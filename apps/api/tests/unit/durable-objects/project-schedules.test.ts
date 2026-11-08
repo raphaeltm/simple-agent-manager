@@ -720,6 +720,74 @@ describe('project schedules — real migrations, CRUD and canonical admission', 
   });
 });
 
+// Constitution XV: who wrote a schedule's prompt decides what the chat or new task receives.
+describe('project schedules — prompt author', () => {
+  const createBy = (
+    f: ReturnType<typeof fixture>,
+    key: string,
+    action: ProjectScheduledAction,
+    promptAuthor: 'human' | 'agent' | 'sam' | null
+  ) =>
+    f.hooks.transactionSync(() =>
+      createSchedule(
+        f.sql,
+        f.env,
+        PROJECT,
+        // `null` reproduces a row written before migration 075 recorded the author.
+        { ...creator, promptAuthor: promptAuthor as 'human' },
+        { action, dueAt: Date.now(), displayTimezone: 'UTC', idempotencyKey: key },
+        Date.now()
+      )
+    );
+
+  it('starts an agent-scheduled task with a first message that names the agent', async () => {
+    const f = fixture();
+    submitReservedTaskMock.mockResolvedValue({ outcome: 'admitted' });
+    const { schedule } = createBy(f, 'agent-start', startAction, 'agent');
+    expect(schedule.promptAuthor).toBe('agent');
+    await runScheduleAlarm(f.sql, f.env, f.hooks);
+    vi.setSystemTime(NOW + 1);
+    await runScheduleAlarm(f.sql, f.env, f.hooks);
+    expect(submitReservedTaskMock).toHaveBeenCalledOnce();
+    const input = submitReservedTaskMock.mock.calls[0]![1] as ReservedTaskSubmissionInput;
+    expect(input.prompt.startsWith('Run the scheduled check\n\n---\nScheduled by an agent')).toBe(
+      true
+    );
+    expect(input.prompt).toContain(`chat session ${CHAT} (schedule ${schedule.id})`);
+  });
+
+  it.each(['human', 'sam', null] as const)(
+    'starts a %s-authored task with the prompt as written',
+    async (promptAuthor) => {
+      const f = fixture();
+      submitReservedTaskMock.mockResolvedValue({ outcome: 'admitted' });
+      createBy(f, `start-${promptAuthor}`, startAction, promptAuthor);
+      await runScheduleAlarm(f.sql, f.env, f.hooks);
+      vi.setSystemTime(NOW + 1);
+      await runScheduleAlarm(f.sql, f.env, f.hooks);
+      const input = submitReservedTaskMock.mock.calls[0]![1] as ReservedTaskSubmissionInput;
+      expect(input.prompt).toBe('Run the scheduled check');
+    }
+  );
+
+  it('delivers a legacy (NULL author) message as written, and an agent one as a notice', async () => {
+    const f = fixture();
+    const legacy = createBy(f, 'legacy-message', messageAction, null).schedule;
+    const agent = createBy(f, 'agent-message', messageAction, 'agent').schedule;
+    expect(legacy.promptAuthor).toBeNull();
+    await runScheduleAlarm(f.sql, f.env, f.hooks);
+    const content = (id: string) =>
+      (
+        f.db
+          .prepare('SELECT content FROM session_inbox WHERE id = ?')
+          .get(getSchedule(f.sql, PROJECT, id)!.deliveryId) as { content: string }
+      ).content;
+    expect(content(legacy.id)).toBe('Continue the scheduled check');
+    expect(content(agent.id)).toMatch(/^SAM notice \(system-generated, not a human message\)/);
+    expect(content(agent.id)).not.toContain('Continue the scheduled check');
+  });
+});
+
 describe('standing watches — canonical matches, execution limits and revocation', () => {
   it('enforces cooldown, live concurrency and the lifetime execution budget', async () => {
     const f = fixture();

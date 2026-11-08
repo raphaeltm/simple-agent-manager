@@ -24,6 +24,7 @@ import {
 } from '../schemas';
 import { reconcileCapacityPoolsForCredentialMutation } from '../services/capacity-pool-credential-lifecycle';
 import { decrypt, encrypt } from '../services/encryption';
+import { deleteGcpApiHealthSafely } from '../services/gcp-api-health';
 import { buildProviderConfig } from '../services/provider-credentials';
 import { CredentialValidator } from '../services/validation';
 
@@ -244,6 +245,9 @@ adminPlatformCredentialRoutes.delete('/:id', async (c) => {
   }
   if (deletedCredential.credentialType === 'cloud-provider') {
     await reconcileCapacityPoolsForCredentialMutation(c.env, { scope: 'installation' });
+    if (deletedCredential.provider === 'gcp') {
+      await deleteGcpApiHealthSafely(c.env, deletedCredential.id);
+    }
   }
 
   return c.json({ success: true });

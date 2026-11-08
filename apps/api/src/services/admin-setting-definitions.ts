@@ -1,4 +1,5 @@
 import type { Env } from '../env';
+import { type GcpCatalogSettingName } from './admin-settings-gcp-catalog-definitions';
 import { type AgentEmailSettingName } from './agent-email/setting-definitions';
 import { type AgentModelSettingKey } from './agent-models/settings-definition';
 import { type ConnectorReadSettingName } from './connector-read-settings-definition';
@@ -25,6 +26,7 @@ export type AdminSettingName =
   | ConnectorReadSettingName
   | AgentEmailSettingName
   | FleetOpsSettingName
+  | GcpCatalogSettingName
   | OperationsTelemetrySettingName
   | 'chat.profileUsageWindowDays'
   | 'nodes.usageWindowMinutes'
@@ -52,6 +54,7 @@ export type AdminSettingName =
   | 'integration.gitlab.clientId'
   | 'integration.gitlab.clientSecret'
   | 'operations.workloadIdentityTokenTtlSeconds'
+  | 'operations.provisioningAttemptsPerProviderTier'
   | 'operations.nodeCleanupBlockedRetirementMs'
   | 'operations.nodeLifetimeForceSleepAfterMs'
   | 'operations.sessionStaleTurnNoWorkMinutes'

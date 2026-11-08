@@ -40,3 +40,5 @@ resumer must accept what the sleeper leaves").
 - [ ] Session stop on a slept, being-deleted Instant workspace does not return 409 forever
 - [ ] Staging: start an Instant chat, let it sleep, delete it, and confirm the workspace becomes deleted
 - [ ] Clean up the four staging workspaces above
+
+> **Resolved by** `tasks/archive/2026-11-08-instant-sleeping-workspace-deletion-and-wake.md` (branch `sam/stability-fix-instant-cf-ztxbsx`).

@@ -9,13 +9,11 @@
  *
  * See: specs/022-simplified-chat-ux/contracts/task-submit.md
  */
-import type { SubmitTaskResponse, TaskAttachment, VMSize } from '@simple-agent-manager/shared';
+import type { SubmitTaskResponse, VMSize } from '@simple-agent-manager/shared';
 import {
   ACP_SESSION_DEFAULTS,
-  ATTACHMENT_DEFAULTS,
+  CHAT_CONTEXT_SUMMARY_SOURCE,
   isValidProvider,
-  MAX_CONTEXT_SUMMARY_BYTES,
-  SAFE_FILENAME_REGEX,
 } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -35,7 +33,7 @@ import {
 } from '../operations/start-work-core';
 import { requireRepositoryAccess } from '../routes/projects/_helpers';
 import { type SubmitTaskSchema } from '../schemas';
-import { validateAttachments } from '../services/attachment-upload';
+import { resolveTaskAgentOverrides } from '../services/agent-profiles';
 import { generateBranchName } from '../services/branch-name';
 import { capacityPlacementSnapshotDbValues } from '../services/capacity-placement-snapshot';
 import { enrichMessageWithMentions } from '../services/mention-enrichment';
@@ -58,6 +56,7 @@ import {
 } from '../services/resource-requirements-input';
 import { resolveSkillProfile } from '../services/skills';
 import { submitInstantTask } from '../services/submit-instant-task';
+import { validateSubmitContextAndAttachments } from '../services/submit-task-input-validation';
 import { markTaskFailedIfNonTerminal } from '../services/task-failure';
 import { startTaskRunnerDO } from '../services/task-runner-do';
 import { getTaskTitleConfig } from '../services/task-title';
@@ -146,45 +145,12 @@ export async function submitTaskImplementation(
   // vmSize, workspaceProfile validated by schema (picklist)
   // vmLocation validated as string by schema
 
-  // Validate contextSummary size if provided
-  if (body.contextSummary) {
-    const summaryBytes = new TextEncoder().encode(body.contextSummary).length;
-    if (summaryBytes > MAX_CONTEXT_SUMMARY_BYTES) {
-      throw errors.badRequest(
-        `contextSummary exceeds maximum size of ${MAX_CONTEXT_SUMMARY_BYTES} bytes`
-      );
-    }
-  }
-
-  // Validate attachments if provided
-  let validatedAttachments: TaskAttachment[] = [];
-  if (body.attachments && body.attachments.length > 0) {
-    // Validate attachment structure
-    const maxFiles = env.ATTACHMENT_MAX_FILES
-      ? parseInt(env.ATTACHMENT_MAX_FILES, 10)
-      : ATTACHMENT_DEFAULTS.MAX_FILES;
-    if (body.attachments.length > maxFiles) {
-      throw errors.badRequest(
-        `Too many attachments: ${body.attachments.length} exceeds maximum ${maxFiles}`
-      );
-    }
-
-    // Structure validated by schema; check filename safety
-    for (const att of body.attachments) {
-      if (!SAFE_FILENAME_REGEX.test(att.filename)) {
-        throw errors.badRequest(`Unsafe filename in attachment: ${att.filename}`);
-      }
-    }
-
-    // Validate attachments exist in R2 and match declared sizes
-    setOperation('attachment_validation');
-    const validation = await validateAttachments(env, userId, body.attachments);
-    if (!validation.valid) {
-      throw errors.badRequest(`Attachment validation failed: ${validation.errors.join('; ')}`);
-    }
-
-    validatedAttachments = body.attachments;
-  }
+  const validatedAttachments = await validateSubmitContextAndAttachments(
+    env,
+    userId,
+    body,
+    setOperation
+  );
 
   let inheritedAttributionUserId: string | null = null;
   let inheritedAttributionProjectId: string | null = null;
@@ -355,6 +321,7 @@ export async function submitTaskImplementation(
       contextSummary: body.contextSummary,
       taskMode: body.taskMode,
       agentType: body.agentType,
+      agentOverrides: { model: body.model, effort: body.effort },
       attachments: validatedAttachments,
       triggeredBy: via === 'connector' || via === 'pat' ? 'connector' : 'user',
       connectorClientName: clientName,
@@ -508,6 +475,14 @@ export async function submitTaskImplementation(
     requestedVmSizeSource: vmSizeSource,
   });
   const projectAgentDefaults = resolveProjectAgentDefault(project.agentDefaults, agentType);
+  // Chat-level model/effort > skill/profile > project.agentDefaults[agentType]; checked before
+  // any task effect against the agent the runner will launch (agent-session-step.ts). An unset
+  // model falls through in the VM agent to user agent_settings.
+  const launchAgentType = agentType || env.DEFAULT_TASK_AGENT_TYPE || 'opencode';
+  const agentRun = resolveTaskAgentOverrides(launchAgentType, body, {
+    model: resolvedProfile?.model ?? projectAgentDefaults.model,
+    effort: resolvedProfile?.effort,
+  });
 
   // Start new task work on its generated output branch so VM-agent completion
   // pushes cannot land on the repository default branch. A fork does not check out
@@ -611,7 +586,7 @@ export async function submitTaskImplementation(
         sessionId,
         'system',
         body.contextSummary,
-        null
+        { source: CHAT_CONTEXT_SUMMARY_SOURCE }
       );
     }
 
@@ -739,10 +714,8 @@ export async function submitTaskImplementation(
       credentialAttributionProjectId,
       credentialAttributionSource,
       taskMode,
-      // Resolution chain: agent profile > project.agentDefaults[agentType] > null (VM agent
-      // then falls through to user agent_settings via callback, then platform default).
-      model: resolvedProfile?.model ?? projectAgentDefaults.model,
-      effort: resolvedProfile?.effort ?? null,
+      model: agentRun.model,
+      effort: agentRun.effort,
       permissionMode: resolvedProfile?.permissionMode ?? projectAgentDefaults.permissionMode,
       // OpenCode provider/baseUrl: null = no profile-level override.
       // The VM agent fetches user-level agent settings via the POST /:id/agent-settings callback.

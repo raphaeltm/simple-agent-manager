@@ -28,7 +28,7 @@ Work in a scratch dir: `.tmp/field-notes-post/` with an `assets/` and `out/` sub
 ### 1. Gather inputs
 
 - **Photos**: locate the uploaded photos (task library or attachments). Extract timestamps with `exiftool -DateTimeOriginal -OffsetTimeOriginal <files>`. GPS EXIF is usually stripped by messaging apps — expect to geolocate visually.
-- **Agent activity**: use SAM MCP tools (`list_sessions`, `get_session_messages`, `list_tasks`, `get_task_details`) to reconstruct what agents were doing at each photo timestamp. Session timestamps are epoch ms — convert to the user's local timezone (use the photo EXIF offset).
+- **Agent activity**: use SAM MCP tools (`sessions_read` method `list`, `sessions_read` method `messages`, `tasks_read` method `list`, `tasks_read` method `get`) to reconstruct what agents were doing at each photo timestamp. Session timestamps are epoch ms — convert to the user's local timezone (use the photo EXIF offset).
 - **Verify claims**: any stat used in copy ("N PRs merged") must be verified against `git log` / `gh pr list` before it goes in an image.
 
 ### 2. Pick the story

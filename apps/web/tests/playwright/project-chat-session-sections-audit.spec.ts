@@ -72,6 +72,11 @@ const NEEDS_INPUT = chatSession('sess-needs-input', 'Approve the database migrat
   attention: marker('needs_input', 'Which migration should run first?'),
 });
 const WORKING = chatSession('sess-working', 'Fix the payouts webhook retry');
+// A question nobody answered for weeks: past the 24h window, so it sits in Awake.
+const STALE_ASK = chatSession('sess-stale-ask', 'Old unanswered question from September', {
+  lastMessageAt: NOW - 55 * 24 * HOUR,
+  attention: { ...marker('needs_input', 'Which branch?'), createdAt: NOW - 55 * 24 * HOUR },
+});
 const QUIET_AWAKE = chatSession('sess-quiet-awake', 'UI sandbox with a dev server', {
   lastMessageAt: NOW - 6 * HOUR,
   isIdle: true,
@@ -101,6 +106,7 @@ const ALL_SESSIONS = [
   LONG_TITLE,
   SLEEPING,
   QUIET_AWAKE,
+  STALE_ASK,
   ...HISTORY.slice(5),
   WAKE_FAILED,
 ];
@@ -182,6 +188,9 @@ test.describe('project chat — attention-first session list', () => {
     const attentionRows = section(list, 'attention');
     await expect(attentionRows.getByText(NEEDS_INPUT.topic as string)).toBeVisible();
     await expect(attentionRows.getByText(WAKE_FAILED.topic as string)).toBeVisible();
+    // A request older than 24 hours is not counted: it falls back to Awake.
+    await expect(attentionRows.getByText(STALE_ASK.topic as string)).toHaveCount(0);
+    await expect(section(list, 'awake').getByText(STALE_ASK.topic as string)).toBeVisible();
     // The six-hour-quiet awake chat is in view without expanding anything.
     await expect(section(list, 'awake').getByText(QUIET_AWAKE.topic as string)).toBeVisible();
     await expect(section(list, 'sleeping').getByText(SLEEPING.topic as string)).toBeVisible();

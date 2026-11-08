@@ -169,6 +169,33 @@ describe('useChatWebSocket (behavioral)', () => {
     );
   });
 
+  it('keeps the server-written SAM notice on a live message.new', () => {
+    const onMessage = vi.fn();
+    renderHook(() => useChatWebSocket({ ...defaultProps, onMessage }));
+    const samNotice = { v: 1, type: 'agent.message', headline: 'Message from another agent' };
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateOpen();
+      MockWebSocket.instances[0]!.simulateMessage({
+        type: 'message.new',
+        sessionId: 'sess-1',
+        messageId: 'msg-2',
+        role: 'user',
+        content: 'SAM notice (system-generated, not a human message): …',
+        toolMetadata: { kind: 'durable_prompt_delivery', source: 'project_event_wake', samNotice },
+        createdAt: 200,
+      });
+    });
+
+    expect(onMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'msg-2',
+        role: 'user',
+        toolMetadata: expect.objectContaining({ samNotice }),
+      })
+    );
+  });
+
   it('ignores messages for different sessions', () => {
     const onMessage = vi.fn();
     renderHook(() => useChatWebSocket({ ...defaultProps, onMessage }));

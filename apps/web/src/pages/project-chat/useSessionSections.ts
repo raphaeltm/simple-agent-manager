@@ -42,9 +42,10 @@ export function groupSessionsBySection(
   taskInfoMap: Map<string, TaskInfo>
 ): SessionSections {
   const sections: SessionSections = { attention: [], awake: [], sleeping: [], history: [] };
+  const now = Date.now();
   for (const s of sessions) {
     const taskInfo = s.taskId ? taskInfoMap.get(s.taskId) : undefined;
-    sections[getSessionSection(enrichSessionWithTaskInfo(s, taskInfo))].push(s);
+    sections[getSessionSection(enrichSessionWithTaskInfo(s, taskInfo), now)].push(s);
   }
   for (const section of SESSION_SECTION_ORDER) sections[section].sort(byRecency);
   return sections;

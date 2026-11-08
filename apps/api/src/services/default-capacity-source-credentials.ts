@@ -284,6 +284,7 @@ export async function resolveOfferingsForSeed(
           encryptedToken: seed.encryptedToken,
           iv: seed.iv,
           credentialSource: seed.credentialSource,
+          ownerProjectId: seed.credentialSource === 'project' ? seed.ownerProjectId : null,
           credentialId: seed.catalogCredentialId,
           platformCredentialId: seed.platformCredentialId,
           capacitySourceCredentialId: seed.credentialId,

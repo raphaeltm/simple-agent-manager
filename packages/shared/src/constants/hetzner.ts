@@ -86,3 +86,9 @@ export const DEFAULT_GCP_STS_SCOPE = 'https://www.googleapis.com/auth/cloud-plat
 
 /** Default scopes for GCP SA impersonation (comma-separated). Override via GCP_SA_IMPERSONATION_SCOPES env var. */
 export const DEFAULT_GCP_SA_IMPERSONATION_SCOPES = 'https://www.googleapis.com/auth/compute';
+
+/**
+ * The only scope requested for reading Google's public Compute Engine price list (Cloud Billing
+ * Catalog). Minted for that call alone, so provisioning tokens never carry a billing scope.
+ */
+export const GCP_PRICE_CATALOG_SCOPE = 'https://www.googleapis.com/auth/cloud-billing.readonly';

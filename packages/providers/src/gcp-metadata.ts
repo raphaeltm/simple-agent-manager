@@ -10,6 +10,7 @@ import type {
   VolumeCapabilities,
 } from './types';
 import {
+  ProviderError,
   SAM_VOLUME_FILESYSTEM_FORMAT,
   SAM_VOLUME_FSTAB_OPTIONS,
   SAM_VOLUME_MOUNT_PATH_TEMPLATE,
@@ -20,61 +21,108 @@ export const COMPUTE_API_BASE = 'https://compute.googleapis.com/compute/v1';
 // 100 pages × 500 items/page ≈ 50,000 resources — well above any realistic fleet
 export const DEFAULT_GCP_MAX_LIST_PAGES = 100;
 
+/** GCP codes that say the zone cannot supply this machine type right now. */
+const GCP_STOCKOUT_CODES = new Set([
+  'ZONE_RESOURCE_POOL_EXHAUSTED',
+  'ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS',
+]);
 /**
- * Classify a GCP API error into a normalized ProviderErrorCategory.
+ * GCP's stockout wording when no structured code survives (`providerFetch` keeps only
+ * `error.status`): "The zone '…' does not have enough resources available to fulfill the
+ * request. Try a different zone, or try again later."
+ */
+const GCP_STOCKOUT_MESSAGE =
+  /zone.*resource.*pool.*exhausted|does not have enough resources available to fulfill the request/i;
+const GCP_QUOTA_CODES = new Set(['QUOTA_EXCEEDED', 'RESOURCE_EXHAUSTED']);
+/** "Quota 'CPUS' exceeded.  Limit: 8.0 in region us-central1." */
+const GCP_QUOTA_MESSAGE = /\bquota\b[^.]*\bexceeded\b|\bresources? exhausted\b/i;
+const GCP_RATE_LIMIT_CODES = new Set(['RATE_LIMIT_EXCEEDED']);
+const GCP_RATE_LIMIT_MESSAGE = /rate limit exceeded/i;
+const GCP_AUTH_CODES = new Set(['PERMISSION_DENIED', 'UNAUTHENTICATED']);
+const GCP_INVALID_CONFIG_CODES = new Set(['INVALID_ARGUMENT', 'NOT_FOUND', 'ALREADY_EXISTS']);
+
+/**
+ * Classify a GCP API error by what the caller must do about it (rule 72).
  *
- * GCP error responses use `{ error: { code, status, errors: [...] } }` where
- * `status` is the structured signal (e.g., "RESOURCE_EXHAUSTED", "UNAVAILABLE").
- * The `providerCode` in ProviderError corresponds to the `error.status` field.
+ * `providerCode` is `error.status` for an HTTP error (`providerFetch` keeps it because GCP's
+ * `error.code` is numeric) or `error.errors[].code` for an operation error. Arms are ordered so
+ * the most specific evidence wins; in particular GCP reports quota and rate limits as HTTP 403,
+ * so those are checked before 403 is read as a credential problem.
  *
- * GCP error statuses (from API docs):
- * - RESOURCE_EXHAUSTED → quota_exceeded (429)
- * - UNAVAILABLE → transient_capacity (503)
- * - ZONE_RESOURCE_POOL_EXHAUSTED → transient_capacity
- * - ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS → transient_capacity
- * - QUOTA_EXCEEDED → quota_exceeded
- * - PERMISSION_DENIED → auth_error
- * - UNAUTHENTICATED → auth_error
- * - INVALID_ARGUMENT → invalid_config
- * - NOT_FOUND → invalid_config
- * - ALREADY_EXISTS → invalid_config
- * - RATE_LIMIT_EXCEEDED → rate_limited
+ * - `transient_capacity`: the zone has no capacity for this machine type. The request was valid
+ *   and GCP created nothing, so the caller may try another permitted offering (zone or type).
+ * - `quota_exceeded`: the project's quota (for example regional CPUs) is used up. The caller
+ *   stops; other GCP offerings in the region draw on the same quota.
+ * - `rate_limited`: the API throttled the call. The caller stops this attempt.
+ * - `auth_error`: the credential was refused. The caller fails fast; retrying cannot help.
+ * - `invalid_config`: the request itself is wrong (bad argument, missing resource, name
+ *   collision). The caller fails fast.
+ * - `unknown`: anything else, INCLUDING a bare `UNAVAILABLE` / HTTP 503 with no stockout
+ *   evidence. That status means GCP's front end failed, not that the zone is out of stock, and
+ *   on the create POST it does not prove that no instance was created. `transient_capacity`
+ *   would make the TaskRunner delete the node row and create a second VM elsewhere (TLA+ path
+ *   P2 in idea 01M6NXTF2RQ5QXHM7YZ4ZF0XBK), so an ambiguous outcome must fail closed.
  */
 export function classifyGcpError(
   statusCode: number | undefined,
   providerCode: string | undefined,
   message: string
 ): ProviderErrorCategory {
-  if (providerCode) {
-    switch (providerCode) {
-      case 'UNAVAILABLE':
-      case 'ZONE_RESOURCE_POOL_EXHAUSTED':
-      case 'ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS':
-        return 'transient_capacity';
-      case 'RESOURCE_EXHAUSTED':
-      case 'QUOTA_EXCEEDED':
-        return 'quota_exceeded';
-      case 'PERMISSION_DENIED':
-      case 'UNAUTHENTICATED':
-        return 'auth_error';
-      case 'INVALID_ARGUMENT':
-      case 'NOT_FOUND':
-      case 'ALREADY_EXISTS':
-        return 'invalid_config';
-      case 'RATE_LIMIT_EXCEEDED':
-        return 'rate_limited';
+  const code = providerCode ?? '';
+  if (GCP_STOCKOUT_CODES.has(code) || GCP_STOCKOUT_MESSAGE.test(message)) {
+    return 'transient_capacity';
+  }
+  if (GCP_QUOTA_CODES.has(code) || GCP_QUOTA_MESSAGE.test(message)) return 'quota_exceeded';
+  if (GCP_RATE_LIMIT_CODES.has(code) || GCP_RATE_LIMIT_MESSAGE.test(message)) {
+    return 'rate_limited';
+  }
+  if (GCP_AUTH_CODES.has(code) || statusCode === 401 || statusCode === 403) return 'auth_error';
+  if (GCP_INVALID_CONFIG_CODES.has(code)) return 'invalid_config';
+  if (statusCode === 429) return 'rate_limited';
+  return 'unknown';
+}
+
+/**
+ * Re-raise a GCP `ProviderError` with its category assigned. `providerFetch` builds HTTP errors
+ * with `{ providerCode }` only, so without this every GCP failure reaches the TaskRunner as
+ * `unknown` and fails the task on its first attempt. Non-provider errors (including abort
+ * reasons) pass through untouched.
+ */
+export function withGcpErrorCategory(err: unknown): unknown {
+  if (!(err instanceof ProviderError) || err.providerName !== 'gcp') return err;
+  if (err.category !== 'unknown') return err;
+  const category = classifyGcpError(err.statusCode, err.providerCode, err.message);
+  if (category === 'unknown') return err;
+  return new ProviderError('gcp', err.statusCode, err.message, {
+    cause: err,
+    context: err.context,
+    providerCode: err.providerCode,
+    category,
+  });
+}
+
+/**
+ * The error for a GCP operation that finished with `error.errors`. The decisive code is the first
+ * one that classifies (so a stockout listed after an informational code still wins); the message
+ * keeps every code and message for operators.
+ */
+export function gcpOperationError(errors: ReadonlyArray<{ code: string; message: string }>) {
+  const details = errors.map((e) => `${e.code}: ${e.message}`).join('; ');
+  const message = `GCP operation failed: ${details}`;
+  let decisive = errors[0];
+  let category: ProviderErrorCategory = 'unknown';
+  for (const entry of errors) {
+    const entryCategory = classifyGcpError(undefined, entry.code, entry.message);
+    if (entryCategory !== 'unknown') {
+      decisive = entry;
+      category = entryCategory;
+      break;
     }
   }
-
-  if (statusCode === 401 || statusCode === 403) return 'auth_error';
-  if (statusCode === 429) return 'rate_limited';
-  if (statusCode === 503) return 'transient_capacity';
-
-  // Message-based fallback (order matters: check zone-specific before general)
-  if (/zone.*resource.*pool.*exhausted/i.test(message)) return 'transient_capacity';
-  if (/resource.*exhausted|quota/i.test(message)) return 'quota_exceeded';
-
-  return 'unknown';
+  return new ProviderError('gcp', undefined, message, {
+    providerCode: decisive?.code,
+    category,
+  });
 }
 
 /** Firewall rule names and config for SAM inbound access. */
@@ -102,7 +150,10 @@ export const SIZE_MAP: Record<VMSize, SizeConfig> = {
   large: { type: 'e2-standard-4', price: '~$97/mo', vcpu: 4, ramGb: 16, storageGb: 50 },
 };
 
-/** Available GCP zones */
+/**
+ * Labelled GCP zones: display names, and the per-zone fast path in instance lookup. Not a gate:
+ * any well-formed zone is valid, and `listVMs` uses the project-wide aggregated list.
+ */
 export const GCP_LOCATIONS = [
   'us-central1-a',
   'us-east1-b',

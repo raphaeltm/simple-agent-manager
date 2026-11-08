@@ -2663,6 +2663,16 @@ export const MIGRATIONS: Migration[] = [
       }
     },
   },
+  {
+    // Who wrote a schedule's prompt (constitution XV): 'human', 'agent' or 'sam'. An
+    // agent-written message_session prompt is delivered as a SAM notice naming the schedule,
+    // never as a plain chat message. Existing rows keep NULL and deliver as before; they are
+    // one-off schedules that expire within the schedule lifetime cap.
+    name: '075-schedule-prompt-author',
+    run(sql) {
+      sql.exec('ALTER TABLE project_schedules ADD COLUMN prompt_author TEXT');
+    },
+  },
   // Retired before release: `072-anchored-comment-threads` ran on staging only (renumbered to
   // 073 after another 072 merged first). That name may not be reused.
   // Retired before release: `059-message-upload-parts` ran on staging only. Objects

@@ -1,4 +1,5 @@
 import { isJsonRecord } from '../runtime-validation';
+import type { AgentEffort } from './agent-settings';
 import type { ResourceRequirements, ResourceRequirementsSource } from './resource';
 import type { CredentialProvider } from './user';
 import type { VMLocation, VMSize, WorkspaceProfile } from './workspace';
@@ -622,6 +623,10 @@ export interface SubmitTaskRequest {
   attachments?: TaskAttachment[];
   /** Explicit resource requirements for this task. Overrides profile/project/platform defaults. */
   resourceRequirements?: ResourceRequirements;
+  /** Model for this task only. Overrides the skill/profile/project model; null/blank inherits. */
+  model?: string | null;
+  /** Effort for this task only. Must be supported by the resolved agent; null inherits. */
+  effort?: AgentEffort | null;
   /** An open idea in this project that this work starts from. The server validates it,
    * then records the session → idea link (`works_on` for task mode, `discusses` for
    * conversation mode) before the agent receives its first prompt. The idea is never

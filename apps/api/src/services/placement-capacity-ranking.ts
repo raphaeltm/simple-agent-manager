@@ -43,6 +43,8 @@ export function rankCapacityCandidatesForRuntime(
 ): TaskStartCapacityCandidate[] {
   const settings = input.settings ?? defaultPlacementSettings();
   return [...candidates].sort((a, b) => {
+    const byRank = compareSourceRank(a, b);
+    if (byRank !== 0) return byRank;
     const byLocation = comparePlacementLocationsByStrategy(
       { provider: a.provider, location: a.location },
       { provider: b.provider, location: b.location },
@@ -67,10 +69,28 @@ export function preferCapacityCandidatesInLocation(
   candidates: readonly TaskStartCapacityCandidate[],
   location: string
 ): TaskStartCapacityCandidate[] {
-  return [
-    ...candidates.filter((candidate) => candidate.location === location),
-    ...candidates.filter((candidate) => candidate.location !== location),
-  ];
+  // Stable within each provider rank: the previous region wins inside the most preferred
+  // provider, never ahead of it.
+  return [...candidates].sort((a, b) => {
+    const byRank = compareSourceRank(a, b);
+    if (byRank !== 0) return byRank;
+    return Number(b.location === location) - Number(a.location === location);
+  });
+}
+
+/**
+ * The pool's provider order, as a ranking key: a candidate from a more preferred source sorts
+ * first. Unranked candidates sort after every ranked one. Two equal or two unranked ranks compare
+ * equal, so a pool without an order ranks exactly as before ordering existed.
+ */
+export function compareSourceRank(
+  a: Pick<TaskStartCapacityCandidate, 'sourceRank'>,
+  b: Pick<TaskStartCapacityCandidate, 'sourceRank'>
+): number {
+  const rankA = a.sourceRank ?? Number.POSITIVE_INFINITY;
+  const rankB = b.sourceRank ?? Number.POSITIVE_INFINITY;
+  if (rankA === rankB) return 0;
+  return rankA < rankB ? -1 : 1;
 }
 
 export function compareCapacityCandidates(
@@ -80,6 +100,8 @@ export function compareCapacityCandidates(
   reservation: ResolvedResourceReservation,
   settings: CapacityPoolPlacementSettings = defaultPlacementSettings()
 ): number {
+  const byRank = compareSourceRank(a, b);
+  if (byRank !== 0) return byRank;
   const capacityDiff = compareOfferingCapacity(a, b);
   if (strategy === 'pack' && capacityDiff !== 0) return -capacityDiff;
   if (a.priority !== b.priority) return a.priority - b.priority;

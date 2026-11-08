@@ -19,7 +19,7 @@ provision/manage VMs without coupling to a specific cloud vendor.
 | `src/hetzner-server-create.ts` | `createVM`'s capacity-retry loop and placement fallback, delegated to by `HetznerProvider` |
 | `src/hetzner-volumes.ts` | Hetzner block-volume operations, delegated to by `HetznerProvider` |
 | `src/scaleway.ts` | Scaleway provider implementation |
-| `src/gcp.ts` | GCP provider (partial/placeholder) |
+| `src/gcp.ts` | GCP provider: VMs over workload identity or a service-account key; live catalog via `gcp-catalog.ts` and `gcp-pricing.ts` |
 | `src/provider-fetch.ts` | Shared HTTP fetch utilities for provider APIs |
 
 ## Commands
@@ -39,7 +39,7 @@ pnpm --filter @simple-agent-manager/providers lint        # ESLint
   caller cancellation reason and begin no follow-up request or resource mutation after cancellation.
 - Provider methods accept explicit credentials supplied by the caller. They do not read
   environment variables or decide whether a credential is user, project, or platform scoped.
-- Location validation uses `PROVIDER_LOCATIONS` registry from `@simple-agent-manager/shared`
+- Location validation uses `PROVIDER_LOCATIONS` registry from `@simple-agent-manager/shared` (except GCP, which validates by zone-name shape with `GCP_ZONE_PATTERN`; its list is suggestions only)
 - New providers: create `src/<provider-name>.ts`, implement `Provider` interface, export from `src/index.ts`
 - VM create paths use `VMConfig.native.instanceType` as the provider-native authority. Legacy
   `size` remains optional and is translated only through `resolveVMConfigWithLegacySizeAdapter()`.

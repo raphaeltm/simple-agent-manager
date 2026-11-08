@@ -15,6 +15,7 @@ import type { Env } from '../env';
 import { lazyBackfillIfNeeded } from './composable-credentials/lazy-backfill';
 import { resolveForConsumer } from './composable-credentials/resolve';
 import { decrypt } from './encryption';
+import { createGcpTokenProvider } from './gcp-token-provider';
 import { getPlatformCloudCredential } from './platform-credentials';
 import {
   buildProviderConfig,
@@ -164,16 +165,11 @@ async function createProviderFromDecryptedToken(
 ): Promise<ProviderResolutionResult> {
   if (providerName === 'gcp') {
     const gcpCred = parseGcpCredential(decryptedToken);
-    const { getGcpAccessToken } = await import('./gcp-sts');
-    const cacheUserId =
-      credentialSource === 'platform'
-        ? `platform:${userId}`
-        : credentialSource === 'project' && projectId
-          ? `project:${projectId}:${userId}`
-          : userId;
-    const cacheProjectId = projectId ?? gcpCred.gcpProjectId;
-    const tokenProvider = (context?: ProviderRequestContext) =>
-      getGcpAccessToken(cacheUserId, cacheProjectId, gcpCred, env, context);
+    const tokenProvider = createGcpTokenProvider(
+      gcpCred,
+      { credentialSource, userId, projectId },
+      env
+    );
     return {
       provider: new GcpProvider(gcpCred.gcpProjectId, tokenProvider, gcpCred.defaultZone),
       providerName,

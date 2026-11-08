@@ -10,7 +10,7 @@ import (
 
 func parseSubmitOptions(parsed parsedArgs) (TaskSubmitOptions, error) {
 	if flagValue(parsed.Flags, "model") != "" {
-		return TaskSubmitOptions{}, errors.New("--model is reserved, but the current task submit API does not accept a per-dispatch model yet; use --agent-profile for configured model selection")
+		return TaskSubmitOptions{}, errors.New("--model is reserved: the CLI does not send a per-dispatch model yet; use --agent-profile for configured model selection")
 	}
 	resource, err := parseResourceRequirementFlags(parsed)
 	if err != nil {

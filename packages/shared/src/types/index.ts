@@ -39,6 +39,8 @@ export type {
   CredentialResponse,
   CredentialSource,
   CredentialValidationStatus,
+  GcpApiIssue,
+  GcpApiIssueReason,
   GcpCredential,
   GcpCredentialAuthType,
   GcpCredentialMetadata,
@@ -118,6 +120,7 @@ export {
   isCapacityPoolStrategy,
   isCapacitySourceKind,
   isCapacityWorkloadRole,
+  MAX_CAPACITY_POOL_SOURCE_ORDER_LENGTH,
   SAFE_EFFECTIVE_CAPACITY_POOL_REASONS,
 } from './capacity-pool';
 
@@ -1048,3 +1051,23 @@ export type {
   ProjectEventDeliveryOutcome,
   ProjectEventDeliveryOutcomeList,
 } from './project-events';
+
+// SAM notices (structured platform messages in chat)
+export type {
+  SamNotice,
+  SamNoticeQuote,
+  SamNoticeRef,
+  SamNoticeRefKind,
+  SamNoticeSeverity,
+} from './sam-notices';
+export {
+  buildSamNotice,
+  CHAT_CONTEXT_SUMMARY_SOURCE,
+  parseSamNotice,
+  SAM_NOTICE_LIMITS,
+  SAM_NOTICE_METADATA_KEY,
+  SAM_NOTICE_REF_KINDS,
+  SAM_NOTICE_SEVERITIES,
+  SAM_NOTICE_VERSION,
+  SAM_RUNTIME_REPORTED_KEY,
+} from './sam-notices';

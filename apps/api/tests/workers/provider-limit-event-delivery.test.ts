@@ -180,6 +180,20 @@ describe('provider-limited project event deliveries through the real alarm', () 
         );
         expect(transcriptBefore[0]!.content).toContain(ids[0]);
         expect(transcriptBefore[0]!.content).toContain(ids[1]);
+        const noticeOf = async () => {
+          const [row] = await sqlRows<{ tool_metadata: string }>(
+            f.stub,
+            'SELECT tool_metadata FROM chat_messages WHERE id=(SELECT prompt_message_id FROM session_inbox WHERE id=?)',
+            batchId
+          );
+          return JSON.parse(row!.tool_metadata).samNotice as {
+            headline: string;
+            refs: { id: string }[];
+          };
+        };
+        const noticeBefore = await noticeOf();
+        expect(noticeBefore.headline).toBe('2 project updates');
+        expect(noticeBefore.refs.map((ref) => ref.id)).toEqual(ids);
         const submit = vi
           .spyOn(DefaultVmPromptDeliveryAdapter.prototype, 'submit')
           .mockImplementation(async (input) => accepted(input));
@@ -197,6 +211,10 @@ describe('provider-limited project event deliveries through the real alarm', () 
           eventIds: [ids[1]],
           eventCount: 1,
         });
+        // The chat notice describes the batch the agent got, not the one first accepted.
+        const noticeAfter = await noticeOf();
+        expect(noticeAfter.headline).not.toBe('2 project updates');
+        expect(noticeAfter.refs.map((ref) => ref.id)).toEqual([ids[1]]);
         const inboxAfter = await sqlRows<{ content: string; metadata: string }>(
           f.stub,
           'SELECT content, metadata FROM session_inbox WHERE id=?',

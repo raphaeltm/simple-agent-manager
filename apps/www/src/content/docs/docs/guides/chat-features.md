@@ -15,9 +15,21 @@ Use the paperclip, paste an image or file, or drag files onto the message input.
 characters of text or more turns it into a text-file attachment (`pasted-….txt`); shorter text stays
 in the input.
 
-Files upload while you compose, each as a chip showing its size or upload progress. Select **✕** on
-a chip to remove a file you don't want to send. A chip that says **Failed** blocks sending: remove
-it, then attach the file again. You can send files with no text; the agent is asked to read them.
+Files upload while you compose. Each one appears above the message input: an image as a thumbnail,
+anything else as a card with a file-type icon, its name and its size. A paste shows its first line and
+how many lines it has, so two pastes are easy to tell apart. A ring or bar shows upload progress.
+
+Tap an attachment to check it before you send. Images open full size (switch between **Fit** and
+**100%**), videos play, and text files show numbered lines with a wrap toggle. Very large text shows its
+first 2,000 lines or 256 KB, and the agent still gets the whole file. For a paste, **Edit in message**
+moves the text back into the input. Other file types show their type and size. Use the arrows to step
+through attachments, and **Remove** to drop one.
+
+Previews read the copy on your device, not the upload, so they work while a file is uploading and after
+an upload fails. A file that is empty or larger than the per-file limit is not uploaded. It still
+appears, marked **Failed** with the reason, so you can see which file it was. Select **✕** to remove an
+attachment. A failed attachment blocks sending until you remove it. You can send files with no text;
+the agent is asked to read them.
 
 The agent receives the files only when you send the message, together with each file's exact path in
 its workspace. You can attach files to a sleeping chat without waking it; sending the message wakes
@@ -551,7 +563,7 @@ An archived or expired chat also has a **Fork** box of its own; see
 1. Open the chat you want to branch from.
 2. Select **Fork** in the [session tool rail](#the-session-tool-rail).
 3. The new-chat screen opens with the message box filled in: an instruction for the agent to read
-   the previous chat with SAM's tools (`get_session_messages`, `search_messages`), then the previous
+   the previous chat with SAM's tools (`sessions_read` method `messages`, `sessions_read` method `search`), then the previous
    chat's title and its project, session, and task IDs.
 4. Add what to do next at the end of the message, keeping the IDs, and send it. To build on what
    the original agent pushed, say so, for example "continue from the original chat's branch". If
@@ -665,6 +677,21 @@ diagnostic context rather than `completed`.
 
 SAM also collapses platform-injected setup messages in the chat timeline. Those messages contain project instructions, task context, and policy that the agent received before it started. They remain available for debugging, but they no longer dominate the visible conversation.
 
+### Messages from SAM
+
+SAM puts other messages into a chat while it works: a subtask finished or failed, another agent sent a message, an approval was decided, a scheduled reminder came due, a GitHub trigger fired, the chat woke up, or SAM checked in on a quiet agent. Each one shows as a single quiet line with an icon and a plain sentence, such as **Subtask finished: Fix login redirect loop**, instead of the ID-heavy text the agent received. A green icon means something finished, a red one that it failed.
+
+Tap the line to expand it:
+
+- **Detail.** A sentence about what happened, when there is more to say.
+- **Quoted text.** Words from outside SAM, such as another agent's message or an approver's note, appear in a quote marked **not written by SAM**.
+- **Cards.** One card for each thing the message is about, up to eight. When more project updates arrive at once, failures come first and the line says how many are shown. A task card opens a quick look with the task's current status and summary, and **Open its chat**. Chat, idea and machine cards open those pages. Pull request and GitHub cards open GitHub in a new tab.
+- **Show what the agent saw.** The exact text the agent received, IDs included.
+
+System messages, such as a failed build or a wake that could not finish, use the same line: the first line of the message, with the full text under **Show full message**. A system message the workspace itself reported (for example a sign-in flow that needs a local callback) shows as **Report from the workspace**, with its text quoted, because the workspace's credentials are also available to the agent (`markRuntimeReported` in `apps/api/src/durable-objects/project-data/sam-notice-metadata.ts`). A context note you supplied when starting the chat (for example the CLI's `--context-summary`, or the summary carried into a forked chat) shows as **Context for this chat**, with your text quoted.
+
+SAM writes these descriptions itself (`samNotice` in the message's metadata, built in `apps/api/src/services/sam-notice-builders.ts`). A notice an agent tries to attach to its own message is dropped, so a line like this always comes from SAM.
+
 ### Sleeping and recovering sessions
 
 Persistent chat sessions can sleep and recover on both [Instant and VM-backed runtimes](/docs/guides/instant-sessions/):
@@ -689,7 +716,8 @@ To send on a desktop keyboard, press **Cmd+Enter** on Mac or **Ctrl+Enter** on W
 The session list groups chats by state, in this order:
 
 1. **Needs attention** — a chat waiting for your answer (**Needs input**) or one SAM could not wake
-   (**Wake failed**), including sleeping ones.
+   (**Wake failed**), including sleeping ones, raised in the last 24 hours. An older one moves to its
+   usual section (Awake or Sleeping) and keeps its **Needs input** or **Wake failed** label.
 2. **Awake** — chats whose agent is working or idle. An awake chat stays here however long it has
    been quiet; the list never hides one because of its age.
 3. **Sleeping** — chats a message can wake. You can fold this section.

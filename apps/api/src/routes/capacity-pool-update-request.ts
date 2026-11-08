@@ -9,6 +9,7 @@ import {
   isCapacityPoolStatus,
   isCapacityPoolStrategy,
   isValidProvider,
+  MAX_CAPACITY_POOL_SOURCE_ORDER_LENGTH,
 } from '@simple-agent-manager/shared';
 
 import { errors } from '../middleware/error';
@@ -44,6 +45,11 @@ export function assertDefaultCapacityPoolUpdateResult(
         unavailableCandidateIds: result.unavailableCandidateIds,
       }
     );
+  }
+  if (result.missingSourceIds.length > 0) {
+    throw errors.badRequest('sourceOrder must list capacity sources that serve this pool', {
+      missingSourceIds: result.missingSourceIds,
+    });
   }
   if (result.missingCatalogAdditions.length > 0) {
     throw errors.badRequest('Catalog additions must belong to the default capacity pool', {
@@ -86,10 +92,12 @@ export function parseDefaultCapacityPoolUpdateRequest(
     record.catalogAdditions === undefined
       ? undefined
       : parseCatalogAdditions(record.catalogAdditions);
+  const sourceOrder =
+    record.sourceOrder === undefined ? undefined : parseSourceOrder(record.sourceOrder);
 
-  if (!policy && !candidates && !catalogAdditions) {
+  if (!policy && !candidates && !catalogAdditions && sourceOrder === undefined) {
     throw errors.badRequest(
-      'Default capacity pool update must include policy, candidates, or catalogAdditions'
+      'Default capacity pool update must include policy, candidates, catalogAdditions, or sourceOrder'
     );
   }
 
@@ -97,7 +105,31 @@ export function parseDefaultCapacityPoolUpdateRequest(
     ...(policy ? { policy } : {}),
     ...(candidates ? { candidates } : {}),
     ...(catalogAdditions ? { catalogAdditions } : {}),
+    ...(sourceOrder !== undefined ? { sourceOrder } : {}),
   };
+}
+
+/** A provider order: capacity source ids, most preferred first. `null` or `[]` clears it. */
+function parseSourceOrder(value: unknown): string[] | null {
+  if (value === null) return null;
+  if (!Array.isArray(value)) {
+    throw errors.badRequest('sourceOrder must be an array of capacity source ids or null');
+  }
+  if (value.length > MAX_CAPACITY_POOL_SOURCE_ORDER_LENGTH) {
+    throw errors.badRequest(
+      `sourceOrder may list at most ${MAX_CAPACITY_POOL_SOURCE_ORDER_LENGTH} capacity sources`
+    );
+  }
+  const ids = value.map((id) => {
+    if (typeof id !== 'string' || id.trim().length === 0) {
+      throw errors.badRequest('sourceOrder entries must be non-empty capacity source ids');
+    }
+    return id.trim();
+  });
+  if (new Set(ids).size !== ids.length) {
+    throw errors.badRequest('sourceOrder must not list a capacity source twice');
+  }
+  return ids;
 }
 
 function parsePolicyUpdate(

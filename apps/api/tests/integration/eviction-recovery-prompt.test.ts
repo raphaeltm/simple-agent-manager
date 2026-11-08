@@ -209,7 +209,7 @@ describe('recovery prompt chosen by the wake cause', () => {
     const config = recoveryStart();
     expect(config).toMatchObject({ taskId: 'source-task', taskMode: 'task' });
     expect(config.taskDescription).toBe(SESSION_RECOVERY_CONTINUE_TASK_PROMPT);
-    expect(config.taskDescription).toContain('get_session_messages');
+    expect(config.taskDescription).toContain('sessions_read method messages');
     expect(config.taskDescription).toContain('Continue the task from where the transcript ends');
     expect(config.taskDescription).toContain(
       'Do not repeat actions with effects outside this workspace'

@@ -19,6 +19,8 @@ export {
 // Providers & Locations
 export type { LocationMeta, ProviderHelpMeta } from './providers';
 export {
+  describeValidLocations,
+  GCP_ZONE_PATTERN,
   getDefaultLocationForProvider,
   getLocationsForProvider,
   hasByocComputeCredential,
@@ -332,8 +334,22 @@ export {
   DEFAULT_SCALEWAY_ZONE,
   DEFAULT_VULTR_OS_NAME,
   DEFAULT_VULTR_REGION,
+  GCP_PRICE_CATALOG_SCOPE,
   HETZNER_IMAGE,
 } from './hetzner';
+
+// GCP required APIs
+export {
+  GCP_APIS_ENABLED_BEFORE_TRACKING,
+  GCP_CLOUD_BILLING_SERVICE,
+  GCP_CONSOLE_API_LIBRARY_URL,
+  GCP_PROJECT_ID_PATTERN,
+  GCP_REQUIRED_APIS,
+  GCP_SERVICE_NAME_PATTERN,
+  gcpApiLabel,
+  gcpEnableApiUrl,
+  type GcpRequiredApi,
+} from './gcp-required-apis';
 
 // GCP Deployment
 export {

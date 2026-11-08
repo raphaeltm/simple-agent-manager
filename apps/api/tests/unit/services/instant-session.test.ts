@@ -296,7 +296,8 @@ describe('launchInstantSession', () => {
       'chat-session-1',
       'system',
       'fork context',
-      null
+      // Tagged so the chat quotes the caller's words instead of showing them as SAM's.
+      { source: 'context_summary' }
     );
     expect(mocks.projectData.persistMessage).toHaveBeenNthCalledWith(
       2,

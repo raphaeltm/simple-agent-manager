@@ -1,10 +1,9 @@
 /**
- * Channel transport for the existing messaging tools: send_durable_message and
- * send_message_to_subtask route ordinary (notify/deliver) messages over the
- * SAM-managed pair channel when AGENT_MESSAGE_CHANNELS_ENABLED is on. Urgent
- * classes keep stop-and-deliver, which already frames the text as an untrusted
- * agent directive. The recipient gets a SAM-authored notice instead of the raw
- * text, and reads the message with get_event.
+ * The only transport for agent-to-agent text (constitution XV): send_durable_message
+ * and send_message_to_subtask publish every message, of every class and delivery
+ * intent, on the SAM-managed pair channel. The recipient gets a SAM-authored notice
+ * naming the event and reads the text with get_event. When the channel transport is
+ * unavailable the send is refused; there is no raw-injection fallback.
  */
 import {
   type AgentChannelMessageClass,
@@ -19,6 +18,7 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
 import {
+  type AgentMessageChannelsDisabledReason,
   resolveAgentMessageChannelsConfig,
   sendAgentMessageOverChannel,
 } from '../../services/agent-message-channels';
@@ -37,7 +37,7 @@ export type AgentMessageTool = 'send_durable_message' | 'send_message_to_subtask
 
 export interface AgentMessageChannelSendRequest {
   tool: AgentMessageTool;
-  messageClass: string;
+  messageClass: AgentChannelMessageClass;
   message: string;
   idempotencyKey: string | undefined;
   metadata: Record<string, unknown> | null;
@@ -73,32 +73,47 @@ export function parseIdempotencyKeyParam(
   return { value: value.trim() };
 }
 
+const DISABLED_REASON_TEXT: Record<AgentMessageChannelsDisabledReason, string> = {
+  flag_off: 'AGENT_MESSAGE_CHANNELS_ENABLED is not "true"',
+  project_event_wake_disabled: 'project event wakes are disabled',
+  durable_prompt_delivery_disabled: 'durable prompt delivery is disabled',
+};
+
 /**
- * Send over the agent message channel, or return null so the caller keeps its
- * legacy path (flag off, prerequisites off, or an urgent message class).
+ * Send over the agent message channel. Refuses (fails closed) when the transport is
+ * unavailable: posting the text into the recipient's chat instead would make an
+ * agent's words indistinguishable from a human's.
  */
-export async function trySendOverAgentMessageChannel(
+export async function sendOverAgentMessageChannel(
   requestId: string | number | null,
   tokenData: McpTokenData,
   env: Env,
   request: AgentMessageChannelSendRequest
-): Promise<JsonRpcResponse | null> {
-  const messageClass: AgentChannelMessageClass | null =
-    request.messageClass === 'notify' || request.messageClass === 'deliver'
-      ? request.messageClass
-      : null;
-  if (!messageClass) return null;
+): Promise<JsonRpcResponse> {
+  const messageClass = request.messageClass;
   const config = resolveAgentMessageChannelsConfig(env);
   if (!config.enabled) {
-    if (config.reason !== 'flag_off') {
-      log.warn('mcp.agent_message_channels.prerequisite_disabled', {
+    log.warn('mcp.agent_message_channels.unavailable', {
+      reason: config.reason,
+      tool: request.tool,
+      projectId: tokenData.projectId,
+      senderTaskId: tokenData.taskId,
+      recipientTaskId: request.recipient.taskId,
+      action: 'rejected',
+    });
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      `Agent messaging is unavailable on this installation: ${DISABLED_REASON_TEXT[config.reason]}. ` +
+        'SAM never posts one agent\'s text into another agent\'s chat directly, so the message was not sent.',
+      {
+        transport: 'agent_message_channel',
+        operation: request.tool,
+        outcome: 'unavailable',
         reason: config.reason,
-        tool: request.tool,
-        projectId: tokenData.projectId,
-        action: 'legacy_path',
-      });
-    }
-    return null;
+        retryable: false,
+      }
+    );
   }
 
   const idempotencyKey = request.idempotencyKey ?? `auto:${ulid()}`;

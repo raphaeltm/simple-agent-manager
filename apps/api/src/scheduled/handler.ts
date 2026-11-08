@@ -6,6 +6,7 @@ import { log } from '../lib/logger';
 import { runAgentEmailRecovery } from '../services/agent-email/recovery';
 import { reconcileDiagnosisRuns } from '../services/diagnosis-runner';
 import { reconcileDiagnosticIncidents } from '../services/diagnostic-incident-reconciliation';
+import { refreshGcpPriceTableIfDue } from '../services/gcp-price-table';
 import { runGitHubTriggerRecovery } from '../services/github-trigger-recovery';
 import {
   runLifecycleLatencyDailyEvaluation,
@@ -234,6 +235,25 @@ export async function scheduled(
   );
   const trialExpire = await sweeps.isolate('trial_expire', () => runTrialExpireSweep(env));
 
+  // After the lifecycle sweeps on purpose. When due (about once a day, or once per retry
+  // interval while it keeps failing) it downloads Google's price list under
+  // gcpCatalog.priceRefreshBudgetMs (default 90 s); on other ticks it costs one KV read. Earlier
+  // in the chain that budget would delay session_sleep (`.claude/rules/47`). Catalogs pick up a
+  // refreshed table on their next build.
+  // A refresh where every credential failed and at least one failure was a genuine fault throws
+  // here so it reaches failed-sweep notifications; its backoff was already recorded, so the next
+  // tick still waits. Failures that are owner-fixable states of a user's Google project (Cloud
+  // Billing API off) are shown on that credential instead, not raised to operators.
+  const gcpPriceTable = await sweeps.isolate('gcp_price_table', async () => {
+    const result = await refreshGcpPriceTableIfDue(env);
+    if (result.status === 'failed' && result.faults > 0) {
+      throw new Error(
+        `GCP price refresh failed for ${result.attempts} credential(s), ${result.faults} with a fault`
+      );
+    }
+    return result;
+  });
+
   // Runs after every lifecycle sweep on purpose. When its persisted cadence is due it copies
   // whole terminal sessions between ProjectData objects under PROJECT_DATA_ARCHIVE_WALL_TIME_MS
   // (checked only between candidates, so one large session can run well past it). Earlier in
@@ -318,6 +338,7 @@ export async function scheduled(
     capacityPoolReconciliationSkipped: capacityPools?.skipped,
     capacityPoolReconciliationSkipReason: capacityPools?.skipReason,
     capacityPoolReconciliationNextEligibleAt: capacityPools?.nextEligibleAt,
+    gcpPriceTableStatus: gcpPriceTable?.status,
     stuckTasksFailedQueued: stuckTasks?.failedQueued,
     stuckTasksFailedDelegated: stuckTasks?.failedDelegated,
     stuckTasksFailedInProgress: stuckTasks?.failedInProgress,

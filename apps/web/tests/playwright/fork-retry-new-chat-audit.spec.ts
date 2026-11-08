@@ -302,7 +302,7 @@ test.describe('Fork/retry new chat screen audit', () => {
     const textarea = page.getByPlaceholder(COMPOSER_PLACEHOLDER);
     await expect(textarea).toHaveValue(/Parent task ID: task-1/);
     const prompt = await textarea.inputValue();
-    expect(prompt).toContain('SAM MCP tools');
+    expect(prompt).toContain('SAM MCP tool sessions_read');
     expect(prompt).toContain('Previous session: "Fix the login bug"');
     expect(prompt).toContain('Parent project ID: proj-test-1');
     expect(prompt).toContain('Parent session ID: session-1');

@@ -118,10 +118,8 @@ All matching and state filtering happens before the configured page limit. Conti
 
 ### Agent messages over shared channels
 
-With `AGENT_MESSAGE_CHANNELS_ENABLED=true`, and only while event wakes and durable
-prompt delivery are enabled, `send_durable_message` (classes `notify` and `deliver`)
-and `send_message_to_subtask` stop injecting the sender's text into the recipient's
-prompt. One ProjectData transaction (`sendAgentChannelMessage`) finds or creates the
+`send_durable_message` (every class and `deliveryIntent`) and `send_message_to_subtask`
+never put the sender's text into the recipient's chat or prompt (constitution principle XV). One ProjectData transaction (`sendAgentChannelMessage`) finds or creates the
 canonical `agent-dm.<pair digest>` channel for the two chat sessions, ensures a
 SAM-managed `runtime_steer` subscription for each chat (`ensureManagedSubscription`), and
 publishes the message with its server-derived sender. The recipient gets a SAM-authored
@@ -131,12 +129,18 @@ created with another delivery mode is replaced on the pair's next message: the r
 receives that message and later ones at once, while the old subscription loses its match keys
 and only delivers the wakes it already owed, in its original mode. The recipient reads the text with `get_event`
 (`event.metadata.actor` is the verified sender), replies with `send_durable_message`,
-and acknowledges with `ack_event_delivery`. Urgent classes keep stop-and-deliver.
+and acknowledges with `ack_event_delivery`. A batch holding an urgent message (`interrupt`,
+`preempt_and_replan` or `shutdown_with_final_prompt`) is delivered stop-and-deliver with that
+class (`urgentAgentMessageClass`); its notice is still IDs-only.
 Responses report `accepted: true, delivered: false` with `transport`, `channel`,
 `eventId` and `sequence`; an optional `idempotencyKey` replays a lost-response retry,
 and changed content under the same key is rejected as a conflict. Messages are capped
 by `PROJECT_EVENT_CHANNEL_MESSAGE_MAX_BYTES` and pair channels by
-`AGENT_MESSAGE_CHANNEL_MAX_CHANNELS`. Managed deployments enable the transport in `wrangler.toml`; the code fallback is off and `AGENT_MESSAGE_CHANNELS_ENABLED=false` selects the legacy path. A message sent with `deliveryIntent: "steer"` never uses the pair channel: it targets the recipient's running turn, so durable delivery injects the text, fenced and labelled as another agent's message, into that turn (see [Live steering](#live-steering)).
+`AGENT_MESSAGE_CHANNEL_MAX_CHANNELS`. The transport needs `AGENT_MESSAGE_CHANNELS_ENABLED=true`, event wakes and durable prompt
+delivery. Managed deployments enable it in `wrangler.toml` (the code fallback is off). When any of
+the three is off, both tools refuse the send with `outcome: "unavailable"` and the reason; there is
+no legacy path that posts the text. `deliveryIntent` is accepted for compatibility: the managed
+subscription already steers notices into a running turn, so `queue` and `steer` deliver alike.
 
 Pair-channel events match only subscriptions targeting one of the two participant
 chats (`subscriptionCanMatchProjectEvent`), `follow_event_channel` rejects
@@ -347,7 +351,7 @@ The Resources drawer reads a whole chat session through two endpoints, both scop
 
 The index returns `{ sessionId, runs, chunks, totalChunkCount, omittedChunkCount, maxChunks, collection, runtime }`. `chunks` is ascending by start time and covers every workspace the session ran on (each wake is a new workspace); each carries its `summary` and a columnar per-minute `rollup` (`null` for chunks uploaded before rollups existed). `runs` groups chunks by workspace with that workspace's `reservation` (`cpuMillis`, `memoryMb`, or `null`). Past `WORKSPACE_RESOURCE_TIMELINE_MAX_CHUNKS` (1000) the oldest chunks are left out and counted in `omittedChunkCount`. When there are no chunks, `collection` explains why: `unsupported` (an Instant session), `expired` (samples passed retention; the summary remains), or `pending` (nothing uploaded yet). The chunk endpoint returns the same shape as `detail` above and `404`s for a chunk that belongs to another project or session.
 
-Agents read the same data with the `get_resource_history` MCP tool, which takes no `projectId` — the project comes from the verified token. With no arguments it returns the caller's own session; supplying any one of `sessionId`, `taskId`, or `workspaceId` replaces the caller's defaults entirely rather than narrowing within them.
+Agents read the same data with the `sessions_read` MCP tool and `{"method": "resource_history"}`, which takes no `projectId` — the project comes from the verified token. With no arguments it returns the caller's own session; supplying any one of `sessionId`, `taskId`, or `workspaceId` replaces the caller's defaults entirely rather than narrowing within them.
 
 ### Live steering
 
@@ -360,8 +364,10 @@ Steering needs durable prompt delivery.
   returns `409` when durable delivery is off and `400` with attachments, which travel only with a
   queued prompt. The response echoes `deliveryIntent`.
 - The MCP tool `send_durable_message` takes `deliveryIntent` (`queue` or `steer`); `steer` is
-  accepted only with the `notify` and `deliver` classes, so a steer never stops a turn. Urgent
-  classes keep stop-and-deliver.
+  accepted only with the `notify` and `deliver` classes. The message travels over the pair channel
+  either way (see [Agent messages over shared channels](#agent-messages-over-shared-channels)), and
+  its notice steers into a running turn through the managed subscription. Urgent classes make the
+  notice stop-and-deliver.
 - An event subscription with `requestedDelivery: "runtime_steer"` wakes its chat through the same
   queue with the steer intent: a chat that is mid-turn on a steering runtime gets the batch in that
   turn, and an idle, sleeping or non-steering chat gets an ordinary wake prompt. Like the other
@@ -572,7 +578,7 @@ MCP tool apply this.
 Usage windows visible to the caller inside a project: the caller's own credentials plus project-
 and platform-shared ones, never another member's personal credential. Requires `project:read`.
 Optional `agentSessionId` narrows the result to the credential that agent session is attributed to,
-resolved server-side from `agent_sessions`. The MCP tool `get_credential_limits` exposes the same
+resolved server-side from `agent_sessions`. The MCP tool `workspace_read` method `credential_limits` exposes the same
 view to agents (`scope: "session" | "project"`). `credentialId` is filled in for the caller's own
 credentials; a shared credential owned by another member whose reference is longer than 71 bytes
 comes back with a `sha256:` digest as `credentialReference` and `credentialId: null`, with or
@@ -652,8 +658,9 @@ credentials.
 
 ### `PATCH /api/capacity-pools/defaults`
 
-Update the authenticated user's owned default-pool policy, candidate statuses, or provider-native
-`catalogAdditions`. This endpoint does not mutate project or installation fallback pools.
+Update the authenticated user's owned default-pool policy, candidate statuses, provider-native
+`catalogAdditions`, or provider order (`sourceOrder`). This endpoint does not mutate project or
+installation fallback pools.
 
 `catalogAdditions` reactivates a currently available provider-native offering from the same
 credential-scoped catalog used by reconciliation. It identifies the active source plus concrete
@@ -669,6 +676,23 @@ provider/location/instance type; it does not accept secret material:
       "providerInstanceType": "cpx62",
       "providerInstanceSku": null
     }
+  ]
+}
+```
+
+`sourceOrder` sets the pool's provider order: capacity source ids, most preferred first, at most 32.
+New VMs are ranked by it; an existing node with room is still reused first. Sources not listed rank
+after listed ones. `null` or `[]` clears the order. Every id must be a capacity source that serves
+this pool, otherwise the request fails with `400` and `details.missingSourceIds` lists the unknown
+ids. Changing only the order does not bump the pool revision, so existing nodes stay reusable.
+If another edit changed the order after this request read it, the request fails with `409` and
+changes nothing.
+
+```json
+{
+  "sourceOrder": [
+    "cap-source-default:user:gcp-credential-id",
+    "cap-source-default:user:hetzner-credential-id"
   ]
 }
 ```
@@ -690,8 +714,9 @@ context. Project-scoped metadata comes from active project compute credentials. 
 
 ### `PATCH /api/projects/:id/capacity-pools/defaults`
 
-Update only the project-owned default-pool policy, candidate statuses, or provider-native
-`catalogAdditions`. Requires project `secret:write`.
+Update only the project-owned default-pool policy, candidate statuses, provider-native
+`catalogAdditions`, or `sourceOrder` (same shape and `missingSourceIds` error as the user route).
+Requires project `secret:write`.
 
 ### `GET /api/admin/capacity-pools/defaults`
 
@@ -705,8 +730,9 @@ Superadmin only.
 
 ### `PATCH /api/admin/capacity-pools/defaults`
 
-Update only the installation-owned default-pool policy, candidate statuses, or provider-native
-`catalogAdditions`. Superadmin only.
+Update only the installation-owned default-pool policy, candidate statuses, provider-native
+`catalogAdditions`, or `sourceOrder` (same shape and `missingSourceIds` error as the user route).
+Superadmin only.
 
 ## GitHub
 
@@ -766,14 +792,14 @@ that was in your list has left it.
 | ------ | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | GET    | `/api/projects/:projectId/ideas`                             | Returns `{ items, truncated, totals }`. Each item carries `derived` (the state, its `source`, and the chat or pull request that decided it), `counts`, and a one-line `summary`. Open ideas and finished ones are capped separately, so a project that shipped a lot cannot push its open ideas off the page. |
 | GET    | `/api/projects/:projectId/ideas/:ideaId`                     | One idea: the current plan in full, its derived state, every chat linked to it and every pull request its work produced.                                                                                                                                                                                      |
-| POST   | `/api/projects/:projectId/ideas`                             | Body `{ title, content? }`; files a new idea and returns it. Goes through the same operation the MCP `create_idea` tool uses.                                                                                                                                                                                 |
-| POST   | `/api/projects/:projectId/ideas/:ideaId/status`              | Body `{ status: 'completed' \| 'cancelled' \| 'draft' }`, as **Mark done**, **Park** and **Reopen** do. One transition table is shared with `update_idea` and the generic task status route, so every surface allows the same moves.                                                                          |
+| POST   | `/api/projects/:projectId/ideas`                             | Body `{ title, content? }`; files a new idea and returns it. Goes through the same operation the MCP `ideas_write` method `create` tool uses.                                                                                                                                                                 |
+| POST   | `/api/projects/:projectId/ideas/:ideaId/status`              | Body `{ status: 'completed' \| 'cancelled' \| 'draft' }`, as **Mark done**, **Park** and **Reopen** do. One transition table is shared with `ideas_write` method `update` and the generic task status route, so every surface allows the same moves.                                                          |
 | POST   | `/api/projects/:projectId/ideas/:ideaId/keep-open`           | Records that a person answered the idea's "a pull request merged, is this done?" question with **Keep open**. Changes no status; the question simply stops being asked for that merge.                                                                                                                        |
 | GET    | `/api/projects/:projectId/ideas/:ideaId/updates`             | Returns `{ updates, nextCursor }`: the notes posted beside the plan, newest first. Pass `cursor` for older ones.                                                                                                                                                                                              |
-| POST   | `/api/projects/:projectId/ideas/:ideaId/updates`             | Body `{ body, quote? }`; posts a note without changing the plan (the same operation as `update_idea` with `note`). Length limits are the Collaboration admin settings (8,000 characters per note, 1,000 per quote by default).                                                                                |
+| POST   | `/api/projects/:projectId/ideas/:ideaId/updates`             | Body `{ body, quote? }`; posts a note without changing the plan (the same operation as `ideas_write` method `update` with `note`). Length limits are the Collaboration admin settings (8,000 characters per note, 1,000 per quote by default).                                                                |
 | DELETE | `/api/projects/:projectId/ideas/:ideaId/updates/:updateId`   | Removes a note. Only the note's author or a project owner or admin can.                                                                                                                                                                                                                                       |
 | GET    | `/api/projects/:projectId/sessions/:sessionId/ideas`         | The ideas linked to a chat.                                                                                                                                                                                                                                                                                   |
-| POST   | `/api/projects/:projectId/sessions/:sessionId/ideas`         | Body `{ taskId, context? }`; links the chat to an idea so that the chat counts as work on it (the same link `link_idea` makes).                                                                                                                                                                               |
+| POST   | `/api/projects/:projectId/sessions/:sessionId/ideas`         | Body `{ taskId, context? }`; links the chat to an idea so that the chat counts as work on it (the same link `ideas_write` method `link_session` makes).                                                                                                                                                       |
 | DELETE | `/api/projects/:projectId/sessions/:sessionId/ideas/:taskId` | Removes that link.                                                                                                                                                                                                                                                                                            |
 
 An idea is open, done or parked, and those are the only moves: an open idea can be marked
@@ -835,6 +861,8 @@ Submit an idea for autonomous execution. This is the chat-first path used by the
 `resourceRequirements` is additive modern workload input. The API validates known fields and persists the normalized JSON through task launch inputs. Legacy `vmSize` is still accepted for old clients as a deprecated compatibility hint; clients should not infer provider hardware from it. Profiles, skills, and triggers persist the same modern data as `resourceRequirementsJson` for compatibility, with explicit `null` clearing that layer and omitted fields preserving inherited behavior.
 
 Optional `sourceIdeaId` starts the work from an open idea in the same project. It is validated before anything is created — `404` for an id that is not an open idea in this project, `409` for an idea that is done or parked — and the session → idea link (`works_on` in task mode, `discusses` in conversation mode) is recorded before the agent receives its first prompt, on both the VM and the Instant path. If the link cannot be written the submit fails and the task is not left queued. Repeating the same start touches the same link rather than adding a second one. The idea is never injected into `message`; the agent receives it from `get_instructions`.
+
+Optional `model` (string, up to 200 characters) and `effort` (`auto`, `low`, `medium`, `high`, `xhigh` or `max`) set the agent's model and effort for this task only, over the skill, profile and project defaults. A blank `model` or a `null` either one inherits. The effort must be one the resolved agent supports, or the request returns `400` before anything is created: Claude Code supports every level, Codex every level except `max`, and other agents only `auto`.
 
 ### `GET /api/projects/:id/agent-profiles/picker`
 
@@ -926,7 +954,7 @@ Start an [Instant](/docs/guides/instant-sessions/) chat session. Returns **`202`
 
 Because the launch is asynchronous, the response does **not** carry `agentSessionId`, `acpSessionId`, or launch `timings` — poll the session or connect to its stream for live state.
 
-Optional `sourceIdeaId` behaves as it does on `POST /api/projects/:id/tasks/submit`, with the link recorded as `discusses`.
+Optional `sourceIdeaId` behaves as it does on `POST /api/projects/:id/tasks/submit`, with the link recorded as `discusses`. Optional `model` and `effort` behave as they do there too.
 
 This endpoint is Instant-only. It returns `409` (`Selected profile resolves to VM runtime; use task submission instead.`) whenever the runtime resolves to VM — because the profile pins `vm`, because the caller has their own or a project cloud credential, or because `CF_CONTAINER_ENABLED` is not `true` for the deployment. Use `POST /api/projects/:id/tasks/submit` for VM work.
 

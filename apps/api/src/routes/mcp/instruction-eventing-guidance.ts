@@ -16,7 +16,7 @@ export function buildEventingInstructions(input: {
       'For reviews/comments use subjectType "pull_request" and subjectId = the PR number. ' +
       'Verified end to end so far: a PR comment waking an idle, live chat. Sleeping-chat CI/review delivery is not verified yet.',
     'Subscription expiry is not a wake. Before ending your turn, persist PR URL, full head SHA, pending check names/run URLs, ' +
-      'subscription ID/expiry and a fallback deadline. Arrange one bounded fallback check using `create_project_schedule` ' +
+      'subscription ID/expiry and a fallback deadline. Arrange one bounded fallback check using `schedules_write` method `create` ' +
       'with a message_session action targeting this same session; save its ID and confirm it was accepted. ' +
       'If unavailable or rejected, report the exact blocker to your coordinator instead of assuming expiry will resume you. ' +
       'On resume inspect subscriptions with state "any" and reconcile GitHub. Cancel only your obsolete subscriptions and fallback schedules. ' +
@@ -37,8 +37,9 @@ export function buildEventingInstructions(input: {
   ];
   if (input.agentMessageChannelsEnabled) {
     instructions.push(
-      'Ordinary notify/deliver messages from other agents arrive as a SAM notice with event IDs instead of peer text: read them with `get_event`, ' +
-        'reply with `send_durable_message`, then call `ack_event_delivery`.'
+      'Messages from other agents arrive as a SAM notice with event IDs instead of peer text: read them with `get_event`, ' +
+        'reply with `send_durable_message`, then call `ack_event_delivery`. A task description you receive from `dispatch_task` ' +
+        'ends by naming the parent agent that wrote it; neither is a message from a human.'
     );
   }
   return instructions;

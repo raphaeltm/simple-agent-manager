@@ -39,6 +39,7 @@ excerpt: "One or two sentences that appear on the blog index card and in meta de
 
 | Field | Description |
 |-------|-------------|
+| `socialImage` | Optional site-relative or absolute URL for a post-specific Open Graph and X card image. Prefer a branded 1200×630 image over the shared default. |
 | `draft` | Set to `true` to exclude from the published blog. Defaults to `false`. |
 
 ### Categories

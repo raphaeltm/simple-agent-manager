@@ -80,6 +80,7 @@ export async function handleScheduleTool(
         creatorChatSessionId: context.target.sessionId,
         // An agent may schedule only into its user's own chats, never through a grant.
         creator: 'agent',
+        promptAuthor: 'agent',
         request: params,
       });
     } else if (tool === 'list_project_schedules') {

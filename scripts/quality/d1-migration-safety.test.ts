@@ -15,6 +15,7 @@ import {
 
 class FakeRunner implements D1MigrationSafetyRunner {
   public readonly commands: string[] = [];
+  public batchQueries = 0;
   private readonly migrationCountsByDb = new Map<string, number>();
   private readonly migrationNamesByDb: Record<string, Set<string>>;
 
@@ -66,6 +67,26 @@ class FakeRunner implements D1MigrationSafetyRunner {
     if (tableInfoMatch) {
       const key = `${dbName}:${tableInfoMatch[1]}`;
       return [{ results: (this.columnsByDbAndTable[key] ?? []).map((name) => ({ name })) }];
+    }
+
+    const batched = [...sql.matchAll(/\(SELECT COUNT\(\*\) FROM "([^"]+)"\) AS "(c\d+)"/g)];
+    if (batched.length > 0) {
+      this.batchQueries += 1;
+      const keys = batched.map((match) => `${dbName}:${match[1]}`);
+      // A batch fails as a whole when any table cannot be counted, like D1 would.
+      if (
+        keys.some((key) => !key.endsWith(':d1_migrations') && !this.countsByDbAndTable[key]?.length)
+      )
+        throw new Error(`batch count failure for ${keys.join(',')}`);
+      const row: Record<string, number | undefined> = {};
+      batched.forEach((match, index) => {
+        const key = keys[index] as string;
+        row[match[2] as string] =
+          match[1] === 'd1_migrations'
+            ? (this.migrationCountsByDb.get(dbName) ?? 0)
+            : this.countsByDbAndTable[key]?.shift();
+      });
+      return [{ results: [row] }];
     }
 
     const countMatch = sql.match(/SELECT COUNT\(\*\) as count FROM "([^"]+)"/);
@@ -189,6 +210,117 @@ describe('D1 migration safety gates', () => {
     expect(runner.commands.filter((command) => command.includes('migrations apply'))).toHaveLength(
       1
     );
+  });
+
+  it('does not count rows after migrating a database that was empty before', () => {
+    const runner = new FakeRunner(
+      { main: [[], ['d1_migrations', 'users', 'projects', 'tasks']] },
+      {}
+    );
+
+    runSafeRemoteMigrations({
+      environment: 'staging',
+      databases: [{ binding: 'DATABASE', name: 'main' }],
+      runner,
+    });
+
+    expect(
+      runner.commands.filter((command) =>
+        /COUNT\(\*\)(?: as count)? FROM "(users|projects|tasks)"/.test(command)
+      )
+    ).toHaveLength(0);
+    expect(runner.commands.filter((command) => command.includes('migrations apply'))).toHaveLength(
+      1
+    );
+  });
+
+  it('control: still counts rows after migrating a database that held tables before', () => {
+    const runner = new FakeRunner({ main: ['d1_migrations', 'users'] }, { 'main:users': [3, 3] });
+
+    runSafeRemoteMigrations({
+      environment: 'production',
+      databases: [{ binding: 'DATABASE', name: 'main' }],
+      runner,
+    });
+
+    expect(
+      runner.commands.filter((command) => command.includes('COUNT(*) FROM "users"'))
+    ).toHaveLength(2);
+  });
+
+  it('counts many protected tables with one Wrangler call per batch, not one per table', () => {
+    const tables = Array.from({ length: 140 }, (_, index) => `table_${index}`);
+    const counts = Object.fromEntries(tables.map((table) => [`main:${table}`, [5, 5]]));
+    const runner = new FakeRunner({ main: ['d1_migrations', ...tables] }, counts);
+
+    runSafeRemoteMigrations({
+      environment: 'production',
+      databases: [{ binding: 'DATABASE', name: 'main' }],
+      runner,
+    });
+
+    // 140 tables at the default batch size of 50: 3 queries before and 3 after.
+    expect(runner.batchQueries).toBe(6);
+    expect(
+      runner.commands.filter((command) => command.includes('as count FROM "table_'))
+    ).toHaveLength(0);
+  });
+
+  it('recounts a failed batch table by table so the error names the table', () => {
+    const runner = new FakeRunner(
+      { main: ['d1_migrations', 'users', 'projects'] },
+      { 'main:users': [2] }
+    );
+
+    expect(() =>
+      runSafeRemoteMigrations({
+        environment: 'production',
+        databases: [{ binding: 'DATABASE', name: 'main' }],
+        runner,
+      })
+    ).toThrow(/Failed to count DATABASE\.projects: count failure for main:projects/);
+    expect(runner.commands.some((command) => command.includes('migrations apply'))).toBe(false);
+  });
+
+  it('recounts an incomplete batch and blocks migration when a table cannot be counted', () => {
+    const runner = new FakeRunner(
+      { main: ['d1_migrations', 'users', 'projects'] },
+      { 'main:users': [2] }
+    );
+    const executeJson = runner.executeJson.bind(runner);
+    vi.spyOn(runner, 'executeJson').mockImplementation((command, args) => {
+      if (args.at(-2)?.includes('AS "c0"')) {
+        return [{ results: [{ c0: 2 }] }];
+      }
+      return executeJson(command, args);
+    });
+
+    expect(() =>
+      runSafeRemoteMigrations({
+        environment: 'production',
+        databases: [{ binding: 'DATABASE', name: 'main' }],
+        runner,
+      })
+    ).toThrow(/Failed to count DATABASE\.projects: count failure for main:projects/);
+    expect(runner.commands.some((command) => command.includes('migrations apply'))).toBe(false);
+  });
+
+  it('rejects an invalid count batch size', () => {
+    const previous = process.env.D1_MIGRATION_COUNT_BATCH_SIZE;
+    process.env.D1_MIGRATION_COUNT_BATCH_SIZE = '0';
+    try {
+      const runner = new FakeRunner({ main: ['d1_migrations', 'users'] }, { 'main:users': [1, 1] });
+      expect(() =>
+        runSafeRemoteMigrations({
+          environment: 'production',
+          databases: [{ binding: 'DATABASE', name: 'main' }],
+          runner,
+        })
+      ).toThrow(/D1_MIGRATION_COUNT_BATCH_SIZE/);
+    } finally {
+      if (previous === undefined) delete process.env.D1_MIGRATION_COUNT_BATCH_SIZE;
+      else process.env.D1_MIGRATION_COUNT_BATCH_SIZE = previous;
+    }
   });
 
   it('fails closed when an initialized upgrade database has no protected tables', () => {

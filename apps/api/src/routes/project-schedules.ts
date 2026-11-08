@@ -113,6 +113,7 @@ projectScheduleRoutes.post('/', async (c) =>
       creatorChatSessionId: null,
       // A person signed in to the app: their active shared access to a chat counts.
       creator: 'person',
+      promptAuthor: 'human',
       request: await scheduleRequestBody(c.req.raw, c.env),
     }),
     201

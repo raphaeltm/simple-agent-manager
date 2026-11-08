@@ -24,7 +24,7 @@ sam tasks wait <task-id> --project SAM --timeout 30m --interval 2s --json
 
 Submission returns a queued receipt, not completion. `tasks wait` exits 0 for completed work, 4 for failed/cancelled work, 3 when waiting times out, and 1 for command/API failures. A timeout stops waiting; it does not cancel the task. HTTP requests are individually bounded by `SAM_CLI_HTTP_TIMEOUT` (default `60s`). Interrupting the CLI cancels its local request/wait; it does not undo accepted work.
 
-Prompt/content inputs accept positional text, `--prompt`/`--content`, a file, or stdin; choose exactly one. File/stdin input preserves prompt whitespace. `SAM_CLI_MAX_PROMPT_BYTES` can lower the 16,000-byte API ceiling. Use `--skill <exact-name-or-id>` to select an accessible skill; inspect `skills resolve <skill> [--profileId <profile-id>]` for server-computed layering. Submit resource overrides are explicit; help lists the supported flags. Per-dispatch `--model` remains reserved and fails; choose an existing configured profile instead.
+Prompt/content inputs accept positional text, `--prompt`/`--content`, a file, or stdin; choose exactly one. File/stdin input preserves prompt whitespace. `SAM_CLI_MAX_PROMPT_BYTES` can lower the 16,000-byte API ceiling. Use `--skill <exact-name-or-id>` to select an accessible skill; inspect `skills resolve <skill> [--profileId <profile-id>]` for server-computed layering. Submit resource overrides are explicit; help lists the supported flags. Per-dispatch `--model` remains reserved and fails, because the CLI does not send one yet (the submit API accepts `model` and `effort`, as the web chat's Chat options do); choose an existing configured profile instead.
 
 ## Receipts and retries
 

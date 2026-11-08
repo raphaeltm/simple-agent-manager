@@ -33,7 +33,7 @@ export const PROJECT_SCHEDULE_TOOLS = [
   {
     name: 'create_project_schedule',
     description:
-      'Persist a one-off scheduled message to a same-project chat or a new task-backed session. UTC dueAt is epoch milliseconds; displayTimezone is IANA. This survives token expiry and holds no compute. Delivery can be late or queued while busy. No exact-second execution or exactly-once agent side effects are promised. Reuse the same idempotencyKey for retries.',
+      'Persist a one-off scheduled message to a same-project chat or a new task-backed session. UTC dueAt is epoch milliseconds; displayTimezone is IANA. This survives token expiry and holds no compute. Delivery can be late or queued while busy. No exact-second execution or exactly-once agent side effects are promised. Reuse the same idempotencyKey for retries. A message_session prompt you write is not posted as plain text: the chat gets a SAM notice naming the schedule, and its agent reads your prompt with schedules_read (method get).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -72,7 +72,7 @@ export const PROJECT_SCHEDULE_TOOLS = [
   {
     name: 'reschedule_project_schedule',
     description:
-      'Reschedule a pending action using the version returned by get_project_schedule. Concurrent changes conflict; already admitted actions cannot be moved.',
+      'Reschedule a pending action using the version returned by schedules_read method get. Concurrent changes conflict; already admitted actions cannot be moved.',
     inputSchema: {
       type: 'object',
       properties: {

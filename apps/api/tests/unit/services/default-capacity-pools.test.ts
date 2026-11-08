@@ -6181,6 +6181,64 @@ describe('GCP managed compatibility copies', () => {
     return db;
   }
 
+  // Google adds zones over time. A zone outside the labelled suggestion list used to fail
+  // `isValidLocationForProvider`, so `normalizeCapacityCandidate` silently dropped it.
+  it('keeps a candidate in a zone outside the labelled list through placement selection', async () => {
+    const db = await saveGcp(createDb());
+    const gcpOffering = (location: string) =>
+      liveHetznerOffering({
+        provider: 'gcp',
+        location,
+        providerInstanceType: 'e2-standard-2',
+        displayName: 'e2-standard-2',
+        machineSize: 'medium',
+        vcpu: 2,
+        ramGb: 8,
+        memoryGb: 8,
+        memoryMb: 8192,
+        storageGb: 50,
+        diskGb: 50,
+        price: '~$49/mo',
+        priceMonthly: 49,
+        priceHourly: 0.067,
+        currency: 'USD',
+      });
+    const newZone = 'northamerica-northeast2-b';
+    expect(getLocationsForProvider('gcp').map((l) => l.id)).not.toContain(newZone);
+    await ensureDefaultCapacityPoolsForExistingCredentials(db, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => [gcpOffering('us-central1-a'), gcpOffering(newZone)],
+    });
+    const summary = await resolveEffectiveDefaultCapacityPoolSummary(db as never, {
+      userId: 'user-1',
+      projectId: null,
+      ensure: false,
+      includeInstallation: false,
+    });
+    const placement = resolveTaskStartPlacement({
+      entryPoint: 'task-submit',
+      taskId: 'gcp-new-zone-task',
+      projectId: 'project-1',
+      userId: 'user-1',
+      project: {
+        id: 'project-1',
+        defaultProvider: 'gcp',
+        defaultLocation: 'us-central1-a',
+        defaultVmSize: 'medium',
+      },
+      credentialProjectPolicy: 'current-project-unless-inherited',
+      taskModeDefault: 'task',
+      resourceRequirements: {},
+    });
+
+    const selection = buildCapacityPoolSelection(summary!, placement, 'workspace');
+
+    expect(selection?.candidates.map((c) => c.location).sort()).toEqual(
+      [newZone, 'us-central1-a'].sort()
+    );
+  });
+
   it('discovers one catalog and one editor-visible source after real WIF credential storage', async () => {
     const db = await saveGcp(createDb());
     expect(await listUserProviderCatalogSeeds(db, { userId: 'user-1' })).toHaveLength(1);
@@ -6687,5 +6745,313 @@ describe('GCP managed compatibility copies', () => {
     const again = await ensureDefaultCapacityPoolsForExistingCredentials(db, options);
     expect(again.user?.sources).toHaveLength(1);
     expect(again.user?.candidates.some((c) => c.status === 'active')).toBe(false);
+  });
+});
+
+describe('pool provider order (idea 01M6NXTF2RQ5QXHM7YZ4ZF0XBK)', () => {
+  const LARGE_ENOUGH = {
+    vcpu: 4,
+    ramGb: 16,
+    memoryGb: 16,
+    memoryMb: 16_384,
+    storageGb: 160,
+    diskGb: 160,
+  };
+  /** A user pool with a cheap Hetzner offering and a pricier Vultr one, both medium. */
+  async function seedTwoProviderPool() {
+    const db = createDb();
+    seedUserCredential({ id: 'user-hetzner' });
+    seedUserCredential({ id: 'user-vultr', provider: 'vultr' });
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      candidatePublishBatchSize: 1000,
+      offeringResolver: async (seed) =>
+        seed.provider === 'vultr'
+          ? [
+              {
+                ...liveHetznerOffering({
+                  location: 'ewr',
+                  providerInstanceType: 'vc2-4c-16gb',
+                  displayName: 'vc2-4c-16gb',
+                  machineSize: 'medium',
+                  ...LARGE_ENOUGH,
+                }),
+                provider: 'vultr',
+                price: '$24.00/mo',
+                priceMonthly: 24,
+                priceHourly: 0.033,
+                currency: 'USD',
+              },
+            ]
+          : [
+              liveHetznerOffering({
+                location: 'fsn1',
+                providerInstanceType: 'cx43',
+                displayName: 'CX43',
+                machineSize: 'medium',
+                ...LARGE_ENOUGH,
+              }),
+            ],
+    });
+    const summary = await readDefaultCapacityPoolSummaries(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      includeDisabled: true,
+    });
+    const sourceFor = (provider: string) =>
+      summary.user?.candidates.find((candidate) => candidate.provider === provider)
+        ?.capacitySourceId as string;
+    return { db, hetznerSource: sourceFor('hetzner'), vultrSource: sourceFor('vultr') };
+  }
+
+  function poolRow() {
+    return getRows<{
+      revision: number;
+      selection_digest: string | null;
+      source_order_json: string | null;
+    }>(
+      "SELECT revision, selection_digest, source_order_json FROM capacity_pools WHERE scope = 'user'"
+    )[0]!;
+  }
+
+  function unpinnedPlacement() {
+    return resolveTaskStartPlacement({
+      entryPoint: 'task-submit',
+      taskId: 'order-task',
+      projectId: 'project-1',
+      userId: 'user-1',
+      project: { id: 'project-1', defaultProvider: null, defaultVmSize: 'medium' },
+      credentialProjectPolicy: 'current-project-unless-inherited',
+      taskModeDefault: 'task',
+      resourceRequirements: {},
+    });
+  }
+
+  async function firstCandidateProvider(db: ReturnType<typeof createDb>) {
+    const summary = await resolveEffectiveDefaultCapacityPoolSummary(db as never, {
+      userId: 'user-1',
+      projectId: null,
+      ensure: false,
+      includeInstallation: false,
+    });
+    const selection = buildCapacityPoolSelection(summary!, unpinnedPlacement(), 'workspace');
+    return selection?.candidates.map((candidate) => [
+      candidate.provider,
+      candidate.sourceRank ?? null,
+    ]);
+  }
+
+  it('ranks new VMs by provider order ahead of strategy, and leaves order unchanged without one', async () => {
+    const { db, hetznerSource, vultrSource } = await seedTwoProviderPool();
+    // Control: no order, so both sources are unranked and the pool's existing order applies.
+    const unordered = await firstCandidateProvider(db);
+    expect(unordered?.map(([, rank]) => rank)).toEqual([null, null]);
+    const naturalFirst = unordered?.[0]?.[0];
+    const preferred = naturalFirst === 'hetzner' ? vultrSource : hetznerSource;
+    const preferredProvider = naturalFirst === 'hetzner' ? 'vultr' : 'hetzner';
+    const other = preferred === vultrSource ? hetznerSource : vultrSource;
+
+    const update = await updateDefaultCapacityPool(db as never, {
+      scope: 'user',
+      ownerUserId: 'user-1',
+      ownerProjectId: null,
+      sourceOrder: [preferred, other],
+    });
+
+    expect(update.conflict).toBe(false);
+    expect(update.summary?.pool.sourceOrder).toEqual([preferred, other]);
+    expect(await firstCandidateProvider(db)).toEqual([
+      [preferredProvider, 1],
+      [naturalFirst, 2],
+    ]);
+  });
+
+  it('stores an order without bumping the pool revision or selection digest', async () => {
+    const { db, hetznerSource, vultrSource } = await seedTwoProviderPool();
+    const before = poolRow();
+
+    await updateDefaultCapacityPool(db as never, {
+      scope: 'user',
+      ownerUserId: 'user-1',
+      ownerProjectId: null,
+      sourceOrder: [vultrSource, hetznerSource],
+    });
+
+    // Reuse authority requires a node's recorded pool revision to match; a reorder that bumped
+    // it would make every running node non-reusable.
+    expect(poolRow()).toEqual({
+      revision: before.revision,
+      selection_digest: before.selection_digest,
+      source_order_json: JSON.stringify([vultrSource, hetznerSource]),
+    });
+  });
+
+  it.each([null, []])('clears the order with %j', async (cleared) => {
+    const { db, hetznerSource, vultrSource } = await seedTwoProviderPool();
+    await updateDefaultCapacityPool(db as never, {
+      scope: 'user',
+      ownerUserId: 'user-1',
+      ownerProjectId: null,
+      sourceOrder: [vultrSource, hetznerSource],
+    });
+
+    const update = await updateDefaultCapacityPool(db as never, {
+      scope: 'user',
+      ownerUserId: 'user-1',
+      ownerProjectId: null,
+      sourceOrder: cleared,
+    });
+
+    expect(update.summary?.pool.sourceOrder ?? null).toBeNull();
+    expect(poolRow().source_order_json).toBeNull();
+  });
+
+  it("rejects another user's source and an unknown id, writing nothing", async () => {
+    const { db, hetznerSource } = await seedTwoProviderPool();
+    seedUserCredential({ id: 'user-2-hetzner', userId: 'user-2' });
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-2',
+      includeInstallation: false,
+      offeringResolver: async () => [
+        liveHetznerOffering({
+          location: 'fsn1',
+          providerInstanceType: 'cx33',
+          displayName: 'CX33',
+          machineSize: 'medium',
+        }),
+      ],
+    });
+    const foreignSource = getRows<{ capacity_source_id: string }>(
+      "SELECT c.capacity_source_id FROM capacity_pool_candidates c JOIN capacity_pools p ON p.id = c.pool_id WHERE p.owner_user_id = 'user-2' LIMIT 1"
+    )[0]!.capacity_source_id;
+
+    const update = await updateDefaultCapacityPool(db as never, {
+      scope: 'user',
+      ownerUserId: 'user-1',
+      ownerProjectId: null,
+      sourceOrder: [hetznerSource, foreignSource, 'no-such-source'],
+    });
+
+    expect(update.missingSourceIds).toEqual([foreignSource, 'no-such-source']);
+    expect(poolRow().source_order_json).toBeNull();
+
+    // Owner-path control: the user's own source alone is accepted.
+    const own = await updateDefaultCapacityPool(db as never, {
+      scope: 'user',
+      ownerUserId: 'user-1',
+      ownerProjectId: null,
+      sourceOrder: [hetznerSource],
+    });
+    expect(own.missingSourceIds).toEqual([]);
+    expect(poolRow().source_order_json).toBe(JSON.stringify([hetznerSource]));
+  });
+
+  it('stores the order with a policy edit in the same revision bump', async () => {
+    const { db, hetznerSource, vultrSource } = await seedTwoProviderPool();
+    const before = poolRow();
+
+    await updateDefaultCapacityPool(db as never, {
+      scope: 'user',
+      ownerUserId: 'user-1',
+      ownerProjectId: null,
+      policy: { exhaustionPolicy: 'fallback-chain' },
+      sourceOrder: [vultrSource, hetznerSource],
+    });
+
+    expect(poolRow()).toMatchObject({
+      revision: before.revision + 1,
+      source_order_json: JSON.stringify([vultrSource, hetznerSource]),
+    });
+  });
+
+  it('lets exactly one of two concurrent reorders win; the other reports a conflict', async () => {
+    const { db, hetznerSource, vultrSource } = await seedTwoProviderPool();
+    const reorder = (sourceOrder: string[]) =>
+      updateDefaultCapacityPool(db as never, {
+        scope: 'user',
+        ownerUserId: 'user-1',
+        ownerProjectId: null,
+        sourceOrder,
+      });
+    const first = [hetznerSource, vultrSource];
+    const second = [vultrSource, hetznerSource];
+
+    const [a, b] = await Promise.all([reorder(first), reorder(second)]);
+
+    // Both editors read the same unordered pool. A reorder does not bump the revision, so only
+    // the order-value fence can stop the later write from silently replacing the earlier one.
+    expect([a.conflict, b.conflict].sort()).toEqual([false, true]);
+    const winner = a.conflict ? second : first;
+    expect(poolRow().source_order_json).toBe(JSON.stringify(winner));
+    expect((a.conflict ? b : a).summary?.pool.sourceOrder).toEqual(winner);
+  });
+
+  it('fences a policy edit that rewrites the order against a concurrent reorder', async () => {
+    const { db, hetznerSource, vultrSource } = await seedTwoProviderPool();
+    const before = poolRow();
+    const reorderOnly = updateDefaultCapacityPool(db as never, {
+      scope: 'user',
+      ownerUserId: 'user-1',
+      ownerProjectId: null,
+      sourceOrder: [hetznerSource, vultrSource],
+    });
+    const policyAndOrder = updateDefaultCapacityPool(db as never, {
+      scope: 'user',
+      ownerUserId: 'user-1',
+      ownerProjectId: null,
+      policy: { exhaustionPolicy: 'fallback-chain' },
+      sourceOrder: [vultrSource, hetznerSource],
+    });
+
+    const [a, b] = await Promise.all([reorderOnly, policyAndOrder]);
+
+    expect([a.conflict, b.conflict].sort()).toEqual([false, true]);
+    const row = getRows<{ exhaustion_policy: string; revision: number }>(
+      "SELECT exhaustion_policy, revision FROM capacity_pools WHERE scope = 'user'"
+    )[0]!;
+    if (a.conflict) {
+      // The combined edit won: its order and its policy landed together, in one revision bump.
+      expect(poolRow().source_order_json).toBe(JSON.stringify([vultrSource, hetznerSource]));
+      expect(row).toEqual({ exhaustion_policy: 'fallback-chain', revision: before.revision + 1 });
+    } else {
+      // The reorder won: the combined edit published nothing, policy included.
+      expect(poolRow().source_order_json).toBe(JSON.stringify([hetznerSource, vultrSource]));
+      expect(row.revision).toBe(before.revision);
+      expect(row.exhaustion_policy).not.toBe('fallback-chain');
+    }
+  });
+
+  it('treats a source whose candidates are all deleted as not serving the pool', async () => {
+    const { db, hetznerSource, vultrSource } = await seedTwoProviderPool();
+    sqlite
+      ?.prepare(
+        `UPDATE capacity_pool_candidates SET status = 'deleted' WHERE capacity_source_id = ?`
+      )
+      .run(vultrSource);
+
+    const update = await updateDefaultCapacityPool(db as never, {
+      scope: 'user',
+      ownerUserId: 'user-1',
+      ownerProjectId: null,
+      sourceOrder: [vultrSource, hetznerSource],
+    });
+
+    expect(update.missingSourceIds).toEqual([vultrSource]);
+    expect(poolRow().source_order_json).toBeNull();
+  });
+
+  it('reads a malformed stored order as no order instead of failing the pool', async () => {
+    const { db } = await seedTwoProviderPool();
+    sqlite?.prepare(`UPDATE capacity_pools SET source_order_json = '{"not":"a list"}'`).run();
+
+    const summary = await readDefaultCapacityPoolSummaries(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      includeDisabled: true,
+    });
+
+    expect(summary.user?.pool.sourceOrder ?? null).toBeNull();
+    expect(summary.user?.candidates.length).toBeGreaterThan(0);
   });
 });

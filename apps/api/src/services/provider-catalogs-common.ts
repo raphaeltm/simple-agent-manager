@@ -16,6 +16,11 @@ export interface ProviderCatalogCredentialSeed {
   encryptedToken: string;
   iv: string;
   credentialSource: ProviderCatalogCredentialSource;
+  /**
+   * SAM project a project-scoped credential belongs to; null for user and platform credentials.
+   * GCP workload identity binds tokens to this project, so token minting must use it.
+   */
+  ownerProjectId: string | null;
   credentialId: string | null;
   platformCredentialId: string | null;
   capacitySourceCredentialId: string | null;

@@ -82,9 +82,9 @@ your work is safe and what to do next. Everything here applies to both
   → [Rephrase it, or update](#agent-profile-not-found-when-you-send-a-message)
 - **The chat runs another agent than the profile you picked**, such as OpenCode instead of Claude
   Code. A skill may be choosing the agent. → [Check the skill](#the-chat-runs-a-different-agent-than-its-profile)
-- **A message on your side of the chat that you didn't write, starting "SAM notice
-  (system-generated, not a human message)".** Another agent sent this chat a message; SAM wrote the
-  notice for the agent. You don't need to reply.
+- **A "Message from another agent" line, or (in older chats) a message on your side of the chat
+  that you didn't write, starting "SAM notice (system-generated, not a human message)".** Another
+  agent sent this chat a message; SAM wrote the notice for the agent. You don't need to reply.
   → [Messages between agents](/docs/guides/agents/#messages-between-agents)
 
 Anything else — including a message that delivery "could not be confirmed" — means SAM couldn't
@@ -106,7 +106,9 @@ older saved sessions.
 ## The agent is waiting for you
 
 **Needs input** beside a chat in the session list means it is waiting for an answer. Such chats sit
-at the top of the list under **Needs attention**, however long ago their last message was. On a
+at the top of the list under **Needs attention** for 24 hours from when the question was asked
+(or, for **Wake failed**, from when the wake failed). Newer messages in the chat do not extend that.
+After that they move to **Awake** or **Sleeping** and keep the label. On a
 phone, open the session list with the list icon at the right of the project-name bar; an amber count
 on that icon says how many chats need attention. Open the chat and look for one of these:
 
@@ -189,8 +191,8 @@ Your work is safe: pausing check-ins doesn't stop the task, the workspace, or an
 left running.
 
 When an agent working on a task goes quiet without finishing, SAM checks in after about five minutes
-with a message asking it to report progress and carry on (it starts **[SAM Orchestrator
-Check-In]**). An agent that keeps stopping without making progress — often because the same error
+with a message asking it to report progress and carry on. The chat shows it as **SAM asked the agent
+for a progress update**; the text the agent received starts **[SAM Orchestrator Check-In]**. An agent that keeps stopping without making progress — often because the same error
 keeps coming back — would otherwise be nudged forever. SAM pauses and posts one of these in the chat:
 
 - **"SAM paused automatic check-ins after repeated attempts without confirmed progress."** This comes
@@ -728,7 +730,7 @@ Code, look at the skill. A skill that sets an agent replaces the profile's agent
 profile's model. Skills created from the **Skills** page before 21 October 2026 (v2026.10.22 on a
 self-hosted instance) all set the platform default agent, usually OpenCode, and the **Skills** page
 doesn't show it. Ask an agent in the project to list the project's skills and clear the agent on
-any that set one (`update_skill` with `agentType: ""`), or start the chat without that skill. See
+any that set one (`skills_write` method `update` with `agentType: ""`), or start the chat without that skill. See
 [the order SAM picks the agent in](/docs/guides/agents/#agent-profiles).
 
 ## SAM moved the session to another machine

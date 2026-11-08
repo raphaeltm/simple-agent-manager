@@ -97,6 +97,12 @@ export interface CapacityPool {
   exhaustionPolicy: CapacityExhaustionPolicy;
   /** Per-user managed workspace-node ceiling. Spread provisions until this limit, then packs. */
   maxNodes?: number;
+  /**
+   * Capacity source ids in provider-preference order, most preferred first. New VMs are planned
+   * from earlier sources first; a running node with room is reused regardless. Null or absent
+   * means every source is equal (no order).
+   */
+  sourceOrder?: string[] | null;
   lastReconciledAt?: string | null;
   migrationVersion?: string | null;
   migrationState?: string | null;
@@ -305,10 +311,18 @@ export interface DefaultCapacityPoolCandidateCatalogAddition {
   providerInstanceSku?: string | null;
 }
 
+/** Most capacity sources a pool's provider order may list. */
+export const MAX_CAPACITY_POOL_SOURCE_ORDER_LENGTH = 32;
+
 export interface DefaultCapacityPoolUpdateRequest {
   policy?: DefaultCapacityPoolPolicyUpdate;
   candidates?: DefaultCapacityPoolCandidateStatusUpdate[];
   catalogAdditions?: DefaultCapacityPoolCandidateCatalogAddition[];
+  /**
+   * Replace the pool's provider order with these capacity source ids, most preferred first.
+   * `null` or `[]` clears it, making every source equal again.
+   */
+  sourceOrder?: string[] | null;
 }
 
 export interface ProjectDefaultCapacityPoolsResponse {

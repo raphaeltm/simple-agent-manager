@@ -97,9 +97,22 @@ export async function enforceComputeQuota(
       });
     }
 
+    const selection = state.config.capacityPoolSelection ?? null;
+    // The offering this attempt provisions, which on a later provider tier is not the first.
+    const targetCandidateId = state.stepResults.capacityPlacementSnapshot?.capacityPoolCandidateId;
+    const targetCandidate = targetCandidateId
+      ? (selection?.candidates.find((candidate) => candidate.id === targetCandidateId) ?? null)
+      : (selection?.candidates[0] ?? null);
+    if (targetCandidateId && !targetCandidate) {
+      // Charging another candidate's quota could bill a user tier as platform or the reverse.
+      throw new Error(
+        `Provisioning target ${targetCandidateId} is not in the task's capacity pool selection`
+      );
+    }
     const quotaCredentialSource = resolveCapacityAwareQuotaCredentialSource(
       credResult,
-      state.config.capacityPoolSelection ?? null
+      selection,
+      targetCandidate
     );
     if (quotaCredentialSource === 'platform') {
       const { checkQuotaForUser } = await import('../../services/compute-quotas');

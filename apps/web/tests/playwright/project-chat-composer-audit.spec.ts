@@ -732,3 +732,231 @@ for (const mode of ['new', 'active'] as const) {
     await assertNoOverflow(page);
   });
 }
+
+/** Stages files through the composer's real paste handler, built in the page from canvas/bytes. */
+async function pasteFiles(
+  page: Page,
+  files: Array<
+    | { kind: 'image'; name: string; width: number; height: number }
+    | { kind: 'bytes'; name: string; type: string; size: number }
+    | { kind: 'video'; name: string }
+  >
+) {
+  await page.locator('textarea[role="combobox"]').evaluate(async (element, specs) => {
+    const transfer = new DataTransfer();
+    for (const spec of specs) {
+      if (spec.kind === 'image') {
+        const canvas = document.createElement('canvas');
+        canvas.width = spec.width;
+        canvas.height = spec.height;
+        const ctx = canvas.getContext('2d')!;
+        const gradient = ctx.createLinearGradient(0, 0, spec.width, spec.height);
+        gradient.addColorStop(0, '#2f7d4f');
+        gradient.addColorStop(1, '#f6a85b');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, spec.width, spec.height);
+        const blob = await new Promise<Blob>((resolve) =>
+          canvas.toBlob((b) => resolve(b!), 'image/png')
+        );
+        transfer.items.add(new File([blob], spec.name, { type: 'image/png' }));
+      } else if (spec.kind === 'video') {
+        // A real, playable WebM: half a second of a 320x180 canvas through MediaRecorder.
+        const canvas = document.createElement('canvas');
+        canvas.width = 320;
+        canvas.height = 180;
+        const ctx = canvas.getContext('2d')!;
+        const recorder = new MediaRecorder(canvas.captureStream(30), { mimeType: 'video/webm' });
+        const chunks: Blob[] = [];
+        recorder.ondataavailable = (event) => chunks.push(event.data);
+        const stopped = new Promise((resolve) => (recorder.onstop = resolve));
+        recorder.start();
+        for (let frame = 0; frame < 15; frame++) {
+          ctx.fillStyle = `hsl(${frame * 24} 60% 45%)`;
+          ctx.fillRect(0, 0, 320, 180);
+          await new Promise((resolve) => setTimeout(resolve, 33));
+        }
+        recorder.stop();
+        await stopped;
+        transfer.items.add(new File(chunks, spec.name, { type: 'video/webm' }));
+      } else {
+        transfer.items.add(new File([new Uint8Array(spec.size)], spec.name, { type: spec.type }));
+      }
+    }
+    element.dispatchEvent(
+      new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: transfer })
+    );
+  }, files);
+}
+
+async function pasteText(page: Page, text: string) {
+  await page.locator('textarea[role="combobox"]').evaluate((element, value) => {
+    const transfer = new DataTransfer();
+    transfer.setData('text/plain', value);
+    element.dispatchEvent(
+      new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: transfer })
+    );
+  }, text);
+}
+
+async function mockUploads(page: Page) {
+  let upload = 0;
+  await page.route('**/tasks/request-upload', (route) => {
+    upload++;
+    return route.fulfill({
+      json: {
+        uploadId: `upload-${upload}`,
+        uploadUrl: `http://localhost:4173/mock-upload/${upload}`,
+      },
+    });
+  });
+  await page.route('**/mock-upload/*', (route) => route.fulfill({ status: 200 }));
+}
+
+const LONG_PASTE = Array.from(
+  { length: 140 },
+  (_, i) =>
+    `2026-11-07T14:08:${String(i % 60).padStart(2, '0')}Z ERROR vm-agent turn=${i} msg="flush failed"`
+).join('\n');
+
+for (const mode of ['new', 'active'] as const) {
+  test(`attachment previews ${mode}: cards, local viewer, paste round-trip, oversize file`, async ({
+    page,
+  }, testInfo) => {
+    const suffix = getProjectSuffix(testInfo.project.name);
+    await openMockedChat(page, mode, mode === 'active' ? ACTIVE_SESSION.id : undefined);
+    await mockUploads(page);
+    const uploads: string[] = [];
+    page.on('request', (request) => {
+      if (request.url().includes('/mock-upload/')) uploads.push(request.url());
+    });
+
+    await pasteFiles(page, [
+      { kind: 'image', name: 'CleanShot_2026-11-07.png', width: 800, height: 500 },
+    ]);
+    await pasteText(page, LONG_PASTE);
+    await page.locator('input[type=file]').setInputFiles([
+      { name: 'workspace-snapshot.zip', mimeType: 'application/zip', buffer: Buffer.alloc(4096) },
+      {
+        name: 'meeting-notes.md',
+        mimeType: 'text/markdown',
+        buffer: Buffer.from('# Notes\n\nline two\n'),
+      },
+    ]);
+    // Over the 50 MB per-file limit: staged as failed, never uploaded, still previewable.
+    await pasteFiles(page, [
+      { kind: 'bytes', name: 'huge-recording.mp4', type: 'video/mp4', size: 50 * 1024 * 1024 + 1 },
+    ]);
+
+    const list = page.getByTestId('composer-attachments');
+    await expect(list.locator('li')).toHaveCount(5);
+    const pasteCard = page.getByRole('button', {
+      name: /^Preview Pasted text, Pasted text, 140 lines/,
+    });
+    await expect(pasteCard).toContainText('2026-11-07T14:08:00Z ERROR');
+    await expect(
+      page.getByRole('button', {
+        name: /^Preview huge-recording\.mp4.*failed: Larger than the 50 MB limit/,
+      })
+    ).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
+    // The thumbnail is the real decoded local image.
+    const thumb = list.locator('img').first();
+    await expect.poll(() => thumb.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(800);
+    expect(await thumb.getAttribute('src')).toMatch(/^blob:/);
+    // The row stays inside the composer: its right edge never passes the textarea's.
+    const listBox = (await list.boundingBox())!;
+    const textareaBox = (await page.locator('textarea[role="combobox"]').boundingBox())!;
+    expect(listBox.x + listBox.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+    expect(textareaBox.y).toBeGreaterThan(listBox.y);
+    await screenshot(page, `attachment-previews-${mode}-cards-${suffix}`);
+    await assertNoOverflow(page);
+
+    // Image viewer reads the local file.
+    await page.getByRole('button', { name: /^Preview CleanShot_2026-11-07\.png/ }).click();
+    const dialog = page.getByTestId('attachment-preview');
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText('800 × 500');
+    const viewerImg = dialog.getByRole('img', { name: 'CleanShot_2026-11-07.png' });
+    expect(await viewerImg.getAttribute('src')).toMatch(/^blob:/);
+    const dialogBox = (await dialog.boundingBox())!;
+    expect(dialogBox.x).toBeGreaterThanOrEqual(0);
+    expect(dialogBox.x + dialogBox.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+    expect(dialogBox.y + dialogBox.height).toBeLessThanOrEqual(page.viewportSize()!.height);
+    await screenshot(page, `attachment-previews-${mode}-image-viewer-${suffix}`);
+    await assertNoOverflow(page);
+
+    // Arrow key → the paste, with numbered lines; Edit in message puts it back in the box.
+    await page.keyboard.press('ArrowRight');
+    await expect(page.getByTestId('attachment-text-preview')).toContainText('turn=139');
+    await screenshot(page, `attachment-previews-${mode}-text-viewer-${suffix}`);
+    await assertNoOverflow(page);
+    await page.getByRole('button', { name: 'Edit in message' }).click();
+    await expect(dialog).toBeHidden();
+    await expect(page.locator('textarea[role="combobox"]')).toHaveValue(LONG_PASTE);
+    await expect(list.locator('li')).toHaveCount(4);
+
+    // The failed file still opens from the local copy and explains itself.
+    await page.getByRole('button', { name: /^Preview huge-recording\.mp4/ }).click();
+    await expect(page.getByRole('alert')).toContainText(
+      'Larger than the 50 MB limit. Remove it to send'
+    );
+    // Its bytes are zeros, so the player gives up and the viewer says so instead of showing a blank.
+    await expect(dialog).toContainText("This video can't play in your browser");
+    await screenshot(page, `attachment-previews-${mode}-failed-viewer-${suffix}`);
+    await page.getByRole('button', { name: 'Remove huge-recording.mp4' }).click();
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeEnabled();
+    expect(uploads).toHaveLength(4);
+
+    // A real recording plays from the local file.
+    await pasteFiles(page, [{ kind: 'video', name: 'screen-recording.webm' }]);
+    await page.getByRole('button', { name: /^Preview screen-recording\.webm/ }).click();
+    const video = dialog.getByTestId('video-preview');
+    await expect(video).toHaveAttribute('src', /^blob:/);
+    await expect
+      .poll(() => video.evaluate((el: HTMLVideoElement) => el.readyState >= 1 && el.videoWidth))
+      .toBe(320);
+    await screenshot(page, `attachment-previews-${mode}-video-viewer-${suffix}`);
+    await assertNoOverflow(page);
+  });
+
+  test(`attachment previews ${mode}: twenty files scroll sideways inside the composer`, async ({
+    page,
+  }, testInfo) => {
+    await openMockedChat(page, mode, mode === 'active' ? ACTIVE_SESSION.id : undefined);
+    await mockUploads(page);
+    await pasteFiles(page, [
+      ...Array.from({ length: 6 }, (_, i) => ({
+        kind: 'image' as const,
+        name: `screenshot-${i}.png`,
+        width: i % 2 ? 4000 : 300,
+        height: i % 2 ? 300 : 2400,
+      })),
+      ...['a.zip', 'b.pdf', 'c.xlsx', 'd.mp3', 'e.tar.gz', 'f.bin', 'core'].map((name) => ({
+        kind: 'bytes' as const,
+        name,
+        type: '',
+        size: 2048,
+      })),
+      ...Array.from({ length: 7 }, (_, i) => ({
+        kind: 'bytes' as const,
+        name: `${'quarterly-infrastructure-cost-review-'.repeat(4)}${i}.csv`,
+        type: 'text/csv',
+        size: 1024,
+      })),
+    ]);
+    const list = page.getByTestId('composer-attachments');
+    await expect(list.locator('li')).toHaveCount(20);
+    await expect(page.getByText('20 attachments')).toBeVisible();
+    const scroll = await list.evaluate((el) => ({ sw: el.scrollWidth, cw: el.clientWidth }));
+    expect(scroll.sw).toBeGreaterThan(scroll.cw);
+    await expect(page.locator('textarea[role="combobox"]')).toBeInViewport();
+    await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeInViewport();
+    await screenshot(
+      page,
+      `attachment-previews-${mode}-twenty-${getProjectSuffix(testInfo.project.name)}`
+    );
+    await assertNoOverflow(page);
+  });
+}

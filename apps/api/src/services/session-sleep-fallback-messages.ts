@@ -137,7 +137,7 @@ export function sessionSleepBlockedNotice(
 }
 
 export const SESSION_RECOVERY_INITIAL_PROMPT =
-  'Resume this sleeping conversation from the persisted transcript. Use get_session_messages for this chat session before relying on memory. Do not repeat prior work; wait for and answer the latest queued follow-up message.';
+  'Resume this sleeping conversation from the persisted transcript. Use sessions_read method messages for this chat session before relying on memory. Do not repeat prior work; wait for and answer the latest queued follow-up message.';
 
 const NO_EXTERNAL_REPLAY =
   'Do not repeat actions with effects outside this workspace that the transcript shows already happened, such as pushes, pull requests, deployments, messages, or API calls. If you cannot tell whether one happened, check first';
@@ -147,7 +147,7 @@ const NO_EXTERNAL_REPLAY =
  * mid-task (an eviction), so the agent must carry on with its task, not wait.
  */
 export const SESSION_RECOVERY_CONTINUE_TASK_PROMPT = [
-  'Resume your interrupted work from the persisted transcript. Use get_session_messages for this chat session before relying on memory.',
+  'Resume your interrupted work from the persisted transcript. Use sessions_read method messages for this chat session before relying on memory.',
   '',
   'Your previous workspace was stopped. Continue the task from where the transcript ends, without redoing work it shows is finished. Follow any newer human directions in the transcript before continuing.',
   '',
@@ -186,7 +186,7 @@ export function sessionRecoveryInitialPrompt(
   if (!point) {
     if (record?.outcome === 'slept')
       return [
-        'Resume from the persisted transcript. Use get_session_messages for this chat before relying on memory.',
+        'Resume from the persisted transcript. Use sessions_read method messages for this chat before relying on memory.',
         'The previous idle workspace was terminated after bounded snapshot failures. Exact Git/filesystem recovery was not verified. Unpublished files and saved harness state may have been lost. This is a fresh agent session.',
         'Inspect the repository and transcript; reconstruct only missing work. Never claim an exact restore.',
         `${NO_EXTERNAL_REPLAY}.`,
@@ -202,7 +202,7 @@ export function sessionRecoveryInitialPrompt(
   const short = shortCommit(point.commit);
   const where = point.branch ? `on branch ${point.branch}` : 'in this repository';
   return [
-    'Resume this sleeping conversation from the persisted transcript. Use get_session_messages for this chat session before relying on memory.',
+    'Resume this sleeping conversation from the persisted transcript. Use sessions_read method messages for this chat session before relying on memory.',
     '',
     complete
       ? `Important: this session slept from its last complete snapshot${capturedClause(point.capturedAt)} because saving a fresh one failed. SAM restored that snapshot, so changes made after it are not in this workspace.`

@@ -98,19 +98,34 @@ export function useAttachments(
       const maxBytes = ATTACHMENT_DEFAULTS.UPLOAD_MAX_BYTES;
       const batchMax = ATTACHMENT_DEFAULTS.UPLOAD_BATCH_MAX_BYTES;
       const newFiles: AttachmentUploadState[] = [];
-      const currentTotal = current.reduce((sum, a) => sum + a.file.size, 0);
+      const currentTotal = current.reduce(
+        (sum, a) => (a.status === 'error' ? sum : sum + a.file.size),
+        0
+      );
       let runningTotal = currentTotal;
       for (const file of Array.from(files).map(withSafeFilename)) {
         if (current.length + newFiles.length >= maxFiles) {
           setSubmitError(`Maximum ${maxFiles} files allowed`);
           break;
         }
-        if (file.size === 0) {
-          setSubmitError(`${file.name} is empty`);
-          continue;
-        }
-        if (file.size > maxBytes) {
-          setSubmitError(`${file.name} exceeds ${formatFileSize(maxBytes)} limit`);
+        // An empty or over-limit file is staged as failed instead of dropped, so the person can
+        // open it from the local copy, see which file it was, and remove it. It is never uploaded,
+        // and a failed attachment already blocks sending.
+        const rejection =
+          file.size === 0
+            ? 'This file is empty'
+            : file.size > maxBytes
+              ? `Larger than the ${formatFileSize(maxBytes)} limit`
+              : null;
+        if (rejection) {
+          newFiles.push({
+            id: crypto.randomUUID(),
+            file,
+            uploadId: null,
+            progress: 0,
+            status: 'error',
+            error: rejection,
+          });
           continue;
         }
         if (runningTotal + file.size > batchMax) {
@@ -129,7 +144,7 @@ export function useAttachments(
       if (newFiles.length === 0) return;
       setChatAttachments((prev) => [...prev, ...newFiles]);
       for (const newFile of newFiles) {
-        void handleChatFileUpload(newFile.file, newFile.id);
+        if (newFile.status === 'pending') void handleChatFileUpload(newFile.file, newFile.id);
       }
     },
     [handleChatFileUpload, setSubmitError, setChatAttachments]

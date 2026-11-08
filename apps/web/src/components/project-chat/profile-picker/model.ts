@@ -43,7 +43,9 @@ export function effortLabel(effort: string | null | undefined): string | null {
 }
 
 /** "Claude · Opus 5.5 · max effort" — what will actually run. */
-export function profileSubtitle(profile: AgentProfile): string {
+export function profileSubtitle(
+  profile: Pick<AgentProfile, 'agentType' | 'model'> & { effort?: string | null }
+): string {
   return [agentLabel(profile.agentType), modelLabel(profile), effortLabel(profile.effort)]
     .filter(Boolean)
     .join(' · ');

@@ -11,11 +11,8 @@ import { useNavigate, useParams } from 'react-router';
 
 import { selectProfileId } from '../../components/project-chat/profile-picker/model';
 import {
-  EMPTY_RESOURCE_STATE as EMPTY_RESOURCE_STATE_IMPORT,
   hasAnyResourceValue,
-  hasValidationErrors,
   toResourceRequirements,
-  validateResourceState,
 } from '../../components/resource-requirements';
 import { useAgentCatalog } from '../../hooks/useAgentCatalog';
 import { useAvailableCommands } from '../../hooks/useAvailableCommands';
@@ -54,6 +51,7 @@ import {
   SESSION_SYNC_INTERVAL_MS,
 } from './types';
 import { DEFAULT_ATTACHMENT_MESSAGE, useAttachments } from './useAttachments';
+import { useComposerOverrides } from './useComposerOverrides';
 import { useComposerPrefill } from './useComposerPrefill';
 import { useConversationActions } from './useConversationActions';
 import { useProfileChoice } from './useProfileChoice';
@@ -184,23 +182,18 @@ export function useProjectChatState() {
   );
   const userSetTaskModeRef = useRef(false);
 
-  // Per-task resource override — blank fields inherit from profile/project
-  const [taskResourceReqs, setTaskResourceReqs] = useState<
-    import('../../components/resource-requirements').ResourceRequirementsFormState
-  >({ ...EMPTY_RESOURCE_STATE_IMPORT });
-  const [taskResourceErrors, setTaskResourceErrors] = useState<
-    import('../../components/resource-requirements').ResourceValidationErrors
-  >({});
-
-  // Reset per-task resource overrides and errors on project switch
-  const prevProjectIdRef = useRef(projectId);
-  useEffect(() => {
-    if (prevProjectIdRef.current !== projectId) {
-      prevProjectIdRef.current = projectId;
-      setTaskResourceReqs({ ...EMPTY_RESOURCE_STATE_IMPORT });
-      setTaskResourceErrors({});
-    }
-  }, [projectId]);
+  // Per-chat resource, model and effort overrides — blank fields inherit from profile/project
+  const {
+    taskResourceReqs,
+    setTaskResourceReqs,
+    taskResourceErrors,
+    setTaskResourceErrors,
+    agentOverrides,
+    setAgentOverrides,
+    resetComposerOverrides,
+    validateTaskResources,
+    agentOverrideFields,
+  } = useComposerOverrides(projectId);
 
   // Provisioning tracking
   const [provisioning, setProvisioning] = useState<ProvisioningState | null>(null);
@@ -437,16 +430,11 @@ export function useProjectChatState() {
     setSubmitError(null);
 
     // Fix 4: validate resource overrides before dispatch and surface per-field errors
-    const hasResources = hasAnyResourceValue(taskResourceReqs);
-    if (hasResources) {
-      const resErrors = validateResourceState(taskResourceReqs);
-      if (hasValidationErrors(resErrors)) {
-        setTaskResourceErrors(resErrors);
-        setSubmitError('Fix resource requirement errors before sending');
-        return;
-      }
+    if (!validateTaskResources()) {
+      setSubmitError('Fix resource requirement errors before sending');
+      return;
     }
-    setTaskResourceErrors({});
+    const hasResources = hasAnyResourceValue(taskResourceReqs);
 
     setSubmitting(true);
     try {
@@ -460,6 +448,7 @@ export function useProjectChatState() {
         : null;
       const attachmentRefs = getCompletedAttachmentRefs(attachments.chatAttachments);
       const selectedRuntime = selectedSkill?.runtime ?? selectedProfile?.runtime ?? null;
+      const agentFields = agentOverrideFields(selectedProfile, selectedSkill);
       const requiresTaskSubmission = attachmentRefs.length > 0;
       // Fix 2: when task has explicit resource overrides, route through submitTask
       // so the backend can honor them; Instant cannot carry resource requirements.
@@ -472,11 +461,12 @@ export function useProjectChatState() {
           agentProfileId: submitProfileId,
           skillId: selectedSkillId ?? undefined,
           parentTaskId: pendingDerived?.parentTaskId || undefined,
+          ...agentFields,
         });
         setMessage('');
         setPendingDerived(null);
         attachments.clearAttachments();
-        setTaskResourceReqs({ ...EMPTY_RESOURCE_STATE_IMPORT });
+        resetComposerOverrides();
         newChatIntentRef.current = false;
         navigate(`/projects/${projectId}/chat/${result.sessionId}`, { replace: true });
         loadSessions().catch(() => undefined);
@@ -502,12 +492,15 @@ export function useProjectChatState() {
         selectedTaskMode,
         pendingDerived,
       });
-      const result = await submitTask(projectId, withAttachmentRefs(baseRequest, attachmentRefs));
+      const result = await submitTask(
+        projectId,
+        withAttachmentRefs({ ...baseRequest, ...agentFields }, attachmentRefs)
+      );
       setMessage('');
       setPendingDerived(null);
       attachments.clearAttachments();
-      // Fix 3: reset per-task resource overrides after successful submit
-      setTaskResourceReqs({ ...EMPTY_RESOURCE_STATE_IMPORT });
+      // Fix 3: reset per-chat overrides after successful submit
+      resetComposerOverrides();
       setProvisioning({
         taskId: result.taskId,
         sessionId: result.sessionId,
@@ -539,9 +532,8 @@ export function useProjectChatState() {
     setMessage('');
     setSubmitError(null);
     setProvisioning(null);
-    setTaskResourceReqs({ ...EMPTY_RESOURCE_STATE_IMPORT });
-    setTaskResourceErrors({});
-  }, [navigate, projectId]);
+    resetComposerOverrides();
+  }, [navigate, projectId, resetComposerOverrides]);
 
   const handleSelect = useCallback(
     (id: string) => {
@@ -578,9 +570,11 @@ export function useProjectChatState() {
       newChatIntentRef.current = true;
       setSubmitError(null);
       setProvisioning(null);
+      // A derived chat starts from its profile, not from an earlier draft's options.
+      resetComposerOverrides();
       navigate(`/projects/${projectId}/chat`, { replace: true });
     },
-    [navigate, projectId]
+    [navigate, projectId, resetComposerOverrides]
   );
 
   /** Open the new-chat composer with the original task prompt re-added. */
@@ -605,6 +599,7 @@ export function useProjectChatState() {
       newChatIntentRef.current = true;
       setSubmitError(null);
       setProvisioning(null);
+      resetComposerOverrides();
       navigate(`/projects/${projectId}/chat`, { replace: true });
 
       const isCurrent = () => pendingDerivedRef.current === derived;
@@ -623,7 +618,7 @@ export function useProjectChatState() {
           );
         });
     },
-    [navigate, projectId]
+    [navigate, projectId, resetComposerOverrides]
   );
 
   const conversationActions = useConversationActions({
@@ -709,6 +704,8 @@ export function useProjectChatState() {
     setTaskResourceReqs,
     taskResourceErrors,
     setTaskResourceErrors,
+    agentOverrides,
+    setAgentOverrides,
     ...attachments,
     provisioning,
     bootLogs,

@@ -138,7 +138,7 @@ chat. On a narrower screen it opens under the message, or, for selected words, i
 **Comment on selected text**. Type in **Add a comment…** and select **Comment**.
 
 Everyone in the project can read the comment, and so can agents in the project (they read comments
-with the `list_message_comment_threads` MCP tool). Each thread shows who wrote it and whether it is
+with the `comments_read` method `list` MCP tool). Each thread shows who wrote it and whether it is
 **Open**, **Sent to agent**, or **Resolved**, and anyone can **Reply** to it, **Resolve** it, or
 **Reopen** it. **Comments** in the [session tool rail](/docs/guides/chat-features/#the-session-tool-rail)
 opens all of a chat's threads, with resolved ones collapsed; it shows a dot while threads are

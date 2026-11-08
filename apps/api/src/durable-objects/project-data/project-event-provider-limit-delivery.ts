@@ -1,7 +1,9 @@
+import { SAM_NOTICE_METADATA_KEY } from '@simple-agent-manager/shared';
+
 import { credentialLimitReferenceKey } from '../../services/credential-limit-events/values';
 import { parseProviderLimitWait } from '../../services/provider-limit-policy';
 import { resolveProjectEventLimits } from './project-events-limits';
-import { readSubscription } from './project-events-materialization-storage';
+import { readEvents, readSubscription } from './project-events-materialization-storage';
 import { buildWakePromptInput } from './project-events-wake-prompt';
 import { resolveMailboxMaxMessages } from './project-events-wake-targets';
 import type { PromptDeliveryClaim, PromptDeliveryResult } from './prompt-delivery';
@@ -84,6 +86,11 @@ export async function providerLimitEventDeliveryGuard(
       const subscriptionId = claim.message.metadata?.subscriptionId;
       if (typeof subscriptionId !== 'string' || !claim.message.sourceTaskId)
         throw new Error('Event wake subscription identity missing');
+      // The chat notice describes the batch the agent now gets, in batch order.
+      const order = new Map(ids.map((id, index) => [id, index]));
+      const events = readEvents(sql, projectId, ids, ids.length).sort(
+        (a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0)
+      );
       const input = buildWakePromptInput({
         batchId: claim.message.id,
         subscription: readSubscription(sql, projectId, subscriptionId),
@@ -94,6 +101,7 @@ export async function providerLimitEventDeliveryGuard(
           chatSessionId: claim.message.targetSessionId,
         },
         eventIds: ids,
+        events,
         now: claim.message.createdAt,
         ttlMs: resolveProjectEventLimits(env).wakePromptTtlMs,
         maxMessages: resolveMailboxMaxMessages(env),
@@ -107,10 +115,13 @@ export async function providerLimitEventDeliveryGuard(
         claim.message.id
       );
       sql.exec(
-        // Transcript text is immutable audit history; only delivery metadata is refined.
-        `UPDATE chat_messages SET tool_metadata=json_set(tool_metadata,'$.eventIds',json(?),'$.eventCount',?) WHERE id=?`,
+        // Transcript text is immutable audit history; only delivery metadata and the notice
+        // describing the batch are refined.
+        `UPDATE chat_messages SET tool_metadata=json_set(tool_metadata,'$.eventIds',json(?),'$.eventCount',?,?,json(?)) WHERE id=?`,
         JSON.stringify(ids),
         ids.length,
+        `$.${SAM_NOTICE_METADATA_KEY}`,
+        JSON.stringify(input.notice ?? null),
         claim.message.promptMessageId
       );
     }

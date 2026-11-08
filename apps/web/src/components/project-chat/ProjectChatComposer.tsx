@@ -11,20 +11,23 @@ import {
 } from '@simple-agent-manager/acp-client';
 import type { AgentProfile, AgentSkill } from '@simple-agent-manager/shared';
 import { formatMentionName, getMentionQuery } from '@simple-agent-manager/shared';
-import { ArrowRight, ArrowUp, Paperclip, X } from 'lucide-react';
+import { ArrowRight, ArrowUp, Paperclip } from 'lucide-react';
 import type { MutableRefObject } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useIsMobile } from '../../hooks/useIsMobile';
-import { formatFileSize } from '../../lib/file-utils';
 import {
   getSendButtonTitle,
   getSendShortcutAriaKey,
   getSendShortcutHint,
 } from '../../lib/platform-shortcuts';
 import { SkillSelector } from '../skills/SkillSelector';
+import { AttachmentPreviewDialog } from './attachments/AttachmentPreviewDialog';
+import { ComposerAttachmentList } from './attachments/ComposerAttachmentList';
 
 export interface ProjectChatComposerAttachment {
+  /** Stable identity for list keys; falls back to name + index when absent. */
+  id?: string;
   file: File;
   progress: number;
   status: 'pending' | 'uploading' | 'complete' | 'error';
@@ -177,6 +180,23 @@ export function ProjectChatComposer({
     [cursorPos, mentionTriggerIndex, onChange, value]
   );
 
+  const [previewIndex, setPreviewIndex] = useState<number | null>(null);
+  const closePreview = useCallback(() => setPreviewIndex(null), []);
+  // A sent message clears the attachments; don't leave a viewer open on nothing.
+  useEffect(() => {
+    if (previewIndex !== null && previewIndex >= attachments.length) setPreviewIndex(null);
+  }, [attachments.length, previewIndex]);
+
+  const moveAttachmentToMessage = useCallback(
+    (index: number, text: string) => {
+      onRemoveAttachment?.(index);
+      onChange(value ? `${value}\n\n${text}` : text);
+      setPreviewIndex(null);
+      textareaRef.current?.focus();
+    },
+    [onChange, onRemoveAttachment, value]
+  );
+
   const handleFilesSelected = useCallback(
     (files: FileList | File[] | null) => {
       onFilesSelected?.(files);
@@ -239,46 +259,21 @@ export function ProjectChatComposer({
           visible={showMentionPalette}
         />
       )}
-      {attachments.length > 0 && (
-        <div className="mb-2 flex max-h-[120px] overflow-y-auto flex-wrap gap-1.5">
-          {attachments.map((attachment, index) => (
-            <div
-              key={`${attachment.file.name}-${index}`}
-              className="relative flex items-center gap-1.5 py-1 px-2 rounded-sm bg-page border border-border-default text-xs max-w-[220px] overflow-hidden"
-            >
-              <span className="truncate text-fg-primary" title={attachment.file.name}>
-                {attachment.file.name}
-              </span>
-              <span className="text-fg-muted shrink-0">
-                {attachment.status === 'uploading'
-                  ? `${attachment.progress}%`
-                  : formatFileSize(attachment.file.size)}
-              </span>
-              {attachment.status === 'error' && (
-                <span className="text-danger shrink-0" title={attachment.error}>
-                  Failed
-                </span>
-              )}
-              {onRemoveAttachment && (
-                <button
-                  type="button"
-                  disabled={sending}
-                  onClick={() => onRemoveAttachment(index)}
-                  className="shrink-0 p-0.5 bg-transparent border-none text-fg-muted hover:text-fg-primary cursor-pointer"
-                  aria-label={`Remove ${attachment.file.name}`}
-                >
-                  <X size={12} />
-                </button>
-              )}
-              {attachment.status === 'uploading' && (
-                <div
-                  className="absolute bottom-0 left-0 h-0.5 bg-accent-emphasis rounded-full transition-all"
-                  style={{ width: `${attachment.progress}%` }}
-                />
-              )}
-            </div>
-          ))}
-        </div>
+      <ComposerAttachmentList
+        attachments={attachments}
+        onOpen={setPreviewIndex}
+        onRemove={onRemoveAttachment}
+        disabled={sending}
+      />
+      {previewIndex !== null && previewIndex < attachments.length && (
+        <AttachmentPreviewDialog
+          attachments={attachments}
+          index={previewIndex}
+          onClose={closePreview}
+          onNavigate={setPreviewIndex}
+          onRemove={sending ? undefined : onRemoveAttachment}
+          onMoveToMessage={onRemoveAttachment && !readOnly ? moveAttachmentToMessage : undefined}
+        />
       )}
       {skills.length > 0 && onSkillChange && (
         <div className="mb-2 max-w-md">
@@ -323,7 +318,11 @@ export function ProjectChatComposer({
                 aria-label={attachTitle}
                 title={attachTitle}
               >
-                <Paperclip size={20} strokeWidth={1.75} className={uploading ? 'animate-pulse' : ''} />
+                <Paperclip
+                  size={20}
+                  strokeWidth={1.75}
+                  className={uploading ? 'animate-pulse' : ''}
+                />
               </button>
             )}
           </>
@@ -391,7 +390,9 @@ export function ProjectChatComposer({
           className={`flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-[14px] border-0 text-base font-semibold text-[var(--sam-on-accent)] transition-[filter,opacity] ${
             submitLabel === 'Fork' ? 'min-h-[56px]' : 'min-h-12'
           } ${iconOnlySend ? 'w-12' : 'px-5'} bg-[linear-gradient(180deg,var(--sam-accent-top),var(--sam-accent-bottom))] shadow-[inset_0_1px_0_rgb(255_255_255/0.32),inset_0_-1px_0_rgb(0_0_0/0.2),var(--sam-shadow-accent)] ${
-            sendDisabled ? 'cursor-default opacity-45 shadow-none' : 'cursor-pointer hover:brightness-105'
+            sendDisabled
+              ? 'cursor-default opacity-45 shadow-none'
+              : 'cursor-pointer hover:brightness-105'
           } focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring`}
         >
           {iconOnlySend ? (

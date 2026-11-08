@@ -12,7 +12,8 @@ import { boundedWarmPlacementClaimGuardSql } from './warm-placement-claims';
 /** Authority from the SAME durable deletion operation, never a generic retirement waiver. */
 export interface ContainerWorkspaceDeletionAuthority {
   workspaceId: string;
-  workspaceGeneration: string;
+  /** NULL for a workspace that was never evicted (every Instant workspace); matched with `IS`. */
+  workspaceGeneration: string | null;
   beforeDestroy: () => Promise<void>;
 }
 
@@ -103,7 +104,7 @@ export async function requireNodeWorkspaceArtifactsDeleted(
       expectedRuntime?.runtime !== 'cf-container' ||
       !expectedRuntime.runtimeIncarnationId ||
       !workspaceDeletion.workspaceId ||
-      !workspaceDeletion.workspaceGeneration
+      workspaceDeletion.workspaceGeneration === ''
     ) {
       throw new Error('Exact container deletion authority is incomplete');
     }

@@ -148,7 +148,8 @@ export async function runStandingWatchAlarm(
           sql,
           env,
           projectId,
-          { userId: watch.creatorUserId, chatSessionId: null },
+          // Watches are created only by a signed-in person, so their action is a human template.
+          { userId: watch.creatorUserId, chatSessionId: null, promptAuthor: 'human' },
           {
             action: watch.action,
             dueAt: now,

@@ -90,7 +90,7 @@ SAM can also sleep sessions automatically. VM sessions write and verify a final 
 
 Sending a message in the same chat wakes it. The composer stays visible while the session is sleeping so the chat remains the wake affordance. Waking is not instant: SAM has to start runtime compute, restore the saved home directory, exact Git checkout, repository work in progress, and harness session, and only then deliver the queued message. Instant starts a fresh container; a VM session provisions a replacement workspace because the original workspace may already have been deleted.
 
-Sleeping Instant sessions retain their container identity throughout the snapshot retention window; the ordinary node lifetime limits do not remove their wake target. Archive permanently destroys a sleeping container without waking it first.
+Sleeping Instant sessions retain their container identity throughout the snapshot retention window; neither the ordinary node lifetime limits nor automatic workspace cleanup remove their wake target. The snapshot purge destroys the container when retention ends. Archive or deleting the workspace permanently destroys a sleeping container without waking it first.
 
 An ordinary sleep requires a complete, verified final snapshot. If snapshots keep failing, SAM
 retries within the configured budget: three failed attempts or 15 minutes by default. After that,

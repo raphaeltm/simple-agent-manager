@@ -197,6 +197,13 @@ export interface TaskStartCapacityCandidate {
   catalogAvailability: 'available' | 'last-known-unavailable';
   priority: number;
   candidateOrder: number;
+  /**
+   * Position of this candidate's capacity source in the pool's provider order (1 = most
+   * preferred), or null/absent when the pool has no order or does not list the source. It is the
+   * first ranking key for new VMs. Absent on selections persisted before ordering existed, which
+   * therefore rank exactly as they did.
+   */
+  sourceRank?: number | null;
   credentialAttributionSource: CredentialSource;
   placementCredentialSource: CredentialSource;
   placementCredentialReference: string | null;

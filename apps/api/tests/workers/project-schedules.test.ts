@@ -232,6 +232,7 @@ describe('scheduled actions public boundaries', () => {
       userId: f.userId,
       creatorChatSessionId: f.sessionId,
       creator: 'agent',
+      promptAuthor: 'agent',
       request: request(f.sessionId),
     });
     const result = await runInDurableObject(f.stub, async (instance, state) => {

@@ -39,7 +39,7 @@ pnpm --filter @simple-agent-manager/www compress:screenshots public/images/blog/
 
 ## Conventions
 
-- Blog posts are Markdown (`.md`; the collection does not load `.mdx`) with YAML frontmatter (`title`, `date`, `author`, `category`, `tags`, `excerpt`; optional `draft`). Posts about UI embed renders of the real app from `public/images/blog/<slug>/`; see "UI Renders" in `src/content/CLAUDE.md`
+- Blog posts are Markdown (`.md`; the collection does not load `.mdx`) with YAML frontmatter (`title`, `date`, `author`, `category`, `tags`, `excerpt`; optional `draft` and `socialImage`). Posts about UI embed renders of the real app from `public/images/blog/<slug>/`; see "UI Renders" in `src/content/CLAUDE.md`
 - Code blocks in docs and blog are rendered by Expressive Code: plugins (line numbers, language tab) in `src/lib/expressive-code.ts`, registered in `astro.config.ts`. Blog pages give it Starlight's theme variables in `src/styles/blog-code.css`
 - Documentation lives in `src/content/docs/` following Starlight conventions
 - Assets are pre-built via `build:assets` (tracker script + blog Mermaid bundle)

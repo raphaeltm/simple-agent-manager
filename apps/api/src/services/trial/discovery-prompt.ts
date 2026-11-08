@@ -15,9 +15,9 @@ Your goals, in order:
 
 1. **Orient quickly.** Read the repo root (\`README.md\`, \`package.json\` or equivalent, top-level directory listing) and form a compact mental model of what this project is and what stack it uses. Keep this to ~3 files.
 
-2. **Seed 3–5 knowledge entities.** Use \`add_knowledge\` to record the most load-bearing facts you discover: the primary language, build system, entry points, notable domain concepts, and any conventions that would trip up a new contributor. Include a source file reference where possible. Prefer depth over breadth — five well-grounded entries beat fifteen shallow ones.
+2. **Seed 3–5 knowledge entities.** Use \`knowledge_write\` method \`add\` to record the most load-bearing facts you discover: the primary language, build system, entry points, notable domain concepts, and any conventions that would trip up a new contributor. Include a source file reference where possible. Prefer depth over breadth — five well-grounded entries beat fifteen shallow ones.
 
-3. **Propose 2–3 starter ideas.** Use \`create_idea\` to suggest small, concrete improvements or explorations a developer could dispatch next (e.g. "Add a CHANGELOG generator", "Document the retry policy in \`src/client.ts\`"). Each idea should have a clear title, a one-paragraph summary, and — if possible — a pointer to the specific file(s) involved.
+3. **Propose 2–3 starter ideas.** Use \`ideas_write\` method \`create\` to suggest small, concrete improvements or explorations a developer could dispatch next (e.g. "Add a CHANGELOG generator", "Document the retry policy in \`src/client.ts\`"). Each idea should have a clear title, a one-paragraph summary, and — if possible — a pointer to the specific file(s) involved.
 
 4. **Stop before you over-explore.** Leave quickly once you have delivered the above; do not attempt to refactor code or run long-form tasks. The human will take over when they claim the workspace.
 

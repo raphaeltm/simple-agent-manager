@@ -42,6 +42,8 @@ export interface ConnectAccountSheetProps {
   /** Project-scoped connect: the account is used by this project only. */
   projectId?: string;
   projectName?: string;
+  /** Opened to look at an existing connection: no "becomes your default" copy. */
+  reviewing?: boolean;
   groups: ProviderAccounts[];
   onClose: () => void;
 }
@@ -54,6 +56,7 @@ export function ConnectAccountSheet({
   initialAuthMethod,
   projectId,
   projectName,
+  reviewing = false,
   groups,
   onClose,
 }: Readonly<ConnectAccountSheetProps>) {
@@ -143,7 +146,9 @@ export function ConnectAccountSheet({
         ? 'Connect an agent account'
         : 'Connect a cloud account'
       : step === 2
-        ? `Connect ${provider?.name ?? ''}`
+        ? reviewing
+          ? `Your ${provider?.name ?? ''} connection`
+          : `Connect ${provider?.name ?? ''}`
         : 'Name your account';
 
   return createPortal(
@@ -178,9 +183,11 @@ export function ConnectAccountSheet({
             </button>
           )}
           <div className="min-w-0 flex-1">
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-fg-muted">
-              Step {stepNumber} of {totalSteps}
-            </div>
+            {!(reviewing && step === 2) && (
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-fg-muted">
+                Step {stepNumber} of {totalSteps}
+              </div>
+            )}
             <h2
               ref={titleRef}
               tabIndex={-1}
@@ -199,12 +206,14 @@ export function ConnectAccountSheet({
             <X size={18} />
           </button>
         </header>
-        <div className="h-1 bg-inset" aria-hidden="true">
-          <div
-            className="h-full bg-accent transition-all"
-            style={{ width: `${(stepNumber / totalSteps) * 100}%` }}
-          />
-        </div>
+        {!(reviewing && step === 2) && (
+          <div className="h-1 bg-inset" aria-hidden="true">
+            <div
+              className="h-full bg-accent transition-all"
+              style={{ width: `${(stepNumber / totalSteps) * 100}%` }}
+            />
+          </div>
+        )}
 
         <div className="relative min-h-0 flex-1 overflow-y-auto px-4 py-4">
           {step === 1 && (
@@ -223,7 +232,12 @@ export function ConnectAccountSheet({
               <div className="flex items-center gap-3">
                 <ProviderMark provider={provider} size={36} />
                 <p className="m-0 min-w-0 text-sm text-fg-primary">
-                  {projectId ? (
+                  {reviewing ? (
+                    <>
+                      Your current <strong>{provider.name}</strong> connection. Nothing changes
+                      unless you act below.
+                    </>
+                  ) : projectId ? (
                     <>
                       Only <strong>{projectName ?? 'this project'}</strong> will use this account.
                       {currentPin ? (

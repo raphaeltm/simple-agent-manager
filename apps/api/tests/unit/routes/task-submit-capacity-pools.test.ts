@@ -1360,6 +1360,262 @@ describe('task submit capacity-pool placement', () => {
     }
   );
 
+  describe('per-chat model and effort overrides', () => {
+    function seedSolProfile(sqlite: Database.Database, runtime: 'vm' | 'cf-container'): void {
+      sqlite
+        .prepare(
+          `INSERT INTO agent_profiles
+        (id, project_id, user_id, name, agent_type, model, effort, runtime, task_mode)
+        VALUES ('sol', 'project-1', 'user-1', 'Sol', 'openai-codex', 'gpt-6.1-sol', 'high', ?, 'conversation')`
+        )
+        .run(runtime);
+      // A skill that sets its own model and effort, so the override must beat the skill too.
+      sqlite.exec(`INSERT INTO skills
+        (id, project_id, user_id, name, default_profile_id, model, effort)
+        VALUES ('review', 'project-1', 'user-1', 'Review', 'sol', 'gpt-6.1-skill', 'medium')`);
+    }
+
+    async function submitWithOverrides(
+      env: Env,
+      overrides: Record<string, unknown>,
+      skillId?: string
+    ): Promise<Response> {
+      return createApp().request(
+        '/api/projects/project-1/tasks/submit',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: 'Try a different model for this one',
+            agentProfileId: 'sol',
+            ...(skillId ? { skillId } : {}),
+            ...overrides,
+          }),
+        },
+        env,
+        executionCtx
+      );
+    }
+
+    /** The model and effort the agent was launched with, from whichever runtime started. */
+    function launchedRunSettings(runtime: 'vm' | 'cf-container') {
+      if (runtime === 'vm') {
+        expect(mocks.acceptInstantSession).not.toHaveBeenCalled();
+        const config = mocks.startTaskRunnerDO.mock.calls[0]![1] as {
+          model: string | null;
+          effort: string | null;
+        };
+        return { model: config.model, effort: config.effort };
+      }
+      expect(mocks.startTaskRunnerDO).not.toHaveBeenCalled();
+      const launch = mocks.acceptInstantSession.mock.calls[0]![2] as {
+        overrides: { model: string | null; effort: string | null };
+      };
+      return { model: launch.overrides.model, effort: launch.overrides.effort };
+    }
+
+    async function withSolEnv(
+      runtime: 'vm' | 'cf-container',
+      run: (ctx: { sqlite: Database.Database; env: Env }) => Promise<void>
+    ): Promise<void> {
+      const { sqlite, env } = createEnv();
+      try {
+        seedTaskSubmitRows(sqlite);
+        await seedProjectDefaultPool(env);
+        env.CF_CONTAINER_ENABLED = 'true';
+        seedSolProfile(sqlite, runtime);
+        mocks.acceptInstantSession.mockResolvedValue({ chatSessionId: 'instant-chat' });
+        mocks.continueInstantSessionLaunch.mockResolvedValue({});
+        await run({ sqlite, env });
+        await Promise.all(vi.mocked(executionCtx.waitUntil).mock.calls.map(([promise]) => promise));
+      } finally {
+        sqlite.close();
+      }
+    }
+
+    it.each(['vm', 'cf-container'] as const)(
+      'launches with the chat model and effort over the skill and profile (%s)',
+      async (runtime) => {
+        await withSolEnv(runtime, async ({ env }) => {
+          const res = await submitWithOverrides(
+            env,
+            { model: '  gpt-6.1-astra  ', effort: 'low' },
+            'review'
+          );
+          expect(res.status).toBe(202);
+          expect(launchedRunSettings(runtime)).toEqual({ model: 'gpt-6.1-astra', effort: 'low' });
+        });
+      }
+    );
+
+    it.each(['vm', 'cf-container'] as const)(
+      'inherits the skill values when the chat model is blank and effort is null (%s)',
+      async (runtime) => {
+        await withSolEnv(runtime, async ({ env }) => {
+          const res = await submitWithOverrides(env, { model: '   ', effort: null }, 'review');
+          expect(res.status).toBe(202);
+          expect(launchedRunSettings(runtime)).toEqual({
+            model: 'gpt-6.1-skill',
+            effort: 'medium',
+          });
+        });
+      }
+    );
+
+    it.each(['vm', 'cf-container'] as const)(
+      'inherits the profile values when no override is sent (%s)',
+      async (runtime) => {
+        await withSolEnv(runtime, async ({ env }) => {
+          const res = await submitWithOverrides(env, {});
+          expect(res.status).toBe(202);
+          expect(launchedRunSettings(runtime)).toEqual({ model: 'gpt-6.1-sol', effort: 'high' });
+        });
+      }
+    );
+
+    it.each(['vm', 'cf-container'] as const)(
+      'rejects an effort the resolved agent cannot run before creating anything (%s)',
+      async (runtime) => {
+        await withSolEnv(runtime, async ({ sqlite, env }) => {
+          // Codex supports up to xhigh; max is Claude-only.
+          const res = await submitWithOverrides(env, { model: 'gpt-6.1-astra', effort: 'max' });
+          expect(res.status).toBe(400);
+          expect(await res.text()).toContain("Effort 'max' is not supported");
+          expect(taskCount(sqlite)).toBe(0);
+          expect(mocks.startTaskRunnerDO).not.toHaveBeenCalled();
+          expect(mocks.acceptInstantSession).not.toHaveBeenCalled();
+          // Owner-path control: the same request with a supported effort starts.
+          const ok = await submitWithOverrides(env, { model: 'gpt-6.1-astra', effort: 'xhigh' });
+          expect(ok.status).toBe(202);
+          expect(taskCount(sqlite)).toBe(1);
+        });
+      }
+    );
+
+    /** A Claude profile (max effort) with a skill that switches the agent to Codex. */
+    function seedOpusWithCodexSkill(sqlite: Database.Database, runtime: 'vm' | 'cf-container') {
+      sqlite
+        .prepare(
+          `INSERT INTO agent_profiles
+        (id, project_id, user_id, name, agent_type, model, effort, runtime, task_mode)
+        VALUES ('opus', 'project-1', 'user-1', 'Opus', 'claude-code', 'claude-opus-5-5', 'max', ?, 'conversation')`
+        )
+        .run(runtime);
+      sqlite.exec(`INSERT INTO skills
+        (id, project_id, user_id, name, default_profile_id, agent_type)
+        VALUES ('codex-skill', 'project-1', 'user-1', 'Codex skill', 'opus', 'openai-codex')`);
+    }
+
+    async function submitAs(env: Env, body: Record<string, unknown>): Promise<Response> {
+      return createApp().request(
+        '/api/projects/project-1/tasks/submit',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: 'Try a different model for this one', ...body }),
+        },
+        env,
+        executionCtx
+      );
+    }
+
+    it.each(['vm', 'cf-container'] as const)(
+      'checks the effort against the agent a skill switches to (%s)',
+      async (runtime) => {
+        await withSolEnv(runtime, async ({ sqlite, env }) => {
+          seedOpusWithCodexSkill(sqlite, runtime);
+          // Max is fine for the Claude profile but not for the Codex agent the skill runs.
+          const rejected = await submitAs(env, {
+            agentProfileId: 'opus',
+            skillId: 'codex-skill',
+            effort: 'max',
+          });
+          expect(rejected.status).toBe(400);
+          expect(await rejected.text()).toContain("agent type 'openai-codex'");
+          expect(taskCount(sqlite)).toBe(0);
+
+          const ok = await submitAs(env, {
+            agentProfileId: 'opus',
+            skillId: 'codex-skill',
+            effort: 'xhigh',
+          });
+          expect(ok.status).toBe(202);
+          expect(launchedRunSettings(runtime)).toEqual({
+            model: 'claude-opus-5-5',
+            effort: 'xhigh',
+          });
+        });
+      }
+    );
+
+    it.each(['vm', 'cf-container'] as const)(
+      'checks the effort against an explicit agentType over the profile (%s)',
+      async (runtime) => {
+        await withSolEnv(runtime, async ({ sqlite, env }) => {
+          seedOpusWithCodexSkill(sqlite, runtime);
+          const rejected = await submitAs(env, {
+            agentProfileId: 'opus',
+            agentType: 'openai-codex',
+            effort: 'max',
+          });
+          expect(rejected.status).toBe(400);
+          expect(taskCount(sqlite)).toBe(0);
+          // Sol's own agent (Codex) cannot run max, but the explicit Claude agent can.
+          const ok = await submitAs(env, {
+            agentProfileId: 'sol',
+            agentType: 'claude-code',
+            effort: 'max',
+          });
+          expect(ok.status).toBe(202);
+          expect(launchedRunSettings(runtime).effort).toBe('max');
+        });
+      }
+    );
+
+    it.each(['vm', 'cf-container'] as const)(
+      'drops an inherited effort the launching agent cannot run (%s)',
+      async (runtime) => {
+        await withSolEnv(runtime, async ({ sqlite, env }) => {
+          seedOpusWithCodexSkill(sqlite, runtime);
+          // The profile's max reaches a skill-switched Codex agent unless it is dropped here.
+          const res = await submitAs(env, { agentProfileId: 'opus', skillId: 'codex-skill' });
+          expect(res.status).toBe(202);
+          expect(launchedRunSettings(runtime)).toEqual({ model: 'claude-opus-5-5', effort: null });
+        });
+      }
+    );
+
+    it.each(['vm', 'cf-container'] as const)(
+      'overrides only the effort and keeps the inherited model (%s)',
+      async (runtime) => {
+        await withSolEnv(runtime, async ({ env }) => {
+          const res = await submitWithOverrides(env, { effort: 'low' }, 'review');
+          expect(res.status).toBe(202);
+          expect(launchedRunSettings(runtime)).toEqual({ model: 'gpt-6.1-skill', effort: 'low' });
+        });
+      }
+    );
+
+    it('accepts a 200-character model and rejects 201 before creating anything', async () => {
+      await withSolEnv('vm', async ({ sqlite, env }) => {
+        const tooLong = await submitWithOverrides(env, { model: 'm'.repeat(201) });
+        expect(tooLong.status).toBe(400);
+        expect(taskCount(sqlite)).toBe(0);
+        const atLimit = await submitWithOverrides(env, { model: 'm'.repeat(200) });
+        expect(atLimit.status).toBe(202);
+        expect(launchedRunSettings('vm').model).toBe('m'.repeat(200));
+      });
+    });
+
+    it('rejects an unknown effort value at the schema boundary', async () => {
+      await withSolEnv('vm', async ({ sqlite, env }) => {
+        const res = await submitWithOverrides(env, { effort: 'turbo' });
+        expect(res.status).toBe(400);
+        expect(taskCount(sqlite)).toBe(0);
+      });
+    });
+  });
+
   it('creates and updates metadata through real services, resolves it, and submits persisted identities', async () => {
     const { sqlite, env } = createEnv();
     try {

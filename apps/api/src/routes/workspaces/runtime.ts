@@ -12,7 +12,7 @@ import {
   isValidAgentType,
   resolveHarnessDialect,
 } from '@simple-agent-manager/shared';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { type Context, Hono } from 'hono';
 import * as v from 'valibot';
@@ -26,7 +26,6 @@ import { ulid } from '../../lib/ulid';
 import { requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import {
-  AgentCredentialSyncSchema,
   AgentTypeBodySchema,
   BootLogEntrySchema,
   formatIssues,
@@ -35,9 +34,7 @@ import {
 } from '../../schemas';
 import { appendBootLog } from '../../services/boot-log';
 import { registerBootstrapTokenConsume } from '../../services/bootstrap';
-import { syncActiveAgentCredentialSecret } from '../../services/composable-credentials/agent-sync';
 import { resolveSessionProfileCredentialContext } from '../../services/composable-credentials/profile-context';
-import { decrypt, encrypt } from '../../services/encryption';
 import { getInstallationToken, getUserInstallationRepositories } from '../../services/github-app';
 import {
   GitHubCliPolicyError,
@@ -1116,190 +1113,6 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     credentialGeneration: persistedAttribution?.credentialGeneration,
   });
 });
-
-/**
- * POST /:id/agent-credential-sync — VM agent callback to sync refreshed credentials.
- * Called after a session ends when the agent used file-based credential injection
- * (e.g. codex-acp auth.json) and the credential may have been refreshed during the session.
- * The VM agent reads the updated auth file from the container and sends it here.
- * Uses workspace callback auth.
- */
-runtimeRoutes.post(
-  '/:id/agent-credential-sync',
-  jsonValidator(AgentCredentialSyncSchema),
-  async (c) => {
-    const workspaceId = c.req.param('id');
-    await verifyWorkspaceCallbackAuth(c, workspaceId);
-
-    // Payload size check (64KB default — auth.json files are typically a few KB).
-    const contentLength = parseInt(c.req.header('content-length') || '0', 10);
-    const maxPayloadBytes = parsePositiveInt(
-      c.env.MAX_AGENT_CREDENTIAL_SYNC_BYTES as string,
-      64 * 1024
-    );
-    if (contentLength > maxPayloadBytes) {
-      throw errors.badRequest(`Payload exceeds ${maxPayloadBytes} byte limit`);
-    }
-
-    const body = c.req.valid('json');
-    const agentType = body.agentType;
-    const credentialKind = body.credentialKind;
-
-    // Validate against known values. Use the shared catalog so new agents
-    // are accepted automatically without a manual allowlist update.
-    const validCredentialKinds = new Set(['api-key', 'oauth-token']);
-    if (!agentType || !isValidAgentType(agentType)) {
-      throw errors.badRequest('Invalid agentType');
-    }
-    if (!credentialKind || !validCredentialKinds.has(credentialKind)) {
-      throw errors.badRequest('Invalid credentialKind');
-    }
-
-    const db = drizzle(c.env.DATABASE, { schema });
-
-    // Look up the workspace to get the user ID and project ID.
-    const workspace = await assertWorkspaceCallbackResourceById(
-      c.env,
-      workspaceId,
-      'agent_credential_sync'
-    );
-
-    // Find the existing credential row to update. Prefer project-scoped match
-    // when the workspace is in a project; fall back to user-scoped only when
-    // there is no project-scoped row at all.
-    //
-    // Match the same HIGH #2 invariant enforced by runtime credential delivery
-    // and CodexRefreshLock: if a project-scoped row exists but is inactive, do
-    // NOT fall through to the user-scoped row. That would silently collapse a
-    // project override back onto the user default during post-session refresh sync.
-    let existing: typeof schema.credentials.$inferSelect | undefined;
-    if (workspace.projectId) {
-      const projectMatch = await db
-        .select()
-        .from(schema.credentials)
-        .where(
-          and(
-            eq(schema.credentials.userId, workspace.userId),
-            eq(schema.credentials.projectId, workspace.projectId),
-            eq(schema.credentials.credentialType, 'agent-api-key'),
-            eq(schema.credentials.agentType, agentType),
-            eq(schema.credentials.credentialKind, credentialKind)
-          )
-        )
-        .limit(1);
-      const projectCredential = projectMatch[0];
-      if (projectCredential) {
-        if (projectCredential.isActive) {
-          existing = projectCredential;
-        } else {
-          return callbackJsonWithJit(c, workspace, 'agent_credential_sync', {
-            success: false,
-            reason: 'credential_not_found',
-          });
-        }
-      }
-    }
-    if (!existing) {
-      const userMatch = await db
-        .select()
-        .from(schema.credentials)
-        .where(
-          and(
-            eq(schema.credentials.userId, workspace.userId),
-            isNull(schema.credentials.projectId),
-            eq(schema.credentials.credentialType, 'agent-api-key'),
-            eq(schema.credentials.agentType, agentType),
-            eq(schema.credentials.credentialKind, credentialKind),
-            eq(schema.credentials.isActive, true)
-          )
-        )
-        .limit(1);
-      existing = userMatch[0];
-    }
-    if (!existing) {
-      // No credential found — the user may have deleted it while the session was active.
-      return callbackJsonWithJit(c, workspace, 'agent_credential_sync', {
-        success: false,
-        reason: 'credential_not_found',
-      });
-    }
-
-    // Decrypt the current credential to compare.
-    const currentCredential = await decrypt(
-      existing.encryptedToken,
-      existing.iv,
-      getCredentialEncryptionKey(c.env)
-    );
-
-    // Only update if the credential has actually changed.
-    if (currentCredential === body.credential) {
-      return callbackJsonWithJit(c, workspace, 'agent_credential_sync', {
-        success: true,
-        updated: false,
-      });
-    }
-
-    // Re-encrypt with a fresh IV and update.
-    const { ciphertext, iv } = await encrypt(body.credential, getCredentialEncryptionKey(c.env));
-    const update = await c.env.DATABASE.prepare(
-      `UPDATE credentials
-          SET encrypted_token = ?, iv = ?, updated_at = ?
-        WHERE id = ?
-          AND EXISTS (
-            SELECT 1
-              FROM workspaces w
-              JOIN nodes n ON n.id = w.node_id
-             WHERE w.id = ?
-               AND w.user_id = ?
-               AND w.project_id IS ?
-               AND w.chat_session_id IS ?
-               AND w.node_id IS ?
-               AND w.status = ?
-               AND n.status = ?
-          )`
-    )
-      .bind(
-        ciphertext,
-        iv,
-        new Date().toISOString(),
-        existing.id,
-        workspace.workspaceId,
-        workspace.userId,
-        workspace.projectId,
-        workspace.chatSessionId,
-        workspace.nodeId,
-        workspace.status,
-        workspace.nodeStatus
-      )
-      .run();
-    if ((update.meta.changes ?? 0) !== 1) {
-      await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'agent_credential_sync');
-      throw errors.gone('Workspace callback state changed; callback resource is gone');
-    }
-
-    await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'agent_credential_sync');
-    await syncActiveAgentCredentialSecret(c.env.DATABASE, {
-      userId: workspace.userId,
-      projectId: existing.projectId,
-      agentType,
-      credentialKind,
-      encryptedToken: ciphertext,
-      iv,
-    });
-
-    log.info('agent_credential_sync.credential_updated', {
-      workspaceId,
-      agentType,
-      credentialKind,
-      credentialId: existing.id,
-    });
-
-    return callbackJsonWithJit(c, workspace, 'agent_credential_sync', {
-      success: true,
-      updated: true,
-    });
-  }
-);
 
 /**
  * POST /:id/agent-settings — VM agent callback to fetch user's agent settings.

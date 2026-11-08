@@ -8,6 +8,15 @@ import {
   DEFAULT_D1_MIGRATION_CHURNING_TABLES,
 } from './d1-migration-churning-tables.js';
 import { executeD1VerificationRead } from './d1-migration-read-retry.js';
+import {
+  MigrationSafetyError,
+  parseD1Rows,
+  parseWranglerJsonOutput,
+  quoteSqlIdentifier,
+  quoteSqlLiteral,
+} from './d1-migration-io.js';
+
+export { MigrationSafetyError, parseWranglerJsonOutput } from './d1-migration-io.js';
 
 export {
   DEFAULT_D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT,
@@ -78,68 +87,6 @@ const SYSTEM_TABLES = new Set(['_cf_KV', D1_MIGRATIONS_TABLE, 'sqlite_sequence']
 
 const REVIEWED_CHURNING_TABLES = new Set<string>(DEFAULT_D1_MIGRATION_CHURNING_TABLES);
 
-export class MigrationSafetyError extends Error {}
-/**
- * Wrangler 4.118 can append a human-readable diagnostic after a valid `--json`
- * response. Keep the migration gate fail-closed for leading garbage and
- * malformed JSON while accepting that documented output shape.
- */
-export function parseWranglerJsonOutput(output: string): unknown {
-  const trimmedStart = output.trimStart();
-  const first = trimmedStart[0];
-  if (first !== '[' && first !== '{') {
-    throw new MigrationSafetyError('Wrangler D1 output did not begin with JSON');
-  }
-
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  let end = -1;
-
-  for (let index = 0; index < trimmedStart.length; index += 1) {
-    const character = trimmedStart[index];
-    if (inString) {
-      if (escaped) {
-        escaped = false;
-      } else if (character === '\\') {
-        escaped = true;
-      } else if (character === '"') {
-        inString = false;
-      }
-      continue;
-    }
-
-    if (character === '"') {
-      inString = true;
-    } else if (character === '[' || character === '{') {
-      depth += 1;
-    } else if (character === ']' || character === '}') {
-      depth -= 1;
-      if (depth < 0) {
-        throw new MigrationSafetyError('Wrangler D1 output contained malformed JSON');
-      }
-      if (depth === 0) {
-        end = index + 1;
-        break;
-      }
-    }
-  }
-
-  if (end < 0 || inString || depth !== 0) {
-    throw new MigrationSafetyError('Wrangler D1 output contained incomplete JSON');
-  }
-
-  return JSON.parse(trimmedStart.slice(0, end)) as unknown;
-}
-
-function quoteSqlIdentifier(identifier: string): string {
-  return `"${identifier.replaceAll('"', '""')}"`;
-}
-
-function quoteSqlLiteral(value: string): string {
-  return `'${value.replaceAll("'", "''")}'`;
-}
-
 export class ExecD1MigrationSafetyRunner implements D1MigrationSafetyRunner {
   executeJson(command: string, args: string[], options: { cwd?: string } = {}): unknown {
     const output = executeD1VerificationRead(command, args, options);
@@ -176,19 +123,6 @@ function wranglerArgs(environment: string, dbName: string, command: string): str
     command,
     '--json',
   ];
-}
-
-function parseD1Rows(value: unknown): Record<string, unknown>[] {
-  if (!Array.isArray(value)) {
-    throw new MigrationSafetyError('Wrangler D1 JSON response was not an array');
-  }
-
-  const results = (value[0] as { results?: unknown } | undefined)?.results;
-  if (!Array.isArray(results)) {
-    throw new MigrationSafetyError('Wrangler D1 JSON response did not include a results array');
-  }
-
-  return results as Record<string, unknown>[];
 }
 
 function parseCountValue(value: unknown, db: D1DatabaseTarget, table: string): number {
@@ -317,6 +251,66 @@ export function discoverProtectedTables(
   return tables;
 }
 
+const DEFAULT_COUNT_BATCH_SIZE = 50;
+
+function countBatchSize(): number {
+  const raw = process.env.D1_MIGRATION_COUNT_BATCH_SIZE;
+  if (raw === undefined || raw === '') return DEFAULT_COUNT_BATCH_SIZE;
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 1 || value > 500) {
+    throw new MigrationSafetyError(
+      'D1_MIGRATION_COUNT_BATCH_SIZE must be an integer from 1 to 500'
+    );
+  }
+  return value;
+}
+
+function countOneTable(
+  runner: D1MigrationSafetyRunner,
+  environment: string,
+  db: D1DatabaseTarget,
+  table: string,
+  cwd: string
+): D1TableCount {
+  let rows: Record<string, unknown>[];
+  try {
+    rows = parseD1Rows(
+      runner.executeJson(
+        WRANGLER_COMMAND,
+        wranglerArgs(
+          environment,
+          db.name,
+          `SELECT COUNT(*) as count FROM ${quoteSqlIdentifier(table)}`
+        ),
+        { cwd }
+      )
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new MigrationSafetyError(`Failed to count ${db.binding}.${table}: ${message}`, {
+      cause: error,
+    });
+  }
+
+  if (rows.length !== 1 || !('count' in rows[0])) {
+    throw new MigrationSafetyError(`Failed to count ${db.binding}.${table}: missing count row`);
+  }
+
+  return {
+    database: db.name,
+    binding: db.binding,
+    table,
+    count: parseCountValue(rows[0].count, db, table),
+  };
+}
+
+/**
+ * Count rows in every protected table with one Wrangler call per batch of tables.
+ * One process per table took ~7 minutes for ~140 tables (2026-11-07); a batch is
+ * a single D1 query. Aliases are positional so table names never become column
+ * names. A batch that fails is recounted table by table, so the error still names
+ * the exact table and the check still fails closed.
+ */
 export function countProtectedTables(
   runner: D1MigrationSafetyRunner,
   environment: string,
@@ -324,38 +318,39 @@ export function countProtectedTables(
   tables: string[],
   cwd = APPS_API_DIR
 ): D1TableCount[] {
-  return tables.map((table) => {
-    let rows: Record<string, unknown>[];
+  const size = countBatchSize();
+  const counts: D1TableCount[] = [];
+  for (let offset = 0; offset < tables.length; offset += size) {
+    const batch = tables.slice(offset, offset + size);
+    const query =
+      'SELECT ' +
+      batch
+        .map((table, index) => `(SELECT COUNT(*) FROM ${quoteSqlIdentifier(table)}) AS "c${index}"`)
+        .join(', ');
+    let row: Record<string, unknown> | undefined;
     try {
-      rows = parseD1Rows(
-        runner.executeJson(
-          WRANGLER_COMMAND,
-          wranglerArgs(
-            environment,
-            db.name,
-            `SELECT COUNT(*) as count FROM ${quoteSqlIdentifier(table)}`
-          ),
-          { cwd }
-        )
+      const rows = parseD1Rows(
+        runner.executeJson(WRANGLER_COMMAND, wranglerArgs(environment, db.name, query), { cwd })
       );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new MigrationSafetyError(`Failed to count ${db.binding}.${table}: ${message}`, {
-        cause: error,
-      });
+      row = rows.length === 1 ? rows[0] : undefined;
+    } catch {
+      row = undefined;
     }
-
-    if (rows.length !== 1 || !('count' in rows[0])) {
-      throw new MigrationSafetyError(`Failed to count ${db.binding}.${table}: missing count row`);
+    if (!row || batch.some((_, index) => !(`c${index}` in row))) {
+      counts.push(...batch.map((table) => countOneTable(runner, environment, db, table, cwd)));
+      continue;
     }
-
-    return {
-      database: db.name,
-      binding: db.binding,
-      table,
-      count: parseCountValue(rows[0].count, db, table),
-    };
-  });
+    const values = row;
+    counts.push(
+      ...batch.map((table, index) => ({
+        database: db.name,
+        binding: db.binding,
+        table,
+        count: parseCountValue(values[`c${index}`], db, table),
+      }))
+    );
+  }
+  return counts;
 }
 
 function readAppliedMigrationNames(
@@ -621,6 +616,10 @@ export function runSafeRemoteMigrations(options: SafeRemoteMigrationOptions): st
         )
       : validateChurningTableMaxDecreasePercent(options.maxChurningTableDecreasePercent);
   const migrationCountsBefore = new Map<string, number>();
+  // Databases that held no protected tables before migrating. Nothing existed to
+  // lose, so after-counts cannot detect anything; skipping them saves one Wrangler
+  // process per table (~140 tables, ~7 min on a first install, 2026-11-07).
+  const cleanInstallDatabases = new Set<string>();
 
   console.log('Recording D1 time-travel recovery timestamp before migrations...');
   console.log(`Pre-migration timestamp: ${backupTimestamp}`);
@@ -649,6 +648,7 @@ export function runSafeRemoteMigrations(options: SafeRemoteMigrationOptions): st
       );
 
       if (tables.length === 0) {
+        cleanInstallDatabases.add(databaseKey(db));
         console.log(
           `Clean install detected for ${db.binding} (${db.name}); initial migrations will create protected tables`
         );
@@ -699,6 +699,12 @@ export function runSafeRemoteMigrations(options: SafeRemoteMigrationOptions): st
         throw new MigrationSafetyError(
           `No protected tables discovered for ${db.binding} (${db.name}); refusing to migrate`
         );
+      }
+      if (cleanInstallDatabases.has(databaseKey(db))) {
+        console.log(
+          `Clean install of ${db.binding} (${db.name}): no data existed before migrations; skipping row counts`
+        );
+        continue;
       }
       after.push(...countProtectedTables(options.runner, options.environment, db, tables, cwd));
     }

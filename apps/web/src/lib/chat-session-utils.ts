@@ -20,6 +20,19 @@ export const STALE_SESSION_THRESHOLD_MS = parseInt(
   import.meta.env.VITE_STALE_SESSION_THRESHOLD_MS || String(DEFAULT_STALE_SESSION_THRESHOLD_MS)
 );
 
+/**
+ * How long a chat stays in the list's Needs attention section after its attention marker
+ * was raised (ms). Older blocked chats fall back to their lifecycle section, where their
+ * row still shows the status label. A malformed override falls back to the default, so it
+ * cannot silently empty the section.
+ */
+const DEFAULT_ATTENTION_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
+const parsedAttentionWindowMs = Number.parseInt(import.meta.env.VITE_ATTENTION_WINDOW_MS ?? '', 10);
+export const ATTENTION_WINDOW_MS =
+  Number.isFinite(parsedAttentionWindowMs) && parsedAttentionWindowMs > 0
+    ? parsedAttentionWindowMs
+    : DEFAULT_ATTENTION_WINDOW_MS;
+
 export type SessionState = 'active' | 'idle' | 'sleeping' | 'terminated';
 
 /** Whether the associated task (if any) has reached a terminal state. */
@@ -171,8 +184,9 @@ export function getAttentionState(session: ChatSessionResponse): AttentionState 
  * act on, then sessions whose runtime is awake (working or idle), then sleeping sessions a
  * message can wake, then everything that can no longer be resumed.
  *
- * Placement is by state only — never by message age — so a long-quiet awake session stays
- * visible. Within a section the list keeps conversation recency.
+ * Awake, Sleeping and History are placed by state only, never by message age, so a
+ * long-quiet awake session stays visible. Needs attention is limited to recent requests
+ * (`ATTENTION_WINDOW_MS`). Within a section the list keeps conversation recency.
  */
 export type SessionSection = 'attention' | 'awake' | 'sleeping' | 'history';
 
@@ -183,14 +197,28 @@ export const SESSION_SECTION_ORDER: readonly SessionSection[] = [
   'history',
 ];
 
-/** Section for a session. Pass the task-enriched session so terminal tasks land in History. */
-export function getSessionSection(session: ChatSessionResponse): SessionSection {
+/**
+ * Section for a session. Pass the task-enriched session so terminal tasks land in History.
+ * `now` is injectable for tests.
+ */
+export function getSessionSection(
+  session: ChatSessionResponse,
+  now: number = Date.now()
+): SessionSection {
   const state = getSessionState(session);
   if (state === 'terminated') return 'history';
   // An unanswered question or a failed wake needs a person even when the session is
-  // asleep; it outranks the lifecycle state, matching the row's own status label.
+  // asleep; it outranks the lifecycle state, matching the row's own status label. Only
+  // recent ones, though: a request nobody answered for days is old news, not a to-do. The
+  // window runs from when the request was raised, not from the chat's last message, so a
+  // busy chat cannot keep an old request at the top.
   const attention = getAttentionState(session);
-  if (attention === 'needs_input' || attention === 'wake_failed') return 'attention';
+  if (
+    (attention === 'needs_input' || attention === 'wake_failed') &&
+    now - (session.attention?.createdAt ?? 0) <= ATTENTION_WINDOW_MS
+  ) {
+    return 'attention';
+  }
   return state === 'sleeping' ? 'sleeping' : 'awake';
 }
 
