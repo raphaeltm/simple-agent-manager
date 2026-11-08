@@ -559,7 +559,7 @@ export {
   stopChatSession,
 } from './sessions';
 export type { SetupCompleteResponse, SetupStatusResponse, SetupVerifyResponse } from './setup';
-export { completeSetup, fetchSetupStatus, saveSetupConfig, verifySetupToken } from './setup';
+export { completeSetup, fetchSetupStatus, verifySetupToken } from './setup';
 export type {
   ListProjectTasksParams,
   RequestAttachmentUploadResponse,

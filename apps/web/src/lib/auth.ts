@@ -53,6 +53,27 @@ export async function signInWithGitLab() {
 }
 
 /**
+ * Email a sign-in code. The API answers the same whether or not the address can sign in,
+ * so the caller always moves on to the code step.
+ */
+export async function sendSignInCode(email: string): Promise<void> {
+  const { error } = await authClient.$fetch('/email-otp/send-verification-otp', {
+    method: 'POST',
+    body: { email, type: 'sign-in' },
+  });
+  if (error) throw new Error(error.message || 'Could not send a sign-in code');
+}
+
+/** Sign in with an emailed code; creates the session cookie on success. */
+export async function signInWithEmailCode(email: string, code: string): Promise<void> {
+  const { error } = await authClient.$fetch('/sign-in/email-otp', {
+    method: 'POST',
+    body: { email, otp: code },
+  });
+  if (error) throw new Error(error.message || 'That code did not work');
+}
+
+/**
  * Sign out the current user.
  * Clears session and redirects to home.
  */

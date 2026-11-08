@@ -18,7 +18,6 @@ import {
   isSetupTokenConfigured,
   type PlatformIntegrationInput,
   previewPlatformIntegrationConfig,
-  savePlatformIntegrationConfig,
   verifySetupToken,
 } from '../services/platform-config';
 import {
@@ -167,20 +166,6 @@ setupRoutes.post('/verify', async (c) => {
     agentEmailPlan(c.env),
   ]);
   return c.json({ ok: true, status, signIn, agentEmail });
-});
-
-setupRoutes.put('/config', async (c) => {
-  await assertSetupOpen(c.env);
-  const { token, config } = await parseSetupBody(c);
-  await assertSetupToken(c.env, token, clientIdentifier(c));
-
-  const validation = await validatePlatformIntegrationInput(c.env, config);
-  if (!validation.ok) {
-    throw errors.badRequest('Platform configuration is invalid', { errors: validation.errors });
-  }
-
-  await savePlatformIntegrationConfig(c.env, config);
-  return c.json({ status: await getPlatformConfigStatus(c.env) });
 });
 
 setupRoutes.post('/complete', async (c) => {

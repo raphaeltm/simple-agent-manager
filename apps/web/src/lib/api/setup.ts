@@ -1,8 +1,6 @@
-import type {
-  PlatformConfigStatus,
-  PlatformConfigStatusResponse,
-  PlatformIntegrationConfigInput,
-} from './admin';
+import type { AgentEmailSetupPlan } from '@simple-agent-manager/shared';
+
+import type { PlatformConfigStatus, PlatformIntegrationConfigInput } from './admin';
 import { request } from './client';
 
 export interface SetupStatusResponse {
@@ -12,20 +10,33 @@ export interface SetupStatusResponse {
   tokenConfigured: boolean;
 }
 
+export interface SetupSignInSummary {
+  /** This deployment can email sign-in codes. */
+  email: boolean;
+  /** The installer's administrator email, when the install was made by the installer. */
+  ownerEmail: string | null;
+}
+
 export interface SetupVerifyResponse {
   ok: true;
   status: PlatformConfigStatus;
+  signIn: SetupSignInSummary;
+  /** What turning agent email on would change; null when it could not be read. */
+  agentEmail: AgentEmailSetupPlan | null;
 }
 
 export interface SetupCompleteResponse {
   completed: true;
   status: PlatformConfigStatus;
+  /** Present when agent email was requested: the resulting plan, or why it did not turn on. */
+  agentEmail: { plan: AgentEmailSetupPlan | null; error: string | null } | null;
 }
 
 export interface LoginProvidersResponse {
   github: boolean;
   google: boolean;
   gitlab: boolean;
+  email: boolean;
 }
 
 /** Public: which login providers are configured (Google = the login client). */
@@ -44,22 +55,13 @@ export async function verifySetupToken(token: string): Promise<SetupVerifyRespon
   });
 }
 
-export async function saveSetupConfig(
-  token: string,
-  config: PlatformIntegrationConfigInput,
-): Promise<PlatformConfigStatusResponse> {
-  return request<PlatformConfigStatusResponse>('/api/setup/config', {
-    method: 'PUT',
-    body: JSON.stringify({ token, config }),
-  });
-}
-
 export async function completeSetup(
   token: string,
   config: PlatformIntegrationConfigInput,
+  agentEmail?: { consentToken: string | null }
 ): Promise<SetupCompleteResponse> {
   return request<SetupCompleteResponse>('/api/setup/complete', {
     method: 'POST',
-    body: JSON.stringify({ token, config }),
+    body: JSON.stringify({ token, config, ...(agentEmail ? { agentEmail } : {}) }),
   });
 }

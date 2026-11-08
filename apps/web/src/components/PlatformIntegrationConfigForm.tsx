@@ -16,13 +16,9 @@ type FeedbackProjectOption = { id: string; name: string; status?: string | null 
 
 interface PlatformIntegrationConfigFormProps {
   status: PlatformConfigStatus;
-  mode: 'setup' | 'admin';
   primaryLabel: string;
-  secondaryLabel?: string;
   submitting?: boolean;
-  secondarySubmitting?: boolean;
   onPrimary: (config: PlatformIntegrationConfigInput) => Promise<void> | void;
-  onSecondary?: (config: PlatformIntegrationConfigInput) => Promise<void> | void;
   feedbackProjects?: FeedbackProjectOption[];
   feedbackProjectsFooter?: ReactNode;
 }
@@ -39,13 +35,9 @@ const FIELD_LABELS = {
 
 export function PlatformIntegrationConfigForm({
   status,
-  mode,
   primaryLabel,
-  secondaryLabel,
   submitting = false,
-  secondarySubmitting = false,
   onPrimary,
-  onSecondary,
   feedbackProjects = [],
   feedbackProjectsFooter,
 }: PlatformIntegrationConfigFormProps) {
@@ -60,11 +52,6 @@ export function PlatformIntegrationConfigForm({
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     await onPrimary(config);
-  };
-
-  const handleSecondary = async () => {
-    if (!onSecondary) return;
-    await onSecondary(config);
   };
 
   const handleRemoveInfrastructure = async () => {
@@ -125,47 +112,45 @@ export function PlatformIntegrationConfigForm({
           />
         </IntegrationSection>
 
-        {mode === 'admin' && (
-          <IntegrationSection
-            title="Google infrastructure OAuth"
-            description="Used only for keyless GCP/WIF setup with cloud-platform scope. Register both static callbacks: /auth/google/callback and /api/deployment/gcp/callback. This client never enables Google sign-in."
-            status={status.integrations.googleInfrastructureOAuth}
-          >
-            <TextField
-              name="googleInfrastructure.clientId"
-              label={FIELD_LABELS.clientId}
-              value={values['googleInfrastructure.clientId'] ?? ''}
-              field={status.integrations.googleInfrastructureOAuth.fields.clientId}
-              onChange={updateValue}
-            />
-            <TextField
-              name="googleInfrastructure.clientSecret"
-              label={FIELD_LABELS.clientSecret}
-              type="password"
-              value={values['googleInfrastructure.clientSecret'] ?? ''}
-              field={status.integrations.googleInfrastructureOAuth.fields.clientSecret}
-              onChange={updateValue}
-            />
-            <p className="text-xs text-fg-muted">
-              Enter both values to configure or rotate the client. Secrets are encrypted and never
-              returned.
-            </p>
-            <FieldAudit
-              field={status.integrations.googleInfrastructureOAuth.fields.clientSecret}
-              testId="google-infrastructure-audit"
-            />
-            {status.integrations.googleInfrastructureOAuth.source === 'runtime' && (
-              <button
-                type="button"
-                onClick={() => setShowRemoveInfrastructureConfirm(true)}
-                disabled={submitting || secondarySubmitting}
-                className="inline-flex min-h-11 items-center justify-center rounded-md border border-danger/40 px-3 text-sm font-semibold text-danger hover:bg-danger-tint disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Remove runtime infrastructure client
-              </button>
-            )}
-          </IntegrationSection>
-        )}
+        <IntegrationSection
+          title="Google infrastructure OAuth"
+          description="Used only for keyless GCP/WIF setup with cloud-platform scope. Register both static callbacks: /auth/google/callback and /api/deployment/gcp/callback. This client never enables Google sign-in."
+          status={status.integrations.googleInfrastructureOAuth}
+        >
+          <TextField
+            name="googleInfrastructure.clientId"
+            label={FIELD_LABELS.clientId}
+            value={values['googleInfrastructure.clientId'] ?? ''}
+            field={status.integrations.googleInfrastructureOAuth.fields.clientId}
+            onChange={updateValue}
+          />
+          <TextField
+            name="googleInfrastructure.clientSecret"
+            label={FIELD_LABELS.clientSecret}
+            type="password"
+            value={values['googleInfrastructure.clientSecret'] ?? ''}
+            field={status.integrations.googleInfrastructureOAuth.fields.clientSecret}
+            onChange={updateValue}
+          />
+          <p className="text-xs text-fg-muted">
+            Enter both values to configure or rotate the client. Secrets are encrypted and never
+            returned.
+          </p>
+          <FieldAudit
+            field={status.integrations.googleInfrastructureOAuth.fields.clientSecret}
+            testId="google-infrastructure-audit"
+          />
+          {status.integrations.googleInfrastructureOAuth.source === 'runtime' && (
+            <button
+              type="button"
+              onClick={() => setShowRemoveInfrastructureConfirm(true)}
+              disabled={submitting}
+              className="inline-flex min-h-11 items-center justify-center rounded-md border border-danger/40 px-3 text-sm font-semibold text-danger hover:bg-danger-tint disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Remove runtime infrastructure client
+            </button>
+          )}
+        </IntegrationSection>
 
         <IntegrationSection
           title="GitLab OAuth"
@@ -197,15 +182,13 @@ export function PlatformIntegrationConfigForm({
         </IntegrationSection>
       </div>
 
-      {mode === 'admin' && (
-        <FeedbackProjectSection
-          status={status.feedbackProject}
-          projects={feedbackProjects}
-          footer={feedbackProjectsFooter}
-          value={values['feedback.projectId'] ?? status.feedbackProject.projectId ?? ''}
-          onChange={(value) => updateValue('feedback.projectId', value)}
-        />
-      )}
+      <FeedbackProjectSection
+        status={status.feedbackProject}
+        projects={feedbackProjects}
+        footer={feedbackProjectsFooter}
+        value={values['feedback.projectId'] ?? status.feedbackProject.projectId ?? ''}
+        onChange={(value) => updateValue('feedback.projectId', value)}
+      />
 
       <IntegrationSection
         title="GitHub App"
@@ -265,25 +248,12 @@ export function PlatformIntegrationConfigForm({
 
       <div className="flex flex-col gap-2 border-t border-border-default pt-4 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-xs text-fg-muted">
-          {mode === 'setup'
-            ? 'Setup can finish when at least one sign-in provider is configured.'
-            : 'Runtime values override GitHub Actions or Worker environment fallbacks.'}
+          Runtime values override GitHub Actions or Worker environment fallbacks.
         </p>
         <div className="flex flex-col gap-2 sm:flex-row">
-          {secondaryLabel && onSecondary && (
-            <button
-              type="button"
-              onClick={handleSecondary}
-              disabled={submitting || secondarySubmitting}
-              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-border-default bg-surface px-4 text-sm font-semibold text-fg-primary hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-              {secondarySubmitting ? 'Completing...' : secondaryLabel}
-            </button>
-          )}
           <button
             type="submit"
-            disabled={submitting || secondarySubmitting}
+            disabled={submitting}
             className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-transparent bg-accent px-4 text-sm font-semibold text-fg-on-accent disabled:cursor-not-allowed disabled:opacity-60"
           >
             <KeyRound className="h-4 w-4" aria-hidden="true" />
