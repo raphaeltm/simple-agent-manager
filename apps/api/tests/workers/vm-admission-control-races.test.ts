@@ -1710,7 +1710,7 @@ describe('VM admission control D1 races', () => {
     expect(expired.kind).toBe('expired');
   });
 
-  it('resets the wait deadline when a busy-build deferral falls through to provider admission', async () => {
+  it('resets the wait deadline when a legacy busy-build wait falls through to provider admission', async () => {
     const taskId = 'task-vm-admission-busy-build-provider-reset';
     await seedQueuedTask(taskId);
     const identity = admission(taskId, {
@@ -1718,13 +1718,11 @@ describe('VM admission control D1 races', () => {
       providerDomainKey: `${PROVIDER_DOMAIN}:busy-build-provider-reset`,
     });
 
+    // A row parked under the busy-build reason before that wait was removed.
     const busyWait = await waitForVmAdmissionCapacity(
       env,
       identity,
-      'compatible_node_building_workspace',
-      null,
-      null,
-      { waitTimeoutMs: 90_000 }
+      'compatible_node_building_workspace'
     );
     expect(busyWait.kind).toBe('waiting');
 
@@ -1750,62 +1748,12 @@ describe('VM admission control D1 races', () => {
     expect(Date.parse(providerWait.waitDeadlineAt)).toBeGreaterThan(Date.now() + 60 * 60 * 1000);
   });
 
-  it('does not extend a repeated busy-build wait beyond the original enqueue budget', async () => {
-    const taskId = 'task-vm-admission-busy-build-repeat-budget';
+  it('starts a new wait budget when the admission reason changes and keeps it while it repeats', async () => {
+    const taskId = 'task-vm-admission-reason-transition';
     await seedQueuedTask(taskId);
     const identity = admission(taskId, {
-      scopeKey: `${SCOPE_KEY}:busy-build-repeat-budget`,
-      providerDomainKey: `${PROVIDER_DOMAIN}:busy-build-repeat-budget`,
-    });
-    const before = Date.now();
-
-    const firstWait = await waitForVmAdmissionCapacity(
-      env,
-      identity,
-      'compatible_node_building_workspace',
-      null,
-      null,
-      { waitTimeoutMs: 90_000 }
-    );
-    expect(firstWait.kind).toBe('waiting');
-    if (firstWait.kind !== 'waiting') throw new Error('expected first busy-build wait');
-
-    await env.DATABASE.prepare(
-      `UPDATE vm_task_admissions
-       SET reason = 'compatible_node_building_workspace',
-           wait_deadline_at = ?,
-           enqueued_at = ?
-       WHERE task_id = ?`
-    )
-      .bind(
-        new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
-        new Date(before - 30_000).toISOString(),
-        taskId
-      )
-      .run();
-
-    const repeatedWait = await waitForVmAdmissionCapacity(
-      env,
-      identity,
-      'compatible_node_building_workspace',
-      null,
-      null,
-      { waitTimeoutMs: 90_000 }
-    );
-
-    expect(repeatedWait.kind).toBe('waiting');
-    if (repeatedWait.kind !== 'waiting') throw new Error('expected repeated busy-build wait');
-    const repeatedDeadlineMs = Date.parse(repeatedWait.waitDeadlineAt);
-    expect(repeatedDeadlineMs).toBeGreaterThanOrEqual(before + 59_000);
-    expect(repeatedDeadlineMs).toBeLessThan(Date.now() + 90_000);
-  });
-
-  it('starts a new busy-build budget when the admission reason changes', async () => {
-    const taskId = 'task-vm-admission-busy-build-reason-transition';
-    await seedQueuedTask(taskId);
-    const identity = admission(taskId, {
-      scopeKey: `${SCOPE_KEY}:busy-build-reason-transition`,
-      providerDomainKey: `${PROVIDER_DOMAIN}:busy-build-reason-transition`,
+      scopeKey: `${SCOPE_KEY}:reason-transition`,
+      providerDomainKey: `${PROVIDER_DOMAIN}:reason-transition`,
     });
 
     const providerWait = await waitForVmAdmissionCapacity(
@@ -1815,6 +1763,7 @@ describe('VM admission control D1 races', () => {
     );
     expect(providerWait.kind).toBe('waiting');
 
+    const nearlySpentDeadline = new Date(Date.now() + 60_000).toISOString();
     await env.DATABASE.prepare(
       `UPDATE vm_task_admissions
        SET reason = 'provider_account_capacity',
@@ -1822,66 +1771,27 @@ describe('VM admission control D1 races', () => {
            wait_deadline_at = ?
        WHERE task_id = ?`
     )
-      .bind(
-        new Date(Date.now() - 10 * 60_000).toISOString(),
-        new Date(Date.now() + 60 * 60_000).toISOString(),
-        taskId
-      )
+      .bind(new Date(Date.now() - 119 * 60_000).toISOString(), nearlySpentDeadline, taskId)
       .run();
 
-    const beforeBusyWait = Date.now();
-    const firstBusyWait = await waitForVmAdmissionCapacity(
+    const repeatedProviderWait = await waitForVmAdmissionCapacity(
       env,
       identity,
-      'compatible_node_building_workspace',
-      null,
-      null,
-      { waitTimeoutMs: 90_000 }
+      'provider_account_capacity'
     );
-    expect(firstBusyWait.kind).toBe('waiting');
-    if (firstBusyWait.kind !== 'waiting') throw new Error('expected first busy-build wait');
-    expect(Date.parse(firstBusyWait.waitDeadlineAt)).toBeGreaterThanOrEqual(
-      beforeBusyWait + 89_000
-    );
-    expect(Date.parse(firstBusyWait.waitDeadlineAt)).toBeLessThan(Date.now() + 120_000);
+    expect(repeatedProviderWait.kind).toBe('waiting');
+    if (repeatedProviderWait.kind !== 'waiting') throw new Error('expected provider wait');
+    expect(repeatedProviderWait.waitDeadlineAt).toBe(nearlySpentDeadline);
 
-    const secondBusyWait = await waitForVmAdmissionCapacity(
+    const provisioningWait = await waitForVmAdmissionCapacity(
       env,
       identity,
-      'compatible_node_building_workspace',
-      null,
-      null,
-      { waitTimeoutMs: 90_000 }
+      'compatible_node_provisioning'
     );
-
-    expect(secondBusyWait.kind).toBe('waiting');
-    if (secondBusyWait.kind !== 'waiting') throw new Error('expected repeated busy-build wait');
-    expect(Date.parse(secondBusyWait.waitDeadlineAt)).toBe(
-      Date.parse(firstBusyWait.waitDeadlineAt)
+    expect(provisioningWait.kind).toBe('waiting');
+    if (provisioningWait.kind !== 'waiting') throw new Error('expected provisioning wait');
+    expect(Date.parse(provisioningWait.waitDeadlineAt)).toBeGreaterThan(
+      Date.now() + 60 * 60 * 1000
     );
-  });
-
-  it('uses the busy-build wait budget instead of the provider-capacity ceiling', async () => {
-    const taskId = 'task-vm-admission-busy-build-deadline';
-    await seedQueuedTask(taskId);
-    const before = Date.now();
-
-    const wait = await waitForVmAdmissionCapacity(
-      env,
-      admission(taskId, {
-        scopeKey: `${SCOPE_KEY}:busy-build-deadline`,
-        providerDomainKey: `${PROVIDER_DOMAIN}:busy-build-deadline`,
-      }),
-      'compatible_node_building_workspace',
-      null,
-      null,
-      { waitTimeoutMs: 90_000 }
-    );
-
-    expect(wait.kind).toBe('waiting');
-    if (wait.kind !== 'waiting') throw new Error('expected busy-build wait');
-    const deadlineMs = Date.parse(wait.waitDeadlineAt);
-    expect(deadlineMs).toBeGreaterThanOrEqual(before + 89_000);
-    expect(deadlineMs).toBeLessThan(Date.now() + 120_000);
   });
 });

@@ -564,7 +564,7 @@ describe('workspace resource capacity final reservation CAS', () => {
     expect(total?.cpuMillis).toBeLessThanOrEqual(4000);
   });
 
-  it('allows user starts during a build while racing for the final resource reservation', async () => {
+  it('admits any start onto a building node while racing for the final resource reservation', async () => {
     const nodeId = 'node-wrc-user-build';
     await makeReadyNode(nodeId, USER_ID, 'medium', {
       lastMetrics: JSON.stringify({
@@ -580,18 +580,14 @@ describe('workspace resource capacity final reservation CAS', () => {
       projectId: PROJECT_ID,
       label: 'user-build',
     });
+    // Each start takes the node's whole CPU budget, so only one of them can fit.
     const input = placement('workspace-wrc-background', nodeId, {
       capacityPlacementSnapshot: snapshot,
       resolvedReservation: reservation({ cpuMillis: 4000 }),
     });
-    expect(await reserveWorkspacePlacement(env.DATABASE, input, admissionPolicy())).toBe(false);
     const outcomes = await Promise.all(
-      ['workspace-wrc-user-a', 'workspace-wrc-user-b'].map((id) =>
-        reserveWorkspacePlacement(
-          env.DATABASE,
-          { ...input, id },
-          admissionPolicy({ allowBusyBuildQueue: true })
-        )
+      ['workspace-wrc-background', 'workspace-wrc-user'].map((id) =>
+        reserveWorkspacePlacement(env.DATABASE, { ...input, id }, admissionPolicy())
       )
     );
     expect(outcomes.filter(Boolean)).toHaveLength(1);
@@ -692,15 +688,27 @@ describe('workspace resource capacity final reservation CAS', () => {
     ).resolves.toBe(false);
   });
 
-  it('vetoes final reservations when selected node metrics change to unsafe pressure', async () => {
+  it('vetoes final reservations when selected node metrics change to unsafe pressure, but not on a build', async () => {
     const cases: Array<{
       name: string;
       metrics: Record<string, number>;
+      admitted: boolean;
     }> = [
-      { name: 'cpu', metrics: { cpuLoadAvg1: 8, memoryPercent: 10, diskPercent: 10 } },
+      {
+        name: 'cpu',
+        metrics: { cpuLoadAvg1: 8, memoryPercent: 10, diskPercent: 10 },
+        admitted: false,
+      },
+      {
+        name: 'disk',
+        metrics: { cpuLoadAvg1: 0.2, memoryPercent: 10, diskPercent: 95 },
+        admitted: false,
+      },
+      // A build starting on the node is not pressure: the new start queues behind it.
       {
         name: 'creating',
         metrics: { cpuLoadAvg1: 0.2, memoryPercent: 10, diskPercent: 10, creatingWorkspaces: 1 },
+        admitted: true,
       },
     ];
 
@@ -750,7 +758,7 @@ describe('workspace resource capacity final reservation CAS', () => {
           }),
           admissionPolicy({ cpuThresholdPercent: 90, memoryThresholdPercent: 90 })
         )
-      ).resolves.toBe(false);
+      ).resolves.toBe(testCase.admitted);
     }
   });
 
@@ -892,6 +900,53 @@ describe('workspace resource capacity advisory selection', () => {
     );
 
     expect(selected?.nodeId).toBe(largeAvailableNode);
+  });
+
+  it('ranks by D1 startup backlog and never ranks another user\'s idle node', async () => {
+    const userId = 'user-wrc-backlog';
+    const otherUserId = 'user-wrc-backlog-other';
+    const installationId = 'installation-wrc-backlog';
+    const projectId = 'project-wrc-backlog';
+    await seedUser(userId);
+    await seedUser(otherUserId);
+    await seedInstallation(installationId, userId, {
+      installationIdValue: 'inst-wrc-backlog',
+      accountName: 'test-user-wrc-backlog',
+    });
+    await seedProject(projectId, userId, installationId);
+    // Heartbeats on every node report a build in progress; only D1 knows how deep each queue is.
+    const building = JSON.stringify({
+      cpuLoadAvg1: 0.2,
+      memoryPercent: 10,
+      diskPercent: 10,
+      creatingWorkspaces: 1,
+    });
+    await makeReadyNode('node-wrc-backlog-three', userId, 'large', { lastMetrics: building });
+    await makeReadyNode('node-wrc-backlog-one', userId, 'large', { lastMetrics: building });
+    await makeReadyNode('node-wrc-backlog-other-user', otherUserId, 'large', {
+      lastMetrics: JSON.stringify({ cpuLoadAvg1: 0, memoryPercent: 5, diskPercent: 5 }),
+    });
+    const seed = (id: string, nodeId: string, status: string) =>
+      seedWorkspace(id, nodeId, userId, {
+        projectId,
+        status,
+        resolvedReservationJson: JSON.stringify(reservation()),
+      });
+    for (const index of [1, 2, 3]) {
+      await seed(`ws-wrc-backlog-three-${index}`, 'node-wrc-backlog-three', 'creating');
+    }
+    // More reservations in total than node-three, so `balanced` alone would prefer node-three.
+    await seed('ws-wrc-backlog-one-creating', 'node-wrc-backlog-one', 'creating');
+    for (const index of [1, 2, 3]) {
+      await seed(`ws-wrc-backlog-one-running-${index}`, 'node-wrc-backlog-one', 'running');
+    }
+
+    const selected = await findNodeWithCapacity(
+      taskState(userId, 'large', { projectId, installationId, resolvedReservation: reservation() }),
+      selectorContext()
+    );
+
+    expect(selected).toMatchObject({ nodeId: 'node-wrc-backlog-one', observedStartupBacklog: 1 });
   });
 });
 

@@ -109,6 +109,11 @@ function seedAuthority(): void {
 
 function seedNode(overrides: Record<string, unknown> = {}): void {
   seedAuthority();
+  insertNodeRow(overrides);
+}
+
+/** A node row under the authority `seedAuthority` already created. */
+function insertNodeRow(overrides: Record<string, unknown> = {}): void {
   const row = {
     id: 'node-1',
     user_id: 'user-1',
@@ -692,36 +697,27 @@ describe('reserveWorkspacePlacement', () => {
     }
   });
 
-  it('vetoes final placement when fresh measured pressure changes after selection', async () => {
+  it('vetoes final placement when fresh measured CPU saturation appears after selection', async () => {
     const database = createDb();
     const snapshot = capacitySnapshot();
     seedNode();
     seedActiveWorkspace('workspace-existing-pressure');
-
-    for (const [workspaceId, metrics] of [
-      [
-        'workspace-cpu-pressure',
-        { version: 1, cpuLoadAvg1: 8, memoryPercent: 10, diskPercent: 10 },
-      ],
-      [
-        'workspace-creating-pressure',
-        { version: 1, cpuLoadAvg1: 0.2, memoryPercent: 10, diskPercent: 10, creatingWorkspaces: 1 },
-      ],
-    ] as const) {
-      sqlite
-        ?.prepare(`UPDATE nodes SET last_metrics = ?, last_heartbeat_at = ? WHERE id = 'node-1'`)
-        .run(JSON.stringify(metrics), new Date().toISOString());
-      await expect(
-        reserveWorkspacePlacement(
-          database,
-          { ...reserveInput(snapshot), id: workspaceId },
-          admissionPolicy({ cpuThresholdPercent: 90, memoryThresholdPercent: 90 })
-        )
-      ).resolves.toBe(false);
-    }
+    sqlite
+      ?.prepare(`UPDATE nodes SET last_metrics = ?, last_heartbeat_at = ? WHERE id = 'node-1'`)
+      .run(
+        JSON.stringify({ version: 1, cpuLoadAvg1: 8, memoryPercent: 10, diskPercent: 10 }),
+        new Date().toISOString()
+      );
+    await expect(
+      reserveWorkspacePlacement(
+        database,
+        { ...reserveInput(snapshot), id: 'workspace-cpu-pressure' },
+        admissionPolicy({ cpuThresholdPercent: 90, memoryThresholdPercent: 90 })
+      )
+    ).resolves.toBe(false);
   });
 
-  it('admits an exempt user start during a build but atomically rejects excess reservations', async () => {
+  it('admits onto a node that is building another workspace but atomically rejects excess reservations', async () => {
     const database = createDb();
     const snapshot = capacitySnapshot();
     seedNode();
@@ -738,22 +734,18 @@ describe('reserveWorkspacePlacement', () => {
         new Date().toISOString()
       );
     const input = reserveInput(snapshot);
-    await expect(reserveWorkspacePlacement(database, input, admissionPolicy())).resolves.toBe(
-      false
-    );
-    const policy = admissionPolicy({ allowBusyBuildQueue: true });
     const reservation = { ...input.resolvedReservation!, cpuMillis: 8000, memoryMb: 8192 };
     const results = await Promise.all(
-      ['user-a', 'user-b'].map((id) =>
+      ['start-a', 'start-b'].map((id) =>
         reserveWorkspacePlacement(
           database,
           { ...input, id, resolvedReservation: reservation },
-          policy
+          admissionPolicy()
         )
       )
     );
     expect(results.filter(Boolean)).toHaveLength(1);
-    expect(countWorkspace('user-a') + countWorkspace('user-b')).toBe(1);
+    expect(countWorkspace('start-a') + countWorkspace('start-b')).toBe(1);
   });
 
   it('ignores legacy memory percent thresholds when physical headroom fits', async () => {
@@ -1116,6 +1108,206 @@ describe('shared host-overhead accounting in the atomic claim', () => {
         policy
       )
     ).resolves.toBe(true);
+  });
+});
+
+describe('startup backlog fairness guard in the atomic reservation', () => {
+  const BUILDING_METRICS = JSON.stringify({
+    version: 1,
+    cpuLoadAvg1: 0.2,
+    memoryPercent: 10,
+    diskPercent: 10,
+    creatingWorkspaces: 1,
+  });
+
+  function seedStartingWorkspace(id: string, nodeId = 'node-1', status = 'creating'): void {
+    sqlite
+      ?.prepare(
+        `INSERT INTO workspaces
+         (id, node_id, user_id, project_id, name, repository, branch, status, vm_size, vm_location,
+          resolved_reservation_json, created_at, updated_at)
+         VALUES (?, ?, 'user-1', 'project-1', ?, 'acme/repo', 'main', ?, 'large', 'fsn1', ?,
+          '2026-11-08T22:00:00.000Z', '2026-11-08T22:00:00.000Z')`
+      )
+      .run(id, nodeId, id, status, JSON.stringify(reservation()));
+  }
+
+  function seedTwoNodes(): void {
+    seedNode();
+    insertNodeRow({ id: 'node-2', name: 'Second node', provider_instance_id: 'provider-node-2' });
+  }
+
+  it('refuses a reservation whose node gained a queued start after ranking, and admits the control', async () => {
+    const database = createDb();
+    seedNode();
+    seedStartingWorkspace('queued-after-ranking');
+    const input = reserveInput(capacitySnapshot());
+
+    await expect(
+      reserveWorkspacePlacement(
+        database,
+        { ...input, id: 'ranked-at-zero', maxStartupBacklog: 0 },
+        admissionPolicy()
+      )
+    ).resolves.toBe(false);
+    expect(countWorkspace('ranked-at-zero')).toBe(0);
+
+    // Owner-path controls: the same node admits when the observed backlog still holds, and when
+    // the caller carries no guard at all.
+    await expect(
+      reserveWorkspacePlacement(
+        database,
+        { ...input, id: 'ranked-at-one', maxStartupBacklog: 1 },
+        admissionPolicy()
+      )
+    ).resolves.toBe(true);
+    await expect(
+      reserveWorkspacePlacement(
+        database,
+        { ...input, id: 'unguarded', maxStartupBacklog: null },
+        admissionPolicy()
+      )
+    ).resolves.toBe(true);
+  });
+
+  it('admits when the backlog shrank since ranking, and counts only creating rows', async () => {
+    const database = createDb();
+    seedNode();
+    seedStartingWorkspace('finished-build', 'node-1', 'running');
+    seedStartingWorkspace('recovering', 'node-1', 'recovery');
+    const input = reserveInput(capacitySnapshot());
+
+    await expect(
+      reserveWorkspacePlacement(
+        database,
+        { ...input, id: 'ranked-before-finish', maxStartupBacklog: 0 },
+        admissionPolicy()
+      )
+    ).resolves.toBe(true);
+  });
+
+  it('never lets a missing guard bypass a capacity check', async () => {
+    const database = createDb();
+    seedNode();
+    const input = reserveInput(capacitySnapshot());
+    await expect(
+      reserveWorkspacePlacement(
+        database,
+        {
+          ...input,
+          maxStartupBacklog: null,
+          resolvedReservation: reservation({ cpuMillis: 9_000 }),
+        },
+        admissionPolicy()
+      )
+    ).resolves.toBe(false);
+  });
+
+  /**
+   * K starts that observe the same backlog counts at the same moment, rank the shortest queue
+   * first (node id breaks ties, as the strategy would), and race the real reservation. Losers
+   * re-read the counts and rank again: the TaskRunner's replan, minus the mocks.
+   */
+  async function placeBurst(
+    database: D1Database,
+    starts: number,
+    nodeIds: string[],
+    { guard }: { guard: boolean }
+  ): Promise<{ placedOn: Map<string, string>; rounds: number }> {
+    const placedOn = new Map<string, string>();
+    let remaining = Array.from({ length: starts }, (_, index) => `burst-${index}`);
+    let rounds = 0;
+    while (remaining.length > 0 && rounds <= starts) {
+      rounds += 1;
+      const usage = await loadActiveWorkspaceReservationUsage(database, nodeIds);
+      const backlog = (id: string) => usage.get(id)?.startupBacklog ?? 0;
+      const [target] = [...nodeIds].sort((a, b) => backlog(a) - backlog(b) || a.localeCompare(b));
+      const outcomes = await Promise.all(
+        remaining.map(async (id) => ({
+          id,
+          placed: await reserveWorkspacePlacement(
+            database,
+            {
+              ...reserveInput(capacitySnapshot()),
+              id,
+              nodeId: target,
+              maxStartupBacklog: guard && nodeIds.length > 1 ? backlog(target) : null,
+            },
+            admissionPolicy()
+          ),
+        }))
+      );
+      for (const outcome of outcomes) if (outcome.placed) placedOn.set(outcome.id, target);
+      remaining = outcomes.filter((outcome) => !outcome.placed).map((outcome) => outcome.id);
+    }
+    return { placedOn, rounds };
+  }
+
+  function countOn(placedOn: Map<string, string>, nodeId: string): number {
+    return [...placedOn.values()].filter((id) => id === nodeId).length;
+  }
+
+  it('spreads a simultaneous burst across two building nodes instead of queueing it on one', async () => {
+    const database = createDb();
+    seedTwoNodes();
+    sqlite?.prepare('UPDATE nodes SET last_metrics = ?').run(BUILDING_METRICS);
+
+    const { placedOn, rounds } = await placeBurst(database, 5, ['node-1', 'node-2'], {
+      guard: true,
+    });
+
+    expect(placedOn.size).toBe(5);
+    expect(countOn(placedOn, 'node-1')).toBe(3);
+    expect(countOn(placedOn, 'node-2')).toBe(2);
+    // One reservation wins per round, so a burst of K converges in K rounds.
+    expect(rounds).toBe(5);
+  });
+
+  it('queues the same burst on one node when the guard is absent (the incident shape)', async () => {
+    const database = createDb();
+    seedTwoNodes();
+
+    const { placedOn } = await placeBurst(database, 5, ['node-1', 'node-2'], { guard: false });
+
+    expect(countOn(placedOn, 'node-1')).toBe(5);
+    expect(countOn(placedOn, 'node-2')).toBe(0);
+  });
+
+  it('places a whole burst on the only eligible node in one round', async () => {
+    const database = createDb();
+    seedNode({ last_metrics: BUILDING_METRICS });
+
+    const { placedOn, rounds } = await placeBurst(database, 4, ['node-1'], { guard: true });
+
+    expect(countOn(placedOn, 'node-1')).toBe(4);
+    expect(rounds).toBe(1);
+  });
+
+  it('restarts a workspace on its node while that node is building another one', async () => {
+    const database = createDb();
+    seedNode({ last_metrics: BUILDING_METRICS });
+    seedActiveWorkspace('workspace-1');
+    sqlite
+      ?.prepare(
+        "UPDATE workspaces SET status = 'stopped', chat_session_id = 'chat-1' WHERE id = 'workspace-1'"
+      )
+      .run();
+    const restart = {
+      ...reserveInput(capacitySnapshot()),
+      chatSessionId: 'chat-1',
+      evictionGeneration: 'restart-generation',
+      expectedEvictionGeneration: null,
+      expectedStatus: 'stopped' as const,
+    };
+
+    expect(await reserveWorkspaceRestart(database, restart, admissionPolicy())).toBe(true);
+
+    // Control: a real resource veto on the same building node still refuses the restart.
+    sqlite?.prepare("UPDATE workspaces SET status = 'stopped' WHERE id = 'workspace-1'").run();
+    sqlite
+      ?.prepare("UPDATE nodes SET last_metrics = ? WHERE id = 'node-1'")
+      .run(JSON.stringify({ ...JSON.parse(BUILDING_METRICS), diskPercent: 95 }));
+    expect(await reserveWorkspaceRestart(database, restart, admissionPolicy())).toBe(false);
   });
 });
 
