@@ -746,9 +746,12 @@ describe('runNodeCleanupSweep — vertical slice', () => {
       await seedBaseData();
       const oldDate = new Date(Date.now() - 60 * 60 * 1000).toISOString();
       const justNow = new Date(Date.now() - 30 * 1000).toISOString();
-      for (const [suffix, endedAt] of [
-        ['just-failed', justNow],
-        ['long-failed', oldDate],
+      // 'just-failed-no-completed-at' covers terminal writers that leave completed_at
+      // NULL: the grace then runs from updated_at.
+      for (const [suffix, endedAt, completedAt] of [
+        ['just-failed', justNow, justNow],
+        ['just-failed-no-completed-at', justNow, null],
+        ['long-failed', oldDate, oldDate],
       ] as const) {
         const nodeId = `node-nc-grace-${suffix}`;
         const wsId = `ws-nc-grace-${suffix}`;
@@ -764,7 +767,7 @@ describe('runNodeCleanupSweep — vertical slice', () => {
         await seedTask(`task-nc-grace-${suffix}`, PROJECT_ID, USER_ID, {
           status: 'failed',
           workspaceId: wsId,
-          completedAt: endedAt,
+          completedAt,
           updatedAt: endedAt,
         });
       }
@@ -773,6 +776,9 @@ describe('runNodeCleanupSweep — vertical slice', () => {
       const result = await runNodeCleanupSweep(env as unknown as Env);
 
       expect(await getWorkspaceStatus('ws-nc-grace-just-failed')).toMatchObject({
+        status: 'running',
+      });
+      expect(await getWorkspaceStatus('ws-nc-grace-just-failed-no-completed-at')).toMatchObject({
         status: 'running',
       });
       // Control: the same workspace whose task ended an hour ago is still reaped.
