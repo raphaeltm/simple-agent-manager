@@ -138,6 +138,11 @@ func (h *SessionHost) beginCrashRecoveryWithPrerequisites(reqID json.RawMessage,
 	h.crashSessionID = prerequisites.sessionID
 	h.crashPromptReqID = append(json.RawMessage(nil), reqID...)
 	h.crashPromptViewerID = viewerID
+	// The interrupted turn no longer owns a live peer. Stop its prompting
+	// heartbeat before recovery starts; otherwise it overwrites the recovered
+	// idle report until the stale-turn sleep bound. Admission is still held by
+	// this attempt, so this cannot cancel a replacement turn's reporter.
+	h.stopPromptActivityRereport()
 	h.setStatusLocked(HostStarting)
 	h.statusErr = ""
 	h.armCrashRecoveryWatchdogLocked(notify)
