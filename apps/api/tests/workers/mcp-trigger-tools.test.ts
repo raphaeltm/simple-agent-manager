@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { storeMcpToken } from '../../src/services/mcp-token';
 import {
   seedInstallation,
+  seedMcpTokenWorkspace,
   seedProject,
   seedTrigger,
   seedTriggerExecution,
@@ -70,6 +71,7 @@ async function seedProjectGraph(suffix: string): Promise<{ userId: string; proje
 }
 
 async function storeToken(token: string, projectId: string, userId: string): Promise<void> {
+  await seedMcpTokenWorkspace(`${token}-workspace`, userId, projectId);
   await storeMcpToken(env.KV, token, {
     taskId: `${token}-task`,
     projectId,

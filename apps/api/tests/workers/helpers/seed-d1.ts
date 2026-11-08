@@ -488,12 +488,23 @@ export async function seedActiveMcpTokenWorkspace(): Promise<{
   const userId = `mcp-user-${suffix}`;
   const installationId = `mcp-inst-${suffix}`;
   const projectId = `mcp-project-${suffix}`;
-  const nodeId = `mcp-node-${suffix}`;
   const workspaceId = `mcp-ws-${suffix}`;
   await seedUser(userId);
   await seedInstallation(installationId, userId);
   await seedProject(projectId, userId, installationId);
-  await seedNode(nodeId, userId);
-  await seedWorkspace(workspaceId, nodeId, userId, { projectId });
+  await seedMcpTokenWorkspace(workspaceId, userId, projectId);
   return { userId, projectId, workspaceId };
+}
+
+/**
+ * Seed a running node and a running workspace for an existing user and project, so an MCP
+ * token naming `workspaceId` passes `validateActiveWorkspaceMcpToken`. Idempotent.
+ */
+export async function seedMcpTokenWorkspace(
+  workspaceId: string,
+  userId: string,
+  projectId: string
+): Promise<void> {
+  await seedNode(`${workspaceId}-node`, userId);
+  await seedWorkspace(workspaceId, `${workspaceId}-node`, userId, { projectId });
 }
