@@ -18,7 +18,13 @@ import type { Env as WorkerEnv } from '../../src/env';
 import { runProjectDataStorageReliefPreflight } from '../../src/scheduled/project-data-storage-relief-preflight';
 import { storeMcpToken } from '../../src/services/mcp-token';
 import { measureProjectDataStorageRelief } from '../../src/services/project-data';
-import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
+import {
+  seedInstallation,
+  seedNode,
+  seedProject,
+  seedUser,
+  seedWorkspace,
+} from './helpers/seed-d1';
 import type { ProjectDataTestDouble } from './support/expected-error-doubles';
 
 const testEnv = env as unknown as WorkerEnv;
@@ -3586,6 +3592,9 @@ describe('ProjectData tool payload R2 archival', () => {
       { now: FIXED_NOW }
     );
     const token = `${projectId}-token`;
+    // MCP authentication requires the token's workspace to be active on a live node.
+    await seedNode(`${projectId}-node`, userId);
+    await seedWorkspace(`${projectId}-workspace`, `${projectId}-node`, userId, { projectId });
     await storeMcpToken(env.KV, token, {
       taskId: `${projectId}-task`,
       projectId,

@@ -127,7 +127,7 @@ returns to and warns when that host is a local program.
 
 ### Callback Tokens
 
-VM agents call the API Worker with RS256 callback tokens signed by the Worker (`apps/api/src/services/jwt.ts`). There are two scopes, and neither can stand in for the other. `verifyCallbackToken` rejects a token with no `scope` claim or no `iat` claim. SAM has not minted unscoped tokens since March 2026, and every signer sets `iat`:
+VM agents call the API Worker with RS256 callback tokens signed by the Worker (`apps/api/src/services/jwt.ts`). There are two scopes, and neither can stand in for the other. `verifyCallbackToken` rejects a token with no `scope` claim or no `iat` claim. SAM has not minted unscoped tokens since March 2026, and every signer sets `iat`. Only a self-hosted installation that raised `CALLBACK_TOKEN_EXPIRY_MS` to many months could still hold an unscoped token, on a node running since before then. Such a node must be recreated:
 
 - **Node tokens** (`scope: node`) authenticate node-level callbacks such as heartbeats and error reports. They are renewed in the heartbeat response while the node is not terminal (`apps/api/src/routes/node-lifecycle.ts`).
 - **Workspace tokens** (`scope: workspace`) authenticate everything about one workspace: chat messages, session snapshots, git credentials, runtime assets, task status and ACP activity. The Worker hands one to the node when it creates or restores the workspace.
