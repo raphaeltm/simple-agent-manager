@@ -192,7 +192,13 @@ function matchesOAuthClient(client, desired) {
     )
   );
 }
-async function prepareOAuth() {
+// Cloudflare rejects client creation (observed 2026-11-08 in production: POST
+// /oauth_clients returned 500) while the client's logo and policy URLs on the
+// installer origin are not served yet. A first deploy therefore validates the
+// catalog and management access before publishing, and creates the client only
+// after the Worker and its assets are live. Existing clients are updated before
+// publishing as before.
+async function prepareOAuth({ deferCreation = false } = {}) {
   const catalog = await api('/oauth/scopes');
   if (
     !Array.isArray(catalog) ||
@@ -215,6 +221,7 @@ async function prepareOAuth() {
     scopes,
     token_endpoint_auth_method: 'client_secret_post',
   };
+  if (!client && deferCreation) return undefined;
   if (!client) {
     client = await api(`${base}/oauth_clients`, 'POST', desired);
     clientId = client.client_id;
@@ -245,7 +252,7 @@ async function prepareOAuth() {
 // A fresh bootstrap still ships approved static assets before OAuth readiness.
 const preflight = !reuseReadyConfiguration && (full || (!!existing && scopesChanged));
 let credentials;
-if (preflight) credentials = await prepareOAuth();
+if (preflight) credentials = await prepareOAuth({ deferCreation: !existing });
 const generated = '.wrangler-deploy.json';
 await writeFile(generated, JSON.stringify(config, null, 2), { mode: 0o600 });
 try {

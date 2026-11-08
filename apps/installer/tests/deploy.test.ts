@@ -113,6 +113,10 @@ async function deploy(options: Options = {}) {
         .map((id) => ({ id }));
     else if (path.endsWith('/oauth_clients')) {
       if (method === 'GET') result = client ? [client] : [];
+      // Cloudflare refused creation while the logo/policy URLs on a not yet
+      // published installer origin were unreachable (production, 2026-11-08).
+      else if (capture.run.mock.calls.length === 0)
+        return Response.json({ success: false }, { status: 500 });
       else {
         client = { ...body, client_id: 'new', client_secret: 'SECRET' };
         result = client;
@@ -163,6 +167,7 @@ async function deploy(options: Options = {}) {
         result = settings;
       } else if (path.includes('/oauth_clients') || path === '/client/v4/oauth/scopes') {
         result = oauthResult(path, method, body);
+        if (result instanceof Response) return result;
       } else if (path.endsWith('/secrets')) {
         if (method === 'PUT') {
           if (!secretNames.includes(String(body.name))) secretNames.push(String(body.name));
@@ -284,6 +289,24 @@ describe('publisher-controlled installer deployment', () => {
     ).rejects.toThrow('permissions');
     expect(capture.run).not.toHaveBeenCalled();
     expect(capture.writes).toHaveLength(0);
+  });
+  it('creates a fresh full-mode client only after the installer and its assets are published', async () => {
+    await deploy({ mode: 'full' });
+    expect(config().vars.INSTALL_SOURCE_COMMIT).toBe('b'.repeat(40));
+    expect(config().vars.OAUTH_SCOPES.split(' ')).toEqual(fullScopes);
+    const listed = capture.events.findIndex((entry) => entry.endsWith('/oauth_clients'));
+    const created = capture.events.indexOf(
+      `POST /client/v4/accounts/${'a'.repeat(32)}/oauth_clients`
+    );
+    expect(listed).toBeGreaterThanOrEqual(0);
+    expect(listed).toBeLessThan(capture.events.indexOf('write-config'));
+    expect(created).toBeGreaterThan(capture.events.indexOf('write-config'));
+    expect(capture.calls.find((call) => call.method === 'POST')?.body.scopes).toEqual(fullScopes);
+    expect(capture.calls.filter((call) => call.method === 'PUT')).toHaveLength(2);
+  });
+  it('blocks a fresh full deployment before publishing when management access is denied', async () => {
+    await expect(deploy({ mode: 'full', managementDenied: true })).rejects.toThrow('permissions');
+    expect(capture.run).not.toHaveBeenCalled();
   });
   it('rejects unsupported consent identifiers before enabling full mode', async () => {
     await expect(deploy({ mode: 'full', missingScope: true })).rejects.toThrow('catalog');
