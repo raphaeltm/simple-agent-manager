@@ -297,7 +297,9 @@ export function operationsDecisionNotice(approval: {
   status: string;
   decisionNote?: string | null;
 }): SamNotice {
-  const approved = approval.status === 'approved';
+  // `executed` means it was approved and the agent has already run it.
+  const executed = approval.status === 'executed';
+  const approved = approval.status === 'approved' || executed;
   const actionLabel = OPERATIONS_ACTION_LABELS[approval.action] ?? humanize(approval.action);
   const targetType = OPERATIONS_ACTION_TARGET_TYPES[approval.action];
   const targetKind: SamNoticeRef['kind'] | null =
@@ -311,7 +313,11 @@ export function operationsDecisionNotice(approval: {
   return buildSamNotice({
     type: approved ? 'ops.approved' : 'ops.denied',
     headline: `${approved ? 'Approved' : 'Denied'}: ${actionLabel.toLowerCase()}`,
-    detail: approved ? 'The agent can run this action once.' : 'The agent was told not to run it.',
+    detail: executed
+      ? 'The agent has already run this action.'
+      : approved
+        ? 'The agent can run this action once.'
+        : 'The agent was told not to run it.',
     severity: approved ? 'success' : 'info',
     quote: approval.decisionNote ? { from: "Approver's note", text: approval.decisionNote } : null,
     refs: [
@@ -319,7 +325,7 @@ export function operationsDecisionNotice(approval: {
         kind: 'approval',
         id: approval.id,
         label: actionLabel,
-        status: approved ? 'Approved' : 'Denied',
+        status: executed ? 'Run' : approved ? 'Approved' : 'Denied',
       },
       ...(targetKind ? [{ kind: targetKind, id: approval.targetId, label: null }] : []),
     ],
@@ -332,13 +338,17 @@ export function scheduledMessageNotice(input: {
   scheduleId: string;
   prompt: string;
   reason: string | null;
-  createdByThisChat: boolean;
+  /** Where the schedule was made, from its creator chat; `unknown_chat` when none was recorded. */
+  origin: 'this_chat' | 'another_chat' | 'unknown_chat';
 }): SamNotice {
   return buildSamNotice({
     type: 'schedule.due',
-    headline: input.createdByThisChat
-      ? 'Scheduled reminder the agent set for itself'
-      : 'Scheduled message from another chat',
+    headline:
+      input.origin === 'this_chat'
+        ? 'Scheduled reminder the agent set for itself'
+        : input.origin === 'another_chat'
+          ? 'Scheduled message from another chat'
+          : 'Scheduled message an agent set',
     // The reason is the scheduler's own words, so it is a card label, not SAM's detail line.
     severity: 'info',
     quote: { from: 'Scheduled message', text: input.prompt },

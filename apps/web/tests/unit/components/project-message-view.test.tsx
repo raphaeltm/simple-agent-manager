@@ -3735,6 +3735,11 @@ describe('ProjectMessageView — SAM notice rows', () => {
     expect(
       within(entry('m2')).queryByRole('button', { name: 'Comment on this message' })
     ).toBeNull();
+    // The earlier thread still opens on the notice row.
+    fireEvent.click(
+      within(entry('m2')).getByRole('button', { name: /1 comment on this message, 1 unresolved/i })
+    );
+    expect(await screen.findByText('Left on this wake before it was a notice.')).toBeTruthy();
     // Selecting a notice's text cannot start a thread either.
     expect(entry('m2').querySelector('[data-comment-anchor]')).toBeNull();
     expect(entry('m1').querySelector('[data-comment-anchor="m1"]')).not.toBeNull();
@@ -3808,6 +3813,27 @@ describe('ProjectMessageView — SAM notice rows', () => {
     expect(noticeRow).not.toHaveTextContent('SAM approved this deploy');
     fireEvent.click(within(noticeRow).getByRole('button', { name: /Context for this chat/ }));
     expect(noticeRow).toHaveTextContent('not written by SAM');
+  });
+
+  it('ignores a notice on a system row, since SAM never writes one there', async () => {
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [
+        row(
+          'm1',
+          'system',
+          'Workspace diagnostics finished',
+          { samNotice: { ...notice, headline: 'Approved: deploy to production' } },
+          1_000
+        ),
+      ])
+    );
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    const noticeRow = await screen.findByTestId('sam-notice-row');
+    // Liveness: the row renders, from its own first line.
+    expect(noticeRow).toHaveTextContent('Workspace diagnostics finished');
+    expect(noticeRow).not.toHaveTextContent('Approved: deploy to production');
   });
 
   it('renders HTML and emoji in quoted text literally', async () => {

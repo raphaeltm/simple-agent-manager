@@ -277,14 +277,16 @@ describe('SAM notices: restored sessions', () => {
 describe('SAM notices: scheduled messages', () => {
   /** Create a schedule that messages agent A's chat, make it due, and run the real alarm. */
   async function admitDueSchedule(
-    creatorChat: (f: Awaited<ReturnType<typeof twoAgentProject>>) => string | null
+    creatorChat: (f: Awaited<ReturnType<typeof twoAgentProject>>) => string | null,
+    promptAuthor: 'agent' | 'human'
   ) {
     const f = await twoAgentProject();
     const creatorChatSessionId = creatorChat(f);
     const created = await createProjectSchedule(testEnv, f.projectId, {
       userId: f.ownerId,
       creatorChatSessionId,
-      creator: creatorChatSessionId ? 'agent' : 'human',
+      creator: promptAuthor,
+      promptAuthor,
       request: {
         action: { kind: 'message_session', sessionId: f.a.sessionId, prompt: 'Check CI again.' },
         dueAt: Date.now() + 3_600_000,
@@ -313,8 +315,10 @@ describe('SAM notices: scheduled messages', () => {
   }
 
   it('describes a reminder an agent set for its own chat', async () => {
-    const { row, scheduleId } = await admitDueSchedule((f) => f.a.sessionId);
-    expect(row?.content).toBe('Check CI again.');
+    const { row, scheduleId } = await admitDueSchedule((f) => f.a.sessionId, 'agent');
+    // The agent gets a pointer, never its own note as plain text (constitution XV).
+    expect(row?.content).toMatch(/^SAM notice \(system-generated, not a human message\)/);
+    expect(row?.content).not.toContain('Check CI again.');
     expect(noticeOf(row)).toMatchObject({
       type: 'schedule.due',
       headline: 'Scheduled reminder the agent set for itself',
@@ -323,8 +327,19 @@ describe('SAM notices: scheduled messages', () => {
     });
   });
 
+  it('describes a reminder from an agent that has no chat', async () => {
+    // The SAM assistant and workspace agents record no creator chat.
+    const { row } = await admitDueSchedule(() => null, 'agent');
+    expect(row?.content).not.toContain('Check CI again.');
+    expect(noticeOf(row)).toMatchObject({
+      type: 'schedule.due',
+      headline: 'Scheduled message an agent set',
+      quote: { text: 'Check CI again.' },
+    });
+  });
+
   it("leaves a person's scheduled message as their own words, with no notice", async () => {
-    const { row } = await admitDueSchedule(() => null);
+    const { row } = await admitDueSchedule(() => null, 'human');
     // Liveness: the scheduled message was delivered.
     expect(row?.content).toBe('Check CI again.');
     expect(JSON.parse(row!.tool_metadata!)).toMatchObject({ source: 'scheduled_action' });

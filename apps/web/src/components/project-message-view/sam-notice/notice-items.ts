@@ -13,9 +13,10 @@ import { maybeJsonRecord } from '../../../lib/runtime-validation';
 
 /**
  * The server-written notice on a transcript row, or null. A notice is trusted only on rows
- * only SAM writes: durable deliveries and orchestrator check-ins (role `user`) and display
- * rows (role `system`). The server also strips notices from agent-supplied metadata, so this
- * is the second of two checks. Message text is never parsed.
+ * only SAM writes: durable deliveries and orchestrator check-ins (role `user`). The server
+ * never writes one on a `system` row, and older runtime-written system rows were not
+ * sanitized, so a notice there is ignored. The server also strips notices from
+ * agent-supplied metadata, so this is the second of two checks. Message text is never parsed.
  */
 export function samNoticeForMessage(
   message: Pick<ChatMessageResponse, 'role' | 'toolMetadata'>
@@ -23,9 +24,8 @@ export function samNoticeForMessage(
   const meta = maybeJsonRecord(message.toolMetadata);
   if (!meta || !(SAM_NOTICE_METADATA_KEY in meta)) return null;
   const fromSam =
-    message.role === 'system' ||
-    (message.role === 'user' &&
-      (meta.kind === 'durable_prompt_delivery' || meta.source === 'sam_orchestrator'));
+    message.role === 'user' &&
+    (meta.kind === 'durable_prompt_delivery' || meta.source === 'sam_orchestrator');
   return fromSam ? parseSamNotice(meta[SAM_NOTICE_METADATA_KEY]) : null;
 }
 
@@ -66,7 +66,7 @@ export function systemRowNotice(text: string): SamNotice {
  * The notice for a display-only system row. A row the workspace runtime reported (marked by
  * the server; an agent can hold the runtime's token) is quoted as a workspace report, and a
  * context note the chat's creator supplied is quoted as provided context, rather than shown
- * as SAM's words. Any other system row is SAM's: its notice, or its first line.
+ * as SAM's words. Any other system row is SAM's: its first line is the headline.
  */
 export function systemRowNoticeForMessage(
   message: Pick<ChatMessageResponse, 'role' | 'toolMetadata' | 'content'>
@@ -91,5 +91,5 @@ export function systemRowNoticeForMessage(
       refs: [],
     });
   }
-  return samNoticeForMessage(message) ?? systemRowNotice(message.content);
+  return systemRowNotice(message.content);
 }

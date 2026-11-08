@@ -239,24 +239,41 @@ describe('other notices', () => {
     });
   });
 
+  it('describes an approval the agent already ran as approved, not denied', () => {
+    const notice = operationsDecisionNotice({
+      id: 'appr-1',
+      action: 'restart_vm_agent',
+      targetId: 'node-1',
+      status: 'executed',
+    });
+    expect(notice.type).toBe('ops.approved');
+    expect(notice.headline).toMatch(/^Approved: /);
+    expect(notice.detail).toBe('The agent has already run this action.');
+    expect(notice.refs[0]).toMatchObject({ kind: 'approval', status: 'Run' });
+  });
+
   it('tells a self-set reminder apart from one set by another chat', () => {
     const self = scheduledMessageNotice({
       scheduleId: 's',
       prompt: 'check CI',
       reason: null,
-      createdByThisChat: true,
+      origin: 'this_chat',
     });
     const other = scheduledMessageNotice({
       scheduleId: 's',
       prompt: 'check CI',
       reason: 'deploy',
-      createdByThisChat: false,
+      origin: 'another_chat',
     });
     expect(self.headline).toBe('Scheduled reminder the agent set for itself');
     expect(other.headline).toBe('Scheduled message from another chat');
     // The scheduler's reason is its own words: a card label, never SAM's detail line.
     expect(other.detail).toBeNull();
     expect(other.refs[0]).toMatchObject({ kind: 'schedule', label: 'deploy' });
+    expect(
+      scheduledMessageNotice({ scheduleId: 's', prompt: 'x', reason: null, origin: 'unknown_chat' })
+        .headline
+    ).toBe('Scheduled message an agent set');
   });
 
   it('states how long the agent was idle', () => {

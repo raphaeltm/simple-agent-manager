@@ -117,19 +117,25 @@ export function admitScheduleClaim(
       senderId: schedule.creatorUserId,
       sourceTaskId: targetTaskId,
       // An agent-made schedule is SAM delivering the agent's own reminder; a person's
-      // scheduled message stays their bubble (teammates keep their attribution line).
-      notice: schedule.creatorChatSessionId
-        ? safeNotice(
-            () =>
-              scheduledMessageNotice({
-                scheduleId: schedule.id,
-                prompt,
-                reason: schedule.reason,
-                createdByThisChat: schedule.creatorChatSessionId === sessionId,
-              }),
-            { scheduleId: schedule.id }
-          )
-        : null,
+      // scheduled message stays their bubble (teammates keep their attribution line). An
+      // agent without a chat (the SAM assistant, a workspace agent) records no creator chat.
+      notice:
+        schedule.promptAuthor !== 'human' && (agentNote || schedule.creatorChatSessionId)
+          ? safeNotice(
+              () =>
+                scheduledMessageNotice({
+                  scheduleId: schedule.id,
+                  prompt,
+                  reason: schedule.reason,
+                  origin: !schedule.creatorChatSessionId
+                    ? 'unknown_chat'
+                    : schedule.creatorChatSessionId === sessionId
+                      ? 'this_chat'
+                      : 'another_chat',
+                }),
+              { scheduleId: schedule.id }
+            )
+          : null,
       ttlMs: Math.min(schedule.expiresAt - now, scheduleLimits(env).deliveryTtlMs),
       metadata: {
         scheduleId: schedule.id,
