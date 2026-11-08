@@ -12,9 +12,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/persistence"
 	"github.com/workspace/vm-agent/internal/publish"
 )
@@ -221,7 +223,7 @@ func TestMcpBuildAndPublishJobStart_RequestCancelDoesNotCancelBackgroundJob(t *t
 }
 
 func TestRunAcceptedPublishJobReportsUnsupportedComposeVolumesAsNonRetryable(t *testing.T) {
-	s := &Server{publishJobs: map[string]publishJobState{
+	s := &Server{config: &config.Config{}, publishJobs: map[string]publishJobState{
 		"job-volumes": {ID: "job-volumes", WorkspaceID: "ws-001", Status: "starting"},
 	}}
 	dir := t.TempDir()
@@ -247,7 +249,10 @@ func TestRunAcceptedPublishJobReportsUnsupportedComposeVolumesAsNonRetryable(t *
 	}
 
 	var events []publish.Event
+	var eventsMu sync.Mutex
 	reporter := publish.EventFunc(func(_ context.Context, event publish.Event) {
+		eventsMu.Lock()
+		defer eventsMu.Unlock()
 		events = append(events, event)
 	})
 	s.runAcceptedPublishJob(context.Background(), "job-volumes", &preparedBuildPublish{
