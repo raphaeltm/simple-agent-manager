@@ -42,7 +42,7 @@ export const DEAD_WAKE_CLAIM_ERROR =
 
 interface DeadWakeCandidate {
   id: string;
-  projectId: string;
+  projectId: string | null;
   chatSessionId: string;
   recoveryTaskId: string | null;
   recoveryAttemptId: string | null;
@@ -142,13 +142,15 @@ export async function runDeadWakeClaimReconciliation(
       taskUpdatedAt: row.taskUpdatedAt,
     });
   }
-  if (released.length > 0) {
+  // Legacy rows can lack a project; their chat has no ProjectData object to notify.
+  const notifiable = released.filter((row) => row.projectId);
+  if (notifiable.length > 0) {
     waitUntil(
       Promise.all(
-        released.map((row) =>
+        notifiable.map((row) =>
           notifyWakeSettled({
             env,
-            projectId: row.projectId,
+            projectId: row.projectId as string,
             chatSessionId: row.chatSessionId,
             status: 'failed',
           })

@@ -184,6 +184,13 @@ describe('dead wake claim sweep', () => {
     });
   });
 
+  it('ends a legacy claim with no project without notifying a ProjectData object', async () => {
+    seed('legacy', { task: null, snapshot: { project_id: null } });
+    expect(await sweep()).toEqual({ selected: 1, released: 1 });
+    expect(snapshot('legacy')).toMatchObject({ recovery_status: 'failed' });
+    expect(notifyWakeSettled).not.toHaveBeenCalled();
+  });
+
   it('ends a claim on an expired snapshot, so its chat stops showing a wake banner', async () => {
     seed('old', {
       snapshot: {
