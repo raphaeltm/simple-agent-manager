@@ -42,14 +42,12 @@ import { runSessionSleepSweep } from './session-sleep';
 import { runSessionSleepLifecycleRepair } from './session-sleep-lifecycle-repair';
 import { runScheduledSessionSnapshotPurge } from './session-snapshot-purge';
 import { runSessionTaskReconciliation } from './session-task-reconciliation';
+import { runDeadWakeClaimReconciliation } from './session-wake-claim-reconciliation';
 import { runSetupSessionSweep } from './setup-session-sweep';
 import { recoverStuckTasks } from './stuck-tasks';
 import { createSweepIsolator } from './sweep-isolation';
 import { runTerminalNodeLifecycleRepair } from './terminal-node-lifecycle-repair';
 import { runTerminalSessionLedgerReconciliation } from './terminal-session-ledger-reconciliation';
-import { runTrialExpireSweep } from './trial-expire';
-import { runTrialRolloverAudit } from './trial-rollover';
-import { runTrialWaitlistCleanup } from './trial-waitlist-cleanup';
 import { runTriggerExecutionCleanup } from './trigger-execution-cleanup';
 import { runWorkspaceEvictionRecovery } from './workspace-eviction-recovery';
 
@@ -59,23 +57,14 @@ export async function scheduled(
   env: Env,
   ctx: ExecutionContext
 ): Promise<void> {
-  const rolloverCron = env.TRIAL_CRON_ROLLOVER_CRON ?? '0 5 1 * *';
-  const waitlistCleanupCron = env.TRIAL_CRON_WAITLIST_CLEANUP ?? '0 4 * * *';
-
   const isDailyForward = controller.cron === '0 3 * * *';
   const isMonthlyCostAggregation = isHourlyPlatformMaintenanceCron(controller.cron);
-  const isTrialRollover = controller.cron === rolloverCron;
-  const isTrialWaitlistCleanup = controller.cron === waitlistCleanupCron;
 
   const cronType = isDailyForward
     ? 'daily-forward'
     : isMonthlyCostAggregation
       ? 'monthly-cost-aggregation'
-      : isTrialRollover
-        ? 'trial-rollover'
-        : isTrialWaitlistCleanup
-          ? 'trial-waitlist-cleanup'
-          : 'sweep';
+      : 'sweep';
 
   log.info('cron.started', { cron: controller.cron, type: cronType });
 
@@ -107,35 +96,6 @@ export async function scheduled(
           error: err instanceof Error ? err.message : String(err),
         });
       })
-    );
-    return;
-  }
-
-  if (isTrialRollover) {
-    ctx.waitUntil(
-      (async () => {
-        const rollover = await runTrialRolloverAudit(env);
-        log.info('cron.completed', {
-          cron: controller.cron,
-          type: 'trial-rollover',
-          trialRolloverMonthKey: rollover.monthKey,
-          trialRolloverPruned: rollover.pruned,
-        });
-      })()
-    );
-    return;
-  }
-
-  if (isTrialWaitlistCleanup) {
-    ctx.waitUntil(
-      (async () => {
-        const waitlist = await runTrialWaitlistCleanup(env);
-        log.info('cron.completed', {
-          cron: controller.cron,
-          type: 'trial-waitlist-cleanup',
-          trialWaitlistPurged: waitlist.purged,
-        });
-      })()
     );
     return;
   }
@@ -176,6 +136,9 @@ export async function scheduled(
   );
   const evictionRecovery = await sweeps.isolate('workspace_eviction_recovery', () =>
     runWorkspaceEvictionRecovery(env, ctx.waitUntil.bind(ctx))
+  );
+  const deadWakeClaims = await sweeps.isolate('dead_wake_claim_reconciliation', () =>
+    runDeadWakeClaimReconciliation(env, ctx.waitUntil.bind(ctx))
   );
   const nodeCleanup = await sweeps.isolate('node_cleanup', () => runNodeCleanupSweep(env));
   await sweeps.isolate('deployment_node_cleanup', () =>
@@ -233,7 +196,6 @@ export async function scheduled(
   const computeUsageClosed = await sweeps.isolate('compute_usage_cleanup', () =>
     runComputeUsageCleanup(env)
   );
-  const trialExpire = await sweeps.isolate('trial_expire', () => runTrialExpireSweep(env));
 
   // After the lifecycle sweeps on purpose. When due (about once a day, or once per retry
   // interval while it keeps failing) it downloads Google's price list under
@@ -348,6 +310,7 @@ export async function scheduled(
     observabilityPurgedByAge: observabilityPurge?.deletedByAge,
     observabilityPurgedByCount: observabilityPurge?.deletedByCount,
     evictionRecovery,
+    deadWakeClaims,
     githubTriggerRecovery,
     agentEmailRecovery,
     cronTriggersChecked: cronTriggers?.checked,
@@ -463,11 +426,6 @@ export async function scheduled(
     composeArtifactCleanupDeletedBytes: composeArtifactCleanup?.deletedBytes,
     composeArtifactCleanupErrors: composeArtifactCleanup?.errors,
     computeUsageOrphansClosed: computeUsageClosed,
-    trialExpired: trialExpire?.expired,
-    trialProjectsLinked: trialExpire?.projectsLinked,
-    trialWorkspacesDeleted: trialExpire?.workspacesDeleted,
-    trialNodesDeleted: trialExpire?.nodesDeleted,
-    trialCleanupErrors: trialExpire?.cleanupErrors,
     setupSessionsSwept: setupSessionSweep?.toreDown,
     setupSessionOrphansForced: setupSessionSweep?.orphansForced,
     setupSessionSweepErrors: setupSessionSweep?.errors,

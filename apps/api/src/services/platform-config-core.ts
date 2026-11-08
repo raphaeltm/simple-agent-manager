@@ -59,7 +59,7 @@ export async function savePlatformIntegrationConfig(
   input: PlatformIntegrationInput,
   updatedBy?: string
 ): Promise<void> {
-  const by = creatorId(env, updatedBy);
+  const by = creatorId(updatedBy);
   const expectedRevision = await validateAdminSettingsChanges(env, integrationChanges(input));
   const statements = await buildPlatformIntegrationStatements(
     env,
@@ -180,7 +180,7 @@ export async function completeSetupWithConfig(
   input: PlatformIntegrationInput,
   updatedBy?: string
 ): Promise<void> {
-  const by = creatorId(env, updatedBy);
+  const by = creatorId(updatedBy);
   const expectedRevision = await validateAdminSettingsChanges(env, integrationChanges(input));
   const now = new Date().toISOString();
   const statements = await buildPlatformIntegrationStatements(env, input, by, now);
@@ -217,9 +217,8 @@ interface PlatformConfigCacheEntry {
 
 /**
  * Module-scoped cache — Workers re-use the isolate across requests within an instance, so this
- * gives the intended "last value for up to TTL" behaviour. `services/trial/kill-switch.ts` uses
- * the same module-scope shape but does NOT key on its binding; do not copy that half of it when
- * adding a cache over a binding whose identity can vary per request (see `database` below).
+ * gives the intended "last value for up to TTL" behaviour. The cache keys on its D1 binding,
+ * because a binding's identity can vary per request (see `database` below).
  */
 let platformConfigCache: PlatformConfigCacheEntry | null = null;
 
@@ -283,11 +282,9 @@ export function resolvePlatformConfigCacheMs(env: Env): number {
  * config (`createAuth` needs three) should resolve once and use the `select*` helpers below
  * rather than calling the `get*` wrappers repeatedly.
  *
- * Unlike `services/trial/kill-switch.ts`, a failed read is deliberately NOT cached. That cache
- * stores its fail-closed default on error to throttle retries, which is safe because "trials
- * disabled" is a valid conservative answer. Here the equivalent would be caching "no OAuth
- * configured", which would disable every social login for a full TTL — strictly worse than
- * re-reading. A rejected read therefore propagates and populates nothing.
+ * A failed read is deliberately NOT cached: caching a fail-closed default would mean caching
+ * "no OAuth configured", which would disable every social login for a full TTL — strictly
+ * worse than re-reading. A rejected read therefore propagates and populates nothing.
  */
 export async function resolvePlatformConfig(
   env: Env,
@@ -459,5 +456,5 @@ export async function isSetupCompleted(env: Env): Promise<boolean> {
 }
 
 export async function setSetupCompleted(env: Env, updatedBy?: string): Promise<void> {
-  await writeSetting(env, SETUP_COMPLETED_SETTING_KEY, 'true', creatorId(env, updatedBy));
+  await writeSetting(env, SETUP_COMPLETED_SETTING_KEY, 'true', creatorId(updatedBy));
 }

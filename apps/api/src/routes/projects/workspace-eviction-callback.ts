@@ -126,10 +126,7 @@ function tokenMatchesEvictionResource(
   if (payload.scope === 'node') {
     return callbackTokenMatchesNode(payload, workspace.nodeId) && workspace.nodeId === body.nodeId;
   }
-  if (payload.scope === 'workspace') {
-    return callbackTokenMatchesWorkspace(payload, workspace.workspaceId);
-  }
-  return payload.workspace === workspace.workspaceId;
+  return callbackTokenMatchesWorkspace(payload, workspace.workspaceId);
 }
 
 function workspaceEvictionErrorMessage(reason: WorkspaceEvictionBody['reason']): string {

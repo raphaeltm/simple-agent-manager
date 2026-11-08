@@ -22,7 +22,14 @@ import {
   startWorkflowRun,
   type WorkflowRunRow,
 } from '../../src/services/workflow-runs';
-import { seedInstallation, seedProject, seedTask, seedUser } from './helpers/seed-d1';
+import {
+  seedInstallation,
+  seedNode,
+  seedProject,
+  seedTask,
+  seedUser,
+  seedWorkspace,
+} from './helpers/seed-d1';
 
 const testEnv = env as unknown as Env;
 afterEach(() => vi.restoreAllMocks());
@@ -934,11 +941,17 @@ describe('durable workflow execution', () => {
   it('exposes start and status through authenticated MCP routes', async () => {
     const f = await fixture();
     const token = `workflow-token-${crypto.randomUUID()}`;
+    // MCP authentication requires the token's workspace to be active on a live node.
+    const workspaceId = `workflow-ws-${crypto.randomUUID()}`;
+    await seedNode(`${workspaceId}-node`, f.input.userId);
+    await seedWorkspace(workspaceId, `${workspaceId}-node`, f.input.userId, {
+      projectId: f.input.projectId,
+    });
     await storeMcpToken(testEnv.KV, token, {
       projectId: f.input.projectId,
       userId: f.input.userId,
       taskId: f.input.parentTaskId,
-      workspaceId: 'test-workspace',
+      workspaceId,
       taskMode: 'conversation',
       createdAt: new Date().toISOString(),
     });

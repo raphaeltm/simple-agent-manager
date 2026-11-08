@@ -70,7 +70,6 @@ export async function mockApi(page: Page, opts: MockOptions = {}): Promise<Polic
       if (path === '/api/credentials/agent') return json(route, { credentials: [] });
       if (path === '/api/notifications')
         return json(route, { notifications: [], unreadCount: 0, nextCursor: null });
-      if (path === '/api/trial/status') return json(route, { available: false });
       if (path === '/api/providers/catalog') return json(route, { catalogs: [] });
       if (path === `/api/projects/${PROJECT_ID}`) return json(route, MOCK_PROJECT);
       if (path === `/api/projects/${PROJECT_ID}/agent-profiles`)

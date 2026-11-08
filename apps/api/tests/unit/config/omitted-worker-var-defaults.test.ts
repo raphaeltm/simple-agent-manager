@@ -19,6 +19,7 @@
  */
 import { isDeepStrictEqual } from 'node:util';
 
+import { generateCloudInit } from '@simple-agent-manager/cloud-init';
 import { resolveOrchestratorConfig } from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
 
@@ -92,10 +93,8 @@ import {
   resolveArchiveShardCount,
 } from '../../../src/services/project-data-archive-routing';
 import { resolveProjectEventSourceOutboxConfig } from '../../../src/services/project-event-source-outbox-contract';
-import { resolveMonthlyCap, resolveWorkspaceTtlMs } from '../../../src/services/trial/helpers';
-import { resolveTrialsEnabledKvKey } from '../../../src/services/trial/kill-switch';
-import { resolveTrialRunnerConfig } from '../../../src/services/trial/trial-runner';
 import { getVmAdmissionConfig } from '../../../src/services/vm-admission-control-types';
+import { errorReportCloudInitVariables } from '../../../src/services/vm-error-report-config';
 import {
   areWebhookTriggersEnabled,
   getWebhookTriggerLimits,
@@ -125,7 +124,7 @@ const API = 'apps/api/src';
 
 const READ_PATHS: readonly ReadPath[] = [
   {
-    label: 'shared operational and trial settings resolver',
+    label: 'shared operational settings resolver',
     sources: [
       `${API}/services/admin-settings-resolution.ts`,
       `${API}/services/admin-settings-cache.ts`,
@@ -137,11 +136,10 @@ const READ_PATHS: readonly ReadPath[] = [
         // A persisted legacy disable under the default keys makes key overrides observable.
         await fixture.env.KV.put('control-loops:cron-enabled', 'false');
         await fixture.env.KV.put('control-loops:alarms-enabled', 'false');
-        await fixture.env.KV.put('trials:enabled', 'true');
         const view = await readAdminSettings(fixture.env, { fresh: true });
         return {
           controls: view.settings
-            .filter((setting) => setting.category === 'Operations' || setting.category === 'Trials')
+            .filter((setting) => setting.category === 'Operations')
             .map(({ name, value }) => ({ name, value })),
           cacheMs: adminSettingCacheMs(fixture.env, 'operations.cronSweepsEnabled'),
         };
@@ -381,21 +379,6 @@ const READ_PATHS: readonly ReadPath[] = [
     read: (env) => [areWebhookTriggersEnabled(asEnv(env)), getWebhookTriggerLimits(asEnv(env))],
   },
   {
-    label: 'trial config',
-    sources: [
-      `${API}/services/trial/helpers.ts`,
-      `${API}/services/trial/kill-switch.ts`,
-      `${API}/services/trial/trial-runner.ts`,
-    ],
-    read: (env) => [
-      resolveMonthlyCap(asEnv(env)),
-      resolveWorkspaceTtlMs(asEnv(env)),
-      resolveTrialsEnabledKvKey(asEnv(env)),
-      resolveTrialRunnerConfig(asEnv({ ...env, ENVIRONMENT: 'staging' })),
-      resolveTrialRunnerConfig(asEnv({ ...env, ENVIRONMENT: 'production' })),
-    ],
-  },
-  {
     label: 'project event limits',
     sources: [
       `${API}/durable-objects/project-data/project-events-limits.ts`,
@@ -417,6 +400,25 @@ const READ_PATHS: readonly ReadPath[] = [
     label: 'project event source outbox config',
     sources: [`${API}/services/project-event-source-outbox-contract.ts`],
     read: (env) => resolveProjectEventSourceOutboxConfig(asEnv(env)),
+  },
+  {
+    // The VM agent reads these from its systemd unit, so compare the rendered cloud-init lines.
+    label: 'VM agent error-report cloud-init settings',
+    sources: [`${API}/services/vm-error-report-config.ts`],
+    read: (env) =>
+      generateCloudInit(
+        {
+          nodeId: 'node-probe',
+          hostname: 'sam-probe',
+          controlPlaneUrl: 'https://api.example.com',
+          jwksUrl: 'https://api.example.com/.well-known/jwks.json',
+          callbackToken: 'callback-probe',
+          ...errorReportCloudInitVariables(asEnv(env)),
+        },
+        { validateSize: false }
+      )
+        .split('\n')
+        .filter((line) => line.includes('Environment=ERROR_REPORT_')),
   },
   {
     label: 'credential limit config',

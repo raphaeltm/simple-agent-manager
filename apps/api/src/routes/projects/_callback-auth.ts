@@ -137,7 +137,7 @@ export async function verifyWorkspacePublishCallback(
   const token = extractBearerToken(c.req.header('Authorization'));
   const payload = await verifyCallbackToken(token, c.env);
 
-  if (payload.scope !== undefined && payload.scope !== 'workspace') {
+  if (payload.scope !== 'workspace') {
     log.warn(`${logPrefix}.invalid_token_scope`, {
       scope: payload.scope,
       action: 'rejected',

@@ -907,7 +907,7 @@ describe('generateCloudInit', () => {
         (f: { path: string }) => f.path === '/usr/local/sbin/sam-configure-docker-memory.sh'
       );
 
-      expect(headroomScript.content).toContain('RESERVE_MB="512"');
+      expect(headroomScript.content).toContain('RESERVE_MB="1024"');
       expect(headroomScript.content).toContain('sam-workload.slice.d/50-headroom.conf');
     });
 

@@ -42,11 +42,11 @@ describe('legacy configuration compatibility', () => {
 
   it('honors zero and shorter configured KV convergence windows', async () => {
     vi.useFakeTimers();
-    env.TRIAL_KILL_SWITCH_CACHE_MS = '0';
-    await env.KV.put('trials:enabled', 'true');
-    expect(await resolveAdminSetting(env, 'trials.enabled')).toBe(true);
-    await env.KV.put('trials:enabled', 'false');
-    expect(await resolveAdminSetting(env, 'trials.enabled')).toBe(false);
+    env.CONTROL_LOOP_KILL_SWITCH_CACHE_MS = '0';
+    await env.KV.put('control-loops:alarms-enabled', 'true');
+    expect(await resolveAdminSetting(env, 'operations.doAlarmsEnabled')).toBe(true);
+    await env.KV.put('control-loops:alarms-enabled', 'false');
+    expect(await resolveAdminSetting(env, 'operations.doAlarmsEnabled')).toBe(false);
     env.CONTROL_LOOP_KILL_SWITCH_CACHE_MS = '10';
     await env.KV.put('control-loops:cron-enabled', 'true');
     expect(await resolveAdminSetting(env, 'operations.cronSweepsEnabled')).toBe(true);

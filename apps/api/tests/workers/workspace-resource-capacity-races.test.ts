@@ -918,7 +918,7 @@ function interceptDatabase(
 
 function removeAggregateResourcePredicates(sql: string): string {
   const patterns = [
-    /\(n\.metrics_json IS NULL OR \(\s*n\.trusted_provider_instance_memory_mb \*\s*CAST\(json_extract\(n\.metrics_json, '\$\.memoryPercent'\) AS REAL\) \/ 100\.0\s*\+ active\.memory_mb - MIN\(active\.observed_memory_credit_mb,\s*n\.trusted_provider_instance_memory_mb \*\s*CAST\(json_extract\(n\.metrics_json, '\$\.memoryPercent'\) AS REAL\) \/ 100\.0\)\s*\+ requested\.memory_mb\s*<= n\.trusted_provider_instance_memory_mb - policy\.host_memory_reserve_mb\s*\)\)/,
+    /\(n\.metrics_json IS NULL OR \(\s*MAX\(policy\.host_memory_reserve_mb,[\s\S]*?\+ active\.memory_mb \+ requested\.memory_mb\s*<= n\.trusted_provider_instance_memory_mb\s*\)\)/,
     /\(\(active\.cpu_millis\s*\+\s*requested\.cpu_millis\)\s*<=\s*\(n\.trusted_provider_instance_vcpu_count\s*\*\s*1000\s*\*\s*policy\.cpu_share_budget_percent\)\s*\/\s*100\)/,
     /\(\(active\.memory_mb\s*\+\s*requested\.memory_mb\)\s*<=\s*n\.trusted_provider_instance_memory_mb\s*-\s*policy\.host_memory_reserve_mb\)/,
     /\(\(active\.disk_mb\s*\+\s*requested\.disk_mb\)\s*<=\s*n\.trusted_provider_instance_disk_gb\s*\*\s*1024\)/,

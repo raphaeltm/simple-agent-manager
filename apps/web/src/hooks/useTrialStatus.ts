@@ -9,7 +9,7 @@ import { trialStatusQueryOptions } from '../lib/query-options';
 
 interface UseTrialStatusResult {
   trial: TrialStatusResponse | null;
-  /** Whether a platform-funded trial is currently claimable. */
+  /** Whether installation platform compute (platform cloud credential + AI proxy) is available. */
   available: boolean;
   loading: boolean;
   isRefreshing: boolean;
@@ -18,7 +18,8 @@ interface UseTrialStatusResult {
 }
 
 /**
- * Platform-funded trial availability.
+ * Installation platform compute availability (`GET /api/trial-status`; the path name predates
+ * the retired anonymous-trial product).
  *
  * Read alongside `useCredentials` wherever the app decides whether a user can
  * provision compute: SAM falls back to a platform cloud credential when the user has
@@ -39,7 +40,7 @@ export function useTrialStatus(queryScope: string): UseTrialStatusResult {
       query.data === undefined && query.error
         ? query.error instanceof Error
           ? query.error.message
-          : 'Failed to load trial status'
+          : 'Failed to load platform compute status'
         : null,
     refresh: () => {
       void query.refetch();

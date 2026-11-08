@@ -83,6 +83,13 @@ for arg in "$@"; do
     printf '%s\\n' "$invocation_count" > "$CAPTURED_BULK_INVOCATIONS"
     cp "$arg" "$CAPTURED_BULK_PAYLOAD"
     printf '%s\\n' "$arg" > "$CAPTURED_BULK_SOURCE_PATH"
+    if [ -n "\${FAKE_WRANGLER_BULK_FAIL:-}" ]; then
+      echo "Uploading secrets for staging"
+      echo "echoed value: \${FAKE_WRANGLER_ECHOED_VALUE:-}"
+      echo "X [ERROR] simulated wrangler failure: Authentication error [code: 10000]" >&2
+      exit 1
+    fi
+    echo "wrangler success chatter"
     exit 0
   fi
   previous_arg="$arg"
@@ -93,6 +100,39 @@ exit 64
 `;
   const fakePath = join(binDir, 'pnpm');
   writeFileSync(fakePath, fakePnpm, 'utf8');
+  chmodSync(fakePath, 0o755);
+}
+
+// Pulumi stand-in: `stack select` succeeds, `stack output <name>` prints
+// pulumi-value-<name>. FAKE_PULUMI_FAIL_OUTPUT makes one output fail after
+// printing a secret-looking value on stdout, which must never be shown.
+// FAKE_PULUMI_MISSING_OUTPUT reports one output as absent, as Pulumi does.
+function installFakePulumi(binDir: string): void {
+  const fakePulumi = `#!/bin/sh
+set -eu
+
+if [ "$1" = "stack" ] && [ "$2" = "select" ]; then
+  exit 0
+fi
+if [ "$1" = "stack" ] && [ "$2" = "output" ]; then
+  if [ "$3" = "\${FAKE_PULUMI_FAIL_OUTPUT:-}" ]; then
+    echo "pulumi-stdout-secret-value"
+    echo "error: simulated pulumi backend failure: AccessDenied reading state" >&2
+    exit 255
+  fi
+  if [ "$3" = "\${FAKE_PULUMI_MISSING_OUTPUT:-}" ]; then
+    echo "error: current stack does not have output property '$3'" >&2
+    exit 255
+  fi
+  printf 'pulumi-value-%s\\n' "$3"
+  exit 0
+fi
+
+echo "unexpected pulumi invocation: $*" >&2
+exit 64
+`;
+  const fakePath = join(binDir, 'pulumi');
+  writeFileSync(fakePath, fakePulumi, 'utf8');
   chmodSync(fakePath, 0o755);
 }
 
@@ -122,7 +162,6 @@ function configureSecretsEnv(
     CF_ACCOUNT_ID: 'cf-account-id-secret',
     DEPLOY_SIGNING_PRIVATE_KEY: 'deploy-signing-private-secret',
     DEPLOY_SIGNING_PUBLIC_KEY: expectedDeployPublic,
-    PULUMI_TRIAL_CLAIM_TOKEN_SECRET: 'trial-claim-secret',
     GH_CLIENT_ID: 'github-client-id',
     GH_CLIENT_SECRET: 'github-client-secret-line-1\ngithub-client-secret-line-2',
     GH_APP_ID: 'github-app-id',
@@ -147,6 +186,7 @@ function runConfigureSecrets(overrides: Record<string, string | undefined> = {})
     mkdirSync(binDir);
     mkdirSync(captureDir);
     installFakePnpm(binDir);
+    installFakePulumi(binDir);
 
     const result = spawnSync('bash', [configureSecretsScript, 'staging'], {
       cwd: repoRoot,
@@ -623,7 +663,6 @@ describe('deployment workflow hardening', () => {
     expect(contents).toContain('WORKER_SECRET_BULK_MAX_OPS');
     expect(contents).toContain('chmod 600 "$WORKER_SECRET_BULK_PAYLOAD"');
     expect(contents).toContain('json_escape_stdin');
-    expect(contents).toContain('>/dev/null 2>&1');
     expect(contents).not.toContain('wrangler secret put');
     expect(contents).not.toContain('wrangler secret delete');
     expect(contents).not.toContain('echo "$output"');
@@ -661,6 +700,9 @@ describe('deployment workflow hardening', () => {
       expect(payload.GITHUB_APP_PRIVATE_KEY).toBe('github-app-private-key');
       expect(payload.AI_PROXY_DEFAULT_MODEL).toBeNull();
       expect(payload.AI_PROXY_ENABLED).toBeNull();
+      // Retired anonymous-trial secrets are deleted from upgraded deployments, never set.
+      expect(payload.TRIAL_CLAIM_TOKEN_SECRET).toBeNull();
+      expect(payload.ANTHROPIC_API_KEY_TRIAL).toBeNull();
       expect(Object.keys(payload).length).toBeGreaterThan(10);
       expect(Object.keys(payload).length).toBeLessThanOrEqual(100);
     } finally {
@@ -703,6 +745,119 @@ describe('deployment workflow hardening', () => {
       const combinedOutput = `${result.stdout}\n${result.stderr}`;
       expect(combinedOutput).not.toContain('partial-secret');
       expect(combinedOutput).not.toContain('github-client-secret-line-1');
+    } finally {
+      result.cleanup();
+    }
+  });
+
+  // A self-host install failed in publish-application with nothing recorded:
+  // Pulumi reads and the Wrangler bulk apply both discarded their diagnostics.
+  const configureSecretValues = [
+    'encryption-secret',
+    'jwt-private-secret',
+    'jwt-public-secret',
+    'preview-signing-secret',
+    'vapid-private-secret',
+    'cf-api-token-secret',
+    'deploy-signing-private-secret',
+    'github-client-secret-line-1',
+    'github-client-secret-line-2',
+    'github-app-private-key',
+  ];
+
+  it('worker secret configuration names the Pulumi output and error when a read fails', () => {
+    const result = runConfigureSecrets({
+      PULUMI_STACK: 'self-host-stack',
+      SECRET_ENCRYPTION_KEY: '',
+      FAKE_PULUMI_FAIL_OUTPUT: 'encryptionKey',
+    });
+    try {
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        "could not read Pulumi output encryptionKey: 'pulumi stack output encryptionKey' exited with status 255"
+      );
+      expect(result.stderr).toContain(
+        'pulumi: error: simulated pulumi backend failure: AccessDenied reading state'
+      );
+      expect(result.stderr).toContain('No security keys available');
+      expect(result.stderr).toContain(
+        'Pulumi output reads that came back empty from stack self-host-stack: encryptionKey'
+      );
+      expect(result.bulkInvocations).toBe(0);
+
+      const combinedOutput = `${result.stdout}\n${result.stderr}`;
+      expect(combinedOutput).not.toContain('pulumi-stdout-secret-value');
+      expect(combinedOutput).not.toContain('pulumi-value-');
+    } finally {
+      result.cleanup();
+    }
+  });
+
+  it('worker secret configuration says when a Pulumi output is missing', () => {
+    const result = runConfigureSecrets({
+      PULUMI_STACK: 'self-host-stack',
+      DEPLOY_SIGNING_PRIVATE_KEY: '',
+      DEPLOY_SIGNING_PUBLIC_KEY: '',
+      FAKE_PULUMI_MISSING_OUTPUT: 'deploySigningPrivateKey',
+    });
+    try {
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        'Pulumi stack self-host-stack has no output named deploySigningPrivateKey'
+      );
+      expect(result.stderr).toContain('No deploy signing key available');
+      expect(result.stderr).toContain(
+        'Pulumi output reads that came back empty from stack self-host-stack: deploySigningPrivateKey'
+      );
+      expect(`${result.stdout}\n${result.stderr}`).not.toContain('pulumi-value-');
+    } finally {
+      result.cleanup();
+    }
+  });
+
+  it('worker secret configuration shows redacted Wrangler output when the bulk apply fails', () => {
+    const result = runConfigureSecrets({
+      FAKE_WRANGLER_BULK_FAIL: '1',
+      // Wrangler does not echo values; the stub does, to prove redaction holds.
+      FAKE_WRANGLER_ECHOED_VALUE:
+        'encryption-secret github-client-secret-line-1\ngithub-client-secret-line-2',
+    });
+    try {
+      expect(result.status).not.toBe(0);
+      expect(result.bulkInvocations).toBe(1);
+      expect(result.stderr).toContain('Worker secret bulk configuration failed');
+      expect(result.stderr).toContain('Wrangler exited with status 1');
+      expect(result.stderr).toContain(
+        'wrangler: X [ERROR] simulated wrangler failure: Authentication error [code: 10000]'
+      );
+      expect(result.stderr).toContain('wrangler: Uploading secrets for staging');
+      expect(result.stderr).toContain('2 line(s) withheld because they contained a secret value');
+
+      const combinedOutput = `${result.stdout}\n${result.stderr}`;
+      for (const value of configureSecretValues) {
+        expect(combinedOutput).not.toContain(value);
+      }
+    } finally {
+      result.cleanup();
+    }
+  });
+
+  it('worker secret configuration stays quiet when Pulumi reads and the bulk apply succeed', () => {
+    const result = runConfigureSecrets({
+      PULUMI_STACK: 'self-host-stack',
+      SECRET_ENCRYPTION_KEY: '',
+    });
+    try {
+      expect(result.status).toBe(0);
+      expect(result.stderr).toBe('');
+      expect(result.stdout).toContain('Using security keys from Pulumi state');
+      expect(result.stdout).toContain('Worker secrets configured in bulk');
+      expect(result.stdout).not.toContain('wrangler success chatter');
+      expect(result.stdout).not.toContain('pulumi-value-');
+
+      const payload = JSON.parse(result.bulkPayload ?? '{}') as Record<string, unknown>;
+      expect(payload.ENCRYPTION_KEY).toBe('pulumi-value-encryptionKey');
+      expect(payload.JWT_PRIVATE_KEY).toBe('pulumi-value-jwtPrivateKey');
     } finally {
       result.cleanup();
     }

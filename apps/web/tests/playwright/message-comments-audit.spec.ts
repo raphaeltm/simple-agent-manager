@@ -184,7 +184,6 @@ async function setupApiMocks(
     if (path.startsWith('/api/credentials')) return respond(200, []);
     if (path.startsWith('/api/provider-catalog') || path.startsWith('/api/providers/catalog'))
       return respond(200, { catalogs: [] });
-    if (path === '/api/trial/status') return respond(200, { available: false });
     if (path === '/api/transcribe') return respond(200, { text: 'Dictated from voice.' });
     if (path === '/api/agents') return respond(200, { agents: [] });
     if (path === '/api/github/installations') return respond(200, []);

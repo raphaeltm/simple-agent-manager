@@ -111,8 +111,9 @@ and interrupted notices publication recovery pass locally.
 
 The explicit `scripts/deploy/publish-codex-runtime-artifact.sh` uses only the
 content-addressed R2 key, refuses a differing existing object or ambiguous lookup
-failure, and verifies a post-upload readback. Its six scenarios pass with a mocked
-R2 CLI. The archive has been published to the experimental GitHub prerelease and its anonymous HTTPS download verified; R2 publication and anonymous Worker download were verified in staging. The download route accepts only the
+failure, and verifies the stored size and single-part MD5 ETag over R2's S3 API
+after upload (`HEAD`, no full readback). Its six scenarios pass with a mocked
+S3 endpoint (`scripts/deploy/test-publish-codex-runtime-artifact.sh`). The archive has been published to the experimental GitHub prerelease and its anonymous HTTPS download verified; R2 publication and anonymous Worker download were verified in staging. The download route accepts only the
 exact release and Linux amd64; unsupported platforms and absent storage fail
 closed. The existing Worker binary streaming helper provides immutable headers.
 

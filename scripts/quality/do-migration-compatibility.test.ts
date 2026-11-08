@@ -85,6 +85,36 @@ describe('resolveDurableObjectMigrations', () => {
     });
   });
 
+  it('keeps every Durable Object class a migration created exported by the API Worker', () => {
+    // Cloudflare rejects a deploy that stops exporting a class an existing namespace depends on
+    // unless a `deleted_classes` migration (which irreversibly deletes storage) is added. Retired
+    // classes therefore stay exported as tombstones, e.g. durable-objects/retired-trial.ts.
+    const history = loadCheckedInMigrations();
+    const created = new Set<string>();
+    for (const migration of history) {
+      for (const name of [...(migration.new_classes ?? []), ...(migration.new_sqlite_classes ?? [])])
+        created.add(name);
+      for (const name of (migration as { deleted_classes?: string[] }).deleted_classes ?? [])
+        created.delete(name);
+    }
+    const indexSource = readFileSync(
+      resolve(import.meta.dirname, '../../apps/api/src/index.ts'),
+      'utf8'
+    );
+    const exported = new Set<string>();
+    for (const match of indexSource.matchAll(/^export \{([^}]*)\} from /gm)) {
+      for (const part of match[1]!.split(',')) {
+        const name = part.trim().split(/\s+as\s+/).at(-1);
+        if (name) exported.add(name);
+      }
+    }
+
+    expect(created.size).toBeGreaterThan(0);
+    expect([...created].filter((name) => !exported.has(name))).toEqual([]);
+    for (const retired of ['TrialCounter', 'TrialEventBus', 'TrialOrchestrator'])
+      expect(created.has(retired), retired).toBe(true);
+  });
+
   it('preserves the complete migration history for an existing deployment at the latest tag', () => {
     const history = loadCheckedInMigrations();
     const latestTag = history.at(-1)?.tag;

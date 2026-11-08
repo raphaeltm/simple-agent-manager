@@ -12,7 +12,6 @@ const ADMIN_TABS: Tab[] = [
   { id: 'infrastructure', label: 'Infrastructure', path: 'infrastructure' },
   { id: 'storage', label: 'Storage', path: 'storage' },
   { id: 'ai-proxy', label: 'AI Proxy', path: 'ai-proxy' },
-  { id: 'trials', label: 'Trials', path: 'trials' },
   { id: 'costs', label: 'Costs', path: 'costs' },
   { id: 'usage', label: 'Usage', path: 'usage' },
   { id: 'quotas', label: 'Quotas', path: 'quotas' },

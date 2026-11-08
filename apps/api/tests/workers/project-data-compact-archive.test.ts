@@ -20,7 +20,13 @@ import {
   seedMessages,
   withArchiveEnv,
 } from './helpers/archive-fixtures';
-import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
+import {
+  seedInstallation,
+  seedNode,
+  seedProject,
+  seedUser,
+  seedWorkspace,
+} from './helpers/seed-d1';
 import type { ProjectDataTestDouble } from './support/expected-error-doubles';
 const testEnv = env as unknown as WorkerEnv;
 const OWNER = 'compact-archive-owner';
@@ -140,6 +146,10 @@ describe('compact R2 archive rollout', () => {
         .toArray()
     );
     const mcpToken = crypto.randomUUID();
+    // MCP authentication requires the token's workspace to be active on a live node.
+    const mcpWorkspaceId = `compact-archive-ws-${mcpToken}`;
+    await seedNode(`${mcpWorkspaceId}-node`, OWNER);
+    await seedWorkspace(mcpWorkspaceId, `${mcpWorkspaceId}-node`, OWNER, { projectId });
     await env.KV.put(
       `mcp:${mcpToken}`,
       JSON.stringify({
@@ -148,7 +158,7 @@ describe('compact R2 archive rollout', () => {
         taskMode: 'conversation',
         projectId,
         userId: OWNER,
-        workspaceId: '',
+        workspaceId: mcpWorkspaceId,
         chatSessionId: sessionId,
         createdAt: new Date().toISOString(),
       }),

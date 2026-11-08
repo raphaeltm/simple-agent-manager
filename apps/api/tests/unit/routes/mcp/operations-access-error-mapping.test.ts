@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../../src/env';
 import { mcpRoutes } from '../../../../src/routes/mcp';
+import { seedActiveMcpWorkspace } from '../../../helpers/mcp-route';
 import { createMemoryKv, createSqliteD1 } from '../../../helpers/sqlite-d1';
 
 vi.mock('../../../../src/lib/logger', async (importOriginal) => ({
@@ -52,6 +53,11 @@ describe('MCP dispatcher OperationsAccessError mapping', () => {
         createdAt: new Date().toISOString(),
       })
     );
+    seedActiveMcpWorkspace(sqlite, {
+      workspaceId: 'ws-1',
+      userId: 'user-1',
+      projectId: 'other-project',
+    });
 
     const res = await mcpRoutes.request(
       '/',

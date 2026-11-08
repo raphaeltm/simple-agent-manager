@@ -90,7 +90,6 @@ export const COMPATIBILITY_MODULES = new Set([
 /** Tier 2 (plain legacy reads) applies to canonical node-pool authority modules. */
 const LEGACY_AUTHORITY_SCOPE_DIRECTORIES = [
   'apps/api/src/durable-objects/task-runner/',
-  'apps/api/src/durable-objects/trial-orchestrator/',
   'packages/providers/src/',
 ] as const;
 
@@ -153,11 +152,6 @@ export interface ReviewedLegacyValidator {
 }
 
 export const REVIEWED_LEGACY_REQUEST_VALIDATORS: readonly ReviewedLegacyValidator[] = [
-  {
-    filePath: 'apps/api/src/durable-objects/trial-orchestrator/steps.ts',
-    owner: 'resolveTrialVmSize',
-    reason: 'validates the deprecated trial VM size setting before canonical native placement',
-  },
   {
     filePath: 'apps/api/src/durable-objects/sam-session/tools/dispatch-task.ts',
     owner: 'dispatchTask',

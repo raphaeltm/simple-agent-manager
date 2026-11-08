@@ -173,7 +173,6 @@ async function setupMocks(page: Page, viewer: Viewer): Promise<Captured> {
     if (path.startsWith('/api/notifications'))
       return respond(200, { notifications: [], unreadCount: 0 });
     if (path.startsWith('/api/credentials')) return respond(200, []);
-    if (path === '/api/trial/status') return respond(200, { available: false });
     if (path === '/api/agents') return respond(200, { agents: [] });
     if (path === '/api/github/installations') return respond(200, []);
     if (path === '/api/workspaces') return respond(200, []);

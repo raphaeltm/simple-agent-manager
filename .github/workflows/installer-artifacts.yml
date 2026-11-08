@@ -1,0 +1,171 @@
+name: Installer Artifacts
+
+# Builds the VM agent and the API container images exactly as an installation's
+# builder would and attaches them, with sam-installer-artifacts.json, to a release.
+# Installations whose installer sets ARTIFACT_BASE_URL to the release download URL
+# place these instead of compiling; anything missing or mismatched still builds.
+# See scripts/deploy/installer-engine-prebuilt.ts (consumer) and
+# scripts/deploy/installer-engine-publish.ts (publisher).
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to attach artifacts to
+        type: string
+        required: true
+  # Pull requests that change the publisher build and stage everything without
+  # uploading, so a broken publisher is caught before a release depends on it.
+  pull_request:
+    paths:
+      - .github/workflows/installer-artifacts.yml
+      - scripts/deploy/installer-engine-publish.ts
+      - scripts/deploy/installer-engine-prebuilt.ts
+
+permissions: {}
+
+concurrency:
+  group: installer-artifacts-${{ inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+env:
+  # Must match the Go toolchain installations pin (installer-engine.ts preflight).
+  # Not named GO_VERSION: packages/vm-agent/Makefile embeds GO_VERSION in the
+  # binary, and an installation builds with the Makefile's own default.
+  GO_TOOLCHAIN_VERSION: '1.26.10'
+
+jobs:
+  publish:
+    name: Build and attach installer artifacts
+    if: github.repository == 'raphaeltm/simple-agent-manager'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      # Uploads release assets; fork pull requests still get a read-only token.
+      contents: write
+    services:
+      registry:
+        image: registry:2.8.3
+        ports:
+          - 5000:5000
+    steps:
+      - name: Checkout release
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.sha }}
+          # resolve-vm-agent-release.sh needs real history.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_TOOLCHAIN_VERSION }}
+          cache: false
+
+      - name: Record Go toolchain
+        id: go
+        run: |
+          version=$(go version)
+          [[ "$version" == "go version go${GO_TOOLCHAIN_VERSION} linux/amd64" ]]
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Resolve VM-agent release
+        id: agent
+        run: |
+          output=$(bash scripts/deploy/resolve-vm-agent-release.sh "$(git rev-parse HEAD)")
+          printf '%s\n' "$output" >> "$GITHUB_OUTPUT"
+
+      # Same sequence as the engine's build phase, so the outputs and the image
+      # build contexts match what an installation of this commit would produce.
+      - name: Build VM agent and container artifacts
+        env:
+          RELEASE: ${{ steps.agent.outputs.release }}
+          BUILD_DATE: ${{ steps.agent.outputs.build_date }}
+        run: |
+          bash scripts/deploy/prepare-codex-runtime-artifact.sh apps/api/container-artifacts
+          make -C packages/vm-agent build-all VERSION="$RELEASE" BUILD_DATE="$BUILD_DATE"
+          make -C packages/vm-agent -o prepare-codex-runtime -o build-linux-amd64 prepare-container \
+            VERSION="$RELEASE" BUILD_DATE="$BUILD_DATE"
+
+      - name: Install crane
+        run: |
+          # Same pinned release the installation builder uses.
+          curl --fail --silent --show-error --location --proto '=https' -o "$RUNNER_TEMP/crane.tar.gz" \
+            https://github.com/google/go-containerregistry/releases/download/v0.20.2/go-containerregistry_Linux_x86_64.tar.gz
+          echo "c14340087103ba9dadf61d45acd20675490fd0ccbd56ac7901fc1b502137f44b  $RUNNER_TEMP/crane.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/crane.tar.gz" -C "$RUNNER_TEMP" crane
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Build container images as OCI layouts
+        id: images
+        run: |
+          work="$RUNNER_TEMP/images"
+          mkdir -p "$work"
+          # class_name and image pairs from the top-level wrangler.toml.
+          node --input-type=module -e "
+            import * as TOML from '@iarna/toml';
+            import { readFileSync } from 'node:fs';
+            for (const c of TOML.parse(readFileSync('apps/api/wrangler.toml','utf8')).containers ?? [])
+              console.log(c.class_name + '\t' + c.image);
+          " > "$work/classes"
+          : > "$work/args"
+          while IFS=$'\t' read -r class dockerfile; do
+            repo="localhost:5000/$(tr '[:upper:]' '[:lower:]' <<< "$class"):release"
+            # Built the way Wrangler builds it: one linux/amd64 image manifest,
+            # no attestation index.
+            docker build --platform linux/amd64 --provenance=false --sbom=false \
+              -f "apps/api/${dockerfile#./}" -t "$repo" apps/api
+            docker push "$repo"
+            crane manifest "$repo" |
+              jq -e '.mediaType | test("vnd.docker.distribution.manifest.v2|vnd.oci.image.manifest")' > /dev/null
+            # The registry keeps the manifest as pushed, so this digest is what
+            # an installation's crane push of the same layout must report.
+            digest=$(crane digest "$repo")
+            crane pull --format=oci "$repo" "$work/$class"
+            tar -cf "$work/$class.tar" -C "$work/$class" .
+            # Each image is ~1.3 GB; keep one copy on the runner.
+            rm -rf "${work:?}/$class"
+            docker image rm "$repo" > /dev/null
+            printf '%s\n' --image "$class=$work/$class.tar=$digest" >> "$work/args"
+          done < "$work/classes"
+
+      - name: Stage artifacts and manifest
+        env:
+          RELEASE: ${{ steps.agent.outputs.release }}
+          BUILD_DATE: ${{ steps.agent.outputs.build_date }}
+          GO_TOOLCHAIN: ${{ steps.go.outputs.version }}
+        run: |
+          mapfile -t images < "$RUNNER_TEMP/images/args"
+          pnpm exec tsx scripts/deploy/installer-engine-publish.ts \
+            --out "$RUNNER_TEMP/artifacts" --release "$RELEASE" --build-date "$BUILD_DATE" \
+            --go-version "$GO_TOOLCHAIN" "${images[@]}"
+          ls -l "$RUNNER_TEMP/artifacts"
+
+      - name: Keep manifest for review
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sam-installer-artifacts
+          path: ${{ runner.temp }}/artifacts/sam-installer-artifacts.json
+
+      - name: Attach to release
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          # The manifest goes last so a reader never sees it before the files it names.
+          find "$RUNNER_TEMP/artifacts" -type f ! -name sam-installer-artifacts.json -print0 |
+            xargs -0 gh release upload "$TAG" --clobber
+          gh release upload "$TAG" --clobber "$RUNNER_TEMP/artifacts/sam-installer-artifacts.json"

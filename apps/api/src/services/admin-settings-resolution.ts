@@ -326,13 +326,11 @@ async function legacyKvDetails(
   kvReads?: KvReads
 ) {
   if (!def.legacyKv) return null;
-  let key = operationalKvKey(env, def);
-  if (def.legacyKv === 'trials') key = env.TRIALS_ENABLED_KV_KEY ?? 'trials:enabled';
+  const key = operationalKvKey(env, def);
   if (!key) return null;
   const value = await legacyKv(env, key, fresh, adminSettingCacheMs(env, def.name), 0, kvReads);
   if (value === null) return null;
-  const enabled =
-    def.legacyKv === 'trials' ? value === 'true' : value !== 'false' && value !== 'disabled';
+  const enabled = value !== 'false' && value !== 'disabled';
   return kvDetails(env, def, enabled);
 }
 export async function resolved(
@@ -443,7 +441,7 @@ function outageValue(
   )
     return false;
   if (def.type === 'boolean') {
-    if (name.startsWith('connector.') || name === 'trials.enabled') return false;
+    if (name.startsWith('connector.')) return false;
     return disabled.get(resolveD1BindingIdentity(env.DATABASE))?.has(name)
       ? false
       : def.defaultValue;
@@ -462,10 +460,7 @@ export async function readAdminSettings(env: Env, options: { fresh?: boolean } =
     );
     const kvReads = new Map<string, Promise<{ value: string | null } | { error: unknown }>>();
     for (const def of ADMIN_SETTINGS_REGISTRY) {
-      const key =
-        def.legacyKv === 'trials'
-          ? (env.TRIALS_ENABLED_KV_KEY ?? 'trials:enabled')
-          : operationalKvKey(env, def);
+      const key = operationalKvKey(env, def);
       if (key && !kvReads.has(key))
         kvReads.set(
           key,

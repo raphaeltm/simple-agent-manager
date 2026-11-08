@@ -27,7 +27,7 @@ export interface McpTokenEnv {
   MCP_TOKEN_MAX_LIFETIME_SECONDS?: string;
 }
 
-export type McpInstructionContextType = 'task' | 'conversation' | 'trial' | 'direct-workspace';
+export type McpInstructionContextType = 'task' | 'conversation' | 'direct-workspace';
 
 export type McpTaskMode = 'task' | 'conversation';
 

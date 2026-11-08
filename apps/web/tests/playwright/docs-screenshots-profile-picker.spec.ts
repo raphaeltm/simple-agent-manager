@@ -157,7 +157,6 @@ async function setupMocks(page: Page) {
       return respond([{ id: 'cred-docs', provider: 'hetzner', createdAt: '2026-09-01' }]);
     if (path === '/api/github/installations')
       return respond([{ id: 'inst-docs', accountName: 'acme', accountType: 'Organization' }]);
-    if (path === '/api/trial/status') return respond({ available: false });
     if (path === '/api/agents')
       return respond({
         agents: [

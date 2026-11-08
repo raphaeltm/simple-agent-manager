@@ -1,6 +1,6 @@
 ---
 title: Admin Settings
-description: Change SAM's sign-in providers, SAM Connector limits, anonymous trials, background jobs, and the limits for collaboration, workflows, AI models and agent email from the app, without redeploying.
+description: Change SAM's sign-in providers, SAM Connector limits, background jobs, and the limits for collaboration, workflows, AI models and agent email from the app, without redeploying.
 ---
 
 A superadmin can change a set of platform settings from **Admin → Settings**, on a phone or a
@@ -10,8 +10,9 @@ and the Workflows settings (under Operations) in v2026.10.22, AI models in v2026
 and workload identity in v2026.10.24, the Connector read limits in v2026.10.26, and the GitHub
 trigger queue limits in the first release after v2026.10.26.
 Before v2026.10.17, sign-in providers and the SAM Connector were set in `/setup` and
-**Admin → Integrations**, trials on **Admin → Trials**, and the background-job switches only through
-GitHub Environment variables and KV.
+**Admin → Integrations**, and the background-job switches only through GitHub Environment variables
+and KV. The anonymous-trial switch (`trials.enabled`, once on **Admin → Trials**) was removed with
+the trial product in November 2026; a value saved for it earlier is ignored.
 
 ## Open the settings
 
@@ -19,7 +20,7 @@ Select **Admin** in the sidebar (only superadmins see it), then the **Settings**
 titled **Runtime settings**. An account must be an approved, active superadmin to use it; admins
 can't.
 
-Settings are grouped into **OAuth**, **Connector**, **Operations**, **Trials**, **Collaboration**,
+Settings are grouped into **OAuth**, **Connector**, **Operations**, **Collaboration**,
 **Chat**, **AI models**, and **Email**. Type in **Search settings** to filter by name, group, or
 description. Each card is named after the setting, split into words (`operations.cronSweepsEnabled`
 shows as **operations · cron Sweeps Enabled**), and shows:
@@ -50,7 +51,7 @@ shows as **operations · cron Sweeps Enabled**), and shows:
    budgets and unpriced-call charge. Other number limits, including the Connector read limits, save
    straight away. **Reset override** always asks.
 3. The page says **Settings saved.** The server that saved it uses the new value at once, and the
-   rest of SAM within a minute (within 30 seconds for trials, cron sweeps, and Durable Object alarms).
+   rest of SAM within a minute (within 30 seconds for cron sweeps and Durable Object alarms).
 
 OAuth client secrets are write-only: their card says **Current secret is never returned**. To
 replace one, type the new value in **Enter replacement secret**; an empty field keeps the current
@@ -92,10 +93,10 @@ nobody can sign in:
 
 For each setting SAM uses the first of these that exists:
 
-1. A value saved in the app, here or on the older **Admin → Integrations** and **Admin → Trials**
-   pages, which change the same settings (**Source: database**).
+1. A value saved in the app, here or on the older **Admin → Integrations** page, which changes the
+   same settings (**Source: database**).
 2. The matching Worker variable, set through your GitHub Environment (**Source: environment**).
-3. An older KV value: `trials:enabled`, or the cron and alarm switches (**Source: kv**).
+3. An older KV value: the cron and alarm switches (**Source: kv**).
 4. The code default (**Source: default**).
 
 So once a value is saved in the app, changing its GitHub Environment variable does nothing until you
@@ -129,7 +130,6 @@ before you try again.
 | Operations    | `operations.stalledTaskClassifierEnabled`                                                                                                                        | on                                             | The check that [ends stalled turns](/docs/guides/session-troubleshooting/#sam-ended-a-stalled-turn)                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | `STALLED_TASK_CLASSIFIER_ENABLED`                                                 |
 | Operations    | `operations.samOperatorDisabled`                                                                                                                                 | off                                            | Set to **Enabled**, turns the [SAM assistant](/docs/guides/sam-assistant/) off for everyone, keeping each person's own choice                                                                                                                                                                                                                                                                                                                                                                                                                                                 | —                                                                                 |
 | Operations    | `operations.githubTriggerQueueMaxPendingLimit`, `…TtlSecondsLimit`                                                                                               | 1,000 events; 2,592,000 seconds (30 days)      | The most a [GitHub trigger](/docs/guides/triggers/#when-a-github-trigger-is-busy) can set for waiting events and how long they wait. Applies when someone creates a trigger or changes its queue settings                                                                                                                                                                                                                                                                                                                                                                     | —                                                                                 |
-| Trials        | `trials.enabled`                                                                                                                                                 | off                                            | Anonymous trials (keep off; see [First Login & Admin Access](/docs/guides/self-hosting/#first-login--admin-access))                                                                                                                                                                                                                                                                                                                                                                                                                                                           | KV `trials:enabled`                                                               |
 | Collaboration | `collaboration.*` (below)                                                                                                                                        | see below                                      | Shared chats, comments, and idea updates                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | —                                                                                 |
 | Operations    | `nodes.usageWindowMinutes`, `nodes.usageChunkLookbackMinutes`, `nodes.usageMaxHistoryWorkspaces`, `nodes.usageMaxWorkspaces`, `nodes.usageMaxChunksPerWorkspace` | 60, 60, 150, 500, 48                           | On the [Nodes page](/docs/guides/compute-pools/#what-each-machine-is-using): minutes of CPU and memory history drawn (15–360); how early a history chunk may start and still be read, which must cover the longest chunk a VM agent uploads (15–1,440); most workspaces per person whose history is read (1–500, running first, each machine's newest before any machine's second); most workspaces per person listed (50–2,000, running and most recently changed first); most history chunks read per workspace, newest first (4–500). The page says what each cap left out | —                                                                                 |
 | Chat          | `chat.profileUsageWindowDays`, `chat.profilePinCandidateLimit` (below)                                                                                           | 30                                             | How far back the new-chat profile picker looks                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | —                                                                                 |
@@ -204,6 +204,24 @@ These **Operations** settings bound automatic retries after an eviction wake fai
 | `operations.evictionRecoveryRetryBatchSize` | 5       | 1–100        | Failed eviction wakes selected per cron sweep                                                                                       |
 | `operations.evictionRecoveryRetryWallMs`    | 10,000  | 1–30,000     | Milliseconds before starting another retry; an in-flight durable wake may finish afterward                                          |
 | `operations.evictionRecoveryRetryDelayMs`   | 60,000  | 1–86,400,000 | Minimum interval after failure or preclaim deferral; deferrals rotate fairly without resetting the failure anchor or attempt budget |
+
+## Dead wake claims
+
+A sleeping VM chat is woken by a task that holds the chat's wake claim until the wake finishes or
+fails. If that task stops partway, or something else cancels it, the claim can outlive the wake. The
+chat then keeps showing a wake that never finishes, and new messages can be refused. A scheduled
+sweep ends such claims once the claim is older than the wake lease
+(`SESSION_SNAPSHOT_RECOVERY_CLAIM_LEASE_MS`, default 10 minutes) and its task is no longer waking and
+has not changed for that long. The chat then shows the wake as failed and the saved conversation is
+kept. The next message wakes it again while the snapshot is unexpired and the wake budget allows: the
+budget recovers from the recorded failure after `SESSION_SNAPSHOT_RECOVERY_ATTEMPT_DECAY_MS` (15
+minutes by default), and only when the ended task proves the attempt finished. A wake whose task is
+missing keeps its attempt counted. The sweep never touches a wake whose task is still
+queued, delegated, in progress or awaiting follow-up.
+
+| Setting                                 | Default | Range | What it controls                      |
+| --------------------------------------- | ------- | ----- | ------------------------------------- |
+| `operations.deadWakeReconcileBatchSize` | 10      | 1–50  | Dead wake claims ended per cron sweep |
 
 ## Node lifetime
 
@@ -433,21 +451,21 @@ across every user of the installation. Everything they return that a user, agent
 wrote (log lines, error messages, event text) comes back marked as untrusted data, and the agent
 is told never to follow instructions found in it.
 
-| Tool                                                             | What it answers                                                                                                                                                                                                                    |
-| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ops_find_anomalies`                                             | What is broken now: empty nodes past the warm-node cleanup grace, stale heartbeats, nodes stuck destroying, running workspaces whose task ended, idle in-progress tasks, snapshot failures, deletion quarantine, pending incidents |
-| `ops_list_nodes`                                                 | Every node with status, health, last heartbeat and metrics, age, owner and workspace counts                                                                                                                                        |
-| `ops_get_node`                                                   | One node with its lifecycle state, placement explanation, workspaces, health events and recent incidents                                                                                                                           |
-| `ops_get_session_story`                                          | Everything recorded about one task, chat session or workspace in one answer                                                                                                                                                        |
-| `ops_timeline`                                                   | One time-ordered list of events for a task, chat session, workspace or node, merged from every store                                                                                                                               |
-| `ops_search_errors`                                              | Platform errors filtered by source, node, workspace, task, text and time                                                                                                                                                           |
-| `ops_query_worker_logs`                                          | The same Cloudflare Workers log search as **Admin → Logs**, sharing its per-user rate limit                                                                                                                                        |
-| `ops_node_logs`                                                  | A running node's logs, filtered on the server with `contains`, capped in lines and bytes                                                                                                                                           |
-| `ops_node_system_info`, `ops_node_events`, `ops_node_containers` | Live system info, agent events and containers from a running node                                                                                                                                                                  |
-| `ops_workspace_agent_sessions`                                   | Live agent sessions on a workspace                                                                                                                                                                                                 |
-| `ops_capture_debug_package`                                      | Saves a node's full debug package into the Operations project's library (see below)                                                                                                                                                |
-| `ops_why_is_node_alive`                                          | Why a node still exists: its active workspaces, warm/claim state, the last keep/kill decisions and a plain verdict                                                                                                                 |
-| `ops_get_node_log_capture`                                       | One black box log capture (see below), filtered on the server with `source` and `contains`                                                                                                                                         |
+| Tool                                                             | What it answers                                                                                                                                                                                                                                        |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ops_find_anomalies`                                             | What is broken now: empty nodes past the warm-node cleanup grace, stale heartbeats, nodes stuck destroying, running workspaces whose task ended, idle in-progress tasks, snapshot failures, wakes stuck waking, deletion quarantine, pending incidents |
+| `ops_list_nodes`                                                 | Every node with status, health, last heartbeat and metrics, age, owner and workspace counts                                                                                                                                                            |
+| `ops_get_node`                                                   | One node with its lifecycle state, placement explanation, workspaces, health events and recent incidents                                                                                                                                               |
+| `ops_get_session_story`                                          | Everything recorded about one task, chat session or workspace in one answer                                                                                                                                                                            |
+| `ops_timeline`                                                   | One time-ordered list of events for a task, chat session, workspace or node, merged from every store                                                                                                                                                   |
+| `ops_search_errors`                                              | Platform errors filtered by source, node, workspace, task, text and time                                                                                                                                                                               |
+| `ops_query_worker_logs`                                          | The same Cloudflare Workers log search as **Admin → Logs**, sharing its per-user rate limit                                                                                                                                                            |
+| `ops_node_logs`                                                  | A running node's logs, filtered on the server with `contains`, capped in lines and bytes                                                                                                                                                               |
+| `ops_node_system_info`, `ops_node_events`, `ops_node_containers` | Live system info, agent events and containers from a running node                                                                                                                                                                                      |
+| `ops_workspace_agent_sessions`                                   | Live agent sessions on a workspace                                                                                                                                                                                                                     |
+| `ops_capture_debug_package`                                      | Saves a node's full debug package into the Operations project's library (see below)                                                                                                                                                                    |
+| `ops_why_is_node_alive`                                          | Why a node still exists: its active workspaces, warm/claim state, the last keep/kill decisions and a plain verdict                                                                                                                                     |
+| `ops_get_node_log_capture`                                       | One black box log capture (see below), filtered on the server with `source` and `contains`                                                                                                                                                             |
 
 These tools reach a node through the same path as a node owner's own **Logs** and **System info**
 views. When the Operations project's agent starts a task, its instructions include a short
@@ -485,6 +503,7 @@ attempts count).
 | `operations.opsAnomalyTerminalTaskGraceMs`    | 900,000    | 0–7 days      | Time after a task ends before its still-running workspace is reported                                                                                                                                           |
 | `operations.opsAnomalyIdleTaskMinutes`        | 60         | 1–10,080      | Minutes without task or workspace activity before an in-progress task is reported                                                                                                                               |
 | `operations.opsAnomalyDestroyingNodeHours`    | 6          | 1–720         | Hours a node may stay destroying, counted from its last heartbeat, before its unfinished teardown is reported with any recorded cleanup refusal                                                                 |
+| `operations.opsAnomalyWakingMinutes`          | 60         | 1–43,200      | Minutes a sleeping chat may stay waking, counted from its wake claim, before the wake is reported (`session_wake_stalled`), with no lookback limit                                                              |
 | `operations.opsAnomalyLookbackHours`          | 24         | 1–720         | Hours of snapshot failures and deletion-quarantine reports the anomaly check looks at                                                                                                                           |
 | `operations.opsAnomalyMaxPerClass`            | 25         | 1–200         | Findings returned per anomaly type; each type still reports its total                                                                                                                                           |
 | `operations.opsNodeLogMaxLines`               | 200        | 1–1,000       | Most log lines one `ops_node_logs` call returns                                                                                                                                                                 |
@@ -569,8 +588,8 @@ again once one has expired.
 
 ## If the database can't be read
 
-The page shows an error instead of guessing. Meanwhile SAM fails safe: the Connector and trials
-switch off, and cron sweeps, alarms, and the stalled-turn check stay switched off if they already
+The page shows an error instead of guessing. Meanwhile SAM fails safe: the Connector switches
+off, and cron sweeps, alarms, and the stalled-turn check stay switched off if they already
 were. Sign-in and security checks refuse rather than fall back, and so does anything that needs the
 linked-work, Account Map, GitHub trigger queue or workload identity limits. The SAM assistant
 switches off. The collaboration, chat, workflow, email and Connector read limits, and the AI-model
@@ -581,9 +600,9 @@ lowered. A single saved value that SAM can't read stops the whole page from load
 
 Updating to v2026.10.17 or later changes nothing by itself: no values are copied into the app, and
 each setting keeps the value it had (from its variable, KV, or default) until someone saves one here.
-New installations keep their defaults, with anonymous trials off.
+New installations keep their defaults.
 
-Releases before v2026.10.17 ignore values saved here: they read trials, cron sweeps, and alarms only
+Releases before v2026.10.17 ignore values saved here: they read cron sweeps and alarms only
 from KV, and the stalled-turn check only from its variable. Those releases can no longer be deployed
 anyway ([Update forward, not back](/docs/guides/self-hosting/#option-a-update-self-hosted-instance-workflow-recommended)),
 but if you run one, set the KV switches to the values you want and check them. Rolling back the
@@ -609,15 +628,15 @@ The GitHub route returns `504 GITHUB_TIMEOUT` when its overall deadline expires.
 
 These control the live Google Cloud catalog described in [Google Cloud](/docs/guides/google-cloud/#machine-types-zones-and-prices).
 
-| Setting                                     | Default                                         | Allowed range     | Applies to                                                                                              |
-| ------------------------------------------- | ----------------------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------- |
-| `gcpCatalog.machineTypes`                   | e2-medium; e2, n2d, t2d standard up to 16 vCPUs | 1–100 exact names | Machine types SAM offers from Google Cloud, in every zone that has them. Arm (ARM64) types are skipped. |
-| `gcpCatalog.priceTableTtlMinutes`           | 1440                                            | 60–10080          | How old the stored Google Cloud price list may get before the background step refreshes it.             |
-| `gcpCatalog.priceRetryMinutes`              | 60                                              | 5–1440            | Wait after a failed price refresh before trying again.                                                  |
-| `gcpCatalog.priceMaxPages`                  | 20                                              | 1–200             | Most pages of price data read in one refresh; needing more fails rather than storing a partial list.    |
-| `gcpCatalog.priceRequestTimeoutMs`          | 30000                                           | 1000–120000       | Each request for a page of Google Cloud price data.                                                     |
-| `gcpCatalog.priceRefreshCredentialAttempts` | 3                                               | 1–20              | Credentials tried per refresh, platform first; a retry continues with the next ones.                    |
-| `gcpCatalog.priceRefreshBudgetMs`           | 90000                                           | 10000–240000      | Most time one price refresh may take across every page and credential it tries.                         |
+| Setting                                     | Default                                         | Allowed range     | Applies to                                                                                               |
+| ------------------------------------------- | ----------------------------------------------- | ----------------- | -------------------------------------------------------------------------------------------------------- |
+| `gcpCatalog.machineTypes`                   | e2-medium; e2, n2d, t2d standard up to 16 vCPUs | 1–100 exact names | Machine types SAM offers from Google Cloud, in every zone that has them. Arm (ARM64) types are skipped.  |
+| `gcpCatalog.priceTableTtlMinutes`           | 1440                                            | 60–10080          | How old the stored Google Cloud price list may get before the background step refreshes it.              |
+| `gcpCatalog.priceRetryMinutes`              | 60                                              | 5–1440            | Wait after a failed price refresh before trying again.                                                   |
+| `gcpCatalog.priceMaxPages`                  | 20                                              | 1–200             | Most pages of price data read in one refresh; needing more fails rather than storing a partial list.     |
+| `gcpCatalog.priceRequestTimeoutMs`          | 30000                                           | 1000–120000       | Each request for a page of Google Cloud price data.                                                      |
+| `gcpCatalog.priceRefreshCredentialAttempts` | 3                                               | 1–20              | Credentials tried per refresh, platform first; a retry continues with the next ones.                     |
+| `gcpCatalog.priceRefreshBudgetMs`           | 90000                                           | 10000–240000      | Most time one price refresh may take across every page and credential it tries.                          |
 | `gcpCatalog.apiIssueTtlMinutes`             | 10080                                           | 60–43200          | How long a Google API problem Google reported stays shown on a credential; a successful check clears it. |
 
 ### Provider fallback
@@ -625,9 +644,17 @@ These control the live Google Cloud catalog described in [Google Cloud](/docs/gu
 | Setting                                          | Default | Allowed range | Applies to                                                                                                                     |
 | ------------------------------------------------ | ------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | `operations.provisioningAttemptsPerProviderTier` | 8       | 1–50          | Most offerings one task tries from one provider source under `fallback-chain` before moving to the pool's next-ranked provider |
+| `operations.workspacePlacementMaxRejections`     | 3       | 1–20          | Consecutive times the node a task selected may refuse its final workspace reservation before the task fails                    |
 
 See [Provider order](/docs/guides/compute-pools/#provider-order). Each attempt is a create request
 to the provider, so this bounds the work one task does before it reaches the next provider.
+
+A refused workspace reservation sends the task back through node selection, about 6 seconds per
+cycle, so `operations.workspacePlacementMaxRejections` bounds a node that can never admit the
+request to roughly 18 seconds at the default (about 2 minutes at the maximum). The failure names
+the refusal reasons, which are also recorded in the task's placement diagnostics, and a node the
+task provisioned goes to the warm pool. A refusal caused only by a busy build queue is a wait, not
+a refusal, and does not count. The count resets when a reservation succeeds.
 
 ### Session and configuration read recovery
 

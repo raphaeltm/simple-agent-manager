@@ -88,7 +88,6 @@ describe('buildAIGatewayMetadata', () => {
       userId: 'u1',
       workspaceId: 'ws1',
       projectId: 'p1',
-      trialId: 't1',
       modelId: 'claude-sonnet-5',
       stream: true,
       hasTools: true,
@@ -100,7 +99,6 @@ describe('buildAIGatewayMetadata', () => {
       userId: 'u1',
       workspaceId: 'ws1',
       projectId: 'p1',
-      trialId: 't1',
       modelId: 'claude-sonnet-5',
       stream: true,
       hasTools: true,
@@ -110,7 +108,7 @@ describe('buildAIGatewayMetadata', () => {
     });
   });
 
-  it('omits null projectId and undefined trialId', () => {
+  it('omits null projectId and never emits a trialId', () => {
     const meta = JSON.parse(buildAIGatewayMetadata({
       userId: 'u1',
       workspaceId: 'ws1',

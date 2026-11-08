@@ -426,7 +426,8 @@ deploy pipeline, and the deploy creates the Connector's storage.
   approval can no longer use the SAM and project agent chats, manage API tokens, or open workspaces
   in the browser. → [Signup approval](/docs/guides/self-hosting/#signup-approval)
 - **Keep anonymous trials off.** Every trial visitor runs under one shared account and can land on
-  the same machine as another visitor, so per-user isolation doesn't separate them.
+  the same machine as another visitor, so per-user isolation doesn't separate them. (Anonymous
+  trials were removed entirely in November 2026.)
   → [First Login & Admin Access](/docs/guides/self-hosting/#first-login--admin-access)
 - **About 180 Worker variables left `wrangler.toml`.** They only repeated SAM's built-in defaults,
   so nothing changes when you deploy. If your fork edited one of those lines, syncing will conflict

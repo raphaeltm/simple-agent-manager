@@ -321,6 +321,43 @@ func TestSessionHost_CodexCrashRecovery_ReportsRecovered(t *testing.T) {
 	assertSuccessfulRecoveryReportsRecovered(t, host, "openai-codex", "codex recovery did not report recovered")
 }
 
+func TestSessionHost_CodexCrashRecoveryStopsInterruptedPromptReports(t *testing.T) {
+	reports := newActivityReportCapture(t)
+	host := newRecoveryTestHost(t, 30*time.Second)
+	defer host.Stop()
+	host.config.ControlPlaneURL = reports.server.URL
+	host.config.CallbackToken = "callback-token"
+	host.config.ProjectID = "project"
+	host.config.NodeID = "node"
+	host.config.HTTPClient = reports.server.Client()
+	host.config.ActivityRereportInterval = 10 * time.Millisecond
+	oldProc, _, _ := armRecoverablePrompt(t, host, "openai-codex", 10*time.Second, true)
+	attempt, ok := host.beginPrompt(func() {}, nil)
+	if !ok {
+		t.Fatal("initial prompt was not admitted")
+	}
+	host.markPromptStarted(attempt, "acp-session-1", 1, "viewer-1")
+	waitFor(t, time.Second, func() bool { return reports.count() >= 2 })
+	var starts atomic.Int32
+	completed := startRecoveryMonitor(t, host, oldProc, "openai-codex", countingSpawn(t, &starts))
+	finishWithPeerDisconnect(host)
+	expectCompletion(t, completed, crashRecoveredStopReason, 2*time.Second, "recovery did not settle")
+	waitFor(t, time.Second, func() bool {
+		_, payloads := reports.snapshot()
+		return len(payloads) > 0 && payloads[len(payloads)-1].Activity == "idle"
+	})
+	// Observe multiple real reporter intervals after the positive idle callback.
+	time.Sleep(60 * time.Millisecond)
+	_, payloads := reports.snapshot()
+	if last := payloads[len(payloads)-1]; last.Activity != "idle" {
+		t.Fatalf("recovered idle overwritten by interrupted prompt reporter: %#v", last)
+	}
+	_, inFlight := host.activePromptAttempt()
+	if host.Status() != HostReady || inFlight {
+		t.Fatal("recovered host is not ready for a new prompt")
+	}
+}
+
 func TestSessionHost_CodexCrashRecovery_LoadsCapturedSessionAfterLivePrerequisitesClear(t *testing.T) {
 	host := newRecoveryTestHost(t, 30*time.Second)
 	defer host.Stop()

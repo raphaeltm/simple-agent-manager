@@ -60,9 +60,12 @@ vi.mock('../../../src/lib/ulid', () => ({
   ulid: () => 'generated-ulid',
 }));
 
+// The identity endpoint authenticates through the workspace-lifecycle-bound MCP check;
+// that check's own behaviour (inactive/deleted workspace, identity mismatch) is covered
+// against real SQL in tests/unit/services/mcp-token-lifecycle.test.ts.
 const mockValidateMcpToken = vi.fn();
-vi.mock('../../../src/services/mcp-token', () => ({
-  validateMcpToken: (...args: unknown[]) => mockValidateMcpToken(...args),
+vi.mock('../../../src/services/mcp-token-lifecycle', () => ({
+  validateActiveWorkspaceMcpToken: (...args: unknown[]) => mockValidateMcpToken(...args),
 }));
 
 // verifyCallbackToken mock kept as a canary — the identity token endpoint must NOT
@@ -238,6 +241,7 @@ describe('GET /:id/deployment-identity-token', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toEqual({ token: 'fixture' });
+    expect(mockValidateMcpToken).toHaveBeenCalledWith(mockEnv, 'mcp-token-1');
 
     // Verify signIdentityToken was called with correct audience
     expect(mockSignIdentityToken).toHaveBeenCalledWith(

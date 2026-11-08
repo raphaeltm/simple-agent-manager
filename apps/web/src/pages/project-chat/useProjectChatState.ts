@@ -95,7 +95,7 @@ export function useProjectChatState() {
   const initialLoadRef = useRef<Promise<ChatSessionResponse[]>>(Promise.resolve([]));
   // The first list came from the route prefetch; see the first-socket-open refresh below.
   const listFromPrefetchRef = useRef(false);
-  // Credentials, trial status, provider catalog, agent catalog and agent profiles all
+  // Credentials, platform compute availability, provider catalog, agent catalog and agent profiles all
   // come from shared TanStack queries. Before this migration each was fetched by a
   // mount effect local to this hook, duplicating requests that the settings pages,
   // onboarding wizards, task forms and workspace creation were already making.
@@ -476,7 +476,7 @@ export function useProjectChatState() {
 
       if (selectedRuntime !== 'cf-container' && !hasCloudCredentials) {
         setSubmitError(
-          'Cloud credentials required. Connect a cloud provider in Settings, or ask your admin to enable platform trial.'
+          'Cloud credentials required. Connect a cloud provider in Settings, or ask your admin to add a platform cloud credential.'
         );
         return;
       }

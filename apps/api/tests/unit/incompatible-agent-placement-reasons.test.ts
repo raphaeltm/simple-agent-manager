@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import { evaluateReusableNodeCandidate } from '../../src/durable-objects/task-runner/node-placement-candidate';
-import { resolveWorkspaceAdmissionPolicy } from '../../src/services/workspace-resource-capacity';
+import {
+  DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB,
+  resolveWorkspaceAdmissionPolicy,
+} from '../../src/services/workspace-resource-capacity';
 
 function evaluate(memoryMb: number) {
   return evaluateReusableNodeCandidate({
@@ -47,8 +50,9 @@ describe('resource rejection reason before allocation authority', () => {
     ]);
   });
   it('retains authority reason when hardware including reserve is sufficient', () => {
-    expect(evaluate(3584).diagnosticHost.reasons).toEqual([
-      'Host is outside the current pool allocation authority',
-    ]);
+    // Exact fit: 4096 MB minus the default host reserve.
+    expect(
+      evaluate(4096 - DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB).diagnosticHost.reasons
+    ).toEqual(['Host is outside the current pool allocation authority']);
   });
 });

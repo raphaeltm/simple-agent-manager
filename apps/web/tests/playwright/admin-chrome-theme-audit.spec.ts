@@ -23,7 +23,6 @@ function makeCostSummary(empty = false) {
       totalRequests: empty ? 0 : 123456789,
       totalInputTokens: empty ? 0 : 987654321,
       totalOutputTokens: empty ? 0 : 123456789,
-      trialCostUsd: empty ? 0 : 12.3456,
       cachedRequests: empty ? 0 : 4321,
       errorRequests: empty ? 0 : 98,
       byModel: empty

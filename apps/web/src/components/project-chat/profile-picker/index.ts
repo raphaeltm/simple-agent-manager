@@ -22,3 +22,5 @@ export { NewChatProfileCards } from './NewChatProfileCards';
 export { ProfileAvatar } from './ProfileAvatar';
 export { ProfilePickerSheet } from './ProfilePickerSheet';
 export { ProfileToControl } from './ProfileToControl';
+export { ProfileUsageNudge } from './ProfileUsageNudge';
+export { type ProfileUsage, usageEntry, useProfileUsages } from './usage';

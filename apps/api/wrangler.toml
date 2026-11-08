@@ -188,30 +188,6 @@ OBSERVABILITY_ERROR_STACK_MAX_LENGTH = "4096"
 OBSERVABILITY_ERROR_USER_AGENT_MAX_LENGTH = "512"
 VM_INCIDENT_R2_PREFIX = "diagnostic-incidents"
 VM_INCIDENT_RETENTION_DAYS = "7"
-ERROR_REPORT_FLUSH_INTERVAL = "30s"
-ERROR_REPORT_MAX_BATCH_SIZE = "10"
-ERROR_REPORT_MAX_BATCH_BYTES = "32768"
-ERROR_REPORT_MAX_QUEUE_SIZE = "1000"
-ERROR_REPORT_HTTP_TIMEOUT = "10s"
-ERROR_REPORT_RETRY_INITIAL = "1s"
-ERROR_REPORT_RETRY_MAX = "5m"
-ERROR_REPORT_MAX_ATTEMPTS = "20"
-ERROR_REPORT_DB_PATH = "/var/lib/vm-agent/error-reports.db"
-ERROR_REPORT_DB_BUSY_TIMEOUT = "5s"
-ERROR_REPORT_SPOOL_DIR = "/var/lib/vm-agent/diagnostic-incidents"
-ERROR_REPORT_ARTIFACT_MAX_BYTES = "2097152"
-ERROR_REPORT_SPOOL_MAX_BYTES = "20971520"
-ERROR_REPORT_RETENTION = "24h"
-ERROR_REPORT_COLLECTOR_TIMEOUT = "10s"
-ERROR_REPORT_MAX_COLLECTOR_DOCS = "8"
-ERROR_REPORT_MAX_DOCUMENT_BYTES = "131072"
-ERROR_REPORT_MAX_VALUE_DEPTH = "8"
-ERROR_REPORT_MAX_VALUE_ITEMS = "256"
-ERROR_REPORT_MAX_STRING_BYTES = "4096"
-ERROR_REPORT_EVENT_LIMIT = "100"
-ERROR_REPORT_RESPONSE_MAX_BYTES = "4096"
-ERROR_REPORT_STORED_ERROR_MAX_BYTES = "512"
-ERROR_REPORT_COLLECTOR_CONCURRENCY = "1"
 VM_AGENT_PROTOCOL = "https"
 VM_AGENT_PORT = "8443"
 DEVCONTAINER_CACHE_ENABLED = "true"
@@ -224,7 +200,7 @@ HETZNER_BASE_IMAGE = "docker-ce"
 TASK_RUNNER_WORKSPACE_READY_POLL_INTERVAL_MS = "30000"
 NODE_LIFECYCLE_MAX_DESTROYING_AGE_MS = "86400000"
 NODE_WORKSPACE_IDLE_TIMEOUT_MS = "1800000"
-# AI Inference Proxy (Cloudflare AI Gateway for trial/zero-config users)
+# AI Inference Proxy (Cloudflare AI Gateway for platform/zero-config users)
 AI_PROXY_ENABLED = "true"
 AI_PROXY_DEFAULT_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8"
 AI_PROXY_REQUEST_BODY_MAX_BYTES = "1048576"
@@ -244,14 +220,6 @@ TRIGGER_NAME_MAX_LENGTH = "100"
 # set it to "false" via GitHub environment variable or Worker var to force VM runtime.
 # CF_CONTAINER_ENABLED = "false"
 # CF_CONTAINER_PORT_READY_TIMEOUT_MS = "180000"
-# Trial Onboarding (zero-friction URL-to-workspace)
-# See docs/guides/trial-configuration.md for the full tunable list.
-TRIAL_ANONYMOUS_USER_ID = "system_anonymous_trials"
-TRIAL_EXPIRE_BATCH_SIZE = "1000"
-TRIAL_CLEANUP_BATCH_SIZE = "25"
-TRIAL_CLEANUP_DEADLINE_MS = "45000"
-TRIAL_NODE_DELETION_LOCK_STALE_MS = "600000"
-TRIAL_DEFAULT_WORKSPACE_PROFILE = "lightweight"
 
 # Cloudflare Artifacts for SAM-native Git repos (GitHub-optional projects)
 # NOTE: [[artifacts]] binding requires Cloudflare account-level access to Artifacts.
@@ -342,21 +310,6 @@ class_name = "GitHubUserAccessTokenLock"
 name = "GITLAB_USER_ACCESS_TOKEN_LOCK"
 class_name = "GitLabUserAccessTokenLock"
 
-# Durable Object for trial-onboarding monthly cap counter (singleton; keyed by YYYY-MM)
-[[durable_objects.bindings]]
-name = "TRIAL_COUNTER"
-class_name = "TrialCounter"
-
-# Durable Object for per-trial SSE event buffering (keyed by trialId)
-[[durable_objects.bindings]]
-name = "TRIAL_EVENT_BUS"
-class_name = "TrialEventBus"
-
-# Durable Object for alarm-driven trial provisioning (one DO per trialId)
-[[durable_objects.bindings]]
-name = "TRIAL_ORCHESTRATOR"
-class_name = "TrialOrchestrator"
-
 # Durable Object for per-project orchestration (one DO per projectId)
 [[durable_objects.bindings]]
 name = "PROJECT_ORCHESTRATOR"
@@ -416,6 +369,9 @@ new_sqlite_classes = ["NotificationService"]
 tag = "v6"
 new_classes = ["CodexRefreshLock"]  # Intentionally stateless: uses D1 for credential storage, no per-instance SQLite needed
 
+# v7-v9 created the classes of the retired anonymous-trial product. Applied migration tags are
+# immutable history, so they stay. The classes are still exported as inert tombstones and are
+# intentionally unbound (apps/api/src/durable-objects/retired-trial.ts).
 [[migrations]]
 tag = "v7"
 new_sqlite_classes = ["TrialCounter"]
@@ -529,22 +485,16 @@ binding = "AI"
 # because they break Vitest — Cloudflare issue #9343).
 
 # Cron triggers:
-# - Every 5 minutes: provisioning timeout checks, warm node cleanup, stuck task recovery,
-#   trial expiry sweep
+# - Every 5 minutes: provisioning timeout checks, warm node cleanup, stuck task recovery
 # - Hourly at :30: monthly AI cost aggregation per user (Gateway logs → KV cache)
 # - Daily at 03:00 UTC: analytics event forwarding to external platforms (Phase 4)
-# - Daily at 04:00 UTC: trial waitlist purge (rows with notified_at older than
-#   TRIAL_WAITLIST_PURGE_DAYS). Configurable via TRIAL_CRON_WAITLIST_CLEANUP.
-# - Monthly on the 1st at 05:00 UTC: trial counter rollover audit (prune DO rows beyond
-#   TRIAL_COUNTER_KEEP_MONTHS). Configurable via TRIAL_CRON_ROLLOVER_CRON.
-#   NOTE: Intentionally offset from the 03:00 daily job to avoid collision on the 1st.
-# NOTE: Cron strings are matched exactly in index.ts:scheduled() to dispatch between
-# the different jobs. If you change them here, update the comparisons in the scheduled
-# handler (or the corresponding TRIAL_CRON_* env vars).
+# NOTE: Cron strings are matched exactly in scheduled/handler.ts:scheduled() to dispatch
+# between the different jobs. If you change them here, update the comparisons there.
 [triggers]
-crons = ["*/5 * * * *", "30 * * * *", "0 3 * * *", "0 4 * * *", "0 5 1 * *"]
+crons = ["*/5 * * * *", "30 * * * *", "0 3 * * *"]
 
 # Secrets (set via wrangler secret bulk):
+# - BOOTSTRAP_OWNER_EMAIL (optional — immutable verified first-owner identity for installer deployments)
 # - GITHUB_CLIENT_ID
 # - GITHUB_CLIENT_SECRET
 # - GITHUB_APP_ID
@@ -579,7 +529,5 @@ crons = ["*/5 * * * *", "30 * * * *", "0 3 * * *", "0 4 * * *", "0 5 1 * *"]
 # - GA4_MEASUREMENT_ID (optional — Google Analytics 4 measurement ID, paired with GA4_API_SECRET)
 # - R2_ACCESS_KEY_ID (optional — R2 S3-compatible API token key ID, enables task attachment presigned uploads)
 # - R2_SECRET_ACCESS_KEY (optional — R2 S3-compatible API token secret, enables task attachment presigned uploads)
-# - TRIAL_CLAIM_TOKEN_SECRET (required when trials are enabled — HMAC secret for sam_trial_claim / sam_trial_fingerprint cookies. 32+ bytes base64.)
 # - CF_AIG_TOKEN (optional — Cloudflare AI Gateway Unified Billing token; enables OpenAI/Anthropic models without separate API keys)
-# - ANTHROPIC_API_KEY_TRIAL (optional — Anthropic API key for trial traffic when not using Workers AI)
 # - SMOKE_TEST_AUTH_ENABLED (optional — enables smoke-test token auth for test environments)

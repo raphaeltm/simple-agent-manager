@@ -58,7 +58,7 @@ describe('admin settings authorization and API', () => {
     ]) {
       for (const body of [
         undefined,
-        { expectedRevision: 0, changes: [{ name: 'trials.enabled', value: true }] },
+        { expectedRevision: 0, changes: [{ name: 'operations.stalledTaskClassifierEnabled', value: false }] },
       ])
         expect((await request(headers, body)).status).toBe(
           headers['x-user'] === 'none' ? 401 : 403
@@ -70,14 +70,14 @@ describe('admin settings authorization and API', () => {
   });
   it('requires revision, rejects unknown fields and reports stale revisions', async () => {
     expect((await request()).status).toBe(200);
-    expect((await request({}, { changes: [{ name: 'trials.enabled', value: true }] })).status).toBe(
+    expect((await request({}, { changes: [{ name: 'operations.stalledTaskClassifierEnabled', value: false }] })).status).toBe(
       400
     );
     expect(
       (
         await request(
           {},
-          { expectedRevision: 0, changes: [{ name: 'trials.enabled', value: true }], extra: 1 }
+          { expectedRevision: 0, changes: [{ name: 'operations.stalledTaskClassifierEnabled', value: false }], extra: 1 }
         )
       ).status
     ).toBe(400);
@@ -85,7 +85,7 @@ describe('admin settings authorization and API', () => {
       (
         await request(
           {},
-          { expectedRevision: 0, changes: [{ name: 'trials.enabled', value: true }] }
+          { expectedRevision: 0, changes: [{ name: 'operations.stalledTaskClassifierEnabled', value: false }] }
         )
       ).status
     ).toBe(200);
@@ -93,7 +93,7 @@ describe('admin settings authorization and API', () => {
       (
         await request(
           {},
-          { expectedRevision: 0, changes: [{ name: 'trials.enabled', value: false }] }
+          { expectedRevision: 0, changes: [{ name: 'operations.stalledTaskClassifierEnabled', value: true }] }
         )
       ).status
     ).toBe(409);
@@ -104,7 +104,7 @@ describe('admin settings authorization and API', () => {
     );
     const response = await request(
       {},
-      { expectedRevision: 0, changes: [{ name: 'trials.enabled', value: true }] }
+      { expectedRevision: 0, changes: [{ name: 'operations.stalledTaskClassifierEnabled', value: false }] }
     );
     expect(response.status).toBe(503);
     expect(await response.text()).not.toContain('private-plaintext');

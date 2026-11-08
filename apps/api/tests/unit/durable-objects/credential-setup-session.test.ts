@@ -3,8 +3,7 @@
  * (apps/api/src/durable-objects/credential-setup-session/index.ts).
  *
  * Harness notes (read before extending):
- *  - `vi.mock('cloudflare:workers', ...)` mirrors the established pattern in
- *    tests/unit/durable-objects/trial-counter.test.ts — it lets the DO module
+ *  - `vi.mock('cloudflare:workers', ...)` lets the DO module
  *    (which imports `DurableObject` from the Workers-runtime-only
  *    'cloudflare:workers' specifier) load under the plain Node test runner.
  *  - `services/sandbox` (getSandboxInstance/destroySandboxInstance) and

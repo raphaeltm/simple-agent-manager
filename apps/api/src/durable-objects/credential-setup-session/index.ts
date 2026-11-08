@@ -23,8 +23,7 @@
  * no orphan (rules 43/47).
  *
  * Storage: embedded SQLite (wrangler `new_sqlite_classes`). DDL is inlined in
- * the constructor (CREATE TABLE IF NOT EXISTS) — no separate DO migration file,
- * mirroring TrialCounter.
+ * the constructor (CREATE TABLE IF NOT EXISTS) — no separate DO migration file.
  */
 import type { AgentType, CredentialKind } from '@simple-agent-manager/shared';
 import { DurableObject } from 'cloudflare:workers';

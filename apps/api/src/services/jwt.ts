@@ -209,17 +209,14 @@ export async function signNodeManagementToken(
   };
 }
 
-/** Token scope discriminator. Legacy tokens (pre-scoping) have no scope claim. */
+/** Token scope discriminator. Every callback token names exactly one scope. */
 export type CallbackTokenScope = 'node' | 'workspace';
 
-/**
- * Payload structure for verified callback tokens.
- * `scope` is optional for backward compatibility with legacy tokens.
- */
+/** Payload structure for verified callback tokens. */
 export interface CallbackTokenPayload {
   workspace: string;
   type: 'callback';
-  scope?: CallbackTokenScope;
+  scope: CallbackTokenScope;
 }
 
 export interface TerminalTokenPayload {
@@ -246,9 +243,13 @@ export interface LocalForwardTokenPayload {
 
 /**
  * Verify a callback token from VM Agent.
- * Returns the payload including the optional scope claim.
  *
- * @throws Error if token is invalid, expired, or has wrong audience
+ * Fails closed on anything SAM never mints: a missing or unknown `scope` (unscoped tokens
+ * stopped being issued in #483, and every renewal path mints scoped tokens) or a missing
+ * `iat` (every signer calls `setIssuedAt`, and the Instant stale-callback guard needs it).
+ *
+ * @throws AppError 401 if the token is invalid, expired, has the wrong audience, or lacks
+ *   a required claim; 403 if `expectedScope` is set and does not match.
  */
 export async function verifyCallbackToken(
   token: string,
@@ -280,17 +281,22 @@ export async function verifyCallbackToken(
     throw callbackTokenUnauthorized('Missing workspace claim');
   }
 
-  // Extract and validate optional scope claim (legacy tokens won't have it)
   const rawScope = payload.scope;
-  if (rawScope !== undefined && rawScope !== 'node' && rawScope !== 'workspace') {
-    throw callbackTokenUnauthorized('Invalid token scope claim');
+  if (rawScope !== 'node' && rawScope !== 'workspace') {
+    throw callbackTokenUnauthorized(
+      rawScope === undefined ? 'Missing token scope claim' : 'Invalid token scope claim'
+    );
   }
-  const scope = rawScope as CallbackTokenScope | undefined;
+  const scope: CallbackTokenScope = rawScope;
+
+  if (typeof payload.iat !== 'number' || !Number.isSafeInteger(payload.iat) || payload.iat <= 0) {
+    throw callbackTokenUnauthorized('Missing token issue time');
+  }
 
   // Enforce expected scope when specified (unified scope check — F-010)
   if (options?.expectedScope && scope !== options.expectedScope) {
     throw callbackTokenForbidden(
-      `Token scope '${scope ?? 'none'}' does not match expected '${options.expectedScope}'`
+      `Token scope '${scope}' does not match expected '${options.expectedScope}'`
     );
   }
 

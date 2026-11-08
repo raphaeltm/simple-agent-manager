@@ -88,6 +88,18 @@ jobs:
             infra:
               - 'infra/**'
             deploy-scripts:
+              - 'package.json'
+              - 'turbo.json'
+              - 'apps/*/package.json'
+              - 'packages/*/package.json'
+              - 'packages/vm-agent/Makefile'
+              - 'packages/cli/Makefile'
+              - 'apps/installer/scripts/**'
+              - 'apps/www/scripts/build-tracker.ts'
+              - 'apps/api/Dockerfile.sandbox'
+              - 'apps/api/Dockerfile.vm-agent-container'
+              - 'apps/api/scripts/**'
+              - 'apps/api/container-entrypoints/**'
               - 'scripts/deploy/**'
               # The generated Worker config is built from wrangler.toml, so its text-binding
               # guard and effective-config tests must run when only wrangler.toml changes.
@@ -108,6 +120,7 @@ jobs:
               - '.github/workflows/deploy-www.yml'
               # Shared sources the marketing site imports from @simple-agent-manager/ui
               - 'packages/ui/src/glass/**'
+              - 'packages/ui/src/brand/**'
               - 'packages/ui/package.json'
             repo-quality:
               - 'scripts/quality/check-runtime-tunables*'
@@ -366,7 +379,9 @@ jobs:
     name: Test
     needs: [changes]
     if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.repo-quality == 'true'
-    timeout-minutes: 20
+    # Normal runs take 12-20 min; on slower runners 3 runs on 2026-11-08 were
+    # cancelled at the old 20-min limit with no failing suite.
+    timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -599,6 +614,11 @@ jobs:
       # compatibility regression suite (clean install vs applied history).
       - name: Run deploy and quality script tests
         run: pnpm quality:scripts:test
+
+      - name: Verify installer engine, runtime integrity and bounded proof contracts
+        run: |
+          pnpm exec vitest run --config scripts/deploy/installer-engine.vitest.config.ts
+          node --test scripts/deploy/installer-pure-build.test.mjs scripts/deploy/installer-builder-bootstrap.test.mjs scripts/deploy/installer-builder-tools.test.mjs scripts/deploy/installer-build-cache.test.mjs scripts/deploy/installer-source-cache.test.mjs
 
       - name: Validate wrangler binding consistency
         run: pnpm quality:wrangler-bindings

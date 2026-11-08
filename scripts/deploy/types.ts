@@ -311,7 +311,6 @@ export const REQUIRED_SECRETS = [
   'JWT_PUBLIC_KEY',
   'DEPLOY_SIGNING_PRIVATE_KEY',
   'DEPLOY_SIGNING_PUBLIC_KEY',
-  'TRIAL_CLAIM_TOKEN_SECRET',
 ] as const;
 
 // Note: HETZNER_TOKEN is NOT a platform secret.

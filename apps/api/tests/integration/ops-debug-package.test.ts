@@ -25,7 +25,13 @@ import type { Env } from '../../src/env';
 import { downloadFile } from '../../src/services/file-library';
 import { purgeExpiredDebugPackages } from '../../src/services/fleet-ops/debug-packages';
 import { FLEET_OPS_DEFAULTS } from '../../src/services/fleet-ops/settings-definitions';
-import { callMcpTool, createJsonKv, createMcpApp, storeMcpToken } from '../helpers/mcp-route';
+import {
+  callMcpTool,
+  createJsonKv,
+  createMcpApp,
+  seedActiveMcpWorkspace,
+  storeMcpToken,
+} from '../helpers/mcp-route';
 import { createAllSchemaTables, createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
 const OPS_PROJECT = 'proj-ops';
@@ -152,6 +158,11 @@ beforeEach(async () => {
     projectId: OPS_PROJECT,
     userId: 'admin',
     workspaceId: 'ws-a',
+  });
+  seedActiveMcpWorkspace(main, {
+    workspaceId: 'ws-a',
+    userId: 'admin',
+    projectId: OPS_PROJECT,
   });
 });
 
@@ -348,6 +359,11 @@ describe('debug package reads and retention', () => {
       projectId: OPS_PROJECT,
       userId: 'member',
       workspaceId: 'ws-m',
+    });
+    seedActiveMcpWorkspace(main, {
+      workspaceId: 'ws-m',
+      userId: 'member',
+      projectId: OPS_PROJECT,
     });
     const body = await capture();
     libraryFile('notes', { directory: '/engineering/', upload_source: 'user' });

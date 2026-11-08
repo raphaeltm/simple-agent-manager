@@ -44,11 +44,6 @@ const DO_MIGRATION_FILES = [
     import.meta.dirname,
     '../../apps/api/src/durable-objects/project-data/anchored-comments-migration.ts'
   ),
-  // trial-counter.ts has inline DDL (CREATE TABLE IF NOT EXISTS) — scan it too
-  resolve(
-    import.meta.dirname,
-    '../../apps/api/src/durable-objects/trial-counter.ts'
-  ),
   // setup-session-pool uses inline constructor DDL (pure DO-SQLite) — scan it.
   // NOTE: credential-setup-session is intentionally NOT scanned here: it mixes DO
   // SQLite with D1 writes (UPDATE agent_credential_setup_sessions ... WHERE id=?),

@@ -5,9 +5,7 @@ import { useLocation,useNavigate } from 'react-router';
 import { useAuth } from '../components/AuthProvider';
 import { useLoginProviders } from '../hooks/useLoginProviders';
 import { signInWithGitHub, signInWithGitLab, signInWithGoogle } from '../lib/auth';
-
-const PUBLIC_WEBSITE_URL =
-  import.meta.env.VITE_PUBLIC_WEBSITE_URL || 'https://simple-agent-manager.org';
+import { PUBLIC_WEBSITE_URL } from '../lib/public-website';
 
 const AGENTS = ['Claude Code', 'OpenAI Codex', 'Gemini CLI', 'Mistral Vibe'];
 

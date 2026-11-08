@@ -74,7 +74,6 @@ async function setupMocks(
       return fulfill(route, { entries: [], nextCursor: null, hasMore: false });
     // App-shell requests, in the shapes the other audit specs serve.
     if (path === '/api/providers/catalog') return fulfill(route, { catalogs: [] });
-    if (path === '/api/trial/status') return fulfill(route, { available: false });
     if (path === '/api/agents') return fulfill(route, { agents: [] });
     if (path === '/api/github/installations') return fulfill(route, []);
     if (path === '/api/credentials') return fulfill(route, []);

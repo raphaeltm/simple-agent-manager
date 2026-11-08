@@ -8,7 +8,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   assertWorkerTextBindingLimit,
   checkTailWorkerExists,
+  CLOUDFLARE_STANDARD_WORKER_TEXT_BINDING_MAX,
   CLOUDFLARE_WORKER_TEXT_BINDING_GUARD_LIMIT,
+  containerImageOverrides,
   countWorkerTextBindings,
   detectArtifactsAvailable,
   encodeWorkflowCommandData,
@@ -140,6 +142,43 @@ describe('sync wrangler config', () => {
     const generated = generateApiWorkerEnv(checkedIn, outputs, 'staging', false, false, null);
     expect(countWorkerTextBindings(generated)).toBeLessThanOrEqual(
       CLOUDFLARE_WORKER_TEXT_BINDING_GUARD_LIMIT
+    );
+  });
+
+  it('deploys digest-pinned prebuilt images in place of Dockerfiles, and rejects anything else', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    const checkedIn = TOML.parse(
+      readFileSync(join(import.meta.dirname, '../../apps/api/wrangler.toml'), 'utf-8')
+    ) as WranglerToml;
+    const reference = `registry.cloudflare.com/${'f'.repeat(32)}/s123abc-api-prod-sandboxdo-prebuilt@sha256:${'b'.repeat(64)}`;
+    vi.stubEnv('SAM_CONTAINER_IMAGE_OVERRIDES', JSON.stringify({ SandboxDO: reference }));
+    const generated = generateApiWorkerEnv(checkedIn, outputs, 'prod', false, false, null);
+    const images = Object.fromEntries(
+      (generated.containers ?? []).map((container) => [container.class_name, container.image])
+    );
+    expect(images.SandboxDO).toBe(reference);
+    // A class without an override still builds its Dockerfile.
+    expect(images.VmAgentContainer).toBe('./Dockerfile.vm-agent-container');
+    for (const bad of [
+      { SandboxDO: 'docker.io/library/busybox:latest' },
+      { SandboxDO: reference.replace(/@sha256:.*/, ':latest') },
+      { 'bad-class': reference },
+    ])
+      expect(() => containerImageOverrides(JSON.stringify(bad))).toThrow();
+    expect(() => containerImageOverrides('[]')).toThrow();
+    expect(containerImageOverrides('')).toEqual({});
+  });
+
+  it('keeps a self-hosted install under the standard account text-binding limit', () => {
+    // Installer deploys run without SAM's GitHub Environment overrides on accounts with the
+    // standard limit; every secret configure-secrets.sh can set is counted.
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    const checkedIn = TOML.parse(
+      readFileSync(join(import.meta.dirname, '../../apps/api/wrangler.toml'), 'utf-8')
+    ) as WranglerToml;
+    const generated = generateApiWorkerEnv(checkedIn, outputs, 'prod', false, false, null);
+    expect(countWorkerTextBindings(generated)).toBeLessThanOrEqual(
+      CLOUDFLARE_STANDARD_WORKER_TEXT_BINDING_MAX
     );
   });
 
@@ -1251,9 +1290,25 @@ describe('Worker vars omitted because they equal the code default', () => {
     return comparable;
   }
 
+  const RETIRED_WITH_ANONYMOUS_TRIALS = [
+    'TRIAL_MONTHLY_CAP',
+    'TRIAL_WORKSPACE_TTL_MS',
+    'TRIAL_ANONYMOUS_USER_ID',
+    'TRIAL_EXPIRE_BATCH_SIZE',
+    'TRIAL_CLEANUP_BATCH_SIZE',
+    'TRIAL_CLEANUP_DEADLINE_MS',
+    'TRIAL_NODE_DELETION_LOCK_STALE_MS',
+    'TRIAL_AGENT_TYPE_STAGING',
+    'TRIAL_AGENT_TYPE_PRODUCTION',
+    'TRIAL_DEFAULT_WORKSPACE_PROFILE',
+    'TRIALS_ENABLED_KV_KEY',
+  ] as const;
+
   it('pins every original binding to its retained value or proven runtime default', () => {
     const current = readCheckedInWrangler().vars ?? {};
-    const dead = new Set(bindingAudit.removedDead);
+    // Vars whose only consumer was deleted with the anonymous-trial product (2026-11-08) are
+    // dead too: nothing reads them, so they are neither retained nor recorded as defaults.
+    const dead = new Set([...bindingAudit.removedDead, ...RETIRED_WITH_ANONYMOUS_TRIALS]);
     expect(Object.keys(bindingAudit.variables)).toHaveLength(283);
     for (const [name, value] of Object.entries(bindingAudit.variables)) {
       if (has(current, name)) {
@@ -1284,7 +1339,9 @@ describe('Worker vars omitted because they equal the code default', () => {
           ...OMITTED_WORKER_VAR_DEFAULTS,
           ...Object.fromEntries(
             Object.entries(bindingAudit.variables).filter(
-              ([name]) => !bindingAudit.removedDead.includes(name)
+              ([name]) =>
+                !bindingAudit.removedDead.includes(name) &&
+                !(RETIRED_WITH_ANONYMOUS_TRIALS as readonly string[]).includes(name)
             )
           ),
           ...checkedIn.vars,

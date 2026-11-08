@@ -3,7 +3,9 @@ import { Check, ChevronRight } from 'lucide-react';
 import { useId } from 'react';
 
 import { profileCardSet, profileSubtitle } from './model';
-import { ProfileAvatar } from './ProfileAvatar';
+import { ProfileUsageAvatar } from './ProfileUsageAvatar';
+import { type ProfileUsage, usageEntry, usageNotice, usageSpoken } from './usage';
+import { UsageNotice } from './UsageNotice';
 
 /** Cards fit two rows on a phone and one row on desktop; the rest is one tap away. */
 const CARD_LIMIT = 4;
@@ -15,18 +17,26 @@ const GRID_CLASSES = 'grid grid-cols-1 gap-2 @2xs:grid-cols-2 @2xl:grid-cols-4';
 
 function ProfileCard({
   profile,
+  usage,
   selected,
   onSelect,
-}: Readonly<{ profile: AgentProfile; selected: boolean; onSelect: () => void }>) {
+}: Readonly<{
+  profile: AgentProfile;
+  usage: ProfileUsage | null | undefined;
+  selected: boolean;
+  onSelect: () => void;
+}>) {
   const descriptionId = useId();
   const subtitle = profileSubtitle(profile);
+  const spoken = usageSpoken(usage);
+  const notice = usageNotice(usage);
   return (
     <button
       type="button"
       onClick={onSelect}
       aria-pressed={selected}
-      // Name and what runs it; a long description is read after, as the description.
-      aria-label={`${profile.name}, ${subtitle}`}
+      // Name, what runs it and what's left; a long description is read after.
+      aria-label={[profile.name, subtitle, spoken].filter(Boolean).join(', ')}
       aria-describedby={profile.description ? descriptionId : undefined}
       className={`relative flex min-h-[76px] min-w-0 flex-col gap-1 rounded-xl border p-3 text-left transition-colors ${
         selected
@@ -36,7 +46,7 @@ function ProfileCard({
     >
       {/* Room for the check only where it shows, so long names keep their full width. */}
       <span className={`flex min-w-0 items-center gap-2 ${selected ? 'pr-4' : ''}`}>
-        <ProfileAvatar profile={profile} size="sm" />
+        <ProfileUsageAvatar profile={profile} usage={usage} size="sm" />
         <span className="line-clamp-2 break-words text-sm font-semibold leading-tight text-fg-primary">
           {profile.name}
         </span>
@@ -53,6 +63,7 @@ function ProfileCard({
         </span>
       )}
       <span className="truncate text-[11px] text-fg-muted">{subtitle}</span>
+      {notice && usage && <UsageNotice usage={usage} text={notice} />}
     </button>
   );
 }
@@ -76,6 +87,7 @@ export function NewChatProfileCards({
   pickerState,
   loading,
   selectedProfileId,
+  usages,
   onSelect,
   onShowAll,
 }: Readonly<{
@@ -83,6 +95,8 @@ export function NewChatProfileCards({
   pickerState: ProfilePickerState | undefined;
   loading: boolean;
   selectedProfileId: string | null;
+  /** What's left on each profile's account; null while loading or not shown. */
+  usages?: ReadonlyMap<string, ProfileUsage> | null;
   onSelect: (profileId: string) => void;
   onShowAll: () => void;
 }>) {
@@ -109,6 +123,7 @@ export function NewChatProfileCards({
               <ProfileCard
                 key={profile.id}
                 profile={profile}
+                usage={usageEntry(usages, profile.id)}
                 selected={profile.id === selectedProfileId}
                 onSelect={() => onSelect(profile.id)}
               />
@@ -125,6 +140,7 @@ export function NewChatProfileCards({
               <ProfileCard
                 key={profile.id}
                 profile={profile}
+                usage={usageEntry(usages, profile.id)}
                 selected={profile.id === selectedProfileId}
                 onSelect={() => onSelect(profile.id)}
               />

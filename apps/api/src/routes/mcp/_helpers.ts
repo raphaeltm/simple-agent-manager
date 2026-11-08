@@ -10,7 +10,8 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
 import { getPlatformOperationLimits } from '../../operations/limits';
-import { type McpTokenData, type McpTokenEnv, validateMcpToken } from '../../services/mcp-token';
+import type { McpTokenData } from '../../services/mcp-token';
+import { validateActiveWorkspaceMcpToken } from '../../services/mcp-token-lifecycle';
 import { readStorageActivation } from '../../services/reliability-storage';
 import { LIVE_TASK_STATUSES, WAKEABLE_TASK_STATUSES } from '../../services/task-status';
 
@@ -393,18 +394,18 @@ export async function checkMcpRateLimit(
 /**
  * Returns [tokenData, rawToken] or [null, null].
  * Unlike extractBearerToken(), this returns null on missing/malformed auth
- * because MCP endpoints fall through to unauthenticated handling.
+ * because MCP endpoints fall through to unauthenticated handling. A token whose
+ * workspace is no longer active is rejected too (`validateActiveWorkspaceMcpToken`).
  */
 export async function authenticateMcpRequest(
   authHeader: string | undefined,
-  kv: KVNamespace,
-  env?: McpTokenEnv
+  env: Env
 ): Promise<[McpTokenData, string] | [null, null]> {
   if (!authHeader?.startsWith('Bearer ') || authHeader.length <= 7) {
     return [null, null];
   }
   const token = authHeader.slice(7);
-  const data = await validateMcpToken(kv, token, env);
+  const data = await validateActiveWorkspaceMcpToken(env, token);
   return data ? [data, token] : [null, null];
 }
 

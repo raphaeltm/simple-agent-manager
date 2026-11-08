@@ -185,7 +185,7 @@ SAM automatically deduplicates notifications:
   claim guarantees that overlapping cron invocations do not send duplicates.
 
 Operational sweep failures are sent only to active superadmin accounts. System
-and anonymous-trial sentinel users are excluded. The notification links to the
+users (status `system`) are excluded. The notification links to the
 admin log viewer for investigation and respects the recipient's in-app
 `cron_failure` preference.
 

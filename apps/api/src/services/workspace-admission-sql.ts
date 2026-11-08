@@ -182,13 +182,8 @@ export function workspaceAdmissionEligibilitySql(): string {
          AND ${trustedHardwareCapacitySql()}
          AND ${finalMeasuredPressurePredicateSql()}
          AND (n.metrics_json IS NULL OR (
-           n.trusted_provider_instance_memory_mb *
-             CAST(json_extract(n.metrics_json, '$.memoryPercent') AS REAL) / 100.0
-             + active.memory_mb - MIN(active.observed_memory_credit_mb,
-               n.trusted_provider_instance_memory_mb *
-                 CAST(json_extract(n.metrics_json, '$.memoryPercent') AS REAL) / 100.0)
-             + requested.memory_mb
-           <= n.trusted_provider_instance_memory_mb - policy.host_memory_reserve_mb
+           ${measuredHostOverheadMbSql()} + active.memory_mb + requested.memory_mb
+             <= n.trusted_provider_instance_memory_mb
          ))
          AND (
            (
@@ -209,6 +204,18 @@ export function workspaceAdmissionEligibilitySql(): string {
              AND ((active.disk_mb + requested.disk_mb) <= n.trusted_provider_instance_disk_gb * 1024)
            )
          )`;
+}
+
+/**
+ * SQL twin of `measuredHostOverheadMb` (`workspace-resource-capacity.ts`): the host reserve, or the
+ * measured use no workspace observation explains when that is larger. Charging measured use on top
+ * of the reserve counted host overhead twice; see the evaluator for the condition this encodes.
+ */
+function measuredHostOverheadMbSql(): string {
+  const measured = `(n.trusted_provider_instance_memory_mb *
+    CAST(json_extract(n.metrics_json, '$.memoryPercent') AS REAL) / 100.0)`;
+  return `MAX(policy.host_memory_reserve_mb,
+    ${measured} - MIN(active.observed_memory_credit_mb, ${measured}))`;
 }
 
 /** Match the advisory evaluator's credit; creating/recovery rows always retain

@@ -6,6 +6,10 @@ user-invocable: false
 
 # SAM Environment Variable Reference
 
+## Installer first-owner binding
+
+`BOOTSTRAP_OWNER_EMAIL` is an optional API Worker secret set by the user-owned installer before public login. Only the matching provider-verified email can establish the first administrator; leave unset for ordinary installations. Preserve it during routine updates. It is distinct from `SETUP_TOKEN`, which authorizes provider configuration rather than user login.
+
 ## GitHub Environment Secrets (GitHub Settings -> Environments -> production)
 
 Uses `GH_*` prefix because GitHub Actions secret names cannot start with `GITHUB_*`.
@@ -44,10 +48,9 @@ Uses `GH_*` prefix because GitHub Actions secret names cannot start with `GITHUB
 | Secret   | `VAPID_PRIVATE_KEY`                                | No (auto-generated; override only)                                 |
 | Secret   | `VAPID_PUBLIC_KEY`                                 | No (derived during deploy; override only)                          |
 | Secret   | `VAPID_SUBJECT`                                    | No (generated contact URI; override only)                          |
-| Secret   | `TRIAL_CLAIM_TOKEN_SECRET`                         | No (auto-generated)                                                |
 | Variable | `ORIGIN_CA_CERT_VALIDITY_DAYS`                     | No (default: 7)                                                    |
 
-`D1_MIGRATION_CHURNING_TABLES` is a comma-separated `<binding>.<table>` subset of the reviewed defaults: `DATABASE.deployment_releases`, `DATABASE.diagnostic_reconciliation_state`, `DATABASE.github_trigger_inbox`, `DATABASE.github_webhook_deliveries`, `DATABASE.project_files`, `DATABASE.registry_credential_rate_limits`, `DATABASE.session_snapshots`, `DATABASE.sessions`, `DATABASE.trial_waitlist`, `DATABASE.trigger_executions`, `DATABASE.verifications`, `DATABASE.vm_provisioning_leases`, `DATABASE.webhook_deliveries`, and `OBSERVABILITY_DATABASE.platform_errors`. It may narrow but cannot expand this list; unset uses all reviewed defaults. `D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT` accepts `0`–`100`; a decrease exactly at the configured limit is accepted and a larger decrease blocks.
+`D1_MIGRATION_CHURNING_TABLES` is a comma-separated `<binding>.<table>` subset of the reviewed defaults: `DATABASE.deployment_releases`, `DATABASE.diagnostic_reconciliation_state`, `DATABASE.github_trigger_inbox`, `DATABASE.github_webhook_deliveries`, `DATABASE.project_files`, `DATABASE.registry_credential_rate_limits`, `DATABASE.session_snapshots`, `DATABASE.sessions`, `DATABASE.trigger_executions`, `DATABASE.verifications`, `DATABASE.vm_provisioning_leases`, `DATABASE.webhook_deliveries`, and `OBSERVABILITY_DATABASE.platform_errors`. It may narrow but cannot expand this list; unset uses all reviewed defaults. `D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT` accepts `0`–`100`; a decrease exactly at the configured limit is accepted and a larger decrease blocks.
 
 `ORIGIN_CA_CERT` and `ORIGIN_CA_KEY` are legacy rotation inputs for nodes provisioned before per-node Origin CA CSR signing. They are not required for new node provisioning.
 
@@ -478,8 +481,7 @@ per-slice and per-run admission budgets, and the verified R2 manifest writes.
 - `PROJECT_EVENT_RETENTION_BATCH_ROWS` — Maximum old rows pruned per event-subscription retention category per pass (default: `500`)
 
 Absent operational brake keys and KV read errors mean enabled. This fail-open
-behavior preserves availability and intentionally differs from the fail-closed
-trials entitlement switch.
+behavior preserves availability.
 
 GitHub Environment variables for the scheduled Durable Object monitor:
 
@@ -752,21 +754,12 @@ by the read-only cron-liveness check.
 - `WEBHOOK_DELIVERY_PROCESSING_LEASE_SECONDS` — Recovery lease for processing deliveries without a submitted task (default: `300`)
 - `MAX_TRIGGERS_PER_PROJECT` — Platform default trigger cap per project (default: `20`, shipped: `10`). Editable per project in the Settings → Scaling & Scheduling → Task Limits field; a `NULL` `projects.max_triggers` falls back to this env default.
 
-### Trial Onboarding (`/try` flow)
+### Retired: Trial Onboarding
 
-Trial configuration is currently sourced from `apps/api/.env.example` and `apps/api/src/env.ts`. Summary:
-
-- `TRIAL_CLAIM_TOKEN_SECRET` — Worker secret; HMAC key for trial cookies (auto-provisioned by Pulumi)
-- `TRIAL_MONTHLY_CAP`, `TRIAL_WORKSPACE_TTL_MS` — Global cap + workspace lifetime
-- `TRIAL_ANONYMOUS_USER_ID`, `TRIAL_ANONYMOUS_INSTALLATION_ID` — Sentinel rows for pre-claim ownership
-- `TRIAL_AGENT_TYPE_STAGING`, `TRIAL_AGENT_TYPE_PRODUCTION`, `TRIAL_DEFAULT_WORKSPACE_PROFILE` — Agent + profile selection
-- `TRIALS_ENABLED_KV_KEY`, `TRIAL_KILL_SWITCH_CACHE_MS` — Kill switch
-- `TRIAL_EXPIRE_BATCH_SIZE`, `TRIAL_CLEANUP_BATCH_SIZE`, `TRIAL_CLEANUP_DEADLINE_MS`, `TRIAL_NODE_DELETION_LOCK_STALE_MS` — Expired-trial cron cleanup bounds and stale deletion-lock retry
-- `TRIAL_ORCHESTRATOR_OVERALL_TIMEOUT_MS`, `TRIAL_ORCHESTRATOR_STEP_MAX_RETRIES`, `TRIAL_ORCHESTRATOR_RETRY_BASE_DELAY_MS`, `TRIAL_ORCHESTRATOR_RETRY_MAX_DELAY_MS` — Orchestrator retry budget
-- `TRIAL_ORCHESTRATOR_NODE_READY_TIMEOUT_MS`, `TRIAL_ORCHESTRATOR_AGENT_READY_TIMEOUT_MS`, `TRIAL_ORCHESTRATOR_WORKSPACE_READY_TIMEOUT_MS`, `TRIAL_ORCHESTRATOR_WORKSPACE_READY_POLL_INTERVAL_MS` — Step-level timeouts
-- `TRIAL_VM_SIZE`, `TRIAL_VM_LOCATION` — VM overrides for trial workspaces
-- `TRIAL_GITHUB_TIMEOUT_MS` — Per-request timeout for the default-branch probe (`fetchDefaultBranch`); falls back to `main` on timeout/404/error
-- `TRIAL_KNOWLEDGE_GITHUB_TIMEOUT_MS`, `TRIAL_KNOWLEDGE_MAX_EVENTS` — Fast-path knowledge probe tunables
+The anonymous-trial product and every `TRIAL_*` variable were removed in November 2026. `/api/trial/*`
+answers `410 Gone`. The migration-seeded system user and placeholder installation rows remain
+(`SYSTEM_USER_ID` / `SYSTEM_INSTALLATION_ID` in `packages/shared/src/system-ids.ts`) and are not
+configurable.
 
 ## VM Agent Environment Variables
 

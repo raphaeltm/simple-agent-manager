@@ -19,6 +19,7 @@ import {
   createJsonKv,
   createMcpApp,
   postMcp,
+  seedActiveMcpWorkspace,
   storeMcpToken,
   toolResult,
 } from '../helpers/mcp-route';
@@ -59,6 +60,7 @@ describe('list_tasks and search_tasks for workspace agents', () => {
       userId: 'user-1',
       workspaceId: 'ws-own',
     });
+    seedActiveMcpWorkspace(sqlite, { workspaceId: 'ws-own', userId: 'user-1', projectId: PROJECT });
     env = { DATABASE: createSqliteD1(sqlite), KV: kv } as unknown as Env;
     app = await createMcpApp();
   });

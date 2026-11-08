@@ -169,6 +169,7 @@ function buildD1Database(
     prepare: vi.fn(() => {
       const statement = {
         bind: vi.fn(() => ({
+          run: vi.fn(async () => ({ success: true, meta: { changes: 1 } })),
           first: vi.fn(async () => {
             if (options.throwOnChildQuery) {
               throw new Error('child task query failed');
@@ -718,7 +719,11 @@ describe('sleepWorkspaceSession', () => {
     expect(mocks.deferSessionSnapshotSleepBeforeClaim).not.toHaveBeenCalled();
     // Negative assertion (no child-lineage read is issued at all), paired with the
     // positive `eligible: true` above so a broken path cannot satisfy it silently.
-    expect(database.prepare).not.toHaveBeenCalled();
+    // Eligibility now also persists its verdict; that write does not consult children.
+    expect(database.prepare).not.toHaveBeenCalledWith(expect.stringMatching(/\bFROM\s+tasks\b/i));
+    expect(database.prepare).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO node_lifecycle_decisions')
+    );
   });
 
   it('sleeps an idle orchestrator even when a child-lineage read would fail', async () => {

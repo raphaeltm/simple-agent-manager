@@ -95,7 +95,6 @@ describe('DO migration safety check', () => {
     );
     expect(result).toContain('migrations.ts: PASS');
     expect(result).toContain('notification-migrations.ts: PASS');
-    expect(result).toContain('trial-counter.ts: PASS');
   });
 });
 

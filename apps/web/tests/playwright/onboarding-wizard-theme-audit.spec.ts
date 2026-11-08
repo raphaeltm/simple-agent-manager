@@ -48,7 +48,6 @@ async function setupMocks(page: Page) {
     if (p === '/api/credentials/agent' && isGet) return jsonResponse(route, 200, { credentials: [] });
     if (p === '/api/credentials' && isGet) return jsonResponse(route, 200, []);
     if (p === '/api/github/installations') return jsonResponse(route, 200, []);
-    if (p === '/api/trial/status') return jsonResponse(route, 200, { available: false });
     if (p === '/api/projects' && isGet) return jsonResponse(route, 200, { projects: [] });
     if (p.startsWith('/api/workspaces')) return jsonResponse(route, 200, []);
 

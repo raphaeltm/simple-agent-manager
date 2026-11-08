@@ -33,7 +33,7 @@ import { runGcpDeploySetup } from '../services/gcp-deploy-setup';
 import { toSanitizedAppError } from '../services/gcp-errors';
 import { listGcpProjects } from '../services/gcp-setup';
 import { signIdentityToken } from '../services/jwt';
-import { validateMcpToken } from '../services/mcp-token';
+import { validateActiveWorkspaceMcpToken } from '../services/mcp-token-lifecycle';
 import { getGoogleInfraOAuthConfig } from '../services/platform-config';
 
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
@@ -341,7 +341,7 @@ deploymentIdentityTokenRoute.get('/:id/deployment-identity-token', async (c) => 
   // Validate MCP token — callback tokens are NOT accepted here.
   // Callback tokens are operational credentials for node-to-API communication
   // (heartbeats, message reporting) and must not grant GCP deployment access.
-  const mcpData = await validateMcpToken(c.env.KV, token, c.env);
+  const mcpData = await validateActiveWorkspaceMcpToken(c.env, token);
   if (!mcpData) {
     throw errors.forbidden('Identity token endpoint requires a valid MCP token');
   }

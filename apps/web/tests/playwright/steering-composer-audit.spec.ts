@@ -180,7 +180,6 @@ async function setupApiMocks(
     if (path === '/api/credentials/agent') return respond(200, MOCK_AGENT_CREDENTIALS);
     if (path.startsWith('/api/credentials')) return respond(200, MOCK_CLOUD_CREDENTIALS);
     if (path.startsWith('/api/provider-catalog')) return respond(200, { catalogs: [] });
-    if (path === '/api/trial/status') return respond(200, { available: false });
     if (path === '/api/agents') return respond(200, { agents: [] });
     if (path === '/api/github/installations') return respond(200, MOCK_GITHUB_INSTALLATIONS);
     if (path === '/api/workspaces') return respond(200, [makeWorkspace()]);

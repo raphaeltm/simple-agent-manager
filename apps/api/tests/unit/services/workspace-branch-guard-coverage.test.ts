@@ -43,9 +43,10 @@ const ALLOWLIST: Record<string, string> = {
   'routes/node-lifecycle.ts':
     're-creates an ALREADY EXISTING workspace row on node restart using workspace.branch, which was ensured ' +
     'when that workspace was first created. It also explicitly excludes cf-container workspaces.',
-  'durable-objects/trial-orchestrator/steps.ts':
-    'Trials always provision on the repository default branch (probed from GitHub, TRIAL_FALLBACK_BRANCH ' +
-    'otherwise), so the guard would short-circuit as `skipped` anyway.',
+  'durable-objects/task-runner/workspace-dispatch-step.ts':
+    'The VM workspace_dispatch step only runs after workspace_creation (workspace-steps.ts), whose ' +
+    'ensureWorkspaceBookkeeping() runs ensureBranchExistsOnRemote() before the step can advance. The ' +
+    'last test in this file pins that the creation step keeps the guard.',
 };
 
 function relativeToSrc(file: string): string {
@@ -63,7 +64,7 @@ describe('workspace provisioning paths all run the checkout-branch guard', () =>
     // do not delete the test. A green suite over zero files proves nothing
     // (rule 02: "a green test count is not a green suite").
     expect(provisioningFiles).toContain('services/instant-session.ts');
-    expect(provisioningFiles).toContain('durable-objects/task-runner/workspace-steps.ts');
+    expect(provisioningFiles).toContain('durable-objects/task-runner/workspace-dispatch-step.ts');
     expect(provisioningFiles.length).toBeGreaterThanOrEqual(4);
   });
 
@@ -102,7 +103,14 @@ describe('workspace provisioning paths all run the checkout-branch guard', () =>
       'utf8'
     );
 
+    // The VM dispatch module is allowlisted because the creation step before it runs the guard.
+    const vmCreation = readFileSync(
+      path.join(SRC_ROOT, 'durable-objects/task-runner/workspace-steps.ts'),
+      'utf8'
+    );
+
     expect(instant).toContain('ensureWorkspaceBranchOnRemote');
     expect(vmDelegate).toContain('ensureWorkspaceBranchOnRemote');
+    expect(vmCreation).toContain('await ensureBranchExistsOnRemote(state, rc);');
   });
 });

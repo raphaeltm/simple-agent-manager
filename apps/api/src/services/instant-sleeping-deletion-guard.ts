@@ -7,8 +7,7 @@
  * sleep writer never queues it for deletion (`scheduleSleepingWorkspaceDeletion` returns early
  * for cf-container), and its teardown belongs to the snapshot purge once retention ends
  * (`scheduled/session-snapshot-purge.ts`). Only a deliberate deletion may destroy it earlier: an
- * explicit delete or archive (queue entries in `explicit` mode), or the end of an anonymous trial
- * (`scheduled/trial-expire.ts`, which claims directly and never goes through the guarded paths).
+ * explicit delete or archive (queue entries in `explicit` mode).
  *
  * A sleeping VM is different: its VM must be released, and the snapshot carries the wake to a
  * replacement. That is why the guard is runtime-specific rather than a change to the

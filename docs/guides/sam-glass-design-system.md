@@ -84,7 +84,7 @@ Build these in `packages/ui/src/components/` with Tailwind and the tokens above,
 
 **Mobile (767px and below, as `useIsMobile`).** One floating app bar slab replaces today's two bars: menu on the left (its drawer slides from the left); project name; Recent chats and Notifications grouped in a well, because both work across projects; and the chat list button raised at the right edge, where its drawer slides in. The chat list drawer is an overlay: it blurs the chat it covers. Search and project settings move into the menu drawer.
 
-**Settings, project and admin pages.** A page header slab with tabs, then panes for each group of settings using `SettingRow` and `DataTable`. Admin's 18 sections go in a side pane grouped as People (Users, Trials, Quotas), Platform (Settings, Integrations, Credentials, Infrastructure, Storage, AI Proxy), Spend (Costs, Usage) and Health (Overview, Errors, Diagnoses, Logs, Stream, Analytics, Eventing). Examples on the canvas: Project settings → Access, Automation, Settings → Agents, Settings → Infrastructure, Admin → Shared compute pool, Admin → Users.
+**Settings, project and admin pages.** A page header slab with tabs, then panes for each group of settings using `SettingRow` and `DataTable`. Admin's sections go in a side pane grouped as People (Users, Quotas), Platform (Settings, Integrations, Credentials, Infrastructure, Storage, AI Proxy), Spend (Costs, Usage) and Health (Overview, Errors, Diagnoses, Logs, Stream, Analytics, Eventing). Examples on the canvas: Project settings → Access, Automation, Settings → Agents, Settings → Infrastructure, Admin → Shared compute pool, Admin → Users.
 
 ## Data the designs need
 

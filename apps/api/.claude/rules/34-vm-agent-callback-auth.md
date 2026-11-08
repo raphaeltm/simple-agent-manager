@@ -39,6 +39,24 @@ Callback JWT routes are not allowed to convert designed terminal callback states
 3. Designed callback `4xx`/`410` responses MUST use non-error or bounded low-severity logging. They MUST NOT emit an error-level log or persisted platform error row for every retry attempt.
 4. Tests for callback-route changes MUST include the discriminating control: a live node/workspace callback still succeeds through the combined app/router wiring.
 
+## Every Credential Sink Checks the Workspace Lifecycle
+
+Callback JWTs and workspace MCP tokens have no revocation list. A stopped, sleeping or deleted
+workspace's credential stays cryptographically valid until it expires, so every sink must re-read
+the lifecycle in D1. On 2026-11-08 the AI proxy (`verifyAIProxyAuth`) and every MCP entry point
+were found accepting credentials for inactive workspaces, while the `/api/workspaces` callbacks
+were fenced correctly.
+
+1. A sink that returns secrets, spends credentials, or mutates state requires an active workspace
+   on a live node: `assertWorkspaceAcceptsCallback` / `assertWorkspaceCallbackResourceById` for
+   callback tokens, `validateActiveWorkspaceMcpToken` for MCP tokens. Re-check the incarnation
+   (`assertWorkspaceCallbackIdentityCurrent`) before a secret leaves.
+2. `verifyCallbackToken` rejects tokens with no `scope` or `iat`. Do not add `scope === undefined`
+   branches. Still check `payload.scope` after verifying, because tests and future refactors can
+   bypass `expectedScope`.
+3. Test the sink with a real SQL engine: the same token is accepted while the workspace is active
+   and refused after it stops, with one case per refused workspace and node state.
+
 ### How to Identify VM Agent Callback Routes
 
 A route is a VM agent callback if ANY of these are true:

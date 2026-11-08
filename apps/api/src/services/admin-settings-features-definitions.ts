@@ -52,13 +52,6 @@ export const FEATURE_SETTINGS: AdminSettingDefinition[] = [
     'Allow Durable Object alarm work; disabled alarms re-arm for later.',
     { legacyKv: 'alarms' }
   ),
-  switchDefinition(
-    'trials.enabled',
-    false,
-    'Trials',
-    'Allow anonymous trials. Fresh installs remain disabled.',
-    { legacyKv: 'trials' }
-  ),
   ...(Object.keys(WORKFLOW_DEFAULTS) as Array<keyof typeof WORKFLOW_DEFAULTS>).map((key) =>
     integerDefinition(
       `workflow.${key}`,

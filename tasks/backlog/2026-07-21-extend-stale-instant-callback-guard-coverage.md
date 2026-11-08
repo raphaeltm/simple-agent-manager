@@ -1,5 +1,12 @@
 # Extend Stale Instant-Callback Guard to Non-Destructive Regressions
 
+> **Note 2026-11-08 (task `01M6Y0DAXRD0S56125X2TQA7RF`):** callback tokens now require `scope`
+> and `iat`. The AI proxy and MCP tokens are now bound to the workspace lifecycle (an inactive
+> workspace is refused). One residual remains: a superseded Instant generation's
+> still-unexpired workspace token is accepted while the same workspace is active again. The
+> generation/epoch claim described below is the durable fix for that too. It is documented as a
+> known limit in `architecture/security.md` (Callback Tokens).
+
 > **Reconciliation 2026-10-26:** Still open; the guard still covers only `failed` task callbacks
 > (`apps/api/src/routes/tasks/callback.ts:321-368`) and `error` activity callbacks. Pointer move:
 > the activity path now lives in `apps/api/src/services/acp-activity-callback-handler.ts`

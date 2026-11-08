@@ -11,6 +11,7 @@ import {
   createJsonKv,
   createMcpApp,
   postMcp,
+  seedActiveMcpWorkspace,
   storeMcpToken,
   toolResult,
 } from '../../helpers/mcp-route';
@@ -97,6 +98,7 @@ describe('explicit PR ownership vertical slice', () => {
       userId: 'u',
       workspaceId: 'ws',
     });
+    seedActiveMcpWorkspace(f.sqlite, { workspaceId: 'ws', userId: 'u', projectId: 'p' });
     const app = await createMcpApp();
     const discovery = await postMcp(app, f.env, 'association-test-token', 'tools/list');
     expect(discovery.error).toBeUndefined();
@@ -130,6 +132,7 @@ describe('explicit PR ownership vertical slice', () => {
       userId: 'u',
       workspaceId: 'ws-next',
     });
+    seedActiveMcpWorkspace(f.sqlite, { workspaceId: 'ws-next', userId: 'u', projectId: 'p' });
     const peers = toolResult<{ agents: { taskId: string }[] }>(
       await callMcpTool(app, f.env, 'peer-token', 'list_project_agents', {
         prUrl: pr(18).replace('owner/repo', 'Owner/Repo') + '/',

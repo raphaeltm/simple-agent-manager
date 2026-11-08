@@ -29,6 +29,7 @@ import {
   createJsonKv,
   createMcpApp,
   postMcp,
+  seedActiveMcpWorkspace,
   storeMcpToken,
 } from '../helpers/mcp-route';
 import { createAllSchemaTables, createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
@@ -225,17 +226,35 @@ beforeEach(async () => {
     userId: 'admin',
     workspaceId: 'ws-a',
   });
+  seedActiveMcpWorkspace(main, {
+    workspaceId: 'ws-a',
+    userId: 'admin',
+    projectId: OPS_PROJECT,
+    nodeId: NODE,
+  });
   await storeMcpToken(env.KV, 'tok-member', {
     taskId: 'task-member',
     projectId: OPS_PROJECT,
     userId: 'member',
     workspaceId: 'ws-m',
   });
+  seedActiveMcpWorkspace(main, {
+    workspaceId: 'ws-m',
+    userId: 'member',
+    projectId: OPS_PROJECT,
+    nodeId: NODE,
+  });
   await storeMcpToken(env.KV, 'tok-elsewhere', {
     taskId: 'task-elsewhere',
     projectId: 'proj-other',
     userId: 'admin',
     workspaceId: 'ws-o',
+  });
+  seedActiveMcpWorkspace(main, {
+    workspaceId: 'ws-o',
+    userId: 'admin',
+    projectId: 'proj-other',
+    nodeId: NODE,
   });
 });
 

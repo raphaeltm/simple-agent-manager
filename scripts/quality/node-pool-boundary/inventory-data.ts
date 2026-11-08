@@ -154,13 +154,6 @@ export const ALLOCATION_WRITER_INVENTORY: readonly AllocationWriterInventoryEntr
     canonicalService: 'explicit feedback adapter',
   },
   {
-    filePath: 'apps/api/src/services/trial/trial-runner.ts',
-    table: 'tasks',
-    owner: 'startDiscoveryAgent',
-    role: 'trial orchestration task adapter',
-    canonicalService: 'explicit trial runtime adapter',
-  },
-  {
     filePath: 'apps/api/src/services/session-task-repair.ts',
     table: 'tasks',
     owner: 'ensureSessionTaskBacked',
@@ -246,16 +239,6 @@ export const ALLOCATION_ENTRYPOINT_INVENTORY: readonly AllocationEntrypointInven
     status: 'canonical',
   },
   {
-    filePath: 'apps/api/src/durable-objects/trial-orchestrator/steps.ts',
-    owner: 'handleWorkspaceCreation',
-    entrypoint: 'reserveWorkspacePlacement',
-    scope: 'trial-orchestrator',
-    role: 'trial',
-    admission:
-      'trial workspace creation delegates its final atomic reservation to the canonical capacity and authority boundary',
-    status: 'canonical',
-  },
-  {
     filePath: 'apps/api/src/durable-objects/task-runner/node-provisioning-step.ts',
     owner: 'handleNodeProvisioning',
     entrypoint: 'createNodeRecord',
@@ -289,7 +272,7 @@ export const ALLOCATION_ENTRYPOINT_INVENTORY: readonly AllocationEntrypointInven
     status: 'canonical',
   },
   {
-    filePath: 'apps/api/src/durable-objects/task-runner/workspace-steps.ts',
+    filePath: 'apps/api/src/durable-objects/task-runner/workspace-dispatch-step.ts',
     owner: 'createWorkspaceOnVmAgent',
     entrypoint: 'createWorkspaceOnNode',
     scope: 'task-runner',
@@ -441,34 +424,6 @@ export const ALLOCATION_ENTRYPOINT_INVENTORY: readonly AllocationEntrypointInven
     scope: 'service',
     role: 'instant',
     admission: 'runtime creation for an already accepted instant session',
-    status: 'runtime-dispatch',
-  },
-  {
-    filePath: 'apps/api/src/durable-objects/trial-orchestrator/steps.ts',
-    owner: 'handleNodeProvisioning',
-    entrypoint: 'createNodeRecord',
-    scope: 'trial-orchestrator',
-    role: 'trial',
-    admission:
-      'single-node-per-trial state guard on the platform credential; no capacity-pool selection or admission lease',
-    status: 'runtime-adapter',
-  },
-  {
-    filePath: 'apps/api/src/durable-objects/trial-orchestrator/steps.ts',
-    owner: 'handleNodeProvisioning',
-    entrypoint: 'provisionNode',
-    scope: 'trial-orchestrator',
-    role: 'trial',
-    admission: 'paid provisioning of the trial node created above',
-    status: 'runtime-adapter',
-  },
-  {
-    filePath: 'apps/api/src/durable-objects/trial-orchestrator/steps.ts',
-    owner: 'handleWorkspaceCreation',
-    entrypoint: 'createWorkspaceOnNode',
-    scope: 'trial-orchestrator',
-    role: 'trial',
-    admission: 'runtime creation for the trial workspace row reserved in the same step',
     status: 'runtime-dispatch',
   },
 ] as const;

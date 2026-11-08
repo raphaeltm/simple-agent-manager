@@ -23,6 +23,7 @@ import {
   callMcpTool,
   createJsonKv,
   createMcpApp,
+  seedActiveMcpWorkspace,
   storeMcpToken,
   toolResult,
 } from '../helpers/mcp-route';
@@ -90,6 +91,11 @@ describe('list_project_agents pull request owner filter', () => {
       projectId: PROJECT,
       userId: 'user-1',
       workspaceId: 'ws-shepherd',
+    });
+    seedActiveMcpWorkspace(sqlite, {
+      workspaceId: 'ws-shepherd',
+      userId: 'user-1',
+      projectId: PROJECT,
     });
     env = { DATABASE: createSqliteD1(sqlite), KV: kv } as unknown as Env;
     app = await createMcpApp();

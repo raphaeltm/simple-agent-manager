@@ -55,6 +55,7 @@ export type AdminSettingName =
   | 'integration.gitlab.clientSecret'
   | 'operations.workloadIdentityTokenTtlSeconds'
   | 'operations.provisioningAttemptsPerProviderTier'
+  | 'operations.workspacePlacementMaxRejections'
   | 'operations.nodeCleanupBlockedRetirementMs'
   | 'operations.nodeLifetimeForceSleepAfterMs'
   | 'operations.sessionStaleTurnNoWorkMinutes'
@@ -65,6 +66,7 @@ export type AdminSettingName =
   | 'operations.evictionRecoveryRetryBatchSize'
   | 'operations.evictionRecoveryRetryWallMs'
   | 'operations.evictionRecoveryRetryDelayMs'
+  | 'operations.deadWakeReconcileBatchSize'
   | 'operations.resourceLinkTouchIntervalMs'
   | 'operations.resourceLinkWeakPerTarget'
   | 'operations.resourceLinkWeakCleanupBatchSize'
@@ -109,8 +111,7 @@ export type AdminSettingName =
   | 'performance.projectRecentTimeoutMs'
   | 'performance.externalReadTimeoutMs'
   | 'performance.configReadTimeoutMs'
-  | 'performance.authReadAttempts'
-  | 'trials.enabled';
+  | 'performance.authReadAttempts';
 
 export interface AdminSettingDefinition {
   readonly name: AdminSettingName;
@@ -120,7 +121,6 @@ export interface AdminSettingDefinition {
     | 'OAuth'
     | 'Connector'
     | 'Operations'
-    | 'Trials'
     | 'Collaboration'
     | 'Chat'
     | 'AI models'
@@ -129,7 +129,7 @@ export interface AdminSettingDefinition {
   readonly secret: boolean;
   readonly risky: boolean;
   readonly legacyEnvironment?: keyof Env;
-  readonly legacyKv?: 'cron' | 'alarms' | 'trials';
+  readonly legacyKv?: 'cron' | 'alarms';
   readonly credential?: { readonly provider: string; readonly kind: string };
   readonly range?: { readonly min: number; readonly max: number };
   readonly choices?: readonly string[];
