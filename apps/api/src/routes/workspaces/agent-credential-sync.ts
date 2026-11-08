@@ -82,8 +82,9 @@ function codexIssuedAt(identity: CodexAuthIdentity): number | null {
 /**
  * Whether a synced Codex file is an older generation than the stored one.
  *
- * The VM agent syncs auth.json on every session stop, changed or not. When
- * another run has since rotated the shared credential through the refresh
+ * The VM agent is meant to sync auth.json on every session stop, changed or not
+ * (today it never does: tasks/backlog/2026-11-08-vm-agent-credential-sync-on-stop-never-runs.md).
+ * When another run has since rotated the shared credential through the refresh
  * proxy, this run's file still holds the refresh token OpenAI already consumed,
  * and writing it back would break the next refresh for every run of the
  * account. A different refresh token is accepted only when the synced tokens
