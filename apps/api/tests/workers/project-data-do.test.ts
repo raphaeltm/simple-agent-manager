@@ -1033,7 +1033,7 @@ describe('ProjectData Durable Object', () => {
       ]);
       const { messages } = await stub.getMessages(sessionId);
       expect(messages.map((message) => message.id)).toEqual([promptId, retryId, diagnosticId]);
-      expect(messages[2]?.toolMetadata).toEqual({ promptMessageId: promptId });
+      expect(messages[2]?.toolMetadata).toEqual({ promptMessageId: promptId, runtimeReported: true });
       expect(messages[2]?.sequence).toBeGreaterThan(messages[1]!.sequence);
     });
 

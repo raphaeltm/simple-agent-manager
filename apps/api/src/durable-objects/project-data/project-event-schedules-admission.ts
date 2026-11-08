@@ -6,6 +6,7 @@
 import type { ProjectSchedule } from '@simple-agent-manager/shared';
 
 import { ulid } from '../../lib/ulid';
+import { safeNotice, scheduledMessageNotice } from '../../services/sam-notice-builders';
 import {
   buildSharedSessionSpeakerLine,
   type SharedSessionNames,
@@ -99,7 +100,8 @@ export function admitScheduleClaim(
     // An agent-written prompt never reaches a chat as plain text (constitution XV): the chat
     // gets a SAM notice naming the schedule, and the agent reads the note through the tool.
     const agentNote = schedule.promptAuthor === 'agent';
-    const content = agentNote ? agentScheduleNotice(schedule.id) : schedule.action.prompt;
+    const { prompt, sessionId } = schedule.action;
+    const content = agentNote ? agentScheduleNotice(schedule.id) : prompt;
     const input: AcceptPromptDeliveryInput = {
       deliveryId: ulid(),
       targetSessionId: schedule.action.sessionId,
@@ -114,6 +116,20 @@ export function admitScheduleClaim(
       senderType: 'system',
       senderId: schedule.creatorUserId,
       sourceTaskId: targetTaskId,
+      // An agent-made schedule is SAM delivering the agent's own reminder; a person's
+      // scheduled message stays their bubble (teammates keep their attribution line).
+      notice: schedule.creatorChatSessionId
+        ? safeNotice(
+            () =>
+              scheduledMessageNotice({
+                scheduleId: schedule.id,
+                prompt,
+                reason: schedule.reason,
+                createdByThisChat: schedule.creatorChatSessionId === sessionId,
+              }),
+            { scheduleId: schedule.id }
+          )
+        : null,
       ttlMs: Math.min(schedule.expiresAt - now, scheduleLimits(env).deliveryTtlMs),
       metadata: {
         scheduleId: schedule.id,

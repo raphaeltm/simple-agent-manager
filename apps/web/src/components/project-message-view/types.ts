@@ -8,6 +8,11 @@ import { isExpiredTask, type SessionUndeliveredPrompt } from '@simple-agent-mana
 import type { ChatMessageResponse, ChatSessionResponse, SessionStateSnapshot } from '../../lib/api';
 import { maybeJsonRecord } from '../../lib/runtime-validation';
 import { userMessageAttribution, userMessageDelivery } from './message-attribution';
+import {
+  samNoticeForMessage,
+  systemRowNoticeForMessage,
+  withSamNotice,
+} from './sam-notice/notice-items';
 import { APPROVAL_CARD_TOOL } from './tool-cards/approval-card-data';
 import { DOCUMENT_CARD_TOOLS, normalizeToolName } from './tool-cards/document-card-data';
 import { HUMAN_INPUT_CARD_TOOL } from './tool-cards/human-input-card-data';
@@ -237,7 +242,7 @@ export function chatMessagesToConversationItems(
     if (msg.role === 'user') {
       const attribution = userMessageAttribution(msg, undelivered.get(msg.id));
       const delivery = userMessageDelivery(msg);
-      acc.push({
+      const item: ConversationItem = {
         kind: 'user_message',
         id: msg.id,
         text: msg.content,
@@ -245,7 +250,10 @@ export function chatMessagesToConversationItems(
         origin: msg.origin === 'system' ? 'system' : 'user',
         ...(attribution ? { attribution } : {}),
         ...(delivery ? { delivery } : {}),
-      });
+      };
+      // A message SAM delivered renders as a notice row, not as the owner's bubble.
+      const notice = samNoticeForMessage(msg);
+      acc.push(notice ? withSamNotice(item, notice) : item);
     } else if (msg.role === 'assistant') {
       // Merge consecutive assistant chunks into one item. The merged roles are
       // MERGED_MESSAGE_ROLES (shared), which the comment context window and
@@ -398,9 +406,15 @@ export function chatMessagesToConversationItems(
         }
       }
     } else if (msg.role === 'system') {
-      // System messages (task status, error logs) rendered as preformatted text
-      // to prevent markdown interpretation of build log characters (#, *, URLs)
-      acc.push({ kind: 'system_message', id: msg.id, text: msg.content, timestamp: msg.createdAt });
+      // System rows (task status, error logs) render as compact SAM notice rows; the full
+      // text stays preformatted behind the row so build-log characters are not markdown.
+      const item: ConversationItem = {
+        kind: 'system_message',
+        id: msg.id,
+        text: msg.content,
+        timestamp: msg.createdAt,
+      };
+      acc.push(withSamNotice(item, systemRowNoticeForMessage(msg)));
     } else {
       // Unknown roles render as raw fallback (matches workspace chat behavior)
       // to ensure no messages are silently dropped.

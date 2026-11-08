@@ -327,6 +327,13 @@ describe('agent lifecycle orchestration integration', () => {
       source: 'sam_orchestrator',
       kind: 'reconciliation_checkin',
       deliveryId: promptCall?.[7]?.deliveryId,
+      // The chat shows this as a SAM row; the agent's text above is unchanged.
+      samNotice: expect.objectContaining({
+        v: 1,
+        type: 'checkin.stalled',
+        headline: 'SAM asked the agent for a progress update',
+        refs: [],
+      }),
     });
 
     const checkinsBeforeReply = sql

@@ -1,4 +1,8 @@
-import type { ToolCallContentItem, UserMessageAttribution } from '@simple-agent-manager/acp-client';
+import type {
+  ToolCallContentItem,
+  UserMessageAttribution,
+  UserMessageDelivery,
+} from '@simple-agent-manager/acp-client';
 import {
   AgentCrashReportView,
   MessageBubble as AcpMessageBubble,
@@ -10,6 +14,8 @@ import { memo, useCallback } from 'react';
 
 import { useGlobalAudio } from '../../contexts/GlobalAudioContext';
 import { getTtsApiUrl } from '../../lib/api';
+import { noticeOf, systemRowNotice } from './sam-notice/notice-items';
+import { NoticeRow } from './sam-notice/NoticeRow';
 import type { DisplayItem } from './tool-call-groups';
 import { matchToolCard } from './tool-cards';
 import { AbsorbedConversationItemView, ToolCallGroupCard } from './ToolCallGroupCard';
@@ -47,39 +53,6 @@ function UserMessageAttributionLine({ attribution }: { attribution: UserMessageA
             : 'Not delivered — access was removed'}
         </span>
       )}
-    </div>
-  );
-}
-
-/** Renders a system message (task status, error logs) as preformatted text.
- *  Prevents markdown interpretation of build log characters (#, *, URLs). */
-export function SystemMessageBubble({ text }: { text: string }) {
-  return (
-    <div className="flex justify-start mb-4">
-      <div
-        role="region"
-        aria-label="System message"
-        className="max-w-[90%] min-w-0 rounded-lg px-4 py-2 border overflow-hidden"
-        style={{
-          backgroundColor: 'rgba(22, 163, 74, 0.06)',
-          borderColor: 'rgba(34, 197, 94, 0.1)',
-        }}
-      >
-        <div className="flex items-center gap-1.5 mb-2">
-          <span
-            className="text-xs font-semibold uppercase tracking-wide"
-            style={{ color: 'var(--sam-color-fg-muted)' }}
-          >
-            System
-          </span>
-        </div>
-        <pre
-          className="text-xs whitespace-pre-wrap break-words m-0 font-mono leading-relaxed"
-          style={{ color: 'var(--sam-color-fg-primary)' }}
-        >
-          {text}
-        </pre>
-      </div>
     </div>
   );
 }
@@ -136,9 +109,15 @@ interface AcpConversationItemViewProps {
   groupLive?: boolean;
 }
 
+const NOTICE_DELIVERY_PROBLEMS: ReadonlySet<UserMessageDelivery['status']> = new Set([
+  'unconfirmed',
+  'not_delivered',
+]);
+
 /** Renders a single ACP ConversationItem using the shared acp-client components.
  *  When `animateText` is true for agent_message items, MessageBubble renders with
  *  per-character fade-in animation via TypewriterText. */
+
 function AcpConversationItemViewImpl({
   item,
   onFileClick,
@@ -186,7 +165,26 @@ function AcpConversationItemViewImpl({
   const handlePlayAudio = isAgentMessage ? playAudio : undefined;
 
   switch (item.kind) {
-    case 'user_message':
+    case 'user_message': {
+      const notice = noticeOf(item);
+      if (notice) {
+        // A notice stays one quiet line when delivery went fine; the chip appears only when the
+        // agent may not have received it.
+        return (
+          <>
+            <NoticeRow
+              notice={notice}
+              rawText={item.text}
+              rawLabel="Show what the agent saw"
+              timestamp={item.timestamp}
+              projectId={projectId}
+            />
+            {item.delivery && NOTICE_DELIVERY_PROBLEMS.has(item.delivery.status) && (
+              <UserMessageDeliveryChip delivery={item.delivery} />
+            )}
+          </>
+        );
+      }
       if (item.origin === 'system') {
         return <CollapsedInjectedMessage text={item.text} />;
       }
@@ -204,6 +202,7 @@ function AcpConversationItemViewImpl({
           {item.delivery && <UserMessageDeliveryChip delivery={item.delivery} />}
         </>
       );
+    }
     case 'agent_message':
       return (
         <AcpMessageBubble
@@ -253,8 +252,19 @@ function AcpConversationItemViewImpl({
     }
     case 'plan':
       return <PlanView plan={item} />;
-    case 'system_message':
-      return <SystemMessageBubble text={item.text} />;
+    case 'system_message': {
+      // The mapper gives every system row a notice; the fallback covers items built elsewhere.
+      const notice = noticeOf(item) ?? systemRowNotice(item.text);
+      return (
+        <NoticeRow
+          notice={notice}
+          rawText={item.text}
+          rawLabel="Show full message"
+          timestamp={item.timestamp}
+          projectId={projectId}
+        />
+      );
+    }
     case 'agent_crash_report':
       return <AgentCrashReportView item={item} />;
     case 'raw_fallback':

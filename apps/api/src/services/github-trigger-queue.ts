@@ -8,6 +8,7 @@ import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import { githubTriggerRecoveryConfig } from './github-trigger-recovery-config';
 import * as projectData from './project-data';
+import { githubTriggerNotice, safeNotice } from './sam-notice-builders';
 import { TERMINAL_STATUS_VALUES } from './task-status';
 import {
   admitAndSubmitTriggerExecution,
@@ -294,6 +295,7 @@ async function routeToSession(
     if (row.queueExpiresAt <= new Date().toISOString()) return dropUnconfirmedRouting(env, row);
     throw new Error('Routing target has no execution principal');
   }
+  const renderedPrompt = row.renderedPrompt;
   const accepted = await projectData.acceptPromptDelivery(env, row.projectId, {
     deliveryId,
     targetSessionId: row.routedSessionId,
@@ -310,6 +312,10 @@ async function routeToSession(
       subjectKey: row.subjectKey,
       creatorUserId,
     },
+    notice: safeNotice(
+      () => githubTriggerNotice({ triggerId: row.triggerId, prompt: renderedPrompt }),
+      { triggerId: row.triggerId, triggerExecutionId: row.id }
+    ),
   });
   const message = receipt ?? accepted.message;
   // A rejected delivery with no submission checkpoint proves no prompt reached a runtime.

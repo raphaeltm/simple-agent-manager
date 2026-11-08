@@ -8,8 +8,10 @@ type PersistOrchestrationPromptInput = {
   chatSessionId: string;
   content: string;
   messageId?: string;
-  source: string;
-  kind: string;
+  // Literal unions: the chat UI trusts a notice only on rows whose kind or source SAM owns
+  // (`samNoticeForMessage`), so callers must not be able to choose those values.
+  source: 'sam_session' | 'agent_mailbox' | 'parent_agent';
+  kind: 'orchestration_prompt' | 'mailbox_immediate_delivery';
   parentTaskId?: string | null;
   childTaskId?: string | null;
   mailboxMessageId?: string | null;

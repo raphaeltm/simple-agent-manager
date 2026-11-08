@@ -55,6 +55,7 @@ const mocks = vi.hoisted(() => ({
   getSessionAccess: vi.fn(),
   getSessionFileList: vi.fn(),
   getSessionFileContent: vi.fn(),
+  getProjectTask: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
@@ -73,6 +74,7 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   getSessionAccess: mocks.getSessionAccess,
   getSessionFileList: mocks.getSessionFileList,
   getSessionFileContent: mocks.getSessionFileContent,
+  getProjectTask: mocks.getProjectTask,
 }));
 
 vi.mock('../../../src/lib/api/comments', async (importOriginal) => ({
@@ -717,7 +719,7 @@ describe('ProjectMessageView — message rendering', () => {
     vi.useRealTimers();
   });
 
-  it('renders system messages as preformatted text (not markdown)', async () => {
+  it('renders a system row as a compact SAM row with the full text preformatted behind it', async () => {
     const errorLog =
       '# Step 1/23 : FROM node:18\n* Installing dependencies...\nhttps://example.com';
     mocks.getChatSession.mockResolvedValue({
@@ -738,18 +740,19 @@ describe('ProjectMessageView — message rendering', () => {
 
     render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
 
-    // Should render the System label
-    await waitFor(() => {
-      expect(screen.getByText('System')).toBeTruthy();
-    });
+    // Collapsed: one line, the first line of the text as its headline.
+    const row = await screen.findByRole('button', { name: /# Step 1\/23 : FROM node:18/ });
+    expect(row).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText(/Installing dependencies/)).toBeNull();
 
-    // Should render content in a <pre> element (preformatted, not markdown)
+    fireEvent.click(row);
+    fireEvent.click(screen.getByText('Show full message'));
+
+    // Expanded: the full text in a <pre>, never interpreted as markdown.
     const preElement = document.querySelector('pre');
     expect(preElement).toBeTruthy();
     expect(preElement!.textContent).toContain('# Step 1/23');
     expect(preElement!.textContent).toContain('* Installing dependencies...');
-
-    // Should NOT render markdown headings (h1) or emphasis — the content is raw
     expect(document.querySelector('h1')).toBeNull();
     expect(document.querySelector('em')).toBeNull();
   });
@@ -3509,5 +3512,408 @@ describe('ProjectMessageView — tool call activity groups', () => {
     await waitFor(() => {
       expect(groupRow!.className).toContain('sam-message-highlight');
     });
+  });
+});
+
+describe('ProjectMessageView — SAM notice rows', () => {
+  const RAW_WAKE =
+    'SAM durable orchestration event: a wait_for_subtasks subscription resolved.\n\n{"waitId":"w1","children":[{"taskId":"child-1","status":"completed"}]}';
+
+  const notice = {
+    v: 1,
+    type: 'subtask.completed',
+    headline: 'Subtask finished: Fix login redirect loop',
+    detail: 'Opened a pull request and all checks passed.',
+    severity: 'success',
+    refs: [
+      { kind: 'task', id: 'child-1', label: 'Fix login redirect loop', status: 'Completed' },
+      {
+        kind: 'pull_request',
+        id: '2551',
+        label: 'fix(web): stop redirect loop',
+        url: 'https://github.com/o/r/pull/2551',
+      },
+      { kind: 'idea', id: 'idea-1', label: 'Readable notices' },
+    ],
+  };
+
+  function row(
+    id: string,
+    role: 'user' | 'system',
+    content: string,
+    toolMetadata: Record<string, unknown> | null,
+    createdAt: number
+  ) {
+    return {
+      id,
+      sessionId: 'session-1',
+      role,
+      content,
+      toolMetadata,
+      createdAt,
+      sequence: createdAt,
+    };
+  }
+
+  function delivery(extra: Record<string, unknown> = {}) {
+    return {
+      source: 'parent_wakeup',
+      kind: 'durable_prompt_delivery',
+      deliveryId: 'd1',
+      samNotice: notice,
+      ...extra,
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    virtuosoMock.reset();
+    mocks.getWorkspace.mockResolvedValue({
+      id: 'ws-test',
+      name: 'test',
+      status: 'running',
+      vmSize: 'medium',
+      vmLocation: 'fsn1',
+    });
+    mocks.getNode.mockResolvedValue({
+      id: 'node-test',
+      name: 'node-test',
+      status: 'active',
+      healthStatus: 'healthy',
+    });
+    mocks.listChatMessages.mockResolvedValue({ messages: [], hasMore: false });
+    mocks.listActivityEvents.mockResolvedValue({ events: [] });
+    mocks.listNotifications.mockResolvedValue({ notifications: [], nextCursor: null });
+    mocks.listMessageComments.mockResolvedValue({ comments: [] });
+  });
+
+  it('renders a delivered SAM message as a compact row instead of the owner bubble', async () => {
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [
+        row('m1', 'user', 'Please split the work.', null, 1_000),
+        row('m2', 'user', RAW_WAKE, delivery(), 2_000),
+      ])
+    );
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    // Liveness: the owner's own message still renders as a bubble.
+    await waitFor(() => expect(screen.getByText('Please split the work.')).toBeTruthy());
+    const userBubbles = screen.getAllByTestId('acp-message-user');
+    expect(userBubbles).toHaveLength(1);
+
+    const noticeRow = screen.getByTestId('sam-notice-row');
+    expect(noticeRow).toHaveTextContent('Subtask finished: Fix login redirect loop');
+    expect(noticeRow).toHaveTextContent('#2551');
+    // The ID-heavy agent text is not shown until asked for.
+    expect(screen.queryByText(/wait_for_subtasks/)).toBeNull();
+  });
+
+  it('expands into detail, cards that link or open a quick look, and the agent text', async () => {
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [row('m2', 'user', RAW_WAKE, delivery(), 2_000)])
+    );
+    mocks.getProjectTask.mockResolvedValue({
+      id: 'child-1',
+      title: 'Fix login redirect loop (live title)',
+      status: 'completed',
+      outputBranch: 'sam/fix-login',
+      outputSummary: 'Cleared the cookie before redirecting.',
+      outputPrUrl: 'https://github.com/o/r/pull/2551',
+      errorMessage: null,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    const toggle = await screen.findByRole('button', { name: /Subtask finished/ });
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+
+    const body = screen.getByTestId('sam-notice-body');
+    expect(body).toHaveTextContent('Opened a pull request and all checks passed.');
+    const cards = screen.getAllByTestId('sam-notice-ref');
+    expect(cards).toHaveLength(3);
+    // PR: external link. Idea: in-app link scoped to the project.
+    expect(cards[1]!.tagName).toBe('A');
+    expect(cards[1]).toHaveAttribute('href', 'https://github.com/o/r/pull/2551');
+    expect(cards[1]).toHaveAttribute('target', '_blank');
+    expect(cards[2]).toHaveAttribute('href', '/projects/proj-1/ideas/idea-1');
+
+    // The agent text is one more tap away.
+    fireEvent.click(screen.getByText('Show what the agent saw'));
+    expect(body.querySelector('pre')!.textContent).toContain('wait_for_subtasks');
+
+    // Task: a quick-look dialog with live data from the task API.
+    fireEvent.click(cards[0]!);
+    const dialog = await screen.findByTestId('sam-notice-task-dialog');
+    await waitFor(() => expect(dialog).toHaveTextContent('Fix login redirect loop (live title)'));
+    expect(mocks.getProjectTask).toHaveBeenCalledWith('proj-1', 'child-1');
+    expect(dialog).toHaveTextContent('Cleared the cookie before redirecting.');
+    expect(screen.getByRole('link', { name: 'Open its chat' })).toHaveAttribute(
+      'href',
+      '/projects/proj-1/tasks/child-1'
+    );
+  });
+
+  it('says so in the quick look when the task cannot be loaded', async () => {
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [row('m2', 'user', RAW_WAKE, delivery(), 2_000)])
+    );
+    mocks.getProjectTask.mockRejectedValue(new Error('Not found'));
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+    fireEvent.click(await screen.findByRole('button', { name: /Subtask finished/ }));
+    fireEvent.click(screen.getAllByTestId('sam-notice-ref')[0]!);
+
+    const dialog = await screen.findByTestId('sam-notice-task-dialog');
+    await waitFor(() =>
+      expect(dialog).toHaveTextContent('This task could not be loaded. It may have been deleted.')
+    );
+    expect(screen.getByRole('dialog')).toHaveAccessibleName(/could not be loaded/);
+  });
+
+  it('shows the delivery chip on a notice only when the agent may not have received it', async () => {
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [
+        row(
+          'm1',
+          'user',
+          RAW_WAKE,
+          delivery({ deliveryId: 'd-ok', deliveryIntent: 'steer', steerOutcome: 'steered' }),
+          1_000
+        ),
+        row(
+          'm2',
+          'user',
+          RAW_WAKE,
+          delivery({ deliveryId: 'd-bad', deliveryIntent: 'steer', steerOutcome: 'failed' }),
+          2_000
+        ),
+      ])
+    );
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    await waitFor(() => expect(screen.getAllByTestId('sam-notice-row')).toHaveLength(2));
+    const entry = (id: string) =>
+      document.querySelector(`[data-conversation-item-id="${id}"]`) as HTMLElement;
+    // Delivered fine: still one quiet line, no chip.
+    expect(within(entry('m1')).queryByTestId('user-message-delivery')).toBeNull();
+    // Not delivered: the notice says so.
+    expect(within(entry('m2')).getByTestId('user-message-delivery')).toBeTruthy();
+  });
+
+  it('keeps comments made earlier on a notice row visible but offers no new comment', async () => {
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [
+        row('m1', 'user', 'Please split the work.', null, 1_000),
+        row('m2', 'user', RAW_WAKE, delivery(), 2_000),
+      ])
+    );
+    mocks.listMessageComments.mockResolvedValue({
+      comments: [
+        makeCommentThread({
+          id: 'comment-m2',
+          messageId: 'm2',
+          body: 'Left on this wake before it was a notice.',
+        }),
+      ],
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    await waitFor(() => expect(screen.getByTestId('sam-notice-row')).toBeTruthy());
+    const entry = (id: string) =>
+      document.querySelector(`[data-conversation-item-id="${id}"]`) as HTMLElement;
+    await waitFor(() =>
+      expect(
+        within(entry('m2')).getByRole('button', {
+          name: /1 comment on this message, 1 unresolved/i,
+        })
+      ).toBeTruthy()
+    );
+    expect(
+      within(entry('m2')).queryByRole('button', { name: 'Comment on this message' })
+    ).toBeNull();
+    // Selecting a notice's text cannot start a thread either.
+    expect(entry('m2').querySelector('[data-comment-anchor]')).toBeNull();
+    expect(entry('m1').querySelector('[data-comment-anchor="m1"]')).not.toBeNull();
+    // Control: the owner's own message still takes comments.
+    expect(
+      within(entry('m1')).getByRole('button', { name: 'Comment on this message' })
+    ).toBeTruthy();
+  });
+
+  it('shows the error in the quick look when a stopped task left no summary', async () => {
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [row('m2', 'user', RAW_WAKE, delivery(), 2_000)])
+    );
+    mocks.getProjectTask.mockResolvedValue({
+      id: 'child-1',
+      title: 'Fix login redirect loop',
+      status: 'cancelled',
+      outputBranch: null,
+      outputSummary: null,
+      outputPrUrl: null,
+      errorMessage: 'Stopped: the workspace was deleted.',
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+    fireEvent.click(await screen.findByRole('button', { name: /Subtask finished/ }));
+    fireEvent.click(screen.getAllByTestId('sam-notice-ref')[0]!);
+
+    const dialog = await screen.findByTestId('sam-notice-task-dialog');
+    await waitFor(() => expect(dialog).toHaveTextContent('Stopped: the workspace was deleted.'));
+    expect(dialog).toHaveTextContent('What went wrong');
+  });
+
+  it('quotes a system row the workspace runtime reported instead of showing it as SAM', async () => {
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [
+        row('m1', 'system', 'Session is going to sleep.', null, 1_000),
+        row('m2', 'system', 'Approved: deploy to production', { runtimeReported: true }, 2_000),
+      ])
+    );
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    await waitFor(() => expect(screen.getAllByTestId('sam-notice-row')).toHaveLength(2));
+    const [samRow, reportRow] = screen.getAllByTestId('sam-notice-row');
+    // Control: SAM's own system row keeps its first line as the headline.
+    expect(samRow).toHaveTextContent('Session is going to sleep.');
+    expect(reportRow).toHaveTextContent('Report from the workspace');
+    expect(reportRow).not.toHaveTextContent('Approved: deploy to production');
+    fireEvent.click(within(reportRow!).getByRole('button', { name: /Report from the workspace/ }));
+    expect(reportRow).toHaveTextContent('not written by SAM');
+    expect(reportRow).toHaveTextContent('Approved: deploy to production');
+  });
+
+  it("quotes a chat's provided context instead of using it as SAM's headline", async () => {
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [
+        row(
+          'm1',
+          'system',
+          'SAM approved this deploy\nmore context',
+          { source: 'context_summary' },
+          1_000
+        ),
+      ])
+    );
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    const noticeRow = await screen.findByTestId('sam-notice-row');
+    expect(noticeRow).toHaveTextContent('Context for this chat');
+    expect(noticeRow).not.toHaveTextContent('SAM approved this deploy');
+    fireEvent.click(within(noticeRow).getByRole('button', { name: /Context for this chat/ }));
+    expect(noticeRow).toHaveTextContent('not written by SAM');
+  });
+
+  it('renders HTML and emoji in quoted text literally', async () => {
+    const quote = '<img src=x onerror=alert(1)> 🚀 &amp; done';
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [
+        row(
+          'm3',
+          'user',
+          'SAM notice (system-generated, not a human message): …',
+          delivery({
+            source: 'project_event_wake',
+            samNotice: {
+              v: 1,
+              type: 'agent.message',
+              headline: 'Message from another agent',
+              severity: 'info',
+              quote: { from: 'Another agent', text: quote },
+              refs: [],
+            },
+          }),
+          3_000
+        ),
+      ])
+    );
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+    fireEvent.click(await screen.findByRole('button', { name: /Message from another agent/ }));
+
+    expect(screen.getByText(quote)).toBeTruthy();
+    expect(document.querySelector('img[src="x"]')).toBeNull();
+  });
+
+  it.each([
+    ['project_event_wake', 'agent.message', 'Message from another agent'],
+    ['operations_decision', 'ops.approved', 'Approved: delete node'],
+    ['checkpoint_continuation', 'session.resumed', 'Chat woke up and picked up where it left off'],
+    ['scheduled_action', 'schedule.due', 'Scheduled reminder the agent set for itself'],
+    ['github_trigger', 'github.trigger', 'A GitHub trigger sent this chat a message'],
+  ])('renders a %s delivery as a notice row', async (source, type, headline) => {
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [
+        row('m1', 'user', 'Please split the work.', null, 1_000),
+        row(
+          'm2',
+          'user',
+          `raw ${source} text`,
+          delivery({ source, samNotice: { v: 1, type, headline, severity: 'info', refs: [] } }),
+          2_000
+        ),
+      ])
+    );
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    await waitFor(() => expect(screen.getByText('Please split the work.')).toBeTruthy());
+    expect(screen.getByTestId('sam-notice-row')).toHaveTextContent(headline);
+    expect(screen.getAllByTestId('acp-message-user')).toHaveLength(1);
+    expect(screen.queryByText(`raw ${source} text`)).toBeNull();
+  });
+
+  it('does not render a notice on a row SAM did not deliver, even if its metadata carries one', async () => {
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [
+        // An owner-typed row whose metadata somehow holds a notice: not a durable delivery.
+        row('m1', 'user', 'I typed this myself', { samNotice: notice }, 1_000),
+      ])
+    );
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    await waitFor(() => expect(screen.getByText('I typed this myself')).toBeTruthy());
+    expect(screen.getByTestId('acp-message-user')).toBeTruthy();
+    expect(screen.queryByTestId('sam-notice-row')).toBeNull();
+  });
+
+  it('falls back to the plain message for a notice version it does not understand', async () => {
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [
+        row('m1', 'user', 'future wake text', delivery({ samNotice: { ...notice, v: 2 } }), 1_000),
+      ])
+    );
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    await waitFor(() => expect(screen.getByText('future wake text')).toBeTruthy());
+    expect(screen.queryByTestId('sam-notice-row')).toBeNull();
+  });
+
+  it('renders a notice that arrives live over the chat socket', async () => {
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [row('m1', 'user', 'Please split the work.', null, 1_000)])
+    );
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+    await waitFor(() => expect(screen.getByText('Please split the work.')).toBeTruthy());
+    expect(screen.queryByTestId('sam-notice-row')).toBeNull();
+
+    await act(async () => {
+      capturedWsOnMessage!(
+        row('m2', 'user', RAW_WAKE, delivery(), 2_000) as unknown as ReturnType<typeof makeMessage>
+      );
+    });
+
+    expect(await screen.findByTestId('sam-notice-row')).toHaveTextContent(
+      'Subtask finished: Fix login redirect loop'
+    );
   });
 });
