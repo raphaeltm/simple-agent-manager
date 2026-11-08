@@ -12,7 +12,8 @@ import { CredentialLimitChip } from './CredentialLimitChip';
 export function SessionCredentialLimitChip({
   projectId,
   agentSessionId,
-}: Readonly<{ projectId: string; agentSessionId: string | null }>) {
+  size = 'md',
+}: Readonly<{ projectId: string; agentSessionId: string | null; size?: 'sm' | 'md' }>) {
   const queryScope = useQueryScope();
   const query = useQuery({
     ...projectCredentialLimitsQueryOptions(queryScope, projectId, agentSessionId),
@@ -20,5 +21,5 @@ export function SessionCredentialLimitChip({
   });
   const credential = query.data?.credentials?.[0];
   if (!credential || !credential.windows?.length) return null;
-  return <CredentialLimitChip credential={credential} />;
+  return <CredentialLimitChip credential={credential} short size={size} />;
 }

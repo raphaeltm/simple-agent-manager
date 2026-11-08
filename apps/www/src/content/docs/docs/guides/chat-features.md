@@ -351,7 +351,7 @@ badge in the rail.
 
 Two of these also surface without opening the panel:
 
-- **The idea the chat is about** appears as a chip in the chat header, next to the comment chip:
+- **The idea the chat is about** appears as a chip in the chat header's chip row:
   **Working on** and the idea's title, or **Discussing** for a chat that talks an idea through.
   Tap it to open the idea.
 - **View PR**, in the session's **Details** panel, shows the pull request's number and its state

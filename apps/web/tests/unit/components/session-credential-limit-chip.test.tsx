@@ -72,6 +72,9 @@ describe('SessionCredentialLimitChip', () => {
     });
     renderChip();
     await screen.findByTestId('credential-limit-chip');
-    expect(screen.getByTestId('credential-limit-chip')).toHaveTextContent('Codex · Week 65%');
+    // The session chip uses the header's short text; the full text stays in the accessible name.
+    const chip = screen.getByTestId('credential-limit-chip');
+    expect(chip).toHaveTextContent('Codex 65%');
+    expect(chip.getAttribute('aria-label')).toContain('Codex · Week 65%');
   });
 });

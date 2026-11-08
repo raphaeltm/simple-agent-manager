@@ -19,6 +19,7 @@ vi.mock('../../../src/hooks/useQueryScope', () => ({
 
 import {
   credentialChipText,
+  credentialHeaderChipText,
   formatResetCountdown,
   formatSampledAgo,
 } from '../../../src/components/credential-limits/credential-limit-format';
@@ -115,6 +116,56 @@ describe('credential limit formatting', () => {
       })),
     });
     expect(credentialChipText(three)).toBe('OpenCode · Rolling 9% · Week 9% · Month 9%');
+  });
+
+  it('builds the short header text: percentages only, at most two windows', () => {
+    expect(credentialHeaderChipText(makeCredential())).toBe('Claude 72% · 31%');
+    const many = makeCredential({
+      windows: ['opencode.rolling', 'opencode.weekly', 'opencode.monthly'].map((windowType) => ({
+        ...makeCredential().windows[1],
+        windowType,
+        utilizationPercent: 9,
+      })),
+    });
+    expect(credentialHeaderChipText(many)).toBe('OpenCode 9% · 9% · +1');
+  });
+
+  it('shows the prompt-rejection window in the header text only while it is not OK', () => {
+    const rejection = {
+      ...makeCredential().windows[1],
+      windowType: 'provider.prompt_rejection',
+      windowMinutes: null,
+      utilizationPercent: 0,
+    };
+    // The full text keeps listing it, the short header text drops a quiet one.
+    const quiet = makeCredential({ windows: [...makeCredential().windows, rejection] });
+    expect(credentialChipText(quiet)).toBe('Claude · 5h 72% · Week 31% · prompt rejection 0%');
+    expect(credentialHeaderChipText(quiet)).toBe('Claude 72% · 31%');
+
+    const rejecting = makeCredential({
+      windows: [
+        ...makeCredential().windows,
+        { ...rejection, status: 'rejected', level: 'rejected', utilizationPercent: null },
+      ],
+    });
+    expect(credentialHeaderChipText(rejecting)).toBe('Claude 72% · 31% · rejected');
+  });
+
+  it('names the family from a quota window even when the rejection window comes first', () => {
+    const rejectionFirst = makeCredential({
+      windows: [
+        {
+          ...makeCredential().windows[0],
+          windowType: 'provider.prompt_rejection',
+          windowMinutes: null,
+          status: 'rejected',
+          level: 'rejected',
+          utilizationPercent: null,
+        },
+        makeCredential().windows[0],
+      ],
+    });
+    expect(credentialHeaderChipText(rejectionFirst)).toBe('Claude 72% · rejected');
   });
 
   it('formats reset countdowns and sample age', () => {
@@ -274,7 +325,11 @@ describe('SessionCredentialLimitChip', () => {
     expect(mocks.getProjectCredentialLimits).toHaveBeenCalledWith('proj-1', {
       agentSessionId: 'agent-1',
     });
-    expect(screen.getByTestId('credential-limit-chip')).toHaveTextContent('Claude · 5h 72%');
+    // The session chip lives in the chat header, so it uses the short text; the accessible
+    // name keeps every window's label.
+    const chip = screen.getByTestId('credential-limit-chip');
+    expect(chip).toHaveTextContent('Claude 72% · 31%');
+    expect(chip.getAttribute('aria-label')).toContain('Claude · 5h 72% · Week 31%');
   });
 
   it('renders nothing without an agent session and nothing when no samples exist', async () => {

@@ -433,14 +433,14 @@ async function expectConversationCanScrollBehindOverlay(page: Page) {
 test.describe('message comments audit — desktop 1280x800', () => {
   test.use({ viewport: { width: 1280, height: 800 }, isMobile: false, hasTouch: false });
 
-  test('opens a visible empty rail from the always-visible header Comments control', async ({
+  test('opens a visible empty rail from the tool rail Comments action', async ({
     page,
   }) => {
     await setupApiMocks(page);
     await openChat(page);
 
     await expect(page.getByRole('complementary', { name: 'Session comments' })).toHaveCount(0);
-    await page.getByRole('button', { name: 'Comments', exact: true }).click();
+    await page.getByRole('button', { name: 'Open comment threads on this session' }).click();
 
     const rail = page.getByRole('complementary', { name: 'Session comments' });
     await expect(rail).toBeVisible();
@@ -450,7 +450,7 @@ test.describe('message comments audit — desktop 1280x800', () => {
         'Select text in a user or agent message, or use a message Comment button to start a thread.'
       )
     ).toBeVisible();
-    await screenshot(page, 'message-comments-desktop-header-empty-rail');
+    await screenshot(page, 'message-comments-desktop-rail-empty');
     await assertNoOverflow(page);
   });
 
@@ -513,7 +513,7 @@ test.describe('message comments audit — desktop 1280x800', () => {
     await openChat(page);
 
     await expect(page.getByRole('complementary', { name: 'Session comments' })).toHaveCount(0);
-    await page.getByRole('button', { name: /1 unresolved comment/i }).click();
+    await page.getByRole('button', { name: /comment threads — 1 unresolved/i }).click();
     const rail = page.getByRole('complementary', { name: 'Session comments' });
     await expect(
       rail.getByText('Seeded desktop rail comment on an offscreen message.')
@@ -637,7 +637,7 @@ test.describe('message comments audit — desktop 1280x800', () => {
     const controls = await setupApiMocks(page, { commentsMode: 'error-then-empty' });
     await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`);
 
-    await page.getByRole('button', { name: 'Comments', description: 'Open comments' }).click();
+    await page.getByTestId('session-tool-comments').click();
     const rail = page.getByRole('complementary', { name: 'Session comments' });
 
     await expect(rail.getByText('Loading comments…')).toBeVisible();

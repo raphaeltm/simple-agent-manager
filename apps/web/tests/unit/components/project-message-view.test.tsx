@@ -1654,7 +1654,8 @@ describe('ProjectMessageView — session context dropdown', () => {
 
     // Wait for workspace data to load — the badge appears in the compact row
     await waitFor(() => {
-      expect(screen.getByText('Lightweight')).toBeTruthy();
+      // Status and profile share one chip: "● Active · Lightweight".
+      expect(screen.getByText('· Lightweight')).toBeTruthy();
     });
   });
 
@@ -1668,7 +1669,7 @@ describe('ProjectMessageView — session context dropdown', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText('Full')).toBeTruthy();
+      expect(screen.getByText('· Full')).toBeTruthy();
     });
   });
 
@@ -1682,7 +1683,7 @@ describe('ProjectMessageView — session context dropdown', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText('Full')).toBeTruthy();
+      expect(screen.getByText('· Full')).toBeTruthy();
     });
   });
 
@@ -1699,7 +1700,7 @@ describe('ProjectMessageView — session context dropdown', () => {
       name: /recovery container: devcontainer build failed/i,
     });
     expect(screen.getByText('Recovery container')).toBeTruthy();
-    expect(screen.queryByText('Full')).toBeNull();
+    expect(screen.queryByText(/Full/)).toBeNull();
 
     fireEvent.mouseEnter(badge);
     expect(screen.getByRole('tooltip').textContent).toContain('Boot Logs');
@@ -2083,7 +2084,9 @@ describe('ProjectMessageView — message anchored comments', () => {
 
     render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
 
-    const openComments = await screen.findByRole('button', { name: /1 unresolved comment/i });
+    const openComments = await screen.findByRole('button', {
+      name: /comment threads — 1 unresolved/i,
+    });
     fireEvent.click(openComments);
 
     const drawerRow = await screen.findByRole('button', {
@@ -2099,7 +2102,7 @@ describe('ProjectMessageView — message anchored comments', () => {
     });
   });
 
-  it('opens an on-demand desktop comments rail from the header chip without rendering the modal drawer', async () => {
+  it('opens an on-demand desktop comments rail from the tool rail without rendering the modal drawer', async () => {
     setMediaMatches({ commentsRail: true });
     mocks.getChatSession.mockResolvedValue(
       makeSessionResponse('session-1', [
@@ -2122,7 +2125,7 @@ describe('ProjectMessageView — message anchored comments', () => {
     await screen.findByText('Agent answer');
     expect(screen.queryByRole('complementary', { name: 'Session comments' })).toBeNull();
 
-    fireEvent.click(await screen.findByRole('button', { name: /1 unresolved comment/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /comment threads — 1 unresolved/i }));
 
     const rail = await screen.findByRole('complementary', { name: 'Session comments' });
     expect(
@@ -2131,7 +2134,7 @@ describe('ProjectMessageView — message anchored comments', () => {
     expect(screen.queryByRole('dialog', { name: 'Session comments' })).toBeNull();
   });
 
-  it('opens the desktop comments rail from the always-visible header Comments chip even with no threads', async () => {
+  it('opens the desktop comments rail from the tool rail Comments action even with no threads', async () => {
     setMediaMatches({ commentsRail: true });
     mocks.getChatSession.mockResolvedValue(
       makeSessionResponse('session-1', [makeMessage('msg-1', 'session-1', 'Agent answer')])
@@ -2142,7 +2145,7 @@ describe('ProjectMessageView — message anchored comments', () => {
     await screen.findByText('Agent answer');
     expect(screen.queryByRole('complementary', { name: 'Session comments' })).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Comments' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open comment threads on this session' }));
 
     const rail = await screen.findByRole('complementary', { name: 'Session comments' });
     expect(
@@ -2367,7 +2370,7 @@ describe('ProjectMessageView — message anchored comments', () => {
       ).toBeTruthy();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /1 unresolved comment/i }));
+    fireEvent.click(screen.getByRole('button', { name: /comment threads — 1 unresolved/i }));
 
     await waitFor(() => {
       expect(screen.getAllByText('Realtime comment body').length).toBeGreaterThan(0);
