@@ -70,11 +70,17 @@ proof, one snapshot (`sleeping`, `available`, runtime `cf-container`), no placem
 | ProjectData session cleanup | `project-data/index.ts:3279` | Best-effort schedule | Covered by the queue guard |
 | Workspace stop route | `workspace-stop.ts:192` | Explicit stop; the row becomes `stopped`, not `sleeping` | None |
 | Preservation receipt | `workspace-preservation-receipt.ts:245` | Only after a replacement restore; Instant has none | None |
-| Explicit delete | `workspace-cleanup.ts` (`mode: 'explicit'`) | Intended | Keep. Fixed to converge (root cause 2) |
+| Explicit delete / archive / operator delete | `routes/workspaces/crud.ts`, `routes/tasks/crud.ts`, `task-terminal-cleanup.ts` (destructive session end), `operations-actions/executors.ts`, all `cleanupWorkspaceForDeletion({ mode: 'explicit' })` → `claimAttempt` | Intended | Keep. Fixed to converge (root cause 2) |
+| Trial expiry | `scheduled/trial-expire.ts` (`cleanupWorkspaceForDeletion({ mode: 'automatic' })` → `claimAttempt`, then strict node delete) | Deliberate end-of-entitlement teardown of an expired anonymous trial's workspaces. Before this PR it hit the same NULL-generation throw | Keep as a deliberate deletion (documented in the guard module). Guarding it would leave every such row as an immortal sweep candidate (rule 47), and an expired trial cannot continue the chat. Strict node deletion still requires every workspace on the node to carry deletion proof first |
+| Terminal-node repair | `scheduled/terminal-node-lifecycle-repair.ts` (`mode: 'automatic'`, `requireRuntimeTerminationProof`) | Only for nodes already terminal; has its own `hasProtectedSleep` check | None. `wakeableSleepingInstantSql` requires the node to be `sleeping`, so the two cannot overlap |
 
 The NodeLifecycle queue (`schedule()` and `processDueEntry()`) is the one place every automatic
-writer passes through. It now refuses a non-explicit entry for a wakeable sleeping Instant
-workspace and repairs a row an automatic claim already moved to `stopping`.
+writer that *schedules* passes through. It now refuses a non-explicit entry for a wakeable
+sleeping Instant workspace and repairs a row that a failed automatic attempt left `stopping`. The
+repair releases only the exact entry it judged (compare-and-set on claimId, attemptCount and
+mode), and restores D1 only by compare-and-set on the observed `error_message` and `updated_at`.
+A claim that lands in the D1 await gap therefore always wins (rule 45; review finding from
+cloudflare-specialist).
 
 ## Status allowlists and denylists checked (rule 79)
 
@@ -101,26 +107,26 @@ the chat or start a new one. The fresh-runtime restore is filed as an idea.
 
 ## Implementation checklist
 
-- [ ] Nullable workspace generation in container deletion (`workspace-deletion.ts`,
+- [x] Nullable workspace generation in container deletion (`workspace-deletion.ts`,
       `node-workspace-retirement-guard.ts`)
-- [ ] Log the error name and message (not persisted) on `workspace_deletion.unconfirmed`, so the
+- [x] Log the error name and message (not persisted) on `workspace_deletion.unconfirmed`, so the
       throw site is visible next time
-- [ ] Shared predicate and repair helper for "wakeable sleeping Instant workspace"
+- [x] Shared predicate and repair helper for "wakeable sleeping Instant workspace"
       (`services/instant-sleeping-deletion-guard.ts`)
-- [ ] Safety net excludes sleeping cf-container rows (`workspace-phases.ts`)
-- [ ] Queue `schedule()` refuses non-explicit entries for wakeable sleeping Instant and repairs
+- [x] Safety net excludes sleeping cf-container rows (`workspace-phases.ts`)
+- [x] Queue `schedule()` refuses non-explicit entries for wakeable sleeping Instant and repairs
       `stopping` rows
-- [ ] Queue `processDueEntry()` does the same for already-queued entries (stuck rows converge)
-- [ ] Clearer `container_runtime_unavailable` refusal text
-- [ ] Tests: the safety net through `sweepStaleStoppedWorkspaces` with real SQL (Instant
+- [x] Queue `processDueEntry()` does the same for already-queued entries (stuck rows converge)
+- [x] Clearer `container_runtime_unavailable` refusal text
+- [x] Tests: the safety net through `sweepStaleStoppedWorkspaces` with real SQL (Instant
       excluded, VM still queued); queue guard and repair; explicit delete of a slept Instant
       workspace with NULL generation converges; the real integration path (sleep → safety
       net → follow-up wakes)
-- [ ] Fix `instant-idle-sleep-wake.test.ts` refusal expectations (new text; no test keeps the
+- [x] Fix `instant-idle-sleep-wake.test.ts` refusal expectations (new text; no test keeps the
       broken behaviour as its contract)
-- [ ] Discrimination checks: revert each guard and confirm the intended tests go red
-- [ ] Docs sync (grep for the refusal text and safety-net descriptions)
-- [ ] Archive the four backlog files, and update the idea
+- [x] Discrimination checks: revert each guard and confirm the intended tests go red
+- [x] Docs sync (grep for the refusal text and safety-net descriptions)
+- [ ] Archive the four backlog files, and update the idea (fresh-runtime restore filed as idea `01M6WVP5YWVX5VGMVGANJKP3N7`)
 
 ## Acceptance criteria
 
@@ -135,3 +141,20 @@ the chat or start a new one. The fresh-runtime restore is filed as an idea.
       a slept Instant workspace completes; the five stuck staging rows repair; test sessions
       are cleaned up
 - [ ] Production checked (`ops_find_anomalies`, `ops_search_errors`) before and after
+
+## Implementation notes
+
+- The integration fixture used `eviction_generation = 'generation-1'`, but production rows are
+  NULL: staging had 87 cf-container and 34 VM workspaces since October, all NULL. The fake value hid
+  root cause 2. Switching the fixture to NULL showed that **archiving a slept Instant session**
+  hit the same throw. That is fixed by the same change.
+- Discrimination, each reverted separately with the intended tests going red:
+  - generation fix: the explicit-delete workers test and the integration archive test;
+  - safety-net exclusion: the integration safety-net test, for both sleep writers;
+  - queue guard: three queue tests;
+  - explicit exemption: one test;
+  - restore compare-and-set: the interleaving test;
+  - due-path guard: the due-repair test.
+- Full unit/integration suite on 29017da4b: 15,553 tests, 15,551 passed, 0 failed, 2 skipped.
+- Production baseline 2026-11-08 05:39Z: no deletion-quarantine or snapshot-failure anomalies,
+  no "cannot wake in place" errors, and no cf-container `stopping` rows.
