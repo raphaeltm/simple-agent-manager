@@ -98,7 +98,6 @@ async function setupMocks(page: Page) {
     if (path === '/api/github/installations')
       return respond(200, [{ id: 'inst-docs', accountName: 'acme', accountType: 'Organization' }]);
     if (path === '/api/dashboard/active-tasks') return respond(200, { tasks: [] });
-    if (path === '/api/trial/status') return respond(200, { available: false });
     if (path === '/api/agent-models/catalog') return respond(200, NORMAL_CATALOG_RESPONSE);
     const match = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
     if (!match) return undefined;

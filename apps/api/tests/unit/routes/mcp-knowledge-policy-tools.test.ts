@@ -36,10 +36,6 @@ vi.mock('../../../src/services/project-data', () => ({
   updateKnowledgeObservation: vi.fn(),
 }));
 
-vi.mock('../../../src/services/trial/bridge', () => ({
-  bridgeKnowledgeAdded: vi.fn(),
-}));
-
 const validTokenData = {
   taskId: 'task-123',
   projectId: 'proj-456',

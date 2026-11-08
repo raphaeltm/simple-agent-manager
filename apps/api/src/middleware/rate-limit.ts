@@ -43,11 +43,6 @@ export const DEFAULT_RATE_LIMITS = {
   // bounding abuse of the externally reachable POST endpoint.
   REPORT_ISSUE_POST: 20,
   PUSH_SUBSCRIPTION: 30,
-  // Tighter limit for anonymous trial creation: each call spawns a DO,
-  // fires ~4 GitHub API calls, and consumes a monthly trial slot.
-  TRIAL_CREATE: 10,
-  // SSE events endpoint — short window to prevent connection storms.
-  TRIAL_SSE: 30,
   // Voice transcription runs Workers AI Whisper on every request. Per MINUTE, not per hour
   // (`DEFAULT_TRANSCRIBE_WINDOW_SECONDS`): dictation is bursty, and the budget is for abuse.
   TRANSCRIBE: 30,
@@ -394,20 +389,6 @@ export function rateLimitAnonymous(env: Env): MiddlewareHandler<{ Bindings: Env 
   return rateLimit({
     limit: getRateLimit(env, 'ANONYMOUS'),
     keyPrefix: 'anonymous',
-    useIp: true,
-  });
-}
-
-/**
- * Per-IP rate limit for `POST /api/trial/create`. Tighter than the general
- * anonymous bucket because each trial create allocates a Durable Object,
- * makes ~4 outbound GitHub API calls, and consumes a monthly trial slot.
- * Default: 10 requests per hour per IP.
- */
-export function rateLimitTrialCreate(env: Env): MiddlewareHandler<{ Bindings: Env }> {
-  return rateLimit({
-    limit: getRateLimit(env, 'TRIAL_CREATE'),
-    keyPrefix: 'trial-create',
     useIp: true,
   });
 }

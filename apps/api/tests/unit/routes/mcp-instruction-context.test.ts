@@ -412,16 +412,7 @@ describe('MCP instruction context handlers', () => {
     expect(String(payload.policyDirectives)).toContain('Call get_instructions');
   });
 
-  it('resolves trial and direct-workspace contexts without a task row', async () => {
-    const trial = await resolveInstructionContext(
-      {
-        ...baseToken,
-        taskId: '',
-        contextType: 'trial',
-        agentSessionId: 'trial-agent',
-      },
-      makeEnv()
-    );
+  it('resolves direct-workspace contexts without a task row', async () => {
     const direct = await resolveInstructionContext(
       {
         ...baseToken,
@@ -432,10 +423,6 @@ describe('MCP instruction context handlers', () => {
       makeEnv()
     );
 
-    expect(trial).toMatchObject({
-      ok: true,
-      context: { type: 'trial', workspaceId: 'workspace-1', agentSessionId: 'trial-agent' },
-    });
     expect(direct).toMatchObject({
       ok: true,
       context: {

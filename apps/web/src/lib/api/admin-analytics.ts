@@ -163,8 +163,6 @@ export interface AnalyticsAiUsageResponse {
   totalInputTokens: number;
   totalOutputTokens: number;
   totalCostUsd: number;
-  trialRequests: number;
-  trialCostUsd: number;
   cachedRequests: number;
   errorRequests: number;
   byModel: AiUsageByModel[];
@@ -213,7 +211,6 @@ export interface CostSummaryResponse {
     totalRequests: number;
     totalInputTokens: number;
     totalOutputTokens: number;
-    trialCostUsd: number;
     cachedRequests: number;
     errorRequests: number;
     byModel: CostByModel[];

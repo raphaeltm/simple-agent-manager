@@ -54,7 +54,6 @@ import { resolveProjectAgentDefault } from '../../services/project-agent-default
 import * as projectDataService from '../../services/project-data';
 import { extractScalewaySecretKey } from '../../services/provider-credentials';
 import { assertProviderLimitCredentialPin } from '../../services/provider-limit-credential-pin';
-import { bridgeAgentActivity } from '../../services/trial/bridge';
 import {
   signalWorkspaceDeletionUnconfirmedCallback,
   type WorkspaceDeletionCallbackKind,
@@ -580,26 +579,6 @@ function partialSessionLimitResponse(
       remainingCapacity: result.remainingCapacity,
     },
     409
-  );
-}
-
-function bridgePersistedAgentActivity(
-  c: RuntimeContext,
-  projectId: string,
-  result: MessageBatchPersistenceRouteResult,
-  body: MessageBatchBody
-): void {
-  if (result.persisted === 0) return;
-  c.executionCtx.waitUntil(
-    bridgeAgentActivity(
-      c.env,
-      projectId,
-      body.messages.map((m) => ({
-        role: m.role,
-        content: m.content,
-        toolMetadata: m.toolMetadata ? safeParseJson(m.toolMetadata) : undefined,
-      }))
-    )
   );
 }
 
@@ -1620,11 +1599,6 @@ runtimeRoutes.post('/:id/messages', async (c) => {
   if (result.limitReached) {
     return partialSessionLimitResponse(c, context, result);
   }
-
-  // Fire-and-forget: pipe agent activity to the trial SSE feed (if this
-  // workspace belongs to a trial project). Non-trial projects short-circuit
-  // with a single KV lookup inside the bridge.
-  bridgePersistedAgentActivity(c, currentWorkspace.projectId, result, body);
 
   return c.json({
     persisted: result.persisted,

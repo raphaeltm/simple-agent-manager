@@ -7,7 +7,6 @@ export const ADMIN_SETTING_CATEGORIES = [
   'OAuth',
   'Connector',
   'Operations',
-  'Trials',
   'Collaboration',
   'Chat',
   'AI models',

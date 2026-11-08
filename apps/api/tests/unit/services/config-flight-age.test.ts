@@ -158,7 +158,7 @@ describe('abandoned cache owner recovery without its timer running', () => {
         })
         .mockResolvedValue('false');
       const { env } = createEnv({ KV: { get } as unknown as KVNamespace });
-      const read = () => resolveAdminSettingDetails(env, 'trials.enabled');
+      const read = () => resolveAdminSettingDetails(env, 'operations.cronSweepsEnabled');
       const owner = read().then(
         (value) => value,
         () => null

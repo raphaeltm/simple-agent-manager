@@ -27,7 +27,6 @@ export type PlacementEntryPoint =
   | 'direct-node'
   | 'direct-workspace'
   | 'deployment-provisioning'
-  | 'trial-orchestrator'
   | 'session-snapshot-relay'
   | 'mcp-dispatch'
   | 'sam-session-dispatch'

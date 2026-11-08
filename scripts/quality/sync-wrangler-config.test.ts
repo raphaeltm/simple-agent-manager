@@ -1290,9 +1290,25 @@ describe('Worker vars omitted because they equal the code default', () => {
     return comparable;
   }
 
+  const RETIRED_WITH_ANONYMOUS_TRIALS = [
+    'TRIAL_MONTHLY_CAP',
+    'TRIAL_WORKSPACE_TTL_MS',
+    'TRIAL_ANONYMOUS_USER_ID',
+    'TRIAL_EXPIRE_BATCH_SIZE',
+    'TRIAL_CLEANUP_BATCH_SIZE',
+    'TRIAL_CLEANUP_DEADLINE_MS',
+    'TRIAL_NODE_DELETION_LOCK_STALE_MS',
+    'TRIAL_AGENT_TYPE_STAGING',
+    'TRIAL_AGENT_TYPE_PRODUCTION',
+    'TRIAL_DEFAULT_WORKSPACE_PROFILE',
+    'TRIALS_ENABLED_KV_KEY',
+  ] as const;
+
   it('pins every original binding to its retained value or proven runtime default', () => {
     const current = readCheckedInWrangler().vars ?? {};
-    const dead = new Set(bindingAudit.removedDead);
+    // Vars whose only consumer was deleted with the anonymous-trial product (2026-11-08) are
+    // dead too: nothing reads them, so they are neither retained nor recorded as defaults.
+    const dead = new Set([...bindingAudit.removedDead, ...RETIRED_WITH_ANONYMOUS_TRIALS]);
     expect(Object.keys(bindingAudit.variables)).toHaveLength(283);
     for (const [name, value] of Object.entries(bindingAudit.variables)) {
       if (has(current, name)) {
@@ -1323,7 +1339,9 @@ describe('Worker vars omitted because they equal the code default', () => {
           ...OMITTED_WORKER_VAR_DEFAULTS,
           ...Object.fromEntries(
             Object.entries(bindingAudit.variables).filter(
-              ([name]) => !bindingAudit.removedDead.includes(name)
+              ([name]) =>
+                !bindingAudit.removedDead.includes(name) &&
+                !(RETIRED_WITH_ANONYMOUS_TRIALS as readonly string[]).includes(name)
             )
           ),
           ...checkedIn.vars,

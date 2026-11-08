@@ -160,7 +160,7 @@ export function CreateWorkspace() {
 
   // Check each prerequisite independently so status appears incrementally
   useEffect(() => {
-    // Cloud provider credentials + catalog (also check platform trial)
+    // Cloud provider credentials + catalog (also check installation platform compute)
     Promise.all([listCredentials().catch(() => []), getTrialStatus().catch(() => null)])
       .then(([creds, trial]) => {
         const hasUserCreds = hasByocComputeCredential(creds);
@@ -465,7 +465,7 @@ export function CreateWorkspace() {
               cloudStatus === 'ready'
                 ? 'Connected'
                 : cloudStatus === 'missing'
-                  ? 'Connect a cloud provider in Settings, or ask your admin to enable platform trial'
+                  ? 'Connect a cloud provider in Settings, or ask your admin to add a platform cloud credential'
                   : cloudStatus === 'error'
                     ? 'Failed to check credentials'
                     : undefined

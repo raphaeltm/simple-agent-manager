@@ -327,18 +327,6 @@ export function prepareIdeaCreate(ctx: OperationContext, input: IdeaCreateInput)
       titleLength: title.length,
       contentLength: content?.length ?? 0,
     });
-    try {
-      const { bridgeIdeaCreated } = await import('../services/trial/bridge');
-      await bridgeIdeaCreated(
-        ctx.env,
-        input.projectId,
-        ideaId,
-        title,
-        (content ?? '').slice(0, 280)
-      );
-    } catch {
-      /* The trial bridge never blocks idea creation. */
-    }
     return {
       ideaId,
       title,

@@ -122,7 +122,7 @@ describe('AuthProvider — persisted query cache failure modes', () => {
   });
 
   it('renders children immediately for a signed-out session and never reads storage', async () => {
-    // Anonymous visitors (landing page, /try, /device) have no identity to key a
+    // Anonymous visitors (landing page, /device) have no identity to key a
     // record by, so they must not pay for the gate at all.
     mockUseSession.mockReturnValue({
       data: null,

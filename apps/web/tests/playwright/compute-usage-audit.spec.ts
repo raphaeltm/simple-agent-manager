@@ -375,7 +375,7 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
       return respond(200, computeUsageData);
     }
 
-    // Trial status
+    // Platform compute availability
     if (path === '/api/trial-status') return respond(200, { available: false });
 
     // User quota status (for SettingsComputeUsage — returns "no quota configured" shape)

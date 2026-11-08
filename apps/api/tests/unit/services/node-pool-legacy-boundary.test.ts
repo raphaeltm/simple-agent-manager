@@ -608,23 +608,6 @@ describe('node-pool metadata exemptions preserve real authority detection', () =
     ).not.toEqual([]);
   });
 
-  it('allows deprecated trial vocabulary validation while retaining its catalog fence', () => {
-    const path = 'apps/api/src/durable-objects/trial-orchestrator/steps.ts';
-    expect(
-      authorityFindings(
-        file(
-          path,
-          "function resolveTrialVmSize(env) { return env.TRIAL_VM_SIZE === 'small' ? env.TRIAL_VM_SIZE : fallback; }"
-        )
-      )
-    ).toEqual([]);
-    expect(
-      authorityFindings(
-        file(path, 'function resolveTrialVmSize(env) { return offers[env.TRIAL_VM_SIZE]; }')
-      )
-    ).not.toEqual([]);
-  });
-
   it('allows comparison only when its sole effect records the deprecated task label', () => {
     const path = 'apps/api/src/durable-objects/task-runner/node-provisioning-step.ts';
     const update =
@@ -1200,7 +1183,8 @@ describe('node-pool inventories', () => {
       expect(entry.owner.length).toBeGreaterThan(0);
       expect(entry.role.length).toBeGreaterThan(0);
     }
-    expect(ALLOCATION_WRITER_INVENTORY.length).toBeGreaterThanOrEqual(23);
+    // 22 since the anonymous-trial task adapter was retired (2026-11-08).
+    expect(ALLOCATION_WRITER_INVENTORY.length).toBeGreaterThanOrEqual(22);
   });
 
   it('records every allocation entrypoint with a scope, role and admission contract', () => {
@@ -1208,7 +1192,8 @@ describe('node-pool inventories', () => {
       expect(entry.owner.length).toBeGreaterThan(0);
       expect(entry.admission.length).toBeGreaterThan(20);
     }
-    expect(ALLOCATION_ENTRYPOINT_INVENTORY.length).toBeGreaterThanOrEqual(21);
+    // 19 since the four anonymous-trial orchestrator entrypoints were retired (2026-11-08).
+    expect(ALLOCATION_ENTRYPOINT_INVENTORY.length).toBeGreaterThanOrEqual(19);
   });
 
   it('has no duplicate writer or entrypoint ownership keys', () => {

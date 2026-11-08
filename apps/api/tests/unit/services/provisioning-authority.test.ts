@@ -21,7 +21,6 @@ import {
   assertDeploymentProvisioningAuthority,
   assertDirectWorkspaceProvisioningAuthority,
   assertRelayProvisioningAuthority,
-  assertTrialProvisioningAuthority,
   cleanupFreshProvisioningNode,
   ProvisioningAuthorityError,
 } from '../../../src/services/provisioning-authority';
@@ -143,32 +142,6 @@ describe('provisioning authority helpers', () => {
       null,
       null,
       null,
-    ]);
-  });
-
-  it('requires pending unclaimed trial ownership and active sentinel project membership', async () => {
-    const { env, statements } = makeEnv(() => ({ ok: 1 }));
-
-    await assertTrialProvisioningAuthority(env, {
-      trialId: 'trial-1',
-      projectId: 'project-1',
-      userId: 'system_anonymous_trials',
-      nowMs: 1234,
-    });
-
-    const statement = statements[0]!;
-    expect(statement.sql).toContain('FROM trials t');
-    expect(statement.sql).toContain('JOIN projects p');
-    expect(statement.sql).toContain('JOIN project_members pm');
-    expect(statement.sql).toContain("t.status = 'pending'");
-    expect(statement.sql).toContain('t.claimed_by_user_id IS NULL');
-    expect(statement.sql).toContain('t.expires_at > ?');
-    expect(statement.binds).toEqual([
-      'system_anonymous_trials',
-      'system_anonymous_trials',
-      'trial-1',
-      'project-1',
-      1234,
     ]);
   });
 

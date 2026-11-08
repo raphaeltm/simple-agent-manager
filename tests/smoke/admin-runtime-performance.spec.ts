@@ -48,7 +48,6 @@ test('bounded admin and Runtime performance audit', async ({ context }, info) =>
     '/api/admin/platform-config',
     '/api/admin/platform-credentials',
     '/api/admin/ai-proxy/config',
-    '/api/admin/trials/config',
     '/api/admin/quotas/users',
     '/api/admin/usage/nodes',
     '/api/admin/observability/errors',

@@ -1,4 +1,4 @@
-import { TRIAL_ANONYMOUS_USER_ID } from '@simple-agent-manager/shared';
+import { SYSTEM_USER_ID } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
@@ -187,8 +187,8 @@ export async function resolveSecret(
     : unset();
 }
 
-export function creatorId(env: Env, updatedBy?: string): string {
-  return updatedBy || env.TRIAL_ANONYMOUS_USER_ID || TRIAL_ANONYMOUS_USER_ID;
+export function creatorId(updatedBy?: string): string {
+  return updatedBy || SYSTEM_USER_ID;
 }
 
 export function trimOptional(value: string | undefined): string | null {

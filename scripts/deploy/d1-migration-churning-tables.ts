@@ -22,7 +22,6 @@ export const DEFAULT_D1_MIGRATION_CHURNING_TABLES = [
   'DATABASE.session_snapshot_traces',
   'DATABASE.session_snapshots',
   'DATABASE.sessions',
-  'DATABASE.trial_waitlist',
   'DATABASE.trigger_executions',
   'DATABASE.verifications',
   'DATABASE.vm_provisioning_leases',

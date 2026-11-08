@@ -188,7 +188,6 @@ export function AdminCosts() {
         <KpiCard
           label="LLM Cost"
           value={formatCost(llm.totalCostUsd)}
-          subtitle={llm.trialCostUsd > 0 ? `${formatCost(llm.trialCostUsd)} trials` : undefined}
           accent
         />
         <KpiCard

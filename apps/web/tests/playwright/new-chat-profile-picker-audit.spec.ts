@@ -238,7 +238,6 @@ async function setupMocks(page: Page, scenario: Scenario) {
       return respond(200, [
         { id: 'cred-1', provider: 'hetzner', name: 'Hetzner', createdAt: Date.now() },
       ]);
-    if (path === '/api/trial/status') return respond(200, { available: false });
     if (path === '/api/agents')
       return respond(200, {
         agents: [

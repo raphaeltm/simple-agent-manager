@@ -48,8 +48,8 @@ declare module 'hono' {
 /**
  * Resolve the status of an authenticated session user.
  *
- * `'system'` is the status of internal sentinel rows (e.g. system_anonymous_trials,
- * seeded by migration 0043). It is an input:false additionalField — only migrations
+ * `'system'` is the status of internal sentinel rows (e.g. the system user
+ * `SYSTEM_USER_ID`, seeded by migration 0043). It is an input:false additionalField — only migrations
  * ever write it — so a real, OAuth-authenticated request must never carry it. If we
  * see it on a live session it is an anomaly (a sentinel row was somehow logged in, or
  * a row was mislabeled), so we log it and fall back to the least-privileged status

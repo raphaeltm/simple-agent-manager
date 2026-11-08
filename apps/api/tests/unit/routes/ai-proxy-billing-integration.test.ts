@@ -103,7 +103,6 @@ describe('upstream header assembly', () => {
       userId: 'user-123',
       workspaceId: 'ws-456',
       projectId: 'proj-789',
-      trialId: 'trial-abc',
       modelId: 'claude-sonnet-5',
       stream: false,
     });

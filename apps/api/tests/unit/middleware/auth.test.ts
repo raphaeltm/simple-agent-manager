@@ -6,7 +6,7 @@
  * projecting a BetterAuth session onto the request `auth` context.
  *
  * The function exists because `'system'` is the status of internal sentinel rows
- * (e.g. system_anonymous_trials, seeded by migration 0043). `status` is an
+ * (e.g. the system user `system_anonymous_trials`, seeded by migration 0043). `status` is an
  * input:false additionalField — only migrations write 'system' — so a real,
  * OAuth-authenticated request must never carry it. If a live session does, that is
  * an anomaly: the middleware logs `auth.system_status_anomaly` and falls back to the

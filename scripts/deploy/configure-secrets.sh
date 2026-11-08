@@ -413,14 +413,6 @@ set_worker_secret "GITHUB_APP_ID" "${GH_APP_ID:-}" "$ENVIRONMENT" "false"
 set_worker_secret "GITHUB_APP_PRIVATE_KEY" "${GH_APP_PRIVATE_KEY:-}" "$ENVIRONMENT" "false"
 set_worker_secret "GITHUB_APP_SLUG" "${GH_APP_SLUG:-}" "$ENVIRONMENT" "false"
 
-# Configure trial onboarding claim/fingerprint HMAC secret (Pulumi-managed, persists across deploys).
-# Required when trials are enabled; harmless when trials are disabled (cookies just aren't issued).
-PULUMI_TRIAL_CLAIM_TOKEN_SECRET="${PULUMI_TRIAL_CLAIM_TOKEN_SECRET:-}"
-if [ -z "$PULUMI_TRIAL_CLAIM_TOKEN_SECRET" ] && [ -n "${PULUMI_STACK:-}" ]; then
-  load_pulumi_secret PULUMI_TRIAL_CLAIM_TOKEN_SECRET trialClaimTokenSecret
-fi
-set_worker_secret "TRIAL_CLAIM_TOKEN_SECRET" "$PULUMI_TRIAL_CLAIM_TOKEN_SECRET" "$ENVIRONMENT" "true" || FAILED=true
-
 # Configure Google INFRA OAuth secrets (optional — only needed for GCP OIDC integration)
 GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:-}"
 GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET:-}"
@@ -482,14 +474,6 @@ else
   echo -e "${YELLOW}ℹ  Skipping GA4 secrets (GA4_API_SECRET/GA4_MEASUREMENT_ID not set — GA4 analytics forwarding disabled)${NC}"
 fi
 
-# Configure trial Anthropic API key (optional — only needed when trials use Anthropic provider)
-ANTHROPIC_API_KEY_TRIAL="${ANTHROPIC_API_KEY_TRIAL:-}"
-if [ -n "$ANTHROPIC_API_KEY_TRIAL" ]; then
-  set_worker_secret "ANTHROPIC_API_KEY_TRIAL" "$ANTHROPIC_API_KEY_TRIAL" "$ENVIRONMENT" "false"
-else
-  echo -e "${YELLOW}ℹ  Skipping ANTHROPIC_API_KEY_TRIAL (not set — trials will use Workers AI provider)${NC}"
-fi
-
 # Configure smoke test auth (optional — only needed for staging/test environments)
 SMOKE_TEST_AUTH_ENABLED="${SMOKE_TEST_AUTH_ENABLED:-}"
 if [ -n "$SMOKE_TEST_AUTH_ENABLED" ]; then
@@ -509,10 +493,12 @@ fi
 STALE_SECRETS=(
   "AI_PROXY_DEFAULT_MODEL"   # Migrated to wrangler.toml [vars] — code defaults in shared/constants/ai-services.ts
   "AI_PROXY_ENABLED"         # Migrated to wrangler.toml [vars]
+  "TRIAL_CLAIM_TOKEN_SECRET" # Retired anonymous-trial product (2026-11-08)
+  "ANTHROPIC_API_KEY_TRIAL"  # Retired anonymous-trial product (2026-11-08)
 )
 
 echo ""
-echo "Cleaning up stale secrets (migrated to wrangler.toml vars)..."
+echo "Cleaning up stale secrets (migrated to wrangler.toml vars or retired)..."
 for secret_name in "${STALE_SECRETS[@]}"; do
   queue_stale_worker_secret_delete "$secret_name"
 done

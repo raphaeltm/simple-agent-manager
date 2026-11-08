@@ -210,8 +210,6 @@ function makeAiUsageData(opts: { empty?: boolean; manyModels?: boolean } = {}) {
     totalInputTokens: opts.empty ? 0 : 987654321,
     totalOutputTokens: opts.empty ? 0 : 123456789,
     totalCostUsd: opts.empty ? 0 : 1234.5678,
-    trialRequests: opts.empty ? 0 : 9876,
-    trialCostUsd: opts.empty ? 0 : 12.3456,
     cachedRequests: opts.empty ? 0 : 4321,
     errorRequests: opts.empty ? 0 : 42,
     byModel: opts.empty

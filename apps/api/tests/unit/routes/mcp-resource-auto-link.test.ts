@@ -36,7 +36,6 @@ vi.mock('../../../src/middleware/project-auth', async (original) => ({
   requireProjectAccess: vi.fn().mockResolvedValue({ id: 'project1' }),
   requireProjectCapability: vi.fn().mockResolvedValue({ id: 'project1' }),
 }));
-vi.mock('../../../src/services/trial/bridge', () => ({ bridgeIdeaCreated: vi.fn() }));
 vi.mock('../../../src/services/file-library', async (original) => ({
   ...(await original<typeof import('../../../src/services/file-library')>()),
   uploadFile: fileMocks.upload,

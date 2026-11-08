@@ -228,7 +228,6 @@ jobs:
         env:
           SAM_CI_SECRETS_JSON: |
             {
-              "ANTHROPIC_API_KEY_TRIAL": ${{ toJSON(secrets.ANTHROPIC_API_KEY_TRIAL || '') }},
               "BETTER_AUTH_SECRET": ${{ toJSON(secrets.BETTER_AUTH_SECRET || '') }},
               "CF_ACCOUNT_ID": ${{ toJSON(secrets.CF_ACCOUNT_ID || '') }},
               "CF_AIG_TOKEN": ${{ toJSON(secrets.CF_AIG_TOKEN || '') }},
@@ -1875,23 +1874,6 @@ jobs:
           PREFIX: ${{ steps.deploy_resources.outputs.prefix }}
           STACK: ${{ steps.deploy_resources.outputs.stack }}
 
-      - name: Enable Trials on Staging (KV kill-switch)
-        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true && inputs.environment == 'staging') }}
-        # Trials are gated by a KV flag that fails closed. Staging always enables them
-        # automatically so the /try flow is live after every deploy. Production stays
-        # opt-in (operator flips the flag manually when ready to accept live traffic).
-        working-directory: apps/api
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-        run: |
-          echo "Enabling trials kill-switch on staging (KV trials:enabled=true)"
-          # Wrangler v4: KV commands default to local; --remote required for deployed KV.
-          pnpm exec wrangler kv key put "trials:enabled" "true" \
-            --binding KV \
-            --env staging \
-            --remote
-
       - name: Configure Worker Secrets
         if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}
         run: bash scripts/deploy/configure-secrets.sh "$DEPLOY_ENV"
@@ -1931,7 +1913,6 @@ jobs:
           SMOKE_TEST_AUTH_ENABLED: ${{ secrets.SMOKE_TEST_AUTH_ENABLED }}
           DEPLOY_SIGNING_PRIVATE_KEY: ${{ secrets.DEPLOY_SIGNING_PRIVATE_KEY }}
           DEPLOY_SIGNING_PUBLIC_KEY: ${{ secrets.DEPLOY_SIGNING_PUBLIC_KEY }}
-          ANTHROPIC_API_KEY_TRIAL: ${{ secrets.ANTHROPIC_API_KEY_TRIAL }}
           SEGMENT_WRITE_KEY: ${{ secrets.SEGMENT_WRITE_KEY }}
           GA4_API_SECRET: ${{ secrets.GA4_API_SECRET }}
           GA4_MEASUREMENT_ID: ${{ secrets.GA4_MEASUREMENT_ID }}

@@ -29,11 +29,6 @@ const METADATA_READERS = [
     'resolveVmSize',
     'collects the deprecated request label from its original request layers',
   ],
-  [
-    'apps/api/src/durable-objects/trial-orchestrator/steps.ts',
-    'resolveTrialVmSize',
-    'validates and forwards the deprecated trial request label',
-  ],
 ] as const;
 
 /** Arguments transported into reviewed compatibility helpers; not whole-module exemptions. */

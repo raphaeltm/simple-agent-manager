@@ -247,13 +247,6 @@ export const OMITTED_WORKER_VAR_DEFAULTS: Readonly<Record<string, string>> = {
   WEBHOOK_DELIVERY_MAX_PAGE_SIZE: '100',
   WEBHOOK_DELIVERY_PROCESSING_LEASE_SECONDS: '300',
 
-  // Trials
-  TRIAL_MONTHLY_CAP: '1500',
-  TRIAL_WORKSPACE_TTL_MS: '1200000',
-  TRIAL_AGENT_TYPE_STAGING: 'opencode',
-  TRIAL_AGENT_TYPE_PRODUCTION: 'claude-code',
-  TRIALS_ENABLED_KV_KEY: 'trials:enabled',
-
   // Project events, agent channels and credential limits (left out of [vars] since 0e8dbc0f7)
   PROJECT_EVENT_MAX_ACTIVE_SUBSCRIPTIONS_PER_PROJECT: '200',
   PROJECT_EVENT_FILTER_MAX_VALUES_PER_FIELD: '20',

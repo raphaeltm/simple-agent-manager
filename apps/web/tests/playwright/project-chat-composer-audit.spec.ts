@@ -247,7 +247,6 @@ async function setupApiMocks(page: Page, mode: AuditMode, profiles = AGENT_PROFI
       return respond(200, [
         { id: 'cred-1', provider: 'hetzner', name: 'Hetzner', createdAt: Date.now() },
       ]);
-    if (path === '/api/trial/status') return respond(200, { available: false });
     if (path === '/api/agents') {
       if (mode === 'no-agents') {
         return respond(200, { agents: [] });

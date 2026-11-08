@@ -94,7 +94,6 @@ async function setupMocks(
     if (path.endsWith('/api/agents')) return respond(200, { agents: AGENTS });
     if (path.endsWith('/api/credentials'))
       return respond(200, [{ provider: 'hetzner', status: 'valid' }]);
-    if (path.endsWith('/api/trial/status')) return respond(200, { available: false });
     // App-shell surfaces that load on every authed page.
     if (path.endsWith('/api/projects'))
       return respond(200, { projects: [], total: 0, hasMore: false });

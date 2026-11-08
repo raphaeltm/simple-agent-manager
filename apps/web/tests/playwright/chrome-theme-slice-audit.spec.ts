@@ -104,7 +104,6 @@ async function setupApiMocks(page: Page) {
     if (path === '/api/credentials') return respond([]);
     if (path === '/api/github/installations') return respond([]);
     if (path === '/api/agents') return respond({ agents: [] });
-    if (path === '/api/trial/status') return respond({ available: false });
     if (path.startsWith('/api/projects/')) return respond(MOCK_PROJECTS[0]);
 
     return respond({});

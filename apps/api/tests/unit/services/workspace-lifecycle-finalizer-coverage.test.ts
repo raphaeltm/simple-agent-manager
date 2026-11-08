@@ -184,7 +184,6 @@ describe('workspace/node terminal writers route through shared lifecycle finaliz
       expect.arrayContaining([
         'durable-objects/vm-agent-container-runtime.ts',
         'routes/nodes.ts',
-        'scheduled/trial-expire.ts',
         'services/instant-session.ts',
         'services/node-provisioning.ts',
         'services/node-resource-deletion.ts',

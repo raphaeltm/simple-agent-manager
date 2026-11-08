@@ -14,7 +14,6 @@ import {
   KeyRound,
   LayoutDashboard,
   LineChart,
-  ListChecks,
   Map,
   MessageSquare,
   Radio,
@@ -101,12 +100,6 @@ export function buildNavigationItems(isSuperadmin: boolean): NavItem[] {
         label: 'Admin: AI Proxy',
         path: '/admin/ai-proxy',
         icon: <Cpu size={14} />,
-      },
-      {
-        id: 'nav-admin-trials',
-        label: 'Admin: Trials',
-        path: '/admin/trials',
-        icon: <ListChecks size={14} />,
       },
       {
         id: 'nav-admin-costs',

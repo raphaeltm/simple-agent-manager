@@ -57,7 +57,7 @@ export async function verifySetupToken(
     `INSERT OR IGNORE INTO platform_settings (key, value, updated_at, updated_by)
      VALUES (?, json_object('windowStart', ?, 'count', 0), CURRENT_TIMESTAMP, ?)`
   )
-    .bind(key, now, creatorId(env))
+    .bind(key, now, creatorId())
     .run();
 
   const result = await env.DATABASE.prepare(

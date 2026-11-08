@@ -211,14 +211,11 @@ export function adminSettingCacheMs(env: Env, name: AdminSettingName): number {
   // The debugger-tools dial is a trust boundary: turning it down must apply to the next call.
   if (name === 'operations.debuggerTools') return 0;
   const ceiling =
-    name === 'trials.enabled' ||
-    name === 'operations.cronSweepsEnabled' ||
-    name === 'operations.doAlarmsEnabled'
+    name === 'operations.cronSweepsEnabled' || name === 'operations.doAlarmsEnabled'
       ? LEGACY_KV_CACHE_MAX_MS
       : ADMIN_SETTINGS_CACHE_MAX_MS;
   let raw: string | undefined;
   if (name.startsWith('integration.')) raw = env.PLATFORM_CONFIG_CACHE_MS;
-  else if (name === 'trials.enabled') raw = env.TRIAL_KILL_SWITCH_CACHE_MS;
   else if (isOperationalSetting(name)) raw = env.CONTROL_LOOP_KILL_SWITCH_CACHE_MS;
   let configured = ceiling;
   if (raw !== undefined) {

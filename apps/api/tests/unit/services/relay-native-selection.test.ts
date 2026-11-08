@@ -1,9 +1,8 @@
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const { allocation, healthy } = vi.hoisted(() => ({
+const { allocation } = vi.hoisted(() => ({
   allocation: vi.fn(),
-  healthy: vi.fn(async () => true),
 }));
 // This suite starts at an already resolved plan. The SQL authority predicate,
 // observed-capacity admission, and real D1 query execution remain production code.
@@ -11,17 +10,8 @@ vi.mock('../../../src/services/canonical-vm-allocation', async (load) => ({
   ...(await load<typeof import('../../../src/services/canonical-vm-allocation')>()),
   resolveCanonicalVmAllocationPlan: allocation,
 }));
-vi.mock('../../../src/durable-objects/task-runner/node-steps', async (load) => ({
-  ...(await load<typeof import('../../../src/durable-objects/task-runner/node-steps')>()),
-  verifyNodeAgentHealthy: healthy,
-}));
 
 import * as schema from '../../../src/db/schema';
-import { handleNodeSelection } from '../../../src/durable-objects/trial-orchestrator/steps';
-import type {
-  TrialOrchestratorContext,
-  TrialOrchestratorState,
-} from '../../../src/durable-objects/trial-orchestrator/types';
 import type { Env } from '../../../src/env';
 import { findSessionSnapshotUploadRelay } from '../../../src/services/session-snapshot-upload-relay';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
@@ -35,7 +25,6 @@ function fixture() {
   const env = {
     DATABASE: createSqliteD1(sqlite),
     VM_AGENT_REQUIRED_VERSION: '0123456789abcdef0123456789abcdef01234567',
-    TRIAL_ANONYMOUS_USER_ID: 'user',
   } as Env;
   allocation.mockResolvedValue({
     effectiveProvider: 'hetzner',
@@ -77,14 +66,7 @@ function fixture() {
       new Date().toISOString(),
       JSON.stringify({ version: 1, cpuLoadAvg1: 0, memoryPercent: 10, diskPercent: 10 })
     );
-  const state = { trialId: 'trial', projectId: 'project', nodeId: null } as TrialOrchestratorState;
-  const advanceToStep = vi.fn(async () => undefined);
-  const context = {
-    env,
-    ctx: { storage: { put: vi.fn(async () => undefined) } },
-    advanceToStep,
-  } as unknown as TrialOrchestratorContext;
-  return { sqlite, env, state, context, advanceToStep };
+  return { sqlite, env };
 }
 
 afterEach(() => {
@@ -92,7 +74,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe('native relay and trial selection', () => {
+describe('native relay selection', () => {
   it('reuses a relay with the same native plan and a different deprecated label', async () => {
     const { env } = fixture();
     expect(await findSessionSnapshotUploadRelay(env, 'user', 'project')).toEqual({
@@ -105,37 +87,5 @@ describe('native relay and trial selection', () => {
     const { sqlite, env } = fixture();
     sqlite.exec("UPDATE nodes SET vm_size = 'small', provider_instance_type = 'wrong-sku'");
     expect(await findSessionSnapshotUploadRelay(env, 'user', 'project')).toBeNull();
-  });
-
-  it('reuses sufficient observed trial capacity despite a different deprecated label', async () => {
-    const { state, context, advanceToStep } = fixture();
-    await handleNodeSelection(state, context);
-    expect(state.nodeId).toBe('node');
-    expect(advanceToStep).toHaveBeenCalledWith(state, 'workspace_creation');
-  });
-
-  it('rejects wrong native trial hardware even when its deprecated label matches', async () => {
-    const { sqlite, state, context, advanceToStep } = fixture();
-    sqlite.exec("UPDATE nodes SET vm_size = 'small', provider_instance_type = 'wrong-sku'");
-    await handleNodeSelection(state, context);
-    expect(state.nodeId).toBeNull();
-    expect(advanceToStep).toHaveBeenCalledWith(state, 'node_provisioning');
-  });
-
-  it('retains observed capacity admission for the matching native trial offering', async () => {
-    const { sqlite, state, context, advanceToStep } = fixture();
-    sqlite.exec('UPDATE nodes SET observed_provider_instance_vcpu_count = 1');
-    await handleNodeSelection(state, context);
-    expect(state.nodeId).toBeNull();
-    expect(advanceToStep).toHaveBeenCalledWith(state, 'node_provisioning');
-  });
-
-  it('rejects a malformed reservation even when observed trial hardware has capacity', async () => {
-    const { state, context, advanceToStep } = fixture();
-    const plan = await allocation();
-    delete plan.placement.resolvedReservation.version;
-    await handleNodeSelection(state, context);
-    expect(state.nodeId).toBeNull();
-    expect(advanceToStep).toHaveBeenCalledWith(state, 'node_provisioning');
   });
 });

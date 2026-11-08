@@ -78,14 +78,14 @@ const vapidKeyResource = new tls.PrivateKey(
 );
 
 /**
- * HMAC-SHA256 secret for trial onboarding claim/fingerprint cookies.
- * 32 bytes (256 bits), base64-encoded.
+ * RETIRED: the HMAC secret of the removed anonymous-trial product's claim cookies.
+ * Nothing reads it and it is no longer exported or copied to the Worker.
  *
- * Used by `apps/api/src/services/trial/cookies.ts` to sign and verify
- * `sam_trial_fingerprint` (7d) and `sam_trial_claim` (48h) cookies.
- * Rotating this invalidates all in-flight trials.
+ * It stays declared because it is `protect: true`: removing a protected resource from the
+ * program makes `pulumi up` fail on every existing stack, including forks that upgrade across
+ * several releases at once. Deleting it needs a separate unprotect step first.
  */
-const trialClaimTokenResource = new random.RandomId(
+new random.RandomId(
   'trial-claim-token-secret',
   {
     byteLength: 32,
@@ -123,7 +123,6 @@ export const encryptionKey = pulumi.secret(encryptionKeyResource.b64Std);
 export const installationId = installationIdResource.hex;
 export const jwtPrivateKey = pulumi.secret(jwtKeyResource.privateKeyPemPkcs8);
 export const jwtPublicKey = pulumi.secret(jwtKeyResource.publicKeyPem);
-export const trialClaimTokenSecret = pulumi.secret(trialClaimTokenResource.b64Std);
 export const deploySigningPrivateKey = deploySigningPrivateKeySeed;
 export const previewSigningKey = pulumi.secret(previewSigningKeyResource.b64Std);
 export const vapidPrivateKeyPem = pulumi.secret(vapidKeyResource.privateKeyPemPkcs8);

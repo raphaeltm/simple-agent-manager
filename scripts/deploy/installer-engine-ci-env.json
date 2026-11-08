@@ -640,7 +640,6 @@
             "SMOKE_TEST_AUTH_ENABLED": "${{ secrets.SMOKE_TEST_AUTH_ENABLED }}",
             "DEPLOY_SIGNING_PRIVATE_KEY": "${{ secrets.DEPLOY_SIGNING_PRIVATE_KEY }}",
             "DEPLOY_SIGNING_PUBLIC_KEY": "${{ secrets.DEPLOY_SIGNING_PUBLIC_KEY }}",
-            "ANTHROPIC_API_KEY_TRIAL": "${{ secrets.ANTHROPIC_API_KEY_TRIAL }}",
             "SEGMENT_WRITE_KEY": "${{ secrets.SEGMENT_WRITE_KEY }}",
             "GA4_API_SECRET": "${{ secrets.GA4_API_SECRET }}",
             "GA4_MEASUREMENT_ID": "${{ secrets.GA4_MEASUREMENT_ID }}",

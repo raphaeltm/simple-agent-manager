@@ -260,7 +260,7 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
     }
     if (!hasCloudCredentials) {
       setError(
-        'Cloud credentials required. Connect a cloud provider in Settings, or ask your admin to enable platform trial.'
+        'Cloud credentials required. Connect a cloud provider in Settings, or ask your admin to add a platform cloud credential.'
       );
       return;
     }

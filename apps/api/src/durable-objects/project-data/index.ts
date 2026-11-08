@@ -2697,23 +2697,6 @@ export class ProjectData extends DurableObject<Env> {
     const projectId = this.getProjectId();
     const result = acpSessions.transitionAcpSession(this.sql, sessionId, toStatus, opts, projectId);
     if (toStatus === 'assigned' || toStatus === 'running') await this.scheduleHeartbeatAlarm();
-
-    try {
-      if (projectId) {
-        const { bridgeAcpSessionTransition } = await import('../../services/trial/bridge');
-        const workerEnv = this.env as unknown as import('../../env').Env;
-        await bridgeAcpSessionTransition(workerEnv, projectId, toStatus, {
-          errorMessage: opts.errorMessage ?? null,
-        });
-      }
-    } catch (err) {
-      log.warn('project_data.trial_bridge_dispatch_failed', {
-        projectId,
-        toStatus,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-
     return result.session;
   }
 

@@ -208,13 +208,10 @@ describe('what a pending account may still reach', () => {
     });
   });
 
-  it('reaches the trial-claim handler, which completes signup for its own trial', async () => {
+  it('gets the retired-trial answer from the old trial-claim path, not an approval error', async () => {
     const response = await send({ method: 'POST', path: '/api/trial/claim' }, pendingCookie);
-    // The handler ran: it rejected the missing claim cookie, not the account.
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toMatchObject({
-      message: 'Missing trial claim cookie',
-    });
+    expect(response.status).toBe(410);
+    await expect(response.json()).resolves.toMatchObject({ error: 'GONE' });
   });
 
   it.each([SAM_ROUTES[4]!, PROJECT_AGENT_ROUTES[1]!, API_TOKEN_ROUTES[0]!])(

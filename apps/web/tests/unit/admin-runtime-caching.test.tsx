@@ -13,7 +13,6 @@ const mocks = vi.hoisted(() => ({
   projects: vi.fn(),
   connector: vi.fn(),
   email: vi.fn(),
-  trials: vi.fn(),
   deleteEnv: vi.fn(),
   usage: vi.fn(),
   userUsage: vi.fn(),
@@ -34,7 +33,6 @@ vi.mock('../../src/lib/api', async (original) => ({
   fetchAdminErrorTrends: mocks.trends,
   fetchAdminPlatformConfig: mocks.platform,
   listProjects: mocks.projects,
-  fetchAdminTrialsConfig: mocks.trials,
 }));
 vi.mock('../../src/components/AdminConnectorPanel', () => ({
   AdminConnectorPanel: () => {
@@ -54,7 +52,6 @@ import { projectQueryKeys } from '../../src/lib/query-options/projects';
 import { AdminComputeQuotas } from '../../src/pages/AdminComputeQuotas';
 import { AdminComputeUsage, UserDetail } from '../../src/pages/AdminComputeUsage';
 import { AdminPlatformConfig } from '../../src/pages/AdminPlatformConfig';
-import { AdminTrials } from '../../src/pages/AdminTrials';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -122,19 +119,6 @@ describe('cached admin and Runtime navigation', () => {
     await act(async () => rendered.unmount());
     expect(signal!.aborted).toBe(true);
   });
-});
-
-it('renders cached admin content immediately after leaving and revisiting the tab', async () => {
-  mocks.trials.mockResolvedValueOnce({ enabled: true });
-  const { view } = harness();
-  const rendered = render(view(<AdminTrials />));
-  await screen.findByRole('button', { name: 'Pause trials' });
-  rendered.rerender(view(null));
-  mocks.trials.mockReturnValue(new Promise(() => undefined));
-  rendered.rerender(view(<AdminTrials />));
-  expect(screen.getByRole('button', { name: 'Pause trials' })).toBeInTheDocument();
-  expect(screen.queryByRole('status')).not.toBeInTheDocument();
-  await waitFor(() => expect(mocks.trials).toHaveBeenCalledTimes(2));
 });
 
 it('does not let an older Runtime refresh resurrect a deleted variable', async () => {

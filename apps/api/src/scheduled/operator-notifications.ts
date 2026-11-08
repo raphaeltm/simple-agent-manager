@@ -4,7 +4,7 @@
  * ProjectData archive circuit breaker that a sweep opened.
  */
 import type { CreateNotificationRequest } from '@simple-agent-manager/shared';
-import { TRIAL_ANONYMOUS_USER_ID } from '@simple-agent-manager/shared';
+import { SYSTEM_USER_ID } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
 import { sendNotificationOnce } from '../services/notification';
@@ -22,9 +22,8 @@ export function resolveOperatorNotificationThrottleMs(env: Env): number {
     : DEFAULT_CRON_FAILURE_NOTIFICATION_THROTTLE_MS;
 }
 
-/** Active superadmins. The anonymous-trial sentinel and `system` rows are never operators. */
+/** Active superadmins. The system user and other `system` rows are never operators. */
 export async function listOperatorUserIds(env: Env): Promise<string[]> {
-  const sentinelId = env.TRIAL_ANONYMOUS_USER_ID ?? TRIAL_ANONYMOUS_USER_ID;
   const superadmins = await env.DATABASE.prepare(
     `SELECT id FROM users
      WHERE role = 'superadmin'
@@ -32,7 +31,7 @@ export async function listOperatorUserIds(env: Env): Promise<string[]> {
        AND status != 'system'
        AND id != ?`
   )
-    .bind(sentinelId)
+    .bind(SYSTEM_USER_ID)
     .all<{ id: string }>();
   return (superadmins.results ?? []).map((user) => user.id);
 }
