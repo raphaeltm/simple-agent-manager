@@ -39,7 +39,7 @@
         "1890267ac0262af98886e14e4f70d5d8d5c9294deccb78d5d6ad686b8d9f3b68",
         "28a56effde34ab107713ed618f3c9a27a53df8899e2490ebe3bc77aea41fafc8",
         "2e6676622a4a6e94ba7bf6de164bfe502d67dca554c389a167ee9692ea19f6d0",
-        "3162e219d33177d8f3ab0498ebb68c5d68e5b485b92b6f63f0e99a06af4b5133",
+        "34cefde848f0c1c49f44cabb11bcc7d20d84cf9a30d6025488bc6cbd02d21385",
         "368a9bf4a2991fecfd51146398eb4f41fe2d23cccdfbb75f631c60de8f90f0cb",
         "4c9d69a7f1d0c2d6daa664a73d4afb0ca5172a57f60a0b7c22adabfc4ca18125",
         "56829340ae1505987a940275bcce15f0af85b3d9cc75012c8afdf5961b0f5b9e",
@@ -56,7 +56,7 @@
         "a3bfb2168fbf3c197263b1921502632fc3b1a6415a4c740efabe5bedd8eecc6d",
         "b50f9b586a3498492c93826306367d25795cfba4d3852b2ec12a2650c19d56b4",
         "c4d8a64d82cf39d956a885a828d716ce960fd13c0cec8e359556b427200255b8",
-        "cc9d43d29f502f0570580b3ffacae0e262faeb9b2229fe5342a701078b9f06b2",
+        "b55c5634a135cf75d1b25da87eedc3d81566ac67a961db06685d3433110c1ffc",
         "cd372c5591f22da97528170ccaafdcaa070378522bfb8757a108d7935d335a68",
         "eb874737e51d373527bec3648c9b802c5f2d5d00b108588fc62ba19dee2eedfb",
         "ee1e620aa06730c6e08f309ced2a3eb5a9a02e6c60bb4c19a86bec3c2afefaea",
@@ -71,7 +71,7 @@
       "owner": "security",
       "reviewedAt": "2026-11-06T12:30:14.413Z",
       "expiresAt": "2026-12-06T12:30:14.413Z",
-      "digests": ["2e2c488b43d71d30946bb0cdec4390e8795c3debec5cd2a1ff0b93c9823abd4b"]
+      "digests": ["eb95f7cd4b658cb44cbce7fbf945705166d8af057ddf8f65475f8f7f69bdc028"]
     },
     {
       "classification": "synthetic-test-fixture",
@@ -109,14 +109,6 @@
         "0ed74e33345c51812e64da9c1525503195b08302331375958aaa089366731f2d",
         "47c37335119e59f588cdc57fe5b2c667193257ab22d0164ee26ec1ac02139c0e"
       ]
-    },
-    {
-      "classification": "synthetic-test-fixture",
-      "reason": "Reviewed synthetic mcp_tok_fixture_abc123 token in trial-orchestrator-agent-boot.test.ts; mock MCP callback token for BYO MCP servers feature test, not real secret material.",
-      "owner": "security",
-      "reviewedAt": "2026-08-23T00:00:00.000Z",
-      "expiresAt": "2026-11-21T00:00:00.000Z",
-      "digests": ["a36d27de181226037bea3c4b4b8213525696b3d3a8a94adc48d03797bc412a01"]
     },
     {
       "classification": "synthetic-test-fixture",
@@ -160,9 +152,9 @@
         "54c818c7ade8518dca18c82bf022302d7e93251d161d7311130d92d63e919aa7",
         "cebc591fa06ac4eb357e4355bd9685d7f9b717e68c0ca19f8a2d601b50f989c8",
         "d1825d5702b57ea0ab87a15624a93992cd2ad7a00aecaf179bb0d1be452fe8fb",
-        "6de06683a6e240f4361656849e0597c9acc91bcec1843d2c186ffd26dd1a0eba",
-        "7c67d029fba7c401690880d732979b713e630885cdd208664b93a06390ffffc9",
-        "471c2e3f8eb56e4084081fa865d8790a6ec65dbd3fa19c167ca7aa5422770d1a"
+        "f6d1743fd44e06fc5d7dcc504d756ab055f1bc32107b8f52558d6dbd4a4bcc38",
+        "dc129225455f2dbc23a7fa8fe3db5d384531c51f35591f0127147b35539660c0",
+        "98b280aaf4995807cacf73b857f1dc0a798796dcdfee42b6dc6ccebcca23b529"
       ]
     },
     {
