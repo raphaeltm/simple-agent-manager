@@ -67,12 +67,12 @@ export function profileUsage(budget: ProfileBudget | undefined, now: number): Pr
 }
 
 /** The ring shows only when there is a reading to draw. */
-export function hasUsageReading(usage: ProfileUsage | undefined): usage is ProfileUsage {
+export function hasUsageReading(usage: ProfileUsage | null | undefined): usage is ProfileUsage {
   return usage?.state === 'ok' || usage?.state === 'low' || usage?.state === 'out';
 }
 
 /** Visible words: null while there is room, so calm profiles stay quiet. */
-export function usageNotice(usage: ProfileUsage | undefined): string | null {
+export function usageNotice(usage: ProfileUsage | null | undefined): string | null {
   switch (usage?.state) {
     case 'low':
       return usage.resetIn
@@ -90,7 +90,7 @@ export function usageNotice(usage: ProfileUsage | undefined): string | null {
 }
 
 /** Spoken with the profile's name, including the calm case the eye reads off the ring. */
-export function usageSpoken(usage: ProfileUsage | undefined): string | null {
+export function usageSpoken(usage: ProfileUsage | null | undefined): string | null {
   if (usage?.state === 'ok') return `${usage.left}% left`;
   return usageNotice(usage);
 }
@@ -102,7 +102,7 @@ export function usageSpoken(usage: ProfileUsage | undefined): string | null {
 export function roomierProfile(
   selected: AgentProfile,
   candidates: readonly AgentProfile[],
-  usageFor: (profileId: string) => ProfileUsage | undefined
+  usageFor: (profileId: string) => ProfileUsage | null | undefined
 ): { profile: AgentProfile; usage: ProfileUsage } | null {
   const mine = usageFor(selected.id);
   let best: { profile: AgentProfile; usage: ProfileUsage } | null = null;
@@ -135,4 +135,16 @@ export function useProfileUsages(
       profiles.map((profile) => [profile.id, profileUsage(budgets.get(profile.id), now)])
     );
   }, [budgets, enabled, profiles]);
+}
+
+/**
+ * One profile's entry for the ring: `undefined` where the surface has no usage map (plain
+ * glyph), `null` while it loads or for a profile it doesn't cover (reserve the footprint).
+ */
+export function usageEntry(
+  usages: ReadonlyMap<string, ProfileUsage> | null | undefined,
+  profileId: string
+): ProfileUsage | null | undefined {
+  if (usages === undefined) return undefined;
+  return usages?.get(profileId) ?? null;
 }

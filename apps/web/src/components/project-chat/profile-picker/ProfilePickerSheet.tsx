@@ -12,7 +12,7 @@ import { useNavigate } from 'react-router';
 import { useIsMobile } from '../../../hooks/useIsMobile';
 import { idleProfiles, type PickerSection, pickerSections } from './model';
 import { IdleProfilesNudge, ProfilePickerRow, SectionLabel } from './ProfilePickerRows';
-import type { ProfileUsage } from './usage';
+import { type ProfileUsage, usageEntry } from './usage';
 
 /** Search appears once the list is long enough that scanning it is slower than typing. */
 const SEARCH_THRESHOLD = 8;
@@ -249,7 +249,7 @@ export function ProfilePickerSheet(props: ProfilePickerSheetProps) {
                     <ProfilePickerRow
                       key={profile.id}
                       profile={profile}
-                      usage={usages?.get(profile.id)}
+                      usage={usageEntry(usages, profile.id)}
                       selected={profile.id === selectedProfileId}
                       hidden={hiddenIds.has(profile.id)}
                       editing={editing}

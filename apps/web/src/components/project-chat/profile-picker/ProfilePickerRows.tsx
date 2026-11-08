@@ -16,7 +16,7 @@ export function SectionLabel({ children }: Readonly<{ children: ReactNode }>) {
 }
 
 /** Words on the right of a row: what's left when it matters, and when it comes back. */
-function RowUsage({ usage }: Readonly<{ usage: ProfileUsage | undefined }>) {
+function RowUsage({ usage }: Readonly<{ usage: ProfileUsage | null | undefined }>) {
   if (usage?.state === 'ok') return <span className="sr-only">{`${usage.left}% left`}</span>;
   let primary: string | null = null;
   let secondary: string | null = null;
@@ -61,8 +61,8 @@ export function ProfilePickerRow({
   onToggleHidden,
 }: Readonly<{
   profile: AgentProfile;
-  /** What's left on the profile's account; undefined where usage isn't loaded. */
-  usage?: ProfileUsage;
+  /** What's left on the profile's account; null while loading, undefined where not shown. */
+  usage?: ProfileUsage | null;
   selected: boolean;
   hidden: boolean;
   editing: boolean;

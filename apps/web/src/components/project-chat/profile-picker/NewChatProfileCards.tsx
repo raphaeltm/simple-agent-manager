@@ -4,7 +4,7 @@ import { useId } from 'react';
 
 import { profileCardSet, profileSubtitle } from './model';
 import { ProfileUsageAvatar } from './ProfileUsageAvatar';
-import { type ProfileUsage, usageNotice, usageSpoken } from './usage';
+import { type ProfileUsage, usageEntry, usageNotice, usageSpoken } from './usage';
 import { UsageNotice } from './UsageNotice';
 
 /** Cards fit two rows on a phone and one row on desktop; the rest is one tap away. */
@@ -22,7 +22,7 @@ function ProfileCard({
   onSelect,
 }: Readonly<{
   profile: AgentProfile;
-  usage: ProfileUsage | undefined;
+  usage: ProfileUsage | null | undefined;
   selected: boolean;
   onSelect: () => void;
 }>) {
@@ -123,7 +123,7 @@ export function NewChatProfileCards({
               <ProfileCard
                 key={profile.id}
                 profile={profile}
-                usage={usages?.get(profile.id)}
+                usage={usageEntry(usages, profile.id)}
                 selected={profile.id === selectedProfileId}
                 onSelect={() => onSelect(profile.id)}
               />
@@ -140,7 +140,7 @@ export function NewChatProfileCards({
               <ProfileCard
                 key={profile.id}
                 profile={profile}
-                usage={usages?.get(profile.id)}
+                usage={usageEntry(usages, profile.id)}
                 selected={profile.id === selectedProfileId}
                 onSelect={() => onSelect(profile.id)}
               />

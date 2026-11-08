@@ -23,6 +23,7 @@ import {
   ProfileToControl,
   type ProfileUsage,
   ProfileUsageNudge,
+  usageEntry,
   visibleProfiles,
 } from '../../components/project-chat/profile-picker';
 import {
@@ -181,7 +182,7 @@ export function ChatInput({
   const selectedUsage =
     selectedProfile &&
     (!effectiveAgent.agentType || effectiveAgent.agentType === selectedProfile.agentType)
-      ? profileUsages?.get(selectedProfile.id)
+      ? usageEntry(profileUsages, selectedProfile.id)
       : undefined;
   // Overrides belong to the agent they were picked for: a profile or skill that switches the
   // agent clears them, so switching back starts from that agent's defaults again.

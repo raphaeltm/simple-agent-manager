@@ -18,8 +18,8 @@ export function ProfileToControl({
   profile: AgentProfile | null;
   /** What this chat will launch with (skill and Chat options applied), in place of the profile's. */
   effective?: Readonly<ChatAgentDefaults>;
-  /** What's left on the account this chat will run on; omitted when it doesn't apply. */
-  usage?: ProfileUsage;
+  /** What's left on the account this chat will run on; null while loading, omitted when it doesn't apply. */
+  usage?: ProfileUsage | null;
   loading: boolean;
   disabled: boolean;
   onOpen: (anchor: DOMRect) => void;

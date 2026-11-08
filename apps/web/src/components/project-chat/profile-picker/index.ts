@@ -23,4 +23,4 @@ export { ProfileAvatar } from './ProfileAvatar';
 export { ProfilePickerSheet } from './ProfilePickerSheet';
 export { ProfileToControl } from './ProfileToControl';
 export { ProfileUsageNudge } from './ProfileUsageNudge';
-export { type ProfileUsage, useProfileUsages } from './usage';
+export { type ProfileUsage, usageEntry, useProfileUsages } from './usage';

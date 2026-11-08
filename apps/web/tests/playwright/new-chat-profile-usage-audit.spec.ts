@@ -16,7 +16,14 @@ import type {
 } from '@simple-agent-manager/shared';
 
 import { accountRows, mergeRows } from '../unit/components/accounts/fixtures';
-import { assertNoOverflow, getProjectSuffix, makeMockUser, screenshot } from './audit-helpers';
+import {
+  assertNoOverflow,
+  expectTheme,
+  getProjectSuffix,
+  makeMockUser,
+  screenshot,
+  seedTheme,
+} from './audit-helpers';
 
 const PROJECT_ID = 'proj-usage-1';
 const USER_ID = 'user-usage-1';
@@ -362,6 +369,28 @@ test.describe('New-chat picker: usage left on profiles', () => {
       nudge(page).getByRole('button', { name: 'Use Claudiii · 83% left' })
     ).toBeVisible();
     await screenshot(page, `new-chat-usage-out-selected-${suffix}`);
+    await assertNoOverflow(page);
+  });
+
+  test('light theme: rings, words and nudge stay legible', async ({ page }, testInfo) => {
+    await seedTheme(page, 'light');
+    await openNewChat(page);
+    await expectTheme(page, 'light');
+    const suffix = getProjectSuffix(testInfo.project.name);
+
+    await expect(
+      cards(page)
+        .getByRole('button', { name: /^Opus 5\.5 Chat/ })
+        .getByText('6% left · resets 53m')
+    ).toBeVisible();
+    await expect(nudge(page)).toBeVisible();
+    await screenshot(page, `new-chat-usage-cards-light-${suffix}`);
+    await assertNoOverflow(page);
+
+    await toControl(page).click();
+    await sheet(page).getByRole('button', { name: 'Out for now (1)' }).click();
+    await expect(sheet(page).getByRole('button', { name: /^SamSamC/ })).toBeVisible();
+    await screenshot(page, `new-chat-usage-sheet-light-${suffix}`);
     await assertNoOverflow(page);
   });
 });
