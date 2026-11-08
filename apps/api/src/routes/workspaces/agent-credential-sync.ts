@@ -12,14 +12,21 @@
 import { isValidAgentType } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
+import type * as v from 'valibot';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
+import { RequestBodyTooLargeError } from '../../lib/bounded-request-body';
 import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
+import {
+  contentFreeIssues,
+  readRequestJsonWithSchema,
+  RuntimeValidationError,
+} from '../../lib/runtime-validation';
 import { getCredentialEncryptionKey } from '../../lib/secrets';
 import { errors } from '../../middleware/error';
-import { AgentCredentialSyncSchema, jsonValidator } from '../../schemas';
+import { AgentCredentialSyncSchema } from '../../schemas';
 import { decrypt, encrypt } from '../../services/encryption';
 import {
   loadRunAgentCredential,
@@ -46,156 +53,182 @@ interface SyncCandidate {
 
 type SyncSelection =
   | { ok: true; candidate: SyncCandidate }
-  | { ok: false; reason: 'credential_account_mismatch' | 'credential_ambiguous' };
+  | {
+      ok: false;
+      reason:
+        | 'credential_account_mismatch'
+        | 'credential_account_unverified'
+        | 'credential_ambiguous'
+        | 'credential_invalid';
+    };
 
 /**
- * Pick which seeded credential the synced file belongs to. For Codex, the
- * auth.json `tokens.account_id` identifies the account: a stored credential of a
- * different account is never a target. With one candidate, a missing account id
- * on either side is accepted (nothing else it could belong to). With several, the
- * synced file must name its account and a candidate must match it exactly: a
- * missing id is ambiguous, never a wildcard. Several stored copies of the same
- * account resolve to the most recently used one (candidates arrive in that order).
+ * Pick which seeded credential the synced file belongs to.
+ *
+ * Codex: the synced auth.json must parse and carry a refresh token, and its
+ * `tokens.account_id` identifies the account. A stored credential of another
+ * account is never a target, and when a stored credential names its account
+ * the synced file must name the same one. With several candidates the target
+ * must be unique: two stored copies of the same account are ambiguous, because
+ * the callback does not say which session wrote the file.
  */
 export function selectSyncTarget(
   agentType: string,
   syncedCredential: string,
   candidates: SyncCandidate[]
 ): SyncSelection {
-  const [first] = candidates;
-  if (!first) return { ok: false, reason: 'credential_ambiguous' };
   const isCodex = agentType === 'openai-codex';
-  const accountOf = (credential: string) =>
-    isCodex ? parseCodexAuth(credential)?.identity.accountId : undefined;
-  const syncedAccount = accountOf(syncedCredential);
-
-  if (candidates.length === 1) {
-    const storedAccount = accountOf(first.plaintext);
-    return syncedAccount && storedAccount && storedAccount !== syncedAccount
-      ? { ok: false, reason: 'credential_account_mismatch' }
-      : { ok: true, candidate: first };
+  if (!isCodex) {
+    const [only] = candidates;
+    return candidates.length === 1 && only
+      ? { ok: true, candidate: only }
+      : { ok: false, reason: 'credential_ambiguous' };
   }
 
-  if (!syncedAccount) return { ok: false, reason: 'credential_ambiguous' };
+  const synced = parseCodexAuth(syncedCredential)?.identity;
+  if (!synced?.refreshToken) return { ok: false, reason: 'credential_invalid' };
   const accounts = candidates.map((candidate) => ({
     candidate,
-    accountId: accountOf(candidate.plaintext),
+    accountId: parseCodexAuth(candidate.plaintext)?.identity.accountId,
   }));
-  const sameAccount = accounts.find(({ accountId }) => accountId === syncedAccount);
-  if (sameAccount) return { ok: true, candidate: sameAccount.candidate };
+
+  if (accounts.length === 1) {
+    const [{ candidate, accountId }] = accounts as [(typeof accounts)[number]];
+    if (!accountId) return { ok: true, candidate };
+    if (!synced.accountId) return { ok: false, reason: 'credential_account_unverified' };
+    return accountId === synced.accountId
+      ? { ok: true, candidate }
+      : { ok: false, reason: 'credential_account_mismatch' };
+  }
+
+  if (!synced.accountId) return { ok: false, reason: 'credential_ambiguous' };
+  const sameAccount = accounts.filter(({ accountId }) => accountId === synced.accountId);
+  const [match] = sameAccount;
+  if (sameAccount.length === 1 && match) return { ok: true, candidate: match.candidate };
+  if (sameAccount.length > 1) return { ok: false, reason: 'credential_ambiguous' };
   return accounts.every(({ accountId }) => accountId)
     ? { ok: false, reason: 'credential_account_mismatch' }
     : { ok: false, reason: 'credential_ambiguous' };
 }
 
-agentCredentialSyncRoutes.post(
-  '/:id/agent-credential-sync',
-  jsonValidator(AgentCredentialSyncSchema),
-  async (c) => {
-    const workspaceId = c.req.param('id');
-    await verifyWorkspaceCallbackAuth(c, workspaceId);
+agentCredentialSyncRoutes.post('/:id/agent-credential-sync', async (c) => {
+  const workspaceId = c.req.param('id');
+  await verifyWorkspaceCallbackAuth(c, workspaceId);
 
-    // Payload size check (64KB default — auth.json files are typically a few KB).
-    const contentLength = parseInt(c.req.header('content-length') || '0', 10);
-    const maxPayloadBytes = parsePositiveInt(
-      c.env.MAX_AGENT_CREDENTIAL_SYNC_BYTES as string,
-      DEFAULT_MAX_AGENT_CREDENTIAL_SYNC_BYTES
+  // Byte limit enforced while reading, after auth (64KB default — auth.json
+  // files are typically a few KB). A missing or false Content-Length cannot
+  // make the route buffer more than the limit.
+  const maxPayloadBytes = parsePositiveInt(
+    c.env.MAX_AGENT_CREDENTIAL_SYNC_BYTES as string,
+    DEFAULT_MAX_AGENT_CREDENTIAL_SYNC_BYTES
+  );
+  let body: v.InferOutput<typeof AgentCredentialSyncSchema>;
+  try {
+    body = await readRequestJsonWithSchema(
+      AgentCredentialSyncSchema,
+      c.req.raw,
+      'agent-credential-sync',
+      maxPayloadBytes
     );
-    if (contentLength > maxPayloadBytes) {
+  } catch (err) {
+    if (err instanceof RequestBodyTooLargeError) {
       throw errors.badRequest(`Payload exceeds ${maxPayloadBytes} byte limit`);
     }
-
-    const body = c.req.valid('json');
-    const agentType = body.agentType;
-    const credentialKind = body.credentialKind;
-
-    // Validate against known values. Use the shared catalog so new agents
-    // are accepted automatically without a manual allowlist update.
-    if (!agentType || !isValidAgentType(agentType)) {
-      throw errors.badRequest('Invalid agentType');
+    if (err instanceof RuntimeValidationError) {
+      // Content-free: names the failing fields, never echoes the submitted secret.
+      throw errors.badRequest(
+        err.issues
+          ? `Invalid credential sync request: ${contentFreeIssues(err.issues)}`
+          : 'Request body must be valid JSON'
+      );
     }
-    if (!credentialKind || !VALID_CREDENTIAL_KINDS.has(credentialKind)) {
-      throw errors.badRequest('Invalid credentialKind');
-    }
+    throw err;
+  }
+  const agentType = body.agentType;
+  const credentialKind = body.credentialKind;
 
-    const db = drizzle(c.env.DATABASE, { schema });
-    const encryptionKey = getCredentialEncryptionKey(c.env);
-    const workspace = await assertWorkspaceCallbackResourceById(
-      c.env,
-      workspaceId,
-      'agent_credential_sync'
-    );
-    const respond = async (payload: Record<string, unknown>) => {
-      await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'agent_credential_sync');
-      return c.json(payload);
-    };
+  // Validate against known values. Use the shared catalog so new agents
+  // are accepted automatically without a manual allowlist update.
+  if (!agentType || !isValidAgentType(agentType)) {
+    throw errors.badRequest('Invalid agentType');
+  }
+  if (!credentialKind || !VALID_CREDENTIAL_KINDS.has(credentialKind)) {
+    throw errors.badRequest('Invalid credentialKind');
+  }
 
-    const references = await resolveRunAgentCredentialReferences(
-      db,
-      c.env.DATABASE,
-      encryptionKey,
-      {
-        workspaceId,
-        userId: workspace.userId,
-        projectId: workspace.projectId,
-        agentType,
-      }
-    );
+  const db = drizzle(c.env.DATABASE, { schema });
+  const encryptionKey = getCredentialEncryptionKey(c.env);
+  const workspace = await assertWorkspaceCallbackResourceById(
+    c.env,
+    workspaceId,
+    'agent_credential_sync'
+  );
+  const respond = async (payload: Record<string, unknown>) => {
+    await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'agent_credential_sync');
+    return c.json(payload);
+  };
 
-    // An inactive or deleted seeded credential is not replaced by another one
-    // (rule 28): nothing is written and the next run re-resolves.
-    const candidates: SyncCandidate[] = [];
-    for (const reference of references) {
-      const credential = await loadRunAgentCredential(c.env.DATABASE, {
-        userId: workspace.userId,
-        reference,
-        agentType,
-        credentialKind,
-      });
-      if (!credential?.isActive) continue;
-      try {
-        const plaintext = await decrypt(credential.encryptedToken, credential.iv, encryptionKey);
-        candidates.push({ credential, plaintext });
-      } catch {
-        log.error('agent_credential_sync.credential_decrypt_failed', {
-          workspaceId,
-          agentType,
-          credentialReference: reference,
-        });
-      }
-    }
-    if (candidates.length === 0) {
-      return respond({ success: false, reason: 'credential_not_found' });
-    }
+  const references = await resolveRunAgentCredentialReferences(db, c.env.DATABASE, encryptionKey, {
+    workspaceId,
+    userId: workspace.userId,
+    projectId: workspace.projectId,
+    agentType,
+  });
 
-    // Only update if the credential has actually changed.
-    if (candidates.some((candidate) => candidate.plaintext === body.credential)) {
-      return respond({ success: true, updated: false });
-    }
-
-    const selection = selectSyncTarget(agentType, body.credential, candidates);
-    if (!selection.ok) {
-      log.warn('agent_credential_sync.target_rejected', {
-        workspaceId,
-        agentType,
-        reason: selection.reason,
-        candidateCount: candidates.length,
-      });
-      return respond({ success: false, reason: selection.reason });
-    }
-    const target = selection.candidate.credential;
-
-    // Re-encrypt with a fresh IV; compare-and-set on the ciphertext read above,
-    // bound to the workspace callback identity in the same statement.
-    const { ciphertext, iv } = await encrypt(body.credential, encryptionKey);
-    const write = await writeRotatedAgentCredential(c.env.DATABASE, {
+  // An inactive or deleted seeded credential is not replaced by another one
+  // (rule 28): nothing is written and the next run re-resolves.
+  const candidates: SyncCandidate[] = [];
+  for (const reference of references) {
+    const credential = await loadRunAgentCredential(c.env.DATABASE, {
       userId: workspace.userId,
+      reference,
       agentType,
       credentialKind,
-      target,
-      next: { encryptedToken: ciphertext, iv },
-      guard: {
-        sql: `EXISTS (
+    });
+    if (!credential?.isActive) continue;
+    try {
+      const plaintext = await decrypt(credential.encryptedToken, credential.iv, encryptionKey);
+      candidates.push({ credential, plaintext });
+    } catch {
+      log.error('agent_credential_sync.credential_decrypt_failed', {
+        workspaceId,
+        agentType,
+        credentialReference: reference,
+      });
+    }
+  }
+  if (candidates.length === 0) {
+    return respond({ success: false, reason: 'credential_not_found' });
+  }
+
+  // Only update if the credential has actually changed.
+  if (candidates.some((candidate) => candidate.plaintext === body.credential)) {
+    return respond({ success: true, updated: false });
+  }
+
+  const selection = selectSyncTarget(agentType, body.credential, candidates);
+  if (!selection.ok) {
+    log.warn('agent_credential_sync.target_rejected', {
+      workspaceId,
+      agentType,
+      reason: selection.reason,
+      candidateCount: candidates.length,
+    });
+    return respond({ success: false, reason: selection.reason });
+  }
+  const target = selection.candidate.credential;
+
+  // Re-encrypt with a fresh IV; compare-and-set on the ciphertext read above,
+  // bound to the workspace callback identity in the same statement.
+  const { ciphertext, iv } = await encrypt(body.credential, encryptionKey);
+  const write = await writeRotatedAgentCredential(c.env.DATABASE, {
+    userId: workspace.userId,
+    agentType,
+    credentialKind,
+    target,
+    next: { encryptedToken: ciphertext, iv },
+    guard: {
+      sql: `EXISTS (
           SELECT 1
             FROM workspaces w
             JOIN nodes n ON n.id = w.node_id
@@ -207,37 +240,36 @@ agentCredentialSyncRoutes.post(
              AND w.status = ?
              AND n.status = ?
         )`,
-        binds: [
-          workspace.workspaceId,
-          workspace.userId,
-          workspace.projectId,
-          workspace.chatSessionId,
-          workspace.nodeId,
-          workspace.status,
-          workspace.nodeStatus,
-        ],
-      },
-    });
-    if (!write.applied) {
-      // `respond` throws 410 when the workspace callback identity moved; otherwise
-      // the credential itself changed under us and is left alone.
-      log.warn('agent_credential_sync.cas_lost', {
-        workspaceId,
-        agentType,
-        credentialReference: target.reference,
-      });
-      return respond({ success: false, reason: 'credential_changed' });
-    }
-
-    log.info('agent_credential_sync.credential_updated', {
+      binds: [
+        workspace.workspaceId,
+        workspace.userId,
+        workspace.projectId,
+        workspace.chatSessionId,
+        workspace.nodeId,
+        workspace.status,
+        workspace.nodeStatus,
+      ],
+    },
+  });
+  if (!write.applied) {
+    // `respond` throws 410 when the workspace callback identity moved; otherwise
+    // the credential itself changed under us and is left alone.
+    log.warn('agent_credential_sync.cas_lost', {
       workspaceId,
       agentType,
-      credentialKind,
       credentialReference: target.reference,
-      mirroredRows: write.mirroredRows,
     });
-    return respond({ success: true, updated: true });
+    return respond({ success: false, reason: 'credential_changed' });
   }
-);
+
+  log.info('agent_credential_sync.credential_updated', {
+    workspaceId,
+    agentType,
+    credentialKind,
+    credentialReference: target.reference,
+    mirroredRows: write.mirroredRows,
+  });
+  return respond({ success: true, updated: true });
+});
 
 export { agentCredentialSyncRoutes };

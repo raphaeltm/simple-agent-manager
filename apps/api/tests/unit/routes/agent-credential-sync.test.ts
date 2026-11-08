@@ -1,8 +1,9 @@
 /**
  * Behavioral tests for the POST /workspaces/:id/agent-credential-sync endpoint.
  *
- * The full workspaces router is mounted (so callback-vs-session auth ordering is
- * exercised) over a real SQLite engine with real encryption. Pin-aware selection
+ * The full workspaces router is mounted with the real session middleware, so a
+ * session-auth wildcard intercepting this callback-only route would fail these
+ * tests (rule 34). Real SQLite engine, real encryption. Pin-aware selection
  * (project and profile pins, account identity) is covered end to end in
  * `tests/integration/codex-run-credential-refresh.test.ts`.
  */
@@ -16,12 +17,6 @@ import { workspacesRoutes } from '../../../src/routes/workspaces';
 import { decrypt, encrypt } from '../../../src/services/encryption';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
-vi.mock('../../../src/middleware/auth', () => ({
-  requireAuth: () => vi.fn((_c: unknown, next: () => Promise<void>) => next()),
-  requireApproved: () => vi.fn((_c: unknown, next: () => Promise<void>) => next()),
-  getUserId: () => 'test-user-id',
-  getAuth: () => ({ userId: 'test-user-id' }),
-}));
 vi.mock('../../../src/services/jwt', () => ({
   verifyCallbackToken: vi
     .fn()
@@ -233,6 +228,36 @@ describe('POST /workspaces/:id/agent-credential-sync', () => {
     const res = await postSync(validBody);
     expect(await res.json()).toEqual({ success: true, updated: true });
     expect(await secretOf('cred-user')).toBe(codexAuth(2));
+  });
+
+  it('rejects an oversized body that declares no Content-Length, before writing', async () => {
+    seedWorkspace();
+    await seedLegacy('cred-user', codexAuth(1));
+    const huge = JSON.stringify({ ...validBody, credential: 'x'.repeat(70 * 1024) });
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(huge));
+        controller.close();
+      },
+    });
+    const res = await app.request(
+      new Request('http://localhost/api/workspaces/ws-123/agent-credential-sync', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer valid-callback-token',
+        },
+        body: stream,
+        // @ts-expect-error -- Node's fetch requires duplex for a stream body
+        duplex: 'half',
+      }),
+      undefined,
+      env
+    );
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).message).toContain('Payload exceeds');
+    expect(await secretOf('cred-user')).toBe(codexAuth(1));
   });
 
   it('rejects oversized payloads', async () => {

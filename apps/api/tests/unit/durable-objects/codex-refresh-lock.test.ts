@@ -21,6 +21,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import { decrypt, encrypt } from '../../../src/services/encryption';
+import { credentialGenerationFingerprint } from '../../../src/services/run-agent-credential';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 // Mock cloudflare:workers
@@ -60,7 +61,7 @@ const { CodexRefreshLock } = await import('../../../src/durable-objects/codex-re
 
 const ENCRYPTION_KEY = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
 const USER = 'user-1';
-const DEFAULT_REF = 'credentials:cred-1';
+const DEFAULT_REF = 'cc_credentials:cred-1';
 
 let sqlite: Database.Database;
 
@@ -109,12 +110,13 @@ async function createDOWithRotatedToken(
   ageMs: number,
   envOverrides: Record<string, unknown> = {}
 ) {
-  const setup = createDO(envOverrides, await createRotatedTokenStorage(token, ageMs));
+  const setup = createDO(envOverrides);
   await setupCredentialFound(setup.env);
+  await addGraceEntry(setup.ctx, token, ageMs);
   return setup;
 }
 
-/** A DO request; defaults the candidate list to the seeded legacy row. */
+/** A DO request; defaults the candidate list to the seeded default cc row. */
 function makeRequest(payload: Record<string, unknown>): Request {
   const body =
     'credentialReferences' in payload
@@ -148,20 +150,39 @@ async function sha256Hex(value: string): Promise<string> {
     .join('');
 }
 
-async function createRotatedTokenStorage(
+/** The generation fingerprint of a row as currently stored. */
+async function generationOf(reference: string): Promise<string> {
+  const [table, id] = reference.split(':') as ['cc_credentials' | 'credentials', string];
+  const row = sqlite
+    .prepare(`SELECT encrypted_token AS t, iv FROM ${table} WHERE id = ?`)
+    .get(id) as { t: string; iv: string };
+  return credentialGenerationFingerprint(row.t, row.iv);
+}
+
+/**
+ * Add a grace entry as a completed rotation would leave it: the old token's hash,
+ * the credential it was rotated out of, and the generation now stored there.
+ * Pass `generation: null` for an entry without one (written before the binding).
+ */
+async function addGraceEntry(
+  ctx: ReturnType<typeof createMockCtx>,
   token: string,
   ageMs: number,
-  credentialReference = DEFAULT_REF
+  credentialReference: string | null = DEFAULT_REF,
+  generation?: string | null
 ) {
-  return {
-    'rotated-tokens': [
-      {
-        tokenHash: await sha256Hex(token),
-        rotatedAt: Date.now() - ageMs,
-        credentialReference,
-      },
-    ],
+  const entry: Record<string, unknown> = {
+    tokenHash: await sha256Hex(token),
+    rotatedAt: Date.now() - ageMs,
   };
+  if (credentialReference) entry.credentialReference = credentialReference;
+  const successorGeneration =
+    generation === undefined && credentialReference
+      ? await generationOf(credentialReference)
+      : generation;
+  if (successorGeneration) entry.successorGeneration = successorGeneration;
+  const existing = (ctx.storage._store.get('rotated-tokens') as unknown[]) ?? [];
+  ctx.storage._store.set('rotated-tokens', [...existing, entry]);
 }
 
 function mockSuccessfulRefreshResponse(
@@ -183,9 +204,14 @@ function mockSuccessfulRefreshResponse(
 async function seedLegacy(
   id: string,
   plaintext: string,
-  opts: { userId?: string; projectId?: string | null; active?: boolean } = {}
+  opts: {
+    userId?: string;
+    projectId?: string | null;
+    active?: boolean;
+    copyOf?: { ciphertext: string; iv: string };
+  } = {}
 ) {
-  const { ciphertext, iv } = await encrypt(plaintext, ENCRYPTION_KEY);
+  const { ciphertext, iv } = opts.copyOf ?? (await encrypt(plaintext, ENCRYPTION_KEY));
   sqlite
     .prepare(
       `INSERT INTO credentials (id, user_id, project_id, provider, credential_type, agent_type,
@@ -232,9 +258,9 @@ async function seedCc(
   return { ciphertext, iv };
 }
 
-/** The legacy user-scoped row `cred-1` holding `storedAuthJson`. */
+/** The user's default cc credential `cred-1` holding `storedAuthJson`. */
 async function setupCredentialFound(_env?: unknown) {
-  return seedLegacy('cred-1', storedAuthJson);
+  return seedCc('cred-1', storedAuthJson);
 }
 
 async function secretOf(table: 'credentials' | 'cc_credentials', id: string): Promise<string> {
@@ -248,11 +274,11 @@ async function secretOf(table: 'credentials' | 'cc_credentials', id: string): Pr
 }
 
 async function expectNoCredentialUpdate(_env?: unknown) {
-  expect(await secretOf('credentials', 'cred-1')).toBe(storedAuthJson);
+  expect(await secretOf('cc_credentials', 'cred-1')).toBe(storedAuthJson);
 }
 
 async function expectCredentialUpdated() {
-  expect(await secretOf('credentials', 'cred-1')).not.toBe(storedAuthJson);
+  expect(await secretOf('cc_credentials', 'cred-1')).not.toBe(storedAuthJson);
 }
 
 describe('CodexRefreshLock', () => {
@@ -315,9 +341,8 @@ describe('CodexRefreshLock', () => {
     // Ciphertext that does not authenticate under the key.
     sqlite
       .prepare(
-        `INSERT INTO credentials (id, user_id, credential_type, agent_type, credential_kind,
-           is_active, encrypted_token, iv) VALUES ('cred-1', ?, 'agent-api-key', 'openai-codex',
-           'oauth-token', 1, 'AAAAAAAAAAAAAAAAAAAAAA==', 'AAAAAAAAAAAAAAAA')`
+        `INSERT INTO cc_credentials (id, owner_id, name, kind, is_active, encrypted_token, iv)
+           VALUES ('cred-1', ?, 'cred-1', 'auth-json', 1, 'AAAAAAAAAAAAAAAAAAAAAA==', 'AAAAAAAAAAAAAAAA')`
       )
       .run(USER);
 
@@ -330,7 +355,7 @@ describe('CodexRefreshLock', () => {
 
   it('returns 500 when stored credential is not valid JSON', async () => {
     const { do: doInstance } = createDO();
-    await seedLegacy('cred-1', 'not-json{{{');
+    await seedCc('cred-1', 'not-json{{{');
 
     const res = await doInstance.fetch(makeRequest({ refreshToken: 'rt_test', userId: 'user-1' }));
     expect(res.status).toBe(500);
@@ -524,7 +549,7 @@ describe('CodexRefreshLock', () => {
     expect(opts?.method).toBe('POST');
 
     // Credential re-encrypted and persisted into the same row.
-    const stored = JSON.parse(await secretOf('credentials', 'cred-1'));
+    const stored = JSON.parse(await secretOf('cc_credentials', 'cred-1'));
     expect(stored.tokens).toMatchObject({
       access_token: 'new-access',
       refresh_token: 'new-refresh',
@@ -680,6 +705,60 @@ describe('CodexRefreshLock', () => {
       expect(vi.mocked(fetch)).not.toHaveBeenCalled();
     });
 
+    it('a recorded credential that became unreadable keeps the stale path closed', async () => {
+      const { do: doInstance } = createDO();
+      await seedCc('cred-a', codexAuth('a'), { active: false });
+      await seedCc('cred-b', codexAuth('b'));
+
+      // A's run presents A's token; A is now inactive and must not be answered with B.
+      const res = await doInstance.fetch(
+        makeRequest({
+          refreshToken: 'a-refresh',
+          userId: USER,
+          credentialReferences: ['cc_credentials:cred-a', 'cc_credentials:cred-b'],
+        })
+      );
+
+      expect(res.status).toBe(401);
+      expect(JSON.stringify(await res.json())).not.toContain('b-');
+      expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+    });
+
+    it('a legacy credential never answers a stale token (it can be rewritten in place)', async () => {
+      const { do: doInstance } = createDO();
+      await seedLegacy('legacy-1', codexAuth('legacy'));
+
+      const res = await doInstance.fetch(
+        makeRequest({
+          refreshToken: 'unknown',
+          userId: USER,
+          credentialReferences: ['credentials:legacy-1'],
+        })
+      );
+
+      expect(res.status).toBe(401);
+      expect(await res.json()).toEqual({ error: 'refresh_token_invalidated' });
+    });
+
+    it('control: a legacy credential still refreshes when the caller holds its token', async () => {
+      const { do: doInstance } = createDO();
+      await seedLegacy('legacy-1', codexAuth('legacy'));
+      mockSuccessfulRefreshResponse();
+
+      const res = await doInstance.fetch(
+        makeRequest({
+          refreshToken: 'legacy-refresh',
+          userId: USER,
+          credentialReferences: ['credentials:legacy-1'],
+        })
+      );
+
+      expect(res.status).toBe(200);
+      expect(JSON.parse(await secretOf('credentials', 'legacy-1')).tokens.refresh_token).toBe(
+        'new-refresh'
+      );
+    });
+
     it('returns 400 when the candidate list is missing or empty', async () => {
       const { do: doInstance } = createDO();
       for (const credentialReferences of [undefined, [], [''], [42]]) {
@@ -699,7 +778,7 @@ describe('CodexRefreshLock', () => {
     it('rotates every stored copy of the same credential generation, and no other account', async () => {
       const { do: doInstance } = createDO();
       const original = await setupCredentialFound();
-      await seedCc('cred-copy', storedAuthJson, { copyOf: original });
+      await seedLegacy('legacy-copy', storedAuthJson, { copyOf: original });
       await seedCc('cred-other', codexAuth('other'));
       mockSuccessfulRefreshResponse();
 
@@ -708,10 +787,10 @@ describe('CodexRefreshLock', () => {
       );
 
       expect(res.status).toBe(200);
-      const legacy = await secretOf('credentials', 'cred-1');
-      expect(JSON.parse(legacy).tokens.refresh_token).toBe('new-refresh');
-      // The copy now holds exactly the same ciphertext as the primary.
-      expect(await secretOf('cc_credentials', 'cred-copy')).toBe(legacy);
+      const primary = await secretOf('cc_credentials', 'cred-1');
+      expect(JSON.parse(primary).tokens.refresh_token).toBe('new-refresh');
+      // The legacy copy now holds exactly the same ciphertext as the primary.
+      expect(await secretOf('credentials', 'legacy-copy')).toBe(primary);
       expect(await secretOf('cc_credentials', 'cred-other')).toBe(codexAuth('other'));
       expect(mockLogInfo).toHaveBeenCalledWith(
         'codex_refresh.rotation_stored',
@@ -730,16 +809,15 @@ describe('CodexRefreshLock', () => {
       expect(await secretOf('cc_credentials', 'cred-foreign')).toBe(storedAuthJson);
     });
 
-    it('a default switch while OpenAI answers leaves the new default intact', async () => {
-      const { do: doInstance } = createDO();
+    it('a concurrent write while OpenAI answers is left intact (CAS lost)', async () => {
+      const { do: doInstance, ctx } = createDO();
       const original = await setupCredentialFound();
-      await seedCc('cred-copy', storedAuthJson, { copyOf: original });
+      await seedLegacy('legacy-copy', storedAuthJson, { copyOf: original });
       const switched = await encrypt(codexAuth('switched'), ENCRYPTION_KEY);
       vi.mocked(fetch).mockImplementation(async () => {
-        // The user replaces their default account mid-refresh (saveAgentCredentialForUser
-        // rewrites the legacy row in place).
+        // Another writer (a credential sync, a replacement) changes the row mid-refresh.
         sqlite
-          .prepare(`UPDATE credentials SET encrypted_token = ?, iv = ? WHERE id = 'cred-1'`)
+          .prepare(`UPDATE cc_credentials SET encrypted_token = ?, iv = ? WHERE id = 'cred-1'`)
           .run(switched.ciphertext, switched.iv);
         return new Response(
           JSON.stringify({ access_token: 'new-access', refresh_token: 'new-refresh' }),
@@ -757,9 +835,10 @@ describe('CodexRefreshLock', () => {
       // The caller proved possession and still gets its own successor tokens.
       expect(res.status).toBe(200);
       expect((await res.json()).refresh_token).toBe('new-refresh');
-      expect(await secretOf('credentials', 'cred-1')).toBe(codexAuth('switched'));
-      // A lost compare-and-set mirrors nothing.
-      expect(await secretOf('cc_credentials', 'cred-copy')).toBe(storedAuthJson);
+      expect(await secretOf('cc_credentials', 'cred-1')).toBe(codexAuth('switched'));
+      // A lost compare-and-set mirrors nothing and records no grace entry.
+      expect(await secretOf('credentials', 'legacy-copy')).toBe(storedAuthJson);
+      expect(ctx.storage._store.get('rotated-tokens')).toBeUndefined();
       expect(mockLogWarn).toHaveBeenCalledWith(
         'codex_refresh.rotation_cas_lost',
         expect.objectContaining({ credentialReference: DEFAULT_REF })
@@ -839,20 +918,87 @@ describe('CodexRefreshLock', () => {
     });
   });
 
+  describe('lock deadline', () => {
+    type RunRefresh = (
+      refreshToken: string,
+      userId: string,
+      references: string[],
+      signal: AbortSignal
+    ) => Promise<Response>;
+    const runRefreshOf = (instance: unknown) =>
+      (instance as { runRefresh: RunRefresh }).runRefresh.bind(instance);
+
+    it('a request whose deadline passed while queued never spends the token', async () => {
+      const { do: doInstance } = createDO();
+      await setupCredentialFound();
+      mockSuccessfulRefreshResponse();
+
+      await expect(
+        runRefreshOf(doInstance)('stored-refresh', USER, [DEFAULT_REF], AbortSignal.abort())
+      ).rejects.toMatchObject({ name: 'AbortError' });
+
+      expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+      await expectNoCredentialUpdate();
+    });
+
+    it('once OpenAI rotated, the successor is stored even if the deadline passed meanwhile', async () => {
+      const { do: doInstance } = createDO();
+      await setupCredentialFound();
+      const controller = new AbortController();
+      vi.mocked(fetch).mockImplementation(async () => {
+        const response = new Response(
+          JSON.stringify({ access_token: 'new-access', refresh_token: 'new-refresh' }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+        controller.abort(); // the lock deadline fires after OpenAI answered
+        return response;
+      });
+
+      const res = await runRefreshOf(doInstance)(
+        'stored-refresh',
+        USER,
+        [DEFAULT_REF],
+        controller.signal
+      );
+
+      expect(res.status).toBe(200);
+      expect(JSON.parse(await secretOf('cc_credentials', 'cred-1')).tokens.refresh_token).toBe(
+        'new-refresh'
+      );
+    });
+  });
+
   // -----------------------------------------------------------------------
   // Grace entries are bound to the credential they were rotated out of
   // -----------------------------------------------------------------------
 
   describe('grace entries are credential-bound', () => {
     it.each([
-      { name: 'another credential', boundTo: DEFAULT_REF, expectFull: false },
-      { name: 'no credential (pre-binding entry)', boundTo: undefined, expectFull: false },
-      { name: 'the served credential', boundTo: 'cc_credentials:cred-pinned', expectFull: true },
-    ])('an entry bound to $name', async ({ boundTo, expectFull }) => {
-      const storage = await createRotatedTokenStorage('old-refresh', 60_000, boundTo);
-      const { do: doInstance } = createDO({}, storage);
+      { name: 'another credential', boundTo: DEFAULT_REF, generation: undefined, full: false },
+      { name: 'no credential (pre-binding)', boundTo: null, generation: null, full: false },
+      {
+        name: 'the served credential, without a generation',
+        boundTo: 'cc_credentials:cred-pinned',
+        generation: null,
+        full: false,
+      },
+      {
+        name: 'the served credential, a generation it no longer holds',
+        boundTo: 'cc_credentials:cred-pinned',
+        generation: 'f'.repeat(64),
+        full: false,
+      },
+      {
+        name: 'the served credential, its current generation',
+        boundTo: 'cc_credentials:cred-pinned',
+        generation: undefined,
+        full: true,
+      },
+    ])('an entry bound to $name', async ({ boundTo, generation, full }) => {
+      const { do: doInstance, ctx } = createDO();
       await setupCredentialFound();
       await seedCc('cred-pinned', codexAuth('pinned'));
+      await addGraceEntry(ctx, 'old-refresh', 60_000, boundTo, generation);
 
       const res = await doInstance.fetch(
         makeRequest({
@@ -864,8 +1010,59 @@ describe('CodexRefreshLock', () => {
 
       const json = await res.json();
       expect(json.access_token).toBe('pinned-access');
-      expect(json.refresh_token).toBe(expectFull ? 'pinned-refresh' : undefined);
-      expect(json.stale).toBe(expectFull ? undefined : true);
+      expect(json.refresh_token).toBe(full ? 'pinned-refresh' : undefined);
+      expect(json.stale).toBe(full ? undefined : true);
+    });
+
+    it('a row replaced with another account after rotation no longer honours the grace entry', async () => {
+      const { do: doInstance, ctx } = createDO();
+      await seedLegacy('legacy-a', codexAuth('a'));
+      await addGraceEntry(ctx, 'old-a-refresh', 60_000, 'credentials:legacy-a');
+      // The legacy row is rewritten in place with account B (Replace / Make default).
+      const b = await encrypt(codexAuth('b'), ENCRYPTION_KEY);
+      sqlite
+        .prepare(`UPDATE credentials SET encrypted_token = ?, iv = ? WHERE id = 'legacy-a'`)
+        .run(b.ciphertext, b.iv);
+
+      const res = await doInstance.fetch(
+        makeRequest({
+          refreshToken: 'old-a-refresh',
+          userId: USER,
+          credentialReferences: ['credentials:legacy-a'],
+        })
+      );
+
+      expect(res.status).toBe(401);
+      expect(JSON.stringify(await res.json())).not.toContain('b-');
+    });
+
+    it('a holder of the old token is handed over through a mirrored reference', async () => {
+      const { do: doInstance } = createDO();
+      const original = await seedLegacy('legacy-1', storedAuthJson);
+      await seedCc('cc-mirror', storedAuthJson, { copyOf: original });
+      mockSuccessfulRefreshResponse();
+
+      // Run 1 (recorded the legacy reference) rotates.
+      await doInstance.fetch(
+        makeRequest({
+          refreshToken: 'stored-refresh',
+          userId: USER,
+          credentialReferences: ['credentials:legacy-1'],
+        })
+      );
+      // Run 2 (recorded the cc mirror) still holds the old token.
+      const res = await doInstance.fetch(
+        makeRequest({
+          refreshToken: 'stored-refresh',
+          userId: USER,
+          credentialReferences: ['cc_credentials:cc-mirror'],
+        })
+      );
+
+      expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+      const json = await res.json();
+      expect(json.refresh_token).toBe('new-refresh');
+      expect(json.stale).toBeUndefined();
     });
 
     it("one account's rotations never evict another account's grace entries", async () => {
@@ -960,10 +1157,10 @@ describe('CodexRefreshLock', () => {
 
       // Rate-limit state must have been written at least once, keyed per-credential.
       expect(ctx.storage.put).toHaveBeenCalledWith(
-        'rate-limit:credentials:cred-1',
+        'rate-limit:cc_credentials:cred-1',
         expect.objectContaining({ count: expect.any(Number) })
       );
-      const stored = ctx.storage._store.get('rate-limit:credentials:cred-1') as {
+      const stored = ctx.storage._store.get('rate-limit:cc_credentials:cred-1') as {
         count: number;
         windowStart: number;
       };
@@ -985,7 +1182,7 @@ describe('CodexRefreshLock', () => {
           RATE_LIMIT_CODEX_REFRESH_WINDOW_SECONDS: windowSeconds.toString(),
         },
         {
-          'rate-limit:credentials:cred-1': { windowStart: currentWindowStart, count: 3 },
+          'rate-limit:cc_credentials:cred-1': { windowStart: currentWindowStart, count: 3 },
         }
       );
       await setupCredentialFound(env);
@@ -1005,7 +1202,9 @@ describe('CodexRefreshLock', () => {
       // No upstream fetch and no DB write should have happened.
       expect(vi.mocked(fetch)).not.toHaveBeenCalled();
       // Count must NOT be incremented past the limit.
-      const stored = ctx.storage._store.get('rate-limit:credentials:cred-1') as { count: number };
+      const stored = ctx.storage._store.get('rate-limit:cc_credentials:cred-1') as {
+        count: number;
+      };
       expect(stored.count).toBe(3);
     });
 
@@ -1025,7 +1224,7 @@ describe('CodexRefreshLock', () => {
           RATE_LIMIT_CODEX_REFRESH_WINDOW_SECONDS: windowSeconds.toString(),
         },
         {
-          'rate-limit:credentials:cred-1': { windowStart: stalePastWindowStart, count: 3 },
+          'rate-limit:cc_credentials:cred-1': { windowStart: stalePastWindowStart, count: 3 },
         }
       );
       await setupCredentialFound(env);
@@ -1041,7 +1240,7 @@ describe('CodexRefreshLock', () => {
       );
 
       expect(res.status).toBe(200);
-      const stored = ctx.storage._store.get('rate-limit:credentials:cred-1') as {
+      const stored = ctx.storage._store.get('rate-limit:cc_credentials:cred-1') as {
         count: number;
         windowStart: number;
       };
@@ -1083,7 +1282,7 @@ describe('CodexRefreshLock', () => {
 
       // cred-1 is unaffected by other-cred's exhausted bucket.
       expect(res.status).toBe(200);
-      const cred1 = ctx.storage._store.get('rate-limit:credentials:cred-1') as { count: number };
+      const cred1 = ctx.storage._store.get('rate-limit:cc_credentials:cred-1') as { count: number };
       expect(cred1.count).toBe(1);
       // The unrelated credential's bucket must be left untouched.
       const otherCred = ctx.storage._store.get('rate-limit:other-cred') as {
@@ -1112,10 +1311,10 @@ describe('CodexRefreshLock', () => {
 
       // Cached/stale responses must not touch the rate-limit bucket.
       expect(ctx.storage.put).not.toHaveBeenCalledWith(
-        'rate-limit:credentials:cred-1',
+        'rate-limit:cc_credentials:cred-1',
         expect.anything()
       );
-      expect(ctx.storage._store.has('rate-limit:credentials:cred-1')).toBe(false);
+      expect(ctx.storage._store.has('rate-limit:cc_credentials:cred-1')).toBe(false);
       expect(vi.mocked(fetch)).not.toHaveBeenCalled();
     });
 
@@ -1134,10 +1333,10 @@ describe('CodexRefreshLock', () => {
 
       // Grace-window hits return stored tokens directly — no budget consumed.
       expect(ctx.storage.put).not.toHaveBeenCalledWith(
-        'rate-limit:credentials:cred-1',
+        'rate-limit:cc_credentials:cred-1',
         expect.anything()
       );
-      expect(ctx.storage._store.has('rate-limit:credentials:cred-1')).toBe(false);
+      expect(ctx.storage._store.has('rate-limit:cc_credentials:cred-1')).toBe(false);
       expect(vi.mocked(fetch)).not.toHaveBeenCalled();
     });
   });

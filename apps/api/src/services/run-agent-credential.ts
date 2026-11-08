@@ -66,10 +66,10 @@ interface CredentialRowRef {
  * reference names something a workspace never writes into (platform
  * credentials, the platform proxy).
  */
-export function parseRunCredentialReference(
-  reference: string | null | undefined
-): CredentialRowRef | null {
-  if (!reference) return null;
+export function parseRunCredentialReference(reference: unknown): CredentialRowRef | null {
+  // Recorded references come from D1 rows; a malformed value (wrong type) is skipped,
+  // never thrown on, so one bad row cannot fail a refresh for the valid ones.
+  if (typeof reference !== 'string' || !reference) return null;
   for (const table of ['cc_credentials', 'credentials'] as const) {
     const prefix = `${table}:`;
     if (reference.startsWith(prefix)) {
@@ -92,35 +92,52 @@ export async function resolveRunAgentCredentialReferences(
   encryptionKey: string,
   input: { workspaceId: string; userId: string; projectId: string | null; agentType: string }
 ): Promise<string[]> {
+  // Every recorded attribution counts, including platform ones: a workspace whose runs
+  // were seeded by the platform proxy must not fall back to whatever personal default
+  // the user configures later. Sessions still running rank first so the cap can only
+  // drop references of runs that have ended.
   const recorded = await database
     .prepare(
-      `SELECT agent_credential_reference AS reference, MAX(updated_at) AS last_used
+      `SELECT agent_credential_reference AS reference,
+              MAX(CASE WHEN agent_credential_source = 'platform' THEN 1 ELSE 0 END) AS platform,
+              MAX(CASE WHEN status IN ('running', 'recovery') THEN 1 ELSE 0 END) AS live,
+              MAX(updated_at) AS last_used
          FROM agent_sessions
         WHERE workspace_id = ?
           AND user_id = ?
           AND agent_type = ?
           AND agent_credential_reference IS NOT NULL
-          AND (agent_credential_source IS NULL OR agent_credential_source != 'platform')
         GROUP BY agent_credential_reference
-        ORDER BY last_used DESC, agent_credential_reference
+        ORDER BY live DESC, last_used DESC, agent_credential_reference
         LIMIT ?`
     )
     .bind(input.workspaceId, input.userId, input.agentType, RUN_CREDENTIAL_CANDIDATE_LIMIT + 1)
-    .all<{ reference: string }>();
+    .all<{ reference: unknown; platform: number }>();
   const rows = recorded.results ?? [];
   if (rows.length > RUN_CREDENTIAL_CANDIDATE_LIMIT) {
-    // Most recently used first, so only the oldest recorded choices are dropped.
     log.warn('run_credential.candidates_truncated', {
       workspaceId: input.workspaceId,
       agentType: input.agentType,
       limit: RUN_CREDENTIAL_CANDIDATE_LIMIT,
     });
   }
-  const references = rows
-    .slice(0, RUN_CREDENTIAL_CANDIDATE_LIMIT)
-    .map((row) => row.reference)
-    .filter((reference) => parseRunCredentialReference(reference) !== null);
+  const references: string[] = [];
+  for (const row of rows.slice(0, RUN_CREDENTIAL_CANDIDATE_LIMIT)) {
+    if (row.platform === 1) continue;
+    if (parseRunCredentialReference(row.reference) && typeof row.reference === 'string') {
+      references.push(row.reference);
+    } else {
+      log.warn('run_credential.reference_skipped', {
+        workspaceId: input.workspaceId,
+        agentType: input.agentType,
+        referenceType: typeof row.reference,
+      });
+    }
+  }
   if (references.length > 0) return references;
+  // Something was recorded but none of it is writable (platform proxy, malformed):
+  // the run has no credential of its own to refresh.
+  if (rows.length > 0) return [];
 
   const profile = await resolveSessionProfileCredentialContext(db, {
     workspaceId: input.workspaceId,
@@ -203,7 +220,7 @@ export async function writeRotatedAgentCredential(
     next: { encryptedToken: string; iv: string };
     guard?: { sql: string; binds: unknown[] };
   }
-): Promise<{ applied: boolean; mirroredRows: number }> {
+): Promise<{ applied: boolean; mirroredRows: number; mirroredReferences: string[] }> {
   const { target, next } = input;
   const now = new Date().toISOString();
   const ownerColumn = target.table === 'cc_credentials' ? 'owner_id' : 'user_id';
@@ -245,7 +262,8 @@ export async function writeRotatedAgentCredential(
           SET encrypted_token = ?, iv = ?, updated_at = ?
         WHERE owner_id = ? AND id != ? AND ${CC_KIND_PREDICATE}
           AND encrypted_token = ? AND iv = ?
-          AND ${primaryApplied}`
+          AND ${primaryApplied}
+        RETURNING id`
     )
     .bind(
       next.encryptedToken,
@@ -264,7 +282,8 @@ export async function writeRotatedAgentCredential(
           SET encrypted_token = ?, iv = ?, updated_at = ?
         WHERE user_id = ? AND id != ? AND ${LEGACY_KIND_PREDICATE}
           AND encrypted_token = ? AND iv = ?
-          AND ${primaryApplied}`
+          AND ${primaryApplied}
+        RETURNING id`
     )
     .bind(
       next.encryptedToken,
@@ -284,10 +303,33 @@ export async function writeRotatedAgentCredential(
     ccMirror,
     legacyMirror,
   ]);
+  const idsOf = (result: D1Result | undefined) =>
+    ((result?.results ?? []) as Array<{ id?: unknown }>)
+      .map((row) => row.id)
+      .filter((id): id is string => typeof id === 'string');
+  const mirroredReferences = [
+    ...idsOf(ccResult).map((id) => `cc_credentials:${id}`),
+    ...idsOf(legacyResult).map((id) => `credentials:${id}`),
+  ];
   return {
     applied: (primaryResult?.meta.changes ?? 0) === 1,
-    mirroredRows: (ccResult?.meta.changes ?? 0) + (legacyResult?.meta.changes ?? 0),
+    mirroredRows: mirroredReferences.length,
+    mirroredReferences,
   };
+}
+
+/**
+ * Identity of one stored credential generation: a digest of its exact ciphertext.
+ * Grace entries are bound to the generation a rotation wrote, so a row that is
+ * replaced (another account) or rotated again no longer honours them.
+ */
+export async function credentialGenerationFingerprint(
+  encryptedToken: string,
+  iv: string
+): Promise<string> {
+  const data = new TextEncoder().encode(`${encryptedToken}:${iv}`);
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', data));
+  return Array.from(digest, (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 /** The parts of a Codex auth.json that identify its account and token family. */

@@ -31,7 +31,12 @@ describe('selectSyncTarget', () => {
   it.each([
     { name: 'same account', synced: 'acct-a', stored: 'acct-a', expected: 'one' },
     { name: 'stored has no account id', synced: 'acct-a', stored: undefined, expected: 'one' },
-    { name: 'synced has no account id', synced: undefined, stored: 'acct-a', expected: 'one' },
+    {
+      name: 'synced has no account id while the stored one does',
+      synced: undefined,
+      stored: 'acct-a',
+      expected: 'credential_account_unverified',
+    },
     {
       name: 'different account',
       synced: 'acct-b',
@@ -46,10 +51,21 @@ describe('selectSyncTarget', () => {
     expect(pick(auth('acct-b'), [candidate('a', 'acct-a'), candidate('b', 'acct-b')])).toBe('b');
   });
 
-  it('several candidates: the most recently used copy of the same account wins', () => {
+  it('several candidates: two stored copies of the same account are ambiguous', () => {
     expect(pick(auth('acct-a'), [candidate('new', 'acct-a'), candidate('old', 'acct-a')])).toBe(
-      'new'
+      'credential_ambiguous'
     );
+  });
+
+  it.each([
+    { name: 'not JSON', synced: 'not-json{' },
+    { name: 'JSON without tokens', synced: JSON.stringify({ hello: 'world' }) },
+    {
+      name: 'tokens without a refresh token',
+      synced: JSON.stringify({ tokens: { access_token: 'x' } }),
+    },
+  ])('Codex: a synced file that is $name is refused', ({ synced }) => {
+    expect(pick(synced, [candidate('one', 'acct-a')])).toBe('credential_invalid');
   });
 
   it('several candidates: a matching account beats a candidate with no account id', () => {

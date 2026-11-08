@@ -39,14 +39,34 @@ const { verifyCallbackToken } = await import('../../../src/services/jwt');
 const { resolveRunAgentCredentialReferences } =
   await import('../../../src/services/run-agent-credential');
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function mockDrizzleWithWorkspace(userId: string | null, projectId: string | null = null): any {
-  const rows = userId ? [{ userId, projectId }] : [];
+/** Drizzle stub for the workspace callback-identity read (`loadWorkspaceCallbackIdentity`). */
+function mockDrizzleWithWorkspace(
+  userId: string | null,
+  projectId: string | null = null,
+  status = 'running',
+  nodeStatus = 'running'
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+): any {
+  const rows = userId
+    ? [
+        {
+          workspaceId: 'ws-123',
+          userId,
+          projectId,
+          chatSessionId: null,
+          status,
+          nodeId: 'node-1',
+          nodeStatus,
+        },
+      ]
+    : [];
   return {
     select: vi.fn().mockReturnValue({
       from: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({
-          limit: vi.fn().mockResolvedValue(rows),
+        leftJoin: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue(rows),
+          }),
         }),
       }),
     }),
@@ -249,13 +269,27 @@ describe('POST /api/auth/codex-refresh', () => {
   // Workspace lookup
   // -----------------------------------------------------------------------
 
-  it('returns 401 when workspace is not found', async () => {
+  it('returns the terminal 410 when the workspace no longer exists', async () => {
     vi.mocked(drizzle).mockReturnValue(mockDrizzleWithWorkspace(null));
 
     const res = await postRefresh(validBody);
-    expect(res.status).toBe(401);
-    const json = await res.json();
-    expect(json.error).toBe('refresh_token_invalidated');
+    expect(res.status).toBe(410);
+    expect(mockDoFetch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { name: 'a stopped workspace', status: 'stopped', nodeStatus: 'running' },
+    { name: 'a workspace on a deleted node', status: 'running', nodeStatus: 'deleted' },
+  ])('refuses $name with 410 before any credential work', async ({ status, nodeStatus }) => {
+    vi.mocked(drizzle).mockReturnValue(
+      mockDrizzleWithWorkspace('user-abc', null, status, nodeStatus)
+    );
+
+    const res = await postRefresh(validBody);
+
+    expect(res.status).toBe(410);
+    expect(vi.mocked(resolveRunAgentCredentialReferences)).not.toHaveBeenCalled();
+    expect(mockDoFetch).not.toHaveBeenCalled();
   });
 
   // -----------------------------------------------------------------------

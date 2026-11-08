@@ -103,6 +103,12 @@ export interface RotatedTokenEntry {
    * the grace window).
    */
   credentialReference?: string;
+  /**
+   * Fingerprint of the exact ciphertext the rotation wrote
+   * (`credentialGenerationFingerprint`). A grace hit requires the credential to
+   * still hold that generation. Entries without it never match.
+   */
+  successorGeneration?: string;
 }
 
 export interface RateLimitState {

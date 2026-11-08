@@ -480,16 +480,96 @@ describe('which recorded references are candidates', () => {
     expect(await secret('cc_credentials', 'cred-default')).toBe(codexAuth('default'));
   });
 
-  it('a reference recorded for a platform-sourced run is not a candidate', async () => {
+  it('a platform-seeded run never falls back to a personal default configured later', async () => {
+    record('s-platform', 'platform_proxy:openai', '2026-11-08T00:00:00.000Z', 'platform');
+
+    const res = await refresh('default-refresh-1');
+
+    expect(res.status).toBe(401);
+    expect(doRequestBodies).toEqual([]);
+    expect(upstreamRefreshTokens).toEqual([]);
+    expect(await secret('cc_credentials', 'cred-default')).toBe(codexAuth('default'));
+  });
+
+  it('a platform-sourced recording is not a candidate even if it names a user credential', async () => {
     record('s-platform', 'cc_credentials:cred-profile', '2026-11-08T00:00:00.000Z', 'platform');
 
     const res = await refresh('profile-refresh-1');
 
-    // Falls through to the resolver (the user default), which the caller does not hold.
-    expect(doRequestBodies[0]?.credentialReferences).toEqual(['cc_credentials:cred-default']);
-    expect(res.body.refresh_token).toBeUndefined();
+    expect(res.status).toBe(401);
     expect(upstreamRefreshTokens).toEqual([]);
     expect(await secret('cc_credentials', 'cred-profile')).toBe(codexAuth('profile'));
+  });
+
+  it('control: no recorded attribution at all falls back to the resolver (user default)', async () => {
+    const res = await refresh('default-refresh-1');
+
+    expect(doRequestBodies[0]?.credentialReferences).toEqual(['cc_credentials:cred-default']);
+    expect(res.status).toBe(200);
+  });
+
+  it('a live session’s credential ranks ahead of newer references from ended sessions', async () => {
+    sqlite
+      .prepare(
+        `INSERT INTO agent_sessions (id, user_id, workspace_id, status, agent_type, agent_credential_source,
+           agent_credential_reference, agent_credential_generation, updated_at)
+         VALUES ('s-live', 'u1', 'w1', 'running', ?, 'user', 'cc_credentials:cred-project', 1, '2026-11-01T00:00:00.000Z')`
+      )
+      .run(CODEX);
+    record('s-ended', 'cc_credentials:cred-profile', '2026-11-08T00:00:00.000Z');
+
+    await refresh('project-refresh-1');
+
+    expect(doRequestBodies[0]?.credentialReferences).toEqual([
+      'cc_credentials:cred-project',
+      'cc_credentials:cred-profile',
+    ]);
+  });
+
+  it('a malformed recorded reference is skipped, and a valid one still refreshes', async () => {
+    sqlite
+      .prepare(
+        `INSERT INTO agent_sessions (id, user_id, workspace_id, status, agent_type, agent_credential_source,
+           agent_credential_reference, agent_credential_generation, updated_at)
+         VALUES ('s-blob', 'u1', 'w1', 'stopped', ?, 'user', X'00ff', 1, '2026-11-08T01:00:00.000Z')`
+      )
+      .run(CODEX);
+    record('s-ok', 'cc_credentials:cred-project', '2026-11-08T00:00:00.000Z');
+
+    const res = await refresh('project-refresh-1');
+
+    expect(res.status).toBe(200);
+    expect(doRequestBodies[0]?.credentialReferences).toEqual(['cc_credentials:cred-project']);
+  });
+});
+
+describe('workspace lifecycle', () => {
+  beforeEach(async () => {
+    await seedCcAccount('default');
+    attachDefault('default');
+  });
+
+  it.each([
+    {
+      name: 'a stopped workspace',
+      sql: `UPDATE workspaces SET status = 'stopped' WHERE id = 'w1'`,
+    },
+    { name: 'a deleted node', sql: `UPDATE nodes SET status = 'deleted' WHERE id = 'n1'` },
+  ])('refuses a refresh from $name (410) and rotates nothing', async ({ sql }) => {
+    sqlite.exec(sql);
+
+    const res = await refresh('default-refresh-1');
+
+    expect(res.status).toBe(410);
+    expect(upstreamRefreshTokens).toEqual([]);
+    expect(await secret('cc_credentials', 'cred-default')).toBe(codexAuth('default'));
+  });
+
+  it('control: the same workspace while running refreshes', async () => {
+    const res = await refresh('default-refresh-1');
+
+    expect(res.status).toBe(200);
+    expect(upstreamRefreshTokens).toEqual(['default-refresh-1']);
   });
 });
 
@@ -568,6 +648,16 @@ describe('agent-credential-sync writes into the seeded account', () => {
     expect(res.body).toEqual({ success: false, reason: 'credential_account_mismatch' });
     expect(await secret('cc_credentials', 'cred-project')).toBe(codexAuth('project'));
     expect(await secret('cc_credentials', 'cred-default')).toBe(codexAuth('default'));
+  });
+
+  it.each([
+    { name: 'not JSON', body: 'not-json{' },
+    { name: 'without an account id', body: JSON.stringify({ tokens: { refresh_token: 'x' } }) },
+  ])('an auth.json $name is refused; the pinned credential is untouched', async ({ body }) => {
+    const res = await sync(body);
+
+    expect(res.body.success).toBe(false);
+    expect(await secret('cc_credentials', 'cred-project')).toBe(codexAuth('project'));
   });
 
   it('an unchanged auth.json is a no-op', async () => {

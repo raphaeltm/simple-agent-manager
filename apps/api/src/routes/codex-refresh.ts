@@ -9,7 +9,6 @@
  * Auth: workspace callback token via `?token=` query param (Codex cannot set headers).
  * Codex sends hardcoded request format — we cannot change it.
  */
-import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -19,6 +18,7 @@ import { log } from '../lib/logger';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { verifyCallbackToken } from '../services/jwt';
 import { resolveRunAgentCredentialReferences } from '../services/run-agent-credential';
+import { assertWorkspaceCallbackResourceById } from './workspaces/_helpers';
 
 const codexRefreshRoutes = new Hono<{ Bindings: Env }>();
 
@@ -93,22 +93,13 @@ codexRefreshRoutes.post('/codex-refresh', async (c) => {
     );
   }
 
-  // Look up workspace to get userId and projectId.
-  const db = drizzle(c.env.DATABASE, { schema });
-  const workspaceRows = await db
-    .select({ userId: schema.workspaces.userId, projectId: schema.workspaces.projectId })
-    .from(schema.workspaces)
-    .where(eq(schema.workspaces.id, workspaceId))
-    .limit(1);
-
-  const workspace = workspaceRows[0];
-  if (!workspace) {
-    log.error('codex_refresh.workspace_not_found', { workspaceId });
-    return c.json({ error: 'refresh_token_invalidated' }, 401);
-  }
-
+  // The workspace must still accept callbacks (active workspace on a live node).
+  // A callback token from a stopped or deleted workspace gets the designed
+  // terminal 410 before any credential is read or rotated (rule 34).
+  const workspace = await assertWorkspaceCallbackResourceById(c.env, workspaceId, 'codex_refresh');
   const userId = workspace.userId;
   const projectId = workspace.projectId;
+  const db = drizzle(c.env.DATABASE, { schema });
 
   // The credentials this workspace's runs were seeded with: the agent-key
   // callback's recorded choice (project pin, profile pin, default or legacy row),

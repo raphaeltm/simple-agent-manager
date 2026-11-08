@@ -37,16 +37,20 @@ import { DurableObject } from 'cloudflare:workers';
 import * as v from 'valibot';
 
 import { log } from '../lib/logger';
-import { maybeJsonRecord, readResponseJson } from '../lib/runtime-validation';
+import { readResponseJson } from '../lib/runtime-validation';
 import { getCredentialEncryptionKey } from '../lib/secrets';
-import { decrypt, encrypt } from '../services/encryption';
+import { encrypt } from '../services/encryption';
 import {
-  type CodexAuthIdentity,
-  loadRunAgentCredential,
-  parseCodexAuth,
-  type RunAgentCredential,
+  credentialGenerationFingerprint,
   writeRotatedAgentCredential,
 } from '../services/run-agent-credential';
+import {
+  CODEX_AGENT_TYPE,
+  CODEX_CREDENTIAL_KIND,
+  loadRefreshCandidates,
+  readSafeUpstreamError,
+  type RefreshCandidate,
+} from './codex-refresh-lock-candidates';
 import {
   type CodexRefreshEnv,
   DEFAULT_CLIENT_ID,
@@ -184,13 +188,18 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     credentialReferences: string[],
     signal: AbortSignal
   ): Promise<Response> {
+    // The lock deadline may have passed while this request waited for the mutex.
+    // Nothing has been consumed yet, so stop here (the caller gets 504).
+    throwIfLockExpired(signal);
+
     // Derive encryption key from DO env (not from caller).
     const encryptionKey = getCredentialEncryptionKey(this.env);
 
-    const { candidates, readFailure } = await this.loadCandidates(
+    const { candidates, readFailure } = await loadRefreshCandidates(
+      this.env.DATABASE,
+      encryptionKey,
       userId,
-      credentialReferences,
-      encryptionKey
+      credentialReferences
     );
     if (candidates.length === 0) {
       if (readFailure) {
@@ -237,13 +246,23 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
         });
       }
 
+      // Short-lived tokens without proof of possession only when the run recorded
+      // exactly one credential and it is still readable: if a second recorded one
+      // was dropped (inactive, unreadable), the caller may be on that account.
+      // And only for a cc credential: a legacy row can be rewritten in place with
+      // another account's secret (Replace, Make default), so its current tokens
+      // may not belong to the account this run started with.
       const [only] = candidates;
-      if (candidates.length !== 1 || !only) {
-        // No proof of which account the caller is on, and more than one account
-        // this workspace could be using: hand out nothing.
-        log.warn('codex_refresh.stale_token_ambiguous', {
+      if (
+        credentialReferences.length !== 1 ||
+        candidates.length !== 1 ||
+        !only ||
+        only.credential.table !== 'cc_credentials'
+      ) {
+        log.warn('codex_refresh.stale_token_no_tokens', {
           userId,
           candidateCount: candidates.length,
+          referenceCount: credentialReferences.length,
         });
         return new Response(JSON.stringify({ error: 'refresh_token_invalidated' }), {
           status: 401,
@@ -294,6 +313,9 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
       );
     }
 
+    // Last point before the one-time-use token is spent at OpenAI.
+    throwIfLockExpired(signal);
+
     // Token matches — forward to OpenAI for a real refresh.
     const upstreamUrl = this.env.CODEX_REFRESH_UPSTREAM_URL || DEFAULT_UPSTREAM_URL;
     const upstreamTimeout =
@@ -334,52 +356,9 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     }
 
     if (!upstreamResponse.ok) {
-      // Parse and filter upstream error — only forward safe fields to prevent
-      // information leakage (e.g., if OpenAI echoes back the refresh token).
-      // OpenAI returns errors in TWO shapes: the flat OAuth2 form
-      // `{ error, error_description }` and a nested form
-      // `{ error: { code, message, type } }`. Parse both so the structured
-      // diagnostic captures the rejection reason (e.g. `refresh_token_invalidated`,
-      // which means the stored token was revoked at OpenAI — log out / re-login /
-      // a sibling refresh consumed it — versus a transient upstream fault).
-      const safeError: Record<string, string> = { error: 'upstream_error' };
-      let upstreamErrorCode: string | null = null;
-      let upstreamErrorMessage: string | null = null;
+      const { safeError, upstreamErrorCode, upstreamErrorMessage } =
+        await readSafeUpstreamError(upstreamResponse);
       const upstreamContentType = upstreamResponse.headers.get('Content-Type');
-      let rawBody = '';
-      try {
-        rawBody = await upstreamResponse.text();
-      } catch {
-        // Body unreadable — leave rawBody empty.
-      }
-      try {
-        const parsedRaw = JSON.parse(rawBody) as unknown;
-        const parsed = maybeJsonRecord(parsedRaw);
-        if (parsed && typeof parsed.error === 'string') {
-          // Flat OAuth2 form.
-          safeError.error = parsed.error;
-          upstreamErrorCode = parsed.error;
-          if (typeof parsed.error_description === 'string') {
-            safeError.error_description = parsed.error_description;
-            upstreamErrorMessage = parsed.error_description;
-          }
-        } else if (parsed && parsed.error && typeof parsed.error === 'object') {
-          // OpenAI nested form: { error: { code, message, type } }.
-          const nested = maybeJsonRecord(parsed.error);
-          if (nested) {
-            if (typeof nested.code === 'string') {
-              safeError.error = nested.code;
-              upstreamErrorCode = nested.code;
-            }
-            if (typeof nested.message === 'string') {
-              safeError.error_description = nested.message;
-              upstreamErrorMessage = nested.message;
-            }
-          }
-        }
-      } catch {
-        // Non-JSON upstream response — use generic error.
-      }
       // Diagnostic: log OpenAI's structured rejection reason so we can
       // distinguish a revoked/expired/consumed refresh_token (e.g.
       // `refresh_token_invalidated`) from a transient upstream fault or an
@@ -399,10 +378,9 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
       });
     }
 
-    // Check lock-level abort before writing to DB.
-    if (signal.aborted) {
-      throw new DOMException('Lock timeout', 'AbortError');
-    }
+    // OpenAI has rotated the token: from here the successor is persisted even if
+    // the lock deadline passed meanwhile. Discarding it would leave storage holding
+    // a consumed token that no later refresh could use.
 
     // Parse new tokens from OpenAI response.
     const newTokens = await readResponseJson(
@@ -419,16 +397,6 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
         JSON.stringify({ error: 'upstream_unexpected_scope', message: scopeResult.reason }),
         { status: 502, headers: { 'Content-Type': 'application/json' } }
       );
-    }
-
-    // Before updating tokens, record the old refresh_token in the grace window
-    // so concurrent sessions holding it can still refresh successfully.
-    if (
-      storedRefreshToken &&
-      typeof newTokens.refresh_token === 'string' &&
-      newTokens.refresh_token !== storedRefreshToken
-    ) {
-      await this.recordRotatedToken(storedRefreshToken, credential.reference);
     }
 
     // Update the stored auth.json with new tokens.
@@ -458,6 +426,22 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
       next: { encryptedToken: ciphertext, iv },
     });
     if (write.applied) {
+      // Concurrent sessions still holding the old refresh token get this successor
+      // through the grace path. The entry names every reference that now holds the
+      // successor (the row and its mirrors) and the exact generation written, so it
+      // stops applying once that row is replaced or rotated again. A lost CAS records
+      // nothing: storage does not hold this successor.
+      if (
+        storedRefreshToken &&
+        typeof newTokens.refresh_token === 'string' &&
+        newTokens.refresh_token !== storedRefreshToken
+      ) {
+        await this.recordRotatedToken(
+          storedRefreshToken,
+          [credential.reference, ...write.mirroredReferences],
+          await credentialGenerationFingerprint(ciphertext, iv)
+        );
+      }
       log.info('codex_refresh.rotation_stored', {
         userId,
         credentialReference: credential.reference,
@@ -597,21 +581,24 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
    */
   private async recordRotatedToken(
     oldRefreshToken: string,
-    credentialReference: string
+    credentialReferences: string[],
+    successorGeneration: string
   ): Promise<void> {
     const hash = await this.hashToken(oldRefreshToken);
     const now = Date.now();
     const graceWindowMs = this.getGraceWindowMs();
     const entries = await this.getRotatedTokenEntries();
 
-    // Prune expired entries and add the new one. The cap applies per credential, so
-    // rotations of one pinned account never evict another account's grace entry;
-    // across credentials the list stays bounded by the grace window.
-    const live = entries.filter((e) => now - e.rotatedAt < graceWindowMs);
-    const sameCredential = live.filter((e) => e.credentialReference === credentialReference);
-    const kept = new Set(sameCredential.slice(-(MAX_ROTATED_TOKEN_ENTRIES - 1)));
-    const fresh = live.filter((e) => e.credentialReference !== credentialReference || kept.has(e));
-    fresh.push({ tokenHash: hash, rotatedAt: now, credentialReference });
+    // Prune expired entries, then cap per credential so rotations of one pinned
+    // account never evict another account's grace entry; across credentials the
+    // list stays bounded by the grace window.
+    let fresh = entries.filter((e) => now - e.rotatedAt < graceWindowMs);
+    for (const credentialReference of credentialReferences) {
+      const same = fresh.filter((e) => e.credentialReference === credentialReference);
+      const kept = new Set(same.slice(-(MAX_ROTATED_TOKEN_ENTRIES - 1)));
+      fresh = fresh.filter((e) => e.credentialReference !== credentialReference || kept.has(e));
+      fresh.push({ tokenHash: hash, rotatedAt: now, credentialReference, successorGeneration });
+    }
 
     await this.ctx.storage.put('rotated-tokens', fresh);
   }
@@ -646,67 +633,6 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     );
   }
 
-  /**
-   * Read every candidate credential, skipping rows that are gone, inactive, or
-   * unreadable. An inactive candidate is never replaced by another credential
-   * (rule 28): a deactivated pin forces re-auth instead of falling back to the
-   * user's default account.
-   */
-  private async loadCandidates(
-    userId: string,
-    credentialReferences: string[],
-    encryptionKey: string
-  ): Promise<{ candidates: RefreshCandidate[]; readFailure: string | null }> {
-    let readFailure: string | null = null;
-    const loaded = await Promise.all(
-      credentialReferences.map(async (reference): Promise<RefreshCandidate | null> => {
-        const credential = await loadRunAgentCredential(this.env.DATABASE, {
-          userId,
-          reference,
-          agentType: CODEX_AGENT_TYPE,
-          credentialKind: CODEX_CREDENTIAL_KIND,
-        });
-        if (!credential) {
-          log.warn('codex_refresh.credential_not_found', {
-            userId,
-            credentialReference: reference,
-          });
-          return null;
-        }
-        if (!credential.isActive) {
-          log.warn('codex_refresh.inactive_credential_no_fallback', {
-            userId,
-            credentialReference: reference,
-          });
-          return null;
-        }
-        let decrypted: string;
-        try {
-          decrypted = await decrypt(credential.encryptedToken, credential.iv, encryptionKey);
-        } catch {
-          readFailure ??= 'Failed to decrypt stored credential';
-          log.error('codex_refresh.credential_decrypt_failed', {
-            userId,
-            credentialReference: reference,
-          });
-          return null;
-        }
-        const parsed = parseCodexAuth(decrypted);
-        if (!parsed) {
-          readFailure ??= 'Stored credential is not valid JSON';
-          log.error('codex_refresh.credential_not_json', {
-            userId,
-            credentialReference: reference,
-          });
-          return null;
-        }
-        return { credential, auth: parsed.auth, identity: parsed.identity };
-      })
-    );
-    const candidates = loaded.filter((c): c is RefreshCandidate => c !== null);
-    return { candidates, readFailure };
-  }
-
   private async findGraceCandidate(
     refreshToken: string,
     candidates: RefreshCandidate[],
@@ -716,17 +642,29 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     if (entries.length === 0) return null;
     const hash = await this.hashToken(refreshToken);
     const now = Date.now();
-    const hit = entries.find((e) => e.tokenHash === hash && now - e.rotatedAt < graceWindowMs);
-    if (!hit?.credentialReference) return null;
-    return candidates.find((c) => c.credential.reference === hit.credentialReference) ?? null;
+    for (const entry of entries) {
+      if (entry.tokenHash !== hash || now - entry.rotatedAt >= graceWindowMs) continue;
+      if (!entry.credentialReference || !entry.successorGeneration) continue;
+      const candidate = candidates.find(
+        (c) => c.credential.reference === entry.credentialReference
+      );
+      // The row must still hold exactly the generation this rotation wrote: a row
+      // replaced with another account, or rotated again since, does not hand over
+      // its current tokens to the holder of an old token.
+      if (
+        candidate &&
+        (await credentialGenerationFingerprint(
+          candidate.credential.encryptedToken,
+          candidate.credential.iv
+        )) === entry.successorGeneration
+      ) {
+        return candidate;
+      }
+    }
+    return null;
   }
 }
 
-const CODEX_AGENT_TYPE = 'openai-codex';
-const CODEX_CREDENTIAL_KIND = 'oauth-token';
-
-interface RefreshCandidate {
-  credential: RunAgentCredential;
-  auth: Record<string, unknown>;
-  identity: CodexAuthIdentity;
+function throwIfLockExpired(signal: AbortSignal): void {
+  if (signal.aborted) throw new DOMException('Lock timeout', 'AbortError');
 }
