@@ -92,6 +92,7 @@ function makeProfile(seed: {
 
 const OPUS = { agentType: 'claude-code', model: 'claude-opus-5-5', effort: 'high' };
 const LONG_NAME = `Overnight-Migration-Reviewer-With-An-Unbroken-Name-${'x'.repeat(80)}`;
+const URL_NAME = `https://example.com/${'very-long-path-segment-'.repeat(6)}reviewer`;
 
 const PROFILES = [
   makeProfile({ id: 'p-opus', name: 'Opus 5.5 Chat', ...OPUS }),
@@ -111,6 +112,7 @@ const PROFILES = [
     model: 'claude-fable-5-1',
   }),
   makeProfile({ id: 'p-long', name: LONG_NAME, ...OPUS, taskMode: 'task' }),
+  makeProfile({ id: 'p-url', name: URL_NAME, ...OPUS }),
   makeProfile({
     id: 'p-sol',
     name: 'Backend Implementation',

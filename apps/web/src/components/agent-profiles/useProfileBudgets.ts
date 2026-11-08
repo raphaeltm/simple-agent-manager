@@ -20,9 +20,11 @@ export type ProfileBudget =
 /** Null while the account queries (and my profile pins) are still loading. */
 export function useProfileBudgets(
   profiles: readonly Pick<AgentProfile, 'id' | 'agentType' | 'projectId'>[],
-  options?: { enabled?: boolean }
+  /** `projectId`: the project the run happens in, for profiles not tied to one. */
+  options?: { enabled?: boolean; projectId?: string }
 ): ReadonlyMap<string, ProfileBudget> | null {
   const { model, snapshot, profilePinsSettled } = useAccountsData({ enabled: options?.enabled });
+  const runProjectId = options?.projectId;
 
   return useMemo(() => {
     // Until my pins load, a pinned profile would show my usual account by mistake.
@@ -37,7 +39,7 @@ export function useProfileBudgets(
       const { outcome } = explainProfileAccount(snapshot, group.accounts, {
         profileId: profile.id,
         agentType: profile.agentType,
-        projectId: profile.projectId,
+        projectId: profile.projectId ?? runProjectId ?? null,
       });
       switch (outcome.kind) {
         case 'account':
@@ -55,5 +57,5 @@ export function useProfileBudgets(
       }
     }
     return budgets;
-  }, [model, snapshot, profilePinsSettled, profiles]);
+  }, [model, snapshot, profilePinsSettled, profiles, runProjectId]);
 }

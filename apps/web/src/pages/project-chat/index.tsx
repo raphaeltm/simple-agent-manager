@@ -230,7 +230,11 @@ export function ProjectChat() {
 
   // Usage left on each profile's account, for the new-chat picker only: an open chat
   // makes none of the account requests.
-  const profileUsages = useProfileUsages(state.agentProfiles, state.showNewChatInput);
+  const profileUsages = useProfileUsages(
+    state.agentProfiles,
+    state.projectId,
+    state.showNewChatInput
+  );
 
   // A deep link names its session, so the conversation does not wait for the sidebar's
   // session list: its transcript loads (or was prefetched) on its own. Only the bare chat

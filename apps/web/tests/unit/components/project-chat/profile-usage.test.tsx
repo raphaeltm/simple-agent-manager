@@ -128,6 +128,28 @@ describe('profileUsage', () => {
     expect(profileUsage(OUT, NOW)).toMatchObject({ state: 'out', left: 0, resetIn: '2h 10m' });
   });
 
+  it('is back only when every refused window has reset', () => {
+    const both = account('both', 'Both', [
+      window('claude.five_hour', 100, 'rejected', HOUR),
+      window('claude.seven_day', 100, 'rejected', 30 * HOUR),
+    ]);
+    expect(profileUsage(both, NOW)).toMatchObject({ state: 'out', resetIn: '1d 6h' });
+    const unknown = account('unknown', 'Unknown', [
+      window('claude.five_hour', 100, 'rejected', HOUR),
+      window('claude.seven_day', 100, 'rejected', null),
+    ]);
+    expect(usageNotice(profileUsage(unknown, NOW))).toBe('Out for now');
+  });
+
+  it('takes the countdown from the window the percentage is measured on', () => {
+    // The provider warns early on the week; the 5h window is fuller and stops it first.
+    const early = account('early', 'Early', [
+      window('claude.five_hour', 80, 'ok', HOUR),
+      window('claude.seven_day', 60, 'warning', 72 * HOUR),
+    ]);
+    expect(profileUsage(early, NOW)).toMatchObject({ state: 'low', left: 20, resetIn: '1h' });
+  });
+
   it('counts a window whose reset passed since its sample as fresh', () => {
     const elapsed = account('old', 'Old', [window('claude.five_hour', 100, 'rejected', -MIN)]);
     expect(profileUsage(elapsed, NOW)).toMatchObject({ state: 'ok', left: 100 });
@@ -196,6 +218,11 @@ describe('roomierProfile', () => {
     // Control: the same profile on a different account is offered.
     shared.set('twin', profileUsage(ROOMY, NOW));
     expect(roomierProfile(opus, candidates, (id) => shared.get(id))?.profile.id).toBe('twin');
+  });
+
+  it('does not offer a profile that builds and opens PRs in place of a chat one', () => {
+    const candidates = [opus, profile('claudiii', { taskMode: 'task' })];
+    expect(roomierProfile(opus, candidates, usageFor)).toBeNull();
   });
 
   it('offers nothing when no other account has room for that model', () => {

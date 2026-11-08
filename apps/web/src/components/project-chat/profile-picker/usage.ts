@@ -16,6 +16,7 @@ import { formatMsSpan } from '../../../lib/time-utils';
 import { profileHeadroom } from '../../agent-profiles/ProfileUsageStrip';
 import { type ProfileBudget, useProfileBudgets } from '../../agent-profiles/useProfileBudgets';
 import { LEVEL_STYLES } from '../../credential-limits/credential-limit-format';
+import { isBuildProfile } from './model';
 
 export type ProfileUsageState = 'ok' | 'low' | 'out' | 'unknown' | 'platform' | 'none' | 'paused';
 
@@ -43,19 +44,28 @@ export function profileUsage(budget: ProfileBudget | undefined, now: number): Pr
 
   const left = profileHeadroom(budget, now);
   if (left === null) return { ...quiet, state: 'unknown', accountLabel: budget.label };
-  // The window that stops the profile first: the worst level, then the fullest.
   const windows = credentialLimitSummaryAsOf(budget.usage, now).windows;
+  // State and colour follow the worst level (a provider can warn before a window fills).
   const level = worstCredentialLimitLevel(windows.map((window) => window.level));
-  const binding = windows
-    .filter((window) => window.level === level)
-    .reduce<(typeof windows)[number] | undefined>(
-      (fullest, window) =>
-        !fullest || (window.utilizationPercent ?? -1) > (fullest.utilizationPercent ?? -1)
+  // The countdown must describe the number shown. Out: back only when every refused
+  // window has reset, so the latest of them (unknown if any is unknown). Otherwise: the
+  // fullest window, which is the one `left` is measured on.
+  const refused = windows.filter((window) => window.level === 'rejected');
+  let resetsAt: number | null;
+  if (left <= 0 && refused.length > 0) {
+    resetsAt = refused.some((window) => window.resetsAt === null)
+      ? null
+      : Math.max(...refused.map((window) => window.resetsAt ?? 0));
+  } else {
+    const fullest = windows.reduce<(typeof windows)[number] | undefined>(
+      (best, window) =>
+        !best || (window.utilizationPercent ?? -1) > (best.utilizationPercent ?? -1)
           ? window
-          : fullest,
+          : best,
       undefined
     );
-  const resetsAt = binding?.resetsAt ?? null;
+    resetsAt = fullest?.resetsAt ?? null;
+  }
   return {
     state: left <= 0 ? 'out' : level === 'ok' ? 'ok' : 'low',
     left,
@@ -96,8 +106,8 @@ export function usageSpoken(usage: ProfileUsage | null | undefined): string | nu
 }
 
 /**
- * Another visible profile that runs the same agent and model on a different account
- * with room, so switching changes only whose limits pay for the chat.
+ * Another visible profile that runs the same agent and model in the same mode (chat or
+ * build) on a different account with room, so switching changes only whose limits pay.
  */
 export function roomierProfile(
   selected: AgentProfile,
@@ -109,6 +119,8 @@ export function roomierProfile(
   for (const profile of candidates) {
     if (profile.id === selected.id) continue;
     if (profile.agentType !== selected.agentType || profile.model !== selected.model) continue;
+    // A chat profile is not a stand-in for one that builds and opens PRs, or the reverse.
+    if (isBuildProfile(profile) !== isBuildProfile(selected)) continue;
     const usage = usageFor(profile.id);
     if (usage?.state !== 'ok' || usage.left === null) continue;
     if (usage.accountKey === mine?.accountKey) continue;
@@ -123,9 +135,12 @@ export function roomierProfile(
  */
 export function useProfileUsages(
   profiles: readonly AgentProfile[],
+  projectId: string,
   enabled: boolean
 ): ReadonlyMap<string, ProfileUsage> | null {
-  const budgets = useProfileBudgets(profiles, { enabled });
+  // The chat runs in this project, so a profile shared across projects resolves to this
+  // project's account when it has no pin of its own.
+  const budgets = useProfileBudgets(profiles, { enabled, projectId });
   // Recomputed when a limits poll lands, which also refreshes the reset countdowns.
   return useMemo(() => {
     // Disabled means off screen: cached rows from an earlier visit are not shown either.
