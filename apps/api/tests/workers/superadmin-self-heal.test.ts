@@ -8,11 +8,11 @@
  *   2. The `session.create.after` login hook — extracted from a real `createAuth`
  *      instance and invoked against real D1.
  *
- * The sentinel user `system_anonymous_trials` (status='system', seeded by
+ * The system user `system_anonymous_trials` (`SYSTEM_USER_ID`, status='system', seeded by
  * migration 0043) is the orphan that broke first-user promotion; every scenario
  * asserts it is never mutated and never counted as a "real" user.
  */
-import { TRIAL_ANONYMOUS_USER_ID } from '@simple-agent-manager/shared';
+import { SYSTEM_USER_ID } from '@simple-agent-manager/shared';
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 
@@ -51,7 +51,7 @@ async function resetUsers(): Promise<void> {
      VALUES (?, 'anonymous-trials@simple-agent-manager.internal', 0, 'user', 'system')
      ON CONFLICT(id) DO UPDATE SET role = 'user', status = 'system'`,
   )
-    .bind(TRIAL_ANONYMOUS_USER_ID)
+    .bind(SYSTEM_USER_ID)
     .run();
 }
 
@@ -116,7 +116,7 @@ describe('migration 0062 — guarded superadmin backfill (real D1)', () => {
 
     expect(await getUser('real-1')).toMatchObject({ role: 'superadmin', status: 'active' });
     // Sentinel is never touched.
-    expect(await getUser(TRIAL_ANONYMOUS_USER_ID)).toMatchObject({ role: 'user', status: 'system' });
+    expect(await getUser(SYSTEM_USER_ID)).toMatchObject({ role: 'user', status: 'system' });
   });
 
   it('does nothing when two real users exist (not single-operator)', async () => {
@@ -159,7 +159,7 @@ describe('migration 0062 — guarded superadmin backfill (real D1)', () => {
     // not promote it — there is no real human to heal.
     await env.DATABASE.exec(MIGRATION_UPDATE_SQL);
 
-    expect(await getUser(TRIAL_ANONYMOUS_USER_ID)).toMatchObject({ role: 'user', status: 'system' });
+    expect(await getUser(SYSTEM_USER_ID)).toMatchObject({ role: 'user', status: 'system' });
     const superadmins = await env.DATABASE.prepare(
       `SELECT COUNT(*) AS n FROM users WHERE role = 'superadmin'`,
     ).first<{ n: number }>();
@@ -177,7 +177,7 @@ describe('session.create.after — login-time self-heal (real D1)', () => {
     await hook({ userId: 'real-1' });
 
     expect(await getUser('real-1')).toMatchObject({ role: 'superadmin', status: 'active' });
-    expect(await getUser(TRIAL_ANONYMOUS_USER_ID)).toMatchObject({ role: 'user', status: 'system' });
+    expect(await getUser(SYSTEM_USER_ID)).toMatchObject({ role: 'user', status: 'system' });
   });
 
   it('is idempotent — a second login is a no-op', async () => {
@@ -241,14 +241,15 @@ describe('session.create.after — login-time self-heal (real D1)', () => {
   it('never mutates the sentinel even if its id is passed as the login user', async () => {
     const hook = await getSessionAfterHook();
 
-    await hook({ userId: TRIAL_ANONYMOUS_USER_ID });
+    await hook({ userId: SYSTEM_USER_ID });
 
-    expect(await getUser(TRIAL_ANONYMOUS_USER_ID)).toMatchObject({ role: 'user', status: 'system' });
+    expect(await getUser(SYSTEM_USER_ID)).toMatchObject({ role: 'user', status: 'system' });
   });
 
-  it('honors an env-overridden sentinel id', async () => {
-    // Re-seed: a custom sentinel plus the real user. The default sentinel is
-    // removed so it cannot satisfy the "single operator" guard on its own.
+  it('never counts any status=system row as a real user, whatever its id', async () => {
+    // Re-seed: a differently-named system row plus the real user. The default system user is
+    // removed so only the status guard can keep the other row out of the "single operator"
+    // count. (The retired TRIAL_ANONYMOUS_USER_ID override is ignored.)
     await env.DATABASE.prepare(`DELETE FROM users`).run();
     await env.DATABASE.prepare(
       `INSERT INTO users (id, email, email_verified, role, status)

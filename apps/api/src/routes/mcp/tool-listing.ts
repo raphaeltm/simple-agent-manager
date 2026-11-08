@@ -3,7 +3,7 @@
  * ungrouped tools). Incident tools are listed only to the Operations project, and
  * Operations debugger tools only to the Operations project while `operations.debuggerTools`
  * is not `off`. Tools that always reject a token without a task are hidden from such
- * tokens (direct workspace chats and trials).
+ * tokens (direct workspace chats).
  *
  * This is context hygiene, not a security boundary: each handler re-checks its own access
  * on every call (`incident-tools.ts`, `services/operations-access.ts`).

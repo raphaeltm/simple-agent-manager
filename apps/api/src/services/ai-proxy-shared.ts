@@ -42,7 +42,6 @@ export function buildAIGatewayMetadata(opts: {
   workspaceId: string;
   projectId?: string | null;
   sessionId?: string | null;
-  trialId?: string;
   modelId: string;
   stream: boolean;
   hasTools?: boolean;
@@ -55,7 +54,6 @@ export function buildAIGatewayMetadata(opts: {
     workspaceId: opts.workspaceId,
     projectId: opts.projectId ?? undefined,
     sessionId: opts.sessionId ?? undefined,
-    trialId: opts.trialId ?? undefined,
     modelId: opts.modelId,
     stream: opts.stream,
     hasTools: opts.hasTools ?? false,

@@ -850,7 +850,7 @@ describe('evicted source cleanup through real writers and real SQL', () => {
         chatSessionId: 'chat',
         restoredWorkspaceId: 'target',
       });
-      // A sweep read the row while it was still bound (terminal-node-lifecycle-repair, trial-expire).
+      // A sweep read the row while it was still bound (e.g. terminal-node-lifecycle-repair).
       const stale = (await db().query.workspaces.findFirst({
         where: (w, { eq }) => eq(w.id, 'workspace'),
       }))!;

@@ -1,5 +1,5 @@
 import type { RepoProvider } from '@simple-agent-manager/shared';
-import { ARTIFACTS_DEFAULTS } from '@simple-agent-manager/shared';
+import { ARTIFACTS_DEFAULTS, SYSTEM_INSTALLATION_ID } from '@simple-agent-manager/shared';
 import { and, count, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { type Hono } from 'hono';
@@ -171,8 +171,7 @@ export function registerProjectCreateRoute(crudRoutes: Hono<{ Bindings: Env }>):
           name,
           normalizedName,
           description,
-          installationId:
-            c.env.TRIAL_ANONYMOUS_INSTALLATION_ID ?? 'system_anonymous_trials_installation',
+          installationId: SYSTEM_INSTALLATION_ID,
           repository,
           defaultBranch,
           repoProvider: 'artifacts',
@@ -239,8 +238,7 @@ export function registerProjectCreateRoute(crudRoutes: Hono<{ Bindings: Env }>):
         name,
         normalizedName,
         description,
-        installationId:
-          c.env.TRIAL_ANONYMOUS_INSTALLATION_ID ?? 'system_anonymous_trials_installation',
+        installationId: SYSTEM_INSTALLATION_ID,
         repository: metadata.pathWithNamespace,
         defaultBranch: selectedBranch,
         repoProvider: 'gitlab',

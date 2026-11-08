@@ -34,8 +34,8 @@ export * from './acp-form';
 export * from './acp-interactions';
 export * from './acp-url-eligibility';
 
-// Trial Onboarding (types + Valibot schemas)
-export * from './trial';
+// Well-known internal system rows (system user, placeholder GitHub installation)
+export * from './system-ids';
 
 // Deployment Manifest (Zod schemas + validation)
 export * from './deployment-manifest';

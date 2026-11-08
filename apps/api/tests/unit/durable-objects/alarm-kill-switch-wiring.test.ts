@@ -7,7 +7,6 @@ const alarmSources = [
   'project-data/index.ts',
   'project-orchestrator/index.ts',
   'task-runner/index.ts',
-  'trial-orchestrator/index.ts',
   'diagnosis-runner.ts',
   'credential-setup-session/index.ts',
 ] as const;

@@ -162,7 +162,6 @@ function configureSecretsEnv(
     CF_ACCOUNT_ID: 'cf-account-id-secret',
     DEPLOY_SIGNING_PRIVATE_KEY: 'deploy-signing-private-secret',
     DEPLOY_SIGNING_PUBLIC_KEY: expectedDeployPublic,
-    PULUMI_TRIAL_CLAIM_TOKEN_SECRET: 'trial-claim-secret',
     GH_CLIENT_ID: 'github-client-id',
     GH_CLIENT_SECRET: 'github-client-secret-line-1\ngithub-client-secret-line-2',
     GH_APP_ID: 'github-app-id',

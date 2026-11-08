@@ -32,7 +32,7 @@ type OpenAIProxyCredential = AIProxyCredentialAttribution & {
 export function buildProxyMetadata(
   auth: Pick<
     AIProxyRequestContext,
-    'userId' | 'workspaceId' | 'projectId' | 'chatSessionId' | 'trialId'
+    'userId' | 'workspaceId' | 'projectId' | 'chatSessionId'
   >,
   body: Record<string, unknown>,
   modelId: string
@@ -42,7 +42,6 @@ export function buildProxyMetadata(
     workspaceId: auth.workspaceId,
     projectId: auth.projectId,
     sessionId: auth.chatSessionId,
-    trialId: auth.trialId,
     modelId,
     stream: !!body.stream,
     hasTools: !!body.tools,

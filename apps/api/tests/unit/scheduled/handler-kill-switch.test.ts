@@ -87,12 +87,9 @@ describe('scheduled operational sweep kill switch', () => {
       sweepNames.indexOf('project_data_archive_sharding')
     );
     // Archive sharding copies whole sessions between ProjectData objects when its cadence is
-    // due; it runs after every lifecycle sweep (session_sleep, trial_expire) so that copy budget
+    // due; it runs after every lifecycle sweep (session_sleep) so that copy budget
     // cannot push them back (`.claude/rules/47`). Only the relief preflight runs later.
     expect(sweepNames.indexOf('session_sleep')).toBeLessThan(
-      sweepNames.indexOf('project_data_archive_sharding')
-    );
-    expect(sweepNames.indexOf('trial_expire')).toBeLessThan(
       sweepNames.indexOf('project_data_archive_sharding')
     );
     expect(sweepNames.indexOf('project_data_archive_sharding')).toBe(sweepNames.length - 2);

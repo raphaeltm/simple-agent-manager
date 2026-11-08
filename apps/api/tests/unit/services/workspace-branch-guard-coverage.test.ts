@@ -47,9 +47,6 @@ const ALLOWLIST: Record<string, string> = {
     'The VM workspace_dispatch step only runs after workspace_creation (workspace-steps.ts), whose ' +
     'ensureWorkspaceBookkeeping() runs ensureBranchExistsOnRemote() before the step can advance. The ' +
     'last test in this file pins that the creation step keeps the guard.',
-  'durable-objects/trial-orchestrator/steps.ts':
-    'Trials always provision on the repository default branch (probed from GitHub, TRIAL_FALLBACK_BRANCH ' +
-    'otherwise), so the guard would short-circuit as `skipped` anyway.',
 };
 
 function relativeToSrc(file: string): string {

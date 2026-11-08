@@ -608,23 +608,6 @@ describe('node-pool metadata exemptions preserve real authority detection', () =
     ).not.toEqual([]);
   });
 
-  it('allows deprecated trial vocabulary validation while retaining its catalog fence', () => {
-    const path = 'apps/api/src/durable-objects/trial-orchestrator/steps.ts';
-    expect(
-      authorityFindings(
-        file(
-          path,
-          "function resolveTrialVmSize(env) { return env.TRIAL_VM_SIZE === 'small' ? env.TRIAL_VM_SIZE : fallback; }"
-        )
-      )
-    ).toEqual([]);
-    expect(
-      authorityFindings(
-        file(path, 'function resolveTrialVmSize(env) { return offers[env.TRIAL_VM_SIZE]; }')
-      )
-    ).not.toEqual([]);
-  });
-
   it('allows comparison only when its sole effect records the deprecated task label', () => {
     const path = 'apps/api/src/durable-objects/task-runner/node-provisioning-step.ts';
     const update =

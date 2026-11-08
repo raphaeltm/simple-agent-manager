@@ -17,8 +17,6 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..
 const ALTERNATIVE_VALUES: Readonly<Record<string, string>> = {
   D1_SESSION_MODE: 'disabled',
   HUMAN_INPUT_ESCALATION_FRACTIONS: '0.5',
-  TRIAL_AGENT_TYPE_STAGING: 'claude-code',
-  TRIAL_AGENT_TYPE_PRODUCTION: 'opencode',
   // The lease is floored at the probe timeout plus a margin (35000 by default), above 30000.
   TASK_RECONCILIATION_CANDIDATE_LEASE_MS: '60000',
 };

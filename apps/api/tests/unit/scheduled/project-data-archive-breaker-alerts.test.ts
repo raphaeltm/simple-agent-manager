@@ -115,7 +115,6 @@ function createHarness(overrides: Partial<Env> = {}): Harness {
     DATABASE: createSqliteD1(main),
     OBSERVABILITY_DATABASE: createSqliteD1(observability),
     NOTIFICATION: {},
-    TRIAL_ANONYMOUS_USER_ID: 'system-sentinel',
     PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
     PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
     PROJECT_DATA_ARCHIVE_POISON_AFTER_ATTEMPTS: String(POISON_AFTER_ATTEMPTS),

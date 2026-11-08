@@ -43,7 +43,7 @@ describe('admin settings mutation and outage safety', () => {
     ];
     const revision = await validateAdminSettingsChanges(env, changes);
     await updateAdminSettings(env, {
-      changes: [{ name: 'trials.enabled', value: true }],
+      changes: [{ name: 'operations.stalledTaskClassifierEnabled', value: false }],
       actorUserId: 'other',
     });
     await expect(
@@ -118,7 +118,6 @@ describe('admin settings mutation and outage safety', () => {
       changes: [
         { name: 'operations.cronSweepsEnabled', value: false },
         { name: 'connector.enabled', value: true },
-        { name: 'trials.enabled', value: true },
       ],
     });
     expect(await resolveAdminSetting(env, 'operations.cronSweepsEnabled')).toBe(false);
@@ -130,7 +129,6 @@ describe('admin settings mutation and outage safety', () => {
     vi.advanceTimersByTime(60_001);
     expect(await resolveAdminSetting(env, 'operations.cronSweepsEnabled')).toBe(false);
     expect(await resolveAdminSetting(env, 'connector.enabled')).toBe(false);
-    expect(await resolveAdminSetting(env, 'trials.enabled')).toBe(false);
     await expect(readAdminSettings(env, { fresh: true })).rejects.toThrow(
       'Admin settings are unavailable'
     );

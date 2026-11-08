@@ -230,7 +230,7 @@ describe('admin-costs routes', () => {
     expect(body.period).toBe('current-month');
   });
 
-  it('tracks trial costs separately', async () => {
+  it('counts historical trial-tagged gateway logs in the totals without a trial split', async () => {
     mockFetch.mockResolvedValue(
       makeGatewayResponse([
         makeLogEntry({ cost: 0.05, metadata: { userId: 'user-1', trialId: 'trial-1' } }),
@@ -242,8 +242,9 @@ describe('admin-costs routes', () => {
     const res = await app.request('/api/admin/costs');
     const body = await res.json();
 
-    expect(body.llm.trialCostUsd).toBeCloseTo(0.05);
+    expect(body.llm).not.toHaveProperty('trialCostUsd');
     expect(body.llm.totalCostUsd).toBeCloseTo(0.15);
+    expect(body.llm.totalRequests).toBe(2);
   });
 
   it('uses configurable compute vCPU hour cost', async () => {

@@ -1089,7 +1089,7 @@ export function getApiWorkerVars(
     ANALYTICS_DATASET: analyticsDataset,
     // Marketing Pages project — used when the wildcard Worker route intercepts www.*
     WWW_PAGES_PROJECT_NAME: `${DEPLOYMENT_CONFIG.prefix}-www`,
-    // Deployment environment — used by trial runner to choose agent type + model
+    // Deployment environment name (staging | production); used for diagnostics and node labels
     ENVIRONMENT: DEPLOYMENT_CONFIG.getEnvironmentFromStack(stack),
     // Artifacts is disabled by default and enabled only with the generated binding.
     ARTIFACTS_ENABLED: includeArtifactsBinding ? 'true' : 'false',

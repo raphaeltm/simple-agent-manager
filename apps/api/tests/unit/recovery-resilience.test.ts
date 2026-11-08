@@ -226,7 +226,6 @@ describe('stuck-tasks DO health checks (TDF-7)', () => {
       'recoverStuckTasks(env)',
       'runNodeCleanupSweep(env)',
       'runCronTriggerSweep(env)',
-      'runTrialExpireSweep(env)',
       'runObservabilityPurge(env)',
     ]) {
       const idx = sweepBody.indexOf(sweepFn);

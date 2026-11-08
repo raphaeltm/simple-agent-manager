@@ -62,8 +62,7 @@ export async function handleUpdateTaskStatus(
   if (
     !tokenData.taskId ||
     tokenData.contextType === 'conversation' ||
-    tokenData.contextType === 'direct-workspace' ||
-    tokenData.contextType === 'trial'
+    tokenData.contextType === 'direct-workspace'
   ) {
     await recordMcpActivityEvent(env, tokenData, {
       eventType: `${tokenData.contextType ?? 'session'}.progress`,

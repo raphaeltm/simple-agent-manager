@@ -93,9 +93,6 @@ import {
   resolveArchiveShardCount,
 } from '../../../src/services/project-data-archive-routing';
 import { resolveProjectEventSourceOutboxConfig } from '../../../src/services/project-event-source-outbox-contract';
-import { resolveMonthlyCap, resolveWorkspaceTtlMs } from '../../../src/services/trial/helpers';
-import { resolveTrialsEnabledKvKey } from '../../../src/services/trial/kill-switch';
-import { resolveTrialRunnerConfig } from '../../../src/services/trial/trial-runner';
 import { getVmAdmissionConfig } from '../../../src/services/vm-admission-control-types';
 import { errorReportCloudInitVariables } from '../../../src/services/vm-error-report-config';
 import {
@@ -127,7 +124,7 @@ const API = 'apps/api/src';
 
 const READ_PATHS: readonly ReadPath[] = [
   {
-    label: 'shared operational and trial settings resolver',
+    label: 'shared operational settings resolver',
     sources: [
       `${API}/services/admin-settings-resolution.ts`,
       `${API}/services/admin-settings-cache.ts`,
@@ -139,11 +136,10 @@ const READ_PATHS: readonly ReadPath[] = [
         // A persisted legacy disable under the default keys makes key overrides observable.
         await fixture.env.KV.put('control-loops:cron-enabled', 'false');
         await fixture.env.KV.put('control-loops:alarms-enabled', 'false');
-        await fixture.env.KV.put('trials:enabled', 'true');
         const view = await readAdminSettings(fixture.env, { fresh: true });
         return {
           controls: view.settings
-            .filter((setting) => setting.category === 'Operations' || setting.category === 'Trials')
+            .filter((setting) => setting.category === 'Operations')
             .map(({ name, value }) => ({ name, value })),
           cacheMs: adminSettingCacheMs(fixture.env, 'operations.cronSweepsEnabled'),
         };
@@ -381,21 +377,6 @@ const READ_PATHS: readonly ReadPath[] = [
     label: 'webhook trigger config',
     sources: [`${API}/services/webhook-trigger-config.ts`],
     read: (env) => [areWebhookTriggersEnabled(asEnv(env)), getWebhookTriggerLimits(asEnv(env))],
-  },
-  {
-    label: 'trial config',
-    sources: [
-      `${API}/services/trial/helpers.ts`,
-      `${API}/services/trial/kill-switch.ts`,
-      `${API}/services/trial/trial-runner.ts`,
-    ],
-    read: (env) => [
-      resolveMonthlyCap(asEnv(env)),
-      resolveWorkspaceTtlMs(asEnv(env)),
-      resolveTrialsEnabledKvKey(asEnv(env)),
-      resolveTrialRunnerConfig(asEnv({ ...env, ENVIRONMENT: 'staging' })),
-      resolveTrialRunnerConfig(asEnv({ ...env, ENVIRONMENT: 'production' })),
-    ],
   },
   {
     label: 'project event limits',

@@ -25,10 +25,6 @@ vi.mock('../../../src/lib/logger', async (importOriginal) => {
   };
 });
 
-vi.mock('../../../src/services/trial/oauth-hook', () => ({
-  maybeAttachTrialClaimCookie: vi.fn(async (_env, _request, response) => response),
-}));
-
 import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
 import { authRoutes } from '../../../src/routes/auth';

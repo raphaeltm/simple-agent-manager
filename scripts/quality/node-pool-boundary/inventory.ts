@@ -40,9 +40,9 @@ export interface AllocationEntrypointInventoryEntry {
   owner: string;
   entrypoint: AllocationEntrypointCall;
   /** Which control plane drives this callsite. */
-  scope: 'task-runner' | 'route' | 'service' | 'trial-orchestrator' | 'node-lifecycle';
+  scope: 'task-runner' | 'route' | 'service' | 'node-lifecycle';
   /** What the allocated capacity is for. */
-  role: 'workspace' | 'deployment' | 'trial' | 'recovery-relay' | 'instant' | 'metering';
+  role: 'workspace' | 'deployment' | 'recovery-relay' | 'instant' | 'metering';
   /** The admission/authorization actually observed at this callsite. */
   admission: string;
   status: AllocationEntrypointStatus;

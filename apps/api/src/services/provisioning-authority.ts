@@ -38,13 +38,6 @@ interface DeploymentProvisioningAuthorityInput {
   releaseId?: string;
 }
 
-interface TrialProvisioningAuthorityInput {
-  trialId: string;
-  projectId: string;
-  userId: string;
-  nowMs?: number;
-}
-
 interface RelayProvisioningAuthorityInput {
   userId: string;
   projectId: string | null;
@@ -223,34 +216,6 @@ export async function assertDeploymentProvisioningAuthority(
       input.providerInstanceArchitecture,
     ],
     'Deployment provisioning authority is no longer current'
-  );
-}
-
-export async function assertTrialProvisioningAuthority(
-  env: Env,
-  input: TrialProvisioningAuthorityInput
-): Promise<void> {
-  await requireAuthority(
-    env,
-    `SELECT 1 AS ok
-       FROM trials t
-       JOIN projects p
-         ON p.id = t.project_id
-        AND p.user_id = ?
-       JOIN project_members pm
-         ON pm.project_id = p.id
-         AND pm.user_id = ?
-         AND pm.status = 'active'
-         AND pm.removed_at IS NULL
-         AND ${projectMemberCapabilitySql('workspace:write')}
-      WHERE t.id = ?
-        AND t.project_id = ?
-        AND t.status = 'pending'
-        AND t.claimed_by_user_id IS NULL
-        AND t.expires_at > ?
-      LIMIT 1`,
-    [input.userId, input.userId, input.trialId, input.projectId, input.nowMs ?? Date.now()],
-    'Trial provisioning authority is no longer current'
   );
 }
 

@@ -73,7 +73,6 @@ export {
   jwtPrivateKey,
   jwtPublicKey,
   previewSigningKey,
-  trialClaimTokenSecret,
   vapidPrivateKeyPem,
 } from './resources/secrets';
 

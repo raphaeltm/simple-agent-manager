@@ -34,7 +34,7 @@ import { buildInstructionIdeaSlice, type InstructionIdeaContext } from './instru
 
 export { handleRequestHumanInput } from './human-input-tool';
 
-type InstructionContextType = 'task' | 'conversation' | 'trial' | 'direct-workspace';
+type InstructionContextType = 'task' | 'conversation' | 'direct-workspace';
 
 interface ResolvedInstructionContext {
   type: InstructionContextType;

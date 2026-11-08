@@ -72,7 +72,6 @@ interface PassthroughAuthResult {
   workspaceId: string;
   projectId: string | null;
   chatSessionId?: string | null;
-  trialId?: string;
   agentType?: string | null;
   agentSessionId?: string | null;
   runtimeRows?: PreloadedRuntimeRows;

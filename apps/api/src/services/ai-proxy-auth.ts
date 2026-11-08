@@ -1,6 +1,6 @@
 /**
  * AI proxy auth: verify a workspace callback token, resolve the workspace, its
- * running agent session and trial, and record which credential served the call.
+ * running agent session, and record which credential served the call.
  * Re-exported from `ai-proxy-shared.ts`, so callers keep importing from there.
  */
 import type { AgentCredentialScope } from '@simple-agent-manager/shared';
@@ -22,7 +22,6 @@ export interface AIProxyAuthResult {
   userId: string;
   projectId: string | null;
   chatSessionId?: string | null;
-  trialId?: string;
   agentType?: string | null;
   agentSessionId?: string | null;
   /**
@@ -141,23 +140,11 @@ export async function verifyAIProxyAuth(
 
   if (!agentType) agentType = agentSession?.agentType ?? null;
 
-  // Check if this workspace belongs to a trial
-  let trialId: string | undefined;
-  if (workspace.projectId) {
-    const trial = await db
-      .select({ id: schema.trials.id })
-      .from(schema.trials)
-      .where(eq(schema.trials.projectId, workspace.projectId))
-      .get();
-    trialId = trial?.id;
-  }
-
   return {
     workspaceId,
     userId: workspace.userId,
     projectId: workspace.projectId,
     chatSessionId: workspace.chatSessionId,
-    trialId,
     agentType,
     agentSessionId: agentSession?.id ?? null,
     runtimeRows: {

@@ -22,7 +22,7 @@ export type ListedMcpTool = McpToolDefinition & { readonly annotations: McpToolA
 
 /**
  * Ungrouped tools whose handlers always reject a token without a task (`taskId === ''`:
- * direct workspace chats and trials). Hidden from those tokens' `tools/list`; the
+ * direct workspace chats). Hidden from those tokens' `tools/list`; the
  * handlers still enforce the check. Groups declare this with `requiresTask`.
  */
 export const TASK_REQUIRED_TOOLS: ReadonlySet<string> = new Set([

@@ -92,7 +92,7 @@ aiProxyAnthropicRoutes.post('/messages', async (c) => {
     return anthropicError('Invalid or expired API key', 'authentication_error', 401);
   }
 
-  const { userId, workspaceId, projectId, chatSessionId, trialId } = auth;
+  const { userId, workspaceId, projectId, chatSessionId } = auth;
 
   // --- Rate limit: per-user RPM (shared key with OpenAI proxy) ---
   const rpmLimit =
@@ -179,7 +179,6 @@ aiProxyAnthropicRoutes.post('/messages', async (c) => {
     workspaceId,
     projectId,
     sessionId: chatSessionId,
-    trialId,
     modelId,
     stream: isStreaming,
     hasTools: Array.isArray(body.tools) && body.tools.length > 0,
@@ -321,7 +320,7 @@ aiProxyAnthropicRoutes.post('/messages/count_tokens', async (c) => {
     return anthropicError('Invalid or expired API key', 'authentication_error', 401);
   }
 
-  const { userId, workspaceId, projectId, chatSessionId, trialId } = auth;
+  const { userId, workspaceId, projectId, chatSessionId } = auth;
 
   // --- Rate limit: per-user RPM (shared key with messages endpoint) ---
   const rpmLimit =
@@ -405,7 +404,6 @@ aiProxyAnthropicRoutes.post('/messages/count_tokens', async (c) => {
     workspaceId,
     projectId,
     sessionId: chatSessionId,
-    trialId,
     modelId,
     stream: false,
     hasTools: false,

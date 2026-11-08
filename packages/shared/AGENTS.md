@@ -14,7 +14,7 @@ Shared TypeScript types, constants, and utilities used across the entire monorep
 | `src/agents.ts` | Agent type definitions and configuration |
 | `src/model-catalog.ts` | LLM model catalog and metadata |
 | `src/vm-agent-contract.ts` | VM agent HTTP API contract types |
-| `src/trial.ts` | Trial orchestrator types |
+| `src/system-ids.ts` | Well-known ids of migration-seeded system rows |
 
 ## Commands
 

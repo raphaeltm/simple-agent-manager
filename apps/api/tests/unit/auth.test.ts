@@ -1,4 +1,4 @@
-import { TRIAL_ANONYMOUS_USER_ID } from '@simple-agent-manager/shared';
+import { SYSTEM_USER_ID } from '@simple-agent-manager/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { selectPrimaryGitHubEmail } from '../../src/auth';
@@ -218,7 +218,7 @@ describe('BetterAuth configuration', () => {
     expect(capturedOptions?.socialProviders).not.toHaveProperty('google');
   });
 
-  it('promotes the first real user when only the trial sentinel exists', async () => {
+  it('promotes the first real user when only the system user exists', async () => {
     const query = installExistingUsersQuery([]);
     const beforeCreate = await getBeforeCreateHook();
 
@@ -246,8 +246,8 @@ describe('BetterAuth configuration', () => {
     });
   });
 
-  it('uses the shared trial sentinel user id in tests', () => {
-    expect(TRIAL_ANONYMOUS_USER_ID).toBe('system_anonymous_trials');
+  it('uses the migration-seeded system user id', () => {
+    expect(SYSTEM_USER_ID).toBe('system_anonymous_trials');
   });
 });
 
@@ -289,21 +289,23 @@ describe('login-time superadmin self-heal (session.create.after)', () => {
     // No-existing-superadmin guard.
     expect(sql).toContain("u3.role = 'superadmin'");
     // ?1 = current user id (referenced twice), ?2 = sentinel id.
-    expect(bind).toHaveBeenCalledWith('github-user-1', TRIAL_ANONYMOUS_USER_ID);
+    expect(bind).toHaveBeenCalledWith('github-user-1', SYSTEM_USER_ID);
     expect(run).toHaveBeenCalledOnce();
   });
 
-  it('honors an env-overridden sentinel id when binding', async () => {
+  it('ignores the retired TRIAL_ANONYMOUS_USER_ID override and binds the seeded system user', async () => {
+    // The system row id is fixed by migration 0043; an override could only name a row that
+    // does not exist, which would let the real system row count as a "real user".
     const { db, bind } = makeSelfHealDb({ changes: 0 });
     const hook = await getSessionAfterHook({
       ...fakeEnv(),
       DATABASE: db,
       TRIAL_ANONYMOUS_USER_ID: 'custom_sentinel',
-    });
+    } as never);
 
     await hook({ userId: 'github-user-1' });
 
-    expect(bind).toHaveBeenCalledWith('github-user-1', 'custom_sentinel');
+    expect(bind).toHaveBeenCalledWith('github-user-1', SYSTEM_USER_ID);
   });
 
   it('does nothing (no query) when the session userId is null', async () => {
@@ -407,7 +409,7 @@ describe('installer bootstrap owner hooks', () => {
     );
     expect(bind).toHaveBeenCalledWith(
       'github-user-1',
-      TRIAL_ANONYMOUS_USER_ID,
+      SYSTEM_USER_ID,
       'owner@example.com'
     );
   });

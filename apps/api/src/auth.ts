@@ -1,4 +1,4 @@
-import { TRIAL_ANONYMOUS_USER_ID } from '@simple-agent-manager/shared';
+import { SYSTEM_USER_ID } from '@simple-agent-manager/shared';
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import type { GithubProfile, SocialProviders } from 'better-auth/social-providers';
@@ -211,8 +211,8 @@ export function selectPrimaryGitHubEmail(
  */
 export async function createAuth(env: Env) {
   const db = drizzle(env.DATABASE, { schema });
-  // Sentinel id is env-overridable; fall back to the shared constant.
-  const sentinelId = env.TRIAL_ANONYMOUS_USER_ID ?? TRIAL_ANONYMOUS_USER_ID;
+  // The migration-seeded system user is never a "first real human".
+  const sentinelId = SYSTEM_USER_ID;
   // Session bootstrap resolves only login clients through the shared settings cache.
   // App keys, webhook secrets, feedback and infrastructure config cannot block login.
   const platformConfig = await resolveLoginOAuthConfig(env);

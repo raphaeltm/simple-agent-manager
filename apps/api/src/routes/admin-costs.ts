@@ -100,7 +100,6 @@ export interface CostSummaryResponse {
     totalRequests: number;
     totalInputTokens: number;
     totalOutputTokens: number;
-    trialCostUsd: number;
     cachedRequests: number;
     errorRequests: number;
     byModel: CostByModel[];
@@ -142,7 +141,6 @@ adminCostRoutes.get('/', async (c) => {
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
   let totalCostUsd = 0;
-  let trialCostUsd = 0;
   let cachedRequests = 0;
   let errorRequests = 0;
 
@@ -166,7 +164,6 @@ adminCostRoutes.get('/', async (c) => {
 
       if (entry.cached) cachedRequests++;
       if (!entry.success) errorRequests++;
-      if (entry.metadata?.trialId) trialCostUsd += cost;
 
       // By model (simplified — admin costs doesn't need totalTokens/cached/error per model)
       const modelKey = entry.model || 'unknown';
@@ -266,7 +263,6 @@ adminCostRoutes.get('/', async (c) => {
       totalRequests,
       totalInputTokens,
       totalOutputTokens,
-      trialCostUsd,
       cachedRequests,
       errorRequests,
       byModel: Array.from(modelMap.values()).sort((a, b) => b.costUsd - a.costUsd),

@@ -41,14 +41,16 @@ describe('independent admin settings review regressions', () => {
       await updateAdminSettings(env, {
         actorUserId: 'admin',
         expectedRevision: 0,
-        changes: [{ name: 'trials.enabled', value: true }],
+        changes: [{ name: 'operations.stalledTaskClassifierEnabled', value: false }],
       });
       const view = await readAdminSettings(requestEnv, { fresh: true });
       expect(view.revision).toBe(1);
       expect(view.history).toEqual([
-        expect.objectContaining({ revision: 1, name: 'trials.enabled' }),
+        expect.objectContaining({ revision: 1, name: 'operations.stalledTaskClassifierEnabled' }),
       ]);
-      expect(view.settings.find((x) => x.name === 'trials.enabled')?.value).toBe(true);
+      expect(
+        view.settings.find((x) => x.name === 'operations.stalledTaskClassifierEnabled')?.value
+      ).toBe(false);
     } finally {
       stale.sqlite.close();
     }
@@ -203,7 +205,7 @@ describe('independent admin settings review regressions', () => {
   it('a stale enable never clears an emergency brake', async () => {
     await updateAdminSettings(env, {
       actorUserId: 'admin',
-      changes: [{ name: 'trials.enabled', value: false }],
+      changes: [{ name: 'operations.stalledTaskClassifierEnabled', value: false }],
     });
     await env.KV.put('control-loops:cron-enabled', 'false');
     const put = vi.spyOn(env.KV, 'put');

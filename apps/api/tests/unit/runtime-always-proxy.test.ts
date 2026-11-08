@@ -209,10 +209,6 @@ vi.mock('../../src/services/provider-credentials', () => ({
   extractScalewaySecretKey: vi.fn(),
 }));
 
-vi.mock('../../src/services/trial/bridge', () => ({
-  bridgeAgentActivity: vi.fn(),
-}));
-
 vi.mock('../../src/lib/route-helpers', () => ({
   parsePositiveInt: (val: string | undefined, def: number) => {
     if (!val) return def;

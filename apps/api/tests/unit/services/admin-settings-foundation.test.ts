@@ -60,7 +60,8 @@ describe('Phase 1 settings registry', () => {
     expect(workloadLifetime.validate(0)).toBe(false);
     expect(workloadLifetime.validate(601)).toBe(false);
     expect(workloadLifetime.validate(1.5)).toBe(false);
-    expect(findAdminSetting('trials.enabled')?.defaultValue).toBe(false);
+    // The retired anonymous-trial switch is gone; a saved row for it is ignored.
+    expect(findAdminSetting('trials.enabled' as never)).toBeUndefined();
     expect(findAdminSetting('operations.cronSweepsEnabled')?.defaultValue).toBe(true);
     expect(findAdminSetting('operations.doAlarmsEnabled')?.defaultValue).toBe(true);
     expect(findAdminSetting('operations.stalledTaskClassifierEnabled')?.defaultValue).toBe(true);
@@ -121,7 +122,7 @@ describe('Phase 1 settings registry', () => {
 
   it('rejects malformed values without accepting boolean-like strings or unsafe numeric inputs', () => {
     for (const value of ['false', null, 0, [], {}]) {
-      expect(findAdminSetting('trials.enabled')?.validate(value)).toBe(false);
+      expect(findAdminSetting('connector.enabled')?.validate(value)).toBe(false);
     }
     const ttl = findAdminSetting('connector.accessTokenTtlSeconds')!;
     for (const value of [59, 1.5, NaN, Infinity, 2147483648, '3600'])
