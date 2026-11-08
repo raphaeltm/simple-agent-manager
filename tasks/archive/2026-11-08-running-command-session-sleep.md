@@ -32,8 +32,9 @@ Existing managed workspace is on the assigned output branch; preserve startup .c
 - [x] Local specialist reviews; final completion/archival validation follows staging cleanup.
 - [x] Coordinate staging, one small VM, short stale-turn setting, actual runtime test.
 - [x] Restore settings, delete resources; record evidence.
-- [ ] CI, CodeRabbit request/wait, resolve findings, merge, production deploy/basic smoke.
-- [ ] Update and complete idea only after merge; report task completion.
+- [x] CI, CodeRabbit request/wait, resolve findings, and merge.
+- [ ] Production deploy completion and basic smoke.
+- [ ] Final merged-idea update and task completion after deployment verification.
 
 ## Concrete validation hazard found (17:31 UTC)
 
@@ -82,3 +83,9 @@ Completion validator PASS for implementation/verification: research, diff, contr
 ## Final scanner follow-up
 
 Full technical CI/E2E passed on0f4f571493c1be21d3523c5286e505e2c44034b5; the only red check is the coordinator hold. CodeRabbit trusted request42515457739 succeeded19:31:28 and returned rate-limited/no review. Sonar quality gate passed, but inspection of its issue API found two cognitive-complexity findings (17/19 versus15) in the native Go probe. Small test-only helper extractions separate validation orchestration and per-PID parsing without changing behavior or ownership. Native quiet-command/cleanup/recovery tests passed2.817s and the actual native API vertical slice passed7.12s after extraction. Go reviewer approved the diff. Final-head scanner/CI reconciliation follows before approval. Production runtime remains identical to the verified staging deployment.
+
+## Merge and release evidence
+
+Coordinator task01M6SHDRB60F28XPA14C7J9XKZ approved exact headb41dc16f4ac82987d1f8d55fc3f1434efad854f8 in durable eventdfc492e8-426e-47ad-8f2b-ea3fb14697db and explicitly delegated ready/hold release. Closing/reopening refreshed the frozen-label evidence gate without changing the commit. Refreshed CI42519601375 and E2E42519601273 passed, including Specialist Review Evidence. Sonar reported zero open issues. CodeRabbit request/wait completed; readiness/reopen requests were also rate-limited. Immediately before merge, reviews and threads were empty and the approved head was unchanged/mergeable.
+
+PR2585 merged2026-11-08T20:42:44Z as9caf8c0c2848fb58b019a686bcf9283dcb028469. Production deploy waits for main CI42521511417. Deployment completion and basic smoke are pending; this separate draft evidence PR remains for coordinator review, with no direct-to-main commit.
