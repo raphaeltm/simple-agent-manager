@@ -113,33 +113,62 @@ The expected steady-state volume is 0-2.
 
 ## Implementation checklist
 
-- [ ] Extract `LIVE_WAKE_TASK_STATUSES` and an exported claim-lease resolver; the resumer uses them
-- [ ] Sweep service with selection, batch CAS release and push; log every release
-- [ ] Wire the sweep into `scheduled/handler.ts` with isolation and a completion-log field
-- [ ] Admin settings `operations.deadWakeReconcileBatchSize` and `operations.opsAnomalyWakingMinutes`
-- [ ] Split `fleet-ops/anomalies.ts` (494 lines) before adding the class; add `session_wake_stalled`
-- [ ] Update the MCP tool description, playbook and docs (agents.md, admin-settings.md, api.md as needed)
-- [ ] Tests (real SQLite engine, through the real sweep and the real `claimSessionSnapshotRecovery`):
-  - [ ] class A row released; the next user wake claims it again (budget decayed)
-  - [ ] class B row (cancelled task) released
-  - [ ] missing task released
-  - [ ] live-wake control: queued/in-progress task with a stale claim is untouched
-  - [ ] fresh-claim control: a sleeping task inside the lease is untouched
-  - [ ] recently-ended task control: task updated inside the lease is untouched
-  - [ ] CAS: a claim renewed or re-claimed between select and update is untouched
-  - [ ] cf-container rows untouched; batch cap honoured; a second sweep is a no-op
-  - [ ] anomaly class reports an old waking row and skips a fresh one
-  - [ ] discrimination: delete the live-task predicate and the live control goes red
-- [ ] Staging: a real sleep/wake cycle completes; force a dead claim and watch the sweep end it
+- [x] Extract `LIVE_WAKE_TASK_STATUSES` and an exported claim-lease resolver; the resumer uses them
+- [x] Sweep service with selection, batch CAS release and push; log every release
+- [x] Wire the sweep into `scheduled/handler.ts` with isolation and a completion-log field
+- [x] Admin settings `operations.deadWakeReconcileBatchSize` and `operations.opsAnomalyWakingMinutes`
+- [x] Split `fleet-ops/anomalies.ts` (494 lines) before adding the class; add `session_wake_stalled`
+- [x] Update the MCP tool description, playbook and docs (agents.md, admin-settings.md, api.md as needed)
+- [x] Tests (real SQLite engine, through the real sweep and the real `claimSessionSnapshotRecovery`):
+  - [x] class A row released; the next user wake claims it again (budget decayed)
+  - [x] class B row (cancelled task) released
+  - [x] missing task released
+  - [x] live-wake control: queued/in-progress task with a stale claim is untouched
+  - [x] fresh-claim control: a sleeping task inside the lease is untouched
+  - [x] recently-ended task control: task updated inside the lease is untouched
+  - [x] CAS: a claim renewed or re-claimed between select and update is untouched
+  - [x] cf-container rows untouched; batch cap honoured; a second sweep is a no-op
+  - [x] anomaly class reports an old waking row and skips a fresh one
+  - [x] discrimination: delete the live-task predicate and the live control goes red
+- [x] Staging: a real sleep/wake cycle completes; force a dead claim and watch the sweep end it (sweep ended 4 real dead claims; forced claim recovered by the lazy path first, see notes)
 - [ ] Remediation evidence plus Raphaël's approval before merge
 
 ## Acceptance criteria
 
-- [ ] Root cause recorded with evidence (above), and the idea updated
-- [ ] Bounded sweep ends dead claims with a CAS on `recovery_attempt_id` and never touches a live wake
-- [ ] The chat ends `failed` (visible, banner off) with a decaying budget, not stuck `waking`
-- [ ] Ops anomaly class for wakes older than a configurable threshold
+- [x] Root cause recorded with evidence (above), and the idea updated
+- [x] Bounded sweep ends dead claims with a CAS on `recovery_attempt_id` and never touches a live wake
+- [x] The chat ends `failed` (visible, banner off) with a decaying budget, not stuck `waking`
+- [x] Ops anomaly class for wakes older than a configurable threshold
 - [ ] Existing stuck rows remediated with evidence after approval
-- [ ] Tests through the real entry points, including a live control and a discrimination check
-- [ ] Thresholds configurable; I/O budget stated
-- [ ] Staging verified with a real sleep/wake cycle
+- [x] Tests through the real entry points, including a live control and a discrimination check
+- [x] Thresholds configurable; I/O budget stated
+- [x] Staging verified with a real sleep/wake cycle
+
+## Implementation notes
+
+- Review fix: the resumer's lost-race fallback (`claimSessionSnapshotRecovery`) reported `waking` for
+  whatever task the row named, even after the sweep had ended that claim. It now re-claims once.
+  Both race directions are tested with the real resumer.
+- Legacy claims with `project_id` NULL exist on staging; the push is skipped for them.
+- Expired snapshots are purged by `session_snapshot_purge` in the same tick, once their claim ends.
+  That purge skips `waking`, so stuck claims had also been blocking retention. Raphaël was asked to
+  approve this as part of the production remediation.
+- Staging (deploy 42453495012): the deployed sweep ended all 4 pre-existing dead staging claims on
+  its first tick. A fresh class B (task cancelled mid-wake) was reproduced on chat 4d9b2389: the UI
+  showed "Waking and restoring session..." while the task was cancelled.
+
+## Staging evidence (2026-11-08)
+
+- Deploys 42452045297 and 42453495012 (final head d8b5f47fb) succeeded.
+- 06:05Z tick: the deployed sweep ended all 4 pre-existing dead staging claims (tasks failed x2,
+  cancelled with budget spent x1, missing task with NULL project x1). `recovery_failed_at` was set to
+  each task's end time. The two expired snapshots were then purged by `session_snapshot_purge`.
+- Real sleep/wake cycle, chat 9a2124fe: slept 06:33, prompted, wake claimed 06:33:24, restored
+  06:40, and the agent replied "pong" after the wake (screenshot). The sweep ticks at 06:35 and 06:40
+  left the live wake alone.
+- Forced dead claim, chat 4d9b2389: task cancelled 06:35:41 mid-wake. The UI showed "Waking and
+  restoring session..." on a chat whose task was cancelled (the exact symptom). Because a durable
+  prompt was still pending, the lazy resumer re-claimed at 06:46:30, before the sweep was due, and the
+  wake restored at 06:47. The production rows had no pending prompt, which is why they stayed stuck.
+- No `platform_errors` rows for the sweep since deploy. Both chats were slept and their workspaces
+  deleted afterwards.
