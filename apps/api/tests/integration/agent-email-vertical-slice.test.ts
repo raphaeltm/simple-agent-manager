@@ -33,6 +33,7 @@ import {
   agentEmailConfig,
 } from '../../src/services/agent-email/setup-state';
 import { type McpTokenData, storeMcpToken } from '../../src/services/mcp-token';
+import { seedActiveMcpWorkspace } from '../helpers/mcp-route';
 import type { TriggerTaskSubmitter } from '../../src/services/trigger-admission';
 import { createAgentEmailTables, markAgentEmailSetUp } from '../helpers/agent-email-tables';
 import { createAllSchemaTables, createMemoryKv, createSqliteD1 } from '../helpers/sqlite-d1';
@@ -363,6 +364,7 @@ describe('agent email vertical slice', () => {
     app.route('/mcp', mcpRoutes);
     const bearer = `mcp-token-${tokenData.taskId}`;
     await storeMcpToken(env.KV, bearer, tokenData, env);
+    seedActiveMcpWorkspace(sqlite, tokenData);
     const response = await app.request(
       '/mcp',
       {

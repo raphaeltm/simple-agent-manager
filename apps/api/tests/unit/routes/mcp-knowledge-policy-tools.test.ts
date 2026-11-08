@@ -12,6 +12,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as projectDataService from '../../../src/services/project-data';
 import { createUnpublishedStorageSession } from '../../helpers/reliability-storage';
 
+// These tool tests run on a mock D1 that has no workspace/node rows. MCP authentication's
+// workspace-lifecycle gate is exercised against real SQL in
+// tests/unit/services/mcp-token-lifecycle.test.ts; here it reduces to KV token validation.
+vi.mock('../../../src/services/mcp-token-lifecycle', async () => {
+  const { validateMcpToken } = await import('../../../src/services/mcp-token');
+  return {
+    validateActiveWorkspaceMcpToken: (env: { KV: KVNamespace }, token: string) =>
+      validateMcpToken(env.KV, token, env),
+  };
+});
+
 vi.mock('../../../src/middleware/project-auth', () => ({
   requireProjectAccess: vi.fn().mockResolvedValue({ id: 'proj-456' }),
   requireProjectCapability: vi.fn().mockResolvedValue({ id: 'proj-456' }),

@@ -31,7 +31,13 @@ import { resetAgentModelCatalogCacheForTests } from '../../src/services/agent-mo
 import { updateProjectAgentModelSettings } from '../../src/services/agent-models/project-settings';
 import * as agentProfileService from '../../src/services/agent-profiles';
 import * as skillService from '../../src/services/skills';
-import { callMcpTool, createJsonKv, createMcpApp, toolResult } from '../helpers/mcp-route';
+import {
+  callMcpTool,
+  createJsonKv,
+  createMcpApp,
+  seedActiveMcpWorkspace,
+  toolResult,
+} from '../helpers/mcp-route';
 import { createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
 const PROJECT = 'proj-1';
@@ -153,6 +159,7 @@ describe('agent model calls through the MCP route', () => {
         "INSERT INTO workspaces (id, project_id, user_id, node_id, status) VALUES (?, ?, ?, 'node-1', 'running')"
       )
       .run(WORKSPACE, PROJECT, USER);
+    seedActiveMcpWorkspace(sqlite, { workspaceId: WORKSPACE, userId: USER, projectId: PROJECT });
     sqlite
       .prepare(
         "INSERT INTO agent_profiles (id, project_id, user_id, name, agent_type, effort, is_builtin, created_at, updated_at) VALUES (?, ?, ?, 'Builder', 'claude-code', 'auto', 0, datetime('now'), datetime('now'))"

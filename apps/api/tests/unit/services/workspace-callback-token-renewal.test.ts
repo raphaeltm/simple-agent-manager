@@ -275,12 +275,16 @@ describe('renewWorkspaceCallbackToken', () => {
     const legacyNode = await agedToken(NODE, null, HOUR);
 
     const asWorkspaceProof = await rejection(renew(legacyWorkspace, env));
-    expect([asWorkspaceProof.statusCode, asWorkspaceProof.error]).toEqual([403, 'FORBIDDEN']);
+    // An unscoped token is not a SAM-minted credential at all: the verifier rejects it as 401.
+    expect([asWorkspaceProof.statusCode, asWorkspaceProof.error]).toEqual([401, 'UNAUTHORIZED']);
 
     const asNodeProof = await rejection(
       renew(await agedToken(WS, 'workspace', 13 * HOUR), env, legacyNode)
     );
-    expect([asNodeProof.statusCode, asNodeProof.error]).toEqual([403, 'NODE_CALLBACK_FORBIDDEN']);
+    expect([asNodeProof.statusCode, asNodeProof.error]).toEqual([
+      401,
+      'NODE_CALLBACK_UNAUTHORIZED',
+    ]);
   });
 
   it('renews up to the expiry boundary and never past it', async () => {

@@ -60,6 +60,16 @@ export function nodeStatusTerminatesCallbacks(status: string | null | undefined)
   return status != null && NODE_STATUSES_TERMINATING_CALLBACKS.has(status);
 }
 
+/** Workspace-scoped tokens CANNOT be used for node-level endpoints. */
+function rejectNonNodeScope(nodeId: string, tokenIdentity: string | null): never {
+  log.warn('node_auth.rejected_workspace_scoped_token', {
+    nodeId,
+    tokenIdentity,
+    action: 'rejected',
+  });
+  throw errors.forbidden('Insufficient token scope');
+}
+
 export async function verifyNodeCallbackAuth(
   c: Context<{ Bindings: Env }>,
   nodeId: string
@@ -70,16 +80,15 @@ export async function verifyNodeCallbackAuth(
     payload = await verifyCallbackToken(token, c.env, { expectedScope: 'node' });
   } catch (cause) {
     if (!(cause instanceof AppError)) throw cause;
-    if (cause.statusCode === 403) {
-      // Workspace-scoped tokens CANNOT be used for node-level endpoints.
-      log.warn('node_auth.rejected_workspace_scoped_token', { nodeId, action: 'rejected' });
-      throw errors.forbidden('Insufficient token scope');
-    }
+    if (cause.statusCode === 403) rejectNonNodeScope(nodeId, null);
     if (cause.statusCode === 401) {
       throw errors.unauthorized('Invalid callback token');
     }
     throw cause;
   }
+
+  // Defence in depth: the verifier already enforced expectedScope.
+  if (payload.scope !== 'node') rejectNonNodeScope(nodeId, payload.workspace);
 
   if (payload.workspace !== nodeId) {
     throw errors.unauthorized('Callback token does not match node');

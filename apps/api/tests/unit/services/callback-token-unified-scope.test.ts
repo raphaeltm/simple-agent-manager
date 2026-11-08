@@ -63,7 +63,7 @@ describe('verifyCallbackToken — unified scope enforcement (F-010)', () => {
 
     await expect(
       verifyCallbackToken(token, env, { expectedScope: 'workspace' })
-    ).rejects.toThrow(/does not match expected/);
+    ).rejects.toThrow(/Missing token scope claim/);
   });
 
   it('accepts node-scoped token when expectedScope is node', async () => {
@@ -75,17 +75,18 @@ describe('verifyCallbackToken — unified scope enforcement (F-010)', () => {
     expect(result.scope).toBe('node');
   });
 
-  it('preserves legacy behavior — no scope check when expectedScope omitted', async () => {
+  it('rejects a legacy token (no scope) even when expectedScope is omitted', async () => {
     const { verifyCallbackToken } = await import('../../../src/services/jwt');
     const legacyToken = await signTestToken({ type: 'callback', workspace: 'ws-legacy' });
     const env = makeTestEnv();
 
-    const result = await verifyCallbackToken(legacyToken, env);
-    expect(result.scope).toBeUndefined();
-    expect(result.workspace).toBe('ws-legacy');
+    await expect(verifyCallbackToken(legacyToken, env)).rejects.toMatchObject({
+      statusCode: 401,
+      message: 'Missing token scope claim',
+    });
   });
 
-  it('preserves legacy behavior — node token accepted when no expectedScope', async () => {
+  it('accepts a node token when no expectedScope is given', async () => {
     const { verifyCallbackToken } = await import('../../../src/services/jwt');
     const token = await signTestToken({ type: 'callback', workspace: 'node-123', scope: 'node' });
     const env = makeTestEnv();

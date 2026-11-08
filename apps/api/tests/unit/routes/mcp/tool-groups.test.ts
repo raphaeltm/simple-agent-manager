@@ -22,6 +22,17 @@ import { __resetPlatformConfigCacheForTest } from '../../../../src/services/plat
 import { createAdminSettingsEnv } from '../../../helpers/admin-settings-env';
 import { createSchemaTables } from '../../../helpers/sqlite-d1';
 
+// These tool tests run on a mock D1 that has no workspace/node rows. MCP authentication's
+// workspace-lifecycle gate is exercised against real SQL in
+// tests/unit/services/mcp-token-lifecycle.test.ts; here it reduces to KV token validation.
+vi.mock('../../../../src/services/mcp-token-lifecycle', async () => {
+  const { validateMcpToken } = await import('../../../../src/services/mcp-token');
+  return {
+    validateActiveWorkspaceMcpToken: (env: { KV: KVNamespace }, token: string) =>
+      validateMcpToken(env.KV, token, env),
+  };
+});
+
 vi.mock('../../../../src/lib/logger', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../../src/lib/logger')>()),
   log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },

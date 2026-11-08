@@ -1210,7 +1210,8 @@ describe('observability error ingestion pipeline (behavioral)', () => {
       const legacy = await signLegacyNodeCallbackToken(NODE_ID, authEnv);
       const res = await postNodeErrors(legacy);
 
-      expect(res.status).toBe(403);
+      // The verifier refuses unscoped tokens outright: they are not SAM-minted credentials.
+      expect(res.status).toBe(401);
 
       const { errors } = await queryErrors(obsDb, {});
       expect(errors).toHaveLength(0);

@@ -49,6 +49,7 @@ import {
   createJsonKv,
   createMcpApp,
   type McpToolResponse,
+  seedActiveMcpWorkspace,
   storeMcpToken,
   toolResult,
 } from '../helpers/mcp-route';
@@ -155,8 +156,9 @@ beforeEach(async () => {
   edges.executeAction.mockResolvedValue({ status: 'succeeded', message: 'done' });
   edges.sendNotification.mockResolvedValue({ id: 'n1' });
   edges.acceptPromptDelivery.mockResolvedValue({ message: { id: 'd1' } });
+  const main = seed();
   env = {
-    DATABASE: createSqliteD1(seed()),
+    DATABASE: createSqliteD1(main),
     KV: createJsonKv(),
     BASE_DOMAIN: 'example.test',
     PLATFORM_FEEDBACK_PROJECT_ID: OPS_PROJECT,
@@ -171,6 +173,12 @@ beforeEach(async () => {
       projectId: OPS_PROJECT,
       userId: 'admin',
       workspaceId: `ws-${taskId}`,
+    });
+    seedActiveMcpWorkspace(main, {
+      workspaceId: `ws-${taskId}`,
+      userId: 'admin',
+      projectId: OPS_PROJECT,
+      nodeId: NODE_A,
     });
   }
   admin = new Hono<{ Bindings: Env }>();
@@ -273,8 +281,9 @@ describe('request → approve → execute', () => {
   it('records a failed outcome when the target lookup throws after the approval was claimed', async () => {
     const approval = await request('delete_node', NODE_A);
     await decide(approval.id, 'approve');
-    // Fails only the post-claim target read; the claim itself touches another table.
-    main.exec('ALTER TABLE nodes RENAME TO nodes_unavailable');
+    // Fails only the post-claim target read; the claim itself touches another table, and
+    // MCP authentication reads only nodes.id/status (validateActiveWorkspaceMcpToken).
+    main.exec('ALTER TABLE nodes RENAME COLUMN name TO name_unavailable');
 
     const outcome = toolResult<{ result: { status: string; message: string } }>(
       await execute(approval.id, 'delete_node', NODE_A)
