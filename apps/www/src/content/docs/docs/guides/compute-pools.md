@@ -300,9 +300,9 @@ A few things worth knowing:
   the provider/region you already have machines in: Pack concentrates there, Spread moves away.
 - "Projected utilization" means how full a host would be _after_ placing this work, measured on
   its fullest dimension (CPU, memory, or disk).
-- **Before strategy, SAM prefers the existing machine with the shortest setup queue.** Each machine
-  sets up one workspace at a time, so new work waits behind every workspace still being set up
-  there. Among existing machines that already fit, the one with fewer workspaces waiting goes
+- **For agent workspaces, SAM prefers the existing machine with the shortest setup queue before
+  applying strategy.** Each machine sets up one workspace at a time, so new work waits behind
+  every workspace still being set up there. Among existing machines that already fit, the one with fewer workspaces waiting goes
   first; strategy breaks ties. A machine that is busy setting up is still used when it is the only
   one that fits: SAM queues the work there and does not start a new machine just to avoid the
   wait. A location you asked for explicitly still comes before the queue; a default location does
@@ -482,7 +482,7 @@ Putting it together, when you start work SAM:
    offering when the declared reservation fits; workspace placement retains its existing
    compatibility rules.
 4. **Checks that the machine can actually take the work** (see below). Candidates are ordered by
-   setup queue length, then the pool's strategy; the capacity check is re-run atomically when the
+   the pool's strategy (for agent workspaces, setup queue length comes first); the capacity check is re-run atomically when the
    workspace slot is claimed, so two simultaneous requests can never both take the last slot.
    When several requests pick the same machine at once, a request whose machine gained a queued
    setup in the meantime picks again, so a burst spreads over the machines you have.

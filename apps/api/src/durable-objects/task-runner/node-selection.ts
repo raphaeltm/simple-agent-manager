@@ -192,8 +192,8 @@ export async function findNodeWithCapacity(
       poolId: pool.poolId,
       strategy: pool.strategy,
       settings: pool.selectionSettings,
-      location: state.config.vmLocation,
       candidates,
+      compare: (a, b, strategy) => compareReusableHosts(state, a, b, strategy),
     });
     updatePlacementDiagnostics(state, { rollout });
   }

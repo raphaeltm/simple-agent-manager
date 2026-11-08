@@ -51,7 +51,8 @@ export interface RankableReusableHost {
 export function compareReusableHosts(
   state: TaskRunnerState,
   a: RankableReusableHost,
-  b: RankableReusableHost
+  b: RankableReusableHost,
+  strategy: CapacityPoolStrategy = taskPlacementStrategy(state)
 ): number {
   const explicitLocation = state.config.explicitVmLocation !== false;
   const location = compareLocation(state, a, b);
@@ -65,7 +66,7 @@ export function compareReusableHosts(
   return comparePlacementHostsByStrategy(
     a.signals,
     b.signals,
-    taskPlacementStrategy(state),
+    strategy,
     state.config.capacityPoolSelection?.selectionSettings
   );
 }
