@@ -3,13 +3,13 @@
  * (`enabledApis`), the observed-issue store and its expiry, the classifier that decides whether a
  * Google error is the owner's to fix, and the setup that writes `enabledApis` in the first place.
  */
+import { ProviderError } from '@simple-agent-manager/providers';
 import {
   GCP_CLOUD_BILLING_SERVICE,
   GCP_CREDENTIAL_VERSION,
   GCP_REQUIRED_APIS,
   type GcpCredential,
 } from '@simple-agent-manager/shared';
-import { ProviderError } from '@simple-agent-manager/providers';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -75,7 +75,11 @@ describe('listGcpApiIssues', () => {
 
   it('flags Cloud Billing on a credential set up before SAM recorded its APIs', async () => {
     expect(await listGcpApiIssues(env, 'c1', wif(), NOW)).toEqual([
-      { service: GCP_CLOUD_BILLING_SERVICE, label: 'Cloud Billing', reason: 'not_enabled_by_setup' },
+      {
+        service: GCP_CLOUD_BILLING_SERVICE,
+        label: 'Cloud Billing',
+        reason: 'not_enabled_by_setup',
+      },
     ]);
   });
 
@@ -125,27 +129,47 @@ describe('listGcpApiIssues', () => {
         `INSERT INTO platform_settings (key, value, updated_at) VALUES ('gcpCatalog.apiIssueTtlMinutes', '60', ?)`
       )
       .run(NOW.toISOString());
-    await recordGcpApiIssue(env, 'c1', { service: GCP_CLOUD_BILLING_SERVICE, reason: 'api_disabled' }, NOW);
+    await recordGcpApiIssue(
+      env,
+      'c1',
+      { service: GCP_CLOUD_BILLING_SERVICE, reason: 'api_disabled' },
+      NOW
+    );
     const later = new Date(NOW.getTime() + 61 * 60 * 1000);
     expect(await listGcpApiIssues(env, 'c1', serviceAccountKey, later)).toEqual([]);
   });
 
   it('a new report withdraws an earlier confirmation, and a later success clears the report', async () => {
     await confirmGcpApi(env, 'c1', GCP_CLOUD_BILLING_SERVICE);
-    await recordGcpApiIssue(env, 'c1', { service: GCP_CLOUD_BILLING_SERVICE, reason: 'api_disabled' }, NOW);
-    expect(await listGcpApiIssues(env, 'c1', wif(), NOW)).toMatchObject([{ reason: 'api_disabled' }]);
+    await recordGcpApiIssue(
+      env,
+      'c1',
+      { service: GCP_CLOUD_BILLING_SERVICE, reason: 'api_disabled' },
+      NOW
+    );
+    expect(await listGcpApiIssues(env, 'c1', wif(), NOW)).toMatchObject([
+      { reason: 'api_disabled' },
+    ]);
 
     await confirmGcpApi(env, 'c1', GCP_CLOUD_BILLING_SERVICE);
     expect(await listGcpApiIssues(env, 'c1', wif(), NOW)).toEqual([]);
   });
 
   it('treats a malformed stored record as empty rather than failing', async () => {
-    await env.KV.put(`${GCP_API_HEALTH_KV_PREFIX}c1`, JSON.stringify({ issues: [{ service: 1 }], confirmed: 'x' }));
+    await env.KV.put(
+      `${GCP_API_HEALTH_KV_PREFIX}c1`,
+      JSON.stringify({ issues: [{ service: 1 }], confirmed: 'x' })
+    );
     expect(await listGcpApiIssues(env, 'c1', serviceAccountKey, NOW)).toEqual([]);
   });
 
-  it('keeps each credential\'s record separate', async () => {
-    await recordGcpApiIssue(env, 'c1', { service: GCP_CLOUD_BILLING_SERVICE, reason: 'api_disabled' }, NOW);
+  it("keeps each credential's record separate", async () => {
+    await recordGcpApiIssue(
+      env,
+      'c1',
+      { service: GCP_CLOUD_BILLING_SERVICE, reason: 'api_disabled' },
+      NOW
+    );
     expect(await listGcpApiIssues(env, 'c2', serviceAccountKey, NOW)).toEqual([]);
   });
 });
@@ -175,17 +199,25 @@ describe('classifyGcpApiError', () => {
     ).toEqual({ service: GCP_CLOUD_BILLING_SERVICE, reason: 'api_disabled' });
   });
 
-  it.each(['IAM_PERMISSION_DENIED', 'USER_PROJECT_DENIED'])('reads %s as an owner-fixable denial', (reason) => {
-    expect(classifyGcpApiError(gcpError({ reason }), GCP_CLOUD_BILLING_SERVICE)).toEqual({
-      service: GCP_CLOUD_BILLING_SERVICE,
-      reason: 'permission_denied',
-    });
-  });
+  it.each(['IAM_PERMISSION_DENIED', 'USER_PROJECT_DENIED'])(
+    'reads %s as an owner-fixable denial',
+    (reason) => {
+      expect(classifyGcpApiError(gcpError({ reason }), GCP_CLOUD_BILLING_SERVICE)).toEqual({
+        service: GCP_CLOUD_BILLING_SERVICE,
+        reason: 'permission_denied',
+      });
+    }
+  );
 
   it.each([
     ['a scope SAM failed to request', gcpError({ reason: 'ACCESS_TOKEN_SCOPE_INSUFFICIENT' })],
     ['a 403 with no ErrorInfo', gcpError()],
-    ['another provider', new ProviderError('hetzner', 403, 'x', { context: { googleErrorInfo: { reason: 'SERVICE_DISABLED' } } })],
+    [
+      'another provider',
+      new ProviderError('hetzner', 403, 'x', {
+        context: { googleErrorInfo: { reason: 'SERVICE_DISABLED' } },
+      }),
+    ],
     ['a non-provider error', new Error('boom')],
   ])('keeps %s a fault', (_name, error) => {
     expect(classifyGcpApiError(error, GCP_CLOUD_BILLING_SERVICE)).toBeNull();
@@ -207,7 +239,9 @@ describe('enabledApis on stored credentials', () => {
     const malformed = JSON.stringify({ ...wif(), enabledApis: 'compute.googleapis.com' });
     expect(parseGcpCredential(malformed)).not.toHaveProperty('enabledApis');
     const mixed = JSON.stringify({ ...wif(), enabledApis: ['compute.googleapis.com', 7] });
-    expect(parseGcpCredential(mixed).authType === 'workload-identity' && parseGcpCredential(mixed)).toMatchObject({
+    expect(
+      parseGcpCredential(mixed).authType === 'workload-identity' && parseGcpCredential(mixed)
+    ).toMatchObject({
       enabledApis: ['compute.googleapis.com'],
     });
   });
@@ -223,17 +257,26 @@ describe('runGcpSetup', () => {
   function stubGoogleSetup(existing: boolean) {
     const enabledServices: string[][] = [];
     const json = (body: unknown, status = 200) =>
-      new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+      new Response(JSON.stringify(body), {
+        status,
+        headers: { 'Content-Type': 'application/json' },
+      });
     globalThis.fetch = vi.fn(async (input: string | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith(':batchEnable')) {
-        enabledServices.push((JSON.parse(String(init?.body)) as { serviceIds: string[] }).serviceIds);
+        enabledServices.push(
+          (JSON.parse(String(init?.body)) as { serviceIds: string[] }).serviceIds
+        );
         return json({ done: true });
       }
       if (url.endsWith('cloudresourcemanager.googleapis.com/v1/projects/owner-project')) {
         return json({ projectNumber: '123456' });
       }
-      if (url.includes('/workloadIdentityPools?') || url.includes('/providers?') || url.endsWith('/serviceAccounts')) {
+      if (
+        url.includes('/workloadIdentityPools?') ||
+        url.includes('/providers?') ||
+        url.endsWith('/serviceAccounts')
+      ) {
         return existing ? json({ error: { code: 409 } }, 409) : json({ done: true });
       }
       if (init?.method === 'PATCH') return json({ done: true });
@@ -249,13 +292,21 @@ describe('runGcpSetup', () => {
   it.each([
     ['a first connection', false],
     ['a re-run over existing resources', true],
-  ])('enables every required API and records them on the credential for %s', async (_name, existing) => {
-    const enabledServices = stubGoogleSetup(existing);
+  ])(
+    'enables every required API and records them on the credential for %s',
+    async (_name, existing) => {
+      const enabledServices = stubGoogleSetup(existing);
 
-    const credential = await runGcpSetup('oauth-token', 'owner-project', 'us-central1-a', setupEnv);
+      const credential = await runGcpSetup(
+        'oauth-token',
+        'owner-project',
+        'us-central1-a',
+        setupEnv
+      );
 
-    expect(enabledServices).toEqual([ALL_REQUIRED]);
-    expect(credential.enabledApis).toEqual(ALL_REQUIRED);
-    expect(await listGcpApiIssues(env, 'fresh', credential, NOW)).toEqual([]);
-  });
+      expect(enabledServices).toEqual([ALL_REQUIRED]);
+      expect(credential.enabledApis).toEqual(ALL_REQUIRED);
+      expect(await listGcpApiIssues(env, 'fresh', credential, NOW)).toEqual([]);
+    }
+  );
 });

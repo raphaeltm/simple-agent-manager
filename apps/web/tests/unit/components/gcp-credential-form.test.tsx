@@ -419,17 +419,22 @@ describe('GcpCredentialForm', () => {
       render(<GcpCredentialForm credential={withIssues} onUpdate={onUpdate} />);
 
       const notice = screen.getByTestId('gcp-api-issues');
-      expect(within(notice).getByText('(cloudbilling.googleapis.com)')).toBeInTheDocument();
+      expect(within(notice).getByText('cloudbilling.googleapis.com')).toBeInTheDocument();
+      expect(notice).toHaveTextContent('may be off in proj-1');
       expect(within(notice).getByText(/turned off in this project/)).toBeInTheDocument();
       expect(within(notice).getByText(/Price unavailable/)).toBeInTheDocument();
-      const link = within(notice).getByRole('link', { name: /Enable it in Google Cloud for proj-1/ });
+      const link = within(notice).getByRole('link', {
+        name: 'Enable in Google Cloud',
+      });
       expect(link).toHaveAttribute(
         'href',
         'https://console.cloud.google.com/apis/library/cloudbilling.googleapis.com?project=proj-1'
       );
       expect(link).toHaveAttribute('target', '_blank');
       // Workload Identity can be repaired by re-running SAM's setup.
-      expect(within(notice).getByRole('button', { name: 'Re-run Google setup' })).toBeInTheDocument();
+      expect(
+        within(notice).getByRole('button', { name: 'Re-run Google setup' })
+      ).toBeInTheDocument();
     });
 
     it('explains setup drift without claiming the API is off', () => {
@@ -439,13 +444,17 @@ describe('GcpCredentialForm', () => {
             ...credential,
             gcp: {
               ...credential.gcp,
-              apiIssues: [{ ...billingIssue, reason: 'not_enabled_by_setup' as const, observedAt: undefined }],
+              apiIssues: [
+                { ...billingIssue, reason: 'not_enabled_by_setup' as const, observedAt: undefined },
+              ],
             },
           }}
           onUpdate={onUpdate}
         />
       );
-      expect(screen.getByText(/set up before SAM needed the Cloud Billing API/)).toBeInTheDocument();
+      expect(
+        screen.getByText(/set up before SAM needed the Cloud Billing API/)
+      ).toBeInTheDocument();
     });
 
     it('offers a gcloud command instead of re-running setup for a service-account key', () => {
@@ -464,7 +473,9 @@ describe('GcpCredentialForm', () => {
           'gcloud services enable cloudbilling.googleapis.com --project="proj-long-name-世界"'
         )
       ).toBeInTheDocument();
-      expect(within(notice).queryByRole('button', { name: 'Re-run Google setup' })).not.toBeInTheDocument();
+      expect(
+        within(notice).queryByRole('button', { name: 'Re-run Google setup' })
+      ).not.toBeInTheDocument();
     });
 
     it('Check again re-verifies, refreshes the credential in place, and reports the result', async () => {
@@ -475,7 +486,9 @@ describe('GcpCredentialForm', () => {
         billingCheck: 'ok',
         apiIssues: [],
       });
-      render(<GcpCredentialForm credential={withIssues} onUpdate={onUpdate} onRefresh={onRefresh} />);
+      render(
+        <GcpCredentialForm credential={withIssues} onUpdate={onUpdate} onRefresh={onRefresh} />
+      );
 
       fireEvent.click(screen.getByRole('button', { name: 'Check again' }));
 
@@ -506,7 +519,10 @@ describe('GcpCredentialForm', () => {
       window.history.replaceState({}, '', '?gcp_setup=1');
       render(
         <GcpCredentialForm
-          credential={{ ...credential, gcp: { ...credential.gcp, gcpProjectId: 'proj-2', defaultZone: 'europe-west1-b' } }}
+          credential={{
+            ...credential,
+            gcp: { ...credential.gcp, gcpProjectId: 'proj-2', defaultZone: 'europe-west1-b' },
+          }}
           onUpdate={onUpdate}
         />
       );

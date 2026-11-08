@@ -30,6 +30,27 @@ The setup identity needs permission to enable services, manage WIF pools/provide
 
 SAM's VM setup requests these APIs in the **selected VM project**: Cloud Resource Manager, IAM, IAM Service Account Credentials (`iamcredentials.googleapis.com`), Security Token Service (`sts.googleapis.com`), Compute Engine (`compute.googleapis.com`), Vertex AI (`aiplatform.googleapis.com`), and Cloud Billing (`cloudbilling.googleapis.com`, read-only, for list prices). It calls Service Usage (`serviceusage.googleapis.com`) to enable them. This target-project setup does not replace the OAuth-client project prerequisites above.
 
+### Keeping the required APIs on
+
+SAM enables these APIs only during setup, using your own Google sign-in. SAM's runtime service account cannot turn APIs on, so when a SAM release needs a new API, a project connected earlier does not have it until you turn it on.
+
+SAM tells you when this happens (`listGcpApiIssues()` in `apps/api/src/services/gcp-api-health.ts`):
+
+- **Settings → Infrastructure** shows a warning naming your Google Cloud project and the API.
+  **Review** opens the Google Cloud connection.
+- The connection card lists each API with the reason and an **Enable it in Google Cloud** link that opens that API's enable page for your project.
+- **Re-run Google setup** (Workload Identity) signs in to Google again and re-runs setup for the same project and zone. Setup reuses the existing pool, provider and service account, and enables the full current API list.
+- A service-account key connection shows the `gcloud services enable` command to run instead.
+- **Check again** re-tests the connection and asks Google whether the API is usable now. The warning clears as soon as a call succeeds.
+
+A connection is flagged for one of three reasons:
+
+- Google reported the API is turned off (`SERVICE_DISABLED`).
+- Google refused SAM's service account on IAM grounds.
+- The connection was set up before SAM needed that API. Setup records the APIs it enabled (`enabledApis` on the stored credential); a connection set up before SAM recorded them is treated as missing Cloud Billing until a call to Cloud Billing succeeds.
+
+Google's reports are kept for `gcpCatalog.apiIssueTtlMinutes` (default 7 days) after the last one. A successful call clears them sooner.
+
 The default zone is a connection setting, not a restriction on all node-pool offerings. Review the allowed machine types and regions in your [compute pool](/docs/guides/compute-pools/) to control where SAM may place work.
 
 SAM accepts any Compute Engine zone name, including zones Google adds later. The zone picker suggests common zones, but it is not the full list. When SAM looks for its own VMs (orphan cleanup, allocation recovery), it lists every zone in the project in one call. If Google reports any zone as unreachable, SAM treats the list as incomplete: cleanup skips that run and tries again on the next one, and a recovery check fails rather than assuming a VM is gone.
@@ -54,9 +75,13 @@ SAM reads the Google Cloud machine catalog live; nothing about zones or prices i
   "Price unavailable". SAM never guesses a price. Enable `cloudbilling.googleapis.com` in the
   connected project to fix it; the next refresh picks it up within the retry interval
   (`gcpCatalog.priceRetryMinutes`). Each retry tries the next connected credentials in turn, so
-  credentials without the API cannot keep a working one from being tried. A refresh where every
-  credential fails notifies operators as a failed scheduled sweep, and the previous price list is
-  kept. So is a refresh that returns no usable price.
+  credentials without the API cannot keep a working one from being tried. A credential whose
+  project has Cloud Billing turned off, or refuses it on IAM grounds, is flagged on that connection
+  for its owner (see [Keeping the required APIs on](#keeping-the-required-apis-on)) and does not
+  notify operators. A refresh where every credential failed and at least one failure was anything
+  else (a token without the right scope, a server error, a timeout, a response with no usable price)
+  notifies operators as a failed scheduled sweep (`refreshGcpPriceTableIfDue()` in
+  `apps/api/src/services/gcp-price-table.ts`). Either way the previous price list is kept.
 - **Credits and discounts are not reflected.** These are list prices. Committed-use discounts,
   free-tier usage and promotional credits apply on your Google invoice, not in SAM's ranking.
 

@@ -31,12 +31,16 @@ const serviceDisabled = {
   metadata: {
     service: 'cloudbilling.googleapis.com',
     consumer: 'projects/123456',
-    activationUrl: 'https://console.developers.google.com/apis/api/cloudbilling.googleapis.com/overview?project=123456',
+    activationUrl:
+      'https://console.developers.google.com/apis/api/cloudbilling.googleapis.com/overview?project=123456',
   },
 };
 
 async function errorFrom(response: Response): Promise<ProviderError> {
-  vi.stubGlobal('fetch', vi.fn(async () => response));
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => response)
+  );
   try {
     await providerFetch('gcp', 'https://cloudbilling.googleapis.com/v1/services/x/skus');
   } catch (error) {
@@ -65,7 +69,9 @@ describe('Google ErrorInfo on provider errors', () => {
   });
 
   it('records nothing when Google sent no ErrorInfo', async () => {
-    const error = await errorFrom(googleError([{ '@type': 'type.googleapis.com/google.rpc.Help' }]));
+    const error = await errorFrom(
+      googleError([{ '@type': 'type.googleapis.com/google.rpc.Help' }])
+    );
     expect(googleErrorInfoOf(error)).toBeNull();
     expect(error.context).toBeUndefined();
   });
@@ -87,7 +93,10 @@ describe('Google ErrorInfo on provider errors', () => {
     const error = await errorFrom(
       googleError([{ ...serviceDisabled, metadata: { service: 'x'.repeat(200) } }])
     );
-    expect(googleErrorInfoOf(error)).toEqual({ reason: 'SERVICE_DISABLED', domain: 'googleapis.com' });
+    expect(googleErrorInfoOf(error)).toEqual({
+      reason: 'SERVICE_DISABLED',
+      domain: 'googleapis.com',
+    });
   });
 
   it('leaves non-Google error bodies as they were', async () => {
@@ -116,7 +125,10 @@ describe('probeGcpBillingAccess', () => {
   });
 
   it('throws the Google error with its ErrorInfo when the API is off', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => googleError([serviceDisabled])));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => googleError([serviceDisabled]))
+    );
 
     const error = await probeGcpBillingAccess('token-1', { requestTimeoutMs: 1_000 }).catch(
       (caught: unknown) => caught

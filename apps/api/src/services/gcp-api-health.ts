@@ -68,7 +68,8 @@ export function classifyGcpApiError(
   const info = googleErrorInfoOf(error);
   if (!info) return null;
   if (info.reason === 'SERVICE_DISABLED') {
-    const reported = info.service && GCP_SERVICE_NAME_PATTERN.test(info.service) ? info.service : null;
+    const reported =
+      info.service && GCP_SERVICE_NAME_PATTERN.test(info.service) ? info.service : null;
     return { service: reported ?? service, reason: 'api_disabled' };
   }
   if (OWNER_FIXABLE_DENIALS.has(info.reason)) return { service, reason: 'permission_denied' };

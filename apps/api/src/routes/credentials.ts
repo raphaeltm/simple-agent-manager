@@ -45,13 +45,13 @@ import {
 import { decrypt, encrypt } from '../services/encryption';
 import { getTimeoutMs } from '../services/fetch-timeout';
 import {
-  deleteUserGcpCredential,
-  replaceUserGcpCredential,
-} from '../services/gcp-credential-store';
-import {
   deleteGcpApiHealth,
   toGcpCredentialMetadataWithApiIssues,
 } from '../services/gcp-api-health';
+import {
+  deleteUserGcpCredential,
+  replaceUserGcpCredential,
+} from '../services/gcp-credential-store';
 import { clearGcpAccessTokenCache } from '../services/gcp-sts';
 import { parseGcpCredential, serializeCredentialToken } from '../services/provider-credentials';
 import {
@@ -269,7 +269,10 @@ credentialsRoutes.get('/', async (c) => {
       try {
         const plaintext = await decrypt(cred.encryptedToken, cred.iv, encryptionKey);
         const credential = parseGcpCredential(plaintext);
-        return { ...base, gcp: await toGcpCredentialMetadataWithApiIssues(c.env, cred.id, credential) };
+        return {
+          ...base,
+          gcp: await toGcpCredentialMetadataWithApiIssues(c.env, cred.id, credential),
+        };
       } catch (err) {
         log.error('credentials.gcp_metadata_unreadable', {
           credentialId: cred.id,

@@ -30,7 +30,9 @@ function identifier(value: unknown): string | undefined {
 }
 
 /** Read the first ErrorInfo from a Google error object (`body.error`); null when there is none. */
-export function parseGoogleErrorInfo(error: Record<string, unknown> | null): GoogleErrorInfo | null {
+export function parseGoogleErrorInfo(
+  error: Record<string, unknown> | null
+): GoogleErrorInfo | null {
   const details = error?.details;
   if (!Array.isArray(details)) return null;
   for (const detail of details) {

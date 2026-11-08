@@ -88,9 +88,7 @@ export async function completeAbortableResponse(
 }
 
 type ProviderAbortSource =
-  | { type: 'caller'; signal: AbortSignal }
-  | { type: 'timeout' }
-  | undefined;
+  { type: 'caller'; signal: AbortSignal } | { type: 'timeout' } | undefined;
 
 interface ProviderAbortScope {
   signal: AbortSignal;

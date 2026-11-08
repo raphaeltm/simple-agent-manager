@@ -24,7 +24,12 @@ export function googleServiceDisabledBody(service: string, projectNumber = '1234
         },
         {
           '@type': 'type.googleapis.com/google.rpc.Help',
-          links: [{ description: 'Google developers console API activation', url: 'https://console.developers.google.com' }],
+          links: [
+            {
+              description: 'Google developers console API activation',
+              url: 'https://console.developers.google.com',
+            },
+          ],
         },
       ],
     },
@@ -71,7 +76,13 @@ export function googleIamPermissionDeniedBody(service: string) {
 
 /** A 403 with no structured detail at all. */
 export function googleBare403Body() {
-  return { error: { code: 403, message: 'The caller does not have permission', status: 'PERMISSION_DENIED' } };
+  return {
+    error: {
+      code: 403,
+      message: 'The caller does not have permission',
+      status: 'PERMISSION_DENIED',
+    },
+  };
 }
 
 export function googleErrorResponse(body: unknown, status = 403): Response {

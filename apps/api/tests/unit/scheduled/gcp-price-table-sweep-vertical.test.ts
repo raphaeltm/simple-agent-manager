@@ -53,8 +53,11 @@ vi.mock('../../../src/scheduled/failed-sweep-notifications', () => ({
   notifyFailedSweeps: notifyFailedSweepsMock,
 }));
 vi.mock('../../../src/services/gcp-sts', () => ({
-  getGcpAccessToken: async (_userId: string, _projectId: string, credential: { gcpProjectId: string }) =>
-    `token-for-${credential.gcpProjectId}`,
+  getGcpAccessToken: async (
+    _userId: string,
+    _projectId: string,
+    credential: { gcpProjectId: string }
+  ) => `token-for-${credential.gcpProjectId}`,
 }));
 
 const { scheduled } = await import('../../../src/scheduled/handler');
@@ -88,7 +91,9 @@ describe('scheduled gcp_price_table step against real Google error bodies', () =
     createAllSchemaTables(sqlite, schema);
     const now = new Date().toISOString();
     sqlite
-      .prepare(`INSERT INTO users (id, email, name, created_at, updated_at) VALUES ('user-1', 'u@example.com', 'U', ?, ?)`)
+      .prepare(
+        `INSERT INTO users (id, email, name, created_at, updated_at) VALUES ('user-1', 'u@example.com', 'U', ?, ?)`
+      )
       .run(now, now);
     const { ciphertext, iv } = await encrypt(credentialJson('owner-gcp'), KEY);
     sqlite
@@ -116,7 +121,7 @@ describe('scheduled gcp_price_table step against real Google error bodies', () =
     return fetchMock;
   }
 
-  it('does not report Cloud Billing turned off in the owner\'s project as a failed sweep', async () => {
+  it("does not report Cloud Billing turned off in the owner's project as a failed sweep", async () => {
     const fetchMock = billingAnswers(googleServiceDisabledBody(GCP_CLOUD_BILLING_SERVICE));
 
     await scheduled(controller, env, context);
@@ -129,7 +134,7 @@ describe('scheduled gcp_price_table step against real Google error bodies', () =
     expect(issues).toMatchObject([{ service: GCP_CLOUD_BILLING_SERVICE, reason: 'api_disabled' }]);
   });
 
-  it('reports a fault in SAM\'s own call (insufficient token scope) as a failed sweep', async () => {
+  it("reports a fault in SAM's own call (insufficient token scope) as a failed sweep", async () => {
     const fetchMock = billingAnswers(googleScopeInsufficientBody(GCP_CLOUD_BILLING_SERVICE));
 
     await scheduled(controller, env, context);

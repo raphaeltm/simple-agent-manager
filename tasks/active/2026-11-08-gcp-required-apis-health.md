@@ -59,17 +59,17 @@ grows, every older credential drifts, and nothing tells the owner.
 
 ## Implementation Checklist
 
-- [ ] shared: `GCP_REQUIRED_APIS`, console URL constant, `enabledApis?` on WIF credential, `GcpApiIssue` + `apiIssues?` on metadata
-- [ ] providers: parse Google ErrorInfo into `ProviderError.context.googleErrorInfo`; `probeGcpBillingAccess()`
-- [ ] api: `gcp-setup.ts` uses shared list; `runGcpSetup` records `enabledApis`; parser preserves it
-- [ ] api: `gcp-api-health.ts` (classify, KV record/clear/read, required-API status)
-- [ ] api: price refresh records/clears health, logs safe fields, returns `faults`; sweep throws only on faults
-- [ ] api: admin setting for health TTL
-- [ ] api: `GET /api/credentials` + `/api/gcp/*` responses include `apiIssues`; `/api/gcp/verify` probes Cloud Billing
-- [ ] web: warning + Enable link + Re-run setup + Check again; preselect project/zone on re-run; SA gcloud command enables cloudbilling
-- [ ] tests: providers ErrorInfo parse; classification (SERVICE_DISABLED vs scope-insufficient vs no ErrorInfo); refresh records/clears + faults; sweep not notified for config-only, notified for faults; credentials route apiIssues; verify probe; parser preserves enabledApis; web component behavior
-- [ ] docs: google-cloud.md + self-hosting.mdx (re-run setup, Check again, notification behavior)
-- [ ] Playwright visual audit (375/1280) of the warning states
+- [x] shared: `GCP_REQUIRED_APIS`, console URL constant, `enabledApis?` on WIF credential, `GcpApiIssue` + `apiIssues?` on metadata
+- [x] providers: parse Google ErrorInfo into `ProviderError.context.googleErrorInfo`; `probeGcpBillingAccess()`
+- [x] api: `gcp-setup.ts` uses shared list; `runGcpSetup` records `enabledApis`; parser preserves it
+- [x] api: `gcp-api-health.ts` (classify, KV record/clear/read, required-API status)
+- [x] api: price refresh records/clears health, logs safe fields, returns `faults`; sweep throws only on faults
+- [x] api: admin setting for health TTL
+- [x] api: `GET /api/credentials` + `/api/gcp/*` responses include `apiIssues`; `/api/gcp/verify` probes Cloud Billing
+- [x] web: warning + Enable link + Re-run setup + Check again; preselect project/zone on re-run; SA gcloud command enables cloudbilling
+- [x] tests: providers ErrorInfo parse; classification (SERVICE_DISABLED vs scope-insufficient vs no ErrorInfo); refresh records/clears + faults; sweep not notified for config-only, notified for faults; credentials route apiIssues; verify probe; parser preserves enabledApis; web component behavior
+- [x] docs: google-cloud.md + self-hosting.mdx (re-run setup, Check again, notification behavior)
+- [x] Playwright visual audit (375/1280) of the warning states
 
 ## Acceptance Criteria
 
@@ -84,3 +84,16 @@ grows, every older credential drifts, and nothing tells the owner.
 
 - Idea `01M6W79RTFHXWMTNDMRBZ4ZG88`; PR #2572
 - `.claude/rules/72-error-categories-must-match-the-recovery-action.md`, `74-proxy-signals-must-match-the-condition.md`, `19-external-service-integration.md`
+
+## Implementation Notes
+
+- Banner on Settings → Infrastructure (`GcpApiIssuesBanner`) + notice in the Google Cloud card (`GcpApiIssuesNotice`). The accounts list is fed by `cc_*` APIs, so the banner reads `GET /api/credentials` (TanStack, cached) instead of mapping cc ids to legacy credential ids.
+- `GcpCredentialForm` gets `onRefresh` from `CloudAccountForm` (which owns the credentials query) so "Check again" refreshes in place without advancing the connect sheet.
+- Health record (KV `gcp-api-health:v1:<credentialId>`) holds `issues` (expire by `observedAt` + `gcpCatalog.apiIssueTtlMinutes`) and `confirmed` services; deleted on credential delete/replace. No KV TTL so a confirmed manual enablement does not silently re-flag.
+- Legacy WIF credentials (no `enabledApis`) assume `GCP_APIS_ENABLED_BEFORE_TRACKING` (the pre-#2572 six). Credentials set up between #2572's deploy and this one have Cloud Billing on but no record; they show drift until a refresh/Check again confirms it.
+- Discrimination proofs (surgical reverts, all restored):
+  1. Remove ErrorInfo capture in `providerFetch` → 7 red incl. sweep-vertical "does not report Cloud Billing turned off".
+  2. Notify on every failed refresh → exactly sweep-vertical "does not report ..." red.
+  3. Widen owner-fixable to `ACCESS_TOKEN_SCOPE_INSUFFICIENT` → 3 red incl. sweep-vertical "reports a fault ...".
+- Fixed a test-harness fidelity gap: `gcp-service-account-vertical` KV mock ignored the `'json'` read type.
+- Known pre-existing UX: opening the connect sheet for an already-connected provider shows "This becomes your default…" copy above the card.

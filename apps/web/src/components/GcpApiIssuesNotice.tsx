@@ -54,17 +54,18 @@ export function GcpApiIssuesNotice({
       <div className="flex min-w-0 flex-col gap-3">
         <p className="m-0 font-medium">
           {issues.length === 1
-            ? 'A Google API this connection needs may be off'
-            : `${issues.length} Google APIs this connection needs may be off`}
+            ? 'A Google API this connection needs may be off in '
+            : `${issues.length} Google APIs this connection needs may be off in `}
+          <span className="break-all">{project}</span>
         </p>
         <ul className="m-0 flex list-none flex-col gap-3 p-0">
           {issues.map((issue) => {
             const consequence = consequenceText(issue.service);
             return (
               <li key={issue.service} className="flex min-w-0 flex-col gap-1">
-                <span className="font-medium">
-                  {issue.label} API{' '}
-                  <span className="break-all font-mono text-xs font-normal">({issue.service})</span>
+                <span className="flex min-w-0 flex-col">
+                  <span className="font-medium">{issue.label} API</span>
+                  <span className="break-all font-mono text-xs">{issue.service}</span>
                 </span>
                 <span>
                   {reasonText(issue)}
@@ -76,7 +77,7 @@ export function GcpApiIssuesNotice({
                   rel="noopener noreferrer"
                   className="w-fit font-medium underline underline-offset-2"
                 >
-                  Enable it in Google Cloud for {project}
+                  Enable in Google Cloud
                 </a>
               </li>
             );

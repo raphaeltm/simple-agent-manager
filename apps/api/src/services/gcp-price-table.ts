@@ -13,8 +13,8 @@ import {
   parseStoredGcpPriceTable,
 } from '@simple-agent-manager/providers';
 import {
-  GCP_CLOUD_BILLING_SERVICE,
   type CredentialSource,
+  GCP_CLOUD_BILLING_SERVICE,
   GCP_PRICE_CATALOG_SCOPE,
 } from '@simple-agent-manager/shared';
 
@@ -161,7 +161,10 @@ async function refreshFromCandidates(
       const fetchedAt = now.toISOString();
       await env.KV.put(GCP_PRICE_TABLE_KV_KEY, JSON.stringify({ fetchedAt, table }));
       await env.KV.delete(GCP_PRICE_TABLE_ATTEMPT_KV_KEY);
-      await updateApiHealth(() => confirmGcpApi(env, candidate.id, GCP_CLOUD_BILLING_SERVICE), candidate.id);
+      await updateApiHealth(
+        () => confirmGcpApi(env, candidate.id, GCP_CLOUD_BILLING_SERVICE),
+        candidate.id
+      );
       return {
         status: 'refreshed',
         fetchedAt,

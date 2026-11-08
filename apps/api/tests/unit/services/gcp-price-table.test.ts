@@ -6,8 +6,8 @@
  */
 import { Buffer } from 'node:buffer';
 
-import Database from 'better-sqlite3';
 import { GCP_CLOUD_BILLING_SERVICE } from '@simple-agent-manager/shared';
+import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
@@ -495,24 +495,27 @@ describe('GCP price table', () => {
     it.each([
       ['a token minted without the scope (SAM bug)', 'scope_insufficient'],
       ['a 403 with no structured reason', 'bare_403'],
-    ] as const)('counts %s as a fault and records nothing on the credential', async (_name, failure) => {
-      await seedOwned('cred-x', 'x-gcp', { updatedAt: '2026-11-06T00:00:00Z' });
-      stubBilling(['x-gcp'], failure);
+    ] as const)(
+      'counts %s as a fault and records nothing on the credential',
+      async (_name, failure) => {
+        await seedOwned('cred-x', 'x-gcp', { updatedAt: '2026-11-06T00:00:00Z' });
+        stubBilling(['x-gcp'], failure);
 
-      expect(await refreshGcpPriceTableIfDue(env, NOW)).toEqual({
-        status: 'failed',
-        attempts: 1,
-        faults: 1,
-      });
-      // Only the setup-drift entry (this credential predates the record) remains.
-      expect(await issuesFor('cred-x', 'x-gcp')).toEqual([
-        {
-          service: GCP_CLOUD_BILLING_SERVICE,
-          label: 'Cloud Billing',
-          reason: 'not_enabled_by_setup',
-        },
-      ]);
-    });
+        expect(await refreshGcpPriceTableIfDue(env, NOW)).toEqual({
+          status: 'failed',
+          attempts: 1,
+          faults: 1,
+        });
+        // Only the setup-drift entry (this credential predates the record) remains.
+        expect(await issuesFor('cred-x', 'x-gcp')).toEqual([
+          {
+            service: GCP_CLOUD_BILLING_SERVICE,
+            label: 'Cloud Billing',
+            reason: 'not_enabled_by_setup',
+          },
+        ]);
+      }
+    );
 
     it('counts faults separately when owner-fixable and genuine failures mix', async () => {
       await seedOwned('cred-off', 'off-gcp', { updatedAt: '2026-11-06T00:00:00Z' });

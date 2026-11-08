@@ -27,14 +27,18 @@ export interface CredentialValidationResponse {
   message: string;
 }
 
-export async function validateCredential(data: CreateCredentialRequest): Promise<CredentialValidationResponse> {
+export async function validateCredential(
+  data: CreateCredentialRequest
+): Promise<CredentialValidationResponse> {
   return request<CredentialValidationResponse>('/api/credentials/validate', {
     method: 'POST',
     body: JSON.stringify(data),
   });
 }
 
-export async function validateAgentCredential(data: SaveAgentCredentialRequest): Promise<CredentialValidationResponse> {
+export async function validateAgentCredential(
+  data: SaveAgentCredentialRequest
+): Promise<CredentialValidationResponse> {
   return request<CredentialValidationResponse>('/api/credentials/agent/validate', {
     method: 'POST',
     body: JSON.stringify(data),
@@ -52,7 +56,7 @@ export async function deleteCredential(provider: string): Promise<void> {
 // =============================================================================
 
 export async function saveGcpServiceAccountCredential(
-  data: SaveGcpServiceAccountCredentialRequest,
+  data: SaveGcpServiceAccountCredentialRequest
 ): Promise<{ success: true; credential: CredentialResponse }> {
   return request('/api/gcp/service-account', {
     method: 'PUT',
