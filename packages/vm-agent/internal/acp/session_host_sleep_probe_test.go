@@ -115,31 +115,7 @@ func TestPinnedQuietCommandSleepProbe(t *testing.T) {
 	host.setStatus(HostReady, "")
 	params := mustJSON(t, map[string]any{"sessionId": string(session.SessionId), "prompt": []any{map[string]any{"type": "text", "text": "Run the quiet command"}}})
 	cleanupDone := make(chan error, 1)
-	go func() {
-		for {
-			if _, err := os.Stat(started); err == nil {
-				break
-			}
-			select {
-			case <-ctx.Done():
-				cleanupDone <- ctx.Err()
-				return
-			case <-time.After(10 * time.Millisecond):
-			}
-		}
-		// Exercise the validation cleanup while the real command is held. Before
-		// its parent-PID fence, this test killed the Codex running validation.
-		cleanup := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestCodexC2CandidateProcessCleanupSignalsActualArgv$", "-test.timeout=10s")
-		if output, err := cleanup.CombinedOutput(); err != nil {
-			cleanupDone <- fmt.Errorf("validation cleanup: %w: %s", err, output)
-			return
-		}
-		response, err := http.Post(callback+"/probe", "application/json", strings.NewReader(`{"probePhase":"cleanup_complete"}`))
-		if err == nil {
-			_ = response.Body.Close()
-		}
-		cleanupDone <- err
-	}()
+	go func() { cleanupDone <- runSleepProbeValidation(ctx, started, callback) }()
 	host.HandlePrompt(ctx, json.RawMessage(`"quiet-probe"`), json.RawMessage(params), "control-plane", true)
 	if err := <-cleanupDone; err != nil {
 		t.Fatal(err)
@@ -171,24 +147,7 @@ func stopSleepProbeProcess(t *testing.T, proc *AgentProcess) {
 		}
 		live := false
 		for _, entry := range entries {
-			if _, err := strconv.Atoi(entry.Name()); err != nil {
-				continue
-			}
-			stat, err := os.ReadFile(filepath.Join("/proc", entry.Name(), "stat"))
-			if err != nil {
-				continue
-			} // Exited while reading.
-			end := strings.LastIndexByte(string(stat), ')')
-			if end < 0 {
-				continue
-			}
-			fields := strings.Fields(string(stat)[end+1:])
-			if len(fields) < 3 {
-				continue
-			}
-			group, _ := strconv.Atoi(fields[2])
-			// Zombies cannot write files and may await an unrelated init's reap.
-			if group == pgid && fields[0] != "Z" && fields[0] != "X" {
+			if sleepProbeGroupMemberLive(entry.Name(), pgid) {
 				live = true
 				break
 			}
@@ -202,4 +161,49 @@ func stopSleepProbeProcess(t *testing.T, proc *AgentProcess) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+func runSleepProbeValidation(ctx context.Context, started, callback string) error {
+	for {
+		if _, err := os.Stat(started); err == nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	// Exercise the validation cleanup while the real command is held. Before
+	// its parent-PID fence, this test killed the Codex running validation.
+	cleanup := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestCodexC2CandidateProcessCleanupSignalsActualArgv$", "-test.timeout=10s")
+	if output, err := cleanup.CombinedOutput(); err != nil {
+		return fmt.Errorf("validation cleanup: %w: %s", err, output)
+	}
+	response, err := http.Post(callback+"/probe", "application/json", strings.NewReader(`{"probePhase":"cleanup_complete"}`))
+	if err == nil {
+		_ = response.Body.Close()
+	}
+	return err
+}
+
+func sleepProbeGroupMemberLive(pid string, pgid int) bool {
+	if _, err := strconv.Atoi(pid); err != nil {
+		return false
+	}
+	stat, err := os.ReadFile(filepath.Join("/proc", pid, "stat"))
+	if err != nil {
+		return false
+	} // Exited while reading.
+	end := strings.LastIndexByte(string(stat), ')')
+	if end < 0 {
+		return false
+	}
+	fields := strings.Fields(string(stat)[end+1:])
+	if len(fields) < 3 {
+		return false
+	}
+	group, _ := strconv.Atoi(fields[2])
+	// Zombies cannot write files and may await an unrelated init's reap.
+	return group == pgid && fields[0] != "Z" && fields[0] != "X"
 }

@@ -78,3 +78,7 @@ Coordinator reviewed the source and requires PR2585 remain DRAFT with needs-huma
 ## Final implementation audit
 
 Completion validator PASS for implementation/verification: research, diff, controls, real reporting vertical slice and staging cleanup. Archive records implementation evidence only; unchecked release gates above remain pending. Coordinator explicitly accepts local fault-injection proof for recovery. Staging did NOT exercise the stale-turn bound (chat renewed workAt) or crash-recovery ghost-heartbeat shutdown; those are local proofs only. The quiet540 result and subsequent normal idle sleep with durable eligibility clocks are the staging claims.
+
+## Final scanner follow-up
+
+Full technical CI/E2E passed on0f4f571493c1be21d3523c5286e505e2c44034b5; the only red check is the coordinator hold. CodeRabbit trusted request42515457739 succeeded19:31:28 and returned rate-limited/no review. Sonar quality gate passed, but inspection of its issue API found two cognitive-complexity findings (17/19 versus15) in the native Go probe. Small test-only helper extractions separate validation orchestration and per-PID parsing without changing behavior or ownership. Native quiet-command/cleanup/recovery tests passed2.817s and the actual native API vertical slice passed7.12s after extraction. Go reviewer approved the diff. Final-head scanner/CI reconciliation follows before approval. Production runtime remains identical to the verified staging deployment.
