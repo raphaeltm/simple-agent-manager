@@ -304,7 +304,11 @@ describe('POST /workspaces/:id/messages — behavioral tests', () => {
         ).toArray()[0] as { tool_metadata: string } | undefined;
         return row?.tool_metadata;
       });
-      expect(storedMetadata && JSON.parse(storedMetadata)).toEqual({ promptMessageId: promptId });
+      // The runtime reported this system row, so the server marks it as a workspace report.
+      expect(storedMetadata && JSON.parse(storedMetadata)).toEqual({
+        promptMessageId: promptId,
+        runtimeReported: true,
+      });
     });
 
     it('preserves tool metadata when toolMetadata is valid JSON', async () => {

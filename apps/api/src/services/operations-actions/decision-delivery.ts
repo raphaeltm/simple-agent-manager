@@ -13,6 +13,7 @@ import { resolveDurableExecutionConfig } from '../../durable-objects/project-dat
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import * as projectDataService from '../project-data';
+import { operationsDecisionNotice, safeNotice } from '../sam-notice-builders';
 import type { StoredOperationsApproval } from './approvals';
 
 export function operationsDecisionDeliveryId(approvalId: string): string {
@@ -21,6 +22,15 @@ export function operationsDecisionDeliveryId(approvalId: string): string {
 
 export function buildOperationsDecisionPrompt(approval: StoredOperationsApproval): string {
   const target = `${OPERATIONS_ACTION_TARGET_TYPES[approval.action]} ${approval.targetId}`;
+  // The agent can run an approval before this prompt is accepted; it must not run it twice.
+  if (approval.status === 'executed') {
+    return [
+      `Operations action approved and already run: ${approval.action} on ${target} (approval ${approval.id}). Do not run it again.`,
+      approval.decisionNote ? `Approver's note: ${approval.decisionNote}` : null,
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }
   if (approval.status === 'approved') {
     return [
       `Operations action approved: ${approval.action} on ${target} (approval ${approval.id}).`,
@@ -68,6 +78,7 @@ export async function deliverOperationsDecision(
         action: approval.action,
         targetId: approval.targetId,
       },
+      notice: safeNotice(() => operationsDecisionNotice(approval), { approvalId: approval.id }),
     });
     return true;
   } catch (error) {

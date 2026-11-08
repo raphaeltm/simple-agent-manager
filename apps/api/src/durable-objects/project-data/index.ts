@@ -111,6 +111,7 @@ import {
 import * as reconciliation from './reconciliation';
 import { parseCountCnt, parseMaxLatest, parseMetaValue } from './row-schemas';
 import { checkRuntimeHeartbeatTimeouts } from './runtime-heartbeat-policy';
+import { withoutSamNotice } from './sam-notice-metadata';
 import * as sessionAccess from './session-access';
 import * as sessionActivityProbe from './session-activity-probe';
 import * as sessionActivityReconciliation from './session-activity-reconciliation';
@@ -341,7 +342,12 @@ export class ProjectData extends DurableObject<Env> {
           input.sessionId,
           input.initialMessageRole,
           input.initialMessageContent,
-          input.initialMessageToolMetadata,
+          // Same boundary as persistMessage below: callers never write a notice here.
+          withoutSamNotice(
+            input.initialMessageToolMetadata,
+            input.sessionId,
+            input.initialMessageId
+          ),
           input.initialMessageId
         );
         return { session, message };
@@ -778,7 +784,9 @@ export class ProjectData extends DurableObject<Env> {
         sessionId,
         role,
         content,
-        toolMetadata,
+        // Worker callers never write notices this way; a notice only enters through
+        // acceptPromptDelivery or in-DO server code, so this boundary drops one.
+        withoutSamNotice(toolMetadata, sessionId, messageId ?? 'unassigned'),
         messageId,
         guard
       )

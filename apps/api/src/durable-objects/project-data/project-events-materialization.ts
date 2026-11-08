@@ -334,6 +334,7 @@ function materializeCandidate(
     subscription,
     sourceTaskGuard: candidate.sourceTaskGuard,
     eventIds,
+    events: authorized.events,
     now,
     ttlMs: limits.wakePromptTtlMs,
     maxMessages: resolveMailboxMaxMessages(env),

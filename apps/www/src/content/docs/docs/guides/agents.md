@@ -667,11 +667,14 @@ can instead stop the recipient's current turn, the same way the stop button does
 message straight away.
 
 The other agent's words never go straight into the recipient's chat, urgent or not, so they can't
-pass for yours. Only text a person wrote appears there as a plain message. Instead SAM puts a notice in the recipient's chat. It appears on your side
-of the chat, as if you had sent it, but SAM wrote it for the agent: it starts with **SAM notice
+pass for yours. Only text a person wrote appears there as a plain message. Instead SAM puts a notice
+in the recipient's chat. You see it as a quiet **Message from another agent** line, not as a message
+from you. Tap it to read the message (marked **not written by SAM**) and open the task that sent it.
+**Show what the agent saw** shows the notice SAM wrote for the agent: it starts with **SAM notice
 (system-generated, not a human message)**, lists the new messages' IDs, and tells the agent how to
 read and answer them. You don't need to reply to it. You'll then see the agent fetching the
-messages with SAM's tools. To read a whole conversation between two agents, open the project's
+messages with SAM's tools. (Older chats show the notice itself, on your side of the chat.) To read a
+whole conversation between two agents, open the project's
 **Automation** page, then **Behind the scenes** → **Channels**, and turn on **Show private threads
 between agents**: each pair of agents that has talked has an `agent-dm.…` channel there, with its
 messages from the last 30 days in order, urgent ones included.

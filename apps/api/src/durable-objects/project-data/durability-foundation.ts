@@ -15,6 +15,7 @@ import * as mailbox from './mailbox';
 import * as delivery from './prompt-delivery';
 import { runPromptDeliveryClaim } from './prompt-delivery-runner';
 import { resetReconciliationEpisode } from './reconciliation-episode';
+import { promptDeliveryToolMetadata } from './sam-notice-metadata';
 import * as sessionState from './session-state';
 import type { ActivityReportOutcome } from './session-work-clock';
 import type { Env } from './types';
@@ -107,14 +108,13 @@ function runAcceptedPromptDeliveryHooks(
         messageId: accepted.transcriptMessageId,
         role: 'user',
         content: input.displayContent.trim(),
-        toolMetadata: {
-          ...(input.metadata ?? {}),
-          source: input.sourceKind,
-          kind: 'durable_prompt_delivery',
-          deliveryId: accepted.message.id,
-          // Matches the persisted row, so a live client shows the steer's state too.
-          ...(accepted.message.deliveryIntent === 'steer' ? { deliveryIntent: 'steer' } : {}),
-        },
+        // The same builder as the persisted row, so a live client sees the steer state and
+        // the notice exactly as a reload would.
+        toolMetadata: promptDeliveryToolMetadata(
+          input,
+          accepted.message.id,
+          accepted.message.deliveryIntent
+        ),
         createdAt: accepted.transcriptCreatedAt,
         sequence: accepted.transcriptSequence,
         origin: null,

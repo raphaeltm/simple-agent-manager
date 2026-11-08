@@ -25,6 +25,7 @@ import {
   parseMessageCount,
   parseWorkspaceId,
 } from './row-schemas';
+import { markRuntimeReported, withoutSamNotice } from './sam-notice-metadata';
 import { assertSessionIdentityGuard, type SessionIdentityGuard } from './sessions';
 import { boundToolMetadataForStorage } from './tool-metadata-storage';
 import type { Env } from './types';
@@ -246,7 +247,10 @@ export function persistMessageBatch(
     // so ties are safe (see message-cursor.ts).
     const createdAt = new Date(msg.timestamp).getTime() || now;
     const sequence = msg.sequence ?? nextSeq++;
-    const boundedToolMetadata = boundToolMetadataForStorage(msg.toolMetadata, env);
+    const boundedToolMetadata = boundToolMetadataForStorage(
+      withoutSamNotice(msg.toolMetadata, sessionId, msg.messageId),
+      env
+    );
     if (boundedToolMetadata.truncated) {
       log.warn('messages.batch_tool_metadata_truncated_for_storage', {
         sessionId,
@@ -255,6 +259,10 @@ export function persistMessageBatch(
         storedBytes: boundedToolMetadata.storedBytes,
       });
     }
+    const storedToolMetadata =
+      msg.role === 'system'
+        ? markRuntimeReported(boundedToolMetadata.value)
+        : boundedToolMetadata.value;
     sql.exec(
       `INSERT INTO chat_messages (id, session_id, role, content, tool_metadata, created_at, sequence, origin)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -262,7 +270,7 @@ export function persistMessageBatch(
       sessionId,
       msg.role,
       msg.content,
-      boundedToolMetadata.value,
+      storedToolMetadata,
       createdAt,
       sequence,
       origin
@@ -272,7 +280,7 @@ export function persistMessageBatch(
       id: msg.messageId,
       role: msg.role,
       content: msg.content,
-      toolMetadata: boundedToolMetadata.value ? JSON.parse(boundedToolMetadata.value) : null,
+      toolMetadata: storedToolMetadata ? JSON.parse(storedToolMetadata) : null,
       createdAt,
       sequence,
       origin,
