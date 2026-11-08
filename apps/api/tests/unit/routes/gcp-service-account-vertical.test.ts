@@ -1,3 +1,5 @@
+import { Buffer } from 'node:buffer';
+
 import {
   DEFAULT_GCP_COMPUTE_API_BASE_URL,
   DEFAULT_GCP_SERVICE_ACCOUNT_TOKEN_URL,
@@ -20,7 +22,8 @@ vi.mock('../../../src/middleware/auth', () => ({
   getUserId: () => 'vertical-user',
 }));
 
-const ENCRYPTION_KEY = 'SK4ihJazAK3GIWUQcM6nZ1odR6KQHrqRAVSp6HdPxrg=';
+// A fixed 32-byte test key, derived so no key-shaped literal sits in the source.
+const ENCRYPTION_KEY = Buffer.from('0123456789abcdef0123456789abcdef').toString('base64');
 let privateKey: string;
 
 function setupDatabase(): Database.Database {
