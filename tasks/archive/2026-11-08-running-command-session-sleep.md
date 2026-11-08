@@ -33,8 +33,8 @@ Existing managed workspace is on the assigned output branch; preserve startup .c
 - [x] Coordinate staging, one small VM, short stale-turn setting, actual runtime test.
 - [x] Restore settings, delete resources; record evidence.
 - [x] CI, CodeRabbit request/wait, resolve findings, and merge.
-- [ ] Production deploy completion and basic smoke.
-- [ ] Final merged-idea update and task completion after deployment verification.
+- [x] Production deploy completion and basic smoke.
+- [x] Final merged-idea update after deployment verification; task completion reported separately.
 
 ## Concrete validation hazard found (17:31 UTC)
 
@@ -56,7 +56,7 @@ Local API reviewer PASS (11tests including required-sleep diagnostic and no runt
 
 Staging ownership was coordinated with the previous tester before deployment; final restoration and release are recorded below.
 
-## Staging verification (release gate in progress)
+## Staging verification
 
 Deploy Staging42507017851 passed for e178684e4. Cloudflare deployment is100% version1bee7b6d-5cd3-4294-8d3f-14cba293bc5a, annotation commit:e178684e4ad0791b1bed1ddf6b04689de6726a3c. VM binary reports250fe3f80841fcadf38513ca865d560429021fcd: this is the last production Go change; later commits modify tests only, verified by diff. Browser token-login and dashboard Welcome/project/settings navigation passed without page errors. Staging health healthy. Noise checkD1 passed; telemetry API403 was unavailable, explicitly skipped.
 
@@ -70,7 +70,7 @@ On completion, stored activity became idle/inactive/count0. Runtime updatedAt179
 
 ## CI and follow-ups
 
-1127c2222 fixes the sole failure among15697 API tests: a legacy test banned all D1 prepare calls instead of child-lineage reads; it now asserts the intended diagnostic insert and forbids lineage queries. Targeted file44/44 pass; no runtime change. FullCI on latest head is pending. An unrelated npm fixture failed before SAM installer code and passed one unchanged retry; actual baseline runs also passed. Tracked as idea01M6Y7R8P8TEVKK4QF6SJ5HRQR.
+1127c2222 fixes the sole failure among15697 API tests: a legacy test banned all D1 prepare calls instead of child-lineage reads; it now asserts the intended diagnostic insert and forbids lineage queries. Targeted file44/44 pass; no runtime change. FullCI on the final approved head passed as recorded below. An unrelated npm fixture failed before SAM installer code and passed one unchanged retry; actual baseline runs also passed. Tracked as idea01M6Y7R8P8TEVKK4QF6SJ5HRQR.
 
 Coordinator reviewed the source and requires PR2585 remain DRAFT with needs-human-review until approval names the exact final head SHA. Coordinator alone marks ready. No merge or idea completion before that approval and remaining gates. Adjacent production container-wide pkill risk is confirmed by code (default10 sessions/workspace share a container); tracked separately as idea01M6Y51G87JNWZ6CGX4ET7EBF3, explicitly non-blocking by coordinator.
 
@@ -88,4 +88,12 @@ Full technical CI/E2E passed on0f4f571493c1be21d3523c5286e505e2c44034b5; the onl
 
 Coordinator task01M6SHDRB60F28XPA14C7J9XKZ approved exact headb41dc16f4ac82987d1f8d55fc3f1434efad854f8 in durable eventdfc492e8-426e-47ad-8f2b-ea3fb14697db and explicitly delegated ready/hold release. Closing/reopening refreshed the frozen-label evidence gate without changing the commit. Refreshed CI42519601375 and E2E42519601273 passed, including Specialist Review Evidence. Sonar reported zero open issues. CodeRabbit request/wait completed; readiness/reopen requests were also rate-limited. Immediately before merge, reviews and threads were empty and the approved head was unchanged/mergeable.
 
-PR2585 merged2026-11-08T20:42:44Z as9caf8c0c2848fb58b019a686bcf9283dcb028469. Main CI42521511417 passed. Its deployment candidate42523060361 failed closed before mutation because main advanced to direct descendantf375bf66f32f42fa41099d603b704f7d9dd22db3 (#2590), verified to contain9caf. Descendant CI42521887015 attempt1 failed one existing direct-provisioning-do.test.ts waitFor race (792 other shard tests passed); the #2590 owner started attempt2 and filed the flaky test in draft PR2592. No duplicate retry or older-candidate override was started by this task. Deployment completion and basic smoke remain pending; this separate draft evidence PR remains for coordinator review, with no direct-to-main commit.
+PR2585 merged2026-11-08T20:42:44Z as9caf8c0c2848fb58b019a686bcf9283dcb028469. Main CI42521511417 passed. Its deployment candidate42523060361 failed closed before mutation because main advanced to direct descendantf375bf66f32f42fa41099d603b704f7d9dd22db3 (#2590), verified to contain9caf. Descendant CI42521887015 attempt1 failed one existing direct-provisioning-do.test.ts waitFor race (792 other shard tests passed); the #2590 owner started attempt2 and filed the flaky test in draft PR2592. No duplicate retry or older-candidate override was started by this task. Production deployment and basic smoke completed below; this separate draft evidence PR remains for coordinator review, with no direct-to-main commit.
+
+## Production verification complete
+
+Descendant mainf375bf66 CI42521887015 passed on the existing owner-run attempt2; current descendantce3b83d6f4501d7c46813cba09fcb48c267f535c CI42525665440 also passed. `git merge-base --is-ancestor` verified ce3 contains9caf. Full Deploy Production42526180332 completed successfully, including validation, Cloudflare deployment, and successful-deployment recording. No override or duplicate retry was used.
+
+Cloudflare read-only verification: sam-api-prod deployment8bff7093-f993-44f8-9425-59b3042d16b1 created2026-11-08T21:45:33.321746Z,100% version0763a391-a46e-4e1d-a4bc-07d968fa497f, annotationcommit:ce3b83d6f4501d7c46813cba09fcb48c267f535c. API `/health` returned200/healthy at21:51:10.261Z; app homepage returned200 with titleSimple Agent Manager. Full workflow success was confirmed21:52UTC.
+
+Idea01M6XYQFD4J74KJ69G43PTR39P received final root-cause/PR/deployment note01M6YJCRQJWHR2TP7GMERP7N3N and was marked completed only after merge and deployment verification. Historical attribution limits and staging-local proof separation remain as documented. This evidence-only follow-up PR remains DRAFT for coordinator review.
