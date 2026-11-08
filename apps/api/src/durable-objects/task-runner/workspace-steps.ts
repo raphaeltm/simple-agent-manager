@@ -13,15 +13,8 @@ import {
 } from '@simple-agent-manager/shared';
 
 import { log } from '../../lib/logger';
-import {
-  isNodePastLifetimeAdmissionCutoff,
-  LIFETIME_ADMISSION_CUTOFF_REASON,
-  resolvePlacementAdmissionPolicy,
-} from '../../services/node-lifetime-admission';
-import {
-  markVmAdmissionPlaced,
-  releaseVmProvisioningLease,
-} from '../../services/vm-admission-control';
+import { resolvePlacementAdmissionPolicy } from '../../services/node-lifetime-admission';
+import { markVmAdmissionPlaced } from '../../services/vm-admission-control';
 import { reserveWorkspacePlacement } from '../../services/workspace-placement';
 import { isResolvedResourceReservation } from '../../services/workspace-resource-capacity';
 import { persistPlacementDiagnostics, updatePlacementDiagnostics } from './placement-diagnostics';
@@ -29,6 +22,7 @@ import { ensureSessionLinked } from './state-machine';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 import { isUserConversationStart } from './user-start-admission';
 import { ensureBranchExistsOnRemote } from './workspace-branch';
+import { handleWorkspacePlacementRefused } from './workspace-placement-rejection';
 import {
   claimWorkspaceAllocationForTask,
   recoverWorkspaceFromD1,
@@ -233,52 +227,12 @@ async function createAndProvisionWorkspace(
   );
 
   if (!placementReserved) {
-    await rc.assertRecoveryAuthority(state);
-    await persistPlacementDiagnostics(state, rc, {
-      selectedNodeId: null,
-      revalidatedAgainstCurrentAuthority: false,
-      notes: ['Host capacity or placement authority changed before reservation'],
-    });
-    log.warn('task_runner_do.workspace_placement_lost', {
-      taskId: state.taskId,
-      nodeId,
-      cpuShareBudgetPercent: admissionPolicy.cpuShareBudgetPercent,
-      hostMemoryReserveMb: admissionPolicy.hostMemoryReserveMb,
-      diskPressureThresholdPercent: admissionPolicy.diskPressureThresholdPercent,
-      preferredNode: state.config.preferredNodeId === nodeId,
-    });
-    if (state.config.preferredNodeId === nodeId) {
-      const pastCutoff = await isNodePastLifetimeAdmissionCutoff(
-        rc.env.DATABASE,
-        nodeId,
-        admissionPolicy.lifetimeAdmissionCutoffAgeMs
-      );
-      throw Object.assign(
-        new Error(
-          pastCutoff
-            ? `Specified node: ${LIFETIME_ADMISSION_CUTOFF_REASON}`
-            : 'Specified node lost capacity or became unavailable before workspace creation'
-        ),
-        { permanent: true }
-      );
-    }
-    state.stepResults.nodeId = null;
-    state.stepResults.autoProvisioned = false;
-    state.stepResults.provisionedVmSize = null;
-    state.stepResults.capacityPlacementSnapshot = null;
-    await releaseVmProvisioningLease(
-      rc.env,
-      state.admissionScopeKey,
-      state.taskId,
-      state.admissionLeaseToken,
-      'workspace_placement_lost'
-    );
-    state.admissionScopeKey = null;
-    state.admissionLeaseToken = null;
-    await rc.advanceToStep(state, 'node_selection');
+    await handleWorkspacePlacementRefused(state, rc, nodeId, admissionPolicy);
     return false;
   }
 
+  // A reservation that succeeds ends the refusal episode (rule 61).
+  state.workspacePlacementRejections = 0;
   await persistPlacementDiagnostics(state, rc, {
     revalidatedAgainstCurrentAuthority: true,
     queue: {},

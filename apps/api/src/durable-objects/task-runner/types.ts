@@ -201,6 +201,11 @@ export interface TaskRunnerState {
   agentReadyStartedAt: number | null;
   /** Set when we started waiting for workspace ready — used for timeout detection */
   workspaceReadyStartedAt: number | null;
+  /**
+   * Consecutive final-reservation refusals in this run (`workspace-placement-rejection.ts`).
+   * Reset when a reservation succeeds; at `operations.workspacePlacementMaxRejections` the task fails.
+   */
+  workspacePlacementRejections?: number;
   /** Set when we started trying to dispatch workspace creation to the VM agent */
   workspaceDispatchStartedAt: number | null;
   /** Number of VM-agent workspace dispatch attempts made by the dispatch step */

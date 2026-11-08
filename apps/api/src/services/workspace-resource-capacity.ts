@@ -35,6 +35,8 @@ export {
 } from './workspace-reservation-usage';
 
 export const WORKSPACE_BUSY_BUILD_QUEUE_REASON = 'node build queue is busy';
+export const MEASURED_MEMORY_OVERRUN_REASON =
+  'measured memory use above the host reserve leaves no room for this reservation';
 
 export interface WorkspaceAdmissionMetrics {
   cpuLoadAvg1: number | null;
@@ -314,13 +316,12 @@ export function evaluateWorkspaceReservationCapacity(
     node.nodeRole !== 'deployment' &&
     memoryMb !== null &&
     measuredMemoryMb !== null &&
-    measuredMemoryMb +
-      active.memoryMb -
-      Math.min(measuredMemoryMb, observedMemoryCreditMb) +
+    measuredHostOverheadMb(measuredMemoryMb, observedMemoryCreditMb, policy) +
+      active.memoryMb +
       request.memoryMb >
-      usableMemoryMb(memoryMb, policy)
+      memoryMb
   ) {
-    reasons.push('measured memory headroom would be exceeded after outstanding reservations');
+    reasons.push(MEASURED_MEMORY_OVERRUN_REASON);
   }
   if (diskGb !== null && active.diskMb + request.diskMb > diskGb * 1024) {
     reasons.push('disk reservation budget would be exceeded');
@@ -345,6 +346,36 @@ export function hasWorkspaceReservationCapacity(
 
 export function cpuBudgetMillis(vcpuCount: number, policy: WorkspaceAdmissionPolicy): number {
   return Math.floor((vcpuCount * 1000 * policy.cpuShareBudgetPercent) / 100);
+}
+
+/**
+ * The host overhead one memory accounting policy charges, shared by provisioning
+ * (`placement-resolver-capacity.ts`), this evaluator and the atomic placement SQL
+ * (`workspace-admission-sql.ts`): the configured host reserve, or the measured use
+ * no workspace observation explains when that is larger.
+ *
+ * Condition: the node's real memory demand (host processes plus workloads) leaves
+ * room for every declared reservation plus this request. Memory is NON-COMPRESSIBLE,
+ * so this is a hard veto, unlike CPU (see `measuredAdmissionDiagnostic`).
+ *
+ * Signal: the heartbeat's whole-host used memory. It includes the host's own
+ * processes, which the reserve already pays for (cloud-init caps the workload slice
+ * at total minus the same reserve). Adding measured use ON TOP of the reserve charged
+ * host overhead twice, so every exact catalog fit was refused, including a node
+ * provisioned for that very request with no workload on it (the 2026-11-05 staging
+ * loop). Measured use counts only where it exceeds the reserve: co-tenants running
+ * past their reservations and orphaned or leaked usage, which is the overrun the
+ * measured guard exists to catch. Provisioning assumes overhead equals the reserve,
+ * so the default reserve must stay at or above real host overhead
+ * (`DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB`).
+ */
+export function measuredHostOverheadMb(
+  measuredMemoryMb: number,
+  observedMemoryCreditMb: number,
+  policy: Pick<WorkspaceAdmissionPolicy, 'hostMemoryReserveMb'>
+): number {
+  const unattributedMb = measuredMemoryMb - Math.min(measuredMemoryMb, observedMemoryCreditMb);
+  return Math.max(policy.hostMemoryReserveMb, unattributedMb);
 }
 
 export function usableMemoryMb(memoryMb: number, policy: WorkspaceAdmissionPolicy): number {

@@ -12,6 +12,7 @@ import {
   evaluateWorkspaceReservationCapacity,
   hasWorkspaceReservationCapacity,
   isResolvedResourceReservation,
+  MEASURED_MEMORY_OVERRUN_REASON,
   normalizeLoadAverageToCpuPercent,
   parseResolvedResourceReservation,
   parseWorkspaceAdmissionMetrics,
@@ -694,9 +695,7 @@ describe('live CPU is a saturation ceiling, not an admission authority', () => {
       resolveWorkspaceAdmissionPolicy(productionEnv)
     );
     expect(result.admitted).toBe(false);
-    expect(result.reasons).toContain(
-      'measured memory headroom would be exceeded after outstanding reservations'
-    );
+    expect(result.reasons).toContain(MEASURED_MEMORY_OVERRUN_REASON);
   });
 
   it('keeps deployment admission separate while unknown node roles stay guarded', () => {

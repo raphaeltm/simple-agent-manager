@@ -49,6 +49,11 @@ import {
 } from '../../../src/services/placement-resolver';
 import { buildCapacityPoolSelection } from '../../../src/services/placement-resolver-capacity';
 import { listUserProviderCatalogSeeds } from '../../../src/services/provider-catalogs';
+import {
+  emptyUsage,
+  evaluateWorkspaceReservationCapacity,
+  resolveWorkspaceAdmissionPolicy,
+} from '../../../src/services/workspace-resource-capacity';
 import { applyCapacityPoolSchemaMigrations } from '../../helpers/capacity-pool-migrations';
 import { createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 
@@ -5814,13 +5819,112 @@ describe('workload-role eligibility contract', () => {
     expect(buildCapacityPoolSelection(summary!, placement, 'deployment')?.candidates).toHaveLength(
       0
     );
-    placement.resolvedReservation = { ...placement.resolvedReservation, memoryMb: 3584 };
+    // Exact fit at the default reserve: 4096 - 1024. One MB more needs a larger offering.
+    placement.resolvedReservation = { ...placement.resolvedReservation, memoryMb: 3073 };
+    expect(buildCapacityPoolSelection(summary!, placement, 'workspace')?.candidates).toHaveLength(
+      0
+    );
+    placement.resolvedReservation = { ...placement.resolvedReservation, memoryMb: 3072 };
     expect(buildCapacityPoolSelection(summary!, placement, 'workspace')?.candidates).toHaveLength(
       1
     );
     expect(buildCapacityPoolSelection(summary!, placement, 'deployment')?.candidates).toHaveLength(
       1
     );
+  });
+
+  /**
+   * The 2026-11-05 staging loop: provisioning kept cx23 for a 3.5 GB request (4096 - 512 >= 3584)
+   * and admission then refused it forever on the fresh node (459 MB measured + 3584 > 3584). Every
+   * offering the real provisioning selection keeps must be admissible by the real evaluator on a
+   * fresh node of that offering, at the host overhead those nodes actually report.
+   */
+  it('admits every request on every fresh offering that provisioning would choose for it', async () => {
+    const db = await seedRoleCapablePool([
+      rolePoolOffering({
+        providerInstanceType: 'cx23',
+        displayName: 'CX23',
+        machineSize: 'small',
+        vcpu: 2,
+        memoryMb: 4096,
+        diskGb: 40,
+      }),
+      rolePoolOffering({
+        providerInstanceType: 'cx33',
+        displayName: 'CX33',
+        machineSize: 'medium',
+        vcpu: 4,
+        memoryMb: 8192,
+        diskGb: 80,
+      }),
+      rolePoolOffering({
+        providerInstanceType: 'cx43',
+        displayName: 'CX43',
+        machineSize: 'large',
+        vcpu: 8,
+        memoryMb: 16_384,
+        diskGb: 160,
+      }),
+    ]);
+    const summary = await resolveEffectiveDefaultCapacityPoolSummary(db as never, {
+      userId: 'user-1',
+      ensure: false,
+      workloadRoles: 'all',
+    });
+    // Host overhead read from fresh/idle nodes (staging incident node 459 MB on 4 GB;
+    // production idle minimums 565 MB on 8 GB, 655 MB on 16 GB).
+    const freshHostOverheadMb: Record<number, number> = { 4096: 459, 8192: 614, 16_384: 737 };
+    const policy = resolveWorkspaceAdmissionPolicy({});
+    const placement = hetznerTaskStartPlacement();
+    const now = new Date().toISOString();
+    const kept: string[] = [];
+    for (const memoryMb of [1024, 2048, 3072, 3584, 4096, 7168, 7680, 15_360]) {
+      placement.resolvedReservation = {
+        ...placement.resolvedReservation,
+        cpuMillis: 2000,
+        memoryMb,
+        diskMb: 10_240,
+        exclusiveNode: true,
+      };
+      const selection = buildCapacityPoolSelection(summary!, placement, 'workspace');
+      expect(selection?.candidates.length, `${memoryMb} MB has an offering`).toBeGreaterThan(0);
+      for (const candidate of selection!.candidates) {
+        kept.push(`${memoryMb}:${candidate.providerInstanceType}`);
+        const overheadMb = freshHostOverheadMb[candidate.providerInstanceMemoryMb]!;
+        const node = {
+          id: `fresh-${candidate.providerInstanceType}`,
+          nodeRole: 'workspace',
+          providerInstanceId: `server-${candidate.providerInstanceType}`,
+          observedProviderInstanceVcpuCount: candidate.providerInstanceVcpuCount,
+          observedProviderInstanceMemoryMb: candidate.providerInstanceMemoryMb,
+          observedProviderInstanceDiskGb: candidate.providerInstanceDiskGb,
+          observedHardwareSource: 'observed',
+          lastHeartbeatAt: now,
+          lastMetrics: JSON.stringify({
+            version: 1,
+            cpuLoadAvg1: 0,
+            memoryPercent: (overheadMb / candidate.providerInstanceMemoryMb) * 100,
+            diskPercent: 19.5,
+            creatingWorkspaces: 0,
+          }),
+        };
+        const decision = evaluateWorkspaceReservationCapacity(
+          node,
+          emptyUsage(),
+          placement.resolvedReservation,
+          policy
+        );
+        expect(
+          decision,
+          `${memoryMb} MB on fresh ${candidate.providerInstanceType}: ${decision.reasons.join('; ')}`
+        ).toMatchObject({ admitted: true });
+      }
+    }
+    // Liveness: the boundary requests reached each size class rather than skipping the loop.
+    expect(kept).toEqual(
+      expect.arrayContaining(['3072:cx23', '3584:cx33', '7168:cx33', '7680:cx43', '15360:cx43'])
+    );
+    expect(kept).not.toContain('3584:cx23');
   });
 
   it('keeps workspace pack largest-first while deployments use smallest-fit', async () => {

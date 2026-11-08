@@ -54,6 +54,7 @@ export type AdminSettingName =
   | 'integration.gitlab.clientSecret'
   | 'operations.workloadIdentityTokenTtlSeconds'
   | 'operations.provisioningAttemptsPerProviderTier'
+  | 'operations.workspacePlacementMaxRejections'
   | 'operations.nodeCleanupBlockedRetirementMs'
   | 'operations.nodeLifetimeForceSleepAfterMs'
   | 'operations.sessionStaleTurnNoWorkMinutes'

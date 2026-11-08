@@ -11,7 +11,16 @@ import {
 import type { Env } from '../env';
 
 export const DEFAULT_WORKSPACE_ADMISSION_CPU_SHARE_BUDGET_PERCENT = 100;
-export const DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB = 512;
+/**
+ * Memory held back for the host (OS, Docker, VM agent). One value drives provisioning
+ * (offering memory minus this must cover the request), admission (`measuredHostOverheadMb`)
+ * and the cloud-init workload-slice `MemoryMax`. Provisioning cannot measure a node that does
+ * not exist yet, so it is only consistent with admission while this is at or above real host
+ * overhead. Measured 2026-11-08 on idle production nodes: 4 GB 500-770 MB, 8 GB 565-729 MB
+ * (typical), 16 GB 655-1278 MB; a fresh staging cx23 read 459 MB. The previous 512 MB was below
+ * nearly all of them, so a node provisioned for an exact-fit request could never admit it.
+ */
+export const DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB = 1024;
 export const DEFAULT_WORKSPACE_ADMISSION_DISK_PRESSURE_THRESHOLD_PERCENT = 80;
 export const DEFAULT_WORKSPACE_ADMISSION_METRICS_TTL_MS = 180_000;
 export const DEFAULT_WORKSPACE_ADMISSION_CPU_SCORE_WEIGHT_PERCENT = 40;
