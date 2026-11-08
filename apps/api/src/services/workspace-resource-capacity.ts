@@ -277,7 +277,7 @@ export function evaluateWorkspaceReservationCapacity(
     metrics,
     policy,
     active.activeCount === 0 && vcpu === null,
-    active.activeCount > 0
+    active.activeCount > 0 || node.nodeRole === 'deployment'
   );
   if (measuredAdmissionReason) {
     if (active.activeCount > 0 || metrics !== null) {
@@ -408,7 +408,7 @@ function measuredAdmissionDiagnostic(
   metrics: WorkspaceAdmissionMetrics | null,
   policy: WorkspaceAdmissionPolicy,
   allowUnknownCpuPressure: boolean,
-  hasActiveReservations: boolean
+  enforceCpuSaturation: boolean
 ): string | null {
   if (!metrics) return 'occupied node has no resource telemetry';
   if (metrics.unsupportedVersion) return 'node resource telemetry version is unsupported';
@@ -424,8 +424,9 @@ function measuredAdmissionDiagnostic(
   // CPU is compressible. With no workspace reservations, host bootstrap load
   // cannot prove a co-tenant is saturated; the declared budget is the authority.
   // Occupied nodes retain this backstop against under-declared workload bursts.
+  // Deployment-role admission has its own SQL policy and retains its CPU ceiling.
   if (
-    hasActiveReservations &&
+    enforceCpuSaturation &&
     metrics.cpuPercent !== null &&
     metrics.cpuPercent >= policy.cpuThresholdPercent
   ) {

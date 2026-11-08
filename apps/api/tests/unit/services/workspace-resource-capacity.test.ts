@@ -644,6 +644,17 @@ describe('live CPU is a saturation ceiling, not an admission authority', () => {
     expect(result.admitted).toBe(true);
   });
 
+  it('preserves the separate empty deployment-node CPU ceiling', () => {
+    const result = evaluateWorkspaceReservationCapacity(
+      { ...hostAt(100), nodeRole: 'deployment' },
+      emptyUsage(),
+      reservation({ cpuMillis: 200, memoryMb: 512, diskMb: 5120 }),
+      resolveWorkspaceAdmissionPolicy(productionEnv)
+    );
+    expect(result.admitted).toBe(false);
+    expect(result.reasons).toContain('CPU saturation ceiling reached');
+  });
+
   it.each([
     [{ diskPercent: 99 }, 'disk pressure threshold reached'],
     [{ memoryPercent: 99 }, MEASURED_MEMORY_OVERRUN_REASON],
