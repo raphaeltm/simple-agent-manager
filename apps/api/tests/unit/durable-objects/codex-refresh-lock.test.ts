@@ -1,18 +1,27 @@
 /**
- * Unit tests for the CodexRefreshLock Durable Object.
+ * Unit tests for the CodexRefreshLock Durable Object, against a real SQLite engine
+ * and real AES-GCM encryption (rule 28: credential predicates need a real SQL engine).
  *
  * Covers:
  *  - Method + payload validation
  *  - CRITICAL #1: stale-token branch does not return `refresh_token`
- *  - HIGH #2: project-scope resolution — active row preferred, inactive row blocks
- *    fallback, absent row falls through to user-scoped
+ *  - Which credential: only the run's candidates, chosen by possession; inactive
+ *    candidates are never replaced; several candidates without proof get nothing
+ *  - Write-back: compare-and-set on the ciphertext read; mirrors only copies of the
+ *    same credential generation; a default switch mid-refresh is left intact
+ *  - Grace entries are bound to the credential they were rotated out of
  *  - MEDIUM #5: rate-limit state held in `ctx.storage` (atomic, keyed per-credential),
  *    429 with Retry-After on exceed; cached/grace/stale responses do not consume budget
  *  - MEDIUM #6: upstream scope validation (block by default; empty allowlist is explicit opt-out)
  *  - Decrypt/parse failure handling
  *  - Upstream error paths (timeout, network, filtered error body)
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import * as schema from '../../../src/db/schema';
+import { decrypt, encrypt } from '../../../src/services/encryption';
+import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 // Mock cloudflare:workers
 vi.mock('cloudflare:workers', () => ({
@@ -29,21 +38,12 @@ vi.mock('cloudflare:workers', () => ({
   },
 }));
 
-// Mock encryption service
-vi.mock('../../../src/services/encryption', () => ({
-  decrypt: vi.fn(),
-  encrypt: vi.fn(),
-}));
-
-// Mock secrets helper
-vi.mock('../../../src/lib/secrets', () => ({
-  getCredentialEncryptionKey: vi.fn().mockReturnValue('test-encryption-key'),
-}));
-
 // Mock logger
-const mockLogWarn = vi.fn();
-const mockLogInfo = vi.fn();
-const mockLogError = vi.fn();
+const { mockLogWarn, mockLogInfo, mockLogError } = vi.hoisted(() => ({
+  mockLogWarn: vi.fn(),
+  mockLogInfo: vi.fn(),
+  mockLogError: vi.fn(),
+}));
 vi.mock('../../../src/lib/logger', () => ({
   log: {
     info: mockLogInfo,
@@ -53,31 +53,27 @@ vi.mock('../../../src/lib/logger', () => ({
 }));
 
 const { CodexRefreshLock } = await import('../../../src/durable-objects/codex-refresh-lock');
-const { decrypt, encrypt } = await import('../../../src/services/encryption');
 
 // -----------------------------------------------------------------------
 // Helpers
 // -----------------------------------------------------------------------
 
+const ENCRYPTION_KEY = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
+const USER = 'user-1';
+const DEFAULT_REF = 'credentials:cred-1';
+
+let sqlite: Database.Database;
+
 function createMockEnv(overrides: Record<string, unknown> = {}) {
+  sqlite = new Database(':memory:');
+  createAllSchemaTables(sqlite, schema);
   return {
-    DATABASE: createMockD1(),
-    ENCRYPTION_KEY: 'test-encryption-key',
+    DATABASE: createSqliteD1(sqlite),
+    ENCRYPTION_KEY,
     // Disable scope validation by default for tests that don't exercise it —
     // individual tests re-enable with CODEX_EXPECTED_SCOPES overrides.
     CODEX_EXPECTED_SCOPES: '',
     ...overrides,
-  };
-}
-
-function createMockD1() {
-  return {
-    prepare: vi.fn().mockReturnValue({
-      bind: vi.fn().mockReturnValue({
-        first: vi.fn().mockResolvedValue(null),
-        run: vi.fn().mockResolvedValue({}),
-      }),
-    }),
   };
 }
 
@@ -114,25 +110,34 @@ async function createDOWithRotatedToken(
   envOverrides: Record<string, unknown> = {}
 ) {
   const setup = createDO(envOverrides, await createRotatedTokenStorage(token, ageMs));
-  setupCredentialFound(setup.env);
+  await setupCredentialFound(setup.env);
   return setup;
 }
 
+/** A DO request; defaults the candidate list to the seeded legacy row. */
 function makeRequest(payload: Record<string, unknown>): Request {
+  const body =
+    'credentialReferences' in payload
+      ? payload
+      : { ...payload, credentialReferences: [DEFAULT_REF] };
   return new Request('https://do-internal/refresh', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(body),
   });
 }
 
-const storedAuthJson = JSON.stringify({
-  tokens: {
-    access_token: 'stored-access',
-    refresh_token: 'stored-refresh',
-    id_token: 'stored-id',
-  },
-});
+const codexAuth = (prefix: string, accountId = `acct-${prefix}`) =>
+  JSON.stringify({
+    tokens: {
+      access_token: `${prefix}-access`,
+      refresh_token: `${prefix}-refresh`,
+      id_token: `${prefix}-id`,
+      account_id: accountId,
+    },
+  });
+
+const storedAuthJson = codexAuth('stored');
 
 async function sha256Hex(value: string): Promise<string> {
   const data = new TextEncoder().encode(value);
@@ -143,12 +148,17 @@ async function sha256Hex(value: string): Promise<string> {
     .join('');
 }
 
-async function createRotatedTokenStorage(token: string, ageMs: number) {
+async function createRotatedTokenStorage(
+  token: string,
+  ageMs: number,
+  credentialReference = DEFAULT_REF
+) {
   return {
     'rotated-tokens': [
       {
         tokenHash: await sha256Hex(token),
         rotatedAt: Date.now() - ageMs,
+        credentialReference,
       },
     ],
   };
@@ -161,57 +171,98 @@ function mockSuccessfulRefreshResponse(
     id_token: 'new-id',
   }
 ) {
-  vi.mocked(fetch).mockResolvedValue(
-    new Response(JSON.stringify(tokens), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    })
+  vi.mocked(fetch).mockImplementation(
+    async () =>
+      new Response(JSON.stringify(tokens), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
   );
 }
 
-/**
- * Configure the D1 mock to return a user-scoped credential row for the SECOND
- * query (the first, project-scoped query returns null when called).
- *
- * DO query order (getStoredCredential):
- *  1. If projectId: lookup project-scoped row (may be null)
- *  2. Always (when no active project row): lookup user-scoped row
- */
-function setupCredentialFound(env: ReturnType<typeof createMockEnv>) {
-  const userFirst = vi.fn().mockResolvedValue({
-    id: 'cred-1',
-    encrypted_token: 'encrypted-data',
-    iv: 'test-iv',
-    is_active: 1,
-  });
-  vi.mocked(env.DATABASE.prepare).mockReturnValue({
-    bind: vi.fn().mockReturnValue({
-      first: userFirst,
-      // Realistic D1 run() shape: the legacy UPDATE and the cc_credentials
-      // dual-write both report a row changed, so rotation-path tests exercise
-      // the real success path instead of silently hitting the no-op branch.
-      run: vi.fn().mockResolvedValue({ meta: { changes: 1 } }),
-    }),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } as any);
-  return userFirst;
+async function seedLegacy(
+  id: string,
+  plaintext: string,
+  opts: { userId?: string; projectId?: string | null; active?: boolean } = {}
+) {
+  const { ciphertext, iv } = await encrypt(plaintext, ENCRYPTION_KEY);
+  sqlite
+    .prepare(
+      `INSERT INTO credentials (id, user_id, project_id, provider, credential_type, agent_type,
+         credential_kind, is_active, encrypted_token, iv, created_at, updated_at)
+       VALUES (?, ?, ?, 'openai-codex', 'agent-api-key', 'openai-codex', 'oauth-token', ?, ?, ?, 'old', 'old')`
+    )
+    .run(
+      id,
+      opts.userId ?? USER,
+      opts.projectId ?? null,
+      opts.active === false ? 0 : 1,
+      ciphertext,
+      iv
+    );
+  return { ciphertext, iv };
 }
 
-function expectNoCredentialUpdate(env: ReturnType<typeof createMockEnv>) {
-  expect(vi.mocked(env.DATABASE.prepare)).not.toHaveBeenCalledWith(
-    expect.stringContaining('UPDATE credentials')
-  );
+/** A cc credential row; pass `copyOf` to store the exact ciphertext of another row. */
+async function seedCc(
+  id: string,
+  plaintext: string,
+  opts: {
+    owner?: string;
+    active?: boolean;
+    kind?: string;
+    copyOf?: { ciphertext: string; iv: string };
+  } = {}
+) {
+  const { ciphertext, iv } = opts.copyOf ?? (await encrypt(plaintext, ENCRYPTION_KEY));
+  sqlite
+    .prepare(
+      `INSERT INTO cc_credentials (id, owner_id, name, kind, encrypted_token, iv, is_active, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'old', 'old')`
+    )
+    .run(
+      id,
+      opts.owner ?? USER,
+      id,
+      opts.kind ?? 'auth-json',
+      ciphertext,
+      iv,
+      opts.active === false ? 0 : 1
+    );
+  return { ciphertext, iv };
+}
+
+/** The legacy user-scoped row `cred-1` holding `storedAuthJson`. */
+async function setupCredentialFound(_env?: unknown) {
+  return seedLegacy('cred-1', storedAuthJson);
+}
+
+async function secretOf(table: 'credentials' | 'cc_credentials', id: string): Promise<string> {
+  const row = sqlite
+    .prepare(`SELECT encrypted_token AS t, iv FROM ${table} WHERE id = ?`)
+    .get(id) as {
+    t: string;
+    iv: string;
+  };
+  return decrypt(row.t, row.iv, ENCRYPTION_KEY);
+}
+
+async function expectNoCredentialUpdate(_env?: unknown) {
+  expect(await secretOf('credentials', 'cred-1')).toBe(storedAuthJson);
+}
+
+async function expectCredentialUpdated() {
+  expect(await secretOf('credentials', 'cred-1')).not.toBe(storedAuthJson);
 }
 
 describe('CodexRefreshLock', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(decrypt).mockResolvedValue(storedAuthJson);
-    vi.mocked(encrypt).mockResolvedValue({
-      ciphertext: 'new-encrypted',
-      iv: 'new-iv',
-    });
     vi.stubGlobal('fetch', vi.fn());
+  });
+
+  afterEach(() => {
+    sqlite?.close();
   });
 
   // -----------------------------------------------------------------------
@@ -260,9 +311,15 @@ describe('CodexRefreshLock', () => {
   // -----------------------------------------------------------------------
 
   it('returns 500 when credential decryption fails', async () => {
-    const { do: doInstance, env } = createDO();
-    setupCredentialFound(env);
-    vi.mocked(decrypt).mockRejectedValue(new Error('bad key'));
+    const { do: doInstance } = createDO();
+    // Ciphertext that does not authenticate under the key.
+    sqlite
+      .prepare(
+        `INSERT INTO credentials (id, user_id, credential_type, agent_type, credential_kind,
+           is_active, encrypted_token, iv) VALUES ('cred-1', ?, 'agent-api-key', 'openai-codex',
+           'oauth-token', 1, 'AAAAAAAAAAAAAAAAAAAAAA==', 'AAAAAAAAAAAAAAAA')`
+      )
+      .run(USER);
 
     const res = await doInstance.fetch(makeRequest({ refreshToken: 'rt_test', userId: 'user-1' }));
     expect(res.status).toBe(500);
@@ -272,9 +329,8 @@ describe('CodexRefreshLock', () => {
   });
 
   it('returns 500 when stored credential is not valid JSON', async () => {
-    const { do: doInstance, env } = createDO();
-    setupCredentialFound(env);
-    vi.mocked(decrypt).mockResolvedValue('not-json{{{');
+    const { do: doInstance } = createDO();
+    await seedLegacy('cred-1', 'not-json{{{');
 
     const res = await doInstance.fetch(makeRequest({ refreshToken: 'rt_test', userId: 'user-1' }));
     expect(res.status).toBe(500);
@@ -289,7 +345,7 @@ describe('CodexRefreshLock', () => {
 
   it('stale-token branch returns access_token + id_token but NOT refresh_token (CRITICAL #1)', async () => {
     const { do: doInstance, env } = createDO();
-    setupCredentialFound(env);
+    await setupCredentialFound(env);
 
     const res = await doInstance.fetch(
       makeRequest({
@@ -352,7 +408,7 @@ describe('CodexRefreshLock', () => {
         name: 'token has no grace-window entry',
         setup: async () => {
           const setup = createDO();
-          setupCredentialFound(setup.env);
+          await setupCredentialFound(setup.env);
           return setup;
         },
         refreshToken: 'totally-unknown-token',
@@ -386,7 +442,7 @@ describe('CodexRefreshLock', () => {
 
     it('records rotated token in DO storage on successful refresh', async () => {
       const { do: doInstance, env, ctx } = createDO();
-      setupCredentialFound(env);
+      await setupCredentialFound(env);
       mockSuccessfulRefreshResponse();
 
       await doInstance.fetch(
@@ -411,7 +467,7 @@ describe('CodexRefreshLock', () => {
 
     it('does NOT record rotated token when refresh_token is unchanged', async () => {
       const { do: doInstance, env, ctx } = createDO();
-      setupCredentialFound(env);
+      await setupCredentialFound(env);
       mockSuccessfulRefreshResponse({
         access_token: 'new-access',
         refresh_token: 'stored-refresh',
@@ -437,7 +493,7 @@ describe('CodexRefreshLock', () => {
 
   it('forwards to upstream when refresh_token matches stored', async () => {
     const { do: doInstance, env } = createDO();
-    setupCredentialFound(env);
+    await setupCredentialFound(env);
 
     vi.mocked(fetch).mockResolvedValue(
       new Response(
@@ -467,522 +523,321 @@ describe('CodexRefreshLock', () => {
     expect(url).toBe('https://auth.openai.com/oauth/token');
     expect(opts?.method).toBe('POST');
 
-    // Credential re-encrypted and persisted.
-    expect(vi.mocked(encrypt)).toHaveBeenCalledTimes(1);
-    expect(env.DATABASE.prepare).toHaveBeenCalledWith(
-      expect.stringContaining('UPDATE credentials')
-    );
+    // Credential re-encrypted and persisted into the same row.
+    const stored = JSON.parse(await secretOf('credentials', 'cred-1'));
+    expect(stored.tokens).toMatchObject({
+      access_token: 'new-access',
+      refresh_token: 'new-refresh',
+      id_token: 'new-id',
+      account_id: 'acct-stored',
+    });
   });
 
   // -----------------------------------------------------------------------
-  // HIGH #2 — Project-scope credential resolution
+  // Which credential is served — only the run's candidates, chosen by possession
   // -----------------------------------------------------------------------
 
-  describe('HIGH #2 — project vs user fallback', () => {
-    /**
-     * Wire the D1 mock to simulate a two-query pattern: first bind(userId, projectId)
-     * targets the project-scoped SELECT, second bind(userId) targets user-scoped.
-     */
-    function setupScopedCredentials(
-      env: ReturnType<typeof createMockEnv>,
-      opts: {
-        projectRow: null | { id: string; is_active: 0 | 1 };
-        userRow: null | { id: string };
-      }
-    ) {
-      const projectFirst = vi.fn().mockResolvedValue(
-        opts.projectRow
-          ? {
-              id: opts.projectRow.id,
-              encrypted_token: 'encrypted-data',
-              iv: 'test-iv',
-              is_active: opts.projectRow.is_active,
-            }
-          : null
-      );
-      const userFirst = vi.fn().mockResolvedValue(
-        opts.userRow
-          ? {
-              id: opts.userRow.id,
-              encrypted_token: 'encrypted-data',
-              iv: 'test-iv',
-            }
-          : null
-      );
-      const userBind = vi.fn().mockReturnValue({
-        first: userFirst,
-        run: vi.fn().mockResolvedValue({}),
-      });
-      const projectBind = vi.fn().mockReturnValue({
-        first: projectFirst,
-        run: vi.fn().mockResolvedValue({}),
-      });
+  describe('which credential is served', () => {
+    const PINNED_REF = 'cc_credentials:cred-pinned';
+    const pinnedAuth = codexAuth('pinned');
 
-      // Route by number of bind args: project query binds 2 args, user query binds 1.
-      const runUpdate = vi.fn().mockResolvedValue({});
-      const prepare = vi.fn((sql: string) => {
-        if (sql.includes('UPDATE credentials')) {
-          return { bind: () => ({ run: runUpdate }) };
-        }
-        if (sql.includes('project_id = ?')) {
-          return { bind: projectBind };
-        }
-        return { bind: userBind };
-      });
-      vi.mocked(env.DATABASE.prepare).mockImplementation(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        prepare as any
-      );
-      return { projectFirst, userFirst, projectBind, userBind, runUpdate };
-    }
-
-    it('prefers active project-scoped row when projectId is supplied', async () => {
-      const { do: doInstance, env } = createDO();
-      const { projectFirst, userFirst, runUpdate } = setupScopedCredentials(env, {
-        projectRow: { id: 'proj-cred-1', is_active: 1 },
-        userRow: { id: 'user-cred-1' },
-      });
-
-      vi.mocked(fetch).mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            access_token: 'new-access',
-            refresh_token: 'new-refresh',
-            id_token: 'new-id',
-          }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } }
-        )
-      );
+    it('refreshes a cc-only pinned account against its own row and leaves the default alone', async () => {
+      const { do: doInstance } = createDO();
+      await setupCredentialFound(); // the user's default (legacy row)
+      await seedCc('cred-pinned', pinnedAuth);
+      mockSuccessfulRefreshResponse({ access_token: 'p2-access', refresh_token: 'p2-refresh' });
 
       const res = await doInstance.fetch(
         makeRequest({
-          refreshToken: 'stored-refresh',
-          userId: 'user-1',
-          projectId: 'proj-a',
+          refreshToken: 'pinned-refresh',
+          userId: USER,
+          credentialReferences: [PINNED_REF],
         })
       );
 
       expect(res.status).toBe(200);
-      expect(projectFirst).toHaveBeenCalled();
-      // User-scoped query should NOT be consulted — project row was active.
-      expect(userFirst).not.toHaveBeenCalled();
-      // DB update targets the PROJECT-scoped row id.
-      expect(runUpdate).toHaveBeenCalled();
+      const json = await res.json();
+      expect(json.access_token).toBe('p2-access');
+      expect(json.refresh_token).toBe('p2-refresh');
+      const upstreamBody = JSON.parse(vi.mocked(fetch).mock.calls[0]?.[1]?.body as string);
+      expect(upstreamBody.refresh_token).toBe('pinned-refresh');
+      const pinned = JSON.parse(await secretOf('cc_credentials', 'cred-pinned'));
+      expect(pinned.tokens).toMatchObject({
+        refresh_token: 'p2-refresh',
+        account_id: 'acct-pinned',
+      });
+      await expectNoCredentialUpdate();
     });
 
-    it('blocks fallback when project-scoped row exists but is inactive (HIGH #2)', async () => {
-      const { do: doInstance, env } = createDO();
-      const { projectFirst, userFirst, runUpdate } = setupScopedCredentials(env, {
-        projectRow: { id: 'proj-cred-1', is_active: 0 },
-        userRow: { id: 'user-cred-1' }, // present but MUST NOT be used
-      });
+    it('answers a stale token on a pinned run with the pinned account only, and no refresh_token', async () => {
+      const { do: doInstance } = createDO();
+      await setupCredentialFound();
+      await seedCc('cred-pinned', pinnedAuth);
+
+      const res = await doInstance.fetch(
+        makeRequest({ refreshToken: 'unknown', userId: USER, credentialReferences: [PINNED_REF] })
+      );
+
+      const json = await res.json();
+      expect(json).toEqual({ access_token: 'pinned-access', id_token: 'pinned-id', stale: true });
+      expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+    });
+
+    it('chooses among several candidates by the refresh token the caller holds', async () => {
+      const { do: doInstance } = createDO();
+      await seedCc('cred-a', codexAuth('a'));
+      await seedCc('cred-b', codexAuth('b'));
+      mockSuccessfulRefreshResponse({ access_token: 'b2-access', refresh_token: 'b2-refresh' });
 
       const res = await doInstance.fetch(
         makeRequest({
-          refreshToken: 'stored-refresh',
-          userId: 'user-1',
-          projectId: 'proj-a',
+          refreshToken: 'b-refresh',
+          userId: USER,
+          credentialReferences: ['cc_credentials:cred-a', 'cc_credentials:cred-b'],
         })
       );
 
-      // Inactive project row blocks — return 401, do not fall back.
+      expect(res.status).toBe(200);
+      expect(JSON.parse(await secretOf('cc_credentials', 'cred-b')).tokens.refresh_token).toBe(
+        'b2-refresh'
+      );
+      expect(await secretOf('cc_credentials', 'cred-a')).toBe(codexAuth('a'));
+    });
+
+    it('hands out nothing when several candidates exist and the caller proves none', async () => {
+      const { do: doInstance } = createDO();
+      await seedCc('cred-a', codexAuth('a'));
+      await seedCc('cred-b', codexAuth('b'));
+
+      const res = await doInstance.fetch(
+        makeRequest({
+          refreshToken: 'unknown',
+          userId: USER,
+          credentialReferences: ['cc_credentials:cred-a', 'cc_credentials:cred-b'],
+        })
+      );
+
       expect(res.status).toBe(401);
-      const json = await res.json();
-      expect(json.error).toBe('refresh_token_invalidated');
-
-      expect(projectFirst).toHaveBeenCalled();
-      // User-scoped row MUST NOT be consulted when inactive project row is present.
-      expect(userFirst).not.toHaveBeenCalled();
-      // User-scoped row MUST NOT be updated (would leak rotation across projects).
-      expect(runUpdate).not.toHaveBeenCalled();
+      expect(await res.json()).toEqual({ error: 'refresh_token_invalidated' });
       expect(vi.mocked(fetch)).not.toHaveBeenCalled();
-      expect(mockLogWarn).toHaveBeenCalledWith(
-        'codex_refresh.inactive_project_credential_no_fallback',
-        expect.objectContaining({ userId: 'user-1', projectId: 'proj-a' })
-      );
     });
 
-    it('falls back to user-scoped row when no project row exists', async () => {
-      const { do: doInstance, env } = createDO();
-      const { projectFirst, userFirst } = setupScopedCredentials(env, {
-        projectRow: null,
-        userRow: { id: 'user-cred-1' },
-      });
+    it('an inactive pinned credential is not replaced by the active default', async () => {
+      const { do: doInstance } = createDO();
+      await setupCredentialFound();
+      await seedCc('cred-pinned', pinnedAuth, { active: false });
 
-      vi.mocked(fetch).mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            access_token: 'new-access',
-            refresh_token: 'new-refresh',
-          }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } }
-        )
+      const res = await doInstance.fetch(
+        makeRequest({
+          refreshToken: 'pinned-refresh',
+          userId: USER,
+          credentialReferences: [PINNED_REF],
+        })
       );
+
+      expect(res.status).toBe(401);
+      expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+      expect(await secretOf('cc_credentials', 'cred-pinned')).toBe(pinnedAuth);
+      await expectNoCredentialUpdate();
+    });
+
+    it.each([
+      { owner: 'user-2', status: 401 },
+      { owner: USER, status: 200 },
+    ])(
+      'reads a candidate only when it belongs to the caller (owner $owner)',
+      async ({ owner, status }) => {
+        const { do: doInstance } = createDO();
+        await seedCc('cred-pinned', pinnedAuth, { owner });
+        mockSuccessfulRefreshResponse();
+
+        const res = await doInstance.fetch(
+          makeRequest({
+            refreshToken: 'pinned-refresh',
+            userId: USER,
+            credentialReferences: [PINNED_REF],
+          })
+        );
+
+        expect(res.status).toBe(status);
+        expect(vi.mocked(fetch)).toHaveBeenCalledTimes(status === 200 ? 1 : 0);
+      }
+    );
+
+    it('never serves a platform credential reference', async () => {
+      const { do: doInstance } = createDO();
+      await setupCredentialFound();
 
       const res = await doInstance.fetch(
         makeRequest({
           refreshToken: 'stored-refresh',
-          userId: 'user-1',
-          projectId: 'proj-a',
+          userId: USER,
+          credentialReferences: ['platform_credentials:plat-1'],
         })
       );
 
-      expect(res.status).toBe(200);
-      expect(projectFirst).toHaveBeenCalled();
-      expect(userFirst).toHaveBeenCalled(); // fallback occurred
+      expect(res.status).toBe(401);
+      expect(vi.mocked(fetch)).not.toHaveBeenCalled();
     });
 
-    it('uses user-scoped row when no projectId is supplied', async () => {
-      const { do: doInstance, env } = createDO();
-      const { projectFirst, userFirst } = setupScopedCredentials(env, {
-        projectRow: null,
-        userRow: { id: 'user-cred-1' },
+    it('returns 400 when the candidate list is missing or empty', async () => {
+      const { do: doInstance } = createDO();
+      for (const credentialReferences of [undefined, [], [''], [42]]) {
+        const res = await doInstance.fetch(
+          makeRequest({ refreshToken: 'stored-refresh', userId: USER, credentialReferences })
+        );
+        expect(res.status).toBe(400);
+      }
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Write-back — compare-and-set on the ciphertext read, mirror by identity
+  // -----------------------------------------------------------------------
+
+  describe('write-back', () => {
+    it('rotates every stored copy of the same credential generation, and no other account', async () => {
+      const { do: doInstance } = createDO();
+      const original = await setupCredentialFound();
+      await seedCc('cred-copy', storedAuthJson, { copyOf: original });
+      await seedCc('cred-other', codexAuth('other'));
+      mockSuccessfulRefreshResponse();
+
+      const res = await doInstance.fetch(
+        makeRequest({ refreshToken: 'stored-refresh', userId: USER })
+      );
+
+      expect(res.status).toBe(200);
+      const legacy = await secretOf('credentials', 'cred-1');
+      expect(JSON.parse(legacy).tokens.refresh_token).toBe('new-refresh');
+      // The copy now holds exactly the same ciphertext as the primary.
+      expect(await secretOf('cc_credentials', 'cred-copy')).toBe(legacy);
+      expect(await secretOf('cc_credentials', 'cred-other')).toBe(codexAuth('other'));
+      expect(mockLogInfo).toHaveBeenCalledWith(
+        'codex_refresh.rotation_stored',
+        expect.objectContaining({ credentialReference: DEFAULT_REF, mirroredRows: 1 })
+      );
+    });
+
+    it('does not mirror into a row of another user holding the same ciphertext', async () => {
+      const { do: doInstance } = createDO();
+      const original = await setupCredentialFound();
+      await seedCc('cred-foreign', storedAuthJson, { copyOf: original, owner: 'user-2' });
+      mockSuccessfulRefreshResponse();
+
+      await doInstance.fetch(makeRequest({ refreshToken: 'stored-refresh', userId: USER }));
+
+      expect(await secretOf('cc_credentials', 'cred-foreign')).toBe(storedAuthJson);
+    });
+
+    it('a default switch while OpenAI answers leaves the new default intact', async () => {
+      const { do: doInstance } = createDO();
+      const original = await setupCredentialFound();
+      await seedCc('cred-copy', storedAuthJson, { copyOf: original });
+      const switched = await encrypt(codexAuth('switched'), ENCRYPTION_KEY);
+      vi.mocked(fetch).mockImplementation(async () => {
+        // The user replaces their default account mid-refresh (saveAgentCredentialForUser
+        // rewrites the legacy row in place).
+        sqlite
+          .prepare(`UPDATE credentials SET encrypted_token = ?, iv = ? WHERE id = 'cred-1'`)
+          .run(switched.ciphertext, switched.iv);
+        return new Response(
+          JSON.stringify({ access_token: 'new-access', refresh_token: 'new-refresh' }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
       });
 
-      vi.mocked(fetch).mockResolvedValue(
-        new Response(JSON.stringify({ access_token: 'new', refresh_token: 'new-rt' }), {
+      const res = await doInstance.fetch(
+        makeRequest({ refreshToken: 'stored-refresh', userId: USER })
+      );
+
+      // The caller proved possession and still gets its own successor tokens.
+      expect(res.status).toBe(200);
+      expect((await res.json()).refresh_token).toBe('new-refresh');
+      expect(await secretOf('credentials', 'cred-1')).toBe(codexAuth('switched'));
+      // A lost compare-and-set mirrors nothing.
+      expect(await secretOf('cc_credentials', 'cred-copy')).toBe(storedAuthJson);
+      expect(mockLogWarn).toHaveBeenCalledWith(
+        'codex_refresh.rotation_cas_lost',
+        expect.objectContaining({ credentialReference: DEFAULT_REF })
+      );
+    });
+
+    it('a pin deactivated while OpenAI answers is not written', async () => {
+      const { do: doInstance } = createDO();
+      await seedCc('cred-pinned', codexAuth('pinned'));
+      vi.mocked(fetch).mockImplementation(async () => {
+        sqlite.prepare(`UPDATE cc_credentials SET is_active = 0 WHERE id = 'cred-pinned'`).run();
+        return new Response(JSON.stringify({ access_token: 'x', refresh_token: 'y' }), {
           status: 200,
-          headers: { 'Content-Type': 'application/json' },
+        });
+      });
+
+      await doInstance.fetch(
+        makeRequest({
+          refreshToken: 'pinned-refresh',
+          userId: USER,
+          credentialReferences: ['cc_credentials:cred-pinned'],
         })
       );
 
-      const res = await doInstance.fetch(
-        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' })
-      );
-
-      expect(res.status).toBe(200);
-      // No projectId → skip project query entirely.
-      expect(projectFirst).not.toHaveBeenCalled();
-      expect(userFirst).toHaveBeenCalled();
+      expect(await secretOf('cc_credentials', 'cred-pinned')).toBe(codexAuth('pinned'));
     });
   });
 
   // -----------------------------------------------------------------------
-  // CORE FIX — dual-write: rotation must mirror into cc_credentials
-  // (regression for the 429 desync: legacy `credentials` was updated but the
-  //  composable-credentials `cc_credentials` snapshot stayed frozen at backfill)
+  // Grace entries are bound to the credential they were rotated out of
   // -----------------------------------------------------------------------
 
-  describe('dual-write — cc_credentials mirror after rotation', () => {
-    /**
-     * Route the D1 mock across all four statements the rotation path issues:
-     *  - `cc_credentials`  → the mirror UPDATE (checked FIRST: the project-scope
-     *    variant also contains `att.project_id = ?`, which would otherwise be
-     *    swallowed by the project-SELECT route below)
-     *  - `UPDATE credentials` → the legacy persist
-     *  - `project_id = ?`  → the project-scoped getStoredCredential SELECT
-     *  - else              → the user-scoped getStoredCredential SELECT
-     */
-    function setupDualWriteCredentials(
-      env: ReturnType<typeof createMockEnv>,
-      opts: { projectId?: string } = {}
-    ) {
-      const legacyRun = vi.fn().mockResolvedValue({});
-      const legacyBind = vi.fn().mockReturnValue({ run: legacyRun });
-      // agent-sync reads `result.meta.changes` — must be a real shape, not {}.
-      const ccRun = vi.fn().mockResolvedValue({ meta: { changes: 1 } });
-      const ccBind = vi.fn().mockReturnValue({ run: ccRun });
-
-      const credRow = {
-        id: 'cred-1',
-        encrypted_token: 'encrypted-data',
-        iv: 'test-iv',
-        is_active: 1,
-      };
-      const projectFirst = vi.fn().mockResolvedValue(opts.projectId ? credRow : null);
-      const userFirst = vi.fn().mockResolvedValue(credRow);
-      const projectSelectBind = vi.fn().mockReturnValue({ first: projectFirst });
-      const userSelectBind = vi.fn().mockReturnValue({ first: userFirst });
-
-      let ccSql = '';
-      const prepare = vi.fn((sql: string) => {
-        if (sql.includes('cc_credentials')) {
-          ccSql = sql;
-          return { bind: ccBind };
-        }
-        if (sql.includes('UPDATE credentials')) {
-          return { bind: legacyBind };
-        }
-        if (sql.includes('project_id = ?')) {
-          return { bind: projectSelectBind };
-        }
-        return { bind: userSelectBind };
-      });
-      vi.mocked(env.DATABASE.prepare).mockImplementation(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        prepare as any
-      );
-      return {
-        legacyBind,
-        legacyRun,
-        ccBind,
-        ccRun,
-        projectFirst,
-        userFirst,
-        getCcSql: () => ccSql,
-      };
-    }
-
-    it('mirrors the rotated token into cc_credentials for a user-scoped credential', async () => {
-      const { do: doInstance, env } = createDO();
-      const { legacyBind, ccBind, getCcSql } = setupDualWriteCredentials(env);
-      mockSuccessfulRefreshResponse();
-
-      const res = await doInstance.fetch(
-        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' })
-      );
-
-      expect(res.status).toBe(200);
-      // Legacy credentials row updated with the freshly-encrypted ciphertext/iv.
-      expect(legacyBind).toHaveBeenCalledWith('new-encrypted', 'new-iv', 'cred-1');
-      // cc_credentials mirror updated exactly once with the SAME ciphertext/iv.
-      expect(ccBind).toHaveBeenCalledTimes(1);
-      const ccArgs = ccBind.mock.calls[0];
-      expect(ccArgs[0]).toBe('new-encrypted');
-      expect(ccArgs[1]).toBe('new-iv');
-      expect(ccArgs).toContain('user-1');
-      expect(ccArgs).toContain('openai-codex');
-      // (openai-codex, oauth-token) maps to the auth-json cc kind.
-      expect(ccArgs).toContain('auth-json');
-      // User scope → IS NULL predicate, NOT the project equality predicate.
-      expect(getCcSql()).toContain('att.project_id IS NULL');
-      expect(getCcSql()).not.toContain('att.project_id = ?');
-    });
-
-    it('mirrors the rotated token into the project-scoped cc_credentials row', async () => {
-      const { do: doInstance, env } = createDO();
-      const { ccBind, getCcSql } = setupDualWriteCredentials(env, {
-        projectId: 'proj-a',
-      });
-      mockSuccessfulRefreshResponse();
+  describe('grace entries are credential-bound', () => {
+    it.each([
+      { name: 'another credential', boundTo: DEFAULT_REF, expectFull: false },
+      { name: 'no credential (pre-binding entry)', boundTo: undefined, expectFull: false },
+      { name: 'the served credential', boundTo: 'cc_credentials:cred-pinned', expectFull: true },
+    ])('an entry bound to $name', async ({ boundTo, expectFull }) => {
+      const storage = await createRotatedTokenStorage('old-refresh', 60_000, boundTo);
+      const { do: doInstance } = createDO({}, storage);
+      await setupCredentialFound();
+      await seedCc('cred-pinned', codexAuth('pinned'));
 
       const res = await doInstance.fetch(
         makeRequest({
-          refreshToken: 'stored-refresh',
-          userId: 'user-1',
-          projectId: 'proj-a',
+          refreshToken: 'old-refresh',
+          userId: USER,
+          credentialReferences: ['cc_credentials:cred-pinned'],
         })
       );
 
-      expect(res.status).toBe(200);
-      expect(ccBind).toHaveBeenCalledTimes(1);
-      const ccArgs = ccBind.mock.calls[0];
-      expect(ccArgs[0]).toBe('new-encrypted');
-      expect(ccArgs[1]).toBe('new-iv');
-      // Mirror targets the credential's OWN project scope, not a workspace scope.
-      expect(ccArgs).toContain('proj-a');
-      // Project scope → equality predicate, NOT the IS NULL fallback.
-      expect(getCcSql()).toContain('att.project_id = ?');
-    });
-
-    it('vertical slice: legacy and cc_credentials receive identical ciphertext/iv', async () => {
-      const { do: doInstance, env } = createDO();
-      const { legacyBind, ccBind } = setupDualWriteCredentials(env);
-      mockSuccessfulRefreshResponse();
-
-      const res = await doInstance.fetch(
-        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' })
-      );
-
-      expect(res.status).toBe(200);
-      const legacyArgs = legacyBind.mock.calls[0];
-      const ccArgs = ccBind.mock.calls[0];
-      // The desync bug rotated legacy without cc; the fix re-uses the SAME
-      // ciphertext/iv so a freshly-seeded auth.json reflects the rotated token.
-      expect(legacyArgs[0]).toBe('new-encrypted');
-      expect(legacyArgs[1]).toBe('new-iv');
-      expect(ccArgs[0]).toBe(legacyArgs[0]);
-      expect(ccArgs[1]).toBe(legacyArgs[1]);
-    });
-
-    it('does NOT touch cc_credentials on the stale-token branch', async () => {
-      const { do: doInstance, env } = createDO();
-      const { legacyBind, ccBind } = setupDualWriteCredentials(env);
-
-      const res = await doInstance.fetch(
-        // Mismatched token, no grace entry → stale branch, no rotation.
-        makeRequest({ refreshToken: 'rt_stale_token', userId: 'user-1' })
-      );
-
-      expect(res.status).toBe(200);
       const json = await res.json();
-      expect(json.stale).toBe(true);
-      // No rotation happened → neither table is written.
-      expect(legacyBind).not.toHaveBeenCalled();
-      expect(ccBind).not.toHaveBeenCalled();
-      expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+      expect(json.access_token).toBe('pinned-access');
+      expect(json.refresh_token).toBe(expectFull ? 'pinned-refresh' : undefined);
+      expect(json.stale).toBe(expectFull ? undefined : true);
     });
 
-    it('keeps the refresh successful when the cc_credentials mirror fails (non-fatal)', async () => {
-      const { do: doInstance, env } = createDO();
-      const { ccRun } = setupDualWriteCredentials(env);
-      ccRun.mockRejectedValue(new Error('cc write failed'));
+    it('records the credential a token was rotated out of', async () => {
+      const { do: doInstance, ctx } = createDO();
+      await seedCc('cred-pinned', codexAuth('pinned'));
       mockSuccessfulRefreshResponse();
 
-      const res = await doInstance.fetch(
-        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' })
-      );
-
-      // Legacy persist already succeeded — a cc mirror failure must not 500
-      // or withhold the rotated token from the caller.
-      expect(res.status).toBe(200);
-      const json = await res.json();
-      expect(json.refresh_token).toBe('new-refresh');
-      expect(mockLogError).toHaveBeenCalledWith(
-        'codex_refresh.cc_sync_failed',
-        expect.objectContaining({ userId: 'user-1', credentialId: 'cred-1' })
-      );
-      // Invariant: the desync diagnostic must never carry token material —
-      // not the encrypted ciphertext, the iv, or any decrypted secret.
-      expect(mockLogError).toHaveBeenCalledWith(
-        'codex_refresh.cc_sync_failed',
-        expect.not.objectContaining({
-          encryptedToken: expect.anything(),
-          ciphertext: expect.anything(),
-          iv: expect.anything(),
-        })
-      );
-      // Value-content check: even though the freshly-encrypted ciphertext/iv are
-      // in lexical scope at the catch block, the serialized log payload must not
-      // contain their VALUES under ANY key (e.g. echoed inside an error message).
-      const syncFailCall = mockLogError.mock.calls.find(
-        (call) => call[0] === 'codex_refresh.cc_sync_failed'
-      );
-      expect(syncFailCall).toBeDefined();
-      const syncFailPayload = JSON.stringify(syncFailCall?.[1] ?? {});
-      expect(syncFailPayload).not.toContain('new-encrypted');
-      expect(syncFailPayload).not.toContain('new-iv');
-      expect(syncFailPayload).not.toContain('new-refresh');
-    });
-
-    it('falls back to the user-scoped cc_credentials row when the project row is absent', async () => {
-      const { do: doInstance, env } = createDO();
-      // projectId supplied to the DO, but getStoredCredential finds NO active
-      // project row → it falls back to the user-scoped credential. The mirror
-      // must follow that same fallback and target the IS NULL (user) scope,
-      // NOT the project equality predicate, or the rotated token lands on a row
-      // that resolution never reads.
-      const { ccBind, getCcSql, projectFirst, userFirst } = setupDualWriteCredentials(env);
-      mockSuccessfulRefreshResponse();
-
-      const res = await doInstance.fetch(
+      await doInstance.fetch(
         makeRequest({
-          refreshToken: 'stored-refresh',
-          userId: 'user-1',
-          projectId: 'proj-a',
+          refreshToken: 'pinned-refresh',
+          userId: USER,
+          credentialReferences: ['cc_credentials:cred-pinned'],
         })
       );
 
-      expect(res.status).toBe(200);
-      // Project SELECT was attempted (returned null) then user SELECT was used.
-      expect(projectFirst).toHaveBeenCalled();
-      expect(userFirst).toHaveBeenCalled();
-      expect(ccBind).toHaveBeenCalledTimes(1);
-      const ccArgs = ccBind.mock.calls[0];
-      expect(ccArgs[0]).toBe('new-encrypted');
-      expect(ccArgs[1]).toBe('new-iv');
-      // Fallback scope → IS NULL predicate, never the project equality predicate.
-      expect(getCcSql()).toContain('att.project_id IS NULL');
-      expect(getCcSql()).not.toContain('att.project_id = ?');
-    });
-
-    it('warns codex_refresh.cc_sync_no_row when the mirror matches no row (no token material)', async () => {
-      const { do: doInstance, env } = createDO();
-      const { ccRun } = setupDualWriteCredentials(env);
-      // Legacy rotated, but the cc_credentials UPDATE matched zero rows — the
-      // exact silent desync this fix exists to surface.
-      ccRun.mockResolvedValue({ meta: { changes: 0 } });
-      mockSuccessfulRefreshResponse();
-
-      const res = await doInstance.fetch(
-        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' })
-      );
-
-      // Still a successful refresh — the legacy persist already succeeded.
-      expect(res.status).toBe(200);
-      expect(mockLogWarn).toHaveBeenCalledWith(
-        'codex_refresh.cc_sync_no_row',
+      expect(ctx.storage._store.get('rotated-tokens')).toEqual([
         expect.objectContaining({
-          userId: 'user-1',
-          credentialId: 'cred-1',
-          scopeProjectId: null,
-        })
-      );
-      // The desync diagnostic must never carry token material.
-      expect(mockLogWarn).toHaveBeenCalledWith(
-        'codex_refresh.cc_sync_no_row',
-        expect.not.objectContaining({
-          encryptedToken: expect.anything(),
-          ciphertext: expect.anything(),
-          iv: expect.anything(),
-          refresh_token: expect.anything(),
-        })
-      );
-      // Value-content check: the serialized payload must not contain the token
-      // VALUES under any key, not just exclude the known key names.
-      const noRowCall = mockLogWarn.mock.calls.find(
-        (call) => call[0] === 'codex_refresh.cc_sync_no_row'
-      );
-      expect(noRowCall).toBeDefined();
-      const noRowPayload = JSON.stringify(noRowCall?.[1] ?? {});
-      expect(noRowPayload).not.toContain('new-encrypted');
-      expect(noRowPayload).not.toContain('new-iv');
-      expect(noRowPayload).not.toContain('new-refresh');
-    });
-
-    it('scopes the mirror UPDATE to the credential owner (cross-user defence)', async () => {
-      const { do: doInstance, env } = createDO();
-      const { getCcSql } = setupDualWriteCredentials(env);
-      mockSuccessfulRefreshResponse();
-
-      const res = await doInstance.fetch(
-        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' })
-      );
-
-      expect(res.status).toBe(200);
-      // A shared cc_configurations/cc_attachments row owned by a different user
-      // must not be writable: the UPDATE binds owner_id = att.user_id on both
-      // the credential and the configuration so a cross-user attachment cannot
-      // be the join target.
-      const ccSql = getCcSql();
-      expect(ccSql).toContain('cred.owner_id = att.user_id');
-      expect(ccSql).toContain('cfg.owner_id = att.user_id');
-    });
-
-    it('writes NEITHER legacy nor cc_credentials when rate-limited (429)', async () => {
-      const windowSeconds = 60;
-      const now = Math.floor(Date.now() / 1000);
-      const currentWindowStart = Math.floor(now / windowSeconds) * windowSeconds;
-
-      const { do: doInstance, env } = createDO(
-        {
-          RATE_LIMIT_CODEX_REFRESH_PER_HOUR: '3',
-          RATE_LIMIT_CODEX_REFRESH_WINDOW_SECONDS: windowSeconds.toString(),
-        },
-        {
-          'rate-limit:cred-1': { windowStart: currentWindowStart, count: 3 },
-        }
-      );
-      const { legacyBind, ccBind } = setupDualWriteCredentials(env);
-
-      const res = await doInstance.fetch(
-        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' })
-      );
-
-      expect(res.status).toBe(429);
-      // Rate-limit rejection happens before any rotation — so the legacy persist
-      // and the cc_credentials mirror must BOTH be untouched. Without this guard
-      // a regression that moved the rate-limit check after the rotation could
-      // silently rotate (and desync) tokens on every throttled request.
-      expect(vi.mocked(fetch)).not.toHaveBeenCalled();
-      expect(legacyBind).not.toHaveBeenCalled();
-      expect(ccBind).not.toHaveBeenCalled();
+          tokenHash: await sha256Hex('pinned-refresh'),
+          credentialReference: 'cc_credentials:cred-pinned',
+        }),
+      ]);
     });
   });
-
-  // -----------------------------------------------------------------------
-  // MEDIUM #5 — DO-state rate limit (atomic, 429 with Retry-After)
-  // -----------------------------------------------------------------------
 
   describe('MEDIUM #5 — rate limit', () => {
     it('counts successful refresh requests in ctx.storage', async () => {
@@ -993,7 +848,7 @@ describe('CodexRefreshLock', () => {
       } = createDO({
         RATE_LIMIT_CODEX_REFRESH_PER_HOUR: '5',
       });
-      setupCredentialFound(env);
+      await setupCredentialFound(env);
       vi.mocked(fetch).mockResolvedValue(
         new Response(JSON.stringify({ access_token: 'a', refresh_token: 'r' }), {
           status: 200,
@@ -1005,10 +860,10 @@ describe('CodexRefreshLock', () => {
 
       // Rate-limit state must have been written at least once, keyed per-credential.
       expect(ctx.storage.put).toHaveBeenCalledWith(
-        'rate-limit:cred-1',
+        'rate-limit:credentials:cred-1',
         expect.objectContaining({ count: expect.any(Number) })
       );
-      const stored = ctx.storage._store.get('rate-limit:cred-1') as {
+      const stored = ctx.storage._store.get('rate-limit:credentials:cred-1') as {
         count: number;
         windowStart: number;
       };
@@ -1030,10 +885,10 @@ describe('CodexRefreshLock', () => {
           RATE_LIMIT_CODEX_REFRESH_WINDOW_SECONDS: windowSeconds.toString(),
         },
         {
-          'rate-limit:cred-1': { windowStart: currentWindowStart, count: 3 },
+          'rate-limit:credentials:cred-1': { windowStart: currentWindowStart, count: 3 },
         }
       );
-      setupCredentialFound(env);
+      await setupCredentialFound(env);
 
       const res = await doInstance.fetch(
         makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' })
@@ -1050,7 +905,7 @@ describe('CodexRefreshLock', () => {
       // No upstream fetch and no DB write should have happened.
       expect(vi.mocked(fetch)).not.toHaveBeenCalled();
       // Count must NOT be incremented past the limit.
-      const stored = ctx.storage._store.get('rate-limit:cred-1') as { count: number };
+      const stored = ctx.storage._store.get('rate-limit:credentials:cred-1') as { count: number };
       expect(stored.count).toBe(3);
     });
 
@@ -1070,10 +925,10 @@ describe('CodexRefreshLock', () => {
           RATE_LIMIT_CODEX_REFRESH_WINDOW_SECONDS: windowSeconds.toString(),
         },
         {
-          'rate-limit:cred-1': { windowStart: stalePastWindowStart, count: 3 },
+          'rate-limit:credentials:cred-1': { windowStart: stalePastWindowStart, count: 3 },
         }
       );
-      setupCredentialFound(env);
+      await setupCredentialFound(env);
       vi.mocked(fetch).mockResolvedValue(
         new Response(JSON.stringify({ access_token: 'a', refresh_token: 'r' }), {
           status: 200,
@@ -1086,7 +941,7 @@ describe('CodexRefreshLock', () => {
       );
 
       expect(res.status).toBe(200);
-      const stored = ctx.storage._store.get('rate-limit:cred-1') as {
+      const stored = ctx.storage._store.get('rate-limit:credentials:cred-1') as {
         count: number;
         windowStart: number;
       };
@@ -1114,7 +969,7 @@ describe('CodexRefreshLock', () => {
           'rate-limit:other-cred': { windowStart: currentWindowStart, count: 3 },
         }
       );
-      setupCredentialFound(env);
+      await setupCredentialFound(env);
       vi.mocked(fetch).mockResolvedValue(
         new Response(JSON.stringify({ access_token: 'a', refresh_token: 'r' }), {
           status: 200,
@@ -1128,7 +983,7 @@ describe('CodexRefreshLock', () => {
 
       // cred-1 is unaffected by other-cred's exhausted bucket.
       expect(res.status).toBe(200);
-      const cred1 = ctx.storage._store.get('rate-limit:cred-1') as { count: number };
+      const cred1 = ctx.storage._store.get('rate-limit:credentials:cred-1') as { count: number };
       expect(cred1.count).toBe(1);
       // The unrelated credential's bucket must be left untouched.
       const otherCred = ctx.storage._store.get('rate-limit:other-cred') as {
@@ -1145,7 +1000,7 @@ describe('CodexRefreshLock', () => {
       } = createDO({
         RATE_LIMIT_CODEX_REFRESH_PER_HOUR: '5',
       });
-      setupCredentialFound(env);
+      await setupCredentialFound(env);
 
       const res = await doInstance.fetch(
         makeRequest({ refreshToken: 'rt_stale_token', userId: 'user-1' })
@@ -1156,8 +1011,11 @@ describe('CodexRefreshLock', () => {
       expect(json.stale).toBe(true);
 
       // Cached/stale responses must not touch the rate-limit bucket.
-      expect(ctx.storage.put).not.toHaveBeenCalledWith('rate-limit:cred-1', expect.anything());
-      expect(ctx.storage._store.has('rate-limit:cred-1')).toBe(false);
+      expect(ctx.storage.put).not.toHaveBeenCalledWith(
+        'rate-limit:credentials:cred-1',
+        expect.anything()
+      );
+      expect(ctx.storage._store.has('rate-limit:credentials:cred-1')).toBe(false);
       expect(vi.mocked(fetch)).not.toHaveBeenCalled();
     });
 
@@ -1175,8 +1033,11 @@ describe('CodexRefreshLock', () => {
       expect(json.refresh_token).toBe('stored-refresh');
 
       // Grace-window hits return stored tokens directly — no budget consumed.
-      expect(ctx.storage.put).not.toHaveBeenCalledWith('rate-limit:cred-1', expect.anything());
-      expect(ctx.storage._store.has('rate-limit:cred-1')).toBe(false);
+      expect(ctx.storage.put).not.toHaveBeenCalledWith(
+        'rate-limit:credentials:cred-1',
+        expect.anything()
+      );
+      expect(ctx.storage._store.has('rate-limit:credentials:cred-1')).toBe(false);
       expect(vi.mocked(fetch)).not.toHaveBeenCalled();
     });
   });
@@ -1190,7 +1051,7 @@ describe('CodexRefreshLock', () => {
       const { do: doInstance, env } = createDO({
         CODEX_EXPECTED_SCOPES: 'openid,offline_access',
       });
-      setupCredentialFound(env);
+      await setupCredentialFound(env);
 
       vi.mocked(fetch).mockResolvedValue(
         new Response(
@@ -1210,8 +1071,7 @@ describe('CodexRefreshLock', () => {
       expect(res.status).toBe(502);
       const json = await res.json();
       expect(json.error).toBe('upstream_unexpected_scope');
-      expect(vi.mocked(encrypt)).not.toHaveBeenCalled();
-      expectNoCredentialUpdate(env);
+      await expectNoCredentialUpdate(env);
       expect(mockLogWarn).toHaveBeenCalledWith(
         'codex_refresh.unexpected_scopes_blocked',
         expect.objectContaining({ unexpectedScopes: 'admin:write' })
@@ -1222,7 +1082,7 @@ describe('CodexRefreshLock', () => {
       const { do: doInstance, env } = createDO({
         CODEX_EXPECTED_SCOPES: 'openid,offline_access',
       });
-      setupCredentialFound(env);
+      await setupCredentialFound(env);
 
       vi.mocked(fetch).mockResolvedValue(
         new Response(
@@ -1239,7 +1099,7 @@ describe('CodexRefreshLock', () => {
         makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' })
       );
       expect(res.status).toBe(200);
-      expect(vi.mocked(encrypt)).toHaveBeenCalled();
+      await expectCredentialUpdated();
     });
 
     it('uses default allowlist and blocks when CODEX_EXPECTED_SCOPES is unset', async () => {
@@ -1249,7 +1109,7 @@ describe('CodexRefreshLock', () => {
       delete (env as Record<string, unknown>).CODEX_EXPECTED_SCOPES;
       const ctx = createMockCtx();
       const doInstance = new CodexRefreshLock(ctx, env);
-      setupCredentialFound(env);
+      await setupCredentialFound(env);
 
       vi.mocked(fetch).mockResolvedValue(
         new Response(
@@ -1268,8 +1128,7 @@ describe('CodexRefreshLock', () => {
       expect(res.status).toBe(502);
       const json = await res.json();
       expect(json.error).toBe('upstream_unexpected_scope');
-      expect(vi.mocked(encrypt)).not.toHaveBeenCalled();
-      expectNoCredentialUpdate(env);
+      await expectNoCredentialUpdate(env);
       expect(mockLogWarn).toHaveBeenCalledWith(
         'codex_refresh.unexpected_scopes_blocked',
         expect.objectContaining({ unexpectedScopes: 'admin:write' })
@@ -1278,7 +1137,7 @@ describe('CodexRefreshLock', () => {
 
     it('allows all scopes when CODEX_EXPECTED_SCOPES is set to empty string (escape hatch)', async () => {
       const { do: doInstance, env } = createDO({ CODEX_EXPECTED_SCOPES: '' });
-      setupCredentialFound(env);
+      await setupCredentialFound(env);
 
       vi.mocked(fetch).mockResolvedValue(
         new Response(
@@ -1295,14 +1154,14 @@ describe('CodexRefreshLock', () => {
         makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' })
       );
       expect(res.status).toBe(200);
-      expect(vi.mocked(encrypt)).toHaveBeenCalled();
+      await expectCredentialUpdated();
     });
 
     it('blocks non-string scope values by default', async () => {
       const { do: doInstance, env } = createDO({
         CODEX_EXPECTED_SCOPES: 'openid',
       });
-      setupCredentialFound(env);
+      await setupCredentialFound(env);
 
       vi.mocked(fetch).mockResolvedValue(
         new Response(
@@ -1323,8 +1182,7 @@ describe('CodexRefreshLock', () => {
         'codex_refresh.scope_validation_nonstring',
         expect.objectContaining({ scopeType: 'number' })
       );
-      expect(vi.mocked(encrypt)).not.toHaveBeenCalled();
-      expectNoCredentialUpdate(env);
+      await expectNoCredentialUpdate(env);
     });
 
     it('blocks non-string scope values even when CODEX_SCOPE_VALIDATION_MODE=warn is set', async () => {
@@ -1332,7 +1190,7 @@ describe('CodexRefreshLock', () => {
         CODEX_EXPECTED_SCOPES: 'openid',
         CODEX_SCOPE_VALIDATION_MODE: 'warn',
       });
-      setupCredentialFound(env);
+      await setupCredentialFound(env);
 
       vi.mocked(fetch).mockResolvedValue(
         new Response(
@@ -1353,15 +1211,14 @@ describe('CodexRefreshLock', () => {
         'codex_refresh.scope_validation_nonstring',
         expect.objectContaining({ scopeType: 'number' })
       );
-      expect(vi.mocked(encrypt)).not.toHaveBeenCalled();
-      expectNoCredentialUpdate(env);
+      await expectNoCredentialUpdate(env);
     });
 
     it('allows responses with no scope field', async () => {
       const { do: doInstance, env } = createDO({
         CODEX_EXPECTED_SCOPES: 'openid,offline_access',
       });
-      setupCredentialFound(env);
+      await setupCredentialFound(env);
 
       vi.mocked(fetch).mockResolvedValue(
         new Response(
@@ -1388,7 +1245,7 @@ describe('CodexRefreshLock', () => {
     const { do: doInstance, env } = createDO({
       CODEX_REFRESH_UPSTREAM_TIMEOUT_MS: '1',
     });
-    setupCredentialFound(env);
+    await setupCredentialFound(env);
 
     vi.mocked(fetch).mockImplementation(
       () =>
@@ -1407,7 +1264,7 @@ describe('CodexRefreshLock', () => {
 
   it('returns 502 with upstream_error on network failure', async () => {
     const { do: doInstance, env } = createDO();
-    setupCredentialFound(env);
+    await setupCredentialFound(env);
 
     vi.mocked(fetch).mockRejectedValue(new TypeError('Network error'));
 
@@ -1421,7 +1278,7 @@ describe('CodexRefreshLock', () => {
 
   it('filters upstream error responses to only safe fields', async () => {
     const { do: doInstance, env } = createDO();
-    setupCredentialFound(env);
+    await setupCredentialFound(env);
 
     vi.mocked(fetch).mockResolvedValue(
       new Response(
@@ -1449,7 +1306,7 @@ describe('CodexRefreshLock', () => {
 
   it('parses OpenAI nested error form and surfaces refresh_token_invalidated (revoked token diagnostic)', async () => {
     const { do: doInstance, env } = createDO();
-    setupCredentialFound(env);
+    await setupCredentialFound(env);
     mockLogWarn.mockClear();
 
     // OpenAI returns the NESTED error shape (not flat OAuth2), which is what a
@@ -1496,7 +1353,7 @@ describe('CodexRefreshLock', () => {
 
   it('returns generic error for non-JSON upstream error responses', async () => {
     const { do: doInstance, env } = createDO();
-    setupCredentialFound(env);
+    await setupCredentialFound(env);
 
     vi.mocked(fetch).mockResolvedValue(
       new Response('<html>Server Error</html>', {
@@ -1533,7 +1390,7 @@ describe('CodexRefreshLock', () => {
     'returns the generic safe error for a garbage-but-valid-JSON upstream body (%s)',
     async (_label, body) => {
       const { do: doInstance, env } = createDO();
-      setupCredentialFound(env);
+      await setupCredentialFound(env);
       mockLogWarn.mockClear();
 
       vi.mocked(fetch).mockResolvedValue(
@@ -1573,7 +1430,7 @@ describe('CodexRefreshLock', () => {
     // object with no .code/.message, so neither is extracted — matching the
     // pre-fix blind-cast behavior for this shape.
     const { do: doInstance, env } = createDO();
-    setupCredentialFound(env);
+    await setupCredentialFound(env);
 
     vi.mocked(fetch).mockResolvedValue(
       new Response(JSON.stringify({ error: ['nested', 'array'] }), {
@@ -1599,7 +1456,7 @@ describe('CodexRefreshLock', () => {
       CODEX_REFRESH_UPSTREAM_URL: 'https://custom-auth.example.com/token',
       CODEX_CLIENT_ID: 'custom_client_id',
     });
-    setupCredentialFound(env);
+    await setupCredentialFound(env);
 
     vi.mocked(fetch).mockResolvedValue(
       new Response(
@@ -1641,27 +1498,10 @@ describe('CodexRefreshLock', () => {
 
   it('serializes concurrent refreshes: consumed token is not replayed to OpenAI', async () => {
     const { do: doInstance, env } = createDO();
-    setupCredentialFound(env);
+    await setupCredentialFound(env);
 
-    // Model the stored credential rotating in the DB. `decrypt` returns the
-    // CURRENT stored auth.json; `encrypt` (the write step after a successful
-    // OpenAI refresh) advances the stored refresh_token to the rotated value —
-    // exactly what writing the new auth.json to D1 does in production.
-    let currentRefresh = 'stored-refresh';
-    vi.mocked(decrypt).mockImplementation(async () =>
-      JSON.stringify({
-        tokens: {
-          access_token: 'stored-access',
-          refresh_token: currentRefresh,
-          id_token: 'stored-id',
-        },
-      })
-    );
-    vi.mocked(encrypt).mockImplementation(async () => {
-      currentRefresh = 'new-refresh';
-      return { ciphertext: 'new-encrypted', iv: 'new-iv' };
-    });
-
+    // The stored credential really rotates in the database: the second, queued
+    // request must re-read it inside the lock and take the grace path.
     // OpenAI returns the rotated token set. If this is called more than once,
     // the second call is a replay of a consumed token (the bug).
     mockSuccessfulRefreshResponse({

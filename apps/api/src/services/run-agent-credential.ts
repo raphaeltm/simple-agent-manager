@@ -26,7 +26,7 @@
 import type { CredentialKind } from '@simple-agent-manager/shared';
 import { type drizzle } from 'drizzle-orm/d1';
 
-import * as schema from '../db/schema';
+import type * as schema from '../db/schema';
 import { maybeJsonRecord } from '../lib/runtime-validation';
 import { getSelectedAgentCredentialReference } from './agent-key-resolution';
 import { ccKindForAgentCredential } from './composable-credentials/agent-sync';
