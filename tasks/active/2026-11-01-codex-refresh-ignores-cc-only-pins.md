@@ -117,3 +117,19 @@ user row in step with the default, so it does not cause or fix this.
 - Old `configurable-limits` source test passed only because the moved sync handler contained its
   string; repointed at the real messages-route enforcement (`readRequestBodyWithLimit`).
 - `routes/workspaces/runtime.ts` shrank 1863 → 1676 by extracting the sync route.
+
+## Staging Evidence (2026-11-08, deploy run 42461704638)
+
+- Smoke user pinned an older Codex account (`cc-cred-01KXMZ…`, Jul 16) to the hono profile
+  "Instant Codex" through the real UI (Settings → Agents → card → Use in profiles…). The default
+  stayed `cc-cred-01M0JB…`.
+- Three Instant Codex sessions with that profile: `agent_sessions` recorded
+  `agent_credential_reference = cc_credentials:cc-cred-01KXMZ…`, `scope = profile`.
+- Workers Observability, each run: `codex_refresh.request_received` (`candidateCount: 1`) →
+  `codex_refresh.upstream_rejected` with `credentialReference: cc_credentials:cc-cred-01KXMZ…`,
+  `upstreamErrorCode: refresh_token_expired`. The proxy refreshed the pinned account with its own
+  refresh token; that July sign-in is dead at OpenAI, so Codex reported "Authentication required".
+- D1 after the runs: default cc row and legacy row unchanged (same updated_at / iv); pinned row
+  unchanged (no successful rotation to store). Pre-fix, these runs would have taken the stale
+  branch against the legacy default row and been handed the default account's access token.
+- Remaining: a successful refresh on a live pinned non-default account (swap test).
