@@ -186,22 +186,26 @@ export async function appendDeploymentPublishJobEvent(
   const insert = db.insert(schema.deploymentPublishJobEvents).select(
     db
       .select({
-        id: sql<string>`${ulid()}`,
-        publishJobId: sql<string>`${input.publishJobId}`,
-        projectId: sql<string>`${input.projectId}`,
-        environmentId: sql<string>`${input.environmentId}`,
-        nodeId: sql<string>`${input.nodeId}`,
-        nodeIdentifier: sql<string>`${input.nodeId}`,
-        workspaceId: sql<string>`${input.workspaceId}`,
-        seq: sql<number>`(SELECT coalesce(max(seq), 0) + 1 FROM deployment_publish_job_events WHERE publish_job_id = ${input.publishJobId})`,
-        level: sql<string>`${normalizeLevel(input.level)}`,
-        eventType: sql<string>`${sanitizePublishEventText(input.eventType, 200)}`,
+        id: sql<string>`${ulid()}`.as('id'),
+        publishJobId: sql<string>`${input.publishJobId}`.as('publish_job_id'),
+        projectId: sql<string>`${input.projectId}`.as('project_id'),
+        environmentId: sql<string>`${input.environmentId}`.as('environment_id'),
+        nodeId: sql<string>`${input.nodeId}`.as('node_id'),
+        nodeIdentifier: sql<string>`${input.nodeId}`.as('node_identifier'),
+        workspaceId: sql<string>`${input.workspaceId}`.as('workspace_id'),
+        seq: sql<number>`(SELECT coalesce(max(seq), 0) + 1 FROM deployment_publish_job_events WHERE publish_job_id = ${input.publishJobId})`.as(
+          'seq'
+        ),
+        level: sql<string>`${normalizeLevel(input.level)}`.as('level'),
+        eventType: sql<string>`${sanitizePublishEventText(input.eventType, 200)}`.as('event_type'),
         step: sql<
           string | null
-        >`${input.currentStep ? sanitizePublishEventText(input.currentStep, 200) : null}`,
-        message: sql<string>`${sanitizePublishEventText(input.message)}`,
-        detailJson: sql<string | null>`${sanitizeDetail(input.detail)}`,
-        createdAt: sql<string>`${now}`,
+        >`${input.currentStep ? sanitizePublishEventText(input.currentStep, 200) : null}`.as(
+          'step'
+        ),
+        message: sql<string>`${sanitizePublishEventText(input.message)}`.as('message'),
+        detailJson: sql<string | null>`${sanitizeDetail(input.detail)}`.as('detail_json'),
+        createdAt: sql<string>`${now}`.as('created_at'),
       })
       .from(schema.deploymentPublishJobs)
       .where(predicate)
