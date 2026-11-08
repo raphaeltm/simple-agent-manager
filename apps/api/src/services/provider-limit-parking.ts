@@ -265,6 +265,8 @@ export async function repairProviderLimitIntents(
     userId: task.userId,
     creatorChatSessionId: task.chatSessionId,
     creator: 'system',
+    // SAM's fixed continuation text, not model- or agent-written.
+    promptAuthor: 'sam',
     request: {
       action: {
         kind: 'message_session',

@@ -1,9 +1,9 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version Change: 1.8.3 → 1.9.0
-Bump Rationale: MINOR - Add Principle XIV for configuration layers and consistent override UX.
-Added Principles: XIV. Layered Configuration & Consistent UX
+Version Change: 1.9.0 → 1.10.0
+Bump Rationale: MINOR - Add Principle XV reserving plain agent messages for human-written text.
+Added Principles: XV. Human Voice Is Reserved
 Modified Sections: None
 Templates Status:
   - plan-template.md: Compatible (existing Constitution Check covers the new principle)
@@ -323,6 +323,32 @@ Not every setting needs an override at every layer; precedence and supported sco
 **Rationale:** Users configure the same concepts at different levels. Consistent controls make those
 levels understandable as overrides and keep connection and editing workflows usable everywhere,
 including on a phone.
+
+### XV. Human Voice Is Reserved (NON-NEGOTIABLE)
+
+An agent treats a plain chat message as something a person said, and so does the person reading the
+chat. Only text a human wrote may arrive that way.
+
+**Rules:**
+
+- **Plain messages are human-written.** A typed message, a comment directive, or a prompt template a
+  human authored (a trigger, a schedule they created) may reach an agent as a plain chat message.
+- **Everything else is a pointer.** Text written by another agent, by SAM's model-driven assistants,
+  or by an outside system reaches an agent only as a SAM-authored notice that names IDs (event,
+  message, schedule). The agent reads the content through a tool that marks it untrusted and names
+  its verified sender. This holds for every delivery mode: queued, steered into a running turn, or
+  urgent stop-and-deliver.
+- **SAM's own fixed notices are not human voice.** They must say that they are system-generated and
+  must not quote agent-written or external text.
+- **Fail closed.** If the pointer transport is unavailable, refuse the send with a reason the caller
+  can act on. Never fall back to posting the text.
+- **Agent-to-agent task handoff names the sender.** A task an agent dispatches carries its
+  description as the child's first message, and that message MUST name the parent task and chat
+  session and say an agent wrote it.
+
+**Rationale:** On 2026-11-07 a peer agent's steered message appeared in a chat as a user bubble.
+Neither the recipient agent nor the human could tell it apart from a typed message. Recording the
+author and delivering non-human text by reference keeps that distinction at every boundary.
 
 ## Code Organization Guidelines
 
@@ -967,4 +993,4 @@ and other project documentation, this Constitution takes precedence.
 - Violations should be addressed constructively with reference to specific principles
 - Repeated violations may result in contribution restrictions per Code of Conduct
 
-**Version**: 1.9.0 | **Ratified**: 2026-01-24 | **Last Amended**: 2026-10-30
+**Version**: 1.10.0 | **Ratified**: 2026-01-24 | **Last Amended**: 2026-11-07

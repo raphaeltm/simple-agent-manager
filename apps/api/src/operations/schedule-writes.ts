@@ -8,6 +8,7 @@
  */
 import {
   type ProjectScheduledAction,
+  type SchedulePromptAuthor,
   TRIGGER_STATUSES,
   type TriggerStatus,
 } from '@simple-agent-manager/shared';
@@ -68,6 +69,11 @@ function keyed(ctx: OperationContext, input: { requestKey?: string }): Operation
 function scheduleCreator(ctx: OperationContext): ScheduleCreator {
   if (ctx.actor.via === 'workspace-agent') return 'agent';
   return ctx.actor.via === 'sam' ? 'system' : 'person';
+}
+
+/** The SAM assistant is a model, so its prompts are agent-written like a workspace agent's. */
+function schedulePromptAuthor(ctx: OperationContext): SchedulePromptAuthor {
+  return ctx.actor.via === 'workspace-agent' || ctx.actor.via === 'sam' ? 'agent' : 'human';
 }
 
 /**
@@ -178,6 +184,7 @@ function prepareOneOffCreate(
         userId: ctx.actor.userId,
         creatorChatSessionId: null,
         creator: scheduleCreator(ctx),
+        promptAuthor: schedulePromptAuthor(ctx),
         request,
       })
     );

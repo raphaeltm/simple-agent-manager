@@ -12,6 +12,7 @@
  */
 import {
   type AgentChannelMessageParticipant,
+  MESSAGE_CLASSES,
   PROJECT_EVENT_CHANNEL_SOURCE,
   type SendAgentChannelMessageInput,
   type SendAgentChannelMessageResult,
@@ -44,7 +45,7 @@ import { readEventByDeliveryKey } from './project-events-storage-helpers';
 import { normalizeText, sha256Hex, stableStringify } from './project-events-values';
 import type { Env } from './types';
 
-const CHANNEL_MESSAGE_CLASSES = new Set(['notify', 'deliver']);
+const CHANNEL_MESSAGE_CLASSES: ReadonlySet<string> = new Set(MESSAGE_CLASSES);
 
 export type PreparedAgentChannelMessage = PreparedChannelPublish & {
   recipient: AgentChannelMessageParticipant;
@@ -73,9 +74,7 @@ export async function prepareAgentChannelMessage(
     throw new ProjectEventValidationError('An agent cannot send a message to its own chat session');
   }
   if (!CHANNEL_MESSAGE_CLASSES.has(input.messageClass)) {
-    throw new ProjectEventValidationError(
-      'Only notify and deliver messages travel over agent message channels'
-    );
+    throw new ProjectEventValidationError(`Unknown agent message class: ${input.messageClass}`);
   }
   const message = normalizeText(input.message, 'message', channelLimits(env).messageBytes);
   const idempotencyKey = normalizeText(input.idempotencyKey, 'idempotencyKey', maxBytes);

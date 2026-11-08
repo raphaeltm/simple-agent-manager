@@ -1,10 +1,12 @@
 /**
  * Child-task description assembly for MCP dispatch: the caller's description,
  * optional references, and (inside a mission) the inherited active policies,
- * capped at the dispatch description limit after concatenation.
+ * capped at the dispatch description limit after concatenation, then the parent
+ * attribution, which the cap never removes.
  */
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { type ParentAgent, parentAgentAttribution } from '../../services/agent-authorship';
 import * as projectDataService from '../../services/project-data';
 import { coordinationChannelSection } from './dispatch-coordination-channel';
 
@@ -15,6 +17,8 @@ export interface BuildDispatchDescriptionInput {
   missionId: string | null;
   coordinationChannel: string | null;
   maxLength: number;
+  /** The dispatching agent, named in the child's first message (constitution XV). */
+  parent: ParentAgent;
 }
 
 export async function buildDispatchDescription(
@@ -61,5 +65,5 @@ export async function buildDispatchDescription(
   if (fullDescription.length > input.maxLength) {
     fullDescription = fullDescription.slice(0, input.maxLength);
   }
-  return fullDescription;
+  return fullDescription + parentAgentAttribution(input.parent);
 }

@@ -2,6 +2,7 @@ import type {
   ProjectSchedule,
   ProjectScheduleList,
   ProjectScheduleMutationResult,
+  SchedulePromptAuthor,
 } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
@@ -47,6 +48,7 @@ export const ProjectScheduleRowSchema = v.object({
   project_id: v.string(),
   creator_user_id: v.string(),
   creator_chat_session_id: nullableText,
+  prompt_author: v.nullish(v.picklist(['human', 'agent', 'sam']), null),
   target_session_id: nullableText,
   reason: nullableText,
   action_json: v.string(),
@@ -102,6 +104,7 @@ export function mapSchedule(row: unknown): ProjectSchedule {
     projectId: r.project_id,
     creatorUserId: r.creator_user_id,
     creatorChatSessionId: r.creator_chat_session_id,
+    promptAuthor: r.prompt_author,
     reason: r.reason,
     action: v.parse(ScheduledActionSchema, JSON.parse(r.action_json)),
     state: r.state,
@@ -222,6 +225,8 @@ export function createSchedule(
   creator: {
     userId: string;
     chatSessionId: string | null;
+    /** Who wrote the prompt; decides plain vs pointer delivery (constitution XV). */
+    promptAuthor: SchedulePromptAuthor;
     /** Set only when a teammate makes the schedule under a shared-access grant. */
     sharedAccessGrantId?: string | null;
   },
@@ -289,14 +294,15 @@ export function createSchedule(
   const id = crypto.randomUUID();
   sql.exec(
     `INSERT INTO project_schedules
-    (id,project_id,creator_user_id,creator_chat_session_id,target_session_id,reason,action_json,fingerprint,
-     state,due_at,display_timezone,expires_at,version,idempotency_key,created_at,updated_at,next_attempt_at,
-     shared_access_grant_id)
-    VALUES (?,?,?,?,?,?,?,?,'pending',?,?,?,1,?,?,?,?,?)`,
+    (id,project_id,creator_user_id,creator_chat_session_id,prompt_author,target_session_id,reason,action_json,
+     fingerprint,state,due_at,display_timezone,expires_at,version,idempotency_key,created_at,updated_at,
+     next_attempt_at,shared_access_grant_id)
+    VALUES (?,?,?,?,?,?,?,?,?,'pending',?,?,?,1,?,?,?,?,?)`,
     id,
     projectId,
     creator.userId,
     creator.chatSessionId,
+    creator.promptAuthor,
     normalized.action.kind === 'message_session' ? normalized.action.sessionId : null,
     normalized.reason,
     stableStringify(normalized.action),

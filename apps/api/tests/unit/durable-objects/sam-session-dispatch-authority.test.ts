@@ -7,6 +7,7 @@ import { dispatchTask } from '../../../src/durable-objects/sam-session/tools/dis
 import { retrySubtask } from '../../../src/durable-objects/sam-session/tools/retry-subtask';
 import type { ToolContext } from '../../../src/durable-objects/sam-session/types';
 import type { Env } from '../../../src/env';
+import { samAssistantAttribution } from '../../../src/services/agent-authorship';
 import { getProfilePickerState } from '../../../src/services/agent-profile-picker';
 import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../../src/services/default-capacity-pools';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
@@ -438,8 +439,12 @@ describe('SAM session dispatch_task current project authority', () => {
           )
           .all()
       ).toEqual([
-        { description: 'Retry me', coordination_channel: 'feature.retry' },
-        { description: 'Retry me', coordination_channel: null },
+        // The replacement is model-written, so it names the SAM assistant (constitution XV).
+        {
+          description: `Retry me${samAssistantAttribution()}`,
+          coordination_channel: 'feature.retry',
+        },
+        { description: `Retry me${samAssistantAttribution()}`, coordination_channel: null },
       ]);
     } finally {
       sqlite.close();

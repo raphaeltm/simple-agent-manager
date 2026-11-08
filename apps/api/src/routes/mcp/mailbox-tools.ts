@@ -1,14 +1,14 @@
 /**
  * MCP mailbox tools — durable messaging between agents.
  *
- * send_durable_message: Enqueue a message for a same-project agent with configurable class and delivery.
+ * send_durable_message: Send a same-project agent a message over its pair channel; the recipient
+ *   gets a SAM notice naming the event, never the text (constitution XV).
  * get_pending_messages: Retrieve unacked messages for the calling agent's session.
  * ack_message: Acknowledge receipt of a delivered message.
  */
-import type { MessageClass, PromptDeliveryIntent } from '@simple-agent-manager/shared';
+import type { MessageClass } from '@simple-agent-manager/shared';
 import {
   canSteerMessageClass,
-  isUrgentMessageClass,
   MESSAGE_CLASSES,
   PROMPT_DELIVERY_INTENTS,
 } from '@simple-agent-manager/shared';
@@ -19,10 +19,6 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { expectJsonRecord } from '../../lib/runtime-validation';
 import * as projectDataService from '../../services/project-data';
-import {
-  composePeerSteerContent,
-  composeUrgentDeliveryContent,
-} from '../../services/urgent-delivery-content';
 import {
   getMcpLimits,
   INTERNAL_ERROR,
@@ -35,13 +31,9 @@ import {
 } from './_helpers';
 import {
   parseIdempotencyKeyParam,
-  trySendOverAgentMessageChannel,
+  sendOverAgentMessageChannel,
 } from './agent-message-channel-send';
-import {
-  attemptImmediateDelivery,
-  resolveCallerChatSession,
-  resolveProjectAgentForMailbox,
-} from './mailbox-target';
+import { resolveCallerChatSession, resolveProjectAgentForMailbox } from './mailbox-target';
 
 // ─── send_durable_message ────────────────────────────────────────────────────
 
@@ -119,148 +111,23 @@ export async function handleSendDurableMessage(
   const resolution = await resolveProjectAgentForMailbox(requestId, targetTaskId, tokenData, db);
   if ('jsonrpc' in resolution) return resolution;
 
-  // Preview: notify/deliver over the SAM-managed pair channel when enabled. A steer
-  // targets the recipient's running turn, which only durable delivery can reach.
-  const channelResponse =
-    deliveryIntent === 'steer'
-      ? null
-      : await trySendOverAgentMessageChannel(requestId, tokenData, env, {
-          tool: 'send_durable_message',
-          messageClass,
-          message,
-          idempotencyKey: idempotencyKey.value,
-          metadata,
-          senderSourceTaskId: resolution.callerSourceTaskId,
-          recipient: {
-            taskId: targetTaskId,
-            sourceTaskId: resolution.targetSourceTaskId,
-            chatSessionId: resolution.chatSessionId,
-          },
-        });
-  if (channelResponse) return channelResponse;
-
-  const { resolveDurableExecutionConfig } =
-    await import('../../durable-objects/project-data/durable-execution-config');
-  const durableConfig = resolveDurableExecutionConfig(env);
-  if (durableConfig.deliveryEnabled) {
-    try {
-      // Stop-and-deliver: urgent classes (interrupt and above) may cancel the
-      // target's in-flight turn so the message is delivered as the very next
-      // prompt. The submitted prompt carries stop context; the transcript row
-      // keeps the sender's raw message.
-      const urgent = isUrgentMessageClass(messageClass as MessageClass);
-      const accepted = await projectDataService.acceptPromptDelivery(env, resolution.projectId, {
-        targetSessionId: resolution.chatSessionId,
-        displayContent: message,
-        deliveryContent: urgent
-          ? composeUrgentDeliveryContent({
-              messageClass: messageClass as MessageClass,
-              message,
-              senderTaskId: tokenData.taskId,
-            })
-          : deliveryIntent === 'steer'
-            ? composePeerSteerContent({ message, senderTaskId: tokenData.taskId })
-            : message,
-        deliveryIntent: deliveryIntent as PromptDeliveryIntent,
-        sourceTaskId: tokenData.taskId,
-        senderType: 'agent',
-        senderId: tokenData.workspaceId,
-        messageClass: messageClass as MessageClass,
-        sourceKind: 'agent_mailbox',
-        metadata,
-        ackTimeoutMs: limits.mailboxAckTimeoutMs,
-        ttlMs: durableConfig.ttlMs,
-        maxMessages: limits.mailboxMaxMessagesPerProject,
-      });
-      return jsonRpcSuccess(requestId, {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify({
-              messageId: accepted.message.id,
-              deliveryState: accepted.message.deliveryState,
-              deliveryIntent: accepted.message.deliveryIntent,
-              delivered: false,
-              accepted: true,
-            }),
-          },
-        ],
-      });
-    } catch (err) {
-      log.error('mcp.send_durable_message.accept_failed', {
-        parentTaskId: tokenData.taskId,
-        targetTaskId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      return jsonRpcError(requestId, INTERNAL_ERROR, 'Failed to durably accept message');
-    }
-  }
-
-  if (resolution.taskStatus === 'sleeping') {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      'Sleeping targets require durable prompt delivery to be enabled'
-    );
-  }
-
-  // Enqueue the message in the target project's DO
-  try {
-    const msg = await projectDataService.enqueueMailboxMessage(env, resolution.projectId, {
-      targetSessionId: resolution.chatSessionId,
-      sourceTaskId: tokenData.taskId,
-      senderType: 'agent',
-      senderId: tokenData.workspaceId,
-      messageClass: messageClass as MessageClass,
-      content: message,
-      metadata,
-      ackTimeoutMs: limits.mailboxAckTimeoutMs,
-      ttlMs: limits.mailboxTtlMs,
-      maxMessages: limits.mailboxMaxMessagesPerProject,
-    });
-
-    // For notify/deliver, attempt immediate delivery
-    let delivered = false;
-    if (messageClass === 'notify' || messageClass === 'deliver') {
-      delivered = await attemptImmediateDelivery(
-        env,
-        db,
-        msg.id,
-        resolution,
-        message,
-        tokenData.userId
-      );
-    }
-
-    log.info('mcp.send_durable_message.enqueued', {
-      messageId: msg.id,
-      parentTaskId: tokenData.taskId,
-      targetTaskId,
-      messageClass,
-      delivered,
-    });
-
-    return jsonRpcSuccess(requestId, {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify({
-            messageId: msg.id,
-            deliveryState: delivered ? 'delivered' : 'queued',
-            delivered,
-          }),
-        },
-      ],
-    });
-  } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : String(err);
-    log.error('mcp.send_durable_message.failed', {
-      parentTaskId: tokenData.taskId,
-      targetTaskId,
-      error: errorMessage,
-    });
-    return jsonRpcError(requestId, INTERNAL_ERROR, 'Failed to enqueue message');
-  }
+  // Every class and delivery intent travels over the pair channel (constitution XV):
+  // the recipient's chat only ever gets a SAM notice naming the event. Its managed
+  // subscription steers into a running turn (#2546), so `steer` needs no path of its
+  // own, and an urgent class makes that notice stop-and-deliver.
+  return sendOverAgentMessageChannel(requestId, tokenData, env, {
+    tool: 'send_durable_message',
+    messageClass: messageClass as MessageClass,
+    message,
+    idempotencyKey: idempotencyKey.value,
+    metadata,
+    senderSourceTaskId: resolution.callerSourceTaskId,
+    recipient: {
+      taskId: targetTaskId,
+      sourceTaskId: resolution.targetSourceTaskId,
+      chatSessionId: resolution.chatSessionId,
+    },
+  });
 }
 
 // ─── get_pending_messages ────────────────────────────────────────────────────

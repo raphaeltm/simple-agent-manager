@@ -1,3 +1,4 @@
+import type { MessageClass } from './mailbox';
 import type {
   CreateProjectEventSubscriptionInput,
   ProjectEventAdmissionResult,
@@ -107,8 +108,12 @@ export type CatchUpProjectEventChannelInput = {
   limit?: number | null;
 };
 
-/** Ordinary message classes carried over agent message channels. Urgent classes keep stop-and-deliver. */
-export type AgentChannelMessageClass = 'notify' | 'deliver';
+/**
+ * Every agent message travels over its pair channel, whatever its class (constitution XV): the
+ * recipient only ever gets a SAM notice naming the event. An urgent class makes that notice
+ * stop-and-deliver instead of joining or following the running turn.
+ */
+export type AgentChannelMessageClass = MessageClass;
 
 export type AgentChannelMessageParticipant = {
   taskId: string;
