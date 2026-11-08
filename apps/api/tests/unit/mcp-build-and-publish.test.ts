@@ -115,13 +115,22 @@ describe('async build_and_publish MCP tools', () => {
     mockStartBuildPublishJobOnVm.mockResolvedValue({ publishJobId: 'job-1', status: 'accepted' });
   });
 
-  it.each(['canceled', 'building'])(
-    'retries VM cancel after acceptance only when the job became %s',
+  it.each(['canceled', 'failed', 'building'])(
+    'returns the observed %s status and cancels terminal runners after acceptance',
     async (status) => {
       currentStatus = status;
       mockAppendDeploymentPublishJobEvent.mockResolvedValue(false);
-      await handleBuildAndPublish('race', { environment: 'staging' }, tokenData(), env());
-      expect(cancelAccepted).toHaveBeenCalledTimes(status === 'canceled' ? 1 : 0);
+      const result = await handleBuildAndPublish(
+        'race',
+        { environment: 'staging' },
+        tokenData(),
+        env()
+      );
+      const payload = JSON.parse(result.result?.content?.[0]?.text as string);
+      expect(payload.status).toBe(status);
+      expect(cancelAccepted).toHaveBeenCalledTimes(
+        status === 'canceled' || status === 'failed' ? 1 : 0
+      );
     }
   );
 

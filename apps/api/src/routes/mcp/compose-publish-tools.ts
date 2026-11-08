@@ -208,15 +208,17 @@ export async function handleBuildAndPublish(
         occurredAt: Date.now(),
       });
 
+    let responseStatus = 'starting';
     if (!changed) {
-      // Cancellation can commit before the VM has registered the runner. Retry
-      // after acceptance so the earlier 404 cannot leave that runner working.
+      // Cancellation or expiry can commit before the VM registers the runner.
+      // Retry after acceptance so an earlier 404 cannot leave it working.
       const [current] = await db
         .select()
         .from(schema.deploymentPublishJobs)
         .where(eq(schema.deploymentPublishJobs.id, job.id))
         .limit(1);
-      if (current?.status === 'canceled')
+      if (current) responseStatus = current.status;
+      if (current?.status === 'canceled' || current?.status === 'failed')
         await cancelDeploymentPublishJobOnVmBestEffort(env, {
           ...job,
           requestedBy: tokenData.userId,
@@ -229,7 +231,7 @@ export async function handleBuildAndPublish(
           text: JSON.stringify(
             {
               publishJobId: job.id,
-              status: 'starting',
+              status: responseStatus,
               environment,
               environmentId: policyResult.environmentId,
               reference,
