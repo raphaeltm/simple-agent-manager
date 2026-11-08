@@ -1,65 +1,51 @@
 /**
  * Behavioral tests for the POST /workspaces/:id/agent-credential-sync endpoint.
  *
- * These tests mount the workspacesRoutes on a Hono app, mock dependencies,
- * and verify actual HTTP responses — not source code patterns.
+ * The full workspaces router is mounted with the real session middleware, so a
+ * session-auth wildcard intercepting this callback-only route would fail these
+ * tests (rule 34). Real SQLite engine, real encryption. Pin-aware selection
+ * (project and profile pins, account identity) is covered end to end in
+ * `tests/integration/codex-run-credential-refresh.test.ts`.
  */
-import { drizzle } from 'drizzle-orm/d1';
+import Database from 'better-sqlite3';
 import { Hono } from 'hono';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { workspacesRoutes } from '../../../src/routes/workspaces';
+import { decrypt, encrypt } from '../../../src/services/encryption';
+import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
-// Mock external dependencies used by the endpoint.
-vi.mock('drizzle-orm/d1');
-vi.mock('../../../src/middleware/auth', () => ({
-  requireAuth: () => vi.fn((_c: unknown, next: () => Promise<void>) => next()),
-  requireApproved: () => vi.fn((_c: unknown, next: () => Promise<void>) => next()),
-  getUserId: () => 'test-user-id',
-  getAuth: () => ({ userId: 'test-user-id' }),
-}));
 vi.mock('../../../src/services/jwt', () => ({
   verifyCallbackToken: vi
     .fn()
     .mockResolvedValue({ workspace: 'ws-123', type: 'callback', scope: 'workspace' }),
   signCallbackToken: vi.fn(),
 }));
-vi.mock('../../../src/services/encryption', () => ({
-  encrypt: vi.fn().mockResolvedValue({ ciphertext: 'new-encrypted', iv: 'new-iv' }),
-  decrypt: vi.fn().mockResolvedValue('old-credential-value'),
-}));
 
-const { decrypt, encrypt } = await import('../../../src/services/encryption');
+const ENCRYPTION_KEY = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
+/** An unsigned JWT issued at `generation` (seconds), as OpenAI access tokens carry an `iat`. */
+const accessToken = (generation: number) =>
+  `${['{"alg":"none"}', JSON.stringify({ iat: generation })]
+    .map((part) => Buffer.from(part).toString('base64url'))
+    .join('.')}.sig`;
+const codexAuth = (generation: number) =>
+  JSON.stringify({
+    tokens: { access_token: accessToken(generation), refresh_token: `rt-${generation}` },
+  });
 
 describe('POST /workspaces/:id/agent-credential-sync', () => {
   let app: Hono<{ Bindings: Env }>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let mockDB: any;
-  let d1PreparedStmt: {
-    bind: ReturnType<typeof vi.fn>;
-    first: ReturnType<typeof vi.fn>;
-    run: ReturnType<typeof vi.fn>;
-  };
-  let d1Database: {
-    prepare: ReturnType<typeof vi.fn>;
-  };
-
-  const mockEnv = {
-    DATABASE: {} as D1Database,
-    ENCRYPTION_KEY: 'test-key',
-    JWT_PUBLIC_KEY: 'test-public-key',
-    CALLBACK_TOKEN_AUDIENCE: 'test-audience',
-    CALLBACK_TOKEN_ISSUER: 'test-issuer',
-  } as unknown as Env;
+  let sqlite: Database.Database;
+  let env: Env;
 
   const validBody = {
     agentType: 'openai-codex',
     credentialKind: 'oauth-token',
-    credential: '{"tokens":{"access_token":"new-jwt"}}',
+    credential: codexAuth(2),
   };
 
-  /** Helper: issue a POST to the endpoint with proper env bindings. */
   function postSync(body: unknown, headers: Record<string, string> = {}): Promise<Response> {
     return app.request(
       '/api/workspaces/ws-123/agent-credential-sync',
@@ -72,29 +58,57 @@ describe('POST /workspaces/:id/agent-credential-sync', () => {
         },
         body: JSON.stringify(body),
       },
-      mockEnv
+      env
     );
+  }
+
+  async function seedLegacy(
+    id: string,
+    plaintext: string,
+    opts: { projectId?: string | null; active?: boolean } = {}
+  ) {
+    const { ciphertext, iv } = await encrypt(plaintext, ENCRYPTION_KEY);
+    sqlite
+      .prepare(
+        `INSERT INTO credentials (id, user_id, project_id, provider, credential_type, agent_type,
+           credential_kind, is_active, encrypted_token, iv, created_at, updated_at)
+         VALUES (?, 'user-1', ?, 'openai-codex', 'agent-api-key', 'openai-codex', 'oauth-token', ?, ?, ?, 'old', 'old')`
+      )
+      .run(id, opts.projectId ?? null, opts.active === false ? 0 : 1, ciphertext, iv);
+  }
+
+  async function secretOf(id: string): Promise<string> {
+    const row = sqlite
+      .prepare(`SELECT encrypted_token AS t, iv FROM credentials WHERE id = ?`)
+      .get(id) as { t: string; iv: string };
+    return decrypt(row.t, row.iv, ENCRYPTION_KEY);
+  }
+
+  function seedWorkspace(opts: { status?: string; projectId?: string | null } = {}) {
+    sqlite
+      .prepare(`INSERT INTO nodes (id, user_id, status) VALUES ('node-1', 'user-1', 'running')`)
+      .run();
+    sqlite
+      .prepare(
+        `INSERT INTO workspaces (id, user_id, node_id, project_id, status)
+         VALUES ('ws-123', 'user-1', 'node-1', ?, ?)`
+      )
+      .run(opts.projectId ?? null, opts.status ?? 'running');
   }
 
   beforeEach(() => {
     vi.clearAllMocks();
-    d1PreparedStmt = {
-      bind: vi.fn().mockReturnThis(),
-      first: vi.fn().mockResolvedValue(null),
-      run: vi.fn().mockResolvedValue({ success: true, meta: { changes: 1 } }),
-    };
-    d1Database = {
-      prepare: vi.fn().mockReturnValue(d1PreparedStmt),
-    };
-    (mockEnv as unknown as { DATABASE: typeof d1Database }).DATABASE = d1Database;
+    sqlite = new Database(':memory:');
+    createAllSchemaTables(sqlite, schema);
+    env = {
+      DATABASE: createSqliteD1(sqlite),
+      ENCRYPTION_KEY,
+      JWT_PUBLIC_KEY: 'test-public-key',
+    } as unknown as Env;
 
     app = new Hono<{ Bindings: Env }>();
     app.onError((err, c) => {
-      const appError = err as {
-        statusCode?: number;
-        error?: string;
-        message?: string;
-      };
+      const appError = err as { statusCode?: number; error?: string; message?: string };
       if (typeof appError.statusCode === 'number' && typeof appError.error === 'string') {
         return c.json(
           { error: appError.error, message: appError.message },
@@ -104,51 +118,9 @@ describe('POST /workspaces/:id/agent-credential-sync', () => {
       return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
     });
     app.route('/api/workspaces', workspacesRoutes);
-
-    mockDB = {
-      select: vi.fn().mockReturnThis(),
-      from: vi.fn().mockReturnThis(),
-      leftJoin: vi.fn().mockReturnThis(),
-      where: vi.fn().mockReturnThis(),
-      limit: vi.fn(),
-      update: vi.fn().mockReturnThis(),
-      set: vi.fn().mockReturnThis(),
-      insert: vi.fn().mockReturnThis(),
-      values: vi.fn().mockResolvedValue(undefined),
-      delete: vi.fn().mockReturnThis(),
-      returning: vi.fn().mockResolvedValue([]),
-    };
-
-    (drizzle as unknown as ReturnType<typeof vi.fn>).mockReturnValue(mockDB);
   });
 
-  /** Helper: set up sequential .limit() results for workspace + credential lookups. */
-  function setupDBMocks(
-    workspaceRow: Record<string, unknown> | null,
-    ...lookupRows: Array<Record<string, unknown> | null>
-  ) {
-    const chain = mockDB.limit;
-    const normalizedWorkspace = workspaceRow
-      ? {
-          workspaceId: 'ws-123',
-          userId: 'user-1',
-          projectId: null,
-          chatSessionId: null,
-          status: 'running',
-          nodeId: 'node-1',
-          nodeStatus: 'running',
-          ...workspaceRow,
-        }
-      : null;
-    chain.mockResolvedValueOnce(normalizedWorkspace ? [normalizedWorkspace] : []);
-    for (const row of lookupRows) {
-      chain.mockResolvedValueOnce(row ? [row] : []);
-    }
-    // Successful callback responses re-read the complete workspace incarnation
-    // immediately before returning. Changed-credential writes also re-read after
-    // their exact D1 CAS. Keep those JIT reads on the original incarnation.
-    chain.mockResolvedValue(normalizedWorkspace ? [normalizedWorkspace] : []);
-  }
+  afterEach(() => sqlite.close());
 
   it('returns 401 when Authorization header is missing', async () => {
     const res = await app.request(
@@ -158,7 +130,7 @@ describe('POST /workspaces/:id/agent-credential-sync', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(validBody),
       },
-      mockEnv
+      env
     );
     expect(res.status).toBe(401);
   });
@@ -174,7 +146,7 @@ describe('POST /workspaces/:id/agent-credential-sync', () => {
         },
         body: 'not-json',
       },
-      mockEnv
+      env
     );
     expect(res.status).toBe(400);
     const body = await res.json();
@@ -205,108 +177,119 @@ describe('POST /workspaces/:id/agent-credential-sync', () => {
   });
 
   it('returns 410 when callback workspace resource does not exist', async () => {
-    setupDBMocks(null, null);
-
     const res = await postSync(validBody);
     expect(res.status).toBe(410);
   });
 
   it('returns 410 when callback workspace is stopped', async () => {
-    setupDBMocks({ userId: 'user-1', nodeId: 'node-1', status: 'stopped' }, null);
+    seedWorkspace({ status: 'stopped' });
+    await seedLegacy('cred-user', codexAuth(1));
 
     const res = await postSync(validBody);
     expect(res.status).toBe(410);
+    expect(await secretOf('cred-user')).toBe(codexAuth(1));
   });
 
   it('returns credential_not_found when no matching credential exists', async () => {
-    setupDBMocks({ userId: 'user-1', nodeId: 'node-1' }, null);
+    seedWorkspace();
 
     const res = await postSync(validBody);
     expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body).toEqual({ success: false, reason: 'credential_not_found' });
+    expect(await res.json()).toEqual({ success: false, reason: 'credential_not_found' });
   });
 
   it('returns updated:false when credential is unchanged', async () => {
-    setupDBMocks(
-      { userId: 'user-1', nodeId: 'node-1' },
-      { id: 'cred-1', encryptedToken: 'enc', iv: 'iv', isActive: true }
-    );
-    // decrypt returns the same value as the submitted credential
-    (decrypt as ReturnType<typeof vi.fn>).mockResolvedValueOnce(validBody.credential);
+    seedWorkspace();
+    await seedLegacy('cred-user', codexAuth(2));
 
     const res = await postSync(validBody);
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body).toEqual({ success: true, updated: false });
-    expect(encrypt).not.toHaveBeenCalled();
+    expect(await res.json()).toEqual({ success: true, updated: false });
   });
 
-  it('re-encrypts and returns updated:true when credential has changed', async () => {
-    setupDBMocks(
-      { userId: 'user-1', nodeId: 'node-1' },
-      { id: 'cred-1', encryptedToken: 'enc', iv: 'iv', isActive: true }
-    );
-    // decrypt returns a different value than the submitted credential
-    (decrypt as ReturnType<typeof vi.fn>).mockResolvedValueOnce('old-different-value');
+  it('re-encrypts into the same row and returns updated:true when credential has changed', async () => {
+    seedWorkspace();
+    await seedLegacy('cred-user', codexAuth(1));
 
     const res = await postSync(validBody);
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body).toEqual({ success: true, updated: true });
+    expect(await res.json()).toEqual({ success: true, updated: true });
+    expect(await secretOf('cred-user')).toBe(codexAuth(2));
+  });
 
-    // Verify encrypt was called with the new credential
-    expect(encrypt).toHaveBeenCalledWith(validBody.credential, 'test-key');
-    // Verify the exact workspace-incarnation CAS received the new ciphertext.
-    expect(d1Database.prepare).toHaveBeenCalledWith(
-      expect.stringContaining('UPDATE credentials')
-    );
-    expect(d1PreparedStmt.bind).toHaveBeenCalledWith(
-      'new-encrypted',
-      'new-iv',
-      expect.any(String),
-      'cred-1',
-      'ws-123',
-      'user-1',
-      null,
-      null,
-      'node-1',
-      'running',
-      'running'
-    );
-    expect(d1PreparedStmt.run).toHaveBeenCalled();
+  it('refuses an older generation than the stored one and keeps the stored rotation', async () => {
+    seedWorkspace();
+    await seedLegacy('cred-user', codexAuth(3));
+
+    const res = await postSync(validBody);
+    expect(await res.json()).toEqual({ success: false, reason: 'credential_stale' });
+    expect(await secretOf('cred-user')).toBe(codexAuth(3));
   });
 
   it('does not fall back to user-scoped credential when a project-scoped row exists but is inactive', async () => {
-    setupDBMocks(
-      { userId: 'user-1', nodeId: 'node-1', projectId: 'proj-1' },
-      { id: 'proj-cred-1', encryptedToken: 'enc-project', iv: 'iv-project', isActive: false }
-    );
+    seedWorkspace({ projectId: 'proj-1' });
+    await seedLegacy('cred-project', codexAuth(1), { projectId: 'proj-1', active: false });
+    await seedLegacy('cred-user', codexAuth(1));
 
     const res = await postSync(validBody);
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body).toEqual({ success: false, reason: 'credential_not_found' });
-    expect(decrypt).not.toHaveBeenCalled();
-    expect(encrypt).not.toHaveBeenCalled();
-    expect(mockDB.update).not.toHaveBeenCalled();
+    expect(await res.json()).toEqual({ success: false, reason: 'credential_not_found' });
+    expect(await secretOf('cred-user')).toBe(codexAuth(1));
+    expect(await secretOf('cred-project')).toBe(codexAuth(1));
   });
 
   it('falls back to user-scoped credential when the workspace project has no project-scoped row', async () => {
-    setupDBMocks({ userId: 'user-1', nodeId: 'node-1', projectId: 'proj-1' }, null, {
-      id: 'user-cred-1',
-      encryptedToken: 'enc-user',
-      iv: 'iv-user',
-      isActive: true,
-    });
-    (decrypt as ReturnType<typeof vi.fn>).mockResolvedValueOnce('old-different-value');
+    seedWorkspace({ projectId: 'proj-1' });
+    await seedLegacy('cred-user', codexAuth(1));
 
     const res = await postSync(validBody);
+    expect(await res.json()).toEqual({ success: true, updated: true });
+    expect(await secretOf('cred-user')).toBe(codexAuth(2));
+  });
+
+  /** A well-formed request whose credential is 70 KiB, streamed with no Content-Length. */
+  function postChunked(): Promise<Response> {
+    const huge = JSON.stringify({ ...validBody, credential: 'x'.repeat(70 * 1024) });
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(huge));
+        controller.close();
+      },
+    });
+    return app.request(
+      new Request('http://localhost/api/workspaces/ws-123/agent-credential-sync', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer valid-callback-token',
+        },
+        body: stream,
+        // @ts-expect-error -- Node's fetch requires duplex for a stream body
+        duplex: 'half',
+      }),
+      undefined,
+      env
+    );
+  }
+
+  it('rejects an oversized body that declares no Content-Length, before writing', async () => {
+    seedWorkspace();
+    await seedLegacy('cred-user', codexAuth(1));
+
+    const res = await postChunked();
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).message).toContain('Payload exceeds');
+    expect(await secretOf('cred-user')).toBe(codexAuth(1));
+  });
+
+  it('control: the same body under a higher limit passes the cap and reaches validation', async () => {
+    seedWorkspace();
+    await seedLegacy('cred-user', codexAuth(1));
+    env = { ...env, MAX_AGENT_CREDENTIAL_SYNC_BYTES: String(200 * 1024) } as Env;
+
+    const res = await postChunked();
+
     expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body).toEqual({ success: true, updated: true });
-    expect(decrypt).toHaveBeenCalledWith('enc-user', 'iv-user', 'test-key');
-    expect(encrypt).toHaveBeenCalledWith(validBody.credential, 'test-key');
+    expect(await res.json()).toEqual({ success: false, reason: 'credential_invalid' });
+    expect(await secretOf('cred-user')).toBe(codexAuth(1));
   });
 
   it('rejects oversized payloads', async () => {
@@ -321,7 +304,7 @@ describe('POST /workspaces/:id/agent-credential-sync', () => {
         },
         body: JSON.stringify(validBody),
       },
-      mockEnv
+      env
     );
     expect(res.status).toBe(400);
     const body = await res.json();

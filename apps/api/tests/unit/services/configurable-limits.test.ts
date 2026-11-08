@@ -322,8 +322,8 @@ describe('workspace messages — configurable MAX_MESSAGES_PAYLOAD_BYTES', () =>
     );
   });
 
-  it('uses configurable maxPayloadBytes in the comparison', () => {
-    expect(runtimeSource).toContain('contentLength > maxPayloadBytes');
+  it('enforces the configurable maxPayloadBytes while reading the body', () => {
+    expect(runtimeSource).toContain('readRequestBodyWithLimit(c.req.raw, maxPayloadBytes)');
   });
 });
 

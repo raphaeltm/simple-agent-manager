@@ -9,14 +9,16 @@
  * Auth: workspace callback token via `?token=` query param (Codex cannot set headers).
  * Codex sends hardcoded request format — we cannot change it.
  */
-import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { getCredentialEncryptionKey } from '../lib/secrets';
 import { verifyCallbackToken } from '../services/jwt';
+import { resolveRunAgentCredentialReferences } from '../services/run-agent-credential';
+import { assertWorkspaceCallbackResourceById } from './workspaces/_helpers';
 
 const codexRefreshRoutes = new Hono<{ Bindings: Env }>();
 
@@ -40,7 +42,10 @@ const codexRefreshRoutes = new Hono<{ Bindings: Env }>();
 codexRefreshRoutes.post('/codex-refresh', async (c) => {
   // Kill switch check.
   if (c.env.CODEX_REFRESH_PROXY_ENABLED === 'false') {
-    return c.json({ error: 'service_unavailable', message: 'Codex refresh proxy is disabled' }, 503);
+    return c.json(
+      { error: 'service_unavailable', message: 'Codex refresh proxy is disabled' },
+      503
+    );
   }
 
   // Auth: extract callback token from query param (Codex can't set headers).
@@ -82,35 +87,45 @@ codexRefreshRoutes.post('/codex-refresh', async (c) => {
   }
 
   if (body.grant_type !== 'refresh_token' || !body.refresh_token) {
-    return c.json({ error: 'invalid_request', message: 'Missing grant_type or refresh_token' }, 400);
+    return c.json(
+      { error: 'invalid_request', message: 'Missing grant_type or refresh_token' },
+      400
+    );
   }
 
-  // Look up workspace to get userId and projectId.
-  const db = drizzle(c.env.DATABASE, { schema });
-  const workspaceRows = await db
-    .select({ userId: schema.workspaces.userId, projectId: schema.workspaces.projectId })
-    .from(schema.workspaces)
-    .where(eq(schema.workspaces.id, workspaceId))
-    .limit(1);
-
-  const workspace = workspaceRows[0];
-  if (!workspace) {
-    log.error('codex_refresh.workspace_not_found', { workspaceId });
-    return c.json({ error: 'refresh_token_invalidated' }, 401);
-  }
-
+  // The workspace must still accept callbacks (active workspace on a live node).
+  // A callback token from a stopped or deleted workspace gets the designed
+  // terminal 410 before any credential is read or rotated (rule 34).
+  const workspace = await assertWorkspaceCallbackResourceById(c.env, workspaceId, 'codex_refresh');
   const userId = workspace.userId;
   const projectId = workspace.projectId;
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  // The credentials this workspace's runs were seeded with: the agent-key
+  // callback's recorded choice (project pin, profile pin, default or legacy row),
+  // else the same resolver. Never "the user's default" by assumption — a pinned
+  // run must refresh, and bill, its own account.
+  const credentialReferences = await resolveRunAgentCredentialReferences(
+    db,
+    c.env.DATABASE,
+    getCredentialEncryptionKey(c.env),
+    { workspaceId, userId, projectId, agentType: 'openai-codex' }
+  );
 
   log.info('codex_refresh.request_received', {
     workspaceId,
     userId,
     projectId,
+    candidateCount: credentialReferences.length,
   });
+
+  if (credentialReferences.length === 0) {
+    log.warn('codex_refresh.no_run_credential', { workspaceId, userId, projectId });
+    return c.json({ error: 'refresh_token_invalidated' }, 401);
+  }
 
   // Forward to CodexRefreshLock DO keyed by userId for serialized refresh.
   // The DO derives the encryption key from its own env — no need to forward it.
-  // projectId is forwarded so the DO updates the correct scoped credential row.
   const doId = c.env.CODEX_REFRESH_LOCK.idFromName(userId);
   const stub = c.env.CODEX_REFRESH_LOCK.get(doId);
 
@@ -120,7 +135,7 @@ codexRefreshRoutes.post('/codex-refresh', async (c) => {
     body: JSON.stringify({
       refreshToken: body.refresh_token,
       userId,
-      projectId,
+      credentialReferences,
     }),
   });
 

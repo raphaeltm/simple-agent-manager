@@ -15,6 +15,7 @@ export type WorkspaceDeletionCallbackKind =
   | 'boot_log'
   | 'bootstrap_token'
   | 'callback_token_renewal'
+  | 'codex_refresh'
   | 'compose_image_artifact_complete'
   | 'compose_image_artifact_init'
   | 'compose_publish_release'

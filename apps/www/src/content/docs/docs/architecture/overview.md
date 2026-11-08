@@ -165,23 +165,23 @@ Before a deploy applies D1 migrations, SAM records per-table counts and a time-t
 
 ### Durable Objects (Per-Project Data)
 
-| Binding                         | Scope       | Purpose                                                                  |
-| ------------------------------- | ----------- | ------------------------------------------------------------------------ |
-| `PROJECT_DATA`                  | Per project | Chat sessions, messages, activity events, ACP sessions (embedded SQLite) |
-| `NODE_LIFECYCLE`                | Per node    | Warm pool state plus durable proof-bearing workspace deletion retries    |
-| `TASK_RUNNER`                   | Per task    | Multi-step task execution orchestration via alarm callbacks              |
-| `ADMIN_LOGS`                    | Singleton   | Real-time log broadcast to admin WebSocket clients                       |
-| `NOTIFICATION`                  | Per user    | Notification delivery and state management                               |
-| `PROJECT_ORCHESTRATOR`          | Per project | Project-scoped agent orchestration                                       |
-| `PROJECT_AGENT`                 | Per project | AI technical-lead session for a project                                  |
-| `SAM_SESSION`                   | Per user    | SAM agent conversation session state                                     |
-| `CODEX_REFRESH_LOCK`            | Per user    | Serializes Codex OAuth token refresh (prevents 429 rotation races)       |
-| `GITHUB_USER_ACCESS_TOKEN_LOCK` | Per user    | Serializes GitHub OAuth user-token refresh                               |
-| `GITLAB_USER_ACCESS_TOKEN_LOCK` | Per user    | Serializes GitLab OAuth user-token refresh                               |
-| `AI_TOKEN_BUDGET_COUNTER`       | Per user    | Atomic AI token budget accounting                                        |
-| `TRIAL_COUNTER`                 | Singleton   | Monthly trial-onboarding cap counter (keyed by `YYYY-MM`)                |
-| `TRIAL_EVENT_BUS`               | Per trial   | SSE event buffering for trial provisioning                               |
-| `TRIAL_ORCHESTRATOR`            | Per trial   | Alarm-driven trial provisioning                                          |
+| Binding                         | Scope       | Purpose                                                                                                    |
+| ------------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------- |
+| `PROJECT_DATA`                  | Per project | Chat sessions, messages, activity events, ACP sessions (embedded SQLite)                                   |
+| `NODE_LIFECYCLE`                | Per node    | Warm pool state plus durable proof-bearing workspace deletion retries                                      |
+| `TASK_RUNNER`                   | Per task    | Multi-step task execution orchestration via alarm callbacks                                                |
+| `ADMIN_LOGS`                    | Singleton   | Real-time log broadcast to admin WebSocket clients                                                         |
+| `NOTIFICATION`                  | Per user    | Notification delivery and state management                                                                 |
+| `PROJECT_ORCHESTRATOR`          | Per project | Project-scoped agent orchestration                                                                         |
+| `PROJECT_AGENT`                 | Per project | AI technical-lead session for a project                                                                    |
+| `SAM_SESSION`                   | Per user    | SAM agent conversation session state                                                                       |
+| `CODEX_REFRESH_LOCK`            | Per user    | Serializes Codex OAuth token refresh of the account each run was seeded with (prevents 429 rotation races) |
+| `GITHUB_USER_ACCESS_TOKEN_LOCK` | Per user    | Serializes GitHub OAuth user-token refresh                                                                 |
+| `GITLAB_USER_ACCESS_TOKEN_LOCK` | Per user    | Serializes GitLab OAuth user-token refresh                                                                 |
+| `AI_TOKEN_BUDGET_COUNTER`       | Per user    | Atomic AI token budget accounting                                                                          |
+| `TRIAL_COUNTER`                 | Singleton   | Monthly trial-onboarding cap counter (keyed by `YYYY-MM`)                                                  |
+| `TRIAL_EVENT_BUS`               | Per trial   | SSE event buffering for trial provisioning                                                                 |
+| `TRIAL_ORCHESTRATOR`            | Per trial   | Alarm-driven trial provisioning                                                                            |
 
 ### Why Hybrid?
 
