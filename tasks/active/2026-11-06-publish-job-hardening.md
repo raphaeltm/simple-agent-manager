@@ -29,3 +29,8 @@ No context bundles, executor columns, queueing, or job tokens. Current SAM outpu
 ### Foreground recovery verification — 2026-11-08
 - Affected API suites passed **73 tests / 7 files** (11.90 seconds). Includes real SQLite service, callback route, scheduled sweep, MCP start/cancel and existing publish regressions.
 - Previous long full commands were interrupted by session sleep and their temporary logs disappeared. Their outcome is unverified; rerun gates remain required.
+- Full typecheck passed **19/19 tasks** after latest main merge and explicit aliases for atomic event insert-select fields (2026-11-08).
+- Focused Go tests `go test -p 2 ./internal/publish/... ./internal/server/... -run 'TestMcpBuildAndPublish|TestPublish' -count=1` passed.
+- Broader Go server run fails in existing `TestHibernateReportsQuiescedOnlyWhenCheckPasses` (capture `degraded`, expected `available`). Reproduced all three failures on clean `origin/main` d300ba42b in detached baseline worktree; unrelated to publish changes. Do not claim broad Go pass.
+- Latest main consolidated deployment MCP discovery. Added `deployments_write` method `cancel_publish` while retaining direct callable `cancel_publish`, and marked cancellation destructive. Docs retain current grouped publish/status names.
+- Default full test worker fanout caused memory pressure. Stopped that run explicitly; replacement uses `turbo run test --concurrency=1 -- --maxWorkers=2` to bound local resources.
