@@ -91,16 +91,32 @@ normal capacity-exhaustion behavior.
 
 ## Acceptance criteria
 
-- [ ] Comparator: backlog 5 vs 0 and 5 vs 1; idle vs active; ties preserve each strategy; explicit vs incidental location ordering; legacy-absent flag keeps location first
-- [ ] Every compatible node busy, for human, automated and wake starts: the lowest backlog is chosen without a provider create, including past the old 20-minute deadline
-- [ ] A node with fewer queued builds that is unsafe (stale telemetry, disk, memory, authority, other user, incompatible) is excluded
-- [ ] Fairness CAS on real SQL: refused after a concurrent insert; null predicate admitted; decreasing count admitted; discriminating
-- [ ] Burst on real D1: K starts across 2 idle nodes distribute; a single eligible node takes all K; zero provisions
-- [ ] A fairness conflict is not counted and not permanent; the bounded fallback keeps capacity guards; the counter resets on success; pins are unaffected
-- [ ] Restart/direct create on a busy-building node is admitted; a resource-failure control is still refused
-- [ ] A parked legacy busy-build waiter reselects and places
-- [ ] Warm vs ordinary interleaving: a warm-flagged node with a queued creating row is not taken by the warm shortcut
+- [x] Comparator: backlog 5 vs 0 and 5 vs 1; idle vs active; ties preserve each strategy; explicit vs incidental location ordering; legacy-absent flag keeps location first
+- [x] Every compatible node busy, for human, automated and wake starts: the lowest backlog is chosen without a provider create, including past the old 20-minute deadline
+- [x] A node with fewer queued builds that is unsafe (stale telemetry, disk, memory, authority, other user, incompatible) is excluded
+- [x] Fairness CAS on real SQL: refused after a concurrent insert; null predicate admitted; decreasing count admitted; discriminating
+- [x] Burst on real D1: K starts across 2 idle nodes distribute; a single eligible node takes all K; zero provisions
+- [x] A fairness conflict is not counted and not permanent; the bounded fallback keeps capacity guards; the counter resets on success; pins are unaffected
+- [x] Restart/direct create on a busy-building node is admitted; a resource-failure control is still refused
+- [x] A parked legacy busy-build waiter reselects and places
+- [x] Warm vs ordinary interleaving: a warm-flagged node with a queued creating row is not taken by the warm shortcut
 - [ ] Staging: 2 small nodes, a burst plus a human chat distributes; cleanup verified
+
+Test mapping:
+- Comparator, all-busy starts, unsafe exclusions, location, warm interleaving, pin and legacy
+  waiter (mocked orchestration): `tests/unit/durable-objects/task-runner-node-selection.test.ts`,
+  "startup backlog ranking"
+- Real D1 selector, including a different user's idle node never being ranked:
+  `tests/workers/workspace-resource-capacity-races.test.ts`. Authority exclusion is covered by
+  `task-runner-reuse-scoping.test.ts` and `placement-authority-effective-pool.test.ts`, which are
+  unchanged and still pass.
+- Fairness CAS, burst, restart on a building node (real SQLite):
+  `tests/unit/services/workspace-placement.test.ts`, "startup backlog fairness guard"
+- Conflict loop, capacity refusal vs conflict, bounded fallback keeping capacity guards, legacy
+  waiter closing its admission row (real DO + D1):
+  `tests/workers/startup-backlog-placement-loop.test.ts`; budget and reset:
+  `tests/workers/provisioned-node-placement-admission.test.ts`
+- `explicitVmLocation` wiring: `tests/unit/task-runner-do-service.test.ts`
 
 ## References
 
