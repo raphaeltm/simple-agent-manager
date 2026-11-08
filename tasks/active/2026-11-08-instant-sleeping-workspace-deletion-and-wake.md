@@ -56,7 +56,16 @@ proof, one snapshot (`sleeping`, `available`, runtime `cf-container`), no placem
    explicit or automatic. `deletionFailureDiagnostic` maps that plain `Error` to
    `request_failed`. `requireNodeWorkspaceArtifactsDeleted` has the same requirement. Every
    other deletion identity check treats the generation as nullable (`?? null`, `IS ?`).
-3. **Unclear refusal.** When a container is genuinely gone, the refusal text tells the person
+3. **An awake Instant workspace could not be deleted either** (found during staging
+   verification). For a `running` cf-container node, `requestWorkspaceDeletion` proxied to
+   the in-container agent's `physical-deletion` route. The standalone agent is launched
+   without `NODE_USER_ID` / `NODE_RUNTIME_INCARNATION_ID` (`VmAgentContainer` launch env), so
+   that route always answers 409 "node deletion ownership or incarnation mismatch". Archiving
+   an awake Instant chat returned 409 on staging on every attempt. The integration test's fake
+   agent answered `physical-deletion` with success, which production never can. Fix: an
+   Instant workspace is its container, so destroy it through the container DO whether it is
+   awake or asleep.
+4. **Unclear refusal.** When a container is genuinely gone, the refusal text tells the person
    nothing about what to do next.
 
 ## Writers that can move a wakeable sleeping Instant workspace toward deletion (rule 44)
@@ -158,3 +167,21 @@ the chat or start a new one. The fresh-runtime restore is filed as an idea.
 - Full unit/integration suite on 29017da4b: 15,553 tests, 15,551 passed, 0 failed, 2 skipped.
 - Production baseline 2026-11-08 05:39Z: no deletion-quarantine or snapshot-failure anomalies,
   no "cannot wake in place" errors, and no cf-container `stopping` rows.
+
+## Staging verification (2026-11-08)
+
+- Deploy 42456892778 (07:04–07:10Z):
+  - 4 of the 5 stuck rows were repaired to `sleeping` by the queue guard
+    (`workspace_deletion_wake_target_kept`, 07:06 and 07:11Z).
+  - The fifth, `01M6VP7CX38SKTV7DRMZV9VHC0`, converged to `deleted` (attempt 18). Its deletion
+    was an explicit session archive from 11-07 19:05Z (`task_session_archive`), so converging
+    is correct. Retrying that archive afterwards returned 200 (`workspaceDeleted: true`); it
+    was 409 before.
+- Chat A (task `01M6X0R085QD349P4VEBCGCCYY`, profile "Claude Code Chat", cf-container):
+  - slept at 07:26:47Z with NULL generation;
+  - was still `sleeping` at 07:44Z, after two cron runs past the 10-minute safety-net window,
+    with no deletion events;
+  - a UI follow-up woke it in place: status Active, agent replied "awake A", no wake failure.
+- Chat B: `DELETE /api/workspaces/:id` on the slept workspace returned
+  `200 {"deletionStatus":"confirmed"}`. Before the fix it was 202 pending.
+- Archiving the awake chat A returned 409 (root cause 3). Fixed in c3547cf55, redeployed.
