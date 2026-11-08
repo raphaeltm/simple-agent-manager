@@ -329,7 +329,8 @@ Your choice is remembered in the browser, per device.
 SAM keeps track of what a chat touches, and **Related** in the tool rail shows it: the ideas the
 agent worked on, the library files it added or read, and the pull requests it opened. Each row
 says how the chat is related in plain words, and opens the thing it names — the idea page, the
-file's preview in the library, or the pull request on GitHub.
+pull request on GitHub, or, for a file, a preview over the chat. Closing the preview takes you back
+to the panel.
 
 | Words you'll see                        | What happened                                                   |
 | --------------------------------------- | --------------------------------------------------------------- |

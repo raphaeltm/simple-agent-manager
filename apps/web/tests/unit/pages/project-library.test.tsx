@@ -9,6 +9,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { queryClient as appQueryClient } from '../../../src/lib/query-client';
 import { type LibraryIndexQueryData,libraryQueryKeys } from '../../../src/lib/query-options';
 import { renderWithQuery } from '../../test-utils/query-test-utils';
 
@@ -32,6 +33,7 @@ const { mocks, authState } = vi.hoisted(() => ({
   deleteLibraryFile: vi.fn(),
   downloadLibraryFile: vi.fn(),
   getLibraryFilePreviewUrl: vi.fn(() => 'https://example.com/preview'),
+  getLibraryFile: vi.fn(),
   updateFileTags: vi.fn(),
   moveLibraryFile: vi.fn(),
   },
@@ -45,6 +47,7 @@ vi.mock('../../../src/lib/api/library', async (importOriginal) => ({
   deleteLibraryFile: mocks.deleteLibraryFile,
   downloadLibraryFile: mocks.downloadLibraryFile,
   getLibraryFilePreviewUrl: mocks.getLibraryFilePreviewUrl,
+  getLibraryFile: mocks.getLibraryFile,
   updateFileTags: mocks.updateFileTags,
   moveLibraryFile: mocks.moveLibraryFile,
 }));
@@ -344,14 +347,51 @@ describe('ProjectLibrary (client-side index)', () => {
     expect(screen.getAllByText(/1 folder/).length).toBeGreaterThanOrEqual(1);
   });
 
-  it('opens the preview modal when ?preview= matches a swept file', async () => {
-    mocks.listLibraryFiles.mockResolvedValue(page([makeFile({ id: 'f1', filename: 'readme.md' })]));
+  it('opens a ?preview= link before the library index has loaded', async () => {
+    // The sweep never finishes: the page is still on its first-load spinner.
+    mocks.listLibraryFiles.mockReturnValue(new Promise(() => {}));
+    const { tags, ...file } = makeFile({ id: 'f1', filename: 'notes.txt' });
+    mocks.getLibraryFile.mockResolvedValue({ file, tags });
 
     renderLibrary('/projects/proj-test/library?preview=f1');
 
-    await waitFor(() =>
-      expect(screen.getAllByText('readme.md').length).toBeGreaterThanOrEqual(2),
+    const dialog = await screen.findByRole('dialog', { name: 'notes.txt' });
+    expect(dialog).toBeInTheDocument();
+    expect(screen.getByText('1.0 KB')).toBeInTheDocument();
+    expect(mocks.getLibraryFile).toHaveBeenCalledWith('proj-test', 'f1', expect.anything());
+    // Liveness: the sweep really is in flight, and the listing has not rendered.
+    expect(mocks.listLibraryFiles).toHaveBeenCalled();
+    expect(screen.queryByPlaceholderText(/search/i)).not.toBeInTheDocument();
+  });
+
+  it('opens a row without reading its metadata again, and closes back to the list', async () => {
+    mocks.listLibraryFiles.mockResolvedValue(
+      page([makeFile({ id: 'f1', filename: 'diagram.png', mimeType: 'image/png' })]),
     );
+    const { queryClient } = renderLibrary();
+    // The app's real cache lifetimes: the seeded row must still be fresh when the viewer mounts.
+    queryClient.setDefaultOptions({
+      queries: { ...appQueryClient.getDefaultOptions().queries, retry: false },
+    });
+
+    await userEvent.click(await screen.findByRole('button', { name: 'diagram.png' }));
+
+    expect(await screen.findByRole('dialog', { name: 'diagram.png' })).toBeInTheDocument();
+    expect(mocks.getLibraryFile).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Close preview' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'diagram.png' })).toBeInTheDocument();
+  });
+
+  it('says so when a ?preview= file cannot be opened', async () => {
+    mocks.listLibraryFiles.mockReturnValue(new Promise(() => {}));
+    mocks.getLibraryFile.mockRejectedValue(new Error('File not found'));
+
+    renderLibrary('/projects/proj-test/library?preview=gone');
+
+    expect(await screen.findByText(/couldn.t be opened/i)).toBeInTheDocument();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
 
   // --- Multi-directory vertical slice --------------------------------------

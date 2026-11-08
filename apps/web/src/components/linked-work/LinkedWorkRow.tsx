@@ -41,10 +41,12 @@ export interface LinkedWorkRowProps {
    * baseline so a wrapping title does not drag it down the row.
    */
   timestamp?: ReactNode;
-  /** In-app destination. Exactly one of `to` / `href` must be given. */
+  /** In-app destination. Exactly one of `to` / `href` / `onClick` must be given. */
   to?: string;
   /** External destination (a pull request), opened in a new tab. Sanitised before use. */
   href?: string;
+  /** Opens the item in place — a library file's preview — instead of navigating away. */
+  onClick?: () => void;
   testId?: string;
 }
 
@@ -97,7 +99,19 @@ function RowBody({
 }
 
 export function LinkedWorkRow(props: LinkedWorkRowProps) {
-  const { to, href, testId } = props;
+  const { to, href, onClick, testId } = props;
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className={`${ROW_CLASS} cursor-pointer`}
+        data-testid={testId}
+      >
+        <RowBody {...props} />
+      </button>
+    );
+  }
   if (href) {
     return (
       <a

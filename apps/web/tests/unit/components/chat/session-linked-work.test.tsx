@@ -32,10 +32,16 @@ const mockGetSessionLinks = vi.fn();
 const mockGetChatSession = vi.fn();
 const mockGetWorkspace = vi.fn();
 const mockGetNode = vi.fn();
+const mockGetLibraryFile = vi.fn();
 
 vi.mock('../../../../src/lib/api/links', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../../src/lib/api/links')>()),
   getSessionLinks: (...args: unknown[]) => mockGetSessionLinks(...args),
+}));
+
+vi.mock('../../../../src/lib/api/library', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../../src/lib/api/library')>()),
+  getLibraryFile: (...args: unknown[]) => mockGetLibraryFile(...args),
 }));
 
 vi.mock('../../../../src/lib/api', async (importOriginal) => ({
@@ -155,7 +161,7 @@ function richContext(overrides: Partial<SessionContext> = {}): SessionContext {
     files: cappedList([
       {
         fileId: 'file-1',
-        filename: 'report.md',
+        filename: 'report.png',
         directory: '/engineering/research',
         relations: ['uploaded'],
         bySessionId: SESSION_ID,
@@ -258,6 +264,18 @@ beforeEach(() => {
   mockGetWorkspace.mockResolvedValue({ id: 'ws-1', nodeId: 'node-1' });
   mockGetNode.mockResolvedValue({ id: 'node-1', name: 'test-node' });
   mockGetSessionLinks.mockResolvedValue(richContext());
+  mockGetLibraryFile.mockResolvedValue({
+    file: {
+      id: 'file-1',
+      projectId: PROJECT_ID,
+      filename: 'report.png',
+      mimeType: 'image/png',
+      sizeBytes: 2048,
+      directory: '/engineering/research/',
+      status: 'ready',
+    },
+    tags: [],
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -275,7 +293,7 @@ describe('chat linked work — the Related panel', () => {
     expect(within(drawer).getByText('Linked work program')).toBeInTheDocument();
     expect(within(drawer).getByText('Working on · Read')).toBeInTheDocument();
     expect(within(drawer).getByText('Created')).toBeInTheDocument();
-    expect(within(drawer).getByText('report.md')).toBeInTheDocument();
+    expect(within(drawer).getByText('report.png')).toBeInTheDocument();
     expect(within(drawer).getByText('Uploaded · /engineering/research')).toBeInTheDocument();
     expect(within(drawer).getByText('Pull request #2425')).toBeInTheDocument();
   });
@@ -288,13 +306,69 @@ describe('chat linked work — the Related panel', () => {
       'href',
       `/projects/${PROJECT_ID}/ideas/idea-1`
     );
-    expect(within(drawer).getByTestId('linked-work-file')).toHaveAttribute(
-      'href',
-      `/projects/${PROJECT_ID}/library?preview=file-1`
-    );
+    // A file opens in place (see the preview tests below), so its row is a button, not a link.
+    const file = within(drawer).getByTestId('linked-work-file');
+    expect(file.tagName).toBe('BUTTON');
+    expect(file).not.toHaveAttribute('href');
     const pr = within(drawer).getByTestId('linked-work-pr');
     expect(pr).toHaveAttribute('href', PR_URL);
     expect(pr).toHaveAttribute('rel', expect.stringContaining('noopener'));
+  });
+
+  it("opens a file in the chat's preview instead of leaving for the library", async () => {
+    await renderChat();
+    const drawer = await openRelated();
+
+    fireEvent.click(within(drawer).getByTestId('linked-work-file'));
+
+    expect(
+      await screen.findByRole('region', { name: 'Preview of report.png' })
+    ).toBeInTheDocument();
+    const preview = screen.getByRole('dialog', { name: 'report.png' });
+    expect(within(preview).getByText('2.0 KB')).toBeInTheDocument();
+    expect(mockGetLibraryFile).toHaveBeenCalledWith(PROJECT_ID, 'file-1', expect.anything());
+    // Still in the chat, with the panel open underneath.
+    expect(screen.getByTestId('session-tool-related')).toBeInTheDocument();
+    expect(screen.getByTestId('session-linked-work-drawer')).toBeInTheDocument();
+  });
+
+  it('Escape closes the preview and leaves the Related panel open', async () => {
+    await renderChat();
+    const drawer = await openRelated();
+    fireEvent.click(within(drawer).getByTestId('linked-work-file'));
+    await screen.findByRole('region', { name: 'Preview of report.png' });
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'report.png' })).not.toBeInTheDocument()
+    );
+    expect(screen.getByTestId('session-linked-work-drawer')).toBeInTheDocument();
+
+    // The panel's own Escape works again once the preview is gone.
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() =>
+      expect(screen.queryByTestId('session-linked-work-drawer')).not.toBeInTheDocument()
+    );
+  });
+
+  it("shows the file's name while it loads, and says so when it cannot be opened", async () => {
+    let reject: (error: Error) => void = () => {};
+    mockGetLibraryFile.mockReturnValue(
+      new Promise((_, rejectFn) => {
+        reject = rejectFn;
+      })
+    );
+    await renderChat();
+    const drawer = await openRelated();
+    fireEvent.click(within(drawer).getByTestId('linked-work-file'));
+
+    const placeholder = await screen.findByTestId('library-file-preview-placeholder');
+    expect(within(placeholder).getByText('report.png')).toBeInTheDocument();
+    expect(within(placeholder).getByRole('status')).toBeInTheDocument();
+
+    reject(new Error('File not found'));
+    expect(await within(placeholder).findByText(/couldn.t be opened/i)).toBeInTheDocument();
   });
 
   it('opens the panel without issuing a second read', async () => {
