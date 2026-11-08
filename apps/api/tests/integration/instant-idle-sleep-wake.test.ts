@@ -44,6 +44,8 @@ import { AppError } from '../../src/middleware/error';
 import { chatRoutes } from '../../src/routes/chat';
 import { agentSessionSuspendResumeRoutes } from '../../src/routes/workspaces/agent-session-suspend-resume';
 import { agentSessionRoutes } from '../../src/routes/workspaces/agent-sessions';
+import { emptyResult, resolveCleanupConfig } from '../../src/scheduled/node-cleanup/shared';
+import { sweepStaleStoppedWorkspaces } from '../../src/scheduled/node-cleanup/workspace-phases';
 import { validateMcpToken } from '../../src/services/mcp-token';
 import { resolveSessionRuntimeContract } from '../../src/services/session-runtime-contract';
 import { sleepWorkspaceSession } from '../../src/services/session-sleep-execution';
@@ -399,7 +401,7 @@ describe('Instant session wake after idle sleep', () => {
     d1.prepare(
       `INSERT INTO workspaces (id, user_id, node_id, project_id, chat_session_id, name,
                                repository, branch, status, eviction_generation, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 'instant', 'owner/repo', 'main', 'running', 'generation-1', ?, ?)`
+       VALUES (?, ?, ?, ?, ?, 'instant', 'owner/repo', 'main', 'running', NULL, ?, ?)`
     ).run(WORKSPACE_ID, USER_ID, NODE_ID, PROJECT_ID, CHAT_SESSION_ID, now, now);
     d1.prepare(
       `INSERT INTO agent_sessions (id, workspace_id, user_id, status, agent_type, created_at, updated_at)
@@ -678,11 +680,14 @@ describe('Instant session wake after idle sleep', () => {
             _node: string,
             _workspace: string,
             _user: string,
-            expected: { nodeRuntimeIncarnationId: string; workspaceGeneration: string }
+            expected: { nodeRuntimeIncarnationId: string; workspaceGeneration: string | null }
           ) => {
+            // An Instant workspace is never evicted: production rows carry a NULL generation
+            // (staging 2026-11-08: every cf-container workspace since October). A string here
+            // hid that every slept Instant deletion threw.
             expect(expected).toMatchObject({
               nodeRuntimeIncarnationId: 'incarnation-1',
-              workspaceGeneration: 'generation-1',
+              workspaceGeneration: null,
             });
             return 'claimed';
           },
@@ -778,6 +783,52 @@ describe('Instant session wake after idle sleep', () => {
       expect(getSession(projectDataSql(), CHAT_SESSION_ID)).toMatchObject({
         status: 'active',
       });
+    });
+
+    // Staging 2026-11-03..08: the stale-workspace safety net queued slept Instant workspaces
+    // for deletion, each attempt moved the row to `stopping`, and the next follow-up was
+    // refused with "The sleeping container runtime is gone". The sleeping VM control lives in
+    // `tests/workers/instant-sleeping-deletion-guard.test.ts`.
+    it('is not queued for deletion by the stale-workspace safety net, and still wakes', async () => {
+      await sleep();
+      // The fixture helper applies no column defaults; the sweep skips user-owned nodes.
+      d1.prepare(`UPDATE nodes SET node_class = 'managed' WHERE id = ?`).run(NODE_ID);
+      const lifecycle = env.NODE_LIFECYCLE.get(env.NODE_LIFECYCLE.idFromName(NODE_ID));
+      const queued: string[] = [];
+      Object.assign(env, {
+        NODE_LIFECYCLE: {
+          idFromName: (name: string) => name,
+          get: () => ({
+            ...lifecycle,
+            scheduleWorkspaceDeletion: async (_node: string, workspaceId: string) => {
+              queued.push(workspaceId);
+              return true;
+            },
+          }),
+        },
+      });
+      const result = emptyResult();
+
+      await sweepStaleStoppedWorkspaces(
+        drizzle(env.DATABASE, { schema }),
+        env,
+        new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+        resolveCleanupConfig(env),
+        result
+      );
+
+      expect(queued).toEqual([]);
+      expect(result.errors).toBe(0);
+      expect(runtimeRows()).toEqual(SLEPT_ROWS);
+
+      const deliveryId = await sendFollowUp('Still there?');
+
+      expect(wakeFailures()).toEqual({ markers: [], messages: [] });
+      expect(mailbox.getMessage(projectDataSql(), deliveryId)).toMatchObject({
+        deliveryState: 'acked',
+      });
+      expect(vmAgent.prompts).toEqual(['Still there?']);
+      expect(runtimeRows()).toEqual(AWAKE_ROWS);
     });
   });
 
@@ -1100,7 +1151,7 @@ describe('Instant session wake after idle sleep', () => {
       messages: [
         {
           content:
-            'Wake failed: The sleeping container runtime is gone and cannot wake in place. (container_runtime_unavailable)',
+            'Wake failed: The sleeping container runtime is gone and cannot wake in place. Your message and this conversation are saved: fork this chat or start a new one to continue. (container_runtime_unavailable)',
         },
       ],
     });

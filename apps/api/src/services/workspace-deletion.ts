@@ -628,12 +628,13 @@ async function requestWorkspaceDeletion(
       // stopping workspace we just claimed. Destroy through the container DO.
       await requireDeletionTargetAtBoundary(env, expected);
       await requireAutomaticPreservation(options);
-      if (!expected.workspaceGeneration)
-        throw new Error('Container deletion requires workspace generation');
+      // An Instant workspace is never evicted, so its generation is NULL. NULL is the exact
+      // incarnation here, as in every other deletion identity check (`IS ?`), not a missing
+      // value. Requiring a string made every slept Instant deletion throw (staging 2026-11-08).
       await stopNodeResources(expected.nodeId, expected.userId, env, {
         workspaceDeletion: {
           workspaceId: expected.workspaceId,
-          workspaceGeneration: expected.workspaceGeneration,
+          workspaceGeneration: expected.workspaceGeneration ?? null,
           beforeDestroy: async () => {
             await requireDeletionTargetAtBoundary(env, expected);
             await requireAutomaticPreservation(options);
@@ -704,6 +705,13 @@ async function classifyWorkspaceDeletionError(
     attempt,
     source,
     diagnostic,
+    // The persisted diagnostic is a category only. Log the internal throw site so a
+    // `request_failed` loop is diagnosable, but never a node agent's response body.
+    errorName: error instanceof Error ? error.name : typeof error,
+    errorMessage:
+      error instanceof NodeAgentHttpError
+        ? undefined
+        : boundedDiagnostic(env, error instanceof Error ? error.message : String(error)),
     action: 'retry',
   });
   return { status: 'retry', reason: 'runtime_deletion_unconfirmed', diagnostic };
