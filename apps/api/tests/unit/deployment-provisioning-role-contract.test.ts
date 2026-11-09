@@ -16,7 +16,9 @@ vi.mock('../../src/services/nodes', async (importActual) => {
   };
 });
 
-vi.mock('../../src/lib/logger', () => ({
+vi.mock('../../src/lib/logger', async (importOriginal) => ({
+  // Keep the rest of the real logger API (e.g. createModuleLogger used at module load).
+  ...(await importOriginal<typeof import('../../src/lib/logger')>()),
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
   serializeError: vi.fn((err: unknown) => ({
     error: err instanceof Error ? err.message : String(err),
