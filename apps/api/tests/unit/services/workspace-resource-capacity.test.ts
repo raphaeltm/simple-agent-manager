@@ -633,6 +633,43 @@ describe('live CPU is a saturation ceiling, not an admission authority', () => {
   const oneCoTenant = () =>
     usage({ activeCount: 1, cpuMillis: 1000, memoryMb: 1024, diskMb: 1024 });
 
+  it('admits a first reservation despite bootstrap CPU with the default policy', () => {
+    const result = evaluateWorkspaceReservationCapacity(
+      hostAt(100),
+      emptyUsage(),
+      reservation({ cpuMillis: 200, memoryMb: 512, diskMb: 5120 }),
+      resolveWorkspaceAdmissionPolicy(productionEnv)
+    );
+    expect(result.reasons).toEqual([]);
+    expect(result.admitted).toBe(true);
+  });
+
+  it('preserves the separate empty deployment-node CPU ceiling', () => {
+    const result = evaluateWorkspaceReservationCapacity(
+      { ...hostAt(100), nodeRole: 'deployment' },
+      emptyUsage(),
+      reservation({ cpuMillis: 200, memoryMb: 512, diskMb: 5120 }),
+      resolveWorkspaceAdmissionPolicy(productionEnv)
+    );
+    expect(result.admitted).toBe(false);
+    expect(result.reasons).toContain('CPU saturation ceiling reached');
+  });
+
+  it.each([
+    [{ diskPercent: 99 }, 'disk pressure threshold reached'],
+    [{ memoryPercent: 99 }, MEASURED_MEMORY_OVERRUN_REASON],
+    [{ cpuLoadAvg1: 'invalid' }, 'node resource telemetry is malformed'],
+  ])('keeps empty-node safety vetoes during bootstrap: %s', (metrics, reason) => {
+    const result = evaluateWorkspaceReservationCapacity(
+      hostAt(100, metrics),
+      emptyUsage(),
+      reservation({ cpuMillis: 200, memoryMb: 512, diskMb: 5120 }),
+      resolveWorkspaceAdmissionPolicy(productionEnv)
+    );
+    expect(result.admitted).toBe(false);
+    expect(result.reasons).toContain(reason);
+  });
+
   it('admits a busy-but-unsaturated host whose declared budget still fits', () => {
     // The incident: at the previous 50% default this host was refused and the
     // scheduler bought another VM, even though 3000 of its 4000 declared
