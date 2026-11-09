@@ -307,3 +307,70 @@ they preserve auth/cancellation assertions and were required for reliable full c
   global sessionHostMu, release it, then call PrepareEviction on each host. This
   preserves aggregation/rollback while following existing host-map discipline.
   Source approval of49187283a was conditional; real staging must use this revision.
+
+## CodeRabbit revision review (2026-11-09)
+
+The prior f98 source approval and staging proof do not cover these production
+changes. Keep this task active; obtain a new final-head approval and refresh staging
+before merge. Production deployment and monitoring remain postmerge gates.
+
+- [x] Stable terminal grace (4511554945): use the latest genuine status-transition
+  event when completed_at is absent; same-status metadata events cannot reset grace.
+  Real Workers regression covers an old terminal transition with a recent edit and
+  a recent terminal transition with old updated_at, with an old-status control.
+- [x] Renewed replay ownership (4511554958): detached process callbacks re-enter the
+  eviction-aware dispatcher. A decision lock orders renewed PrepareEviction against
+  the existing bounded process restart, including its previously unlocked one-second
+  delay. Controlled replay and restart-delay tests discriminate independently.
+- [x] Late parking after teardown (4511554974): current-attempt and teardown checks
+  consume stale prompt callbacks; report publication is ordered before teardown.
+  Stop latches teardown under the reporting lock and releases it before completion
+  callbacks. Regression checks no new parked callback/timer after committed stop.
+- [x] Checkpoint terminal arbitration (4511554983): committed eviction supersedes
+  checkpoint ownership and resolves its caller; rollback preserves ordinary failure.
+  Real checkpoint deadline tests cover commit before/after deadline, rollback,
+  no eviction, natural completion, ordinary stop, teardown before HostStopped,
+  and detached failure replay behind a renewed fence. Independent removal of
+  eviction completion reproduces a missing terminal callback.
+- [x] Viewer timeout ownership (4511554997): defer the notification together with its
+  force-stop. Real watchdog regression covers commit, rollback, expiry and no-fence
+  controls; guard-removal overlay reproduces the premature terminal viewer error.
+- [x] Parking-budget validation (4511555011): exercise real Config.Load and Validate,
+  rejecting short, exact-boundary and negative budgets, accepting sufficient/default
+  budgets, and checking overflow-safe arithmetic against configured stop/capture/
+  recording windows.
+- [x] Late host admission (4511555021): initial and retried stops reject ordinary and
+  restore-owner host creation while the real Docker stop is held at a controlled
+  midpoint; failed stops reopen admission. Independent host-guard and retry-fence
+  removal overlays fail the intended regression cases.
+
+Test-engineer/task-completion review evidence: focused six-test ACP race subset
+passed (9.200s); final replay/teardown/restart-delay subset passed (3.909s).
+Independent Go overlays demonstrated all three added ACP protections discriminate:
+restoring direct process-exit replay bypasses the renewed fence; removing teardown
+validation creates one stale parked callback and timer; removing decision ordering
+allows PrepareEviction to return during the restart delay. Server admission and
+checkpoint/viewer discrimination logs are recorded under /tmp/eviction-ship during
+this session; durable PR evidence must summarize results rather than rely on those
+local files. Broader final-source verification and staging remain coordinator gates.
+
+Final CodeRabbit source/test completion review: PASS for all seven implementation
+items. Checkpoint/viewer focused race verification passed (14.588s). A separate
+focused race run covering legacy unfenced crash recovery, captured prerequisites,
+watchdogs, unrecoverable disconnect/deadline controls, new replay/teardown ordering,
+and checkpoint/viewer controls passed (14.223s). The late-park guard validates
+supplied attempt identity/terminal state rather than promptInFlight: this preserves
+existing ordinary crash handling and consumes stale real attempts. Its regenerated
+current-source removal overlay still reproduces stale parking after teardown.
+
+The process decision lock introduces no unbounded restart: ordinary restarts use
+existing ACP_RESTART_ATTEMPT_TIMEOUT (default five minutes, already protected by
+h.mu); production checkpoint calls derive an operation deadline from
+ACP_CHECKPOINT_ROLLOVER_TIMEOUT (default two minutes). The lock additionally orders
+the existing one-second unlocked restart delay before a new eviction fence.
+No reporting lock is held across terminal callbacks. Remaining completion gates:
+final broad validation, fresh immutable-release staging, renewed exact-head
+coordinator approval, CI/CodeRabbit reconciliation, merge and production monitoring.
+Do not archive before those gates are resolved.
+
+Final checkpoint teardown ordering: retain report serialization through the eviction terminal arbiter, before ordinary Stop. A controlled real-checkpoint interval test verifies exact evicted completion and caller supersession; independently restoring the early unlock fails the regression. Full revised Go suite and ACP/server/persistence race suites passed; final full ACP race passed after this last ordering change.

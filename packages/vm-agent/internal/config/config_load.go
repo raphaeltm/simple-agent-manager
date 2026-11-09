@@ -460,6 +460,10 @@ func Load() (*Config, error) {
 		cfg.WorktreeCacheTTL = 5 * time.Second
 	}
 
+	if err := cfg.validateEvictionParkTimeout(); err != nil {
+		return nil, err
+	}
+
 	return cfg, nil
 }
 

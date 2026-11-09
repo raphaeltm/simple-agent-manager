@@ -59,6 +59,8 @@ export async function sweepOrphanedWorkspaces(
   // from creation alone, a long-lived workspace was stopped on the first tick after its
   // task turned terminal, which on 2026-11-08 cut off an in-flight eviction that would
   // have resumed a falsely failed task (the eviction recovery re-queues it).
+  // Legacy terminal writers may omit completed_at. Prefer their latest genuine status
+  // transition over mutable updated_at; same-status metadata events do not reset grace.
   const orphanGraceCutoff = new Date(now.getTime() - config.orphanGracePeriodMs).toISOString();
   const candidates = await env.DATABASE.prepare(
     `SELECT w.id, w.node_id, w.user_id, w.status, w.created_at, w.project_id, w.chat_session_id
@@ -76,7 +78,12 @@ export async function sweepOrphanedWorkspaces(
          SELECT 1 FROM tasks recent_terminal
          WHERE recent_terminal.workspace_id = w.id
            AND recent_terminal.status IN ('completed', 'failed', 'cancelled')
-           AND COALESCE(recent_terminal.completed_at, recent_terminal.updated_at) >= ?
+           AND COALESCE(recent_terminal.completed_at,
+             (SELECT MAX(terminal_event.created_at) FROM task_status_events terminal_event
+              WHERE terminal_event.task_id = recent_terminal.id
+                AND terminal_event.to_status = recent_terminal.status
+                AND terminal_event.from_status IS NOT terminal_event.to_status),
+             recent_terminal.updated_at) >= ?
        )
        AND NOT EXISTS (
          SELECT 1 FROM tasks t

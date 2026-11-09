@@ -273,7 +273,7 @@ func TestExpiredEvictionReopensAdmissionAndNextEpisodeParks(t *testing.T) {
 	if !ok {
 		t.Fatal("expired eviction permanently fenced the recovered host")
 	}
-	attempt.complete(host, "cancelled", context.Canceled)
+	// Keep the newly accepted prompt active through the next episode.
 
 	host.config.EvictionParkTimeout = time.Hour
 	_, rollback := host.PrepareEviction()
@@ -292,7 +292,105 @@ func TestExpiredEvictionReopensAdmissionAndNextEpisodeParks(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("new episode rollback did not replay")
 	}
+	attempt.complete(host, "cancelled", context.Canceled)
 	if _, ok := host.beginPrompt(func() {}, nil); !ok {
 		t.Fatal("new episode rollback left admission fenced")
 	}
+}
+
+// Hold the detached batch at a controlled midpoint, then renew ownership before
+// its real process-exit callback runs. Scheduling luck cannot make this pass.
+func TestDetachedProcessExitReplayHonorsRenewedEviction(t *testing.T) {
+	host := newRecoveryTestHost(t, 30*time.Second)
+	defer host.Stop()
+	oldProc, _, _ := armRecoverablePrompt(t, host, "claude-code", 10*time.Second, false)
+	var starts atomic.Int32
+	completed := startRecoveryMonitor(t, host, oldProc, "claude-code", countingSpawn(t, &starts))
+	_, rollback := host.PrepareEviction()
+	exitFakeProcess(oldProc)
+	waitForParked(t, host, func(p evictionParked) bool { return len(p.processExit) == 1 })
+	entered, release := make(chan struct{}), make(chan struct{})
+	host.promptMu.Lock()
+	host.evictionParked.promptCrash = append(host.evictionParked.promptCrash, func() { close(entered); <-release })
+	host.promptMu.Unlock()
+	rollback()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("replay did not start")
+	}
+	host.PrepareEviction()
+	close(release)
+	waitForParked(t, host, func(p evictionParked) bool { return len(p.processExit) == 1 })
+	assertNoVerdict(t, completed, &starts, "renewed fence during detached replay")
+	host.StopForEviction()
+	if host.Status() != HostStopped {
+		t.Fatal("renewed eviction did not stop host")
+	}
+}
+
+// Models an RPC that already passed AcceptedPrompt.Run's activity check before
+// teardown won. The late handler must consume it without parking/reporting anew.
+func TestPromptDisconnectAfterEvictionTeardownIsConsumed(t *testing.T) {
+	host, _, completed, starts := armEvictedPrompt(t)
+	host.promptMu.Lock()
+	attempt := host.promptAttempt
+	host.promptMu.Unlock()
+	host.PrepareEviction()
+	host.StopForEviction()
+	expectCompletion(t, completed, EvictedStopReason, time.Second, "eviction did not complete")
+	host.finishPromptAttemptWithError(attempt, context.Background(), json.RawMessage(`"req-1"`), promptStartInfo{}, &testError{"peer disconnected"})
+	host.promptMu.Lock()
+	parked, timer := len(host.evictionParked.promptCrash), host.evictionParkTimer
+	host.promptMu.Unlock()
+	if parked != 0 || timer != nil {
+		t.Fatalf("stale RPC parked after teardown: callbacks=%d timer=%v", parked, timer)
+	}
+	if starts.Load() != 0 || host.Status() != HostStopped {
+		t.Fatal("stale RPC changed stopped host")
+	}
+	assertNoSecondCompletion(t, completed)
+}
+
+// A fence cannot become visible midway through an already-started restart. The
+// bounded restart finishes first; Docker stop is authorized only after Prepare.
+func TestEvictionPrepareOrdersAfterInFlightProcessDecision(t *testing.T) {
+	host := newRecoveryTestHost(t, 30*time.Second)
+	defer host.Stop()
+	oldProc, _, _ := armRecoverablePrompt(t, host, "claude-code", 10*time.Second, false)
+	var starts atomic.Int32
+	entered, release := make(chan struct{}), make(chan struct{})
+	spawn := countingSpawn(t, &starts)
+	completed := startRecoveryMonitor(t, host, oldProc, "claude-code", func(s *agentStartup) (agentProcess, error) { close(entered); <-release; return spawn(s) })
+	exitFakeProcess(oldProc)
+	deadline := time.Now().Add(3 * time.Second)
+	for host.Status() != HostStarting && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if host.Status() != HostStarting {
+		close(release)
+		t.Fatal("process decision never reached restart delay")
+	}
+	prepared := make(chan struct{})
+	go func() { host.PrepareEviction(); close(prepared) }()
+	select {
+	case <-prepared:
+		close(release)
+		t.Fatal("eviction fenced midway through restart")
+	case <-time.After(100 * time.Millisecond):
+	}
+	select {
+	case <-entered:
+	case <-time.After(3 * time.Second):
+		close(release)
+		t.Fatal("restart never reached launch")
+	}
+	close(release)
+	select {
+	case <-prepared:
+	case <-time.After(3 * time.Second):
+		t.Fatal("bounded restart never released eviction preparation")
+	}
+	host.StopForEviction()
+	assertNoSecondCompletion(t, completed)
 }

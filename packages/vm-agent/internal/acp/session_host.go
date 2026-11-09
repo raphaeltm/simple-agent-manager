@@ -297,8 +297,15 @@ type SessionHost struct {
 	// Independent of the prompt gate: a steer never takes promptMu across an RPC.
 	steerMu sync.Mutex
 
+	// Lock order: evictionDecisionMu -> evictionReportMu -> mu -> promptMu.
+	// Process decisions may hold decisionMu through the existing one-second settle
+	// and configured restart deadline; Prepare waits before recording ownership.
+	// Stop only latches teardown under reportMu, then releases it before callbacks.
 	// Prompt lifecycle state.
 	// promptMu guards promptInFlight (serialization gate only).
+	evictionDecisionMu   sync.Mutex // orders process-exit handling before a new eviction fence
+	evictionReportMu     sync.Mutex // orders parked-exit publication before final teardown
+	evictionTeardown     bool       // evictionReportMu: teardown has consumed late callbacks
 	promptMu             sync.Mutex
 	promptInFlight       bool
 	guardedCancelAttempt *promptAttempt // promptMu: owns any pending guarded stop
@@ -606,6 +613,9 @@ func (h *SessionHost) autoSuspend() {
 // as stopped. This is the only way to terminate the agent — browser disconnects
 // do NOT call this.
 func (h *SessionHost) Stop() {
+	h.evictionReportMu.Lock()
+	h.evictionTeardown = true
+	h.evictionReportMu.Unlock()
 	h.cancelInteractionWaiters("session_stopped")
 	h.promptMu.Lock()
 	attempt := h.promptAttempt

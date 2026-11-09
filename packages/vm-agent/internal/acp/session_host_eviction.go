@@ -27,6 +27,8 @@ type evictionParked struct {
 }
 
 func (h *SessionHost) PrepareEviction() (interrupted *bool, rollback func()) {
+	h.evictionDecisionMu.Lock()
+	defer h.evictionDecisionMu.Unlock()
 	// Match CheckpointRollover's lock order. Keep ownership and admission atomic.
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -90,8 +92,19 @@ func (p evictionParked) replay() {
 // parkPromptCrashForEviction defers a prompt's terminal handling (a crash disconnect, or
 // a prompt-timeout force-stop) while a durable eviction owns the runtime. It reports
 // whether the handling was parked.
-func (h *SessionHost) parkPromptCrashForEviction(signal string, replay func()) bool {
+func (h *SessionHost) parkPromptCrashForEviction(signal string, replay func(), attempts ...*promptAttempt) bool {
+	h.evictionReportMu.Lock()
+	defer h.evictionReportMu.Unlock()
+	h.mu.RLock()
 	h.promptMu.Lock()
+	// A late RPC return is consumed after teardown or prompt completion. Falling
+	// through would restart crash handling for an attempt that already ended.
+	if h.evictionTeardown || h.status == HostStopped || (len(attempts) > 0 && (h.promptAttempt != attempts[0] || (attempts[0] != nil && attempts[0].isTerminal()))) {
+		h.promptMu.Unlock()
+		h.mu.RUnlock()
+		return true
+	}
+	h.mu.RUnlock()
 	parked := h.evictionPending && !h.evictionParkExpired
 	if parked {
 		h.evictionParked.promptCrash = append(h.evictionParked.promptCrash, replay)
@@ -108,8 +121,14 @@ func (h *SessionHost) parkPromptCrashForEviction(signal string, replay func()) b
 // active-prompt failure verdicts) while a durable eviction owns the runtime. A replaced
 // process or a stopped host is left to the normal handler, which already ignores both.
 func (h *SessionHost) parkProcessExitForEviction(process agentProcess, replay func()) bool {
+	h.evictionReportMu.Lock()
+	defer h.evictionReportMu.Unlock()
 	h.mu.RLock()
-	current := h.process == process && h.status != HostStopped
+	if h.evictionTeardown || h.status == HostStopped {
+		h.mu.RUnlock()
+		return true
+	}
+	current := h.process == process
 	h.promptMu.Lock()
 	parked := current && h.evictionPending && !h.evictionParkExpired
 	if parked {
@@ -187,15 +206,24 @@ func (h *SessionHost) reportEvictionOwnedExit(signal string) {
 // EvictedStopReason instead of "cancelled" or a crash failure, and parked crash
 // handling is discarded.
 func (h *SessionHost) StopForEviction() {
+	h.evictionReportMu.Lock()
+	h.mu.RLock()
+	episode := h.checkpointRollover
 	h.promptMu.Lock()
+	h.evictionTeardown = true
 	attempt := h.promptAttempt
 	active := h.promptInFlight
 	_ = h.takeEvictionParkedLocked()
 	h.promptMu.Unlock()
-	if active && attempt != nil && !attempt.complete(h, EvictedStopReason, errWorkspaceEvicted) {
-		// A checkpoint rollover owns this attempt's terminal outcome, as it does for Stop().
-		slog.Warn("Evicted prompt is owned by a checkpoint rollover; leaving its outcome to the rollover",
-			"sessionId", h.config.SessionID, "workspaceId", h.config.WorkspaceID, "promptId", attempt.id)
+	h.mu.RUnlock()
+	if active && attempt != nil {
+		if episode != nil && episode.attempt == attempt {
+			episode.completeEviction(h)
+		} else {
+			attempt.completeEviction(h)
+		}
 	}
+	// Publish the eviction terminal owner before exposing teardown to deadlines.
+	h.evictionReportMu.Unlock()
 	h.Stop()
 }

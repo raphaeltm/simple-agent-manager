@@ -155,9 +155,22 @@ func (h *SessionHost) watchPromptTimeout(
 			return
 		}
 		msg := fmt.Sprintf("Prompt timed out after %s", timeout)
-		h.sendJSONRPCErrorToViewer(viewerID, reqID, -32603, msg)
-		h.triggerPromptForceStopIfStuck(attempt, msg)
+		h.finishPromptTimeout(attempt, viewerID, reqID, msg)
 	}
+}
+
+// A viewer timeout is terminal too: park its notification with the force-stop.
+func (h *SessionHost) finishPromptTimeout(attempt *promptAttempt, viewerID string, reqID json.RawMessage, message string) {
+	h.evictionDecisionMu.Lock()
+	defer h.evictionDecisionMu.Unlock()
+	if attempt == nil || attempt.isTerminal() {
+		return
+	}
+	if h.parkPromptCrashForEviction("prompt_timeout", func() { h.finishPromptTimeout(attempt, viewerID, reqID, message) }, attempt) {
+		return
+	}
+	h.sendJSONRPCErrorToViewer(viewerID, reqID, -32603, message)
+	h.triggerPromptForceStopIfStuck(attempt, message)
 }
 
 // triggerPromptForceStopIfStuck acts only on the exact attempt a watchdog was
@@ -193,7 +206,7 @@ func (h *SessionHost) triggerPromptForceStopIfStuck(attempt *promptAttempt, reas
 	}
 	// A prompt deadline that lands while an eviction owns the runtime is not this
 	// prompt's verdict: the eviction ends it (StopForEviction) or, if rolled back, replays this.
-	if h.parkPromptCrashForEviction("prompt_timeout", func() { h.triggerPromptForceStopIfStuck(attempt, reason) }) {
+	if h.parkPromptCrashForEviction("prompt_timeout", func() { h.triggerPromptForceStopIfStuck(attempt, reason) }, attempt) {
 		return
 	}
 	attempt.completeWith(h, fatalErrorStopReason, errors.New(reason), func() {

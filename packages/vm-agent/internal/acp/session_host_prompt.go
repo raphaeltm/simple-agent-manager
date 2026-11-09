@@ -628,7 +628,7 @@ func (h *SessionHost) finishPromptAttemptWithError(attempt *promptAttempt, promp
 	if errors.Is(promptCtx.Err(), context.DeadlineExceeded) {
 		if h.parkPromptCrashForEviction("prompt_deadline", func() {
 			h.finishPromptAttemptWithError(attempt, promptCtx, reqID, info, err)
-		}) {
+		}, attempt) {
 			return
 		}
 		errMsg := "Prompt cancelled (context deadline exceeded)"
@@ -654,7 +654,7 @@ func (h *SessionHost) finishPromptAttemptWithError(attempt *promptAttempt, promp
 		// That disconnect is the eviction, not a crash: no recovery, no verdict.
 		if h.parkPromptCrashForEviction("prompt_disconnected", func() {
 			h.finishPromptAttemptWithError(attempt, promptCtx, reqID, info, err)
-		}) {
+		}, attempt) {
 			return
 		}
 		agentType, stderr, proc, missing, _, ok := h.beginCrashRecoveryWithPrerequisites(reqID, info.viewerID, info.recovery)

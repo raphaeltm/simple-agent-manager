@@ -867,6 +867,77 @@ describe('runNodeCleanupSweep — vertical slice', () => {
       await env.DATABASE.prepare(`DELETE FROM nodes WHERE id LIKE 'node-nc-reused-grace-%'`).run();
     });
 
+    it('uses genuine terminal history rather than later metadata edits for orphan grace', async () => {
+      await seedBaseData();
+      const oldDate = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      const recentDate = new Date(Date.now() - 30 * 1000).toISOString();
+      for (const [suffix, terminalAt] of [
+        ['old', oldDate],
+        ['recent', recentDate],
+      ] as const) {
+        const nodeId = `node-nc-terminal-history-${suffix}`;
+        const workspaceId = `ws-nc-terminal-history-${suffix}`;
+        const taskId = `task-nc-terminal-history-${suffix}`;
+        await seedNode(nodeId, USER_ID, {
+          status: 'running',
+          createdAt: oldDate,
+          lastHeartbeatAt: recentDate,
+        });
+        await seedWorkspace(workspaceId, nodeId, USER_ID, {
+          projectId: PROJECT_ID,
+          status: 'running',
+          createdAt: oldDate,
+          chatSessionId: `chat-nc-terminal-history-${suffix}`,
+        });
+        await seedAgentSession(`agent-nc-terminal-history-${suffix}`, workspaceId, USER_ID, {
+          status: 'error',
+        });
+        await seedTask(taskId, PROJECT_ID, USER_ID, {
+          status: 'failed',
+          workspaceId,
+          completedAt: null,
+          updatedAt: suffix === 'old' ? recentDate : oldDate,
+        });
+        // A preceding failure must not hide a later genuine failure after retry.
+        // A same-status metadata event must not extend the grace either.
+        for (const [eventSuffix, fromStatus, createdAt] of [
+          ['previous-failure', 'in_progress', oldDate],
+          ['terminal', 'in_progress', terminalAt],
+          ['metadata', 'failed', recentDate],
+        ] as const) {
+          await env.DATABASE.prepare(
+            `INSERT INTO task_status_events (id, task_id, from_status, to_status, actor_type, created_at)
+             VALUES (?, ?, ?, 'failed', 'system', ?)`
+          )
+            .bind(`${taskId}-${eventSuffix}`, taskId, fromStatus, createdAt)
+            .run();
+        }
+      }
+      const result = await runNodeCleanupSweep(env as unknown as Env);
+      expect(await getWorkspaceStatus('ws-nc-terminal-history-old')).toMatchObject({
+        status: 'stopped',
+      });
+      expect(await getWorkspaceStatus('ws-nc-terminal-history-recent')).toMatchObject({
+        status: 'running',
+      });
+      expect(result.orphanedWorkspacesFlagged).toBe(1);
+      // Keep the protected row out of later sweeps with shorter grace settings.
+      await env.DATABASE.prepare(
+        `DELETE FROM task_status_events WHERE task_id LIKE 'task-nc-terminal-history-%'`
+      ).run();
+      for (const table of ['agent_sessions', 'tasks']) {
+        await env.DATABASE.prepare(
+          `DELETE FROM ${table} WHERE workspace_id LIKE 'ws-nc-terminal-history-%'`
+        ).run();
+      }
+      await env.DATABASE.prepare(
+        `DELETE FROM workspaces WHERE id LIKE 'ws-nc-terminal-history-%'`
+      ).run();
+      await env.DATABASE.prepare(
+        `DELETE FROM nodes WHERE id LIKE 'node-nc-terminal-history-%'`
+      ).run();
+    });
+
     it('leaves a failed task workspace to the sleep lifecycle only while its agent session can be slept', async () => {
       // node_cleanup runs before session_sleep in every tick: without this
       // ownership predicate it would stop a failed task's workspace before its

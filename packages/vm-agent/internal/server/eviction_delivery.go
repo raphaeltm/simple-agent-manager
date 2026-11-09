@@ -139,6 +139,10 @@ func (s *Server) reconcilePendingEvictionStop(ctx context.Context, delivery *per
 	if currentID != "" && !dockerContainerIdentityMatches(currentID, delivery.ContainerID) {
 		return false, fmt.Errorf("pending eviction container no longer current")
 	}
+	// Close host admission before collecting hosts, including retry attempts.
+	// A failed attempt reopens admission; successful teardown stops every host.
+	s.markEvictionFinalizing(delivery.WorkspaceID)
+	defer s.clearEvictionFinalizing(delivery.WorkspaceID)
 	if currentID != "" {
 		// A prior fence may have expired while this intent waited for retry.
 		interrupted, rollback := s.prepareWorkspaceEvictionHosts(delivery.WorkspaceID)

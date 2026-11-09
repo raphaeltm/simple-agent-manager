@@ -110,13 +110,8 @@ func (h *SessionHost) CheckpointRollover(ctx context.Context, grace time.Duratio
 			message := "checkpoint rollover cancelled before process restart"
 			result := CheckpointRolloverResult{State: "failed", ACPSessionID: episode.sessionID,
 				ErrorCode: "rollover_cancelled", ErrorMessage: message}
-			episode.complete(result, true)
 			_ = process.Stop()
-			attempt.complete(h, fatalErrorStopReason, errors.New(message))
-			h.setStatus(HostError, message)
-			h.stopPromptActivityRereport()
-			h.reportActivity("error")
-			return result, ctx.Err()
+			return h.resolveCheckpointFailure(episode, result, ctx.Err(), false)
 		}
 	}
 	select {
@@ -139,11 +134,7 @@ func (h *SessionHost) CheckpointRollover(ctx context.Context, grace time.Duratio
 		message := "agent process changed during checkpoint rollover"
 		result := CheckpointRolloverResult{State: "failed", Forced: forced, ACPSessionID: episode.sessionID,
 			ErrorCode: "process_changed", ErrorMessage: message}
-		episode.complete(result, true)
-		attempt.completeCheckpoint(h, fatalErrorStopReason, errors.New(message))
-		h.setStatus(HostError, message)
-		h.reportActivity("error")
-		return result, fmt.Errorf("%w: %s", ErrCheckpointUnavailable, message)
+		return h.resolveCheckpointFailure(episode, result, fmt.Errorf("%w: %s", ErrCheckpointUnavailable, message), true)
 	}
 	episode.forced = forced
 	h.mu.Unlock()
@@ -152,11 +143,7 @@ func (h *SessionHost) CheckpointRollover(ctx context.Context, grace time.Duratio
 		message := "failed to stop agent process for checkpoint rollover"
 		result := CheckpointRolloverResult{State: "failed", Forced: forced, ACPSessionID: episode.sessionID,
 			ErrorCode: "process_stop_failed", ErrorMessage: message}
-		episode.complete(result, true)
-		attempt.completeCheckpoint(h, fatalErrorStopReason, fmt.Errorf("%s: %w", message, err))
-		h.setStatus(HostError, message)
-		h.reportActivity("error")
-		return result, fmt.Errorf("%s: %w", message, err)
+		return h.resolveCheckpointFailure(episode, result, fmt.Errorf("%s: %w", message, err), true)
 	}
 
 	select {
@@ -169,18 +156,57 @@ func (h *SessionHost) CheckpointRollover(ctx context.Context, grace time.Duratio
 		message := "checkpoint rollover did not converge before its operation deadline"
 		result := CheckpointRolloverResult{State: "failed", Forced: forced, ACPSessionID: episode.sessionID,
 			ErrorCode: "rollover_deadline_exceeded", ErrorMessage: message}
-		if !episode.complete(result, true) {
-			result = <-episode.result
-			if result.State == "failed" {
-				return result, errors.New(result.ErrorMessage)
-			}
-			return result, nil
-		}
-		attempt.completeCheckpoint(h, fatalErrorStopReason, errors.New(message))
-		h.setStatus(HostError, message)
-		h.reportActivity("error")
-		return result, ctx.Err()
+		return h.resolveCheckpointFailure(episode, result, ctx.Err(), true)
 	}
+}
+
+// publishCheckpointFailure keeps the checkpoint outcome and its prompt verdict
+// together while eviction owns the runtime. Rollback/expiry replay the failure;
+// a committed eviction supersedes the episode and wakes its waiting caller.
+func (h *SessionHost) publishCheckpointFailure(episode *checkpointRolloverEpisode, result CheckpointRolloverResult, cause error, owned bool) {
+	if episode.supersedeIfSettled(h, h.checkpointTeardownStarted()) {
+		return
+	}
+	publish := func() {
+		if episode.completeFailure(h, result, cause, owned) {
+			h.setStatus(HostError, result.ErrorMessage)
+			h.stopPromptActivityRereport()
+			h.reportActivity("error")
+		}
+	}
+	replay := func() { h.dispatchCheckpointFailure(episode, result, cause, owned) }
+	if !h.parkPromptCrashForEviction("checkpoint_failed", replay, episode.attempt) {
+		publish()
+	} else {
+		// The park guard also consumes stale callbacks; resolve their waiting caller.
+		episode.supersedeIfSettled(h, h.checkpointTeardownStarted())
+	}
+}
+
+// Stop latches teardown before changing status or running cancellation callbacks.
+func (h *SessionHost) checkpointTeardownStarted() bool {
+	h.evictionReportMu.Lock()
+	defer h.evictionReportMu.Unlock()
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.evictionTeardown || h.status == HostStopped
+}
+
+// Process-exit handling already owns this decision lock; checkpoint callers and
+// detached replays enter here so a renewed fence cannot lose terminal ownership.
+func (h *SessionHost) dispatchCheckpointFailure(episode *checkpointRolloverEpisode, result CheckpointRolloverResult, cause error, owned bool) {
+	h.evictionDecisionMu.Lock()
+	defer h.evictionDecisionMu.Unlock()
+	h.publishCheckpointFailure(episode, result, cause, owned)
+}
+
+func (h *SessionHost) resolveCheckpointFailure(episode *checkpointRolloverEpisode, result CheckpointRolloverResult, cause error, owned bool) (CheckpointRolloverResult, error) {
+	h.dispatchCheckpointFailure(episode, result, cause, owned)
+	decided := <-episode.result
+	if decided.State == "failed" {
+		return decided, cause
+	}
+	return decided, nil
 }
 
 func (h *SessionHost) clearCheckpointRollover(episode *checkpointRolloverEpisode) {
