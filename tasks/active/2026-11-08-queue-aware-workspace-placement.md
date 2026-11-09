@@ -103,6 +103,7 @@ normal capacity-exhaustion behavior.
 - [ ] Staging: 2 small nodes, a burst plus a human chat distributes; cleanup verified
 
 Test mapping:
+
 - Comparator, all-busy starts, unsafe exclusions, location, warm interleaving, pin and legacy
   waiter (mocked orchestration): `tests/unit/durable-objects/task-runner-node-selection.test.ts`,
   "startup backlog ranking"
