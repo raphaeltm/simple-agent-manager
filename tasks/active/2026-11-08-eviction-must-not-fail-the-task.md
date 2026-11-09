@@ -204,3 +204,9 @@ issuing a verdict.
 - Cloudflare, constitution, documentation-sync and environment reviews passed.
 - Residual idea `01M6YR5TX0C7X1S5FS7HSG22DX` remains open: raising the fence at
   target selection and recording eviction reason are outside this PR.
+- Broad Go race validation found two baseline issues and reproduced both on
+  unmodified main (`6c788eeff`): snapshot upload checksum/count race (existing idea
+  `01M6M30FKZJ5CBYNW1EA6GZ9Y6`), and quiescence test scanning inherited agent state.
+  The adjacent quiescence fixture now isolates CODEX_HOME, CLAUDE_CONFIG_DIR and
+  XDG_DATA_HOME under its temporary home; its focused race test passes (2.138s).
+  The upload race remains separately tracked; production upload code is unchanged.
