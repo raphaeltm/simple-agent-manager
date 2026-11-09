@@ -472,27 +472,43 @@ const POOL_HEADINGS: Record<PoolScope, string> = {
   installation: 'Shared compute pool',
 };
 
-/** One row per machine type per connection that is allowed in at least one region. */
-function allowedRowCount(scope: PoolScope) {
+/** Rows SAM can place on: picked machines × regions of accounts that are on. */
+function pickedRowCount(scope: PoolScope) {
   return new Set(
     capacitySummary(scope)
       .candidates.filter((candidate) => candidate.status === 'active')
-      .map((candidate) => `${candidate.capacitySourceId}|${candidate.providerInstanceType}`)
+      .map(
+        (candidate) =>
+          `${candidate.capacitySourceId}|${candidate.providerInstanceType}|${candidate.location}`
+      )
   ).size;
+}
+
+/** The control for a row, in whichever layout (table or list) the viewport shows. */
+function visibleButton(page: Page, name: string) {
+  return page.getByRole('button', { name, exact: true }).filter({ visible: true }).first();
 }
 
 async function expectStressedDefaultPool(page: Page, scope: PoolScope) {
   await expect(page.getByRole('heading', { name: POOL_HEADINGS[scope] })).toBeVisible({
     timeout: 20_000,
   });
-  await expect(page.getByText(`Allowed machines (${allowedRowCount(scope)})`)).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'In your pool', exact: true })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Available machines', exact: true })
+  ).toBeVisible();
+  await expect(page.getByText(`Ready · ${pickedRowCount(scope)} in pool`)).toBeVisible();
   // The hostile region label (unicode, emoji, markup) renders as wrapped text.
   await expect(
-    page.getByText(new RegExp(`region-with-a-deliberately-long-location-name-${scope}`)).first()
+    page
+      .getByText(new RegExp(`region-with-a-deliberately-long-location-name-${scope}`))
+      .filter({ visible: true })
+      .first()
   ).toBeVisible();
-  // Internal references never render.
+  // Internal references and legacy size names never render.
   await expect(page.getByText(/credentials:|platform_credentials:/)).toHaveCount(0);
   await expect(page.getByText(/Hidden outside this settings context/i)).toHaveCount(0);
+  await expect(page.getByText(/\b(small|medium|large)\b/)).toHaveCount(0);
   await assertNoOverflow(page);
 }
 
@@ -504,12 +520,12 @@ async function screenshotDefaultPoolScope(
 ) {
   await screenshot(page, `${namePrefix}-${suffix}`);
   await screenshotNearHeading(page, heading, `${namePrefix}-focused-${suffix}`);
-  await screenshotNearHeading(page, 'Allowed machines', `${namePrefix}-details-${suffix}`);
+  await screenshotNearHeading(page, 'Available machines', `${namePrefix}-details-${suffix}`);
 }
 
 async function editStressedPool(page: Page, screenshotName: string) {
-  await page.getByRole('button', { name: 'Edit', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Allowed machines', exact: true })).toBeVisible();
+  // Pool settings live in a disclosure under the machine list.
+  await page.getByText('How SAM uses machines', { exact: true }).click();
   await page.getByLabel('Placing agents').selectOption('spread');
   await page.getByLabel(/^Machine limit/).fill('5');
   // The machine limit's longer help makes its grid row taller; the dropdown beside it
@@ -521,71 +537,49 @@ async function editStressedPool(page: Page, screenshotName: string) {
   );
   expect(Math.min(...selectHeights)).toBeGreaterThan(0);
   expect(Math.max(...selectHeights) - Math.min(...selectHeights)).toBeLessThanOrEqual(1);
-  await page.getByRole('button', { name: 'cx33 in Nuremberg', exact: true }).click();
-  await page.getByRole('button', { name: 'cx43 in Helsinki', exact: true }).click();
-  await screenshotNearHeading(page, 'Allowed machines', screenshotName);
 
-  // Provider order: rank the six accounts and move the second one to the top.
-  await page.getByRole('radio', { name: /Try accounts in this order/ }).check();
-  const order = page.getByRole('list', { name: 'Accounts in order' });
-  await expect(order.getByRole('listitem')).toHaveCount(providerNames.length);
-  const secondTitle = (await order
-    .getByRole('listitem')
-    .nth(1)
-    .locator('div > div')
-    .first()
-    .textContent())!.replace(/^\d+\.\s*/, '');
-  await order.getByRole('button', { name: `Move ${secondTitle} up` }).click();
-  await expect(order.getByRole('listitem').first()).toContainText(secondTitle);
-  const reorderedTitles = await orderTitles(page);
+  // Remove a picked region, add a catalog-only machine and a second account's machine.
+  await visibleButton(page, 'Remove cx33 in Nuremberg').click();
+  await visibleButton(page, 'Add cpx62-catalog-only-live-api-extra in Falkenstein').click();
+  await page.getByRole('textbox', { name: 'Search machines' }).fill('bare-metal');
+  await expect(
+    page.getByText(EXPENSIVE_HETZNER_GPU_SKU).filter({ visible: true }).first()
+  ).toBeVisible();
+  await screenshotNearHeading(page, 'Available machines', `${screenshotName}-search`);
+  await page.getByRole('textbox', { name: 'Search machines' }).fill('');
   await assertNoOverflow(page);
-  await screenshotNearHeading(page, 'Provider order', `${screenshotName}-provider-order`);
 
-  // Each click removes its button, so always expand the first one left.
-  const showMoreButtons = page.getByRole('button', { name: /^Show \d+ more machine types?$/ });
-  for (let left = await showMoreButtons.count(); left > 0; left -= 1) {
-    await showMoreButtons.first().click();
-  }
-  await expect(showMoreButtons).toHaveCount(0);
+  // Unavailable machines are hidden until asked for, and cannot be added.
+  await page.getByLabel('Hide unavailable').uncheck();
   await expect(
-    page.getByRole('button', { name: 'cpx31 in Ashburn (temporarily unavailable)', exact: true })
-  ).toBeDisabled();
+    page.getByText('Temporarily unavailable').filter({ visible: true }).first()
+  ).toBeVisible();
+  await page.getByLabel('Hide unavailable').check();
+
+  // Switching the account off keeps its machines but empties the pool: the Instant warning shows.
+  const hetznerSwitch = page.getByRole('switch', { name: /^Use Hetzner/ }).first();
+  await hetznerSwitch.click();
+  await expect(page.getByText('Empty · Instant sessions only')).toBeVisible();
   await expect(
-    page.getByRole('button', { name: 'ccx33 in Hillsboro (not currently offered)', exact: true })
-  ).toBeDisabled();
+    page.getByText('Your pool is empty, so only Instant sessions can run.')
+  ).toBeVisible();
+  await expect(page.getByText(/machines? kept, not used$/).first()).toBeVisible();
+  await assertNoOverflow(page);
+  await screenshotNearHeading(page, 'In your pool', `${screenshotName}-account-off`);
   await page
-    .getByRole('button', { name: 'cpx62-catalog-only-live-api-extra in Falkenstein', exact: true })
+    .getByRole('switch', { name: /^Use Hetzner/ })
+    .first()
     .click();
+  await expect(page.getByText(/^Ready · \d+ in pool$/)).toBeVisible();
+  await screenshotNearHeading(page, 'In your pool', `${screenshotName}-accounts`);
+  await screenshotNearHeading(page, 'Available machines', screenshotName);
+
+  await visibleButton(page, 'Save changes').click();
+  await expect(page.getByRole('button', { name: 'Save changes' })).toHaveCount(0);
+  await expect(
+    page.getByText('cpx62-catalog-only-live-api-extra').filter({ visible: true }).first()
+  ).toBeVisible();
   await assertNoOverflow(page);
-
-  await page.getByRole('searchbox', { name: 'Search machine types' }).fill('bare-metal');
-  await expect(page.getByText(EXPENSIVE_HETZNER_GPU_SKU).first()).toBeVisible();
-  await screenshotNearHeading(page, 'Allowed machines', `${screenshotName}-search`);
-
-  await page.getByRole('button', { name: 'Save changes' }).click();
-  // cx33's only region was turned off; the catalog-only cpx62 joins.
-  await expect(page.getByText('cpx62-catalog-only-live-api-extra', { exact: true })).toBeVisible();
-  await expect(page.getByText('cx33', { exact: true })).toHaveCount(0);
-  // The saved order reaches the overview sentence.
-  await expect(page.getByText(/ first, then /)).toBeVisible();
-  await assertNoOverflow(page);
-  // Reopening the editor shows exactly the order that was saved.
-  await page.getByRole('button', { name: 'Edit', exact: true }).click();
-  await expect(page.getByRole('radio', { name: /Try accounts in this order/ })).toBeChecked();
-  expect(await orderTitles(page)).toEqual(reorderedTitles);
-  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
-}
-
-async function orderTitles(page: Page): Promise<string[]> {
-  const items = await page
-    .getByRole('list', { name: 'Accounts in order' })
-    .getByRole('listitem')
-    .all();
-  return Promise.all(
-    items.map(async (item) =>
-      ((await item.locator('div > div').first().textContent()) ?? '').replace(/^\d+\.\s*/, '')
-    )
-  );
 }
 
 test.describe('Default capacity pool scope surfaces', () => {

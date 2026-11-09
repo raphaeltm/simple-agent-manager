@@ -69,19 +69,20 @@ A session in a project you have since left still shows its usage, because it run
 but not the project's name, the chat title or a link to the chat. If you have a very large number of
 sessions, or a session uploads unusually many history batches, the page says what it left out.
 
-Each panel sums the pool up in one sentence (which provider, which regions, the smallest and
-largest machine), lists its settings in plain words, and shows the machine types it allows with the
-regions each one is allowed in. **Edit** opens the same panel for changes, with a Save bar that stays
-on screen.
+A pool you can edit opens straight into its editor (`ComputePoolEditor`). A status chip says
+**Ready · N in pool** or **Empty · Instant sessions only**. Below it:
 
-<picture>
-  <source type="image/webp" srcset="/images/features/sam-compute-pool-editor.webp" />
-  <img
-    src="/images/features/sam-compute-pool-editor.png"
-    alt="A project compute pool open for editing. Under &quot;How SAM uses machines&quot;: Placing agents is Pack, If the provider is out of capacity is Try other allowed machines, Machine limit per person is 3, and App deployments is Smallest fit. Under &quot;Allowed machines&quot;, a search box sits above one row per machine type with its vCPU, RAM, disk, and monthly price: cx23 is allowed in Falkenstein, and under &quot;Other machine types&quot;, cx33 can be allowed in Nuremberg and cpx31 in Helsinki, while cx43 shows &quot;Falkenstein · region sold out&quot;. A bar at the bottom reads &quot;No changes yet&quot;, with Cancel and Save changes."
-    loading="lazy"
-  />
-</picture>
+- **In your pool** lists the cloud accounts with the machines picked from each (machine · region ·
+  price), a switch per account, the account order, and **Remove all**.
+- **Available machines** lists every machine your connected accounts offer, **one row per provider ×
+  machine × region**, with vCPU, memory, disk and the monthly price in that provider's own currency.
+  Search, show **All / In pool / Not in pool**, filter by account, continent, minimum vCPU, minimum
+  memory and maximum price, and hide unavailable machines. Every column sorts; the default order is
+  account, then machine size, then region. Select rows to add or remove them together.
+- **How SAM uses machines** holds the pool's settings.
+
+Changes stay a draft until **Save changes**; **Discard** drops them. A pool you can see but not
+edit (for example the personal pool a project falls back to) is summed up read-only instead.
 
 You can also see the pool in effect without leaving your work: the **workspace sidebar** and a
 chat session's **infrastructure** section both show a "Current compute pool" line with the scope,
@@ -164,6 +165,17 @@ tab, under **Compute**).
 Without any pool of your own, the panel tells you whether shared machines from the installation
 are running your work, and links to connecting your own cloud account.
 
+### An empty pool runs only Instant sessions
+
+**Nothing joins a pool on its own.** Connecting an account lists its machines but picks none of them,
+so a new pool is empty until you add machines. While a pool has no machines it can place (none
+picked, or only on accounts that are switched off), the editor warns that only
+[Instant sessions](/docs/guides/instant-sessions/) can run there: no Docker, no devcontainer and a
+slim toolchain. Work that needs a VM fails at once with "Your compute pool has no machines, so work
+that needs a VM cannot start" (`emptyCapacityPoolMessage()`), naming the two ways forward: add
+machines, or run it as an Instant session. An empty pool is still authoritative: SAM does not fall
+back to another pool.
+
 ## What is inside a pool
 
 ### Sources
@@ -180,10 +192,24 @@ from credentials you have already connected:
 - **Platform** credentials — installation-level credentials added by a superadmin.
 
 A pool with no active source cannot rent anything. The panel links straight to the right setup
-page when that is the case. When a pool has more than one connection, the panel shows each one as
-its own section, named after the provider and where you manage it (for example **Hetzner ·
-Infrastructure settings**, **Hetzner · Project accounts**, or **Hetzner · Project credentials**), so
-you can tell them apart without seeing credential ids.
+page when that is the case. Each account is named after its provider and the name you gave the
+connection (for example **Google Cloud · SAM GCP Prod**), or where you manage it when it has no name
+(**Hetzner · Infrastructure settings**), so you can tell two accounts apart without seeing credential
+ids (`attachCapacitySourceLabels()`).
+
+An account that is disconnected, deleted or disabled disappears from the pool on its own, with its
+machines, and SAM never places on it. Its records are kept rather than deleted, because running
+machines may still reference them.
+
+#### Switching an account off
+
+Each account in **In your pool** has a switch. Switching an account off keeps the machines you
+picked from it but stops SAM using them: no new machines from that account, and no new work on its
+running machines (`isCapacitySourceExcluded()`, enforced again when work is admitted to a machine).
+Switching it back on restores its machines as they were. Adding a machine from an account that is
+off switches it on. An account with nothing picked is listed under **Connected, not in this pool**.
+Like the provider order, switching an account does not disturb other accounts' running machines.
+The same setting is `excludedSourceIds` in the pool update API.
 
 #### Provider order
 
@@ -228,14 +254,11 @@ Sources that share a rank do not fall back to each other; give them different ra
 one to back up the other. Without an order, nothing falls back across sources. Each attempt,
 including skipped sources and the reason, appears in the run's placement details.
 
-**Setting the order.** Open the pool on its Infrastructure page and select **Edit**. Under
-**Provider order**, choose **Try accounts in this order**, then use the up and down arrows to put
-the account SAM should try first at the top, and **Save changes**. Choose **Every account is equal**
-to clear the order. The pool summary states the current order in one sentence, for example
-"Google Cloud first, then Hetzner". An account connected after the order was saved is listed
-"after those" until you place it. A pool with a single account has nothing to order, so the
-section only explains that. The same order can be set through the pool update API
-(`sourceOrder`, a list of source ids).
+**Setting the order.** In **In your pool**, select **Try accounts in this order**, then use the up
+and down arrows to put the account SAM should try first at the top, and **Save changes**. Select
+**Every account is equal** to clear the order. Only accounts with machines in the pool are ranked; a
+pool with a single such account has nothing to order. The same order can be set through the pool
+update API (`sourceOrder`, a list of source ids).
 
 ### Allowed offerings
 
@@ -246,33 +269,32 @@ region, with real vCPU, RAM, disk, and price. Not `small`/`medium`/`large` — t
 When SAM refreshes a pool it discovers your provider's **full** catalog for each source. For
 Google Cloud, the catalog is the machine types an admin has chosen, in every zone where Google has
 them, priced from Google's live list prices; see
-[Google Cloud](/docs/guides/google-cloud/#machine-types-zones-and-prices). The
-editor shows one row per machine type (its vCPU, RAM, disk, and price) with a chip for every region
-your provider sells it in. Select a region to allow that machine there; select it again to stop.
-Each chip is one of:
+[Google Cloud](/docs/guides/google-cloud/#machine-types-zones-and-prices). The editor shows one row
+per machine type and **region**, with its price in the provider's own currency (SAM never converts
+currencies, so the maximum-price filter compares each provider in its own). **Add** puts that
+machine in the pool in that region; **Remove** takes it out.
 
-| Chip                     | Meaning                                                                                                                            |
-| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
-| ✓ **Allowed**            | SAM may provision this machine type in this region                                                                                 |
-| Plain                    | Not allowed. SAM will not use it until you select it                                                                               |
-| Dashed, with a reason    | Your provider does not offer it right now (region sold out, machine retired, not seen in the latest catalog). It cannot be allowed |
-| ⚠ Allowed, with a reason | Allowed, but your provider does not offer it right now. You can turn it off                                                        |
+**Regions, not zones.** Where a provider splits a region into zones (Google Cloud's `europe-west1-b`,
+`-c`, `-d`; Scaleway's `fr-par-1`, `-2`), you pick the region and SAM may use any of its zones
+(`providerLocationRegion()`). A zone the provider adds later to a region you picked joins it; zones
+of regions you did not pick never do. A row the provider does not offer right now in any zone is
+marked unavailable and cannot be added; one already in the pool can still be removed.
 
-Only allowed machines are eligible for placement. Machine types the pool already allows are listed
-first; the rest of the provider's catalog is folded behind **Show N more machine types** and is
-searchable by name or region (**Search by name or region**), so you can browse everything your
-provider sells without leaving the page.
+Only machines in the pool, on accounts that are on, are eligible for placement.
 
 #### How refresh treats your choices
 
 Refresh updates catalog facts — prices, specs, availability, new machine types — without undoing
 your decisions:
 
-- A machine you explicitly allowed or turned off keeps that setting.
-- A brand-new machine type that appears in the catalog starts out not allowed, so your provider
-  adding a machine type never silently changes what SAM rents.
-- On first creation, SAM enables the offerings that correspond to the machine sizes it has always
-  supported, so a fresh pool works immediately.
+- A machine you explicitly added or removed keeps that setting.
+- **Nothing joins a pool on its own** (`initialStatusForProviderOffering()`): a newly connected
+  account, a new machine type and a new region all start out not in the pool, so a provider
+  growing its catalog never changes what SAM rents. The one exception is a new zone of a region
+  you already picked, as above.
+- The old `small`/`medium`/`large` sizes play no part in what a pool contains. A task or profile
+  that still asks for one is asking for that much vCPU, memory and disk, and gets any picked
+  machine that fits.
 - A provider API failure during refresh is reported as a refresh error; SAM does not invent
   availability it could not confirm.
 - When a source's catalog changed, SAM writes the whole new catalog during that refresh, in batches,
@@ -326,8 +348,8 @@ example, _"Why this node: lowest projected utilization first"_.
 
 Agent workspaces and [app deployments](/docs/guides/app-deployments/) want opposite things — a
 workspace is bursty and short-lived, a deployment is steady and long-lived — so the pool carries a
-separate strategy for each. **Edit** on the compute pool panel of whichever scope you own shows
-all four settings together (the app's label, then the concept it sets):
+separate strategy for each. **How SAM uses machines** in the compute pool editor of whichever scope
+you own shows all four settings together (the app's label, then the concept it sets):
 
 | Field                                                      | What it decides                                                                                                                    | Default        |
 | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | -------------- |
@@ -622,7 +644,7 @@ problem as a warning in plain words:
 | ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Available**                             | _(no warning)_                                                                                                                                                                                           | Nothing to do.                                                                                                                                                                                                                                                               |
 | **Not configured**                        | "No machines yet" or "You're using shared machines" (on a project: "No machines for this project yet" or "This project uses shared machines"; on the installation pool: "No platform cloud account yet") | If it says you're using shared machines, nothing is needed. To get machines of your own, connect a cloud credential to the project or your account, and the pool is created for you. For the installation pool, a platform superadmin selects **Add a platform credential**. |
-| **Empty — no eligible offerings**         | "No machines are allowed, so SAM can't start any from this pool."                                                                                                                                        | **Edit** it and allow a machine, or attach a credential.                                                                                                                                                                                                                     |
+| **Empty — no eligible offerings**         | "Your pool is empty, so only Instant sessions can run." (read-only views: "No machines are allowed, so SAM can't start any from this pool.")                                                          | Add a machine from **Available machines**, switch an account back on, or attach a credential.                                                                                                                                                                                 |
 | **Unavailable — compute source disabled** | "The cloud account behind this pool is turned off or was removed."                                                                                                                                       | Reconnect or re-enable the credential. The pool updates when you do.                                                                                                                                                                                                         |
 | **Unavailable — catalog refresh needed**  | "SAM couldn't read the provider's machine list. Try Refresh."                                                                                                                                            | **Refresh**, then allow a machine that is still sold.                                                                                                                                                                                                                        |
 | **Migration in progress**                 | "This pool is being updated. Try again in a minute."                                                                                                                                                     | Wait, then reload.                                                                                                                                                                                                                                                           |
@@ -642,7 +664,7 @@ remove it so a lower scope applies.
 | A new machine is provisioned for every task                            | Requirements ask for an exclusive node, each request fills a machine, or **Spread** has not reached the pool's **Machine limit**.                                                                                                                                                                                                                                                          |
 | Workspace machines are bigger or pricier than expected                 | Check the resolved requirements in the chat's infrastructure panel — a profile, skill, or project default may be raising the floor. Then open **Resources** on a finished session to see what it actually used ([Session Resource History](/docs/guides/session-resources/)).                                                                                                              |
 | A deployment machine is bigger than expected                           | Check the service CPU and memory limits in its deployment manifest, the pool's deployment strategy, and which smaller offerings the pool allows.                                                                                                                                                                                                                                           |
-| There's no **Edit** button                                             | The project has no pool of its own and shows the one it falls back to, read-only: follow **Edit your pool** (or **Edit the shared pool**), or connect a cloud account to the project to give it its own. Otherwise, editing a project's pool takes the project's owner or admin role (everyone who joins through an invitation is an admin), and the installation pool takes a superadmin. |
+| The pool cannot be edited                                              | The project has no pool of its own and shows the one it falls back to, read-only: follow **Edit your pool** (or **Edit the shared pool**), or connect a cloud account to the project to give it its own. Otherwise, editing a project's pool takes the project's owner or admin role (everyone who joins through an invitation is an admin), and the installation pool takes a superadmin. |
 | The project ignores your personal pool                                 | The project has its own pool. Remove it if you want the personal pool to apply.                                                                                                                                                                                                                                                                                                            |
 | Everything lands on one cloud although the pool allows several         | A default provider is set on the project or the agent profile, and it filters the others out.                                                                                                                                                                                                                                                                                              |
 | Too many, or too few, workspaces share a machine                       | Adjust explicit CPU, memory, and disk requirements, use **Exclusive node** for isolation, or change the pool strategy and **Machine limit**. [Session Resource History](/docs/guides/session-resources/) is the evidence for what the requirements should be.                                                                                                                              |

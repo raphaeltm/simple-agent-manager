@@ -148,11 +148,7 @@ async function marketingSpanShot(
  * that must stay under a fixed pixel budget, as opposed to `marketingSpanShot`
  * / `exposeFullPageHeight`'s whole-section captures.
  */
-async function scrollHeadingNearTop(
-  page: Page,
-  locator: ReturnType<Page['locator']>,
-  offset = 24
-) {
+async function scrollHeadingNearTop(page: Page, locator: ReturnType<Page['locator']>, offset = 24) {
   // JS `main.scrollTop` assignment (and even native `scrollIntoViewIfNeeded`)
   // read `#main-content`'s `scrollHeight` as exactly equal to `clientHeight`
   // — i.e. "no overflow" — for several seconds after `page.setViewportSize`
@@ -364,25 +360,147 @@ const OFFERING_SPECS: OfferingSpec[] = [
   // real catalog rows (unavailable / not-selected) so the offerings-manager
   // catalog list still demonstrates every status within its first four
   // (Hetzner) cards.
-  { candidateId: 'cand-hetzner-cx23-fsn1', provider: 'hetzner', location: 'fsn1', sku: 'cx23', vcpu: 2, ramGb: 4, diskGb: 40, priceCents: 549, currency: 'EUR' },
-  { candidateId: 'cand-hetzner-cx43-fsn1', provider: 'hetzner', location: 'fsn1', sku: 'cx43', vcpu: 8, ramGb: 16, diskGb: 160, priceCents: 1599, currency: 'EUR', disabled: true, unavailable: 'Region sold out' },
-  { candidateId: 'cand-hetzner-cx33-nbg1', provider: 'hetzner', location: 'nbg1', sku: 'cx33', vcpu: 4, ramGb: 8, diskGb: 80, priceCents: 849, currency: 'EUR', disabled: true },
+  {
+    candidateId: 'cand-hetzner-cx23-fsn1',
+    provider: 'hetzner',
+    location: 'fsn1',
+    sku: 'cx23',
+    vcpu: 2,
+    ramGb: 4,
+    diskGb: 40,
+    priceCents: 549,
+    currency: 'EUR',
+  },
+  {
+    candidateId: 'cand-hetzner-cx43-fsn1',
+    provider: 'hetzner',
+    location: 'fsn1',
+    sku: 'cx43',
+    vcpu: 8,
+    ramGb: 16,
+    diskGb: 160,
+    priceCents: 1599,
+    currency: 'EUR',
+    disabled: true,
+    unavailable: 'Region sold out',
+  },
+  {
+    candidateId: 'cand-hetzner-cx33-nbg1',
+    provider: 'hetzner',
+    location: 'nbg1',
+    sku: 'cx33',
+    vcpu: 4,
+    ramGb: 8,
+    diskGb: 80,
+    priceCents: 849,
+    currency: 'EUR',
+    disabled: true,
+  },
   // Scaleway: only PLAY2-MICRO is active (card 2, via Elena's granted
   // credential). PRO2-S stays a real "Not selected" candidate row.
-  { candidateId: 'cand-scaleway-play2micro-par2', provider: 'scaleway', location: 'fr-par-2', sku: 'PLAY2-MICRO', vcpu: 2, ramGb: 4, diskGb: 20, priceCents: 799, currency: 'EUR' },
-  { candidateId: 'cand-scaleway-pro2s-ams1', provider: 'scaleway', location: 'nl-ams-1', sku: 'PRO2-S', vcpu: 2, ramGb: 8, diskGb: 50, priceCents: 1606, currency: 'EUR', disabled: true },
+  {
+    candidateId: 'cand-scaleway-play2micro-par2',
+    provider: 'scaleway',
+    location: 'fr-par-2',
+    sku: 'PLAY2-MICRO',
+    vcpu: 2,
+    ramGb: 4,
+    diskGb: 20,
+    priceCents: 799,
+    currency: 'EUR',
+  },
+  {
+    candidateId: 'cand-scaleway-pro2s-ams1',
+    provider: 'scaleway',
+    location: 'nl-ams-1',
+    sku: 'PRO2-S',
+    vcpu: 2,
+    ramGb: 8,
+    diskGb: 50,
+    priceCents: 1606,
+    currency: 'EUR',
+    disabled: true,
+  },
   // Vultr: 5 active across 3 locations (ewr/fra/ord) to keep total Allowed
   // at 7. Only vc2-4c-8gb is active at ewr, so it alone sorts as card 3.
-  { candidateId: 'cand-vultr-vc24c8gb-ewr', provider: 'vultr', location: 'ewr', sku: 'vc2-4c-8gb', vcpu: 4, ramGb: 8, diskGb: 160, priceCents: 4800, currency: 'USD' },
-  { candidateId: 'cand-vultr-vc22c4gb-fra', provider: 'vultr', location: 'fra', sku: 'vc2-2c-4gb', vcpu: 2, ramGb: 4, diskGb: 80, priceCents: 2400, currency: 'USD' },
-  { candidateId: 'cand-vultr-vc24c8gb-fra', provider: 'vultr', location: 'fra', sku: 'vc2-4c-8gb', vcpu: 4, ramGb: 8, diskGb: 160, priceCents: 4800, currency: 'USD' },
-  { candidateId: 'cand-vultr-vc22c4gb-ord', provider: 'vultr', location: 'ord', sku: 'vc2-2c-4gb', vcpu: 2, ramGb: 4, diskGb: 80, priceCents: 2400, currency: 'USD' },
-  { candidateId: 'cand-vultr-vc24c8gb-ord', provider: 'vultr', location: 'ord', sku: 'vc2-4c-8gb', vcpu: 4, ramGb: 8, diskGb: 160, priceCents: 4800, currency: 'USD' },
+  {
+    candidateId: 'cand-vultr-vc24c8gb-ewr',
+    provider: 'vultr',
+    location: 'ewr',
+    sku: 'vc2-4c-8gb',
+    vcpu: 4,
+    ramGb: 8,
+    diskGb: 160,
+    priceCents: 4800,
+    currency: 'USD',
+  },
+  {
+    candidateId: 'cand-vultr-vc22c4gb-fra',
+    provider: 'vultr',
+    location: 'fra',
+    sku: 'vc2-2c-4gb',
+    vcpu: 2,
+    ramGb: 4,
+    diskGb: 80,
+    priceCents: 2400,
+    currency: 'USD',
+  },
+  {
+    candidateId: 'cand-vultr-vc24c8gb-fra',
+    provider: 'vultr',
+    location: 'fra',
+    sku: 'vc2-4c-8gb',
+    vcpu: 4,
+    ramGb: 8,
+    diskGb: 160,
+    priceCents: 4800,
+    currency: 'USD',
+  },
+  {
+    candidateId: 'cand-vultr-vc22c4gb-ord',
+    provider: 'vultr',
+    location: 'ord',
+    sku: 'vc2-2c-4gb',
+    vcpu: 2,
+    ramGb: 4,
+    diskGb: 80,
+    priceCents: 2400,
+    currency: 'USD',
+  },
+  {
+    candidateId: 'cand-vultr-vc24c8gb-ord',
+    provider: 'vultr',
+    location: 'ord',
+    sku: 'vc2-4c-8gb',
+    vcpu: 4,
+    ramGb: 8,
+    diskGb: 160,
+    priceCents: 4800,
+    currency: 'USD',
+  },
   // Catalog-only additions — no candidateId, so they only appear in the edit
   // view's "Add instances from catalog" list, labeled "Catalog only". Both
   // sort into the first 4 catalog cards (Hetzner, then Scaleway groups).
-  { provider: 'hetzner', location: 'hel1', sku: 'cpx31', vcpu: 4, ramGb: 8, diskGb: 160, priceCents: 1559, currency: 'EUR' },
-  { provider: 'scaleway', location: 'fr-par-2', sku: 'PRO2-S', vcpu: 2, ramGb: 8, diskGb: 50, priceCents: 1606, currency: 'EUR' },
+  {
+    provider: 'hetzner',
+    location: 'hel1',
+    sku: 'cpx31',
+    vcpu: 4,
+    ramGb: 8,
+    diskGb: 160,
+    priceCents: 1559,
+    currency: 'EUR',
+  },
+  {
+    provider: 'scaleway',
+    location: 'fr-par-2',
+    sku: 'PRO2-S',
+    vcpu: 2,
+    ramGb: 8,
+    diskGb: 50,
+    priceCents: 1606,
+    currency: 'EUR',
+  },
 ];
 
 function priceDisplay(spec: OfferingSpec): string {
@@ -573,34 +691,20 @@ test.describe('A. Compute pool editor', () => {
     await page.goto(`/projects/${PROJECT.id}/settings/infrastructure`);
     const heading = page.getByRole('heading', { name: 'Project compute pool' });
     await expect(heading).toBeVisible({ timeout: 20_000 });
-    const allowedTypes = new Set(
-      OFFERING_SPECS.filter((spec) => spec.candidateId && !spec.disabled).map(
-        (spec) => `${spec.provider}|${spec.sku}`
-      )
-    ).size;
-    await expect(page.getByText(`Allowed machines (${allowedTypes})`)).toBeVisible();
-
-    const section = heading.locator('xpath=ancestor::section[1]').first();
-    await section.getByRole('button', { name: 'Edit' }).click();
-    const machinesHeading = page.getByRole('heading', { name: 'Allowed machines', exact: true });
+    await expect(page.getByRole('heading', { name: 'In your pool', exact: true })).toBeVisible();
+    const machinesHeading = page.getByRole('heading', { name: 'Available machines', exact: true });
     await expect(machinesHeading).toBeVisible();
-    // Each click removes its button, so always expand the first one left.
-    const showMoreButtons = page.getByRole('button', { name: /^Show \d+ more machine types?$/ });
-    for (let left = await showMoreButtons.count(); left > 0; left -= 1) {
-      await showMoreButtons.first().click();
-    }
-    await expect(showMoreButtons).toHaveCount(0);
-    await expect(page.getByText('region sold out', { exact: false }).first()).toBeVisible();
+    await expect(page.getByText(/^Ready · \d+ in pool$/)).toBeVisible();
     await assertNoOverflow(page);
 
     // sam-compute-pool-editor: a viewport-bounded shot of the top of the editor
-    // (placement settings and the first machine rows).
+    // (the pool's accounts with their machines).
     await page.setViewportSize({ width: 1440, height: 1100 });
     await page.waitForTimeout(300);
     await scrollHeadingNearTop(page, heading, 24);
     await marketingShot(page, 'sam-compute-pool-editor');
 
-    // sam-compute-offerings-manager: the machine list with its region chips.
+    // sam-compute-offerings-manager: one row per machine and region.
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.waitForTimeout(300);
     await scrollHeadingNearTop(page, machinesHeading, 24);
@@ -1123,10 +1227,46 @@ const AI_USAGE_RESPONSE = {
   cachedRequests: 990,
   errorRequests: 9,
   byModel: [
-    { model: 'claude-opus-5', provider: 'anthropic', requests: 1240, inputTokens: 3_200_000, outputTokens: 540_000, costUsd: 98.4, cachedRequests: 220, errorRequests: 3 },
-    { model: 'claude-sonnet-5', provider: 'anthropic', requests: 3100, inputTokens: 5_800_000, outputTokens: 910_000, costUsd: 52.1, cachedRequests: 640, errorRequests: 5 },
-    { model: 'gpt-5.5', provider: 'openai', requests: 860, inputTokens: 1_500_000, outputTokens: 210_000, costUsd: 24.75, cachedRequests: 90, errorRequests: 1 },
-    { model: 'gemini-2.5-pro', provider: 'google', requests: 340, inputTokens: 600_000, outputTokens: 95_000, costUsd: 8.95, cachedRequests: 40, errorRequests: 0 },
+    {
+      model: 'claude-opus-5',
+      provider: 'anthropic',
+      requests: 1240,
+      inputTokens: 3_200_000,
+      outputTokens: 540_000,
+      costUsd: 98.4,
+      cachedRequests: 220,
+      errorRequests: 3,
+    },
+    {
+      model: 'claude-sonnet-5',
+      provider: 'anthropic',
+      requests: 3100,
+      inputTokens: 5_800_000,
+      outputTokens: 910_000,
+      costUsd: 52.1,
+      cachedRequests: 640,
+      errorRequests: 5,
+    },
+    {
+      model: 'gpt-5.5',
+      provider: 'openai',
+      requests: 860,
+      inputTokens: 1_500_000,
+      outputTokens: 210_000,
+      costUsd: 24.75,
+      cachedRequests: 90,
+      errorRequests: 1,
+    },
+    {
+      model: 'gemini-2.5-pro',
+      provider: 'google',
+      requests: 340,
+      inputTokens: 600_000,
+      outputTokens: 95_000,
+      costUsd: 8.95,
+      cachedRequests: 40,
+      errorRequests: 0,
+    },
   ],
   byDay: AI_BY_DAY,
   period: 'current-month',
@@ -1284,18 +1424,76 @@ const COST_SUMMARY = {
     cachedRequests: 9400,
     errorRequests: 62,
     byModel: [
-      { model: 'claude-opus-5', provider: 'anthropic', requests: 18_400, inputTokens: 42_000_000, outputTokens: 7_100_000, costUsd: 1180.4 },
-      { model: 'claude-sonnet-5', provider: 'anthropic', requests: 46_200, inputTokens: 71_000_000, outputTokens: 11_800_000, costUsd: 640.15 },
-      { model: 'gpt-5.5', provider: 'openai', requests: 12_100, inputTokens: 19_500_000, outputTokens: 2_900_000, costUsd: 298.6 },
-      { model: 'gemini-2.5-pro', provider: 'google', requests: 5300, inputTokens: 8_100_000, outputTokens: 1_150_000, costUsd: 96.85 },
+      {
+        model: 'claude-opus-5',
+        provider: 'anthropic',
+        requests: 18_400,
+        inputTokens: 42_000_000,
+        outputTokens: 7_100_000,
+        costUsd: 1180.4,
+      },
+      {
+        model: 'claude-sonnet-5',
+        provider: 'anthropic',
+        requests: 46_200,
+        inputTokens: 71_000_000,
+        outputTokens: 11_800_000,
+        costUsd: 640.15,
+      },
+      {
+        model: 'gpt-5.5',
+        provider: 'openai',
+        requests: 12_100,
+        inputTokens: 19_500_000,
+        outputTokens: 2_900_000,
+        costUsd: 298.6,
+      },
+      {
+        model: 'gemini-2.5-pro',
+        provider: 'google',
+        requests: 5300,
+        inputTokens: 8_100_000,
+        outputTokens: 1_150_000,
+        costUsd: 96.85,
+      },
     ],
     byDay: COST_BY_DAY,
     byUser: [
-      { userId: 'user-priya', requests: 21_000, inputTokens: 38_000_000, outputTokens: 6_200_000, costUsd: 812.4 },
-      { userId: 'user-marcus', requests: 15_400, inputTokens: 28_000_000, outputTokens: 4_600_000, costUsd: 588.2 },
-      { userId: 'user-elena', requests: 10_200, inputTokens: 19_000_000, outputTokens: 3_100_000, costUsd: 402.1 },
-      { userId: 'user-tomas', requests: 8600, inputTokens: 15_000_000, outputTokens: 2_400_000, costUsd: 268.75 },
-      { userId: 'user-aisha', requests: 6800, inputTokens: 11_000_000, outputTokens: 1_800_000, costUsd: 144.55 },
+      {
+        userId: 'user-priya',
+        requests: 21_000,
+        inputTokens: 38_000_000,
+        outputTokens: 6_200_000,
+        costUsd: 812.4,
+      },
+      {
+        userId: 'user-marcus',
+        requests: 15_400,
+        inputTokens: 28_000_000,
+        outputTokens: 4_600_000,
+        costUsd: 588.2,
+      },
+      {
+        userId: 'user-elena',
+        requests: 10_200,
+        inputTokens: 19_000_000,
+        outputTokens: 3_100_000,
+        costUsd: 402.1,
+      },
+      {
+        userId: 'user-tomas',
+        requests: 8600,
+        inputTokens: 15_000_000,
+        outputTokens: 2_400_000,
+        costUsd: 268.75,
+      },
+      {
+        userId: 'user-aisha',
+        requests: 6800,
+        inputTokens: 11_000_000,
+        outputTokens: 1_800_000,
+        costUsd: 144.55,
+      },
     ],
   },
   projection: {
@@ -1343,11 +1541,56 @@ test.describe('F. Admin costs', () => {
 const ADMIN_NODE_USAGE_RESPONSE = {
   period: USAGE_PERIOD,
   users: [
-    { userId: 'user-priya', name: 'Priya Natarajan', email: 'priya@northwindlabs.dev', avatarUrl: null, totalNodeHours: 128.4, totalVcpuHours: 512.8, platformNodeHours: 100.2, activeNodes: 2 },
-    { userId: 'user-marcus', name: 'Marcus Chen', email: 'marcus@northwindlabs.dev', avatarUrl: null, totalNodeHours: 84.1, totalVcpuHours: 336.2, platformNodeHours: 60.0, activeNodes: 1 },
-    { userId: 'user-elena', name: 'Elena Rossi', email: 'elena@northwindlabs.dev', avatarUrl: null, totalNodeHours: 52.6, totalVcpuHours: 168.9, platformNodeHours: 20.4, activeNodes: 1 },
-    { userId: 'user-tomas', name: 'Tomás Alvarez', email: 'tomas@northwindlabs.dev', avatarUrl: null, totalNodeHours: 31.7, totalVcpuHours: 95.3, platformNodeHours: 31.7, activeNodes: 0 },
-    { userId: 'user-aisha', name: 'Aisha Okafor', email: 'aisha@northwindlabs.dev', avatarUrl: null, totalNodeHours: 15.2, totalVcpuHours: 45.6, platformNodeHours: 15.2, activeNodes: 0 },
+    {
+      userId: 'user-priya',
+      name: 'Priya Natarajan',
+      email: 'priya@northwindlabs.dev',
+      avatarUrl: null,
+      totalNodeHours: 128.4,
+      totalVcpuHours: 512.8,
+      platformNodeHours: 100.2,
+      activeNodes: 2,
+    },
+    {
+      userId: 'user-marcus',
+      name: 'Marcus Chen',
+      email: 'marcus@northwindlabs.dev',
+      avatarUrl: null,
+      totalNodeHours: 84.1,
+      totalVcpuHours: 336.2,
+      platformNodeHours: 60.0,
+      activeNodes: 1,
+    },
+    {
+      userId: 'user-elena',
+      name: 'Elena Rossi',
+      email: 'elena@northwindlabs.dev',
+      avatarUrl: null,
+      totalNodeHours: 52.6,
+      totalVcpuHours: 168.9,
+      platformNodeHours: 20.4,
+      activeNodes: 1,
+    },
+    {
+      userId: 'user-tomas',
+      name: 'Tomás Alvarez',
+      email: 'tomas@northwindlabs.dev',
+      avatarUrl: null,
+      totalNodeHours: 31.7,
+      totalVcpuHours: 95.3,
+      platformNodeHours: 31.7,
+      activeNodes: 0,
+    },
+    {
+      userId: 'user-aisha',
+      name: 'Aisha Okafor',
+      email: 'aisha@northwindlabs.dev',
+      avatarUrl: null,
+      totalNodeHours: 15.2,
+      totalVcpuHours: 45.6,
+      platformNodeHours: 15.2,
+      activeNodes: 0,
+    },
   ],
 };
 

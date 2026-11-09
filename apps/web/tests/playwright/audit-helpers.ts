@@ -90,6 +90,7 @@ type MutableCapacitySummary = {
     exhaustionPolicy: string;
     maxNodes?: number;
     sourceOrder?: string[] | null;
+    excludedSourceIds?: string[];
     revision: number;
   };
   candidates: MutableCapacityCandidate[];
@@ -112,6 +113,7 @@ export type MockCapacityDefaultsUpdate = {
     providerInstanceSku?: string | null;
   }>;
   sourceOrder?: string[] | null;
+  excludedSourceIds?: string[] | null;
 };
 
 export function applyMockCapacityDefaultsUpdate<T extends MutableCapacityDefaultsResponse>(
@@ -128,6 +130,9 @@ export function applyMockCapacityDefaultsUpdate<T extends MutableCapacityDefault
   }
   if (update.policy?.maxNodes) summary.pool.maxNodes = update.policy.maxNodes;
   if (update.sourceOrder !== undefined) summary.pool.sourceOrder = update.sourceOrder;
+  if (update.excludedSourceIds !== undefined) {
+    summary.pool.excludedSourceIds = update.excludedSourceIds ?? [];
+  }
   for (const candidateUpdate of update.candidates ?? []) {
     const candidate = summary.candidates.find((item) => item.id === candidateUpdate.id);
     if (candidate) candidate.status = candidateUpdate.status;

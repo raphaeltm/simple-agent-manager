@@ -531,10 +531,13 @@ test.describe('Project settings sub-pages', () => {
   }) => {
     await page.goto(`/projects/${PROJECT_ID}/settings/infrastructure`);
     await expect(page.getByRole('heading', { name: 'Project compute pool' })).toBeVisible();
-    await expect(page.getByText('Allowed machines (5)')).toBeVisible();
-    await expect(page.getByText(/^SAM can start Hetzner machines in/)).toBeVisible();
-    await expect(page.getByText('(not currently offered)')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'In your pool', exact: true })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'Available machines', exact: true })
+    ).toBeVisible();
+    await expect(page.getByText(/^Ready · \d+ in pool$/)).toBeVisible();
     await expect(page.getByText(/credentials:credential-project-default/)).toHaveCount(0);
+    await expect(page.getByText(/\b(small|medium|large)\b/)).toHaveCount(0);
     await expectCompactTabs(page);
     await screenshot(page, 'project-settings-infrastructure-capacity-pool-normal');
     await screenshotNearHeading(
@@ -543,35 +546,35 @@ test.describe('Project settings sub-pages', () => {
       'project-settings-default-compute-pool-normal-focused'
     );
 
-    await page.getByRole('button', { name: 'Edit' }).click();
-    await expect(
-      page.getByRole('heading', { name: 'Allowed machines', exact: true })
-    ).toBeVisible();
-    await page.getByRole('button', { name: 'cpx31 in Ashburn', exact: true }).click();
-    await page
-      .getByRole('button', { name: 'ccx33 in Hillsboro (not currently offered)', exact: true })
-      .click();
+    // The editor is the panel: add or remove rows, then save.
+    const rowButton = (name: RegExp) =>
+      page.getByRole('button', { name }).filter({ visible: true }).first();
+    await rowButton(/^(Add|Remove) cpx31 in Ashburn$/).click();
+    await rowButton(/^(Add|Remove) cx23 in /).click();
     await expect(page.getByText('2 unsaved changes')).toBeVisible();
     await screenshotNearHeading(
       page,
-      'Allowed machines',
+      'Available machines',
       'project-settings-default-compute-pool-edit-focused'
     );
-    await page.getByRole('searchbox', { name: 'Search machine types' }).fill('hil');
-    await expect(page.getByText('ccx33', { exact: true })).toBeVisible();
+    await page.getByRole('textbox', { name: 'Search machines' }).fill('hil');
+    await expect(
+      page.getByText('ccx33', { exact: true }).filter({ visible: true }).first()
+    ).toBeVisible();
     await screenshotNearHeading(
       page,
-      'Allowed machines',
+      'Available machines',
       'project-settings-default-compute-pool-search-focused'
     );
     await page.getByRole('button', { name: 'Save changes' }).click();
-    await expect(page.getByText('Allowed machines (3)')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Save changes' })).toHaveCount(0);
     await assertNoOverflow(page);
 
     capacityDefaultsBody = capacityDefaults(userCapacitySummary());
     await page.goto(`/projects/${PROJECT_ID}/settings/infrastructure?case=fallback`);
     await expect(page.getByText(/This project uses your personal compute pool/)).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Edit' })).toHaveCount(0);
+    // A pool the project only falls back to is shown read-only, without the editor.
+    await expect(page.getByRole('heading', { name: 'Available machines' })).toHaveCount(0);
     await screenshot(page, 'project-settings-infrastructure-capacity-pool-user-fallback');
     await screenshotNearHeading(
       page,
@@ -606,10 +609,13 @@ test.describe('Project settings sub-pages', () => {
       })
     );
     await page.goto(`/projects/${PROJECT_ID}/settings/infrastructure?case=many`);
-    // 36 regions across the six machine types in the fixture.
-    await expect(page.getByText('Allowed machines (6)')).toBeVisible();
+    // One row per machine type and region: 36 picked rows.
+    await expect(page.getByText('Ready · 36 in pool')).toBeVisible();
     await expect(
-      page.getByText(/region-with-a-very-long-location-name-and-special-marker-ß/)
+      page
+        .getByText(/region-with-a-very-long-location-name-and-special-marker-ß/)
+        .filter({ visible: true })
+        .first()
     ).toBeVisible();
     await screenshot(page, 'project-settings-infrastructure-capacity-pool-many');
     await screenshotNearHeading(

@@ -109,7 +109,10 @@ export function buildMachineRegionRows(groups: MachineGroup[]): MachineRegionRow
       }
       for (const [region, zones] of byRegion) {
         const meta = providerRegionMeta(machine.provider, region);
+        // Without zones the location is the region, and the live catalog's name for it wins.
         const single = zones.length === 1 && zones[0]?.location === region ? zones[0] : null;
+        const catalogName =
+          single && single.locationLabel !== single.location ? single.locationLabel : null;
         const country = meta?.country ?? zones.find((zone) => zone.country)?.country ?? null;
         const price = cheapest(zones);
         const canAllow = zones.some((zone) => zone.canAllow);
@@ -123,7 +126,7 @@ export function buildMachineRegionRows(groups: MachineGroup[]): MachineRegionRow
           ramGb: machine.ramGb,
           diskGb: machine.diskGb,
           region,
-          regionLabel: meta?.name ?? single?.locationLabel ?? region,
+          regionLabel: catalogName ?? meta?.name ?? region,
           country,
           continent: continentForCountry(country),
           zones,
