@@ -10,6 +10,9 @@ const mocks = vi.hoisted(() => ({
   listAgentCredentials: vi.fn(),
   listGitHubInstallations: vi.fn(),
   listProjects: vi.fn(),
+  listAgents: vi.fn(),
+  getInstantRuntimeEnabled: vi.fn(),
+  getTrialStatus: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
@@ -18,6 +21,9 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   listAgentCredentials: mocks.listAgentCredentials,
   listGitHubInstallations: mocks.listGitHubInstallations,
   listProjects: mocks.listProjects,
+  listAgents: mocks.listAgents,
+  getInstantRuntimeEnabled: mocks.getInstantRuntimeEnabled,
+  getTrialStatus: mocks.getTrialStatus,
 }));
 
 function createWrapper() {
@@ -41,6 +47,9 @@ describe('useSetupStatus', () => {
     mocks.listAgentCredentials.mockResolvedValue({ credentials: [AGENT_CRED] });
     mocks.listGitHubInstallations.mockResolvedValue([INSTALLATION]);
     mocks.listProjects.mockResolvedValue({ projects: [] });
+    mocks.listAgents.mockResolvedValue({ agents: [] });
+    mocks.getInstantRuntimeEnabled.mockResolvedValue(false);
+    mocks.getTrialStatus.mockResolvedValue({ hasInfraCredential: false, hasAgentCredential: true });
   });
 
   /**
@@ -67,8 +76,11 @@ describe('useSetupStatus', () => {
     expect(mocks.listCredentials).toHaveBeenCalledTimes(1);
     expect(mocks.listAgentCredentials).toHaveBeenCalledTimes(1);
     expect(mocks.listGitHubInstallations).toHaveBeenCalledTimes(1);
-    // GitHub answers the repository question, so the project list is never asked.
+    // Every fallback read is answered already, so a set-up user pays for none of them.
     expect(mocks.listProjects).not.toHaveBeenCalled();
+    expect(mocks.listAgents).not.toHaveBeenCalled();
+    expect(mocks.getInstantRuntimeEnabled).not.toHaveBeenCalled();
+    expect(mocks.getTrialStatus).not.toHaveBeenCalled();
   });
 
   // A SAM-hosted (Cloudflare Artifacts) project is a repository source with no GitHub. Without
@@ -154,5 +166,78 @@ describe('useSetupStatus', () => {
       expect(client.getQueryData(['auth', 'user-2', 'credentials', 'list'])).toBeDefined();
     });
     expect(mocks.listCredentials).toHaveBeenCalledTimes(2);
+  });
+
+  // A fresh self-hosted install has no cloud account at all: Instant is what runs agents there.
+  it('is complete without a cloud account where Instant runs agents', async () => {
+    const { Wrapper } = createWrapper();
+    mocks.listCredentials.mockResolvedValue([]);
+    mocks.getInstantRuntimeEnabled.mockResolvedValue(true);
+
+    const { result } = renderHook(() => useSetupStatus('user-1'), { wrapper: Wrapper });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.hasCloud).toBe(false);
+    expect(result.current.instantEnabled).toBe(true);
+    expect(result.current.hasCompute).toBe(true);
+    expect(result.current.isComplete).toBe(true);
+  });
+
+  it("is complete without a cloud account where the installation's own machines exist", async () => {
+    const { Wrapper } = createWrapper();
+    mocks.listCredentials.mockResolvedValue([]);
+    mocks.getTrialStatus.mockResolvedValue({ hasInfraCredential: true, hasAgentCredential: true });
+
+    const { result } = renderHook(() => useSetupStatus('user-1'), { wrapper: Wrapper });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.platformCompute).toBe(true);
+    expect(result.current.isComplete).toBe(true);
+  });
+
+  it('is not complete when agents have nowhere to run', async () => {
+    const { Wrapper } = createWrapper();
+    mocks.listCredentials.mockResolvedValue([]);
+
+    const { result } = renderHook(() => useSetupStatus('user-1'), { wrapper: Wrapper });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.hasAgent).toBe(true);
+    expect(result.current.hasRepoSource).toBe(true);
+    expect(result.current.hasCompute).toBe(false);
+    expect(result.current.isComplete).toBe(false);
+  });
+
+  // SAM-managed AI is a saved setting rather than a credential; without this the wizard came
+  // back forever for a user who picked it.
+  it('counts an agent on SAM-managed AI as connected', async () => {
+    const { Wrapper } = createWrapper();
+    mocks.listAgentCredentials.mockResolvedValue({ credentials: [] });
+    mocks.listAgents.mockResolvedValue({
+      agents: [
+        { id: 'claude-code', configured: true, fallbackCredentialSource: 'platform-sam' },
+        { id: 'google-gemini', configured: false, fallbackCredentialSource: null },
+      ],
+    });
+
+    const { result } = renderHook(() => useSetupStatus('user-1'), { wrapper: Wrapper });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.hasAgent).toBe(true);
+    expect(result.current.isComplete).toBe(true);
+  });
+
+  it('is not complete when no agent can sign in', async () => {
+    const { Wrapper } = createWrapper();
+    mocks.listAgentCredentials.mockResolvedValue({ credentials: [] });
+    mocks.listAgents.mockResolvedValue({
+      agents: [{ id: 'claude-code', configured: false, fallbackCredentialSource: null }],
+    });
+
+    const { result } = renderHook(() => useSetupStatus('user-1'), { wrapper: Wrapper });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.hasAgent).toBe(false);
+    expect(result.current.isComplete).toBe(false);
   });
 });

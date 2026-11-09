@@ -1,239 +1,235 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import type { ReactNode } from 'react';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   createProject: vi.fn(),
+  createAgentProfile: vi.fn(),
   getAgentCredentialSetupConfig: vi.fn(),
   listGitHubInstallations: vi.fn(),
   listRepositories: vi.fn(),
+  saveAgentCredential: vi.fn(),
+  validateAgentCredential: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/lib/api')>()),
+  createAgentProfile: mocks.createAgentProfile,
+  getAgentCredentialSetupConfig: mocks.getAgentCredentialSetupConfig,
   listGitHubInstallations: mocks.listGitHubInstallations,
   listRepositories: mocks.listRepositories,
-  getAgentCredentialSetupConfig: mocks.getAgentCredentialSetupConfig,
+  saveAgentCredential: mocks.saveAgentCredential,
+  validateAgentCredential: mocks.validateAgentCredential,
 }));
-
-vi.mock('../../../src/lib/api/projects', () => ({
-  createProject: mocks.createProject,
-}));
+vi.mock('../../../src/lib/api/projects', () => ({ createProject: mocks.createProject }));
 
 import type { GeneratedStep } from '../../../src/components/onboarding/choose-path/path-generator';
+import { generatePath } from '../../../src/components/onboarding/choose-path/path-generator';
 import { StepExecution } from '../../../src/components/onboarding/choose-path/StepExecution';
+import { ToastProvider } from '../../../src/hooks/useToast';
 
-const projectStep: GeneratedStep = {
-  id: 'project',
-  title: 'Create your first project',
-  description: 'Select one of your GitHub repos to create your first SAM project.',
-  actionLabel: 'Choose Repository',
-  timeEstimate: '30 seconds',
-  details: ['Pick a repo from your connected GitHub account'],
-  isOptional: false,
-};
-
-const aiSetupStep: GeneratedStep = {
-  id: 'ai-setup',
-  title: 'Set up your coding agent',
-  description: 'Pick an agent and connect it.',
-  actionLabel: 'Save agent',
-  timeEstimate: '1 minute',
-  details: ['Choose from the supported agents'],
-  isOptional: false,
-};
-
-const cloudByocStep: GeneratedStep = {
-  id: 'cloud-byoc',
-  title: 'Connect your cloud',
-  description: 'Add your Hetzner or Scaleway credentials.',
-  actionLabel: 'Save credentials',
-  timeEstimate: '1 minute',
-  details: ['Bring your own cloud'],
-  isOptional: false,
-};
-
-const installation = {
-  id: 'inst-1',
-  userId: 'user-1',
-  installationId: '100',
-  accountType: 'organization',
-  accountName: 'serverspresentation2025',
-  createdAt: '2026-01-01T00:00:00Z',
-  updatedAt: '2026-01-01T00:00:00Z',
-};
-
+const fresh = { hasAgent: false, hasCloud: false, hasGitHub: false, hasProject: false };
 const repo = {
   id: 123,
-  fullName: 'serverspresentation2025/VoyajApp',
-  name: 'VoyajApp',
+  fullName: 'acme/web',
+  name: 'web',
   private: true,
-  defaultBranch: 'main',
+  defaultBranch: 'trunk',
   installationId: 'inst-1',
 };
 
-function renderProjectStep() {
+function renderSteps(props: {
+  steps: GeneratedStep[];
+  runtime?: 'instant' | 'platform' | 'byoc';
+  hostedRepo?: boolean;
+  samAvailable?: boolean;
+}) {
   const onComplete = vi.fn();
-
-  render(
-    <MemoryRouter>
-      <StepExecution steps={[projectStep]} onComplete={onComplete} />
-    </MemoryRouter>
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const Wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>
+      <ToastProvider>
+        <MemoryRouter>{children}</MemoryRouter>
+      </ToastProvider>
+    </QueryClientProvider>
   );
-
+  render(
+    <StepExecution
+      steps={props.steps}
+      runtime={props.runtime}
+      hostedRepo={props.hostedRepo ?? false}
+      samAvailable={props.samAvailable ?? false}
+      onComplete={onComplete}
+    />,
+    { wrapper: Wrapper }
+  );
   return { onComplete };
 }
 
-describe('StepExecution project creation', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mocks.listGitHubInstallations.mockResolvedValue([installation]);
-    mocks.listRepositories.mockResolvedValue({ repositories: [repo] });
-    mocks.createProject.mockResolvedValue({ id: 'project-1' });
+async function connectClaudeWithApiKey() {
+  fireEvent.click(screen.getByRole('button', { name: 'Claude Code' }));
+  fireEvent.click(screen.getByRole('button', { name: 'API key' }));
+  fireEvent.change(screen.getByLabelText('Claude Code API key'), { target: { value: 'sk-1' } });
+  fireEvent.click(screen.getByRole('button', { name: /Use this agent/ }));
+  await screen.findByRole('heading', { name: 'What are we building?' });
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.getAgentCredentialSetupConfig.mockResolvedValue({
+    enabled: true,
+    agentTypes: ['openai-codex', 'claude-code'],
   });
-
-  it('sends the selected repository full name to project creation', async () => {
-    const { onComplete } = renderProjectStep();
-
-    await waitFor(() => {
-      expect(mocks.listRepositories).toHaveBeenCalledWith('inst-1');
-    });
-
-    const select = await screen.findByLabelText('Repository');
-    fireEvent.change(select, { target: { value: repo.fullName } });
-    fireEvent.click(screen.getByRole('button', { name: /create project/i }));
-
-    await waitFor(() => {
-      expect(mocks.createProject).toHaveBeenCalledWith(
-        expect.objectContaining({
-          name: 'VoyajApp',
-          repository: 'serverspresentation2025/VoyajApp',
-          installationId: 'inst-1',
-          githubRepoId: 123,
-          defaultBranch: 'main',
-        })
-      );
-    });
-    await waitFor(() => expect(onComplete).toHaveBeenCalled());
-  });
+  mocks.validateAgentCredential.mockResolvedValue({ valid: true });
+  mocks.saveAgentCredential.mockResolvedValue({});
+  mocks.createProject.mockResolvedValue({ id: 'project-1' });
+  mocks.createAgentProfile.mockResolvedValue({ id: 'profile-1' });
+  mocks.listGitHubInstallations.mockResolvedValue([{ id: 'inst-1' }]);
+  mocks.listRepositories.mockResolvedValue({ repositories: [repo] });
 });
 
-describe('StepExecution ai-setup step', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mocks.getAgentCredentialSetupConfig.mockResolvedValue({
-      enabled: true,
-      agentTypes: ['openai-codex', 'claude-code'],
-    });
-  });
-
-  function renderAiSetup() {
-    render(
-      <MemoryRouter>
-        <StepExecution steps={[aiSetupStep]} onComplete={vi.fn()} />
-      </MemoryRouter>
-    );
-  }
-
-  it('renders all six catalog agents and reveals the API key input for an API-key-only agent', async () => {
-    renderAiSetup();
-
-    for (const name of [
-      'Claude Code',
-      'OpenAI Codex',
-      'Gemini CLI',
-      'Mistral Vibe',
-      'OpenCode',
-      'Amp',
-    ]) {
-      expect(screen.getByRole('button', { name: new RegExp(name) })).toBeInTheDocument();
-    }
-
-    // No credential input until an agent is chosen.
-    expect(document.querySelector('#onboarding-api-key')).toBeNull();
-
-    fireEvent.click(screen.getByRole('button', { name: /Gemini CLI/ }));
-
-    await waitFor(() => {
-      expect(document.querySelector('#onboarding-api-key')).not.toBeNull();
-    });
-  });
+describe('agent step', () => {
+  const agentOnly = generatePath(
+    { runtime: 'instant', repo: 'hosted' },
+    { ...fresh, hasProject: true }
+  );
 
   it.each([
     ['Claude Code', 'Connect with Claude Code'],
     ['OpenAI Codex', 'Connect with Codex'],
   ])('offers the guided %s sign-in first, with paste as the fallback', async (agent, button) => {
-    renderAiSetup();
-    fireEvent.click(screen.getByRole('button', { name: new RegExp(agent) }));
+    renderSteps({ steps: agentOnly });
+    fireEvent.click(screen.getByRole('button', { name: agent }));
 
     expect(await screen.findByRole('button', { name: button })).toBeInTheDocument();
     expect(await screen.findByLabelText(/^Or paste/)).toBeInTheDocument();
-    expect(document.querySelector('#onboarding-api-key')).toBeNull();
+    // The guided sign-in is the action until something is pasted.
+    expect(screen.queryByRole('button', { name: 'Save sign-in' })).toBeNull();
   });
 
-  it('falls back to pasting the subscription token where guided sign-in is unavailable', async () => {
+  it('falls back to pasting the token where guided sign-in is unavailable', async () => {
     mocks.getAgentCredentialSetupConfig.mockResolvedValue({ enabled: false });
-    renderAiSetup();
-    fireEvent.click(screen.getByRole('button', { name: /Claude Code/ }));
+    renderSteps({ steps: agentOnly });
+    fireEvent.click(screen.getByRole('button', { name: 'Claude Code' }));
 
-    expect(await screen.findByLabelText('OAuth token')).toBeInTheDocument();
+    const field = await screen.findByLabelText('OAuth token');
     await waitFor(() => expect(mocks.getAgentCredentialSetupConfig).toHaveBeenCalled());
     expect(screen.queryByRole('button', { name: 'Connect with Claude Code' })).toBeNull();
+    fireEvent.change(field, { target: { value: 'tok' } });
+    expect(screen.getByRole('button', { name: /Save sign-in/ })).toBeInTheDocument();
+  });
+
+  it('offers SAM-managed AI only when the installation enables it', () => {
+    renderSteps({ steps: agentOnly, samAvailable: false });
+    fireEvent.click(screen.getByRole('button', { name: 'Claude Code' }));
+    expect(screen.queryByRole('button', { name: 'SAM-managed AI' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'API key' })).toBeInTheDocument();
+  });
+
+  it('shows an API key field for an agent without a subscription', () => {
+    renderSteps({ steps: agentOnly });
+    fireEvent.click(screen.getByRole('button', { name: 'Gemini CLI' }));
+    expect(screen.getByLabelText('Gemini CLI API key')).toBeInTheDocument();
   });
 });
 
-describe('StepExecution SAM-hosted project step', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mocks.createProject.mockResolvedValue({ id: 'project-1' });
+describe('cloud step', () => {
+  it('uses the shared connect flow with every provider', () => {
+    renderSteps({
+      steps: generatePath({ runtime: 'byoc', repo: 'hosted' }, { ...fresh, hasAgent: true }),
+    });
+    expect(screen.getByRole('heading', { name: 'Which cloud should I use?' })).toBeInTheDocument();
+    for (const provider of ['Hetzner', 'Scaleway', 'DigitalOcean'])
+      expect(screen.getByRole('button', { name: new RegExp(provider) })).toBeInTheDocument();
   });
+});
 
-  it('creates an Artifacts-backed project from just a name, without touching GitHub', async () => {
-    const onComplete = vi.fn();
-    render(
-      <MemoryRouter>
-        <StepExecution
-          steps={[{ ...projectStep, actionLabel: 'Create Project', hostedRepo: true }]}
-          onComplete={onComplete}
-        />
-      </MemoryRouter>
-    );
+describe('project step', () => {
+  it('creates a SAM-hosted project and an Instant profile for the chosen agent', async () => {
+    const { onComplete } = renderSteps({
+      steps: generatePath({ runtime: 'instant', repo: 'hosted' }, fresh),
+      runtime: 'instant',
+      hostedRepo: true,
+    });
+    await connectClaudeWithApiKey();
 
     fireEvent.change(screen.getByLabelText('Project name'), { target: { value: 'my-app' } });
-    fireEvent.click(screen.getByRole('button', { name: /create project/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Create project/ }));
 
-    await waitFor(() => {
-      expect(mocks.createProject).toHaveBeenCalledWith({
-        name: 'my-app',
-        repoProvider: 'artifacts',
-        defaultBranch: 'main',
-      });
+    await waitFor(() => expect(onComplete).toHaveBeenCalledWith('project-1'));
+    expect(mocks.createProject).toHaveBeenCalledWith({
+      name: 'my-app',
+      repoProvider: 'artifacts',
+      defaultBranch: 'main',
     });
-    await waitFor(() => expect(onComplete).toHaveBeenCalled());
+    expect(mocks.createAgentProfile).toHaveBeenCalledWith(
+      'project-1',
+      expect.objectContaining({ agentType: 'claude-code', runtime: 'cf-container' })
+    );
     expect(mocks.listGitHubInstallations).not.toHaveBeenCalled();
   });
-});
 
-describe('StepExecution cloud-byoc step', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
+  it('creates a GitHub project with a full-machine profile on own cloud', async () => {
+    const { onComplete } = renderSteps({
+      steps: generatePath(
+        { runtime: 'byoc', repo: 'github' },
+        { ...fresh, hasCloud: true, hasGitHub: true }
+      ),
+      runtime: 'byoc',
+    });
+    await connectClaudeWithApiKey();
+
+    fireEvent.change(await screen.findByLabelText('Repository'), {
+      target: { value: repo.fullName },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Create project/ }));
+
+    await waitFor(() => expect(onComplete).toHaveBeenCalledWith('project-1'));
+    expect(mocks.createProject).toHaveBeenCalledWith({
+      name: 'web',
+      repository: 'acme/web',
+      installationId: 'inst-1',
+      githubRepoId: 123,
+      defaultBranch: 'trunk',
+    });
+    expect(mocks.createAgentProfile).toHaveBeenCalledWith(
+      'project-1',
+      expect.objectContaining({ runtime: 'vm', taskMode: 'task' })
+    );
   });
 
-  it('defaults to the Hetzner token input and offers a Scaleway toggle', async () => {
-    render(
-      <MemoryRouter>
-        <StepExecution steps={[cloudByocStep]} onComplete={vi.fn()} />
-      </MemoryRouter>
-    );
-
-    expect(document.querySelector('#onboarding-hetzner-token')).not.toBeNull();
-    expect(screen.getByRole('button', { name: /scaleway/i })).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /scaleway/i }));
-
-    await waitFor(() => {
-      expect(document.querySelector('#onboarding-scaleway-secret')).not.toBeNull();
+  it('still finishes when the first profile cannot be created', async () => {
+    mocks.createAgentProfile.mockRejectedValue(new Error('conflict'));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { onComplete } = renderSteps({
+      steps: generatePath({ runtime: 'instant', repo: 'hosted' }, fresh),
+      runtime: 'instant',
+      hostedRepo: true,
     });
-    expect(document.querySelector('#onboarding-scaleway-project')).not.toBeNull();
+    await connectClaudeWithApiKey();
+    fireEvent.change(screen.getByLabelText('Project name'), { target: { value: 'my-app' } });
+    fireEvent.click(screen.getByRole('button', { name: /Create project/ }));
+
+    await waitFor(() => expect(onComplete).toHaveBeenCalledWith('project-1'));
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('shows the error and stays put when the project cannot be created', async () => {
+    mocks.createProject.mockRejectedValue(new Error('Name taken'));
+    const { onComplete } = renderSteps({
+      steps: generatePath({ runtime: 'instant', repo: 'hosted' }, { ...fresh, hasAgent: true }),
+      runtime: 'instant',
+      hostedRepo: true,
+    });
+    fireEvent.change(screen.getByLabelText('Project name'), { target: { value: 'my-app' } });
+    fireEvent.click(screen.getByRole('button', { name: /Create project/ }));
+
+    expect(await screen.findByText('Name taken')).toBeInTheDocument();
+    expect(onComplete).not.toHaveBeenCalled();
+    // No agent was picked in this run, so no profile is guessed.
+    expect(mocks.createAgentProfile).not.toHaveBeenCalled();
   });
 });

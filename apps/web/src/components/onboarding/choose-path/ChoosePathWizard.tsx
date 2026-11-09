@@ -12,7 +12,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryScope } from '../../../hooks/useQueryScope';
 import { useSetupStatus } from '../../../hooks/useSetupStatus';
 import { useTrialStatus } from '../../../hooks/useTrialStatus';
-import { projectArtifactsEnabledQueryOptions } from '../../../lib/query-options';
+import {
+  projectArtifactsEnabledQueryOptions,
+  projectListQueryOptions,
+} from '../../../lib/query-options';
 import { SamHero } from '../../SamHero';
 import { useOnboarding } from '../OnboardingContext';
 import { CompletionScreen } from './CompletionScreen';
@@ -41,6 +44,14 @@ export function ChoosePathWizard() {
     ...projectArtifactsEnabledQueryOptions(queryScope),
     enabled: Boolean(queryScope) && showOverlay,
   });
+
+  // Setup status reads projects only when GitHub is not connected; the wizard needs to know
+  // either way, so it does not create a second first project.
+  const projectsQuery = useQuery({
+    ...projectListQueryOptions(queryScope, 1),
+    enabled: Boolean(queryScope) && showOverlay,
+  });
+  const hasProject = setup.hasProject || (projectsQuery.data ?? []).length > 0;
 
   const [phase, setPhase] = useState<Phase>('hello');
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -85,7 +96,7 @@ export function ChoosePathWizard() {
     ]
   );
   // The questions depend on what the installation offers; wait for those reads to settle.
-  const contextReady = !setup.loading && !artifactsQuery.isLoading;
+  const contextReady = !setup.loading && !artifactsQuery.isLoading && !projectsQuery.isLoading;
 
   const startSteps = useCallback(
     (finalAnswers: Answers) => {
@@ -95,12 +106,12 @@ export function ChoosePathWizard() {
           hasAgent: setup.hasAgent,
           hasCloud: setup.hasCloud,
           hasGitHub: setup.hasGitHub,
-          hasProject: setup.hasProject,
+          hasProject,
         })
       );
       setPhase('steps');
     },
-    [setup.hasAgent, setup.hasCloud, setup.hasGitHub, setup.hasProject]
+    [setup.hasAgent, setup.hasCloud, setup.hasGitHub, hasProject]
   );
 
   const begin = useCallback(() => {
