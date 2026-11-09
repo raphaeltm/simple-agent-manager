@@ -210,3 +210,12 @@ issuing a verdict.
   The adjacent quiescence fixture now isolates CODEX_HOME, CLAUDE_CONFIG_DIR and
   XDG_DATA_HOME under its temporary home; its focused race test passes (2.138s).
   The upload race remains separately tracked; production upload code is unchanged.
+- Full non-race Go validation also exposed a cancellation fixture rejecting the
+  independent deferred `/lifecycle-timings` telemetry callback. The fixture now
+  accepts exactly that route and still rejects any actual provisioning callback
+  after credential cancellation; focused repeat tests pass.
+- Repository validation passed: lint (14 tasks), typecheck (20 tasks), test (23
+  tasks; API 15,628 passed / 4 skipped, web 5,064 passed), build (10 tasks).
+- Staging deployment `42578506080` succeeded. Zero existing VM nodes before
+  deployment; first queued test cancelled after Hetzner `fsn1` capacity exhaustion,
+  second test in allowed `nbg1` provisioned node `01M6ZKHJVXR21S1VFX65F9G4S7`.

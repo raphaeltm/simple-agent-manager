@@ -357,6 +357,11 @@ func TestGitTokenInterruptedBodyRecoveryAndAuthFailFast(t *testing.T) {
 func TestProvisioningGitTokenCancellation(t *testing.T) {
 	var calls atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Cancellation still reports timing telemetry; it does not advance provisioning.
+		if r.URL.Path == "/api/workspaces/ws-retry/lifecycle-timings" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		if !strings.HasSuffix(r.URL.Path, "/git-token") {
 			t.Error("provisioning advanced beyond cancelled credential exchange")
 			return
