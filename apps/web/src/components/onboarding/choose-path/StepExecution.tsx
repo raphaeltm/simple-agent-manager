@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { ArrowRight, Github } from 'lucide-react';
 import { useCallback, useRef, useState } from 'react';
 
+import { useQueryScope } from '../../../hooks/useQueryScope';
 import {
   createAgentProfile,
   getGitHubInstallUrl,
@@ -11,6 +12,12 @@ import {
   listRepositories,
 } from '../../../lib/api';
 import { createProject } from '../../../lib/api/projects';
+import {
+  agentQueryKeys,
+  credentialQueryKeys,
+  githubQueryKeys,
+  projectQueryKeys,
+} from '../../../lib/query-options';
 import { CloudProviderConnectFlow } from '../../CloudProviderConnectFlow';
 import { AgentStep } from './AgentStep';
 import { FieldLabel, SamSays, StepRail, WELL_INPUT_CLASS } from './OnboardingParts';
@@ -75,16 +82,22 @@ export function StepExecution({
   }, []);
 
   const queryClient = useQueryClient();
+  const queryScope = useQueryScope();
   const next = useCallback(
     (projectId: string | null = null) => {
       setError(null);
-      // Each step changed what the app knows (credentials, installations, projects, profiles);
-      // refresh what is cached so setup status and the first chat see it.
-      void queryClient.invalidateQueries();
+      // Each step changed what setup status and the first chat read; refresh just those.
+      for (const queryKey of [
+        credentialQueryKeys.all(queryScope),
+        agentQueryKeys.all(queryScope),
+        githubQueryKeys.all(queryScope),
+        projectQueryKeys.all(queryScope),
+      ])
+        void queryClient.invalidateQueries({ queryKey });
       if (index >= steps.length - 1) onComplete(projectId);
       else setIndex((i) => i + 1);
     },
-    [index, steps.length, onComplete, queryClient]
+    [index, steps.length, onComplete, queryClient, queryScope]
   );
 
   /* ─── Agent ─── */

@@ -24,6 +24,9 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   validateAgentCredential: mocks.validateAgentCredential,
 }));
 vi.mock('../../../src/lib/api/projects', () => ({ createProject: mocks.createProject }));
+vi.mock('../../../src/components/AuthProvider', () => ({
+  useAuth: () => ({ user: { id: 'user-1', email: 'user@example.com', name: 'Test User' } }),
+}));
 
 import type { GeneratedStep } from '../../../src/components/onboarding/choose-path/path-generator';
 import { generatePath } from '../../../src/components/onboarding/choose-path/path-generator';
@@ -48,6 +51,7 @@ function renderSteps(props: {
 }) {
   const onComplete = vi.fn();
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const invalidate = vi.spyOn(client, 'invalidateQueries');
   const Wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
       <ToastProvider>
@@ -65,7 +69,7 @@ function renderSteps(props: {
     />,
     { wrapper: Wrapper }
   );
-  return { onComplete };
+  return { onComplete, invalidate };
 }
 
 async function connectClaudeWithApiKey() {
@@ -148,7 +152,7 @@ describe('cloud step', () => {
 
 describe('project step', () => {
   it('creates a SAM-hosted project and an Instant profile for the chosen agent', async () => {
-    const { onComplete } = renderSteps({
+    const { onComplete, invalidate } = renderSteps({
       steps: generatePath({ runtime: 'instant', repo: 'hosted' }, fresh),
       runtime: 'instant',
       hostedRepo: true,
@@ -169,6 +173,10 @@ describe('project step', () => {
       expect.objectContaining({ agentType: 'claude-code', runtime: 'cf-container' })
     );
     expect(mocks.listGitHubInstallations).not.toHaveBeenCalled();
+    // Each finished step refreshes what setup status reads, and nothing else.
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['auth', 'user-1', 'agents'] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['auth', 'user-1', 'projects'] });
+    expect(invalidate).not.toHaveBeenCalledWith();
   });
 
   it('creates a GitHub project with a full-machine profile on own cloud', async () => {
