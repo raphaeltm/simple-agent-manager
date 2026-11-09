@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -109,6 +110,10 @@ func TestRestoreDeniedByEvictionReturnsDegradedWithoutLosingFence(t *testing.T) 
 	s, input := newRestoreRetryTestServer(t)
 	s.config.Role = config.RoleStandalone
 	input.runtime.WorkspaceDir = filepath.Join(t.TempDir(), "workspace")
+	// Standalone resolution prefers ContainerWorkDir. Keep both runtime paths in
+	// the fixture so upsert cannot derive /workspaces/workspace (CI cannot mkdir there).
+	input.runtime.ContainerWorkDir = input.runtime.WorkspaceDir
+	degradedReasons := make(chan string, 2)
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if strings.HasSuffix(r.URL.Path, "/session-snapshot/restore") {
@@ -116,6 +121,15 @@ func TestRestoreDeniedByEvictionReturnsDegradedWithoutLosingFence(t *testing.T) 
 			s.markEvictionFinalizing("ws")
 			_, _ = w.Write([]byte(`{"available":true,"manifest":{"agentType":"claude-code","acpSessionId":"saved-session","artifacts":{"home":{}}}}`))
 		} else {
+			if strings.HasSuffix(r.URL.Path, "/session-snapshot/restore-result") {
+				var report map[string]string
+				if err := json.NewDecoder(r.Body).Decode(&report); err != nil {
+					t.Error(err)
+				}
+				if report["status"] == "degraded" {
+					degradedReasons <- report["message"]
+				}
+			}
 			_, _ = w.Write([]byte(`{}`))
 		}
 	}))
@@ -124,6 +138,14 @@ func TestRestoreDeniedByEvictionReturnsDegradedWithoutLosingFence(t *testing.T) 
 	response := nodeManagementPOST(t, s, s.handleRestoreAgentSession, "ws", "session", "/workspaces/ws/agent-sessions/session/restore", map[string]any{"chatSessionId": "chat", "runtime": "vm", "agentType": "claude-code", "workspaceCallbackToken": "fresh"})
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"status":"degraded"`) {
 		t.Fatalf("denied restore=%d %s", response.Code, response.Body.String())
+	}
+	select {
+	case reason := <-degradedReasons:
+		if reason != "resume saved agent context: workspace session admission is fenced" {
+			t.Fatalf("restore degraded before the intended host-admission gate: %s", reason)
+		}
+	default:
+		t.Fatal("restore did not report the denied-host degradation")
 	}
 	if !s.isEvictionFinalizing("ws") {
 		t.Fatal("degraded restore cleared eviction fence")
