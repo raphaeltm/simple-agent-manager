@@ -360,3 +360,21 @@ test('SAM-hosted path skips GitHub and creates an Artifacts project from a name'
     defaultBranch: 'main',
   });
 });
+
+/* ─── Scenario F: after skipping setup, the dashboard does not assume GitHub ─── */
+
+test('dashboard empty state offers a new project, not a GitHub import', async ({ page }) => {
+  await setupMocks(page, { existingAgent: false, existingCloud: false, existingGithub: false });
+  await page.addInitScript(() =>
+    localStorage.setItem('sam-onboarding-wizard-dismissed-user-demo-1', 'true')
+  );
+  await page.goto('/dashboard');
+
+  await expect(page.getByRole('heading', { name: 'Create your first project' })).toBeVisible({
+    timeout: 5000,
+  });
+  await expect(page.getByRole('button', { name: 'New Project' }).first()).toBeVisible();
+  await expect(page.getByText(/Import/)).toHaveCount(0);
+  await assertNoOverflow(page);
+  await screenshot(page, 'onboarding-dashboard-empty-projects');
+});
