@@ -454,6 +454,67 @@ describe('recoverStuckTasks — vertical slice', () => {
     );
   });
 
+  describe('delegated task whose creating-deadline probe cannot read', () => {
+    it('withholds the verdict on an unreadable probe, then decides on the next conclusive pass', async () => {
+      await seedBaseData();
+      const nodeId = 'node-st-probe';
+      const freshId = 'ws-st-probe-fresh';
+      const expiredId = 'ws-st-probe-expired';
+      const queued = (minutes: number) => new Date(Date.now() - minutes * 60 * 1000).toISOString();
+      await seedNode(nodeId, USER_ID, { status: 'running' });
+      for (const [workspaceId, minutes] of [
+        [freshId, 45],
+        [expiredId, 61],
+      ] as const) {
+        await seedWorkspace(workspaceId, nodeId, USER_ID, {
+          projectId: PROJECT_ID,
+          status: 'creating',
+          createdAt: queued(minutes),
+        });
+        await env.DATABASE.prepare('UPDATE workspaces SET creating_started_at = ? WHERE id = ?')
+          .bind(queued(minutes), workspaceId)
+          .run();
+        await seedTask(`task-${workspaceId}`, PROJECT_ID, USER_ID, {
+          status: 'delegated',
+          executionStep: 'workspace_ready',
+          workspaceId,
+          updatedAt: queued(minutes),
+        });
+      }
+
+      // Pass 1: the probe's read fails (a transient D1 error). Neither task is failed, including
+      // the one whose deadline really has passed: an unknown deadline is not an overdue one.
+      let probeFailures = 0;
+      const failingProbeDb = new Proxy(env.DATABASE, {
+        get(target, prop) {
+          if (prop !== 'prepare') {
+            const value = Reflect.get(target, prop, target);
+            return typeof value === 'function' ? value.bind(target) : value;
+          }
+          return (query: string) => {
+            if (query.includes('AS starting FROM workspaces')) {
+              probeFailures++;
+              throw new Error('D1_ERROR: Network connection lost.');
+            }
+            return target.prepare(query);
+          };
+        },
+      });
+      await recoverStuckTasks({ ...env, DATABASE: failingProbeDb } as unknown as Env);
+      // At least the two seeded here (earlier tests in this file can leave delegated tasks too).
+      expect(probeFailures).toBeGreaterThanOrEqual(2);
+      expect((await getTaskStatus(`task-${freshId}`))?.status).toBe('delegated');
+      expect((await getTaskStatus(`task-${expiredId}`))?.status).toBe('delegated');
+
+      // Pass 2: the probe reads. The still-queued workspace stays; the expired one fails.
+      await recoverStuckTasks(env as unknown as Env);
+      expect((await getTaskStatus(`task-${freshId}`))?.status).toBe('delegated');
+      const expired = await getTaskStatus(`task-${expiredId}`);
+      expect(expired?.status).toBe('failed');
+      expect(expired?.error_message).toContain("stuck in 'delegated'");
+    });
+  });
+
   describe('stuck in_progress task detection', () => {
     it('fails an in_progress task past the recovery check with no live runtime', async () => {
       await seedBaseData();

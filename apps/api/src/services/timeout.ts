@@ -176,15 +176,21 @@ export async function resolveProvisioningTimeoutBudgets(
  * Whether a task's workspace is still legitimately starting: in 'creating' and inside the shared
  * deadline at this cron's (backstop) budgets. The stuck-task sweep defers to this instead of
  * failing a delegated task on its own shorter, dispatch-anchored clock while the workspace waits
- * for its node's build slot. A failed read withholds nothing: it returns false and the sweep keeps
- * its own verdict.
+ * for its node's build slot.
+ *
+ *   starting      in 'creating' and inside the deadline: not stuck
+ *   not_starting  conclusively not: past the deadline, not 'creating', or no such row
+ *   unknown       the read failed: an unknown deadline is not evidence of an overdue one, so the
+ *                 sweep withholds its terminal verdict for this pass and asks again next pass
  */
-export async function isWorkspaceWithinCreatingDeadline(
+export type CreatingDeadlineProbe = 'starting' | 'not_starting' | 'unknown';
+
+export async function probeWorkspaceCreatingDeadline(
   database: D1Database,
   env: Env,
   workspaceId: string,
   now: Date
-): Promise<boolean> {
+): Promise<CreatingDeadlineProbe> {
   try {
     const budgets = await resolveProvisioningTimeoutBudgets(env);
     const overdue = workspaceCreatingOverdueSql('w', now.toISOString(), budgets);
@@ -195,13 +201,13 @@ export async function isWorkspaceWithinCreatingDeadline(
       )
       .bind(workspaceId, ...overdue.binds)
       .first<{ starting: number }>();
-    return row?.starting === 1;
+    return row?.starting === 1 ? 'starting' : 'not_starting';
   } catch (error) {
     log.warn('provisioning_timeout.creating_deadline_probe_failed', {
       workspaceId,
       error: error instanceof Error ? error.message : String(error),
-      action: 'sweep_keeps_its_own_verdict',
+      action: 'verdict_withheld',
     });
-    return false;
+    return 'unknown';
   }
 }

@@ -79,7 +79,7 @@ import {
 } from '../services/task-sleep-preservation';
 import { cleanupTerminalTaskResources } from '../services/task-terminal-cleanup';
 import { transitionTaskToTerminal } from '../services/task-terminal-transition';
-import { isWorkspaceWithinCreatingDeadline } from '../services/timeout';
+import { probeWorkspaceCreatingDeadline } from '../services/timeout';
 import {
   getVmAdmissionDiagnostics,
   isActiveVmAdmissionState,
@@ -1318,14 +1318,16 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
             // A workspace waiting for its node's build slot is not stuck: it answers to the
             // shared creating deadline (`workspace-creating-deadline.ts`), not this clock, which
             // starts at dispatch. Probed only for tasks this branch would otherwise fail.
-            if (
-              task.workspace_id &&
-              (await isWorkspaceWithinCreatingDeadline(env.DATABASE, env, task.workspace_id, now))
-            ) {
+            const creating = task.workspace_id
+              ? await probeWorkspaceCreatingDeadline(env.DATABASE, env, task.workspace_id, now)
+              : 'not_starting';
+            if (creating !== 'not_starting') {
+              // 'unknown' (the probe could not read) withholds the verdict for this pass only.
               log.info('stuck_task.delegated_workspace_still_starting', {
                 taskId: task.id,
                 workspaceId: task.workspace_id,
                 elapsedMs,
+                probe: creating,
                 action: 'deferred',
               });
               break;

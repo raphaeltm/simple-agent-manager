@@ -251,6 +251,12 @@ F7 tests:
   The step and the cron now share `claimWorkspaceCreatingExpiry`: errored only if still `creating`
   and overdue at the write; a lost claim re-polls. Midpoint tests (build start, ready) proven red
   with the claim bypassed; a revoked recovery authority leaves the workspace untouched.
+- Parent review of `b49cb0e0c`: the delegated probe returned false on a failed read, which let the
+  sweep apply its 31-minute verdict to a workspace with a valid 60-minute deadline. The probe is now
+  three-valued (`probeWorkspaceCreatingDeadline`: starting / not_starting / unknown). Unknown
+  withholds the verdict for that pass only. Real-sweep test: an injected probe failure leaves both a
+  valid and an expired task delegated, and the next conclusive pass fails only the expired one.
+  Proven red when unknown is treated as not_starting.
 - A late previous-attempt build-start is fenced once #2598 lands: its restart rotates
   `workspaces.callback_generation` and `verifyCallbackToken` rejects the old runtime's token, which
   the build-started route already calls. Migration renumbered to 0229 because #2598 owns 0228.

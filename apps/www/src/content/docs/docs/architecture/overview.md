@@ -568,7 +568,7 @@ queue budget (`operations.workspaceBuildQueueTimeoutMinutes`, 60 minutes by defa
 budget if that is larger). After it starts, the attempt has the build budget from that moment. The
 TaskRunner's `workspace_ready` step, the provisioning-timeout cron (`checkProvisioningTimeouts()` in
 `services/timeout.ts`, a backstop whose build budget is `PROVISIONING_TIMEOUT_MS`) and the stuck-task
-sweep's `delegated` check (`isWorkspaceWithinCreatingDeadline()`) all read that same rule from D1.
+sweep's `delegated` check (`probeWorkspaceCreatingDeadline()`, which withholds its verdict when the read fails) all read that same rule from D1.
 The cron rechecks the status and deadline in its UPDATE, so it cannot overwrite a workspace that
 became ready or started building after its read.
 

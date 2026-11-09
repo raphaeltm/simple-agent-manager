@@ -20,7 +20,7 @@ import {
 } from '../../../src/services/admin-settings';
 import {
   checkProvisioningTimeouts,
-  isWorkspaceWithinCreatingDeadline,
+  probeWorkspaceCreatingDeadline,
 } from '../../../src/services/timeout';
 import { createAllSchemaTables, createMemoryKv, createSqliteD1 } from '../../helpers/sqlite-d1';
 
@@ -225,27 +225,28 @@ describe('checkProvisioningTimeouts', () => {
   });
 });
 
-describe('isWorkspaceWithinCreatingDeadline', () => {
-  it('is true only for a creating workspace inside its deadline', async () => {
+describe('probeWorkspaceCreatingDeadline', () => {
+  it('answers starting only for a creating workspace inside its deadline', async () => {
     const now = new Date();
     seedCreating('inside', { createdAt: ago(45), creatingStartedAt: ago(45) });
     seedCreating('outside', { createdAt: ago(61), creatingStartedAt: ago(61) });
     seedCreating('ready', { createdAt: ago(5), creatingStartedAt: ago(5) }, 'running');
 
-    expect(await isWorkspaceWithinCreatingDeadline(env.DATABASE, env, 'inside', now)).toBe(true);
-    expect(await isWorkspaceWithinCreatingDeadline(env.DATABASE, env, 'outside', now)).toBe(false);
-    expect(await isWorkspaceWithinCreatingDeadline(env.DATABASE, env, 'ready', now)).toBe(false);
-    expect(await isWorkspaceWithinCreatingDeadline(env.DATABASE, env, 'missing', now)).toBe(false);
+    const probe = (id: string) => probeWorkspaceCreatingDeadline(env.DATABASE, env, id, now);
+    expect(await probe('inside')).toBe('starting');
+    expect(await probe('outside')).toBe('not_starting');
+    expect(await probe('ready')).toBe('not_starting');
+    expect(await probe('missing')).toBe('not_starting');
   });
 
-  it('returns false instead of throwing when the probe cannot read', async () => {
+  it('answers unknown, not "overdue", when it cannot read', async () => {
     const broken = {
       prepare: () => {
         throw new Error('D1 unavailable');
       },
     } as unknown as D1Database;
-    await expect(
-      isWorkspaceWithinCreatingDeadline(broken, env, 'inside', new Date())
-    ).resolves.toBe(false);
+    await expect(probeWorkspaceCreatingDeadline(broken, env, 'inside', new Date())).resolves.toBe(
+      'unknown'
+    );
   });
 });
