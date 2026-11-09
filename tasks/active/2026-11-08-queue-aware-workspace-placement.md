@@ -247,5 +247,15 @@ F7 tests:
   the instant insert drops its clock.
 - Delegated sweep through the real `recoverStuckTasks` (`scheduled-stuck-tasks.test.ts`): queued 45
   minutes stays delegated (proven red without the deferral), queued 61 minutes fails.
-- [ ] Specialist re-review of the CodeRabbit round
+- Parent review of `0ef446e8b`: the TaskRunner failed the task on a row it had read before other awaits.
+  The step and the cron now share `claimWorkspaceCreatingExpiry`: errored only if still `creating`
+  and overdue at the write; a lost claim re-polls. Midpoint tests (build start, ready) proven red
+  with the claim bypassed; a revoked recovery authority leaves the workspace untouched.
+- A late previous-attempt build-start is fenced once #2598 lands: its restart rotates
+  `workspaces.callback_generation` and `verifyCallbackToken` rejects the old runtime's token, which
+  the build-started route already calls. Migration renumbered to 0229 because #2598 owns 0228.
+- [x] Specialist re-review of the CodeRabbit round: cloudflare-specialist PASS (LOW fixed: the
+      delegated probe now fails safe as documented), architecture-reviewer PASS,
+      task-completion-validator PASS, test-engineer HIGH fixed (rebuild-from-running clock reset now
+      has a real-SQL route test, proven red without it)
 - [ ] Staging: a queued build on one node, past the old 30-minute mark if bounded, plus cleanup
