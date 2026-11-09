@@ -19,7 +19,7 @@ const containerOwnerEnv = "SAM_ACP_PROCESS_OWNER"
 
 // Container IDs are immutable; share one bounded probe among launches on that ID.
 // No environment contents leave the container, only capability booleans.
-type containerCapabilities struct{ proc, session, marker bool }
+type containerCapabilities struct{ proc, session, marker, probeFailed bool }
 
 var containerCapabilityCache sync.Map
 
@@ -31,7 +31,13 @@ exit 0
 `
 
 func containerCapabilitiesFor(cfg ProcessConfig, dockerPath, owner string) containerCapabilities {
-	key := dockerPath + "\x00" + cfg.ContainerID
+	pathOverride := ""
+	for _, entry := range cfg.EnvVars {
+		if strings.HasPrefix(entry, "PATH=") {
+			pathOverride = entry
+		}
+	}
+	key := dockerPath + "\x00" + cfg.ContainerID + "\x00" + cfg.ContainerUser + "\x00" + pathOverride
 	probe := sync.OnceValue(func() containerCapabilities {
 		timeout := cfg.ContainerSignalTimeout
 		if timeout <= 0 {
@@ -39,16 +45,28 @@ func containerCapabilitiesFor(cfg ProcessConfig, dockerPath, owner string) conta
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
-		out, err := exec.CommandContext(ctx, dockerPath, "exec", "-e", containerOwnerEnv+"="+owner, cfg.ContainerID, "sh", "-c", containerCapabilityScript, "sam-process-capabilities", containerOwnerEnv+"="+owner).Output()
+		args := []string{"exec"}
+		if cfg.ContainerUser != "" {
+			args = append(args, "-u", cfg.ContainerUser)
+		}
+		if pathOverride != "" {
+			args = append(args, "-e", pathOverride)
+		}
+		args = append(args, "-e", containerOwnerEnv+"="+owner, cfg.ContainerID, "sh", "-c", containerCapabilityScript, "sam-process-capabilities", containerOwnerEnv+"="+owner)
+		out, err := exec.CommandContext(ctx, dockerPath, args...).Output()
 		if err != nil {
 			slog.Warn("Container cleanup capability probe failed", "containerId", cfg.ContainerID, "error", err)
-			return containerCapabilities{}
+			return containerCapabilities{probeFailed: true}
 		}
 		fields := "\n" + string(out)
-		return containerCapabilities{strings.Contains(fields, "\nproc\n"), strings.Contains(fields, "\nsession\n"), strings.Contains(fields, "\nmarker\n")}
+		return containerCapabilities{proc: strings.Contains(fields, "\nproc\n"), session: strings.Contains(fields, "\nsession\n"), marker: strings.Contains(fields, "\nmarker\n")}
 	})
 	cached, _ := containerCapabilityCache.LoadOrStore(key, probe)
-	return cached.(func() containerCapabilities)()
+	caps := cached.(func() containerCapabilities)()
+	if caps.probeFailed {
+		containerCapabilityCache.Delete(key)
+	}
+	return caps
 }
 func (c containerCapabilities) reason() string {
 	var reasons []string
@@ -62,6 +80,24 @@ func (c containerCapabilities) reason() string {
 		reasons = append(reasons, "NUL-safe batch grep unavailable")
 	}
 	return strings.Join(reasons, "; ")
+}
+
+func containerLaunchConfig(cfg ProcessConfig, caps containerCapabilities) ProcessConfig {
+	launchCfg := cfg
+	launchCfg.AcpCommand = "sh"
+	grace := cfg.StopGracePeriod
+	if grace <= 0 {
+		grace = DefaultStopGracePeriod
+	}
+	launchCfg.AcpArgs = append([]string{"-c", containerSessionLaunchScript, "sam-acp-session", fmt.Sprintf("%.3f", grace.Seconds()), strconv.FormatBool(caps.session), strconv.FormatBool(caps.marker), cfg.AcpCommand}, cfg.AcpArgs...)
+	if caps.session {
+		launchCfg.AcpCommand = "setsid"
+		launchCfg.AcpArgs = append([]string{"--wait", "sh"}, launchCfg.AcpArgs...)
+	}
+	if !caps.proc {
+		launchCfg.AcpCommand, launchCfg.AcpArgs = cfg.AcpCommand, cfg.AcpArgs
+	}
+	return launchCfg
 }
 
 // Record the launch root before the adapter can fork or clear its env.
@@ -90,10 +126,27 @@ command_session() {
  done
  printf '%s %s %s %s\n' "$SAM_ACP_PROCESS_OWNER" "$$" "$started" "$private_session"
 }
+signal_identity() {
+ pid=$1
+ expected=$2
+ session_owned=$3
+ IFS= read -r stat 2>/dev/null < "/proc/$pid/stat" || return 0
+ rest=${stat##*) }
+ set -- $rest
+ [ "$#" -ge 20 ] || return 0
+ shift 19
+ [ "$1" = "$expected" ] || return 0
+ owned=0
+ case "$owned_paths" in *"/proc/$pid/environ"*) owned=1 ;; esac
+ if [ "$session_owned" = 1 ] || [ "$owned" = 1 ]; then
+  kill -"$signal" "$pid" 2>/dev/null || :
+ fi
+}
 signal_owned() {
  signal=$1
- owned_paths=""
- if [ "$marker_scan" = true ]; then owned_paths=$(grep -Fxlz -- "SAM_ACP_PROCESS_OWNER=$SAM_ACP_PROCESS_OWNER" /proc/[0-9]*/environ 2>/dev/null); fi
+ identities=""
+ # Capture starttime BEFORE looking up markers. Marker proof can never attach
+ # to a replacement identity that appears during the batch environment scan.
  for path in /proc/[0-9]*; do
   pid=${path##*/}
   [ "$pid" -gt 1 ] && [ "$pid" != "$$" ] || continue
@@ -102,11 +155,17 @@ signal_owned() {
   rest=${stat##*) }
   set -- $rest
   [ "$#" -ge 20 ] || continue
-  owned=0
-  case "$owned_paths" in *"$path/environ"*) owned=1 ;; esac
-  if { [ "$private_session" = true ] && [ "$4" = "$$" ]; } || [ "$owned" = 1 ]; then
-   kill -"$signal" "$pid" 2>/dev/null || :
-  fi
+  session_owned=0
+  if [ "$private_session" = true ] && [ "$4" = "$$" ]; then session_owned=1; fi
+  shift 19
+  identities="$identities $pid $1 $session_owned"
+ done
+ owned_paths=""
+ if [ "$marker_scan" = true ]; then owned_paths=$(grep -Fxlz -- "SAM_ACP_PROCESS_OWNER=$SAM_ACP_PROCESS_OWNER" /proc/[0-9]*/environ 2>/dev/null); fi
+ set -- $identities
+ while [ "$#" -ge 3 ]; do
+  signal_identity "$1" "$2" "$3"
+  shift 3
  done
 }
 cleanup() {
@@ -180,12 +239,7 @@ func (p *AgentProcess) awaitContainerSession() error {
 // Removing through the final ') ' handles spaces/parentheses in Linux comm.
 const containerSnapshotScript = `
 marker="$1"
-owned_paths=""
-if [ "$2" = true ]; then owned_paths=$(grep -Fxlz -- "$marker" /proc/[0-9]*/environ 2>/dev/null); fi
-for owned_path in $owned_paths; do
- owned_path=${owned_path%/environ}
- printf 'owned %s\n' "${owned_path##*/}"
-done
+marker_scan="$2"
 for path in /proc/[0-9]*; do
  IFS= read -r stat 2>/dev/null < "$path/stat" || continue
  rest=${stat##*) }
@@ -197,6 +251,15 @@ for path in /proc/[0-9]*; do
  start=$1
  printf '%s %s %s 0 %s\n' "${path##*/}" "$parent" "$start" "$session"
 done
+# Marker proof is joined to the identities already captured above. The signal
+# command rechecks those starttimes, so replacements cannot inherit ownership.
+if [ "$marker_scan" = true ]; then
+ owned_paths=$(grep -Fxlz -- "$marker" /proc/[0-9]*/environ 2>/dev/null)
+ for owned_path in $owned_paths; do
+  owned_path=${owned_path%/environ}
+  printf 'owned %s\n' "${owned_path##*/}"
+ done
+fi
 `
 
 // Starttime is checked again immediately before each signal, preventing a stale

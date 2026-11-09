@@ -34,6 +34,10 @@ while args and args[0].startswith('-'):
  elif flag!='-i': raise Exception(flag)
 assert args.pop(0)=='test-container'
 if args[0]=='pkill': sys.exit(1)
+if 'sam-process-capabilities' in args and env.get('SAM_TEST_CAP_FAIL_ONCE_FILE'):
+ once=env['SAM_TEST_CAP_FAIL_ONCE_FILE']
+ if not os.path.exists(once):
+  open(once,'w').close(); sys.exit(1)
 if 'sam-process-capabilities' in args and env.get('SAM_TEST_CAP_PROBE_FILE'):
  with open(env['SAM_TEST_CAP_PROBE_FILE'],'a') as counter: counter.write('probe\n')
 if env.get('SAM_TEST_DOCKER_PROC_ROOT') and 'sam-process-snapshot' in args:
@@ -365,4 +369,115 @@ func TestContainerSnapshotOuterLimit(t *testing.T) {
 		t.Fatalf("snapshot exceeded %s: %s", DefaultContainerSignalTimeout, elapsed)
 	}
 	t.Logf("%d processes / 8 MiB environments captured in %s (budget %s)", processCount, elapsed, DefaultContainerSignalTimeout)
+}
+
+func TestContainerCapabilityProbeRetriesAfterTransientFailure(t *testing.T) {
+	installProcessDockerTransport(t)
+	t.Setenv("SAM_TEST_CAP_FAIL_ONCE_FILE", filepath.Join(t.TempDir(), "failed-once"))
+	first := startCleanupFixture(t, `echo ready; read request`)
+	out := bufio.NewScanner(first.Stdout())
+	if !out.Scan() || out.Text() != "ready" {
+		t.Fatal("transient probe failure blocked adapter launch")
+	}
+	if !first.containerCleanupUnavailable {
+		t.Fatal("test did not exercise failed probe")
+	}
+	if err := first.Stop(); err == nil {
+		t.Fatal("missing ownership cleanup must be visible")
+	}
+	// Same container ID and transport: a failed probe must not poison its cache.
+	second := startCleanupFixture(t, `echo ready; read request`)
+	out = bufio.NewScanner(second.Stdout())
+	if !out.Scan() || out.Text() != "ready" || second.containerRootPID <= 1 || second.containerCleanupUnavailable {
+		t.Fatal("transient failure remained cached")
+	}
+	if err := second.Stop(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestContainerBatchScanRejectsIdentityReplacement(t *testing.T) {
+	for _, phase := range []string{"snapshot", "supervisor"} {
+		t.Run(phase, func(t *testing.T) {
+			installProcessDockerTransport(t)
+			root := t.TempDir()
+			proc := filepath.Join(root, "4242")
+			if err := os.Mkdir(proc, 0755); err != nil {
+				t.Fatal(err)
+			}
+			stat, err := os.ReadFile("/proc/self/stat")
+			if err != nil {
+				t.Fatal(err)
+			}
+			fields := strings.Fields(string(stat[strings.LastIndex(string(stat), ") ")+2:]))
+			fields[1], fields[3], fields[19] = "1", "4242", "111"
+			oldStat := "4242 (fixture) " + strings.Join(fields, " ") + "\n"
+			fields[19] = "999"
+			newStat := "4242 (fixture) " + strings.Join(fields, " ") + "\n"
+			if err := os.WriteFile(filepath.Join(proc, "stat"), []byte(oldStat), 0600); err != nil {
+				t.Fatal(err)
+			}
+			replacement := filepath.Join(root, "replacement")
+			if err := os.WriteFile(replacement, []byte(newStat), 0600); err != nil {
+				t.Fatal(err)
+			}
+			// Deterministically replace the marked process identity during the batch
+			// marker query, after its proof was obtained but before signaling.
+			toolDir := t.TempDir()
+			grep := "#!/bin/sh\ncp '" + replacement + "' '" + filepath.Join(proc, "stat") + "'\nprintf '%s\\n' '" + filepath.Join(proc, "environ") + "'\n"
+			if err := os.WriteFile(filepath.Join(toolDir, "grep"), []byte(grep), 0755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", toolDir+":"+os.Getenv("PATH"))
+			if phase == "snapshot" {
+				t.Setenv("SAM_TEST_DOCKER_PROC_ROOT", root)
+				p := &AgentProcess{containerID: "test-container", dockerExecutable: testDockerExecutable(t), containerOwner: "owner", containerMarkerScan: true}
+				if err := p.captureContainerProcesses(); err != nil {
+					t.Fatal(err)
+				}
+				if p.containerTargets[4242] != "111" {
+					t.Fatalf("marker attached to replacement identity: %v", p.containerTargets)
+				}
+			} else {
+				begin := strings.Index(containerSessionLaunchScript, "signal_identity() {")
+				if begin < 0 {
+					begin = strings.Index(containerSessionLaunchScript, "signal_owned() {")
+				}
+				end := strings.Index(containerSessionLaunchScript, "\ncleanup() {")
+				helpers := strings.ReplaceAll(containerSessionLaunchScript[begin:end], "/proc/", root+"/")
+				// Replace only the signal boundary, so a regression reports a signal
+				// instead of touching a real process with a coincidentally matching PID.
+				script := "private_session=false; marker_scan=true; ancestor_pids=' '; SAM_ACP_PROCESS_OWNER=owner; kill() { printf 'UNEXPECTED SIGNAL\\n'; };\n" + helpers + "\nsignal_owned KILL\n"
+				output, err := exec.Command("sh", "-c", script).CombinedOutput()
+				if err != nil || len(output) != 0 {
+					t.Fatalf("replacement identity was signalled: %q %v", output, err)
+				}
+			}
+			changed, err := os.ReadFile(filepath.Join(proc, "stat"))
+			if err != nil || string(changed) != newStat {
+				t.Fatal("identity replacement fixture did not run")
+			}
+		})
+	}
+}
+
+func TestContainerCapabilityProbeUsesLaunchPath(t *testing.T) {
+	installProcessDockerTransport(t)
+	defaultPath := os.Getenv("PATH")
+	installLimitedContainerTools(t, "setsid-missing")
+	launchPath := os.Getenv("PATH")
+	// Only the launch environment omits setsid, not the Docker exec default.
+	t.Setenv("PATH", defaultPath)
+	p, err := StartProcess(ProcessConfig{DockerExecutable: testDockerExecutable(t), ContainerID: "test-container", AcpCommand: "sh", AcpArgs: []string{"-c", `echo ready; read request`}, EnvVars: []string{"PATH=" + launchPath}, StopGracePeriod: 50 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = p.Stop() })
+	out := bufio.NewScanner(p.Stdout())
+	if !out.Scan() || out.Text() != "ready" || p.containerRootPID <= 1 || p.containerSessionID != 0 {
+		t.Fatal("probe did not use launch PATH")
+	}
+	if err := p.Stop(); err != nil {
+		t.Fatal(err)
+	}
 }

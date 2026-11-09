@@ -13,7 +13,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -392,21 +391,8 @@ func startDockerExecProcess(cfg ProcessConfig) (*AgentProcess, error) {
 	}
 	owner := hex.EncodeToString(ownerBytes[:])
 	cfg.EnvVars = mergeProcessEnv(cfg.EnvVars, []string{containerOwnerEnv + "=" + owner})
-	launchCfg := cfg
 	caps := containerCapabilitiesFor(cfg, dockerExecutable, owner)
-	launchCfg.AcpCommand = "sh"
-	grace := cfg.StopGracePeriod
-	if grace <= 0 {
-		grace = DefaultStopGracePeriod
-	}
-	launchCfg.AcpArgs = append([]string{"-c", containerSessionLaunchScript, "sam-acp-session", fmt.Sprintf("%.3f", grace.Seconds()), strconv.FormatBool(caps.session), strconv.FormatBool(caps.marker), cfg.AcpCommand}, cfg.AcpArgs...)
-	if caps.session {
-		launchCfg.AcpCommand = "setsid"
-		launchCfg.AcpArgs = append([]string{"--wait", "sh"}, launchCfg.AcpArgs...)
-	}
-	if !caps.proc {
-		launchCfg.AcpCommand, launchCfg.AcpArgs = cfg.AcpCommand, cfg.AcpArgs
-	}
+	launchCfg := containerLaunchConfig(cfg, caps)
 	if !caps.session || !caps.marker || !caps.proc {
 		slog.Warn("Container agent cleanup using reduced ownership capabilities", "containerId", cfg.ContainerID, "reason", caps.reason())
 	}
