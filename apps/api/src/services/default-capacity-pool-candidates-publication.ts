@@ -131,7 +131,8 @@ export async function ensureCandidatesForSource(
     const written = await publishCandidateValues(db, pending, options);
     published += written;
     publishedTotal += written;
-    // A fenced row that did not land means a newer publisher owns the rest of this catalog.
+    // A row that did not land (a newer publisher's generation fence, or a native-configuration
+    // edit racing this pass) ends the pass; the cursor keeps the contiguous prefix for the next one.
     lastBatchFullyPublished = written === pending.length;
     if (
       !lastBatchFullyPublished ||

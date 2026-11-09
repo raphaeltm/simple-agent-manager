@@ -42,3 +42,20 @@ unaffected.
 - [ ] Give the scheduled pass a per-invocation write budget (queries or wall time) and stop
       draining further incomplete sources once it is spent; the cursor resumes them next run.
 - [ ] Test with many users whose catalogs changed, counting D1 queries per invocation.
+
+## Also: findings from the independent review of the 2026-11-09 fix (deferred, MEDIUM)
+
+- [ ] **Shared pass budget across scopes.** `backfillDefaultCapacityPoolsForExistingCredentials`
+      (`default-capacity-pools-read.ts`) ensures up to 25 users + 25 projects sequentially, each
+      with up to `operations.capacityPoolPublishBudgetMs` per source. If every scope's catalog
+      changed at once at the outer limit, the pass could approach the 15-minute Cron Trigger wall
+      limit and cut short later sweeps in that tick (`scheduled/handler.ts`). Stop draining scopes
+      when a pass-level budget is spent; the cursor resumes them.
+- [ ] **Credential mutation latency.** `reconcileCapacityPoolsForCredentialMutation` is awaited
+      inline by credential routes and loops project scopes; with a changed catalog each scope now
+      publishes to completion. Consider `waitUntil` (the failure path already writes retry
+      markers) or the shared budget above.
+- [ ] **Resume sooner after a budget overrun.** When a pass ends with publication incomplete, the
+      pool stays `migration-pending` until the next refresh (daily gate in
+      `claimScheduledReconciliationRun`). Let the scheduled reconcile bypass its 24 h gate while
+      any default pool is `migration_state='pending'`, or fix the readiness gate above.
