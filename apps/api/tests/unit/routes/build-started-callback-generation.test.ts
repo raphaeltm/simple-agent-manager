@@ -71,7 +71,7 @@ beforeEach(() => {
 
 afterEach(() => sqlite.close());
 
-async function postBuildStarted(token: string): Promise<Response> {
+async function postBuildStarted(token: string, requestEnv: Env = env): Promise<Response> {
   const { buildStartedCallbackRoute } =
     await import('../../../src/routes/projects/build-started-callback');
   const app = new Hono();
@@ -88,7 +88,7 @@ async function postBuildStarted(token: string): Promise<Response> {
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ workspaceId: WS }),
     },
-    env
+    requestEnv
   );
 }
 
@@ -127,5 +127,50 @@ describe('build-started after a restart rotated the callback generation', () => 
     expect(response.status).toBe(204);
     expect(Date.parse(buildStartedAt() ?? '')).toBeGreaterThan(Date.now() - 60_000);
     expect(mocks.notify).toHaveBeenCalledWith(env, 'task-1', WS);
+  });
+
+  it('rejects a previous-attempt callback when a restart rotates the generation after it authenticated', async () => {
+    // The previous attempt is still current when its callback authenticates...
+    sqlite.prepare("UPDATE workspaces SET callback_generation = 'gen-old' WHERE id = ?").run(WS);
+    const previousAttempt = await signCallbackToken(WS, env, { callbackGeneration: 'gen-old' });
+    let rotated = false;
+    const database = new Proxy(env.DATABASE, {
+      get(target, prop) {
+        if (prop !== 'prepare') {
+          const value = Reflect.get(target, prop, target);
+          return typeof value === 'function' ? value.bind(target) : value;
+        }
+        return (query: string) => {
+          // ...then a restart lands between authentication and the build-start write, in the
+          // restart's own shape: new attempt clock, build start cleared, generation rotated.
+          if (!rotated && query.includes('UPDATE workspaces SET build_started_at = ?')) {
+            rotated = true;
+            sqlite
+              .prepare(
+                `UPDATE workspaces SET creating_started_at = ?, build_started_at = NULL,
+                   callback_generation = 'gen-new' WHERE id = ?`
+              )
+              .run(new Date().toISOString(), WS);
+          }
+          return target.prepare(query);
+        };
+      },
+    });
+
+    const response = await postBuildStarted(previousAttempt, { ...env, DATABASE: database });
+
+    expect(rotated).toBe(true);
+    expect(response.status).toBe(401);
+    expect(buildStartedAt()).toBeNull();
+    expect(mocks.notify).not.toHaveBeenCalled();
+  });
+
+  it('still records a legacy callback whose token and row carry no generation', async () => {
+    sqlite.prepare('UPDATE workspaces SET callback_generation = NULL WHERE id = ?').run(WS);
+    const legacy = await signCallbackToken(WS, env, { callbackGeneration: null });
+
+    expect((await postBuildStarted(legacy)).status).toBe(204);
+    expect(buildStartedAt()).not.toBeNull();
+    expect(mocks.notify).toHaveBeenCalledOnce();
   });
 });

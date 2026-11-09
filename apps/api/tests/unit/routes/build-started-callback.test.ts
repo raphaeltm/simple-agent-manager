@@ -83,6 +83,7 @@ describe('build-started callback route', () => {
       workspace: 'ws-1',
       type: 'callback',
       scope: 'workspace',
+      callbackGeneration: null,
     });
     mocks.notifyTaskRunnerWorkspaceBuildStarted.mockResolvedValue(undefined);
   });
@@ -110,6 +111,7 @@ describe('build-started callback route', () => {
       workspace: 'ws-other',
       type: 'callback',
       scope: 'workspace',
+      callbackGeneration: null,
     });
     const app = await createTestApp();
 
