@@ -101,13 +101,27 @@ func (p evictionParked) replay() {
 // a prompt-timeout force-stop) while a durable eviction owns the runtime. It reports
 // whether the handling was parked.
 func (h *SessionHost) parkPromptCrashForEviction(signal string, replay func(), attempts ...*promptAttempt) bool {
+	return h.parkCrashHandlingForEviction(signal, replay, false, attempts...)
+}
+
+// parkRecoveryWatchdogForEviction retains recovery ownership after cancellation
+// completed the prompt: a terminal verdict does not prove the process exited.
+// Exact attempt identity still prevents a stale watchdog touching newer work.
+func (h *SessionHost) parkRecoveryWatchdogForEviction(replay func(), attempt *promptAttempt) bool {
+	return h.parkCrashHandlingForEviction("recovery_watchdog", replay, true, attempt)
+}
+
+// parkCrashHandlingForEviction arbitrates eviction ownership while retaining the
+// caller's exact prompt identity. Only recovery cleanup may outlive its verdict.
+func (h *SessionHost) parkCrashHandlingForEviction(signal string, replay func(), allowTerminal bool, attempts ...*promptAttempt) bool {
 	h.evictionReportMu.Lock()
 	defer h.evictionReportMu.Unlock()
 	h.mu.RLock()
 	h.promptMu.Lock()
 	// A late RPC return is consumed after teardown or prompt completion. Falling
 	// through would restart crash handling for an attempt that already ended.
-	if h.evictionTeardown || h.status == HostStopped || (len(attempts) > 0 && (h.promptAttempt != attempts[0] || (attempts[0] != nil && attempts[0].isTerminal()))) {
+	// Recovery watchdogs must still detach a live process after its prompt ended.
+	if h.evictionTeardown || h.status == HostStopped || (len(attempts) > 0 && (h.promptAttempt != attempts[0] || (!allowTerminal && attempts[0] != nil && attempts[0].isTerminal()))) {
 		h.promptMu.Unlock()
 		h.mu.RUnlock()
 		return true

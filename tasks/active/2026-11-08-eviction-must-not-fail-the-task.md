@@ -412,7 +412,7 @@ Final checkpoint teardown ordering: retain report serialization through the evic
   allocated just before bounded fixture cancellation did not boot/restore. Final
   release restore is NOT claimed. Supporting control: earlier real 9c sleep/wake
   restored the exact EVICTION-PRESERVED-20261109 sentinel on a replacement workspace;
-  restore implementation is unchanged by this PR.
+  earlier restore is supporting evidence only:350 later changed denied-host admission and degraded-restore eviction ownership; a final-runtime real restore is required.
 - [ ] Renewed exact-final-head coordinator approval and final CI/CodeRabbit gate.
 - [ ] Merge, production deployment and production monitoring.
 
@@ -508,9 +508,10 @@ through the owner task API200; original node and aborted replacement
 01M70W53Y3ZDESWTZAN1P1CSBB were strictly deleted200, and temporary profile
 01M70VESXZHCKQAG4P1C336KR8 deleted200. Final350 replacement sentinel read is
 NOT claimed. Supporting earlier9c real replacement restore read the identical
-sentinel, and this PR leaves restore implementation unchanged; final350 denied-
-restore and identity regressions are covered locally and in CI. Coordinator must
-explicitly accept this disclosed limitation when renewing exact-head approval.
+sentinel as supporting evidence only.350 changed denied host admission and
+preservation of eviction ownership during degraded restore; local/CI denial and
+identity regressions do not replace final-runtime live restore proof. Historical disposition, superseded by Review3 below: this gap now requires
+final-runtime actual restore proof; coordinator acceptance is withdrawn.
 
 Late allocation01M70WH9DVTF0KXCSG02RZF3HW appeared during cancellation;
 strict owner DELETE also returned200. D1 independently confirmed zero remaining
@@ -530,3 +531,36 @@ Final archival audit: implementation PASS (all source reviews returned, includin
 independent final A–F task-completion review); release WARN until those three
 explicit premerge/postmerge gates finish. This docs-only archive commit does not
 change the350 VM runtime and does not claim that the fix is shipped.
+
+## Review3 — 2026-11-09 20:17 UTC, implementation reopened
+
+CodeRabbit5832097846 returned two valid minor findings and one cleanup nit.
+The task is active again; all earlier exact-head approvals and restore-gap
+acceptance are withdrawn. Earlier9c restore is supporting evidence only:
+350 changed denied host admission and degraded-restore eviction ownership.
+Final candidate MUST prove a real restore, not rely on unchanged-code rationale.
+
+- [ ] Recovery watchdog must settle a terminal original prompt while its process
+      remains alive, preserving exact attempt/epoch and eviction ownership.
+- [ ] Discriminating regression through actual cancel grace with blocked original
+      process; fenced commit/rollback/expiry, unfenced and stale/new-attempt controls.
+- [ ] Correct restore evidence wording; clean mixed-timestamp test rows.
+- [ ] Re-run affected suites and independent Go/source-completion reviews.
+- [ ] Final runtime staging on ONE VM: two-host real eviction, then agent reads
+      pre-eviction sentinel after wake. Retain source until recovery completes.
+      If forced new allocation hits412 for ~10min, plain fresh-session sleep/wake
+      on same node is allowed restore fallback; disclose exact path.
+- [ ] Cancel fixtures first, strict cleanup, immediate AND ~5min-later zero-VM checks.
+- [ ] Renew exact-head coordinator approval, fresh CI and trusted CR request/wait,
+      resolve feedback, merge and monitor production.
+
+Review3 source fixes and evidence: watchdog-only allowTerminal keeps exact prompt
+identity and recovery epoch; generic crash/RPC/cancel handling is unchanged.
+The new real CancelPrompt -> gated cancel-grace -> blocked original process Wait
+regression fails on old source in all four dispositions (RED16.026s), then passes
+under race with active-watchdog and stale-epoch controls4.010s. Full ACP race
+PASS73.766s. Independent identity-guard and eviction-fence removal overlays each
+fail the intended behavioral assertion. Workers33/33 PASS38.79s after fixture
+row cleanup. Independent Go-specialist and test/doc/A–F source-completion reviews
+PASS, no pending local reviewer. Full broader Go suite is running; live restore,
+final cleanup, exact-head approval and release gates remain pending.

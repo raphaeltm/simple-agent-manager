@@ -985,6 +985,14 @@ describe('runNodeCleanupSweep — vertical slice', () => {
         emptyResult()
       );
       expect(await getWorkspaceStatus(workspaceId)).toMatchObject({ status: 'stopped' });
+      await env.DATABASE.prepare(`DELETE FROM task_status_events WHERE task_id = ?`)
+        .bind(taskId)
+        .run();
+      await env.DATABASE.prepare(`DELETE FROM tasks WHERE id = ?`).bind(taskId).run();
+      await env.DATABASE.prepare(`DELETE FROM workspaces WHERE id = ?`).bind(workspaceId).run();
+      await env.DATABASE.prepare(`DELETE FROM nodes WHERE id = ?`)
+        .bind('node-nc-mixed-history')
+        .run();
     });
 
     it('leaves a failed task workspace to the sleep lifecycle only while its agent session can be slept', async () => {

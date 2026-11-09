@@ -240,7 +240,7 @@ func (h *SessionHost) finishCrashRecoveryTimeout(timeout time.Duration, notify r
 	if !active {
 		return
 	}
-	if h.parkPromptCrashForEviction("recovery_watchdog", func() { h.finishCrashRecoveryTimeout(timeout, notify, epoch, attempt) }, attempt) {
+	if h.parkRecoveryWatchdogForEviction(func() { h.finishCrashRecoveryTimeout(timeout, notify, epoch, attempt) }, attempt) {
 		return
 	}
 	message := fmt.Sprintf("Agent crash recovery timed out after %s", timeout)
