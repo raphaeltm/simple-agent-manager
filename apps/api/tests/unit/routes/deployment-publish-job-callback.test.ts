@@ -124,6 +124,7 @@ const validEvent = {
   currentStep: 'push',
   level: 'info',
   terminal: false,
+  releaseId: 'release-3',
   releaseVersion: 3,
   detail: { note: 'ok' },
 };

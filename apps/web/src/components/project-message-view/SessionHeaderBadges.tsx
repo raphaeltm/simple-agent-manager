@@ -4,7 +4,7 @@ import { AlertTriangle, ExternalLink, Globe } from 'lucide-react';
 import { type CSSProperties, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
-function getWorkspaceProfileLabel(workspace: WorkspaceResponse): string {
+export function getWorkspaceProfileLabel(workspace: WorkspaceResponse): string {
   if (workspace.status === 'recovery') return 'Recovery container';
   return workspace.workspaceProfile === 'lightweight' ? 'Lightweight' : 'Full';
 }
@@ -12,7 +12,10 @@ function getWorkspaceProfileLabel(workspace: WorkspaceResponse): string {
 const RECOVERY_CONTAINER_HELP =
   'The devcontainer build failed, so SAM started a fallback recovery container to keep this chat usable. Open the workspace and check Boot Logs for the devcontainer error output.';
 
-export function WorkspaceProfileBadge({ workspace }: Readonly<{ workspace: WorkspaceResponse }>) {
+export function WorkspaceProfileBadge({
+  workspace,
+  size = 'md',
+}: Readonly<{ workspace: WorkspaceResponse; size?: 'sm' | 'md' }>) {
   const [open, setOpen] = useState(false);
   const [tooltipStyle, setTooltipStyle] = useState<CSSProperties>({});
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -20,6 +23,7 @@ export function WorkspaceProfileBadge({ workspace }: Readonly<{ workspace: Works
   const isRecovery = workspace.status === 'recovery';
   const label = getWorkspaceProfileLabel(workspace);
   const badgeClassName = chipClassName({
+    size,
     tone: isRecovery
       ? 'warning'
       : workspace.workspaceProfile === 'lightweight'
@@ -77,7 +81,7 @@ export function WorkspaceProfileBadge({ workspace }: Readonly<{ workspace: Works
         onMouseLeave={() => setOpen(false)}
         className={`${badgeClassName} cursor-help focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring`}
       >
-        <AlertTriangle size={13} aria-hidden="true" />
+        <AlertTriangle size={size === 'sm' ? 12 : 13} aria-hidden="true" />
         {label}
       </button>
       {open &&

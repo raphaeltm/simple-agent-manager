@@ -4962,6 +4962,8 @@ export const deploymentPublishJobs = sqliteTable(
     retryable: integer('retryable', { mode: 'boolean' }).notNull().default(false),
     attempt: integer('attempt').notNull().default(1),
     lastEventAt: text('last_event_at'),
+    // Null means a legacy executor: only the overall deadline may expire it.
+    lastHeartbeatAt: text('last_heartbeat_at'),
     startedAt: text('started_at'),
     completedAt: text('completed_at'),
     createdAt: text('created_at')

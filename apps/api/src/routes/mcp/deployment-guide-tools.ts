@@ -54,6 +54,7 @@ SAM exposes these MCP tools for deployment. They are the only interface you need
 | \`deployments_read { method: 'config', environment }\` | List the Variables (values visible) and Secret keys (values never returned) configured for an environment. |
 | \`deployments_write { method: 'set_config', environment, key, value, isSecret? }\` | Create or update a Variable or Secret for an environment. |
 | \`deployments_write { method: 'publish', environment, reference?, workingDir? }\` | Start an async server-side Compose build/publish job and return a durable \`publishJobId\`. |
+| \`deployments_write { method: 'cancel_publish', publishJobId }\` | Cancel a running publish job. Terminal jobs stay unchanged; recorded releases are not rolled back. |
 | \`deployments_read { method: 'publish_status', publishJobId, sinceSeq?, limit? }\` | Poll the build/publish job for status, events, release details, and sanitized failure diagnostics. |
 | \`deployments_read { method: 'preview_routes', environment, composeYaml }\` | Preview which Compose ports will get public SAM URLs before deploying. \`mode: host\` ports are internal/private; other ports are public unless explicitly marked private. |
 | \`deployments_read { method: 'routes', environment }\` | List the public URLs, custom domains, and internal routes derived from the latest release version in an accessible environment. |
@@ -133,6 +134,8 @@ Call \`deployments_write { method: 'publish', environment, reference?, workingDi
 - \`workingDir\` — optional absolute path under \`/workspaces\` if the Compose file is not at the workspace root.
 
 SAM returns a \`publishJobId\` quickly after the VM accepts the job. The actual Docker Compose build, image export, artifact upload, and release recording continue in the background. You do not run any docker or registry commands.
+
+Publishing requires a VM session; Instant sessions cannot publish yet. Jobs fail with retryable \`stalled\` when a heartbeat-capable executor stops heartbeating (older agents are deadline-only) or \`deadline_exceeded\` after the overall deadline. To cancel, use \`deployments_write { method: 'cancel_publish', publishJobId }\` (also callable as \`cancel_publish\`).
 
 After \`deployments_write\` method \`publish\` returns, call \`deployments_read { method: 'publish_status', publishJobId }\` every 10-20 seconds until the status is terminal:
 

@@ -7,7 +7,7 @@ import {
   resolveDeploymentManifestReservation,
   type ResolvedResourceReservation,
 } from '@simple-agent-manager/shared';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, isNull, notInArray } from 'drizzle-orm';
 import { Hono } from 'hono';
 import type { InferOutput } from 'valibot';
 import * as v from 'valibot';
@@ -31,6 +31,7 @@ import {
   DEPLOYMENT_MODEL_RUNNER_VM_SIZE,
   resolveDeploymentPlacement,
 } from '../../services/deployment-provisioning';
+import { PUBLISH_JOB_TERMINAL_STATUSES } from '../../services/deployment-publish-jobs';
 import {
   createMissingDeclaredVolumes,
   markDeploymentReleaseVolumeAttachFailed,
@@ -121,6 +122,8 @@ const composePublishSubmittedBySchema = v.object({
  * .claude/rules/51-runtime-boundary-validation.md.
  */
 const composePublishReleaseSubmissionSchema = v.object({
+  publishJobId: v.optional(v.pipe(v.string(), v.minLength(1))),
+  attempt: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
   environment: v.optional(v.string()),
   environmentId: v.optional(v.string()),
   reference: v.optional(v.string()),
@@ -231,6 +234,9 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
     throw errors.badRequest('Invalid release submission body');
   }
 
+  if (submission.publishJobId !== undefined && submission.attempt === undefined) {
+    throw errors.badRequest('Release submission with publishJobId requires attempt');
+  }
   const environment = cleanOptionalString(submission.environment);
   const environmentId = cleanOptionalString(submission.environmentId);
   if (!environment || !environmentId) {
@@ -358,6 +364,28 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
   }
   if (requiresVolumes && placement) {
     await assertCurrent();
+    if (submission.publishJobId) {
+      const [job] = await db
+        .select({ id: schema.deploymentPublishJobs.id })
+        .from(schema.deploymentPublishJobs)
+        .where(
+          and(
+            eq(schema.deploymentPublishJobs.id, submission.publishJobId),
+            eq(schema.deploymentPublishJobs.attempt, submission.attempt ?? 0),
+            eq(schema.deploymentPublishJobs.projectId, projectId),
+            eq(schema.deploymentPublishJobs.workspaceId, workspaceId),
+            eq(schema.deploymentPublishJobs.requestedBy, userId),
+            eq(schema.deploymentPublishJobs.environmentId, environmentId),
+            notInArray(schema.deploymentPublishJobs.status, [...PUBLISH_JOB_TERMINAL_STATUSES]),
+            isNull(schema.deploymentPublishJobs.releaseId)
+          )
+        )
+        .limit(1);
+      if (!job) throw errors.conflict('Publish job release fence does not match');
+    }
+    // Provisioning can still race cancellation. Volumes belong to the environment;
+    // createMissingDeclaredVolumes reuses existing names on the next release.
+    // The later atomic release fence remains authoritative after provider I/O.
     await createMissingDeclaredVolumes(db, c.env, userId, {
       environmentId,
       volumes: volumeDeclarations,
@@ -417,6 +445,16 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
     const insertedRelease = await insertDeploymentReleaseWhilePlacementUnlocked({
       db,
       env: c.env,
+      // Rollout: old agents omit publishJobId and retain the legacy unfenced path.
+      publishJob: submission.publishJobId
+        ? {
+            id: submission.publishJobId,
+            attempt: submission.attempt ?? 1,
+            projectId,
+            workspaceId,
+            requestedBy: userId,
+          }
+        : undefined,
       values: {
         id: releaseId,
         environmentId,
@@ -433,7 +471,7 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
     });
     if (!insertedRelease) {
       throw errors.conflict(
-        'Another deployment placement operation is in progress. Please retry this release.'
+        'Publish job is terminal, stale, already linked, or deployment placement is in progress.'
       );
     }
     await assertCurrent();

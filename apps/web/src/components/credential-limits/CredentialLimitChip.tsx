@@ -12,6 +12,7 @@ import { useId, useState } from 'react';
 import {
   credentialChipText,
   credentialFamilyLabel,
+  credentialHeaderChipText,
   formatResetCountdown,
   formatSampledAgo,
   LEVEL_LABELS,
@@ -32,7 +33,15 @@ import {
 export function CredentialLimitChip({
   credential,
   now,
-}: Readonly<{ credential: CredentialLimitCredentialSummary; now?: number }>) {
+  short = false,
+  size = 'md',
+}: Readonly<{
+  credential: CredentialLimitCredentialSummary;
+  now?: number;
+  /** The chat header's short text ("Claude 15% · 17%"); the accessible name keeps the full text. */
+  short?: boolean;
+  size?: 'sm' | 'md';
+}>) {
   const [open, setOpen] = useState(false);
   const eyebrowId = useId();
   const headingId = useId();
@@ -40,6 +49,7 @@ export function CredentialLimitChip({
   // the same rule at read time; this covers resets between polls).
   const current = credentialLimitSummaryAsOf(credential, now ?? Date.now());
   const text = credentialChipText(current);
+  const visibleText = short ? credentialHeaderChipText(current) : text;
   const style = LEVEL_STYLES[current.level];
 
   return (
@@ -49,11 +59,17 @@ export function CredentialLimitChip({
         onClick={() => setOpen(true)}
         aria-label={`Usage limits${current.credentialName ? ` for ${current.credentialName}` : ''}: ${text}. ${LEVEL_LABELS[current.level]}. Open details`}
         data-testid="credential-limit-chip"
-        className={`${chipClassName()} cursor-pointer transition-[filter] hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring`}
+        title={short ? text : undefined}
+        className={`${chipClassName({ size })} cursor-pointer transition-[filter] hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring`}
       >
         {/* The level colour rides on the gauge; the chip stays solid and neutral (SAM Glass). */}
-        <Gauge size={14} strokeWidth={1.75} aria-hidden="true" style={{ color: style.color }} />
-        <span className="truncate">{text}</span>
+        <Gauge
+          size={size === 'sm' ? 13 : 14}
+          strokeWidth={1.75}
+          aria-hidden="true"
+          style={{ color: style.color }}
+        />
+        <span className="truncate">{visibleText}</span>
       </button>
       <Dialog
         isOpen={open}

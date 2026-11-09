@@ -768,6 +768,8 @@ configurable.
 
 ### Workspace Builds
 
+- `DEPLOY_PUBLISH_HEARTBEAT_INTERVAL` — VM publish-job heartbeat interval (default `1m`), independent of slow Docker build/save/upload progress. Each callback is bounded by `HTTP_CALLBACK_TIMEOUT`; API stall recovery starts only after a heartbeat has been recorded. Keep the API stall setting above interval plus callback/network grace. The API default deadline is `30m`, above the VM `DEPLOY_BUILD_PUBLISH_TIMEOUT` default `20m`; operators increasing the VM timeout must also raise the API deadline.
+
 - `WORKSPACE_BUILD_QUEUE_DEPTH` — Concurrent devcontainer build slots per workspace VM (default: `1`, supported range: `1` through `16`). Generated cloud-init passes this from the Worker env to newly provisioned VM Agent systemd services. Invalid values do not enable additional build slots and fall back to the default one-slot behavior.
 
 ### Physical Workspace Deletion and Image-transfer Scratch

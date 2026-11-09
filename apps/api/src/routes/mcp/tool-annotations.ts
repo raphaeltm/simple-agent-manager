@@ -58,6 +58,7 @@ const READ_ONLY_TOOLS = new Set([
 
 const DESTRUCTIVE_TOOLS = new Set([
   'cancel_mission',
+  'cancel_publish',
   'cancel_project_event_subscription',
   'complete_task',
   'delete_agent_profile',

@@ -1,0 +1,132 @@
+{
+  "instantJobCount": [
+    {
+      "count": 0
+    }
+  ],
+  "jobs": [
+    {
+      "id": "01M6Y1NGTTK3T27K2VT8TZVC70",
+      "status": "failed",
+      "error_code": "stalled",
+      "error_message": "Publish job stopped reporting progress or exceeded its overall deadline. Inspect events before retrying.",
+      "retryable": 1,
+      "release_id": null,
+      "created_at": "2026-11-08T17:00:32.986Z",
+      "last_event_at": "2026-11-08T17:00:36.166Z",
+      "updated_at": "2026-11-08T17:05:51.170Z"
+    },
+    {
+      "id": "01M6Y1BD34H1D65PZMXQJ9F8QP",
+      "status": "canceled",
+      "error_code": null,
+      "error_message": null,
+      "retryable": 0,
+      "release_id": null,
+      "created_at": "2026-11-08T16:55:01.476Z",
+      "last_event_at": "2026-11-08T16:55:04.339Z",
+      "updated_at": "2026-11-08T16:56:02.183Z"
+    },
+    {
+      "id": "01M6Y0TCKQ1FAK2W5MQ4WN1QSC",
+      "status": "canceled",
+      "error_code": null,
+      "error_message": null,
+      "retryable": 0,
+      "release_id": null,
+      "created_at": "2026-11-08T16:45:43.927Z",
+      "last_event_at": "2026-11-08T16:45:46.978Z",
+      "updated_at": "2026-11-08T16:46:17.311Z"
+    },
+    {
+      "id": "01M6Y0QT8ZN6ZMZMT6M13FGGRD",
+      "status": "succeeded",
+      "error_code": null,
+      "error_message": null,
+      "retryable": 0,
+      "release_id": "01M6Y0R61D76Q1QN31QFYD8WP1",
+      "created_at": "2026-11-08T16:44:19.615Z",
+      "last_event_at": "2026-11-08T16:44:33.856Z",
+      "updated_at": "2026-11-08T16:44:33.856Z"
+    },
+    {
+      "id": "01M6Y0B5MJMZTAD3N5TS0KBZS9",
+      "status": "failed",
+      "error_code": "publish_failed",
+      "error_message": "publish failed: publish: empty agentProfileID",
+      "retryable": 1,
+      "release_id": null,
+      "created_at": "2026-11-08T16:37:25.266Z",
+      "last_event_at": "2026-11-08T16:37:31.646Z",
+      "updated_at": "2026-11-08T16:37:31.646Z"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "01M6Y01CA196JKNHQ69STFFPBJ",
+      "agent_version": "30c80869dcd1dc5974660afdb06a405698f3722b",
+      "status": "deleted",
+      "last_heartbeat_at": "2026-11-08T17:01:11.675Z",
+      "error_message": null,
+      "runtime_termination_confirmed_at": "2026-11-08T17:01:57.592Z"
+    },
+    {
+      "id": "01M6Y0R6WPT58HKCF8248EKP0D",
+      "agent_version": "30c80869dcd1dc5974660afdb06a405698f3722b",
+      "status": "running",
+      "last_heartbeat_at": "2026-11-08T17:10:28.660Z",
+      "error_message": null,
+      "runtime_termination_confirmed_at": null
+    }
+  ],
+  "runtimeHead": "d1e03526f0edf01f286861d53507f9f80a64f393",
+  "stagingRun": 42499959944,
+  "stallMs": 30000,
+  "sourceTerminatedAt": "2026-11-08T17:01:57.592Z",
+  "instantGate": "Deploying from Instant sessions isn't available yet; use a VM session.",
+  "deployment": {
+    "releaseId": "01M6Y0R61D76Q1QN31QFYD8WP1",
+    "version": 1,
+    "status": "applied",
+    "appliedSeq": 1,
+    "service": "web",
+    "serviceStatus": "running",
+    "observedAt": "2026-11-08T16:51:27.951Z"
+  },
+  "publicHttpsVerified": false,
+  "publicHttpsLimitation": "Default staging app hostname TLS negotiation failed from runner; release apply and service running verified.",
+  "cleanup": {
+    "checkedAt": "2026-11-08T17:13:05.893Z",
+    "nodes": [
+      {
+        "id": "01M6Y01CA196JKNHQ69STFFPBJ",
+        "status": "deleted",
+        "runtime_termination_confirmed_at": "2026-11-08T17:01:57.592Z"
+      },
+      {
+        "id": "01M6Y0KW91JE3RKP95GWYHVH7V",
+        "status": "deleted",
+        "runtime_termination_confirmed_at": "2026-11-08T17:11:14.994Z"
+      },
+      {
+        "id": "01M6Y0R6WPT58HKCF8248EKP0D",
+        "status": "deleted",
+        "runtime_termination_confirmed_at": "2026-11-08T17:11:08.987Z"
+      }
+    ],
+    "environment": [],
+    "profile": [],
+    "settings": [],
+    "tasks": []
+  },
+  "stallDefaultRestoredMs": 300000,
+  "browserSmoke": {
+    "paths": [
+      "/dashboard",
+      "/projects/01KVRJCC7Y3NSDQYCPWDRPVJVH",
+      "/settings"
+    ],
+    "pageErrors": 0,
+    "passed": true
+  }
+}

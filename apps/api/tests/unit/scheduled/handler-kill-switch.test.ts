@@ -70,6 +70,7 @@ describe('scheduled operational sweep kill switch', () => {
 
     expect(isolateMock).toHaveBeenCalled();
     const sweepNames = isolateMock.mock.calls.map(([name]) => name);
+    expect(sweepNames).toContain('deployment_publish_jobs');
     expect(sweepNames).toContain('node_cleanup');
     expect(sweepNames).toContain('capacity_pool_reconciliation');
     expect(sweepNames).toContain('session_sleep_lifecycle_repair');

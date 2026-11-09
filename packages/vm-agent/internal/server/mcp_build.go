@@ -22,6 +22,7 @@ import (
 
 // McpBuildAndPublishRequest is the body for the build-and-publish endpoint.
 type McpBuildAndPublishRequest struct {
+	Attempt int `json:"attempt,omitempty"`
 	// PublishJobID is the durable control-plane job id for async publish jobs.
 	PublishJobID string `json:"publishJobId,omitempty"`
 	// Environment is the deployment environment name already authorized by the
@@ -142,6 +143,10 @@ func (s *Server) handleMcpBuildAndPublishJobStart(w http.ResponseWriter, r *http
 		return
 	}
 
+	prepared.Request.PublishJobID = jobID
+	if prepared.Request.Attempt <= 0 {
+		prepared.Request.Attempt = 1
+	}
 	s.publishJobsMu.Lock()
 	if s.publishJobs == nil {
 		s.publishJobs = make(map[string]publishJobState)
@@ -173,7 +178,10 @@ func (s *Server) handleMcpBuildAndPublishJobStart(w http.ResponseWriter, r *http
 
 	controlPlaneReporter := newPublishJobReporter(s.config.ControlPlaneURL, prepared.ProjectID, jobID, s.publishCallbackToken(prepared), s.controlPlaneHTTPClient(publishTimeout), prepared.Log)
 	reporter := publish.EventFunc(func(ctx context.Context, event publish.Event) {
-		s.persistPublishEvent(jobID, event)
+		// Heartbeats are control-plane liveness, not local job history.
+		if event.EventType != "publish.job.heartbeat" {
+			s.persistPublishEvent(jobID, event)
+		}
 		controlPlaneReporter.Event(ctx, event)
 	})
 	go s.runAcceptedPublishJob(jobCtx, jobID, prepared, reporter)
@@ -199,6 +207,13 @@ func (s *Server) prepareMcpBuildAndPublish(w http.ResponseWriter, r *http.Reques
 	// Body is optional; an empty body (io.EOF) is fine.
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return nil, false
+	}
+
+	// Async starts supply an attempt default for older callers. The synchronous
+	// path has no such admission step and must reject an incomplete release fence.
+	if r.PathValue("jobId") == "" && req.PublishJobID != "" && req.Attempt <= 0 {
+		writeError(w, http.StatusBadRequest, "publishJobId requires a positive attempt")
 		return nil, false
 	}
 
@@ -275,12 +290,15 @@ func (s *Server) prepareMcpBuildAndPublish(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) runAcceptedPublishJob(ctx context.Context, jobID string, prepared *preparedBuildPublish, reporter publish.EventSink) {
+	stopHeartbeats := s.startPublishJobHeartbeats(ctx, reporter)
 	reporter.Event(ctx, publish.Event{Status: "starting", CurrentStep: "started", EventType: "publish.job.started", Message: "publish job started"})
 	runner := s.runPreparedBuildAndPublish
 	if s.buildPublishRunner != nil {
 		runner = s.buildPublishRunner
 	}
 	result, err := runner(ctx, prepared, reporter)
+	// Abort and join any in-flight heartbeat before emitting a terminal callback.
+	stopHeartbeats()
 	s.publishJobsMu.Lock()
 	state := s.publishJobs[jobID]
 	if state.Cancel != nil {
@@ -338,6 +356,8 @@ func (s *Server) runPreparedBuildAndPublish(ctx context.Context, prepared *prepa
 	}
 
 	orch := publish.New(publish.Options{
+		PublishJobID: prepared.Request.PublishJobID,
+		Attempt:      prepared.Request.Attempt,
 		ControlPlane: publish.NewHTTPControlPlane(publish.HTTPControlPlaneOptions{
 			BaseURL:     s.config.ControlPlaneURL,
 			Token:       prepared.Token,
@@ -474,4 +494,25 @@ func (s *Server) deployBuildPublishTimeout() time.Duration {
 		return s.config.DeployBuildPublishTimeout
 	}
 	return config.DefaultDeployBuildPublishTimeout
+}
+
+// handleMcpBuildAndPublishJobCancel uses the same node-management auth as start.
+func (s *Server) handleMcpBuildAndPublishJobCancel(w http.ResponseWriter, r *http.Request) {
+	workspaceID := r.PathValue("workspaceId")
+	if !s.requireNodeManagementAuth(w, r, workspaceID) {
+		return
+	}
+	jobID := strings.TrimSpace(r.PathValue("jobId"))
+	s.publishJobsMu.Lock()
+	state, exists := s.publishJobs[jobID]
+	if !exists || state.WorkspaceID != workspaceID {
+		s.publishJobsMu.Unlock()
+		writeError(w, http.StatusNotFound, "publish job not found")
+		return
+	}
+	if state.CompletedAt.IsZero() && state.Cancel != nil {
+		state.Cancel()
+	}
+	s.publishJobsMu.Unlock()
+	writeJSON(w, http.StatusOK, map[string]string{"publishJobId": jobID, "status": "cancel_requested"})
 }

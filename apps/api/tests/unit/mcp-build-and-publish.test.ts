@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+let nodeRuntime = 'vm';
+let currentStatus = 'building';
+const cancelAccepted = vi.hoisted(() => vi.fn(async () => undefined));
+vi.mock('../../src/services/deployment-publish-job-cancel', () => ({
+  cancelDeploymentPublishJobOnVmBestEffort: cancelAccepted,
+}));
 const mockAssertAgentDeploymentAllowed = vi.fn();
 const mockLoadDeploymentBuildInterpolationEnv = vi.fn();
 const mockLookupWorkspaceForVmAgent = vi.fn();
@@ -12,7 +18,14 @@ const recordDeploymentPublishJobLifecycleEventBestEffort = vi.hoisted(() =>
 );
 
 vi.mock('drizzle-orm/d1', () => ({
-  drizzle: vi.fn(() => ({ mockedDb: true })),
+  drizzle: vi.fn(() => ({
+    mockedDb: true,
+    select: () => ({
+      from: () => ({
+        where: () => ({ limit: async () => [{ runtime: nodeRuntime, status: currentStatus }] }),
+      }),
+    }),
+  })),
 }));
 
 vi.mock('../../src/services/deployment-control', () => ({
@@ -69,6 +82,9 @@ function env() {
 describe('async build_and_publish MCP tools', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    nodeRuntime = 'vm';
+    currentStatus = 'building';
+    mockAppendDeploymentPublishJobEvent.mockResolvedValue(true);
     mockAssertAgentDeploymentAllowed.mockResolvedValue({
       environmentId: 'env-1',
       policy: { agentDeployEnabled: true, allowedDeployProfileIds: [] },
@@ -89,9 +105,48 @@ describe('async build_and_publish MCP tools', () => {
     });
     mockCreateDeploymentPublishJob.mockResolvedValue({
       id: 'job-1',
+      environmentId: 'env-1',
+      nodeId: 'node-1',
+      workspaceId: 'ws-1',
+      taskId: 'task-1',
+      attempt: 1,
       createdAt: '2026-08-28T12:00:00.000Z',
     });
     mockStartBuildPublishJobOnVm.mockResolvedValue({ publishJobId: 'job-1', status: 'accepted' });
+  });
+
+  it.each(['canceled', 'failed', 'building'])(
+    'returns the observed %s status and cancels terminal runners after acceptance',
+    async (status) => {
+      currentStatus = status;
+      mockAppendDeploymentPublishJobEvent.mockResolvedValue(false);
+      const result = await handleBuildAndPublish(
+        'race',
+        { environment: 'staging' },
+        tokenData(),
+        env()
+      );
+      const payload = JSON.parse(result.result?.content?.[0]?.text as string);
+      expect(payload.status).toBe(status);
+      expect(cancelAccepted).toHaveBeenCalledTimes(
+        status === 'canceled' || status === 'failed' ? 1 : 0
+      );
+    }
+  );
+
+  it('rejects Instant sessions before creating or starting a job', async () => {
+    nodeRuntime = 'cf-container';
+    const result = await handleBuildAndPublish(
+      'instant',
+      { environment: 'staging' },
+      tokenData(),
+      env()
+    );
+    expect(result.error?.message).toContain(
+      "Deploying from Instant sessions isn't available yet; use a VM session"
+    );
+    expect(mockCreateDeploymentPublishJob).not.toHaveBeenCalled();
+    expect(mockStartBuildPublishJobOnVm).not.toHaveBeenCalled();
   });
 
   it('rejects when there is no active workspace', async () => {
@@ -185,6 +240,10 @@ describe('async build_and_publish MCP tools', () => {
       occurredAt: '2026-08-28T12:00:00.000Z',
     });
 
+    expect(recordDeploymentPublishJobLifecycleEventBestEffort).toHaveBeenCalledWith(
+      testEnv,
+      expect.objectContaining({ status: 'starting', source: 'mcp.build_and_publish.accepted' })
+    );
     const payload = JSON.parse(result.result?.content?.[0]?.text as string);
     expect(payload).toMatchObject({
       publishJobId: 'job-1',
@@ -223,6 +282,14 @@ describe('async build_and_publish MCP tools', () => {
         terminal: true,
         errorCode: 'failed_to_start',
         message: expect.not.stringContaining('X-Amz-Signature=secret'),
+      })
+    );
+    expect(recordDeploymentPublishJobLifecycleEventBestEffort).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        status: 'failed',
+        source: 'mcp.build_and_publish.failed_to_start',
+        terminal: true,
       })
     );
     const payload = JSON.parse(result.result?.content?.[0]?.text as string);

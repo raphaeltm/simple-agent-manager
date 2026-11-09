@@ -1,3 +1,4 @@
+import { eq } from 'drizzle-orm';
 /**
  * MCP tool handler: build_and_publish
  *
@@ -15,8 +16,10 @@ import type { Env } from '../../env';
 import { parsePositiveInt } from '../../lib/route-helpers';
 import { assertAgentDeploymentAllowed } from '../../services/deployment-control';
 import { loadDeploymentBuildInterpolationEnv } from '../../services/deployment-environment-config';
+import { cancelDeploymentPublishJobOnVmBestEffort } from '../../services/deployment-publish-job-cancel';
 import {
   appendDeploymentPublishJobEvent,
+  cancelDeploymentPublishJob,
   createDeploymentPublishJob,
   getDeploymentPublishJobForMcp,
   sanitizePublishEventText,
@@ -48,6 +51,22 @@ function getBuildPublishStartTimeout(env: Env): number {
   );
 }
 
+type PublishRequestId = string | number | null;
+
+function optionalPublishArgument(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined;
+}
+
+function publishArguments(toolArgs: Record<string, unknown>) {
+  const environment = optionalPublishArgument(toolArgs.environment);
+  const reference = optionalPublishArgument(toolArgs.reference);
+  return {
+    environment: environment ? sanitizeUserInput(environment).slice(0, 200) : undefined,
+    reference: reference ? sanitizeUserInput(reference).slice(0, 200) : 'latest',
+    workingDir: optionalPublishArgument(toolArgs.workingDir),
+  };
+}
+
 /**
  * Handle the build_and_publish MCP tool call.
  *
@@ -55,7 +74,7 @@ function getBuildPublishStartTimeout(env: Env): number {
  * vm-agent triggers are themselves rate-limited at their own endpoints.
  */
 export async function handleBuildAndPublish(
-  requestId: string | number | null,
+  requestId: PublishRequestId,
   toolArgs: Record<string, unknown>,
   tokenData: McpTokenData,
   env: Env
@@ -66,9 +85,7 @@ export async function handleBuildAndPublish(
   const { projectId } = tokenData;
   const db = drizzle(env.DATABASE, { schema });
 
-  const rawEnvironment =
-    typeof toolArgs.environment === 'string' ? toolArgs.environment.trim() : undefined;
-  const environment = rawEnvironment ? sanitizeUserInput(rawEnvironment).slice(0, 200) : undefined;
+  const { environment, reference, workingDir } = publishArguments(toolArgs);
   if (!environment) {
     return jsonRpcError(
       requestId,
@@ -83,21 +100,22 @@ export async function handleBuildAndPublish(
   }
   const buildEnv = await loadDeploymentBuildInterpolationEnv(db, policyResult.environmentId);
 
-  const reference =
-    typeof toolArgs.reference === 'string' && toolArgs.reference.trim() !== ''
-      ? sanitizeUserInput(toolArgs.reference.trim()).slice(0, 200)
-      : 'latest';
-
-  // Optional: the agent's current working directory (e.g. a git worktree under
-  // /workspaces). When set, the vm-agent builds the source at this directory
-  // instead of the workspace's primary repo. The vm-agent validates it is a path
-  // under /workspaces and ignores anything that isn't.
-  const workingDir =
-    typeof toolArgs.workingDir === 'string' && toolArgs.workingDir.trim() !== ''
-      ? toolArgs.workingDir.trim()
-      : undefined;
-
+  // workingDir selects the agent's worktree under /workspaces; the VM agent
+  // validates the actual source path before building.
   const workspace = await lookupWorkspaceForVmAgent(env, tokenData.workspaceId, projectId);
+  const [node] = await db
+    .select({ runtime: schema.nodes.runtime })
+    .from(schema.nodes)
+    .where(eq(schema.nodes.id, workspace.nodeId))
+    .limit(1);
+  // Temporary until phase 3 of idea 01KZ6V37D1QGDR3WN12PSDB0QD adds the Cloudflare builder.
+  if (node?.runtime === 'cf-container') {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      "Deploying from Instant sessions isn't available yet; use a VM session."
+    );
+  }
   const job = await createDeploymentPublishJob(db, {
     projectId,
     environmentId: policyResult.environmentId,
@@ -137,6 +155,7 @@ export async function handleBuildAndPublish(
 
   const proxyBody: Record<string, unknown> = {
     publishJobId: job.id,
+    attempt: job.attempt,
     environment,
     environmentId: policyResult.environmentId,
     submittedBy: {
@@ -162,18 +181,49 @@ export async function handleBuildAndPublish(
       proxyBody,
       getBuildPublishStartTimeout(env)
     );
-    await appendDeploymentPublishJobEvent(db, {
+    const changed = await appendDeploymentPublishJobEvent(db, {
       publishJobId: job.id,
       projectId,
       environmentId: policyResult.environmentId,
       nodeId: workspace.nodeId,
       workspaceId: tokenData.workspaceId,
       status: 'starting',
+      expectedStatus: 'queued',
       currentStep: 'accepted',
       eventType: 'publish.job.accepted',
       message: 'vm agent accepted the publish job',
     });
+    if (changed)
+      await recordDeploymentPublishJobLifecycleEventBestEffort(env, {
+        projectId,
+        publishJobId: job.id,
+        environmentId: job.environmentId,
+        status: 'starting',
+        fromStatus: 'queued',
+        currentStep: 'accepted',
+        nodeId: job.nodeId,
+        workspaceId: job.workspaceId,
+        taskId: job.taskId,
+        source: 'mcp.build_and_publish.accepted',
+        occurredAt: Date.now(),
+      });
 
+    let responseStatus = 'starting';
+    if (!changed) {
+      // Cancellation or expiry can commit before the VM registers the runner.
+      // Retry after acceptance so an earlier 404 cannot leave it working.
+      const [current] = await db
+        .select()
+        .from(schema.deploymentPublishJobs)
+        .where(eq(schema.deploymentPublishJobs.id, job.id))
+        .limit(1);
+      if (current) responseStatus = current.status;
+      if (current?.status === 'canceled' || current?.status === 'failed')
+        await cancelDeploymentPublishJobOnVmBestEffort(env, {
+          ...job,
+          requestedBy: tokenData.userId,
+        });
+    }
     return jsonRpcSuccess(requestId, {
       content: [
         {
@@ -181,7 +231,7 @@ export async function handleBuildAndPublish(
           text: JSON.stringify(
             {
               publishJobId: job.id,
-              status: 'starting',
+              status: responseStatus,
               environment,
               environmentId: policyResult.environmentId,
               reference,
@@ -199,7 +249,7 @@ export async function handleBuildAndPublish(
     });
   } catch (e) {
     const message = sanitizePublishEventText(e instanceof Error ? e.message : String(e));
-    await appendDeploymentPublishJobEvent(db, {
+    const changed = await appendDeploymentPublishJobEvent(db, {
       publishJobId: job.id,
       projectId,
       environmentId: policyResult.environmentId,
@@ -215,6 +265,21 @@ export async function handleBuildAndPublish(
       terminal: true,
       retryable: true,
     });
+    if (changed)
+      await recordDeploymentPublishJobLifecycleEventBestEffort(env, {
+        projectId,
+        publishJobId: job.id,
+        environmentId: job.environmentId,
+        status: 'failed',
+        fromStatus: 'queued',
+        currentStep: 'start',
+        terminal: true,
+        nodeId: job.nodeId,
+        workspaceId: job.workspaceId,
+        taskId: job.taskId,
+        source: 'mcp.build_and_publish.failed_to_start',
+        occurredAt: Date.now(),
+      });
     return jsonRpcSuccess(requestId, {
       content: [
         {
@@ -240,7 +305,7 @@ export async function handleBuildAndPublish(
 }
 
 export async function handleGetPublishStatus(
-  requestId: string | number | null,
+  requestId: PublishRequestId,
   toolArgs: Record<string, unknown>,
   tokenData: McpTokenData,
   env: Env
@@ -271,4 +336,39 @@ export async function handleGetPublishStatus(
   return jsonRpcSuccess(requestId, {
     content: [{ type: 'text', text: JSON.stringify(status, null, 2) }],
   });
+}
+
+export async function handleCancelPublish(
+  requestId: PublishRequestId,
+  toolArgs: Record<string, unknown>,
+  tokenData: McpTokenData,
+  env: Env
+): Promise<JsonRpcResponse> {
+  const publishJobId =
+    typeof toolArgs.publishJobId === 'string' ? toolArgs.publishJobId.trim() : '';
+  if (!publishJobId) return jsonRpcError(requestId, INVALID_PARAMS, 'publishJobId is required.');
+  const db = drizzle(env.DATABASE, { schema });
+  const job = await cancelDeploymentPublishJob(
+    db,
+    tokenData.projectId,
+    tokenData.workspaceId,
+    publishJobId
+  );
+  if (job) {
+    await recordDeploymentPublishJobLifecycleEventBestEffort(env, {
+      projectId: job.projectId,
+      publishJobId: job.id,
+      environmentId: job.environmentId,
+      status: 'canceled',
+      terminal: true,
+      currentStep: job.currentStep,
+      nodeId: job.nodeId,
+      workspaceId: job.workspaceId,
+      taskId: job.taskId,
+      source: 'mcp.cancel_publish',
+      occurredAt: job.completedAt ?? job.updatedAt,
+    });
+    await cancelDeploymentPublishJobOnVmBestEffort(env, job);
+  }
+  return handleGetPublishStatus(requestId, { publishJobId }, tokenData, env);
 }

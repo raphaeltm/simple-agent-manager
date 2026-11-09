@@ -3,6 +3,7 @@ package publish
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -209,5 +210,38 @@ func TestHTTPControlPlaneUsesTheCurrentTokenForEachRequest(t *testing.T) {
 		if gotAuth[i] != want[i] {
 			t.Fatalf("request %d authorization = %q, want %q", i, gotAuth[i], want[i])
 		}
+	}
+}
+
+func TestHTTPControlPlaneReleaseFenceWireKeys(t *testing.T) {
+	for _, fenced := range []bool{false, true} {
+		t.Run(fmt.Sprint(fenced), func(t *testing.T) {
+			var body map[string]json.RawMessage
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Error(err)
+				}
+				_, _ = w.Write([]byte(`{"releaseId":"rel1","version":1,"status":"created"}`))
+			}))
+			defer srv.Close()
+			cp := NewHTTPControlPlane(HTTPControlPlaneOptions{BaseURL: srv.URL, Token: "callback-token", Client: srv.Client()})
+			input := &ReleaseSubmission{Environment: "staging", EnvironmentID: "env-1"}
+			if fenced {
+				input.PublishJobID = "job-wire"
+				input.Attempt = 3
+			}
+			if _, err := cp.SubmitRelease(context.Background(), "project", input); err != nil {
+				t.Fatal(err)
+			}
+			if fenced {
+				if string(body["publishJobId"]) != `"job-wire"` || string(body["attempt"]) != "3" {
+					t.Fatalf("literal release fence wire keys missing or wrong: %v", body)
+				}
+			} else if _, present := body["publishJobId"]; present {
+				t.Fatal("legacy payload contains publishJobId")
+			} else if _, present := body["attempt"]; present {
+				t.Fatal("legacy payload contains attempt")
+			}
+		})
 	}
 }

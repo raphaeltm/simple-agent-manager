@@ -5,8 +5,7 @@ import { Globe, User2 } from 'lucide-react';
 
 import type { ChatSessionResponse } from '../../lib/api';
 import { SessionCredentialLimitChip } from '../credential-limits/SessionCredentialLimitChip';
-import { SessionCommentChip } from './SessionCommentChip';
-import { WorkspaceProfileBadge } from './SessionHeaderBadges';
+import { getWorkspaceProfileLabel, WorkspaceProfileBadge } from './SessionHeaderBadges';
 import { getCreatorLabel } from './SessionHeaderFormatters';
 import { SessionWorkingOnChip } from './SessionWorkingOnChip';
 import type { SessionState } from './types';
@@ -44,6 +43,15 @@ export function sessionStateTone(
 /**
  * The session's status and metadata chips. One component for the desktop header row and the
  * phone's session-info sheet, so the two surfaces cannot drift apart (rule 24).
+ *
+ * Kept to one row on a typical desktop session:
+ * - status and workspace profile share a chip ("● Active · Full"); a recovery container keeps
+ *   its own amber chip, because it is the one profile state that asks the user to act;
+ * - the usage chip uses its short form ("Claude 15% · 17%");
+ * - the creator chip appears only when someone else started the session;
+ * - comments are not here: the tool rail's Comments action carries the count and turns amber
+ *   when someone is waiting on you.
+ * The header uses the small chip size; the sheet keeps the standard size for touch.
  */
 export function SessionHeaderChips({
   projectId,
@@ -54,9 +62,6 @@ export function SessionHeaderChips({
   sortedPorts,
   getWorkspacePortHref,
   onShowMorePorts,
-  onOpenComments,
-  unresolvedCommentCount,
-  needsAttentionCommentCount,
   linkedWork,
   lineageText,
   surface,
@@ -69,37 +74,46 @@ export function SessionHeaderChips({
   sortedPorts: DetectedPort[];
   getWorkspacePortHref: (port: DetectedPort) => string;
   onShowMorePorts: () => void;
-  onOpenComments?: () => void;
-  unresolvedCommentCount: number;
-  needsAttentionCommentCount: number;
   linkedWork?: SessionLinkedWork | null;
   lineageText?: string;
   /** `sheet` lists every port in its own section, so the port chips are left out. */
   surface: 'header' | 'sheet';
 }>) {
+  const size = surface === 'header' ? 'sm' : 'md';
+  const iconSize = size === 'sm' ? 13 : 14;
   const creatorLabel = getCreatorLabel(session);
   const firstPort = surface === 'header' ? sortedPorts[0] : undefined;
   const extraPortCount = surface === 'header' ? Math.max(0, sortedPorts.length - 1) : 0;
+  const isRecovery = workspace?.status === 'recovery';
+  const profileLabel = workspace && !isRecovery ? getWorkspaceProfileLabel(workspace) : null;
 
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-2">
-      <Chip tone={sessionStateTone(sessionState, taskEmbed)} dot>
+    <div className={`flex min-w-0 flex-wrap items-center ${size === 'sm' ? 'gap-1.5' : 'gap-2'}`}>
+      <Chip
+        tone={sessionStateTone(sessionState, taskEmbed)}
+        size={size}
+        dot
+        title={profileLabel ? `Workspace profile: ${profileLabel}` : undefined}
+      >
         {sessionStateLabel(sessionState, taskEmbed)}
+        {profileLabel && <span className="opacity-70">· {profileLabel}</span>}
       </Chip>
 
-      {workspace && <WorkspaceProfileBadge workspace={workspace} />}
+      {workspace && isRecovery && <WorkspaceProfileBadge workspace={workspace} size={size} />}
 
       <SessionCredentialLimitChip
         projectId={projectId}
         agentSessionId={session.agentSessionId ?? null}
+        size={size}
       />
 
       {creatorLabel && (
         <Chip
-          icon={<User2 size={14} strokeWidth={1.75} aria-hidden="true" />}
-          title={session.isMine ? 'Created by you' : `Created by ${creatorLabel}`}
+          size={size}
+          icon={<User2 size={iconSize} strokeWidth={1.75} aria-hidden="true" />}
+          title={`Created by ${creatorLabel}`}
         >
-          {session.isMine ? 'Your session' : creatorLabel}
+          {creatorLabel}
         </Chip>
       )}
 
@@ -108,10 +122,10 @@ export function SessionHeaderChips({
           href={getWorkspacePortHref(firstPort)}
           target="_blank"
           rel="noopener noreferrer"
-          className={`${chipClassName({ tone: 'success' })} transition-[filter] hover:brightness-110`}
+          className={`${chipClassName({ tone: 'success', size })} transition-[filter] hover:brightness-110`}
           title={`${firstPort.label} — ${firstPort.url}`}
         >
-          <Globe size={14} strokeWidth={1.75} aria-hidden="true" />
+          <Globe size={iconSize} strokeWidth={1.75} aria-hidden="true" />
           {firstPort.port}
         </a>
       )}
@@ -120,27 +134,20 @@ export function SessionHeaderChips({
         <button
           type="button"
           onClick={onShowMorePorts}
-          className={`${chipClassName()} cursor-pointer transition-[filter] hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring`}
+          className={`${chipClassName({ size })} cursor-pointer transition-[filter] hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring`}
           aria-label={`Show ${extraPortCount} more forwarded ${extraPortCount === 1 ? 'port' : 'ports'}`}
+          title={`${extraPortCount} more forwarded ${extraPortCount === 1 ? 'port' : 'ports'}`}
         >
-          +{extraPortCount} more
+          +{extraPortCount}
         </button>
       )}
 
-      {onOpenComments && (
-        <SessionCommentChip
-          unresolvedCommentCount={unresolvedCommentCount}
-          needsAttentionCommentCount={needsAttentionCommentCount}
-          onOpenComments={onOpenComments}
-        />
-      )}
-
       {linkedWork?.workingOn && (
-        <SessionWorkingOnChip projectId={projectId} workingOn={linkedWork.workingOn} />
+        <SessionWorkingOnChip projectId={projectId} workingOn={linkedWork.workingOn} size={size} />
       )}
 
       {lineageText && (
-        <Chip tone="muted" title={lineageText}>
+        <Chip tone="muted" size={size} title={lineageText}>
           {lineageText.startsWith('⑂') ? '⑂ fork' : lineageText}
         </Chip>
       )}

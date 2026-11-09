@@ -7,7 +7,10 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { parseWithSchema, readRequestJsonRecord } from '../../lib/runtime-validation';
 import { errors } from '../../middleware/error';
-import { appendDeploymentPublishJobEvent } from '../../services/deployment-publish-jobs';
+import {
+  appendDeploymentPublishJobEvent,
+  PUBLISH_JOB_TERMINAL_STATUSES,
+} from '../../services/deployment-publish-jobs';
 import { recordDeploymentPublishJobLifecycleEventBestEffort } from '../../services/project-lifecycle-events';
 import { verifyWorkspacePublishCallback } from './_callback-auth';
 
@@ -95,9 +98,18 @@ deploymentPublishJobCallbackRoute.post('/:id/deployment-publish-jobs/:jobId/even
   }
 
   const status = optionalString(event.status) ?? undefined;
+  if (event.terminal && (!status || !PUBLISH_JOB_TERMINAL_STATUSES.has(status))) {
+    throw errors.badRequest('Terminal publish job event requires a terminal status');
+  }
+  if (
+    !optionalString(event.releaseId) &&
+    (event.releaseVersion !== undefined || event.releaseStatus !== undefined)
+  ) {
+    throw errors.badRequest('Release metadata requires releaseId');
+  }
   const currentStep = optionalString(event.currentStep) ?? optionalString(event.step);
   await assertCurrent();
-  await appendDeploymentPublishJobEvent(db, {
+  const accepted = await appendDeploymentPublishJobEvent(db, {
     publishJobId,
     projectId,
     environmentId: job.environmentId,
@@ -110,16 +122,18 @@ deploymentPublishJobCallbackRoute.post('/:id/deployment-publish-jobs/:jobId/even
     message,
     detail: requestBody.detail,
     terminal: event.terminal === true,
-    releaseId: optionalString(event.releaseId),
-    releaseVersion: optionalNumber(event.releaseVersion),
-    releaseStatus: optionalString(event.releaseStatus),
+    releaseId: optionalString(event.releaseId) ?? undefined,
+    releaseVersion: optionalNumber(event.releaseVersion) ?? undefined,
+    releaseStatus: optionalString(event.releaseStatus) ?? undefined,
     errorMessage: optionalString(event.errorMessage),
     errorCode: optionalString(event.errorCode),
     retryable: event.retryable === true,
   });
 
+  if (accepted === false)
+    throw errors.conflict('Publish job is terminal or release does not match');
   await assertCurrent();
-  if (status && status !== job.status) {
+  if (eventType !== 'publish.job.heartbeat' && status && status !== job.status) {
     c.executionCtx.waitUntil(
       recordDeploymentPublishJobLifecycleEventBestEffort(c.env, {
         projectId,
@@ -130,8 +144,8 @@ deploymentPublishJobCallbackRoute.post('/:id/deployment-publish-jobs/:jobId/even
         currentStep,
         nodeId: job.nodeId,
         workspaceId,
-        releaseId: optionalString(event.releaseId),
-        releaseVersion: optionalNumber(event.releaseVersion),
+        releaseId: optionalString(event.releaseId) ?? undefined,
+        releaseVersion: optionalNumber(event.releaseVersion) ?? undefined,
         terminal: event.terminal === true,
         source: 'deployment_publish_job_callback.status',
         occurredAt: Date.now(),
