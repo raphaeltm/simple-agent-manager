@@ -66,7 +66,9 @@ were fenced correctly.
    runtime's credentials from it. When you add a path that renews or delivers to an existing
    runtime, carry the generation it verified or bound, never a fresh read. Never verify a callback
    JWT outside `verifyCallbackToken` (`tests/unit/services/callback-credential-generation.test.ts`
-   enforces this).
+   enforces this). VM node rows are deliberately not rotated: their token stays with the host's VM
+   agent, outside devcontainers. A path that exposes a VM node token to workspace processes, or
+   reuses a VM node ID for a new runtime, must start rotating `nodes.callback_generation`.
 
 ### How to Identify VM Agent Callback Routes
 
