@@ -66,8 +66,9 @@ normal capacity-exhaustion behavior.
 4. Fairness CAS: when 2+ admitted candidates were ranked, carry `observedStartupBacklog`. The
    reservation INSERT adds `creating count <= observed`. A fairness loss does not count toward
    `workspacePlacementMaxRejections`, is never permanent and replans freshly. After
-   `operations.workspacePlacementBacklogConflictRetries` (default 3) consecutive conflicts, the next
-   fresh selection omits only the fairness predicate. The counter resets on success.
+   `operations.workspacePlacementBacklogConflictRetries` (default 3) conflicts since the last
+   successful reservation (capacity refusals neither add to nor reset the count), the next fresh
+   selection omits only the fairness predicate. The counter resets on success.
 5. Warm shortcut only takes nodes whose D1 startup backlog is 0. A warm-flagged node with queued
    work falls through to ordinary ranking.
 6. Diagnostics only: `startupBacklog` on each host diagnostic. No UI change.

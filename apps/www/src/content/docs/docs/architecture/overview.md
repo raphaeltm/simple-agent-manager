@@ -555,8 +555,9 @@ backlog; a default location ranks after it. When another admitted node was avail
 carries the chosen node's observed backlog into the final reservation, which refuses the claim if
 that node's backlog has grown since (`maxStartupBacklog` in `reserveWorkspacePlacement()`). Such a
 refusal replans without counting toward `operations.workspacePlacementMaxRejections`; after
-`operations.workspacePlacementBacklogConflictRetries` consecutive conflicts (3 by default) the next
-reservation omits only that guard. Backlog never triggers provisioning: a node that fits is used
+`operations.workspacePlacementBacklogConflictRetries` such conflicts (3 by default) since the run's last
+successful reservation, the next reservation omits only that guard; capacity refusals neither add to
+nor reset that count. Backlog never triggers provisioning: a node that fits is used
 even when its queue is long.
 
 ## ACP Session Lifecycle

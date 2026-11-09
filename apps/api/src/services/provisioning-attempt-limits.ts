@@ -18,11 +18,12 @@ export const DEFAULT_PROVISIONING_ATTEMPTS_PER_PROVIDER_TIER = 8;
 export const DEFAULT_WORKSPACE_PLACEMENT_MAX_REJECTIONS = 3;
 
 /**
- * Default for `operations.workspacePlacementBacklogConflictRetries`: consecutive times a task's
+ * Default for `operations.workspacePlacementBacklogConflictRetries`: how many times a task's
  * reservation may be refused only because the ranked node's startup queue grew after ranking,
- * before the next reservation drops that fairness guard (capacity guards stay). Each conflict
- * replans through node selection, a few D1 reads and no provider call, so 3 adds well under a
- * second. A burst of K starts ranking the same nodes converges in at most K rounds, because
- * every round's first reservation succeeds; the cap only bounds an unlucky loser.
+ * counted since the task's last successful reservation, before the next reservation drops that
+ * fairness guard (capacity guards stay). Capacity refusals neither add to nor reset this count.
+ * Each conflict replans through node selection: D1 reads and no provider call. The cap bounds how
+ * often one task can lose that race; it does not bound how long the replans take, which depends
+ * on alarm scheduling and the other work in flight.
  */
 export const DEFAULT_WORKSPACE_PLACEMENT_BACKLOG_CONFLICT_RETRIES = 3;

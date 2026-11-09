@@ -219,10 +219,11 @@ export interface TaskRunnerState {
    */
   workspacePlacementRejections?: number;
   /**
-   * Consecutive final reservations refused only because the chosen node's startup backlog grew
-   * after it was ranked (`workspace-placement-rejection.ts`). These do not count toward
-   * `workspacePlacementRejections`. At `operations.workspacePlacementBacklogConflictRetries` the
-   * next reservation drops the backlog guard and keeps every capacity guard. Reset when a
+   * Final reservations refused only because the chosen node's startup backlog grew after it was
+   * ranked (`workspace-placement-rejection.ts`), counted since this run's last successful
+   * reservation. Capacity refusals neither add to nor reset it, and these refusals do not count
+   * toward `workspacePlacementRejections`. At `operations.workspacePlacementBacklogConflictRetries`
+   * the next reservation drops the backlog guard and keeps every capacity guard. Reset when a
    * reservation succeeds.
    */
   startupBacklogConflicts?: number;

@@ -641,11 +641,11 @@ These control the live Google Cloud catalog described in [Google Cloud](/docs/gu
 
 ### Provider fallback
 
-| Setting                                               | Default | Allowed range | Applies to                                                                                                                     |
-| ----------------------------------------------------- | ------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `operations.provisioningAttemptsPerProviderTier`      | 8       | 1–50          | Most offerings one task tries from one provider source under `fallback-chain` before moving to the pool's next-ranked provider |
-| `operations.workspacePlacementMaxRejections`          | 3       | 1–20          | Consecutive times the node a task selected may refuse its final workspace reservation before the task fails                    |
-| `operations.workspacePlacementBacklogConflictRetries` | 3       | 1–20          | Consecutive times a task may pick again because its chosen node gained a queued workspace setup before the reservation         |
+| Setting                                               | Default | Allowed range | Applies to                                                                                                                             |
+| ----------------------------------------------------- | ------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `operations.provisioningAttemptsPerProviderTier`      | 8       | 1–50          | Most offerings one task tries from one provider source under `fallback-chain` before moving to the pool's next-ranked provider         |
+| `operations.workspacePlacementMaxRejections`          | 3       | 1–20          | Consecutive times the node a task selected may refuse its final workspace reservation before the task fails                            |
+| `operations.workspacePlacementBacklogConflictRetries` | 3       | 1–20          | Times a task may pick again because its chosen node gained a queued workspace setup before the reservation, counted until one succeeds |
 
 See [Provider order](/docs/guides/compute-pools/#provider-order). Each attempt is a create request
 to the provider, so this bounds the work one task does before it reaches the next provider.
@@ -660,9 +660,9 @@ A node busy setting up another workspace does not refuse a reservation; the new 
 that node's setup queue. When a task chose a node over another one with a longer queue and that
 node's queue grows before the reservation, the task picks again. That does not count toward
 `operations.workspacePlacementMaxRejections`, never fails the task, and never starts a new machine.
-After `operations.workspacePlacementBacklogConflictRetries` such conflicts in a row, the next
-reservation skips this check; every capacity check still applies. That count also resets when a
-reservation succeeds.
+After `operations.workspacePlacementBacklogConflictRetries` such conflicts, the next reservation
+skips this check; every capacity check still applies. The conflicts are counted until a reservation
+succeeds; a capacity refusal in between neither adds to nor resets that count.
 
 ### Session and configuration read recovery
 

@@ -51,9 +51,10 @@ interface PlacementRefusal {
 
 /**
  * The startup-backlog guard for a reservation on `nodeId`: the backlog observed when the node was
- * ranked above an alternative, or null for no guard. After
- * `operations.workspacePlacementBacklogConflictRetries` consecutive conflicts the guard is dropped,
- * so a run that keeps losing the race to the shortest queue still places. Every capacity,
+ * ranked above an alternative, or null for no guard. Once the run has had
+ * `operations.workspacePlacementBacklogConflictRetries` such conflicts since its last successful
+ * reservation, the guard is dropped, so a run that keeps losing the race to the shortest queue
+ * still places. Every capacity,
  * telemetry and authority guard stays in the reservation SQL either way.
  */
 export async function resolveStartupBacklogGuard(

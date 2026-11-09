@@ -249,7 +249,7 @@ export const CORE_SETTINGS: AdminSettingDefinition[] = [
     'operations.workspacePlacementBacklogConflictRetries',
     DEFAULT_WORKSPACE_PLACEMENT_BACKLOG_CONFLICT_RETRIES,
     'Operations',
-    "Consecutive times a task may reselect because the node it ranked first gained queued workspace builds before its reservation. After this many, the task places on its next choice without that fairness check; capacity checks still apply. Conflicts never fail a task or provision a node. The count resets when a reservation succeeds.",
+    'Times a task may reselect because the node it ranked first gained queued workspace builds before its reservation, counted until a reservation succeeds (capacity refusals neither add to nor reset the count). After this many, the task places on its next choice without that fairness check; capacity checks still apply. Conflicts never fail a task or provision a node.',
     { min: 1, max: 20 }
   ),
   ...Object.keys(CONNECTOR_DEFAULTS).map((key) => connectorDefinition(key as ConnectorSettingKey)),
