@@ -99,6 +99,65 @@ func (e *checkpointRolloverEpisode) completeStrictResume(h *SessionHost, result 
 	return result, true
 }
 
+// completeEviction supersedes checkpoint ownership only for a committed eviction.
+func (a *promptAttempt) completeEviction(h *SessionHost) bool {
+	a.terminalMu.Lock()
+	if a.terminal {
+		a.terminalMu.Unlock()
+		return false
+	}
+	a.checkpointOwned = false
+	a.terminal = true
+	a.terminalMu.Unlock()
+	a.publishCompletion(h, EvictedStopReason, errWorkspaceEvicted, nil)
+	return true
+}
+
+func (e *checkpointRolloverEpisode) completeEviction(h *SessionHost) bool {
+	e.decisionMu.Lock()
+	defer e.decisionMu.Unlock()
+	won := e.attempt.completeEviction(h)
+	e.completeLocked(CheckpointRolloverResult{State: "superseded", ACPSessionID: e.sessionID}, true)
+	return won
+}
+
+// supersedeIfSettled resolves a checkpoint caller after another terminal owner won.
+func (e *checkpointRolloverEpisode) supersedeIfSettled(h *SessionHost, stopped bool) bool {
+	e.decisionMu.Lock()
+	defer e.decisionMu.Unlock()
+	if !stopped && !e.attempt.isTerminal() {
+		return false
+	}
+	if stopped {
+		if !e.attempt.completeCheckpoint(h, "cancelled", context.Canceled) {
+			e.attempt.complete(h, "cancelled", context.Canceled)
+		}
+	}
+	e.completeLocked(CheckpointRolloverResult{State: "superseded", ACPSessionID: e.sessionID}, true)
+	return true
+}
+
+// completeFailure orders a checkpoint verdict against committed eviction.
+func (e *checkpointRolloverEpisode) completeFailure(h *SessionHost, result CheckpointRolloverResult, cause error, owned bool) bool {
+	e.decisionMu.Lock()
+	defer e.decisionMu.Unlock()
+	if e.terminal.Load() {
+		return false
+	}
+	var won bool
+	if owned {
+		won = e.attempt.completeCheckpoint(h, fatalErrorStopReason, cause)
+	} else {
+		won = e.attempt.complete(h, fatalErrorStopReason, cause)
+	}
+	if !won {
+		e.completeLocked(CheckpointRolloverResult{State: "superseded", ACPSessionID: e.sessionID}, true)
+		return false
+	}
+	e.completeLocked(result, true)
+	return true
+}
+
 func (a *promptAttempt) complete(h *SessionHost, stopReason string, promptErr error) bool {
 	return a.completeWith(h, stopReason, promptErr, nil)
 }

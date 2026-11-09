@@ -34,6 +34,38 @@ func (h *SessionHost) monitorProcessExit(process agentProcess, agentType string,
 	exitInfo := agentExitInfo(err)
 	slog.Info("Agent process exited", "agentType", agentType, "uptime", uptime.Round(time.Millisecond), "exitInfo", exitInfo, "stderrBytes", len(stderrOutput))
 
+	exit := processExitObservation{stderr: stderrOutput, uptime: uptime, exitInfo: exitInfo, intentionalStop: intentionalStop}
+	h.dispatchProcessExit(process, agentType, cred, settings, exit)
+}
+
+// dispatchProcessExit serializes the complete decision with a renewed eviction.
+// PrepareEviction waits for an already-started bounded restart; once it returns,
+// even detached callbacks from an older eviction must park behind its fence.
+func (h *SessionHost) dispatchProcessExit(process agentProcess, agentType string, cred *agentCredential, settings *agentSettingsPayload, exit processExitObservation) {
+	h.evictionDecisionMu.Lock()
+	defer h.evictionDecisionMu.Unlock()
+	if h.parkProcessExitForEviction(process, func() {
+		h.dispatchProcessExit(process, agentType, cred, settings, exit)
+	}) {
+		return
+	}
+	h.handleProcessExit(process, agentType, cred, settings, exit)
+}
+
+// processExitObservation is what monitorProcessExit read once from the exited process.
+type processExitObservation struct {
+	intentionalStop bool
+	stderr          string
+	uptime          time.Duration
+	exitInfo        string
+}
+
+// handleProcessExit decides what an observed agent exit means: restart, crash-recovery
+// resume, or a terminal verdict. It runs immediately, or later as a replay when an
+// eviction that owned the exit was rolled back.
+func (h *SessionHost) handleProcessExit(process agentProcess, agentType string, cred *agentCredential, settings *agentSettingsPayload, exit processExitObservation) {
+	stderrOutput, uptime, exitInfo := exit.stderr, exit.uptime, exit.exitInfo
+	intentionalStop := exit.intentionalStop
 	isRapidExit := uptime < 5*time.Second
 	h.mu.Lock()
 	if h.process != process {
@@ -191,14 +223,10 @@ func (h *SessionHost) monitorProcessExit(process agentProcess, agentType string,
 			h.stopCurrentAgentLocked()
 			h.setStatusLocked(HostError)
 			h.statusErr = message
-			h.checkpointRollover = nil
 			result := CheckpointRolloverResult{State: "failed", Forced: rollover.forced,
 				ACPSessionID: rollover.sessionID, ErrorCode: "strict_resume_failed", ErrorMessage: message}
-			rollover.complete(result, true)
 			h.mu.Unlock()
-			rollover.attempt.completeCheckpoint(h, fatalErrorStopReason, errors.New(message))
-			h.broadcastAgentStatus(StatusError, agentType, message)
-			h.reportActivity("error")
+			h.publishCheckpointFailure(rollover, result, errors.New(message), true)
 			return
 		}
 		if string(h.sessionID) != rollover.sessionID {
@@ -206,14 +234,10 @@ func (h *SessionHost) monitorProcessExit(process agentProcess, agentType string,
 			h.stopCurrentAgentLocked()
 			h.setStatusLocked(HostError)
 			h.statusErr = message
-			h.checkpointRollover = nil
 			result := CheckpointRolloverResult{State: "failed", Forced: rollover.forced,
 				ACPSessionID: rollover.sessionID, ErrorCode: "session_identity_mismatch", ErrorMessage: message}
-			rollover.complete(result, true)
 			h.mu.Unlock()
-			rollover.attempt.completeCheckpoint(h, fatalErrorStopReason, errors.New(message))
-			h.broadcastAgentStatus(StatusError, agentType, message)
-			h.reportActivity("error")
+			h.publishCheckpointFailure(rollover, result, errors.New(message), true)
 			return
 		}
 		result := CheckpointRolloverResult{State: "completed", Forced: rollover.forced, ACPSessionID: rollover.sessionID}

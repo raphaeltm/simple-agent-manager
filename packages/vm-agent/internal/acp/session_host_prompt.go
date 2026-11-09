@@ -624,20 +624,19 @@ func (h *SessionHost) finishPrompt(
 	h.scheduleProviderUsageProbe()
 }
 
-func (h *SessionHost) finishPromptCancelled(attempt *promptAttempt, reqID json.RawMessage, info promptStartInfo) {
-	if !attempt.completeWith(h, "cancelled", context.Canceled, func() { h.markPromptDoneForAttempt(attempt) }) {
-		return
-	}
-	slog.Info("ACP: Prompt cancelled", "promptId", attempt.id)
-	h.reportLifecycle("info", "ACP Prompt cancelled", attempt.logFields(map[string]interface{}{
-		"duration": time.Since(info.startedAt).String(),
-		"promptId": attempt.id,
-	}))
-	h.broadcastMessage(h.marshalJSONRPCError(reqID, -32800, "Prompt cancelled"))
+func (h *SessionHost) finishPromptAttemptWithError(attempt *promptAttempt, promptCtx context.Context, reqID json.RawMessage, info promptStartInfo, err error) {
+	h.evictionDecisionMu.Lock()
+	defer h.evictionDecisionMu.Unlock()
+	h.finishPromptAttemptWithErrorLocked(attempt, promptCtx, reqID, info, err)
 }
 
-func (h *SessionHost) finishPromptAttemptWithError(attempt *promptAttempt, promptCtx context.Context, reqID json.RawMessage, info promptStartInfo, err error) {
+func (h *SessionHost) finishPromptAttemptWithErrorLocked(attempt *promptAttempt, promptCtx context.Context, reqID json.RawMessage, info promptStartInfo, err error) {
 	if errors.Is(promptCtx.Err(), context.DeadlineExceeded) {
+		if h.parkPromptCrashForEviction("prompt_deadline", func() {
+			h.finishPromptAttemptWithError(attempt, promptCtx, reqID, info, err)
+		}, attempt) {
+			return
+		}
 		errMsg := "Prompt cancelled (context deadline exceeded)"
 		if info.timeout > 0 {
 			errMsg = fmt.Sprintf("Prompt timed out after %s", info.timeout)
@@ -657,6 +656,13 @@ func (h *SessionHost) finishPromptAttemptWithError(attempt *promptAttempt, promp
 	}
 
 	if isCrashPromptError(err) && !errors.Is(promptCtx.Err(), context.DeadlineExceeded) {
+		// An eviction's docker stop disconnects the agent before the stop returns.
+		// That disconnect is the eviction, not a crash: no recovery, no verdict.
+		if h.parkPromptCrashForEviction("prompt_disconnected", func() {
+			h.finishPromptAttemptWithError(attempt, promptCtx, reqID, info, err)
+		}, attempt) {
+			return
+		}
 		agentType, stderr, proc, missing, _, ok := h.beginCrashRecoveryWithPrerequisites(reqID, info.viewerID, info.recovery)
 		if ok {
 			slog.Warn("ACP Prompt failed because agent disconnected; deferring to crash recovery", "error", err, "agentType", agentType)

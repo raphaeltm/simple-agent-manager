@@ -34,6 +34,10 @@ func (s *Server) handleRestoreAgentSession(w http.ResponseWriter, r *http.Reques
 func (s *Server) prepareFreshSessionAfterDegradedRestore(workspaceID, sessionID string, restoreErr error) {
 	hostKey := workspaceID + ":" + sessionID
 	s.sessionHostMu.Lock()
+	if s.isEvictionFinalizing(workspaceID) {
+		s.sessionHostMu.Unlock()
+		return // The eviction retains ownership; do not replace or stop its host.
+	}
 	host := s.sessionHosts[hostKey]
 	if host != nil {
 		delete(s.sessionHosts, hostKey)
@@ -183,6 +187,9 @@ func (s *Server) restoreSessionSnapshot(ctx context.Context, runtime *WorkspaceR
 	}
 	hostKey := runtime.ID + ":" + sessionID
 	host := s.getOrCreateSessionHostForRestore(hostKey, runtime.ID, sessionID, session, runtime, "", true)
+	if host == nil {
+		return nil, fmt.Errorf("resume saved agent context: workspace session admission is fenced")
+	}
 	if restoreErr := host.RestoreAgent(ctx, savedAgentType); restoreErr != nil {
 		return nil, fmt.Errorf("resume saved agent context: %w", restoreErr)
 	}

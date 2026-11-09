@@ -55,6 +55,13 @@ export async function sweepOrphanedWorkspaces(
   config: CleanupConfig,
   result: NodeCleanupResult
 ): Promise<void> {
+  // The grace runs from the later of workspace creation and the latest task's end. Measured
+  // from creation alone, a long-lived workspace was stopped on the first tick after its
+  // task turned terminal, which on 2026-11-08 cut off an in-flight eviction that would
+  // have resumed a falsely failed task (the eviction recovery re-queues it).
+  // Legacy terminal writers may omit completed_at. Prefer their latest genuine status
+  // transition over mutable updated_at; same-status metadata events do not reset grace.
+  const orphanGraceCutoff = new Date(now.getTime() - config.orphanGracePeriodMs).toISOString();
   const candidates = await env.DATABASE.prepare(
     `SELECT w.id, w.node_id, w.user_id, w.status, w.created_at, w.project_id, w.chat_session_id
      FROM workspaces w
@@ -68,6 +75,17 @@ export async function sweepOrphanedWorkspaces(
            AND NOT ${sleepLifecycleOwnsTerminalTaskWorkspaceSql('t', 'w', sessionSleepMaxAttempts(env))}
        )
        AND NOT EXISTS (
+         SELECT 1 FROM tasks recent_terminal
+         WHERE recent_terminal.workspace_id = w.id
+           AND recent_terminal.status IN ('completed', 'failed', 'cancelled')
+           AND COALESCE(julianday(recent_terminal.completed_at),
+             (SELECT MAX(julianday(terminal_event.created_at)) FROM task_status_events terminal_event
+              WHERE terminal_event.task_id = recent_terminal.id
+                AND terminal_event.to_status = recent_terminal.status
+                AND terminal_event.from_status IS NOT terminal_event.to_status),
+             julianday(recent_terminal.updated_at)) >= julianday(?)
+       )
+       AND NOT EXISTS (
          SELECT 1 FROM tasks t
          WHERE t.workspace_id = w.id
            AND t.status IN ('queued', 'delegated', 'in_progress')
@@ -78,7 +96,8 @@ export async function sweepOrphanedWorkspaces(
   )
     .bind(
       new Date(now.getTime() - sessionSleepInFlightMaxAgeMs(env)).toISOString(),
-      new Date(now.getTime() - config.orphanGracePeriodMs).toISOString(),
+      orphanGraceCutoff,
+      orphanGraceCutoff,
       config.workspaceSweepLimit
     )
     .all<{

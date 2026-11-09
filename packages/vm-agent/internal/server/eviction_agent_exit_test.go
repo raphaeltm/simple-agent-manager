@@ -1,0 +1,455 @@
+package server
+
+// Production 2026-11-08 (14 sessions, 3 stranded): the eviction's `docker stop` killed the
+// docker-exec'd agent ~100ms before the stop returned. The production SessionHost treated
+// the disconnect as a crash, retried one second later, found no devcontainer and posted a
+// terminal `failed` task callback, racing the eviction that would have resumed the work.
+//
+// These tests run a real ACP agent subprocess under the production SessionHost and task
+// completion callback, and let the real eviction stop path kill it: the fake `docker
+// stop` SIGKILLs the agent, marks the container gone, and returns 100ms later.
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync/atomic"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/workspace/vm-agent/internal/acp"
+	"github.com/workspace/vm-agent/internal/config"
+	"github.com/workspace/vm-agent/internal/resourcemon"
+)
+
+// Compiled only into Go test binaries: an ACP agent whose prompt never finishes. It
+// records its PID so the fake `docker stop` can kill it like a container teardown.
+func TestEvictionACPFixtureProcess(t *testing.T) {
+	pidFile := os.Getenv("SAM_TEST_EVICTION_ACP_PID_FILE")
+	if pidFile == "" {
+		return
+	}
+	if os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0600) != nil {
+		os.Exit(2)
+	}
+	decoder, encoder := json.NewDecoder(os.Stdin), json.NewEncoder(os.Stdout)
+	prompts := 0
+	for {
+		var request struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+		}
+		if err := decoder.Decode(&request); err != nil {
+			if err == io.EOF {
+				os.Exit(0)
+			}
+			os.Exit(2)
+		}
+		if len(request.ID) == 0 {
+			continue
+		}
+		response := map[string]any{"jsonrpc": "2.0", "id": request.ID}
+		switch request.Method {
+		case "initialize":
+			response["result"] = map[string]any{"protocolVersion": 1, "agentCapabilities": map[string]any{"loadSession": true}}
+		case "session/new":
+			response["result"] = map[string]any{"sessionId": "fixture-evicted-session"}
+		case "session/prompt":
+			prompts++
+			_ = os.WriteFile(pidFile+".prompt-count", []byte(strconv.Itoa(prompts)), 0600)
+			_ = os.WriteFile(pidFile+".prompting", nil, 0600)
+			continue // Working until the container is stopped underneath it.
+		default:
+			response["result"] = map[string]any{}
+		}
+		if encoder.Encode(response) != nil {
+			os.Exit(2)
+		}
+	}
+}
+
+// evictionFixtureLauncher starts the fixture agent until the container is gone, then
+// fails exactly as the devcontainer launcher does once `docker stop` has run.
+type evictionFixtureLauncher struct {
+	pidFile  string
+	goneFile string
+	starts   *atomic.Int32
+}
+
+func (l evictionFixtureLauncher) Start(cfg acp.ProcessConfig) (*acp.AgentProcess, error) {
+	l.starts.Add(1)
+	if _, err := os.Stat(l.goneFile); err == nil {
+		return nil, errors.New("failed to discover devcontainer: no running devcontainer found (label: devcontainer.local_folder=/workspace/repo)")
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	cfg.AcpCommand = executable
+	cfg.AcpArgs = []string{"-test.run=^TestEvictionACPFixtureProcess$"}
+	cfg.EnvVars = append(cfg.EnvVars, "SAM_TEST_EVICTION_ACP_PID_FILE="+l.pidFile)
+	return (acp.LocalLauncher{}).Start(cfg)
+}
+
+type evictionAgentFixture struct {
+	server         *Server
+	host           *acp.SessionHost
+	launcher       evictionFixtureLauncher
+	taskCallbacks  chan map[string]any
+	evictCallbacks chan map[string]any
+}
+
+// startEvictionAgentFixture runs a production SessionHost with a prompt in flight on a
+// workspace the eviction test server can evict, wired to a recording control plane.
+func startEvictionAgentFixture(t *testing.T, withPrompt bool, parkTimeout ...time.Duration) *evictionAgentFixture {
+	t.Helper()
+	return startEvictionAgentSessionFixture(t, "agent-1", withPrompt, parkTimeout...)
+}
+
+func startEvictionAgentSessionFixture(t *testing.T, sessionID string, withPrompt bool, parkTimeout ...time.Duration) *evictionAgentFixture {
+	t.Helper()
+	bin := t.TempDir()
+	installACPAdapterFixtureShims(t, bin)
+	f := &evictionAgentFixture{
+		launcher: evictionFixtureLauncher{pidFile: filepath.Join(bin, "agent.pid"),
+			goneFile: filepath.Join(bin, "container-gone"), starts: new(atomic.Int32)},
+		taskCallbacks:  make(chan map[string]any, 8),
+		evictCallbacks: make(chan map[string]any, 4),
+	}
+	control := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		record := func(into chan map[string]any) {
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			into <- body
+		}
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/agent-key"):
+			json.NewEncoder(w).Encode(map[string]any{"apiKey": "test-only", "credentialKind": "api-key", "credentialSource": "user",
+				"credentialReference": "cc_credentials:provider-1", "credentialGeneration": 1, "credentialProvider": "anthropic", "providerMode": "direct"})
+		case strings.HasSuffix(r.URL.Path, "/runtime-assets"):
+			json.NewEncoder(w).Encode(map[string]any{"workspaceId": "workspace-1", "envVars": []any{}, "files": []any{}})
+		case strings.HasSuffix(r.URL.Path, "/status/callback"):
+			record(f.taskCallbacks)
+			io.WriteString(w, `{}`)
+		case strings.HasSuffix(r.URL.Path, "/eviction"):
+			record(f.evictCallbacks)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			io.WriteString(w, `{}`)
+		}
+	}))
+	t.Cleanup(control.Close)
+
+	s := newEvictionTestServer()
+	initializeEvictionTestStore(t, s)
+	s.config.ControlPlaneURL = control.URL
+	s.acpConfig = acp.GatewayConfig{ControlPlaneURL: control.URL, CallbackToken: "test-token", NodeID: "node-1",
+		ProcessLauncher: f.launcher, ContainerWorkDir: bin, SettingsResolved: true,
+		TerminalActivityReportAttempts: 1, ActivityReportTimeout: time.Second}
+	if len(parkTimeout) == 1 {
+		s.acpConfig.EvictionParkTimeout = parkTimeout[0]
+	}
+	session, _, err := s.agentSessions.Create("workspace-1", sessionID, "Agent", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := "workspace-1:" + sessionID
+	s.sessionTaskCtx[key] = taskCallbackContext{ProjectID: "project-1", TaskID: "task-1", WorkspaceID: "workspace-1",
+		TaskMode: config.TaskModeConversation}
+	// The agent runs as a local process (ProcessLauncher), as in the provider-limit
+	// fixture; container mode stays on for the eviction path the test drives.
+	s.config.ContainerMode = false
+	host := s.getOrCreateSessionHost(key, "workspace-1", sessionID, session, &WorkspaceRuntime{ID: "workspace-1"}, "")
+	s.config.ContainerMode = true
+	if host == nil {
+		t.Fatal("no session host")
+	}
+	t.Cleanup(host.Stop)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	host.SelectAgent(ctx, "claude-code")
+	if host.Status() != acp.HostReady {
+		t.Fatalf("fixture agent did not initialize: %s", host.Status())
+	}
+	f.server, f.host = s, host
+	if !withPrompt {
+		return f
+	}
+	params := json.RawMessage(`{"sessionId":"fixture-evicted-session","prompt":[{"type":"text","text":"long-running work"}]}`)
+	// The prompt outlives this setup function, so it must not take the setup context.
+	accepted, ok := host.AcceptPrompt(context.Background(), json.RawMessage(`1`), params, "fixture-viewer", true, "", nil)
+	if !ok {
+		t.Fatal("fixture prompt was not accepted")
+	}
+	go accepted.Run()
+	waitForFile(t, f.launcher.pidFile+".prompting")
+	return f
+}
+
+// killAgentWithContainer is the container teardown: SIGKILL the agent, then the
+// devcontainer is gone for any later restart.
+func (f *evictionAgentFixture) killAgentWithContainer(t *testing.T) {
+	t.Helper()
+	raw, err := os.ReadFile(f.launcher.pidFile)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	pid, err := strconv.Atoi(string(raw))
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	if err := os.WriteFile(f.launcher.goneFile, nil, 0600); err != nil {
+		t.Error(err)
+	}
+	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
+		t.Error(err)
+	}
+}
+
+func waitForFile(t *testing.T, path string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", path)
+}
+
+func expectNoTaskCallback(t *testing.T, callbacks chan map[string]any, wait time.Duration, during string) {
+	t.Helper()
+	select {
+	case body := <-callbacks:
+		t.Fatalf("%s: task status posted for an evicted prompt: %v", during, body)
+	case <-time.After(wait):
+	}
+}
+
+// evictKillingTheAgent runs the real eviction stop with a fake `docker stop` that kills
+// the agent and its container, then records and notifies the eviction. It returns the
+// eviction callback body, asserting no task status and no restart along the way.
+func (f *evictionAgentFixture) evictKillingTheAgent(t *testing.T, peers ...*evictionAgentFixture) map[string]any {
+	t.Helper()
+	fixtures := append([]*evictionAgentFixture{f}, peers...)
+	setupEvictionDocker(t, evictionTestContainerID)
+	dir := t.TempDir()
+	started, release := filepath.Join(dir, "stop-started"), filepath.Join(dir, "stop-release")
+	t.Setenv("SAM_EVICTION_TEST_STOP_STARTED", started)
+	t.Setenv("SAM_EVICTION_TEST_STOP_RELEASE", release)
+	go func() {
+		// Measured locally (Docker 29, devcontainer-style PID1): the exec'd agent exits
+		// 137 ~40ms into `docker stop`, ~100ms before the stop returns.
+		waitForFile(t, started)
+		for _, fixture := range fixtures {
+			fixture.killAgentWithContainer(t)
+		}
+		time.Sleep(100 * time.Millisecond)
+		_ = os.WriteFile(release, nil, 0600)
+	}()
+
+	target := evictionTargetFixture(f.server)
+	if err := f.server.stopEvictedWorkspaceContainer(context.Background(), target); err != nil {
+		t.Fatalf("eviction stop: %v", err)
+	}
+	// The final capture runs here in production (15-75s). Outlast the 1s restart delay.
+	for _, fixture := range fixtures {
+		expectNoTaskCallback(t, fixture.taskCallbacks, 2*time.Second, "between stop and record")
+		if n := fixture.launcher.starts.Load(); n != 1 {
+			t.Fatalf("agent launched %d times; an eviction-owned exit must not restart", n)
+		}
+	}
+
+	result := resourcemon.EvictionResult{Target: target, SnapshotCaptured: true, ContainerStopped: true,
+		CompletedAt: time.Now().UTC()}
+	if !f.server.markWorkspaceEvicted(result) {
+		t.Fatal("eviction could not be recorded")
+	}
+	for _, fixture := range fixtures {
+		expectNoTaskCallback(t, fixture.taskCallbacks, 300*time.Millisecond, "after record")
+		if fixture.host.Status() != acp.HostStopped {
+			t.Fatalf("host status = %s, want stopped", fixture.host.Status())
+		}
+	}
+	if err := f.server.notifyWorkspaceEvicted(context.Background(), result); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case body := <-f.evictCallbacks:
+		return body
+	case <-time.After(5 * time.Second):
+		t.Fatal("eviction callback was not delivered")
+		return nil
+	}
+}
+
+func TestEvictionStopKillingTheAgentDoesNotFailTheTask(t *testing.T) {
+	f := startEvictionAgentFixture(t, true)
+	body := f.evictKillingTheAgent(t)
+	if body["interruptedWork"] != true || body["containerStopped"] != true {
+		t.Fatalf("eviction callback = %v, want the in-flight prompt reported as interrupted work", body)
+	}
+}
+
+// An idle agent killed by the eviction must not be restarted either, and the eviction
+// reports that no work was interrupted.
+func TestEvictionStopKillingAnIdleAgentDoesNotRestartIt(t *testing.T) {
+	f := startEvictionAgentFixture(t, false)
+	body := f.evictKillingTheAgent(t)
+	if body["interruptedWork"] != false || body["containerStopped"] != true {
+		t.Fatalf("eviction callback = %v, want an idle runtime reported as not interrupted", body)
+	}
+}
+
+// Control on the same production host: a container lost without an eviction still
+// produces the terminal verdict, so the test above can see a callback when one is sent.
+func TestContainerLossWithoutEvictionStillFailsTheTask(t *testing.T) {
+	f := startEvictionAgentFixture(t, true)
+	f.killAgentWithContainer(t)
+	select {
+	case body := <-f.taskCallbacks:
+		if body["toStatus"] != "failed" {
+			t.Fatalf("callback = %v, want failed", body)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("an unowned container loss posted no task verdict")
+	}
+}
+
+// A `docker stop` that kills the agent but then fails leaves the eviction committed and
+// unrecorded, so nothing calls StopForEviction until the reconciler succeeds. The park
+// deadline bounds that: the task gets the ordinary crash verdict instead of staying in
+// progress forever (and the control plane can still resume it if the eviction lands).
+func TestStuckEvictionStopFallsBackToCrashVerdictAtTheDeadline(t *testing.T) {
+	f := startEvictionAgentFixture(t, true, 2*time.Second)
+	setupEvictionDocker(t, evictionTestContainerID)
+	dir := t.TempDir()
+	started, release := filepath.Join(dir, "stop-started"), filepath.Join(dir, "stop-release")
+	t.Setenv("SAM_EVICTION_TEST_STOP_STARTED", started)
+	t.Setenv("SAM_EVICTION_TEST_STOP_RELEASE", release)
+	t.Setenv("SAM_EVICTION_TEST_STOP_EXIT", "1")
+	go func() {
+		waitForFile(t, started)
+		f.killAgentWithContainer(t)
+		time.Sleep(100 * time.Millisecond)
+		_ = os.WriteFile(release, nil, 0600)
+	}()
+	if err := f.server.stopEvictedWorkspaceContainer(context.Background(), evictionTargetFixture(f.server)); err == nil {
+		t.Fatal("stop unexpectedly succeeded")
+	}
+	expectNoTaskCallback(t, f.taskCallbacks, time.Second, "before the park deadline")
+	select {
+	case body := <-f.taskCallbacks:
+		if body["toStatus"] != "failed" {
+			t.Fatalf("callback = %v, want the crash verdict after the deadline", body)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("a stuck eviction left the prompt parked past its deadline")
+	}
+}
+
+func TestEvictionStopFencesEveryWorkspaceHost(t *testing.T) {
+	first := startEvictionAgentFixture(t, true)
+	second := startEvictionAgentSessionFixture(t, "agent-2", true)
+	if _, _, err := first.server.agentSessions.Create("workspace-1", "agent-2", "Agent 2", ""); err != nil {
+		t.Fatal(err)
+	}
+	first.server.sessionHostMu.Lock()
+	first.server.sessionHosts["workspace-1:agent-2"] = second.host
+	first.server.sessionHostMu.Unlock()
+	body := first.evictKillingTheAgent(t, second)
+	if body["interruptedWork"] != true {
+		t.Fatalf("eviction callback = %v, want interrupted work", body)
+	}
+}
+
+func TestEvictionAbortedIntentRollsBackEveryHost(t *testing.T) {
+	first := startEvictionAgentFixture(t, false)
+	second := startEvictionAgentSessionFixture(t, "agent-2", false)
+	first.server.sessionHostMu.Lock()
+	first.server.sessionHosts["workspace-1:agent-2"] = second.host
+	first.server.sessionHostMu.Unlock()
+	// Identity failure happens after all fences were acquired but before the intent.
+	first.server.workspaceMu.Lock()
+	first.server.workspaces["workspace-1"].ProjectID = ""
+	first.server.workspaceMu.Unlock()
+	first.server.config.ProjectID = ""
+	if err := first.server.prepareWorkspaceEvictionStop(context.Background(), evictionTargetFixture(first.server)); err == nil {
+		t.Fatal("intent unexpectedly committed")
+	}
+	for _, fixture := range []*evictionAgentFixture{first, second} {
+		params := json.RawMessage(`{"sessionId":"fixture-evicted-session","prompt":[{"type":"text","text":"after rollback"}]}`)
+		accepted, ok := fixture.host.AcceptPrompt(context.Background(), json.RawMessage(`1`), params, "fixture-viewer", true, "", nil)
+		if !ok {
+			t.Fatal("aborted intent left a workspace host fenced")
+		}
+		accepted.Abort(context.Canceled)
+	}
+}
+
+func TestEvictionRetryRefencesNewWorkAndPersistsInterruption(t *testing.T) {
+	f := startEvictionAgentFixture(t, true)
+	f.server.config.EvictionDockerStopTimeout = 5 * time.Second
+	target := evictionTargetFixture(f.server)
+	runtime, err := f.server.evictionWorkspaceRuntimeSnapshot(target.WorkspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.server.writeWorkspaceMetadata(runtime); err != nil {
+		t.Fatal(err)
+	}
+	// The old idle intent outlived its fence; this host now owns newly admitted work.
+	delivery := f.server.workspaceEvictionDelivery(resourcemon.EvictionResult{Target: target, SnapshotCaptured: true})
+	idle := false
+	delivery.InterruptedWork = &idle
+	if applied, err := f.server.store.RecordWorkspaceEviction(context.Background(), delivery); err != nil || !applied {
+		t.Fatalf("intent applied=%v err=%v", applied, err)
+	}
+	setupEvictionDocker(t, evictionTestContainerID)
+	dir := t.TempDir()
+	started, release := filepath.Join(dir, "retry-started"), filepath.Join(dir, "retry-release")
+	t.Setenv("SAM_EVICTION_TEST_STOP_STARTED", started)
+	t.Setenv("SAM_EVICTION_TEST_STOP_RELEASE", release)
+	go func() {
+		waitForFile(t, started)
+		// Interruption ownership must be durable before the retry kills the new work.
+		stored, err := f.server.store.ClaimEvictionDelivery(context.Background(), "", time.Now().Add(time.Hour), time.Second, time.Minute, time.Second)
+		if err != nil || stored == nil || stored.InterruptedWork == nil || !*stored.InterruptedWork {
+			t.Error("retry did not persist new interrupted work before Docker stop")
+		}
+		f.killAgentWithContainer(t)
+		time.Sleep(2 * time.Second)
+		_ = os.WriteFile(release, nil, 0600)
+	}()
+	obsolete, err := f.server.reconcilePendingEvictionStop(context.Background(), &delivery)
+	if err != nil || obsolete {
+		t.Fatalf("retry obsolete=%v err=%v", obsolete, err)
+	}
+	expectNoTaskCallback(t, f.taskCallbacks, 300*time.Millisecond, "after retry")
+	if f.host.Status() != acp.HostStopped || f.launcher.starts.Load() != 1 {
+		t.Fatalf("retry status=%s starts=%d", f.host.Status(), f.launcher.starts.Load())
+	}
+	if err := f.server.notifyWorkspaceEvicted(context.Background(), resourcemon.EvictionResult{Target: target}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case body := <-f.evictCallbacks:
+		if body["interruptedWork"] != true {
+			t.Fatalf("callback lost new work: %v", body)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("retry callback missing")
+	}
+}

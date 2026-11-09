@@ -373,6 +373,9 @@ func (c *Config) Validate() error {
 		}
 	}
 	errs = append(errs, c.SnapshotHelper.validate()...)
+	if err := c.validateEvictionParkTimeout(); err != nil {
+		errs = append(errs, err)
+	}
 
 	if c.ResourceEventBufferSize <= 0 {
 		errs = append(errs, fmt.Errorf("%s must be > 0", EnvDefaultResourceEventBufferSize))

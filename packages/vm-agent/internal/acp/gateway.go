@@ -244,6 +244,9 @@ type GatewayConfig struct {
 	// RecoveryWatchdogTimeout bounds crash recovery after a prompt disconnect.
 	// Zero uses DefaultRecoveryWatchdogTimeout.
 	RecoveryWatchdogTimeout time.Duration
+	// EvictionParkTimeout bounds how long a pending eviction may own an agent exit
+	// before the host replays it as an ordinary crash. Zero uses DefaultEvictionParkTimeout.
+	EvictionParkTimeout time.Duration
 	// RestartDecayWindow resets restartCount after this quiet period. Zero uses
 	// DefaultRestartDecayWindow.
 	RestartDecayWindow time.Duration

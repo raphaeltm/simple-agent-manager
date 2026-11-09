@@ -43,6 +43,7 @@ import (
 // profileOverrides holds model/permissionMode/effort/opencode provider overrides from agent profiles.
 // Passed from the control plane in the start-agent-session request.
 type profileOverrides struct {
+	StartFingerprint string // immutable request identity for an eviction-owned start replay
 	SettingsResolved bool
 	Model            string
 	PermissionMode   string
@@ -472,6 +473,7 @@ func New(cfg *config.Config) (*Server, error) {
 		CredentialSyncTimeout:            cfg.ACPCredentialSyncTimeout,
 		RestartAttemptTimeout:            cfg.ACPRestartAttemptTimeout,
 		RecoveryWatchdogTimeout:          cfg.ACPRecoveryWatchdog,
+		EvictionParkTimeout:              cfg.ACPEvictionParkTimeout,
 		RestartDecayWindow:               cfg.ACPRestartDecayWindow,
 		HTTPClient:                       config.NewControlPlaneClient(cfg.HTTPCallbackTimeout),
 	}
@@ -1464,6 +1466,14 @@ func (s *Server) makeTaskCompletionCallback(
 		strings.TrimRight(controlPlaneURL, "/"), projectID, taskID)
 
 	return func(stopReason string, promptErr error) {
+		if stopReason == acp.EvictedStopReason {
+			// The eviction delivery owns this task's outcome: it reports the interrupted
+			// work and the control plane resumes the conversation on another workspace.
+			// Any status posted here would race it ("failed" stranded tasks on 2026-11-08).
+			slog.Info("Prompt ended by workspace eviction; task status left to the eviction delivery",
+				"taskId", taskID, "workspaceId", workspaceID)
+			return
+		}
 		if isPromptCancellation(stopReason, promptErr) {
 			s.postTaskCallback(
 				callbackURL,
