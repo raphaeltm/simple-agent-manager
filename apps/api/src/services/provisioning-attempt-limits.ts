@@ -27,3 +27,9 @@ export const DEFAULT_WORKSPACE_PLACEMENT_MAX_REJECTIONS = 3;
  * on alarm scheduling and the other work in flight.
  */
 export const DEFAULT_WORKSPACE_PLACEMENT_BACKLOG_CONFLICT_RETRIES = 3;
+
+/**
+ * Default for `operations.workspaceBuildQueueTimeoutMinutes`: how long a workspace may wait for its
+ * node's single build slot (`workspace-creating-deadline.ts`). About 20 queued builds of ~3 minutes.
+ */
+export const DEFAULT_WORKSPACE_BUILD_QUEUE_TIMEOUT_MINUTES = 60;

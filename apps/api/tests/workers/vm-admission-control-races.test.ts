@@ -268,7 +268,6 @@ function taskState(
     admissionScopeKey: null,
     admissionLeaseToken: null,
     agentReadyStartedAt: null,
-    workspaceReadyStartedAt: null,
     workspaceDispatchStartedAt: null,
     workspaceDispatchAttempts: 0,
     workspaceDispatchLastAttemptAt: null,

@@ -118,7 +118,6 @@ function wakeState(restoredSessionPrompt: string | null): TaskRunnerState {
     lastStepAt: 1,
     provisioningStartedAt: null,
     agentReadyStartedAt: null,
-    workspaceReadyStartedAt: null,
     workspaceDispatchStartedAt: null,
     workspaceDispatchAttempts: 0,
     workspaceDispatchLastAttemptAt: null,

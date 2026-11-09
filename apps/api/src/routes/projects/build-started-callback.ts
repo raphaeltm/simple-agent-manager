@@ -77,6 +77,24 @@ buildStartedCallbackRoute.post(
     // advance its task, even with a still-unexpired token from that workspace.
     await assertWorkspaceCallbackResourceById(c.env, body.workspaceId, 'build_started');
 
+    // The durable start of this attempt's build (`workspace-creating-deadline.ts`). First write
+    // wins, so a retried or duplicated callback cannot push the deadline out. Every transition
+    // into 'creating' clears it for the new attempt. The callback carries no attempt identity,
+    // so a late signal from a previous attempt (sent at most ~30 s after that build took the
+    // slot) that lands after a restart is indistinguishable from the new attempt's own.
+    const recorded = await c.env.DATABASE.prepare(
+      `UPDATE workspaces SET build_started_at = ?
+        WHERE id = ? AND status = 'creating' AND build_started_at IS NULL`
+    )
+      .bind(new Date().toISOString(), body.workspaceId)
+      .run();
+    log.info('build_started.recorded', {
+      projectId,
+      taskId,
+      workspaceId: body.workspaceId,
+      recorded: (recorded.meta.changes ?? 0) === 1,
+    });
+
     await notifyTaskRunnerWorkspaceBuildStarted(c.env, taskId, body.workspaceId);
     return c.body(null, 204);
   }

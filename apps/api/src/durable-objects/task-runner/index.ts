@@ -134,7 +134,6 @@ export class TaskRunner extends DurableObject<Env> {
       admissionScopeKey: null,
       admissionLeaseToken: null,
       agentReadyStartedAt: null,
-      workspaceReadyStartedAt: null,
       workspaceDispatchStartedAt: null,
       workspaceDispatchAttempts: 0,
       workspaceDispatchLastAttemptAt: null,
@@ -232,7 +231,6 @@ export class TaskRunner extends DurableObject<Env> {
         admissionScopeKey: null,
         admissionLeaseToken: null,
         agentReadyStartedAt: null,
-        workspaceReadyStartedAt: null,
         workspaceDispatchStartedAt: null,
         workspaceDispatchAttempts: 0,
         workspaceDispatchLastAttemptAt: null,
@@ -292,9 +290,11 @@ export class TaskRunner extends DurableObject<Env> {
   }
 
   /**
-   * Called when the VM agent dequeues a workspace build and actual provisioning starts.
-   * This resets the workspace-ready timeout window so time spent queued behind another
-   * devcontainer build does not count against the build itself.
+   * Called when the VM agent dequeues a workspace build and actual provisioning starts. The
+   * callback route has already recorded the durable `workspaces.build_started_at`; the
+   * workspace_ready step measures its deadline from that row (`workspace-creating-deadline.ts`),
+   * so this only wakes the step to re-read it. It writes no clock of its own: a duplicate or a
+   * lost notification cannot move the deadline.
    */
   async notifyWorkspaceBuildStarted(workspaceId: string): Promise<void> {
     const state = await this.getState();
@@ -307,9 +307,6 @@ export class TaskRunner extends DurableObject<Env> {
       });
       return;
     }
-
-    state.workspaceReadyStartedAt = Date.now();
-    await putTaskRunnerState(this.ctx.storage, this.env.DATABASE, state);
 
     log.info('task_runner_do.workspace_build_started', {
       taskId: state.taskId,
@@ -592,7 +589,6 @@ export class TaskRunner extends DurableObject<Env> {
     raw.admissionScopeKey ??= null;
     raw.admissionLeaseToken ??= null;
     raw.agentReadyStartedAt ??= null;
-    raw.workspaceReadyStartedAt ??= null;
     raw.workspaceDispatchStartedAt ??= null;
     raw.workspaceDispatchAttempts ??= 0;
     raw.workspaceDispatchLastAttemptAt ??= null;

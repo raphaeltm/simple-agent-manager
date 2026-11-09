@@ -417,7 +417,6 @@ function createState(overrides: Partial<TaskRunnerState> = {}): TaskRunnerState 
     createdAt: Date.now(),
     lastStepAt: Date.now(),
     agentReadyStartedAt: null,
-    workspaceReadyStartedAt: null,
     completed: false,
     ...overrides,
   };

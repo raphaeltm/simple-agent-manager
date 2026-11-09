@@ -79,6 +79,7 @@ import {
 } from '../services/task-sleep-preservation';
 import { cleanupTerminalTaskResources } from '../services/task-terminal-cleanup';
 import { transitionTaskToTerminal } from '../services/task-terminal-transition';
+import { isWorkspaceWithinCreatingDeadline } from '../services/timeout';
 import {
   getVmAdmissionDiagnostics,
   isActiveVmAdmissionState,
@@ -1314,6 +1315,21 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
           break;
         case 'delegated':
           if (elapsedMs > delegatedTimeoutMs) {
+            // A workspace waiting for its node's build slot is not stuck: it answers to the
+            // shared creating deadline (`workspace-creating-deadline.ts`), not this clock, which
+            // starts at dispatch. Probed only for tasks this branch would otherwise fail.
+            if (
+              task.workspace_id &&
+              (await isWorkspaceWithinCreatingDeadline(env.DATABASE, env, task.workspace_id, now))
+            ) {
+              log.info('stuck_task.delegated_workspace_still_starting', {
+                taskId: task.id,
+                workspaceId: task.workspace_id,
+                elapsedMs,
+                action: 'deferred',
+              });
+              break;
+            }
             isStuck = true;
             reason = `Task stuck in 'delegated' for ${Math.round(elapsedMs / 1000)}s (threshold: ${Math.round(delegatedTimeoutMs / 1000)}s).${stepInfo} Workspace may have failed to start.`;
           }

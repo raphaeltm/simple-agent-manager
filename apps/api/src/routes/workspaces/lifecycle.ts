@@ -427,6 +427,7 @@ lifecycleRoutes.post('/:id/rebuild', requireAuth(), requireApproved(), async (c)
   }
 
   // Clear previous error state and boot logs before starting new provisioning
+  const rebuildStartedAt = new Date().toISOString();
   const rebuildTransition =
     workspace.status === 'error'
       ? {
@@ -447,7 +448,10 @@ lifecycleRoutes.post('/:id/rebuild', requireAuth(), requireApproved(), async (c)
           .set({
             status: 'creating',
             errorMessage: null,
-            updatedAt: new Date().toISOString(),
+            updatedAt: rebuildStartedAt,
+            // A rebuild is a new attempt: its clock starts now and its build has not started.
+            creatingStartedAt: rebuildStartedAt,
+            buildStartedAt: null,
             evictionGeneration,
             evictionFinalizedAt: null,
             stopRuntimeConfirmedAt: null,

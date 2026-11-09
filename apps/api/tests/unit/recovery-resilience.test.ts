@@ -392,7 +392,7 @@ describe('timeout service OBSERVABILITY_DATABASE recording (TDF-7)', () => {
 
   it('records provisioning timeouts in OBSERVABILITY_DATABASE', () => {
     expect(timeoutSource).toContain("recoveryType: 'provisioning_timeout'");
-    expect(timeoutSource).toContain('persistError(observabilityDb');
+    expect(timeoutSource).toMatch(/persistError\(\s*observabilityDb/);
   });
 
   it('includes workspace and node IDs in context', () => {

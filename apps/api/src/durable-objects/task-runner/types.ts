@@ -211,8 +211,6 @@ export interface TaskRunnerState {
   admissionLeaseToken?: number | null;
   /** Set when we started waiting for agent ready — used for timeout detection */
   agentReadyStartedAt: number | null;
-  /** Set when we started waiting for workspace ready — used for timeout detection */
-  workspaceReadyStartedAt: number | null;
   /**
    * Consecutive final-reservation refusals in this run (`workspace-placement-rejection.ts`).
    * Reset when a reservation succeeds; at `operations.workspacePlacementMaxRejections` the task fails.

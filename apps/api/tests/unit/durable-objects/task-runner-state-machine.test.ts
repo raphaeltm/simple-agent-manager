@@ -273,7 +273,6 @@ function makeState(overrides: Partial<TaskRunnerState> = {}): TaskRunnerState {
     lastStepAt: Date.parse('2026-06-29T10:00:00.000Z'),
     provisioningStartedAt: null,
     agentReadyStartedAt: null,
-    workspaceReadyStartedAt: null,
     workspaceDispatchStartedAt: null,
     workspaceDispatchAttempts: 0,
     workspaceDispatchLastAttemptAt: null,
