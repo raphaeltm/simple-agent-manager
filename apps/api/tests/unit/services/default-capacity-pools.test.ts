@@ -5226,6 +5226,64 @@ describe('capacity pool review findings', () => {
   describe('finding 6: bounded, resumable candidate publication', () => {
     const LARGE = 40; // 40 offerings x 2 roles = 80 rows
 
+    // Production 2026-11-09: a changed ~1,000-row GCP catalog published 200 rows per refresh,
+    // leaving the user's whole pool migration-pending (zero placement candidates) until five
+    // refreshes had run, and refreshes are daily or user-triggered.
+    function productionSizedCatalog(): ProviderInstanceOffering[] {
+      const offerings = manyLiveOfferings(500); // 500 offerings x 2 roles = 1,000 rows
+      offerings[0] = liveHetznerOffering({
+        location: 'fsn1',
+        providerInstanceType: 'cx23',
+        displayName: 'CX23',
+      });
+      return offerings;
+    }
+
+    it('publishes a 1,000-row catalog in one pass and the pool places immediately (incident 2026-11-09)', async () => {
+      const db = createDb();
+      seedUserCredential({ id: 'user-hetzner' });
+      // Production defaults: no batch-size or budget override; the budget resolves through
+      // the real admin settings resolver against this database.
+      const result = await ensureDefaultCapacityPoolsForExistingCredentials(poolDb() as never, {
+        userId: 'user-1',
+        includeInstallation: false,
+        env: catalogEnv(createSqliteD1WithBindLimit(sqlite!, 100)),
+        offeringResolver: async () => productionSizedCatalog(),
+      });
+
+      expect(getCount('capacity_pool_candidates')).toBe(1000);
+      expect(result.user?.pool.migrationState).toBe('complete');
+      expect(result.user?.effectiveState).toBe('configured-ready');
+      const selection = await resolveTaskStartCapacityPoolSelection(
+        db as never,
+        defaultTaskPlacement('one-pass-publication'),
+        { ensure: false }
+      );
+      expect(selection?.effectiveState).toBe('configured-ready');
+      expect(selection?.candidates.length).toBeGreaterThan(0);
+    });
+
+    it('the operations.capacityPoolPublishBudgetMs setting controls the pass budget', async () => {
+      createDb();
+      seedUserCredential({ id: 'user-hetzner' });
+      sqlite!
+        .prepare('INSERT INTO platform_settings (key, value, updated_at) VALUES (?, ?, ?)')
+        .run('operations.capacityPoolPublishBudgetMs', '0', '2026-11-09T00:00:00Z');
+      const refresh = () =>
+        ensureDefaultCapacityPoolsForExistingCredentials(poolDb() as never, {
+          userId: 'user-1',
+          includeInstallation: false,
+          env: catalogEnv(createSqliteD1WithBindLimit(sqlite!, 100)),
+          offeringResolver: async () => productionSizedCatalog(),
+        });
+
+      // Budget 0: one 200-row batch per pass, resuming from the durable cursor.
+      expect((await refresh()).user?.pool.migrationState).toBe('pending');
+      expect(getCount('capacity_pool_candidates')).toBe(200);
+      expect((await refresh()).user?.pool.migrationState).toBe('pending');
+      expect(getCount('capacity_pool_candidates')).toBe(400);
+    });
+
     it('publishes in bounded passes, resumes across a restart, and only then marks missing', async () => {
       createDb();
       seedUserCredential({ id: 'user-hetzner' });
@@ -5254,6 +5312,8 @@ describe('capacity pool review findings', () => {
           userId: 'user-1',
           includeInstallation: false,
           candidatePublishBatchSize: 25,
+          // One batch per pass: these tests prove durable cross-pass resumption.
+          candidatePublishBudgetMs: 0,
           offeringResolver: async () => offerings,
         });
         passes += 1;
@@ -5300,6 +5360,8 @@ describe('capacity pool review findings', () => {
           userId: 'user-1',
           includeInstallation: false,
           candidatePublishBatchSize: 200,
+          // One batch per pass: these tests prove durable cross-pass resumption.
+          candidatePublishBudgetMs: 0,
           offeringResolver: async () =>
             offerings.map((offering) => ({
               ...offering,
@@ -5346,6 +5408,8 @@ describe('capacity pool review findings', () => {
           userId: 'user-1',
           includeInstallation: false,
           candidatePublishBatchSize: 4,
+          // One batch per pass: these tests prove durable cross-pass resumption.
+          candidatePublishBudgetMs: 0,
           offeringResolver: async () => offerings,
         };
         await ensureDefaultCapacityPoolsForExistingCredentials(poolDb() as never, options);
@@ -5466,6 +5530,8 @@ describe('capacity pool review findings', () => {
           userId: 'user-1',
           includeInstallation: false,
           candidatePublishBatchSize: 4,
+          // One batch per pass: these tests prove durable cross-pass resumption.
+          candidatePublishBudgetMs: 0,
           offeringResolver: async () => offerings,
         });
       await refresh();
@@ -5544,6 +5610,8 @@ describe('capacity pool review findings', () => {
             userId: 'user-1',
             includeInstallation: false,
             candidatePublishBatchSize: 4,
+            // One batch per pass: these tests prove durable cross-pass resumption.
+            candidatePublishBudgetMs: 0,
             offeringResolver: async () => offerings,
           });
         await refresh();
@@ -5585,6 +5653,8 @@ describe('capacity pool review findings', () => {
         userId: 'user-1',
         includeInstallation: false,
         candidatePublishBatchSize: 5,
+        // One batch per pass: these tests prove durable cross-pass resumption.
+        candidatePublishBudgetMs: 0,
         offeringResolver: async () => ({ offerings: [], refreshSucceeded: false }),
       });
 

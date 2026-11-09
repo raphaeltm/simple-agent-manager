@@ -436,6 +436,7 @@ describe('pool publication real SQL interleavings', () => {
       userId: 'user',
       includeInstallation: false,
       candidatePublishBatchSize: 1,
+      candidatePublishBudgetMs: 0,
       offeringResolver: async () => [offering()],
     };
     await ensureDefaultCapacityPoolsForExistingCredentials(db, options);
@@ -544,5 +545,118 @@ describe('pool publication real SQL interleavings', () => {
     expect(sqlite.prepare('SELECT count(*) n FROM capacity_pool_candidates').get()).toEqual({
       n: 0,
     });
+  });
+});
+
+describe('pool publication pass budget (incident 2026-11-09)', () => {
+  // 5 offerings x 2 workload roles = 10 rows; batch size 2 makes every count in the path smaller
+  // than the catalog, so only a multi-batch pass can finish it.
+  const catalog = () =>
+    Array.from({ length: 5 }, (_, index) => offering(`cx${index}3`, 10 + index));
+
+  function countingBatches(database: D1Database) {
+    const counter = { batches: 0 };
+    const counted: D1Database = {
+      ...database,
+      batch<T = unknown>(statements: D1PreparedStatement[]) {
+        counter.batches += 1;
+        return database.batch<T>(statements);
+      },
+    };
+    return { counter, counted };
+  }
+
+  it('finishes an incomplete catalog in one pass while the deadline allows', async () => {
+    const { db } = fixture();
+    const store = cursorStore();
+    const result = await publish(db, catalog(), {
+      publishBatchSize: 2,
+      cursorStore: store,
+      publishDeadlineAt: Number.POSITIVE_INFINITY,
+    });
+    expect(result).toMatchObject({
+      totalCandidates: 10,
+      publishedCandidates: 10,
+      publicationComplete: true,
+      markedMissing: true,
+    });
+  });
+
+  it('stops at the deadline with a durable cursor, and the next pass resumes instead of restarting', async () => {
+    const { db } = fixture();
+    const store = cursorStore();
+    let tick = 0;
+    // Each deadline check advances the clock by one; the deadline admits two continuations.
+    const first = await publish(db, catalog(), {
+      publishBatchSize: 2,
+      cursorStore: store,
+      publishDeadlineAt: 2,
+      now: () => tick++,
+    });
+    expect(first).toMatchObject({ publishedCandidates: 6, publicationComplete: false });
+    expect(JSON.parse([...store.values.values()][0]!)).toMatchObject({
+      published: 6,
+      complete: false,
+    });
+
+    const second = await publish(db, catalog(), {
+      publishBatchSize: 2,
+      cursorStore: store,
+      publishDeadlineAt: Number.POSITIVE_INFINITY,
+    });
+    // Only the remaining 4 rows: progress resumed from the cursor.
+    expect(second).toMatchObject({ publishedCandidates: 4, publicationComplete: true });
+  });
+
+  it('a past deadline writes exactly one batch per pass', async () => {
+    const { db } = fixture();
+    const store = cursorStore();
+    const result = await publish(db, catalog(), {
+      publishBatchSize: 2,
+      cursorStore: store,
+      publishDeadlineAt: 0,
+    });
+    expect(result).toMatchObject({ publishedCandidates: 2, publicationComplete: false });
+  });
+
+  it('keeps one batch per pass for a complete, unchanged catalog even with time left', async () => {
+    const { db } = fixture();
+    const store = cursorStore();
+    const options = {
+      publishBatchSize: 2,
+      cursorStore: store,
+      publishDeadlineAt: Number.POSITIVE_INFINITY,
+    };
+    expect(await publish(db, catalog(), options)).toMatchObject({
+      publishedCandidates: 10,
+      publicationComplete: true,
+    });
+    // Already placeable: the steady-state refresh keeps its round-robin cost.
+    expect(await publish(db, catalog(), options)).toMatchObject({
+      publishedCandidates: 2,
+      publicationComplete: true,
+    });
+  });
+
+  it('stops the loop when a newer publisher fences the batch, even with time left', async () => {
+    const { sqlite, database } = fixture();
+    const store = cursorStore();
+    const raced = beforeStatement(database, /INSERT INTO capacity_pool_candidates/, () => {
+      sqlite.exec("UPDATE capacity_sources SET source_generation=2 WHERE id='source'");
+    });
+    const { counter, counted } = countingBatches(raced);
+    let tick = 0;
+    const result = await publish(drizzle(counted, { schema }), catalog(), {
+      publishBatchSize: 2,
+      cursorStore: store,
+      // A finite horizon keeps a regression from spinning forever: without the fence check the
+      // loop would retry the same rejected slice until this runs out.
+      publishDeadlineAt: 50,
+      now: () => tick++,
+    });
+    expect(result).toMatchObject({ publishedCandidates: 0, publicationComplete: false });
+    // One candidate write batch plus its one verification read, nothing more.
+    expect(counter.batches).toBeLessThanOrEqual(2);
+    expect(JSON.parse([...store.values.values()][0]!).published).toBe(0);
   });
 });

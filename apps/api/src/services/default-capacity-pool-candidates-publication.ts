@@ -115,14 +115,41 @@ export async function ensureCandidatesForSource(
   // A completed catalog keeps its readiness proof while later bounded passes refresh
   // timestamps and write generations. Changed semantic content resets that proof.
   const publishFrom = alreadyPublished >= candidateValues.length ? 0 : alreadyPublished;
-  const publishTo = Math.min(publishFrom + batchSize, candidateValues.length);
-  const pending = candidateValues.slice(publishFrom, publishTo);
+  // An incomplete catalog leaves its pool unplaceable (migration-pending) until it finishes,
+  // and refreshes are rare, so it keeps writing batches until complete or the pass deadline
+  // (.claude/rules/81). A complete, unchanged catalog is already placeable: one batch per pass
+  // refreshes its timestamps round-robin, exactly as before.
+  const continueUntil = progress.complete
+    ? Number.NEGATIVE_INFINITY
+    : (options.publishDeadlineAt ?? Number.NEGATIVE_INFINITY);
+  const clock = options.now ?? Date.now;
+  let publishedTotal = publishFrom;
+  let published = 0;
+  let lastBatchFullyPublished = true;
+  for (;;) {
+    const pending = candidateValues.slice(publishedTotal, publishedTotal + batchSize);
+    const written = await publishCandidateValues(db, pending, options);
+    published += written;
+    publishedTotal += written;
+    // A fenced row that did not land means a newer publisher owns the rest of this catalog.
+    lastBatchFullyPublished = written === pending.length;
+    if (
+      !lastBatchFullyPublished ||
+      publishedTotal >= candidateValues.length ||
+      clock() >= continueUntil
+    ) {
+      break;
+    }
+    // Persist each completed batch so a pass that dies mid-loop resumes here, not at zero.
+    await writePublicationProgress(options.cursorStore, cursorKey, {
+      digest,
+      published: publishedTotal,
+      complete: false,
+    });
+  }
 
-  const published = await publishCandidateValues(db, pending, options);
-
-  const publishedTotal = publishFrom + published;
   const publicationComplete =
-    publishedTotal >= candidateValues.length || (progress.complete && published === pending.length);
+    publishedTotal >= candidateValues.length || (progress.complete && lastBatchFullyPublished);
   // Retain completion for multi-pass catalogs: clearing the cursor would make every
   // following identical refresh mark a ready pool migration-pending again. Small catalogs
   // still complete in one pass without a progress row.
