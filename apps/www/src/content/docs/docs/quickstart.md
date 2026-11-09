@@ -13,6 +13,8 @@ SAM is chat-first: you import a repository, describe what you want in a chat, an
 
 Open the web UI and click **Sign in with GitHub**. Authorize the GitHub App when prompted.
 
+The first time you sign in, SAM walks you through the next steps itself. It asks only what your instance leaves open: where agents should work (Instant, the instance's own machines, or your cloud account) and where your code should live (a repository SAM hosts on Cloudflare Artifacts, or GitHub). It then connects your agent, creates your first project with a profile for that agent, and opens the project's chat (`ChoosePathWizard` in `apps/web/src/components/onboarding/choose-path/`). The steps below do the same by hand.
+
 ### 2. Connect an AI Agent
 
 Go to **Settings → Agents** and click **Connect account**. Pick the AI coding agent you want to use — Claude Code, OpenAI Codex, Gemini CLI, Google Antigravity, Mistral Vibe, OpenCode, or Amp — connect it, then give the account a name such as Work or Personal. Depending on the agent, you'll paste an API key or connect a subscription. For Claude Code and Codex, a [guided sign-in](/docs/guides/agents/#connecting-a-subscription-with-guided-sign-in) links your Claude Max/Pro or ChatGPT plan in the browser — no terminal needed. Your credentials stay encrypted in the database — they're never stored as environment variables.
@@ -25,9 +27,9 @@ You need cloud compute to submit tasks. On a hosted instance it's usually provid
 
 Go to **Settings → GitHub** and click **Install GitHub App** on the repositories you want to use with SAM. This grants SAM access to those repositories.
 
-### 4. Import a Project
+### 4. Create a Project
 
-From the **Dashboard**, click **Import Project** and pick a repository that has the GitHub App installed. A project links that repo to its chats, agents, and activity. During setup, your conversation agent becomes the project's default agent. If you also configure a task agent, that agent becomes the default instead. Tasks and automations without a selected profile use this default; change it later in **Project Settings → Agents → Default Agent Type**.
+From the **Dashboard**, click **New Project** and pick a repository that has the GitHub App installed, or, where your instance offers it, let SAM create and host a new repository for you with no GitHub needed. A project links that repo to its chats, agents, and activity. During setup, your conversation agent becomes the project's default agent. If you also configure a task agent, that agent becomes the default instead. Tasks and automations without a selected profile use this default; change it later in **Project Settings → Agents → Default Agent Type**.
 
 ### 5. Chat
 

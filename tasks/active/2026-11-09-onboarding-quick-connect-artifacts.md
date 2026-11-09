@@ -34,3 +34,33 @@
 - [x] StepForm.tsx split under 500 lines (SubscriptionConnect.tsx, ActionButton.tsx)
 - [x] Specialist review: security-auditor (0 critical/high; ambiguous-catalog test + all-or-nothing grant added), ui-ux-specialist (nested-dialog Escape, mobile screenshot, repo-question layout shift, credential scrub, back-nav lookup all fixed)
 - [ ] Staging: redeploy installer, fresh install on the BYOC account, live onboarding with guided sign-in and a SAM-hosted project
+
+## Round 2 (Raphaël, 2026-11-09): thorough decision-tree review + SAM Glass + personality
+
+Findings:
+- On a fresh self-hosted install the installer creates no platform cloud credential; agents run on
+  Instant (`CF_CONTAINER_ENABLED` on, `decideWorkspaceRuntime`). The old "Use SAM-managed
+  infrastructure" choice was a no-op step, and `isComplete` required the user's own cloud
+  credential, so an Instant user saw onboarding forever. No client signal existed for Instant.
+- SAM-managed AI saves `providerMode`, not a credential, so `hasAgent` stayed false.
+- "SAM-managed AI" was offered without checking the installation enables the proxy.
+- The onboarding cloud form handled only Hetzner/Scaleway while `CloudProviderConnectFlow`
+  handles all seven (duplicate implementation).
+- The first chat needed a profile; the composer opened the profile wizard instead.
+- PathPreview and the cloud-sam confirmation were screens with no decision.
+
+Checklist:
+- [x] `GET /api/config/instant-runtime` (`isInstantRuntimeAvailable`) + client query
+- [x] Decision tree asks only open questions (`openQuestions`/`presetAnswers`), runtime first
+- [x] Steps omit what the user already has (`generatePath`)
+- [x] `useSetupStatus`: compute = own cloud | Instant | platform machines; agent = credential | catalog configured
+- [x] OnboardingContext keeps an open overlay up until the hand-off
+- [x] Cloud step reuses `CloudProviderConnectFlow`; old cloud form and step removed
+- [x] First profile created for the chosen agent/runtime; completion opens `/projects/:id/chat`
+- [x] SAM-managed AI gated on `trial-status.hasAgentCredential`
+- [x] SAM Glass: void overlay, one Pane, wells, raised tiles, SegmentedControl, SAM speaks first person, Lucide icons
+- [x] Removed PathPreview, StepForm, ActionButton, `--sam-onboarding-overlay-bg`
+- [x] Unit tests rewritten; new guards proven discriminating; Playwright 24/24 at 375/1280, both themes
+- [x] Docs: quickstart, creating-workspaces, api reference
+- [ ] Reviews (ui-ux-specialist, security-auditor)
+- [ ] Live run-through on a fresh BYOC install
