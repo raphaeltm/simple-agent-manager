@@ -93,7 +93,7 @@ export async function lookupWorkspaceForVmAgent(
   };
 }
 
-function vmAgentUrlForPath(env: Env, nodeId: string, path: string): string {
+export function vmAgentUrlForPath(env: Env, nodeId: string, path: string): string {
   const protocol = env.VM_AGENT_PROTOCOL || 'https';
   const port = env.VM_AGENT_PORT || '8443';
   return `${protocol}://${nodeId.toLowerCase()}.vm.${env.BASE_DOMAIN}:${port}${path}`;

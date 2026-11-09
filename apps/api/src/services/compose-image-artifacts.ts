@@ -77,7 +77,7 @@ function getDownloadExpiry(env: Env): number {
   );
 }
 
-function getS3Client(env: Env): S3Client {
+export function getS3Client(env: Env): S3Client {
   if (!env.R2_ACCESS_KEY_ID || !env.R2_SECRET_ACCESS_KEY || !env.CF_ACCOUNT_ID) {
     throw new Error(
       'R2 S3 credentials not configured (R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, CF_ACCOUNT_ID required)'

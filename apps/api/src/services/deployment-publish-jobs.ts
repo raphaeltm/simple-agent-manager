@@ -76,6 +76,7 @@ function normalizeStatus(status: unknown): string | undefined {
 }
 
 export interface CreateDeploymentPublishJobInput {
+  executor?: 'node' | 'cloudflare';
   projectId: string;
   environmentId: string;
   workspaceId: string;
@@ -107,6 +108,7 @@ export async function createDeploymentPublishJob(
     reference: input.reference || 'latest',
     workingDir: input.workingDir ?? null,
     status: 'queued',
+    executor: input.executor ?? 'node',
     createdAt: now,
     updatedAt: now,
   });

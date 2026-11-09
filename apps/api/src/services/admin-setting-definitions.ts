@@ -18,6 +18,7 @@ export type AdminSettingValue = boolean | number | string | readonly string[] | 
 export type AdminSettingType = 'boolean' | 'integer' | 'string' | 'string-list' | 'enum';
 
 export type AdminSettingName =
+  | `deployments.buildContext${'MaxBytes' | 'CollectTimeoutMs' | 'UploadTtlSeconds' | 'RetentionHours' | 'CleanupBudgetMs' | 'CleanupPageSize'}`
   | `deployments.publishJob${'StallMs' | 'DeadlineMs' | 'SweepLimit' | 'CancelTimeoutMs'}`
   | `workflow.${keyof typeof WORKFLOW_DEFAULTS}`
   | `lifecycleLatency.${LifecycleLatencySettingKey}`
@@ -120,13 +121,7 @@ export interface AdminSettingDefinition {
   readonly type: AdminSettingType;
   readonly defaultValue: AdminSettingValue;
   readonly category:
-    | 'OAuth'
-    | 'Connector'
-    | 'Operations'
-    | 'Collaboration'
-    | 'Chat'
-    | 'AI models'
-    | 'Email';
+    'OAuth' | 'Connector' | 'Operations' | 'Collaboration' | 'Chat' | 'AI models' | 'Email';
   readonly description: string;
   readonly secret: boolean;
   readonly risky: boolean;

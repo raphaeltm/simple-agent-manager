@@ -1,3 +1,4 @@
+import { buildContextCallbackRoute } from './routes/projects/build-context-callback';
 export { McpRateCounter } from './durable-objects/mcp-rate-counter';
 export { WorkspaceBootLog } from './durable-objects/workspace-boot-log';
 import { adminAgentEmailRoutes } from './routes/admin-agent-email';
@@ -868,7 +869,8 @@ app.route('/api/projects', taskCallbackRoute); // Must be before projectsRoutes 
 app.route('/api/projects', registryPushCredentialsCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', composeImageArtifactsCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', composePublishReleaseCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
-app.route('/api/projects', deploymentPublishJobCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
+app.route('/api/projects', deploymentPublishJobCallbackRoute);
+app.route('/api/projects', buildContextCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', workspaceEvictionCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', workspaceResourceHistoryCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', projectsRoutes);
