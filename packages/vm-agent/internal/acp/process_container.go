@@ -19,16 +19,59 @@ const containerOwnerEnv = "SAM_ACP_PROCESS_OWNER"
 // Record the kernel session before the adapter can fork or clear its env.
 // The readiness line is consumed by the launcher, never exposed to ACP.
 const containerSessionLaunchScript = `
+grace=$1
+shift
 command_session() {
  IFS= read -r stat < /proc/self/stat || return 125
  rest=${stat##*) }
  set -- $rest
  [ "$4" = "$$" ] || return 125
+ ancestor=$2
  shift 19
- printf '%s %s %s\n' "$SAM_ACP_PROCESS_OWNER" "$$" "$1"
+ started=$1
+ ancestor_pids=" "
+ while [ "$ancestor" -gt 1 ]; do
+  ancestor_pids="$ancestor_pids$ancestor "
+  IFS= read -r ancestor_stat 2>/dev/null < "/proc/$ancestor/stat" || break
+  ancestor_rest=${ancestor_stat##*) }
+  set -- $ancestor_rest
+  ancestor=$2
+ done
+ printf '%s %s %s\n' "$SAM_ACP_PROCESS_OWNER" "$$" "$started"
+}
+signal_owned() {
+ signal=$1
+ for path in /proc/[0-9]*; do
+  pid=${path##*/}
+  [ "$pid" -gt 1 ] && [ "$pid" != "$$" ] || continue
+  case "$ancestor_pids" in *" $pid "*) continue ;; esac
+  IFS= read -r stat 2>/dev/null < "$path/stat" || continue
+  rest=${stat##*) }
+  set -- $rest
+  [ "$#" -ge 20 ] || continue
+  if [ "$4" = "$$" ] || { [ -r "$path/environ" ] && tr '\000' '\n' < "$path/environ" 2>/dev/null | grep -Fqx -- "SAM_ACP_PROCESS_OWNER=$SAM_ACP_PROCESS_OWNER"; }; then
+   kill -"$signal" "$pid" 2>/dev/null || :
+  fi
+ done
+}
+cleanup() {
+ trap '' TERM INT HUP
+ signal_owned TERM
+ sleep "$grace"
+ signal_owned KILL
+ wait "$child" 2>/dev/null || :
 }
 command_session || exit 125
-exec "$@"
+trap 'cleanup; exit 143' TERM INT HUP
+# Background POSIX jobs otherwise read /dev/null; preserve ACP stdin explicitly.
+exec 3<&0
+( trap - TERM INT HUP; exec "$@" ) <&3 3<&- &
+child=$!
+exec 3<&-
+wait "$child"
+code=$?
+cleanup
+exit "$code"
 `
 
 type bufferedProcessOutput struct {
@@ -167,12 +210,10 @@ func (p *AgentProcess) captureContainerProcesses() error {
 	if p.containerTargets == nil {
 		p.containerTargets = make(map[int]string)
 	}
-	// A live session pins its leader's PID even after the leader exits. Once
-	// the PID is recycled for another session, its starttime no longer matches.
-	sessionValid := p.containerSessionID > 1
-	if leader, ok := processes[p.containerSessionID]; ok && leader.start != p.containerSessionStart {
-		sessionValid = false
-	}
+	// Only the live supervisor proves session continuity. A missing leader
+	// could belong to an extinct/recycled SID, so never adopt it by SID alone.
+	leader, leaderPresent := processes[p.containerSessionID]
+	sessionValid := leaderPresent && leader.start == p.containerSessionStart
 	for pid, proc := range processes {
 		if proc.owned || (sessionValid && proc.session == p.containerSessionID) {
 			p.containerTargets[pid] = proc.start

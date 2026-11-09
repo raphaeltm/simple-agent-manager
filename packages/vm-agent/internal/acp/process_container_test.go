@@ -33,6 +33,12 @@ while args and args[0].startswith('-'):
  elif flag!='-i': raise Exception(flag)
 assert args.pop(0)=='test-container'
 if args[0]=='pkill': sys.exit(1)
+if args[0]=='setsid' and env.get('SAM_TEST_DOCKER_MODE'):
+ open(env['SAM_TEST_DOCKER_PID_FILE'],'w').write(str(os.getpid()))
+ mode=env['SAM_TEST_DOCKER_MODE']
+ if mode=='malformed': print('invalid ownership header',flush=True)
+ if mode=='eof': os.close(1)
+ os.execvpe('sleep',['sleep','60'],env)
 os.execvpe(args[0],args,env)
 `
 	if err := os.WriteFile(filepath.Join(dir, "docker"), []byte(script), 0755); err != nil {
@@ -132,7 +138,7 @@ func TestContainerCleanupWithoutOwnershipNeverUsesCommandPatterns(t *testing.T) 
 
 func TestContainerLaunchOwnershipOverridesProfileEnv(t *testing.T) {
 	installProcessDockerTransport(t)
-	p, err := StartProcess(ProcessConfig{ContainerID: "test-container", AcpCommand: "sh", AcpArgs: []string{"-c", `printf '%s\n' "$SAM_ACP_PROCESS_OWNER"`}, EnvVars: []string{"SAM_ACP_PROCESS_OWNER=profile-collision"}})
+	p, err := StartProcess(ProcessConfig{ContainerID: "test-container", AcpCommand: "sh", AcpArgs: []string{"-c", `printf '%s\n' "$SAM_ACP_PROCESS_OWNER"`}, EnvVars: []string{"SAM_ACP_PROCESS_OWNER=profile-collision"}, StopGracePeriod: 50 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,5 +193,85 @@ func TestContainerCleanupFindsEnvClearedOrphanBeforeStop(t *testing.T) {
 	}
 	if _, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid)); err == nil {
 		t.Fatal("env-cleared child orphaned before Stop leaked")
+	}
+}
+
+func TestContainerCleanupRejectsUnprovenSessionContinuity(t *testing.T) {
+	for _, snapshot := range []string{
+		"4242 1 999 0 1234\n",                       // Extinct SID recycled, replacement leader also gone.
+		"1234 1 222 0 1234\n4242 1234 999 0 1234\n", // Recycled live leader.
+	} {
+		t.Run(snapshot, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "docker"), []byte("#!/bin/sh\nprintf '%s' '"+snapshot+"'\n"), 0755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+			p := &AgentProcess{containerID: "test-container", containerOwner: "owner", containerSessionID: 1234, containerSessionStart: "111"}
+			if err := p.captureContainerProcesses(); err != nil {
+				t.Fatal(err)
+			}
+			if len(p.containerTargets) != 0 {
+				t.Fatalf("unrelated replacement session adopted: %v", p.containerTargets)
+			}
+		})
+	}
+}
+
+func TestContainerLaunchFailureCleansOnlyItsProcess(t *testing.T) {
+	for _, mode := range []string{"malformed", "eof", "timeout"} {
+		t.Run(mode, func(t *testing.T) {
+			installProcessDockerTransport(t)
+			peer := startCleanupFixture(t, `echo ready; while read request; do echo "peer:$request"; done`)
+			out := bufio.NewScanner(peer.Stdout())
+			if !out.Scan() {
+				t.Fatal("peer not ready")
+			}
+			pidFile := filepath.Join(t.TempDir(), "pid")
+			t.Setenv("SAM_TEST_DOCKER_PID_FILE", pidFile)
+			t.Setenv("SAM_TEST_DOCKER_MODE", mode)
+			started := time.Now()
+			p, err := StartProcess(ProcessConfig{ContainerID: "test-container", AcpCommand: "sh", ContainerSignalTimeout: 200 * time.Millisecond, StopGracePeriod: 50 * time.Millisecond, StopTimeout: time.Second})
+			if err == nil {
+				_ = p.Stop()
+				t.Fatal("invalid handshake accepted")
+			}
+			if time.Since(started) > 3*time.Second {
+				t.Fatal("startup failure cleanup exceeded bound")
+			}
+			pidText, readErr := os.ReadFile(pidFile)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			pid, parseErr := strconv.Atoi(string(pidText))
+			if parseErr != nil {
+				t.Fatal(parseErr)
+			}
+			if _, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid)); err == nil {
+				_ = syscall.Kill(pid, syscall.SIGKILL)
+				t.Fatal("failed startup leaked process")
+			}
+			if _, err := fmt.Fprintln(peer.Stdin(), "survived-startup-failure"); err != nil {
+				t.Fatal(err)
+			}
+			if !out.Scan() || out.Text() != "peer:survived-startup-failure" {
+				t.Fatal("peer lost during startup failure")
+			}
+		})
+	}
+}
+
+func TestContainerLaunchPreservesBufferedACPOutputAndExitStatus(t *testing.T) {
+	installProcessDockerTransport(t)
+	p := startCleanupFixture(t, `printf '{"jsonrpc":"2.0","id":1,"result":{}}\n'; exit 23`)
+	out := bufio.NewScanner(p.Stdout())
+	if !out.Scan() || out.Text() != `{"jsonrpc":"2.0","id":1,"result":{}}` {
+		t.Fatal("readiness header lost or contaminated ACP output")
+	}
+	if err := p.Wait(); err == nil {
+		t.Fatal("adapter exit failure was lost")
+	}
+	if p.cmd.ProcessState.ExitCode() != 23 {
+		t.Fatalf("adapter exit status=%d", p.cmd.ProcessState.ExitCode())
 	}
 }

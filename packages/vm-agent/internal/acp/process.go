@@ -375,7 +375,11 @@ func startDockerExecProcess(cfg ProcessConfig) (*AgentProcess, error) {
 	cfg.EnvVars = mergeProcessEnv(cfg.EnvVars, []string{containerOwnerEnv + "=" + owner})
 	launchCfg := cfg
 	launchCfg.AcpCommand = "setsid"
-	launchCfg.AcpArgs = append([]string{"--wait", "sh", "-c", containerSessionLaunchScript, "sam-acp-session", cfg.AcpCommand}, cfg.AcpArgs...)
+	grace := cfg.StopGracePeriod
+	if grace <= 0 {
+		grace = DefaultStopGracePeriod
+	}
+	launchCfg.AcpArgs = append([]string{"--wait", "sh", "-c", containerSessionLaunchScript, "sam-acp-session", fmt.Sprintf("%.3f", grace.Seconds()), cfg.AcpCommand}, cfg.AcpArgs...)
 	args, envFilePath, err := buildDockerExecArgs(launchCfg)
 	if err != nil {
 		return nil, err
@@ -576,7 +580,7 @@ func (p *AgentProcess) Stderr() io.Reader {
 //     Killing only the host-side `docker exec` process (via PGID signals)
 //     does NOT terminate the processes inside the container — they run in
 //     a separate PID namespace and will keep consuming resources.
-//  3. Send SIGTERM to the host-side process group to clean up docker exec.
+//  3. Wait for the container grace period without closing its Docker transport.
 //  4. If still running after grace period, SIGKILL both inside and outside.
 //
 // Docker commands have a configurable per-command deadline; the host-process
@@ -624,10 +628,14 @@ func (p *AgentProcess) Stop() error {
 	// PID namespace. Host-side PGID signals only affect docker exec itself.
 	cleanupErr = errors.Join(cleanupErr, p.killContainerProcesses(syscall.SIGTERM))
 
-	// Stage 2: SIGTERM to host-side process group — cleans up the docker exec CLI.
+	// Local processes need host signals. For Docker, keep the transport alive
+	// through the container grace period; killing it early would falsely look
+	// like successful container exit and force immediate KILL escalation.
 	pgid := pid
-	if err := syscall.Kill(-pgid, syscall.SIGTERM); err != nil {
-		slog.Warn("SIGTERM to process group failed", "pgid", pgid, "error", err)
+	if p.containerID == "" {
+		if err := syscall.Kill(-pgid, syscall.SIGTERM); err != nil {
+			slog.Warn("SIGTERM to process group failed", "pgid", pgid, "error", err)
+		}
 	}
 
 	// Wait for graceful exit or grace period expiry.
