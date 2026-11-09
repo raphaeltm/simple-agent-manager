@@ -2,6 +2,7 @@ package acp
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -131,7 +132,7 @@ func testRestartAgentProcessForCredentialRotation(t *testing.T, startedAgo time.
 
 	host.mu.RLock()
 	restartCount := host.restartCount
-	intentional := host.intentionalProcessStop
+	intentional := host.intentionalProcessStop != nil
 	sessionID := string(host.sessionID)
 	host.mu.RUnlock()
 	if restartCount != 0 {
@@ -191,7 +192,7 @@ func TestSessionHost_RestartAgentProcessForCredentialRotationNoProcess(t *testin
 			t.Fatalf("idle host spawned %d process(es) or changed status %s -> %s", recorder.count(), before, host.Status())
 		}
 		host.mu.RLock()
-		intentional := host.intentionalProcessStop
+		intentional := host.intentionalProcessStop != nil
 		host.mu.RUnlock()
 		if intentional {
 			t.Fatal("intentionalProcessStop latched with no process; a later real crash would be hidden")
@@ -210,6 +211,95 @@ func TestSessionHost_RestartAgentProcessForCredentialRotationNoProcess(t *testin
 		time.Sleep(1500 * time.Millisecond)
 		if recorder.count() != 1 || host.Status() != HostStopped {
 			t.Fatalf("stopped host spawned a replacement (processes=%d) or left HostStopped (%s)", recorder.count(), host.Status())
+		}
+	})
+}
+
+// A credential rotation that lands after the agent process already exited on its
+// own must not relabel that crash as an intentional stop: the crash still
+// spends the restart budget, so a crash-looping agent cannot slip past
+// MaxRestartAttempts because rotations keep coinciding with its exits. The
+// mark is read when Wait returns and names the process it was set for.
+func TestSessionHost_IntentionalStopMarkMustPredateTheExit(t *testing.T) {
+	t.Parallel()
+
+	newHost := func(t *testing.T, process agentProcess) *SessionHost {
+		t.Helper()
+		host := NewSessionHost(SessionHostConfig{
+			GatewayConfig: GatewayConfig{
+				SessionID:          "test-session",
+				WorkspaceID:        "test-workspace",
+				MaxRestartAttempts: 1,
+				ContainerResolver:  func() (string, error) { return "", errors.New("container unavailable") },
+			},
+			MessageBufferSize: 100,
+			ViewerSendBuffer:  32,
+		})
+		t.Cleanup(host.Stop)
+		host.mu.Lock()
+		host.process = process
+		host.setStatusLocked(HostReady)
+		host.agentType = "claude-code"
+		host.setSessionIDLocked("acp-session-1")
+		host.restartCount = 1 // the next counted crash exceeds the budget
+		host.mu.Unlock()
+		return host
+	}
+	restartOutcome := func(host *SessionHost) (int, string) {
+		host.mu.RLock()
+		defer host.mu.RUnlock()
+		return host.restartCount, host.statusErr
+	}
+
+	t.Run("rotation requested after the exit counts the crash", func(t *testing.T) {
+		process := newExitedAgentProcess(t, "claude-code")
+		host := newHost(t, process)
+		rotated := false
+		host.processExitObservedHook = func(exited agentProcess) {
+			// The process has exited but is still the host's current process,
+			// exactly the window a rotation can land in.
+			rotated = host.RestartAgentProcessForCredentialRotation()
+		}
+		host.monitorProcessExit(process, "claude-code", nil, nil)
+
+		if !rotated {
+			t.Fatal("setup: the rotation did not see a running process in the exit window")
+		}
+		restartCount, statusErr := restartOutcome(host)
+		if restartCount != 2 || !strings.Contains(statusErr, "could not be restarted") {
+			t.Fatalf("restartCount=%d statusErr=%q, want the crash counted against the exhausted budget", restartCount, statusErr)
+		}
+	})
+
+	t.Run("rotation requested before the exit is intentional", func(t *testing.T) {
+		process := newExitedAgentProcess(t, "claude-code")
+		host := newHost(t, process)
+		if !host.RestartAgentProcessForCredentialRotation() {
+			t.Fatal("setup: the rotation saw no running process")
+		}
+		host.monitorProcessExit(process, "claude-code", nil, nil)
+
+		restartCount, statusErr := restartOutcome(host)
+		if restartCount != 1 || strings.Contains(statusErr, "could not be restarted") {
+			t.Fatalf("restartCount=%d statusErr=%q, want an uncounted in-place restart", restartCount, statusErr)
+		}
+		if !strings.Contains(statusErr, "container unavailable") {
+			t.Fatalf("statusErr=%q, want the restart attempt to have run", statusErr)
+		}
+	})
+
+	t.Run("a mark for an earlier process does not hide a later crash", func(t *testing.T) {
+		earlier := newExitedAgentProcess(t, "claude-code")
+		process := newExitedAgentProcess(t, "claude-code")
+		host := newHost(t, process)
+		host.mu.Lock()
+		host.intentionalProcessStop = earlier
+		host.mu.Unlock()
+		host.monitorProcessExit(process, "claude-code", nil, nil)
+
+		restartCount, statusErr := restartOutcome(host)
+		if restartCount != 2 || !strings.Contains(statusErr, "could not be restarted") {
+			t.Fatalf("restartCount=%d statusErr=%q, want the crash counted", restartCount, statusErr)
 		}
 	})
 }

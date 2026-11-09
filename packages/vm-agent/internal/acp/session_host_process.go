@@ -20,6 +20,10 @@ import (
 // See .claude/rules/71-request-context-must-not-outlive-its-request.md.
 func (h *SessionHost) monitorProcessExit(process agentProcess, agentType string, cred *agentCredential, settings *agentSettingsPayload) {
 	err := process.Wait()
+	// Decide whether this exit was intentional at the moment it was observed. A
+	// stop requested after this point targeted a process that had already
+	// exited on its own, so it must not hide the crash.
+	intentionalStop := h.intentionalStopForExitedProcess(process)
 	// Exit proof remains valid after lifecycle detachment/replacement. Clear
 	// only this process's fence before the current-process checks below.
 	h.releaseGuardedCancelForExitedProcess(process)
@@ -37,8 +41,6 @@ func (h *SessionHost) monitorProcessExit(process agentProcess, agentType string,
 		slog.Info("Agent process monitor: process replaced, skipping status/restart")
 		return
 	}
-	intentionalStop := h.intentionalProcessStop
-	h.intentionalProcessStop = false
 	rollover := h.checkpointRollover
 	rolloverForced := false
 	if rollover != nil {
@@ -403,4 +405,19 @@ func (h *SessionHost) finishCrashRecoveryFailure(crashRecovery crashRecoverySnap
 	if notify != nil {
 		notify(fatalErrorStopReason, err)
 	}
+}
+
+// intentionalStopForExitedProcess reports whether process was stopped on
+// purpose, consuming the mark. Called once its Wait has returned.
+func (h *SessionHost) intentionalStopForExitedProcess(process agentProcess) bool {
+	h.mu.Lock()
+	intentional := process != nil && h.intentionalProcessStop == process
+	if intentional {
+		h.intentionalProcessStop = nil
+	}
+	h.mu.Unlock()
+	if hook := h.processExitObservedHook; hook != nil {
+		hook(process)
+	}
+	return intentional
 }

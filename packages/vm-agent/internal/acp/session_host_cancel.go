@@ -208,7 +208,7 @@ func (h *SessionHost) stopProcessForIntentionalRestart(caller string) bool {
 	h.mu.Lock()
 	process := h.process
 	if process != nil {
-		h.intentionalProcessStop = true
+		h.intentionalProcessStop = process
 	}
 	h.mu.Unlock()
 

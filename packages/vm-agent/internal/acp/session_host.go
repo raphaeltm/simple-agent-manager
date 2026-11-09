@@ -213,15 +213,26 @@ type SessionHost struct {
 	// credential-fetch/install phase, so two concurrent selections for the same
 	// agent cannot double-spawn a process for one session.
 	selectionInProgress bool
-	// intentionalProcessStop marks the current agent process as stopped on
-	// purpose so the process monitor restarts it in place (LoadSession resume)
-	// without counting a crash: no rapid-exit or active-prompt error, no
-	// restartCount increment. Set by a user prompt cancel that terminates the
-	// agent (StopProcessForPromptCancel, CancelPromptGuarded) and by a workspace
-	// credential rotation (RestartAgentProcessForCredentialRotation). Consumed
-	// and cleared by monitorProcessExit.
-	intentionalProcessStop bool
-	checkpointRollover     *checkpointRolloverEpisode
+	// intentionalProcessStop is the agent process that was stopped on purpose,
+	// so the process monitor restarts it in place (LoadSession resume) without
+	// counting a crash: no rapid-exit or active-prompt error, no restartCount
+	// increment. Set by a user prompt cancel that terminates the agent
+	// (StopProcessForPromptCancel, CancelPromptGuarded) and by a workspace
+	// credential rotation (RestartAgentProcessForCredentialRotation).
+	//
+	// It names the process rather than being a per-host flag, and
+	// monitorProcessExit reads it as soon as that process's Wait returns
+	// (intentionalStopForExitedProcess). A stop requested after the process had
+	// already exited on its own therefore cannot relabel that crash as
+	// intentional, and a stale mark can never match a later process. nil means
+	// no intentional stop is pending.
+	intentionalProcessStop agentProcess
+	// processExitObservedHook, when set by a test before the agent starts, runs
+	// right after monitorProcessExit records whether an exit was intentional, so
+	// a test can request a stop between the exit and the restart decision.
+	// Always nil in production.
+	processExitObservedHook func(agentProcess)
+	checkpointRollover      *checkpointRolloverEpisode
 
 	// replaySuppressed is set while an ACP LoadSession is in flight. LoadSession
 	// makes the agent replay the entire transcript as session/update
