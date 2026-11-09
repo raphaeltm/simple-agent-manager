@@ -49,7 +49,7 @@ os.execvpe(args[0],args,env)
 
 func startCleanupFixture(t *testing.T, script string) *AgentProcess {
 	t.Helper()
-	p, err := StartProcess(ProcessConfig{ContainerID: "test-container", AcpCommand: "sh", AcpArgs: []string{"-c", script}, StopGracePeriod: 50 * time.Millisecond, StopTimeout: 3 * time.Second})
+	p, err := StartProcess(ProcessConfig{DockerExecutable: testDockerExecutable(t), ContainerID: "test-container", AcpCommand: "sh", AcpArgs: []string{"-c", script}, StopGracePeriod: 50 * time.Millisecond, StopTimeout: 3 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestContainerCleanupWithoutOwnershipNeverUsesCommandPatterns(t *testing.T) 
 
 func TestContainerLaunchOwnershipOverridesProfileEnv(t *testing.T) {
 	installProcessDockerTransport(t)
-	p, err := StartProcess(ProcessConfig{ContainerID: "test-container", AcpCommand: "sh", AcpArgs: []string{"-c", `printf '%s\n' "$SAM_ACP_PROCESS_OWNER"`}, EnvVars: []string{"SAM_ACP_PROCESS_OWNER=profile-collision"}, StopGracePeriod: 50 * time.Millisecond})
+	p, err := StartProcess(ProcessConfig{DockerExecutable: testDockerExecutable(t), ContainerID: "test-container", AcpCommand: "sh", AcpArgs: []string{"-c", `printf '%s\n' "$SAM_ACP_PROCESS_OWNER"`}, EnvVars: []string{"SAM_ACP_PROCESS_OWNER=profile-collision"}, StopGracePeriod: 50 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,45 +154,31 @@ func TestContainerLaunchOwnershipOverridesProfileEnv(t *testing.T) {
 	}
 }
 
-func TestContainerCleanupFindsMarkedExecChildAfterParentExit(t *testing.T) {
-	installProcessDockerTransport(t)
-	owner := startCleanupFixture(t, `sh -c 'echo $$; exec sleep 60' & exit 0`)
-	out := bufio.NewScanner(owner.Stdout())
-	if !out.Scan() {
-		t.Fatal("child not ready")
-	}
-	pid, err := strconv.Atoi(out.Text())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
-	_ = owner.Wait()
-	if err := owner.Stop(); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid)); err == nil {
-		t.Fatal("marked exec child survived its parent and cleanup")
-	}
-}
-
-func TestContainerCleanupFindsEnvClearedOrphanBeforeStop(t *testing.T) {
-	installProcessDockerTransport(t)
-	owner := startCleanupFixture(t, `env -i PATH=/usr/bin:/bin sh -c 'echo $$; exec sleep 60' & exit 0`)
-	out := bufio.NewScanner(owner.Stdout())
-	if !out.Scan() {
-		t.Fatal("child not ready")
-	}
-	pid, err := strconv.Atoi(out.Text())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
-	_ = owner.Wait()
-	if err := owner.Stop(); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid)); err == nil {
-		t.Fatal("env-cleared child orphaned before Stop leaked")
+func TestContainerCleanupFindsOrphanAfterParentExit(t *testing.T) {
+	for _, command := range []string{
+		`sh -c 'echo $$; exec sleep 60' & exit 0`,
+		`env -i PATH=/usr/bin:/bin sh -c 'echo $$; exec sleep 60' & exit 0`,
+	} {
+		t.Run(command, func(t *testing.T) {
+			installProcessDockerTransport(t)
+			owner := startCleanupFixture(t, command)
+			out := bufio.NewScanner(owner.Stdout())
+			if !out.Scan() {
+				t.Fatal("child not ready")
+			}
+			pid, err := strconv.Atoi(out.Text())
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+			_ = owner.Wait()
+			if err := owner.Stop(); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid)); err == nil {
+				t.Fatal("orphan survived adapter exit and cleanup")
+			}
+		})
 	}
 }
 
@@ -207,7 +193,7 @@ func TestContainerCleanupRejectsUnprovenSessionContinuity(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
-			p := &AgentProcess{containerID: "test-container", containerOwner: "owner", containerSessionID: 1234, containerSessionStart: "111"}
+			p := &AgentProcess{containerID: "test-container", dockerExecutable: filepath.Join(dir, "docker"), containerOwner: "owner", containerSessionID: 1234, containerSessionStart: "111"}
 			if err := p.captureContainerProcesses(); err != nil {
 				t.Fatal(err)
 			}
@@ -231,7 +217,7 @@ func TestContainerLaunchFailureCleansOnlyItsProcess(t *testing.T) {
 			t.Setenv("SAM_TEST_DOCKER_PID_FILE", pidFile)
 			t.Setenv("SAM_TEST_DOCKER_MODE", mode)
 			started := time.Now()
-			p, err := StartProcess(ProcessConfig{ContainerID: "test-container", AcpCommand: "sh", ContainerSignalTimeout: 200 * time.Millisecond, StopGracePeriod: 50 * time.Millisecond, StopTimeout: time.Second})
+			p, err := StartProcess(ProcessConfig{DockerExecutable: testDockerExecutable(t), ContainerID: "test-container", AcpCommand: "sh", ContainerSignalTimeout: 200 * time.Millisecond, StopGracePeriod: 50 * time.Millisecond, StopTimeout: time.Second})
 			if err == nil {
 				_ = p.Stop()
 				t.Fatal("invalid handshake accepted")
@@ -273,5 +259,20 @@ func TestContainerLaunchPreservesBufferedACPOutputAndExitStatus(t *testing.T) {
 	}
 	if p.cmd.ProcessState.ExitCode() != 23 {
 		t.Fatalf("adapter exit status=%d", p.cmd.ProcessState.ExitCode())
+	}
+}
+
+func testDockerExecutable(t *testing.T) string {
+	t.Helper()
+	path, err := exec.LookPath("docker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestContainerLaunchRejectsRelativeHostDockerPath(t *testing.T) {
+	if _, err := StartProcess(ProcessConfig{DockerExecutable: "docker", ContainerID: "test-container", AcpCommand: "sh"}); err == nil {
+		t.Fatal("relative Docker path would reintroduce privileged PATH lookup")
 	}
 }

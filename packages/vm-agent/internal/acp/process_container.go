@@ -180,12 +180,18 @@ func (p *AgentProcess) captureContainerProcesses() error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), p.containerCommandTimeout())
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "docker", "exec", "-u", "0", p.containerID, "sh", "-c", containerSnapshotScript, "sam-process-snapshot", containerOwnerEnv+"="+p.containerOwner).Output()
+	out, err := exec.CommandContext(ctx, p.dockerCommandPath(), "exec", "-u", "0", p.containerID, "sh", "-c", containerSnapshotScript, "sam-process-snapshot", containerOwnerEnv+"="+p.containerOwner).Output()
 	if err != nil {
 		return fmt.Errorf("snapshot owned container processes: %w", err)
 	}
+	processes := parseContainerProcessSnapshot(string(out))
+	p.retainOwnedContainerProcesses(processes)
+	return nil
+}
+
+func parseContainerProcessSnapshot(output string) map[int]containerProcessIdentity {
 	processes := make(map[int]containerProcessIdentity)
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
 		fields := strings.Fields(line)
 		if len(fields) != 5 {
 			continue
@@ -207,6 +213,10 @@ func (p *AgentProcess) captureContainerProcesses() error {
 		}
 		processes[pid] = containerProcessIdentity{pid: pid, parent: parent, start: fields[2], owned: fields[3] == "1", session: session}
 	}
+	return processes
+}
+
+func (p *AgentProcess) retainOwnedContainerProcesses(processes map[int]containerProcessIdentity) {
 	if p.containerTargets == nil {
 		p.containerTargets = make(map[int]string)
 	}
@@ -231,7 +241,6 @@ func (p *AgentProcess) captureContainerProcesses() error {
 			changed = true
 		}
 	}
-	return nil
 }
 
 // killContainerProcesses signals only identities associated with this launch.
@@ -254,7 +263,7 @@ func (p *AgentProcess) killContainerProcesses(sig syscall.Signal) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), p.containerCommandTimeout())
 	defer cancel()
-	if err := exec.CommandContext(ctx, "docker", args...).Run(); err != nil {
+	if err := exec.CommandContext(ctx, p.dockerCommandPath(), args...).Run(); err != nil {
 		return errors.Join(snapshotErr, fmt.Errorf("signal owned container processes: %w", err))
 	}
 	return snapshotErr
@@ -266,4 +275,12 @@ func (p *AgentProcess) containerCommandTimeout() time.Duration {
 		return p.containerSignalTimeout
 	}
 	return DefaultContainerSignalTimeout
+}
+
+// dockerCommandPath avoids PATH resolution in the privileged host service.
+func (p *AgentProcess) dockerCommandPath() string {
+	if p.dockerExecutable != "" {
+		return p.dockerExecutable
+	}
+	return DefaultDockerExecutable
 }

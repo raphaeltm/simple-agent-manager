@@ -31,6 +31,9 @@ const (
 	// DefaultContainerSignalTimeout bounds each Docker process inspection/signal.
 	// Override via ProcessConfig.ContainerSignalTimeout for slower containers.
 	DefaultContainerSignalTimeout = 3 * time.Second
+	// DefaultDockerExecutable is the Docker CLI installed by cloud-init.
+	// ProcessConfig.DockerExecutable supplies an explicit alternative in tests.
+	DefaultDockerExecutable = "/usr/bin/docker"
 )
 
 // samEnvFiles are the paths inside the devcontainer where SAM and project
@@ -177,6 +180,7 @@ type AgentProcess struct {
 	stderr                 io.ReadCloser
 	containerID            string
 	containerOwner         string
+	dockerExecutable       string
 	containerSessionID     int
 	containerSessionStart  string
 	containerTargets       map[int]string
@@ -224,6 +228,8 @@ func (LocalLauncher) Start(cfg ProcessConfig) (*AgentProcess, error) {
 
 // ProcessConfig holds configuration for spawning an agent process.
 type ProcessConfig struct {
+	// DockerExecutable is an absolute host CLI path. Empty uses DefaultDockerExecutable.
+	DockerExecutable string
 	// ContainerID is the Docker container to exec into.
 	ContainerID string
 	// ContainerUser is the user to run as inside the container.
@@ -366,6 +372,14 @@ func removeEnvFile(path string) {
 }
 
 func startDockerExecProcess(cfg ProcessConfig) (*AgentProcess, error) {
+	dockerExecutable := cfg.DockerExecutable
+	if dockerExecutable == "" {
+		dockerExecutable = DefaultDockerExecutable
+	}
+	if !filepath.IsAbs(dockerExecutable) {
+		return nil, errors.New("Docker executable must be an absolute path")
+	}
+
 	// Per-launch identity survives adapter exec wrappers and ordinary child forks.
 	var ownerBytes [16]byte
 	if _, err := rand.Read(ownerBytes[:]); err != nil {
@@ -385,7 +399,7 @@ func startDockerExecProcess(cfg ProcessConfig) (*AgentProcess, error) {
 		return nil, err
 	}
 
-	cmd := exec.Command("docker", args...)
+	cmd := exec.Command(dockerExecutable, args...)
 
 	// Place the process in its own process group so we can signal the entire
 	// tree (docker exec CLI + its children) via negative PGID in Stop().
@@ -421,6 +435,7 @@ func startDockerExecProcess(cfg ProcessConfig) (*AgentProcess, error) {
 		stderr:                 pipes.stderr,
 		containerID:            cfg.ContainerID,
 		containerOwner:         owner,
+		dockerExecutable:       dockerExecutable,
 		containerSignalTimeout: cfg.ContainerSignalTimeout,
 		envFilePath:            envFilePath,
 		startTime:              time.Now(),
