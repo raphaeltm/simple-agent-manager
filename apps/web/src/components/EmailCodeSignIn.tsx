@@ -3,6 +3,7 @@ import { ArrowRight, Mail } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 
 import { sendSignInCode, signInWithEmailCode } from '../lib/auth';
+import { maybeJsonRecord } from '../lib/runtime-validation';
 
 interface EmailCodeSignInProps {
   /** Pre-filled address, e.g. the installer owner arriving from first-run setup. */
@@ -28,8 +29,8 @@ function readPendingCodeEmail(): string | null {
   try {
     const raw = window.sessionStorage.getItem(PENDING_CODE_KEY);
     if (!raw) return null;
-    const pending = JSON.parse(raw) as { email?: unknown; sentAt?: unknown };
-    if (typeof pending.email !== 'string' || typeof pending.sentAt !== 'number') return null;
+    const pending = maybeJsonRecord(JSON.parse(raw) as unknown);
+    if (typeof pending?.email !== 'string' || typeof pending.sentAt !== 'number') return null;
     return Date.now() - pending.sentAt < PENDING_CODE_TTL_MS ? pending.email : null;
   } catch {
     return null;
