@@ -20,9 +20,11 @@ current `main` before working on it.
   rejecting older or incompatible releases before update approval; preserving verified canonical
   source in the user's account; enforcing the approved workers.dev target on resume and update;
   verifying API release identity and web availability before reporting completion.
-- #2475's release dependencies (production `OAUTH_REGISTRATION_TOKEN`, `INSTALLER_MODE=full`,
-  `INSTALLER_ARTIFACT_BASE_URL`, first Create Release dispatch) are operator steps. Raphaël runs
-  the first production install himself.
+- #2475's release dependencies were completed with fix #2587 (2026-11-08): production runs in
+  full mode with a private OAuth client created through `OAUTH_REGISTRATION_TOKEN`, and the daily
+  release attaches prebuilt artifacts (first: `v2026.11.08.1`). Still open: Raphaël's first real
+  production install, and promoting the OAuth client to public (manual DNS TXT verification, then
+  visibility=public, which is permanent).
 - Related: `tasks/backlog/2026-11-06-installer-smoke-real-consent-scopes-and-flakes.md`.
 
 ## Acceptance Criteria
@@ -30,4 +32,5 @@ current `main` before working on it.
 - [ ] Each adversarial-audit gap is confirmed fixed on `main` (cite the code path) or fixed.
 - [ ] Decide whether SAM's own CI should switch to the shared engine. If yes, complete the parity
       audit items and qualify equivalence on staging first. If no, record the decision here.
-- [ ] #2475's release dependencies are confirmed in place, or their absence is reported.
+- [ ] After Raphaël's first production install, record the outcome here and decide on promoting
+      the OAuth client to public.

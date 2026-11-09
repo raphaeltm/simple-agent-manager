@@ -28,13 +28,23 @@ need a weekly status nudge so their park decisions stay visible.
       only recorded the merge or deploy
 - [x] Carry the installer task's open remainder to a backlog file
 - [x] Post a weekly status/park comment on each PR older than 7 days
-- [ ] Classify every backlog file; delete only shipped, superseded, obsolete or duplicate entries
-      with evidence; keep anything plausibly open
-- [ ] Record a one-line rationale per removed backlog file in the PR description
+- [x] Classify every backlog file; delete only shipped, superseded, obsolete or duplicate entries
+      with evidence; keep anything plausibly open (272 classified: 13 removed, 120 PARTIAL,
+      139 KEEP; duplicates' unique criteria folded into their canonical files)
+- [x] Add reconciliation notes to the 13 PARTIAL files with new progress since the last sweep
+- [x] Record a one-line rationale per removed backlog file in the PR description
 
 ## Acceptance criteria
 
-- [ ] `tasks/active/` contains only this task while the PR is open
+- [x] `tasks/active/` contains only this task while the PR is open (archived before merge)
 - [ ] Every removed backlog file has a one-line rationale in the PR description
-- [ ] No backlog file with plausibly open work is removed
+- [x] No backlog file with plausibly open work is removed (each removal spot-checked against code)
 - [ ] CI green
+
+## Notes
+
+- Removed files and rationale: see the PR description.
+- Findings left for humans (not changed here): `rateLimitAnonymous`
+  (`apps/api/src/middleware/rate-limit.ts`) has no callers since #2588; the `origin/harness/develop`
+  branch (PRs #943–#953) needs a land-or-retire decision; main CI on `80bb3b6de` (#2598) failed in
+  `Devcontainer Volume Mount`, so that merge has not deployed yet.
