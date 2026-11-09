@@ -72,6 +72,12 @@ export function EmailCodeSignIn({
   const [error, setError] = useState<string | null>(null);
   const [resent, setResent] = useState(false);
 
+  // `sendOnMount` only fires for the address the setup token already vouched for (the installer
+  // owner). That address is known-good, so we can say so plainly instead of hedging the way we
+  // must for an arbitrary visitor-typed address (no account-enumeration signal either way).
+  const isKnownOwnerAddress =
+    sendOnMount && email.trim().toLowerCase() === initialEmail.trim().toLowerCase();
+
   const requestCode = async (event?: FormEvent) => {
     event?.preventDefault();
     setError(null);
@@ -116,8 +122,17 @@ export function EmailCodeSignIn({
     return (
       <form onSubmit={verify} className="space-y-3 text-left" data-testid="email-code-form">
         <p className="text-sm text-fg-muted">
-          If <span className="break-all font-medium text-fg-primary">{email.trim()}</span> can sign
-          in here, a code is on its way.
+          {isKnownOwnerAddress ? (
+            <>
+              We sent a code to{' '}
+              <span className="break-all font-medium text-fg-primary">{email.trim()}</span>.
+            </>
+          ) : (
+            <>
+              If <span className="break-all font-medium text-fg-primary">{email.trim()}</span> can
+              sign in here, a code is on its way.
+            </>
+          )}
         </p>
         <label className="block space-y-1.5">
           <span className="text-sm font-medium">Sign-in code</span>

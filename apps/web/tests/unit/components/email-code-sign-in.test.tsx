@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import { EmailCodeSignIn } from '../../../src/components/EmailCodeSignIn';
@@ -11,6 +12,8 @@ vi.mock('../../../src/lib/auth', () => ({
 
 beforeEach(() => {
   window.sessionStorage.clear();
+  auth.send.mockReset();
+  auth.signIn.mockReset();
   auth.send.mockResolvedValue(undefined);
   auth.signIn.mockResolvedValue(undefined);
 });
@@ -63,4 +66,28 @@ it('forgets the address when the visitor chooses a different one', async () => {
 
   render(<EmailCodeSignIn primary onSignedIn={vi.fn()} />);
   expect(screen.getByPlaceholderText('you@example.com')).toBeInTheDocument();
+});
+
+it('sends the code once on arrival from setup, even when React mounts twice', async () => {
+  render(
+    <StrictMode>
+      <EmailCodeSignIn initialEmail="owner@example.com" sendOnMount primary onSignedIn={vi.fn()} />
+    </StrictMode>
+  );
+  await screen.findByPlaceholderText('123456');
+  expect(auth.send).toHaveBeenCalledTimes(1);
+  expect(auth.send).toHaveBeenCalledWith('owner@example.com');
+});
+
+it('does not send another code on arrival when one is already on its way', async () => {
+  const first = render(<EmailCodeSignIn primary onSignedIn={vi.fn()} />);
+  await requestCode('owner@example.com');
+  first.unmount();
+  auth.send.mockClear();
+
+  render(
+    <EmailCodeSignIn initialEmail="owner@example.com" sendOnMount primary onSignedIn={vi.fn()} />
+  );
+  expect(screen.getByPlaceholderText('123456')).toBeInTheDocument();
+  expect(auth.send).not.toHaveBeenCalled();
 });

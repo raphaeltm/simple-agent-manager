@@ -79,20 +79,27 @@ export function Landing() {
             Simple Agent Manager
           </Typography>
 
-          <p className="text-fg-muted text-sm mb-6">
-            Launch AI coding agents on your own cloud infrastructure.
-          </p>
+          {sendCodeOnArrival ? (
+            // Continuing straight out of setup: no need to re-sell SAM, just hand off cleanly.
+            <p className="text-fg-muted text-sm mb-6">One step left.</p>
+          ) : (
+            <>
+              <p className="text-fg-muted text-sm mb-6">
+                Launch AI coding agents on your own cloud infrastructure.
+              </p>
 
-          <div className="flex flex-wrap justify-center gap-2 mb-8">
-            {AGENTS.map((name) => (
-              <span
-                key={name}
-                className="px-2.5 py-0.5 rounded-full bg-inset border border-[rgba(34,197,94,0.10)] text-xs font-medium"
-              >
-                {name}
-              </span>
-            ))}
-          </div>
+              <div className="flex flex-wrap justify-center gap-2 mb-8">
+                {AGENTS.map((name) => (
+                  <span
+                    key={name}
+                    className="px-2.5 py-0.5 rounded-full bg-inset border border-[rgba(34,197,94,0.10)] text-xs font-medium"
+                  >
+                    {name}
+                  </span>
+                ))}
+              </div>
+            </>
+          )}
 
           {providers.github && (
             <Button onClick={handleGitHubSignIn} size="lg" className="w-full mb-3">
@@ -146,18 +153,22 @@ export function Landing() {
             </>
           )}
 
-          <p className="text-xs text-fg-muted mb-6">
-            Bring your own cloud &mdash; your infrastructure, your costs.
-          </p>
+          {!sendCodeOnArrival && (
+            <>
+              <p className="text-xs text-fg-muted mb-6">
+                Bring your own cloud &mdash; your infrastructure, your costs.
+              </p>
 
-          <a
-            href={PUBLIC_WEBSITE_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-xs text-fg-muted hover:text-fg-primary underline underline-offset-2"
-          >
-            Learn more about SAM
-          </a>
+              <a
+                href={PUBLIC_WEBSITE_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-fg-muted hover:text-fg-primary underline underline-offset-2"
+              >
+                Learn more about SAM
+              </a>
+            </>
+          )}
         </div>
       </div>
     </main>

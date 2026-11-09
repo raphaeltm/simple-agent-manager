@@ -135,6 +135,13 @@ test.describe('First-run setup wizard', () => {
     expect(captured.complete).toEqual([{ token: 'installer-setup-token', config: {} }]);
     expect(captured.sendCode).toEqual([{ email: LONG_OWNER, type: 'sign-in' }]);
     await expect(page.getByText(/agents? (can )?receive email/i)).toHaveCount(0);
+    // The setup token already vouched for this address: say so plainly instead of the
+    // anonymous-visitor hedge, and don't re-sell SAM the owner just finished installing.
+    await expect(page.getByText('We sent a code to')).toBeVisible();
+    await expect(page.getByText(/can sign in here/)).toHaveCount(0);
+    await expect(page.getByText('One step left')).toBeVisible();
+    await expect(page.getByText('Claude Code')).toHaveCount(0);
+    await expect(page.getByText('Learn more about SAM')).toHaveCount(0);
     await assertNoOverflow(page);
     await screenshot(page, 'setup-email-code-sent', { scopeToProject: true });
 
@@ -249,6 +256,10 @@ test.describe('Email sign-in', () => {
     await sendButton.click();
     await expect(page.getByLabel('Sign-in code')).toBeVisible();
     expect(captured.sendCode).toEqual([{ email: LONG_OWNER, type: 'sign-in' }]);
+    // An ordinary visitor typing an address gets the account-enumeration-safe hedge, not the
+    // confident "we sent it" copy reserved for a setup-token-vouched owner (see the setup test).
+    await expect(page.getByText(/can sign in here/)).toBeVisible();
+    await expect(page.getByText('We sent a code to')).toHaveCount(0);
     await assertNoOverflow(page);
     await screenshot(page, 'sign-in-email-code', { scopeToProject: true });
 
