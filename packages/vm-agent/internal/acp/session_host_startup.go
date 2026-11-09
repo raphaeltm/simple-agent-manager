@@ -517,8 +517,9 @@ func (h *SessionHost) writeCodexStartupConfig(ctx context.Context, cred *agentCr
 	// carry the credential in the URL itself — and generateCodexMcpConfig already omits
 	// bearer_token_env_var for those. Failing closed on all of them would mean one no-auth
 	// connection blocks every Codex session for that user.
-	names := ResolveMcpServerNames(h.config.McpServers)
-	for i, server := range h.config.McpServers {
+	mcpServers := h.mcpServers() // one snapshot: validated, written and logged together
+	names := ResolveMcpServerNames(mcpServers)
+	for i, server := range mcpServers {
 		switch {
 		case strings.TrimSpace(server.URL) == "":
 			return fmt.Errorf("cannot start Codex with SAM MCP enabled: mcp server %d has a blank URL", i)
@@ -533,9 +534,9 @@ func (h *SessionHost) writeCodexStartupConfig(ctx context.Context, cred *agentCr
 
 	var codexMcpEnvVars []string
 	if startup.containerID != "" {
-		codexMcpEnvVars, err = writeCodexConfigToContainer(ctx, startup.containerID, h.config.ContainerUser, h.config.McpServers, proxyConfig, effort)
+		codexMcpEnvVars, err = writeCodexConfigToContainer(ctx, startup.containerID, h.config.ContainerUser, mcpServers, proxyConfig, effort)
 	} else {
-		codexMcpEnvVars, err = writeCodexConfigLocally(h.config.McpServers, proxyConfig, effort)
+		codexMcpEnvVars, err = writeCodexConfigLocally(mcpServers, proxyConfig, effort)
 	}
 	if err != nil {
 		return fmt.Errorf("cannot start Codex: write SAM MCP config.toml: %w", err)
@@ -565,7 +566,7 @@ func (h *SessionHost) writeCodexStartupConfig(ctx context.Context, cred *agentCr
 	}
 	startup.envVars = append(startup.envVars, codexMcpEnvVars...)
 	slog.Info("Wrote Codex config.toml",
-		"mcpServers", len(h.config.McpServers),
+		"mcpServers", len(mcpServers),
 		"hasProxyProvider", proxyConfig != nil,
 		"effort", normalizeCodexEffort(effort),
 		"standalone", startup.containerID == "")
@@ -597,13 +598,14 @@ func (h *SessionHost) writeOpenCodeStartupConfig(ctx context.Context, cred *agen
 
 func (h *SessionHost) writeVibeStartupConfig(ctx context.Context, startup *agentStartup) {
 	activeModel := resolveVibeActiveModel(startup.settings)
-	err := writeVibeConfigToContainer(ctx, startup.containerID, h.config.ContainerUser, activeModel, h.config.McpServers)
+	mcpServers := h.mcpServers()
+	err := writeVibeConfigToContainer(ctx, startup.containerID, h.config.ContainerUser, activeModel, mcpServers)
 	if err != nil {
 		slog.Warn("Failed to write Vibe config.toml",
 			"error", err, "activeModel", activeModel, "workspaceId", h.config.WorkspaceID)
 		return
 	}
-	slog.Info("Wrote Vibe config.toml", "activeModel", activeModel, "mcpServers", len(h.config.McpServers))
+	slog.Info("Wrote Vibe config.toml", "activeModel", activeModel, "mcpServers", len(mcpServers))
 }
 
 func (h *SessionHost) startAgentProcess(startup *agentStartup) (agentProcess, error) {

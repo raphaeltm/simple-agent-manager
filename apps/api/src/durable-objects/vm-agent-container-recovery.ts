@@ -74,6 +74,9 @@ export interface RuntimeRecoveryContext {
   agentType: string | null;
   runtimeContract: SessionRuntimeContract | null;
   runtimeIncarnationId: string | null;
+  /** Credential generations the runtime being started must be minted with. */
+  workspaceCallbackGeneration: string | null;
+  nodeCallbackGeneration: string | null;
 }
 
 export function toRuntimeRecoveryTarget(
@@ -121,6 +124,8 @@ export async function loadRuntimeRecoveryContext(
       userId: schema.workspaces.userId,
       chatSessionId: schema.workspaces.chatSessionId,
       runtimeIncarnationId: schema.nodes.runtimeIncarnationId,
+      workspaceCallbackGeneration: schema.workspaces.callbackGeneration,
+      nodeCallbackGeneration: schema.nodes.callbackGeneration,
     })
     .from(schema.workspaces)
     .innerJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
@@ -191,6 +196,8 @@ export async function loadRuntimeRecoveryContext(
     agentType: agentSession.agentType,
     runtimeContract,
     runtimeIncarnationId: workspace.runtimeIncarnationId,
+    workspaceCallbackGeneration: workspace.workspaceCallbackGeneration,
+    nodeCallbackGeneration: workspace.nodeCallbackGeneration,
   };
 }
 
@@ -208,6 +215,7 @@ export async function persistRuntimeRecovering(
            error_message = ?,
            runtime_termination_confirmed_at = NULL,
            runtime_incarnation_id = ?,
+           callback_generation = ?,
            updated_at = ?
        WHERE id = ?
          AND user_id = ?
@@ -227,6 +235,7 @@ export async function persistRuntimeRecovering(
     ).bind(
       RUNTIME_RECOVERING_MESSAGE,
       runtimeIncarnationId,
+      runtimeIncarnationId,
       now,
       target.nodeId,
       target.userId,
@@ -238,7 +247,7 @@ export async function persistRuntimeRecovering(
     ),
     env.DATABASE.prepare(
       `UPDATE workspaces
-       SET status = 'recovery', error_message = ?, updated_at = ?
+       SET status = 'recovery', error_message = ?, callback_generation = ?, updated_at = ?
        WHERE id = ?
          AND node_id = ?
          AND user_id = ?
@@ -256,6 +265,7 @@ export async function persistRuntimeRecovering(
          )`
     ).bind(
       RUNTIME_RECOVERING_MESSAGE,
+      runtimeIncarnationId,
       now,
       target.workspaceId,
       target.nodeId,

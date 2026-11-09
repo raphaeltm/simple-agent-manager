@@ -213,10 +213,16 @@ describe('POST /workspaces/:id/messages — behavioral tests', () => {
     });
 
     // Sign callback tokens for each workspace
-    validToken = await signCallbackToken(WORKSPACE_ID, env as any);
-    noSessionToken = await signCallbackToken(WORKSPACE_NO_SESSION, env as any);
-    stoppedToken = await signCallbackToken(WORKSPACE_STOPPED, env as any);
-    stoppingToken = await signCallbackToken(WORKSPACE_STOPPING, env as any);
+    validToken = await signCallbackToken(WORKSPACE_ID, env as any, { callbackGeneration: null });
+    noSessionToken = await signCallbackToken(WORKSPACE_NO_SESSION, env as any, {
+      callbackGeneration: null,
+    });
+    stoppedToken = await signCallbackToken(WORKSPACE_STOPPED, env as any, {
+      callbackGeneration: null,
+    });
+    stoppingToken = await signCallbackToken(WORKSPACE_STOPPING, env as any, {
+      callbackGeneration: null,
+    });
   });
 
   describe('session validation (Bug 3 fix)', () => {
@@ -299,9 +305,9 @@ describe('POST /workspaces/:id/messages — behavioral tests', () => {
       expect(response.status).toBe(200);
       const projectData = env.PROJECT_DATA.get(env.PROJECT_DATA.idFromName(PROJECT_ID));
       const storedMetadata = await runInDurableObject(projectData, async (instance) => {
-        const row = instance.ctx.storage.sql.exec(
-          'SELECT tool_metadata FROM chat_messages WHERE id = ?', diagnosticId
-        ).toArray()[0] as { tool_metadata: string } | undefined;
+        const row = instance.ctx.storage.sql
+          .exec('SELECT tool_metadata FROM chat_messages WHERE id = ?', diagnosticId)
+          .toArray()[0] as { tool_metadata: string } | undefined;
         return row?.tool_metadata;
       });
       // The runtime reported this system row, so the server marks it as a workspace report.
@@ -367,7 +373,9 @@ describe('POST /workspaces/:id/messages — behavioral tests', () => {
 
   describe('workspace resolution', () => {
     it('returns 204 for non-existent workspace to stop old-agent outbox retries', async () => {
-      const fakeToken = await signCallbackToken('nonexistent-ws', env as any);
+      const fakeToken = await signCallbackToken('nonexistent-ws', env as any, {
+        callbackGeneration: null,
+      });
       const response = await postMessages('nonexistent-ws', [makeMessage()], fakeToken);
       expect(response.status).toBe(204);
     });

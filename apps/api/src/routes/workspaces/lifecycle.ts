@@ -22,6 +22,10 @@ import { isSafeSleepDeferral, sleepWorkspaceSession } from '../../services/sessi
 import { finalizeWorkspaceEvictionOnNode } from '../../services/workspace-eviction-lifecycle';
 import { reserveWorkspaceRestart } from '../../services/workspace-placement';
 import {
+  describeReprovisionDispatchError,
+  signReprovisionCallbackToken,
+} from '../../services/workspace-reprovision-credential';
+import {
   parseResolvedResourceReservation,
   resolveWorkspaceAdmissionPolicy,
 } from '../../services/workspace-resource-capacity';
@@ -306,6 +310,11 @@ lifecycleRoutes.post('/:id/restart', requireAuth(), requireApproved(), async (c)
         await restartWorkspaceOnNode(nodeId, workspace.id, c.env, userId, {
           evictionGeneration,
           expectedEvictionGeneration: workspace.evictionGeneration ?? '',
+          callbackToken: await signReprovisionCallbackToken(
+            c.env,
+            workspace.id,
+            evictionGeneration
+          ),
           beforeExternalMutation: async () => {
             const current = await c.env.DATABASE.prepare(
               `SELECT id
@@ -360,7 +369,7 @@ lifecycleRoutes.post('/:id/restart', requireAuth(), requireApproved(), async (c)
           nodeId,
           'restart',
           evictionGeneration,
-          err,
+          describeReprovisionDispatchError(err, 'restart'),
           runtimeDispatchStarted
         );
       }
@@ -453,6 +462,9 @@ lifecycleRoutes.post('/:id/rebuild', requireAuth(), requireApproved(), async (c)
             creatingStartedAt: rebuildStartedAt,
             buildStartedAt: null,
             evictionGeneration,
+            // Same write as the reactivation: the rebuilt runtime's credentials are the only
+            // ones that authenticate from here on (see workspace-reprovision-credential.ts).
+            callbackGeneration: evictionGeneration,
             evictionFinalizedAt: null,
             stopRuntimeConfirmedAt: null,
           })
@@ -483,6 +495,11 @@ lifecycleRoutes.post('/:id/rebuild', requireAuth(), requireApproved(), async (c)
         await rebuildWorkspaceOnNode(nodeId, workspace.id, c.env, userId, {
           evictionGeneration,
           expectedEvictionGeneration: workspace.evictionGeneration ?? '',
+          callbackToken: await signReprovisionCallbackToken(
+            c.env,
+            workspace.id,
+            evictionGeneration
+          ),
           beforeExternalMutation: async () => {
             const current = await c.env.DATABASE.prepare(
               `SELECT id
@@ -518,7 +535,7 @@ lifecycleRoutes.post('/:id/rebuild', requireAuth(), requireApproved(), async (c)
           nodeId,
           'rebuild',
           evictionGeneration,
-          err
+          describeReprovisionDispatchError(err, 'rebuild')
         );
       }
     })()

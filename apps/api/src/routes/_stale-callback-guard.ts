@@ -5,12 +5,16 @@ import { callbackTokenGenerationIssuedAtSeconds } from '../services/callback-tok
  * Staleness guard for VM-agent → control-plane DESTRUCTIVE callbacks (S2).
  *
  * Instant (cf-container) sessions recover by replacing a dead container with a
- * NEW generation under the SAME nodeId. Callback tokens are stateless RS256 JWTs
- * with no jti/revocation, minted fresh per cold wake, so a superseded (dead)
- * container's token stays valid. A mid-turn rollout can make the OLD container
- * fire a fire-and-forget `error` / `failed` callback that lands AFTER the DO has
- * recovered a new container to running. Left unguarded, that late callback
- * regresses the freshly recovered, healthy session to error/failed.
+ * NEW generation under the SAME nodeId. A mid-turn rollout can make the OLD
+ * container fire a fire-and-forget `error` / `failed` callback that lands AFTER
+ * the DO has recovered a new container to running. Left unguarded, that late
+ * callback regresses the freshly recovered, healthy session to error/failed.
+ *
+ * Superseded by credential generations: recovery rotates the workspace's and
+ * node's `callback_generation`, and `verifyCallbackToken` refuses the old
+ * container's tokens before any route runs (`services/callback-token-generation.ts`).
+ * This timestamp heuristic predates that check and is kept only as defence in
+ * depth; a current-generation token is the only kind that can still reach it.
  *
  * We reject a destructive callback only when it is provably OLDER than a
  * completed D1 reconciliation of the target row: the row's `updated_at` (written
@@ -28,8 +32,8 @@ import { callbackTokenGenerationIssuedAtSeconds } from '../services/callback-tok
  * same-generation gap (a recovered container mints its token just BEFORE the
  * snapshot restore that later writes `updated_at`, so its own genuine later
  * error has an `updated_at - iat` gap bounded by the restore duration — a few
- * seconds) yet BELOW a typical superseded-container lifetime (a real user turn),
- * so a stale generation's callback is reliably rejected.
+ * seconds) yet BELOW a typical superseded-container lifetime (a real user turn).
+ * Superseded generations are refused earlier by the credential generation check.
  */
 export const DEFAULT_INSTANT_STALE_CALLBACK_MARGIN_MS = 60_000;
 

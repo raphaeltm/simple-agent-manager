@@ -176,6 +176,9 @@ type callbackTokenClaims struct {
 	Subject   string  `json:"sub"`
 	IssuedAt  float64 `json:"iat"`
 	ExpiresAt float64 `json:"exp"`
+	// CallbackGeneration is the control plane's callback credential generation
+	// ("cgen", see auth.Claims.CallbackGeneration). Not the eviction generation.
+	CallbackGeneration string `json:"cgen,omitempty"`
 }
 
 // decodeCallbackTokenClaims decodes a callback token's payload and verifies
@@ -419,7 +422,9 @@ func adoptWorkspaceCallbackTokenLocked(runtime *WorkspaceRuntime, delivered stri
 // control-plane call. Hosts are found under sessionHostMu, which host creation
 // also holds while it reads the token, so a host is either created with the new
 // token or updated here. Callers must not hold workspaceMu, messageReportersMu
-// or sessionHostMu.
+// or sessionHostMu. It may run under the workspace's lifecycle lock
+// (claimWorkspaceReprovision calls it while holding workspaceLifecycleLock), so
+// nothing it calls may acquire that lock: it is not reentrant and would deadlock.
 func (s *Server) propagateWorkspaceCallbackToken(workspaceID, token string) {
 	if strings.TrimSpace(token) == "" {
 		return

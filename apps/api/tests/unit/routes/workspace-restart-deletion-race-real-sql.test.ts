@@ -42,7 +42,9 @@ vi.mock('../../../src/services/boot-log', () => ({
 }));
 vi.mock('../../../src/services/jwt', () => ({
   signCallbackToken: vi.fn(),
+  signCurrentWorkspaceCallbackToken: vi.fn(),
   signNodeCallbackToken: vi.fn(),
+  signCurrentNodeCallbackToken: vi.fn(),
   signNodeManagementToken: (...args: unknown[]) => mocks.signNodeManagementToken(...args),
   verifyCallbackToken: vi.fn(),
 }));

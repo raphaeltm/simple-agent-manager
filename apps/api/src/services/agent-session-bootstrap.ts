@@ -320,6 +320,13 @@ export async function startSamAwareAgentSession(
     await input.onAgentSessionId?.(agentSessionId);
 
     if (generatedMcpToken) {
+      // The runtime this session starts on: an MCP token from another generation is refused.
+      const workspaceGeneration = await db
+        .select({ callbackGeneration: schema.workspaces.callbackGeneration })
+        .from(schema.workspaces)
+        .where(eq(schema.workspaces.id, input.workspaceId))
+        .get();
+      const callbackGeneration = workspaceGeneration?.callbackGeneration ?? null;
       await runMaybePhased(input, 'store_mcp_token', () =>
         storeMcpToken(
           env.KV,
@@ -335,6 +342,7 @@ export async function startSamAwareAgentSession(
             workspaceId: input.workspaceId,
             chatSessionId: input.chatSessionId ?? undefined,
             agentSessionId,
+            callbackGeneration,
             createdAt: new Date().toISOString(),
           },
           env

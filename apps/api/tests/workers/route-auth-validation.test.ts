@@ -324,12 +324,24 @@ beforeAll(async () => {
   }
 
   // Sign all tokens after seeding is complete (follows workspace-messages.test.ts pattern)
-  workspaceCallbackToken = await signCallbackToken(WORKSPACE_ID, env as any);
-  evictionWorkspaceCallbackToken = await signCallbackToken(EVICTION_WORKSPACE_ID, env as any);
-  deletedWorkspaceCallbackToken = await signCallbackToken(DELETED_WORKSPACE_ID, env as any);
-  nodeCallbackToken = await signNodeCallbackToken(NODE_ID, env as any);
-  deletedNodeCallbackToken = await signNodeCallbackToken(DELETED_NODE_ID, env as any);
-  stoppedNodeCallbackToken = await signNodeCallbackToken(STOPPED_NODE_ID, env as any);
+  workspaceCallbackToken = await signCallbackToken(WORKSPACE_ID, env as any, {
+    callbackGeneration: null,
+  });
+  evictionWorkspaceCallbackToken = await signCallbackToken(EVICTION_WORKSPACE_ID, env as any, {
+    callbackGeneration: null,
+  });
+  deletedWorkspaceCallbackToken = await signCallbackToken(DELETED_WORKSPACE_ID, env as any, {
+    callbackGeneration: null,
+  });
+  nodeCallbackToken = await signNodeCallbackToken(NODE_ID, env as any, {
+    callbackGeneration: null,
+  });
+  deletedNodeCallbackToken = await signNodeCallbackToken(DELETED_NODE_ID, env as any, {
+    callbackGeneration: null,
+  });
+  stoppedNodeCallbackToken = await signNodeCallbackToken(STOPPED_NODE_ID, env as any, {
+    callbackGeneration: null,
+  });
   expiredNodeCallbackToken = await signExpiredNodeCallbackToken(NODE_ID);
 
   const projectData = env.PROJECT_DATA.get(env.PROJECT_DATA.idFromName(PROJECT_ID));
@@ -829,7 +841,9 @@ describe('workspace eviction callback', () => {
 
 describe('workspace resolution', () => {
   it('returns 204 for non-existent workspace messages to stop old-agent outbox retries', async () => {
-    const fakeToken = await signCallbackToken('nonexistent-ws', env as any);
+    const fakeToken = await signCallbackToken('nonexistent-ws', env as any, {
+      callbackGeneration: null,
+    });
     const response = await SELF.fetch(
       `https://api.test.example.com/api/workspaces/nonexistent-ws/messages`,
       {

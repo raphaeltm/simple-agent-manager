@@ -298,6 +298,11 @@ func Load() (*Config, error) {
 		WorkspaceCallbackTokenRenewalRetryInitial: positiveDurationOr(getEnvDuration("WORKSPACE_CALLBACK_TOKEN_RENEWAL_RETRY_INITIAL", DefaultWorkspaceCallbackTokenRenewalRetryInitial), DefaultWorkspaceCallbackTokenRenewalRetryInitial),
 		WorkspaceCallbackTokenRenewalRetryMax:     positiveDurationOr(getEnvDuration("WORKSPACE_CALLBACK_TOKEN_RENEWAL_RETRY_MAX", DefaultWorkspaceCallbackTokenRenewalRetryMax), DefaultWorkspaceCallbackTokenRenewalRetryMax),
 
+		McpTokenRotationTimeout:     positiveDurationOr(getEnvDuration("MCP_TOKEN_ROTATION_TIMEOUT", DefaultMcpTokenRotationTimeout), DefaultMcpTokenRotationTimeout),
+		McpTokenRotationMaxAttempts: getBoundedPositiveEnvInt("MCP_TOKEN_ROTATION_MAX_ATTEMPTS", DefaultMcpTokenRotationMaxAttempts, MaxMcpTokenRotationMaxAttempts),
+		McpTokenRotationRetryDelay:  positiveDurationOr(getEnvDuration("MCP_TOKEN_ROTATION_RETRY_DELAY", DefaultMcpTokenRotationRetryDelay), DefaultMcpTokenRotationRetryDelay),
+		McpTokenRotationBudget:      positiveDurationOr(getEnvDuration("MCP_TOKEN_ROTATION_BUDGET", DefaultMcpTokenRotationBudget), DefaultMcpTokenRotationBudget),
+
 		// Error reporting settings - configurable per constitution principle XI
 		ErrorReportFlushInterval:  getEnvDuration("ERROR_REPORT_FLUSH_INTERVAL", 30*time.Second),
 		ErrorReportMaxBatchSize:   getEnvInt("ERROR_REPORT_MAX_BATCH_SIZE", 10),

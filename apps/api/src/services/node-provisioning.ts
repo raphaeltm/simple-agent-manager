@@ -17,7 +17,7 @@ import { log, serializeError } from '../lib/logger';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { createNodeBackendDNSRecord, deleteDNSRecord } from './dns';
 import { GcpApiError, sanitizeGcpError } from './gcp-errors';
-import { signNodeCallbackToken } from './jwt';
+import { signCurrentNodeCallbackToken } from './jwt';
 import {
   type DurableNodeAllocation,
   NodeAllocationUncertainError,
@@ -340,7 +340,7 @@ export async function provisionNode(
       }
     }
 
-    const callbackToken = await signNodeCallbackToken(node.id, env);
+    const callbackToken = await signCurrentNodeCallbackToken(node.id, env);
 
     const isDeploymentNode = !!deploymentContext;
 

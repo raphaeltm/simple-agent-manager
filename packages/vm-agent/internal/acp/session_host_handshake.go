@@ -185,7 +185,7 @@ func (h *SessionHost) tryLoadPreviousACPSession(
 	loadResp, loadErr := h.acpConn.LoadSession(loadCtx, acpsdk.LoadSessionRequest{
 		SessionId:  acpsdk.SessionId(previousAcpSessionID),
 		Cwd:        h.config.ContainerWorkDir,
-		McpServers: buildAcpMcpServers(h.config.McpServers, agentType),
+		McpServers: buildAcpMcpServers(h.mcpServers(), agentType),
 		Meta:       acpSessionMeta(agentType),
 	})
 	cancel()
@@ -228,7 +228,7 @@ func (h *SessionHost) startNewACPSession(ctx context.Context, agentType string, 
 	h.reportLifecycle("info", "ACP NewSession started", map[string]interface{}{"agentType": agentType})
 	sessResp, err := h.acpConn.NewSession(newCtx, acpsdk.NewSessionRequest{
 		Cwd:        h.config.ContainerWorkDir,
-		McpServers: buildAcpMcpServers(h.config.McpServers, agentType),
+		McpServers: buildAcpMcpServers(h.mcpServers(), agentType),
 		Meta:       acpSessionMeta(agentType),
 	})
 	if err != nil {

@@ -49,7 +49,11 @@ const mocks = vi.hoisted(() => ({
   ulid: vi.fn(),
 }));
 
-vi.mock('../../../src/services/jwt', () => mocks.jwt);
+vi.mock('../../../src/services/jwt', () => ({
+  ...mocks.jwt,
+  signCurrentWorkspaceCallbackToken: mocks.jwt.signCallbackToken,
+  signCurrentNodeCallbackToken: mocks.jwt.signNodeCallbackToken,
+}));
 vi.mock('../../../src/services/node-agent', () => mocks.nodeAgent);
 vi.mock('../../../src/services/nodes', () => mocks.nodes);
 vi.mock('../../../src/services/project-data', () => mocks.projectData);
@@ -170,9 +174,7 @@ describe('acceptInstantSession — checkout branch guard', () => {
     // would still burn a container on every failure.
     expect(callOrder.indexOf('ensureBranch')).toBeGreaterThanOrEqual(0);
     expect(callOrder.indexOf('ensureBranch')).toBeLessThan(callOrder.indexOf('createNodeRecord'));
-    expect(callOrder.indexOf('ensureBranch')).toBeLessThan(
-      callOrder.indexOf('insertWorkspaceRow')
-    );
+    expect(callOrder.indexOf('ensureBranch')).toBeLessThan(callOrder.indexOf('insertWorkspaceRow'));
     // acceptInstantSession must not have reached container allocation at all.
     expect(callOrder).not.toContain('launchContainer');
     expect(callOrder).not.toContain('containerPhase');

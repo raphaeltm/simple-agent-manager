@@ -16,7 +16,7 @@ describe('workspace runtime assets shared project access', () => {
         id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL,
         project_id TEXT,
-        agent_profile_hint TEXT
+        agent_profile_hint TEXT, callback_generation TEXT
       );
 
       CREATE TABLE tasks (

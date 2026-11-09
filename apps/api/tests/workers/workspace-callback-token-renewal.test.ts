@@ -153,11 +153,19 @@ beforeAll(async () => {
   await seedWorkspace(WS_RATE_CONTROL, NODE_ID, USER_ID, { status: 'running' });
   await seedWorkspace(WS_CASCADE, NODE_ID, USER_ID, { status: 'running' });
 
-  nodeToken = await signNodeCallbackToken(NODE_ID, testEnv);
-  otherNodeToken = await signNodeCallbackToken(OTHER_NODE_ID, testEnv);
-  otherOwnerNodeToken = await signNodeCallbackToken(OTHER_OWNER_NODE_ID, testEnv);
-  stoppedNodeToken = await signNodeCallbackToken(STOPPED_NODE_ID, testEnv);
-  instantNodeToken = await signNodeCallbackToken(INSTANT_NODE_ID, testEnv);
+  nodeToken = await signNodeCallbackToken(NODE_ID, testEnv, { callbackGeneration: null });
+  otherNodeToken = await signNodeCallbackToken(OTHER_NODE_ID, testEnv, {
+    callbackGeneration: null,
+  });
+  otherOwnerNodeToken = await signNodeCallbackToken(OTHER_OWNER_NODE_ID, testEnv, {
+    callbackGeneration: null,
+  });
+  stoppedNodeToken = await signNodeCallbackToken(STOPPED_NODE_ID, testEnv, {
+    callbackGeneration: null,
+  });
+  instantNodeToken = await signNodeCallbackToken(INSTANT_NODE_ID, testEnv, {
+    callbackGeneration: null,
+  });
 });
 
 /** Wait out a window boundary that is about to pass, so a burst stays in one window. */
@@ -186,7 +194,12 @@ describe('POST /api/workspaces/:id/callback-token/renew', () => {
     const payload = await verifyCallbackToken(body.token, testEnv, {
       expectedScope: 'workspace',
     });
-    expect(payload).toEqual({ workspace: WS_ACTIVE, type: 'callback', scope: 'workspace' });
+    expect(payload).toEqual({
+      workspace: WS_ACTIVE,
+      type: 'callback',
+      scope: 'workspace',
+      callbackGeneration: null,
+    });
     const renewedClaims = decodeJwt(body.token);
     expect(renewedClaims.sub).toBe(WS_ACTIVE);
     expect(renewedClaims.exp).toBeGreaterThan(agedClaims.exp as number);
@@ -208,7 +221,7 @@ describe('POST /api/workspaces/:id/callback-token/renew', () => {
   });
 
   it('does not mint while the token is younger than the refresh threshold', async () => {
-    const fresh = await signCallbackToken(WS_ACTIVE, testEnv);
+    const fresh = await signCallbackToken(WS_ACTIVE, testEnv, { callbackGeneration: null });
 
     const response = await renew(WS_ACTIVE, fresh, { nodeId: NODE_ID, nodeToken });
 
@@ -241,7 +254,9 @@ describe('POST /api/workspaces/:id/callback-token/renew', () => {
 
   it('rejects a workspace token presented as the node credential', async () => {
     const aged = await signAgedCallbackToken(WS_ACTIVE, 'workspace', 13 * HOUR);
-    const otherWorkspaceToken = await signCallbackToken(WS_ON_OTHER_NODE, testEnv);
+    const otherWorkspaceToken = await signCallbackToken(WS_ON_OTHER_NODE, testEnv, {
+      callbackGeneration: null,
+    });
 
     const response = await renew(WS_ACTIVE, aged, {
       nodeId: WS_ON_OTHER_NODE,
@@ -452,7 +467,12 @@ describe('mintWorkspaceCallbackTokenForNodeDelivery', () => {
     expect(token).not.toBeNull();
     await expect(
       verifyCallbackToken(token as string, testEnv, { expectedScope: 'workspace' })
-    ).resolves.toEqual({ workspace: WS_ACTIVE, type: 'callback', scope: 'workspace' });
+    ).resolves.toEqual({
+      workspace: WS_ACTIVE,
+      type: 'callback',
+      scope: 'workspace',
+      callbackGeneration: null,
+    });
   });
 
   it.each([

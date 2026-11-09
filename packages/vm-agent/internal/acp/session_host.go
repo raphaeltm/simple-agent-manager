@@ -213,11 +213,26 @@ type SessionHost struct {
 	// credential-fetch/install phase, so two concurrent selections for the same
 	// agent cannot double-spawn a process for one session.
 	selectionInProgress bool
-	// intentionalPromptCancelProcessStop suppresses rapid-exit crash handling
-	// when a user cancel intentionally terminates an agent that lacks native
-	// session/cancel support.
-	intentionalPromptCancelProcessStop bool
-	checkpointRollover                 *checkpointRolloverEpisode
+	// intentionalProcessStop is the agent process that was stopped on purpose,
+	// so the process monitor restarts it in place (LoadSession resume) without
+	// counting a crash: no rapid-exit or active-prompt error, no restartCount
+	// increment. Set by a user prompt cancel that terminates the agent
+	// (StopProcessForPromptCancel, CancelPromptGuarded) and by a workspace
+	// credential rotation (RestartAgentProcessForCredentialRotation).
+	//
+	// It names the process rather than being a per-host flag, and
+	// monitorProcessExit reads it as soon as that process's Wait returns
+	// (intentionalStopForExitedProcess). A stop requested after the process had
+	// already exited on its own therefore cannot relabel that crash as
+	// intentional, and a stale mark can never match a later process. nil means
+	// no intentional stop is pending.
+	intentionalProcessStop agentProcess
+	// processExitObservedHook, when set by a test before the agent starts, runs
+	// right after monitorProcessExit records whether an exit was intentional, so
+	// a test can request a stop between the exit and the restart decision.
+	// Always nil in production.
+	processExitObservedHook func(agentProcess)
+	checkpointRollover      *checkpointRolloverEpisode
 
 	// replaySuppressed is set while an ACP LoadSession is in flight. LoadSession
 	// makes the agent replay the entire transcript as session/update
@@ -233,6 +248,10 @@ type SessionHost struct {
 	// host was created (SetCallbackToken). Lock-free like the fields above:
 	// control-plane reporting runs on the ACP notification goroutine.
 	renewedCallbackToken atomic.Value // string
+	// replacedMcpServers holds MCP server configs delivered after the host was
+	// created (SetMcpServers), for example after a workspace callback generation
+	// rotation re-minted the sam-mcp token. Read through mcpServers().
+	replacedMcpServers atomic.Pointer[[]McpServerEntry]
 
 	// Credential injection metadata (set during startAgent, read during stop).
 	// These track whether the agent used file-based credential injection so

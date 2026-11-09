@@ -50,6 +50,17 @@ no revocation list; each use re-reads D1. On the agent side:
 - An agent process running during a stop or sleep will see 403 from the AI proxy, 401 from MCP and
   410 from workspace callbacks. Treat these as terminal for that workspace and do not retry in a loop.
 - Callback tokens must carry `scope` and `iat`. The API mints every token; never construct one here.
+- A restart or rebuild retires the previous runtime's credentials (credential generation, `cgen`).
+  The control plane delivers the new runtime's token in the request body; install it
+  unconditionally (not "later expiry wins"), exchange each session's sam-mcp token, then restart
+  the agent process of every SessionHost of the workspace in place (their running processes hold
+  the revoked credentials), all before provisioning (`workspace_mcp_token_rotation.go`,
+  `workspace_reprovision.go` `restartSessionAgentsForWorkspace`,
+  `SessionHost.RestartAgentProcessForCredentialRotation`). Never stop or remove the SessionHost:
+  the control plane's task-liveness probe fails a task whose agent host is stopped
+  (`task_agent_host_stopped`). Session MCP lists, overrides and task context are kept. Any local
+  check that accepts a workspace JWT must also require the current token's `cgen`
+  (`git_credential_callback_auth.go`).
 - Full rule and tests: `apps/api/.claude/rules/34-vm-agent-callback-auth.md`.
 
 ### How to Identify VM Agent Callback Routes

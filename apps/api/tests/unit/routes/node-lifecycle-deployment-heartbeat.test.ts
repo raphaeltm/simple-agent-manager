@@ -90,7 +90,9 @@ vi.mock('drizzle-orm/d1', () => ({
 vi.mock('../../../src/services/jwt', () => ({
   shouldRefreshCallbackToken: vi.fn().mockReturnValue(false),
   signCallbackToken: vi.fn(),
+  signCurrentWorkspaceCallbackToken: vi.fn(),
   signNodeCallbackToken: vi.fn(),
+  signCurrentNodeCallbackToken: vi.fn(),
   signNodeManagementToken: vi.fn(),
   verifyCallbackToken: vi
     .fn()

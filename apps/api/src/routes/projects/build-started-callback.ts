@@ -79,9 +79,9 @@ buildStartedCallbackRoute.post(
 
     // The durable start of this attempt's build (`workspace-creating-deadline.ts`). First write
     // wins, so a retried or duplicated callback cannot push the deadline out. Every transition
-    // into 'creating' clears it for the new attempt. The callback carries no attempt identity,
-    // so a late signal from a previous attempt (sent at most ~30 s after that build took the
-    // slot) that lands after a restart is indistinguishable from the new attempt's own.
+    // into 'creating' clears it for the new attempt. A late signal from a previous attempt never
+    // gets here: the restart that started this attempt rotated `callback_generation`, so
+    // `verifyCallbackToken` above rejects the previous runtime's token.
     const recorded = await c.env.DATABASE.prepare(
       `UPDATE workspaces SET build_started_at = ?
         WHERE id = ? AND status = 'creating' AND build_started_at IS NULL`

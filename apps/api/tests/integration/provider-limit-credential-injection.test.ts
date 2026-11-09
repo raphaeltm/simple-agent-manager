@@ -26,6 +26,7 @@ vi.mock('../../src/routes/credentials', () => ({
 vi.mock('../../src/services/jwt', () => ({
   verifyCallbackToken: vi.fn(async () => ({ workspace: 'workspace-1', scope: 'workspace' })),
   signCallbackToken: vi.fn(),
+  signCurrentWorkspaceCallbackToken: vi.fn(),
 }));
 
 describe('provider wait credential pin at the authenticated secret injection route', () => {

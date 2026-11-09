@@ -122,7 +122,7 @@ async function seedCallbackSession(
     ...(opts?.acpSdkSessionId ? { acpSdkSessionId: opts.acpSdkSessionId } : {}),
   });
 
-  const callbackToken = await signCallbackToken(workspaceId, testEnv);
+  const callbackToken = await signCallbackToken(workspaceId, testEnv, { callbackGeneration: null });
 
   return { projectId, userId, nodeId, workspaceId, chatSessionId, acpSessionId, callbackToken };
 }

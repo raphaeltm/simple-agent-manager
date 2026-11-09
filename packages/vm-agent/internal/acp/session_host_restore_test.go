@@ -28,6 +28,9 @@ type fakeACPServer struct {
 	loadSessionCalls      atomic.Int32
 	newSessionCalls       atomic.Int32
 	loadSessionIDs        chan string
+	// loadSessionParams, when set, receives each LoadSession request's raw
+	// params (including its MCP server list).
+	loadSessionParams chan json.RawMessage
 }
 
 func newFakeACPServer(loadSessionCapability, loadSessionErr bool) *fakeACPServer {
@@ -72,6 +75,12 @@ func (f *fakeACPServer) serve(reader *io.PipeReader, writer *io.PipeWriter) {
 				select {
 				case f.loadSessionIDs <- p.SessionID:
 				default:
+				}
+				if f.loadSessionParams != nil {
+					select {
+					case f.loadSessionParams <- append(json.RawMessage(nil), req.Params...):
+					default:
+					}
 				}
 				if f.loadSessionErr {
 					errObj = map[string]any{"code": -32000, "message": "load failed"}

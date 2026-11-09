@@ -67,11 +67,17 @@ async function agedToken(
   subject: string,
   scope: 'workspace' | 'node' | null,
   ageSeconds: number,
-  lifetimeSeconds = DAY
+  lifetimeSeconds = DAY,
+  callbackGeneration?: string
 ): Promise<string> {
   const key = await importPKCS8(privateKeyPem, 'RS256');
   const issuedAt = Math.floor(Date.now() / 1000) - ageSeconds;
-  return new SignJWT({ workspace: subject, type: 'callback', ...(scope ? { scope } : {}) })
+  return new SignJWT({
+    workspace: subject,
+    type: 'callback',
+    ...(scope ? { scope } : {}),
+    ...(callbackGeneration ? { cgen: callbackGeneration } : {}),
+  })
     .setProtectedHeader({ alg: 'RS256' })
     .setIssuer(`https://api.${BASE_DOMAIN}`)
     .setSubject(subject)
@@ -162,6 +168,28 @@ describe('mintWorkspaceCallbackTokenForNodeDelivery', () => {
     ).resolves.toBeNull();
   });
 
+  it('mints the delivered token for the runtime the binding read, not a later one', async () => {
+    sqlite.prepare("UPDATE workspaces SET callback_generation = 'gen-a' WHERE id = ?").run(WS);
+    const token = await mintWorkspaceCallbackTokenForNodeDelivery(makeEnv(), {
+      workspaceId: WS,
+      nodeId: NODE,
+    });
+    expect(decodeJwt(token as string).cgen).toBe('gen-a');
+  });
+
+  it('withholds the token when the runtime is replaced while minting', async () => {
+    sqlite.prepare("UPDATE workspaces SET callback_generation = 'gen-a' WHERE id = ?").run(WS);
+    const reads = bindingReadCount();
+    reads.mutateOn = (n) => {
+      if (n === 2) {
+        sqlite.prepare("UPDATE workspaces SET callback_generation = 'gen-b' WHERE id = ?").run(WS);
+      }
+    };
+    await expect(
+      mintWorkspaceCallbackTokenForNodeDelivery(makeEnv(), { workspaceId: WS, nodeId: NODE })
+    ).resolves.toBeNull();
+  });
+
   it('never delivers to an Instant (cf-container) runtime', async () => {
     sqlite.prepare("UPDATE nodes SET runtime = 'cf-container' WHERE id = ?").run(NODE);
     await expect(
@@ -189,7 +217,8 @@ describe('renewWorkspaceCallbackToken', () => {
       workspaceId: WS,
       workspaceToken,
       nodeId: NODE,
-      nodeToken: nodeToken ?? (await signNodeCallbackToken(NODE, env)),
+      nodeToken:
+        nodeToken ?? (await signNodeCallbackToken(NODE, env, { callbackGeneration: null })),
     });
   }
 
@@ -204,7 +233,7 @@ describe('renewWorkspaceCallbackToken', () => {
 
   it('suppresses the renewed credential when the workspace is deleted while minting', async () => {
     const env = makeEnv();
-    const nodeToken = await signNodeCallbackToken(NODE, env);
+    const nodeToken = await signNodeCallbackToken(NODE, env, { callbackGeneration: null });
     onPrepare = (sql) => {
       // The identity re-read at the secret-delivery boundary is drizzle's select.
       if (sql.includes('from "workspaces"') && sql.includes('left join "nodes"')) {
@@ -220,7 +249,7 @@ describe('renewWorkspaceCallbackToken', () => {
 
   it('suppresses the renewed credential when the workspace moves to another node while minting', async () => {
     const env = makeEnv();
-    const nodeToken = await signNodeCallbackToken(NODE, env);
+    const nodeToken = await signNodeCallbackToken(NODE, env, { callbackGeneration: null });
     onPrepare = (sql) => {
       if (sql.includes('from "workspaces"') && sql.includes('left join "nodes"')) {
         sqlite.prepare('UPDATE workspaces SET node_id = ? WHERE id = ?').run(OTHER_NODE, WS);
@@ -238,7 +267,7 @@ describe('renewWorkspaceCallbackToken', () => {
 
   it('ends renewal when the workspace is deleted before its attempt is counted', async () => {
     const env = makeEnv();
-    const nodeToken = await signNodeCallbackToken(NODE, env);
+    const nodeToken = await signNodeCallbackToken(NODE, env, { callbackGeneration: null });
     onPrepare = (sql) => {
       if (sql.includes('INSERT INTO workspace_callback_token_renewal_rate_limits')) {
         sqlite.prepare('DELETE FROM workspaces WHERE id = ?').run(WS);
@@ -249,6 +278,18 @@ describe('renewWorkspaceCallbackToken', () => {
       renew(await agedToken(WS, 'workspace', 13 * HOUR), env, nodeToken)
     );
     expect([error.statusCode, error.error]).toEqual([410, 'GONE']);
+  });
+
+  it('renews the current runtime within its generation, and refuses a retired runtime', async () => {
+    sqlite.prepare("UPDATE workspaces SET callback_generation = 'gen-b' WHERE id = ?").run(WS);
+    const current = await renew(await agedToken(WS, 'workspace', 13 * HOUR, DAY, 'gen-b'));
+    expect(current.renewed).toBe(true);
+    expect(decodeJwt(current.token as string).cgen).toBe('gen-b');
+
+    const retired = await rejection(
+      renew(await agedToken(WS, 'workspace', 13 * HOUR, DAY, 'gen-a'))
+    );
+    expect(retired.statusCode).toBe(401);
   });
 
   it('refuses an Instant (cf-container) workspace, while the VM control renews', async () => {

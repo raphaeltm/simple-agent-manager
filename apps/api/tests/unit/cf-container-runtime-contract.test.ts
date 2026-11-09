@@ -128,8 +128,8 @@ describe('cf-container runtime spike contracts', () => {
     expect(launcher).toContain("runContainerPhase('launch'");
     expect(launcher).not.toContain('nohup env');
     expect(launcher).toContain("runtime: 'cf-container'");
-    expect(launcher).toContain('signNodeCallbackToken');
-    expect(launcher).toContain('signCallbackToken');
+    expect(launcher).toContain('signCurrentNodeCallbackToken');
+    expect(launcher).toContain('signCurrentWorkspaceCallbackToken');
     expect(launcher).toContain('createWorkspaceOnNode');
     expect(launcher).toContain('startSamAwareAgentSession');
     const bootstrap = read('services/agent-session-bootstrap.ts');

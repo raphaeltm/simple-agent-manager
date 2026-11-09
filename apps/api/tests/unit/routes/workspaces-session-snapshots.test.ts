@@ -32,6 +32,7 @@ vi.mock('../../../src/middleware/auth', () => ({
 vi.mock('../../../src/services/jwt', () => ({
   verifyCallbackToken: mocks.verifyCallbackToken,
   signCallbackToken: vi.fn(),
+  signCurrentWorkspaceCallbackToken: vi.fn(),
 }));
 vi.mock('../../../src/services/session-snapshots', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../src/services/session-snapshots')>();

@@ -876,7 +876,11 @@ export class VmAgentContainer extends Container<Env> {
     const target = toRuntimeRecoveryTarget(config, context);
 
     try {
-      const nodeCallbackToken = await signNodeCallbackToken(config.nodeId, this.env);
+      // The generations persistRuntimeRecovering rotated for this runtime: the previous
+      // container's node and workspace tokens stop authenticating once it committed.
+      const nodeCallbackToken = await signNodeCallbackToken(config.nodeId, this.env, {
+        callbackGeneration: context.nodeCallbackGeneration,
+      });
       await this.assertSourceTaskGuard(sourceTaskGuard);
       await this.startRuntime(config, { nodeCallbackToken });
     } catch (error) {
@@ -896,7 +900,9 @@ export class VmAgentContainer extends Container<Env> {
     let restoreMcp: Awaited<ReturnType<typeof prepareSessionRestoreMcp>> | undefined;
     let retainRestoreMcp = false;
     try {
-      const workspaceCallbackToken = await signCallbackToken(config.workspaceId, this.env);
+      const workspaceCallbackToken = await signCallbackToken(config.workspaceId, this.env, {
+        callbackGeneration: context.workspaceCallbackGeneration,
+      });
       const { token } = await signNodeManagementToken(
         context.userId,
         config.nodeId,
@@ -962,6 +968,7 @@ export class VmAgentContainer extends Container<Env> {
         chatSessionId: context.chatSessionId,
         agentSessionId: context.agentSessionId,
         runtimeContract: context.runtimeContract,
+        callbackGeneration: context.workspaceCallbackGeneration,
       });
       // A fresh Instant process has no session MCP map or SQLite credentials.
       // Reuse authenticated session creation without starting a new agent context.

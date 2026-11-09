@@ -36,7 +36,7 @@ func (h *SessionHost) CancelPromptGuarded(expectedStartedAt int64) string {
 	attempt.guardedCancel.Store(true)
 	cancel, process := h.promptCancel, h.process
 	if process != nil {
-		h.intentionalPromptCancelProcessStop = true
+		h.intentionalProcessStop = process
 	}
 	h.promptCancelMu.Unlock()
 	h.promptMu.Unlock()

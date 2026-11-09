@@ -329,6 +329,7 @@ async function loadMessageWorkspace(
       status: schema.workspaces.status,
       nodeId: schema.workspaces.nodeId,
       nodeStatus: schema.nodes.status,
+      callbackGeneration: schema.workspaces.callbackGeneration,
     })
     .from(schema.workspaces)
     .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
@@ -1161,6 +1162,7 @@ runtimeRoutes.get('/:id/runtime', async (c) => {
       status: schema.workspaces.status,
       nodeId: schema.workspaces.nodeId,
       nodeStatus: schema.nodes.status,
+      callbackGeneration: schema.workspaces.callbackGeneration,
     })
     .from(schema.workspaces)
     .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
@@ -1218,6 +1220,7 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
       status: schema.workspaces.status,
       nodeId: schema.workspaces.nodeId,
       nodeStatus: schema.nodes.status,
+      callbackGeneration: schema.workspaces.callbackGeneration,
     })
     .from(schema.workspaces)
     .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))

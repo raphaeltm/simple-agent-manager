@@ -30,7 +30,11 @@ const mocks = vi.hoisted(() => ({
   drizzle: vi.fn(),
 }));
 
-vi.mock('../../../src/services/jwt', () => mocks.jwt);
+vi.mock('../../../src/services/jwt', () => ({
+  ...mocks.jwt,
+  signCurrentWorkspaceCallbackToken: mocks.jwt.signCallbackToken,
+  signCurrentNodeCallbackToken: mocks.jwt.signNodeCallbackToken,
+}));
 vi.mock('../../../src/services/telemetry', () => mocks.telemetry);
 vi.mock('../../../src/services/vm-agent-container', () => mocks.container);
 vi.mock('drizzle-orm/d1', () => ({ drizzle: mocks.drizzle }));

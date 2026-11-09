@@ -22,7 +22,10 @@ vi.mock('../../../src/services/provider-credentials', () => ({
   createProviderForUser: mocks.createProvider,
   exactProviderCredentialBindingFromPlacementSnapshot: () => null,
 }));
-vi.mock('../../../src/services/jwt', () => ({ signNodeCallbackToken: async () => 'test-token' }));
+vi.mock('../../../src/services/jwt', () => ({
+  signNodeCallbackToken: async () => 'test-token',
+  signCurrentNodeCallbackToken: async () => 'test-token',
+}));
 vi.mock('../../../src/lib/secrets', () => ({ getCredentialEncryptionKey: () => 'test-key' }));
 vi.mock('../../../src/services/observability', () => ({ persistError: vi.fn() }));
 vi.mock('@simple-agent-manager/cloud-init', () => ({
@@ -183,9 +186,9 @@ describe('fresh VM absence proof through real provisioning and cleanup SQL', () 
     ).rejects.toThrow('Placement unavailable');
 
     expect(readNode(node.id)).toMatchObject({ status: 'creating', providerId: null });
-    expect(
-      sqlite.prepare('SELECT vm_location FROM nodes WHERE id = ?').get(node.id)
-    ).toEqual({ vm_location: 'fsn1' });
+    expect(sqlite.prepare('SELECT vm_location FROM nodes WHERE id = ?').get(node.id)).toEqual({
+      vm_location: 'fsn1',
+    });
   });
 
   it.each([

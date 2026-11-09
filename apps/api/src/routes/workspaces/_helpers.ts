@@ -8,7 +8,7 @@ import { extractBearerToken } from '../../lib/auth-helpers';
 import { log } from '../../lib/logger';
 import { expectJsonRecord } from '../../lib/runtime-validation';
 import { errors } from '../../middleware/error';
-import { signCallbackToken, verifyCallbackToken } from '../../services/jwt';
+import { signCurrentWorkspaceCallbackToken, verifyCallbackToken } from '../../services/jwt';
 import { createWorkspaceOnNode } from '../../services/node-agent';
 import { nodeStatusTerminatesCallbacks } from '../../services/node-callback-auth';
 import {
@@ -105,6 +105,7 @@ export async function loadWorkspaceCallbackIdentity(
       status: schema.workspaces.status,
       nodeId: schema.workspaces.nodeId,
       nodeStatus: schema.nodes.status,
+      callbackGeneration: schema.workspaces.callbackGeneration,
     })
     .from(schema.workspaces)
     .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
@@ -153,6 +154,7 @@ export async function transitionWorkspaceFromCallback(
         AND chat_session_id IS ?
         AND node_id IS ?
         AND status = ?
+        AND callback_generation IS ?
         AND EXISTS (
           SELECT 1 FROM nodes
            WHERE nodes.id = workspaces.node_id
@@ -167,6 +169,7 @@ export async function transitionWorkspaceFromCallback(
       expected.chatSessionId,
       expected.nodeId,
       expected.status,
+      expected.callbackGeneration,
       expected.nodeStatus
     )
     .run();
@@ -211,6 +214,8 @@ export async function assertWorkspaceCallbackIdentityCurrent(
       currentWorkspaceStatus: active.status,
       expectedNodeStatus: expected.nodeStatus,
       currentNodeStatus: active.nodeStatus,
+      expectedCallbackGeneration: expected.callbackGeneration,
+      currentCallbackGeneration: active.callbackGeneration,
       callback,
       action: 'terminal_gone',
     });
@@ -398,7 +403,7 @@ export async function scheduleWorkspaceCreateOnNode(
       throw errors.gone('Workspace changed before workspace creation dispatch');
     }
 
-    const callbackToken = await signCallbackToken(workspaceId, env);
+    const callbackToken = await signCurrentWorkspaceCallbackToken(workspaceId, env);
     const gitSource = await resolveWorkspaceGitSource(db, project);
     const acknowledgement = await createWorkspaceOnNode(
       nodeId,

@@ -116,8 +116,9 @@ describe('workspace dispatch race prevention', () => {
       const sqlite = new Database(':memory:');
       try {
         sqlite.exec(
-          `CREATE TABLE workspaces (id TEXT PRIMARY KEY, dispatched_at TEXT, status TEXT,
-             error_message TEXT, created_at TEXT, creating_started_at TEXT, build_started_at TEXT)`
+          `CREATE TABLE workspaces (id TEXT PRIMARY KEY, dispatched_at TEXT, callback_generation TEXT,
+             status TEXT, error_message TEXT, created_at TEXT, creating_started_at TEXT,
+             build_started_at TEXT)`
         );
         sqlite
           .prepare(

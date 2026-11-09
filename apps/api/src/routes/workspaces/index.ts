@@ -9,6 +9,7 @@ import { crudRoutes } from './crud';
 import { lifecycleRoutes } from './lifecycle';
 import { lifecycleTimingsRoutes } from './lifecycle-timings';
 import { localForwardRoutes } from './local-forward';
+import { mcpTokenRotationRoutes } from './mcp-token-rotation';
 import { runtimeRoutes } from './runtime';
 import { sessionSnapshotRoutes } from './session-snapshots';
 
@@ -23,5 +24,6 @@ workspacesRoutes.route('/', runtimeRoutes);
 workspacesRoutes.route('/', agentCredentialSyncRoutes);
 workspacesRoutes.route('/', sessionSnapshotRoutes);
 workspacesRoutes.route('/', callbackTokenRenewalRoutes);
+workspacesRoutes.route('/', mcpTokenRotationRoutes);
 
 export { workspacesRoutes };

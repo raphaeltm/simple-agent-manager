@@ -54,8 +54,11 @@ describe('callbackTokenIssuedAtMs', () => {
       BASE_DOMAIN: 'example.com',
     } as unknown as Env;
     const generationIssuedAtSeconds = Math.floor(Date.now() / 1000) - 2 * 3600;
-    const renewed = await signCallbackToken('ws-instant', env, { generationIssuedAtSeconds });
-    const firstIssue = await signCallbackToken('ws-instant', env);
+    const renewed = await signCallbackToken('ws-instant', env, {
+      callbackGeneration: null,
+      generationIssuedAtSeconds,
+    });
+    const firstIssue = await signCallbackToken('ws-instant', env, { callbackGeneration: null });
 
     const recoveredAtMs = generationIssuedAtSeconds * 1000 + MARGIN + 60_000;
     const verdict = (token: string) =>

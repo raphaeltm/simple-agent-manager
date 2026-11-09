@@ -18,6 +18,7 @@ vi.mock('../../../src/services/node-agent', () => ({
 
 vi.mock('../../../src/services/jwt', () => ({
   signCallbackToken: vi.fn().mockResolvedValue('mock-callback-token'),
+  signCurrentWorkspaceCallbackToken: vi.fn().mockResolvedValue('mock-callback-token'),
 }));
 
 vi.mock('../../../src/services/workspace-names', () => ({

@@ -101,7 +101,9 @@ vi.mock('drizzle-orm/d1', () => ({ drizzle: () => createMockDb() }));
 vi.mock('../../../src/services/jwt', () => ({
   shouldRefreshCallbackToken: vi.fn(() => state.refreshNeeded),
   signCallbackToken: vi.fn(),
+  signCurrentWorkspaceCallbackToken: vi.fn(),
   signNodeCallbackToken: vi.fn().mockResolvedValue('REFRESHED-TOKEN'),
+  signCurrentNodeCallbackToken: vi.fn().mockResolvedValue('REFRESHED-TOKEN'),
   signNodeManagementToken: vi.fn(),
   verifyCallbackToken: vi
     .fn()
@@ -267,9 +269,7 @@ describe('node-lifecycle BYO gates', () => {
       const res = await appRequest('/api/nodes/node-1/heartbeat', { nodeId: 'node-1' });
 
       expect(res.status).toBe(200);
-      expect(state.updates).toContainEqual(
-        expect.objectContaining({ healthStatus: 'healthy' })
-      );
+      expect(state.updates).toContainEqual(expect.objectContaining({ healthStatus: 'healthy' }));
     });
 
     it('stores creatingWorkspaces even when no metrics payload is present', async () => {

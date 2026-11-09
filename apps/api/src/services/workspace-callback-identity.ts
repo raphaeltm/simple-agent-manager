@@ -20,6 +20,12 @@ export interface WorkspaceCallbackIdentitySnapshot {
   status: string;
   nodeId: string | null;
   nodeStatus: string | null;
+  /**
+   * Credential generation of the workspace's current runtime (`callback_generation`).
+   * Part of the identity so a final fence also catches a runtime replaced between
+   * authentication and the side effect, even when every status reads the same again.
+   */
+  callbackGeneration: string | null;
 }
 
 export function sameWorkspaceCallbackIdentity(
@@ -33,6 +39,7 @@ export function sameWorkspaceCallbackIdentity(
     current.chatSessionId === expected.chatSessionId &&
     current.status === expected.status &&
     current.nodeId === expected.nodeId &&
-    current.nodeStatus === expected.nodeStatus
+    current.nodeStatus === expected.nodeStatus &&
+    current.callbackGeneration === expected.callbackGeneration
   );
 }

@@ -1869,7 +1869,7 @@ func TestSessionHost_CancelPromptFromControlPlane_ForwardsSessionCancel(t *testi
 
 	host.mu.RLock()
 	process := host.process
-	intentionalStop := host.intentionalPromptCancelProcessStop
+	intentionalStop := process != nil && host.intentionalProcessStop == process
 	host.mu.RUnlock()
 	agentProc, ok := process.(*AgentProcess)
 	if process == nil || !ok || !agentProc.stopped {
@@ -1902,7 +1902,7 @@ func TestSessionHost_MonitorIntentionalPromptCancelDoesNotConsumeRestartBudget(t
 	host.agentType = "claude-code"
 	host.setSessionIDLocked("acp-session-1")
 	host.restartCount = 1
-	host.intentionalPromptCancelProcessStop = true
+	host.intentionalProcessStop = process
 	host.mu.Unlock()
 
 	host.monitorProcessExit(process, "claude-code", nil, nil)
@@ -1951,7 +1951,7 @@ func TestSessionHost_MonitorIntentionalPromptCancelReportsIdleAfterSuccessfulRes
 	host.agentType = "claude-code"
 	host.setSessionIDLocked("acp-session-1")
 	host.agentSupportsLoadSession = true
-	host.intentionalPromptCancelProcessStop = true
+	host.intentionalProcessStop = oldProc
 	host.mu.Unlock()
 	close(oldProc.waitCh)
 

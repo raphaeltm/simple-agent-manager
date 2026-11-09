@@ -109,6 +109,8 @@ type restartControlPlane struct {
 	mu       sync.Mutex
 	payloads []activityPayload
 	server   *httptest.Server
+	// agentKeyBody, when set, replaces the default api-key agent-key response.
+	agentKeyBody string
 }
 
 func newRestartControlPlane(t *testing.T) *restartControlPlane {
@@ -127,8 +129,14 @@ func newRestartControlPlane(t *testing.T) *restartControlPlane {
 			cp.mu.Unlock()
 			w.WriteHeader(http.StatusNoContent)
 		case strings.Contains(r.URL.Path, "/agent-key"):
+			cp.mu.Lock()
+			body := cp.agentKeyBody
+			cp.mu.Unlock()
+			if body == "" {
+				body = `{"apiKey":"test-api-key","credentialKind":"api-key"}`
+			}
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"apiKey":"test-api-key","credentialKind":"api-key"}`))
+			_, _ = w.Write([]byte(body))
 		default:
 			// agent-settings and friends fall back to defaults on 404.
 			w.WriteHeader(http.StatusNotFound)

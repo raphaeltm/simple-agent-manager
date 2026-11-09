@@ -29,6 +29,13 @@ type Claims struct {
 	RemotePort     int    `json:"remotePort,omitempty"`
 	Mode           string `json:"mode,omitempty"`
 	LocalAuthority string `json:"localAuthority,omitempty"`
+	// CallbackGeneration ("cgen") is the control plane's opaque per-workspace
+	// callback credential generation embedded in workspace callback tokens. The
+	// control plane rotates it when the same workspace ID is reactivated so the
+	// previous runtime's tokens stop working. Absent on tokens minted before
+	// rotation existed and for workspaces never rotated. It is unrelated to the
+	// agent's eviction generation, which fences restart against eviction.
+	CallbackGeneration string `json:"cgen,omitempty"`
 }
 
 // JWTValidator validates JWTs using a remote JWKS endpoint.
