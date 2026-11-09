@@ -1,15 +1,15 @@
 import type { AgentDefinition } from '@simple-agent-manager/shared';
-import { Input } from '@simple-agent-manager/ui';
 import { useState } from 'react';
 
 import { getSuccessCloseDelayMs } from '../../CodexConnectModal';
 import { AgentCredentialConnectTrigger } from '../../CodexConnectTrigger';
+import { WELL_INPUT_CLASS } from './OnboardingParts';
 
 /** Agents whose subscription sign-in SAM can run for the user (open a link, enter a code). */
 const GUIDED_SIGN_IN_AGENTS = ['openai-codex', 'claude-code'] as const;
 type GuidedSignInAgent = (typeof GUIDED_SIGN_IN_AGENTS)[number];
 
-export function isGuidedSignInAgent(agentId: string | null): agentId is GuidedSignInAgent {
+function isGuidedSignInAgent(agentId: string | null): agentId is GuidedSignInAgent {
   return (GUIDED_SIGN_IN_AGENTS as readonly string[]).includes(agentId ?? '');
 }
 
@@ -51,7 +51,7 @@ export function SubscriptionConnect({
       )}
       <label
         htmlFor="onboarding-oauth-token"
-        className="block text-xs font-medium text-fg-muted mb-1"
+        className="mb-1.5 block text-xs font-medium text-fg-muted"
       >
         {guidedShown
           ? isCodex
@@ -72,26 +72,28 @@ export function SubscriptionConnect({
           value={token}
           onChange={(e) => onTokenChange(e.target.value)}
           placeholder="Paste the full contents of ~/.codex/auth.json"
-          className="w-full px-3 py-2 rounded border border-border-default bg-surface text-fg-primary text-xs font-mono outline-none focus:border-accent"
+          className={`${WELL_INPUT_CLASS} font-mono text-xs sm:text-xs`}
         />
       ) : (
-        <Input
+        <input
           id="onboarding-oauth-token"
           type="password"
           autoComplete="off"
+          spellCheck={false}
           value={token}
           onChange={(e) => onTokenChange(e.target.value)}
           placeholder='Paste your token from "claude setup-token"'
+          className={`${WELL_INPUT_CLASS} font-mono`}
         />
       )}
       {!guidedShown && (
-        <p className="text-xs text-fg-muted/70 mt-1">{oauthSupport.setupInstructions}</p>
+        <p className="mb-0 mt-1.5 text-xs text-fg-muted">{oauthSupport.setupInstructions}</p>
       )}
       <a
         href={oauthSupport.subscriptionUrl}
         target="_blank"
         rel="noopener noreferrer"
-        className="text-xs text-accent hover:underline mt-1 inline-block"
+        className="mt-1.5 inline-block text-xs text-accent hover:underline"
       >
         View subscription plans
       </a>

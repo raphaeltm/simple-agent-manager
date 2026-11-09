@@ -1,33 +1,24 @@
 /**
- * Executes the real API call for each setup step.
+ * The onboarding agent step: which agent, how it signs in, and the first profile.
  */
 import type {
   AgentType,
+  CreateAgentProfileRequest,
   SaveAgentCredentialRequest,
   UpdateAiBudgetRequest,
 } from '@simple-agent-manager/shared';
 import { getAgentDefinition } from '@simple-agent-manager/shared';
 
 import {
-  createCredential,
   saveAgentCredential,
   saveAgentSettings,
   updateUserAiBudget,
   validateAgentCredential,
-  validateCredential,
 } from '../../../lib/api';
-import type { StepId } from './path-generator';
+import type { RuntimeChoice } from './questions';
 
 /** Auth methods a user can pick for an agent during onboarding. */
 export type AuthMethod = 'api-key' | 'oauth-token' | 'sam';
-
-/**
- * Cloud providers selectable inline during onboarding (no GCP — it needs a multi-step handshake).
- * Vultr and DigitalOcean are intentionally deferred here (binary hetzner/scaleway ternary UI);
- * tracked follow-up: tasks/backlog/2026-07-23-vultr-onboarding-wizard-parity.md. Both are fully
- * usable via Settings → Infrastructure.
- */
-export type CloudProvider = 'hetzner' | 'scaleway';
 
 /**
  * Agents whose traffic can be routed through the SAM-managed AI proxy.
@@ -42,12 +33,15 @@ export const SAM_PROXY_AGENT_TYPES: readonly AgentType[] = ['claude-code', 'open
  * - 'api-key': every agent
  * - 'sam': only agents the SAM AI proxy supports
  */
-export function authMethodsForAgent(agentId: string): AuthMethod[] {
+export function authMethodsForAgent(
+  agentId: string,
+  { samAvailable = true }: { samAvailable?: boolean } = {}
+): AuthMethod[] {
   // A subscription comes first where the agent has one: signing in is quicker than finding and
   // pasting an API key, and SAM can run the sign-in for Claude Code and Codex.
   const def = getAgentDefinition(agentId as AgentType);
   const methods: AuthMethod[] = def?.oauthSupport ? ['oauth-token', 'api-key'] : ['api-key'];
-  if (SAM_PROXY_AGENT_TYPES.includes(agentId as AgentType)) methods.push('sam');
+  if (samAvailable && SAM_PROXY_AGENT_TYPES.includes(agentId as AgentType)) methods.push('sam');
   return methods;
 }
 
@@ -61,11 +55,6 @@ export interface StepFormState {
   dailyInputTokenLimit: string;
   dailyOutputTokenLimit: string;
   monthlyCostCapUsd: string;
-  // Cloud (cloud-byoc step)
-  cloudProvider: CloudProvider;
-  hetznerToken: string;
-  scalewaySecretKey: string;
-  scalewayProjectId: string;
   // Project (project step)
   selectedRepoName: string;
   /** Name for a SAM-hosted project (the repository is created with it). */
@@ -80,10 +69,6 @@ export const INITIAL_FORM: StepFormState = {
   dailyInputTokenLimit: '',
   dailyOutputTokenLimit: '',
   monthlyCostCapUsd: '',
-  cloudProvider: 'hetzner',
-  hetznerToken: '',
-  scalewaySecretKey: '',
-  scalewayProjectId: '',
   selectedRepoName: '',
   hostedProjectName: '',
 };
@@ -115,102 +100,71 @@ function buildBudgetRequest(form: StepFormState): UpdateAiBudgetRequest | null {
   return Object.keys(body).length > 0 ? body : null;
 }
 
-export async function executeStep(stepId: StepId, form: StepFormState): Promise<void> {
-  switch (stepId) {
-    case 'ai-setup': {
-      if (!form.selectedAgent) {
-        throw new Error('Please choose an agent');
-      }
-      const agentType = form.selectedAgent as AgentType;
-      const method = form.selectedAuthMethod;
+/** Saves how the chosen agent signs in. The guided subscription sign-in saves on its own. */
+export async function saveAgentConnection(form: StepFormState): Promise<void> {
+  if (!form.selectedAgent) throw new Error('Please choose an agent');
+  const agentType = form.selectedAgent as AgentType;
+  const method = form.selectedAuthMethod;
 
-      if (method === 'api-key') {
-        if (!form.apiKey.trim()) {
-          throw new Error('Please enter an API key');
-        }
-        const request: SaveAgentCredentialRequest = {
-          agentType,
-          credentialKind: 'api-key',
-          credential: form.apiKey.trim(),
-        };
-        const validation = await validateAgentCredential(request);
-        if (validation.valid === false) {
-          throw new Error(validation.message ?? 'Invalid API key');
-        }
-        await saveAgentCredential(request);
-        return;
-      }
-
-      if (method === 'oauth-token') {
-        if (!form.oauthToken.trim()) {
-          throw new Error('Please paste your OAuth token');
-        }
-        await saveAgentCredential({
-          agentType,
-          credentialKind: 'oauth-token',
-          credential: form.oauthToken.trim(),
-          autoActivate: true,
-        });
-        return;
-      }
-
-      if (method === 'sam') {
-        await saveAgentSettings(agentType, { providerMode: 'sam' });
-        const budget = buildBudgetRequest(form);
-        if (budget) {
-          await updateUserAiBudget(budget);
-        }
-        return;
-      }
-
-      throw new Error('Please choose how to connect this agent');
-    }
-
-    case 'cloud-byoc': {
-      if (form.cloudProvider === 'hetzner') {
-        if (!form.hetznerToken.trim()) {
-          throw new Error('Please enter your Hetzner API token');
-        }
-        const validation = await validateCredential({
-          provider: 'hetzner',
-          token: form.hetznerToken.trim(),
-        });
-        if (validation.valid === false) {
-          throw new Error(validation.message ?? 'Invalid Hetzner token');
-        }
-        await createCredential({
-          provider: 'hetzner',
-          token: form.hetznerToken.trim(),
-        });
-        return;
-      }
-
-      // scaleway
-      if (!form.scalewaySecretKey.trim() || !form.scalewayProjectId.trim()) {
-        throw new Error('Please enter your Scaleway secret key and project ID');
-      }
-      const validation = await validateCredential({
-        provider: 'scaleway',
-        secretKey: form.scalewaySecretKey.trim(),
-        projectId: form.scalewayProjectId.trim(),
-      });
-      if (validation.valid === false) {
-        throw new Error(validation.message ?? 'Invalid Scaleway credentials');
-      }
-      await createCredential({
-        provider: 'scaleway',
-        secretKey: form.scalewaySecretKey.trim(),
-        projectId: form.scalewayProjectId.trim(),
-      });
-      return;
-    }
-
-    case 'cloud-sam':
-    case 'github':
-    case 'project':
-      // These are handled by their own UI flows, not this function.
-      // cloud-sam is an honest confirmation step — there is no backend field to
-      // persist a "use SAM infra" choice, so it collects nothing (rule 42).
-      return;
+  if (method === 'api-key') {
+    if (!form.apiKey.trim()) throw new Error('Please enter an API key');
+    const request: SaveAgentCredentialRequest = {
+      agentType,
+      credentialKind: 'api-key',
+      credential: form.apiKey.trim(),
+    };
+    const validation = await validateAgentCredential(request);
+    if (validation.valid === false) throw new Error(validation.message ?? 'Invalid API key');
+    await saveAgentCredential(request);
+    return;
   }
+
+  if (method === 'oauth-token') {
+    if (!form.oauthToken.trim()) throw new Error('Please paste your sign-in token');
+    await saveAgentCredential({
+      agentType,
+      credentialKind: 'oauth-token',
+      credential: form.oauthToken.trim(),
+      autoActivate: true,
+    });
+    return;
+  }
+
+  if (method === 'sam') {
+    await saveAgentSettings(agentType, { providerMode: 'sam' });
+    const budget = buildBudgetRequest(form);
+    if (budget) await updateUserAiBudget(budget);
+    return;
+  }
+
+  throw new Error('Please choose how to connect this agent');
+}
+
+/**
+ * The project's first profile, so its first chat starts without a detour through the profile
+ * wizard: the chosen agent on the runtime the user picked. Instant runs as a conversation in a
+ * lightweight workspace (the runtime allows nothing else); a machine runs full tasks.
+ */
+export function firstProfileRequest(
+  agentType: AgentType,
+  runtime: RuntimeChoice
+): CreateAgentProfileRequest {
+  const name = getAgentDefinition(agentType)?.name ?? agentType;
+  return runtime === 'instant'
+    ? {
+        name,
+        description: 'Chats and changes on Instant, ready in seconds',
+        agentType,
+        runtime: 'cf-container',
+        workspaceProfile: 'lightweight',
+        taskMode: 'conversation',
+      }
+    : {
+        name,
+        description: 'Writes code and opens pull requests on its own machine',
+        agentType,
+        runtime: 'vm',
+        workspaceProfile: 'full',
+        taskMode: 'task',
+      };
 }

@@ -2,7 +2,7 @@ import { Button } from '@simple-agent-manager/ui';
 import { ArrowRight, KeyRound } from 'lucide-react';
 import { type FormEvent, type ReactNode } from 'react';
 
-import { SetupHero } from './SetupShell';
+import { SamHero } from '../../components/SamHero';
 
 export function SetupNotice({
   tone,
@@ -69,7 +69,7 @@ export function WelcomeStep({
 
   return (
     <form onSubmit={submit}>
-      <SetupHero />
+      <SamHero />
       <StepHeading
         title="Welcome to your SAM"
         subtitle={
@@ -183,7 +183,7 @@ interface DoneStepProps {
 export function DoneStep({ title, message, onSignIn }: DoneStepProps) {
   return (
     <div>
-      <SetupHero celebrate />
+      <SamHero celebrate />
       <StepHeading title={title} subtitle={message} />
       <Button type="button" variant="accent" size="lg" className="w-full" onClick={onSignIn}>
         Sign in

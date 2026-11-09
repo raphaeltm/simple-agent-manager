@@ -1,90 +1,48 @@
-import { Button, Card } from '@simple-agent-manager/ui';
-import { Check, Sparkles, X } from 'lucide-react';
+import { Button } from '@simple-agent-manager/ui';
+import { MessageSquare } from 'lucide-react';
 import { useCallback } from 'react';
 import { useNavigate } from 'react-router';
 
-/* ─── Constants ─── */
-
-const NEXT_STEPS = [
-  {
-    title: 'Start a chat in your project',
-    desc: 'Describe what you want built and the agent will start working',
-  },
-  {
-    title: 'Watch the agent work',
-    desc: 'See real-time progress as it edits files, runs tests, and creates PRs',
-  },
-  {
-    title: 'Review and merge',
-    desc: 'Check the PR, request changes, or merge it to your main branch',
-  },
-] as const;
-
-/* ─── Props ─── */
+import { SamHero } from '../../SamHero';
 
 interface CompletionScreenProps {
+  /** The project created during onboarding; its chat is where the user goes next. */
+  projectId: string | null;
   onDismiss: () => void;
 }
 
-/* ─── Component ─── */
-
-export function CompletionScreen({ onDismiss }: CompletionScreenProps) {
+/** The hand-off: SAM is ready, and the first chat is one tap away. */
+export function CompletionScreen({ projectId, onDismiss }: CompletionScreenProps) {
   const navigate = useNavigate();
 
-  const handleGoToProjects = useCallback(() => {
+  const startChatting = useCallback(() => {
     onDismiss();
-    navigate('/projects');
-  }, [onDismiss, navigate]);
+    navigate(projectId ? `/projects/${projectId}/chat` : '/projects');
+  }, [onDismiss, navigate, projectId]);
 
   return (
-    <div className="max-w-md mx-auto text-center">
-      <div className="mt-8 mb-6">
-        <div className="w-20 h-20 rounded-full bg-success/10 flex items-center justify-center mx-auto mb-4">
-          <Check size={36} className="text-success" />
-        </div>
-        <h2 className="sam-type-page-title text-fg-primary mb-2">You&apos;re all set!</h2>
-        <p className="text-fg-muted max-w-sm mx-auto">
-          Your account is configured and ready to go. Start a chat in your project to begin.
-        </p>
-      </div>
-
-      <Card className="p-5 text-left mb-6">
-        <p className="text-xs text-fg-muted uppercase tracking-wide font-medium mb-3">
-          What&apos;s next
-        </p>
-        <ol className="flex flex-col gap-3 list-none p-0 m-0">
-          {NEXT_STEPS.map((item) => (
-            <li key={item.title} className="flex items-start gap-3">
-              <div className="w-6 h-6 rounded-full bg-accent/10 flex items-center justify-center text-xs text-accent font-bold shrink-0">
-                {NEXT_STEPS.indexOf(item) + 1}
-              </div>
-              <div>
-                <p className="text-sm font-medium text-fg-primary">{item.title}</p>
-                <p className="text-xs text-fg-muted">{item.desc}</p>
-              </div>
-            </li>
-          ))}
-        </ol>
-      </Card>
-
-      <div className="flex flex-col items-center gap-3">
-        <Button
-          variant="primary"
-          size="lg"
-          onClick={handleGoToProjects}
-          className="w-full max-w-xs"
-        >
-          <Sparkles size={14} /> Go to my projects
-        </Button>
+    <div className="text-center">
+      <SamHero celebrate />
+      <h2 className="m-0 text-[1.6rem] font-bold leading-tight text-fg-primary sm:text-[1.9rem]">
+        We&apos;re ready.
+      </h2>
+      <p className="mx-auto mb-7 mt-2 max-w-sm text-[0.95rem] text-fg-muted">
+        Tell your agent what to build, fix or explain. I&apos;ll give it a workspace and keep you
+        posted while it works.
+      </p>
+      <Button variant="accent" size="lg" className="w-full sm:w-auto" onClick={startChatting}>
+        <MessageSquare className="h-5 w-5" aria-hidden="true" />
+        {projectId ? 'Start your first chat' : 'Go to my projects'}
+      </Button>
+      <div>
         <button
           type="button"
           onClick={onDismiss}
-          className="inline-flex items-center gap-1 text-xs text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer min-h-[44px]"
+          className="mt-3 min-h-11 cursor-pointer border-0 bg-transparent px-2 text-sm text-fg-muted hover:text-fg-primary"
         >
-          <X size={12} /> Dismiss
+          Stay on the dashboard
         </button>
       </div>
-      <p className="text-xs text-fg-muted mt-3">You can change any setting in Settings anytime</p>
     </div>
   );
 }
