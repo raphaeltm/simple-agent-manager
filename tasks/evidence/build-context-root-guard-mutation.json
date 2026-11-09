@@ -1,10 +1,10 @@
 {
-  "recordedAt": "2026-11-09T10:38:58.258079+00:00",
-  "baseCommit": "25b15e263d26d2b5e0b52ee1242b1d6d1404f56d",
+  "recordedAt": "2026-11-09T12:27:32.977611+00:00",
+  "baseCommit": "3b65a30f4501ceea29795a8bb78fc33a2dc52cd6",
   "results": [
     {
       "guard": "trusted-base-openroot",
-      "sourceSha256": "b0329daa87d0a3ef1a23390d72fede3c934883fa921be986f6ce732595bd4627",
+      "sourceSha256": "f8dac2e9948a908280cbc52c018f473066b4f7042cd5da0a45bb9b6d0822792c",
       "mutantExitCode": 1,
       "ownerControls": {
         "TestContextSourceWorkingDirectorySwap/VM/owner": true,
@@ -30,7 +30,7 @@
     },
     {
       "guard": "directory-only-source-open",
-      "sourceSha256": "b0329daa87d0a3ef1a23390d72fede3c934883fa921be986f6ce732595bd4627",
+      "sourceSha256": "f8dac2e9948a908280cbc52c018f473066b4f7042cd5da0a45bb9b6d0822792c",
       "mutantExitCode": 1,
       "ownerControls": {
         "TestContextSourceWorkingDirectorySwap/VM/owner": true,

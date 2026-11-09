@@ -24,7 +24,9 @@ export async function createBuildContextUpload(
       ContentType: 'application/zstd',
       Metadata: { sha256: descriptor.sha256 },
     }),
-    { expiresIn }
+    // The source sends this as a header. Keep it in SignedHeaders instead of
+    // hoisting it into the query, so changing the digest invalidates the PUT.
+    { expiresIn, unhoistableHeaders: new Set(['x-amz-meta-sha256']) }
   );
   return { r2Key, uploadUrl, expiresIn };
 }

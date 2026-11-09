@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"log/slog"
@@ -19,6 +20,11 @@ import (
 	"github.com/workspace/vm-agent/internal/container"
 	"github.com/workspace/vm-agent/internal/publish"
 	"github.com/workspace/vm-agent/internal/publish/contextcollect"
+)
+
+const (
+	DEFAULT_BUILD_CONTEXT_UPLOAD_RESPONSE_MAX_BYTES   = 4096
+	DEFAULT_BUILD_CONTEXT_CALLBACK_RESPONSE_MAX_BYTES = 1 << 20
 )
 
 type collectBuildContextRequest struct {
@@ -161,15 +167,35 @@ func (s *Server) collectAndUploadBuildContext(ctx context.Context, workspaceID, 
 	if err != nil {
 		return nil, fmt.Errorf("context upload failed")
 	}
-	io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-	resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("context upload returned %d", resp.StatusCode)
+	if err := buildContextUploadResponse(resp); err != nil {
+		return nil, err
 	}
 	if err := s.contextCallback(ctx, workspaceID, callbackPath+"complete", body, nil); err != nil {
 		return nil, err
 	}
 	return result, nil
+}
+
+// R2 error bodies can contain signed URLs, canonical requests and credentials.
+// Expose only a bounded, recognized error code, never the message or raw body.
+func buildContextUploadResponse(resp *http.Response) error {
+	defer resp.Body.Close()
+	body := io.LimitReader(resp.Body, DEFAULT_BUILD_CONTEXT_UPLOAD_RESPONSE_MAX_BYTES)
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		io.Copy(io.Discard, body)
+		return nil
+	}
+	var detail struct {
+		XMLName xml.Name `xml:"Error"`
+		Code    string   `xml:"Code"`
+	}
+	if xml.NewDecoder(body).Decode(&detail) == nil {
+		switch detail.Code {
+		case "AccessDenied", "SignatureDoesNotMatch", "InvalidAccessKeyId", "ExpiredToken", "RequestTimeTooSkewed", "AuthorizationQueryParametersError", "UnsignedHeaders", "InvalidToken":
+			return fmt.Errorf("context upload returned %d (%s); check R2 credentials and signed upload headers", resp.StatusCode, detail.Code)
+		}
+	}
+	return fmt.Errorf("context upload returned %d; check R2 credentials and signed upload headers", resp.StatusCode)
 }
 func (s *Server) contextCallback(ctx context.Context, workspaceID, path string, body any, out any) error {
 	data, err := json.Marshal(body)
@@ -191,7 +217,7 @@ func (s *Server) contextCallback(ctx context.Context, workspaceID, path string, 
 		return fmt.Errorf("context callback returned %d; inspect publish job state before retrying", resp.StatusCode)
 	}
 	if out != nil {
-		return json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(out)
+		return json.NewDecoder(io.LimitReader(resp.Body, DEFAULT_BUILD_CONTEXT_CALLBACK_RESPONSE_MAX_BYTES)).Decode(out)
 	}
 	return nil
 }
