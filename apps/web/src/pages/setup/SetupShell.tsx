@@ -1,16 +1,7 @@
 import { GlassNodeField } from '@simple-agent-manager/ui';
-import { Check } from 'lucide-react';
 import type { ReactNode } from 'react';
 
-export interface SetupStepMarker {
-  key: string;
-  label: string;
-}
-
 interface SetupShellProps {
-  /** The steps shown in the indicator; omitted on screens outside the step sequence. */
-  steps?: SetupStepMarker[];
-  currentStep?: string;
   footer?: ReactNode;
   children: ReactNode;
 }
@@ -22,9 +13,7 @@ interface SetupShellProps {
  * page owns its scrolling: `<main>` is the scroll container, positioned so absolutely placed
  * descendants scroll with it (rule 56). The field sits in a fixed layer behind it.
  */
-export function SetupShell({ steps, currentStep, footer, children }: SetupShellProps) {
-  const currentIndex = steps?.findIndex((step) => step.key === currentStep) ?? -1;
-
+export function SetupShell({ footer, children }: SetupShellProps) {
   return (
     <main
       data-testid="setup-scroll"
@@ -34,48 +23,6 @@ export function SetupShell({ steps, currentStep, footer, children }: SetupShellP
         <GlassNodeField mode="floor" density={0.18} horizonY={0.58} />
       </div>
       <div className="mx-auto flex min-h-full w-full min-w-0 max-w-[34rem] flex-col justify-center px-4 py-8 sm:py-12">
-        {steps && steps.length > 1 && (
-          <ol aria-label="Setup steps" className="mb-5 flex items-center justify-center gap-2">
-            {steps.map((step, index) => {
-              const state =
-                index < currentIndex ? 'done' : index === currentIndex ? 'current' : 'next';
-              return (
-                <li
-                  key={step.key}
-                  aria-current={state === 'current' ? 'step' : undefined}
-                  className="flex items-center gap-2"
-                >
-                  {index > 0 && (
-                    <span
-                      aria-hidden="true"
-                      className={`h-px w-6 sm:w-10 ${state === 'next' ? 'bg-border-default' : 'bg-accent'}`}
-                    />
-                  )}
-                  <span
-                    className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
-                      state === 'current'
-                        ? 'sam-raised text-fg-primary'
-                        : state === 'done'
-                          ? 'text-success-fg'
-                          : 'text-fg-muted'
-                    }`}
-                  >
-                    {state === 'done' ? (
-                      <Check className="h-3.5 w-3.5" aria-hidden="true" />
-                    ) : (
-                      <span
-                        aria-hidden="true"
-                        className={`h-1.5 w-1.5 rounded-full ${state === 'next' ? 'bg-fg-muted' : 'bg-accent'}`}
-                      />
-                    )}
-                    {step.label}
-                    {state === 'done' && <span className="sr-only"> (done)</span>}
-                  </span>
-                </li>
-              );
-            })}
-          </ol>
-        )}
         <section className="sam-glass sam-glass-rim rounded-[var(--sam-radius-pane)] px-5 py-7 sm:px-9 sm:py-9">
           {children}
         </section>

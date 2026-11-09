@@ -127,9 +127,7 @@ the Cloudflare dashboard.
    DNS records only under that subdomain. Without them, email stays off and the deploy log says so.
    No GitHub variable is needed. See [Self-Hosting](/docs/guides/self-hosting/). The hosted
    installer requests these permissions itself, and its installs prepare email automatically.
-2. **Turn it on.** On a new installation, first-run setup offers this as its last step (**Let agents
-   receive email**, on by default), listing the same changes as below under **What changes on
-   &lt;your-domain&gt;**. Otherwise a superadmin opens **Admin → Integrations**. The **Agent email** section says
+2. **Turn it on.** A superadmin opens **Admin → Integrations**. The **Agent email** section says
    **Off** and what's next:
    - "This deployment has not prepared agent email…", "Email Sending is not set up…" or "Deploy
      again: this deployment predates the agent email setup.": go back to step 1.

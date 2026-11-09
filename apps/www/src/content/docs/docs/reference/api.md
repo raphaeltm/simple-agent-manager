@@ -253,13 +253,11 @@ the login page offers.
 Token-gated by `SETUP_TOKEN`; every route returns `410 SETUP_CLOSED` once setup is complete.
 
 - `GET /api/setup/status` — `{ completed, open, forced, tokenConfigured }`.
-- `POST /api/setup/verify` — body `{ token }`. Returns the integration `status`, `signIn: { email,
-ownerEmail }` and `agentEmail`, the agent email setup plan (or `null` when it can't be read).
-- `POST /api/setup/complete` — body `{ token, config?, agentEmail?: { consentToken } }`. Needs a
-  sign-in method: email sign-up (installer owner set and email prepared), or an OAuth provider in
-  `config`. With `agentEmail`, turns agent
-  email on after setup completes and returns `agentEmail: { plan, error }`; a failure there does not
-  undo setup.
+- `POST /api/setup/verify` — body `{ token }`. Returns the integration `status` and
+  `signIn: { email, ownerEmail }`.
+- `POST /api/setup/complete` — body `{ token, config? }`. Needs a sign-in method: email sign-up
+  (installer owner set and email prepared), or an OAuth provider in `config`. Setup never turns
+  agent email on; a superadmin does that from **Admin → Integrations**.
 
 ## Workspaces
 

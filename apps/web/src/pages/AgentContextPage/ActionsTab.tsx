@@ -2,7 +2,12 @@ import type { ActivityEventResponse } from '../../lib/api';
 import { Badge, GLASS_CARD, SectionHeader } from './index';
 
 function formatDate(ts: number): string {
-  return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return new Date(ts).toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 const eventTypeColors: Record<string, string> = {
@@ -37,10 +42,14 @@ function ActionRow({ event }: { event: ActivityEventResponse }) {
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
             <Badge className={getEventColor(event.eventType)}>{event.eventType}</Badge>
-            <Badge className="border-glass-border bg-accent-tint text-fg-muted">{event.actorType}</Badge>
+            <Badge className="border-glass-border bg-accent-tint text-fg-muted">
+              {event.actorType}
+            </Badge>
           </div>
           {summary && (
-            <p className="m-0 mt-2 text-[13px] text-fg-muted leading-relaxed break-words">{summary}</p>
+            <p className="m-0 mt-2 text-[13px] text-fg-muted leading-relaxed break-words">
+              {summary}
+            </p>
           )}
         </div>
         <div className="flex shrink-0 flex-col gap-1 text-xs text-fg-muted lg:items-end">
@@ -58,8 +67,13 @@ interface ActionsTabProps {
 export function ActionsTab({ actions }: ActionsTabProps) {
   return (
     <div className="space-y-2.5">
-      <SectionHeader title="Recent agent actions" description="Activity events and state changes in this project." />
-      {actions.map((a) => <ActionRow key={a.id} event={a} />)}
+      <SectionHeader
+        title="Recent agent actions"
+        description="Activity events and state changes in this project."
+      />
+      {actions.map((a) => (
+        <ActionRow key={a.id} event={a} />
+      ))}
     </div>
   );
 }

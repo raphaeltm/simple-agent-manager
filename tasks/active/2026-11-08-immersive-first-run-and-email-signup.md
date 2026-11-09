@@ -47,3 +47,18 @@ Raphaël ran a real installer install (sam2.party, 2026-11-08) and reported:
 - [x] Setup page scrolls on desktop and mobile.
 - [x] Agent email turns on during setup when the owner keeps it on, with DNS changes previewed.
 - [x] Existing installs and CI deploys keep working (email step skipped without permissions).
+
+## Live test feedback (2026-11-09, fresh sam2.party install from the staging installer)
+
+The install worked end to end: the installer's tokens prepared Email Sending for `agents.sam2.party`, the
+API reported email-only sign-in, and the emailed code arrived. Raphaël's two problems:
+
+- [x] Onboarding showed an "Email your agents" screen. That is not onboarding: setup must only get the
+  owner to a running SAM. Removed the agent-email step and the setup API's agent-email plan/consent
+  fields; with email sign-in available, setup is now the token alone, then the code step with the
+  code already sent. OAuth providers and agent email live in Admin → Integrations.
+- [x] On a phone, switching to the mail app and back emptied the code field. Root cause: BetterAuth's
+  focus refetch reports `isPending` while the session is null, and `AuthProvider` treated that as a
+  cold load and swapped the whole app for its spinner. A refetch after a confirmed signed-out answer
+  is now background revalidation. The code step also survives a full tab reload (address only, five
+  minutes, sessionStorage).

@@ -1,14 +1,11 @@
-import { type AgentEmailSetupPlan, SYSTEM_USER_ID } from '@simple-agent-manager/shared';
 import type { Context } from 'hono';
 import { Hono } from 'hono';
 import * as v from 'valibot';
 
 import type { Env } from '../env';
-import { createModuleLogger } from '../lib/logger';
 import { expectJsonRecord, maybeJsonRecord } from '../lib/runtime-validation';
 import { AppError, errors } from '../middleware/error';
 import { parseOptionalBody } from '../schemas/_validator';
-import { planAgentEmailSetup, runAgentEmailSetup } from '../services/agent-email/setup';
 import { bootstrapOwnerEmail } from '../services/bootstrap-owner';
 import { emailSignUpOffered } from '../services/email-sign-in';
 import {
@@ -25,7 +22,6 @@ import {
   validateSetupCanComplete,
 } from '../services/platform-config-validation';
 
-const log = createModuleLogger('setup');
 const setupRoutes = new Hono<{ Bindings: Env }>();
 type SetupContext = Context<{ Bindings: Env }>;
 
@@ -36,8 +32,6 @@ type SetupContext = Context<{ Bindings: Env }>;
 const SetupRequestBodySchema = v.object({
   token: v.optional(v.unknown()),
   config: v.optional(v.unknown()),
-  // Present when the owner keeps agent email on; carries the previewed plan's consent token.
-  agentEmail: v.optional(v.object({ consentToken: v.optional(v.nullable(v.string())) })),
 });
 
 function clientIdentifier(c: SetupContext): string {
@@ -93,7 +87,6 @@ function parseIntegrationConfig(value: unknown): PlatformIntegrationInput {
 async function parseSetupBody(c: SetupContext): Promise<{
   token: string;
   config: PlatformIntegrationInput;
-  agentEmail: { consentToken: string | null } | null;
 }> {
   const body = await parseOptionalBody(c.req.raw, SetupRequestBodySchema, {});
   if (typeof body.token !== 'string') {
@@ -102,7 +95,6 @@ async function parseSetupBody(c: SetupContext): Promise<{
   return {
     token: body.token,
     config: parseIntegrationConfig(body.config),
-    agentEmail: body.agentEmail ? { consentToken: body.agentEmail.consentToken ?? null } : null,
   };
 }
 
@@ -112,18 +104,6 @@ async function signInSummary(env: Env) {
     email: emailSignUpOffered(env),
     ownerEmail: bootstrapOwnerEmail(env) || null,
   };
-}
-
-/** The agent email plan, or null when it cannot be read; setup never fails because of it. */
-async function agentEmailPlan(env: Env): Promise<AgentEmailSetupPlan | null> {
-  try {
-    return await planAgentEmailSetup(env);
-  } catch (error) {
-    log.warn('setup.agent_email_plan_failed', {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return null;
-  }
 }
 
 async function assertSetupOpen(env: Env): Promise<void> {
@@ -160,17 +140,16 @@ setupRoutes.post('/verify', async (c) => {
   await assertSetupOpen(c.env);
   const { token } = await parseSetupBody(c);
   await assertSetupToken(c.env, token, clientIdentifier(c));
-  const [status, signIn, agentEmail] = await Promise.all([
+  const [status, signIn] = await Promise.all([
     getPlatformConfigStatus(c.env),
     signInSummary(c.env),
-    agentEmailPlan(c.env),
   ]);
-  return c.json({ ok: true, status, signIn, agentEmail });
+  return c.json({ ok: true, status, signIn });
 });
 
 setupRoutes.post('/complete', async (c) => {
   await assertSetupOpen(c.env);
-  const { token, config, agentEmail } = await parseSetupBody(c);
+  const { token, config } = await parseSetupBody(c);
   await assertSetupToken(c.env, token, clientIdentifier(c));
 
   const validation = await validatePlatformIntegrationInput(c.env, config);
@@ -186,30 +165,7 @@ setupRoutes.post('/complete', async (c) => {
     throw errors.badRequest('Setup cannot be completed', { errors: completion.errors });
   }
   await completeSetupWithConfig(c.env, config);
-  return c.json({
-    completed: true,
-    status: await getPlatformConfigStatus(c.env),
-    agentEmail: agentEmail ? await turnOnAgentEmail(c.env, agentEmail.consentToken) : null,
-  });
+  return c.json({ completed: true, status: await getPlatformConfigStatus(c.env) });
 });
-
-/**
- * Turns agent email on as the last step of setup, with the consent token of the plan the owner
- * previewed. Setup is already complete by then, so a failure is reported, not thrown: the owner
- * can retry from Admin → Integrations → Agent email.
- */
-async function turnOnAgentEmail(
-  env: Env,
-  consentToken: string | null
-): Promise<{ plan: AgentEmailSetupPlan | null; error: string | null }> {
-  try {
-    const plan = await runAgentEmailSetup(env, { consentToken, userId: SYSTEM_USER_ID });
-    return { plan, error: null };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    log.warn('setup.agent_email_failed', { error: message });
-    return { plan: null, error: message };
-  }
-}
 
 export { setupRoutes };

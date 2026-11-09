@@ -23,7 +23,13 @@ export function Landing() {
   // navigate(replace: true) clears the state and re-triggers the effect.
   const fromRef = useRef((location.state as { from?: Location })?.from);
   // First-run setup hands over the installer owner's address so they only type the code.
-  const signInEmail = (location.state as { signInEmail?: string | null } | null)?.signInEmail ?? '';
+  const handoff = location.state as {
+    signInEmail?: string | null;
+    sendSignInCode?: boolean;
+  } | null;
+  const signInEmail = handoff?.signInEmail ?? '';
+  // Finishing first-run setup asks for the owner's code straight away, so they only enter it.
+  const sendCodeOnArrival = Boolean(signInEmail && handoff?.sendSignInCode);
   const hasOAuth = providers.github || providers.google || providers.gitlab;
 
   useEffect(() => {
@@ -132,6 +138,7 @@ export function Landing() {
               <div className="mb-3">
                 <EmailCodeSignIn
                   initialEmail={signInEmail}
+                  sendOnMount={sendCodeOnArrival}
                   primary={!hasOAuth}
                   onSignedIn={handleEmailSignedIn}
                 />

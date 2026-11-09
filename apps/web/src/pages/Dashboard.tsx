@@ -1,4 +1,11 @@
-import { Alert, Button, EmptyState, PageLayout, SkeletonCard, Spinner } from '@simple-agent-manager/ui';
+import {
+  Alert,
+  Button,
+  EmptyState,
+  PageLayout,
+  SkeletonCard,
+  Spinner,
+} from '@simple-agent-manager/ui';
 import { useNavigate } from 'react-router';
 
 import { ActiveTaskCard } from '../components/ActiveTaskCard';
@@ -13,17 +20,25 @@ export function Dashboard() {
   const navigate = useNavigate();
 
   const queryScope = user?.id ?? '';
-  const { tasks, loading: tasksLoading, isRefreshing: tasksRefreshing, error: tasksError, refresh: refreshTasks } = useActiveTasks({ queryScope });
-  const { projects, loading: projectsLoading, error: projectsError, refresh: refreshProjects } = useProjectList({
+  const {
+    tasks,
+    loading: tasksLoading,
+    isRefreshing: tasksRefreshing,
+    error: tasksError,
+    refresh: refreshTasks,
+  } = useActiveTasks({ queryScope });
+  const {
+    projects,
+    loading: projectsLoading,
+    error: projectsError,
+    refresh: refreshProjects,
+  } = useProjectList({
     queryScope,
     limit: PROJECT_LIST_LIMIT,
   });
 
   return (
-    <PageLayout
-      title="Simple Agent Manager"
-      maxWidth="xl"
-    >
+    <PageLayout title="Simple Agent Manager" maxWidth="xl">
       {/* Welcome section */}
       <div className="mb-6">
         <h2 className="sam-type-page-title text-fg-primary">

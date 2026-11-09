@@ -44,9 +44,12 @@ function CopyButton({ code }: { code: string }) {
 
   const handleCopy = useCallback(() => {
     if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(code).then(onSuccess).catch(() => {
-        if (execCommandCopy(code)) onSuccess();
-      });
+      navigator.clipboard
+        .writeText(code)
+        .then(onSuccess)
+        .catch(() => {
+          if (execCommandCopy(code)) onSuccess();
+        });
     } else {
       if (execCommandCopy(code)) onSuccess();
     }
@@ -100,7 +103,13 @@ function SamCodeBlock({ code, language }: { code: string; language: string }) {
                 <div
                   key={lineIdx}
                   {...lineProps}
-                  style={{ ...lineProps.style, display: 'flex', padding: 0, whiteSpace: 'pre', minHeight: '1.55em' }}
+                  style={{
+                    ...lineProps.style,
+                    display: 'flex',
+                    padding: 0,
+                    whiteSpace: 'pre',
+                    minHeight: '1.55em',
+                  }}
                 >
                   <span style={{ flex: 1 }}>
                     {line.map((token, tokenIdx) => {

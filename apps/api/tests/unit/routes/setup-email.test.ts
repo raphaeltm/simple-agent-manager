@@ -1,7 +1,8 @@
 /**
  * First-run setup on a deployment that can send email: setup completes with email sign-in
- * alone, and turns agent email on with the plan the owner previewed. Real SQLite, a fake
- * Cloudflare zone (`fakeCloudflareEmail`), the production setup routes.
+ * alone. Setup is only about getting to a running SAM, so it never touches agent email (that
+ * stays an admin choice). Real SQLite, a fake Cloudflare zone (`fakeCloudflareEmail`) to
+ * observe that nothing calls it, the production setup routes.
  */
 import { readFileSync } from 'node:fs';
 
@@ -23,12 +24,10 @@ const DOMAIN = `agents.${MAIN}`;
 
 interface VerifyBody {
   signIn: { email: boolean; ownerEmail: string | null };
-  agentEmail: { state: string; consentToken: string | null; domain: string | null } | null;
 }
 
 interface CompleteBody {
   completed: boolean;
-  agentEmail: { plan: { state: string } | null; error: string | null } | null;
 }
 
 function createApp() {
@@ -109,62 +108,36 @@ describe('first-run setup with email', () => {
     );
   }
 
-  it('reports email sign-in, the owner and the agent email plan after the token is verified', async () => {
-    newZone();
+  it('reports email sign-in and the owner after the token is verified', async () => {
+    const fake = newZone();
     const res = await post('/verify', { token: 'setup-token' });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as VerifyBody;
+    const body = (await res.json()) as VerifyBody & Record<string, unknown>;
     expect(body.signIn).toEqual({ email: true, ownerEmail: 'owner@fixture.example' });
-    expect(body.agentEmail).toMatchObject({ state: 'needs_consent', domain: DOMAIN });
-    expect(body.agentEmail?.consentToken).toBeTruthy();
+    expect(body).not.toHaveProperty('agentEmail');
+    expect(fake.calls).toEqual([]);
   });
 
-  it('completes with email sign-in alone and turns agent email on with the previewed plan', async () => {
-    newZone();
-    const verify = (await (await post('/verify', { token: 'setup-token' })).json()) as VerifyBody;
-
-    const res = await post('/complete', {
-      token: 'setup-token',
-      config: {},
-      agentEmail: { consentToken: verify.agentEmail?.consentToken },
-    });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as CompleteBody;
-    expect(body.completed).toBe(true);
-    expect(body.agentEmail?.error).toBeNull();
-    expect(body.agentEmail?.plan?.state).toBe('on');
-    await expect(isAgentEmailOn(env)).resolves.toBe(true);
-  });
-
-  it('leaves agent email off when the owner turns it off', async () => {
+  it('completes with email sign-in alone and leaves agent email to the admin', async () => {
     const fake = newZone();
-    const res = await post('/complete', { token: 'setup-token', config: {} });
-    expect(res.status).toBe(200);
-    expect(((await res.json()) as CompleteBody).agentEmail).toBeNull();
-    await expect(isAgentEmailOn(env)).resolves.toBe(false);
-    expect(fake.calls.filter((call) => call.method !== 'GET')).toEqual([]);
-  });
-
-  it('still completes setup, and reports why, when agent email cannot turn on', async () => {
-    newZone();
     const res = await post('/complete', {
       token: 'setup-token',
       config: {},
-      agentEmail: { consentToken: 'not-the-plan-token' },
+      // An older client may still send this; setup ignores it.
+      agentEmail: { consentToken: 'anything' },
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as CompleteBody;
+    const body = (await res.json()) as CompleteBody & Record<string, unknown>;
     expect(body.completed).toBe(true);
-    expect(body.agentEmail?.plan).toBeNull();
-    expect(body.agentEmail?.error).toMatch(/different from what you allowed/);
+    expect(body).not.toHaveProperty('agentEmail');
     await expect(isAgentEmailOn(env)).resolves.toBe(false);
+    expect(fake.calls).toEqual([]);
   });
 
   it('still needs a sign-in provider where the deployment cannot send email', async () => {
     env = makeEnv({ AGENT_EMAIL: undefined, AGENT_EMAIL_WORKER_NAME: undefined });
     const verify = (await (await post('/verify', { token: 'setup-token' })).json()) as VerifyBody;
     expect(verify.signIn.email).toBe(false);
-    expect(verify.agentEmail?.state).toBe('unavailable');
 
     const res = await post('/complete', { token: 'setup-token', config: {} });
     expect(res.status).toBe(400);

@@ -1,4 +1,3 @@
-import type { AgentEmailSetupPlan } from '@simple-agent-manager/shared';
 import { Spinner } from '@simple-agent-manager/ui';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
@@ -13,9 +12,8 @@ import {
   SetupProviderFields,
   type SetupProviderValues,
 } from './setup/SetupProviderFields';
-import { SetupShell, type SetupStepMarker } from './setup/SetupShell';
+import { SetupShell } from './setup/SetupShell';
 import {
-  AgentEmailStep,
   DoneStep,
   SETUP_STEP_HEADING_ID,
   SetupNotice,
@@ -27,10 +25,7 @@ const API_ORIGIN = import.meta.env.VITE_API_URL || 'http://localhost:8787';
 /** The installer's "Open SAM setup" link carries the token here; fragments never reach a server. */
 const TOKEN_FRAGMENT = /^#(?:.*&)?token=([^&]+)/;
 
-type Step = 'welcome' | 'sign-in' | 'agent-email' | 'done';
-
-/** Agent email can be turned on during setup only from these plan states. */
-const RUNNABLE_AGENT_EMAIL_STATES = new Set(['ready', 'needs_consent', 'changed']);
+type Step = 'welcome' | 'sign-in' | 'done';
 
 // Read once per page load: the fragment is removed on first read, and the page can mount more
 // than once while the app's providers settle.
@@ -64,11 +59,8 @@ export function Setup() {
   const [verified, setVerified] = useState<SetupVerifyResponse | null>(null);
   const [step, setStep] = useState<Step>('welcome');
   const [provider, setProvider] = useState<SetupProviderValues>(EMPTY_PROVIDER_VALUES);
-  const [showProviders, setShowProviders] = useState(false);
-  const [agentEmailOn, setAgentEmailOn] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [agentEmailError, setAgentEmailError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -98,26 +90,25 @@ export function Setup() {
     document.getElementById(SETUP_STEP_HEADING_ID)?.focus();
   }, [step]);
 
-  const agentEmailPlan: AgentEmailSetupPlan | null =
-    verified?.agentEmail && RUNNABLE_AGENT_EMAIL_STATES.has(verified.agentEmail.state)
-      ? verified.agentEmail
-      : null;
-  const emailSignIn = verified?.signIn.email ?? false;
-
-  // The indicator appears once the token is verified, when the number of steps is known.
-  const steps: SetupStepMarker[] = [
-    { key: 'welcome', label: 'Welcome' },
-    { key: 'sign-in', label: 'Sign-in' },
-    ...(agentEmailPlan ? [{ key: 'agent-email', label: 'Email' }] : []),
-  ];
-
+  // Setup is about getting to a running SAM. Where SAM can email sign-in codes, the token is
+  // the only question: setup finishes straight away and the owner lands on the code step, with
+  // the code already on its way. Other sign-in providers are optional and live in Admin.
+  // Without email sign-in, one OAuth provider is the only way in, so setup asks for it.
   const handleVerify = async () => {
     setError(null);
     setBusy(true);
     try {
-      const response = await verifySetupToken(token.trim());
+      const trimmed = token.trim();
+      const response = await verifySetupToken(trimmed);
+      if (response.signIn.email) {
+        await completeSetup(trimmed, providerConfig(EMPTY_PROVIDER_VALUES));
+        navigate('/', {
+          replace: true,
+          state: { signInEmail: response.signIn.ownerEmail, sendSignInCode: true },
+        });
+        return;
+      }
       setVerified(response);
-      setShowProviders(!response.signIn.email);
       setStep('sign-in');
     } catch (err) {
       setError(errorMessage(err, 'That setup token did not work.'));
@@ -131,26 +122,12 @@ export function Setup() {
     setError(null);
     setBusy(true);
     try {
-      const response = await completeSetup(
-        token.trim(),
-        providerConfig(provider),
-        agentEmailPlan && agentEmailOn ? { consentToken: agentEmailPlan.consentToken } : undefined
-      );
-      setAgentEmailError(response.agentEmail?.error ?? null);
+      await completeSetup(token.trim(), providerConfig(provider));
       setStep('done');
     } catch (err) {
       setError(errorMessage(err, 'Setup could not be completed.'));
     } finally {
       setBusy(false);
-    }
-  };
-
-  const handleContinueFromSignIn = () => {
-    if (agentEmailPlan) {
-      setError(null);
-      setStep('agent-email');
-    } else {
-      void handleFinish();
     }
   };
 
@@ -173,7 +150,6 @@ export function Setup() {
         <DoneStep
           title="SAM is set up"
           message="Setup is already finished for this instance."
-          agentEmailError={null}
           onSignIn={signIn}
         />
       </SetupShell>
@@ -181,11 +157,7 @@ export function Setup() {
   }
 
   return (
-    <SetupShell
-      steps={step === 'welcome' || step === 'done' ? undefined : steps}
-      currentStep={step}
-      footer={<span className="break-all">{instanceDomain()}</span>}
-    >
+    <SetupShell footer={<span className="break-all">{instanceDomain()}</span>}>
       {error && step !== 'done' && <SetupNotice tone="error">{error}</SetupNotice>}
       {step === 'welcome' && (
         <WelcomeStep
@@ -204,37 +176,19 @@ export function Setup() {
       )}
       {step === 'sign-in' && (
         <SignInStep
-          emailSignIn={emailSignIn}
-          ownerEmail={verified?.signIn.ownerEmail ?? null}
           providerReady={providerValuesComplete(provider)}
-          providerPartial={showProviders && providerValuesPartial(provider)}
-          showProviders={showProviders}
-          onShowProviders={() => setShowProviders(true)}
-          busy={busy && !agentEmailPlan}
+          providerPartial={providerValuesPartial(provider)}
+          busy={busy}
           providerFields={
             <SetupProviderFields values={provider} onChange={setProvider} apiOrigin={API_ORIGIN} />
           }
-          onContinue={handleContinueFromSignIn}
-        />
-      )}
-      {step === 'agent-email' && agentEmailPlan && (
-        <AgentEmailStep
-          plan={agentEmailPlan}
-          enabled={agentEmailOn}
-          completing={busy}
-          onToggle={() => setAgentEmailOn((on) => !on)}
-          onFinish={() => void handleFinish()}
+          onContinue={() => void handleFinish()}
         />
       )}
       {step === 'done' && (
         <DoneStep
           title="You're all set"
-          message={
-            emailSignIn
-              ? "Sign in with your email and we'll send you a code."
-              : 'Sign in to start your first project.'
-          }
-          agentEmailError={agentEmailError}
+          message="Sign in to start your first project."
           onSignIn={signIn}
         />
       )}

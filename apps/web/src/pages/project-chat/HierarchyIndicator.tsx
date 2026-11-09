@@ -14,7 +14,7 @@ export type HierarchyRole = 'parent' | 'child' | 'both' | 'none';
  */
 export function getHierarchyRole(
   taskId: string | undefined,
-  taskInfoMap: Map<string, TaskInfo>,
+  taskInfoMap: Map<string, TaskInfo>
 ): HierarchyRole {
   if (!taskId) return 'none';
   const info = taskInfoMap.get(taskId);

@@ -453,7 +453,7 @@ curl https://api.yourdomain.com/health
 # Should return: {"status":"healthy","timestamp":"..."}
 ```
 
-Open the Cloudflare dashboard link printed by the workflow, copy the plaintext `SETUP_TOKEN` Worker variable, then open `https://app.yourdomain.com/setup`. The setup page accepts the token only while first-run setup is incomplete. After you choose a sign-in method (email codes, or a valid OAuth provider) and complete setup, `/setup` returns Gone and future changes are made by a superadmin in **Admin → Integrations** and [**Admin → Settings**](/docs/guides/admin-settings/).
+Open the Cloudflare dashboard link printed by the workflow, copy the plaintext `SETUP_TOKEN` Worker variable, then open `https://app.yourdomain.com/setup`. The setup page accepts the token only while first-run setup is incomplete. When the deploy prepared email and the installer named an owner, setup finishes with the token alone and emails that owner a sign-in code; otherwise it asks for one OAuth provider. Once setup is complete, `/setup` returns Gone and future changes are made by a superadmin in **Admin → Integrations** and [**Admin → Settings**](/docs/guides/admin-settings/).
 
 Open `https://app.yourdomain.com` — you should see the login page with whichever providers you configured, plus **Email me a sign-in code** when the deploy prepared email.
 

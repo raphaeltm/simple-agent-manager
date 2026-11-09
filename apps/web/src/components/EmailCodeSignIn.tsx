@@ -1,6 +1,6 @@
 import { Button } from '@simple-agent-manager/ui';
 import { ArrowRight, Mail } from 'lucide-react';
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, useEffect, useRef, useState } from 'react';
 
 import { sendSignInCode, signInWithEmailCode } from '../lib/auth';
 import { maybeJsonRecord } from '../lib/runtime-validation';
@@ -8,6 +8,8 @@ import { maybeJsonRecord } from '../lib/runtime-validation';
 interface EmailCodeSignInProps {
   /** Pre-filled address, e.g. the installer owner arriving from first-run setup. */
   initialEmail?: string;
+  /** Send a code to `initialEmail` as soon as the form appears (arriving from first-run setup). */
+  sendOnMount?: boolean;
   /** Primary when email is the only way in; quieter when OAuth buttons sit above it. */
   primary: boolean;
   onSignedIn: () => void;
@@ -56,7 +58,12 @@ function writePendingCodeEmail(email: string | null) {
  * Two steps: ask for an address, then for the six-digit code SAM emailed to it. The API answers
  * the same whether or not the address can sign in, so the form always moves to the code step.
  */
-export function EmailCodeSignIn({ initialEmail = '', primary, onSignedIn }: EmailCodeSignInProps) {
+export function EmailCodeSignIn({
+  initialEmail = '',
+  sendOnMount = false,
+  primary,
+  onSignedIn,
+}: EmailCodeSignInProps) {
   const [pendingEmail] = useState(readPendingCodeEmail);
   const [email, setEmail] = useState(pendingEmail ?? initialEmail);
   const [code, setCode] = useState('');
@@ -81,6 +88,15 @@ export function EmailCodeSignIn({ initialEmail = '', primary, onSignedIn }: Emai
       setBusy(false);
     }
   };
+
+  // Once per mount, and never over a code already on its way (a reload restores that one).
+  const sentOnMountRef = useRef(false);
+  useEffect(() => {
+    if (!sendOnMount || pendingEmail || sentOnMountRef.current || !initialEmail) return;
+    sentOnMountRef.current = true;
+    void requestCode();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- arrival only, not on later edits
+  }, []);
 
   const verify = async (event: FormEvent) => {
     event.preventDefault();

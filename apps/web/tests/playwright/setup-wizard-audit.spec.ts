@@ -1,6 +1,7 @@
 /**
- * First-run setup wizard and email sign-in: every step at each viewport project, with long
- * values, the error paths, and the request each primary action sends.
+ * First-run setup and email sign-in: every screen at each viewport project, with long values,
+ * the error paths, and the request each primary action sends. Where SAM can email sign-in
+ * codes, setup is one screen: the token, then straight to the code.
  */
 import { expect, type Page, type Route, test } from '@playwright/test';
 
@@ -16,43 +17,16 @@ const PLATFORM_STATUS = {
   feedbackProject: { configured: false, projectId: null, source: null },
 };
 
-const AGENT_EMAIL_PLAN = {
-  state: 'needs_consent',
-  domain: 'agents.sam2.party',
-  mainDomain: 'sam2.party',
-  mainDomainChanges: [
-    {
-      type: 'TXT',
-      name: 'sam2.party',
-      content: 'v=spf1 include:_spf.mx.cloudflare.net ~all',
-      change: 'add',
-    },
-    { type: 'TXT', name: 'cf2024-1._domainkey.sam2.party', content: null, change: 'add' },
-  ],
-  zoneChanges: [
-    {
-      setting: 'subaddressing',
-      description:
-        'Turn on subaddressing for the zone, so agent+key@ addresses reach their trigger.',
-      allowed: false,
-    },
-  ],
-  consentToken: 'consent-token-1',
-  reason:
-    'Cloudflare adds its email records to sam2.party the first time the zone uses Email Routing.',
-};
-
 interface MockOptions {
   completed?: boolean;
   emailSignIn?: boolean;
   ownerEmail?: string | null;
-  agentEmail?: typeof AGENT_EMAIL_PLAN | null;
   verifyFails?: boolean;
-  agentEmailError?: string | null;
   oauthProviders?: boolean;
 }
 
 interface Captured {
+  sessionChecks: number;
   complete: Array<Record<string, unknown>>;
   sendCode: Array<Record<string, unknown>>;
   signIn: Array<Record<string, unknown>>;
@@ -63,14 +37,17 @@ function json(route: Route, status: number, body: unknown) {
 }
 
 async function setupMocks(page: Page, options: MockOptions = {}): Promise<Captured> {
-  const captured: Captured = { complete: [], sendCode: [], signIn: [] };
+  const captured: Captured = { sessionChecks: 0, complete: [], sendCode: [], signIn: [] };
   await page.routeWebSocket('**/api/notifications/ws', () => undefined);
   await page.route('**/api/**', async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
     const body = () => JSON.parse(request.postData() ?? '{}') as Record<string, unknown>;
 
-    if (path === '/api/auth/get-session') return json(route, 200, null);
+    if (path === '/api/auth/get-session') {
+      captured.sessionChecks += 1;
+      return json(route, 200, null);
+    }
     if (path === '/api/config/login-providers') {
       const oauth = options.oauthProviders ?? false;
       return json(route, 200, { github: oauth, google: oauth, gitlab: false, email: true });
@@ -100,21 +77,11 @@ async function setupMocks(page: Page, options: MockOptions = {}): Promise<Captur
           email: options.emailSignIn ?? true,
           ownerEmail: options.ownerEmail === undefined ? 'owner@sam2.party' : options.ownerEmail,
         },
-        agentEmail: options.agentEmail === undefined ? AGENT_EMAIL_PLAN : options.agentEmail,
       });
     }
     if (path === '/api/setup/complete') {
-      const payload = body();
-      captured.complete.push(payload);
-      return json(route, 200, {
-        completed: true,
-        status: PLATFORM_STATUS,
-        agentEmail: payload.agentEmail
-          ? options.agentEmailError
-            ? { plan: null, error: options.agentEmailError }
-            : { plan: { ...AGENT_EMAIL_PLAN, state: 'on' }, error: null }
-          : null,
-      });
+      captured.complete.push(body());
+      return json(route, 200, { completed: true, status: PLATFORM_STATUS });
     }
     if (path === '/api/auth/email-otp/send-verification-otp') {
       captured.sendCode.push(body());
@@ -135,8 +102,6 @@ test.describe('First-run setup wizard', () => {
     await page.goto('/setup#token=installer-setup-token');
     await expect(page.getByRole('heading', { name: 'Welcome to your SAM' })).toBeVisible();
     await expect(page.getByText('Setup token filled in from your installer')).toBeVisible();
-    // The step indicator appears once the token is checked and the step count is known.
-    await expect(page.getByRole('list', { name: 'Setup steps' })).toHaveCount(0);
     // The token never stays in the address bar or history.
     expect(new URL(page.url()).hash).toBe('');
     await assertNoOverflow(page);
@@ -155,95 +120,67 @@ test.describe('First-run setup wizard', () => {
     await screenshot(page, 'setup-welcome-error', { scopeToProject: true });
   });
 
-  test('email sign-in, agent email and finish send the previewed consent', async ({ page }) => {
+  test('with email sign-in, the token is the only question and the code is already on its way', async ({
+    page,
+  }) => {
     const captured = await setupMocks(page, { ownerEmail: LONG_OWNER });
     await page.goto('/setup#token=installer-setup-token');
     await page.getByRole('button', { name: "Let's go" }).click();
 
-    await expect(page.getByRole('heading', { name: "How you'll sign in" })).toBeVisible();
-    await expect(page.getByText('Email sign-in is ready')).toBeVisible();
+    // Setup finished with no other screens, and the owner lands on the code step.
+    const codeField = page.getByLabel('Sign-in code');
+    await expect(codeField).toBeVisible();
     await expect(page.getByText(LONG_OWNER)).toBeVisible();
+    expect(new URL(page.url()).pathname).toBe('/');
+    expect(captured.complete).toEqual([{ token: 'installer-setup-token', config: {} }]);
+    expect(captured.sendCode).toEqual([{ email: LONG_OWNER, type: 'sign-in' }]);
+    await expect(page.getByText(/agents? (can )?receive email/i)).toHaveCount(0);
     await assertNoOverflow(page);
-    await screenshot(page, 'setup-sign-in-email', { scopeToProject: true });
+    await screenshot(page, 'setup-email-code-sent', { scopeToProject: true });
 
-    await page.getByRole('button', { name: /Also allow GitHub, Google or GitLab/ }).click();
-    await expect(page.getByRole('button', { name: 'GitHub', exact: true })).toHaveAttribute(
-      'aria-pressed',
-      'true'
-    );
-    await expect(page.getByText(/\/api\/auth\/callback\/github/)).toBeVisible();
-    // Google infrastructure OAuth (GCP) is admin-only; setup offers sign-in providers alone.
-    await expect(page.getByText(/infrastructure/i)).toHaveCount(0);
-    await assertNoOverflow(page);
-    await screenshot(page, 'setup-sign-in-providers', { scopeToProject: true });
-
-    // A half-entered provider would fail setup, so Continue waits for the rest of it.
-    await page.getByLabel('Client ID').fill('half-entered-client-id');
-    await expect(page.getByRole('button', { name: 'Continue' })).toBeDisabled();
-    await page.getByLabel('Client ID').fill('');
-    await page.getByRole('button', { name: 'Continue' }).click();
-    await expect(page.getByRole('heading', { name: 'Email your agents' })).toBeVisible();
-    // Focus follows the step, so keyboard and screen reader users start at the new heading.
-    await expect(page.getByRole('heading', { name: 'Email your agents' })).toBeFocused();
-    await expect(page.getByRole('switch', { name: 'Let agents receive email' })).toHaveAttribute(
-      'aria-checked',
-      'true'
-    );
-    await page.getByRole('button', { name: /What changes on sam2.party/ }).click();
-    await expect(page.getByText('Add TXT record cf2024-1._domainkey.sam2.party')).toBeVisible();
-    await assertNoOverflow(page);
-    await screenshot(page, 'setup-agent-email', { scopeToProject: true });
-
-    await page.getByRole('button', { name: 'Finish setup' }).click();
-    await expect(page.getByRole('heading', { name: "You're all set" })).toBeVisible();
-    expect(captured.complete).toEqual([
-      {
-        token: 'installer-setup-token',
-        config: {},
-        agentEmail: { consentToken: 'consent-token-1' },
-      },
-    ]);
-    await assertNoOverflow(page);
-    await screenshot(page, 'setup-done', { scopeToProject: true });
-
-    // Sign in carries the owner to the email form with their address filled in.
-    await page.getByRole('button', { name: 'Sign in' }).click();
-    await expect(page.getByPlaceholder('you@example.com')).toHaveValue(LONG_OWNER);
-  });
-
-  test('turning agent email off finishes without it', async ({ page }) => {
-    const captured = await setupMocks(page);
-    await page.goto('/setup#token=t');
-    await page.getByRole('button', { name: "Let's go" }).click();
-    await page.getByRole('button', { name: 'Continue' }).click();
-    await page.getByRole('switch', { name: 'Let agents receive email' }).click();
-    await expect(page.getByRole('button', { name: /What changes on/ })).toHaveCount(0);
-    await page.getByRole('button', { name: 'Finish setup' }).click();
-    await expect(page.getByRole('heading', { name: "You're all set" })).toBeVisible();
-    expect(captured.complete).toEqual([{ token: 't', config: {} }]);
-  });
-
-  test('a deployment without email needs one OAuth provider and skips the email step', async ({
-    page,
-  }) => {
-    const captured = await setupMocks(page, {
-      emailSignIn: false,
-      ownerEmail: null,
-      agentEmail: null,
+    // Coming back from the mail app: the tab regains focus and the session is re-checked.
+    // BetterAuth skips focus refetches within 5 s of the last session request.
+    await codeField.fill('123456');
+    await page.waitForTimeout(5_500);
+    const sessionChecks = captured.sessionChecks;
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+      Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new Event('focus'));
     });
+    await expect.poll(() => captured.sessionChecks).toBeGreaterThan(sessionChecks);
+    await page.waitForTimeout(500);
+    await expect(codeField).toHaveValue('123456');
+
+    // The phone browser reloaded the tab while it was in the background.
+    await page.reload();
+    await expect(page.getByLabel('Sign-in code')).toBeVisible();
+    await expect(page.getByText(LONG_OWNER)).toBeVisible();
+    // No second code: the one already sent is still the one to enter.
+    expect(captured.sendCode).toHaveLength(1);
+  });
+
+  test('without email sign-in, one OAuth provider is the way in', async ({ page }) => {
+    const captured = await setupMocks(page, { emailSignIn: false, ownerEmail: null });
     await page.goto('/setup#token=t');
     await page.getByRole('button', { name: "Let's go" }).click();
     await expect(
       page.getByText('Connect one sign-in provider. You can add more later.')
     ).toBeVisible();
-    const continueButton = page.getByRole('button', { name: 'Continue' });
-    await expect(continueButton).toBeDisabled();
+    await expect(page.getByRole('heading', { name: "How you'll sign in" })).toBeFocused();
+    // Google infrastructure OAuth (GCP) is admin-only; setup offers sign-in providers alone.
+    await expect(page.getByText(/infrastructure/i)).toHaveCount(0);
+    const finish = page.getByRole('button', { name: 'Finish setup' });
+    await expect(finish).toBeDisabled();
     await page.getByRole('button', { name: 'Google', exact: true }).click();
     await page.getByLabel('Client ID').fill('google-client-id.apps.googleusercontent.com');
+    await expect(finish).toBeDisabled();
     await page.getByLabel('Client secret').fill('google-client-secret');
     await assertNoOverflow(page);
     await screenshot(page, 'setup-sign-in-oauth-only', { scopeToProject: true });
-    await continueButton.click();
+    await finish.click();
     await expect(page.getByRole('heading', { name: "You're all set" })).toBeVisible();
     expect(captured.complete).toEqual([
       {
@@ -256,20 +193,9 @@ test.describe('First-run setup wizard', () => {
         },
       },
     ]);
-  });
-
-  test('says when agent email could not turn on', async ({ page }) => {
-    await setupMocks(page, {
-      agentEmailError:
-        'What turning agent email on would change is different from what you allowed.',
-    });
-    await page.goto('/setup#token=t');
-    await page.getByRole('button', { name: "Let's go" }).click();
-    await page.getByRole('button', { name: 'Continue' }).click();
-    await page.getByRole('button', { name: 'Finish setup' }).click();
-    await expect(page.getByText("Agent email didn't turn on", { exact: false })).toBeVisible();
+    expect(captured.sendCode).toEqual([]);
     await assertNoOverflow(page);
-    await screenshot(page, 'setup-done-agent-email-error', { scopeToProject: true });
+    await screenshot(page, 'setup-done', { scopeToProject: true });
   });
 
   test('a finished instance says so', async ({ page }) => {
@@ -284,24 +210,23 @@ test.describe('First-run setup scrolling', () => {
   test('the tallest step scrolls to its button with the wheel, at every viewport', async ({
     page,
   }) => {
-    await setupMocks(page);
+    await setupMocks(page, { emailSignIn: false, ownerEmail: null });
     // Shorter than the step at every project viewport, mobile included.
     const viewport = page.viewportSize();
     await page.setViewportSize({ width: viewport?.width ?? 375, height: 560 });
     await page.goto('/setup#token=t');
     await page.getByRole('button', { name: "Let's go" }).click();
-    await page.getByRole('button', { name: /Also allow GitHub, Google or GitLab/ }).click();
     await page.getByRole('button', { name: 'GitLab', exact: true }).click();
     const scroller = page.getByTestId('setup-scroll');
     const overflow = await scroller.evaluate((node) => node.scrollHeight - node.clientHeight);
     expect(overflow).toBeGreaterThan(0);
 
-    const continueButton = page.getByRole('button', { name: 'Continue' });
+    const finish = page.getByRole('button', { name: 'Finish setup' });
     await page.mouse.move((viewport?.width ?? 375) / 2, 280);
     await page.mouse.wheel(0, 3000);
     await expect
       .poll(async () => {
-        const box = await continueButton.boundingBox();
+        const box = await finish.boundingBox();
         return box ? box.y + box.height <= 560 && box.y >= 0 : false;
       })
       .toBe(true);
