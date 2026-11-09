@@ -77,7 +77,7 @@ the Instant stale-callback heuristic (now redundant for claimed tokens; kept as 
 ## Implementation Checklist
 
 ### API
-- [x] Migration `0227_callback_generation.sql` + `schema.ts` columns
+- [x] Migration `0228_callback_generation.sql` + `schema.ts` columns
 - [x] `callback-token-claims.ts`: `cgen` claim + reader; `signCallbackToken` / `signNodeCallbackToken` accept `callbackGeneration`
 - [x] `verifyCallbackToken`: generation check against D1 by scope; payload returns `callbackGeneration`
 - [x] Rotation: `persistRuntimeRecovering` (node + workspace = new incarnation); `reserveWorkspaceRestart`; rebuild active-path update

@@ -348,6 +348,24 @@ describe('workspace credential generation across VM restart and rebuild — real
     });
   });
 
+  it('until B starts, A keeps its lifecycle treatment: allowed cleanup callbacks still work', async () => {
+    const tokenA = await signCallbackToken(WORKSPACE_ID, env, {
+      callbackGeneration: 'generation-a',
+    });
+    // A stopping runtime is refused by the lifecycle check, not by a generation change.
+    await stopIncarnationA();
+    expect(await verifyStatus(tokenA)).toBe(200);
+    const db = drizzle(env.DATABASE, { schema });
+    await expect(verifyAIProxyAuth(tokenA, env, db)).rejects.toMatchObject({ statusCode: 403 });
+    // A provisioning-failure report for a workspace in error is a permitted cleanup callback.
+    sqlite.prepare("UPDATE workspaces SET status = 'error' WHERE id = ?").run(WORKSPACE_ID);
+    expect(
+      (await request('/provisioning-failed', { token: tokenA, body: { errorMessage: 'boom' } }))
+        .status
+    ).toBe(200);
+    expect(workspaceRow().callbackGeneration).toBe('generation-a');
+  });
+
   it('restart: a copied MCP token from A is refused and revoked without any exchange', async () => {
     await storeMcpTokenForGeneration(MCP_TOKEN_A, 'generation-a');
     await stopIncarnationA();
