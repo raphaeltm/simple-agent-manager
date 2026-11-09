@@ -13,6 +13,10 @@ import {
   buildHigherPrecedenceDefaultCapacityPoolExclusionSql,
 } from './capacity-pool-precedence';
 import { capacityCandidateSatisfiesWorkloadRole } from './capacity-pool-workload-roles';
+import {
+  type ConcreteCapacitySnapshot,
+  normalizeConcreteSnapshot,
+} from './placement-authority-snapshot';
 
 export type PlacementSqlBind = string | number | null;
 export type PlacementAuthorityNodeClass = 'managed' | 'user-owned';
@@ -33,32 +37,6 @@ export interface PlacementAuthoritySqlInput {
   capacityPlacementSnapshot?: CapacityPlacementSnapshot | null;
   requireProjectMembership?: boolean;
 }
-
-export interface LegacyNodeAdoptionInput {
-  node: {
-    capacityPoolId?: string | null;
-    capacityPoolScope?: string | null;
-    capacitySourceId?: string | null;
-    capacityPoolCandidateId?: string | null;
-    cloudProvider?: string | null;
-    vmLocation?: string | null;
-    providerInstanceType?: string | null;
-    providerInstanceVcpuCount?: number | null;
-    providerInstanceMemoryMb?: number | null;
-    providerInstanceDiskGb?: number | null;
-    observedProviderInstanceType?: string | null;
-    observedProviderInstanceVcpuCount?: number | null;
-    observedProviderInstanceMemoryMb?: number | null;
-    observedProviderInstanceDiskGb?: number | null;
-    observedHardwareSource?: string | null;
-  };
-  snapshot: CapacityPlacementSnapshot | null | undefined;
-}
-
-export type LegacyNodeAdoptionDecision =
-  | { kind: 'verified-current'; reason: string }
-  | { kind: 'grandfathered-draining'; reason: string }
-  | { kind: 'incompatible'; reason: string };
 
 export const PROVIDER_ALLOCATION_ACTIVE_STATUS_SQL = "'creating', 'running'";
 
@@ -283,52 +261,6 @@ export function capacityCandidateWorkloadRoleSql(
     : `${candidateColumnSql} = 'workspace'`;
 }
 
-export function evaluateLegacyNodeAdoptionCompatibility(
-  input: LegacyNodeAdoptionInput
-): LegacyNodeAdoptionDecision {
-  const snapshot = input.snapshot ?? null;
-  const node = input.node;
-  if (!snapshot?.capacityPoolId) {
-    return {
-      kind: 'grandfathered-draining',
-      reason:
-        'node has no capacity-pool snapshot and requires explicit adoption before new placement',
-    };
-  }
-  if (!node.capacityPoolId || node.capacityPoolId !== snapshot.capacityPoolId) {
-    return { kind: 'incompatible', reason: 'node pool id does not match the placement snapshot' };
-  }
-  if (node.capacitySourceId !== snapshot.capacitySourceId) {
-    return { kind: 'incompatible', reason: 'node source id does not match the placement snapshot' };
-  }
-  if (node.capacityPoolCandidateId !== snapshot.capacityPoolCandidateId) {
-    return {
-      kind: 'incompatible',
-      reason: 'node candidate id does not match the placement snapshot',
-    };
-  }
-  if (
-    !snapshot.providerInstanceType ||
-    node.providerInstanceType !== snapshot.providerInstanceType
-  ) {
-    return {
-      kind: 'grandfathered-draining',
-      reason: 'node has no verified provider-native instance identity',
-    };
-  }
-  if (
-    node.observedHardwareSource === 'observed' &&
-    node.observedProviderInstanceType &&
-    node.observedProviderInstanceType !== snapshot.providerInstanceType
-  ) {
-    return {
-      kind: 'incompatible',
-      reason: 'observed provider-native instance identity differs from placement snapshot',
-    };
-  }
-  return { kind: 'verified-current', reason: 'node matches capacity snapshot identity' };
-}
-
 /**
  * Legacy nodes carry no capacity snapshot. They stay admissible only while this
  * caller has no default pool at all: once any scope in the effective-default
@@ -500,111 +432,6 @@ function poolScopeSql(
   }
 }
 
-function normalizeConcreteSnapshot(
-  snapshot: CapacityPlacementSnapshot
-): ConcreteCapacitySnapshot | null {
-  const capacityPoolId = nonEmptyString(snapshot.capacityPoolId);
-  if (!capacityPoolId) return null;
-
-  const capacityPoolScope = snapshot.capacityPoolScope;
-  if (!isCapacityPoolScope(capacityPoolScope)) return null;
-
-  const capacityPoolRevision = positiveInteger(snapshot.capacityPoolRevision);
-  if (capacityPoolRevision === null) return null;
-
-  const capacitySourceId = nonEmptyString(snapshot.capacitySourceId);
-  if (!capacitySourceId) return null;
-
-  const capacitySourceGeneration = positiveInteger(snapshot.capacitySourceGeneration);
-  if (capacitySourceGeneration === null) return null;
-
-  const capacityPoolCandidateId = nonEmptyString(snapshot.capacityPoolCandidateId);
-  if (!capacityPoolCandidateId) return null;
-
-  const placementCredentialSource = snapshot.placementCredentialSource;
-  if (
-    placementCredentialSource !== 'user' &&
-    placementCredentialSource !== 'project' &&
-    placementCredentialSource !== 'platform'
-  ) {
-    return null;
-  }
-
-  const placementCredentialReference = nonEmptyString(snapshot.placementCredentialReference);
-  if (!placementCredentialReference) return null;
-
-  const placementCredentialVersion = positiveInteger(snapshot.placementCredentialVersion);
-  if (placementCredentialVersion === null) return null;
-
-  const capacityPoolProjectId =
-    capacityPoolScope === 'project' ? nonEmptyString(snapshot.capacityPoolProjectId) : null;
-  if (capacityPoolScope === 'project' && !capacityPoolProjectId) return null;
-  if (capacityPoolScope !== 'project' && snapshot.capacityPoolProjectId !== null) return null;
-
-  const workloadRole = snapshot.workloadRole;
-  if (workloadRole !== 'workspace' && workloadRole !== 'deployment') return null;
-
-  const providerInstanceType = nonEmptyString(snapshot.providerInstanceType);
-  if (!providerInstanceType) return null;
-
-  const providerInstanceVcpuCount = positiveInteger(snapshot.providerInstanceVcpuCount);
-  if (providerInstanceVcpuCount === null) return null;
-
-  const providerInstanceMemoryMb = positiveInteger(snapshot.providerInstanceMemoryMb);
-  if (providerInstanceMemoryMb === null) return null;
-
-  const providerInstanceDiskGb = nullableNonNegativeInteger(snapshot.providerInstanceDiskGb);
-  if (providerInstanceDiskGb === undefined) return null;
-
-  const providerInstanceBootDiskSizeGb = nullableNonNegativeInteger(
-    snapshot.providerInstanceBootDiskSizeGb
-  );
-  if (providerInstanceBootDiskSizeGb === undefined) return null;
-
-  return {
-    capacityPoolId,
-    capacityPoolScope,
-    capacityPoolRevision,
-    capacitySourceId,
-    capacitySourceGeneration,
-    capacitySourceExternalRef: snapshot.capacitySourceExternalRef ?? null,
-    capacityPoolCandidateId,
-    placementCredentialSource,
-    placementCredentialReference,
-    placementCredentialVersion,
-    capacityPoolProjectId,
-    workloadRole,
-    providerInstanceType,
-    providerInstanceVcpuCount,
-    providerInstanceMemoryMb,
-    providerInstanceDiskGb,
-    providerInstanceBootDiskSizeGb,
-    providerInstanceImage: snapshot.providerInstanceImage ?? null,
-    providerInstanceArchitecture: snapshot.providerInstanceArchitecture ?? null,
-  };
-}
-interface ConcreteCapacitySnapshot {
-  capacityPoolId: string;
-  capacityPoolScope: CapacityPoolScope;
-  capacityPoolRevision: number;
-  capacitySourceId: string;
-  capacitySourceGeneration: number;
-  capacitySourceExternalRef: string | null;
-  capacityPoolCandidateId: string;
-  placementCredentialSource: 'user' | 'project' | 'platform';
-  placementCredentialReference: string;
-  placementCredentialVersion: number;
-  capacityPoolProjectId: string | null;
-  workloadRole: CapacityWorkloadRole;
-  providerInstanceType: string;
-  providerInstanceVcpuCount: number;
-  providerInstanceMemoryMb: number;
-  providerInstanceDiskGb: number | null;
-  providerInstanceBootDiskSizeGb: number | null;
-  providerInstanceImage: string | null;
-  providerInstanceArchitecture: string | null;
-}
-
 function joinPredicates(
   left: PlacementAuthoritySqlPredicate,
   right: PlacementAuthoritySqlPredicate
@@ -664,21 +491,4 @@ function parseComposableAttachmentReference(
   if (!reference?.startsWith(SQLITE_CC_ATTACHMENT_PREFIX)) return null;
   const id = reference.slice(SQLITE_CC_ATTACHMENT_PREFIX.length).trim();
   return id ? { id } : null;
-}
-
-function isCapacityPoolScope(value: unknown): value is CapacityPoolScope {
-  return value === 'installation' || value === 'user' || value === 'project';
-}
-
-function nonEmptyString(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() ? value.trim() : null;
-}
-
-function positiveInteger(value: unknown): number | null {
-  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : null;
-}
-
-function nullableNonNegativeInteger(value: unknown): number | null | undefined {
-  if (value === null || value === undefined) return null;
-  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : undefined;
 }
