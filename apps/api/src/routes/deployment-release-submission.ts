@@ -89,6 +89,13 @@ export async function updateDeploymentEnvironmentForLatestRelease(params: {
 export async function insertDeploymentReleaseWhilePlacementUnlocked(params: {
   db: DeploymentReleaseDb;
   env: Env;
+  publishJob?: {
+    id: string;
+    attempt: number;
+    projectId: string;
+    workspaceId: string;
+    requestedBy: string;
+  };
   values: {
     id: string;
     environmentId: string;
@@ -101,11 +108,30 @@ export async function insertDeploymentReleaseWhilePlacementUnlocked(params: {
     createdAt: string;
   };
 }): Promise<boolean> {
-  if (typeof params.env.DATABASE.prepare !== 'function') {
+  if (!params.publishJob && typeof params.env.DATABASE.prepare !== 'function') {
     await params.db.insert(schema.deploymentReleases).values(params.values);
     return true;
   }
-  const result = await params.env.DATABASE.prepare(
+  const fence = params.publishJob;
+  const fenceSql = fence
+    ? `AND EXISTS (
+    SELECT 1 FROM deployment_publish_jobs j
+    WHERE j.id = ? AND j.attempt = ? AND j.project_id = ? AND j.workspace_id = ?
+      AND j.requested_by = ? AND j.environment_id = ?
+      AND j.status NOT IN ('succeeded', 'failed', 'canceled', 'unknown') AND j.release_id IS NULL
+  )`
+    : '';
+  const fenceBindings = fence
+    ? [
+        fence.id,
+        fence.attempt,
+        fence.projectId,
+        fence.workspaceId,
+        fence.requestedBy,
+        params.values.environmentId,
+      ]
+    : [];
+  const insert = params.env.DATABASE.prepare(
     `INSERT INTO deployment_releases
        (id, environment_id, manifest, version, status, status_updated_at, source, created_by, created_at)
      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
@@ -113,22 +139,44 @@ export async function insertDeploymentReleaseWhilePlacementUnlocked(params: {
         SELECT 1 FROM deployment_environments de
         WHERE de.id = ?
           AND ${NO_DEPLOYMENT_RELOCATION_CLAIM_SQL}
-      )`
-  )
-    .bind(
-      params.values.id,
-      params.values.environmentId,
-      params.values.manifest,
-      params.values.version,
-      params.values.status,
-      params.values.statusUpdatedAt,
-      params.values.source ?? null,
-      params.values.createdBy,
-      params.values.createdAt,
-      params.values.environmentId
-    )
-    .run();
-  return (result.meta?.changes ?? 0) > 0;
+      ) ${fenceSql}`
+  ).bind(
+    params.values.id,
+    params.values.environmentId,
+    params.values.manifest,
+    params.values.version,
+    params.values.status,
+    params.values.statusUpdatedAt,
+    params.values.source ?? null,
+    params.values.createdBy,
+    params.values.createdAt,
+    params.values.environmentId,
+    ...fenceBindings
+  );
+  if (!fence) {
+    const result = await insert.run();
+    return (result.meta?.changes ?? 0) > 0;
+  }
+  // D1 batch is transactional. The INSERT and link share the same predicates,
+  // so duplicates/late callbacks create no release and cannot claim a job.
+  // The release must exist before linking because release_id is a foreign key.
+  const link = params.env.DATABASE.prepare(
+    `UPDATE deployment_publish_jobs
+    SET release_id = ?, release_version = ?, release_status = ?, updated_at = ?
+    WHERE id = ? AND attempt = ? AND project_id = ? AND workspace_id = ?
+      AND requested_by = ? AND environment_id = ?
+      AND status NOT IN ('succeeded', 'failed', 'canceled', 'unknown') AND release_id IS NULL
+      AND EXISTS (SELECT 1 FROM deployment_releases WHERE id = ?)`
+  ).bind(
+    params.values.id,
+    params.values.version,
+    params.values.status,
+    params.values.createdAt,
+    ...fenceBindings,
+    params.values.id
+  );
+  const results = await params.env.DATABASE.batch([insert, link]);
+  return (results[0]?.meta?.changes ?? 0) > 0 && (results[1]?.meta?.changes ?? 0) > 0;
 }
 
 async function validateManifestSecrets(

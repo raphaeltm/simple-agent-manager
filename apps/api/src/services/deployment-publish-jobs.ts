@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, isNull, lt, notInArray, or, sql } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -128,6 +128,7 @@ export interface AppendDeploymentPublishJobEventInput {
   nodeId: string;
   workspaceId: string;
   status?: string;
+  expectedStatus?: string;
   currentStep?: string | null;
   level?: string;
   eventType: string;
@@ -145,40 +146,48 @@ export interface AppendDeploymentPublishJobEventInput {
 export async function appendDeploymentPublishJobEvent(
   db: Db,
   input: AppendDeploymentPublishJobEventInput
-): Promise<void> {
+): Promise<boolean> {
   const now = new Date().toISOString();
-  const maxRows = await db
-    .select({ maxSeq: sql<number>`coalesce(max(${schema.deploymentPublishJobEvents.seq}), 0)` })
-    .from(schema.deploymentPublishJobEvents)
-    .where(eq(schema.deploymentPublishJobEvents.publishJobId, input.publishJobId));
-  const seq = Number(maxRows[0]?.maxSeq ?? 0) + 1;
-
-  await db.insert(schema.deploymentPublishJobEvents).values({
-    id: ulid(),
-    publishJobId: input.publishJobId,
-    projectId: input.projectId,
-    environmentId: input.environmentId,
-    nodeId: input.nodeId,
-    nodeIdentifier: input.nodeId,
-    workspaceId: input.workspaceId,
-    seq,
-    level: normalizeLevel(input.level),
-    eventType: sanitizePublishEventText(input.eventType, 200),
-    step: input.currentStep ? sanitizePublishEventText(input.currentStep, 200) : null,
-    message: sanitizePublishEventText(input.message),
-    detailJson: sanitizeDetail(input.detail),
-    createdAt: now,
-  });
-
   const status = normalizeStatus(input.status);
+  if (input.terminal && (!status || !PUBLISH_JOB_TERMINAL_STATUSES.has(status))) return false;
+  if (input.releaseId == null && (input.releaseVersion != null || input.releaseStatus != null))
+    return false;
   const terminal = input.terminal || (status ? PUBLISH_JOB_TERMINAL_STATUSES.has(status) : false);
+  const predicate = and(
+    eq(schema.deploymentPublishJobs.id, input.publishJobId),
+    input.releaseId != null
+      ? or(
+          isNull(schema.deploymentPublishJobs.releaseId),
+          eq(schema.deploymentPublishJobs.releaseId, input.releaseId)
+        )
+      : undefined,
+    input.expectedStatus
+      ? eq(schema.deploymentPublishJobs.status, input.expectedStatus)
+      : undefined,
+    notInArray(schema.deploymentPublishJobs.status, [...PUBLISH_JOB_TERMINAL_STATUSES])
+  );
+  if (input.eventType === 'publish.job.heartbeat') {
+    // Heartbeats prove executor liveness independently of slow build/upload progress.
+    // The same terminal fence prevents late heartbeats from reviving a canceled job.
+    const changed = await db
+      .update(schema.deploymentPublishJobs)
+      .set({ lastHeartbeatAt: now, updatedAt: now })
+      .where(predicate)
+      .returning({ id: schema.deploymentPublishJobs.id });
+    return changed.length > 0;
+  }
   const update: Partial<schema.NewDeploymentPublishJobRow> = {
     updatedAt: now,
     lastEventAt: now,
+    // Progress is also proof of life, but cannot opt legacy agents into stall detection.
+    lastHeartbeatAt:
+      sql`CASE WHEN ${schema.deploymentPublishJobs.lastHeartbeatAt} IS NULL THEN NULL ELSE ${now} END` as unknown as string,
   };
   if (status) update.status = status;
   if (input.currentStep !== undefined) update.currentStep = input.currentStep;
-  if (input.releaseId !== undefined) update.releaseId = input.releaseId;
+  if (input.releaseId != null)
+    update.releaseId =
+      sql`coalesce(${schema.deploymentPublishJobs.releaseId}, ${input.releaseId})` as unknown as string;
   if (input.releaseVersion !== undefined) update.releaseVersion = input.releaseVersion;
   if (input.releaseStatus !== undefined) update.releaseStatus = input.releaseStatus;
   if (input.errorMessage !== undefined && input.errorMessage !== null) {
@@ -194,10 +203,42 @@ export async function appendDeploymentPublishJobEvent(
     update.completedAt =
       sql`coalesce(${schema.deploymentPublishJobs.completedAt}, ${now})` as unknown as string;
 
-  await db
+  // Insert history and transition together. Sequencing inside the batch avoids
+  // the acceptance/event callback race on the unique (publish_job_id, seq) key.
+  const insert = db.insert(schema.deploymentPublishJobEvents).select(
+    db
+      .select({
+        id: sql<string>`${ulid()}`.as('id'),
+        publishJobId: sql<string>`${input.publishJobId}`.as('publish_job_id'),
+        projectId: sql<string>`${input.projectId}`.as('project_id'),
+        environmentId: sql<string>`${input.environmentId}`.as('environment_id'),
+        nodeId: sql<string>`${input.nodeId}`.as('node_id'),
+        nodeIdentifier: sql<string>`${input.nodeId}`.as('node_identifier'),
+        workspaceId: sql<string>`${input.workspaceId}`.as('workspace_id'),
+        seq: sql<number>`(SELECT coalesce(max(seq), 0) + 1 FROM deployment_publish_job_events WHERE publish_job_id = ${input.publishJobId})`.as(
+          'seq'
+        ),
+        level: sql<string>`${normalizeLevel(input.level)}`.as('level'),
+        eventType: sql<string>`${sanitizePublishEventText(input.eventType, 200)}`.as('event_type'),
+        step: sql<
+          string | null
+        >`${input.currentStep ? sanitizePublishEventText(input.currentStep, 200) : null}`.as(
+          'step'
+        ),
+        message: sql<string>`${sanitizePublishEventText(input.message)}`.as('message'),
+        detailJson: sql<string | null>`${sanitizeDetail(input.detail)}`.as('detail_json'),
+        createdAt: sql<string>`${now}`.as('created_at'),
+      })
+      .from(schema.deploymentPublishJobs)
+      .where(predicate)
+  );
+  const transition = db
     .update(schema.deploymentPublishJobs)
     .set(update)
-    .where(eq(schema.deploymentPublishJobs.id, input.publishJobId));
+    .where(predicate)
+    .returning({ id: schema.deploymentPublishJobs.id });
+  const [, changed] = await db.batch([insert, transition]);
+  return changed.length > 0;
 }
 
 export async function getDeploymentPublishJobForMcp(
@@ -244,6 +285,7 @@ export async function getDeploymentPublishJobForMcp(
     currentStep: job.currentStep,
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
+    lastHeartbeatAt: job.lastHeartbeatAt,
     startedAt: job.startedAt,
     completedAt: job.completedAt,
     environment: job.environmentName,
@@ -274,4 +316,96 @@ export async function getDeploymentPublishJobForMcp(
         : 'Publish is terminal. Inspect the failed step and recent events before retrying.'
       : 'Call deployments_read method publish_status again with publishJobId and sinceSeq until the status is terminal.',
   };
+}
+
+/** The status predicate is the durable winner election against callbacks and sweeps. */
+export async function cancelDeploymentPublishJob(
+  db: Db,
+  projectId: string,
+  workspaceId: string | undefined,
+  publishJobId: string
+) {
+  const now = new Date().toISOString();
+  const rows = await db
+    .update(schema.deploymentPublishJobs)
+    .set({
+      status: 'canceled',
+      completedAt: now,
+      updatedAt: now,
+      retryable: false,
+    })
+    .where(
+      and(
+        eq(schema.deploymentPublishJobs.id, publishJobId),
+        eq(schema.deploymentPublishJobs.projectId, projectId),
+        workspaceId ? eq(schema.deploymentPublishJobs.workspaceId, workspaceId) : undefined,
+        notInArray(schema.deploymentPublishJobs.status, [...PUBLISH_JOB_TERMINAL_STATUSES])
+      )
+    )
+    .returning();
+  return rows[0] ?? null;
+}
+
+/** Recheck expiry in the UPDATE: a callback can refresh the job after selection. */
+export async function failExpiredDeploymentPublishJobs(
+  db: Db,
+  settings: { stallMs: number; deadlineMs: number; sweepLimit: number },
+  nowMs = Date.now()
+) {
+  const now = new Date(nowMs).toISOString();
+  const stallCutoff = new Date(nowMs - settings.stallMs).toISOString();
+  const deadlineCutoff = new Date(nowMs - settings.deadlineMs).toISOString();
+  // SQL NULL never satisfies the heartbeat comparison: legacy agents are deadline-only.
+  const expired = sql`(${schema.deploymentPublishJobs.createdAt} <= ${deadlineCutoff}
+    OR ${schema.deploymentPublishJobs.lastHeartbeatAt} <= ${stallCutoff})`;
+  // Disjoint status ranges use the existing (status, updated_at) index and
+  // exclude terminal history. Unlike a fixed active-status list, this also
+  // covers new non-terminal states introduced by later executors.
+  const terminalStatuses = [...PUBLISH_JOB_TERMINAL_STATUSES].sort((left, right) =>
+    left.localeCompare(right)
+  );
+  const activeRanges = or(
+    ...terminalStatuses.map((status, index) =>
+      index === 0
+        ? lt(schema.deploymentPublishJobs.status, status)
+        : and(
+            gt(schema.deploymentPublishJobs.status, terminalStatuses[index - 1] as string),
+            lt(schema.deploymentPublishJobs.status, status)
+          )
+    ),
+    gt(schema.deploymentPublishJobs.status, terminalStatuses.at(-1) as string)
+  );
+  const candidates = await db
+    .select({ id: schema.deploymentPublishJobs.id })
+    .from(schema.deploymentPublishJobs)
+    .where(and(activeRanges, expired))
+    .orderBy(asc(schema.deploymentPublishJobs.updatedAt), asc(schema.deploymentPublishJobs.id))
+    .limit(settings.sweepLimit);
+  const updates = candidates.map((candidate) =>
+    db
+      .update(schema.deploymentPublishJobs)
+      .set({
+        status: 'failed',
+        completedAt: now,
+        updatedAt: now,
+        retryable: true,
+        errorCode: sql`CASE WHEN ${schema.deploymentPublishJobs.createdAt} <= ${deadlineCutoff} THEN 'deadline_exceeded' ELSE 'stalled' END`,
+        errorMessage:
+          'Publish job stopped reporting progress or exceeded its overall deadline. Inspect events before retrying.',
+      })
+      .where(
+        and(
+          eq(schema.deploymentPublishJobs.id, candidate.id),
+          notInArray(schema.deploymentPublishJobs.status, [...PUBLISH_JOB_TERMINAL_STATUSES]),
+          expired
+        )
+      )
+      .returning()
+  );
+  const [first, ...remaining] = updates;
+  if (!first) return [];
+  // One bounded D1 batch preserves each conditional expiry check while reducing
+  // round trips. Lifecycle delivery remains outside this transaction.
+  const results = await db.batch([first, ...remaining]);
+  return results.flat();
 }

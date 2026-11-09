@@ -425,7 +425,9 @@ function surfaceTests() {
   test('chat header shows the session credential chip and opens details', async ({ page }) => {
     await openChat(page, 'normal', CLAUDE_CRED);
     await expectChipInsideHeader(page);
-    await expect(page.getByTestId('credential-limit-chip')).toHaveText(
+    // The header shows the short text; the accessible name keeps every window's label.
+    await expect(page.getByTestId('credential-limit-chip')).toHaveText(/Claude 72% · 31%/);
+    await expect(page.getByTestId('credential-limit-chip')).toHaveAccessibleName(
       /Claude · 5h 72% · Week 31%/
     );
     await assertNoOverflow(page);
@@ -446,9 +448,7 @@ function surfaceTests() {
   test('chat header renders a critical Codex credential', async ({ page }) => {
     await openChat(page, 'normal', CODEX_CRITICAL_CRED);
     await expectChipInsideHeader(page);
-    await expect(page.getByTestId('credential-limit-chip')).toHaveText(
-      /Codex · 5h 93% · Week 100%/
-    );
+    await expect(page.getByTestId('credential-limit-chip')).toHaveText(/Codex 93% · 100%/);
     await expect(page.getByTestId('credential-limit-chip')).toHaveAccessibleName(/Limit reached/);
     await assertNoOverflow(page);
     await assertNoClippedOverflow(page);
@@ -465,7 +465,8 @@ function surfaceTests() {
   test('chat header collapses many windows and stays inside the card', async ({ page }) => {
     await openChat(page, 'normal', OPENCODE_MANY_CRED);
     await expectChipInsideHeader(page);
-    await expect(page.getByTestId('credential-limit-chip')).toHaveText(
+    await expect(page.getByTestId('credential-limit-chip')).toHaveText(/OpenCode 7% · 39% · \+3/);
+    await expect(page.getByTestId('credential-limit-chip')).toHaveAccessibleName(
       /OpenCode · Rolling 7% · Week 39% · Month 19% · \+2/
     );
     await assertNoOverflow(page);

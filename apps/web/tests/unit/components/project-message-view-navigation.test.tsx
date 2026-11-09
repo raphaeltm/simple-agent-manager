@@ -151,7 +151,7 @@ function commentOn(messageId: string) {
 
 /** Opens the comments drawer on the one thread and returns its row. */
 async function openCommentThread() {
-  fireEvent.click(await screen.findByRole('button', { name: /1 unresolved comment/i }));
+  fireEvent.click(await screen.findByRole('button', { name: /comment threads — 1 unresolved/i }));
   return screen.findByRole('button', { name: /Worth revisiting this early decision\./i });
 }
 

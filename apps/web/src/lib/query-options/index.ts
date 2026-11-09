@@ -137,7 +137,12 @@ export {
   workspacePortsQueryOptions,
   workspaceQueryKeys,
 } from './infrastructure';
-export { type LibraryIndexQueryData, libraryIndexQueryOptions, libraryQueryKeys } from './library';
+export {
+  libraryFileQueryOptions,
+  type LibraryIndexQueryData,
+  libraryIndexQueryOptions,
+  libraryQueryKeys,
+} from './library';
 export {
   ideaLinksQueryOptions,
   libraryFileLinksQueryOptions,

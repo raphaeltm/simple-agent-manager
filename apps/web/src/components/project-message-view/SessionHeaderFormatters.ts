@@ -22,7 +22,10 @@ export function formatDuration(ms: number): string {
 
 export function formatTime(ts: number): string {
   return new Date(ts).toLocaleString(undefined, {
-    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
   });
 }
 
@@ -50,8 +53,9 @@ export function formatAgentType(agentType: string): string {
   return labels[agentType] ?? agentType;
 }
 
+/** Who started the session, or null when it was you (the header only names someone else). */
 export function getCreatorLabel(session: ChatSessionResponse): string | null {
-  if (session.isMine) return 'You';
+  if (session.isMine) return null;
   if (!session.createdByUserId) return null;
   const creator = session.createdBy;
   return creator?.name?.trim() || creator?.email?.split('@')[0] || 'Member';

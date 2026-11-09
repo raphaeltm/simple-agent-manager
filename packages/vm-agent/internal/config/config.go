@@ -153,6 +153,9 @@ const (
 	// DefaultDeployBuildPublishTimeout bounds host build + push + release publish
 	// work. Override via DEPLOY_BUILD_PUBLISH_TIMEOUT.
 	DefaultDeployBuildPublishTimeout = 20 * time.Minute
+	// DefaultDeployPublishHeartbeatInterval proves liveness during silent Docker operations.
+	DefaultDeployPublishHeartbeatInterval = time.Minute
+	DefaultHTTPCallbackTimeout            = 30 * time.Second
 
 	// DefaultWorkspaceBuildQueueDepth preserves the historical single devcontainer
 	// build slot per VM while allowing operators to tune the per-node queue depth.
@@ -509,6 +512,7 @@ type Config struct {
 	DeployArtifactIdleTimeout           time.Duration // Max no-progress body read interval for artifact downloads (env: DEPLOY_ARTIFACT_IDLE_TIMEOUT)
 	DeployApplyIdleTimeout              time.Duration // Max no-progress interval for detached apply goroutines (env: DEPLOY_APPLY_IDLE_TIMEOUT)
 	ComposeOutputRetentionBytes         int64         // Max compose output bytes retained (tail) for apply error messages (env: COMPOSE_OUTPUT_RETENTION_BYTES)
+	DeployPublishHeartbeatInterval      time.Duration // env: DEPLOY_PUBLISH_HEARTBEAT_INTERVAL
 	DeployBuildPublishTimeout           time.Duration // Max host build/push/release publish duration (env: DEPLOY_BUILD_PUBLISH_TIMEOUT)
 	DeployPreflightCommandTimeout       time.Duration // Max deployment preflight diagnostic command duration (env: DEPLOY_PREFLIGHT_COMMAND_TIMEOUT)
 }

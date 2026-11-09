@@ -24,6 +24,7 @@ import { runCronTriggerSweep } from './cron-triggers';
 import { runScheduledDeploymentReleaseRetention } from './d1-retention';
 import { runDebugPackagePurge } from './debug-package-purge';
 import { runDeploymentNodeCleanup } from './deployment-node-cleanup';
+import { runDeploymentPublishJobSweep } from './deployment-publish-jobs';
 import { notifyFailedSweeps } from './failed-sweep-notifications';
 import { runIncidentTriggerSweep } from './incident-triggers';
 import { runNodeCleanupSweep } from './node-cleanup';
@@ -106,6 +107,9 @@ export async function scheduled(
 
   // Every sweep is isolated so one failure cannot suppress later recovery work.
   const sweeps = createSweepIsolator(env);
+  await sweeps.isolate('deployment_publish_jobs', () =>
+    runDeploymentPublishJobSweep(env, ctx.waitUntil.bind(ctx))
+  );
   const githubTriggerRecovery = await sweeps.isolate('github_trigger_recovery', () =>
     runGitHubTriggerRecovery(env, ctx.waitUntil.bind(ctx))
   );

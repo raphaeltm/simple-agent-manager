@@ -15,6 +15,12 @@ const MINUTE_MS = 60_000;
 /** How many windows the compact chip spells out before collapsing to "+N". */
 export const CHIP_MAX_WINDOWS = 3;
 
+/** How many usage windows the chat header's short chip shows ("Claude 15% · 17%"). */
+export const HEADER_CHIP_MAX_WINDOWS = 2;
+
+/** The generic window a provider rejection is recorded on. It carries no quota percentage. */
+const PROMPT_REJECTION_WINDOW_TYPE = 'provider.prompt_rejection';
+
 /**
  * Level colours come from the shared status tokens (the same family
  * `StatusBadge` uses), so the chip reads like every other status surface and
@@ -87,5 +93,27 @@ export function credentialChipText(credential: CredentialLimitCredentialSummary)
   for (const window of shown) parts.push(windowChipText(window));
   const hidden = credential.windows.length - shown.length;
   if (hidden > 0) parts.push(`+${hidden}`);
+  return parts.join(' · ');
+}
+
+/**
+ * The chat header's short form: "Claude 15% · 17%" instead of
+ * "Claude · 5h 15% · Week 17% · prompt rejection 0%".
+ *
+ * Window labels are dropped (the full text stays in the chip's accessible name and its
+ * details dialog), only the first HEADER_CHIP_MAX_WINDOWS quota windows are shown, and the
+ * prompt-rejection window appears only while it is not OK, as "rejected".
+ */
+export function credentialHeaderChipText(credential: CredentialLimitCredentialSummary): string {
+  const quota = credential.windows.filter((w) => w.windowType !== PROMPT_REJECTION_WINDOW_TYPE);
+  const rejection = credential.windows.find((w) => w.windowType === PROMPT_REJECTION_WINDOW_TYPE);
+  const family = quota[0] ? credentialLimitFamilyLabel(quota[0].windowType) : credential.provider;
+  const shown = quota
+    .slice(0, HEADER_CHIP_MAX_WINDOWS)
+    .map((w) => formatUtilizationPercent(w.utilizationPercent));
+  const hidden = quota.length - shown.length;
+  const parts = [shown.length > 0 ? `${family} ${shown.join(' · ')}` : family];
+  if (hidden > 0) parts.push(`+${hidden}`);
+  if (rejection && rejection.level !== 'ok') parts.push('rejected');
   return parts.join(' · ');
 }

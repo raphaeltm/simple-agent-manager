@@ -1,7 +1,11 @@
-import { LIBRARY_DEFAULTS, type ProjectFile, type ProjectFileTag } from '@simple-agent-manager/shared';
+import {
+  LIBRARY_DEFAULTS,
+  type ProjectFile,
+  type ProjectFileTag,
+} from '@simple-agent-manager/shared';
 import { queryOptions } from '@tanstack/react-query';
 
-import { listLibraryFiles } from '../api/library';
+import { getLibraryFile, listLibraryFiles } from '../api/library';
 import { QUERY_PERSIST_MAX_AGE_MS } from '../query-persist-config';
 
 export type LibraryIndexFile = ProjectFile & { tags: ProjectFileTag[] };
@@ -35,6 +39,8 @@ export const libraryQueryKeys = {
         namespace: config.namespace ?? null,
       },
     ] as const,
+  file: (queryScope: string, projectId: string, fileId: string) =>
+    [...libraryQueryKeys.all(queryScope), 'file', projectId, fileId] as const,
 };
 
 function stripPreview(file: LibraryIndexFile): LibraryIndexFile {
@@ -92,5 +98,20 @@ export function libraryIndexQueryOptions(
     queryKey: libraryQueryKeys.index(queryScope, projectId, config),
     queryFn: () => sweepLibraryIndex(projectId, config),
     gcTime: QUERY_PERSIST_MAX_AGE_MS,
+  });
+}
+
+/**
+ * One file's metadata, for opening its preview without waiting for the library index sweep.
+ *
+ * Not persisted: filenames are free text (see `query-options/index.ts`).
+ */
+export function libraryFileQueryOptions(queryScope: string, projectId: string, fileId: string) {
+  return queryOptions({
+    queryKey: libraryQueryKeys.file(queryScope, projectId, fileId),
+    queryFn: async ({ signal }): Promise<LibraryIndexFile> => {
+      const { file, tags } = await getLibraryFile(projectId, fileId, { signal });
+      return { ...file, tags };
+    },
   });
 }

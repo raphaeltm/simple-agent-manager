@@ -605,17 +605,14 @@ async function expandHeader(page: Page) {
 }
 
 async function openCommentsDrawer(page: Page) {
-  // The always-visible chip is the intended entry point; fall back to the
-  // action-row button so the test still passes if the chip is suppressed.
+  // A phone's one-row header keeps its comment chip; elsewhere the tool rail's Comments
+  // action is the entry point.
   const chip = page.getByRole('button', { name: /unresolved comment/i }).first();
   if (await chip.isVisible().catch(() => false)) {
     await chip.click();
   } else {
     await expandHeader(page);
-    await page
-      .getByRole('button', { name: /^Comments/ })
-      .first()
-      .click();
+    await page.getByTestId('session-tool-comments').first().click();
   }
   const drawer = page.getByRole('dialog', { name: 'Session comments' });
   await drawer.waitFor({ timeout: 10_000 });
@@ -675,11 +672,17 @@ for (const [label, viewport] of [
   test.describe(`Comment navigation — ${label}`, () => {
     test.use({ viewport, isMobile: label === 'mobile', hasTouch: label === 'mobile' });
 
-    test('header surfaces the unresolved comment count', async ({ page }) => {
+    test('the session surfaces the unresolved comment count', async ({ page }) => {
       await setupMocks(page);
       await openChat(page);
-      await screenshot(page, `comments-01-header-chip-${label}`);
-      await expect(page.getByRole('button', { name: /unresolved comment/i }).first()).toBeVisible();
+      await screenshot(page, `comments-01-count-${label}`);
+      // Phones keep a comment chip in the one-row header; desktop shows the count on the
+      // tool rail's Comments action (the header chip row no longer carries comments).
+      const count =
+        label === 'mobile'
+          ? page.getByRole('button', { name: /unresolved comment|needing your attention/i })
+          : page.getByRole('button', { name: /comment threads — \d+ (unresolved|needs you)/i });
+      await expect(count.first()).toBeVisible();
       await assertNoOverflow(page);
     });
 

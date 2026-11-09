@@ -194,7 +194,7 @@ export function SessionHeader({
     people.length > 1 ? (
       <AvatarStack
         people={people}
-        size={26}
+        size={isMobile ? 26 : 20}
         label={`People with access: ${people.map((person) => person.name).join(', ')}`}
         className="mt-0.5 shrink-0"
       />
@@ -210,9 +210,6 @@ export function SessionHeader({
       sortedPorts={sortedPorts}
       getWorkspacePortHref={getWorkspacePortHref}
       onShowMorePorts={() => onExpandedChange(true)}
-      onOpenComments={onOpenComments}
-      unresolvedCommentCount={unresolvedCommentCount}
-      needsAttentionCommentCount={needsAttentionCommentCount}
       linkedWork={linkedWork}
       lineageText={lineageText}
       surface={surface}
@@ -311,7 +308,7 @@ export function SessionHeader({
       // get clipped, whatever else shares the column.
       className={`${paneClassName('slab')} flex flex-col overflow-hidden ${expanded ? 'min-h-0 shrink' : 'shrink-0'}`}
     >
-      <div className="shrink-0 space-y-2.5 px-4 pt-3 pb-3.5 md:px-6 md:pt-4">
+      <div className="shrink-0 space-y-1.5 px-4 pt-3 pb-2.5 md:px-5">
         <div className="flex items-start gap-3">
           {/* Retry / Fork / the details chevron live in `SessionToolRail`, so the title
               gets the full width. */}
@@ -319,7 +316,7 @@ export function SessionHeader({
             // Focus target after an in-chat link opens another chat (session-focus-handoff).
             data-session-title
             tabIndex={-1}
-            className="min-w-0 flex-1 rounded-sm text-[17px] leading-snug font-semibold text-fg-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring md:text-[19px]"
+            className="min-w-0 flex-1 rounded-sm text-[17px] leading-snug font-semibold text-fg-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
             title={sessionTitle}
             style={{
               display: '-webkit-box',

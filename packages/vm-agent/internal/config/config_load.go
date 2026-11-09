@@ -122,7 +122,7 @@ func Load() (*Config, error) {
 		HTTPReadTimeout:     getEnvDuration("HTTP_READ_TIMEOUT", 15*time.Second),
 		HTTPWriteTimeout:    getEnvDuration("HTTP_WRITE_TIMEOUT", 15*time.Second),
 		HTTPIdleTimeout:     getEnvDuration("HTTP_IDLE_TIMEOUT", 60*time.Second),
-		HTTPCallbackTimeout: getEnvDuration("HTTP_CALLBACK_TIMEOUT", 30*time.Second),
+		HTTPCallbackTimeout: getEnvDuration("HTTP_CALLBACK_TIMEOUT", DefaultHTTPCallbackTimeout),
 
 		// WebSocket buffer sizes and terminal socket limits - configurable per constitution
 		WSReadBufferSize:           getEnvInt("WS_READ_BUFFER_SIZE", 1024),
@@ -375,6 +375,7 @@ func Load() (*Config, error) {
 		DeployArtifactIdleTimeout:           getEnvDuration("DEPLOY_ARTIFACT_IDLE_TIMEOUT", DefaultDeployArtifactIdleTimeout),
 		DeployApplyIdleTimeout:              getEnvDuration("DEPLOY_APPLY_IDLE_TIMEOUT", DefaultDeployApplyIdleTimeout),
 		ComposeOutputRetentionBytes:         composeOutputRetentionBytes,
+		DeployPublishHeartbeatInterval:      getEnvDuration("DEPLOY_PUBLISH_HEARTBEAT_INTERVAL", DefaultDeployPublishHeartbeatInterval),
 		DeployBuildPublishTimeout:           getEnvDuration("DEPLOY_BUILD_PUBLISH_TIMEOUT", DefaultDeployBuildPublishTimeout),
 		DeployPreflightCommandTimeout:       getEnvDuration("DEPLOY_PREFLIGHT_COMMAND_TIMEOUT", DefaultDeployPreflightCommandTimeout),
 	}

@@ -1,4 +1,4 @@
-// FILE SIZE EXCEPTION: Pre-existing large Library page; this production hotfix adds URL-preview metadata fallback without a risky component split. See .claude/rules/18-file-size-limits.md
+// FILE SIZE EXCEPTION: Pre-existing large Library page; the URL preview lives in LibraryFilePreview, and splitting the page itself is out of scope here. See .claude/rules/18-file-size-limits.md
 import type {
   DirectoryEntry,
   FileUploadSource,
@@ -6,6 +6,7 @@ import type {
 } from '@simple-agent-manager/shared';
 import { LIBRARY_DEFAULTS } from '@simple-agent-manager/shared';
 import { Spinner } from '@simple-agent-manager/ui';
+import { useQueryClient } from '@tanstack/react-query';
 import { Folder, FolderOpen, Search, Upload } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
@@ -15,7 +16,7 @@ import { CreateDirectoryDialog } from '../components/library/CreateDirectoryDial
 import { DirectoryBreadcrumb } from '../components/library/DirectoryBreadcrumb';
 import { FileGridCard } from '../components/library/FileGridCard';
 import { FileListItem } from '../components/library/FileListItem';
-import { FilePreviewModal } from '../components/library/FilePreviewModal';
+import { LibraryFilePreview } from '../components/library/LibraryFilePreview';
 import { LibraryToolbar } from '../components/library/LibraryToolbar';
 import { TagEditor } from '../components/library/TagEditor';
 import type { FileWithTags, SortOption, UploadItem, ViewMode } from '../components/library/types';
@@ -25,14 +26,8 @@ import { UploadZone } from '../components/library/UploadZone';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { useLibraryIndex } from '../hooks/useLibraryIndex';
-import {
-  downloadLibraryFile,
-  getLibraryFile,
-  getLibraryFilePreviewUrl,
-  listLibraryDirectories,
-  listLibraryFiles,
-  uploadLibraryFile,
-} from '../lib/api';
+import { useQueryScope } from '../hooks/useQueryScope';
+import { listLibraryDirectories, listLibraryFiles, uploadLibraryFile } from '../lib/api';
 import { formatFileSize } from '../lib/file-utils';
 import {
   buildLibraryCacheNamespace,
@@ -43,6 +38,7 @@ import {
   UNAUTHENTICATED_LIBRARY_CACHE_NAMESPACE,
 } from '../lib/library-cache';
 import { searchIndex } from '../lib/library-search';
+import { libraryFileQueryOptions } from '../lib/query-options';
 import { useProjectContext } from './ProjectContext';
 
 let uploadIdCounter = 0;
@@ -82,7 +78,36 @@ export function ProjectLibrary() {
   const { user } = useAuth();
   const cacheNamespace =
     buildLibraryCacheNamespace(user?.id) ?? UNAUTHENTICATED_LIBRARY_CACHE_NAMESPACE;
-  return <ProjectLibraryContent key={cacheNamespace} cacheNamespace={cacheNamespace} />;
+  return (
+    <>
+      <ProjectLibraryContent key={cacheNamespace} cacheNamespace={cacheNamespace} />
+      <LibraryUrlPreview />
+    </>
+  );
+}
+
+/**
+ * The `?preview=fileId` viewer. It sits beside the listing, not inside it, so a direct link
+ * opens the file without waiting for the library index to load.
+ */
+function LibraryUrlPreview() {
+  const { projectId } = useProjectContext();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const previewFileId = searchParams.get('preview');
+
+  const closePreview = useCallback(() => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('preview');
+        return next;
+      },
+      { replace: true }
+    );
+  }, [setSearchParams]);
+
+  if (!previewFileId) return null;
+  return <LibraryFilePreview projectId={projectId} fileId={previewFileId} onClose={closePreview} />;
 }
 
 function ProjectLibraryContent({ cacheNamespace }: { cacheNamespace: string }) {
@@ -92,8 +117,6 @@ function ProjectLibraryContent({ cacheNamespace }: { cacheNamespace: string }) {
 
   // URL-driven directory navigation — `?dir=/path`
   const currentDirectory = searchParams.get('dir') || '/';
-  // URL-driven file preview — `?preview=fileId`
-  const previewFileId = searchParams.get('preview');
 
   // ---------------------------------------------------------------------------
   // Client-side index (sub-cap projects). At/over cap, `status === 'overCap'`
@@ -166,47 +189,9 @@ function ProjectLibraryContent({ cacheNamespace }: { cacheNamespace: string }) {
 
   // Tag editor
   const [editingTagsFile, setEditingTagsFile] = useState<FileWithTags | null>(null);
-  const [directPreviewFile, setDirectPreviewFile] = useState<FileWithTags | null>(null);
 
   // The authoritative file set for the active mode (used for preview + tag list)
   const allFiles = isOverCap ? serverFiles : sweptFiles;
-
-  // Preview — derived from URL param + loaded files
-  const previewFile = useMemo(
-    () =>
-      previewFileId ? (allFiles.find((f) => f.id === previewFileId) ?? directPreviewFile) : null,
-    [previewFileId, allFiles, directPreviewFile]
-  );
-
-  useEffect(() => {
-    let cancelled = false;
-
-    if (!previewFileId) {
-      setDirectPreviewFile(null);
-      return;
-    }
-
-    const indexedFile = allFiles.find((f) => f.id === previewFileId);
-    if (indexedFile) {
-      setDirectPreviewFile(indexedFile);
-      return;
-    }
-
-    getLibraryFile(projectId, previewFileId)
-      .then(({ file, tags }) => {
-        if (!cancelled) setDirectPreviewFile({ ...file, tags });
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setDirectPreviewFile(null);
-          console.error('Failed to load preview file metadata:', err);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId, previewFileId, allFiles]);
 
   // Active filter count for badge — EXCLUDES searchInput (search is always visible)
   const activeFilterCount = activeTags.length + (sourceFilter !== 'all' ? 1 : 0);
@@ -477,8 +462,15 @@ function ProjectLibraryContent({ cacheNamespace }: { cacheNamespace: string }) {
   // ---------------------------------------------------------------------------
   // Preview + tag filter
   // ---------------------------------------------------------------------------
+  const queryClient = useQueryClient();
+  const queryScope = useQueryScope();
   const openPreview = useCallback(
     (file: FileWithTags) => {
+      // The row already holds the file's metadata, so the viewer needn't request it again.
+      queryClient.setQueryData(
+        libraryFileQueryOptions(queryScope, projectId, file.id).queryKey,
+        file
+      );
       setSearchParams(
         (prev) => {
           const next = new URLSearchParams(prev);
@@ -488,19 +480,8 @@ function ProjectLibraryContent({ cacheNamespace }: { cacheNamespace: string }) {
         { replace: true }
       );
     },
-    [setSearchParams]
+    [projectId, queryClient, queryScope, setSearchParams]
   );
-
-  const closePreview = useCallback(() => {
-    setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        next.delete('preview');
-        return next;
-      },
-      { replace: true }
-    );
-  }, [setSearchParams]);
 
   const handleTagClick = useCallback((tag: string) => {
     setActiveTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]));
@@ -795,17 +776,6 @@ function ProjectLibraryContent({ cacheNamespace }: { cacheNamespace: string }) {
             />
           ))}
         </div>
-      )}
-
-      {/* Preview modal */}
-      {previewFile && (
-        <FilePreviewModal
-          projectId={projectId}
-          file={previewFile}
-          previewUrl={getLibraryFilePreviewUrl(projectId, previewFile.id)}
-          onClose={closePreview}
-          onDownload={() => downloadLibraryFile(projectId, previewFile.id)}
-        />
       )}
     </div>
   );

@@ -329,7 +329,8 @@ Your choice is remembered in the browser, per device.
 SAM keeps track of what a chat touches, and **Related** in the tool rail shows it: the ideas the
 agent worked on, the library files it added or read, and the pull requests it opened. Each row
 says how the chat is related in plain words, and opens the thing it names — the idea page, the
-file's preview in the library, or the pull request on GitHub.
+pull request on GitHub, or, for a file, a preview over the chat. Closing the preview takes you back
+to the panel.
 
 | Words you'll see                        | What happened                                                   |
 | --------------------------------------- | --------------------------------------------------------------- |
@@ -350,7 +351,7 @@ badge in the rail.
 
 Two of these also surface without opening the panel:
 
-- **The idea the chat is about** appears as a chip in the chat header, next to the comment chip:
+- **The idea the chat is about** appears as a chip in the chat header's chip row:
   **Working on** and the idea's title, or **Discussing** for a chat that talks an idea through.
   Tap it to open the idea.
 - **View PR**, in the session's **Details** panel, shows the pull request's number and its state
