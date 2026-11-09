@@ -30,8 +30,8 @@ export interface ReusableNodeSelection {
   /**
    * The node's startup backlog when it was ranked above at least one other admitted host. The
    * final reservation refuses if the backlog has grown since, so the run reselects and can take
-   * the other host (`maxStartupBacklog`). Null or absent when there was no alternative, and for
-   * pinned nodes and warm claims.
+   * the other host (`maxStartupBacklog`). A warm claim is always guarded at 0, because it was
+   * taken as an empty node. Null or absent when there was no alternative, and for pinned nodes.
    */
   observedStartupBacklog?: number | null;
 }

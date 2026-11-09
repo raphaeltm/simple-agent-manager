@@ -98,7 +98,9 @@ export async function reserveWorkspacePlacement(
           resolved_reservation_json,
           ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS},
           created_at, updated_at)
-       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'creating', ?, ?, ?, ?, ?,
+       -- vm_location is where the workspace actually runs: ranking can choose a node outside the
+       -- requested (default) location, and a later wake prefers this value.
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'creating', ?, COALESCE(n.vm_location, ?), ?, ?, ?,
           ?,
           requested.reservation_json,
           ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS},
@@ -171,7 +173,7 @@ export async function attachPrecreatedWorkspacePlacement(
        SET node_id = ?,
            status = 'creating',
            vm_size = ?,
-           vm_location = ?,
+           vm_location = COALESCE((SELECT vm_location FROM node_scope), ?),
            workspace_profile = ?,
            devcontainer_config_name = ?,
            agent_profile_hint = ?,

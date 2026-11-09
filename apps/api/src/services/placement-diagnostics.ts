@@ -163,18 +163,31 @@ function authorityDiagnostic(
     capacityPoolRevision: selection.revision,
     effectivePoolState: selection.effectiveState,
     strategy: appliedStrategy ?? selection.strategy,
-    strategyOrdering: describePlacementStrategyOrdering(appliedStrategy ?? selection.strategy),
+    strategyOrdering: describeReusableHostOrdering(appliedStrategy ?? selection.strategy),
     exhaustionPolicy: selection.exhaustionPolicy,
     revalidatedAgainstCurrentAuthority: revalidated,
   };
 }
 
-/** The human-readable ranking key a strategy applied, for "why this node". */
+/** The human-readable ranking key a strategy applied. */
 export function describePlacementStrategyOrdering(
   strategy: CapacityPoolStrategy | null | undefined
 ): string | null {
   if (!strategy) return null;
   return PLACEMENT_STRATEGY_HOST_ORDERING[strategy] ?? null;
+}
+
+/**
+ * The full order existing hosts are ranked in, for "why this node". The strategy only breaks
+ * ties after the startup queue (`compareReusableHosts`), so naming the strategy alone would
+ * credit it with a choice the queue made.
+ */
+function describeReusableHostOrdering(
+  strategy: CapacityPoolStrategy | null | undefined
+): string | null {
+  const ordering = describePlacementStrategyOrdering(strategy);
+  if (!ordering) return null;
+  return `explicitly requested location first, then shortest startup queue, then default location, then ${ordering}`;
 }
 
 function queueDiagnostic(

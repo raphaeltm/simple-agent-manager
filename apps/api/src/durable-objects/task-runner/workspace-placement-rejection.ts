@@ -32,6 +32,7 @@ import {
 import { getTaskReservation } from './node-selection-shared';
 import { persistPlacementDiagnostics } from './placement-diagnostics';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
+import { relinquishWarmClaim } from './warm-node-claim';
 
 /** Prefix of the placement-diagnostics note this module owns; replaced on each refusal. */
 export const WORKSPACE_PLACEMENT_REFUSED_NOTE_PREFIX = 'Workspace placement refused';
@@ -154,6 +155,11 @@ export async function handleWorkspacePlacementRefused(
     );
   }
 
+  // A warm claim is a promise that the node is empty. Once its queue has grown, give the claim
+  // back so reselection weighs that queue like any other node's instead of re-adopting the claim.
+  if (refusal.backlogConflict && state.stepResults.claimedWarmNodeId === nodeId) {
+    await relinquishWarmClaim(state, rc, nodeId);
+  }
   state.stepResults.nodeId = null;
   state.stepResults.autoProvisioned = false;
   state.stepResults.provisionedVmSize = null;
@@ -213,11 +219,17 @@ async function diagnoseWorkspacePlacementRefusal(
     reasons.push(LIFETIME_ADMISSION_CUTOFF_REASON);
   }
   const startupBacklog = nodeUsage?.startupBacklog ?? 0;
-  if (reasons.length === 0 && maxStartupBacklog !== null && startupBacklog > maxStartupBacklog) {
+  // With a guard applied and no capacity reason, the guard is the only predicate left that can
+  // have refused. The queue may already have drained by this re-read (a build finished in
+  // between), so do not require it to still be longer: counting that as a capacity refusal
+  // would spend the budget that fails the task. Conflicts stay bounded by the conflict retries.
+  if (reasons.length === 0 && maxStartupBacklog !== null) {
+    const detail =
+      startupBacklog > maxStartupBacklog
+        ? `${maxStartupBacklog} when ranked, ${startupBacklog} now`
+        : `${maxStartupBacklog} when ranked, ${startupBacklog} now; it drained before this check`;
     return {
-      reasons: [
-        `${STARTUP_BACKLOG_CONFLICT_REASON} (${maxStartupBacklog} when ranked, ${startupBacklog} now)`,
-      ],
+      reasons: [`${STARTUP_BACKLOG_CONFLICT_REASON} (${detail})`],
       backlogConflict: true,
     };
   }

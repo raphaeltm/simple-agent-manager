@@ -16,6 +16,7 @@ import type {
   TaskRunnerState,
 } from '../../src/durable-objects/task-runner';
 import { STARTUP_BACKLOG_CONFLICT_REASON } from '../../src/durable-objects/task-runner/workspace-placement-rejection';
+import type { Env } from '../../src/env';
 import { DEFAULT_WORKSPACE_PLACEMENT_BACKLOG_CONFLICT_RETRIES } from '../../src/services/provisioning-attempt-limits';
 import {
   seedInstallation,
@@ -244,6 +245,87 @@ describe('startup backlog placement loop', () => {
     expect(await provisionedNodeCount()).toBe(0);
   });
 
+  it('does not count a fairness refusal whose queue drained before the diagnostic re-read', async () => {
+    const nodeA = 'node-loop-drain-a';
+    const nodeB = 'node-loop-drain-b';
+    const taskId = 'task-backlog-loop-drain';
+    await seedReadyCx23(nodeA);
+    await seedReadyCx23(nodeB);
+    await queueStartupOn(nodeA, 'ws-loop-drain-a-queued');
+    await startAtNodeSelection(taskId);
+    const selected = await fireAlarm(taskId);
+    expect(selected.state.stepResults.rankedStartupBacklog).toEqual({ nodeId: nodeB, backlog: 0 });
+
+    // Another run reserves B, so the guarded INSERT is refused. Its build then finishes in the
+    // window between that refusal and the handler's re-read: the re-read sees an empty queue.
+    await queueStartupOn(nodeB, 'ws-loop-drain-b-raced');
+    const fired = await runInDurableObject(taskRunner(taskId), async (instance) => {
+      const realEnv = (instance as unknown as { env: Env }).env;
+      const realDb = realEnv.DATABASE;
+      let drained = false;
+      const db = new Proxy(realDb, {
+        get(target, prop) {
+          if (prop !== 'prepare') {
+            const value = Reflect.get(target, prop, target);
+            return typeof value === 'function' ? value.bind(target) : value;
+          }
+          return (sql: string) => {
+            const statement = target.prepare(sql);
+            // The refusal diagnostic's node read is the midpoint: drain the queue right before it.
+            if (
+              !drained &&
+              sql.includes('last_heartbeat_at AS lastHeartbeatAt') &&
+              sql.includes('FROM nodes WHERE id = ? AND user_id = ?')
+            ) {
+              drained = true;
+              return new Proxy(statement, {
+                get(stmt, key) {
+                  const value = Reflect.get(stmt, key, stmt);
+                  if (key !== 'bind') return typeof value === 'function' ? value.bind(stmt) : value;
+                  return (...binds: unknown[]) => {
+                    const bound = stmt.bind(...binds);
+                    return {
+                      first: async <T>() => {
+                        await realDb
+                          .prepare("UPDATE workspaces SET status = 'running' WHERE id = ?")
+                          .bind('ws-loop-drain-b-raced')
+                          .run();
+                        return bound.first<T>();
+                      },
+                    };
+                  };
+                },
+              });
+            }
+            return statement;
+          };
+        },
+      });
+      (instance as unknown as { env: Env }).env = { ...realEnv, DATABASE: db };
+      try {
+        await instance.alarm();
+      } finally {
+        (instance as unknown as { env: Env }).env = realEnv;
+      }
+      await instance.ctx.storage.deleteAlarm();
+      const state = await instance.ctx.storage.get<TaskRunnerState>('state');
+      if (!state) throw new Error('TaskRunner state missing');
+      return { state, drained };
+    });
+
+    // Liveness: the hook ran, so the re-read really saw the drained queue.
+    expect(fired.drained).toBe(true);
+    expect(fired.state.completed).toBe(false);
+    expect(fired.state.currentStep).toBe('node_selection');
+    expect(fired.state.workspacePlacementRejections ?? 0).toBe(0);
+    expect(fired.state.startupBacklogConflicts).toBe(1);
+    const notes = fired.state.stepResults.placementDiagnostics?.notes ?? [];
+    expect(notes).toEqual(
+      expect.arrayContaining([expect.stringContaining('drained before this check')])
+    );
+    expect(await provisionedNodeCount()).toBe(0);
+  });
+
   it('counts a real capacity refusal against the budget even when the queue also grew', async () => {
     const nodeId = 'node-loop-capacity';
     const otherNodeId = 'node-loop-capacity-other';
@@ -355,6 +437,61 @@ describe('startup backlog placement loop', () => {
       .bind(taskId)
       .first<{ state: string; selectedNodeId: string | null }>();
     expect(admission).toEqual({ state: 'placed', selectedNodeId: nodeId });
+    expect(await provisionedNodeCount()).toBe(0);
+  });
+
+  it('releases a warm claim whose node gained a queued start and places on the occupied node', async () => {
+    const warmNode = 'node-loop-warm';
+    const occupiedNode = 'node-loop-occupied';
+    const taskId = 'task-backlog-loop-warm';
+    await seedReadyCx23(warmNode);
+    await seedReadyCx23(occupiedNode);
+    // The occupied node runs one workspace: no queue, but it is not warm.
+    await seedWorkspace('ws-loop-occupied-running', occupiedNode, USER_ID, {
+      projectId: PROJECT_ID,
+      status: 'running',
+      resolvedReservationJson: JSON.stringify({ ...SMALL_RESERVATION, source: 'platform' }),
+    });
+    const lifecycle = env.NODE_LIFECYCLE.get(env.NODE_LIFECYCLE.idFromName(warmNode));
+    await lifecycle.markIdle(warmNode, USER_ID);
+    expect((await lifecycle.getStatus()).status).toBe('warm');
+    await startAtNodeSelection(taskId);
+
+    // 1. The warm shortcut claims the empty node, guarded at a backlog of 0.
+    let fired = await fireAlarm(taskId);
+    expect(fired.ran).toBe('node_selection');
+    expect(fired.state.stepResults.claimedWarmNodeId).toBe(warmNode);
+    expect(fired.state.stepResults.rankedStartupBacklog).toEqual({ nodeId: warmNode, backlog: 0 });
+
+    // An ordinary placement lands on the warm node before this run's reservation.
+    await queueStartupOn(warmNode, 'ws-loop-warm-raced');
+
+    // 2. Refused as a fairness conflict; the claim is given back in NodeLifecycle and D1.
+    fired = await fireAlarm(taskId);
+    expect(fired.ran).toBe('workspace_creation');
+    expect(fired.state.currentStep).toBe('node_selection');
+    expect(fired.state.workspacePlacementRejections ?? 0).toBe(0);
+    expect(fired.state.startupBacklogConflicts).toBe(1);
+    expect(fired.state.stepResults.claimedWarmNodeId ?? null).toBeNull();
+    expect((await lifecycle.getStatus()).claimedByTask).toBeNull();
+    const claim = await env.DATABASE.prepare(
+      'SELECT claimed_warm_node_id AS claimed FROM tasks WHERE id = ?'
+    )
+      .bind(taskId)
+      .first<{ claimed: string | null }>();
+    expect(claim?.claimed ?? null).toBeNull();
+
+    // 3. Reselection skips the queued warm node and ranks the occupied one (0 against 1).
+    fired = await fireAlarm(taskId);
+    expect(fired.ran).toBe('node_selection');
+    expect(fired.state.stepResults.nodeId).toBe(occupiedNode);
+    expect(fired.state.stepResults.claimedWarmNodeId ?? null).toBeNull();
+
+    // 4. Placement on the occupied node; nothing provisioned.
+    fired = await fireAlarm(taskId);
+    expect(fired.ran).toBe('workspace_creation');
+    expect(fired.state.currentStep).toBe('workspace_dispatch');
+    expect(await workspacesOf(taskId)).toEqual([{ nodeId: occupiedNode, status: 'creating' }]);
     expect(await provisionedNodeCount()).toBe(0);
   });
 });

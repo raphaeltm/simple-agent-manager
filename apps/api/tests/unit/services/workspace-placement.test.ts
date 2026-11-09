@@ -500,6 +500,24 @@ describe('reserveWorkspacePlacement', () => {
     expect(countWorkspace()).toBe(0);
   });
 
+  it.each(['reserve', 'attach'] as const)(
+    "records the node's location, not the requested default, when ranking chose another region (%s)",
+    async (operation) => {
+      const database = createDb();
+      seedNode(); // runs in fsn1
+      const input = { ...reserveInput(capacitySnapshot()), vmLocation: 'nbg1' as const };
+      if (operation === 'attach') seedPlaceholderWorkspace(input.id);
+      const claim =
+        operation === 'attach' ? attachPrecreatedWorkspacePlacement : reserveWorkspacePlacement;
+
+      await expect(claim(database, input, admissionPolicy())).resolves.toBe(true);
+
+      expect(
+        sqlite?.prepare('SELECT vm_location, status FROM workspaces WHERE id = ?').get(input.id)
+      ).toEqual({ vm_location: 'fsn1', status: 'creating' });
+    }
+  );
+
   it('rejects project viewers without workspace execution capability in final admission', async () => {
     const database = createDb();
     const snapshot = capacitySnapshot();
