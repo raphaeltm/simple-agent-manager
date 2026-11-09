@@ -16,11 +16,16 @@ Refresh hardcoded model choices from primary sources, preserving actual agent/ad
 
 ## Checklist and acceptance
 - [x] Derive supported agents and consumers from code; check primary sources for all static catalogs.
-- [ ] Update only justified IDs/names/groups and proxy metadata.
-- [ ] Focused tests cover added IDs, retired exclusions, source names, routing capability and consumer contracts.
-- [ ] Shared lint/typecheck/tests/build; API/web catalog consumer tests.
-- [ ] Independent specialist review (completion, test, constitution, docs); resolve findings before archive.
+- [x] Update only justified IDs/names/groups and proxy metadata.
+- [x] Focused tests cover added IDs, retired exclusions, source names, routing capability and consumer contracts.
+- [x] Shared lint/typecheck/tests/build; API/web catalog consumer tests.
+- [x] Independent specialist review (completion, test, constitution, docs); resolve findings before archive.
 - [ ] Staging deployment and authenticated selector/API verification.
 - [ ] Open PR, CI green, request CodeRabbit and wait, resolve findings, merge, monitor production smoke.
 
 Release completion is recorded in SAM and the PR after production deploy succeeds.
+
+## Local verification
+Shared 51 files / 962 tests passed; shared lint/typecheck/build passed. API catalog service/route: 11 tests passed. Web ModelSelect/profile-picker: 19 tests passed. Main task-only push rejected by required-check branch protection; task record included on output branch rather than bypassing protection.
+
+Independent reviews: task-completion-validator PASS (LOW stale progress evidence addressed); test-engineer PASS (64 focused tests independently rerun); constitution-validator PASS; doc-sync-validator PASS. OpenCode snapshot comparison exactly matches 83 + 32 active ID/name pairs and upstream group names.
