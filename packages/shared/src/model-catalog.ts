@@ -117,6 +117,7 @@ const CODEX_MODELS: ModelGroup[] = [
   modelGroup('GPT-6.1 / 6 (Latest)', [
     { id: 'gpt-6-astra', name: 'GPT-6 Astra' },
     { id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol' },
+    { id: 'gpt-6.1-terra', name: 'GPT-6.1 Terra' },
     { id: 'gpt-6-sol', name: 'GPT-6 Sol' },
     { id: 'gpt-6-luna', name: 'GPT-6 Luna' },
   ]),
@@ -140,7 +141,7 @@ const CODEX_MODELS: ModelGroup[] = [
 // ---------------------------------------------------------------------------
 
 const OPENCODE_MODELS: ModelGroup[] = [
-  modelGroup('OpenCode Zen', [
+  modelGroup('OpenCode', [
     { id: 'opencode/muse-wonder-1.0', name: 'Muse Wonder' },
     { id: 'opencode/flint-40b-free', name: 'Flint 40B Free' },
     { id: 'opencode/beam-free', name: 'Beam Free' },
@@ -187,7 +188,6 @@ const OPENCODE_MODELS: ModelGroup[] = [
     { id: 'opencode/gemini-3.5-flash', name: 'Gemini 3.5 Flash' },
     { id: 'opencode/claude-fable-5', name: 'Claude Fable 5' },
     { id: 'opencode/mimo-v2.6-flash-free', name: 'MiMo-V2.6-Flash Free' },
-    { id: 'opencode/nemotron-3-ultra-free', name: 'Nemotron 3 Ultra Free' },
     { id: 'opencode/muse-spark-1.2', name: 'Muse Spark 1.2' },
     { id: 'opencode/gpt-5.4-mini', name: 'GPT-5.4 Mini' },
     { id: 'opencode/minimax-m3', name: 'MiniMax-M3' },
@@ -221,8 +221,10 @@ const OPENCODE_MODELS: ModelGroup[] = [
     { id: 'opencode/gemini-3.1-pro', name: 'Gemini 3.1 Pro Preview' },
     { id: 'opencode/gpt-5.6-sol', name: 'GPT-5.6 Sol' },
     { id: 'opencode/nemotron-3.5-super-vl-free', name: 'Nemotron 3.5 Super VL Free' },
-    { id: 'opencode/deepseek-v4-flash', name: 'DeepSeek V4 Flash' },
     { id: 'opencode/gpt-6-sol', name: 'GPT-6 Sol' },
+    { id: 'opencode/iceman-free', name: 'Iceman Free' },
+    { id: 'opencode/crouton-alpha-free', name: 'Crouton Alpha Free' },
+    { id: 'opencode/inkling-2-small-free', name: 'Inkling 2 Small Free' },
   ]),
   modelGroup('OpenCode Go', [
     { id: 'opencode-go/iceman-contributor-free', name: 'Iceman Contributor Free' },
@@ -249,12 +251,14 @@ const OPENCODE_MODELS: ModelGroup[] = [
     { id: 'opencode-go/hy3', name: 'Hy3' },
     { id: 'opencode-go/muse-spark-1.2-contributor', name: 'Muse Spark 1.2 Contributor' },
     { id: 'opencode-go/gpt-6-luna', name: 'GPT-6 Luna' },
-    { id: 'opencode-go/deepseek-v4-pro', name: 'DeepSeek V4 Pro (New)' },
+    { id: 'opencode-go/deepseek-v4-pro', name: 'DeepSeek V4 Pro' },
     { id: 'opencode-go/hy4-preview', name: 'Hy4 preview' },
     { id: 'opencode-go/muse-spark-1.3-contributor', name: 'Muse Spark 1.3 Contributor' },
     { id: 'opencode-go/glm-5.3', name: 'GLM-5.3' },
     { id: 'opencode-go/kimi-k2.7-code', name: 'Kimi K2.7 Code' },
     { id: 'opencode-go/qwen3.7-plus', name: 'Qwen3.7 Plus' },
+    { id: 'opencode-go/hy4', name: 'Hy4' },
+    { id: 'opencode-go/crouton-alpha-free', name: 'Crouton Alpha Free' },
   ]),
 ];
 
@@ -262,17 +266,12 @@ const OPENCODE_MODELS: ModelGroup[] = [
 // Mistral Vibe models
 // ---------------------------------------------------------------------------
 
+// Vibe's documented configured model presets; API releases alone do not imply a preset.
 const MISTRAL_MODELS: ModelGroup[] = [
   {
     label: 'Frontier (Latest)',
     models: [
-      { id: 'mistral-medium-latest', name: 'Mistral Medium 3.5', group: 'Frontier (Latest)' },
       { id: 'zai-glm-5-3', name: 'Z.ai GLM 5.3', group: 'Frontier (Latest)' },
-      {
-        id: 'zai-glm-5-2',
-        name: 'Z.ai GLM 5.2 (Deprecated; retires 2026-10-31)',
-        group: 'Frontier (Latest)',
-      },
       { id: 'mistral-large-latest', name: 'Mistral Large 3', group: 'Frontier (Latest)' },
       { id: 'mistral-small-latest', name: 'Mistral Small 4', group: 'Frontier (Latest)' },
     ],
@@ -289,6 +288,9 @@ const MISTRAL_MODELS: ModelGroup[] = [
       { id: 'ministral-3b-latest', name: 'Ministral 3 3B', group: 'Edge / Efficient' },
     ],
   },
+  modelGroup('Legacy (Deprecated)', [
+    { id: 'mistral-medium-latest', name: 'Mistral Medium 3.5 (Deprecated)' },
+  ]),
 ];
 
 // ---------------------------------------------------------------------------
@@ -296,19 +298,20 @@ const MISTRAL_MODELS: ModelGroup[] = [
 // ---------------------------------------------------------------------------
 
 const GEMINI_MODELS: ModelGroup[] = [
-  modelGroupFromTuples('Gemini 3 (Latest)', [
+  modelGroupFromTuples('Gemini 4 (Latest)', [['gemini-4-argon', 'Gemini 4 Argon']]),
+  modelGroupFromTuples('Gemini 3', [
     ['gemini-3.8-flash', 'Gemini 3.8 Flash'],
     ['gemini-3.7-flash', 'Gemini 3.7 Flash (Deprecated; routes to 3.8)'],
     ['gemini-3.6-flash', 'Gemini 3.6 Flash'],
-    ['gemini-3.5-flash', 'Gemini 3.5 Flash'],
+    ['gemini-3.5-flash', 'Gemini 3.5 Flash (Legacy; routes to 3.6)'],
     ['gemini-3.5-flash-lite', 'Gemini 3.5 Flash-Lite'],
     ['gemini-3.1-pro-preview', 'Gemini 3.1 Pro Preview'],
     ['gemini-3-flash-preview', 'Gemini 3 Flash Preview'],
     ['gemini-3.1-flash-lite', 'Gemini 3.1 Flash-Lite'],
   ]),
   modelGroupFromTuples('Gemini 2.5 (Legacy; existing users)', [
-    ['gemini-2.5-pro', 'Gemini 2.5 Pro'],
-    ['gemini-2.5-flash', 'Gemini 2.5 Flash'],
+    ['gemini-2.5-pro', 'Gemini 2.5 Pro (Deprecated; routes to 3.8 on 2026-12-01)'],
+    ['gemini-2.5-flash', 'Gemini 2.5 Flash (Deprecated; routes to 3.5 Flash-Lite on 2026-12-01)'],
     ['gemini-2.5-flash-lite', 'Gemini 2.5 Flash-Lite'],
   ]),
 ];
