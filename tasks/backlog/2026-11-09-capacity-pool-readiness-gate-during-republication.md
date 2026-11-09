@@ -29,3 +29,16 @@ placement readiness semantics needs its own review: the comment at the cursor co
 - [ ] Missing-offering cleanup still waits for complete publication.
 - [ ] Divergence test (republishing pool still places) and convergence control (never-published
       pool does not) through the real resolver, proven discriminating.
+
+## Also: cron per-invocation query budget
+
+The scheduled reconcile (`backfillDefaultCapacityPoolsForExistingCredentials`) ensures up to 25
+users and 25 projects in one invocation. Since the 2026-11-09 fix, each source with a CHANGED
+catalog writes up to `operations.capacityPoolPublishBudgetMs` of batches (1 D1 query per batch plus
+1 cursor write). A catalog change that hits many users at once (for example a GCP price-table
+refresh) could approach the Workers per-invocation query limit. Steady state (unchanged catalogs) is
+unaffected.
+
+- [ ] Give the scheduled pass a per-invocation write budget (queries or wall time) and stop
+      draining further incomplete sources once it is spent; the cursor resumes them next run.
+- [ ] Test with many users whose catalogs changed, counting D1 queries per invocation.

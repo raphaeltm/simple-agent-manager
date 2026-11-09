@@ -5263,6 +5263,26 @@ describe('capacity pool review findings', () => {
       expect(selection?.candidates.length).toBeGreaterThan(0);
     });
 
+    it('publishes the outer probable catalog (~7,200 rows) in one pass with production defaults', async () => {
+      createDb();
+      seedUserCredential({ id: 'user-hetzner' });
+      // gcpCatalog.machineTypes allows up to 100 types; at ~36 zones each that is ~3,600
+      // offerings x 2 workload roles (.claude/rules/81 outer probable limit).
+      const offerings = manyLiveOfferings(3600);
+      const started = Date.now();
+      const result = await ensureDefaultCapacityPoolsForExistingCredentials(poolDb() as never, {
+        userId: 'user-1',
+        includeInstallation: false,
+        env: catalogEnv(createSqliteD1WithBindLimit(sqlite!, 100)),
+        offeringResolver: async () => offerings,
+      });
+      expect(getCount('capacity_pool_candidates')).toBe(7200);
+      expect(result.user?.pool.migrationState).toBe('complete');
+      // Local SQLite is far faster than D1; this bounds the publisher's own overhead, well
+      // inside the 20 s default budget.
+      expect(Date.now() - started).toBeLessThan(20_000);
+    }, 60_000);
+
     it('the operations.capacityPoolPublishBudgetMs setting controls the pass budget', async () => {
       createDb();
       seedUserCredential({ id: 'user-hetzner' });

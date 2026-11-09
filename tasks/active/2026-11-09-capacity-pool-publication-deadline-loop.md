@@ -52,32 +52,50 @@ deadline-bounded loop (rule 81 requirement 2).
 
 ## Implementation Checklist
 
-- [ ] Add admin setting `capacityPools.candidatePublishBudgetMs` (registry, default + range).
-- [ ] `ensureCandidatesForSource`: publish successive batches until the catalog is complete, a
-      fenced write fails (a newer publisher owns the rest), or the per-pass budget elapses. Persist
+- [x] Add admin setting `operations.capacityPoolPublishBudgetMs` (registry, default 20,000 ms,
+      range 0–120,000). Named in the `operations.*` family like the other wall budgets.
+- [x] `ensureCandidatesForSource`: publish successive batches until the catalog is complete, a
+      fenced write fails (a newer publisher owns the rest), or the pass deadline passes. Persist
       the cursor after each batch so a mid-pass failure resumes.
-- [ ] Keep already-complete, unchanged catalogs at one batch per pass (timestamp round-robin is
+- [x] Keep already-complete, unchanged catalogs at one batch per pass (timestamp round-robin is
       unchanged; no extra writes for steady-state refreshes).
-- [ ] `ensureDefaultPoolForCredentialSeeds`: resolve the budget once per pass (option override, then
-      admin setting when `env` is present, then default); share one deadline across sources.
-- [ ] Budget `0` keeps the legacy one-batch-per-pass behavior; update existing multi-pass resumption
-      tests to pass it explicitly so they keep testing resumption.
-- [ ] Tests: a catalog larger than every count in the path completes in ONE pass through the real
-      entry point (`ensureDefaultCapacityPoolsForExistingCredentials`) on a real SQL engine, and
-      the pool reads `configured-ready` with placement candidates afterwards.
-- [ ] Tests: deadline expiry leaves a resumable cursor and the next pass completes; fenced failure
-      stops the loop without counting rejected rows.
-- [ ] Prove the main test discriminating against the pre-fix single-batch behavior.
-- [ ] Docs: admin settings guide entry if settings are documented there.
+- [x] `ensureDefaultPoolForCredentialSeeds`: resolve the budget once per pass (option override,
+      then admin setting when `env` is present, then default). The deadline is per source and is
+      set when that source starts publishing, so a slow catalog fetch (GCP prices can take up to
+      `gcpCatalog.priceRefreshBudgetMs`) cannot spend the write budget.
+- [x] Budget `0` keeps the legacy one-batch-per-pass behavior; existing multi-pass resumption
+      tests pass it explicitly so they keep testing cross-pass resumption.
+- [x] Tests: a 1,000-row catalog completes in ONE pass through
+      `ensureDefaultCapacityPoolsForExistingCredentials` on a real SQL engine, and
+      `resolveTaskStartCapacityPoolSelection` returns `configured-ready` with candidates.
+- [x] Tests: deadline expiry leaves a resumable cursor; a batch failing mid-pass leaves the cursor
+      at the last complete batch; a fenced write stops the loop; cleanup of offerings that left the
+      catalog runs after a multi-batch pass; ~7,200-row outer limit completes in one pass.
+- [x] Proved every new test discriminating (see below).
+- [x] Docs: `guides/admin-settings.md` and `guides/compute-pools.md`.
 
-## Acceptance Criteria
+## Discrimination evidence (surgical reverts, each restored)
 
-- [ ] A 1,000+ row catalog publishes completely in a single refresh with default settings.
-- [ ] A pool whose catalog changed is `configured-ready` after one refresh (not N refreshes).
-- [ ] Budget exhaustion persists progress and the next pass resumes (no restart at 0).
-- [ ] Steady-state refresh of an unchanged, complete catalog writes no more than before.
-- [ ] Production: after deploy, the affected user pool returns to `migration_state='complete'`
-      on its next refresh and VM placement resumes.
+| Revert | Tests that went red |
+| --- | --- |
+| A: deadline ignored (pre-fix, one batch per pass) | incident 1,000-row test; one-pass; deadline/resume; steady-state |
+| B: no break on fenced write | fence test only |
+| C: complete catalogs also loop | steady-state test only |
+| D: admin setting ignored | setting test only |
+| E: no per-batch cursor write | mid-loop failure test only |
+
+## Review outcomes
+
+- constitution-validator: PASS (LOW only).
+- test-engineer: HIGH (per-batch cursor write untested) fixed with the mid-loop failure test
+  (revert E); MEDIUM (clock coupling) fixed by driving the deadline from batch count.
+- task-completion-validator: WARN; task text corrected (setting name, per-source deadline),
+  unrelated formatting churn reverted, discrimination evidence recorded here.
+- cloudflare-specialist: no CRITICAL/HIGH. Kept one 20 s budget for request paths: a shorter
+  PATCH budget would leave a pool unplaceable after an edit, which is the bug being fixed;
+  realistic catalogs (1,000 rows) finish in ~5 batches. Cron per-invocation query budget for a
+  bulk catalog change across many users is deferred to the backlog task below (steady state is
+  unchanged; the sweep is isolated and resumable).
 
 ## Throughput at the outer probable limit (rule 81)
 
