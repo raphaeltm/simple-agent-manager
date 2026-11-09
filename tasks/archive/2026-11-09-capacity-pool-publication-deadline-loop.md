@@ -76,13 +76,20 @@ deadline-bounded loop (rule 81 requirement 2).
 
 ## Discrimination evidence (surgical reverts, each restored)
 
-| Revert | Tests that went red |
-| --- | --- |
+| Revert                                            | Tests that went red                                              |
+| ------------------------------------------------- | ---------------------------------------------------------------- |
 | A: deadline ignored (pre-fix, one batch per pass) | incident 1,000-row test; one-pass; deadline/resume; steady-state |
-| B: no break on fenced write | fence test only |
-| C: complete catalogs also loop | steady-state test only |
-| D: admin setting ignored | setting test only |
-| E: no per-batch cursor write | mid-loop failure test only |
+| B: no break on fenced write                       | fence test only                                                  |
+| C: complete catalogs also loop                    | steady-state test only                                           |
+| D: admin setting ignored                          | setting test only                                                |
+| E: no per-batch cursor write                      | mid-loop failure test only                                       |
+
+## Staging verification
+
+Waived by Raphaël on 2026-11-09: this session had no staging login token
+(`SAM_PLAYWRIGHT_PRIMARY_USER`), and a staging D1 write to force a republication was offered and
+declined in favour of verifying directly against the affected production pool after deploy. The
+branch was still deployed to staging to prove it builds and deploys.
 
 ## Review outcomes
 
