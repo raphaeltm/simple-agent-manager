@@ -33,8 +33,6 @@ export const DEPLOYMENT_PUBLISH_SETTINGS = [
   integerDefinition(
     'deployments.buildContextMaxBytes',
     DEFAULT_BUILD_CONTEXT_MAX_BYTES,
-    DEFAULT_BUILD_CONTEXT_CLEANUP_BUDGET_MS,
-    DEFAULT_BUILD_CONTEXT_CLEANUP_PAGE_SIZE,
     'Operations',
     'Maximum raw tar and compressed context bytes per publish job.',
     { min: 1024, max: 5 * 1024 * 1024 * 1024 }

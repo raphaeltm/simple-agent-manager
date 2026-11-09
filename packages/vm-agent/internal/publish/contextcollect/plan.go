@@ -193,7 +193,12 @@ func (p *collectionPlan) addContext(path, dockerfile string, max int64) error {
 		}
 	}
 	c := buildContext{path: canonical}
-	ignores := []string{filepath.Join(path, ".dockerignore")}
+	// Named additional contexts are passed through conservatively: BuildKit's
+	// named-context filtering differs across frontends, so never drop their files.
+	ignores := []string{}
+	if dockerfile != "" {
+		ignores = append(ignores, filepath.Join(path, ".dockerignore"))
+	}
 	if dockerfile != "" {
 		if !filepath.IsAbs(dockerfile) {
 			dockerfile = filepath.Join(path, dockerfile)

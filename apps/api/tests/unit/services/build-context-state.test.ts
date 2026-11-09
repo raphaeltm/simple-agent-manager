@@ -20,7 +20,7 @@ const owner = {
 const descriptor = { sizeBytes: 100, sha256: 'a'.repeat(64) };
 beforeEach(() => {
   sqlite = new Database(':memory:');
-  createSchemaTables(sqlite, [schema.deploymentPublishJobs]);
+  createSchemaTables(sqlite, [schema.deploymentPublishJobs, schema.deploymentPublishJobEvents]);
   db = drizzle(createSqliteD1(sqlite), { schema });
   sqlite
     .prepare(

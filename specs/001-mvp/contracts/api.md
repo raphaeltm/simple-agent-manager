@@ -824,3 +824,14 @@ must match the saved options exactly, and a request without options accepts a ty
 ### Resume a blocked provider-limit task
 
 `POST /api/projects/:projectId/tasks/:taskId/provider-limit/resume` requires an approved, authenticated task owner with project `task:write`. No body is required. Returns `202 { status: "waking", taskId }` after accepting the current credential selection and starting recovery from the retained sleeping snapshot (or nudging a first-dispatch admission wait). Returns `403` for another member and `409` when the wait is no longer blocked, sleep is incomplete, or a snapshot cannot be restored. Repeated approval is fenced against the current wait; retained WIP is never discarded.
+
+## Application build-context callbacks
+
+These internal callbacks use a live workspace callback JWT, not a browser session:
+
+- `POST /api/projects/:id/deployment-publish-jobs/:jobId/context/init`
+- `POST /api/projects/:id/deployment-publish-jobs/:jobId/context/complete`
+
+Both accept `{ attempt, sizeBytes, sha256, durationMs? }`. Identity, environment and object key come from the authorized job; the job must use `executor=cloudflare`. Init conditionally changes `queued` to `collecting`, records the descriptor, and returns a short-lived presigned R2 PUT. Complete verifies HEAD size plus recorded digest metadata and conditionally changes `collecting` to `context_ready`, setting `queued_at`. Scope/attempt/descriptor mismatch or terminal state returns 409; invalid/missing objects return 400. Successful transitions and collection timing are recorded atomically in job history. SHA metadata is a source assertion; the future builder must verify downloaded bytes. Context completion does not dispatch a build.
+
+The node-management endpoint `POST /workspaces/:workspaceId/mcp/build-and-publish-jobs/:jobId/collect` collects, spools, uploads, and completes one context from the devcontainer volume (VM) or `/workspaces` (Instant). `attempt` is required; optional `workingDir`, `buildInterpolationEnv`, `secretInterpolationKeys`, `maxBytes`, and `collectTimeoutMs` are supplied by the control plane. Missing legacy routes return an explicit unsupported capability result to callers. Existing node build/start routes are unchanged.

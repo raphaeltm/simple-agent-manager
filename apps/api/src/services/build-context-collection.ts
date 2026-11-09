@@ -50,7 +50,8 @@ export async function collectBuildContextOnSource(
       }),
       signal: AbortSignal.timeout(Number(deadlineMs)),
     },
-    Number(deadlineMs)
+    Number(deadlineMs),
+    { noWakeContainer: true, recoverContainerOnTimeout: false }
   );
   if (response.status === 404)
     return {

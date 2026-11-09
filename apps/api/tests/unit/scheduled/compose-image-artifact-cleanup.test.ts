@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('../../../src/scheduled/build-context-cleanup', () => ({
+  runBuildContextCleanup: async () => ({ scanned: 0, deleted: 0, bytes: 0 }),
+}));
+
 vi.mock('../../../src/lib/logger', () => ({
   createModuleLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
@@ -36,7 +40,10 @@ function makeDb(rows: ReleaseRow[]): D1Database {
   } as unknown as D1Database;
 }
 
-function makeR2(objects: ListedObject[], options: { deleteErrorFor?: string; listError?: boolean } = {}) {
+function makeR2(
+  objects: ListedObject[],
+  options: { deleteErrorFor?: string; listError?: boolean } = {}
+) {
   const deleted: string[] = [];
   const r2 = {
     list: vi.fn(async (listOptions: { prefix?: string; cursor?: string; limit?: number }) => {
@@ -65,14 +72,16 @@ function makeKv(lastRun: string | null = null) {
   };
 }
 
-function makeEnv(options: {
-  rows?: ReleaseRow[];
-  objects?: ListedObject[];
-  kvLastRun?: string | null;
-  overrides?: Partial<Env>;
-  deleteErrorFor?: string;
-  listError?: boolean;
-} = {}): Env & { R2: ReturnType<typeof makeR2>; KV: ReturnType<typeof makeKv> } {
+function makeEnv(
+  options: {
+    rows?: ReleaseRow[];
+    objects?: ListedObject[];
+    kvLastRun?: string | null;
+    overrides?: Partial<Env>;
+    deleteErrorFor?: string;
+    listError?: boolean;
+  } = {}
+): Env & { R2: ReturnType<typeof makeR2>; KV: ReturnType<typeof makeKv> } {
   const r2 = makeR2(options.objects ?? [], {
     deleteErrorFor: options.deleteErrorFor,
     listError: options.listError,

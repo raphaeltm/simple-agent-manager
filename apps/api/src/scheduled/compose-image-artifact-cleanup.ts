@@ -1,3 +1,4 @@
+import { runBuildContextCleanup } from './build-context-cleanup';
 /**
  * Compose image artifact cleanup.
  *
@@ -266,6 +267,17 @@ export async function runScheduledComposeImageArtifactCleanup(
   }
 
   const result = await runComposeImageArtifactCleanup(env, now);
+  try {
+    const contexts = await runBuildContextCleanup(env, now);
+    result.scannedObjects += contexts.scanned;
+    result.deletedObjects += contexts.deleted;
+    result.deletedBytes += contexts.bytes;
+  } catch (error) {
+    result.errors += 1;
+    log.error('context_cleanup_failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 
   if (!result.skipped || result.skipReason === 'reference-collection-failed') {
     try {

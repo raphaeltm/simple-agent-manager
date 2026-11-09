@@ -15,7 +15,7 @@ export async function createBuildContextUpload(
 ) {
   const r2Key = buildContextKey(owner);
   const uploadUrl = await getSignedUrl(
-    getS3Client(env),
+    getS3Client(env, 'WHEN_REQUIRED'),
     new PutObjectCommand({
       Bucket: env.R2_BUCKET_NAME,
       Key: r2Key,
