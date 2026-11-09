@@ -1,3 +1,4 @@
+import { resolveResourceReservation } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,6 +9,7 @@ import type { McpTokenData } from '../../../src/routes/mcp/_helpers';
 import { getRuntimeValidationError } from '../../../src/routes/mcp/dispatch-instant';
 import { parseDispatchTaskParams } from '../../../src/routes/mcp/dispatch-tool-params';
 import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../../src/services/default-capacity-pools';
+import { readPersistedTaskResourcePlan } from '../../../src/services/resource-requirements-input';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 import { seedCloudCredential, seedProjectWithMember, seedUser } from './capacity-pool-test-seeds';
 
@@ -459,6 +461,24 @@ describe('MCP dispatch_task resource requirements input', () => {
         expect(plan.intent.task).toEqual(
           explicitSizing ? { minVcpu: 0.2, minMemoryGb: 0.5 } : null
         );
+        const replay = readPersistedTaskResourcePlan({
+          taskId: 'replayed-task',
+          projectId: 'project-1',
+          userId: 'user-1',
+          resourceRequirementPlanJson: taskRow.resource_requirement_plan_json,
+        });
+        const replayed = resolveResourceReservation(
+          replay.layers,
+          {},
+          {
+            legacyVmSizes: { 'agent-profile': 'medium' },
+          }
+        );
+        expect(replayed).toMatchObject({
+          cpuMillis: reservation.cpuMillis,
+          memoryMb: reservation.memoryMb,
+          diskMb: reservation.diskMb,
+        });
         expect(mocks.startTaskRunnerDO).toHaveBeenCalledWith(
           env,
           expect.objectContaining({

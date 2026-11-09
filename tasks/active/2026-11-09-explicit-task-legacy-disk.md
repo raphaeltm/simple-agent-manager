@@ -11,7 +11,7 @@ Shared direct callers: placement-resolver, workspace-admission-sql, task-runner/
 - [x] Add discriminating shared resolver and real MCP dispatch persistence tests: explicit CPU/RAM over medium legacy profile, plus omitted/empty requirements legacy control.
 - [x] Suppress lower legacy compatibility contributions after higher modern CPU/RAM sizing; preserve same-layer legacy semantics and explicit lower fields, false/zero overrides.
 - [x] Resolve platform disk fallback so an unrequested disk does not force a larger offering; preserve configurable override authority.
-- [ ] Preserve intent/provenance through persisted plan roundtrip; investigate old provenance-only rows.
+- [x] Preserve intent/provenance through persisted plan roundtrip; investigate old provenance-only rows.
 - [x] Update affected public resource documentation.
 - [ ] Run shared full suite and API targeted+quality checks; let early draft CI run full suites.
 - [ ] Complete local specialist/completion reviews.
@@ -25,3 +25,5 @@ Task explicit CPU/RAM, absent disk over medium profile uses disk no larger than 
 References: rule73 optional-field absence; rule62 real trigger; compute-pools resource guide.
 
 Evidence: coordinator and own full SAM workspace+cache samples≈4.4GB each;15GB default gives≈3x growth margin and fits20GB catalog offerings. No host disk reserve is subtracted today (evaluator+atomic SQL). Telemetry summaries contain IO but not disk space. Legacy-only medium remains40GB. Platform CPU2/RAM4 unchanged; memory+host-reserve limitation is outside this bug.
+
+Local review found historical provenance-only replay promoted compatibility fields to explicit. Reader now reconstructs modern fields separately and recovers legacy size/source from compatibility metadata when missing; stored historical reservation remains unchanged for no-op recovery. Tests cover mixed historical requests, genuinely explicit disk, legacy-only replay and a new task override.

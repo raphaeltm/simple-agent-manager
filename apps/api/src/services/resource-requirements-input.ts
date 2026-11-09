@@ -266,11 +266,16 @@ export function readPersistedTaskResourcePlan(
   const legacyJson = parseLegacyResourceRequirementsJson(input, options, legacyJsonSource);
   const resolvedReservation = parseStoredResolvedReservationJson(input.resolvedReservationJson);
   if (resolvedReservation?.fieldProvenance) {
+    // Older rows have no intent plan. Recover the legacy bundle separately,
+    // rather than promoting adapter output into explicitly authored fields.
+    const legacyField = Object.values(resolvedReservation.fieldProvenance).find(
+      (field) => field?.compatibility !== undefined
+    );
     return {
       layers: layersFromReservationProvenance(resolvedReservation),
       resolvedReservation,
-      requestedVmSize,
-      requestedVmSizeSource,
+      requestedVmSize: requestedVmSize ?? legacyField?.compatibility?.legacyVmSize ?? null,
+      requestedVmSizeSource: requestedVmSizeSource ?? legacyField?.source ?? null,
       source: 'reservation-provenance',
     };
   }
@@ -551,7 +556,7 @@ function layersFromReservationProvenance(
 
   for (const field of RESOURCE_REQUIREMENT_FIELDS) {
     const fieldProvenance = provenance[field];
-    if (!fieldProvenance) continue;
+    if (!fieldProvenance || fieldProvenance.compatibility) continue;
     const layer = SOURCE_TO_RESOURCE_LAYER[fieldProvenance.source];
     if (!layer) continue;
     const nextLayer = (layers[layer] ?? {}) as ResourceRequirements;

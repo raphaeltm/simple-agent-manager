@@ -123,7 +123,7 @@ function expectSafePlacementSettings(body: Record<string, any>) {
       platformDefaults: {
         minVcpu: 2,
         minMemoryGb: 4,
-        minDiskGb: 40,
+        minDiskGb: 15,
         exclusiveNode: false,
       },
     },
