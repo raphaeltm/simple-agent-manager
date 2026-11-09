@@ -116,6 +116,34 @@ async function withinEmailBudget(env: Env, email: string): Promise<boolean> {
   return result.allowed;
 }
 
+/**
+ * Counts one code guess against the address's hourly budget. Throws `RateLimitError` once it
+ * is spent.
+ *
+ * BetterAuth allows 3 guesses per stored code, but every code request stores a fresh code, even
+ * when `deliverSignInCode` mails nothing. Per-IP limits alone would let guesses spread across
+ * many IP addresses add up against one account, so guesses are also capped per address. The cap
+ * applies to every address alike, so a 429 here says nothing about whether an account exists.
+ */
+export async function assertCodeAttemptBudget(env: Env, email: string): Promise<void> {
+  const { signInCodeAttemptsPerEmailPerHour } = await getAgentEmailLimits(env);
+  const key = createRateLimitKey(
+    'email-sign-in-attempt',
+    await sha256Hex(email.trim().toLowerCase()),
+    getCurrentWindowStart(DEFAULT_WINDOW_SECONDS)
+  );
+  const result = await checkRateLimit(
+    env.KV,
+    key,
+    signInCodeAttemptsPerEmailPerHour,
+    DEFAULT_WINDOW_SECONDS
+  );
+  if (!result.allowed) {
+    log.warn('email_sign_in.attempts_rate_limited');
+    throw new RateLimitError(Math.max(1, result.resetAt - Math.floor(Date.now() / 1000)));
+  }
+}
+
 export function signInCodeEmail(baseDomain: string, code: string) {
   const appUrl = `https://app.${baseDomain}`;
   return {

@@ -104,12 +104,16 @@ describe('email sign-in through better-auth (vertical slice)', () => {
     );
   }
 
-  async function signIn(email: string, otp: string): Promise<Response> {
+  async function signIn(email: string, otp: string, ip?: string): Promise<Response> {
     const response = await app.request(
       `${API_ORIGIN}/api/auth/sign-in/email-otp`,
       {
         method: 'POST',
-        headers: { 'content-type': 'application/json', origin: APP_ORIGIN },
+        headers: {
+          'content-type': 'application/json',
+          origin: APP_ORIGIN,
+          ...(ip ? { 'CF-Connecting-IP': ip } : {}),
+        },
         body: JSON.stringify({ email, otp }),
       },
       env
@@ -308,6 +312,23 @@ describe('email sign-in through better-auth (vertical slice)', () => {
     }
     expect(statuses.slice(0, 20).every((status) => status === 400)).toBe(true);
     expect(statuses[20]).toBe(429);
+  });
+
+  it('caps guesses for one address across many IP addresses', async () => {
+    // Every code request stores a fresh code even when nothing is mailed, so per-IP limits
+    // alone would let guesses from many IPs add up against one account.
+    await requestCode(OWNER);
+    const wrong = codeFrom(mail.sent[0]) === '000000' ? '111111' : '000000';
+    const statuses: number[] = [];
+    for (let attempt = 0; attempt < 11; attempt += 1) {
+      await requestCode(OWNER, `198.51.100.${attempt}`);
+      statuses.push((await signIn(OWNER, wrong, `192.0.2.${attempt}`)).status);
+    }
+    expect(statuses.slice(0, 10).every((status) => status !== 429)).toBe(true);
+    expect(statuses[10]).toBe(429);
+    // Control: the cap is per address, so another address from a fresh IP is still checked.
+    expect((await signIn('someone@example.com', wrong, '192.0.2.200')).status).toBe(400);
+    expect(realUsers()).toHaveLength(0);
   });
 
   it('rejects a wrong code', async () => {

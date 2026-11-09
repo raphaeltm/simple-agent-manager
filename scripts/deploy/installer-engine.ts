@@ -151,7 +151,15 @@ export async function runInstallerEngine(
     } catch (error) {
       if (!(error instanceof EngineCommandFailure)) throw error;
       // Logged as its own optional step so the install log shows why email is off.
-      options.emit({ phase: 'agent-email', status: 'failed', operation: 'configure-agent-email' });
+      // prepareInstallationEmail never runs for legacy-ci, so the tail goes to the owner only.
+      options.emit({
+        phase: 'agent-email',
+        status: 'failed',
+        operation: 'configure-agent-email',
+        exitCode: error.exitCode,
+        signal: error.signal,
+        tail: error.tail,
+      });
     }
   };
   const phase = async (name: string, action: () => Promise<unknown>) => {

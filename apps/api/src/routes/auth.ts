@@ -7,6 +7,7 @@ import { log, serializeError } from '../lib/logger';
 import { expectJsonRecord, maybeJsonRecord } from '../lib/runtime-validation';
 import { errors } from '../middleware/error';
 import {
+  assertCodeAttemptBudget,
   EMAIL_CODE_SIGN_IN_PATH,
   emailCodeRedemptionAllowed,
   isClosedEmailOtpPath,
@@ -56,7 +57,7 @@ authRoutes.get('/me', async (c) => {
 authRoutes.get('/get-session', (c) => readAuthSession(c.env, c.req.raw));
 
 // Email sign-in codes cost an email each, and each redemption is a guess: limit both per IP
-// before BetterAuth sees them.
+// before BetterAuth sees them, and guesses also per address.
 authRoutes.post(SEND_CODE_PATH, rateLimitSignInCodes('email-sign-in-ip'));
 authRoutes.post(EMAIL_CODE_SIGN_IN_PATH, rateLimitSignInCodes('email-sign-in-redeem-ip'));
 authRoutes.post(EMAIL_CODE_SIGN_IN_PATH, async (c, next) => {
@@ -65,6 +66,8 @@ authRoutes.post(EMAIL_CODE_SIGN_IN_PATH, async (c, next) => {
     .json()
     .catch(() => null);
   const email = maybeJsonRecord(body)?.email;
+  // Guesses for one address are capped across all IPs, for every address alike.
+  if (typeof email === 'string') await assertCodeAttemptBudget(c.env, email);
   // Same answer as a wrong code, so this reveals nothing the code check would not.
   if (typeof email !== 'string' || !(await emailCodeRedemptionAllowed(c.env, email))) {
     return c.json({ code: 'INVALID_OTP', message: 'Invalid OTP' }, 400);

@@ -106,7 +106,7 @@ Where the deploy prepared Email Sending, BetterAuth's email OTP plugin also sign
 2. User enters the code. It is stored hashed, expires after 5 minutes and allows 3 attempts.
 3. BetterAuth marks the email verified and creates the session, running the same user and session hooks as OAuth sign-in.
 
-Code requests and code redemptions are limited per IP address, and requests per recipient (`agentEmail.signInCodesPerIpPerHour`, `agentEmail.signInCodesPerEmailPerHour`). The plugin's password-reset, verification and email-change routes return 404.
+Code requests and code redemptions are limited per IP address. Requests and redemption guesses are also limited per recipient, across all IP addresses (`agentEmail.signInCodesPerIpPerHour`, `agentEmail.signInCodesPerEmailPerHour`, `agentEmail.signInCodeAttemptsPerEmailPerHour`). Each code also allows only 3 guesses. The plugin's password-reset, verification and email-change routes return 404.
 
 ### Token Types
 
