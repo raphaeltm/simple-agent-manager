@@ -400,65 +400,77 @@ func TestContainerBatchScanRejectsIdentityReplacement(t *testing.T) {
 	for _, phase := range []string{"snapshot", "supervisor"} {
 		t.Run(phase, func(t *testing.T) {
 			installProcessDockerTransport(t)
-			root := t.TempDir()
-			proc := filepath.Join(root, "4242")
-			if err := os.Mkdir(proc, 0755); err != nil {
-				t.Fatal(err)
-			}
-			stat, err := os.ReadFile("/proc/self/stat")
-			if err != nil {
-				t.Fatal(err)
-			}
-			fields := strings.Fields(string(stat[strings.LastIndex(string(stat), ") ")+2:]))
-			fields[1], fields[3], fields[19] = "1", "4242", "111"
-			oldStat := "4242 (fixture) " + strings.Join(fields, " ") + "\n"
-			fields[19] = "999"
-			newStat := "4242 (fixture) " + strings.Join(fields, " ") + "\n"
-			if err := os.WriteFile(filepath.Join(proc, "stat"), []byte(oldStat), 0600); err != nil {
-				t.Fatal(err)
-			}
-			replacement := filepath.Join(root, "replacement")
-			if err := os.WriteFile(replacement, []byte(newStat), 0600); err != nil {
-				t.Fatal(err)
-			}
-			// Deterministically replace the marked process identity during the batch
-			// marker query, after its proof was obtained but before signaling.
-			toolDir := t.TempDir()
-			grep := "#!/bin/sh\ncp '" + replacement + "' '" + filepath.Join(proc, "stat") + "'\nprintf '%s\\n' '" + filepath.Join(proc, "environ") + "'\n"
-			if err := os.WriteFile(filepath.Join(toolDir, "grep"), []byte(grep), 0755); err != nil {
-				t.Fatal(err)
-			}
-			t.Setenv("PATH", toolDir+":"+os.Getenv("PATH"))
-			if phase == "snapshot" {
-				t.Setenv("SAM_TEST_DOCKER_PROC_ROOT", root)
-				p := &AgentProcess{containerID: "test-container", dockerExecutable: testDockerExecutable(t), containerOwner: "owner", containerMarkerScan: true}
-				if err := p.captureContainerProcesses(); err != nil {
-					t.Fatal(err)
-				}
-				if p.containerTargets[4242] != "111" {
-					t.Fatalf("marker attached to replacement identity: %v", p.containerTargets)
-				}
-			} else {
-				begin := strings.Index(containerSessionLaunchScript, "signal_identity() {")
-				if begin < 0 {
-					begin = strings.Index(containerSessionLaunchScript, "signal_owned() {")
-				}
-				end := strings.Index(containerSessionLaunchScript, "\ncleanup() {")
-				helpers := strings.ReplaceAll(containerSessionLaunchScript[begin:end], "/proc/", root+"/")
-				// Replace only the signal boundary, so a regression reports a signal
-				// instead of touching a real process with a coincidentally matching PID.
-				script := "private_session=false; marker_scan=true; ancestor_pids=' '; SAM_ACP_PROCESS_OWNER=owner; kill() { printf 'UNEXPECTED SIGNAL\\n'; };\n" + helpers + "\nsignal_owned KILL\n"
-				output, err := exec.Command("sh", "-c", script).CombinedOutput()
-				if err != nil || len(output) != 0 {
-					t.Fatalf("replacement identity was signalled: %q %v", output, err)
-				}
-			}
-			changed, err := os.ReadFile(filepath.Join(proc, "stat"))
+			root, newStat := installReplacementIdentityFixture(t)
+			assertContainerReplacementRejected(t, phase, root)
+			changed, err := os.ReadFile(filepath.Join(root, "4242", "stat"))
 			if err != nil || string(changed) != newStat {
 				t.Fatal("identity replacement fixture did not run")
 			}
 		})
 	}
+}
+
+func installReplacementIdentityFixture(t *testing.T) (string, string) {
+	t.Helper()
+	root := t.TempDir()
+	proc := filepath.Join(root, "4242")
+	if err := os.Mkdir(proc, 0755); err != nil {
+		t.Fatal(err)
+	}
+	stat, err := os.ReadFile("/proc/self/stat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fields := strings.Fields(string(stat[strings.LastIndex(string(stat), ") ")+2:]))
+	fields[1], fields[3], fields[19] = "1", "4242", "111"
+	oldStat := "4242 (fixture) " + strings.Join(fields, " ") + "\n"
+	fields[19] = "999"
+	newStat := "4242 (fixture) " + strings.Join(fields, " ") + "\n"
+	if err := os.WriteFile(filepath.Join(proc, "stat"), []byte(oldStat), 0600); err != nil {
+		t.Fatal(err)
+	}
+	replacement := filepath.Join(root, "replacement")
+	if err := os.WriteFile(replacement, []byte(newStat), 0600); err != nil {
+		t.Fatal(err)
+	}
+	// Deterministically replace the marked process identity during the batch
+	// marker query, after its proof was obtained but before signaling.
+	toolDir := t.TempDir()
+	grep := "#!/bin/sh\ncp '" + replacement + "' '" + filepath.Join(proc, "stat") + "'\nprintf '%s\\n' '" + filepath.Join(proc, "environ") + "'\n"
+	if err := os.WriteFile(filepath.Join(toolDir, "grep"), []byte(grep), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", toolDir+":"+os.Getenv("PATH"))
+	return root, newStat
+}
+
+func assertContainerReplacementRejected(t *testing.T, phase, root string) {
+	t.Helper()
+	if phase == "snapshot" {
+		t.Setenv("SAM_TEST_DOCKER_PROC_ROOT", root)
+		p := &AgentProcess{containerID: "test-container", dockerExecutable: testDockerExecutable(t), containerOwner: "owner", containerMarkerScan: true}
+		if err := p.captureContainerProcesses(); err != nil {
+			t.Fatal(err)
+		}
+		if p.containerTargets[4242] != "111" {
+			t.Fatalf("marker attached to replacement identity: %v", p.containerTargets)
+		}
+	} else {
+		begin := strings.Index(containerSessionLaunchScript, "signal_identity() {")
+		if begin < 0 {
+			begin = strings.Index(containerSessionLaunchScript, "signal_owned() {")
+		}
+		end := strings.Index(containerSessionLaunchScript, "\ncleanup() {")
+		helpers := strings.ReplaceAll(containerSessionLaunchScript[begin:end], "/proc/", root+"/")
+		// Replace only the signal boundary, so a regression reports a signal
+		// instead of touching a real process with a coincidentally matching PID.
+		script := "private_session=false; marker_scan=true; ancestor_pids=' '; SAM_ACP_PROCESS_OWNER=owner; kill() { printf 'UNEXPECTED SIGNAL\\n'; };\n" + helpers + "\nsignal_owned KILL\n"
+		output, err := exec.Command("sh", "-c", script).CombinedOutput()
+		if err != nil || len(output) != 0 {
+			t.Fatalf("replacement identity was signalled: %q %v", output, err)
+		}
+	}
+
 }
 
 func TestContainerCapabilityProbeUsesLaunchPath(t *testing.T) {

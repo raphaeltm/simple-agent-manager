@@ -350,13 +350,17 @@ func parseContainerProcessSnapshot(output string) map[int]containerProcessIdenti
 		}
 		processes[pid] = containerProcessIdentity{pid: pid, parent: parent, start: fields[2], owned: fields[3] == "1", session: session}
 	}
+	markOwnedContainerProcesses(processes, owned)
+	return processes
+}
+
+func markOwnedContainerProcesses(processes map[int]containerProcessIdentity, owned map[int]bool) {
 	for pid := range owned {
 		if proc, ok := processes[pid]; ok {
 			proc.owned = true
 			processes[pid] = proc
 		}
 	}
-	return processes
 }
 
 func (p *AgentProcess) retainOwnedContainerProcesses(processes map[int]containerProcessIdentity) {
