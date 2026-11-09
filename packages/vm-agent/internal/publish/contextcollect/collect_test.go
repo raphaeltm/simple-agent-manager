@@ -179,3 +179,123 @@ func TestByteAndDeadlineBounds(t *testing.T) {
 		t.Fatal("deadline ignored")
 	}
 }
+func TestAdditionalContextsDockerfileAndTarNames(t *testing.T) {
+	root := fixture(t, map[string]string{"compose.yaml": "services:\n  web:\n    build:\n      context: ./app\n      dockerfile: ../docker/Webfile\n      additional_contexts:\n        shared: ./shared\n", "app/source": "app", "docker/Webfile": "FROM scratch\n", "shared/source": "shared"})
+	files := bundle(t, root)
+	for _, name := range []string{"app/source", "docker/Webfile", "shared/source"} {
+		if _, ok := files[name]; !ok {
+			t.Fatal("missing", name)
+		}
+	}
+	for name := range files {
+		if filepath.IsAbs(name) || name == ".." || strings.HasPrefix(name, "../") {
+			t.Fatal("tar-slip name", name)
+		}
+	}
+	for _, value := range []string{"service:base", "docker-image://alpine:latest", "https://example.com/context.git"} {
+		t.Run(value, func(t *testing.T) {
+			root := fixture(t, map[string]string{"compose.yaml": "services:\n  web:\n    build:\n      context: .\n      additional_contexts:\n        shared: " + value + "\n", "Dockerfile": "FROM scratch\n"})
+			if _, err := Collect(context.Background(), Options{Root: root}, io.Discard); err == nil {
+				t.Fatal("accepted nonlocal additional_context")
+			}
+		})
+	}
+}
+func TestSecretBuildReferenceRejected(t *testing.T) {
+	root := fixture(t, map[string]string{"compose.yaml": "services:\n  web:\n    build:\n      context: .\n      args:\n        BAD: ${SECRET}\n", "Dockerfile": "FROM scratch\n"})
+	if _, err := Collect(context.Background(), Options{Root: root, SecretKeys: []string{"SECRET"}}, io.Discard); err == nil {
+		t.Fatal("accepted secret build argument")
+	}
+}
+func TestRuntimeSecretAndConfigFilesEmpty(t *testing.T) {
+	root := fixture(t, map[string]string{"compose.yaml": "services:\n  web:\n    build: .\n    secrets: [runtime]\nsecrets:\n  runtime:\n    file: ./secret.txt\nconfigs:\n  settings:\n    file: ./config.txt\n", "Dockerfile": "FROM scratch\n", "secret.txt": "must-never-leak", "config.txt": "also-private"})
+	files := bundle(t, root)
+	if files["secret.txt"] != "" || files["config.txt"] != "" {
+		t.Fatal("runtime credentials leaked")
+	}
+}
+func TestEnvFileAliasesNeverLeak(t *testing.T) {
+	for _, hard := range []bool{false, true} {
+		t.Run(map[bool]string{false: "symlink", true: "hardlink"}[hard], func(t *testing.T) {
+			root := fixture(t, map[string]string{"compose.yaml": "services:\n  web:\n    build: .\n    env_file: runtime.env\n", "Dockerfile": "FROM scratch\n", "private.txt": "ALIAS_SECRET=must-never-leak"})
+			var err error
+			if hard {
+				err = os.Link(filepath.Join(root, "private.txt"), filepath.Join(root, "runtime.env"))
+			} else {
+				err = os.Symlink("private.txt", filepath.Join(root, "runtime.env"))
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			for name, value := range bundle(t, root) {
+				if strings.Contains(value, "ALIAS_SECRET=") {
+					t.Fatal("alias leaked at", name)
+				}
+			}
+		})
+	}
+}
+func TestLocalSymlinkBuildContext(t *testing.T) {
+	root := fixture(t, map[string]string{"compose.yaml": "services:\n  web:\n    build: ./alias\n", "actual/Dockerfile": "FROM scratch\n", "actual/source": "yes"})
+	if err := os.Symlink("actual", filepath.Join(root, "alias")); err != nil {
+		t.Fatal(err)
+	}
+	files := bundle(t, root)
+	if files["actual/source"] != "yes" {
+		t.Fatal("symlink context target missing")
+	}
+	if _, ok := files["alias"]; !ok {
+		t.Fatal("context symlink missing")
+	}
+}
+func TestNestedIncludeAndExtendsWithEmptyInterpolationFiles(t *testing.T) {
+	root := fixture(t, map[string]string{
+		"compose.yaml": "include:\n  - nested/compose.yaml\nservices:\n  root:\n    build: ./root\n", "root/Dockerfile": "FROM scratch\n",
+		"nested/compose.yaml": "include:\n  - path: child/compose.yaml\n    env_file: child/private.env\nservices:\n  nested:\n    extends:\n      file: base.yaml\n      service: base\n", "nested/.env": "LEAK=secret-from-dotenv", "nested/base.yaml": "services:\n  base:\n    build: .\n", "nested/Dockerfile": "FROM scratch\n",
+		"nested/child/compose.yaml": "services:\n  child:\n    build: .\n", "nested/child/private.env": "LEAK=secret-from-include-env", "nested/child/Dockerfile": "FROM scratch\n", "nested/child/source": "child",
+	})
+	files := bundle(t, root)
+	for _, name := range []string{"nested/compose.yaml", "nested/base.yaml", "nested/child/compose.yaml", "nested/child/source"} {
+		if _, ok := files[name]; !ok {
+			t.Fatal("nested Compose input missing", name)
+		}
+	}
+	for name, value := range files {
+		if strings.Contains(value, "secret-from-") {
+			t.Fatal("include interpolation file leaked", name)
+		}
+	}
+}
+func TestIncludeCannotReadOutsideRoot(t *testing.T) {
+	outside := fixture(t, map[string]string{"compose.yaml": "services:\n  web:\n    build: .\n", "Dockerfile": "FROM scratch\n"})
+	root := fixture(t, map[string]string{"compose.yaml": "include:\n  - " + filepath.Join(outside, "compose.yaml") + "\n"})
+	if _, err := Collect(context.Background(), Options{Root: root}, io.Discard); err == nil {
+		t.Fatal("include escaped root")
+	}
+}
+func TestIncludeAliasesMergesAndMultipleDocuments(t *testing.T) {
+	for name, compose := range map[string]string{
+		"alias scalar":  "x-env: &env private.env\ninclude:\n  - path: nested/compose.yaml\n    env_file: *env\nservices:\n  web:\n    build: .\n",
+		"alias mapping": "x-inc: &inc\n  path: nested/compose.yaml\n  env_file: private.env\ninclude: [*inc]\nservices:\n  web:\n    build: .\n",
+		"merge":         "x-common: &common\n  include:\n    - path: nested/compose.yaml\n      env_file: private.env\n<<: *common\nservices:\n  web:\n    build: .\n",
+		"multidoc":      "services:\n  web:\n    build: .\n---\nservices:\n  web:\n    env_file: private.env\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := fixture(t, map[string]string{"compose.yaml": compose, "Dockerfile": "FROM scratch\n", "nested/compose.yaml": "services:\n  included:\n    image: alpine\n", "private.env": "PASSWORD=never-leak"})
+			for name, value := range bundle(t, root) {
+				if strings.Contains(value, "PASSWORD=") {
+					t.Fatal("alias/merge/multidoc leaked secret", name)
+				}
+			}
+		})
+	}
+}
+func TestDanglingEscapingSymlink(t *testing.T) {
+	root := fixture(t, map[string]string{"compose.yaml": "services:\n  web:\n    build: .\n", "Dockerfile": "FROM scratch\n"})
+	if err := os.Symlink("../missing-outside", filepath.Join(root, "escape")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Collect(context.Background(), Options{Root: root}, io.Discard); err == nil {
+		t.Fatal("dangling escaping symlink accepted")
+	}
+}

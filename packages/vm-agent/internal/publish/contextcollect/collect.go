@@ -164,6 +164,10 @@ func writeEntry(ctx context.Context, tw *tar.Writer, safe *os.Root, plan *collec
 		if err != nil {
 			return err
 		}
+		if !within(plan.root, filepath.Join(filepath.Dir(path), link)) {
+			return fmt.Errorf("symlink %s escapes working directory", rel)
+		}
+
 		if filepath.IsAbs(link) {
 			return fmt.Errorf("absolute symlink %s is not portable; use a relative link", rel)
 		}
@@ -180,7 +184,7 @@ func writeEntry(ctx context.Context, tw *tar.Writer, safe *os.Root, plan *collec
 	h.Gid = 0
 	h.Uname = ""
 	h.Gname = ""
-	if plan.empty[path] {
+	if plan.isSensitive(path, info) {
 		h.Typeflag = tar.TypeReg
 		h.Linkname = ""
 		h.Size = 0
@@ -211,23 +215,65 @@ func within(root, path string) bool {
 	rel, err := filepath.Rel(root, path)
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }
+
+// Resolve each component before consuming '..', including dangling links.
+// EvalSymlinks alone loses the escape evidence when the target is missing.
 func validatePath(root, path string) error {
 	if !within(root, path) {
 		return fmt.Errorf("path %s escapes working directory; move inputs under %s", path, root)
 	}
-	resolved, err := filepath.EvalSymlinks(path)
-	if os.IsNotExist(err) {
-		parent := filepath.Dir(path)
-		if parent == path {
-			return err
-		}
-		return validatePath(root, parent)
-	}
+	rel, err := filepath.Rel(root, path)
 	if err != nil {
 		return err
 	}
-	if !within(root, resolved) {
-		return fmt.Errorf("symlink %s escapes working directory; use inputs inside %s", path, root)
+	parts := strings.Split(rel, string(filepath.Separator))
+	current := root
+	seen := map[string]bool{}
+	for len(parts) > 0 {
+		part := parts[0]
+		parts = parts[1:]
+		if part == "" || part == "." {
+			continue
+		}
+		if part == ".." {
+			current = filepath.Dir(current)
+			if !within(root, current) {
+				return fmt.Errorf("symlink %s escapes working directory", path)
+			}
+			continue
+		}
+		next := filepath.Join(current, part)
+		info, err := os.Lstat(next)
+		if os.IsNotExist(err) {
+			current = next
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			current = next
+			continue
+		}
+		if seen[next] {
+			return fmt.Errorf("cyclic symlink %s in build inputs", path)
+		}
+		seen[next] = true
+		target, err := os.Readlink(next)
+		if err != nil {
+			return err
+		}
+		if filepath.IsAbs(target) {
+			if !within(root, target) {
+				return fmt.Errorf("symlink %s escapes working directory", path)
+			}
+			target, err = filepath.Rel(root, target)
+			if err != nil {
+				return err
+			}
+			current = root
+		}
+		parts = append(strings.Split(target, string(filepath.Separator)), parts...)
 	}
 	return nil
 }

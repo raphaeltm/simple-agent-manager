@@ -1212,6 +1212,7 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /workspaces/{workspaceId}/mcp/diff-summary", s.handleMcpDiffSummary)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/mcp/build-and-publish", s.handleMcpBuildAndPublish)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/mcp/build-and-publish-jobs/{jobId}/start", s.handleMcpBuildAndPublishJobStart)
+	mux.HandleFunc("POST /workspaces/{workspaceId}/mcp/build-and-publish-jobs/{jobId}/collect", s.handleMcpBuildContextCollect)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/mcp/build-and-publish-jobs/{jobId}/cancel", s.handleMcpBuildAndPublishJobCancel)
 
 	mux.HandleFunc("POST /workspaces/{workspaceId}/mcp/secret-exec", s.handleMcpSecretExecStart)

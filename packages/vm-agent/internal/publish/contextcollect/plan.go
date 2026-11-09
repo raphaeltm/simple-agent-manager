@@ -2,6 +2,7 @@ package contextcollect
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/compose-spec/compose-go/v2/cli"
 	"github.com/compose-spec/compose-go/v2/loader"
@@ -20,6 +21,7 @@ type collectionPlan struct {
 	root          string
 	contexts      []buildContext
 	forced, empty map[string]bool
+	sensitive     []os.FileInfo
 }
 
 func makePlan(ctx context.Context, opts Options) (*collectionPlan, error) {
@@ -31,7 +33,20 @@ func makePlan(ctx context.Context, opts Options) (*collectionPlan, error) {
 	for _, k := range opts.SecretKeys {
 		env = append(env, k+"="+SecretPlaceholder)
 	}
-	options, err := cli.NewProjectOptions(nil, cli.WithWorkingDirectory(opts.Root), cli.WithEnv(env), cli.WithConfigFileEnv, cli.WithDefaultConfigPath, cli.WithoutEnvironmentResolution, cli.WithProfiles([]string{"*"}), cli.WithResourceLoader(&localLoader{p: p, max: opts.MaxBytes}), cli.WithLoadOptions(func(o *loader.Options) { o.SkipResolveEnvironment = true }))
+	temp, err := os.MkdirTemp("", "sam-context-config-graph-")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(temp)
+	envMap := map[string]string{}
+	for k, v := range opts.BuildEnv {
+		envMap[k] = v
+	}
+	for _, k := range opts.SecretKeys {
+		envMap[k] = SecretPlaceholder
+	}
+	graph := &localLoader{p: p, max: opts.MaxBytes, temp: temp, env: envMap, staged: map[string]string{}, originals: map[string]string{}, visiting: map[string]bool{}}
+	options, err := cli.NewProjectOptions(nil, cli.WithWorkingDirectory(opts.Root), cli.WithEnv(env), cli.WithConfigFileEnv, cli.WithDefaultConfigPath, cli.WithoutEnvironmentResolution, cli.WithoutLabelsResolution, cli.WithProfiles([]string{"*"}), cli.WithResourceLoader(graph), cli.WithLoadOptions(func(o *loader.Options) { o.SkipResolveEnvironment = true }))
 	if err != nil {
 		return nil, err
 	}
@@ -45,13 +60,18 @@ func makePlan(ctx context.Context, opts Options) (*collectionPlan, error) {
 		return nil, fmt.Errorf("load Compose build context: %w", err)
 	}
 	for _, path := range project.ComposeFiles {
+		if original, ok := graph.originals[path]; ok {
+			path = original
+		}
 		if err := p.force(path, opts.MaxBytes); err != nil {
 			return nil, err
 		}
 	}
 	// Host env and dotenv are never loaded. Build interpolation uses only the
 	// server's non-secret config and the node executor's secret placeholders.
-	p.empty[filepath.Join(opts.Root, ".env")] = true
+	if err := p.markEmpty(filepath.Join(opts.Root, ".env")); err != nil {
+		return nil, err
+	}
 	for _, service := range project.AllServices() {
 		for _, file := range service.EnvFiles {
 			path := file.Path
@@ -61,12 +81,21 @@ func makePlan(ctx context.Context, opts Options) (*collectionPlan, error) {
 			if err := validatePath(opts.Root, path); err != nil {
 				return nil, err
 			}
-			p.empty[path] = true
+			if err := p.markEmpty(path); err != nil {
+				return nil, err
+			}
 		}
 		if service.Build == nil {
 			continue
 		}
 		b := service.Build
+		encoded, err := json.Marshal(b)
+		if err != nil {
+			return nil, err
+		}
+		if strings.Contains(string(encoded), SecretPlaceholder) || strings.Contains(service.Image, SecretPlaceholder) {
+			return nil, fmt.Errorf("service %s uses a runtime secret in build/image fields; use non-secret build config", service.Name)
+		}
 		if err := p.addContext(b.Context, b.Dockerfile, opts.MaxBytes); err != nil {
 			return nil, fmt.Errorf("service %s: %w", service.Name, err)
 		}
@@ -81,7 +110,9 @@ func makePlan(ctx context.Context, opts Options) (*collectionPlan, error) {
 			if err := validatePath(opts.Root, s.File); err != nil {
 				return nil, err
 			}
-			p.empty[s.File] = true
+			if err := p.markEmpty(s.File); err != nil {
+				return nil, err
+			}
 		}
 	}
 	for _, s := range project.Configs {
@@ -89,7 +120,9 @@ func makePlan(ctx context.Context, opts Options) (*collectionPlan, error) {
 			if err := validatePath(opts.Root, s.File); err != nil {
 				return nil, err
 			}
-			p.empty[s.File] = true
+			if err := p.markEmpty(s.File); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return p, nil
@@ -112,11 +145,24 @@ func (p *collectionPlan) force(path string, max int64) error {
 		return fmt.Errorf("Compose input %s exceeds maximum %d bytes", path, max)
 	}
 	p.forced[path] = true
+	canonical, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return err
+	}
+	p.forced[canonical] = true
+	for parent := filepath.Dir(path); within(p.root, parent) && parent != p.root; parent = filepath.Dir(parent) {
+		if info, err := os.Lstat(parent); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			p.forced[parent] = true
+		}
+	}
 	return nil
 }
 func (p *collectionPlan) addContext(path, dockerfile string, max int64) error {
 	if path == "" {
 		path = p.root
+	}
+	if remoteContext(path) {
+		return fmt.Errorf("non-local context %q is unsupported; use a local directory", path)
 	}
 	if !filepath.IsAbs(path) {
 		if strings.Contains(path, ":") {
@@ -134,7 +180,19 @@ func (p *collectionPlan) addContext(path, dockerfile string, max int64) error {
 	if !info.IsDir() {
 		return fmt.Errorf("build context %s must be a local directory", path)
 	}
-	c := buildContext{path: path}
+	canonical, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return err
+	}
+	if canonical != path {
+		p.forced[path] = true
+		for parent := filepath.Dir(path); within(p.root, parent) && parent != p.root; parent = filepath.Dir(parent) {
+			if info, err := os.Lstat(parent); err == nil && info.Mode()&os.ModeSymlink != 0 {
+				p.forced[parent] = true
+			}
+		}
+	}
+	c := buildContext{path: canonical}
 	ignores := []string{filepath.Join(path, ".dockerignore")}
 	if dockerfile != "" {
 		if !filepath.IsAbs(dockerfile) {
@@ -213,23 +271,37 @@ func (p *collectionPlan) descends(path string) bool {
 	return false
 }
 
-// Validate include/extends references through Compose's resource loader.
-type localLoader struct {
-	p   *collectionPlan
-	max int64
+func (p *collectionPlan) markEmpty(path string) error {
+	if err := validatePath(p.root, path); err != nil {
+		return err
+	}
+	p.empty[path] = true
+	info, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("runtime env/secret file %s must be a regular file", path)
+	}
+	canonical, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return err
+	}
+	p.empty[canonical] = true
+	p.sensitive = append(p.sensitive, info)
+	return nil
 }
-
-func (l *localLoader) Accept(string) bool { return true }
-func (l *localLoader) Load(ctx context.Context, path string) (string, error) {
-	if err := ctx.Err(); err != nil {
-		return "", err
+func (p *collectionPlan) isSensitive(path string, info os.FileInfo) bool {
+	if p.empty[path] {
+		return true
 	}
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(l.p.root, path)
+	for _, secret := range p.sensitive {
+		if os.SameFile(secret, info) {
+			return true
+		}
 	}
-	if err := l.p.force(path, l.max); err != nil {
-		return "", err
-	}
-	return path, nil
+	return false
 }
-func (l *localLoader) Dir(path string) string { return filepath.Dir(path) }
