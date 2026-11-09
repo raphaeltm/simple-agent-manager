@@ -10,7 +10,7 @@ Scope: app deployment context collection/transport only. Existing node builds an
 - [x] Additive publish-job metadata migration (latest main 0229); preserve source node_id and cascade.
 - [x] Authenticated context upload init/complete, derived keys, short presigned PUT, size/head and recorded hash fences.
 - [x] Reuse artifact cleanup cron for bounded retention.
-- [x] Tests: override/env placeholders, documented/real Docker ignore matrix, escapes, secrets, multi-buffer route; SQLite conditional-state attacks + owner controls.
+- [x] Tests: override/env placeholders, documented Docker ignore matrix (real Docker parity unverified), escapes, secrets, multi-buffer route; SQLite conditional-state attacks + owner controls.
 - [x] Docs/config reference and full quality suite (root 22/23 tasks, remaining API suite separately green).
 - [x] Local specialist review and completion validation (collector/security, API/Cloudflare/constitution, completion/docs/tests; shadow re-review PASS).
 - [ ] Coordinator staging slot; one small claude-code VM and Instant collect proof; cleanup verified in D1, release slot.
@@ -41,3 +41,10 @@ FIFO follow-up final validation: independent Go/security review PASS; full `go t
 Live v2 staging (2026-11-09): deployment42611705477 at3b65a30f4501ceea29795a8bb78fc33a2dc52cd6 and browser smoke passed. One small-request claude-code VM and fresh Instant both reported expected source release28270ffc and healthy heartbeats. Through genuine publish calls, both collected >8 MiB bundles and recorded SHA descriptors, but R2 PUT returned403; no context_ready or completion proof. The original Instant sibling fixture disappeared after idle restore; recreated inside checkout and published in the same turn. All resources removed, D1 zero fixture rows/active VMs, Instant termination confirmed, R2 prefix empty and shadow OFF; slot released directly to bug3 with coordinator copied. Evidence: `tasks/evidence/build-context-staging-upload-failure.json`.
 
 Upload investigation: SDK hoisted SHA metadata to the query while the source also sent the header. Bind that header explicitly with unhoistableHeaders, validated by real localhost HTTP plus an independent SigV4 verifier and changed/missing metadata and size controls. This proves header binding, not the root cause of live403. Expose only bounded allowlisted R2 XML error codes, never raw bodies/canonical requests/credentials. Name the two existing response-size caps DEFAULT_* without changing values. Fresh review, CI and granted live transport verification remain required.
+
+
+## Takeover result — 2026-11-09 (supersedes earlier pending-state notes)
+
+Merged main1065cd446 into the existing branch and pushed d97e8b167445da51567e1ac6ec3a0456bac30eda. Functional CI and staging deployment passed. Instant genuine publish proved successful R2 upload, HEAD/completion, and independent GET/hash/tar inspection (8,391,150 bytes). Fresh VM publish remains unverified because the claude-code agent refused parent-agent-originated requests pending human confirmation; coordinator instructed stop/cleanup. This is not a demonstrated phase-2 defect and is not a waived gate. Detailed composite VM evidence, current validation limits, migration collision caveat, and cleanup disposition are in `tasks/evidence/build-context-takeover-staging.md` and `tasks/evidence/build-context-takeover-instant.json`.
+
+Mandatory draft/exact-SHA coordinator hold remains. No permission to ready or merge has been received. Cleanup passed immediate23:01:31Z and late23:06:40Z D1 audits, with no late VM; staging slot released. One successful R2 object is retained under the coordinator-approved48h disposition. Fresh final-head CI/CodeRabbit request/wait remains pending.
