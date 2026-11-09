@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/workspace/vm-agent/internal/acp"
 	"github.com/workspace/vm-agent/internal/persistence"
 	"github.com/workspace/vm-agent/internal/resourcemon"
 )
@@ -82,11 +83,17 @@ func (s *Server) prepareWorkspaceEvictionHosts(workspaceID string) (*bool, func(
 	// A container stop kills every session in this workspace, regardless of which
 	// session supplied the snapshot identity. Fence them all before the intent.
 	allIdle, anyActive := true, false
+	var hosts []*acp.SessionHost
 	s.sessionHostMu.Lock()
 	for key, host := range s.sessionHosts {
 		if !strings.HasPrefix(key, workspaceID+":") || host == nil {
 			continue
 		}
+		hosts = append(hosts, host)
+	}
+	s.sessionHostMu.Unlock()
+	// Host locks are independent of the node-wide map lock.
+	for _, host := range hosts {
 		interrupted, rollback := host.PrepareEviction()
 		rollbacks = append(rollbacks, rollback)
 		if interrupted == nil {
@@ -95,7 +102,6 @@ func (s *Server) prepareWorkspaceEvictionHosts(workspaceID string) (*bool, func(
 			anyActive = true
 		}
 	}
-	s.sessionHostMu.Unlock()
 	// Active work dominates unknown state; false requires proof from every host.
 	var interrupted *bool
 	if anyActive || (allIdle && len(rollbacks) > 0) {

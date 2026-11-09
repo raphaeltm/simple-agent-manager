@@ -302,3 +302,8 @@ no production reader examines errorCode (GetPromptDelivery reads it without bran
 Thus it cannot post a failed verdict. Test hygiene changes isolate inherited agent
 state, accept the precise independent telemetry callback, and drain fake upload bodies;
 they preserve auth/cancellation assertions and were required for reliable full checks.
+
+- Coordinator's final map-lock review: collect matching host pointers under the
+  global sessionHostMu, release it, then call PrepareEviction on each host. This
+  preserves aggregation/rollback while following existing host-map discipline.
+  Source approval of49187283a was conditional; real staging must use this revision.
