@@ -110,3 +110,25 @@ export const POOL_STATE_WARNINGS: Partial<Record<DefaultCapacityPoolEffectiveSta
   'catalog-unavailable': "SAM couldn't read the provider's machine list. Try Refresh.",
   'migration-pending': 'This pool is being updated. Try again in a minute.',
 };
+
+/**
+ * Provider order (`sourceOrder`). Mirrors the ranking in `placement-capacity-ranking.ts` and the
+ * next-source fallback in `node-provisioning-tier.ts`: reuse is unaffected, and only sources with
+ * different ranks fall back to each other.
+ */
+export const PROVIDER_ORDER_COPY = {
+  help: 'A running machine with room is always used first. The order decides which account a new machine comes from, and SAM moves to the next account when one cannot start it.',
+  singleSource:
+    'This pool uses one account. Connect another cloud account to choose which one SAM tries first.',
+  equal: {
+    label: 'Every account is equal',
+    description: 'The placement strategy and price decide. Nothing falls back across accounts.',
+  },
+  ordered: {
+    label: 'Try accounts in this order',
+    description: 'SAM starts new machines on the first account and falls back down the list.',
+  },
+} as const;
+
+export const POOL_EDIT_CONFLICT_MESSAGE =
+  'This pool changed while you were editing it, so your changes were not saved. Review the current pool and edit again.';

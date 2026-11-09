@@ -75,7 +75,7 @@ function cellKeyFor(groupKey: string, offering: ComputePoolOffering): string {
   return [groupKey, offering.provider, offering.location, offering.sku].map(normalized).join('|');
 }
 
-function sourceKind(source: CapacitySourceIdentity | undefined): MachineSourceKind {
+export function sourceKind(source: CapacitySourceIdentity | undefined): MachineSourceKind {
   if (!source) return 'unknown';
   if (source.credentialSource === 'platform' || source.platformCredentialId) return 'platform';
   if (source.externalSourceRef || source.credentialReference?.startsWith('cc_credentials:')) {
