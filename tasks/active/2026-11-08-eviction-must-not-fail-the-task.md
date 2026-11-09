@@ -190,3 +190,17 @@ issuing a verdict.
     (`persistence.PromptDeliveryReceipt`), so no consumer can misread it.
   - Discrimination was verified per guard: process-exit park, prompt-crash park,
     timeout park, deadline, orphan grace.
+
+## Shipping continuation (2026-11-09)
+
+- Rebased the existing branch onto current main. Fresh go-specialist review found
+  the moved process-exit helper lost the exit-time intentional-stop observation;
+  carry it in `processExitObservation` so deferred replay preserves causality.
+- Fresh review also found the actual ACP deadline-return path bypassed eviction
+  parking. It now parks; `TestPromptDeadlineReturnDuringEvictionIsNotAVerdict`
+  exercises that path. Removing only this guard via a Go overlay makes the test
+  fail with the false `fatal_error` verdict.
+- Focused ACP eviction/deadline/intentional-stop race suite passed (20.776s).
+- Cloudflare, constitution, documentation-sync and environment reviews passed.
+- Residual idea `01M6YR5TX0C7X1S5FS7HSG22DX` remains open: raising the fence at
+  target selection and recording eviction reason are outside this PR.

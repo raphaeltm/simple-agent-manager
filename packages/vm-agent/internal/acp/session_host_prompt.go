@@ -638,6 +638,11 @@ func (h *SessionHost) finishPromptCancelled(attempt *promptAttempt, reqID json.R
 
 func (h *SessionHost) finishPromptAttemptWithError(attempt *promptAttempt, promptCtx context.Context, reqID json.RawMessage, info promptStartInfo, err error) {
 	if errors.Is(promptCtx.Err(), context.DeadlineExceeded) {
+		if h.parkPromptCrashForEviction("prompt_deadline", func() {
+			h.finishPromptAttemptWithError(attempt, promptCtx, reqID, info, err)
+		}) {
+			return
+		}
 		errMsg := "Prompt cancelled (context deadline exceeded)"
 		if info.timeout > 0 {
 			errMsg = fmt.Sprintf("Prompt timed out after %s", info.timeout)

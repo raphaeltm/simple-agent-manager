@@ -235,3 +235,21 @@ func TestPromptDeadlineDuringEvictionIsNotAVerdict(t *testing.T) {
 	host.StopForEviction()
 	expectCompletion(t, completed, EvictedStopReason, time.Second, "committed eviction did not end the prompt")
 }
+
+// The ACP call itself also returns when its context deadline expires; fencing
+// just the timeout watchdog leaves this parallel terminal path unprotected.
+func TestPromptDeadlineReturnDuringEvictionIsNotAVerdict(t *testing.T) {
+	host, _, completed, starts := armEvictedPrompt(t)
+	host.promptMu.Lock()
+	attempt := host.promptAttempt
+	host.promptMu.Unlock()
+	host.PrepareEviction()
+	promptCtx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	host.finishPromptAttemptWithError(attempt, promptCtx, json.RawMessage(`"req-1"`), promptStartInfo{startedAt: time.Now(), timeout: time.Second}, context.DeadlineExceeded)
+	assertNoVerdict(t, completed, starts, "ACP deadline return")
+	waitForParked(t, host, func(p evictionParked) bool { return len(p.promptCrash) == 1 })
+	host.StopForEviction()
+	expectCompletion(t, completed, EvictedStopReason, time.Second, "committed eviction did not end the prompt")
+	assertNoSecondCompletion(t, completed)
+}
