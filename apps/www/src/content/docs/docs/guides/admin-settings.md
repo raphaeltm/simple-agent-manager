@@ -205,6 +205,17 @@ These **Operations** settings bound automatic retries after an eviction wake fai
 | `operations.evictionRecoveryRetryWallMs`    | 10,000  | 1–30,000     | Milliseconds before starting another retry; an in-flight durable wake may finish afterward                                          |
 | `operations.evictionRecoveryRetryDelayMs`   | 60,000  | 1–86,400,000 | Minimum interval after failure or preclaim deferral; deferrals rotate fairly without resetting the failure anchor or attempt budget |
 
+## Compute pool refresh
+
+This **Operations** setting bounds how long one refresh spends writing a changed compute pool
+catalog. A pool cannot place new machines until its catalog is fully written, so a refresh keeps
+writing 200-row batches until the catalog is complete or the budget is used, then resumes on the
+next refresh.
+
+| Setting                                  | Default | Range     | What it controls                                                                           |
+| ---------------------------------------- | ------- | --------- | ------------------------------------------------------------------------------------------ |
+| `operations.capacityPoolPublishBudgetMs` | 20,000  | 0–120,000 | Milliseconds per source per refresh for writing a changed catalog; 0 writes one batch only |
+
 ## Dead wake claims
 
 A sleeping VM chat is woken by a task that holds the chat's wake claim until the wake finishes or

@@ -16,6 +16,13 @@ used a tiny fixture repository, so every check passed. Lifecycle latency was not
 anywhere, and every stop in production took ~31 minutes for six days before a human
 noticed (`tasks/archive/2026-11-03-fast-workspace-physical-deletion.md`).
 
+A second instance, 2026-11-09: compute pool catalog publication wrote 200 candidate rows per
+refresh and returned, with refreshes daily or user-triggered, and a pool cannot place VMs until its
+catalog is fully written. A ~1,000-row GCP catalog therefore left a production user's whole pool
+unplaceable for days. The 200 was a sensible chunk size used as the whole per-pass budget
+(`ensureCandidatesForSource()`, `tasks/archive/2026-11-09-capacity-pool-publication-deadline-loop.md`).
+When work gates availability, ask what the user is blocked on while the bound defers the rest.
+
 ## Hard Requirements
 
 1. **Do the division in the PR.** For every bound, state the implied throughput and the

@@ -19,6 +19,7 @@ import {
 } from './admin-setting-definitions';
 import { agentModelSettingDefinitions } from './agent-models/settings-definition';
 import { CONNECTOR_DEFAULTS, type ConnectorSettingKey } from './connector-settings-definition';
+import { DEFAULT_CAPACITY_POOL_CANDIDATE_PUBLISH_BUDGET_MS } from './default-capacity-pool-candidates-common';
 import { ENV_KEYS, SECRET_KINDS, SETTING_KEYS } from './platform-config-store';
 import {
   DEFAULT_PROVISIONING_ATTEMPTS_PER_PROVIDER_TIER,
@@ -84,6 +85,13 @@ export const CORE_SETTINGS: AdminSettingDefinition[] = [
     'Operations',
     'Time budget in milliseconds before starting another failed eviction wake; an in-flight durable wake may finish afterward.',
     { min: 1, max: 30000 }
+  ),
+  integerDefinition(
+    'operations.capacityPoolPublishBudgetMs',
+    DEFAULT_CAPACITY_POOL_CANDIDATE_PUBLISH_BUDGET_MS,
+    'Operations',
+    'Time budget in milliseconds for writing a changed compute pool catalog in one refresh. SAM keeps writing batches until the catalog is complete or this time is used, then resumes on the next refresh. A pool cannot place new VMs until its catalog is complete. 0 writes one batch per refresh.',
+    { min: 0, max: 120000 }
   ),
   integerDefinition(
     'operations.evictionRecoveryRetryDelayMs',

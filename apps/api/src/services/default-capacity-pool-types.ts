@@ -109,8 +109,13 @@ export interface DefaultCapacityPoolsBackfillOptions {
   env?: Env;
   offeringResolver?: DefaultCapacityPoolOfferingResolver;
   scopeBatchSize?: number;
-  /** Candidate ROWS published per source per pass before the durable cursor defers the rest. */
+  /** Candidate ROWS written per D1 batch while publishing a source's catalog. */
   candidatePublishBatchSize?: number;
+  /**
+   * Per-source wall-clock budget for publishing an incomplete catalog in one pass. Overrides
+   * `operations.capacityPoolPublishBudgetMs`; 0 writes one batch per pass.
+   */
+  candidatePublishBudgetMs?: number;
   /** Secret-free credential anchors scrubbed/pruned per backfill pass. */
   credentialAnchorScrubBatchSize?: number;
   beforeSourcePublication?: (input: {

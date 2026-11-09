@@ -26,8 +26,18 @@ export const MISSING_CANDIDATE_UPDATE_FIXED_BIND_COUNT = 8;
 /** Extra binds contributed by the generation fence: catalog_generation, id, source_generation, status. */
 export const MISSING_CANDIDATE_SOURCE_GENERATION_GUARD_BIND_COUNT = 4;
 
-/** Default candidate ROWS published per invocation before the cursor defers the rest. */
+/** Candidate ROWS written per D1 batch. A pass writes successive batches until its budget ends. */
 export const DEFAULT_CAPACITY_POOL_CANDIDATE_PUBLISH_BATCH_SIZE = 200;
+
+/**
+ * Wall-clock budget for publishing one changed catalog in a single pass
+ * (`operations.capacityPoolPublishBudgetMs`). A pool is unplaceable until its catalog is
+ * complete, and refreshes are rare (daily, or a user editing the pool), so publication must
+ * finish within one pass rather than one batch per pass. At 200 rows per batch the default
+ * covers the default GCP catalog (~1,000 rows, 5 batches) with wide margin; past it, the
+ * cursor persists and the next pass resumes. 0 keeps one batch per pass.
+ */
+export const DEFAULT_CAPACITY_POOL_CANDIDATE_PUBLISH_BUDGET_MS = 20_000;
 
 /**
  * Durable progress store for bounded, resumable catalog publication. Backed by
@@ -43,8 +53,16 @@ export interface EnsureCandidatesForSourceOptions {
   sourceGeneration?: number;
   sourceAuthorityGeneration?: number;
   catalogComplete?: boolean;
-  /** Max candidate rows written per invocation. Defaults to the module constant. */
+  /** Max candidate rows written per D1 batch. Defaults to the module constant. */
   publishBatchSize?: number;
+  /**
+   * Epoch ms until which an INCOMPLETE catalog keeps publishing further batches in this pass.
+   * Omitted (or already past): exactly one batch per pass. A complete, unchanged catalog always
+   * writes one batch per pass because it is already placeable.
+   */
+  publishDeadlineAt?: number;
+  /** Clock for the deadline check; injectable for tests. Defaults to `Date.now`. */
+  now?: () => number;
   cursorStore?: CapacityCandidatePublicationCursorStore;
 }
 
