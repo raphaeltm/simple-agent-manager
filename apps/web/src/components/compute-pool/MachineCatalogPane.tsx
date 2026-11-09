@@ -26,9 +26,15 @@ import { MachineCatalogFilters } from './MachineCatalogFilters';
 /** Rows rendered per page of the list; "Show more" adds another page. */
 const ROWS_PER_PAGE = 100;
 
-const COLUMNS: Array<{ key: CatalogSortKey; label: string; numeric?: boolean }> = [
-  { key: 'provider', label: 'Provider' },
+/**
+ * The first column holds the machine and its account, so the table fits the settings pane; it
+ * sorts by either. The remaining columns each sort by their own value.
+ */
+const MACHINE_SORT_KEYS: Array<{ key: CatalogSortKey; label: string }> = [
   { key: 'machine', label: 'Machine' },
+  { key: 'provider', label: 'Account' },
+];
+const COLUMNS: Array<{ key: CatalogSortKey; label: string; numeric?: boolean }> = [
   { key: 'vcpu', label: 'vCPU', numeric: true },
   { key: 'memory', label: 'Memory', numeric: true },
   { key: 'disk', label: 'Disk', numeric: true },
@@ -52,6 +58,34 @@ function specs(row: MachineRegionRow): string {
     `${formatOfferingNumber(row.ramGb, 'GB')}`,
     `${formatOfferingNumber(row.diskGb, 'GB')} disk`,
   ].join(' · ');
+}
+
+function SortButton({
+  label,
+  sortKey,
+  sort,
+  onSort,
+}: {
+  label: string;
+  sortKey: CatalogSortKey;
+  sort: CatalogSort | null;
+  onSort: (key: CatalogSortKey) => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="inline-flex items-center gap-1 whitespace-nowrap border-0 bg-transparent p-0 font-medium text-inherit hover:text-fg-primary"
+      onClick={() => onSort(sortKey)}
+    >
+      {label}
+      <SortIcon active={sort?.key === sortKey ? sort : null} />
+    </button>
+  );
+}
+
+function ariaSortFor(sort: CatalogSort | null, keys: CatalogSortKey[]) {
+  if (!sort || !keys.includes(sort.key)) return 'none' as const;
+  return sort.direction === 'asc' ? ('ascending' as const) : ('descending' as const);
 }
 
 function SortIcon({ active }: { active: CatalogSort | null }) {
@@ -136,6 +170,10 @@ export function MachineCatalogPane({
     );
   };
 
+  // Account titles already start with the provider ("Hetzner · Personal").
+  const accountTitle = (row: MachineRegionRow) =>
+    accountTitles.get(row.sourceId) ?? row.providerLabel;
+  const onSort = (key: CatalogSortKey) => setSort((current) => nextSort(current, key));
   const accountNote = (row: MachineRegionRow) =>
     excluded.has(row.sourceId) ? ' · account off' : '';
 
@@ -201,26 +239,37 @@ export function MachineCatalogPane({
                   />
                 </th>
               )}
+              <th
+                className="py-2 pr-3 font-medium"
+                aria-sort={ariaSortFor(
+                  sort,
+                  MACHINE_SORT_KEYS.map((entry) => entry.key)
+                )}
+              >
+                <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-1">
+                  {MACHINE_SORT_KEYS.map((entry) => (
+                    <SortButton
+                      key={entry.key}
+                      label={entry.label}
+                      sortKey={entry.key}
+                      sort={sort}
+                      onSort={onSort}
+                    />
+                  ))}
+                </span>
+              </th>
               {COLUMNS.map((column) => (
                 <th
                   key={column.key}
                   className={`py-2 pr-3 font-medium ${column.numeric ? 'text-right' : ''}`}
-                  aria-sort={
-                    sort?.key === column.key
-                      ? sort.direction === 'asc'
-                        ? 'ascending'
-                        : 'descending'
-                      : 'none'
-                  }
+                  aria-sort={ariaSortFor(sort, [column.key])}
                 >
-                  <button
-                    type="button"
-                    className="inline-flex items-center gap-1 whitespace-nowrap border-0 bg-transparent p-0 font-medium text-inherit hover:text-fg-primary"
-                    onClick={() => setSort((current) => nextSort(current, column.key))}
-                  >
-                    {column.label}
-                    <SortIcon active={sort?.key === column.key ? sort : null} />
-                  </button>
+                  <SortButton
+                    label={column.label}
+                    sortKey={column.key}
+                    sort={sort}
+                    onSort={onSort}
+                  />
                 </th>
               ))}
               <th className="py-2 text-right font-medium">
@@ -250,15 +299,14 @@ export function MachineCatalogPane({
                       />
                     </td>
                   )}
-                  <td className="py-2 pr-3">
-                    <span className="block text-fg-primary">{row.providerLabel}</span>
-                    <span className="block break-words text-xs text-fg-muted">
-                      {accountTitles.get(row.sourceId)}
+                  <td className="min-w-[10rem] py-2 pr-3">
+                    <span className="block font-mono text-fg-primary [overflow-wrap:anywhere]">
+                      {row.sku}
+                    </span>
+                    <span className="block text-xs text-fg-muted [overflow-wrap:anywhere]">
+                      {accountTitle(row)}
                       {accountNote(row)}
                     </span>
-                  </td>
-                  <td className="whitespace-nowrap py-2 pr-3 font-mono text-fg-primary">
-                    {row.sku}
                   </td>
                   <td className="py-2 pr-3 text-right tabular-nums">
                     {formatOfferingNumber(row.vcpu, '')}
@@ -269,9 +317,13 @@ export function MachineCatalogPane({
                   <td className="whitespace-nowrap py-2 pr-3 text-right tabular-nums">
                     {formatOfferingNumber(row.diskGb, 'GB')}
                   </td>
-                  <td className="py-2 pr-3">
-                    <span className="block text-fg-primary">{row.regionLabel}</span>
-                    <span className="block text-xs text-fg-muted">{row.region}</span>
+                  <td className="min-w-[7rem] py-2 pr-3">
+                    <span className="block text-fg-primary [overflow-wrap:anywhere]">
+                      {row.regionLabel}
+                    </span>
+                    <span className="block text-xs text-fg-muted [overflow-wrap:anywhere]">
+                      {row.region}
+                    </span>
                   </td>
                   <td className="whitespace-nowrap py-2 pr-3 text-right">
                     <span className="block text-fg-primary">
@@ -313,11 +365,11 @@ export function MachineCatalogPane({
                 />
               )}
               <div className="min-w-0 flex-1">
-                <p className="m-0 break-words text-sm text-fg-primary">
+                <p className="m-0 text-sm text-fg-primary [overflow-wrap:anywhere]">
                   <span className="font-mono">{row.sku}</span> · {row.regionLabel}
                 </p>
-                <p className="m-0 break-words text-xs text-fg-muted">
-                  {row.providerLabel} · {accountTitles.get(row.sourceId)}
+                <p className="m-0 text-xs text-fg-muted [overflow-wrap:anywhere]">
+                  {accountTitle(row)}
                   {accountNote(row)}
                 </p>
                 <p className="m-0 text-xs text-fg-muted">{specs(row)}</p>

@@ -523,6 +523,35 @@ async function screenshotDefaultPoolScope(
   await screenshotNearHeading(page, 'Available machines', `${namePrefix}-details-${suffix}`);
 }
 
+/**
+ * Captures the machine rows themselves, which sit below the filters. When the desktop table is
+ * showing, it must fit its pane: a table that scrolls sideways hides the Add/Remove buttons.
+ */
+async function screenshotMachineRows(page: Page, name: string) {
+  await page
+    .getByText(/^\d+ of \d+ rows$/)
+    .first()
+    .evaluate((element) => element.scrollIntoView({ block: 'start' }));
+  const table = page.locator('table').filter({ visible: true });
+  if ((await table.count()) > 0) {
+    const fit = await table.first().evaluate((element) => {
+      const wrapper = element.parentElement as HTMLElement;
+      const action = element.querySelector('tbody tr td:last-child button');
+      const wrapperBox = wrapper.getBoundingClientRect();
+      const actionBox = action?.getBoundingClientRect();
+      return {
+        overflow: wrapper.scrollWidth - wrapper.clientWidth,
+        actionRight: actionBox ? actionBox.right : 0,
+        wrapperRight: wrapperBox.right,
+      };
+    });
+    expect(fit.overflow).toBeLessThanOrEqual(1);
+    expect(fit.actionRight).toBeGreaterThan(0);
+    expect(fit.actionRight).toBeLessThanOrEqual(fit.wrapperRight + 1);
+  }
+  await screenshot(page, name);
+}
+
 async function editStressedPool(page: Page, screenshotName: string) {
   // Pool settings live in a disclosure under the machine list.
   await page.getByText('How SAM uses machines', { exact: true }).click();
@@ -546,6 +575,7 @@ async function editStressedPool(page: Page, screenshotName: string) {
     page.getByText(EXPENSIVE_HETZNER_GPU_SKU).filter({ visible: true }).first()
   ).toBeVisible();
   await screenshotNearHeading(page, 'Available machines', `${screenshotName}-search`);
+  await screenshotMachineRows(page, `${screenshotName}-search-rows`);
   await page.getByRole('textbox', { name: 'Search machines' }).fill('');
   await assertNoOverflow(page);
 
@@ -573,6 +603,7 @@ async function editStressedPool(page: Page, screenshotName: string) {
   await expect(page.getByText(/^Ready · \d+ in pool$/)).toBeVisible();
   await screenshotNearHeading(page, 'In your pool', `${screenshotName}-accounts`);
   await screenshotNearHeading(page, 'Available machines', screenshotName);
+  await screenshotMachineRows(page, `${screenshotName}-rows`);
 
   await visibleButton(page, 'Save changes').click();
   await expect(page.getByRole('button', { name: 'Save changes' })).toHaveCount(0);

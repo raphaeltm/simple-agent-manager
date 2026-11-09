@@ -108,6 +108,7 @@ export function MachineCatalogFilters({
           onValueChange={(value) => update('query', value)}
         />
         <SegmentedControl
+          className="sm:w-80 sm:shrink-0"
           label="Show"
           options={VIEW_OPTIONS}
           value={filters.view}
