@@ -93,3 +93,8 @@ The session header enhancements (PR #804) shipped with several accessibility gap
 - [ ] `hasDetails` constant removed, guards simplified
 - [ ] Playwright visual audit spec added with long-ID mock data scenarios
 - [ ] `allowedHosts: true` in vite.config.ts documented or reverted
+
+## Reconciliation (2026-11-09 weekly queue sweep)
+
+- Evidence: #1,#4,#9,#11 shipped earlier; undefined tokens gone after header split (#2535/#2594); CopyableId.tsx no aria-live; SessionToolRail.tsx:175 aria-expanded without aria-controls; SessionHeaderDetails.tsx icon only for completed; vite.config.ts:118 allowedHosts undocumented
+- Status: Remaining: copy announcement (#6), aria-controls (#7), failed icon (#8), cancelled/sleeping/expired badge (#10), allowedHosts comment (#12)

@@ -11,8 +11,8 @@ Research: design v4 SAM idea 01M60R60ZQT4203MGXAVJNPRH5. Cloudflare confidential
 - [x] Tests: callback replay/expiry, CSRF, account isolation, cleanup, upstream failures
 - [x] Mobile/desktop browser screenshots and overflow assertions
 - [x] Specialist code review, staging Worker deployment, public endpoint and mobile/desktop checks
-- [ ] Configure OAuth client and verify real Cloudflare consent
-- [ ] PR with validation and explicit prototype limitations
+- [x] Configure OAuth client and verify real Cloudflare consent
+- [x] PR with validation and explicit prototype limitations
 
 Acceptance: no marketing/main-app storage or session dependency; no cloud tokens in browser/logs/URLs; deployments do not run in forks; env-derived domain; user gets clear bounded prototype outcome; self-host instructions reproducible; staging address serves verified build.
 
@@ -21,3 +21,9 @@ Workflow adjustment: reuse SAM-provided isolated branch/workspace and task file 
 Validation: 12 tests, lint/typecheck/dry-run build, public-doc build/link checks and 12 browser screenshots pass; real local cross-site form/redirect/cookie handoff passes. Security and completion reviewers passed code. Staging run 40679197642 deployed the Worker but OAuth client configuration returned403; requested OAuth Client Read/Write on staging deployment token. Live API evidence identified wildcard `*.sammy.party/*` interception; deployment now adds exact installer hostname route. New bounded staging smoke provisions/checks/deletes a temporary Worker independently of OAuth consent.
 
 Staging run [40680257534](https://github.com/raphaeltm/simple-agent-manager/actions/runs/40680257534): temporary Worker provisioning, anonymous401, ownership handoff and cleanup passed; exact routing fixed. Live install.sammy.party serves build23852a97f; mobile/desktop screenshots reviewed, no overflow, login correctly disabled. Real endpoint checks: foreign-Origin403, unconfigured sign-in503, anonymous session401, privacy200. OAuth provisioning403 is the remaining blocker; no real consent success claimed. Production configured but not deployed. Branch5151bdeef adds public prerequisite correction. PR held until staging OAuth verification per /do phase6 gate.
+
+## Reconciliation (2026-11-09 weekly queue sweep)
+
+- Shipped: Prototype superseded by the shipped installer in #2475 (merged 2026-11-08), which registers the OAuth client in full mode (`OAUTH_REGISTRATION_TOKEN`) and verified real consent in fresh installs.
+- Production deploy run on `e727f0259` (2026-11-09 01:29 UTC) succeeded and contains this merge, so the change is live.
+- Moved from `tasks/active/` to `tasks/archive/` by the weekly reconciliation.

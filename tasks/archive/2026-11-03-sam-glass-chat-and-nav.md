@@ -50,7 +50,7 @@ surface in light and dark, desktop and mobile, uploaded to the PR.
 - [ ] Chat desktop and mobile resemble references 01/02/03/04/10 in both themes
 - [ ] At most one live blur on screen; panes separated by gutters; elements solid
 - [ ] All chat-attached panels and dialogs use the SAM Glass overlay
-- [ ] CI green on the draft PR; screenshots posted to the PR
+- [x] CI green on the draft PR; screenshots posted to the PR
 
 ## Implementation notes
 
@@ -61,3 +61,10 @@ surface in light and dark, desktop and mobile, uploaded to the PR.
 - Overlays use the full pane fill + live blur; light-mode chrome fill was too see-through.
 - Hierarchy modal closes the phone chat-list drawer first (two live blurs otherwise).
 - Docs screenshots under apps/www/public/images/docs predate SAM Glass; regenerating them is a separate pass.
+
+## Reconciliation (2026-11-09 weekly queue sweep)
+
+- Shipped: #2506 merged 2026-11-04 (originally requested as a draft; later merged), with follow-ups #2522 and #2529.
+- Production deploy run on `e727f0259` (2026-11-09 01:29 UTC) succeeded and contains this merge, so the change is live.
+- The unchecked visual acceptance items were not re-verified in this sweep.
+- Moved from `tasks/active/` to `tasks/archive/` by the weekly reconciliation.

@@ -24,3 +24,8 @@ stay accurate after the new one lands. The image itself is what needs replacing.
       `apps/www/src/content/CLAUDE.md` (real components, mock data, dark and light).
 - [ ] Replace `/images/features/sam-ideas-detail.png` and restore label-specific alt text.
 - [ ] Check the `/features/automation` page at phone and desktop widths.
+
+## Reconciliation (2026-11-09 weekly queue sweep)
+
+- Evidence: #2449 re-captured sam-ideas-detail(-light) and rewrote alt text/captions (apps/www/src/data/features/automation.json); capture test updated
+- Status: Remaining: decide whether a Start work button/sheet shot is wanted, then phone/desktop check of /features/automation.

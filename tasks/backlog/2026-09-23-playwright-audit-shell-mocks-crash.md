@@ -45,3 +45,8 @@ mocking `/api/credentials*`, `/api/github/installations`, `/api/workspaces`,
       spec broken by the same cause is fixed
 - [ ] The default `{}` fallback in `setupAuditRoutes` fails loudly (or logs) for unmatched
       `/api/**` paths so the next new shell fetch is noticed
+
+## Reconciliation (2026-11-09 weekly queue sweep)
+
+- Evidence: #2439, #2481 per-spec mocks; admin-trials-audit.spec.ts deleted by #2588; apps/web/tests/playwright/audit-routes.ts:106 still returns {}
+- Status: Remains: central array defaults + wizard dismissal in setupAuditRoutes, loud fallback, full-corpus run (example spec now gone)

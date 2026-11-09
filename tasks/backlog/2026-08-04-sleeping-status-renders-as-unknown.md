@@ -67,3 +67,8 @@ is checking whether their work survived.
       — the fallback silently hides every one of them
 - [ ] Simplify the "Don't read too much into the badges" paragraph in
       `guides/instant-sessions.md` once the label is correct
+
+## Reconciliation (2026-11-09 weekly queue sweep)
+
+- Evidence: #2230 added sleeping to StatusBadge statusConfig; health_status='unhealthy' still written at vm-agent-container-runtime.ts:178,213 and session-sleep-teardown.ts:307; NodeOverviewSection.tsx:53 renders the health badge (NodeCard.tsx removed by #2528)
+- Status: Remaining: sleeping node shown Unhealthy, Playwright audit, audit of other missing statuses, unused STATUS_LABELS

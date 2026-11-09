@@ -85,3 +85,8 @@ Separately, admins need a dedicated operational surface for monitoring platform-
 - `.claude/rules/09-task-tracking.md`
 - `.claude/rules/14-do-workflow-persistence.md`
 - `.claude/rules/17-ui-visual-testing.md`
+
+## Reconciliation (2026-11-09 weekly queue sweep)
+
+- Evidence: PR #994, PR #2403 (NavSidebar.tsx Infrastructure link ungated); PR #2588 removed trials; AuthProvider.tsx:48 exposes only isSuperadmin; no /api/admin/platform-infra routes
+- Status: Nav half shipped and trial context moot; remaining: admin capability flags, node-association metadata, platform-infra admin API and page for admin role

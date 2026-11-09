@@ -296,3 +296,13 @@ Raphaël approved the paid cold build, then asked for iteration until it works. 
 Peak disk 7.9 GB, 7.7 GB free at the end. Memory peak is unobserved: cgroup `memory.peak` is not readable inside the managed container. No OOM kill occurred on the 8 GiB instance. The elapsed-time compute estimate is about $0.11, about $0.14 across all four runs, before allowances; actual billing is not reconciled. Evidence: `tasks/evidence/2026-11-03-installer-cold-build/result.json` and `progress.jsonl`.
 
 This proves the fit-only cold build (artifacts, no tests). It does not prove a full install. Deployment, OAuth sign-in and revocation still need the OAuth client. PRs #2465/#2475 stay draft and unmerged.
+
+## Reconciliation (2026-11-09 weekly queue sweep)
+
+- Shipped: #2475 (merged 2026-11-08) shipped the user-owned installer; draft #2465 was closed as superseded by it.
+- Production deploy run on `e727f0259` (2026-11-09 01:29 UTC) succeeded and contains this merge, so the change is live.
+- The ten top-level plan items (runner-neutral engine through CI/staging proof) are superseded by
+  this file's later implementation and publication checkpoints and shipped in #2475; their boxes
+  were never ticked as the work moved into those checkpoints. They were not individually
+  re-verified in this sweep. The shared-engine CI parity work (production still runs with `use_shared_engine` unset in `.github/workflows/deploy-reusable.yml`) and the adversarial-audit items are carried forward in `tasks/backlog/2026-11-09-installer-shared-engine-follow-ups.md`.
+- Moved from `tasks/active/` to `tasks/archive/` by the weekly reconciliation.

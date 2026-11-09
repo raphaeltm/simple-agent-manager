@@ -82,3 +82,9 @@ Constraint: do not relax the proof requirement (rule 56).
 - [x] A slept workspace whose wake released its binding gets deletion proof on its first due attempt.
 - [x] Its stopped node is destroyed on the first cleanup pass.
 - [x] No unbound workspace without a held wake claim is treated as preserved, including one with only a stale wake task.
+
+## Reconciliation (2026-11-09 weekly queue sweep)
+
+- Shipped: #2526 merged 2026-11-04.
+- Production deploy run on `e727f0259` (2026-11-09 01:29 UTC) succeeded and contains this merge, so the change is live.
+- Moved from `tasks/active/` to `tasks/archive/` by the weekly reconciliation.

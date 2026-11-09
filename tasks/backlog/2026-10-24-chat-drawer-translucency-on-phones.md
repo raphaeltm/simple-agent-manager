@@ -46,3 +46,8 @@ Affected files, all with the same two lines:
       concluding the blur was the fix.
 - [ ] Light mode checked too: `--sam-glass-bg-modal` is 60% there, so the bleed-through is at
       least as visible.
+
+## Reconciliation (2026-11-09 weekly queue sweep)
+
+- Evidence: #2506 moved all five drawers onto one shared apps/web/src/components/shell/GlassSheet.tsx (AC: one place); each still passes backdrop="desktop" (scrim hidden below md)
+- Status: Remaining: decide/implement phone legibility (opaque full-screen pane or scrim) and screenshots.

@@ -92,3 +92,8 @@ The first groundwork slice should make a deployment such as `dev-a.sammy.party` 
 - `tasks/archive/2026-06-13-app-route-dns-and-environment-teardown-cleanup.md`
 - `apps/www/src/content/docs/docs/guides/self-hosting.mdx`
 - `apps/www/src/content/docs/docs/reference/configuration.md`
+
+## Reconciliation (2026-11-09 weekly queue sweep)
+
+- Evidence: #2475 added infra/resources/config.ts:zoneRelativeDnsName used by infra/resources/dns.ts; apps/api/src/services/dns-core.ts:198 still sends ws-${id}; dns-node-backend.ts:81 still sends ${nodeId}.vm; scripts/deploy/sync-wrangler-config.ts:563-571 still sets zone_name: baseDomain
+- Status: Pulumi nested-domain DNS shipped; remaining: fully qualified runtime DNS names, Wrangler routes by zone_id, docs

@@ -110,3 +110,9 @@ landing captures, including actual unavailable state, and gave final verdict:
 design blockers or visible regression. Screenshot artifact12833588308. Review and
 validation recorded in PR2465. Live Browser Back check retained both floor canvases.
 Design work complete; real OAuth and aggregate PR merge remain blocked as before.
+
+## Reconciliation (2026-11-09 weekly queue sweep)
+
+- Shipped: Brand work landed through #2475 (merged 2026-11-08), which contains all of #2465; #2465 itself was closed unmerged.
+- Production deploy run on `e727f0259` (2026-11-09 01:29 UTC) succeeded and contains this merge, so the change is live.
+- Moved from `tasks/active/` to `tasks/archive/` by the weekly reconciliation.

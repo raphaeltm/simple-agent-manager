@@ -102,3 +102,9 @@ Debugging agents in the Operations project cannot answer "why is this node still
   - decide `status = 'pending'` → re-open an executed approval (first attempt was non-discriminating: a deny also moves `expires_at`, so the expiry conjunct masked it; the re-open test fixes that)
   - decide `expires_at > ?` → approve an expired request
 - Bug found by the telemetry-source test: the capture source selected `trigger` (column is `capture_trigger`).
+
+## Reconciliation (2026-11-09 weekly queue sweep)
+
+- Shipped: #2502 merged 2026-11-04.
+- Production deploy run on `e727f0259` (2026-11-09 01:29 UTC) succeeded and contains this merge, so the change is live.
+- Moved from `tasks/active/` to `tasks/archive/` by the weekly reconciliation.

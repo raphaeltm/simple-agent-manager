@@ -13,3 +13,8 @@ Discovered by the task-completion-validator after PR merge.
 - [ ] Asserts correct AI Gateway URL structure (account ID, gateway ID, provider path)
 - [ ] Tests both streaming and non-streaming OpenAI requests
 - [ ] Verifies OpenAI credential resolution path (CF_AIG_TOKEN or platform credential)
+
+## Reconciliation (2026-11-09 weekly queue sweep)
+
+- Evidence: apps/api/tests/unit/routes/ai-proxy-accounting.test.ts:351 covers OpenAI Responses forwarding; no test drives forwardToOpenAI chat-completions branch (ai-proxy-upstream.ts:203) asserting the gateway /openai/v1/chat/completions URL
+- Status: Remaining: route-level OpenAI chat-completions URL test, streaming and non-streaming

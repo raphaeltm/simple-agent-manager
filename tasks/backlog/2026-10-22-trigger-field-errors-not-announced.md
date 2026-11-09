@@ -29,3 +29,8 @@ predate that change and were left as they were to keep the prototype's diff focu
 - [ ] Component tests assert the accessible description while an error is shown and its absence
       after it is fixed, as the email field test does.
 - [ ] Playwright audit of the editor's error states at 375 px and 1280 px still passes.
+
+## Reconciliation (2026-11-09 weekly queue sweep)
+
+- Evidence: #2447 moved GitHub filter fields onto shared Field helper; steps-start-when.tsx:156-159,185-188 still render separate <p role="alert"> for errors.github/errors.webhook; WebhookTriggerFields.tsx has no aria-invalid
+- Status: Remaining: wire step-level github/webhook errors into the fields and drop the alert siblings.

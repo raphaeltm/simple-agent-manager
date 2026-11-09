@@ -124,3 +124,9 @@ Waived by Raphaël for this work (session `eecddba8`, 2026-11-07).
   `services/provisioning-attempt-limits.ts`. LOWs done: quota target lookup fails closed;
   stale-lease restart test with a skipped first tier. Compaction: per-source test traced into
   `buildProvisioningExhaustionPlan` (two tiers survive); both proven by revert.
+
+## Reconciliation (2026-11-09 weekly queue sweep)
+
+- Shipped: #2576 merged 2026-11-07 (stacked on #2571 and #2572, both merged).
+- Production deploy run on `e727f0259` (2026-11-09 01:29 UTC) succeeded and contains this merge, so the change is live.
+- Moved from `tasks/active/` to `tasks/archive/` by the weekly reconciliation.
