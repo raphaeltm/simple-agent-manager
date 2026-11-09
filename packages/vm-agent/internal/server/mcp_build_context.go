@@ -123,6 +123,7 @@ func (s *Server) collectAndUploadBuildContext(ctx context.Context, workspaceID, 
 	if err != nil {
 		return nil, err
 	}
+	defer source.Close()
 	file, err := os.CreateTemp("", "sam-build-context-*.tar.zst")
 	if err != nil {
 		return nil, fmt.Errorf("cannot create context archive: %w", err)
@@ -197,7 +198,13 @@ func (s *Server) contextCallback(ctx context.Context, workspaceID, path string, 
 
 // Strict source resolution: never collect the stale host clone on a VM. Instant
 // reads /workspaces directly, and does not invoke any Docker command.
-func (s *Server) resolveContextSourceDir(ctx context.Context, workspaceID string, runtime *WorkspaceRuntime, requested string) (string, error) {
+func (s *Server) resolveContextSourceDir(ctx context.Context, workspaceID string, runtime *WorkspaceRuntime, requested string) (*os.Root, error) {
+	return s.openContextSourceDir(ctx, workspaceID, runtime, requested, nil)
+}
+
+// beforeOpen is a deterministic test barrier for replacing workingDir after
+// validation. Only the trusted mountpoint is opened by host pathname.
+func (s *Server) openContextSourceDir(ctx context.Context, workspaceID string, runtime *WorkspaceRuntime, requested string, beforeOpen func()) (*os.Root, error) {
 	path := strings.TrimSpace(requested)
 	if path == "" {
 		path = runtime.ContainerWorkDir
@@ -210,31 +217,30 @@ func (s *Server) resolveContextSourceDir(ctx context.Context, workspaceID string
 	}
 	rel, ok := containerPathRelativeToWorkspaces(path)
 	if !ok {
-		return "", fmt.Errorf("workingDir must be a directory under /workspaces without traversal")
+		return nil, fmt.Errorf("workingDir must be a directory under /workspaces without traversal")
 	}
 	root := containerWorkspacesRoot
 	if !s.config.IsStandaloneMode() {
 		out, err := exec.CommandContext(ctx, container.DockerCLIPath(), "volume", "inspect", bootstrap.VolumeNameForWorkspace(workspaceID), "--format", "{{.Mountpoint}}").Output()
 		if err != nil {
-			return "", fmt.Errorf("cannot resolve devcontainer volume; start the workspace and retry")
+			return nil, fmt.Errorf("cannot resolve devcontainer volume; start the workspace and retry")
 		}
 		root = strings.TrimSpace(string(out))
 		if root == "" || !filepath.IsAbs(root) {
-			return "", fmt.Errorf("devcontainer volume has no absolute mountpoint")
+			return nil, fmt.Errorf("devcontainer volume has no absolute mountpoint")
 		}
 	}
-	source := filepath.Join(root, rel)
-	resolved, err := filepath.EvalSymlinks(source)
+	base, err := os.OpenRoot(root)
 	if err != nil {
-		return "", fmt.Errorf("workingDir is unavailable: %w", err)
+		return nil, fmt.Errorf("workspace mountpoint is unavailable; start the workspace and retry")
 	}
-	realRoot, err := filepath.EvalSymlinks(root)
+	defer base.Close()
+	if beforeOpen != nil {
+		beforeOpen()
+	}
+	source, err := base.OpenRoot(rel)
 	if err != nil {
-		return "", err
+		return nil, fmt.Errorf("workingDir is unavailable or escapes the workspace mountpoint; select a local workspace directory")
 	}
-	check, err := filepath.Rel(realRoot, resolved)
-	if err != nil || check == ".." || strings.HasPrefix(check, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("workingDir symlink escapes workspace volume")
-	}
-	return resolved, nil
+	return source, nil
 }

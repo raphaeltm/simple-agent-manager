@@ -61,7 +61,7 @@ func (l *localLoader) stage(ctx context.Context, path, base string) (string, err
 	if err := l.p.force(path, l.max); err != nil {
 		return "", err
 	}
-	f, err := os.Open(path)
+	f, err := l.p.open(path)
 	if err != nil {
 		return "", err
 	}
@@ -157,7 +157,7 @@ func (l *localLoader) path(value, base string) (string, error) {
 	if !filepath.IsAbs(value) {
 		value = filepath.Join(base, value)
 	}
-	if err := validatePath(l.p.root, value); err != nil {
+	if err := l.p.validatePath(value); err != nil {
 		return "", err
 	}
 	return value, nil

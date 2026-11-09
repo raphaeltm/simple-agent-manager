@@ -29,7 +29,20 @@ func fixture(t *testing.T, files map[string]string) string {
 	}
 	return root
 }
+func testRoot(t *testing.T, path string) *os.Root {
+	t.Helper()
+	root, err := os.OpenRoot(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { root.Close() })
+	return root
+}
 func bundle(t *testing.T, root string) map[string]string {
+	t.Helper()
+	return bundleRoot(t, testRoot(t, root))
+}
+func bundleRoot(t *testing.T, root *os.Root) map[string]string {
 	t.Helper()
 	var out bytes.Buffer
 	_, err := Collect(context.Background(), Options{Root: root}, &out)
@@ -62,7 +75,7 @@ func bundle(t *testing.T, root string) map[string]string {
 func TestOverridesAndRuntimeSecrets(t *testing.T) {
 	root := fixture(t, map[string]string{"compose.yaml": "services:\n  web:\n    build: ./old\n    env_file: runtime.env\n    environment:\n      SECRET: ${SECRET:?required}\n", "compose.override.yaml": "services:\n  web:\n    build: ./app\n", "runtime.env": "SECRET=must-never-leak", ".env": "LOCAL_SECRET=never-leak", "app/Dockerfile": "FROM scratch\n", "app/source": "yes", "old/Dockerfile": "FROM scratch\n"})
 	var out bytes.Buffer
-	_, err := Collect(context.Background(), Options{Root: root, SecretKeys: []string{"SECRET"}}, &out)
+	_, err := Collect(context.Background(), Options{Root: testRoot(t, root), SecretKeys: []string{"SECRET"}}, &out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +101,7 @@ func TestOverridesAndRuntimeSecrets(t *testing.T) {
 func bundleWithSecrets(t *testing.T, root string) map[string]string {
 	t.Helper() // Same placeholder as node publish, without host env.
 	var out bytes.Buffer
-	_, err := Collect(context.Background(), Options{Root: root, SecretKeys: []string{"SECRET"}}, &out)
+	_, err := Collect(context.Background(), Options{Root: testRoot(t, root), SecretKeys: []string{"SECRET"}}, &out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +168,7 @@ func TestRejectEscapesAndRemoteContexts(t *testing.T) {
 	for _, c := range []string{"../outside", "https://example.com/repo.git", "git@example.com:repo.git"} {
 		t.Run(c, func(t *testing.T) {
 			root := fixture(t, map[string]string{"compose.yaml": "services:\n  web:\n    build: " + c + "\n"})
-			_, err := Collect(context.Background(), Options{Root: root}, io.Discard)
+			_, err := Collect(context.Background(), Options{Root: testRoot(t, root)}, io.Discard)
 			if err == nil {
 				t.Fatal("accepted unsafe context")
 			}
@@ -165,18 +178,18 @@ func TestRejectEscapesAndRemoteContexts(t *testing.T) {
 	if err := os.Symlink(t.TempDir(), filepath.Join(root, "escape")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Collect(context.Background(), Options{Root: root}, io.Discard); err == nil {
+	if _, err := Collect(context.Background(), Options{Root: testRoot(t, root)}, io.Discard); err == nil {
 		t.Fatal("accepted escaping symlink")
 	}
 }
 func TestByteAndDeadlineBounds(t *testing.T) {
 	root := fixture(t, map[string]string{"compose.yaml": "services:\n  web:\n    build: .\n", "Dockerfile": "FROM scratch\n", "big": strings.Repeat("x", 20000)})
-	if _, err := Collect(context.Background(), Options{Root: root, MaxBytes: 4096}, io.Discard); err == nil {
+	if _, err := Collect(context.Background(), Options{Root: testRoot(t, root), MaxBytes: 4096}, io.Discard); err == nil {
 		t.Fatal("size limit not enforced")
 	}
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 	defer cancel()
-	if _, err := Collect(ctx, Options{Root: root}, io.Discard); err == nil {
+	if _, err := Collect(ctx, Options{Root: testRoot(t, root)}, io.Discard); err == nil {
 		t.Fatal("deadline ignored")
 	}
 }
@@ -196,7 +209,7 @@ func TestAdditionalContextsDockerfileAndTarNames(t *testing.T) {
 	for _, value := range []string{"service:base", "docker-image://alpine:latest", "https://example.com/context.git"} {
 		t.Run(value, func(t *testing.T) {
 			root := fixture(t, map[string]string{"compose.yaml": "services:\n  web:\n    build:\n      context: .\n      additional_contexts:\n        shared: " + value + "\n", "Dockerfile": "FROM scratch\n"})
-			if _, err := Collect(context.Background(), Options{Root: root}, io.Discard); err == nil {
+			if _, err := Collect(context.Background(), Options{Root: testRoot(t, root)}, io.Discard); err == nil {
 				t.Fatal("accepted nonlocal additional_context")
 			}
 		})
@@ -204,7 +217,7 @@ func TestAdditionalContextsDockerfileAndTarNames(t *testing.T) {
 }
 func TestSecretBuildReferenceRejected(t *testing.T) {
 	root := fixture(t, map[string]string{"compose.yaml": "services:\n  web:\n    build:\n      context: .\n      args:\n        BAD: ${SECRET}\n", "Dockerfile": "FROM scratch\n"})
-	if _, err := Collect(context.Background(), Options{Root: root, SecretKeys: []string{"SECRET"}}, io.Discard); err == nil {
+	if _, err := Collect(context.Background(), Options{Root: testRoot(t, root), SecretKeys: []string{"SECRET"}}, io.Discard); err == nil {
 		t.Fatal("accepted secret build argument")
 	}
 }
@@ -270,7 +283,7 @@ func TestNestedIncludeAndExtendsWithEmptyInterpolationFiles(t *testing.T) {
 func TestIncludeCannotReadOutsideRoot(t *testing.T) {
 	outside := fixture(t, map[string]string{"compose.yaml": "services:\n  web:\n    build: .\n", "Dockerfile": "FROM scratch\n"})
 	root := fixture(t, map[string]string{"compose.yaml": "include:\n  - " + filepath.Join(outside, "compose.yaml") + "\n"})
-	if _, err := Collect(context.Background(), Options{Root: root}, io.Discard); err == nil {
+	if _, err := Collect(context.Background(), Options{Root: testRoot(t, root)}, io.Discard); err == nil {
 		t.Fatal("include escaped root")
 	}
 }
@@ -296,7 +309,7 @@ func TestDanglingEscapingSymlink(t *testing.T) {
 	if err := os.Symlink("../missing-outside", filepath.Join(root, "escape")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Collect(context.Background(), Options{Root: root}, io.Discard); err == nil {
+	if _, err := Collect(context.Background(), Options{Root: testRoot(t, root)}, io.Discard); err == nil {
 		t.Fatal("dangling escaping symlink accepted")
 	}
 }
@@ -331,7 +344,7 @@ func TestCollectMonorepoScale(t *testing.T) {
 		}
 	}
 	start := time.Now()
-	result, err := Collect(context.Background(), Options{Root: root}, io.Discard)
+	result, err := Collect(context.Background(), Options{Root: testRoot(t, root)}, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}

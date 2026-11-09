@@ -9,6 +9,7 @@ import (
 	"github.com/compose-spec/compose-go/v2/types"
 	"github.com/moby/patternmatcher"
 	"github.com/moby/patternmatcher/ignorefile"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,13 +21,18 @@ type buildContext struct {
 }
 type collectionPlan struct {
 	root          string
+	source        *os.Root
 	contexts      []buildContext
 	forced, empty map[string]bool
 	sensitive     []os.FileInfo
 }
 
 func makePlan(ctx context.Context, opts Options) (*collectionPlan, error) {
-	p := &collectionPlan{root: opts.Root, forced: map[string]bool{}, empty: map[string]bool{}}
+	root, err := filepath.Abs(opts.Root.Name())
+	if err != nil {
+		return nil, err
+	}
+	p := &collectionPlan{root: root, source: opts.Root, forced: map[string]bool{}, empty: map[string]bool{}}
 	env := make([]string, 0, len(opts.BuildEnv)+len(opts.SecretKeys))
 	for k, v := range opts.BuildEnv {
 		env = append(env, k+"="+v)
@@ -47,14 +53,22 @@ func makePlan(ctx context.Context, opts Options) (*collectionPlan, error) {
 		envMap[k] = SecretPlaceholder
 	}
 	graph := &localLoader{p: p, max: opts.MaxBytes, temp: temp, env: envMap, staged: map[string]string{}, originals: map[string]string{}, visiting: map[string]bool{}}
-	options, err := cli.NewProjectOptions(nil, cli.WithWorkingDirectory(opts.Root), cli.WithEnv(env), cli.WithConfigFileEnv, cli.WithDefaultConfigPath, cli.WithoutEnvironmentResolution, cli.WithoutLabelsResolution, cli.WithProfiles([]string{"*"}), cli.WithResourceLoader(graph), cli.WithLoadOptions(func(o *loader.Options) { o.SkipResolveEnvironment = true }))
+	options, err := cli.NewProjectOptions(nil, cli.WithWorkingDirectory(root), cli.WithEnv(env), cli.WithResourceLoader(graph), cli.WithConfigFileEnv, cli.WithoutEnvironmentResolution, cli.WithoutLabelsResolution, cli.WithProfiles([]string{"*"}), cli.WithLoadOptions(func(o *loader.Options) { o.SkipResolveEnvironment = true }))
 	if err != nil {
 		return nil, err
 	}
-	for _, path := range options.ConfigPaths {
-		if err := p.force(path, opts.MaxBytes); err != nil {
+	if err := p.discover(options); err != nil {
+		return nil, err
+	}
+	for i, path := range options.ConfigPaths {
+		if path == "-" || remoteContext(path) {
+			return nil, fmt.Errorf("Compose input %q must be a local file under workingDir", path)
+		}
+		staged, err := graph.Load(ctx, path)
+		if err != nil {
 			return nil, err
 		}
+		options.ConfigPaths[i] = staged
 	}
 	project, err := options.LoadProject(ctx)
 	if err != nil {
@@ -70,29 +84,29 @@ func makePlan(ctx context.Context, opts Options) (*collectionPlan, error) {
 	}
 	// Host env and dotenv are never loaded. Build interpolation uses only the
 	// server's non-secret config and the node executor's secret placeholders.
-	if err := p.markEmpty(filepath.Join(opts.Root, ".env")); err != nil {
+	if err := p.markEmpty(filepath.Join(root, ".env")); err != nil {
 		return nil, err
 	}
 
 	for _, service := range project.AllServices() {
-		if err := p.addSpec(service.Name, service.ContainerSpec, service.Build, project.WorkingDir, opts.MaxBytes); err != nil {
+		if err := p.addSpec(ctx, service.Name, service.ContainerSpec, service.Build, project.WorkingDir, opts.MaxBytes); err != nil {
 			return nil, err
 		}
 		for _, hook := range service.PreStart {
-			if err := p.addSpec(service.Name+" pre_start", hook.ContainerSpec, nil, project.WorkingDir, opts.MaxBytes); err != nil {
+			if err := p.addSpec(ctx, service.Name+" pre_start", hook.ContainerSpec, nil, project.WorkingDir, opts.MaxBytes); err != nil {
 				return nil, err
 			}
 		}
 	}
 	for _, job := range project.AllJobs() {
-		if err := p.addSpec(job.Name, job.ContainerSpec, job.Build, project.WorkingDir, opts.MaxBytes); err != nil {
+		if err := p.addSpec(ctx, job.Name, job.ContainerSpec, job.Build, project.WorkingDir, opts.MaxBytes); err != nil {
 			return nil, err
 		}
 	}
 
 	for _, s := range project.Secrets {
 		if s.File != "" {
-			if err := validatePath(opts.Root, s.File); err != nil {
+			if err := p.validatePath(s.File); err != nil {
 				return nil, err
 			}
 			if err := p.markEmpty(s.File); err != nil {
@@ -115,10 +129,10 @@ func (p *collectionPlan) force(path string, max int64) error {
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(p.root, path)
 	}
-	if err := validatePath(p.root, path); err != nil {
+	if err := p.validatePath(path); err != nil {
 		return err
 	}
-	info, err := os.Stat(path)
+	info, err := p.stat(path)
 	if err != nil {
 		return err
 	}
@@ -129,19 +143,22 @@ func (p *collectionPlan) force(path string, max int64) error {
 		return fmt.Errorf("Compose input %s exceeds maximum %d bytes", path, max)
 	}
 	p.forced[path] = true
-	canonical, err := filepath.EvalSymlinks(path)
+	canonical, err := p.resolvePath(path)
 	if err != nil {
 		return err
 	}
 	p.forced[canonical] = true
 	for parent := filepath.Dir(path); within(p.root, parent) && parent != p.root; parent = filepath.Dir(parent) {
-		if info, err := os.Lstat(parent); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		if info, err := p.lstat(parent); err == nil && info.Mode()&os.ModeSymlink != 0 {
 			p.forced[parent] = true
 		}
 	}
 	return nil
 }
-func (p *collectionPlan) addContext(path, dockerfile string, max int64) error {
+func (p *collectionPlan) addContext(ctx context.Context, path, dockerfile string, max int64) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if path == "" {
 		path = p.root
 	}
@@ -154,24 +171,24 @@ func (p *collectionPlan) addContext(path, dockerfile string, max int64) error {
 		}
 		path = filepath.Join(p.root, path)
 	}
-	if err := validatePath(p.root, path); err != nil {
+	if err := p.validatePath(path); err != nil {
 		return err
 	}
-	info, err := os.Stat(path)
+	info, err := p.stat(path)
 	if err != nil {
 		return fmt.Errorf("build context %s: %w", path, err)
 	}
 	if !info.IsDir() {
 		return fmt.Errorf("build context %s must be a local directory", path)
 	}
-	canonical, err := filepath.EvalSymlinks(path)
+	canonical, err := p.resolvePath(path)
 	if err != nil {
 		return err
 	}
 	if canonical != path {
 		p.forced[path] = true
 		for parent := filepath.Dir(path); within(p.root, parent) && parent != p.root; parent = filepath.Dir(parent) {
-			if info, err := os.Lstat(parent); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			if info, err := p.lstat(parent); err == nil && info.Mode()&os.ModeSymlink != 0 {
 				p.forced[parent] = true
 			}
 		}
@@ -193,18 +210,22 @@ func (p *collectionPlan) addContext(path, dockerfile string, max int64) error {
 		ignores = append(ignores, dockerfile+".dockerignore")
 	}
 	for _, ignore := range ignores {
-		if _, err := os.Lstat(ignore); os.IsNotExist(err) {
+		if _, err := p.lstat(ignore); os.IsNotExist(err) {
 			continue
 		}
 		if err := p.force(ignore, max); err != nil {
 			return err
 		}
-		file, err := os.Open(ignore)
+		file, err := p.open(ignore)
 		if err != nil {
 			return err
 		}
-		patterns, err := ignorefile.ReadAll(file)
+		limited := &io.LimitedReader{R: &contextReader{ctx: ctx, r: file}, N: max + 1}
+		patterns, err := ignorefile.ReadAll(limited)
 		file.Close()
+		if limited.N == 0 {
+			return fmt.Errorf("ignore file exceeds maximum %d bytes", max)
+		}
 		if err != nil {
 			return err
 		}
@@ -261,11 +282,11 @@ func (p *collectionPlan) descends(path string) bool {
 }
 
 func (p *collectionPlan) markEmpty(path string) error {
-	if err := validatePath(p.root, path); err != nil {
+	if err := p.validatePath(path); err != nil {
 		return err
 	}
 	p.empty[path] = true
-	info, err := os.Stat(path)
+	info, err := p.stat(path)
 	if os.IsNotExist(err) {
 		return nil
 	}
@@ -275,7 +296,7 @@ func (p *collectionPlan) markEmpty(path string) error {
 	if !info.Mode().IsRegular() {
 		return fmt.Errorf("runtime env/secret file %s must be a regular file", path)
 	}
-	canonical, err := filepath.EvalSymlinks(path)
+	canonical, err := p.resolvePath(path)
 	if err != nil {
 		return err
 	}
@@ -295,7 +316,10 @@ func (p *collectionPlan) isSensitive(path string, info os.FileInfo) bool {
 	return false
 }
 
-func (p *collectionPlan) addSpec(name string, spec types.ContainerSpec, b *types.BuildConfig, base string, max int64) error {
+func (p *collectionPlan) addSpec(ctx context.Context, name string, spec types.ContainerSpec, b *types.BuildConfig, base string, max int64) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	for _, file := range spec.EnvFiles {
 		path := file.Path
 		if !filepath.IsAbs(path) {
@@ -315,11 +339,11 @@ func (p *collectionPlan) addSpec(name string, spec types.ContainerSpec, b *types
 	if strings.Contains(string(encoded), SecretPlaceholder) || strings.Contains(spec.Image, SecretPlaceholder) {
 		return fmt.Errorf("service/job %s uses a runtime secret in build/image fields; use non-secret build config", name)
 	}
-	if err := p.addContext(b.Context, b.Dockerfile, max); err != nil {
+	if err := p.addContext(ctx, b.Context, b.Dockerfile, max); err != nil {
 		return fmt.Errorf("service/job %s: %w", name, err)
 	}
 	for key, path := range b.AdditionalContexts {
-		if err := p.addContext(path, "", max); err != nil {
+		if err := p.addContext(ctx, path, "", max); err != nil {
 			return fmt.Errorf("service/job %s additional_context %s: %w", name, key, err)
 		}
 	}

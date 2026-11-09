@@ -23,7 +23,9 @@ const (
 )
 
 type Options struct {
-	Root       string
+	// Root is an already-open directory capability. The caller must obtain it
+	// from a trusted base with Root.OpenRoot and owns its lifetime.
+	Root       *os.Root
 	BuildEnv   map[string]string
 	SecretKeys []string
 	MaxBytes   int64
@@ -79,24 +81,19 @@ func Collect(parent context.Context, opts Options, output io.Writer) (*Result, e
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	root, err := filepath.Abs(opts.Root)
+	if opts.Root == nil {
+		return nil, fmt.Errorf("an open source root is required")
+	}
+	// This string is only a Compose path label. Source IO always uses Root.
+	root, err := filepath.Abs(opts.Root.Name())
 	if err != nil {
 		return nil, err
 	}
-	root, err = filepath.EvalSymlinks(root)
-	if err != nil {
-		return nil, err
-	}
-	opts.Root = root
 	plan, err := makePlan(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
-	safe, err := os.OpenRoot(root)
-	if err != nil {
-		return nil, err
-	}
-	defer safe.Close()
+	safe := opts.Root
 	hash := sha256.New()
 	compressed := &budgetWriter{ctx: ctx, w: io.MultiWriter(output, hash), max: opts.MaxBytes}
 	encoder, err := zstd.NewWriter(compressed, zstd.WithEncoderConcurrency(1))
@@ -105,26 +102,23 @@ func Collect(parent context.Context, opts Options, output io.Writer) (*Result, e
 	}
 	defer encoder.Close()
 	tw := tar.NewWriter(&budgetWriter{ctx: ctx, w: encoder, max: opts.MaxBytes})
-	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+	err = fs.WalkDir(rootWalkFS{root: safe}, ".", func(rel string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
 		if rel == "." {
 			return nil
 		}
+		path := filepath.Join(root, filepath.FromSlash(rel))
 		needed, err := plan.includes(path)
 		if err != nil {
 			return err
 		}
 		if !needed && d.IsDir() && !plan.descends(path) {
-			return filepath.SkipDir
+			return fs.SkipDir
 		}
 		if !needed {
 			return nil
@@ -135,7 +129,7 @@ func Collect(parent context.Context, opts Options, output io.Writer) (*Result, e
 		return nil, err
 	}
 	for path := range plan.empty {
-		if _, err := os.Lstat(path); os.IsNotExist(err) {
+		if _, err := plan.lstat(path); os.IsNotExist(err) {
 			rel, _ := filepath.Rel(root, path)
 			if err := tw.WriteHeader(&tar.Header{Name: filepath.ToSlash(rel), Mode: 0600, Typeflag: tar.TypeReg}); err != nil {
 				return nil, err
@@ -151,7 +145,7 @@ func Collect(parent context.Context, opts Options, output io.Writer) (*Result, e
 	return &Result{Bytes: compressed.n, SHA256: hex.EncodeToString(hash.Sum(nil)), DurationMs: time.Since(started).Milliseconds()}, nil
 }
 func writeEntry(ctx context.Context, tw *tar.Writer, safe *os.Root, plan *collectionPlan, path, rel string) error {
-	if err := validatePath(plan.root, path); err != nil {
+	if err := plan.validatePath(path); err != nil {
 		return err
 	}
 	info, err := safe.Lstat(rel)
@@ -175,6 +169,24 @@ func writeEntry(ctx context.Context, tw *tar.Writer, safe *os.Root, plan *collec
 	if !info.Mode().IsRegular() && !info.IsDir() && link == "" {
 		return fmt.Errorf("unsupported special file %s; remove it from build inputs", rel)
 	}
+	// Open before emitting metadata, then retain the descriptor through copying.
+	// A rename/symlink swap cannot change which inode supplies the payload.
+	var file *os.File
+	if info.Mode().IsRegular() && !plan.isSensitive(path, info) {
+		file, err = plan.open(path)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+		opened, err := file.Stat()
+		if err != nil {
+			return err
+		}
+		if !os.SameFile(info, opened) {
+			return fmt.Errorf("file %s changed while collecting; retry", rel)
+		}
+		info = opened
+	}
 	h, err := tar.FileInfoHeader(info, link)
 	if err != nil {
 		return err
@@ -196,12 +208,6 @@ func writeEntry(ctx context.Context, tw *tar.Writer, safe *os.Root, plan *collec
 	if h.Typeflag != tar.TypeReg || h.Size == 0 {
 		return nil
 	}
-	// os.Root prevents path replacement races from opening outside the source.
-	file, err := safe.Open(rel)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
 	n, err := io.Copy(tw, &contextReader{ctx: ctx, r: io.LimitReader(file, h.Size)})
 	if err != nil {
 		return err
@@ -218,13 +224,14 @@ func within(root, path string) bool {
 
 // Resolve each component before consuming '..', including dangling links.
 // EvalSymlinks alone loses the escape evidence when the target is missing.
-func validatePath(root, path string) error {
+func (p *collectionPlan) resolvePath(path string) (string, error) {
+	root := p.root
 	if !within(root, path) {
-		return fmt.Errorf("path %s escapes working directory; move inputs under %s", path, root)
+		return "", fmt.Errorf("path %s escapes working directory; move inputs under %s", path, root)
 	}
 	rel, err := filepath.Rel(root, path)
 	if err != nil {
-		return err
+		return "", err
 	}
 	parts := strings.Split(rel, string(filepath.Separator))
 	current := root
@@ -238,42 +245,46 @@ func validatePath(root, path string) error {
 		if part == ".." {
 			current = filepath.Dir(current)
 			if !within(root, current) {
-				return fmt.Errorf("symlink %s escapes working directory", path)
+				return "", fmt.Errorf("symlink %s escapes working directory", path)
 			}
 			continue
 		}
 		next := filepath.Join(current, part)
-		info, err := os.Lstat(next)
+		info, err := p.lstat(next)
 		if os.IsNotExist(err) {
 			current = next
 			continue
 		}
 		if err != nil {
-			return err
+			return "", err
 		}
 		if info.Mode()&os.ModeSymlink == 0 {
 			current = next
 			continue
 		}
 		if seen[next] {
-			return fmt.Errorf("cyclic symlink %s in build inputs", path)
+			return "", fmt.Errorf("cyclic symlink %s in build inputs", path)
 		}
 		seen[next] = true
-		target, err := os.Readlink(next)
+		rel, err := p.relative(next)
 		if err != nil {
-			return err
+			return "", err
+		}
+		target, err := p.source.Readlink(rel)
+		if err != nil {
+			return "", err
 		}
 		if filepath.IsAbs(target) {
 			if !within(root, target) {
-				return fmt.Errorf("symlink %s escapes working directory", path)
+				return "", fmt.Errorf("symlink %s escapes working directory", path)
 			}
 			target, err = filepath.Rel(root, target)
 			if err != nil {
-				return err
+				return "", err
 			}
 			current = root
 		}
 		parts = append(strings.Split(target, string(filepath.Separator)), parts...)
 	}
-	return nil
+	return current, nil
 }

@@ -1,0 +1,32 @@
+{
+  "recordedAt": "2026-11-09T10:23:00.644148+00:00",
+  "baseCommit": "88f136566c66cb3c0816283dbe96a556d96b06ea",
+  "results": [
+    {
+      "guard": "trusted-base-openroot",
+      "sourceSha256": "1ab047216f04c8743e0443bcb1c8168909fe8103a52aa1d5e78f051e8931a94a",
+      "mutantExitCode": 1,
+      "ownerControls": {
+        "TestContextSourceWorkingDirectorySwap/VM/owner": true,
+        "TestContextSourceWorkingDirectorySwap/Instant/owner": true
+      },
+      "attacksFailWithoutGuard": {
+        "TestContextSourceWorkingDirectorySwap/VM/swap": true,
+        "TestContextSourceWorkingDirectorySwap/Instant/swap": true
+      },
+      "mutationRestored": true
+    },
+    {
+      "guard": "preserve-source-capability",
+      "sourceSha256": "c867805572388d7d6d5a567322152e2f1cf0e9d9c1da2cef6a5e368e3419e97e",
+      "mutantExitCode": 1,
+      "ownerControls": {
+        "TestOpenedRootRetainsOwnerAfterPathSwap/owner": true
+      },
+      "attacksFailWithoutGuard": {
+        "TestOpenedRootRetainsOwnerAfterPathSwap/swap": true
+      },
+      "mutationRestored": true
+    }
+  ]
+}
