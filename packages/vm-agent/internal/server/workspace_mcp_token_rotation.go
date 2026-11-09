@@ -16,17 +16,18 @@ package server
 // that survived an agent restart). A rotated list is re-registered, which
 // persists it, and is handed to a live SessionHost through SetMcpServers.
 //
-// Live SessionHosts: a rebuild runs from running/recovery/error and does NOT
-// stop the workspace's SessionHosts, and bootstrap.PrepareWorkspace reuses an
-// already running devcontainer ("Devcontainer already running"), so those hosts
-// and their agent processes survive the rebuild. Restart from stopped/evicted
-// stops the hosts first (handleStopWorkspace, finishLocalWorkspaceEviction), but
-// restart from error can still find hosts left by a failed rebuild. Every host
-// therefore gets the rotated list through SetMcpServers, which is the smaller
-// option than stopping hosts during rebuild: it changes no lifecycle behaviour,
-// and the host's next agent (re)start uses the new token. An agent process that
-// is already running keeps the token it started with, which the control plane
-// has revoked, exactly as it keeps the revoked callback-token credentials.
+// Live SessionHosts: a rebuild runs from running/recovery/error and reuses an
+// already running devcontainer ("Devcontainer already running"), and restart
+// from error can find hosts left by a failed rebuild. An agent process keeps the
+// credentials it started with, all revoked, so the provisioning goroutine first
+// stops every SessionHost of the workspace (stopSessionHostProcessesForWorkspace)
+// and only then rotates. SetMcpServers is still needed for a host created after
+// that stop and before its session's rotated list is installed: agent attach
+// (handleAgentWS) and session start do not wait for provisioning, so such a host
+// can read the old list, and SetMcpServers gives its next agent start the new
+// token. An agent started by that host inside the window itself keeps the
+// revoked sam-mcp token (MCP calls fail with 401) until it restarts; it holds
+// the new callback token, so it is not a retired-runtime process.
 
 import (
 	"bytes"

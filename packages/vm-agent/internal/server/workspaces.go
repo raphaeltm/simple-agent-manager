@@ -365,12 +365,15 @@ func (s *Server) startWorkspaceProvision(
 	successType string,
 	successMessage string,
 	detail map[string]interface{},
-	rotateSamMcpTokens bool, // restart/rebuild delivered a new callback generation's token
+	credentialGenerationRotated bool, // restart/rebuild delivered a new callback generation's token
 ) {
 	go func() {
-		if rotateSamMcpTokens {
-			// Before anything else, so no provisioning step or restarted agent
-			// runs with a revoked sam-mcp token; bounded by its own budget.
+		if credentialGenerationRotated {
+			// Before anything else, so no provisioning step or agent runs with the
+			// previous generation's revoked credentials: first stop every agent
+			// process that started with them, then exchange the sessions' sam-mcp
+			// tokens (bounded by its own budget) for the agents started next.
+			s.stopSessionHostProcessesForWorkspace(provisionRuntime.ID)
 			s.rotateWorkspaceSamMcpTokens(provisionRuntime.ID, provisionRuntime.CallbackToken)
 		}
 		s.acquireBuildSlot(provisionRuntime.ID)

@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+
+	"github.com/workspace/vm-agent/internal/acp"
 )
 
 type workspaceReprovisionRequest struct {
@@ -116,6 +118,54 @@ func (s *Server) claimWorkspaceReprovision(ctx context.Context, workspaceID stri
 		s.propagateWorkspaceCallbackToken(workspaceID, snapshot.CallbackToken)
 	}
 	return runtime, snapshot, 0, nil
+}
+
+// stopSessionHostProcessesForWorkspace retires the agent processes of a
+// workspace whose callback generation was just rotated by a restart or rebuild.
+// The control plane revoked the previous generation before delivering the new
+// token, and an agent process keeps the credentials it started with (the AI
+// proxy key and Codex refresh URL carry the old callback token; ACP NewSession
+// was given the old sam-mcp token). A rebuild of a running workspace reuses the
+// running devcontainer and would otherwise leave those processes running as a
+// retired runtime. Each host is stopped and removed so the next attach or
+// prompt builds a new SessionHost from the current token and the rotated MCP
+// list and resumes the conversation through LoadSession.
+//
+// Unlike stopSessionHostsForWorkspace (stop, evict, delete), it keeps the
+// session's MCP servers, profile overrides, task context and interaction config
+// in memory and in SQLite: the sessions continue on the new generation, and
+// rotateWorkspaceSamMcpTokens needs the lists to exchange their tokens.
+//
+// Secret executions are cancelled too: they were accepted on the retired
+// runtime's sam-mcp token and run as its owning session, and stopping the host
+// cancels only the jobs it tracks, not ones accepted without a live host.
+//
+// Runs in the provisioning goroutine without workspaceLifecycleLock or
+// workspaceMu: host.Stop() syncs credentials and flushes reports, so it can
+// block for its own timeouts.
+func (s *Server) stopSessionHostProcessesForWorkspace(workspaceID string) {
+	s.cancelSecretExecutionsForOwner(workspaceID, "")
+	prefix := workspaceID + ":"
+
+	var hosts []*acp.SessionHost
+	s.sessionHostMu.Lock()
+	for key, host := range s.sessionHosts {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		hosts = append(hosts, host)
+		delete(s.sessionHosts, key)
+	}
+	s.sessionHostMu.Unlock()
+	for _, host := range hosts {
+		if host != nil {
+			host.Stop()
+		}
+	}
+	if len(hosts) > 0 {
+		slog.Info("Stopped agent processes started with the previous workspace credential generation",
+			"workspace", workspaceID, "sessions", len(hosts))
+	}
 }
 
 // commitWorkspaceReprovision applies a claimed restart in memory, in the final

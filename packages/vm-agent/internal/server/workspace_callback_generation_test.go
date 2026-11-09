@@ -331,10 +331,11 @@ func TestWorkspaceRestartStillRejectsUnknownFields(t *testing.T) {
 	}
 }
 
-// Rebuild keeps the workspace's SessionHosts, so this drives the full rotation
-// through the real handler: memory and SQLite-only sessions, retries, a refusal,
-// an untouched third-party entry and another workspace, the live host, the 202
-// returning before rotation finishes, and rotation finishing before provisioning.
+// Drives the full rotation through the real rebuild handler: memory and
+// SQLite-only sessions, retries, a refusal, an untouched third-party entry and
+// another workspace, the 202 returning before rotation finishes, and rotation
+// finishing before provisioning. Live SessionHosts are covered in
+// workspace_callback_generation_hosts_test.go.
 func TestWorkspaceRebuildRotatesSamMcpTokensBeforeProvisioning(t *testing.T) {
 	current := generationTestToken(t, generationTestWorkspace, "workspace", "gen-a", time.Hour)
 	delivered := generationTestToken(t, generationTestWorkspace, "workspace", "gen-b", time.Hour)
@@ -359,12 +360,6 @@ func TestWorkspaceRebuildRotatesSamMcpTokensBeforeProvisioning(t *testing.T) {
 		toPersistedMcpServers([]acp.McpServerEntry{sam("old-sqlite")})); err != nil {
 		t.Fatal(err)
 	}
-	liveHost := acp.NewSessionHost(acp.SessionHostConfig{GatewayConfig: acp.GatewayConfig{
-		CallbackToken: current, McpServers: []acp.McpServerEntry{sam("old-a"), composio},
-	}})
-	t.Cleanup(liveHost.Stop)
-	s.sessionHosts[generationTestWorkspace+":sess-a"] = liveHost
-
 	cp.respond = func(attempt int, old string) (int, string) {
 		switch {
 		case old == "old-forbidden":
@@ -449,9 +444,6 @@ func TestWorkspaceRebuildRotatesSamMcpTokensBeforeProvisioning(t *testing.T) {
 	}
 	if got := memory["ws-other:sess-x"][0].Token; got != "old-other" {
 		t.Errorf("another workspace's token changed to %q", got)
-	}
-	if !liveHost.UsesMcpServerToken(acp.SamMcpServerName, "new-a") {
-		t.Fatal("the live SessionHost would restart its agent with the revoked sam-mcp token")
 	}
 }
 

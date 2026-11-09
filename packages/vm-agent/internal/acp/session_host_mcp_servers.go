@@ -17,8 +17,8 @@ func (h *SessionHost) mcpServers() []McpServerEntry {
 // SetMcpServers replaces the MCP server configs used by this host's later agent
 // starts and ACP session requests. The control plane rotates the sam-mcp token
 // when it rotates the workspace callback generation; the server calls this with
-// the rotated list so a host that outlives the rotation (a rebuild reuses the
-// running devcontainer and keeps its hosts) cannot restart its agent with the
+// the rotated list so a host created while the rotation is in flight (the server
+// stops the workspace's earlier hosts first) cannot start its agent with the
 // revoked token. An agent process that is already running keeps the
 // configuration it was started with, exactly as with SetCallbackToken.
 //

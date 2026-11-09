@@ -63,7 +63,8 @@ were fenced correctly.
    `callbackGeneration`); the reactivating write rotates it; `verifyCallbackToken` and
    `validateActiveWorkspaceMcpToken` refuse a retired generation. When you add a path that starts a
    new runtime for an existing workspace or node, rotate the generation in that write and mint the
-   runtime's credentials from it. When you add a path that renews or delivers to an existing
+   runtime's credentials from it, and make sure no process of the old runtime keeps running (a VM
+   rebuild reuses the devcontainer, so the agent stops the old agent processes). When you add a path that renews or delivers to an existing
    runtime, carry the generation it verified or bound, never a fresh read. Never verify a callback
    JWT outside `verifyCallbackToken` (`tests/unit/services/callback-credential-generation.test.ts`
    enforces this). VM node rows are deliberately not rotated: their token stays with the host's VM
