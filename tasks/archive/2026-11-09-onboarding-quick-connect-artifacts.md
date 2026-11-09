@@ -33,7 +33,7 @@
 - [x] Playwright audit at 375 and 1280 (onboarding-inline-audit.spec.ts)
 - [x] StepForm.tsx split under 500 lines (SubscriptionConnect.tsx, ActionButton.tsx)
 - [x] Specialist review: security-auditor (0 critical/high; ambiguous-catalog test + all-or-nothing grant added), ui-ux-specialist (nested-dialog Escape, mobile screenshot, repo-question layout shift, credential scrub, back-nav lookup all fixed)
-- [ ] Staging: redeploy installer, fresh install on the BYOC account, live onboarding with guided sign-in and a SAM-hosted project
+- [x] Staging: installer redeployed, fresh install, live onboarding with a SAM-hosted project
 
 ## Round 2 (Raphaël, 2026-11-09): thorough decision-tree review + SAM Glass + personality
 
@@ -62,5 +62,5 @@ Checklist:
 - [x] Removed PathPreview, StepForm, ActionButton, `--sam-onboarding-overlay-bg`
 - [x] Unit tests rewritten; new guards proven discriminating; Playwright 24/24 at 375/1280, both themes
 - [x] Docs: quickstart, creating-workspaces, api reference
-- [ ] Reviews (ui-ux-specialist, security-auditor)
-- [ ] Live run-through on a fresh BYOC install
+- [x] Reviews (ui-ux-specialist, security-auditor): no critical; all high and medium findings fixed
+- [x] Live run-through on a fresh BYOC install (sam2.party, 2026-11-09): Raphaël completed it and called it a success
