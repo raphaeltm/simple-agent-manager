@@ -86,6 +86,10 @@ export type ExistingCandidateRecord = Pick<
   | 'providerInstanceBootDiskSizeGb'
   | 'providerInstanceImage'
   | 'providerInstanceArchitecture'
+  | 'workloadRole'
+  | 'location'
+  | 'providerInstanceType'
+  | 'providerInstanceSku'
 >;
 
 export interface PublicationCursor {

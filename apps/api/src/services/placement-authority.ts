@@ -224,6 +224,11 @@ export function buildPlacementAuthoritySqlPredicate(
         AND s.scope = p.scope
         AND s.source_kind = 'cloud-provider-credential'
         AND s.status = 'active'
+        -- A switched-off account keeps its picks but is never placed (new VMs or reuse).
+        AND NOT EXISTS (
+          SELECT 1 FROM json_each(COALESCE(p.excluded_source_ids_json, '[]')) AS excluded
+          WHERE excluded.value = s.id
+        )
         AND s.provider = ${nodeAlias}.cloud_provider
         AND s.credential_source = ${nodeAlias}.placement_credential_source
         AND s.credential_reference = ${nodeAlias}.placement_credential_reference

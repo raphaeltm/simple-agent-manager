@@ -33,6 +33,7 @@ export {
   TOKEN_COMPUTE_PROVIDERS,
   VM_LOCATIONS,
 } from './providers';
+export { providerLocationRegion, providerRegionMeta } from './provider-regions';
 
 // Status
 export { STATUS_COLORS, STATUS_LABELS } from './status';

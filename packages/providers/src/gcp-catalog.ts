@@ -5,7 +5,10 @@
  * Nothing here is a hardcoded zone or price list. The machine types offered are an
  * admin-editable list of exact names; zones are whatever Google reports for them.
  */
-import type { ProviderInstanceOffering } from '@simple-agent-manager/shared';
+import {
+  type ProviderInstanceOffering,
+  providerLocationRegion,
+} from '@simple-agent-manager/shared';
 
 import { fetchPaginatedGcpList, GCP_UNREACHABLE_WARNING, type GcpApiScope } from './gcp-api';
 import { LOCATION_METADATA, SIZE_MAP } from './gcp-metadata';
@@ -158,7 +161,7 @@ function parseMachineType(raw: unknown, scopeKey: string, context: string): GcpM
 
 /** `us-central1-a` → `us-central1`. */
 export function gcpZoneRegion(zone: string): string {
-  return zone.replace(/-[a-z]$/, '');
+  return providerLocationRegion('gcp', zone);
 }
 
 /** Hourly list price in the table's currency, or null when any part of it is unknown. */

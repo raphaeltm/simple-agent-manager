@@ -14,6 +14,7 @@ import { type drizzle } from 'drizzle-orm/d1';
 
 import type * as schema from '../db/schema';
 import type { Env } from '../env';
+import { emptyCapacityPoolMessage } from './placement-resolution-error';
 import {
   capacityPlacementSnapshotForCandidate,
   directPlacementAuditSnapshot,
@@ -404,6 +405,9 @@ function noEligibleCapacityCandidateMessage(
   placement: TaskStartPlacement,
   selection: TaskStartCapacityPoolSelection
 ): string {
+  if (selection.effectiveState === 'configured-empty') {
+    return emptyCapacityPoolMessage(selection.scope);
+  }
   const provider = placement.provider ? ` provider ${placement.provider}` : '';
   const location = placement.explicitVmLocation ? ` location ${placement.vmLocation}` : '';
   return (

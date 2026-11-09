@@ -3,6 +3,7 @@ import type { SafeEffectiveCapacityPoolSummary } from '@simple-agent-manager/sha
 import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
 import { effectiveDefaultCapacityPoolScopeChain } from './capacity-pool-precedence';
+import { attachCapacitySourceLabels } from './default-capacity-pool-source-labels';
 import {
   ACTIVE_STATUS,
   BACKFILL_PROJECT_CURSOR_KEY,
@@ -253,5 +254,7 @@ export async function readDefaultCapacityPoolSummaries(
       : null,
   ]);
 
+  // Every caller is an editor response, so the accounts get their display names.
+  await attachCapacitySourceLabels(db, [installation, user, project]);
   return { installation, user, project };
 }

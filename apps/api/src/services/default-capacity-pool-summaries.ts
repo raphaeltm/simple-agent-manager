@@ -7,7 +7,7 @@ import type {
   SafeEffectiveCapacityPoolReason,
   SafeEffectiveCapacityPoolSummary,
 } from '@simple-agent-manager/shared';
-import { isValidProvider } from '@simple-agent-manager/shared';
+import { isCapacitySourceExcluded, isValidProvider } from '@simple-agent-manager/shared';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 
 import * as schema from '../db/schema';
@@ -17,6 +17,7 @@ import {
   PRIMARY_CAPACITY_WORKLOAD_ROLE,
 } from './capacity-pool-workload-roles';
 import {
+  parseCapacityPoolExcludedSources,
   toCapacityPool,
   toCapacityPoolCandidate,
   toCapacitySourceIdentity,
@@ -55,19 +56,38 @@ export function toSafeEffectiveCapacityPoolSummary(
   }
 
   const state = summary.effectiveState ?? 'configured-ready';
-  const activeSources = new Set(summary.sources.filter((source) =>
-    source.status === ACTIVE_STATUS && source.sourceKind === SOURCE_KIND_CLOUD_PROVIDER
-  ).map((source) => source.id));
+  const activeSources = new Set(
+    summary.sources
+      .filter(
+        (source) =>
+          source.status === ACTIVE_STATUS &&
+          source.sourceKind === SOURCE_KIND_CLOUD_PROVIDER &&
+          !isCapacitySourceExcluded(summary.pool, source.id)
+      )
+      .map((source) => source.id)
+  );
   const nativeOfferings: NonNullable<SafeEffectiveCapacityPoolSummary['nativeOfferings']> = [];
   const seen = new Set<string>();
   if (state === 'configured-ready') {
     for (const candidate of summary.candidates) {
-      if (candidate.status !== ACTIVE_STATUS || !activeSources.has(candidate.capacitySourceId)
-        || candidate.workloadRole !== PRIMARY_CAPACITY_WORKLOAD_ROLE || candidate.runtime !== 'vm'
-        || candidate.catalogAvailability !== 'available' || !candidate.providerInstanceCatalogSource
-        || !candidate.provider || !isValidProvider(candidate.provider)
-        || !candidate.location || !candidate.providerInstanceType) continue;
-      const key = JSON.stringify([candidate.provider, candidate.location, candidate.providerInstanceType]);
+      if (
+        candidate.status !== ACTIVE_STATUS ||
+        !activeSources.has(candidate.capacitySourceId) ||
+        candidate.workloadRole !== PRIMARY_CAPACITY_WORKLOAD_ROLE ||
+        candidate.runtime !== 'vm' ||
+        candidate.catalogAvailability !== 'available' ||
+        !candidate.providerInstanceCatalogSource ||
+        !candidate.provider ||
+        !isValidProvider(candidate.provider) ||
+        !candidate.location ||
+        !candidate.providerInstanceType
+      )
+        continue;
+      const key = JSON.stringify([
+        candidate.provider,
+        candidate.location,
+        candidate.providerInstanceType,
+      ]);
       if (seen.has(key)) continue;
       seen.add(key);
       nativeOfferings.push({
@@ -385,6 +405,11 @@ export async function readDefaultPoolSummary(
   }
   const sourcesById = new Map<string, CapacitySourceIdentity>();
   const candidates: CapacityPoolCandidateDto[] = [];
+  // Switched-off accounts keep their picks, but those picks are not placeable, so they do not
+  // make the pool ready (mirrors `isActiveCapacityPlacementOption`).
+  const excludedSources = new Set(
+    parseCapacityPoolExcludedSources(pool.id, pool.excludedSourceIdsJson)
+  );
   let activeCandidateCount = 0;
   let availableCandidateCount = 0;
   for (const row of rows) {
@@ -400,6 +425,7 @@ export async function readDefaultPoolSummary(
     if (
       isEditorVisibleCapacityCandidateRole(candidate.workloadRole) &&
       row.source.status === ACTIVE_STATUS &&
+      !excludedSources.has(row.source.id) &&
       candidate.status === ACTIVE_STATUS
     ) {
       activeCandidateCount += 1;

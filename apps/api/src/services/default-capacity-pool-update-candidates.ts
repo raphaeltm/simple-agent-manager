@@ -38,6 +38,8 @@ export interface CandidateStatusUpdateResolution {
   missingCandidateIds: string[];
   unavailableCandidateIds: string[];
   changedUpdates: CandidateStatusUpdate[];
+  /** Capacity sources this edit adds a machine to. A switched-off account is switched on. */
+  activatedSourceIds: string[];
 }
 
 export interface CatalogAdditionUpdateResult {
@@ -166,7 +168,12 @@ export async function resolveCandidateStatusUpdates(
 ): Promise<CandidateStatusUpdateResolution> {
   const updates = dedupeCandidateStatusUpdates(candidates);
   if (updates.length === 0) {
-    return { missingCandidateIds: [], unavailableCandidateIds: [], changedUpdates: [] };
+    return {
+      missingCandidateIds: [],
+      unavailableCandidateIds: [],
+      changedUpdates: [],
+      activatedSourceIds: [],
+    };
   }
 
   const requestedById = await readCandidateIdentities(
@@ -178,7 +185,12 @@ export async function resolveCandidateStatusUpdates(
     .map(({ id }) => id)
     .filter((candidateId) => !requestedById.has(candidateId));
   if (missingCandidateIds.length > 0) {
-    return { missingCandidateIds, unavailableCandidateIds: [], changedUpdates: [] };
+    return {
+      missingCandidateIds,
+      unavailableCandidateIds: [],
+      changedUpdates: [],
+      activatedSourceIds: [],
+    };
   }
 
   const unavailableCandidateIds = updates
@@ -188,7 +200,12 @@ export async function resolveCandidateStatusUpdates(
     })
     .map(({ id }) => id);
   if (unavailableCandidateIds.length > 0) {
-    return { missingCandidateIds: [], unavailableCandidateIds, changedUpdates: [] };
+    return {
+      missingCandidateIds: [],
+      unavailableCandidateIds,
+      changedUpdates: [],
+      activatedSourceIds: [],
+    };
   }
 
   const coupledById = await readCandidateIdentities(db, poolId, coupledCandidateIds(updates));
@@ -214,7 +231,20 @@ export async function resolveCandidateStatusUpdates(
     .map(([id, status]) => ({ id, status }))
     .filter(({ id, status }) => (requestedById.get(id) ?? coupledById.get(id))?.status !== status);
 
-  return { missingCandidateIds: [], unavailableCandidateIds: [], changedUpdates };
+  const activatedSourceIds = [
+    ...new Set(
+      updates
+        .filter(({ status }) => status === 'active')
+        .flatMap(({ id }) => requestedById.get(id)?.capacitySourceId ?? [])
+    ),
+  ];
+
+  return {
+    missingCandidateIds: [],
+    unavailableCandidateIds: [],
+    changedUpdates,
+    activatedSourceIds,
+  };
 }
 
 /** Sibling role ids for each requested edit, excluding the requested row itself. */

@@ -126,6 +126,7 @@ export function toCapacityPool(row: schema.CapacityPool): CapacityPoolDto {
     ),
     maxNodes: row.maxNodes,
     sourceOrder: parseCapacityPoolSourceOrder(row.id, row.sourceOrderJson),
+    excludedSourceIds: parseCapacityPoolExcludedSources(row.id, row.excludedSourceIdsJson),
     lastReconciledAt: row.lastReconciledAt,
     migrationVersion: row.migrationVersion,
     migrationState: row.migrationState,
@@ -142,6 +143,27 @@ export function parseCapacityPoolSourceOrder(
   poolId: string,
   raw: string | null | undefined
 ): string[] | null {
+  const ids = parseSourceIdList(poolId, raw, 'capacity_pool.source_order_invalid');
+  return ids && ids.length > 0 ? ids : null;
+}
+
+/**
+ * Accounts switched off in this pool, or an empty list when none are. A malformed value reads
+ * as "none switched off" and is logged: the column only ever holds what the update path wrote,
+ * and failing the pool read would stop every placement, not just this account's.
+ */
+export function parseCapacityPoolExcludedSources(
+  poolId: string,
+  raw: string | null | undefined
+): string[] {
+  return parseSourceIdList(poolId, raw, 'capacity_pool.excluded_sources_invalid') ?? [];
+}
+
+function parseSourceIdList(
+  poolId: string,
+  raw: string | null | undefined,
+  invalidEvent: string
+): string[] | null {
   if (raw === null || raw === undefined) return null;
   try {
     const parsed: unknown = JSON.parse(raw);
@@ -149,12 +171,12 @@ export function parseCapacityPoolSourceOrder(
       Array.isArray(parsed) &&
       parsed.every((id): id is string => typeof id === 'string' && id.length > 0)
     ) {
-      return parsed.length > 0 ? parsed : null;
+      return parsed;
     }
   } catch {
     // fall through to the warning below
   }
-  log.warn('capacity_pool.source_order_invalid', { poolId });
+  log.warn(invalidEvent, { poolId });
   return null;
 }
 
