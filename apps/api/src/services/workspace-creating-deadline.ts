@@ -16,7 +16,7 @@
  * the queue budget, and then it keeps the build budget from being shortened for workspaces that
  * never report a build start. Those are direct creates (the callback is task-scoped): for them
  * the queued deadline is a total budget for the whole attempt, not evidence of a real queue wait.
- * Rows from before migration 0228 have neither column and fall back to `created_at`, which is
+ * Rows from before migration 0229 have neither column and fall back to `created_at`, which is
  * what every reader used before.
  *
  * Throughput at the default 60-minute queue budget: about 20 queued builds of ~3 minutes on one

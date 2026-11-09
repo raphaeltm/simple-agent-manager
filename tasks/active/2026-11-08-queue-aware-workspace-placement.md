@@ -203,7 +203,7 @@ draft. Resolution, agreed with the coordinator (events `e43c2f20`, `3b4efec6`):
 - [x] F7 (Major): queue wait consumed the ready deadline. Three clocks were involved: the TaskRunner
       ready timeout (from first entry to `workspace_ready`), the provisioning-timeout cron (from
       `created_at`) and the stuck-task `delegated` check (from dispatch). Fixed with one shared rule:
-  - Migration 0228 adds `workspaces.creating_started_at` and `build_started_at`.
+  - Migration 0229 adds `workspaces.creating_started_at` and `build_started_at`.
   - `services/workspace-creating-deadline.ts` holds the rule. Queued: the attempt start plus the
     larger of the queue budget (`operations.workspaceBuildQueueTimeoutMinutes`, default 60) and the
     build budget. Building: the build start plus the build budget.

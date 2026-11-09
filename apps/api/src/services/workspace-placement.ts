@@ -183,7 +183,7 @@ export async function attachPrecreatedWorkspacePlacement(
            resolved_reservation_json = ?,
            ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS},
            -- Attaching the placeholder continues the attempt that created it, so its clock is
-           -- kept; a placeholder from before migration 0228 starts it here.
+           -- kept; a placeholder from before migration 0229 starts it here.
            creating_started_at = COALESCE(creating_started_at, ?),
            updated_at = ?
        WHERE id = ?

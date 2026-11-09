@@ -3,7 +3,7 @@
  *
  * It errors a 'creating' workspace only past the shared per-attempt deadline
  * (`workspace-creating-deadline.ts`): the queue budget before the build starts, the build budget
- * (`PROVISIONING_TIMEOUT_MS`) from the durable build start. Before migration 0228 it errored
+ * (`PROVISIONING_TIMEOUT_MS`) from the durable build start. Before migration 0229 it errored
  * every 'creating' row 30 minutes after `created_at`, so a workspace still queued behind a
  * node's single build slot, or restarted long after it was created, was killed.
  */
