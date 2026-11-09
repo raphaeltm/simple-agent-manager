@@ -54,7 +54,6 @@ import {
   recordProviderRejectedNode,
 } from './node-provisioning-rejected-node';
 import { trySelectReusableNodeForProvisioning } from './node-provisioning-reuse';
-import { adoptReusableNodeSelection } from './node-selection-shared';
 import { applyCapacityCandidateProvisioningTarget } from './node-provisioning-target';
 import {
   enterPrimaryProvisioningTier,
@@ -62,6 +61,7 @@ import {
   logTierSkipped,
   markTierSkipped,
 } from './node-provisioning-tier';
+import { adoptReusableNodeSelection } from './node-selection-shared';
 import { persistPlacementDiagnostics } from './placement-diagnostics';
 import {
   assertTaskExecutionAuthority,
