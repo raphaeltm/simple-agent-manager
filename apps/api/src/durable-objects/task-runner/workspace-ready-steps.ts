@@ -1,5 +1,6 @@
 import { log } from '../../lib/logger';
 import {
+  claimWorkspaceCreatingExpiry,
   resolveWorkspaceBuildQueueWaitMs,
   workspaceCreatingDeadline,
 } from '../../services/workspace-creating-deadline';
@@ -89,29 +90,51 @@ export async function handleWorkspaceReady(
 
   // Check timeout. The build budget runs from the durable build start; before it, the attempt
   // waits for the node's build slot on the queue budget.
-  const buildMs = rc.getWorkspaceReadyTimeoutMs();
-  const queueWaitMs = wsRow.build_started_at
-    ? buildMs
-    : await resolveWorkspaceBuildQueueWaitMs(rc.env);
+  const budgets = {
+    buildMs: rc.getWorkspaceReadyTimeoutMs(),
+    queueWaitMs: await resolveWorkspaceBuildQueueWaitMs(rc.env),
+  };
   const deadline = workspaceCreatingDeadline(
     {
       createdAt: wsRow.created_at,
       creatingStartedAt: wsRow.creating_started_at,
       buildStartedAt: wsRow.build_started_at,
     },
-    { queueWaitMs, buildMs }
+    budgets
   );
   const now = Date.now();
   if (!Number.isFinite(deadline.deadlineMs) || now > deadline.deadlineMs) {
-    const budgetMs = deadline.phase === 'building' ? buildMs : Math.max(queueWaitMs, buildMs);
-    throw Object.assign(
-      new Error(
-        deadline.phase === 'building'
-          ? `Workspace did not become ready within ${budgetMs}ms of its build starting`
-          : `Workspace build did not start within ${budgetMs}ms (waiting for the node's build slot)`
-      ),
-      { permanent: true }
-    );
+    const budgetMs =
+      deadline.phase === 'building'
+        ? budgets.buildMs
+        : Math.max(budgets.queueWaitMs, budgets.buildMs);
+    const message =
+      deadline.phase === 'building'
+        ? `Workspace did not become ready within ${budgetMs}ms of its build starting`
+        : `Workspace build did not start within ${budgetMs}ms (waiting for the node's build slot)`;
+    // The row above was read before this step's other awaits; a ready callback or a build start
+    // may have landed since. Fail only if the conditional expiry claim still wins on the current
+    // row, the same claim the provisioning-timeout cron makes.
+    await rc.assertRecoveryAuthority(state);
+    if (
+      await claimWorkspaceCreatingExpiry(
+        rc.env.DATABASE,
+        state.stepResults.workspaceId,
+        new Date(now).toISOString(),
+        budgets,
+        message
+      )
+    ) {
+      throw Object.assign(new Error(message), { permanent: true });
+    }
+    log.info('task_runner_do.workspace_ready_expiry_lost', {
+      taskId: state.taskId,
+      workspaceId: state.stepResults.workspaceId,
+      phase: deadline.phase,
+      action: 'repoll',
+    });
+    await rc.ctx.storage.setAlarm(Date.now());
+    return;
   }
 
   // No callback yet and not timed out — schedule next poll.

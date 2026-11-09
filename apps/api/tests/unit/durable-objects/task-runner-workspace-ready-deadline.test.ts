@@ -87,18 +87,29 @@ function freshState(): TaskRunnerState {
   } as unknown as TaskRunnerState;
 }
 
-function context() {
+function context(options: { betweenReadAndDecision?: () => void } = {}) {
   const setAlarm = vi.fn(async () => undefined);
   const advanceToStep = vi.fn(async () => undefined);
+  const assertRecoveryAuthority = vi.fn(async () => undefined);
   const rc = {
     env,
     ctx: { storage: { put: vi.fn(), setAlarm } },
-    updateD1ExecutionStep: vi.fn(async () => undefined),
+    // Runs after the step's row read and before its timeout decision: the midpoint where a
+    // concurrent callback can land.
+    updateD1ExecutionStep: vi.fn(async () => options.betweenReadAndDecision?.()),
     advanceToStep,
+    assertRecoveryAuthority,
     getWorkspaceReadyTimeoutMs: () => BUILD_BUDGET_MS,
     getWorkspaceReadyPollIntervalMs: () => 5_000,
   } as unknown as TaskRunnerContext;
-  return { rc, setAlarm, advanceToStep };
+  return { rc, setAlarm, advanceToStep, assertRecoveryAuthority };
+}
+
+function workspaceRow(): { status: string; error_message: string | null } {
+  return sqlite.prepare("SELECT status, error_message FROM workspaces WHERE id = 'ws-1'").get() as {
+    status: string;
+    error_message: string | null;
+  };
 }
 
 describe('workspace_ready deadline', () => {
@@ -114,11 +125,59 @@ describe('workspace_ready deadline', () => {
   it('fails a workspace whose build has not started within the queue budget', async () => {
     seedWorkspace({ createdAt: ago(61), creatingStartedAt: ago(61) });
     const { rc } = context();
+    const message = `Workspace build did not start within ${60 * MINUTE}ms (waiting for the node's build slot)`;
 
     await expect(handleWorkspaceReady(freshState(), rc)).rejects.toMatchObject({
-      message: `Workspace build did not start within ${60 * MINUTE}ms (waiting for the node's build slot)`,
+      message,
       permanent: true,
     });
+    // The step won the shared expiry claim, so the workspace is errored with the same reason.
+    expect(workspaceRow()).toEqual({ status: 'error', error_message: message });
+  });
+
+  it('does not fail when the build starts after the step read the expired row', async () => {
+    seedWorkspace({ createdAt: ago(61), creatingStartedAt: ago(61) });
+    const { rc, setAlarm } = context({
+      betweenReadAndDecision: () => {
+        sqlite
+          .prepare("UPDATE workspaces SET build_started_at = ? WHERE id = 'ws-1'")
+          .run(new Date().toISOString());
+      },
+    });
+
+    await expect(handleWorkspaceReady(freshState(), rc)).resolves.toBeUndefined();
+
+    expect(workspaceRow()).toEqual({ status: 'creating', error_message: null });
+    // Lost the claim: re-poll at once, and the next poll reads the started build.
+    expect(setAlarm).toHaveBeenCalledOnce();
+  });
+
+  it('does not fail when the workspace became ready after the step read the expired row', async () => {
+    seedWorkspace({ createdAt: ago(61), creatingStartedAt: ago(61) });
+    const first = context({
+      betweenReadAndDecision: () => {
+        sqlite.prepare("UPDATE workspaces SET status = 'running' WHERE id = 'ws-1'").run();
+      },
+    });
+
+    await expect(handleWorkspaceReady(freshState(), first.rc)).resolves.toBeUndefined();
+    expect(workspaceRow().status).toBe('running');
+
+    // The re-poll advances the task.
+    const second = context();
+    await handleWorkspaceReady(freshState(), second.rc);
+    expect(second.advanceToStep).toHaveBeenCalledWith(expect.anything(), 'agent_session');
+  });
+
+  it('does not expire the workspace when recovery authority was revoked', async () => {
+    seedWorkspace({ createdAt: ago(61), creatingStartedAt: ago(61) });
+    const { rc, assertRecoveryAuthority } = context();
+    assertRecoveryAuthority.mockRejectedValueOnce(new Error('recovery authority revoked'));
+
+    await expect(handleWorkspaceReady(freshState(), rc)).rejects.toThrow(
+      'recovery authority revoked'
+    );
+    expect(workspaceRow()).toEqual({ status: 'creating', error_message: null });
   });
 
   it('uses the durable build start after a missed notification or a restarted DO', async () => {

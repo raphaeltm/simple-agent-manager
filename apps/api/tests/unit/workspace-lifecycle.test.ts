@@ -51,6 +51,8 @@ function makeWorkspaceReadyContext(options?: {
         build_started_at: options?.buildStartedAt ?? new Date().toISOString(),
         ...(options?.workspaceRow ?? { status: 'creating', error_message: null }),
       }),
+      // The conditional expiry claim (`claimWorkspaceCreatingExpiry`) wins.
+      run: async () => ({ meta: { changes: 1 } }),
     }),
   });
   return {
@@ -58,6 +60,7 @@ function makeWorkspaceReadyContext(options?: {
     ctx: { storage: { put: async () => undefined, setAlarm: async () => undefined } },
     updateD1ExecutionStep: async () => undefined,
     advanceToStep: async () => undefined,
+    assertRecoveryAuthority: async () => undefined,
     getWorkspaceReadyTimeoutMs: () => options?.timeoutMs ?? 30_000,
     getWorkspaceReadyPollIntervalMs: () => 1_000,
   } as unknown as TaskRunnerContext;

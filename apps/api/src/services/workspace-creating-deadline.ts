@@ -126,3 +126,28 @@ export async function resolveWorkspaceBuildQueueWaitMs(env: Env): Promise<number
       : DEFAULT_WORKSPACE_BUILD_QUEUE_TIMEOUT_MINUTES;
   return safeMinutes * 60_000;
 }
+
+/**
+ * The one destructive decision on an expired attempt: mark it 'error' only if it is STILL
+ * 'creating' and STILL past its deadline at this write. A ready callback or a build start that
+ * landed after the caller read the row makes the claim lose, and the caller must not fail
+ * anything. Shared by the TaskRunner's workspace_ready step and the provisioning-timeout cron, so
+ * neither can act on a row it read before a concurrent transition.
+ */
+export async function claimWorkspaceCreatingExpiry(
+  database: D1Database,
+  workspaceId: string,
+  nowIso: string,
+  budgets: WorkspaceCreatingBudgets,
+  errorMessage: string
+): Promise<boolean> {
+  const overdue = workspaceCreatingOverdueSql('workspaces', nowIso, budgets);
+  const result = await database
+    .prepare(
+      `UPDATE workspaces SET status = 'error', error_message = ?, updated_at = ?
+        WHERE id = ? AND status = 'creating' AND ${overdue.sql}`
+    )
+    .bind(errorMessage, nowIso, workspaceId, ...overdue.binds)
+    .run();
+  return (result.meta.changes ?? 0) === 1;
+}

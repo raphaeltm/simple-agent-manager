@@ -13,6 +13,7 @@ import { log } from '../lib/logger';
 import { persistError } from './observability';
 import { DEFAULT_WORKSPACE_BUILD_QUEUE_TIMEOUT_MINUTES } from './provisioning-attempt-limits';
 import {
+  claimWorkspaceCreatingExpiry,
   resolveWorkspaceBuildQueueWaitMs,
   type WorkspaceCreatingBudgets,
   workspaceCreatingOverdueSql,
@@ -90,15 +91,9 @@ export async function checkProvisioningTimeouts(
       phase === 'building'
         ? `Provisioning timed out ${timeoutMinutes} minutes after the workspace build started`
         : `Provisioning timed out: the workspace build did not start within ${timeoutMinutes} minutes`;
-    const recheck = workspaceCreatingOverdueSql('workspaces', nowIso, budgets);
-    const result = await database
-      .prepare(
-        `UPDATE workspaces SET status = 'error', error_message = ?, updated_at = ?
-          WHERE id = ? AND status = 'creating' AND ${recheck.sql}`
-      )
-      .bind(timeoutMessage, nowIso, workspace.id, ...recheck.binds)
-      .run();
-    if ((result.meta.changes ?? 0) !== 1) {
+    if (
+      !(await claimWorkspaceCreatingExpiry(database, workspace.id, nowIso, budgets, timeoutMessage))
+    ) {
       log.info('provisioning_timeout.workspace_changed_before_timeout', {
         workspaceId: workspace.id,
         nodeId: workspace.nodeId,
@@ -190,14 +185,23 @@ export async function isWorkspaceWithinCreatingDeadline(
   workspaceId: string,
   now: Date
 ): Promise<boolean> {
-  const budgets = await resolveProvisioningTimeoutBudgets(env);
-  const overdue = workspaceCreatingOverdueSql('w', now.toISOString(), budgets);
-  const row = await database
-    .prepare(
-      `SELECT 1 AS starting FROM workspaces w
-        WHERE w.id = ? AND w.status = 'creating' AND NOT ${overdue.sql}`
-    )
-    .bind(workspaceId, ...overdue.binds)
-    .first<{ starting: number }>();
-  return row?.starting === 1;
+  try {
+    const budgets = await resolveProvisioningTimeoutBudgets(env);
+    const overdue = workspaceCreatingOverdueSql('w', now.toISOString(), budgets);
+    const row = await database
+      .prepare(
+        `SELECT 1 AS starting FROM workspaces w
+          WHERE w.id = ? AND w.status = 'creating' AND NOT ${overdue.sql}`
+      )
+      .bind(workspaceId, ...overdue.binds)
+      .first<{ starting: number }>();
+    return row?.starting === 1;
+  } catch (error) {
+    log.warn('provisioning_timeout.creating_deadline_probe_failed', {
+      workspaceId,
+      error: error instanceof Error ? error.message : String(error),
+      action: 'sweep_keeps_its_own_verdict',
+    });
+    return false;
+  }
 }

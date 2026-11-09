@@ -437,6 +437,30 @@ describe('workspace runtime recreation/deletion races — real SQL', () => {
     }
   );
 
+  it.each(['restart', 'rebuild'] as const)(
+    'starts a new creating attempt clock on %s and clears the previous build start',
+    async (action) => {
+      // Rebuild from running writes in the route (lifecycle.ts); restart goes through
+      // reserveWorkspaceRestart. Both must start the attempt the shared deadline reads.
+      if (action === 'rebuild') sqlite.exec("UPDATE workspaces SET status = 'running'");
+      sqlite.exec(
+        `UPDATE workspaces SET creating_started_at = '2026-01-01T00:00:00.000Z',
+           build_started_at = '2026-01-01T00:01:00.000Z'`
+      );
+      const before = Date.now();
+
+      expect((await requestLifecycle(action)).status).toBe(action === 'rebuild' ? 202 : 200);
+      await Promise.all(waitUntilPromises);
+
+      const clock = sqlite
+        .prepare('SELECT status, creating_started_at, build_started_at FROM workspaces')
+        .get() as { status: string; creating_started_at: string; build_started_at: string | null };
+      expect(clock.status).toBe('creating');
+      expect(Date.parse(clock.creating_started_at)).toBeGreaterThanOrEqual(before - 1000);
+      expect(clock.build_started_at).toBeNull();
+    }
+  );
+
   it('fails closed when compute tracking cannot start', async () => {
     prepareEvictedRestart();
     sqlite.exec(`CREATE TRIGGER reject_usage BEFORE INSERT ON compute_usage

@@ -237,4 +237,15 @@ describe('isWorkspaceWithinCreatingDeadline', () => {
     expect(await isWorkspaceWithinCreatingDeadline(env.DATABASE, env, 'ready', now)).toBe(false);
     expect(await isWorkspaceWithinCreatingDeadline(env.DATABASE, env, 'missing', now)).toBe(false);
   });
+
+  it('returns false instead of throwing when the probe cannot read', async () => {
+    const broken = {
+      prepare: () => {
+        throw new Error('D1 unavailable');
+      },
+    } as unknown as D1Database;
+    await expect(
+      isWorkspaceWithinCreatingDeadline(broken, env, 'inside', new Date())
+    ).resolves.toBe(false);
+  });
 });
