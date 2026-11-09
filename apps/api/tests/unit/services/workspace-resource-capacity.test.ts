@@ -138,6 +138,31 @@ describe('workspace resource capacity accounting', () => {
     expect(occupied.reasons).toContain('node has no trusted observed hardware capacity');
   });
 
+  it('reserves the real nonzero default disk and refuses overpacking a 20 GB node', () => {
+    const request = resolveResourceReservation(
+      { task: { minVcpu: 0.2, minMemoryGb: 0.5 } },
+      {},
+      { legacyVmSizes: { 'agent-profile': 'medium' } }
+    );
+    const node = {
+      ...observedCapacityNode({ id: 'twenty-gb', vcpuCount: 2, memoryMb: 4096, diskGb: 20 }),
+      lastHeartbeatAt: new Date().toISOString(),
+      lastMetrics: JSON.stringify({ cpuLoadAvg1: 0.1, memoryPercent: 10, diskPercent: 10 }),
+    };
+    expect(request.diskMb).toBe(15 * 1024);
+    expect(
+      evaluateWorkspaceReservationCapacity(node, emptyUsage(), request, policy()).admitted
+    ).toBe(true);
+    const second = evaluateWorkspaceReservationCapacity(
+      node,
+      aggregateCopies(request, 1),
+      request,
+      policy()
+    );
+    expect(second.admitted).toBe(false);
+    expect(second.reasons).toEqual(['disk reservation budget would be exceeded']);
+  });
+
   it('reports concrete rejection diagnostics for headroom, exclusivity and disk pressure', () => {
     const now = new Date().toISOString();
     const node = {

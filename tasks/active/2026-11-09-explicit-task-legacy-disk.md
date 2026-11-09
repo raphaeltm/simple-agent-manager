@@ -8,11 +8,11 @@ Explicit small task CPU/RAM leaves disk absent, and the shared resolver fills it
 Shared direct callers: placement-resolver, workspace-admission-sql, task-runner/node-selection-shared, workspace-steps, placement-diagnostics. Explicit modern lower-layer fields must remain independently inheritable (rule73).
 
 ## Plan
-- [ ] Add discriminating shared resolver and real MCP dispatch persistence tests: explicit CPU/RAM over medium legacy profile, plus omitted/empty requirements legacy control.
-- [ ] Suppress lower legacy compatibility contributions after higher modern CPU/RAM sizing; preserve same-layer legacy semantics and explicit lower fields, false/zero overrides.
-- [ ] Resolve platform disk fallback so an unrequested disk does not force a larger offering; preserve configurable override authority.
+- [x] Add discriminating shared resolver and real MCP dispatch persistence tests: explicit CPU/RAM over medium legacy profile, plus omitted/empty requirements legacy control.
+- [x] Suppress lower legacy compatibility contributions after higher modern CPU/RAM sizing; preserve same-layer legacy semantics and explicit lower fields, false/zero overrides.
+- [x] Resolve platform disk fallback so an unrequested disk does not force a larger offering; preserve configurable override authority.
 - [ ] Preserve intent/provenance through persisted plan roundtrip; investigate old provenance-only rows.
-- [ ] Update affected public resource documentation.
+- [x] Update affected public resource documentation.
 - [ ] Run shared full suite and API targeted+quality checks; let early draft CI run full suites.
 - [ ] Complete local specialist/completion reviews.
 - [ ] Ask coordinator for staging slot; deploy exact head and verify real resolver via browser/API with explicit .2/.5/5 staging test resources. Delete all own resources promptly.
@@ -23,3 +23,5 @@ Shared direct callers: placement-resolver, workspace-admission-sql, task-runner/
 Task explicit CPU/RAM, absent disk over medium profile uses disk no larger than smallest offering needs through real resolver. No explicit fields retains legacy translation. Explicit disk requirements survive; controls show false/zero and configurable defaults work. No main commits; archive notes separate draft PR.
 
 References: rule73 optional-field absence; rule62 real trigger; compute-pools resource guide.
+
+Evidence: coordinator and own full SAM workspace+cache samples≈4.4GB each;15GB default gives≈3x growth margin and fits20GB catalog offerings. No host disk reserve is subtracted today (evaluator+atomic SQL). Telemetry summaries contain IO but not disk space. Legacy-only medium remains40GB. Platform CPU2/RAM4 unchanged; memory+host-reserve limitation is outside this bug.

@@ -428,8 +428,13 @@ _needs_. SAM resolves them, then keeps only the offerings and nodes that satisfy
 | ------------------ | ---------------------------------------- | ---------------- |
 | **vCPU**           | Minimum vCPU                             | 2                |
 | **Memory (GB)**    | Minimum RAM                              | 4                |
-| **Disk (GB)**      | Minimum disk                             | 40               |
+| **Disk (GB)**      | Minimum disk                             | 15               |
 | **Exclusive node** | The work must have the machine to itself | Off              |
+
+The disk default reserves 15 GB, leaving growth room over measured full SAM workspaces
+(about 4.4 GB including caches) while fitting a 20 GB offering. It remains configurable
+through the platform setting described below. Existing legacy sizes retain their translation
+when no higher modern CPU/RAM sizing is provided.
 
 Every field is optional. Leave a field blank and it **inherits** — it is resolved from the next
 level down, field by field. Setting vCPU without setting memory is fine and normal.
@@ -453,6 +458,10 @@ task  →  trigger  →  skill  →  agent profile  →  project  →  platform 
 - **Platform** — set by the deployment (`CAPACITY_POOL_PLATFORM_DEFAULTS_JSON`, or the persisted
   platform setting; see the [Configuration Reference](/docs/reference/configuration/)). The
   installation-wide floor.
+
+When higher levels provide explicit vCPU and memory, lower legacy VM-size bundles do not
+supply implicit fields such as disk. Explicit disk requirements on a profile or project still
+inherit normally. A legacy size supplied at the same level still fills missing fields.
 
 Each level fills in only the fields the levels above it left blank, so a project can set the disk
 floor while a profile sets CPU and memory. SAM records where each field came from, which is what

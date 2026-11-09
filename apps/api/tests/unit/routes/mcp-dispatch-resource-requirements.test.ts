@@ -358,6 +358,121 @@ describe('MCP dispatch_task resource requirements input', () => {
     }
   });
 
+  it.each([true, false])(
+    'resolves legacy profile disk through real dispatch (explicit sizing: %s)',
+    async (explicitSizing) => {
+      const sqlite = new Database(':memory:');
+      try {
+        createAllSchemaTables(sqlite, schema);
+        seedUser(sqlite, 'user-1');
+        seedProjectWithMember(sqlite, { projectId: 'project-1', userId: 'user-1', role: 'owner' });
+        seedCloudCredential(sqlite, {
+          id: 'project-cloud-1',
+          userId: 'user-1',
+          projectId: 'project-1',
+        });
+        sqlite
+          .prepare(`UPDATE projects SET resource_requirements_json = ? WHERE id = 'project-1'`)
+          .run(JSON.stringify({}));
+        sqlite
+          .prepare(
+            `INSERT INTO agent_profiles (
+             id, project_id, user_id, name, agent_type, effort, vm_size_override, resource_requirements_json
+           )
+           VALUES ('profile-1', 'project-1', 'user-1', 'Profile One', 'claude-code', 'auto', 'medium', ?)`
+          )
+          .run(JSON.stringify({}));
+        sqlite
+          .prepare(
+            `INSERT INTO tasks (
+             id, project_id, user_id, title, description, status, priority,
+             task_mode, dispatch_depth, triggered_by, created_by,
+             credential_attribution_user_id, credential_attribution_project_id,
+             credential_attribution_source, created_at, updated_at
+           )
+           VALUES (
+             'parent-task-1', 'project-1', 'user-1', 'Parent task',
+             'Parent task', 'in_progress', 0, 'task', 0, 'user',
+             'user-1', 'user-1', 'project-1', 'project',
+             '2026-09-07T00:00:00.000Z', '2026-09-07T00:00:00.000Z'
+           )`
+          )
+          .run();
+
+        const env = {
+          DATABASE: createSqliteD1WithBindLimit(sqlite, 100),
+          BASE_DOMAIN: 'sammy.party',
+          BRANCH_NAME_PREFIX: 'sam/',
+          BRANCH_NAME_MAX_LENGTH: '60',
+          COMPUTE_QUOTA_ENFORCEMENT_ENABLED: 'false',
+        } as Env;
+        await ensureDefaultCapacityPoolsForExistingCredentials(drizzle(env.DATABASE, { schema }), {
+          userId: 'user-1',
+          projectId: 'project-1',
+          includeInstallation: false,
+        });
+        const tokenData: McpTokenData = {
+          taskId: 'parent-task-1',
+          projectId: 'project-1',
+          userId: 'user-1',
+          workspaceId: 'workspace-1',
+          createdAt: '2026-09-07T00:00:00.000Z',
+        };
+
+        const response = await handleDispatchTask(
+          1,
+          {
+            description: 'Dispatch small legacy-profile child task',
+            ...(explicitSizing ? { resourceRequirements: { minVcpu: 0.2, minMemoryGb: 0.5 } } : {}),
+            agentProfileId: 'profile-1',
+          },
+          tokenData,
+          env
+        );
+
+        expect(response.error).toBeUndefined();
+        const taskRow = sqlite
+          .prepare(
+            `SELECT resource_requirements_json, resource_requirement_plan_json,
+            resource_requirements_source, resolved_reservation_json
+           FROM tasks
+           WHERE parent_task_id = 'parent-task-1'`
+          )
+          .get() as {
+          resource_requirements_json: string | null;
+          resource_requirement_plan_json: string;
+          resource_requirements_source: string | null;
+          resolved_reservation_json: string;
+        };
+        const reservation = JSON.parse(taskRow.resolved_reservation_json);
+        expect(reservation).toMatchObject(
+          explicitSizing
+            ? { cpuMillis: 200, memoryMb: 512, diskMb: 15 * 1024, source: 'task' }
+            : { cpuMillis: 2000, memoryMb: 3712, diskMb: 40 * 1024, source: 'agent-profile' }
+        );
+        expect(reservation.fieldProvenance.minDiskGb).toMatchObject(
+          explicitSizing
+            ? { source: 'platform', value: 15 }
+            : { source: 'agent-profile', value: 40, compatibility: { legacyVmSize: 'medium' } }
+        );
+        const plan = JSON.parse(taskRow.resource_requirement_plan_json);
+        expect(plan.intent.task).toEqual(
+          explicitSizing ? { minVcpu: 0.2, minMemoryGb: 0.5 } : null
+        );
+        expect(mocks.startTaskRunnerDO).toHaveBeenCalledWith(
+          env,
+          expect.objectContaining({
+            resolvedReservation: expect.objectContaining({
+              diskMb: (explicitSizing ? 15 : 40) * 1024,
+            }),
+          })
+        );
+      } finally {
+        sqlite.close();
+      }
+    }
+  );
+
   it('rejects removed project members before HTTP MCP dispatch side effects', async () => {
     const sqlite = new Database(':memory:');
     try {

@@ -33,7 +33,9 @@ export const LEGACY_VM_SIZE_WORKLOAD_ADAPTER_VERSION = 2;
 export const PLATFORM_RESOURCE_DEFAULTS: Required<ResourceRequirements> = {
   minVcpu: 2,
   minMemoryGb: 4,
-  minDiskGb: 40,
+  // Two measured full SAM workspaces used ~4.4 GB each including caches. Leave
+  // room for growth while fitting a 20 GB offering; installations can override.
+  minDiskGb: 15,
   exclusiveNode: false,
 };
 
@@ -171,7 +173,9 @@ export interface ResourceReservationResolutionOptions {
 
 /**
  * Resolve resource requirements from the precedence chain.
- * Each field is independently resolved: the first layer that defines a field wins.
+ * Each explicit field is independently resolved: the first defining layer wins.
+ * Lower legacy bundles stop contributing once higher modern layers provide both
+ * CPU and memory; explicit lower fields still inherit normally.
  * Any field not set by any layer falls back to PLATFORM_RESOURCE_DEFAULTS.
  *
  * The `source` field on the output records the highest-priority layer that
@@ -267,16 +271,26 @@ export function resolveResourceReservation(
     }
   };
 
+  let higherExplicitCpu = false;
+  let higherExplicitMemory = false;
   for (const layer of layers) {
     const explicit = validatedExplicitLayer(layer);
     if (explicit) recordLayerContribution(layer, explicit);
 
-    const legacy = validatedLegacyLayer(layer, {
-      mapping: legacyWorkloadMapping,
-      adapterVersion: compatibilityAdapterVersion,
-      diagnostics,
-    });
-    if (legacy) recordLayerContribution(layer, legacy);
+    // A complete modern CPU/RAM request describes a workload slice. A lower
+    // legacy size describes a bundled shape, not an explicit requirement for
+    // its missing dimensions. Keep explicit lower fields inheritable, and keep
+    // same-layer legacy compatibility for callers that deliberately supply both.
+    if (!(higherExplicitCpu && higherExplicitMemory)) {
+      const legacy = validatedLegacyLayer(layer, {
+        mapping: legacyWorkloadMapping,
+        adapterVersion: compatibilityAdapterVersion,
+        diagnostics,
+      });
+      if (legacy) recordLayerContribution(layer, legacy);
+    }
+    higherExplicitCpu ||= explicit?.requirements.minVcpu !== undefined;
+    higherExplicitMemory ||= explicit?.requirements.minMemoryGb !== undefined;
   }
 
   // Fill remaining fields from platform defaults
