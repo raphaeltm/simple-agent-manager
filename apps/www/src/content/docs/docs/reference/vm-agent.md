@@ -247,6 +247,8 @@ Implements the Agent Communication Protocol for AI coding agents:
 
 Responses are serialized via `orderedPipe` to prevent token reordering from concurrent notification dispatch.
 
+Multiple agent sessions can share one workspace container. Each Docker agent launch receives a unique process ownership marker. Stopping or restarting a session signals only its marked processes and captured descendants, with PID start-time checks before signalling. Cleanup includes surviving children after the Docker client exits; it does not match other sessions by adapter command name.
+
 ### JWT Validator
 
 Validates workspace and node-management JWTs using the API's JWKS endpoint:

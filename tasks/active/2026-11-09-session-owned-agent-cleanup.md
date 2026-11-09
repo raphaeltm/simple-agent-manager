@@ -11,10 +11,10 @@ Stopping one ACP session currently runs container-wide pkill by adapter/release 
 - Same user VM boundary/nested privileged containers remain unchanged.
 
 ## Plan
-- [ ] Assign a random ownership marker to each Docker agent launch, overriding profile env collisions.
-- [ ] Snapshot container process identities and ancestry; select only marked processes and their descendants, fence signals against PID reuse.
-- [ ] Preserve owned targets across TERM/KILL, including an env-cleared child and orphaned TERM-resistant descendant.
-- [ ] Remove command-pattern cleanup and obsolete pattern-based tests.
+- [x] Assign a random ownership marker to each Docker agent launch, overriding profile env collisions.
+- [x] Snapshot container process identities and ancestry; select only marked processes and their descendants, fence signals against PID reuse.
+- [x] Preserve owned targets across TERM/KILL, including an env-cleared child and orphaned TERM-resistant descendant.
+- [x] Remove command-pattern cleanup and obsolete pattern-based tests.
 - [ ] Test actual cleanup script/processes via fake Docker transport plus real same-container staging sessions.
 - [ ] Targeted Go tests/race/vet/build; full CI.
 - [ ] Local specialist reviews (Go, test/completion, constitution/docs).
@@ -25,3 +25,8 @@ Two same-type live sessions share one workspace container; stopping/restarting o
 
 ## Release hold
 Draft PR + needs-human-review. Do not mark ready/remove label/merge until coordinator approves PR number and exact head. Any new commit voids approval. No direct main commits; archive notes separate draft PR. Staging slot required, explicit small resources CPU0.2/RAM0.5/disk5GB; immediately delete own staging node.
+
+## Local evidence
+New real-process shim tests passed3 repeats including orphan/env-cleared child, peer survival through stop/restart, marker override and PID reuse. Race run3 repeats passed before final orphan control addition. Full ACP/coverage, vet and vm-agent build running. Initial new tests failed compilation against missing owned-cleanup interface; a behavioral mutation check remains planned.
+
+Staging queue confirmed by coordinator: #2605 → model catalog task → this task. Wait direct release message before deploy. Claudecode test agents requested due OpenCode installer504.
