@@ -27,6 +27,9 @@ Two same-type live sessions share one workspace container; stopping/restarting o
 Draft PR + needs-human-review. Do not mark ready/remove label/merge until coordinator approves PR number and exact head. Any new commit voids approval. No direct main commits; archive notes separate draft PR. Staging slot required, explicit small resources CPU0.2/RAM0.5/disk5GB; immediately delete own staging node.
 
 ## Local evidence
-New real-process shim tests passed3 repeats including orphan/env-cleared child, peer survival through stop/restart, marker override and PID reuse. Race run3 repeats passed before final orphan control addition. Full ACP/coverage, vet and vm-agent build running. Initial new tests failed compilation against missing owned-cleanup interface; a behavioral mutation check remains planned.
+New real-process shim tests passed3 repeats including orphan/env-cleared child, peer survival through stop/restart, marker override and PID reuse. Race run3 repeats passed before final orphan control addition. Full ACP/coverage, vet and vm-agent build running. Initial new tests failed compilation against missing owned-cleanup interface. Behavioral mutation removing post-host-exit KILL failed the owned-orphan regression. Full ACP passed in40.774s with82.9% coverage; vet/build passed.
 
 Staging queue confirmed by coordinator: #2605 → model catalog task → this task. Wait direct release message before deploy. Claudecode test agents requested due OpenCode installer504.
+
+## Review correction
+Go and test reviewers confirmed that an env-cleared child orphaned before Stop cannot be inferred from a late ancestry snapshot. Added launch-time Linux session ownership via setsid (already required by secret-exec supervisor), plus a consumed stdout readiness header proving session ID/starttime before returning the adapter. No PID files or profiles. Session membership covers env-cleared/reparented children; inherited marker covers ordinary detached descendants. PID/session leader reuse fenced by starttime. Added combined env-cleared/pre-Stop-orphan regression. Re-review required.

@@ -1,9 +1,11 @@
 package acp
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -12,6 +14,64 @@ import (
 )
 
 const containerOwnerEnv = "SAM_ACP_PROCESS_OWNER"
+
+// setsid is already required by the VM agent's secret-execution supervisor.
+// Record the kernel session before the adapter can fork or clear its env.
+// The readiness line is consumed by the launcher, never exposed to ACP.
+const containerSessionLaunchScript = `
+command_session() {
+ IFS= read -r stat < /proc/self/stat || return 125
+ rest=${stat##*) }
+ set -- $rest
+ [ "$4" = "$$" ] || return 125
+ shift 19
+ printf '%s %s %s\n' "$SAM_ACP_PROCESS_OWNER" "$$" "$1"
+}
+command_session || exit 125
+exec "$@"
+`
+
+type bufferedProcessOutput struct {
+	io.Reader
+	io.Closer
+}
+
+// awaitContainerSession establishes ownership before returning the live adapter.
+// No files or shell profiles are needed; output after the header stays buffered.
+func (p *AgentProcess) awaitContainerSession() error {
+	type result struct {
+		header string
+		reader *bufio.Reader
+		err    error
+	}
+	ready := make(chan result, 1)
+	go func() {
+		reader := bufio.NewReader(p.stdout)
+		line, err := reader.ReadSlice('\n')
+		ready <- result{string(line), reader, err}
+	}()
+	timer := time.NewTimer(p.containerCommandTimeout())
+	defer timer.Stop()
+	select {
+	case got := <-ready:
+		fields := strings.Fields(got.header)
+		if got.err != nil || len(fields) != 3 || fields[0] != p.containerOwner {
+			return errors.New("container process ownership handshake failed")
+		}
+		pid, err := strconv.Atoi(fields[1])
+		if err != nil || pid <= 1 {
+			return errors.New("invalid container session identity")
+		}
+		if _, err := strconv.ParseUint(fields[2], 10, 64); err != nil {
+			return errors.New("invalid container session starttime")
+		}
+		p.containerSessionID, p.containerSessionStart = pid, fields[2]
+		p.stdout = bufferedProcessOutput{Reader: got.reader, Closer: p.stdout}
+		return nil
+	case <-timer.C:
+		return errors.New("container process ownership handshake timed out")
+	}
+}
 
 // Read metadata only: never return environment contents or match command names.
 // Removing through the final ') ' handles spaces/parentheses in Linux comm.
@@ -23,11 +83,12 @@ for path in /proc/[0-9]*; do
  set -- $rest
  [ "$#" -ge 20 ] || continue
  parent=$2
+ session=$4
  shift 19
  start=$1
  owned=0
  if [ -r "$path/environ" ] && tr '\000' '\n' < "$path/environ" 2>/dev/null | grep -Fqx -- "$marker"; then owned=1; fi
- printf '%s %s %s %s\n' "${path##*/}" "$parent" "$start" "$owned"
+ printf '%s %s %s %s %s\n' "${path##*/}" "$parent" "$start" "$owned" "$session"
 done
 `
 
@@ -57,10 +118,11 @@ exit "$failed"
 `
 
 type containerProcessIdentity struct {
-	pid    int
-	parent int
-	start  string
-	owned  bool
+	pid     int
+	parent  int
+	start   string
+	owned   bool
+	session int
 }
 
 // captureContainerProcesses retains ownership before parent exit can erase
@@ -82,7 +144,7 @@ func (p *AgentProcess) captureContainerProcesses() error {
 	processes := make(map[int]containerProcessIdentity)
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		fields := strings.Fields(line)
-		if len(fields) != 4 {
+		if len(fields) != 5 {
 			continue
 		}
 		pid, err := strconv.Atoi(fields[0])
@@ -96,13 +158,23 @@ func (p *AgentProcess) captureContainerProcesses() error {
 		if _, err := strconv.ParseUint(fields[2], 10, 64); err != nil {
 			continue
 		}
-		processes[pid] = containerProcessIdentity{pid: pid, parent: parent, start: fields[2], owned: fields[3] == "1"}
+		session, err := strconv.Atoi(fields[4])
+		if err != nil {
+			continue
+		}
+		processes[pid] = containerProcessIdentity{pid: pid, parent: parent, start: fields[2], owned: fields[3] == "1", session: session}
 	}
 	if p.containerTargets == nil {
 		p.containerTargets = make(map[int]string)
 	}
+	// A live session pins its leader's PID even after the leader exits. Once
+	// the PID is recycled for another session, its starttime no longer matches.
+	sessionValid := p.containerSessionID > 1
+	if leader, ok := processes[p.containerSessionID]; ok && leader.start != p.containerSessionStart {
+		sessionValid = false
+	}
 	for pid, proc := range processes {
-		if proc.owned {
+		if proc.owned || (sessionValid && proc.session == p.containerSessionID) {
 			p.containerTargets[pid] = proc.start
 		}
 	}

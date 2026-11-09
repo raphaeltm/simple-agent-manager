@@ -168,3 +168,24 @@ func TestContainerCleanupFindsMarkedExecChildAfterParentExit(t *testing.T) {
 		t.Fatal("marked exec child survived its parent and cleanup")
 	}
 }
+
+func TestContainerCleanupFindsEnvClearedOrphanBeforeStop(t *testing.T) {
+	installProcessDockerTransport(t)
+	owner := startCleanupFixture(t, `env -i PATH=/usr/bin:/bin sh -c 'echo $$; exec sleep 60' & exit 0`)
+	out := bufio.NewScanner(owner.Stdout())
+	if !out.Scan() {
+		t.Fatal("child not ready")
+	}
+	pid, err := strconv.Atoi(out.Text())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+	_ = owner.Wait()
+	if err := owner.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid)); err == nil {
+		t.Fatal("env-cleared child orphaned before Stop leaked")
+	}
+}

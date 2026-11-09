@@ -177,6 +177,8 @@ type AgentProcess struct {
 	stderr                 io.ReadCloser
 	containerID            string
 	containerOwner         string
+	containerSessionID     int
+	containerSessionStart  string
 	containerTargets       map[int]string
 	containerSignalTimeout time.Duration
 	startTime              time.Time
@@ -249,8 +251,8 @@ type ProcessConfig struct {
 
 // StartProcess spawns an agent process inside the devcontainer.
 // The process communicates via NDJSON over stdin/stdout.
-// The process is placed in its own process group (Setpgid) so that Stop()
-// can signal the entire tree reliably.
+// The Docker client has a host process group; container ownership is established
+// separately by a kernel session and per-launch marker.
 func StartProcess(cfg ProcessConfig) (*AgentProcess, error) {
 	return DockerExecLauncher{}.Start(cfg)
 }
@@ -371,7 +373,10 @@ func startDockerExecProcess(cfg ProcessConfig) (*AgentProcess, error) {
 	}
 	owner := hex.EncodeToString(ownerBytes[:])
 	cfg.EnvVars = mergeProcessEnv(cfg.EnvVars, []string{containerOwnerEnv + "=" + owner})
-	args, envFilePath, err := buildDockerExecArgs(cfg)
+	launchCfg := cfg
+	launchCfg.AcpCommand = "setsid"
+	launchCfg.AcpArgs = append([]string{"--wait", "sh", "-c", containerSessionLaunchScript, "sam-acp-session", cfg.AcpCommand}, cfg.AcpArgs...)
+	args, envFilePath, err := buildDockerExecArgs(launchCfg)
 	if err != nil {
 		return nil, err
 	}
@@ -404,7 +409,7 @@ func startDockerExecProcess(cfg ProcessConfig) (*AgentProcess, error) {
 		stopTimeout = DefaultStopTimeout
 	}
 
-	return &AgentProcess{
+	process := &AgentProcess{
 		agentType:              cfg.AcpCommand,
 		cmd:                    cmd,
 		stdin:                  pipes.stdin,
@@ -418,7 +423,12 @@ func startDockerExecProcess(cfg ProcessConfig) (*AgentProcess, error) {
 		stopGracePeriod:        gracePeriod,
 		stopTimeout:            stopTimeout,
 		waitDone:               make(chan struct{}),
-	}, nil
+	}
+	if err := process.awaitContainerSession(); err != nil {
+		_ = process.Stop()
+		return nil, err
+	}
+	return process, nil
 }
 
 func startLocalProcess(cfg ProcessConfig) (*AgentProcess, error) {
@@ -605,7 +615,7 @@ func (p *AgentProcess) Stop() error {
 	go func() { _ = p.Wait() }()
 	waitCh := p.waitDone
 
-	// Overall deadline — Stop() must not block longer than this.
+	// Bound the host-process exit wait; Docker commands have separate deadlines.
 	deadline := time.NewTimer(p.stopTimeout)
 	defer deadline.Stop()
 
