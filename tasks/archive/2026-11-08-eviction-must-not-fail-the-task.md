@@ -450,3 +450,83 @@ Server/config4512799549/9565/9572 and concurrentretrynit fixed: include configur
 Validation: full `go test ./...` PASS (server73.498s); full ACP `go test -race ./internal/acp` PASS71.640s. Focused finalACP race10.338s + expandedcontrols31.866s + checkpointcontrols7.688s; finalconfig/serverrace1.021s/3.298s. API33/33cleanupWorkersPASS, independentmixedtimestampnormalizationremovalRED; APItypecheck/lintPASS. File-size/context-budget/runtime-state and diff checksPASS. Evidence `/tmp/eviction-ship/review2-*`, `go-followup-*`, `mixed-terminal-timestamps-*`. Freshstage/newheadapproval/CI/reviewwait/productionmonitoring stillrequired; no releaseclaim.
 
 CI350 exposed a portablefixture issue in the new deniedrestore regression: standalone restore prioritizes ContainerWorkDir, and only WorkspaceDir was set to the test tempdir. CI could not create the derived /workspaces/workspace and returned an earlier generic degradation. Fixed TESTONLY: set both paths to the tempdir and require the exact admission-fenced degradation report before checking identity. Focusedrace count10PASS3.571s; explicitreadonlydefault simulationPASS1.272s; oldfixture/readonlypath negative reproduces earlyprovisioningfailure, and independent nilguard/fallbackguard removals remainRED409panic/identityloss. Production source unchanged from350. SonarQualityGatePASS18maintainabilitysmells/0hotspots, independentlyGo-triagednonblocking; no sourcecorrectness/securityfinding.
+
+## Final candidate staging — 2026-11-09 19:22 UTC
+
+This section supersedes the historical361 staging and pending350 notes above.
+Current source/test head is f86fe76c15b643bbe2c2429425dce4c1a70b26ef;
+immutable VM release is35069edce2869b56917c4ee85e25a92d03905b98 (test-only
+f86 does not change release inputs). Deploy Staging42678111223 passed in full,
+including smoke. Cloudflare required-version binding, fresh node heartbeat and
+live system-info all match350; buildDate2026-11-09T12:55:00Z. Authenticated
+Playwright dashboard, Potato project chat and settings pages loaded successfully.
+
+Fresh default-placement hel1/cx33 node01M70VFKDCQTDXRQ8KESKKZHQ7 was created
+19:10:10.860Z, with observed heartbeat19:12:51.688Z. Its workspace
+01M70VMN01FMW6N0GF11XDKD4Z ran task01M70VF8632N1CYKV7XQD9W3HD in chat
+2e8013e5-b296-4795-83d9-117734e891a9. No resourceRequirements or sizing override
+was supplied. Primary host01M70VNH0DV4Y7W7HQ1B8WK245 and secondary
+01M70VQQTY08Z9T53NFEE8DNJX both had real foreground Python waits running,
+confirmed by ACP tool events and separate processes. The exact marker
+EVICTION-PRESERVED-20261109 was present before pressure.
+
+A bounded allocator (16MiB per125ms, RAM+1280MiB cap,400-second duration,
+420-second alarm, elevated OOM score) triggered container OOM. Initial attempt
+was invalidated by a terminal probe reconnect changing RuntimeVersion while
+capture was in flight; stop correctly rejected a stale target. Retried once on
+same VM without terminal reconnects. Both hosts' prompt disconnect and process
+exit were parked at19:21:19.014–19:21:19.118Z. Final snapshot finished19:21:40;
+the task completion callback explicitly left its verdict to eviction delivery.
+Snapshot01M70VVJ4WHAB2A4SB4V1MBXSF is available/none with home and WIP artifacts
+and interruptedWork=1. Full durable status audit shows in_progress -> queued at
+19:21:46.338Z, with NO failed transition. This proves current-release fenced
+crash suppression and durable task handoff.
+
+Independent final task-completion-validator re-audited source coverage A–F:
+PASS, no implementation blocker. Source criteria are covered by real-process
+regressions, callback tests, real Workers SQLite and this two-host VM vertical
+slice. Release completion remains explicitly pending until the checks below.
+
+- [x] Final350 real VM heartbeat/version/access, two-host eviction and no-failed handoff.
+- [ ] Final restore disposition and cleanup/D1zero/staging release.
+- [ ] Renewed exact-final-head coordinator approval, refreshed CI and trusted CodeRabbit wait.
+- [ ] Merge, production deployment and read-only production monitoring.
+
+Verification correction: original node was strictly deleted200 after successful
+handoff while automatic replacement authority was still checking source generation.
+This invalidated that replacement and safely returned task to sleeping; it is a
+verification cleanup mistake, not proof of an uninterrupted automatic restore.
+A normal sleeping-chat prompt was submitted to verify the same saved marker.
+Its placement initially encountered Hetzner412 capacity; bounded outcome follows.
+The original selection-time fence/reason residual remains open in
+01M6YR5TX0C7X1S5FS7HSG22DX, including the terminal-probe observation. Minor9440
+remains explicitly deferred to open01M705B45FNNTZAFM9QHW87J3Y.
+
+Final bounded restore/cleanup disposition19:29UTC: the normal wake remained
+queued with provider_transient_capacity (Hetzner412, hel1/cx33). It was cancelled
+through the owner task API200; original node and aborted replacement
+01M70W53Y3ZDESWTZAN1P1CSBB were strictly deleted200, and temporary profile
+01M70VESXZHCKQAG4P1C336KR8 deleted200. Final350 replacement sentinel read is
+NOT claimed. Supporting earlier9c real replacement restore read the identical
+sentinel, and this PR leaves restore implementation unchanged; final350 denied-
+restore and identity regressions are covered locally and in CI. Coordinator must
+explicitly accept this disclosed limitation when renewing exact-head approval.
+
+Late allocation01M70WH9DVTF0KXCSG02RZF3HW appeared during cancellation;
+strict owner DELETE also returned200. D1 independently confirmed zero remaining
+active/destroying VM nodes at19:29:51.085Z (managed query
+sx-9fb5265cdea80671720eb99cdcce596d06bf656ee256319a28a658a78a5a4833).
+Staging was released to the coordinator at19:30UTC. No independent provider
+GET404 is claimed. The complete post-cleanup audit still has no failed transition;
+its only terminal transition is the explicit fixture cancellation.
+
+- [x] Final restore limitation documented, all fixture resources strictly deleted,
+      D1zero verified, staging released.
+- [ ] Coordinator accepts disclosed final350 restore gap and approves exact final head.
+- [ ] Fresh label-free CI, ready/trusted incremental CodeRabbit request and wait.
+- [ ] Merge and production deploy/read-only monitoring.
+
+Final archival audit: implementation PASS (all source reviews returned, including
+independent final A–F task-completion review); release WARN until those three
+explicit premerge/postmerge gates finish. This docs-only archive commit does not
+change the350 VM runtime and does not claim that the fix is shipped.
