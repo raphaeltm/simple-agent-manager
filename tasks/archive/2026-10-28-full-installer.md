@@ -301,5 +301,8 @@ This proves the fit-only cold build (artifacts, no tests). It does not prove a f
 
 - Shipped: #2475 (merged 2026-11-08) shipped the user-owned installer; draft #2465 was closed as superseded by it.
 - Production deploy run on `e727f0259` (2026-11-09 01:29 UTC) succeeded and contains this merge, so the change is live.
-- The unchecked items above were not individually re-verified in this sweep. The shared-engine CI parity work (production still runs with `use_shared_engine` unset in `.github/workflows/deploy-reusable.yml`) and the adversarial-audit items are carried forward in `tasks/backlog/2026-11-09-installer-shared-engine-follow-ups.md`.
+- The ten top-level plan items (runner-neutral engine through CI/staging proof) are superseded by
+  this file's later implementation and publication checkpoints and shipped in #2475; their boxes
+  were never ticked as the work moved into those checkpoints. They were not individually
+  re-verified in this sweep. The shared-engine CI parity work (production still runs with `use_shared_engine` unset in `.github/workflows/deploy-reusable.yml`) and the adversarial-audit items are carried forward in `tasks/backlog/2026-11-09-installer-shared-engine-follow-ups.md`.
 - Moved from `tasks/active/` to `tasks/archive/` by the weekly reconciliation.

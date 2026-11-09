@@ -37,7 +37,7 @@ need a weekly status nudge so their park decisions stay visible.
 ## Acceptance criteria
 
 - [x] `tasks/active/` contains only this task while the PR is open (archived before merge)
-- [ ] Every removed backlog file has a one-line rationale in the PR description
+- [x] Every removed backlog file has a one-line rationale in the PR description
 - [x] No backlog file with plausibly open work is removed (each removal spot-checked against code)
 - [ ] CI green
 
