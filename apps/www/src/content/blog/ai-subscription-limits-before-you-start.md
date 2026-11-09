@@ -14,7 +14,7 @@ I'm SAM, an open-source tool for running coding agents on your own cloud, and th
 
 Coding agents like Claude Code and Codex often run on a subscription rather than a pay-per-call API key. Those plans have usage limits that refill over time. Claude Max, for example, has a five-hour limit and a weekly limit. When one runs out, the agent stops until it resets.
 
-In SAM you start work by picking an **agent profile**: a saved setup that says which agent to run, with which model and settings. Different profiles can run on different accounts. A project might have one profile on a personal Claude plan and another on a team plan. SAM already tracked how much of each account's limits had been used, but it only showed that inside a running chat or on the Profiles page. When you started something new, nothing told you that the profile you were about to pick had 6% left.
+In SAM you start work by picking an **agent profile**: a saved setup that says which agent to run, with which model and settings. Different profiles can run on different accounts. A project might have one profile on a personal Claude plan and another on a team plan. SAM already tracked how much of each account's limits had been used, but it only showed that inside a running chat, on the account cards in Settings, or on the Profiles page. When you started something new, nothing told you that the profile you were about to pick had 6% left.
 
 ## Which account does a profile use?
 
@@ -45,11 +45,11 @@ export function profileHeadroom(budget: ProfileBudget | undefined, now: number):
 
 An account at 94% of its five-hour limit and 69% of its weekly limit therefore shows **6% left**. The weekly number doesn't matter yet, because the five-hour limit will stop the agent first.
 
-That number is drawn as a ring around the profile's icon, like a fuel gauge. The arc is what's left, and its colour follows the level the server already assigns: OK, Warning from 75% used, Critical from 90%, or out.
+That number is drawn as a ring around the profile's icon, like a fuel gauge. The arc is what's left, and its colour follows the level the server already assigns: OK, Warning (by default from 75% used, or earlier if the provider warns), Critical (by default from 90%), or out.
 
 <figure>
-  <img class="shot-dark" src="/images/blog/ai-subscription-limits-before-you-start/profile-cards-dark.png" width="456" height="380" alt="The new-chat screen headed &quot;Who should take this?&quot; with four recent profiles. Careful Reviewer is selected, with a thin orange arc and the words &quot;6% left · resets 53m&quot;. Codex Builder has a green ring about two thirds full and no words. Docs Writer has an empty ring and red text reading &quot;Out · back in 2h 10m&quot;. Quick Questions has no ring and says &quot;No account connected&quot;." loading="lazy" decoding="async" />
-  <img class="shot-light" src="/images/blog/ai-subscription-limits-before-you-start/profile-cards-light.png" width="456" height="380" alt="The new-chat screen headed &quot;Who should take this?&quot; with four recent profiles. Careful Reviewer is selected, with a thin orange arc and the words &quot;6% left · resets 53m&quot;. Codex Builder has a green ring about two thirds full and no words. Docs Writer has an empty ring and red text reading &quot;Out · back in 2h 10m&quot;. Quick Questions has no ring and says &quot;No account connected&quot;." loading="lazy" decoding="async" />
+  <img class="shot-dark" src="/images/blog/ai-subscription-limits-before-you-start/profile-cards-dark.png" width="456" height="379" alt="The new-chat screen headed &quot;Who should take this?&quot; with four recent profiles. Careful Reviewer is selected, with a thin orange arc and the words &quot;6% left · resets 53m&quot;. Codex Builder has a green ring a little more than half full and no words. Docs Writer has an empty ring and red text reading &quot;Out · back in 2h 10m&quot;. Quick Questions has no ring and says &quot;No account connected&quot;." loading="lazy" decoding="async" />
+  <img class="shot-light" src="/images/blog/ai-subscription-limits-before-you-start/profile-cards-light.png" width="456" height="379" alt="The new-chat screen headed &quot;Who should take this?&quot; with four recent profiles. Careful Reviewer is selected, with a thin orange arc and the words &quot;6% left · resets 53m&quot;. Codex Builder has a green ring a little more than half full and no words. Docs Writer has an empty ring and red text reading &quot;Out · back in 2h 10m&quot;. Quick Questions has no ring and says &quot;No account connected&quot;." loading="lazy" decoding="async" />
   <figcaption>Profiles with room show only the ring. Words appear when a limit is close or used up.</figcaption>
 </figure>
 
@@ -61,11 +61,11 @@ Most of the time most profiles have plenty of room, and a row of "83% left" labe
 - **Used up:** `Out · back in 2h 10m`
 - **Nothing to run on:** `No account connected`, or the account's name and `paused`
 
-Screen readers still hear the number for every profile, because it is part of each card's accessible name, which ends in "60% left" for Codex Builder. The ring itself is decorative, and colour is never the only signal.
+Screen readers still hear the number for every profile that has a reading, because it is part of each card's accessible name, which ends in "60% left" for Codex Builder. The ring itself is decorative, and colour is never the only signal.
 
 The countdown needed one careful rule: **it has to describe the number next to it.** For a profile that's close, the reset time comes from the fullest window, the same one the percentage was measured on. For a profile that's out, it's the latest reset among the windows that are refusing requests, because the profile is only usable again once all of them have reset. If any of those reset times is unknown, SAM shows `Out for now` rather than guessing.
 
-In the full profile list, used-up profiles move to a folded **Out for now** section at the bottom, so the ones you can use right away come first.
+In the full profile list, used-up profiles move to a folded **Out for now** section near the end of the list, so the ones you can use right away come first.
 
 ## Offering a switch, carefully
 
