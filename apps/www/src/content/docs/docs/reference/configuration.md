@@ -1960,13 +1960,15 @@ are runtime configuration overrides, not credentials or required deployment secr
 
 Installation admins edit these at **Admin → Settings**. They use the existing R2 binding and S3 credentials; no new Worker variables or infrastructure are required. Executor selection is reserved for the later Cloudflare executor rollout.
 
-| Setting                                    | Default | Purpose                                                          |
-| ------------------------------------------ | ------- | ---------------------------------------------------------------- |
-| `deployments.buildContextMaxBytes`         | 2 GiB   | Maximum raw tar (including headers) and compressed bundle bytes  |
-| `deployments.buildContextCollectTimeoutMs` | 120,000 | Source collection deadline                                       |
-| `deployments.buildContextUploadTtlSeconds` | 300     | Presigned upload URL lifetime                                    |
-| `deployments.buildContextRetentionHours`   | 48      | Minimum age before abandoned/terminal bundles are deleted        |
-| `deployments.buildContextCleanupBudgetMs`  | 10,000  | Work budget per daily cleanup pass                               |
-| `deployments.buildContextCleanupPageSize`  | 250     | R2 listing page size; a persisted cursor resumes remaining pages |
+| Setting                                    | Default | Purpose                                                                                                    |
+| ------------------------------------------ | ------- | ---------------------------------------------------------------------------------------------------------- |
+| `deployments.buildContextCollectionMode`   | `off`   | `shadow` enables an asynchronous hidden context probe on publish; actual build execution remains unchanged |
+| `deployments.buildContextStartTimeoutMs`   | 10,000  | Bounds control-plane wait for source collection acceptance                                                 |
+| `deployments.buildContextMaxBytes`         | 2 GiB   | Maximum raw tar (including headers) and compressed bundle bytes                                            |
+| `deployments.buildContextCollectTimeoutMs` | 120,000 | Source collection deadline                                                                                 |
+| `deployments.buildContextUploadTtlSeconds` | 300     | Presigned upload URL lifetime                                                                              |
+| `deployments.buildContextRetentionHours`   | 48      | Minimum age before abandoned/terminal bundles are deleted                                                  |
+| `deployments.buildContextCleanupBudgetMs`  | 10,000  | Work budget per daily cleanup pass                                                                         |
+| `deployments.buildContextCleanupPageSize`  | 250     | R2 listing page size; a persisted cursor resumes remaining pages                                           |
 
 Collection has no file-count cutoff. For a 100,000-file context near 1.5 GiB, tar headers add at least 49 MiB, plus filename/padding metadata. At 50 MiB/s the payload alone needs about 31 seconds to collect and another 31 seconds to upload; filesystem traversal, compression, and network conditions add time. Collection stops at its deadline rather than repeatedly processing a fixed batch. Phase timings are stored in publish-job events. The source request retains the existing overall VM publish timeout (20 minutes by default) and emits publish heartbeats throughout collection/upload.

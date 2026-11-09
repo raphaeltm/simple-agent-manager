@@ -28,6 +28,7 @@ describe('additive build context migration', () => {
             "INSERT INTO deployment_publish_jobs(id,project_id,environment_id,workspace_id,node_id,requested_by,environment_name) VALUES('old','owner','owner','workspace','owner','owner','production')"
           );
         db.exec(migration('0230_publish_job_build_context.sql'));
+        db.exec(migration('0231_publish_job_context_shadow.sql'));
         if (existing)
           expect(
             db

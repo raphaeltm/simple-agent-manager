@@ -31,6 +31,7 @@ import {
   DEPLOYMENT_MODEL_RUNNER_VM_SIZE,
   resolveDeploymentPlacement,
 } from '../../services/deployment-provisioning';
+import { visiblePublishJobPredicate } from '../../services/deployment-publish-jobs';
 import { PUBLISH_JOB_TERMINAL_STATUSES } from '../../services/deployment-publish-jobs';
 import {
   createMissingDeclaredVolumes,
@@ -371,6 +372,7 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
         .where(
           and(
             eq(schema.deploymentPublishJobs.id, submission.publishJobId),
+            visiblePublishJobPredicate(),
             eq(schema.deploymentPublishJobs.attempt, submission.attempt ?? 0),
             eq(schema.deploymentPublishJobs.projectId, projectId),
             eq(schema.deploymentPublishJobs.workspaceId, workspaceId),

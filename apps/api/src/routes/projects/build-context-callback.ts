@@ -98,21 +98,22 @@ for (const operation of ['init', 'complete'] as const) {
         throw errors.conflict(
           'Context job status, executor, attempt, or descriptor no longer matches'
         );
-      c.executionCtx.waitUntil(
-        recordDeploymentPublishJobLifecycleEventBestEffort(c.env, {
-          projectId: job.projectId,
-          publishJobId: job.id,
-          environmentId: job.environmentId,
-          status: result.status,
-          fromStatus: job.status,
-          currentStep: result.status,
-          nodeId: job.nodeId,
-          workspaceId: job.workspaceId,
-          terminal: false,
-          source: `build_context.${operation}`,
-          occurredAt: Date.now(),
-        })
-      );
+      if (!job.contextShadow)
+        c.executionCtx.waitUntil(
+          recordDeploymentPublishJobLifecycleEventBestEffort(c.env, {
+            projectId: job.projectId,
+            publishJobId: job.id,
+            environmentId: job.environmentId,
+            status: result.status,
+            fromStatus: job.status,
+            currentStep: result.status,
+            nodeId: job.nodeId,
+            workspaceId: job.workspaceId,
+            terminal: false,
+            source: `build_context.${operation}`,
+            occurredAt: Date.now(),
+          })
+        );
       await verified.assertCurrent();
       return c.json({ ok: true, status: result.status, ...upload });
     }

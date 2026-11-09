@@ -14,6 +14,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { parsePositiveInt } from '../../lib/route-helpers';
+import { scheduleBuildContextShadow } from '../../services/build-context-shadow';
 import { assertAgentDeploymentAllowed } from '../../services/deployment-control';
 import { loadDeploymentBuildInterpolationEnv } from '../../services/deployment-environment-config';
 import { cancelDeploymentPublishJobOnVmBestEffort } from '../../services/deployment-publish-job-cancel';
@@ -77,7 +78,8 @@ export async function handleBuildAndPublish(
   requestId: PublishRequestId,
   toolArgs: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env
+  env: Env,
+  execCtx?: { waitUntil(promise: Promise<unknown>): void }
 ): Promise<JsonRpcResponse> {
   const workspaceErr = requireWorkspace(requestId, tokenData);
   if (workspaceErr) return workspaceErr;
@@ -108,6 +110,23 @@ export async function handleBuildAndPublish(
     .from(schema.nodes)
     .where(eq(schema.nodes.id, workspace.nodeId))
     .limit(1);
+  scheduleBuildContextShadow(
+    env,
+    {
+      projectId,
+      environmentId: policyResult.environmentId,
+      workspaceId: tokenData.workspaceId,
+      nodeId: workspace.nodeId,
+      taskId: tokenData.taskId || null,
+      agentProfileId: policyResult.taskAgentProfileId || null,
+      requestedBy: tokenData.userId,
+      environmentName: environment,
+      reference,
+      workingDir: workingDir ?? null,
+    },
+    { buildInterpolationEnv: buildEnv.values, secretInterpolationKeys: buildEnv.secretKeys },
+    execCtx
+  );
   // Temporary until phase 3 of idea 01KZ6V37D1QGDR3WN12PSDB0QD adds the Cloudflare builder.
   if (node?.runtime === 'cf-container') {
     return jsonRpcError(

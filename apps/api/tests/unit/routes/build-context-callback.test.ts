@@ -6,6 +6,7 @@ import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { AppError, errors } from '../../../src/middleware/error';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
+const lifecycle = vi.hoisted(() => vi.fn(async () => undefined));
 const signed = vi.hoisted(() => vi.fn(async () => 'https://signed.invalid/object'));
 vi.mock('@aws-sdk/s3-request-presigner', () => ({ getSignedUrl: signed }));
 vi.mock('../../../src/services/jwt', () => ({
@@ -22,7 +23,7 @@ vi.mock('../../../src/services/deployment-control', () => ({
   assertAgentDeploymentAllowedForProfile: async () => ({ environmentId: 'env' }),
 }));
 vi.mock('../../../src/services/project-lifecycle-events', () => ({
-  recordDeploymentPublishJobLifecycleEventBestEffort: async () => undefined,
+  recordDeploymentPublishJobLifecycleEventBestEffort: lifecycle,
 }));
 vi.mock('../../../src/services/workspace-deletion-callback-signal', () => ({
   signalWorkspaceDeletionUnconfirmedCallback: async () => undefined,
@@ -140,5 +141,17 @@ describe('context callback vertical slice with real SQLite and callback middlewa
     expect((await request('init', { sizeBytes: 3000 })).status).toBe(400);
     expect(signed).not.toHaveBeenCalled();
     expect((await request('init')).status).toBe(200);
+  });
+  it('shadow init/complete records internal timing without project publish events', async () => {
+    sqlite.exec('UPDATE deployment_publish_jobs SET context_shadow=1');
+    expect((await request('init', { durationMs: 123 })).status).toBe(200);
+    expect((await request('complete', { durationMs: 123 })).status).toBe(200);
+    expect(lifecycle).not.toHaveBeenCalled();
+    const event = sqlite
+      .prepare(
+        "SELECT detail_json FROM deployment_publish_job_events WHERE event_type='publish.context.context_ready'"
+      )
+      .get() as { detail_json: string };
+    expect(JSON.parse(event.detail_json)).toMatchObject({ collectionDurationMs: 123 });
   });
 });

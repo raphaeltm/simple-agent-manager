@@ -16,10 +16,10 @@ export async function collectBuildContextOnSource(
     secretInterpolationKeys: string[];
   }
 ) {
-  const [maxBytes, collectTimeoutMs, deadlineMs] = await Promise.all([
+  const [maxBytes, collectTimeoutMs, startTimeoutMs] = await Promise.all([
     resolveAdminSetting(env, 'deployments.buildContextMaxBytes'),
     resolveAdminSetting(env, 'deployments.buildContextCollectTimeoutMs'),
-    resolveAdminSetting(env, 'deployments.publishJobDeadlineMs'),
+    resolveAdminSetting(env, 'deployments.buildContextStartTimeoutMs'),
   ]);
   const { token } = await signNodeManagementToken(
     job.requestedBy,
@@ -43,14 +43,15 @@ export async function collectBuildContextOnSource(
       body: JSON.stringify({
         publishJobId: job.id,
         attempt: job.attempt,
+        shadow: job.contextShadow,
         workingDir: job.workingDir,
         maxBytes: Number(maxBytes),
         collectTimeoutMs: Number(collectTimeoutMs),
         ...interpolation,
       }),
-      signal: AbortSignal.timeout(Number(deadlineMs)),
+      signal: AbortSignal.timeout(Number(startTimeoutMs)),
     },
-    Number(deadlineMs),
+    Number(startTimeoutMs),
     { noWakeContainer: true, recoverContainerOnTimeout: false }
   );
   if (response.status === 404)

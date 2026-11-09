@@ -3,10 +3,12 @@ package server
 import (
 	"archive/tar"
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"github.com/klauspost/compress/zstd"
+	"github.com/workspace/vm-agent/internal/publish"
 	"io"
 	"math/rand"
 	"net/http"
@@ -16,11 +18,18 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestBuildContextCollectRouteBothRuntimesLarge(t *testing.T) {
-	for _, instant := range []bool{false, true} {
-		t.Run(map[bool]string{true: "Instant", false: "VM"}[instant], func(t *testing.T) {
+	for _, tc := range []struct {
+		name                    string
+		instant, shadow, cancel bool
+	}{{"VM", false, false, false}, {"Instant", true, false, false}, {"VMShadow", false, true, false}, {"InstantShadow", true, true, false}, {"CancelShadowUpload", false, true, true}} {
+		instant, shadow, cancelUpload := tc.instant, tc.shadow, tc.cancel
+		t.Run(tc.name, func(t *testing.T) {
+			temp := t.TempDir()
+			t.Setenv("TMPDIR", temp)
 			s, key := mcpBuildTestServer(t)
 			s.config.ContainerMode = instant
 			mount := t.TempDir()
@@ -66,12 +75,28 @@ func TestBuildContextCollectRouteBothRuntimesLarge(t *testing.T) {
 				SHA  string `json:"sha256"`
 			}
 			completed := false
+			var finalEvent publish.Event
+			var eventTypes []string
+			uploadStarted := make(chan struct{})
+			releaseUpload := make(chan struct{})
+			requestEnded := make(chan struct{})
 			var callbacks *httptest.Server
 			callbacks = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				mu.Lock()
 				defer mu.Unlock()
 				switch {
 				case strings.HasSuffix(r.URL.Path, "/events"):
+					var event publish.Event
+					if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
+						t.Error(err)
+					}
+					eventTypes = append(eventTypes, event.EventType)
+					if event.EventType != "publish.job.heartbeat" {
+						finalEvent = event
+						if !cancelUpload && !completed {
+							t.Error("final event preceded verified completion")
+						}
+					}
 					io.WriteString(w, "{\"ok\":true}")
 				case strings.HasSuffix(r.URL.Path, "/init"):
 					if r.Header.Get("Authorization") != "Bearer callback-token" {
@@ -82,6 +107,13 @@ func TestBuildContextCollectRouteBothRuntimesLarge(t *testing.T) {
 					}
 					json.NewEncoder(w).Encode(map[string]string{"uploadUrl": callbacks.URL + "/put"})
 				case r.URL.Path == "/put":
+					<-requestEnded
+					if cancelUpload {
+						close(uploadStarted)
+						<-releaseUpload
+						w.WriteHeader(500)
+						return
+					}
 					if r.Header.Get("Authorization") != "" {
 						t.Error("credential leaked to upload")
 					}
@@ -113,18 +145,76 @@ func TestBuildContextCollectRouteBothRuntimesLarge(t *testing.T) {
 			s.config.ControlPlaneURL = callbacks.URL
 			mux := http.NewServeMux()
 			s.setupRoutes(mux)
-			body, _ := json.Marshal(collectBuildContextRequest{McpBuildAndPublishRequest: McpBuildAndPublishRequest{PublishJobID: "job", Attempt: 1, WorkingDir: work}})
+			body, _ := json.Marshal(collectBuildContextRequest{McpBuildAndPublishRequest: McpBuildAndPublishRequest{PublishJobID: "job", Attempt: 1, WorkingDir: work}, Shadow: shadow})
 			req := httptest.NewRequest("POST", "/workspaces/ws-001/mcp/build-and-publish-jobs/job/collect", bytes.NewReader(body))
 			req.Header.Set("Authorization", "Bearer "+signWorkspaceCreateNodeToken(t, key, s.config.NodeID, "ws-001"))
 			req.Header.Set("X-SAM-Node-Id", s.config.NodeID)
 			req.Header.Set("X-SAM-Workspace-Id", "ws-001")
+			requestCtx, cancelRequest := context.WithCancel(context.Background())
+			req = req.WithContext(requestCtx)
 			rec := httptest.NewRecorder()
 			mux.ServeHTTP(rec, req)
-			if rec.Code != 200 {
+			cancelRequest()
+			close(requestEnded)
+			if rec.Code != http.StatusAccepted {
 				t.Fatalf("collect: %d %s", rec.Code, rec.Body.String())
+			}
+			if cancelUpload {
+				select {
+				case <-uploadStarted:
+				case <-time.After(10 * time.Second):
+					t.Fatal("upload did not start")
+				}
+				cancelRequest := httptest.NewRequest("POST", "/workspaces/ws-001/mcp/build-and-publish-jobs/job/cancel", nil)
+				cancelRequest.Header = req.Header.Clone()
+				cancelResponse := httptest.NewRecorder()
+				mux.ServeHTTP(cancelResponse, cancelRequest)
+				close(releaseUpload)
+				if cancelResponse.Code != 200 {
+					t.Fatalf("cancel: %d %s", cancelResponse.Code, cancelResponse.Body.String())
+				}
+			}
+			expected := "context_ready"
+			if shadow {
+				expected = "succeeded"
+			}
+			if cancelUpload {
+				expected = "failed"
+			}
+			deadline := time.Now().Add(10 * time.Second)
+			for {
+				s.publishJobsMu.Lock()
+				state := s.publishJobs["job"]
+				s.publishJobsMu.Unlock()
+				if !state.CompletedAt.IsZero() {
+					if state.Status != expected {
+						t.Fatalf("context failed: %s", state.Status)
+					}
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("async context collection did not finish")
+				}
+				time.Sleep(time.Millisecond)
 			}
 			mu.Lock()
 			defer mu.Unlock()
+			if finalEvent.Status != expected || finalEvent.Terminal != (shadow || cancelUpload) {
+				t.Fatalf("wrong final callback: %+v", finalEvent)
+			}
+			if len(eventTypes) == 0 || eventTypes[len(eventTypes)-1] == "publish.job.heartbeat" {
+				t.Fatal("heartbeat after completion")
+			}
+			matches, err := filepath.Glob(filepath.Join(temp, "sam-build-context-*"))
+			if err != nil || len(matches) != 0 {
+				t.Fatalf("archive not cleaned: %v %v", matches, err)
+			}
+			if cancelUpload {
+				if completed {
+					t.Fatal("canceled upload completed")
+				}
+				return
+			}
 			if len(uploaded) < 1024*1024 {
 				t.Fatal("test must exercise a multi-buffer compressed upload")
 			}

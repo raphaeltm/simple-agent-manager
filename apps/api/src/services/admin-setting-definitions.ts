@@ -18,6 +18,8 @@ export type AdminSettingValue = boolean | number | string | readonly string[] | 
 export type AdminSettingType = 'boolean' | 'integer' | 'string' | 'string-list' | 'enum';
 
 export type AdminSettingName =
+  | 'deployments.buildContextCollectionMode'
+  | 'deployments.buildContextStartTimeoutMs'
   | `deployments.buildContext${'MaxBytes' | 'CollectTimeoutMs' | 'UploadTtlSeconds' | 'RetentionHours' | 'CleanupBudgetMs' | 'CleanupPageSize'}`
   | `deployments.publishJob${'StallMs' | 'DeadlineMs' | 'SweepLimit' | 'CancelTimeoutMs'}`
   | `workflow.${keyof typeof WORKFLOW_DEFAULTS}`

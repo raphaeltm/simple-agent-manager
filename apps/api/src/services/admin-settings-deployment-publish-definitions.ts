@@ -1,10 +1,12 @@
-import { integerDefinition } from './admin-setting-definitions';
+import { choiceDefinition, integerDefinition } from './admin-setting-definitions';
 import {
   DEFAULT_BUILD_CONTEXT_CLEANUP_BUDGET_MS,
   DEFAULT_BUILD_CONTEXT_CLEANUP_PAGE_SIZE,
   DEFAULT_BUILD_CONTEXT_COLLECT_TIMEOUT_MS,
+  DEFAULT_BUILD_CONTEXT_COLLECTION_MODE,
   DEFAULT_BUILD_CONTEXT_MAX_BYTES,
   DEFAULT_BUILD_CONTEXT_RETENTION_HOURS,
+  DEFAULT_BUILD_CONTEXT_START_TIMEOUT_MS,
   DEFAULT_BUILD_CONTEXT_UPLOAD_TTL_SECONDS,
 } from './build-context-defaults';
 import {
@@ -16,6 +18,20 @@ import {
 } from './deployment-publish-job-defaults';
 
 export const DEPLOYMENT_PUBLISH_SETTINGS = [
+  choiceDefinition(
+    'deployments.buildContextCollectionMode',
+    DEFAULT_BUILD_CONTEXT_COLLECTION_MODE,
+    ['off', 'shadow'],
+    'Operations',
+    'Off preserves node publishing. Shadow asynchronously collects a separate hidden context job without changing build execution.'
+  ),
+  integerDefinition(
+    'deployments.buildContextStartTimeoutMs',
+    DEFAULT_BUILD_CONTEXT_START_TIMEOUT_MS,
+    'Operations',
+    'Maximum control-plane wait for source collection acceptance; collection runs in a source-owned job.',
+    { min: 100, max: 30000 }
+  ),
   integerDefinition(
     'deployments.buildContextCleanupBudgetMs',
     DEFAULT_BUILD_CONTEXT_CLEANUP_BUDGET_MS,

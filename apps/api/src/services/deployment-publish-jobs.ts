@@ -13,6 +13,10 @@ export const PUBLISH_JOB_TERMINAL_STATUSES = new Set([
   'canceled',
   'unknown',
 ]);
+// coalesce also supports older narrow test fixtures; migrated rows are NOT NULL.
+export function visiblePublishJobPredicate() {
+  return sql`coalesce(${schema.deploymentPublishJobs.contextShadow}, 0) = 0`;
+}
 const MAX_MESSAGE_LENGTH = 1000;
 const MAX_DETAIL_JSON_LENGTH = 4000;
 const DEFAULT_EVENT_LIMIT = 50;
@@ -77,6 +81,7 @@ function normalizeStatus(status: unknown): string | undefined {
 
 export interface CreateDeploymentPublishJobInput {
   executor?: 'node' | 'cloudflare';
+  contextShadow?: boolean;
   projectId: string;
   environmentId: string;
   workspaceId: string;
@@ -109,6 +114,7 @@ export async function createDeploymentPublishJob(
     workingDir: input.workingDir ?? null,
     status: 'queued',
     executor: input.executor ?? 'node',
+    contextShadow: input.contextShadow ?? false,
     createdAt: now,
     updatedAt: now,
   });
@@ -157,6 +163,7 @@ export async function appendDeploymentPublishJobEvent(
   const terminal = input.terminal || (status ? PUBLISH_JOB_TERMINAL_STATUSES.has(status) : false);
   const predicate = and(
     eq(schema.deploymentPublishJobs.id, input.publishJobId),
+    input.releaseId != null ? visiblePublishJobPredicate() : undefined,
     input.releaseId != null
       ? or(
           isNull(schema.deploymentPublishJobs.releaseId),
@@ -259,7 +266,11 @@ export async function getDeploymentPublishJobForMcp(
         eq(schema.deploymentPublishJobs.id, publishJobId),
         eq(schema.deploymentPublishJobs.projectId, projectId)
       );
-  const [job] = await db.select().from(schema.deploymentPublishJobs).where(where).limit(1);
+  const [job] = await db
+    .select()
+    .from(schema.deploymentPublishJobs)
+    .where(and(where, visiblePublishJobPredicate()))
+    .limit(1);
   if (!job) return null;
 
   const limit = clamp(opts.limit ?? DEFAULT_EVENT_LIMIT, 1, MAX_EVENT_LIMIT);
@@ -339,6 +350,7 @@ export async function cancelDeploymentPublishJob(
     .where(
       and(
         eq(schema.deploymentPublishJobs.id, publishJobId),
+        visiblePublishJobPredicate(),
         eq(schema.deploymentPublishJobs.projectId, projectId),
         workspaceId ? eq(schema.deploymentPublishJobs.workspaceId, workspaceId) : undefined,
         notInArray(schema.deploymentPublishJobs.status, [...PUBLISH_JOB_TERMINAL_STATUSES])
