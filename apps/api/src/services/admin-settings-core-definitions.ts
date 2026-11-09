@@ -22,6 +22,8 @@ import { CONNECTOR_DEFAULTS, type ConnectorSettingKey } from './connector-settin
 import { ENV_KEYS, SECRET_KINDS, SETTING_KEYS } from './platform-config-store';
 import {
   DEFAULT_PROVISIONING_ATTEMPTS_PER_PROVIDER_TIER,
+  DEFAULT_WORKSPACE_BUILD_QUEUE_TIMEOUT_MINUTES,
+  DEFAULT_WORKSPACE_PLACEMENT_BACKLOG_CONFLICT_RETRIES,
   DEFAULT_WORKSPACE_PLACEMENT_MAX_REJECTIONS,
 } from './provisioning-attempt-limits';
 import { DEFAULT_SESSION_STALE_TURN_NO_WORK_MINUTES } from './session-idleness';
@@ -243,6 +245,20 @@ export const CORE_SETTINGS: AdminSettingDefinition[] = [
     'Operations',
     'Consecutive times the node a task selected may refuse its final workspace reservation before the task fails with the refusal reasons. The count resets when a reservation succeeds.',
     { min: 1, max: 20 }
+  ),
+  integerDefinition(
+    'operations.workspacePlacementBacklogConflictRetries',
+    DEFAULT_WORKSPACE_PLACEMENT_BACKLOG_CONFLICT_RETRIES,
+    'Operations',
+    'Times a task may reselect because the node it ranked first gained queued workspace builds before its reservation, counted until a reservation succeeds (capacity refusals neither add to nor reset the count). After this many, the task places on its next choice without that fairness check; capacity checks still apply. Conflicts never fail a task or provision a node.',
+    { min: 1, max: 20 }
+  ),
+  integerDefinition(
+    'operations.workspaceBuildQueueTimeoutMinutes',
+    DEFAULT_WORKSPACE_BUILD_QUEUE_TIMEOUT_MINUTES,
+    'Operations',
+    "Minutes a workspace may wait for its node's single build slot before it times out. Once its build starts, the build gets the full workspace-ready timeout from that moment, so queue time never shortens the build. Workspaces that do not report a build start (direct creates) stay on this budget for the whole start.",
+    { min: 5, max: 1440 }
   ),
   ...Object.keys(CONNECTOR_DEFAULTS).map((key) => connectorDefinition(key as ConnectorSettingKey)),
   ...agentModelSettingDefinitions(),

@@ -381,6 +381,8 @@ export function registerWorkspaceCreateRoute(crudRoutes: Hono<{ Bindings: Env }>
           providerInstanceArchitecture: workspaceProviderInstanceArchitecture,
           resourceRequirementsJson,
           resolvedReservationJson: JSON.stringify(resolvedReservation),
+          // The attempt's clock starts now; node provisioning time counts toward it.
+          creatingStartedAt: now,
           createdAt: now,
           updatedAt: now,
         });

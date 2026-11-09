@@ -25,7 +25,6 @@ vi.mock('../../../src/services/vm-admission-control', async (importActual) => {
 });
 
 type D1ResultMap = {
-  task?: { id: string; projectId: string; userId: string; taskMode: string; triggeredBy: string };
   activePoolNodeCount?: number;
   persistedWarmClaim?: string | null;
   persistedWarmNode?: PlacementRowNodeSource;
@@ -60,6 +59,8 @@ type D1ResultMap = {
   workspaceReservations?: Array<{
     nodeId: string;
     resolvedReservationJson: string | null;
+    /** Workspace status; defaults to `running`. `creating` rows are the node's startup backlog. */
+    status?: string;
   }>;
   healthByNode?: Record<
     string,
@@ -247,19 +248,6 @@ function createStatement(sql: string, results: D1ResultMap) {
       return this;
     },
     first() {
-      if (sql.includes("task_mode = 'conversation' AND triggered_by IN ('user', 'connector')")) {
-        const task = results.task;
-        return Promise.resolve(
-          task &&
-            task.id === bound[0] &&
-            task.projectId === bound[1] &&
-            task.userId === bound[2] &&
-            task.taskMode === 'conversation' &&
-            (task.triggeredBy === 'user' || task.triggeredBy === 'connector')
-            ? { id: task.id }
-            : null
-        );
-      }
       if (sql.includes('COUNT(*) AS count') && sql.includes('capacity_pool_id = ?')) {
         return Promise.resolve({ count: results.activePoolNodeCount ?? 0 });
       }
@@ -330,9 +318,11 @@ function createStatement(sql: string, results: D1ResultMap) {
       }
       if (sql.includes('resolved_reservation_json AS reservationJson')) {
         return Promise.resolve({
-          results: (results.workspaceReservations ?? []).map((row) => ({
+          results: (results.workspaceReservations ?? []).map((row, index) => ({
             nodeId: row.nodeId,
             reservationJson: row.resolvedReservationJson,
+            workspaceId: `ws-${row.nodeId}-${index}`,
+            status: row.status ?? 'running',
           })),
         });
       }
@@ -351,7 +341,6 @@ function createContext(results: D1ResultMap): TaskRunnerContext {
       },
       NODE_HEARTBEAT_STALE_SECONDS: '180',
       VM_AGENT_REQUIRED_VERSION: 'current-sha',
-      VM_ADMISSION_BUSY_BUILD_WAIT_TIMEOUT_MS: '900000',
     },
     ctx: {
       storage: {
@@ -428,7 +417,6 @@ function createState(overrides: Partial<TaskRunnerState> = {}): TaskRunnerState 
     createdAt: Date.now(),
     lastStepAt: Date.now(),
     agentReadyStartedAt: null,
-    workspaceReadyStartedAt: null,
     completed: false,
     ...overrides,
   };
@@ -592,14 +580,6 @@ function idleBuildMetrics(): string {
   return busyBuildMetrics({ creatingWorkspaces: 0 });
 }
 
-function busyBuildWaitExpired() {
-  return {
-    kind: 'expired' as const,
-    reason: 'wait_deadline_expired' as const,
-    waitDeadlineAt: '2026-09-11T12:15:00.000Z',
-  };
-}
-
 function busyBuildState({
   cpuMillis = 500,
   selection = capacityPoolSelection('user'),
@@ -642,6 +622,35 @@ function busyBuildNode(
     ...nodeCapacityFields(selection),
     ...overrides,
   };
+}
+
+/** `count` workspace rows on `nodeId` holding the run's own reservation. */
+function reservationsOn(
+  nodeId: string,
+  count: number,
+  state: TaskRunnerState,
+  status: 'creating' | 'running' = 'creating'
+): NonNullable<D1ResultMap['workspaceReservations']> {
+  return Array.from({ length: count }, () => ({
+    nodeId,
+    resolvedReservationJson: JSON.stringify(state.config.resolvedReservation),
+    status,
+  }));
+}
+
+function healthyAgents(...nodeIds: string[]): NonNullable<D1ResultMap['healthByNode']> {
+  const now = new Date().toISOString();
+  return Object.fromEntries(
+    nodeIds.map((id) => [
+      id,
+      {
+        health_status: 'healthy',
+        last_heartbeat_at: now,
+        agent_ready_at: now,
+        agent_version: 'current-sha',
+      },
+    ])
+  );
 }
 
 beforeEach(() => {
@@ -1472,178 +1481,385 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
     expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'workspace_creation');
   });
 
-  it('skips existing nodes that report creating workspaces in heartbeat metrics', async () => {
-    const state = createState();
-    const now = new Date().toISOString();
-    const rc = createContext({
-      existingNodes: [
-        {
-          id: 'node-building',
-          vm_size: 'large',
-          vm_location: 'fsn1',
-          health_status: 'healthy',
-          last_metrics: JSON.stringify({
-            cpuLoadAvg1: 1,
-            memoryPercent: 1,
-            diskPercent: 1,
-            creatingWorkspaces: 1,
-          }),
-          last_heartbeat_at: now,
-          agent_version: 'current-sha',
-        },
-        {
-          id: 'node-ready',
-          vm_size: 'large',
-          vm_location: 'fsn1',
-          health_status: 'healthy',
-          last_metrics: JSON.stringify({ cpuLoadAvg1: 1.6, memoryPercent: 20, diskPercent: 20 }),
-          last_heartbeat_at: now,
-          agent_version: 'current-sha',
-        },
-      ],
-      healthByNode: {
-        'node-ready': {
-          health_status: 'healthy',
-          last_heartbeat_at: now,
-          agent_ready_at: now,
-          agent_version: 'current-sha',
-        },
-      },
-    });
-
-    await handleNodeSelection(state, rc);
-
-    expect(state.stepResults.nodeId).toBe('node-ready');
-    expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'workspace_creation');
-  });
-
-  it('parks instead of provisioning when the only otherwise-eligible host is busy building', async () => {
-    const selection = capacityPoolSelection('user', {
-      machineSize: 'small',
-      providerInstanceType: 'cx23',
-      vcpuCount: 2,
-      memoryMb: 4_096,
-      diskGb: 40,
-    });
-    const state = busyBuildState({ selection });
-    const rc = createContext({
-      existingNodes: [busyBuildNode('node-building-only', selection)],
-      workspaceReservations: [
-        {
-          nodeId: 'node-building-only',
-          resolvedReservationJson: JSON.stringify({
-            ...state.config.resolvedReservation,
-            cpuMillis: 1_000,
-            memoryMb: 2_048,
-          }),
-        },
-      ],
-    });
-
-    await handleNodeSelection(state, rc);
-
-    expect(admissionMocks.waitForVmAdmissionCapacity).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ taskId: state.taskId, scopeKey: ADMISSION_SCOPE.scopeKey }),
-      'compatible_node_building_workspace',
-      null,
-      null,
-      expect.objectContaining({ waitTimeoutMs: expect.any(Number) })
-    );
-    expect(rc.updateD1ExecutionStep).toHaveBeenCalledWith(
-      state.taskId,
-      'waiting_for_node_capacity'
-    );
-    expect(rc.ctx.storage.setAlarm).toHaveBeenCalledWith(Date.parse('2026-09-11T12:00:15.000Z'));
-    expect(rc.advanceToStep).not.toHaveBeenCalled();
-    expect(state.stepResults.placementDiagnostics).toMatchObject({
-      selectedNodeId: null,
-      queue: {
-        state: 'waiting',
-        reason: 'compatible_node_building_workspace',
-      },
-      hosts: [
-        {
-          nodeId: 'node-building-only',
-          outcome: 'deferred',
-          reasons: ['node build queue is busy'],
-        },
-      ],
-    });
-  });
-
-  it.each([
-    { label: 'first human conversation', triggeredBy: 'user', resume: false, admitted: true },
-    {
-      label: 'first Connector conversation',
-      triggeredBy: 'connector',
-      resume: false,
-      admitted: true,
-    },
-    {
-      label: 'Connector conversation wake',
-      triggeredBy: 'connector',
-      resume: true,
-      admitted: false,
-    },
-    { label: 'background conversation', triggeredBy: 'schedule', resume: false, admitted: false },
-    { label: 'human conversation wake', triggeredBy: 'user', resume: true, admitted: false },
-  ])(
-    'handles build deferral for a $label through the real selector',
-    async ({ triggeredBy, resume, admitted }) => {
-      const state = busyBuildState();
-      state.config.taskMode = 'conversation';
-      state.config.resumeSnapshotChatSessionId = resume ? 'sleeping-chat' : null;
-      const now = new Date().toISOString();
+  describe('startup backlog ranking', () => {
+    // The 2026-11-08 incident: `pack` ranked the node with five queued builds first, because
+    // their reservations made it look fullest, and a chat waited 17 minutes for a 3-minute setup.
+    it('prefers a node with no queued builds over one with five, even under pack', async () => {
+      const selection = capacityPoolSelection('user', { strategy: 'pack' });
+      const state = busyBuildState({ selection });
       const rc = createContext({
-        task: {
-          id: state.taskId,
-          projectId: state.projectId,
-          userId: state.userId,
-          taskMode: 'conversation',
-          triggeredBy,
-        },
-        existingNodes: [busyBuildNode('node-building', state.config.capacityPoolSelection!)],
-        workspaceReservations: [
-          {
-            nodeId: 'node-building',
-            resolvedReservationJson: JSON.stringify(state.config.resolvedReservation),
-          },
+        existingNodes: [
+          busyBuildNode('node-queued', selection),
+          busyBuildNode('node-idle', selection, { last_metrics: idleBuildMetrics() }),
         ],
-        healthByNode: {
-          'node-building': {
-            health_status: 'healthy',
-            last_heartbeat_at: now,
-            agent_ready_at: now,
-            agent_version: 'current-sha',
-          },
-        },
+        workspaceReservations: [
+          ...reservationsOn('node-queued', 5, state),
+          ...reservationsOn('node-idle', 1, state, 'running'),
+        ],
+        healthByNode: healthyAgents('node-queued', 'node-idle'),
       });
 
       await handleNodeSelection(state, rc);
 
-      if (admitted) {
-        expect(state.stepResults.nodeId).toBe('node-building');
+      expect(state.stepResults.nodeId).toBe('node-idle');
+      expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'workspace_creation');
+      expect(state.stepResults.rankedStartupBacklog).toEqual({ nodeId: 'node-idle', backlog: 0 });
+      expect(state.stepResults.placementDiagnostics?.hosts).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ nodeId: 'node-idle', outcome: 'selected', startupBacklog: 0 }),
+          expect.objectContaining({
+            nodeId: 'node-queued',
+            outcome: 'rejected',
+            startupBacklog: 5,
+            reasons: ['Another eligible host ranked higher'],
+          }),
+        ])
+      );
+    });
+
+    it('prefers one queued build over five', async () => {
+      const selection = capacityPoolSelection('user', { strategy: 'pack' });
+      const state = busyBuildState({ selection });
+      const rc = createContext({
+        existingNodes: [
+          busyBuildNode('node-five', selection),
+          busyBuildNode('node-one', selection),
+        ],
+        workspaceReservations: [
+          ...reservationsOn('node-five', 5, state),
+          ...reservationsOn('node-one', 1, state),
+        ],
+        healthByNode: healthyAgents('node-five', 'node-one'),
+      });
+
+      await handleNodeSelection(state, rc);
+
+      expect(state.stepResults.nodeId).toBe('node-one');
+      expect(state.stepResults.rankedStartupBacklog).toEqual({ nodeId: 'node-one', backlog: 1 });
+    });
+
+    it('prefers an idle node over one with a single active build and no waiters', async () => {
+      const selection = capacityPoolSelection('user', { strategy: 'pack' });
+      const state = busyBuildState({ selection });
+      const rc = createContext({
+        existingNodes: [
+          busyBuildNode('node-building', selection),
+          busyBuildNode('node-idle', selection, { last_metrics: idleBuildMetrics() }),
+        ],
+        // pack alone would pick node-building: it carries more reservations.
+        workspaceReservations: [
+          ...reservationsOn('node-building', 1, state),
+          ...reservationsOn('node-building', 2, state, 'running'),
+          ...reservationsOn('node-idle', 1, state, 'running'),
+        ],
+        healthByNode: healthyAgents('node-building', 'node-idle'),
+      });
+
+      await handleNodeSelection(state, rc);
+
+      expect(state.stepResults.nodeId).toBe('node-idle');
+    });
+
+    it('leaves equal backlogs to the pool strategy', async () => {
+      const selection = capacityPoolSelection('user', { strategy: 'pack' });
+      const state = busyBuildState({ selection });
+      const rc = createContext({
+        existingNodes: [
+          busyBuildNode('node-light', selection, { last_metrics: idleBuildMetrics() }),
+          busyBuildNode('node-full', selection, { last_metrics: idleBuildMetrics() }),
+        ],
+        workspaceReservations: [
+          ...reservationsOn('node-light', 1, state, 'running'),
+          ...reservationsOn('node-full', 4, state, 'running'),
+        ],
+        healthByNode: healthyAgents('node-light', 'node-full'),
+      });
+
+      await handleNodeSelection(state, rc);
+
+      // pack: highest projected utilization first.
+      expect(state.stepResults.nodeId).toBe('node-full');
+    });
+
+    it.each([
+      { label: 'first human conversation', taskMode: 'conversation', resume: false },
+      { label: 'automated task', taskMode: 'task', resume: false },
+      { label: 'conversation wake', taskMode: 'conversation', resume: true },
+    ] as const)(
+      'places a $label on the shortest queue when every node is building, without waiting or provisioning',
+      async ({ taskMode, resume }) => {
+        const selection = capacityPoolSelection('user');
+        const state = busyBuildState({ selection });
+        state.config.taskMode = taskMode;
+        state.config.resumeSnapshotChatSessionId = resume ? 'sleeping-chat' : null;
+        const rc = createContext({
+          existingNodes: [
+            busyBuildNode('node-three', selection),
+            busyBuildNode('node-one', selection),
+          ],
+          // balanced alone would pick node-three: node-one carries more reservations in total.
+          workspaceReservations: [
+            ...reservationsOn('node-three', 3, state),
+            ...reservationsOn('node-one', 1, state),
+            ...reservationsOn('node-one', 3, state, 'running'),
+          ],
+          healthByNode: healthyAgents('node-three', 'node-one'),
+        });
+
+        await handleNodeSelection(state, rc);
+
+        expect(state.stepResults.nodeId).toBe('node-one');
         expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'workspace_creation');
+        expect(rc.advanceToStep).not.toHaveBeenCalledWith(state, 'node_provisioning');
         expect(admissionMocks.waitForVmAdmissionCapacity).not.toHaveBeenCalled();
-      } else {
-        expect(state.stepResults.nodeId).toBeNull();
-        expect(rc.advanceToStep).not.toHaveBeenCalled();
-        expect(rc.updateD1ExecutionStep).toHaveBeenCalledWith(
+        expect(rc.updateD1ExecutionStep).not.toHaveBeenCalledWith(
           state.taskId,
           'waiting_for_node_capacity'
         );
-        expect(admissionMocks.waitForVmAdmissionCapacity).toHaveBeenCalledWith(
-          expect.anything(),
-          expect.objectContaining({ taskId: state.taskId }),
-          'compatible_node_building_workspace',
-          null,
-          null,
-          expect.objectContaining({ waitTimeoutMs: expect.any(Number) })
+      }
+    );
+
+    it('queues on the only eligible node while it builds, with no backlog guard', async () => {
+      const selection = capacityPoolSelection('user', {
+        machineSize: 'small',
+        providerInstanceType: 'cx23',
+        vcpuCount: 2,
+        memoryMb: 4_096,
+        diskGb: 40,
+      });
+      const state = busyBuildState({ selection });
+      const rc = createContext({
+        existingNodes: [busyBuildNode('node-building-only', selection)],
+        workspaceReservations: reservationsOn('node-building-only', 1, state),
+        healthByNode: healthyAgents('node-building-only'),
+      });
+
+      await handleNodeSelection(state, rc);
+
+      expect(state.stepResults.nodeId).toBe('node-building-only');
+      expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'workspace_creation');
+      expect(admissionMocks.waitForVmAdmissionCapacity).not.toHaveBeenCalled();
+      // No alternative node, so a growing queue is no reason to refuse the reservation.
+      expect(state.stepResults.rankedStartupBacklog).toBeNull();
+    });
+
+    it("keeps an explicit pin on its node however long that node's queue is, with no guard", async () => {
+      const selection = capacityPoolSelection('user');
+      const state = busyBuildState({ selection });
+      state.config.preferredNodeId = 'node-pinned';
+      const rc = createContext({
+        preferredNode: { ...busyBuildNode('node-pinned', selection), status: 'running' },
+        existingNodes: [
+          busyBuildNode('node-idle', selection, { last_metrics: idleBuildMetrics() }),
+        ],
+        workspaceReservations: reservationsOn('node-pinned', 4, state),
+        healthByNode: healthyAgents('node-pinned', 'node-idle'),
+      });
+
+      await handleNodeSelection(state, rc);
+
+      expect(state.stepResults.nodeId).toBe('node-pinned');
+      expect(state.stepResults.rankedStartupBacklog).toBeNull();
+      expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'workspace_creation');
+    });
+
+    it('lets a task parked under the old busy-build wait place on its next selection', async () => {
+      const state = busyBuildState();
+      const selection = state.config.capacityPoolSelection!;
+      state.stepResults.placementDiagnostics = {
+        version: 1,
+        decidedAt: '2026-11-08T22:30:00.000Z',
+        requested: null,
+        hosts: [],
+        selectedNodeId: null,
+        attempts: [],
+        queue: {
+          state: 'waiting',
+          reason: 'compatible_node_building_workspace',
+          nextRetryAt: '2026-11-08T22:30:15.000Z',
+          waitDeadlineAt: '2026-11-08T22:50:00.000Z',
+          attemptCount: 3,
+        },
+        notes: [],
+      } as unknown as NonNullable<TaskRunnerState['stepResults']['placementDiagnostics']>;
+      const rc = createContext({
+        existingNodes: [busyBuildNode('node-still-building', selection)],
+        workspaceReservations: reservationsOn('node-still-building', 2, state),
+        healthByNode: healthyAgents('node-still-building'),
+      });
+
+      await handleNodeSelection(state, rc);
+
+      expect(state.stepResults.nodeId).toBe('node-still-building');
+      expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'workspace_creation');
+    });
+
+    it.each([
+      {
+        label: 'stale telemetry',
+        overrides: { last_heartbeat_at: '2026-09-11T11:00:00.000Z' },
+        reason: 'node telemetry is stale',
+      },
+      {
+        label: 'disk pressure',
+        overrides: { last_metrics: busyBuildMetrics({ creatingWorkspaces: 0, diskPercent: 85 }) },
+        reason: 'disk pressure threshold reached',
+      },
+      {
+        label: 'measured memory overrun',
+        overrides: { last_metrics: busyBuildMetrics({ creatingWorkspaces: 0, memoryPercent: 99 }) },
+        reason: 'measured memory use above the host reserve leaves no room for this reservation',
+      },
+      {
+        label: 'an incompatible agent',
+        overrides: { agent_version: 'old-sha' },
+        reason: 'Host agent version is incompatible',
+      },
+    ])(
+      'never trades safety for a shorter queue: excludes an idle node with $label',
+      async ({ overrides, reason }) => {
+        const selection = capacityPoolSelection('user');
+        const state = busyBuildState({ selection });
+        const rc = createContext({
+          existingNodes: [
+            busyBuildNode('node-unsafe-idle', selection, overrides),
+            busyBuildNode('node-safe-queued', selection),
+          ],
+          workspaceReservations: reservationsOn('node-safe-queued', 4, state),
+          healthByNode: healthyAgents('node-unsafe-idle', 'node-safe-queued'),
+        });
+
+        await handleNodeSelection(state, rc);
+
+        expect(state.stepResults.nodeId).toBe('node-safe-queued');
+        // The unsafe node was the only alternative and was excluded, so no guard applies.
+        expect(state.stepResults.rankedStartupBacklog).toBeNull();
+        expect(state.stepResults.placementDiagnostics?.hosts).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              nodeId: 'node-unsafe-idle',
+              outcome: 'rejected',
+              reasons: expect.arrayContaining([reason]),
+            }),
+          ])
         );
       }
-    }
-  );
+    );
+
+    it.each([
+      { label: 'explicit', explicitVmLocation: true, expected: 'node-requested-region' },
+      {
+        label: 'legacy (flag absent)',
+        explicitVmLocation: undefined,
+        expected: 'node-requested-region',
+      },
+      { label: 'default', explicitVmLocation: false, expected: 'node-other-region' },
+    ])('ranks a $label location against backlog', async ({ explicitVmLocation, expected }) => {
+      // A pool spanning two regions: either node is inside its authority.
+      const selection = capacityPoolSelection('user');
+      const [fsn1Candidate] = selection.candidates;
+      const nbg1Candidate = {
+        ...fsn1Candidate,
+        id: 'candidate-user-nbg1',
+        location: 'nbg1',
+        snapshot: { ...fsn1Candidate.snapshot, capacityPoolCandidateId: 'candidate-user-nbg1' },
+      };
+      selection.candidates.push(nbg1Candidate);
+      const state = busyBuildState({ selection });
+      state.config.vmLocation = 'fsn1';
+      if (explicitVmLocation === undefined) delete state.config.explicitVmLocation;
+      else state.config.explicitVmLocation = explicitVmLocation;
+      const rc = createContext({
+        existingNodes: [
+          busyBuildNode('node-requested-region', selection, { vm_location: 'fsn1' }),
+          busyBuildNode('node-other-region', selection, {
+            vm_location: 'nbg1',
+            capacity_pool_candidate_id: nbg1Candidate.id,
+            last_metrics: idleBuildMetrics(),
+          }),
+        ],
+        workspaceReservations: reservationsOn('node-requested-region', 2, state),
+        healthByNode: healthyAgents('node-requested-region', 'node-other-region'),
+      });
+
+      await handleNodeSelection(state, rc);
+
+      expect(state.stepResults.nodeId).toBe(expected);
+    });
+
+    it('does not let the warm shortcut take a warm-flagged node that already has a start queued', async () => {
+      const now = new Date().toISOString();
+      const state = createState();
+      const tryClaim = vi.fn().mockResolvedValue({
+        claimed: true,
+        state: {
+          nodeId: 'warm-raced',
+          status: 'active',
+          warmSince: null,
+          claimedByTask: state.taskId,
+        },
+      });
+      const metrics = idleBuildMetrics();
+      const rc = createContext({
+        // An ordinary placement reserved onto this node before NodeLifecycle cleared warm_since.
+        warmNodes: [
+          {
+            id: 'warm-raced',
+            vm_size: 'large',
+            vm_location: 'fsn1',
+            agent_version: 'current-sha',
+          },
+        ],
+        freshWarmNode: { status: 'running', warm_since: now, agent_version: 'current-sha' },
+        existingNodes: [
+          {
+            id: 'warm-raced',
+            vm_size: 'large',
+            vm_location: 'fsn1',
+            health_status: 'healthy',
+            last_metrics: busyBuildMetrics(),
+            last_heartbeat_at: now,
+            agent_version: 'current-sha',
+          },
+          {
+            id: 'node-idle',
+            vm_size: 'large',
+            vm_location: 'fsn1',
+            health_status: 'healthy',
+            last_metrics: metrics,
+            last_heartbeat_at: now,
+            agent_version: 'current-sha',
+          },
+        ],
+        workspaceReservations: [
+          {
+            nodeId: 'warm-raced',
+            resolvedReservationJson: JSON.stringify({
+              cpuMillis: 500,
+              memoryMb: 1_024,
+              diskMb: 1_024,
+              exclusiveNode: false,
+              source: 'task',
+              sourceId: 'other-task',
+              version: 1,
+            }),
+            status: 'creating',
+          },
+        ],
+        healthByNode: healthyAgents('warm-raced', 'node-idle'),
+      });
+      rc.env.NODE_LIFECYCLE = {
+        idFromName: vi.fn((id: string) => id),
+        get: vi.fn(() => ({ tryClaim, releaseClaim: vi.fn() })),
+      } as unknown as DurableObjectNamespace;
+
+      await handleNodeSelection(state, rc);
+
+      expect(tryClaim).not.toHaveBeenCalled();
+      expect(state.stepResults.nodeId).toBe('node-idle');
+      expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'workspace_creation');
+    });
+  });
 
   it('keeps aggregate resource rejection for a first human conversation on a building host', async () => {
     const selection = capacityPoolSelection('user', {
@@ -1656,13 +1872,6 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
     const state = busyBuildState({ cpuMillis: 1500, selection });
     state.config.taskMode = 'conversation';
     const rc = createContext({
-      task: {
-        id: state.taskId,
-        projectId: state.projectId,
-        userId: state.userId,
-        taskMode: 'conversation',
-        triggeredBy: 'user',
-      },
       existingNodes: [busyBuildNode('node-building-full', selection)],
       workspaceReservations: [
         {
@@ -1671,6 +1880,7 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
             ...state.config.resolvedReservation,
             cpuMillis: 1000,
           }),
+          status: 'creating',
         },
       ],
     });
@@ -1679,100 +1889,13 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
 
     expect(state.stepResults.nodeId).toBeNull();
     expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'node_provisioning');
-    expect(admissionMocks.waitForVmAdmissionCapacity).not.toHaveBeenCalled();
     expect(state.stepResults.placementDiagnostics?.hosts[0]).toMatchObject({
       outcome: 'rejected',
       reasons: expect.arrayContaining(['CPU share budget would be exceeded']),
     });
   });
 
-  it('provisions when the busy host also fails a real resource budget', async () => {
-    const selection = capacityPoolSelection('user', {
-      machineSize: 'small',
-      providerInstanceType: 'cx23',
-      vcpuCount: 2,
-      memoryMb: 4_096,
-      diskGb: 40,
-    });
-    const state = busyBuildState({ cpuMillis: 1_500, selection });
-    const rc = createContext({
-      existingNodes: [busyBuildNode('node-building-full', selection)],
-      workspaceReservations: [
-        {
-          nodeId: 'node-building-full',
-          resolvedReservationJson: JSON.stringify({
-            ...state.config.resolvedReservation,
-            cpuMillis: 1_000,
-          }),
-        },
-      ],
-    });
-
-    await handleNodeSelection(state, rc);
-
-    expect(admissionMocks.waitForVmAdmissionCapacity).not.toHaveBeenCalled();
-    expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'node_provisioning');
-    expect(state.stepResults.placementDiagnostics?.hosts[0]).toMatchObject({
-      nodeId: 'node-building-full',
-      outcome: 'rejected',
-      reasons: expect.arrayContaining(['CPU share budget would be exceeded']),
-    });
-  });
-
-  it('places on the existing node when the build slot frees on wake', async () => {
-    const state = busyBuildState();
-    const selection = state.config.capacityPoolSelection!;
-    const now = new Date().toISOString();
-    const results: D1ResultMap = {
-      existingNodes: [busyBuildNode('node-build-frees', selection, { last_heartbeat_at: now })],
-      healthByNode: {
-        'node-build-frees': {
-          health_status: 'healthy',
-          last_heartbeat_at: now,
-          agent_ready_at: now,
-          agent_version: 'current-sha',
-        },
-      },
-    };
-    const rc = createContext(results);
-
-    await handleNodeSelection(state, rc);
-    expect(rc.advanceToStep).not.toHaveBeenCalled();
-
-    results.existingNodes = [
-      {
-        ...results.existingNodes![0],
-        last_metrics: idleBuildMetrics(),
-      },
-    ];
-
-    await handleNodeSelection(state, rc);
-
-    expect(state.stepResults.nodeId).toBe('node-build-frees');
-    expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'workspace_creation');
-  });
-
-  it('falls through to provisioning when the busy-build wait budget expires', async () => {
-    admissionMocks.waitForVmAdmissionCapacity.mockResolvedValueOnce(busyBuildWaitExpired());
-    const state = busyBuildState();
-    const selection = state.config.capacityPoolSelection!;
-    const rc = createContext({
-      existingNodes: [busyBuildNode('node-building-expired', selection)],
-    });
-
-    await handleNodeSelection(state, rc);
-
-    expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'node_provisioning');
-    expect(state.stepResults.placementDiagnostics).toMatchObject({
-      queue: {
-        state: 'expired',
-        reason: 'compatible_node_building_workspace',
-        waitDeadlineAt: '2026-09-11T12:15:00.000Z',
-      },
-    });
-  });
-
-  it('treats stale busy-build telemetry as stale instead of deferrable', async () => {
+  it('treats stale telemetry on a building node as stale', async () => {
     const state = busyBuildState();
     const selection = state.config.capacityPoolSelection!;
     const rc = createContext({
@@ -1791,28 +1914,6 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
       outcome: 'rejected',
       reasons: ['node telemetry is stale'],
     });
-  });
-
-  it('does not re-park a permanently-building node after the bounded wait expires', async () => {
-    admissionMocks.waitForVmAdmissionCapacity
-      .mockResolvedValueOnce({
-        kind: 'waiting',
-        reason: 'compatible_node_building_workspace',
-        nextRetryAt: '2026-09-11T12:00:15.000Z',
-        waitDeadlineAt: '2026-09-11T12:15:00.000Z',
-      })
-      .mockResolvedValueOnce(busyBuildWaitExpired());
-    const state = busyBuildState();
-    const selection = state.config.capacityPoolSelection!;
-    const rc = createContext({
-      existingNodes: [busyBuildNode('node-building-forever', selection)],
-    });
-
-    await handleNodeSelection(state, rc);
-    await handleNodeSelection(state, rc);
-
-    expect(admissionMocks.waitForVmAdmissionCapacity).toHaveBeenCalledTimes(2);
-    expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'node_provisioning');
   });
 
   it('skips a better-ranked stale node and selects a compatible current node', async () => {

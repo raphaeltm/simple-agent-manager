@@ -545,6 +545,33 @@ provisioned to the warm pool (`handleWorkspacePlacementRefused()` in
 node, and an active exclusive workspace prevents any additional placement. Legacy workspace-count
 and co-tenant settings remain compatible audit data but do not block placement.
 
+A node that is building another workspace is not refused. The VM agent builds one workspace at a
+time (`acquireBuildSlot()` in `packages/vm-agent/internal/server/workspaces.go`), so a placement
+there waits for every workspace still `creating` on that node. Node selection ranks admitted nodes
+by that startup backlog before the pool strategy (`compareReusableHosts()` in
+`durable-objects/task-runner/task-placement-strategy.ts`), reading the D1 `creating` count from the
+rows `loadActiveWorkspaceReservationUsage()` already loads. An explicit location ranks before
+backlog; a default location ranks after it. When another admitted node was available, the TaskRunner
+carries the chosen node's observed backlog into the final reservation, which refuses the claim if
+that node's backlog has grown since (`maxStartupBacklog` in `reserveWorkspacePlacement()`). Such a
+refusal replans without counting toward `operations.workspacePlacementMaxRejections`; after
+`operations.workspacePlacementBacklogConflictRetries` such conflicts (3 by default) since the run's last
+successful reservation, the next reservation omits only that guard; capacity refusals neither add to
+nor reset that count. Backlog never triggers provisioning: a node that fits is used
+even when its queue is long.
+
+Queued work is timed against its own budget (`workspace-creating-deadline.ts`). Every transition
+into `creating` starts a per-attempt clock (`workspaces.creating_started_at`), and the build-started
+callback records when the VM agent took the build slot (`workspaces.build_started_at`, first write
+wins, in `routes/projects/build-started-callback.ts`). Before the build starts, the attempt has the
+queue budget (`operations.workspaceBuildQueueTimeoutMinutes`, 60 minutes by default, or the build
+budget if that is larger). After it starts, the attempt has the build budget from that moment. The
+TaskRunner's `workspace_ready` step, the provisioning-timeout cron (`checkProvisioningTimeouts()` in
+`services/timeout.ts`, a backstop whose build budget is `PROVISIONING_TIMEOUT_MS`) and the stuck-task
+sweep's `delegated` check (`probeWorkspaceCreatingDeadline()`, which withholds its verdict when the read fails) all read that same rule from D1.
+The cron rechecks the status and deadline in its UPDATE, so it cannot overwrite a workspace that
+became ready or started building after its read.
+
 ## ACP Session Lifecycle
 
 Agent sessions are managed by the ProjectData DO with this state machine:

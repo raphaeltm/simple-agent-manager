@@ -121,12 +121,12 @@ export function buildWorkspaceAdmissionSql(
            ? AS host_memory_reserve_mb,
            ? AS disk_pressure_threshold_percent,
            ? AS metrics_ttl_ms,
-           ? AS cpu_threshold_percent,
-           ? AS allow_busy_build_queue
+           ? AS cpu_threshold_percent
        ),
        active_reservations AS (
          SELECT
            COUNT(w.id) AS active_count,
+           COALESCE(SUM(CASE WHEN w.status = 'creating' THEN 1 ELSE 0 END), 0) AS startup_backlog,
            COALESCE(SUM(CASE
              WHEN w.id IS NULL THEN 0
              WHEN ${validReservationJsonSql('w.resolved_reservation_json')} THEN 0
@@ -171,7 +171,6 @@ export function buildWorkspaceAdmissionSql(
       policy.diskPressureThresholdPercent,
       policy.metricsTtlMs,
       policy.cpuThresholdPercent,
-      policy.allowBusyBuildQueue ? 1 : 0,
     ],
   };
 }
@@ -325,8 +324,6 @@ function finalMeasuredPressurePredicateSql(): string {
       AND ${validMemoryPercentSql()}
       AND ${validDiskPercentSql()}
       AND ${validCreatingWorkspacesSql()}
-      AND (policy.allow_busy_build_queue = 1
-        OR COALESCE(CAST(json_extract(n.metrics_json, '$.creatingWorkspaces') AS INTEGER), 0) = 0)
       -- CPU is compressible: bootstrap load must not veto the first reservation.
       -- Read occupancy in this claim so a concurrent co-tenant cannot bypass it.
       AND (active.active_count = 0 OR (

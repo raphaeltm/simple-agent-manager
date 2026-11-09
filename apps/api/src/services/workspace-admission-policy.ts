@@ -27,8 +27,6 @@ export const DEFAULT_WORKSPACE_ADMISSION_CPU_SCORE_WEIGHT_PERCENT = 40;
 export const DEFAULT_WORKSPACE_ADMISSION_MEMORY_SCORE_WEIGHT_PERCENT = 60;
 
 export interface WorkspaceAdmissionPolicy {
-  /** Internal admission hint: human conversation starts need not wait for unrelated builds. */
-  allowBusyBuildQueue?: boolean;
   cpuShareBudgetPercent: number;
   hostMemoryReserveMb: number;
   diskPressureThresholdPercent: number;

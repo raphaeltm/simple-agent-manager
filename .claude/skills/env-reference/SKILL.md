@@ -553,7 +553,6 @@ by the read-only cron-liveness check.
 - `VM_ADMISSION_LEASE_TTL_MS` — Fenced VM provisioning claim lease duration (default: `1200000`)
 - `VM_ADMISSION_RETRY_MIN_MS` / `VM_ADMISSION_RETRY_MAX_MS` — Bounds for retrying tasks waiting on VM capacity (defaults: `15000` / `60000`)
 - `VM_ADMISSION_WAIT_TIMEOUT_MS` — Maximum visible wait for VM capacity before failing the task (default: `7200000`)
-- `VM_ADMISSION_BUSY_BUILD_WAIT_TIMEOUT_MS` — Maximum bounded wait for an otherwise-eligible reusable VM node whose only blocker is an active workspace build queue (default: `1200000`)
 - `VM_ADMISSION_PROVIDER_COOLDOWN_MS` — Cooldown after provider/account capacity errors such as Hetzner server limits (default: `600000`)
 - `VM_ADMISSION_WAKE_BATCH_SIZE` — Maximum waiting TaskRunner DOs nudged by one capacity event (default: `25`)
 - `VM_ADMISSION_DIAGNOSTIC_MESSAGE_MAX_LENGTH` — Maximum provider diagnostic message persisted on admission/capacity rows (default: `500`)
@@ -655,7 +654,7 @@ by the read-only cron-liveness check.
 - `TASK_RUNNER_WORKSPACE_DISPATCH_TIMEOUT_MS` — Max wait for VM-agent workspace dispatch acknowledgement (default: 600000)
 - `TASK_RUNNER_WORKSPACE_DISPATCH_BASE_DELAY_MS` — Base delay for workspace dispatch retry backoff (default: 30000)
 - `TASK_RUNNER_WORKSPACE_DISPATCH_MAX_DELAY_MS` — Maximum delay for workspace dispatch retry backoff (default: 120000)
-- `TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS` — Max wait for workspace-ready callback (default: 1800000)
+- `TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS` — Max time from a workspace's build start (the VM agent taking the node's build slot) to its ready callback (default: 1800000). Time queued for the slot is governed by the `operations.workspaceBuildQueueTimeoutMinutes` admin setting
 - `TASK_RUNNER_WORKSPACE_READY_POLL_INTERVAL_MS` — D1 poll interval during the TaskRunner workspace-ready step (default: 30000)
 - `TASK_RUNNER_PROVISION_POLL_INTERVAL_MS` — TaskRunner provision status poll interval (default: 10000)
 - `TASK_RUNNER_PROVISION_TIMEOUT_MS` — Max time for TaskRunner node provisioning before permanent failure (default: 900000)

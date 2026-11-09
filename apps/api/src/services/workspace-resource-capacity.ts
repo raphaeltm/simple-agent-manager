@@ -34,7 +34,6 @@ export {
   RESOURCE_REQUIREMENTS_SOURCE_SQL,
 } from './workspace-reservation-usage';
 
-export const WORKSPACE_BUSY_BUILD_QUEUE_REASON = 'node build queue is busy';
 export const MEASURED_MEMORY_OVERRUN_REASON =
   'measured memory use above the host reserve leaves no room for this reservation';
 
@@ -51,7 +50,6 @@ export interface WorkspaceAdmissionMetrics {
 
 export interface WorkspaceReservationCapacityResult {
   admitted: boolean;
-  deferrable: boolean;
   reasons: string[];
 }
 
@@ -330,7 +328,6 @@ export function evaluateWorkspaceReservationCapacity(
 
   return {
     admitted: reasons.length === 0,
-    deferrable: reasons.length === 1 && reasons[0] === WORKSPACE_BUSY_BUILD_QUEUE_REASON,
     reasons,
   };
 }
@@ -435,8 +432,10 @@ function measuredAdmissionDiagnostic(
   if (metrics.diskPercent >= policy.diskPressureThresholdPercent) {
     return 'disk pressure threshold reached';
   }
-  if (metrics.creatingWorkspaces > 0 && !policy.allowBusyBuildQueue)
-    return WORKSPACE_BUSY_BUILD_QUEUE_REASON;
+  // A workspace build in progress is NOT a veto. The node builds one workspace at a time, so a
+  // new placement queues behind it while its reservation is already charged above. Refusing a
+  // busy-but-sufficient node only sent work to a fresh VM (#2065's expiry path); queue length is
+  // a ranking preference instead (`startupBacklog`, `compareReusableHosts`).
   return null;
 }
 

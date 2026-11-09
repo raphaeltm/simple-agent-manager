@@ -17,6 +17,13 @@ const D1_BIND_LIMIT = D1_MAX_BOUND_PARAMETERS;
 
 export interface ActiveWorkspaceReservationUsage {
   activeCount: number;
+  /**
+   * Workspaces still starting on the node (`status = 'creating'`): reserved but not yet
+   * dispatched, building, or waiting for the node's single build slot. The node builds one
+   * workspace at a time, so this is the startup queue a new placement would join. Only
+   * `loadActiveWorkspaceReservationUsage` knows row status; other aggregations report 0.
+   */
+  startupBacklog: number;
   invalidCount: number;
   exclusiveCount: number;
   cpuMillis: number;
@@ -78,6 +85,7 @@ export async function loadActiveWorkspaceReservationUsage(
     for (const row of rows.results ?? []) {
       const existing = usage.get(row.nodeId) ?? emptyUsage();
       existing.activeCount += 1;
+      if (row.status === 'creating') existing.startupBacklog += 1;
       addReservationUsage(existing, row.reservationJson);
       const credit = observedWorkspaceMemoryCredit(row);
       if (credit) {
@@ -163,6 +171,7 @@ function addReservationUsage(usage: ActiveWorkspaceReservationUsage, value: stri
 export function emptyUsage(): ActiveWorkspaceReservationUsage {
   return {
     activeCount: 0,
+    startupBacklog: 0,
     invalidCount: 0,
     exclusiveCount: 0,
     cpuMillis: 0,

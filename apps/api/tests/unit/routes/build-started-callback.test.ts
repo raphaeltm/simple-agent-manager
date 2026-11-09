@@ -83,6 +83,7 @@ describe('build-started callback route', () => {
       workspace: 'ws-1',
       type: 'callback',
       scope: 'workspace',
+      callbackGeneration: null,
     });
     mocks.notifyTaskRunnerWorkspaceBuildStarted.mockResolvedValue(undefined);
   });
@@ -110,6 +111,7 @@ describe('build-started callback route', () => {
       workspace: 'ws-other',
       type: 'callback',
       scope: 'workspace',
+      callbackGeneration: null,
     });
     const app = await createTestApp();
 
@@ -144,4 +146,53 @@ describe('build-started callback route', () => {
       expect(mocks.notifyTaskRunnerWorkspaceBuildStarted).not.toHaveBeenCalled();
     }
   );
+
+  function buildStartedAt(): string | null {
+    return (
+      sqlite.prepare("SELECT build_started_at FROM workspaces WHERE id = 'ws-1'").get() as {
+        build_started_at: string | null;
+      }
+    ).build_started_at;
+  }
+
+  it('records the build start durably, and a duplicate callback cannot move it', async () => {
+    seed('creating', 'running');
+    const app = await createTestApp();
+
+    expect((await postBuildStarted(app)).status).toBe(204);
+    const first = buildStartedAt();
+    expect(first).not.toBeNull();
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect((await postBuildStarted(app)).status).toBe(204);
+
+    // First write wins: a retried or duplicated callback leaves the deadline where it was.
+    expect(buildStartedAt()).toBe(first);
+    expect(mocks.notifyTaskRunnerWorkspaceBuildStarted).toHaveBeenCalledTimes(2);
+  });
+
+  it('records a new build start after a restart cleared the previous attempt', async () => {
+    seed('creating', 'running');
+    sqlite
+      .prepare(
+        "UPDATE workspaces SET build_started_at = '2026-01-01T00:00:00.000Z' WHERE id = 'ws-1'"
+      )
+      .run();
+    // A restart clears it (workspace-placement.ts reserveWorkspaceRestart).
+    sqlite.prepare("UPDATE workspaces SET build_started_at = NULL WHERE id = 'ws-1'").run();
+    const app = await createTestApp();
+
+    expect((await postBuildStarted(app)).status).toBe(204);
+
+    expect(buildStartedAt()).not.toBe('2026-01-01T00:00:00.000Z');
+    expect(Date.parse(buildStartedAt() ?? '')).toBeGreaterThan(Date.now() - 60_000);
+  });
+
+  it('does not record a build start on a workspace that is no longer creating', async () => {
+    seed('running', 'running');
+    const app = await createTestApp();
+
+    expect((await postBuildStarted(app)).status).toBe(204);
+    expect(buildStartedAt()).toBeNull();
+  });
 });

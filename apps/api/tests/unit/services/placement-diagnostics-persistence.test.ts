@@ -151,7 +151,10 @@ describe('placement diagnostics through persisted task state', () => {
       } as never,
     });
     expect(JSON.stringify(result)).not.toContain(canary);
-    expect(result.authority.strategyOrdering).toBe('highest projected utilization first');
+    // The startup queue ranks existing hosts before the strategy, so the panel names both.
+    expect(result.authority.strategyOrdering).toBe(
+      'explicitly requested location first, then shortest startup queue, then default location, then highest projected utilization first'
+    );
     expect(result.authority.revalidatedAgainstCurrentAuthority).toBe(false);
   });
 });

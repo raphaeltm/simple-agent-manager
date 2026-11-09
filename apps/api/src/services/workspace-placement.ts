@@ -45,6 +45,14 @@ export interface WorkspacePlacementInput {
   taskLifecycleGuard?: WorkspacePlacementTaskLifecycleGuard | null;
   authorityNodeClass?: PlacementAuthorityNodeClass;
   resolvedReservation?: ResolvedResourceReservation | null;
+  /**
+   * Fairness guard for ranked placement: the node's startup backlog (`creating` workspaces) the
+   * caller observed when it chose this node over a less-queued alternative. The reservation is
+   * refused when the backlog has since grown, so a burst that ranked the same node first spreads
+   * out instead of queueing behind itself. Null or absent means no fairness guard (pins, warm
+   * claims, a single candidate, or the bounded fallback); every capacity guard applies either way.
+   */
+  maxStartupBacklog?: number | null;
   createdAt: string;
 }
 
@@ -89,14 +97,17 @@ export async function reserveWorkspacePlacement(
           resource_requirements_json,
           resolved_reservation_json,
           ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS},
-          created_at, updated_at)
-       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'creating', ?, ?, ?, ?, ?,
+          creating_started_at, created_at, updated_at)
+       -- vm_location is where the workspace actually runs: ranking can choose a node outside the
+       -- requested (default) location, and a later wake prefers this value.
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'creating', ?, COALESCE(n.vm_location, ?), ?, ?, ?,
           ?,
           requested.reservation_json,
           ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS},
-          ?, ?
+          ?, ?, ?
        FROM node_scope n, requested_reservation requested, active_reservations active, admission_policy policy
          WHERE ${workspaceAdmissionEligibilitySql()}
+         AND (? IS NULL OR active.startup_backlog <= ?)
          ${taskLifecyclePredicate.sql}`
     )
     .bind(
@@ -119,8 +130,12 @@ export async function reserveWorkspacePlacement(
       input.agentProfileHint,
       input.resourceRequirementsJson ?? null,
       ...capacityPlacementSnapshotSqlValues(input.capacityPlacementSnapshot),
+      // The attempt's clock starts with its reservation (`workspace-creating-deadline.ts`).
       input.createdAt,
       input.createdAt,
+      input.createdAt,
+      input.maxStartupBacklog ?? null,
+      input.maxStartupBacklog ?? null,
       ...taskLifecyclePredicate.binds
     )
     .run();
@@ -160,13 +175,16 @@ export async function attachPrecreatedWorkspacePlacement(
        SET node_id = ?,
            status = 'creating',
            vm_size = ?,
-           vm_location = ?,
+           vm_location = COALESCE((SELECT vm_location FROM node_scope), ?),
            workspace_profile = ?,
            devcontainer_config_name = ?,
            agent_profile_hint = ?,
            resource_requirements_json = ?,
            resolved_reservation_json = ?,
            ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS},
+           -- Attaching the placeholder continues the attempt that created it, so its clock is
+           -- kept; a placeholder from before migration 0229 starts it here.
+           creating_started_at = COALESCE(creating_started_at, ?),
            updated_at = ?
        WHERE id = ?
          AND user_id = ?
@@ -186,6 +204,7 @@ export async function attachPrecreatedWorkspacePlacement(
       input.resourceRequirementsJson ?? null,
       admission.requestedReservationJson,
       ...capacityPlacementSnapshotSqlValues(input.capacityPlacementSnapshot),
+      admission.admissionNow,
       admission.admissionNow,
       input.id,
       input.userId,
@@ -233,6 +252,8 @@ export async function reserveWorkspaceRestart(
        WHERE ${workspaceAdmissionEligibilitySql()}
      )
      UPDATE workspaces SET status = 'creating', error_message = NULL, updated_at = ?,
+       -- A restart is a new attempt: its clock starts now and its build has not started.
+       creating_started_at = ?, build_started_at = NULL,
        eviction_generation = ?, callback_generation = ?, eviction_finalized_at = NULL,
        stop_runtime_confirmed_at = NULL
      WHERE id = ? AND node_id = ? AND user_id = ? AND project_id = ?
@@ -244,6 +265,7 @@ export async function reserveWorkspaceRestart(
     )
     .bind(
       ...admission.binds,
+      admission.admissionNow,
       admission.admissionNow,
       input.evictionGeneration,
       // The restarted runtime gets a new credential generation in the same write that

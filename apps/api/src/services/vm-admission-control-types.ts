@@ -6,7 +6,6 @@ import type {
   VMSize,
 } from '@simple-agent-manager/shared';
 import {
-  DEFAULT_VM_ADMISSION_BUSY_BUILD_WAIT_TIMEOUT_MS,
   DEFAULT_VM_ADMISSION_CONTROL_MODE,
   DEFAULT_VM_ADMISSION_DIAGNOSTIC_MESSAGE_MAX_LENGTH,
   DEFAULT_VM_ADMISSION_LEASE_TTL_MS,
@@ -38,6 +37,11 @@ export type VmAdmissionReason =
   | 'admission_created'
   | 'admission_shadow'
   | 'compatible_node_provisioning'
+  /**
+   * No longer written: a node's busy build queue is a ranking preference, not a wait
+   * (`compareReusableHosts`). Kept so admission rows parked under it before that change still
+   * parse; those tasks reselect on their next alarm and place.
+   */
   | 'compatible_node_building_workspace'
   | 'provider_account_capacity'
   | 'provider_transient_capacity'
@@ -59,7 +63,6 @@ export interface VmAdmissionConfig {
   retryMinMs: number;
   retryMaxMs: number;
   waitTimeoutMs: number;
-  busyBuildWaitTimeoutMs: number;
   providerCooldownMs: number;
   wakeBatchSize: number;
   diagnosticMessageMaxLength: number;
@@ -195,10 +198,6 @@ export function getVmAdmissionConfig(env: Env): VmAdmissionConfig {
     waitTimeoutMs: parsePositiveInt(
       env.VM_ADMISSION_WAIT_TIMEOUT_MS,
       DEFAULT_VM_ADMISSION_WAIT_TIMEOUT_MS
-    ),
-    busyBuildWaitTimeoutMs: parsePositiveInt(
-      env.VM_ADMISSION_BUSY_BUILD_WAIT_TIMEOUT_MS,
-      DEFAULT_VM_ADMISSION_BUSY_BUILD_WAIT_TIMEOUT_MS
     ),
     providerCooldownMs: parsePositiveInt(
       env.VM_ADMISSION_PROVIDER_COOLDOWN_MS,

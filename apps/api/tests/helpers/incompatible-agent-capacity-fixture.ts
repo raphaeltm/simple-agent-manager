@@ -157,7 +157,6 @@ export function createIncompatibleCapacityFixture() {
     lastStepAt: Date.now(),
     provisioningStartedAt: null,
     agentReadyStartedAt: null,
-    workspaceReadyStartedAt: null,
     workspaceDispatchStartedAt: null,
     workspaceDispatchAttempts: 0,
     workspaceDispatchLastAttemptAt: null,

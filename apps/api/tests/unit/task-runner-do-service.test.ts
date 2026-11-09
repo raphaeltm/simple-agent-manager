@@ -243,6 +243,21 @@ describe('task-runner-do service', () => {
     expect(forwarded.config.capacityPoolSelection).toBeNull();
   });
 
+  it.each([
+    { explicitVmLocation: true, expected: true },
+    { explicitVmLocation: false, expected: false },
+    { explicitVmLocation: undefined, expected: false },
+  ])(
+    'records whether the location was explicit (input $explicitVmLocation)',
+    async ({ explicitVmLocation, expected }) => {
+      const { env, start } = createTaskRunnerEnv();
+      await startTaskRunnerDO(env, { ...minimalStartInput, explicitVmLocation });
+
+      // Node ranking puts an explicit location ahead of startup backlog and a default one after.
+      expect(start.mock.calls[0]?.[0].config.explicitVmLocation).toBe(expected);
+    }
+  );
+
   it('persists exact event wake authority in the TaskRunner start config', async () => {
     const { env, start } = createTaskRunnerEnv();
 

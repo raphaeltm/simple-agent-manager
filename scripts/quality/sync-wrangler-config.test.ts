@@ -1303,12 +1303,20 @@ describe('Worker vars omitted because they equal the code default', () => {
     'TRIAL_DEFAULT_WORKSPACE_PROFILE',
     'TRIALS_ENABLED_KV_KEY',
   ] as const;
+  // The busy-build placement wait it bounded was removed (2026-11-08): a busy node is now ranked by
+  // its startup backlog instead of waited on, so nothing reads the timeout.
+  const RETIRED_WITH_BUSY_BUILD_WAIT = ['VM_ADMISSION_BUSY_BUILD_WAIT_TIMEOUT_MS'] as const;
+  const RETIRED_VARS: readonly string[] = [
+    ...RETIRED_WITH_ANONYMOUS_TRIALS,
+    ...RETIRED_WITH_BUSY_BUILD_WAIT,
+  ];
 
   it('pins every original binding to its retained value or proven runtime default', () => {
     const current = readCheckedInWrangler().vars ?? {};
-    // Vars whose only consumer was deleted with the anonymous-trial product (2026-11-08) are
-    // dead too: nothing reads them, so they are neither retained nor recorded as defaults.
-    const dead = new Set([...bindingAudit.removedDead, ...RETIRED_WITH_ANONYMOUS_TRIALS]);
+    // Vars whose only consumer was deleted later (the anonymous-trial product, the busy-build
+    // wait; both 2026-11-08) are dead too: nothing reads them, so they are neither retained nor
+    // recorded as defaults.
+    const dead = new Set([...bindingAudit.removedDead, ...RETIRED_VARS]);
     expect(Object.keys(bindingAudit.variables)).toHaveLength(283);
     for (const [name, value] of Object.entries(bindingAudit.variables)) {
       if (has(current, name)) {
@@ -1339,9 +1347,7 @@ describe('Worker vars omitted because they equal the code default', () => {
           ...OMITTED_WORKER_VAR_DEFAULTS,
           ...Object.fromEntries(
             Object.entries(bindingAudit.variables).filter(
-              ([name]) =>
-                !bindingAudit.removedDead.includes(name) &&
-                !(RETIRED_WITH_ANONYMOUS_TRIALS as readonly string[]).includes(name)
+              ([name]) => !bindingAudit.removedDead.includes(name) && !RETIRED_VARS.includes(name)
             )
           ),
           ...checkedIn.vars,

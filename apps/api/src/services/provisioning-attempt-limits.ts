@@ -16,3 +16,20 @@ export const DEFAULT_PROVISIONING_ATTEMPTS_PER_PROVIDER_TIER = 8;
  * 15-minute provisioning timeout. The count resets when a reservation succeeds.
  */
 export const DEFAULT_WORKSPACE_PLACEMENT_MAX_REJECTIONS = 3;
+
+/**
+ * Default for `operations.workspacePlacementBacklogConflictRetries`: how many times a task's
+ * reservation may be refused only because the ranked node's startup queue grew after ranking,
+ * counted since the task's last successful reservation, before the next reservation drops that
+ * fairness guard (capacity guards stay). Capacity refusals neither add to nor reset this count.
+ * Each conflict replans through node selection: D1 reads and no provider call. The cap bounds how
+ * often one task can lose that race; it does not bound how long the replans take, which depends
+ * on alarm scheduling and the other work in flight.
+ */
+export const DEFAULT_WORKSPACE_PLACEMENT_BACKLOG_CONFLICT_RETRIES = 3;
+
+/**
+ * Default for `operations.workspaceBuildQueueTimeoutMinutes`: how long a workspace may wait for its
+ * node's single build slot (`workspace-creating-deadline.ts`). About 20 queued builds of ~3 minutes.
+ */
+export const DEFAULT_WORKSPACE_BUILD_QUEUE_TIMEOUT_MINUTES = 60;

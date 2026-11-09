@@ -17,7 +17,6 @@ import {
   parseResolvedResourceReservation,
   parseWorkspaceAdmissionMetrics,
   resolveWorkspaceAdmissionPolicy,
-  WORKSPACE_BUSY_BUILD_QUEUE_REASON,
   type WorkspaceAdmissionPolicy,
 } from '../../../src/services/workspace-resource-capacity';
 
@@ -171,7 +170,7 @@ describe('workspace resource capacity accounting', () => {
     expect(result.reasons).toContain('disk pressure threshold reached');
   });
 
-  it('vetoes fresh measured CPU, memory, and creating-workspace pressure separately from budgets', () => {
+  it('vetoes CPU saturation but admits a node that is only building another workspace', () => {
     const active = usage({
       activeCount: 1,
       cpuMillis: 1000,
@@ -187,43 +186,46 @@ describe('workspace resource capacity accounting', () => {
       observedHardwareSource: 'observed',
       lastHeartbeatAt: new Date().toISOString(),
     };
-
-    for (const [metrics, reason] of [
-      [{ cpuLoadAvg1: 8, memoryPercent: 10, diskPercent: 10 }, 'CPU saturation ceiling reached'],
-      [
-        { cpuLoadAvg1: 0.2, memoryPercent: 10, diskPercent: 10, creatingWorkspaces: 1 },
-        WORKSPACE_BUSY_BUILD_QUEUE_REASON,
-      ],
-      // A saturated host stays a HARD refusal even while building: busy-build must not
-      // absorb CPU saturation and turn a refusal into a deferral (the scheduler would
-      // then wait on a host that is already saturated). Deleting the CPU branch is caught
-      // by the first row; only this row catches the CPU branch being made conditional on
-      // `creatingWorkspaces === 0`.
-      [
-        { cpuLoadAvg1: 8, memoryPercent: 10, diskPercent: 10, creatingWorkspaces: 1 },
-        'CPU saturation ceiling reached',
-      ],
-    ] as const) {
-      const result = evaluateWorkspaceReservationCapacity(
+    const evaluate = (metrics: Record<string, unknown>) =>
+      evaluateWorkspaceReservationCapacity(
         { ...baseNode, lastMetrics: JSON.stringify(metrics) },
         active,
         reservation(),
         policy({ cpuThresholdPercent: 90, memoryThresholdPercent: 90 })
       );
-      expect(result.admitted).toBe(false);
-      expect(result.reasons).toContain(reason);
-      expect(result.deferrable).toBe(reason === WORKSPACE_BUSY_BUILD_QUEUE_REASON);
-      expect(result.reasons).not.toContain('CPU share budget would be exceeded');
-      expect(result.reasons).not.toContain('memory budget would be exceeded after host reserve');
-      const interactive = evaluateWorkspaceReservationCapacity(
-        { ...baseNode, lastMetrics: JSON.stringify(metrics) },
-        active,
-        reservation(),
-        policy({ cpuThresholdPercent: 90, allowBusyBuildQueue: true })
-      );
-      expect(interactive.admitted).toBe(reason === WORKSPACE_BUSY_BUILD_QUEUE_REASON);
-      expect(interactive.deferrable).toBe(false);
+
+    // A build in progress is a queue to wait behind, not a capacity verdict: the node builds one
+    // workspace at a time and the queued reservation is already charged above.
+    const building = evaluate({
+      cpuLoadAvg1: 0.2,
+      memoryPercent: 10,
+      diskPercent: 10,
+      creatingWorkspaces: 3,
+    });
+    expect(building).toEqual({ admitted: true, reasons: [] });
+
+    // Saturation stays a hard refusal whether or not the node is building.
+    for (const creatingWorkspaces of [0, 1]) {
+      const saturated = evaluate({
+        cpuLoadAvg1: 8,
+        memoryPercent: 10,
+        diskPercent: 10,
+        creatingWorkspaces,
+      });
+      expect(saturated.admitted).toBe(false);
+      expect(saturated.reasons).toContain('CPU saturation ceiling reached');
+      expect(saturated.reasons).not.toContain('CPU share budget would be exceeded');
     }
+
+    // Malformed build telemetry still fails closed.
+    const malformed = evaluate({
+      cpuLoadAvg1: 0.2,
+      memoryPercent: 10,
+      diskPercent: 10,
+      creatingWorkspaces: -1,
+    });
+    expect(malformed.admitted).toBe(false);
+    expect(malformed.reasons).toContain('node resource telemetry is malformed');
   });
 
   it('rejects malformed, future, stale, and incomplete telemetry when a node reports metrics', () => {
@@ -353,6 +355,8 @@ describe('workspace resource capacity', () => {
       ])
     ).toEqual({
       activeCount: 3,
+      // Status-free aggregation cannot know which rows are still starting.
+      startupBacklog: 0,
       cpuMillis: 3_000,
       memoryMb: 6_144,
       diskMb: 61_440,

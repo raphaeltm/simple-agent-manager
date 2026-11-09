@@ -56,6 +56,8 @@ export type AdminSettingName =
   | 'operations.workloadIdentityTokenTtlSeconds'
   | 'operations.provisioningAttemptsPerProviderTier'
   | 'operations.workspacePlacementMaxRejections'
+  | 'operations.workspacePlacementBacklogConflictRetries'
+  | 'operations.workspaceBuildQueueTimeoutMinutes'
   | 'operations.nodeCleanupBlockedRetirementMs'
   | 'operations.nodeLifetimeForceSleepAfterMs'
   | 'operations.sessionStaleTurnNoWorkMinutes'

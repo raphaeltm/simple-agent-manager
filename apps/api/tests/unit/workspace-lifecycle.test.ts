@@ -38,13 +38,21 @@ function makeWorkspaceReadyState(overrides: Partial<TaskRunnerState> = {}): Task
 function makeWorkspaceReadyContext(options?: {
   timeoutMs?: number;
   workspaceRow?: { status: string; error_message: string | null };
+  buildStartedAt?: string | null;
 }): TaskRunnerContext {
-  const prepare = (query: string) => ({
+  const prepare = () => ({
     bind: () => ({
-      first: async () =>
-        query.includes('SELECT dispatched_at')
-          ? { dispatched_at: '2026-07-29T00:00:00.000Z' }
-          : (options?.workspaceRow ?? { status: 'creating', error_message: null }),
+      first: async () => ({
+        dispatched_at: '2026-07-29T00:00:00.000Z',
+        created_at: new Date().toISOString(),
+        creating_started_at: new Date().toISOString(),
+        // A started build keeps the deadline on the build budget, so these tests need no
+        // admin-setting lookup for the queue budget.
+        build_started_at: options?.buildStartedAt ?? new Date().toISOString(),
+        ...(options?.workspaceRow ?? { status: 'creating', error_message: null }),
+      }),
+      // The conditional expiry claim (`claimWorkspaceCreatingExpiry`) wins.
+      run: async () => ({ meta: { changes: 1 } }),
     }),
   });
   return {
@@ -52,6 +60,7 @@ function makeWorkspaceReadyContext(options?: {
     ctx: { storage: { put: async () => undefined, setAlarm: async () => undefined } },
     updateD1ExecutionStep: async () => undefined,
     advanceToStep: async () => undefined,
+    assertRecoveryAuthority: async () => undefined,
     getWorkspaceReadyTimeoutMs: () => options?.timeoutMs ?? 30_000,
     getWorkspaceReadyPollIntervalMs: () => 1_000,
   } as unknown as TaskRunnerContext;
@@ -124,24 +133,25 @@ describe('handleWorkspaceReady — callback-driven with D1 polling safety net', 
   });
 
   it('checks timeout when no callback received', async () => {
-    const state = makeWorkspaceReadyState({ workspaceReadyStartedAt: Date.now() - 100 });
+    const state = makeWorkspaceReadyState();
     await expect(
-      handleWorkspaceReady(state, makeWorkspaceReadyContext({ timeoutMs: 1 }))
+      handleWorkspaceReady(
+        state,
+        makeWorkspaceReadyContext({
+          timeoutMs: 1,
+          buildStartedAt: new Date(Date.now() - 100).toISOString(),
+        })
+      )
     ).rejects.toMatchObject({
-      message: 'Workspace did not become ready within 1ms',
+      message: 'Workspace did not become ready within 1ms of its build starting',
       permanent: true,
     });
-  });
-
-  it('initializes timeout tracking on first entry', () => {
-    expect(wsReadySection).toContain('if (!state.workspaceReadyStartedAt)');
-    expect(wsReadySection).toContain('state.workspaceReadyStartedAt = Date.now()');
   });
 
   it('schedules next alarm using poll interval capped by remaining timeout', () => {
     expect(wsReadySection).toContain('getWorkspaceReadyPollIntervalMs()');
     expect(wsReadySection).toContain('Math.min(pollIntervalMs');
-    expect(wsReadySection).toContain('setAlarm(Date.now() + nextPollMs)');
+    expect(wsReadySection).toContain('setAlarm(now + nextPollMs)');
   });
 
   it('does NOT use agent poll interval for workspace ready step', () => {
@@ -154,7 +164,7 @@ describe('handleWorkspaceReady — callback-driven with D1 polling safety net', 
   });
 
   it('does not wait for ready before VM-agent dispatch acknowledgement exists', () => {
-    expect(wsReadySection).toContain('SELECT dispatched_at FROM workspaces WHERE id = ?');
+    expect(wsReadySection).toContain('if (!wsRow.dispatched_at)');
     expect(wsReadySection).toContain('workspace_ready_without_dispatch_ack');
     expect(wsReadySection).toContain("advanceToStep(state, 'workspace_dispatch')");
   });
@@ -439,7 +449,7 @@ describe('workspace lifecycle race condition handling', () => {
     );
     // callback check comes before timeout check
     const callbackCheckIdx = wsReadySection.indexOf('state.workspaceReadyReceived');
-    const timeoutCheckIdx = wsReadySection.indexOf('elapsed > timeoutMs');
+    const timeoutCheckIdx = wsReadySection.indexOf('now > deadline.deadlineMs');
     expect(callbackCheckIdx).toBeGreaterThan(-1);
     expect(timeoutCheckIdx).toBeGreaterThan(callbackCheckIdx);
   });
@@ -479,12 +489,12 @@ describe('D1 polling in handleWorkspaceReady (periodic safety net)', () => {
 
   it('polls D1 for workspace status on each alarm', () => {
     expect(wsReadySection).toContain('workspace_ready_from_d1_poll');
-    expect(wsReadySection).toContain('SELECT status, error_message FROM workspaces');
+    expect(wsReadySection).toContain('SELECT status, error_message, dispatched_at');
   });
 
   it('advances to agent_session if D1 shows running or recovery', () => {
-    expect(wsReadySection).toContain("wsRow?.status === 'running'");
-    expect(wsReadySection).toContain("wsRow?.status === 'recovery'");
+    expect(wsReadySection).toContain("wsRow.status === 'running'");
+    expect(wsReadySection).toContain("wsRow.status === 'recovery'");
     expect(wsReadySection).toContain('advanceToStep');
   });
 
@@ -506,7 +516,7 @@ describe('workspace ready timeout and polling alarm strategy', () => {
   it('schedules alarm using poll interval capped by remaining timeout', () => {
     expect(wsReadySection).toContain('const pollIntervalMs = rc.getWorkspaceReadyPollIntervalMs()');
     expect(wsReadySection).toContain('Math.min(pollIntervalMs');
-    expect(wsReadySection).toContain('Math.max(timeoutMs - elapsed, 0)');
+    expect(wsReadySection).toContain('Math.max(deadline.deadlineMs - now, 0)');
   });
 
   it('uses permanent error flag for D1 provisioning failures', async () => {
@@ -522,7 +532,9 @@ describe('workspace ready timeout and polling alarm strategy', () => {
   });
 
   it('includes timeout duration in error message', () => {
-    expect(wsReadySection).toContain('`Workspace did not become ready within ${timeoutMs}ms`');
+    expect(wsReadySection).toContain(
+      '`Workspace did not become ready within ${budgetMs}ms of its build starting`'
+    );
   });
 });
 

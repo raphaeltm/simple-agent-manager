@@ -1,10 +1,3 @@
-/**
- * Reusable-node warm-pool claim and capacity-selection helpers.
- *
- * Kept separate from the node step handlers so provisioning and placement
- * policy remain independently reviewable. See rule 18.
- */
-
 import { log } from '../../lib/logger';
 import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
 import {
@@ -13,32 +6,24 @@ import {
 } from '../../services/node-lifetime-admission';
 import type { PlacementHostDiagnosticInput } from '../../services/placement-diagnostics';
 import { comparePlacementRolloutHosts } from '../../services/placement-rollout';
-import { comparePlacementHostsByStrategy } from '../../services/placement-strategy';
 import {
   loadActiveWorkspaceReservationUsage,
   trustedWorkspaceNodeCapacityColumnsSql,
 } from '../../services/workspace-resource-capacity';
 import { evaluateReusableNodeCandidate, type RankedReusableNode } from './node-placement-candidate';
 import {
-  type DeferrableReusableNodeCandidate,
-  type ReusableNodePlacementResult,
-  type ReusableNodeSelection,
-  selectReusableNodeDeferral,
-} from './node-placement-deferral';
-import {
   currentReusableNodeIds,
   getTaskReservation,
   nodeSatisfiesTaskResources,
   resolveReusableNodeSelection,
+  type ReusableNodeSelection,
 } from './node-selection-shared';
 import { updatePlacementDiagnostics } from './placement-diagnostics';
-import { taskPlacementStrategy } from './task-placement-strategy';
+import { compareReusableHosts } from './task-placement-strategy';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
-import { isUserConversationStart } from './user-start-admission';
 
 export { verifyNodeAgentHealthy } from './node-agent-health';
-export type { ReusableNodePlacementResult, ReusableNodeSelection } from './node-placement-deferral';
-export type { NodePlacementFields } from './node-selection-shared';
+export type { NodePlacementFields, ReusableNodeSelection } from './node-selection-shared';
 export {
   getTaskReservation,
   hasReusableNodeReservationCapacity,
@@ -47,39 +32,20 @@ export {
 export { taskPlacementStrategy } from './task-placement-strategy';
 export { releaseClaimedWarmNode, tryClaimWarmNode } from './warm-node-claim';
 
+/**
+ * The best admitted running node for this run, or null when none can admit it.
+ *
+ * A node that is building another workspace is NOT refused: it queues this start behind its
+ * single build slot, and the ranking prefers the shorter queue (`compareReusableHosts`). Only
+ * capacity, telemetry, identity, authority, version and lifetime checks refuse a node, so a
+ * busy-but-sufficient node never sends a run to provisioning.
+ */
 export async function findNodeWithCapacity(
   state: TaskRunnerState,
   rc: TaskRunnerContext
 ): Promise<ReusableNodeSelection | null> {
-  const placement = await findReusableNodePlacement(state, rc);
-  return placement?.kind === 'selected' ? placement.selection : null;
-}
-
-function resolveNoReusableNodePlacement(
-  state: TaskRunnerState,
-  diagnosticHosts: PlacementHostDiagnosticInput[],
-  deferrableCandidates: DeferrableReusableNodeCandidate[],
-  rejectionDiagnostics: Array<{ nodeId: string; reasons: string[] }>
-): ReusableNodePlacementResult | null {
-  const deferral = selectReusableNodeDeferral(state, diagnosticHosts, deferrableCandidates);
-  if (deferral) return deferral;
-  updatePlacementDiagnostics(state, { hosts: diagnosticHosts });
-  if (rejectionDiagnostics.length) {
-    log.info('task_runner_do.node_capacity_rejected', {
-      taskId: state.taskId,
-      sample: rejectionDiagnostics.slice(0, 5),
-    });
-  }
-  return null;
-}
-
-export async function findReusableNodePlacement(
-  state: TaskRunnerState,
-  rc: TaskRunnerContext
-): Promise<ReusableNodePlacementResult | null> {
   const scaling = state.config.projectScaling;
   const policy = await resolvePlacementAdmissionPolicy(rc.env, scaling);
-  policy.allowBusyBuildQueue = await isUserConversationStart(state, rc);
   const requestedReservation = getTaskReservation(state);
   // A hint that records its refusal: the final reservation repeats the cutoff
   // (`workspace-admission-sql.ts`).
@@ -177,7 +143,6 @@ export async function findReusableNodePlacement(
   const usageByNode = await loadActiveWorkspaceReservationUsage(rc.env.DATABASE, nodeIds);
 
   const candidates: RankedReusableNode[] = [];
-  const deferrableCandidates: DeferrableReusableNodeCandidate[] = [];
   const diagnosticHosts: PlacementHostDiagnosticInput[] = [];
   const rejectionDiagnostics: Array<{ nodeId: string; reasons: string[] }> = [];
 
@@ -199,33 +164,21 @@ export async function findReusableNodePlacement(
     });
     diagnosticHosts.push(evaluation.diagnosticHost);
     if (evaluation.candidate) candidates.push(evaluation.candidate);
-    if (evaluation.deferrableCandidate) {
-      deferrableCandidates.push(evaluation.deferrableCandidate);
-    }
     if (evaluation.rejection) rejectionDiagnostics.push(evaluation.rejection);
   }
 
   if (!candidates.length) {
-    return resolveNoReusableNodePlacement(
-      state,
-      diagnosticHosts,
-      deferrableCandidates,
-      rejectionDiagnostics
-    );
+    updatePlacementDiagnostics(state, { hosts: diagnosticHosts });
+    if (rejectionDiagnostics.length) {
+      log.info('task_runner_do.node_capacity_rejected', {
+        taskId: state.taskId,
+        sample: rejectionDiagnostics.slice(0, 5),
+      });
+    }
+    return null;
   }
 
-  // Requested location stays a hard preference (an explicit locality constraint
-  // the caller made), then the pool's configured strategy decides. The former
-  // `vmSize === config.vmSize` tier is gone: a size label never outranked
-  // concrete capacity, it only made every strategy behave like `balanced`.
-  const strategy = taskPlacementStrategy(state);
-  const selectionSettings = state.config.capacityPoolSelection?.selectionSettings;
-  candidates.sort((a, b) => {
-    const aLoc = a.vmLocation === state.config.vmLocation ? 1 : 0;
-    const bLoc = b.vmLocation === state.config.vmLocation ? 1 : 0;
-    if (aLoc !== bLoc) return bLoc - aLoc;
-    return comparePlacementHostsByStrategy(a.signals, b.signals, strategy, selectionSettings);
-  });
+  candidates.sort((a, b) => compareReusableHosts(state, a, b));
 
   const best = candidates[0];
   if (!best) {
@@ -239,8 +192,8 @@ export async function findReusableNodePlacement(
       poolId: pool.poolId,
       strategy: pool.strategy,
       settings: pool.selectionSettings,
-      location: state.config.vmLocation,
       candidates,
+      compare: (a, b, strategy) => compareReusableHosts(state, a, b, strategy),
     });
     updatePlacementDiagnostics(state, { rollout });
   }
@@ -250,8 +203,17 @@ export async function findReusableNodePlacement(
     selectedDiagnostic.reasons = [];
   }
   updatePlacementDiagnostics(state, { hosts: diagnosticHosts, selectedNodeId: best.id });
+  log.info('task_runner_do.node_capacity_selected', {
+    taskId: state.taskId,
+    nodeId: best.id,
+    startupBacklog: best.signals.startupBacklog,
+    admittedCandidates: candidates.length,
+  });
   return {
-    kind: 'selected',
-    selection: { nodeId: best.id, capacityPlacementSnapshot: best.capacityPlacementSnapshot },
+    nodeId: best.id,
+    capacityPlacementSnapshot: best.capacityPlacementSnapshot,
+    // With an alternative available, a growing queue on the chosen node should send this
+    // start to the other one: the final reservation refuses if the backlog has grown.
+    observedStartupBacklog: candidates.length > 1 ? best.signals.startupBacklog : null,
   };
 }

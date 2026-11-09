@@ -59,6 +59,11 @@ export interface PlacementResourceFacts {
 /** Why one candidate host won or lost. */
 export interface PlacementHostDiagnostic {
   nodeId: string;
+  /**
+   * `deferred` is no longer written: it marked a node whose only blocker was a busy build
+   * queue, which is now a ranking preference (`startupBacklog`). Kept so diagnostics persisted
+   * before that change still parse.
+   */
   outcome: 'selected' | 'deferred' | 'rejected';
   /** Already-sanitized admission reasons, verbatim from the capacity gate. */
   reasons: string[];
@@ -66,6 +71,11 @@ export interface PlacementHostDiagnostic {
   capacity: PlacementResourceFacts;
   /** Active workspaces already placed on the host. */
   coTenantCount: number | null;
+  /**
+   * Workspaces still starting on the host (reserved, building, or waiting for its single build
+   * slot). Absent on diagnostics recorded before startup backlog was tracked.
+   */
+  startupBacklog?: number | null;
   /** Dominant-resource utilization after placing this run, 0-100. */
   projectedUtilizationPercent: number | null;
   provider: string | null;

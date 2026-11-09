@@ -73,6 +73,13 @@ export interface PlacementHostSignals {
   /** Active workspaces already placed on the host. */
   coTenantCount: number;
   /**
+   * Workspaces still starting on the host (`status = 'creating'`). The node builds one at a
+   * time, so a new placement waits behind every one of them. Ranked by `compareReusableHosts`
+   * (task-runner), never by the strategy comparator below: it is a property of reuse, and
+   * fresh offerings have no backlog.
+   */
+  startupBacklog: number;
+  /**
    * Dominant-resource utilization in [0, 1] AFTER placing the pending request,
    * or null when no dimension has trusted capacity.
    */
@@ -134,6 +141,7 @@ export function normalizePlacementHostSignals(
     diskMbCapacity,
     diskMbCommitted: usage.diskMb,
     coTenantCount: usage.activeCount,
+    startupBacklog: usage.startupBacklog,
     projectedUtilization: projectedDominantUtilization(
       { cpuMillisCapacity, memoryMbCapacity, diskMbCapacity },
       usage,

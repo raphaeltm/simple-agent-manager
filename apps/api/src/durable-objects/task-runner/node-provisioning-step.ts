@@ -61,6 +61,7 @@ import {
   logTierSkipped,
   markTierSkipped,
 } from './node-provisioning-tier';
+import { adoptReusableNodeSelection } from './node-selection-shared';
 import { persistPlacementDiagnostics } from './placement-diagnostics';
 import {
   assertTaskExecutionAuthority,
@@ -163,8 +164,7 @@ export async function handleNodeProvisioning(
   if (admissionIdentity && !spreadNeedsNode) {
     const reusableNode = await trySelectReusableNodeForProvisioning(state, rc);
     if (reusableNode) {
-      state.stepResults.nodeId = reusableNode.nodeId;
-      state.stepResults.capacityPlacementSnapshot = reusableNode.capacityPlacementSnapshot;
+      adoptReusableNodeSelection(state, reusableNode);
       await persistPlacementDiagnostics(state, rc, { queue: {} });
       await rc.advanceToStep(state, 'workspace_creation');
       return;

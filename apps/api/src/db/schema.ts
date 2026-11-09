@@ -1821,6 +1821,10 @@ export const workspaces = sqliteTable(
      */
     preservationReceiptJson: text('preservation_receipt_json'),
     dispatchedAt: text('dispatched_at'),
+    /** When the current attempt entered 'creating' (`workspace-creating-deadline.ts`). */
+    creatingStartedAt: text('creating_started_at'),
+    /** When the VM agent took the build slot for the current attempt; first write wins. */
+    buildStartedAt: text('build_started_at'),
     /** Agent profile ID used for this workspace's task — drives GitHub CLI policy enforcement. */
     agentProfileHint: text('agent_profile_hint'),
     /** JSON snapshot of ResourceRequirements for audit. */

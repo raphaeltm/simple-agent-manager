@@ -190,8 +190,7 @@ export const OMITTED_WORKER_VAR_DEFAULTS: Readonly<Record<string, string>> = {
   VM_INCIDENT_PENDING_TIMEOUT_MINUTES: '30',
   VM_INCIDENT_RECONCILE_BATCH_SIZE: '50',
 
-  // VM admission and devcontainer cache
-  VM_ADMISSION_BUSY_BUILD_WAIT_TIMEOUT_MS: '1200000',
+  // Devcontainer cache
   DEVCONTAINER_CACHE_REGISTRY_HOST: 'registry.cloudflare.com',
   DEVCONTAINER_CACHE_CREDENTIAL_EXPIRATION_MINUTES: '120',
 

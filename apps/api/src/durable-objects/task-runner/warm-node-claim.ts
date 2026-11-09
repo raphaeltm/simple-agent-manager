@@ -10,10 +10,7 @@ import {
   pastLifetimeAdmissionCutoffColumnSql,
   resolvePlacementAdmissionPolicy,
 } from '../../services/node-lifetime-admission';
-import {
-  comparePlacementHostsByStrategy,
-  normalizePlacementHostSignals,
-} from '../../services/placement-strategy';
+import { normalizePlacementHostSignals } from '../../services/placement-strategy';
 import { filterReusableNodesByCurrentAuthority } from '../../services/reusable-node-authority';
 import {
   SessionRecoveryAuthorityRevokedError,
@@ -24,7 +21,6 @@ import {
   trustedWorkspaceNodeCapacityColumnsSql,
 } from '../../services/workspace-resource-capacity';
 import type { NodeLifecycle } from '../node-lifecycle';
-import { type ReusableNodeSelection } from './node-placement-deferral';
 import {
   currentReusableNodeIds,
   getTaskReservation,
@@ -32,12 +28,12 @@ import {
   type NodePlacementFields,
   nodeSatisfiesTaskResources,
   resolveReusableNodeSelection,
+  type ReusableNodeSelection,
 } from './node-selection-shared';
 import { updatePlacementDiagnostics } from './placement-diagnostics';
 import { revokeRecoveryAuthority } from './recovery-revocation';
-import { taskPlacementStrategy } from './task-placement-strategy';
+import { compareReusableHosts } from './task-placement-strategy';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
-import { isUserConversationStart } from './user-start-admission';
 
 function recoverySourceTaskGuard(
   state: TaskRunnerState
@@ -76,6 +72,25 @@ export async function releaseClaimedWarmNode(
     await rc.ctx.storage.put('state', state);
   }
   return result.released;
+}
+
+/**
+ * Give a warm claim back for good: release the NodeLifecycle claim first (NodeLifecycle.alarm()
+ * does not expire active claims), then clear the task's D1 pointer, so the next selection does
+ * not re-adopt the node through the persisted-claim path.
+ */
+export async function relinquishWarmClaim(
+  state: TaskRunnerState,
+  rc: TaskRunnerContext,
+  nodeId: string
+): Promise<void> {
+  await releaseClaimedWarmNode(state, rc, nodeId).catch(() => undefined);
+  await rc.env.DATABASE.prepare(
+    `UPDATE tasks SET claimed_warm_node_id = NULL, claimed_warm_node_at = NULL, updated_at = ?
+      WHERE id = ? AND claimed_warm_node_id = ?`
+  )
+    .bind(new Date().toISOString(), state.taskId, nodeId)
+    .run();
 }
 
 async function claimWarmNodeCandidate(
@@ -190,22 +205,12 @@ export async function tryClaimWarmNode(
         : null;
     if (selection && (await claimWarmNodeCandidate(state, rc, selection))) {
       if (await hasReusableNodeReservationCapacity(rc, state, persistedClaim)) {
-        return selection;
+        return warmSelection(selection);
       }
     }
     // The persisted warm claim can no longer be used: either the referenced
-    // node is no longer a reusable selection, or claiming it failed. Release
-    // the NodeLifecycle claim first (NodeLifecycle.alarm() does not expire
-    // active claims), then clear the D1 pointer so the node becomes reusable.
-    await releaseClaimedWarmNode(state, rc, persistedClaim.claimedWarmNodeId).catch(
-      () => undefined
-    );
-    await rc.env.DATABASE.prepare(
-      `UPDATE tasks SET claimed_warm_node_id = NULL, claimed_warm_node_at = NULL, updated_at = ?
-        WHERE id = ? AND claimed_warm_node_id = ?`
-    )
-      .bind(new Date().toISOString(), state.taskId, persistedClaim.claimedWarmNodeId)
-      .run();
+    // node is no longer a reusable selection, or claiming it failed.
+    await relinquishWarmClaim(state, rc, persistedClaim.claimedWarmNodeId);
   }
 
   // A hint only: the final reservation repeats the cutoff (`workspace-admission-sql.ts`).
@@ -256,17 +261,14 @@ export async function tryClaimWarmNode(
 
   if (!warmNodes.results.length) return null;
 
-  // Warm hosts are ranked by the SAME strategy comparator as occupied reuse, so
-  // an operator's pool strategy is observable on the warm path too. It used to
-  // rank on `vmSize` equality, which made every strategy pick the same host.
-  warmPolicy.allowBusyBuildQueue = await isUserConversationStart(state, rc);
+  // Warm hosts are ranked by the SAME comparator as occupied reuse, so an operator's
+  // pool strategy is observable on the warm path too. It used to rank on `vmSize`
+  // equality, which made every strategy pick the same host.
   const warmReservation = getTaskReservation(state);
   const warmUsage = await loadActiveWorkspaceReservationUsage(
     rc.env.DATABASE,
     warmNodes.results.map((node) => node.id)
   );
-  const warmStrategy = taskPlacementStrategy(state);
-  const warmSelectionSettings = state.config.capacityPoolSelection?.selectionSettings;
   const authoritativeWarmNodes = await currentReusableNodeIds(state, rc, warmNodes.results);
   const sorted = warmNodes.results
     .filter((node) => authoritativeWarmNodes.has(node.id))
@@ -283,19 +285,14 @@ export async function tryClaimWarmNode(
         request: warmReservation,
         policy: warmPolicy,
       });
+      // The warm shortcut runs before occupied ranking on the premise that a warm node is
+      // empty. `warm_since` is cleared by NodeLifecycle after a placement lands, so an
+      // ordinary placement can already have a workspace starting here. Leave such a node
+      // to the occupied ranking, which weighs its queue against the alternatives.
+      if (signals.startupBacklog > 0) return [];
       return [{ ...node, selection, signals }];
     })
-    .sort((a, b) => {
-      const aLocMatch = a.vmLocation === state.config.vmLocation ? 1 : 0;
-      const bLocMatch = b.vmLocation === state.config.vmLocation ? 1 : 0;
-      if (aLocMatch !== bLocMatch) return bLocMatch - aLocMatch;
-      return comparePlacementHostsByStrategy(
-        a.signals,
-        b.signals,
-        warmStrategy,
-        warmSelectionSettings
-      );
-    });
+    .sort((a, b) => compareReusableHosts(state, a, b));
 
   for (const warmNode of sorted) {
     try {
@@ -381,7 +378,7 @@ export async function tryClaimWarmNode(
             },
           ],
         });
-        return selection;
+        return warmSelection(selection);
       }
     } catch (error) {
       if (error instanceof SessionRecoveryAuthorityRevokedError) throw error;
@@ -393,4 +390,15 @@ export async function tryClaimWarmNode(
   }
 
   return null;
+}
+
+/**
+ * A warm shortcut is taken on the premise that the node is empty, so its reservation is guarded
+ * at a startup backlog of 0. A placement that lands on the node between the claim and this run's
+ * reservation makes it refuse; the refusal releases the claim and reselection weighs the node's
+ * queue against the alternatives (`handleWorkspacePlacementRefused`). If the node is the only
+ * candidate, that reselection carries no guard, so the run still places there.
+ */
+function warmSelection(selection: ReusableNodeSelection): ReusableNodeSelection {
+  return { ...selection, observedStartupBacklog: 0 };
 }

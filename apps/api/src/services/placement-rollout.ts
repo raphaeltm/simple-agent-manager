@@ -5,7 +5,7 @@ import type {
 } from '@simple-agent-manager/shared';
 
 import { DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS } from './capacity-pool-placement-settings';
-import { comparePlacementHostsByStrategy, type PlacementHostSignals } from './placement-strategy';
+import type { PlacementHostSignals } from './placement-strategy';
 
 // FNV-1a provides a stable cohort across isolates, retries and version rollbacks.
 const FNV_OFFSET = 0x811c9dc5;
@@ -43,27 +43,28 @@ export function resolvePlacementRollout(input: {
   };
 }
 
-/** Compare strategies only after the caller has applied every admission constraint. */
-export function comparePlacementRolloutHosts(input: {
+/**
+ * Compare strategies only after the caller has applied every admission constraint. `compare`
+ * is the caller's own host ordering with the strategy as a parameter, so the baseline and
+ * configured picks differ only by strategy, never by the ordering tiers ranked before it
+ * (locality, startup backlog).
+ */
+export function comparePlacementRolloutHosts<
+  Candidate extends { id: string; signals: PlacementHostSignals },
+>(input: {
   userId: string;
   poolId: string;
   strategy: CapacityPoolStrategy;
   settings?: CapacityPoolPlacementSettings;
-  location: string;
-  candidates: ReadonlyArray<{ id: string; vmLocation: string; signals: PlacementHostSignals }>;
+  candidates: ReadonlyArray<Candidate>;
+  compare: (a: Candidate, b: Candidate, strategy: CapacityPoolStrategy) => number;
 }): PlacementRolloutDiagnostic {
   const rollout = resolvePlacementRollout({
     ...input,
     cohortPercent: input.settings?.rolloutCohortPercent,
   });
   const rankFor = (strategy: CapacityPoolStrategy) =>
-    [...input.candidates].sort((a, b) => {
-      const locality =
-        Number(b.vmLocation === input.location) - Number(a.vmLocation === input.location);
-      return (
-        locality || comparePlacementHostsByStrategy(a.signals, b.signals, strategy, input.settings)
-      );
-    })[0]?.id ?? null;
+    [...input.candidates].sort((a, b) => input.compare(a, b, strategy))[0]?.id ?? null;
   rollout.baselineSelectedNodeId = rankFor(PLACEMENT_ROLLOUT_BASELINE_STRATEGY);
   rollout.configuredSelectedNodeId = rankFor(input.strategy);
   rollout.differenceReasons = [

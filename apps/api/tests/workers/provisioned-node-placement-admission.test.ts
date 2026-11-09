@@ -19,17 +19,29 @@ import type {
   TaskRunner,
   TaskRunnerState,
 } from '../../src/durable-objects/task-runner';
-import { WORKSPACE_PLACEMENT_REFUSED_NOTE_PREFIX } from '../../src/durable-objects/task-runner/workspace-placement-rejection';
+import {
+  STARTUP_BACKLOG_CONFLICT_REASON,
+  WORKSPACE_PLACEMENT_REFUSED_NOTE_PREFIX,
+} from '../../src/durable-objects/task-runner/workspace-placement-rejection';
 import type { Env } from '../../src/env';
 import { invalidateAdminSettings } from '../../src/services/admin-settings-resolution';
-import { DEFAULT_WORKSPACE_PLACEMENT_MAX_REJECTIONS } from '../../src/services/provisioning-attempt-limits';
+import {
+  DEFAULT_WORKSPACE_PLACEMENT_BACKLOG_CONFLICT_RETRIES,
+  DEFAULT_WORKSPACE_PLACEMENT_MAX_REJECTIONS,
+} from '../../src/services/provisioning-attempt-limits';
 import {
   DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB,
   MEASURED_MEMORY_OVERRUN_REASON,
   resolveWorkspaceAdmissionPolicy,
-  WORKSPACE_BUSY_BUILD_QUEUE_REASON,
 } from '../../src/services/workspace-resource-capacity';
-import { seedInstallation, seedNode, seedProject, seedTask, seedUser } from './helpers/seed-d1';
+import {
+  seedInstallation,
+  seedNode,
+  seedProject,
+  seedTask,
+  seedUser,
+  seedWorkspace,
+} from './helpers/seed-d1';
 
 const USER_ID = 'user-provisioned-admission';
 const INSTALLATION_ID = 'installation-provisioned-admission';
@@ -37,6 +49,16 @@ const PROJECT_ID = 'project-provisioned-admission';
 /** The documented dispatch ceiling for a 4 GB machine (`.claude/rules/09`): 4096 - 1024. */
 const DOCUMENTED_CAP_MEMORY_MB = 3072;
 const CX23_MEMORY_MB = 4096;
+/** A co-tenant small enough that a shared start still fits a cx23 beside it. */
+const SIBLING_RESERVATION = {
+  cpuMillis: 500,
+  memoryMb: 512,
+  diskMb: 1024,
+  exclusiveNode: false,
+  source: 'platform',
+  sourceId: 'platform',
+  version: 1,
+};
 
 beforeAll(async () => {
   await seedUser(USER_ID);
@@ -150,7 +172,14 @@ async function startAtWorkspaceCreation(
   taskId: string,
   nodeId: string,
   memoryMb: number,
-  options: { priorRejections?: number; preferred?: boolean } = {}
+  options: {
+    priorRejections?: number;
+    preferred?: boolean;
+    /** Share the node with other workspaces: a small, non-exclusive reservation. */
+    shared?: boolean;
+    rankedStartupBacklog?: TaskRunnerState['stepResults']['rankedStartupBacklog'];
+    startupBacklogConflicts?: number;
+  } = {}
 ): Promise<void> {
   const preferred = options.preferred === true;
   await runInDurableObject(taskRunner(taskId), async (instance) => {
@@ -164,6 +193,15 @@ async function startAtWorkspaceCreation(
     state.stepResults.autoProvisioned = !preferred;
     state.provisioningStartedAt = Date.now();
     state.workspacePlacementRejections = options.priorRejections ?? 0;
+    if (options.shared && state.config.resolvedReservation) {
+      state.config.resolvedReservation = {
+        ...state.config.resolvedReservation,
+        cpuMillis: 500,
+        exclusiveNode: false,
+      };
+    }
+    state.stepResults.rankedStartupBacklog = options.rankedStartupBacklog ?? null;
+    state.startupBacklogConflicts = options.startupBacklogConflicts ?? 0;
     await instance.ctx.storage.put('state', state);
   });
 }
@@ -371,26 +409,120 @@ describe('a node provisioned for a task admits that task', () => {
     expect(await warmSince(nodeId)).toBeTruthy();
   });
 
-  it('does not count a busy build queue against the cap', async () => {
+  it('reserves on a node that is building another workspace instead of refusing it', async () => {
     const nodeId = 'node-provisioned-busy-build';
     const taskId = 'task-provisioned-busy-build';
     await seedProvisionedCx23(nodeId, taskId, { memoryPercent: 14, creatingWorkspaces: 1 });
-    await startAtWorkspaceCreation(taskId, nodeId, 1024, {
+    await seedWorkspace('ws-building-sibling', nodeId, USER_ID, {
+      projectId: PROJECT_ID,
+      status: 'creating',
+      resolvedReservationJson: JSON.stringify(SIBLING_RESERVATION),
+    });
+    await startAtWorkspaceCreation(taskId, nodeId, 512, {
+      shared: true,
       priorRejections: DEFAULT_WORKSPACE_PLACEMENT_MAX_REJECTIONS - 1,
     });
 
     const { ran, state } = await fireAlarm(taskId);
 
     expect(ran).toBe('workspace_creation');
-    // A survivable wait: back to selection, which defers on the build queue, not a failure.
-    expect(state.completed).toBe(false);
-    expect(state.currentStep).toBe('node_selection');
-    expect(state.workspacePlacementRejections).toBe(DEFAULT_WORKSPACE_PLACEMENT_MAX_REJECTIONS - 1);
-    const task = await taskRow(taskId);
-    expect(task?.status).toBe('queued');
-    expect(placementNotes(task?.placement ?? null)).toEqual(
-      expect.arrayContaining([expect.stringContaining(WORKSPACE_BUSY_BUILD_QUEUE_REASON)])
-    );
+    expect(state.currentStep).toBe('workspace_dispatch');
+    expect(state.workspacePlacementRejections).toBe(0);
+    expect(await activeWorkspacesOn(nodeId)).toBe(2);
+  });
+
+  describe('startup backlog conflicts', () => {
+    async function seedQueuedNode(nodeId: string, taskId: string): Promise<void> {
+      await seedProvisionedCx23(nodeId, taskId, { memoryPercent: 14, creatingWorkspaces: 1 });
+      // Another run reserved this node after ours ranked it with an empty queue.
+      await seedWorkspace(`ws-queued-${nodeId}`, nodeId, USER_ID, {
+        projectId: PROJECT_ID,
+        status: 'creating',
+        resolvedReservationJson: JSON.stringify(SIBLING_RESERVATION),
+      });
+    }
+
+    it('replans without spending the rejection budget when the queue grew after ranking', async () => {
+      const nodeId = 'node-backlog-conflict';
+      const taskId = 'task-backlog-conflict';
+      await seedQueuedNode(nodeId, taskId);
+      await startAtWorkspaceCreation(taskId, nodeId, 512, {
+        shared: true,
+        priorRejections: DEFAULT_WORKSPACE_PLACEMENT_MAX_REJECTIONS - 1,
+        rankedStartupBacklog: { nodeId, backlog: 0 },
+      });
+
+      const { ran, state } = await fireAlarm(taskId);
+
+      expect(ran).toBe('workspace_creation');
+      // Fairness, not capacity: no failure, no budget spent, a fresh selection next.
+      expect(state.completed).toBe(false);
+      expect(state.currentStep).toBe('node_selection');
+      expect(state.workspacePlacementRejections).toBe(
+        DEFAULT_WORKSPACE_PLACEMENT_MAX_REJECTIONS - 1
+      );
+      expect(state.startupBacklogConflicts).toBe(1);
+      expect(state.stepResults.rankedStartupBacklog).toBeNull();
+      expect(await activeWorkspacesOn(nodeId)).toBe(1);
+      const task = await taskRow(taskId);
+      expect(task?.status).toBe('queued');
+      expect(placementNotes(task?.placement ?? null)).toEqual(
+        expect.arrayContaining([expect.stringContaining(STARTUP_BACKLOG_CONFLICT_REASON)])
+      );
+    });
+
+    it('drops only the fairness guard after the configured number of conflicts, then resets', async () => {
+      expect(DEFAULT_WORKSPACE_PLACEMENT_BACKLOG_CONFLICT_RETRIES).toBe(3);
+      const nodeId = 'node-backlog-fallback';
+      const taskId = 'task-backlog-fallback';
+      await seedQueuedNode(nodeId, taskId);
+      await startAtWorkspaceCreation(taskId, nodeId, 512, {
+        shared: true,
+        rankedStartupBacklog: { nodeId, backlog: 0 },
+        startupBacklogConflicts: DEFAULT_WORKSPACE_PLACEMENT_BACKLOG_CONFLICT_RETRIES,
+      });
+
+      const { state } = await fireAlarm(taskId);
+
+      expect(state.currentStep).toBe('workspace_dispatch');
+      expect(state.startupBacklogConflicts).toBe(0);
+      expect(await activeWorkspacesOn(nodeId)).toBe(2);
+    });
+
+    it('keeps the guard one conflict short of the bound', async () => {
+      const nodeId = 'node-backlog-before-fallback';
+      const taskId = 'task-backlog-before-fallback';
+      await seedQueuedNode(nodeId, taskId);
+      await startAtWorkspaceCreation(taskId, nodeId, 512, {
+        shared: true,
+        rankedStartupBacklog: { nodeId, backlog: 0 },
+        startupBacklogConflicts: DEFAULT_WORKSPACE_PLACEMENT_BACKLOG_CONFLICT_RETRIES - 1,
+      });
+
+      const { state } = await fireAlarm(taskId);
+
+      expect(state.currentStep).toBe('node_selection');
+      expect(state.workspacePlacementRejections ?? 0).toBe(0);
+      expect(state.startupBacklogConflicts).toBe(
+        DEFAULT_WORKSPACE_PLACEMENT_BACKLOG_CONFLICT_RETRIES
+      );
+      expect(await activeWorkspacesOn(nodeId)).toBe(1);
+    });
+
+    it('ignores a backlog observed for a different node', async () => {
+      const nodeId = 'node-backlog-other-node';
+      const taskId = 'task-backlog-other-node';
+      await seedQueuedNode(nodeId, taskId);
+      await startAtWorkspaceCreation(taskId, nodeId, 512, {
+        shared: true,
+        rankedStartupBacklog: { nodeId: 'some-other-node', backlog: 0 },
+      });
+
+      const { state } = await fireAlarm(taskId);
+
+      expect(state.currentStep).toBe('workspace_dispatch');
+      expect(await activeWorkspacesOn(nodeId)).toBe(2);
+    });
   });
 
   it.each([1, 5])('fails after exactly the configured %i consecutive refusals', async (limit) => {

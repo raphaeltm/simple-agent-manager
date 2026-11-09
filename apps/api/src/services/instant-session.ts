@@ -328,6 +328,7 @@ export async function acceptInstantSession(
     ...capacityPlacementSnapshotDbValues(capacityPlacementSnapshot),
     workspaceProfile: 'lightweight',
     agentProfileHint: input.agentProfileId ?? null,
+    creatingStartedAt: now,
     createdAt: now,
     updatedAt: now,
   });
