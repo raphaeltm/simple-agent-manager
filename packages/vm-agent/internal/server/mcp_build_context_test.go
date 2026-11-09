@@ -41,12 +41,7 @@ func TestBuildContextCollectRouteBothRuntimesLarge(t *testing.T) {
 			work := "/workspaces/project"
 			root := filepath.Join(mount, "project")
 			if instant {
-				var err error
-				root, err = os.MkdirTemp("/workspaces", "context-test-")
-				if err != nil {
-					t.Fatal(err)
-				}
-				t.Cleanup(func() { os.RemoveAll(root) })
+				root = buildContextTestDir(t, "/workspaces", "context-test-")
 				work = root
 			}
 			if err := os.MkdirAll(root, 0700); err != nil {

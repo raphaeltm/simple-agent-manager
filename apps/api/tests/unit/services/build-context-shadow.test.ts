@@ -112,7 +112,7 @@ describe('shadow collection through the real publish handler', () => {
     const result = await publish();
     expect(result.error).toBeUndefined();
     expect(mock.start).toHaveBeenCalledTimes(1);
-    while (!accept) await Promise.resolve();
+    await vi.waitFor(() => expect(accept).toBeDefined());
     accept(new Response('{}', { status: 500 }));
     await Promise.all(pending);
     expect(

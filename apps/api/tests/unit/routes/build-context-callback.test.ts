@@ -19,9 +19,6 @@ vi.mock('../../../src/services/admin-settings', () => ({
   resolveAdminSetting: async (_env: unknown, key: string) =>
     key.endsWith('MaxBytes') ? 2048 : 300,
 }));
-vi.mock('../../../src/services/deployment-control', () => ({
-  assertAgentDeploymentAllowedForProfile: async () => ({ environmentId: 'env' }),
-}));
 vi.mock('../../../src/services/project-lifecycle-events', () => ({
   recordDeploymentPublishJobLifecycleEventBestEffort: lifecycle,
 }));
@@ -68,9 +65,13 @@ beforeEach(() => {
     schema.deploymentPublishJobEvents,
     schema.workspaces,
     schema.nodes,
+    schema.deploymentEnvironments,
   ]);
   sqlite.exec(
     "INSERT INTO nodes(id,status) VALUES('node','running'); INSERT INTO workspaces(id,project_id,user_id,status,node_id) VALUES('workspace','project','user','running','node'); INSERT INTO deployment_publish_jobs(id,project_id,environment_id,workspace_id,node_id,requested_by,environment_name,agent_profile_id,status,executor,attempt) VALUES('job','project','env','workspace','node','user','staging','profile','queued','cloudflare',1)"
+  );
+  sqlite.exec(
+    "INSERT INTO deployment_environments(id,project_id,name,status,agent_deploy_enabled) VALUES('env','project','staging','active',1)"
   );
   head.mockResolvedValue({ size: 100, customMetadata: { sha256 } });
   env = {
@@ -84,6 +85,28 @@ beforeEach(() => {
 });
 afterEach(() => sqlite.close());
 describe('context callback vertical slice with real SQLite and callback middleware', () => {
+  it('lets unrestricted policy admit a profile-less callback and rechecks policy on completion', async () => {
+    sqlite.exec('UPDATE deployment_publish_jobs SET agent_profile_id=NULL');
+    expect((await request('init')).status).toBe(200);
+    sqlite.exec(
+      'UPDATE deployment_environments SET allowed_deploy_profile_ids_json=\'["profile"]\''
+    );
+    expect((await request('complete')).status).toBe(403);
+    expect(head).not.toHaveBeenCalled();
+    sqlite.exec('UPDATE deployment_environments SET allowed_deploy_profile_ids_json=NULL');
+    expect((await request('complete')).status).toBe(200);
+  });
+  it('rejects a profile-less callback when deployment is disabled or profile-restricted', async () => {
+    sqlite.exec(
+      'UPDATE deployment_publish_jobs SET agent_profile_id=NULL; UPDATE deployment_environments SET agent_deploy_enabled=0'
+    );
+    expect((await request('init')).status).toBe(403);
+    sqlite.exec(
+      'UPDATE deployment_environments SET agent_deploy_enabled=1,allowed_deploy_profile_ids_json=\'["profile"]\''
+    );
+    expect((await request('init')).status).toBe(403);
+    expect(signed).not.toHaveBeenCalled();
+  });
   it('live owner completes and signs only server-derived key', async () => {
     expect((await request('init')).status).toBe(200);
     const [, command] = signed.mock.calls[0] as unknown as [

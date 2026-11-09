@@ -377,6 +377,7 @@ func Load() (*Config, error) {
 		ComposeOutputRetentionBytes:         composeOutputRetentionBytes,
 		DeployPublishHeartbeatInterval:      getEnvDuration("DEPLOY_PUBLISH_HEARTBEAT_INTERVAL", DefaultDeployPublishHeartbeatInterval),
 		DeployBuildPublishTimeout:           getEnvDuration("DEPLOY_BUILD_PUBLISH_TIMEOUT", DefaultDeployBuildPublishTimeout),
+		BuildContextMaxActivePerWorkspace:   getEnvInt("BUILD_CONTEXT_MAX_ACTIVE_PER_WORKSPACE", DEFAULT_BUILD_CONTEXT_MAX_ACTIVE_PER_WORKSPACE),
 		DeployPreflightCommandTimeout:       getEnvDuration("DEPLOY_PREFLIGHT_COMMAND_TIMEOUT", DefaultDeployPreflightCommandTimeout),
 	}
 

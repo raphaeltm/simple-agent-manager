@@ -33,12 +33,7 @@ func TestContextSourceWorkingDirectorySwap(t *testing.T) {
 					if standalone {
 						s.config.Role = config.RoleStandalone
 						s.config.ContainerMode = false
-						var err error
-						mount, err = os.MkdirTemp("/workspaces", "context-source-swap-")
-						if err != nil {
-							t.Fatal(err)
-						}
-						t.Cleanup(func() { os.RemoveAll(mount) })
+						mount = buildContextTestDir(t, "/workspaces", "context-source-swap-")
 						work = filepath.Join(mount, "work")
 					}
 					owned := filepath.Join(mount, "work")
@@ -99,12 +94,7 @@ func TestContextSourceRejectsFifo(t *testing.T) {
 			t.Run(runtime+"/"+mode, func(t *testing.T) {
 				mount := t.TempDir()
 				if runtime == "Instant" {
-					var err error
-					mount, err = os.MkdirTemp("/workspaces", "context-source-fifo-")
-					if err != nil {
-						t.Fatal(err)
-					}
-					t.Cleanup(func() { os.RemoveAll(mount) })
+					mount = buildContextTestDir(t, "/workspaces", "context-source-fifo-")
 				}
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()

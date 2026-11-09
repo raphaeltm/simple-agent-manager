@@ -51,7 +51,6 @@ for (const operation of ['init', 'complete'] as const) {
         )
         .limit(1);
       if (!job) throw errors.notFound('Publish job');
-      if (!job.agentProfileId) throw errors.forbidden('Publish job has no deployment profile');
       const policy = await assertAgentDeploymentAllowedForProfile(
         verified.db,
         verified.projectId,

@@ -272,6 +272,7 @@ export async function runScheduledComposeImageArtifactCleanup(
     result.scannedObjects += contexts.scanned;
     result.deletedObjects += contexts.deleted;
     result.deletedBytes += contexts.bytes;
+    result.errors += contexts.errors;
   } catch (error) {
     result.errors += 1;
     log.error('context_cleanup_failed', {

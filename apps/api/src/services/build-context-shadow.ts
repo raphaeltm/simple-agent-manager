@@ -2,7 +2,7 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
-import { log } from '../lib/logger';
+import { log, serializeError } from '../lib/logger';
 import { resolveAdminSetting } from './admin-settings';
 import { collectBuildContextOnSource } from './build-context-collection';
 import {
@@ -25,10 +25,11 @@ export function scheduleBuildContextShadow(
 ) {
   if (!execCtx) return;
   execCtx.waitUntil(
-    startShadow(env, input, interpolation).catch(() => {
+    startShadow(env, input, interpolation).catch((error) => {
       log.warn('build_context.shadow_start_failed', {
         projectId: input.projectId,
         workspaceId: input.workspaceId,
+        ...serializeError(error),
       });
     })
   );
@@ -53,7 +54,13 @@ async function startShadow(
     const result = await collectBuildContextOnSource(env, job, interpolation);
     if (result.supported) return;
     throw new Error(result.message);
-  } catch {
+  } catch (error) {
+    log.warn('build_context.shadow_collect_failed', {
+      publishJobId: job.id,
+      projectId: job.projectId,
+      workspaceId: job.workspaceId,
+      ...serializeError(error),
+    });
     // A missing route or failed acceptance never affects the real publish. The
     // conditional terminal event also fences late callbacks from a lost response.
     await appendDeploymentPublishJobEvent(db, {

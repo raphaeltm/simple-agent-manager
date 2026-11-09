@@ -75,6 +75,22 @@ func (s *Server) handleMcpBuildContextCollect(w http.ResponseWriter, r *http.Req
 		writeError(w, 409, "context job is already active")
 		return
 	}
+	limit := s.config.BuildContextMaxActivePerWorkspace
+	if limit < 1 {
+		limit = config.DEFAULT_BUILD_CONTEXT_MAX_ACTIVE_PER_WORKSPACE
+	}
+	active := 0
+	for _, existing := range s.publishJobs {
+		if existing.ContextOnly && existing.WorkspaceID == workspaceID && existing.CompletedAt.IsZero() {
+			active++
+		}
+	}
+	if active >= limit {
+		s.publishJobsMu.Unlock()
+		cancel()
+		writeError(w, http.StatusConflict, "workspace context collection capacity is full")
+		return
+	}
 	s.publishJobs[jobID] = publishJobState{ID: jobID, ContextOnly: true, WorkspaceID: workspaceID, ProjectID: projectID, Status: "collecting", Cancel: cancel, StartedAt: time.Now().UTC()}
 	s.publishJobsMu.Unlock()
 	// Freeze accepted source paths; workspace updates may mutate the live runtime.

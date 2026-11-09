@@ -22,7 +22,8 @@ export async function runBuildContextCleanup(env: Env, now: Date = new Date()) {
   let cursor = (await env.KV.get(BUILD_CONTEXT_CLEANUP_CURSOR_KEY)) ?? undefined;
   let scanned = 0,
     deleted = 0,
-    bytes = 0;
+    bytes = 0,
+    errors = 0;
   do {
     const page = await env.R2.list({
       prefix: BUILD_CONTEXT_PREFIX,
@@ -32,20 +33,26 @@ export async function runBuildContextCleanup(env: Env, now: Date = new Date()) {
     for (const object of page.objects) {
       // Keep the current page cursor on budget exhaustion. Re-listing that
       // page next time is safe: deleted objects vanish, retained ones stay.
-      if (Date.now() >= deadline) return { scanned, deleted, bytes };
+      if (Date.now() >= deadline) return { scanned, deleted, bytes, errors };
       scanned++;
       if (
         !protectedKeys.has(object.key) &&
         object.uploaded.getTime() <= now.getTime() - retentionHours * 3600000
       ) {
-        await env.R2.delete(object.key);
-        deleted++;
-        bytes += object.size;
+        try {
+          await env.R2.delete(object.key);
+          deleted++;
+          bytes += object.size;
+        } catch {
+          // One failed object must not starve later objects or pages. The next
+          // full sweep retries it; scheduled totals expose the partial failure.
+          errors++;
+        }
       }
     }
     cursor = page.truncated ? page.cursor : undefined;
     if (cursor) await env.KV.put(BUILD_CONTEXT_CLEANUP_CURSOR_KEY, cursor);
     else await env.KV.delete(BUILD_CONTEXT_CLEANUP_CURSOR_KEY);
   } while (cursor && Date.now() < deadline);
-  return { scanned, deleted, bytes };
+  return { scanned, deleted, bytes, errors };
 }

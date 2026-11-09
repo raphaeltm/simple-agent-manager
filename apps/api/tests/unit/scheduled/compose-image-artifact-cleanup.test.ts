@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+const contextCleanup = vi.hoisted(() =>
+  vi.fn(async () => ({ scanned: 0, deleted: 0, bytes: 0, errors: 0 }))
+);
 vi.mock('../../../src/scheduled/build-context-cleanup', () => ({
-  runBuildContextCleanup: async () => ({ scanned: 0, deleted: 0, bytes: 0 }),
+  runBuildContextCleanup: contextCleanup,
 }));
 
 vi.mock('../../../src/lib/logger', () => ({
@@ -117,6 +120,8 @@ function youngObject(name: string): ListedObject {
 
 describe('compose image artifact cleanup', () => {
   beforeEach(() => {
+    contextCleanup.mockReset();
+    contextCleanup.mockResolvedValue({ scanned: 0, deleted: 0, bytes: 0, errors: 0 });
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-06-27T12:00:00Z'));
   });
@@ -259,6 +264,19 @@ describe('compose image artifact cleanup', () => {
       skipReason: 'interval-not-elapsed',
       deletedObjects: 0,
     });
+  });
+
+  it('includes partial context cleanup successes and deletion errors in scheduled totals', async () => {
+    contextCleanup.mockResolvedValueOnce({ scanned: 3, deleted: 2, bytes: 200, errors: 1 });
+    const env = makeEnv({ objects: [oldObject('orphan', 300)] });
+    const result = await runScheduledComposeImageArtifactCleanup(env);
+    expect(result).toMatchObject({
+      scannedObjects: 4,
+      deletedObjects: 3,
+      deletedBytes: 500,
+      errors: 1,
+    });
+    expect(contextCleanup).toHaveBeenCalledWith(env, new Date('2026-06-27T12:00:00Z'));
   });
 
   it('runs scheduled cleanup after the interval and records the last run', async () => {
