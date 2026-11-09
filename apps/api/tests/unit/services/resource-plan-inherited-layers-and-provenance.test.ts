@@ -92,10 +92,9 @@ describe('explicit Run task override preserves inherited resource layers', () =>
     // The explicit task override does not replace the skill layer, so a broken
     // skill row must not be swallowed by the repair path.
     expect(() =>
-      readPersistedTaskResourcePlan(
-        legacyTaskRow('skill', JSON.stringify({ minVcpu: 'banana' })),
-        { ignoreLegacyResourceRequirementsJson: true }
-      )
+      readPersistedTaskResourcePlan(legacyTaskRow('skill', JSON.stringify({ minVcpu: 'banana' })), {
+        ignoreLegacyResourceRequirementsJson: true,
+      })
     ).toThrow(ResourceRequirementsValidationError);
   });
 
@@ -182,6 +181,63 @@ describe('persisted reservation roundtrip preserves full semantic provenance', (
       requestedVmSizeSource: readBack.requestedVmSizeSource,
     });
     expect(JSON.parse(rewritten)).toEqual(JSON.parse(planJson));
+  });
+
+  it.each([true, false])(
+    'replays historical disk according to its authored/legacy intent (legacy: %s)',
+    (legacy) => {
+      // Shape emitted before modern sizing stopped inheriting a medium bundle.
+      const historical = resolveResourceReservation(
+        {},
+        {},
+        { legacyVmSizes: { 'agent-profile': 'medium' } }
+      );
+      historical.cpuMillis = 200;
+      historical.memoryMb = 512;
+      historical.fieldProvenance!.minVcpu = { source: 'task', sourceId: 'task-1', value: 0.2 };
+      historical.fieldProvenance!.minMemoryGb = { source: 'task', sourceId: 'task-1', value: 0.5 };
+      if (!legacy) delete historical.fieldProvenance!.minDiskGb!.compatibility;
+      const read = readPersistedTaskResourcePlan({
+        ...BASE,
+        resolvedReservationJson: JSON.stringify(historical),
+      });
+      const replayed = resolveResourceReservation(
+        read.layers,
+        {},
+        {
+          legacyVmSizes:
+            read.requestedVmSize && read.requestedVmSizeSource
+              ? { [read.requestedVmSizeSource]: read.requestedVmSize }
+              : {},
+        }
+      );
+      expect(replayed).toMatchObject({
+        cpuMillis: 200,
+        memoryMb: 512,
+        diskMb: (legacy ? 15 : 40) * 1024,
+      });
+    }
+  );
+
+  it('retains historical legacy-only sizing but lets a new modern task override the bundle', () => {
+    const historical = legacyAdapterReservation();
+    const read = readPersistedTaskResourcePlan({
+      ...BASE,
+      resolvedReservationJson: JSON.stringify(historical),
+    });
+    const options = { legacyVmSizes: { [read.requestedVmSizeSource!]: read.requestedVmSize! } };
+    expect(resolveResourceReservation(read.layers, {}, options)).toMatchObject({
+      cpuMillis: 2000,
+      memoryMb: 3712,
+      diskMb: 40960,
+    });
+    expect(
+      resolveResourceReservation(
+        { ...read.layers, task: { minVcpu: 0.2, minMemoryGb: 0.5 } },
+        {},
+        options
+      )
+    ).toMatchObject({ cpuMillis: 200, memoryMb: 512, diskMb: 15360 });
   });
 
   it('preserves an empty diagnostics array distinctly from an absent one', () => {
