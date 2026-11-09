@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -33,6 +34,10 @@ while args and args[0].startswith('-'):
  elif flag!='-i': raise Exception(flag)
 assert args.pop(0)=='test-container'
 if args[0]=='pkill': sys.exit(1)
+if 'sam-process-capabilities' in args and env.get('SAM_TEST_CAP_PROBE_FILE'):
+ with open(env['SAM_TEST_CAP_PROBE_FILE'],'a') as counter: counter.write('probe\n')
+if env.get('SAM_TEST_DOCKER_PROC_ROOT') and 'sam-process-snapshot' in args:
+ args=[arg.replace('/proc/',env['SAM_TEST_DOCKER_PROC_ROOT']+'/') for arg in args]
 if args[0]=='setsid' and env.get('SAM_TEST_DOCKER_MODE'):
  open(env['SAM_TEST_DOCKER_PID_FILE'],'w').write(str(os.getpid()))
  mode=env['SAM_TEST_DOCKER_MODE']
@@ -58,9 +63,48 @@ func startCleanupFixture(t *testing.T, script string) *AgentProcess {
 }
 
 func TestContainerStopPreservesPeerAndKillsOwnedOrphan(t *testing.T) {
-	installProcessDockerTransport(t)
+	for _, mode := range []string{"full", "setsid-missing", "setsid-no-wait", "grep-missing", "tr-missing", "setsid-and-grep-missing"} {
+		t.Run(mode, func(t *testing.T) {
+			installProcessDockerTransport(t)
+			installLimitedContainerTools(t, mode)
+			assertContainerStopPreservesPeer(t)
+		})
+	}
+}
+
+func installLimitedContainerTools(t *testing.T, mode string) {
+	t.Helper()
+	dir := t.TempDir()
+	tools := map[string]string{}
+	if strings.Contains(mode, "setsid") {
+		tools["setsid"] = "#!/bin/sh\nexit 127\n"
+	}
+	if mode == "setsid-no-wait" {
+		tools["setsid"] = "#!/bin/sh\n[ \"$1\" != --wait ] || exit 1\nexec /usr/bin/setsid \"$@\"\n"
+	}
+	if strings.Contains(mode, "grep") {
+		tools["grep"] = "#!/bin/sh\nexit 127\n"
+	}
+	if mode == "tr-missing" {
+		tools["tr"] = "#!/bin/sh\nexit 127\n"
+	}
+	for name, script := range tools {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+}
+
+func assertContainerStopPreservesPeer(t *testing.T) {
+	t.Helper()
+	probeFile := filepath.Join(t.TempDir(), "probes")
+	t.Setenv("SAM_TEST_CAP_PROBE_FILE", probeFile)
 	// Clear env and ignore TERM: capture ancestry before the parent exits.
 	owner := startCleanupFixture(t, `env -i PATH=/usr/bin:/bin sh -c 'trap "" TERM; echo $$; while :; do sleep 1; done' & child=$!; read request; wait "$child"`)
+	if owner.containerRootPID <= 1 {
+		t.Fatal("launch root not captured")
+	}
 	scanner := bufio.NewScanner(owner.Stdout())
 	if !scanner.Scan() {
 		t.Fatal("owner child did not become ready")
@@ -110,6 +154,10 @@ func TestContainerStopPreservesPeerAndKillsOwnedOrphan(t *testing.T) {
 	}
 	if !peerOutput.Scan() || peerOutput.Text() != "peer:after-restart" {
 		t.Fatal("peer lost after restart")
+	}
+	probes, err := os.ReadFile(probeFile)
+	if err != nil || string(probes) != "probe\n" {
+		t.Fatalf("capabilities were not cached once per container: %q, %v", probes, err)
 	}
 }
 
@@ -275,4 +323,46 @@ func TestContainerLaunchRejectsRelativeHostDockerPath(t *testing.T) {
 	if _, err := StartProcess(ProcessConfig{DockerExecutable: "docker", ContainerID: "test-container", AcpCommand: "sh"}); err == nil {
 		t.Fatal("relative Docker path would reintroduce privileged PATH lookup")
 	}
+}
+
+// Exercise the production capture entry point with 2,001 Linux-style process
+// records and 8 MiB of environments, without exhausting this host's PID quota.
+func TestContainerSnapshotOuterLimit(t *testing.T) {
+	installProcessDockerTransport(t)
+	root := t.TempDir()
+	const processCount = 2001
+	owner := "outer-limit-owner"
+	stat, err := os.ReadFile("/proc/self/stat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rest := string(stat[strings.LastIndex(string(stat), ") ")+2:])
+	for i := 0; i < processCount; i++ {
+		pid := strconv.Itoa(100000 + i)
+		dir := filepath.Join(root, pid)
+		if err := os.Mkdir(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "stat"), []byte(pid+" (fixture) "+rest), 0600); err != nil {
+			t.Fatal(err)
+		}
+		env := "FILLER=" + strings.Repeat("x", 4096) + "\x00" + containerOwnerEnv + "=" + owner + "\x00"
+		if err := os.WriteFile(filepath.Join(dir, "environ"), []byte(env), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("SAM_TEST_DOCKER_PROC_ROOT", root)
+	p := &AgentProcess{containerID: "test-container", dockerExecutable: testDockerExecutable(t), containerOwner: owner, containerMarkerScan: true}
+	started := time.Now()
+	if err := p.captureContainerProcesses(); err != nil {
+		t.Fatal(err)
+	}
+	elapsed := time.Since(started)
+	if len(p.containerTargets) != processCount {
+		t.Fatalf("captured %d of %d", len(p.containerTargets), processCount)
+	}
+	if elapsed >= DefaultContainerSignalTimeout {
+		t.Fatalf("snapshot exceeded %s: %s", DefaultContainerSignalTimeout, elapsed)
+	}
+	t.Logf("%d processes / 8 MiB environments captured in %s (budget %s)", processCount, elapsed, DefaultContainerSignalTimeout)
 }

@@ -247,7 +247,9 @@ Implements the Agent Communication Protocol for AI coding agents:
 
 Responses are serialized via `orderedPipe` to prevent token reordering from concurrent notification dispatch.
 
-Multiple agent sessions can share one workspace container. Each Docker agent launch receives a unique process ownership marker and a separate Linux process session, established before the adapter starts. Stopping or restarting a session signals only its Linux session, marked processes and captured descendants, with PID start-time checks before signalling. Cleanup includes surviving children after the Docker client exits; it does not match other sessions by adapter command name.
+Multiple agent sessions can share one workspace container. Each Docker agent launch receives a unique process ownership marker and a captured launch-root identity before the adapter starts. Stopping or restarting a session signals only its proven processes and captured descendants, with PID start-time checks before signalling. Cleanup includes surviving children after the Docker client exits; it does not match other sessions by adapter command name.
+
+The launcher probes container capabilities once per container ID. When `setsid --wait` is available, a private Linux session and a small shell supervisor also clean children that clear their environment and become orphaned before Stop. Images without `setsid`, including implementations without `--wait`, still launch normally using the marker and captured ancestry. This fallback cannot recover an environment-cleared child whose ancestry was already lost before capture. A NUL-safe `grep -Fxlz` enables one batch environment scan per cleanup phase; `tr` is not required. Without that grep capability, cleanup uses the captured root, descendants and any proven private session. Missing capabilities produce a warning with the container ID and reason, never broader command matching. If `/proc` itself is unavailable, the adapter launches directly and cleanup reports that ownership cannot be established.
 
 ### JWT Validator
 

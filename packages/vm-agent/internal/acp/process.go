@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -24,8 +25,8 @@ const (
 	// escalating to SIGKILL. Configurable via ProcessConfig.StopGracePeriod.
 	DefaultStopGracePeriod = 5 * time.Second
 
-	// DefaultStopTimeout is the total time Stop() is allowed to take before
-	// giving up. Configurable via ProcessConfig.StopTimeout.
+	// DefaultStopTimeout bounds the host-process exit wait; Docker commands
+	// have separate deadlines. Configurable via ProcessConfig.StopTimeout.
 	DefaultStopTimeout = 10 * time.Second
 
 	// DefaultContainerSignalTimeout bounds each Docker process inspection/signal.
@@ -173,25 +174,29 @@ func hasEnvVar(envVars []string, key string) bool {
 // distinct launch marker and PID/starttime identities; host PGIDs do not cross
 // the container PID namespace.
 type AgentProcess struct {
-	agentType              string
-	cmd                    *exec.Cmd
-	stdin                  io.WriteCloser
-	stdout                 io.ReadCloser
-	stderr                 io.ReadCloser
-	containerID            string
-	containerOwner         string
-	dockerExecutable       string
-	containerSessionID     int
-	containerSessionStart  string
-	containerTargets       map[int]string
-	containerSignalTimeout time.Duration
-	startTime              time.Time
-	stopGracePeriod        time.Duration
-	stopTimeout            time.Duration
-	mu                     sync.Mutex
-	stopped                bool
-	recoveryMu             sync.Mutex
-	recoveryNotify         recoveryNotify
+	agentType                   string
+	cmd                         *exec.Cmd
+	stdin                       io.WriteCloser
+	stdout                      io.ReadCloser
+	stderr                      io.ReadCloser
+	containerID                 string
+	containerOwner              string
+	dockerExecutable            string
+	containerMarkerScan         bool
+	containerCleanupUnavailable bool
+	containerRootPID            int
+	containerRootStart          string
+	containerSessionID          int
+	containerSessionStart       string
+	containerTargets            map[int]string
+	containerSignalTimeout      time.Duration
+	startTime                   time.Time
+	stopGracePeriod             time.Duration
+	stopTimeout                 time.Duration
+	mu                          sync.Mutex
+	stopped                     bool
+	recoveryMu                  sync.Mutex
+	recoveryNotify              recoveryNotify
 
 	// envFilePath is the tmpfs-backed file containing secret env vars.
 	// Cleaned up after the process exits (in Wait) rather than immediately
@@ -388,12 +393,23 @@ func startDockerExecProcess(cfg ProcessConfig) (*AgentProcess, error) {
 	owner := hex.EncodeToString(ownerBytes[:])
 	cfg.EnvVars = mergeProcessEnv(cfg.EnvVars, []string{containerOwnerEnv + "=" + owner})
 	launchCfg := cfg
-	launchCfg.AcpCommand = "setsid"
+	caps := containerCapabilitiesFor(cfg, dockerExecutable, owner)
+	launchCfg.AcpCommand = "sh"
 	grace := cfg.StopGracePeriod
 	if grace <= 0 {
 		grace = DefaultStopGracePeriod
 	}
-	launchCfg.AcpArgs = append([]string{"--wait", "sh", "-c", containerSessionLaunchScript, "sam-acp-session", fmt.Sprintf("%.3f", grace.Seconds()), cfg.AcpCommand}, cfg.AcpArgs...)
+	launchCfg.AcpArgs = append([]string{"-c", containerSessionLaunchScript, "sam-acp-session", fmt.Sprintf("%.3f", grace.Seconds()), strconv.FormatBool(caps.session), strconv.FormatBool(caps.marker), cfg.AcpCommand}, cfg.AcpArgs...)
+	if caps.session {
+		launchCfg.AcpCommand = "setsid"
+		launchCfg.AcpArgs = append([]string{"--wait", "sh"}, launchCfg.AcpArgs...)
+	}
+	if !caps.proc {
+		launchCfg.AcpCommand, launchCfg.AcpArgs = cfg.AcpCommand, cfg.AcpArgs
+	}
+	if !caps.session || !caps.marker || !caps.proc {
+		slog.Warn("Container agent cleanup using reduced ownership capabilities", "containerId", cfg.ContainerID, "reason", caps.reason())
+	}
 	args, envFilePath, err := buildDockerExecArgs(launchCfg)
 	if err != nil {
 		return nil, err
@@ -428,24 +444,28 @@ func startDockerExecProcess(cfg ProcessConfig) (*AgentProcess, error) {
 	}
 
 	process := &AgentProcess{
-		agentType:              cfg.AcpCommand,
-		cmd:                    cmd,
-		stdin:                  pipes.stdin,
-		stdout:                 pipes.stdout,
-		stderr:                 pipes.stderr,
-		containerID:            cfg.ContainerID,
-		containerOwner:         owner,
-		dockerExecutable:       dockerExecutable,
-		containerSignalTimeout: cfg.ContainerSignalTimeout,
-		envFilePath:            envFilePath,
-		startTime:              time.Now(),
-		stopGracePeriod:        gracePeriod,
-		stopTimeout:            stopTimeout,
-		waitDone:               make(chan struct{}),
+		agentType:                   cfg.AcpCommand,
+		cmd:                         cmd,
+		stdin:                       pipes.stdin,
+		stdout:                      pipes.stdout,
+		stderr:                      pipes.stderr,
+		containerID:                 cfg.ContainerID,
+		containerOwner:              owner,
+		containerMarkerScan:         caps.marker,
+		containerCleanupUnavailable: !caps.proc,
+		dockerExecutable:            dockerExecutable,
+		containerSignalTimeout:      cfg.ContainerSignalTimeout,
+		envFilePath:                 envFilePath,
+		startTime:                   time.Now(),
+		stopGracePeriod:             gracePeriod,
+		stopTimeout:                 stopTimeout,
+		waitDone:                    make(chan struct{}),
 	}
-	if err := process.awaitContainerSession(); err != nil {
-		_ = process.Stop()
-		return nil, err
+	if caps.proc {
+		if err := process.awaitContainerSession(); err != nil {
+			_ = process.Stop()
+			return nil, err
+		}
 	}
 	return process, nil
 }
@@ -635,8 +655,9 @@ func (p *AgentProcess) Stop() error {
 	waitCh := p.waitDone
 
 	// Bound the host-process exit wait; Docker commands have separate deadlines.
-	deadline := time.NewTimer(p.stopTimeout)
-	defer deadline.Stop()
+	stopContext, cancelStop := context.WithTimeout(context.Background(), p.stopTimeout)
+	defer cancelStop()
+	deadline := stopContext.Done()
 
 	// Stage 1: SIGTERM inside the container. This is the critical step —
 	// the agent processes (claude-agent-acp, claude) run inside the container's
@@ -665,7 +686,7 @@ func (p *AgentProcess) Stop() error {
 	case <-graceTimer.C:
 		slog.Warn("Agent process did not exit within grace period, sending SIGKILL",
 			"agentType", p.agentType, "pid", pid, "gracePeriod", p.stopGracePeriod)
-	case <-deadline.C:
+	case <-deadline:
 		slog.Error("Agent process stop deadline reached during SIGTERM phase, sending SIGKILL",
 			"agentType", p.agentType, "pid", pid)
 	}
@@ -680,7 +701,7 @@ func (p *AgentProcess) Stop() error {
 	select {
 	case <-waitCh:
 		slog.Info("Agent process exited after SIGKILL", "agentType", p.agentType, "pid", pid)
-	case <-deadline.C:
+	case <-deadline:
 		slog.Error("Agent process did not exit after SIGKILL within deadline",
 			"agentType", p.agentType, "pid", pid, "timeout", p.stopTimeout)
 		return errors.Join(cleanupErr, fmt.Errorf("agent process %d did not exit within %s", pid, p.stopTimeout))
