@@ -4,10 +4,11 @@ import { Hono } from 'hono';
 import { createAuth } from '../auth';
 import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
-import { expectJsonRecord } from '../lib/runtime-validation';
+import { expectJsonRecord, maybeJsonRecord } from '../lib/runtime-validation';
 import { errors } from '../middleware/error';
 import {
   EMAIL_CODE_SIGN_IN_PATH,
+  emailCodeRedemptionAllowed,
   isClosedEmailOtpPath,
   rateLimitSignInCodes,
   SEND_CODE_PATH,
@@ -58,6 +59,18 @@ authRoutes.get('/get-session', (c) => readAuthSession(c.env, c.req.raw));
 // before BetterAuth sees them.
 authRoutes.post(SEND_CODE_PATH, rateLimitSignInCodes('email-sign-in-ip'));
 authRoutes.post(EMAIL_CODE_SIGN_IN_PATH, rateLimitSignInCodes('email-sign-in-redeem-ip'));
+authRoutes.post(EMAIL_CODE_SIGN_IN_PATH, async (c, next) => {
+  const body: unknown = await c.req.raw
+    .clone()
+    .json()
+    .catch(() => null);
+  const email = maybeJsonRecord(body)?.email;
+  // Same answer as a wrong code, so this reveals nothing the code check would not.
+  if (typeof email !== 'string' || !(await emailCodeRedemptionAllowed(c.env, email))) {
+    return c.json({ code: 'INVALID_OTP', message: 'Invalid OTP' }, 400);
+  }
+  return next();
+});
 
 authRoutes.on(['GET', 'POST'], '/*', async (c) => {
   // SAM has no passwords: the plugin's reset, verification and email-change routes stay closed.

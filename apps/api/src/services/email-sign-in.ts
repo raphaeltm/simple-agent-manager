@@ -49,7 +49,12 @@ export const EMAIL_CODE_SIGN_IN_PATH = '/sign-in/email-otp';
  * than left to the `type === 'sign-in'` guard in `emailSignInPlugins`.
  */
 export function isClosedEmailOtpPath(pathname: string): boolean {
-  const path = pathname.replace(/^\/api\/auth/, '');
+  // Normalize here rather than rely on the auth router rejecting odd paths.
+  const path = pathname
+    .toLowerCase()
+    .replace(/\/{2,}/g, '/')
+    .replace(/(.)\/$/, '$1')
+    .replace(/^\/api\/auth/, '');
   if (path === SEND_CODE_PATH || path === EMAIL_CODE_SIGN_IN_PATH) return false;
   return path.startsWith('/email-otp/') || path === '/forget-password/email-otp';
 }
@@ -70,6 +75,16 @@ export async function emailSignUpAllowed(env: Env, email: string): Promise<boole
   const owner = bootstrapOwnerEmail(env);
   if (!owner) return false;
   return email === owner && !(await bootstrapOwnerEstablished(env));
+}
+
+/**
+ * Redeeming a code may create an account (BetterAuth's emailOTP sign-up). Refuse that for
+ * anyone `emailSignUpAllowed` would not send a code to, so the rule does not rest only on the
+ * code never having been mailed.
+ */
+export async function emailCodeRedemptionAllowed(env: Env, email: string): Promise<boolean> {
+  const normalized = email.trim().toLowerCase();
+  return (await accountExists(env, normalized)) || (await emailSignUpAllowed(env, normalized));
 }
 
 async function accountExists(env: Env, email: string): Promise<boolean> {

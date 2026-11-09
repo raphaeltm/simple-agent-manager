@@ -249,8 +249,33 @@ describe('email sign-in through better-auth (vertical slice)', () => {
     await Promise.all(background);
   });
 
+  it('refuses a code that would create an account for anyone but the owner', async () => {
+    // A code exists for the stranger (BetterAuth stores one per request) but was never mailed.
+    // Even a correct guess must not create the account.
+    await requestCode('stranger@example.com');
+    const row = sqlite
+      .prepare(
+        `SELECT COUNT(*) AS n FROM verifications WHERE identifier LIKE '%stranger@example.com%'`
+      )
+      .get() as { n: number };
+    expect(row.n).toBe(1);
+    sqlite.prepare(`DELETE FROM verifications`).run();
+    // Plant a known code for the stranger the way BetterAuth stores sign-in codes.
+    await requestCode(OWNER);
+    const ownerCode = codeFrom(mail.sent[0]);
+    sqlite
+      .prepare(`UPDATE verifications SET identifier = REPLACE(identifier, ?, ?)`)
+      .run(OWNER, 'stranger@example.com');
+    const response = await signIn('stranger@example.com', ownerCode);
+    expect(response.status).toBe(400);
+    expect(realUsers()).toHaveLength(0);
+  });
+
   it('keeps the password-reset, verification and email-change code routes closed', async () => {
     for (const path of [
+      '/email-otp//reset-password',
+      '/EMAIL-OTP/reset-password',
+      '/email-otp/reset-password/',
       '/email-otp/request-password-reset',
       '/forget-password/email-otp',
       '/email-otp/reset-password',
