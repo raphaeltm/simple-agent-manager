@@ -129,6 +129,14 @@ async function setupMocks(page: Page, state: ExistingState): Promise<Recorded> {
   return recorded;
 }
 
+async function viewportScreenshot(page: Page, name: string) {
+  await page.waitForTimeout(600);
+  const viewport = page.viewportSize();
+  await page.screenshot({
+    path: `../../.codex/tmp/playwright-screenshots/${name}-${viewport?.width}x${viewport?.height}.png`,
+  });
+}
+
 type CloudAnswer = 'byoc' | 'sam';
 type RepoAnswer = 'github' | 'sam-hosted';
 
@@ -279,7 +287,21 @@ for (const [agent, button, slug] of [
     expect(connectBox!.y + connectBox!.height).toBeLessThanOrEqual(pasteBox!.y);
     await connect.scrollIntoViewIfNeeded();
     await assertNoOverflow(page);
-    await screenshot(page, `onboarding-inline-ai-guided-${slug}`);
+    // The wizard scrolls inside its own overlay, which a full-page capture cannot see; capture
+    // the viewport where the sign-in now sits.
+    await viewportScreenshot(page, `onboarding-inline-ai-guided-${slug}`);
+
+    // Escape backs out of the sign-in only; the setup stays open.
+    await connect.click();
+    const signIn = page
+      .getByRole('dialog')
+      .filter({ hasNot: page.locator('[data-testid="onboarding-wizard"]') })
+      .last();
+    await expect(signIn).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog')).toHaveCount(1);
+    await expect(wizard).toBeVisible();
+    await expect(connect).toBeVisible();
   });
 }
 

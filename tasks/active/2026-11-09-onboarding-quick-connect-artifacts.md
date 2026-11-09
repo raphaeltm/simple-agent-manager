@@ -32,5 +32,5 @@
       useSetupStatus, dashboard, installer credentials/deploy), each new guard proven discriminating
 - [x] Playwright audit at 375 and 1280 (onboarding-inline-audit.spec.ts)
 - [x] StepForm.tsx split under 500 lines (SubscriptionConnect.tsx, ActionButton.tsx)
-- [ ] Specialist review
+- [x] Specialist review: security-auditor (0 critical/high; ambiguous-catalog test + all-or-nothing grant added), ui-ux-specialist (nested-dialog Escape, mobile screenshot, repo-question layout shift, credential scrub, back-nav lookup all fixed)
 - [ ] Staging: redeploy installer, fresh install on the BYOC account, live onboarding with guided sign-in and a SAM-hosted project

@@ -86,6 +86,39 @@ describe('ChoosePathWizard', () => {
     expect(mocks.dismissOnboarding).toHaveBeenCalledTimes(1);
   });
 
+  // The guided agent sign-in opens its own modal from inside the wizard. Escape there must
+  // close only that modal, not throw away the whole setup.
+  it('leaves Escape to a dialog opened from inside the wizard', () => {
+    render(<ChoosePathWizard />, { wrapper: QueryTestWrapper });
+    const nested = document.createElement('div');
+    nested.setAttribute('role', 'dialog');
+    nested.setAttribute('aria-modal', 'true');
+    document.body.appendChild(nested);
+    try {
+      fireEvent.keyDown(nested, { key: 'Escape' });
+      expect(mocks.dismissOnboarding).not.toHaveBeenCalled();
+    } finally {
+      nested.remove();
+    }
+    // Control: with the nested dialog gone, Escape dismisses again.
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(mocks.dismissOnboarding).toHaveBeenCalledTimes(1);
+  });
+
+  it('holds the repository question until it knows whether SAM can host repositories', async () => {
+    let resolve!: (enabled: boolean) => void;
+    mocks.getArtifactsEnabled.mockReturnValue(new Promise<boolean>((r) => (resolve = r)));
+    render(<ChoosePathWizard />, { wrapper: QueryTestWrapper });
+
+    fireEvent.click(screen.getByRole('button', { name: /Use SAM-managed infrastructure/ }));
+    expect(await screen.findByRole('status', { name: 'Loading options' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /GitHub — I have a repo/ })).toBeNull();
+
+    resolve(true);
+    const options = await screen.findAllByRole('button', { name: /Let SAM host it|GitHub/ });
+    expect(options[0]).toHaveAccessibleName(/Let SAM host it/);
+  });
+
   it('does not call dismissOnboarding for a non-Escape key', () => {
     render(<ChoosePathWizard />, { wrapper: QueryTestWrapper });
 

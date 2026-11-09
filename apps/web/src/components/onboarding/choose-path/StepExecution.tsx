@@ -102,6 +102,13 @@ export function StepExecution({ steps, onComplete }: StepExecutionProps) {
 
   const handleSkip = useCallback(() => markStepDone(), [markStepDone]);
 
+  // The guided sign-in saved the credential itself. Drop anything typed into the manual
+  // fields too, as handleAction does after a manual save.
+  const handleAgentConnected = useCallback(() => {
+    setForm((prev) => ({ ...prev, apiKey: '', oauthToken: '' }));
+    markStepDone();
+  }, [markStepDone]);
+
   /* ─── GitHub App installation (opens tab, polls for completion) ─── */
 
   const clearGitHubTimers = useCallback(() => {
@@ -286,7 +293,7 @@ export function StepExecution({ steps, onComplete }: StepExecutionProps) {
             onAction={handleAction}
             onGitHubInstall={handleGitHubInstall}
             onCreateProject={handleCreateProject}
-            onAgentConnected={markStepDone}
+            onAgentConnected={handleAgentConnected}
             hostedRepo={step.hostedRepo === true}
             onSkip={step.isOptional ? handleSkip : undefined}
             actionLabel={step.actionLabel}

@@ -5,7 +5,7 @@
  * The standard app UI is hidden behind it. Users dismiss via X button.
  */
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, X } from 'lucide-react';
+import { ArrowLeft, Loader2, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useQueryScope } from '../../../hooks/useQueryScope';
@@ -16,7 +16,7 @@ import { CompletionScreen } from './CompletionScreen';
 import { type GeneratedStep, generatePath } from './path-generator';
 import { PathPreview } from './PathPreview';
 import { QuestionCard } from './QuestionCard';
-import { type PathOption, questionsFor } from './questions';
+import { type PathOption, QUESTIONS, questionsFor } from './questions';
 import { StepExecution } from './StepExecution';
 
 type Phase = 'questions' | 'path-preview' | 'executing' | 'complete';
@@ -60,6 +60,13 @@ export function ChoosePathWizard() {
   // handler.
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
+      // A dialog opened from inside the wizard (the guided agent sign-in) owns the keyboard:
+      // its Escape closes only itself, and it traps Tab. Dismissing here as well would throw
+      // away the whole setup when the user only meant to back out of the sign-in.
+      const nestedDialogOpen = Array.from(document.querySelectorAll('[aria-modal="true"]')).some(
+        (el) => el !== dialogRef.current
+      );
+      if (nestedDialogOpen) return;
       if (e.key === 'Escape') {
         e.preventDefault();
         dismissOnboarding();
@@ -174,7 +181,7 @@ export function ChoosePathWizard() {
       setTags((prev) => prev.filter((t) => !lastOption.tags.includes(t)));
     }
     setCurrentQuestionId(lastAnsweredId);
-  }, [answers, questionHistory, questions]);
+  }, [answers, questionHistory]);
 
   const handleExecutionComplete = useCallback(() => {
     setPhase('complete');
@@ -189,6 +196,10 @@ export function ChoosePathWizard() {
   if (!showOverlay) return null;
 
   const currentQuestion = questions.find((q) => q.id === currentQuestionId);
+  // Hold the repository question until we know whether SAM can host repositories, so an
+  // option never appears above ones the user is about to tap.
+  const waitingForRepoOptions =
+    currentQuestionId === 'repo-source' && artifactsEnabledQuery.isLoading;
 
   return (
     <div
@@ -240,7 +251,12 @@ export function ChoosePathWizard() {
         className="flex-1 overflow-y-auto overflow-x-hidden outline-none px-4 pb-8 sm:px-6"
       >
         <div className="max-w-lg mx-auto pt-4 sm:pt-12">
-          {phase === 'questions' && currentQuestion && (
+          {phase === 'questions' && waitingForRepoOptions && (
+            <div className="flex justify-center py-12" role="status" aria-label="Loading options">
+              <Loader2 size={20} className="animate-spin text-fg-muted" />
+            </div>
+          )}
+          {phase === 'questions' && currentQuestion && !waitingForRepoOptions && (
             <QuestionCard
               question={currentQuestion}
               selectedId={answers[currentQuestionId] ?? null}
