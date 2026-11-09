@@ -10,6 +10,7 @@ import {
   commandLabel,
   type EngineCheckpoint,
   EngineCommandFailure,
+  type EngineEvent,
   engineFingerprint,
   type EngineRunner,
   type InstallerEngineConfig,
@@ -318,7 +319,7 @@ describe('installation engine', () => {
   });
   it('finishes an installation with email off when preparing Email Sending fails', async () => {
     const f = fixture('scripts/deploy/configure-agent-email.ts');
-    const events: Array<{ phase: string; status: string }> = [];
+    const events: EngineEvent[] = [];
     let state: EngineCheckpoint | undefined;
     await runInstallerEngine(config, {
       ...f,
@@ -329,7 +330,13 @@ describe('installation engine', () => {
       },
     });
     expect(events).toContainEqual(
-      expect.objectContaining({ phase: 'agent-email', status: 'failed' })
+      // The owner's own install log says why email is off.
+      expect.objectContaining({
+        phase: 'agent-email',
+        status: 'failed',
+        exitCode: 23,
+        tail: ['wrangler: D1 count failed for users'],
+      })
     );
     expect(state?.status).toBe('completed');
     // Control: the same failure still stops a CI deploy, which has always required it.
