@@ -121,7 +121,7 @@ function createCredentialD1(overrides: Partial<TestEnv> = {}) {
       user_id TEXT,
       chat_session_id TEXT,
       node_id TEXT,
-      status TEXT
+      status TEXT, callback_generation TEXT
     );
     CREATE TABLE agent_sessions (
       id TEXT PRIMARY KEY,

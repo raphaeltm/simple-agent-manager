@@ -85,7 +85,9 @@ vi.mock('../../src/services/jwt', () => ({
     .fn()
     .mockResolvedValue({ workspace: 'ws-test', type: 'callback', scope: 'workspace' }),
   signCallbackToken: vi.fn().mockResolvedValue('mock-token'),
+  signCurrentWorkspaceCallbackToken: vi.fn().mockResolvedValue('mock-token'),
   signNodeCallbackToken: vi.fn().mockResolvedValue('mock-node-token'),
+  signCurrentNodeCallbackToken: vi.fn().mockResolvedValue('mock-node-token'),
 }));
 
 vi.mock('../../src/lib/logger', () => ({
@@ -221,7 +223,9 @@ async function createTestApp(): Promise<Hono> {
 
 describe('task callback auth routing (regression)', () => {
   let app: Hono;
-  beforeAll(async () => { await createTestApp(); }, 30_000);
+  beforeAll(async () => {
+    await createTestApp();
+  }, 30_000);
 
   beforeEach(async () => {
     vi.clearAllMocks();

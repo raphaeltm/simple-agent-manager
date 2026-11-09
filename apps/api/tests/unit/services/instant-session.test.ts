@@ -3,7 +3,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   jwt: {
     signCallbackToken: vi.fn(),
+    signCurrentWorkspaceCallbackToken: vi.fn(),
     signNodeCallbackToken: vi.fn(),
+    signCurrentNodeCallbackToken: vi.fn(),
     signTerminalToken: vi.fn(),
   },
   mcp: {
@@ -41,7 +43,11 @@ const mocks = vi.hoisted(() => ({
   transitionTaskToTerminal: vi.fn(),
 }));
 
-vi.mock('../../../src/services/jwt', () => mocks.jwt);
+vi.mock('../../../src/services/jwt', () => ({
+  ...mocks.jwt,
+  signCurrentWorkspaceCallbackToken: mocks.jwt.signCallbackToken,
+  signCurrentNodeCallbackToken: mocks.jwt.signNodeCallbackToken,
+}));
 vi.mock('../../../src/services/mcp-token', () => mocks.mcp);
 vi.mock('../../../src/services/node-agent', () => mocks.nodeAgent);
 vi.mock('../../../src/services/nodes', () => mocks.nodes);

@@ -23,7 +23,9 @@ async function seedRunningWorkspace(workspaceId: string, chatSessionId: string):
 }
 
 async function postTimings(workspaceId: string, body: Record<string, unknown>): Promise<Response> {
-  const token = await signCallbackToken(workspaceId, env as unknown as Env);
+  const token = await signCallbackToken(workspaceId, env as unknown as Env, {
+    callbackGeneration: null,
+  });
   return SELF.fetch(
     `https://api.test.example.com/api/workspaces/${workspaceId}/lifecycle-timings`,
     {

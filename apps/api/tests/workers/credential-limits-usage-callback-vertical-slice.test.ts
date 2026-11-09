@@ -112,7 +112,7 @@ async function seedClaudeSession(suffix: string, credentialReference: string) {
     projectId,
     nodeId,
     agentSessionId,
-    callbackToken: await signCallbackToken(workspaceId, testEnv),
+    callbackToken: await signCallbackToken(workspaceId, testEnv, { callbackGeneration: null }),
   };
 }
 

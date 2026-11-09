@@ -431,6 +431,12 @@ type Config struct {
 	WorkspaceCallbackTokenRenewalRetryInitial time.Duration
 	WorkspaceCallbackTokenRenewalRetryMax     time.Duration
 
+	// SAM MCP token rotation after a callback generation rotation (see mcp_token_rotation.go)
+	McpTokenRotationTimeout     time.Duration
+	McpTokenRotationMaxAttempts int
+	McpTokenRotationRetryDelay  time.Duration
+	McpTokenRotationBudget      time.Duration
+
 	// Error reporting settings - configurable per constitution principle XI
 	ErrorReportFlushInterval  time.Duration // Background flush interval (default: 30s)
 	ErrorReportMaxBatchSize   int           // Immediate flush threshold (default: 10)

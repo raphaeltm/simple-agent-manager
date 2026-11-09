@@ -28,10 +28,10 @@ async function createWorkspaceOnVmAgent(
   workspaceId: string,
   nodeId: string
 ): Promise<void> {
-  const { signCallbackToken } = await import('../../services/jwt');
+  const { signCurrentWorkspaceCallbackToken } = await import('../../services/jwt');
   const { createWorkspaceOnNode } = await import('../../services/node-agent');
   const { resolveWorkspaceGitSource } = await import('../../services/workspace-git-source');
-  const callbackToken = await signCallbackToken(workspaceId, rc.env);
+  const callbackToken = await signCurrentWorkspaceCallbackToken(workspaceId, rc.env);
   const projectRepo = await loadTaskRunnerProjectRepo(state, rc);
   const { drizzle } = await import('drizzle-orm/d1');
   const schema = await import('../../db/schema');

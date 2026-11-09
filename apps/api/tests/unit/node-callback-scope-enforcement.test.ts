@@ -57,7 +57,9 @@ const mockVerifyCallbackToken =
 vi.mock('../../src/services/jwt', () => ({
   verifyCallbackToken: (...args: [string, unknown]) => mockVerifyCallbackToken(...args),
   signCallbackToken: vi.fn().mockResolvedValue('mock-ws-token'),
+  signCurrentWorkspaceCallbackToken: vi.fn().mockResolvedValue('mock-ws-token'),
   signNodeCallbackToken: vi.fn().mockResolvedValue('mock-node-token'),
+  signCurrentNodeCallbackToken: vi.fn().mockResolvedValue('mock-node-token'),
   signNodeManagementToken: vi
     .fn()
     .mockResolvedValue({ token: 'mgmt-token', expiresAt: '2030-01-01' }),

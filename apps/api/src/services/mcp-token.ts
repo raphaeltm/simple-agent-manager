@@ -46,6 +46,13 @@ export interface McpTokenData {
   workspaceId: string;
   chatSessionId?: string;
   agentSessionId?: string;
+  /**
+   * Credential generation of the workspace runtime the token was issued to
+   * (`workspaces.callback_generation`). Absent on tokens issued before generations
+   * existed, which then match only a workspace that has never been rotated
+   * (`mcp-token-lifecycle.ts`).
+   */
+  callbackGeneration?: string | null;
   createdAt: string;
   /** ISO timestamp of last sliding window refresh (set on first refresh) */
   lastRefreshedAt?: string;

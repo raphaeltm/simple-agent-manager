@@ -14,7 +14,14 @@ import {
 
 import type { Env } from '../env';
 import { AppError } from '../middleware/error';
-import { CALLBACK_TOKEN_GENERATION_ISSUED_AT_CLAIM } from './callback-token-claims';
+import {
+  CALLBACK_TOKEN_CREDENTIAL_GENERATION_CLAIM,
+  CALLBACK_TOKEN_GENERATION_ISSUED_AT_CLAIM,
+} from './callback-token-claims';
+import {
+  assertCallbackCredentialGenerationCurrent,
+  loadCallbackCredentialGeneration,
+} from './callback-token-generation';
 
 // Key ID format: key-YYYY-MM (rotates monthly)
 const KEY_ID = `key-${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
@@ -106,6 +113,21 @@ export async function signTerminalToken(
 export interface SignCallbackTokenOptions {
   /** Generation issue time (seconds) to preserve when renewing an existing token. */
   generationIssuedAtSeconds?: number;
+  /**
+   * The row's current credential generation (`callback_generation`). Required, so every
+   * signer states which runtime the token belongs to; null when the row was never rotated.
+   */
+  callbackGeneration: string | null;
+}
+
+export interface SignNodeCallbackTokenOptions {
+  /** The node row's current credential generation; null when never rotated. */
+  callbackGeneration: string | null;
+}
+
+function credentialGenerationClaim(generation: string | null): Record<string, string> {
+  // `!generation`: never mint an empty claim, which the verifier rejects as malformed.
+  return !generation ? {} : { [CALLBACK_TOKEN_CREDENTIAL_GENERATION_CLAIM]: generation };
 }
 
 /**
@@ -119,7 +141,7 @@ export interface SignCallbackTokenOptions {
 export async function signCallbackToken(
   workspaceId: string,
   env: Env,
-  options: SignCallbackTokenOptions = {}
+  options: SignCallbackTokenOptions
 ): Promise<string> {
   const privateKey = await importPKCS8(env.JWT_PRIVATE_KEY, 'RS256');
   const expiry = getCallbackTokenExpiry(env);
@@ -134,6 +156,7 @@ export async function signCallbackToken(
     ...(generationIssuedAt !== undefined
       ? { [CALLBACK_TOKEN_GENERATION_ISSUED_AT_CLAIM]: generationIssuedAt }
       : {}),
+    ...credentialGenerationClaim(options.callbackGeneration),
   })
     .setProtectedHeader({ alg: 'RS256', kid: KEY_ID })
     .setIssuer(issuer)
@@ -154,7 +177,11 @@ export async function signCallbackToken(
  * Node-scoped tokens CANNOT be used for workspace-scoped endpoints (agent-key,
  * runtime-assets, etc.) to prevent cross-workspace secret access on multi-tenant nodes.
  */
-export async function signNodeCallbackToken(nodeId: string, env: Env): Promise<string> {
+export async function signNodeCallbackToken(
+  nodeId: string,
+  env: Env,
+  options: SignNodeCallbackTokenOptions
+): Promise<string> {
   const privateKey = await importPKCS8(env.JWT_PRIVATE_KEY, 'RS256');
   const expiry = getCallbackTokenExpiry(env);
   const expiresAt = new Date(Date.now() + expiry);
@@ -164,6 +191,7 @@ export async function signNodeCallbackToken(nodeId: string, env: Env): Promise<s
     workspace: nodeId,
     type: 'callback',
     scope: 'node',
+    ...credentialGenerationClaim(options.callbackGeneration),
   })
     .setProtectedHeader({ alg: 'RS256', kid: KEY_ID })
     .setIssuer(issuer)
@@ -174,6 +202,26 @@ export async function signNodeCallbackToken(nodeId: string, env: Env): Promise<s
     .sign(privateKey);
 
   return token;
+}
+
+/**
+ * Sign a workspace callback token for the workspace row's CURRENT credential generation
+ * (one D1 read). For credentials handed to the runtime that is being created or dispatched
+ * now. Paths that renew or deliver to an existing runtime must instead carry the generation
+ * they verified or bound, so a retired runtime is never handed a current-generation token.
+ */
+export async function signCurrentWorkspaceCallbackToken(
+  workspaceId: string,
+  env: Env
+): Promise<string> {
+  const generation = await loadCallbackCredentialGeneration(env, 'workspace', workspaceId);
+  return signCallbackToken(workspaceId, env, { callbackGeneration: generation ?? null });
+}
+
+/** Node counterpart of {@link signCurrentWorkspaceCallbackToken}. */
+export async function signCurrentNodeCallbackToken(nodeId: string, env: Env): Promise<string> {
+  const generation = await loadCallbackCredentialGeneration(env, 'node', nodeId);
+  return signNodeCallbackToken(nodeId, env, { callbackGeneration: generation ?? null });
 }
 
 /**
@@ -217,6 +265,11 @@ export interface CallbackTokenPayload {
   workspace: string;
   type: 'callback';
   scope: CallbackTokenScope;
+  /**
+   * The token's credential generation (`cgen`), null when absent. Verification has already
+   * proved it equals the row's current generation; renewals must carry it forward.
+   */
+  callbackGeneration: string | null;
 }
 
 export interface TerminalTokenPayload {
@@ -247,6 +300,11 @@ export interface LocalForwardTokenPayload {
  * Fails closed on anything SAM never mints: a missing or unknown `scope` (unscoped tokens
  * stopped being issued in #483, and every renewal path mints scoped tokens) or a missing
  * `iat` (every signer calls `setIssuedAt`, and the Instant stale-callback guard needs it).
+ *
+ * Also rejects a token from a retired runtime: its `cgen` claim must equal the current
+ * `callback_generation` of the workspace or node row it names (one D1 read). This is the
+ * single place every callback sink inherits revocation across reactivation from, so the
+ * check lives here rather than at each sink (`callback-token-generation.ts`).
  *
  * @throws AppError 401 if the token is invalid, expired, has the wrong audience, or lacks
  *   a required claim; 403 if `expectedScope` is set and does not match.
@@ -293,6 +351,13 @@ export async function verifyCallbackToken(
     throw callbackTokenUnauthorized('Missing token issue time');
   }
 
+  const rawGeneration = payload[CALLBACK_TOKEN_CREDENTIAL_GENERATION_CLAIM];
+  if (rawGeneration !== undefined && (typeof rawGeneration !== 'string' || rawGeneration === '')) {
+    throw callbackTokenUnauthorized('Invalid token generation claim');
+  }
+  const callbackGeneration: string | null =
+    typeof rawGeneration === 'string' ? rawGeneration : null;
+
   // Enforce expected scope when specified (unified scope check — F-010)
   if (options?.expectedScope && scope !== options.expectedScope) {
     throw callbackTokenForbidden(
@@ -300,10 +365,18 @@ export async function verifyCallbackToken(
     );
   }
 
+  await assertCallbackCredentialGenerationCurrent(
+    env,
+    scope,
+    payload.workspace,
+    callbackGeneration
+  );
+
   return {
     workspace: payload.workspace,
     type: 'callback',
     scope,
+    callbackGeneration,
   };
 }
 

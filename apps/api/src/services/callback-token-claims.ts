@@ -16,6 +16,15 @@ import { decodeJwt } from 'jose';
  */
 export const CALLBACK_TOKEN_GENERATION_ISSUED_AT_CLAIM = 'gen_iat';
 
+/**
+ * Claim carried by every callback JWT minted for a runtime whose workspace or node row has a
+ * credential generation (`callback_generation`). `verifyCallbackToken` rejects a token whose
+ * claim differs from the row, so reactivating the same workspace ID under a new runtime
+ * revokes the previous runtime's tokens (`callback-token-generation.ts`). Absent when the row
+ * has never been rotated.
+ */
+export const CALLBACK_TOKEN_CREDENTIAL_GENERATION_CLAIM = 'cgen';
+
 function positiveIntegerClaim(value: unknown): number | null {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : null;
 }

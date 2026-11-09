@@ -19,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../../src/services/jwt', () => ({
   verifyCallbackToken: vi.fn(async () => ({ workspace: 'w1', scope: 'workspace' })),
   signCallbackToken: vi.fn(),
+  signCurrentWorkspaceCallbackToken: vi.fn(),
 }));
 vi.mock('../../src/services/project-data', () => ({ persistMessage: vi.fn(async () => 'notice') }));
 

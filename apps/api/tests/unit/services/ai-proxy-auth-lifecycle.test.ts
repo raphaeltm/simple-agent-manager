@@ -78,7 +78,9 @@ describe('verifyAIProxyAuth lifecycle binding', () => {
     'accepts a workspace token while the workspace is %s',
     async (status) => {
       seed(status);
-      const result = await verify(await signCallbackToken('ws-1', env));
+      const result = await verify(
+        await signCallbackToken('ws-1', env, { callbackGeneration: null })
+      );
       expect(result).toMatchObject({
         workspaceId: 'ws-1',
         userId: 'user-1',
@@ -91,7 +93,9 @@ describe('verifyAIProxyAuth lifecycle binding', () => {
     'refuses a still-unexpired token once its workspace is %s',
     async (status) => {
       seed(status);
-      const error = await rejection(verify(await signCallbackToken('ws-1', env)));
+      const error = await rejection(
+        verify(await signCallbackToken('ws-1', env, { callbackGeneration: null }))
+      );
       expect(error.statusCode).toBe(403);
     }
   );
@@ -104,13 +108,15 @@ describe('verifyAIProxyAuth lifecycle binding', () => {
     ['missing', null],
   ] as const)('refuses a running workspace whose node is %s', async (_label, nodeStatus) => {
     seed('running', nodeStatus);
-    const error = await rejection(verify(await signCallbackToken('ws-1', env)));
+    const error = await rejection(
+      verify(await signCallbackToken('ws-1', env, { callbackGeneration: null }))
+    );
     expect(error.statusCode).toBe(403);
   });
 
   it('refuses the same token after its workspace stops, having accepted it while running', async () => {
     seed('running');
-    const token = await signCallbackToken('ws-1', env);
+    const token = await signCallbackToken('ws-1', env, { callbackGeneration: null });
     await expect(verify(token)).resolves.toMatchObject({ workspaceId: 'ws-1' });
 
     setWorkspaceStatus('stopped');
@@ -119,7 +125,9 @@ describe('verifyAIProxyAuth lifecycle binding', () => {
 
   it('refuses a node-scoped token even when it names a running workspace id', async () => {
     seed('running');
-    await expect(verify(await signNodeCallbackToken('ws-1', env))).rejects.toMatchObject({
+    await expect(
+      verify(await signNodeCallbackToken('ws-1', env, { callbackGeneration: null }))
+    ).rejects.toMatchObject({
       statusCode: 403,
     });
   });
@@ -159,7 +167,7 @@ describe('AI proxy admission (/ai/v1) refuses inactive workspaces before any ups
 
   it('admits a running workspace token, then refuses it with 403 once the workspace sleeps', async () => {
     seed('running');
-    const token = await signCallbackToken('ws-1', env);
+    const token = await signCallbackToken('ws-1', env, { callbackGeneration: null });
 
     const live = await post(token);
     expect(live.status).toBe(200);

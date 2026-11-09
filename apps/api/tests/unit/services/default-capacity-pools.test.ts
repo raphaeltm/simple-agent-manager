@@ -138,7 +138,7 @@ function createDb() {
       runtime TEXT NOT NULL DEFAULT 'vm',
       node_class TEXT NOT NULL DEFAULT 'managed',
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, callback_generation TEXT
     );
 
     CREATE TABLE workspaces (
@@ -154,7 +154,7 @@ function createDb() {
       vm_location TEXT NOT NULL,
       placement_explanation_json TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, callback_generation TEXT
     );
 
     CREATE TABLE compute_usage (

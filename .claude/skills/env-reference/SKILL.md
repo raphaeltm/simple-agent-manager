@@ -817,6 +817,10 @@ The agent renews each workspace callback token after a successful node heartbeat
 - `WORKSPACE_CALLBACK_TOKEN_RENEWAL_TIMEOUT` — Timeout for one renewal request (default: `15s`)
 - `WORKSPACE_CALLBACK_TOKEN_RENEWAL_RETRY_INITIAL` — First backoff after a transient renewal failure (default: `1m`)
 - `WORKSPACE_CALLBACK_TOKEN_RENEWAL_RETRY_MAX` — Backoff ceiling, also the wait after a "not yet due" answer (default: `30m`)
+- `MCP_TOKEN_ROTATION_TIMEOUT` — Timeout for one SAM MCP token exchange after a restart or rebuild delivered a new workspace credential (default: `10s`)
+- `MCP_TOKEN_ROTATION_MAX_ATTEMPTS` — Attempts per SAM MCP token on transient failures (default: `3`, capped at `10`)
+- `MCP_TOKEN_ROTATION_RETRY_DELAY` — First backoff between exchange attempts, doubling per attempt (default: `1s`)
+- `MCP_TOKEN_ROTATION_BUDGET` — Total time the exchange pass may delay provisioning (default: `1m`)
 - `MSG_AUTH_RENEWAL_WAIT` — How long chat-message delivery may stay paused on a rejected (401) workspace token before the pause is reported as an error (default: `15m`). Held messages are kept either way.
 
 ### File Operations

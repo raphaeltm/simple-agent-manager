@@ -232,7 +232,7 @@ describe('provider limit -> canonical sleep -> full restored continuation', () =
       expect(callback.providerLimitResetsAt).toBe(
         recorded.cases[fixture]!.callback.providerLimitResetsAt
       );
-      const token = await signCallbackToken(f.workspaceId, testEnv);
+      const token = await signCallbackToken(f.workspaceId, testEnv, { callbackGeneration: null });
       const response = await SELF.fetch(
         `https://api.test.example.com/api/projects/${f.projectId}/tasks/${f.taskId}/status/callback`,
         {

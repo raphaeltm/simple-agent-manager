@@ -31,6 +31,8 @@ import {
 import { exportPKCS8, exportSPKI, generateKeyPair } from 'jose';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { D1_WITHOUT_CALLBACK_ROWS } from '../helpers/callback-generation-d1';
+
 // =============================================================================
 // Key generation for JWT tests
 // =============================================================================
@@ -501,12 +503,13 @@ describe('JWT Token Contract', () => {
       const { jwtVerify, importSPKI } = await import('jose');
 
       const env = {
+        DATABASE: D1_WITHOUT_CALLBACK_ROWS,
         JWT_PRIVATE_KEY: testPrivateKey,
         JWT_PUBLIC_KEY: testPublicKey,
         BASE_DOMAIN: 'example.com',
       } as any;
 
-      const token = await signCallbackToken('ws-test-123', env);
+      const token = await signCallbackToken('ws-test-123', env, { callbackGeneration: null });
       expect(typeof token).toBe('string');
 
       // Verify and extract claims
@@ -547,12 +550,13 @@ describe('JWT Token Contract', () => {
       const { jwtVerify, importSPKI } = await import('jose');
 
       const env = {
+        DATABASE: D1_WITHOUT_CALLBACK_ROWS,
         JWT_PRIVATE_KEY: testPrivateKey,
         JWT_PUBLIC_KEY: testPublicKey,
         BASE_DOMAIN: 'example.com',
       } as any;
 
-      const token = await signNodeCallbackToken('node-abc-123', env);
+      const token = await signNodeCallbackToken('node-abc-123', env, { callbackGeneration: null });
       expect(typeof token).toBe('string');
 
       const publicKey = await importSPKI(testPublicKey, JWT_ALGORITHM);
@@ -577,12 +581,13 @@ describe('JWT Token Contract', () => {
       const { signCallbackToken, verifyCallbackToken } = await import('../../src/services/jwt');
 
       const env = {
+        DATABASE: D1_WITHOUT_CALLBACK_ROWS,
         JWT_PRIVATE_KEY: testPrivateKey,
         JWT_PUBLIC_KEY: testPublicKey,
         BASE_DOMAIN: 'example.com',
       } as any;
 
-      const token = await signCallbackToken('ws-scope-test', env);
+      const token = await signCallbackToken('ws-scope-test', env, { callbackGeneration: null });
       const payload = await verifyCallbackToken(token, env);
 
       expect(payload.workspace).toBe('ws-scope-test');
@@ -593,12 +598,15 @@ describe('JWT Token Contract', () => {
       const { signNodeCallbackToken, verifyCallbackToken } = await import('../../src/services/jwt');
 
       const env = {
+        DATABASE: D1_WITHOUT_CALLBACK_ROWS,
         JWT_PRIVATE_KEY: testPrivateKey,
         JWT_PUBLIC_KEY: testPublicKey,
         BASE_DOMAIN: 'example.com',
       } as any;
 
-      const token = await signNodeCallbackToken('node-scope-test', env);
+      const token = await signNodeCallbackToken('node-scope-test', env, {
+        callbackGeneration: null,
+      });
       const payload = await verifyCallbackToken(token, env);
 
       expect(payload.workspace).toBe('node-scope-test');
@@ -624,6 +632,7 @@ describe('JWT Token Contract', () => {
         .sign(privateKey);
 
       const env = {
+        DATABASE: D1_WITHOUT_CALLBACK_ROWS,
         JWT_PUBLIC_KEY: testPublicKey,
         BASE_DOMAIN: 'example.com',
       } as any;
@@ -642,14 +651,22 @@ describe('JWT Token Contract', () => {
       const { verifyCallbackToken } = await import('../../src/services/jwt');
 
       const privateKey = await importPKCS8(testPrivateKey, JWT_ALGORITHM);
-      const noIatToken = await new SignJWT({ workspace: 'ws-1', type: 'callback', scope: 'workspace' })
+      const noIatToken = await new SignJWT({
+        workspace: 'ws-1',
+        type: 'callback',
+        scope: 'workspace',
+      })
         .setProtectedHeader({ alg: JWT_ALGORITHM, kid: 'key-2024-01' })
         .setIssuer('https://api.example.com')
         .setSubject('ws-1')
         .setAudience(JWT_AUDIENCES.callback)
         .setExpirationTime(new Date(Date.now() + 86400000))
         .sign(privateKey);
-      const env = { JWT_PUBLIC_KEY: testPublicKey, BASE_DOMAIN: 'example.com' } as any;
+      const env = {
+        JWT_PUBLIC_KEY: testPublicKey,
+        BASE_DOMAIN: 'example.com',
+        DATABASE: D1_WITHOUT_CALLBACK_ROWS,
+      } as any;
 
       await expect(verifyCallbackToken(noIatToken, env)).rejects.toMatchObject({
         statusCode: 401,
@@ -663,6 +680,7 @@ describe('JWT Token Contract', () => {
       const { signTerminalToken, verifyTerminalToken } = await import('../../src/services/jwt');
 
       const env = {
+        DATABASE: D1_WITHOUT_CALLBACK_ROWS,
         JWT_PRIVATE_KEY: testPrivateKey,
         JWT_PUBLIC_KEY: testPublicKey,
         BASE_DOMAIN: 'example.com',
@@ -679,12 +697,13 @@ describe('JWT Token Contract', () => {
       const { signCallbackToken, verifyTerminalToken } = await import('../../src/services/jwt');
 
       const env = {
+        DATABASE: D1_WITHOUT_CALLBACK_ROWS,
         JWT_PRIVATE_KEY: testPrivateKey,
         JWT_PUBLIC_KEY: testPublicKey,
         BASE_DOMAIN: 'example.com',
       } as any;
 
-      const token = await signCallbackToken('ws-terminal', env);
+      const token = await signCallbackToken('ws-terminal', env, { callbackGeneration: null });
 
       await expect(verifyTerminalToken(token, env)).rejects.toThrow();
     });
@@ -696,6 +715,7 @@ describe('JWT Token Contract', () => {
       const { jwtVerify, importSPKI } = await import('jose');
 
       const env = {
+        DATABASE: D1_WITHOUT_CALLBACK_ROWS,
         JWT_PRIVATE_KEY: testPrivateKey,
         JWT_PUBLIC_KEY: testPublicKey,
         BASE_DOMAIN: 'example.com',
@@ -733,6 +753,7 @@ describe('JWT Token Contract', () => {
       const { jwtVerify, importSPKI } = await import('jose');
 
       const env = {
+        DATABASE: D1_WITHOUT_CALLBACK_ROWS,
         JWT_PRIVATE_KEY: testPrivateKey,
         JWT_PUBLIC_KEY: testPublicKey,
         BASE_DOMAIN: 'example.com',
@@ -757,12 +778,13 @@ describe('JWT Token Contract', () => {
       const { signCallbackToken, verifyCallbackToken } = await import('../../src/services/jwt');
 
       const env = {
+        DATABASE: D1_WITHOUT_CALLBACK_ROWS,
         JWT_PRIVATE_KEY: testPrivateKey,
         JWT_PUBLIC_KEY: testPublicKey,
         BASE_DOMAIN: 'example.com',
       } as any;
 
-      const token = await signCallbackToken('ws-verify-test', env);
+      const token = await signCallbackToken('ws-verify-test', env, { callbackGeneration: null });
       const payload = await verifyCallbackToken(token, env);
 
       expect(payload.workspace).toBe('ws-verify-test');
@@ -789,6 +811,7 @@ describe('JWT Token Contract', () => {
         .sign(privateKey);
 
       const env = {
+        DATABASE: D1_WITHOUT_CALLBACK_ROWS,
         JWT_PRIVATE_KEY: testPrivateKey,
         JWT_PUBLIC_KEY: testPublicKey,
         BASE_DOMAIN: 'example.com',
@@ -835,6 +858,7 @@ describe('JWT Token Contract', () => {
         .sign(privateKey);
 
       const env = {
+        DATABASE: D1_WITHOUT_CALLBACK_ROWS,
         JWT_PRIVATE_KEY: testPrivateKey,
         JWT_PUBLIC_KEY: testPublicKey,
         BASE_DOMAIN: 'example.com',
@@ -862,6 +886,7 @@ describe('JWT Token Contract', () => {
         .sign(privateKey);
 
       const env = {
+        DATABASE: D1_WITHOUT_CALLBACK_ROWS,
         JWT_PRIVATE_KEY: testPrivateKey,
         JWT_PUBLIC_KEY: testPublicKey,
         BASE_DOMAIN: 'example.com',
@@ -888,6 +913,7 @@ describe('JWT Token Contract', () => {
         .sign(privateKey);
 
       const env = {
+        DATABASE: D1_WITHOUT_CALLBACK_ROWS,
         JWT_PRIVATE_KEY: testPrivateKey,
         JWT_PUBLIC_KEY: testPublicKey,
         BASE_DOMAIN: 'example.com',

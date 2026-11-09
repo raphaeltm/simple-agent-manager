@@ -3,13 +3,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   createWorkspaceOnNode: vi.fn(),
   signCallbackToken: vi.fn(),
+  signCurrentWorkspaceCallbackToken: vi.fn(),
   resolveWorkspaceGitSource: vi.fn(),
 }));
 
 vi.mock('../../../src/services/node-agent', () => ({
   createWorkspaceOnNode: mocks.createWorkspaceOnNode,
 }));
-vi.mock('../../../src/services/jwt', () => ({ signCallbackToken: mocks.signCallbackToken }));
+vi.mock('../../../src/services/jwt', () => ({
+  signCallbackToken: mocks.signCallbackToken,
+  signCurrentWorkspaceCallbackToken: mocks.signCallbackToken,
+}));
 vi.mock('../../../src/services/workspace-git-source', () => ({
   resolveWorkspaceGitSource: mocks.resolveWorkspaceGitSource,
 }));

@@ -59,7 +59,7 @@ describe('snapshot prepare HTTP conflicts', () => {
       },
     });
     const bindings = { ...env, DATABASE: database } as unknown as Env;
-    const token = await signCallbackToken(workspace, bindings);
+    const token = await signCallbackToken(workspace, bindings, { callbackGeneration: null });
     const app = new Hono<{ Bindings: Env }>();
     app.onError(handleAppError);
     app.route('/api/workspaces', sessionSnapshotRoutes);

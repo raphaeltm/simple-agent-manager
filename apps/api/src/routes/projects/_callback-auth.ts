@@ -34,6 +34,7 @@ interface WorkspacePublishCallbackIdentity {
   status: string;
   nodeId: string | null;
   nodeStatus: string | null;
+  callbackGeneration: string | null;
 }
 
 async function loadWorkspacePublishCallbackIdentity(
@@ -48,6 +49,7 @@ async function loadWorkspacePublishCallbackIdentity(
       status: schema.workspaces.status,
       nodeId: schema.workspaces.nodeId,
       nodeStatus: schema.nodes.status,
+      callbackGeneration: schema.workspaces.callbackGeneration,
     })
     .from(schema.workspaces)
     .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
@@ -66,7 +68,8 @@ function sameWorkspacePublishCallbackIdentity(
     current.chatSessionId === expected.chatSessionId &&
     current.status === expected.status &&
     current.nodeId === expected.nodeId &&
-    current.nodeStatus === expected.nodeStatus
+    current.nodeStatus === expected.nodeStatus &&
+    current.callbackGeneration === expected.callbackGeneration
   );
 }
 

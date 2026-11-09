@@ -20,6 +20,10 @@ import (
 // See .claude/rules/71-request-context-must-not-outlive-its-request.md.
 func (h *SessionHost) monitorProcessExit(process agentProcess, agentType string, cred *agentCredential, settings *agentSettingsPayload) {
 	err := process.Wait()
+	// Decide whether this exit was intentional at the moment it was observed. A
+	// stop requested after this point targeted a process that had already
+	// exited on its own, so it must not hide the crash.
+	intentionalStop := h.intentionalStopForExitedProcess(process)
 	// Exit proof remains valid after lifecycle detachment/replacement. Clear
 	// only this process's fence before the current-process checks below.
 	h.releaseGuardedCancelForExitedProcess(process)
@@ -37,8 +41,6 @@ func (h *SessionHost) monitorProcessExit(process agentProcess, agentType string,
 		slog.Info("Agent process monitor: process replaced, skipping status/restart")
 		return
 	}
-	intentionalPromptCancel := h.intentionalPromptCancelProcessStop
-	h.intentionalPromptCancelProcessStop = false
 	rollover := h.checkpointRollover
 	rolloverForced := false
 	if rollover != nil {
@@ -49,7 +51,7 @@ func (h *SessionHost) monitorProcessExit(process agentProcess, agentType string,
 	recoveryNotify := process.RecoveryNotify()
 	h.mu.Unlock()
 
-	if isRapidExit && !intentionalPromptCancel && rollover == nil {
+	if isRapidExit && !intentionalStop && rollover == nil {
 		errMsg := rapidExitMessage(agentType, uptime, exitInfo, stderrOutput)
 		slog.Error("Agent rapid exit", "message", errMsg)
 		h.reportAgentError(agentType, "agent_crash", errMsg, stderrOutput)
@@ -83,7 +85,7 @@ func (h *SessionHost) monitorProcessExit(process agentProcess, agentType string,
 	h.promptMu.Lock()
 	promptActive := h.promptInFlight
 	h.promptMu.Unlock()
-	if promptActive && !crashRecovery.inProgress && !intentionalPromptCancel && rollover == nil {
+	if promptActive && !crashRecovery.inProgress && !intentionalStop && rollover == nil {
 		h.clearCurrentAgentSessionLocked()
 		h.setStatusLocked(HostError)
 		errMsg := fmt.Sprintf("Agent process exited during an active prompt (%s)", exitInfo)
@@ -95,7 +97,7 @@ func (h *SessionHost) monitorProcessExit(process agentProcess, agentType string,
 		return
 	}
 
-	if isRapidExit && !intentionalPromptCancel && rollover == nil {
+	if isRapidExit && !intentionalStop && rollover == nil {
 		h.clearCurrentAgentSessionLocked()
 		if crashRecovery.inProgress {
 			h.clearCrashRecoveryLocked()
@@ -112,7 +114,7 @@ func (h *SessionHost) monitorProcessExit(process agentProcess, agentType string,
 	}
 
 	maxRestarts := h.maxRestartAttempts()
-	if !intentionalPromptCancel && rollover == nil {
+	if !intentionalStop && rollover == nil {
 		h.applyRestartDecayLocked()
 		h.restartCount++
 		h.lastCrashTime = time.Now()
@@ -132,8 +134,8 @@ func (h *SessionHost) monitorProcessExit(process agentProcess, agentType string,
 
 	if rollover != nil {
 		slog.Info("Attempting strict agent restart for checkpoint rollover", "acpSessionId", rollover.sessionID, "forced", rolloverForced)
-	} else if intentionalPromptCancel {
-		slog.Info("Attempting agent restart after user prompt cancel", "restartCount", h.restartCount, "maxRestarts", maxRestarts)
+	} else if intentionalStop {
+		slog.Info("Attempting agent restart after an intentional process stop", "restartCount", h.restartCount, "maxRestarts", maxRestarts)
 	} else {
 		slog.Info("Attempting agent restart", "attempt", h.restartCount, "maxRestarts", maxRestarts)
 	}
@@ -161,11 +163,11 @@ func (h *SessionHost) monitorProcessExit(process agentProcess, agentType string,
 	loadSessionID := ""
 	if rollover != nil {
 		loadSessionID = rollover.sessionID
-	} else if intentionalPromptCancel || crashRecovery.inProgress {
+	} else if intentionalStop || crashRecovery.inProgress {
 		loadSessionID = previousAcpSessionID
 		// Fall back to the captured crash-recovery session ID only during an
 		// active crash-recovery episode. The captured ID is meaningful for
-		// LoadSession resume; scoping to inProgress keeps intentional cancels
+		// LoadSession resume; scoping to inProgress keeps intentional stops
 		// from ever resuming a stale recovery session and makes the invariant
 		// explicit for future refactors.
 		if loadSessionID == "" && crashRecovery.inProgress {
@@ -251,9 +253,10 @@ func (h *SessionHost) monitorProcessExit(process agentProcess, agentType string,
 	if !crashRecovery.inProgress {
 		// Normal (non-crash-recovery) restart succeeded. This includes the
 		// intentional process restart used to preserve a session after prompt
-		// cancellation. The detach path published `recovering`; close that
-		// transition explicitly after LoadSession succeeds so the control-plane
-		// activity mirror and composer become usable for the next prompt.
+		// cancellation or a workspace credential rotation. The detach path
+		// published `recovering`; close that transition explicitly after
+		// LoadSession succeeds so the control-plane activity mirror and composer
+		// become usable for the next prompt.
 		h.mu.Unlock()
 		h.broadcastAgentStatus(StatusReady, agentType, "")
 		h.reportActivity("idle")
@@ -402,4 +405,19 @@ func (h *SessionHost) finishCrashRecoveryFailure(crashRecovery crashRecoverySnap
 	if notify != nil {
 		notify(fatalErrorStopReason, err)
 	}
+}
+
+// intentionalStopForExitedProcess reports whether process was stopped on
+// purpose, consuming the mark. Called once its Wait has returned.
+func (h *SessionHost) intentionalStopForExitedProcess(process agentProcess) bool {
+	h.mu.Lock()
+	intentional := process != nil && h.intentionalProcessStop == process
+	if intentional {
+		h.intentionalProcessStop = nil
+	}
+	h.mu.Unlock()
+	if hook := h.processExitObservedHook; hook != nil {
+		hook(process)
+	}
+	return intentional
 }

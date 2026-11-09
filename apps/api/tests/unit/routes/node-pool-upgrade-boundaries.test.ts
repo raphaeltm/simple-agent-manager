@@ -1,10 +1,10 @@
 /** Shipped migrations and external HTTP/JWT boundaries joined to the shared upgrade slice. */
-import { readdirSync,readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import Database from 'better-sqlite3';
 import { Hono } from 'hono';
-import { exportPKCS8, exportSPKI, generateKeyPair } from 'jose';
+import { decodeJwt, exportPKCS8, exportSPKI, generateKeyPair, importPKCS8, SignJWT } from 'jose';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
@@ -108,7 +108,8 @@ async function heartbeat(
   f: Fixture,
   nodeId: string,
   body: Record<string, unknown>,
-  tokenNodeId = nodeId
+  tokenNodeId = nodeId,
+  bearer?: string
 ) {
   Object.assign(f.env, keys);
   const app = new Hono<{ Bindings: Env }>();
@@ -125,7 +126,7 @@ async function heartbeat(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${await signNodeCallbackToken(tokenNodeId, f.env)}`,
+        Authorization: `Bearer ${bearer ?? (await signNodeCallbackToken(tokenNodeId, f.env, { callbackGeneration: null }))}`,
       },
       body: JSON.stringify(body),
     },
@@ -254,6 +255,37 @@ describe('node-pool upgrade boundaries', () => {
     const denied = await heartbeat(f, 'host', {}, 'other-host');
     expect(denied.status).toBe(401);
     expect(f.sqlite.prepare(hardwareSql).get()).toEqual(before);
+  });
+
+  it('refreshes a node token within the generation it proved, and refuses a retired runtime', async () => {
+    const f = fixture();
+    await connectHttpBoundaries(f);
+    const start = await f.run();
+    await seedHost(f, start);
+    f.sqlite.exec(
+      "UPDATE nodes SET ip_address = '203.0.113.2', backend_dns_record_id = 'dns-host', callback_generation = 'gen-b' WHERE id = 'host'"
+    );
+    // A token past the refresh threshold, as a long-running agent presents it.
+    const agedNodeToken = async (generation: string) => {
+      const issuedAt = Math.floor(Date.now() / 1000) - 13 * 3600;
+      return new SignJWT({ workspace: 'host', type: 'callback', scope: 'node', cgen: generation })
+        .setProtectedHeader({ alg: 'RS256' })
+        .setIssuer(`https://api.${f.env.BASE_DOMAIN}`)
+        .setSubject('host')
+        .setAudience('workspace-callback')
+        .setIssuedAt(issuedAt)
+        .setExpirationTime(issuedAt + 24 * 3600)
+        .sign(await importPKCS8(keys.JWT_PRIVATE_KEY, 'RS256'));
+    };
+    const metrics = { metrics: { cpuLoadAvg1: 0.1, memoryPercent: 5, diskPercent: 5 } };
+
+    const current = await heartbeat(f, 'host', metrics, 'host', await agedNodeToken('gen-b'));
+    expect(current.status).toBe(200);
+    const { refreshedToken } = (await current.json()) as { refreshedToken?: string };
+    expect(decodeJwt(refreshedToken as string).cgen).toBe('gen-b');
+
+    const retired = await heartbeat(f, 'host', metrics, 'host', await agedNodeToken('gen-a'));
+    expect(retired.status).toBe(401);
   });
 
   it('provisions an old queued legacy request through the real provider and records observed native hardware before atomic admission', async () => {

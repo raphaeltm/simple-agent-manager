@@ -8,7 +8,9 @@ const recoveryMocks = vi.hoisted(() => ({
   persistFailed: vi.fn(),
   persistSleepingAfterRevoked: vi.fn(),
   signNodeCallbackToken: vi.fn(),
+  signCurrentNodeCallbackToken: vi.fn(),
   signCallbackToken: vi.fn(),
+  signCurrentWorkspaceCallbackToken: vi.fn(),
   signNodeManagementToken: vi.fn(),
   commitWake: vi.fn(),
   prepareRestoreMcp: vi.fn(),
@@ -51,7 +53,9 @@ vi.mock('../../../src/services/session-restore-mcp', () => ({
 
 vi.mock('../../../src/services/jwt', () => ({
   signNodeCallbackToken: recoveryMocks.signNodeCallbackToken,
+  signCurrentNodeCallbackToken: recoveryMocks.signNodeCallbackToken,
   signCallbackToken: recoveryMocks.signCallbackToken,
+  signCurrentWorkspaceCallbackToken: recoveryMocks.signCallbackToken,
   signNodeManagementToken: recoveryMocks.signNodeManagementToken,
 }));
 

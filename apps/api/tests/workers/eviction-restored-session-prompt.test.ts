@@ -194,7 +194,7 @@ async function agentOnVm(taskMode: TaskMode) {
 
 /** The VM agent's OOM eviction callback, through the real route and callback auth. */
 async function evict(f: Fixture, interruptedWork?: boolean): Promise<void> {
-  const token = await signNodeCallbackToken(f.nodeId, testEnv);
+  const token = await signNodeCallbackToken(f.nodeId, testEnv, { callbackGeneration: null });
   const response = await SELF.fetch(
     `https://api.test.example.com/api/projects/${f.projectId}/workspaces/${f.workspaceId}/eviction`,
     {
@@ -651,7 +651,7 @@ async function completeEvictionSnapshot(f: Fixture) {
   await env.R2.put(buildSessionSnapshotR2Key(testEnv, f.chatSessionId, generation, 'home'), home, {
     sha256: digest,
   });
-  const token = await signCallbackToken(f.workspaceId, testEnv);
+  const token = await signCallbackToken(f.workspaceId, testEnv, { callbackGeneration: null });
   const response = await SELF.fetch(
     `https://api.test.example.com/api/workspaces/${f.workspaceId}/session-snapshot/complete`,
     {
@@ -1073,7 +1073,7 @@ describe('eviction snapshot -> real TaskRunner workspace linking', () => {
     )
       .bind(f.chatSessionId)
       .first();
-    const token = await signNodeCallbackToken(f.nodeId, testEnv);
+    const token = await signNodeCallbackToken(f.nodeId, testEnv, { callbackGeneration: null });
     const response = await SELF.fetch(
       `https://api.test.example.com/api/projects/${f.projectId}/workspaces/${f.workspaceId}/eviction`,
       {

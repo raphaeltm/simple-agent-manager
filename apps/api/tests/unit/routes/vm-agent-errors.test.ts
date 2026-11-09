@@ -9,7 +9,9 @@ vi.mock('../../../src/services/jwt', () => ({
     .fn()
     .mockResolvedValue({ workspace: 'node-123', type: 'callback', scope: 'node' }),
   signCallbackToken: vi.fn(),
+  signCurrentWorkspaceCallbackToken: vi.fn(),
   signNodeCallbackToken: vi.fn(),
+  signCurrentNodeCallbackToken: vi.fn(),
   signNodeManagementToken: vi.fn(),
 }));
 

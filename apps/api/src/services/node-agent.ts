@@ -470,26 +470,38 @@ export async function stopWorkspaceOnNode(
   });
 }
 
+export interface WorkspaceReprovisionOptions extends GuardedNodeAgentMutationOptions {
+  evictionGeneration?: string;
+  expectedEvictionGeneration?: string;
+  /**
+   * The new runtime's workspace callback token. Restart and rebuild rotate the workspace's
+   * credential generation, so the agent must replace the token it holds. A VM agent that
+   * predates this field rejects the request with 400 (its decoder disallows unknown fields).
+   */
+  callbackToken?: string;
+}
+
+function workspaceReprovisionBody(options?: WorkspaceReprovisionOptions): { body?: string } {
+  if (!options?.evictionGeneration) return {};
+  return {
+    body: JSON.stringify({
+      evictionGeneration: options.evictionGeneration,
+      expectedEvictionGeneration: options.expectedEvictionGeneration ?? '',
+      ...(options.callbackToken ? { callbackToken: options.callbackToken } : {}),
+    }),
+  };
+}
+
 export async function restartWorkspaceOnNode(
   nodeId: string,
   workspaceId: string,
   env: Env,
   userId: string,
-  options?: GuardedNodeAgentMutationOptions & {
-    evictionGeneration?: string;
-    expectedEvictionGeneration?: string;
-  }
+  options?: WorkspaceReprovisionOptions
 ): Promise<unknown> {
   return nodeAgentRequest(nodeId, env, `/workspaces/${workspaceId}/restart`, {
     method: 'POST',
-    ...(options?.evictionGeneration
-      ? {
-          body: JSON.stringify({
-            evictionGeneration: options.evictionGeneration,
-            expectedEvictionGeneration: options.expectedEvictionGeneration ?? '',
-          }),
-        }
-      : {}),
+    ...workspaceReprovisionBody(options),
     userId,
     workspaceId,
     beforeExternalMutation: options?.beforeExternalMutation,
@@ -985,21 +997,11 @@ export async function rebuildWorkspaceOnNode(
   workspaceId: string,
   env: Env,
   userId: string,
-  options?: GuardedNodeAgentMutationOptions & {
-    evictionGeneration?: string;
-    expectedEvictionGeneration?: string;
-  }
+  options?: WorkspaceReprovisionOptions
 ): Promise<unknown> {
   return nodeAgentRequest(nodeId, env, `/workspaces/${workspaceId}/rebuild`, {
     method: 'POST',
-    ...(options?.evictionGeneration
-      ? {
-          body: JSON.stringify({
-            evictionGeneration: options.evictionGeneration,
-            expectedEvictionGeneration: options.expectedEvictionGeneration ?? '',
-          }),
-        }
-      : {}),
+    ...workspaceReprovisionBody(options),
     userId,
     workspaceId,
     beforeExternalMutation: options?.beforeExternalMutation,

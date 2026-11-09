@@ -24,6 +24,7 @@ export type WorkspaceDeletionCallbackKind =
   | 'compose_publish_release'
   | 'deployment_publish_job_event'
   | 'git_token'
+  | 'mcp_token_rotation'
   | 'messages'
   | 'node_acp_heartbeat'
   | 'provisioning_failed'

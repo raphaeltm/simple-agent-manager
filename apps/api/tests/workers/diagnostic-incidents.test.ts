@@ -64,9 +64,13 @@ beforeAll(async () => {
   )
     .bind('diagnostic-other-node', USER_ID, 'diagnostic-other-node')
     .run();
-  nodeToken = await signNodeCallbackToken(NODE_ID, env as never);
-  otherNodeToken = await signNodeCallbackToken('diagnostic-other-node', env as never);
-  workspaceToken = await signCallbackToken(WORKSPACE_ID, env as never);
+  nodeToken = await signNodeCallbackToken(NODE_ID, env as never, { callbackGeneration: null });
+  otherNodeToken = await signNodeCallbackToken('diagnostic-other-node', env as never, {
+    callbackGeneration: null,
+  });
+  workspaceToken = await signCallbackToken(WORKSPACE_ID, env as never, {
+    callbackGeneration: null,
+  });
 });
 
 describe('same-instance automatic VM incident contract', () => {

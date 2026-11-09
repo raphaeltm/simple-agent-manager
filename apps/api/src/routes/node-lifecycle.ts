@@ -28,7 +28,7 @@ import { reconcileCustomDomainRoutingObservation } from '../services/deployment-
 import { createNodeBackendDNSRecord, updateDNSRecord } from '../services/dns';
 import {
   shouldRefreshCallbackToken,
-  signCallbackToken,
+  signCurrentWorkspaceCallbackToken,
   signNodeCallbackToken,
   signNodeManagementToken,
 } from '../services/jwt';
@@ -241,7 +241,7 @@ nodeLifecycleRoutes.post('/:id/ready', async (c) => {
         try {
           // Intentionally workspace-scoped (not signNodeCallbackToken) — this token
           // is for a specific workspace's VM agent callbacks, not node-level operations.
-          const callbackToken = await signCallbackToken(workspace.id, c.env);
+          const callbackToken = await signCurrentWorkspaceCallbackToken(workspace.id, c.env);
           const gitSource = await resolveWorkspaceGitSourceByProjectId(
             innerDb,
             workspace.projectId
@@ -360,7 +360,7 @@ nodeLifecycleRoutes.post('/:id/origin-ca-certificate', async (c) => {
 
 nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), async (c) => {
   const nodeId = c.req.param('id');
-  await verifyNodeCallbackAuth(c, nodeId);
+  const auth = await verifyNodeCallbackAuth(c, nodeId);
 
   // Extract raw token for refresh check (auth already verified above)
   const rawToken = extractBearerToken(c.req.header('Authorization'));
@@ -587,7 +587,11 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
         action: 'refresh_skipped',
       });
     } else {
-      response.refreshedToken = await signNodeCallbackToken(nodeId, c.env);
+      // Carry the generation this request proved, never a fresher one read now: a retired
+      // runtime that heartbeats after a rotation must not be handed the new runtime's token.
+      response.refreshedToken = await signNodeCallbackToken(nodeId, c.env, {
+        callbackGeneration: auth.callbackGeneration,
+      });
     }
   }
 

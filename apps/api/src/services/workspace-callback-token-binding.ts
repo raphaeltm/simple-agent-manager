@@ -44,6 +44,7 @@ export async function loadWorkspaceCallbackTokenBinding(
             w.status AS status,
             w.node_id AS nodeId,
             n.status AS nodeStatus,
+            w.callback_generation AS callbackGeneration,
             n.user_id AS nodeUserId,
             n.runtime AS nodeRuntime
        FROM workspaces w
@@ -130,7 +131,11 @@ export async function mintWorkspaceCallbackTokenForNodeDelivery(
     const skipReason = deliverySkipReason(binding, input.nodeId);
     if (skipReason || !binding) return skip(skipReason ?? 'workspace_missing');
 
-    const token = await signCallbackToken(input.workspaceId, env);
+    // The binding's generation, not a fresh read: if the runtime is replaced while this
+    // mints, the token is for the old runtime and the re-read below drops it.
+    const token = await signCallbackToken(input.workspaceId, env, {
+      callbackGeneration: binding.callbackGeneration,
+    });
 
     const current = await loadWorkspaceCallbackTokenBinding(env, input.workspaceId);
     if (!current || !sameRenewalBinding(current, binding)) {

@@ -73,7 +73,7 @@ function rejectNonNodeScope(nodeId: string, tokenIdentity: string | null): never
 export async function verifyNodeCallbackAuth(
   c: Context<{ Bindings: Env }>,
   nodeId: string
-): Promise<void> {
+): Promise<CallbackTokenPayload> {
   const token = extractBearerToken(c.req.header('Authorization'));
   let payload: CallbackTokenPayload;
   try {
@@ -93,4 +93,5 @@ export async function verifyNodeCallbackAuth(
   if (payload.workspace !== nodeId) {
     throw errors.unauthorized('Callback token does not match node');
   }
+  return payload;
 }

@@ -1717,6 +1717,11 @@ export const nodes = sqliteTable(
     /** Server-written identity rotated whenever the runtime behind this node row is replaced. */
     runtimeIncarnationId: text('runtime_incarnation_id'),
     /**
+     * Credential generation embedded in this node's callback JWTs. Rotated with
+     * `runtimeIncarnationId` when an Instant runtime is replaced; NULL until first rotated.
+     */
+    callbackGeneration: text('callback_generation'),
+    /**
      * SHA-256 fingerprint of the encrypted provider credential used for this runtime. The
      * fingerprint is pinned before provider I/O so strict deletion cannot follow a mutable
      * credential row into a different provider account.
@@ -1800,6 +1805,12 @@ export const workspaces = sqliteTable(
     runtimeDeletionProof: text('runtime_deletion_proof'),
     /** Rotated for runtime recreation; stale eviction callbacks cannot affect its successor. */
     evictionGeneration: text('eviction_generation'),
+    /**
+     * Credential generation embedded in this workspace's callback JWTs and MCP tokens.
+     * Rotated whenever the same workspace ID is reactivated under a new runtime (VM
+     * restart/rebuild, Instant recovery); NULL until first rotated.
+     */
+    callbackGeneration: text('callback_generation'),
     /** Restart may reserve capacity only after serialized eviction cleanup completes. */
     evictionFinalizedAt: text('eviction_finalized_at'),
     /** VM Stop acknowledged; explicit Stop can retry internal cleanup without stopping again. */
