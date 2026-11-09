@@ -139,7 +139,7 @@ issuing a verdict.
       control test)
 - [x] The orphan sweep does not stop a workspace whose task became terminal less than
       the grace period ago (SQLite integration test)
-- [ ] Staging: a real VM eviction under memory pressure leaves the task non-terminal and
+- [x] Staging: a real VM eviction under memory pressure leaves the task non-terminal and
       the conversation resumes on a new workspace (or the reason it cannot be exercised
       is documented, with fallback evidence)
 - [ ] Prod: after deploy, monitor `agent_restart_failed` / "no running devcontainer
@@ -540,16 +540,16 @@ acceptance are withdrawn. Earlier9c restore is supporting evidence only:
 350 changed denied host admission and degraded-restore eviction ownership.
 Final candidate MUST prove a real restore, not rely on unchanged-code rationale.
 
-- [ ] Recovery watchdog must settle a terminal original prompt while its process
+- [x] Recovery watchdog must settle a terminal original prompt while its process
       remains alive, preserving exact attempt/epoch and eviction ownership.
-- [ ] Discriminating regression through actual cancel grace with blocked original
+- [x] Discriminating regression through actual cancel grace with blocked original
       process; fenced commit/rollback/expiry, unfenced and stale/new-attempt controls.
-- [ ] Correct restore evidence wording; clean mixed-timestamp test rows.
-- [ ] Re-run affected suites and independent Go/source-completion reviews.
-- [ ] Final runtime staging on ONE VM: two-host real eviction, then agent reads
-      pre-eviction sentinel after wake. Retain source until recovery completes.
-      If forced new allocation hits412 for ~10min, plain fresh-session sleep/wake
-      on same node is allowed restore fallback; disclose exact path.
+- [x] Correct restore evidence wording; clean mixed-timestamp test rows.
+- [x] Re-run affected suites and independent Go/source-completion reviews.
+- [x] Final runtime staging: first prove same-node real sleep/wake with an agent
+      shell reading the sentinel; then two-host eviction and replacement restore.
+      Parent correction permits brief two-VM overlap (~20min window): automatic
+      eviction recovery excludes the source. Retain source until recovery finishes.
 - [ ] Cancel fixtures first, strict cleanup, immediate AND ~5min-later zero-VM checks.
 - [ ] Renew exact-head coordinator approval, fresh CI and trusted CR request/wait,
       resolve feedback, merge and monitor production.
@@ -562,5 +562,92 @@ under race with active-watchdog and stale-epoch controls4.010s. Full ACP race
 PASS73.766s. Independent identity-guard and eviction-fence removal overlays each
 fail the intended behavioral assertion. Workers33/33 PASS38.79s after fixture
 row cleanup. Independent Go-specialist and test/doc/A–F source-completion reviews
-PASS, no pending local reviewer. Full broader Go suite is running; live restore,
-final cleanup, exact-head approval and release gates remain pending.
+PASS, no pending local reviewer. Full broader Go suite PASS (server74.185s); CI integration passed its single
+rerun after an npm fixture-install failure. Live restore evidence and cleanup
+are recorded below; renewed exact-head approval and release gates remain pending.
+
+## Final97 live verification — 2026-11-09 21:20 UTC
+
+This section supersedes the historical run-specific checklists and restore-gap
+acceptance above. Those earlier approvals are withdrawn. No implementation or
+restore gap is being waived for the current candidate. Runtime release is
+`97a5a2a21f870a4d99d8b9b1492c2a35b457ff23` (build20:26:44Z).
+
+- Deploy Staging42694066530 passed in full, including smoke. Cloudflare required
+  version, fresh-node D1 heartbeat and live system-info match97. Authenticated
+  Playwright dashboard, project chat and settings each returned200.
+- Same-node restore control: task01M71160N7JMCQXQ410N84DYTE, chat
+  4560e472-70ca-4197-8fff-67efa4acfe7e, source01M7116B8F2TAJ3PEMFMFNVP67.
+  Agent wrote `EVICTION-PRESERVED-20261109`; explicit sleep200 captured snapshot
+  01M711H548Q9YEH2KKE3TZBK0B available/none with home+WIP. Wake restored workspace
+  01M711KN0ATKJPE2QDDEBT7XJ9 on the same node. At20:59:02.863Z the agent's Bash
+  `pwd; cat eviction-proof.txt` returned the exact marker. An earlier cached Read
+  result was deliberately excluded as insufficient proof.
+- Final eviction fixture: task01M712A1DJEBZZER1P8CX80BN7, chat
+  e5066887-4a4a-41a4-ab3e-3d3800a65c05, workspace01M712A7VTQE7QK3FGWK5CR82R
+  on the same source. Primary01M712B5Q0JJ1AGPG7PMMYTTKB and secondary
+  01M712D803SGFA36C1VVCJ3SFD each had a real foreground Python tool/process;
+  process inventory immediately before pressure confirmed both. A bounded
+  allocator triggered resource eviction; no terminal reconnect changed runtime
+  identity during eviction. Both prompt disconnects and process exits parked
+  at21:13:51Z. Final snapshot finished21:14:21.398Z, and the completion callback
+  explicitly left task status to eviction delivery21:14:22.062Z.
+- Snapshot01M712CHBMVJV6YRKP6NATAGFF is available/none, home+WIP present,
+  interruptedWork=1, restore_status/recovery_status=restored. The complete final
+  task audit has **no failed transition**: in_progress→queued21:14:26.011Z,
+  delegated21:17:24.537Z, in_progress21:18:35.933Z.
+- Automatic recovery allocated replacement01M712KDE5WMBG1R05QPHN5X0S. Its live
+  version and D1 heartbeat21:18:44.157Z match97. Source was retained throughout
+  recovery. Restored workspace01M712RC6EGT37ZVBVRTC5Q3G6 / agent
+  01M712SFYHCS4BSKXSBWN4RNAX resumed; Bash toolu_0138nPUQM7C7KjaXuzFhCHbD
+  ran `cat` and read the exact preserved sentinel21:18:47.698Z, then replied
+  with it21:18:48.921Z. This is actual automatic replacement restore proof.
+- No resourceRequirements or sizing override was supplied. Default platform
+  placement selected cx33. Brief source/replacement overlap was explicitly
+  authorized by the parent after confirming recovery excludes the source node.
+- Fixture corrections: the restored control agent refused long waits because its
+  initial task prohibited them, so eviction used a separate initial-wait task.
+  A queued follow-up woke the cancelled control, temporarily holding capacity;
+  one separate pre-pressure placement attempt01M7122Z7892VZZ7FDGQFSGF66 failed
+  admission and was stopped. It is not part of the final eviction audit. The
+  control chat was explicitly stopped to block further delivery. This is the
+  already-open cancellation/late-allocation follow-up01M70XES9AH7HG8VQMD3DT7W0F.
+- Cleanup: all fixture conversations stopped; final task cancelled200 before
+  teardown. Both source/replacement nodes and temporary profile deleted200
+  through strict owner routes. D1 zero active VMs21:20:26.526Z. Delayed check
+  remains pending until at least21:28Z; no provider GET404 is claimed.
+
+Current release gates: delayed zero-VM check and coordinator staging release;
+final evidence/archive commit; renewed approval naming the exact full head;
+fresh label-free CI; one trusted incremental CodeRabbit request and wait with
+all returned feedback resolved; merge; successful production deploy and basic
+read-only health/version/error monitoring. These are release sequencing gates,
+not deferred implementation. Original selection-time fence/reason residual
+01M6YR5TX0C7X1S5FS7HSG22DX and missing-terminal-anchor retention follow-up
+01M705B45FNNTZAFM9QHW87J3Y remain explicitly open.
+
+Cleanup correction21:28UTC: initialzero was point-in-time. Delayed audit caught
+control retry VM01M712Y53HVYP3XMA3VPVPZN96(created21:20:27.761), strictDELETE200
+21:27. Control chat remains stopped/terminated, but durable delivery
+01M711R5EJBZH4JWJ1F4ZQJVMH remains retry_wait until21:59:42.930TTL. Public
+mailbox cancellation only accepts queued and refuses retry_wait. A fixture-only
+snapshot expiry attempt via CF_TOKEN was denied(read-only), so nothing changed.
+Parent/coordinator notified for operational cleanup assistance; D1 monitoring
+continues. Do not claim cleanup complete until retry is terminal and delayed
+zero verified. This does not invalidate the final eviction/restore proof.
+Independent final A–F archival reconciliation PASS: both actual Bash reads, both
+foreground processes and both parked-host paths independently parsed. Archive
+ready only after cleanup and staging release; approval/CI/CR/merge/prod pending.
+
+Parent disposition21:29UTC (verified peer event e2ae3f03-adfe-49d4-a203-3e90ec3d350d):
+the known control retry cleanup tail does not block the documentation/archive
+commit or exact-head approval request. Archive the completed implementation and
+live proof now; keep cleanup visible in the PR. **Do not merge** before the
+retry TTL21:59:42.930Z plus approximately5min and a finalzero check after22:05.
+Coordinator independently confirms staging otherwise idle and the same plan.
+Watch D1 every3–5min and strictly delete any fixture late allocation. Canonical
+cleanup follow-up is OPEN idea01M70XEMZ7FWZ9HB9NDKG2KRDW (01M70XES9 is duplicate);
+its note now records REST cancellation refusing retry_wait. D1zero reverified
+21:28:59.912Z after late deletion, but finalzero/terminaldelivery remain pending.
+This archived implementation retains explicit release sequencing gates above;
+archival does not claim merged, deployed, or final cleanup complete.
