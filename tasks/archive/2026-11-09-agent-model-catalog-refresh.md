@@ -20,7 +20,7 @@ Refresh hardcoded model choices from primary sources, preserving actual agent/ad
 - [x] Focused tests cover added IDs, retired exclusions, source names, routing capability and consumer contracts.
 - [x] Shared lint/typecheck/tests/build; API/web catalog consumer tests.
 - [x] Independent specialist review (completion, test, constitution, docs); resolve findings before archive.
-- [ ] Staging deployment and authenticated selector/API verification.
+- [x] Staging deployment and authenticated selector/API verification.
 - [ ] Open PR, CI green, request CodeRabbit and wait, resolve findings, merge, monitor production smoke.
 
 Release completion is recorded in SAM and the PR after production deploy succeeds.
@@ -29,3 +29,5 @@ Release completion is recorded in SAM and the PR after production deploy succeed
 Shared 51 files / 962 tests passed; shared lint/typecheck/build passed. API catalog service/route: 11 tests passed. Web ModelSelect/profile-picker: 19 tests passed. Main task-only push rejected by required-check branch protection; task record included on output branch rather than bypassing protection.
 
 Independent reviews: task-completion-validator PASS (LOW stale progress evidence addressed); test-engineer PASS (64 focused tests independently rerun); constitution-validator PASS; doc-sync-validator PASS. OpenCode snapshot comparison exactly matches 83 + 32 active ID/name pairs and upstream group names.
+
+Staging: [Deploy Staging 42598925273](https://github.com/raphaeltm/simple-agent-manager/actions/runs/42598925273) succeeded for bb807eccca389c3a601f4b903a60a0b30bdb5339. Authenticated Playwright asserted all seven catalog endpoints, navigated dashboard/projects/settings, and selected Terra/Argon/deprecated Medium/OpenCode Crouton at 1280x800 and 375x667. OpenCode API failure was simulated in the browser to exercise the shipped static fallback. All checks passed, zero page errors/horizontal overflow; all eight screenshots reviewed (readable labels, expected wrapping, no clipping). Browser closed, no profiles saved or resources provisioned. Staging released to next coordinated task.
