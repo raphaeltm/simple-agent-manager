@@ -22,28 +22,28 @@ Raphaël ran a real installer install (sam2.party, 2026-11-08) and reported:
 ## Design
 
 - Installer: add those three OAuth scopes; add Email Sending Write (account) and Zone Settings Write + Email Routing Rules Write (zone) to the deployment and runtime tokens (runtime also Email Sending Read). The engine prepares email sending for installations too; failure there never fails an install. Upgrades with old tokens skip email (the script probes permissions).
-- API: `emailOTP` plugin when the send binding exists. Codes go out from `sign-in@agents.<BASE_DOMAIN>`. New accounts by email only for the first user (installer owner email, or no users yet); existing users can always use email. Per-IP and per-email send limits. Setup can complete with email sign-in alone. Setup verify returns the owner email, email sign-in availability and the agent email plan; setup complete can turn agent email on with the plan's consent token.
+- API: `emailOTP` plugin when the send binding exists. Codes go out from `sign-in@agents.<BASE_DOMAIN>`. New accounts by email only for the installer owner email (after security review, deployments without an owner email keep OAuth for the first sign-in); existing users can always use email. Codes are sent after the response (waitUntil). Per-IP and per-email send limits. Setup can complete with email sign-in alone. Setup verify returns the owner email, email sign-in availability and the agent email plan; setup complete can turn agent email on with the plan's consent token.
 - Web: immersive setup wizard (welcome + token, sign-in, agent email, done), own scroll container, token auto-filled from the installer link's URL fragment. Landing gets email-code sign-in.
 - Installer maintenance: celebratory ready panel; setup handoff puts the instruction next to the token and button; the button carries the token in the fragment.
 
 ## Implementation checklist
 
-- [ ] API email sign-in service + plugin + rate limits
-- [ ] API login-providers `email` flag
-- [ ] API setup verify/complete changes + validation
-- [ ] Web auth client emailOtp + Landing email sign-in
-- [ ] Web Setup wizard rebuild + scroll fix
-- [ ] Installer scopes + token permission groups + tests
-- [ ] Engine prepares agent email for installations + tests
-- [ ] Installer maintenance ready + handoff redesign + browser audit
-- [ ] Docs (self-hosting, installer, auth)
-- [ ] Playwright audits 375/1280 for Setup, Landing, maintenance pages
+- [x] API email sign-in service + plugin + rate limits
+- [x] API login-providers `email` flag
+- [x] API setup verify/complete changes + validation
+- [x] Web auth client emailOtp + Landing email sign-in
+- [x] Web Setup wizard rebuild + scroll fix
+- [x] Installer scopes + token permission groups + tests
+- [x] Engine prepares agent email for installations + tests
+- [x] Installer maintenance ready + handoff redesign + browser audit
+- [x] Docs (self-hosting, installer, auth)
+- [x] Playwright audits 375/1280 for Setup, Landing, maintenance pages
 - [ ] Staging deploy + verify; fresh BYOC install verify email sign-in end to end
 
 ## Acceptance criteria
 
 - [ ] A fresh install can finish setup without any OAuth app and the owner signs in with an emailed code.
-- [ ] Non-owner emails cannot create accounts before the owner exists; unknown emails get no code afterwards.
-- [ ] Setup page scrolls on desktop and mobile.
-- [ ] Agent email turns on during setup when the owner keeps it on, with DNS changes previewed.
-- [ ] Existing installs and CI deploys keep working (email step skipped without permissions).
+- [x] Non-owner emails cannot create accounts before the owner exists; unknown emails get no code afterwards.
+- [x] Setup page scrolls on desktop and mobile.
+- [x] Agent email turns on during setup when the owner keeps it on, with DNS changes previewed.
+- [x] Existing installs and CI deploys keep working (email step skipped without permissions).
