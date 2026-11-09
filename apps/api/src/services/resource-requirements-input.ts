@@ -238,6 +238,12 @@ export function createPersistedTaskResourcePlanJson(input: {
   return JSON.stringify(plan);
 }
 
+/**
+ * Recover authored resource intent from the versioned plan or older task rows.
+ * Compatibility provenance restores a legacy bundle separately from modern
+ * fields, so a later task override can supersede it. The original reservation
+ * is retained for callers performing a no-op retry or runtime recovery.
+ */
 export function readPersistedTaskResourcePlan(
   input: PersistedTaskResourcePlanReadInput,
   options: PersistedTaskResourcePlanReadOptions = {}
@@ -547,6 +553,11 @@ function normalizeReservationFieldCompatibility(
   };
 }
 
+/**
+ * Reconstruct only explicitly authored fields from historical provenance.
+ * Legacy adapter fields are recovered as a bundle by the plan reader; treating
+ * those translated values as explicit would prevent modern sizing overrides.
+ */
 function layersFromReservationProvenance(
   reservation: ResolvedResourceReservation
 ): ResourceResolutionInput {
