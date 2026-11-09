@@ -29,6 +29,7 @@ import {
   RateLimitError,
 } from '../middleware/rate-limit';
 import { agentEmailDomain } from './agent-email/address';
+import { listSendingSubdomains } from './agent-email/cloudflare-email-api';
 import { agentEmailSenderFor } from './agent-email/provider';
 import { getAgentEmailLimits } from './agent-email/settings';
 import { hasAgentEmailBinding } from './agent-email/setup-state';
@@ -70,6 +71,34 @@ export function emailSignUpOffered(
   return emailSignInAvailable(env) && Boolean(env.BOOTSTRAP_OWNER_EMAIL?.trim());
 }
 
+/**
+ * Can first-run setup rely on email sign-in right now?
+ *
+ * - `unavailable`: no email sign-up here (no send binding, or no installer owner email).
+ * - `verifying`: Cloudflare has not finished verifying the sending domain, so a code would not
+ *   arrive. Setup must not close on email alone yet: with no OAuth provider it would lock the
+ *   owner out.
+ * - `ready`: the sending domain is enabled, or its state could not be read. An unreadable state
+ *   (older runtime tokens lack Email Sending Read) keeps the previous behaviour rather than
+ *   blocking setup on a permission the deploy may not have granted.
+ */
+export type EmailSignInReadiness = 'unavailable' | 'verifying' | 'ready';
+
+export async function emailSignInReadiness(env: Env): Promise<EmailSignInReadiness> {
+  if (!emailSignUpOffered(env)) return 'unavailable';
+  const domain = agentEmailDomain(env.BASE_DOMAIN).toLowerCase();
+  try {
+    const subdomains = await listSendingSubdomains(env);
+    const sending = subdomains.find((entry) => entry.name.toLowerCase() === domain);
+    return sending?.enabled === true ? 'ready' : 'verifying';
+  } catch (error) {
+    log.warn('email_sign_in.sending_state_unreadable', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return 'ready';
+  }
+}
+
 /** May a code create a new account for this address? Existing accounts are handled by BetterAuth. */
 export async function emailSignUpAllowed(env: Env, email: string): Promise<boolean> {
   const owner = bootstrapOwnerEmail(env);
@@ -99,12 +128,19 @@ async function sha256Hex(value: string): Promise<string> {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-/** Counts this send against the address's hourly budget; false once it is spent. */
-async function withinEmailBudget(env: Env, email: string): Promise<boolean> {
+/**
+ * Counts one code request against the address's hourly budget; false once it is spent.
+ *
+ * Called before BetterAuth sees the request (`routes/auth.ts`): each request makes BetterAuth
+ * store a fresh code and invalidate the previous one, so a request past the budget must not reach
+ * it, or it would silently replace the last code the owner was emailed. Every address is counted
+ * alike, so the budget reveals nothing about which addresses have accounts.
+ */
+export async function withinEmailBudget(env: Env, email: string): Promise<boolean> {
   const { signInCodesPerEmailPerHour } = await getAgentEmailLimits(env);
   const key = createRateLimitKey(
     'email-sign-in-code',
-    await sha256Hex(email),
+    await sha256Hex(email.trim().toLowerCase()),
     getCurrentWindowStart(DEFAULT_WINDOW_SECONDS)
   );
   const result = await checkRateLimit(
@@ -167,10 +203,6 @@ export async function deliverSignInCode(env: Env, email: string, code: string): 
     const known = await accountExists(env, email);
     if (!known && !(await emailSignUpAllowed(env, email))) {
       log.info('email_sign_in.code_not_sent', { reason: 'no_account' });
-      return;
-    }
-    if (!(await withinEmailBudget(env, email))) {
-      log.warn('email_sign_in.code_not_sent', { reason: 'email_rate_limited' });
       return;
     }
     const message = signInCodeEmail(env.BASE_DOMAIN, code);

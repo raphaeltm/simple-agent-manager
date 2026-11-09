@@ -91,3 +91,35 @@ it('does not send another code on arrival when one is already on its way', async
   expect(screen.getByPlaceholderText('123456')).toBeInTheDocument();
   expect(auth.send).not.toHaveBeenCalled();
 });
+
+it('sends the owner a code on arrival from setup even if this tab had a code for another address', async () => {
+  const first = render(<EmailCodeSignIn primary onSignedIn={vi.fn()} />);
+  await requestCode('someone-else@example.com');
+  first.unmount();
+  auth.send.mockClear();
+
+  render(
+    <EmailCodeSignIn initialEmail="owner@example.com" sendOnMount primary onSignedIn={vi.fn()} />
+  );
+  await waitFor(() => expect(auth.send).toHaveBeenCalledWith('owner@example.com'));
+  expect(screen.getByText('owner@example.com')).toBeInTheDocument();
+});
+
+it('keeps the address fixed while a new code is being sent', async () => {
+  render(<EmailCodeSignIn primary onSignedIn={vi.fn()} />);
+  await requestCode('owner@example.com');
+  let finishResend: () => void = () => {};
+  auth.send.mockImplementation(
+    () =>
+      new Promise<void>((resolve) => {
+        finishResend = resolve;
+      })
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Send a new code' }));
+  // Mid-resend: switching address would ask for a code that was never requested.
+  expect(screen.getByRole('button', { name: 'Use a different email' })).toBeDisabled();
+  finishResend();
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'Use a different email' })).toBeEnabled()
+  );
+});

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
 
 import { useAuth } from '../components/AuthProvider';
+import { EmailCodeSignIn } from '../components/EmailCodeSignIn';
 import { useLoginProviders } from '../hooks/useLoginProviders';
 import { useToast } from '../hooks/useToast';
 import { approveDeviceCode } from '../lib/api';
@@ -28,8 +29,9 @@ export function DeviceAuth() {
     setCode(initialCode);
   }, [initialCode]);
 
+  const returnPath = `/device${code ? `?code=${encodeURIComponent(normalizeCode(code))}` : ''}`;
+
   const handleLogin = async (provider: 'github' | 'google' | 'gitlab') => {
-    const returnPath = `/device${code ? `?code=${encodeURIComponent(normalizeCode(code))}` : ''}`;
     await authClient.signIn.social({
       provider,
       callbackURL: window.location.origin + returnPath,
@@ -49,6 +51,8 @@ export function DeviceAuth() {
         await handleLogin('google');
       } else if (providers.gitlab) {
         await handleLogin('gitlab');
+      } else if (providers.email) {
+        setError('Sign in with your email below, then authorize.');
       } else {
         setError('No login provider is configured.');
       }
@@ -163,6 +167,14 @@ export function DeviceAuth() {
                     </span>
                     Log in with GitLab
                   </Button>
+                )}
+                {providers.email && (
+                  // A code sign-in sets the session cookie outside BetterAuth's session store, so
+                  // reload this page (code kept in the URL) for the provider to read it.
+                  <EmailCodeSignIn
+                    primary={!providers.github && !providers.google && !providers.gitlab}
+                    onSignedIn={() => window.location.assign(returnPath)}
+                  />
                 )}
               </div>
             )}

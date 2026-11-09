@@ -61,6 +61,7 @@ export function Setup() {
   const [provider, setProvider] = useState<SetupProviderValues>(EMPTY_PROVIDER_VALUES);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [emailVerifying, setEmailVerifying] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -100,6 +101,10 @@ export function Setup() {
     try {
       const trimmed = token.trim();
       const response = await verifySetupToken(trimmed);
+      // Cloudflare verifies the sending domain a few minutes after install. Closing setup on
+      // email alone before then would leave no way in, so the owner waits and tries again.
+      setEmailVerifying(response.signIn.email && !response.signIn.emailReady);
+      if (response.signIn.email && !response.signIn.emailReady) return;
       if (response.signIn.email) {
         await completeSetup(trimmed, providerConfig(EMPTY_PROVIDER_VALUES));
         navigate('/', {
@@ -159,6 +164,12 @@ export function Setup() {
   return (
     <SetupShell footer={<span className="break-all">{instanceDomain()}</span>}>
       {error && step !== 'done' && <SetupNotice tone="error">{error}</SetupNotice>}
+      {emailVerifying && step === 'welcome' && (
+        <SetupNotice tone="warning">
+          Cloudflare is still verifying the address SAM emails sign-in codes from. This usually
+          takes a few minutes after install. Try again shortly.
+        </SetupNotice>
+      )}
       {step === 'welcome' && (
         <WelcomeStep
           domain={instanceDomain()}
@@ -177,6 +188,7 @@ export function Setup() {
       {step === 'sign-in' && (
         <SignInStep
           providerReady={providerValuesComplete(provider)}
+          existingProvider={existingLoginProvider(verified)}
           providerPartial={providerValuesPartial(provider)}
           busy={busy}
           providerFields={
@@ -194,6 +206,19 @@ export function Setup() {
       )}
     </SetupShell>
   );
+}
+
+/**
+ * A sign-in provider the deployment already has (for example GitHub OAuth set by a CI deploy).
+ * Setup can finish with it as is; the owner should not have to re-enter its credentials.
+ */
+function existingLoginProvider(verified: SetupVerifyResponse | null): string | null {
+  const integrations = verified?.status.integrations;
+  if (!integrations) return null;
+  if (integrations.githubOAuth?.configured) return 'GitHub';
+  if (integrations.googleOAuth?.configured) return 'Google';
+  if (integrations.gitlabOAuth?.configured) return 'GitLab';
+  return null;
 }
 
 function errorMessage(err: unknown, fallback: string): string {

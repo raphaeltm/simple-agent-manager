@@ -13,6 +13,7 @@ import {
   isClosedEmailOtpPath,
   rateLimitSignInCodes,
   SEND_CODE_PATH,
+  withinEmailBudget,
 } from '../services/email-sign-in';
 import { readAuthSession } from '../services/read-auth-session';
 import { assertUserNotSuspended } from '../services/signup-approval';
@@ -59,6 +60,20 @@ authRoutes.get('/get-session', (c) => readAuthSession(c.env, c.req.raw));
 // Email sign-in codes cost an email each, and each redemption is a guess: limit both per IP
 // before BetterAuth sees them, and guesses also per address.
 authRoutes.post(SEND_CODE_PATH, rateLimitSignInCodes('email-sign-in-ip'));
+authRoutes.post(SEND_CODE_PATH, async (c, next) => {
+  const body: unknown = await c.req.raw
+    .clone()
+    .json()
+    .catch(() => null);
+  const email = maybeJsonRecord(body)?.email;
+  // Past the address's hourly budget, answer as usual without letting BetterAuth mint a new
+  // code: that would invalidate the last one the owner was actually emailed.
+  if (typeof email === 'string' && !(await withinEmailBudget(c.env, email))) {
+    log.warn('email_sign_in.code_not_sent', { reason: 'email_rate_limited' });
+    return c.json({ success: true });
+  }
+  return next();
+});
 authRoutes.post(EMAIL_CODE_SIGN_IN_PATH, rateLimitSignInCodes('email-sign-in-redeem-ip'));
 authRoutes.post(EMAIL_CODE_SIGN_IN_PATH, async (c, next) => {
   const body: unknown = await c.req.raw
@@ -72,7 +87,13 @@ authRoutes.post(EMAIL_CODE_SIGN_IN_PATH, async (c, next) => {
   if (typeof email !== 'string' || !(await emailCodeRedemptionAllowed(c.env, email))) {
     return c.json({ code: 'INVALID_OTP', message: 'Invalid OTP' }, 400);
   }
-  return next();
+  await next();
+  // BetterAuth answers 403 TOO_MANY_ATTEMPTS once a code has taken its guesses, which only an
+  // eligible address can reach. Answer exactly like a wrong code so the lockout cannot be used
+  // to tell which addresses have accounts; the lockout itself still holds.
+  if (c.res.status === 403) {
+    c.res = c.json({ code: 'INVALID_OTP', message: 'Invalid OTP' }, 400);
+  }
 });
 
 authRoutes.on(['GET', 'POST'], '/*', async (c) => {

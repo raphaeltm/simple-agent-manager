@@ -129,6 +129,8 @@ export function WelcomeStep({
 
 interface SignInStepProps {
   providerReady: boolean;
+  /** A provider the deployment already has; setup can finish with it unchanged. */
+  existingProvider: string | null;
   /** Provider fields were started but not finished: finishing setup would fail validation. */
   providerPartial: boolean;
   providerFields: ReactNode;
@@ -139,6 +141,7 @@ interface SignInStepProps {
 /** Only for instances that cannot email sign-in codes: one OAuth provider is the way in. */
 export function SignInStep({
   providerReady,
+  existingProvider,
   providerPartial,
   providerFields,
   busy,
@@ -148,7 +151,11 @@ export function SignInStep({
     <div>
       <StepHeading
         title="How you'll sign in"
-        subtitle="Connect one sign-in provider. You can add more later."
+        subtitle={
+          existingProvider
+            ? `${existingProvider} sign-in is already set up. Finish, or add another provider.`
+            : 'Connect one sign-in provider. You can add more later.'
+        }
       />
       <div className="mb-6">{providerFields}</div>
       <Button
@@ -156,7 +163,7 @@ export function SignInStep({
         variant="accent"
         size="lg"
         className="w-full"
-        disabled={!providerReady || providerPartial}
+        disabled={(!providerReady && !existingProvider) || providerPartial}
         loading={busy}
         onClick={onContinue}
       >

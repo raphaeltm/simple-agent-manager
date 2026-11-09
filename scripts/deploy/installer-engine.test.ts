@@ -319,6 +319,10 @@ describe('installation engine', () => {
   });
   it('finishes an installation with email off when preparing Email Sending fails', async () => {
     const f = fixture('scripts/deploy/configure-agent-email.ts');
+    // A retry reusing a checkout whose earlier run prepared email: the stale marker must go, or
+    // sync would deploy the email binding for a domain this run could not prepare.
+    const marker = join(f.root, '.wrangler', 'agent-email-domain');
+    writeFileSync(marker, 'agents.example.com');
     const events: EngineEvent[] = [];
     let state: EngineCheckpoint | undefined;
     await runInstallerEngine(config, {
@@ -339,6 +343,7 @@ describe('installation engine', () => {
       })
     );
     expect(state?.status).toBe('completed');
+    expect(existsSync(marker)).toBe(false);
     // Control: the same failure still stops a CI deploy, which has always required it.
     await expect(
       runInstallerEngine(

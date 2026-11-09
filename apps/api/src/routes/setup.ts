@@ -7,7 +7,7 @@ import { expectJsonRecord, maybeJsonRecord } from '../lib/runtime-validation';
 import { AppError, errors } from '../middleware/error';
 import { parseOptionalBody } from '../schemas/_validator';
 import { bootstrapOwnerEmail } from '../services/bootstrap-owner';
-import { emailSignUpOffered } from '../services/email-sign-in';
+import { emailSignInReadiness } from '../services/email-sign-in';
 import {
   completeSetupWithConfig,
   getPlatformConfigStatus,
@@ -100,8 +100,11 @@ async function parseSetupBody(c: SetupContext): Promise<{
 
 /** What the first-run screens need beyond the integration status. Token-gated by the callers. */
 async function signInSummary(env: Env) {
+  const readiness = await emailSignInReadiness(env);
   return {
-    email: emailSignUpOffered(env),
+    email: readiness !== 'unavailable',
+    /** False while Cloudflare is still verifying the sending domain: ask the owner to wait. */
+    emailReady: readiness === 'ready',
     ownerEmail: bootstrapOwnerEmail(env) || null,
   };
 }
@@ -159,7 +162,7 @@ setupRoutes.post('/complete', async (c) => {
 
   const preview = await previewPlatformIntegrationConfig(c.env, config);
   const completion = validateSetupCanComplete(preview, {
-    emailSignIn: emailSignUpOffered(c.env),
+    emailSignIn: (await emailSignInReadiness(c.env)) === 'ready',
   });
   if (!completion.ok) {
     throw errors.badRequest('Setup cannot be completed', { errors: completion.errors });

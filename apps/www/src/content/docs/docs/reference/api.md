@@ -250,13 +250,16 @@ the login page offers.
 
 ### First-run setup (`/api/setup/*`)
 
-Token-gated by `SETUP_TOKEN`; every route returns `410 SETUP_CLOSED` once setup is complete.
+The `POST` routes require `SETUP_TOKEN`; `GET /api/setup/status` is public. Every route returns
+`410 SETUP_CLOSED` once setup is complete.
 
-- `GET /api/setup/status` — `{ completed, open, forced, tokenConfigured }`.
+- `GET /api/setup/status` — public. `{ completed, open, forced, tokenConfigured }`.
 - `POST /api/setup/verify` — body `{ token }`. Returns the integration `status` and
-  `signIn: { email, ownerEmail }`.
+  `signIn: { email, emailReady, ownerEmail }`; `emailReady` is `false` while Cloudflare is still
+  verifying the sending domain.
 - `POST /api/setup/complete` — body `{ token, config? }`. Needs a sign-in method: email sign-up
-  (installer owner set and email prepared), or an OAuth provider in `config`. Setup never turns
+  (installer owner set, email prepared and its sending domain verified), or an OAuth provider in
+  `config` or already configured. Setup never turns
   agent email on; a superadmin does that from **Admin → Integrations**.
 
 ## Workspaces

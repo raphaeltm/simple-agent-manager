@@ -64,7 +64,13 @@ export function EmailCodeSignIn({
   primary,
   onSignedIn,
 }: EmailCodeSignInProps) {
-  const [pendingEmail] = useState(readPendingCodeEmail);
+  // Arriving from setup, the owner's address wins over a code this tab requested for some other
+  // address earlier: restoring that one would skip sending the owner's code.
+  const [pendingEmail] = useState(() => {
+    const pending = readPendingCodeEmail();
+    if (!pending || !sendOnMount) return pending;
+    return pending === initialEmail.trim().toLowerCase() ? pending : null;
+  });
   const [email, setEmail] = useState(pendingEmail ?? initialEmail);
   const [code, setCode] = useState('');
   const [stage, setStage] = useState<'email' | 'code'>(pendingEmail ? 'code' : 'email');
@@ -169,6 +175,7 @@ export function EmailCodeSignIn({
         <div className="flex justify-between gap-2 text-xs">
           <button
             type="button"
+            disabled={busy}
             onClick={() => {
               writePendingCodeEmail(null);
               setStage('email');

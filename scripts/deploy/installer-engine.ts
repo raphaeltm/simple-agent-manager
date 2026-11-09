@@ -1,8 +1,9 @@
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 import * as TOML from '@iarna/toml';
 
+import { AGENT_EMAIL_MARKER_FILE } from './configure-agent-email.js';
 import { CLI_OUTPUTS, openEngineBuildCache, VM_AGENT_OUTPUTS } from './installer-engine-cache.js';
 import {
   commandLabel,
@@ -150,6 +151,10 @@ export async function runInstallerEngine(
       await pnpm('exec', 'tsx', 'scripts/deploy/configure-agent-email.ts');
     } catch (error) {
       if (!(error instanceof EngineCommandFailure)) throw error;
+      // A retry can reuse a checkout whose earlier run prepared email. Leaving that marker would
+      // make sync deploy the AGENT_EMAIL binding, so setup would offer email-only sign-in for a
+      // domain this run could not prepare.
+      rmSync(join(root, '.wrangler', AGENT_EMAIL_MARKER_FILE), { force: true });
       // Logged as its own optional step so the install log shows why email is off.
       // prepareInstallationEmail never runs for legacy-ci, so the tail goes to the owner only.
       options.emit({

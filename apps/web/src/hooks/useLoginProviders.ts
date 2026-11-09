@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 
 import { fetchLoginProviders } from '../lib/api/setup';
 
@@ -9,36 +9,29 @@ export interface LoginProviders {
   email: boolean;
 }
 
+/** Shown until the deployment answers: GitHub stays visible, nothing that might error on use. */
+const DEFAULT_LOGIN_PROVIDERS: LoginProviders = {
+  github: true,
+  google: false,
+  gitlab: false,
+  email: false,
+};
+
 /**
  * Which login providers are configured, for gating login buttons.
  *
- * Defaults show GitHub (the primary path — never hidden by a transient fetch
- * failure) and hide Google, GitLab and email until we confirm they are
- * configured, so we never render sign-in options that would error on use.
+ * Until the deployment answers, GitHub shows and Google, GitLab and email stay hidden, so the
+ * page never offers a sign-in option that would error on use. A failed lookup is retried, and
+ * again when the browser reconnects or the tab regains focus: on an email-only install the
+ * defaults hide the only working way in, so one transient failure must not strand the page.
  */
 export function useLoginProviders(): LoginProviders {
-  const [providers, setProviders] = useState<LoginProviders>({
-    github: true,
-    google: false,
-    gitlab: false,
-    email: false,
+  const { data } = useQuery({
+    queryKey: ['login-providers'],
+    queryFn: fetchLoginProviders,
+    retry: 3,
+    staleTime: 5 * 60_000,
   });
-
-  useEffect(() => {
-    let active = true;
-    fetchLoginProviders()
-      .then((p) => {
-        if (active) {
-          setProviders({ github: p.github, google: p.google, gitlab: p.gitlab, email: p.email });
-        }
-      })
-      .catch(() => {
-        /* keep defaults on failure — GitHub visible, other providers hidden */
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  return providers;
+  // The query's data and the default are both stable references, safe in effect deps.
+  return data ?? DEFAULT_LOGIN_PROVIDERS;
 }

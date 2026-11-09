@@ -20,6 +20,9 @@ const PLATFORM_STATUS = {
 interface MockOptions {
   completed?: boolean;
   emailSignIn?: boolean;
+  /** Answers for successive /verify calls: is the sending domain verified yet? */
+  emailReady?: boolean[];
+  existingGitHubOAuth?: boolean;
   ownerEmail?: string | null;
   verifyFails?: boolean;
   oauthProviders?: boolean;
@@ -37,6 +40,7 @@ function json(route: Route, status: number, body: unknown) {
 }
 
 async function setupMocks(page: Page, options: MockOptions = {}): Promise<Captured> {
+  let verifyCalls = 0;
   const captured: Captured = { sessionChecks: 0, complete: [], sendCode: [], signIn: [] };
   await page.routeWebSocket('**/api/notifications/ws', () => undefined);
   await page.route('**/api/**', async (route) => {
@@ -73,8 +77,16 @@ async function setupMocks(page: Page, options: MockOptions = {}): Promise<Captur
       return json(route, 200, {
         ok: true,
         status: PLATFORM_STATUS,
+        status: options.existingGitHubOAuth
+          ? {
+              ...PLATFORM_STATUS,
+              integrations: { githubOAuth: { configured: true, source: 'environment' } },
+            }
+          : PLATFORM_STATUS,
         signIn: {
           email: options.emailSignIn ?? true,
+          emailReady:
+            options.emailReady?.[Math.min(verifyCalls++, options.emailReady.length - 1)] ?? true,
           ownerEmail: options.ownerEmail === undefined ? 'owner@sam2.party' : options.ownerEmail,
         },
       });
@@ -203,6 +215,38 @@ test.describe('First-run setup wizard', () => {
     expect(captured.sendCode).toEqual([]);
     await assertNoOverflow(page);
     await screenshot(page, 'setup-done', { scopeToProject: true });
+  });
+
+  test('waits for Cloudflare to verify the sending domain, then finishes', async ({ page }) => {
+    const captured = await setupMocks(page, { emailReady: [false, true] });
+    await page.goto('/setup#token=t');
+    await page.getByRole('button', { name: "Let's go" }).click();
+    await expect(
+      page.getByText(/still verifying the address SAM emails sign-in codes from/)
+    ).toBeVisible();
+    // Nothing closed: setup is still open and the token is kept for the retry.
+    expect(captured.complete).toEqual([]);
+    await assertNoOverflow(page);
+    await screenshot(page, 'setup-email-verifying', { scopeToProject: true });
+    await page.getByRole('button', { name: "Let's go" }).click();
+    await expect(page.getByLabel('Sign-in code')).toBeVisible();
+    expect(captured.complete).toEqual([{ token: 't', config: {} }]);
+  });
+
+  test('finishes with a sign-in provider the deployment already has', async ({ page }) => {
+    const captured = await setupMocks(page, {
+      emailSignIn: false,
+      ownerEmail: null,
+      existingGitHubOAuth: true,
+    });
+    await page.goto('/setup#token=t');
+    await page.getByRole('button', { name: "Let's go" }).click();
+    await expect(
+      page.getByText('GitHub sign-in is already set up.', { exact: false })
+    ).toBeVisible();
+    await page.getByRole('button', { name: 'Finish setup' }).click();
+    await expect(page.getByRole('heading', { name: "You're all set" })).toBeVisible();
+    expect(captured.complete).toEqual([{ token: 't', config: {} }]);
   });
 
   test('a finished instance says so', async ({ page }) => {

@@ -113,9 +113,14 @@ describe('first-run setup with email', () => {
     const res = await post('/verify', { token: 'setup-token' });
     expect(res.status).toBe(200);
     const body = (await res.json()) as VerifyBody & Record<string, unknown>;
-    expect(body.signIn).toEqual({ email: true, ownerEmail: 'owner@fixture.example' });
+    expect(body.signIn).toEqual({
+      email: true,
+      emailReady: true,
+      ownerEmail: 'owner@fixture.example',
+    });
     expect(body).not.toHaveProperty('agentEmail');
-    expect(fake.calls).toEqual([]);
+    // Only reads: whether Cloudflare has verified the sending domain.
+    expect(fake.writes()).toEqual([]);
   });
 
   it('completes with email sign-in alone and leaves agent email to the admin', async () => {
@@ -131,7 +136,38 @@ describe('first-run setup with email', () => {
     expect(body.completed).toBe(true);
     expect(body).not.toHaveProperty('agentEmail');
     await expect(isAgentEmailOn(env)).resolves.toBe(false);
-    expect(fake.calls).toEqual([]);
+    expect(fake.writes()).toEqual([]);
+  });
+
+  it('waits for Cloudflare to verify the sending domain before closing setup on email alone', async () => {
+    const fake = fakeCloudflareEmail({
+      zoneName: MAIN,
+      dns: [{ type: 'A', name: MAIN, content: '192.0.2.10' }],
+      sending: [{ name: DOMAIN, enabled: false }],
+    });
+    vi.stubGlobal('fetch', fake.fetchMock);
+    const verify = (await (await post('/verify', { token: 'setup-token' })).json()) as {
+      signIn: Record<string, unknown>;
+    };
+    expect(verify.signIn).toMatchObject({ email: true, emailReady: false });
+    // Closing setup now would leave no way in: no code can be sent, and no OAuth provider.
+    const res = await post('/complete', { token: 'setup-token', config: {} });
+    expect(res.status).toBe(400);
+    // Control: once verified, the same request completes.
+    fake.state.sending[0]!.enabled = true;
+    expect((await post('/complete', { token: 'setup-token', config: {} })).status).toBe(200);
+  });
+
+  it('does not block setup when the sending state cannot be read', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ success: false }), { status: 403 }))
+    );
+    const verify = (await (await post('/verify', { token: 'setup-token' })).json()) as {
+      signIn: Record<string, unknown>;
+    };
+    expect(verify.signIn).toMatchObject({ email: true, emailReady: true });
+    expect((await post('/complete', { token: 'setup-token', config: {} })).status).toBe(200);
   });
 
   it('still needs a sign-in provider where the deployment cannot send email', async () => {

@@ -345,6 +345,35 @@ describe('email sign-in through better-auth (vertical slice)', () => {
     expect(mail.sent).toHaveLength(5);
   });
 
+  it('keeps the last emailed code valid after the hourly budget is spent', async () => {
+    // A request past the budget sends nothing; it must not mint a new code either, or the code
+    // in the owner's inbox would stop working until the hour is up.
+    for (let attempt = 0; attempt < 7; attempt += 1) {
+      await requestCode(OWNER, `198.51.100.${attempt}`);
+    }
+    expect(mail.sent).toHaveLength(5);
+    const res = await signIn(OWNER, codeFrom(mail.sent[4]));
+    expect(res.status).toBe(200);
+    expect(realUsers()).toEqual([expect.objectContaining({ email: OWNER, role: 'superadmin' })]);
+  });
+
+  it('answers a locked-out code exactly like an address with no account', async () => {
+    // BetterAuth locks a code after 3 wrong guesses (403); only an eligible address gets there.
+    await requestCode(OWNER);
+    const wrong = codeFrom(mail.sent[0]) === '000000' ? '111111' : '000000';
+    const ownerStatuses: Array<{ status: number; body: unknown }> = [];
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const res = await signIn(OWNER, wrong, `192.0.2.${attempt}`);
+      ownerStatuses.push({ status: res.status, body: await res.json() });
+    }
+    const unknown = await signIn('nobody@example.com', wrong, '192.0.2.99');
+    const unknownBody = await unknown.json();
+    for (const answer of ownerStatuses) {
+      expect(answer).toEqual({ status: unknown.status, body: unknownBody });
+    }
+    expect(unknown.status).toBe(400);
+  });
+
   it('limits code requests per IP address', async () => {
     const statuses: number[] = [];
     for (let attempt = 0; attempt < 21; attempt += 1) {

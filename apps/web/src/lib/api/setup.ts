@@ -11,6 +11,8 @@ export interface SetupStatusResponse {
 export interface SetupSignInSummary {
   /** This deployment can email sign-in codes. */
   email: boolean;
+  /** False while Cloudflare is still verifying the sending domain. */
+  emailReady: boolean;
   /** The installer's administrator email, when the install was made by the installer. */
   ownerEmail: string | null;
 }
