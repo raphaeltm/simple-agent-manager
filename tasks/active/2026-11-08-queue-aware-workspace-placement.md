@@ -191,3 +191,61 @@ Merge head `221384ea3b6b41dafd4e4dcb56f9b21ebe233c94` merges `origin/main` (#259
 drops only the busy-build lines. Local checks on the merge: API typecheck clean, 5 unit files
 208/208, 3 real-D1 Workers suites 35/35. The coordinator accepted the `404b5ae4d` live run for
 this merge, together with the merge-head real-D1/local validation and final CI.
+
+## CodeRabbit round (review 5821366899 on 8be0d33, 2026-11-09)
+
+Seven findings; the coordinator's exact-head approval of `8be0d33` was revoked and the PR returned to
+draft. Resolution, agreed with the coordinator (events `e43c2f20`, `3b4efec6`):
+
+- [x] F5 (Major): a guarded refusal whose queue drained before the diagnostic re-read was counted as
+      a capacity rejection. Now classified as a fairness conflict whenever a guard was applied and no
+      capacity reason exists (`diagnoseWorkspacePlacementRefusal`). Real-DO test; proven red on revert.
+- [x] F7 (Major): queue wait consumed the ready deadline. Three clocks were involved: the TaskRunner
+      ready timeout (from first entry to `workspace_ready`), the provisioning-timeout cron (from
+      `created_at`) and the stuck-task `delegated` check (from dispatch). Fixed with one shared rule:
+  - Migration 0228 adds `workspaces.creating_started_at` and `build_started_at`.
+  - `services/workspace-creating-deadline.ts` holds the rule. Queued: the attempt start plus the
+    larger of the queue budget (`operations.workspaceBuildQueueTimeoutMinutes`, default 60) and the
+    build budget. Building: the build start plus the build budget.
+  - Every transition into `creating` starts the clock: reservation INSERT, direct-create
+    placeholder, restart and rebuild-from-error (`reserveWorkspaceRestart`), rebuild-from-running,
+    instant insert. Same-attempt transitions keep it: placeholder attach, re-claim, and
+    restart-failure after dispatch.
+  - The build-started route writes `build_started_at` with first-write-wins. The DO keeps no clock
+    (`workspaceReadyStartedAt` removed) and reads the row on every poll.
+  - The cron rechecks status and deadline in its UPDATE. The delegated sweep defers to the shared
+    rule at the cron's budgets.
+  - A late build-start signal from a previous attempt that lands after a restart cannot be told
+    apart: the callback carries no attempt identity, and its window is about 30 s after that
+    build took the slot. Reported, not fenced.
+- [x] F4: a warm claim could queue behind a placement that raced onto it. Every warm shortcut is
+      now guarded at 0; a conflict relinquishes the claim (NodeLifecycle plus the D1 pointer).
+      Interleaving test; both halves proven red on revert.
+- [x] F1: the workspace row recorded the requested location rather than the chosen node's
+      (`COALESCE(n.vm_location, ?)`, reserve and attach). Real-SQL test, proven.
+- [x] F6: "Why this node" named only the strategy; it now names the full reusable-host order.
+- [x] F3 declined: a wake only prefers its previous region by design (`session-recovery-location.ts`).
+- [x] F2 declined: an unhealthy reused node falling through to provisioning is unchanged from main;
+      fresh-telemetry admission already excludes stale nodes.
+
+F7 tests:
+
+- JS/SQL equivalence at the exact boundary (deadline -1, 0, +1 ms) for default and non-default
+  budgets, legacy and `CURRENT_TIMESTAMP` rows (`workspace-creating-deadline.test.ts`). This
+  found a `julianday` rounding divergence at the boundary, now fixed with ROUND.
+- Cron on real SQL (`timeout.test.ts`): queued 45 minutes (the old kill) left alone, expired queue,
+  queue then build, a stuck build, a restarted attempt, legacy nulls, a non-default queue budget
+  set through the admin setting, a longer build budget not shortened, and two races at the UPDATE
+  midpoint (ready, build start) proven red without the recheck.
+- TaskRunner step on real SQL (`task-runner-workspace-ready-deadline.test.ts`): a missed
+  notification or a fresh DO uses the durable build start.
+- Route (`build-started-callback.test.ts`): first write wins, proven red without it; not recorded
+  when the workspace is not `creating`.
+- Writers on real SQL (`workspace-placement.test.ts`): INSERT starts the clock, attach keeps it,
+  restart resets it and clears the build start.
+- Source-scan enumeration of writers (`workspace-creating-clock-writers.test.ts`), proven red when
+  the instant insert drops its clock.
+- Delegated sweep through the real `recoverStuckTasks` (`scheduled-stuck-tasks.test.ts`): queued 45
+  minutes stays delegated (proven red without the deferral), queued 61 minutes fails.
+- [ ] Specialist re-review of the CodeRabbit round
+- [ ] Staging: a queued build on one node, past the old 30-minute mark if bounded, plus cleanup

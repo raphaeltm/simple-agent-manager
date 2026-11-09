@@ -654,7 +654,7 @@ by the read-only cron-liveness check.
 - `TASK_RUNNER_WORKSPACE_DISPATCH_TIMEOUT_MS` — Max wait for VM-agent workspace dispatch acknowledgement (default: 600000)
 - `TASK_RUNNER_WORKSPACE_DISPATCH_BASE_DELAY_MS` — Base delay for workspace dispatch retry backoff (default: 30000)
 - `TASK_RUNNER_WORKSPACE_DISPATCH_MAX_DELAY_MS` — Maximum delay for workspace dispatch retry backoff (default: 120000)
-- `TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS` — Max wait for workspace-ready callback (default: 1800000)
+- `TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS` — Max time from a workspace's build start (the VM agent taking the node's build slot) to its ready callback (default: 1800000). Time queued for the slot is governed by the `operations.workspaceBuildQueueTimeoutMinutes` admin setting
 - `TASK_RUNNER_WORKSPACE_READY_POLL_INTERVAL_MS` — D1 poll interval during the TaskRunner workspace-ready step (default: 30000)
 - `TASK_RUNNER_PROVISION_POLL_INTERVAL_MS` — TaskRunner provision status poll interval (default: 10000)
 - `TASK_RUNNER_PROVISION_TIMEOUT_MS` — Max time for TaskRunner node provisioning before permanent failure (default: 900000)

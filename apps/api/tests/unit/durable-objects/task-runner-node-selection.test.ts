@@ -1643,7 +1643,7 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
       expect(state.stepResults.rankedStartupBacklog).toBeNull();
     });
 
-    it('keeps an explicit pin on its node however long that node\'s queue is, with no guard', async () => {
+    it("keeps an explicit pin on its node however long that node's queue is, with no guard", async () => {
       const selection = capacityPoolSelection('user');
       const state = busyBuildState({ selection });
       state.config.preferredNodeId = 'node-pinned';
@@ -1748,50 +1748,56 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
 
     it.each([
       { label: 'explicit', explicitVmLocation: true, expected: 'node-requested-region' },
-      { label: 'legacy (flag absent)', explicitVmLocation: undefined, expected: 'node-requested-region' },
+      {
+        label: 'legacy (flag absent)',
+        explicitVmLocation: undefined,
+        expected: 'node-requested-region',
+      },
       { label: 'default', explicitVmLocation: false, expected: 'node-other-region' },
-    ])(
-      'ranks a $label location against backlog',
-      async ({ explicitVmLocation, expected }) => {
-        // A pool spanning two regions: either node is inside its authority.
-        const selection = capacityPoolSelection('user');
-        const [fsn1Candidate] = selection.candidates;
-        const nbg1Candidate = {
-          ...fsn1Candidate,
-          id: 'candidate-user-nbg1',
-          location: 'nbg1',
-          snapshot: { ...fsn1Candidate.snapshot, capacityPoolCandidateId: 'candidate-user-nbg1' },
-        };
-        selection.candidates.push(nbg1Candidate);
-        const state = busyBuildState({ selection });
-        state.config.vmLocation = 'fsn1';
-        if (explicitVmLocation === undefined) delete state.config.explicitVmLocation;
-        else state.config.explicitVmLocation = explicitVmLocation;
-        const rc = createContext({
-          existingNodes: [
-            busyBuildNode('node-requested-region', selection, { vm_location: 'fsn1' }),
-            busyBuildNode('node-other-region', selection, {
-              vm_location: 'nbg1',
-              capacity_pool_candidate_id: nbg1Candidate.id,
-              last_metrics: idleBuildMetrics(),
-            }),
-          ],
-          workspaceReservations: reservationsOn('node-requested-region', 2, state),
-          healthByNode: healthyAgents('node-requested-region', 'node-other-region'),
-        });
+    ])('ranks a $label location against backlog', async ({ explicitVmLocation, expected }) => {
+      // A pool spanning two regions: either node is inside its authority.
+      const selection = capacityPoolSelection('user');
+      const [fsn1Candidate] = selection.candidates;
+      const nbg1Candidate = {
+        ...fsn1Candidate,
+        id: 'candidate-user-nbg1',
+        location: 'nbg1',
+        snapshot: { ...fsn1Candidate.snapshot, capacityPoolCandidateId: 'candidate-user-nbg1' },
+      };
+      selection.candidates.push(nbg1Candidate);
+      const state = busyBuildState({ selection });
+      state.config.vmLocation = 'fsn1';
+      if (explicitVmLocation === undefined) delete state.config.explicitVmLocation;
+      else state.config.explicitVmLocation = explicitVmLocation;
+      const rc = createContext({
+        existingNodes: [
+          busyBuildNode('node-requested-region', selection, { vm_location: 'fsn1' }),
+          busyBuildNode('node-other-region', selection, {
+            vm_location: 'nbg1',
+            capacity_pool_candidate_id: nbg1Candidate.id,
+            last_metrics: idleBuildMetrics(),
+          }),
+        ],
+        workspaceReservations: reservationsOn('node-requested-region', 2, state),
+        healthByNode: healthyAgents('node-requested-region', 'node-other-region'),
+      });
 
-        await handleNodeSelection(state, rc);
+      await handleNodeSelection(state, rc);
 
-        expect(state.stepResults.nodeId).toBe(expected);
-      }
-    );
+      expect(state.stepResults.nodeId).toBe(expected);
+    });
 
     it('does not let the warm shortcut take a warm-flagged node that already has a start queued', async () => {
       const now = new Date().toISOString();
       const state = createState();
       const tryClaim = vi.fn().mockResolvedValue({
         claimed: true,
-        state: { nodeId: 'warm-raced', status: 'active', warmSince: null, claimedByTask: state.taskId },
+        state: {
+          nodeId: 'warm-raced',
+          status: 'active',
+          warmSince: null,
+          claimedByTask: state.taskId,
+        },
       });
       const metrics = idleBuildMetrics();
       const rc = createContext({

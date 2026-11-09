@@ -1510,6 +1510,106 @@ describe('attachPrecreatedWorkspacePlacement', () => {
   });
 });
 
+describe('per-attempt creating clock (workspace-creating-deadline.ts)', () => {
+  function clockOf(id = 'workspace-1') {
+    return sqlite
+      ?.prepare(
+        'SELECT status, created_at, creating_started_at, build_started_at FROM workspaces WHERE id = ?'
+      )
+      .get(id);
+  }
+
+  it('starts the clock with the reservation', async () => {
+    const database = createDb();
+    seedNode();
+    await expect(
+      reserveWorkspacePlacement(database, reserveInput(capacitySnapshot()), admissionPolicy())
+    ).resolves.toBe(true);
+    expect(clockOf()).toEqual({
+      status: 'creating',
+      created_at: '2026-08-28T00:00:00.000Z',
+      creating_started_at: '2026-08-28T00:00:00.000Z',
+      build_started_at: null,
+    });
+  });
+
+  it("keeps the placeholder's clock when attaching it, and starts one for a legacy placeholder", async () => {
+    const database = createDb();
+    seedNode();
+    seedPlaceholderWorkspace('attach-with-clock');
+    sqlite
+      ?.prepare(
+        "UPDATE workspaces SET creating_started_at = '2026-08-28T00:00:00.000Z' WHERE id = 'attach-with-clock'"
+      )
+      .run();
+    seedPlaceholderWorkspace('attach-legacy');
+
+    const input = reserveInput(capacitySnapshot());
+    await expect(
+      attachPrecreatedWorkspacePlacement(
+        database,
+        { ...input, id: 'attach-with-clock' },
+        admissionPolicy()
+      )
+    ).resolves.toBe(true);
+    await expect(
+      attachPrecreatedWorkspacePlacement(
+        database,
+        { ...input, id: 'attach-legacy' },
+        admissionPolicy()
+      )
+    ).resolves.toBe(true);
+
+    // Attaching continues the attempt the placeholder started (node provisioning counts).
+    expect(clockOf('attach-with-clock')).toMatchObject({
+      creating_started_at: '2026-08-28T00:00:00.000Z',
+    });
+    const legacy = clockOf('attach-legacy') as { creating_started_at: string | null };
+    expect(legacy.creating_started_at).not.toBeNull();
+  });
+
+  it('starts a new attempt on restart and clears the previous build start', async () => {
+    const database = createDb();
+    seedNode();
+    seedActiveWorkspace('workspace-1');
+    sqlite
+      ?.prepare(
+        `UPDATE workspaces SET status = 'stopped', chat_session_id = 'chat-1',
+           creating_started_at = '2026-08-28T00:00:00.000Z',
+           build_started_at = '2026-08-28T00:01:00.000Z'
+         WHERE id = 'workspace-1'`
+      )
+      .run();
+    const before = Date.now();
+
+    expect(
+      await reserveWorkspaceRestart(
+        database,
+        {
+          ...reserveInput(capacitySnapshot()),
+          chatSessionId: 'chat-1',
+          evictionGeneration: 'restart-generation',
+          expectedEvictionGeneration: null,
+          expectedStatus: 'stopped' as const,
+        },
+        admissionPolicy()
+      )
+    ).toBe(true);
+
+    const clock = clockOf() as {
+      status: string;
+      created_at: string;
+      creating_started_at: string;
+      build_started_at: string | null;
+    };
+    expect(clock.status).toBe('creating');
+    // created_at is the workspace's age, not the attempt's: it is left alone.
+    expect(clock.created_at).toBe('2026-08-28T00:00:00.000Z');
+    expect(Date.parse(clock.creating_started_at)).toBeGreaterThanOrEqual(before - 1000);
+    expect(clock.build_started_at).toBeNull();
+  });
+});
+
 describe('reserveWorkspaceRestart', () => {
   function seedEvicted(id = 'workspace-1') {
     seedActiveWorkspace(id);

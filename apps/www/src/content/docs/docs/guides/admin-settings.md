@@ -646,6 +646,7 @@ These control the live Google Cloud catalog described in [Google Cloud](/docs/gu
 | `operations.provisioningAttemptsPerProviderTier`      | 8       | 1–50          | Most offerings one task tries from one provider source under `fallback-chain` before moving to the pool's next-ranked provider         |
 | `operations.workspacePlacementMaxRejections`          | 3       | 1–20          | Consecutive times the node a task selected may refuse its final workspace reservation before the task fails                            |
 | `operations.workspacePlacementBacklogConflictRetries` | 3       | 1–20          | Times a task may pick again because its chosen node gained a queued workspace setup before the reservation, counted until one succeeds |
+| `operations.workspaceBuildQueueTimeoutMinutes`        | 60      | 5–1440        | Minutes a workspace may wait for its node's single build slot before it times out                                                      |
 
 See [Provider order](/docs/guides/compute-pools/#provider-order). Each attempt is a create request
 to the provider, so this bounds the work one task does before it reaches the next provider.
@@ -663,6 +664,14 @@ node's queue grows before the reservation, the task picks again. That does not c
 After `operations.workspacePlacementBacklogConflictRetries` such conflicts, the next reservation
 skips this check; every capacity check still applies. The conflicts are counted until a reservation
 succeeds; a capacity refusal in between neither adds to nor resets that count.
+
+A workspace waiting in a node's setup queue has `operations.workspaceBuildQueueTimeoutMinutes` (60 by
+default, about 20 queued setups of 3 minutes) for its setup to start. Once it starts, the setup has
+the full workspace-ready timeout (`TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS`, 30 minutes) from that
+moment, so time spent queued never shortens it. Each start, restart or rebuild has its own clock.
+Before its setup starts, a workspace gets the larger of the two budgets. A workspace that never
+reports its setup start, such as one created directly rather than by a task, keeps that budget for
+the whole start: it is a total limit, not evidence that the workspace actually waited in a queue.
 
 ### Session and configuration read recovery
 

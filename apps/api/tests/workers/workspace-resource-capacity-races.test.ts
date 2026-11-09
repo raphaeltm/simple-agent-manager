@@ -901,7 +901,7 @@ describe('workspace resource capacity advisory selection', () => {
     expect(selected?.nodeId).toBe(largeAvailableNode);
   });
 
-  it('ranks by D1 startup backlog and never ranks another user\'s idle node', async () => {
+  it("ranks by D1 startup backlog and never ranks another user's idle node", async () => {
     const userId = 'user-wrc-backlog';
     const otherUserId = 'user-wrc-backlog-other';
     const installationId = 'installation-wrc-backlog';

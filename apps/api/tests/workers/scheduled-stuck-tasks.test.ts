@@ -410,6 +410,50 @@ describe('recoverStuckTasks — vertical slice', () => {
     });
   });
 
+  describe('delegated task whose workspace is queued for its build slot', () => {
+    // The delegated clock starts at dispatch. A workspace still waiting for its node's single
+    // build slot answers to the shared creating deadline (`workspace-creating-deadline.ts`).
+    it.each([
+      { queuedMinutes: 45, expected: 'delegated' },
+      { queuedMinutes: 61, expected: 'failed' },
+    ])(
+      'treats a workspace queued $queuedMinutes minutes as $expected',
+      async ({ queuedMinutes, expected }) => {
+        await seedBaseData();
+        const suffix = String(queuedMinutes);
+        const nodeId = `node-st-queued-${suffix}`;
+        const workspaceId = `ws-st-queued-${suffix}`;
+        const taskId = `task-st-queued-${suffix}`;
+        const queuedSince = new Date(Date.now() - queuedMinutes * 60 * 1000).toISOString();
+        await seedNode(nodeId, USER_ID, { status: 'running' });
+        await seedWorkspace(workspaceId, nodeId, USER_ID, {
+          projectId: PROJECT_ID,
+          status: 'creating',
+          createdAt: queuedSince,
+        });
+        await env.DATABASE.prepare('UPDATE workspaces SET creating_started_at = ? WHERE id = ?')
+          .bind(queuedSince, workspaceId)
+          .run();
+        await seedTask(taskId, PROJECT_ID, USER_ID, {
+          status: 'delegated',
+          executionStep: 'workspace_ready',
+          workspaceId,
+          updatedAt: queuedSince,
+        });
+
+        // Production defaults: no delegated or provisioning timeout override.
+        const result = await recoverStuckTasks(env as unknown as Env);
+
+        const task = await getTaskStatus(taskId);
+        expect(task?.status).toBe(expected);
+        if (expected === 'failed') {
+          expect(result.failedDelegated).toBeGreaterThanOrEqual(1);
+          expect(task?.error_message).toContain("stuck in 'delegated'");
+        }
+      }
+    );
+  });
+
   describe('stuck in_progress task detection', () => {
     it('fails an in_progress task past the recovery check with no live runtime', async () => {
       await seedBaseData();

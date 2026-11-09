@@ -560,6 +560,18 @@ successful reservation, the next reservation omits only that guard; capacity ref
 nor reset that count. Backlog never triggers provisioning: a node that fits is used
 even when its queue is long.
 
+Queued work is timed against its own budget (`workspace-creating-deadline.ts`). Every transition
+into `creating` starts a per-attempt clock (`workspaces.creating_started_at`), and the build-started
+callback records when the VM agent took the build slot (`workspaces.build_started_at`, first write
+wins, in `routes/projects/build-started-callback.ts`). Before the build starts, the attempt has the
+queue budget (`operations.workspaceBuildQueueTimeoutMinutes`, 60 minutes by default, or the build
+budget if that is larger). After it starts, the attempt has the build budget from that moment. The
+TaskRunner's `workspace_ready` step, the provisioning-timeout cron (`checkProvisioningTimeouts()` in
+`services/timeout.ts`, a backstop whose build budget is `PROVISIONING_TIMEOUT_MS`) and the stuck-task
+sweep's `delegated` check (`isWorkspaceWithinCreatingDeadline()`) all read that same rule from D1.
+The cron rechecks the status and deadline in its UPDATE, so it cannot overwrite a workspace that
+became ready or started building after its read.
+
 ## ACP Session Lifecycle
 
 Agent sessions are managed by the ProjectData DO with this state machine:
