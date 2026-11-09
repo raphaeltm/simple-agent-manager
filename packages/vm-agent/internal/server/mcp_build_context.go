@@ -202,7 +202,7 @@ func (s *Server) resolveContextSourceDir(ctx context.Context, workspaceID string
 	if path == "" {
 		path = runtime.ContainerWorkDir
 	}
-	if path == "" && s.config.ContainerMode {
+	if path == "" && s.config.IsStandaloneMode() {
 		path = runtime.WorkspaceDir
 	}
 	if path == "" {
@@ -213,7 +213,7 @@ func (s *Server) resolveContextSourceDir(ctx context.Context, workspaceID string
 		return "", fmt.Errorf("workingDir must be a directory under /workspaces without traversal")
 	}
 	root := containerWorkspacesRoot
-	if !s.config.ContainerMode {
+	if !s.config.IsStandaloneMode() {
 		out, err := exec.CommandContext(ctx, container.DockerCLIPath(), "volume", "inspect", bootstrap.VolumeNameForWorkspace(workspaceID), "--format", "{{.Mountpoint}}").Output()
 		if err != nil {
 			return "", fmt.Errorf("cannot resolve devcontainer volume; start the workspace and retry")

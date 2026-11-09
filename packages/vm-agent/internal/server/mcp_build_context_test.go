@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"github.com/klauspost/compress/zstd"
+	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/publish"
 	"io"
 	"math/rand"
@@ -31,7 +32,11 @@ func TestBuildContextCollectRouteBothRuntimesLarge(t *testing.T) {
 			temp := t.TempDir()
 			t.Setenv("TMPDIR", temp)
 			s, key := mcpBuildTestServer(t)
-			s.config.ContainerMode = instant
+			s.config.ContainerMode = !instant
+			s.config.Role = config.RoleWorkspace
+			if instant {
+				s.config.Role = config.RoleStandalone
+			}
 			mount := t.TempDir()
 			work := "/workspaces/project"
 			root := filepath.Join(mount, "project")
