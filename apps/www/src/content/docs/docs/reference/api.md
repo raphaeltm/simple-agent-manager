@@ -221,7 +221,7 @@ Notes for client developers:
 
 ### `POST /api/auth/sign-in/social`
 
-Start GitHub OAuth flow. Redirects to GitHub for authorization.
+Start an OAuth sign-in (GitHub, Google or GitLab). Redirects to the provider for authorization.
 
 ### `POST /api/auth/sign-out`
 
@@ -230,6 +230,37 @@ End the current session.
 ### `GET /api/auth/session`
 
 Returns the current authenticated session and user info.
+
+### `POST /api/auth/email-otp/send-verification-otp`
+
+Email a six-digit sign-in code. Body: `{ "email": "...", "type": "sign-in" }`. Exists only when the
+deployment can send email. Always answers `200 { "success": true }`; a code is sent only to an
+existing account or the installer owner (see [Security](/docs/architecture/security/)). Returns
+`429` past the per-IP limit.
+
+### `POST /api/auth/sign-in/email-otp`
+
+Sign in with an emailed code. Body: `{ "email": "...", "otp": "123456" }`. Sets the session cookie.
+Limited per IP address. Other `/api/auth/email-otp/*` routes return `404`.
+
+### `GET /api/config/login-providers`
+
+Public. `{ "github": bool, "google": bool, "gitlab": bool, "email": bool }`: which sign-in options
+the login page offers.
+
+### First-run setup (`/api/setup/*`)
+
+The `POST` routes require `SETUP_TOKEN`; `GET /api/setup/status` is public. Every route returns
+`410 SETUP_CLOSED` once setup is complete.
+
+- `GET /api/setup/status` — public. `{ completed, open, forced, tokenConfigured }`.
+- `POST /api/setup/verify` — body `{ token }`. Returns the integration `status` and
+  `signIn: { email, emailReady, ownerEmail }`; `emailReady` is `false` while Cloudflare is still
+  verifying the sending domain.
+- `POST /api/setup/complete` — body `{ token, config? }`. Needs a sign-in method: email sign-up
+  (installer owner set, email prepared and its sending domain verified), or an OAuth provider in
+  `config` or already configured. Setup never turns
+  agent email on; a superadmin does that from **Admin → Integrations**.
 
 ## Workspaces
 

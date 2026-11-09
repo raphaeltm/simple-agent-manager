@@ -1,202 +1,229 @@
-import { Alert, Button, Spinner } from '@simple-agent-manager/ui';
-import { ShieldCheck } from 'lucide-react';
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router';
+import { Spinner } from '@simple-agent-manager/ui';
+import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router';
 
-import { PlatformIntegrationConfigForm } from '../components/PlatformIntegrationConfigForm';
-import type { PlatformConfigStatus, PlatformIntegrationConfigInput, SetupStatusResponse } from '../lib/api';
+import type { SetupStatusResponse, SetupVerifyResponse } from '../lib/api';
+import { ApiClientError, completeSetup, fetchSetupStatus, verifySetupToken } from '../lib/api';
 import {
-  ApiClientError,
-  completeSetup,
-  fetchSetupStatus,
-  saveSetupConfig,
-  verifySetupToken,
-} from '../lib/api';
+  EMPTY_PROVIDER_VALUES,
+  providerConfig,
+  providerValuesComplete,
+  providerValuesPartial,
+  SetupProviderFields,
+  type SetupProviderValues,
+} from './setup/SetupProviderFields';
+import { SetupShell } from './setup/SetupShell';
+import {
+  DoneStep,
+  SETUP_STEP_HEADING_ID,
+  SetupNotice,
+  SignInStep,
+  WelcomeStep,
+} from './setup/SetupSteps';
+
+const API_ORIGIN = import.meta.env.VITE_API_URL || 'http://localhost:8787';
+/** The installer's "Open SAM setup" link carries the token here; fragments never reach a server. */
+const TOKEN_FRAGMENT = /^#(?:.*&)?token=([^&]+)/;
+
+type Step = 'welcome' | 'sign-in' | 'done';
+
+// Read once per page load: the fragment is removed on first read, and the page can mount more
+// than once while the app's providers settle.
+let linkTokenCache: string | null = null;
+
+function readTokenFromLink(): string {
+  if (linkTokenCache !== null) return linkTokenCache;
+  const match = TOKEN_FRAGMENT.exec(window.location.hash);
+  linkTokenCache = '';
+  if (!match?.[1]) return linkTokenCache;
+  // Keep the token out of history and anything that later reads the URL.
+  window.history.replaceState(null, '', window.location.pathname + window.location.search);
+  try {
+    linkTokenCache = decodeURIComponent(match[1]);
+  } catch {
+    // A malformed fragment leaves the token field empty for the owner to paste.
+  }
+  return linkTokenCache;
+}
+
+function instanceDomain(): string {
+  return window.location.hostname.replace(/^app\./, '');
+}
 
 export function Setup() {
-  const [setupStatus, setSetupStatus] = useState<SetupStatusResponse | null>(null);
-  const [platformStatus, setPlatformStatus] = useState<PlatformConfigStatus | null>(null);
-  const [token, setToken] = useState('');
-  const [verified, setVerified] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [verifying, setVerifying] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [completing, setCompleting] = useState(false);
-  const [complete, setComplete] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const navigate = useNavigate();
+  const [linkToken] = useState(readTokenFromLink);
+  const [token, setToken] = useState(linkToken);
+  const [tokenFromLink, setTokenFromLink] = useState(Boolean(linkToken));
+  const [status, setStatus] = useState<SetupStatusResponse | null>(null);
+  const [verified, setVerified] = useState<SetupVerifyResponse | null>(null);
+  const [step, setStep] = useState<Step>('welcome');
+  const [provider, setProvider] = useState<SetupProviderValues>(EMPTY_PROVIDER_VALUES);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [emailVerifying, setEmailVerifying] = useState(false);
 
   useEffect(() => {
     let active = true;
     fetchSetupStatus()
       .then((response) => {
-        if (!active) return;
-        setSetupStatus(response);
+        if (active) setStatus(response);
       })
       .catch((err) => {
         if (!active) return;
         if (err instanceof ApiClientError && err.code === 'SETUP_CLOSED') {
-          setSetupStatus({ completed: true, open: false, forced: false, tokenConfigured: false });
+          setStatus({ completed: true, open: false, forced: false, tokenConfigured: false });
           return;
         }
-        setError(err instanceof Error ? err.message : 'Failed to load setup status');
-      })
-      .finally(() => {
-        if (active) setLoading(false);
+        setError(err instanceof Error ? err.message : 'Could not reach your SAM API.');
+        setStatus({ completed: false, open: true, forced: false, tokenConfigured: true });
       });
     return () => {
       active = false;
     };
   }, []);
 
+  // Move focus to the new step's heading, so keyboard and screen reader users land on it.
+  const previousStep = useRef(step);
+  useEffect(() => {
+    if (previousStep.current === step) return;
+    previousStep.current = step;
+    document.getElementById(SETUP_STEP_HEADING_ID)?.focus();
+  }, [step]);
+
+  // Setup is about getting to a running SAM. Where SAM can email sign-in codes, the token is
+  // the only question: setup finishes straight away and the owner lands on the code step, with
+  // the code already on its way. Other sign-in providers are optional and live in Admin.
+  // Without email sign-in, one OAuth provider is the only way in, so setup asks for it.
   const handleVerify = async () => {
     setError(null);
-    setMessage(null);
-    setVerifying(true);
+    setBusy(true);
     try {
-      const response = await verifySetupToken(token);
-      setVerified(true);
-      setPlatformStatus(response.status);
+      const trimmed = token.trim();
+      const response = await verifySetupToken(trimmed);
+      // Cloudflare verifies the sending domain a few minutes after install. Closing setup on
+      // email alone before then would leave no way in, so the owner waits and tries again.
+      setEmailVerifying(response.signIn.email && !response.signIn.emailReady);
+      if (response.signIn.email && !response.signIn.emailReady) return;
+      if (response.signIn.email) {
+        await completeSetup(trimmed, providerConfig(EMPTY_PROVIDER_VALUES));
+        navigate('/', {
+          replace: true,
+          state: { signInEmail: response.signIn.ownerEmail, sendSignInCode: true },
+        });
+        return;
+      }
+      setVerified(response);
+      setStep('sign-in');
     } catch (err) {
-      setError(errorMessage(err, 'Failed to verify setup token'));
+      setError(errorMessage(err, 'That setup token did not work.'));
+      setTokenFromLink(false);
     } finally {
-      setVerifying(false);
+      setBusy(false);
     }
   };
 
-  const handleSave = async (config: PlatformIntegrationConfigInput) => {
+  const handleFinish = async () => {
     setError(null);
-    setMessage(null);
-    setSaving(true);
+    setBusy(true);
     try {
-      const response = await saveSetupConfig(token, config);
-      setPlatformStatus(response.status);
-      setMessage('Platform integration settings saved.');
+      await completeSetup(token.trim(), providerConfig(provider));
+      setStep('done');
     } catch (err) {
-      setError(errorMessage(err, 'Failed to save platform configuration'));
+      setError(errorMessage(err, 'Setup could not be completed.'));
     } finally {
-      setSaving(false);
+      setBusy(false);
     }
   };
 
-  const handleComplete = async (config: PlatformIntegrationConfigInput) => {
-    setError(null);
-    setMessage(null);
-    setCompleting(true);
-    try {
-      const response = await completeSetup(token, config);
-      setPlatformStatus(response.status);
-      setComplete(true);
-      setVerified(false);
-      setSetupStatus((current) => current ? { ...current, completed: true, open: false } : current);
-      setMessage('Setup complete. Sign in to continue.');
-    } catch (err) {
-      setError(errorMessage(err, 'Failed to complete setup'));
-    } finally {
-      setCompleting(false);
-    }
-  };
+  const signIn = () =>
+    navigate('/', { replace: true, state: { signInEmail: verified?.signIn.ownerEmail ?? null } });
 
-  if (loading) {
+  if (!status) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-canvas text-fg-primary">
-        <Spinner />
-      </main>
+      <SetupShell>
+        <div className="flex justify-center py-10">
+          <Spinner />
+        </div>
+      </SetupShell>
     );
   }
 
-  if (setupStatus?.completed || complete) {
+  if (status.completed && step !== 'done') {
     return (
-      <main className="min-h-screen bg-canvas px-4 py-10 text-fg-primary">
-        <section className="mx-auto max-w-xl rounded-lg border border-border-default bg-surface p-6">
-          <div className="mb-4 flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-border-default bg-surface-secondary">
-              <ShieldCheck className="h-5 w-5 text-success" aria-hidden="true" />
-            </div>
-            <div>
-              <h1 className="text-xl font-semibold">Setup is complete</h1>
-              <p className="text-sm text-fg-muted">The first-run setup route is closed.</p>
-            </div>
-          </div>
-          {message && <Alert variant="success">{message}</Alert>}
-          <Link
-            to="/"
-            className="mt-4 inline-flex min-h-11 items-center justify-center rounded-md border border-border-default bg-surface px-4 text-sm font-semibold text-fg-primary hover:bg-surface-hover"
-          >
-            Continue to sign in
-          </Link>
-        </section>
-      </main>
+      <SetupShell>
+        <DoneStep
+          title="SAM is set up"
+          message="Setup is already finished for this instance."
+          onSignIn={signIn}
+        />
+      </SetupShell>
     );
   }
 
   return (
-    <main className="min-h-screen bg-canvas px-4 py-8 text-fg-primary">
-      <section className="mx-auto w-full max-w-5xl space-y-5">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold">First-run setup</h1>
-            <p className="mt-1 max-w-2xl text-sm text-fg-muted">
-              Enter the setup token from Cloudflare Worker variables, then configure platform sign-in and repository automation.
-            </p>
-          </div>
-          {setupStatus?.forced && (
-            <span className="inline-flex w-fit items-center rounded-full border border-warning/30 bg-warning-tint px-3 py-1 text-xs font-medium text-warning-fg">
-              SETUP_FORCE active
-            </span>
-          )}
-        </div>
-
-        {!setupStatus?.tokenConfigured && (
-          <Alert variant="warning">
-            SETUP_TOKEN is not configured on the Worker. Redeploy or set the plaintext Worker variable before continuing.
-          </Alert>
-        )}
-        {error && <Alert variant="error" onDismiss={() => setError(null)}>{error}</Alert>}
-        {message && <Alert variant="success" onDismiss={() => setMessage(null)}>{message}</Alert>}
-
-        {!verified ? (
-          <section className="rounded-lg border border-border-default bg-surface p-4">
-            <label className="block space-y-2">
-              <span className="text-sm font-medium text-fg-primary">Setup token</span>
-              <input
-                type="password"
-                value={token}
-                onChange={(event) => setToken(event.target.value)}
-                className="w-full min-h-11 rounded-sm border border-border-default bg-inset px-3 py-2 text-sm text-fg-primary"
-                autoComplete="one-time-code"
-              />
-            </label>
-            <Button
-              type="button"
-              className="mt-4 w-full sm:w-auto"
-              disabled={!token.trim() || verifying || !setupStatus?.tokenConfigured}
-              loading={verifying}
-              onClick={handleVerify}
-            >
-              Verify token
-            </Button>
-          </section>
-        ) : platformStatus ? (
-          <PlatformIntegrationConfigForm
-            status={platformStatus}
-            mode="setup"
-            primaryLabel="Save settings"
-            secondaryLabel="Complete setup"
-            submitting={saving}
-            secondarySubmitting={completing}
-            onPrimary={handleSave}
-            onSecondary={handleComplete}
-          />
-        ) : null}
-      </section>
-    </main>
+    <SetupShell footer={<span className="break-all">{instanceDomain()}</span>}>
+      {error && step !== 'done' && <SetupNotice tone="error">{error}</SetupNotice>}
+      {emailVerifying && step === 'welcome' && (
+        <SetupNotice tone="warning">
+          Cloudflare is still verifying the address SAM emails sign-in codes from. This usually
+          takes a few minutes after install. Try again shortly.
+        </SetupNotice>
+      )}
+      {step === 'welcome' && (
+        <WelcomeStep
+          domain={instanceDomain()}
+          token={token}
+          tokenFromLink={tokenFromLink}
+          tokenConfigured={status.tokenConfigured}
+          verifying={busy}
+          onTokenChange={setToken}
+          onForgetLinkToken={() => {
+            setTokenFromLink(false);
+            setToken('');
+          }}
+          onSubmit={() => void handleVerify()}
+        />
+      )}
+      {step === 'sign-in' && (
+        <SignInStep
+          providerReady={providerValuesComplete(provider)}
+          existingProvider={existingLoginProvider(verified)}
+          providerPartial={providerValuesPartial(provider)}
+          busy={busy}
+          providerFields={
+            <SetupProviderFields values={provider} onChange={setProvider} apiOrigin={API_ORIGIN} />
+          }
+          onContinue={() => void handleFinish()}
+        />
+      )}
+      {step === 'done' && (
+        <DoneStep
+          title="You're all set"
+          message="Sign in to start your first project."
+          onSignIn={signIn}
+        />
+      )}
+    </SetupShell>
   );
+}
+
+/**
+ * A sign-in provider the deployment already has (for example GitHub OAuth set by a CI deploy).
+ * Setup can finish with it as is; the owner should not have to re-enter its credentials.
+ */
+function existingLoginProvider(verified: SetupVerifyResponse | null): string | null {
+  const integrations = verified?.status.integrations;
+  if (!integrations) return null;
+  if (integrations.githubOAuth?.configured) return 'GitHub';
+  if (integrations.googleOAuth?.configured) return 'Google';
+  if (integrations.gitlabOAuth?.configured) return 'GitLab';
+  return null;
 }
 
 function errorMessage(err: unknown, fallback: string): string {
   if (err instanceof ApiClientError && err.code === 'SETUP_CLOSED') {
-    return 'First-run setup has already been completed.';
+    return 'Setup has already been finished.';
   }
-  return err instanceof Error ? err.message : fallback;
+  return err instanceof Error && err.message ? err.message : fallback;
 }

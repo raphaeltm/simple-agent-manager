@@ -87,13 +87,16 @@ it('shows the retry error if verification fails after a confirmed signed-out sta
     </AuthProvider>
   );
   expect(screen.getByText('Signed out')).toBeInTheDocument();
+  // A background refetch (window focus) keeps the signed-out page mounted rather than
+  // swapping it for the cold-load spinner.
   mocks.session.mockReturnValue({ data: null, isPending: true, error: null });
   view.rerender(
     <AuthProvider>
       <VerificationState />
     </AuthProvider>
   );
-  expect(screen.getByRole('status', { name: 'Verifying your session' })).toBeInTheDocument();
+  expect(screen.getByText('Signed out')).toBeInTheDocument();
+  expect(screen.queryByRole('status', { name: 'Verifying your session' })).not.toBeInTheDocument();
   mocks.session.mockReturnValue({ data: null, isPending: false, error: new Error('Unavailable') });
   view.rerender(
     <AuthProvider>

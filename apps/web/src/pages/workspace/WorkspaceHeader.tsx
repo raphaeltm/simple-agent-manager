@@ -28,7 +28,11 @@ export interface WorkspaceHeaderProps {
   onOpenCommandPalette: () => void;
   onOpenMobileMenu: () => void;
   onSelectWorktree: (worktreePath: string | null) => void;
-  onCreateWorktree: (request: { branch: string; createBranch: boolean; baseBranch?: string }) => Promise<void>;
+  onCreateWorktree: (request: {
+    branch: string;
+    createBranch: boolean;
+    baseBranch?: string;
+  }) => Promise<void>;
   onRemoveWorktree: (path: string, force: boolean) => Promise<void>;
   onRequestBranches: () => Promise<void>;
 }
@@ -93,12 +97,7 @@ export function WorkspaceHeader({
           viewBox="0 0 24 24"
           stroke="currentColor"
         >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M15 19l-7-7 7-7"
-          />
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
         </svg>
       </button>
 
@@ -193,7 +192,13 @@ export function WorkspaceHeader({
 
       {/* Error inline (desktop only) */}
       {!isMobile && error && (
-        <span style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-danger-fg)', whiteSpace: 'nowrap' }}>
+        <span
+          style={{
+            fontSize: 'var(--sam-type-caption-size)',
+            color: 'var(--sam-color-danger-fg)',
+            whiteSpace: 'nowrap',
+          }}
+        >
           {error}
           <button
             onClick={onClearError}
@@ -233,11 +238,7 @@ export function WorkspaceHeader({
 
       {/* Mobile command palette access */}
       {isRunning && terminalToken && isMobile && (
-        <CommandPaletteButton
-          onClick={onOpenCommandPalette}
-          isMobile
-          compactMobile
-        />
+        <CommandPaletteButton onClick={onOpenCommandPalette} isMobile compactMobile />
       )}
 
       {/* Mobile sidebar menu button */}

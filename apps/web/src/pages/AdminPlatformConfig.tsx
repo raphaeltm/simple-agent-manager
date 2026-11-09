@@ -76,7 +76,6 @@ export function AdminPlatformConfig() {
       {status && (
         <PlatformIntegrationConfigForm
           status={status}
-          mode="admin"
           primaryLabel="Save integrations"
           submitting={saving}
           onPrimary={handleSave}

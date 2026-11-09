@@ -31,9 +31,10 @@ export const ProjectFiles: FC = () => {
     setBranchesError(null);
     getRepoBranches(projectId)
       .then((res) => !cancelled && setBranches(res.branches))
-      .catch((err: unknown) =>
-        !cancelled &&
-        setBranchesError(err instanceof ApiClientError ? err.message : 'Failed to load branches')
+      .catch(
+        (err: unknown) =>
+          !cancelled &&
+          setBranchesError(err instanceof ApiClientError ? err.message : 'Failed to load branches')
       )
       .finally(() => !cancelled && setLoadingBranches(false));
     return () => {
@@ -96,11 +97,7 @@ export const ProjectFiles: FC = () => {
     );
   }
   if (!branches || branches.length === 0 || !projectId) {
-    return (
-      <p className="p-6 text-fg-muted">
-        No branches found for this repository.
-      </p>
-    );
+    return <p className="p-6 text-fg-muted">No branches found for this repository.</p>;
   }
 
   const onDefault = ref === defaultBranch;
@@ -139,9 +136,11 @@ export const ProjectFiles: FC = () => {
             title={onDefault ? 'Select a non-default branch to see changes' : undefined}
             onClick={() => update({ mode: 'changes' })}
             className={`text-[13px] px-3 py-1 rounded-md border cursor-pointer transition-colors
-              ${mode === 'changes'
-                ? 'bg-accent text-fg-on-accent border-accent'
-                : 'bg-canvas text-fg-muted border-border-default hover:text-fg-primary hover:bg-surface-hover'}
+              ${
+                mode === 'changes'
+                  ? 'bg-accent text-fg-on-accent border-accent'
+                  : 'bg-canvas text-fg-muted border-border-default hover:text-fg-primary hover:bg-surface-hover'
+              }
               ${onDefault ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
             Changes
@@ -154,9 +153,11 @@ export const ProjectFiles: FC = () => {
             aria-selected={mode === 'browse'}
             onClick={() => update({ mode: 'browse' })}
             className={`text-[13px] px-3 py-1 rounded-md border cursor-pointer transition-colors
-              ${mode === 'browse'
-                ? 'bg-accent text-fg-on-accent border-accent'
-                : 'bg-canvas text-fg-muted border-border-default hover:text-fg-primary hover:bg-surface-hover'}`}
+              ${
+                mode === 'browse'
+                  ? 'bg-accent text-fg-on-accent border-accent'
+                  : 'bg-canvas text-fg-muted border-border-default hover:text-fg-primary hover:bg-surface-hover'
+              }`}
           >
             Browse
           </button>
@@ -166,12 +167,19 @@ export const ProjectFiles: FC = () => {
       <div
         role="tabpanel"
         id="files-tabpanel"
-        aria-labelledby={mode === 'changes' && !onDefault ? 'files-tab-changes' : 'files-tab-browse'}
+        aria-labelledby={
+          mode === 'changes' && !onDefault ? 'files-tab-changes' : 'files-tab-browse'
+        }
       >
         {mode === 'changes' && !onDefault ? (
           <ChangesView projectId={projectId} head={ref} base={base} onOpenFile={openFileInBrowse} />
         ) : (
-          <BrowseView projectId={projectId} ref={ref} path={path} onNavigate={(p) => update({ mode: 'browse', path: p })} />
+          <BrowseView
+            projectId={projectId}
+            ref={ref}
+            path={path}
+            onNavigate={(p) => update({ mode: 'browse', path: p })}
+          />
         )}
       </div>
     </div>

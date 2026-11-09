@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
 
 import { useAuth } from '../components/AuthProvider';
+import { EmailCodeSignIn } from '../components/EmailCodeSignIn';
 import { useLoginProviders } from '../hooks/useLoginProviders';
 import { useToast } from '../hooks/useToast';
 import { approveDeviceCode } from '../lib/api';
@@ -28,8 +29,9 @@ export function DeviceAuth() {
     setCode(initialCode);
   }, [initialCode]);
 
+  const returnPath = `/device${code ? `?code=${encodeURIComponent(normalizeCode(code))}` : ''}`;
+
   const handleLogin = async (provider: 'github' | 'google' | 'gitlab') => {
-    const returnPath = `/device${code ? `?code=${encodeURIComponent(normalizeCode(code))}` : ''}`;
     await authClient.signIn.social({
       provider,
       callbackURL: window.location.origin + returnPath,
@@ -49,6 +51,8 @@ export function DeviceAuth() {
         await handleLogin('google');
       } else if (providers.gitlab) {
         await handleLogin('gitlab');
+      } else if (providers.email) {
+        setError('Sign in with your email below, then authorize.');
       } else {
         setError('No login provider is configured.');
       }
@@ -73,22 +77,34 @@ export function DeviceAuth() {
       <section className="w-full max-w-md space-y-5">
         <div className="flex items-center gap-3">
           <div className="h-10 w-10 rounded-lg bg-bg-secondary border border-border flex items-center justify-center">
-            {success ? <CheckCircle2 className="h-5 w-5 text-success" /> : <KeyRound className="h-5 w-5 text-fg-secondary" />}
+            {success ? (
+              <CheckCircle2 className="h-5 w-5 text-success" />
+            ) : (
+              <KeyRound className="h-5 w-5 text-fg-secondary" />
+            )}
           </div>
           <div>
             <h1 className="text-xl font-semibold">Authorize SAM CLI</h1>
-            <p className="text-sm text-fg-secondary">Approve the login request from your terminal.</p>
+            <p className="text-sm text-fg-secondary">
+              Approve the login request from your terminal.
+            </p>
           </div>
         </div>
 
         {success ? (
           <div className="rounded-lg border border-border bg-bg-secondary p-4 space-y-2">
             <h2 className="text-sm font-medium text-fg-primary">CLI authorized</h2>
-            <p className="text-sm text-fg-secondary">You can close this tab and return to your terminal.</p>
+            <p className="text-sm text-fg-secondary">
+              You can close this tab and return to your terminal.
+            </p>
           </div>
         ) : (
           <div className="rounded-lg border border-border bg-bg-secondary p-4 space-y-4">
-            {error && <Alert variant="error" onDismiss={() => setError(null)}>{error}</Alert>}
+            {error && (
+              <Alert variant="error" onDismiss={() => setError(null)}>
+                {error}
+              </Alert>
+            )}
             <label htmlFor="device-user-code" className="block space-y-2">
               <span className="text-sm font-medium text-fg-primary">User code</span>
               <Input
@@ -151,6 +167,14 @@ export function DeviceAuth() {
                     </span>
                     Log in with GitLab
                   </Button>
+                )}
+                {providers.email && (
+                  // A code sign-in sets the session cookie outside BetterAuth's session store, so
+                  // reload this page (code kept in the URL) for the provider to read it.
+                  <EmailCodeSignIn
+                    primary={!providers.github && !providers.google && !providers.gitlab}
+                    onSignedIn={() => window.location.assign(returnPath)}
+                  />
                 )}
               </div>
             )}

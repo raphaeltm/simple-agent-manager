@@ -1,4 +1,6 @@
-import { render, screen } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { render as rtlRender, screen } from '@testing-library/react';
+import type { ReactElement } from 'react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -17,18 +19,36 @@ vi.mock('../../../src/lib/auth', () => ({
 }));
 
 vi.mock('@simple-agent-manager/ui', () => ({
-  Button: ({ children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { size?: string }) => (
+  Button: ({
+    children,
+    ...props
+  }: React.ButtonHTMLAttributes<HTMLButtonElement> & { size?: string }) => (
     <button {...props}>{children}</button>
   ),
   Card: ({ children, className }: { children: React.ReactNode; className?: string }) => (
     <div className={className}>{children}</div>
   ),
-  Typography: ({ children, className, as: Tag = 'span' }: { children: React.ReactNode; variant?: string; className?: string; as?: React.ElementType }) => (
-    <Tag className={className}>{children}</Tag>
+  Typography: ({
+    children,
+    className,
+    as: Tag = 'span',
+  }: {
+    children: React.ReactNode;
+    variant?: string;
+    className?: string;
+    as?: React.ElementType;
+  }) => <Tag className={className}>{children}</Tag>,
+  Container: ({ children }: { children: React.ReactNode; maxWidth?: string }) => (
+    <div>{children}</div>
   ),
-  Container: ({ children }: { children: React.ReactNode; maxWidth?: string }) => <div>{children}</div>,
   GlassNodeField: () => <div data-testid="glass-node-field" aria-hidden="true" />,
 }));
+
+/** The login-provider lookup is a TanStack query, so every render needs a fresh client. */
+function render(ui: ReactElement) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return rtlRender(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+}
 
 function renderLanding() {
   mockUseAuth.mockReturnValue({ isAuthenticated: false, isLoading: false });
@@ -38,7 +58,7 @@ function renderLanding() {
         <Route path="/" element={<Landing />} />
         <Route path="/dashboard" element={<div data-testid="dashboard" />} />
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
 }
 
@@ -99,7 +119,7 @@ describe('Landing page navigation', () => {
           <Route path="/" element={<Landing />} />
           <Route path="/dashboard" element={<div data-testid="dashboard" />} />
         </Routes>
-      </MemoryRouter>,
+      </MemoryRouter>
     );
     expect(screen.getByTestId('dashboard')).toBeInTheDocument();
   });
@@ -114,7 +134,7 @@ describe('Landing page navigation', () => {
           <Route path="/dashboard" element={<div data-testid="dashboard" />} />
           <Route path="/projects/:id" element={<div data-testid="project-page" />} />
         </Routes>
-      </MemoryRouter>,
+      </MemoryRouter>
     );
     expect(screen.getByTestId('project-page')).toBeInTheDocument();
     expect(screen.queryByTestId('dashboard')).not.toBeInTheDocument();
@@ -129,7 +149,7 @@ describe('Landing page navigation', () => {
           <Route path="/" element={<Landing />} />
           <Route path="/dashboard" element={<div data-testid="dashboard" />} />
         </Routes>
-      </MemoryRouter>,
+      </MemoryRouter>
     );
     // Should fall back to /dashboard, not navigate to //evil.com
     expect(screen.getByTestId('dashboard')).toBeInTheDocument();
@@ -143,7 +163,7 @@ describe('Landing page navigation', () => {
           <Route path="/" element={<Landing />} />
           <Route path="/dashboard" element={<div data-testid="dashboard" />} />
         </Routes>
-      </MemoryRouter>,
+      </MemoryRouter>
     );
     expect(screen.queryByTestId('dashboard')).not.toBeInTheDocument();
     // Landing page content should be visible

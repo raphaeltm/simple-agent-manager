@@ -116,6 +116,14 @@ describe('installation credential principals', () => {
     );
     for (const name of ['Workers AI Write', 'AI Gateway Run', 'Workers Containers Write'])
       expect(runtime).toContain(group(name).id);
+    // Email: the deploy prepares Email Sending; the app's agent email setup turns on routing.
+    const deployment = JSON.stringify(f.plans.find((plan) => plan.name.endsWith('-deployment')));
+    expect(deployment).toContain(group('Email Sending Write').id);
+    for (const name of ['Zone Settings Read', 'Email Routing Rules Read'])
+      expect(deployment).toContain(group(name, 'com.cloudflare.api.account.zone').id);
+    expect(runtime).toContain(group('Email Sending Read').id);
+    for (const name of ['Zone Settings Write', 'Email Routing Rules Write'])
+      expect(runtime).toContain(group(name, 'com.cloudflare.api.account.zone').id);
     expect(serialize).not.toMatch(/API Tokens|OAuth/);
   });
   // Observed on staging 2026-11-06: an OAuth grant saw Workers Scripts Write and

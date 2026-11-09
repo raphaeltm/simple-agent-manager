@@ -125,8 +125,9 @@ the Cloudflare dashboard.
    Zone Settings → Edit**, **Zone → Email Routing Rules → Edit** and **Email Sending → Edit**. With
    them, every deploy prepares email: it sets up Email Sending for `agents.<your-domain>` and writes
    DNS records only under that subdomain. Without them, email stays off and the deploy log says so.
-   No GitHub variable is needed. See [Self-Hosting](/docs/guides/self-hosting/).
-2. **A superadmin turns it on.** Open **Admin → Integrations**. The **Agent email** section says
+   No GitHub variable is needed. See [Self-Hosting](/docs/guides/self-hosting/). The hosted
+   installer requests these permissions itself, and its installs prepare email automatically.
+2. **Turn it on.** A superadmin opens **Admin → Integrations**. The **Agent email** section says
    **Off** and what's next:
    - "This deployment has not prepared agent email…", "Email Sending is not set up…" or "Deploy
      again: this deployment predates the agent email setup.": go back to step 1.

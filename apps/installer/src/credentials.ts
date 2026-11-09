@@ -64,6 +64,8 @@ const DEPLOY_ACCOUNT = [
   'Workers AI Write',
   'AI Gateway Write',
   'Account Settings Read',
+  // Email sign-in codes and agent email: configure-agent-email.ts onboards the sending domain.
+  'Email Sending Write',
 ];
 const RUNTIME_ACCOUNT = [
   'Workers Containers Write',
@@ -74,14 +76,26 @@ const RUNTIME_ACCOUNT = [
   'AI Gateway Read',
   'AI Gateway Run',
   'Account Settings Read',
+  // Agent email setup in the app reads the sending domain (services/agent-email/setup.ts).
+  'Email Sending Read',
 ];
 const DEPLOY_ZONE = [
   'DNS Write',
   'Zone Read',
   'Workers Routes Write',
   'SSL and Certificates Write',
+  // configure-agent-email.ts checks Email Routing before preparing sending.
+  'Zone Settings Read',
+  'Email Routing Rules Read',
 ];
-const RUNTIME_ZONE = ['DNS Write', 'Zone Read', 'SSL and Certificates Write'];
+const RUNTIME_ZONE = [
+  'DNS Write',
+  'Zone Read',
+  'SSL and Certificates Write',
+  // Agent email setup turns on routing and subaddressing and writes the agent@ rule.
+  'Zone Settings Write',
+  'Email Routing Rules Write',
+];
 const validId = (id: unknown): id is string => typeof id === 'string' && /^[a-f0-9]{32}$/.test(id);
 // Every required group must exist once in its scope. is_selectable is only
 // advisory ("Token creation performs the authoritative permission check",

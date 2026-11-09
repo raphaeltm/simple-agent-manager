@@ -1,13 +1,6 @@
 import type { ListKnowledgeEntitiesResponse } from '@simple-agent-manager/shared';
 import type { ProjectPolicy } from '@simple-agent-manager/shared';
-import {
-  Activity,
-  Brain,
-  Eye,
-  Search,
-  ShieldCheck,
-  SlidersHorizontal,
-} from 'lucide-react';
+import { Activity, Brain, Eye, Search, ShieldCheck, SlidersHorizontal } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
@@ -21,11 +14,15 @@ import { PoliciesTab } from './PoliciesTab';
 
 // ── Shared glass styling constants ──────────────────────────────────────────
 
-export const GLASS_CARD = 'rounded-lg border border-[var(--sam-form-border)] bg-[var(--sam-glass-nested-bg)]';
+export const GLASS_CARD =
+  'rounded-lg border border-[var(--sam-form-border)] bg-[var(--sam-glass-nested-bg)]';
 export const GLASS_CARD_HOVER = `${GLASS_CARD} hover:border-[var(--sam-form-border-hover)] transition-colors`;
-export const GLASS_CARD_MUTED = 'rounded-md bg-accent-tint border border-[color-mix(in_srgb,var(--sam-form-border)_60%,transparent)]';
-export const GLASS_BADGE = 'inline-flex min-h-[22px] items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium leading-tight';
-export const FOCUS_RING = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent';
+export const GLASS_CARD_MUTED =
+  'rounded-md bg-accent-tint border border-[color-mix(in_srgb,var(--sam-form-border)_60%,transparent)]';
+export const GLASS_BADGE =
+  'inline-flex min-h-[22px] items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium leading-tight';
+export const FOCUS_RING =
+  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent';
 
 // ── Shared primitive components ─────────────────────────────────────────────
 
@@ -88,33 +85,44 @@ export function AgentContextPage() {
     }
   }, [projectId]);
 
-  useEffect(() => { void loadData(); }, [loadData]);
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
 
   // Filter logic
   const q = filter.trim().toLowerCase();
   const entities = useMemo(() => knowledgeData?.entities ?? [], [knowledgeData]);
-  const filteredEntities = useMemo(() =>
-    entities.filter((e) => `${e.name} ${e.entityType}`.toLowerCase().includes(q)),
-    [entities, q],
+  const filteredEntities = useMemo(
+    () => entities.filter((e) => `${e.name} ${e.entityType}`.toLowerCase().includes(q)),
+    [entities, q]
   );
-  const filteredPolicies = useMemo(() =>
-    policiesData.filter((p) => `${p.title} ${p.content} ${p.category}`.toLowerCase().includes(q)),
-    [policiesData, q],
+  const filteredPolicies = useMemo(
+    () =>
+      policiesData.filter((p) => `${p.title} ${p.content} ${p.category}`.toLowerCase().includes(q)),
+    [policiesData, q]
   );
-  const filteredActions = useMemo(() =>
-    actionsData.filter((a) => `${a.eventType} ${a.actorType}`.toLowerCase().includes(q)),
-    [actionsData, q],
+  const filteredActions = useMemo(
+    () => actionsData.filter((a) => `${a.eventType} ${a.actorType}`.toLowerCase().includes(q)),
+    [actionsData, q]
   );
 
-  const visibleCount = activeTab === 'memory' ? filteredEntities.length
-    : activeTab === 'policies' ? filteredPolicies.length
-    : activeTab === 'actions' ? filteredActions.length
-    : 0;
+  const visibleCount =
+    activeTab === 'memory'
+      ? filteredEntities.length
+      : activeTab === 'policies'
+        ? filteredPolicies.length
+        : activeTab === 'actions'
+          ? filteredActions.length
+          : 0;
 
   return (
     <div className="mx-auto flex min-h-full w-full max-w-5xl flex-col px-3 py-3 sm:px-4 md:px-6 md:py-5">
       {/* Tab bar */}
-      <div role="tablist" aria-label="Agent context" className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
+      <div
+        role="tablist"
+        aria-label="Agent context"
+        className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1"
+      >
         {TABS.map((tab) => {
           const active = tab.id === activeTab;
           return (
@@ -124,7 +132,10 @@ export function AgentContextPage() {
               type="button"
               aria-selected={active}
               aria-controls={`tabpanel-${tab.id}`}
-              onClick={() => { setActiveTab(tab.id); setFilter(''); }}
+              onClick={() => {
+                setActiveTab(tab.id);
+                setFilter('');
+              }}
               className={`flex min-h-11 shrink-0 items-center gap-1.5 rounded-lg border px-3 text-[13px] font-medium transition-colors bg-transparent cursor-pointer ${FOCUS_RING} ${
                 active
                   ? 'border-accent/40 bg-accent/10 text-accent'
@@ -139,9 +150,16 @@ export function AgentContextPage() {
       </div>
 
       {/* Content */}
-      <div id={`tabpanel-${activeTab}`} role="tabpanel" aria-label={TABS.find((t) => t.id === activeTab)?.label} className="mt-4 flex-1 space-y-3 pb-8">
+      <div
+        id={`tabpanel-${activeTab}`}
+        role="tabpanel"
+        aria-label={TABS.find((t) => t.id === activeTab)?.label}
+        className="mt-4 flex-1 space-y-3 pb-8"
+      >
         {activeTab !== 'overview' && (
-          <label className={`flex min-h-11 items-center gap-2 px-3 text-sm text-fg-muted ${GLASS_CARD} focus-within:border-[var(--sam-form-border-focus)]`}>
+          <label
+            className={`flex min-h-11 items-center gap-2 px-3 text-sm text-fg-muted ${GLASS_CARD} focus-within:border-[var(--sam-form-border-focus)]`}
+          >
             <Search size={15} className="shrink-0 text-fg-muted" />
             <input
               value={filter}
@@ -175,9 +193,7 @@ export function AgentContextPage() {
           <PoliciesTab policies={filteredPolicies} projectId={projectId} onRefresh={loadData} />
         )}
 
-        {activeTab === 'actions' && !loading && (
-          <ActionsTab actions={filteredActions} />
-        )}
+        {activeTab === 'actions' && !loading && <ActionsTab actions={filteredActions} />}
 
         {activeTab !== 'overview' && !loading && visibleCount === 0 && (
           <Panel className="border-dashed">

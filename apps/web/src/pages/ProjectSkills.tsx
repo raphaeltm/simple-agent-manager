@@ -8,7 +8,8 @@ export function ProjectSkills() {
   const { projectId } = useProjectContext();
   const queryScope = useQueryScope();
   const { profiles } = useAgentProfiles(projectId, queryScope);
-  const { skills, loading, error, refresh, createSkill, updateSkill, deleteSkill } = useSkills(projectId);
+  const { skills, loading, error, refresh, createSkill, updateSkill, deleteSkill } =
+    useSkills(projectId);
 
   return (
     <div className="w-full min-w-0 mx-auto max-w-3xl px-4 py-6">

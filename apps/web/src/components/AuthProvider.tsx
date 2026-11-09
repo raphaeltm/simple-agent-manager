@@ -71,8 +71,24 @@ interface AuthProviderProps {
  * All authorization decisions are enforced server-side via requireAuth().
  */
 export function AuthProvider({ children }: AuthProviderProps) {
-  const { data: session, isPending, error, isRefetching, refetch } = useSession();
+  const {
+    data: session,
+    isPending: sessionRequestPending,
+    error,
+    isRefetching,
+    refetch,
+  } = useSession();
   const lastGoodSessionRef = useRef<typeof session>(null);
+  // BetterAuth marks every background refetch (window focus, reconnect) as pending while the
+  // session is null, so a signed-out visitor looked like a cold load each time they came back
+  // to the tab: the spinner replaced the app and the sign-in code form lost its state. Once the
+  // server has confirmed "signed out", a refetch that still has no session is a background
+  // revalidation (rule 48). Unresolved identity after a signed-in session, and a retry after a
+  // cold failure, still count as pending.
+  const confirmedSignedOutRef = useRef(false);
+  if (session?.user) confirmedSignedOutRef.current = false;
+  else if (!sessionRequestPending && !error) confirmedSignedOutRef.current = true;
+  const isPending = sessionRequestPending && !confirmedSignedOutRef.current;
   const [githubReauthMessage, setGitHubReauthMessage] = useState<string | null>(null);
   const [activeCacheNamespace, setActiveCacheNamespace] = useState<string | null | undefined>(
     undefined

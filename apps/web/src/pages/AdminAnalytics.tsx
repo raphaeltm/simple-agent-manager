@@ -1,5 +1,5 @@
-import { Body,Button, Card, Spinner } from '@simple-agent-manager/ui';
-import { useEffect, useRef,useState } from 'react';
+import { Body, Button, Card, Spinner } from '@simple-agent-manager/ui';
+import { useEffect, useRef, useState } from 'react';
 
 import { useAdminAnalytics } from '../hooks/useAdminAnalytics';
 import {
@@ -46,7 +46,9 @@ export function AdminAnalytics() {
     refresh,
   } = useAdminAnalytics();
 
-  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(() => (loading ? null : new Date()));
+  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(() =>
+    loading ? null : new Date()
+  );
   const [showForwarding, setShowForwarding] = useState(false);
   const prevLoadingRef = useRef(loading);
 
@@ -99,7 +101,9 @@ export function AdminAnalytics() {
           <h2 className="text-xl font-bold text-fg-primary">Analytics</h2>
           {isRefreshing && <Spinner size="sm" />}
           {lastRefreshed && (
-            <span className="text-xs text-fg-muted">Updated {formatLastUpdated(lastRefreshed)}</span>
+            <span className="text-xs text-fg-muted">
+              Updated {formatLastUpdated(lastRefreshed)}
+            </span>
           )}
         </div>
         <div className="flex items-center gap-2">
@@ -192,7 +196,9 @@ export function AdminAnalytics() {
         {/* Top Events */}
         <Card>
           <div className="p-4">
-            <h3 className="text-base font-semibold text-fg-primary mb-3">Top Events ({events?.period ?? eventPeriod})</h3>
+            <h3 className="text-base font-semibold text-fg-primary mb-3">
+              Top Events ({events?.period ?? eventPeriod})
+            </h3>
             <EventsTable data={events?.events ?? []} />
           </div>
         </Card>
@@ -207,7 +213,9 @@ export function AdminAnalytics() {
           aria-expanded={showForwarding}
         >
           <span className="text-base font-semibold text-fg-primary">Event Forwarding</span>
-          <span className="text-fg-muted text-sm" aria-hidden="true">{showForwarding ? '\u25B2' : '\u25BC'}</span>
+          <span className="text-fg-muted text-sm" aria-hidden="true">
+            {showForwarding ? '\u25B2' : '\u25BC'}
+          </span>
         </button>
         {showForwarding && (
           <div className="px-4 pb-4">

@@ -85,7 +85,9 @@ vi.mock('../../src/middleware/auth', () => ({
   requireApproved: () => vi.fn(),
 }));
 
-vi.mock('../../src/middleware/error', () => ({
+// Keep the real AppError: auth's module graph defines RateLimitError from it at load time.
+vi.mock('../../src/middleware/error', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/middleware/error')>()),
   errors: {
     notFound: (msg: string) => {
       const err = new Error(msg) as Error & { statusCode: number; error: string };

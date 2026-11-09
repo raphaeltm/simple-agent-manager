@@ -248,9 +248,15 @@ export async function validatePlatformIntegrationInput(
   return { ok: errors.length === 0, errors };
 }
 
+/**
+ * Setup completes once somebody can sign in: an OAuth login provider, or email sign-in codes
+ * when the deployment can send email (`services/email-sign-in.ts`).
+ */
 export function validateSetupCanComplete(
-  config: ResolvedPlatformConfig
+  config: ResolvedPlatformConfig,
+  options: { emailSignIn: boolean } = { emailSignIn: false }
 ): PlatformConfigValidationResult {
+  if (options.emailSignIn) return { ok: true, errors: [] };
   const hasGitHub = Boolean(config.github.clientId.value && config.github.clientSecret.value);
   const hasGoogle = Boolean(config.google.clientId.value && config.google.clientSecret.value);
   const hasGitLab = Boolean(

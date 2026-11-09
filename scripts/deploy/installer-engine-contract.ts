@@ -56,6 +56,8 @@ export interface EngineEvent {
   operation?: string;
   exitCode?: number | null;
   signal?: string | null;
+  /** Scrubbed command output; installations only, never legacy-ci (public CI logs). */
+  tail?: string[];
 }
 export interface EngineCheckpoint {
   schemaVersion: 1;
