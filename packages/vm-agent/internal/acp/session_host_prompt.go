@@ -624,18 +624,6 @@ func (h *SessionHost) finishPrompt(
 	h.scheduleProviderUsageProbe()
 }
 
-func (h *SessionHost) finishPromptCancelled(attempt *promptAttempt, reqID json.RawMessage, info promptStartInfo) {
-	if !attempt.completeWith(h, "cancelled", context.Canceled, func() { h.markPromptDoneForAttempt(attempt) }) {
-		return
-	}
-	slog.Info("ACP: Prompt cancelled", "promptId", attempt.id)
-	h.reportLifecycle("info", "ACP Prompt cancelled", attempt.logFields(map[string]interface{}{
-		"duration": time.Since(info.startedAt).String(),
-		"promptId": attempt.id,
-	}))
-	h.broadcastMessage(h.marshalJSONRPCError(reqID, -32800, "Prompt cancelled"))
-}
-
 func (h *SessionHost) finishPromptAttemptWithError(attempt *promptAttempt, promptCtx context.Context, reqID json.RawMessage, info promptStartInfo, err error) {
 	if errors.Is(promptCtx.Err(), context.DeadlineExceeded) {
 		if h.parkPromptCrashForEviction("prompt_deadline", func() {

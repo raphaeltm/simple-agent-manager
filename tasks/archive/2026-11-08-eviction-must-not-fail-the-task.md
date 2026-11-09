@@ -258,3 +258,8 @@ issuing a verdict.
   hibernate authentication success/failure controls with race detection (4.180s).
   Final node listing confirmed zero remaining VM nodes after cleanup; temporary
   profile deletion returned success.
+- CI caught the prompt file at 802 lines after the deadline guard. Moved unchanged
+  `finishPromptCancelled` beside cancellation completion in `session_host_cancel.go`
+  (prompt file now 789 lines); focused cancellation/eviction/deadline race tests
+  pass (24.363s), and the file-size gate passes. Refresh staging for this final
+  release identity before merge; no behavior changed in this extraction.
