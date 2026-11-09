@@ -194,7 +194,12 @@ describe('POST /api/workspaces/:id/callback-token/renew', () => {
     const payload = await verifyCallbackToken(body.token, testEnv, {
       expectedScope: 'workspace',
     });
-    expect(payload).toEqual({ workspace: WS_ACTIVE, type: 'callback', scope: 'workspace' });
+    expect(payload).toEqual({
+      workspace: WS_ACTIVE,
+      type: 'callback',
+      scope: 'workspace',
+      callbackGeneration: null,
+    });
     const renewedClaims = decodeJwt(body.token);
     expect(renewedClaims.sub).toBe(WS_ACTIVE);
     expect(renewedClaims.exp).toBeGreaterThan(agedClaims.exp as number);
@@ -462,7 +467,12 @@ describe('mintWorkspaceCallbackTokenForNodeDelivery', () => {
     expect(token).not.toBeNull();
     await expect(
       verifyCallbackToken(token as string, testEnv, { expectedScope: 'workspace' })
-    ).resolves.toEqual({ workspace: WS_ACTIVE, type: 'callback', scope: 'workspace' });
+    ).resolves.toEqual({
+      workspace: WS_ACTIVE,
+      type: 'callback',
+      scope: 'workspace',
+      callbackGeneration: null,
+    });
   });
 
   it.each([
