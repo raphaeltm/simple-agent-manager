@@ -38,14 +38,15 @@ export const SAM_PROXY_AGENT_TYPES: readonly AgentType[] = ['claude-code', 'open
 /**
  * Returns the auth methods available for an agent, driven by the catalog
  * capabilities rather than hardcoded provider branches:
+ * - 'oauth-token': only agents that declare oauthSupport, listed first
  * - 'api-key': every agent
- * - 'oauth-token': only agents that declare oauthSupport
  * - 'sam': only agents the SAM AI proxy supports
  */
 export function authMethodsForAgent(agentId: string): AuthMethod[] {
-  const methods: AuthMethod[] = ['api-key'];
+  // A subscription comes first where the agent has one: signing in is quicker than finding and
+  // pasting an API key, and SAM can run the sign-in for Claude Code and Codex.
   const def = getAgentDefinition(agentId as AgentType);
-  if (def?.oauthSupport) methods.push('oauth-token');
+  const methods: AuthMethod[] = def?.oauthSupport ? ['oauth-token', 'api-key'] : ['api-key'];
   if (SAM_PROXY_AGENT_TYPES.includes(agentId as AgentType)) methods.push('sam');
   return methods;
 }
@@ -67,6 +68,8 @@ export interface StepFormState {
   scalewayProjectId: string;
   // Project (project step)
   selectedRepoName: string;
+  /** Name for a SAM-hosted project (the repository is created with it). */
+  hostedProjectName: string;
 }
 
 export const INITIAL_FORM: StepFormState = {
@@ -82,6 +85,7 @@ export const INITIAL_FORM: StepFormState = {
   scalewaySecretKey: '',
   scalewayProjectId: '',
   selectedRepoName: '',
+  hostedProjectName: '',
 };
 
 /**

@@ -16,6 +16,8 @@ export interface GeneratedStep {
   details: string[];
   /** Steps marked optional are already handled and shown as "Done" */
   isOptional: boolean;
+  /** The project step creates a SAM-hosted repository (Cloudflare Artifacts), not a GitHub one. */
+  hostedRepo?: boolean;
 }
 
 /**
@@ -44,12 +46,12 @@ const STEP_CONTENT: Record<string, Omit<GeneratedStep, 'isOptional'>> = {
   'ai-setup': step(
     'ai-setup',
     'Connect an AI agent',
-    'Pick the coding agent you want to use, then connect it — with your own API key, your provider subscription, or SAM-managed AI.',
+    'Pick the coding agent you want to use, then sign in with your subscription, use an API key, or SAM-managed AI.',
     'Connect Agent',
     '1 minute',
     [
       'Choose from Claude Code, Codex, Gemini, Mistral, OpenCode, or Amp',
-      'Bring your own API key, OAuth subscription, or use SAM-managed AI',
+      'Sign in with your Claude or ChatGPT subscription in a few clicks',
       'Your credentials are encrypted and stored securely',
       'You can change agents or switch connection method anytime',
     ]
@@ -106,6 +108,19 @@ const STEP_CONTENT: Record<string, Omit<GeneratedStep, 'isOptional'>> = {
       'Add more projects later',
     ]
   ),
+  'project-hosted': step(
+    'project',
+    'Create your first project',
+    'Name it and SAM creates its repository for you. No GitHub needed.',
+    'Create Project',
+    '30 seconds',
+    [
+      'SAM hosts the Git repository in your Cloudflare account',
+      'Agents clone it, commit and push like any Git remote',
+      'Connect GitHub later for other projects if you want',
+      'You can add more projects later',
+    ]
+  ),
   'project-no-repo': step(
     'project',
     'Create your first project',
@@ -123,12 +138,12 @@ const STEP_CONTENT: Record<string, Omit<GeneratedStep, 'isOptional'>> = {
 
 export function generatePath(tags: string[]): GeneratedStep[] {
   const steps: GeneratedStep[] = [];
-  const add = (key: string, isOptional: boolean) => {
+  const add = (key: string, isOptional: boolean, extra: Partial<GeneratedStep> = {}) => {
     const content = STEP_CONTENT[key];
     if (!content) {
       throw new Error(`generatePath: unknown step key "${key}"`);
     }
-    steps.push({ ...content, isOptional });
+    steps.push({ ...content, isOptional, ...extra });
   };
 
   // AI agent setup — always emitted; agent + connection method are chosen inline.
@@ -138,6 +153,13 @@ export function generatePath(tags: string[]): GeneratedStep[] {
   const cloudDone = tags.includes('existing-cloud');
   if (tags.includes('byoc')) add('cloud-byoc', cloudDone);
   else add('cloud-sam', cloudDone);
+
+  // A SAM-hosted repository needs no GitHub at all: no GitHub App step, and the first
+  // project creates its repository on Cloudflare Artifacts.
+  if (tags.includes('repo-artifacts')) {
+    add('project-hosted', false, { hostedRepo: true });
+    return steps;
+  }
 
   // GitHub access.
   add('github', tags.includes('existing-github'));

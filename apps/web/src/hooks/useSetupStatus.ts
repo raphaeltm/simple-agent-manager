@@ -1,7 +1,7 @@
 import { hasByocComputeCredential } from '@simple-agent-manager/shared';
 import { useQuery } from '@tanstack/react-query';
 
-import { githubInstallationsQueryOptions } from '../lib/query-options';
+import { githubInstallationsQueryOptions, projectListQueryOptions } from '../lib/query-options';
 import { useAgentCredentials } from './useAgentCatalog';
 import { useCredentials } from './useCredentials';
 
@@ -10,11 +10,16 @@ export interface SetupStatus {
   hasCloud: boolean;
   /** The GitHub App is installed on at least one account. */
   hasGitHub: boolean;
+  /**
+   * Agents have a repository to work on: the GitHub App is installed, or the user already has a
+   * project (for example a SAM-hosted one on Cloudflare Artifacts, which needs no GitHub).
+   */
+  hasRepoSource: boolean;
   /** The user has at least one active agent credential. */
   hasAgent: boolean;
   /**
-   * Onboarding is complete only when the user has configured their OWN agent,
-   * cloud and GitHub. Platform availability (SAM-managed AI tokens / SAM-managed
+   * Onboarding is complete only when the user has configured their OWN agent and
+   * cloud, and has a repository source. Platform availability (SAM-managed AI tokens / SAM-managed
    * infrastructure) must NOT auto-complete onboarding — routing through SAM is
    * itself a decision the user makes inside onboarding.
    */
@@ -47,6 +52,14 @@ export function useSetupStatus(queryScope: string): SetupStatus {
 
   const hasCloud = hasByocComputeCredential(credentials.credentials);
   const hasGitHub = (installationsQuery.data ?? []).length > 0;
+  // Only asked when GitHub is not connected, so GitHub users pay no extra request on the
+  // pages this hook runs on (every authenticated page, through AppShell).
+  const needsProjectCheck = Boolean(queryScope) && installationsQuery.isSuccess && !hasGitHub;
+  const projectsQuery = useQuery({
+    ...projectListQueryOptions(queryScope, 1),
+    enabled: needsProjectCheck,
+  });
+  const hasRepoSource = hasGitHub || (projectsQuery.data ?? []).length > 0;
   const hasAgent = agentCredentials.credentials.some((credential) => credential.isActive);
 
   // Loading until every read has settled. Deciding on the first read to land read the
@@ -57,7 +70,17 @@ export function useSetupStatus(queryScope: string): SetupStatus {
   // failed read cannot hold the caller in a permanent loading state.
   const loading =
     Boolean(queryScope) &&
-    (credentials.loading || agentCredentials.loading || installationsQuery.isPending);
+    (credentials.loading ||
+      agentCredentials.loading ||
+      installationsQuery.isPending ||
+      (needsProjectCheck && projectsQuery.isPending));
 
-  return { hasCloud, hasGitHub, hasAgent, isComplete: hasAgent && hasCloud && hasGitHub, loading };
+  return {
+    hasCloud,
+    hasGitHub,
+    hasRepoSource,
+    hasAgent,
+    isComplete: hasAgent && hasCloud && hasRepoSource,
+    loading,
+  };
 }

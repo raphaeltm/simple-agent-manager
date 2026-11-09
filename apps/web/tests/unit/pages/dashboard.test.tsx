@@ -86,22 +86,22 @@ describe('Dashboard page', () => {
     expect(screen.getByText(/Welcome, Dev User/)).toBeInTheDocument();
   });
 
-  it('shows Import Project button', () => {
+  it('shows New project button', () => {
     mocks.listProjects.mockReturnValue({ projects: [sampleProject] });
     renderDashboard();
-    expect(screen.getByRole('button', { name: 'Import Project' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'New project' })).toBeInTheDocument();
   });
 
   it('shows empty state when no projects', () => {
     renderDashboard();
-    expect(screen.getByText('Import your first project')).toBeInTheDocument();
+    expect(screen.getByText('Create your first project')).toBeInTheDocument();
   });
 
   it('does not present a failed project request as an empty account', () => {
     mocks.listProjects.mockReturnValue({ projects: [], error: 'Network error' });
     renderDashboard();
     expect(screen.getByText('Network error')).toBeInTheDocument();
-    expect(screen.queryByText('Import your first project')).not.toBeInTheDocument();
+    expect(screen.queryByText('Create your first project')).not.toBeInTheDocument();
   });
 
   it('renders project cards when projects exist', () => {

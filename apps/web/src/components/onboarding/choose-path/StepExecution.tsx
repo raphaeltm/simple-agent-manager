@@ -161,6 +161,27 @@ export function StepExecution({ steps, onComplete }: StepExecutionProps) {
   /* ─── Project creation ─── */
 
   const handleCreateProject = useCallback(async () => {
+    if (step?.hostedRepo) {
+      const name = form.hostedProjectName.trim();
+      if (!name) {
+        setError('Please name your project');
+        return;
+      }
+      setLoading(true);
+      setError(null);
+      try {
+        // SAM creates the repository on Cloudflare Artifacts; no GitHub involved.
+        await createProject({ name, repoProvider: 'artifacts', defaultBranch: 'main' });
+        if (abortRef.current.signal.aborted) return;
+        markStepDone();
+      } catch (err) {
+        if (abortRef.current.signal.aborted) return;
+        setError(err instanceof Error ? err.message : 'Failed to create project');
+      } finally {
+        if (!abortRef.current.signal.aborted) setLoading(false);
+      }
+      return;
+    }
     if (!form.selectedRepoName) {
       setError('Please select a repository');
       return;
@@ -191,7 +212,7 @@ export function StepExecution({ steps, onComplete }: StepExecutionProps) {
     } finally {
       if (!abortRef.current.signal.aborted) setLoading(false);
     }
-  }, [form.selectedRepoName, repos, markStepDone]);
+  }, [step?.hostedRepo, form.hostedProjectName, form.selectedRepoName, repos, markStepDone]);
 
   /* ─── Repository loading ─── */
 
@@ -265,6 +286,8 @@ export function StepExecution({ steps, onComplete }: StepExecutionProps) {
             onAction={handleAction}
             onGitHubInstall={handleGitHubInstall}
             onCreateProject={handleCreateProject}
+            onAgentConnected={markStepDone}
+            hostedRepo={step.hostedRepo === true}
             onSkip={step.isOptional ? handleSkip : undefined}
             actionLabel={step.actionLabel}
           />

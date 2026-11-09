@@ -21,6 +21,8 @@ export interface PathOption {
   next: string | null;
   /** Tags that influence the generated path */
   tags: string[];
+  /** Offered only when this installation can host repositories on Cloudflare Artifacts. */
+  requiresArtifacts?: boolean;
 }
 
 /**
@@ -34,9 +36,10 @@ function opt(
   description: string,
   icon: string,
   next: string | null,
-  tags: string[]
+  tags: string[],
+  requiresArtifacts = false
 ): PathOption {
-  return { id, label, description, icon, next, tags };
+  return { id, label, description, icon, next, tags, ...(requiresArtifacts ? { requiresArtifacts } : {}) };
 }
 
 export const QUESTIONS: PathQuestion[] = [
@@ -51,7 +54,7 @@ export const QUESTIONS: PathQuestion[] = [
         'I have Hetzner or Scaleway',
         'Most cost-effective — you pay your cloud provider directly for usage',
         'H',
-        'github-ready',
+        'repo-source',
         ['byoc']
       ),
       opt(
@@ -59,28 +62,37 @@ export const QUESTIONS: PathQuestion[] = [
         'Use SAM-managed infrastructure',
         'Let SAM provision and manage VMs for you — bring your own cloud account anytime.',
         '\u{1F680}',
-        'github-ready',
+        'repo-source',
         []
       ),
     ],
   },
   {
-    id: 'github-ready',
-    question: 'Do you have a GitHub repo ready?',
+    id: 'repo-source',
+    question: 'Where should your code live?',
     description:
-      "SAM agents work on real code. You'll connect GitHub so they can clone repos and open PRs.",
+      'Agents work on a Git repository. SAM can host it for you, or connect to GitHub.',
     options: [
       opt(
+        'sam-hosted',
+        'Let SAM host it',
+        'SAM keeps the repository in your Cloudflare account. No GitHub account needed.',
+        '\u{1F4E6}',
+        null,
+        ['repo-artifacts'],
+        true
+      ),
+      opt(
         'yes',
-        'Yes, I have a repo',
-        'I have a project I want to work on',
+        'GitHub — I have a repo',
+        'Connect GitHub and pick the repository to work on',
         '\u{1F4C2}',
         null,
         ['has-repo']
       ),
       opt(
         'no-repo',
-        "Not yet, I'll pick one after connecting",
+        "GitHub — I'll pick one after connecting",
         'Connect GitHub first, then choose or fork a repo',
         '\u{1F517}',
         null,
@@ -89,3 +101,13 @@ export const QUESTIONS: PathQuestion[] = [
     ],
   },
 ];
+
+/** The questions this installation can answer: SAM-hosted repos only where Artifacts is on. */
+export function questionsFor(options: { artifactsEnabled: boolean }): PathQuestion[] {
+  return QUESTIONS.map((question) => ({
+    ...question,
+    options: question.options.filter(
+      (option) => !option.requiresArtifacts || options.artifactsEnabled
+    ),
+  }));
+}

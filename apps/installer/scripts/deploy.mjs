@@ -3,7 +3,8 @@ import { readFile, unlink, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 // Verified against Cloudflare GET /oauth/scopes on 2026-10-28; the email scopes on
-// 2026-11-08 (email sign-in codes and agent email). Validate the live
+// 2026-11-08 (email sign-in codes and agent email); the Artifacts scopes on
+// 2026-11-09. Validate the live
 // catalog before every registration/scope change; these are OAuth scope IDs,
 // not account-token permission-group display names.
 const FULL_SCOPES = [
@@ -29,6 +30,9 @@ const FULL_SCOPES = [
   'zone-settings.write',
   'email-routing-rule.write',
   'email-sending.write',
+  // SAM-hosted repositories on Cloudflare Artifacts (optional token groups in credentials.ts).
+  'artifacts.read',
+  'artifacts.write',
 ];
 const SECRET_NAMES = ['OAUTH_CLIENT_ID', 'OAUTH_CLIENT_SECRET'];
 process.chdir(fileURLToPath(new URL('..', import.meta.url)));

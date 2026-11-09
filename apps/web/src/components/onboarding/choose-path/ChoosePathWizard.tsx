@@ -4,17 +4,19 @@
  * Renders as a fixed overlay with a green-glow vignette background.
  * The standard app UI is hidden behind it. Users dismiss via X button.
  */
+import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useQueryScope } from '../../../hooks/useQueryScope';
 import { useSetupStatus } from '../../../hooks/useSetupStatus';
+import { projectArtifactsEnabledQueryOptions } from '../../../lib/query-options';
 import { useOnboarding } from '../OnboardingContext';
 import { CompletionScreen } from './CompletionScreen';
 import { type GeneratedStep, generatePath } from './path-generator';
 import { PathPreview } from './PathPreview';
 import { QuestionCard } from './QuestionCard';
-import { type PathOption, QUESTIONS } from './questions';
+import { type PathOption, questionsFor } from './questions';
 import { StepExecution } from './StepExecution';
 
 type Phase = 'questions' | 'path-preview' | 'executing' | 'complete';
@@ -107,6 +109,16 @@ export function ChoosePathWizard() {
   // still makes inside the flow — it must not skip the question.
   const queryScope = useQueryScope();
   const { hasCloud, hasGitHub, hasAgent, loading: setupLoading } = useSetupStatus(queryScope);
+  // SAM-hosted repositories (Cloudflare Artifacts) are offered only where this installation has
+  // them; everywhere else the repository question is about GitHub.
+  const artifactsEnabledQuery = useQuery({
+    ...projectArtifactsEnabledQueryOptions(queryScope),
+    enabled: Boolean(queryScope) && showOverlay,
+  });
+  const questions = useMemo(
+    () => questionsFor({ artifactsEnabled: artifactsEnabledQuery.data === true }),
+    [artifactsEnabledQuery.data]
+  );
 
   useEffect(() => {
     if (setupLoading) return;
@@ -150,7 +162,7 @@ export function ChoosePathWizard() {
     const lastAnsweredId = questionHistory.at(-1);
     if (!lastAnsweredId) return;
     const lastAnswer = answers[lastAnsweredId];
-    const lastOption = QUESTIONS.find((q) => q.id === lastAnsweredId)?.options.find(
+    const lastOption = questions.find((q) => q.id === lastAnsweredId)?.options.find(
       (o) => o.id === lastAnswer
     );
 
@@ -162,7 +174,7 @@ export function ChoosePathWizard() {
       setTags((prev) => prev.filter((t) => !lastOption.tags.includes(t)));
     }
     setCurrentQuestionId(lastAnsweredId);
-  }, [answers, questionHistory]);
+  }, [answers, questionHistory, questions]);
 
   const handleExecutionComplete = useCallback(() => {
     setPhase('complete');
@@ -176,7 +188,7 @@ export function ChoosePathWizard() {
 
   if (!showOverlay) return null;
 
-  const currentQuestion = QUESTIONS.find((q) => q.id === currentQuestionId);
+  const currentQuestion = questions.find((q) => q.id === currentQuestionId);
 
   return (
     <div
