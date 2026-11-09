@@ -304,6 +304,7 @@ type SessionHost struct {
 	guardedCancelAttempt *promptAttempt // promptMu: owns any pending guarded stop
 	guardedCancelProcess agentProcess   // promptMu: fence survives detach until this process exits
 	guardedCancelPending bool           // promptMu: a matched process stop still owns admission
+	evictionEpoch        uint64         // promptMu: identifies the current admission fence
 	evictionPending      bool           // promptMu: durable eviction owns this runtime; reject new work
 	evictionParked       evictionParked // promptMu: crash handling deferred while evictionPending
 	evictionParkTimer    *time.Timer    // promptMu: replays parked handling if the eviction never resolves it

@@ -139,7 +139,7 @@ issuing a verdict.
       control test)
 - [x] The orphan sweep does not stop a workspace whose task became terminal less than
       the grace period ago (SQLite integration test)
-- [x] Staging: a real VM eviction under memory pressure leaves the task non-terminal and
+- [ ] Staging: a real VM eviction under memory pressure leaves the task non-terminal and
       the conversation resumes on a new workspace (or the reason it cannot be exercised
       is documented, with fallback evidence)
 - [ ] Prod: after deploy, monitor `agent_restart_failed` / "no running devcontainer
@@ -263,3 +263,42 @@ issuing a verdict.
   (prompt file now 789 lines); focused cancellation/eviction/deadline race tests
   pass (24.363s), and the file-size gate passes. Refresh staging for this final
   release identity before merge; no behavior changed in this extraction.
+
+## Coordinator review continuation (2026-11-09)
+
+This section supersedes the earlier candidate identity and accepted-fallback claim.
+Real pressure eviction is required before release approval; the task is active again.
+Staging refresh 42582734240 failed fetching the upstream OpenCode installer asset
+(HTTP 504), before any new VM was provisioned. Deploy the final revised source next.
+
+- [x] Fence every SessionHost in the workspace, aggregate interrupted work, and
+  roll back every fence if durable intent preparation aborts. Two real ACP processes
+  killed by the production stop callback produce no failed verdict; reverting the
+  helper makes agent-2 report a false failure.
+- [x] Expiry reopens admission. Per-episode epochs prevent stale timers and rollback
+  closures from clearing later fences. A new prompt can start and a subsequent
+  eviction parks again; removing admission clearing discriminates the regression.
+- [x] A delayed reconciler stop reacquires all fences and persists new interrupted
+  work before Docker stop. Persistence monotonically merges that evidence, advancing
+  the payload revision so a stale idle acknowledgement cannot erase it. Both guards
+  have discriminating tests.
+- [x] Orphan cleanup vetoes any recent terminal task, including on a reused workspace.
+  Real Workers SQL red/green coverage includes old failed + fresh failed tasks with a
+  chat, old completed + fresh failed tasks without a chat, NULL completion fallback,
+  and old-task controls. Completed tasks with a chat independently retain sleep
+  ownership. Full cleanup suite: 31 passing tests; API typecheck and lint pass.
+- [x] go-specialist source review ADDRESSED; focused race ACP/server/persistence pass
+  (15.474s / 20.827s / 2.660s). Cloudflare/constitution/doc-sync re-review PASS.
+  Test-engineer/task-completion source review PASS; real staging and production pending.
+- [ ] Deploy final source and demonstrate a real pressure eviction on a fresh VM.
+- [ ] Obtain coordinator approval naming PR 2604 and the final full head SHA.
+
+Review dispositions: the small interval between PrepareEviction and intent commit
+is deliberately owned by eviction; failed preparation replays ordinary crash recovery,
+while a successful intent owns the container stop. The prompt receipt observer's
+prompt_terminal_error is stored only as private diagnostic state: errorCode and
+stopReason are unexported fields of PromptDeliveryReceipt, omitted from its JSON;
+no production reader examines errorCode (GetPromptDelivery reads it without branching).
+Thus it cannot post a failed verdict. Test hygiene changes isolate inherited agent
+state, accept the precise independent telemetry callback, and drain fake upload bodies;
+they preserve auth/cancellation assertions and were required for reliable full checks.

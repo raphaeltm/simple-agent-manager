@@ -253,3 +253,46 @@ func TestPromptDeadlineReturnDuringEvictionIsNotAVerdict(t *testing.T) {
 	expectCompletion(t, completed, EvictedStopReason, time.Second, "committed eviction did not end the prompt")
 	assertNoSecondCompletion(t, completed)
 }
+
+func TestExpiredEvictionReopensAdmissionAndNextEpisodeParks(t *testing.T) {
+	host, oldProc, completed, starts := armEvictedPrompt(t)
+	defer host.Stop()
+	host.config.EvictionParkTimeout = 500 * time.Millisecond
+	_, staleRollback := host.PrepareEviction()
+	host.promptMu.Lock()
+	oldEpoch := host.evictionEpoch
+	host.promptMu.Unlock()
+	finishWithPeerDisconnect(host)
+	exitFakeProcess(oldProc)
+	waitForParked(t, host, func(p evictionParked) bool { return len(p.promptCrash) == 1 && len(p.processExit) == 1 })
+	expectCompletion(t, completed, crashRecoveredStopReason, 5*time.Second, "expired eviction did not recover")
+	if starts.Load() != 1 {
+		t.Fatalf("restarts = %d, want 1", starts.Load())
+	}
+	attempt, ok := host.beginPrompt(func() {}, nil)
+	if !ok {
+		t.Fatal("expired eviction permanently fenced the recovered host")
+	}
+	attempt.complete(host, "cancelled", context.Canceled)
+
+	host.config.EvictionParkTimeout = time.Hour
+	_, rollback := host.PrepareEviction()
+	staleRollback()
+	host.expireEvictionPark(oldEpoch)
+	if _, ok := host.beginPrompt(func() {}, nil); ok {
+		t.Fatal("old episode cleared the new eviction fence")
+	}
+	replayed := make(chan struct{}, 1)
+	if !host.parkPromptCrashForEviction("next_episode", func() { replayed <- struct{}{} }) {
+		t.Fatal("new eviction inherited expired parking state")
+	}
+	rollback()
+	select {
+	case <-replayed:
+	case <-time.After(time.Second):
+		t.Fatal("new episode rollback did not replay")
+	}
+	if _, ok := host.beginPrompt(func() {}, nil); !ok {
+		t.Fatal("new episode rollback left admission fenced")
+	}
+}

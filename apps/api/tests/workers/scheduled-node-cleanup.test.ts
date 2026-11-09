@@ -797,6 +797,76 @@ describe('runNodeCleanupSweep — vertical slice', () => {
       await env.DATABASE.prepare(`DELETE FROM nodes WHERE id LIKE 'node-nc-grace-%'`).run();
     });
 
+    it('waits for the latest terminal task on a reused workspace before orphan cleanup', async () => {
+      await seedBaseData();
+      const oldDate = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      const recentDate = new Date(Date.now() - 30 * 1000).toISOString();
+      for (const [suffix, latestEnd, completedAt, oldStatus] of [
+        ['recent', recentDate, recentDate, 'failed'],
+        ['recent-null-completion', recentDate, null, 'failed'],
+        ['old', oldDate, oldDate, 'failed'],
+        ['recent-after-completed', recentDate, recentDate, 'completed'],
+        ['old-after-completed', oldDate, oldDate, 'completed'],
+      ] as const) {
+        const nodeId = `node-nc-reused-grace-${suffix}`;
+        const workspaceId = `ws-nc-reused-grace-${suffix}`;
+        await seedNode(nodeId, USER_ID, { status: 'running', createdAt: oldDate });
+        await seedWorkspace(workspaceId, nodeId, USER_ID, {
+          projectId: PROJECT_ID,
+          status: 'running',
+          // Completed tasks with a chat are independently sleep-owned.
+          // Their orphan case has no chat; failed tasks retain the production chat link.
+          chatSessionId: oldStatus === 'completed' ? undefined : `chat-nc-reused-grace-${suffix}`,
+          createdAt: oldDate,
+        });
+        await seedAgentSession(`agent-nc-reused-grace-${suffix}`, workspaceId, USER_ID, {
+          status: 'error',
+        });
+        // Old task A must not qualify this reused workspace while task B is still
+        // inside the grace period, including writers that omit completed_at.
+        await seedTask(`task-nc-reused-grace-${suffix}-a`, PROJECT_ID, USER_ID, {
+          status: oldStatus,
+          workspaceId,
+          completedAt: oldDate,
+          updatedAt: oldDate,
+        });
+        await seedTask(`task-nc-reused-grace-${suffix}-b`, PROJECT_ID, USER_ID, {
+          status: 'failed',
+          workspaceId,
+          completedAt,
+          updatedAt: latestEnd,
+        });
+      }
+
+      const result = await runNodeCleanupSweep(env as unknown as Env);
+      expect(await getWorkspaceStatus('ws-nc-reused-grace-recent')).toMatchObject({
+        status: 'running',
+      });
+      expect(await getWorkspaceStatus('ws-nc-reused-grace-recent-null-completion')).toMatchObject({
+        status: 'running',
+      });
+      expect(await getWorkspaceStatus('ws-nc-reused-grace-old')).toMatchObject({
+        status: 'stopped',
+      });
+      expect(await getWorkspaceStatus('ws-nc-reused-grace-recent-after-completed')).toMatchObject({
+        status: 'running',
+      });
+      expect(await getWorkspaceStatus('ws-nc-reused-grace-old-after-completed')).toMatchObject({
+        status: 'stopped',
+      });
+      expect(result.orphanedWorkspacesFlagged).toBe(2);
+
+      for (const table of ['agent_sessions', 'tasks']) {
+        await env.DATABASE.prepare(
+          `DELETE FROM ${table} WHERE workspace_id LIKE 'ws-nc-reused-grace-%'`
+        ).run();
+      }
+      await env.DATABASE.prepare(
+        `DELETE FROM workspaces WHERE id LIKE 'ws-nc-reused-grace-%'`
+      ).run();
+      await env.DATABASE.prepare(`DELETE FROM nodes WHERE id LIKE 'node-nc-reused-grace-%'`).run();
+    });
+
     it('leaves a failed task workspace to the sleep lifecycle only while its agent session can be slept', async () => {
       // node_cleanup runs before session_sleep in every tick: without this
       // ownership predicate it would stop a failed task's workspace before its

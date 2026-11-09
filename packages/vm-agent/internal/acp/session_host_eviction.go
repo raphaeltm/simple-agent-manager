@@ -33,9 +33,18 @@ func (h *SessionHost) PrepareEviction() (interrupted *bool, rollback func()) {
 	h.promptMu.Lock()
 	defer h.promptMu.Unlock()
 	wasPending := h.evictionPending
+	if !wasPending {
+		h.evictionEpoch++
+		h.evictionParkExpired = false
+	}
+	epoch := h.evictionEpoch
 	h.evictionPending = true
 	rollback = func() {
 		h.promptMu.Lock()
+		if h.evictionEpoch != epoch || !h.evictionPending {
+			h.promptMu.Unlock()
+			return
+		}
 		h.evictionPending = wasPending
 		var parked evictionParked
 		if !h.evictionPending {
@@ -129,16 +138,18 @@ func (h *SessionHost) armEvictionParkDeadlineLocked() {
 	if timeout <= 0 {
 		timeout = DefaultEvictionParkTimeout
 	}
-	h.evictionParkTimer = time.AfterFunc(timeout, h.expireEvictionPark)
+	epoch := h.evictionEpoch
+	h.evictionParkTimer = time.AfterFunc(timeout, func() { h.expireEvictionPark(epoch) })
 }
 
-func (h *SessionHost) expireEvictionPark() {
+func (h *SessionHost) expireEvictionPark(epoch uint64) {
 	h.promptMu.Lock()
-	h.evictionParkTimer = nil
-	if !h.evictionPending {
+	if h.evictionEpoch != epoch || !h.evictionPending {
 		h.promptMu.Unlock()
 		return
 	}
+	h.evictionParkTimer = nil
+	h.evictionPending = false // Expired ownership must also reopen prompt admission.
 	h.evictionParkExpired = true
 	parked := h.evictionParked
 	h.evictionParked = evictionParked{}
