@@ -6,13 +6,13 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -24,9 +24,16 @@ const (
 	// escalating to SIGKILL. Configurable via ProcessConfig.StopGracePeriod.
 	DefaultStopGracePeriod = 5 * time.Second
 
-	// DefaultStopTimeout is the total time Stop() is allowed to take before
-	// giving up. Configurable via ProcessConfig.StopTimeout.
+	// DefaultStopTimeout bounds the host-process exit wait; Docker commands
+	// have separate deadlines. Configurable via ProcessConfig.StopTimeout.
 	DefaultStopTimeout = 10 * time.Second
+
+	// DefaultContainerSignalTimeout bounds each Docker process inspection/signal.
+	// Override via ProcessConfig.ContainerSignalTimeout for slower containers.
+	DefaultContainerSignalTimeout = 3 * time.Second
+	// DefaultDockerExecutable is the Docker CLI installed by cloud-init.
+	// ProcessConfig.DockerExecutable supplies an explicit alternative in tests.
+	DefaultDockerExecutable = "/usr/bin/docker"
 )
 
 // samEnvFiles are the paths inside the devcontainer where SAM and project
@@ -162,23 +169,33 @@ func hasEnvVar(envVars []string, key string) bool {
 // AgentProcess manages an ACP-compliant agent subprocess running inside the
 // devcontainer via docker exec. It pipes stdin/stdout for NDJSON communication.
 //
-// The process is started in its own process group (Setpgid) so that Stop()
-// can reliably kill the entire process tree (docker exec + child processes)
-// using a negative PGID signal.
+// The host docker client has its own process group. Container processes use a
+// distinct launch marker and PID/starttime identities; host PGIDs do not cross
+// the container PID namespace.
 type AgentProcess struct {
-	agentType       string
-	cmd             *exec.Cmd
-	stdin           io.WriteCloser
-	stdout          io.ReadCloser
-	stderr          io.ReadCloser
-	containerID     string
-	startTime       time.Time
-	stopGracePeriod time.Duration
-	stopTimeout     time.Duration
-	mu              sync.Mutex
-	stopped         bool
-	recoveryMu      sync.Mutex
-	recoveryNotify  recoveryNotify
+	agentType                   string
+	cmd                         *exec.Cmd
+	stdin                       io.WriteCloser
+	stdout                      io.ReadCloser
+	stderr                      io.ReadCloser
+	containerID                 string
+	containerOwner              string
+	dockerExecutable            string
+	containerMarkerScan         bool
+	containerCleanupUnavailable bool
+	containerRootPID            int
+	containerRootStart          string
+	containerSessionID          int
+	containerSessionStart       string
+	containerTargets            map[int]string
+	containerSignalTimeout      time.Duration
+	startTime                   time.Time
+	stopGracePeriod             time.Duration
+	stopTimeout                 time.Duration
+	mu                          sync.Mutex
+	stopped                     bool
+	recoveryMu                  sync.Mutex
+	recoveryNotify              recoveryNotify
 
 	// envFilePath is the tmpfs-backed file containing secret env vars.
 	// Cleaned up after the process exits (in Wait) rather than immediately
@@ -215,6 +232,8 @@ func (LocalLauncher) Start(cfg ProcessConfig) (*AgentProcess, error) {
 
 // ProcessConfig holds configuration for spawning an agent process.
 type ProcessConfig struct {
+	// DockerExecutable is an absolute host CLI path. Empty uses DefaultDockerExecutable.
+	DockerExecutable string
 	// ContainerID is the Docker container to exec into.
 	ContainerID string
 	// ContainerUser is the user to run as inside the container.
@@ -233,14 +252,17 @@ type ProcessConfig struct {
 	// StopGracePeriod is how long Stop() waits after SIGTERM before SIGKILL.
 	// Zero uses DefaultStopGracePeriod.
 	StopGracePeriod time.Duration
-	// StopTimeout is the total time Stop() may take. Zero uses DefaultStopTimeout.
+	// ContainerSignalTimeout bounds each container inspection/signal command.
+	// Zero uses DefaultContainerSignalTimeout.
+	ContainerSignalTimeout time.Duration
+	// StopTimeout bounds the host-process exit wait. Zero uses DefaultStopTimeout.
 	StopTimeout time.Duration
 }
 
 // StartProcess spawns an agent process inside the devcontainer.
 // The process communicates via NDJSON over stdin/stdout.
-// The process is placed in its own process group (Setpgid) so that Stop()
-// can signal the entire tree reliably.
+// The Docker client has a host process group; container ownership is established
+// separately by a kernel session and per-launch marker.
 func StartProcess(cfg ProcessConfig) (*AgentProcess, error) {
 	return DockerExecLauncher{}.Start(cfg)
 }
@@ -354,12 +376,32 @@ func removeEnvFile(path string) {
 }
 
 func startDockerExecProcess(cfg ProcessConfig) (*AgentProcess, error) {
-	args, envFilePath, err := buildDockerExecArgs(cfg)
+	dockerExecutable := cfg.DockerExecutable
+	if dockerExecutable == "" {
+		dockerExecutable = DefaultDockerExecutable
+	}
+	if !filepath.IsAbs(dockerExecutable) {
+		return nil, errors.New("Docker executable must be an absolute path")
+	}
+
+	// Per-launch identity survives adapter exec wrappers and ordinary child forks.
+	var ownerBytes [16]byte
+	if _, err := rand.Read(ownerBytes[:]); err != nil {
+		return nil, fmt.Errorf("generate container process ownership: %w", err)
+	}
+	owner := hex.EncodeToString(ownerBytes[:])
+	cfg.EnvVars = mergeProcessEnv(cfg.EnvVars, []string{containerOwnerEnv + "=" + owner})
+	caps := containerCapabilitiesFor(cfg, dockerExecutable, owner)
+	launchCfg := containerLaunchConfig(cfg, caps)
+	if !caps.session || !caps.marker || !caps.proc {
+		slog.Warn("Container agent cleanup using reduced ownership capabilities", "containerId", cfg.ContainerID, "reason", caps.reason())
+	}
+	args, envFilePath, err := buildDockerExecArgs(launchCfg)
 	if err != nil {
 		return nil, err
 	}
 
-	cmd := exec.Command("docker", args...)
+	cmd := exec.Command(dockerExecutable, args...)
 
 	// Place the process in its own process group so we can signal the entire
 	// tree (docker exec CLI + its children) via negative PGID in Stop().
@@ -387,19 +429,31 @@ func startDockerExecProcess(cfg ProcessConfig) (*AgentProcess, error) {
 		stopTimeout = DefaultStopTimeout
 	}
 
-	return &AgentProcess{
-		agentType:       cfg.AcpCommand,
-		cmd:             cmd,
-		stdin:           pipes.stdin,
-		stdout:          pipes.stdout,
-		stderr:          pipes.stderr,
-		containerID:     cfg.ContainerID,
-		envFilePath:     envFilePath,
-		startTime:       time.Now(),
-		stopGracePeriod: gracePeriod,
-		stopTimeout:     stopTimeout,
-		waitDone:        make(chan struct{}),
-	}, nil
+	process := &AgentProcess{
+		agentType:                   cfg.AcpCommand,
+		cmd:                         cmd,
+		stdin:                       pipes.stdin,
+		stdout:                      pipes.stdout,
+		stderr:                      pipes.stderr,
+		containerID:                 cfg.ContainerID,
+		containerOwner:              owner,
+		containerMarkerScan:         caps.marker,
+		containerCleanupUnavailable: !caps.proc,
+		dockerExecutable:            dockerExecutable,
+		containerSignalTimeout:      cfg.ContainerSignalTimeout,
+		envFilePath:                 envFilePath,
+		startTime:                   time.Now(),
+		stopGracePeriod:             gracePeriod,
+		stopTimeout:                 stopTimeout,
+		waitDone:                    make(chan struct{}),
+	}
+	if caps.proc {
+		if err := process.awaitContainerSession(); err != nil {
+			_ = process.Stop()
+			return nil, err
+		}
+	}
+	return process, nil
 }
 
 func startLocalProcess(cfg ProcessConfig) (*AgentProcess, error) {
@@ -547,11 +601,11 @@ func (p *AgentProcess) Stderr() io.Reader {
 //     Killing only the host-side `docker exec` process (via PGID signals)
 //     does NOT terminate the processes inside the container — they run in
 //     a separate PID namespace and will keep consuming resources.
-//  3. Send SIGTERM to the host-side process group to clean up docker exec.
+//  3. Wait for the container grace period without closing its Docker transport.
 //  4. If still running after grace period, SIGKILL both inside and outside.
 //
-// The entire operation is bounded by stopTimeout so Stop() never blocks
-// indefinitely.
+// Docker commands have a configurable per-command deadline; the host-process
+// exit wait is bounded by stopTimeout.
 func (p *AgentProcess) Stop() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -567,15 +621,18 @@ func (p *AgentProcess) Stop() error {
 	}
 	slog.Info("Stopping ACP agent process", "agentType", p.agentType, "pid", pid, "container", p.containerID)
 
-	// Close stdin first to signal the agent to exit gracefully.
+	// Capture descendants before EOF can make their marked parent exit. Retain
+	// PID/starttime identities across TERM so reparented, env-cleared children
+	// remain owned during escalation.
+	cleanupErr := p.captureContainerProcesses()
+	// Close stdin to signal the agent to exit gracefully.
 	if p.stdin != nil {
 		p.stdin.Close()
 	}
 
 	if p.cmd == nil || p.cmd.Process == nil {
 		// No host process, but container processes may still be running.
-		p.killContainerProcesses(syscall.SIGKILL)
-		return nil
+		return errors.Join(cleanupErr, p.killContainerProcesses(syscall.SIGKILL))
 	}
 
 	// Trigger the Wait-once machinery so waitDone closes when the process exits.
@@ -583,19 +640,24 @@ func (p *AgentProcess) Stop() error {
 	go func() { _ = p.Wait() }()
 	waitCh := p.waitDone
 
-	// Overall deadline — Stop() must not block longer than this.
-	deadline := time.NewTimer(p.stopTimeout)
-	defer deadline.Stop()
+	// Bound the host-process exit wait; Docker commands have separate deadlines.
+	stopContext, cancelStop := context.WithTimeout(context.Background(), p.stopTimeout)
+	defer cancelStop()
+	deadline := stopContext.Done()
 
 	// Stage 1: SIGTERM inside the container. This is the critical step —
 	// the agent processes (claude-agent-acp, claude) run inside the container's
 	// PID namespace. Host-side PGID signals only affect docker exec itself.
-	p.killContainerProcesses(syscall.SIGTERM)
+	cleanupErr = errors.Join(cleanupErr, p.killContainerProcesses(syscall.SIGTERM))
 
-	// Stage 2: SIGTERM to host-side process group — cleans up the docker exec CLI.
+	// Local processes need host signals. For Docker, keep the transport alive
+	// through the container grace period; killing it early would falsely look
+	// like successful container exit and force immediate KILL escalation.
 	pgid := pid
-	if err := syscall.Kill(-pgid, syscall.SIGTERM); err != nil {
-		slog.Warn("SIGTERM to process group failed", "pgid", pgid, "error", err)
+	if p.containerID == "" {
+		if err := syscall.Kill(-pgid, syscall.SIGTERM); err != nil {
+			slog.Warn("SIGTERM to process group failed", "pgid", pgid, "error", err)
+		}
 	}
 
 	// Wait for graceful exit or grace period expiry.
@@ -605,17 +667,18 @@ func (p *AgentProcess) Stop() error {
 	select {
 	case <-waitCh:
 		slog.Info("Agent process exited after SIGTERM", "agentType", p.agentType, "pid", pid)
-		return nil
+		// docker exec exiting does not prove its container descendants exited.
+		return errors.Join(cleanupErr, p.killContainerProcesses(syscall.SIGKILL))
 	case <-graceTimer.C:
 		slog.Warn("Agent process did not exit within grace period, sending SIGKILL",
 			"agentType", p.agentType, "pid", pid, "gracePeriod", p.stopGracePeriod)
-	case <-deadline.C:
+	case <-deadline:
 		slog.Error("Agent process stop deadline reached during SIGTERM phase, sending SIGKILL",
 			"agentType", p.agentType, "pid", pid)
 	}
 
 	// Stage 3: SIGKILL inside the container, then to host-side process group.
-	p.killContainerProcesses(syscall.SIGKILL)
+	cleanupErr = errors.Join(cleanupErr, p.killContainerProcesses(syscall.SIGKILL))
 	if err := syscall.Kill(-pgid, syscall.SIGKILL); err != nil {
 		slog.Warn("SIGKILL to process group failed", "pgid", pgid, "error", err)
 	}
@@ -624,62 +687,13 @@ func (p *AgentProcess) Stop() error {
 	select {
 	case <-waitCh:
 		slog.Info("Agent process exited after SIGKILL", "agentType", p.agentType, "pid", pid)
-	case <-deadline.C:
+	case <-deadline:
 		slog.Error("Agent process did not exit after SIGKILL within deadline",
 			"agentType", p.agentType, "pid", pid, "timeout", p.stopTimeout)
-		return fmt.Errorf("agent process %d did not exit within %s", pid, p.stopTimeout)
+		return errors.Join(cleanupErr, fmt.Errorf("agent process %d did not exit within %s", pid, p.stopTimeout))
 	}
 
-	return nil
-}
-
-// killContainerProcesses sends a signal to the agent processes running inside
-// the Docker container. This is necessary because killing the host-side
-// `docker exec` process does NOT terminate the processes inside the container —
-// they run in a separate PID namespace.
-//
-// Targets both the ACP adapter (claude-agent-acp) and the underlying agent
-// (claude) to ensure nothing leaks.
-func (p *AgentProcess) killContainerProcesses(sig syscall.Signal) {
-	if p.containerID == "" {
-		return
-	}
-
-	sigName := "TERM"
-	if sig == syscall.SIGKILL {
-		sigName = "KILL"
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
-	// Kill the ACP adapter process and all its children inside the container.
-	// Using pkill with -f matches the full command line.
-	patterns := containerProcessKillPatterns(p.agentType)
-	for _, pattern := range patterns {
-		cmd := exec.CommandContext(ctx, "docker", "exec", p.containerID,
-			"pkill", fmt.Sprintf("-%s", sigName), "-f", pattern)
-		if err := cmd.Run(); err != nil {
-			// Exit code 1 means no processes matched — that's fine, they already exited.
-			if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
-				slog.Debug("No container processes matched for kill", "signal", sigName, "pattern", pattern)
-			} else {
-				slog.Warn("Failed to kill container processes", "signal", sigName, "pattern", pattern, "error", err)
-			}
-		} else {
-			slog.Info("Sent signal to container processes", "signal", sigName, "pattern", pattern, "container", p.containerID)
-		}
-	}
-}
-
-func containerProcessKillPatterns(command string) []string {
-	if command == codexC2ReleaseRoot+"/current/bin/codex-acp" {
-		// The reviewed wrapper execs Node and its paired CLI through the real
-		// release directory, so neither process retains the wrapper path.
-		base := codexC2ReleaseRoot + "/releases/" + codexC2ReleaseIdentity + "/payload/"
-		return []string{regexp.QuoteMeta(base + "adapter.js"), regexp.QuoteMeta(base + "codex")}
-	}
-	return []string{command}
+	return cleanupErr
 }
 
 // Wait waits for the agent process to exit and returns the error (if any).
