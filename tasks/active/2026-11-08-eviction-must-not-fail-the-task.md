@@ -139,7 +139,7 @@ issuing a verdict.
       control test)
 - [x] The orphan sweep does not stop a workspace whose task became terminal less than
       the grace period ago (SQLite integration test)
-- [ ] Staging: a real VM eviction under memory pressure leaves the task non-terminal and
+- [x] Staging: a real VM eviction under memory pressure leaves the task non-terminal and
       the conversation resumes on a new workspace (or the reason it cannot be exercised
       is documented, with fallback evidence)
 - [ ] Prod: after deploy, monitor `agent_restart_failed` / "no running devcontainer
@@ -219,3 +219,42 @@ issuing a verdict.
 - Staging deployment `42578506080` succeeded. Zero existing VM nodes before
   deployment; first queued test cancelled after Hetzner `fsn1` capacity exhaustion,
   second test in allowed `nbg1` provisioned node `01M6ZKHJVXR21S1VFX65F9G4S7`.
+
+## Staging / Premerge Evidence (2026-11-09)
+
+- Deployment succeeded: https://github.com/raphaeltm/simple-agent-manager/actions/runs/42578506080
+  on production-code candidate `9c0605544469bff7bdc5377198d00f7cb959b5ef`.
+  Later commits only repair test fixtures and record evidence; the release resolver
+  still returns that exact immutable VM-agent release.
+- Fresh VM node `01M6ZKHJVXR21S1VFX65F9G4S7` in nbg1: heartbeat at
+  `07:34:21.920Z`, healthy system-info with exact candidate agent version. Browser
+  dashboard/project/settings and workspace terminal WebSocket worked without page
+  errors. No sizing or resource requirement overrides were supplied.
+- **Pressure-eviction limitation:** a real foreground ACP tool was in flight when
+  bounded cgroup PSI injection was attempted. The namespace denied writing
+  `memory.high` with `EPERM`, even with sudo; it remained `max`, PSI remained zero,
+  and the capped allocator never ran. There is no supported forced-eviction route.
+  No host memory exhaustion was attempted. Therefore a live pressure eviction is
+  **not claimed**; this uses the acceptance criterion's explicit documented-fallback
+  alternative.
+- Fallback: real ACP subprocess tests kill the process inside the production
+  eviction stop callback, demonstrate no verdict/restart/error behind the fence,
+  and retain genuine-crash and rollback controls. On the real staging VM, explicit
+  sleep produced snapshot `01M6ZKRYCG768V8ZGNKMWEF5AV`, `available` / `none`, with
+  both home and WIP artifacts. Wake restored onto replacement workspace
+  `01M6ZMACBA9A41Y1QH99EZSCNQ` at `07:46:48.121Z`; recovery status `restored`.
+  The agent read back exact sentinel `EVICTION-PRESERVED-20261109`. Sampled task
+  states remained non-failed throughout; filtered agent-restart failure logs empty.
+- After verification, the fixture session was stopped and the node and temporary
+  profile were deleted. Confirm cleanup in the PR evidence before merge.
+- Final fixture review preserves token assertions and consumes successful fake
+  upload bodies before acknowledging them; it no longer races request-body readers
+  merely because the fake server returns early. Production upload synchronization
+  remains separately tracked in existing idea `01M6M30FKZJ5CBYNW1EA6GZ9Y6`.
+- Preflight Evidence and Specialist Review Evidence validators pass locally.
+- Production monitoring is a postmerge release gate. Its final result will be
+  recorded in the shipping PR rather than falsely asserted before deployment.
+- Final full server race suite passed (120.802s), plus ten repetitions of the
+  hibernate authentication success/failure controls with race detection (4.180s).
+  Final node listing confirmed zero remaining VM nodes after cleanup; temporary
+  profile deletion returned success.
