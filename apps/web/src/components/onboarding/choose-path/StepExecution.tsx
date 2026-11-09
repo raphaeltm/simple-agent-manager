@@ -36,6 +36,9 @@ const GITHUB_POLL_TIMEOUT_MS = 300_000; // 5 minutes
 
 interface StepExecutionProps {
   steps: GeneratedStep[];
+  /** The current step; the wizard owns it so its Back button can step back. */
+  index: number;
+  onIndexChange: (index: number) => void;
   /** Where agents run; decides the first profile's runtime. */
   runtime: RuntimeChoice | undefined;
   /** The project step creates a SAM-hosted repository rather than picking a GitHub one. */
@@ -48,12 +51,13 @@ interface StepExecutionProps {
 
 export function StepExecution({
   steps,
+  index,
+  onIndexChange,
   runtime,
   hostedRepo,
   samAvailable,
   onComplete,
 }: StepExecutionProps) {
-  const [index, setIndex] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<StepFormState>(INITIAL_FORM);
@@ -95,9 +99,9 @@ export function StepExecution({
       ])
         void queryClient.invalidateQueries({ queryKey });
       if (index >= steps.length - 1) onComplete(projectId);
-      else setIndex((i) => i + 1);
+      else onIndexChange(index + 1);
     },
-    [index, steps.length, onComplete, queryClient, queryScope]
+    [index, steps.length, onComplete, onIndexChange, queryClient, queryScope]
   );
 
   /* ─── Agent ─── */

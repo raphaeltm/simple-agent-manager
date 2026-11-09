@@ -7,7 +7,7 @@
 import { Button, Pane } from '@simple-agent-manager/ui';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, ArrowRight, Loader2, X } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 
 import { useQueryScope } from '../../../hooks/useQueryScope';
 import { useSetupStatus } from '../../../hooks/useSetupStatus';
@@ -58,6 +58,7 @@ export function ChoosePathWizard() {
   const [questionIndex, setQuestionIndex] = useState(0);
   const [answers, setAnswers] = useState<Answers>({});
   const [steps, setSteps] = useState<GeneratedStep[]>([]);
+  const [stepIndex, setStepIndex] = useState(0);
   const [projectId, setProjectId] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -73,11 +74,8 @@ export function ChoosePathWizard() {
   // start inside the overlay and stay there as screens swap out under them.
   const headingRef = useCallback(
     (el: HTMLHeadingElement | null) => el?.focus(),
-    [phase, questionIndex] // eslint-disable-line react-hooks/exhaustive-deps -- re-created per screen so React re-focuses
+    [phase, questionIndex, stepIndex] // eslint-disable-line react-hooks/exhaustive-deps -- re-created per screen so React re-focuses
   );
-  useEffect(() => {
-    if (showOverlay) requestAnimationFrame(() => contentRef.current?.focus());
-  }, [showOverlay]);
 
   const context: SetupContext = useMemo(
     () => ({
@@ -86,12 +84,14 @@ export function ChoosePathWizard() {
       artifactsEnabled: artifactsQuery.data === true,
       hasCloud: setup.hasCloud,
       hasGitHub: setup.hasGitHub,
+      hasProject,
     }),
     [
       setup.instantEnabled,
       setup.platformCompute,
       setup.hasCloud,
       setup.hasGitHub,
+      hasProject,
       artifactsQuery.data,
     ]
   );
@@ -109,6 +109,7 @@ export function ChoosePathWizard() {
           hasProject,
         })
       );
+      setStepIndex(0);
       setPhase('steps');
     },
     [setup.hasAgent, setup.hasCloud, setup.hasGitHub, hasProject]
@@ -138,7 +139,8 @@ export function ChoosePathWizard() {
 
   const back = useCallback(() => {
     if (phase === 'steps') {
-      if (questions.length === 0) setPhase('hello');
+      if (stepIndex > 0) setStepIndex((i) => i - 1);
+      else if (questions.length === 0) setPhase('hello');
       else {
         setQuestionIndex(questions.length - 1);
         setPhase('questions');
@@ -147,7 +149,7 @@ export function ChoosePathWizard() {
       if (questionIndex === 0) setPhase('hello');
       else setQuestionIndex((i) => i - 1);
     }
-  }, [phase, questions.length, questionIndex]);
+  }, [phase, stepIndex, questions.length, questionIndex]);
 
   const finish = useCallback((createdProjectId: string | null) => {
     setProjectId(createdProjectId);
@@ -216,6 +218,8 @@ export function ChoosePathWizard() {
             {phase === 'steps' && (
               <StepExecution
                 steps={steps}
+                index={stepIndex}
+                onIndexChange={setStepIndex}
                 runtime={answers.runtime}
                 hostedRepo={answers.repo === 'hosted'}
                 samAvailable={trial.trial?.hasAgentCredential === true}
@@ -223,7 +227,11 @@ export function ChoosePathWizard() {
               />
             )}
             {phase === 'done' && (
-              <CompletionScreen projectId={projectId} onDismiss={dismissOnboarding} />
+              <CompletionScreen
+                projectId={projectId}
+                onDismiss={dismissOnboarding}
+                headingRef={headingRef}
+              />
             )}
           </Pane>
         </div>

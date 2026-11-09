@@ -31,6 +31,9 @@ vi.mock('../../../../../src/lib/api', () => ({
   getInstantRuntimeEnabled: mocks.getInstantRuntimeEnabled,
   getTrialStatus: mocks.getTrialStatus,
   getAgentCredentialSetupConfig: vi.fn(() => Promise.resolve({ enabled: false })),
+  validateAgentCredential: vi.fn(() => Promise.resolve({ valid: true })),
+  saveAgentCredential: vi.fn(() => Promise.resolve({})),
+  listRepositories: vi.fn(() => Promise.resolve({ repositories: [] })),
 }));
 
 import { ChoosePathWizard } from '../../../../../src/components/onboarding/choose-path/ChoosePathWizard';
@@ -130,6 +133,39 @@ describe('ChoosePathWizard', () => {
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Back' }));
     expect(screen.getByRole('heading', { name: "Hi, I'm SAM." })).toBeInTheDocument();
+  });
+
+  it('Back during the steps returns to the previous step, then to the questions', async () => {
+    mocks.getInstantRuntimeEnabled.mockResolvedValue(true);
+    mocks.listGitHubInstallations.mockResolvedValue([{ id: 'inst-1' }]);
+    renderWizard();
+    await begin();
+    fireEvent.click(await screen.findByRole('button', { name: /Right here, on Cloudflare/ }));
+
+    // Instant on connected GitHub: agent, then project.
+    fireEvent.click(await screen.findByRole('button', { name: 'Gemini CLI' }));
+    fireEvent.change(screen.getByLabelText('Gemini CLI API key'), { target: { value: 'k' } });
+    fireEvent.click(screen.getByRole('button', { name: /Use this agent/ }));
+    expect(
+      await screen.findByRole('heading', { name: 'What are we building?' })
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    expect(screen.getByRole('heading', { name: 'Who should do the coding?' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    expect(
+      screen.getByRole('heading', { name: 'Where should your agents work?' })
+    ).toBeInTheDocument();
+  });
+
+  it('focuses the heading of each screen', async () => {
+    mocks.getInstantRuntimeEnabled.mockResolvedValue(true);
+    renderWizard();
+    expect(screen.getByRole('heading', { name: "Hi, I'm SAM." })).toHaveFocus();
+    await begin();
+    expect(
+      await screen.findByRole('heading', { name: 'Where should your agents work?' })
+    ).toHaveFocus();
   });
 
   it('calls dismissOnboarding when Escape is pressed anywhere in the document', () => {

@@ -1,23 +1,19 @@
 import type { AgentType } from '@simple-agent-manager/shared';
 import { AGENT_CATALOG, getAgentDefinition } from '@simple-agent-manager/shared';
 import { Button, SegmentedControl } from '@simple-agent-manager/ui';
-import { ArrowRight } from 'lucide-react';
+import { ArrowRight, Check } from 'lucide-react';
 import type { Dispatch, SetStateAction } from 'react';
 
 import { FieldLabel, WELL_INPUT_CLASS } from './OnboardingParts';
 import { type AuthMethod, authMethodsForAgent, type StepFormState } from './step-actions';
 import { SubscriptionConnect } from './SubscriptionConnect';
 
-const AUTH_METHOD_LABEL: Record<AuthMethod, string> = {
-  'oauth-token': 'Subscription',
-  'api-key': 'API key',
-  sam: 'SAM-managed AI',
+// Short enough for three to fit at 375px; the title carries the full name.
+const AUTH_METHOD_LABEL: Record<AuthMethod, { label: string; title: string }> = {
+  'oauth-token': { label: 'Sign in', title: 'Sign in with your subscription' },
+  'api-key': { label: 'API key', title: 'Use an API key' },
+  sam: { label: 'SAM AI', title: 'SAM-managed AI, billed per task' },
 };
-
-function authMethodLabel(agentId: string, method: AuthMethod): string {
-  if (method === 'oauth-token' && agentId === 'openai-codex') return 'ChatGPT plan';
-  return AUTH_METHOD_LABEL[method];
-}
 
 interface AgentStepProps {
   form: StepFormState;
@@ -74,8 +70,17 @@ export function AgentStep({
                   : ''
               }`}
             >
-              <span className="block break-words text-sm font-semibold text-fg-primary">
-                {agent.name}
+              <span className="flex items-center gap-1.5">
+                <span className="min-w-0 flex-1 break-words text-sm font-semibold text-fg-primary">
+                  {agent.name}
+                </span>
+                {selected && (
+                  <Check
+                    size={16}
+                    aria-hidden="true"
+                    className="shrink-0 text-[var(--sam-status-success-fg)]"
+                  />
+                )}
               </span>
             </button>
           );
@@ -91,7 +96,7 @@ export function AgentStep({
           onChange={(value) =>
             setForm((prev) => ({ ...prev, selectedAuthMethod: value, apiKey: '', oauthToken: '' }))
           }
-          options={methods.map((m) => ({ value: m, label: authMethodLabel(agentId, m) }))}
+          options={methods.map((m) => ({ value: m, ...AUTH_METHOD_LABEL[m] }))}
         />
       )}
 

@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import type { ReactNode } from 'react';
+import { type ReactNode, useState } from 'react';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -59,19 +59,23 @@ function renderSteps(props: {
       </ToastProvider>
     </QueryClientProvider>
   );
-  render(
-    <StepExecution
-      steps={props.steps}
-      runtime={props.runtime}
-      hostedRepo={props.hostedRepo ?? false}
-      samAvailable={props.samAvailable ?? false}
-      onComplete={onComplete}
-    />,
-    { wrapper: Wrapper }
-  );
+  function Harness() {
+    const [index, setIndex] = useState(0);
+    return (
+      <StepExecution
+        steps={props.steps}
+        index={index}
+        onIndexChange={setIndex}
+        runtime={props.runtime}
+        hostedRepo={props.hostedRepo ?? false}
+        samAvailable={props.samAvailable ?? false}
+        onComplete={onComplete}
+      />
+    );
+  }
+  render(<Harness />, { wrapper: Wrapper });
   return { onComplete, invalidate };
 }
-
 async function connectClaudeWithApiKey() {
   fireEvent.click(screen.getByRole('button', { name: 'Claude Code' }));
   fireEvent.click(screen.getByRole('button', { name: 'API key' }));
@@ -125,10 +129,19 @@ describe('agent step', () => {
     expect(screen.getByRole('button', { name: /Save sign-in/ })).toBeInTheDocument();
   });
 
+  it('marks the chosen agent with a check, not colour alone', () => {
+    renderSteps({ steps: agentOnly });
+    const claude = screen.getByRole('button', { name: 'Claude Code' });
+    expect(claude.querySelector('svg')).toBeNull();
+    fireEvent.click(claude);
+    expect(claude).toHaveAttribute('aria-pressed', 'true');
+    expect(claude.querySelector('svg')).not.toBeNull();
+  });
+
   it('offers SAM-managed AI only when the installation enables it', () => {
     renderSteps({ steps: agentOnly, samAvailable: false });
     fireEvent.click(screen.getByRole('button', { name: 'Claude Code' }));
-    expect(screen.queryByRole('button', { name: 'SAM-managed AI' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'SAM AI' })).toBeNull();
     expect(screen.getByRole('button', { name: 'API key' })).toBeInTheDocument();
   });
 

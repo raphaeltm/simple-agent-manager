@@ -267,7 +267,7 @@ test('SAM-managed AI is offered only when this installation enables it', async (
     await wizard.getByRole('button', { name: /Right here, on Cloudflare/ }).click();
     await wizard.getByRole('button', { name: /Claude Code/ }).click();
     await expect(wizard.getByRole('button', { name: 'API key' })).toBeVisible();
-    await expect(wizard.getByRole('button', { name: 'SAM-managed AI' })).toHaveCount(samAi ? 1 : 0);
+    await expect(wizard.getByRole('button', { name: 'SAM AI' })).toHaveCount(samAi ? 1 : 0);
   }
   await page.getByRole('button', { name: 'API key' }).click();
   await expect(page.locator('#onboarding-api-key')).toBeVisible();

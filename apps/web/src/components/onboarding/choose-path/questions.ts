@@ -26,6 +26,8 @@ export interface SetupContext {
   artifactsEnabled: boolean;
   hasCloud: boolean;
   hasGitHub: boolean;
+  /** A project exists, so where code lives is already settled. */
+  hasProject: boolean;
 }
 
 export interface Choice<T extends string> {
@@ -107,7 +109,7 @@ export function openQuestions(context: SetupContext): Question[] {
       hint: 'Each agent gets its own workspace. You can mix both later.',
       choices: runtimeChoices(context),
     });
-  if (!preset.repo)
+  if (!preset.repo && !context.hasProject)
     questions.push({
       id: 'repo',
       prompt: 'Where should your code live?',

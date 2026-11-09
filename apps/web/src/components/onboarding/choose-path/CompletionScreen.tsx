@@ -9,10 +9,12 @@ interface CompletionScreenProps {
   /** The project created during onboarding; its chat is where the user goes next. */
   projectId: string | null;
   onDismiss: () => void;
+  /** Receives the heading so the wizard can move focus to it. */
+  headingRef?: (el: HTMLHeadingElement | null) => void;
 }
 
 /** The hand-off: SAM is ready, and the first chat is one tap away. */
-export function CompletionScreen({ projectId, onDismiss }: CompletionScreenProps) {
+export function CompletionScreen({ projectId, onDismiss, headingRef }: CompletionScreenProps) {
   const navigate = useNavigate();
 
   const startChatting = useCallback(() => {
@@ -23,7 +25,11 @@ export function CompletionScreen({ projectId, onDismiss }: CompletionScreenProps
   return (
     <div className="text-center">
       <SamHero celebrate />
-      <h2 className="m-0 text-[1.6rem] font-bold leading-tight text-fg-primary sm:text-[1.9rem]">
+      <h2
+        ref={headingRef}
+        tabIndex={-1}
+        className="m-0 text-[1.6rem] font-bold leading-tight text-fg-primary outline-none sm:text-[1.9rem]"
+      >
         We&apos;re ready.
       </h2>
       <p className="mx-auto mb-7 mt-2 max-w-sm text-[0.95rem] text-fg-muted">

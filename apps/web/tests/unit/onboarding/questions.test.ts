@@ -12,6 +12,7 @@ const none: SetupContext = {
   artifactsEnabled: false,
   hasCloud: false,
   hasGitHub: false,
+  hasProject: false,
 };
 
 const choiceIds = (context: SetupContext, id: 'runtime' | 'repo') =>
@@ -57,6 +58,13 @@ describe('onboarding decision tree', () => {
     expect(question?.choices.find((c) => c.id === 'github')?.label).toBe(
       'In my GitHub repositories'
     );
+  });
+
+  // A project already settles where code lives; asking again could only add a GitHub step
+  // that creates nothing.
+  it('does not ask where code lives once the user has a project', () => {
+    const context = { ...none, artifactsEnabled: true, instantEnabled: true, hasProject: true };
+    expect(openQuestions(context).map((q) => q.id)).toEqual(['runtime']);
   });
 
   it('asks where agents work before where code lives', () => {

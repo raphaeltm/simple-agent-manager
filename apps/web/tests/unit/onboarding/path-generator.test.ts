@@ -43,6 +43,12 @@ describe('generatePath', () => {
     ).toEqual([]);
   });
 
+  it('skips GitHub when a project already exists', () => {
+    expect(ids({ runtime: 'instant', repo: 'github' }, { ...fresh, hasProject: true })).toEqual([
+      'agent',
+    ]);
+  });
+
   it('never asks for a cloud account when agents run on Instant or platform machines', () => {
     expect(ids({ runtime: 'instant', repo: 'hosted' }, fresh)).not.toContain('cloud');
     expect(ids({ runtime: 'platform', repo: 'hosted' }, fresh)).not.toContain('cloud');

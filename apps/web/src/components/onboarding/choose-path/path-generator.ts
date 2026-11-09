@@ -49,7 +49,8 @@ export function generatePath(answers: Answers, existing: ExistingSetup): Generat
   const ids: StepId[] = [];
   if (!existing.hasAgent) ids.push('agent');
   if (answers.runtime === 'byoc' && !existing.hasCloud) ids.push('cloud');
-  if (answers.repo === 'github' && !existing.hasGitHub) ids.push('github');
+  // GitHub is only needed to pick the first project's repository.
+  if (answers.repo === 'github' && !existing.hasGitHub && !existing.hasProject) ids.push('github');
   if (!existing.hasProject) ids.push('project');
   return ids.map((id) => ({ id, ...STEPS[id] }));
 }
