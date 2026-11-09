@@ -14,6 +14,10 @@ func (c *Config) validateEvictionParkTimeout() error {
 	if remaining == 0 {
 		remaining = DefaultACPEvictionParkTimeout
 	}
+	progressTimeout := c.SessionSnapshotProgressReportTimeout
+	if progressTimeout <= 0 {
+		progressTimeout = DefaultSessionSnapshotProgressReportTimeout
+	}
 	for _, budget := range []struct {
 		name     string
 		duration time.Duration
@@ -22,6 +26,7 @@ func (c *Config) validateEvictionParkTimeout() error {
 		{"docker stop cancellation", c.EvictionDockerStopTimeout / 2},
 		{"docker stop WaitDelay", c.EvictionDockerStopTimeout},
 		{"final snapshot", c.SnapshotHelper.WithDefaults().FinalSnapshotTimeout},
+		{"final snapshot failure report", progressTimeout},
 		{"recording", c.HTTPCallbackTimeout},
 	} {
 		if remaining <= budget.duration || budget.duration < 0 {

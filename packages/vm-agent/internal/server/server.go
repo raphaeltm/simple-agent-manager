@@ -43,6 +43,7 @@ import (
 // profileOverrides holds model/permissionMode/effort/opencode provider overrides from agent profiles.
 // Passed from the control plane in the start-agent-session request.
 type profileOverrides struct {
+	StartFingerprint string // immutable request identity for an eviction-owned start replay
 	SettingsResolved bool
 	Model            string
 	PermissionMode   string

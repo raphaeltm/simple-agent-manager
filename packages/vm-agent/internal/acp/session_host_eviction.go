@@ -22,8 +22,9 @@ var errWorkspaceEvicted = errors.New("workspace evicted due to resource pressure
 // failure is reported. A committed eviction discards the parked work
 // (StopForEviction); a rolled-back one replays it, so a genuine crash is never hidden.
 type evictionParked struct {
-	promptCrash []func()
-	processExit []func()
+	admissionDone func()
+	promptCrash   []func()
+	processExit   []func()
 }
 
 func (h *SessionHost) PrepareEviction() (interrupted *bool, rollback func()) {
@@ -51,11 +52,15 @@ func (h *SessionHost) PrepareEviction() (interrupted *bool, rollback func()) {
 		var parked evictionParked
 		if !h.evictionPending {
 			parked = h.takeEvictionParkedLocked()
+			h.fenceEvictionReplayLocked(&parked)
 			h.evictionParkExpired = false
 		}
 		h.promptMu.Unlock()
 		if h.Status() == HostStopped {
-			return // A stopped host has no crash to handle; replay would only emit stale status.
+			if parked.admissionDone != nil {
+				parked.admissionDone()
+			}
+			return
 		}
 		parked.replay()
 	}
@@ -80,6 +85,9 @@ func (p evictionParked) replay() {
 		return
 	}
 	go func() {
+		if p.admissionDone != nil {
+			defer p.admissionDone()
+		}
 		for _, fn := range p.promptCrash {
 			fn()
 		}
@@ -171,15 +179,29 @@ func (h *SessionHost) expireEvictionPark(epoch uint64) {
 	h.evictionPending = false // Expired ownership must also reopen prompt admission.
 	h.evictionParkExpired = true
 	parked := h.evictionParked
+	h.fenceEvictionReplayLocked(&parked)
 	h.evictionParked = evictionParked{}
 	h.promptMu.Unlock()
 	if h.Status() == HostStopped {
+		if parked.admissionDone != nil {
+			parked.admissionDone()
+		}
 		return
 	}
 	slog.Error("Eviction did not resolve a parked agent exit before its deadline; applying crash handling",
 		"sessionId", h.config.SessionID, "workspaceId", h.config.WorkspaceID,
 		"parkedPromptCrashes", len(parked.promptCrash), "parkedProcessExits", len(parked.processExit))
 	parked.replay()
+}
+
+// Detached exit observers retain admission until they detach or replace the old peer.
+// Caller holds promptMu. A counter preserves independently detached replay batches.
+func (h *SessionHost) fenceEvictionReplayLocked(parked *evictionParked) {
+	if len(parked.processExit) == 0 {
+		return
+	}
+	h.evictionReplayPending++
+	parked.admissionDone = func() { h.promptMu.Lock(); h.evictionReplayPending--; h.promptMu.Unlock() }
 }
 
 // takeEvictionParkedLocked removes the parked handling and disarms its deadline.

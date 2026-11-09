@@ -130,6 +130,11 @@ func (h *SessionHost) startCancelGraceTimer(d time.Duration) (<-chan time.Time, 
 }
 
 func (h *SessionHost) finishPromptCancelled(attempt *promptAttempt, reqID json.RawMessage, info promptStartInfo) {
+	h.evictionDecisionMu.Lock()
+	defer h.evictionDecisionMu.Unlock()
+	if h.parkPromptCrashForEviction("prompt_cancelled", func() { h.finishPromptCancelled(attempt, reqID, info) }, attempt) {
+		return
+	}
 	if !attempt.completeWith(h, "cancelled", context.Canceled, func() { h.markPromptDoneForAttempt(attempt) }) {
 		return
 	}

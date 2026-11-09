@@ -169,7 +169,13 @@ func (h *SessionHost) publishCheckpointFailure(episode *checkpointRolloverEpisod
 	}
 	publish := func() {
 		if episode.completeFailure(h, result, cause, owned) {
-			h.setStatus(HostError, result.ErrorMessage)
+			h.mu.Lock()
+			if h.checkpointRollover == episode && h.process == nil {
+				h.checkpointRollover = nil
+			}
+			h.setStatusLocked(HostError)
+			h.statusErr = result.ErrorMessage
+			h.mu.Unlock()
 			h.stopPromptActivityRereport()
 			h.reportActivity("error")
 		}

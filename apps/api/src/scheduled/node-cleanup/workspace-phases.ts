@@ -78,12 +78,12 @@ export async function sweepOrphanedWorkspaces(
          SELECT 1 FROM tasks recent_terminal
          WHERE recent_terminal.workspace_id = w.id
            AND recent_terminal.status IN ('completed', 'failed', 'cancelled')
-           AND COALESCE(recent_terminal.completed_at,
-             (SELECT MAX(terminal_event.created_at) FROM task_status_events terminal_event
+           AND COALESCE(julianday(recent_terminal.completed_at),
+             (SELECT MAX(julianday(terminal_event.created_at)) FROM task_status_events terminal_event
               WHERE terminal_event.task_id = recent_terminal.id
                 AND terminal_event.to_status = recent_terminal.status
                 AND terminal_event.from_status IS NOT terminal_event.to_status),
-             recent_terminal.updated_at) >= ?
+             julianday(recent_terminal.updated_at)) >= julianday(?)
        )
        AND NOT EXISTS (
          SELECT 1 FROM tasks t

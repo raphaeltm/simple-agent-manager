@@ -303,20 +303,21 @@ type SessionHost struct {
 	// Stop only latches teardown under reportMu, then releases it before callbacks.
 	// Prompt lifecycle state.
 	// promptMu guards promptInFlight (serialization gate only).
-	evictionDecisionMu   sync.Mutex // orders process-exit handling before a new eviction fence
-	evictionReportMu     sync.Mutex // orders parked-exit publication before final teardown
-	evictionTeardown     bool       // evictionReportMu: teardown has consumed late callbacks
-	promptMu             sync.Mutex
-	promptInFlight       bool
-	guardedCancelAttempt *promptAttempt // promptMu: owns any pending guarded stop
-	guardedCancelProcess agentProcess   // promptMu: fence survives detach until this process exits
-	guardedCancelPending bool           // promptMu: a matched process stop still owns admission
-	evictionEpoch        uint64         // promptMu: identifies the current admission fence
-	evictionPending      bool           // promptMu: durable eviction owns this runtime; reject new work
-	evictionParked       evictionParked // promptMu: crash handling deferred while evictionPending
-	evictionParkTimer    *time.Timer    // promptMu: replays parked handling if the eviction never resolves it
-	evictionParkExpired  bool           // promptMu: the deadline fired; this fence no longer parks exits
-	promptSeq            uint64
+	evictionDecisionMu    sync.Mutex // orders process-exit handling before a new eviction fence
+	evictionReportMu      sync.Mutex // orders parked-exit publication before final teardown
+	evictionTeardown      bool       // evictionReportMu: teardown has consumed late callbacks
+	promptMu              sync.Mutex
+	promptInFlight        bool
+	guardedCancelAttempt  *promptAttempt // promptMu: owns any pending guarded stop
+	guardedCancelProcess  agentProcess   // promptMu: fence survives detach until this process exits
+	guardedCancelPending  bool           // promptMu: a matched process stop still owns admission
+	evictionEpoch         uint64         // promptMu: identifies the current admission fence
+	evictionReplayPending int            // promptMu: detached exit replay still owns admission
+	evictionPending       bool           // promptMu: durable eviction owns this runtime; reject new work
+	evictionParked        evictionParked // promptMu: crash handling deferred while evictionPending
+	evictionParkTimer     *time.Timer    // promptMu: replays parked handling if the eviction never resolves it
+	evictionParkExpired   bool           // promptMu: the deadline fired; this fence no longer parks exits
+	promptSeq             uint64
 	// promptAttempt remains attached until the next accepted prompt so late
 	// terminal signals from the same runtime are absorbed by its exact-once
 	// arbiter instead of reaching the control plane twice.
@@ -365,6 +366,7 @@ type SessionHost struct {
 	// Crash recovery state (guarded by mu). When a prompt fails because the
 	// agent process disconnected, finishPromptWithError records this context
 	// and lets monitorProcessExit attempt LoadSession recovery.
+	crashRecoveryEpoch      uint64 // mu: binds watchdogs to their originating recovery
 	crashRecoveryInProgress bool
 	crashStderr             string
 	crashAgentType          string
@@ -789,65 +791,4 @@ func (h *SessionHost) persistLastPrompt(text string) {
 			slog.Warn("Failed to persist last prompt to tab store", "error", err)
 		}
 	}
-}
-
-// IsPrompting returns true if a prompt is currently in flight.
-// Used by the auto-suspend timer to avoid interrupting active work.
-func (h *SessionHost) IsPrompting() bool {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	return h.status == HostPrompting
-}
-
-func (h *SessionHost) isPromptingOrRecovering() bool {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	return h.status == HostPrompting || h.status == HostStarting || h.crashRecoveryInProgress || h.hasSecretExecutionWork()
-}
-
-// OnPromptCompleteCallback returns the OnPromptComplete callback, if configured.
-// Used by server-initiated prompt flows to report agent start failures back to
-// the control plane without going through HandlePrompt.
-func (h *SessionHost) OnPromptCompleteCallback() func(string, error) {
-	return h.config.OnPromptComplete
-}
-
-// setSessionIDLocked assigns the ACP session ID and its lock-free mirror.
-// Callers must hold h.mu for write.
-func (h *SessionHost) setSessionIDLocked(id acpsdk.SessionId) {
-	h.sessionID = id
-	h.mirrorSessionID.Store(string(id))
-}
-
-// setStatusLocked assigns the host status and its lock-free mirror.
-// Callers must hold h.mu for write.
-func (h *SessionHost) setStatusLocked(status SessionHostStatus) {
-	h.status = status
-	h.mirrorStatus.Store(status)
-}
-
-// loadMirroredSessionID reads the session ID WITHOUT taking h.mu. Safe to call
-// from the ACP notification-processing goroutine.
-func (h *SessionHost) loadMirroredSessionID() string {
-	if v, ok := h.mirrorSessionID.Load().(string); ok {
-		return v
-	}
-	return ""
-}
-
-// loadMirroredStatus reads the host status WITHOUT taking h.mu. Safe to call
-// from the ACP notification-processing goroutine.
-func (h *SessionHost) loadMirroredStatus() SessionHostStatus {
-	if v, ok := h.mirrorStatus.Load().(SessionHostStatus); ok {
-		return v
-	}
-	return HostIdle
-}
-
-// SecretExecutionContext returns the live process container and configured session
-// identity without resolving/recreating a container or waking the session.
-func (h *SessionHost) SecretExecutionContext() (containerID, user, workDir string, active bool) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	return h.secretExecContainerID, h.config.ContainerUser, h.config.ContainerWorkDir, h.process != nil
 }

@@ -426,3 +426,25 @@ restore disposition, approval/review and production gates remain explicit in the
 and .do-state.md. Archival must not mark those gates complete or authorize merge.
 A documentation-only archive commit must precede renewed exact-head approval;
 the VM release remains the verified immutable 361 release.
+
+
+## Incremental review 2026-11-09 12:39 UTC — reopened implementation
+
+CodeRabbit review5825952787 on head2c0379db returned11findings and one concurrent-retry test nit after the trusted request/wait. The task is active again; previous head approval cannot authorize a changed head.
+
+- [x] Verify/address recovery watchdog, expired/rolled-back process replay admission, checkpoint episode cleanup, cooperative cancellation, and RPC decision atomicity (ACP).
+- [x] Verify/address final snapshot failure-report timeout budget, idempotent start retry ownership, nil restore-host denial, and concurrent stop/retry admission control (server/config).
+- [x] Normalize mixed event timestamps and disposition legacy missing terminal-history grace anchor; document all orphan cleanup states (API/docs).
+- [ ] Record per-finding meaningful regressions and negative/removal controls; complete local specialist reviews and affected suites.
+- [ ] Push revised head, fresh VM staging verification under new coordinator grant, then renew exact-head approval.
+- [ ] Complete revised CI, trusted incremental CodeRabbit request/wait and all returned feedback, merge, production monitoring.
+
+API9449 fixed with normalized Julian-day comparisons before eventMAX and cutoff;33/33 realWorkers testsPASS and independent normalizationremovalRED. Docs9476 nowlistcreating/running/recovery. Minor9440deferred toOPENidea01M705B45FNNTZAFM9QHW87J3Y: completed_at/realtransitionnormalrowsstable; retainingconservativeunknownlegacyfallbackavoidsprematurekill, stablefirstobservationrequiresseparatehoneststate. SourceAPItypecheckPASS. Updated timeout reference formula to include SESSION_SNAPSHOT_PROGRESS_REPORT_TIMEOUT (defaultcombined360s, parkingstrictlygreater).
+
+### Review2 source validation
+
+ACP4512799485/9496/9510/9523/9532 fixed: active watchdog park with original recoveryepoch+attempt identity, admission retained through detachedexit replay, completedcheckpoint released only after absentprocess, cooperativecancel park, atomic RPC terminal/recovery decision. `session_host_eviction_followup_test.go` exercises commit/rollback/expiry/unfenced and staleepisode controls; checkpoint execution test covers reusablehost afterfailedresume. All five guardremovals plus watchdogidentity removal reproduced behavioral failures. Independent cross-componentreview caught and verified watchdogidentity correction.
+
+Server/config4512799549/9565/9572 and concurrentretrynit fixed: include configurable/default failure-report timeout; exactlegacy/versioned retry recognizes only actual AcceptPrompt winner with existing invokedreceipt, no mutation/relaunch; deniedrestore gracefullydegradeswithoutclearingevictionidentity/fence; stale retry rechecks finalizationafterlifecyclelock. New `eviction_retry_contract_test.go` verifies changedprompt/task/model/delivery/session rejection, realACP invocationcount1, actualrestore route, originalstop/finalcaptureadmission, concurrentstarteridentity. Six guardremoval overlays failed behaviorally.
+
+Validation: full `go test ./...` PASS (server73.498s); full ACP `go test -race ./internal/acp` PASS71.640s. Focused finalACP race10.338s + expandedcontrols31.866s + checkpointcontrols7.688s; finalconfig/serverrace1.021s/3.298s. API33/33cleanupWorkersPASS, independentmixedtimestampnormalizationremovalRED; APItypecheck/lintPASS. File-size/context-budget/runtime-state and diff checksPASS. Evidence `/tmp/eviction-ship/review2-*`, `go-followup-*`, `mixed-terminal-timestamps-*`. Freshstage/newheadapproval/CI/reviewwait/productionmonitoring stillrequired; no releaseclaim.

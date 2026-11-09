@@ -625,6 +625,12 @@ func (h *SessionHost) finishPrompt(
 }
 
 func (h *SessionHost) finishPromptAttemptWithError(attempt *promptAttempt, promptCtx context.Context, reqID json.RawMessage, info promptStartInfo, err error) {
+	h.evictionDecisionMu.Lock()
+	defer h.evictionDecisionMu.Unlock()
+	h.finishPromptAttemptWithErrorLocked(attempt, promptCtx, reqID, info, err)
+}
+
+func (h *SessionHost) finishPromptAttemptWithErrorLocked(attempt *promptAttempt, promptCtx context.Context, reqID json.RawMessage, info promptStartInfo, err error) {
 	if errors.Is(promptCtx.Err(), context.DeadlineExceeded) {
 		if h.parkPromptCrashForEviction("prompt_deadline", func() {
 			h.finishPromptAttemptWithError(attempt, promptCtx, reqID, info, err)

@@ -14,8 +14,10 @@
  * - Stale warm nodes: error is caught (no Hetzner), counted in result
  */
 import { env, runInDurableObject } from 'cloudflare:test';
+import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { runNodeCleanupSweep } from '../../src/scheduled/node-cleanup';
 import {
@@ -25,7 +27,10 @@ import {
 } from '../../src/scheduled/node-cleanup/shared';
 import { sweepTerminalCfContainers } from '../../src/scheduled/node-cleanup/terminal-cf-container-phase';
 import type { UnhealthyNodeBoundaries } from '../../src/scheduled/node-cleanup/unhealthy-nodes';
-import { sweepStaleStoppedWorkspaces } from '../../src/scheduled/node-cleanup/workspace-phases';
+import {
+  sweepOrphanedWorkspaces,
+  sweepStaleStoppedWorkspaces,
+} from '../../src/scheduled/node-cleanup/workspace-phases';
 import { ensureSessionRecovery } from '../../src/services/session-recovery';
 import { buildSessionSnapshotR2Key } from '../../src/services/session-snapshot-artifacts';
 import {
@@ -936,6 +941,50 @@ describe('runNodeCleanupSweep — vertical slice', () => {
       await env.DATABASE.prepare(
         `DELETE FROM nodes WHERE id LIKE 'node-nc-terminal-history-%'`
       ).run();
+    });
+
+    it('compares mixed SQLite and ISO terminal timestamps chronologically', async () => {
+      await seedBaseData();
+      const now = new Date('2026-11-09T12:00:00.000Z');
+      const old = '2026-11-09T10:00:00.000Z';
+      const workspaceId = 'ws-nc-mixed-history';
+      const taskId = 'task-nc-mixed-history';
+      const db = drizzle(env.DATABASE, { schema });
+      await seedNode('node-nc-mixed-history', USER_ID);
+      await seedWorkspace(workspaceId, 'node-nc-mixed-history', USER_ID, {
+        projectId: PROJECT_ID,
+        status: 'running',
+        createdAt: old,
+      });
+      await seedTask(taskId, PROJECT_ID, USER_ID, {
+        status: 'failed',
+        workspaceId,
+        completedAt: null,
+        updatedAt: old,
+      });
+      for (const [suffix, at] of [
+        ['old-iso', '2026-11-09T11:00:00.000Z'],
+        ['recent-sqlite', '2026-11-09 11:59:30'],
+      ]) {
+        await env.DATABASE.prepare(
+          `INSERT INTO task_status_events
+          (id, task_id, from_status, to_status, actor_type, created_at)
+          VALUES (?, ?, 'in_progress', 'failed', 'system', ?)`
+        )
+          .bind(`${taskId}-${suffix}`, taskId, at)
+          .run();
+      }
+      const config = resolveCleanupConfig(env as unknown as Env);
+      await sweepOrphanedWorkspaces(db, env as unknown as Env, now, config, emptyResult());
+      expect(await getWorkspaceStatus(workspaceId)).toMatchObject({ status: 'running' });
+      await sweepOrphanedWorkspaces(
+        db,
+        env as unknown as Env,
+        new Date(now.getTime() + config.orphanGracePeriodMs + 1000),
+        config,
+        emptyResult()
+      );
+      expect(await getWorkspaceStatus(workspaceId)).toMatchObject({ status: 'stopped' });
     });
 
     it('leaves a failed task workspace to the sleep lifecycle only while its agent session can be slept', async () => {

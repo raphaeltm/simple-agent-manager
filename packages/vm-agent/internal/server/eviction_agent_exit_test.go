@@ -41,6 +41,7 @@ func TestEvictionACPFixtureProcess(t *testing.T) {
 		os.Exit(2)
 	}
 	decoder, encoder := json.NewDecoder(os.Stdin), json.NewEncoder(os.Stdout)
+	prompts := 0
 	for {
 		var request struct {
 			ID     json.RawMessage `json:"id"`
@@ -62,6 +63,8 @@ func TestEvictionACPFixtureProcess(t *testing.T) {
 		case "session/new":
 			response["result"] = map[string]any{"sessionId": "fixture-evicted-session"}
 		case "session/prompt":
+			prompts++
+			_ = os.WriteFile(pidFile+".prompt-count", []byte(strconv.Itoa(prompts)), 0600)
 			_ = os.WriteFile(pidFile+".prompting", nil, 0600)
 			continue // Working until the container is stopped underneath it.
 		default:

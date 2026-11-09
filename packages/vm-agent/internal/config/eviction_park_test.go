@@ -12,13 +12,14 @@ func TestLoadEvictionParkBudget(t *testing.T) {
 	t.Setenv(EnvDefaultEvictionDockerStopTimeoutSeconds, "8")
 	t.Setenv(EnvEvictionFinalSnapshotTimeoutSeconds, "60")
 	t.Setenv("HTTP_CALLBACK_TIMEOUT", "10s")
-	// docker stop: 12s command deadline + 8s WaitDelay; capture:60s; record:10s.
+	t.Setenv("SESSION_SNAPSHOT_PROGRESS_REPORT_TIMEOUT", "5s")
+	// docker stop: 12s command deadline + 8s WaitDelay; capture:60s; failure report:5s; record:10s.
 	for _, tc := range []struct {
 		name, raw string
 		wantError bool
 	}{
-		{"short", "30s", true}, {"exact budget", "90s", true},
-		{"negative", "-1s", true}, {"custom sufficient", "91s", false},
+		{"short", "30s", true}, {"exact budget", "95s", true},
+		{"negative", "-1s", true}, {"custom sufficient", "96s", false},
 		{"default", "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -33,7 +34,7 @@ func TestLoadEvictionParkBudget(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if tc.raw == "91s" && cfg.ACPEvictionParkTimeout != 91*time.Second {
+			if tc.raw == "96s" && cfg.ACPEvictionParkTimeout != 96*time.Second {
 				t.Fatalf("park=%s", cfg.ACPEvictionParkTimeout)
 			}
 		})
@@ -68,5 +69,26 @@ func TestEvictionParkBudgetCannotOverflow(t *testing.T) {
 	cfg.SnapshotHelper.FinalSnapshotTimeout = time.Duration(1<<63 - 1)
 	if err := cfg.validateEvictionParkTimeout(); err == nil {
 		t.Fatal("overflowing final capture budget accepted")
+	}
+}
+
+func TestEvictionParkBudgetIncludesFailureReportDefault(t *testing.T) {
+	for _, progress := range []time.Duration{0, 20 * time.Second} {
+		cfg := validConfig()
+		cfg.EvictionDockerStopTimeout = 8 * time.Second
+		cfg.SnapshotHelper.FinalSnapshotTimeout = time.Minute
+		cfg.HTTPCallbackTimeout = 10 * time.Second
+		cfg.SessionSnapshotProgressReportTimeout = progress
+		cfg.ACPEvictionParkTimeout = 91 * time.Second // Old budget accepted this unsafe value.
+		if err := cfg.validateEvictionParkTimeout(); err == nil {
+			t.Fatalf("accepted park budget excluding failure report, progress=%s", progress)
+		}
+		if progress == 0 {
+			progress = DefaultSessionSnapshotProgressReportTimeout
+		}
+		cfg.ACPEvictionParkTimeout = 90*time.Second + progress + time.Nanosecond
+		if err := cfg.validateEvictionParkTimeout(); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

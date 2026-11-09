@@ -125,6 +125,9 @@ func (s *Server) reconcilePendingEvictionStop(ctx context.Context, delivery *per
 		return false, err
 	}
 	defer lock.Unlock()
+	if s.isEvictionFinalizing(delivery.WorkspaceID) {
+		return false, errWorkspaceEvicting
+	}
 	meta, err := s.store.GetWorkspaceMetadata(delivery.WorkspaceID)
 	if err != nil {
 		return false, err
