@@ -13,7 +13,7 @@ import {
 import type { MachineRegionRow, RegionDraft } from '../../lib/compute-pool-region-rows';
 import { isRowAllowed, rowControlName } from '../../lib/compute-pool-region-rows';
 import type { OrderableSource } from '../../lib/compute-pool-source-order';
-import { ModelToggleSwitch } from '../agent-models/ModelToggleSwitch';
+import { ToggleSwitch } from '../ui/ToggleSwitch';
 
 /** Picked rows shown per account before "Show all". */
 const VISIBLE_ITEMS_PER_ACCOUNT = 5;
@@ -212,7 +212,7 @@ export function PoolAccountsPane({
                       />
                     </span>
                   )}
-                  <ModelToggleSwitch
+                  <ToggleSwitch
                     checked
                     label={`Use ${account.title} in this pool`}
                     onChange={() => switchAccount(account.id, false)}
@@ -284,7 +284,7 @@ export function PoolAccountsPane({
                     </p>
                   </div>
                   {kept > 0 ? (
-                    <ModelToggleSwitch
+                    <ToggleSwitch
                       checked={false}
                       label={`Use ${account.title} in this pool`}
                       onChange={() => switchAccount(account.id, true)}

@@ -97,7 +97,11 @@ export async function resolveSourceSettingsUpdate(
   return update;
 }
 
-/** SQL fence: the stored account settings still equal what this edit read. */
+/**
+ * SQL fence: the stored account settings still equal what this edit read. Binds at most two
+ * values; the atomic edit's bind budget reserves exactly that
+ * (`MAX_SOURCE_SETTINGS_GUARD_BINDS` in default-capacity-pool-updates.ts), so keep them in step.
+ */
 export function sourceSettingsGuardSql(guards: SourceSettingsUpdate['guards']) {
   const parts = [
     guards.sourceOrderJson === undefined

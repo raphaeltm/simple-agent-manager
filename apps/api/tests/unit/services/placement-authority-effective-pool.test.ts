@@ -16,6 +16,7 @@
  */
 import type { CapacityPlacementSnapshot } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
+import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -30,6 +31,7 @@ import type {
   TaskRunnerState,
 } from '../../../src/durable-objects/task-runner/types';
 import type { Env } from '../../../src/env';
+import { disableCapacitySourceAvailability } from '../../../src/services/default-capacity-pool-sources';
 import { updateDefaultCapacityPool } from '../../../src/services/default-capacity-pool-updates';
 import { assertNodeAllocationPlanCurrent } from '../../../src/services/nodes';
 import type { TaskStartCapacityPoolSelection } from '../../../src/services/placement-resolver';
@@ -561,7 +563,7 @@ describe('reuse selection agrees with final authority admission', () => {
           ownerProjectId: null,
           excludedSourceIds,
         });
-      return { a, b, reusable, admits, exclude };
+      return { database, a, b, reusable, admits, exclude };
     }
 
     it('reuses and admits both accounts while neither is switched off (control)', async () => {
@@ -598,6 +600,33 @@ describe('reuse selection agrees with final authority admission', () => {
 
       expect(await reusable()).toEqual(new Set(['node-a', 'node-b']));
       await expect(admits(a, 'node-a')).resolves.toBe(true);
+      await expect(admits(b, 'node-b')).resolves.toBe(true);
+    });
+
+    it('refuses the node on a disconnected account and keeps the other usable', async () => {
+      const { database, a, b, reusable, admits } = twoAccountFixture();
+      // Disconnecting a credential disables its source through this writer
+      // (reconcileCapacityPoolsForCredentialMutation -> disableCapacitySourcesMissingFromSeeds).
+      const orm = drizzle(database, { schema });
+      // Production sources always carry a generation; the writer matches on it.
+      db()
+        .prepare('UPDATE capacity_sources SET source_generation = 1 WHERE id = ?')
+        .run(a.sourceId);
+      const [source] = await orm
+        .select()
+        .from(schema.capacitySources)
+        .where(eq(schema.capacitySources.id, a.sourceId));
+      await disableCapacitySourceAvailability(
+        orm as never,
+        { scope: 'user', ownerUserId: USER_ID, ownerProjectId: null },
+        source!
+      );
+      expect(
+        db().prepare('SELECT status FROM capacity_sources WHERE id = ?').get(a.sourceId)
+      ).toEqual({ status: 'disabled' });
+
+      expect(await reusable()).toEqual(new Set(['node-b']));
+      await expect(admits(a, 'node-a')).resolves.toBe(false);
       await expect(admits(b, 'node-b')).resolves.toBe(true);
     });
 

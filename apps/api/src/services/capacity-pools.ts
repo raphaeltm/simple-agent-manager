@@ -143,8 +143,22 @@ export function parseCapacityPoolSourceOrder(
   poolId: string,
   raw: string | null | undefined
 ): string[] | null {
-  const ids = parseSourceIdList(poolId, raw, 'capacity_pool.source_order_invalid');
-  return ids && ids.length > 0 ? ids : null;
+  if (raw === null || raw === undefined) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    // Unlike the switched-off list (parseCapacityPoolExcludedSources), one bad entry rejects the
+    // whole order: a partial order would silently re-rank accounts.
+    if (
+      Array.isArray(parsed) &&
+      parsed.every((id): id is string => typeof id === 'string' && id.length > 0)
+    ) {
+      return parsed.length > 0 ? parsed : null;
+    }
+  } catch {
+    // fall through to the warning below
+  }
+  log.warn('capacity_pool.source_order_invalid', { poolId });
+  return null;
 }
 
 /**
@@ -177,27 +191,6 @@ export function parseCapacityPoolExcludedSources(
     });
   }
   return ids;
-}
-
-function parseSourceIdList(
-  poolId: string,
-  raw: string | null | undefined,
-  invalidEvent: string
-): string[] | null {
-  if (raw === null || raw === undefined) return null;
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (
-      Array.isArray(parsed) &&
-      parsed.every((id): id is string => typeof id === 'string' && id.length > 0)
-    ) {
-      return parsed;
-    }
-  } catch {
-    // fall through to the warning below
-  }
-  log.warn(invalidEvent, { poolId });
-  return null;
 }
 
 export function toCapacityPoolCandidate(

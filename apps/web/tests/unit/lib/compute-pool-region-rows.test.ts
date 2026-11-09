@@ -9,13 +9,13 @@ import {
   sortCatalogRows,
 } from '../../../src/lib/compute-pool-catalog-view';
 import type { MachineCell, MachineGroup } from '../../../src/lib/compute-pool-machines';
+import { priceCurrency } from '../../../src/lib/compute-pool-offering-fields';
 import {
   ambiguousRowKeys,
   buildMachineRegionRows,
   continentForCountry,
   isRowAllowed,
   type MachineRegionRow,
-  priceCurrency,
   rowControlName,
   setRows,
   zoneDraftForRows,

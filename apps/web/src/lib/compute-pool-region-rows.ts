@@ -1,6 +1,7 @@
 import { providerLocationRegion, providerRegionMeta } from '@simple-agent-manager/shared';
 
 import type { MachineCell, MachineDraft, MachineGroup } from './compute-pool-machines';
+import { priceCurrency } from './compute-pool-offering-fields';
 
 /**
  * One row of the pool editor: one machine type in one region for one account. People pick
@@ -88,21 +89,6 @@ const CONTINENT_BY_COUNTRY: Readonly<Record<string, Continent>> = {
 
 export function continentForCountry(country: string | null): Continent {
   return (country && CONTINENT_BY_COUNTRY[country.toUpperCase()]) || 'Other';
-}
-
-/**
- * The currency marker of a price label: what is left once the amount and the period are taken
- * out ("€3.99/mo" → "€", "USD 12.00/mo" → "USD"). Amounts are only ever compared within one
- * marker, because prices are never converted.
- */
-export function priceCurrency(label: string | null | undefined): string | null {
-  if (!label) return null;
-  const marker = label
-    .replace(/^from\s+/i, '')
-    .replace(/\/\s*[a-z]+\s*$/i, '')
-    .replace(/[0-9.,\s]+/g, ' ')
-    .trim();
-  return marker || null;
 }
 
 function cheapest(cells: MachineCell[]): MachineCell | null {

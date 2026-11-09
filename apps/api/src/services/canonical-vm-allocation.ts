@@ -163,7 +163,7 @@ export async function resolveCanonicalVmAllocationPlan(
 
   if (capacityPoolSelection && hasNoCapacityPoolCandidates(capacityPoolSelection)) {
     return {
-      error: noEligibleCapacityCandidateMessage(placement, capacityPoolSelection),
+      error: noEligibleCanonicalAllocationMessage(placement, capacityPoolSelection),
       errorKind: 'placement',
     };
   }
@@ -401,7 +401,7 @@ function requestedNativeOfferingUnavailableMessage(
     : 'No active compute-pool offering satisfies the requested allocation.';
 }
 
-function noEligibleCapacityCandidateMessage(
+function noEligibleCanonicalAllocationMessage(
   placement: TaskStartPlacement,
   selection: TaskStartCapacityPoolSelection
 ): string {

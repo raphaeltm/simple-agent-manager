@@ -72,9 +72,9 @@ Raphaël approved a prototype (artifact `BLxnvbCWtMM4KBcRzjsc5c`, v3) and these 
       from `initialStatusForProviderOffering`; delete `legacyStatusForOffering`.
 - [x] A new zone row inherits `active` only from an active row of the same source, machine type
       and REGION (region selection = all its zones, including zones the provider adds later).
-- [x] Shared `capacityLocationRegion(provider, location)`; `gcpZoneRegion` delegates to it.
-- [x] Shared GCP region metadata (name + country) for region labels; the GCP catalog uses it for
-      zone names.
+- [x] Shared `providerLocationRegion(provider, location)`; `gcpZoneRegion` delegates to it.
+- [x] Shared GCP and Scaleway region metadata (`providerRegionMeta`: name + country) for the
+      editor's region labels. (The GCP catalog keeps its own zone names; see Deviations.)
 - [x] Migration 0230: `capacity_pools.excluded_source_ids_json` (nullable, `json_valid`).
 - [x] `CapacityPool.excludedSourceIds`; PATCH `excludedSourceIds?: string[] | null`; route
       validation (≤ `MAX_CAPACITY_POOL_SOURCE_ORDER_LENGTH`, unique, non-empty strings).
@@ -109,6 +109,9 @@ Raphaël approved a prototype (artifact `BLxnvbCWtMM4KBcRzjsc5c`, v3) and these 
 ### Deferred (tracked)
 - Credential "fix permissions" replacement creates a new credential id, so its source starts with
   no picks: `tasks/backlog/2026-11-09-credential-replacement-keeps-pool-picks.md`.
+- A person's edit changes the publication digest (candidate status is part of it), so the next
+  refresh republishes the catalog and the pool reads pending meanwhile:
+  `tasks/backlog/2026-11-09-capacity-pool-readiness-gate-during-republication.md`.
 
 ## Acceptance Criteria
 
