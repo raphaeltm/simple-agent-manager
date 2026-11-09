@@ -101,7 +101,7 @@ normal capacity-exhaustion behavior.
 - [x] Restart/direct create on a busy-building node is admitted; a resource-failure control is still refused
 - [x] A parked legacy busy-build waiter reselects and places
 - [x] Warm vs ordinary interleaving: a warm-flagged node with a queued creating row is not taken by the warm shortcut
-- [ ] Staging: 2 small nodes, a burst plus a human chat distributes; cleanup verified
+- [x] Staging: 2 small nodes, a burst plus a human chat distributes; cleanup verified (see Staging evidence)
 
 Test mapping:
 
@@ -140,3 +140,26 @@ Test mapping:
   - restoring the old busy veto in SQL: building-node admission, burst, single-node burst, restart
   - conflicts counted as rejections: the replan-without-budget test
   - fallback bound removed: the drop-guard-after-N test
+
+## Staging evidence
+
+Deploy of `404b5ae4d284f50f5866daee008891cf419b27bc` (run 42550155973). Two idle cx23 nodes owned
+by the smoke user: A `01M6Z2AYM28MK64SDVG4PJ7260`, B `01M6Z2B15R4112HG0BTB9SJF63`. B already held
+one running workspace from an earlier submit, so `pack` ranks B first by utilization.
+
+Burst at 02:44:49Z on 2026-11-09: three tasks and one conversation, 250 ms apart, all inside one
+heartbeat window (both nodes reported `creatingWorkspaces: 0`). Results from D1:
+
+| Task                         | Mode         | Node | Ranked backlogs (A, B)       | Note                                                            |
+| ---------------------------- | ------------ | ---- | ---------------------------- | --------------------------------------------------------------- |
+| `01M6Z33B70TP1AFMA8J28BPW6V` | task         | B    | B: 0 (only candidate ranked) |                                                                 |
+| `01M6Z33BVH367P1J00Q1PAA6KM` | task         | A    | 0, 0 (B rejected)            |                                                                 |
+| `01M6Z33BY0SWJF6ZMFQPSFP41N` | task         | A    | 1, 1                         | fairness conflict on A (0 when ranked, 1 now), replanned        |
+| `01M6Z33BYF1ZG9BGEY4P6XNM2Y` | conversation | B    | 2, 1                         | fairness conflict on A (1 when ranked, 2 now), replanned onto B |
+
+Per node: A 2, B 2. Nodes created since the burst: none. Conflicts were not counted toward the
+refusal budget (`0/3` in the note).
+
+An earlier simultaneous burst at 02:38:15Z had 3 of 4 submits fail with 500 in
+`project_authorization` (transient D1 error), before placement code runs. That path is not
+changed here; filed as `tasks/backlog/2026-11-09-task-submit-transient-d1-500.md`.
