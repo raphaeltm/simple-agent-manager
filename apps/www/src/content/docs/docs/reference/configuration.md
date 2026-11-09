@@ -307,7 +307,7 @@ responses:
 | Pool state          | What to do                                                                                                         |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | Migration pending   | Allow reconciliation to finish; if it persists, check scheduled reconciliation errors and the affected credential. |
-| Configured empty    | Select a supported offering in that pool. An empty configured pool intentionally blocks new allocation.            |
+| Configured empty    | Add a machine from **Available machines**, or switch an account back on. Only Instant sessions run in an empty pool. |
 | Source disabled     | Re-enable or replace the pool's credential source.                                                                 |
 | Catalog unavailable | Check provider access and retry after inventory refresh. A failed refresh preserves the last valid inventory.      |
 | Configured ready    | Start a small test workload and check its requested resources and provider-native hardware in the node details.    |

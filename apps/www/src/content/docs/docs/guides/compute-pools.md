@@ -72,16 +72,20 @@ sessions, or a session uploads unusually many history batches, the page says wha
 A pool you can edit opens straight into its editor (`ComputePoolEditor`). A status chip says
 **Ready · N in pool** or **Empty · Instant sessions only**. Below it:
 
-- **In your pool** lists the cloud accounts with the machines picked from each (machine · region ·
-  price), a switch per account, the account order, and **Remove all**.
+- **In your pool** (**In this project's pool** or **In the shared pool** for those scopes) lists the
+  cloud accounts with the machines picked from each (machine · region · price), a switch per
+  account, the account order, and **Remove all**.
 - **Available machines** lists every machine your connected accounts offer, **one row per provider ×
   machine × region**, with vCPU, memory, disk and the monthly price in that provider's own currency.
   Search, show **All / In pool / Not in pool**, filter by account, continent, minimum vCPU, minimum
-  memory and maximum price, and hide unavailable machines. Every column sorts; the default order is
-  account, then machine size, then region. Select rows to add or remove them together.
+  memory and a maximum price per currency, and hide unavailable machines. Every column sorts (on
+  narrow screens, with **Sort by**); the default order is account, then machine size, then region.
+  Select rows to add or remove them together; the bulk buttons act only on selected rows still listed.
 - **How SAM uses machines** holds the pool's settings.
 
-Changes stay a draft until **Save changes**; **Discard** drops them. A pool you can see but not
+Changes stay a draft until **Save changes**; **Discard** drops them. A row you changed shows
+**Adding on save** or **Removing on save** and stays listed whatever the view, so you can undo it in
+place. A pool you can see but not
 edit (for example the personal pool a project falls back to) is summed up read-only instead.
 
 You can also see the pool in effect without leaving your work: the **workspace sidebar** and a
@@ -172,8 +176,9 @@ so a new pool is empty until you add machines. While a pool has no machines it c
 picked, or only on accounts that are switched off), the editor warns that only
 [Instant sessions](/docs/guides/instant-sessions/) can run there: no Docker, no devcontainer and a
 slim toolchain. Work that needs a VM fails at once with "Your compute pool has no machines, so work
-that needs a VM cannot start" (`emptyCapacityPoolMessage()`), naming the two ways forward: add
-machines, or run it as an Instant session. An empty pool is still authoritative: SAM does not fall
+that needs a VM cannot start" ("This project's compute pool…" or "The shared compute pool…" for
+those scopes; `emptyCapacityPoolMessage()`), naming the two ways forward: add machines (for the
+shared pool, ask an admin to), or run it as an Instant session. An empty pool is still authoritative: SAM does not fall
 back to another pool.
 
 ## What is inside a pool
@@ -203,7 +208,7 @@ machines may still reference them.
 
 #### Switching an account off
 
-Each account in **In your pool** has a switch. Switching an account off keeps the machines you
+Each account in the pool's account list has a switch. Switching an account off keeps the machines you
 picked from it but stops SAM using them: no new machines from that account, and no new work on its
 running machines (`isCapacitySourceExcluded()`, enforced again when work is admitted to a machine).
 Switching it back on restores its machines as they were. Adding a machine from an account that is
@@ -254,7 +259,7 @@ Sources that share a rank do not fall back to each other; give them different ra
 one to back up the other. Without an order, nothing falls back across sources. Each attempt,
 including skipped sources and the reason, appears in the run's placement details.
 
-**Setting the order.** In **In your pool**, select **Try accounts in this order**, then use the up
+**Setting the order.** In the pool's account list, select **Try accounts in this order**, then use the up
 and down arrows to put the account SAM should try first at the top, and **Save changes**. Select
 **Every account is equal** to clear the order. Only accounts with machines in the pool are ranked; a
 pool with a single such account has nothing to order. The same order can be set through the pool
@@ -271,7 +276,8 @@ Google Cloud, the catalog is the machine types an admin has chosen, in every zon
 them, priced from Google's live list prices; see
 [Google Cloud](/docs/guides/google-cloud/#machine-types-zones-and-prices). The editor shows one row
 per machine type and **region**, with its price in the provider's own currency (SAM never converts
-currencies, so the maximum-price filter compares each provider in its own). **Add** puts that
+currencies: there is one maximum-price filter per currency, and sorting by price groups rows by
+currency before amount). **Add** puts that
 machine in the pool in that region; **Remove** takes it out.
 
 **Regions, not zones.** Where a provider splits a region into zones (Google Cloud's `europe-west1-b`,
@@ -305,10 +311,11 @@ your decisions:
   submission is never delayed by a provider API call and a deliberately emptied pool is never
   quietly repopulated. Refreshing happens when you press **Refresh** or change a credential — not
   as a side effect of running a task. (The one exception is an installation upgraded from the old size presets, whose
-  pool is materialized into native offerings once.)
+  pool gets its native offerings listed once. Like any new row they start out of the pool, so a pool
+  whose only machines were size presets is empty until you add machines.)
 
 :::note
-Allowing an offering allows it for **both** workspace machines and
+Adding a machine adds it for **both** workspace machines and
 [app deployment](/docs/guides/app-deployments/) machines. You curate one row per instance type;
 SAM keeps the two workload roles in sync behind it.
 :::
@@ -640,14 +647,14 @@ The "Current compute pool" line in the workspace sidebar and chat infrastructure
 state of the pool in effect. When a pool cannot start machines, the settings panel shows the same
 problem as a warning in plain words:
 
-| State                                     | Settings panel says                                                                                                                                                                                      | What to do                                                                                                                                                                                                                                                                   |
-| ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Available**                             | _(no warning)_                                                                                                                                                                                           | Nothing to do.                                                                                                                                                                                                                                                               |
-| **Not configured**                        | "No machines yet" or "You're using shared machines" (on a project: "No machines for this project yet" or "This project uses shared machines"; on the installation pool: "No platform cloud account yet") | If it says you're using shared machines, nothing is needed. To get machines of your own, connect a cloud credential to the project or your account, and the pool is created for you. For the installation pool, a platform superadmin selects **Add a platform credential**. |
-| **Empty — no eligible offerings**         | "Your pool is empty, so only Instant sessions can run." (read-only views: "No machines are allowed, so SAM can't start any from this pool.")                                                             | Add a machine from **Available machines**, switch an account back on, or attach a credential.                                                                                                                                                                                |
-| **Unavailable — compute source disabled** | "The cloud account behind this pool is turned off or was removed."                                                                                                                                       | Reconnect or re-enable the credential. The pool updates when you do.                                                                                                                                                                                                         |
-| **Unavailable — catalog refresh needed**  | "SAM couldn't read the provider's machine list. Try Refresh."                                                                                                                                            | **Refresh**, then allow a machine that is still sold.                                                                                                                                                                                                                        |
-| **Migration in progress**                 | "This pool is being updated. Try again in a minute."                                                                                                                                                     | Wait, then reload.                                                                                                                                                                                                                                                           |
+| State                                     | Settings panel says                                                                                                                                                                                         | What to do                                                                                                                                                                                                                                                                   |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Available**                             | _(no warning)_                                                                                                                                                                                              | Nothing to do.                                                                                                                                                                                                                                                               |
+| **Not configured**                        | "No machines yet" or "You're using shared machines" (on a project: "No machines for this project yet" or "This project uses shared machines"; on the installation pool: "No platform cloud account yet")    | If it says you're using shared machines, nothing is needed. To get machines of your own, connect a cloud credential to the project or your account, and the pool is created for you. For the installation pool, a platform superadmin selects **Add a platform credential**. |
+| **Empty — no eligible offerings**         | "Your pool is empty, so only Instant sessions can run." ("This project's pool…" or "The shared pool…" for those scopes; read-only views: "No machines are allowed, so SAM can't start any from this pool.") | Add a machine from **Available machines**, switch an account back on, or attach a credential.                                                                                                                                                                                |
+| **Unavailable — compute source disabled** | "The cloud account behind this pool is turned off or was removed."                                                                                                                                          | Reconnect or re-enable the credential. The pool updates when you do.                                                                                                                                                                                                         |
+| **Unavailable — catalog refresh needed**  | "SAM couldn't read the provider's machine list. Try Refresh."                                                                                                                                               | **Refresh**, then add a machine that is still available.                                                                                                                                                                                                                     |
+| **Migration in progress**                 | "This pool is being updated. Try again in a minute."                                                                                                                                                        | Wait, then reload.                                                                                                                                                                                                                                                           |
 
 Remember that a project pool in any of the unhealthy states stays authoritative — fix it, or
 remove it so a lower scope applies.
@@ -656,10 +663,10 @@ remove it so a lower scope applies.
 
 | Symptom                                                                | Likely cause                                                                                                                                                                                                                                                                                                                                                                               |
 | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| "Waiting for capacity" that never clears                               | The pool's allowed offerings are sold out in the chosen region. Allow more offerings or regions, or switch the policy to **Fallback chain**.                                                                                                                                                                                                                                               |
+| "Waiting for capacity" that never clears                               | The pool's allowed offerings are sold out in the chosen region. Add more machines or regions, or switch the policy to **Fallback chain**.                                                                                                                                                                                                                                                  |
 | Work fails immediately with a capacity error                           | Exhaustion policy is **Fail**, or the pool has no allowed offering that satisfies the requirements.                                                                                                                                                                                                                                                                                        |
 | "Capacity pool node limit (N) reached and no node can fit the request" | The user is at the pool's **Machine limit** and no running node has room. Raise the limit, lower the requirements so an existing node fits, or free a node.                                                                                                                                                                                                                                |
-| No offering satisfies the request                                      | Requirements exceed every allowed machine — remember the host memory reserve, so a 4 GiB offering tops out at a 3072 MiB reservation. Lower the requirements or allow a bigger instance type.                                                                                                                                                                                              |
+| No offering satisfies the request                                      | Requirements exceed every allowed machine — remember the host memory reserve, so a 4 GiB offering tops out at a 3072 MiB reservation. Lower the requirements or add a bigger instance type.                                                                                                                                                                                                |
 | A new machine starts although an existing one looks free               | The existing machine's disk is at or above the deployment's disk-pressure threshold (80% by default, `TASK_RUN_NODE_DISK_PRESSURE_THRESHOLD_PERCENT`), its CPU is saturated (85% by default, or the project's **Node CPU Threshold**), or it hasn't reported fresh health readings. SAM won't add work to it until that clears; check the machine's page for its disk and CPU.             |
 | A new machine is provisioned for every task                            | Requirements ask for an exclusive node, each request fills a machine, or **Spread** has not reached the pool's **Machine limit**.                                                                                                                                                                                                                                                          |
 | Workspace machines are bigger or pricier than expected                 | Check the resolved requirements in the chat's infrastructure panel — a profile, skill, or project default may be raising the floor. Then open **Resources** on a finished session to see what it actually used ([Session Resource History](/docs/guides/session-resources/)).                                                                                                              |
