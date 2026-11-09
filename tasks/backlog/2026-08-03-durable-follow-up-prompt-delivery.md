@@ -69,3 +69,7 @@ Convert follow-up prompt submission into durable accept + server-owned delivery:
 - Duplicate retries or ambiguous acknowledgements do not create duplicate VM messages.
 - Failed follow-up deliveries are visible and retryable.
 
+## Reconciliation (2026-11-09 weekly queue sweep)
+
+- Evidence: #1785 (server durable accept/runner), #2291 (server Idempotency-Key via cliOperationReceipt), #2536 (web consumes mailbox.delivery_updated via lib/prompt-delivery-update.ts, steer rows only); apps/web/src/lib/api/session-prompts.ts:22-39 sends no idempotency key
+- Status: Remaining: web idempotency key, queued/delivering/failed state for normal follow-ups on refresh, retry UI for failed deliveries

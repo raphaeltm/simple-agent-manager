@@ -38,3 +38,16 @@ need a temporary log-level change), and check `ContainerMode` and
       vm-agent and use it in `resolveTrustedWorkspaceNodeCapacity`, with provisioning using the same
       figure (rule 69: one accounting policy)
 - [ ] Tests through the real heartbeat route and the real admission SQL
+
+## Merged from `2026-11-04-heartbeat-workspace-memory-not-reported.md` (2026-11-09)
+
+That file reported the same gap from staging: only 2 of 183 staging VM nodes had ever reported
+`workspaceMemory` (latest 2026-09-08), and a lightweight workspace on node
+`01M6M5908QESNY0EER04Q4WF5Z` heartbeated with no `workspaceMemory`. Suspects it listed: runtimes
+with no `ContainerLabelValue` (lightweight workspaces?), the all-or-nothing `len(labelValues) > limit`
+return, and Docker stats errors logged only at `slog.Debug`. The Nodes page
+(`node-resource-model.ts`, `liveMemoryByWorkspace`) also depends on it.
+
+- [ ] Both a lightweight and a full VM workspace report `workspaceMemory`, with a test covering the
+      lightweight case
+- [ ] A failure to collect is logged at a level visible in production, with the reason

@@ -31,3 +31,12 @@ and does not run in CI at all. That is why these went unnoticed.
 - [ ] `project-chat-composer-audit.spec.ts` is removed from the quarantine list once it passes
 - [ ] Decide whether CI should also run the iPhone SE (375x667) and Desktop (1280x800) projects for
       these chat audits, since both failures above only appear at viewports CI does not run
+
+## Merged from `2026-10-21-composer-audit-provisioning-progress-test-fails-on-main.md` (2026-11-09)
+
+That file first reported the "restored provisioning session" failure on `main` `c0fb8edd8`: the page
+renders the mocked session as "Running" with a "Reconnecting..." alert and no provisioning block
+(`getByText('Installing dependencies (3/4)')` not found). If it is a product regression, the fix
+needs a unit test through the real restore path; if the mocks drifted, the spec must drive the data
+path the page uses today. Repro: `cd apps/web && npx playwright test
+tests/playwright/project-chat-composer-audit.spec.ts -g "restored provisioning" --project="Desktop (1280x800)"`.

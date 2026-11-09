@@ -55,3 +55,8 @@ the shape rule 74 warns about. Decide the ranking before writing the cap:
 - `.claude/rules/65-capped-selection-must-rank-and-disclose.md`
 - `apps/api/.claude/rules/74` equivalent: `.claude/rules/74-proxy-signals-must-match-the-condition.md`
 - `.claude/rules/60-request-io-and-bundle-budgets.md`
+
+## Reconciliation (2026-11-09 weekly queue sweep)
+
+- Evidence: #2436: per-target cap via operations.resourceLinkBatchPerTargetCap (operations/link-core.ts:48, project-data/links.ts) with atLeast disclosure
+- Status: Remaining: ranking by deriveIdeaStatus purpose, skew test, round-trip assertion.
