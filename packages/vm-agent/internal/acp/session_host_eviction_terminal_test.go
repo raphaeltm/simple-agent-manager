@@ -295,3 +295,45 @@ func TestCommittedEvictionDoesNotExposeTeardownBeforeOwningCheckpoint(t *testing
 	}
 	assertNoSecondCompletion(t, completed)
 }
+
+func TestEvictionDefersCancelGraceTerminalOwnership(t *testing.T) {
+	for _, mode := range []string{"commit", "rollback", "expiry", "no eviction"} {
+		t.Run(mode, func(t *testing.T) {
+			host, proc, completed, starts := armEvictedPrompt(t)
+			defer host.Stop()
+			timer := &gatedGraceTimer{armed: make(chan chan time.Time, 1)}
+			host.cancelGraceTimer = timer.start
+			if mode == "expiry" {
+				host.config.EvictionParkTimeout = 150 * time.Millisecond
+			}
+			var rollback func()
+			if mode != "no eviction" {
+				_, rollback = host.PrepareEviction()
+			}
+			// The actual cancel entrypoint arms its watchdog; the fake peer remains stuck.
+			host.CancelPrompt()
+			fire := timer.awaitArmed(t)
+			fire <- time.Now()
+			if mode != "no eviction" {
+				select {
+				case reason := <-completed:
+					t.Fatalf("cancel grace published %s while eviction owned prompt", reason)
+				case <-time.After(50 * time.Millisecond):
+				}
+				waitForParked(t, host, func(p evictionParked) bool { return len(p.promptCrash) == 1 })
+				if proc.stopCount.Load() != 0 || starts.Load() != 0 {
+					t.Fatal("cancel grace stopped or restarted eviction-owned runtime")
+				}
+			}
+			want := "cancelled"
+			if mode == "commit" {
+				host.StopForEviction()
+				want = EvictedStopReason
+			} else if mode == "rollback" {
+				rollback()
+			}
+			expectCompletion(t, completed, want, time.Second, "cancel-grace terminal callback missing")
+			assertNoSecondCompletion(t, completed)
+		})
+	}
+}

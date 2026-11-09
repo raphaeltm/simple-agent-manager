@@ -374,3 +374,10 @@ coordinator approval, CI/CodeRabbit reconciliation, merge and production monitor
 Do not archive before those gates are resolved.
 
 Final checkpoint teardown ordering: retain report serialization through the eviction terminal arbiter, before ordinary Stop. A controlled real-checkpoint interval test verifies exact evicted completion and caller supersession; independently restoring the early unlock fails the regression. Full revised Go suite and ACP/server/persistence race suites passed; final full ACP race passed after this last ordering change.
+
+### Independent coordinator review: cancellation grace
+
+- [x] Route the actual cancel-grace watchdog through the eviction decision lock and park before cancellation settlement; the viewer timeout uses an already-locked helper.
+- [x] Actual CancelPrompt-to-grace-expiry regressions cover committed eviction (evicted), rollback/expiry/unfenced cancellation, with an independent ordering removal that reproduces premature cancelled completion.
+- [x] Independent final go-specialist/completion review PASS. Full Go suite passed again (server73.038s); full ACP race passed68.711s.
+- [x] Confirm checkpoint HTTP lifetime: POST immediately returns202 and launches a background operation. Eviction arbitration may outlive the2m restart context until commit/rollback/configured park expiry (default15m); no HTTP request waits for it. PR documents the bound.

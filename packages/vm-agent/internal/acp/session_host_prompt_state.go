@@ -170,7 +170,7 @@ func (h *SessionHost) finishPromptTimeout(attempt *promptAttempt, viewerID strin
 		return
 	}
 	h.sendJSONRPCErrorToViewer(viewerID, reqID, -32603, message)
-	h.triggerPromptForceStopIfStuck(attempt, message)
+	h.triggerPromptForceStopIfStuckLocked(attempt, message)
 }
 
 // triggerPromptForceStopIfStuck acts only on the exact attempt a watchdog was
@@ -178,6 +178,13 @@ func (h *SessionHost) finishPromptTimeout(attempt *promptAttempt, viewerID strin
 // one. A watchdog outliving its attempt is a no-op: it must never touch a
 // later prompt (see idea 01M31M9G3T4SEWT9ZW1BM4QKZ3).
 func (h *SessionHost) triggerPromptForceStopIfStuck(attempt *promptAttempt, reason string) {
+	h.evictionDecisionMu.Lock()
+	defer h.evictionDecisionMu.Unlock()
+	h.triggerPromptForceStopIfStuckLocked(attempt, reason)
+}
+
+// Caller owns evictionDecisionMu, including the viewer-timeout path.
+func (h *SessionHost) triggerPromptForceStopIfStuckLocked(attempt *promptAttempt, reason string) {
 	if attempt == nil {
 		return
 	}
@@ -200,13 +207,13 @@ func (h *SessionHost) triggerPromptForceStopIfStuck(attempt *promptAttempt, reas
 			"promptId", attempt.id, "currentPromptId", currentID, "reason", reason)
 		return
 	}
-	if cancelRequested {
-		h.settleStuckPromptCancel(attempt, reason, fields)
+	// Eviction owns watchdog completion, including cancellation grace expiry.
+	// A rollback or park deadline replays the ordinary cancellation/timeout path.
+	if h.parkPromptCrashForEviction("prompt_force_stop", func() { h.triggerPromptForceStopIfStuck(attempt, reason) }, attempt) {
 		return
 	}
-	// A prompt deadline that lands while an eviction owns the runtime is not this
-	// prompt's verdict: the eviction ends it (StopForEviction) or, if rolled back, replays this.
-	if h.parkPromptCrashForEviction("prompt_timeout", func() { h.triggerPromptForceStopIfStuck(attempt, reason) }, attempt) {
+	if cancelRequested {
+		h.settleStuckPromptCancel(attempt, reason, fields)
 		return
 	}
 	attempt.completeWith(h, fatalErrorStopReason, errors.New(reason), func() {
