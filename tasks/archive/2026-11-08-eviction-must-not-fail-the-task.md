@@ -290,7 +290,8 @@ Staging refresh 42582734240 failed fetching the upstream OpenCode installer asse
 - [x] go-specialist source review ADDRESSED; focused race ACP/server/persistence pass
   (15.474s / 20.827s / 2.660s). Cloudflare/constitution/doc-sync re-review PASS.
   Test-engineer/task-completion source review PASS; real staging and production pending.
-- [ ] Deploy final source and demonstrate a real pressure eviction on a fresh VM.
+- [x] Deploy final source and demonstrate a real pressure eviction on a fresh VM
+  (release 361a5d8a734bc42d19a2ed3ce5f06341e071747d; evidence below).
 - [ ] Obtain coordinator approval naming PR 2604 and the final full head SHA.
 
 Review dispositions: the small interval between PrepareEviction and intent commit
@@ -311,8 +312,8 @@ they preserve auth/cancellation assertions and were required for reliable full c
 ## CodeRabbit revision review (2026-11-09)
 
 The prior f98 source approval and staging proof do not cover these production
-changes. Keep this task active; obtain a new final-head approval and refresh staging
-before merge. Production deployment and monitoring remain postmerge gates.
+changes. Obtain a new final-head approval and refresh staging before merge;
+archival records implementation/premerge evidence and does not waive release gates. Production deployment and monitoring remain postmerge gates.
 
 - [x] Stable terminal grace (4511554945): use the latest genuine status-transition
   event when completed_at is absent; same-status metadata events cannot reset grace.
@@ -371,7 +372,8 @@ the existing one-second unlocked restart delay before a new eviction fence.
 No reporting lock is held across terminal callbacks. Remaining completion gates:
 final broad validation, fresh immutable-release staging, renewed exact-head
 coordinator approval, CI/CodeRabbit reconciliation, merge and production monitoring.
-Do not archive before those gates are resolved.
+Track unresolved release gates explicitly in the PR and .do-state.md through
+archival; archive status is not a claim that deployment or production monitoring passed.
 
 Final checkpoint teardown ordering: retain report serialization through the eviction terminal arbiter, before ordinary Stop. A controlled real-checkpoint interval test verifies exact evicted completion and caller supersession; independently restoring the early unlock fails the regression. Full revised Go suite and ACP/server/persistence race suites passed; final full ACP race passed after this last ordering change.
 
@@ -381,3 +383,46 @@ Final checkpoint teardown ordering: retain report serialization through the evic
 - [x] Actual CancelPrompt-to-grace-expiry regressions cover committed eviction (evicted), rollback/expiry/unfenced cancellation, with an independent ordering removal that reproduces premature cancelled completion.
 - [x] Independent final go-specialist/completion review PASS. Full Go suite passed again (server73.038s); full ACP race passed68.711s.
 - [x] Confirm checkpoint HTTP lifetime: POST immediately returns202 and launches a background operation. Eviction arbitration may outlive the2m restart context until commit/rollback/configured park expiry (default15m); no HTTP request waits for it. PR documents the bound.
+
+
+## Final immutable-release staging and archive-readiness review (2026-11-09)
+
+- [x] Exact release `361a5d8a734bc42d19a2ed3ce5f06341e071747d` deployed in
+  staging run `42605923340`, including smoke. Cloudflare binding, fresh VM D1
+  version and live system-info agree. Browser dashboard/project/settings had no
+  page errors. No resourceRequirements or sizing override was used.
+- [x] Fresh VM `01M7014N91Q4P9YBEMJ3KSEPH5` had two real foreground ACP tool
+  waits active before a bounded allocator triggered actual container-OOM eviction.
+  All four prompt/process disconnects were explicitly parked as eviction-owned.
+  Both hosts stopped for eviction; the task callback explicitly deferred to the
+  durable eviction delivery. Snapshot `01M701G2JS4WQQA42W6CVVEK1V` is
+  available/none with home and WIP artifacts and interruptedWork=1.
+- [x] Complete task-status audit for `01M700Y48CB5MC5RAB7CE13H20` shows
+  in_progress -> queued at 11:40:11.442Z, with no failed transition. This proves
+  final-release verdict suppression and durable handoff, not a replacement restore.
+  Snapshot trace times are control-plane ingestion timestamps; no synchronized
+  pre-stop ordering is inferred from them.
+- [x] Bounded verification cleanup: fixture task cancelled, original node and late
+  replacement allocation deleted through strict owner deletion (HTTP 200), and
+  temporary profile deleted. D1 confirmed zero remaining VM nodes at 11:44:05Z.
+  Earlier capacity-refused attempt was cancelled and its late allocation strictly
+  deleted before the final attempt. No independent provider GET-404 is claimed.
+- [ ] Coordinator accepts the disclosed replacement-restore disposition, or obtains
+  fresh restore evidence. Recovery first hit external Hetzner 412 capacity; a node
+  allocated just before bounded fixture cancellation did not boot/restore. Final
+  release restore is NOT claimed. Supporting control: earlier real 9c sleep/wake
+  restored the exact EVICTION-PRESERVED-20261109 sentinel on a replacement workspace;
+  restore implementation is unchanged by this PR.
+- [ ] Renewed exact-final-head coordinator approval and final CI/CodeRabbit gate.
+- [ ] Merge, production deployment and production monitoring.
+
+Final task-completion verdict: implementation/source coverage PASS; release
+completion WARN. All seven CodeRabbit fixes and the independent cancel-grace
+finding have substantive implementation, real-trigger regressions and discriminating
+negative evidence. Full final Go suite and ACP race passed (server 73.038s;
+ACP 68.711s), and functional CI passed. No uncovered source finding blocks archival.
+The /do Phase 4 archive step may record this premerge state, provided the pending
+restore disposition, approval/review and production gates remain explicit in the PR
+and .do-state.md. Archival must not mark those gates complete or authorize merge.
+A documentation-only archive commit must precede renewed exact-head approval;
+the VM release remains the verified immutable 361 release.
