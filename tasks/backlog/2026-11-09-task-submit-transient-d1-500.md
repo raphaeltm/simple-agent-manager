@@ -1,5 +1,7 @@
 # Task submit returns 500 on a transient D1 error in project authorization
 
+SAM idea: `01M6Z3PER77CKTAW6JMJ200X7P`.
+
 ## Problem
 
 Concurrent `POST /api/projects/:id/tasks/submit` requests can fail with `500 INTERNAL_ERROR`

@@ -160,6 +160,34 @@ heartbeat window (both nodes reported `creatingWorkspaces: 0`). Results from D1:
 Per node: A 2, B 2. Nodes created since the burst: none. Conflicts were not counted toward the
 refusal budget (`0/3` in the note).
 
-An earlier simultaneous burst at 02:38:15Z had 3 of 4 submits fail with 500 in
-`project_authorization` (transient D1 error), before placement code runs. That path is not
-changed here; filed as `tasks/backlog/2026-11-09-task-submit-transient-d1-500.md`.
+Completion: by 02:46:16Z all four workspaces were `running` with no `error_message`. Two tasks
+had completed, and the conversation had replied (`awaiting_followup`). Staging `platform_errors`
+held 0 error-level rows from the burst onward.
+
+Cleanup (02:46:34Z to 02:47:35Z):
+
+- Two tasks still running were cancelled (200). The completed tasks returned 409, since a
+  completed task cannot be cancelled.
+- The 4 remaining workspaces were deleted, each with `deletionStatus: confirmed`.
+- Both nodes were deleted (200).
+- At 02:48:40Z staging D1 had no row for either node and no workspaces on them.
+- Staging was released to coordinator `01M6SHDRB6`.
+
+An earlier simultaneous burst at 02:38:15Z had 3 of 4 submits return 500. All three failed in
+`project_authorization`, the first `requireProjectCapability` read, with `causeCode: D1_ERROR`,
+`d1Category: d1_transient`, before any placement code runs. Request IDs in staging
+`platform_errors`:
+
+- `6b3fb507-c3de-48ee-9232-eecced28e8cc`
+- `a27a70a7-688e-40a1-8486-e6bfb05765b1`
+- `2d27b071-dbad-4000-99c5-576281c48182`
+
+The fourth submit (`01M6Z2QBXH4BK7VT0G6S937N37`) placed on B with no new node. That code path is
+not changed here. Filed as `tasks/backlog/2026-11-09-task-submit-transient-d1-500.md` and idea
+`01M6Z3PER77CKTAW6JMJ200X7P`.
+
+Merge head `221384ea3b6b41dafd4e4dcb56f9b21ebe233c94` merges `origin/main` (#2595, #2596,
+#2599). The conflict in `workspace-admission-sql.ts` keeps #2595's empty-node CPU exception and
+drops only the busy-build lines. Local checks on the merge: API typecheck clean, 5 unit files
+208/208, 3 real-D1 Workers suites 35/35. The coordinator accepted the `404b5ae4d` live run for
+this merge, together with the merge-head real-D1/local validation and final CI.
