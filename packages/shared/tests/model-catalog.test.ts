@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { AGENT_TYPE_VALUES } from '../src/agents';
 import { PLATFORM_AI_MODELS } from '../src/constants/ai-services';
 import { getModelGroupsForAgent, getModelsForAgent, isKnownModel } from '../src/model-catalog';
 
@@ -16,6 +17,18 @@ function toClaudeCodeBaseModelId(modelId: string): string {
 }
 
 describe('model-catalog', () => {
+  it('covers every supported agent with models, leaving Amp model selection to its harness', () => {
+    for (const agentType of AGENT_TYPE_VALUES) {
+      const models = getModelsForAgent(agentType);
+      if (agentType === 'amp') {
+        expect(models).toEqual([]);
+      } else {
+        expect(models.length, agentType).toBeGreaterThan(0);
+        expect(new Set(models.map((model) => model.id)).size, agentType).toBe(models.length);
+      }
+    }
+  });
+
   describe('getModelGroupsForAgent', () => {
     it('returns grouped models for claude-code', () => {
       const groups = getModelGroupsForAgent('claude-code');
@@ -28,7 +41,13 @@ describe('model-catalog', () => {
       const groups = getModelGroupsForAgent('openai-codex');
       expect(groups.length).toBeGreaterThanOrEqual(2);
       const latestModels = groups[0]?.models.map((model) => model.id) ?? [];
-      expect(latestModels).toEqual(['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna']);
+      expect(latestModels).toEqual([
+        'gpt-6-astra',
+        'gpt-6.1-sol',
+        'gpt-6.1-terra',
+        'gpt-6-sol',
+        'gpt-6-luna',
+      ]);
       expect(groups[1]?.models.map((model) => model.id)).toEqual([
         'gpt-5.6-sol',
         'gpt-5.6-terra',
@@ -69,7 +88,6 @@ describe('model-catalog', () => {
         expect.arrayContaining([
           'mistral-medium-latest',
           'zai-glm-5-3',
-          'zai-glm-5-2',
           'mistral-small-latest',
           'mistral-large-latest',
           'codestral-latest',
@@ -78,9 +96,11 @@ describe('model-catalog', () => {
           'ministral-3b-latest',
         ])
       );
-      expect(allModels.find((model) => model.id === 'zai-glm-5-2')?.name).toBe(
-        'Z.ai GLM 5.2 (Deprecated; retires 2026-10-31)'
-      );
+      expect(isKnownModel('mistral-vibe', 'zai-glm-5-2')).toBe(false);
+      expect(allModels.find((model) => model.id === 'mistral-medium-latest')).toMatchObject({
+        name: 'Mistral Medium 3.5 (Deprecated)',
+        group: 'Legacy (Deprecated)',
+      });
       expect(allModels.some((model) => model.id === 'mistral-medium-3-5')).toBe(false);
       expect(allModels.some((model) => model.id === 'codestral-2508')).toBe(false);
       expect(allModels.some((model) => model.id === 'mistral-medium-3-5-2604')).toBe(false);
@@ -94,6 +114,13 @@ describe('model-catalog', () => {
       const groups = getModelGroupsForAgent('google-gemini');
       expect(groups.length).toBeGreaterThanOrEqual(1);
       const allModels = groups.flatMap((g) => g.models);
+      expect(groups[0]?.models).toEqual([
+        {
+          id: 'gemini-4-argon',
+          name: 'Gemini 4 Argon',
+          group: 'Gemini 4 (Latest)',
+        },
+      ]);
       expect(allModels.some((m) => m.id === 'gemini-3.8-flash')).toBe(true);
       expect(allModels.some((m) => m.id === 'gemini-3.7-flash')).toBe(true);
       expect(allModels.find((m) => m.id === 'gemini-3.7-flash')?.name).toBe(
@@ -101,7 +128,9 @@ describe('model-catalog', () => {
       );
       expect(allModels.some((m) => m.id === 'gemini-2.5-pro')).toBe(true);
       expect(allModels.some((m) => m.id === 'gemini-3.6-flash')).toBe(true);
-      expect(allModels.some((m) => m.id === 'gemini-3.5-flash')).toBe(true);
+      expect(allModels.find((m) => m.id === 'gemini-3.5-flash')?.name).toBe(
+        'Gemini 3.5 Flash (Legacy; routes to 3.6)'
+      );
       expect(allModels.some((m) => m.id === 'gemini-3.5-flash-lite')).toBe(true);
       expect(allModels.some((m) => m.id === 'gemini-2.5-flash-lite')).toBe(true);
       expect(allModels.some((m) => m.id === 'gemini-3.1-pro-preview')).toBe(true);
@@ -114,8 +143,8 @@ describe('model-catalog', () => {
         (group) => group.label === 'Gemini 2.5 (Legacy; existing users)'
       );
       expect(currentGroup?.models.map((model) => model.name)).toEqual([
-        'Gemini 2.5 Pro',
-        'Gemini 2.5 Flash',
+        'Gemini 2.5 Pro (Deprecated; routes to 3.8 on 2026-12-01)',
+        'Gemini 2.5 Flash (Deprecated; routes to 3.5 Flash-Lite on 2026-12-01)',
         'Gemini 2.5 Flash-Lite',
       ]);
       expect(allModels.find((model) => model.id === 'gemini-3.1-flash-lite')?.name).toBe(
@@ -142,7 +171,7 @@ describe('model-catalog', () => {
       expect(groups.length).toBeGreaterThanOrEqual(2);
       const allModels = groups.flatMap((g) => g.models);
       expect(groups.map((g) => g.label)).toEqual(
-        expect.arrayContaining(['OpenCode Zen', 'OpenCode Go'])
+        expect.arrayContaining(['OpenCode', 'OpenCode Go'])
       );
       expect(allModels.some((m) => m.id === 'opencode/claude-sonnet-4-6')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode/gpt-6-astra')).toBe(true);
@@ -304,6 +333,7 @@ describe('model-catalog', () => {
     it('returns true for a codex model under openai-codex', () => {
       expect(isKnownModel('openai-codex', 'gpt-6-astra')).toBe(true);
       expect(isKnownModel('openai-codex', 'gpt-6.1-sol')).toBe(true);
+      expect(isKnownModel('openai-codex', 'gpt-6.1-terra')).toBe(true);
       expect(isKnownModel('openai-codex', 'gpt-6-sol')).toBe(true);
       expect(isKnownModel('openai-codex', 'gpt-6-luna')).toBe(true);
       expect(isKnownModel('openai-codex', 'gpt-5.6-sol')).toBe(true);

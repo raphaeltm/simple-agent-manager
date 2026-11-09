@@ -30,6 +30,19 @@ describe('AI Model Registry', () => {
       expect(defaults).toHaveLength(1);
     });
 
+    it('routes GPT-6.1 Terra with published pricing and Responses-only tools', () => {
+      const model = PLATFORM_AI_MODELS.find((entry) => entry.id === 'gpt-6.1-terra');
+      expect(model).toMatchObject({
+        label: 'GPT-6.1 Terra',
+        costPer1kInputTokens: 0.001,
+        costPer1kOutputTokens: 0.005,
+        contextWindow: 1050000,
+        supportsChatCompletionsToolCalls: false,
+        intendedRole: 'workspace-agent',
+      });
+      expect(DEFAULT_AI_PROXY_ALLOWED_MODELS.split(',')).toContain('gpt-6.1-terra');
+    });
+
     it('has unique model IDs', () => {
       const ids = PLATFORM_AI_MODELS.map((m) => m.id);
       expect(new Set(ids).size).toBe(ids.length);

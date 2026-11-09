@@ -13,6 +13,11 @@ const EXPECTED_OPENCODE_MODELS = [
   'opencode/claude-sonnet-5-5',
   'opencode/claude-haiku-5-5',
   'opencode/beam-free',
+  'opencode/iceman-free',
+  'opencode/crouton-alpha-free',
+  'opencode/inkling-2-small-free',
+  'opencode-go/hy4',
+  'opencode-go/crouton-alpha-free',
   'opencode/muse-wonder-1.0',
   'opencode/flint-40b-free',
   'opencode-go/iceman-contributor-free',
@@ -48,7 +53,7 @@ const EXPECTED_OPENCODE_MODELS = [
   'opencode-go/step-5-preview',
 ] as const;
 
-const EXPECTED_GROUP_LABELS = ['OpenCode Zen', 'OpenCode Go'] as const;
+const EXPECTED_GROUP_LABELS = ['OpenCode', 'OpenCode Go'] as const;
 
 describe('OpenCode model catalog entries', () => {
   it('keys suggested OpenCode models as provider-qualified IDs', () => {
@@ -73,7 +78,12 @@ describe('OpenCode model catalog entries', () => {
     expect(namesById.get('opencode-go/iceman-contributor-free')).toBe('Iceman Contributor Free');
     expect(namesById.get('opencode-go/minimax-m3.1-flash')).toBe('MiniMax M3.1 Flash');
     expect(namesById.get('opencode-go/gemini-4-argon')).toBe('Gemini 4 Argon');
-    expect(namesById.get('opencode/deepseek-v4-flash')).toBe('DeepSeek V4 Flash');
+    expect(namesById.has('opencode/deepseek-v4-flash')).toBe(false);
+    expect(namesById.get('opencode/iceman-free')).toBe('Iceman Free');
+    expect(namesById.get('opencode/crouton-alpha-free')).toBe('Crouton Alpha Free');
+    expect(namesById.get('opencode/inkling-2-small-free')).toBe('Inkling 2 Small Free');
+    expect(namesById.get('opencode-go/hy4')).toBe('Hy4');
+    expect(namesById.get('opencode-go/crouton-alpha-free')).toBe('Crouton Alpha Free');
     expect(namesById.get('opencode/claude-sonnet-5-5')).toBe('Claude Sonnet 5.5');
     expect(namesById.get('opencode/claude-haiku-5-5')).toBe('Claude Haiku 5.5');
     expect(namesById.get('opencode/gpt-6-astra')).toBe('GPT-6 Astra');
@@ -82,7 +92,7 @@ describe('OpenCode model catalog entries', () => {
     expect(namesById.get('opencode/grok-4.7')).toBe('Grok 4.7');
     expect(namesById.get('opencode/gemini-4-argon')).toBe('Gemini 4 Argon');
     expect(namesById.get('opencode-go/step-5-preview')).toBe('Step 5 Preview');
-    expect(namesById.get('opencode-go/deepseek-v4-pro')).toBe('DeepSeek V4 Pro (New)');
+    expect(namesById.get('opencode-go/deepseek-v4-pro')).toBe('DeepSeek V4 Pro');
     expect(namesById.get('opencode-go/gpt-6-luna')).toBe('GPT-6 Luna');
     expect(namesById.has('opencode-go/gpt-6.1-sol')).toBe(false);
     expect(namesById.get('opencode-go/gpt-5.6-luna')).toBe('GPT-5.6 Luna');
@@ -120,6 +130,8 @@ describe('OpenCode model catalog entries', () => {
 
   it('excludes inactive Models.dev records from the static fallback', () => {
     for (const inactiveModelId of [
+      'opencode/nemotron-3-ultra-free',
+      'opencode/deepseek-v4-flash',
       'opencode/longcat-2.5-preview-free',
       'opencode/deepseek-v4-flash-vision-exp',
       'opencode/space-bunny-free',
