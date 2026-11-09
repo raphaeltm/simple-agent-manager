@@ -43,7 +43,8 @@ export function ProviderOrderField({ sources, order, onChange }: ProviderOrderFi
         <h3 className="m-0 text-sm font-semibold text-fg-primary">Provider order</h3>
         <p className="m-0 mt-1 text-xs text-fg-muted">{PROVIDER_ORDER_COPY.help}</p>
       </div>
-      {sources.length < 2 ? (
+      {/* A stored order stays clearable even after the pool drops to one account. */}
+      {sources.length < 2 && order === null ? (
         <p className="m-0 text-xs text-fg-muted">{PROVIDER_ORDER_COPY.singleSource}</p>
       ) : (
         <>
@@ -80,7 +81,7 @@ export function ProviderOrderField({ sources, order, onChange }: ProviderOrderFi
               </span>
             </label>
           </fieldset>
-          {order && (
+          {order && listed.length > 0 && (
             <ol
               aria-label="Accounts in order"
               className="m-0 grid min-w-0 list-none divide-y divide-border-default rounded-md border border-border-default bg-inset p-0"

@@ -76,13 +76,14 @@ function renderPanel(
       mutations: { retry: false },
     },
   });
-  return render(<DefaultCapacityPoolsPanel {...props} />, {
+  const rendered = render(<DefaultCapacityPoolsPanel {...props} />, {
     wrapper: ({ children }: { children: ReactNode }) => (
       <MemoryRouter>
         <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
       </MemoryRouter>
     ),
   });
+  return Object.assign(rendered, { queryClient });
 }
 
 function providerCatalog(credentialId = 'credential-project'): ProviderCatalog {
@@ -1132,6 +1133,8 @@ describe('DefaultCapacityPoolsPanel provider order', () => {
 
   it('turns an order on from equal, and back off to clear it', async () => {
     const current = multiSourceSummary(null);
+    // Scaleway (no allowed machines) comes first in the response, so seeding must move it down.
+    current.sources = [current.sources[2]!, ...current.sources.filter((_, i) => i !== 2)];
     mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(response('project', current));
     mocks.updateProjectDefaultCapacityPools.mockResolvedValue(response('project', current));
 
@@ -1142,7 +1145,11 @@ describe('DefaultCapacityPoolsPanel provider order', () => {
     expect(screen.queryByRole('list', { name: 'Accounts in order' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('radio', { name: /Try accounts in this order/ }));
     // Accounts that can start machines are seeded above the one that allows none.
-    expect(orderedTitles().at(-1)).toBe('Scaleway · Project credentials');
+    expect(orderedTitles()).toEqual([
+      'Hetzner · Project credentials',
+      'Google Cloud · Project credentials',
+      'Scaleway · Project credentials',
+    ]);
     fireEvent.click(screen.getByRole('button', { name: 'Move Scaleway · Project credentials up' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
@@ -1202,6 +1209,95 @@ describe('DefaultCapacityPoolsPanel provider order', () => {
         'Scaleway (no machines allowed yet) first, then Google Cloud and Hetzner.'
       )
     ).toBeInTheDocument();
+  });
+
+  it('does not write an untouched order back after a refetch changes it', async () => {
+    const opened = multiSourceSummary(['source-gcp', 'source-hetzner', 'source-scw']);
+    const newer = multiSourceSummary(['source-scw', 'source-hetzner', 'source-gcp']);
+    mocks.fetchProjectDefaultCapacityPools
+      .mockResolvedValueOnce(response('project', opened))
+      .mockResolvedValue(response('project', newer));
+    mocks.updateProjectDefaultCapacityPools.mockResolvedValue(response('project', newer));
+
+    const { queryClient } = renderPanel();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    await queryClient.refetchQueries();
+    await waitFor(() => expect(mocks.fetchProjectDefaultCapacityPools).toHaveBeenCalledTimes(2));
+    fireEvent.change(screen.getByLabelText('Placing agents'), { target: { value: 'pack' } });
+    expect(screen.getByText('1 unsaved change')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() =>
+      expect(mocks.updateProjectDefaultCapacityPools).toHaveBeenCalledWith('project-1', {
+        policy: { strategy: 'pack' },
+      })
+    );
+  });
+
+  it('sends at most the API limit of ranked sources', async () => {
+    const current = multiSourceSummary(null);
+    const base = current.sources[0]!;
+    current.sources = Array.from({ length: 34 }, (_, index) => ({
+      ...base,
+      id: `source-${index}`,
+      credentialId: `credential-${index}`,
+    }));
+    current.candidates = current.sources.map((source, index) =>
+      candidate({ id: `candidate-${index}`, capacitySourceId: source.id })
+    );
+    mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(response('project', current));
+    mocks.updateProjectDefaultCapacityPools.mockResolvedValue(response('project', current));
+
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    fireEvent.click(screen.getByRole('radio', { name: /Try accounts in this order/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => expect(mocks.updateProjectDefaultCapacityPools).toHaveBeenCalled());
+    const [, body] = mocks.updateProjectDefaultCapacityPools.mock.calls[0]!;
+    expect(body.sourceOrder).toEqual(current.sources.slice(0, 32).map((source) => source.id));
+  });
+
+  it('lets a stored order be cleared when only one account still serves the pool', async () => {
+    const current = summary('project');
+    current.pool.sourceOrder = ['source-project', 'source-removed'];
+    mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(response('project', current));
+    mocks.updateProjectDefaultCapacityPools.mockResolvedValue(response('project', current));
+
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    expect(screen.getByRole('radio', { name: /Try accounts in this order/ })).toBeChecked();
+    fireEvent.click(screen.getByRole('radio', { name: /Every account is equal/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() =>
+      expect(mocks.updateProjectDefaultCapacityPools).toHaveBeenCalledWith('project-1', {
+        sourceOrder: null,
+      })
+    );
+  });
+
+  it('lets a stored order be cleared when none of its sources serve the pool now', async () => {
+    const current = multiSourceSummary(['source-gone']);
+    mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(response('project', current));
+    mocks.updateProjectDefaultCapacityPools.mockResolvedValue(response('project', current));
+
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    expect(screen.getByRole('radio', { name: /Try accounts in this order/ })).toBeChecked();
+    expect(screen.getByText('No changes yet')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('radio', { name: /Every account is equal/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() =>
+      expect(mocks.updateProjectDefaultCapacityPools).toHaveBeenCalledWith('project-1', {
+        sourceOrder: null,
+      })
+    );
   });
 
   it('names two accounts of one provider apart in the order', async () => {

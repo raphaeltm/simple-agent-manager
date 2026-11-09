@@ -537,6 +537,7 @@ async function editStressedPool(page: Page, screenshotName: string) {
     .textContent())!.replace(/^\d+\.\s*/, '');
   await order.getByRole('button', { name: `Move ${secondTitle} up` }).click();
   await expect(order.getByRole('listitem').first()).toContainText(secondTitle);
+  const reorderedTitles = await orderTitles(page);
   await assertNoOverflow(page);
   await screenshotNearHeading(page, 'Provider order', `${screenshotName}-provider-order`);
 
@@ -568,6 +569,23 @@ async function editStressedPool(page: Page, screenshotName: string) {
   // The saved order reaches the overview sentence.
   await expect(page.getByText(/ first, then /)).toBeVisible();
   await assertNoOverflow(page);
+  // Reopening the editor shows exactly the order that was saved.
+  await page.getByRole('button', { name: 'Edit', exact: true }).click();
+  await expect(page.getByRole('radio', { name: /Try accounts in this order/ })).toBeChecked();
+  expect(await orderTitles(page)).toEqual(reorderedTitles);
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+}
+
+async function orderTitles(page: Page): Promise<string[]> {
+  const items = await page
+    .getByRole('list', { name: 'Accounts in order' })
+    .getByRole('listitem')
+    .all();
+  return Promise.all(
+    items.map(async (item) =>
+      ((await item.locator('div > div').first().textContent()) ?? '').replace(/^\d+\.\s*/, '')
+    )
+  );
 }
 
 test.describe('Default capacity pool scope surfaces', () => {

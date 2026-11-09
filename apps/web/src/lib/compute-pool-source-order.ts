@@ -1,4 +1,5 @@
 import type { DefaultCapacityPoolSummary } from '@simple-agent-manager/shared';
+import { MAX_CAPACITY_POOL_SOURCE_ORDER_LENGTH } from '@simple-agent-manager/shared';
 
 import { groupTitles } from '../components/compute-pool/machine-labels';
 import { type MachineGroup, sourceKind } from './compute-pool-machines';
@@ -72,16 +73,25 @@ export function rankSources(sources: OrderableSource[], sourceOrder: string[] | 
 }
 
 /**
- * The editor's starting order: null when every source is equal, otherwise every orderable
- * source with unranked ones appended, so saving without a change writes nothing new.
+ * The editor's starting order: null when no order is stored, otherwise every orderable source
+ * with unranked ones appended, so saving without a change writes nothing new. A stored order
+ * whose sources no longer serve the pool still opens as ordered, so it can be cleared.
  */
 export function initialSourceOrder(
   sources: OrderableSource[],
   sourceOrder: string[] | null | undefined
 ): string[] | null {
+  if (!sourceOrder || sourceOrder.length === 0) return null;
   const { ranked, unranked } = rankSources(sources, sourceOrder);
-  if (ranked.length === 0) return null;
   return [...ranked, ...unranked].map((source) => source.id);
+}
+
+/**
+ * The `sourceOrder` to send. The API lists at most MAX_CAPACITY_POOL_SOURCE_ORDER_LENGTH sources;
+ * any beyond that stay unranked, which placement already tries after every ranked source.
+ */
+export function toSourceOrderRequest(order: string[] | null): string[] | null {
+  return order ? order.slice(0, MAX_CAPACITY_POOL_SOURCE_ORDER_LENGTH) : null;
 }
 
 export function sameSourceOrder(a: string[] | null, b: string[] | null): boolean {
