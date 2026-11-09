@@ -56,8 +56,8 @@ function NumberFilter({
   onChange,
 }: {
   label: string;
-  value: number | null;
-  step: number;
+  value: number | null | undefined;
+  step: number | 'any';
   onChange: (value: number | null) => void;
 }) {
   const id = useId();
@@ -84,6 +84,8 @@ interface MachineCatalogFiltersProps {
   filters: CatalogFilters;
   accounts: OrderableSource[];
   continents: Continent[];
+  /** Currency markers present in the list: one price limit each, never converted. */
+  currencies: string[];
   onChange: (filters: CatalogFilters) => void;
 }
 
@@ -91,8 +93,15 @@ export function MachineCatalogFilters({
   filters,
   accounts,
   continents,
+  currencies,
   onChange,
 }: MachineCatalogFiltersProps) {
+  const setMaxPrice = (currency: string, value: number | null) => {
+    const next = new Map(filters.maxMonthlyPrices);
+    if (value === null) next.delete(currency);
+    else next.set(currency, value);
+    onChange({ ...filters, maxMonthlyPrices: next });
+  };
   const update = <K extends keyof CatalogFilters>(key: K, value: CatalogFilters[K]) =>
     onChange({ ...filters, [key]: value });
   const hideId = useId();
@@ -154,12 +163,15 @@ export function MachineCatalogFilters({
           step={1}
           onChange={(value) => update('minMemoryGb', value)}
         />
-        <NumberFilter
-          label="Max price / month"
-          value={filters.maxMonthlyPrice}
-          step={1}
-          onChange={(value) => update('maxMonthlyPrice', value)}
-        />
+        {currencies.map((currency) => (
+          <NumberFilter
+            key={currency}
+            label={`Max ${currency} / month`}
+            value={filters.maxMonthlyPrices.get(currency)}
+            step="any"
+            onChange={(value) => setMaxPrice(currency, value)}
+          />
+        ))}
         <label
           htmlFor={hideId}
           className="flex min-h-11 items-center gap-2 text-sm text-fg-primary"

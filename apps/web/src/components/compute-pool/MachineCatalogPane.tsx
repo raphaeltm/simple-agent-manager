@@ -1,8 +1,9 @@
-import { Button, Chip } from '@simple-agent-manager/ui';
-import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
+import { Button, Select } from '@simple-agent-manager/ui';
 import { useId, useMemo, useState } from 'react';
 
 import {
+  CATALOG_SORT_OPTIONS,
+  catalogCurrencies,
   type CatalogFilters,
   type CatalogSort,
   type CatalogSortKey,
@@ -13,34 +14,21 @@ import {
   sortCatalogRows,
 } from '../../lib/compute-pool-catalog-view';
 import { POOL_EDITOR_COPY } from '../../lib/compute-pool-copy';
-import { formatOfferingNumber } from '../../lib/compute-pool-offerings';
 import {
   CONTINENTS,
   isRowAllowed,
   type MachineRegionRow,
   type RegionDraft,
+  rowControlName,
 } from '../../lib/compute-pool-region-rows';
 import type { OrderableSource } from '../../lib/compute-pool-source-order';
+import type { CatalogRowView } from './machine-catalog-row';
+import { MachineCatalogCards } from './MachineCatalogCards';
 import { MachineCatalogFilters } from './MachineCatalogFilters';
+import { MachineCatalogTable } from './MachineCatalogTable';
 
 /** Rows rendered per page of the list; "Show more" adds another page. */
 const ROWS_PER_PAGE = 100;
-
-/**
- * The first column holds the machine and its account, so the table fits the settings pane; it
- * sorts by either. The remaining columns each sort by their own value.
- */
-const MACHINE_SORT_KEYS: Array<{ key: CatalogSortKey; label: string }> = [
-  { key: 'machine', label: 'Machine' },
-  { key: 'provider', label: 'Account' },
-];
-const COLUMNS: Array<{ key: CatalogSortKey; label: string; numeric?: boolean }> = [
-  { key: 'vcpu', label: 'vCPU', numeric: true },
-  { key: 'memory', label: 'Memory', numeric: true },
-  { key: 'disk', label: 'Disk', numeric: true },
-  { key: 'region', label: 'Region' },
-  { key: 'price', label: 'Price / month', numeric: true },
-];
 
 interface MachineCatalogPaneProps {
   rows: MachineRegionRow[];
@@ -48,65 +36,27 @@ interface MachineCatalogPaneProps {
   accountRank: ReadonlyMap<string, number>;
   draft: RegionDraft;
   excluded: ReadonlySet<string>;
-  readOnly: boolean;
+  /** Rows whose machine and region another account also offers (see `ambiguousRowKeys`). */
+  ambiguous: ReadonlySet<string>;
   onSetRows: (rows: MachineRegionRow[], inPool: boolean) => void;
 }
 
-function specs(row: MachineRegionRow): string {
-  return [
-    `${formatOfferingNumber(row.vcpu, '')} vCPU`,
-    `${formatOfferingNumber(row.ramGb, 'GB')}`,
-    `${formatOfferingNumber(row.diskGb, 'GB')} disk`,
-  ].join(' · ');
+function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`;
 }
 
-function SortButton({
-  label,
-  sortKey,
-  sort,
-  onSort,
-}: {
-  label: string;
-  sortKey: CatalogSortKey;
-  sort: CatalogSort | null;
-  onSort: (key: CatalogSortKey) => void;
-}) {
-  return (
-    <button
-      type="button"
-      className="inline-flex items-center gap-1 whitespace-nowrap border-0 bg-transparent p-0 font-medium text-inherit hover:text-fg-primary"
-      onClick={() => onSort(sortKey)}
-    >
-      {label}
-      <SortIcon active={sort?.key === sortKey ? sort : null} />
-    </button>
-  );
-}
-
-function ariaSortFor(sort: CatalogSort | null, keys: CatalogSortKey[]) {
-  if (!sort || !keys.includes(sort.key)) return 'none' as const;
-  return sort.direction === 'asc' ? ('ascending' as const) : ('descending' as const);
-}
-
-function SortIcon({ active }: { active: CatalogSort | null }) {
-  if (!active) return <ArrowUpDown size={12} aria-hidden className="opacity-50" />;
-  return active.direction === 'asc' ? (
-    <ArrowUp size={12} aria-hidden />
-  ) : (
-    <ArrowDown size={12} aria-hidden />
-  );
-}
-
+/** Every machine × region the connected accounts offer, with filters, sorting and bulk edits. */
 export function MachineCatalogPane({
   rows,
   accounts,
   accountRank,
   draft,
   excluded,
-  readOnly,
+  ambiguous,
   onSetRows,
 }: MachineCatalogPaneProps) {
   const headingId = useId();
+  const sortId = useId();
   const [filters, setFilters] = useState<CatalogFilters>(DEFAULT_CATALOG_FILTERS);
   const [sort, setSort] = useState<CatalogSort | null>(null);
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
@@ -120,6 +70,7 @@ export function MachineCatalogPane({
     const present = new Set(rows.map((row) => row.continent));
     return CONTINENTS.filter((continent) => present.has(continent));
   }, [rows]);
+  const currencies = useMemo(() => catalogCurrencies(rows), [rows]);
   const cheapest = useMemo(() => cheapestRegionKeys(rows), [rows]);
   const visible = useMemo(
     () =>
@@ -127,55 +78,51 @@ export function MachineCatalogPane({
     [rows, filters, draft, accountTitles, sort, accountRank]
   );
   const page = visible.slice(0, limit);
-  const selectedRows = rows.filter((row) => selected.has(row.key));
-  const pageKeys = page.filter((row) => row.canAllow || isRowAllowed(row, draft)).map((r) => r.key);
-  const allPageSelected = pageKeys.length > 0 && pageKeys.every((key) => selected.has(key));
 
-  const toggleSelected = (key: string) =>
-    setSelected((current) => {
-      const next = new Set(current);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  const applyBulk = (inPool: boolean) => {
-    onSetRows(selectedRows, inPool);
-    setSelected(new Set());
-  };
-
-  const actionFor = (row: MachineRegionRow) => {
-    const inPool = isRowAllowed(row, draft);
-    if (!inPool && !row.canAllow) {
-      return (
-        <Chip size="sm" tone="warning" title={row.issue ?? undefined}>
-          {row.issue ?? 'Unavailable'}
-        </Chip>
-      );
-    }
-    if (readOnly)
-      return inPool ? (
-        <Chip size="sm" tone="success">
-          In pool
-        </Chip>
-      ) : null;
-    return (
-      <Button
-        size="sm"
-        variant={inPool ? 'ghost' : 'raised'}
-        aria-label={`${inPool ? 'Remove' : 'Add'} ${row.sku} in ${row.regionLabel}`}
-        onClick={() => onSetRows([row], !inPool)}
-      >
-        {inPool ? 'Remove' : 'Add'}
-      </Button>
-    );
-  };
-
-  // Account titles already start with the provider ("Hetzner · Personal").
+  const inPool = (row: MachineRegionRow) => isRowAllowed(row, draft);
   const accountTitle = (row: MachineRegionRow) =>
     accountTitles.get(row.sourceId) ?? row.providerLabel;
-  const onSort = (key: CatalogSortKey) => setSort((current) => nextSort(current, key));
-  const accountNote = (row: MachineRegionRow) =>
-    excluded.has(row.sourceId) ? ' · account off' : '';
+  const view: CatalogRowView = {
+    inPool,
+    changed: (row) => draft.has(row.key),
+    accountTitle,
+    accountNote: (row) => (excluded.has(row.sourceId) ? POOL_EDITOR_COPY.offAccountNote : null),
+    controlName: (row) => rowControlName(row, accountTitle(row), ambiguous),
+    cheapest: (row) => cheapest.has(row.key),
+    selected: (row) => selected.has(row.key),
+    selectable: (row) => row.canAllow || inPool(row),
+    toggleSelected: (row) =>
+      setSelected((current) => {
+        const next = new Set(current);
+        if (next.has(row.key)) next.delete(row.key);
+        else next.add(row.key);
+        return next;
+      }),
+    setInPool: (row, next) => onSetRows([row], next),
+  };
+
+  // Bulk actions act on selected rows that are still listed, never on rows a filter hid, and
+  // count only the rows each action would change.
+  const selectedRows = visible.filter((row) => selected.has(row.key));
+  const toAdd = selectedRows.filter((row) => !inPool(row) && row.canAllow);
+  const toRemove = selectedRows.filter(inPool);
+  const pageKeys = page.filter(view.selectable).map((row) => row.key);
+  const pageSelected = pageKeys.filter((key) => selected.has(key)).length;
+  const pageSelection =
+    pageSelected === 0 ? 'none' : pageSelected === pageKeys.length ? 'all' : 'some';
+  const selectPage = () =>
+    setSelected((current) => {
+      const next = new Set(current);
+      for (const key of pageKeys) {
+        if (pageSelection === 'all') next.delete(key);
+        else next.add(key);
+      }
+      return next;
+    });
+  const applyBulk = (target: MachineRegionRow[], next: boolean) => {
+    onSetRows(target, next);
+    setSelected(new Set());
+  };
 
   return (
     <section className="grid min-w-0 gap-3" aria-labelledby={headingId}>
@@ -185,28 +132,89 @@ export function MachineCatalogPane({
         </h3>
         <p className="m-0 mt-1 text-xs text-fg-muted">{POOL_EDITOR_COPY.catalogHelp}</p>
       </div>
+
       <MachineCatalogFilters
         filters={filters}
         accounts={accounts}
         continents={continents}
+        currencies={currencies}
         onChange={(next) => {
           setFilters(next);
           setLimit(ROWS_PER_PAGE);
+          // A selection made under other filters must not act on rows the person can't see.
+          setSelected(new Set());
         }}
       />
 
-      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 text-xs text-fg-muted">
-        <span aria-live="polite">
-          {visible.length} of {rows.length} rows
+      {/* Narrow screens have no column headers: sort and select-all live here instead. */}
+      <div className="grid min-w-0 grid-cols-[1fr_auto] items-end gap-2 xl:hidden">
+        <div className="grid min-w-0 gap-1">
+          <label htmlFor={sortId} className="text-xs font-medium text-fg-muted">
+            Sort by
+          </label>
+          <Select
+            id={sortId}
+            value={sort?.key ?? ''}
+            onChange={(event) => {
+              const key = event.currentTarget.value as CatalogSortKey | '';
+              setSort(key ? { key, direction: sort?.direction ?? 'asc' } : null);
+            }}
+          >
+            <option value="">Account order</option>
+            {CATALOG_SORT_OPTIONS.map((option) => (
+              <option key={option.key} value={option.key}>
+                {option.label}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={!sort}
+          onClick={() =>
+            sort && setSort({ ...sort, direction: sort.direction === 'asc' ? 'desc' : 'asc' })
+          }
+        >
+          {sort?.direction === 'desc' ? 'Descending' : 'Ascending'}
+        </Button>
+      </div>
+
+      <div
+        className={`flex min-w-0 flex-wrap items-center justify-between gap-2 text-xs text-fg-muted ${
+          selectedRows.length > 0 ? 'sticky top-0 z-10 bg-surface py-2' : ''
+        }`}
+      >
+        <span className="flex flex-wrap items-center gap-3">
+          <label className="flex min-h-9 items-center gap-2 xl:hidden">
+            <input
+              type="checkbox"
+              className="h-5 w-5 accent-[var(--sam-color-focus-ring)]"
+              checked={pageSelection === 'all'}
+              ref={(element) => {
+                if (element) element.indeterminate = pageSelection === 'some';
+              }}
+              disabled={pageKeys.length === 0}
+              onChange={selectPage}
+            />
+            Select all {pageKeys.length} shown
+          </label>
+          <span aria-live="polite">
+            {visible.length} of {rows.length} rows
+          </span>
         </span>
-        {!readOnly && selected.size > 0 && (
+        {selectedRows.length > 0 && (
           <span className="flex flex-wrap gap-2">
-            <Button size="sm" variant="raised" onClick={() => applyBulk(true)}>
-              Add {selected.size} to pool
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => applyBulk(false)}>
-              Remove {selected.size} from pool
-            </Button>
+            {toAdd.length > 0 && (
+              <Button size="sm" variant="raised" onClick={() => applyBulk(toAdd, true)}>
+                Add {plural(toAdd.length, 'row')} to pool
+              </Button>
+            )}
+            {toRemove.length > 0 && (
+              <Button size="sm" variant="ghost" onClick={() => applyBulk(toRemove, false)}>
+                Remove {plural(toRemove.length, 'row')} from pool
+              </Button>
+            )}
             <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
               Clear selection
             </Button>
@@ -214,175 +222,21 @@ export function MachineCatalogPane({
         )}
       </div>
 
-      {/* Desktop: a sortable table. Its wrapper scrolls rather than clipping on narrow panes. */}
-      <div className="relative hidden min-w-0 overflow-x-auto lg:block">
-        <table className="w-full border-collapse text-sm">
-          <thead>
-            <tr className="border-b border-border-default text-left text-xs text-fg-muted">
-              {!readOnly && (
-                <th className="w-8 py-2 pr-2">
-                  <input
-                    type="checkbox"
-                    aria-label="Select every row on this page"
-                    className="h-4 w-4 accent-[var(--sam-color-focus-ring)]"
-                    checked={allPageSelected}
-                    onChange={() =>
-                      setSelected((current) => {
-                        const next = new Set(current);
-                        for (const key of pageKeys) {
-                          if (allPageSelected) next.delete(key);
-                          else next.add(key);
-                        }
-                        return next;
-                      })
-                    }
-                  />
-                </th>
-              )}
-              <th
-                className="py-2 pr-3 font-medium"
-                aria-sort={ariaSortFor(
-                  sort,
-                  MACHINE_SORT_KEYS.map((entry) => entry.key)
-                )}
-              >
-                <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-1">
-                  {MACHINE_SORT_KEYS.map((entry) => (
-                    <SortButton
-                      key={entry.key}
-                      label={entry.label}
-                      sortKey={entry.key}
-                      sort={sort}
-                      onSort={onSort}
-                    />
-                  ))}
-                </span>
-              </th>
-              {COLUMNS.map((column) => (
-                <th
-                  key={column.key}
-                  className={`py-2 pr-3 font-medium ${column.numeric ? 'text-right' : ''}`}
-                  aria-sort={ariaSortFor(sort, [column.key])}
-                >
-                  <SortButton
-                    label={column.label}
-                    sortKey={column.key}
-                    sort={sort}
-                    onSort={onSort}
-                  />
-                </th>
-              ))}
-              <th className="py-2 text-right font-medium">
-                <span className="sr-only">Action</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {page.map((row) => {
-              const inPool = isRowAllowed(row, draft);
-              return (
-                <tr
-                  key={row.key}
-                  className={`border-b border-border-default align-middle ${
-                    inPool ? 'bg-[var(--sam-status-success-bg)]' : ''
-                  }`}
-                >
-                  {!readOnly && (
-                    <td className="py-2 pr-2">
-                      <input
-                        type="checkbox"
-                        aria-label={`Select ${row.sku} in ${row.regionLabel}`}
-                        className="h-4 w-4 accent-[var(--sam-color-focus-ring)]"
-                        checked={selected.has(row.key)}
-                        disabled={!inPool && !row.canAllow}
-                        onChange={() => toggleSelected(row.key)}
-                      />
-                    </td>
-                  )}
-                  <td className="min-w-[10rem] py-2 pr-3">
-                    <span className="block font-mono text-fg-primary [overflow-wrap:anywhere]">
-                      {row.sku}
-                    </span>
-                    <span className="block text-xs text-fg-muted [overflow-wrap:anywhere]">
-                      {accountTitle(row)}
-                      {accountNote(row)}
-                    </span>
-                  </td>
-                  <td className="py-2 pr-3 text-right tabular-nums">
-                    {formatOfferingNumber(row.vcpu, '')}
-                  </td>
-                  <td className="whitespace-nowrap py-2 pr-3 text-right tabular-nums">
-                    {formatOfferingNumber(row.ramGb, 'GB')}
-                  </td>
-                  <td className="whitespace-nowrap py-2 pr-3 text-right tabular-nums">
-                    {formatOfferingNumber(row.diskGb, 'GB')}
-                  </td>
-                  <td className="min-w-[7rem] py-2 pr-3">
-                    <span className="block text-fg-primary [overflow-wrap:anywhere]">
-                      {row.regionLabel}
-                    </span>
-                    <span className="block text-xs text-fg-muted [overflow-wrap:anywhere]">
-                      {row.region}
-                    </span>
-                  </td>
-                  <td className="whitespace-nowrap py-2 pr-3 text-right">
-                    <span className="block text-fg-primary">
-                      {row.priceLabel ?? 'Price unavailable'}
-                    </span>
-                    {cheapest.has(row.key) && (
-                      <span className="block text-xs text-[var(--sam-status-success-fg)]">
-                        Cheapest region
-                      </span>
-                    )}
-                  </td>
-                  <td className="whitespace-nowrap py-2 text-right">{actionFor(row)}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+      {/* Wide screens: a sortable table. Its wrapper scrolls rather than clipping. */}
+      <div className="relative hidden min-w-0 overflow-x-auto xl:block">
+        <MachineCatalogTable
+          rows={page}
+          view={view}
+          sort={sort}
+          onSort={(key) => setSort((current) => nextSort(current, key))}
+          pageSelection={pageSelection}
+          onSelectPage={selectPage}
+          labelledBy={headingId}
+        />
       </div>
-
-      {/* Mobile and narrow panes: one card per row. */}
-      <ul className="m-0 grid list-none gap-2 p-0 lg:hidden">
-        {page.map((row) => {
-          const inPool = isRowAllowed(row, draft);
-          return (
-            <li
-              key={row.key}
-              className={`flex min-w-0 items-start gap-3 rounded-md border border-border-default p-3 ${
-                inPool ? 'bg-[var(--sam-status-success-bg)]' : 'bg-inset'
-              }`}
-            >
-              {!readOnly && (
-                <input
-                  type="checkbox"
-                  aria-label={`Select ${row.sku} in ${row.regionLabel}`}
-                  className="mt-1 h-5 w-5 shrink-0 accent-[var(--sam-color-focus-ring)]"
-                  checked={selected.has(row.key)}
-                  disabled={!inPool && !row.canAllow}
-                  onChange={() => toggleSelected(row.key)}
-                />
-              )}
-              <div className="min-w-0 flex-1">
-                <p className="m-0 text-sm text-fg-primary [overflow-wrap:anywhere]">
-                  <span className="font-mono">{row.sku}</span> · {row.regionLabel}
-                </p>
-                <p className="m-0 text-xs text-fg-muted [overflow-wrap:anywhere]">
-                  {accountTitle(row)}
-                  {accountNote(row)}
-                </p>
-                <p className="m-0 text-xs text-fg-muted">{specs(row)}</p>
-                <p className="m-0 text-xs text-fg-primary">
-                  {row.priceLabel ?? 'Price unavailable'}
-                  {cheapest.has(row.key) ? ' · cheapest region' : ''}
-                </p>
-              </div>
-              <div className="shrink-0">{actionFor(row)}</div>
-            </li>
-          );
-        })}
-      </ul>
+      <div className="xl:hidden">
+        <MachineCatalogCards rows={page} view={view} />
+      </div>
 
       {visible.length === 0 && (
         <p className="m-0 text-sm text-fg-muted">

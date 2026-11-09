@@ -219,11 +219,38 @@ describe('compute pool editor', () => {
     renderPanel();
     expect(await screen.findByText('Empty · Instant sessions only')).toBeInTheDocument();
     expect(
-      screen.getByText('Your pool is empty, so only Instant sessions can run.')
+      screen.getByText("This project's pool is empty, so only Instant sessions can run.")
     ).toBeInTheDocument();
     await click('Add cx22 in Nuremberg');
     expect(screen.getByText('Ready · 1 in pool')).toBeInTheDocument();
-    expect(screen.queryByText('Your pool is empty, so only Instant sessions can run.')).toBeNull();
+    expect(
+      screen.queryByText("This project's pool is empty, so only Instant sessions can run.")
+    ).toBeNull();
+  });
+
+  it('warns that the pool is empty when its last account with machines is switched off', async () => {
+    const pool = summary('project');
+    load(pool);
+    renderPanel();
+    expect(await screen.findByText('Ready · 2 in pool')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('switch', { name: /^Use Hetzner .* in this pool$/ }));
+    expect(screen.getByText('Empty · Instant sessions only')).toBeInTheDocument();
+    expect(
+      screen.getByText("This project's pool is empty, so only Instant sessions can run.")
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/^Ready · \d+ in pool$/)).toBeNull();
+    expect(screen.getByText('2 machines kept, not used')).toBeInTheDocument();
+
+    // Switching it back on restores the machines and clears the change.
+    fireEvent.click(screen.getByRole('switch', { name: /^Use Hetzner .* in this pool$/ }));
+    expect(screen.getByText('Ready · 2 in pool')).toBeInTheDocument();
+    expect(
+      screen.queryByText("This project's pool is empty, so only Instant sessions can run.")
+    ).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Save changes' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('switch', { name: /^Use Hetzner .* in this pool$/ }));
+    expect(await save()).toEqual({ excludedSourceIds: ['source-project'] });
   });
 
   it('switches an account off, keeps its machines, and saves only the switch', async () => {
@@ -235,6 +262,44 @@ describe('compute pool editor', () => {
     expect(screen.getByText('1 machine kept, not used')).toBeInTheDocument();
     expect(screen.getByText('Ready · 2 in pool')).toBeInTheDocument();
     expect(await save()).toEqual({ excludedSourceIds: [GCP_SOURCE] });
+  });
+
+  it('switching an account off then adding one of its machines saves it on, with the machine', async () => {
+    load(twoAccountPool());
+    renderPanel();
+    fireEvent.click(
+      await screen.findByRole('switch', { name: 'Use Google Cloud · SAM GCP Prod in this pool' })
+    );
+    expect(screen.getAllByText(/account off: adding switches it on/).length).toBeGreaterThan(0);
+    await click('Add e2-standard-4 in Iowa');
+    // The account is back on, so nothing about it is switched off any more: no exclusion change.
+    expect(await save()).toEqual({
+      candidates: [{ id: 'gcp-us-central1-a', status: 'active' }],
+    });
+  });
+
+  it('saves machines, order and switched-off accounts in one request', async () => {
+    load(twoAccountPool());
+    renderPanel();
+    await click('Try accounts in this order');
+    await click('Try Google Cloud · SAM GCP Prod earlier');
+    await click('Add ccx33 in Hillsboro');
+    fireEvent.click(
+      screen.getByRole('switch', { name: 'Use Google Cloud · SAM GCP Prod in this pool' })
+    );
+    expect(await save()).toEqual({
+      catalogAdditions: [
+        {
+          sourceId: 'source-project',
+          provider: 'hetzner',
+          location: 'hil',
+          providerInstanceType: 'ccx33',
+          providerInstanceSku: null,
+        },
+      ],
+      sourceOrder: [GCP_SOURCE, 'source-project'],
+      excludedSourceIds: [GCP_SOURCE],
+    });
   });
 
   it('switches an account back on when a machine from it is added', async () => {
@@ -273,16 +338,31 @@ describe('compute pool editor', () => {
       (await screen.findAllByRole('checkbox', { name: 'Select ccx33 in Hillsboro' }))[0]!
     );
     fireEvent.click(screen.getAllByRole('checkbox', { name: 'Select e2-standard-4 in Iowa' })[0]!);
-    await click('Add 2 to pool');
+    await click('Add 2 rows to pool');
     const body = await save();
     expect(body.candidates).toEqual([{ id: 'gcp-us-central1-a', status: 'active' }]);
     expect(body.catalogAdditions).toHaveLength(1);
   });
 
+  it('bulk actions act only on selected rows still listed', async () => {
+    load(twoAccountPool());
+    renderPanel();
+    fireEvent.click(
+      (await screen.findAllByRole('checkbox', { name: 'Select ccx33 in Hillsboro' }))[0]!
+    );
+    expect(screen.getAllByRole('button', { name: 'Add 1 row to pool' }).length).toBe(1);
+    // Changing a filter clears the selection, so no hidden row can be acted on.
+    fireEvent.click(
+      within(screen.getByRole('group', { name: 'Show' })).getByRole('button', { name: 'In pool' })
+    );
+    expect(screen.queryByRole('button', { name: /rows? to pool$/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Save changes' })).toBeNull();
+  });
+
   it('removes everything with Remove all', async () => {
     load(twoAccountPool());
     renderPanel();
-    await click('Remove all');
+    await click('Remove all (3)');
     expect(screen.getByText('Empty · Instant sessions only')).toBeInTheDocument();
     const body = await save();
     expect(body.candidates.map((c: { id: string }) => c.id).sort()).toEqual([
@@ -324,14 +404,62 @@ describe('compute pool editor', () => {
   it('filters to the machines in the pool', async () => {
     load(twoAccountPool());
     renderPanel();
-    const show = await screen.findByRole('radiogroup', { name: 'Show' }).catch(() => null);
-    const inPool = show
-      ? within(show).getByRole('radio', { name: 'In pool' })
-      : screen.getByRole('button', { name: 'In pool' });
-    fireEvent.click(inPool);
+    const show = await screen.findByRole('group', { name: 'Show' });
+    fireEvent.click(within(show).getByRole('button', { name: 'In pool' }));
     expect(screen.queryAllByRole('button', { name: 'Add ccx33 in Hillsboro' })).toHaveLength(0);
     expect(
       screen.getAllByRole('button', { name: 'Remove cx22 in Nuremberg' }).length
+    ).toBeGreaterThan(0);
+
+    // Removing a row keeps it listed (with its pending state) so it can be undone in place.
+    await click('Remove cx22 in Nuremberg');
+    expect(screen.getAllByRole('button', { name: 'Add cx22 in Nuremberg' }).length).toBeGreaterThan(
+      0
+    );
+    expect(screen.getAllByText('Removing on save').length).toBeGreaterThan(0);
+  });
+
+  it('names controls with the account when two accounts offer the same machine and region', async () => {
+    const pool = twoAccountPool();
+    const second = {
+      ...pool.sources[0]!,
+      id: 'source-second',
+      credentialId: 'credential-second',
+      credentialReference: 'credentials:credential-second',
+      label: 'Second key',
+    };
+    pool.sources = [...pool.sources, second];
+    pool.candidates = [
+      ...pool.candidates,
+      candidate({
+        id: 'second-cx22',
+        capacitySourceId: 'source-second',
+        machineSize: 'small',
+        providerInstanceType: 'cx22',
+      }),
+    ];
+    mocks.providerCatalogs = [
+      providerCatalog(),
+      providerCatalog('credential-second'),
+      gcpCatalog(),
+    ];
+    load(pool);
+    renderPanel();
+    expect(
+      (
+        await screen.findAllByRole('button', {
+          name: 'Remove cx22 in Nuremberg, Hetzner · Second key',
+        })
+      ).length
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getAllByRole('button', { name: /^Remove cx22 in Nuremberg, Hetzner · (?!Second)/ })
+        .length
+    ).toBeGreaterThan(0);
+    expect(screen.queryAllByRole('button', { name: 'Remove cx22 in Nuremberg' })).toHaveLength(0);
+    // A machine only one account offers keeps the short name.
+    expect(
+      screen.getAllByRole('button', { name: 'Remove e2-standard-4 in Belgium' }).length
     ).toBeGreaterThan(0);
   });
 });

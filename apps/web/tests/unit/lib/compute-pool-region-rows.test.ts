@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  catalogCurrencies,
   cheapestRegionKeys,
   DEFAULT_CATALOG_FILTERS,
   filterCatalogRows,
@@ -9,10 +10,13 @@ import {
 } from '../../../src/lib/compute-pool-catalog-view';
 import type { MachineCell, MachineGroup } from '../../../src/lib/compute-pool-machines';
 import {
+  ambiguousRowKeys,
   buildMachineRegionRows,
   continentForCountry,
   isRowAllowed,
   type MachineRegionRow,
+  priceCurrency,
+  rowControlName,
   setRows,
   zoneDraftForRows,
 } from '../../../src/lib/compute-pool-region-rows';
@@ -223,8 +227,12 @@ describe('catalog filters and order', () => {
     expect(f({ accounts: new Set(['hz-src']) })).toEqual(['fsn1']);
     expect(f({ continents: new Set(['North America'] as const) })).toEqual(['us-central1']);
     expect(f({ minMemoryGb: 10 }).sort()).toEqual(['europe-west1', 'us-central1']);
-    // Max price compares each provider's own currency: no conversion.
-    expect(f({ maxMonthlyPrice: 50 })).toEqual(['fsn1']);
+    // A price limit applies only to rows priced in its own currency: nothing is converted.
+    expect(f({ maxMonthlyPrices: new Map([['$', 92]]) }).sort()).toEqual(['fsn1', 'us-central1']);
+    expect(f({ maxMonthlyPrices: new Map([['€', 5]]) }).sort()).toEqual([
+      'europe-west1',
+      'us-central1',
+    ]);
     expect(f({ query: 'sam gcp iowa' })).toEqual(['us-central1']);
     expect(f({ query: 'personal' })).toEqual(['fsn1']);
   });
@@ -264,16 +272,47 @@ describe('catalog filters and order', () => {
       'europe-west1',
       'us-central1',
     ]);
+    // Price sorts within each currency: the dollar rows together, then the euro row.
     expect(regions(sortCatalogRows(rows, { key: 'price', direction: 'asc' }, rank))).toEqual([
-      'fsn1',
       'us-central1',
       'europe-west1',
+      'fsn1',
     ]);
     expect(regions(sortCatalogRows(rows, { key: 'price', direction: 'desc' }, rank))).toEqual([
+      'fsn1',
       'europe-west1',
       'us-central1',
-      'fsn1',
     ]);
+  });
+
+  it('never compares amounts across currencies', () => {
+    const euro = buildMachineRegionRows([
+      group('hz-src', 'hetzner', [
+        {
+          sku: 'eu',
+          vcpu: 2,
+          ramGb: 4,
+          cells: [zone('fsn1', { key: 'eu', priceLabel: '€20.00/mo', monthlyPrice: 20 })],
+        },
+      ]),
+      group('gcp-src', 'gcp', [
+        {
+          sku: 'us',
+          vcpu: 2,
+          ramGb: 4,
+          cells: [zone('us-east1-b', { key: 'us', priceLabel: '$20.00/mo', monthlyPrice: 20 })],
+        },
+      ]),
+    ]);
+    expect(euro.map((r) => r.currency).sort()).toEqual(['$', '€']);
+    expect(catalogCurrencies(euro)).toEqual(['$', '€']);
+    const limited = filterCatalogRows(
+      euro,
+      { ...DEFAULT_CATALOG_FILTERS, maxMonthlyPrices: new Map([['€', 19]]) },
+      new Map(),
+      titles
+    );
+    expect(limited.map((r) => r.sku)).toEqual(['us']);
   });
 
   it('keeps unknown values last in both directions', () => {
@@ -304,9 +343,68 @@ describe('catalog filters and order', () => {
     ]);
   });
 
+  it('keeps a row the person changed listed whatever the view', () => {
+    const belgium = row(rows, 'europe-west1');
+    const removed = setRows(new Map(), [belgium], false);
+    const inView = filterCatalogRows(
+      rows,
+      { ...DEFAULT_CATALOG_FILTERS, view: 'in' },
+      removed,
+      titles
+    );
+    expect(regions(inView)).toEqual(['europe-west1']);
+    // An unchanged row still follows the view.
+    expect(
+      regions(
+        filterCatalogRows(rows, { ...DEFAULT_CATALOG_FILTERS, view: 'in' }, new Map(), titles)
+      )
+    ).toEqual(['europe-west1']);
+    expect(
+      regions(
+        filterCatalogRows(rows, { ...DEFAULT_CATALOG_FILTERS, view: 'out' }, removed, titles)
+      ).sort()
+    ).toEqual(['europe-west1', 'fsn1', 'us-central1']);
+  });
+
   it('maps unknown countries to Other', () => {
     expect(continentForCountry(null)).toBe('Other');
     expect(continentForCountry('zz')).toBe('Other');
     expect(continentForCountry('jp')).toBe('Asia');
+  });
+});
+
+describe('price currency and control names', () => {
+  it('reads the currency marker from a price label', () => {
+    expect(priceCurrency('€3.99/mo')).toBe('€');
+    expect(priceCurrency('$97.09/mo')).toBe('$');
+    expect(priceCurrency('USD 12.00/mo')).toBe('USD');
+    expect(priceCurrency('CHF 0.0120/hr')).toBe('CHF');
+    expect(priceCurrency('from €3.99/mo')).toBe('€');
+    expect(priceCurrency(null)).toBeNull();
+    expect(priceCurrency('12.00/mo')).toBeNull();
+  });
+
+  it('adds the account to a control name only when another account offers the same row', () => {
+    const second = group('hz-2', 'hetzner', [
+      {
+        sku: 'cx33',
+        vcpu: 4,
+        ramGb: 8,
+        cells: [zone('fsn1', { key: 'fsn1-2', locationLabel: 'Falkenstein', country: 'DE' })],
+      },
+    ]);
+    const rows = buildMachineRegionRows([GCP, HETZNER, second]);
+    const ambiguous = ambiguousRowKeys(rows);
+    const fsn = rows.filter((r) => r.region === 'fsn1');
+    expect(fsn).toHaveLength(2);
+    expect(fsn.every((r) => ambiguous.has(r.key))).toBe(true);
+    expect(rowControlName(fsn[0]!, 'Hetzner · Personal', ambiguous)).toBe(
+      'cx33 in Falkenstein, Hetzner · Personal'
+    );
+    const belgium = rows.find((r) => r.region === 'europe-west1')!;
+    expect(ambiguous.has(belgium.key)).toBe(false);
+    expect(rowControlName(belgium, 'Google Cloud · Prod', ambiguous)).toBe(
+      'e2-standard-4 in Belgium'
+    );
   });
 });

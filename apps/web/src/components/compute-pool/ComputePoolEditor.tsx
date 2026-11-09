@@ -5,6 +5,7 @@ import { useMemo, useState } from 'react';
 import { POOL_EDITOR_COPY } from '../../lib/compute-pool-copy';
 import { buildMachineChanges, type MachineGroup } from '../../lib/compute-pool-machines';
 import {
+  ambiguousRowKeys,
   buildMachineRegionRows,
   isRowAllowed,
   type MachineRegionRow,
@@ -34,8 +35,6 @@ interface ComputePoolEditorProps {
   /** The order the editor opened with (see `initialSourceOrder`). */
   initialOrder: string[] | null;
   saving: boolean;
-  /** A pool this scope uses but does not own: shown, not editable. */
-  readOnly?: boolean;
   onDiscard: () => void;
   onSave: (request: DefaultCapacityPoolUpdateRequest) => void;
 }
@@ -55,11 +54,13 @@ export function ComputePoolEditor({
   sources,
   initialOrder,
   saving,
-  readOnly = false,
   onDiscard,
   onSave,
 }: ComputePoolEditorProps) {
   const rows = useMemo(() => buildMachineRegionRows(groups), [groups]);
+  const ambiguous = useMemo(() => ambiguousRowKeys(rows), [rows]);
+  // What the last edit did, for screen readers (the visible list changes silently).
+  const [announcement, setAnnouncement] = useState('');
   const [draft, setDraft] = useState<RegionDraft>(() => new Map());
   const [policy, setPolicy] = useState<PolicyDraft>(() => initialPolicy(pool));
   // Pinned when the editor opens: a background refetch must not turn an untouched value into a
@@ -87,6 +88,11 @@ export function ComputePoolEditor({
 
   const setRowsInPool = (target: MachineRegionRow[], inPool: boolean) => {
     setDraft((current) => setRows(current, target, inPool));
+    const what =
+      target.length === 1 && target[0]
+        ? `${target[0].sku} in ${target[0].regionLabel}`
+        : `${target.length} machines`;
+    setAnnouncement(`${inPool ? 'Added' : 'Removed'} ${what}. Save changes to apply.`);
     // Adding a machine from an account that is off switches the account on (the server does the
     // same), so the pick is used.
     if (inPool) {
@@ -122,19 +128,26 @@ export function ComputePoolEditor({
             Empty · Instant sessions only
           </Chip>
         )}
-        {!readOnly && (
-          <span className="text-xs text-fg-muted">{POOL_EDITOR_COPY.nothingAddedOnItsOwn}</span>
-        )}
+        <span className="text-xs text-fg-muted">
+          {changeCount > 0 ? 'Not saved yet. ' : ''}
+          {POOL_EDITOR_COPY.nothingAddedOnItsOwn}
+        </span>
+      </div>
+      {/* Always mounted, so screen readers announce updates to it. */}
+      <div role="status" className="sr-only">
+        {announcement}
+        {changeCount > 0 ? ` ${changeCount} unsaved change${changeCount === 1 ? '' : 's'}.` : ''}
       </div>
 
       <PoolAccountsPane
+        scope={pool.scope}
         accounts={sources}
         rows={rows}
         draft={draft}
         excluded={excluded}
         order={order}
         usableCount={usableCount}
-        readOnly={readOnly}
+        ambiguous={ambiguous}
         onAccountChange={(sourceId, on) =>
           setExcluded((current) => {
             const next = new Set(current);
@@ -153,15 +166,15 @@ export function ComputePoolEditor({
         accountRank={accountRank}
         draft={draft}
         excluded={excluded}
-        readOnly={readOnly}
+        ambiguous={ambiguous}
         onSetRows={setRowsInPool}
       />
 
-      <PoolSettingsSection pool={pool} policy={policy} readOnly={readOnly} onChange={setPolicy} />
+      <PoolSettingsSection pool={pool} policy={policy} onChange={setPolicy} />
 
-      {!readOnly && changeCount > 0 && (
+      {changeCount > 0 && (
         <div className="sticky bottom-0 z-10 -mx-4 -mb-4 flex flex-wrap items-center justify-between gap-3 rounded-b-lg border-t border-border-default bg-surface px-4 py-3">
-          <span className="text-xs text-fg-muted" aria-live="polite">
+          <span className="text-xs text-fg-muted">
             {changeCount} unsaved change{changeCount === 1 ? '' : 's'}
           </span>
           <div className="flex gap-2">

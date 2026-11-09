@@ -176,6 +176,9 @@ function capacitySummary(scope: PoolScope) {
       deploymentStrategy: 'smallest-fit',
       exhaustionPolicy: 'queue',
       maxNodes: 3,
+      // The server always sends these; the editor must not depend on them being absent.
+      sourceOrder: null,
+      excludedSourceIds: [],
       createdAt: TIMESTAMP,
       updatedAt: TIMESTAMP,
     },
@@ -489,11 +492,25 @@ function visibleButton(page: Page, name: string) {
   return page.getByRole('button', { name, exact: true }).filter({ visible: true }).first();
 }
 
+const ACCOUNTS_HEADINGS: Record<PoolScope, string> = {
+  project: "In this project's pool",
+  user: 'In your pool',
+  installation: 'In the shared pool',
+};
+const EMPTY_TITLES: Record<PoolScope, string> = {
+  project: "This project's pool is empty, so only Instant sessions can run.",
+  user: 'Your pool is empty, so only Instant sessions can run.',
+  installation:
+    'The shared pool is empty, so only Instant sessions can run, for everyone who uses it.',
+};
+
 async function expectStressedDefaultPool(page: Page, scope: PoolScope) {
   await expect(page.getByRole('heading', { name: POOL_HEADINGS[scope] })).toBeVisible({
     timeout: 20_000,
   });
-  await expect(page.getByRole('heading', { name: 'In your pool', exact: true })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: ACCOUNTS_HEADINGS[scope], exact: true })
+  ).toBeVisible();
   await expect(
     page.getByRole('heading', { name: 'Available machines', exact: true })
   ).toBeVisible();
@@ -552,7 +569,7 @@ async function screenshotMachineRows(page: Page, name: string) {
   await screenshot(page, name);
 }
 
-async function editStressedPool(page: Page, screenshotName: string) {
+async function editStressedPool(page: Page, scope: PoolScope, screenshotName: string) {
   // Pool settings live in a disclosure under the machine list.
   await page.getByText('How SAM uses machines', { exact: true }).click();
   await page.getByLabel('Placing agents').selectOption('spread');
@@ -590,18 +607,16 @@ async function editStressedPool(page: Page, screenshotName: string) {
   const hetznerSwitch = page.getByRole('switch', { name: /^Use Hetzner/ }).first();
   await hetznerSwitch.click();
   await expect(page.getByText('Empty · Instant sessions only')).toBeVisible();
-  await expect(
-    page.getByText('Your pool is empty, so only Instant sessions can run.')
-  ).toBeVisible();
+  await expect(page.getByText(EMPTY_TITLES[scope])).toBeVisible();
   await expect(page.getByText(/machines? kept, not used$/).first()).toBeVisible();
   await assertNoOverflow(page);
-  await screenshotNearHeading(page, 'In your pool', `${screenshotName}-account-off`);
+  await screenshotNearHeading(page, ACCOUNTS_HEADINGS[scope], `${screenshotName}-account-off`);
   await page
     .getByRole('switch', { name: /^Use Hetzner/ })
     .first()
     .click();
   await expect(page.getByText(/^Ready · \d+ in pool$/)).toBeVisible();
-  await screenshotNearHeading(page, 'In your pool', `${screenshotName}-accounts`);
+  await screenshotNearHeading(page, ACCOUNTS_HEADINGS[scope], `${screenshotName}-accounts`);
   await screenshotNearHeading(page, 'Available machines', screenshotName);
   await screenshotMachineRows(page, `${screenshotName}-rows`);
 
@@ -632,7 +647,7 @@ test.describe('Default capacity pool scope surfaces', () => {
       'default-capacity-pools-project',
       suffix
     );
-    await editStressedPool(page, `default-capacity-pools-project-edit-${suffix}`);
+    await editStressedPool(page, 'project', `default-capacity-pools-project-edit-${suffix}`);
   });
 
   test('user settings surface renders stressed user default pool without overflow', async ({
@@ -649,7 +664,7 @@ test.describe('Default capacity pool scope surfaces', () => {
       'default-capacity-pools-user',
       suffix
     );
-    await editStressedPool(page, `default-capacity-pools-user-edit-${suffix}`);
+    await editStressedPool(page, 'user', `default-capacity-pools-user-edit-${suffix}`);
   });
 
   test('admin surface renders stressed installation default pool without overflow', async ({
@@ -666,6 +681,10 @@ test.describe('Default capacity pool scope surfaces', () => {
       'default-capacity-pools-installation',
       suffix
     );
-    await editStressedPool(page, `default-capacity-pools-installation-edit-${suffix}`);
+    await editStressedPool(
+      page,
+      'installation',
+      `default-capacity-pools-installation-edit-${suffix}`
+    );
   });
 });

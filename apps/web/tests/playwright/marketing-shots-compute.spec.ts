@@ -691,7 +691,9 @@ test.describe('A. Compute pool editor', () => {
     await page.goto(`/projects/${PROJECT.id}/settings/infrastructure`);
     const heading = page.getByRole('heading', { name: 'Project compute pool' });
     await expect(heading).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByRole('heading', { name: 'In your pool', exact: true })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: "In this project's pool", exact: true })
+    ).toBeVisible();
     const machinesHeading = page.getByRole('heading', { name: 'Available machines', exact: true });
     await expect(machinesHeading).toBeVisible();
     await expect(page.getByText(/^Ready · \d+ in pool$/)).toBeVisible();

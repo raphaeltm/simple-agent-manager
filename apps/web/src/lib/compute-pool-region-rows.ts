@@ -32,6 +32,8 @@ export interface MachineRegionRow {
   /** The cheapest zone's price, in the provider's own currency. */
   priceLabel: string | null;
   monthlyPrice: number | null;
+  /** The currency of `monthlyPrice` as written in its label ("€", "$", "USD"). Never converted. */
+  currency: string | null;
 }
 
 export const CONTINENTS = [
@@ -88,6 +90,21 @@ export function continentForCountry(country: string | null): Continent {
   return (country && CONTINENT_BY_COUNTRY[country.toUpperCase()]) || 'Other';
 }
 
+/**
+ * The currency marker of a price label: what is left once the amount and the period are taken
+ * out ("€3.99/mo" → "€", "USD 12.00/mo" → "USD"). Amounts are only ever compared within one
+ * marker, because prices are never converted.
+ */
+export function priceCurrency(label: string | null | undefined): string | null {
+  if (!label) return null;
+  const marker = label
+    .replace(/^from\s+/i, '')
+    .replace(/\/\s*[a-z]+\s*$/i, '')
+    .replace(/[0-9.,\s]+/g, ' ')
+    .trim();
+  return marker || null;
+}
+
 function cheapest(cells: MachineCell[]): MachineCell | null {
   let best: MachineCell | null = null;
   for (const cell of cells) {
@@ -135,11 +152,39 @@ export function buildMachineRegionRows(groups: MachineGroup[]): MachineRegionRow
           issue: canAllow ? null : (zones.find((zone) => zone.issue)?.issue ?? 'Unavailable'),
           priceLabel: price?.priceLabel ?? null,
           monthlyPrice: price?.monthlyPrice ?? null,
+          currency: priceCurrency(price?.priceLabel),
         });
       }
     }
   }
   return rows;
+}
+
+/**
+ * Rows whose machine and region another account also offers. Their control names add the
+ * account, so "Add cx23 in Falkenstein" stays unique for screen readers.
+ */
+export function ambiguousRowKeys(rows: MachineRegionRow[]): Set<string> {
+  const sources = new Map<string, Set<string>>();
+  for (const row of rows) {
+    const name = `${row.sku}|${row.regionLabel}`;
+    sources.set(name, (sources.get(name) ?? new Set()).add(row.sourceId));
+  }
+  return new Set(
+    rows
+      .filter((row) => (sources.get(`${row.sku}|${row.regionLabel}`)?.size ?? 0) > 1)
+      .map((row) => row.key)
+  );
+}
+
+/** "cx23 in Falkenstein", plus the account when another account offers the same thing. */
+export function rowControlName(
+  row: MachineRegionRow,
+  accountTitle: string,
+  ambiguous: ReadonlySet<string>
+): string {
+  const name = `${row.sku} in ${row.regionLabel}`;
+  return ambiguous.has(row.key) ? `${name}, ${accountTitle}` : name;
 }
 
 /** Desired in-pool state per region row key, holding only rows the person changed. */

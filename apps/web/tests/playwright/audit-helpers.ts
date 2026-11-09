@@ -168,6 +168,22 @@ export function applyMockCapacityDefaultsUpdate<T extends MutableCapacityDefault
       updatedAt: new Date().toISOString(),
     });
   }
+  // Like the server (default-capacity-pool-source-settings.ts): activating a machine switches its
+  // account back on, so the mock cannot diverge from what a real save returns.
+  const activatedSources = new Set([
+    ...(update.catalogAdditions ?? []).map((addition) => addition.sourceId),
+    ...(update.candidates ?? [])
+      .filter((candidateUpdate) => candidateUpdate.status === 'active')
+      .flatMap((candidateUpdate) => {
+        const candidate = summary.candidates.find((item) => item.id === candidateUpdate.id);
+        return candidate?.capacitySourceId ? [candidate.capacitySourceId] : [];
+      }),
+  ]);
+  if (summary.pool.excludedSourceIds) {
+    summary.pool.excludedSourceIds = summary.pool.excludedSourceIds.filter(
+      (id) => !activatedSources.has(id)
+    );
+  }
   summary.activeCandidateCount = summary.candidates.filter(
     (candidate) => candidate.status === 'active'
   ).length;

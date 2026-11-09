@@ -19,8 +19,11 @@ export interface CatalogFilters {
   continents: ReadonlySet<Continent>;
   minVcpu: number | null;
   minMemoryGb: number | null;
-  /** In each provider's own currency: prices are never converted. */
-  maxMonthlyPrice: number | null;
+  /**
+   * Highest monthly price per currency marker (see `priceCurrency`). Prices are never
+   * converted, so a limit only applies to rows priced in its own currency.
+   */
+  maxMonthlyPrices: ReadonlyMap<string, number>;
   hideUnavailable: boolean;
 }
 
@@ -31,11 +34,20 @@ export const DEFAULT_CATALOG_FILTERS: CatalogFilters = {
   continents: new Set(),
   minVcpu: null,
   minMemoryGb: null,
-  maxMonthlyPrice: null,
+  maxMonthlyPrices: new Map(),
   hideUnavailable: true,
 };
 
-/** Rows matching the filters. A row in the pool is never hidden as unavailable. */
+/** Currency markers present in the rows, for one price limit each. */
+export function catalogCurrencies(rows: MachineRegionRow[]): string[] {
+  return [...new Set(rows.flatMap((row) => (row.currency ? [row.currency] : [])))].sort();
+}
+
+/**
+ * Rows matching the filters. A row in the pool is never hidden as unavailable, and a row the
+ * person changed in this edit stays listed whatever the view, so its button keeps focus and the
+ * change can be undone where it was made.
+ */
 export function filterCatalogRows(
   rows: MachineRegionRow[],
   filters: CatalogFilters,
@@ -45,17 +57,16 @@ export function filterCatalogRows(
   const terms = filters.query.trim().toLowerCase().split(/\s+/).filter(Boolean);
   return rows.filter((row) => {
     const inPool = isRowAllowed(row, draft);
-    if (filters.view === 'in' && !inPool) return false;
-    if (filters.view === 'out' && inPool) return false;
-    if (filters.hideUnavailable && !inPool && !row.canAllow) return false;
+    const changed = draft.has(row.key);
+    if (!changed && filters.view === 'in' && !inPool) return false;
+    if (!changed && filters.view === 'out' && inPool) return false;
+    if (!changed && filters.hideUnavailable && !inPool && !row.canAllow) return false;
     if (filters.accounts.size > 0 && !filters.accounts.has(row.sourceId)) return false;
     if (filters.continents.size > 0 && !filters.continents.has(row.continent)) return false;
     if (filters.minVcpu !== null && (row.vcpu ?? 0) < filters.minVcpu) return false;
     if (filters.minMemoryGb !== null && (row.ramGb ?? 0) < filters.minMemoryGb) return false;
-    if (
-      filters.maxMonthlyPrice !== null &&
-      (row.monthlyPrice === null || row.monthlyPrice > filters.maxMonthlyPrice)
-    ) {
+    const maxPrice = row.currency ? filters.maxMonthlyPrices.get(row.currency) : undefined;
+    if (maxPrice !== undefined && (row.monthlyPrice === null || row.monthlyPrice > maxPrice)) {
       return false;
     }
     if (terms.length === 0) return true;
@@ -116,7 +127,11 @@ function compareBy(key: CatalogSortKey, a: MachineRegionRow, b: MachineRegionRow
     case 'region':
       return compareText(a.regionLabel, b.regionLabel);
     case 'price':
-      return compareNumbers(a.monthlyPrice, b.monthlyPrice);
+      // Grouped by currency, then by amount: amounts in different currencies are not compared.
+      if (a.monthlyPrice === null || b.monthlyPrice === null) {
+        return compareNumbers(a.monthlyPrice, b.monthlyPrice);
+      }
+      return compareText(a.currency ?? '', b.currency ?? '') || a.monthlyPrice - b.monthlyPrice;
   }
 }
 
@@ -143,6 +158,17 @@ export function sortCatalogRows(
     return defaultCompare(a, b, accountRank);
   });
 }
+
+/** Sort choices for the list where there are no column headers (narrow screens). */
+export const CATALOG_SORT_OPTIONS: ReadonlyArray<{ key: CatalogSortKey; label: string }> = [
+  { key: 'machine', label: 'Machine' },
+  { key: 'provider', label: 'Provider' },
+  { key: 'vcpu', label: 'vCPU' },
+  { key: 'memory', label: 'Memory' },
+  { key: 'disk', label: 'Disk' },
+  { key: 'region', label: 'Region' },
+  { key: 'price', label: 'Price (by currency)' },
+];
 
 /** Header click cycles ascending, descending, back to the default order. */
 export function nextSort(current: CatalogSort | null, key: CatalogSortKey): CatalogSort | null {

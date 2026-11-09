@@ -133,21 +133,41 @@ export const PROVIDER_ORDER_COPY = {
 export const POOL_EDIT_CONFLICT_MESSAGE =
   'This pool changed while you were editing it, so your changes were not saved. Review the current pool and edit again.';
 
+/** How the editor names a pool of each scope, inside a sentence. */
+const POOL_NOUN: Readonly<Record<CapacityPoolScope, string>> = {
+  user: 'your pool',
+  project: "this project's pool",
+  installation: 'the shared pool',
+};
+
+function capitalize(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/** "In your pool", "In this project's pool", "In the shared pool". */
+export function poolAccountsTitle(scope: CapacityPoolScope): string {
+  return `In ${POOL_NOUN[scope]}`;
+}
+
 /** Shown when nothing in the pool can run work. Matches guides/instant-sessions.md. */
+export function emptyPoolTitle(scope: CapacityPoolScope): string {
+  const who = scope === 'installation' ? ', for everyone who uses it' : '';
+  return `${capitalize(POOL_NOUN[scope])} is empty, so only Instant sessions can run${who}.`;
+}
+
 export const EMPTY_POOL_COPY = {
-  title: 'Your pool is empty, so only Instant sessions can run.',
   body: 'Instant runs in a container on Cloudflare: no Docker, no devcontainer, and a slim toolchain (git, gh, curl, jq, uv, Node and the agent CLIs). Builds and test suites that need more will fail. Add machines from the list to run work on VMs.',
 } as const;
 
 export const POOL_EDITOR_COPY = {
-  accountsTitle: 'In your pool',
   accountsHelp:
     'Switch accounts on or off for this pool. Switching one off keeps its machines for later. Disconnected accounts disappear from here on their own.',
   offTitle: 'Connected, not in this pool',
   noMachinesOn: 'Add machines from this account in the list.',
   catalogTitle: 'Available machines',
   catalogHelp:
-    'One row per machine type and region. Prices are in each provider’s own currency. Adding a region lets SAM use any of its zones.',
+    'One row per machine type and region. Prices are in each provider’s own currency. Adding a region lets SAM use any of its zones. Add and Remove apply when you save.',
+  offAccountNote: 'account off: adding switches it on',
   nothingAddedOnItsOwn:
     'Nothing is added on its own: new accounts, machine types and regions stay out until you add them.',
 } as const;

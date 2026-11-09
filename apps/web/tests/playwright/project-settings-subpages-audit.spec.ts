@@ -531,7 +531,9 @@ test.describe('Project settings sub-pages', () => {
   }) => {
     await page.goto(`/projects/${PROJECT_ID}/settings/infrastructure`);
     await expect(page.getByRole('heading', { name: 'Project compute pool' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'In your pool', exact: true })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: "In this project's pool", exact: true })
+    ).toBeVisible();
     await expect(
       page.getByRole('heading', { name: 'Available machines', exact: true })
     ).toBeVisible();
@@ -551,7 +553,7 @@ test.describe('Project settings sub-pages', () => {
       page.getByRole('button', { name }).filter({ visible: true }).first();
     await rowButton(/^(Add|Remove) cpx31 in Ashburn$/).click();
     await rowButton(/^(Add|Remove) cx23 in /).click();
-    await expect(page.getByText('2 unsaved changes')).toBeVisible();
+    await expect(page.getByText('2 unsaved changes', { exact: true })).toBeVisible();
     await screenshotNearHeading(
       page,
       'Available machines',

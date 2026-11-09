@@ -60,7 +60,6 @@ function ChoiceField<T extends string>({
   options,
   copy,
   help,
-  disabled,
   onChange,
 }: {
   label: string;
@@ -68,7 +67,6 @@ function ChoiceField<T extends string>({
   options: readonly T[];
   copy: Record<T, ChoiceCopy>;
   help?: string;
-  disabled: boolean;
   onChange: (value: T) => void;
 }) {
   const id = useId();
@@ -81,7 +79,6 @@ function ChoiceField<T extends string>({
       <Select
         id={id}
         value={value}
-        disabled={disabled}
         aria-describedby={`${id}-help`}
         onChange={(event) => onChange(event.currentTarget.value as T)}
       >
@@ -101,17 +98,11 @@ function ChoiceField<T extends string>({
 interface PoolSettingsSectionProps {
   pool: CapacityPool;
   policy: PolicyDraft;
-  readOnly: boolean;
   onChange: (policy: PolicyDraft) => void;
 }
 
 /** How SAM uses the pool's machines: placement, capacity fallback, limit, deployments. */
-export function PoolSettingsSection({
-  pool,
-  policy,
-  readOnly,
-  onChange,
-}: PoolSettingsSectionProps) {
+export function PoolSettingsSection({ pool, policy, onChange }: PoolSettingsSectionProps) {
   const limitId = useId();
   // The limit field keeps what the person typed (even empty) while they edit; only a positive
   // whole number reaches the policy, and leaving the field shows the value that will be saved.
@@ -130,7 +121,6 @@ export function PoolSettingsSection({
           value={policy.strategy}
           options={CAPACITY_POOL_STRATEGIES}
           copy={WORKSPACE_STRATEGY_COPY}
-          disabled={readOnly}
           onChange={(value) => update('strategy', value)}
         />
         <ChoiceField
@@ -138,7 +128,6 @@ export function PoolSettingsSection({
           value={policy.exhaustionPolicy}
           options={CAPACITY_EXHAUSTION_POLICIES}
           copy={EXHAUSTION_POLICY_COPY}
-          disabled={readOnly}
           onChange={(value) => update('exhaustionPolicy', value)}
         />
         <div className="grid min-w-0 content-start gap-1">
@@ -151,7 +140,6 @@ export function PoolSettingsSection({
             min={1}
             step={1}
             inputMode="numeric"
-            disabled={readOnly}
             aria-describedby={`${limitId}-help`}
             value={maxNodesText}
             onChange={(event) => {
@@ -175,7 +163,6 @@ export function PoolSettingsSection({
           options={CAPACITY_POOL_STRATEGIES}
           copy={WORKSPACE_STRATEGY_COPY}
           help={DEPLOYMENT_STRATEGY_HELP}
-          disabled={readOnly}
           onChange={(value) => update('deploymentStrategy', value)}
         />
       </div>
