@@ -132,3 +132,22 @@ export const PROVIDER_ORDER_COPY = {
 
 export const POOL_EDIT_CONFLICT_MESSAGE =
   'This pool changed while you were editing it, so your changes were not saved. Review the current pool and edit again.';
+
+/** Shown when nothing in the pool can run work. Matches guides/instant-sessions.md. */
+export const EMPTY_POOL_COPY = {
+  title: 'Your pool is empty, so only Instant sessions can run.',
+  body: 'Instant runs in a container on Cloudflare: no Docker, no devcontainer, and a slim toolchain (git, gh, curl, jq, uv, Node and the agent CLIs). Builds and test suites that need more will fail. Add machines from the list to run work on VMs.',
+} as const;
+
+export const POOL_EDITOR_COPY = {
+  accountsTitle: 'In your pool',
+  accountsHelp:
+    'Switch accounts on or off for this pool. Switching one off keeps its machines for later. Disconnected accounts disappear from here on their own.',
+  offTitle: 'Connected, not in this pool',
+  noMachinesOn: 'Add machines from this account in the list.',
+  catalogTitle: 'Available machines',
+  catalogHelp:
+    'One row per machine type and region. Prices are in each provider’s own currency. Adding a region lets SAM use any of its zones.',
+  nothingAddedOnItsOwn:
+    'Nothing is added on its own: new accounts, machine types and regions stay out until you add them.',
+} as const;

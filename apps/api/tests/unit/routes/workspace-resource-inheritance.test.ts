@@ -59,6 +59,7 @@ describe('direct workspace resource inheritance through HTTP and persisted reser
     '$label requirements preserve field precedence',
     async ({ body, cpu, memory, disk, source }) => {
       const f = fixture();
+      await f.pickPools();
       directProvisioningHarness(f.env);
       f.sqlite.prepare('UPDATE projects SET resource_requirements_json = ?').run(
         JSON.stringify({

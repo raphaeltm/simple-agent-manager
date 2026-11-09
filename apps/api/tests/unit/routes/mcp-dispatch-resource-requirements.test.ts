@@ -10,6 +10,7 @@ import { getRuntimeValidationError } from '../../../src/routes/mcp/dispatch-inst
 import { parseDispatchTaskParams } from '../../../src/routes/mcp/dispatch-tool-params';
 import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../../src/services/default-capacity-pools';
 import { readPersistedTaskResourcePlan } from '../../../src/services/resource-requirements-input';
+import { pickStarterMachines } from '../../helpers/capacity-pool-picks';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 import { seedCloudCredential, seedProjectWithMember, seedUser } from './capacity-pool-test-seeds';
 
@@ -176,6 +177,7 @@ describe('MCP dispatch_task resource requirements input', () => {
         projectId: 'project-1',
         includeInstallation: false,
       });
+      await pickStarterMachines(drizzle(env.DATABASE, { schema }) as never);
       const tokenData: McpTokenData = {
         taskId: 'parent-task-1',
         projectId: 'project-1',
@@ -295,6 +297,7 @@ describe('MCP dispatch_task resource requirements input', () => {
         projectId: 'project-1',
         includeInstallation: false,
       });
+      await pickStarterMachines(drizzle(env.DATABASE, { schema }) as never);
       const tokenData: McpTokenData = {
         taskId: 'parent-task-1',
         projectId: 'project-1',
@@ -413,6 +416,7 @@ describe('MCP dispatch_task resource requirements input', () => {
           projectId: 'project-1',
           includeInstallation: false,
         });
+        await pickStarterMachines(drizzle(env.DATABASE, { schema }) as never);
         const tokenData: McpTokenData = {
           taskId: 'parent-task-1',
           projectId: 'project-1',
@@ -610,6 +614,7 @@ describe('MCP dispatch_task resource requirements input', () => {
         projectId: 'project-1',
         includeInstallation: false,
       });
+      await pickStarterMachines(drizzle(env.DATABASE, { schema }) as never);
       const tokenData: McpTokenData = {
         taskId: 'parent-task-1',
         projectId: 'project-1',

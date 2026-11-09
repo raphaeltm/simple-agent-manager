@@ -4,12 +4,15 @@
  * apply to the modules imported here too.
  */
 import type Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
+import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { AppError } from '../../src/middleware/error';
 import { workspaceEvictionCallbackRoute } from '../../src/routes/projects/workspace-eviction-callback';
 import { finalizeWorkspaceEvictionInNode } from '../../src/services/workspace-eviction-lifecycle';
+import { ensurePoolsWithStarterMachines } from './capacity-pool-picks';
 import { createSqliteD1 } from './sqlite-d1';
 
 /** The owner, their cloud credential, the project and the VM node an evicted workspace ran on. */
@@ -39,6 +42,19 @@ export function seedEvictionOwnerAndNode(sqlite: Database.Database): void {
     VALUES ('node-1', 'user-1', 'Node', 'running', 'healthy', 'vm', 'small', 'nbg1',
       'hetzner', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
   `);
+}
+
+/**
+ * Picks the owner's starter machines, as a person does before work runs: nothing joins a pool
+ * on its own, and recovery places the replacement runtime on the pool.
+ */
+export async function pickEvictionPools(env: Env): Promise<void> {
+  await ensurePoolsWithStarterMachines(drizzle(env.DATABASE, { schema }) as never, {
+    userId: 'user-1',
+    projectId: 'project-1',
+    includeInstallation: true,
+    env,
+  });
 }
 
 /** An env whose NodeLifecycle stub serializes eviction finalization the way the DO gate does. */

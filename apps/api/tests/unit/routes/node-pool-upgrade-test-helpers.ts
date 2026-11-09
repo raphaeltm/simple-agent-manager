@@ -27,6 +27,7 @@ import {
 } from '../../../src/services/placement-resolver';
 import { reserveWorkspacePlacement } from '../../../src/services/workspace-placement';
 import { resolveWorkspaceAdmissionPolicy } from '../../../src/services/workspace-resource-capacity';
+import { ensurePoolsWithStarterMachines } from '../../helpers/capacity-pool-picks';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 import {
   seedCloudCredential,
@@ -117,7 +118,20 @@ export function fixture(scope: Scope = 'user', existingDatabase?: Database.Datab
       : c.json({ error: error.message }, 500)
   );
   app.route('/api/projects/:projectId/tasks', runRoutes);
+  let poolsPicked = false;
+  /** A person picks machines before running work: nothing joins a pool on its own. */
+  async function pickPools() {
+    if (poolsPicked) return;
+    poolsPicked = true;
+    await ensurePoolsWithStarterMachines(db, {
+      userId: 'user-1',
+      projectId: 'project-1',
+      includeInstallation: true,
+      env,
+    });
+  }
   async function run(body: Record<string, unknown> = {}) {
+    await pickPools();
     const response = await app.request(
       '/api/projects/project-1/tasks/task-1/run',
       {
@@ -133,7 +147,7 @@ export function fixture(scope: Scope = 'user', existingDatabase?: Database.Datab
     expect(starts).toHaveLength(1);
     return starts[0]!;
   }
-  return { sqlite, env, db, starts, start, reactivate, run };
+  return { sqlite, env, db, starts, start, reactivate, run, pickPools };
 }
 export type Fixture = ReturnType<typeof fixture>;
 

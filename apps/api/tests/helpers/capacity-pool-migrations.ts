@@ -45,6 +45,9 @@ export const capacityPoolMaxNodesMigrationSql = readDbMigration('0167_capacity_p
 export const capacityPoolSourceOrderMigrationSql = readDbMigration(
   '0226_capacity_pool_source_order.sql'
 );
+export const capacityPoolExcludedSourcesMigrationSql = readDbMigration(
+  '0230_capacity_pool_excluded_sources.sql'
+);
 export const deploymentPoolStrategyMigrationSql = readDbMigration(
   '0170_deployment_pool_strategy_reservations.sql'
 );
@@ -66,6 +69,7 @@ export function applyCapacityPoolSchemaMigrations(
   database.exec(capacityPoolSelectionDigestMigrationSql);
   database.exec(capacityPoolMaxNodesMigrationSql);
   database.exec(capacityPoolSourceOrderMigrationSql);
+  database.exec(capacityPoolExcludedSourcesMigrationSql);
   if (options.includeDeploymentStrategy === false) {
     return;
   }

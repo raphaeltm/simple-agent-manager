@@ -8,6 +8,7 @@ import type { Env } from '../../../src/env';
 import type { McpTokenData } from '../../../src/routes/mcp/_helpers';
 import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../../src/services/default-capacity-pools';
 import { createPersistedTaskResourcePlanJson } from '../../../src/services/resource-requirements-input';
+import { pickStarterMachines } from '../../helpers/capacity-pool-picks';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 import { seedCloudCredential, seedProjectWithMember, seedUser } from './capacity-pool-test-seeds';
 
@@ -115,6 +116,7 @@ describe('MCP retry_subtask resource plan persistence', () => {
         projectId: 'project-1',
         includeInstallation: false,
       });
+      await pickStarterMachines(drizzle(env.DATABASE, { schema }) as never);
 
       seedTask(sqlite, { id: 'parent-task-1', parentTaskId: null, status: 'in_progress' });
       const storedLayers = {

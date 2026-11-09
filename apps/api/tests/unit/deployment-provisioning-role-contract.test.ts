@@ -32,6 +32,7 @@ import { resolveCanonicalVmAllocationPlan } from '../../src/services/canonical-v
 import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../src/services/default-capacity-pools';
 import { provisionDeploymentNode } from '../../src/services/deployment-provisioning';
 import { encrypt } from '../../src/services/encryption';
+import { pickStarterMachines } from '../helpers/capacity-pool-picks';
 import { createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
 const OWNER_ID = 'owner-shared-deploy';
@@ -148,6 +149,7 @@ describe('deployment default-pool role eligibility contract', () => {
       includeInstallation: false,
       env,
     });
+    await pickStarterMachines(db as never);
 
     let completeProviderCall!: () => void;
     provisionNodeMock.mockImplementationOnce(
@@ -219,6 +221,7 @@ describe('deployment default-pool role eligibility contract', () => {
       includeInstallation: false,
       env,
     });
+    await pickStarterMachines(db as never);
     sqlite
       ?.prepare(
         `UPDATE capacity_pool_candidates
@@ -251,13 +254,10 @@ describe('deployment default-pool role eligibility contract', () => {
 
     expect(allocation).toMatchObject({
       errorKind: 'placement',
-      // Deployment-only candidates are not eligible for a workspace allocation,
-      // and the refusal names the requested role rather than falling back to
-      // another pool.
-      error: expect.stringContaining('No eligible compute-pool offering'),
-    });
-    expect(allocation).toMatchObject({
-      error: expect.stringContaining('workspace allocation'),
+      // Deployment-only candidates are not eligible for a workspace allocation, and the
+      // refusal does not fall back to another pool. With no workspace machines left the pool
+      // reads as empty for workspaces, so the refusal says so in plain words.
+      error: expect.stringContaining("This project's compute pool has no machines"),
     });
   });
 });

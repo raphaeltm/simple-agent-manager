@@ -40,6 +40,7 @@ export function orderableSources(
           providerLabel: providerDisplayName(source.provider),
           kind: sourceKind(source),
           credentialSource: source.credentialSource,
+          label: source.label ?? null,
           rows: [],
         }
     );
