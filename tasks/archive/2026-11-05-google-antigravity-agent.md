@@ -144,3 +144,9 @@ Declined, with replies on the PR: `PLATFORM_AI_MODELS` entries (Antigravity has 
 the invariant covers platform-routed agents only), Playwright submit test (generic connect flow),
 Plan mode mapping (Antigravity has no read-only mode; `default` asks before every write and the
 guide says so), XDG/plugin-secret/helper-regeneration notes.
+
+## Reconciliation (2026-11-09 weekly queue sweep)
+
+- Shipped: #2542 merged 2026-11-06.
+- Production deploy run on `e727f0259` (2026-11-09 01:29 UTC) succeeded and contains this merge, so the change is live.
+- Moved from `tasks/active/` to `tasks/archive/` by the weekly reconciliation.

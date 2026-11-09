@@ -20,9 +20,16 @@ Idea 01M6YQ6KWZ24HA20CKPB59SYRG: a newly provisioned staging node refused its ow
 - [ ] Staging small reservation .2 vCPU/.5GB RAM/5GB disk; delete every created staging VM.
 - [ ] Early DRAFT PR + needs-human-review. CodeRabbit request/wait recorded.
 - [ ] Exact PR/head SHA approval from coordinator before ready/merge; new commit voids approval.
-- [ ] Production deployment success with deployed main containing merge before bug 2 begins.
+- [x] Production deployment success with deployed main containing merge before bug 2 begins.
 
 ## Workflow
 No main commits. Use existing SAM task branch/workspace. Archive notes belong in a separate draft PR, per user; keep this task active until then.
 
 Red/green proof: four failures pre-fix (reserve, attach, first-reservation evaluator, correct disk reason during bootstrap); 111 tests passed after fix.
+
+## Reconciliation (2026-11-09 weekly queue sweep)
+
+- Shipped: #2595 merged 2026-11-09.
+- Production deploy run on `e727f0259` (2026-11-09 01:29 UTC) succeeded and contains this merge, so the change is live.
+- Process items (staging slot, coordinator approval) were not re-verified in this sweep.
+- Moved from `tasks/active/` to `tasks/archive/` by the weekly reconciliation.

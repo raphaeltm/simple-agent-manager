@@ -67,3 +67,10 @@ Kept standalone on purpose: library `upload_to_library`/`replace_library_file`/`
 - The local machine is shared and was at load average 30-67. Some suites hit their 10s hook timeouts, and a stashed `main` failed the same way.
 - Follow-ups: idea 01M6SPM7G7TPCNAMC31EVZ1QDP (coordination tools phase 2), idea 01M6SPMDHY2F2BPVD933B9FYJZ (policy injection budget).
 - Merge with main 349c78101 -> head 1fead2384; baseline kept 2180@a42bb51 with main dates; CI 21/21 incl Sonar.
+
+## Reconciliation (2026-11-09 weekly queue sweep)
+
+- Shipped: #2558 merged 2026-11-07 (145 to 82 tools); the original do-not-merge constraint was lifted.
+- Production deploy run on `e727f0259` (2026-11-09 01:29 UTC) succeeded and contains this merge, so the change is live.
+- The unchecked acceptance items were not individually re-verified in this sweep; the grouped `<domain>_read`/`<domain>_write` tools are in use in production SAM sessions.
+- Moved from `tasks/active/` to `tasks/archive/` by the weekly reconciliation.

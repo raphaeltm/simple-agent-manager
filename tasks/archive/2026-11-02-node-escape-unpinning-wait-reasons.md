@@ -33,7 +33,7 @@ subagent confirms address the core problems.
 - [x] Vertical-slice tests per item, each proven discriminating
 - [x] Local test-quality reviewer subagent confirms tests are legitimate (all three LEGITIMATE)
 - [x] Security and UI/UX reviews addressed; docs updated
-- [ ] PR green, merge, prod deploy verified
+- [x] PR green, merge, prod deploy verified
 
 ## Findings
 
@@ -102,3 +102,10 @@ subagent confirms address the core problems.
   visible (`useFallbackSessionPoll.ts`), which bounds staleness to one poll; pushing would need
   `updateD1ExecutionStep` to broadcast on an unchanged step. Raised as MEDIUM by the
   task-completion validator and accepted as bounded.
+
+## Reconciliation (2026-11-09 weekly queue sweep)
+
+- Shipped: #2494 merged 2026-11-03.
+- Production deploy run on `e727f0259` (2026-11-09 01:29 UTC) succeeded and contains this merge, so the change is live.
+- Fix A and Fix B stay deferred as recorded above; their backlog files remain open.
+- Moved from `tasks/active/` to `tasks/archive/` by the weekly reconciliation.

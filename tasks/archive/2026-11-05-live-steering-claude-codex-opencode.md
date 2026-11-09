@@ -213,3 +213,9 @@ default without clicking it. Staging's GitHub Environment now has `ACP_INTERACTI
 - OpenCode release: https://github.com/raphaeltm/simple-agent-manager/releases/tag/opencode-v2.2.5-sam-s1
   (two builds in one environment are byte-identical; CI vs workspace builds differ, so the CI
   build is the published artifact).
+
+## Reconciliation (2026-11-09 weekly queue sweep)
+
+- Shipped: #2536 merged 2026-11-05; follow-ups #2543, #2546 and #2556 also merged.
+- Production deploy run on `e727f0259` (2026-11-09 01:29 UTC) succeeded and contains this merge, so the change is live.
+- Moved from `tasks/active/` to `tasks/archive/` by the weekly reconciliation.

@@ -73,3 +73,10 @@ Fresh Phase 5 review of 8 local reviewers on d826b6cbe. Fixed:
 - Next: wait for PR1 #2501 `merged` → `git rebase origin/main` → push `HEAD:sam/operations-tools-pr2-3-4vtq8v` → Phase 6 staging (check no other staging run is active).
 - Staging plan: staging CF_TOKEN cannot write KV, so drive real chats. Secrets only through exec_with_secrets (CF_TOKEN; read-only D1 helper: account c4e4aebd980b626f6af43ac6b1edcede, main D1 1cfaf5d4-8226-47d8-bf26-6ba727ce5718, observability D1 8c2fa46c-3b89-428b-b235-d835b7914106). Smoke user is superadmin. In the admin UI set the Operations (feedback) project to Test Project 1 (01KJNR9R3TEN3KX1ETE33852R8) and `operations.debuggerTools=read`; restore both afterwards. Start a chat in Test Project 1 with VM profile raph-cc-convo (01KVR2BJEFY19587NTWR5M6PQN) so it owns a real node, and have it call ops_find_anomalies, ops_get_session_story (its own task), ops_node_logs with contains, ops_capture_debug_package and download_library_file. Check operations_audit_log rows. Delete the VM afterwards.
 - PR body: per-tool round-trip table (gate 1 D1 + audit 1 D1 + settings cached; anomalies ~10, list_nodes ~3, get_node ~7, session_story ~14, timeline ~15 with fan-out 2, search_errors ~3, worker_logs ~3, node_* ~4, workspace_agent_sessions ~5, capture ~9 + R2; purge ~6 per run), debug-package buffering rationale (library encrypts whole objects; capped streaming read), CodeRabbit evidence.
+
+## Reconciliation (2026-11-09 weekly queue sweep)
+
+- Shipped: #2504 merged 2026-11-04 (PR1 #2501 and PR3 #2502 also merged).
+- Production deploy run on `e727f0259` (2026-11-09 01:29 UTC) succeeded and contains this merge, so the change is live.
+- The two unchecked items were not re-verified in this sweep.
+- Moved from `tasks/active/` to `tasks/archive/` by the weekly reconciliation.
