@@ -238,7 +238,10 @@ func (s *Server) openContextSourceDir(ctx context.Context, workspaceID string, r
 	if beforeOpen != nil {
 		beforeOpen()
 	}
-	source, err := base.OpenRoot(rel)
+	// Preserve the final dot: Go opens preceding components with O_DIRECTORY.
+	// Without it, OpenRoot can block opening a directory swapped to a FIFO.
+	// filepath.Join would clean the dot away.
+	source, err := base.OpenRoot(rel + "/.")
 	if err != nil {
 		return nil, fmt.Errorf("workingDir is unavailable or escapes the workspace mountpoint; select a local workspace directory")
 	}
