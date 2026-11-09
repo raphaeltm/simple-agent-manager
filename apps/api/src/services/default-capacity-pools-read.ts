@@ -212,6 +212,13 @@ export async function readDefaultCapacityPoolSummaries(
   options: DefaultCapacityPoolsBackfillOptions & {
     ensure?: boolean;
     includeDisabled?: boolean;
+    /**
+     * Attach account display names (default true). A caller that only runs `ensure` and drops
+     * the result passes false; `labelInstallation: false` skips the installation pool when the
+     * caller reads it but does not show it.
+     */
+    labels?: boolean;
+    labelInstallation?: boolean;
   } = {}
 ): Promise<DefaultCapacityPoolsEnsureResult> {
   if (options.ensure) {
@@ -254,7 +261,12 @@ export async function readDefaultCapacityPoolSummaries(
       : null,
   ]);
 
-  // Every caller is an editor response, so the accounts get their display names.
-  await attachCapacitySourceLabels(db, [installation, user, project]);
+  if (options.labels !== false) {
+    await attachCapacitySourceLabels(db, [
+      options.labelInstallation === false ? null : installation,
+      user,
+      project,
+    ]);
+  }
   return { installation, user, project };
 }

@@ -11,6 +11,7 @@ import { and, eq, inArray, ne, sql } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
+import { nextCapacityPoolTimestamp } from './capacity-pool-clock';
 import { parseCapacityPoolExcludedSources, parseCapacityPoolSourceOrder } from './capacity-pools';
 import type { DefaultPoolScopeIdentity } from './default-capacity-pool-helpers';
 import { sourceScopePredicates } from './default-capacity-pool-update-candidates';
@@ -74,9 +75,13 @@ export async function resolveSourceSettingsUpdate(
       input.excludedSourceIds === undefined ? currentExcluded : (input.excludedSourceIds ?? []);
     const activated = new Set(activatedSourceIds);
     const next = requested.filter((id) => !activated.has(id));
+    // This edit's outcome depends on the stored value even when it does not change it: an edit
+    // that adds a machine read its account as on. Fencing on the value read means a concurrent
+    // switch-off (which bumps no revision) makes this edit conflict instead of committing an
+    // active machine on an account that is now off.
+    update.guards.excludedSourceIdsJson = pool.excludedSourceIdsJson ?? null;
     if (!sameIdSet(currentExcluded, next)) {
       update.values.excludedSourceIdsJson = next.length > 0 ? JSON.stringify(next) : null;
-      update.guards.excludedSourceIdsJson = pool.excludedSourceIdsJson ?? null;
       // Switching an account off must name a real account; leaving stale ids is harmless.
       for (const id of next) if (!currentExcluded.includes(id)) toValidate.add(id);
     }
@@ -118,7 +123,7 @@ export async function publishSourceSettingsOnly(
 ): Promise<boolean> {
   const result = await db
     .update(schema.capacityPools)
-    .set(update.values)
+    .set({ ...update.values, updatedAt: nextCapacityPoolTimestamp() })
     .where(
       and(
         eq(schema.capacityPools.id, pool.id),

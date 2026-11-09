@@ -75,10 +75,13 @@ type PolicyUpdate = NonNullable<DefaultCapacityPoolUpdateInput['policy']>;
 
 /**
  * Binds consumed by an atomic candidate UPDATE before its `id IN (...)` list:
- * `status`, `updated_at` (SET), `pool_id`, role suffix and the fence's `id` + `revision`.
- * Each candidate id is bound twice: its direct update and current coupled-mirror lookup.
+ * `status`, `updated_at` (SET), `pool_id`, role suffix, the fence's `id` + `revision`, and up to
+ * two account-settings guards in the same fence (`sourceSettingsGuardSql`: provider order and
+ * switched-off accounts). Each candidate id is bound twice: its direct update and current
+ * coupled-mirror lookup.
  */
-const ATOMIC_CANDIDATE_UPDATE_FIXED_BIND_COUNT = 6;
+const MAX_SOURCE_SETTINGS_GUARD_BINDS = 2;
+const ATOMIC_CANDIDATE_UPDATE_FIXED_BIND_COUNT = 6 + MAX_SOURCE_SETTINGS_GUARD_BINDS;
 const ATOMIC_CANDIDATE_ID_CHUNK_SIZE = Math.max(
   1,
   Math.floor((D1_MAX_BOUND_PARAMETERS - ATOMIC_CANDIDATE_UPDATE_FIXED_BIND_COUNT) / 2)

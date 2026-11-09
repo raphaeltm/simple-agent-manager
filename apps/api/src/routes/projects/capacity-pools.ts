@@ -157,6 +157,8 @@ async function readProjectDefaultPoolSummaries(
     includeInstallation: true,
     ensure: false,
     includeDisabled: true,
+    // Only superadmins are shown the installation pool and its platform credential names.
+    labelInstallation: input.includeInstallation,
     env: input.env,
   });
 }
@@ -292,6 +294,7 @@ capacityPoolRoutes.patch('/:id/capacity-pools/defaults', async (c) => {
     includeInstallation: auth.user.role === 'superadmin',
     ensure: true,
     includeDisabled: true,
+    labels: false,
     env: c.env,
   });
   const result = await updateDefaultCapacityPool(db, {

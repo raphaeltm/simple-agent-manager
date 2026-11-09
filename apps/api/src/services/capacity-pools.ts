@@ -148,15 +148,35 @@ export function parseCapacityPoolSourceOrder(
 }
 
 /**
- * Accounts switched off in this pool, or an empty list when none are. A malformed value reads
- * as "none switched off" and is logged: the column only ever holds what the update path wrote,
- * and failing the pool read would stop every placement, not just this account's.
+ * Accounts switched off in this pool, or an empty list when none are. Reads the column the way
+ * the placement authority SQL does (`json_each` in placement-authority.ts): every non-empty
+ * string entry is an excluded id. The migration's CHECK only admits a JSON array, and the update
+ * path only writes arrays of ids, so anything else is logged and skipped rather than failing
+ * the pool read, which would stop every placement and not just this account's.
  */
 export function parseCapacityPoolExcludedSources(
   poolId: string,
   raw: string | null | undefined
 ): string[] {
-  return parseSourceIdList(poolId, raw, 'capacity_pool.excluded_sources_invalid') ?? [];
+  if (raw === null || raw === undefined) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    parsed = null;
+  }
+  if (!Array.isArray(parsed)) {
+    log.warn('capacity_pool.excluded_sources_invalid', { poolId });
+    return [];
+  }
+  const ids = parsed.filter((id): id is string => typeof id === 'string' && id.length > 0);
+  if (ids.length !== parsed.length) {
+    log.warn('capacity_pool.excluded_sources_invalid', {
+      poolId,
+      skipped: parsed.length - ids.length,
+    });
+  }
+  return ids;
 }
 
 function parseSourceIdList(
