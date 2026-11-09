@@ -326,7 +326,7 @@ export function MobileSelectedTextCommentComposer({
   return createPortal(
     <section
       aria-label="Selected text comment composer"
-      className="fixed inset-x-2 bottom-2 z-panel max-h-[min(72dvh,32rem)] overflow-y-auto rounded-2xl border border-border-default bg-surface p-2 shadow-2xl lg:hidden"
+      className="fixed inset-x-2 bottom-[calc(0.5rem+env(safe-area-inset-bottom))] z-panel max-h-[min(72dvh,32rem)] overflow-y-auto rounded-2xl border border-border-default bg-surface p-2 shadow-2xl lg:hidden"
     >
       <div className="mb-2 flex items-center gap-2 px-1">
         <MessageSquareQuote size={15} className="shrink-0 text-fg-muted" aria-hidden="true" />

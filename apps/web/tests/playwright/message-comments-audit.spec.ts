@@ -404,9 +404,7 @@ async function expectCommentThreadVisible(root: Page | Locator, body: string) {
 
 async function expectConversationCanScrollBehindOverlay(page: Page) {
   const scrollResult = await page.evaluate(() => {
-    const scroller = document.querySelector<HTMLElement>(
-      '[data-sam-conversation-scroller="true"]'
-    );
+    const scroller = document.querySelector<HTMLElement>('[data-sam-conversation-scroller="true"]');
     if (!scroller) return null;
 
     const before = scroller.scrollTop;
@@ -433,9 +431,7 @@ async function expectConversationCanScrollBehindOverlay(page: Page) {
 test.describe('message comments audit — desktop 1280x800', () => {
   test.use({ viewport: { width: 1280, height: 800 }, isMobile: false, hasTouch: false });
 
-  test('opens a visible empty rail from the tool rail Comments action', async ({
-    page,
-  }) => {
+  test('opens a visible empty rail from the tool rail Comments action', async ({ page }) => {
     await setupApiMocks(page);
     await openChat(page);
 
@@ -461,7 +457,8 @@ test.describe('message comments audit — desktop 1280x800', () => {
     await expect(page.getByRole('complementary', { name: 'Session comments' })).toHaveCount(0);
     await page
       .locator('[data-conversation-item-id="msg-27"]')
-      .getByRole('button', { name: 'Comment on this message' }).click();
+      .getByRole('button', { name: 'Comment on this message' })
+      .click();
 
     const rail = page.getByRole('complementary', { name: 'Session comments' });
     await expect(rail).toBeVisible();
@@ -675,6 +672,7 @@ test.describe('message comments audit — mobile 375x667', () => {
 
     const actionBar = page.getByRole('dialog', { name: 'Comment on selection' });
     await expect(actionBar.getByRole('button', { name: 'Comment on selection' })).toBeVisible();
+    await screenshot(page, 'message-comments-mobile-action-bar');
     await actionBar.getByRole('button', { name: 'Comment on selection' }).click();
 
     const bottomComposer = page.getByRole('region', {
@@ -701,7 +699,7 @@ test.describe('message comments audit — mobile 375x667', () => {
     await expect(
       page.getByRole('button', { name: /1 comment on this message, 1 unresolved/i })
     ).toBeVisible();
-    await expect(page.locator('aside')).toBeHidden();
+    await expect(page.getByRole('complementary', { name: 'Session comments' })).toBeHidden();
 
     await screenshot(page, 'message-comments-mobile-bottom-composer-send');
     await assertNoOverflow(page);
