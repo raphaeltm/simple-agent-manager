@@ -68,43 +68,43 @@ Raphaël approved a prototype (artifact `BLxnvbCWtMM4KBcRzjsc5c`, v3) and these 
 ## Implementation Checklist
 
 ### Backend
-- [ ] New candidate rows start unselected: remove legacy-size and legacy-row status inheritance
+- [x] New candidate rows start unselected: remove legacy-size and legacy-row status inheritance
       from `initialStatusForProviderOffering`; delete `legacyStatusForOffering`.
-- [ ] A new zone row inherits `active` only from an active row of the same source, machine type
+- [x] A new zone row inherits `active` only from an active row of the same source, machine type
       and REGION (region selection = all its zones, including zones the provider adds later).
-- [ ] Shared `capacityLocationRegion(provider, location)`; `gcpZoneRegion` delegates to it.
-- [ ] Shared GCP region metadata (name + country) for region labels; the GCP catalog uses it for
+- [x] Shared `capacityLocationRegion(provider, location)`; `gcpZoneRegion` delegates to it.
+- [x] Shared GCP region metadata (name + country) for region labels; the GCP catalog uses it for
       zone names.
-- [ ] Migration 0230: `capacity_pools.excluded_source_ids_json` (nullable, `json_valid`).
-- [ ] `CapacityPool.excludedSourceIds`; PATCH `excludedSourceIds?: string[] | null`; route
+- [x] Migration 0230: `capacity_pools.excluded_source_ids_json` (nullable, `json_valid`).
+- [x] `CapacityPool.excludedSourceIds`; PATCH `excludedSourceIds?: string[] | null`; route
       validation (≤ `MAX_CAPACITY_POOL_SOURCE_ORDER_LENGTH`, unique, non-empty strings).
-- [ ] Update service: exclusion changes are CAS-fenced like the provider order and do not bump the
+- [x] Update service: exclusion changes are CAS-fenced like the provider order and do not bump the
       revision; activating machines of an excluded account removes it from the exclusions in the
       same atomic edit.
-- [ ] Every placement reader skips excluded sources: resolver, reuse/admission authority SQL,
+- [x] Every placement reader skips excluded sources: resolver, reuse/admission authority SQL,
       summary counts / effective state, safe effective summary.
-- [ ] Editor summaries carry an account `label` (connection name) for sources.
-- [ ] Clear empty-pool placement error that names Settings → Infrastructure and Instant sessions.
+- [x] Editor summaries carry an account `label` (connection name) for sources.
+- [x] Clear empty-pool placement error that names Settings → Infrastructure and Instant sessions.
 
 ### Frontend
-- [ ] Region rows: `buildMachineRegionRows` (provider × machine × region per source), draft keyed
+- [x] Region rows: `buildMachineRegionRows` (provider × machine × region per source), draft keyed
       by region row; allowing a row activates every addable zone and adds missing zones.
-- [ ] New editor: status chip, "In your pool" pane (accounts with switches, order, picked items,
+- [x] New editor: status chip, "In your pool" pane (accounts with switches, order, picked items,
       remove, show all, Remove all, empty-pool Instant warning), "Available machines" pane (search,
       All/In pool/Not in pool, provider chips, continent chips, min vCPU, min memory, max price,
       hide sold out, sortable columns, bulk add/remove), pool settings kept, save bar.
-- [ ] Disabled (disconnected) sources hidden from the editor and the account list.
-- [ ] No small/medium/large labels in the editor.
-- [ ] Editor is the default view when the scope owns its pool; read-only fallback unchanged.
+- [x] Disabled (disconnected) sources hidden from the editor and the account list.
+- [x] No small/medium/large labels in the editor.
+- [x] Editor is the default view when the scope owns its pool; read-only fallback unchanged.
 
 ### Docs and tests
-- [ ] `apps/www/src/content/docs/docs/guides/compute-pools.md` (and self-hosting note): nothing is
+- [x] `apps/www/src/content/docs/docs/guides/compute-pools.md` (and self-hosting note): nothing is
       added on its own, regions, accounts on/off, empty pool = Instant only.
-- [ ] API tests: no auto-activation (new provider, new zone, new region, legacy rows present),
+- [x] API tests: no auto-activation (new provider, new zone, new region, legacy rows present),
       region sibling inheritance + control, exclusions in resolver/authority/summary, CAS conflict,
       re-inclusion on add, empty-pool error message.
-- [ ] Web tests: region row building, draft → PATCH body, account switch, hidden disabled sources.
-- [ ] Playwright audit at 375 and 1280 with long names, many rows, empty pool, error.
+- [x] Web tests: region row building, draft → PATCH body, account switch, hidden disabled sources.
+- [x] Playwright audit at 375 and 1280 with long names, many rows, empty pool, error.
 
 ### Deferred (tracked)
 - Credential "fix permissions" replacement creates a new credential id, so its source starts with
@@ -112,14 +112,47 @@ Raphaël approved a prototype (artifact `BLxnvbCWtMM4KBcRzjsc5c`, v3) and these 
 
 ## Acceptance Criteria
 
-- [ ] A catalog refresh, a newly connected account and a replaced credential never activate a
+- [x] A catalog refresh, a newly connected account and a replaced credential never activate a
       machine a person did not pick (zones of a picked region excepted).
-- [ ] Switching an account off stops placement on it (new VMs and reuse) and keeps its picks;
+- [x] Switching an account off stops placement on it (new VMs and reuse) and keeps its picks;
       switching it on restores them.
-- [ ] A disconnected or disabled account does not appear in the editor and is never placed.
-- [ ] The editor lists one row per provider × machine × region with a native-currency price.
-- [ ] An empty pool shows the Instant-only warning, and a VM task fails with a clear message.
-- [ ] Task/profile `small`/`medium`/`large` requests still resolve to the predefined resources.
+- [x] A disconnected or disabled account does not appear in the editor and is never placed.
+- [x] The editor lists one row per provider × machine × region with a native-currency price.
+- [x] An empty pool shows the Instant-only warning, and a VM task fails with a clear message.
+- [x] Task/profile `small`/`medium`/`large` requests still resolve to the predefined resources.
+
+## Implementation Notes and Deviations
+
+- The shared helper is `providerLocationRegion(provider, location)` with region metadata
+  `providerRegionMeta` (`packages/shared/src/constants/provider-regions.ts`); `gcpZoneRegion`
+  delegates to it. The GCP catalog keeps its own zone display names; only the editor uses the
+  region metadata, which is all the redesign needs.
+- Disconnected or disabled accounts are not deleted. Every credential mutation route calls
+  `reconcileCapacityPoolsForCredentialMutation()`, which disables the gone source
+  (`disableCapacitySourcesMissingFromSeeds()`), and placement only reads active sources
+  (`isActiveCapacityPlacementOption()`, the `s.status = 'active'` predicate in
+  `placement-authority.ts`). The editor hides non-active sources (`connectedOnly()` in
+  `DefaultCapacityPoolsPanel.tsx`). Keeping the rows preserves references held by running work,
+  so no cleanup migration was needed.
+- The desktop machine table puts the account under the machine name (sortable by either) so it
+  fits the 740px settings pane; the Playwright audit asserts the table and its Add/Remove buttons
+  fit without sideways scrolling.
+- Small/medium/large requests are unchanged on the request side (`resource-requirements-input.ts`,
+  covered by `resource-requirements-input.test.ts`). The catalog side no longer reads them.
+
+## Acceptance Evidence
+
+- No auto-activation: `default-capacity-pools.test.ts` (initial status cases, fresh pool counts 0,
+  legacy rows ignored) and `capacity-pool-editor-redesign.test.ts` (region inheritance, deleted
+  region not re-added).
+- Account off/on: `capacity-pool-editor-redesign.test.ts` (resolver exclusion with two accounts,
+  re-include on add, CAS conflict) and `placement-authority-effective-pool.test.ts` (reuse and
+  admission skip a switched-off account). Both proven discriminating by removing the guard.
+- Hidden disconnected accounts: `default-capacity-pools-panel.test.tsx` and
+  `compute-pool-editor.test.tsx`.
+- One row per provider × machine × region: `compute-pool-region-rows.test.ts`.
+- Empty pool: editor warning in `compute-pool-editor.test.tsx` and the Playwright audit (account
+  switched off); placement message in `capacity-pool-editor-redesign.test.ts`.
 
 ## References
 
