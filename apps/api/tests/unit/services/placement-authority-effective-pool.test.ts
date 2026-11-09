@@ -65,6 +65,8 @@ interface PoolFixture {
   sourceId: string;
   candidateId: string;
   scope: PoolScope;
+  /** Cloud credential behind the source; the seeded personal credential by default. */
+  credentialId?: string;
 }
 
 function db(): Database.Database {
@@ -138,6 +140,44 @@ function seedPool(scope: PoolScope, options: { isDefault?: boolean } = {}): Pool
 }
 
 /**
+ * A second account (credential, capacity source and active pick) in the same pool as `pool`,
+ * so a test can switch one account off and watch the other.
+ */
+function seedSecondAccount(pool: PoolFixture): PoolFixture {
+  const credentialId = 'user-cloud-b';
+  const sourceId = `${pool.sourceId}-b`;
+  const candidateId = `${pool.candidateId}-b`;
+  db().exec(`
+    INSERT INTO credentials
+      (id, user_id, project_id, provider, credential_type, is_active, encrypted_token, iv,
+       created_at, updated_at)
+    VALUES
+      ('${credentialId}', '${USER_ID}', NULL, 'hetzner', 'cloud-provider', 1, 'enc', 'iv',
+       '${AUTHORITY_TIMESTAMP}', '${AUTHORITY_TIMESTAMP}');
+
+    INSERT INTO capacity_sources
+      (id, scope, owner_user_id, owner_project_id, source_kind, provider, credential_source,
+       credential_id, platform_credential_id, credential_reference, credential_version,
+       external_source_ref, status, created_at, updated_at)
+    VALUES
+      ('${sourceId}', 'user', '${USER_ID}', NULL, 'cloud-provider-credential',
+       'hetzner', 'user', '${credentialId}', NULL, 'credentials:${credentialId}',
+       ${AUTHORITY_VERSION}, NULL, 'active', '${AUTHORITY_TIMESTAMP}', '${AUTHORITY_TIMESTAMP}');
+
+    INSERT INTO capacity_pool_candidates
+      (id, pool_id, capacity_source_id, provider, location, workload_role, provider_instance_type,
+       provider_instance_vcpu_count, provider_instance_memory_mb, provider_instance_disk_gb,
+       provider_instance_boot_disk_size_gb, provider_instance_image, provider_instance_architecture,
+       catalog_availability, status, priority, candidate_order, created_at, updated_at)
+    VALUES
+      ('${candidateId}', '${pool.poolId}', '${sourceId}', 'hetzner', 'fsn1', 'workspace', 'cx42',
+       8, ${16 * 1024}, 240, NULL, NULL, NULL, 'available', 'active', 1, 1,
+       '${AUTHORITY_TIMESTAMP}', '${AUTHORITY_TIMESTAMP}');
+  `);
+  return { ...pool, sourceId, candidateId, credentialId };
+}
+
+/**
  * A configured-empty higher-precedence default pool: it has no usable candidates,
  * which is exactly the case that must still be authoritative rather than falling
  * back to a lower scope.
@@ -164,7 +204,7 @@ function snapshotFor(fixture: PoolFixture): CapacityPlacementSnapshot {
     capacitySourceExternalRef: null,
     capacityPoolCandidateId: fixture.candidateId,
     placementCredentialSource: 'user',
-    placementCredentialReference: 'credentials:user-cloud',
+    placementCredentialReference: `credentials:${fixture.credentialId ?? 'user-cloud'}`,
     placementCredentialVersion: AUTHORITY_VERSION,
     capacityPoolProjectId: fixture.scope === 'project' ? PROJECT_ID : null,
     workloadRole: 'workspace',
@@ -492,6 +532,86 @@ describe('reuse selection agrees with final authority admission', () => {
     await expect(
       reserveWorkspacePlacement(database, placementInput(pool), ADMISSION_POLICY)
     ).resolves.toBe(true);
+  });
+
+  describe('two accounts in one pool, one switched off', () => {
+    /** Accounts A and B each hold an active pick and a running node. */
+    function twoAccountFixture() {
+      const database = createDb();
+      const a = seedPool('user');
+      const b = seedSecondAccount(a);
+      db().exec(`UPDATE capacity_pools SET deployment_strategy = 'smallest-fit'`);
+      seedNode(a, { id: 'node-a', provider_instance_id: 'server-a' });
+      seedNode(b, { id: 'node-b', provider_instance_id: 'server-b' });
+      const reusable = () =>
+        filterReusableNodesByCurrentAuthority(database, {
+          userId: USER_ID,
+          projectId: PROJECT_ID,
+          selections: [
+            { nodeId: 'node-a', capacityPlacementSnapshot: snapshotFor(a) },
+            { nodeId: 'node-b', capacityPlacementSnapshot: snapshotFor(b) },
+          ],
+        });
+      const admits = (fixture: PoolFixture, nodeId: string) =>
+        reserveWorkspacePlacement(database, placementInput(fixture, { nodeId }), ADMISSION_POLICY);
+      const exclude = (excludedSourceIds: string[]) =>
+        updateDefaultCapacityPool(drizzle(database, { schema }), {
+          scope: 'user',
+          ownerUserId: USER_ID,
+          ownerProjectId: null,
+          excludedSourceIds,
+        });
+      return { a, b, reusable, admits, exclude };
+    }
+
+    it('reuses and admits both accounts while neither is switched off (control)', async () => {
+      const { a, b, reusable, admits } = twoAccountFixture();
+      expect(await reusable()).toEqual(new Set(['node-a', 'node-b']));
+      await expect(admits(a, 'node-a')).resolves.toBe(true);
+      await expect(admits(b, 'node-b')).resolves.toBe(true);
+    });
+
+    it('keeps the node on account B usable and refuses the node on switched-off account A', async () => {
+      const { a, b, reusable, admits, exclude } = twoAccountFixture();
+      const result = await exclude([a.sourceId]);
+      expect(result).toMatchObject({ conflict: false, missingSourceIds: [] });
+      expect(result.summary?.pool.excludedSourceIds).toEqual([a.sourceId]);
+
+      expect(await reusable()).toEqual(new Set(['node-b']));
+      await expect(admits(a, 'node-a')).resolves.toBe(false);
+      await expect(admits(b, 'node-b')).resolves.toBe(true);
+    });
+
+    it('mirrors the exclusion: switching B off keeps the node on A and refuses the one on B', async () => {
+      const { a, b, reusable, admits, exclude } = twoAccountFixture();
+      await exclude([b.sourceId]);
+
+      expect(await reusable()).toEqual(new Set(['node-a']));
+      await expect(admits(b, 'node-b')).resolves.toBe(false);
+      await expect(admits(a, 'node-a')).resolves.toBe(true);
+    });
+
+    it('leaves both nodes usable when the excluded id is not the source of either node', async () => {
+      const { a, b, reusable, admits } = twoAccountFixture();
+      // A stale id (an account that no longer serves the pool) is harmless by design.
+      db().exec(`UPDATE capacity_pools SET excluded_source_ids_json = '["source-long-gone"]'`);
+
+      expect(await reusable()).toEqual(new Set(['node-a', 'node-b']));
+      await expect(admits(a, 'node-a')).resolves.toBe(true);
+      await expect(admits(b, 'node-b')).resolves.toBe(true);
+    });
+
+    it('refuses both nodes when both accounts are switched off, and restores both on clearing', async () => {
+      const { a, b, reusable, admits, exclude } = twoAccountFixture();
+      await exclude([a.sourceId, b.sourceId]);
+      expect(await reusable()).toEqual(new Set());
+      await expect(admits(a, 'node-a')).resolves.toBe(false);
+      await expect(admits(b, 'node-b')).resolves.toBe(false);
+
+      await exclude([]);
+      expect(await reusable()).toEqual(new Set(['node-a', 'node-b']));
+      await expect(admits(a, 'node-a')).resolves.toBe(true);
+    });
   });
 
   it('filters 150 hosts using grouped queries within the D1 parameter ceiling', async () => {

@@ -810,7 +810,6 @@ describe('default capacity pool creation', () => {
         offeringResolver: async () => manyLiveOfferings(100),
       }
     );
-    await pickStarterMachines(drizzleD1(observed, { schema }) as never);
     expect(batches).toEqual([200]);
     expect(result.user?.candidates).toHaveLength(100);
   });
@@ -1636,7 +1635,6 @@ describe('default capacity pool creation', () => {
       includeInstallation: false,
       env: catalogEnv(),
     });
-    await pickStarterMachines(db as never);
 
     const warningPayloads = warnSpy.mock.calls
       .map(([payload]) => String(payload))
@@ -1668,7 +1666,6 @@ describe('default capacity pool creation', () => {
         catalogComplete: false,
       }),
     });
-    await pickStarterMachines(db as never);
 
     expect(failedRefresh.user?.effectiveState).toBe('configured-empty');
     expect(getCount('capacity_pool_candidates')).toBe(0);
@@ -1961,7 +1958,6 @@ describe('default capacity pool creation', () => {
       candidatePublishBatchSize: 1000,
       offeringResolver: async () => initialOfferings,
     });
-    await pickStarterMachines(db as never);
     await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
       userId: 'user-1',
       includeInstallation: false,
@@ -2013,7 +2009,6 @@ describe('default capacity pool creation', () => {
       candidatePublishBatchSize: 1000,
       offeringResolver: async () => offerings,
     });
-    await pickStarterMachines(db as never);
     expect(ensured.user?.effectiveState).toBe('configured-empty');
     expect(ensured.user?.activeCandidateCount).toBe(0);
     const editorRead = await readDefaultCapacityPoolSummaries(db as never, {
@@ -2168,7 +2163,6 @@ describe('default capacity pool creation', () => {
         }),
       ],
     });
-    await pickStarterMachines(db as never);
     sqlite?.prepare("DELETE FROM cc_attachments WHERE id = 'cc-att-old'").run();
     seedComposableCloudCredential({
       credentialId: 'cc-cred-new',
@@ -2283,7 +2277,6 @@ describe('default capacity pool creation', () => {
         }),
       ],
     });
-    await pickStarterMachines(db as never);
 
     expect(
       sqlite?.prepare(`SELECT status FROM capacity_sources WHERE id = 'source-no-candidates'`).get()
@@ -3608,7 +3601,6 @@ describe('default capacity pool creation', () => {
         }),
       ],
     });
-    await pickStarterMachines(newerDb as never);
 
     releaseOldSeed?.();
     await oldEnsure;
@@ -3816,7 +3808,6 @@ describe('default capacity pool creation', () => {
           })
         ),
     });
-    await pickStarterMachines(db as never);
 
     const [deletedCandidate, disabledCandidate] = getRows<{ id: string }>(`
       SELECT id
@@ -3932,7 +3923,6 @@ describe('default capacity pool creation', () => {
         }),
       ],
     });
-    await pickStarterMachines(db as never);
     sqlite
       ?.prepare(
         "UPDATE capacity_pool_candidates SET priority = 0, status = 'active' WHERE pool_id LIKE 'cap-pool-default:user:%'"
@@ -3991,7 +3981,6 @@ describe('default capacity pool creation', () => {
         }),
       ],
     });
-    await pickStarterMachines(db as never);
     sqlite?.prepare("UPDATE capacity_pool_candidates SET priority = 0, status = 'active'").run();
 
     const selection = await resolveTaskStartCapacityPoolSelection(
@@ -4033,7 +4022,6 @@ describe('default capacity pool creation', () => {
         }),
       ],
     });
-    await pickStarterMachines(db as never);
     sqlite
       ?.prepare(
         `
@@ -4086,7 +4074,6 @@ describe('default capacity pool creation', () => {
           }),
         ],
       });
-      await pickStarterMachines(db as never);
       sqlite
         ?.prepare(
           "UPDATE capacity_pools SET strategy = ? WHERE scope = 'user' AND owner_user_id = 'user-1'"
@@ -4359,7 +4346,6 @@ describe('default capacity pool creation', () => {
         }),
       ],
     });
-    await pickStarterMachines(db as never);
 
     sqlite
       ?.prepare("DELETE FROM credentials WHERE id IN ('user-hetzner', 'project-hetzner')")
@@ -5361,7 +5347,6 @@ describe('capacity pool review findings', () => {
         env: catalogEnv(createSqliteD1WithBindLimit(sqlite!, 100)),
         offeringResolver: async () => offerings,
       });
-      await pickStarterMachines(poolDb() as never);
       expect(getCount('capacity_pool_candidates')).toBe(7200);
       expect(result.user?.pool.migrationState).toBe('complete');
       // Local SQLite is far faster than D1; this bounds the publisher's own overhead, well
@@ -5408,7 +5393,6 @@ describe('capacity pool review findings', () => {
           }),
         ],
       });
-      await pickStarterMachines(poolDb() as never);
       expect(getCount('capacity_pool_candidates', "catalog_availability = 'available'")).toBe(2);
 
       let passes = 0;
@@ -5758,7 +5742,6 @@ describe('capacity pool review findings', () => {
           }),
         ],
       });
-      await pickStarterMachines(poolDb() as never);
 
       await ensureDefaultCapacityPoolsForExistingCredentials(poolDb() as never, {
         userId: 'user-1',
@@ -6601,7 +6584,6 @@ describe('GCP managed compatibility copies', () => {
         sqlite!.exec("UPDATE cc_credentials SET iv = 'rotated-after-selection'");
       },
     });
-    await pickStarterMachines(db as never);
     expect(changed).toBe(true);
     expect(
       sqlite!.prepare('SELECT status FROM capacity_sources WHERE id = ?').get(mirror.id)
@@ -6644,7 +6626,6 @@ describe('GCP managed compatibility copies', () => {
       )
       .run(mirrorOnly, mirror.id);
     const after = await ensureDefaultCapacityPoolsForExistingCredentials(db, options);
-    await pickStarterMachines(db as never);
     expect(after.user?.sources.map((source) => source.id)).toEqual([canonical.id]);
     expect(
       new Set(
@@ -6942,7 +6923,6 @@ describe('GCP managed compatibility copies', () => {
       .prepare(`UPDATE capacity_pool_candidates SET ${column} = ? WHERE capacity_source_id = ?`)
       .run(column.endsWith('_gb') ? 100 : 'custom-value', mirror.id);
     const after = await ensureDefaultCapacityPoolsForExistingCredentials(db, options);
-    await pickStarterMachines(db as never);
     expect(after.user?.sources).toHaveLength(2);
     expect(
       sqlite!.prepare('SELECT status FROM capacity_sources WHERE id = ?').get(mirror.id)

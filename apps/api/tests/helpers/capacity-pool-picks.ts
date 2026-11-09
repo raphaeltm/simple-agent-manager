@@ -20,9 +20,20 @@ type Db = ReturnType<typeof drizzle>;
 export interface StarterMachineOptions {
   /** Only these pool scopes. Default: every default pool. */
   scopes?: Array<'project' | 'user' | 'installation'>;
+  /**
+   * Do not throw when a requested scope has nothing to pick. By default a pick that finds no
+   * eligible machine is a broken fixture (no pool, no catalog rows, rows already active), and
+   * the test would silently run against an empty pool.
+   */
+  allowNothingToPick?: boolean;
 }
 
-/** Picks, in every existing default pool, the machines a legacy size maps to. */
+/**
+ * Picks, in every existing default pool, the machines a legacy size maps to.
+ *
+ * Throws when nothing was picked: for each scope in `options.scopes`, or, with no `scopes`, when
+ * not a single pool had a machine to pick. Pass `allowNothingToPick` to opt out.
+ */
 export async function pickStarterMachines(
   db: Db,
   options: StarterMachineOptions = {}
@@ -36,6 +47,7 @@ export async function pickStarterMachines(
         options.scopes ? inArray(schema.capacityPools.scope, options.scopes) : undefined
       )
     );
+  const pickedScopes = new Set<string>();
   for (const pool of pools) {
     const rows = await db
       .select({ id: schema.capacityPoolCandidates.id })
@@ -64,6 +76,20 @@ export async function pickStarterMachines(
     ) {
       throw new Error(`pickStarterMachines could not pick machines in pool ${pool.id}`);
     }
+    pickedScopes.add(pool.scope);
+  }
+  if (options.allowNothingToPick) return;
+  const missing = options.scopes
+    ? options.scopes.filter((scope) => !pickedScopes.has(scope))
+    : pickedScopes.size === 0
+      ? ['any']
+      : [];
+  if (missing.length > 0) {
+    throw new Error(
+      `pickStarterMachines found no machines to pick in the ${missing.join(', ')} default pool. ` +
+        'The pool is missing, has no catalog rows mapped to a legacy size, or is already picked; ' +
+        'fix the fixture or pass allowNothingToPick.'
+    );
   }
 }
 

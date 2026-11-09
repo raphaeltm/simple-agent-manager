@@ -2274,7 +2274,7 @@ describe('task submit capacity-pool placement', () => {
       credentialAttributionUserId: 'user-a',
       credentialAttributionSource: 'user',
     });
-    await seedStaticDefaultPool(env, { userId: 'user-b', projectId: 'project-1' });
+    // user-b has no cloud credential and the project has none: there is no pool to seed or pick.
     authState.userId = 'user-b';
 
     const res = await createApp().request(

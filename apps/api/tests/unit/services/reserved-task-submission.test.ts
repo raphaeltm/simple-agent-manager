@@ -15,10 +15,7 @@ import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../../src/s
 import type { startTaskRunnerDO } from '../../../src/services/task-runner-do';
 import { admitAndSubmitTriggerExecution } from '../../../src/services/trigger-admission';
 import { TriggerTaskSubmissionPendingError } from '../../../src/services/trigger-submission';
-import {
-  ensurePoolsWithStarterMachines,
-  pickStarterMachines,
-} from '../../helpers/capacity-pool-picks';
+import { ensurePoolsWithStarterMachines } from '../../helpers/capacity-pool-picks';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 
 const projectDataBoundary = vi.hoisted(() => {
@@ -598,7 +595,6 @@ describe('submitReservedTask', () => {
         includeInstallation: false,
       }
     );
-    await pickStarterMachines(drizzle(fixture.env.DATABASE, { schema }) as never);
     const { deps, startedTaskIds } = createSubmissionDependencies();
 
     const [first, second] = await Promise.all([
