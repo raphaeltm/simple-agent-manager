@@ -23,6 +23,7 @@ Found while shipping SAM notice rows (PR #2575). The first version of that PR fi
 
 ## Merged from `2026-11-07-sam-assistant-messages-as-pointers.md` (2026-11-09)
 
+- [ ] In every delivery mode, the tool the agent uses to read the message marks the text as untrusted and names the verified sender as the SAM assistant. The Workers test asserts both in the reader output.
 - [ ] The 409 queue fallback no longer records model text with `senderType: 'human'`.
 - [ ] Decide with Raphaël whether GitHub-supplied text interpolated into trigger templates
       (`renderedPrompt` in `services/github-trigger-queue.ts`, for example PR titles and bodies) must

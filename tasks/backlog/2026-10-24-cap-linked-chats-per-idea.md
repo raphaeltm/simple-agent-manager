@@ -59,4 +59,4 @@ the shape rule 74 warns about. Decide the ranking before writing the cap:
 ## Reconciliation (2026-11-09 weekly queue sweep)
 
 - Evidence: #2436: per-target cap via operations.resourceLinkBatchPerTargetCap (operations/link-core.ts:48, project-data/links.ts) with atLeast disclosure
-- Status: Remaining: ranking by deriveIdeaStatus purpose, skew test, round-trip assertion.
+- Status: Remaining: ranking by deriveIdeaStatus purpose, skew test, round-trip assertion, and the disclosure criterion: `atLeast` gives only a lower bound and the idea-links endpoint does not page omitted chats, so the response does not yet say the total or how to get the rest.

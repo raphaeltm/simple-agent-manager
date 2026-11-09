@@ -30,6 +30,9 @@ current `main` before working on it.
 ## Acceptance Criteria
 
 - [ ] Each adversarial-audit gap is confirmed fixed on `main` (cite the code path) or fixed.
+- [ ] Prove that an installation's account-owned credentials keep working, and that maintenance
+      recovery still works, after the hosted installer's OAuth grant is revoked (archived plan item:
+      "prove child credentials survive central OAuth revocation"). Cite the test or live evidence.
 - [ ] Decide whether SAM's own CI should switch to the shared engine. If yes, complete the parity
       audit items and qualify equivalence on staging first. If no, record the decision here.
 - [ ] After Raphaël's first production install, record the outcome here and decide on promoting

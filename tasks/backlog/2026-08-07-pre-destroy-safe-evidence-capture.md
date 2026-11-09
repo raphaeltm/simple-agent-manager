@@ -38,4 +38,4 @@ Raphaël has explicitly prioritized preserving VM evidence at incident time befo
 ## Reconciliation (2026-11-09 weekly queue sweep)
 
 - Evidence: #2502 black box recorder: services/node-log-capture.ts captureNodeLogsBeforeTeardown called from strict-node-deletion.ts:301 (cleanup sweep path via deleteNodeResourcesStrict) and captureNodeLogsOnUnhealthy (unhealthy-nodes.ts:415)
-- Status: Pre-teardown capture shipped as raw superadmin-only logs (policy a35180d5); remains: vm-agent self-capture on heartbeat failure, safe-snapshot/canary design decision vs raw capture
+- Status: Pre-teardown capture shipped as raw superadmin-only logs (policy a35180d5); the raw capture does not satisfy this file's criteria. Still required: vm-agent self-capture on heartbeat failure, a safe incident snapshot at reap time, and canary-secret coverage for the new capture triggers (unless a human explicitly drops them)
