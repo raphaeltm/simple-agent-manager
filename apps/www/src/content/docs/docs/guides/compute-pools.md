@@ -228,7 +228,14 @@ Sources that share a rank do not fall back to each other; give them different ra
 one to back up the other. Without an order, nothing falls back across sources. Each attempt,
 including skipped sources and the reason, appears in the run's placement details.
 
-The order is set through the pool update API (`sourceOrder`, a list of source ids) for now.
+**Setting the order.** Open the pool on its Infrastructure page and select **Edit**. Under
+**Provider order**, choose **Try accounts in this order**, then use the up and down arrows to put
+the account SAM should try first at the top, and **Save changes**. Choose **Every account is equal**
+to clear the order. The pool summary states the current order in one sentence, for example
+"Google Cloud first, then Hetzner". An account connected after the order was saved is listed
+"after those" until you place it. A pool with a single account has nothing to order, so the
+section only explains that. The same order can be set through the pool update API
+(`sourceOrder`, a list of source ids).
 
 ### Allowed offerings
 

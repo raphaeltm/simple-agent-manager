@@ -338,6 +338,67 @@ afterEach(() => {
 });
 
 describe('reserveWorkspacePlacement', () => {
+  it.each(['reserve', 'attach'] as const)(
+    'admits the first workspace during bootstrap CPU and refuses a co-tenant (%s)',
+    async (operation) => {
+      const database = createDb();
+      seedNode({
+        observed_provider_instance_vcpu_count: 2,
+        observed_provider_instance_memory_mb: 4096,
+        observed_provider_instance_disk_gb: 40,
+        last_metrics: JSON.stringify({
+          version: 1,
+          cpuLoadAvg1: 8,
+          memoryPercent: 15,
+          diskPercent: 10,
+        }),
+      });
+      const request = reservation({ cpuMillis: 200, memoryMb: 512, diskMb: 5120 });
+      const policy = { ...resolveWorkspaceAdmissionPolicy({}), lifetimeAdmissionCutoffAgeMs: null };
+      const input = { ...reserveInput(capacitySnapshot()), resolvedReservation: request };
+      if (operation === 'attach') seedPlaceholderWorkspace(input.id);
+      const claim =
+        operation === 'attach' ? attachPrecreatedWorkspacePlacement : reserveWorkspacePlacement;
+      await expect(claim(database, input, policy)).resolves.toBe(true);
+      expect(
+        sqlite?.prepare('SELECT node_id, status FROM workspaces WHERE id = ?').get(input.id)
+      ).toEqual({ node_id: 'node-1', status: 'creating' });
+
+      // Occupancy is re-read at the final claim, even on the same heartbeat.
+      await expect(
+        reserveWorkspacePlacement(database, { ...input, id: 'co-tenant' }, policy)
+      ).resolves.toBe(false);
+      expect(countWorkspace('co-tenant')).toBe(0);
+    }
+  );
+
+  it('refuses an established saturated node with fitting declared reservations', async () => {
+    const database = createDb();
+    seedNode({
+      last_metrics: JSON.stringify({
+        version: 1,
+        cpuLoadAvg1: 8,
+        memoryPercent: 15,
+        diskPercent: 10,
+      }),
+    });
+    seedActiveWorkspace(
+      'established',
+      JSON.stringify(reservation({ cpuMillis: 200, memoryMb: 512 }))
+    );
+    await expect(
+      reserveWorkspacePlacement(
+        database,
+        {
+          ...reserveInput(capacitySnapshot()),
+          resolvedReservation: reservation({ cpuMillis: 200, memoryMb: 512, diskMb: 5120 }),
+        },
+        { ...resolveWorkspaceAdmissionPolicy({}), lifetimeAdmissionCutoffAgeMs: null }
+      )
+    ).resolves.toBe(false);
+    expect(countWorkspace()).toBe(0);
+  });
+
   it('keeps the atomic authority reservation within the D1 bind limit', async () => {
     createDb();
     if (!sqlite) throw new Error('SQLite fixture was not initialized');

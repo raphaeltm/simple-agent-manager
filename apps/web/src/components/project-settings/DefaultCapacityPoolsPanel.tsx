@@ -25,8 +25,9 @@ import {
   updateUserDefaultCapacityPools,
 } from '../../lib/api/capacity-pools';
 import { ApiClientError } from '../../lib/api/client';
-import { POOL_SCOPE_COPY } from '../../lib/compute-pool-copy';
+import { POOL_EDIT_CONFLICT_MESSAGE, POOL_SCOPE_COPY } from '../../lib/compute-pool-copy';
 import { buildMachineGroups } from '../../lib/compute-pool-machines';
+import { initialSourceOrder, orderableSources } from '../../lib/compute-pool-source-order';
 import { capacityPoolQueryKeys } from '../../lib/query-options/capacity-pools';
 import { ComputePoolEditor } from '../compute-pool/ComputePoolEditor';
 import { ComputePoolEmptyState } from '../compute-pool/ComputePoolEmptyState';
@@ -137,6 +138,7 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
     () => (shown ? buildMachineGroups(shown.candidates, catalogs, shown.sources) : []),
     [shown, catalogs]
   );
+  const sources = useMemo(() => (shown ? orderableSources(shown, groups) : []), [shown, groups]);
 
   const reconcileMutation = useMutation({
     mutationFn: () =>
@@ -166,6 +168,14 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
       toast.success('Compute pool saved');
     },
     onError: (error) => {
+      if (error instanceof ApiClientError && error.status === 409) {
+        // Someone else saved this pool after it loaded. Saving again would resend the same stale
+        // edit, so show the current pool instead.
+        setIsEditing(false);
+        void queryClient.invalidateQueries({ queryKey });
+        toast.error(POOL_EDIT_CONFLICT_MESSAGE);
+        return;
+      }
       toast.error(error instanceof Error ? error.message : 'Failed to save the compute pool');
     },
   });
@@ -229,6 +239,8 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
               <ComputePoolEditor
                 pool={ownedDefault.pool}
                 groups={groups}
+                sources={sources}
+                initialOrder={initialSourceOrder(sources, ownedDefault.pool.sourceOrder)}
                 saving={updateMutation.isPending}
                 onCancel={() => setIsEditing(false)}
                 onSave={(request) => {
@@ -240,6 +252,7 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
               <ComputePoolOverview
                 summary={shown}
                 groups={groups}
+                sources={sources}
                 projectId={projectId}
                 notice={
                   fallbackScope && fallbackScope !== scope ? (

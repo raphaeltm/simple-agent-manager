@@ -30,7 +30,13 @@ import {
   type MachineGroup,
   toggleCell,
 } from '../../lib/compute-pool-machines';
+import {
+  type OrderableSource,
+  sameSourceOrder,
+  toSourceOrderRequest,
+} from '../../lib/compute-pool-source-order';
 import { MachinePicker } from './MachinePicker';
+import { ProviderOrderField } from './ProviderOrderField';
 
 interface PolicyDraft {
   strategy: CapacityPoolStrategy;
@@ -106,6 +112,9 @@ function ChoiceField<T extends string>({
 interface ComputePoolEditorProps {
   pool: CapacityPool;
   groups: MachineGroup[];
+  sources: OrderableSource[];
+  /** The order the editor opened with (see `initialSourceOrder`). */
+  initialOrder: string[] | null;
   saving: boolean;
   onCancel: () => void;
   onSave: (request: DefaultCapacityPoolUpdateRequest | null) => void;
@@ -114,6 +123,8 @@ interface ComputePoolEditorProps {
 export function ComputePoolEditor({
   pool,
   groups,
+  sources,
+  initialOrder,
   saving,
   onCancel,
   onSave,
@@ -124,8 +135,13 @@ export function ComputePoolEditor({
   // whole number reaches the policy, and leaving the field shows the value that will be saved.
   const [maxNodesText, setMaxNodesText] = useState(() => String(policy.maxNodes));
   const [draft, setDraft] = useState<MachineDraft>(() => new Map());
+  // Pinned when the editor opens: a background refetch must not turn an untouched order into a
+  // change that would write the stale order back over a newer one.
+  const [baselineOrder] = useState<string[] | null>(initialOrder);
+  const [order, setOrder] = useState<string[] | null>(initialOrder);
   const changedPolicy = policyChanges(pool, policy);
-  const changeCount = Object.keys(changedPolicy).length + draft.size;
+  const orderChanged = !sameSourceOrder(order, baselineOrder);
+  const changeCount = Object.keys(changedPolicy).length + draft.size + (orderChanged ? 1 : 0);
   const update = <K extends keyof PolicyDraft>(key: K, value: PolicyDraft[K]) =>
     setPolicy((current) => ({ ...current, [key]: value }));
 
@@ -135,7 +151,8 @@ export function ComputePoolEditor({
     if (Object.keys(changedPolicy).length > 0) request.policy = changedPolicy;
     if (machines.candidates.length > 0) request.candidates = machines.candidates;
     if (machines.catalogAdditions.length > 0) request.catalogAdditions = machines.catalogAdditions;
-    onSave(request.policy || request.candidates || request.catalogAdditions ? request : null);
+    if (orderChanged) request.sourceOrder = toSourceOrderRequest(order);
+    onSave(Object.keys(request).length > 0 ? request : null);
   };
 
   return (
@@ -194,6 +211,8 @@ export function ComputePoolEditor({
           />
         </div>
       </section>
+
+      <ProviderOrderField sources={sources} order={order} onChange={setOrder} />
 
       <MachinePicker
         groups={groups}

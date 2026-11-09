@@ -274,7 +274,8 @@ export function evaluateWorkspaceReservationCapacity(
   const measuredAdmissionReason = measuredAdmissionDiagnostic(
     metrics,
     policy,
-    active.activeCount === 0 && vcpu === null
+    active.activeCount === 0 && vcpu === null,
+    active.activeCount > 0 || node.nodeRole === 'deployment'
   );
   if (measuredAdmissionReason) {
     if (active.activeCount > 0 || metrics !== null) {
@@ -403,7 +404,8 @@ export function usableMemoryMb(memoryMb: number, policy: WorkspaceAdmissionPolic
 function measuredAdmissionDiagnostic(
   metrics: WorkspaceAdmissionMetrics | null,
   policy: WorkspaceAdmissionPolicy,
-  allowUnknownCpuPressure: boolean
+  allowUnknownCpuPressure: boolean,
+  enforceCpuSaturation: boolean
 ): string | null {
   if (!metrics) return 'occupied node has no resource telemetry';
   if (metrics.unsupportedVersion) return 'node resource telemetry version is unsupported';
@@ -416,7 +418,15 @@ function measuredAdmissionDiagnostic(
   }
   if (metrics.memoryPercent === null) return 'node has no memory pressure telemetry';
   if (metrics.diskPercent === null) return 'node has no disk pressure telemetry';
-  if (metrics.cpuPercent !== null && metrics.cpuPercent >= policy.cpuThresholdPercent) {
+  // CPU is compressible. With no workspace reservations, host bootstrap load
+  // cannot prove a co-tenant is saturated; the declared budget is the authority.
+  // Occupied nodes retain this backstop against under-declared workload bursts.
+  // Deployment-role admission has its own SQL policy and retains its CPU ceiling.
+  if (
+    enforceCpuSaturation &&
+    metrics.cpuPercent !== null &&
+    metrics.cpuPercent >= policy.cpuThresholdPercent
+  ) {
     return 'CPU saturation ceiling reached';
   }
   if (metrics.diskPercent >= policy.diskPressureThresholdPercent) {
@@ -428,8 +438,6 @@ function measuredAdmissionDiagnostic(
   // a ranking preference instead (`startupBacklog`, `compareReusableHosts`).
   return null;
 }
-
-
 
 function nonNegativeNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
