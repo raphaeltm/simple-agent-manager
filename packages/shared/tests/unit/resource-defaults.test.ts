@@ -230,6 +230,69 @@ describe('resolveResourceReservation', () => {
     }
   });
 
+  it('keeps a default-only reservation nonzero and within the smallest Hetzner VM disk', () => {
+    const result = resolveResourceReservation({});
+    expect(result).toMatchObject({ cpuMillis: 2000, memoryMb: 4096, diskMb: 15 * 1024 });
+    expect(selectVmSizeForRequirements(PLATFORM_RESOURCE_DEFAULTS, 'hetzner')).toBe('small');
+  });
+
+  it('does not inflate explicit CPU/RAM with a lower legacy profile disk', () => {
+    const result = resolveResourceReservation(
+      { task: { minVcpu: 0.2, minMemoryGb: 0.5 } },
+      { taskId: 'small-task', agentProfileId: 'medium-profile' },
+      { legacyVmSizes: { 'agent-profile': 'medium', project: 'large' } }
+    );
+    expect(result).toMatchObject({ cpuMillis: 200, memoryMb: 512, diskMb: 15 * 1024 });
+    expect(result.fieldProvenance?.minDiskGb).toEqual({
+      source: 'platform',
+      sourceId: 'platform',
+      value: 15,
+    });
+    expect(result.fieldProvenance?.minVcpu?.source).toBe('task');
+  });
+
+  it.each([undefined, {}])('keeps a legacy profile when task fields are absent: %j', (task) => {
+    const result = resolveResourceReservation(
+      { task },
+      {},
+      { legacyVmSizes: { 'agent-profile': 'medium' } }
+    );
+    expect(result).toMatchObject({ cpuMillis: 2000, memoryMb: 3712, diskMb: 40960 });
+    expect(result.fieldProvenance?.minDiskGb?.compatibility?.legacyVmSize).toBe('medium');
+  });
+
+  it('preserves explicit inherited disk and zero/false task overrides over legacy sizes', () => {
+    const options = { legacyVmSizes: { 'agent-profile': 'medium' as const } };
+    const input = {
+      task: { minVcpu: 0.2, minMemoryGb: 0.5 },
+      agentProfile: { minDiskGb: 60, exclusiveNode: true },
+    };
+    expect(resolveResourceReservation(input, {}, options)).toMatchObject({
+      diskMb: 61440,
+      exclusiveNode: true,
+    });
+    expect(
+      resolveResourceReservation(
+        { ...input, task: { ...input.task, minDiskGb: 0, exclusiveNode: false } },
+        {},
+        options
+      )
+    ).toMatchObject({ diskMb: 0, exclusiveNode: false });
+  });
+
+  it('honors configured platform disk after suppressing a lower legacy size', () => {
+    const result = resolveResourceReservation(
+      { task: { minVcpu: 0.2, minMemoryGb: 0.5 } },
+      {},
+      {
+        legacyVmSizes: { 'agent-profile': 'medium' },
+        platformDefaults: { ...PLATFORM_RESOURCE_DEFAULTS, minDiskGb: 7 },
+      }
+    );
+    expect(result).toMatchObject({ cpuMillis: 200, memoryMb: 512, diskMb: 7168 });
+    expect(result.fieldProvenance?.minDiskGb?.source).toBe('platform');
+  });
+
   it('keeps modern fields authoritative over legacy values within the same layer', () => {
     const result = resolveResourceReservation(
       { task: { minMemoryGb: 12 } },

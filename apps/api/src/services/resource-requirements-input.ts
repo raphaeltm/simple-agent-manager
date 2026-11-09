@@ -238,6 +238,12 @@ export function createPersistedTaskResourcePlanJson(input: {
   return JSON.stringify(plan);
 }
 
+/**
+ * Recover authored resource intent from the versioned plan or older task rows.
+ * Compatibility provenance restores a legacy bundle separately from modern
+ * fields, so a later task override can supersede it. The original reservation
+ * is retained for callers performing a no-op retry or runtime recovery.
+ */
 export function readPersistedTaskResourcePlan(
   input: PersistedTaskResourcePlanReadInput,
   options: PersistedTaskResourcePlanReadOptions = {}
@@ -266,11 +272,16 @@ export function readPersistedTaskResourcePlan(
   const legacyJson = parseLegacyResourceRequirementsJson(input, options, legacyJsonSource);
   const resolvedReservation = parseStoredResolvedReservationJson(input.resolvedReservationJson);
   if (resolvedReservation?.fieldProvenance) {
+    // Older rows have no intent plan. Recover the legacy bundle separately,
+    // rather than promoting adapter output into explicitly authored fields.
+    const legacyField = Object.values(resolvedReservation.fieldProvenance).find(
+      (field) => field?.compatibility !== undefined
+    );
     return {
       layers: layersFromReservationProvenance(resolvedReservation),
       resolvedReservation,
-      requestedVmSize,
-      requestedVmSizeSource,
+      requestedVmSize: requestedVmSize ?? legacyField?.compatibility?.legacyVmSize ?? null,
+      requestedVmSizeSource: requestedVmSizeSource ?? legacyField?.source ?? null,
       source: 'reservation-provenance',
     };
   }
@@ -542,6 +553,11 @@ function normalizeReservationFieldCompatibility(
   };
 }
 
+/**
+ * Reconstruct only explicitly authored fields from historical provenance.
+ * Legacy adapter fields are recovered as a bundle by the plan reader; treating
+ * those translated values as explicit would prevent modern sizing overrides.
+ */
 function layersFromReservationProvenance(
   reservation: ResolvedResourceReservation
 ): ResourceResolutionInput {
@@ -551,7 +567,7 @@ function layersFromReservationProvenance(
 
   for (const field of RESOURCE_REQUIREMENT_FIELDS) {
     const fieldProvenance = provenance[field];
-    if (!fieldProvenance) continue;
+    if (!fieldProvenance || fieldProvenance.compatibility) continue;
     const layer = SOURCE_TO_RESOURCE_LAYER[fieldProvenance.source];
     if (!layer) continue;
     const nextLayer = (layers[layer] ?? {}) as ResourceRequirements;
