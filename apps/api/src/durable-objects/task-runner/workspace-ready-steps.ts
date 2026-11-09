@@ -87,6 +87,14 @@ export async function handleWorkspaceReady(
       permanent: true,
     });
   }
+  // Any other state (stopped, stopping, deleted, ...) means this start is over without becoming
+  // ready. Exit here rather than wait: the expiry claim below only acts on 'creating', so a
+  // non-creating row would otherwise lose it on every poll and re-poll forever.
+  if (wsRow.status !== 'creating') {
+    throw Object.assign(new Error(`Workspace became ${wsRow.status} before it was ready`), {
+      permanent: true,
+    });
+  }
 
   // Check timeout. The build budget runs from the durable build start; before it, the attempt
   // waits for the node's build slot on the queue budget.

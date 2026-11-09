@@ -257,6 +257,10 @@ F7 tests:
   withholds the verdict for that pass only. Real-sweep test: an injected probe failure leaves both a
   valid and an expired task delegated, and the next conclusive pass fails only the expired one.
   Proven red when unknown is treated as not_starting.
+- Parent review of `9a4ff5b41`: a fresh non-creating, non-ready row (stopped, stopping, deleted)
+  made the expiry claim lose on every poll, re-polling forever. The step now exits with a permanent
+  error on any status other than creating/running/recovery/error. A lost claim's single re-poll lands
+  there. Tests for each status and for lost-claim-then-stopped; proven red with the branch removed.
 - A late previous-attempt build-start is fenced once #2598 lands: its restart rotates
   `workspaces.callback_generation` and `verifyCallbackToken` rejects the old runtime's token, which
   the build-started route already calls. Migration renumbered to 0229 because #2598 owns 0228.

@@ -169,6 +169,41 @@ describe('workspace_ready deadline', () => {
     expect(second.advanceToStep).toHaveBeenCalledWith(expect.anything(), 'agent_session');
   });
 
+  it.each(['stopped', 'stopping', 'deleted'])(
+    'exits on a %s workspace instead of re-polling it forever',
+    async (status) => {
+      seedWorkspace({ createdAt: ago(61), creatingStartedAt: ago(61) });
+      sqlite.prepare('UPDATE workspaces SET status = ? WHERE id = ?').run(status, 'ws-1');
+      const { rc, setAlarm } = context();
+
+      await expect(handleWorkspaceReady(freshState(), rc)).rejects.toMatchObject({
+        message: `Workspace became ${status} before it was ready`,
+        permanent: true,
+      });
+      expect(setAlarm).not.toHaveBeenCalled();
+      // The step does not touch a row it does not own the transition of.
+      expect(workspaceRow().status).toBe(status);
+    }
+  );
+
+  it('re-polls once after a lost claim, then exits when the row was stopped meanwhile', async () => {
+    seedWorkspace({ createdAt: ago(61), creatingStartedAt: ago(61) });
+    const first = context({
+      betweenReadAndDecision: () => {
+        sqlite.prepare("UPDATE workspaces SET status = 'stopped' WHERE id = 'ws-1'").run();
+      },
+    });
+    await expect(handleWorkspaceReady(freshState(), first.rc)).resolves.toBeUndefined();
+    expect(first.setAlarm).toHaveBeenCalledOnce();
+
+    const second = context();
+    await expect(handleWorkspaceReady(freshState(), second.rc)).rejects.toMatchObject({
+      message: 'Workspace became stopped before it was ready',
+      permanent: true,
+    });
+    expect(second.setAlarm).not.toHaveBeenCalled();
+  });
+
   it('does not expire the workspace when recovery authority was revoked', async () => {
     seedWorkspace({ createdAt: ago(61), creatingStartedAt: ago(61) });
     const { rc, assertRecoveryAuthority } = context();
