@@ -170,14 +170,29 @@
     }
   },
   "go": {
-    "golang.org/x/vuln/cmd/govulncheck": {
-      "registryUrl": "https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck",
-      "necessity": "Pins the official govulncheck CLI used by the diff-local Go vulnerability gate."
+    "github.com/compose-spec/compose-go/v2": {
+      "registryUrl": "https://pkg.go.dev/github.com/compose-spec/compose-go/v2",
+      "homepageUrl": "https://github.com/compose-spec/compose-go",
+      "necessity": "Loads Docker Compose discovery, overrides and interpolation without a Docker daemon."
+    },
+    "github.com/klauspost/compress": {
+      "registryUrl": "https://pkg.go.dev/github.com/klauspost/compress",
+      "homepageUrl": "https://github.com/klauspost/compress",
+      "necessity": "Streams portable zstd build-context bundles without an external compression binary."
+    },
+    "github.com/moby/patternmatcher": {
+      "registryUrl": "https://pkg.go.dev/github.com/moby/patternmatcher",
+      "homepageUrl": "https://github.com/moby/patternmatcher",
+      "necessity": "Applies Docker documented ignore matching with conservative context inclusion."
     },
     "golang.org/x/sys": {
       "registryUrl": "https://pkg.go.dev/golang.org/x/sys",
       "homepageUrl": "https://go.googlesource.com/sys",
       "necessity": "Uses unix.Openat and unix.Mkdirat for pinned-directory workspace ownership initialization without symlink traversal on Linux and Darwin. Promotes the existing pinned v0.48.0 indirect module to direct use; no version or resolved module change."
+    },
+    "golang.org/x/vuln/cmd/govulncheck": {
+      "registryUrl": "https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck",
+      "necessity": "Pins the official govulncheck CLI used by the diff-local Go vulnerability gate."
     }
   }
 }
