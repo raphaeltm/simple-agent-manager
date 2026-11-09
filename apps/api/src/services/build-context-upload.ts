@@ -1,9 +1,10 @@
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+
 import type { Env } from '../env';
-import { getS3Client } from './compose-image-artifacts';
 import type { BuildContextDescriptor, BuildContextOwner } from './build-context-state';
 import { buildContextKey } from './build-context-state';
+import { getS3Client } from './compose-image-artifacts';
 
 /** Only job-derived keys are signed. Metadata binds the uploaded object to the
  * digest declared before upload; builders must still hash bytes after download. */

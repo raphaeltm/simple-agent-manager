@@ -18,13 +18,14 @@ import (
 // those reads with /dev/null, while keeping original project directories. The
 // bundle always contains the original YAML and empty original env-file paths.
 type localLoader struct {
-	p              *collectionPlan
-	max, readBytes int64
-	temp           string
-	env            map[string]string
-	staged         map[string]string
-	originals      map[string]string
-	visiting       map[string]bool
+	p                           *collectionPlan
+	max, readBytes              int64
+	expandedBytes, encodedBytes int64
+	temp                        string
+	env                         map[string]string
+	staged                      map[string]string
+	originals                   map[string]string
+	visiting                    map[string]bool
 }
 
 func (l *localLoader) Accept(string) bool { return true }
@@ -78,7 +79,7 @@ func (l *localLoader) stage(ctx context.Context, path, base string) (string, err
 	defer delete(l.visiting, key)
 	var sanitized bytes.Buffer
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	encoder := yaml.NewEncoder(&sanitized)
+	encoder := yaml.NewEncoder(&graphWriter{ctx: ctx, l: l, w: &sanitized})
 	for {
 		var doc yaml.Node
 		if err := decoder.Decode(&doc); err == io.EOF {
@@ -86,7 +87,7 @@ func (l *localLoader) stage(ctx context.Context, path, base string) (string, err
 		} else if err != nil {
 			return "", fmt.Errorf("parse Compose file %s: %w", path, err)
 		}
-		expanded, err := expandYAML(ctx, &doc, map[*yaml.Node]bool{}, new(int64), l.max)
+		expanded, err := expandYAML(ctx, &doc, map[*yaml.Node]bool{}, &l.expandedBytes, l.max)
 		if err != nil {
 			return "", err
 		}
@@ -324,4 +325,22 @@ func expandYAML(ctx context.Context, n *yaml.Node, stack map[*yaml.Node]bool, us
 	}
 	clone.Content = content
 	return &clone, nil
+}
+
+type graphWriter struct {
+	ctx context.Context
+	l   *localLoader
+	w   io.Writer
+}
+
+func (w *graphWriter) Write(p []byte) (int, error) {
+	if err := w.ctx.Err(); err != nil {
+		return 0, err
+	}
+	if int64(len(p)) > w.l.max-w.l.encodedBytes {
+		return 0, fmt.Errorf("sanitized Compose graph exceeds maximum %d bytes", w.l.max)
+	}
+	n, err := w.w.Write(p)
+	w.l.encodedBytes += int64(n)
+	return n, err
 }

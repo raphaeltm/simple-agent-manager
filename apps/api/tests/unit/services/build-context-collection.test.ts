@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { Env } from '../../../src/env';
+
 import type { DeploymentPublishJobRow } from '../../../src/db/schema';
+import type { Env } from '../../../src/env';
 const fetch = vi.hoisted(() => vi.fn());
 vi.mock('../../../src/services/node-agent', () => ({ fetchNodeAgent: fetch }));
 vi.mock('../../../src/services/jwt', () => ({

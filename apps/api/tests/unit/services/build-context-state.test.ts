@@ -1,10 +1,11 @@
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
 import * as schema from '../../../src/db/schema';
 import {
-  reserveBuildContext,
   completeBuildContext,
+  reserveBuildContext,
 } from '../../../src/services/build-context-state';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 let sqlite: Database.Database;

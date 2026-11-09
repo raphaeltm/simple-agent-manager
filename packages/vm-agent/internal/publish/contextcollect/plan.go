@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/compose-spec/compose-go/v2/cli"
 	"github.com/compose-spec/compose-go/v2/loader"
+	"github.com/compose-spec/compose-go/v2/types"
 	"github.com/moby/patternmatcher"
 	"github.com/moby/patternmatcher/ignorefile"
 	"os"
@@ -72,39 +73,23 @@ func makePlan(ctx context.Context, opts Options) (*collectionPlan, error) {
 	if err := p.markEmpty(filepath.Join(opts.Root, ".env")); err != nil {
 		return nil, err
 	}
+
 	for _, service := range project.AllServices() {
-		for _, file := range service.EnvFiles {
-			path := file.Path
-			if !filepath.IsAbs(path) {
-				path = filepath.Join(project.WorkingDir, path)
-			}
-			if err := validatePath(opts.Root, path); err != nil {
-				return nil, err
-			}
-			if err := p.markEmpty(path); err != nil {
-				return nil, err
-			}
-		}
-		if service.Build == nil {
-			continue
-		}
-		b := service.Build
-		encoded, err := json.Marshal(b)
-		if err != nil {
+		if err := p.addSpec(service.Name, service.ContainerSpec, service.Build, project.WorkingDir, opts.MaxBytes); err != nil {
 			return nil, err
 		}
-		if strings.Contains(string(encoded), SecretPlaceholder) || strings.Contains(service.Image, SecretPlaceholder) {
-			return nil, fmt.Errorf("service %s uses a runtime secret in build/image fields; use non-secret build config", service.Name)
-		}
-		if err := p.addContext(b.Context, b.Dockerfile, opts.MaxBytes); err != nil {
-			return nil, fmt.Errorf("service %s: %w", service.Name, err)
-		}
-		for name, path := range b.AdditionalContexts {
-			if err := p.addContext(path, "", opts.MaxBytes); err != nil {
-				return nil, fmt.Errorf("service %s additional_context %s: %w", service.Name, name, err)
+		for _, hook := range service.PreStart {
+			if err := p.addSpec(service.Name+" pre_start", hook.ContainerSpec, nil, project.WorkingDir, opts.MaxBytes); err != nil {
+				return nil, err
 			}
 		}
 	}
+	for _, job := range project.AllJobs() {
+		if err := p.addSpec(job.Name, job.ContainerSpec, job.Build, project.WorkingDir, opts.MaxBytes); err != nil {
+			return nil, err
+		}
+	}
+
 	for _, s := range project.Secrets {
 		if s.File != "" {
 			if err := validatePath(opts.Root, s.File); err != nil {
@@ -115,16 +100,15 @@ func makePlan(ctx context.Context, opts Options) (*collectionPlan, error) {
 			}
 		}
 	}
-	for _, s := range project.Configs {
-		if s.File != "" {
-			if err := validatePath(opts.Root, s.File); err != nil {
-				return nil, err
-			}
-			if err := p.markEmpty(s.File); err != nil {
+	// Ordinary Compose configs can also be Docker COPY inputs; preserve bytes.
+	for _, config := range project.Configs {
+		if config.File != "" {
+			if err := p.force(config.File, opts.MaxBytes); err != nil {
 				return nil, err
 			}
 		}
 	}
+
 	return p, nil
 }
 func (p *collectionPlan) force(path string, max int64) error {
@@ -309,4 +293,35 @@ func (p *collectionPlan) isSensitive(path string, info os.FileInfo) bool {
 		}
 	}
 	return false
+}
+
+func (p *collectionPlan) addSpec(name string, spec types.ContainerSpec, b *types.BuildConfig, base string, max int64) error {
+	for _, file := range spec.EnvFiles {
+		path := file.Path
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(base, path)
+		}
+		if err := p.markEmpty(path); err != nil {
+			return err
+		}
+	}
+	if b == nil {
+		return nil
+	}
+	encoded, err := json.Marshal(b)
+	if err != nil {
+		return err
+	}
+	if strings.Contains(string(encoded), SecretPlaceholder) || strings.Contains(spec.Image, SecretPlaceholder) {
+		return fmt.Errorf("service/job %s uses a runtime secret in build/image fields; use non-secret build config", name)
+	}
+	if err := p.addContext(b.Context, b.Dockerfile, max); err != nil {
+		return fmt.Errorf("service/job %s: %w", name, err)
+	}
+	for key, path := range b.AdditionalContexts {
+		if err := p.addContext(path, "", max); err != nil {
+			return fmt.Errorf("service/job %s additional_context %s: %w", name, key, err)
+		}
+	}
+	return nil
 }

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"github.com/klauspost/compress/zstd"
 	"io"
+	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -38,8 +39,8 @@ func TestBuildContextCollectRouteBothRuntimesLarge(t *testing.T) {
 				t.Fatal(err)
 			}
 			payload := make([]byte, 3*1024*1024+7)
-			for i := range payload {
-				payload[i] = byte(i * 31)
+			if _, err := rand.New(rand.NewSource(42)).Read(payload); err != nil {
+				t.Fatal(err)
 			}
 			for name, body := range map[string][]byte{"compose.yaml": []byte("services:\n  web:\n    build: .\n    env_file: runtime.env\n"), "Dockerfile": []byte("FROM scratch\nCOPY payload /payload\n"), "payload": payload, "runtime.env": []byte("PASSWORD=never-include-this")} {
 				if err := os.WriteFile(filepath.Join(root, name), body, 0600); err != nil {
@@ -124,6 +125,9 @@ func TestBuildContextCollectRouteBothRuntimesLarge(t *testing.T) {
 			}
 			mu.Lock()
 			defer mu.Unlock()
+			if len(uploaded) < 1024*1024 {
+				t.Fatal("test must exercise a multi-buffer compressed upload")
+			}
 			if !completed {
 				t.Fatal("no completion")
 			}

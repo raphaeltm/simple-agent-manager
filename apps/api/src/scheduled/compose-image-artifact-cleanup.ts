@@ -1,4 +1,3 @@
-import { runBuildContextCleanup } from './build-context-cleanup';
 /**
  * Compose image artifact cleanup.
  *
@@ -9,6 +8,7 @@ import { runBuildContextCleanup } from './build-context-cleanup';
 import type { Env } from '../env';
 import { createModuleLogger } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
+import { runBuildContextCleanup } from './build-context-cleanup';
 
 const log = createModuleLogger('compose-image-artifact-cleanup');
 

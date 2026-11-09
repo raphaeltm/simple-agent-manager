@@ -30,6 +30,9 @@ export async function runBuildContextCleanup(env: Env, now: Date = new Date()) {
       limit: Number(await resolveAdminSetting(env, 'deployments.buildContextCleanupPageSize')),
     });
     for (const object of page.objects) {
+      // Keep the current page cursor on budget exhaustion. Re-listing that
+      // page next time is safe: deleted objects vanish, retained ones stay.
+      if (Date.now() >= deadline) return { scanned, deleted, bytes };
       scanned++;
       if (
         !protectedKeys.has(object.key) &&

@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -207,10 +208,10 @@ func TestSecretBuildReferenceRejected(t *testing.T) {
 		t.Fatal("accepted secret build argument")
 	}
 }
-func TestRuntimeSecretAndConfigFilesEmpty(t *testing.T) {
+func TestRuntimeSecretsEmptyAndOrdinaryConfigsPreserved(t *testing.T) {
 	root := fixture(t, map[string]string{"compose.yaml": "services:\n  web:\n    build: .\n    secrets: [runtime]\nsecrets:\n  runtime:\n    file: ./secret.txt\nconfigs:\n  settings:\n    file: ./config.txt\n", "Dockerfile": "FROM scratch\n", "secret.txt": "must-never-leak", "config.txt": "also-private"})
 	files := bundle(t, root)
-	if files["secret.txt"] != "" || files["config.txt"] != "" {
+	if files["secret.txt"] != "" || files["config.txt"] != "also-private" {
 		t.Fatal("runtime credentials leaked")
 	}
 }
@@ -298,4 +299,41 @@ func TestDanglingEscapingSymlink(t *testing.T) {
 	if _, err := Collect(context.Background(), Options{Root: root}, io.Discard); err == nil {
 		t.Fatal("dangling escaping symlink accepted")
 	}
+}
+func TestHooksAndJobsRuntimeFiles(t *testing.T) {
+	root := fixture(t, map[string]string{"compose.yaml": "services:\n  web:\n    build: .\n    pre_start:\n      - image: alpine\n        env_file: hook.env\njobs:\n  task:\n    triggers:\n      manual: true\n    build: ./task\n    env_file: job.env\n", "Dockerfile": "FROM scratch\n", "task/Dockerfile": "FROM scratch\n", "task/source": "yes", "hook.env": "PASSWORD=hook-secret", "job.env": "PASSWORD=job-secret"})
+	files := bundle(t, root)
+	if files["task/source"] != "yes" {
+		t.Fatal("job build context missing")
+	}
+	for name, value := range files {
+		if strings.Contains(value, "PASSWORD=") {
+			t.Fatal("runtime hook/job file leaked", name)
+		}
+	}
+}
+
+// Explicit throughput probe, excluded from routine CI to avoid creating 1.5 GiB
+// per run. It exercises the probable 100k-file monorepo in one collection pass.
+func TestCollectMonorepoScale(t *testing.T) {
+	if os.Getenv("SAM_CONTEXT_SCALE_TEST") != "1" {
+		t.Skip("set SAM_CONTEXT_SCALE_TEST=1 for bounded 100k-file/1.5GiB throughput probe")
+	}
+	root := fixture(t, map[string]string{"compose.yaml": "services:\n  web:\n    build: .\n", "Dockerfile": "FROM scratch\n"})
+	dir := filepath.Join(root, "files")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	payload := bytes.Repeat([]byte("portable-context"), 1000)
+	for i := 0; i < 100000; i++ {
+		if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("%06d", i)), payload, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	start := time.Now()
+	result, err := Collect(context.Background(), Options{Root: root}, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("100000 files, %d payload bytes, %d compressed bytes, collection %s (reported %dms)", 100000*len(payload), result.Bytes, time.Since(start), result.DurationMs)
 }

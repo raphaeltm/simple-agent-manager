@@ -1,5 +1,6 @@
-import Database from 'better-sqlite3';
 import { readFileSync } from 'node:fs';
+
+import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 const migration = (name: string) =>
   readFileSync(new URL(`../../../src/db/migrations/${name}`, import.meta.url), 'utf8');

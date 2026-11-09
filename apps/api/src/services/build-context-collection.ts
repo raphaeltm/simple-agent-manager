@@ -1,9 +1,9 @@
+import type { DeploymentPublishJobRow } from '../db/schema';
 import type { Env } from '../env';
-import { fetchNodeAgent } from './node-agent';
-import { signNodeManagementToken } from './jwt';
 import { vmAgentUrlForPath } from '../routes/mcp/workspace-tools';
 import { resolveAdminSetting } from './admin-settings';
-import type { DeploymentPublishJobRow } from '../db/schema';
+import { signNodeManagementToken } from './jwt';
+import { fetchNodeAgent } from './node-agent';
 
 /** Phase-2 primitive only. Executor selection and dispatch are phase 3. A 404
  * is capability absence, never success or permission to silently switch an
