@@ -169,9 +169,10 @@ export function ChoosePathWizard() {
     const lastAnsweredId = questionHistory.at(-1);
     if (!lastAnsweredId) return;
     const lastAnswer = answers[lastAnsweredId];
-    const lastOption = questions
-      .find((q) => q.id === lastAnsweredId)
-      ?.options.find((o) => o.id === lastAnswer);
+    // The unfiltered graph: the answered option is found even if the filter changed since.
+    const lastOption = QUESTIONS.find((q) => q.id === lastAnsweredId)?.options.find(
+      (o) => o.id === lastAnswer
+    );
 
     const newAnswers = { ...answers };
     delete newAnswers[lastAnsweredId];
