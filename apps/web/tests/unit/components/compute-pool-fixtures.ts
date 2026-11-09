@@ -263,4 +263,3 @@ export function response(
 }
 
 export const LONG_SKU = 'long-provider-native-sku-name-that-needs-to-wrap-cleanly-catalog-only';
-
