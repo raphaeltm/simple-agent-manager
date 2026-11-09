@@ -123,12 +123,19 @@ the Instant stale-callback heuristic (now redundant for claimed tokens; kept as 
 
 ## Acceptance Criteria
 
-- [ ] Credential captured for incarnation A is refused after A stops/sleeps/is replaced and the same workspace ID runs as B, at secret, AI-proxy, state and node sinks, and for MCP (`/mcp`, webhook claims, deployment identity)
-- [ ] B's credentials work, including renewal and ordinary in-process token renewal of B
-- [ ] Shutdown/telemetry callbacks of A keep working until B starts
-- [ ] Old VM agents fail closed on restart with a clear message; old APIs keep working with new agents
-- [ ] Independent adversarial reviewer actively tried to reuse A after B starts
-- [ ] Staging: old-token rejection and woken-agent functionality on Instant wake and VM restart
+- [x] Credential captured for incarnation A is refused after A stops/sleeps/is replaced and the same workspace ID runs as B, at secret, AI-proxy, state and node sinks, and for MCP (`/mcp`, webhook claims, deployment identity)
+- [x] B's credentials work, including renewal and ordinary in-process token renewal of B
+- [x] Shutdown/telemetry callbacks of A keep working until B starts
+- [x] Old VM agents fail closed on restart with a clear message; old APIs keep working with new agents
+- [x] Independent adversarial reviewer actively tried to reuse A after B starts
+- [x] Staging: old-token rejection and woken-agent functionality on Instant wake and VM restart
+
+## Verification Evidence (2026-11-09)
+
+- Staging Instant wake (run 42545742237): A's MCP token 200 → 401 (asleep) → 401 and revoked after B woke; B's token worked and the woken agent answered via SAM MCP.
+- Staging VM (run 42561330813 @ f0dea3c99, cx23 node 01M6Z9J5RX1TGD7CGJ66AVM056): rebuild rotated the generation, A 401, the exchanged token 200, and the agent (restarted in place) answered a follow-up while the task stayed in progress. The earlier version, which stopped session hosts, failed the task with `task_agent_host_stopped`; fixed in e3087e697. Stop/restart twice: each restart rotated the generation, every earlier generation's token got 401 while the workspace was running, and the current generation's tokens returned 200.
+- Not changed by this PR: a manual Stop ends the task's chat; a follow-up after Restart is never delivered (SAM Idea 01M6ZARM2D9DXFCP759C356H7N).
+- Security re-verification of the in-place restart: MED intentional-stop flag fixed in f0dea3c99 and re-verified PASS; LOW pkill descendants → SAM Idea 01M6Z7K63N2E24A1KZZ2CV7BTX.
 
 ## References
 - PR #2590, `tasks/archive/2026-11-08-harden-workspace-credential-revocation.md`
