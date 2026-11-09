@@ -16,13 +16,50 @@ const inputClassName =
   'sam-well min-h-12 w-full rounded-[var(--sam-radius-control)] border-0 bg-transparent px-3.5 py-2.5 text-base text-fg-primary placeholder:text-fg-muted focus:outline focus:outline-2 focus:outline-[var(--sam-color-focus-ring)]';
 
 /**
+ * The address a code was just sent to, kept for this tab only. Phone browsers can reload a
+ * background tab while the visitor reads the code in their mail app; without this they come
+ * back to an empty address form. Holds no secret: the code itself is never stored.
+ */
+const PENDING_CODE_KEY = 'sam:email-sign-in:pending';
+/** Codes expire after 5 minutes server-side (`email-sign-in.ts`); stop restoring after that. */
+const PENDING_CODE_TTL_MS = 5 * 60 * 1000;
+
+function readPendingCodeEmail(): string | null {
+  try {
+    const raw = window.sessionStorage.getItem(PENDING_CODE_KEY);
+    if (!raw) return null;
+    const pending = JSON.parse(raw) as { email?: unknown; sentAt?: unknown };
+    if (typeof pending.email !== 'string' || typeof pending.sentAt !== 'number') return null;
+    return Date.now() - pending.sentAt < PENDING_CODE_TTL_MS ? pending.email : null;
+  } catch {
+    return null;
+  }
+}
+
+function writePendingCodeEmail(email: string | null) {
+  try {
+    if (email) {
+      window.sessionStorage.setItem(
+        PENDING_CODE_KEY,
+        JSON.stringify({ email, sentAt: Date.now() })
+      );
+    } else {
+      window.sessionStorage.removeItem(PENDING_CODE_KEY);
+    }
+  } catch {
+    // Storage can be unavailable (private mode); the form still works without it.
+  }
+}
+
+/**
  * Two steps: ask for an address, then for the six-digit code SAM emailed to it. The API answers
  * the same whether or not the address can sign in, so the form always moves to the code step.
  */
 export function EmailCodeSignIn({ initialEmail = '', primary, onSignedIn }: EmailCodeSignInProps) {
-  const [email, setEmail] = useState(initialEmail);
+  const [pendingEmail] = useState(readPendingCodeEmail);
+  const [email, setEmail] = useState(pendingEmail ?? initialEmail);
   const [code, setCode] = useState('');
-  const [stage, setStage] = useState<'email' | 'code'>('email');
+  const [stage, setStage] = useState<'email' | 'code'>(pendingEmail ? 'code' : 'email');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resent, setResent] = useState(false);
@@ -32,7 +69,9 @@ export function EmailCodeSignIn({ initialEmail = '', primary, onSignedIn }: Emai
     setError(null);
     setBusy(true);
     try {
-      await sendSignInCode(email.trim().toLowerCase());
+      const address = email.trim().toLowerCase();
+      await sendSignInCode(address);
+      writePendingCodeEmail(address);
       setResent(stage === 'code');
       setStage('code');
     } catch (err) {
@@ -48,6 +87,7 @@ export function EmailCodeSignIn({ initialEmail = '', primary, onSignedIn }: Emai
     setBusy(true);
     try {
       await signInWithEmailCode(email.trim().toLowerCase(), code.trim());
+      writePendingCodeEmail(null);
       onSignedIn();
     } catch {
       setError("That code didn't work. Check the latest email, or send a new code.");
@@ -98,6 +138,7 @@ export function EmailCodeSignIn({ initialEmail = '', primary, onSignedIn }: Emai
           <button
             type="button"
             onClick={() => {
+              writePendingCodeEmail(null);
               setStage('email');
               setCode('');
               setError(null);
