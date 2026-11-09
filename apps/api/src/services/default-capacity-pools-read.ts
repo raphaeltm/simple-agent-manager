@@ -3,6 +3,7 @@ import type { SafeEffectiveCapacityPoolSummary } from '@simple-agent-manager/sha
 import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
 import { effectiveDefaultCapacityPoolScopeChain } from './capacity-pool-precedence';
+import { toSafeEffectiveCapacityPoolSummary } from './default-capacity-pool-safe-summary';
 import { attachCapacitySourceLabels } from './default-capacity-pool-source-labels';
 import {
   ACTIVE_STATUS,
@@ -13,11 +14,7 @@ import {
   resolveBackfillScopeBatchSize,
   writeBackfillCursor,
 } from './default-capacity-pool-storage';
-import {
-  findDefaultPool,
-  readDefaultPoolSummary,
-  toSafeEffectiveCapacityPoolSummary,
-} from './default-capacity-pool-summaries';
+import { findDefaultPool, readDefaultPoolSummary } from './default-capacity-pool-summaries';
 import {
   type CapacityPoolSummary,
   type CapacityPoolSummaryWorkloadRoles,

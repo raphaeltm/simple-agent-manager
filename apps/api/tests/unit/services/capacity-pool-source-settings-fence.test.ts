@@ -19,11 +19,11 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import { parseCapacityPoolExcludedSources } from '../../../src/services/capacity-pools';
+import { toSafeEffectiveCapacityPoolSummary } from '../../../src/services/default-capacity-pool-safe-summary';
 import {
   publishSourceSettingsOnly,
   resolveSourceSettingsUpdate,
 } from '../../../src/services/default-capacity-pool-source-settings';
-import { toSafeEffectiveCapacityPoolSummary } from '../../../src/services/default-capacity-pool-summaries';
 import { updateDefaultCapacityPool } from '../../../src/services/default-capacity-pool-updates';
 import {
   ensureDefaultCapacityPoolsForExistingCredentials,

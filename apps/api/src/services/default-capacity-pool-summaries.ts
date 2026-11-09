@@ -3,11 +3,7 @@ import type {
   CapacityPoolConfigurationState,
   CapacityPoolScope,
   CapacitySourceIdentity,
-  DefaultCapacityPoolEffectiveState,
-  SafeEffectiveCapacityPoolReason,
-  SafeEffectiveCapacityPoolSummary,
 } from '@simple-agent-manager/shared';
-import { isCapacitySourceExcluded, isValidProvider } from '@simple-agent-manager/shared';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 
 import * as schema from '../db/schema';
@@ -39,100 +35,6 @@ import {
 } from './default-capacity-pool-types';
 import { listManagedGcpCredentialMirrors } from './gcp-credential-mirrors';
 
-export function toSafeEffectiveCapacityPoolSummary(
-  summary: CapacityPoolSummary | null
-): SafeEffectiveCapacityPoolSummary {
-  if (!summary) {
-    return {
-      scope: null,
-      state: 'unconfigured',
-      strategy: null,
-      deploymentStrategy: null,
-      exhaustionPolicy: null,
-      availableCandidateCount: 0,
-      nativeOfferings: [],
-      reason: 'no-capacity-pool-configured',
-    };
-  }
-
-  const state = summary.effectiveState ?? 'configured-ready';
-  const activeSources = new Set(
-    summary.sources
-      .filter(
-        (source) =>
-          source.status === ACTIVE_STATUS &&
-          source.sourceKind === SOURCE_KIND_CLOUD_PROVIDER &&
-          !isCapacitySourceExcluded(summary.pool, source.id)
-      )
-      .map((source) => source.id)
-  );
-  const nativeOfferings: NonNullable<SafeEffectiveCapacityPoolSummary['nativeOfferings']> = [];
-  const seen = new Set<string>();
-  if (state === 'configured-ready') {
-    for (const candidate of summary.candidates) {
-      if (
-        candidate.status !== ACTIVE_STATUS ||
-        !activeSources.has(candidate.capacitySourceId) ||
-        candidate.workloadRole !== PRIMARY_CAPACITY_WORKLOAD_ROLE ||
-        candidate.runtime !== 'vm' ||
-        candidate.catalogAvailability !== 'available' ||
-        !candidate.providerInstanceCatalogSource ||
-        !candidate.provider ||
-        !isValidProvider(candidate.provider) ||
-        !candidate.location ||
-        !candidate.providerInstanceType
-      )
-        continue;
-      const key = JSON.stringify([
-        candidate.provider,
-        candidate.location,
-        candidate.providerInstanceType,
-      ]);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      nativeOfferings.push({
-        provider: candidate.provider,
-        location: candidate.location,
-        providerInstanceType: candidate.providerInstanceType,
-        displayName: candidate.providerInstanceDisplayName ?? candidate.providerInstanceType,
-        vcpu: candidate.providerInstanceVcpuCount,
-        memoryMb: candidate.providerInstanceMemoryMb,
-        diskGb: candidate.providerInstanceDiskGb,
-        price: candidate.providerInstancePriceDisplay,
-      });
-    }
-  }
-  return {
-    scope: summary.pool.scope,
-    state,
-    strategy: summary.pool.strategy,
-    deploymentStrategy: summary.pool.deploymentStrategy,
-    exhaustionPolicy: summary.pool.exhaustionPolicy,
-    availableCandidateCount: summary.availableCandidateCount ?? 0,
-    nativeOfferings,
-    reason: safeEffectiveReasonForState(state),
-  };
-}
-
-function safeEffectiveReasonForState(
-  state: DefaultCapacityPoolEffectiveState
-): SafeEffectiveCapacityPoolReason | undefined {
-  switch (state) {
-    case 'configured-ready':
-      return undefined;
-    case 'unconfigured':
-      return 'no-capacity-pool-configured';
-    case 'configured-empty':
-      return 'configured-default-pool-has-no-active-candidates';
-    case 'source-disabled':
-      return 'configured-default-pool-sources-disabled';
-    case 'catalog-unavailable':
-      return 'configured-default-pool-catalog-last-known-unavailable';
-    case 'migration-pending':
-      return 'configured-default-pool-migration-pending';
-  }
-}
-
 export async function findDefaultPool(
   db: Db,
   scope: ScopeIdentity
@@ -155,6 +57,13 @@ export interface ReconcileDefaultPoolStatusOptions {
   publicationComplete?: boolean;
 }
 
+/**
+ * Records the pool's persisted `configuration_state` from its candidates and sources. It does
+ * not read the switched-off accounts (`excluded_source_ids_json`): switching an account does not
+ * bump the revision or run this. Placement does not depend on that: the resolver
+ * (`isActiveCapacityPlacementOption`) and the authority SQL (placement-authority.ts) both skip
+ * switched-off accounts themselves, and summaries recompute the effective state on read.
+ */
 export async function reconcileDefaultPoolStatus(
   db: Db,
   poolId: string,
