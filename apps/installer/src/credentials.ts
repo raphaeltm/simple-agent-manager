@@ -129,13 +129,14 @@ function resolveRequired(groups: PermissionGroup[], required: [string[], string]
     throw new Error(`Required account-token permission unavailable: ${[...problems].join(', ')}`);
   return [...notSelectable];
 }
+// An optional feature's groups are granted together or not at all: a partial grant (Read
+// without Write) cannot run the feature and would only widen the token.
 function availableOptional(groups: PermissionGroup[], names: string[], scope: string): string[] {
-  return names.filter(
-    (name) =>
-      groups.filter(
-        (group) => group.name === name && group.scopes?.includes(scope) && validId(group.id)
-      ).length === 1
-  );
+  const unique = (name: string) =>
+    groups.filter(
+      (group) => group.name === name && group.scopes?.includes(scope) && validId(group.id)
+    ).length === 1;
+  return names.every(unique) ? names : [];
 }
 function select(groups: PermissionGroup[], names: string[], scope: string): { id: string }[] {
   return names.map((name) => {

@@ -342,6 +342,15 @@ describe('optional Artifacts access for SAM-hosted repositories', () => {
     expect(deploymentPlans(f)[0]).toContain(`"${group('Workers Scripts Write').id}"`);
   });
 
+  it('leaves Artifacts out when the catalog lists a group ambiguously', async () => {
+    const duplicate = { ...group('Artifacts Write'), id: 'f'.repeat(32) };
+    const f = fixture(undefined, [...catalog, duplicate]);
+    await createInstallationCredentials('bootstrap-secret', config, installation);
+    const [deployment] = deploymentPlans(f);
+    for (const id of [...artifacts(), duplicate.id]) expect(deployment).not.toContain(`"${id}"`);
+    expect(deployment).toContain(`"${group('Workers Scripts Write').id}"`);
+  });
+
   it('retries the deployment token without Artifacts when Cloudflare refuses them', async () => {
     const f = fixture('refuses-artifacts');
     const credentials = await createInstallationCredentials(
