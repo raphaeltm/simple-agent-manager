@@ -436,6 +436,7 @@ describe('pool publication real SQL interleavings', () => {
       userId: 'user',
       includeInstallation: false,
       candidatePublishBatchSize: 1,
+      candidatePublishBudgetMs: 0,
       offeringResolver: async () => [offering()],
     };
     await ensureDefaultCapacityPoolsForExistingCredentials(db, options);
@@ -544,5 +545,193 @@ describe('pool publication real SQL interleavings', () => {
     expect(sqlite.prepare('SELECT count(*) n FROM capacity_pool_candidates').get()).toEqual({
       n: 0,
     });
+  });
+});
+
+describe('pool publication pass budget (incident 2026-11-09)', () => {
+  // 5 offerings x 2 workload roles = 10 rows; batch size 2 makes every count in the path smaller
+  // than the catalog, so only a multi-batch pass can finish it.
+  const catalog = () =>
+    Array.from({ length: 5 }, (_, index) => offering(`cx${index}3`, 10 + index));
+
+  function countingBatches(database: D1Database) {
+    const counter = { batches: 0 };
+    const counted: D1Database = {
+      ...database,
+      batch<T = unknown>(statements: D1PreparedStatement[]) {
+        counter.batches += 1;
+        return database.batch<T>(statements);
+      },
+    };
+    return { counter, counted };
+  }
+
+  function failingNthCandidateBatch(database: D1Database, failAt: number): D1Database {
+    const sqlOf = new WeakMap<object, string>();
+    let candidateBatches = 0;
+    const wrap = (statement: D1PreparedStatement, sql: string): D1PreparedStatement => {
+      const wrapped = new Proxy(statement, {
+        get(target, key) {
+          if (key === 'bind') return (...params: unknown[]) => wrap(target.bind(...params), sql);
+          if (key === 'run' || key === 'all' || key === 'raw' || key === 'first')
+            return (...args: unknown[]) => Reflect.apply(Reflect.get(target, key), target, args);
+          return Reflect.get(target, key);
+        },
+      });
+      sqlOf.set(wrapped, sql);
+      return wrapped;
+    };
+    return {
+      ...database,
+      prepare: (sql: string) => wrap(database.prepare(sql), sql),
+      batch<T = unknown>(statements: D1PreparedStatement[]) {
+        if (statements.some((s) => /INSERT INTO capacity_pool_candidates/.test(sqlOf.get(s) ?? ''))) {
+          candidateBatches += 1;
+          if (candidateBatches === failAt) {
+            return Promise.reject(new Error('D1_ERROR: simulated batch failure'));
+          }
+        }
+        return database.batch<T>(statements);
+      },
+    };
+  }
+
+  it('finishes an incomplete catalog in one pass while the deadline allows', async () => {
+    const { db } = fixture();
+    const store = cursorStore();
+    const result = await publish(db, catalog(), {
+      publishBatchSize: 2,
+      cursorStore: store,
+      publishDeadlineAt: Number.POSITIVE_INFINITY,
+    });
+    expect(result).toMatchObject({
+      totalCandidates: 10,
+      publishedCandidates: 10,
+      publicationComplete: true,
+      markedMissing: true,
+    });
+  });
+
+  it('stops at the deadline with a durable cursor, and the next pass resumes instead of restarting', async () => {
+    const { database } = fixture();
+    const store = cursorStore();
+    const { counter, counted } = countingBatches(database);
+    // The clock reads the number of batches written, so the deadline admits exactly two.
+    const first = await publish(drizzle(counted, { schema }), catalog(), {
+      publishBatchSize: 2,
+      cursorStore: store,
+      publishDeadlineAt: 2,
+      now: () => counter.batches,
+    });
+    expect(counter.batches).toBe(2);
+    expect(first).toMatchObject({ publishedCandidates: 4, publicationComplete: false });
+    expect(JSON.parse([...store.values.values()][0]!)).toMatchObject({
+      published: 4,
+      complete: false,
+    });
+
+    const second = await publish(drizzle(database, { schema }), catalog(), {
+      publishBatchSize: 2,
+      cursorStore: store,
+      publishDeadlineAt: Number.POSITIVE_INFINITY,
+    });
+    // Only the remaining 6 rows: progress resumed from the cursor.
+    expect(second).toMatchObject({ publishedCandidates: 6, publicationComplete: true });
+  });
+
+  it('a pass that dies mid-loop keeps the cursor at its last complete batch, and the next pass resumes there', async () => {
+    const { database } = fixture();
+    const store = cursorStore();
+    await expect(
+      publish(drizzle(failingNthCandidateBatch(database, 3), { schema }), catalog(), {
+        publishBatchSize: 2,
+        cursorStore: store,
+        publishDeadlineAt: Number.POSITIVE_INFINITY,
+      })
+    ).rejects.toThrow('simulated batch failure');
+    expect(JSON.parse([...store.values.values()][0]!)).toMatchObject({
+      published: 4,
+      complete: false,
+    });
+
+    const resumed = await publish(drizzle(database, { schema }), catalog(), {
+      publishBatchSize: 2,
+      cursorStore: store,
+      publishDeadlineAt: Number.POSITIVE_INFINITY,
+    });
+    expect(resumed).toMatchObject({ publishedCandidates: 6, publicationComplete: true });
+  });
+
+  it('marks offerings that left the catalog only after a multi-batch pass completes', async () => {
+    const { sqlite, db } = fixture();
+    const store = cursorStore();
+    await publish(db, [offering('cx99', 10)], { cursorStore: store });
+    sqlite.exec("UPDATE capacity_sources SET source_generation=2 WHERE id='source'");
+    const result = await publish(db, catalog(), {
+      sourceGeneration: 2,
+      publishBatchSize: 2,
+      cursorStore: store,
+      publishDeadlineAt: Number.POSITIVE_INFINITY,
+    });
+    expect(result).toMatchObject({ publishedCandidates: 10, markedMissing: true });
+    expect(
+      sqlite
+        .prepare(
+          "SELECT DISTINCT catalog_availability AS availability FROM capacity_pool_candidates WHERE provider_instance_type='cx99'"
+        )
+        .all()
+    ).toEqual([{ availability: 'last-known-unavailable' }]);
+  });
+
+  it('a past deadline writes exactly one batch per pass', async () => {
+    const { db } = fixture();
+    const store = cursorStore();
+    const result = await publish(db, catalog(), {
+      publishBatchSize: 2,
+      cursorStore: store,
+      publishDeadlineAt: 0,
+    });
+    expect(result).toMatchObject({ publishedCandidates: 2, publicationComplete: false });
+  });
+
+  it('keeps one batch per pass for a complete, unchanged catalog even with time left', async () => {
+    const { db } = fixture();
+    const store = cursorStore();
+    const options = {
+      publishBatchSize: 2,
+      cursorStore: store,
+      publishDeadlineAt: Number.POSITIVE_INFINITY,
+    };
+    expect(await publish(db, catalog(), options)).toMatchObject({
+      publishedCandidates: 10,
+      publicationComplete: true,
+    });
+    // Already placeable: the steady-state refresh keeps its round-robin cost.
+    expect(await publish(db, catalog(), options)).toMatchObject({
+      publishedCandidates: 2,
+      publicationComplete: true,
+    });
+  });
+
+  it('stops the loop when a newer publisher fences the batch, even with time left', async () => {
+    const { sqlite, database } = fixture();
+    const store = cursorStore();
+    const raced = beforeStatement(database, /INSERT INTO capacity_pool_candidates/, () => {
+      sqlite.exec("UPDATE capacity_sources SET source_generation=2 WHERE id='source'");
+    });
+    const { counter, counted } = countingBatches(raced);
+    let tick = 0;
+    const result = await publish(drizzle(counted, { schema }), catalog(), {
+      publishBatchSize: 2,
+      cursorStore: store,
+      // A finite horizon keeps a regression from spinning forever: without the fence check the
+      // loop would retry the same rejected slice until this runs out.
+      publishDeadlineAt: 50,
+      now: () => tick++,
+    });
+    expect(result).toMatchObject({ publishedCandidates: 0, publicationComplete: false });
+    // One candidate write batch plus its one verification read, nothing more.
+    expect(counter.batches).toBeLessThanOrEqual(2);
+    expect(JSON.parse([...store.values.values()][0]!).published).toBe(0);
   });
 });

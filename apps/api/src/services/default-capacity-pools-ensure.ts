@@ -2,11 +2,14 @@ import { DEFAULT_CAPACITY_POOL_DEPLOYMENT_STRATEGY } from '@simple-agent-manager
 import { and, eq } from 'drizzle-orm';
 
 import * as schema from '../db/schema';
+import { log, serializeError } from '../lib/logger';
+import { resolveAdminSetting } from './admin-settings';
 import { nextCapacityPoolTimestamp } from './capacity-pool-clock';
 import {
   DEFAULT_CAPACITY_POOL_CANDIDATE_PUBLISH_BATCH_SIZE,
   ensureCandidatesForSource,
 } from './default-capacity-pool-candidates';
+import { DEFAULT_CAPACITY_POOL_CANDIDATE_PUBLISH_BUDGET_MS } from './default-capacity-pool-candidates-common';
 import { composableAttachmentReference, defaultPoolId } from './default-capacity-pool-helpers';
 import {
   disableCapacitySourceAvailability,
@@ -194,6 +197,7 @@ export async function ensureDefaultPoolForCredentialSeeds(
   };
   const activeSeedKeys = new Set<string>();
   let publicationComplete = true;
+  const publishBudgetMs = await resolveCandidatePublishBudgetMs(options);
 
   const publications = await Promise.all(
     seeds.map(async (seed) => {
@@ -265,6 +269,8 @@ export async function ensureDefaultPoolForCredentialSeeds(
             catalogComplete:
               resolvedOfferings.refreshSucceeded && resolvedOfferings.catalogComplete !== false,
             publishBatchSize: resolveCandidatePublishBatchSize(options),
+            // Measured from publication start, so a slow catalog fetch cannot spend it.
+            publishDeadlineAt: Date.now() + publishBudgetMs,
             cursorStore: platformSettingsCursorStore(db, {
               sourceId: publication.source.id,
               generation: publication.generation,
@@ -367,6 +373,33 @@ export async function createDefaultPoolIfAbsent(
     throw new Error(`Failed to promote default capacity pool for ${input.scope}`);
   }
   return promotedPool;
+}
+
+/**
+ * Per-source publication budget for one pass: explicit option, then the admin setting, then
+ * the default. A settings outage must not stall publication, so it degrades to the default.
+ */
+export async function resolveCandidatePublishBudgetMs(
+  options: DefaultCapacityPoolsBackfillOptions
+): Promise<number> {
+  const valid = (value: unknown): value is number =>
+    typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+  if (options.candidatePublishBudgetMs !== undefined) {
+    return valid(options.candidatePublishBudgetMs)
+      ? options.candidatePublishBudgetMs
+      : DEFAULT_CAPACITY_POOL_CANDIDATE_PUBLISH_BUDGET_MS;
+  }
+  if (!options.env) return DEFAULT_CAPACITY_POOL_CANDIDATE_PUBLISH_BUDGET_MS;
+  try {
+    const configured = await resolveAdminSetting(
+      options.env,
+      'operations.capacityPoolPublishBudgetMs'
+    );
+    return valid(configured) ? configured : DEFAULT_CAPACITY_POOL_CANDIDATE_PUBLISH_BUDGET_MS;
+  } catch (error) {
+    log.warn('default_capacity_pools.publish_budget_setting_unavailable', serializeError(error));
+    return DEFAULT_CAPACITY_POOL_CANDIDATE_PUBLISH_BUDGET_MS;
+  }
 }
 
 export function resolveCandidatePublishBatchSize(

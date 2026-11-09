@@ -275,6 +275,10 @@ your decisions:
   supported, so a fresh pool works immediately.
 - A provider API failure during refresh is reported as a refresh error; SAM does not invent
   availability it could not confirm.
+- When a source's catalog changed, SAM writes the whole new catalog during that refresh, in batches,
+  for up to `operations.capacityPoolPublishBudgetMs` (20 seconds by default). Until it finishes the
+  pool shows as pending and cannot place new machines. A catalog too large for one refresh carries on
+  from where it stopped on the next one (`ensureCandidatesForSource()`).
 - **Starting work never refreshes the catalog.** Placement reads the pool as it stands, so a
   submission is never delayed by a provider API call and a deliberately emptied pool is never
   quietly repopulated. Refreshing happens when you press **Refresh** or change a credential — not

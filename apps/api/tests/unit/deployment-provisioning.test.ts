@@ -36,7 +36,9 @@ vi.mock('../../src/services/provisioning-authority', () => ({
   cleanupFreshProvisioningNode: mocks.cleanupFreshProvisioningNode,
 }));
 
-vi.mock('../../src/lib/logger', () => ({
+vi.mock('../../src/lib/logger', async (importOriginal) => ({
+  // Keep the rest of the real logger API (e.g. createModuleLogger used at module load).
+  ...(await importOriginal<typeof import('../../src/lib/logger')>()),
   log: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
   serializeError: vi.fn((e: unknown) => ({ error: String(e) })),
 }));
