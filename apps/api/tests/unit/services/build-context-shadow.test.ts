@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import type { McpTokenData } from '../../../src/routes/mcp/_helpers';
