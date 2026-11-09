@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   createProject: vi.fn(),
+  getAgentCredentialSetupConfig: vi.fn(),
   listGitHubInstallations: vi.fn(),
   listRepositories: vi.fn(),
 }));
@@ -12,6 +13,7 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   listGitHubInstallations: mocks.listGitHubInstallations,
   listRepositories: mocks.listRepositories,
+  getAgentCredentialSetupConfig: mocks.getAgentCredentialSetupConfig,
 }));
 
 vi.mock('../../../src/lib/api/projects', () => ({
@@ -119,27 +121,96 @@ describe('StepExecution project creation', () => {
 describe('StepExecution ai-setup step', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.getAgentCredentialSetupConfig.mockResolvedValue({
+      enabled: true,
+      agentTypes: ['openai-codex', 'claude-code'],
+    });
   });
 
-  it('renders all six catalog agents and reveals the API key input after selecting one', async () => {
+  function renderAiSetup() {
     render(
       <MemoryRouter>
         <StepExecution steps={[aiSetupStep]} onComplete={vi.fn()} />
       </MemoryRouter>
     );
+  }
 
-    for (const name of ['Claude Code', 'OpenAI Codex', 'Gemini CLI', 'Mistral Vibe', 'OpenCode', 'Amp']) {
+  it('renders all six catalog agents and reveals the API key input for an API-key-only agent', async () => {
+    renderAiSetup();
+
+    for (const name of [
+      'Claude Code',
+      'OpenAI Codex',
+      'Gemini CLI',
+      'Mistral Vibe',
+      'OpenCode',
+      'Amp',
+    ]) {
       expect(screen.getByRole('button', { name: new RegExp(name) })).toBeInTheDocument();
     }
 
     // No credential input until an agent is chosen.
     expect(document.querySelector('#onboarding-api-key')).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: /Claude Code/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Gemini CLI/ }));
 
     await waitFor(() => {
       expect(document.querySelector('#onboarding-api-key')).not.toBeNull();
     });
+  });
+
+  it.each([
+    ['Claude Code', 'Connect with Claude Code'],
+    ['OpenAI Codex', 'Connect with Codex'],
+  ])('offers the guided %s sign-in first, with paste as the fallback', async (agent, button) => {
+    renderAiSetup();
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(agent) }));
+
+    expect(await screen.findByRole('button', { name: button })).toBeInTheDocument();
+    expect(await screen.findByLabelText(/^Or paste/)).toBeInTheDocument();
+    expect(document.querySelector('#onboarding-api-key')).toBeNull();
+  });
+
+  it('falls back to pasting the subscription token where guided sign-in is unavailable', async () => {
+    mocks.getAgentCredentialSetupConfig.mockResolvedValue({ enabled: false });
+    renderAiSetup();
+    fireEvent.click(screen.getByRole('button', { name: /Claude Code/ }));
+
+    expect(await screen.findByLabelText('OAuth token')).toBeInTheDocument();
+    await waitFor(() => expect(mocks.getAgentCredentialSetupConfig).toHaveBeenCalled());
+    expect(screen.queryByRole('button', { name: 'Connect with Claude Code' })).toBeNull();
+  });
+});
+
+describe('StepExecution SAM-hosted project step', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.createProject.mockResolvedValue({ id: 'project-1' });
+  });
+
+  it('creates an Artifacts-backed project from just a name, without touching GitHub', async () => {
+    const onComplete = vi.fn();
+    render(
+      <MemoryRouter>
+        <StepExecution
+          steps={[{ ...projectStep, actionLabel: 'Create Project', hostedRepo: true }]}
+          onComplete={onComplete}
+        />
+      </MemoryRouter>
+    );
+
+    fireEvent.change(screen.getByLabelText('Project name'), { target: { value: 'my-app' } });
+    fireEvent.click(screen.getByRole('button', { name: /create project/i }));
+
+    await waitFor(() => {
+      expect(mocks.createProject).toHaveBeenCalledWith({
+        name: 'my-app',
+        repoProvider: 'artifacts',
+        defaultBranch: 'main',
+      });
+    });
+    await waitFor(() => expect(onComplete).toHaveBeenCalled());
+    expect(mocks.listGitHubInstallations).not.toHaveBeenCalled();
   });
 });
 

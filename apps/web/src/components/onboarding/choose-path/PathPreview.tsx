@@ -37,7 +37,9 @@ export function PathPreview({ steps, onStart, onReset }: PathPreviewProps) {
             <Clock size={12} /> {timeEstimate}
           </span>
           <span aria-hidden="true">|</span>
-          <span>{requiredSteps.length} step{requiredSteps.length !== 1 ? 's' : ''}</span>
+          <span>
+            {requiredSteps.length} step{requiredSteps.length !== 1 ? 's' : ''}
+          </span>
           {steps.length > requiredSteps.length && (
             <>
               <span aria-hidden="true">|</span>
@@ -50,34 +52,29 @@ export function PathPreview({ steps, onStart, onReset }: PathPreviewProps) {
       {/* Step list */}
       <div className="flex flex-col gap-3 mb-8">
         {steps.map((step) => (
-            <Card
-              key={step.id}
-              className={`p-4 ${step.isOptional ? 'opacity-60' : ''}`}
-            >
-              <div className="flex items-start gap-3">
-                <div
-                  className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
-                    step.isOptional
-                      ? 'bg-success/10 text-success'
-                      : 'bg-accent/20 text-accent'
-                  }`}
-                >
-                  {step.isOptional ? <Check size={12} /> : stepNumbers.get(step.id)}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-0.5">
-                    <span className="font-medium text-fg-primary text-sm">{step.title}</span>
-                    <span className="text-xs text-fg-muted">{step.timeEstimate}</span>
-                    {step.isOptional && (
-                      <span className="text-xs px-1.5 py-0.5 rounded bg-success/10 text-success">
-                        Handled
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-xs text-fg-muted">{step.description}</p>
-                </div>
+          <Card key={step.id} className={`p-4 ${step.isOptional ? 'opacity-60' : ''}`}>
+            <div className="flex items-start gap-3">
+              <div
+                className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
+                  step.isOptional ? 'bg-success/10 text-success' : 'bg-accent/20 text-accent'
+                }`}
+              >
+                {step.isOptional ? <Check size={12} /> : stepNumbers.get(step.id)}
               </div>
-            </Card>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-0.5">
+                  <span className="font-medium text-fg-primary text-sm">{step.title}</span>
+                  <span className="text-xs text-fg-muted">{step.timeEstimate}</span>
+                  {step.isOptional && (
+                    <span className="text-xs px-1.5 py-0.5 rounded bg-success/10 text-success">
+                      Handled
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-fg-muted">{step.description}</p>
+              </div>
+            </div>
+          </Card>
         ))}
       </div>
 

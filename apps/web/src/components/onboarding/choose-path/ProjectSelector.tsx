@@ -44,14 +44,20 @@ export function ProjectSelector({
         </div>
       ) : repos.length === 0 ? (
         <div className="text-sm text-fg-muted py-3">
-          <p className="mb-2">No repositories found. Make sure you&apos;ve installed the GitHub App and granted repo access.</p>
+          <p className="mb-2">
+            No repositories found. Make sure you&apos;ve installed the GitHub App and granted repo
+            access.
+          </p>
           <Button variant="secondary" size="sm" onClick={onLoadRepos}>
             Refresh
           </Button>
         </div>
       ) : (
         <div className="mb-3">
-          <label htmlFor="onboarding-repo-select" className="block text-xs font-medium text-fg-muted mb-1">
+          <label
+            htmlFor="onboarding-repo-select"
+            className="block text-xs font-medium text-fg-muted mb-1"
+          >
             Repository
           </label>
           <Select

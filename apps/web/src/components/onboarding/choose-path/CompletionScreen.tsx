@@ -84,9 +84,7 @@ export function CompletionScreen({ onDismiss }: CompletionScreenProps) {
           <X size={12} /> Dismiss
         </button>
       </div>
-      <p className="text-xs text-fg-muted mt-3">
-        You can change any setting in Settings anytime
-      </p>
+      <p className="text-xs text-fg-muted mt-3">You can change any setting in Settings anytime</p>
     </div>
   );
 }

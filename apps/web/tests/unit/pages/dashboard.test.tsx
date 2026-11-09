@@ -66,8 +66,9 @@ function renderDashboard() {
       <MemoryRouter>
         <Dashboard />
       </MemoryRouter>
-    </ToastProvider>
-  , { wrapper: QueryTestWrapper });
+    </ToastProvider>,
+    { wrapper: QueryTestWrapper }
+  );
 }
 
 describe('Dashboard page', () => {
@@ -86,10 +87,10 @@ describe('Dashboard page', () => {
     expect(screen.getByText(/Welcome, Dev User/)).toBeInTheDocument();
   });
 
-  it('shows New project button', () => {
+  it('shows New Project button', () => {
     mocks.listProjects.mockReturnValue({ projects: [sampleProject] });
     renderDashboard();
-    expect(screen.getByRole('button', { name: 'New project' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'New Project' })).toBeInTheDocument();
   });
 
   it('shows empty state when no projects', () => {

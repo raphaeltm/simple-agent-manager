@@ -292,8 +292,7 @@ export async function createInstallationCredentials(
         // Cloudflare can list a beta group the grant cannot delegate. Optional access must
         // never cost the installation, so retry the deployment token without it.
         const refused =
-          error instanceof PrincipalCreationError &&
-          (error.status === 400 || error.status === 403);
+          error instanceof PrincipalCreationError && (error.status === 400 || error.status === 403);
         if (index !== 0 || !optionalDeploy.length || !refused || options.signal?.aborted)
           throw error;
         console.warn('Deployment token refused optional permissions; continuing without them', {

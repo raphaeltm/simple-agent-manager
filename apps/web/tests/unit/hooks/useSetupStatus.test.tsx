@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   listCredentials: vi.fn(),
   listAgentCredentials: vi.fn(),
   listGitHubInstallations: vi.fn(),
+  listProjects: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
@@ -16,6 +17,7 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   listCredentials: mocks.listCredentials,
   listAgentCredentials: mocks.listAgentCredentials,
   listGitHubInstallations: mocks.listGitHubInstallations,
+  listProjects: mocks.listProjects,
 }));
 
 function createWrapper() {
@@ -38,6 +40,7 @@ describe('useSetupStatus', () => {
     mocks.listCredentials.mockResolvedValue([HETZNER]);
     mocks.listAgentCredentials.mockResolvedValue({ credentials: [AGENT_CRED] });
     mocks.listGitHubInstallations.mockResolvedValue([INSTALLATION]);
+    mocks.listProjects.mockResolvedValue({ projects: [] });
   });
 
   /**
@@ -64,9 +67,27 @@ describe('useSetupStatus', () => {
     expect(mocks.listCredentials).toHaveBeenCalledTimes(1);
     expect(mocks.listAgentCredentials).toHaveBeenCalledTimes(1);
     expect(mocks.listGitHubInstallations).toHaveBeenCalledTimes(1);
+    // GitHub answers the repository question, so the project list is never asked.
+    expect(mocks.listProjects).not.toHaveBeenCalled();
   });
 
-  it('is complete only when the user has their own agent, cloud and GitHub', async () => {
+  // A SAM-hosted (Cloudflare Artifacts) project is a repository source with no GitHub. Without
+  // this the wizard reopened forever for a user who chose not to use GitHub.
+  it('is complete without GitHub once the user has a project', async () => {
+    const { Wrapper } = createWrapper();
+    mocks.listGitHubInstallations.mockResolvedValue([]);
+    mocks.listProjects.mockResolvedValue({ projects: [{ id: 'project-1' }] });
+
+    const { result } = renderHook(() => useSetupStatus('user-1'), { wrapper: Wrapper });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.hasGitHub).toBe(false);
+    expect(result.current.hasRepoSource).toBe(true);
+    expect(result.current.isComplete).toBe(true);
+    expect(mocks.listProjects).toHaveBeenCalledWith(1);
+  });
+
+  it('is complete only when the user has their own agent, cloud and a repository source', async () => {
     const { Wrapper } = createWrapper();
     mocks.listGitHubInstallations.mockResolvedValue([]);
 

@@ -51,6 +51,14 @@ interface ExistingState {
   existingAgent: boolean;
   existingCloud: boolean;
   existingGithub: boolean;
+  /** Whether this installation can host repositories on Cloudflare Artifacts. */
+  artifactsEnabled?: boolean;
+  /** Whether SAM can run the provider sign-in for Claude Code and Codex. */
+  guidedSignIn?: boolean;
+}
+
+interface Recorded {
+  projectCreates: unknown[];
 }
 
 /**
@@ -58,7 +66,8 @@ interface ExistingState {
  * in ChoosePathWizard so we can land the wizard on a chosen step as the first
  * executable step.
  */
-async function setupMocks(page: Page, state: ExistingState) {
+async function setupMocks(page: Page, state: ExistingState): Promise<Recorded> {
+  const recorded: Recorded = { projectCreates: [] };
   await page.route('**/api/**', async (route: Route) => {
     const p = new URL(route.request().url()).pathname;
     const isGet = route.request().method() === 'GET';
@@ -76,7 +85,11 @@ async function setupMocks(page: Page, state: ExistingState) {
         credentials: state.existingAgent ? [{ id: 'agent-cred-1', isActive: true }] : [],
       });
     if (p === '/api/credentials' && isGet)
-      return jsonResponse(route, 200, state.existingCloud ? [{ id: 'cred-1', provider: 'hetzner' }] : []);
+      return jsonResponse(
+        route,
+        200,
+        state.existingCloud ? [{ id: 'cred-1', provider: 'hetzner' }] : []
+      );
     if (p === '/api/github/installations')
       return jsonResponse(route, 200, state.existingGithub ? [INSTALLATION] : []);
 
@@ -88,6 +101,21 @@ async function setupMocks(page: Page, state: ExistingState) {
     if (p === '/api/credentials/validate') return jsonResponse(route, 200, { valid: true });
     if (p === '/api/credentials' && isPost) return jsonResponse(route, 201, { id: 'cred-2' });
 
+    if (p === '/api/config/artifacts-enabled')
+      return jsonResponse(route, 200, { enabled: state.artifactsEnabled === true });
+    if (p === '/api/agent-credential-setup-sessions/config')
+      return jsonResponse(
+        route,
+        200,
+        state.guidedSignIn
+          ? { enabled: true, agentTypes: ['openai-codex', 'claude-code'], scopes: ['user'] }
+          : { enabled: false }
+      );
+    if (p === '/api/projects' && isPost) {
+      recorded.projectCreates.push(route.request().postDataJSON());
+      return jsonResponse(route, 201, { id: 'project-1', name: 'created' });
+    }
+
     if (p === '/api/github/repositories')
       return jsonResponse(route, 200, { repositories: [REPOSITORY] });
     if (p === '/api/projects' && isGet) return jsonResponse(route, 200, { projects: [] });
@@ -98,15 +126,17 @@ async function setupMocks(page: Page, state: ExistingState) {
 
     return jsonResponse(route, 200, {});
   });
+  return recorded;
 }
 
 type CloudAnswer = 'byoc' | 'sam';
+type RepoAnswer = 'github' | 'sam-hosted';
 
 /**
  * Walk the two-question tree and start execution. Pre-pop tags determine which
  * step renders first.
  */
-async function reachExecution(page: Page, cloud: CloudAnswer) {
+async function reachExecution(page: Page, cloud: CloudAnswer, repo: RepoAnswer = 'github') {
   await page.goto('/dashboard?onboarding');
 
   const wizard = page.locator('[data-testid="onboarding-wizard"]');
@@ -120,7 +150,9 @@ async function reachExecution(page: Page, cloud: CloudAnswer) {
   } else {
     await wizard.getByRole('button', { name: 'Use SAM-managed infrastructure' }).click();
   }
-  await wizard.getByRole('button', { name: 'Yes, I have a repo' }).click();
+  await wizard
+    .getByRole('button', { name: repo === 'github' ? /GitHub — I have a repo/ : /Let SAM host it/ })
+    .click();
   await wizard.getByRole('button', { name: /Start setup/ }).click();
 
   return wizard;
@@ -133,8 +165,9 @@ test('ai-setup inline form: agent grid, api-key, OAuth, and SAM budget', async (
   const wizard = await reachExecution(page, 'byoc');
 
   // Lands on ai-setup (cloud + github pre-satisfied → optional → filtered out).
-  await expect(wizard.getByRole('heading', { name: /set up your.*agent|coding agent|ai/i }).first())
-    .toBeVisible({ timeout: 5000 });
+  await expect(
+    wizard.getByRole('heading', { name: /set up your.*agent|coding agent|ai/i }).first()
+  ).toBeVisible({ timeout: 5000 });
 
   // All six catalog agents are selectable.
   await expect(wizard.getByRole('button', { name: /Claude Code/ })).toBeVisible();
@@ -147,24 +180,29 @@ test('ai-setup inline form: agent grid, api-key, OAuth, and SAM budget', async (
   await assertNoOverflow(page);
   await screenshot(page, 'onboarding-inline-ai-agent-grid');
 
-  // Claude Code → API key input present. Screenshot the empty field BEFORE
+  // Claude Code opens on its subscription (the quick path). Without guided sign-in on this
+  // installation the paste field is the only control. Screenshot the empty field BEFORE
   // filling so no secret value (even a test value) is ever captured to disk.
   await wizard.getByRole('button', { name: /Claude Code/ }).click();
+  await expect(page.locator('#onboarding-oauth-token')).toBeVisible();
+  await expect(wizard.getByRole('button', { name: 'Connect with Claude Code' })).toHaveCount(0);
+  await assertNoOverflow(page);
+  await screenshot(page, 'onboarding-inline-ai-oauth-claude');
+  await page.locator('#onboarding-oauth-token').fill('claude-oauth-token');
+
+  // API key stays one click away.
+  await wizard.getByRole('button', { name: 'API key' }).click();
   await expect(page.locator('#onboarding-api-key')).toBeVisible();
   await assertNoOverflow(page);
   await screenshot(page, 'onboarding-inline-ai-apikey');
   await page.locator('#onboarding-api-key').fill('sk-test-key');
 
-  // Claude Code → Subscription (OAuth token) widget — the regression target.
-  await wizard.getByRole('button', { name: 'Subscription' }).click();
-  await expect(page.locator('#onboarding-oauth-token')).toBeVisible();
-  await assertNoOverflow(page);
-  await screenshot(page, 'onboarding-inline-ai-oauth-claude');
-  await page.locator('#onboarding-oauth-token').fill('claude-oauth-token');
-
   // OpenAI Codex → ChatGPT subscription → auth.json textarea.
   await wizard.getByRole('button', { name: /OpenAI Codex/ }).click();
-  await wizard.getByRole('button', { name: 'ChatGPT subscription' }).click();
+  await expect(wizard.getByRole('button', { name: 'ChatGPT subscription' })).toHaveAttribute(
+    'aria-pressed',
+    'true'
+  );
   await expect(page.locator('textarea#onboarding-oauth-token')).toBeVisible();
   await assertNoOverflow(page);
   await screenshot(page, 'onboarding-inline-ai-oauth-codex');
@@ -214,4 +252,89 @@ test('cloud-sam inline form: SAM-managed infrastructure confirmation', async ({ 
   await expect(wizard.getByRole('button', { name: /Continue/ })).toBeVisible({ timeout: 5000 });
   await assertNoOverflow(page);
   await screenshot(page, 'onboarding-inline-cloud-sam');
+});
+
+/* ─── Scenario D: guided subscription sign-in (no pasting) ─── */
+
+for (const [agent, button, slug] of [
+  ['Claude Code', 'Connect with Claude Code', 'claude'],
+  ['OpenAI Codex', 'Connect with Codex', 'codex'],
+] as const) {
+  test(`ai-setup offers guided ${agent} sign-in before the paste fallback`, async ({ page }) => {
+    await setupMocks(page, {
+      existingAgent: false,
+      existingCloud: true,
+      existingGithub: true,
+      guidedSignIn: true,
+    });
+    const wizard = await reachExecution(page, 'byoc');
+    await wizard.getByRole('button', { name: new RegExp(agent) }).click();
+
+    const connect = wizard.getByRole('button', { name: button });
+    await expect(connect).toBeVisible({ timeout: 5000 });
+    const paste = page.locator('#onboarding-oauth-token');
+    await expect(wizard.getByText(/^Or paste/)).toBeVisible();
+    // The quick path sits above the manual one.
+    const [connectBox, pasteBox] = [await connect.boundingBox(), await paste.boundingBox()];
+    expect(connectBox!.y + connectBox!.height).toBeLessThanOrEqual(pasteBox!.y);
+    await connect.scrollIntoViewIfNeeded();
+    await assertNoOverflow(page);
+    await screenshot(page, `onboarding-inline-ai-guided-${slug}`);
+  });
+}
+
+/* ─── Scenario E: where the code lives ─── */
+
+test('repository question offers SAM hosting only where Artifacts is enabled', async ({ page }) => {
+  for (const enabled of [true, false]) {
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+    await setupMocks(page, {
+      existingAgent: false,
+      existingCloud: false,
+      existingGithub: false,
+      artifactsEnabled: enabled,
+    });
+    await page.goto('/dashboard?onboarding');
+    const wizard = page.locator('[data-testid="onboarding-wizard"]');
+    await expect(wizard).toBeVisible({ timeout: 5000 });
+    await page.waitForTimeout(300);
+    await wizard.getByRole('button', { name: 'Use SAM-managed infrastructure' }).click();
+    await expect(
+      wizard.getByRole('heading', { name: 'Where should your code live?' })
+    ).toBeVisible();
+    await expect(wizard.getByRole('button', { name: /GitHub — I have a repo/ })).toBeVisible();
+    await expect(wizard.getByRole('button', { name: /Let SAM host it/ })).toHaveCount(
+      enabled ? 1 : 0
+    );
+    await assertNoOverflow(page);
+    await screenshot(page, `onboarding-repo-source-artifacts-${enabled ? 'on' : 'off'}`);
+  }
+});
+
+test('SAM-hosted path skips GitHub and creates an Artifacts project from a name', async ({
+  page,
+}) => {
+  const recorded = await setupMocks(page, {
+    existingAgent: true,
+    existingCloud: true,
+    existingGithub: false,
+    artifactsEnabled: true,
+  });
+  const wizard = await reachExecution(page, 'sam', 'sam-hosted');
+
+  await expect(wizard.getByText(/No GitHub needed/)).toBeVisible({ timeout: 5000 });
+  await expect(wizard.getByText(/GitHub App/)).toHaveCount(0);
+  const name =
+    'a-very-long-project-name-that-keeps-going-to-check-wrapping-on-small-screens-1234567890';
+  await wizard.getByLabel('Project name').fill(name);
+  await assertNoOverflow(page);
+  await screenshot(page, 'onboarding-sam-hosted-project');
+  await wizard.getByRole('button', { name: /Create Project/ }).click();
+
+  await expect.poll(() => recorded.projectCreates.length).toBe(1);
+  expect(recorded.projectCreates[0]).toEqual({
+    name,
+    repoProvider: 'artifacts',
+    defaultBranch: 'main',
+  });
 });

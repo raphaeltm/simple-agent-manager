@@ -20,11 +20,22 @@ describe('generatePath', () => {
     ['byoc + no-repo', ['byoc'], ['ai-setup', 'cloud-byoc', 'github', 'project']],
     ['sam-managed + repo', ['has-repo'], ['ai-setup', 'cloud-sam', 'github', 'project']],
     ['sam-managed + no-repo', [], ['ai-setup', 'cloud-sam', 'github', 'project']],
+    // SAM-hosted repositories (Cloudflare Artifacts) need no GitHub step.
+    ['byoc + sam-hosted', ['byoc', 'repo-artifacts'], ['ai-setup', 'cloud-byoc', 'project']],
+    ['sam-managed + sam-hosted', ['repo-artifacts'], ['ai-setup', 'cloud-sam', 'project']],
   ])('%s → %j', (_label, tags, expected) => {
     expect(ids(generatePath(tags))).toEqual(expected);
   });
 
   // ── ai-setup is always present and agent-neutral ──
+
+  it('marks the SAM-hosted project step as a hosted repository with its own copy', () => {
+    const step = generatePath(['repo-artifacts']).find((s) => s.id === 'project')!;
+    expect(step.hostedRepo).toBe(true);
+    expect(step.isOptional).toBe(false);
+    expect(step.description).toMatch(/No GitHub needed/);
+    expect(generatePath(['has-repo']).find((s) => s.id === 'project')!.hostedRepo).toBeUndefined();
+  });
 
   it('always emits the ai-setup step regardless of tags', () => {
     expect(ids(generatePath([]))).toContain('ai-setup');

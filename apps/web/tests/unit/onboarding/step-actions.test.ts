@@ -42,17 +42,18 @@ describe('INITIAL_FORM', () => {
       scalewaySecretKey: '',
       scalewayProjectId: '',
       selectedRepoName: '',
+      hostedProjectName: '',
     });
   });
 });
 
 describe('authMethodsForAgent (capability-driven)', () => {
-  it('offers api-key + oauth-token + sam for claude-code', () => {
-    expect(authMethodsForAgent('claude-code')).toEqual(['api-key', 'oauth-token', 'sam']);
+  it('offers oauth-token (subscription) first, then api-key and sam, for claude-code', () => {
+    expect(authMethodsForAgent('claude-code')).toEqual(['oauth-token', 'api-key', 'sam']);
   });
 
-  it('offers api-key + oauth-token + sam for openai-codex', () => {
-    expect(authMethodsForAgent('openai-codex')).toEqual(['api-key', 'oauth-token', 'sam']);
+  it('offers oauth-token (subscription) first, then api-key and sam, for openai-codex', () => {
+    expect(authMethodsForAgent('openai-codex')).toEqual(['oauth-token', 'api-key', 'sam']);
   });
 
   it('offers ONLY api-key for agents without oauthSupport or proxy support', () => {
@@ -115,7 +116,11 @@ describe('executeStep', () => {
     });
 
     it('throws when selectedAgent is null', async () => {
-      const form: StepFormState = { ...INITIAL_FORM, selectedAuthMethod: 'api-key', apiKey: 'sk-test' };
+      const form: StepFormState = {
+        ...INITIAL_FORM,
+        selectedAuthMethod: 'api-key',
+        apiKey: 'sk-test',
+      };
       await expect(executeStep('ai-setup', form)).rejects.toThrow('Please choose an agent');
     });
 
@@ -141,7 +146,10 @@ describe('executeStep', () => {
     });
 
     it('validates with the exact agentType + credentialKind + trimmed credential payload', async () => {
-      await executeStep('ai-setup', apiKeyForm({ selectedAgent: 'claude-code', apiKey: '  sk-test  ' }));
+      await executeStep(
+        'ai-setup',
+        apiKeyForm({ selectedAgent: 'claude-code', apiKey: '  sk-test  ' })
+      );
       expect(validateAgentCredential).toHaveBeenCalledWith({
         agentType: 'claude-code',
         credentialKind: 'api-key',
@@ -150,7 +158,10 @@ describe('executeStep', () => {
     });
 
     it('does not call save when validation fails', async () => {
-      vi.mocked(validateAgentCredential).mockResolvedValue({ valid: false, message: 'Key is expired' });
+      vi.mocked(validateAgentCredential).mockResolvedValue({
+        valid: false,
+        message: 'Key is expired',
+      });
       await expect(executeStep('ai-setup', apiKeyForm({ apiKey: 'sk-bad' }))).rejects.toThrow(
         'Key is expired'
       );
@@ -158,7 +169,10 @@ describe('executeStep', () => {
     });
 
     it('trims and passes correct agentType + credentialKind', async () => {
-      await executeStep('ai-setup', apiKeyForm({ selectedAgent: 'google-gemini', apiKey: '  sk-x  ' }));
+      await executeStep(
+        'ai-setup',
+        apiKeyForm({ selectedAgent: 'google-gemini', apiKey: '  sk-x  ' })
+      );
       expect(saveAgentCredential).toHaveBeenCalledWith({
         agentType: 'google-gemini',
         credentialKind: 'api-key',
@@ -185,7 +199,10 @@ describe('executeStep', () => {
     });
 
     it("saves with the literal credentialKind 'oauth-token' and autoActivate: true", async () => {
-      await executeStep('ai-setup', oauthForm({ selectedAgent: 'openai-codex', oauthToken: '  json-blob  ' }));
+      await executeStep(
+        'ai-setup',
+        oauthForm({ selectedAgent: 'openai-codex', oauthToken: '  json-blob  ' })
+      );
       expect(saveAgentCredential).toHaveBeenCalledWith({
         agentType: 'openai-codex',
         credentialKind: 'oauth-token',

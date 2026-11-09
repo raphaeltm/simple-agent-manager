@@ -1,9 +1,10 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   dismissOnboarding: vi.fn(),
   useOnboarding: vi.fn(),
+  getArtifactsEnabled: vi.fn(),
 }));
 
 // `useQueryScope()` reads the authenticated identity; `useSetupStatus` keys its
@@ -20,6 +21,8 @@ vi.mock('../../../../../src/lib/api', () => ({
   listAgentCredentials: vi.fn(() => Promise.resolve({ credentials: [] })),
   listCredentials: vi.fn(() => Promise.resolve([])),
   listGitHubInstallations: vi.fn(() => Promise.resolve([])),
+  listProjects: vi.fn(() => Promise.resolve({ projects: [] })),
+  getArtifactsEnabled: mocks.getArtifactsEnabled,
 }));
 
 import { ChoosePathWizard } from '../../../../../src/components/onboarding/choose-path/ChoosePathWizard';
@@ -32,6 +35,25 @@ describe('ChoosePathWizard', () => {
       showOverlay: true,
       dismissOnboarding: mocks.dismissOnboarding,
     });
+    mocks.getArtifactsEnabled.mockResolvedValue(false);
+  });
+
+  it.each([
+    [true, ['Let SAM host it', 'GitHub — I have a repo']],
+    [false, ['GitHub — I have a repo']],
+  ])('with Artifacts enabled=%s, the repository question offers %j', async (enabled, shown) => {
+    mocks.getArtifactsEnabled.mockResolvedValue(enabled);
+    render(<ChoosePathWizard />, { wrapper: QueryTestWrapper });
+    await waitFor(() => expect(mocks.getArtifactsEnabled).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole('button', { name: /Use SAM-managed infrastructure/ }));
+    expect(
+      await screen.findByRole('heading', { name: 'Where should your code live?' })
+    ).toBeInTheDocument();
+    for (const label of shown) {
+      expect(await screen.findByRole('button', { name: new RegExp(label) })).toBeInTheDocument();
+    }
+    if (!enabled) expect(screen.queryByRole('button', { name: /Let SAM host it/ })).toBeNull();
   });
 
   it('renders the dialog when showOverlay is true', () => {

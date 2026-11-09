@@ -39,7 +39,15 @@ function opt(
   tags: string[],
   requiresArtifacts = false
 ): PathOption {
-  return { id, label, description, icon, next, tags, ...(requiresArtifacts ? { requiresArtifacts } : {}) };
+  return {
+    id,
+    label,
+    description,
+    icon,
+    next,
+    tags,
+    ...(requiresArtifacts ? { requiresArtifacts } : {}),
+  };
 }
 
 export const QUESTIONS: PathQuestion[] = [
@@ -70,8 +78,7 @@ export const QUESTIONS: PathQuestion[] = [
   {
     id: 'repo-source',
     question: 'Where should your code live?',
-    description:
-      'Agents work on a Git repository. SAM can host it for you, or connect to GitHub.',
+    description: 'Agents work on a Git repository. SAM can host it for you, or connect to GitHub.',
     options: [
       opt(
         'sam-hosted',

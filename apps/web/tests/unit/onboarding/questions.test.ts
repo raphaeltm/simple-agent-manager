@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { type PathQuestion, QUESTIONS } from '../../../src/components/onboarding/choose-path/questions';
+import {
+  type PathQuestion,
+  QUESTIONS,
+  questionsFor,
+} from '../../../src/components/onboarding/choose-path/questions';
 
 describe('QUESTIONS graph validation', () => {
-  const questionMap = new Map<string, PathQuestion>(
-    QUESTIONS.map((q) => [q.id, q])
-  );
+  const questionMap = new Map<string, PathQuestion>(QUESTIONS.map((q) => [q.id, q]));
 
   // ── Structural integrity ──
 
@@ -54,10 +56,7 @@ describe('QUESTIONS graph validation', () => {
     }
 
     for (const q of QUESTIONS) {
-      expect(
-        reachable.has(q.id),
-        `question "${q.id}" is unreachable from root`
-      ).toBe(true);
+      expect(reachable.has(q.id), `question "${q.id}" is unreachable from root`).toBe(true);
     }
   });
 
@@ -107,7 +106,10 @@ describe('QUESTIONS graph validation', () => {
     for (const q of QUESTIONS) {
       for (const o of q.options) {
         expect(o.label.trim().length, `option "${o.id}" label is empty`).toBeGreaterThan(0);
-        expect(o.description.trim().length, `option "${o.id}" description is empty`).toBeGreaterThan(0);
+        expect(
+          o.description.trim().length,
+          `option "${o.id}" description is empty`
+        ).toBeGreaterThan(0);
         expect(o.icon.trim().length, `option "${o.id}" icon is empty`).toBeGreaterThan(0);
       }
     }
@@ -116,18 +118,21 @@ describe('QUESTIONS graph validation', () => {
   it('every question has non-empty question and description', () => {
     for (const q of QUESTIONS) {
       expect(q.question.trim().length, `question "${q.id}" has empty question`).toBeGreaterThan(0);
-      expect(q.description.trim().length, `question "${q.id}" has empty description`).toBeGreaterThan(0);
+      expect(
+        q.description.trim().length,
+        `question "${q.id}" has empty description`
+      ).toBeGreaterThan(0);
     }
   });
 
   // ── Tag vocabulary ──
 
-  // The cloud + github questions are framed so that the affirmative option adds
-  // a tag (`byoc`, `has-repo`) and the "not yet / SAM-managed" option carries no
-  // tag — its meaning IS the absence of the tag. generatePath() branches on
-  // presence/absence, so empty-tag terminal options are intentional, not a bug.
-  it('only uses recognized tags (byoc, has-repo)', () => {
-    const recognized = new Set(['byoc', 'has-repo']);
+  // The affirmative options add a tag (`byoc`, `has-repo`, `repo-artifacts`) and the
+  // "not yet / SAM-managed" option carries no tag — its meaning IS the absence of the
+  // tag. generatePath() branches on presence/absence, so empty-tag terminal options are
+  // intentional, not a bug.
+  it('only uses recognized tags (byoc, has-repo, repo-artifacts)', () => {
+    const recognized = new Set(['byoc', 'has-repo', 'repo-artifacts']);
     for (const q of QUESTIONS) {
       for (const o of q.options) {
         for (const t of o.tags) {
@@ -137,13 +142,22 @@ describe('QUESTIONS graph validation', () => {
     }
   });
 
-  it('each tag-bearing question offers exactly one affirmative (tagged) and one absence (untagged) option', () => {
+  it('every question offers exactly one untagged (absence) option', () => {
     for (const q of QUESTIONS) {
-      const tagged = q.options.filter((o) => o.tags.length > 0);
       const untagged = q.options.filter((o) => o.tags.length === 0);
-      expect(tagged.length, `question "${q.id}" should have one tagged option`).toBe(1);
       expect(untagged.length, `question "${q.id}" should have one untagged option`).toBe(1);
     }
+  });
+
+  // ── Installation capabilities ──
+
+  it('offers SAM-hosted repositories only where Artifacts is enabled', () => {
+    const repoOptions = (artifactsEnabled: boolean) =>
+      questionsFor({ artifactsEnabled })
+        .find((q) => q.id === 'repo-source')!
+        .options.map((o) => o.id);
+    expect(repoOptions(true)).toEqual(['sam-hosted', 'yes', 'no-repo']);
+    expect(repoOptions(false)).toEqual(['yes', 'no-repo']);
   });
 
   // ── Path enumeration ──
@@ -167,13 +181,14 @@ describe('QUESTIONS graph validation', () => {
 
     enumerate(QUESTIONS[0]!.id, []);
 
-    // 2 cloud choices × 2 github choices = 4 paths.
-    expect(allPaths.length).toBe(4);
+    // 2 cloud choices × 3 repository choices = 6 paths.
+    expect(allPaths.length).toBe(6);
 
-    // The four paths cover every (cloud, github) combination of the two tags.
+    const repo = (p: string[]) =>
+      p.includes('repo-artifacts') ? 'sam' : p.includes('has-repo') ? 'repo' : '-';
     const signatures = allPaths
-      .map((p) => `${p.includes('byoc') ? 'byoc' : '-'}/${p.includes('has-repo') ? 'repo' : '-'}`)
+      .map((p) => `${p.includes('byoc') ? 'byoc' : '-'}/${repo(p)}`)
       .sort();
-    expect(signatures).toEqual(['-/-', '-/repo', 'byoc/-', 'byoc/repo']);
+    expect(signatures).toEqual(['-/-', '-/repo', '-/sam', 'byoc/-', 'byoc/repo', 'byoc/sam']);
   });
 });
