@@ -389,7 +389,7 @@ func TestCancelGraceWatchdogSettlesAGenuinelyStuckCancel(t *testing.T) {
 				t.Fatalf("host status = %s after stuck cancel, want a restart rather than error", got)
 			}
 			h.host.mu.RLock()
-			intentional := h.host.intentionalPromptCancelProcessStop
+			intentional := h.host.intentionalProcessStop
 			h.host.mu.RUnlock()
 			if !intentional {
 				t.Fatal("stuck cancel must stop the agent as an intentional prompt cancel so the monitor restarts it")
@@ -522,7 +522,7 @@ func TestCancelGraceStuckCancelDefersToAnInFlightRestart(t *testing.T) {
 		t.Fatalf("status = %s, want the in-flight restart's %s left untouched", got, HostStarting)
 	}
 	h.host.mu.RLock()
-	intentional := h.host.intentionalPromptCancelProcessStop
+	intentional := h.host.intentionalProcessStop
 	h.host.mu.RUnlock()
 	if intentional {
 		t.Fatal("no intentional stop may be recorded without a process to stop")

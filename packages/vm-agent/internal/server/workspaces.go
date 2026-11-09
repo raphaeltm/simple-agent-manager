@@ -369,12 +369,17 @@ func (s *Server) startWorkspaceProvision(
 ) {
 	go func() {
 		if credentialGenerationRotated {
-			// Before anything else, so no provisioning step or agent runs with the
-			// previous generation's revoked credentials: first stop every agent
-			// process that started with them, then exchange the sessions' sam-mcp
-			// tokens (bounded by its own budget) for the agents started next.
-			s.stopSessionHostProcessesForWorkspace(provisionRuntime.ID)
+			// Before anything else, so no provisioning step or agent keeps running
+			// with the previous generation's revoked credentials. The new callback
+			// token already reached every SessionHost during the claim
+			// (propagateWorkspaceCallbackToken). First exchange the sessions'
+			// sam-mcp tokens (bounded by its own budget) and hand them to the
+			// hosts, then restart each host's running agent process in place so
+			// the replacement starts with both. The hosts stay registered: the
+			// control plane's task-liveness probe fails a task whose agent host
+			// is stopped (task_agent_host_stopped).
 			s.rotateWorkspaceSamMcpTokens(provisionRuntime.ID, provisionRuntime.CallbackToken)
+			s.restartSessionAgentsForWorkspace(provisionRuntime.ID)
 		}
 		s.acquireBuildSlot(provisionRuntime.ID)
 		defer s.releaseBuildSlot(provisionRuntime.ID)

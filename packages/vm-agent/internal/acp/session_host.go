@@ -213,11 +213,15 @@ type SessionHost struct {
 	// credential-fetch/install phase, so two concurrent selections for the same
 	// agent cannot double-spawn a process for one session.
 	selectionInProgress bool
-	// intentionalPromptCancelProcessStop suppresses rapid-exit crash handling
-	// when a user cancel intentionally terminates an agent that lacks native
-	// session/cancel support.
-	intentionalPromptCancelProcessStop bool
-	checkpointRollover                 *checkpointRolloverEpisode
+	// intentionalProcessStop marks the current agent process as stopped on
+	// purpose so the process monitor restarts it in place (LoadSession resume)
+	// without counting a crash: no rapid-exit or active-prompt error, no
+	// restartCount increment. Set by a user prompt cancel that terminates the
+	// agent (StopProcessForPromptCancel, CancelPromptGuarded) and by a workspace
+	// credential rotation (RestartAgentProcessForCredentialRotation). Consumed
+	// and cleared by monitorProcessExit.
+	intentionalProcessStop bool
+	checkpointRollover     *checkpointRolloverEpisode
 
 	// replaySuppressed is set while an ACP LoadSession is in flight. LoadSession
 	// makes the agent replay the entire transcript as session/update

@@ -57,6 +57,7 @@ type generationControlPlane struct {
 	respond   func(attempt int, old string) (int, string)
 	attempts  map[string]int
 	hold      chan struct{} // when set, rotation requests wait for it to close
+	held      int           // rotation requests that reached the hold
 	server    *httptest.Server
 }
 
@@ -73,6 +74,9 @@ func newGenerationControlPlane(t *testing.T) *generationControlPlane {
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			cp.mu.Lock()
 			hold := cp.hold
+			if hold != nil {
+				cp.held++
+			}
 			cp.mu.Unlock()
 			if hold != nil {
 				<-hold
@@ -101,6 +105,13 @@ func newGenerationControlPlane(t *testing.T) *generationControlPlane {
 	}))
 	t.Cleanup(cp.server.Close)
 	return cp
+}
+
+// heldRotations reports how many rotation requests reached the hold.
+func (cp *generationControlPlane) heldRotations() int {
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+	return cp.held
 }
 
 func (cp *generationControlPlane) rotationRequests() []rotationRequest {

@@ -19,15 +19,16 @@ package server
 // Live SessionHosts: a rebuild runs from running/recovery/error and reuses an
 // already running devcontainer ("Devcontainer already running"), and restart
 // from error can find hosts left by a failed rebuild. An agent process keeps the
-// credentials it started with, all revoked, so the provisioning goroutine first
-// stops every SessionHost of the workspace (stopSessionHostProcessesForWorkspace)
-// and only then rotates. SetMcpServers is still needed for a host created after
-// that stop and before its session's rotated list is installed: agent attach
-// (handleAgentWS) and session start do not wait for provisioning, so such a host
-// can read the old list, and SetMcpServers gives its next agent start the new
-// token. An agent started by that host inside the window itself keeps the
-// revoked sam-mcp token (MCP calls fail with 401) until it restarts; it holds
-// the new callback token, so it is not a retired-runtime process.
+// credentials it started with, all revoked, so after this rotation the
+// provisioning goroutine restarts every running agent process of the workspace
+// in place (restartSessionAgentsForWorkspace). The SessionHosts stay registered
+// (the control plane's task-liveness probe fails a task whose agent host is
+// stopped), and each replacement process reads the rotated list installed here
+// through SetMcpServers. A host created while the rotation is in flight gets the
+// rotated list through SetMcpServers too. An agent that host starts inside the
+// window, after the restart pass, keeps the revoked sam-mcp token (MCP calls
+// fail with 401) until it restarts; it holds the new callback token, so it is
+// not a retired-runtime process.
 
 import (
 	"bytes"
@@ -57,9 +58,10 @@ const (
 )
 
 // rotateWorkspaceSamMcpTokens rotates every sam-mcp token of the workspace's
-// sessions. It runs synchronously, first thing in the provisioning goroutine,
-// under its own context.Background()-derived budget: never the request context,
-// which ends when the 202 is written (rule 71).
+// sessions. It runs synchronously, first thing in the provisioning goroutine and
+// before restartSessionAgentsForWorkspace, under its own
+// context.Background()-derived budget: never the request context, which ends
+// when the 202 is written (rule 71).
 func (s *Server) rotateWorkspaceSamMcpTokens(workspaceID, callbackToken string) {
 	callbackToken = strings.TrimSpace(callbackToken)
 	if s.config == nil || s.config.ControlPlaneURL == "" || callbackToken == "" || s.controlPlaneCallbacksStopped() {

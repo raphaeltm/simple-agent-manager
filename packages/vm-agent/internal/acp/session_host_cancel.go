@@ -195,19 +195,28 @@ func (h *SessionHost) SignalProcess(sig syscall.Signal) {
 // prompt cancel without marking the host stopped. The process monitor will
 // restart the agent and return the host to ready for follow-up prompts.
 func (h *SessionHost) StopProcessForPromptCancel() {
+	if !h.stopProcessForIntentionalRestart("StopProcessForPromptCancel") {
+		slog.Warn("StopProcessForPromptCancel: no agent process running")
+	}
+}
+
+// stopProcessForIntentionalRestart terminates the current agent process without
+// marking the host stopped, flagging the exit as intentional so the process
+// monitor restarts the agent in place instead of treating the exit as a crash.
+// It reports whether a process was running; with none it does nothing.
+func (h *SessionHost) stopProcessForIntentionalRestart(caller string) bool {
 	h.mu.Lock()
 	process := h.process
 	if process != nil {
-		h.intentionalPromptCancelProcessStop = true
+		h.intentionalProcessStop = true
 	}
 	h.mu.Unlock()
 
 	if process == nil {
-		slog.Warn("StopProcessForPromptCancel: no agent process running")
-		return
+		return false
 	}
-
 	if err := process.Stop(); err != nil {
-		slog.Warn("StopProcessForPromptCancel: failed to stop agent process", "error", err)
+		slog.Warn(caller+": failed to stop agent process", "error", err)
 	}
+	return true
 }

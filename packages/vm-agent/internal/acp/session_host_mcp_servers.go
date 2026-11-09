@@ -17,10 +17,12 @@ func (h *SessionHost) mcpServers() []McpServerEntry {
 // SetMcpServers replaces the MCP server configs used by this host's later agent
 // starts and ACP session requests. The control plane rotates the sam-mcp token
 // when it rotates the workspace callback generation; the server calls this with
-// the rotated list so a host created while the rotation is in flight (the server
-// stops the workspace's earlier hosts first) cannot start its agent with the
-// revoked token. An agent process that is already running keeps the
-// configuration it was started with, exactly as with SetCallbackToken.
+// the rotated list for every live host of the workspace, then restarts each
+// host's running agent process in place
+// (RestartAgentProcessForCredentialRotation) so the replacement starts with the
+// rotated token. An agent process that is already running keeps the
+// configuration it was started with until that restart, exactly as with
+// SetCallbackToken.
 //
 // The slice is copied, so the caller may keep mutating its own.
 func (h *SessionHost) SetMcpServers(entries []McpServerEntry) {
