@@ -15,9 +15,9 @@ import {
   updateAdminSettings,
 } from '../../src/services/admin-settings';
 import { startSamAwareAgentSession } from '../../src/services/agent-session-bootstrap';
+import { cancelTask } from '../../src/services/cancel-task';
 import { assertProviderLimitCredentialPin } from '../../src/services/provider-limit-credential-pin';
 import { newProviderLimitWait } from '../../src/services/provider-limit-policy';
-import { cancelTask } from '../../src/services/cancel-task';
 import {
   canStartProviderLimitTaskAnyway,
   resumeProviderLimitTask,
