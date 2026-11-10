@@ -28,25 +28,42 @@ import { ensureCelldBinary, resolveEsbuild } from './celld-binary.js';
 import { buildCelldConfig, type CelldWranglerConfig } from './celld-config.js';
 import { ASSETS_DIR, prepareCelldProject, SOURCE_LINK, writeCelldConfig } from './celld-project.js';
 import { ensurePlatformKeys, GATEWAY_KEY_NAMES } from './platform-keys.js';
-import { assertPrivateFile, parseDotenv, readSecretsFile, writePrivateFile } from './secret-files.js';
+import {
+  assertPrivateFile,
+  parseDotenv,
+  readSecretsFile,
+  writePrivateFile,
+} from './secret-files.js';
 
 const REPO_ROOT = resolve(import.meta.dirname, '../..');
 const API_DIR = join(REPO_ROOT, 'apps/api');
 const WEB_DIR = join(REPO_ROOT, 'apps/web');
 
-const DEFAULT_MIGRATION_ATTEMPTS = 10;
+/** Attempts while the freshly deployed node takes its leases. */
+const DEFAULT_MIGRATION_ATTEMPTS = 20;
+/** Attempts before the deploy; an upgraded fleet answers at once, a fresh one never does. */
+const DEFAULT_PREDEPLOY_MIGRATION_ATTEMPTS = 2;
 const DEFAULT_MIGRATION_RETRY_DELAY_MS = 3000;
 const DEFAULT_HEALTH_TIMEOUT_MS = 120_000;
 const DEFAULT_CELLD_PORT = '8080';
 
 /** Box settings `celld` needs on the deploying machine, read from the compose .env file. */
-const STORAGE_ENV_KEYS = ['CELLD_BUCKET', 'S3_ENDPOINT', 'AWS_REGION', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY'] as const;
+const STORAGE_ENV_KEYS = [
+  'CELLD_BUCKET',
+  'S3_ENDPOINT',
+  'AWS_REGION',
+  'AWS_ACCESS_KEY_ID',
+  'AWS_SECRET_ACCESS_KEY',
+] as const;
 
 /**
  * Box settings frps also reads from the compose .env; the Worker must see the same values or
  * the leased ports and frps's allowPorts fence disagree. Passed as Worker vars when set.
  */
-const SHARED_BOX_VARS = ['REVERSE_TUNNEL_PORT_RANGE_START', 'REVERSE_TUNNEL_PORT_RANGE_END'] as const;
+const SHARED_BOX_VARS = [
+  'REVERSE_TUNNEL_PORT_RANGE_START',
+  'REVERSE_TUNNEL_PORT_RANGE_END',
+] as const;
 
 function log(message: string): void {
   console.log(`[selfhost] ${message}`);
@@ -69,7 +86,12 @@ interface RunResult {
 
 /** Runs a command with output streamed to the console and also captured. */
 function run(command: string, args: string[], env: NodeJS.ProcessEnv, cwd = REPO_ROOT): RunResult {
-  const result = spawnSync(command, args, { cwd, env, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  const result = spawnSync(command, args, {
+    cwd,
+    env,
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  });
   const output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
   process.stdout.write(output);
   if (result.error) throw result.error;
@@ -79,29 +101,68 @@ function run(command: string, args: string[], env: NodeJS.ProcessEnv, cwd = REPO
 function buildWeb(baseDomain: string): string {
   log(`building apps/web for https://api.${baseDomain}`);
   const env = { ...process.env, VITE_API_URL: `https://api.${baseDomain}` };
-  const result = spawnSync('pnpm', ['exec', 'turbo', 'run', 'build', '--filter=@simple-agent-manager/web'], {
-    cwd: REPO_ROOT,
-    env,
-    stdio: 'inherit',
-  });
+  const result = spawnSync(
+    'pnpm',
+    ['exec', 'turbo', 'run', 'build', '--filter=@simple-agent-manager/web'],
+    {
+      cwd: REPO_ROOT,
+      env,
+      stdio: 'inherit',
+    }
+  );
   if (result.status !== 0) throw new Error('apps/web build failed');
   return join(WEB_DIR, 'dist');
 }
 
-/** `celld d1 migrations apply` needs a node holding a lease; right after boot it may not yet. */
-async function applyMigrations(celld: string, databaseName: string, projectDir: string, env: NodeJS.ProcessEnv): Promise<void> {
-  const attempts = intEnv('SELFHOST_MIGRATION_ATTEMPTS', DEFAULT_MIGRATION_ATTEMPTS);
+const NO_LEASES = /no node leases/i;
+
+function bucketOf(env: NodeJS.ProcessEnv): string {
+  const bucket = env.CELLD_BUCKET;
+  if (!bucket) throw new Error('CELLD_BUCKET is not set');
+  return bucket;
+}
+
+/**
+ * Applies one database's migrations. `celld d1` talks to a node holding a lease, and a node
+ * takes leases only once a Worker is deployed, so on a fresh fleet this reports `no-leases`
+ * instead of failing; the caller deploys and retries. Other failures throw.
+ */
+async function applyMigrations(
+  celld: string,
+  databaseName: string,
+  projectDir: string,
+  env: NodeJS.ProcessEnv,
+  attempts: number
+): Promise<'applied' | 'no-leases'> {
   const delay = intEnv('SELFHOST_MIGRATION_RETRY_DELAY_MS', DEFAULT_MIGRATION_RETRY_DELAY_MS);
   for (let attempt = 1; ; attempt += 1) {
     log(`applying D1 migrations: ${databaseName} (attempt ${attempt}/${attempts})`);
-    const result = run(celld, ['d1', 'migrations', 'apply', databaseName, projectDir, '--bucket', env.CELLD_BUCKET!], env);
-    if (result.status === 0) return;
-    if (attempt >= attempts || !/no node leases/i.test(result.output)) {
+    const result = run(
+      celld,
+      ['d1', 'migrations', 'apply', databaseName, projectDir, '--bucket', bucketOf(env)],
+      env
+    );
+    if (result.status === 0) return 'applied';
+    if (!NO_LEASES.test(result.output)) {
       throw new Error(`celld d1 migrations apply ${databaseName} failed (exit ${result.status})`);
     }
-    log('no celld node holds a lease yet; is `docker compose up -d` running? retrying');
+    if (attempt >= attempts) return 'no-leases';
     await sleep(delay);
   }
+}
+
+async function applyAllMigrations(
+  celld: string,
+  databases: readonly string[],
+  projectDir: string,
+  env: NodeJS.ProcessEnv,
+  attempts: number
+): Promise<'applied' | 'no-leases'> {
+  for (const name of databases) {
+    if ((await applyMigrations(celld, name, projectDir, env, attempts)) === 'no-leases')
+      return 'no-leases';
+  }
+  return 'applied';
 }
 
 async function waitForHealth(port: string, baseDomain: string): Promise<void> {
@@ -124,7 +185,10 @@ async function waitForHealth(port: string, baseDomain: string): Promise<void> {
 
 function redact(config: CelldWranglerConfig, secretNames: Set<string>): CelldWranglerConfig {
   const vars = Object.fromEntries(
-    Object.entries(config.vars).map(([key, value]) => [key, secretNames.has(key) ? '<redacted>' : value])
+    Object.entries(config.vars).map(([key, value]) => [
+      key,
+      secretNames.has(key) ? '<redacted>' : value,
+    ])
   );
   return { ...config, vars };
 }
@@ -132,7 +196,7 @@ function redact(config: CelldWranglerConfig, secretNames: Set<string>): CelldWra
 async function main(): Promise<void> {
   const { values } = parseArgs({
     options: {
-      'env-file': { type: 'string', default: join(REPO_ROOT, 'deploy/selfhost/.env') },
+      'env-file': { type: 'string' },
       'state-dir': { type: 'string' },
       secrets: { type: 'string' },
       'web-dist': { type: 'string' },
@@ -140,12 +204,15 @@ async function main(): Promise<void> {
       init: { type: 'boolean', default: false },
     },
   });
-  const envFile = resolve(values['env-file']!);
+  const envFile = resolve(values['env-file'] ?? join(REPO_ROOT, 'deploy/selfhost/.env'));
   // The .env holds the bucket credential, which can read every deployed secret.
   assertPrivateFile(envFile);
   const box = parseDotenv(readFileSync(envFile, 'utf8'), envFile);
   // Same default and base directory docker compose uses for SAM_SELFHOST_STATE_DIR.
-  const stateDir = resolve(dirname(envFile), values['state-dir'] ?? box.SAM_SELFHOST_STATE_DIR ?? '.state');
+  const stateDir = resolve(
+    dirname(envFile),
+    values['state-dir'] ?? box.SAM_SELFHOST_STATE_DIR ?? '.state'
+  );
   mkdirSync(stateDir, { recursive: true, mode: 0o700 });
   const secretsPath = resolve(values.secrets ?? join(stateDir, 'secrets.env'));
   const projectDir = join(stateDir, 'project');
@@ -154,7 +221,8 @@ async function main(): Promise<void> {
   if (!box.CELLD_BUCKET) throw new Error(`${envFile}: CELLD_BUCKET is required`);
 
   const { keys, generated } = ensurePlatformKeys(join(stateDir, 'platform-keys.json'));
-  if (generated.length > 0) log(`generated platform keys: ${generated.join(', ')} (back up ${stateDir})`);
+  if (generated.length > 0)
+    log(`generated platform keys: ${generated.join(', ')} (back up ${stateDir})`);
   // docker compose passes this file to frps and Caddy (env_file); rewritten only on change.
   const gatewayEnv = GATEWAY_KEY_NAMES.map((name) => `${name}=${keys[name]}\n`).join('');
   const gatewayEnvPath = join(stateDir, 'gateway.env');
@@ -178,11 +246,19 @@ async function main(): Promise<void> {
     vars: {
       SAM_INSTALLATION_ID,
       VAPID_SUBJECT: `https://app.${baseDomain}`,
-      ...Object.fromEntries(SHARED_BOX_VARS.filter((key) => box[key]).map((key) => [key, box[key]!])),
+      ...Object.fromEntries(
+        SHARED_BOX_VARS.flatMap((key) => {
+          const value = box[key];
+          return value ? [[key, value] as const] : [];
+        })
+      ),
     },
   });
   for (const line of plan.report) log(line);
-  const withSecrets: CelldWranglerConfig = { ...plan.config, vars: { ...plan.config.vars, ...secrets } };
+  const withSecrets: CelldWranglerConfig = {
+    ...plan.config,
+    vars: { ...plan.config.vars, ...secrets },
+  };
 
   if (values['dry-run']) {
     console.log(JSON.stringify(redact(withSecrets, new Set(Object.keys(secrets))), null, 2));
@@ -200,9 +276,19 @@ async function main(): Promise<void> {
   }
 
   // The secrets-free config is what stays on disk: migrations and operator `celld d1`/`kv`
-  // commands read it. Migrations run before the new Worker version, as on Cloudflare.
+  // commands read it. On an upgrade, migrations run before the new Worker version, as on
+  // Cloudflare. A fresh fleet has no leases until its first deploy, so it migrates after.
   writeCelldConfig(projectDir, plan.config);
-  for (const db of plan.config.d1_databases) await applyMigrations(celld, db.database_name, projectDir, env);
+  const databases = plan.config.d1_databases.map((db) => db.database_name);
+  const preDeploy = await applyAllMigrations(
+    celld,
+    databases,
+    projectDir,
+    env,
+    intEnv('SELFHOST_PREDEPLOY_MIGRATION_ATTEMPTS', DEFAULT_PREDEPLOY_MIGRATION_ATTEMPTS)
+  );
+  if (preDeploy === 'no-leases')
+    log('no node holds a lease yet (first deploy?); deploying before migrating');
 
   // spawnSync blocks the event loop, so a Ctrl-C lands here after celld exits; `finally`
   // alone would not run on a signal.
@@ -215,12 +301,25 @@ async function main(): Promise<void> {
   writeCelldConfig(projectDir, withSecrets);
   try {
     log(`celld deploy ${plan.config.name}`);
-    const result = run(celld, ['deploy', projectDir, '--bucket', env.CELLD_BUCKET!], env);
+    const result = run(celld, ['deploy', projectDir, '--bucket', bucketOf(env)], env);
     if (result.status !== 0) throw new Error(`celld deploy failed (exit ${result.status})`);
   } finally {
     writeCelldConfig(projectDir, plan.config);
     process.off('SIGINT', scrub);
     process.off('SIGTERM', scrub);
+  }
+
+  if (preDeploy === 'no-leases') {
+    const migrated = await applyAllMigrations(
+      celld,
+      databases,
+      projectDir,
+      env,
+      intEnv('SELFHOST_MIGRATION_ATTEMPTS', DEFAULT_MIGRATION_ATTEMPTS)
+    );
+    if (migrated === 'no-leases') {
+      throw new Error('no celld node holds a lease; is the stack running (docker compose ps)?');
+    }
   }
 
   await waitForHealth(box.CELLD_PORT || DEFAULT_CELLD_PORT, baseDomain);

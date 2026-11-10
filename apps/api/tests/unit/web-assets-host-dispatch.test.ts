@@ -34,7 +34,11 @@ function assetsBinding() {
   };
 }
 
-const ctx = { waitUntil: vi.fn(), passThroughOnException: vi.fn(), props: {} } as unknown as ExecutionContext;
+const ctx = {
+  waitUntil: vi.fn(),
+  passThroughOnException: vi.fn(),
+  props: {},
+} as unknown as ExecutionContext;
 
 function call(url: string, env: Record<string, unknown>, init?: RequestInit) {
   return worker.default.fetch(new Request(url, init), env as never, ctx);
@@ -64,7 +68,9 @@ describe('web UI host dispatch', () => {
       expect(await response.text()).toBe('spa:/projects/abc/chat');
       expect(response.headers.get('x-frame-options')).toBe('DENY');
       expect(ASSETS.fetch).toHaveBeenCalledTimes(1);
-      expect(ASSETS.fetch.mock.calls[0]![0].url).toBe(`https://app.${BASE_DOMAIN}/projects/abc/chat`);
+      expect(ASSETS.fetch.mock.calls[0]![0].url).toBe(
+        `https://app.${BASE_DOMAIN}/projects/abc/chat`
+      );
       expect(globalThis.fetch).not.toHaveBeenCalled();
     });
 
@@ -130,7 +136,11 @@ describe('resolvePagesProxyTarget with web assets', () => {
   it('is unchanged when hasWebAssets is false or absent', () => {
     for (const hasWebAssets of [false, undefined]) {
       expect(
-        resolvePagesProxyTarget(`app.${BASE_DOMAIN}`, { baseDomain: BASE_DOMAIN, appPagesProjectName: 'p', hasWebAssets })
+        resolvePagesProxyTarget(`app.${BASE_DOMAIN}`, {
+          baseDomain: BASE_DOMAIN,
+          appPagesProjectName: 'p',
+          hasWebAssets,
+        })
       ).toEqual({ type: 'proxy', hostname: 'p.pages.dev' });
     }
   });

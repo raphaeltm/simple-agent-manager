@@ -22,7 +22,9 @@ export function celldReleaseTarget(os = platform(), cpu = arch()): string {
           ? 'aarch64-apple-darwin'
           : null;
   if (!target || !CELLD_RELEASE_SHA256[target]) {
-    throw new Error(`celld ${CELLD_VERSION} has no release for ${os}/${cpu}; set CELLD_BIN to a celld binary`);
+    throw new Error(
+      `celld ${CELLD_VERSION} has no release for ${os}/${cpu}; set CELLD_BIN to a celld binary`
+    );
   }
   return target;
 }
@@ -35,7 +37,10 @@ export function sha256Hex(bytes: Uint8Array): string {
  * Returns a celld binary path: `CELLD_BIN` when set, otherwise the pinned release under
  * `binDir`, downloaded once. The compressed asset must match the pinned sha256.
  */
-export async function ensureCelldBinary(binDir: string, env: NodeJS.ProcessEnv = process.env): Promise<string> {
+export async function ensureCelldBinary(
+  binDir: string,
+  env: NodeJS.ProcessEnv = process.env
+): Promise<string> {
   if (env.CELLD_BIN) return env.CELLD_BIN;
   const target = celldReleaseTarget();
   const path = join(binDir, `celld-${CELLD_VERSION}`);
@@ -67,8 +72,14 @@ export function resolveEsbuild(apiDir: string, env: NodeJS.ProcessEnv = process.
   const fromApi = createRequire(join(apiDir, 'package.json'));
   const fromWrangler = createRequire(fromApi.resolve('wrangler/package.json'));
   const pkgPath = fromWrangler.resolve('esbuild/package.json');
-  const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { bin?: string | Record<string, string> };
-  const bin = typeof pkg.bin === 'string' ? pkg.bin : pkg.bin?.esbuild;
+  const pkg: unknown = JSON.parse(readFileSync(pkgPath, 'utf8')) as unknown;
+  const binField = typeof pkg === 'object' && pkg !== null && 'bin' in pkg ? pkg.bin : undefined;
+  const bin =
+    typeof binField === 'string'
+      ? binField
+      : typeof binField === 'object' && binField !== null && 'esbuild' in binField
+        ? String(binField.esbuild)
+        : undefined;
   if (!bin) throw new Error(`${pkgPath} declares no esbuild binary; set CELLD_ESBUILD`);
   return join(dirname(pkgPath), bin);
 }

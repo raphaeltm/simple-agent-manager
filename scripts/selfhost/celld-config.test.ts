@@ -11,9 +11,26 @@ const WRANGLER_TOML = resolve(import.meta.dirname, '../../apps/api/wrangler.toml
 
 /** celld 0.6.x's accepted top-level keys (celld docs, configuration reference). */
 const CELLD_TOP_LEVEL_KEYS = new Set([
-  'name', 'main', 'no_bundle', 'compatibility_date', 'compatibility_flags', 'durable_objects',
-  'migrations', 'assets', 'services', 'triggers', 'vars', 'd1_databases', 'kv_namespaces',
-  'queues', 'workflows', 'r2_buckets', 'worker_loaders', 'containers', 'define', 'rules',
+  'name',
+  'main',
+  'no_bundle',
+  'compatibility_date',
+  'compatibility_flags',
+  'durable_objects',
+  'migrations',
+  'assets',
+  'services',
+  'triggers',
+  'vars',
+  'd1_databases',
+  'kv_namespaces',
+  'queues',
+  'workflows',
+  'r2_buckets',
+  'worker_loaders',
+  'containers',
+  'define',
+  'rules',
 ]);
 
 function loadToml(): WranglerToml {
@@ -32,21 +49,36 @@ describe('buildCelldConfig against the real apps/api/wrangler.toml', () => {
   });
 
   it('drops every Cloudflare-only key and reports why', () => {
-    for (const key of ['port', 'limits', 'alias', 'artifacts', 'analytics_engine_datasets', 'ai', 'containers']) {
+    for (const key of [
+      'port',
+      'limits',
+      'alias',
+      'artifacts',
+      'analytics_engine_datasets',
+      'ai',
+      'containers',
+    ]) {
       expect(config).not.toHaveProperty(key);
       expect(plan.report.some((line) => line.startsWith(`drop [${key}]`))).toBe(true);
     }
   });
 
   it('folds every legacy new_classes create into new_sqlite_classes, keeping tag order', () => {
-    const sourceMigrations = source.migrations as Array<{ tag: string; new_classes?: string[]; new_sqlite_classes?: string[] }>;
+    const sourceMigrations = source.migrations as Array<{
+      tag: string;
+      new_classes?: string[];
+      new_sqlite_classes?: string[];
+    }>;
     expect(sourceMigrations.some((m) => m.new_classes?.length)).toBe(true);
     expect(config.migrations.map((m) => m.tag)).toEqual(sourceMigrations.map((m) => m.tag));
     for (const migration of config.migrations) {
       expect(Object.keys(migration).sort()).toEqual(['new_sqlite_classes', 'tag']);
     }
     const created = config.migrations.flatMap((m) => m.new_sqlite_classes);
-    const expected = sourceMigrations.flatMap((m) => [...(m.new_sqlite_classes ?? []), ...(m.new_classes ?? [])]);
+    const expected = sourceMigrations.flatMap((m) => [
+      ...(m.new_sqlite_classes ?? []),
+      ...(m.new_classes ?? []),
+    ]);
     expect(new Set(created)).toEqual(new Set(expected));
   });
 
@@ -83,11 +115,14 @@ describe('buildCelldConfig against the real apps/api/wrangler.toml', () => {
   });
 
   it('turns the Cloudflare-only switches off and sets BASE_DOMAIN', () => {
-    for (const [key, value] of Object.entries(SELFHOST_VAR_OVERRIDES)) expect(config.vars[key]).toBe(value);
+    for (const [key, value] of Object.entries(SELFHOST_VAR_OVERRIDES))
+      expect(config.vars[key]).toBe(value);
     expect(config.vars.CF_CONTAINER_ENABLED).toBe('false');
     expect(config.vars.BASE_DOMAIN).toBe('sam.example.com');
     // Ordinary tunables still flow through from wrangler.toml [vars].
-    expect(config.vars.MAX_NODES_PER_USER).toBe((source.vars as Record<string, string>).MAX_NODES_PER_USER);
+    expect(config.vars.MAX_NODES_PER_USER).toBe(
+      (source.vars as Record<string, string>).MAX_NODES_PER_USER
+    );
   });
 
   it('serves the web build through ASSETS with SPA fallback, Worker first', () => {
@@ -109,32 +144,48 @@ describe('buildCelldConfig failure modes', () => {
   const base = (): WranglerToml => loadToml();
 
   it('fails loudly on a top-level key it has no rule for', () => {
-    for (const key of ['routes', 'tail_consumers', 'observability', 'env', 'send_email', 'workers_dev']) {
+    for (const key of [
+      'routes',
+      'tail_consumers',
+      'observability',
+      'env',
+      'send_email',
+      'workers_dev',
+    ]) {
       const source = { ...base(), [key]: [] };
-      expect(() => buildCelldConfig(source, options)).toThrow(new RegExp(`no self-host translation: ${key}`));
+      expect(() => buildCelldConfig(source, options)).toThrow(
+        new RegExp(`no self-host translation: ${key}`)
+      );
     }
   });
 
   it('fails on a binding field it does not translate', () => {
     const source = base();
     (source.d1_databases as Array<Record<string, unknown>>)[0]!.preview_database_id = 'x';
-    expect(() => buildCelldConfig(source, options)).toThrow(/d1_databases\[0\] has keys .*preview_database_id/);
+    expect(() => buildCelldConfig(source, options)).toThrow(
+      /d1_databases\[0\] has keys .*preview_database_id/
+    );
   });
 
   it('fails on a Durable Object migration celld cannot apply', () => {
     const source = base();
-    (source.migrations as unknown[]).push({ tag: 'v999', renamed_classes: [{ from: 'A', to: 'B' }] });
+    (source.migrations as unknown[]).push({
+      tag: 'v999',
+      renamed_classes: [{ from: 'A', to: 'B' }],
+    });
     expect(() => buildCelldConfig(source, options)).toThrow(/migration v999 uses renamed_classes/);
   });
 
   it('refuses caller vars for keys the generator owns', () => {
-    expect(() => buildCelldConfig(base(), { ...options, vars: { BASE_DOMAIN: 'evil.example' } })).toThrow(
-      /vars.BASE_DOMAIN is generated/
-    );
+    expect(() =>
+      buildCelldConfig(base(), { ...options, vars: { BASE_DOMAIN: 'evil.example' } })
+    ).toThrow(/vars.BASE_DOMAIN is generated/);
   });
 
   it('refuses an assets directory outside the project', () => {
-    expect(() => buildCelldConfig(base(), { ...options, assetsDirectory: '../web' })).toThrow(/no \.\./);
+    expect(() => buildCelldConfig(base(), { ...options, assetsDirectory: '../web' })).toThrow(
+      /no \.\./
+    );
   });
 
   it('omits assets when no web build is given', () => {

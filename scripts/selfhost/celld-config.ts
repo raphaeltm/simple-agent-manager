@@ -128,26 +128,25 @@ function asArray(value: unknown, context: string): unknown[] {
 }
 
 function asString(value: unknown, context: string): string {
-  if (typeof value !== 'string' || value.length === 0) fail(`${context} must be a non-empty string`);
+  if (typeof value !== 'string' || value.length === 0)
+    fail(`${context} must be a non-empty string`);
   return value;
 }
 
-/** Copies the allowed fields of a binding entry and throws on any other field. */
-function pickFields(
+/** Copies exactly `fields` from a binding entry and throws on any other field. */
+function pickFields<K extends string>(
   value: unknown,
   context: string,
-  required: readonly string[],
-  optional: readonly string[] = []
-): Record<string, string> {
+  fields: readonly K[]
+): Record<K, string> {
   const record = asRecord(value, context);
-  const allowed = new Set([...required, ...optional]);
+  const allowed = new Set<string>(fields);
   const unknown = Object.keys(record).filter((key) => !allowed.has(key));
-  if (unknown.length > 0) fail(`${context} has keys celld config does not translate: ${unknown.join(', ')}`);
-  const picked: Record<string, string> = {};
-  for (const key of required) picked[key] = asString(record[key], `${context}.${key}`);
-  for (const key of optional) {
-    if (record[key] !== undefined) picked[key] = asString(record[key], `${context}.${key}`);
+  if (unknown.length > 0) {
+    fail(`${context} has keys celld config does not translate: ${unknown.join(', ')}`);
   }
+  const picked = {} as Record<K, string>;
+  for (const key of fields) picked[key] = asString(record[key], `${context}.${key}`);
   return picked;
 }
 
@@ -172,7 +171,9 @@ function translateMigrations(value: unknown, ctx: TranslateContext): void {
   ctx.out.migrations = resolved.map((entry) => {
     const extra = Object.keys(entry).filter((key) => key !== 'tag' && key !== 'new_sqlite_classes');
     if (extra.length > 0) {
-      fail(`migration ${entry.tag} uses ${extra.join(', ')}; celld accepts only tag + new_sqlite_classes`);
+      fail(
+        `migration ${entry.tag} uses ${extra.join(', ')}; celld accepts only tag + new_sqlite_classes`
+      );
     }
     return {
       tag: asString(entry.tag, 'migrations[].tag'),
@@ -187,18 +188,25 @@ function translateMigrations(value: unknown, ctx: TranslateContext): void {
 
 function translateD1(value: unknown, ctx: TranslateContext): void {
   ctx.out.d1_databases = asArray(value, 'd1_databases').map((entry, index) => {
-    const d = pickFields(entry, `d1_databases[${index}]`, ['binding', 'database_name', 'database_id', 'migrations_dir']);
-    const projectRelativeDir = migrationDirName(d.database_name!);
+    const d = pickFields(entry, `d1_databases[${index}]`, [
+      'binding',
+      'database_name',
+      'database_id',
+      'migrations_dir',
+    ]);
+    const projectRelativeDir = migrationDirName(d.database_name);
     ctx.plan.migrationDirs.push({
-      databaseName: d.database_name!,
+      databaseName: d.database_name,
       projectRelativeDir,
-      sourceDir: d.migrations_dir!,
+      sourceDir: d.migrations_dir,
     });
-    ctx.plan.report.push(`d1 ${d.binding}: migrations_dir ${d.migrations_dir} -> ${projectRelativeDir} (flat)`);
+    ctx.plan.report.push(
+      `d1 ${d.binding}: migrations_dir ${d.migrations_dir} -> ${projectRelativeDir} (flat)`
+    );
     return {
-      binding: d.binding!,
-      database_name: d.database_name!,
-      database_id: d.database_id!,
+      binding: d.binding,
+      database_name: d.database_name,
+      database_id: d.database_id,
       migrations_dir: projectRelativeDir,
     };
   });
@@ -211,14 +219,14 @@ function translateR2(value: unknown, ctx: TranslateContext): void {
   const seen = new Set<string>();
   ctx.out.r2_buckets = asArray(value, 'r2_buckets').map((entry, index) => {
     const b = pickFields(entry, `r2_buckets[${index}]`, ['binding', 'bucket_name']);
-    let bucketName = b.bucket_name!;
+    let bucketName = b.bucket_name;
     if (seen.has(bucketName)) {
-      bucketName = `${bucketName}-${b.binding!.toLowerCase().replaceAll('_', '-')}`;
+      bucketName = `${bucketName}-${b.binding.toLowerCase().replaceAll('_', '-')}`;
       if (seen.has(bucketName)) fail(`r2 binding ${b.binding} cannot get a distinct bucket name`);
       ctx.plan.report.push(`r2 ${b.binding}: shared bucket ${b.bucket_name} -> ${bucketName}`);
     }
     seen.add(bucketName);
-    return { binding: b.binding!, bucket_name: bucketName };
+    return { binding: b.binding, bucket_name: bucketName };
   });
 }
 
@@ -249,16 +257,22 @@ const RULES: Readonly<Record<string, Rule>> = {
     },
   },
   artifacts: { kind: 'drop', reason: 'Cloudflare Artifacts binding; ARTIFACTS_ENABLED=false' },
-  analytics_engine_datasets: { kind: 'drop', reason: 'Analytics Engine binding; ANALYTICS_ENABLED=false' },
+  analytics_engine_datasets: {
+    kind: 'drop',
+    reason: 'Analytics Engine binding; ANALYTICS_ENABLED=false',
+  },
   ai: { kind: 'drop', reason: 'Workers AI binding' },
-  containers: { kind: 'drop', reason: 'Cloudflare Containers; container DO classes stay bound as plain DOs' },
+  containers: {
+    kind: 'drop',
+    reason: 'Cloudflare Containers; container DO classes stay bound as plain DOs',
+  },
   d1_databases: { kind: 'translate', apply: translateD1 },
   kv_namespaces: {
     kind: 'translate',
     apply: (v, ctx) =>
       (ctx.out.kv_namespaces = asArray(v, 'kv_namespaces').map((entry, index) => {
         const kv = pickFields(entry, `kv_namespaces[${index}]`, ['binding', 'id']);
-        return { binding: kv.binding!, id: kv.id! };
+        return { binding: kv.binding, id: kv.id };
       })),
   },
   r2_buckets: { kind: 'translate', apply: translateR2 },
@@ -271,7 +285,7 @@ const RULES: Readonly<Record<string, Rule>> = {
       ctx.out.durable_objects = {
         bindings: asArray(record.bindings, 'durable_objects.bindings').map((entry, index) => {
           const b = pickFields(entry, `durable_objects.bindings[${index}]`, ['name', 'class_name']);
-          return { name: b.name!, class_name: b.class_name! };
+          return { name: b.name, class_name: b.class_name };
         }),
       };
     },
@@ -307,7 +321,10 @@ const REQUIRED_OUTPUT_KEYS = [
  * Throws on any wrangler.toml key without a translation rule, on binding fields it does not
  * know, and on Durable Object migrations celld cannot apply (renames, deletes, transfers).
  */
-export function buildCelldConfig(source: WranglerToml, options: CelldConfigOptions): CelldConfigPlan {
+export function buildCelldConfig(
+  source: WranglerToml,
+  options: CelldConfigOptions
+): CelldConfigPlan {
   if (!/^[a-z0-9.-]+$/i.test(options.baseDomain) || !options.baseDomain.includes('.')) {
     fail(`baseDomain "${options.baseDomain}" is not a domain name`);
   }
@@ -326,7 +343,8 @@ export function buildCelldConfig(source: WranglerToml, options: CelldConfigOptio
 
   const ctx: TranslateContext = { out: {}, plan: { migrationDirs: [], report: [] }, options };
   for (const [key, value] of Object.entries(source)) {
-    const rule = RULES[key]!;
+    const rule = RULES[key];
+    if (!rule) continue; // unreachable: unknown keys were rejected above
     if (rule.kind === 'drop') ctx.plan.report.push(`drop [${key}]: ${rule.reason}`);
     else rule.apply(value, ctx);
   }
@@ -346,7 +364,10 @@ export function buildCelldConfig(source: WranglerToml, options: CelldConfigOptio
   };
 
   if (options.assetsDirectory !== undefined) {
-    if (options.assetsDirectory.startsWith('/') || options.assetsDirectory.split('/').includes('..')) {
+    if (
+      options.assetsDirectory.startsWith('/') ||
+      options.assetsDirectory.split('/').includes('..')
+    ) {
       fail('assetsDirectory must be relative to the project dir with no ..');
     }
     if (out.durable_objects.bindings.some((b) => b.name === ASSETS_BINDING)) {

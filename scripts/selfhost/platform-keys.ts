@@ -58,7 +58,10 @@ const GENERATORS: ReadonlyArray<{
     names: ['DEPLOY_SIGNING_PRIVATE_KEY', 'DEPLOY_SIGNING_PUBLIC_KEY'],
     generate: () => {
       const pair = generateDeploySigningKeyPair();
-      return { DEPLOY_SIGNING_PRIVATE_KEY: pair.privateKey, DEPLOY_SIGNING_PUBLIC_KEY: pair.publicKey };
+      return {
+        DEPLOY_SIGNING_PRIVATE_KEY: pair.privateKey,
+        DEPLOY_SIGNING_PUBLIC_KEY: pair.publicKey,
+      };
     },
   },
   {
@@ -70,8 +73,14 @@ const GENERATORS: ReadonlyArray<{
   },
   // Same shape as Pulumi's `preview-signing-key` (32 bytes, base64) and
   // `installation-id` (16 bytes, lowercase hex).
-  { names: ['PREVIEW_SIGNING_KEY'], generate: () => ({ PREVIEW_SIGNING_KEY: randomBytes(32).toString('base64') }) },
-  { names: ['SAM_INSTALLATION_ID'], generate: () => ({ SAM_INSTALLATION_ID: randomBytes(16).toString('hex') }) },
+  {
+    names: ['PREVIEW_SIGNING_KEY'],
+    generate: () => ({ PREVIEW_SIGNING_KEY: randomBytes(32).toString('base64') }),
+  },
+  {
+    names: ['SAM_INSTALLATION_ID'],
+    generate: () => ({ SAM_INSTALLATION_ID: randomBytes(16).toString('hex') }),
+  },
   // Hex so it is safe in frps's plugin URL userinfo.
   {
     names: ['REVERSE_TUNNEL_GATEWAY_SECRET'],

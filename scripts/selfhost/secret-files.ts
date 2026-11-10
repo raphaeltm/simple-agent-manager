@@ -66,12 +66,12 @@ export function parseDotenv(text: string, source: string): Record<string, string
   const values: Record<string, string> = {};
   const lines = text.split(/\r?\n/);
   for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i]!.trim();
+    const line = (lines[i] ?? '').trim();
     if (line === '' || line.startsWith('#')) continue;
     const match = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(line);
     if (!match) throw new Error(`${source}:${i + 1}: expected NAME=value`);
-    const name = match[1]!;
-    let rest = match[2]!;
+    const [, name = '', matchedRest = ''] = match;
+    let rest = matchedRest;
     let value: string;
     if (rest.startsWith('"')) {
       const lineNo = i + 1;
@@ -109,7 +109,8 @@ export function readSecretsFile(path: string): Record<string, string> {
   assertPrivateFile(path);
   const parsed = parseDotenv(readFileSync(path, 'utf8'), path);
   for (const name of Object.keys(parsed)) {
-    if (!SECRET_NAME.test(name)) throw new Error(`${path}: ${name} is not an UPPER_SNAKE_CASE name`);
+    if (!SECRET_NAME.test(name))
+      throw new Error(`${path}: ${name} is not an UPPER_SNAKE_CASE name`);
   }
   return parsed;
 }
@@ -126,6 +127,7 @@ export function readPrivateJson(path: string): Record<string, string> {
     throw new Error(`${path} is not valid JSON`);
   }
   const result = v.safeParse(StringMapSchema, raw);
-  if (!result.success) throw new Error(`${path} must be a JSON object of UPPER_SNAKE_CASE string values`);
+  if (!result.success)
+    throw new Error(`${path} must be a JSON object of UPPER_SNAKE_CASE string values`);
   return result.output;
 }

@@ -1,4 +1,14 @@
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, statSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -42,12 +52,15 @@ describe('prepareCelldProject', () => {
     expect(main.length).toBeGreaterThan(200);
     expect(observability.length).toBeGreaterThan(0);
 
-    const [mainDir, obsDir] = p.config.d1_databases.map((db) => join(projectDir, db.migrations_dir));
+    const [mainDir, obsDir] = p.config.d1_databases.map((db) =>
+      join(projectDir, db.migrations_dir)
+    );
     expect(readdirSync(mainDir!).sort()).toEqual(main);
     expect(readdirSync(obsDir!).sort()).toEqual(observability);
     // Flat: no subdirectory holding .sql files (celld refuses that), and links, not copies.
     for (const dir of [mainDir!, obsDir!]) {
-      for (const entry of readdirSync(dir)) expect(lstatSync(join(dir, entry)).isSymbolicLink()).toBe(true);
+      for (const entry of readdirSync(dir))
+        expect(lstatSync(join(dir, entry)).isSymbolicLink()).toBe(true);
     }
     expect(existsSync(join(API_DIR, 'src/db/migrations/observability'))).toBe(true);
   });
@@ -65,13 +78,17 @@ describe('prepareCelldProject', () => {
   it('refuses to replace a real directory where the src symlink belongs', () => {
     const projectDir = mkdtempSync(join(tmpdir(), 'sam-celld-'));
     mkdirSync(join(projectDir, 'src'));
-    expect(() => prepareCelldProject({ apiDir: API_DIR, projectDir, plan: plan() })).toThrow(/not a symlink/);
+    expect(() => prepareCelldProject({ apiDir: API_DIR, projectDir, plan: plan() })).toThrow(
+      /not a symlink/
+    );
   });
 
   it('copies the web build with _headers but without source maps', () => {
     const projectDir = join(mkdtempSync(join(tmpdir(), 'sam-celld-')), 'project');
     prepareCelldProject({ apiDir: API_DIR, projectDir, plan: plan(true), webDist: fakeWebDist() });
-    expect(readFileSync(join(projectDir, 'web/_headers'), 'utf8')).toContain('X-Frame-Options: DENY');
+    expect(readFileSync(join(projectDir, 'web/_headers'), 'utf8')).toContain(
+      'X-Frame-Options: DENY'
+    );
     expect(existsSync(join(projectDir, 'web/assets/app.js'))).toBe(true);
     expect(existsSync(join(projectDir, 'web/assets/app.js.map'))).toBe(false);
   });

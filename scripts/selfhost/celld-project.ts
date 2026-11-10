@@ -40,7 +40,8 @@ export interface PrepareProjectOptions {
 /** Points `link` at `target`, replacing a stale symlink but never a real file or directory. */
 function ensureSymlink(target: string, link: string): void {
   if (existsSync(link) || isSymlink(link)) {
-    if (!isSymlink(link)) throw new Error(`${link} exists and is not a symlink; refusing to replace it`);
+    if (!isSymlink(link))
+      throw new Error(`${link} exists and is not a symlink; refusing to replace it`);
     if (readlinkSync(link) === target) return;
     rmSync(link);
   }
