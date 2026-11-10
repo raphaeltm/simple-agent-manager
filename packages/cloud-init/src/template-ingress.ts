@@ -6,6 +6,8 @@
  * - Direct (legacy): Origin CA bootstrap; the agent serves TLS on its public
  *   port, restricted to Cloudflare IPs by the firewall.
  * - Tunnel: pinned cloudflared connector; no public agent ingress at all.
+ * - Reverse tunnel: pinned frpc connector (template-reverse-tunnel.ts); same firewall
+ *   and loopback listener as the Cloudflare tunnel.
  */
 
 /** Direct mode: node-local Origin CA key/CSR, signed by the control plane. */
@@ -125,10 +127,10 @@ export const TUNNEL_CONNECTOR_RUNCMD = `  - 'logger -t sam-boot "PHASE START: tu
   - 'logger -t sam-boot "PHASE END: tunnel-connector"'`;
 
 /**
- * Tunnel mode: the connector unit. ExecStartPre gates every start, including
- * restarts and reboots, on the agent's loopback tunnel listener answering.
+ * Tunnel modes (Cloudflare and reverse tunnel): the connector's ExecStartPre gate. It
+ * exposes nothing until the vm-agent's loopback tunnel listener answers.
  */
-export const TUNNEL_WRITE_FILES = `  - path: /usr/local/sbin/sam-wait-tunnel-listener
+export const TUNNEL_LISTENER_WAIT_WRITE_FILE = `  - path: /usr/local/sbin/sam-wait-tunnel-listener
     permissions: '0755'
     content: |
       #!/bin/sh
@@ -141,7 +143,13 @@ export const TUNNEL_WRITE_FILES = `  - path: /usr/local/sbin/sam-wait-tunnel-lis
           exit 1
         fi
         sleep {{ tunnel_listener_probe_interval_seconds }}
-      done
+      done`;
+
+/**
+ * Cloudflare Tunnel mode: the connector unit. ExecStartPre gates every start, including
+ * restarts and reboots, on the agent's loopback tunnel listener answering.
+ */
+export const TUNNEL_WRITE_FILES = `${TUNNEL_LISTENER_WAIT_WRITE_FILE}
 
   - path: /etc/systemd/system/sam-cloudflared.service
     permissions: '0644'

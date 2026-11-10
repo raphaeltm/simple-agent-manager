@@ -46,13 +46,9 @@ import {
   deleteCreatedProviderVmDirectly,
 } from './node-provisioning-race-cleanup';
 export { resolveHetznerBaseImageOverride } from './node-provisioning-image';
+import { prepareNodeTunnelIngress, settleNodeTunnelIngress } from './node-provisioning-ingress';
 import { recordRejectedAllocationAbsence } from './node-rejection-proof';
-import { settleNodeTunnels } from './node-tunnel-cleanup';
 import { resolveManagedNodeTransport, type TunnelEnv } from './node-tunnel-config';
-import {
-  ensureNodeTunnelForProvisioning,
-  type NodeTunnelProvisioning,
-} from './node-tunnel-provisioning';
 import { persistError } from './observability';
 import {
   createProviderForUser,
@@ -177,8 +173,8 @@ export async function provisionNode(
     // A resumed allocation keeps the transport its (possibly already created) VM was
     // booted with; only a new incarnation reads the installation's current choice.
     const transport = resuming
-      ? node.transport === 'cloudflare-tunnel'
-        ? 'cloudflare-tunnel'
+      ? node.transport === 'cloudflare-tunnel' || node.transport === 'reverse-tunnel'
+        ? node.transport
         : null
       : resolveManagedNodeTransport(tunnelEnv, {
           isDeploymentNode: !!deploymentContext,
@@ -257,21 +253,17 @@ export async function provisionNode(
 
     const isDeploymentNode = !!deploymentContext;
 
-    // Journal + create the incarnation's named tunnel BEFORE the provider VM exists, so
-    // every later failure can find and remove it (services/node-tunnel-provisioning.ts).
-    let tunnel: NodeTunnelProvisioning | null = null;
-    if (transport === 'cloudflare-tunnel') {
-      if (!provisioningRuntimeIncarnationId) {
-        throw new Error('Tunnel transport requires a runtime incarnation');
-      }
-      tunnelJournaled = true;
-      tunnel = await ensureNodeTunnelForProvisioning(env, {
-        nodeId: node.id,
-        userId: node.userId,
-        runtimeIncarnationId: provisioningRuntimeIncarnationId,
-        signal: options?.signal,
-      });
-    }
+    // Tunnel ownership (Cloudflare journal or reverse-tunnel lease) is recorded BEFORE the
+    // provider VM exists, so every later failure can find and release it.
+    const { tunnel, reverseTunnel } = await prepareNodeTunnelIngress(env, transport, {
+      nodeId: node.id,
+      userId: node.userId,
+      runtimeIncarnationId: provisioningRuntimeIncarnationId,
+      signal: options?.signal,
+      onOwnershipRecorded: () => {
+        tunnelJournaled = true;
+      },
+    });
 
     const cloudInit = buildNodeCloudInit({
       env,
@@ -282,6 +274,7 @@ export async function provisionNode(
       taskContext,
       deploymentContext,
       tunnel,
+      reverseTunnel,
     });
 
     if (!validateCloudInitSize(cloudInit)) {
@@ -442,9 +435,10 @@ export async function provisionNode(
     // Scaleway allocates IPs asynchronously after boot — vm.ip will be empty.
     // Store the provider instance ID and mark as pending-ip; heartbeat backfill
     // will capture the IP when the VM agent sends its first heartbeat.
-    // Tunnel nodes are reached through cloudflared, never the public IP: no IP wait and no
-    // A record. The heartbeat backfill also skips them (keyed on nodes.tunnel_id).
-    if (!vm.ip && !tunnel) {
+    // Tunnel nodes are reached through cloudflared or frpc, never the public IP: no IP wait
+    // and no A record. The heartbeat backfill also skips them (keyed on the node's transport).
+    const tunnelIngress = !!tunnel || !!reverseTunnel;
+    if (!vm.ip && !tunnelIngress) {
       log.info('node_provisioning.awaiting_ip_backfill', {
         nodeId: node.id,
         providerInstanceId: vm.id,
@@ -487,7 +481,7 @@ export async function provisionNode(
 
     let backendDnsRecordId: string | null = null;
     let dnsErrorMessage: string | null = null;
-    if (!tunnel) {
+    if (!tunnelIngress) {
       try {
         backendDnsRecordId = durable
           ? await createNodeBackendDNSRecord(node.id, vm.ip, env, providerContext?.signal, true)
@@ -674,7 +668,7 @@ export async function provisionNode(
       // After the row writes above: a deleted row or rejection proof makes the incarnation
       // non-live, which releases its tunnel. A possibly-created VM keeps it until node
       // teardown records termination proof. Never throws; the cron sweep is the backstop.
-      if (tunnelJournaled) await settleNodeTunnels(env, node.id, 'provisioning_failed');
+      if (tunnelJournaled) await settleNodeTunnelIngress(env, node.id, 'provisioning_failed');
     }
   }
 }

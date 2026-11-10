@@ -1182,7 +1182,11 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   TTS_RETRY_ATTEMPTS?: string;
   TTS_RETRY_BASE_DELAY_MS?: string;
   // Managed VM transport (new nodes only; legacy nodes and instant containers keep their transport)
-  VM_AGENT_TRANSPORT?: string; // "vm-public-dns" (default) or "cloudflare-tunnel"
+  VM_AGENT_TRANSPORT?: string; // "vm-public-dns" (default), "cloudflare-tunnel", or "reverse-tunnel" (self-hosted box with frps)
+  // Reverse-tunnel transport (self-hosted control plane; read only when VM_AGENT_TRANSPORT="reverse-tunnel")
+  REVERSE_TUNNEL_GATEWAY_SECRET?: string; // Secret shared with the box's frps plugin and Caddy forward_auth; required for reverse-tunnel
+  REVERSE_TUNNEL_PORT_RANGE_START?: string; // Default: 20000. First loopback port leased to nodes; must match frps allowPorts
+  REVERSE_TUNNEL_PORT_RANGE_END?: string; // Default: 29999. Last loopback port leased to nodes; must match frps allowPorts
   VM_AGENT_TUNNEL_PORT?: string; // Dedicated loopback tunnel ingress port (default: 8444)
   CLOUDFLARED_VERSION?: string; // Pinned connector release supported by cloud-init (default: 2026.10.7)
   VM_AGENT_TUNNEL_LISTENER_WAIT_SECONDS?: string; // Default: 120. Elapsed connector startup wait for the loopback agent listener (1-3600 seconds).

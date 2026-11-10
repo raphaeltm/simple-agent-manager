@@ -60,8 +60,11 @@ redacted.
 - Still reachable but failing without Cloudflare: the SAM agent's default model
   (`@cf/...` through AI Gateway), voice transcription, and the Workers AI model catalog (503).
 - `www.SAM_DOMAIN` answers 503 and the apex is not served; only the subdomains above are used.
-- `VM_AGENT_TRANSPORT=reverse-tunnel` is set for the box. Node provisioning needs the
-  reverse-tunnel transport from the same integration branch.
+- `VM_AGENT_TRANSPORT=reverse-tunnel` is set for the box: nodes run a pinned frpc that dials
+  `wss://api.SAM_DOMAIN/~!frp` and is exposed on a leased loopback port (20000-29999 by default);
+  frps asks the Worker to authorize every login, proxy and heartbeat. Node WebSockets go through
+  Caddy forward_auth (`caddy/sam.d/node-ws.caddy`); plain HTTP to nodes stays on the Worker and is
+  cut at `CELLD_FETCH_TIMEOUT_S`. The box needs a certificate nodes trust (frpc verifies it).
 - The Worker shares the host network, so its outbound `fetch` can reach loopback services
   (celld's operator listener, the bundled store, frps) and, on GCE, the metadata server. There
   is no egress fence yet.
