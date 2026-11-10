@@ -48,3 +48,8 @@ updates:
     directory: '/deploy/selfhost/caddy'
     schedule:
       interval: weekly
+  # Self-hosted celld egress fence (alpine + nftables).
+  - package-ecosystem: 'docker'
+    directory: '/deploy/selfhost/egress-fence'
+    schedule:
+      interval: weekly

@@ -138,7 +138,7 @@ describe('composable credentials routes', () => {
           body: JSON.stringify({
             name: 'My endpoint',
             kind: 'openai-compatible',
-            secret: { apiKey: 'sk-test-key-1234567890', baseUrl, dialect: 'openai-compatible' },
+            secret: { apiKey: 'placeholder-provider-key', baseUrl, dialect: 'openai-compatible' },
           }),
         },
         { ...env, ENCRYPTION_KEY: btoa('k'.repeat(32)) } as Env

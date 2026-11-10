@@ -137,6 +137,7 @@ describe('dependency governance', () => {
       'apps/api/Dockerfile.sandbox',
       'apps/api/Dockerfile.vm-agent-container',
       'deploy/selfhost/caddy/Dockerfile',
+      'deploy/selfhost/egress-fence/Dockerfile',
       'scripts/e2e/workspace-mock/Dockerfile',
     ]);
     expect(refs.length).toBeGreaterThanOrEqual(dockerfiles.length);
@@ -144,6 +145,7 @@ describe('dependency governance', () => {
     expect([...extractDependabotDirectories('docker')].sort()).toEqual([
       '/apps/api',
       '/deploy/selfhost/caddy',
+      '/deploy/selfhost/egress-fence',
       '/scripts/e2e/workspace-mock',
     ]);
   });
