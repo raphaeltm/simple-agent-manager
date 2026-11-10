@@ -10,8 +10,6 @@ import { listCredentials } from '../api';
  * and the two onboarding components (`OnboardingProvider` + `ChoosePathWizard`, both
  * of which `AppShell` mounts on EVERY authenticated page).
  *
- * Still issuing its own request, tracked as follow-up: `CreateWorkspace.tsx`.
- *
  * NOT persistable. `CredentialResponse` is connection configuration, which
  * `query-persist-config.ts` places on the never-persist-without-security-review
  * list. It is deliberately absent from `PERSISTED_QUERY_OPERATIONS`.

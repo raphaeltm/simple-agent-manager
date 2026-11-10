@@ -92,10 +92,6 @@ function renderNode(path: string) {
         <Routes>
           <Route path="/nodes/:id" element={<Node />} />
           <Route path="/nodes" element={<div data-testid="nodes-list-page">Nodes</div>} />
-          <Route
-            path="/workspaces/new"
-            element={<div data-testid="workspace-create-probe">probe</div>}
-          />
         </Routes>
       </MemoryRouter>
     </ToastProvider>,
@@ -177,15 +173,17 @@ describe('Node page', () => {
     expect(await screen.findByText('Node started')).toBeInTheDocument();
   });
 
-  it('supports create-workspace navigation from node detail', async () => {
+  it('does not offer manual workspace creation from node detail', async () => {
     renderNode('/nodes/node-1');
 
     await waitFor(() => {
       expect(screen.getAllByText('Node 1').length).toBeGreaterThanOrEqual(1);
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /create workspace/i }));
-    expect(await screen.findByTestId('workspace-create-probe')).toBeInTheDocument();
+    // Liveness: the page actions and the workspaces section rendered.
+    expect(screen.getByRole('button', { name: /stop node/i })).toBeInTheDocument();
+    expect(await screen.findByText('Workspaces')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /create workspace/i })).not.toBeInTheDocument();
   });
 
   it('shows stop/delete confirmations and calls lifecycle APIs', async () => {

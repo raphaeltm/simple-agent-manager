@@ -70,7 +70,6 @@ const AdminStream = lazyNamed(() => import('./pages/AdminStream'), 'AdminStream'
 const AdminUsers = lazyNamed(() => import('./pages/AdminUsers'), 'AdminUsers');
 const AgentContextPage = lazyNamed(() => import('./pages/AgentContextPage'), 'AgentContextPage');
 const Chats = lazyNamed(() => import('./pages/Chats'), 'Chats');
-const CreateWorkspace = lazyNamed(() => import('./pages/CreateWorkspace'), 'CreateWorkspace');
 const DeviceAuth = lazyNamed(() => import('./pages/DeviceAuth'), 'DeviceAuth');
 const IdeaPage = lazyNamed(() => import('./pages/ideas/IdeaPage'), 'IdeaPage');
 const IdeasListPage = lazyNamed(() => import('./pages/ideas/IdeasListPage'), 'IdeasListPage');
@@ -404,9 +403,9 @@ export default function App() {
 
                       <Route path="/nodes" element={page(<Nodes />)} />
                       <Route path="/nodes/:id" element={page(<Node />)} />
-                      {/* The Workspaces list was removed; old links land on Infrastructure. */}
+                      {/* The Workspaces list and manual create form were removed; old links land on Infrastructure. */}
                       <Route path="/workspaces" element={<Navigate to="/nodes" replace />} />
-                      <Route path="/workspaces/new" element={page(<CreateWorkspace />)} />
+                      <Route path="/workspaces/new" element={<Navigate to="/nodes" replace />} />
                       <Route path="/settings" element={page(<Settings />)}>
                         <Route index element={<Navigate to="agents" replace />} />
                         <Route path="agents" element={page(<SettingsAgents />)} />

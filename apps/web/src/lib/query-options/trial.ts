@@ -7,8 +7,7 @@ import { TRIAL_STATUS_STALE_TIME_MS } from '../query-stale-times';
  * Installation platform compute availability (`GET /api/trial-status`).
  *
  * Read to decide whether a user without their own cloud credential can still
- * provision. Project chat routes through this key; `CreateWorkspace.tsx` still fetches
- * it directly, so the consolidation here is partial — see the follow-up note in the PR.
+ * provision. Project chat routes through this key.
  */
 export const trialQueryKeys = {
   all: (queryScope: string) => ['auth', queryScope, 'trial'] as const,
