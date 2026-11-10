@@ -251,6 +251,16 @@ describe('stop_subtask', () => {
     }
   );
 
+  it('reports a lost cancel race instead of claiming the task stopped', async () => {
+    const ctx = buildCtx({ dbRunChanges: 0 });
+    queueD1Result(ctx._db._statement, [
+      { id: 'task-1', status: 'in_progress', workspace_id: null, project_id: 'proj-1', title: 'R' },
+    ]);
+    const result = (await stopSubtask({ taskId: 'task-1' }, ctx)) as Record<string, unknown>;
+    expect(result.stopped).toBeUndefined();
+    expect(result.error).toContain('changed status');
+  });
+
   it('does not wake a sleeping task to stop its agent', async () => {
     const { stopAgentSessionOnNode } = await import('../../../src/services/node-agent');
     vi.mocked(stopAgentSessionOnNode).mockClear();

@@ -15,6 +15,7 @@ import { stopAgentSessionOnNode } from '../../../services/node-agent';
 import { isSleepingContainerNode } from '../../../services/sleeping-container-runtime';
 import { WAKEABLE_TASK_STATUSES } from '../../../services/task-status';
 import { cleanupTerminalTaskResources } from '../../../services/task-terminal-cleanup';
+import { syncTriggerExecutionStatus } from '../../../services/trigger-execution-sync';
 import type { AnthropicToolDef, ToolContext } from '../types';
 
 /**
@@ -74,8 +75,48 @@ export async function stopSubtask(input: { taskId: string }, ctx: ToolContext): 
     };
   }
 
-  // Try to stop the agent session on the VM (best-effort). A sleeping task has
-  // already released its runtime; stop it without waking it.
+  // Mark task as cancelled first. Compare-and-set on the status read above, so a task
+  // that completed or failed meanwhile keeps its real terminal story; the status event
+  // is only written when this cancellation actually landed.
+  const now = new Date().toISOString();
+  let cancelled = false;
+  try {
+    const [transition] = await env.DATABASE.batch([
+      env.DATABASE.prepare(
+        `UPDATE tasks SET status = 'cancelled', error_message = 'Stopped by user via SAM', updated_at = ?, completed_at = ?
+          WHERE id = ? AND status = ?`
+      ).bind(now, now, taskId, task.status),
+      env.DATABASE.prepare(
+        `INSERT INTO task_status_events (id, task_id, from_status, to_status, actor_type, actor_id, reason, created_at)
+         SELECT ?, ?, ?, 'cancelled', 'user', ?, 'Stopped via SAM', ?
+          WHERE EXISTS (
+            SELECT 1 FROM tasks WHERE id = ? AND status = 'cancelled' AND completed_at = ?
+          )`
+      ).bind(ulid(), taskId, task.status, ctx.userId, now, taskId, now),
+    ]);
+    cancelled = Boolean(transition?.meta?.changes);
+  } catch (err) {
+    log.error('sam.stop_subtask.status_update_failed', {
+      taskId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return { error: 'Failed to update task status.' };
+  }
+
+  if (!cancelled) {
+    log.warn('sam.stop_subtask.status_changed', {
+      taskId,
+      readStatus: task.status,
+      action: 'cancel_skipped',
+    });
+    return {
+      error: `Task changed status while stopping (was '${task.status}'). Check its current status before retrying.`,
+    };
+  }
+
+  // Stop the agent only after the cancel won, so a lost race never leaves a live
+  // task with a dead agent. Best-effort; a sleeping task has already released its
+  // runtime, so stop it without waking it.
   if (task.workspaceId && task.status !== 'sleeping') {
     try {
       const [workspace] = await db
@@ -120,44 +161,8 @@ export async function stopSubtask(input: { taskId: string }, ctx: ToolContext): 
     }
   }
 
-  // Mark task as cancelled. Compare-and-set on the status read above, so a task that
-  // completed or failed meanwhile keeps its real terminal story; the status event is
-  // only written when this cancellation actually landed.
-  const now = new Date().toISOString();
-  let cancelled = false;
-  try {
-    const [transition] = await env.DATABASE.batch([
-      env.DATABASE.prepare(
-        `UPDATE tasks SET status = 'cancelled', error_message = 'Stopped by user via SAM', updated_at = ?, completed_at = ?
-          WHERE id = ? AND status = ?`
-      ).bind(now, now, taskId, task.status),
-      env.DATABASE.prepare(
-        `INSERT INTO task_status_events (id, task_id, from_status, to_status, actor_type, actor_id, reason, created_at)
-         SELECT ?, ?, ?, 'cancelled', 'user', ?, 'Stopped via SAM', ?
-          WHERE EXISTS (
-            SELECT 1 FROM tasks WHERE id = ? AND status = 'cancelled' AND completed_at = ?
-          )`
-      ).bind(ulid(), taskId, task.status, ctx.userId, now, taskId, now),
-    ]);
-    cancelled = Boolean(transition?.meta?.changes);
-  } catch (err) {
-    log.error('sam.stop_subtask.status_update_failed', {
-      taskId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return { error: 'Failed to update task status.' };
-  }
-
-  if (!cancelled) {
-    log.warn('sam.stop_subtask.status_changed', {
-      taskId,
-      readStatus: task.status,
-      action: 'cancel_skipped',
-    });
-    return {
-      error: `Task changed status while stopping (was '${task.status}'). Check its current status before retrying.`,
-    };
-  }
+  // Same as the MCP stop_subtask: a trigger-linked task's execution follows it.
+  await syncTriggerExecutionStatus(env.DATABASE, taskId, 'cancelled');
 
   try {
     await cleanupTerminalTaskResources(env, taskId, {

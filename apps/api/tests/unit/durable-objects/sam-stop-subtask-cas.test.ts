@@ -19,8 +19,9 @@ const cleanup = vi.hoisted(() => vi.fn(async () => undefined));
 vi.mock('../../../src/services/task-terminal-cleanup', () => ({
   cleanupTerminalTaskResources: cleanup,
 }));
+const stopAgent = vi.hoisted(() => vi.fn(async () => undefined));
 vi.mock('../../../src/services/node-agent', () => ({
-  stopAgentSessionOnNode: vi.fn(async () => undefined),
+  stopAgentSessionOnNode: stopAgent,
 }));
 
 let sqlite: Database.Database;
@@ -54,14 +55,45 @@ function racingD1(): D1Database {
   return { ...d1, prepare: (sql: string) => wrap(sql, prepare(sql)) } as D1Database;
 }
 
-function seedTask(status: string): void {
+function seedTask(status: string, triggerExecutionStatus?: string): void {
   sqlite.prepare(`INSERT INTO projects (id, user_id, name) VALUES ('proj-1', 'user-1', 'P')`).run();
+  // A live workspace, node and agent session, so the agent-stop path is reachable.
   sqlite
     .prepare(
-      `INSERT INTO tasks (id, project_id, user_id, title, status)
-       VALUES ('task-1', 'proj-1', 'user-1', 'Child', ?)`
+      `INSERT INTO nodes (id, user_id, name, status, runtime) VALUES ('node-1', 'user-1', 'n', 'running', 'vm')`
     )
-    .run(status);
+    .run();
+  sqlite
+    .prepare(
+      `INSERT INTO workspaces (id, user_id, node_id, project_id, status) VALUES ('ws-1', 'user-1', 'node-1', 'proj-1', 'running')`
+    )
+    .run();
+  sqlite
+    .prepare(
+      `INSERT INTO agent_sessions (id, workspace_id, user_id, status, created_at, updated_at)
+       VALUES ('agent-1', 'ws-1', 'user-1', 'running', '2026-11-10T00:00:00Z', '2026-11-10T00:00:00Z')`
+    )
+    .run();
+  if (triggerExecutionStatus) {
+    sqlite
+      .prepare(
+        `INSERT INTO trigger_executions (id, trigger_id, project_id, status) VALUES ('exec-1', 'trig-1', 'proj-1', ?)`
+      )
+      .run(triggerExecutionStatus);
+  }
+  sqlite
+    .prepare(
+      `INSERT INTO tasks (id, project_id, user_id, title, status, workspace_id, trigger_execution_id)
+       VALUES ('task-1', 'proj-1', 'user-1', 'Child', ?, 'ws-1', ?)`
+    )
+    .run(status, triggerExecutionStatus ? 'exec-1' : null);
+}
+
+function executionStatus(): string | undefined {
+  return (
+    sqlite.prepare(`SELECT status FROM trigger_executions WHERE id = 'exec-1'`).get() as
+      { status: string } | undefined
+  )?.status;
 }
 
 function task(): { status: string } {
@@ -86,28 +118,48 @@ describe('SAM stop_subtask cancellation CAS', () => {
     createAllSchemaTables(sqlite, schema);
     afterTaskRead = null;
     cleanup.mockClear();
+    stopAgent.mockClear();
   });
 
-  it('cancels an in_progress task and records the event (control)', async () => {
-    seedTask('in_progress');
+  it.each(['in_progress', 'delegated', 'queued'])(
+    'cancels a %s task, stops its agent and records the event (control)',
+    async (status) => {
+      seedTask(status, 'running');
+      const result = (await stopSubtask({ taskId: 'task-1' }, ctx())) as Record<string, unknown>;
+      expect(result.stopped).toBe(true);
+      expect(task().status).toBe('cancelled');
+      expect(statusEvents()).toEqual([{ to_status: 'cancelled' }]);
+      expect(stopAgent).toHaveBeenCalledTimes(1);
+      expect(cleanup).toHaveBeenCalledTimes(1);
+      // A trigger-linked task's execution follows it, as the MCP stop_subtask does.
+      expect(executionStatus()).toBe('failed');
+    }
+  );
+
+  it('cancels a sleeping task without stopping (and so waking) its agent', async () => {
+    seedTask('sleeping');
     const result = (await stopSubtask({ taskId: 'task-1' }, ctx())) as Record<string, unknown>;
     expect(result.stopped).toBe(true);
     expect(task().status).toBe('cancelled');
-    expect(statusEvents()).toEqual([{ to_status: 'cancelled' }]);
-    expect(cleanup).toHaveBeenCalledTimes(1);
+    expect(stopAgent).not.toHaveBeenCalled();
   });
 
-  it('does not overwrite a completion that lands after the read', async () => {
-    seedTask('in_progress');
-    afterTaskRead = () => {
-      sqlite.prepare(`UPDATE tasks SET status = 'completed' WHERE id = 'task-1'`).run();
-    };
-    const result = (await stopSubtask({ taskId: 'task-1' }, ctx())) as Record<string, unknown>;
-    expect(afterTaskRead).toBeNull(); // the race was actually injected
-    expect(result.stopped).toBeUndefined();
-    expect(result.error).toContain('changed status');
-    expect(task().status).toBe('completed');
-    expect(statusEvents()).toEqual([]);
-    expect(cleanup).not.toHaveBeenCalled();
-  });
+  it.each(['completed', 'failed'])(
+    'does not overwrite a task that became %s after the read, nor stop its agent',
+    async (concurrentStatus) => {
+      seedTask('in_progress', 'running');
+      afterTaskRead = () => {
+        sqlite.prepare(`UPDATE tasks SET status = ? WHERE id = 'task-1'`).run(concurrentStatus);
+      };
+      const result = (await stopSubtask({ taskId: 'task-1' }, ctx())) as Record<string, unknown>;
+      expect(afterTaskRead).toBeNull(); // the race was actually injected
+      expect(result.stopped).toBeUndefined();
+      expect(result.error).toContain('changed status');
+      expect(task().status).toBe(concurrentStatus);
+      expect(statusEvents()).toEqual([]);
+      expect(stopAgent).not.toHaveBeenCalled();
+      expect(cleanup).not.toHaveBeenCalled();
+      expect(executionStatus()).toBe('running');
+    }
+  );
 });
