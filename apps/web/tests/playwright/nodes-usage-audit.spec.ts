@@ -222,6 +222,28 @@ for (const theme of ['dark', 'light'] as const) {
       await capture(page, `nodes-usage-normal-${theme}`);
     });
 
+    // State-machine audit D5: `destroying` and `deleting` are real node statuses that
+    // were missing from NodeStatus, so the chip had no entry for them.
+    test('nodes on their way out show a Deleting chip', async ({ page }) => {
+      const leaving = [
+        makeNode({
+          id: 'node-del',
+          name: 'deploy-node',
+          nodeRole: 'deployment',
+          status: 'deleting',
+        }),
+        makeNode({ id: 'node-des', name: 'old-worker', status: 'destroying' }),
+        makeNode({ id: 'node-run', name: 'live-worker', status: 'running' }),
+      ];
+      await setupApiMocks(page, { nodes: leaving, sessions: [] });
+      await page.goto('/nodes');
+      await expect(page.getByText('Deleting')).toHaveCount(2);
+      // Liveness: the running machine beside them still reads as running.
+      await expect(page.getByText('Running').first()).toBeVisible();
+      await checkLayout(page);
+      await capture(page, `nodes-usage-deleting-${theme}`);
+    });
+
     test('long text wraps correctly', async ({ page }) => {
       test.skip(theme === 'light', 'layout check runs once; light covers colours');
       await setupApiMocks(page, { nodes: LONG_NODES, sessions: LONG_SESSIONS });
