@@ -84,7 +84,9 @@ The 2026-11-10 state-machine audit (Library `/engineering/research/state-machine
 - [ ] A mission task in `in_progress` whose session has had no messages for longer than the stall timeout receives one non-cancelling nudge. A task with recent messages receives none. An agent mid-turn is never cancelled by stall detection.
 - [ ] SAM `stop_subtask` stops `in_progress`, `delegated`, `queued` and `sleeping` tasks, and `send_message_to_subtask` messages `in_progress` and `delegated` ones. A concurrent completion is not overwritten with `cancelled`.
 - [ ] Opening the agent or terminal WebSocket on a VM agent runtime in `stopped`/`error` leaves its status unchanged. A runtime missing after an agent restart is still recreated as `running`.
-- [ ] A failed chat session renders as failed (error badge) in the session list and account map, and is not treated as idle.
+- [ ] A failed chat session renders as failed on the account map. Revised during implementation:
+  - The session list (`ChatSessionList`) turned out to be dead code and was removed.
+  - `deriveSessionState`'s `idle` mapping for a failed session with `agentCompletedAt` is unchanged, because resume-and-send relies on it. Changing it is a product decision outside this scope; it is raised to Raphaël in the PR.
 - [ ] `/ready` and heartbeat from a node in `deleting` do not set it to `running`, and do not refresh its callback token.
 - [ ] A task reaching a terminal state does not overwrite a `skipped`/`dropped`/`routed` trigger execution, while a `running` execution is still synced.
 - [ ] A deployment env heartbeat does not overwrite a concurrent `stopping`/`error`; `starting → active` still happens.

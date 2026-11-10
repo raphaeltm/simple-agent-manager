@@ -5,7 +5,7 @@
  * - Task completes → orchestrator notified → handoff routed → dependent auto-dispatched
  * - Non-mission tasks are unaffected
  * - Concurrency limits respected
- * - Stall detection sends interrupts
+ * - Stall detection sends a non-cancelling status nudge
  */
 import { resolveOrchestratorConfig } from '@simple-agent-manager/shared';
 import { describe, expect, it, vi } from 'vitest';
