@@ -17,6 +17,7 @@ import {
   resolveReverseTunnelPortRange,
   type ReverseTunnelEnv,
 } from './node-reverse-tunnel-config';
+import { isReverseTunnelInstallation } from './node-tunnel-config';
 import { LIVE_INCARNATION_SQL } from './node-tunnel-journal';
 
 export type ReverseTunnelLeaseStatus = 'active' | 'released';
@@ -242,7 +243,22 @@ export async function releaseNodeReverseTunnelLeases(
   }
 }
 
-/** Cron sweep: release every non-live active lease installation-wide (one statement). */
-export async function runReverseTunnelLeaseSweep(env: LeaseEnv): Promise<{ released: number }> {
+export type ReverseTunnelLeaseSweepResult =
+  | { released: number }
+  | { released: null; skipReason: 'transport_not_reverse_tunnel' };
+
+/**
+ * Cron sweep: release every non-live active lease installation-wide (one statement). Runs only
+ * on an installation configured for the reverse-tunnel transport; every other deployment
+ * (vm-public-dns, cloudflare-tunnel, Instant) makes no D1 call and reports why it skipped, so
+ * the tick is distinguishable from "ran and found nothing" in `cron.completed`. Leases are
+ * also released node-by-node on every teardown path, which does not depend on this sweep.
+ */
+export async function runReverseTunnelLeaseSweep(
+  env: LeaseEnv & Pick<Env, 'VM_AGENT_TRANSPORT'>
+): Promise<ReverseTunnelLeaseSweepResult> {
+  if (!isReverseTunnelInstallation(env)) {
+    return { released: null, skipReason: 'transport_not_reverse_tunnel' };
+  }
   return { released: await releaseNonLiveReverseTunnelLeases(env, 'runtime_not_live') };
 }

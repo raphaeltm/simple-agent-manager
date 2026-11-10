@@ -281,6 +281,31 @@ describe('every lifecycle path releases the lease', () => {
   });
 });
 
+describe('the cron lease sweep on other transports', () => {
+  it.each([
+    ['vm-public-dns', 'vm-public-dns'],
+    ['cloudflare-tunnel', 'cloudflare-tunnel'],
+    ['the default (unset) transport', undefined],
+  ] as const)(
+    'makes no D1 call and reports why on %s, leaving a releasable lease active',
+    async (_name, transport) => {
+      // A lease the sweep WOULD release (node row hard-deleted), so a skip is observable.
+      const gone = await freshNode();
+      await provisionNode(gone.id, env);
+      sqlite.prepare('DELETE FROM nodes WHERE id = ?').run(gone.id);
+      const prepare = vi.spyOn(env.DATABASE, 'prepare');
+      const result = await runReverseTunnelLeaseSweep({ ...env, VM_AGENT_TRANSPORT: transport });
+      expect(result).toEqual({ released: null, skipReason: 'transport_not_reverse_tunnel' });
+      expect(prepare).not.toHaveBeenCalled();
+      prepare.mockRestore();
+      expect(leases(gone.id)).toMatchObject([{ status: 'active' }]);
+      // Control: the same lease on a reverse-tunnel installation is released.
+      expect(await runReverseTunnelLeaseSweep(env)).toEqual({ released: 1 });
+      expect(leases(gone.id)).toMatchObject([{ status: 'released' }]);
+    }
+  );
+});
+
 describe('control plane -> node routing seam', () => {
   it('routes a reverse-tunnel node to its loopback lease port and never to public DNS', async () => {
     const node = await freshNode();
