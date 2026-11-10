@@ -358,11 +358,12 @@ export async function workspaceSubdomainProxy(
     },
     c.env
   );
-  const vmUrl = new URL(
+  // Both origins come from trusted routing config, never from the request: the fixed loopback
+  // lease origin for a reverse-tunnel node, the backend hostname for every other transport.
+  const vmUrl =
     nodeRoute.kind === 'reverse-tunnel'
-      ? nodeRoute.origin
-      : getNodeBackendBaseUrl(routedNodeId, c.env)
-  );
+      ? new URL(nodeRoute.origin)
+      : new URL(getNodeBackendBaseUrl(routedNodeId, c.env));
   vmUrl.pathname = url.pathname;
   vmUrl.search = url.search;
 
