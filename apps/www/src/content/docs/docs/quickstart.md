@@ -11,7 +11,7 @@ SAM is chat-first: you import a repository, describe what you want in a chat, an
 
 ### 1. Sign In
 
-Open the web UI and click **Sign in with GitHub**. Authorize the GitHub App when prompted.
+Open the web UI and use a sign-in option enabled by your administrator. For email-code sign-in, enter your account email and the code sent to it. If you choose **Sign in with GitHub**, authorize the GitHub App when prompted.
 
 The first time you sign in, SAM walks you through the next steps itself. It asks only what your instance leaves open: where agents should work (Instant, the instance's own machines, or your cloud account) and where your code should live (a repository SAM hosts on Cloudflare Artifacts, or GitHub). It then connects your agent, creates your first project with a profile for that agent, and opens the project's chat (`ChoosePathWizard` in `apps/web/src/components/onboarding/choose-path/`). The steps below do the same by hand.
 
@@ -23,9 +23,9 @@ Go to **Settings → Agents** and click **Connect account**. Pick the AI coding 
 You need cloud compute to submit tasks. On a hosted instance it's usually provided for you. To work without any cloud credential at all, use an agent profile whose runtime is **Instant container** — [Instant sessions](/docs/guides/instant-sessions/) start in seconds but don't build your `.devcontainer` or provide Docker, and publication still requires an explicit request to the agent. If you're self-hosting or the operator requires it, add a [Hetzner API token](https://console.hetzner.cloud/), [Scaleway secret key](https://console.scaleway.com/iam/api-keys), [Vultr API key](https://my.vultr.com/settings/#settingsapi), [Infomaniak application credential](https://docs.infomaniak.cloud/identity/applications_credentials/), [DigitalOcean token](https://cloud.digitalocean.com/account/api/tokens), [UpCloud API subaccount](https://hub.upcloud.com/people/accounts), or GCP credential under **Settings → Infrastructure → Cloud accounts**. See [Bring Your Own Cloud](/docs/guides/creating-workspaces/#where-your-workspaces-run-bring-your-own-cloud) for the full list.
 :::
 
-### 3. Install the GitHub App
+### 3. Install the GitHub App (GitHub Repositories Only)
 
-Go to **Settings → GitHub** and click **Install GitHub App** on the repositories you want to use with SAM. This grants SAM access to those repositories.
+For GitHub-backed projects, go to **Settings → GitHub** and click **Install GitHub App** on the repositories you want to use with SAM. This grants SAM access to those repositories. Skip this step if SAM will host your new repository.
 
 ### 4. Create a Project
 
