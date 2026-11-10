@@ -677,9 +677,13 @@ test('docs: external link request card', async ({ page }) => {
 test('docs: usage limits dialog from the chat header', async ({ page }) => {
   await openChat(page, USAGE, [USAGE, ...OTHER_SESSIONS]);
 
+  // On a phone the header is one row; its chips live in the session-info sheet.
+  if (isMobile(page)) {
+    await page.getByRole('button', { name: /Show session info$/ }).click();
+  }
   const chip = page.getByTestId('credential-limit-chip');
   await expect(chip).toBeVisible({ timeout: 20000 });
-  await expect(chip).toHaveText('Claude · 5h 78% · Week 31%');
+  await expect(chip).toHaveText('Claude 78% · 31%');
   await chip.click();
 
   const details = page.getByTestId('credential-limit-details');

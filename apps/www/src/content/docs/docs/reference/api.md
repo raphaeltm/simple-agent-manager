@@ -248,6 +248,13 @@ Limited per IP address. Other `/api/auth/email-otp/*` routes return `404`.
 Public. `{ "github": bool, "google": bool, "gitlab": bool, "email": bool }`: which sign-in options
 the login page offers.
 
+### `GET /api/config/instant-runtime`
+
+Public. `{ "enabled": bool }`: whether agents can run on Instant (Cloudflare Containers) here
+with no cloud account. True only when the runtime is on and its container binding exists
+(`isInstantRuntimeAvailable`). Onboarding asks for a cloud account only when this is false and
+the instance has no machines of its own.
+
 ### First-run setup (`/api/setup/*`)
 
 The `POST` routes require `SETUP_TOKEN`; `GET /api/setup/status` is public. Every route returns

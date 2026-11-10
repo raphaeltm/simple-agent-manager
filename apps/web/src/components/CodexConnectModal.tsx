@@ -67,7 +67,8 @@ function getPollIntervalMs(): number {
   return Number(import.meta.env.VITE_CODEX_SETUP_POLL_MS ?? DEFAULT_POLL_INTERVAL_MS);
 }
 
-function getSuccessCloseDelayMs(): number {
+/** How long the success state stays on screen before the modal closes itself. */
+export function getSuccessCloseDelayMs(): number {
   return Number(
     import.meta.env.VITE_CODEX_SETUP_SUCCESS_CLOSE_MS ?? DEFAULT_SUCCESS_CLOSE_DELAY_MS
   );

@@ -30,6 +30,17 @@ your work is safe and what to do next. Everything here applies to both
   **Finding a server...**, or a reason it's waiting such as **Your cloud provider has no capacity
   right now. Retrying...**. A wake or a recovery is in progress.
   → [Wait, or clear what it's waiting for](#recovery-is-in-progress)
+- **Connecting...**, **Reconnecting...** or **Disconnected** with a **Retry** button, floating over
+  the conversation. This is your browser's live connection to SAM, not the agent: the agent keeps
+  working, and its messages are saved. SAM reconnects on its own; if it says **Disconnected**,
+  select **Retry**, or reload the page if that doesn't help.
+- **"Agent went quiet — no confirmed activity"** above the message box. The chat showed the agent
+  working, but SAM confirmed it has stopped. Read its last message: it may simply have finished.
+  Send a message to carry on, or select **Dismiss**.
+- **A card with a progress track, such as "Installing dependencies · 3 of 4"**, at the start of a
+  new chat on a VM. SAM is preparing its workspace: **Provisioning VM**, **Cloning repository**,
+  **Installing dependencies**, **Starting agent**. A large devcontainer can take several minutes;
+  a step that fails turns red and the chat says why.
 - **"…delivery was interrupted and its execution outcome is unknown"** (Instant). Your prompt may
   or may not have run. → [Check, then decide](#your-prompt-may-or-may-not-have-run)
 - **"…could not restore its last safe checkpoint"** (Instant). SAM stopped the container; your
@@ -278,7 +289,8 @@ On Instant this finishes within two minutes. On a VM, the status names the step 
 the agent...** — because a VM wake often provisions a replacement machine, which takes a few
 minutes. The composer reads **Waking the agent — your message will be delivered...** while it
 works, and the **Nodes** page (**Infrastructure** in the main navigation) may briefly show the chat's old workspace deleted and a new one being
-created. That is normal.
+created. That is normal. A VM wake that stops partway doesn't spin for ever: after 10 minutes or
+more SAM ends it and says so (see [Wake failed](#wake-failed)), and your next message tries again.
 
 If a VM wake is waiting, the status says why when SAM knows (`attachWakeState` in
 `apps/api/src/routes/chat/wake-state.ts`):
@@ -499,6 +511,10 @@ whether the cause is something you can fix first:
 - **Session is waking (…).** The wake was still going — for example, waiting for server capacity —
   when your message's delivery window ran out. Wait for the chat to finish waking, then send the
   message again.
+- **The last wake attempt stopped without finishing. Send a message to wake this chat again.**
+  A wake stopped partway, for example because the machine it was starting died. Instead of showing
+  that it is waking for ever, SAM ends an attempt that has been stuck for 10 minutes or more. Send
+  your message again.
 - **SAM retried the wake until the delivery expired…**, or another retry reason such as **Session
   cannot wake yet (…)**. Something temporary outlasted SAM's retries: an hour for a message you
   send, a day for a scheduled action. Send your message again.

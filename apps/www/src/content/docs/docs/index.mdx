@@ -18,14 +18,15 @@ import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
 
 <CardGrid>
   <Card title="Quickstart" icon="rocket">
-    Get SAM running in minutes — either on the hosted instance or self-hosted on your own
-    infrastructure.
+    Start chatting with an agent in minutes, on an instance you already have or one you install in
+    your own Cloudflare account.
   </Card>
   <Card title="Core Concepts" icon="open-book">
     Understand workspaces, nodes, providers, projects, ideas, agents, and how they fit together.
   </Card>
   <Card title="Self-Hosting Guide" icon="setting">
-    Fork, configure, deploy. Full walkthrough for running SAM on your own Cloudflare account.
+    Deploy SAM to your own Cloudflare account from a GitHub fork. For a browser-based install, see
+    **Install SAM with the installer**, below.
   </Card>
   <Card title="Architecture" icon="document">
     Deep dive into the system design — Workers, Durable Objects, VM agents, hybrid storage, and
@@ -50,6 +51,11 @@ import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
     title="Core Concepts"
     href="/docs/concepts/"
     description="Workspaces, nodes, providers, projects, ideas, and more."
+  />
+  <LinkCard
+    title="Install SAM with the installer"
+    href="/docs/guides/installer/"
+    description="Install your own SAM in your Cloudflare account from the browser."
   />
   <LinkCard
     title="Recent Product Changes"

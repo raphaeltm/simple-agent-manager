@@ -1,8 +1,9 @@
 import type { Repository } from '@simple-agent-manager/shared';
-import { Button, Select } from '@simple-agent-manager/ui';
+import { Button } from '@simple-agent-manager/ui';
 import { ArrowRight, Loader2 } from 'lucide-react';
 import { useCallback, useRef } from 'react';
 
+import { FieldLabel, WELL_INPUT_CLASS } from './OnboardingParts';
 import type { StepFormState } from './step-actions';
 
 interface ProjectSelectorProps {
@@ -44,20 +45,22 @@ export function ProjectSelector({
         </div>
       ) : repos.length === 0 ? (
         <div className="text-sm text-fg-muted py-3">
-          <p className="mb-2">No repositories found. Make sure you&apos;ve installed the GitHub App and granted repo access.</p>
-          <Button variant="secondary" size="sm" onClick={onLoadRepos}>
+          <p className="mb-2">
+            No repositories found. Make sure you&apos;ve installed the GitHub App and granted repo
+            access.
+          </p>
+          <Button variant="raised" size="sm" onClick={onLoadRepos}>
             Refresh
           </Button>
         </div>
       ) : (
         <div className="mb-3">
-          <label htmlFor="onboarding-repo-select" className="block text-xs font-medium text-fg-muted mb-1">
-            Repository
-          </label>
-          <Select
+          <FieldLabel htmlFor="onboarding-repo-select">Repository</FieldLabel>
+          <select
             id="onboarding-repo-select"
             value={form.selectedRepoName}
             disabled={loading}
+            className={WELL_INPUT_CLASS}
             onChange={(e) => {
               const repo = repos.find((r) => r.fullName === e.target.value);
               if (repo) {
@@ -73,25 +76,19 @@ export function ProjectSelector({
                 {repo.fullName}
               </option>
             ))}
-          </Select>
+          </select>
         </div>
       )}
       {repos.length > 0 && (
         <Button
-          variant="primary"
-          size="md"
+          variant="accent"
+          size="lg"
+          className="w-full sm:w-auto"
           onClick={onCreateProject}
-          disabled={loading || !form.selectedRepoName}
+          disabled={!form.selectedRepoName}
+          loading={loading}
         >
-          {loading ? (
-            <>
-              <Loader2 size={14} className="animate-spin" /> Creating...
-            </>
-          ) : (
-            <>
-              Create Project <ArrowRight size={14} />
-            </>
-          )}
+          Create project <ArrowRight size={16} aria-hidden="true" />
         </Button>
       )}
     </div>

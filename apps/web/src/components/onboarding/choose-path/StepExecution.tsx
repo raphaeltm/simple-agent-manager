@@ -1,54 +1,81 @@
-import type { Repository } from '@simple-agent-manager/shared';
-import { Alert, Card } from '@simple-agent-manager/ui';
-import { Check, ChevronDown } from 'lucide-react';
+import type { AgentType, Repository } from '@simple-agent-manager/shared';
+import { Alert, Button } from '@simple-agent-manager/ui';
+import { useQueryClient } from '@tanstack/react-query';
+import { ArrowRight, Github } from 'lucide-react';
 import { useCallback, useRef, useState } from 'react';
 
-import { getGitHubInstallUrl, listGitHubInstallations, listRepositories } from '../../../lib/api';
+import { useQueryScope } from '../../../hooks/useQueryScope';
+import {
+  createAgentProfile,
+  getGitHubInstallUrl,
+  listGitHubInstallations,
+  listRepositories,
+} from '../../../lib/api';
 import { createProject } from '../../../lib/api/projects';
+import {
+  agentQueryKeys,
+  credentialQueryKeys,
+  githubQueryKeys,
+  projectQueryKeys,
+} from '../../../lib/query-options';
+import { CloudProviderConnectFlow } from '../../CloudProviderConnectFlow';
+import { AgentStep } from './AgentStep';
+import { FieldLabel, SamSays, StepRail, WELL_INPUT_CLASS } from './OnboardingParts';
 import type { GeneratedStep } from './path-generator';
-import { executeStep, INITIAL_FORM, type StepFormState } from './step-actions';
-import { StepForm } from './StepForm';
-
-/* ─── Constants ─── */
+import { ProjectSelector } from './ProjectSelector';
+import type { RuntimeChoice } from './questions';
+import {
+  firstProfileRequest,
+  INITIAL_FORM,
+  saveAgentConnection,
+  type StepFormState,
+} from './step-actions';
 
 const GITHUB_POLL_INTERVAL_MS = 3_000;
 const GITHUB_POLL_TIMEOUT_MS = 300_000; // 5 minutes
-const COMPLETION_DELAY_MS = 300;
-
-/* ─── Props ─── */
 
 interface StepExecutionProps {
   steps: GeneratedStep[];
-  onComplete: () => void;
+  /** The current step; the wizard owns it so its Back button can step back. */
+  index: number;
+  onIndexChange: (index: number) => void;
+  /** Where agents run; decides the first profile's runtime. */
+  runtime: RuntimeChoice | undefined;
+  /** The project step creates a SAM-hosted repository rather than picking a GitHub one. */
+  hostedRepo: boolean;
+  /** SAM-managed AI is enabled on this installation. */
+  samAvailable: boolean;
+  /** Every step is done; `projectId` is the project created here, if any. */
+  onComplete: (projectId: string | null) => void;
 }
 
-/* ─── Component ─── */
-
-export function StepExecution({ steps, onComplete }: StepExecutionProps) {
-  const [currentStepIndex, setCurrentStepIndex] = useState(0);
-  const [completedSteps, setCompletedSteps] = useState<string[]>([]);
-  const [expandedDetails, setExpandedDetails] = useState(false);
+export function StepExecution({
+  steps,
+  index,
+  onIndexChange,
+  runtime,
+  hostedRepo,
+  samAvailable,
+  onComplete,
+}: StepExecutionProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<StepFormState>(INITIAL_FORM);
   const [repos, setRepos] = useState<Repository[]>([]);
   const [reposLoading, setReposLoading] = useState(false);
 
-  const step = steps[currentStepIndex];
-  const isLast = currentStepIndex >= steps.length - 1;
-  const progress = steps.length > 0 ? (completedSteps.length / steps.length) * 100 : 0;
-
+  const step = steps[index];
   const abortRef = useRef(new AbortController());
   const githubPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const githubTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Focus step heading via ref callback — React re-invokes when currentStepIndex changes
-  const stepHeadingRef = useCallback(
+  // Move focus to the heading on every step, so keyboard and screen-reader users follow along.
+  const headingRef = useCallback(
     (el: HTMLHeadingElement | null) => el?.focus(),
-    [currentStepIndex] // eslint-disable-line react-hooks/exhaustive-deps -- currentStepIndex is intentionally unused in the body; it exists only to change this callback's identity so React detaches/reattaches the ref (and thus re-focuses) on every step transition
+    [index] // eslint-disable-line react-hooks/exhaustive-deps -- index re-creates the ref callback so React re-focuses on each step
   );
 
-  // Cleanup ref callback — abort in-flight requests and clear timers when root element unmounts
+  // Abort in-flight requests and clear timers when the steps unmount.
   const cleanupRef = useCallback((el: HTMLDivElement | null) => {
     if (!el) {
       abortRef.current.abort();
@@ -58,158 +85,104 @@ export function StepExecution({ steps, onComplete }: StepExecutionProps) {
     }
   }, []);
 
-  /* ─── Step lifecycle ─── */
+  const queryClient = useQueryClient();
+  const queryScope = useQueryScope();
+  const next = useCallback(
+    (projectId: string | null = null) => {
+      setError(null);
+      // Each step changed what setup status and the first chat read; refresh just those.
+      for (const queryKey of [
+        credentialQueryKeys.all(queryScope),
+        agentQueryKeys.all(queryScope),
+        githubQueryKeys.all(queryScope),
+        projectQueryKeys.all(queryScope),
+      ])
+        void queryClient.invalidateQueries({ queryKey });
+      if (index >= steps.length - 1) onComplete(projectId);
+      else onIndexChange(index + 1);
+    },
+    [index, steps.length, onComplete, onIndexChange, queryClient, queryScope]
+  );
 
-  const markStepDone = useCallback(() => {
-    if (!step) return;
-    setCompletedSteps((prev) => [...prev, step.id]);
-    setError(null);
-    setExpandedDetails(false);
-    if (isLast) {
-      setTimeout(onComplete, COMPLETION_DELAY_MS);
-    } else {
-      setCurrentStepIndex((i) => i + 1);
-    }
-  }, [step, isLast, onComplete]);
+  /* ─── Agent ─── */
 
-  const handleAction = useCallback(async () => {
-    if (!step) return;
+  const saveAgent = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      await executeStep(step.id, form);
+      await saveAgentConnection(form);
       if (abortRef.current.signal.aborted) return;
-      // Clear credentials from memory after successful submission
-      if (step.id === 'ai-setup') {
-        setForm((prev) => ({ ...prev, apiKey: '', oauthToken: '' }));
-      }
-      if (step.id === 'cloud-byoc') {
-        setForm((prev) => ({
-          ...prev,
-          hetznerToken: '',
-          scalewaySecretKey: '',
-          scalewayProjectId: '',
-        }));
-      }
-      markStepDone();
+      setForm((prev) => ({ ...prev, apiKey: '', oauthToken: '' }));
+      next();
     } catch (err) {
-      if (abortRef.current.signal.aborted) return;
-      setError(err instanceof Error ? err.message : 'Something went wrong');
+      if (!abortRef.current.signal.aborted)
+        setError(err instanceof Error ? err.message : 'Something went wrong');
     } finally {
       if (!abortRef.current.signal.aborted) setLoading(false);
     }
-  }, [step, form, markStepDone]);
+  }, [form, next]);
 
-  const handleSkip = useCallback(() => markStepDone(), [markStepDone]);
+  // The guided sign-in saved the credential itself. Drop anything typed into the manual fields
+  // too, as a manual save does.
+  const agentConnected = useCallback(() => {
+    setForm((prev) => ({ ...prev, apiKey: '', oauthToken: '' }));
+    next();
+  }, [next]);
 
-  /* ─── GitHub App installation (opens tab, polls for completion) ─── */
+  /* ─── GitHub App installation (opens a tab, polls for completion) ─── */
 
   const clearGitHubTimers = useCallback(() => {
-    if (githubPollRef.current) {
-      clearInterval(githubPollRef.current);
-      githubPollRef.current = null;
-    }
-    if (githubTimeoutRef.current) {
-      clearTimeout(githubTimeoutRef.current);
-      githubTimeoutRef.current = null;
-    }
+    if (githubPollRef.current) clearInterval(githubPollRef.current);
+    if (githubTimeoutRef.current) clearTimeout(githubTimeoutRef.current);
+    githubPollRef.current = null;
+    githubTimeoutRef.current = null;
   }, []);
 
-  const handleGitHubInstall = useCallback(async () => {
+  const installGitHub = useCallback(async () => {
     setLoading(true);
     setError(null);
     clearGitHubTimers();
-
     try {
       const { url } = await getGitHubInstallUrl();
       if (abortRef.current.signal.aborted) return;
-
-      // Validate the URL before opening to prevent open-redirect attacks
-      const parsed = new URL(url);
-      if (parsed.origin !== 'https://github.com') {
+      // Open only GitHub: the URL comes from the server, so check it before following it.
+      if (new URL(url).origin !== 'https://github.com') {
         throw new Error('Unexpected installation URL from server');
       }
       window.open(url, '_blank', 'noopener');
-
-      const poll = setInterval(async () => {
+      githubPollRef.current = setInterval(async () => {
         try {
-          const installations = await listGitHubInstallations();
-          if (installations.length > 0) {
+          if ((await listGitHubInstallations()).length > 0) {
             clearGitHubTimers();
             setLoading(false);
-            markStepDone();
+            next();
           }
         } catch {
-          // Keep polling on transient failures
+          // Keep polling through transient failures.
         }
       }, GITHUB_POLL_INTERVAL_MS);
-      githubPollRef.current = poll;
-
       githubTimeoutRef.current = setTimeout(() => {
         clearGitHubTimers();
         setLoading(false);
-        setError(
-          'Installation not detected. If you completed the installation, click the button to try again.'
-        );
+        setError("I didn't see the installation finish. If you completed it, try once more.");
       }, GITHUB_POLL_TIMEOUT_MS);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to get install URL');
+      setError(err instanceof Error ? err.message : 'Failed to get the install link');
       setLoading(false);
     }
-  }, [markStepDone, clearGitHubTimers]);
+  }, [next, clearGitHubTimers]);
 
-  /* ─── Project creation ─── */
-
-  const handleCreateProject = useCallback(async () => {
-    if (!form.selectedRepoName) {
-      setError('Please select a repository');
-      return;
-    }
-    const selectedRepo = repos.find((r) => r.fullName === form.selectedRepoName);
-    if (!selectedRepo) {
-      setError('Selected repository not found. Please refresh and try again.');
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-    try {
-      await createProject({
-        name: form.selectedRepoName.split('/').pop() || form.selectedRepoName,
-        repository: form.selectedRepoName,
-        installationId: selectedRepo.installationId,
-        githubRepoId: selectedRepo.id,
-        defaultBranch: selectedRepo.defaultBranch,
-      });
-      if (abortRef.current.signal.aborted) return;
-      // Project is the last step: advance to the completion screen rather than
-      // dismissing the wizard outright, so the user gets a clean "all set" hand-off.
-      markStepDone();
-    } catch (err) {
-      if (abortRef.current.signal.aborted) return;
-      setError(err instanceof Error ? err.message : 'Failed to create project');
-    } finally {
-      if (!abortRef.current.signal.aborted) setLoading(false);
-    }
-  }, [form.selectedRepoName, repos, markStepDone]);
-
-  /* ─── Repository loading ─── */
+  /* ─── Project ─── */
 
   const loadRepos = useCallback(async () => {
     setReposLoading(true);
     try {
       const installations = await listGitHubInstallations();
       if (abortRef.current.signal.aborted) return;
-      if (installations.length === 0) {
-        setRepos([]);
-        return;
-      }
-
-      const allRepos = await Promise.all(
+      const lists = await Promise.all(
         installations.map((inst) => listRepositories(inst.id).then((r) => r.repositories))
       );
-      if (abortRef.current.signal.aborted) return;
-      setRepos(allRepos.flat());
+      if (!abortRef.current.signal.aborted) setRepos(lists.flat());
     } catch {
       if (!abortRef.current.signal.aborted) setRepos([]);
     } finally {
@@ -217,183 +190,148 @@ export function StepExecution({ steps, onComplete }: StepExecutionProps) {
     }
   }, []);
 
-  /* ─── Render ─── */
+  const createFirstProject = useCallback(async () => {
+    let request: Parameters<typeof createProject>[0];
+    if (hostedRepo) {
+      const name = form.hostedProjectName.trim();
+      if (!name) {
+        setError('Give your project a name');
+        return;
+      }
+      // SAM creates the repository on Cloudflare Artifacts; no GitHub involved.
+      request = { name, repoProvider: 'artifacts', defaultBranch: 'main' };
+    } else {
+      const repo = repos.find((r) => r.fullName === form.selectedRepoName);
+      if (!repo) {
+        setError('Pick a repository');
+        return;
+      }
+      request = {
+        name: repo.name,
+        repository: repo.fullName,
+        installationId: repo.installationId,
+        githubRepoId: repo.id,
+        defaultBranch: repo.defaultBranch,
+      };
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const project = await createProject(request);
+      if (abortRef.current.signal.aborted) return;
+      // Give the project a profile for the agent and runtime chosen here, so its first chat
+      // starts straight away. If that fails, the chat's own profile wizard still covers it.
+      if (form.selectedAgent && runtime) {
+        try {
+          await createAgentProfile(
+            project.id,
+            firstProfileRequest(form.selectedAgent as AgentType, runtime)
+          );
+        } catch (err) {
+          console.warn('Onboarding could not create the first profile', {
+            projectId: project.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+      if (!abortRef.current.signal.aborted) next(project.id);
+    } catch (err) {
+      if (!abortRef.current.signal.aborted)
+        setError(err instanceof Error ? err.message : 'Failed to create the project');
+    } finally {
+      if (!abortRef.current.signal.aborted) setLoading(false);
+    }
+  }, [hostedRepo, form, repos, runtime, next]);
 
   if (!step) return null;
 
   return (
-    <div ref={cleanupRef} className="max-w-md mx-auto">
-      <ProgressHeader
-        steps={steps}
-        currentStepIndex={currentStepIndex}
-        completedSteps={completedSteps}
-        progress={progress}
-      />
+    <div ref={cleanupRef}>
+      <StepRail labels={steps.map((s) => s.label)} current={index} />
+      <SamSays title={step.title} headingRef={headingRef}>
+        {step.id === 'project' && hostedRepo
+          ? "Name it and I'll create its Git repository for you. No GitHub needed."
+          : step.description}
+      </SamSays>
 
-      <Card className="p-6 mb-4">
-        <div className="flex items-center gap-2 mb-1">
-          <div className="w-7 h-7 rounded-full bg-accent/20 flex items-center justify-center text-xs font-bold text-accent">
-            {currentStepIndex + 1}
-          </div>
-          <h3
-            ref={stepHeadingRef}
-            tabIndex={-1}
-            className="text-lg font-semibold text-fg-primary outline-none"
-          >
-            {step.title}
-          </h3>
+      {error && (
+        <div className="mb-4">
+          <Alert variant="error" onDismiss={() => setError(null)}>
+            {error}
+          </Alert>
         </div>
-        <p className="text-sm text-fg-muted mb-4 sm:ml-9">{step.description}</p>
-
-        {error && (
-          <div className="mb-4 sm:ml-9">
-            <Alert variant="error" onDismiss={() => setError(null)}>
-              {error}
-            </Alert>
-          </div>
-        )}
-
-        <div className="sm:ml-9">
-          <StepForm
-            stepId={step.id}
-            form={form}
-            setForm={setForm}
-            loading={loading}
-            repos={repos}
-            reposLoading={reposLoading}
-            onLoadRepos={loadRepos}
-            onAction={handleAction}
-            onGitHubInstall={handleGitHubInstall}
-            onCreateProject={handleCreateProject}
-            onSkip={step.isOptional ? handleSkip : undefined}
-            actionLabel={step.actionLabel}
-          />
-        </div>
-
-        <StepDetails
-          details={step.details}
-          expanded={expandedDetails}
-          onToggle={() => setExpandedDetails(!expandedDetails)}
-        />
-      </Card>
-
-      {!isLast && <UpcomingSteps steps={steps} currentStepIndex={currentStepIndex} />}
-    </div>
-  );
-}
-
-/* ─── Sub-components ─── */
-
-function ProgressHeader({
-  steps,
-  currentStepIndex,
-  completedSteps,
-  progress,
-}: {
-  steps: GeneratedStep[];
-  currentStepIndex: number;
-  completedSteps: string[];
-  progress: number;
-}) {
-  return (
-    <div className="mb-6">
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-xs text-fg-muted">
-          Step {currentStepIndex + 1} of {steps.length}
-        </span>
-        <span className="text-xs text-fg-muted">{Math.round(progress)}% complete</span>
-      </div>
-      <div
-        role="progressbar"
-        aria-valuenow={Math.round(progress)}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-label={`Setup progress: step ${currentStepIndex + 1} of ${steps.length}`}
-        className="w-full h-1.5 bg-accent/10 rounded-full overflow-hidden"
-      >
-        <div
-          className="h-full bg-accent rounded-full transition-all duration-500"
-          style={{ width: `${progress}%` }}
-        />
-      </div>
-      <div className="flex gap-1 mt-2" aria-hidden="true">
-        {steps.map((s, i) => (
-          <div
-            key={s.id}
-            className={`h-1 flex-1 rounded-full transition-all ${
-              completedSteps.includes(s.id)
-                ? 'bg-accent'
-                : i === currentStepIndex
-                  ? 'bg-accent/50'
-                  : 'bg-accent/10'
-            }`}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function StepDetails({
-  details,
-  expanded,
-  onToggle,
-}: {
-  details: string[];
-  expanded: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <div className="mt-4 sm:ml-9">
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={expanded}
-        className="flex items-center gap-1 text-xs text-fg-muted hover:text-fg-primary transition-colors bg-transparent border-none cursor-pointer py-2 px-0 min-h-[44px]"
-      >
-        <ChevronDown
-          size={12}
-          aria-hidden="true"
-          className={`transition-transform ${expanded ? 'rotate-180' : ''}`}
-        />
-        {expanded ? 'Hide' : 'Show'} details
-      </button>
-      {expanded && (
-        <ul className="mt-2 flex flex-col gap-1.5">
-          {details.map((detail, i) => (
-            <li key={i} className="text-xs text-fg-muted flex items-start gap-2">
-              <Check size={10} className="text-accent/50 mt-0.5 shrink-0" />
-              {detail}
-            </li>
-          ))}
-        </ul>
       )}
-    </div>
-  );
-}
 
-function UpcomingSteps({
-  steps,
-  currentStepIndex,
-}: {
-  steps: GeneratedStep[];
-  currentStepIndex: number;
-}) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <p className="text-xs text-fg-muted uppercase tracking-wide font-medium">Coming up</p>
-      {steps.slice(currentStepIndex + 1).map((s, i) => (
-        <div
-          key={s.id}
-          className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-fg-muted"
-        >
-          <div className="w-5 h-5 rounded-full bg-accent/5 flex items-center justify-center text-xs">
-            {currentStepIndex + 2 + i}
-          </div>
-          <span>{s.title}</span>
-          <span className="ml-auto text-xs text-fg-muted">{s.timeEstimate}</span>
+      {step.id === 'agent' && (
+        <AgentStep
+          form={form}
+          setForm={setForm}
+          samAvailable={samAvailable}
+          saving={loading}
+          onSave={() => void saveAgent()}
+          onConnected={agentConnected}
+        />
+      )}
+
+      {step.id === 'cloud' && <CloudProviderConnectFlow onConnected={() => next()} />}
+
+      {step.id === 'github' && (
+        <div>
+          <Button
+            variant="accent"
+            size="lg"
+            className="w-full sm:w-auto"
+            onClick={() => void installGitHub()}
+            loading={loading}
+          >
+            <Github className="h-4 w-4" aria-hidden="true" />
+            Install the GitHub app
+          </Button>
+          {loading && (
+            <p role="status" className="mb-0 mt-3 text-sm text-fg-muted">
+              Finish in the new tab. I&apos;ll notice when it&apos;s done.
+            </p>
+          )}
         </div>
-      ))}
+      )}
+
+      {step.id === 'project' && hostedRepo && (
+        <div>
+          <FieldLabel htmlFor="onboarding-hosted-project-name">Project name</FieldLabel>
+          <input
+            id="onboarding-hosted-project-name"
+            value={form.hostedProjectName}
+            maxLength={100}
+            autoComplete="off"
+            onChange={(e) => setForm((prev) => ({ ...prev, hostedProjectName: e.target.value }))}
+            placeholder="my-first-project"
+            className={WELL_INPUT_CLASS}
+          />
+          <Button
+            variant="accent"
+            size="lg"
+            className="mt-4 w-full sm:w-auto"
+            onClick={() => void createFirstProject()}
+            disabled={!form.hostedProjectName.trim()}
+            loading={loading}
+          >
+            Create project
+            <ArrowRight className="h-4 w-4" aria-hidden="true" />
+          </Button>
+        </div>
+      )}
+
+      {step.id === 'project' && !hostedRepo && (
+        <ProjectSelector
+          repos={repos}
+          reposLoading={reposLoading}
+          onLoadRepos={() => void loadRepos()}
+          form={form}
+          setForm={setForm}
+          loading={loading}
+          onCreateProject={() => void createFirstProject()}
+        />
+      )}
     </div>
   );
 }

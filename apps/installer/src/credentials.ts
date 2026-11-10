@@ -67,6 +67,11 @@ const DEPLOY_ACCOUNT = [
   // Email sign-in codes and agent email: configure-agent-email.ts onboards the sending domain.
   'Email Sending Write',
 ];
+// SAM-hosted repositories (Cloudflare Artifacts, beta). Optional: requested only when this
+// account's catalog has them, so accounts without Artifacts still install. The deploy probes
+// Artifacts with the deployment token (detectArtifactsAvailable in sync-wrangler-config.ts) and
+// binds it; the runtime uses the Worker binding, so the runtime token needs neither group.
+const DEPLOY_ACCOUNT_OPTIONAL = ['Artifacts Read', 'Artifacts Write'];
 const RUNTIME_ACCOUNT = [
   // Managed workspace VMs use per-incarnation outbound Cloudflare Tunnels.
   'Cloudflare One Connector: cloudflared Write',
@@ -125,6 +130,15 @@ function resolveRequired(groups: PermissionGroup[], required: [string[], string]
   if (problems.size)
     throw new Error(`Required account-token permission unavailable: ${[...problems].join(', ')}`);
   return [...notSelectable];
+}
+// An optional feature's groups are granted together or not at all: a partial grant (Read
+// without Write) cannot run the feature and would only widen the token.
+function availableOptional(groups: PermissionGroup[], names: string[], scope: string): string[] {
+  const unique = (name: string) =>
+    groups.filter(
+      (group) => group.name === name && group.scopes?.includes(scope) && validId(group.id)
+    ).length === 1;
+  return names.every(unique) ? names : [];
 }
 function select(groups: PermissionGroup[], names: string[], scope: string): { id: string }[] {
   return names.map((name) => {
@@ -210,14 +224,16 @@ export async function createInstallationCredentials(
     ])
   );
   // Resolve all permissions before creating or deleting principals.
+  const deploymentPlan = (extra: string[]): TokenPlan => ({
+    name: `${installationId}-deployment`,
+    policies: [
+      policy([...DEPLOY_ACCOUNT, ...extra], ACCOUNT_SCOPE, account),
+      policy(DEPLOY_ZONE, ZONE_SCOPE, zone),
+    ],
+  });
+  const optionalDeploy = availableOptional(groups, DEPLOY_ACCOUNT_OPTIONAL, ACCOUNT_SCOPE);
   const plans: TokenPlan[] = [
-    {
-      name: `${installationId}-deployment`,
-      policies: [
-        policy(DEPLOY_ACCOUNT, ACCOUNT_SCOPE, account),
-        policy(DEPLOY_ZONE, ZONE_SCOPE, zone),
-      ],
-    },
+    deploymentPlan(optionalDeploy),
     {
       name: `${installationId}-runtime`,
       policies: [
@@ -259,20 +275,34 @@ export async function createInstallationCredentials(
     });
   const created: Required<Pick<AccountToken, 'id' | 'value'>>[] = [];
   try {
-    await plans.reduce(async (previous, plan) => {
-      await previous;
+    const create = async (plan: TokenPlan) => {
       await reconcile(plan);
-      created.push(
-        await createPrincipal(
-          bootstrapToken,
-          base,
-          plan,
-          attempts,
-          options.signal,
-          reconcile,
-          remember
-        )
+      return createPrincipal(
+        bootstrapToken,
+        base,
+        plan,
+        attempts,
+        options.signal,
+        reconcile,
+        remember
       );
+    };
+    await plans.reduce(async (previous, plan, index) => {
+      await previous;
+      try {
+        created.push(await create(plan));
+      } catch (error) {
+        // Cloudflare can list a beta group the grant cannot delegate. Optional access must
+        // never cost the installation, so retry the deployment token without it.
+        const refused =
+          error instanceof PrincipalCreationError && (error.status === 400 || error.status === 403);
+        if (index !== 0 || !optionalDeploy.length || !refused || options.signal?.aborted)
+          throw error;
+        console.warn('Deployment token refused optional permissions; continuing without them', {
+          optional: optionalDeploy,
+        });
+        created.push(await create(deploymentPlan([])));
+      }
     }, Promise.resolve());
     const [deployment, runtime, storage] = created;
     if (!deployment || !runtime || !storage) throw new Error('Incomplete installation credentials');
@@ -348,6 +378,17 @@ async function reconcilePrincipal(options: ReconcilePrincipalOptions): Promise<v
   }
   await scan(1);
 }
+class PrincipalCreationError extends Error {
+  constructor(
+    label: string,
+    readonly status: number | undefined
+  ) {
+    super(
+      `Cloudflare did not create the ${label} account token` +
+        (status === undefined ? '' : ` (HTTP ${status})`)
+    );
+  }
+}
 async function createPrincipal(
   bootstrapToken: string,
   base: string,
@@ -370,9 +411,9 @@ async function createPrincipal(
     // A timed-out POST may have committed. Reconcile the exact owned principal.
     await reconcile(plan);
     if (attempts === 1)
-      throw new Error(
-        `Cloudflare did not create the ${label} account token` +
-          (error instanceof CloudflareError ? ` (HTTP ${error.status})` : '')
+      throw new PrincipalCreationError(
+        label,
+        error instanceof CloudflareError ? error.status : undefined
       );
     return createPrincipal(bootstrapToken, base, plan, attempts - 1, signal, reconcile, remember);
   }

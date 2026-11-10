@@ -31,28 +31,3 @@ export function SetupShell({ footer, children }: SetupShellProps) {
     </main>
   );
 }
-
-/** SAM's mark with a slow glow behind it. The glow holds still for reduced motion. */
-export function SetupHero({ celebrate = false }: { celebrate?: boolean }) {
-  return (
-    <div className="relative mx-auto mb-6 flex h-28 w-28 items-center justify-center sm:h-32 sm:w-32">
-      <span
-        aria-hidden="true"
-        className="absolute inset-0 rounded-full bg-[radial-gradient(circle,rgb(132_204_22/0.45),rgb(34_197_94/0.12)_55%,transparent_72%)] blur-md motion-safe:animate-pulse"
-      />
-      {celebrate && (
-        <span
-          aria-hidden="true"
-          className="absolute -inset-3 rounded-full border border-accent/40 motion-safe:animate-ping"
-        />
-      )}
-      <img
-        src="/sam-head.png"
-        alt=""
-        width={112}
-        height={112}
-        className="relative h-24 w-24 drop-shadow-[0_8px_24px_rgb(34_197_94/0.35)] sm:h-28 sm:w-28"
-      />
-    </div>
-  );
-}

@@ -159,6 +159,7 @@ export {
   timelineProgressNotificationsQueryOptions,
 } from './notifications';
 export {
+  instantRuntimeEnabledQueryOptions,
   projectArtifactsEnabledQueryOptions,
   projectCredentialHealthQueryOptions,
   projectDetailQueryOptions,

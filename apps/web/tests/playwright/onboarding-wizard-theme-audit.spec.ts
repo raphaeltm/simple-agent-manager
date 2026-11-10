@@ -7,9 +7,8 @@
  * the overlay on top stayed dark — a jarring dark takeover for light-mode users
  * during first-run.
  *
- * The fix moves the overlay background into a theme-aware token
- * (`--sam-onboarding-overlay-bg`, defined per theme in
- * `packages/ui/src/tokens/theme.css`). This spec forces the overlay via
+ * The overlay is the SAM Glass void (`.sam-void`, whose base colour `--sam-void-base` is
+ * defined per theme in `packages/ui/src/glass/glass.css`). This spec forces the overlay via
  * `?onboarding` in both themes, asserts the resolved background matches the
  * active theme, and captures screenshots with no horizontal overflow.
  *
@@ -45,7 +44,8 @@ async function setupMocks(page: Page) {
     if (p.startsWith('/api/notifications'))
       return jsonResponse(route, 200, { notifications: [], unreadCount: 0 });
     if (p === '/api/agents') return jsonResponse(route, 200, []);
-    if (p === '/api/credentials/agent' && isGet) return jsonResponse(route, 200, { credentials: [] });
+    if (p === '/api/credentials/agent' && isGet)
+      return jsonResponse(route, 200, { credentials: [] });
     if (p === '/api/credentials' && isGet) return jsonResponse(route, 200, []);
     if (p === '/api/github/installations') return jsonResponse(route, 200, []);
     if (p === '/api/projects' && isGet) return jsonResponse(route, 200, { projects: [] });
@@ -68,13 +68,11 @@ for (const theme of ['dark', 'light'] as const) {
     // The theme attribute drives the token layer.
     await expect(page.locator('html')).toHaveAttribute(
       'data-ui-theme',
-      theme === 'dark' ? 'sam' : 'sam-light',
+      theme === 'dark' ? 'sam' : 'sam-light'
     );
 
-    // The overlay background must resolve to the theme-aware token, not a
-    // hardcoded dark gradient. The token resolves to a `background-image` of two
-    // radial-gradients plus a base `background-color`. The base color differs
-    // per theme: ~#0a0e0a (dark) vs ~#eef3ef (light).
+    // The overlay background must resolve to the theme's void, not a hardcoded dark
+    // gradient: the void's base colour is near-black in dark and light in light.
     const bgColor = await wizard.evaluate((el) => getComputedStyle(el).backgroundColor);
     if (theme === 'light') {
       // Light base #eef3ef → high RGB channels.
