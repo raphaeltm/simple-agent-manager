@@ -1,0 +1,38 @@
+# GCE metadata token proxy for celld (profile `gce`).
+#
+# The egress fence keeps celld (and so every Worker) away from 169.254.169.254. celld still needs
+# an access token for its gs:// bucket, so its object_store client is pointed here through
+# GCE_METADATA_HOST=127.0.0.1:<port>/<secret>. Only the service-account token and email are
+# served, only under the secret path that lives in celld's environment, and only with the
+# Metadata-Flavor header. Worker code can reach this port (celld can) but not the path.
+{
+	admin off
+	auto_https off
+	persist_config off
+}
+
+http://127.0.0.1:{$GCE_METADATA_PROXY_PORT} {
+	bind 127.0.0.1
+
+	@token {
+		path /{$GCE_METADATA_PROXY_SECRET}/computeMetadata/v1/instance/service-accounts/default/token
+		path /{$GCE_METADATA_PROXY_SECRET}/computeMetadata/v1/instance/service-accounts/default/email
+		header Metadata-Flavor Google
+		method GET
+	}
+	handle @token {
+		uri strip_prefix /{$GCE_METADATA_PROXY_SECRET}
+		reverse_proxy {$GCE_METADATA_UPSTREAM:169.254.169.254:80} {
+			header_up Host metadata.google.internal
+			# The metadata server refuses requests that carry X-Forwarded-For.
+			header_up -X-Forwarded-For
+			header_up -X-Forwarded-Host
+			header_up -X-Forwarded-Proto
+			header_up -Via
+		}
+	}
+	handle {
+		respond 404
+	}
+	# No access log: the request path carries the secret.
+}

@@ -9,6 +9,12 @@
 # loopback lease port runs in celld's network namespace, and Caddy forward_auth proxies node
 # WebSockets to the same port. Everything except Caddy listens on 127.0.0.1 only.
 #
+# Egress fence: celld runs as its own uid (CELLD_UID) and the `egress-fence` service installs an
+# nftables table for that uid (.state/egress-fence.nft, rendered by the deploy script) that keeps
+# Worker code away from loopback services, private ranges and the metadata server. celld's
+# entrypoint (celld/start.sh) refuses to start until the fence is in effect. Check it any time
+# with `pnpm selfhost:verify-fence`.
+#
 # Usage: cp .env.example .env && chmod 600 .env && edit it; `pnpm selfhost:deploy --init`
 # (platform keys + .state/gateway.env); docker compose up -d; then `pnpm selfhost:deploy`.
 # Images are pinned by digest; the pinned celld version must match CELLD_VERSION in
@@ -19,11 +25,27 @@ services:
   celld:
     image: ghcr.io/denoland/celld:v0.6.3@sha256:22bca1b40a9e4c434cc149d8913d7eaafa9792961a8c05f9fecf921d416216dc
     network_mode: host
+    # The egress fence matches this uid; celld/start.sh refuses to run as root.
+    user: '${CELLD_UID:-7101}:${CELLD_UID:-7101}'
+    entrypoint: ['/bin/bash', '/etc/sam/celld-start.sh']
     depends_on:
+      egress-fence:
+        condition: service_healthy
+      celld-data-owner:
+        condition: service_completed_successfully
       objectstore-init:
         condition: service_completed_successfully
         required: false # only with the local-store profile
+      gce-metadata-proxy:
+        condition: service_started
+        required: false # only with the gce profile
+    # SAM_EGRESS_FENCE_CANARY, and on a gs:// bucket GCE_METADATA_HOST/IP pointing at the token
+    # proxy. Written by `pnpm selfhost:deploy --init`.
+    env_file:
+      - path: ${SAM_SELFHOST_STATE_DIR:-./.state}/celld.env
+        required: true
     environment:
+      HOME: /var/lib/celld
       CELLD_BUCKET: ${CELLD_BUCKET:?set CELLD_BUCKET in .env}
       # Empty means unset: gs:// buckets take no endpoint and use Application Default Credentials.
       S3_ENDPOINT: ${S3_ENDPOINT:-}
@@ -45,10 +67,80 @@ services:
     volumes:
       # A cache on one node: the bucket is the durable copy and the only thing to back up.
       - celld-data:/var/lib/celld
+      - ./celld/start.sh:/etc/sam/celld-start.sh:ro
     # Above CELLD_SHUTDOWN_TOTAL_MS (40 s) so a stop is a clean lease handoff.
     stop_grace_period: 50s
     # celld docs: restart without an attempt limit. An immediate restart can hit
     # "Address already in use"; Docker's restart backoff covers that.
+    restart: unless-stopped
+
+  # Installs the celld egress fence in the host's nftables and re-applies it if a firewall
+  # reload removes it. Needs only NET_ADMIN on the host network. Stopping it leaves the fence in
+  # place.
+  egress-fence:
+    build: ./egress-fence
+    image: sam-selfhost-egress-fence:local
+    network_mode: host
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN]
+    environment:
+      SAM_EGRESS_FENCE_RECHECK_SECONDS: ${SAM_EGRESS_FENCE_RECHECK_SECONDS:-15}
+    volumes:
+      - ${SAM_SELFHOST_STATE_DIR:-./.state}/egress-fence.nft:/etc/sam/egress-fence.nft:ro
+    healthcheck:
+      test: ['CMD', '/bin/sh', '/usr/local/bin/sam-egress-fence', 'check']
+      interval: 5s
+      retries: 12
+    restart: unless-stopped
+
+  # Gives the celld data volume to CELLD_UID (celld used to run as root). One-shot.
+  celld-data-owner:
+    image: sam-selfhost-egress-fence:local
+    pull_policy: never # built by the egress-fence service
+    depends_on:
+      egress-fence:
+        condition: service_started
+    network_mode: none
+    cap_drop: [ALL]
+    cap_add: [CHOWN, FOWNER, DAC_READ_SEARCH]
+    entrypoint:
+      [
+        'find',
+        '/var/lib/celld',
+        '(',
+        '!',
+        '-user',
+        '${CELLD_UID:-7101}',
+        '-o',
+        '!',
+        '-group',
+        '${CELLD_UID:-7101}',
+        ')',
+        '-exec',
+        'chown',
+        '-h',
+        '${CELLD_UID:-7101}:${CELLD_UID:-7101}',
+        '{}',
+        '+',
+      ]
+    volumes:
+      - celld-data:/var/lib/celld
+    restart: 'no'
+
+  # Token proxy for celld's gs:// bucket on GCE (deploy/selfhost/metadata-proxy/Caddyfile): the
+  # fence blocks the metadata server, so celld fetches its access token here instead.
+  gce-metadata-proxy:
+    profiles: [gce]
+    image: sam-selfhost-caddy:local
+    pull_policy: never # built by the caddy service
+    network_mode: host
+    cap_drop: [ALL]
+    command: ['caddy', 'run', '--config', '/etc/caddy/Caddyfile', '--adapter', 'caddyfile']
+    env_file:
+      - path: ${SAM_SELFHOST_STATE_DIR:-./.state}/celld.env
+        required: true
+    volumes:
+      - ./metadata-proxy/Caddyfile:/etc/caddy/Caddyfile:ro
     restart: unless-stopped
 
   caddy:

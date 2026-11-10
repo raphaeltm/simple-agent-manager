@@ -5,8 +5,9 @@
  *   pnpm selfhost:deploy [--env-file deploy/selfhost/.env] [--state-dir <env dir>/.state]
  *                        [--secrets <state-dir>/secrets.env] [--web-dist DIR] [--dry-run] [--init]
  *
- * `--init` only generates the platform keys and `<state-dir>/gateway.env`, the shared secret
- * docker compose hands to frps and Caddy; run it once before the first `docker compose up`.
+ * `--init` only generates the platform keys, `<state-dir>/gateway.env` (the shared secret
+ * docker compose hands to frps and Caddy), and the celld egress fence files
+ * (`egress-fence.nft`, `celld.env`); run it once before the first `docker compose up`.
  *
  * Re-runnable: platform keys are generated once and kept, the project directory is rebuilt,
  * D1 migrations are applied idempotently, and `celld deploy` publishes a new version that the
@@ -25,6 +26,7 @@ import * as TOML from '@iarna/toml';
 
 import type { WranglerToml } from '../deploy/types.js';
 import {
+  assertPresignCredentialIsScoped,
   celldChildEnv,
   presignVars,
   redactSecrets,
@@ -35,6 +37,7 @@ import {
 import { ensureCelldBinary, resolveEsbuild } from './celld-binary.js';
 import { buildCelldConfig, type CelldWranglerConfig } from './celld-config.js';
 import { ASSETS_DIR, prepareCelldProject, SOURCE_LINK, writeCelldConfig } from './celld-project.js';
+import { writeFenceFiles } from './fence-state.js';
 import { ensurePlatformKeys } from './platform-keys.js';
 import {
   assertPrivateFile,
@@ -229,11 +232,17 @@ async function main(): Promise<void> {
     writePrivateFile(gatewayEnvPath, gatewayEnv);
     log(`wrote ${gatewayEnvPath}; (re)start the stack: docker compose up -d`);
   }
+  // The celld egress fence and celld.env (scripts/selfhost/egress-fence.ts).
+  const fence = await writeFenceFiles({ stateDir, box, leaseRange: tunnelRange });
+  for (const path of fence.changed) {
+    log(`wrote ${path}; (re)start the stack: docker compose up -d`);
+  }
   if (values.init) return;
   const operatorSecrets = readSecretsFile(secretsPath);
   for (const name of ['BASE_DOMAIN', 'R2_BUCKET_NAME']) {
     if (name in operatorSecrets) throw new Error(`${secretsPath}: ${name} is generated; remove it`);
   }
+  assertPresignCredentialIsScoped(box, operatorSecrets);
   const { SAM_INSTALLATION_ID, ...platformSecrets } = keys;
   const secrets: Record<string, string> = { ...platformSecrets, ...operatorSecrets };
   knownSecrets = Object.values(secrets);
