@@ -22,21 +22,25 @@
 handle @sam_node_ws_port {
 	# Client-supplied SAM routing/credential headers never reach SAM or the node.
 	request_header -X-SAM-*
-	# A workspace app must not set cookies on the preview host (sam_port_access). Applied on the
-	# response writer (reverse_proxy's header_down is not applied to a 101 upgrade response), and
-	# only to the upgraded socket, so SAM's own 302 port-token -> cookie redirect keeps its cookie.
+	# A workspace app must not set cookies on the preview host (sam_port_access), exactly as the
+	# Worker strips Set-Cookie from every port response. Two rules, because reverse_proxy's
+	# header_down is not applied to a 101 upgrade: header_down for ordinary node responses, and
+	# this response-writer rule for the upgraded socket only. Neither touches SAM's own 302
+	# port-token -> cookie redirect, which forward_auth returns.
 	header {
 		-Set-Cookie
 		match status 101
 	}
 	route {
+		# Captured before forward_auth overrides Host: header_up ops are not ordered.
+		vars sam_ws_host {host}
 		forward_auth 127.0.0.1:{$CELLD_PORT:8080} {
 			uri /api/self-host/gateway/node-websocket
 			# celld (CELLD_TRUST_FORWARDED_HEADERS=1) builds request.url from X-Forwarded-Host,
 			# so it must name the API host; the socket's own host travels separately.
 			header_up Host api.{$SAM_DOMAIN}
 			header_up X-Forwarded-Host api.{$SAM_DOMAIN}
-			header_up X-SAM-Gateway-Original-Host {host}
+			header_up X-SAM-Gateway-Original-Host {vars.sam_ws_host}
 			header_up X-SAM-Gateway-Secret {$REVERSE_TUNNEL_GATEWAY_SECRET}
 			import sam_client_ip
 			copy_headers X-SAM-Upstream X-SAM-Upstream-Uri X-SAM-Upstream-Authorization X-SAM-Upstream-Cookie X-SAM-Node-Id X-SAM-Workspace-Id
@@ -46,12 +50,13 @@ handle @sam_node_ws_port {
 			import sam_client_ip
 			header_up Authorization {http.request.header.X-SAM-Upstream-Authorization}
 			header_up Cookie {http.request.header.X-SAM-Upstream-Cookie}
-			header_up X-Forwarded-Host {host}
+			header_up X-Forwarded-Host {vars.sam_ws_host}
 			header_up X-Forwarded-Proto https
 			header_up -X-SAM-Upstream
 			header_up -X-SAM-Upstream-Uri
 			header_up -X-SAM-Upstream-Authorization
 			header_up -X-SAM-Upstream-Cookie
+			header_down -Set-Cookie
 		}
 	}
 }
@@ -64,13 +69,15 @@ handle @sam_node_ws_port {
 handle @sam_node_ws {
 	request_header -X-SAM-*
 	route {
+		# Captured before forward_auth overrides Host: header_up ops are not ordered.
+		vars sam_ws_host {host}
 		forward_auth 127.0.0.1:{$CELLD_PORT:8080} {
 			uri /api/self-host/gateway/node-websocket
 			# celld (CELLD_TRUST_FORWARDED_HEADERS=1) builds request.url from X-Forwarded-Host,
 			# so it must name the API host; the socket's own host travels separately.
 			header_up Host api.{$SAM_DOMAIN}
 			header_up X-Forwarded-Host api.{$SAM_DOMAIN}
-			header_up X-SAM-Gateway-Original-Host {host}
+			header_up X-SAM-Gateway-Original-Host {vars.sam_ws_host}
 			header_up X-SAM-Gateway-Secret {$REVERSE_TUNNEL_GATEWAY_SECRET}
 			import sam_client_ip
 			copy_headers X-SAM-Upstream X-SAM-Upstream-Uri X-SAM-Upstream-Authorization X-SAM-Upstream-Cookie X-SAM-Node-Id X-SAM-Workspace-Id
@@ -80,7 +87,7 @@ handle @sam_node_ws {
 			import sam_client_ip
 			header_up Authorization {http.request.header.X-SAM-Upstream-Authorization}
 			header_up Cookie {http.request.header.X-SAM-Upstream-Cookie}
-			header_up X-Forwarded-Host {host}
+			header_up X-Forwarded-Host {vars.sam_ws_host}
 			header_up X-Forwarded-Proto https
 			header_up -X-SAM-Upstream
 			header_up -X-SAM-Upstream-Uri
