@@ -30,12 +30,21 @@ import {
 
 /** Background per-request budget: shorter than the interactive Cloudflare default (rule 47). */
 export const DEFAULT_NODE_TUNNEL_CLEANUP_REQUEST_TIMEOUT_MS = 10_000;
-/** Rows cleaned per sweep tick. Each row costs at most ~6 Cloudflare requests. */
+/** Rows cleaned per sweep tick. Each row costs at most ~6 single-attempt Cloudflare requests. */
 export const DEFAULT_NODE_TUNNEL_CLEANUP_BATCH_SIZE = 10;
+/**
+ * Wall-time budget per sweep tick: no new row is started once it is spent, so a degraded
+ * Cloudflare API cannot hold the shared 5-minute cron (rule 53). Worst case per tick is this
+ * budget plus one row (6 requests x the request timeout = 60 s by default).
+ */
+export const DEFAULT_NODE_TUNNEL_CLEANUP_SWEEP_BUDGET_MS = 30_000;
 export const DEFAULT_NODE_TUNNEL_CLEANUP_BACKOFF_BASE_MS = 60_000;
 export const DEFAULT_NODE_TUNNEL_CLEANUP_BACKOFF_MAX_MS = 60 * 60_000;
-/** Failed attempts after which every further failure is logged at error level as stuck. */
-export const DEFAULT_NODE_TUNNEL_CLEANUP_STUCK_ATTEMPTS = 6;
+/**
+ * Failed attempts after which every further failure is logged at error level as stuck. Only
+ * changes log severity, never behavior, so it is a fixed observability threshold.
+ */
+export const NODE_TUNNEL_CLEANUP_STUCK_ATTEMPTS = 6;
 const LAST_ERROR_MAX_LENGTH = 500;
 
 /** Optional overrides, read through a narrow local interface (see node-tunnel-config.ts). */
@@ -44,6 +53,7 @@ export interface NodeTunnelCleanupEnv {
   NODE_TUNNEL_CLEANUP_BATCH_SIZE?: string;
   NODE_TUNNEL_CLEANUP_BACKOFF_BASE_MS?: string;
   NODE_TUNNEL_CLEANUP_BACKOFF_MAX_MS?: string;
+  NODE_TUNNEL_CLEANUP_SWEEP_BUDGET_MS?: string;
 }
 
 type CleanupEnv = TunnelEnv & NodeTunnelCleanupEnv;
@@ -54,7 +64,9 @@ function cleanupOptions(env: CleanupEnv): CloudflareCallOptions {
     env.NODE_TUNNEL_CLEANUP_REQUEST_TIMEOUT_MS,
     DEFAULT_NODE_TUNNEL_CLEANUP_REQUEST_TIMEOUT_MS
   );
-  return { timeoutMs: Math.min(interactive, background) };
+  // Single attempt per request: the row's persisted backoff is the retry loop, which keeps
+  // one row's worst case at (requests x timeout) instead of multiplying it by retries.
+  return { timeoutMs: Math.min(interactive, background), attempts: 1 };
 }
 
 export function nodeTunnelCleanupBackoffMs(env: NodeTunnelCleanupEnv, attempts: number): number {
@@ -137,7 +149,7 @@ async function recordCleanupFailure(env: CleanupEnv, row: NodeTunnelRow, err: un
     attempts,
     ...serializeError(err),
   };
-  if (attempts >= DEFAULT_NODE_TUNNEL_CLEANUP_STUCK_ATTEMPTS) {
+  if (attempts >= NODE_TUNNEL_CLEANUP_STUCK_ATTEMPTS) {
     log.error('node_tunnel.cleanup_stuck', fields);
   } else {
     log.warn('node_tunnel.cleanup_failed', fields);
@@ -200,9 +212,29 @@ export interface NodeTunnelCleanupResult {
 }
 
 /**
- * Release this node's non-live incarnations and try to clean them now. Used right after a
- * runtime termination proof or a provisioning failure. Never throws; the cron sweep is the
- * backstop for anything left pending.
+ * Release this node's non-live incarnations (D1 only, one statement). Cloudflare deletion is
+ * left to the cron sweep so teardown paths (the delete route, TaskRunner/NodeLifecycle DOs,
+ * other sweeps) never wait on the Cloudflare API. Never throws: an unreleased row is still
+ * found by the sweep's own non-live scan.
+ */
+export async function releaseNodeTunnels(
+  env: CleanupEnv,
+  nodeId: string,
+  reason: string
+): Promise<number> {
+  try {
+    return await releaseNonLiveNodeTunnels(env, reason, nodeId);
+  } catch (err) {
+    log.error('node_tunnel.release_failed', { nodeId, reason, ...serializeError(err) });
+    return 0;
+  }
+}
+
+/**
+ * Release, then try to clean at most ONE due row of this node now. Used on provisioning
+ * failure, where the caller is already on a slow failure path and prompt removal of a
+ * just-created tunnel is worth one bounded attempt (<= 6 requests x the request timeout).
+ * Anything else stays pending for the sweep. Never throws.
  */
 export async function settleNodeTunnels(
   env: CleanupEnv,
@@ -212,12 +244,7 @@ export async function settleNodeTunnels(
   const result: NodeTunnelCleanupResult = { released: 0, attempted: 0, cleaned: 0 };
   try {
     result.released = await releaseNonLiveNodeTunnels(env, reason, nodeId);
-    const due = await listDueNodeTunnelCleanups(
-      env,
-      new Date().toISOString(),
-      batchSize(env),
-      nodeId
-    );
+    const due = await listDueNodeTunnelCleanups(env, new Date().toISOString(), 1, nodeId);
     for (const row of due) {
       result.attempted++;
       if (await cleanupNodeTunnelRow(env, row)) result.cleaned++;
@@ -228,16 +255,35 @@ export async function settleNodeTunnels(
   return result;
 }
 
-/** Cron sweep: release every non-live owned row, then clean a bounded batch of due rows. */
+/**
+ * Cron sweep: release every non-live owned row, then clean due rows in a bounded batch until
+ * the wall-time budget is spent. Rows left over stay due for the next tick.
+ */
 export async function runNodeTunnelCleanupSweep(
   env: CleanupEnv,
-  now: Date = new Date()
+  now: Date = new Date(),
+  clock: () => number = Date.now
 ): Promise<NodeTunnelCleanupResult> {
   const released = await releaseNonLiveNodeTunnels(env, 'runtime_not_live');
   const due = await listDueNodeTunnelCleanups(env, now.toISOString(), batchSize(env));
+  const budgetMs = getTimeoutMs(
+    env.NODE_TUNNEL_CLEANUP_SWEEP_BUDGET_MS,
+    DEFAULT_NODE_TUNNEL_CLEANUP_SWEEP_BUDGET_MS
+  );
+  const startedAt = clock();
+  let attempted = 0;
   let cleaned = 0;
   for (const row of due) {
+    if (clock() - startedAt >= budgetMs) {
+      log.warn('node_tunnel.sweep_budget_exhausted', {
+        budgetMs,
+        attempted,
+        deferred: due.length - attempted,
+      });
+      break;
+    }
+    attempted++;
     if (await cleanupNodeTunnelRow(env, row)) cleaned++;
   }
-  return { released, attempted: due.length, cleaned };
+  return { released, attempted, cleaned };
 }

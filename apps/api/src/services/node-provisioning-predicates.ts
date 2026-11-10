@@ -68,18 +68,18 @@ export function d1WriteChanged(
   return (result?.meta?.changes ?? 0) === 1;
 }
 
+/**
+ * Release one incarnation's tunnel when the caller KNOWS no VM can still use it: no provider
+ * create was ever requested, or the provider confirmed the VM deleted. Never throws.
+ */
 export async function releaseTunnelBeforeVm(
   env: Env,
   nodeId: string,
-  runtimeIncarnationId: string
+  runtimeIncarnationId: string,
+  reason = 'provisioning_failed_before_vm'
 ): Promise<void> {
   try {
-    await releaseUnallocatedNodeTunnel(
-      env,
-      nodeId,
-      runtimeIncarnationId,
-      'provisioning_failed_before_vm'
-    );
+    await releaseUnallocatedNodeTunnel(env, nodeId, runtimeIncarnationId, reason);
   } catch (releaseErr) {
     log.error('node_provisioning.tunnel_release_failed', {
       nodeId,

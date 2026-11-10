@@ -39,6 +39,7 @@ import {
 import {
   NODE_TUNNEL_COLUMNS,
   type NodeTunnelRow,
+  type OwnedNodeTunnelAssignment,
   readNodeTunnelByIncarnation,
   releaseNonLiveNodeTunnels,
   updateOwnedNodeTunnel,
@@ -64,6 +65,13 @@ export interface EnsureNodeTunnelInput {
 const NODE_LIVE_FENCE_SQL = `id = ? AND user_id = ? AND runtime = 'vm' AND node_class = 'managed'
   AND runtime_incarnation_id = ? AND runtime_termination_confirmed_at IS NULL
   AND status NOT IN ('deleted', 'stopped', 'destroying')`;
+
+/**
+ * Superseded rows cleaned inline before taking over the shared hostname. Only the most recent
+ * one can hold the CNAME (a CNAME is exclusive and every incarnation cleans its predecessor
+ * first), so a small fixed bound suffices; the sweep owns any older backlog.
+ */
+const SUPERSEDED_CLEANUP_LIMIT = 2;
 
 class NodeTunnelFenceError extends Error {
   override name = 'NodeTunnelFenceError';
@@ -146,7 +154,7 @@ async function writeNodeTunnelFields(
 async function persistOwned(
   env: TunnelEnv,
   row: NodeTunnelRow,
-  assignments: string,
+  assignments: OwnedNodeTunnelAssignment,
   binds: unknown[]
 ): Promise<void> {
   if (!(await updateOwnedNodeTunnel(env, row.id, assignments, binds))) {
@@ -246,9 +254,11 @@ async function cleanupSupersededIncarnations(env: TunnelEnv, row: NodeTunnelRow)
   await releaseNonLiveNodeTunnels(env, 'superseded_by_new_incarnation', row.nodeId);
   const pending = await env.DATABASE.prepare(
     `SELECT ${NODE_TUNNEL_COLUMNS} FROM node_cloudflare_tunnels
-      WHERE node_id = ? AND id != ? AND status = 'cleanup_pending'`
+      WHERE node_id = ? AND id != ? AND status = 'cleanup_pending'
+      ORDER BY created_at DESC, id
+      LIMIT ?`
   )
-    .bind(row.nodeId, row.id)
+    .bind(row.nodeId, row.id, SUPERSEDED_CLEANUP_LIMIT)
     .all<NodeTunnelRow>();
   let cleaned = false;
   for (const stale of pending.results ?? []) {

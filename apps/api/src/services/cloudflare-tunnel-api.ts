@@ -21,10 +21,15 @@ import { readResponseJson } from '../lib/runtime-validation';
 import { CLOUDFLARE_API_BASE, DEFAULT_CF_API_TIMEOUT_MS, getDnsTTL } from './dns-core';
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 
-/** Attempts for idempotent (GET/PUT/DELETE) calls on transient failure. Never applied to POST. */
-export const DEFAULT_CF_TUNNEL_API_IDEMPOTENT_ATTEMPTS = 3;
-/** Linear backoff step between idempotent retries. */
-export const DEFAULT_CF_TUNNEL_API_RETRY_DELAY_MS = 250;
+/**
+ * Attempts for idempotent (GET/PUT/DELETE) calls on a transient failure, during provisioning.
+ * Never applied to POST. Fixed rather than env-exposed: it only smooths one blip inside an
+ * interactive provisioning step; background cleanup passes `attempts: 1` because its own
+ * backoff schedule (node-tunnel-cleanup.ts, env-tunable) is the retry loop.
+ */
+export const CF_TUNNEL_API_IDEMPOTENT_ATTEMPTS = 3;
+/** Linear backoff step between those retries. */
+export const CF_TUNNEL_API_RETRY_DELAY_MS = 250;
 const ERROR_MESSAGE_MAX_LENGTH = 200;
 
 export type CloudflareTunnelEnv = Pick<
@@ -35,6 +40,8 @@ export type CloudflareTunnelEnv = Pick<
 export interface CloudflareCallOptions {
   /** Per-request timeout override (background cleanup uses a shorter budget). */
   timeoutMs?: number;
+  /** Attempts for idempotent calls; defaults to {@link CF_TUNNEL_API_IDEMPOTENT_ATTEMPTS}. */
+  attempts?: number;
   signal?: AbortSignal;
 }
 
@@ -116,7 +123,8 @@ async function cloudflareRequest(
   body: unknown,
   options: CloudflareCallOptions = {}
 ): Promise<unknown> {
-  const attempts = method === 'POST' ? 1 : DEFAULT_CF_TUNNEL_API_IDEMPOTENT_ATTEMPTS;
+  const attempts =
+    method === 'POST' ? 1 : Math.max(1, options.attempts ?? CF_TUNNEL_API_IDEMPOTENT_ATTEMPTS);
   const timeoutMs =
     options.timeoutMs ?? getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
   let lastError: CloudflareTunnelApiError | null = null;
@@ -145,7 +153,7 @@ async function cloudflareRequest(
         [],
         boundedMessage(err instanceof Error ? err.message : String(err))
       );
-      if (attempt < attempts) await sleep(DEFAULT_CF_TUNNEL_API_RETRY_DELAY_MS * attempt);
+      if (attempt < attempts) await sleep(CF_TUNNEL_API_RETRY_DELAY_MS * attempt);
       continue;
     }
     const envelope = await readEnvelope(response, operation);
@@ -162,7 +170,7 @@ async function cloudflareRequest(
       boundedMessage(envelope?.errors?.[0]?.message)
     );
     if (!lastError.transient || attempt >= attempts) throw lastError;
-    await sleep(DEFAULT_CF_TUNNEL_API_RETRY_DELAY_MS * attempt);
+    await sleep(CF_TUNNEL_API_RETRY_DELAY_MS * attempt);
   }
   throw lastError ?? new CloudflareTunnelApiError(operation, undefined, [], '');
 }

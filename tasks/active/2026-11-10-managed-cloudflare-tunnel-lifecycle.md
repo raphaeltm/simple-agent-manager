@@ -56,7 +56,10 @@ never delete a replacement incarnation's resources.
 - [x] `provisionNode`: tunnel before createVM; no IP wait/A record for tunnel nodes; release on
       pre-VM failure and cancellation; settle after rejection/deleted row; keep tunnel when a
       VM may exist.
-- [x] `deleteNodeResourcesStrict`: release/clean after runtime termination proof (VM only).
+- [x] `deleteNodeResourcesStrict`: after runtime termination proof, a D1-only release for
+      tunnel-transport VM nodes. Cloudflare I/O is left to the sweep, so teardown never waits
+      on that API.
+- [x] Direct provider-delete fallback (strict teardown failed) releases that exact incarnation.
 - [x] Cron wiring `node_tunnel_cleanup` (isolated sweep) with completion-log counters.
 - [x] File-size splits: `node-provisioning-cloud-init.ts`, `-predicates.ts`,
       `-race-cleanup.ts`; `strict-node-deletion-shared.ts`; writer-inventory allowlist updated.
@@ -110,6 +113,41 @@ Discrimination checks (each guard deleted once, then restored):
 - Pre-VM release applied regardless of VM request → the resume, capacity and ambiguous tests
   went red.
 - Lost-response adoption removed → the adopt test went red.
+
+Review-round discrimination checks (same method):
+
+- Fallback release removed → the direct-fallback test went red.
+- Multi-tunnel refusal removed → the refusal test went red.
+- Sweep budget removed → the budget test went red.
+- Strict-deletion release removed → both strict-deletion tests went red.
+
+## Work bounds (rule 81)
+
+- Per row: at most ~6 single-attempt Cloudflare requests × 10 s
+  (`NODE_TUNNEL_CLEANUP_REQUEST_TIMEOUT_MS`), so 60 s worst case and under 1 s normally.
+- Per sweep tick (every 5 min): batch 10 (`NODE_TUNNEL_CLEANUP_BATCH_SIZE`), and no new row
+  starts after 30 s (`NODE_TUNNEL_CLEANUP_SWEEP_BUDGET_MS`). The worst-case tick is therefore
+  about 90 s with a fully degraded API, and normal throughput is 10 rows per 5 min, or
+  120 rows/h.
+- Outer probable limit: a burst of 500 node deletions in one hour (a fleet-wide cleanup)
+  drains in about 4.2 h at normal latency. Leftover tunnels are harmless: there is no connector
+  and the CNAME returns 530, never an IP fallback. With the API down, each row backs off
+  1 → 2 → 4 … min, capped at 60 min, and retries forever without losing its identity. It logs
+  `node_tunnel.cleanup_stuck` at error level from the 6th failed attempt.
+- Inline work: provisioning failure cleans at most 1 row of its own node (≤ 60 s). A
+  superseded-incarnation takeover cleans at most 2 rows. Strict deletion does no Cloudflare I/O.
+- Provisioning adds about 6–8 Cloudflare requests before `createVM`. Idempotent calls retry
+  up to 3 times with 250/500 ms backoff; POST is never retried.
+
+## Specialist review
+
+| Reviewer | Status | Outcome |
+| --- | --- | --- |
+| security-auditor | ADDRESSED | MEDIUM: the direct-delete fallback leaked the tunnel; it now releases that incarnation (test added). LOW: assignment SQL restricted to a literal union. LOW: worst-case documented above. |
+| cloudflare-specialist | ADDRESSED | CRITICAL: unbounded inline superseded fan-out, now LIMIT 2 with background timeouts. HIGH: inline Cloudflare I/O in strict deletion, now a D1-only release. HIGH: sweep wall time, now has a 30 s budget plus single-attempt requests. MEDIUM: release guarded on tunnel transport. LOW: the redundant `nodes.tunnel_id` write is kept on purpose, because it re-checks the live-incarnation fence before ingress/DNS mutation. |
+| task-completion-validator | PASS | LOW: node-provisioning.ts is 670 lines (under 800). |
+| test-engineer | ADDRESSED | Added tests for: multi-tunnel refusal; cleanup with NULL tunnel_id or NULL dns_record_id; the existing-proof strict path; batch convergence across ticks; doubling and capped backoff; DNS retry exhaustion; already-released and account-mismatch fences. Not added: an assertion on the stuck-log threshold (log level only), and Cloudflare tunnel-name uniqueness fidelity (undocumented; the code tolerates both behaviours). |
+| constitution-validator | ADDRESSED | Two LOW items: the fixed constants were renamed without the `DEFAULT_` prefix, with the reason recorded in comments. |
 
 ## Remaining (parent-owned)
 

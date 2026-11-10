@@ -76,11 +76,17 @@ export async function readNodeTunnelById(
     .first<NodeTunnelRow>();
 }
 
+/**
+ * The only column assignments an owned-row update may make. A closed literal set, so no caller
+ * can ever interpolate a computed string into the SQL below.
+ */
+export type OwnedNodeTunnelAssignment = 'tunnel_id = ?' | "dns_record_id = ?, status = 'active'";
+
 /** Update an owned (provisioning/active) row. Returns false when cleanup already claimed it. */
 export async function updateOwnedNodeTunnel(
   env: JournalEnv,
   id: string,
-  assignments: string,
+  assignments: OwnedNodeTunnelAssignment,
   binds: unknown[]
 ): Promise<boolean> {
   const result = await env.DATABASE.prepare(
@@ -116,8 +122,9 @@ export async function releaseNonLiveNodeTunnels(
 }
 
 /**
- * Release one incarnation that the caller KNOWS never had a VM requested (failure or
- * cancellation before the provider create call). Fenced on the exact node + incarnation.
+ * Release one incarnation that the caller KNOWS no VM can still use: failure or cancellation
+ * before the provider create call, or a provider-confirmed direct delete. Fenced on the exact
+ * node + incarnation.
  */
 export async function releaseUnallocatedNodeTunnel(
   env: JournalEnv,

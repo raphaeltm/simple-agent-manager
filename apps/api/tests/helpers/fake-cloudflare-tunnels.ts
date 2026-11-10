@@ -28,7 +28,9 @@ export type FakeFault =
   | { kind: 'status'; status: number; code?: number }
   | { kind: 'network' }
   | { kind: 'lost-after-commit' }
-  | { kind: 'hook'; run: () => void | Promise<void> };
+  | { kind: 'hook'; run: () => void | Promise<void> }
+  /** Answer normally; used to target a later call of the same operation. */
+  | { kind: 'pass' };
 
 export interface FakeCall {
   method: string;
@@ -82,6 +84,20 @@ export class FakeCloudflare {
 
   callCount(op: string): number {
     return this.calls.filter((call) => call.op === op).length;
+  }
+
+  seedTunnel(name: string): FakeTunnel {
+    const id = `00000000-0000-4000-9000-${String(++this.counter).padStart(12, '0')}`;
+    const tunnel: FakeTunnel = {
+      id,
+      name,
+      deleted: false,
+      connections: 0,
+      ingress: null,
+      token: `connector-token-${id}-SECRET`,
+    };
+    this.tunnels.set(id, tunnel);
+    return tunnel;
   }
 
   seedDnsRecord(record: Omit<FakeDnsRecord, 'id'>): FakeDnsRecord {
