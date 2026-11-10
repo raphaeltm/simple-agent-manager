@@ -66,17 +66,17 @@ The 2026-11-10 state-machine audit (Library `/engineering/research/state-machine
 
 ## Implementation checklist
 
-- [ ] Split `routes/node-lifecycle.ts`: extract the deployment heartbeat block (no behavior change), separate commit
-- [ ] D1: stall filter uses `in_progress`/`delegated` via typed `TaskStatus`; progress = max(`tasks.updated_at`, active session `lastMessageAt`); nudge class `deliver`; tests through `detectStalls` with realistic session rows
-- [ ] D2: SAM `send_message_to_subtask` uses `LIVE_TASK_STATUSES`; SAM `stop_subtask` uses `WAKEABLE_TASK_STATUSES`, skips the session stop for `sleeping`, CAS cancel with conditional status event; tests incl. concurrent-completion control
-- [ ] D3: `workspaceRuntimeOpts.CreateStatus`; attach paths use it; Go tests through real agent and terminal WS handlers (existing runtime `stopped`/`error` stays, missing runtime is created `running`)
-- [ ] D4: `ChatSessionStatus` = `active | sleeping | stopped | failed`; fix web consumers (`ChatSessionList`, `connections-model`, `deriveSessionState`); grep every `'error'` chat-status comparison; tests
-- [ ] D5: add `destroying`/`deleting` to `NodeStatus`; add `deleting` to `NODE_CALLBACK_TERMINAL_STATUSES`; route test proving `/ready` and heartbeat do not revive a `deleting` node (plus a `running` control)
-- [ ] D6: export shared drizzle predicate from `trigger-execution-sync.ts`; `setTaskStatus` uses it; real-SQL test proving `skipped`/`dropped` survive and `running` still syncs
-- [ ] D7: CAS on env status in heartbeat write; test: concurrent `stopping` survives the heartbeat; `starting → active` control
-- [ ] D8: `useWakeProgress(sessionId, sessionStatus)` re-arms on not-sleeping → `sleeping`; test second wake shows phases; control: late `waking` after `restored` while still `sleeping` stays suppressed
-- [ ] Docs: update any docs referencing chat `error` status / node statuses / stall detection
-- [ ] Playwright visual audit for changed UI surfaces (chat session list badge, account map failed state), 375 and 1280
+- [x] Split `routes/node-lifecycle.ts`: extract the deployment heartbeat block (no behavior change), separate commit
+- [x] D1: stall filter uses `in_progress`/`delegated` via typed `TaskStatus`; progress = max(`tasks.updated_at`, active session `lastMessageAt`); nudge class `deliver`; tests through `detectStalls` with realistic session rows
+- [x] D2: SAM `send_message_to_subtask` uses `LIVE_TASK_STATUSES`; SAM `stop_subtask` uses `WAKEABLE_TASK_STATUSES`, skips the session stop for `sleeping`, CAS cancel with conditional status event; tests incl. concurrent-completion control
+- [x] D3: `workspaceRuntimeOpts.CreateStatus`; attach paths use it; Go tests through real agent and terminal WS handlers (existing runtime `stopped`/`error` stays, missing runtime is created `running`)
+- [x] D4: `ChatSessionStatus` = `active | sleeping | stopped | failed`; fix web consumers (`ChatSessionList`, `connections-model`, `deriveSessionState`); grep every `'error'` chat-status comparison; tests
+- [x] D5: add `destroying`/`deleting` to `NodeStatus`; add `deleting` to `NODE_CALLBACK_TERMINAL_STATUSES`; route test proving `/ready` and heartbeat do not revive a `deleting` node (plus a `running` control)
+- [x] D6: export shared drizzle predicate from `trigger-execution-sync.ts`; `setTaskStatus` uses it; real-SQL test proving `skipped`/`dropped` survive and `running` still syncs
+- [x] D7: CAS on env status in heartbeat write; test: concurrent `stopping` survives the heartbeat; `starting → active` control
+- [x] D8: `useWakeProgress(sessionId, sessionStatus)` re-arms on not-sleeping → `sleeping`; test second wake shows phases; control: late `waking` after `restored` while still `sleeping` stays suppressed
+- [x] Docs: update any docs referencing chat `error` status / node statuses / stall detection
+- [x] Playwright visual audit for changed UI surfaces (chat session list badge, account map failed state), 375 and 1280
 - [ ] Staging: deploy; verify each defect fixed on live staging (see acceptance criteria)
 
 ## Acceptance criteria
@@ -96,3 +96,18 @@ The 2026-11-10 state-machine audit (Library `/engineering/research/state-machine
 
 - Library report: `/engineering/research/state-machines-2026-11-10/00-state-machine-map.md`
 - Rules: 62 (real trigger), 73 (optional fields), 74 (proxy signals), 18 (file size), 28 (real SQL for predicates), 27/54 (VM agent staging), 17 (visual audit)
+
+## Implementation notes
+
+- **D1 changed shape on purpose.**
+  - Correcting only the status filter would have turned on a detector that cancels working agents.
+  - Progress is now `max(tasks.updated_at, session lastMessageAt)`, and the nudge is `deliver`.
+  - Decision-log text is now "status nudge sent".
+- **D2 also fixes the adjacent missing CAS** on the SAM stop cancel write, reported in audit row 9. It is the same function and the same class of bug.
+- **D3 also moved code for rule 18.** `workspace_routing.go` was 614 lines; request routing and auth moved to `workspace_request_auth.go` (pure move, separate commit).
+- **D4 correction to the audit:**
+  - `ChatSessionList` has no importer in `apps/web/src`; it is dead code, so it was deleted rather than fixed. The user-visible effect of D4 was the account map, which showed failed task-less chats as idle.
+  - `deriveSessionState` mapping a failed session with `agentCompletedAt` to `idle` was deliberately **not** changed. The resume-and-send path relies on it to let a user continue a failed chat, so changing it is a product decision outside this scope.
+- **D7 also moved code for rule 18.** `node-lifecycle.ts` was 840 lines; the deployment heartbeat moved to `node-heartbeat-deployment.ts` (pure move, separate commit).
+- **Discrimination:** every guard was removed once and the intended tests went red (see commit messages / PR).
+- **Go toolchain:** the workspace had none. go1.26.10 was installed to `/tmp/gotool` and its checksum verified against the go.dev JSON index.
