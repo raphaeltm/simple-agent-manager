@@ -15,7 +15,7 @@
 import type { Env } from '../env';
 
 /** Cloudflare R2's S3 API ignores the region; SigV4 still needs one. */
-export const DEFAULT_R2_S3_REGION = 'auto';
+const DEFAULT_R2_S3_REGION = 'auto';
 
 export interface R2PresignConfig {
   endpoint: string;
@@ -29,7 +29,7 @@ export interface R2PresignConfig {
   secretAccessKey: string;
 }
 
-export type R2PresignEnv = Pick<
+type R2PresignEnv = Pick<
   Env,
   | 'CF_ACCOUNT_ID'
   | 'R2_ACCESS_KEY_ID'

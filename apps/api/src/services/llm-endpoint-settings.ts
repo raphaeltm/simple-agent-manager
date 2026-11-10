@@ -5,14 +5,18 @@
  *
  * Nothing changes until an admin sets `llm.openAICompatible.baseUrl`. The API key is stored
  * encrypted in `platform_credentials` like every other secret admin setting. The dependency
- * back to the registry is type-only, so there is no runtime import cycle.
+ * back to the registry is type-only; only the shared secret length floor is imported at runtime.
  */
-import type { AdminSettingDefinition, AdminSettingName } from './admin-setting-definitions';
+import {
+  type AdminSettingDefinition,
+  type AdminSettingName,
+  MIN_SECRET_SETTING_LENGTH,
+} from './admin-setting-definitions';
 
 /** Which control-plane caller is asking; each can use its own model on the endpoint. */
 export type LlmPurpose = 'agent' | 'taskTitle' | 'diagnosis' | 'aiProxy';
 
-export const LLM_ENDPOINT_SETTING_KEYS = [
+const LLM_ENDPOINT_SETTING_KEYS = [
   'baseUrl',
   'apiKey',
   'model',
@@ -22,7 +26,7 @@ export const LLM_ENDPOINT_SETTING_KEYS = [
   'aiProxyModel',
 ] as const;
 
-export type LlmEndpointSettingKey = (typeof LLM_ENDPOINT_SETTING_KEYS)[number];
+type LlmEndpointSettingKey = (typeof LLM_ENDPOINT_SETTING_KEYS)[number];
 export type LlmEndpointSettingName = `llm.openAICompatible.${LlmEndpointSettingKey}`;
 
 /** Per-purpose model override, falling back to `llm.openAICompatible.model`. */
@@ -33,17 +37,27 @@ export const LLM_PURPOSE_MODEL_SETTING: Readonly<Record<LlmPurpose, LlmEndpointS
   aiProxy: 'llm.openAICompatible.aiProxyModel',
 };
 
-/** Shortest and longest accepted API key. */
-const MIN_API_KEY_LENGTH = 8;
+/** Longest accepted API key. */
 const MAX_API_KEY_LENGTH = 4096;
 
 /** Longest accepted model id; real ids are far shorter. */
 const MAX_MODEL_ID_LENGTH = 200;
 
-/** Docker service names and other single-label hosts are on the operator's private network. */
+/** IPv6 loopback, unique-local (fc00::/7) and link-local (fe80::/10); nothing else. */
+function isPrivateIpv6(host: string): boolean {
+  return host === '::1' || /^f[cd][0-9a-f]{2}:/.test(host) || /^fe[89ab][0-9a-f]:/.test(host);
+}
+
+/**
+ * Loopback, RFC 1918, private IPv6, `.local`/`.internal` names and single-label hosts (Docker
+ * service names) are on the operator's own network.
+ */
 function isPrivateHost(hostname: string): boolean {
   const host = hostname.replace(/^\[|\]$/g, '').toLowerCase();
-  if (host === 'localhost' || host === '::1' || !host.includes('.')) return true;
+  // Every IPv6 literal contains ':'; decide those here so the single-label rule below cannot
+  // admit a public IPv6 (or IPv4-mapped) address.
+  if (host.includes(':')) return isPrivateIpv6(host);
+  if (host === 'localhost' || !host.includes('.')) return true;
   if (host.endsWith('.local') || host.endsWith('.internal')) return true;
   const octets = host.split('.').map(Number);
   if (octets.length !== 4 || octets.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) {
@@ -122,7 +136,7 @@ function definition(key: LlmEndpointSettingKey): AdminSettingDefinition {
       // Same floor as the OAuth secrets: a real key is never this short.
       validate: (value) =>
         typeof value === 'string' &&
-        value.trim().length >= MIN_API_KEY_LENGTH &&
+        value.trim().length >= MIN_SECRET_SETTING_LENGTH &&
         value.length <= MAX_API_KEY_LENGTH,
     };
   }

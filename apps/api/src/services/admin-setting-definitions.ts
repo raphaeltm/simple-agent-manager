@@ -267,6 +267,10 @@ export function connectorDefinition(key: ConnectorSettingKey): AdminSettingDefin
   };
 }
 
+/** Shortest secret a secret admin setting accepts (OAuth client secrets, the LLM API key). */
+export const MIN_SECRET_SETTING_LENGTH = 8;
+const MIN_OAUTH_CLIENT_ID_LENGTH = 6;
+
 export function oauthDefinition(
   name: AdminSettingName,
   legacyEnvironment: keyof Env,
@@ -283,7 +287,9 @@ export function oauthDefinition(
     risky: true,
     legacyEnvironment,
     credential,
-    validate: (value) => typeof value === 'string' && value.trim().length >= (credential ? 8 : 6),
+    validate: (value) =>
+      typeof value === 'string' &&
+      value.trim().length >= (credential ? MIN_SECRET_SETTING_LENGTH : MIN_OAUTH_CLIENT_ID_LENGTH),
   };
 }
 

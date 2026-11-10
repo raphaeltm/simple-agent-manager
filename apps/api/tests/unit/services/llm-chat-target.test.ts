@@ -61,12 +61,19 @@ describe('validLlmBaseUrl', () => {
     'http://192.168.1.20/v1',
     'http://10.0.0.5/v1',
     'http://172.20.0.3/v1',
+    'http://[::1]:4000/v1',
+    'http://[fd00::1]/v1',
+    'http://[fe80::1]/v1',
   ])('accepts %s', (url) => expect(validLlmBaseUrl(url)).toBe(true));
 
   it.each([
     'http://llm.example.com/v1',
     'http://8.8.8.8/v1',
     'http://172.32.0.1/v1',
+    // Every IPv6 literal lacks a '.', which the single-label rule must not mistake for private.
+    'http://[2001:db8::1]/v1',
+    'http://[::ffff:8.8.8.8]/v1',
+    'http://[fe00::1]/v1',
     'https://user:pass@llm.example.com/v1',
     'https://llm.example.com/v1?key=x',
     'https://llm.example.com/v1/chat/completions',
