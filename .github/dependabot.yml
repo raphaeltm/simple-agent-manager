@@ -42,3 +42,9 @@ updates:
     directory: '/scripts/e2e/workspace-mock'
     schedule:
       interval: weekly
+  # Self-hosted one-box Caddy build (DNS-01 module); compose images are pinned in
+  # deploy/selfhost/docker-compose.yml and checked by scripts/selfhost/versions.test.ts.
+  - package-ecosystem: 'docker'
+    directory: '/deploy/selfhost/caddy'
+    schedule:
+      interval: weekly
