@@ -33,12 +33,13 @@ export async function getPlatformCapabilities(signal?: AbortSignal): Promise<Pla
       '/api/config/platform-capabilities',
       { signal }
     );
-    return {
-      ...ASSUMED_PLATFORM_CAPABILITIES,
-      ...Object.fromEntries(
-        Object.entries(result).filter(([, value]) => typeof value === 'boolean')
-      ),
-    };
+    // Known keys only; a field the API omits or mistypes keeps its assumed value.
+    const capabilities = { ...ASSUMED_PLATFORM_CAPABILITIES };
+    for (const key of Object.keys(capabilities) as (keyof PlatformCapabilities)[]) {
+      const value: unknown = result[key];
+      if (typeof value === 'boolean') capabilities[key] = value;
+    }
+    return capabilities;
   } catch (error) {
     if (signal?.aborted) throw error;
     return ASSUMED_PLATFORM_CAPABILITIES;

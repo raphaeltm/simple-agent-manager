@@ -118,7 +118,9 @@ describe('POST /api/projects (repoProvider: artifacts)', () => {
 
   it('keeps the existing 400 when the flag is off, with or without the binding', async () => {
     const withoutBinding = await create(env());
-    const withBinding = await create(env({ ARTIFACTS: { create: artifactsCreate, delete: vi.fn() } }));
+    const withBinding = await create(
+      env({ ARTIFACTS: { create: artifactsCreate, delete: vi.fn() } })
+    );
 
     expect(withoutBinding.status).toBe(400);
     expect(withBinding.status).toBe(400);

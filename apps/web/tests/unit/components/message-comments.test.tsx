@@ -25,7 +25,6 @@ vi.mock('../../../src/hooks/usePlatformCapabilities', () => ({
   }),
 }));
 
-
 const author: MessageCommentAuthor = {
   id: 'user-1',
   name: 'Ada Lovelace',

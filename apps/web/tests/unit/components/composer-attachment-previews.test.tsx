@@ -27,7 +27,6 @@ vi.mock('../../../src/hooks/usePlatformCapabilities', () => ({
   }),
 }));
 
-
 vi.mock('@simple-agent-manager/acp-client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@simple-agent-manager/acp-client')>();
   return { ...actual, VoiceButton: () => null };

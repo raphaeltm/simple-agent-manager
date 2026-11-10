@@ -16,7 +16,6 @@ vi.mock('../../../src/hooks/usePlatformCapabilities', () => ({
   }),
 }));
 
-
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   getTtsApiUrl: () => 'https://api.example.test/tts',

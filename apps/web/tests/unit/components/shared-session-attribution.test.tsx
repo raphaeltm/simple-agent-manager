@@ -20,7 +20,6 @@ vi.mock('../../../src/hooks/usePlatformCapabilities', () => ({
   }),
 }));
 
-
 /**
  * Who sent a user-role transcript row (gap G3). The server writes the sender into the durable
  * delivery's tool metadata; the transcript must not show a teammate's words as the owner's.

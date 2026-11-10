@@ -97,7 +97,9 @@ beforeEach(() => {
   ({ sqlite, env: baseEnv } = createAdminSettingsEnv());
   unhandled = [];
   process.on('unhandledRejection', onUnhandled);
-  projectData.getMessages.mockReset().mockResolvedValue({ messages: silentTranscript, hasMore: false });
+  projectData.getMessages
+    .mockReset()
+    .mockResolvedValue({ messages: silentTranscript, hasMore: false });
   projectData.hasPendingSessionHumanInput.mockReset().mockResolvedValue(false);
   projectData.hasUnexpiredHumanInput.mockReset().mockResolvedValue(false);
 });
@@ -156,10 +158,11 @@ describe('classifyLongRunningTaskStall', () => {
   });
 
   it('treats an AI binding without a run method as absent', async () => {
-    const result = await classifyLongRunningTaskStall(
-      { ...baseEnv, AI: {} } as unknown as Env,
-      { task, liveness, nowMs: NOW }
-    );
+    const result = await classifyLongRunningTaskStall({ ...baseEnv, AI: {} } as unknown as Env, {
+      task,
+      liveness,
+      nowMs: NOW,
+    });
 
     expect(result).toBeNull();
     expect(projectData.getMessages).not.toHaveBeenCalled();

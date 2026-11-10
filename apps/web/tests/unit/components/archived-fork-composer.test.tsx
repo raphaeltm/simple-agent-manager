@@ -19,7 +19,6 @@ vi.mock('../../../src/hooks/usePlatformCapabilities', () => ({
   }),
 }));
 
-
 vi.mock('../../../src/components/AuthProvider', () => ({
   useAuth: () => ({ user: { id: 'user-1' } }),
 }));

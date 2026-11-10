@@ -17,7 +17,6 @@ vi.mock('../../../src/hooks/usePlatformCapabilities', () => ({
   }),
 }));
 
-
 function userItem(
   overrides: Partial<Extract<ConversationItem, { kind: 'user_message' }>>
 ): ConversationItem {

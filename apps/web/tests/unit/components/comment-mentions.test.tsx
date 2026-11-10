@@ -22,7 +22,6 @@ vi.mock('../../../src/hooks/usePlatformCapabilities', () => ({
   }),
 }));
 
-
 const mocks = vi.hoisted(() => ({ getProjectMembers: vi.fn() }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({

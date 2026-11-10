@@ -29,7 +29,6 @@ vi.mock('../../../src/hooks/usePlatformCapabilities', () => ({
   }),
 }));
 
-
 const mocks = vi.hoisted(() => ({
   getChatSession: vi.fn(),
   getChatSessionState: vi.fn(),
