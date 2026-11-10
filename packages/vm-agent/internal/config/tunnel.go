@@ -20,7 +20,10 @@ const TunnelHost = "127.0.0.1"
 // control-plane traffic arrives through a Cloudflare Tunnel connector.
 //
 // The zero value means "disabled", which is what legacy direct-IP nodes and
-// Instant (cf-container) runtimes get when the variables are absent.
+// Instant (cf-container) runtimes get when the variables are absent. The tunnel
+// listener always serves plain HTTP (cloudflared terminates TLS at the edge);
+// TLS_CERT_PATH/TLS_KEY_PATH apply only to the main listener, and tunnel nodes
+// are provisioned without them.
 type TunnelConfig struct {
 	// Enabled starts the loopback tunnel listener (env: VM_AGENT_TUNNEL_ENABLED).
 	Enabled bool

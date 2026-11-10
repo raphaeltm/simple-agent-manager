@@ -48,7 +48,7 @@ API token, never fetches an Origin CA certificate, and blocks public inbound tra
 - [x] Split `generate.ts` (validation/variables) to respect the file-size rule.
 - [x] Cloud-init: new variables + validation (token charset/length, port, pinned version, tunnel +
       Origin CA mutual exclusion).
-- [x] Cloud-init tunnel mode: pinned/checksummed cloudflared install, 0600 token file, systemd
+- [x] Cloud-init tunnel mode: pinned/checksummed cloudflared install, 0400 token file, systemd
       connector unit (hardened, `--token-file`, `--no-autoupdate`), firewall before agent start,
       wait for tunnel listener health before starting connector, boot-failure reporting.
 - [x] Firewall tunnel mode: drop public inbound for agent port, tunnel port, SSH on IPv4/IPv6;
@@ -83,6 +83,9 @@ Local tests here are not staging proof; the parent runs live staging E2E.
   though `ip6tables` worked. Usability of `ip6tables` now decides.
 - User-data size: legacy output was ~31.9 KB of 32 KB with a 700-char callback JWT. Mode-only
   fragments and reading `/etc/sam/callback-token` bring it to ~30.2 KB (tunnel ~26.9 KB).
+- go-specialist: no confirmed concurrency bugs; MEDIUM sequential listener shutdown sharing one
+  deadline fixed (concurrent `shutdownListeners`, `TestStopClosesMainListenerWhileTunnelRequestDrains`
+  red on the sequential version). LOW harness layering left as is.
 - Local review (this slice): doc-sync PASS; security-auditor 0 CRITICAL/HIGH (LOW systemd
   hardening applied; checksums verified against the release); task-completion-validator PASS
   (`template.ts` split into `template-resources.ts`; the configuration.md env table lists

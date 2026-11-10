@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sync"
 
 	"github.com/workspace/vm-agent/internal/config"
 )
@@ -120,12 +121,22 @@ func (s *Server) serveListeners() error {
 	return err
 }
 
-// shutdownTunnelServer gracefully stops the tunnel listener, if any.
-func (s *Server) shutdownTunnelServer(ctx context.Context) error {
-	if s.tunnelServer == nil {
-		return nil
+// shutdownListeners gracefully stops both listeners concurrently: each stops
+// accepting at once and drains within the same deadline, so a slow request on
+// one listener cannot keep the other accepting or consume its drain window.
+func (s *Server) shutdownListeners(ctx context.Context) error {
+	var tunnelErr error
+	var wg sync.WaitGroup
+	if s.tunnelServer != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			tunnelErr = s.tunnelServer.Shutdown(ctx)
+		}()
 	}
-	return s.tunnelServer.Shutdown(ctx)
+	mainErr := s.httpServer.Shutdown(ctx)
+	wg.Wait()
+	return errors.Join(tunnelErr, mainErr)
 }
 
 // isOwnListenerPort reports whether port is one this vm-agent listens on.
