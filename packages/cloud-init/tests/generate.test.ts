@@ -1188,7 +1188,9 @@ describe('generateCloudInit', () => {
       expect(originCaBlock).toContain('openssl genrsa -out "$TLS_KEY_PATH" 2048');
       expect(originCaBlock).toContain('chmod 600 "$TLS_KEY_PATH"');
       expect(originCaBlock).toContain('openssl req -new -key "$TLS_KEY_PATH"');
-      expect(originCaBlock).toContain('Authorization: Bearer cb-token-abc');
+      // The token is read from its 0600 file rather than repeated in user-data.
+      expect(originCaBlock).toContain('Authorization: Bearer $(cat /etc/sam/callback-token)');
+      expect(originCaBlock).not.toContain('cb-token-abc');
       expect(originCaBlock).toContain('--data-binary "@$TLS_CSR_PATH"');
       expect(parsed.runcmd.indexOf(originCaBlock)).toBeLessThan(
         parsed.runcmd.findIndex(

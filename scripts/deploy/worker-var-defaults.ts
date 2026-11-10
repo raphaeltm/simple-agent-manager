@@ -30,6 +30,15 @@
  * `_RATE_LIMIT_WINDOW_SECONDS`), which the proof test cannot call.
  */
 export const OMITTED_WORKER_VAR_DEFAULTS: Readonly<Record<string, string>> = {
+  // Managed VM tunnel transport, connector startup, and owned-resource cleanup
+  VM_AGENT_TRANSPORT: 'vm-public-dns',
+  VM_AGENT_TUNNEL_PORT: '8444',
+  CLOUDFLARED_VERSION: '2026.10.7',
+  VM_AGENT_TUNNEL_LISTENER_WAIT_SECONDS: '120',
+  VM_AGENT_TUNNEL_PROBE_TIMEOUT_SECONDS: '2',
+  VM_AGENT_TUNNEL_PROBE_INTERVAL_SECONDS: '1',
+  VM_AGENT_TUNNEL_RESTART_SECONDS: '5',
+
   // Request path
   D1_SESSION_MODE: 'first-primary',
 

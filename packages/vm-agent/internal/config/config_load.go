@@ -464,6 +464,10 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
+	if cfg.Tunnel, err = loadTunnelConfig(cfg.Port); err != nil {
+		return nil, err
+	}
+
 	return cfg, nil
 }
 

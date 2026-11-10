@@ -1177,6 +1177,14 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   TTS_SUMMARY_THRESHOLD?: string;
   TTS_RETRY_ATTEMPTS?: string;
   TTS_RETRY_BASE_DELAY_MS?: string;
+  // Managed VM transport (new nodes only; legacy nodes and instant containers keep their transport)
+  VM_AGENT_TRANSPORT?: string; // "vm-public-dns" (default) or "cloudflare-tunnel"
+  VM_AGENT_TUNNEL_PORT?: string; // Dedicated loopback tunnel ingress port (default: 8444)
+  CLOUDFLARED_VERSION?: string; // Pinned connector release supported by cloud-init (default: 2026.10.7)
+  VM_AGENT_TUNNEL_LISTENER_WAIT_SECONDS?: string; // Default: 120. Elapsed connector startup wait for the loopback agent listener (1-3600 seconds).
+  VM_AGENT_TUNNEL_PROBE_TIMEOUT_SECONDS?: string; // Default: 2. Maximum duration of one loopback health probe (1-60 seconds).
+  VM_AGENT_TUNNEL_PROBE_INTERVAL_SECONDS?: string; // Default: 1. Pause between loopback health probes (1-60 seconds).
+  VM_AGENT_TUNNEL_RESTART_SECONDS?: string; // Default: 5. Connector service restart delay (1-3600 seconds).
   // VM agent TLS configuration
   VM_AGENT_PROTOCOL?: string; // "https" (default) or "http"
   VM_AGENT_PORT?: string; // "8443" (default) or custom port

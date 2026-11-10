@@ -180,6 +180,14 @@
       "reviewedAt": "2026-11-09T01:00:00.000Z",
       "expiresAt": "2026-12-09T01:00:00.000Z",
       "digests": ["c76d36e487bee10de3b2aa6bb76a1a7aea74c8ecea171f2be31ae244a366cd50"]
+    },
+    {
+      "classification": "synthetic-test-fixture",
+      "reason": "Intermediate PR-range bytes only: a cloud-init test encoded placeholder account, tunnel and connector identities as one base64 literal. The identities are not valid Cloudflare account/tunnel IDs. The current tree constructs visibly synthetic fixture JSON at runtime instead. Exact rule/path/line/bytes only.",
+      "owner": "security",
+      "reviewedAt": "2026-11-10T09:21:52.185Z",
+      "expiresAt": "2026-12-10T09:21:52.185Z",
+      "digests": ["753cf5e5f0b0593379205af9e29a8f277d5e70a4cb78aec374dc3b006eec7de2"]
     }
   ]
 }

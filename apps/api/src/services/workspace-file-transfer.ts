@@ -13,6 +13,7 @@ import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { signTerminalToken } from './jwt';
 import { fetchNodeAgent } from './node-agent';
+import { getNodeBackendBaseUrl } from './node-agent-readiness';
 
 type AppDb = DrizzleD1Database<typeof schema>;
 
@@ -92,9 +93,7 @@ export async function resolveWorkspaceVmUrl(
     return { error: 'Invalid node ID format' };
   }
 
-  const protocol = env.VM_AGENT_PROTOCOL || 'https';
-  const port = env.VM_AGENT_PORT || '8443';
-  const vmBaseUrl = `${protocol}://${nodeIdLower}.vm.${env.BASE_DOMAIN}:${port}`;
+  const vmBaseUrl = getNodeBackendBaseUrl(workspace.nodeId, env);
   return { vmBaseUrl, nodeId: workspace.nodeId };
 }
 

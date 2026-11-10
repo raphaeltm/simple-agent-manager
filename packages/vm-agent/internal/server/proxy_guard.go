@@ -35,24 +35,28 @@ func markProxiedRequest(h http.Header) {
 	h.Set(proxiedRequestHeader, "1")
 }
 
-// isRelayedRequest reports whether a SAM proxy relayed the request. Besides the
+// isRelayedRequest reports whether a SAM proxy relayed the request. Every
+// request on the tunnel listener counts, whatever its headers, because the
+// local cloudflared connector relayed it (classifyTunnelIngress). Besides the
 // explicit marker it treats X-Forwarded-Host as a relay signal, because every
 // SAM relay path sets it (the API Worker on container forwards, the port proxy
 // passes it through, local forward sets it) and in-workspace helpers that call
 // the vm-agent directly never do.
 func isRelayedRequest(r *http.Request) bool {
-	return r.Header.Get(proxiedRequestHeader) != "" || r.Header.Get("X-Forwarded-Host") != ""
+	return isTunnelIngress(r) || r.Header.Get(proxiedRequestHeader) != "" || r.Header.Get("X-Forwarded-Host") != ""
 }
 
-// isOwnListenerTarget reports whether a proxy target would reach this vm-agent's
-// own HTTP listener. That happens whenever the proxy falls back to loopback
-// (standalone/cf-container mode, or a host without container discovery) and the
-// requested port is the vm-agent's listen port. Workspace ports must never be
-// able to reach the agent's own routes this way, whatever their auth model.
-// Callers pass either the loopback fallback or a container bridge IP; a caller
-// that resolves a target from the agent's own bind address must extend this.
+// isOwnListenerTarget reports whether a proxy target would reach one of this
+// vm-agent's own HTTP listeners: the main listener or, when enabled, the
+// loopback tunnel listener. That happens whenever the proxy falls back to
+// loopback (standalone/cf-container mode, or a host without container
+// discovery) and the requested port is a vm-agent listen port. Workspace ports
+// must never be able to reach the agent's own routes this way, whatever their
+// auth model. Callers pass either the loopback fallback or a container bridge
+// IP; a caller that resolves a target from the agent's own bind address must
+// extend this.
 func (s *Server) isOwnListenerTarget(targetHost string, port int) bool {
-	if s.config == nil || s.config.Port <= 0 || port != s.config.Port {
+	if !s.isOwnListenerPort(port) {
 		return false
 	}
 	host := strings.TrimSpace(targetHost)

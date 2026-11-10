@@ -28,7 +28,8 @@ vi.mock('../../../src/services/jwt', () => ({
 }));
 vi.mock('../../../src/lib/secrets', () => ({ getCredentialEncryptionKey: () => 'test-key' }));
 vi.mock('../../../src/services/observability', () => ({ persistError: vi.fn() }));
-vi.mock('@simple-agent-manager/cloud-init', () => ({
+vi.mock('@simple-agent-manager/cloud-init', async (load) => ({
+  ...(await load<typeof import('@simple-agent-manager/cloud-init')>()),
   generateCloudInit: () => 'cloud-init',
   validateCloudInitSize: () => true,
 }));

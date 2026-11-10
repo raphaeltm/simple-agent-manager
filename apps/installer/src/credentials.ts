@@ -73,6 +73,8 @@ const DEPLOY_ACCOUNT = [
 // binds it; the runtime uses the Worker binding, so the runtime token needs neither group.
 const DEPLOY_ACCOUNT_OPTIONAL = ['Artifacts Read', 'Artifacts Write'];
 const RUNTIME_ACCOUNT = [
+  // Managed workspace VMs use per-incarnation outbound Cloudflare Tunnels.
+  'Cloudflare One Connector: cloudflared Write',
   'Workers Containers Write',
   'Workers Scripts Read',
   'Workers Observability Read',

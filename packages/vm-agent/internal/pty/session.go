@@ -40,6 +40,7 @@ type Session struct {
 	attachedWriter io.Writer
 	closeGrace     time.Duration
 	waitProcess    func() error
+	processGroup   bool
 }
 
 // SessionInfo is a lightweight struct for listing sessions without exposing internals.
@@ -154,11 +155,9 @@ func NewSession(cfg SessionConfig) (*Session, error) {
 		}
 	}
 
-	if cfg.ProcessGroup {
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	}
-
-	// Start PTY
+	// StartWithSize creates a new session and process group via Setsid. Adding
+	// Setpgid would make the child a group leader before setsid, which fails with
+	// EPERM. Keep group-wide shutdown policy separate from the spawn attributes.
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{
 		Rows: uint16(rows),
 		Cols: uint16(cols),
@@ -181,6 +180,7 @@ func NewSession(cfg SessionConfig) (*Session, error) {
 		onClose:      cfg.OnClose,
 		OutputBuffer: NewRingBuffer(cfg.OutputBufferSize),
 		closeGrace:   cfg.CloseGrace,
+		processGroup: cfg.ProcessGroup,
 	}
 	session.waitProcess = session.defaultWaitProcess
 
@@ -315,7 +315,7 @@ func (s *Session) closeGraceDuration() time.Duration {
 }
 
 func (s *Session) signalProcess(signal syscall.Signal) error {
-	if s.Cmd.SysProcAttr != nil && s.Cmd.SysProcAttr.Setpgid {
+	if s.processGroup {
 		return syscall.Kill(-s.Cmd.Process.Pid, signal)
 	}
 	return s.Cmd.Process.Signal(signal)
