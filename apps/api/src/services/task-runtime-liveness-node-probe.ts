@@ -8,6 +8,7 @@
  */
 import { DEFAULT_TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS } from '@simple-agent-manager/shared';
 
+import { log } from '../lib/logger';
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 import { getNodeBackendBaseUrl } from './node-agent-readiness';
 import {
@@ -113,13 +114,10 @@ export async function probeNodeHealthForTaskLiveness(
         init = nodeAgentRequestInit(route, init);
       } catch (routeErr) {
         if (routeErr instanceof NodeAgentRouteError) throw routeErr;
-        console.warn(
-          JSON.stringify({
-            event: 'task_liveness.node_route_unreadable',
-            nodeId,
-            error: routeErr instanceof Error ? routeErr.message : String(routeErr),
-          })
-        );
+        log.warn('task_liveness.node_route_unreadable', {
+          nodeId,
+          error: routeErr instanceof Error ? routeErr.message : String(routeErr),
+        });
       }
     }
     const response = await fetchWithTimeout(url, init, timeoutMs);

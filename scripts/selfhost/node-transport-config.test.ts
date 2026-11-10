@@ -14,8 +14,8 @@ import {
   GATEWAY_SECRET_HEADER,
 } from '../../apps/api/src/routes/self-host-gateway';
 import { FRPS_PLUGIN_OPS } from '../../apps/api/src/services/node-reverse-tunnel-authz';
-import { REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS } from '../../packages/cloud-init/src/reverse-tunnel';
 import { GATEWAY_HEADER } from '../../apps/api/src/services/node-websocket-gateway';
+import { REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS } from '../../packages/cloud-init/src/reverse-tunnel';
 
 const root = join(import.meta.dirname, '../../deploy/selfhost');
 const frps = readFileSync(join(root, 'frps/frps.toml'), 'utf8');
