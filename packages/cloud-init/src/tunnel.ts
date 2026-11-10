@@ -6,6 +6,16 @@ import {
   TUNNEL_FIREWALL_WRITE_FILE,
   TUNNEL_WRITE_FILES,
 } from './template-ingress';
+import {
+  isReverseTunnelMode,
+  reverseTunnelReplacements,
+  validateReverseTunnelVariables,
+} from './reverse-tunnel';
+import {
+  REVERSE_TUNNEL_BOOTSTRAP_RUNCMD,
+  REVERSE_TUNNEL_CONNECTOR_RUNCMD,
+  REVERSE_TUNNEL_WRITE_FILES,
+} from './template-reverse-tunnel';
 import type { CloudInitVariables } from './variables';
 
 /**
@@ -65,9 +75,23 @@ function orDefault(value: string | undefined, fallback: string): string {
   return isSet(value) ? value : fallback;
 }
 
-/** A node is in tunnel mode exactly when it is given a connector token. */
-export function isTunnelMode(variables: CloudInitVariables): boolean {
+function isCloudflareTunnelMode(variables: CloudInitVariables): boolean {
   return isSet(variables.cloudflareTunnelToken);
+}
+
+/**
+ * A node is in tunnel mode exactly when it is given a Cloudflare connector token or a
+ * reverse-tunnel credential. Both modes share the firewall and the loopback listener.
+ */
+export function isTunnelMode(variables: CloudInitVariables): boolean {
+  return isCloudflareTunnelMode(variables) || isReverseTunnelMode(variables);
+}
+
+/** The agent's loopback tunnel listener port for whichever tunnel mode is active. */
+function tunnelListenerPort(variables: CloudInitVariables): string {
+  return isReverseTunnelMode(variables)
+    ? orDefault(variables.reverseTunnelLocalPort, DEFAULT_CLOUDFLARE_TUNNEL_PORT)
+    : orDefault(variables.cloudflareTunnelPort, DEFAULT_CLOUDFLARE_TUNNEL_PORT);
 }
 
 function effectiveVmAgentPort(variables: CloudInitVariables): string {
@@ -80,7 +104,16 @@ function effectiveVmAgentPort(variables: CloudInitVariables): string {
  * echo the connector token.
  */
 export function validateTunnelVariables(variables: CloudInitVariables, errors: string[]): void {
-  if (!isTunnelMode(variables)) {
+  validateReverseTunnelVariables(variables, errors);
+  if (isReverseTunnelMode(variables)) {
+    for (const name of ['cloudflareTunnelPort', 'cloudflaredVersion'] as const) {
+      if (isSet(variables[name])) errors.push(`${name}: requires cloudflareTunnelToken`);
+    }
+    validateListenerPort(variables, 'reverseTunnelLocalPort', errors);
+    validateTunnelTimings(variables, errors);
+    return;
+  }
+  if (!isCloudflareTunnelMode(variables)) {
     // Tunnel settings without a token would silently boot a direct-ingress node.
     const tunnelOnly: Array<keyof CloudInitVariables> = [
       'cloudflareTunnelPort',
@@ -106,14 +139,7 @@ export function validateTunnelVariables(variables: CloudInitVariables, errors: s
     );
   }
 
-  const port = orDefault(variables.cloudflareTunnelPort, DEFAULT_CLOUDFLARE_TUNNEL_PORT);
-  if (!NUMERIC_RE.test(port) || Number(port) < 1 || Number(port) > 65535) {
-    errors.push(`cloudflareTunnelPort: must be numeric 1-65535 (got ${JSON.stringify(port)})`);
-  } else if (Number(port) === Number(effectiveVmAgentPort(variables))) {
-    errors.push(
-      'cloudflareTunnelPort: must differ from vmAgentPort (that listener serves the bearerless Docker Git helper)'
-    );
-  }
+  validateListenerPort(variables, 'cloudflareTunnelPort', errors);
 
   const version = orDefault(variables.cloudflaredVersion, DEFAULT_CLOUDFLARED_VERSION);
   if (!Object.hasOwn(CLOUDFLARED_RELEASES, version)) {
@@ -122,6 +148,25 @@ export function validateTunnelVariables(variables: CloudInitVariables, errors: s
     );
   }
 
+  validateTunnelTimings(variables, errors);
+}
+
+function validateListenerPort(
+  variables: CloudInitVariables,
+  name: 'cloudflareTunnelPort' | 'reverseTunnelLocalPort',
+  errors: string[]
+): void {
+  const port = orDefault(variables[name], DEFAULT_CLOUDFLARE_TUNNEL_PORT);
+  if (!NUMERIC_RE.test(port) || Number(port) < 1 || Number(port) > 65535) {
+    errors.push(`${name}: must be numeric 1-65535 (got ${JSON.stringify(port)})`);
+  } else if (Number(port) === Number(effectiveVmAgentPort(variables))) {
+    errors.push(
+      `${name}: must differ from vmAgentPort (that listener serves the bearerless Docker Git helper)`
+    );
+  }
+}
+
+function validateTunnelTimings(variables: CloudInitVariables, errors: string[]): void {
   for (const [name, max] of TUNNEL_TIMING_LIMITS) {
     const value = variables[name];
     if (isSet(value) && (!NUMERIC_RE.test(value) || Number(value) < 1 || Number(value) > max)) {
@@ -136,7 +181,15 @@ export function validateTunnelVariables(variables: CloudInitVariables, errors: s
  * connector, which also keeps user-data under the 32 KB Hetzner limit.
  */
 export function ingressFragments(variables: CloudInitVariables): Record<string, string> {
-  const tunnel = isTunnelMode(variables);
+  if (isReverseTunnelMode(variables)) {
+    return {
+      '{{ ingress_bootstrap_runcmd }}': REVERSE_TUNNEL_BOOTSTRAP_RUNCMD,
+      '{{ ingress_connector_runcmd }}': REVERSE_TUNNEL_CONNECTOR_RUNCMD,
+      '{{ ingress_write_files }}': REVERSE_TUNNEL_WRITE_FILES,
+      '{{ ingress_firewall_write_file }}': TUNNEL_FIREWALL_WRITE_FILE,
+    };
+  }
+  const tunnel = isCloudflareTunnelMode(variables);
   return {
     '{{ ingress_bootstrap_runcmd }}': tunnel ? TUNNEL_BOOTSTRAP_RUNCMD : ORIGIN_CA_BOOTSTRAP_RUNCMD,
     '{{ ingress_connector_runcmd }}': tunnel ? TUNNEL_CONNECTOR_RUNCMD : '',
@@ -150,6 +203,7 @@ export function ingressFragments(variables: CloudInitVariables): Record<string, 
 /** Template replacements for tunnel mode; legacy nodes get inert values. */
 export function tunnelReplacements(variables: CloudInitVariables): Record<string, string> {
   const tunnel = isTunnelMode(variables);
+  const cloudflare = isCloudflareTunnelMode(variables);
   const version = orDefault(variables.cloudflaredVersion, DEFAULT_CLOUDFLARED_VERSION);
   const release = CLOUDFLARED_RELEASES[version];
   return {
@@ -159,8 +213,8 @@ export function tunnelReplacements(variables: CloudInitVariables): Record<string
     '{{ vm_agent_exec_start_pre }}': tunnel
       ? 'ExecStartPre=/etc/sam/firewall/setup-firewall.sh'
       : '',
-    '{{ tunnel_port }}': orDefault(variables.cloudflareTunnelPort, DEFAULT_CLOUDFLARE_TUNNEL_PORT),
-    '{{ tunnel_token }}': tunnel ? (variables.cloudflareTunnelToken ?? '') : '',
+    '{{ tunnel_port }}': tunnelListenerPort(variables),
+    '{{ tunnel_token }}': cloudflare ? (variables.cloudflareTunnelToken ?? '') : '',
     '{{ tunnel_listener_wait_seconds }}': orDefault(
       variables.tunnelListenerWaitSeconds,
       DEFAULT_TUNNEL_LISTENER_WAIT_SECONDS
@@ -180,5 +234,6 @@ export function tunnelReplacements(variables: CloudInitVariables): Record<string
     '{{ cloudflared_url }}': `${CLOUDFLARED_DOWNLOAD_BASE_URL}/${version}/cloudflared-linux`,
     '{{ cloudflared_sha256_amd64 }}': release?.amd64 ?? '',
     '{{ cloudflared_sha256_arm64 }}': release?.arm64 ?? '',
+    ...reverseTunnelReplacements(variables),
   };
 }

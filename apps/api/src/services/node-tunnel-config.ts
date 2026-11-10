@@ -2,7 +2,9 @@
  * Transport selection and tunnel configuration for managed workspace VM nodes.
  *
  * `VM_AGENT_TRANSPORT='cloudflare-tunnel'` opts NEW managed workspace VM nodes into an
- * outbound-only Cloudflare named tunnel. An unset transport keeps legacy public-IP
+ * outbound-only Cloudflare named tunnel. `VM_AGENT_TRANSPORT='reverse-tunnel'` (self-hosted
+ * control plane) gives them a pinned frpc that dials the control-plane box instead
+ * (services/node-reverse-tunnel-*.ts). An unset transport keeps legacy public-IP
  * transport unchanged; unsupported values fail provisioning. Deployment-role nodes and Instant (cf-container) runtimes are
  * deliberately excluded: deployment nodes serve public app routes on their own IP, and a
  * container runtime has no VM to run cloudflared on.
@@ -101,11 +103,11 @@ export function resolveManagedNodeTransport(
 ): NodeTransport | null {
   const configured = env.VM_AGENT_TRANSPORT?.trim() ?? '';
   if (configured === '' || configured === 'vm-public-dns') return null;
-  if (configured !== 'cloudflare-tunnel') {
+  if (configured !== 'cloudflare-tunnel' && configured !== 'reverse-tunnel') {
     throw new Error(`Unsupported VM_AGENT_TRANSPORT ${JSON.stringify(configured)}`);
   }
   if (node.isDeploymentNode || node.runtime !== 'vm' || node.nodeClass !== 'managed') return null;
-  return 'cloudflare-tunnel';
+  return configured;
 }
 
 export function resolveVmAgentTunnelPort(env: TunnelTransportEnv): string {

@@ -16,6 +16,7 @@ import {
   resolveEnvironmentLabel,
   resolveInstallationId,
 } from './node-provider-labels';
+import { releaseNodeReverseTunnelLeases } from './node-reverse-tunnel-leases';
 import { releaseNodeTunnels } from './node-tunnel-cleanup';
 import {
   type ContainerWorkspaceDeletionAuthority,
@@ -227,13 +228,19 @@ async function reconcileStrictProviderlessVm(
 
 /**
  * Mark the Cloudflare tunnel of every non-live incarnation of this node for deletion (one D1
- * write; the cron sweep does the Cloudflare I/O, so teardown never waits on that API). Only
- * managed tunnel-transport VM nodes own tunnels: legacy nodes and Instant containers pay
- * nothing, and an incarnation missed here is still found by the sweep's own non-live scan.
+ * write; the cron sweep does the Cloudflare I/O, so teardown never waits on that API), or
+ * release a reverse-tunnel node's non-live port leases. Only managed tunnel-transport VM nodes
+ * own either: legacy nodes and Instant containers pay nothing, and an incarnation missed here
+ * is still found by the sweeps' own non-live scans.
  */
 async function releaseTerminatedNodeTunnels(env: Env, node: NodeRow): Promise<void> {
-  if (node.runtime !== 'vm' || node.transport !== 'cloudflare-tunnel') return;
-  await releaseNodeTunnels(env, node.id, 'runtime_terminated');
+  if (node.runtime !== 'vm') return;
+  if (node.transport === 'cloudflare-tunnel') {
+    await releaseNodeTunnels(env, node.id, 'runtime_terminated');
+  } else if (node.transport === 'reverse-tunnel') {
+    // Frees the incarnation's loopback port; the frps plugin refuses it from now on.
+    await releaseNodeReverseTunnelLeases(env, node.id, 'runtime_terminated');
+  }
 }
 
 async function markWorkspaceRuntimeTerminationConfirmed(

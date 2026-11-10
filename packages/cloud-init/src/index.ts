@@ -17,3 +17,9 @@ export {
   DEFAULT_TUNNEL_LISTENER_WAIT_SECONDS,
   isTunnelMode,
 } from './tunnel';
+export {
+  DEFAULT_FRPC_VERSION,
+  FRPC_RELEASES,
+  isReverseTunnelMode,
+  REVERSE_TUNNEL_PROXY_NAME,
+} from './reverse-tunnel';

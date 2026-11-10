@@ -6,6 +6,7 @@ import { type CloudInitVariables, generateCloudInit } from '@simple-agent-manage
 import { type TaskMode } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
+import type { NodeReverseTunnelProvisioning } from './node-reverse-tunnel-provisioning';
 import { nodeTunnelBootVariables } from './node-tunnel-config';
 import type { NodeTunnelProvisioning } from './node-tunnel-provisioning';
 import { errorReportCloudInitVariables } from './vm-error-report-config';
@@ -26,10 +27,12 @@ export interface NodeCloudInitInput {
   deploymentContext?: { environmentId: string };
   /** Present only for tunnel-transport workspace nodes. */
   tunnel?: NodeTunnelProvisioning | null;
+  /** Present only for reverse-tunnel-transport workspace nodes (self-hosted control plane). */
+  reverseTunnel?: NodeReverseTunnelProvisioning | null;
 }
 
 export function buildNodeCloudInit(input: NodeCloudInitInput): string {
-  const { env, node, taskContext, deploymentContext, tunnel } = input;
+  const { env, node, taskContext, deploymentContext, tunnel, reverseTunnel } = input;
   const isDeploymentNode = !!deploymentContext;
   const variables: CloudInitVariables = {
     nodeId: node.id,
@@ -56,7 +59,8 @@ export function buildNodeCloudInit(input: NodeCloudInitInput): string {
     // Tunnel nodes never fetch an Origin CA certificate: cloudflared terminates TLS at the
     // edge and the agent serves plain HTTP on loopback (the node-lifecycle route also
     // refuses issuance server-side for tunnel transport).
-    originCaCertificateUrl: tunnel
+    originCaCertificateUrl:
+      tunnel || reverseTunnel
       ? undefined
       : `https://api.${env.BASE_DOMAIN}/api/nodes/${node.id}/origin-ca-certificate`,
     vmAgentPort: env.VM_AGENT_PORT,
@@ -89,6 +93,15 @@ export function buildNodeCloudInit(input: NodeCloudInitInput): string {
     variables.cloudflareTunnelToken = tunnel.connectorToken;
     variables.cloudflareTunnelPort = tunnel.tunnelPort;
     Object.assign(variables, nodeTunnelBootVariables(env));
+  }
+  if (reverseTunnel) {
+    // Same loopback listener, firewall and connector timings as the Cloudflare tunnel; the
+    // connector is frpc dialling the control plane's own HTTPS endpoint.
+    const { cloudflaredVersion: _cloudflaredOnly, ...timings } = nodeTunnelBootVariables(env);
+    variables.reverseTunnelCredential = reverseTunnel.credential;
+    variables.reverseTunnelRemotePort = String(reverseTunnel.port);
+    variables.reverseTunnelLocalPort = reverseTunnel.localPort;
+    Object.assign(variables, timings);
   }
   return generateCloudInit(variables);
 }

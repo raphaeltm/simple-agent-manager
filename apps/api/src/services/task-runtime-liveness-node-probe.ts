@@ -10,6 +10,7 @@ import { DEFAULT_TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS } from '@simple-agen
 
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 import { getNodeBackendBaseUrl } from './node-agent-readiness';
+import { resolveNodeAgentRoute, retargetNodeAgentUrl } from './node-agent-route';
 import type {
   RuntimeWorkspaceSnapshot,
   TaskLivenessNodeHealthProbeEnv,
@@ -84,13 +85,22 @@ export async function probeNodeHealthForTaskLiveness(
     };
   }
 
-  const url = `${getNodeBackendBaseUrl(nodeId, {
+  const backendEnv = {
     BASE_DOMAIN: env.BASE_DOMAIN,
     VM_AGENT_PROTOCOL: env.VM_AGENT_PROTOCOL,
     VM_AGENT_PORT: env.VM_AGENT_PORT,
-  })}/health`;
+  };
+  let url = `${getNodeBackendBaseUrl(nodeId, backendEnv)}/health`;
 
   try {
+    if (env.DATABASE) {
+      // Same routing decision as fetchNodeAgent; a reverse-tunnel node without a live lease
+      // is an inconclusive 'error', never a probe of a hostname that does not exist.
+      url = retargetNodeAgentUrl(
+        url,
+        await resolveNodeAgentRoute({ DATABASE: env.DATABASE, ...backendEnv }, nodeId)
+      );
+    }
     const response = await fetchWithTimeout(url, { method: 'GET' }, timeoutMs);
     return {
       outcome: response.ok ? 'ok' : 'failed',

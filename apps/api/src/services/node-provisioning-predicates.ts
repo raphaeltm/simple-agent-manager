@@ -8,6 +8,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
+import { releaseUnallocatedReverseTunnelLease } from './node-reverse-tunnel-leases';
 import { releaseUnallocatedNodeTunnel } from './node-tunnel-journal';
 
 const NODE_ERROR_MESSAGE_MAX_LENGTH = 500;
@@ -69,8 +70,10 @@ export function d1WriteChanged(
 }
 
 /**
- * Release one incarnation's tunnel when the caller KNOWS no VM can still use it: no provider
- * create was ever requested, or the provider confirmed the VM deleted. Never throws.
+ * Release one incarnation's tunnel (Cloudflare journal row and/or reverse-tunnel port lease)
+ * when the caller KNOWS no VM can still use it: no provider create was ever requested, or the
+ * provider confirmed the VM deleted. Each release is one fenced D1 update that is a no-op for
+ * a transport the incarnation does not use. Never throws.
  */
 export async function releaseTunnelBeforeVm(
   env: Env,
@@ -82,6 +85,15 @@ export async function releaseTunnelBeforeVm(
     await releaseUnallocatedNodeTunnel(env, nodeId, runtimeIncarnationId, reason);
   } catch (releaseErr) {
     log.error('node_provisioning.tunnel_release_failed', {
+      nodeId,
+      runtimeIncarnationId,
+      ...serializeError(releaseErr),
+    });
+  }
+  try {
+    await releaseUnallocatedReverseTunnelLease(env, nodeId, runtimeIncarnationId, reason);
+  } catch (releaseErr) {
+    log.error('node_provisioning.reverse_tunnel_release_failed', {
       nodeId,
       runtimeIncarnationId,
       ...serializeError(releaseErr),

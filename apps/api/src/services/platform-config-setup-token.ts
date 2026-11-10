@@ -1,5 +1,6 @@
 import type { Env } from '../env';
 import { creatorId, positiveIntegerEnv } from './platform-config-store';
+import { constantTimeEqual } from '../lib/constant-time';
 
 /* Setup-token verification and its D1-backed per-identifier attempt rate limit. */
 
@@ -16,17 +17,6 @@ async function stableHash(input: string): Promise<string> {
     .slice(0, 16)
     .map((byte) => byte.toString(16).padStart(2, '0'))
     .join('');
-}
-
-function constantTimeEqual(a: string, b: string): boolean {
-  const left = new TextEncoder().encode(a);
-  const right = new TextEncoder().encode(b);
-  const length = Math.max(left.length, right.length);
-  let diff = left.length ^ right.length;
-  for (let i = 0; i < length; i += 1) {
-    diff |= (left[i] ?? 0) ^ (right[i] ?? 0);
-  }
-  return diff === 0;
 }
 
 export async function verifySetupToken(
