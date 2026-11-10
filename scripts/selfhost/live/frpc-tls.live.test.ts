@@ -216,7 +216,14 @@ describe('frpc certificate verification (generated frpc.toml, real frpc 0.72.0)'
       credential: CREDENTIAL,
     });
 
-    // One connection through the lease port makes frps open a work connection.
+    // poolCount: work connections are opened, and authorized, before any user connection.
+    await waitFor(
+      'the pooled work connections',
+      () => calls.filter((c) => c.op === 'NewWorkConn').length >= 2,
+      15_000,
+      frpc.output
+    );
+    // A connection through the lease port is served by a pooled work connection.
     const reply = await new Promise<string>((done, fail) => {
       const socket = connect(ports.lease, '127.0.0.1');
       let data = '';

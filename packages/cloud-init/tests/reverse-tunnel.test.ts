@@ -126,6 +126,8 @@ describe('rendered reverse-tunnel user-data', () => {
 
   it('writes an frpc config that dials the control plane over verified wss with one proxy', () => {
     const toml = file(parse(reverse()), '/etc/sam/frpc/frpc.toml');
+    // Pre-opened work connections keep the NewWorkConn plugin round trip off the data path.
+    expect(toml.content).toContain('transport.poolCount = 2\n');
     expect(toml.permissions).toBe('0644');
     const lines = toml.content.split('\n');
     for (const expected of [

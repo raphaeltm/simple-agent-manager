@@ -202,6 +202,37 @@ describe('frps plugin endpoint', () => {
     });
   });
 
+  it("refuses an old frpc's work connection after the node's replacement incarnation got its own lease", async () => {
+    await seedUser('rt-wc-repl');
+    const old = await seedReverseNode('O', 'rt-wc-repl');
+    // The node is reprovisioned: new incarnation, old lease released, new lease written.
+    const incarnation = crypto.randomUUID();
+    await env.DATABASE.prepare(
+      "UPDATE node_reverse_tunnel_leases SET status = 'released', released_at = ? WHERE node_id = ?"
+    )
+      .bind(new Date(Date.now() - 3_600_000).toISOString(), old.nodeId)
+      .run();
+    await env.DATABASE.prepare('UPDATE nodes SET runtime_incarnation_id = ? WHERE id = ?')
+      .bind(incarnation, old.nodeId)
+      .run();
+    const fresh = await ensureReverseTunnelLease(testEnv(), {
+      nodeId: old.nodeId,
+      userId: 'rt-wc-repl',
+      runtimeIncarnationId: incarnation,
+    });
+    const replacement: SeededNode = { ...old, incarnation, ...fresh };
+    // The old frpc's control session still carries the old incarnation and credential.
+    expect(await verdict(await call(frpsCall('NewWorkConn', workConn(old))))).toEqual({
+      reject: true,
+      reject_reason: 'node lease is released',
+    });
+    // Owner control: the replacement's own work connection is admitted.
+    expect(await verdict(await call(frpsCall('NewWorkConn', workConn(replacement))))).toEqual({
+      reject: false,
+      unchange: true,
+    });
+  });
+
   it("refuses a work connection whose run id is not its control session's, or whose control credential is wrong", async () => {
     await seedUser('rt-wc-bad');
     const a = await seedReverseNode('K', 'rt-wc-bad');
@@ -211,7 +242,10 @@ describe('frps plugin endpoint', () => {
     );
     const forged = workConn(b);
     forged.user.metas = { ...metas(b), credential: a.credential };
-    expect((await verdict(await call(frpsCall('NewWorkConn', forged)))).reject).toBe(true);
+    expect(await verdict(await call(frpsCall('NewWorkConn', forged)))).toEqual({
+      reject: true,
+      reject_reason: 'invalid node credential',
+    });
     // Owner control on the same fixture.
     expect((await verdict(await call(frpsCall('NewWorkConn', workConn(b))))).reject).toBe(false);
     expect(await verdict(await call(frpsCall('NewWorkConn', { run_id: 'r' })))).toEqual({
@@ -345,10 +379,15 @@ describe('released port reuse age (real D1)', () => {
     const e = onePort(27100);
     await ensureReverseTunnelLease(e, await liveNode('A', 'rt-age'));
     await releasedAgo(27100, 60);
+    const { at } = (await env.DATABASE.prepare(
+      'SELECT released_at AS at FROM node_reverse_tunnel_leases WHERE port = 27100'
+    ).first<{ at: string }>())!;
     const err = await ensureReverseTunnelLease(e, await liveNode('B', 'rt-age')).catch((x) => x);
     expect(err).toMatchObject({ name: 'ReverseTunnelLeaseError', code: 'port_range_cooling_down' });
     expect(String(err.message)).toContain('released less than 180s ago');
-    expect(String(err.message)).toMatch(/first becomes reusable at 20\d\d-/);
+    expect(String(err.message)).toContain(
+      `the first becomes reusable at ${new Date(Date.parse(at) + 180_000).toISOString()}`
+    );
   });
 
   it('control: reissues the port once its release is older than the minimum age', async () => {
@@ -370,6 +409,46 @@ describe('released port reuse age (real D1)', () => {
     );
     expect(err).toMatchObject({ code: 'port_range_cooling_down' });
     expect(String(err.message)).toContain('released less than 300s ago');
+  });
+
+  it('any recent release cools a port down, even with an older release in its history', async () => {
+    await seedUser('rt-hist');
+    const e = onePort(27105);
+    await ensureReverseTunnelLease(e, await liveNode('A', 'rt-hist'));
+    await releasedAgo(27105, 3_600); // long ago
+    await ensureReverseTunnelLease(e, await liveNode('B', 'rt-hist')); // reissued
+    await releasedAgo(27105, 10); // released again just now
+    const err = await ensureReverseTunnelLease(e, await liveNode('C', 'rt-hist')).catch((x) => x);
+    expect(err).toMatchObject({ code: 'port_range_cooling_down' });
+  });
+
+  it('treats a released row with no released_at as fresh (fails closed)', async () => {
+    await seedUser('rt-null');
+    const e = onePort(27106);
+    await ensureReverseTunnelLease(e, await liveNode('A', 'rt-null'));
+    await env.DATABASE.prepare(
+      "UPDATE node_reverse_tunnel_leases SET status = 'released', released_at = NULL WHERE port = 27106"
+    ).run();
+    const err = await ensureReverseTunnelLease(e, await liveNode('B', 'rt-null')).catch((x) => x);
+    expect(err).toMatchObject({ code: 'port_range_cooling_down' });
+  });
+
+  it('skips a cooling port for a free one in the same range, preferring never-used ports', async () => {
+    await seedUser('rt-pick');
+    const e = {
+      ...testEnv(),
+      REVERSE_TUNNEL_PORT_RANGE_START: '27107',
+      REVERSE_TUNNEL_PORT_RANGE_END: '27109',
+    } as Env;
+    expect((await ensureReverseTunnelLease(e, await liveNode('A', 'rt-pick'))).port).toBe(27107);
+    expect((await ensureReverseTunnelLease(e, await liveNode('B', 'rt-pick'))).port).toBe(27108);
+    await releasedAgo(27107, 10); // cooling
+    await releasedAgo(27108, 3_600); // reusable
+    // 27109 was never used, so it goes first; then the aged 27108; never the cooling 27107.
+    expect((await ensureReverseTunnelLease(e, await liveNode('C', 'rt-pick'))).port).toBe(27109);
+    expect((await ensureReverseTunnelLease(e, await liveNode('D', 'rt-pick'))).port).toBe(27108);
+    const err = await ensureReverseTunnelLease(e, await liveNode('E', 'rt-pick')).catch((x) => x);
+    expect(err).toMatchObject({ code: 'port_range_cooling_down' });
   });
 
   it('a range held entirely by active leases is reported as exhausted, not cooling', async () => {
@@ -842,7 +921,8 @@ describe('lease port range membership at the point the upstream is produced', ()
       const cookie = await seedSignedInUser(userId);
       const path = `/api/nodes/${node.nodeId}/logs/stream`;
       const refused = await call(gatewayCall(`api.${env.BASE_DOMAIN}`, path, { Cookie: cookie }));
-      expect(refused.status).not.toBe(200);
+      expect(refused.status).toBe(503);
+      expect(await refused.json()).toMatchObject({ error: 'NODE_UNREACHABLE' });
       expect(refused.headers.get('X-SAM-Upstream')).toBeNull();
       expect(refused.headers.get('X-SAM-Upstream-Authorization')).toBeNull();
       // Control: the same node on an in-range port is authorized.

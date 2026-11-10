@@ -28,6 +28,7 @@ import {
   celldChildEnv,
   presignVars,
   redactSecrets,
+  gatewayEnvAction,
   renderGatewayEnv,
   resolveTunnelSettings,
   tunnelWorkerVars,
@@ -226,9 +227,19 @@ async function main(): Promise<void> {
   const tunnelSettings = resolveTunnelSettings(box);
   const gatewayEnv = renderGatewayEnv(keys.REVERSE_TUNNEL_GATEWAY_SECRET, tunnelSettings);
   const gatewayEnvPath = join(stateDir, 'gateway.env');
-  if (!existsSync(gatewayEnvPath) || readFileSync(gatewayEnvPath, 'utf8') !== gatewayEnv) {
+  const existingGatewayEnv = existsSync(gatewayEnvPath)
+    ? readFileSync(gatewayEnvPath, 'utf8')
+    : null;
+  const gatewayAction = gatewayEnvAction(existingGatewayEnv, gatewayEnv, values.init ?? false);
+  if (gatewayAction !== 'unchanged') {
     writePrivateFile(gatewayEnvPath, gatewayEnv);
     log(`wrote ${gatewayEnvPath}; (re)start the stack: docker compose up -d`);
+  }
+  if (gatewayAction === 'write-then-restart') {
+    throw new Error(
+      `${gatewayEnvPath} changed. Restart frps and Caddy so they run it (docker compose up -d), ` +
+        'then run pnpm selfhost:deploy again; the Worker is not updated before they agree.'
+    );
   }
   if (values.init) return;
   const operatorSecrets = readSecretsFile(secretsPath);

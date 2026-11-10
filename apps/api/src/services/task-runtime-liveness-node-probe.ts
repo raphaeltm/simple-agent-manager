@@ -121,11 +121,14 @@ export async function probeNodeHealthForTaskLiveness(
   };
   let url = `${getNodeBackendBaseUrl(nodeId, backendEnv)}/health`;
   let init: RequestInit = { method: 'GET' };
-  const startedAt = Date.now();
+  // Existing transports keep the exact budget they always had; only the reverse-tunnel route
+  // read spends part of it.
+  let fetchTimeoutMs = timeoutMs;
 
   try {
     if (nodeTransport === 'reverse-tunnel') {
       if (!env.DATABASE) throw new Error('Reverse-tunnel node route needs DATABASE');
+      const startedAt = Date.now();
       const route = await withinBudget(
         resolveNodeAgentRoute(
           {
@@ -140,9 +143,9 @@ export async function probeNodeHealthForTaskLiveness(
       );
       url = retargetNodeAgentUrl(url, route);
       init = nodeAgentRequestInit(route, init);
+      fetchTimeoutMs = Math.max(1, timeoutMs - (Date.now() - startedAt));
     }
-    const remainingMs = Math.max(1, timeoutMs - (Date.now() - startedAt));
-    const response = await fetchWithTimeout(url, init, remainingMs);
+    const response = await fetchWithTimeout(url, init, fetchTimeoutMs);
     return {
       outcome: response.ok ? 'ok' : 'failed',
       timeoutMs,

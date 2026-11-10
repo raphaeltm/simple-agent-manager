@@ -1,8 +1,12 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import {
   BOX_RESERVED_PORTS,
   celldChildEnv,
+  gatewayEnvAction,
   presignVars,
   redactSecrets,
   renderGatewayEnv,
@@ -154,5 +158,42 @@ describe('presignVars', () => {
 
   it('gives Azure buckets no presign vars', () => {
     expect(presignVars({ CELLD_BUCKET: 'az://container' }, 'assets')).toEqual({});
+  });
+});
+
+describe('BOX_RESERVED_PORTS', () => {
+  it('matches the defaults docker-compose.yml actually uses', () => {
+    const compose = readFileSync(
+      join(import.meta.dirname, '../../deploy/selfhost/docker-compose.yml'),
+      'utf8'
+    );
+    const defaults = new Map(
+      [...compose.matchAll(/\$\{([A-Z_]+):-(\d+)\}/g)].map((m) => [m[1]!, Number(m[2])])
+    );
+    for (const [name, port] of Object.entries(BOX_RESERVED_PORTS)) {
+      expect(defaults.get(name), name).toBe(port);
+    }
+  });
+});
+
+describe('gatewayEnvAction', () => {
+  const settings = resolveTunnelSettings({});
+  const current = renderGatewayEnv(SECRET, settings);
+  const longer = renderGatewayEnv(
+    SECRET,
+    resolveTunnelSettings({ REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS: '120' })
+  );
+
+  it('writes on --init and on a first run, without stopping', () => {
+    expect(gatewayEnvAction(null, current, false)).toBe('write');
+    expect(gatewayEnvAction(current, longer, true)).toBe('write');
+  });
+
+  it('stops a normal deploy when frps would still run the old values', () => {
+    expect(gatewayEnvAction(current, longer, false)).toBe('write-then-restart');
+  });
+
+  it('control: an unchanged file lets the deploy continue', () => {
+    expect(gatewayEnvAction(current, current, false)).toBe('unchanged');
   });
 });

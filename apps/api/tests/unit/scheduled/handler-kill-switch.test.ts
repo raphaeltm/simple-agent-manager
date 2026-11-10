@@ -176,14 +176,17 @@ describe('scheduled operational sweep kill switch', () => {
     isolateMock.mockImplementation(async (name: string, fn: () => Promise<unknown>) =>
       name === 'reverse_tunnel_lease_release' ? fn() : undefined
     );
-    await scheduled(controller, { ...env, VM_AGENT_TRANSPORT: 'cloudflare-tunnel' }, context);
-    expect(logInfoMock).toHaveBeenCalledWith(
-      'cron.completed',
-      expect.objectContaining({
-        reverseTunnelLeasesReleased: null,
-        reverseTunnelLeaseSweepSkipReason: 'transport_not_reverse_tunnel',
-      })
-    );
-    isolateMock.mockImplementation(async () => undefined);
+    try {
+      await scheduled(controller, { ...env, VM_AGENT_TRANSPORT: 'cloudflare-tunnel' }, context);
+      expect(logInfoMock).toHaveBeenCalledWith(
+        'cron.completed',
+        expect.objectContaining({
+          reverseTunnelLeasesReleased: null,
+          reverseTunnelLeaseSweepSkipReason: 'transport_not_reverse_tunnel',
+        })
+      );
+    } finally {
+      isolateMock.mockImplementation(async () => undefined);
+    }
   });
 });

@@ -75,6 +75,12 @@ redacted.
   (at most that age away); with every port held, `port_range_exhausted`. The deploy refuses a
   lease range that contains any other box listener (celld, celld's operator port, frps, the
   bundled store, Caddy) or holds more than 20000 ports.
+- When the deploy changes `.state/gateway.env` (heartbeat timeout, port range, gateway secret)
+  it writes the file and stops before touching the Worker: run `docker compose up -d` so frps
+  and Caddy load it, then `pnpm selfhost:deploy` again. frps reads `gateway.env` only at start,
+  and the Worker must never assume values the running frps is not enforcing. After pulling a
+  new release, run the deploy before restarting the stack: an older `gateway.env` can lack a
+  variable the new `frps.toml` reads.
 - The Worker shares the host network, so its outbound `fetch` can reach loopback services
   (celld's operator listener, the bundled store, frps) and, on GCE, the metadata server. There
   is no egress fence yet.

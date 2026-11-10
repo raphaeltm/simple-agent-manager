@@ -105,8 +105,7 @@ jobs:
               - 'scripts/selfhost/**'
               - 'deploy/selfhost/**'
               # The live self-host suite runs the frpc.toml cloud-init renders.
-              - 'packages/cloud-init/src/reverse-tunnel.ts'
-              - 'packages/cloud-init/src/template-reverse-tunnel.ts'
+              - 'packages/cloud-init/src/**'
               # The generated Worker config is built from wrangler.toml, so its text-binding
               # guard and effective-config tests must run when only wrangler.toml changes.
               - 'apps/api/wrangler.toml'

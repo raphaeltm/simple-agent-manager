@@ -24,7 +24,7 @@ handle @sam_gateway_internal {
 # unmatched form into the gateway route. No public SAM route contains "self-host". Workspace
 # hosts (ws-*) are exempt: the Worker sends every ws-* request to the workspace proxy before any
 # route, and a preview app may legitimately serve such paths.
-@sam_gateway_internal_variant expression `!{host}.matches("(?i)^ws-") && ({path}.matches("(?i)self-host") || {http.request.uri}.matches("(?i)^[^?]*self(-|%2d|%252d)host"))`
+@sam_gateway_internal_variant expression `!{host}.matches("(?i)^ws-[a-z0-9]+(--[0-9]+)?[.]") && ({path}.matches("(?i)self-host") || {http.request.uri}.matches("(?i)^[^?]*self(-|%2d|%252d)host"))`
 handle @sam_gateway_internal_variant {
 	respond "Not found" 404
 }

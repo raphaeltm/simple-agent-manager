@@ -20,11 +20,14 @@
  * `{ user: { user, metas, run_id }, run_id }`, where `user` is copied from the CONTROL session
  * that owns the presented run_id, not from the dialing connection, and nothing in it describes
  * the dialer (no address, no privilege key without auth.additionalScopes). So the plugin binds
- * each work connection to that control's lease (1-2 again, and run_id must equal the control's),
- * which refuses work connections into a released or superseded lease immediately instead of at
- * the next Ping. It cannot tell the owner from another party presenting the owner's run_id:
- * that rests on the run_id being a 64-bit crypto/rand value (frps util.RandID) that frps only
- * ever returns to the owning frpc over its TLS session, and that SAM never logs.
+ * each work connection to that control's lease (1-2 again), which refuses work connections into
+ * a released or superseded lease immediately instead of at the next Ping. The run_id equality
+ * is a consistency check only (frps looked the control up by that run_id), kept so a change in
+ * frps' payload fails closed. The plugin cannot tell the owner from another party presenting
+ * the owner's run_id: that rests on the run_id being unknown to other nodes. frps assigns a
+ * 64-bit crypto/rand value (util.RandID) when a client logs in without one and returns it only
+ * on that client's TLS session; a client may choose its own run_id at Login, which only weakens
+ * its own sessions. SAM never logs run_ids.
  */
 import { REVERSE_TUNNEL_PROXY_NAME } from '@simple-agent-manager/cloud-init';
 import * as v from 'valibot';

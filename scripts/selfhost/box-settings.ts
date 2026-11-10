@@ -172,6 +172,22 @@ export function renderGatewayEnv(gatewaySecret: string, settings: TunnelSettings
 }
 
 /**
+ * What the deploy does with gateway.env. frps and Caddy read it only when they start, so when
+ * its content changes (heartbeat timeout, port range, secret) the Worker must not be updated in
+ * the same run: it would assume a heartbeat timeout (and so a port-reuse age) or a range that the
+ * running frps is not enforcing yet. A changed file outside `--init` therefore stops the deploy
+ * until the operator restarts the stack and runs it again.
+ */
+export function gatewayEnvAction(
+  existing: string | null,
+  next: string,
+  init: boolean
+): 'unchanged' | 'write' | 'write-then-restart' {
+  if (existing === next) return 'unchanged';
+  return init || existing === null ? 'write' : 'write-then-restart';
+}
+
+/**
  * Host variables a celld child process may inherit; everything else is dropped. HOME and
  * GOOGLE_APPLICATION_CREDENTIALS (a file path) let a gs:// bucket use Application Default
  * Credentials when the deploy does not run on GCE.

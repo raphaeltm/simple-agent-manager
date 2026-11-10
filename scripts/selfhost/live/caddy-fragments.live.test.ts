@@ -259,6 +259,11 @@ const TRICKS = [
   '/api/self-host/gateway;x=1',
   '/api/self-host/gateway%00/frps-plugin',
   '/api/self-host/gateway/..%2Ffrps-plugin',
+  // Encoded hyphen: only the raw-request-path clause of the variant matcher sees these.
+  '/api/self%2Dhost/gateway/',
+  '/API/SELF%2DHOST/gateway',
+  '/api/self%252dhost/gateway/frps-plugin',
+  '/api/self%252Dhost/gateway/node-websocket',
 ];
 
 describe('internal gateway routes are never served publicly', () => {
