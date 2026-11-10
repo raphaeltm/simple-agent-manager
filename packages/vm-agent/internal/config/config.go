@@ -194,6 +194,8 @@ type Config struct {
 	Port           int
 	Host           string
 	AllowedOrigins []string
+	// Tunnel is the loopback ingress listener for Cloudflare Tunnel nodes (disabled by default).
+	Tunnel TunnelConfig
 
 	// Control plane settings
 	ControlPlaneURL string

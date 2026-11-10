@@ -128,7 +128,12 @@ describe('installation credential principals', () => {
     expect(runtime).toContain(
       group('SSL and Certificates Write', 'com.cloudflare.api.account.zone').id
     );
-    for (const name of ['Workers AI Write', 'AI Gateway Run', 'Workers Containers Write'])
+    for (const name of [
+      'Workers AI Write',
+      'AI Gateway Run',
+      'Workers Containers Write',
+      'Cloudflare One Connector: cloudflared Write',
+    ])
       expect(runtime).toContain(group(name).id);
     // Email: the deploy prepares Email Sending; the app's agent email setup turns on routing.
     const deployment = JSON.stringify(f.plans.find((plan) => plan.name.endsWith('-deployment')));

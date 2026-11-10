@@ -12,7 +12,13 @@ import {
 
 export const NODE_BOOT_FAILURE_PREFIX = 'Node boot failed: ';
 const BootFailureSchema = v.object({
-  reason: v.picklist(['origin_ca_bootstrap', 'vm_agent_download']),
+  reason: v.picklist([
+    'origin_ca_bootstrap',
+    'vm_agent_download',
+    'cloudflared_install',
+    'tunnel_firewall',
+    'tunnel_connector',
+  ]),
 });
 
 // Callback-only router: mounted before the session-auth node router.

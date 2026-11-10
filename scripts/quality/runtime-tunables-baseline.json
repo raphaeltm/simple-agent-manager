@@ -1317,6 +1317,13 @@
   ],
   "bootstrapExceptions": {
     "AGENT_EMAIL_WORKER_NAME": "Deploy-generated name of this Worker's own script, emitted by scripts/deploy/sync-wrangler-config.ts only together with the AGENT_EMAIL send binding. The agent email admin setup points the Email Routing rule at it, so it must not be admin-editable: another value would route agent mail to a different Worker.",
-    "BOOTSTRAP_OWNER_EMAIL": "Installer-approved initial administrator identity, supplied as a Worker secret before first authentication and preserved across updates. Changing ownership requires an authenticated transfer, not an operational runtime setting."
+    "BOOTSTRAP_OWNER_EMAIL": "Installer-approved initial administrator identity, supplied as a Worker secret before first authentication and preserved across updates. Changing ownership requires an authenticated transfer, not an operational runtime setting.",
+    "VM_AGENT_TRANSPORT": "Provisioning topology for new managed VM incarnations only. Must be selected with deployment-owned Cloudflare token permissions; persisted transport and DNS ownership remain unchanged for existing nodes. A live setting must not imply migration of running VMs.",
+    "VM_AGENT_TUNNEL_PORT": "Written into immutable per-node cloud-init, the loopback agent listener and remote tunnel ingress together. A live update would split that bootstrap contract and disconnect existing nodes; applies only to newly provisioned VMs.",
+    "CLOUDFLARED_VERSION": "Pinned binary release with architecture SHA-256 checksums shipped in cloud-init. Selected before VM creation and installed in user-data; runtime edits cannot safely replace a running connector.",
+    "VM_AGENT_TUNNEL_LISTENER_WAIT_SECONDS": "Rendered into the connector startup script in VM cloud-init. Existing VMs retain their provisioned script; changing the Worker only affects subsequent VM bootstrap.",
+    "VM_AGENT_TUNNEL_PROBE_TIMEOUT_SECONDS": "Rendered into the connector health-probe script in VM cloud-init. Existing VMs retain their provisioned script; changing the Worker only affects subsequent VM bootstrap.",
+    "VM_AGENT_TUNNEL_PROBE_INTERVAL_SECONDS": "Rendered into the connector health-probe script in VM cloud-init. Existing VMs retain their provisioned script; changing the Worker only affects subsequent VM bootstrap.",
+    "VM_AGENT_TUNNEL_RESTART_SECONDS": "Rendered into the connector systemd unit at VM bootstrap. Changing this Worker variable cannot update installed units; it applies only to subsequently provisioned VMs."
   }
 }

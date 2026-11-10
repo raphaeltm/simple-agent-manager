@@ -1621,10 +1621,34 @@ lifecycle bookkeeping.
 | `OBSERVABILITY_ERROR_USER_AGENT_MAX_LENGTH` | `512`    | Maximum persisted user-agent length |
 | `OBSERVABILITY_LOG_QUERY_RATE_LIMIT`        | `30`     | Log queries per minute per admin    |
 
-## VM TLS
+## VM transport and TLS
+
+The tunnel environment settings below are provisioning inputs: a VM keeps the transport, connector binary and systemd configuration it received at creation. They do not reconfigure existing VMs.
+
+Tunnel API retries and resource cleanup use **Admin → Settings → Operations** instead of deployment variables. These controls apply to subsequent calls and cleanup sweeps without redeploying:
+
+| Admin setting | Default | Meaning |
+| --- | --- | --- |
+| `vmTunnels.apiAttempts` | `3` | Provisioning attempts for transient GET/PUT/DELETE failures, range 1–10. Creation is never retried; cleanup uses one attempt per request. |
+| `vmTunnels.apiRetryDelayMs` | `250` | Linear retry delay step in milliseconds, range 1–30000. |
+| `vmTunnels.cleanupRequestTimeoutMs` | `10000` | Per-request background timeout, range 1–30000 ms, capped by `CF_API_TIMEOUT_MS`. |
+| `vmTunnels.cleanupBatchSize` | `10` | Journal rows processed per sweep, range 1–100. |
+| `vmTunnels.cleanupSweepBudgetMs` | `30000` | Cloudflare I/O deadline for the sweep, range 1–120000 ms. Cancels an in-flight request; D1 bookkeeping finishes afterward and remaining rows stay due. |
+| `vmTunnels.cleanupBackoffBaseMs` | `60000` | Initial cleanup retry delay, range 1–86400000 ms. |
+| `vmTunnels.cleanupBackoffMaxMs` | `3600000` | Maximum cleanup retry delay, range 1–604800000 ms. Ownership remains recorded until cleanup succeeds. |
+| `vmTunnels.cleanupStuckAttempts` | `6` | Failed attempts before subsequent failures are logged at error severity, range 1–100. |
+
+If a Cloudflare create response is lost, cleanup retains the ownership journal and checks again at the capped backoff interval, even after finding no remaining resources. This prevents a delayed create from leaving an untracked tunnel or DNS record. A lost response can therefore leave a reconciliation row pending indefinitely without any live resource.
 
 | Variable                                       | Default | Description                                                                      |
 | ---------------------------------------------- | ------- | -------------------------------------------------------------------------------- |
+| `VM_AGENT_TRANSPORT` | `vm-public-dns` | Transport for newly provisioned managed workspace VMs: `vm-public-dns` or `cloudflare-tunnel`. Existing nodes, deployment nodes, and instant containers keep their current transport. |
+| `VM_AGENT_TUNNEL_PORT` | `8444` | Dedicated loopback HTTP ingress for cloudflared; must differ from the private agent listener port. |
+| `CLOUDFLARED_VERSION` | `2026.10.7` | Connector release; only versions with pinned architecture checksums in cloud-init are accepted. |
+| `VM_AGENT_TUNNEL_LISTENER_WAIT_SECONDS` | `120` | Elapsed connector startup wait for the loopback agent listener (1-3600 seconds). |
+| `VM_AGENT_TUNNEL_PROBE_TIMEOUT_SECONDS` | `2` | Maximum duration of one loopback health probe (1-60 seconds). |
+| `VM_AGENT_TUNNEL_PROBE_INTERVAL_SECONDS` | `1` | Pause between loopback health probes (1-60 seconds). |
+| `VM_AGENT_TUNNEL_RESTART_SECONDS` | `5` | Connector service restart delay (1-3600 seconds). |
 | `VM_AGENT_PROTOCOL`                            | `https` | Protocol for VM agent communication                                              |
 | `VM_AGENT_PORT`                                | `8443`  | VM agent listening port                                                          |
 | `VM_AGENT_MEMORY_RESERVE_MB`                   | `1024`  | Optional Docker workload-slice memory reserve for VM-agent reachability headroom |
@@ -1637,7 +1661,9 @@ lifecycle bookkeeping.
 | `HEARTBEAT_WORKSPACE_METRICS_MAX_OUTPUT_BYTES` | `65536` | Maximum bytes read from each heartbeat Docker metric command                     |
 | `ORIGIN_CA_CERT_VALIDITY_DAYS`                 | `7`     | Validity for per-node Origin CA certificates signed by the API Worker            |
 
-New nodes generate `/etc/sam/tls/origin-ca-key.pem` locally in cloud-init and fetch only the signed certificate from `POST /api/nodes/:id/origin-ca-certificate` (`packages/cloud-init/src/template.ts`, `apps/api/src/routes/node-lifecycle.ts`). Legacy `ORIGIN_CA_CERT` and `ORIGIN_CA_KEY` Worker secrets are not required for new node provisioning.
+New public-DNS nodes generate `/etc/sam/tls/origin-ca-key.pem` locally in cloud-init and fetch only the signed certificate from `POST /api/nodes/:id/origin-ca-certificate` (`packages/cloud-init/src/template-ingress.ts`, `apps/api/src/routes/node-lifecycle.ts`). Legacy `ORIGIN_CA_CERT` and `ORIGIN_CA_KEY` Worker secrets are not required for new node provisioning.
+
+With `VM_AGENT_TRANSPORT=cloudflare-tunnel`, SAM creates one remotely managed tunnel per new workspace VM incarnation and points its existing backend hostname at that tunnel. The API still uses HTTPS to Cloudflare; cloudflared connects outbound from the VM and forwards to a dedicated authenticated loopback listener. The VM receives only its connector token, stored in a mode-0400 credential file readable by the dedicated connector service, and does not request an Origin CA certificate. Agent and SSH ports are blocked on public interfaces. Preview ports, terminals, and API agent calls use the tunnel; instant containers retain their Durable Object transport. The setting does not migrate running nodes. Set it back to `vm-public-dns` to change future provisioning; existing tunnel nodes continue using their tunnels until deleted.
 
 VM workspace admission uses persisted `workspaces.resolved_reservation_json` snapshots and provider capacity fields in a final single-statement D1 reservation (`apps/api/src/services/workspace-placement.ts`). Aggregate CPU, memory, and disk reservations plus `exclusiveNode` control packing. Fresh telemetry remains mandatory on occupied nodes; disk pressure and CPU saturation veto reuse, while live memory percentage is a scoring signal rather than a second capacity gate (`apps/api/src/services/workspace-resource-capacity.ts`, `apps/api/src/durable-objects/task-runner/node-selection.ts`). There is no workspace-count or co-tenant cap: `MAX_WORKSPACES_PER_NODE` and `maxCoTenants` were removed, and legacy reservation rows that still carry `maxCoTenants` are admitted on their resource reservations alone. Live memory-threshold settings remain scoring inputs, not gates. VM agents report optional per-workspace memory telemetry in heartbeat metrics when Docker stats can be collected within the configured bounds (`packages/vm-agent/internal/server/health.go`, `packages/vm-agent/internal/sysinfo/docker_metrics.go`).
 

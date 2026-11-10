@@ -23,7 +23,7 @@ vi.mock('node:fs/promises', async (importOriginal) => ({
   unlink: vi.fn(async () => {}),
 }));
 // Fixture IDs verified against live GET /oauth/scopes on 2026-10-28 (the three email
-// scopes on 2026-11-08). In
+// scopes on 2026-11-08; cloudflared Write on 2026-11-10). In
 // particular Workers AI uses ai.*, Pages uses page.*, and token creation uses
 // account-api-tokens.write; permission-group display names are not scope IDs.
 const fullScopes = [
@@ -51,6 +51,7 @@ const fullScopes = [
   'email-sending.write',
   'artifacts.read',
   'artifacts.write',
+  'teams-connector-cloudflared.write',
 ];
 const bootstrapScopes = ['account-settings.read', 'workers-scripts.write'];
 // Shipped before 2026-11-06; workers-scripts.edit (Workers Editor) cannot create Workers.
@@ -66,23 +67,25 @@ afterEach(() => {
   capture.run.mockClear();
 });
 interface Options {
-  existing?: 'bootstrap' | 'full' | 'editor-bootstrap';
+  existing?: 'bootstrap' | 'full' | 'legacy-full' | 'editor-bootstrap';
   ready?: boolean;
   mode?: string;
   managementDenied?: boolean;
   registrationToken?: string;
   sha?: string;
-  missingScope?: boolean;
+  missingScope?: boolean | string;
   laggingSecretReads?: number;
   secretsNeverVisible?: boolean;
   orphanClient?: boolean;
 }
 const existingScopes = (existing: Options['existing']) =>
-  existing === 'full'
-    ? fullScopes
-    : existing === 'editor-bootstrap'
-      ? editorBootstrapScopes
-      : bootstrapScopes;
+  existing === 'legacy-full'
+    ? fullScopes.filter((scope) => scope !== 'teams-connector-cloudflared.write')
+    : existing === 'full'
+      ? fullScopes
+      : existing === 'editor-bootstrap'
+        ? editorBootstrapScopes
+        : bootstrapScopes;
 async function deploy(options: Options = {}) {
   vi.spyOn(process, 'chdir').mockImplementation(() => {});
   vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -117,7 +120,11 @@ async function deploy(options: Options = {}) {
     let result: unknown;
     if (path === '/client/v4/oauth/scopes')
       result = [...fullScopes, ...bootstrapScopes]
-        .filter((scope) => !(options.missingScope && scope === 'account-api-tokens.write'))
+        .filter(
+          (scope) =>
+            scope !==
+            (options.missingScope === true ? 'account-api-tokens.write' : options.missingScope)
+        )
         .map((id) => ({ id }));
     else if (path.endsWith('/oauth_clients')) {
       if (method === 'GET') result = client ? [client] : [];
@@ -144,7 +151,7 @@ async function deploy(options: Options = {}) {
           type: 'plain_text',
           text: existingScopes(options.existing).join(' '),
         },
-        ...(options.existing === 'full'
+        ...(options.existing === 'full' || options.existing === 'legacy-full'
           ? [{ name: 'INSTALL_SOURCE_COMMIT', type: 'plain_text', text: 'c'.repeat(40) }]
           : []),
         ...secretNames.map((name) => ({ name, type: 'secret_text' })),
@@ -247,6 +254,29 @@ describe('publisher-controlled installer deployment', () => {
     expect(config().vars.INSTALL_SOURCE_COMMIT).toBe('b'.repeat(40));
     expect(config().vars.OAUTH_SCOPES.split(' ')).toEqual(fullScopes);
     expect(capture.calls.some((call) => call.path.includes('/oauth_clients'))).toBe(false);
+  });
+  it('adds tunnel consent to a preserved older full installer before publishing new source', async () => {
+    await deploy({ existing: 'legacy-full' });
+    expect(config().vars.INSTALL_SOURCE_COMMIT).toBe('b'.repeat(40));
+    expect(config().vars.OAUTH_SCOPES.split(' ')).toEqual(fullScopes);
+    expect(capture.calls.find((call) => call.method === 'PATCH')?.body.scopes).toEqual(fullScopes);
+    expect(capture.events.findIndex((entry) => entry.startsWith('PATCH '))).toBeLessThan(
+      capture.events.indexOf('write-config')
+    );
+  });
+  it('does not repin an older full installer when tunnel consent cannot be reconciled', async () => {
+    await expect(deploy({ existing: 'legacy-full', managementDenied: true })).rejects.toThrow(
+      'permissions'
+    );
+    expect(capture.run).not.toHaveBeenCalled();
+    expect(capture.writes).toHaveLength(0);
+  });
+  it('requires the verified cloudflared scope in the live catalog before the full upgrade', async () => {
+    await expect(
+      deploy({ existing: 'legacy-full', missingScope: 'teams-connector-cloudflared.write' })
+    ).rejects.toThrow('catalog');
+    expect(capture.run).not.toHaveBeenCalled();
+    expect(capture.writes).toHaveLength(0);
   });
   it('explicit bootstrap mode removes full-mode pin and reconciles reduced client consent', async () => {
     await deploy({ existing: 'full', mode: 'bootstrap' });

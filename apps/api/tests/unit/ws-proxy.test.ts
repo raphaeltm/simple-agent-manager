@@ -28,7 +28,7 @@ describe('ws proxy source contract', () => {
   });
 
   it('constructs the backend VM URL from trusted routing config instead of cloning request origin', () => {
-    expect(file).toContain('new URL(`${vmAgentProtocol}://${backendHostname}:${vmAgentPort}`)');
+    expect(file).toContain('new URL(getNodeBackendBaseUrl(routedNodeId, c.env))');
     expect(file).not.toContain('const vmUrl = new URL(c.req.url)');
   });
 

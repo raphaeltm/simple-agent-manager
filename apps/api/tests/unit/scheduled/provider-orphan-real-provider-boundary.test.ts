@@ -53,7 +53,8 @@ vi.mock('../../../src/lib/secrets', () => ({
 vi.mock('../../../src/services/observability', () => ({
   persistError: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock('../../../src/lib/logger', () => ({
+vi.mock('../../../src/lib/logger', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/logger')>()),
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 vi.mock('drizzle-orm/d1', () => ({ drizzle: vi.fn(() => ({})) }));

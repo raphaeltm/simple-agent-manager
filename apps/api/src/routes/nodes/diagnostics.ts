@@ -16,6 +16,7 @@ import {
   listNodeContainersFromNode,
   openNodeDiagnosticDownload,
 } from '../../services/node-agent-diagnostics';
+import { getNodeBackendBaseUrl } from '../../services/node-agent-readiness';
 import { ownerNodeAccess, runNodeDiagnostic } from '../../services/node-diagnostics-access';
 
 export const nodeDiagnosticsRoutes = new Hono<{ Bindings: Env }>();
@@ -131,11 +132,7 @@ nodeDiagnosticsRoutes.get('/:id/logs/stream', async (c) => {
 
   // Build the VM agent WebSocket URL with all query params
   const clientUrl = new URL(c.req.url);
-  const vmProtocol = c.env.VM_AGENT_PROTOCOL || 'https';
-  const vmPort = c.env.VM_AGENT_PORT || '8443';
-  const vmUrl = new URL(
-    `${vmProtocol}://${nodeId.toLowerCase()}.vm.${c.env.BASE_DOMAIN}:${vmPort}/logs/stream`
-  );
+  const vmUrl = new URL(`${getNodeBackendBaseUrl(nodeId, c.env)}/logs/stream`);
   vmUrl.searchParams.set('token', token);
 
   // Forward filter params from client

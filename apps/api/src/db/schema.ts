@@ -1702,9 +1702,9 @@ export const nodes = sqliteTable(
     nodeClass: text('node_class').notNull().default('managed'),
     /** Reachability transport: 'vm-public-dns' | 'cloudflare-tunnel'. Null for implicit transport. */
     transport: text('transport'),
-    /** Cloudflare Tunnel UUID for user-owned tunnel nodes. Null otherwise. */
+    /** Cloudflare Tunnel UUID for tunnel-transport nodes (user-owned or managed). Null otherwise. */
     tunnelId: text('tunnel_id'),
-    /** Cloudflare Tunnel display name for user-owned tunnel nodes. Null otherwise. */
+    /** Cloudflare Tunnel name for tunnel-transport nodes (user-owned or managed). Null otherwise. */
     tunnelName: text('tunnel_name'),
     errorMessage: text('error_message'),
     /** Durable runtime absence proof; cleared before any provider create request. */
@@ -1759,6 +1759,50 @@ export const nodes = sqliteTable(
     capacityPoolProjectIdx: index('idx_nodes_capacity_pool_project')
       .on(table.capacityPoolProjectId)
       .where(sql`capacity_pool_project_id IS NOT NULL`),
+  })
+);
+
+/**
+ * Managed-node Cloudflare Tunnel ownership journal (migration 0230). One row per node runtime
+ * incarnation that SAM gave a named tunnel. Written before any Cloudflare or provider mutation
+ * and kept until Cloudflare confirms deletion. `nodeId` deliberately has no FK: node rows can be
+ * hard-deleted while the tunnel/DNS identity still needs cleanup. See services/node-tunnel-*.ts.
+ */
+export const nodeCloudflareTunnels = sqliteTable(
+  'node_cloudflare_tunnels',
+  {
+    id: text('id').primaryKey(),
+    nodeId: text('node_id').notNull(),
+    userId: text('user_id').notNull(),
+    runtimeIncarnationId: text('runtime_incarnation_id').notNull(),
+    accountId: text('account_id').notNull(),
+    zoneId: text('zone_id').notNull(),
+    tunnelName: text('tunnel_name').notNull(),
+    tunnelId: text('tunnel_id'),
+    hostname: text('hostname').notNull(),
+    dnsRecordId: text('dns_record_id'),
+    /** 'provisioning' | 'active' | 'cleanup_pending' | 'cleaned' */
+    status: text('status').notNull().default('provisioning'),
+    cleanupReason: text('cleanup_reason'),
+    cleanupAttempts: integer('cleanup_attempts').notNull().default(0),
+    pendingCreateCount: integer('pending_create_count').notNull().default(0),
+    cleanupNextAttemptAt: text('cleanup_next_attempt_at'),
+    lastError: text('last_error'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+    cleanedAt: text('cleaned_at'),
+  },
+  (table) => ({
+    incarnationUnique: uniqueIndex('idx_node_cloudflare_tunnels_incarnation').on(
+      table.nodeId,
+      table.runtimeIncarnationId
+    ),
+    nameUnique: uniqueIndex('idx_node_cloudflare_tunnels_name').on(table.tunnelName),
+    cleanupDueIdx: index('idx_node_cloudflare_tunnels_cleanup_due').on(
+      table.status,
+      table.cleanupNextAttemptAt
+    ),
+    nodeIdx: index('idx_node_cloudflare_tunnels_node').on(table.nodeId),
   })
 );
 

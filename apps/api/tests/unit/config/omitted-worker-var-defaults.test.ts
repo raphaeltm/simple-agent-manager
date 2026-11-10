@@ -77,6 +77,11 @@ import { resolveDiagnosisCompletedStepDelayMs } from '../../../src/services/diag
 import { resolveDiagnosticIncidentConfig } from '../../../src/services/diagnostic-incident-config';
 import { githubTriggerRecoveryConfig } from '../../../src/services/github-trigger-recovery-config';
 import { getRuntimeLimits } from '../../../src/services/limits';
+import { buildNodeCloudInit } from '../../../src/services/node-provisioning-cloud-init';
+import {
+  resolveManagedNodeTransport,
+  resolveVmAgentTunnelPort,
+} from '../../../src/services/node-tunnel-config';
 import {
   resolveDisabledAlarmRetryMs,
   resolveOperationalKillSwitchCacheMs,
@@ -123,6 +128,43 @@ const asEnv = <T>(env: WorkerVars): T => env as unknown as T;
 const API = 'apps/api/src';
 
 const READ_PATHS: readonly ReadPath[] = [
+  {
+    label: 'managed VM tunnel transport and connector boot configuration',
+    sources: [`${API}/services/node-tunnel-config.ts`],
+    read: (env) => {
+      let boot: string;
+      try {
+        boot = buildNodeCloudInit({
+          env: asEnv({ ...env, BASE_DOMAIN: 'example.com' }),
+          node: { id: 'node-probe', userId: 'user-probe' },
+          runtimeIncarnationId: null,
+          callbackToken: 'callback-probe',
+          providerName: 'hetzner',
+          tunnel: {
+            tunnelId: 'tunnel-probe',
+            tunnelName: 'tunnel-probe',
+            hostname: 'node-probe.vm.example.com',
+            connectorToken: 'a'.repeat(64),
+            tunnelPort: resolveVmAgentTunnelPort(asEnv(env)),
+          },
+        });
+      } catch (error) {
+        // Only one release is pinned today. An unsupported release must reach
+        // the real cloud-init validator and fail, never be silently ignored.
+        if (!(error instanceof Error) || !error.message.includes('cloudflaredVersion:'))
+          throw error;
+        boot = error.message;
+      }
+      return [
+        resolveManagedNodeTransport(asEnv(env), {
+          isDeploymentNode: false,
+          runtime: 'vm',
+          nodeClass: 'managed',
+        }),
+        boot,
+      ];
+    },
+  },
   {
     label: 'shared operational settings resolver',
     sources: [
