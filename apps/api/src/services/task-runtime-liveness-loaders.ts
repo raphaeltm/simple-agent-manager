@@ -24,7 +24,7 @@ export async function loadRuntimeWorkspaceSnapshot(
       `SELECT w.id, w.status AS workspace_status, w.created_at AS workspace_created_at,
             w.chat_session_id, w.node_id, w.user_id,
             n.status AS node_status, n.health_status, n.last_heartbeat_at,
-            n.runtime AS node_runtime,
+            n.runtime AS node_runtime, n.transport AS node_transport,
             (SELECT COUNT(*) FROM workspaces nw WHERE nw.node_id = w.node_id AND nw.status = 'running') AS running_workspaces_on_node
      FROM workspaces w
      LEFT JOIN nodes n ON n.id = w.node_id
@@ -43,6 +43,7 @@ export async function loadRuntimeWorkspaceSnapshot(
       health_status: string | null;
       last_heartbeat_at: string | null;
       node_runtime: string | null;
+      node_transport?: string | null;
       running_workspaces_on_node: number | null;
     }>();
   if (!row) return null;
@@ -56,6 +57,7 @@ export async function loadRuntimeWorkspaceSnapshot(
     nodeId: row.node_id,
     userId: row.user_id,
     nodeRuntime: row.node_runtime,
+    nodeTransport: row.node_transport ?? null,
     nodeStatus: row.node_status,
     nodeHealthStatus: row.health_status,
     nodeHeartbeatAt: Number.isFinite(heartbeatAt) ? heartbeatAt : null,

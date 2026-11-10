@@ -721,7 +721,11 @@ async function classifyTaskRuntime(
   let initialClassification = classifyTaskRuntimeLiveness(livenessSignals);
   if (needsNodeHealthProbe(livenessSignals) && livenessSignals.workspace?.nodeId) {
     const nodeId = livenessSignals.workspace.nodeId;
-    const probe = await probeNodeHealthForTaskLiveness(env, nodeId);
+    const probe = await probeNodeHealthForTaskLiveness(
+      env,
+      nodeId,
+      livenessSignals.workspace.nodeTransport
+    );
     if (probe.outcome !== 'ok') {
       log.warn('stuck_task.node_health_probe_unhealthy', {
         workspaceId: task.workspace_id,

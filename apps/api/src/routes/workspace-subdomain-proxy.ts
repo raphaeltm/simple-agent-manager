@@ -358,11 +358,12 @@ export async function workspaceSubdomainProxy(
     },
     c.env
   );
-  const vmUrl = new URL(
+  // Both origins come from trusted routing config, never from the request: the fixed loopback
+  // lease origin for a reverse-tunnel node, the backend hostname for every other transport.
+  const vmUrl =
     nodeRoute.kind === 'reverse-tunnel'
-      ? nodeRoute.origin
-      : getNodeBackendBaseUrl(routedNodeId, c.env)
-  );
+      ? new URL(nodeRoute.origin)
+      : new URL(getNodeBackendBaseUrl(routedNodeId, c.env));
   vmUrl.pathname = url.pathname;
   vmUrl.search = url.search;
 
@@ -412,7 +413,7 @@ export async function workspaceSubdomainProxy(
   // Self-hosted WebSocket gateway: everything above (auth, ownership, status, port token,
   // header rewriting) has run unchanged; Caddy proxies the socket to the decided upstream.
   if (gatewayRequest) {
-    return gatewayDecisionResponse(c.req.raw, nodeRoute, { url: vmUrl, headers });
+    return gatewayDecisionResponse(c.req.raw, nodeRoute, { url: vmUrl, headers }, c.env);
   }
 
   let response: Response;

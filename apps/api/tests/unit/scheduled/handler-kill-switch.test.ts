@@ -168,4 +168,25 @@ describe('scheduled operational sweep kill switch', () => {
       })
     );
   });
+
+  it('skips the reverse-tunnel lease sweep without D1 on a non-reverse-tunnel deployment', async () => {
+    enabledMock.mockResolvedValue(true);
+    // Run the real lease sweep through the isolator; DATABASE has no prepare(), so any D1
+    // call would reject and surface here instead of being swallowed.
+    isolateMock.mockImplementation(async (name: string, fn: () => Promise<unknown>) =>
+      name === 'reverse_tunnel_lease_release' ? fn() : undefined
+    );
+    try {
+      await scheduled(controller, { ...env, VM_AGENT_TRANSPORT: 'cloudflare-tunnel' }, context);
+      expect(logInfoMock).toHaveBeenCalledWith(
+        'cron.completed',
+        expect.objectContaining({
+          reverseTunnelLeasesReleased: null,
+          reverseTunnelLeaseSweepSkipReason: 'transport_not_reverse_tunnel',
+        })
+      );
+    } finally {
+      isolateMock.mockImplementation(async () => undefined);
+    }
+  });
 });

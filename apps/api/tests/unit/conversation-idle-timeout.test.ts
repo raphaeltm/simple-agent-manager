@@ -72,7 +72,8 @@ const D1_SCHEMA = `
     status TEXT NOT NULL,
     health_status TEXT,
     last_heartbeat_at TEXT,
-    runtime TEXT, callback_generation TEXT
+    runtime TEXT, callback_generation TEXT,
+    transport TEXT
   );
   CREATE TABLE workspaces (
     id TEXT PRIMARY KEY,

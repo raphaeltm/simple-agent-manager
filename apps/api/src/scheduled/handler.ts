@@ -157,6 +157,7 @@ export async function scheduled(
   );
   // Backstop for every reverse-tunnel lease whose incarnation is no longer live (node row
   // hard-deleted, incarnation replaced, termination proof): one D1 statement, no external I/O.
+  // A no-op without a D1 call unless VM_AGENT_TRANSPORT='reverse-tunnel' (skip reason logged).
   const reverseTunnelLeases = await sweeps.isolate('reverse_tunnel_lease_release', () =>
     runReverseTunnelLeaseSweep(env)
   );
@@ -289,6 +290,10 @@ export async function scheduled(
     nodeTunnelCleanupsAttempted: nodeTunnelCleanup?.attempted,
     nodeTunnelsCleaned: nodeTunnelCleanup?.cleaned,
     reverseTunnelLeasesReleased: reverseTunnelLeases?.released,
+    reverseTunnelLeaseSweepSkipReason:
+      reverseTunnelLeases && 'skipReason' in reverseTunnelLeases
+        ? reverseTunnelLeases.skipReason
+        : undefined,
     orphanedWorkspacesFlagged: nodeCleanup?.orphanedWorkspacesFlagged,
     orphanedNodesDestroyed: nodeCleanup?.orphanedNodesDestroyed,
     orphanedNodesSkipped: nodeCleanup?.orphanedNodesSkipped,
