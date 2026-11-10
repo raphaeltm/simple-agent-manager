@@ -38,6 +38,23 @@ describe('ChatSessionList', () => {
     expect(screen.getByText('3 messages')).toBeInTheDocument();
   });
 
+  // The ProjectData DO stores a failed chat as `failed`; the badge used to look for
+  // `error`, so failed chats were drawn like stopped ones (state-machine audit D4).
+  it.each([
+    ['failed', 'danger'],
+    ['stopped', 'muted'],
+    ['active', 'success'],
+  ])('badges a %s session with the %s tone', (status, tone) => {
+    render(
+      <ChatSessionList
+        sessions={[makeSession({ status, topic: `Chat ${status}` })]}
+        onSelect={vi.fn()}
+      />
+    );
+    const badge = screen.getByText(status);
+    expect(badge.getAttribute('style')).toContain(`--sam-status-${tone}-bg`);
+  });
+
   it('calls onSelect with the session id on click', () => {
     const onSelect = vi.fn();
     render(<ChatSessionList sessions={[makeSession({ id: 'sess-42' })]} onSelect={onSelect} />);

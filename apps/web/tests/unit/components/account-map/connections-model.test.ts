@@ -79,6 +79,19 @@ describe('buildConnectionsModel', () => {
     expect(machineOf(m, 'w-4')?.id).toBe(NO_MACHINE_ID);
   });
 
+  // The ProjectData DO stores a failed chat as `failed` (never `error`), so a chat
+  // with no task that failed was shown as idle (state-machine audit D4).
+  it('shows a failed chat without a task as failed', () => {
+    const fixture = accountMapFixture();
+    const failed = buildConnectionsModel({
+      ...fixture,
+      sessions: fixture.sessions.map((s) => (s.id === 's-2' ? { ...s, status: 'failed' } : s)),
+    });
+    expect(failed.work.find((w) => w.id === 's-2')?.state).toBe('failed');
+    // Liveness: the other chats keep their own states.
+    expect(failed.work.find((w) => w.id === 's-4')?.state).toBe('asleep');
+  });
+
   it('treats a cancelled or superseded task as done, not idle', () => {
     const m = buildConnectionsModel(
       accountMapFixture({

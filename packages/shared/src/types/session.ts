@@ -5,7 +5,12 @@ import type { WakeWaitReason } from './wake-wait';
 // Chat Sessions
 // =============================================================================
 
-export type ChatSessionStatus = 'active' | 'sleeping' | 'stopped' | 'error';
+/**
+ * Chat session lifecycle as the ProjectData DO stores it (`chat_sessions.status`).
+ * A session that ended in failure is `failed` (`failSession`, `project-data/sessions.ts`);
+ * the DO has never written `error`.
+ */
+export type ChatSessionStatus = 'active' | 'sleeping' | 'stopped' | 'failed';
 
 export interface ChatSession {
   id: string;
@@ -22,7 +27,7 @@ export interface ChatSession {
   lastMessageAt: number | null;
   /** Computed: true when status === 'active' && agentCompletedAt != null */
   isIdle: boolean;
-  /** Computed: true when status === 'stopped' */
+  /** Computed: true when status is 'stopped' or 'failed' */
   isTerminated: boolean;
   /** Computed: derived from workspaceId + BASE_DOMAIN */
   workspaceUrl: string | null;

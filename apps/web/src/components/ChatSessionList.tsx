@@ -36,7 +36,7 @@ export function ChatSessionList({ sessions, onSelect }: ChatSessionListProps) {
                   status={
                     session.status === 'active'
                       ? 'running'
-                      : session.status === 'error'
+                      : session.status === 'failed'
                         ? 'error'
                         : 'stopped'
                   }
