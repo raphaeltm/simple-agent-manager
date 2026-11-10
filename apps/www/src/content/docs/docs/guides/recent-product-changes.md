@@ -9,6 +9,9 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 
 ### For everyone
 
+- **Claude Fable 5.2.** Anthropic's newest frontier model (1M-token context) is selectable for
+  Claude Code in an agent profile and through the SAM AI proxy. Sessions that start after the
+  update run a Claude Code version that supports it. → [Agent profiles](/docs/guides/agents/#agent-profiles)
 - **Install your own SAM from the browser.** The installer signs in with Cloudflare, builds a
   complete SAM in your account in about half an hour, then hands you a setup link, and later offers
   updates. No GitHub fork or secrets to copy. The hosted installer's Cloudflare sign-in isn't open
@@ -1197,7 +1200,7 @@ Before anything reaches the model, SAM strips user IDs, IP addresses, user-agent
 | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
 | Guided subscription sign-in      | Connect Claude Code or OpenAI Codex to your Claude Max/Pro or ChatGPT subscription with a browser sign-in — no terminal, no token paste. | **Settings → Connections**             |
 | More cloud providers             | Bring your own Vultr, DigitalOcean, UpCloud, or Infomaniak account, alongside Hetzner, Scaleway, and Google Cloud.                       | **Settings → Connections**             |
-| Claude Fable 5.1                 | Pick Anthropic's newest frontier model (1M-token context) when you configure an agent profile.                                           | Agent profile model picker             |
+| Claude Fable 5.1                 | Pick Anthropic's Fable 5.1 frontier model (1M-token context) when you configure an agent profile.                                        | Agent profile model picker             |
 | Markdown previews in the library | Markdown an agent saves to a project now renders inline instead of downloading as a file.                                                | Project chat & library                 |
 | Shared projects & roles          | Invite teammates with a link, approve access requests, and share profiles, skills, and secrets. Approved teammates join as admins.       | Project **Settings → Access**          |
 | Credential attribution           | A **Credentials** indicator shows which shared work runs on personal keys versus project credentials.                                    | Project navigation (shared projects)   |
