@@ -12,8 +12,8 @@
  * `VM_AGENT_REQUIRED_VERSION`, so cloud-init downloads exactly this build.
  *
  * The binaries are built in a pinned Go image because Docker is already a box prerequisite and
- * Go is not. `-trimpath -buildvcs=false` (packages/vm-agent/Makefile) makes the bytes
- * reproducible across checkouts, which the immutable-key check depends on.
+ * Go is not. `-trimpath -buildvcs=false` (packages/vm-agent/Makefile) plus the pinned image make
+ * the bytes reproducible across checkouts, which the immutable-key check depends on.
  */
 
 import { spawnSync } from 'node:child_process';
@@ -134,8 +134,9 @@ export function buildVmAgentBinaries(
     '-w',
     '/src/packages/vm-agent',
     VM_AGENT_BUILD_IMAGE,
-    // The same target the Cloudflare pipeline runs (deploy-reusable.yml), so one release
-    // produces the same bytes on either platform.
+    // The target the Cloudflare pipeline runs (deploy-reusable.yml). Bytes are reproducible
+    // for one image, not across build hosts (verified: a host-toolchain build of the same
+    // release differed), which is why the image is pinned.
     'make',
     'build-all',
     `VERSION=${release}`,
