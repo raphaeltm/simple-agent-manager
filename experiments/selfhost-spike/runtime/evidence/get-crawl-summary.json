@@ -1,0 +1,42 @@
+{
+ "total": 302,
+ "byStatus": {
+  "200": 102,
+  "400": 6,
+  "401": 5,
+  "403": 3,
+  "404": 182,
+  "500": 3,
+  "503": 1
+ },
+ "failures": [
+  {
+   "raw": "/api/admin/analytics/dau",
+   "url": "/api/admin/analytics/dau",
+   "status": 500,
+   "ms": 160,
+   "body": "{\"error\":\"INTERNAL_ERROR\",\"message\":\"Internal server error\",\"requestId\":\"b8cfab72-8426-4c31-96bd-253e601d3aa8\"}"
+  },
+  {
+   "raw": "/api/admin/analytics/funnel",
+   "url": "/api/admin/analytics/funnel",
+   "status": 500,
+   "ms": 31,
+   "body": "{\"error\":\"INTERNAL_ERROR\",\"message\":\"Internal server error\",\"requestId\":\"6f564842-55f0-4ca4-b393-267e2eea80f4\"}"
+  },
+  {
+   "raw": "/api/agent-models/catalog",
+   "url": "/api/agent-models/catalog",
+   "status": 503,
+   "ms": 19,
+   "body": "{\"error\":\"SERVICE_UNAVAILABLE\",\"message\":\"The Cloudflare model catalog is unavailable right now. Try again shortly.\",\"requestId\":\"090febcc-6ba4-4809-908a-8c846f"
+  },
+  {
+   "raw": "/api/projects/${projectId}/repository-access/discover",
+   "url": "/api/projects/01M72SPK1PR0JECT00000000AB/repository-access/discover",
+   "status": 500,
+   "ms": 377,
+   "body": "{\"error\":\"INTERNAL_ERROR\",\"message\":\"Internal server error\",\"requestId\":\"842bd44b-67f4-4ddb-b498-a27c7504d76a\"}"
+  }
+ ]
+}

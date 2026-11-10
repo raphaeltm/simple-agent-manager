@@ -79,6 +79,9 @@ export function buildAnthropicGatewayUrl(env: Env): string {
 
 /** Build upstream URL for Workers AI chat completions via AI Gateway. */
 export function buildWorkersAIGatewayUrl(env: Env): string {
+  // SPIKE (self-host Track A): an OpenAI-compatible base URL for installs without Cloudflare.
+  const compatBase = (env as Env & { SPIKE_OPENAI_COMPAT_BASE_URL?: string }).SPIKE_OPENAI_COMPAT_BASE_URL;
+  if (compatBase) return `${compatBase.replace(/\/$/, '')}/chat/completions`;
   const gatewayId = env.AI_GATEWAY_ID;
   if (gatewayId) {
     return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${gatewayId}/workers-ai/v1/chat/completions`;
