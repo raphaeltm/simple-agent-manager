@@ -46,8 +46,11 @@ afterEach(() => {
 
 const cloudflare = (): Env =>
   ({ ...baseEnv, CF_ACCOUNT_ID: 'account-1', CF_API_TOKEN: 'token-1' }) as Env;
-/** A runtime with no Cloudflare account; the analytics dataset name is still configured. */
-const selfHosted = (): Env => ({ ...baseEnv }) as Env;
+/**
+ * A runtime with no Cloudflare account. The Cloudflare deploy generates ANALYTICS_DATASET, so a
+ * self-hosted box has none either; the celld run failed with a 500 for exactly this shape.
+ */
+const selfHosted = (): Env => ({ ...baseEnv, ANALYTICS_DATASET: undefined }) as Env;
 
 describe('admin analytics routes', () => {
   function app() {
@@ -79,7 +82,7 @@ describe('admin analytics routes', () => {
     expect(String(init.body)).toContain('sam_analytics');
   });
 
-  it.each(['dau', 'events', 'funnel', 'feature-adoption', 'geo'])(
+  it.each(['dau', 'events', 'funnel', 'feature-adoption', 'geo', 'retention', 'website-traffic'])(
     'GET /%s answers 404 FEATURE_UNAVAILABLE for analyticsQuery without an account, and never calls fetch',
     async (route) => {
       const res = await app().request(`/api/admin/analytics/${route}`, {}, selfHosted());
