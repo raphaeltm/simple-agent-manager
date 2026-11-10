@@ -352,7 +352,7 @@ func anthropicMessage(w http.ResponseWriter, text string) {
 func TestShippedClaudeAdapterSteersRunningTurn(t *testing.T) {
 	adapter, claude := os.Getenv("SAM_STEER_CLAUDE_ACP"), os.Getenv("SAM_STEER_CLAUDE_CODE")
 	if adapter == "" || claude == "" {
-		t.Skip("set SAM_STEER_CLAUDE_ACP (claude-agent-acp 0.81.2 bin) and SAM_STEER_CLAUDE_CODE (claude 2.1.281)")
+		t.Skip("set SAM_STEER_CLAUDE_ACP (claude-agent-acp 0.88.0 bin) and SAM_STEER_CLAUDE_CODE (claude 2.1.293)")
 	}
 	const turnMarker = "Create a todo file for the project."
 	model, server := newSteerModel(t, func(p string) bool { return strings.HasSuffix(p, "/v1/messages") },

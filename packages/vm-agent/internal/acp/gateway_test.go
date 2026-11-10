@@ -279,7 +279,7 @@ func TestGetAgentCommandInfoClaudeCodeRequiresCatalogCapableCli(t *testing.T) {
 	t.Parallel()
 
 	info := getAgentCommandInfo("claude-code", "api-key")
-	if !strings.Contains(info.installCmd, "@anthropic-ai/claude-code@2.1.281") {
+	if !strings.Contains(info.installCmd, "@anthropic-ai/claude-code@2.1.293") {
 		t.Fatalf("installCmd=%q, want pinned Claude Code CLI", info.installCmd)
 	}
 	minParts := strings.Split(claudeCodeMinVersion, ".")

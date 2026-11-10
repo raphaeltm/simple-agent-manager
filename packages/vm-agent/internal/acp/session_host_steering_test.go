@@ -160,7 +160,7 @@ func newSteerHarness(t *testing.T, support steeringSupport) *steerHarness {
 }
 
 var verifiedSteering = steeringSupport{Advertised: true, PromptRequired: true,
-	Adapter: "@agentclientprotocol/claude-agent-acp", Version: "0.81.2"}
+	Adapter: "@agentclientprotocol/claude-agent-acp", Version: "0.88.0"}
 
 // startTurn runs a real prompt through the production gate and returns its
 // request ID with the attempt the host is executing.
@@ -235,7 +235,7 @@ func TestSteeringSupportFromInitialize(t *testing.T) {
 		meta                  map[string]any
 		advertised, supported bool
 	}{
-		{"claude pinned", "@agentclientprotocol/claude-agent-acp", "0.81.2", advertised, true, true},
+		{"claude pinned", "@agentclientprotocol/claude-agent-acp", "0.88.0", advertised, true, true},
 		{"claude newer", "@agentclientprotocol/claude-agent-acp", "0.90.0", advertised, true, true},
 		{"claude before promptRequired", "@agentclientprotocol/claude-agent-acp", "0.80.9", advertised, true, false},
 		{"stock codex 2.1.1 starts detached turns", "@agentclientprotocol/codex-acp", "2.1.1", advertised, true, false},
@@ -246,7 +246,7 @@ func TestSteeringSupportFromInitialize(t *testing.T) {
 		{"sam opencode advertises idle behavior", "OpenCode", "2.2.5-sam-s1", withIdle, true, true},
 		{"upstream opencode has no steering", "OpenCode", "2.2.5", nil, false, false},
 		{"unknown adapter advertising only support", "other-acp", "1.0.0", advertised, true, false},
-		{"supported false", "@agentclientprotocol/claude-agent-acp", "0.81.2",
+		{"supported false", "@agentclientprotocol/claude-agent-acp", "0.88.0",
 			map[string]any{"steering": map[string]any{"supported": false}}, false, false},
 	}
 	for _, tc := range cases {

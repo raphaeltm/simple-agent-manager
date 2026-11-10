@@ -105,13 +105,13 @@ export const integrations: Integration[] = [
       { title: 'Run test generation at scale', description: 'Generate comprehensive test suites for existing code — Claude Code understands your codebase context and writes meaningful tests.' },
     ],
     faq: [
-      { question: 'What models does Claude Code use?', answer: 'Claude Code uses Anthropic\'s Claude models. SAM lists the Claude 5 models, such as Fable 5.1, Opus 5.5, Sonnet 5.5 and Haiku 5.5, and the Claude 4 models. Choose one in Settings → Agents or in an agent profile.' },
+      { question: 'What models does Claude Code use?', answer: 'Claude Code uses Anthropic\'s Claude models. SAM lists the Claude 5 models, such as Fable 5.2, Opus 5.5, Sonnet 5.5 and Haiku 5.5, and the Claude 4 models. Choose one in Settings → Agents or in an agent profile.' },
       { question: 'Do I need an Anthropic API key?', answer: 'You can use either an Anthropic API key (pay-per-use) or a Claude Max/Pro OAuth token (subscription-based). Configure your preferred method in project settings.' },
       { question: 'Can I run Claude Code in a devcontainer?', answer: 'Yes — SAM builds your repo\'s devcontainer on the VM. Claude Code runs inside it with the same toolchains, language runtimes, and test runners your team uses.' },
     ],
     relatedSlugs: ['codex', 'hetzner', 'scaleway'],
     externalUrl: 'https://docs.anthropic.com/en/docs/claude-code/overview',
-    models: ['Claude Fable 5.1', 'Claude Opus 5.5', 'Claude Sonnet 5.5', 'Claude Haiku 5.5'],
+    models: ['Claude Fable 5.2', 'Claude Opus 5.5', 'Claude Sonnet 5.5', 'Claude Haiku 5.5'],
   },
   {
     slug: 'codex',

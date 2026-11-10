@@ -68,7 +68,7 @@
   },
   {
     "name": "claude_ask_user_question_selection_and_other",
-    "source": "claude-agent-acp@0.81.2 askUserQuestionsToCreateRequest",
+    "source": "claude-agent-acp@0.88.0 askUserQuestionsToCreateRequest",
     "schema": {
       "type": "object",
       "properties": {
@@ -96,12 +96,6 @@
         "question_0_custom": {
           "type": "string",
           "title": "Other",
-          "_meta": {
-            "_askUserQuestionCustomAnswer": {
-              "questionId": "question_0",
-              "isCustomAnswer": true
-            }
-          },
           "description": "Type your own answer, or add a note to the option you chose above (optional)."
         },
         "question_1": {
@@ -126,12 +120,6 @@
         "question_1_custom": {
           "type": "string",
           "title": "Other",
-          "_meta": {
-            "_askUserQuestionCustomAnswer": {
-              "questionId": "question_1",
-              "isCustomAnswer": true
-            }
-          },
           "description": "Type your own answer to add to your selection above (optional)."
         }
       }
