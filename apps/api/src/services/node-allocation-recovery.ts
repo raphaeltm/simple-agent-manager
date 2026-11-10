@@ -27,6 +27,23 @@ export interface DurableNodeAllocation {
   createdAt: number;
   initialIncarnationId: string;
   incarnationId: string;
+  /**
+   * Whether any attempt of this allocation may already have sent the provider create POST.
+   * `false` is positive evidence that none did, so a resumed attempt may create. Anything else
+   * (`true`, or `undefined` for intents persisted before this field existed) means a VM may
+   * exist and a resume must reconcile the exact inventory instead of creating again.
+   */
+  providerCreateRequested?: boolean;
+  /**
+   * Durably records that a create POST is about to be sent, BEFORE it is sent. Must throw when
+   * the record cannot be made, so an unrecorded create is never sent.
+   */
+  markProviderCreateRequested?: () => Promise<void>;
+}
+
+/** True when a resumed attempt must reconcile inventory rather than create (see above). */
+export function durableAllocationMayHaveCreated(allocation: DurableNodeAllocation): boolean {
+  return allocation.providerCreateRequested !== false;
 }
 
 /** Only the exact persisted create incarnation may supply a lost provider response. */

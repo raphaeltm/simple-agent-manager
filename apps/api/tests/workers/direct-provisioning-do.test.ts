@@ -22,7 +22,9 @@ import {
   attemptWorkspaceDeletion,
   loadWorkspaceDeletionIdentity,
 } from '../../src/services/workspace-deletion';
+import { updateAdminSettings } from '../../src/services/admin-settings';
 import { ensurePoolsWithStarterMachines } from '../helpers/capacity-pool-picks';
+import { FakeCloudflare } from '../helpers/fake-cloudflare-tunnels';
 import { seedInstallation, seedNode, seedProject, seedUser } from './helpers/seed-d1';
 
 afterEach(() => {
@@ -30,7 +32,13 @@ afterEach(() => {
   clearCapacityCatalogCache();
 });
 
-async function setup(interrupt: boolean, interruptDispatch = false, directNode = false) {
+async function setup(
+  interrupt: boolean,
+  interruptDispatch = false,
+  directNode = false,
+  /** Tunnel transport: route every Cloudflare API call to this stateful fake. */
+  tunnelCf?: FakeCloudflare
+) {
   const userId = 'durable-user-' + crypto.randomUUID();
   const projectId = 'durable-project-' + crypto.randomUUID();
   const installationId = 'durable-install-' + crypto.randomUUID();
@@ -75,6 +83,13 @@ async function setup(interrupt: boolean, interruptDispatch = false, directNode =
     NODE_PROVISIONING_REQUEST_TIMEOUT_MS: '3000',
     NODE_PROVISIONING_RETRY_INTERVAL_MS: '30000',
     COMPUTE_QUOTA_ENFORCEMENT_ENABLED: 'false',
+    ...(tunnelCf
+      ? {
+          VM_AGENT_TRANSPORT: 'cloudflare-tunnel',
+          CF_ACCOUNT_ID: tunnelCf.accountId,
+          CF_ZONE_ID: tunnelCf.zoneId,
+        }
+      : {}),
   };
   let stub!: DurableObjectStub<NodeLifecycle>;
   const testEnv = {
@@ -129,6 +144,8 @@ async function setup(interrupt: boolean, interruptDispatch = false, directNode =
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (tunnelCf && url.startsWith('https://api.cloudflare.com/'))
+        return tunnelCf.fetch(input, init);
       if (url.includes('/server_types'))
         return Response.json({
           server_types: [serverType],
@@ -703,5 +720,78 @@ describe('durable direct workspace allocation', () => {
         .bind(f.workspaceId)
         .first()
     ).toEqual({ dispatched_at: expect.any(String) });
+  });
+});
+
+describe('durable direct allocation on Cloudflare Tunnel transport', () => {
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  it('resumes the same incarnation after its first attempt is cut mid tunnel setup by the real deadline', async () => {
+    const cf = new FakeCloudflare('durable-account', 'durable-zone');
+    // Real POST /nodes -> NodeLifecycle start -> alarm -> provisionNode. The first attempt's
+    // deadline is the 3 s request timeout plus a 1 ms tunnel budget, and the first tunnel
+    // list and create each take 1.7 s (each under the 3 s per-call timeout), so the real
+    // AbortController fires inside the create POST: a lost response that later commits.
+    const f = await setup(false, false, true, cf);
+    await updateAdminSettings(f.testEnv, {
+      actorUserId: f.userId,
+      changes: [{ name: 'vmTunnels.provisioningBudgetMs', value: 1 }],
+    });
+    f.release();
+    cf.inject('tunnel.list', { kind: 'hook', run: () => sleep(1700) });
+    cf.inject('tunnel.create', { kind: 'hook', run: () => sleep(1700) });
+    if ((await f.intent())?.attempts === 0) await f.tick();
+    await vi.waitFor(
+      async () => expect((await f.intent())?.lastError).toMatch(/deadline elapsed/),
+      { timeout: 8000 }
+    );
+    const nodeId = f.workspaceId;
+    const afterFirst = await env.DATABASE.prepare(
+      `SELECT status, tunnel_id, pending_create_count, last_error FROM node_cloudflare_tunnels
+        WHERE node_id = ?`
+    )
+      .bind(nodeId)
+      .first<{ status: string; last_error: string; pending_create_count: number }>();
+    // Not released: the durable allocation will resume this incarnation (pre-fix this row was
+    // cleanup_pending and every later attempt failed "already being cleaned up").
+    expect(afterFirst).toMatchObject({ status: 'provisioning', pending_create_count: 1 });
+    expect(afterFirst?.last_error).toMatch(/^aborted during tunnel: NodeAllocationUncertainError/);
+    expect((await f.intent())?.providerCreateRequested).toBe(false);
+    expect(f.creates).toHaveLength(0);
+
+    await runInDurableObject(f.stub, async (instance) => {
+      (instance as unknown as { provisioningController: unknown }).provisioningController =
+        undefined;
+    });
+    await f.tick();
+    await vi.waitFor(async () => expect((await f.intent())?.status).toBe('complete'), {
+      timeout: 8000,
+    });
+    // One paid create (no "second create is forbidden" deadlock), one tunnel (adopted by name).
+    expect(f.creates).toHaveLength(1);
+    expect(cf.callCount('tunnel.create')).toBe(1);
+    expect(cf.liveTunnels()).toHaveLength(1);
+    expect(String(f.creates[0]?.user_data)).toContain('sam-cloudflared');
+    const node = await env.DATABASE.prepare(
+      'SELECT status, transport, tunnel_id, backend_dns_record_id FROM nodes WHERE id = ?'
+    )
+      .bind(nodeId)
+      .first<{ tunnel_id: string }>();
+    expect(node).toMatchObject({
+      status: 'running',
+      transport: 'cloudflare-tunnel',
+      tunnel_id: cf.liveTunnels()[0]!.id,
+      backend_dns_record_id: null,
+    });
+    expect(
+      await env.DATABASE.prepare(
+        'SELECT status, tunnel_id FROM node_cloudflare_tunnels WHERE node_id = ?'
+      )
+        .bind(nodeId)
+        .first()
+    ).toEqual({ status: 'active', tunnel_id: node!.tunnel_id });
+    expect(cf.records()).toMatchObject([
+      { type: 'CNAME', content: `${node!.tunnel_id}.cfargotunnel.com`, proxied: true },
+    ]);
   });
 });

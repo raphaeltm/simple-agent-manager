@@ -19,6 +19,7 @@ import { GcpApiError, sanitizeGcpError } from './gcp-errors';
 import { signCurrentNodeCallbackToken } from './jwt';
 import {
   type DurableNodeAllocation,
+  durableAllocationMayHaveCreated,
   NodeAllocationUncertainError,
   recoverNodeAllocation,
 } from './node-allocation-recovery';
@@ -167,6 +168,9 @@ export async function provisionNode(
     !!durable &&
     node.runtimeIncarnationId === durable.incarnationId &&
     node.runtimeTerminationConfirmedAt === null;
+  // A resumed attempt reconciles the exact inventory only when an earlier attempt may have
+  // sent the create; one cut before its create POST (e.g. inside tunnel setup) creates instead.
+  const recoverExisting = resuming && !!durable && durableAllocationMayHaveCreated(durable);
   if (
     durable &&
     !resuming &&
@@ -305,7 +309,7 @@ export async function provisionNode(
     // Last authority check before the paid provider allocation. A revocation
     // that races createVM is handled by the post-request check below, which can
     // strictly destroy the resource using the persisted provider identity.
-    if (!resuming) {
+    if (!recoverExisting) {
       await assertNodeAllocationPlanCurrent(
         env,
         node.id,
@@ -336,7 +340,8 @@ export async function provisionNode(
     let vm: Awaited<ReturnType<typeof provider.createVM>>;
     providerCreateRequested = true;
     try {
-      vm = await (resuming && durable
+      if (!recoverExisting) await durable?.markProviderCreateRequested?.();
+      vm = await (recoverExisting && durable
         ? recoverNodeAllocation(provider, node, env, durable, providerContext)
         : providerContext
           ? provider.createVM(vmConfig, providerContext)

@@ -167,12 +167,13 @@ export async function cleanupNodeTunnelRow(
     const settled = pendingCreateSettled(row, pendingCreateSettleMs, Date.now());
     if (row.pendingCreateCount > 0 && !settled) {
       // A POST may commit after the inventory/deletes above. Do not infer finality from an
-      // empty read inside the settle window; keep polling at the capped retry rate.
+      // empty read inside the settle window; keep polling at the capped retry rate. This is
+      // not a success, so it keeps `last_error` (the cause that left the create unobserved).
       const attempts = row.cleanupAttempts + 1;
       const next = new Date(Date.now() + (await nodeTunnelCleanupBackoffMs(env, attempts)));
       await env.DATABASE.prepare(
         `UPDATE node_cloudflare_tunnels SET cleanup_attempts = ?, cleanup_next_attempt_at = ?,
-          last_error = NULL, updated_at = ? WHERE id = ? AND status = 'cleanup_pending'`
+          updated_at = ? WHERE id = ? AND status = 'cleanup_pending'`
       )
         .bind(attempts, next.toISOString(), new Date().toISOString(), row.id)
         .run();
@@ -200,7 +201,7 @@ export async function cleanupNodeTunnelRow(
           )
             .bind(now, now, row.id)
             .run();
-    if (row.pendingCreateCount > 0) {
+    if (row.pendingCreateCount > 0 && (done.meta?.changes ?? 0) === 1) {
       log.warn('node_tunnel.pending_create_settled_by_age', {
         nodeId: row.nodeId,
         runtimeIncarnationId: row.runtimeIncarnationId,
