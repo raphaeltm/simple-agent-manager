@@ -23,6 +23,7 @@ import { copyCredentialLimitHeaders } from '../services/credential-limit-events'
 import {
   chatTargetHeaders,
   isCloudflareChatTarget,
+  LlmUnavailableError,
   resolveWorkersAiChatTarget,
 } from '../services/llm-chat-target';
 import { resolveAiGatewayId } from '../services/platform-capabilities';
@@ -79,7 +80,19 @@ export async function forwardToWorkersAI(
   modelId: string,
   aigMetadata: string
 ): Promise<Response> {
-  const target = await resolveWorkersAiChatTarget(env, 'aiProxy', modelId);
+  let target: Awaited<ReturnType<typeof resolveWorkersAiChatTarget>>;
+  try {
+    target = await resolveWorkersAiChatTarget(env, 'aiProxy', modelId);
+  } catch (err) {
+    if (!(err instanceof LlmUnavailableError)) throw err;
+    // The endpoint settings could not be read; the call is refused rather than sent elsewhere.
+    return new Response(
+      JSON.stringify({
+        error: { message: err.message, type: 'api_error', code: 'LLM_SETTINGS_UNAVAILABLE' },
+      }),
+      { status: 503, headers: { 'Content-Type': 'application/json' } }
+    );
+  }
   if (!target) {
     // No Workers AI on this installation and no OpenAI-compatible endpoint configured.
     return new Response(

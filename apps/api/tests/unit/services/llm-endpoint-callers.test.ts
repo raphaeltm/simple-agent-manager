@@ -112,6 +112,27 @@ describe('/ai/v1 Workers AI route (forwardToWorkersAI)', () => {
   });
 });
 
+describe('/ai/v1 Workers AI route when the endpoint settings are unreadable', () => {
+  it('answers 503 without calling the endpoint or the Cloudflare gateway', async () => {
+    Object.assign(env, CLOUDFLARE);
+    await configureEndpoint(ENDPOINT);
+    // Liveness: the endpoint serves the route while settings are readable.
+    expect((await forwardToWorkersAI(env, { messages: [] }, '@cf/m/x', '{}')).status).toBe(200);
+    fetchMock.mockClear();
+    __resetAdminSettingsCacheForTest();
+    vi.spyOn(env.DATABASE, 'prepare').mockImplementation(() => {
+      throw new Error('D1 unavailable');
+    });
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    const res = await forwardToWorkersAI(env, { messages: [] }, '@cf/m/x', '{}');
+
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({ error: { code: 'LLM_SETTINGS_UNAVAILABLE' } });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
 describe('diagnosis runner (complete)', () => {
   const config = { model: '@cf/zai-org/glm-5.3-flash', timeoutMs: 5_000 } as never;
 

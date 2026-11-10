@@ -12,8 +12,9 @@
  * A Cloudflare deployment with no endpoint configured resolves exactly the URLs it used before.
  */
 import type { Env } from '../env';
+import { resolveD1BindingIdentity } from '../lib/d1-session';
 import { log } from '../lib/logger';
-import { resolveAdminSetting, resolveAdminSettingDetailsMany } from './admin-settings-resolution';
+import { resolveAdminSettingDetailsMany } from './admin-settings-resolution';
 import {
   LLM_PURPOSE_MODEL_SETTING,
   type LlmPurpose,
@@ -41,12 +42,26 @@ export interface ChatCompletionsTarget {
   redirect: 'error' | 'follow';
 }
 
-/** No endpoint can serve this call on this installation. A designed state, not a fault. */
+/**
+ * No endpoint can serve this call. `not_configured` is a designed state (nothing is set up here);
+ * `settings_unreadable` means the endpoint settings could not be read, so the call was refused
+ * rather than sent to a provider the admin may have opted out of.
+ */
+export type LlmUnavailableReason = 'not_configured' | 'settings_unreadable';
+
+const LLM_UNAVAILABLE_MESSAGES: Record<LlmUnavailableReason, string> = {
+  not_configured:
+    'No language model is available on this installation. Configure an OpenAI-compatible endpoint in admin settings (AI models).',
+  settings_unreadable:
+    'The language model settings could not be read, so the call was not sent. Try again shortly.',
+};
+
 export class LlmUnavailableError extends Error {
-  constructor(readonly purpose: LlmPurpose) {
-    super(
-      'No language model is available on this installation. Configure an OpenAI-compatible endpoint in admin settings (AI models).'
-    );
+  constructor(
+    readonly purpose: LlmPurpose,
+    readonly reason: LlmUnavailableReason = 'not_configured'
+  ) {
+    super(LLM_UNAVAILABLE_MESSAGES[reason]);
     this.name = 'LlmUnavailableError';
   }
 }
@@ -76,21 +91,50 @@ function stringValue(value: unknown): string | null {
 }
 
 /**
+ * Per D1 binding, whether the last successful read of the base URL found an endpoint. Lets a
+ * settings outage keep the Cloudflare route for an installation known to have no endpoint.
+ */
+const lastEndpointConfigured = new WeakMap<D1Database, boolean>();
+
+function settingsUnreadable(purpose: LlmPurpose, err: unknown): LlmUnavailableError {
+  log.error('llm.endpoint_settings_unreadable', {
+    purpose,
+    error: err instanceof Error ? err.message : String(err),
+  });
+  return new LlmUnavailableError(purpose, 'settings_unreadable');
+}
+
+/**
+ * The configured base URL, read alone: it is a plain setting, so an installation without an
+ * endpoint never queries the credential table. When the read fails, the call goes to Cloudflare
+ * only if this isolate last saw no endpoint. Otherwise (an endpoint was configured, or nothing
+ * has been read yet) it is refused: an admin who pointed SAM at their own endpoint must not have
+ * prompts sent to another provider because D1 hiccuped.
+ */
+async function readConfiguredBaseUrl(env: Env, purpose: LlmPurpose): Promise<unknown> {
+  const db = resolveD1BindingIdentity(env.DATABASE);
+  try {
+    const [setting] = await resolveAdminSettingDetailsMany(env, ['llm.openAICompatible.baseUrl']);
+    const baseUrl = setting?.value ?? null;
+    lastEndpointConfigured.set(db, validLlmBaseUrl(baseUrl));
+    return baseUrl;
+  } catch (err) {
+    if (lastEndpointConfigured.get(db) === false) return null;
+    throw settingsUnreadable(purpose, err);
+  }
+}
+
+/**
  * The admin-configured OpenAI-compatible endpoint for `purpose`, or null when none is set.
- * `requestedModel` is used only when no endpoint model is configured.
- *
- * The base URL is read first and alone: it is a plain setting, so an installation without an
- * endpoint never queries the credential table, and a settings outage resolves it to its default
- * (no endpoint), which keeps the Cloudflare route working as before. Once an endpoint IS
- * configured, failing to read its key or models must not silently send the call to another
- * provider, so that throws instead.
+ * `requestedModel` is used only when no endpoint model is configured. Once an endpoint is
+ * configured, failing to read its key or models throws rather than using another provider.
  */
 export async function resolveOpenAICompatibleTarget(
   env: Env,
   purpose: LlmPurpose,
   requestedModel: string | null = null
 ): Promise<ChatCompletionsTarget | null> {
-  const baseUrl = await resolveAdminSetting(env, 'llm.openAICompatible.baseUrl');
+  const baseUrl = await readConfiguredBaseUrl(env, purpose);
   if (!validLlmBaseUrl(baseUrl)) return null;
   let values: unknown[];
   try {
@@ -101,11 +145,7 @@ export async function resolveOpenAICompatibleTarget(
     ]);
     values = details.map((detail) => detail.value);
   } catch (err) {
-    log.error('llm.endpoint_settings_unreadable', {
-      purpose,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    throw new LlmUnavailableError(purpose);
+    throw settingsUnreadable(purpose, err);
   }
   const [apiKey, defaultModel, purposeModel] = values;
   const model = stringValue(purposeModel) ?? stringValue(defaultModel) ?? requestedModel;

@@ -175,6 +175,92 @@ describe('resolveWorkersAiChatTarget', () => {
     expect(sql).not.toContain('platform_credentials');
   });
 
+  /** D1 stops answering after the settings cache expires. */
+  function breakSettingsReads() {
+    __resetAdminSettingsCacheForTest();
+    vi.spyOn(env.DATABASE, 'prepare').mockImplementation(() => {
+      throw new Error('D1 unavailable');
+    });
+  }
+
+  it('refuses rather than falls back to Cloudflare when a configured endpoint becomes unreadable', async () => {
+    Object.assign(env, CLOUDFLARE);
+    await configureEndpoint({ baseUrl: 'https://llm.example.com/v1', apiKey: 'sk-endpoint-key' });
+    // Liveness: the endpoint resolves while settings are readable.
+    expect((await resolveWorkersAiChatTarget(env, 'taskTitle', '@cf/m/x'))?.kind).toBe(
+      'openai-compatible'
+    );
+    breakSettingsReads();
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const outcome = await resolveWorkersAiChatTarget(env, 'taskTitle', '@cf/m/x').catch(
+      (err: unknown) => err
+    );
+    expect(outcome).toBeInstanceOf(LlmUnavailableError);
+    expect((outcome as LlmUnavailableError).reason).toBe('settings_unreadable');
+    expect((outcome as LlmUnavailableError).message).toContain('could not be read');
+  });
+
+  it('refuses when settings cannot be read and none were ever read here', async () => {
+    Object.assign(env, CLOUDFLARE);
+    breakSettingsReads();
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    await expect(resolveWorkersAiChatTarget(env, 'taskTitle', '@cf/m/x')).rejects.toMatchObject({
+      reason: 'settings_unreadable',
+    });
+  });
+
+  it('keeps the Cloudflare route through an outage when the last read found no endpoint', async () => {
+    Object.assign(env, CLOUDFLARE);
+    expect((await resolveWorkersAiChatTarget(env, 'taskTitle', '@cf/m/x'))?.kind).toBe(
+      'cloudflare-gateway'
+    );
+    breakSettingsReads();
+    const target = await resolveWorkersAiChatTarget(env, 'taskTitle', '@cf/m/x');
+    expect(target?.url).toBe(
+      'https://gateway.ai.cloudflare.com/v1/account-1/sam/workers-ai/v1/chat/completions'
+    );
+  });
+
+  it('tells the agent the settings are unreadable, without calling any model', async () => {
+    Object.assign(env, CLOUDFLARE);
+    await configureEndpoint({ baseUrl: 'https://llm.example.com/v1', apiKey: 'sk-endpoint-key' });
+    await resolveWorkersAiChatTarget(env, 'agent', '@cf/m/x');
+    breakSettingsReads();
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const chunks: string[] = [];
+    const sink = new WritableStream<Uint8Array>({
+      write(chunk) {
+        chunks.push(new TextDecoder().decode(chunk));
+      },
+    }).getWriter();
+
+    await runAgentLoop(
+      'conv-1',
+      [],
+      'hi',
+      {
+        model: '@cf/test/model',
+        maxTokens: 128,
+        maxTurns: 1,
+        maxRequestBodyBytes: 100_000,
+        maxToolResultBytes: 10_000,
+        aigSource: 'sam-session',
+        ftsEnabled: false,
+      } as SamConfig,
+      env,
+      'user-1',
+      sink,
+      vi.fn()
+    );
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    const stream = chunks.join('');
+    expect(stream).toContain('could not be read');
+    expect(stream).toContain('"type":"done"');
+  });
+
   it('rejects an invalid base URL at the admin settings boundary', async () => {
     await expect(configureEndpoint({ baseUrl: 'http://llm.example.com/v1' })).rejects.toThrow();
   });
@@ -244,6 +330,24 @@ describe('task titles through the real generator', () => {
       model: '@cf/zai-org/glm-5.2',
       chat_template_kwargs: { enable_thinking: false },
     });
+  });
+
+  it('truncate without calling Cloudflare when the configured endpoint becomes unreadable', async () => {
+    Object.assign(env, CLOUDFLARE);
+    await configureEndpoint({ baseUrl: 'https://llm.example.com/v1', apiKey: 'sk-endpoint-key' });
+    await resolveWorkersAiChatTarget(env, 'taskTitle', '@cf/m/x');
+    __resetAdminSettingsCacheForTest();
+    vi.spyOn(env.DATABASE, 'prepare').mockImplementation(() => {
+      throw new Error('D1 unavailable');
+    });
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const title = await generateTaskTitle(env, LONG_MESSAGE, { maxRetries: 2 });
+
+    expect(LONG_MESSAGE.startsWith(title.replace(/…$|\.\.\.$/, '').trimEnd())).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('truncate quietly when no model is available at all', async () => {
