@@ -71,21 +71,21 @@ describe('tunnel port range', () => {
           })
         ).toThrow(new RegExp(`contains ${name} \\(${fallback}\\)`));
       }
-      expect(() =>
-        resolveTunnelPortRange({ [name]: '20500' })
-      ).toThrow(new RegExp(`contains ${name} \\(20500\\)`));
+      expect(() => resolveTunnelPortRange({ [name]: '20500' })).toThrow(
+        new RegExp(`contains ${name} \\(20500\\)`)
+      );
       // Control: the same listener moved just outside the range is accepted.
       expect(resolveTunnelPortRange({ [name]: '30000' })).toEqual({ start: 20000, end: 29999 });
     }
   );
 
   it('derives the reuse age floor from the heartbeat timeout frps gets', () => {
-    expect(resolveTunnelSettings({ REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS: '120' })).toMatchObject(
-      { heartbeatTimeoutSeconds: 120, portReuseMinAgeSeconds: null }
+    expect(
+      resolveTunnelSettings({ REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS: '120' })
+    ).toMatchObject({ heartbeatTimeoutSeconds: 120, portReuseMinAgeSeconds: null });
+    expect(() => resolveTunnelSettings({ REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS: '30' })).toThrow(
+      /between 60 and 3600/
     );
-    expect(() =>
-      resolveTunnelSettings({ REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS: '30' })
-    ).toThrow(/between 60 and 3600/);
     const longer = resolveTunnelSettings({ REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS: '600' });
     expect(tunnelWorkerVars(longer).REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS).toBe('600');
     expect(() =>

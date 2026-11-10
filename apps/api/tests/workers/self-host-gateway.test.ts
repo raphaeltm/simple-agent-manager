@@ -202,21 +202,22 @@ describe('frps plugin endpoint', () => {
     });
   });
 
-  it('refuses a work connection whose run id is not its control session\'s, or whose control credential is wrong', async () => {
+  it("refuses a work connection whose run id is not its control session's, or whose control credential is wrong", async () => {
     await seedUser('rt-wc-bad');
     const a = await seedReverseNode('K', 'rt-wc-bad');
     const b = await seedReverseNode('L', 'rt-wc-bad');
-    expect(
-      await verdict(await call(frpsCall('NewWorkConn', workConn(a, 'aaaa', 'bbbb'))))
-    ).toEqual({ reject: true, reject_reason: 'work connection run id mismatch' });
+    expect(await verdict(await call(frpsCall('NewWorkConn', workConn(a, 'aaaa', 'bbbb'))))).toEqual(
+      { reject: true, reject_reason: 'work connection run id mismatch' }
+    );
     const forged = workConn(b);
     forged.user.metas = { ...metas(b), credential: a.credential };
     expect((await verdict(await call(frpsCall('NewWorkConn', forged)))).reject).toBe(true);
     // Owner control on the same fixture.
     expect((await verdict(await call(frpsCall('NewWorkConn', workConn(b))))).reject).toBe(false);
-    expect(
-      await verdict(await call(frpsCall('NewWorkConn', { run_id: 'r' })))
-    ).toEqual({ reject: true, reject_reason: 'malformed plugin request' });
+    expect(await verdict(await call(frpsCall('NewWorkConn', { run_id: 'r' })))).toEqual({
+      reject: true,
+      reject_reason: 'malformed plugin request',
+    });
   });
 
   it.each([
@@ -364,7 +365,9 @@ describe('released port reuse age (real D1)', () => {
     const e = onePort(27102, { REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS: '150' });
     await ensureReverseTunnelLease(e, await liveNode('A', 'rt-age-cfg'));
     await releasedAgo(27102, 250);
-    const err = await ensureReverseTunnelLease(e, await liveNode('B', 'rt-age-cfg')).catch((x) => x);
+    const err = await ensureReverseTunnelLease(e, await liveNode('B', 'rt-age-cfg')).catch(
+      (x) => x
+    );
     expect(err).toMatchObject({ code: 'port_range_cooling_down' });
     expect(String(err.message)).toContain('released less than 300s ago');
   });
@@ -382,7 +385,10 @@ describe('released port reuse age (real D1)', () => {
     await seedUser('rt-floor');
     const node = await liveNode('A', 'rt-floor');
     await expect(
-      ensureReverseTunnelLease(onePort(27104, { REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS: '60' }), node)
+      ensureReverseTunnelLease(
+        onePort(27104, { REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS: '60' }),
+        node
+      )
     ).rejects.toThrow(/at least 180/);
     const rows = await env.DATABASE.prepare(
       'SELECT COUNT(*) AS n FROM node_reverse_tunnel_leases WHERE node_id = ?'

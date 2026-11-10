@@ -97,7 +97,10 @@ export async function waitFor<T>(
 }
 
 /** A private CA plus a leaf for `host`, created with the system openssl. */
-export function makeCertificate(dir: string, host: string): { ca: string; cert: string; key: string } {
+export function makeCertificate(
+  dir: string,
+  host: string
+): { ca: string; cert: string; key: string } {
   mkdirSync(dir, { recursive: true });
   const ca = join(dir, 'ca.pem');
   const caKey = join(dir, 'ca.key');
@@ -106,9 +109,42 @@ export function makeCertificate(dir: string, host: string): { ca: string; cert: 
   const cert = join(dir, 'leaf.pem');
   const ext = join(dir, 'leaf.ext');
   const run = (...args: string[]) => execFileSync('openssl', args, { stdio: 'pipe' });
-  run('req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '2', '-subj', `/CN=Live Test CA ${basename(dir)}`, '-keyout', caKey, '-out', ca);
+  run(
+    'req',
+    '-x509',
+    '-newkey',
+    'rsa:2048',
+    '-nodes',
+    '-days',
+    '2',
+    '-subj',
+    `/CN=Live Test CA ${basename(dir)}`,
+    '-keyout',
+    caKey,
+    '-out',
+    ca
+  );
   run('req', '-newkey', 'rsa:2048', '-nodes', '-subj', `/CN=${host}`, '-keyout', key, '-out', csr);
-  writeFileSync(ext, `subjectAltName=DNS:${host}\nbasicConstraints=CA:FALSE\nextendedKeyUsage=serverAuth\n`);
-  run('x509', '-req', '-in', csr, '-CA', ca, '-CAkey', caKey, '-CAcreateserial', '-days', '2', '-extfile', ext, '-out', cert);
+  writeFileSync(
+    ext,
+    `subjectAltName=DNS:${host}\nbasicConstraints=CA:FALSE\nextendedKeyUsage=serverAuth\n`
+  );
+  run(
+    'x509',
+    '-req',
+    '-in',
+    csr,
+    '-CA',
+    ca,
+    '-CAkey',
+    caKey,
+    '-CAcreateserial',
+    '-days',
+    '2',
+    '-extfile',
+    ext,
+    '-out',
+    cert
+  );
   return { ca: readFileSync(ca, 'utf8'), cert, key };
 }

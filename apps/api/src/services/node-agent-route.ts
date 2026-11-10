@@ -19,8 +19,8 @@ import type { Env } from '../env';
 import { getNodeBackendBaseUrl, type NodeBackendBaseUrlEnv } from './node-agent-readiness';
 import {
   assertReverseTunnelUpstreamPort,
-  reverseTunnelUpstreamOrigin,
   type ReverseTunnelRangeEnv,
+  reverseTunnelUpstreamOrigin,
 } from './node-reverse-tunnel-config';
 
 export type NodeAgentRoute =

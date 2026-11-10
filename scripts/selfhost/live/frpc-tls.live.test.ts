@@ -91,7 +91,12 @@ beforeAll(async () => {
     ].join('\n')
   );
   frps = start(bins.frps, ['-c', frpsToml]);
-  await waitFor('frps to listen', () => frps.output().includes('frps started successfully'), 15_000, frps.output);
+  await waitFor(
+    'frps to listen',
+    () => frps.output().includes('frps started successfully'),
+    15_000,
+    frps.output
+  );
 });
 
 afterEach(async () => {
@@ -110,15 +115,12 @@ afterAll(async () => {
 
 /** TLS on ports.tls, plain TCP to frps: what Caddy does in front of frps on the box. */
 async function serveTls(cert: string, key: string) {
-  terminator = createTlsServer(
-    { cert: readFileSync(cert), key: readFileSync(key) },
-    (socket) => {
-      const upstream = connect(ports.frps, '127.0.0.1');
-      socket.pipe(upstream).pipe(socket);
-      socket.on('error', () => upstream.destroy());
-      upstream.on('error', () => socket.destroy());
-    }
-  );
+  terminator = createTlsServer({ cert: readFileSync(cert), key: readFileSync(key) }, (socket) => {
+    const upstream = connect(ports.frps, '127.0.0.1');
+    socket.pipe(upstream).pipe(socket);
+    socket.on('error', () => upstream.destroy());
+    upstream.on('error', () => socket.destroy());
+  });
   terminator.on('tlsClientError', () => {});
   await new Promise<void>((done) => terminator!.listen(ports.tls, '127.0.0.1', done));
 }
@@ -167,7 +169,12 @@ describe('frpc certificate verification (generated frpc.toml, real frpc 0.72.0)'
     const other = makeCertificate(join(work, 'other-ca'), 'localhost');
     await serveTls(server.cert, server.key);
     const frpc = runFrpc(other.ca);
-    await waitFor('a certificate error', () => /x509|certificate/i.test(frpc.output()), 30_000, frpc.output);
+    await waitFor(
+      'a certificate error',
+      () => /x509|certificate/i.test(frpc.output()),
+      30_000,
+      frpc.output
+    );
     expect(frpc.output()).not.toContain('login to server success');
     expect(calls.filter((c) => c.op === 'Login')).toEqual([]);
   });
@@ -176,7 +183,12 @@ describe('frpc certificate verification (generated frpc.toml, real frpc 0.72.0)'
     const server = makeCertificate(join(work, 'wrong-host'), 'not-the-box.test');
     await serveTls(server.cert, server.key);
     const frpc = runFrpc(server.ca);
-    await waitFor('a certificate error', () => /x509|certificate/i.test(frpc.output()), 30_000, frpc.output);
+    await waitFor(
+      'a certificate error',
+      () => /x509|certificate/i.test(frpc.output()),
+      30_000,
+      frpc.output
+    );
     expect(calls.filter((c) => c.op === 'Login')).toEqual([]);
   });
 
@@ -184,8 +196,18 @@ describe('frpc certificate verification (generated frpc.toml, real frpc 0.72.0)'
     const server = makeCertificate(join(work, 'trusted'), 'localhost');
     await serveTls(server.cert, server.key);
     const frpc = runFrpc(server.ca);
-    await waitFor('frpc login', () => frpc.output().includes('login to server success'), 30_000, frpc.output);
-    await waitFor('the lease proxy', () => calls.some((c) => c.op === 'NewProxy'), 15_000, frpc.output);
+    await waitFor(
+      'frpc login',
+      () => frpc.output().includes('login to server success'),
+      30_000,
+      frpc.output
+    );
+    await waitFor(
+      'the lease proxy',
+      () => calls.some((c) => c.op === 'NewProxy'),
+      15_000,
+      frpc.output
+    );
     const login = calls.find((c) => c.op === 'Login')!.content;
     expect(login.user).toBe(NODE_ID);
     expect(login.metas).toEqual({

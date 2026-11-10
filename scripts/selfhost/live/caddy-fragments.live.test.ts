@@ -123,11 +123,23 @@ beforeAll(async () => {
     REVERSE_TUNNEL_GATEWAY_SECRET: SECRET,
   };
   execFileSync('docker', [
-    'run', '-d', '--rm', '--name', container, '--network', 'host',
-    '-v', `${CADDY_DIR}:/etc/caddy:ro`,
+    'run',
+    '-d',
+    '--rm',
+    '--name',
+    container,
+    '--network',
+    'host',
+    '-v',
+    `${CADDY_DIR}:/etc/caddy:ro`,
     ...Object.entries(env).flatMap(([name, value]) => ['-e', `${name}=${value}`]),
     caddyImage(),
-    'caddy', 'run', '--config', '/etc/caddy/Caddyfile', '--adapter', 'caddyfile',
+    'caddy',
+    'run',
+    '--config',
+    '/etc/caddy/Caddyfile',
+    '--adapter',
+    'caddyfile',
   ]);
   const logs = () => {
     try {
@@ -136,13 +148,18 @@ beforeAll(async () => {
       return String(err);
     }
   };
-  await waitFor('Caddy to serve TLS', async () => {
-    try {
-      return (await send('app', '/')).status === 200;
-    } catch {
-      return false;
-    }
-  }, 120_000, logs);
+  await waitFor(
+    'Caddy to serve TLS',
+    async () => {
+      try {
+        return (await send('app', '/')).status === 200;
+      } catch {
+        return false;
+      }
+    },
+    120_000,
+    logs
+  );
 });
 
 afterAll(async () => {

@@ -35,7 +35,12 @@ import { log } from '../lib/logger';
 import { hashReverseTunnelCredential } from './node-reverse-tunnel-config';
 
 export type FrpsPluginOp = 'Login' | 'NewProxy' | 'Ping' | 'NewWorkConn';
-export const FRPS_PLUGIN_OPS: readonly FrpsPluginOp[] = ['Login', 'NewProxy', 'Ping', 'NewWorkConn'];
+export const FRPS_PLUGIN_OPS: readonly FrpsPluginOp[] = [
+  'Login',
+  'NewProxy',
+  'Ping',
+  'NewWorkConn',
+];
 
 export type FrpsPluginDecision = { allow: true } | { allow: false; reason: string; code: string };
 

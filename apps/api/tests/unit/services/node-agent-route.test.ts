@@ -7,9 +7,9 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  type NodeAgentRouteRow,
   NodeAgentRouteError,
   nodeAgentRouteFromRow,
+  type NodeAgentRouteRow,
 } from '../../../src/services/node-agent-route';
 
 const env = {
@@ -65,9 +65,9 @@ describe('nodeAgentRouteFromRow', () => {
   );
 
   it('refuses a reverse-tunnel node without a lease, and fails closed on a malformed range', () => {
-    expect(() =>
-      nodeAgentRouteFromRow('NODE1', row({ transport: 'reverse-tunnel' }), env)
-    ).toThrow(NodeAgentRouteError);
+    expect(() => nodeAgentRouteFromRow('NODE1', row({ transport: 'reverse-tunnel' }), env)).toThrow(
+      NodeAgentRouteError
+    );
     expect(() =>
       nodeAgentRouteFromRow('NODE1', row({ transport: 'reverse-tunnel', leasePort: 20001 }), {
         ...env,

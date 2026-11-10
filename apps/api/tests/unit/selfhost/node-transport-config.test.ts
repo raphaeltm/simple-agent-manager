@@ -10,11 +10,11 @@ import { join } from 'node:path';
 import { REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS } from '@simple-agent-manager/cloud-init';
 import { describe, expect, it } from 'vitest';
 
+import * as box from '../../../../../scripts/selfhost/box-settings';
 import {
   GATEWAY_ORIGINAL_HOST_HEADER,
   GATEWAY_SECRET_HEADER,
 } from '../../../src/routes/self-host-gateway';
-import * as box from '../../../../../scripts/selfhost/box-settings';
 import { FRPS_PLUGIN_OPS } from '../../../src/services/node-reverse-tunnel-authz';
 import * as config from '../../../src/services/node-reverse-tunnel-config';
 import { GATEWAY_HEADER } from '../../../src/services/node-websocket-gateway';

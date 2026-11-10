@@ -324,8 +324,7 @@ export async function releaseNodeReverseTunnelLeases(
 }
 
 export type ReverseTunnelLeaseSweepResult =
-  | { released: number }
-  | { released: null; skipReason: 'transport_not_reverse_tunnel' };
+  { released: number } | { released: null; skipReason: 'transport_not_reverse_tunnel' };
 
 /**
  * Cron sweep: release every non-live active lease installation-wide (one statement). Runs only
