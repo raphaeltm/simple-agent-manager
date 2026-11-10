@@ -10,7 +10,6 @@ import type {
   TaskRunnerState,
 } from '../../src/durable-objects/task-runner';
 import type { Env } from '../../src/env';
-import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../src/services/default-capacity-pools';
 import { fetchNodeAgent } from '../../src/services/node-agent';
 import { resolveTaskStartPlacementCredentialAttribution } from '../../src/services/placement-resolver';
 import * as projectDataService from '../../src/services/project-data';
@@ -30,6 +29,7 @@ import {
 } from '../../src/services/task-runner-start-guard';
 import { reserveWorkspacePlacement } from '../../src/services/workspace-placement';
 import { resolveWorkspaceAdmissionPolicy } from '../../src/services/workspace-resource-capacity';
+import { ensurePoolsWithStarterMachines } from '../helpers/capacity-pool-picks';
 import { seedReadyNode } from './helpers/ready-node';
 import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
 
@@ -246,10 +246,11 @@ async function seedReservedFixture(label: string): Promise<{
   };
 
   // Establish the configured provider-native pool before concurrent submissions.
-  await ensureDefaultCapacityPoolsForExistingCredentials(drizzle(env.DATABASE, { schema }), {
+  await ensurePoolsWithStarterMachines(drizzle(env.DATABASE, { schema }) as never, {
     userId,
     projectId,
     includeInstallation: false,
+    owner: { userId, projectId },
   });
   return { userId, installationId, projectId, repository, triggerId, executionId, input };
 }

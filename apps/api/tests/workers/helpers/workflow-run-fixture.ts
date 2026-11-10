@@ -11,10 +11,10 @@ import * as schema from '../../../src/db/schema';
 import type { ProjectOrchestrator } from '../../../src/durable-objects/project-orchestrator';
 import type { Env } from '../../../src/env';
 import { handleCompleteTask } from '../../../src/routes/mcp/task-tools';
-import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../../src/services/default-capacity-pools';
 import { transitionTaskToTerminal } from '../../../src/services/task-terminal-transition';
 import { reconcileWorkflowRun } from '../../../src/services/workflow-reconcile';
 import { startWorkflowRun, type WorkflowRunRow } from '../../../src/services/workflow-runs';
+import { ensurePoolsWithStarterMachines } from '../../helpers/capacity-pool-picks';
 import { seedInstallation, seedProject, seedTask, seedUser } from './seed-d1';
 
 const testEnv = env as unknown as Env;
@@ -64,10 +64,11 @@ export async function workflowRunFixture(
   )
     .bind(`wf-c-${suffix}`, userId, projectId)
     .run();
-  await ensureDefaultCapacityPoolsForExistingCredentials(drizzle(env.DATABASE, { schema }), {
+  await ensurePoolsWithStarterMachines(drizzle(env.DATABASE, { schema }) as never, {
     userId,
     projectId,
     includeInstallation: false,
+    owner: { userId, projectId },
   });
 
   const launched = new Set<string>();

@@ -7,7 +7,7 @@
  * placeable pool picks those same machines explicitly, through the real update service, after
  * the pools exist.
  */
-import { and, eq, inArray, isNotNull } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, or } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../src/db/schema';
@@ -26,6 +26,24 @@ export interface StarterMachineOptions {
    * the test would silently run against an empty pool.
    */
   allowNothingToPick?: boolean;
+  /**
+   * Only this user's user pool and this project's project pool. Tests that share one database
+   * across many fixtures (the Workers pool shares storage within a file) pass this so a pick
+   * never reaches another fixture's pools. Default: every default pool.
+   */
+  owner?: { userId: string; projectId?: string | null };
+}
+
+function ownedPools(owner: { userId: string; projectId?: string | null }) {
+  return or(
+    and(eq(schema.capacityPools.scope, 'user'), eq(schema.capacityPools.ownerUserId, owner.userId)),
+    owner.projectId
+      ? and(
+          eq(schema.capacityPools.scope, 'project'),
+          eq(schema.capacityPools.ownerProjectId, owner.projectId)
+        )
+      : undefined
+  );
 }
 
 /**
@@ -44,7 +62,8 @@ export async function pickStarterMachines(
     .where(
       and(
         eq(schema.capacityPools.isDefault, true),
-        options.scopes ? inArray(schema.capacityPools.scope, options.scopes) : undefined
+        options.scopes ? inArray(schema.capacityPools.scope, options.scopes) : undefined,
+        options.owner ? ownedPools(options.owner) : undefined
       )
     );
   const pickedScopes = new Set<string>();
@@ -109,5 +128,5 @@ export async function ensurePoolsWithStarterMachines(
     includeInstallation: input.includeInstallation,
     env: input.env,
   });
-  await pickStarterMachines(db, { scopes: input.scopes });
+  await pickStarterMachines(db, { scopes: input.scopes, owner: input.owner });
 }

@@ -15,7 +15,7 @@ import {
   revokeConnectorConnection,
 } from '../../src/services/connector-oauth';
 import { connectorUrl, updateConnectorSettings } from '../../src/services/connector-settings';
-import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../src/services/default-capacity-pools';
+import { ensurePoolsWithStarterMachines } from '../helpers/capacity-pool-picks';
 
 const bindings = env as unknown as Env;
 const issuer = `https://api.${bindings.BASE_DOMAIN}`;
@@ -635,10 +635,11 @@ describe('Connector OAuth real Workers/KV conformance', () => {
     )
       .bind(crypto.randomUUID(), userId, projectId)
       .run();
-    await ensureDefaultCapacityPoolsForExistingCredentials(drizzle(bindings.DATABASE, { schema }), {
+    await ensurePoolsWithStarterMachines(drizzle(bindings.DATABASE, { schema }) as never, {
       userId,
       projectId,
       includeInstallation: false,
+      owner: { userId, projectId },
     });
     const start = vi.fn().mockResolvedValue(undefined);
     // Only the external runtime admission boundary is replaced. Task submit, placement,
