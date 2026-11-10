@@ -4,11 +4,6 @@ import { request } from './client';
 export interface PlatformCapabilities {
   speechToText: boolean;
   textToSpeech: boolean;
-  guidedCredentialSetup: boolean;
-  analytics: boolean;
-  workerLogSearch: boolean;
-  artifacts: boolean;
-  emailSending: boolean;
 }
 
 /**
@@ -19,11 +14,6 @@ export interface PlatformCapabilities {
 export const ASSUMED_PLATFORM_CAPABILITIES: PlatformCapabilities = Object.freeze({
   speechToText: true,
   textToSpeech: true,
-  guidedCredentialSetup: true,
-  analytics: true,
-  workerLogSearch: true,
-  artifacts: true,
-  emailSending: true,
 });
 
 /** Which platform services this installation has (`GET /api/config/platform-capabilities`). */

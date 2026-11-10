@@ -156,15 +156,14 @@ export function resolvePlatformCapabilities(env: CapabilityEnv): PlatformCapabil
   };
 }
 
-/** What the web client needs to hide entry points that cannot work. Public: no secrets. */
+/**
+ * What the web client needs to hide entry points that cannot work here. Public: no secrets.
+ * Only fields the UI reads: guided setup, Artifacts and email sign-in already have their own
+ * config endpoints, and analytics and log search answer FEATURE_UNAVAILABLE themselves.
+ */
 export interface PublicPlatformCapabilities {
   speechToText: boolean;
   textToSpeech: boolean;
-  guidedCredentialSetup: boolean;
-  analytics: boolean;
-  workerLogSearch: boolean;
-  artifacts: boolean;
-  emailSending: boolean;
 }
 
 export function publicPlatformCapabilities(env: CapabilityEnv): PublicPlatformCapabilities {
@@ -172,10 +171,5 @@ export function publicPlatformCapabilities(env: CapabilityEnv): PublicPlatformCa
   return {
     speechToText: capabilities.speechToText,
     textToSpeech: capabilities.textToSpeech,
-    guidedCredentialSetup: capabilities.guidedCredentialSetup,
-    analytics: capabilities.analyticsQuery,
-    workerLogSearch: capabilities.workersObservability,
-    artifacts: capabilities.artifacts,
-    emailSending: capabilities.emailSending,
   };
 }

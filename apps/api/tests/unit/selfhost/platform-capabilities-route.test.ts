@@ -74,59 +74,15 @@ describe('GET /api/config/platform-capabilities', () => {
     const { res, body } = await getCapabilities(cloudflareEnv());
 
     expect(res.status).toBe(200);
-    expect(body).toMatchObject({
-      speechToText: true,
-      textToSpeech: true,
-      guidedCredentialSetup: true,
-      analytics: true,
-      workerLogSearch: true,
-      artifacts: true,
-    });
+    // Booleans the UI reads, and nothing else (no configuration fingerprint beyond them).
+    expect(body).toEqual({ speechToText: true, textToSpeech: true });
   });
 
   it('reports the Cloudflare-only capabilities absent on a runtime without them', async () => {
     const { res, body } = await getCapabilities(selfHostedEnv());
 
     expect(res.status).toBe(200);
-    expect(body).toMatchObject({
-      speechToText: false,
-      textToSpeech: false,
-      guidedCredentialSetup: false,
-      analytics: false,
-      workerLogSearch: false,
-      artifacts: false,
-    });
-  });
-
-  it('keeps analytics and log search independent of the AI gateway default var', async () => {
-    // Positive control for the absent case above: AI_GATEWAY_ID alone must not read as an account.
-    const withGatewayOnly = await getCapabilities({ AI_GATEWAY_ID: 'sam' } as unknown as Env);
-    const withAccount = await getCapabilities({
-      AI_GATEWAY_ID: 'sam',
-      CF_ACCOUNT_ID: 'account-1',
-      CF_API_TOKEN: 'token-1',
-    } as unknown as Env);
-
-    expect(withGatewayOnly.body.analytics).toBe(false);
-    expect(withGatewayOnly.body.workerLogSearch).toBe(false);
-    expect(withAccount.body.analytics).toBe(true);
-    expect(withAccount.body.workerLogSearch).toBe(true);
-  });
-
-  it('declares guided setup absent only because the container runtime is declared absent', async () => {
-    const bindingsPresent = {
-      SANDBOX: stubBinding(),
-      CREDENTIAL_SETUP_SESSION: stubBinding(),
-      SETUP_SESSION_POOL: stubBinding(),
-    };
-    const unset = await getCapabilities(bindingsPresent as unknown as Env);
-    const declaredAbsent = await getCapabilities({
-      ...bindingsPresent,
-      CONTAINER_RUNTIME_AVAILABLE: 'false',
-    } as unknown as Env);
-
-    expect(unset.body.guidedCredentialSetup).toBe(true);
-    expect(declaredAbsent.body.guidedCredentialSetup).toBe(false);
+    expect(body).toEqual({ speechToText: false, textToSpeech: false });
   });
 
   it('turns text-to-speech off with TTS_ENABLED=false while speech-to-text stays on', async () => {

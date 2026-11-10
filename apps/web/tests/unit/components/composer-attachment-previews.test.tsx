@@ -16,15 +16,7 @@ import {
 
 // Cloudflare behaviour: every platform service present (absent case: platform-capabilities-ui.test.tsx).
 vi.mock('../../../src/hooks/usePlatformCapabilities', () => ({
-  usePlatformCapabilities: () => ({
-    speechToText: true,
-    textToSpeech: true,
-    guidedCredentialSetup: true,
-    analytics: true,
-    workerLogSearch: true,
-    artifacts: true,
-    emailSending: true,
-  }),
+  usePlatformCapabilities: () => ({ speechToText: true, textToSpeech: true }),
 }));
 
 vi.mock('@simple-agent-manager/acp-client', async (importOriginal) => {
