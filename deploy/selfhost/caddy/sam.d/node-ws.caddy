@@ -32,8 +32,11 @@ handle @sam_node_ws_port {
 	route {
 		forward_auth 127.0.0.1:{$CELLD_PORT:8080} {
 			uri /api/self-host/gateway/node-websocket
+			# celld (CELLD_TRUST_FORWARDED_HEADERS=1) builds request.url from X-Forwarded-Host,
+			# so it must name the API host; the socket's own host travels separately.
 			header_up Host api.{$SAM_DOMAIN}
-			header_up X-Forwarded-Host {host}
+			header_up X-Forwarded-Host api.{$SAM_DOMAIN}
+			header_up X-SAM-Gateway-Original-Host {host}
 			header_up X-SAM-Gateway-Secret {$REVERSE_TUNNEL_GATEWAY_SECRET}
 			import sam_client_ip
 			copy_headers X-SAM-Upstream X-SAM-Upstream-Uri X-SAM-Upstream-Authorization X-SAM-Upstream-Cookie X-SAM-Node-Id X-SAM-Workspace-Id
@@ -63,8 +66,11 @@ handle @sam_node_ws {
 	route {
 		forward_auth 127.0.0.1:{$CELLD_PORT:8080} {
 			uri /api/self-host/gateway/node-websocket
+			# celld (CELLD_TRUST_FORWARDED_HEADERS=1) builds request.url from X-Forwarded-Host,
+			# so it must name the API host; the socket's own host travels separately.
 			header_up Host api.{$SAM_DOMAIN}
-			header_up X-Forwarded-Host {host}
+			header_up X-Forwarded-Host api.{$SAM_DOMAIN}
+			header_up X-SAM-Gateway-Original-Host {host}
 			header_up X-SAM-Gateway-Secret {$REVERSE_TUNNEL_GATEWAY_SECRET}
 			import sam_client_ip
 			copy_headers X-SAM-Upstream X-SAM-Upstream-Uri X-SAM-Upstream-Authorization X-SAM-Upstream-Cookie X-SAM-Node-Id X-SAM-Workspace-Id

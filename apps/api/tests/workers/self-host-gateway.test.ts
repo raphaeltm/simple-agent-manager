@@ -269,7 +269,10 @@ function gatewayCall(
   return new Request(`${API}/api/self-host/gateway/node-websocket`, {
     headers: {
       'X-SAM-Gateway-Secret': secret,
-      'X-Forwarded-Host': forwardedHost,
+      // As deploy/selfhost/caddy/sam.d/node-ws.caddy sends it: celld derives request.url from
+      // X-Forwarded-Host, so that names the API host and the socket's host travels separately.
+      'X-Forwarded-Host': `api.${env.BASE_DOMAIN}`,
+      'X-SAM-Gateway-Original-Host': forwardedHost,
       'X-Forwarded-Uri': forwardedUri,
       'X-Forwarded-Method': 'GET',
       Upgrade: 'websocket',
@@ -399,6 +402,42 @@ describe('node WebSocket forward_auth', () => {
     expect(response.status).toBe(502);
     expect(response.headers.get('X-SAM-Upstream')).toBeNull();
     expect(upstream).not.toHaveBeenCalled();
+  });
+
+  it('never forwards the gateway secret to a node, even when a request carrying it reaches the ws-* proxy', async () => {
+    await seedUser('rt-ws-leak');
+    const node = await seedReverseNode('K', 'rt-ws-leak');
+    const workspaceId = await seedWorkspaceOn(node, 'rt-ws-leak', 'KK1');
+    await env.DATABASE.prepare('UPDATE workspaces SET ports_public_enabled = 1 WHERE id = ?')
+      .bind(workspaceId)
+      .run();
+    upstream.mockImplementation(async () => new Response('from node'));
+    // What celld produced before the fix: the forward_auth subrequest's URL host rewritten
+    // to the socket's ws-* host, so the ws-* proxy (not the gateway route) handled it.
+    const response = await call(
+      new Request(`https://ws-${workspaceId.toLowerCase()}--3000.${env.BASE_DOMAIN}/x`, {
+        headers: { 'X-SAM-Gateway-Secret': SECRET },
+      })
+    );
+    expect(await response.text()).toBe('from node');
+    const sent = upstream.mock.calls[0]?.[1] as RequestInit;
+    expect(new Headers(sent.headers).get('x-sam-gateway-secret')).toBeNull();
+    expect(String(upstream.mock.calls[0]?.[0])).toContain(`http://127.0.0.1:${node.port}/`);
+  });
+
+  it('reads the socket host from the gateway header, not X-Forwarded-Host', async () => {
+    const response = await call(
+      new Request(`${API}/api/self-host/gateway/node-websocket`, {
+        headers: {
+          'X-SAM-Gateway-Secret': SECRET,
+          'X-Forwarded-Host': `ws-01krrtx0000000000000000000--3000.${env.BASE_DOMAIN}`,
+          'X-Forwarded-Uri': '/',
+          'X-Forwarded-Method': 'GET',
+          Upgrade: 'websocket',
+        },
+      })
+    );
+    expect(response.status).toBe(403);
   });
 
   it('fails closed on a wrong or missing secret and on non-gateway targets', async () => {

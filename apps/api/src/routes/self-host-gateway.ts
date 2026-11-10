@@ -35,6 +35,8 @@ import {
 /** frps plugin bodies are a few hundred bytes; bound them well above that. */
 export const FRPS_PLUGIN_MAX_BODY_BYTES = 16 * 1024;
 export const GATEWAY_SECRET_HEADER = 'X-SAM-Gateway-Secret';
+/** The WebSocket's original host, set by Caddy (client values are stripped before forward_auth). */
+export const GATEWAY_ORIGINAL_HOST_HEADER = 'X-SAM-Gateway-Original-Host';
 
 /** Basic-auth username frps sends (deploy/selfhost/frps/frps.toml); only the password matters. */
 const FRPS_PLUGIN_BASIC_USER = 'frps';
@@ -46,6 +48,7 @@ const LOGS_STREAM_PATH_RE = /^\/api\/nodes\/[A-Za-z0-9_-]{1,64}\/logs\/stream$/;
 const GATEWAY_INPUT_HEADERS = [
   'host',
   GATEWAY_SECRET_HEADER.toLowerCase(),
+  GATEWAY_ORIGINAL_HOST_HEADER.toLowerCase(),
   'x-forwarded-host',
   'x-forwarded-uri',
   'x-forwarded-method',
@@ -104,7 +107,9 @@ function isGatewayTarget(env: Env, host: string, path: string): boolean {
  * the gateway may authorize (any other target is refused rather than re-dispatched).
  */
 function forwardedGatewayTarget(env: Env, headers: Headers): URL | null {
-  const host = (headers.get('X-Forwarded-Host') ?? '').toLowerCase().replace(/:\d+$/, '');
+  // Not X-Forwarded-Host: celld rebuilds request.url from that header, so Caddy sets it to the
+  // API host (keeping this request on this route) and sends the socket's host separately.
+  const host = (headers.get(GATEWAY_ORIGINAL_HOST_HEADER) ?? '').toLowerCase().replace(/:\d+$/, '');
   const uri = headers.get('X-Forwarded-Uri') ?? '';
   const method = (headers.get('X-Forwarded-Method') ?? '').toUpperCase();
   const upgrade = (headers.get('Upgrade') ?? '').toLowerCase();

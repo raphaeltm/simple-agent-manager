@@ -1,5 +1,6 @@
 # frps for the reverse-tunnel node transport (VM_AGENT_TRANSPORT="reverse-tunnel").
-# Validated with frp 0.72.0. Rendered by frps itself from its environment ({{ .Envs.* }}):
+# Validated with frp 0.72.0. frps renders this file as a Go template over its environment
+# (so no template braces may appear in comments either). Variables:
 #   FRPS_BIND_PORT, CELLD_PORT, REVERSE_TUNNEL_GATEWAY_SECRET,
 #   REVERSE_TUNNEL_PORT_RANGE_START, REVERSE_TUNNEL_PORT_RANGE_END
 #

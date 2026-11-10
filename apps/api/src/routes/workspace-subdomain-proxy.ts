@@ -233,6 +233,7 @@ export async function workspaceSubdomainProxy(
     headers.delete('x-sam-node-id');
     headers.delete('x-sam-workspace-id');
     headers.delete('x-forwarded-host');
+    headers.delete('x-sam-gateway-secret');
     headers.set('X-SAM-Node-Id', workspace.nodeId || workspaceId);
     headers.set('X-SAM-Workspace-Id', workspaceId);
     headers.set('X-Forwarded-Host', hostname);
@@ -396,6 +397,8 @@ export async function workspaceSubdomainProxy(
   headers.delete('x-sam-node-id');
   headers.delete('x-sam-workspace-id');
   headers.delete('x-forwarded-host');
+  // The self-hosted gateway secret authenticates Caddy to the Worker; it never goes to a node.
+  headers.delete('x-sam-gateway-secret');
   headers.set('X-SAM-Node-Id', workspace.nodeId || workspaceId);
   headers.set('X-SAM-Workspace-Id', workspaceId);
 
