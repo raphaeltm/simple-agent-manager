@@ -12,6 +12,7 @@ Generates cloud-init YAML templates for VM provisioning. Produces the user-data 
 | `src/template.ts` | YAML template with variable placeholders and multi-line content embedding |
 | `src/generate.ts` | Variable resolution — maps input config to template variables |
 | `src/variables.ts` / `src/validate.ts` | `CloudInitVariables` and their validation |
+| `src/template-resources.ts` | Slice hierarchy and Docker headroom write_files, interpolated into the template |
 | `src/template-ingress.ts` / `src/tunnel.ts` | Ingress-mode blocks (Origin CA direct vs Cloudflare Tunnel) and tunnel validation; each node renders only its own mode |
 
 ## Commands
