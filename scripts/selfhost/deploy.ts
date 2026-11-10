@@ -111,6 +111,21 @@ function buildWeb(baseDomain: string): string {
   return join(WEB_DIR, 'dist');
 }
 
+/**
+ * celld bundles `apps/api/src` with its own esbuild, which resolves the workspace packages
+ * (`shared`, `providers`, `cloud-init`) through their built `dist/` entry points. A fresh
+ * checkout has none, so build the API's dependencies (not the API itself) first.
+ */
+function buildApiDependencies(): void {
+  log("building the API Worker's workspace dependencies");
+  const result = spawnSync(
+    'pnpm',
+    ['exec', 'turbo', 'run', 'build', '--filter=@simple-agent-manager/api^...'],
+    { cwd: REPO_ROOT, stdio: 'inherit' }
+  );
+  if (result.status !== 0) throw new Error('building the API Worker dependencies failed');
+}
+
 const NO_LEASES = /no node leases/i;
 
 function bucketOf(env: NodeJS.ProcessEnv): string {
@@ -263,6 +278,7 @@ async function main(): Promise<void> {
   }
 
   const webDist = values['web-dist'] ? resolve(values['web-dist']) : buildWeb(baseDomain);
+  buildApiDependencies();
   prepareCelldProject({ apiDir: API_DIR, projectDir, plan, webDist });
 
   const celld = await ensureCelldBinary(join(stateDir, 'bin'));
