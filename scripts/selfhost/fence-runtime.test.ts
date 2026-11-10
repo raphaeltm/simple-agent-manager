@@ -34,7 +34,7 @@ const nft = nftChecker();
 
 describe.skipIf(nft === null)('rendered rulesets pass nft -c', () => {
   const RESOLV = 'nameserver 127.0.0.53\nnameserver 2001:4860:4860::8888\n';
-  it.each([
+  it.each<[string, Record<string, string>]>([
     ['defaults, bundled store', { S3_ENDPOINT: 'http://127.0.0.1:9000' }],
     ['gs:// with the metadata proxy', { CELLD_BUCKET: 'gs://b' }],
     [
