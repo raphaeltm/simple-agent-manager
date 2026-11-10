@@ -1,0 +1,11 @@
+-- When the latest unobserved tunnel/DNS create POST for a journal row was sent
+-- (services/node-tunnel-create-journal.ts). Cleanup keeps a row with pending_create_count > 0
+-- pending only for a bounded settle window after this stamp (vmTunnels.pendingCreateSettleMs):
+-- a Cloudflare POST commits within seconds or never, so an older unobserved create is settled
+-- once cleanup has deleted every resource the row could own.
+--
+-- Existing rows: NULL. Readers use COALESCE(pending_create_last_at, created_at), and created_at
+-- precedes every POST for the row, so rows stranded with a stale count before this migration
+-- become settleable on their next cleanup attempt. Additive only; numbered 0233 because the
+-- self-host integration branch already uses 0232.
+ALTER TABLE node_cloudflare_tunnels ADD COLUMN pending_create_last_at TEXT;

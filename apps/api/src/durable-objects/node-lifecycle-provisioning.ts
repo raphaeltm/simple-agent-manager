@@ -11,6 +11,10 @@ import {
   continueDirectWorkspaceCreation,
 } from '../services/direct-workspace-creation';
 import { NodeAllocationUncertainError } from '../services/node-allocation-recovery';
+import {
+  resolveManagedNodeTransport,
+  resolveNodeTunnelProvisioningBudgetMs,
+} from '../services/node-tunnel-config';
 import { provisionNode } from '../services/node-provisioning';
 import { persistError } from '../services/observability';
 import { taskStatusIsNonTerminalSql, TERMINAL_STATUS_VALUES } from '../services/task-status';
@@ -189,11 +193,7 @@ export class NodeLifecycleProvisioning {
       DEFAULT_NODE_PROVISIONING_REQUEST_TIMEOUT_MS
     );
     const controller = new AbortController();
-    const timer = setTimeout(
-      () =>
-        controller.abort(new NodeAllocationUncertainError('Provisioning request deadline elapsed')),
-      timeout
-    );
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const { input } = intent;
       const workspaceInput = input.workspace;
@@ -205,6 +205,19 @@ export class NodeLifecycleProvisioning {
         await this.finish(intent, 'failed', 'Node no longer exists or belongs to this intent');
         return;
       }
+      // Each provider/Cloudflare request keeps the `timeout` budget (CF_API_TIMEOUT_MS below);
+      // the attempt as a whole also gets the tunnel-setup budget when this incarnation uses
+      // tunnel transport, because tunnel setup is about six sequential Cloudflare calls before
+      // createVM. Setup is resumable, so an attempt that still runs out continues next time.
+      const attemptDeadlineMs =
+        timeout + (await this.tunnelSetupBudgetMs(node, intent));
+      timer = setTimeout(
+        () =>
+          controller.abort(
+            new NodeAllocationUncertainError('Provisioning request deadline elapsed')
+          ),
+        attemptDeadlineMs
+      );
       const mustAllocate = !input.workspace || input.workspace.mustProvisionNode;
       if (
         mustAllocate &&
@@ -272,7 +285,7 @@ export class NodeLifecycleProvisioning {
         }
       }
       // Provider work has its own deadline. Readiness/dispatch each use the shorter background tier.
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
       const continuationEnv = {
         ...this.env,
         CF_API_TIMEOUT_MS: String(timeout),
@@ -298,8 +311,35 @@ export class NodeLifecycleProvisioning {
         await this.ctx.storage.put(DIRECT_PROVISIONING_KEY, current);
       });
     } finally {
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
     }
+  }
+
+  /**
+   * Tunnel-setup share of this attempt's deadline: the transport this attempt will provision
+   * with, decided exactly as `provisionNode` decides it (a resumed incarnation keeps its
+   * recorded transport; a new one reads the installation setting). Zero when no tunnel.
+   */
+  private async tunnelSetupBudgetMs(
+    node: typeof schema.nodes.$inferSelect,
+    intent: DirectProvisioningIntent
+  ): Promise<number> {
+    let transport: string | null;
+    try {
+      transport =
+        node.runtimeIncarnationId === intent.incarnationId
+          ? node.transport
+          : resolveManagedNodeTransport(this.env, {
+              isDeploymentNode: false,
+              runtime: node.runtime,
+              nodeClass: node.nodeClass,
+            });
+    } catch {
+      // An invalid transport setting fails inside provisionNode with a recorded error.
+      return 0;
+    }
+    if (transport !== 'cloudflare-tunnel') return 0;
+    return resolveNodeTunnelProvisioningBudgetMs(this.env);
   }
 
   private async finish(

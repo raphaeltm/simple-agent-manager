@@ -8,6 +8,8 @@
  * still points at this row's tunnel, so a replacement incarnation that took over the shared
  * `{nodeId}.vm` hostname is never touched. Failures keep the row pending with backoff; the
  * identity is never dropped (rule 47: bounded retry rate, no lifetime cap that loses state).
+ * An unobserved create keeps a row pending only for a bounded settle window
+ * ({@link pendingCreateSettled}), so no row stays pending forever on a lost response.
  */
 import { log, serializeError } from '../lib/logger';
 import {
@@ -91,6 +93,22 @@ async function deleteOwnTunnels(
   for (const id of ids) await deleteTunnel(env, id, options);
 }
 
+/**
+ * True once the newest unobserved create for this row is older than the settle window. A
+ * Cloudflare create POST either commits within seconds of being sent or not at all; waiting
+ * longer only kept rows pending forever (staging node 01M73GH65N0542PA0ZV13AW6GN, 2026-11-10).
+ * An unparseable stamp is treated as unsettled (fail closed: keep the row discoverable).
+ */
+export function pendingCreateSettled(
+  row: Pick<NodeTunnelRow, 'pendingCreateCount' | 'pendingCreateSince'>,
+  settleMs: number,
+  nowMs: number
+): boolean {
+  if (row.pendingCreateCount <= 0) return true;
+  const since = Date.parse(row.pendingCreateSince);
+  return Number.isFinite(since) && nowMs - since >= settleMs;
+}
+
 async function recordCleanupFailure(env: CleanupEnv, row: NodeTunnelRow, err: unknown) {
   const attempts = (row.cleanupAttempts ?? 0) + 1;
   const now = Date.now();
@@ -145,9 +163,11 @@ export async function cleanupNodeTunnelRow(
     // DNS first: once the hostname stops resolving to the tunnel, the tunnel is unreachable.
     await deleteOwnDnsRecord(env, row, options);
     await deleteOwnTunnels(env, row, options);
-    if (row.pendingCreateCount > 0) {
+    const { pendingCreateSettleMs } = await resolveNodeTunnelCleanupConfig(env);
+    const settled = pendingCreateSettled(row, pendingCreateSettleMs, Date.now());
+    if (row.pendingCreateCount > 0 && !settled) {
       // A POST may commit after the inventory/deletes above. Do not infer finality from an
-      // empty read. Keep this tombstone discoverable indefinitely at the capped retry rate.
+      // empty read inside the settle window; keep polling at the capped retry rate.
       const attempts = row.cleanupAttempts + 1;
       const next = new Date(Date.now() + (await nodeTunnelCleanupBackoffMs(env, attempts)));
       await env.DATABASE.prepare(
@@ -159,13 +179,36 @@ export async function cleanupNodeTunnelRow(
       return false;
     }
     const now = new Date().toISOString();
-    const done = await env.DATABASE.prepare(
-      `UPDATE node_cloudflare_tunnels
-          SET status = 'cleaned', cleaned_at = ?, last_error = NULL, updated_at = ?
-        WHERE id = ? AND status = 'cleanup_pending' AND pending_create_count = 0`
-    )
-      .bind(now, now, row.id)
-      .run();
+    // Past the settle window, an unobserved create can no longer commit: the deletes above ran
+    // after it and removed everything this incarnation could own. Settle the count in the same
+    // compare-and-set, fenced on the stamp read, so a create claimed since then keeps the row.
+    const done =
+      row.pendingCreateCount > 0
+        ? await env.DATABASE.prepare(
+            `UPDATE node_cloudflare_tunnels
+                SET status = 'cleaned', cleaned_at = ?, last_error = NULL, updated_at = ?,
+                    pending_create_count = 0
+              WHERE id = ? AND status = 'cleanup_pending' AND pending_create_count = ?
+                AND COALESCE(pending_create_last_at, created_at) = ?`
+          )
+            .bind(now, now, row.id, row.pendingCreateCount, row.pendingCreateSince)
+            .run()
+        : await env.DATABASE.prepare(
+            `UPDATE node_cloudflare_tunnels
+                SET status = 'cleaned', cleaned_at = ?, last_error = NULL, updated_at = ?
+              WHERE id = ? AND status = 'cleanup_pending' AND pending_create_count = 0`
+          )
+            .bind(now, now, row.id)
+            .run();
+    if (row.pendingCreateCount > 0) {
+      log.warn('node_tunnel.pending_create_settled_by_age', {
+        nodeId: row.nodeId,
+        runtimeIncarnationId: row.runtimeIncarnationId,
+        pendingCreateCount: row.pendingCreateCount,
+        pendingCreateSince: row.pendingCreateSince,
+        settleMs: pendingCreateSettleMs,
+      });
+    }
     log.info('node_tunnel.cleaned', {
       nodeId: row.nodeId,
       runtimeIncarnationId: row.runtimeIncarnationId,

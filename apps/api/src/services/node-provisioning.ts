@@ -52,7 +52,9 @@ import { resolveManagedNodeTransport, type TunnelEnv } from './node-tunnel-confi
 import {
   ensureNodeTunnelForProvisioning,
   type NodeTunnelProvisioning,
+  type NodeTunnelProvisioningPhase,
 } from './node-tunnel-provisioning';
+import { recordTunnelProvisioningFailure } from './node-tunnel-provisioning-failure';
 import { persistError } from './observability';
 import {
   createProviderForUser,
@@ -145,6 +147,7 @@ export async function provisionNode(
   let providerRejectionProofAt: string | null = null;
   // Tunnel bookkeeping for the failure path: was ownership journaled, and could a VM exist?
   let tunnelJournaled = false;
+  let tunnelPhase: NodeTunnelProvisioningPhase | null = null;
   let providerCreateRequested = false;
   const attributionUserId = node.credentialAttributionUserId ?? node.userId;
   const attributionProjectId =
@@ -270,7 +273,11 @@ export async function provisionNode(
         userId: node.userId,
         runtimeIncarnationId: provisioningRuntimeIncarnationId,
         signal: options?.signal,
+        onPhase: (phase) => {
+          tunnelPhase = phase;
+        },
       });
+      tunnelPhase = null;
     }
 
     const cloudInit = buildNodeCloudInit({
@@ -544,14 +551,24 @@ export async function provisionNode(
     throwIfProviderRequestAborted(providerContext);
     return { allocationConfirmed: true };
   } catch (err) {
-    // Only a fresh allocation can prove it never requested a VM. A durable resume may
-    // already have a VM holding this token, even when this invocation has not queried it.
-    if (
-      tunnelJournaled &&
-      !resuming &&
-      !providerCreateRequested &&
-      provisioningRuntimeIncarnationId
-    ) {
+    // Record the cause first, aborts included: the abort branches below rethrow before any
+    // other log or row write, which left staging failures with no recorded cause.
+    if (tunnelJournaled && provisioningRuntimeIncarnationId) {
+      await recordTunnelProvisioningFailure(env, {
+        nodeId: node.id,
+        runtimeIncarnationId: provisioningRuntimeIncarnationId,
+        phase: tunnelPhase ?? (providerCreateRequested ? 'provider_create' : 'before_provider'),
+        durable: !!durable,
+        aborted: options?.signal?.aborted === true,
+        error: err,
+      });
+    }
+    // Only a non-durable call can release before the VM: it minted this incarnation and will
+    // never resume it. A durable allocation resumes the SAME incarnation on its next attempt
+    // (a released row would refuse it forever), and an earlier attempt of it may already have
+    // a VM holding this token. Its row is released by node teardown or the sweep once the
+    // incarnation is no longer live.
+    if (tunnelJournaled && !durable && !providerCreateRequested && provisioningRuntimeIncarnationId) {
       await releaseTunnelBeforeVm(env, node.id, provisioningRuntimeIncarnationId);
     }
     if (err instanceof NodeAllocationUncertainError) throw err;

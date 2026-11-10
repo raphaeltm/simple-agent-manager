@@ -56,16 +56,37 @@ export async function resolveNodeTunnelApiConfig(env: Env) {
 }
 
 export async function resolveNodeTunnelCleanupConfig(env: Env) {
-  const [requestTimeoutMs, batchSize, sweepBudgetMs, backoffBaseMs, backoffMaxMs, stuckAttempts] =
-    await Promise.all([
-      runtimeValue(env, 'cleanupRequestTimeoutMs'),
-      runtimeValue(env, 'cleanupBatchSize'),
-      runtimeValue(env, 'cleanupSweepBudgetMs'),
-      runtimeValue(env, 'cleanupBackoffBaseMs'),
-      runtimeValue(env, 'cleanupBackoffMaxMs'),
-      runtimeValue(env, 'cleanupStuckAttempts'),
-    ]);
-  return { requestTimeoutMs, batchSize, sweepBudgetMs, backoffBaseMs, backoffMaxMs, stuckAttempts };
+  const [
+    requestTimeoutMs,
+    batchSize,
+    sweepBudgetMs,
+    backoffBaseMs,
+    backoffMaxMs,
+    stuckAttempts,
+    pendingCreateSettleMs,
+  ] = await Promise.all([
+    runtimeValue(env, 'cleanupRequestTimeoutMs'),
+    runtimeValue(env, 'cleanupBatchSize'),
+    runtimeValue(env, 'cleanupSweepBudgetMs'),
+    runtimeValue(env, 'cleanupBackoffBaseMs'),
+    runtimeValue(env, 'cleanupBackoffMaxMs'),
+    runtimeValue(env, 'cleanupStuckAttempts'),
+    runtimeValue(env, 'pendingCreateSettleMs'),
+  ]);
+  return {
+    requestTimeoutMs,
+    batchSize,
+    sweepBudgetMs,
+    backoffBaseMs,
+    backoffMaxMs,
+    stuckAttempts,
+    pendingCreateSettleMs,
+  };
+}
+
+/** Extra durable-attempt time for tunnel setup (see `NodeLifecycleProvisioning.run`). */
+export async function resolveNodeTunnelProvisioningBudgetMs(env: Env): Promise<number> {
+  return runtimeValue(env, 'provisioningBudgetMs');
 }
 
 /** Cloud-init validates the supported release and timing bounds before rendering. */

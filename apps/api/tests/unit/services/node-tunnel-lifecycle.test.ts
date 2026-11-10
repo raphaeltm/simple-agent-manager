@@ -223,7 +223,16 @@ describe('ambiguous Cloudflare outcomes and retries', () => {
     expect(listVMs).toHaveBeenCalled();
     expect(cf.callCount('tunnel.create')).toBe(1);
     expect(mocks.createVM).toHaveBeenCalledTimes(1);
-    expect(journal(node.id)).toEqual(before);
+    // Ownership is unchanged; only the recorded cause of the failed attempt moved.
+    expect(journal(node.id).map(({ lastError: _ignored, ...rest }) => rest)).toEqual(
+      before.map(({ lastError: _ignored, ...rest }) => rest)
+    );
+    expect(journal(node.id)[0]!.lastError).toMatch(
+      /^failed during provider_create: NodeAllocationUncertainError: .*second create is forbidden/
+    );
+    // The resume fast path: the active row needs only its DNS re-check and the token.
+    expect(cf.callCount('tunnel.configure')).toBe(1);
+    expect(cf.callCount('dns.list')).toBe(1);
   });
 });
 
