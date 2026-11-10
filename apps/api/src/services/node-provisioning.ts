@@ -1,7 +1,6 @@
-import { generateCloudInit, validateCloudInitSize } from '@simple-agent-manager/cloud-init';
+import { validateCloudInitSize } from '@simple-agent-manager/cloud-init';
 import {
   isTransientCapacityError,
-  type Provider,
   ProviderError,
   type ProviderRequestContext,
   rethrowIfProviderRequestAborted,
@@ -15,7 +14,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
 import { getCredentialEncryptionKey } from '../lib/secrets';
-import { createNodeBackendDNSRecord, deleteDNSRecord } from './dns';
+import { createNodeBackendDNSRecord } from './dns';
 import { GcpApiError, sanitizeGcpError } from './gcp-errors';
 import { signCurrentNodeCallbackToken } from './jwt';
 import {
@@ -32,9 +31,28 @@ import {
   resolveEnvironmentLabel,
   resolveInstallationId,
 } from './node-provider-labels';
+import { buildNodeCloudInit } from './node-provisioning-cloud-init';
 import { resolveHetznerBaseImageOverride } from './node-provisioning-image';
+import {
+  creatingProvisioningPredicate,
+  d1WriteChanged,
+  isProviderCreateRejectedBeforeVmIdentity,
+  providerIdentityRecordPredicate,
+  releaseTunnelBeforeVm,
+  truncateNodeErrorMessage,
+} from './node-provisioning-predicates';
+import {
+  cleanupCreatedVmAfterProvisioningRace,
+  deleteCreatedProviderVmDirectly,
+} from './node-provisioning-race-cleanup';
 export { resolveHetznerBaseImageOverride } from './node-provisioning-image';
 import { recordRejectedAllocationAbsence } from './node-rejection-proof';
+import { settleNodeTunnels } from './node-tunnel-cleanup';
+import { resolveManagedNodeTransport, type TunnelEnv } from './node-tunnel-config';
+import {
+  ensureNodeTunnelForProvisioning,
+  type NodeTunnelProvisioning,
+} from './node-tunnel-provisioning';
 import { persistError } from './observability';
 import {
   createProviderForUser,
@@ -46,12 +64,6 @@ import {
   observedHardwareDbValues,
 } from './runtime-allocation';
 import { deleteNodeResourcesStrict } from './strict-node-deletion';
-import { errorReportCloudInitVariables } from './vm-error-report-config';
-import { resolveEffectiveNodeHostMemoryReserveMb } from './workspace-resource-capacity';
-
-const NODE_ERROR_MESSAGE_MAX_LENGTH = 500;
-
-type ProvisionNodeRow = typeof schema.nodes.$inferSelect;
 
 /** Optional task context for cloud-init (enables message reporter on VM). */
 export interface ProvisionTaskContext {
@@ -65,21 +77,6 @@ export interface ProvisionTaskContext {
 export interface DeploymentProvisionContext {
   environmentId: string;
   projectId?: string | null;
-}
-
-function isProviderCreateRejectedBeforeVmIdentity(providerName: string, err: unknown): boolean {
-  if (
-    providerName !== 'hetzner' ||
-    !(err instanceof ProviderError) ||
-    err.providerName !== 'hetzner' ||
-    err.statusCode === undefined
-  ) {
-    return false;
-  }
-
-  return (
-    err.statusCode === 412 || isTransientCapacityError(err) || err.category === 'quota_exceeded'
-  );
 }
 
 export interface ProvisionNodeOptions {
@@ -118,108 +115,6 @@ function provisionAuthorityProjectId(
   );
 }
 
-function creatingProvisioningPredicate(
-  node: ProvisionNodeRow,
-  runtimeIncarnationId: string | null,
-  providerInstanceId: string | null = node.providerInstanceId
-) {
-  return and(
-    eq(schema.nodes.id, node.id),
-    eq(schema.nodes.userId, node.userId),
-    eq(schema.nodes.status, 'creating'),
-    eq(schema.nodes.runtime, 'vm'),
-    eq(schema.nodes.nodeClass, 'managed'),
-    sql`${schema.nodes.providerInstanceId} IS ${providerInstanceId}`,
-    sql`${schema.nodes.runtimeIncarnationId} IS ${runtimeIncarnationId}`
-  );
-}
-
-function providerIdentityRecordPredicate(
-  node: ProvisionNodeRow,
-  runtimeIncarnationId: string | null
-) {
-  return and(
-    eq(schema.nodes.id, node.id),
-    eq(schema.nodes.userId, node.userId),
-    eq(schema.nodes.runtime, 'vm'),
-    eq(schema.nodes.nodeClass, 'managed'),
-    sql`${schema.nodes.runtimeIncarnationId} IS ${runtimeIncarnationId}`,
-    sql`${schema.nodes.status} NOT IN ('deleted', 'stopped')`
-  );
-}
-
-function d1WriteChanged(result: { meta?: { changes?: number | null } } | undefined): boolean {
-  return (result?.meta?.changes ?? 0) === 1;
-}
-
-async function deleteCreatedProviderVmDirectly(input: {
-  provider: Pick<Provider, 'deleteVM'>;
-  providerInstanceId: string;
-  nodeId: string;
-  providerContext?: ProviderRequestContext;
-}): Promise<void> {
-  try {
-    if (input.providerContext)
-      await input.provider.deleteVM(input.providerInstanceId, input.providerContext);
-    else await input.provider.deleteVM(input.providerInstanceId);
-  } catch (err) {
-    log.error('node_provisioning.created_vm_direct_cleanup_failed', {
-      nodeId: input.nodeId,
-      providerInstanceId: input.providerInstanceId,
-      ...serializeError(err),
-    });
-  }
-}
-
-async function cleanupCreatedVmAfterProvisioningRace(input: {
-  node: ProvisionNodeRow;
-  env: Env;
-  provider: Pick<Provider, 'deleteVM'>;
-  providerInstanceId: string;
-  runtimeIncarnationId: string | null;
-  backendDnsRecordId?: string | null;
-  providerContext?: ProviderRequestContext;
-}): Promise<void> {
-  if (input.backendDnsRecordId) {
-    try {
-      await deleteDNSRecord(input.backendDnsRecordId, input.env, input.providerContext?.signal);
-    } catch (dnsErr) {
-      log.error('node_provisioning.created_vm_dns_cleanup_failed', {
-        nodeId: input.node.id,
-        backendDnsRecordId: input.backendDnsRecordId,
-        ...serializeError(dnsErr),
-      });
-    }
-  }
-
-  try {
-    await deleteNodeResourcesStrict(input.node.id, input.node.userId, input.env, {
-      cleanupDns: false,
-      providerRequestContext: input.providerContext,
-      expectedRuntime: {
-        userId: input.node.userId,
-        runtime: input.node.runtime,
-        providerInstanceId: input.providerInstanceId,
-        runtimeIncarnationId: input.runtimeIncarnationId,
-      },
-    });
-    return;
-  } catch (strictErr) {
-    log.error('node_provisioning.created_vm_strict_cleanup_failed', {
-      nodeId: input.node.id,
-      providerInstanceId: input.providerInstanceId,
-      ...serializeError(strictErr),
-    });
-  }
-
-  await deleteCreatedProviderVmDirectly({
-    provider: input.provider,
-    providerInstanceId: input.providerInstanceId,
-    nodeId: input.node.id,
-    providerContext: input.providerContext,
-  });
-}
-
 export async function provisionNode(
   nodeId: string,
   env: Env,
@@ -232,6 +127,7 @@ export async function provisionNode(
     : undefined;
   throwIfProviderRequestAborted(providerContext);
   const db = drizzle(env.DATABASE, { schema });
+  const tunnelEnv: TunnelEnv = env;
 
   const nodes = await db.select().from(schema.nodes).where(eq(schema.nodes.id, nodeId)).limit(1);
 
@@ -247,6 +143,9 @@ export async function provisionNode(
   let providerAllocationRejected = false;
   let rejectedPlacementPredicate: ReturnType<typeof and>;
   let providerRejectionProofAt: string | null = null;
+  // Tunnel bookkeeping for the failure path: was ownership journaled, and could a VM exist?
+  let tunnelJournaled = false;
+  let providerCreateRequested = false;
   const attributionUserId = node.credentialAttributionUserId ?? node.userId;
   const attributionProjectId =
     node.credentialAttributionSource === 'project'
@@ -275,6 +174,17 @@ export async function provisionNode(
   }
 
   try {
+    // A resumed allocation keeps the transport its (possibly already created) VM was
+    // booted with; only a new incarnation reads the installation's current choice.
+    const transport = resuming
+      ? node.transport === 'cloudflare-tunnel'
+        ? 'cloudflare-tunnel'
+        : null
+      : resolveManagedNodeTransport(tunnelEnv, {
+          isDeploymentNode: !!deploymentContext,
+          runtime: node.runtime,
+          nodeClass: node.nodeClass,
+        });
     if (!resuming)
       await assertNodeAllocationPlanCurrent(
         env,
@@ -344,54 +254,31 @@ export async function provisionNode(
 
     const isDeploymentNode = !!deploymentContext;
 
-    const cloudInit = generateCloudInit({
-      nodeId: node.id,
-      nodeUserId: node.userId,
-      nodeRuntimeIncarnationId: provisioningRuntimeIncarnationId ?? undefined,
-      hostname: `node-${node.id.toLowerCase()}`,
-      controlPlaneUrl: `https://api.${env.BASE_DOMAIN}`,
-      jwksUrl: `https://api.${env.BASE_DOMAIN}/.well-known/jwks.json`,
+    // Journal + create the incarnation's named tunnel BEFORE the provider VM exists, so
+    // every later failure can find and remove it (services/node-tunnel-provisioning.ts).
+    let tunnel: NodeTunnelProvisioning | null = null;
+    if (transport === 'cloudflare-tunnel') {
+      if (!provisioningRuntimeIncarnationId) {
+        throw new Error('Tunnel transport requires a runtime incarnation');
+      }
+      tunnelJournaled = true;
+      tunnel = await ensureNodeTunnelForProvisioning(env, {
+        nodeId: node.id,
+        userId: node.userId,
+        runtimeIncarnationId: provisioningRuntimeIncarnationId,
+        signal: options?.signal,
+      });
+    }
+
+    const cloudInit = buildNodeCloudInit({
+      env,
+      node,
+      runtimeIncarnationId: provisioningRuntimeIncarnationId,
       callbackToken,
-      agentDownloadTimeoutSeconds: env.CLOUD_INIT_AGENT_DOWNLOAD_TIMEOUT_SECONDS,
-      certMaxAttempts: env.CLOUD_INIT_CERT_MAX_ATTEMPTS,
-      certBaseDelaySeconds: env.CLOUD_INIT_CERT_BASE_DELAY_SECONDS,
-      certMaxDelaySeconds: env.CLOUD_INIT_CERT_MAX_DELAY_SECONDS,
-      certRequestTimeoutSeconds: env.CLOUD_INIT_CERT_REQUEST_TIMEOUT_SECONDS,
-      provider: providerResult.providerName,
-      logJournalMaxUse: env.LOG_JOURNAL_MAX_USE,
-      logJournalKeepFree: env.LOG_JOURNAL_KEEP_FREE,
-      logJournalMaxRetention: env.LOG_JOURNAL_MAX_RETENTION,
-      projectId: taskContext?.projectId,
-      chatSessionId: taskContext?.chatSessionId,
-      taskId: taskContext?.taskId,
-      taskMode: taskContext?.taskMode,
-      dockerDnsServers: env.DOCKER_DNS_SERVERS,
-      originCaCertificateUrl: `https://api.${env.BASE_DOMAIN}/api/nodes/${node.id}/origin-ca-certificate`,
-      vmAgentPort: env.VM_AGENT_PORT,
-      vmAgentRequiredVersion: env.VM_AGENT_REQUIRED_VERSION?.trim(),
-      vmAgentMemoryReserveMb: String(resolveEffectiveNodeHostMemoryReserveMb(env)),
-      samInfraSliceMemoryMinMb: env.SAM_INFRA_SLICE_MEMORY_MIN_MB,
-      samInfraSliceCpuWeight: env.SAM_INFRA_SLICE_CPU_WEIGHT,
-      samWorkloadSliceCpuWeight: env.SAM_WORKLOAD_SLICE_CPU_WEIGHT,
-      dockerMemoryMinMb: env.DOCKER_MEMORY_MIN_MB,
-      heartbeatDockerStatsTimeout: env.HEARTBEAT_DOCKER_STATS_TIMEOUT,
-      heartbeatWorkspaceMetricsMaxContainers: env.HEARTBEAT_WORKSPACE_METRICS_MAX_CONTAINERS,
-      heartbeatWorkspaceMetricsMaxOutputBytes: env.HEARTBEAT_WORKSPACE_METRICS_MAX_OUTPUT_BYTES,
-      devcontainerCacheEnabled: env.DEVCONTAINER_CACHE_ENABLED,
-      workspaceBuildQueueDepth: env.WORKSPACE_BUILD_QUEUE_DEPTH,
-      swapSizeMb: env.SWAP_SIZE_MB,
-      swapSwappiness: env.SWAP_SWAPPINESS,
-      role: isDeploymentNode ? 'deployment' : undefined,
-      environmentId: deploymentContext?.environmentId,
-      deploySigningPubKey: isDeploymentNode ? env.DEPLOY_SIGNING_PUBLIC_KEY : undefined,
-      deployAcmeEmail: isDeploymentNode ? env.DEPLOY_ACME_EMAIL : undefined,
-      deployAcmeCa: isDeploymentNode ? env.DEPLOY_ACME_CA : undefined,
-      deployComposeCmd: isDeploymentNode ? env.DEPLOY_COMPOSE_CMD : undefined,
-      deployHealthTimeout: isDeploymentNode ? env.DEPLOY_HEALTH_TIMEOUT : undefined,
-      sessionSnapshotOperationTimeout: env.SESSION_SNAPSHOT_OPERATION_TIMEOUT,
-      sessionSnapshotProgressReportInterval: env.SESSION_SNAPSHOT_PROGRESS_REPORT_INTERVAL,
-      sessionSnapshotProgressReportTimeout: env.SESSION_SNAPSHOT_PROGRESS_REPORT_TIMEOUT,
-      ...errorReportCloudInitVariables(env),
+      providerName: providerResult.providerName,
+      taskContext,
+      deploymentContext,
+      tunnel,
     });
 
     if (!validateCloudInitSize(cloudInit)) {
@@ -437,6 +324,7 @@ export async function provisionNode(
       node
     );
     let vm: Awaited<ReturnType<typeof provider.createVM>>;
+    providerCreateRequested = true;
     try {
       vm = await (resuming && durable
         ? recoverNodeAllocation(provider, node, env, durable, providerContext)
@@ -549,7 +437,9 @@ export async function provisionNode(
     // Scaleway allocates IPs asynchronously after boot — vm.ip will be empty.
     // Store the provider instance ID and mark as pending-ip; heartbeat backfill
     // will capture the IP when the VM agent sends its first heartbeat.
-    if (!vm.ip) {
+    // Tunnel nodes are reached through cloudflared, never the public IP: no IP wait and no
+    // A record. The heartbeat backfill also skips them (keyed on nodes.tunnel_id).
+    if (!vm.ip && !tunnel) {
       log.info('node_provisioning.awaiting_ip_backfill', {
         nodeId: node.id,
         providerInstanceId: vm.id,
@@ -592,17 +482,19 @@ export async function provisionNode(
 
     let backendDnsRecordId: string | null = null;
     let dnsErrorMessage: string | null = null;
-    try {
-      backendDnsRecordId = durable
-        ? await createNodeBackendDNSRecord(node.id, vm.ip, env, providerContext?.signal, true)
-        : await createNodeBackendDNSRecord(node.id, vm.ip, env);
-    } catch (dnsErr) {
-      throwIfProviderRequestAborted(providerContext);
-      log.error('node_provisioning.dns_record_failed', {
-        nodeId: node.id,
-        ...serializeError(dnsErr),
-      });
-      dnsErrorMessage = dnsErr instanceof Error ? dnsErr.message : String(dnsErr);
+    if (!tunnel) {
+      try {
+        backendDnsRecordId = durable
+          ? await createNodeBackendDNSRecord(node.id, vm.ip, env, providerContext?.signal, true)
+          : await createNodeBackendDNSRecord(node.id, vm.ip, env);
+      } catch (dnsErr) {
+        throwIfProviderRequestAborted(providerContext);
+        log.error('node_provisioning.dns_record_failed', {
+          nodeId: node.id,
+          ...serializeError(dnsErr),
+        });
+        dnsErrorMessage = dnsErr instanceof Error ? dnsErr.message : String(dnsErr);
+      }
     }
 
     throwIfProviderRequestAborted(providerContext);
@@ -618,7 +510,7 @@ export async function provisionNode(
         providerInstanceId: vm.id,
         ...observedHardwareDbValues(vm),
         runtimeTerminationConfirmedAt: null,
-        ipAddress: vm.ip,
+        ipAddress: vm.ip || null,
         backendDnsRecordId,
         status: dnsErrorMessage ? 'error' : 'running',
         healthStatus: dnsErrorMessage ? 'unhealthy' : 'stale',
@@ -647,126 +539,132 @@ export async function provisionNode(
     throwIfProviderRequestAborted(providerContext);
     return { allocationConfirmed: true };
   } catch (err) {
+    // No provider create was ever requested for this incarnation, so no VM can hold its
+    // connector token: release the tunnel even on cancellation (D1 only, no Cloudflare I/O).
+    if (tunnelJournaled && !providerCreateRequested && provisioningRuntimeIncarnationId) {
+      await releaseTunnelBeforeVm(env, node.id, provisioningRuntimeIncarnationId);
+    }
     if (err instanceof NodeAllocationUncertainError) throw err;
     rethrowIfProviderRequestAborted(err, providerContext);
-    // Sanitize GCP errors to prevent leaking resource paths in client-visible errorMessage
-    const errorMessage =
-      err instanceof GcpApiError
-        ? sanitizeGcpError(err, 'node-provisioning')
-        : err instanceof Error
-          ? err.message
-          : String(err);
-    const providerName = attemptedProvider ?? 'unknown';
-    const statusCode = err instanceof ProviderError ? err.statusCode : undefined;
-
-    log.error('node_provisioning.failed', {
-      nodeId: node.id,
-      provider: providerName,
-      vmSize: node.vmSize,
-      vmLocation: node.vmLocation,
-      statusCode,
-      error: errorMessage,
-    });
-
-    // Persist detailed error to observability database
     try {
-      await persistError(
-        env.OBSERVABILITY_DATABASE,
-        {
-          source: 'api',
-          level: 'error',
-          message: `Node provisioning failed: ${errorMessage}`,
-          context: {
-            component: 'node-provisioning',
+      // Sanitize GCP errors to prevent leaking resource paths in client-visible errorMessage
+      const errorMessage =
+        err instanceof GcpApiError
+          ? sanitizeGcpError(err, 'node-provisioning')
+          : err instanceof Error
+            ? err.message
+            : String(err);
+      const providerName = attemptedProvider ?? 'unknown';
+      const statusCode = err instanceof ProviderError ? err.statusCode : undefined;
+
+      log.error('node_provisioning.failed', {
+        nodeId: node.id,
+        provider: providerName,
+        vmSize: node.vmSize,
+        vmLocation: node.vmLocation,
+        statusCode,
+        error: errorMessage,
+      });
+
+      // Persist detailed error to observability database
+      try {
+        await persistError(
+          env.OBSERVABILITY_DATABASE,
+          {
+            source: 'api',
+            level: 'error',
+            message: `Node provisioning failed: ${errorMessage}`,
+            context: {
+              component: 'node-provisioning',
+              nodeId: node.id,
+              userId: node.userId,
+              provider: providerName,
+              vmSize: node.vmSize,
+              vmLocation: node.vmLocation,
+              statusCode,
+            },
             nodeId: node.id,
             userId: node.userId,
-            provider: providerName,
-            vmSize: node.vmSize,
-            vmLocation: node.vmLocation,
-            statusCode,
           },
-          nodeId: node.id,
-          userId: node.userId,
-        },
-        env
-      );
-    } catch (obsErr) {
-      log.error('node_provisioning.observability_persist_failed', serializeError(obsErr));
-    }
-
-    const isCapacityFailure = err instanceof ProviderError && isTransientCapacityError(err);
-
-    // Descent-loop mode: re-throw so the caller can branch on the error category.
-    // Delete the failed node row when the create boundary proved the provider rejected
-    // allocation before returning a VM identity; there is no runtime to tear down.
-    if (options?.rethrowProviderError) {
-      if ((isCapacityFailure && !providerCreateRejected) || providerAllocationRejected) {
-        if (
-          providerAllocationRejected &&
-          (!providerRejectionProofAt || !rejectedPlacementPredicate)
-        ) {
-          throw new Error('Rejected allocation proof identity is unavailable');
-        }
-        await options.beforeRejectedNodeDelete?.();
-        await db
-          .delete(schema.nodes)
-          .where(
-            and(
-              creatingProvisioningPredicate(node, provisioningRuntimeIncarnationId),
-              ...(providerAllocationRejected
-                ? [
-                    sql`${schema.nodes.runtimeTerminationConfirmedAt} IS ${providerRejectionProofAt}`,
-                    rejectedPlacementPredicate,
-                  ]
-                : [])
-            )
-          )
-          .run();
-      } else {
-        const truncatedError = truncateNodeErrorMessage(errorMessage);
-        await db
-          .update(schema.nodes)
-          .set({
-            status: 'error',
-            healthStatus: 'unhealthy',
-            errorMessage: `[${providerName}] ${truncatedError}`,
-            ...(providerAllocationRejected
-              ? { runtimeTerminationConfirmedAt: new Date().toISOString() }
-              : {}),
-            updatedAt: new Date().toISOString(),
-            cleanupBlockedSince: null,
-            cleanupBlockedReason: null,
-            cleanupBlockedAlertedAt: null,
-          })
-          .where(creatingProvisioningPredicate(node, provisioningRuntimeIncarnationId))
-          .run();
+          env
+        );
+      } catch (obsErr) {
+        log.error('node_provisioning.observability_persist_failed', serializeError(obsErr));
       }
-      throw err;
+
+      const isCapacityFailure = err instanceof ProviderError && isTransientCapacityError(err);
+
+      // Descent-loop mode: re-throw so the caller can branch on the error category.
+      // Delete the failed node row when the create boundary proved the provider rejected
+      // allocation before returning a VM identity; there is no runtime to tear down.
+      if (options?.rethrowProviderError) {
+        if ((isCapacityFailure && !providerCreateRejected) || providerAllocationRejected) {
+          if (
+            providerAllocationRejected &&
+            (!providerRejectionProofAt || !rejectedPlacementPredicate)
+          ) {
+            throw new Error('Rejected allocation proof identity is unavailable');
+          }
+          await options.beforeRejectedNodeDelete?.();
+          await db
+            .delete(schema.nodes)
+            .where(
+              and(
+                creatingProvisioningPredicate(node, provisioningRuntimeIncarnationId),
+                ...(providerAllocationRejected
+                  ? [
+                      sql`${schema.nodes.runtimeTerminationConfirmedAt} IS ${providerRejectionProofAt}`,
+                      rejectedPlacementPredicate,
+                    ]
+                  : [])
+              )
+            )
+            .run();
+        } else {
+          const truncatedError = truncateNodeErrorMessage(errorMessage);
+          await db
+            .update(schema.nodes)
+            .set({
+              status: 'error',
+              healthStatus: 'unhealthy',
+              errorMessage: `[${providerName}] ${truncatedError}`,
+              ...(providerAllocationRejected
+                ? { runtimeTerminationConfirmedAt: new Date().toISOString() }
+                : {}),
+              updatedAt: new Date().toISOString(),
+              cleanupBlockedSince: null,
+              cleanupBlockedReason: null,
+              cleanupBlockedAlertedAt: null,
+            })
+            .where(creatingProvisioningPredicate(node, provisioningRuntimeIncarnationId))
+            .run();
+        }
+        throw err;
+      }
+
+      // Legacy mode: store the actual error message (truncated) in the node record.
+      const truncatedError = truncateNodeErrorMessage(errorMessage);
+      await db
+        .update(schema.nodes)
+        .set({
+          status: 'error',
+          healthStatus: 'unhealthy',
+          errorMessage: `[${providerName}] ${truncatedError}`,
+          ...(providerAllocationRejected
+            ? { runtimeTerminationConfirmedAt: new Date().toISOString() }
+            : {}),
+          updatedAt: new Date().toISOString(),
+          cleanupBlockedSince: null,
+          cleanupBlockedReason: null,
+          cleanupBlockedAlertedAt: null,
+        })
+        .where(creatingProvisioningPredicate(node, provisioningRuntimeIncarnationId))
+        .run();
+    } finally {
+      // After the row writes above: a deleted row or rejection proof makes the incarnation
+      // non-live, which releases its tunnel. A possibly-created VM keeps it until node
+      // teardown records termination proof. Never throws; the cron sweep is the backstop.
+      if (tunnelJournaled) await settleNodeTunnels(env, node.id, 'provisioning_failed');
     }
-
-    // Legacy mode: store the actual error message (truncated) in the node record.
-    const truncatedError = truncateNodeErrorMessage(errorMessage);
-    await db
-      .update(schema.nodes)
-      .set({
-        status: 'error',
-        healthStatus: 'unhealthy',
-        errorMessage: `[${providerName}] ${truncatedError}`,
-        ...(providerAllocationRejected
-          ? { runtimeTerminationConfirmedAt: new Date().toISOString() }
-          : {}),
-        updatedAt: new Date().toISOString(),
-        cleanupBlockedSince: null,
-        cleanupBlockedReason: null,
-        cleanupBlockedAlertedAt: null,
-      })
-      .where(creatingProvisioningPredicate(node, provisioningRuntimeIncarnationId))
-      .run();
   }
-}
-
-function truncateNodeErrorMessage(message: string): string {
-  return message.length > NODE_ERROR_MESSAGE_MAX_LENGTH
-    ? message.slice(0, NODE_ERROR_MESSAGE_MAX_LENGTH) + '...'
-    : message;
 }
