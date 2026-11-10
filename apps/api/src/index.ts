@@ -183,6 +183,7 @@ import { scheduled } from './scheduled/handler';
 import { handleInboundAgentEmail } from './services/agent-email/inbound';
 import { agentEmailConfig } from './services/agent-email/setup-state';
 import { signTerminalToken, verifyPortAccessToken, verifyTerminalToken } from './services/jwt';
+import { getNodeBackendBaseUrl } from './services/node-agent-readiness';
 import { assertSessionUserApproved } from './services/signup-approval';
 import { recordNodeRoutingMetric } from './services/telemetry';
 import { assertTerminalTokenSessionLive } from './services/terminal-token-liveness';
@@ -594,9 +595,8 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
   }
 
   // Proxy to the VM agent via its proxied (orange-clouded) backend hostname.
-  // Cloudflare Workers cannot fetch IP addresses directly (Error 1003),
-  // so we use the {id}.vm.{domain} hostname. The two-level subdomain bypasses
-  // the wildcard Worker route *.{domain}/* (which only matches one level).
+  // The explicit scriptless *.vm route prevents recursion through this Worker.
+  // Its DNS record selects legacy public-IP or Cloudflare Tunnel transport.
   const routedNodeId = (workspace.nodeId || workspaceId).toLowerCase();
   const backendHostname = `${routedNodeId}.vm.${baseDomain}`;
   log.info('ws_proxy_route', {
@@ -616,9 +616,7 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
     },
     c.env
   );
-  const vmAgentProtocol = c.env.VM_AGENT_PROTOCOL || 'https';
-  const vmAgentPort = c.env.VM_AGENT_PORT || '8443';
-  const vmUrl = new URL(`${vmAgentProtocol}://${backendHostname}:${vmAgentPort}`);
+  const vmUrl = new URL(getNodeBackendBaseUrl(routedNodeId, c.env));
   vmUrl.pathname = url.pathname;
   vmUrl.search = url.search;
 

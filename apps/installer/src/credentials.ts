@@ -68,6 +68,8 @@ const DEPLOY_ACCOUNT = [
   'Email Sending Write',
 ];
 const RUNTIME_ACCOUNT = [
+  // Managed workspace VMs use per-incarnation outbound Cloudflare Tunnels.
+  'Cloudflare One Connector: cloudflared Write',
   'Workers Containers Write',
   'Workers Scripts Read',
   'Workers Observability Read',

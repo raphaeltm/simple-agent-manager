@@ -1621,10 +1621,13 @@ lifecycle bookkeeping.
 | `OBSERVABILITY_ERROR_USER_AGENT_MAX_LENGTH` | `512`    | Maximum persisted user-agent length |
 | `OBSERVABILITY_LOG_QUERY_RATE_LIMIT`        | `30`     | Log queries per minute per admin    |
 
-## VM TLS
+## VM transport and TLS
 
 | Variable                                       | Default | Description                                                                      |
 | ---------------------------------------------- | ------- | -------------------------------------------------------------------------------- |
+| `VM_AGENT_TRANSPORT` | `vm-public-dns` | Transport for newly provisioned managed workspace VMs: `vm-public-dns` or `cloudflare-tunnel`. Existing nodes, deployment nodes, and instant containers keep their current transport. |
+| `VM_AGENT_TUNNEL_PORT` | `8444` | Dedicated loopback HTTP ingress for cloudflared; must differ from the private agent listener port. |
+| `CLOUDFLARED_VERSION` | `2026.10.7` | Connector release; only versions with pinned architecture checksums in cloud-init are accepted. |
 | `VM_AGENT_PROTOCOL`                            | `https` | Protocol for VM agent communication                                              |
 | `VM_AGENT_PORT`                                | `8443`  | VM agent listening port                                                          |
 | `VM_AGENT_MEMORY_RESERVE_MB`                   | `1024`  | Optional Docker workload-slice memory reserve for VM-agent reachability headroom |
@@ -1637,7 +1640,9 @@ lifecycle bookkeeping.
 | `HEARTBEAT_WORKSPACE_METRICS_MAX_OUTPUT_BYTES` | `65536` | Maximum bytes read from each heartbeat Docker metric command                     |
 | `ORIGIN_CA_CERT_VALIDITY_DAYS`                 | `7`     | Validity for per-node Origin CA certificates signed by the API Worker            |
 
-New nodes generate `/etc/sam/tls/origin-ca-key.pem` locally in cloud-init and fetch only the signed certificate from `POST /api/nodes/:id/origin-ca-certificate` (`packages/cloud-init/src/template.ts`, `apps/api/src/routes/node-lifecycle.ts`). Legacy `ORIGIN_CA_CERT` and `ORIGIN_CA_KEY` Worker secrets are not required for new node provisioning.
+New public-DNS nodes generate `/etc/sam/tls/origin-ca-key.pem` locally in cloud-init and fetch only the signed certificate from `POST /api/nodes/:id/origin-ca-certificate` (`packages/cloud-init/src/template.ts`, `apps/api/src/routes/node-lifecycle.ts`). Legacy `ORIGIN_CA_CERT` and `ORIGIN_CA_KEY` Worker secrets are not required for new node provisioning.
+
+With `VM_AGENT_TRANSPORT=cloudflare-tunnel`, SAM creates one remotely managed tunnel per new workspace VM incarnation and points its existing backend hostname at that tunnel. The API still uses HTTPS to Cloudflare; cloudflared connects outbound from the VM and forwards to a dedicated authenticated loopback listener. The VM receives only its connector token, stored in a root-only credential file, and does not request an Origin CA certificate. Agent and SSH ports are blocked on public interfaces. Preview ports, terminals, and API agent calls use the tunnel; instant containers retain their Durable Object transport. The setting does not migrate running nodes. Set it back to `vm-public-dns` to change future provisioning; existing tunnel nodes continue using their tunnels until deleted.
 
 VM workspace admission uses persisted `workspaces.resolved_reservation_json` snapshots and provider capacity fields in a final single-statement D1 reservation (`apps/api/src/services/workspace-placement.ts`). Aggregate CPU, memory, and disk reservations plus `exclusiveNode` control packing. Fresh telemetry remains mandatory on occupied nodes; disk pressure and CPU saturation veto reuse, while live memory percentage is a scoring signal rather than a second capacity gate (`apps/api/src/services/workspace-resource-capacity.ts`, `apps/api/src/durable-objects/task-runner/node-selection.ts`). There is no workspace-count or co-tenant cap: `MAX_WORKSPACES_PER_NODE` and `maxCoTenants` were removed, and legacy reservation rows that still carry `maxCoTenants` are admitted on their resource reservations alone. Live memory-threshold settings remain scoring inputs, not gates. VM agents report optional per-workspace memory telemetry in heartbeat metrics when Docker stats can be collected within the configured bounds (`packages/vm-agent/internal/server/health.go`, `packages/vm-agent/internal/sysinfo/docker_metrics.go`).
 

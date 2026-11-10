@@ -3,10 +3,6 @@ name: Deploy Staging
 on:
   workflow_dispatch:
     inputs:
-      tunnel_proof_only:
-        description: 'Run isolated named-tunnel transport proof; skip application deployment'
-        type: boolean
-        default: false
       performance_audit:
         description: 'Run bounded admin/Runtime browser timings and screenshots with the staging smoke account'
         type: boolean
@@ -82,7 +78,7 @@ permissions:
 
 jobs:
   deploy:
-    if: ${{ !inputs.tunnel_proof_only && !inputs.github_trigger_audit_send_only && !inputs.activation_only && !inputs.performance_audit_only }}
+    if: ${{ !inputs.github_trigger_audit_send_only && !inputs.activation_only && !inputs.performance_audit_only }}
     uses: ./.github/workflows/deploy-reusable.yml
     with:
       environment: staging
@@ -96,7 +92,7 @@ jobs:
   # Skipped if the token is not configured (new deployments before token setup).
   smoke-tests:
     needs: deploy
-    if: ${{ always() && !inputs.tunnel_proof_only && !inputs.activation_only && !inputs.dry_run && (needs.deploy.result == 'success' || (inputs.performance_audit && inputs.performance_audit_only) || (inputs.github_trigger_audit && inputs.github_trigger_audit_send_only)) }}
+    if: ${{ always() && !inputs.activation_only && !inputs.dry_run && (needs.deploy.result == 'success' || (inputs.performance_audit && inputs.performance_audit_only) || (inputs.github_trigger_audit && inputs.github_trigger_audit_send_only)) }}
     runs-on: ubuntu-latest
     environment: staging
     env:
@@ -161,7 +157,7 @@ jobs:
         run: node scripts/e2e/github-trigger-staging.mjs --phase=send
 
   storage-activation:
-    if: ${{ inputs.activation_only && !inputs.tunnel_proof_only }}
+    if: ${{ inputs.activation_only }}
     runs-on: ubuntu-latest
     environment: staging
     steps:
@@ -192,7 +188,7 @@ jobs:
 
   agent-email-dns-audit:
     needs: deploy
-    if: ${{ inputs.agent_email_dns_audit && !inputs.dry_run && !inputs.tunnel_proof_only }}
+    if: ${{ inputs.agent_email_dns_audit && !inputs.dry_run }}
     runs-on: ubuntu-latest
     environment: staging
     timeout-minutes: 5
@@ -208,50 +204,3 @@ jobs:
           BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
           DEPLOY_ENVIRONMENT: staging
         run: node scripts/e2e/agent-email-dns-staging.mjs
-
-  tunnel-proof:
-    if: ${{ inputs.tunnel_proof_only }}
-    runs-on: ubuntu-latest
-    environment: staging
-    timeout-minutes: 12
-    env:
-      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-      CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-      CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
-      BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
-      DEPLOY_ENVIRONMENT: staging
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install isolated probe dependencies
-        run: |
-          python3 -m venv /tmp/tunnel-probe-venv
-          /tmp/tunnel-probe-venv/bin/pip install 'aiohttp==3.13.2'
-          mkdir -p experiments/cloudflare-tunnel/.tmp
-          curl -fsSL --retry 3 https://github.com/cloudflare/cloudflared/releases/download/2026.10.7/cloudflared-linux-amd64 -o experiments/cloudflare-tunnel/.tmp/cloudflared
-          echo '1f99fb518b83dec2ba8d870a7cc991d82a77e6196295a3d2754ba17ab9f91872  experiments/cloudflare-tunnel/.tmp/cloudflared' | sha256sum -c
-          chmod +x experiments/cloudflare-tunnel/.tmp/cloudflared
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: packages/vm-agent/go.mod
-          cache-dependency-path: packages/vm-agent/go.sum
-      - name: Compile real VM-agent handler fixture
-        run: |
-          cp experiments/cloudflare-tunnel/agent_fixture_test.go packages/vm-agent/internal/server/tunnel_proof_experiment_test.go
-          cd packages/vm-agent
-          go test -c -o ../../experiments/cloudflare-tunnel/.tmp/agent-proof.test ./internal/server
-      - name: Prove named tunnel transport
-        timeout-minutes: 8
-        run: /tmp/tunnel-probe-venv/bin/python experiments/cloudflare-tunnel/probe.py
-      - name: Independently retry cleanup
-        if: ${{ always() }}
-        run: /tmp/tunnel-probe-venv/bin/python experiments/cloudflare-tunnel/probe.py --cleanup
-      - name: Upload sanitized findings and resource journal
-        if: ${{ always() }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: tunnel-proof-${{ github.run_id }}
-          path: |
-            experiments/cloudflare-tunnel/.tmp/report.json
-            experiments/cloudflare-tunnel/.tmp/resources.json
-          if-no-files-found: warn
-          retention-days: 14

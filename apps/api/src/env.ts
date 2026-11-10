@@ -1177,6 +1177,10 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   TTS_SUMMARY_THRESHOLD?: string;
   TTS_RETRY_ATTEMPTS?: string;
   TTS_RETRY_BASE_DELAY_MS?: string;
+  // Managed VM transport (new nodes only; legacy nodes and instant containers keep their transport)
+  VM_AGENT_TRANSPORT?: string; // "vm-public-dns" (default) or "cloudflare-tunnel"
+  VM_AGENT_TUNNEL_PORT?: string; // Dedicated loopback tunnel ingress port (default: 8444)
+  CLOUDFLARED_VERSION?: string; // Pinned connector release supported by cloud-init (default: 2026.10.7)
   // VM agent TLS configuration
   VM_AGENT_PROTOCOL?: string; // "https" (default) or "http"
   VM_AGENT_PORT?: string; // "8443" (default) or custom port

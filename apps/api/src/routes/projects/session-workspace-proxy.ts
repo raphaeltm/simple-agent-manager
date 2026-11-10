@@ -12,6 +12,7 @@ import { errors } from '../../middleware/error';
 import { requireProjectAccess } from '../../middleware/project-auth';
 import { signTerminalToken } from '../../services/jwt';
 import { fetchNodeAgent } from '../../services/node-agent';
+import { getNodeBackendBaseUrl } from '../../services/node-agent-readiness';
 import * as projectDataService from '../../services/project-data';
 import { requireSessionWriter } from '../../services/session-access';
 
@@ -182,12 +183,7 @@ export async function resolveSessionWorkspace(
     throw errors.badRequest('Workspace has no assigned node');
   }
 
-  // Use the two-level subdomain ({nodeId}.vm.{domain}) to bypass Cloudflare
-  // same-zone routing restrictions. Single-level ws-{id}.{domain} subdomains
-  // are intercepted by the Worker route, causing error 1014 on server-side fetch.
-  const protocol = env.VM_AGENT_PROTOCOL || 'https';
-  const port = env.VM_AGENT_PORT || '8443';
-  const workspaceUrl = `${protocol}://${workspace.nodeId.toLowerCase()}.vm.${env.BASE_DOMAIN}:${port}`;
+  const workspaceUrl = getNodeBackendBaseUrl(workspace.nodeId, env);
   // The workspace's owner, also for a teammate: the token selects the owner's resource.
   const { token } = await signTerminalToken(workspace.userId, workspace.id, env);
 

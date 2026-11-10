@@ -34,6 +34,7 @@ import {
 } from '../services/jwt';
 import { recordLifecycleTimings } from '../services/lifecycle-timings';
 import { createWorkspaceOnNode } from '../services/node-agent';
+import { getNodeBackendBaseUrl } from '../services/node-agent-readiness';
 import {
   NODE_CALLBACK_TERMINAL_STATUSES,
   nodeStatusBlocksTokenRefresh,
@@ -152,7 +153,7 @@ nodeLifecycleRoutes.post('/:id/token', async (c) => {
   }
 
   const { token, expiresAt } = await signNodeManagementToken(userId, nodeId, null, c.env);
-  const nodeAgentUrl = `https://${nodeId.toLowerCase()}.vm.${c.env.BASE_DOMAIN}:${c.env.VM_AGENT_PORT || '8443'}`;
+  const nodeAgentUrl = getNodeBackendBaseUrl(nodeId, c.env);
 
   return c.json({ token, expiresAt, nodeAgentUrl });
 });
