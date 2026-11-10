@@ -189,6 +189,7 @@ import { assertTerminalTokenSessionLive } from './services/terminal-token-livene
 import {
   fetchVmAgentContainer,
   getVmAgentContainerConfig,
+  isInstantRuntimeAvailable,
   SAM_PROXIED_REQUEST_HEADER,
 } from './services/vm-agent-container';
 
@@ -746,6 +747,12 @@ app.get('/health', (c) => {
 app.get('/api/config/artifacts-enabled', (c) => {
   applyCacheHeaders(c, 'public-config');
   return c.json({ enabled: c.env.ARTIFACTS_ENABLED === 'true' && !!c.env.ARTIFACTS });
+});
+
+// Public config — whether agents can run on Instant (Cloudflare Containers) with no cloud account.
+app.get('/api/config/instant-runtime', (c) => {
+  applyCacheHeaders(c, 'public-config');
+  return c.json({ enabled: isInstantRuntimeAvailable(c.env) });
 });
 
 // Public config — whether this deployment can receive and send agent email (preview).

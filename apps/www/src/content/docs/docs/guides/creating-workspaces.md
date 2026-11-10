@@ -9,7 +9,7 @@ A **workspace** is the environment an AI coding agent runs in — your repositor
 
 You don't start with a workspace — you start with a conversation:
 
-1. From the **Dashboard**, click **Import Project** and connect a GitHub repository.
+1. From the **Dashboard**, click **New Project** and connect a GitHub repository, or let SAM host a new one where your instance offers it.
 2. Open the project and describe what you want in the **chat**.
 3. SAM automatically provisions a workspace, runs your chosen agent, and streams progress back to you. Ask the agent to commit, push and open a pull request when the work is ready.
 

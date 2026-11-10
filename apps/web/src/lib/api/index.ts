@@ -481,6 +481,7 @@ export {
   discoverSubmoduleRepos,
   getAccountMap,
   getArtifactsEnabled,
+  getInstantRuntimeEnabled,
   getProject,
   getProjectCredentialAttributionHealth,
   getProjectInvitePreview,

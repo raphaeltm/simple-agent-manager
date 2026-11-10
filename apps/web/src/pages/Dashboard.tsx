@@ -103,7 +103,7 @@ export function Dashboard() {
             <h3 className="sam-type-section-heading m-0 text-fg-primary">Projects</h3>
           </div>
           <Button variant="primary" size="sm" onClick={() => navigate('/projects/new')}>
-            Import Project
+            New Project
           </Button>
         </div>
 
@@ -115,9 +115,9 @@ export function Dashboard() {
           </div>
         ) : projectsError && projects.length === 0 ? null : projects.length === 0 ? (
           <EmptyState
-            heading="Import your first project"
-            description="Connect a GitHub repository to start chatting with an AI coding agent."
-            action={{ label: 'Import Project', onClick: () => navigate('/projects/new') }}
+            heading="Create your first project"
+            description="A project gives your agents a repository to work in. Start one to begin chatting with an AI coding agent."
+            action={{ label: 'New Project', onClick: () => navigate('/projects/new') }}
           />
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

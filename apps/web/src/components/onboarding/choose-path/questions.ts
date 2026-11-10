@@ -1,91 +1,120 @@
 /**
- * Choose-Your-Path onboarding question definitions.
- *
- * Each question branches to the next based on the user's answer.
- * Tags accumulate and drive the generated setup path.
+ * The onboarding decision tree: at most two questions, and only the ones this installation and
+ * this user leave open. A question with a single possible answer, or one the user's existing
+ * setup already answers, is never shown.
  */
+import type { LucideIcon } from 'lucide-react';
+import { Cloud, GitBranch, PackageOpen, Server, Zap } from 'lucide-react';
 
-export interface PathQuestion {
-  id: string;
-  question: string;
-  description: string;
-  options: PathOption[];
+/** Where agents run. */
+export type RuntimeChoice = 'instant' | 'platform' | 'byoc';
+/** Where the code lives. */
+export type RepoChoice = 'hosted' | 'github';
+
+export interface Answers {
+  runtime?: RuntimeChoice;
+  repo?: RepoChoice;
 }
 
-export interface PathOption {
-  id: string;
+/** What the installation offers and what the user already has. */
+export interface SetupContext {
+  /** Instant (Cloudflare Containers) can run agents with no cloud account. */
+  instantEnabled: boolean;
+  /** The installation has its own cloud account SAM can place agents on. */
+  platformCompute: boolean;
+  /** SAM can host repositories on Cloudflare Artifacts. */
+  artifactsEnabled: boolean;
+  hasCloud: boolean;
+  hasGitHub: boolean;
+  /** A project exists, so where code lives is already settled. */
+  hasProject: boolean;
+}
+
+export interface Choice<T extends string> {
+  id: T;
   label: string;
   description: string;
-  icon: string;
-  /** Next question ID, or null to end the question phase */
-  next: string | null;
-  /** Tags that influence the generated path */
-  tags: string[];
+  icon: LucideIcon;
 }
 
-/**
- * Constructs one answer option. Positional arguments keep each option on a
- * single call so the question table reads as data, not repeated object
- * literals.
- */
-function opt(
-  id: string,
-  label: string,
-  description: string,
-  icon: string,
-  next: string | null,
-  tags: string[]
-): PathOption {
-  return { id, label, description, icon, next, tags };
+export type Question =
+  | { id: 'runtime'; prompt: string; hint: string; choices: Choice<RuntimeChoice>[] }
+  | { id: 'repo'; prompt: string; hint: string; choices: Choice<RepoChoice>[] };
+
+function runtimeChoices(context: SetupContext): Choice<RuntimeChoice>[] {
+  const choices: Choice<RuntimeChoice>[] = [];
+  if (context.instantEnabled)
+    choices.push({
+      id: 'instant',
+      label: 'Right here, on Cloudflare',
+      description: 'Starts in seconds with nothing to sign up for. Great for chatting and changes.',
+      icon: Zap,
+    });
+  if (context.platformCompute)
+    choices.push({
+      id: 'platform',
+      label: "On this installation's machines",
+      description: 'Full machines your admin already set up. Nothing to connect.',
+      icon: Server,
+    });
+  choices.push({
+    id: 'byoc',
+    label: 'On my own cloud account',
+    description: 'Full machines that build and test anything. Hetzner, DigitalOcean, GCP and more.',
+    icon: Cloud,
+  });
+  return choices;
 }
 
-export const QUESTIONS: PathQuestion[] = [
-  {
-    id: 'cloud-account',
-    question: 'Do you have a cloud hosting account?',
-    description:
-      'AI agents need a real computer to run on. SAM creates temporary VMs for each task.',
-    options: [
-      opt(
-        'byoc',
-        'I have Hetzner or Scaleway',
-        'Most cost-effective — you pay your cloud provider directly for usage',
-        'H',
-        'github-ready',
-        ['byoc']
-      ),
-      opt(
-        'no-cloud',
-        'Use SAM-managed infrastructure',
-        'Let SAM provision and manage VMs for you — bring your own cloud account anytime.',
-        '\u{1F680}',
-        'github-ready',
-        []
-      ),
-    ],
-  },
-  {
-    id: 'github-ready',
-    question: 'Do you have a GitHub repo ready?',
-    description:
-      "SAM agents work on real code. You'll connect GitHub so they can clone repos and open PRs.",
-    options: [
-      opt(
-        'yes',
-        'Yes, I have a repo',
-        'I have a project I want to work on',
-        '\u{1F4C2}',
-        null,
-        ['has-repo']
-      ),
-      opt(
-        'no-repo',
-        "Not yet, I'll pick one after connecting",
-        'Connect GitHub first, then choose or fork a repo',
-        '\u{1F517}',
-        null,
-        []
-      ),
-    ],
-  },
-];
+function repoChoices(context: SetupContext): Choice<RepoChoice>[] {
+  const choices: Choice<RepoChoice>[] = [];
+  if (context.artifactsEnabled)
+    choices.push({
+      id: 'hosted',
+      label: 'Let SAM keep it',
+      description: 'A fresh Git repository in your Cloudflare account. No GitHub needed.',
+      icon: PackageOpen,
+    });
+  choices.push({
+    id: 'github',
+    label: context.hasGitHub ? 'In my GitHub repositories' : 'On GitHub',
+    description: context.hasGitHub
+      ? 'Pick one of the repositories SAM can already reach.'
+      : 'Connect GitHub and pick a repository. Agents open pull requests for you.',
+    icon: GitBranch,
+  });
+  return choices;
+}
+
+/** The answers the user's setup or installation already decides. */
+export function presetAnswers(context: SetupContext): Answers {
+  const answers: Answers = {};
+  const runtimes = runtimeChoices(context);
+  // Someone who connected their own cloud wants full machines.
+  if (context.hasCloud) answers.runtime = 'byoc';
+  else if (runtimes.length === 1) answers.runtime = runtimes[0]?.id;
+  const repos = repoChoices(context);
+  if (repos.length === 1) answers.repo = repos[0]?.id;
+  return answers;
+}
+
+/** The questions still open, in order. */
+export function openQuestions(context: SetupContext): Question[] {
+  const preset = presetAnswers(context);
+  const questions: Question[] = [];
+  if (!preset.runtime)
+    questions.push({
+      id: 'runtime',
+      prompt: 'Where should your agents work?',
+      hint: 'Each agent gets its own workspace. You can mix both later.',
+      choices: runtimeChoices(context),
+    });
+  if (!preset.repo && !context.hasProject)
+    questions.push({
+      id: 'repo',
+      prompt: 'Where should your code live?',
+      hint: 'Agents clone it, commit and push like any Git remote.',
+      choices: repoChoices(context),
+    });
+  return questions;
+}

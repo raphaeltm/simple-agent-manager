@@ -80,7 +80,12 @@ export const workspaceQueryKeys = {
     workspaceId: string,
     workspaceUrl: string,
     tokenCacheMarker: string
-  ) => [...workspaceQueryKeys.ports(queryScope), workspaceId, { workspaceUrl, tokenCacheMarker }] as const,
+  ) =>
+    [
+      ...workspaceQueryKeys.ports(queryScope),
+      workspaceId,
+      { workspaceUrl, tokenCacheMarker },
+    ] as const,
 };
 
 export function nodeListQueryOptions(queryScope: string) {
