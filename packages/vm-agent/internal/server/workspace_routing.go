@@ -50,6 +50,12 @@ type workspaceRuntimeOpts struct {
 	ChatSessionID          string
 	EvictionGeneration     string // Initial hydration only; existing runs advance through explicit restart CAS.
 	TaskID                 string
+	// CreateStatus is the status to give the runtime only when this call creates it
+	// (rebuilding it from persisted metadata after an agent restart). An existing
+	// runtime keeps its status. Attach paths use it instead of the positional status,
+	// which overwrites: a browser opening the agent or terminal WebSocket must not turn
+	// a stopped or errored workspace back into "running". Empty means not supplied.
+	CreateStatus string
 }
 
 // lightweightOpt returns an explicit override for workspaceRuntimeOpts.Lightweight.
@@ -184,6 +190,10 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 		runtimeCopy := *runtime
 		resourceHistorySnapshot = &runtimeCopy
 		return runtime
+	}
+
+	if status == "" {
+		status = opt.CreateStatus
 	}
 
 	// Hydrate from SQLite persistence if available — this is the critical path

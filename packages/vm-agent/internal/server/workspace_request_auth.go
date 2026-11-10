@@ -135,6 +135,14 @@ func (s *Server) checkWorkspaceRequestAuth(r *http.Request, workspaceID string) 
 	return err == nil
 }
 
+// upsertWorkspaceRuntimeForAttach returns the runtime a browser WebSocket attaches
+// to. A runtime missing after an agent restart is rebuilt as "running", as before;
+// an existing runtime keeps whatever status it has, so attaching to a stopped,
+// errored or recovering workspace does not resurrect it.
+func (s *Server) upsertWorkspaceRuntimeForAttach(workspaceID string) *WorkspaceRuntime {
+	return s.upsertWorkspaceRuntime(workspaceID, "", "", "", "", workspaceRuntimeOpts{CreateStatus: "running"})
+}
+
 func (s *Server) requireWorkspaceReconnectState(w http.ResponseWriter, r *http.Request, runtime *WorkspaceRuntime) bool {
 	lock := s.workspaceLifecycleLock(runtime.ID)
 	if err := lock.Lock(r.Context()); err != nil {
