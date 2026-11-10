@@ -26,6 +26,7 @@ import * as TOML from '@iarna/toml';
 import type { WranglerToml } from '../deploy/types.js';
 import {
   celldChildEnv,
+  presignVars,
   redactSecrets,
   renderGatewayEnv,
   resolveTunnelPortRange,
@@ -248,6 +249,8 @@ async function main(): Promise<void> {
       ...tunnelRangeVars(tunnelRange),
     },
   });
+  // Needs the R2 binding's final bucket name, so it is applied after translation.
+  Object.assign(plan.config.vars, presignVars(box, plan.config.vars.R2_BUCKET_NAME ?? ''));
   for (const line of plan.report) log(line);
   const withSecrets: CelldWranglerConfig = {
     ...plan.config,

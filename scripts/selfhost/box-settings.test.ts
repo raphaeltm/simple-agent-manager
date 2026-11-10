@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   celldChildEnv,
+  presignVars,
   redactSecrets,
   renderGatewayEnv,
   resolveTunnelPortRange,
@@ -72,5 +73,28 @@ describe('redactSecrets', () => {
     expect(out).not.toContain(SECRET);
     expect(out).not.toContain('MIIEvQIBADANBgkqhkiG9w0BAQEFAASC');
     expect(out).toContain('flag=true');
+  });
+});
+
+describe('presignVars', () => {
+  it('derives the fleet bucket and the R2 key prefix celld uses', () => {
+    expect(presignVars({ CELLD_BUCKET: 's3://celld-fleet' }, 'assets')).toEqual({
+      R2_S3_BUCKET: 'celld-fleet',
+      R2_S3_KEY_PREFIX: 'r2/assets/',
+    });
+    expect(
+      presignVars(
+        { CELLD_BUCKET: 'gs://my-bucket/celld/', R2_S3_ENDPOINT: 'https://storage.googleapis.com' },
+        'assets'
+      )
+    ).toEqual({
+      R2_S3_BUCKET: 'my-bucket',
+      R2_S3_KEY_PREFIX: 'celld/r2/assets/',
+      R2_S3_ENDPOINT: 'https://storage.googleapis.com',
+    });
+  });
+
+  it('gives Azure buckets no presign vars', () => {
+    expect(presignVars({ CELLD_BUCKET: 'az://container' }, 'assets')).toEqual({});
   });
 });

@@ -37,6 +37,9 @@ export const SELFHOST_VAR_OVERRIDES: Readonly<Record<string, string>> = {
   // wrangler.toml ships AI_GATEWAY_ID="sam". Empty makes every gateway consumer take its
   // no-gateway branch (direct Anthropic/OpenAI URLs, no AI Gateway log or cost queries).
   AI_GATEWAY_ID: '',
+  // The container DO classes stay bound (index.ts exports them) but celld runs no container
+  // runtime here; this hides Instant and guided credential setup (sibling task T3).
+  CONTAINER_RUNTIME_AVAILABLE: 'false',
   // Nodes reach the box through frps on loopback instead of per-node Cloudflare DNS/tunnels
   // (reverse-tunnel transport, sibling task T2 on sam/selfhost-pass-2).
   VM_AGENT_TRANSPORT: 'reverse-tunnel',

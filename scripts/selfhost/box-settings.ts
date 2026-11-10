@@ -48,6 +48,33 @@ export function tunnelRangeVars(range: PortRange): Record<string, string> {
   };
 }
 
+/**
+ * Worker vars that point presigned uploads (attachments, snapshots, compose artifacts) at the
+ * box's own object store. celld keeps an R2 binding's objects at
+ * `<fleet prefix>/r2/<bucket_name>/<key>` inside the fleet bucket, so the bucket and key prefix
+ * follow from CELLD_BUCKET and the R2 binding. The public endpoint (R2_S3_ENDPOINT, optional
+ * R2_S3_REGION) comes from the compose .env and the prefix-scoped R2_ACCESS_KEY_ID /
+ * R2_SECRET_ACCESS_KEY from secrets.env. Without an endpoint the Worker leaves presigning off.
+ * Azure (az://) buckets have no S3 interface, so they get no presign vars.
+ */
+export function presignVars(
+  box: Readonly<Record<string, string>>,
+  r2BucketName: string
+): Record<string, string> {
+  const match = /^(?:(s3|gs|az):\/\/)?([^/]+)(?:\/(.*))?$/.exec(box.CELLD_BUCKET ?? '');
+  if (!match) throw new Error('CELLD_BUCKET must be [s3://|gs://|az://]NAME[/PREFIX]');
+  const [, scheme = 's3', bucket = '', fleetPrefix = ''] = match;
+  if (scheme === 'az') return {};
+  const prefix = fleetPrefix.replace(/^\/+|\/+$/g, '');
+  const vars: Record<string, string> = {
+    R2_S3_BUCKET: bucket,
+    R2_S3_KEY_PREFIX: `${prefix ? `${prefix}/` : ''}r2/${r2BucketName}/`,
+  };
+  if (box.R2_S3_ENDPOINT) vars.R2_S3_ENDPOINT = box.R2_S3_ENDPOINT;
+  if (box.R2_S3_REGION) vars.R2_S3_REGION = box.R2_S3_REGION;
+  return vars;
+}
+
 /** The dotenv docker compose passes to frps and Caddy (`env_file`). */
 export function renderGatewayEnv(gatewaySecret: string, range: PortRange): string {
   if (!/^[0-9a-f]{64}$/.test(gatewaySecret)) {
