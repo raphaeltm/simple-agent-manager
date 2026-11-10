@@ -1,0 +1,230 @@
+{
+  "run": "42775358378-1",
+  "checks": [
+    {
+      "name": "existing-vm-route-exclusion",
+      "passed": true
+    },
+    {
+      "name": "updated-token-can-create-named-tunnel",
+      "passed": true
+    },
+    {
+      "name": "worker-vm-443",
+      "passed": true,
+      "status": 200,
+      "error": null,
+      "origin_observation": {
+        "origin": "sam-tunnel-proof-42775358378-1",
+        "path": "/health",
+        "remoteLoopback": true,
+        "samRelayMarker": true,
+        "forwardedHostPresent": true,
+        "probeKeyLeaked": false
+      }
+    },
+    {
+      "name": "direct-vm-443-verified-tls",
+      "passed": false,
+      "status": null,
+      "error": "ClientConnectorSSLError",
+      "origin_observation": null
+    },
+    {
+      "name": "worker-vm-8443",
+      "passed": true,
+      "status": 200,
+      "error": null,
+      "origin_observation": {
+        "origin": "sam-tunnel-proof-42775358378-1",
+        "path": "/health",
+        "remoteLoopback": true,
+        "samRelayMarker": true,
+        "forwardedHostPresent": true,
+        "probeKeyLeaked": false
+      }
+    },
+    {
+      "name": "direct-vm-8443-verified-tls",
+      "passed": false,
+      "status": null,
+      "error": "ClientConnectorSSLError",
+      "origin_observation": null
+    },
+    {
+      "name": "worker-flat-443",
+      "passed": true,
+      "status": 200,
+      "error": null,
+      "origin_observation": {
+        "origin": "sam-tunnel-proof-42775358378-1",
+        "path": "/health",
+        "remoteLoopback": true,
+        "samRelayMarker": true,
+        "forwardedHostPresent": true,
+        "probeKeyLeaked": false
+      }
+    },
+    {
+      "name": "direct-flat-443-verified-tls",
+      "passed": true,
+      "status": 200,
+      "error": null,
+      "origin_observation": {
+        "origin": "sam-tunnel-proof-42775358378-1",
+        "path": "/health",
+        "remoteLoopback": true,
+        "samRelayMarker": false,
+        "forwardedHostPresent": false,
+        "probeKeyLeaked": false
+      }
+    },
+    {
+      "name": "worker-flat-8443",
+      "passed": true,
+      "status": 200,
+      "error": null,
+      "origin_observation": {
+        "origin": "sam-tunnel-proof-42775358378-1",
+        "path": "/health",
+        "remoteLoopback": true,
+        "samRelayMarker": true,
+        "forwardedHostPresent": true,
+        "probeKeyLeaked": false
+      }
+    },
+    {
+      "name": "direct-flat-8443-verified-tls",
+      "passed": true,
+      "status": 200,
+      "error": null,
+      "origin_observation": {
+        "origin": "sam-tunnel-proof-42775358378-1",
+        "path": "/health",
+        "remoteLoopback": true,
+        "samRelayMarker": false,
+        "forwardedHostPresent": false,
+        "probeKeyLeaked": false
+      }
+    },
+    {
+      "name": "worker-rejects-unauthenticated",
+      "passed": true,
+      "status": 401
+    },
+    {
+      "name": "origin-rejects-direct-unauthenticated",
+      "passed": true,
+      "status": 401
+    },
+    {
+      "name": "two-local-http-ports-one-tunnel",
+      "passed": true
+    },
+    {
+      "name": "real-agent-port-3000-jwt-and-token-stripping",
+      "passed": true,
+      "status": 200,
+      "error": null
+    },
+    {
+      "name": "real-agent-port-5173-jwt-and-token-stripping",
+      "passed": true,
+      "status": 200,
+      "error": null
+    },
+    {
+      "name": "real-agent-rejects-missing",
+      "passed": true,
+      "status": 401,
+      "error": null
+    },
+    {
+      "name": "real-agent-rejects-invalid",
+      "passed": true,
+      "status": 401,
+      "error": null
+    },
+    {
+      "name": "real-agent-rejects-expired",
+      "passed": true,
+      "status": 401,
+      "error": null
+    },
+    {
+      "name": "real-agent-rejects-wrong_workspace",
+      "passed": true,
+      "status": 401,
+      "error": null
+    },
+    {
+      "name": "real-agent-rejects-wrong_node",
+      "passed": true,
+      "status": 401,
+      "error": null
+    },
+    {
+      "name": "real-agent-direct-without-jwt-rejected",
+      "passed": true,
+      "status": 401,
+      "error": null
+    },
+    {
+      "name": "real-agent-refuses-proxy-to-own-listener",
+      "passed": true,
+      "status": 403,
+      "error": null
+    },
+    {
+      "name": "tunnel-listener-blocks-bearerless-git-credential",
+      "passed": true,
+      "status": 401,
+      "error": null
+    },
+    {
+      "name": "private-local-git-helper-still-works",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "name": "preview-to-private-git-helper-rejected",
+      "passed": true,
+      "status": 401,
+      "error": null
+    },
+    {
+      "name": "real-agent-preview-websocket",
+      "passed": true
+    },
+    {
+      "name": "streaming-first-byte-before-completion",
+      "passed": true,
+      "first_byte_seconds": 0.03,
+      "total_seconds": 2.034
+    },
+    {
+      "name": "websocket-text-binary-and-35s-idle",
+      "passed": true
+    },
+    {
+      "name": "connector-stopped-no-direct-ip-fallback",
+      "passed": true,
+      "status": 530
+    },
+    {
+      "name": "connector-restart-same-tunnel-and-dns",
+      "passed": true
+    },
+    {
+      "name": "cleanup",
+      "passed": true,
+      "errors": []
+    },
+    {
+      "name": "cleanup",
+      "passed": true,
+      "errors": []
+    }
+  ],
+  "scope": "isolated CI origin and Worker in staging zone; not a managed SAM VM"
+}

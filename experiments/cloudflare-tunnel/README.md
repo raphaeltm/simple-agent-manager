@@ -9,8 +9,9 @@ The proof creates one named tunnel, three unique DNS records, one isolated
 Worker, and two exact routes. It compares the existing `.vm` hostname and a flat
 hostname at ports 443/8443 with certificate verification enabled, then checks
 auth rejection, two local HTTP ports, streaming, WebSocket text/binary after
-35 seconds idle, connector restart, and cleanup. Auth is a fixture, not SAM JWT
-authorization. The main staging Worker and existing route exclusions are unchanged.
+35 seconds idle, connector restart, and cleanup. Outer probe authorization is a
+fixture; the real agent tests use synthetic keys with SAM's actual JWT validator.
+The main staging Worker and existing route exclusions are unchanged.
 
 Only `.tmp/report.json` and the nonsecret resource journal are uploaded. Connector
 logs and generated tokens remain private on the ephemeral runner. Cleanup runs
