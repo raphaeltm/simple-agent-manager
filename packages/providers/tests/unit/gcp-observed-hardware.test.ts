@@ -3,7 +3,7 @@
  * type's vCPU or memory, so before this fix every GCP node was stored with unknown resources and
  * workspace admission refused it forever (production node 01M73DSGQ07WQTBZMGPXJPJ281,
  * 2026-11-10: "node has no trusted observed hardware capacity"). These tests drive the real
- * createVM/getVM paths with production-shaped responses.
+ * createVM path with production-shaped responses.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -128,15 +128,13 @@ describe('GCP observed hardware', () => {
     expect(requests.some((r) => r.includes('www.googleapis.com'))).toBe(false);
   });
 
-  it('getVM reports observed resources too', async () => {
-    installFakeCompute();
+  it('getVM does not look up the machine type (existence and ownership checks only)', async () => {
+    const requests = installFakeCompute();
 
     const vm = await newProvider().getVM('node-gcp');
 
-    expect(vm?.observedHardware.resources).toEqual({
-      source: 'observed',
-      value: { vcpuCount: 4, memoryMb: 16384, diskGb: 50 },
-    });
+    expect(vm?.id).toBe('1861759100528809252');
+    expect(requests.some((r) => r.includes('/machineTypes/'))).toBe(false);
   });
 
   it('retries a transient machine type failure and still reports observed resources', async () => {
@@ -190,9 +188,18 @@ describe('GCP observed hardware', () => {
       return inner(url, init);
     }) as typeof fetch;
 
-    await expect(newProvider().getVM('node-gcp', { signal: controller.signal })).rejects.toBe(
-      reason
-    );
+    await expect(
+      newProvider().createVM(
+        {
+          name: 'node-gcp',
+          size: 'large',
+          location: ZONE,
+          userData: '#cloud-config',
+          instanceType: 'e2-standard-4',
+        },
+        { signal: controller.signal }
+      )
+    ).rejects.toBe(reason);
   });
 });
 

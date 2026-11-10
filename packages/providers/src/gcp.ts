@@ -23,7 +23,11 @@ import {
   SIZE_MAP,
   withGcpErrorCategory,
 } from './gcp-metadata';
-import { gcpInstanceToObservedVM, resolveGcpSourceImage } from './gcp-native-instance';
+import {
+  gcpInstanceToObservedVM,
+  gcpInstanceToVM,
+  resolveGcpSourceImage,
+} from './gcp-native-instance';
 import type { GcpPriceTable } from './gcp-pricing';
 import { getProviderCatalogOfferings } from './instance-offerings';
 import { resolveVMConfigWithLegacySizeAdapter } from './native-vm-config';
@@ -304,7 +308,9 @@ export class GcpProvider implements Provider {
     throwIfProviderRequestAborted(context);
     const instance = await this.findInstanceByIdOrName(id, context);
     if (!instance) return null;
-    return await gcpInstanceToObservedVM(this.api, instance, context);
+    // No machine type lookup: getVM callers check existence and ownership (deletion, orphan
+    // reconciliation), never observed hardware, which is written only from createVM.
+    return gcpInstanceToVM(instance);
   }
 
   async listVMs(
