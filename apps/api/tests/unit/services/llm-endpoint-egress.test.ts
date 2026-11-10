@@ -26,7 +26,8 @@ import {
 import { generateTaskTitle } from '../../../src/services/task-title';
 import { createAdminSettingsEnv } from '../../helpers/admin-settings-env';
 
-const METADATA_URL = 'http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token';
+const METADATA_URL =
+  'http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token';
 const COMPLETION = {
   id: 'chatcmpl-1',
   object: 'chat.completion',
@@ -93,7 +94,11 @@ function stubCompletion() {
 const CALLERS: Array<[string, () => Promise<unknown>]> = [
   [
     'task titles (fetchWorkersAIChatCompletion)',
-    () => generateTaskTitle(env, 'Refactor the billing job '.repeat(10), { model: '@cf/m/x', maxRetries: 0 }),
+    () =>
+      generateTaskTitle(env, 'Refactor the billing job '.repeat(10), {
+        model: '@cf/m/x',
+        maxRetries: 0,
+      }),
   ],
   [
     '/ai/v1 Workers AI route (forwardToWorkersAI)',

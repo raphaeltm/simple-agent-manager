@@ -46,12 +46,7 @@ export interface OutboundPolicy {
 }
 
 export type OutboundRefusalReason =
-  | 'invalid_url'
-  | 'scheme'
-  | 'userinfo'
-  | 'host'
-  | 'redirect_limit'
-  | 'redirect_unreplayable';
+  'invalid_url' | 'scheme' | 'userinfo' | 'host' | 'redirect_limit' | 'redirect_unreplayable';
 
 /** The request was refused before it was sent; nothing reached the refused address. */
 export class OutboundRequestRefusedError extends Error {
@@ -79,7 +74,11 @@ export function assertOutboundUrl(input: string | URL, policy: OutboundPolicy = 
   }
   const host = url.hostname;
   if (url.protocol !== 'https:' && url.protocol !== 'http:') {
-    throw new OutboundRequestRefusedError('scheme', host, `Outbound scheme ${url.protocol} refused`);
+    throw new OutboundRequestRefusedError(
+      'scheme',
+      host,
+      `Outbound scheme ${url.protocol} refused`
+    );
   }
   if (url.username || url.password) {
     throw new OutboundRequestRefusedError('userinfo', host, 'Outbound URL carries credentials');
@@ -93,7 +92,11 @@ export function assertOutboundUrl(input: string | URL, policy: OutboundPolicy = 
     );
   }
   if (url.protocol === 'http:' && hostClass !== 'private') {
-    throw new OutboundRequestRefusedError('scheme', host, `Plain HTTP to public host ${host} refused`);
+    throw new OutboundRequestRefusedError(
+      'scheme',
+      host,
+      `Plain HTTP to public host ${host} refused`
+    );
   }
   policy.validateUrl?.(url);
   return url;
@@ -115,7 +118,9 @@ function isReplayableBody(body: RequestInit['body']): boolean {
 function nextHopInit(init: RequestInit, status: number, from: URL, to: URL): RequestInit {
   const headers = new Headers(init.headers);
   const method = (init.method ?? 'GET').toUpperCase();
-  const toGet = (status === 303 && method !== 'HEAD') || ((status === 301 || status === 302) && method === 'POST');
+  const toGet =
+    (status === 303 && method !== 'HEAD') ||
+    ((status === 301 || status === 302) && method === 'POST');
   if (from.origin !== to.origin) for (const name of CREDENTIAL_HEADERS) headers.delete(name);
   if (toGet) {
     for (const name of BODY_HEADERS) headers.delete(name);
@@ -148,7 +153,9 @@ export async function guardedFetch(
     const response = policy.fetchFn
       ? await policy.fetchFn(url.toString(), request)
       : await fetch(url.toString(), request);
-    const location = REDIRECT_STATUSES.has(response.status) ? response.headers.get('location') : null;
+    const location = REDIRECT_STATUSES.has(response.status)
+      ? response.headers.get('location')
+      : null;
     if (!location) return response;
     await response.body?.cancel().catch(() => undefined);
     if (hop >= maxRedirects) {

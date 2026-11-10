@@ -46,10 +46,7 @@ export interface ProbeTarget {
  * "Operation not permitted", which is what an nftables drop in OUTPUT gives connect().
  */
 export function buildProbeScript(targets: ProbeTarget[], timeoutSeconds: number): string {
-  const lines = targets.map(
-    (target, index) =>
-      `probe ${index} '${target.host}' ${target.port}`
-  );
+  const lines = targets.map((target, index) => `probe ${index} '${target.host}' ${target.port}`);
   return [
     'probe() {',
     `  out="$(timeout ${timeoutSeconds} bash -c "exec 3<>/dev/tcp/$2/$3" 2>&1)"; code=$?`,
@@ -85,7 +82,9 @@ export function evaluateProbes(
     } else if (target.expect === 'blocked' && outcome !== 'blocked') {
       failures.push(`${target.label} (${target.host}:${target.port}) is NOT fenced: ${outcome}`);
     } else if (target.expect === 'reachable' && (outcome === 'blocked' || outcome === 'error')) {
-      failures.push(`${target.label} (${target.host}:${target.port}) should be allowed: ${outcome}`);
+      failures.push(
+        `${target.label} (${target.host}:${target.port}) should be allowed: ${outcome}`
+      );
     }
   });
   return failures;
@@ -110,17 +109,32 @@ export async function fenceTargets(
     loopback('frps control port', composePort(box, 'FRPS_BIND_PORT'), 'blocked'),
     loopback('object store console', composePort(box, 'OBJECTSTORE_CONSOLE_PORT'), 'blocked'),
     loopback('Caddy admin API', 2019, 'blocked'),
-    { label: 'IPv6 loopback', host: '::1', port: composePort(box, 'CELLD_INTERNAL_PORT'), expect: 'blocked' },
+    {
+      label: 'IPv6 loopback',
+      host: '::1',
+      port: composePort(box, 'CELLD_INTERNAL_PORT'),
+      expect: 'blocked',
+    },
     { label: 'cloud metadata server', host: '169.254.169.254', port: 80, expect: 'blocked' },
     { label: 'private 10/8', host: '10.255.255.1', port: 80, expect: 'blocked' },
-    { label: 'private 172.16/12 (Docker bridges)', host: '172.17.0.1', port: 80, expect: 'blocked' },
+    {
+      label: 'private 172.16/12 (Docker bridges)',
+      host: '172.17.0.1',
+      port: 80,
+      expect: 'blocked',
+    },
     { label: 'private 192.168/16', host: '192.168.255.1', port: 80, expect: 'blocked' },
     { label: 'carrier-grade NAT', host: '100.100.100.200', port: 80, expect: 'blocked' },
     loopback('node tunnel lease port', range.start, 'reachable'),
     { label: 'public internet', host: publicHost, port: Number(publicPort), expect: 'reachable' },
   ];
   for (const endpoint of await resolveObjectStoreEndpoints(box)) {
-    targets.push({ label: 'object store', host: endpoint.address, port: endpoint.port, expect: 'reachable' });
+    targets.push({
+      label: 'object store',
+      host: endpoint.address,
+      port: endpoint.port,
+      expect: 'reachable',
+    });
   }
   if (metadataProxyEnabled(box)) {
     targets.push(loopback('metadata token proxy', metadataProxyPort(box), 'reachable'));
@@ -137,11 +151,24 @@ function compose(envFile: string, args: string[]): { status: number; output: str
   return { status: result.status ?? 1, output: `${result.stdout ?? ''}${result.stderr ?? ''}` };
 }
 
-function runProbes(envFile: string, targets: ProbeTarget[], user: string | null): Map<number, ProbeOutcome> {
+function runProbes(
+  envFile: string,
+  targets: ProbeTarget[],
+  user: string | null
+): Map<number, ProbeOutcome> {
   const script = buildProbeScript(targets, DEFAULT_PROBE_TIMEOUT_SECONDS);
   const userArgs = user ? ['--user', user] : [];
   const result = compose(envFile, [
-    'run', '--rm', '--no-deps', '-T', ...userArgs, '--entrypoint', 'bash', 'celld', '-c', script,
+    'run',
+    '--rm',
+    '--no-deps',
+    '-T',
+    ...userArgs,
+    '--entrypoint',
+    'bash',
+    'celld',
+    '-c',
+    script,
   ]);
   return parseProbeOutput(result.output);
 }
@@ -154,7 +181,16 @@ async function main(): Promise<void> {
   const box = parseDotenv(readFileSync(envFile, 'utf8'), envFile);
   const failures: string[] = [];
 
-  const table = compose(envFile, ['exec', '-T', 'egress-fence', 'nft', 'list', 'table', 'inet', EGRESS_FENCE_TABLE]);
+  const table = compose(envFile, [
+    'exec',
+    '-T',
+    'egress-fence',
+    'nft',
+    'list',
+    'table',
+    'inet',
+    EGRESS_FENCE_TABLE,
+  ]);
   if (table.status !== 0) failures.push(`nftables table ${EGRESS_FENCE_TABLE} is not installed`);
 
   const targets = await fenceTargets(box, values['public-probe'] ?? DEFAULT_PUBLIC_PROBE);
@@ -162,12 +198,19 @@ async function main(): Promise<void> {
 
   // Control: another uid must get through to the same forbidden target, or "blocked" above
   // could mean the probe itself is broken.
-  const control: ProbeTarget[] = [{ ...targets[0]!, label: 'control (another uid)', expect: 'reachable' }];
-  const controlFailures = evaluateProbes(control, runProbes(envFile, control, `${CONTROL_UID}:${CONTROL_UID}`));
+  const control: ProbeTarget[] = [
+    { ...targets[0]!, label: 'control (another uid)', expect: 'reachable' },
+  ];
+  const controlFailures = evaluateProbes(
+    control,
+    runProbes(envFile, control, `${CONTROL_UID}:${CONTROL_UID}`)
+  );
   failures.push(...controlFailures.map((line) => `${line}; the probe cannot be trusted`));
 
   for (const target of targets) {
-    console.log(`  ${target.expect === 'blocked' ? 'deny ' : 'allow'}  ${target.label} ${target.host}:${target.port}`);
+    console.log(
+      `  ${target.expect === 'blocked' ? 'deny ' : 'allow'}  ${target.label} ${target.host}:${target.port}`
+    );
   }
   if (failures.length > 0) {
     console.error('\n[selfhost] EGRESS FENCE NOT IN EFFECT:');

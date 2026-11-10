@@ -208,7 +208,7 @@ export async function complete(
   try {
     const response = await fetchChatTarget(target, {
       method: 'POST',
-        signal: controller.signal,
+      signal: controller.signal,
       headers: chatTargetHeaders(target, {
         'cf-aig-metadata': JSON.stringify({
           source: featureKey,

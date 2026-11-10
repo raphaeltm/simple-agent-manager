@@ -35,7 +35,14 @@ const METADATA_HOSTNAMES = new Set([
 ]);
 
 /** Name suffixes that only resolve on a private network. */
-const PRIVATE_NAME_SUFFIXES = ['.localhost', '.local', '.internal', '.localdomain', '.lan', '.home.arpa'];
+const PRIVATE_NAME_SUFFIXES = [
+  '.localhost',
+  '.local',
+  '.internal',
+  '.localdomain',
+  '.lan',
+  '.home.arpa',
+];
 
 const IPV4_MAX = 0xffff_ffff;
 
@@ -65,7 +72,7 @@ const IPV4_RANGES: ReadonlyArray<readonly [number, number, Exclude<HostClass, 'p
 export function classifyIpv4(address: number): HostClass {
   for (const [start, prefix, hostClass] of IPV4_RANGES) {
     const mask = prefix === 0 ? 0 : (IPV4_MAX << (32 - prefix)) >>> 0;
-    if (((address & mask) >>> 0) === start) return hostClass;
+    if ((address & mask) >>> 0 === start) return hostClass;
   }
   return 'public';
 }
@@ -185,7 +192,11 @@ function classifyName(host: string): HostClass {
 
 /** A URL `hostname` (or a bare host) classified as public, private or forbidden. */
 export function classifyHost(hostname: string): HostClass {
-  const host = hostname.trim().replace(/^\[|\]$/g, '').toLowerCase().replace(/\.+$/, '');
+  const host = hostname
+    .trim()
+    .replace(/^\[|\]$/g, '')
+    .toLowerCase()
+    .replace(/\.+$/, '');
   // Empty hosts, zone ids and percent-encoded hosts are never a valid outbound endpoint.
   if (!host || host.includes('%') || /[\s/\\@]/.test(host)) return 'forbidden';
   if (host.includes(':')) {

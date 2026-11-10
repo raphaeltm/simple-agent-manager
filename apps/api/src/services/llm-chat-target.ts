@@ -49,9 +49,7 @@ export interface ChatCompletionsTarget {
  * rather than sent to a provider the admin may have opted out of.
  */
 export type LlmUnavailableReason =
-  | 'not_configured'
-  | 'settings_unreadable'
-  | 'private_network_not_allowed';
+  'not_configured' | 'settings_unreadable' | 'private_network_not_allowed';
 
 const LLM_UNAVAILABLE_MESSAGES: Record<LlmUnavailableReason, string> = {
   not_configured:
@@ -173,7 +171,13 @@ export async function resolveOpenAICompatibleTarget(
   if (!allowPrivateNetwork && classifyHost(new URL(normalized).hostname) === 'private') {
     throw new LlmUnavailableError(purpose, 'private_network_not_allowed');
   }
-  return chatTarget('openai-compatible', normalized, stringValue(apiKey), model, allowPrivateNetwork);
+  return chatTarget(
+    'openai-compatible',
+    normalized,
+    stringValue(apiKey),
+    model,
+    allowPrivateNetwork
+  );
 }
 
 /** Cloudflare's Workers AI chat route (gateway first, then REST), or null off Cloudflare. */

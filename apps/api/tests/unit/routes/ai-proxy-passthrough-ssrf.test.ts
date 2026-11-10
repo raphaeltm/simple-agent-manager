@@ -224,7 +224,10 @@ describe('AI proxy passthrough: redirect to an internal address', () => {
   });
 
   it('control: a 307 from one public host to another is followed with the body replayed', async () => {
-    attackerRedirect = { status: 307, location: () => 'https://llm.test.example/v1/chat/completions' };
+    attackerRedirect = {
+      status: 307,
+      location: () => 'https://llm.test.example/v1/chat/completions',
+    };
     credentialWithBaseUrl('https://attacker.test.example/v1');
 
     const res = await postChat();

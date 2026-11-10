@@ -161,9 +161,9 @@ describe('GitLab API requests (self-host SSRF, T5)', () => {
     await expect(verifyGitLabProjectAccess({} as Env, 'gl_token', 123)).resolves.toMatchObject({
       gitlabProjectId: 123,
     });
-    expect(new Headers((fetchMock.mock.calls[1]?.[1] as RequestInit).headers).get('authorization')).toBe(
-      'Bearer gl_token'
-    );
+    expect(
+      new Headers((fetchMock.mock.calls[1]?.[1] as RequestInit).headers).get('authorization')
+    ).toBe('Bearer gl_token');
   });
 
   it('control: a self-managed GitLab the admin configured on the private network still works', async () => {

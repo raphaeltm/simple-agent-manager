@@ -25,11 +25,7 @@ import {
   optionalExecutionContext,
 } from '../services/ai-token-usage-accounting';
 import { copyCredentialLimitHeaders } from '../services/credential-limit-events';
-import {
-  anthropicError,
-  credentialErrorHeaders,
-  openaiError,
-} from './ai-proxy-passthrough-errors';
+import { anthropicError, credentialErrorHeaders, openaiError } from './ai-proxy-passthrough-errors';
 import {
   addAnthropicRequestHeaders,
   anthropicProxyOptions,

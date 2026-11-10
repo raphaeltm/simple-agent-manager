@@ -9,16 +9,16 @@ import { classifyHost, guardedFetch } from '../lib/network-hosts';
 import { readResponseJson } from '../lib/runtime-validation';
 import { errors } from '../middleware/error';
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
-import { getGitLabOAuthConfig } from './platform-config';
 import { requireGitLabUserAccessTokenForOwner } from './gitlab-access-token';
+import { getGitLabOAuthConfig } from './platform-config';
 
 // Access-token helpers live in gitlab-access-token.ts; re-exported so callers keep one import.
 export {
-  type GitLabAccessTokenResult,
   getGitLabUserAccessToken,
   getGitLabUserAccessTokenForOwner,
   getGitLabUserAccessTokenResultWithHeaders,
   getGitLabUserAccessTokenWithHeaders,
+  type GitLabAccessTokenResult,
   requireGitLabUserAccessToken,
   requireGitLabUserAccessTokenForOwner,
   requireGitLabUserAccessTokenResultForOwner,

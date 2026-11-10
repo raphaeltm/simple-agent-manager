@@ -307,4 +307,3 @@ export function addAnthropicRequestHeaders(
   if (anthropicBeta) headers['anthropic-beta'] = anthropicBeta;
   return headers;
 }
-

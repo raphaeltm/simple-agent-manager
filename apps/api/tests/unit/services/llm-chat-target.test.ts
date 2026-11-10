@@ -4,7 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { runAgentLoop } from '../../../src/durable-objects/sam-session/agent-loop';
 import type { Env } from '../../../src/env';
-import { __resetAdminSettingsCacheForTest, updateAdminSettings } from '../../../src/services/admin-settings';
+import {
+  __resetAdminSettingsCacheForTest,
+  updateAdminSettings,
+} from '../../../src/services/admin-settings';
 import {
   chatTargetHeaders,
   LlmUnavailableError,
@@ -150,7 +153,9 @@ describe('resolveWorkersAiChatTarget', () => {
   it('stores the API key encrypted, never as plaintext', async () => {
     await configureEndpoint({ baseUrl: 'https://llm.example.com/v1', apiKey: 'sk-endpoint-key' });
     const rows = sqlite
-      .prepare("SELECT encrypted_token FROM platform_credentials WHERE provider='openai-compatible'")
+      .prepare(
+        "SELECT encrypted_token FROM platform_credentials WHERE provider='openai-compatible'"
+      )
       .all() as { encrypted_token: string }[];
     expect(rows).toHaveLength(1);
     expect(rows[0]?.encrypted_token).not.toContain('sk-endpoint-key');
@@ -459,4 +464,3 @@ describe('SAM and project agents through the real loop', () => {
     expect(errors.mock.calls.flat().join(' ')).not.toContain('sam.llm_fetch_error');
   });
 });
-

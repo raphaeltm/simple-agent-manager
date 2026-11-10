@@ -8,14 +8,14 @@ Instant sessions, Workers AI features, Analytics Engine, Artifacts and email sig
 
 ## What runs
 
-| Service       | Network | Listens on                      | Notes                                                    |
-| ------------- | ------- | ------------------------------- | -------------------------------------------------------- |
-| `caddy`       | host    | `:80`, `:443`                   | wildcard `*.SAM_DOMAIN`, sets `CF-Connecting-IP`         |
-| `celld`       | host    | `127.0.0.1:8080`, `:7001` (ops) | API Worker + web UI (`ASSETS`), cron triggers; uid 7101  |
-| `egress-fence`| host    | none                            | installs and keeps the celld nftables egress fence       |
-| `gce-metadata-proxy` | host | `127.0.0.1:7180`           | profile `gce`; access tokens for a gs:// bucket          |
-| `frps`        | host    | `127.0.0.1:7000`                | profile `tunnel`; nodes arrive as frp over wss via Caddy |
-| `objectstore` | host    | `127.0.0.1:9000`                | profile `local-store`; otherwise use a GCS/S3 bucket     |
+| Service              | Network | Listens on                      | Notes                                                    |
+| -------------------- | ------- | ------------------------------- | -------------------------------------------------------- |
+| `caddy`              | host    | `:80`, `:443`                   | wildcard `*.SAM_DOMAIN`, sets `CF-Connecting-IP`         |
+| `celld`              | host    | `127.0.0.1:8080`, `:7001` (ops) | API Worker + web UI (`ASSETS`), cron triggers; uid 7101  |
+| `egress-fence`       | host    | none                            | installs and keeps the celld nftables egress fence       |
+| `gce-metadata-proxy` | host    | `127.0.0.1:7180`                | profile `gce`; access tokens for a gs:// bucket          |
+| `frps`               | host    | `127.0.0.1:7000`                | profile `tunnel`; nodes arrive as frp over wss via Caddy |
+| `objectstore`        | host    | `127.0.0.1:9000`                | profile `local-store`; otherwise use a GCS/S3 bucket     |
 
 ## Install or upgrade
 

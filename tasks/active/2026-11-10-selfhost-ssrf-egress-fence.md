@@ -30,6 +30,7 @@ redirect (`res.redirected` stays false, `res.url` unchanged), `redirect: 'manual
 ## Checklist
 
 Part A
+
 - [ ] network-hosts: one classifier (`classifyHost`) covering every IPv4/IPv6/name spelling
 - [ ] network-hosts: `guardedFetch` (pre-validate, redirect manual, per-hop revalidation, bounded hops)
 - [ ] Passthrough (3 fetches) through guardedFetch; save-time host check in composable-credentials
@@ -43,6 +44,7 @@ Part A
       per-site guard tests (discriminating); public + opted-in local controls
 
 Part B
+
 - [ ] nftables egress fence for celld uid (compose service, fails closed)
 - [ ] GCE metadata: token proxy with secret path prefix; direct metadata blocked
 - [ ] `pnpm selfhost:verify-fence` operator check

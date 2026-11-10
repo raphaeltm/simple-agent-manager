@@ -27,7 +27,10 @@ const RANGE = { start: 20000, end: 29999 };
 const RESOLV = 'nameserver 127.0.0.53\nnameserver 169.254.169.254\noptions edns0\n';
 const SECRET = 'cd'.repeat(32);
 
-function plan(box: Record<string, string> = {}, objectStore = [] as { address: string; port: number }[]) {
+function plan(
+  box: Record<string, string> = {},
+  objectStore = [] as { address: string; port: number }[]
+) {
   return buildFencePlan({ box, leaseRange: RANGE, resolvConf: RESOLV, objectStore });
 }
 
@@ -56,7 +59,9 @@ describe('egress fence ruleset', () => {
 
   it('allows DNS only to the configured nameservers, before the link-local drop', () => {
     const rules = renderFenceRuleset(plan());
-    const dns = rules.indexOf('ip daddr { 127.0.0.53, 169.254.169.254 } meta l4proto { tcp, udp } th dport 53 accept');
+    const dns = rules.indexOf(
+      'ip daddr { 127.0.0.53, 169.254.169.254 } meta l4proto { tcp, udp } th dport 53 accept'
+    );
     expect(dns).toBeGreaterThan(0);
     expect(dns).toBeLessThan(rules.indexOf('169.254.0.0/16'));
   });
@@ -64,7 +69,14 @@ describe('egress fence ruleset', () => {
   it('drops this host, private, link-local, CGNAT and IPv6 local ranges', () => {
     const rules = renderFenceRuleset(plan());
     expect(rules).toContain('fib daddr type local counter drop');
-    for (const range of ['10.0.0.0/8', '127.0.0.0/8', '169.254.0.0/16', '172.16.0.0/12', '192.168.0.0/16', '100.64.0.0/10']) {
+    for (const range of [
+      '10.0.0.0/8',
+      '127.0.0.0/8',
+      '169.254.0.0/16',
+      '172.16.0.0/12',
+      '192.168.0.0/16',
+      '100.64.0.0/10',
+    ]) {
       expect(rules).toContain(range);
     }
     for (const range of ['::/127', 'fc00::/7', 'fe80::/10', '::ffff:0:0/96']) {
@@ -107,7 +119,7 @@ describe('egress fence ruleset', () => {
     expect(() => plan(box)).toThrow(/egress fence would allow/);
   });
 
-  it('refuses a plan that would open celld\'s operator port as the object store port', () => {
+  it("refuses a plan that would open celld's operator port as the object store port", () => {
     expect(() => plan({}, [{ address: '127.0.0.1', port: 7001 }])).toThrow(/CELLD_INTERNAL_PORT/);
   });
 
@@ -121,7 +133,9 @@ describe('egress fence ruleset', () => {
 describe('parseNameservers', () => {
   it('keeps IP literals, drops zone ids and junk, dedupes', () => {
     expect(
-      parseNameservers('nameserver 1.1.1.1\nnameserver fe80::1%eth0\nnameserver bogus\nnameserver 1.1.1.1\n')
+      parseNameservers(
+        'nameserver 1.1.1.1\nnameserver fe80::1%eth0\nnameserver bogus\nnameserver 1.1.1.1\n'
+      )
     ).toEqual(['1.1.1.1', 'fe80::1']);
   });
 });
@@ -133,7 +147,9 @@ describe('object store endpoints', () => {
       { address: '127.0.0.1', port: 9000 },
     ]);
     expect(
-      await resolveObjectStoreEndpoints({ S3_ENDPOINT: 'https://minio.lan' }, async () => ['10.0.0.9'])
+      await resolveObjectStoreEndpoints({ S3_ENDPOINT: 'https://minio.lan' }, async () => [
+        '10.0.0.9',
+      ])
     ).toEqual([{ address: '10.0.0.9', port: 443 }]);
   });
 });
@@ -159,9 +175,15 @@ describe('celld.env and the metadata token proxy', () => {
   });
 
   it('requires the gce compose profile exactly when the proxy is on', () => {
-    expect(() => assertComposeProfiles({ CELLD_BUCKET: 'gs://b', COMPOSE_PROFILES: 'tunnel' })).toThrow(/gce/);
-    expect(() => assertComposeProfiles({ CELLD_BUCKET: 'gs://b', COMPOSE_PROFILES: 'tunnel,gce' })).not.toThrow();
-    expect(() => assertComposeProfiles({ CELLD_BUCKET: 's3://b', COMPOSE_PROFILES: 'gce' })).toThrow(/remove/);
+    expect(() =>
+      assertComposeProfiles({ CELLD_BUCKET: 'gs://b', COMPOSE_PROFILES: 'tunnel' })
+    ).toThrow(/gce/);
+    expect(() =>
+      assertComposeProfiles({ CELLD_BUCKET: 'gs://b', COMPOSE_PROFILES: 'tunnel,gce' })
+    ).not.toThrow();
+    expect(() =>
+      assertComposeProfiles({ CELLD_BUCKET: 's3://b', COMPOSE_PROFILES: 'gce' })
+    ).toThrow(/remove/);
   });
 
   it('writes the ruleset world-readable, celld.env private, and keeps the proxy secret stable', async () => {
@@ -185,14 +207,20 @@ describe('presign credential', () => {
       /R2_ACCESS_KEY_ID is the fleet bucket credential/
     );
     expect(() =>
-      assertPresignCredentialIsScoped(box, { R2_ACCESS_KEY_ID: 'scoped', R2_SECRET_ACCESS_KEY: 'fleet-secret' })
+      assertPresignCredentialIsScoped(box, {
+        R2_ACCESS_KEY_ID: 'scoped',
+        R2_SECRET_ACCESS_KEY: 'fleet-secret',
+      })
     ).toThrow(/R2_SECRET_ACCESS_KEY/);
   });
 
   it('control: accepts a scoped credential, and no credential at all', () => {
     const box = { AWS_ACCESS_KEY_ID: 'fleet-key', AWS_SECRET_ACCESS_KEY: 'fleet-secret' };
     expect(() =>
-      assertPresignCredentialIsScoped(box, { R2_ACCESS_KEY_ID: 'scoped', R2_SECRET_ACCESS_KEY: 'scoped-secret' })
+      assertPresignCredentialIsScoped(box, {
+        R2_ACCESS_KEY_ID: 'scoped',
+        R2_SECRET_ACCESS_KEY: 'scoped-secret',
+      })
     ).not.toThrow();
     expect(() => assertPresignCredentialIsScoped({}, {})).not.toThrow();
   });
@@ -208,12 +236,19 @@ describe('verify-fence', () => {
     expect(evaluateProbes(targets, parseProbeOutput('0 blocked\n1 refused\n'))).toEqual([]);
   });
 
-  it.each(['open', 'refused', 'timeout', 'error'])('fails when a forbidden target is %s', (outcome) => {
-    expect(evaluateProbes(targets, parseProbeOutput(`0 ${outcome}\n1 open\n`))[0]).toMatch(/NOT fenced/);
-  });
+  it.each(['open', 'refused', 'timeout', 'error'])(
+    'fails when a forbidden target is %s',
+    (outcome) => {
+      expect(evaluateProbes(targets, parseProbeOutput(`0 ${outcome}\n1 open\n`))[0]).toMatch(
+        /NOT fenced/
+      );
+    }
+  );
 
   it('fails when an allowed target is blocked, or a result is missing', () => {
-    expect(evaluateProbes(targets, parseProbeOutput('0 blocked\n1 blocked\n'))[0]).toMatch(/should be allowed/);
+    expect(evaluateProbes(targets, parseProbeOutput('0 blocked\n1 blocked\n'))[0]).toMatch(
+      /should be allowed/
+    );
     expect(evaluateProbes(targets, parseProbeOutput('0 blocked\n'))[0]).toMatch(/no result/);
   });
 
@@ -228,7 +263,13 @@ describe('verify-fence', () => {
     const all = await fenceTargets({ CELLD_BUCKET: 'gs://b' }, '1.1.1.1:443');
     const blocked = all.filter((t) => t.expect === 'blocked').map((t) => `${t.host}:${t.port}`);
     expect(blocked).toEqual(
-      expect.arrayContaining(['127.0.0.1:7001', '127.0.0.1:8080', '127.0.0.1:7000', '169.254.169.254:80', '::1:7001'])
+      expect.arrayContaining([
+        '127.0.0.1:7001',
+        '127.0.0.1:8080',
+        '127.0.0.1:7000',
+        '169.254.169.254:80',
+        '::1:7001',
+      ])
     );
     const allowed = all.filter((t) => t.expect === 'reachable').map((t) => `${t.host}:${t.port}`);
     expect(allowed).toEqual(['127.0.0.1:20000', '1.1.1.1:443', '127.0.0.1:7180']);

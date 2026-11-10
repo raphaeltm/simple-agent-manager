@@ -260,7 +260,11 @@ describe('guardedFetch', () => {
       {
         method: 'POST',
         body: '{}',
-        headers: { Authorization: 'Bearer k', 'x-api-key': 'k', 'content-type': 'application/json' },
+        headers: {
+          Authorization: 'Bearer k',
+          'x-api-key': 'k',
+          'content-type': 'application/json',
+        },
       },
       { fetchFn }
     );
@@ -281,9 +285,9 @@ describe('guardedFetch', () => {
       { method: 'POST', body: '{}', headers: { Authorization: 'Bearer k' } },
       { fetchFn }
     );
-    expect(new Headers((fetchFn.mock.calls[1]?.[1] as RequestInit).headers).get('authorization')).toBe(
-      'Bearer k'
-    );
+    expect(
+      new Headers((fetchFn.mock.calls[1]?.[1] as RequestInit).headers).get('authorization')
+    ).toBe('Bearer k');
   });
 
   it('turns a POST into a body-less GET on 303', async () => {

@@ -153,9 +153,11 @@ describe('deliverWebPushSubscription', () => {
   });
 
   it('treats a redirect from the push service as a failure and never follows it', async () => {
-    const fetcher = vi.fn().mockResolvedValue(
-      new Response(null, { status: 302, headers: { Location: 'http://127.0.0.1:7001/' } })
-    );
+    const fetcher = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(null, { status: 302, headers: { Location: 'http://127.0.0.1:7001/' } })
+      );
 
     const result = await deliverWebPushSubscription(SUBSCRIPTION, '{}', ENV, {
       fetcher,
