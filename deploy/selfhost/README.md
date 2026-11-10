@@ -11,7 +11,9 @@ Instant sessions, Workers AI features, Analytics Engine, Artifacts and email sig
 | Service       | Network | Listens on                      | Notes                                                    |
 | ------------- | ------- | ------------------------------- | -------------------------------------------------------- |
 | `caddy`       | host    | `:80`, `:443`                   | wildcard `*.SAM_DOMAIN`, sets `CF-Connecting-IP`         |
-| `celld`       | host    | `127.0.0.1:8080`, `:7001` (ops) | API Worker + web UI (`ASSETS`), cron triggers            |
+| `celld`       | host    | `127.0.0.1:8080`, `:7001` (ops) | API Worker + web UI (`ASSETS`), cron triggers; uid 7101  |
+| `egress-fence`| host    | none                            | installs and keeps the celld nftables egress fence       |
+| `gce-metadata-proxy` | host | `127.0.0.1:7180`           | profile `gce`; access tokens for a gs:// bucket          |
 | `frps`        | host    | `127.0.0.1:7000`                | profile `tunnel`; nodes arrive as frp over wss via Caddy |
 | `objectstore` | host    | `127.0.0.1:9000`                | profile `local-store`; otherwise use a GCS/S3 bucket     |
 
@@ -23,10 +25,15 @@ Needs Docker with Compose v2.20+, Node 22+ and pnpm, and a checkout of this repo
 cp deploy/selfhost/.env.example deploy/selfhost/.env && chmod 600 deploy/selfhost/.env
 $EDITOR deploy/selfhost/.env           # SAM_DOMAIN, TLS mode, bucket
 pnpm install
-pnpm selfhost:deploy --init            # platform keys + .state/gateway.env, once
+pnpm selfhost:deploy --init            # platform keys, gateway.env, egress fence files
 docker compose -f deploy/selfhost/docker-compose.yml up -d
 pnpm selfhost:deploy                   # build web, migrate, deploy; re-run to upgrade
+pnpm selfhost:verify-fence             # the egress fence is in effect (see below)
 ```
+
+Upgrading a box from before the egress fence: add `gce` to `COMPOSE_PROFILES` if the bucket is
+gs://, run `pnpm selfhost:deploy --init`, then `docker compose up -d --build`. celld switches to
+uid 7101; `celld-data-owner` re-owns its data volume on the way.
 
 Worker secrets that are yours to supply (GitHub App, OAuth clients) go in
 `deploy/selfhost/.state/secrets.env` (`NAME=value`, mode 600). Platform keys are generated into
@@ -69,9 +76,49 @@ redacted.
   frps asks the Worker to authorize every login, proxy and heartbeat. Node WebSockets go through
   Caddy forward_auth (`caddy/sam.d/node-ws.caddy`); plain HTTP to nodes stays on the Worker and is
   cut at `CELLD_FETCH_TIMEOUT_S`. The box needs a certificate nodes trust (frpc verifies it).
-- The Worker shares the host network, so its outbound `fetch` can reach loopback services
-  (celld's operator listener, the bundled store, frps) and, on GCE, the metadata server. There
-  is no egress fence yet.
+
+## Outbound requests and the egress fence
+
+The Worker shares the host network, so without limits its `fetch` could reach every loopback
+service (celld's unauthenticated operator listener, frps's control port, the object store and
+its console), any private address, and the cloud metadata server. Two layers stop that:
+
+1. The API checks every URL a user or admin chose before it calls it, and never lets the
+   runtime follow a redirect (`apps/api/src/lib/network-hosts`). User URLs must be public HTTPS.
+   An admin's OpenAI-compatible endpoint on this machine or its private network (a local model
+   server) needs the `llm.openAICompatible.allowPrivateNetwork` admin setting; metadata and
+   link-local addresses are refused either way. These checks see names, not DNS answers.
+2. The egress fence holds whatever the Worker asks for. celld runs as `CELLD_UID` (7101), and
+   the `egress-fence` service installs an nftables table, rendered into `.state/egress-fence.nft`
+   by `pnpm selfhost:deploy`, that lets that uid reach only the public internet, the
+   `resolv.conf` nameservers on port 53, the node lease ports on 127.0.0.1, the object store
+   endpoint celld uses (`S3_ENDPOINT`), the metadata token proxy, and Caddy's ports. Everything
+   else on the box and every private, link-local and metadata range is dropped. The service
+   re-applies the table if a firewall reload removes it. celld's entrypoint (`celld/start.sh`)
+   will not start celld until a connection to its own operator port is dropped, so a reboot
+   cannot bring celld up unfenced.
+
+Check it after install, after a firewall change, or any time:
+
+```bash
+pnpm selfhost:verify-fence             # exits 1 and lists every gap if the fence is not in effect
+```
+
+It probes from celld's uid on the host network (every forbidden target must fail with EPERM,
+every allowed one must not) and repeats one forbidden probe from another uid as a control.
+
+On GCE with a gs:// bucket, celld needs access tokens from the metadata server, which the fence
+blocks. The `gce` profile runs a small proxy (`metadata-proxy/Caddyfile`) that serves only the
+service-account token and email, only with the `Metadata-Flavor` header, and only under a random
+path prefix that is in celld's environment (`.state/celld.env`) and not in the Worker's. Worker
+code can reach the proxy port, as celld can, but not that path. Give the VM's service account
+access to the fleet bucket only.
+
+What the fence cannot separate: Worker code and celld's storage client are one process. A
+Worker can reach the object store endpoint (without the fleet credential it gets nothing; the
+bundled store denies anonymous access) and the token proxy port. The deploy refuses a presign
+credential (`R2_ACCESS_KEY_ID`) equal to the fleet credential, since the presign credential is a
+Worker secret.
 
 ## Code
 
@@ -79,3 +126,5 @@ redacted.
   `wrangler.json` and fails on any key it has no rule for.
 - `scripts/selfhost/deploy.ts`: the deploy and upgrade flow above.
 - `caddy/sam.d/` and `frps/frps.toml`: node-transport routes and config (reverse tunnel).
+- `scripts/selfhost/egress-fence.ts`, `egress-fence/`, `celld/start.sh`, `metadata-proxy/`: the
+  egress fence; `scripts/selfhost/verify-fence.ts`: `pnpm selfhost:verify-fence`.
