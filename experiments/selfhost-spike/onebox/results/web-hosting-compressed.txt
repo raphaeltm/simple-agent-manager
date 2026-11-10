@@ -1,0 +1,5 @@
+=== app.onebox.test
+largest JS (assets/chunk-K5T4RW27-CB1otIab.js, 473564B raw) with Accept-Encoding: 106743B content-encoding: zstd
+=== app-assets.onebox.test
+largest JS (assets/chunk-K5T4RW27-CB1otIab.js, 473564B raw) with Accept-Encoding: 107002B content-encoding: zstd
+=== api.onebox.test/index.html (must reach the Worker, not the SPA)

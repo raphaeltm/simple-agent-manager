@@ -15,4 +15,7 @@ if (secretsFile && secretsFile !== '-') {
   while ((m = re.exec(text))) { cfg.vars[m[1]] = m[2] !== undefined ? m[2].replace(/\\n/g, '\n').replace(/\\"/g, '"') : (m[3] ?? m[4].trim()); n++; }
   console.error(`merged ${n} secret(s) from ${secretsFile}`);
 }
+if (process.env.WEB_ASSETS_DIR) {
+  cfg.assets = { directory: process.env.WEB_ASSETS_DIR, binding: 'ASSETS', not_found_handling: 'single-page-application', run_worker_first: true };
+}
 writeFileSync(out, JSON.stringify(cfg, null, 2), { mode: 0o600 });

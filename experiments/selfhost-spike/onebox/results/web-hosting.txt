@@ -1,0 +1,16 @@
+=== app.onebox.test
+200 9879B text/html; charset=utf-8 / | cache= | xfo=DENY | csp=
+200 9879B text/html; charset=utf-8 /projects/abc/chat | cache= | xfo=DENY | csp=
+200 3461B text/javascript; charset=utf-8 /assets/AccountBits-Df8JxFWz.js | cache=public, max-age=31536000, immutable | xfo=DENY | csp=
+200 9879B text/html; charset=utf-8 /oauth/consent | cache= | xfo=DENY | csp=
+200 9879B text/html; charset=utf-8 /missing.json | cache= | xfo=DENY | csp=
+largest JS (assets/chunk-K5T4RW27-CB1otIab.js, 473564B raw) with Accept-Encoding: 473564B 
+=== app-assets.onebox.test
+200 9879B text/html; charset=utf-8 / | cache=public, max-age=0, must-revalidate | xfo= | csp=
+200 9879B text/html; charset=utf-8 /projects/abc/chat | cache=public, max-age=0, must-revalidate | xfo= | csp=
+200 3461B text/javascript; charset=utf-8 /assets/AccountBits-Df8JxFWz.js | cache=public, max-age=0, must-revalidate | xfo= | csp=
+200 9879B text/html; charset=utf-8 /oauth/consent | cache=no-store | xfo=DENY | csp=frame-ancestors 'none'
+200 9879B text/html; charset=utf-8 /missing.json | cache=public, max-age=0, must-revalidate | xfo= | csp=
+largest JS (assets/chunk-K5T4RW27-CB1otIab.js, 473564B raw) with Accept-Encoding: 473564B 
+=== api.onebox.test/index.html (must reach the Worker, not the SPA)
+404 application/json

@@ -22,6 +22,8 @@
 
 *.{$DOMAIN:onebox.test} {
 	tls internal
+	# celld never compresses responses (assets or Worker); do it at the edge.
+	encode zstd gzip
 
 	# app.<domain>: the Vite SPA from disk with SPA fallback (option A, item 5).
 	@app host app.{$DOMAIN:onebox.test}

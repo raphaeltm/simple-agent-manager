@@ -1,0 +1,21 @@
+== cert presented for api.onebox.test
+subject= X509v3 Subject Alternative Name: critical DNS:*.onebox.test 
+== https://api.onebox.test/headers with spoofed CF-Connecting-IP / X-Forwarded-Host / True-Client-IP
+{"url":"https://api.onebox.test/headers","cfip":"127.0.0.1","xff":"127.0.0.1","xfh":"api.onebox.test","tci":null,"xri":"127.0.0.1"}
+== https://app-assets.onebox.test/headers with spoofed CF-Connecting-IP / X-Forwarded-Host / True-Client-IP
+{"url":"https://app-assets.onebox.test/headers","cfip":"127.0.0.1","xff":"127.0.0.1","xfh":"app-assets.onebox.test","tci":null,"xri":"127.0.0.1"}
+== https://ws-01abc.onebox.test/headers with spoofed CF-Connecting-IP / X-Forwarded-Host / True-Client-IP
+{"url":"https://ws-01abc.onebox.test/headers","cfip":"127.0.0.1","xff":"127.0.0.1","xfh":"ws-01abc.onebox.test","tci":null,"xri":"127.0.0.1"}
+== https://ws-01abc--3000.onebox.test/headers with spoofed CF-Connecting-IP / X-Forwarded-Host / True-Client-IP
+{"url":"https://ws-01abc--3000.onebox.test/headers","cfip":"127.0.0.1","xff":"127.0.0.1","xfh":"ws-01abc--3000.onebox.test","tci":null,"xri":"127.0.0.1"}
+== app.onebox.test (file_server) deep link
+200 text/html; charset=utf-8
+== direct to celld without trust headers (bypassing Caddy): request.url
+http://api.onebox.test/headers
+open after 16 ms
+recv echo:ping0
+recv echo:ping1
+recv echo:ping2
+closed 1000
+{"client":"container on docker bridge","cfip":"172.18.0.5","xff":"172.18.0.5"}
+{"client":"host eth0 172.17.0.4","cfip":"172.17.0.4","xff":"172.17.0.4"}

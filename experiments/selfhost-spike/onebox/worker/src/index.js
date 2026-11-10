@@ -57,6 +57,9 @@ export default {
   async fetch(req, env, ctx) {
     const u = new URL(req.url);
     const p = u.pathname;
+    // Option B (item 5): the SPA rides in the same Worker via the assets binding.
+    // run_worker_first=true, so the Worker dispatches by host; api/ws hosts never see SPA files.
+    if (env.ASSETS && u.hostname.startsWith('app-assets.')) return env.ASSETS.fetch(req);
     if (p === '/' || p === '/healthz') return json({ ok: true, host: u.host, url: req.url, app: env.APP_NAME });
     if (p.startsWith('/do/')) {
       const name = u.searchParams.get('name') || 'default';
