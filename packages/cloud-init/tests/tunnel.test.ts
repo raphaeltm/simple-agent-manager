@@ -122,14 +122,18 @@ describe('tunnel variable validation', () => {
     expect(message).not.toContain('SSSS');
   });
 
-  it.each(['cloudflareTunnelPort', 'cloudflaredVersion', 'tunnelListenerWaitSeconds'] as const)(
-    'rejects %s without a token instead of booting a direct-ingress node',
-    (name) => {
-      expect(() => validateCloudInitVariables(variables({ [name]: '8444' }))).toThrow(
-        `${name}: requires cloudflareTunnelToken`
-      );
-    }
-  );
+  it.each([
+    'cloudflareTunnelPort',
+    'cloudflaredVersion',
+    'tunnelListenerWaitSeconds',
+    'tunnelListenerProbeTimeoutSeconds',
+    'tunnelListenerProbeIntervalSeconds',
+    'tunnelConnectorRestartSeconds',
+  ] as const)('rejects %s without a token instead of booting a direct-ingress node', (name) => {
+    expect(() => validateCloudInitVariables(variables({ [name]: '8444' }))).toThrow(
+      `${name}: requires cloudflareTunnelToken`
+    );
+  });
 });
 
 describe('rendered tunnel-mode user-data', () => {
@@ -548,31 +552,94 @@ chown -R ${process.getuid?.() ?? 0} ${d}`;
   });
 });
 
+/**
+ * Fake clock for the readiness gate: `date +%s` starts at 1000 and every
+ * probe (curl) or pause (sleep) advances it by its own duration, so the test
+ * observes elapsed-time behaviour without waiting.
+ */
+function readinessSandbox(curlBody: string) {
+  const advance = (seconds: string) =>
+    `t=$(cat "$TEST_DIR/clock" 2>/dev/null || echo 1000); echo $((t + ${seconds})) > "$TEST_DIR/clock"`;
+  return sandbox({
+    date: 'cat "$TEST_DIR/clock" 2>/dev/null || echo 1000',
+    // A failing probe spends its whole --max-time ($3).
+    curl: `${advance('$3')}\n${curlBody}`,
+    sleep: advance('$1'),
+    logger: 'true',
+  });
+}
+
+const waitScript = (overrides?: Partial<CloudInitVariables>) =>
+  file(parse(tunnel(overrides)), '/usr/local/sbin/sam-wait-tunnel-listener').content;
+
 describe('executed connector readiness gate', () => {
   it('waits for the loopback tunnel listener before allowing the connector to start', () => {
-    const box = sandbox({
-      curl: `n=$(cat "$TEST_DIR/n" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "$TEST_DIR/n"; [ "$n" -ge 3 ]`,
-      sleep: 'true',
-      logger: 'true',
-    });
-    const script = file(parse(tunnel()), '/usr/local/sbin/sam-wait-tunnel-listener').content;
-    const result = box.run('/bin/sh', script);
+    const box = readinessSandbox(
+      'n=$(cat "$TEST_DIR/n" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "$TEST_DIR/n"; [ "$n" -ge 3 ]'
+    );
+    const result = box.run('/bin/sh', waitScript());
     expect(result.status).toBe(0);
     expect(box.calls()).toContain(
       'curl -fsS --max-time 2 -o /dev/null http://127.0.0.1:8444/health'
     );
     expect(box.calls().match(/^curl /gm)).toHaveLength(3);
+    expect(box.calls().match(/^sleep 1$/gm)).toHaveLength(2);
   });
 
-  it('fails the start attempt when the listener never answers', () => {
-    const box = sandbox({ curl: 'exit 7', sleep: 'true', logger: 'true' });
-    const script = file(
-      parse(tunnel({ tunnelListenerWaitSeconds: '4' })),
-      '/usr/local/sbin/sam-wait-tunnel-listener'
-    ).content;
-    const result = box.run('/bin/sh', script);
+  it('gives up at the elapsed-time deadline, not after a number of attempts', () => {
+    // 20s budget; each failed round costs a 5s probe plus a 3s pause, so the
+    // deadline passes after the third probe. An attempt counter would make 20.
+    const box = readinessSandbox('exit 7');
+    const result = box.run(
+      '/bin/sh',
+      waitScript({
+        tunnelListenerWaitSeconds: '20',
+        tunnelListenerProbeTimeoutSeconds: '5',
+        tunnelListenerProbeIntervalSeconds: '3',
+      })
+    );
     expect(result.status).toBe(1);
-    expect(box.calls().match(/^curl /gm)).toHaveLength(4);
+    expect(box.calls().match(/^curl -fsS --max-time 5 /gm)).toHaveLength(3);
+    expect(box.calls().match(/^sleep 3$/gm)).toHaveLength(2);
+    expect(Number(readFileSync(join(box.dir, 'clock'), 'utf8'))).toBeLessThanOrEqual(1000 + 20 + 5);
+  });
+});
+
+describe('connector timing settings', () => {
+  it('renders the default and configured connector restart delay', () => {
+    const unit = (o?: Partial<CloudInitVariables>) =>
+      file(parse(tunnel(o)), '/etc/systemd/system/sam-cloudflared.service').content;
+    expect(unit()).toContain('RestartSec=5\n');
+    expect(unit({ tunnelConnectorRestartSeconds: '17' })).toContain('RestartSec=17\n');
+  });
+
+  it('treats empty strings as unset, as env-derived callers pass them', () => {
+    const vars = tunnel({
+      cloudflareTunnelPort: '',
+      cloudflaredVersion: '',
+      tunnelListenerWaitSeconds: '',
+      tunnelListenerProbeTimeoutSeconds: '',
+      tunnelListenerProbeIntervalSeconds: '',
+      tunnelConnectorRestartSeconds: '',
+    });
+    expect(() => validateCloudInitVariables(vars)).not.toThrow();
+    const parsed = parse(vars);
+    expect(file(parsed, '/etc/systemd/system/sam-cloudflared.service').content).toContain(
+      'RestartSec=5\n'
+    );
+    expect(file(parsed, '/usr/local/sbin/sam-wait-tunnel-listener').content).toContain(
+      'http://127.0.0.1:8444/health'
+    );
+    expect(parsed.runcmd.join('\n')).toContain(`/${DEFAULT_CLOUDFLARED_VERSION}/cloudflared-linux`);
+  });
+
+  it.each([
+    ['tunnelListenerProbeTimeoutSeconds', '61'],
+    ['tunnelListenerProbeIntervalSeconds', '0'],
+    ['tunnelConnectorRestartSeconds', '3601'],
+    ['tunnelConnectorRestartSeconds', '5s'],
+  ] as const)('rejects %s=%s', (name, value) => {
+    expect(() => validateCloudInitVariables(tunnel({ [name]: value }))).toThrow(name);
   });
 });
 

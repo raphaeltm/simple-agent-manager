@@ -32,8 +32,25 @@ export const CLOUDFLARED_DOWNLOAD_BASE_URL =
 /** Loopback port of the VM agent's tunnel listener (matches the agent's DefaultTunnelPort). */
 export const DEFAULT_CLOUDFLARE_TUNNEL_PORT = '8444';
 
-/** Seconds the connector unit waits for the tunnel listener before a start attempt fails. */
+/** Elapsed seconds the connector unit waits for the tunnel listener before a start attempt fails. */
 export const DEFAULT_TUNNEL_LISTENER_WAIT_SECONDS = '120';
+
+/** Timeout of each loopback tunnel listener health probe, in seconds. */
+export const DEFAULT_TUNNEL_LISTENER_PROBE_TIMEOUT_SECONDS = '2';
+
+/** Pause between loopback tunnel listener health probes, in seconds. */
+export const DEFAULT_TUNNEL_LISTENER_PROBE_INTERVAL_SECONDS = '1';
+
+/** systemd RestartSec for the connector after it exits or fails to start. */
+export const DEFAULT_TUNNEL_CONNECTOR_RESTART_SECONDS = '5';
+
+/** Tunnel timing settings: [variable, inclusive maximum]. All must be integers >= 1. */
+const TUNNEL_TIMING_LIMITS = [
+  ['tunnelListenerWaitSeconds', 3600],
+  ['tunnelListenerProbeTimeoutSeconds', 60],
+  ['tunnelListenerProbeIntervalSeconds', 60],
+  ['tunnelConnectorRestartSeconds', 3600],
+] as const;
 
 /** Connector run tokens are base64 JSON; bound the length so a mistaken paste fails fast. */
 const TUNNEL_TOKEN_RE = /^[A-Za-z0-9+/=_-]{32,4096}$/;
@@ -41,6 +58,11 @@ const NUMERIC_RE = /^[0-9]+$/;
 
 function isSet(value: string | undefined): value is string {
   return value !== undefined && value !== '';
+}
+
+/** Empty strings mean "not set": env-derived callers commonly pass ''. */
+function orDefault(value: string | undefined, fallback: string): string {
+  return isSet(value) ? value : fallback;
 }
 
 /** A node is in tunnel mode exactly when it is given a connector token. */
@@ -60,11 +82,12 @@ function effectiveVmAgentPort(variables: CloudInitVariables): string {
 export function validateTunnelVariables(variables: CloudInitVariables, errors: string[]): void {
   if (!isTunnelMode(variables)) {
     // Tunnel settings without a token would silently boot a direct-ingress node.
-    for (const name of [
+    const tunnelOnly: Array<keyof CloudInitVariables> = [
       'cloudflareTunnelPort',
       'cloudflaredVersion',
-      'tunnelListenerWaitSeconds',
-    ] as const) {
+      ...TUNNEL_TIMING_LIMITS.map(([timing]) => timing),
+    ];
+    for (const name of tunnelOnly) {
       if (isSet(variables[name])) {
         errors.push(`${name}: requires cloudflareTunnelToken`);
       }
@@ -83,7 +106,7 @@ export function validateTunnelVariables(variables: CloudInitVariables, errors: s
     );
   }
 
-  const port = variables.cloudflareTunnelPort ?? DEFAULT_CLOUDFLARE_TUNNEL_PORT;
+  const port = orDefault(variables.cloudflareTunnelPort, DEFAULT_CLOUDFLARE_TUNNEL_PORT);
   if (!NUMERIC_RE.test(port) || Number(port) < 1 || Number(port) > 65535) {
     errors.push(`cloudflareTunnelPort: must be numeric 1-65535 (got ${JSON.stringify(port)})`);
   } else if (Number(port) === Number(effectiveVmAgentPort(variables))) {
@@ -92,16 +115,18 @@ export function validateTunnelVariables(variables: CloudInitVariables, errors: s
     );
   }
 
-  const version = variables.cloudflaredVersion ?? DEFAULT_CLOUDFLARED_VERSION;
+  const version = orDefault(variables.cloudflaredVersion, DEFAULT_CLOUDFLARED_VERSION);
   if (!Object.hasOwn(CLOUDFLARED_RELEASES, version)) {
     errors.push(
       `cloudflaredVersion: must be one of ${Object.keys(CLOUDFLARED_RELEASES).join(', ')} (got ${JSON.stringify(version)})`
     );
   }
 
-  const wait = variables.tunnelListenerWaitSeconds;
-  if (isSet(wait) && (!NUMERIC_RE.test(wait) || Number(wait) < 1 || Number(wait) > 3600)) {
-    errors.push(`tunnelListenerWaitSeconds: must be numeric 1-3600 (got ${JSON.stringify(wait)})`);
+  for (const [name, max] of TUNNEL_TIMING_LIMITS) {
+    const value = variables[name];
+    if (isSet(value) && (!NUMERIC_RE.test(value) || Number(value) < 1 || Number(value) > max)) {
+      errors.push(`${name}: must be numeric 1-${max} (got ${JSON.stringify(value)})`);
+    }
   }
 }
 
@@ -125,7 +150,7 @@ export function ingressFragments(variables: CloudInitVariables): Record<string, 
 /** Template replacements for tunnel mode; legacy nodes get inert values. */
 export function tunnelReplacements(variables: CloudInitVariables): Record<string, string> {
   const tunnel = isTunnelMode(variables);
-  const version = variables.cloudflaredVersion ?? DEFAULT_CLOUDFLARED_VERSION;
+  const version = orDefault(variables.cloudflaredVersion, DEFAULT_CLOUDFLARED_VERSION);
   const release = CLOUDFLARED_RELEASES[version];
   return {
     '{{ tunnel_mode }}': tunnel ? 'true' : 'false',
@@ -134,10 +159,24 @@ export function tunnelReplacements(variables: CloudInitVariables): Record<string
     '{{ vm_agent_exec_start_pre }}': tunnel
       ? 'ExecStartPre=/etc/sam/firewall/setup-firewall.sh'
       : '',
-    '{{ tunnel_port }}': variables.cloudflareTunnelPort ?? DEFAULT_CLOUDFLARE_TUNNEL_PORT,
+    '{{ tunnel_port }}': orDefault(variables.cloudflareTunnelPort, DEFAULT_CLOUDFLARE_TUNNEL_PORT),
     '{{ tunnel_token }}': tunnel ? (variables.cloudflareTunnelToken ?? '') : '',
-    '{{ tunnel_listener_wait_seconds }}':
-      variables.tunnelListenerWaitSeconds ?? DEFAULT_TUNNEL_LISTENER_WAIT_SECONDS,
+    '{{ tunnel_listener_wait_seconds }}': orDefault(
+      variables.tunnelListenerWaitSeconds,
+      DEFAULT_TUNNEL_LISTENER_WAIT_SECONDS
+    ),
+    '{{ tunnel_listener_probe_timeout_seconds }}': orDefault(
+      variables.tunnelListenerProbeTimeoutSeconds,
+      DEFAULT_TUNNEL_LISTENER_PROBE_TIMEOUT_SECONDS
+    ),
+    '{{ tunnel_listener_probe_interval_seconds }}': orDefault(
+      variables.tunnelListenerProbeIntervalSeconds,
+      DEFAULT_TUNNEL_LISTENER_PROBE_INTERVAL_SECONDS
+    ),
+    '{{ tunnel_connector_restart_seconds }}': orDefault(
+      variables.tunnelConnectorRestartSeconds,
+      DEFAULT_TUNNEL_CONNECTOR_RESTART_SECONDS
+    ),
     '{{ cloudflared_url }}': `${CLOUDFLARED_DOWNLOAD_BASE_URL}/${version}/cloudflared-linux`,
     '{{ cloudflared_sha256_amd64 }}': release?.amd64 ?? '',
     '{{ cloudflared_sha256_arm64 }}': release?.arm64 ?? '',
