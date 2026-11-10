@@ -15,7 +15,11 @@
  * any other 2xx the inner dispatch might produce (which it then refuses).
  */
 import type { NodeAgentRoute } from './node-agent-route';
-import { REVERSE_TUNNEL_UPSTREAM_HOST } from './node-reverse-tunnel-config';
+import {
+  assertReverseTunnelUpstreamPort,
+  REVERSE_TUNNEL_UPSTREAM_HOST,
+  type ReverseTunnelRangeEnv,
+} from './node-reverse-tunnel-config';
 
 /** Response headers Caddy copies into the upstream request (deploy/selfhost/caddy/sam.d/). */
 export const GATEWAY_HEADER = {
@@ -63,12 +67,19 @@ function unsupported(message: string): Response {
 export function gatewayDecisionResponse(
   request: Request,
   route: NodeAgentRoute | null,
-  upstream: GatewayUpstreamRequest
+  upstream: GatewayUpstreamRequest,
+  env: ReverseTunnelRangeEnv
 ): Response {
   const nonce = gatewayRequestNonces.get(request);
   if (!nonce) throw new Error('gatewayDecisionResponse called for a non-gateway request');
   if (!route || route.kind !== 'reverse-tunnel') {
     return unsupported('Node is not reachable through the self-hosted WebSocket gateway');
+  }
+  // Re-checked where X-SAM-Upstream is minted: Caddy proxies to exactly this address.
+  try {
+    assertReverseTunnelUpstreamPort(env, route.port);
+  } catch {
+    return unsupported('Node lease port is outside the reverse-tunnel range');
   }
   const headers = new Headers({ 'Cache-Control': 'no-store' });
   headers.set(GATEWAY_HEADER.decision, nonce);

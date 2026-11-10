@@ -412,7 +412,7 @@ export async function workspaceSubdomainProxy(
   // Self-hosted WebSocket gateway: everything above (auth, ownership, status, port token,
   // header rewriting) has run unchanged; Caddy proxies the socket to the decided upstream.
   if (gatewayRequest) {
-    return gatewayDecisionResponse(c.req.raw, nodeRoute, { url: vmUrl, headers });
+    return gatewayDecisionResponse(c.req.raw, nodeRoute, { url: vmUrl, headers }, c.env);
   }
 
   let response: Response;

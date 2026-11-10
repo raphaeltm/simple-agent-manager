@@ -36,6 +36,12 @@ export type ReverseTunnelEnv = Pick<
   | 'REVERSE_TUNNEL_PORT_RANGE_END'
 >;
 
+/** The leased port range settings alone (route resolution needs no secret). */
+export type ReverseTunnelRangeEnv = Pick<
+  Env,
+  'REVERSE_TUNNEL_PORT_RANGE_START' | 'REVERSE_TUNNEL_PORT_RANGE_END'
+>;
+
 export interface ReverseTunnelPortRange {
   start: number;
   end: number;
@@ -51,7 +57,7 @@ function parsePort(name: string, raw: string | undefined, fallback: number): num
 }
 
 /** The leased port range. Fails closed on a malformed or oversized range. */
-export function resolveReverseTunnelPortRange(env: ReverseTunnelEnv): ReverseTunnelPortRange {
+export function resolveReverseTunnelPortRange(env: ReverseTunnelRangeEnv): ReverseTunnelPortRange {
   const start = parsePort(
     'REVERSE_TUNNEL_PORT_RANGE_START',
     env.REVERSE_TUNNEL_PORT_RANGE_START,
@@ -73,6 +79,22 @@ export function resolveReverseTunnelPortRange(env: ReverseTunnelEnv): ReverseTun
     );
   }
   return { start, end };
+}
+
+/**
+ * Fail-closed membership check for a lease port about to become an upstream (a Worker fetch
+ * target or Caddy's X-SAM-Upstream). The lease table should only ever hold in-range ports, but
+ * the upstream is loopback on the control-plane box, next to celld's operator listener, frps
+ * and the object store, so a row outside the range (a manual edit, a range shrunk under live
+ * leases, a bug) must never be routed to. Throws on an out-of-range port or a malformed range.
+ */
+export function assertReverseTunnelUpstreamPort(env: ReverseTunnelRangeEnv, port: number): void {
+  const range = resolveReverseTunnelPortRange(env);
+  if (!Number.isInteger(port) || port < range.start || port > range.end) {
+    throw new Error(
+      `Reverse-tunnel lease port ${String(port)} is outside the configured range ${range.start}-${range.end}`
+    );
+  }
 }
 
 /** The configured gateway secret, or null when absent/too short (callers fail closed). */

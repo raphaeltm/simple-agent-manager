@@ -659,6 +659,65 @@ describe('gateway attack cases', () => {
   });
 });
 
+describe('lease port range membership at the point the upstream is produced', () => {
+  // Ports a lease must never name: celld's public + unauthenticated operator listeners, frps,
+  // the bundled object store, plus a port just past the configured range.
+  const outOfRange = [8080, 7001, 7000, 9000, 30000];
+
+  async function nodeWithLeasePort(label: string, userId: string, port: number) {
+    const node = await seedReverseNode(label, userId);
+    await env.DATABASE.prepare(
+      "UPDATE node_reverse_tunnel_leases SET port = ? WHERE node_id = ? AND status = 'active'"
+    )
+      .bind(port, node.nodeId)
+      .run();
+    return node;
+  }
+
+  it.each(outOfRange)(
+    'never hands Caddy an upstream outside the range (lease port %i), with an in-range control',
+    async (port) => {
+      const userId = `rt-range-gw-${port}`;
+      await seedUser(userId);
+      const node = await nodeWithLeasePort(`G${port}`, userId, port);
+      const cookie = await seedSignedInUser(userId);
+      const path = `/api/nodes/${node.nodeId}/logs/stream`;
+      const refused = await call(gatewayCall(`api.${env.BASE_DOMAIN}`, path, { Cookie: cookie }));
+      expect(refused.status).not.toBe(200);
+      expect(refused.headers.get('X-SAM-Upstream')).toBeNull();
+      expect(refused.headers.get('X-SAM-Upstream-Authorization')).toBeNull();
+      // Control: the same node on an in-range port is authorized.
+      await env.DATABASE.prepare(
+        "UPDATE node_reverse_tunnel_leases SET port = ? WHERE node_id = ? AND status = 'active'"
+      )
+        .bind(node.port, node.nodeId)
+        .run();
+      const allowed = await call(gatewayCall(`api.${env.BASE_DOMAIN}`, path, { Cookie: cookie }));
+      expect(allowed.status).toBe(200);
+      expect(allowed.headers.get('X-SAM-Upstream')).toBe(`127.0.0.1:${node.port}`);
+      expect(upstream).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(outOfRange)(
+    'never fetches an out-of-range lease port from the ws-* proxy (lease port %i)',
+    async (port) => {
+      const userId = `rt-range-ws-${port}`;
+      await seedUser(userId);
+      const node = await nodeWithLeasePort(`W${port}`, userId, port);
+      const workspaceId = await seedWorkspaceOn(node, userId, `R${port}`);
+      const response = await call(
+        new Request(`https://ws-${workspaceId.toLowerCase()}.${env.BASE_DOMAIN}/x`, {
+          headers: { Cookie: await seedSignedInUser(userId) },
+        })
+      );
+      expect(response.status).toBe(503);
+      expect(await response.json()).toMatchObject({ error: 'NODE_UNREACHABLE' });
+      expect(upstream).not.toHaveBeenCalled();
+    }
+  );
+});
+
 describe('lease allocation fence (real D1)', () => {
   it.each([
     ['another user', "user_id = 'rt-fence-other'"],
