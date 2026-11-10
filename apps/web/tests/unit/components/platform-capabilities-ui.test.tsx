@@ -14,11 +14,11 @@ import { ProjectChatComposer } from '../../../src/components/project-chat/Projec
 import { AcpConversationItemView } from '../../../src/components/project-message-view/AcpConversationItemView';
 import { CommentComposer } from '../../../src/components/project-message-view/comments/CommentComposer';
 import { SamComposer } from '../../../src/components/sam/SamComposer';
-import { ProjectAgentChat } from '../../../src/pages/ProjectAgentChat';
 import {
   ASSUMED_PLATFORM_CAPABILITIES,
   getPlatformCapabilities,
 } from '../../../src/lib/api/platform-capabilities';
+import { ProjectAgentChat } from '../../../src/pages/ProjectAgentChat';
 
 vi.mock('@simple-agent-manager/acp-client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@simple-agent-manager/acp-client')>();
