@@ -1,0 +1,6 @@
+ok listen 127.0.0.1:8080: bind check; diagnose does not serve
+ok internal listen 127.0.0.1:38543: bind check; diagnose does not serve
+ok advertise 127.0.0.1:38543: same host only; direct reachability is not inferred
+ok bucket s3://celld-fleet
+fail bucket conditional write: the store overwrote an object although the write was conditional on that object being absent; the store accepts If-Match / If-None-Match and does not enforce it, so two nodes can own one cell
+Error: bucket failed the storage conformance probe

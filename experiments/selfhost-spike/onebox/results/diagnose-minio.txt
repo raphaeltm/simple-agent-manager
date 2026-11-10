@@ -1,0 +1,6 @@
+ok listen 127.0.0.1:8080: bind check; diagnose does not serve
+ok internal listen 127.0.0.1:38945: bind check; diagnose does not serve
+ok advertise 127.0.0.1:38945: same host only; direct reachability is not inferred
+ok bucket s3://celld-fleet
+ok bucket conditional write: create, reject-create, update, reject-stale
+ok fleet: 0 node lease(s) enumerated

@@ -1,0 +1,15 @@
+// Rendered to wrangler.json by scripts/render-config.sh at deploy time.
+// Secrets are merged into "vars" from a root-only env file; the rendered file
+// is written to a tmpfs path and deleted after `celld deploy`.
+{
+  "name": "onebox",
+  "main": "src/index.js",
+  "compatibility_date": "2026-01-01",
+  "durable_objects": { "bindings": [{ "name": "BOX", "class_name": "Box" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Box"] }],
+  "d1_databases": [{ "binding": "DB", "database_name": "onebox", "database_id": "00000000-0000-0000-0000-000000000001", "migrations_dir": "migrations" }],
+  "kv_namespaces": [{ "binding": "KV", "id": "onebox-kv" }],
+  "r2_buckets": [{ "binding": "FILES", "bucket_name": "onebox-files" }],
+  "triggers": { "crons": ["* * * * *"] },
+  "vars": { "APP_NAME": "onebox" }
+}
