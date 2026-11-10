@@ -86,6 +86,10 @@ Local tests here are not staging proof; the parent runs live staging E2E.
 - go-specialist: no confirmed concurrency bugs; MEDIUM sequential listener shutdown sharing one
   deadline fixed (concurrent `shutdownListeners`, `TestStopClosesMainListenerWhileTunnelRequestDrains`
   red on the sequential version). LOW harness layering left as is.
+- Parent config review: the readiness wait counted attempts (120 could take ~360 s). Fixed with
+  an elapsed-time deadline; probe timeout, probe interval and connector RestartSec are optional
+  CloudInitVariables with exported defaults (`746eca513`). The fake-clock test goes red on the
+  count-based loop.
 - Local review (this slice): doc-sync PASS; security-auditor 0 CRITICAL/HIGH (LOW systemd
   hardening applied; checksums verified against the release); task-completion-validator PASS
   (`template.ts` split into `template-resources.ts`; the configuration.md env table lists
@@ -97,6 +101,7 @@ Local tests here are not staging proof; the parent runs live staging E2E.
 - Direct (legacy) nodes still install the firewall from `internal/provision` after the agent
   starts listening; the provider cloud firewall is their primary gate. Tunnel nodes are gated
   before start. A provider-level firewall for tunnel nodes (security MEDIUM: in-VM iptables is
-  the only layer) is control-plane work owned by the parent/lifecycle slice and was reported there.
+  the only layer) was reported to the parent, which decided the fail-closed host firewall is
+  adequate for now and left provider-level defence in depth for separate future work.
 - Live staging proof (real VM, connector, firewall evidence) is owned by parent task
   `01M719ZRT6MJX696B9FH8TBWX9`.
