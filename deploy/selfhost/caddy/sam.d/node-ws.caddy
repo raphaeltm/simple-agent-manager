@@ -1,0 +1,2 @@
+# PLACEHOLDER, owned by T2: node WebSockets proxied by Caddy after Worker forward_auth
+# (celld cannot return a WebSocket the Worker obtained from fetch). Same shape as frp.caddy.

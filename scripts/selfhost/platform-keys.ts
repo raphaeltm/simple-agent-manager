@@ -30,7 +30,14 @@ export const PLATFORM_KEY_NAMES = [
   'VAPID_PUBLIC_KEY',
   'PREVIEW_SIGNING_KEY',
   'SAM_INSTALLATION_ID',
+  'REVERSE_TUNNEL_GATEWAY_SECRET',
 ] as const;
+
+/**
+ * Keys that frps and Caddy also need, written to `gateway.env` for docker compose. The Worker
+ * authenticates frps's server plugin and Caddy's forward_auth with this shared secret.
+ */
+export const GATEWAY_KEY_NAMES = ['REVERSE_TUNNEL_GATEWAY_SECRET'] as const;
 
 type PlatformKeyName = (typeof PLATFORM_KEY_NAMES)[number];
 
@@ -65,6 +72,11 @@ const GENERATORS: ReadonlyArray<{
   // `installation-id` (16 bytes, lowercase hex).
   { names: ['PREVIEW_SIGNING_KEY'], generate: () => ({ PREVIEW_SIGNING_KEY: randomBytes(32).toString('base64') }) },
   { names: ['SAM_INSTALLATION_ID'], generate: () => ({ SAM_INSTALLATION_ID: randomBytes(16).toString('hex') }) },
+  // Hex so it is safe in frps's plugin URL userinfo.
+  {
+    names: ['REVERSE_TUNNEL_GATEWAY_SECRET'],
+    generate: () => ({ REVERSE_TUNNEL_GATEWAY_SECRET: randomBytes(32).toString('hex') }),
+  },
 ];
 
 export interface PlatformKeysResult {

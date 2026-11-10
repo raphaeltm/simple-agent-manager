@@ -34,6 +34,9 @@ export const SELFHOST_VAR_OVERRIDES: Readonly<Record<string, string>> = {
   ANALYTICS_ENABLED: 'false',
   ANALYTICS_INGEST_ENABLED: 'false',
   COST_MONITORING_ENABLED: 'false',
+  // Nodes reach the box through frps on loopback instead of per-node Cloudflare DNS/tunnels
+  // (reverse-tunnel transport, sibling task T2 on sam/selfhost-pass-2).
+  VM_AGENT_TRANSPORT: 'reverse-tunnel',
 };
 
 /** Keys the generator owns. Values a caller passes for these are rejected. */

@@ -1,0 +1,6 @@
+# PLACEHOLDER, owned by T2. frps listens on loopback only; nodes reach it as frp over wss
+# through Caddy on 443 (caddy/sam.d/frp.caddy). Each node's proxy also binds on loopback, where
+# the Worker (celld, host network) and Caddy forward_auth reach it.
+bindAddr = "127.0.0.1"
+bindPort = {{ .Envs.FRPS_BIND_PORT }}
+proxyBindAddr = "127.0.0.1"
