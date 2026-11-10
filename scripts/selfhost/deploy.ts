@@ -52,6 +52,7 @@ import {
 import {
   buildVmAgentBinaries,
   publishVmAgentArtifacts,
+  removeVmAgentBuild,
   resolveVmAgentRelease,
 } from './vm-agent-artifacts.js';
 
@@ -258,7 +259,8 @@ async function main(): Promise<void> {
   }
   if (values.init) return;
   const operatorSecrets = readSecretsFile(secretsPath);
-  for (const name of ['BASE_DOMAIN', 'R2_BUCKET_NAME']) {
+  // VM_AGENT_REQUIRED_VERSION must name the release this deploy published (or stay unset).
+  for (const name of ['BASE_DOMAIN', 'R2_BUCKET_NAME', 'VM_AGENT_REQUIRED_VERSION']) {
     if (name in operatorSecrets) throw new Error(`${secretsPath}: ${name} is generated; remove it`);
   }
   const { SAM_INSTALLATION_ID, ...platformSecrets } = keys;
@@ -291,6 +293,12 @@ async function main(): Promise<void> {
     return;
   }
 
+  // First, so a box without a working Docker fails before minutes of other builds.
+  let vmAgentBinDir: string | null = null;
+  if (vmAgentRelease) {
+    log(`building vm-agent release ${vmAgentRelease.release}`);
+    vmAgentBinDir = buildVmAgentBinaries(REPO_ROOT, join(stateDir, 'go-cache'), vmAgentRelease);
+  }
   const webDist = values['web-dist'] ? resolve(values['web-dist']) : buildWeb(baseDomain);
   buildApiDependencies();
   prepareCelldProject({ apiDir: API_DIR, projectDir, plan, webDist });
@@ -299,19 +307,23 @@ async function main(): Promise<void> {
   const env = celldChildEnv(process.env, box, resolveEsbuild(API_DIR));
 
   // Before the Worker that pins VM_AGENT_REQUIRED_VERSION is published, as on Cloudflare.
-  if (vmAgentRelease) {
+  if (vmAgentRelease && vmAgentBinDir) {
     const agentBucket = plan.config.r2_buckets.find((bucket) => bucket.binding === 'R2');
     if (!agentBucket) throw new Error('the Worker has no R2 binding to serve the vm-agent from');
-    log(`building vm-agent release ${vmAgentRelease.release}`);
-    publishVmAgentArtifacts({
-      celld,
-      env,
-      fleetBucket: bucketOf(env),
-      r2BucketName: agentBucket.bucket_name,
-      binDir: buildVmAgentBinaries(REPO_ROOT, join(stateDir, 'go-cache'), vmAgentRelease),
-      release: vmAgentRelease.release,
-      log,
-    });
+    try {
+      publishVmAgentArtifacts({
+        celld,
+        env,
+        fleetBucket: bucketOf(env),
+        r2BucketName: agentBucket.bucket_name,
+        binDir: vmAgentBinDir,
+        release: vmAgentRelease.release,
+        redact: (text) => redactSecrets(text, knownSecrets),
+        log,
+      });
+    } finally {
+      removeVmAgentBuild(vmAgentBinDir);
+    }
   }
 
   // The secrets-free config is what stays on disk: migrations and operator `celld d1`/`kv`

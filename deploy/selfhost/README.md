@@ -32,7 +32,8 @@ pnpm selfhost:deploy                   # build web, migrate, deploy; re-run to u
 Go toolchain) and publishes it into the fleet bucket under the same keys the Cloudflare pipeline
 uses (`agents/releases/<release>/vm-agent-linux-<arch>`, immutable), then pins the Worker's
 `VM_AGENT_REQUIRED_VERSION` to that release. Nodes download it from `/api/agent/download`.
-`--skip-vm-agent` skips this for a control-plane-only box.
+`--skip-vm-agent` skips this for a control-plane-only box. The release is resolved from git
+history, so the checkout must be a full clone (not `--depth 1`).
 
 Worker secrets that are yours to supply (GitHub App, OAuth clients) go in
 `deploy/selfhost/.state/secrets.env` (`NAME=value`, mode 600). Platform keys are generated into

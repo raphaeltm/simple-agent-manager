@@ -5,8 +5,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   decideVmAgentPublish,
+  isR2NoObjectError,
   parseVmAgentRelease,
-  R2_NO_OBJECT,
   VM_AGENT_BUILD_IMAGE,
   vmAgentLegacyKey,
   vmAgentReleaseKey,
@@ -30,10 +30,28 @@ describe('parseVmAgentRelease', () => {
       /release/
     );
     expect(() => parseVmAgentRelease(`release=${RELEASE}\nbuild_date=never`)).toThrow(/build_date/);
+    // Date.parse accepts this; it would reach a make recipe.
+    expect(() =>
+      parseVmAgentRelease(`release=${RELEASE}\nbuild_date=2026-11-10T12:23:48Z ($(id))`)
+    ).toThrow(/build_date/);
+    expect(
+      parseVmAgentRelease(`release=${RELEASE}\nbuild_date=2026-11-10T12:23:48+01:00`).buildDate
+    ).toBe('2026-11-10T12:23:48+01:00');
   });
 });
 
 describe('object keys', () => {
+  it('match the keys the Cloudflare pipeline publishes (publish-vm-agent-artifacts.sh)', () => {
+    const script = readFileSync(
+      resolve(import.meta.dirname, '../deploy/publish-vm-agent-artifacts.sh'),
+      'utf8'
+    );
+    const asTemplate = (key: string): string =>
+      key.replace(RELEASE, '$VM_AGENT_RELEASE').replace(/amd64$/, '$architecture');
+    expect(script).toContain(`$R2_BUCKET/${asTemplate(vmAgentReleaseKey(RELEASE, 'amd64'))}"`);
+    expect(script).toContain(`$R2_BUCKET/${asTemplate(vmAgentLegacyKey('amd64'))}"`);
+  });
+
   it('match the keys /api/agent/download reads (routes/agent.ts)', () => {
     expect(vmAgentReleaseKey(RELEASE, 'amd64')).toBe(
       `agents/releases/${RELEASE}/vm-agent-linux-amd64`
@@ -80,9 +98,16 @@ describe('build pins', () => {
     );
   });
 
-  it("treats only celld's missing-object error as absent", () => {
-    expect(R2_NO_OBJECT.test('Error: no object "agents/x" in r2 bucket "b"')).toBe(true);
-    expect(R2_NO_OBJECT.test('Error: no node leases in the bucket')).toBe(false);
-    expect(R2_NO_OBJECT.test('permission denied')).toBe(false);
+  it("treats only celld's missing-object error for this exact key and bucket as absent", () => {
+    // Captured from celld 0.6.3 on the T4 box (`celld r2 get workspaces-dev-assets agents/nope`).
+    const real = 'Error: no object "agents/nope" in r2 bucket "workspaces-dev-assets"';
+    const logged = `2026-11-10T19:36:40Z  INFO object_store::gcp::credential: fetching token\n${real}\n`;
+    expect(isR2NoObjectError(logged, 'workspaces-dev-assets', 'agents/nope')).toBe(true);
+    expect(isR2NoObjectError(real, 'other-bucket', 'agents/nope')).toBe(false);
+    expect(isR2NoObjectError(real, 'workspaces-dev-assets', 'agents/other')).toBe(false);
+    expect(isR2NoObjectError(`prefix ${real}`, 'workspaces-dev-assets', 'agents/nope')).toBe(false);
+    expect(
+      isR2NoObjectError('Error: no node leases in the bucket', 'workspaces-dev-assets', 'k')
+    ).toBe(false);
   });
 });
