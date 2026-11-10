@@ -32,9 +32,36 @@ locally, so it is timing-sensitive.
 - Staging sets `VM_AGENT_TRANSPORT=cloudflare-tunnel`.
 - Every staging workspace VM is blocked by this, which also blocked live verification of PR #2627 (D3, D8).
 
+## Likely root cause
+
+Traced by the tunnel status agent (task 01M73DYVFKDZH35ZTF7HZ9ZWJ1); the timeout, release and
+rethrow lines below are confirmed in code. It covers every symptom, but no single run was
+traced end to end on staging.
+
+1. Direct provisioning (`POST /api/workspaces` needing a new node, or `POST /api/nodes`, then
+   `NodeLifecycle` `node-lifecycle-provisioning.ts`) wraps the whole `provisionNode` call in a
+   per-attempt abort of `DEFAULT_NODE_PROVISIONING_REQUEST_TIMEOUT_MS = 5_000`. It retries every
+   `DEFAULT_NODE_PROVISIONING_RETRY_INTERVAL_MS = 30_000`.
+2. Tunnel transport adds about 6-7 sequential Cloudflare calls before the Hetzner `createVM` (list
+   tunnels, create tunnel, put ingress, list DNS, create CNAME, get token), so the first attempt
+   is aborted partway through the tunnel create.
+3. The catch in `services/node-provisioning.ts` (~line 549) runs `releaseTunnelBeforeVm` on a fresh
+   allocation. That moves the journal row to `cleanup_pending` / `provisioning_failed_before_vm`.
+4. `rethrowIfProviderRequestAborted` (~line 558) rethrows before the
+   `log.error('node_provisioning.failed')` / persist block, so the abort cause is never recorded.
+5. The durable retry about 30s later resumes the same incarnation. `journalTunnelOwnership` then
+   finds `cleanup_pending` and throws "already being cleaned up". The retry can never succeed.
+6. Task and chat runs go through the TaskRunner, which passes no abort signal. That is why tunnel
+   transport works for chats and #2615's staging sweep passed.
+
+**Production risk:** enabling `VM_AGENT_TRANSPORT=cloudflare-tunnel` in production would break
+direct workspace and node creation the same way. Do not enable it until this is fixed.
+
 ## Acceptance criteria
 
 - [ ] The first tunnel-provisioning failure (tunnel create, ingress, DNS, token) is recorded in `node_cloudflare_tunnels.last_error` and logged at error level with the node and incarnation.
 - [ ] The root cause on staging is identified and fixed, and a staging workspace VM provisions with tunnel transport and heartbeats.
-- [ ] A provisioning retry after a failed tunnel create either reuses or cleanly replaces the journal row, instead of failing on the cleanup fence.
+- [ ] A pre-VM journal row is not released while a durable allocation can still resume that incarnation, or the resume can re-own or replace it, so a retry converges instead of failing on the cleanup fence.
+- [ ] Tunnel steps resume across attempts instead of relying only on a larger 5s budget. State the throughput (rule 81).
+- [ ] A regression test drives `scheduleDirectProvisioning` with `VM_AGENT_TRANSPORT=cloudflare-tunnel`, a Cloudflare create slower than the attempt deadline, and the retry, and asserts it converges.
 - [ ] `node-tunnel-races.test.ts` controls its own ordering, so it cannot flake on slow runners (rule 62).
