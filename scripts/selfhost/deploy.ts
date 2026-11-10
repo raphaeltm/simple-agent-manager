@@ -4,6 +4,7 @@
  *
  *   pnpm selfhost:deploy [--env-file deploy/selfhost/.env] [--state-dir <env dir>/.state]
  *                        [--secrets <state-dir>/secrets.env] [--web-dist DIR] [--dry-run] [--init]
+ *                        [--skip-vm-agent]
  *
  * `--init` only generates the platform keys and `<state-dir>/gateway.env`, the shared secret
  * docker compose hands to frps and Caddy; run it once before the first `docker compose up`.
@@ -12,6 +13,11 @@
  * D1 migrations are applied idempotently, and `celld deploy` publishes a new version that the
  * node adopts in place. celld has no secrets store for real nodes, so secrets are rendered
  * into `vars` for the deploy only; the config left on disk afterwards carries none.
+ *
+ * Nodes download the vm-agent from this install, so the deploy builds it (pinned Go image) and
+ * publishes it into the fleet bucket the way the Cloudflare pipeline does, then pins
+ * VM_AGENT_REQUIRED_VERSION to that release. `--skip-vm-agent` skips both and leaves the
+ * version unpinned (nodes then use the legacy `agents/vm-agent-linux-<arch>` objects).
  *
  * The Cloudflare pipeline never runs this script.
  */
@@ -26,9 +32,9 @@ import * as TOML from '@iarna/toml';
 import type { WranglerToml } from '../deploy/types.js';
 import {
   celldChildEnv,
+  gatewayEnvAction,
   presignVars,
   redactSecrets,
-  gatewayEnvAction,
   renderGatewayEnv,
   resolveTunnelSettings,
   tunnelWorkerVars,
@@ -44,6 +50,12 @@ import {
   readSecretsFile,
   writePrivateFile,
 } from './secret-files.js';
+import {
+  buildVmAgentBinaries,
+  publishVmAgentArtifacts,
+  removeVmAgentBuild,
+  resolveVmAgentRelease,
+} from './vm-agent-artifacts.js';
 
 const REPO_ROOT = resolve(import.meta.dirname, '../..');
 const API_DIR = join(REPO_ROOT, 'apps/api');
@@ -110,6 +122,21 @@ function buildWeb(baseDomain: string): string {
   );
   if (result.status !== 0) throw new Error('apps/web build failed');
   return join(WEB_DIR, 'dist');
+}
+
+/**
+ * celld bundles `apps/api/src` with its own esbuild, which resolves the workspace packages
+ * (`shared`, `providers`, `cloud-init`) through their built `dist/` entry points. A fresh
+ * checkout has none, so build the API's dependencies (not the API itself) first.
+ */
+function buildApiDependencies(): void {
+  log("building the API Worker's workspace dependencies");
+  const result = spawnSync(
+    'pnpm',
+    ['exec', 'turbo', 'run', 'build', '--filter=@simple-agent-manager/api^...'],
+    { cwd: REPO_ROOT, stdio: 'inherit' }
+  );
+  if (result.status !== 0) throw new Error('building the API Worker dependencies failed');
 }
 
 const NO_LEASES = /no node leases/i;
@@ -219,6 +246,7 @@ async function main(): Promise<void> {
       'web-dist': { type: 'string' },
       'dry-run': { type: 'boolean', default: false },
       init: { type: 'boolean', default: false },
+      'skip-vm-agent': { type: 'boolean', default: false },
     },
   });
   const envFile = resolve(values['env-file'] ?? join(REPO_ROOT, 'deploy/selfhost/.env'));
@@ -251,7 +279,8 @@ async function main(): Promise<void> {
   );
   if (values.init) return;
   const operatorSecrets = readSecretsFile(secretsPath);
-  for (const name of ['BASE_DOMAIN', 'R2_BUCKET_NAME']) {
+  // VM_AGENT_REQUIRED_VERSION must name the release this deploy published (or stay unset).
+  for (const name of ['BASE_DOMAIN', 'R2_BUCKET_NAME', 'VM_AGENT_REQUIRED_VERSION']) {
     if (name in operatorSecrets) throw new Error(`${secretsPath}: ${name} is generated; remove it`);
   }
   const { SAM_INSTALLATION_ID, ...platformSecrets } = keys;
@@ -269,6 +298,8 @@ async function main(): Promise<void> {
       ...tunnelWorkerVars(tunnelSettings),
     },
   });
+  const vmAgentRelease = values['skip-vm-agent'] ? null : resolveVmAgentRelease(REPO_ROOT);
+  if (vmAgentRelease) plan.config.vars.VM_AGENT_REQUIRED_VERSION = vmAgentRelease.release;
   // Needs the R2 binding's final bucket name, so it is applied after translation.
   Object.assign(plan.config.vars, presignVars(box, plan.config.vars.R2_BUCKET_NAME ?? ''));
   for (const line of plan.report) log(line);
@@ -282,11 +313,38 @@ async function main(): Promise<void> {
     return;
   }
 
+  // First, so a box without a working Docker fails before minutes of other builds.
+  let vmAgentBinDir: string | null = null;
+  if (vmAgentRelease) {
+    log(`building vm-agent release ${vmAgentRelease.release}`);
+    vmAgentBinDir = buildVmAgentBinaries(REPO_ROOT, join(stateDir, 'go-cache'), vmAgentRelease);
+  }
   const webDist = values['web-dist'] ? resolve(values['web-dist']) : buildWeb(baseDomain);
+  buildApiDependencies();
   prepareCelldProject({ apiDir: API_DIR, projectDir, plan, webDist });
 
   const celld = await ensureCelldBinary(join(stateDir, 'bin'));
   const env = celldChildEnv(process.env, box, resolveEsbuild(API_DIR));
+
+  // Before the Worker that pins VM_AGENT_REQUIRED_VERSION is published, as on Cloudflare.
+  if (vmAgentRelease && vmAgentBinDir) {
+    const agentBucket = plan.config.r2_buckets.find((bucket) => bucket.binding === 'R2');
+    if (!agentBucket) throw new Error('the Worker has no R2 binding to serve the vm-agent from');
+    try {
+      publishVmAgentArtifacts({
+        celld,
+        env,
+        fleetBucket: bucketOf(env),
+        r2BucketName: agentBucket.bucket_name,
+        binDir: vmAgentBinDir,
+        release: vmAgentRelease.release,
+        redact: (text) => redactSecrets(text, knownSecrets),
+        log,
+      });
+    } finally {
+      removeVmAgentBuild(vmAgentBinDir);
+    }
+  }
 
   // The secrets-free config is what stays on disk: migrations and operator `celld d1`/`kv`
   // commands read it. On an upgrade, migrations run before the new Worker version, as on
