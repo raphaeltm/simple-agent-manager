@@ -235,6 +235,14 @@ describe('guardedFetch', () => {
     expect(fetchFn.mock.calls[1]?.[0]).toBe('https://a.example.com/moved');
   });
 
+  it('refuses a malformed Location as invalid_url without another request', async () => {
+    const fetchFn = vi.fn(async () => redirect(302, 'http://[::1'));
+    await expect(guardedFetch('https://a.example.com/', {}, { fetchFn })).rejects.toMatchObject({
+      reason: 'invalid_url',
+    });
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
   it('stops after maxRedirects hops', async () => {
     const fetchFn = vi.fn(async () => redirect(302, 'https://a.example.com/loop'));
     await expect(

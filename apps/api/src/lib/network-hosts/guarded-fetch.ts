@@ -165,7 +165,17 @@ export async function guardedFetch(
         `Outbound request exceeded ${maxRedirects} redirects`
       );
     }
-    const next = assertOutboundUrl(new URL(location, url), policy);
+    let target: URL;
+    try {
+      target = new URL(location, url);
+    } catch {
+      throw new OutboundRequestRefusedError(
+        'invalid_url',
+        url.hostname,
+        'Redirect Location is not a URL'
+      );
+    }
+    const next = assertOutboundUrl(target, policy);
     request = nextHopInit(request, response.status, url, next);
     url = next;
   }

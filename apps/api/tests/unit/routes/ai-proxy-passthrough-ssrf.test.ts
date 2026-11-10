@@ -51,8 +51,9 @@ vi.mock('../../../src/services/credential-limit-events', () => ({
   copyCredentialLimitHeaders: () => {},
   recordProxyCredentialLimitObservationsFromHeaders: vi.fn(),
 }));
+const mockLogWarn = vi.fn();
 vi.mock('../../../src/lib/logger', () => ({
-  log: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
+  log: { info: vi.fn(), error: vi.fn(), warn: (...args: unknown[]) => mockLogWarn(...args) },
 }));
 vi.mock('../../../src/lib/secrets', () => ({ getCredentialEncryptionKey: () => 'k' }));
 vi.mock('../../../src/services/composable-credentials/resolve', () => ({
@@ -113,7 +114,17 @@ const attacker = listen((_req, res) => {
   res.end('moved');
 });
 
-const legitimate = listen((_req, res) => {
+const legitimate = listen((_req, res, body) => {
+  if ((JSON.parse(body || '{}') as { stream?: boolean }).stream) {
+    // Server-sent events in two writes, so the relay must stream rather than buffer one chunk.
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    res.write('data: {"choices":[{"delta":{"content":"hel"}}]}\n\n');
+    setTimeout(
+      () => res.end('data: {"choices":[{"delta":{"content":"lo"}}]}\n\ndata: [DONE]\n\n'),
+      50
+    );
+    return;
+  }
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ choices: [{ message: { content: 'hello' } }] }));
 });
@@ -152,13 +163,17 @@ function credentialWithBaseUrl(baseUrl: string) {
   );
 }
 
-function postChat() {
+function postChat(extra: Record<string, unknown> = {}) {
   return app.request(
     CHAT_PATH,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'any-model', messages: [{ role: 'user', content: 'hi' }] }),
+      body: JSON.stringify({
+        model: 'any-model',
+        messages: [{ role: 'user', content: 'hi' }],
+        ...extra,
+      }),
     },
     { DATABASE: {}, KV: {}, AI_PROXY_ENABLED: 'true' }
   );
@@ -238,6 +253,23 @@ describe('AI proxy passthrough: redirect to an internal address', () => {
     expect(JSON.parse(legitimate.hits[0]?.body ?? '{}')).toMatchObject({ model: 'any-model' });
   });
 
+  it('control: a streamed (SSE) response from a public endpoint is still relayed as a stream', async () => {
+    credentialWithBaseUrl('https://llm.test.example/v1');
+
+    const res = await postChat({ stream: true });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/event-stream');
+    const reader = res.body!.getReader();
+    const first = new TextDecoder().decode((await reader.read()).value);
+    expect(first).toContain('"hel"');
+    let rest = '';
+    for (let chunk = await reader.read(); !chunk.done; chunk = await reader.read()) {
+      rest += new TextDecoder().decode(chunk.value);
+    }
+    expect(`${first}${rest}`).toContain('[DONE]');
+  });
+
   it('never calls a stored credential whose base URL is itself a private address', async () => {
     credentialWithBaseUrl(`https://127.0.0.1:${portOf(internal.server)}/v1`);
 
@@ -246,5 +278,10 @@ describe('AI proxy passthrough: redirect to an internal address', () => {
     expect(res.status).toBe(401);
     expect(routedFetch).not.toHaveBeenCalled();
     expect(internal.hits).toHaveLength(0);
+    // The refusal is diagnosable, not a silent "no credential".
+    expect(mockLogWarn).toHaveBeenCalledWith('ai_proxy_passthrough.upstream_refused', {
+      credentialId: 'cred-attacker',
+      reason: 'host',
+    });
   });
 });
