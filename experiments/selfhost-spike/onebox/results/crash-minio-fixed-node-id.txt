@@ -1,0 +1,10 @@
+kill -9 at 12:48:38.283, acked so far: do=2366 d1=1078
+restart: process start->healthz 10431 ms; ->first DO write 10884 ms; kill->first DO write 10954 ms
+load do: {"op":"do","conc":8,"secs":40,"ok":6188,"errs":8,"errKinds":{"UND_ERR_SOCKET":8},"opsPerSec":154.7,"p50":"34.3","p90":"51.6","p99":"88.8","max":"10728.1"}
+load d1: {"op":"d1","conc":4,"secs":40,"ok":2822,"errs":4,"errKinds":{"UND_ERR_SOCKET":4},"opsPerSec":70.5,"p50":"37.2","p90":"58.8","p99":"91.9","max":"10690.5"}
+DO load0: acked=1546 present=6513 missing=0
+DO load1: acked=1563 present=5130 missing=0
+DO load2: acked=1538 present=5011 missing=0
+DO load3: acked=1541 present=5048 missing=0
+D1: acked=2822 present(all keys in table)=14539 missing=0
+TOTAL MISSING ACKED WRITES: 0

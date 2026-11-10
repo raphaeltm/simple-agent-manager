@@ -1,0 +1,19 @@
+== A) presigned PUT to store at r2/onebox-files/direct/a.bin (no celld metadata header) -> read via binding
+store PUT 200
+bindinghead:{"found":true,"key":"direct/a.bin","size":3145728,"etag":"6c7d156de289ea2919cd325a65c94d85","httpMetadata":{"contentType":"application/octet-stream"},"customMetadata":{},"uploaded":"2026-11-10T12:49:19.000Z"}
+binding GET sha=4495c120313949d1 want=4495c120313949d1
+binding list: [{"key":"direct/a.bin","size":3145728,"etag":"6c7d156de289ea2919cd325a65c94d85","ct":"application/octet-stream","meta":{}}]
+== A2) presigned PUT carrying x-amz-meta-celld-r2 (client sends the header)
+store PUT 200
+bindinghead:{"found":true,"key":"direct/b.png","size":3145728,"etag":"6c7d156de289ea2919cd325a65c94d85","httpMetadata":{"contentType":"image/png"},"customMetadata":{"uploader":"presign"},"uploaded":"2026-11-10T12:49:19.000Z"}
+== B) PUT via binding -> presigned GET from store
+store GET HTTP/1.1 200 OK sha=4495c120313949d1 want=4495c120313949d1 ct=Content-Type: application/pdf
+== C) 40 MiB object via binding: single store object or chunks?
+{"ok":true,"key":"viaworker/big.bin","size":41943040,"etag":"58c6b0f02e15e544c6c69bbb1af17ab7-5"}
+41943040 r2/onebox-files/viaworker/big.bin
+3145728 r2/onebox-files/viaworker/c.pdf
+# 2 objects, 45088768 bytes
+store GET sha=ebc718f465710ff5 want=ebc718f465710ff5
+== D) 40 MiB presigned PUT to store -> binding GET
+store PUT 200
+binding GET sha=ebc718f465710ff5 want=ebc718f465710ff5; head: {"size":41943040,"etag":"924fd61d6c9debac1ed316b8ef1368eb","httpMetadata":{"contentType":"application/octet-stream"}}

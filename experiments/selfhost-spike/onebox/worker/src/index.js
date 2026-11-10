@@ -63,6 +63,12 @@ export default {
       const stub = env.BOX.get(env.BOX.idFromName(name));
       return stub.fetch(req);
     }
+    if (p === '/d1/init') {
+      // celld dev has no `d1 migrations apply`; mirror migrations/0001_init.sql here.
+      await env.DB.exec(`CREATE TABLE IF NOT EXISTS writes (k TEXT PRIMARY KEY, v TEXT, t INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS cron_runs (scheduled_time INTEGER PRIMARY KEY, ran_at INTEGER NOT NULL);`);
+      return json({ ok: true });
+    }
     if (p === '/d1/write') {
       const k = u.searchParams.get('k');
       const r = await env.DB.prepare(`INSERT INTO writes (k, v, t) VALUES (?, ?, ?)`).bind(k, 'x', Date.now()).run();
@@ -80,6 +86,10 @@ export default {
       const k = u.searchParams.get('k');
       if (req.method === 'PUT') { await env.KV.put(k, await req.text()); return json({ ok: true }); }
       return json({ k, v: await env.KV.get(k) });
+    }
+    if (p === '/r2list') {
+      const r = await env.FILES.list({ prefix: u.searchParams.get('prefix') || '', include: ['httpMetadata', 'customMetadata'] });
+      return json(r.objects.map((o) => ({ key: o.key, size: o.size, etag: o.etag, ct: o.httpMetadata?.contentType, meta: o.customMetadata })));
     }
     if (p.startsWith('/r2/')) {
       const key = decodeURIComponent(p.slice(4));

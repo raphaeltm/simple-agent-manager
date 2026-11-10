@@ -1,0 +1,48 @@
+# One-box ingress for a celld-hosted SAM control plane (spike).
+# DOMAIN defaults to onebox.test with Caddy's internal CA. For production,
+# replace `tls internal` with a DNS-01 issuer (see FINDINGS.md item 4).
+{
+	# Caddy is the edge: no trusted_proxies, so client X-Forwarded-* are not trusted.
+	admin localhost:2019
+}
+
+(to_celld) {
+	reverse_proxy {$CELLD_UPSTREAM:127.0.0.1:8080} {
+		# Overwrite (not append) anything the client sent.
+		header_up CF-Connecting-IP {remote_host}
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-Host {host}
+		header_up X-Forwarded-Proto {scheme}
+		header_up -True-Client-IP
+		header_up -CF-Ray
+		header_up -CF-IPCountry
+		header_up -CF-Visitor
+	}
+}
+
+*.{$DOMAIN:onebox.test} {
+	tls internal
+
+	# app.<domain>: the Vite SPA from disk with SPA fallback (option A, item 5).
+	@app host app.{$DOMAIN:onebox.test}
+	handle @app {
+		root * {$WEB_ROOT:/srv/web}
+		# Long cache for hashed assets, no cache for the shell.
+		@hashed path /assets/*
+		header @hashed Cache-Control "public, max-age=31536000, immutable"
+		header /index.html Cache-Control "no-cache"
+		header {
+			X-Content-Type-Options nosniff
+			Referrer-Policy strict-origin-when-cross-origin
+			X-Frame-Options DENY
+		}
+		try_files {path} /index.html
+		file_server
+	}
+
+	# app-assets.<domain>: same SPA through the Worker `assets` binding (option B).
+	# api.<domain>, ws-<id>.<domain>, ws-<id>--<port>.<domain>: all to the one Worker.
+	handle {
+		import to_celld
+	}
+}

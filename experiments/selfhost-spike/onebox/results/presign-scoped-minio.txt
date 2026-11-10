@@ -1,0 +1,5 @@
+scoped PUT r2/onebox-files/scoped/x.txt: 200
+binding read of it: scoped ok
+scoped GET deploy/onebox/5f17314176f1d518/manifest.json (holds plaintext secrets): 403
+scoped PUT cells/evil: 403
+scoped PUT r2/other-bucket/x: 403
