@@ -7,6 +7,7 @@ import { updateAdminSettings } from '../../../src/services/admin-settings';
 import { runNodeTunnelCleanupSweep } from '../../../src/services/node-tunnel-cleanup';
 import { ensureNodeTunnelForProvisioning } from '../../../src/services/node-tunnel-provisioning';
 import { provisionNode } from '../../../src/services/nodes';
+import { deleteNodeResourcesStrict } from '../../../src/services/strict-node-deletion';
 import {
   cf,
   env,
@@ -20,6 +21,58 @@ import {
 } from './node-tunnel-fixture';
 
 describe('edge branches of adoption, fencing and bounded cleanup', () => {
+  it('retains owned resources and retryable journal when account credentials are revoked, then cleans after access is restored', async () => {
+    const node = await freshNode();
+    await provisionNode(node.id, env);
+    const owned = journal(node.id)[0]!;
+    const foreign = cf.seedTunnel('another-node-incarnation');
+    const foreignDns = cf.seedDnsRecord({
+      name: 'another-node.vm.example.test',
+      type: 'CNAME',
+      content: `${foreign.id}.cfargotunnel.com`,
+      proxied: true,
+    });
+    await deleteNodeResourcesStrict(node.id, USER, env);
+    // Model a revoked account token at the HTTP boundary, without changing any live secret.
+    // Every due attempt remains unauthorized until the injected revocation is lifted.
+    cf.inject('dns.get', { kind: 'status', status: 401, code: 10000 }, 2);
+    let due = new Date();
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const callsBefore = cf.calls.length;
+      expect(await runNodeTunnelCleanupSweep(env, due)).toMatchObject({ attempted: 1, cleaned: 0 });
+      const pending = journal(node.id)[0]!;
+      expect(pending).toMatchObject({
+        id: owned.id,
+        runtimeIncarnationId: owned.runtimeIncarnationId,
+        tunnelId: owned.tunnelId,
+        dnsRecordId: owned.dnsRecordId,
+        status: 'cleanup_pending',
+        cleanupAttempts: attempt,
+      });
+      expect(pending.lastError).toContain('HTTP 401');
+      expect(cf.calls.slice(callsBefore).map(({ op }) => op)).toEqual(['dns.get']);
+      expect(cf.liveTunnels().map(({ id }) => id)).toContain(owned.tunnelId);
+      expect(cf.records().map(({ id }) => id)).toContain(owned.dnsRecordId);
+      const next = Date.parse(pending.cleanupNextAttemptAt!);
+      expect(next).toBeGreaterThan(Date.now());
+      const callsAfter = cf.calls.length;
+      expect(await runNodeTunnelCleanupSweep(env, new Date(next - 1))).toMatchObject({
+        attempted: 0,
+      });
+      expect(cf.calls).toHaveLength(callsAfter);
+      due = new Date(next + 1);
+    }
+    // Restored access: the same journal identity drives deletion, without reprovisioning,
+    // an A-record/public-IP fallback, or deleting another incarnation's resources.
+    expect(await runNodeTunnelCleanupSweep(env, due)).toMatchObject({ attempted: 1, cleaned: 1 });
+    expect(journal(node.id)).toMatchObject([{ id: owned.id, status: 'cleaned', lastError: null }]);
+    expect(cf.liveTunnels().map(({ id }) => id)).toEqual([foreign.id]);
+    expect(cf.records()).toEqual([foreignDns]);
+    expect(mocks.createVM).toHaveBeenCalledTimes(1);
+    expect(mocks.createARecord).not.toHaveBeenCalled();
+    expect(mocks.deleteVM).toHaveBeenCalledTimes(1);
+  });
+
   it('aborts a hung Cloudflare request within a row when the sweep deadline expires', async () => {
     const node = await freshNode();
     await provisionNode(node.id, env);

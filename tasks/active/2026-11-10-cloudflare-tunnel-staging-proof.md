@@ -50,7 +50,7 @@ staging validation, covering all VM-agent communication and port forwarding,
 while retaining instant-container compatibility. Plan requested before execution.
 The earlier synthetic proof does not satisfy this phase.
 
-- [x] Inventory every browser/API/CLI/MCP-to-agent path and callback; maintain an
+- [ ] Inventory every browser/API/CLI/MCP-to-agent path and callback; maintain an
       endpoint-to-test matrix with live evidence or explicit failure-path coverage.
 - [x] Centralize transport selection for tunnel VMs, legacy VMs, and instant
       containers. Preserve container DO forwarding, timeout and cold-wake/no-wake
@@ -120,3 +120,22 @@ definitions still require the final live rerun.
 The initial managed staging deployment is green and both real VM/instant agents ran the port3000 fixture. See the staging matrix for exact IDs and passed surfaces. Full API15,719 tests /1067 files, CI root Test, SonarCloud, secret scan and Durable Object Workers pass on8a3321ad5. Admin controls have reviewed desktop/mobile evidence posted on PR2615.
 
 Live testing found preview credential leakage, redirect auto-follow and an existing instant PTY spawn conflict. These are fixed with targeted regression coverage and independent review before the final staging candidate. Remaining lifecycle/fault/cleanup gates are open; this task is not complete.
+
+## Interim completion audit follow-up
+
+The staging matrix now names boot-log streams/callbacks, worktree CRUD, Git
+credential refresh, callback renewal, MCP build/publication, prompt attachments
+and managed execution with exact callers and existing test references. The
+inventory checkbox is reopened until the explicitly pending live/failure-path
+rows are resolved; broad surface labels are not proof that every caller ran.
+
+Account-credential revocation now has a stateful HTTP401 cleanup regression in
+`node-tunnel-cleanup-edge.test.ts`: two unauthorized sweeps retain journal and
+resource identity with backoff; restored access cleans only owned resources and
+never creates a public-IP/A-record fallback. This does not mutate live shared
+credentials or claim a connector-token revocation exercise.
+
+Steering evidence means accepted intent and eventual reply, not interruption
+inside a foreground command. Instant snapshot wake independently preserves
+nonignored uncommitted text/binary bytes and restores the fixture app; gitignored
+fixture files are intentionally outside that preservation assertion.
