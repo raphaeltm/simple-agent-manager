@@ -261,6 +261,8 @@ export interface TaskRuntimeLivenessSignals {
 }
 
 export interface TaskLivenessNodeHealthProbeEnv {
+  /** When present, the probe resolves the node's real route (reverse-tunnel nodes have no DNS). */
+  DATABASE?: D1Database;
   BASE_DOMAIN?: string;
   VM_AGENT_PROTOCOL?: string;
   VM_AGENT_PORT?: string;

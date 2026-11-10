@@ -4,7 +4,11 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 describe('ws proxy source contract', () => {
-  const file = readFileSync(resolve(process.cwd(), 'src/index.ts'), 'utf8');
+  // The ws-* proxy moved out of index.ts (rule 18); index.ts only mounts it.
+  const file = readFileSync(
+    resolve(process.cwd(), 'src/routes/workspace-subdomain-proxy.ts'),
+    'utf8'
+  );
 
   it('routes workspace traffic via node backend hostname', () => {
     expect(file).toContain('${routedNodeId}.vm.${baseDomain}');
@@ -13,7 +17,9 @@ describe('ws proxy source contract', () => {
 
   it('does not block proxying when workspace vmIp is null', () => {
     expect(file).not.toContain('!workspace || !workspace.vmIp');
-    expect(file).toContain("return c.json({ error: 'NOT_FOUND', message: 'Workspace not found' }, 404);");
+    expect(file).toContain(
+      "return c.json({ error: 'NOT_FOUND', message: 'Workspace not found' }, 404);"
+    );
   });
 
   it('strips spoofed routing headers and injects trusted values', () => {
@@ -28,7 +34,8 @@ describe('ws proxy source contract', () => {
   });
 
   it('constructs the backend VM URL from trusted routing config instead of cloning request origin', () => {
-    expect(file).toContain('new URL(getNodeBackendBaseUrl(routedNodeId, c.env))');
+    expect(file).toContain(': getNodeBackendBaseUrl(routedNodeId, c.env)');
+    expect(file).toContain("nodeRoute.kind === 'reverse-tunnel'");
     expect(file).not.toContain('const vmUrl = new URL(c.req.url)');
   });
 

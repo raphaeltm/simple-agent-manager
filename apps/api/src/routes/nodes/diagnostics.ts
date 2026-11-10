@@ -17,7 +17,16 @@ import {
   openNodeDiagnosticDownload,
 } from '../../services/node-agent-diagnostics';
 import { getNodeBackendBaseUrl } from '../../services/node-agent-readiness';
+import {
+  type NodeAgentRoute,
+  NodeAgentRouteError,
+  resolveNodeAgentRoute,
+} from '../../services/node-agent-route';
 import { ownerNodeAccess, runNodeDiagnostic } from '../../services/node-diagnostics-access';
+import {
+  gatewayDecisionResponse,
+  isGatewayAuthorizationRequest,
+} from '../../services/node-websocket-gateway';
 
 export const nodeDiagnosticsRoutes = new Hono<{ Bindings: Env }>();
 
@@ -163,6 +172,19 @@ nodeDiagnosticsRoutes.get('/:id/logs/stream', async (c) => {
   }
   headers.set('Authorization', `Bearer ${token}`);
   headers.set('X-SAM-Node-Id', nodeId);
+
+  // Self-hosted WebSocket gateway: same auth and headers; Caddy carries the socket.
+  if (isGatewayAuthorizationRequest(c.req.raw)) {
+    let route: NodeAgentRoute;
+    try {
+      route = await resolveNodeAgentRoute(c.env, nodeId);
+    } catch (err) {
+      // A reverse-tunnel node without a live lease: refused as unreachable, like the ws-* proxy.
+      if (!(err instanceof NodeAgentRouteError)) throw err;
+      return c.json({ error: 'NODE_UNREACHABLE', message: 'Node is not reachable' }, 503);
+    }
+    return gatewayDecisionResponse(c.req.raw, route, { url: vmUrl, headers });
+  }
 
   return fetchNodeAgent(
     nodeId,

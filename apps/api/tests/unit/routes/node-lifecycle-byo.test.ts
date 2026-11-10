@@ -218,6 +218,12 @@ describe('node-lifecycle BYO gates', () => {
       expect(res.status).toBe(403);
     });
 
+    it('denies issuance for a managed reverse-tunnel node (no tunnelId, transport only)', async () => {
+      state.node = makeNode({ nodeClass: 'managed', transport: 'reverse-tunnel', tunnelId: null });
+      const res = await appRequest('/api/nodes/node-1/origin-ca-certificate', VALID_CSR, true);
+      expect(res.status).toBe(403);
+    });
+
     it('still issues a cert for a managed public-DNS node', async () => {
       state.node = makeNode({ nodeClass: 'managed', transport: 'vm-public-dns' });
       const res = await appRequest('/api/nodes/node-1/origin-ca-certificate', VALID_CSR, true);
@@ -298,6 +304,36 @@ describe('node-lifecycle BYO gates', () => {
       expect(state.dns.create).toBeNull();
       // No ipAddress written into any node update payload.
       expect(state.updates.some((u) => 'ipAddress' in u)).toBe(false);
+    });
+
+    it('does NOT backfill the IP or create an A record for a managed reverse-tunnel node', async () => {
+      // Reverse-tunnel nodes carry no tunnelId: the gate must read the row's transport, and
+      // CF-Connecting-IP (the node's real egress IP through Caddy) must not be backfilled.
+      state.node = makeNode({
+        transport: 'reverse-tunnel',
+        tunnelId: null,
+        ipAddress: '198.51.100.9',
+      });
+      const res = await getNodeLifecycleApp().request(
+        '/api/nodes/node-1/heartbeat',
+        {
+          method: 'POST',
+          headers: {
+            Authorization: 'Bearer node-token',
+            'Content-Type': 'application/json',
+            'CF-Connecting-IP': '203.0.113.7',
+          },
+          body: JSON.stringify({ nodeId: 'node-1' }),
+        },
+        { DATABASE: {}, BASE_DOMAIN: 'example.com' },
+        { waitUntil: vi.fn(), passThroughOnException: vi.fn() }
+      );
+      expect(res.status).toBe(200);
+      expect(state.dns.create).toBeNull();
+      expect(state.dns.update).toBeNull();
+      expect(state.updates.some((u) => 'ipAddress' in u)).toBe(false);
+      // Liveness: the heartbeat itself was recorded.
+      expect(state.updates).toContainEqual(expect.objectContaining({ healthStatus: 'healthy' }));
     });
 
     it('DOES backfill IP + A record for a managed node without a tunnel', async () => {

@@ -14,6 +14,7 @@ import {
 import { verifyCallbackToken } from './jwt';
 import { getRuntimeLimits } from './limits';
 import { getNodeBackendBaseUrl } from './node-agent-readiness';
+import { isReverseTunnelInstallation } from './node-tunnel-config';
 import { buildPlacementAuthoritySqlPredicate } from './placement-authority';
 import {
   assertRelayProvisioningAuthority,
@@ -173,6 +174,17 @@ function allocationMatchesRelaySource(
   return true;
 }
 
+/**
+ * The relay URL is handed to ANOTHER VM, which must reach the relay over its public backend
+ * hostname. A reverse-tunnel node is reachable only from the control-plane box's loopback, so
+ * it can never be a relay, and an installation provisioning reverse-tunnel nodes would only
+ * ever create unusable relays: relay selection and provisioning are off, and uploads use the
+ * Worker path.
+ */
+export function snapshotUploadRelayAvailable(env: Pick<Env, 'VM_AGENT_TRANSPORT'>): boolean {
+  return !isReverseTunnelInstallation(env);
+}
+
 export async function findSessionSnapshotUploadRelay(
   env: Env,
   userId: string,
@@ -180,7 +192,7 @@ export async function findSessionSnapshotUploadRelay(
   source: RelaySourceNode | null = null
 ): Promise<RelayNode | null> {
   const requiredVersion = env.VM_AGENT_REQUIRED_VERSION?.trim();
-  if (!requiredVersion) return null;
+  if (!requiredVersion || !snapshotUploadRelayAvailable(env)) return null;
 
   const allocation = await resolveRelayAllocation(env, {
     userId,
@@ -209,6 +221,7 @@ export async function findSessionSnapshotUploadRelay(
         AND n.node_role = 'workspace'
         AND n.node_class != 'user-owned'
         AND n.runtime = 'vm'
+        AND COALESCE(n.transport, 'vm-public-dns') != 'reverse-tunnel'
         AND n.cloud_provider = ?
         AND n.vm_location = ?
         AND n.provider_instance_type = ?
@@ -398,7 +411,10 @@ export async function resolveSessionSnapshotUploadTargets(
       ? { home: authorizationTarget('home'), wip: authorizationTarget('wip') }
       : undefined,
     needsRelayProvisioning:
-      input.directUploadAvailable && !input.directUploadSupported && relay === null,
+      input.directUploadAvailable &&
+      !input.directUploadSupported &&
+      relay === null &&
+      snapshotUploadRelayAvailable(env),
   };
 }
 
@@ -414,7 +430,7 @@ export async function ensureSessionSnapshotUploadRelay(
   input: { userId: string; sourceNodeId: string; projectId: string | null }
 ): Promise<void> {
   const requiredVersion = env.VM_AGENT_REQUIRED_VERSION?.trim();
-  if (!requiredVersion) return;
+  if (!requiredVersion || !snapshotUploadRelayAvailable(env)) return;
   const source = await loadRelaySourceNode(env, input.userId, input.sourceNodeId);
   if (!sourceStillNeedsRelay(source, requiredVersion)) return;
   if (await findSessionSnapshotUploadRelay(env, input.userId, input.projectId, source)) return;

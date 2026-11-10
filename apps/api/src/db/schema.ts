@@ -1806,6 +1806,41 @@ export const nodeCloudflareTunnels = sqliteTable(
   })
 );
 
+/**
+ * Reverse-tunnel loopback port leases (migration 0232, services/node-reverse-tunnel-*.ts).
+ * One row per node incarnation; at most one ACTIVE lease per port (partial unique index).
+ * Rows end 'released' and are never deleted.
+ */
+export const nodeReverseTunnelLeases = sqliteTable(
+  'node_reverse_tunnel_leases',
+  {
+    id: text('id').primaryKey(),
+    nodeId: text('node_id').notNull(),
+    userId: text('user_id').notNull(),
+    runtimeIncarnationId: text('runtime_incarnation_id').notNull(),
+    port: integer('port').notNull(),
+    /** SHA-256 hex of the per-node frp credential; the credential itself is never stored. */
+    credentialHash: text('credential_hash').notNull(),
+    /** 'active' | 'released' */
+    status: text('status').notNull().default('active'),
+    releaseReason: text('release_reason'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+    releasedAt: text('released_at'),
+  },
+  (table) => ({
+    incarnationUnique: uniqueIndex('idx_node_reverse_tunnel_leases_incarnation').on(
+      table.nodeId,
+      table.runtimeIncarnationId
+    ),
+    activePortUnique: uniqueIndex('idx_node_reverse_tunnel_leases_active_port')
+      .on(table.port)
+      .where(sql`status = 'active'`),
+    portIdx: index('idx_node_reverse_tunnel_leases_port').on(table.port, table.releasedAt),
+    statusIdx: index('idx_node_reverse_tunnel_leases_status').on(table.status, table.nodeId),
+  })
+);
+
 // =============================================================================
 // Workspaces
 // =============================================================================

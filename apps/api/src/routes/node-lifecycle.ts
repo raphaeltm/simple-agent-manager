@@ -6,7 +6,7 @@
  * the browser (token). VM-agent callbacks use callback JWT auth; the token
  * issuance route uses user session auth through the nodes route middleware.
  */
-import { isUserOwnedNodeClass } from '@simple-agent-manager/shared';
+import { isTunnelNodeTransport, isUserOwnedNodeClass } from '@simple-agent-manager/shared';
 import { and, desc, eq, isNull, ne, notInArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -310,7 +310,8 @@ nodeLifecycleRoutes.post('/:id/origin-ca-certificate', async (c) => {
   // Server-side ownership gate: NEVER hand a platform-wide `*.{BASE_DOMAIN}` wildcard Origin CA
   // cert to a user-owned (BYO) machine — a BYO owner holds a valid callback token for their own
   // node and could otherwise `curl` this endpoint to extract the platform wildcard cert+key.
-  // Tunnel-transport nodes never need Origin CA at all (cloudflared terminates TLS at the edge).
+  // Tunnel-transport nodes (cloudflare-tunnel, reverse-tunnel) never need Origin CA at all: the
+  // connector carries plain HTTP from the agent's loopback listener.
   // This gate is independent of what the agent chooses to send. See security-critique #2, rule 28.
   const gateDb = drizzle(c.env.DATABASE, { schema });
   const nodeRow = await gateDb
@@ -325,7 +326,7 @@ nodeLifecycleRoutes.post('/:id/origin-ca-certificate', async (c) => {
   if (!nodeRow || nodeStatusTerminatesCallbacks(nodeRow.status)) {
     rejectTerminalNodeCallback(nodeId, nodeRow?.status, 'origin_ca_certificate');
   }
-  if (isUserOwnedNodeClass(nodeRow.nodeClass) || nodeRow.transport === 'cloudflare-tunnel') {
+  if (isUserOwnedNodeClass(nodeRow.nodeClass) || isTunnelNodeTransport(nodeRow.transport)) {
     log.error('node_origin_ca_certificate.denied_user_owned', {
       nodeId,
       nodeClass: nodeRow.nodeClass,
@@ -411,14 +412,17 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
   // server-side (keyed on tunnelId presence, NOT nodeClass — a future public-IP BYO mode still wants
   // backfill) so a heartbeat can never create an A record that conflicts with the enrollment CNAME.
   // See security-critique #8 / architecture-critique #7.
-  if (node.tunnelId) {
+  // Reverse-tunnel nodes have no tunnelId and no DNS record at all (frpc dials the box), so
+  // the gate also reads the node row's own transport, never anything the agent sends.
+  const tunnelIngress = !!node.tunnelId || isTunnelNodeTransport(node.transport);
+  if (tunnelIngress) {
     log.debug('heartbeat.ip_backfill_skipped_tunnel_node', { nodeId, action: 'skipped' });
   }
-  const heartbeatIp = node.tunnelId ? undefined : c.req.header('CF-Connecting-IP');
+  const heartbeatIp = tunnelIngress ? undefined : c.req.header('CF-Connecting-IP');
 
   // Defense-in-depth: backfill IP from heartbeat if node has no IP stored.
   // This self-heals Scaleway nodes where the IP wasn't captured at creation time.
-  let effectiveNodeIp = node.tunnelId ? null : node.ipAddress;
+  let effectiveNodeIp = tunnelIngress ? null : node.ipAddress;
 
   if (!node.ipAddress) {
     if (heartbeatIp) {

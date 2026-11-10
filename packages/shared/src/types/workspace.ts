@@ -52,9 +52,16 @@ export type NodeClass = 'managed' | 'user-owned';
  * - 'vm-public-dns' (default for managed cloud VMs): proxied A record → public IP, Origin CA TLS.
  * - 'cloudflare-tunnel': proxied CNAME → {tunnelUUID}.cfargotunnel.com; cloudflared is the sole
  *   ingress and vm-agent serves plain HTTP on loopback. Tunnel presence ⇒ skip A-record backfill.
+ * - 'reverse-tunnel' (self-hosted control plane): the node's frpc dials the control-plane box and
+ *   is exposed there on a leased loopback port; no DNS record, no Origin CA, no public ingress.
  * Null for nodes (e.g. cf-container) where transport is implicit.
  */
-export type NodeTransport = 'vm-public-dns' | 'cloudflare-tunnel';
+export type NodeTransport = 'vm-public-dns' | 'cloudflare-tunnel' | 'reverse-tunnel';
+
+/** Transports whose node agent is reached only through an outbound tunnel (never a public IP). */
+export function isTunnelNodeTransport(transport: string | null | undefined): boolean {
+  return transport === 'cloudflare-tunnel' || transport === 'reverse-tunnel';
+}
 
 /** Runtime type guard for {@link NodeClass}. Unknown/legacy values are treated as not user-owned. */
 export function isNodeClass(value: unknown): value is NodeClass {

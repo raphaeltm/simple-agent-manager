@@ -1,10 +1,35 @@
-# PLACEHOLDER until the reverse-tunnel transport (task 01M72X0F03A7NVVJP28W9SC03Z) replaces it
-# with server-plugin auth. frps listens on loopback only; nodes reach it as frp over wss through
-# Caddy on 443 (caddy/sam.d/frp.caddy). Proxies bind on loopback and only inside the lease
-# range, where the Worker (celld, host network) and Caddy forward_auth reach them.
+# frps for the reverse-tunnel node transport (VM_AGENT_TRANSPORT="reverse-tunnel").
+# Validated with frp 0.72.0. frps renders this file as a Go template over its environment
+# (so no template braces may appear in comments either). Variables:
+#   FRPS_BIND_PORT, CELLD_PORT, REVERSE_TUNNEL_GATEWAY_SECRET,
+#   REVERSE_TUNNEL_PORT_RANGE_START, REVERSE_TUNNEL_PORT_RANGE_END
+#
+# - frps listens on loopback only. Nodes reach it as frp over wss through Caddy on 443
+#   (caddy/sam.d/frp.caddy); there is no TLS here because Caddy terminates it.
+# - Every node proxy binds on loopback, only inside the lease range. The Worker (celld, host
+#   network) and Caddy (forward_auth WebSockets) reach nodes at 127.0.0.1:{leasePort}.
+# - The real gate is the SAM server plugin: it checks the node's per-node credential, that its
+#   node incarnation is live, and that it binds exactly its own leased port, on every Login,
+#   NewProxy and heartbeat (Ping). allowPorts and maxPortsPerClient are a second fence.
+# - frps sends the plugin `addr` userinfo as HTTP basic auth; the password is the gateway
+#   secret. The plugin route answers 404 when the Worker has no secret, so frps then refuses
+#   every node (fail closed). The secret must be URL-safe (the generator makes it hex).
 bindAddr = "127.0.0.1"
 bindPort = {{ .Envs.FRPS_BIND_PORT }}
 proxyBindAddr = "127.0.0.1"
 allowPorts = [
   { start = {{ .Envs.REVERSE_TUNNEL_PORT_RANGE_START }}, end = {{ .Envs.REVERSE_TUNNEL_PORT_RANGE_END }} },
 ]
+maxPortsPerClient = 1
+# Caddy is the only TLS layer; frps sees plain WebSocket from it.
+transport.tls.force = false
+# A node that stops heartbeating is dropped after this long (frpc heartbeats every 30 s).
+transport.heartbeatTimeout = 90
+log.to = "console"
+log.level = "info"
+
+[[httpPlugins]]
+name = "sam-node-authz"
+addr = "http://frps:{{ .Envs.REVERSE_TUNNEL_GATEWAY_SECRET }}@127.0.0.1:{{ .Envs.CELLD_PORT }}"
+path = "/api/self-host/gateway/frps-plugin"
+ops = ["Login", "NewProxy", "Ping"]

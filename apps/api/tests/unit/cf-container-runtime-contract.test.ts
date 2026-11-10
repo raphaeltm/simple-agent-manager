@@ -56,7 +56,8 @@ describe('cf-container runtime spike contracts', () => {
   });
 
   it('routes cf-container workspace hostnames through the raw Container binding behind the kill switch', () => {
-    const index = read('index.ts');
+    // The ws-* proxy moved out of index.ts (rule 18).
+    const index = read('routes/workspace-subdomain-proxy.ts');
     const containerService = read('services/vm-agent-container.ts');
 
     expect(index).toContain("nodeRuntime === 'cf-container'");
@@ -82,7 +83,7 @@ describe('cf-container runtime spike contracts', () => {
     const localForward = read('routes/workspaces/local-forward.ts');
     const nodesRoute = read('routes/nodes/diagnostics.ts');
 
-    expect(nodeAgent).toContain("node?.runtime !== 'cf-container'");
+    expect(nodeAgent).toContain("route.kind !== 'container'");
     expect(nodeAgent).toContain('getVmAgentContainerConfig(env)');
     expect(nodeAgent).toContain('!env.VM_AGENT_CONTAINER');
     expect(nodeAgent).toContain('fetchVmAgentContainer(');

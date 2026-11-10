@@ -214,7 +214,7 @@ export type {
   WorkspaceStatus,
 } from './workspace';
 // Node class runtime guards (value exports, not types)
-export { isNodeClass, isUserOwnedNodeClass } from './workspace';
+export { isNodeClass, isTunnelNodeTransport, isUserOwnedNodeClass } from './workspace';
 // Provider Catalog
 export type {
   LocationInfo,
