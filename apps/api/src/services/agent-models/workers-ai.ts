@@ -8,6 +8,7 @@
 import type { Env } from '../../env';
 import { createModuleLogger } from '../../lib/logger';
 import { maybeJsonRecord } from '../../lib/runtime-validation';
+import { getWorkersAiBindingOrNull } from '../platform-capabilities';
 
 const log = createModuleLogger('agent_models.workers_ai');
 
@@ -31,9 +32,9 @@ export interface WorkersAiBinding {
 }
 
 export function getWorkersAiBinding(env: Env): WorkersAiBinding {
-  const ai: unknown = (env as { AI?: unknown }).AI;
-  const candidate = ai as Partial<WorkersAiBinding> | undefined;
-  if (!candidate || typeof candidate.run !== 'function' || typeof candidate.models !== 'function') {
+  // Same presence answer as every other Workers AI caller, plus the catalog method this needs.
+  const candidate = getWorkersAiBindingOrNull(env) as Partial<WorkersAiBinding> | null;
+  if (!candidate || typeof candidate.models !== 'function') {
     throw new Error('The Workers AI binding (AI) is not configured for this deployment');
   }
   return candidate as WorkersAiBinding;
