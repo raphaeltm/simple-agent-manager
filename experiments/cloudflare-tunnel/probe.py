@@ -90,7 +90,7 @@ async def cleanup(session):
 async def main():
     if os.environ.get('DEPLOY_ENVIRONMENT') != 'staging' or DOMAIN != 'sammy.party':
         raise RuntimeError('This experiment is restricted to the SAM staging zone')
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20), cookie_jar=aiohttp.DummyCookieJar()) as session:
         if '--cleanup' in sys.argv:
             return 0 if await cleanup(session) else 1
         if state.get('tunnel') or state.get('worker') or state['dns'] or state['routes']:
@@ -101,6 +101,9 @@ async def main():
         vm_host, flat_host, edge_host = f'{NAME}.vm.{DOMAIN}', f'{NAME}-origin.{DOMAIN}', f'{NAME}.{DOMAIN}'
         token_path = OUT / 'tunnel-token'
         connector_log = None
+        agent_proc = None
+        agent_log = None
+        agent_tokens_path = OUT / 'agent-tokens.json'
 
         async def origin(request):
             if request.headers.get('Authorization') != 'Bearer ' + origin_key:
@@ -170,6 +173,18 @@ async def main():
             return False
 
         try:
+            agent_log = (OUT / 'agent-private.log').open('w')
+            agent_tokens_path.unlink(missing_ok=True)
+            agent_env = {'PATH': os.environ['PATH'], 'HOME': os.environ['HOME'], 'TUNNEL_PROOF_TOKENS': str(agent_tokens_path)}
+            agent_proc = await asyncio.create_subprocess_exec(str(OUT / 'agent-proof.test'), '-test.run=^TestTunnelProofHost$', '-test.timeout=8m',
+                                                             env=agent_env, stdout=agent_log, stderr=agent_log)
+            for _ in range(30):
+                if agent_tokens_path.exists():
+                    break
+                if agent_proc.returncode is not None:
+                    raise RuntimeError('Agent fixture exited before readiness')
+                await asyncio.sleep(1)
+            agent_tokens = json.loads(agent_tokens_path.read_text())
             zone = await api(session, 'GET', f'/zones/{ZONE}')
             if zone['name'] != DOMAIN:
                 raise RuntimeError('Zone ID does not match staging domain')
@@ -183,7 +198,9 @@ async def main():
             token_path.write_text(tunnel['token'])
             await api(session, 'PUT', f'/accounts/{ACCOUNT}/cfd_tunnel/{state["tunnel"]}/configurations', {
                 'config': {'ingress': [
-                    {'hostname': host, 'service': 'http://127.0.0.1:9000'} for host in (vm_host, flat_host)
+                    rule for host in (vm_host, flat_host) for rule in (
+                        {'hostname': host, 'path': '^/agent/', 'service': 'http://127.0.0.1:9010'},
+                        {'hostname': host, 'service': 'http://127.0.0.1:9000'})
                 ] + [{'service': 'http_status:404'}]}})
             for host in (vm_host, flat_host, edge_host):
                 dns = await api(session, 'POST', f'/zones/{ZONE}/dns_records', {
@@ -196,8 +213,9 @@ async def main():
             state['routes'].append(route['id'])
             save()
             metadata = {'main_module': 'worker.js', 'compatibility_date': '2026-11-01', 'bindings': [
-                {'name': key, 'type': 'secret_text' if key.endswith('_KEY') else 'plain_text', 'text': value}
-                for key, value in {'PROBE_KEY': probe_key, 'ORIGIN_KEY': origin_key, 'VM_HOST': vm_host, 'FLAT_HOST': flat_host}.items()]}
+                {'name': key, 'type': 'secret_text' if key.endswith(('_KEY', '_TOKENS')) else 'plain_text', 'text': value}
+                for key, value in {'PROBE_KEY': probe_key, 'ORIGIN_KEY': origin_key, 'VM_HOST': vm_host, 'FLAT_HOST': flat_host,
+                                   'AGENT_TOKENS': json.dumps(agent_tokens)}.items()]}
             form = aiohttp.FormData()
             form.add_field('metadata', json.dumps(metadata), content_type='application/json')
             form.add_field('worker.js', (ROOT / 'probe-worker.js').read_text(), filename='worker.js', content_type='application/javascript+module')
@@ -211,7 +229,15 @@ async def main():
             await start_server(9000, origin)
             for port in (3000, 5173):
                 async def preview(request, value=port):
-                    return web.json_response({'port': value})
+                    if request.path == '/ws':
+                        ws = web.WebSocketResponse()
+                        await ws.prepare(request)
+                        async for message in ws:
+                            if message.type == aiohttp.WSMsgType.TEXT:
+                                await ws.send_str(message.data)
+                        return ws
+                    return web.json_response({'port': value, 'tokenLeaked': 'token' in request.query,
+                                              'authorizationLeaked': 'Authorization' in request.headers})
                 await start_server(port, preview)
             connector_log = (OUT / 'connector-private.log').open('w')
             proc = await start_connector()
@@ -232,7 +258,35 @@ async def main():
             status, _, _ = await get('https://' + flat_host + '/health')
             record('origin-rejects-direct-unauthenticated', status == 401, status=status)
             checks = await asyncio.gather(*(get(edge + '/flat/443/ports/' + str(p), auth) for p in (3000, 5173)))
-            record('two-local-http-ports-one-tunnel', all(s == 200 and b == {'port': p} for (s, b, e), p in zip(checks, (3000, 5173))))
+            record('two-local-http-ports-one-tunnel', all(s == 200 and b and b['port'] == p for (s, b, e), p in zip(checks, (3000, 5173))))
+            agent_base = edge + '/flat/443/agent/workspaces/proof-ws/ports/'
+            for port in (3000, 5173):
+                status, body, error = await get(agent_base + str(port) + '/', auth)
+                record(f'real-agent-port-{port}-jwt-and-token-stripping', status == 200 and body == {
+                    'port': port, 'tokenLeaked': False, 'authorizationLeaked': False}, status=status, error=error)
+            for mode in ('missing', 'invalid', 'expired', 'wrong_workspace', 'wrong_node'):
+                status, _, error = await get(agent_base + '3000/', {**auth, 'X-Probe-Auth-Mode': mode})
+                record('real-agent-rejects-' + mode, status in (401, 403), status=status, error=error)
+            status, _, error = await get('https://' + flat_host + '/agent/workspaces/proof-ws/ports/3000/')
+            record('real-agent-direct-without-jwt-rejected', status == 401, status=status, error=error)
+            status, _, error = await get(agent_base + '9010/', auth)
+            record('real-agent-refuses-proxy-to-own-listener', status == 403, status=status, error=error)
+            # Public tunnel ingress cannot claim to be a local Git helper, even
+            # without Worker-added headers. No real GitHub credential is used.
+            status, _, error = await get('https://' + flat_host + '/agent/git-credential?workspaceId=proof-ws')
+            record('tunnel-listener-blocks-bearerless-git-credential', status == 401, status=status, error=error)
+            async with session.get('http://127.0.0.1:9011/git-credential?workspaceId=proof-ws') as response:
+                body = await response.text()
+                record('private-local-git-helper-still-works', response.status == 200 and 'synthetic-not-a-github-token' in body,
+                       status=response.status)
+            # Authenticated preview forwarding must not turn the private listener
+            # back into a credential oracle; existing proxy relay marking applies.
+            status, _, error = await get(agent_base + '9011/git-credential?workspaceId=proof-ws', auth)
+            record('preview-to-private-git-helper-rejected', status == 401, status=status, error=error)
+            async with session.ws_connect(agent_base + '5173/ws', headers=auth, heartbeat=None) as ws:
+                await ws.send_str('real-agent-preview-websocket')
+                message = await ws.receive(timeout=10)
+                record('real-agent-preview-websocket', message.data == 'real-agent-preview-websocket')
             started = time.monotonic()
             async with session.get(edge + '/flat/443/stream', headers=auth) as response:
                 first = await response.content.readline()
@@ -269,7 +323,13 @@ async def main():
                 await runner.cleanup()
             if connector_log:
                 connector_log.close()
+            if agent_proc and agent_proc.returncode is None:
+                agent_proc.terminate()
+                await agent_proc.wait()
+            if agent_log:
+                agent_log.close()
             token_path.unlink(missing_ok=True)
+            agent_tokens_path.unlink(missing_ok=True)
             await cleanup(session)
         # .vm TLS/8443 comparisons are measured findings, not prerequisites for flat :443 viability.
         required = [r for r in report['checks'] if not r['name'].startswith(('worker-vm-', 'direct-vm-', 'worker-flat-8443', 'direct-flat-8443'))]

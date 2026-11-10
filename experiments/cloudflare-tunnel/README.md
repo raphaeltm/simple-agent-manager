@@ -19,6 +19,14 @@ needed for operator cleanup if a runner dies abruptly; a successful HTTP respons
 lost before journaling can still leave resources, discoverable by the unique run
 name. The workflow is capped at 12 minutes.
 
-This is transport feasibility evidence. Managed VM provisioning, real SAM JWT
-authorization, Git credential isolation, actual preview proxy behavior, and
-incarnation-safe lifecycle cleanup require subsequent integration validation.
+The second stage compiles a temporary Go test host with the real VM-agent JWT,
+preview proxy, and Git credential handlers. Synthetic JWKS keys and a fake
+Git credential endpoint replace external credentials. A dedicated tunnel
+listener marks all requests as relayed; a separate local listener preserves
+private Git helper access. It verifies wrong/missing/expired tokens, workspace
+and node isolation, preview WebSockets, credential stripping, and rejection of
+direct and preview-relayed access to the private credential exchange.
+
+This is transport and handler feasibility evidence. Managed VM provisioning,
+cloud-init/firewall rollout, real SAM login/session issuance, Docker bridge
+discovery, and incarnation-safe lifecycle cleanup still require integration.

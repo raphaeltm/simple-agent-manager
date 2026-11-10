@@ -13,6 +13,16 @@ export default {
     headers.set('Authorization', `Bearer ${env.ORIGIN_KEY}`);
     headers.set('X-SAM-Proxied-Request', 'true');
     headers.set('X-Forwarded-Host', url.host);
+    if (match[3].startsWith('/agent/')) {
+      const mode = headers.get('X-Probe-Auth-Mode') || 'valid';
+      headers.delete('X-Probe-Auth-Mode');
+      headers.delete('Authorization');
+      headers.delete('Cookie');
+      url.searchParams.delete('token');
+      const tokens = JSON.parse(env.AGENT_TOKENS);
+      if (Object.hasOwn(tokens, mode)) url.searchParams.set('token', tokens[mode]);
+      if (mode === 'invalid') url.searchParams.set('token', 'invalid');
+    }
     const target = `https://${host}:${match[2]}${match[3]}${url.search}`;
     try {
       return await fetch(new Request(target, {
