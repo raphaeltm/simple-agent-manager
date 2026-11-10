@@ -19,13 +19,33 @@ describe('clientIpFromHeaders', () => {
     expect(read({ 'X-Forwarded-For': '198.51.100.1, 10.0.0.1' })).toBe('198.51.100.1');
   });
 
-  it.each(['spoof:ratelimit:key', 'x'.repeat(100), '999.1.1.1', 'not an ip', ''])(
+  it.each([
+    'spoof:ratelimit:key',
+    'x'.repeat(100),
+    '999.1.1.1',
+    'not an ip',
+    '',
+    // Hex-and-colon strings that are not IPv6 addresses: each would mint a distinct rate-limit key.
+    ':',
+    'ab:cd',
+    '::::',
+    'dead:beef:::::',
+    '1.2.3.4:80',
+    '1:2:3:4:5:6:7:8:9',
+  ])(
     'treats a value that is not an IP literal (%j) as absent',
     (value) => {
       expect(read({ 'CF-Connecting-IP': value })).toBeNull();
       expect(read({ 'CF-Connecting-IP': value, 'X-Forwarded-For': '198.51.100.2' })).toBe(
         '198.51.100.2'
       );
+    }
+  );
+
+  it.each(['::1', '2001:db8::1', '::ffff:198.51.100.9', '1:2:3:4:5:6:7:8', 'fe80::1'])(
+    'accepts the IPv6 literal %s',
+    (value) => {
+      expect(read({ 'CF-Connecting-IP': value })).toBe(value);
     }
   );
 

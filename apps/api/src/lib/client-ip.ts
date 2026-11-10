@@ -27,5 +27,16 @@ function isIpLiteral(value: string): boolean {
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(value)) {
     return value.split('.').every((octet) => Number(octet) <= 255);
   }
-  return value.includes(':') && /^[0-9a-fA-F:.]+$/.test(value);
+  // The character check keeps zone ids and anything bracketed out; the URL parser then
+  // accepts only a well-formed IPv6 address (so "1.2.3.4:80" or "ab:cd" are rejected).
+  return value.includes(':') && /^[0-9a-fA-F:.]+$/.test(value) && isIpv6Literal(value);
+}
+
+function isIpv6Literal(value: string): boolean {
+  try {
+    new URL(`http://[${value}]/`);
+    return true;
+  } catch {
+    return false;
+  }
 }
