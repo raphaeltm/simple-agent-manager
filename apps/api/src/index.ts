@@ -590,6 +590,8 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
         status: response.status,
         statusText: response.statusText,
         headers: responseHeaders,
+        // A 101 response must carry its accepted socket through cookie filtering.
+        webSocket: response.webSocket,
       });
     }
     return response;
@@ -708,6 +710,8 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
       status: response.status,
       statusText: response.statusText,
       headers,
+      // Preserve preview WebSockets (including dev-server HMR).
+      webSocket: response.webSocket,
     });
   }
 
