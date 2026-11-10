@@ -65,14 +65,27 @@ function racingD1(): D1Database {
   return { ...d1, prepare: (sql: string) => wrap(sql, prepare(sql)) } as D1Database;
 }
 
-function buildEnv(): Env {
+function buildEnv(overrides: Record<string, string> = {}): Env {
   return {
     DATABASE: racingD1(),
     KV: createMemoryKv(),
     JWT_PRIVATE_KEY,
     JWT_PUBLIC_KEY,
     BASE_DOMAIN: 'example.com',
+    ...overrides,
   } as unknown as Env;
+}
+
+/** A callback token already past its refresh point (10s lifetime, refresh at 10%). */
+const REFRESH_DUE_ENV = {
+  CALLBACK_TOKEN_EXPIRY_MS: '10000',
+  CALLBACK_TOKEN_REFRESH_THRESHOLD_RATIO: '0.1',
+};
+
+async function refreshDueToken(env: Env): Promise<string> {
+  const token = await signNodeCallbackToken(NODE_ID, env, { callbackGeneration: null });
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+  return token;
 }
 
 function buildApp(): Hono<{ Bindings: Env }> {
@@ -104,8 +117,14 @@ function nodeStatus(): string {
   ).status;
 }
 
-async function callback(env: Env, path: 'ready' | 'heartbeat', body?: unknown) {
-  const token = await signNodeCallbackToken(NODE_ID, env, { callbackGeneration: null });
+async function callback(
+  env: Env,
+  path: 'ready' | 'heartbeat',
+  body?: unknown,
+  presetToken?: string
+) {
+  const token =
+    presetToken ?? (await signNodeCallbackToken(NODE_ID, env, { callbackGeneration: null }));
   return buildApp().request(
     `/api/nodes/${NODE_ID}/${path}`,
     {
@@ -150,12 +169,34 @@ describe('node callbacks from a deleting deployment node', () => {
     expect(nodeStatus()).toBe('deleting');
   });
 
+  it('heartbeat refreshes a due token for a running node (control)', async () => {
+    seedNode('running');
+    const env = buildEnv(REFRESH_DUE_ENV);
+    const res = await callback(env, 'heartbeat', {}, await refreshDueToken(env));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(typeof body.refreshedToken).toBe('string');
+  });
+
   it('heartbeat answers 410 for a deleting node and refreshes no token', async () => {
     seedNode('deleting');
-    const res = await callback(buildEnv(), 'heartbeat', {});
+    const env = buildEnv(REFRESH_DUE_ENV);
+    const res = await callback(env, 'heartbeat', {}, await refreshDueToken(env));
     expect(res.status).toBe(410);
     const body = (await res.json()) as Record<string, unknown>;
     expect(body.refreshedToken).toBeUndefined();
+    expect(nodeStatus()).toBe('deleting');
+  });
+
+  it('heartbeat does not revive a node that turns deleting after the handler read it', async () => {
+    seedNode('running');
+    afterFirstNodeRead = () => {
+      sqlite.prepare(`UPDATE nodes SET status = 'deleting' WHERE id = ?`).run(NODE_ID);
+    };
+    const env = buildEnv(REFRESH_DUE_ENV);
+    const res = await callback(env, 'heartbeat', {}, await refreshDueToken(env));
+    expect(afterFirstNodeRead).toBeNull(); // the race was actually injected
+    expect(res.status).toBe(410);
     expect(nodeStatus()).toBe('deleting');
   });
 });

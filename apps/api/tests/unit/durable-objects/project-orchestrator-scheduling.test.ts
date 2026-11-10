@@ -560,6 +560,19 @@ describe('Scheduling Cycle — Stall Detection', () => {
     }
   );
 
+  // Status-gate control: the same stale fixture in a status that holds no running
+  // agent must not be nudged, so the in_progress case above is the gate's doing.
+  it.each(['queued', 'sleeping', 'completed', 'failed'])(
+    'does not nudge a stale %s task',
+    async (status) => {
+      const { sql, env, mailboxMessages } = stallScenario({ status });
+
+      await runSchedulingCycle(sql, env, 'proj-1', stallConfig);
+
+      expect(mailboxMessages).toHaveLength(0);
+    }
+  );
+
   it('does not nudge a task whose session produced output recently', async () => {
     // The task row is old, but the agent wrote a message 100ms ago: it is working.
     const { sql, env, mailboxMessages } = stallScenario({
