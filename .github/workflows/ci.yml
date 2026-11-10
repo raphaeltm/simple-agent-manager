@@ -104,6 +104,9 @@ jobs:
               # Self-hosted (celld) packaging: generator, deploy script, one-box stack.
               - 'scripts/selfhost/**'
               - 'deploy/selfhost/**'
+              # The live self-host suite runs the frpc.toml cloud-init renders.
+              - 'packages/cloud-init/src/reverse-tunnel.ts'
+              - 'packages/cloud-init/src/template-reverse-tunnel.ts'
               # The generated Worker config is built from wrangler.toml, so its text-binding
               # guard and effective-config tests must run when only wrangler.toml changes.
               - 'apps/api/wrangler.toml'
@@ -623,6 +626,13 @@ jobs:
       # celld wrangler.json generator, root-only secret files, pinned versions.
       - name: Run self-host packaging tests
         run: pnpm selfhost:test
+
+      # Real Caddy (pinned image, Docker host network) running the box's Caddyfile and sam.d
+      # fragments against stub upstreams, and the pinned frpc/frps 0.72.0 (checksum-verified)
+      # with the generated frpc.toml: gateway 404s and path tricks, X-SAM-* stripping, the 101
+      # Set-Cookie rule, frpc certificate verification, the NewWorkConn plugin payload.
+      - name: Run self-host live tests (Caddy in Docker, real frp)
+        run: pnpm selfhost:live-test
 
       - name: Verify installer engine, runtime integrity and bounded proof contracts
         run: |
