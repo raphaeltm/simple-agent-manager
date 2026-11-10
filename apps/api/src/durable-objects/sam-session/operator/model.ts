@@ -4,12 +4,21 @@ import { drizzle } from 'drizzle-orm/d1';
 import type { Env } from '../../../env';
 import { log } from '../../../lib/logger';
 import { resolveUpstreamAuth } from '../../../services/ai-billing';
-import { buildWorkersAIGatewayUrl } from '../../../services/ai-proxy-shared';
 import { incrementProviderUsage, incrementTokenUsage } from '../../../services/ai-token-budget';
+import {
+  type ChatCompletionsTarget,
+  chatTargetHeaders,
+  LlmUnavailableError,
+  resolveCloudflareWorkersAiTarget,
+  resolveOpenAICompatibleTarget,
+} from '../../../services/llm-chat-target';
+import { aiGatewayOnlyHeaders } from '../../../services/platform-capabilities';
 import { buildAnthropicGatewayUrl } from '../agent-loop-helpers';
 
 /** Provider ID of the OpenAI-compatible Workers AI route; also its providerOptions key. */
 const WORKERS_AI_PROVIDER_ID = 'sam-workers-ai';
+/** Provider ID of an admin-configured OpenAI-compatible endpoint (no provider options). */
+const OPENAI_COMPATIBLE_PROVIDER_ID = 'sam-openai-compatible';
 
 /**
  * The language model for one private turn, routed through the SAM AI Gateway.
@@ -22,6 +31,18 @@ export async function resolveOperatorModel(
   headers: { metadata: string; sessionAffinity: string }
 ) {
   const { ModelRouterLanguageModel, ModelsDevGateway } = await import('@mastra/core/llm');
+  // An admin-configured OpenAI-compatible endpoint replaces the model route for the agent.
+  const endpoint = await resolveOpenAICompatibleTarget(env, 'agent', modelId);
+  if (endpoint) {
+    return new ModelRouterLanguageModel({
+      providerId: OPENAI_COMPATIBLE_PROVIDER_ID,
+      modelId: endpoint.model,
+      url: endpoint.baseUrl,
+      apiKey: endpoint.apiKey ?? '',
+      headers: chatHeadersWithoutAuth(endpoint, headers),
+      api: 'chat',
+    });
+  }
   if (modelId.startsWith('claude-')) {
     const auth = await resolveUpstreamAuth(env, drizzle(env.DATABASE));
     const gateway = new ModelsDevGateway({
@@ -37,23 +58,36 @@ export async function resolveOperatorModel(
       providerId: 'anthropic',
       modelId,
       apiKey: auth.headers['x-api-key'] ?? '',
-      headers: { ...auth.headers, 'cf-aig-metadata': headers.metadata },
+      headers: { ...auth.headers, ...aiGatewayOnlyHeaders(env, { 'cf-aig-metadata': headers.metadata }) },
     });
   }
   if (modelId.startsWith('@cf/') || modelId.startsWith('@hf/')) {
+    const target = resolveCloudflareWorkersAiTarget(env, modelId);
+    if (!target) throw new LlmUnavailableError('agent');
     return new ModelRouterLanguageModel({
       providerId: WORKERS_AI_PROVIDER_ID,
       modelId,
-      url: buildWorkersAIGatewayUrl(env).replace(/\/chat\/completions$/, ''),
+      url: target.baseUrl,
       apiKey: env.CF_API_TOKEN,
-      headers: {
-        'cf-aig-metadata': headers.metadata,
-        'x-session-affinity': headers.sessionAffinity,
-      },
+      headers: chatHeadersWithoutAuth(target, headers),
       api: 'chat',
     });
   }
   throw new Error('Unsupported SAM model provider');
+}
+
+/** The router sets Authorization from apiKey; gateway attribution goes to Cloudflare only. */
+function chatHeadersWithoutAuth(
+  target: ChatCompletionsTarget,
+  headers: { metadata: string; sessionAffinity: string }
+): Record<string, string> {
+  const all = chatTargetHeaders(target, {
+    'cf-aig-metadata': headers.metadata,
+    'x-session-affinity': headers.sessionAffinity,
+  });
+  return Object.fromEntries(
+    Object.entries(all).filter(([name]) => name !== 'Authorization' && name !== 'Content-Type')
+  );
 }
 
 /** Model quirks live in one explicit boundary (compare `getTaskTitleModelControls`). */

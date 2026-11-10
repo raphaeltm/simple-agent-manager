@@ -39,6 +39,8 @@ vi.mock('../../../src/middleware/error', () => {
       badRequest: (msg: string) => new AppError(400, 'BAD_REQUEST', msg),
       notFound: (entity: string) => new AppError(404, 'NOT_FOUND', `${entity} not found`),
       forbidden: (msg: string) => new AppError(403, 'FORBIDDEN', msg),
+      featureUnavailable: (_feature: string, msg: string) =>
+        new AppError(404, 'FEATURE_UNAVAILABLE', msg),
     },
     AppError,
   };
@@ -813,15 +815,17 @@ describe('Admin Observability Routes', () => {
       expect(mockQueryCloudflareLogs).not.toHaveBeenCalled();
     });
 
-    it('should return 400 when CF credentials are not configured', async () => {
+    it('reports log search as not available when no Cloudflare account is configured', async () => {
       const res = await postLogs(validBody, {
         CF_API_TOKEN: undefined as unknown as string,
         CF_ACCOUNT_ID: undefined as unknown as string,
       });
 
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(404);
       const body = await res.json();
-      expect(body.message).toContain('credentials');
+      expect(body.error).toBe('FEATURE_UNAVAILABLE');
+      expect(body.message).toContain('not available');
+      expect(mockQueryCloudflareLogs).not.toHaveBeenCalled();
     });
 
     it('should return 400 when timeRange is missing', async () => {

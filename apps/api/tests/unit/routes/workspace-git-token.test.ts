@@ -263,9 +263,17 @@ describe('workspace git-token GitHub scoping', () => {
 
     app = new Hono<{ Bindings: Env }>();
     app.onError((err, c) => {
-      const appError = err as { statusCode?: number; error?: string; message?: string };
+      const appError = err as {
+        statusCode?: number;
+        error?: string;
+        message?: string;
+        details?: Record<string, unknown>;
+      };
       if (typeof appError.statusCode === 'number' && typeof appError.error === 'string') {
-        return c.json({ error: appError.error, message: appError.message }, appError.statusCode);
+        return c.json(
+          { error: appError.error, message: appError.message, details: appError.details },
+          appError.statusCode
+        );
       }
       return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
     });
@@ -609,6 +617,84 @@ describe('workspace git-token GitHub scoping', () => {
     expect(res.status).toBe(403);
     await expect(res.json()).resolves.toMatchObject({ error: 'FORBIDDEN' });
     expect(getInstallationToken).not.toHaveBeenCalled();
+  });
+
+  describe('Artifacts flag set, binding availability varies (self-host)', () => {
+    function artifactsBinding(createToken: ReturnType<typeof vi.fn>) {
+      return {
+        get: vi.fn().mockResolvedValue({
+          remote: 'https://acct123.artifacts.cloudflare.net/git/default/artifacts-repo-1.git',
+          createToken,
+        }),
+      };
+    }
+
+    it('returns 404 FEATURE_UNAVAILABLE (feature "artifacts") when ARTIFACTS_ENABLED is "true" but the binding is absent', async () => {
+      // A self-hosted install can set the flag without the Cloudflare-only Artifacts binding.
+      const noBindingEnv = { ...mockEnv, ARTIFACTS_ENABLED: 'true' } as Env;
+      limitResponses.push([workspaceRow()], [artifactsProjectRow()]);
+
+      const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, noBindingEnv);
+
+      expect(res.status).toBe(404);
+      const body = (await res.json()) as Record<string, unknown>;
+      expect(body).toMatchObject({
+        error: 'FEATURE_UNAVAILABLE',
+        details: { feature: 'artifacts' },
+      });
+      // Nothing was minted or returned.
+      expect(body).not.toHaveProperty('token');
+      expect(getInstallationToken).not.toHaveBeenCalled();
+      expect(mocks.requireGitLabUserAccessTokenResultForOwner).not.toHaveBeenCalled();
+    });
+
+    it('control: the same workspace and project mint a token when the binding is present', async () => {
+      const createToken = vi.fn().mockResolvedValue({
+        plaintext: 'artifacts-token?expires=ignored',
+        expiresAt: '2026-06-06T20:00:00.000Z',
+      });
+      const withBindingEnv = {
+        ...mockEnv,
+        ARTIFACTS_ENABLED: 'true',
+        ARTIFACTS: artifactsBinding(createToken),
+      } as unknown as Env;
+      limitResponses.push([workspaceRow()], [artifactsProjectRow()]);
+
+      const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, withBindingEnv);
+
+      expect(res.status).toBe(200);
+      expect(createToken).toHaveBeenCalledWith('write', 3600);
+      await expect(res.json()).resolves.toMatchObject({ token: 'artifacts-token' });
+    });
+
+    it('still answers 403 (not 404) when the binding is present but the flag is off', async () => {
+      // The flag guard keeps precedence over the binding guard: a Cloudflare deployment that
+      // has not opted in sees exactly the pre-self-host response.
+      const createToken = vi.fn();
+      const flagOffEnv = {
+        ...mockEnv,
+        ARTIFACTS: artifactsBinding(createToken),
+      } as unknown as Env;
+      limitResponses.push([workspaceRow()], [artifactsProjectRow()]);
+
+      const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, flagOffEnv);
+
+      expect(res.status).toBe(403);
+      await expect(res.json()).resolves.toMatchObject({ error: 'FORBIDDEN' });
+      expect(createToken).not.toHaveBeenCalled();
+    });
+
+    it('does not apply the binding guard to a GitHub project when the binding is absent', async () => {
+      // The 404 is Artifacts-specific: a GitHub workspace on the same install still mints.
+      queueWorkspaceProjectLookup();
+      const res = await app.request(
+        '/ws/ws-1/git-token',
+        { method: 'POST' },
+        { ...mockEnv, ARTIFACTS_ENABLED: 'true' } as Env
+      );
+      expect(res.status).not.toBe(404);
+      expect(getInstallationToken).toHaveBeenCalled();
+    });
   });
 
   it('returns 500 when an Artifacts project has a null artifactsRepoId', async () => {

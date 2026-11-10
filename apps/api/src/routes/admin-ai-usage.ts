@@ -16,6 +16,7 @@ import {
   type UsageByDay,
   type UsageByModel,
 } from '../services/ai-gateway-logs';
+import { resolveAiGatewayId } from '../services/platform-capabilities';
 
 // Admin AI usage supports 24h which isn't a standard GatewayPeriod
 const VALID_PERIODS = ['24h', '7d', '30d', '90d'] as const;
@@ -54,7 +55,7 @@ adminAiUsageRoutes.use('/*', requireAuth(), requireApproved(), requireSuperadmin
  */
 adminAiUsageRoutes.get('/', async (c) => {
   const period = parsePeriod(c.req.query('period'));
-  const gatewayId = c.env.AI_GATEWAY_ID;
+  const gatewayId = resolveAiGatewayId(c.env);
   if (!gatewayId) {
     return c.json({
       totalRequests: 0,

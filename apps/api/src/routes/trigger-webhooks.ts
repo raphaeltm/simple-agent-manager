@@ -2,6 +2,7 @@ import type { WebhookDeliveryOutcome } from '@simple-agent-manager/shared';
 import { type Context, Hono } from 'hono';
 
 import type { Env } from '../env';
+import { clientIpFromHeaders } from '../lib/client-ip';
 import { log } from '../lib/logger';
 import {
   checkRateLimit,
@@ -72,11 +73,7 @@ function bearerToken(authorization: string | undefined): string | null {
 }
 
 function clientIp(request: Request): string {
-  return (
-    request.headers.get('CF-Connecting-IP') ??
-    request.headers.get('X-Forwarded-For')?.split(',')[0]?.trim() ??
-    'unknown'
-  );
+  return clientIpFromHeaders((name) => request.headers.get(name)) ?? 'unknown';
 }
 
 async function takeRateLimit(

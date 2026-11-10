@@ -41,7 +41,6 @@ vi.mock('../../../src/services/ai-proxy-shared', () => {
     buildAnthropicGatewayUrl: () => 'https://gateway.example.com/anthropic/v1/messages',
     buildAnthropicCountTokensUrl: () =>
       'https://gateway.example.com/anthropic/v1/messages/count_tokens',
-    buildWorkersAIGatewayUrl: () => 'https://gateway.example.com/workers-ai/v1/chat/completions',
     isAnthropicModel: (id: string) => id.startsWith('claude-'),
   };
 });

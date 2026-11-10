@@ -4,6 +4,11 @@ import { describe, expect, it } from 'vitest';
 
 import { AcpConversationItemView } from '../../../src/components/project-message-view/AcpConversationItemView';
 
+// Cloudflare behaviour: every platform service present (absent case: platform-capabilities-ui.test.tsx).
+vi.mock('../../../src/hooks/usePlatformCapabilities', () => ({
+  usePlatformCapabilities: () => ({ speechToText: true, textToSpeech: true }),
+}));
+
 function userItem(
   overrides: Partial<Extract<ConversationItem, { kind: 'user_message' }>>
 ): ConversationItem {

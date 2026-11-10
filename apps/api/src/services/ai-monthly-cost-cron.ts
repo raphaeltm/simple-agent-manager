@@ -15,6 +15,7 @@ import {
   getGatewayPeriodBounds,
   iterateGatewayLogs,
 } from './ai-gateway-logs';
+import { resolveAiGatewayId } from './platform-capabilities';
 
 const DEFAULT_MONTHLY_COST_AGGREGATION_MAX_PAGES = 200;
 const MONTHLY_COST_AGGREGATION_MAX_PAGES_HARD_CAP = 500;
@@ -23,6 +24,8 @@ export const MAX_MONTHLY_COST_CACHE_TTL_SECONDS = 86_400;
 
 export interface MonthlyCostCronResult {
   enabled: boolean;
+  /** Why the run did nothing, when it was skipped on purpose (not a failure). */
+  skipReason?: 'ai_gateway_unavailable';
   usersUpdated: number;
   totalEntries: number;
   errors: number;
@@ -49,9 +52,17 @@ export function resolveMonthlyCostCacheTtlSeconds(raw: string | undefined): numb
  * TTL: 2 hours (cron runs hourly, so stale data expires if cron stops).
  */
 export async function runMonthlyCostAggregation(env: Env): Promise<MonthlyCostCronResult> {
-  const gatewayId = env.AI_GATEWAY_ID;
+  // No reachable AI Gateway (no gateway id, or no Cloudflare account to address it): there are
+  // no gateway logs to aggregate. A designed skip, reported in cron.completed, not an error.
+  const gatewayId = resolveAiGatewayId(env);
   if (!gatewayId) {
-    return { enabled: false, usersUpdated: 0, totalEntries: 0, errors: 0 };
+    return {
+      enabled: false,
+      skipReason: 'ai_gateway_unavailable',
+      usersUpdated: 0,
+      totalEntries: 0,
+      errors: 0,
+    };
   }
 
   const now = new Date();

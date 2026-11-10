@@ -8,6 +8,7 @@ import {
   projectChatSessionsQueryOptions,
   projectDetailQueryOptions,
 } from './query-options';
+import { platformCapabilitiesQueryOptions } from './query-options/platform-capabilities';
 
 /**
  * The project chat sidebar's first session-list read.
@@ -90,6 +91,9 @@ export function prefetchProjectRoute(
   if (!projectId) return;
 
   void queryClient.prefetchQuery(projectDetailQueryOptions(queryScope, projectId));
+  // Decides whether the composer offers voice input; fetched early so it rarely changes after
+  // the composer first renders.
+  void queryClient.prefetchQuery(platformCapabilitiesQueryOptions());
 
   const selected = matchPath('/projects/:id/chat/:sessionId', pathname);
   const chatRoute =

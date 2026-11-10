@@ -18,6 +18,7 @@ import type { drizzle } from 'drizzle-orm/d1';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { getCredentialEncryptionKey } from '../lib/secrets';
+import { resolveAiGatewayId } from './platform-capabilities';
 import { getPlatformAgentCredential } from './platform-credentials';
 
 export interface UpstreamAuth {
@@ -55,8 +56,13 @@ function isValidBillingMode(value: string): value is BillingMode {
 /**
  * Resolve the Cloudflare token for Unified Billing.
  * Prefers the explicit CF_AIG_TOKEN, falls back to CF_API_TOKEN (already a Worker secret).
+ *
+ * Unified Billing exists only through AI Gateway. When the gateway cannot be addressed the call
+ * goes straight to the provider, so there is no unified billing and the Cloudflare token must
+ * not be sent: callers then use the provider key instead.
  */
 export function resolveUnifiedBillingToken(env: Env): string | undefined {
+  if (!resolveAiGatewayId(env)) return undefined;
   return env.CF_AIG_TOKEN ?? env.CF_API_TOKEN ?? undefined;
 }
 
@@ -86,7 +92,7 @@ export async function resolveUpstreamAuth(
   if (mode === 'unified') {
     if (!cfToken) {
       throw new Error(
-        'Unified Billing enabled but no CF token is configured (set CF_AIG_TOKEN or CF_API_TOKEN)'
+        'Unified Billing enabled but unavailable: it needs AI Gateway (AI_GATEWAY_ID and CF_ACCOUNT_ID) and a CF token (CF_AIG_TOKEN or CF_API_TOKEN)'
       );
     }
     return {

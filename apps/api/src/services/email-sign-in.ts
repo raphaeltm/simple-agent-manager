@@ -20,6 +20,7 @@ import { emailOTP } from 'better-auth/plugins/email-otp';
 import type { Context, MiddlewareHandler } from 'hono';
 
 import type { Env } from '../env';
+import { clientIpFromHeaders } from '../lib/client-ip';
 import { createModuleLogger } from '../lib/logger';
 import {
   checkRateLimit,
@@ -240,11 +241,7 @@ export function emailSignInPlugins(env: Env): BetterAuthPlugin[] {
 }
 
 function clientIp(c: Context): string {
-  return (
-    c.req.header('CF-Connecting-IP') ??
-    c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() ??
-    'unknown'
-  );
+  return clientIpFromHeaders((name) => c.req.header(name)) ?? 'unknown';
 }
 
 /** Per-IP limit on email-code requests or redemptions, ahead of BetterAuth. */

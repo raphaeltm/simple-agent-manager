@@ -16,6 +16,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FakeWebSocket } from '../helpers/fake-websocket';
 
+// Cloudflare behaviour: every platform service present (absent case: platform-capabilities-ui.test.tsx).
+vi.mock('../../../src/hooks/usePlatformCapabilities', () => ({
+  usePlatformCapabilities: () => ({ speechToText: true, textToSpeech: true }),
+}));
+
 const mocks = vi.hoisted(() => ({
   getChatSession: vi.fn(),
   getChatSessionState: vi.fn(),

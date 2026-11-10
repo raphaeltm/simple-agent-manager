@@ -9,6 +9,12 @@ import {
 import type { UiCommentThread } from '../../../src/components/project-message-view/comments/comment-utils';
 import type { MessageCommentAuthor } from '../../../src/lib/api/comments';
 
+// Cloudflare behaviour: every platform service present. The absent case runs through the real
+// capabilities query in platform-capabilities-ui.test.tsx.
+vi.mock('../../../src/hooks/usePlatformCapabilities', () => ({
+  usePlatformCapabilities: () => ({ speechToText: true, textToSpeech: true }),
+}));
+
 const VIEWER = 'user-viewer';
 const OTHER = 'user-other';
 

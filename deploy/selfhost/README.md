@@ -64,8 +64,12 @@ redacted.
 - Off on purpose: Instant sessions and guided credential login (Cloudflare Containers), Artifacts
   (SAM-native repos), Analytics Engine, AI Gateway, Workers AI features (TTS, task titles,
   stalled-task classifier), email sign-in. Project creation needs a GitHub App or GitLab.
-- Still reachable but failing without Cloudflare: the SAM agent's default model
-  (`@cf/...` through AI Gateway), voice transcription, and the Workers AI model catalog (503).
+- Without Cloudflare, voice transcription, server read-aloud and the Workers AI model catalog
+  answer `404 FEATURE_UNAVAILABLE`, and the web UI hides the mic and server read-aloud. The SAM
+  agent, project agents, task titles and the diagnosis runner need an OpenAI-compatible endpoint:
+  set it in Admin settings (`llm.openAICompatible.baseUrl`, `apiKey`, `model`, plus optional
+  per-purpose models). The key is stored encrypted. Without an endpoint those features report that
+  no model is available, and task titles fall back to the truncated prompt.
 - `www.SAM_DOMAIN` answers 503 and the apex is not served; only the subdomains above are used.
 - `VM_AGENT_TRANSPORT=reverse-tunnel` is set for the box: nodes run a pinned frpc that dials
   `wss://api.SAM_DOMAIN/~!frp` and is exposed on a leased loopback port (20000-29999 by default);

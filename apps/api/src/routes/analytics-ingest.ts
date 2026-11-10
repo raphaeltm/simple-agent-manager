@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 
 import type { Env } from '../env';
+import { clientIpFromHeaders } from '../lib/client-ip';
 import { log } from '../lib/logger';
 import { expectJsonRecord } from '../lib/runtime-validation';
 import { bucketUserAgent } from '../middleware/analytics';
@@ -36,11 +37,7 @@ function truncate(value: string, maxLength: number): string {
 }
 
 function getClientIp(c: { req: { header: (name: string) => string | undefined } }): string {
-  return (
-    c.req.header('CF-Connecting-IP') ??
-    c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() ??
-    'unknown'
-  );
+  return clientIpFromHeaders((name) => c.req.header(name)) ?? 'unknown';
 }
 
 /**

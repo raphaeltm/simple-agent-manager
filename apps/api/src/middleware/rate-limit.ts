@@ -8,6 +8,7 @@
 import type { Context, MiddlewareHandler, Next } from 'hono';
 
 import type { Env } from '../env';
+import { clientIpFromHeaders } from '../lib/client-ip';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { AppError } from './error';
@@ -78,16 +79,7 @@ export function getRateLimit(env: Env, key: keyof typeof DEFAULT_RATE_LIMITS): n
  * Get the client IP address from the request.
  */
 function getClientIp(c: Context): string {
-  const cfIp = c.req.header('CF-Connecting-IP');
-  if (cfIp) return cfIp;
-
-  const xForwardedFor = c.req.header('X-Forwarded-For');
-  if (xForwardedFor) {
-    const firstIp = xForwardedFor.split(',')[0];
-    return firstIp ? firstIp.trim() : 'unknown';
-  }
-
-  return 'unknown';
+  return clientIpFromHeaders((name) => c.req.header(name)) ?? 'unknown';
 }
 
 /**

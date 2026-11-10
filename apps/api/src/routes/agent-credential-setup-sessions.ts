@@ -43,6 +43,7 @@ import {
   startSetupSession,
   submitSetupSessionVerificationCode,
 } from '../services/credential-setup-session';
+import { isGuidedCredentialSetupAvailable } from '../services/platform-capabilities';
 import { leaseSetupSlot, releaseSetupSlot } from '../services/setup-session-pool';
 
 const agentCredentialSetupSessionsRoutes = new Hono<{ Bindings: Env }>();
@@ -82,8 +83,9 @@ interface SetupSessionD1Row {
   error_message: string | null;
 }
 
+/** Bindings alone are not enough: the Sandbox binding needs a container runtime behind it. */
 function guidedSetupAvailable(env: Env): boolean {
-  return !!env.SANDBOX && !!env.CREDENTIAL_SETUP_SESSION && !!env.SETUP_SESSION_POOL;
+  return isGuidedCredentialSetupAvailable(env);
 }
 
 async function loadOwnedSession(

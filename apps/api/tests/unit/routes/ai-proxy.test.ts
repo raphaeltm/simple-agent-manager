@@ -12,7 +12,8 @@ import {
   normalizeModelId,
   resolveModelId,
 } from '../../../src/routes/ai-proxy';
-import { buildAIGatewayMetadata, buildWorkersAIGatewayUrl } from '../../../src/services/ai-proxy-shared';
+import { buildAIGatewayMetadata } from '../../../src/services/ai-proxy-shared';
+import { resolveCloudflareWorkersAiTarget } from '../../../src/services/llm-chat-target';
 
 // =============================================================================
 // Model Normalization
@@ -368,7 +369,11 @@ describe('AI Gateway shared metadata', () => {
   });
 
   it('builds the shared Workers AI Gateway URL', () => {
-    expect(buildWorkersAIGatewayUrl({ CF_ACCOUNT_ID: 'account-1', AI_GATEWAY_ID: 'gateway-1' } as never))
-      .toBe('https://gateway.ai.cloudflare.com/v1/account-1/gateway-1/workers-ai/v1/chat/completions');
+    expect(
+      resolveCloudflareWorkersAiTarget(
+        { CF_ACCOUNT_ID: 'account-1', AI_GATEWAY_ID: 'gateway-1', CF_API_TOKEN: 'token' },
+        '@cf/model'
+      )?.url
+    ).toBe('https://gateway.ai.cloudflare.com/v1/account-1/gateway-1/workers-ai/v1/chat/completions');
   });
 });

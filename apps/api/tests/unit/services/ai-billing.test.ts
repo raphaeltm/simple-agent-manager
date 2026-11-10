@@ -34,7 +34,16 @@ function mockEnv(overrides: Partial<{
     ENCRYPTION_KEY: overrides.ENCRYPTION_KEY ?? 'test-key',
     KV: overrides.KV ?? mockKV(),
     DATABASE: {} as D1Database,
+    // A Cloudflare deployment: Unified Billing needs an addressable AI Gateway.
+    AI_GATEWAY_ID: 'sam',
+    CF_ACCOUNT_ID: 'account-1',
   } as Parameters<typeof resolveUpstreamAuth>[0];
+}
+
+/** The same env on a runtime with no Cloudflare account (wrangler.toml's gateway id remains). */
+function withoutGateway(env: Parameters<typeof resolveUpstreamAuth>[0]) {
+  (env as Record<string, unknown>).CF_ACCOUNT_ID = undefined;
+  return env;
 }
 
 // Mock the platform-credentials module
@@ -72,6 +81,33 @@ describe('resolveUnifiedBillingToken', () => {
     (env as Record<string, unknown>).CF_AIG_TOKEN = undefined;
     (env as Record<string, unknown>).CF_API_TOKEN = undefined;
     expect(resolveUnifiedBillingToken(env)).toBeUndefined();
+  });
+});
+
+describe('Unified Billing without an addressable AI Gateway', () => {
+  it('has no unified token, so no Cloudflare token can reach a provider directly', () => {
+    const env = withoutGateway(mockEnv({ CF_AIG_TOKEN: 'aig-token', CF_API_TOKEN: 'api-token' }));
+    expect(resolveUnifiedBillingToken(env)).toBeUndefined();
+  });
+
+  it('auto mode uses the platform key instead of cf-aig-authorization', async () => {
+    mockGetPlatformCred.mockResolvedValueOnce({
+      credential: 'sk-ant-direct',
+      credentialKind: 'api-key',
+    });
+    const env = withoutGateway(mockEnv({ CF_API_TOKEN: 'api-token' }));
+    const result = await resolveUpstreamAuth(env, {} as Parameters<typeof resolveUpstreamAuth>[1]);
+    expect(result.headers['x-api-key']).toBe('sk-ant-direct');
+    expect(result.headers['cf-aig-authorization']).toBeUndefined();
+    expect(JSON.stringify(result.headers)).not.toContain('api-token');
+    expect(result.billingMode).toBe('platform-key');
+  });
+
+  it('unified mode refuses with a reason naming the gateway', async () => {
+    const env = withoutGateway(mockEnv({ AI_PROXY_BILLING_MODE: 'unified' }));
+    await expect(
+      resolveUpstreamAuth(env, {} as Parameters<typeof resolveUpstreamAuth>[1])
+    ).rejects.toThrow('needs AI Gateway');
   });
 });
 
@@ -148,7 +184,7 @@ describe('resolveUpstreamAuth — unified mode', () => {
     const db = {} as Parameters<typeof resolveUpstreamAuth>[1];
 
     await expect(resolveUpstreamAuth(env, db)).rejects.toThrow(
-      'no CF token is configured',
+      'Unified Billing enabled but unavailable',
     );
   });
 });

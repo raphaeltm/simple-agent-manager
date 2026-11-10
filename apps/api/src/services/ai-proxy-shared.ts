@@ -10,6 +10,14 @@
  */
 import type { Env } from '../env';
 import { expectJsonRecord } from '../lib/runtime-validation';
+import {
+  chatTargetHeaders,
+  isCloudflareChatTarget,
+  type LlmPurpose,
+  LlmUnavailableError,
+  resolveWorkersAiChatTarget,
+} from './llm-chat-target';
+import { resolveAiGatewayId } from './platform-capabilities';
 
 export {
   AIProxyAuthError,
@@ -69,21 +77,12 @@ export function buildAIGatewayMetadata(opts: {
 
 /** Build upstream URL for Anthropic Messages API via AI Gateway. */
 export function buildAnthropicGatewayUrl(env: Env): string {
-  const gatewayId = env.AI_GATEWAY_ID;
+  const gatewayId = resolveAiGatewayId(env);
   if (gatewayId) {
     return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${gatewayId}/anthropic/v1/messages`;
   }
   // Fallback: direct Anthropic API (no gateway monitoring)
   return 'https://api.anthropic.com/v1/messages';
-}
-
-/** Build upstream URL for Workers AI chat completions via AI Gateway. */
-export function buildWorkersAIGatewayUrl(env: Env): string {
-  const gatewayId = env.AI_GATEWAY_ID;
-  if (gatewayId) {
-    return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${gatewayId}/workers-ai/v1/chat/completions`;
-  }
-  return `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/ai/v1/chat/completions`;
 }
 
 export interface WorkersAIChatMessage {
@@ -92,6 +91,8 @@ export interface WorkersAIChatMessage {
 }
 
 export interface WorkersAIChatCompletionOptions {
+  /** Which control-plane caller this is; selects its model on an OpenAI-compatible endpoint. */
+  purpose: LlmPurpose;
   modelId: string;
   maxTokens: number;
   timeoutMs: number;
@@ -206,22 +207,26 @@ export async function fetchWorkersAIChatCompletion(
   env: Env,
   options: WorkersAIChatCompletionOptions
 ): Promise<string | null> {
-  const response = await fetch(buildWorkersAIGatewayUrl(env), {
+  const target = await resolveWorkersAiChatTarget(env, options.purpose, options.modelId);
+  if (!target) throw new LlmUnavailableError(options.purpose);
+  // reasoning_effort and chat_template_kwargs are Workers AI model quirks keyed by the
+  // Cloudflare model id; another endpoint's model would reject or misread them.
+  const cloudflare = isCloudflareChatTarget(target);
+  const response = await fetch(target.url, {
     method: 'POST',
+    redirect: target.redirect,
     signal: AbortSignal.timeout(options.timeoutMs),
-    headers: {
-      Authorization: `Bearer ${env.CF_API_TOKEN}`,
-      'Content-Type': 'application/json',
-      'cf-aig-metadata': JSON.stringify(options.metadata),
-    },
+    headers: chatTargetHeaders(target, { 'cf-aig-metadata': JSON.stringify(options.metadata) }),
     body: JSON.stringify({
-      model: options.modelId,
+      model: target.model,
       max_tokens: options.maxTokens,
       messages: options.messages,
-      ...(options.reasoningEffort !== undefined
+      ...(cloudflare && options.reasoningEffort !== undefined
         ? { reasoning_effort: options.reasoningEffort }
         : {}),
-      ...(options.chatTemplateKwargs ? { chat_template_kwargs: options.chatTemplateKwargs } : {}),
+      ...(cloudflare && options.chatTemplateKwargs
+        ? { chat_template_kwargs: options.chatTemplateKwargs }
+        : {}),
     }),
   });
 
@@ -245,7 +250,7 @@ export async function fetchWorkersAIChatCompletion(
 
 /** Build upstream URL for Anthropic token counting via AI Gateway. */
 export function buildAnthropicCountTokensUrl(env: Env): string {
-  const gatewayId = env.AI_GATEWAY_ID;
+  const gatewayId = resolveAiGatewayId(env);
   if (gatewayId) {
     return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${gatewayId}/anthropic/v1/messages/count_tokens`;
   }

@@ -171,6 +171,7 @@ import { workspacesRoutes } from './routes/workspaces';
 import { scheduled } from './scheduled/handler';
 import { handleInboundAgentEmail } from './services/agent-email/inbound';
 import { agentEmailConfig } from './services/agent-email/setup-state';
+import { isArtifactsAvailable, publicPlatformCapabilities } from './services/platform-capabilities';
 import { isInstantRuntimeAvailable } from './services/vm-agent-container';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -267,7 +268,14 @@ app.get('/health', (c) => {
 // Public config — exposes feature flags the UI needs before auth
 app.get('/api/config/artifacts-enabled', (c) => {
   applyCacheHeaders(c, 'public-config');
-  return c.json({ enabled: c.env.ARTIFACTS_ENABLED === 'true' && !!c.env.ARTIFACTS });
+  return c.json({ enabled: isArtifactsAvailable(c.env) });
+});
+
+// Public config — which platform services this installation has, so the UI can hide entry
+// points that cannot work here (services/platform-capabilities.ts). Booleans only.
+app.get('/api/config/platform-capabilities', (c) => {
+  applyCacheHeaders(c, 'public-config');
+  return c.json(publicPlatformCapabilities(c.env));
 });
 
 // Public config — whether agents can run on Instant (Cloudflare Containers) with no cloud account.

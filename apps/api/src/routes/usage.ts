@@ -37,6 +37,7 @@ import {
 import { checkQuotaForUser, userHasOwnCloudCredentials } from '../services/compute-quotas';
 import { getCurrentPeriodBounds } from '../services/compute-usage';
 import { getUserNodeUsageSummary } from '../services/node-usage';
+import { resolveAiGatewayId } from '../services/platform-capabilities';
 
 const usageRoutes = new Hono<{ Bindings: Env }>();
 
@@ -94,7 +95,7 @@ usageRoutes.get('/ai', requireAuth(), requireApproved(), async (c) => {
   const period = parseGatewayPeriod(c.req.query('period'));
   const periodBounds = getGatewayPeriodBounds(period);
 
-  const gatewayId = c.env.AI_GATEWAY_ID;
+  const gatewayId = resolveAiGatewayId(c.env);
   if (!gatewayId) {
     const providerMap = new Map<string, UsageByProvider>();
     const localProviderUsage = await getProviderUsage(c.env.KV, userId, new Date(periodBounds.startDate), c.env);
@@ -254,7 +255,7 @@ usageRoutes.get('/ai/budget', requireAuth(), requireApproved(), async (c) => {
 
   // Get current month cost from AI Gateway (reuse the same aggregation)
   let monthCostUsd = 0;
-  const gatewayId = c.env.AI_GATEWAY_ID;
+  const gatewayId = resolveAiGatewayId(c.env);
   if (gatewayId) {
     const periodBounds = getGatewayPeriodBounds('current-month');
     try {

@@ -3,6 +3,7 @@ import { type drizzle } from 'drizzle-orm/d1';
 
 import type * as schema from '../db/schema';
 import type { Env } from '../env';
+import { isContainerWorkspaceRuntimeEnabled } from './platform-capabilities';
 import { resolveCredentialSource } from './provider-credentials';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
@@ -50,7 +51,7 @@ export function decideWorkspaceRuntime(input: WorkspaceRuntimeDecisionInput): Wo
 
 export async function resolveWorkspaceRuntime(
   db: Db,
-  env: Pick<Env, 'CF_CONTAINER_ENABLED' | 'SANDBOX_ENABLED'>,
+  env: Pick<Env, 'CF_CONTAINER_ENABLED' | 'SANDBOX_ENABLED' | 'CONTAINER_RUNTIME_AVAILABLE'>,
   input: {
     userId: string;
     projectId?: string | null;
@@ -58,7 +59,7 @@ export async function resolveWorkspaceRuntime(
     explicitRuntime?: AgentProfileRuntime | null;
   }
 ): Promise<WorkspaceRuntimeDecision> {
-  if ((env.CF_CONTAINER_ENABLED ?? env.SANDBOX_ENABLED) !== 'true') {
+  if (!isContainerWorkspaceRuntimeEnabled(env)) {
     return decideWorkspaceRuntime({ containerEnabled: false, explicitRuntime: input.explicitRuntime });
   }
 

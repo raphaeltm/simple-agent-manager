@@ -7,6 +7,7 @@ import { LIFECYCLE_LATENCY_SETTINGS } from './admin-settings-lifecycle-latency-d
 import { NODE_TUNNEL_SETTINGS } from './admin-settings-node-tunnel-definitions';
 import { OPERATIONS_TELEMETRY_SETTINGS } from './admin-settings-operations-telemetry-definitions';
 import { OPERATOR_SETTINGS } from './admin-settings-operator-definitions';
+import { llmEndpointSettingDefinitions } from './llm-endpoint-settings';
 export {
   type AdminSettingDefinition,
   type AdminSettingName,
@@ -31,6 +32,7 @@ const definitions = [
   ...OPERATOR_SETTINGS,
   ...LIFECYCLE_LATENCY_SETTINGS,
   ...OPERATIONS_TELEMETRY_SETTINGS,
+  ...llmEndpointSettingDefinitions(),
 ];
 
 export const ADMIN_SETTINGS_REGISTRY: readonly AdminSettingDefinition[] = Object.freeze(

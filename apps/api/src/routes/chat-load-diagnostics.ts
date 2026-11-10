@@ -1,6 +1,7 @@
 import type { Context } from 'hono';
 
 import type { Env } from '../env';
+import { clientIpFromHeaders } from '../lib/client-ip';
 import { log } from '../lib/logger';
 import { getAuth } from '../middleware/auth';
 import { persistError } from '../services/observability';
@@ -70,7 +71,7 @@ export async function recordChatSessionLoadFailure(
         context,
         userId: input.userId,
         sessionId: input.sessionId,
-        ipAddress: c.req.header('CF-Connecting-IP') ?? null,
+        ipAddress: clientIpFromHeaders((name) => c.req.header(name)),
         userAgent: c.req.header('User-Agent') ?? null,
       },
       c.env

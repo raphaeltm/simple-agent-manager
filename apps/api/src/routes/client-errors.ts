@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 
 import type { Env } from '../env';
+import { clientIpFromHeaders } from '../lib/client-ip';
 import { log } from '../lib/logger';
 import { expectJsonRecord, maybeJsonRecord } from '../lib/runtime-validation';
 import { optionalAuth } from '../middleware/auth';
@@ -33,7 +34,7 @@ function getPositiveInteger(value: string | undefined, fallback: number): number
 }
 
 function getClientIp(c: { req: { header: (name: string) => string | undefined } }): string {
-  return c.req.header('CF-Connecting-IP') ?? c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() ?? 'unknown';
+  return clientIpFromHeaders((name) => c.req.header(name)) ?? 'unknown';
 }
 
 const clientErrorsRoutes = new Hono<{ Bindings: Env }>();

@@ -143,7 +143,12 @@ describe('platform quota attribution at real credential and callback boundaries'
     'excludes %s platform limits from admission and startup pinning',
     async (billing) => {
       mode = billing;
-      if (billing === 'unified') env.CF_AIG_TOKEN = 'synthetic-unified-fixture-value';
+      if (billing === 'unified') {
+        // Unified Billing runs through an addressable AI Gateway (a Cloudflare deployment).
+        env.CF_AIG_TOKEN = 'synthetic-unified-fixture-value';
+        env.AI_GATEWAY_ID = 'sam';
+        env.CF_ACCOUNT_ID = 'account-1';
+      }
       const actual = await resolveUpstreamAuth(env, db());
       sqlite
         .prepare(
