@@ -79,7 +79,7 @@ const MESSAGES = [
     role: 'user',
     content: 'Can I dictate a reply here?',
     messageIndex: 0,
-    createdAt: '2026-01-15T10:01:00Z',
+    createdAt: Date.parse('2026-01-15T10:01:00Z'),
   },
   {
     id: 'msg-2',
@@ -87,7 +87,7 @@ const MESSAGES = [
     role: 'assistant',
     content: AGENT_TEXT,
     messageIndex: 1,
-    createdAt: '2026-01-15T10:02:00Z',
+    createdAt: Date.parse('2026-01-15T10:02:00Z'),
   },
 ];
 
@@ -153,6 +153,8 @@ interface Harness {
   releaseCapabilities: () => void;
   capabilityRequests: () => number;
   ttsRequests: () => string[];
+  /** Releases held `/api/tts/*` responses (they answer 503, which falls back to browser speech). */
+  releaseTts: () => void;
 }
 
 async function setupHarness(page: Page, capabilities: Capabilities): Promise<Harness> {
@@ -194,8 +196,15 @@ async function setupHarness(page: Page, capabilities: Capabilities): Promise<Har
       body: JSON.stringify(capabilities),
     });
   });
+  // Held until the test has asserted which path the click took: the player falls back to
+  // browser speech when the server answers an error, so an immediate 503 would race it.
+  let releaseTts!: () => void;
+  const ttsReleased = new Promise<void>((resolve) => {
+    releaseTts = resolve;
+  });
   await page.route('**/api/tts/**', async (route: Route) => {
     ttsRequests.push(`${route.request().method()} ${new URL(route.request().url()).pathname}`);
+    await ttsReleased;
     await route.fulfill({
       status: 503,
       contentType: 'application/json',
@@ -207,6 +216,7 @@ async function setupHarness(page: Page, capabilities: Capabilities): Promise<Har
     releaseCapabilities: release,
     capabilityRequests: () => capabilityRequests,
     ttsRequests: () => ttsRequests,
+    releaseTts,
   };
 }
 
@@ -324,9 +334,11 @@ for (const config of CONFIGS) {
         await expect
           .poll(() => harness.ttsRequests().some((r) => r.startsWith('POST /api/tts/synthesize')))
           .toBe(true);
+        // The server request is in flight and the browser has said nothing.
         expect(await page.evaluate(() => (window as never as { __spoken: string[] }).__spoken)).toEqual(
           []
         );
+        harness.releaseTts();
       } else {
         await expect
           .poll(() => page.evaluate(() => (window as never as { __spoken: string[] }).__spoken.length))
