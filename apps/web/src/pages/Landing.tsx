@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from 'react-router';
 
 import { useAuth } from '../components/AuthProvider';
 import { EmailCodeSignIn } from '../components/EmailCodeSignIn';
+import { LoginProvidersPending } from '../components/LoginProvidersPending';
 import { useLoginProviders } from '../hooks/useLoginProviders';
 import { signInWithGitHub, signInWithGitLab, signInWithGoogle } from '../lib/auth';
 import { PUBLIC_WEBSITE_URL } from '../lib/public-website';
@@ -16,7 +17,7 @@ const AGENTS = ['Claude Code', 'OpenAI Codex', 'Gemini CLI', 'Mistral Vibe'];
  */
 export function Landing() {
   const { isAuthenticated, isLoading } = useAuth();
-  const providers = useLoginProviders();
+  const { providers, failed: providersFailed, retry: retryProviders } = useLoginProviders();
   const navigate = useNavigate();
   const location = useLocation();
   // Capture state.from once on mount to avoid double-navigation when
@@ -30,7 +31,7 @@ export function Landing() {
   const signInEmail = handoff?.signInEmail ?? '';
   // Finishing first-run setup asks for the owner's code straight away, so they only enter it.
   const sendCodeOnArrival = Boolean(signInEmail && handoff?.sendSignInCode);
-  const hasOAuth = providers.github || providers.google || providers.gitlab;
+  const hasOAuth = Boolean(providers && (providers.github || providers.google || providers.gitlab));
 
   useEffect(() => {
     if (isAuthenticated && !isLoading) {
@@ -101,13 +102,19 @@ export function Landing() {
             </>
           )}
 
-          {providers.github && (
+          {!providers && (
+            <div className="mb-3">
+              <LoginProvidersPending failed={providersFailed} retry={retryProviders} />
+            </div>
+          )}
+
+          {providers?.github && (
             <Button onClick={handleGitHubSignIn} size="lg" className="w-full mb-3">
               <GitHubIcon />
               Sign in with GitHub
             </Button>
           )}
-          {providers.google && (
+          {providers?.google && (
             <Button
               onClick={handleGoogleSignIn}
               variant="secondary"
@@ -118,7 +125,7 @@ export function Landing() {
               Sign in with Google
             </Button>
           )}
-          {providers.gitlab && (
+          {providers?.gitlab && (
             <Button
               onClick={handleGitLabSignIn}
               variant="secondary"
@@ -130,7 +137,7 @@ export function Landing() {
             </Button>
           )}
 
-          {providers.email && (
+          {providers?.email && (
             <>
               {hasOAuth && (
                 <div

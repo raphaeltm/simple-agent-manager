@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { useCallback, useState } from 'react';
 
 import { fetchLoginProviders } from '../lib/api/setup';
 
@@ -9,29 +10,67 @@ export interface LoginProviders {
   email: boolean;
 }
 
-/** Shown until the deployment answers: GitHub stays visible, nothing that might error on use. */
-const DEFAULT_LOGIN_PROVIDERS: LoginProviders = {
-  github: true,
-  google: false,
-  gitlab: false,
-  email: false,
-};
+export interface LoginProvidersState {
+  /**
+   * The deployment's login providers: its live answer, else the last answer this browser saw.
+   * `null` means neither exists yet. Render a neutral pending state then, never a guess: a guessed
+   * GitHub button errors on installs without GitHub and hides email on email-only installs.
+   */
+  providers: LoginProviders | null;
+  /** The lookup failed and there is no remembered answer to show instead. */
+  failed: boolean;
+  retry: () => void;
+}
+
+/** Last answer seen in this browser, shown on the next visit while the live lookup runs. */
+export const LOGIN_PROVIDERS_STORAGE_KEY = 'sam:login-providers';
+
+function isLoginProviders(value: unknown): value is LoginProviders {
+  if (!value || typeof value !== 'object') return false;
+  const record = value as Record<string, unknown>;
+  return (['github', 'google', 'gitlab', 'email'] as const).every(
+    (key) => typeof record[key] === 'boolean'
+  );
+}
+
+function readRememberedProviders(): LoginProviders | null {
+  try {
+    const raw = window.localStorage.getItem(LOGIN_PROVIDERS_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    return isLoginProviders(parsed) ? parsed : null;
+  } catch {
+    // Storage disabled or a corrupt entry: behave as a first visit.
+    return null;
+  }
+}
+
+async function fetchAndRememberProviders(): Promise<LoginProviders> {
+  const providers = await fetchLoginProviders();
+  try {
+    window.localStorage.setItem(LOGIN_PROVIDERS_STORAGE_KEY, JSON.stringify(providers));
+  } catch {
+    // Storage full or disabled: the next visit just waits for the lookup again.
+  }
+  return providers;
+}
 
 /**
- * Which login providers are configured, for gating login buttons.
+ * Which login providers this deployment has configured, for gating sign-in options.
  *
- * Until the deployment answers, GitHub shows and Google, GitLab and email stay hidden, so the
- * page never offers a sign-in option that would error on use. A failed lookup is retried, and
- * again when the browser reconnects or the tab regains focus: on an email-only install the
- * defaults hide the only working way in, so one transient failure must not strand the page.
+ * Shows the last answer this browser saw while the live lookup runs, then the live answer.
+ * With neither, `providers` is `null` until the deployment answers. A failed lookup is retried,
+ * and again when the browser reconnects; `retry` lets a pending-state UI offer a manual retry.
  */
-export function useLoginProviders(): LoginProviders {
-  const { data } = useQuery({
+export function useLoginProviders(): LoginProvidersState {
+  const [remembered] = useState(readRememberedProviders);
+  const { data, isError, refetch } = useQuery({
     queryKey: ['login-providers'],
-    queryFn: fetchLoginProviders,
+    queryFn: fetchAndRememberProviders,
     retry: 3,
     staleTime: 5 * 60_000,
   });
-  // The query's data and the default are both stable references, safe in effect deps.
-  return data ?? DEFAULT_LOGIN_PROVIDERS;
+  const retry = useCallback(() => void refetch(), [refetch]);
+  const providers = data ?? remembered;
+  return { providers, failed: isError && !providers, retry };
 }

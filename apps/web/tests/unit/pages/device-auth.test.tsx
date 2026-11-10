@@ -68,6 +68,7 @@ describe('DeviceAuth', () => {
       email: false,
     });
     window.sessionStorage.clear();
+    window.localStorage.clear();
   });
 
   it('prefills the user code from the query string', () => {
@@ -89,7 +90,7 @@ describe('DeviceAuth', () => {
     mocks.authState = { isAuthenticated: false, isLoading: false };
     renderDevice('/device?code=LMNO-2222');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Log in with GitHub' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Log in with GitHub' }));
 
     await waitFor(() =>
       expect(mocks.signInSocial).toHaveBeenCalledWith({
@@ -97,6 +98,16 @@ describe('DeviceAuth', () => {
         callbackURL: 'http://localhost:3000/device?code=LMNO-2222',
       })
     );
+  });
+
+  it('shows a neutral pending state, not a guessed GitHub button, until providers load', async () => {
+    mocks.authState = { isAuthenticated: false, isLoading: false };
+    mocks.loginProviders.mockReturnValue(new Promise(() => {}));
+    renderDevice();
+
+    expect(screen.getByDisplayValue('ABCD-1234')).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Loading sign-in options' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Log in with GitHub/ })).not.toBeInTheDocument();
   });
 
   it('lets an email-only owner sign in by code and comes back to the same code', async () => {

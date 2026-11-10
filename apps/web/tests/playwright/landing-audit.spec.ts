@@ -1,16 +1,32 @@
-import { expect, type Page, type Route,test } from '@playwright/test';
+import { expect, type Page, type Route, test } from '@playwright/test';
+
+import { assertNoOverflow } from './audit-helpers';
 
 // ---------------------------------------------------------------------------
 // API Mock — unauthenticated user (no session)
 // ---------------------------------------------------------------------------
 
-async function setupApiMocks(page: Page) {
+const GITHUB_ONLY = { github: true, google: false, gitlab: false, email: false };
+const EMAIL_ONLY = { github: false, google: false, gitlab: false, email: true };
+const ALL_PROVIDERS = { github: true, google: true, gitlab: true, email: true };
+
+type ProvidersMock = Record<string, boolean> | 'hang' | 'error';
+
+async function setupApiMocks(page: Page, providers: ProvidersMock = GITHUB_ONLY) {
   await page.route('**/api/**', async (route: Route) => {
     const url = route.request().url();
 
     // Auth session — return empty (unauthenticated)
     if (url.includes('/api/auth/get-session')) {
       return route.fulfill({ status: 200, json: {} });
+    }
+
+    if (url.includes('/api/config/login-providers')) {
+      if (providers === 'hang') return; // never answers: the page must stay neutral
+      if (providers === 'error') {
+        return route.fulfill({ status: 500, json: { error: 'INTERNAL', message: 'boom' } });
+      }
+      return route.fulfill({ status: 200, json: providers });
     }
 
     // Default: 404
@@ -39,17 +55,6 @@ async function expectGlassNodeField(page: Page) {
   await expect(field).toHaveAttribute('aria-hidden', 'true');
   // The renderer loads on mount and adds its static and dynamic canvases.
   await expect(field.locator('canvas')).toHaveCount(2);
-}
-
-// ---------------------------------------------------------------------------
-// Overflow check helper
-// ---------------------------------------------------------------------------
-
-async function assertNoOverflow(page: Page) {
-  const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth > window.innerWidth,
-  );
-  expect(overflow).toBe(false);
 }
 
 // ---------------------------------------------------------------------------
@@ -130,3 +135,70 @@ test.describe('Landing — Desktop', () => {
     await screenshot(page, 'landing-sign-in-desktop');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Sign-in option states (both viewports)
+// ---------------------------------------------------------------------------
+
+for (const viewport of [
+  { name: 'mobile', size: { width: 375, height: 667 }, isMobile: true },
+  { name: 'desktop', size: { width: 1280, height: 800 }, isMobile: false },
+]) {
+  test.describe(`Landing sign-in options — ${viewport.name}`, () => {
+    test.use({ viewport: viewport.size, isMobile: viewport.isMobile });
+
+    test('first visit shows a neutral pending state, never a guessed GitHub button', async ({
+      page,
+    }) => {
+      await setupApiMocks(page, 'hang');
+      await page.goto('/');
+      await expect(page.getByText('Simple Agent Manager')).toBeVisible();
+      await expect(page.getByRole('status', { name: 'Loading sign-in options' })).toBeVisible();
+      await expect(page.getByText('Sign in with GitHub')).toHaveCount(0);
+      await assertNoOverflow(page);
+      await screenshot(page, `landing-pending-${viewport.name}`);
+    });
+
+    test('email-only install shows the email form and no GitHub button', async ({ page }) => {
+      await setupApiMocks(page, EMAIL_ONLY);
+      await page.goto('/');
+      await expect(page.getByRole('textbox', { name: /email/i })).toBeVisible();
+      await expect(page.getByText('Sign in with GitHub')).toHaveCount(0);
+      await assertNoOverflow(page);
+      await screenshot(page, `landing-email-only-${viewport.name}`);
+    });
+
+    test('every provider configured', async ({ page }) => {
+      await setupApiMocks(page, ALL_PROVIDERS);
+      await page.goto('/');
+      await expect(page.getByText('Sign in with GitLab')).toBeVisible();
+      await expect(page.getByRole('textbox', { name: /email/i })).toBeVisible();
+      await assertNoOverflow(page);
+      await screenshot(page, `landing-all-providers-${viewport.name}`);
+    });
+
+    test('a remembered answer shows at once while the lookup hangs', async ({ page }) => {
+      await setupApiMocks(page, 'hang');
+      await page.addInitScript((value) => {
+        window.localStorage.setItem('sam:login-providers', value);
+      }, JSON.stringify(EMAIL_ONLY));
+      await page.goto('/');
+      await expect(page.getByRole('textbox', { name: /email/i })).toBeVisible();
+      await expect(page.getByRole('status', { name: 'Loading sign-in options' })).toHaveCount(0);
+      await assertNoOverflow(page);
+      await screenshot(page, `landing-remembered-${viewport.name}`);
+    });
+
+    test('a failed lookup with nothing remembered offers a retry', async ({ page }) => {
+      await setupApiMocks(page, 'error');
+      await page.goto('/');
+      // The hook retries three times with backoff (~7s) before giving up.
+      await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible({
+        timeout: 20_000,
+      });
+      await expect(page.getByText('Sign in with GitHub')).toHaveCount(0);
+      await assertNoOverflow(page);
+      await screenshot(page, `landing-failed-${viewport.name}`);
+    });
+  });
+}

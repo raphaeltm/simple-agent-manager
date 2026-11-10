@@ -1,10 +1,20 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render as rtlRender, screen } from '@testing-library/react';
+import { render as rtlRender, screen, waitFor } from '@testing-library/react';
 import type { ReactElement } from 'react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { LOGIN_PROVIDERS_STORAGE_KEY } from '../../../src/hooks/useLoginProviders';
 import { Landing } from '../../../src/pages/Landing';
+
+const fetchLoginProviders = vi.hoisted(() => vi.fn());
+vi.mock('../../../src/lib/api/setup', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api/setup')>()),
+  fetchLoginProviders,
+}));
+
+const GITHUB_ONLY = { github: true, google: false, gitlab: false, email: false };
+const EMAIL_ONLY = { github: false, google: false, gitlab: false, email: true };
 
 const mockUseAuth = vi.fn();
 
@@ -41,12 +51,15 @@ vi.mock('@simple-agent-manager/ui', () => ({
   Container: ({ children }: { children: React.ReactNode; maxWidth?: string }) => (
     <div>{children}</div>
   ),
+  Spinner: () => <span data-testid="spinner" />,
   GlassNodeField: () => <div data-testid="glass-node-field" aria-hidden="true" />,
 }));
 
 /** The login-provider lookup is a TanStack query, so every render needs a fresh client. */
 function render(ui: ReactElement) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  // The hook sets its own retry count; skip the backoff so failure tests run fast.
+  client.setQueryDefaults(['login-providers'], { retryDelay: 0 });
   return rtlRender(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
 }
 
@@ -65,6 +78,8 @@ function renderLanding() {
 describe('Landing page content', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.localStorage.clear();
+    fetchLoginProviders.mockResolvedValue(GITHUB_ONLY);
   });
 
   it('draws the shared glass node field behind the sign-in card', () => {
@@ -100,15 +115,76 @@ describe('Landing page content', () => {
     expect(screen.getByText('Gemini CLI')).toBeInTheDocument();
   });
 
-  it('shows sign-in button', () => {
+  it('shows sign-in button', async () => {
     renderLanding();
-    expect(screen.getByText('Sign in with GitHub')).toBeInTheDocument();
+    expect(await screen.findByText('Sign in with GitHub')).toBeInTheDocument();
+  });
+});
+
+describe('Landing sign-in options before the deployment answers', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    window.localStorage.clear();
+  });
+
+  it('shows a neutral pending state, not a guessed GitHub button, on a first visit', async () => {
+    let answer: (value: typeof EMAIL_ONLY) => void = () => {};
+    fetchLoginProviders.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+    renderLanding();
+
+    // Liveness: the card rendered, the options are pending, and nothing was guessed.
+    expect(screen.getByRole('heading', { name: 'Simple Agent Manager' })).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Loading sign-in options' })).toBeInTheDocument();
+    expect(screen.queryByText('Sign in with GitHub')).not.toBeInTheDocument();
+
+    answer(EMAIL_ONLY);
+    expect(await screen.findByLabelText(/email/i)).toBeInTheDocument();
+    expect(screen.queryByText('Sign in with GitHub')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('status', { name: 'Loading sign-in options' })
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows the options this browser saw last time while the lookup runs', async () => {
+    window.localStorage.setItem(LOGIN_PROVIDERS_STORAGE_KEY, JSON.stringify(EMAIL_ONLY));
+    fetchLoginProviders.mockReturnValue(new Promise(() => {}));
+    renderLanding();
+
+    expect(screen.getByLabelText(/email/i)).toBeInTheDocument();
+    expect(screen.queryByText('Sign in with GitHub')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('status', { name: 'Loading sign-in options' })
+    ).not.toBeInTheDocument();
+  });
+
+  it('replaces a remembered answer with the live one', async () => {
+    window.localStorage.setItem(LOGIN_PROVIDERS_STORAGE_KEY, JSON.stringify(EMAIL_ONLY));
+    fetchLoginProviders.mockResolvedValue(GITHUB_ONLY);
+    renderLanding();
+
+    expect(await screen.findByText('Sign in with GitHub')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByLabelText(/email/i)).not.toBeInTheDocument());
+  });
+
+  it('offers a retry when the lookup fails and nothing is remembered', async () => {
+    fetchLoginProviders.mockRejectedValue(new Error('network down'));
+    renderLanding();
+
+    const retry = await screen.findByRole('button', { name: 'Try again' });
+    expect(screen.getByText(/Couldn.t load the sign-in options/)).toBeInTheDocument();
+    expect(screen.queryByText('Sign in with GitHub')).not.toBeInTheDocument();
+
+    fetchLoginProviders.mockResolvedValue(EMAIL_ONLY);
+    retry.click();
+    expect(await screen.findByLabelText(/email/i)).toBeInTheDocument();
   });
 });
 
 describe('Landing page navigation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.localStorage.clear();
+    fetchLoginProviders.mockResolvedValue(GITHUB_ONLY);
   });
 
   it('navigates to /dashboard when authenticated with no state.from', () => {
