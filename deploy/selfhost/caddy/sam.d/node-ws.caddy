@@ -1,0 +1,85 @@
+# Node WebSockets on the reverse-tunnel transport: terminal, agent, boot log, port-preview
+# sockets (ws-<id>[--<port>].{SAM_DOMAIN}) and the node log stream
+# (api.{SAM_DOMAIN}/api/nodes/<id>/logs/stream).
+#
+# celld cannot return a WebSocket the Worker obtained from an outbound fetch, so Caddy carries
+# these sockets. The Worker still makes every decision: forward_auth re-runs SAM's own ws-* /
+# logs-stream authentication (session, terminal token, port-access cookie or token, public
+# ports, ownership, workspace status) and answers either
+#   - a refusal (401, 302 port-token -> cookie redirect, 403, 404, 503 ...), which Caddy sends
+#     to the client unchanged, or
+#   - 200 with the loopback upstream (X-SAM-Upstream = 127.0.0.1:<leasePort>), the node-agent
+#     URI to request, and the exact Authorization/Cookie/X-SAM-* headers SAM would have sent.
+# Plain HTTP (including port previews) is not matched here and goes to celld as usual.
+#
+# `route` keeps the steps in the order written (forward_auth, then rewrite, then proxy).
+
+@sam_node_ws_port {
+	expression `{host}.matches("^ws-[A-Za-z0-9]+--[0-9]+\\.")`
+	header_regexp Connection (?i)upgrade
+	header_regexp Upgrade (?i)^websocket$
+}
+handle @sam_node_ws_port {
+	# Client-supplied SAM routing/credential headers never reach SAM or the node.
+	request_header -X-SAM-*
+	# A workspace app must not set cookies on the preview host (sam_port_access). Applied on the
+	# response writer (reverse_proxy's header_down is not applied to a 101 upgrade response), and
+	# only to the upgraded socket, so SAM's own 302 port-token -> cookie redirect keeps its cookie.
+	header {
+		-Set-Cookie
+		match status 101
+	}
+	route {
+		forward_auth 127.0.0.1:{$CELLD_PORT:8080} {
+			uri /api/self-host/gateway/node-websocket
+			header_up Host api.{$SAM_DOMAIN}
+			header_up X-Forwarded-Host {host}
+			header_up X-SAM-Gateway-Secret {$REVERSE_TUNNEL_GATEWAY_SECRET}
+			import sam_client_ip
+			copy_headers X-SAM-Upstream X-SAM-Upstream-Uri X-SAM-Upstream-Authorization X-SAM-Upstream-Cookie X-SAM-Node-Id X-SAM-Workspace-Id
+		}
+		rewrite * {http.request.header.X-SAM-Upstream-Uri}
+		reverse_proxy {http.request.header.X-SAM-Upstream} {
+			import sam_client_ip
+			header_up Authorization {http.request.header.X-SAM-Upstream-Authorization}
+			header_up Cookie {http.request.header.X-SAM-Upstream-Cookie}
+			header_up X-Forwarded-Host {host}
+			header_up X-Forwarded-Proto https
+			header_up -X-SAM-Upstream
+			header_up -X-SAM-Upstream-Uri
+			header_up -X-SAM-Upstream-Authorization
+			header_up -X-SAM-Upstream-Cookie
+		}
+	}
+}
+
+@sam_node_ws {
+	expression `{host}.matches("^ws-[A-Za-z0-9]+\\.") || ({host} == "api." + {env.SAM_DOMAIN} && {path}.matches("^/api/nodes/[A-Za-z0-9_-]+/logs/stream$"))`
+	header_regexp Connection (?i)upgrade
+	header_regexp Upgrade (?i)^websocket$
+}
+handle @sam_node_ws {
+	request_header -X-SAM-*
+	route {
+		forward_auth 127.0.0.1:{$CELLD_PORT:8080} {
+			uri /api/self-host/gateway/node-websocket
+			header_up Host api.{$SAM_DOMAIN}
+			header_up X-Forwarded-Host {host}
+			header_up X-SAM-Gateway-Secret {$REVERSE_TUNNEL_GATEWAY_SECRET}
+			import sam_client_ip
+			copy_headers X-SAM-Upstream X-SAM-Upstream-Uri X-SAM-Upstream-Authorization X-SAM-Upstream-Cookie X-SAM-Node-Id X-SAM-Workspace-Id
+		}
+		rewrite * {http.request.header.X-SAM-Upstream-Uri}
+		reverse_proxy {http.request.header.X-SAM-Upstream} {
+			import sam_client_ip
+			header_up Authorization {http.request.header.X-SAM-Upstream-Authorization}
+			header_up Cookie {http.request.header.X-SAM-Upstream-Cookie}
+			header_up X-Forwarded-Host {host}
+			header_up X-Forwarded-Proto https
+			header_up -X-SAM-Upstream
+			header_up -X-SAM-Upstream-Uri
+			header_up -X-SAM-Upstream-Authorization
+			header_up -X-SAM-Upstream-Cookie
+		}
+	}
+}

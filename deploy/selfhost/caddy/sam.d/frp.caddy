@@ -1,0 +1,19 @@
+# Reverse-tunnel transport: nodes' frpc dial wss://api.{SAM_DOMAIN}/~!frp (frp's fixed
+# WebSocket path). Caddy terminates TLS with the box's public certificate (frpc verifies it,
+# useSystemCa) and hands the socket to frps on loopback.
+@sam_frp {
+	host api.{$SAM_DOMAIN}
+	path /~!frp
+}
+handle @sam_frp {
+	reverse_proxy 127.0.0.1:{$FRPS_BIND_PORT:7000} {
+		import sam_client_ip
+	}
+}
+
+# Internal gateway endpoints (frps plugin, forward_auth) are reached by frps and Caddy on
+# loopback only, straight to celld. They are never served on the public listener, on any host.
+@sam_gateway_internal path /api/self-host/gateway /api/self-host/gateway/*
+handle @sam_gateway_internal {
+	respond "Not found" 404
+}
