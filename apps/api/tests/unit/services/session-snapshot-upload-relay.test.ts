@@ -271,6 +271,48 @@ describe('session snapshot upload relay', () => {
     });
   });
 
+  it('never selects a reverse-tunnel node as a relay (another VM cannot reach its loopback port)', async () => {
+    const env = makeEnv((sql) => {
+      expect(sql).toContain("COALESCE(n.transport, 'vm-public-dns') != 'reverse-tunnel'");
+      return { id: 'relay-node', name: 'current relay' };
+    });
+    await expect(findSessionSnapshotUploadRelay(env, 'user-1')).resolves.toEqual({
+      id: 'relay-node',
+      name: 'current relay',
+    });
+  });
+
+  it('turns relays off on a reverse-tunnel installation: no lookup, no provisioning, Worker upload path', async () => {
+    const lookups: string[] = [];
+    const env = {
+      ...makeEnv((sql) => {
+        lookups.push(sql);
+        return sourceNode();
+      }),
+      VM_AGENT_TRANSPORT: 'reverse-tunnel',
+    } as Env;
+    await expect(findSessionSnapshotUploadRelay(env, 'user-1')).resolves.toBeNull();
+    await ensureSessionSnapshotUploadRelay(env, {
+      userId: 'user-1',
+      sourceNodeId: 'legacy-node',
+      projectId: null,
+    });
+    const targets = await resolveSessionSnapshotUploadTargets(env, {
+      workspaceId: 'ws-1',
+      userId: 'user-1',
+      projectId: null,
+      chatSessionId: 'chat-1',
+      generation: 'gen-1',
+      directUploadAvailable: true,
+      directUploadSupported: false,
+      sourceNodeId: 'legacy-node',
+    });
+    expect(targets.needsRelayProvisioning).toBe(false);
+    expect(targets.upload.home).toMatch(/^\/api\/workspaces\/ws-1\/session-snapshot\/artifacts\/home/);
+    expect(mocks.provisionNode).not.toHaveBeenCalled();
+    expect(lookups.some((sql) => sql.includes('agent_version = ?'))).toBe(false);
+  });
+
   it('resolves relay lookup with source native affinity before reusing a current relay', async () => {
     mocks.resolveCanonicalVmAllocationPlan.mockResolvedValueOnce(
       canonicalAllocation({
