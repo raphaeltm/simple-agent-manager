@@ -541,7 +541,7 @@ The final atomic claim repeats both checks. When that claim refuses the node a t
 TaskRunner replans through node selection; after `operations.workspacePlacementMaxRejections`
 consecutive refusals (3 by default) it fails the task with the refusal reasons and hands a node it
 provisioned to the warm pool (`handleWorkspacePlacementRefused()` in
-`durable-objects/task-runner/workspace-placement-rejection.ts`). CPU saturation and disk pressure remain live overload vetoes. Exclusive requests require an empty
+`durable-objects/task-runner/workspace-placement-rejection.ts`). Disk pressure remains a live overload veto. CPU saturation is one only for a node that already holds a workspace reservation: an empty node, warm ones included, is admitted on declared reservations alone, because bootstrap work can saturate a fresh host's CPU before any workspace exists. Exclusive requests require an empty
 node, and an active exclusive workspace prevents any additional placement. Legacy workspace-count
 and co-tenant settings remain compatible audit data but do not block placement.
 

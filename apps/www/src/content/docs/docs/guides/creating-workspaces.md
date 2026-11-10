@@ -99,6 +99,27 @@ Open a workspace to get a browser-based terminal — a full interactive shell th
 - **Multiple tabs** — run several shells alongside agent chats
 - **Copy/paste and resize** — standard shortcuts work; the terminal fits the window
 
+### What SAM sets in the workspace
+
+SAM sets these environment variables for the agent in a workspace, so the scripts it runs and your
+agent instructions can tell they are on SAM and which project, chat and task they belong to. On a
+machine shared by several chats, each chat's agent gets its own values. A value SAM has nothing for
+can be missing (for example `SAM_TASK_MODE` in a chat started directly in a workspace), so scripts
+should handle an unset variable.
+
+| Variable              | What it holds                                                             |
+| --------------------- | ------------------------------------------------------------------------- |
+| `SAM_WORKSPACE_ID`    | The workspace's ID. Its presence is the way to detect SAM                 |
+| `SAM_WORKSPACE_URL`   | The workspace's own address                                               |
+| `SAM_API_URL`         | The SAM API's address                                                     |
+| `SAM_NODE_ID`         | The machine it runs on                                                    |
+| `SAM_PROJECT_ID`      | The project                                                               |
+| `SAM_CHAT_SESSION_ID` | The chat                                                                  |
+| `SAM_TASK_ID`         | The task behind the chat                                                  |
+| `SAM_TASK_MODE`       | `task` or `conversation`: whether the session is a **Task** or a **Chat** |
+| `SAM_REPOSITORY`      | The repository, as `owner/repo`                                           |
+| `SAM_BRANCH`          | The branch the workspace checked out                                      |
+
 ### Agent chat in a workspace
 
 Click **+ New Chat** to start an AI coding session directly in the workspace. If you've connected more than one agent, you can choose which one to use. Each chat runs in its own tab alongside your shells.
@@ -144,7 +165,8 @@ Requirements are inherited field by field, so you only set what you care about:
 task  →  trigger  →  skill  →  agent profile  →  project  →  platform default
 ```
 
-The platform default is 2 vCPU, 4 GB RAM, and 40 GB disk. Set a project baseline in
+The platform default is 2 vCPU, 4 GB RAM, and 15 GB disk. If the project's devcontainer image or
+build is large, set **Disk (GB)** in the project baseline, so work doesn't run out of space. Set a project baseline in
 **Project → Settings → Infrastructure → Default Resources**, a per-profile or per-skill default in
 their editors, or a one-off override under the sliders button (**Chat options**) above the chat composer.
 

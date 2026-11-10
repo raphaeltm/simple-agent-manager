@@ -10,6 +10,7 @@ import {
   screenshotNearHeading,
   setupAuditRoutes,
 } from './audit-helpers';
+import { docsShot } from './docs-shot';
 
 const TIMESTAMP = '2026-08-28T00:00:00.000Z';
 const EXPENSIVE_HETZNER_GPU_SKU =
@@ -540,6 +541,39 @@ async function editStressedPool(page: Page, screenshotName: string) {
   const reorderedTitles = await orderTitles(page);
   await assertNoOverflow(page);
   await screenshotNearHeading(page, 'Provider order', `${screenshotName}-provider-order`);
+  // Docs image for the Compute pools guide, "Provider order": the section itself, after the
+  // reorder above. Written to apps/www only when DOCS_SHOTS is set.
+  if (screenshotName.startsWith('default-capacity-pools-project-edit-')) {
+    const viewport = page.viewportSize()!;
+    const phone = viewport.width < 500;
+    const section = page.getByRole('region', { name: 'Provider order' });
+    // The guide's example puts the account that allows machines first; restore the audit's
+    // order afterwards so the save below still checks what this test arranged.
+    const hetzner = order.getByRole('listitem').filter({ hasText: /^\d*\.?\s*Hetzner/ });
+    const hetznerTitle = (await hetzner.locator('div > div').first().textContent())!.replace(
+      /^\d+\.\s*/,
+      ''
+    );
+    const hetznerIndex = (await orderTitles(page)).indexOf(hetznerTitle);
+    for (let i = 0; i < hetznerIndex; i += 1)
+      await order.getByRole('button', { name: `Move ${hetznerTitle} up` }).click();
+    await expect(order.getByRole('listitem').first()).toContainText(hetznerTitle);
+    // A tall window, scrolled so the section sits above the sticky save bar.
+    await page.setViewportSize({ width: viewport.width, height: 2000 });
+    await section.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+    const box = (await section.boundingBox())!;
+    await docsShot(
+      page,
+      phone ? 'compute-pool-provider-order-mobile' : 'compute-pool-provider-order',
+      {
+        clip: { x: box.x - 16, y: box.y - 16, width: box.width + 32, height: box.height + 32 },
+      }
+    );
+    await page.setViewportSize(viewport);
+    for (let i = 0; i < hetznerIndex; i += 1)
+      await order.getByRole('button', { name: `Move ${hetznerTitle} down` }).click();
+    expect(await orderTitles(page)).toEqual(reorderedTitles);
+  }
 
   // Each click removes its button, so always expand the first one left.
   const showMoreButtons = page.getByRole('button', { name: /^Show \d+ more machine types?$/ });

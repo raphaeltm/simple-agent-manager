@@ -372,13 +372,16 @@ coming before an agent stops on it.
   a few model calls); credentials that report nothing (see the list below) never show one.
 - **In Settings → Agents**, each account card shows the same chip once an agent has used that
   account. The raw credential list in **Settings → Advanced** shows it too.
-- **On a project's Profiles page**, each profile shows a short usage line for the account it runs on
-  (its own pin, the project's account, or your default), for example `● 5h 72%  Wk 31%  Opus 88%`.
+- **On a project's Profiles page**, each profile shows a short line of how much of each limit its
+  account has **used** (its own pin, the project's account, or your default), for example
+  `● 5h 72%  Wk 31%  Opus 88%`: a higher number means less room left.
   Select it for the same details dialog. **Most room** sorts the profiles by how much is left on the
   limit that will stop each one first, which helps pick the agent to use next.
 - **When you start a new chat**, each profile's icon in the cards, the profile list and **To** has a
   ring that shows how much is left on the limit that will stop it first. Words appear only when it
-  matters: `6% left · resets 52m` when a limit is close, `Out · back in 2h 10m` when one is used up.
+  matters: `6% left · resets 52m` when a limit is close, `Out · back in 2h 10m` when one is used up,
+  **No account connected** when the profile's agent has no account to run on, and for example
+  **Work Claude paused** when its account is [paused](#pausing-an-account).
   Used-up profiles move to a folded **Out for now** section at the end of the profile list. If the
   profile you picked is close or out, a line above the message box says so and, when another profile
   runs the same model on a different account with room, offers to switch to it (for example
@@ -393,7 +396,7 @@ provider's limits.
 The chip's colour shows the most serious state among the limits, and the dialog names it: **OK**,
 **Warning** (from 75%, or earlier if the provider warns), **Critical** (from 90%), or **Limit
 reached** (the provider is refusing requests). For your own subscription the percentages cover your
-whole account with that provider, so they include use outside SAM; a **Platform credential**'s
+whole account with that provider, so they include use outside SAM; a **Platform account**'s
 numbers are SAM's shared limits.
 
 SAM only learns a limit's usage while an agent runs on that account. Once a limit's reset time has
@@ -436,7 +439,7 @@ Which credentials report limits:
   only.
 - **OpenCode with an OpenCode Go key:** rolling, weekly, and monthly.
 - **Claude Code or Codex in the SAM provider mode:** the request and token rate limits the model
-  provider reports, shown as **Platform credential**.
+  provider reports, shown as **Platform account**.
 
 OpenCode Zen bills from a credit balance that only the OpenCode console shows, so Zen has no chip;
 OpenCode's agent settings link to the console instead. API keys used directly, and the other agents,
@@ -468,6 +471,14 @@ container**, or **Default resources**), and the [usage](#usage-limits) of the ac
 a computer these are columns of a table; on a phone each profile takes three short lines. Select a
 profile's name to edit it, or use its **⋯** menu to edit or delete it.
 
+<picture>
+  <source media="(max-width: 40em)" srcset="/images/docs/profiles-page-mobile.png 2x" />
+  <img
+    src="/images/docs/profiles-page.png"
+    alt="A project's Agent Profiles page with Name and Most room sort buttons and a table of six profiles. Each row shows the model and effort, the resources it asks for (Default resources, Medium VM, 4 vCPU · 7.5 GB, or Instant container) and a usage strip for its account, such as 5h 94% and Wk 46% in orange for Backend Builder. Code Reviewer's 5h window shows 0% with a reset arrow, and OpenCode Explorer reads No account connected."
+  />
+</picture>
+
 In a [shared project](/docs/guides/collaboration/), agent profiles (and skills, environment variables, secrets, and files) are project-scoped resources — any member can use profiles another member created. LLM cost follows the running member's own accounts: their choice for the profile, their project pin, or their default. Shared team accounts on profiles are not available yet.
 
 When work starts, the agent is resolved in this order:
@@ -493,14 +504,14 @@ Type `@` in a chat message to choose a profile from the mention list. Mentions a
 
 <picture>
   <source media="(max-width: 40em)" srcset="/images/docs/new-chat-profiles-mobile.png 2x" />
-  <img src="/images/docs/new-chat-profiles.png" alt="A new chat asking 'Who should take this?', with 'Pick a profile, then describe the task below.' Under Recent are three profile cards, each with its description and what runs it: Brainstormer, selected and checked, 'Claude · Opus 5.5 · max effort'; Careful Builder; and Code Reviewer, 'Codex · GPT-6 Astra · high effort'. Under Builds and opens PRs is a Frontend Builder card. Below them is All 6 profiles. Above the message box, To shows Brainstormer, with the attach and Chat options buttons on the right." />
+  <img src="/images/docs/new-chat-profiles.png" alt="A new chat asking 'Who should take this?', with 'Pick a profile, then describe the task below.' Under Recent are three profile cards, each with its description, what runs it and a ring around its icon showing the usage left: Brainstormer, selected and checked, 'Claude · Opus 5.5 · max effort', with an almost empty orange ring and '6% left · resets 53m'; Careful Builder, with a nearly full green ring; and Code Reviewer, 'Codex · GPT-6 Astra · high effort'. Below them is All 6 profiles. Above the message box a strip reads '6% left on Personal Max · resets in 53m', and To shows Brainstormer with the same ring, with the attach and Chat options buttons on the right." />
 </picture>
 
 - **The profile you used last is pre-selected.** A new chat starts with the profile you last picked yourself for a new chat in this project in the last 30 days, unless you've hidden it. Chats the SAM assistant started for you count; chats that automations, the Connector or other agents started don't. Otherwise it's the first profile you haven't hidden, in alphabetical order. Change it any time before you send. **Start work** on an [idea](/docs/guides/ideas/#start-work-on-an-idea) pre-selects the same way.
 - **Your recent profiles appear as cards.** With two or more profiles you haven't hidden, the empty chat asks **Who should take this?** and shows your most recent profiles as cards under **Recent** (with no recent picks, your first profiles, under **Your profiles**). When the chat area is wide enough, it also shows profiles that build and open pull requests. Each card shows the profile's description (change it with **Edit** in the profile list or on the **Profiles** page) and what runs it, such as **Claude · Opus 5.5 · max effort**. Tap a card to pick it, or select **All _N_ profiles** under the cards for the full list. Otherwise the starter prompts show instead.
 - **To** above the message box names the chosen profile. Select it to see every profile: **Recent** first, then **Chat & explore** and **Build & open PRs**, with a search box once you have more than eight. Profiles whose account has no [usage](#usage-limits) left wait in a folded **Out for now** section near the end. **New**, **Edit** and **Manage** are at the bottom.
 
-![The profile list opened from To, titled 'Start with…', with Edit list and a close button. Recent lists Brainstormer (checked), Careful Builder and Code Reviewer. Chat & explore lists Quick Questions and Release Notes. Build & open PRs lists Frontend Builder. Each row shows what runs it, such as 'Codex · GPT-6 Luna · medium effort'. New, Edit and Manage are at the bottom.](/images/docs/new-chat-profile-list.png)
+![The profile list opened from To, titled 'Start with…', with Edit list and a close button. Recent lists Brainstormer (checked), Careful Builder and Code Reviewer. Chat & explore lists Quick Questions and Release Notes. Build & open PRs lists Frontend Builder. Each row shows what runs it, such as 'Codex · GPT-6 Luna · medium effort', and a ring around its icon for the usage left; Brainstormer and Frontend Builder, on the same nearly used-up Claude account, also read '6% left, resets 53m'. New, Edit and Manage are at the bottom.](/images/docs/new-chat-profile-list.png)
 
 - **Hide profiles you don't pick by hand.** In that list, select **Edit list**, then the eye next to a profile. Or accept the suggestion to hide every profile you haven't picked in the last 30 days (a superadmin can change the 30 days with [`chat.profileUsageWindowDays`](/docs/guides/admin-settings/#chat)). Hiding only changes your own list in this project: triggers, agents that dispatch work, @mentions and other members still use the profile. Hidden profiles stay at the end of the list, and you can show them again there.
 - **Skill, model, effort and resources are under Chat options**, the sliders button at the end of the **To** row, after the attach button. A number on the button shows how many you've set for this chat; anything left blank comes from the skill or profile, and each blank field shows that default. The model and effort lists follow the agent the chat will run, so only efforts that agent supports are offered, and switching to a profile with a different agent clears a model or effort you picked. **To** shows the model and effort that will actually run. These choices apply to this one chat only.
@@ -517,8 +528,10 @@ ID is refused.
 
 Some names carry a note. **(API key only)** works only when Codex uses an OpenAI API key, not a
 ChatGPT subscription connected with **Connect with Codex**. **Deprecated for ChatGPT sign-in** is
-being withdrawn for ChatGPT subscriptions. **Deprecated; retires 2026-10-31** stops working on that
-date. When a model leaves the list, a profile that used it keeps its ID as a custom model; if the
+being withdrawn for ChatGPT subscriptions. **(Deprecated)** still works but is on its way out, and
+**(Deprecated; routes to … on 2026-12-01)** means the provider starts answering that name with the
+newer model on that date. **(Legacy; routes to …)** already does: choosing it runs the newer model.
+Prefer a model without a note for new profiles. When a model leaves the list, a profile that used it keeps its ID as a custom model; if the
 provider stops offering it, chats fail with
 [Model unavailable for this account](/docs/guides/session-troubleshooting/#the-agent-or-a-tool-cant-sign-in),
 so choose a listed model.
@@ -751,11 +764,11 @@ change.
 | `comments_read` / `comments_write`                                                                                 | Comment threads on chat messages and library files. Methods: `list`, `get`, `list_file`; `create`, `reply`, `resolve`, `reopen`, `create_file`.                                                                                                                                                                                                                                |
 | `profiles_read` / `profiles_write`                                                                                 | Agent profiles and their environment variables. Methods: `list`, `get`, `env_vars`; `create`, `update`, `set_env_var`, `remove_env_var`.                                                                                                                                                                                                                                       |
 | `skills_read` / `skills_write`                                                                                     | Project skills. Methods: `list`, `get`; `create`, `update`.                                                                                                                                                                                                                                                                                                                    |
-| `deployments_read` / `deployments_write`                                                                           | App deployments. Methods: `guide`, `environments`, `preview_routes`, `routes`, `config`, `logs`, `publish_status`; `create_environment`, `set_config`, `publish`.                                                                                                                                                                                                              |
+| `deployments_read` / `deployments_write`                                                                           | App deployments. Methods: `guide`, `environments`, `preview_routes`, `routes`, `config`, `logs`, `publish_status`; `create_environment`, `set_config`, `publish`, `cancel_publish`.                                                                                                                                                                                            |
 | `associate_pull_request`, `list_pull_request_associations`                                                         | Record that this task is responsible for a pull request it didn't open, and look up who is ([Pull requests an agent takes over](#pull-requests-an-agent-takes-over))                                                                                                                                                                                                           |
 | `exec_with_secrets`                                                                                                | Run a command in this workspace with selected **Secret** variables filled in; `exec_with_secrets_status` returns the result and `exec_with_secrets_cancel` stops it ([Run commands with secrets](/docs/guides/secret-execution/))                                                                                                                                              |
-| `send_message_to_subtask`                                                                                          | Send a message to another active agent in the project by task ID, usually a subtask; the recipient gets a SAM notice and reads it with `get_event`                                                                                                                                                                                                                                |
-| `send_durable_message`                                                                                             | Send a message to any active agent in the project, by task ID; the notice joins the agent's running turn when it can ([Live steering](/docs/reference/api/#live-steering))                                                                                                                                                                                 |
+| `send_message_to_subtask`                                                                                          | Send a message to another active agent in the project by task ID, usually a subtask; the recipient gets a SAM notice and reads it with `get_event`                                                                                                                                                                                                                             |
+| `send_durable_message`                                                                                             | Send a message to any active agent in the project, by task ID; the notice joins the agent's running turn when it can ([Live steering](/docs/reference/api/#live-steering))                                                                                                                                                                                                     |
 | `wait_for_subtasks`                                                                                                | End the turn and be woken when the tasks it names (usually ones this agent dispatched) finish, instead of polling                                                                                                                                                                                                                                                              |
 | `stop_subtask`                                                                                                     | Stop a task this agent dispatched                                                                                                                                                                                                                                                                                                                                              |
 | `create_trigger`                                                                                                   | Create a schedule, GitHub, or webhook [trigger](/docs/guides/triggers/#ask-an-agent-to-set-one-up) in the project; `update_trigger` and `delete_trigger` change or remove one                                                                                                                                                                                                  |

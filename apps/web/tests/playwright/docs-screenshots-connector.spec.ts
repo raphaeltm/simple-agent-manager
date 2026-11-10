@@ -111,17 +111,18 @@ test('docs: connector settings on the Access page', async ({ page }) => {
   const heading = page.getByRole('heading', { name: 'Connect an AI app' });
   // The app shell and the settings page each render a <main>; crop to the page's own.
   const pageMain = page.locator('main').filter({ has: heading }).last();
-  await expect(page.getByRole('tab', { name: 'Access', exact: true })).toHaveAttribute(
-    'aria-selected',
-    'true'
+  const sections = page.getByRole('navigation', { name: 'Settings sections' });
+  await expect(sections.getByRole('link', { name: 'Access', exact: true })).toHaveAttribute(
+    'aria-current',
+    'page'
   );
-  const tabs = await page.getByRole('tablist').boundingBox();
+  const nav = await sections.boundingBox();
   const bottom = await connected.boundingBox();
   const area = await pageMain.boundingBox();
-  if (!tabs || !bottom || !area) throw new Error('Access page regions did not lay out');
-  // From the settings tabs down to the end of Connected apps: the API tokens card below is
-  // unchanged and would only push the part the guide describes off the image.
-  const y = tabs.y - 16;
+  if (!nav || !bottom || !area) throw new Error('Access page regions did not lay out');
+  // From the settings sections down to the end of Connected apps: the API tokens card below
+  // is unchanged and would only push the part the guide describes off the image.
+  const y = nav.y - 16;
   await docsShot(page, 'connector-access', {
     clip: { x: area.x, y, width: area.width, height: bottom.y + bottom.height + 24 - y },
   });

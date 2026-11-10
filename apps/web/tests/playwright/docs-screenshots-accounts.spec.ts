@@ -22,7 +22,7 @@ import {
   seedTheme,
   setupAuditRoutes,
 } from './audit-helpers';
-import { docsShot, opaqueBackdrop } from './docs-shot';
+import { DIALOG_PANE, docsShot, opaqueBackdrop } from './docs-shot';
 import { makeAgentProfile, respondToProfilePageRoute } from './profile-account-fixtures';
 
 const USER = makeMockUser({
@@ -241,7 +241,7 @@ test('docs: make another account your default', async ({ page }) => {
   await expect(dialog).toContainText('3 projects using Work Max plan will switch');
   await opaqueBackdrop(page);
   await assertNoOverflow(page);
-  await docsShot(page, 'accounts-make-default', dialog.locator('.glass-panel-container'));
+  await docsShot(page, 'accounts-make-default', dialog.locator(DIALOG_PANE));
 });
 
 test('docs: pick an existing account for one project', async ({ page }) => {
@@ -297,5 +297,5 @@ test('docs: guided subscription sign-in modal (Claude Code)', async ({ page }) =
   await expect(modal.getByRole('button', { name: 'Continue sign-in' })).toBeDisabled();
   await opaqueBackdrop(page);
   await assertNoOverflow(page);
-  await docsShot(page, 'agent-guided-login', modal.locator('.glass-panel-container'));
+  await docsShot(page, 'agent-guided-login', modal.locator(DIALOG_PANE));
 });

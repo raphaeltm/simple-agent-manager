@@ -13,8 +13,11 @@
  *     --project="Desktop (1280x800)" --project="iPhone SE (375x667)"
  */
 import { expect, type Page, type Route, test } from '@playwright/test';
+import type { CCProfileAttachmentItem } from '@simple-agent-manager/shared';
 
+import { accountRows, mergeRows } from '../unit/components/accounts/fixtures';
 import { makeMockUser, seedTheme } from './audit-helpers';
+import { credentialUsage as usage, limitWindow } from './credential-limit-fixtures';
 import { docsShot, opaqueBackdrop } from './docs-shot';
 
 const PROJECT_ID = 'proj-docs-picker';
@@ -140,6 +143,101 @@ const USAGE = ['p-brainstormer', 'p-careful-builder', 'p-code-reviewer'].map(
   })
 );
 
+/**
+ * Accounts and their usage, so each profile's ring shows what is left: the default Claude
+ * account is nearly used up, Careful Builder is pinned to a second Claude account with room
+ * (so SAM offers it as the switch), and the Codex account is comfortable.
+ */
+const ACCOUNTS = mergeRows(
+  accountRows({
+    id: 'personal',
+    name: 'Personal Max',
+    kind: 'agent',
+    target: 'claude-code',
+    credentialKind: 'oauth-token',
+    isDefault: true,
+  }),
+  accountRows({
+    id: 'team',
+    name: 'Team Claude',
+    kind: 'agent',
+    target: 'claude-code',
+    credentialKind: 'oauth-token',
+  }),
+  accountRows({
+    id: 'work',
+    name: 'Work ChatGPT',
+    kind: 'agent',
+    target: 'openai-codex',
+    credentialKind: 'oauth-token',
+    isDefault: true,
+  })
+);
+
+const PINS: CCProfileAttachmentItem[] = [
+  {
+    id: 'pin-careful',
+    configurationId: 'cfg-team',
+    agentProfileId: 'p-careful-builder',
+    profileName: 'Careful Builder',
+    projectId: PROJECT_ID,
+    projectName: PROJECT.name,
+    consumerKind: 'agent',
+    consumerTarget: 'claude-code',
+    isActive: true,
+    createdAt: '2026-11-01T00:00:00.000Z',
+    updatedAt: '2026-11-01T00:00:00.000Z',
+  },
+];
+
+/** Reset times are relative to the response, with slack, so the countdown reads 52m. */
+function limits(now: number) {
+  return [
+    usage('cred-personal', 'claude-code', [
+      limitWindow(
+        'claude.five_hour',
+        94,
+        { level: 'critical', status: 'allowed_warning', resetsAt: now + 52 * 60_000 + 30_000 },
+        now
+      ),
+      limitWindow(
+        'claude.seven_day',
+        61,
+        { level: 'ok', status: 'allowed', resetsAt: now + 3 * 24 * HOUR },
+        now
+      ),
+    ]),
+    usage('cred-team', 'claude-code', [
+      limitWindow(
+        'claude.five_hour',
+        17,
+        { level: 'ok', status: 'allowed', resetsAt: now + 3 * HOUR },
+        now
+      ),
+      limitWindow(
+        'claude.seven_day',
+        22,
+        { level: 'ok', status: 'allowed', resetsAt: now + 5 * 24 * HOUR },
+        now
+      ),
+    ]),
+    usage('cred-work', 'openai-codex', [
+      limitWindow(
+        'codex.primary',
+        40,
+        { level: 'ok', status: 'allowed', resetsAt: now + 2 * HOUR },
+        now
+      ),
+      limitWindow(
+        'codex.secondary',
+        35,
+        { level: 'ok', status: 'allowed', resetsAt: now + 4 * 24 * HOUR },
+        now
+      ),
+    ]),
+  ];
+}
+
 async function setupMocks(page: Page) {
   await page.addInitScript((id) => {
     localStorage.setItem(`sam-onboarding-wizard-dismissed-${id}`, 'true');
@@ -150,6 +248,14 @@ async function setupMocks(page: Page) {
     if (path.includes('/api/auth/')) return respond(MOCK_USER);
     if (path.startsWith('/api/notifications'))
       return respond({ notifications: [], unreadCount: 0 });
+    if (path === '/api/cc/credentials') return respond({ credentials: ACCOUNTS.credentials });
+    if (path === '/api/cc/configurations')
+      return respond({ configurations: ACCOUNTS.configurations });
+    if (path === '/api/cc/attachments') return respond({ attachments: ACCOUNTS.attachments });
+    if (path === '/api/cc/profile-attachments') return respond({ attachments: PINS });
+    if (path === '/api/credentials/resolution-status') return respond({ consumers: [] });
+    if (path === '/api/credentials/limits')
+      return respond({ credentials: limits(Date.now()), generatedAt: Date.now() });
     // A finished setup, so the navigation shows no "Complete Setup" prompt.
     if (path === '/api/credentials/agent')
       return respond({ credentials: [{ agentType: 'claude-code', isActive: true }] });
@@ -210,20 +316,27 @@ test('docs: a new chat offers recent profiles as cards', async ({ page }) => {
   await expect(
     cards.getByText('Talk through ideas and designs before anyone writes code.')
   ).toBeVisible();
+  // The usage this image exists to show: a ring and words on the nearly-used-up account, and
+  // the warning above the message box.
+  const brainstormer = cards.getByRole('button', { name: /^Brainstormer/ });
+  await expect(brainstormer.getByText(/^6% left · resets/)).toBeVisible();
+  await expect(page.getByTestId('profile-usage-nudge')).toContainText('6% left on Personal Max');
   await page.mouse.move(2, 2);
   if (isMobile(page)) {
     await docsShot(page, 'new-chat-profiles-mobile');
     return;
   }
   // On a desktop, keep to the chat column: from just above the question down to the composer.
-  const composer = page
-    .locator('textarea[role="combobox"]')
-    .locator('xpath=ancestor::*[contains(@class, "glass-chrome")][1]');
   const question = (await page.getByText('Who should take this?').boundingBox())!;
-  const box = (await composer.boundingBox())!;
+  const input = (await page.locator('textarea[role="combobox"]').boundingBox())!;
+  const to = (await toControl(page).boundingBox())!;
+  const grid = (await cards.boundingBox())!;
+  const left = Math.min(input.x, to.x, grid.x) - 24;
+  const right = Math.max(input.x + input.width, grid.x + grid.width) + 24;
   const top = Math.max(0, question.y - 48);
+  const bottom = Math.max(input.y + input.height, to.y + to.height) + 24;
   await docsShot(page, 'new-chat-profiles', {
-    clip: { x: box.x, y: top, width: box.width, height: box.y + box.height - top },
+    clip: { x: left, y: top, width: right - left, height: bottom - top },
   });
 });
 
