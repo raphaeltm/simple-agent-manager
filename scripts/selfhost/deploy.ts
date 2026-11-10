@@ -32,9 +32,9 @@ import * as TOML from '@iarna/toml';
 import type { WranglerToml } from '../deploy/types.js';
 import {
   celldChildEnv,
+  gatewayEnvAction,
   presignVars,
   redactSecrets,
-  gatewayEnvAction,
   renderGatewayEnv,
   resolveTunnelSettings,
   tunnelWorkerVars,
