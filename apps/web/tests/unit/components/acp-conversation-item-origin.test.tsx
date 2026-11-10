@@ -4,11 +4,6 @@ import { describe, expect, it } from 'vitest';
 
 import { AcpConversationItemView } from '../../../src/components/project-message-view/AcpConversationItemView';
 
-// Cloudflare behaviour: every platform service present (absent case: platform-capabilities-ui.test.tsx).
-vi.mock('../../../src/hooks/usePlatformCapabilities', () => ({
-  usePlatformCapabilities: () => ({ speechToText: true, textToSpeech: true }),
-}));
-
 function userItem(
   overrides: Partial<Extract<ConversationItem, { kind: 'user_message' }>>
 ): ConversationItem {
@@ -19,6 +14,7 @@ describe('AcpConversationItemView — user message origin', () => {
   it('collapses an origin="system" injected message behind a disclosure', () => {
     const { container } = render(
       <AcpConversationItemView
+        serverTextToSpeech
         item={userItem({ origin: 'system', text: 'call get_instructions' })}
       />
     );
@@ -37,8 +33,12 @@ describe('AcpConversationItemView — user message origin', () => {
   it('keeps user text visible alongside collapsed injected context', () => {
     const { container } = render(
       <>
-        <AcpConversationItemView item={userItem({ id: 'user', text: 'my exact task' })} />
         <AcpConversationItemView
+          serverTextToSpeech
+          item={userItem({ id: 'user', text: 'my exact task' })}
+        />
+        <AcpConversationItemView
+          serverTextToSpeech
           item={userItem({ id: 'system', origin: 'system', text: 'long injected context' })}
         />
       </>
@@ -49,14 +49,19 @@ describe('AcpConversationItemView — user message origin', () => {
 
   it('renders a normal (origin="user") message as a standard bubble, not collapsed', () => {
     const { container } = render(
-      <AcpConversationItemView item={userItem({ origin: 'user', text: 'my task' })} />
+      <AcpConversationItemView
+        serverTextToSpeech
+        item={userItem({ origin: 'user', text: 'my task' })}
+      />
     );
     expect(container.querySelector('details.sam-injected-message')).toBeNull();
     expect(screen.getByText('my task')).toBeInTheDocument();
   });
 
   it('treats a missing origin as a normal message', () => {
-    const { container } = render(<AcpConversationItemView item={userItem({ text: 'plain' })} />);
+    const { container } = render(
+      <AcpConversationItemView serverTextToSpeech item={userItem({ text: 'plain' })} />
+    );
     expect(container.querySelector('details.sam-injected-message')).toBeNull();
     expect(screen.getByText('plain')).toBeInTheDocument();
   });

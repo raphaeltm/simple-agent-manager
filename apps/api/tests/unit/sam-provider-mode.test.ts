@@ -18,6 +18,10 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
     AI_USAGE_MIN_DAILY_TOKEN_LIMIT: '',
     AI_USAGE_MAX_MONTHLY_COST_CAP_USD: '',
     AI_USAGE_MIN_MONTHLY_COST_CAP_USD: '',
+    // A Cloudflare deployment: the monthly cap is priced from AI Gateway logs.
+    AI_GATEWAY_ID: 'sam',
+    CF_ACCOUNT_ID: 'account-1',
+    CF_API_TOKEN: 'token-1',
     ...overrides,
   } as unknown as Env;
 }

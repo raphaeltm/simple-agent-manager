@@ -14,6 +14,7 @@
 import type { Env } from '../env';
 import { resolveD1BindingIdentity } from '../lib/d1-session';
 import { log } from '../lib/logger';
+import { maybeJsonRecord } from '../lib/runtime-validation';
 import { resolveAdminSettingDetailsMany } from './admin-settings-resolution';
 import {
   LLM_PURPOSE_MODEL_SETTING,
@@ -194,6 +195,47 @@ export async function resolveWorkersAiChatTarget(
     (await resolveOpenAICompatibleTarget(env, purpose, model)) ??
     resolveCloudflareWorkersAiTarget(env, model)
   );
+}
+
+/**
+ * `resolveWorkersAiChatTarget` inside the caller's own time budget. The endpoint settings read
+ * is a D1 query, so without this a D1 hang would cost a call its settings-read wait on top of its
+ * own timeout (and a retried call would pay it per attempt). The read cannot be cancelled, so it
+ * races `signal`: when the budget runs out the call rejects with the signal's reason and the read
+ * is left to settle unobserved.
+ */
+export function resolveWorkersAiChatTargetWithin(
+  env: Env,
+  purpose: LlmPurpose,
+  model: string,
+  signal: AbortSignal
+): Promise<ChatCompletionsTarget | null> {
+  if (signal.aborted) return Promise.reject(toError(signal.reason));
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(toError(signal.reason));
+    signal.addEventListener('abort', onAbort, { once: true });
+    resolveWorkersAiChatTarget(env, purpose, model)
+      .then(resolve, reject)
+      .finally(() => signal.removeEventListener('abort', onAbort));
+  });
+}
+
+function toError(reason: unknown): Error {
+  return reason instanceof Error ? reason : new Error(String(reason));
+}
+
+/**
+ * A chat request body for `target`. A streamed call to an OpenAI-compatible endpoint asks for the
+ * final usage chunk (`stream_options.include_usage`, part of the OpenAI chat protocol) so SAM's
+ * accounting gets real counts. Cloudflare targets get `body` itself, byte for byte as before.
+ */
+export function withStreamUsageRequested(
+  target: ChatCompletionsTarget,
+  body: Record<string, unknown>
+): Record<string, unknown> {
+  if (isCloudflareChatTarget(target) || body.stream !== true) return body;
+  const streamOptions = maybeJsonRecord(body.stream_options) ?? {};
+  return { ...body, stream_options: { ...streamOptions, include_usage: true } };
 }
 
 /**

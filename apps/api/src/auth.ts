@@ -8,6 +8,7 @@ import * as v from 'valibot';
 
 import * as schema from './db/schema';
 import type { Env } from './env';
+import { CLIENT_IP_HEADER } from './lib/client-ip';
 import { createModuleLogger } from './lib/logger';
 import { readResponseJson } from './lib/runtime-validation';
 import { getBetterAuthSecret } from './lib/secrets';
@@ -316,7 +317,13 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
     },
     socialProviders,
     plugins: emailSignInPlugins(env),
-    ...(options.waitUntil ? { advanced: { backgroundTasks: { handler: options.waitUntil } } } : {}),
+    advanced: {
+      // One client-IP rule for the whole API (`lib/client-ip.ts`): only the ingress-set
+      // CF-Connecting-IP is trusted for BetterAuth's session IPs and rate limits. Its default,
+      // X-Forwarded-For, carries whatever a client prepends.
+      ipAddress: { ipAddressHeaders: [CLIENT_IP_HEADER] },
+      ...(options.waitUntil ? { backgroundTasks: { handler: options.waitUntil } } : {}),
+    },
     user: {
       additionalFields: {
         githubId: {

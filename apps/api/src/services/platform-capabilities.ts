@@ -20,6 +20,7 @@ import { resolveR2PresignConfig } from './r2-presign-config';
 export type PlatformCapability =
   | 'workersAi'
   | 'aiGateway'
+  | 'monthlyCostCap'
   | 'cloudflareAccountApi'
   | 'analyticsIngest'
   | 'analyticsQuery'
@@ -92,6 +93,24 @@ export function resolveAiGatewayId(env: Pick<Env, 'AI_GATEWAY_ID' | 'CF_ACCOUNT_
 }
 
 /**
+ * Whether a monthly AI dollar cap can be enforced here. The month's spend comes only from AI
+ * Gateway logs, read by `runMonthlyCostAggregation` through the account API (gateway id, account
+ * id and API token all required); SAM's own records carry no price for an operator's model on
+ * their own endpoint. Without that, the cap is reported as unavailable everywhere (budget API,
+ * settings UI, admin AI proxy page) rather than accepted and silently never enforced. Daily token
+ * budgets apply either way.
+ *
+ * Calls served by an admin-configured OpenAI-compatible endpoint never reach gateway logs, so on
+ * an installation with both, the cap counts only gateway-routed spend (documented in
+ * reference/configuration.md). This predicate reads env only and cannot see that D1 setting.
+ */
+export function isMonthlyCostCapAvailable(
+  env: Pick<Env, 'AI_GATEWAY_ID' | 'CF_ACCOUNT_ID' | 'CF_API_TOKEN'>
+): boolean {
+  return resolveAiGatewayId(env) !== null && hasCloudflareAccountApi(env);
+}
+
+/**
  * AI Gateway request headers (`cf-aig-metadata` attribution with user and workspace ids), or
  * nothing when the call goes straight to the provider. Only the gateway reads them, so a
  * direct call to OpenAI or Anthropic must not carry SAM's internal ids.
@@ -153,6 +172,7 @@ export function resolvePlatformCapabilities(env: CapabilityEnv): PlatformCapabil
   return {
     workersAi,
     aiGateway: resolveAiGatewayId(env) !== null,
+    monthlyCostCap: isMonthlyCostCapAvailable(env),
     cloudflareAccountApi,
     analyticsIngest: !!env.ANALYTICS,
     analyticsQuery: cloudflareAccountApi,
@@ -176,6 +196,8 @@ export function resolvePlatformCapabilities(env: CapabilityEnv): PlatformCapabil
 export interface PublicPlatformCapabilities {
   speechToText: boolean;
   textToSpeech: boolean;
+  /** Whether a monthly AI dollar cap can be set (onboarding's SAM-managed AI step reads it). */
+  monthlyCostCap: boolean;
 }
 
 export function publicPlatformCapabilities(env: CapabilityEnv): PublicPlatformCapabilities {
@@ -183,5 +205,6 @@ export function publicPlatformCapabilities(env: CapabilityEnv): PublicPlatformCa
   return {
     speechToText: capabilities.speechToText,
     textToSpeech: capabilities.textToSpeech,
+    monthlyCostCap: capabilities.monthlyCostCap,
   };
 }

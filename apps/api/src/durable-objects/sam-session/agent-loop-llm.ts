@@ -14,6 +14,7 @@ import {
   chatTargetHeaders,
   LlmUnavailableError,
   resolveCloudflareWorkersAiTarget,
+  withStreamUsageRequested,
 } from '../../services/llm-chat-target';
 import { aiGatewayOnlyHeaders } from '../../services/platform-capabilities';
 import { getPlatformAgentCredential } from '../../services/platform-credentials';
@@ -199,12 +200,14 @@ async function callOpenAIChatLLM(
     redirect: target.redirect,
     signal,
     headers: chatTargetHeaders(target, { 'cf-aig-metadata': aigMetadata }),
-    body: JSON.stringify({
-      model: target.model,
-      max_tokens: maxTokens,
-      messages: fullMessages,
-      tools: openAITools.length > 0 ? openAITools : undefined,
-      stream: true,
-    }),
+    body: JSON.stringify(
+      withStreamUsageRequested(target, {
+        model: target.model,
+        max_tokens: maxTokens,
+        messages: fullMessages,
+        tools: openAITools.length > 0 ? openAITools : undefined,
+        stream: true,
+      })
+    ),
   });
 }

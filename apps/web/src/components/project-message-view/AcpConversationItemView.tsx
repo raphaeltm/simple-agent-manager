@@ -13,7 +13,6 @@ import {
 import { memo, useCallback } from 'react';
 
 import { useGlobalAudio } from '../../contexts/GlobalAudioContext';
-import { usePlatformCapabilities } from '../../hooks/usePlatformCapabilities';
 import { getTtsApiUrl } from '../../lib/api';
 import { noticeOf, systemRowNotice } from './sam-notice/notice-items';
 import { NoticeRow } from './sam-notice/NoticeRow';
@@ -108,6 +107,13 @@ interface AcpConversationItemViewProps {
   onToggleGroup?: (groupId: string) => void;
   /** True when this group is the tail row and the agent is mid-turn. */
   groupLive?: boolean;
+  /**
+   * Whether server read-aloud (text-to-speech) exists on this installation. Read once by the
+   * list that owns the rows (`usePlatformCapabilities`) and passed down as a primitive, so a
+   * long conversation is one query observer, and rows re-render only if the answer changes.
+   * Without it the bubble falls back to the browser's own speech synthesis.
+   */
+  serverTextToSpeech: boolean;
 }
 
 const NOTICE_DELIVERY_PROBLEMS: ReadonlySet<UserMessageDelivery['status']> = new Set([
@@ -129,6 +135,7 @@ function AcpConversationItemViewImpl({
   groupExpanded,
   onToggleGroup,
   groupLive,
+  serverTextToSpeech,
 }: AcpConversationItemViewProps) {
   // Depend on `startPlayback` (a stable useCallback) rather than the whole
   // GlobalAudio context value — that value is memoized but re-created as
@@ -163,9 +170,7 @@ function AcpConversationItemViewImpl({
     });
   }, [startPlayback, audioId, audioText]);
 
-  // Without server text-to-speech the bubble falls back to the browser's own speech synthesis.
-  const { textToSpeech } = usePlatformCapabilities();
-  const handlePlayAudio = isAgentMessage && textToSpeech ? playAudio : undefined;
+  const handlePlayAudio = isAgentMessage && serverTextToSpeech ? playAudio : undefined;
 
   switch (item.kind) {
     case 'user_message': {
@@ -214,7 +219,7 @@ function AcpConversationItemViewImpl({
           streaming={item.streaming}
           animated={animateText}
           timestamp={item.timestamp}
-          ttsApiUrl={textToSpeech ? getTtsUrl() : undefined}
+          ttsApiUrl={serverTextToSpeech ? getTtsUrl() : undefined}
           ttsStorageId={item.id}
           onPlayAudio={handlePlayAudio}
           onFileClick={onFileClick}

@@ -14,6 +14,7 @@ import { Hono } from 'hono';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { extractBearerToken } from '../lib/auth-helpers';
+import { clientIpFromHeaders } from '../lib/client-ip';
 import { log } from '../lib/logger';
 import { maybeJsonRecord } from '../lib/runtime-validation';
 import { getUserId } from '../middleware/auth';
@@ -420,7 +421,7 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
   if (tunnelIngress) {
     log.debug('heartbeat.ip_backfill_skipped_tunnel_node', { nodeId, action: 'skipped' });
   }
-  const heartbeatIp = tunnelIngress ? undefined : c.req.header('CF-Connecting-IP');
+  const heartbeatIp = tunnelIngress ? null : clientIpFromHeaders((name) => c.req.header(name));
 
   // Defense-in-depth: backfill IP from heartbeat if node has no IP stored.
   // This self-heals Scaleway nodes where the IP wasn't captured at creation time.

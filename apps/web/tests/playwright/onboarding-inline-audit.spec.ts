@@ -51,6 +51,8 @@ interface Installation {
   hasAgent?: boolean;
   hasCloud?: boolean;
   hasGitHub?: boolean;
+  /** Public capabilities: false without Cloudflare AI Gateway (no monthly AI cap). */
+  monthlyCostCap?: boolean;
 }
 
 interface Recorded {
@@ -72,6 +74,12 @@ async function setupMocks(page: Page, state: Installation): Promise<Recorded> {
     if (p === '/api/agents') return jsonResponse(route, 200, []);
 
     // What the installation offers.
+    if (p === '/api/config/platform-capabilities')
+      return jsonResponse(route, 200, {
+        speechToText: true,
+        textToSpeech: true,
+        monthlyCostCap: state.monthlyCostCap !== false,
+      });
     if (p === '/api/config/instant-runtime')
       return jsonResponse(route, 200, { enabled: state.instant === true });
     if (p === '/api/config/artifacts-enabled')
@@ -274,6 +282,28 @@ test('SAM-managed AI is offered only when this installation enables it', async (
   await assertNoOverflow(page);
   await viewportScreenshot(page, 'onboarding-agent-api-key');
 });
+
+for (const monthlyCostCap of [true, false]) {
+  test(`SAM AI limits ${monthlyCostCap ? 'offer' : 'omit'} a monthly cap ${
+    monthlyCostCap ? 'with' : 'without'
+  } AI Gateway`, async ({ page }) => {
+    await setupMocks(page, { instant: true, hasGitHub: true, samAi: true, monthlyCostCap });
+    const wizard = await begin(page);
+    await wizard.getByRole('button', { name: /Right here, on Cloudflare/ }).click();
+    await wizard.getByRole('button', { name: /Claude Code/ }).click();
+    await wizard.getByRole('button', { name: 'SAM AI' }).click();
+    // Liveness: the daily limits are always there.
+    await expect(page.locator('#onboarding-daily-input')).toBeVisible();
+    await expect(page.locator('#onboarding-daily-output')).toBeVisible();
+    await expect(page.locator('#onboarding-monthly-cap')).toHaveCount(monthlyCostCap ? 1 : 0);
+    await page.locator('#onboarding-daily-output').scrollIntoViewIfNeeded();
+    await assertNoOverflow(page);
+    await viewportScreenshot(
+      page,
+      `onboarding-sam-ai-limits-${monthlyCostCap ? 'with-gateway' : 'no-gateway'}`
+    );
+  });
+}
 
 test('SAM-hosted path: no GitHub, an Instant profile, then the first chat', async ({ page }) => {
   const recorded = await setupMocks(page, { instant: true, artifacts: true });

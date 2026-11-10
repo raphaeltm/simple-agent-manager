@@ -234,6 +234,7 @@ import {
   ProjectMessageView,
 } from '../../../src/components/project-message-view';
 import { VIRTUAL_START } from '../../../src/components/project-message-view/types';
+import { platformCapabilitiesQueryKeys } from '../../../src/lib/query-options/platform-capabilities';
 
 beforeEach(() => {
   mockWsConnectionState = 'connected';
@@ -389,7 +390,7 @@ function render(ui: ReactElement) {
     </MemoryRouter>
   );
 
-  return rtlRender(ui, { wrapper: Wrapper });
+  return { ...rtlRender(ui, { wrapper: Wrapper }), queryClient };
 }
 
 async function selectPhraseInMessage(fullText: string, selectedPhrase: string) {
@@ -693,6 +694,57 @@ describe('ProjectMessageView — session isolation', () => {
 
     // Session B must remain visible — stale A data must NOT contaminate
     expect(screen.queryByText('Hello from A')).toBeNull();
+  });
+});
+
+/*
+ * Project chat reads the platform capabilities once, in SessionMessageView, and hands rows the
+ * primitive. Before, every row ran its own `usePlatformCapabilities()` query observer, so the
+ * observer count grew with the conversation (tests/unit/pages/conversation-capabilities-observer
+ * covers the re-render half on the workspace chat surface).
+ */
+describe('ProjectMessageView — platform capabilities read', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  async function observersFor(messageCount: number): Promise<number> {
+    const realFetch = globalThis.fetch;
+    // Held: the capabilities stay in flight, as on a cold load, so only observers are counted.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
+        String(input).endsWith('/api/config/platform-capabilities')
+          ? new Promise<Response>(() => undefined)
+          : realFetch(input, init)
+      )
+    );
+    const messages = Array.from({ length: messageCount }, (_, index) =>
+      makeMessage(
+        `msg-${index}`,
+        'session-1',
+        index % 2 === 1 ? `Agent reply ${index}` : `User turn ${index}`,
+        index % 2 === 1 ? 'assistant' : 'user'
+      )
+    );
+    mocks.getChatSession.mockResolvedValue(makeSessionResponse('session-1', messages));
+    const view = render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+    await screen.findByText(`Agent reply ${messageCount - 1}`);
+    const count =
+      view.queryClient
+        .getQueryCache()
+        .find({ queryKey: platformCapabilitiesQueryKeys.all() })
+        ?.getObserversCount() ?? 0;
+    view.unmount();
+    vi.unstubAllGlobals();
+    return count;
+  }
+
+  it('keeps the capabilities observer count independent of conversation length', async () => {
+    const short = await observersFor(2);
+    const long = await observersFor(40);
+    expect(short).toBeGreaterThan(0);
+    expect(long).toBe(short);
   });
 });
 

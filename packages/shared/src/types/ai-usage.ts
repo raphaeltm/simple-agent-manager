@@ -80,6 +80,11 @@ export interface UserAiBudgetResponse {
   };
   /** Current month's estimated cost from AI Gateway. */
   monthCostUsd: number;
+  /**
+   * Whether this installation can enforce a monthly cost cap. False without Cloudflare AI
+   * Gateway, whose logs are the only source of cost: a cap cannot be set and is not enforced.
+   */
+  monthlyCostCapAvailable: boolean;
   /** Utilization percentages (0-100). */
   utilization: {
     dailyInputPercent: number;

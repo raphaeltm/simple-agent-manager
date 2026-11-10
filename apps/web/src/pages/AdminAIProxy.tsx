@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { RotateCcw } from 'lucide-react';
 import { useState } from 'react';
 
+import { MonthlyCapUnavailableNote } from '../components/ai-usage/MonthlyCapUnavailableNote';
 import { useQueryScope } from '../hooks/useQueryScope';
 import {
   type AIProxyConfigResponse,
@@ -171,8 +172,8 @@ export function AdminAIProxy() {
     <div className="space-y-6">
       <Body>
         Configure the default AI model and billing mode for the platform inference proxy. Models are
-        routed through Cloudflare AI Gateway. Workers AI models are Cloudflare-billed; Anthropic and
-        OpenAI models require credentials or Unified Billing.
+        routed through Cloudflare AI Gateway when this installation has one. Workers AI models are
+        Cloudflare-billed; Anthropic and OpenAI models require credentials or Unified Billing.
       </Body>
 
       {error && (
@@ -241,6 +242,10 @@ export function AdminAIProxy() {
           </div>
         </div>
       </Card>
+
+      {config.monthlyCostCapAvailable === false && (
+        <MonthlyCapUnavailableNote audience="admin" testId="admin-monthly-cap-unavailable" />
+      )}
 
       {/* Default Model */}
       <Card>
