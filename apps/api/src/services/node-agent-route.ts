@@ -40,30 +40,45 @@ export interface NodeAgentRouteRow {
   leasePort: number | null;
 }
 
-/** One D1 read: runtime, transport and the current incarnation's active lease port. */
+/**
+ * The node's routing row. Non-reverse-tunnel nodes cost exactly the one node query this seam
+ * always made (same shape, same columns plus transport); only a reverse-tunnel node pays a
+ * second, indexed read for its current incarnation's active lease.
+ */
 export async function readNodeAgentRouteRow(
   env: Pick<Env, 'DATABASE'>,
   nodeId: string
 ): Promise<NodeAgentRouteRow | null> {
   const db = drizzle(env.DATABASE, { schema });
-  const row = await db
+  const node = await db
     .select({
       runtime: schema.nodes.runtime,
       transport: schema.nodes.transport,
-      leasePort: schema.nodeReverseTunnelLeases.port,
+      runtimeIncarnationId: schema.nodes.runtimeIncarnationId,
     })
     .from(schema.nodes)
-    .leftJoin(
-      schema.nodeReverseTunnelLeases,
+    .where(eq(schema.nodes.id, nodeId))
+    .get();
+  if (!node) return null;
+  if (node.transport !== 'reverse-tunnel' || !node.runtimeIncarnationId) {
+    return { runtime: node.runtime ?? null, transport: node.transport ?? null, leasePort: null };
+  }
+  const lease = await db
+    .select({ port: schema.nodeReverseTunnelLeases.port })
+    .from(schema.nodeReverseTunnelLeases)
+    .where(
       and(
-        eq(schema.nodeReverseTunnelLeases.nodeId, schema.nodes.id),
-        eq(schema.nodeReverseTunnelLeases.runtimeIncarnationId, schema.nodes.runtimeIncarnationId),
+        eq(schema.nodeReverseTunnelLeases.nodeId, nodeId),
+        eq(schema.nodeReverseTunnelLeases.runtimeIncarnationId, node.runtimeIncarnationId),
         eq(schema.nodeReverseTunnelLeases.status, 'active')
       )
     )
-    .where(eq(schema.nodes.id, nodeId))
     .get();
-  return row ?? null;
+  return {
+    runtime: node.runtime ?? null,
+    transport: node.transport,
+    leasePort: lease?.port ?? null,
+  };
 }
 
 /** Resolve a route from an already-loaded row (lets callers fold this into their own query). */

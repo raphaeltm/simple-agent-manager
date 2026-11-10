@@ -110,6 +110,15 @@ export function resolveManagedNodeTransport(
   return configured;
 }
 
+/**
+ * True when this installation provisions reverse-tunnel nodes (a self-hosted box). Used by
+ * paths that must not hand a node's URL to another VM: a reverse-tunnel node is reachable only
+ * from the box's loopback.
+ */
+export function isReverseTunnelInstallation(env: Pick<Env, 'VM_AGENT_TRANSPORT'>): boolean {
+  return env.VM_AGENT_TRANSPORT?.trim() === 'reverse-tunnel';
+}
+
 export function resolveVmAgentTunnelPort(env: TunnelTransportEnv): string {
   const port = env.VM_AGENT_TUNNEL_PORT?.trim() || DEFAULT_CLOUDFLARE_TUNNEL_PORT;
   const value = Number(port);

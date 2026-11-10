@@ -80,7 +80,7 @@ describe('heartbeat IP backfill', () => {
     // tests/unit/routes/node-lifecycle-byo.test.ts. This structural assertion tracks the
     // effectiveNodeIp initializer, which now short-circuits to null for tunnel-transport nodes.
     expect(heartbeatSection).toContain(
-      'let effectiveNodeIp = node.tunnelId ? null : node.ipAddress'
+      'let effectiveNodeIp = tunnelIngress ? null : node.ipAddress'
     );
     expect(heartbeatSection).toContain('if (effectiveNodeIp) {');
     expect(heartbeatSection).toContain('const dnsIp = heartbeatIpv4 || effectiveNodeIp');

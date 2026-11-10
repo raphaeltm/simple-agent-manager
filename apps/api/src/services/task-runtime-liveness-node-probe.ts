@@ -10,7 +10,11 @@ import { DEFAULT_TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS } from '@simple-agen
 
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 import { getNodeBackendBaseUrl } from './node-agent-readiness';
-import { resolveNodeAgentRoute, retargetNodeAgentUrl } from './node-agent-route';
+import {
+  NodeAgentRouteError,
+  resolveNodeAgentRoute,
+  retargetNodeAgentUrl,
+} from './node-agent-route';
 import type {
   RuntimeWorkspaceSnapshot,
   TaskLivenessNodeHealthProbeEnv,
@@ -94,12 +98,18 @@ export async function probeNodeHealthForTaskLiveness(
 
   try {
     if (env.DATABASE) {
-      // Same routing decision as fetchNodeAgent; a reverse-tunnel node without a live lease
-      // is an inconclusive 'error', never a probe of a hostname that does not exist.
-      url = retargetNodeAgentUrl(
-        url,
-        await resolveNodeAgentRoute({ DATABASE: env.DATABASE, ...backendEnv }, nodeId)
-      );
+      // Same routing decision as fetchNodeAgent. A reverse-tunnel node without a live lease
+      // throws NodeAgentRouteError, an inconclusive 'error' below. If the row itself cannot be
+      // read, keep the public URL this probe always used: the probe is a liveness signal, so
+      // its worst outcome is an inconclusive failure, which withholds any terminal verdict.
+      try {
+        url = retargetNodeAgentUrl(
+          url,
+          await resolveNodeAgentRoute({ DATABASE: env.DATABASE, ...backendEnv }, nodeId)
+        );
+      } catch (routeErr) {
+        if (routeErr instanceof NodeAgentRouteError) throw routeErr;
+      }
     }
     const response = await fetchWithTimeout(url, { method: 'GET' }, timeoutMs);
     return {

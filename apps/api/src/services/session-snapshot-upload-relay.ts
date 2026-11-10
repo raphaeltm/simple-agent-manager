@@ -14,6 +14,7 @@ import {
 import { verifyCallbackToken } from './jwt';
 import { getRuntimeLimits } from './limits';
 import { getNodeBackendBaseUrl } from './node-agent-readiness';
+import { isReverseTunnelInstallation } from './node-tunnel-config';
 import { buildPlacementAuthoritySqlPredicate } from './placement-authority';
 import {
   assertRelayProvisioningAuthority,
@@ -181,7 +182,7 @@ function allocationMatchesRelaySource(
  * Worker path.
  */
 export function snapshotUploadRelayAvailable(env: Pick<Env, 'VM_AGENT_TRANSPORT'>): boolean {
-  return env.VM_AGENT_TRANSPORT?.trim() !== 'reverse-tunnel';
+  return !isReverseTunnelInstallation(env);
 }
 
 export async function findSessionSnapshotUploadRelay(

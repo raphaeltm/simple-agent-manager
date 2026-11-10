@@ -41,6 +41,7 @@ vi.mock('../../../src/services/jwt', () => ({
 }));
 vi.mock('../../../src/lib/logger', () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+  createModuleLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
   serializeError: (error: unknown) => ({
     error: error instanceof Error ? error.message : String(error),
   }),
