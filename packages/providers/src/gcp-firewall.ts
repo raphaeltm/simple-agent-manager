@@ -12,7 +12,8 @@ import {
 } from './provider-fetch';
 import type { ProviderRequestContext } from './types';
 import { ProviderError } from './types';
-import { parseProviderJson, validateGcpOperation } from './validation';
+import { parseProviderJson } from './validation';
+import { validateGcpOperation } from './validation-gcp';
 
 export interface GcpFirewallConfig {
   readonly agentSourceRanges: readonly string[];
