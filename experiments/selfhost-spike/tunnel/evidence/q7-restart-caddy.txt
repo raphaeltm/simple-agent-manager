@@ -1,0 +1,13 @@
+   124ms health null -> 200
+  6046ms stream ended after 5963 ms, 12 lines: ERR:UND_ERR_SOCKET
+  6102ms health 200 -> 502
+  6552ms stream ended after 4 ms, 0 lines: status 502
+  7057ms stream ended after 5 ms, 0 lines: status 502
+  7562ms stream ended after 4 ms, 0 lines: status 502
+  8065ms stream ended after 3 ms, 0 lines: status 502
+  8503ms health 502 -> 200 (outage 2401 ms)
+ 40021ms ws ended after 39941 ms, 6 msgs: close code=1000 reason="probe-end" clean=true
+ 40384ms probe done
+node-a frpc: 2026-11-10T13:25:21.935463990Z 2026-11-10 13:25:21.935 [W] [client/service.go:380] [b4e861758f2c5436] connect to server error: dial tcp 172.|2026-11-10T13:25:24.113644164Z 2026-11-10 13:25:24.113 [I] [client/service.go:389] [b4e861758f2c5436] login to server success, get run id [b|
+node-b frpc: 2026-11-10T13:25:21.916998166Z 2026-11-10 13:25:21.916 [W] [client/service.go:380] [794281d68f7f3d74] connect to server error: dial tcp 172.|2026-11-10T13:25:24.112776828Z 2026-11-10 13:25:24.110 [I] [client/service.go:389] [794281d68f7f3d74] login to server success, get run id [7|
+node-c frpc: 2026-11-10T13:25:21.943681275Z 2026-11-10 13:25:21.942 [W] [client/service.go:380] [fe34e24e090f63e3] connect to server error: dial tcp 172.|2026-11-10T13:25:24.145049994Z 2026-11-10 13:25:24.144 [I] [client/service.go:389] [fe34e24e090f63e3] login to server success, get run id [f|

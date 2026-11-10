@@ -1,0 +1,22 @@
+   137ms health null -> 200
+  5981ms stream ended after 5898 ms, 12 lines: ERR:UND_ERR_SOCKET
+  5984ms health 200 -> 502
+  6487ms stream ended after 6 ms, 0 lines: status 502
+  6998ms stream ended after 9 ms, 0 lines: status 502
+  7504ms stream ended after 5 ms, 0 lines: status 502
+  8009ms stream ended after 5 ms, 0 lines: status 502
+  8517ms stream ended after 8 ms, 0 lines: status 502
+  9024ms stream ended after 5 ms, 0 lines: status 502
+  9529ms stream ended after 5 ms, 0 lines: status 502
+ 10035ms stream ended after 5 ms, 0 lines: status 502
+ 10541ms stream ended after 5 ms, 0 lines: status 502
+ 11048ms stream ended after 5 ms, 0 lines: status 502
+ 11553ms stream ended after 5 ms, 0 lines: status 502
+ 12063ms stream ended after 9 ms, 0 lines: status 502
+ 12572ms stream ended after 9 ms, 0 lines: status 502
+ 12690ms health 502 -> 200 (outage 6704 ms)
+ 45015ms ws ended after 44934 ms, 6 msgs: close code=1000 reason="probe-end" clean=true
+ 45384ms probe done
+node-a frpc: 2026-11-10T13:23:52.195775305Z 2026-11-10 13:23:52.195 [W] [client/service.go:380] [b4e861758f2c5436] connect to server error: bad status|2026-11-10T13:23:56.479898920Z 2026-11-10 13:23:56.478 [I] [client/service.go:389] [b4e861758f2c5436] login to server success, get run id [b|
+node-b frpc: 2026-11-10T13:23:52.258927147Z 2026-11-10 13:23:52.258 [W] [client/service.go:380] [794281d68f7f3d74] connect to server error: bad status|2026-11-10T13:23:56.786970493Z 2026-11-10 13:23:56.786 [I] [client/service.go:389] [794281d68f7f3d74] login to server success, get run id [7|
+node-c frpc: 2026-11-10T13:23:50.134342928Z 2026-11-10 13:23:50.133 [W] [client/service.go:380] [fe34e24e090f63e3] connect to server error: bad status|2026-11-10T13:23:52.359709661Z 2026-11-10 13:23:52.359 [I] [client/service.go:389] [fe34e24e090f63e3] login to server success, get run id [f|

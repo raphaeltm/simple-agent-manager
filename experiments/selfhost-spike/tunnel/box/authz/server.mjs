@@ -6,7 +6,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 
 const SECRET = process.env.AUTHZ_SECRET || 'spike-authz-secret';
-const LEASES = JSON.parse(process.env.LEASES || '{"node-a":{"port":17001,"domain":"node-a.nodes.internal"},"node-b":{"port":17002,"domain":"node-b.nodes.internal"}}');
+const LEASES = JSON.parse(process.env.LEASES || '{"node-a":{"port":17001,"domain":"node-a.nodes.internal"},"node-b":{"port":17002,"domain":"node-b.nodes.internal"},"node-c":{"port":17003,"domain":"node-c.nodes.internal"}}');
 const ALLOWED_TYPES = new Set(['tcp', 'http', 'tcpmux']);
 export const tokenFor = (nodeId) => crypto.createHmac('sha256', SECRET).update(nodeId).digest('hex');
 

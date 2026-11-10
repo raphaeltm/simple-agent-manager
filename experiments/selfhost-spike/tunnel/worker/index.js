@@ -29,7 +29,8 @@ export default {
         const target = url.searchParams.get('url'); const out = {};
         const firstMessage = (ws) => new Promise((ok) => { ws.addEventListener('message', (e) => ok(String(e.data))); ws.addEventListener('close', (e) => ok('closed ' + e.code)); ws.addEventListener('error', (e) => ok('error ' + (e.message || e))); setTimeout(() => ok('no message in 3s'), 3000); });
         try {
-          const res = await fetch(target.replace('ws://', 'http://'), { headers: { Upgrade: 'websocket' } });
+          const h = { Upgrade: 'websocket' }; if (url.searchParams.get('host')) h.Host = url.searchParams.get('host');
+          const res = await fetch(target.replace('ws://', 'http://'), { headers: h });
           const ws = res.webSocket; out.fetchStatus = res.status; out.keys = Object.keys(ws || {}).concat(Object.getOwnPropertyNames(Object.getPrototypeOf(ws || {})));
           ws.accept(); const p = firstMessage(ws); out.fetchFirst = await p;
           ws.send('ping-from-worker'); out.fetchEcho = await firstMessage(ws); ws.close(1000);
@@ -86,8 +87,11 @@ export default {
       upstream.addEventListener('message', (e) => server.send(e.data));
       server.addEventListener('close', (e) => { try { upstream.close(e.code, e.reason); } catch {} });
       upstream.addEventListener('close', (e) => { try { server.close(e.code, e.reason); } catch {} });
+      // A dead tunnel surfaces as 'error' (or nothing); close the other side with 1011 so the client learns.
+      upstream.addEventListener('error', () => { console.log('bridge: upstream error'); try { server.close(1011, 'upstream error'); } catch {} });
+      server.addEventListener('error', () => { try { upstream.close(1011, 'client error'); } catch {} });
       // ?_wait=1 keeps the invocation alive until either side closes.
-      if (url.searchParams.get('_wait')) ctx.waitUntil(new Promise((done) => { server.addEventListener('close', done); upstream.addEventListener('close', done); }));
+      if (url.searchParams.get('_wait')) ctx.waitUntil(new Promise((done) => { for (const ws of [server, upstream]) for (const ev of ['close', 'error']) ws.addEventListener(ev, done); }));
       return new Response(null, { status: 101, webSocket: client });
     } catch (err) {
       return Response.json({ error: String(err && err.stack || err) }, { status: 502 });

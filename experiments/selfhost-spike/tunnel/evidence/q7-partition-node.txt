@@ -1,0 +1,12 @@
+   152ms health null -> 200
+  8047ms health 200 -> ERR:TimeoutError
+ 29224ms stream ended after 29118 ms, 59 lines: ERR:UND_ERR_SOCKET
+ 29228ms health ERR:TimeoutError -> 502
+ 29549ms health 502 -> 200 (outage 21501 ms)
+ 75013ms ws ended after 74911 ms, 30 msgs: close code=1000 reason="probe-end" clean=true
+ 75408ms probe done
+node-b frpc: 2026-11-10T13:23:56.786970493Z 2026-11-10 13:23:56.786 [I] [client/service.go:389] [794281d68f7f3d74] login to server success, get run id [794281d68f7|2026-11-10T13:25:21.916998166Z 2026-11-10 13:25:21.916 [W] [client/service.go:380] [794281d68f7f3d74] connect to server error: dial tcp 172.18.0.1:443|2026-11-10T13:25:24.112776828Z 2026-11-10 13:25:24.110 [I] [client/service.go:389] [794281d68f7f3d74] login to server success, get run id [794281d68f7|2026-11-10T13:26:34.346807209Z 2026-11-10 13:26:34.345 [I] [client/service.go:389] [794281d68f7f3d74] login to server success, get run id [794281d68f7|
+2026-11-10 13:26:34.355 [I] [server/control.go:769] [794281d68f7f3d74] new proxy [node-b-mux] type [tcpmux] success
+2026-11-10 13:26:34.428 [I] [proxy/proxy.go:260] [794281d68f7f3d74] [node-b-tcp] get a user connection [127.0.0.1:34382]
+2026-11-10 13:26:34.536 [I] [proxy/proxy.go:260] [794281d68f7f3d74] [node-b-tcp] get a user connection [127.0.0.1:34388]
+2026-11-10 13:26:34.648 [I] [proxy/proxy.go:260] [794281d68f7f3d74] [node-b-tcp] get a user connection [127.0.0.1:34396]

@@ -1,0 +1,11 @@
+   127ms ws ended after 22 ms, 0 msgs: close code=1006 reason="" clean=false
+   128ms stream ended after 21 ms, 0 lines: ERR:ECONNRESET
+   131ms health null -> ERR:ECONNRESET
+   399ms health ERR:ECONNRESET -> 200 (outage 268 ms)
+  6143ms stream ended after 5512 ms, 11 lines: ERR:UND_ERR_SOCKET
+  6148ms health 200 -> 502
+  6651ms stream ended after 7 ms, 0 lines: status 502
+  7155ms stream ended after 4 ms, 0 lines: status 502
+  7218ms health 502 -> 200 (outage 1070 ms)
+ 25019ms ws ended after 24391 ms, 6 msgs: close code=1000 reason="probe-end" clean=true
+ 25408ms probe done

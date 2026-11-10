@@ -1,0 +1,10 @@
+== vhost WebSocket via bridge
+2026-11-10T13:27:36.723Z FAILED ws error 
+== tcp/node-b 1 GiB download (wss transport now)
+http=200 time=13.279921s rate=80854533
+== tcp/node-b /health x200
+p50=3.3ms p95=5.3ms
+== vhost/node-b 1 GiB download (wss transport now)
+http=200 time=13.816590s rate=77713952
+== vhost/node-b /health x200
+p50=3.4ms p95=5.0ms

@@ -1,0 +1,40 @@
+# Node-side frpc for node-b. Dials the box; exposes only the loopback agent listener.
+serverAddr = "{{ .Envs.FRP_SERVER_ADDR }}"
+serverPort = {{ .Envs.FRP_SERVER_PORT }}
+loginFailExit = false
+auth.method = "token"
+auth.token = "spike-shared-token"
+# Per-node credential checked by the frps Login/NewProxy plugin (stands in for the callback JWT).
+metadatas.nodeId = "node-b"
+metadatas.nodeToken = "{{ .Envs.NODE_TOKEN }}"
+transport.protocol = "{{ .Envs.FRP_PROTOCOL }}"
+transport.tls.enable = true
+# wss: the only TLS layer is the box's public cert (Caddy). Verify it: without trustedCaFile or
+# useSystemCa, frpc does NOT verify the server certificate.
+transport.tls.serverName = "box.spike.test"
+{{ if .Envs.FRP_CA }}transport.tls.trustedCaFile = "{{ .Envs.FRP_CA }}"{{ end }}
+
+# (a) one TCP proxy per node, bound on the box's loopback at a SAM-assigned port
+[[proxies]]
+name = "node-b-tcp"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 8444
+remotePort = {{ .Envs.CLAIM_PORT }}
+
+# (b) HTTP vhost routing by custom domain
+[[proxies]]
+name = "node-b-http"
+type = "http"
+localIP = "127.0.0.1"
+localPort = 8444
+customDomains = ["{{ .Envs.CLAIM_DOMAIN }}"]
+
+# (c) tcpmux (HTTP CONNECT multiplexer)
+[[proxies]]
+name = "node-b-mux"
+type = "tcpmux"
+multiplexer = "httpconnect"
+localIP = "127.0.0.1"
+localPort = 8444
+customDomains = ["{{ .Envs.CLAIM_DOMAIN }}"]

@@ -1,0 +1,11 @@
+   159ms health null -> 200
+  5984ms stream ended after 5900 ms, 12 lines: ERR:UND_ERR_SOCKET
+  5989ms ws ended after 5907 ms, 6 msgs: close code=1006 reason="" clean=false
+  5992ms health 200 -> ERR:ECONNREFUSED
+  6490ms stream ended after 5 ms, 0 lines: ERR:ECONNREFUSED
+  6499ms ws ended after 8 ms, 0 msgs: close code=1006 reason="" clean=false
+  6994ms stream ended after 4 ms, 0 lines: ERR:ECONNREFUSED
+  7002ms ws ended after 2 ms, 0 msgs: close code=1006 reason="" clean=false
+  7427ms health ERR:ECONNREFUSED -> 200 (outage 1435 ms)
+ 30019ms ws ended after 22516 ms, 23 msgs: close code=1000 reason="probe-end" clean=true
+ 30386ms probe done

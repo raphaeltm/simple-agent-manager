@@ -12,4 +12,4 @@ docker run -d --name "spike-$NODE" --add-host box.spike.test:"$BOX_ADDR" \
   -v "$BIN:/opt/spike:ro" -v "$CFG:/etc/frpc.toml:ro" -v "$T/box/tls:/etc/spike-tls:ro" \
   -e FRP_SERVER_ADDR="$SADDR" -e FRP_SERVER_PORT="$SPORT" -e FRP_PROTOCOL="$PROTO" \
   -e FRP_CA="${FRP_CA:-}" -e NODE_TOKEN="$(token_for "$TOKEN_NODE")" -e CLAIM_PORT="$CLAIM_PORT" -e CLAIM_DOMAIN="$CLAIM_DOMAIN" \
-  alpine:3.22 sh -c "/opt/spike/echo-backend -node $NODE -listen 127.0.0.1:8444 & exec /opt/spike/frpc -c /etc/frpc.toml"
+  alpine:3.22 sh -c "/opt/spike/echo-backend -node $NODE -listen 127.0.0.1:8444 & while true; do /opt/spike/frpc -c /etc/frpc.toml; echo \"frpc exited \$?, restarting in 1s (like systemd Restart=always RestartSec=1)\"; sleep 1; done"

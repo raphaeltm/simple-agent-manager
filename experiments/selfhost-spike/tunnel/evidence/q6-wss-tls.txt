@@ -1,0 +1,8 @@
+## wss, NO CA configured (FRP_CA empty)
+2026-11-10 13:20:24.359 [I] [client/service.go:389] [39054cbf88c8f60d] login to server success, get run id [39054cbf88c8f60d]
+## wss, WRONG CA
+2026-11-10 13:20:30.149 [W] [client/service.go:380] connect to server error: tls: failed to verify certificate: x509: certificate signed by unknown authority
+2026-11-10 13:20:32.313 [W] [client/service.go:380] connect to server error: tls: failed to verify certificate: x509: certificate signed by unknown authority
+## wss, correct CA (restore)
+2026-11-10 13:20:35.937 [I] [client/service.go:389] [b4e861758f2c5436] login to server success, get run id [b4e861758f2c5436]
+{"host":"localhost:8787","node":"node-a","ok":true,"spikeNode":"","xff":""}

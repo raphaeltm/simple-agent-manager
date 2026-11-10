@@ -1,0 +1,6 @@
+== worker+tunnel: http=200 total=52.427549s curl-exit=18 lines=11 last=tick 10 1794316531339
+== worker-only: http=200 total=52.480811s curl-exit=18 lines=11 last=tick 10 1794316531508
+== tunnel-only: http=200 total=160.096479s curl-exit=0 lines=32 last=tick 31 1794316636390
+== worker+tunnel (no file edits during run): http=200 total=120.024601s curl-exit=18 lines=24
+== worker-only (no file edits during run): http=200 total=120.045555s curl-exit=18 lines=24
+== CELLD_FETCH_TIMEOUT_S=300, worker-only 160 s active stream: http=200 total=160.617970s curl-exit=0 lines=32

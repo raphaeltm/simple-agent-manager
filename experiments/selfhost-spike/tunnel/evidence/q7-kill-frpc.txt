@@ -1,0 +1,12 @@
+   150ms health null -> 200
+  8082ms stream ended after 7973 ms, 16 lines: ERR:UND_ERR_SOCKET
+  8144ms health 200 -> 502
+  8586ms stream ended after 3 ms, 0 lines: status 502
+  9091ms stream ended after 5 ms, 0 lines: status 502
+  9196ms health 502 -> 200 (outage 1052 ms)
+ 40011ms ws ended after 39907 ms, 8 msgs: close code=1000 reason="probe-end" clean=true
+ 40411ms probe done
+2026-11-10T13:21:09.087383406Z 2026-11-10 13:21:09.086 [I] [client/service.go:389] [659ab82cc10292d2] login to server success, get run id [659ab82cc10292d2]
+2026-11-10T13:22:13.472225289Z frpc exited 137, restarting in 1s (like systemd Restart=always RestartSec=1)
+2026-11-10T13:22:14.501682786Z 2026-11-10 13:22:14.501 [I] [client/service.go:369] try to connect to server...
+2026-11-10T13:22:14.521921534Z 2026-11-10 13:22:14.520 [I] [client/service.go:389] [19d187476dafee75] login to server success, get run id [19d187476dafee75]
