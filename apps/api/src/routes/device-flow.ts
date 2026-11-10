@@ -5,6 +5,7 @@ import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { clientIpFromHeaders } from '../lib/client-ip';
 import { AppError, errors } from '../middleware/error';
 import {
   checkRateLimit,
@@ -41,11 +42,7 @@ function parsePositiveInt(value: string | undefined, fallback: number): number {
 }
 
 function getClientIp(headers: Headers): string {
-  const cfIp = headers.get('CF-Connecting-IP');
-  if (cfIp) return cfIp;
-  const forwarded = headers.get('X-Forwarded-For');
-  if (forwarded) return forwarded.split(',')[0]?.trim() || 'unknown';
-  return 'unknown';
+  return clientIpFromHeaders((name) => headers.get(name)) ?? 'unknown';
 }
 
 function rateLimitByIp(
