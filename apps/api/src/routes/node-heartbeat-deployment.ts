@@ -137,15 +137,32 @@ export async function applyDeploymentHeartbeat(params: {
           observedUpdate.status = 'error';
         }
 
-        await db
+        // Compare-and-set on the status read above. The `starting → active/error`
+        // decision was made from that read, so a stop, start failure or deletion that
+        // landed in between must win: without the status predicate this write would
+        // overwrite it (read-then-write race).
+        const applied = await db
           .update(schema.deploymentEnvironments)
           .set(observedUpdate)
           .where(
             and(
               eq(schema.deploymentEnvironments.id, envId),
-              eq(schema.deploymentEnvironments.nodeId, nodeId)
+              eq(schema.deploymentEnvironments.nodeId, nodeId),
+              eq(schema.deploymentEnvironments.status, envRow.status)
             )
-          );
+          )
+          .returning({ id: schema.deploymentEnvironments.id });
+        if (applied.length === 0) {
+          // The environment changed under us. Its new status owns what happens next;
+          // the next heartbeat re-reads it, so skip events and release work for now.
+          log.info('heartbeat.deployment_environment_status_changed', {
+            nodeId,
+            environmentId: envId,
+            readStatus: envRow.status,
+            action: 'skipped_observation',
+          });
+          continue;
+        }
 
         const nextObservedStatus =
           typeof observedUpdate.observedStatus === 'string' ? observedUpdate.observedStatus : null;
