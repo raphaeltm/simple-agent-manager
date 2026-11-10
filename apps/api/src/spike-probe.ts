@@ -8,6 +8,7 @@ import { createHash } from 'node:crypto';
 
 import type { Env } from './env';
 import { scheduled } from './scheduled/handler';
+import * as projectDataService from './services/project-data';
 import { createRequestScopedD1 } from './lib/d1-session';
 import { createVapidAuthorization } from './lib/web-push';
 import { sha256Hex } from './project-data-archive/hashing';
@@ -335,6 +336,42 @@ spikeProbeRoutes.post('/scheduled', async (c) => {
     error = `${(e as Error).name}: ${(e as Error).message}`;
   }
   return c.json({ cron, ms: Date.now() - t0, waitUntil: pending.length, error });
+});
+
+// Push N agent-style messages through SAM's real ProjectData batch path (what the VM agent's
+// POST /api/workspaces/:id/messages ends in), in batches of B, then read them back.
+spikeProbeRoutes.post('/persist-batch', async (c) => {
+  const projectId = c.req.query('projectId') ?? '';
+  const sessionId = c.req.query('sessionId') ?? '';
+  const n = Number(c.req.query('n') ?? '200');
+  const b = Number(c.req.query('b') ?? '50');
+  const tag = c.req.query('tag') ?? String(Date.now());
+  const t0 = Date.now();
+  const batches: Array<{ ms: number; persisted: number; duplicates: number }> = [];
+  let seq = 0;
+  for (let i = 0; i < n; i += b) {
+    const msgs = Array.from({ length: Math.min(b, n - i) }, (_, k) => {
+      const idx = i + k;
+      const tool = idx % 3 === 0;
+      return {
+        messageId: `spike-${tag}-${idx}`,
+        role: tool ? 'tool' : 'assistant',
+        content: tool ? `tool output ${idx} ` + 'x'.repeat(2000) : `assistant chunk ${idx}`,
+        toolMetadata: tool ? { toolCallId: `call-${idx}`, title: 'Read file', kind: 'read', status: 'completed' } : null,
+        timestamp: new Date(Date.now() + idx).toISOString(),
+        sequence: ++seq,
+      };
+    });
+    const t = Date.now();
+    const res = await projectDataService.persistMessageBatch(c.env, projectId, sessionId, msgs);
+    batches.push({ ms: Date.now() - t, persisted: res.persisted, duplicates: res.duplicates });
+  }
+  // Replay the first batch: idempotency must report duplicates, not re-insert.
+  const replayT = Date.now();
+  const replay = await projectDataService.persistMessageBatch(c.env, projectId, sessionId, [
+    { messageId: `spike-${tag}-1`, role: 'assistant', content: 'assistant chunk 1', toolMetadata: null, timestamp: new Date().toISOString() },
+  ]);
+  return c.json({ n, b, totalMs: Date.now() - t0, batches, replay: { ...replay, ms: Date.now() - replayT } });
 });
 
 spikeProbeRoutes.get('/alarm-status', async (c) => {
