@@ -18,6 +18,7 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { assertOutboundUrl } from '../lib/network-hosts';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import type { AiProviderUsageAttribution } from '../services/ai-token-budget';
 import { resolveSessionProfileCredentialContext } from '../services/composable-credentials/profile-context';
@@ -55,9 +56,14 @@ function stringSetting(value: unknown): string | null {
   return typeof value === 'string' && value.trim() !== '' ? value.trim() : null;
 }
 
-function isHttpsUrl(value: string): boolean {
+/**
+ * A base URL the passthrough may call: HTTPS to a public host. Checked at use time because a
+ * credential saved before the save-time check (composable-credentials.ts) may still hold a
+ * private or metadata host; such a credential is skipped, never called.
+ */
+function isUsableUpstreamBaseUrl(value: string): boolean {
   try {
-    return new URL(value).protocol === 'https:';
+    return assertOutboundUrl(value).protocol === 'https:';
   } catch {
     return false;
   }
@@ -211,7 +217,7 @@ export async function resolveProxyUpstream(input: {
     if (!credentialSupportsDialect(secret, settings, input.dialect)) continue;
     const apiKey = credentialApiKey(secret);
     const baseUrl = resolvedBaseUrl(secret, settings);
-    if (!apiKey || !baseUrl || !isHttpsUrl(baseUrl)) continue;
+    if (!apiKey || !baseUrl || !isUsableUpstreamBaseUrl(baseUrl)) continue;
     return {
       agentType: capability.agentType,
       dialect: input.dialect,

@@ -16,6 +16,7 @@ import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { assertOutboundUrl } from '../lib/network-hosts';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { ulid } from '../lib/ulid';
 import { requireApproved, requireAuth } from '../middleware/auth';
@@ -30,19 +31,23 @@ const ccRoutes = new Hono<{ Bindings: Env }>();
 
 ccRoutes.use('/*', requireAuth(), requireApproved());
 
+/**
+ * A user-supplied provider base URL: HTTPS to a public host. The control plane calls it (the AI
+ * proxy passthrough), so loopback, private-network and metadata hosts are refused here as well
+ * as at use time (`resolveProxyUpstream`), which is the control that cannot be bypassed.
+ */
 function requireHttpsBaseUrl(value: unknown): string {
   if (typeof value !== 'string' || value.trim() === '') {
     throw errors.badRequest('HTTPS baseUrl is required');
   }
+  let url: URL;
   try {
-    const url = new URL(value);
-    if (url.protocol !== 'https:') {
-      throw errors.badRequest('HTTPS baseUrl is required');
-    }
-    return value.trim();
+    url = assertOutboundUrl(value.trim());
   } catch {
-    throw errors.badRequest('HTTPS baseUrl is required');
+    throw errors.badRequest('baseUrl must be an HTTPS URL on a public host');
   }
+  if (url.protocol !== 'https:') throw errors.badRequest('HTTPS baseUrl is required');
+  return value.trim();
 }
 
 function requireDialect(value: unknown): Dialect {
