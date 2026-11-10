@@ -7,24 +7,33 @@
  * write updates are not atomic under concurrent requests.
  */
 
-import type { AdminAiAllowance, UserAiBudgetSettings } from '@simple-agent-manager/shared';
+import type { UserAiBudgetSettings } from '@simple-agent-manager/shared';
 import {
-  AI_ADMIN_ALLOWANCE_KV_PREFIX,
-  AI_BUDGET_SETTINGS_KV_PREFIX,
-  AI_MONTHLY_COST_CACHE_KV_PREFIX,
   DEFAULT_AI_PROXY_DAILY_INPUT_TOKEN_LIMIT,
   DEFAULT_AI_PROXY_DAILY_OUTPUT_TOKEN_LIMIT,
-  DEFAULT_AI_USAGE_ALERT_THRESHOLD_PERCENT,
   DEFAULT_AI_USAGE_BUDGET_TTL_SECONDS,
-  DEFAULT_AI_USAGE_MAX_DAILY_TOKEN_LIMIT,
-  DEFAULT_AI_USAGE_MAX_MONTHLY_COST_CAP_USD,
-  DEFAULT_AI_USAGE_MIN_DAILY_TOKEN_LIMIT,
-  DEFAULT_AI_USAGE_MIN_MONTHLY_COST_CAP_USD,
 } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { expectJsonRecord } from '../lib/runtime-validation';
+import { getUserBudgetSettings } from './ai-budget-settings';
+import { checkMonthlyCostCap } from './ai-monthly-cost-cap';
+
+export {
+  type AiBudgetLimits,
+  buildBudgetSettingsKey,
+  deleteUserBudgetSettings,
+  getAdminAiAllowance,
+  getAiBudgetLimits,
+  getUserBudgetSettings,
+  saveUserBudgetSettings,
+  validateBudgetUpdate,
+} from './ai-budget-settings';
+export {
+  buildMonthlyCostCacheKey,
+  checkMonthlyCostCap,
+  getCachedMonthlyCost,
+} from './ai-monthly-cost-cap';
 
 export interface TokenBudget {
   inputTokens: number;
@@ -46,7 +55,11 @@ export interface AiProviderUsageEntry extends AiProviderUsageAttribution {
 
 interface AiTokenBudgetCounterStub extends DurableObjectStub {
   get(dateKey: string): Promise<TokenBudget>;
-  consumeTotal(dateKey: string, tokenLimit: number, tokens: number): Promise<{ allowed: boolean; usedTokens: number }>;
+  consumeTotal(
+    dateKey: string,
+    tokenLimit: number,
+    tokens: number
+  ): Promise<{ allowed: boolean; usedTokens: number }>;
   releaseTotal(dateKey: string, tokens: number): Promise<number>;
   increment(dateKey: string, inputTokens: number, outputTokens: number): Promise<TokenBudget>;
   incrementProviderUsage(
@@ -57,13 +70,6 @@ interface AiTokenBudgetCounterStub extends DurableObjectStub {
     estimatedCostUsd: number
   ): Promise<void>;
   getProviderUsage(startDateKey: string): Promise<AiProviderUsageEntry[]>;
-}
-
-export interface AiBudgetLimits {
-  maxDailyTokens: number;
-  minDailyTokens: number;
-  maxMonthlyCostCapUsd: number;
-  minMonthlyCostCapUsd: number;
 }
 
 export interface PlatformDailyTokenLimits {
@@ -89,21 +95,6 @@ function getBudgetCounter(env: Env | undefined, userId: string) {
   return env.AI_TOKEN_BUDGET_COUNTER.get(
     env.AI_TOKEN_BUDGET_COUNTER.idFromName(userId)
   ) as AiTokenBudgetCounterStub;
-}
-
-export function getAiBudgetLimits(env: Env): AiBudgetLimits {
-  return {
-    maxDailyTokens:
-      Number.parseInt(env.AI_USAGE_MAX_DAILY_TOKEN_LIMIT || '', 10) ||
-      DEFAULT_AI_USAGE_MAX_DAILY_TOKEN_LIMIT,
-    minDailyTokens:
-      Number.parseInt(env.AI_USAGE_MIN_DAILY_TOKEN_LIMIT || '', 10) ||
-      DEFAULT_AI_USAGE_MIN_DAILY_TOKEN_LIMIT,
-    maxMonthlyCostCapUsd:
-      Number(env.AI_USAGE_MAX_MONTHLY_COST_CAP_USD) || DEFAULT_AI_USAGE_MAX_MONTHLY_COST_CAP_USD,
-    minMonthlyCostCapUsd:
-      Number(env.AI_USAGE_MIN_MONTHLY_COST_CAP_USD) || DEFAULT_AI_USAGE_MIN_MONTHLY_COST_CAP_USD,
-  };
 }
 
 function parsePositiveIntegerEnv(
@@ -162,8 +153,6 @@ export async function getTokenUsage(
   return existing ?? { inputTokens: 0, outputTokens: 0 };
 }
 
-
-
 export interface FeatureTokenBudgetResult {
   allowed: boolean;
   usedTokens: number;
@@ -181,7 +170,7 @@ export async function consumeFeatureTokenBudget(
   feature: string,
   tokens: number,
   tokenLimit: number,
-  env?: Env,
+  env?: Env
 ): Promise<FeatureTokenBudgetResult> {
   const normalizedTokens = Math.max(0, Math.floor(tokens));
   const counter = getBudgetCounter(env, `feature:${feature}`);
@@ -196,7 +185,8 @@ export async function consumeFeatureTokenBudget(
     return { allowed: false, usedTokens: existing, tokenLimit };
   }
   const usedTokens = existing + normalizedTokens;
-  const ttl = parseInt(env?.AI_USAGE_BUDGET_TTL_SECONDS || '', 10) || DEFAULT_AI_USAGE_BUDGET_TTL_SECONDS;
+  const ttl =
+    parseInt(env?.AI_USAGE_BUDGET_TTL_SECONDS || '', 10) || DEFAULT_AI_USAGE_BUDGET_TTL_SECONDS;
   await kv.put(key, String(usedTokens), { expirationTtl: ttl });
   return { allowed: true, usedTokens, tokenLimit };
 }
@@ -207,7 +197,7 @@ export async function releaseFeatureTokenBudget(
   feature: string,
   tokens: number,
   tokenLimit: number,
-  env?: Env,
+  env?: Env
 ): Promise<FeatureTokenBudgetResult> {
   const normalizedTokens = Math.max(0, Math.floor(tokens));
   const counter = getBudgetCounter(env, `feature:${feature}`);
@@ -219,7 +209,8 @@ export async function releaseFeatureTokenBudget(
   const key = buildFeatureBudgetKey(feature);
   const existing = Number(await kv.get(key)) || 0;
   const usedTokens = Math.max(0, existing - normalizedTokens);
-  const ttl = parseInt(env?.AI_USAGE_BUDGET_TTL_SECONDS || '', 10) || DEFAULT_AI_USAGE_BUDGET_TTL_SECONDS;
+  const ttl =
+    parseInt(env?.AI_USAGE_BUDGET_TTL_SECONDS || '', 10) || DEFAULT_AI_USAGE_BUDGET_TTL_SECONDS;
   await kv.put(key, String(usedTokens), { expirationTtl: ttl });
   return { allowed: usedTokens < tokenLimit, usedTokens, tokenLimit };
 }
@@ -228,143 +219,13 @@ export async function getFeatureTokenBudget(
   kv: KVNamespace,
   feature: string,
   tokenLimit: number,
-  env?: Env,
+  env?: Env
 ): Promise<FeatureTokenBudgetResult> {
   const counter = getBudgetCounter(env, `feature:${feature}`);
   const usedTokens = counter
     ? (await counter.get(buildBudgetDateKey())).inputTokens
     : Number(await kv.get(buildFeatureBudgetKey(feature))) || 0;
   return { allowed: usedTokens < tokenLimit, usedTokens, tokenLimit };
-}
-
-// =============================================================================
-// User Budget Settings (KV-stored)
-// =============================================================================
-
-/** Build the KV key for a user's budget settings. */
-export function buildBudgetSettingsKey(userId: string): string {
-  return `${AI_BUDGET_SETTINGS_KV_PREFIX}:${userId}`;
-}
-
-/** Get a user's custom budget settings, or null if none set. */
-export async function getUserBudgetSettings(
-  kv: KVNamespace,
-  userId: string
-): Promise<UserAiBudgetSettings | null> {
-  const key = buildBudgetSettingsKey(userId);
-  return kv.get<UserAiBudgetSettings>(key, 'json');
-}
-
-/** Save a user's budget settings. */
-export async function saveUserBudgetSettings(
-  kv: KVNamespace,
-  userId: string,
-  settings: UserAiBudgetSettings
-): Promise<void> {
-  const key = buildBudgetSettingsKey(userId);
-  await kv.put(key, JSON.stringify(settings));
-}
-
-/** Delete a user's custom budget settings (revert to platform defaults). */
-export async function deleteUserBudgetSettings(kv: KVNamespace, userId: string): Promise<void> {
-  const key = buildBudgetSettingsKey(userId);
-  await kv.delete(key);
-}
-
-/** Get a user's admin-managed AI allowance ceiling from KV. */
-export async function getAdminAiAllowance(
-  kv: KVNamespace,
-  userId: string
-): Promise<AdminAiAllowance | null> {
-  return kv.get<AdminAiAllowance>(`${AI_ADMIN_ALLOWANCE_KV_PREFIX}:${userId}`, 'json');
-}
-
-/**
- * Validate and normalize budget update request. Returns validated settings or throws.
- *
- * When `adminAllowance` is provided, the user's limits are capped at the
- * admin-set ceiling instead of the platform maximum.
- */
-export function validateBudgetUpdate(
-  body: unknown,
-  env: Env,
-  adminAllowance?: AdminAiAllowance | null
-): UserAiBudgetSettings {
-  const request = expectJsonRecord(body, 'usage.ai.budget');
-  const {
-    maxDailyTokens: platformMaxDailyTokens,
-    minDailyTokens,
-    maxMonthlyCostCapUsd: platformMaxMonthlyCap,
-    minMonthlyCostCapUsd: minMonthlyCap,
-  } = getAiBudgetLimits(env);
-
-  // Admin ceilings take precedence over platform maximums when set
-  const maxDailyInputTokens = adminAllowance?.maxDailyInputTokens ?? platformMaxDailyTokens;
-  const maxDailyOutputTokens = adminAllowance?.maxDailyOutputTokens ?? platformMaxDailyTokens;
-  const maxMonthlyCap = adminAllowance?.maxMonthlyCostCapUsd ?? platformMaxMonthlyCap;
-
-  const settings: UserAiBudgetSettings = {
-    dailyInputTokenLimit: null,
-    dailyOutputTokenLimit: null,
-    monthlyCostCapUsd: null,
-    alertThresholdPercent: DEFAULT_AI_USAGE_ALERT_THRESHOLD_PERCENT,
-  };
-
-  if (request.dailyInputTokenLimit !== undefined) {
-    if (request.dailyInputTokenLimit !== null) {
-      if (
-        typeof request.dailyInputTokenLimit !== 'number' ||
-        request.dailyInputTokenLimit < minDailyTokens ||
-        request.dailyInputTokenLimit > maxDailyInputTokens
-      ) {
-        throw new Error(
-          `dailyInputTokenLimit must be between ${minDailyTokens} and ${maxDailyInputTokens}`
-        );
-      }
-      settings.dailyInputTokenLimit = Math.floor(request.dailyInputTokenLimit);
-    }
-  }
-
-  if (request.dailyOutputTokenLimit !== undefined) {
-    if (request.dailyOutputTokenLimit !== null) {
-      if (
-        typeof request.dailyOutputTokenLimit !== 'number' ||
-        request.dailyOutputTokenLimit < minDailyTokens ||
-        request.dailyOutputTokenLimit > maxDailyOutputTokens
-      ) {
-        throw new Error(
-          `dailyOutputTokenLimit must be between ${minDailyTokens} and ${maxDailyOutputTokens}`
-        );
-      }
-      settings.dailyOutputTokenLimit = Math.floor(request.dailyOutputTokenLimit);
-    }
-  }
-
-  if (request.monthlyCostCapUsd !== undefined) {
-    if (request.monthlyCostCapUsd !== null) {
-      if (
-        typeof request.monthlyCostCapUsd !== 'number' ||
-        request.monthlyCostCapUsd < minMonthlyCap ||
-        request.monthlyCostCapUsd > maxMonthlyCap
-      ) {
-        throw new Error(`monthlyCostCapUsd must be between ${minMonthlyCap} and ${maxMonthlyCap}`);
-      }
-      settings.monthlyCostCapUsd = Math.round(request.monthlyCostCapUsd * 100) / 100;
-    }
-  }
-
-  if (request.alertThresholdPercent !== undefined) {
-    if (
-      typeof request.alertThresholdPercent !== 'number' ||
-      request.alertThresholdPercent < 1 ||
-      request.alertThresholdPercent > 100
-    ) {
-      throw new Error('alertThresholdPercent must be between 1 and 100');
-    }
-    settings.alertThresholdPercent = Math.floor(request.alertThresholdPercent);
-  }
-
-  return settings;
 }
 
 /**
@@ -566,61 +427,6 @@ function* eachUtcDate(startDate: Date, endDate: Date): Generator<Date> {
     yield new Date(current);
     current.setUTCDate(current.getUTCDate() + 1);
   }
-}
-
-// =============================================================================
-// Monthly Cost Cap Enforcement (KV-cached, written by cron)
-// =============================================================================
-
-/** Build the KV key for a user's cached monthly AI cost. */
-export function buildMonthlyCostCacheKey(userId: string): string {
-  const now = new Date();
-  const monthKey = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
-  return `${AI_MONTHLY_COST_CACHE_KV_PREFIX}:${userId}:${monthKey}`;
-}
-
-/** Read a user's cached monthly AI cost from KV. Returns null if not cached yet. */
-export async function getCachedMonthlyCost(
-  kv: KVNamespace,
-  userId: string
-): Promise<number | null> {
-  const key = buildMonthlyCostCacheKey(userId);
-  const raw = await kv.get(key);
-  if (raw === null) return null;
-  const parsed = parseFloat(raw);
-  return Number.isNaN(parsed) ? null : parsed;
-}
-
-/**
- * Check whether a user is within their monthly cost cap.
- *
- * Reads from KV cache (written by hourly cron). If no cache exists,
- * the check passes (fail-open) — the cron will populate it next run.
- *
- * Returns { allowed, costUsd, capUsd } where capUsd is null if no cap is set.
- */
-export async function checkMonthlyCostCap(
-  kv: KVNamespace,
-  userId: string
-): Promise<{ allowed: boolean; costUsd: number; capUsd: number | null }> {
-  const userSettings = await getUserBudgetSettings(kv, userId);
-  const capUsd = userSettings?.monthlyCostCapUsd ?? null;
-
-  // No cap set — always allowed
-  if (capUsd === null || capUsd <= 0) {
-    return { allowed: true, costUsd: 0, capUsd };
-  }
-
-  const costUsd = await getCachedMonthlyCost(kv, userId);
-
-  // No cache yet — fail-open until the hourly cron populates usage data.
-  // Window is at most 60 minutes after SAM mode activation or cap change.
-  // Acceptable risk: daily token budget (checked separately) still applies.
-  if (costUsd === null) {
-    return { allowed: true, costUsd: 0, capUsd };
-  }
-
-  return { allowed: costUsd < capUsd, costUsd, capUsd };
 }
 
 export type AiUsageGateResult =
