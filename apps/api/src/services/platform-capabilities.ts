@@ -103,6 +103,17 @@ export function hasContainerRuntime(env: Pick<Env, 'CONTAINER_RUNTIME_AVAILABLE'
   return env.CONTAINER_RUNTIME_AVAILABLE?.trim().toLowerCase() !== 'false';
 }
 
+/**
+ * Whether Instant (raw container) workspaces may run: the operator switch is on AND a container
+ * runtime backs the bindings. The one gate for both advertising Instant and choosing it, so the
+ * two cannot diverge on a runtime whose container classes are plain Durable Objects.
+ */
+export function isContainerWorkspaceRuntimeEnabled(
+  env: Pick<Env, 'CF_CONTAINER_ENABLED' | 'SANDBOX_ENABLED' | 'CONTAINER_RUNTIME_AVAILABLE'>
+): boolean {
+  return (env.CF_CONTAINER_ENABLED ?? env.SANDBOX_ENABLED) === 'true' && hasContainerRuntime(env);
+}
+
 /** Guided credential setup runs the Sandbox SDK and two coordination Durable Objects. */
 export function isGuidedCredentialSetupAvailable(
   env: Pick<

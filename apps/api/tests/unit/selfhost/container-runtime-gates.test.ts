@@ -13,7 +13,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import { handleAppError } from '../../../src/middleware/app-error-handler';
-import { isInstantRuntimeAvailable } from '../../../src/services/vm-agent-container';
+import { getSandboxConfig } from '../../../src/services/sandbox';
+import {
+  getVmAgentContainerConfig,
+  isInstantRuntimeAvailable,
+} from '../../../src/services/vm-agent-container';
+import { resolveWorkspaceRuntime } from '../../../src/services/workspace-runtime';
 import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const h = vi.hoisted(() => ({
@@ -193,3 +198,38 @@ describe('isInstantRuntimeAvailable', () => {
     expect(isInstantRuntimeAvailable(instant({ VM_AGENT_CONTAINER: undefined }))).toBe(false);
   });
 });
+
+describe('container runtime declaration gates the start paths, not only the advertisement', () => {
+  const on = { CF_CONTAINER_ENABLED: 'true', SANDBOX_ENABLED: 'true' };
+
+  it('an explicit cf-container request falls back to VM when no container runtime exists', async () => {
+    const decision = await resolveWorkspaceRuntime(
+      {} as never,
+      { ...on, CONTAINER_RUNTIME_AVAILABLE: 'false' } as Env,
+      { userId: 'u1', explicitRuntime: 'cf-container' }
+    );
+    expect(decision).toEqual({ runtime: 'vm', reason: 'sandbox-disabled' });
+  });
+
+  it('keeps the Cloudflare decision when the declaration is unset', async () => {
+    // A query builder that answers every chain with "no rows" (no credentials stored).
+    const noRows: unknown = new Proxy(() => noRows, {
+      get: (_target, property) =>
+        property === 'then' ? (resolve: (rows: unknown[]) => void) => resolve([]) : noRows,
+      apply: () => noRows,
+    });
+    const decision = await resolveWorkspaceRuntime(noRows as never, on as Env, {
+      userId: 'u1',
+      explicitRuntime: 'cf-container',
+    });
+    expect(decision.runtime).toBe('cf-container');
+  });
+
+  it('turns the container config and the legacy sandbox off, and only when declared absent', () => {
+    expect(getVmAgentContainerConfig({ ...on, CONTAINER_RUNTIME_AVAILABLE: 'false' } as Env).enabled).toBe(false);
+    expect(getVmAgentContainerConfig(on as Env).enabled).toBe(true);
+    expect(getSandboxConfig({ ...on, CONTAINER_RUNTIME_AVAILABLE: 'false' } as Env).enabled).toBe(false);
+    expect(getSandboxConfig(on as Env).enabled).toBe(true);
+  });
+});
+
