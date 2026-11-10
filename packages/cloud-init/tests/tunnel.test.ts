@@ -21,8 +21,10 @@ import {
 import { CLOUDFLARED_RELEASES, DEFAULT_CLOUDFLARED_VERSION } from '../src/tunnel';
 import type { CloudInitVariables } from '../src/variables';
 
-const TUNNEL_TOKEN =
-  'eyJhIjoiYWNjb3VudC10YWciLCJ0IjoiNmY1YzFlMmEtdHVubmVsIiwicyI6InNlY3JldC1zYWx0In0=';
+// Explicit synthetic identities preserve connector-token format without a secret-like literal.
+const TUNNEL_TOKEN = Buffer.from(
+  JSON.stringify({ a: 'fixture-account', t: 'fixture-tunnel', s: 'fixture-secret' })
+).toString('base64');
 const CALLBACK_TOKEN = 'CALLBACK-CANARY';
 const AMD64_SHA = CLOUDFLARED_RELEASES[DEFAULT_CLOUDFLARED_VERSION]!.amd64;
 
@@ -549,7 +551,9 @@ chown -R ${process.getuid?.() ?? 0} ${d}`;
     for (const rule of TUNNEL_CHAIN_RULES) expect(v4).toContain(rule);
     const v6 = listed('v6');
     for (const rule of TUNNEL_CHAIN_RULES) expect(v6).toContain(rule);
-  });
+    // This integration check starts real shell/netfilter processes 25 times. Its
+    // subprocess has a 60s deadline; Vitest must allow it to finish under CI load.
+  }, 75_000);
 });
 
 /**
