@@ -153,6 +153,17 @@ export function buildVmAgentBinaries(
   );
   if (archive.status !== 0) throw childFailure('git archive packages/vm-agent', archive, (t) => t);
   const src = join(workDir, 'packages/vm-agent');
+  try {
+    runVmAgentBuild(src, cacheDir, { release, buildDate });
+  } catch (error) {
+    rmSync(workDir, { recursive: true, force: true });
+    throw error;
+  }
+  return join(src, 'bin');
+}
+
+// GOFLAGS is not passed: the Makefile defines its own, and make exports it to `go`.
+function runVmAgentBuild(src: string, cacheDir: string, { release, buildDate }: VmAgentRelease) {
   const uid = process.getuid?.() ?? 0;
   const gid = process.getgid?.() ?? 0;
   const common = [
@@ -175,8 +186,6 @@ export function buildVmAgentBinaries(
     '-e',
     'GOMODCACHE=/cache/mod',
     '-e',
-    'GOFLAGS=-mod=readonly',
-    '-e',
     'GOTOOLCHAIN=local',
     '-w',
     '/src',
@@ -197,7 +206,6 @@ export function buildVmAgentBinaries(
     ],
     'vm-agent build'
   );
-  return join(src, 'bin');
 }
 
 export function removeVmAgentBuild(binDir: string): void {
