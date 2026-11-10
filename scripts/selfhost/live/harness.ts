@@ -18,6 +18,9 @@ import {
 export const REPO_ROOT = resolve(import.meta.dirname, '../../..');
 /** Gitignored scratch directory (see .tmp/README.md). */
 export const LIVE_TMP = join(REPO_ROOT, '.tmp', 'selfhost-live');
+/** System tools run by absolute path, never resolved through a caller-controlled PATH. */
+const TAR = '/usr/bin/tar';
+const OPENSSL = '/usr/bin/openssl';
 
 /** A free loopback TCP port (the kernel picks it; closed before returning). */
 export async function freePort(): Promise<number> {
@@ -50,7 +53,7 @@ export async function frpBinaries(): Promise<{ frpc: string; frps: string }> {
   if (digest !== release[arch]) throw new Error(`frp ${name} checksum mismatch: ${digest}`);
   const archive = join(dir, `${name}.tar.gz`);
   writeFileSync(archive, tarball);
-  execFileSync('tar', ['-xzf', archive, '-C', dir]);
+  execFileSync(TAR, ['-xzf', archive, '-C', dir]);
   return bin;
 }
 
@@ -108,7 +111,7 @@ export function makeCertificate(
   const csr = join(dir, 'leaf.csr');
   const cert = join(dir, 'leaf.pem');
   const ext = join(dir, 'leaf.ext');
-  const run = (...args: string[]) => execFileSync('openssl', args, { stdio: 'pipe' });
+  const run = (...args: string[]) => execFileSync(OPENSSL, args, { stdio: 'pipe' });
   run(
     'req',
     '-x509',

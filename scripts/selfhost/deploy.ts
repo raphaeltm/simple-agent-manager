@@ -191,6 +191,25 @@ function redact(config: CelldWranglerConfig, secretNames: Set<string>): CelldWra
   return { ...config, vars };
 }
 
+/**
+ * Write gateway.env (frps and Caddy read it via env_file) when it changed. Outside `--init` a
+ * change stops the deploy before the Worker is updated: frps reads the file only when it starts,
+ * so the Worker must not assume a heartbeat timeout or range the running frps is not enforcing.
+ */
+function syncGatewayEnv(path: string, content: string, init: boolean): void {
+  const existing = existsSync(path) ? readFileSync(path, 'utf8') : null;
+  const action = gatewayEnvAction(existing, content, init);
+  if (action === 'unchanged') return;
+  writePrivateFile(path, content);
+  log(`wrote ${path}; (re)start the stack: docker compose up -d`);
+  if (action === 'write-then-restart') {
+    throw new Error(
+      `${path} changed. Restart frps and Caddy so they run it (docker compose up -d), ` +
+        'then run pnpm selfhost:deploy again; the Worker is not updated before they agree.'
+    );
+  }
+}
+
 async function main(): Promise<void> {
   const { values } = parseArgs({
     options: {
@@ -225,22 +244,11 @@ async function main(): Promise<void> {
   // The port range and heartbeat timeout go to the Worker from the same resolved values
   // (below). Resolution fails the deploy on a range overlapping a box listener or too large.
   const tunnelSettings = resolveTunnelSettings(box);
-  const gatewayEnv = renderGatewayEnv(keys.REVERSE_TUNNEL_GATEWAY_SECRET, tunnelSettings);
-  const gatewayEnvPath = join(stateDir, 'gateway.env');
-  const existingGatewayEnv = existsSync(gatewayEnvPath)
-    ? readFileSync(gatewayEnvPath, 'utf8')
-    : null;
-  const gatewayAction = gatewayEnvAction(existingGatewayEnv, gatewayEnv, values.init ?? false);
-  if (gatewayAction !== 'unchanged') {
-    writePrivateFile(gatewayEnvPath, gatewayEnv);
-    log(`wrote ${gatewayEnvPath}; (re)start the stack: docker compose up -d`);
-  }
-  if (gatewayAction === 'write-then-restart') {
-    throw new Error(
-      `${gatewayEnvPath} changed. Restart frps and Caddy so they run it (docker compose up -d), ` +
-        'then run pnpm selfhost:deploy again; the Worker is not updated before they agree.'
-    );
-  }
+  syncGatewayEnv(
+    join(stateDir, 'gateway.env'),
+    renderGatewayEnv(keys.REVERSE_TUNNEL_GATEWAY_SECRET, tunnelSettings),
+    values.init ?? false
+  );
   if (values.init) return;
   const operatorSecrets = readSecretsFile(secretsPath);
   for (const name of ['BASE_DOMAIN', 'R2_BUCKET_NAME']) {

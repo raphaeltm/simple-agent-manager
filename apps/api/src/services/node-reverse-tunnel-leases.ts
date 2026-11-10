@@ -255,13 +255,17 @@ async function noFreePortError(
     reuseMinAgeSeconds,
     reusableAt,
   });
+  if (code === 'port_range_exhausted') {
+    return new ReverseTunnelLeaseError(
+      code,
+      `No free reverse-tunnel port in ${range.start}-${range.end}: every port holds an active lease`
+    );
+  }
+  const firstReusable = reusableAt ? `; the first becomes reusable at ${reusableAt}` : '';
   return new ReverseTunnelLeaseError(
     code,
-    code === 'port_range_cooling_down'
-      ? `No reverse-tunnel port in ${range.start}-${range.end} is reusable yet: ${coolingPorts} ` +
-          `free port(s) were released less than ${reuseMinAgeSeconds}s ago` +
-          (reusableAt ? `; the first becomes reusable at ${reusableAt}` : '')
-      : `No free reverse-tunnel port in ${range.start}-${range.end}: every port holds an active lease`
+    `No reverse-tunnel port in ${range.start}-${range.end} is reusable yet: ${coolingPorts} ` +
+      `free port(s) were released less than ${reuseMinAgeSeconds}s ago${firstReusable}`
   );
 }
 
