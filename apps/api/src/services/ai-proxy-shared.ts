@@ -205,6 +205,12 @@ export async function readSafeGatewayErrorDiagnostic(
 
 /** Bound on the sanitized reason logged for a failed third-party model call. */
 export const UPSTREAM_ERROR_REASON_MAX_LENGTH = 256;
+/**
+ * Bytes of a third-party error body read to find its `code`/`type` (never logged). An
+ * OpenAI-style body puts a long `message` first, so a window as small as the reason would cut
+ * the JSON before the fields that matter and log nothing.
+ */
+export const UPSTREAM_ERROR_BODY_PARSE_MAX_BYTES = 4096;
 
 /**
  * Log fields for a failed model response, consuming its body. A Cloudflare or first-party
@@ -221,9 +227,9 @@ export async function upstreamErrorLogFields(
   }
   const reason = await readSafeGatewayErrorDiagnostic(
     response,
-    UPSTREAM_ERROR_REASON_MAX_LENGTH
+    UPSTREAM_ERROR_BODY_PARSE_MAX_BYTES
   ).catch(() => undefined);
-  return reason ? { reason } : {};
+  return reason ? { reason: reason.slice(0, UPSTREAM_ERROR_REASON_MAX_LENGTH) } : {};
 }
 
 export async function fetchWorkersAIChatCompletion(

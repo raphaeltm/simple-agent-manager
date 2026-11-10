@@ -123,6 +123,32 @@ describe('SAM agent loop model error logging', () => {
   });
 });
 
+describe('a long, message-first error body', () => {
+  it('still yields the code and type as the reason, never the message', async () => {
+    await configureEndpoint();
+    // OpenAI-style: a long message first, the classifying fields last, well past 256 bytes.
+    const body = JSON.stringify({
+      error: {
+        message: `my private prompt text ${'x'.repeat(600)}`,
+        type: 'invalid_request_error',
+        code: 'model_not_found',
+      },
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(body, { status: 404 }))
+    );
+    await runAgentTurn();
+
+    const record = loggedRecord('sam.llm_error');
+    expect(record.status).toBe(404);
+    expect(record.reason).toContain('code=model_not_found');
+    expect(record.reason).toContain('type=invalid_request_error');
+    expect(String(record.reason).length).toBeLessThanOrEqual(256);
+    expect(allErrorLogText()).not.toContain('my private prompt text');
+  });
+});
+
 describe('/ai/v1 Workers AI route error logging', () => {
   it('logs status and a sanitized reason, never the endpoint body, for a configured endpoint', async () => {
     await configureEndpoint();

@@ -136,14 +136,16 @@ an AI Gateway counts only when both the gateway id and the account id are set
 | Unified Billing            | Unavailable. `resolveUnifiedBillingToken()` (`services/ai-billing.ts`) returns nothing, so `auto` billing uses the Claude Code / Codex platform credentials, and the admin cannot select `unified` (`PATCH /api/admin/ai-proxy/config` answers 400). Before, the Cloudflare token was sent to OpenAI or Anthropic as `cf-aig-authorization` and those calls failed.                                                                                                                                                                     |
 | OpenAI and Anthropic calls | Go straight to `api.openai.com` / `api.anthropic.com` with the platform key, without `cf-aig-metadata` (the user and workspace ids are for the gateway only; `aiGatewayOnlyHeaders()`).                                                                                                                                                                                                                                                                                                                                                 |
 | Workers AI calls           | Use the account's Workers AI REST API, as before.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| Monthly cost cap           | **Unavailable.** Spend is priced only from AI Gateway logs (`runMonthlyCostAggregation()`, `services/ai-monthly-cost-cron.ts`, which skips with `monthlyCostSkipReason: ai_gateway_unavailable`). `PUT /api/usage/ai/budget` refuses a monthly cap (400), `GET /api/usage/ai/budget` returns `monthlyCostCapAvailable: false`, a cap saved earlier is not enforced (`checkMonthlyCostCap()` reports `enforced: false`), and the settings page, onboarding and the admin AI proxy page say so. Daily token budgets still limit `/ai/v1`. |
+| Monthly cost cap           | **Unavailable.** Spend is priced only from AI Gateway logs, read with `CF_API_TOKEN` (`runMonthlyCostAggregation()`, `services/ai-monthly-cost-cron.ts`, which skips with `monthlyCostSkipReason: ai_gateway_unavailable`), so the cap also needs the token (`isMonthlyCostCapAvailable()`). `PUT /api/usage/ai/budget` refuses a monthly cap (400), `GET /api/usage/ai/budget` returns `monthlyCostCapAvailable: false`, a cap saved earlier is not enforced (`checkMonthlyCostCap()` reports `enforced: false`), and the settings page, onboarding and the admin AI proxy page say so. Daily token budgets still limit `/ai/v1`. |
 | AI usage pages             | `/api/usage/ai`, the budget page and admin costs show SAM's own token counts and no gateway cost.                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 
 With an admin-configured OpenAI-compatible endpoint (Admin → Settings → AI models), SAM asks the
 endpoint for its usage on streamed calls (`stream_options.include_usage`) and, when a response
 still reports none, charges an estimate from the response's own output to the daily token budget
 (`estimateTokensFromText()`, `services/ai-token-usage-accounting.ts`). Failed calls to that
-endpoint log the HTTP status and a short sanitized reason, never the response body.
+endpoint log the HTTP status and a short sanitized reason, never the response body. Calls that
+endpoint serves never reach AI Gateway logs, so on an installation with both, a monthly cap counts
+only the spend that went through the gateway.
 
 ### Status codes for services this installation does not have
 
@@ -167,7 +169,8 @@ Rate limits, stored diagnostics, the node heartbeat IP backfill and the forwarde
 VM hop all take the client address from `CF-Connecting-IP` only (`clientIpFromHeaders()`,
 `apps/api/src/lib/client-ip.ts`). Cloudflare's edge always sets it. A proxy in front of a
 non-Cloudflare runtime must set it from the TCP peer and drop any value the client sent (the
-self-host Caddy configuration does). `X-Forwarded-For` is never read. A request with a missing or
+self-host Caddy configuration does). `X-Forwarded-For` is never read, and BetterAuth's session IPs
+and sign-in rate limits use the same header (`advanced.ipAddress` in `apps/api/src/auth.ts`). A request with a missing or
 malformed `CF-Connecting-IP` shares one rate-limit bucket with every other such request, so a
 misconfigured proxy shows up as rate limiting rather than as unlimited access.
 

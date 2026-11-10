@@ -128,7 +128,7 @@ describe('buildBudgetKey', () => {
 });
 
 /** A Cloudflare deployment's gateway, which the monthly cap is priced from. */
-const GATEWAY_ENV = { AI_GATEWAY_ID: 'sam', CF_ACCOUNT_ID: 'account-1' };
+const GATEWAY_ENV = { AI_GATEWAY_ID: 'sam', CF_ACCOUNT_ID: 'account-1', CF_API_TOKEN: 'token-1' };
 
 describe('monthly cost cap', () => {
   it('builds the current-month cache key', () => {

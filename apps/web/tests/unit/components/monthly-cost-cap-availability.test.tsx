@@ -12,15 +12,22 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const mockFetchUserAiBudget = vi.fn();
 const mockUpdateUserAiBudget = vi.fn();
+const mockFetchAIProxyConfig = vi.fn();
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   fetchUserAiBudget: (...args: unknown[]) => mockFetchUserAiBudget(...args),
   updateUserAiBudget: (...args: unknown[]) => mockUpdateUserAiBudget(...args),
+  fetchAIProxyConfig: (...args: unknown[]) => mockFetchAIProxyConfig(...args),
+}));
+vi.mock('../../../src/components/AuthProvider', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/components/AuthProvider')>()),
+  useAuth: () => ({ user: { id: 'admin-1' }, isSuperadmin: true, isLoading: false }),
 }));
 
 import { AiBudgetSettingsSection } from '../../../src/components/ai-usage/AiBudgetSettingsSection';
 import { AgentStep } from '../../../src/components/onboarding/choose-path/AgentStep';
 import { INITIAL_FORM } from '../../../src/components/onboarding/choose-path/step-actions';
+import { AdminAIProxy } from '../../../src/pages/AdminAIProxy';
 
 function budget(overrides: Partial<UserAiBudgetResponse> = {}): UserAiBudgetResponse {
   return {
@@ -102,15 +109,20 @@ describe('onboarding SAM-managed AI limits', () => {
     );
   }
 
-  function renderStep(): void {
+  function renderStep(monthlyCostCapUsd = '', setForm = vi.fn()): void {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const wrapper = ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
     );
     render(
       <AgentStep
-        form={{ ...INITIAL_FORM, selectedAgent: 'claude-code', selectedAuthMethod: 'sam' }}
-        setForm={vi.fn()}
+        form={{
+          ...INITIAL_FORM,
+          selectedAgent: 'claude-code',
+          selectedAuthMethod: 'sam',
+          monthlyCostCapUsd,
+        }}
+        setForm={setForm}
         samAvailable
         saving={false}
         onSave={vi.fn()}
@@ -132,5 +144,70 @@ describe('onboarding SAM-managed AI limits', () => {
     renderStep();
     await waitFor(() => expect(screen.queryByLabelText('Monthly cap (USD)')).toBeNull());
     expect(screen.getByLabelText('Daily input tokens')).toBeTruthy();
+  });
+
+  it('clears a cap typed before the installation answered that it cannot enforce one', async () => {
+    serveCapabilities(false);
+    const setForm = vi.fn();
+    renderStep('50', setForm);
+    await waitFor(() => expect(setForm).toHaveBeenCalled());
+    const update = setForm.mock.calls.at(-1)?.[0] as (
+      prev: typeof INITIAL_FORM
+    ) => typeof INITIAL_FORM;
+    expect(update({ ...INITIAL_FORM, monthlyCostCapUsd: '50' }).monthlyCostCapUsd).toBe('');
+  });
+
+  it('keeps a typed cap where one can be enforced (control)', async () => {
+    serveCapabilities(true);
+    const setForm = vi.fn();
+    renderStep('50', setForm);
+    await waitFor(() => expect(screen.getByLabelText('Monthly cap (USD)')).toBeTruthy());
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(setForm).not.toHaveBeenCalled();
+  });
+});
+
+describe('admin AI proxy page', () => {
+  function renderPage(monthlyCostCapAvailable: boolean) {
+    mockFetchAIProxyConfig.mockResolvedValue({
+      defaultModel: '@cf/meta/llama-4-scout-17b-16e-instruct',
+      source: 'default',
+      updatedAt: null,
+      hasAnthropicCredential: false,
+      hasOpenAICredential: false,
+      hasUnifiedBilling: false,
+      billingMode: 'auto',
+      monthlyCostCapAvailable,
+      models: [
+        {
+          id: '@cf/meta/llama-4-scout-17b-16e-instruct',
+          label: 'Llama 4 Scout 17B',
+          provider: 'workers-ai',
+          tier: 'low-cost',
+          costPer1kInputTokens: 0.00027,
+          costPer1kOutputTokens: 0.00085,
+          available: true,
+        },
+      ],
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <AdminAIProxy />
+      </QueryClientProvider>
+    );
+  }
+
+  it('tells the admin when monthly caps are unavailable', async () => {
+    renderPage(false);
+    const notice = await screen.findByTestId('admin-monthly-cap-unavailable');
+    expect(notice.textContent).toContain('Monthly cost caps are unavailable.');
+    expect(notice.textContent).toContain('daily token budgets still limit AI proxy usage');
+  });
+
+  it('shows no notice with AI Gateway, while the page still renders (control)', async () => {
+    renderPage(true);
+    expect(await screen.findByText('Billing Mode')).toBeTruthy();
+    expect(screen.queryByTestId('admin-monthly-cap-unavailable')).toBeNull();
   });
 });

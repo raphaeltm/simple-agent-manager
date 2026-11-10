@@ -94,15 +94,20 @@ export function resolveAiGatewayId(env: Pick<Env, 'AI_GATEWAY_ID' | 'CF_ACCOUNT_
 
 /**
  * Whether a monthly AI dollar cap can be enforced here. The month's spend comes only from AI
- * Gateway logs (`runMonthlyCostAggregation`), which price every call; SAM's own records carry no
- * price for an operator's model on their own endpoint. Without an addressable gateway the cap is
- * reported as unavailable everywhere (budget API, settings UI, admin AI proxy page) rather than
- * accepted and silently never enforced. Daily token budgets apply either way.
+ * Gateway logs, read by `runMonthlyCostAggregation` through the account API (gateway id, account
+ * id and API token all required); SAM's own records carry no price for an operator's model on
+ * their own endpoint. Without that, the cap is reported as unavailable everywhere (budget API,
+ * settings UI, admin AI proxy page) rather than accepted and silently never enforced. Daily token
+ * budgets apply either way.
+ *
+ * Calls served by an admin-configured OpenAI-compatible endpoint never reach gateway logs, so on
+ * an installation with both, the cap counts only gateway-routed spend (documented in
+ * reference/configuration.md). This predicate reads env only and cannot see that D1 setting.
  */
 export function isMonthlyCostCapAvailable(
-  env: Pick<Env, 'AI_GATEWAY_ID' | 'CF_ACCOUNT_ID'>
+  env: Pick<Env, 'AI_GATEWAY_ID' | 'CF_ACCOUNT_ID' | 'CF_API_TOKEN'>
 ): boolean {
-  return resolveAiGatewayId(env) !== null;
+  return resolveAiGatewayId(env) !== null && hasCloudflareAccountApi(env);
 }
 
 /**

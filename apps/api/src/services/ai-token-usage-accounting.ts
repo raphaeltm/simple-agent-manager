@@ -42,8 +42,11 @@ export function estimateTokensFromText(value: unknown): number {
   return estimateTokensFromByteLength(utf8ByteLength(text));
 }
 
+/** One encoder for every delta (the custom-endpoint stream path counts each one). */
+const UTF8 = new TextEncoder();
+
 function utf8ByteLength(text: string): number {
-  return new TextEncoder().encode(text).byteLength;
+  return UTF8.encode(text).byteLength;
 }
 
 export interface UpstreamTokenUsageAccountingOptions extends TokenUsageAccountingOptions {

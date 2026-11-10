@@ -39,13 +39,15 @@ import { createMemoryKv } from '../../helpers/sqlite-d1';
 
 const USER = 'cap-user';
 
-type Config = 'cloudflare' | 'selfHosted' | 'partialCloudflare';
+type Config = 'cloudflare' | 'selfHosted' | 'partialCloudflare' | 'gatewayWithoutToken';
 const CONFIG_VARS: Record<Config, Partial<Env>> = {
   cloudflare: { AI_GATEWAY_ID: 'sam', CF_ACCOUNT_ID: 'account-1', CF_API_TOKEN: 'token-1' },
   selfHosted: { AI_GATEWAY_ID: 'sam' },
   partialCloudflare: { AI_GATEWAY_ID: '', CF_ACCOUNT_ID: 'account-1', CF_API_TOKEN: 'token-1' },
+  // The gateway is addressable but its logs cannot be read (the cost cron needs the token).
+  gatewayWithoutToken: { AI_GATEWAY_ID: 'sam', CF_ACCOUNT_ID: 'account-1' },
 };
-const WITHOUT_GATEWAY: Config[] = ['selfHosted', 'partialCloudflare'];
+const WITHOUT_GATEWAY: Config[] = ['selfHosted', 'partialCloudflare', 'gatewayWithoutToken'];
 
 let fetchMock: ReturnType<typeof vi.fn>;
 
@@ -164,7 +166,8 @@ describe('GET /api/usage/ai/budget monthly cap availability', () => {
       expect(body.settings.monthlyCostCapUsd).toBe(5);
       expect(body.utilization.monthlyCostPercent).toBeNull();
       expect(body.exceeded).toBe(false);
-      expect(fetchMock).not.toHaveBeenCalled();
+      // Only an addressable gateway is read for the month's cost (it fails without a token).
+      if (config !== 'gatewayWithoutToken') expect(fetchMock).not.toHaveBeenCalled();
     }
   );
 });
@@ -204,6 +207,7 @@ describe('where an admin and the web client learn it', () => {
     ['cloudflare', true],
     ['selfHosted', false],
     ['partialCloudflare', false],
+    ['gatewayWithoutToken', false],
   ] as const)(
     '%s: capabilities and admin AI proxy config say monthlyCostCap=%s',
     async (config, available) => {

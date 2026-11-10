@@ -259,6 +259,46 @@ describe('/ai/v1 through an OpenAI-compatible endpoint', () => {
     expect(input).toBeGreaterThan(0);
     expect(sentBody()).not.toHaveProperty('stream_options');
   });
+  it('estimates a tool-call-only and reasoning turn from what the endpoint generated', async () => {
+    configureEndpoint();
+    const charged = nextIncrement();
+    const toolCalls = [
+      {
+        index: 0,
+        id: 'call_1',
+        type: 'function',
+        function: { name: 'read_file', arguments: '{"path":"a.ts"}' },
+      },
+    ];
+    mockFetch.mockResolvedValueOnce(
+      sse([
+        JSON.stringify({ choices: [{ index: 0, delta: { reasoning_content: 'thinking hard' } }] }),
+        JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: toolCalls } }] }),
+        '[DONE]',
+      ])
+    );
+
+    const res = await postChat({ stream: true });
+    await res.text();
+
+    const [, output] = await charged;
+    // 13 bytes of reasoning plus the serialized tool calls, at bytes/3 rounded up.
+    const bytes = 'thinking hard'.length + JSON.stringify(toolCalls).length;
+    expect(output).toBe(Math.ceil(bytes / 3));
+    expect(output).toBeGreaterThan(20);
+  });
+
+  it('pins the estimator: 32 bytes of output is 11 tokens', async () => {
+    configureEndpoint();
+    const charged = nextIncrement();
+    expect(OUTPUT).toHaveLength(32);
+    mockFetch.mockResolvedValueOnce(streamWithoutUsage());
+
+    const res = await postChat({ stream: true });
+    await res.text();
+
+    expect((await charged)[1]).toBe(11);
+  });
 });
 
 describe('/ai/v1 through the Cloudflare AI Gateway (unchanged)', () => {
@@ -280,6 +320,27 @@ describe('/ai/v1 through the Cloudflare AI Gateway (unchanged)', () => {
     );
     expect(sentBody()).not.toHaveProperty('stream_options');
     expect(await charged).toEqual([3, 0]);
+    expect(mockLogWarn).not.toHaveBeenCalledWith('ai_proxy.usage_estimated', expect.anything());
+  });
+
+  it('charges nothing for a non-streamed response without usage, and drops the request estimate', async () => {
+    mockFetch.mockResolvedValueOnce(
+      Response.json({
+        id: 'chatcmpl-1',
+        choices: [{ index: 0, message: { role: 'assistant', content: OUTPUT } }],
+      })
+    );
+
+    const res = await postChat({});
+    await res.text();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(sentUrl()).toBe(
+      'https://gateway.ai.cloudflare.com/v1/acct/sam/workers-ai/v1/chat/completions'
+    );
+    // Liveness: the response reached the client.
+    expect(res.status).toBe(200);
+    expect(mockIncrementTokenUsage).not.toHaveBeenCalled();
     expect(mockLogWarn).not.toHaveBeenCalledWith('ai_proxy.usage_estimated', expect.anything());
   });
 });

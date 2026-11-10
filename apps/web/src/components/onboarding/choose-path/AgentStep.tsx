@@ -2,7 +2,7 @@ import type { AgentType } from '@simple-agent-manager/shared';
 import { AGENT_CATALOG, getAgentDefinition } from '@simple-agent-manager/shared';
 import { Button, SegmentedControl } from '@simple-agent-manager/ui';
 import { ArrowRight, Check } from 'lucide-react';
-import type { Dispatch, SetStateAction } from 'react';
+import { type Dispatch, type SetStateAction, useEffect } from 'react';
 
 import { usePlatformCapabilities } from '../../../hooks/usePlatformCapabilities';
 import { FieldLabel, WELL_INPUT_CLASS } from './OnboardingParts';
@@ -167,6 +167,14 @@ function SamBudget({
 }) {
   // No monthly cap field where the installation cannot enforce one (no Cloudflare AI Gateway).
   const { monthlyCostCap } = usePlatformCapabilities();
+  // A cap typed while the answer was still assumed must not be sent once the field is gone:
+  // the budget API refuses it, and the user could no longer see what was refused.
+  const typedCap = form.monthlyCostCapUsd;
+  useEffect(() => {
+    if (!monthlyCostCap && typedCap !== '') {
+      setForm((prev) => ({ ...prev, monthlyCostCapUsd: '' }));
+    }
+  }, [monthlyCostCap, typedCap, setForm]);
   const fields = [
     { id: 'onboarding-daily-input', key: 'dailyInputTokenLimit', label: 'Daily input tokens' },
     { id: 'onboarding-daily-output', key: 'dailyOutputTokenLimit', label: 'Daily output tokens' },

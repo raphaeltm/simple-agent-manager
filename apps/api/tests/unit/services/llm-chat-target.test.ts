@@ -455,6 +455,9 @@ describe('SAM and project agents through the real loop', () => {
     expect((init.headers as Record<string, string>)['cf-aig-metadata']).toContain('sam-session');
     // The Cloudflare request is unchanged: no usage request added to it.
     expect(JSON.parse(String(init.body))).not.toHaveProperty('stream_options');
+    // ...and a stream without a usage chunk is still charged nothing (reported-only accounting).
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(await env.KV.get(buildBudgetKey('user-1'))).toBeNull();
   });
 
   it('tell the user no model is configured, without an error log, when nothing can serve the turn', async () => {

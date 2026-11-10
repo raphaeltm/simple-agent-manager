@@ -121,6 +121,14 @@ async function holdModel(
   return { release, heldUrls };
 }
 
+/** Wait until the runner's model request is actually held (the race must land inside it). */
+async function waitForHeldModelCall(heldUrls: string[]): Promise<void> {
+  for (let attempt = 0; attempt < 200 && heldUrls.length === 0; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  if (heldUrls.length === 0) throw new Error('The model request was never made');
+}
+
 afterEach(async () => {
   vi.restoreAllMocks();
   if (lentGatewayEnv) {
@@ -239,6 +247,7 @@ describe('DiagnosisRunner DO durability and fault injection', () => {
 
       const alarm = runDurableObjectAlarm(runner);
       await waitForModelAwait(runId);
+      await waitForHeldModelCall(held.heldUrls);
       await runner.cancel(runId);
       expect(
         await env.DATABASE.prepare(
@@ -288,6 +297,7 @@ describe('DiagnosisRunner DO durability and fault injection', () => {
 
       const alarm = runDurableObjectAlarm(runner);
       await waitForModelAwait(runId);
+      await waitForHeldModelCall(held.heldUrls);
       await env.DATABASE.prepare(
         "UPDATE debug_diagnosis_runs SET deadline_at='2020-01-01T00:00:00.000Z',heartbeat_at='2020-01-01T00:00:00.000Z' WHERE id=?"
       )

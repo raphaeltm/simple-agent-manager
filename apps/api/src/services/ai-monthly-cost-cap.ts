@@ -53,7 +53,7 @@ export interface MonthlyCostCapCheck {
 export async function checkMonthlyCostCap(
   kv: KVNamespace,
   userId: string,
-  env: Pick<Env, 'AI_GATEWAY_ID' | 'CF_ACCOUNT_ID'>
+  env: Pick<Env, 'AI_GATEWAY_ID' | 'CF_ACCOUNT_ID' | 'CF_API_TOKEN'>
 ): Promise<MonthlyCostCapCheck> {
   const userSettings = await getUserBudgetSettings(kv, userId);
   const capUsd = userSettings?.monthlyCostCapUsd ?? null;

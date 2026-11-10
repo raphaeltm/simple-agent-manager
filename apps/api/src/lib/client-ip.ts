@@ -16,10 +16,13 @@
  *   and a shared bucket fails closed for exactly that traffic, where a client-chosen key (another
  *   header, the User-Agent) would let it mint a fresh bucket per request.
  */
+/** The one trusted client-address header (BetterAuth is configured with it too, `auth.ts`). */
+export const CLIENT_IP_HEADER = 'cf-connecting-ip';
+
 export function clientIpFromHeaders(
   header: (name: string) => string | null | undefined
 ): string | null {
-  const connecting = header('CF-Connecting-IP')?.trim();
+  const connecting = header(CLIENT_IP_HEADER)?.trim();
   return connecting && isIpLiteral(connecting) ? connecting : null;
 }
 

@@ -85,6 +85,33 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+/** PATCH the billing mode through the real admin route. */
+function billingPatcher(env: Env) {
+  const app = new Hono<{ Bindings: Env }>();
+  app.onError((err, c: Context) => handleAppError(err as Error, c));
+  app.route('/api/admin/ai-proxy', adminAIProxyRoutes);
+  return (billingMode: string) =>
+    app.request(
+      '/api/admin/ai-proxy/config',
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ billingMode }),
+      },
+      env
+    );
+}
+
+const ANTHROPIC_OK = {
+  id: 'msg_1',
+  type: 'message',
+  role: 'assistant',
+  content: [{ type: 'text', text: 'hello' }],
+  model: 'claude-sonnet-5',
+  stop_reason: 'end_turn',
+  usage: { input_tokens: 3, output_tokens: 2 },
+};
+
 describe('capabilities', () => {
   it('cloudflare: AI Gateway and the monthly cap are available', () => {
     expect(resolvePlatformCapabilities(makeEnv('cloudflare'))).toMatchObject({
@@ -133,25 +160,19 @@ describe('billing mode and upstream auth', () => {
   });
 
   it.each(PARTIAL)('%s: the admin cannot switch billing to unified (400)', async (shape) => {
-    const env = makeEnv(shape, { CF_AIG_TOKEN: 'cf-aig-token' } as Partial<Env>);
-    const app = new Hono<{ Bindings: Env }>();
-    app.onError((err, c: Context) => handleAppError(err as Error, c));
-    app.route('/api/admin/ai-proxy', adminAIProxyRoutes);
-    const patch = (billingMode: string) =>
-      app.request(
-        '/api/admin/ai-proxy/config',
-        {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ billingMode }),
-        },
-        env
-      );
+    const patch = billingPatcher(makeEnv(shape, { CF_AIG_TOKEN: 'cf-aig-token' } as Partial<Env>));
     const refused = await patch('unified');
     expect(refused.status).toBe(400);
     expect(await refused.json()).toMatchObject({ message: expect.stringContaining('AI Gateway') });
     // Liveness: the other modes still save.
     expect((await patch('platform-key')).status).toBe(200);
+  });
+
+  it('cloudflare: the admin can switch billing to unified (control)', async () => {
+    const patch = billingPatcher(
+      makeEnv('cloudflare', { CF_AIG_TOKEN: 'cf-aig-token' } as Partial<Env>)
+    );
+    expect((await patch('unified')).status).toBe(200);
   });
 });
 
@@ -177,18 +198,25 @@ describe('provider forwarding', () => {
     }
   );
 
-  it.each(PARTIAL)('%s: Anthropic goes straight to Anthropic without SAM ids', async (shape) => {
-    fetchMock.mockResolvedValueOnce(
-      Response.json({
-        id: 'msg_1',
-        type: 'message',
-        role: 'assistant',
-        content: [{ type: 'text', text: 'hello' }],
-        model: 'claude-sonnet-5',
-        stop_reason: 'end_turn',
-        usage: { input_tokens: 3, output_tokens: 2 },
-      })
+  it('cloudflare: Anthropic goes through the gateway with attribution (control)', async () => {
+    fetchMock.mockResolvedValueOnce(Response.json(ANTHROPIC_OK));
+    await forwardToAnthropic(makeEnv('cloudflare'), CHAT, 'claude-sonnet-5', AIG_METADATA, {
+      headers: { 'x-api-key': 'sk-platform-key' },
+    } as Parameters<typeof forwardToAnthropic>[4]);
+    const { url, headers } = sent();
+    expect(url).toBe('https://gateway.ai.cloudflare.com/v1/account-1/sam/anthropic/v1/messages');
+    expect(headers['cf-aig-metadata']).toBe(AIG_METADATA);
+  });
+
+  it('cloudflare: Workers AI goes through the gateway (control)', async () => {
+    await forwardToWorkersAI(makeEnv('cloudflare'), CHAT, '@cf/m/x', AIG_METADATA);
+    expect(sent().url).toBe(
+      'https://gateway.ai.cloudflare.com/v1/account-1/sam/workers-ai/v1/chat/completions'
     );
+  });
+
+  it.each(PARTIAL)('%s: Anthropic goes straight to Anthropic without SAM ids', async (shape) => {
+    fetchMock.mockResolvedValueOnce(Response.json(ANTHROPIC_OK));
     const res = await forwardToAnthropic(makeEnv(shape), CHAT, 'claude-sonnet-5', AIG_METADATA, {
       headers: { 'x-api-key': 'sk-platform-key' },
     } as Parameters<typeof forwardToAnthropic>[4]);
@@ -211,6 +239,19 @@ describe('provider forwarding', () => {
 });
 
 describe('monthly cost cron', () => {
+  it('cloudflare: reads gateway logs (control)', async () => {
+    fetchMock.mockResolvedValueOnce(
+      Response.json({
+        success: true,
+        result: [],
+        result_info: { page: 1, per_page: 50, count: 0, total_count: 0, total_pages: 1 },
+      })
+    );
+    const result = await runMonthlyCostAggregation(makeEnv('cloudflare'));
+    expect(result).toMatchObject({ enabled: true, errors: 0 });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/ai-gateway/gateways/sam/logs');
+  });
+
   it.each(PARTIAL)('%s: skips by design without reading gateway logs', async (shape) => {
     expect(await runMonthlyCostAggregation(makeEnv(shape))).toEqual({
       enabled: false,
