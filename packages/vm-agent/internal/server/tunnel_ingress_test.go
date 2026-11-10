@@ -66,8 +66,7 @@ func startTunnelHarness(t *testing.T) *tunnelHarness {
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		_ = h.server.shutdownTunnelServer(ctx)
-		_ = h.server.httpServer.Shutdown(ctx)
+		_ = h.server.shutdownListeners(ctx)
 	})
 
 	h.mainURL = fmt.Sprintf("http://127.0.0.1:%d", h.server.config.Port)
@@ -360,5 +359,67 @@ func TestServeListenersTunnelBindFailureFailsStartup(t *testing.T) {
 	if conn, dialErr := net.DialTimeout("tcp", s.httpServer.Addr, time.Second); dialErr == nil {
 		_ = conn.Close()
 		t.Fatalf("main listener %s left open after tunnel bind failure", s.httpServer.Addr)
+	}
+}
+
+// A slow request draining on the tunnel listener must not keep the main
+// listener accepting: both listeners stop accepting as soon as Stop starts.
+func TestStopClosesMainListenerWhileTunnelRequestDrains(t *testing.T) {
+	s := newShutdownTestServer(t)
+	s.config = &config.Config{
+		Host:   "127.0.0.1",
+		Port:   freeLoopbackPort(t),
+		Tunnel: config.TunnelConfig{Enabled: true, Port: freeLoopbackPort(t)},
+	}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /health", s.handleHealth)
+	mux.HandleFunc("GET /slow", func(w http.ResponseWriter, _ *http.Request) {
+		close(entered)
+		<-release
+	})
+	s.buildHTTPServers(mux)
+	go func() { _ = s.serveListeners() }()
+	tunnelURL := fmt.Sprintf("http://127.0.0.1:%d", s.config.Tunnel.Port)
+	waitForHealth(t, fmt.Sprintf("http://127.0.0.1:%d", s.config.Port))
+	waitForHealth(t, tunnelURL)
+
+	go func() {
+		if res, err := http.Get(tunnelURL + "/slow"); err == nil {
+			_ = res.Body.Close()
+		}
+	}()
+	<-entered
+
+	stopped := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		stopped <- s.Stop(ctx)
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		conn, err := net.DialTimeout("tcp", s.httpServer.Addr, 100*time.Millisecond)
+		if err != nil {
+			break
+		}
+		_ = conn.Close()
+		if time.Now().After(deadline) {
+			close(release)
+			t.Fatal("main listener still accepting while the tunnel request drains")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	close(release)
+	select {
+	case err := <-stopped:
+		if err != nil {
+			t.Fatalf("Stop: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Stop did not return after the tunnel request finished")
 	}
 }

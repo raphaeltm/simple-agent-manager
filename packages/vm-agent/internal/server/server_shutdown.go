@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 )
 
@@ -72,10 +71,8 @@ func (s *Server) Stop(ctx context.Context) error {
 			}
 		}
 
-		// Shutdown HTTP listeners. The tunnel listener goes first so no new
-		// external request is accepted while the main listener drains.
-		tunnelErr := s.shutdownTunnelServer(ctx)
-		stopErr := errors.Join(tunnelErr, s.httpServer.Shutdown(ctx))
+		// Shutdown HTTP listeners (main and, when enabled, tunnel).
+		stopErr := s.shutdownListeners(ctx)
 		s.stopErrMu.Lock()
 		s.stopErr = stopErr
 		s.stopErrMu.Unlock()
