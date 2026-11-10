@@ -123,12 +123,12 @@ export function useWakeProgress(sessionId: string | undefined): UseWakeProgressR
       status: WakeRecoveryStatus | null | undefined,
       phase: TaskExecutionStep | null,
       attemptId?: string | null
-    ) => {
+    ): boolean => {
       if (attemptId) {
         // Attempt ids are ULIDs, so they sort by creation time. A snapshot naming an
         // older attempt than one already seen is a stale poll: it must not end or
         // restart the newer wake.
-        if (lastAttemptIdRef.current && attemptId < lastAttemptIdRef.current) return;
+        if (lastAttemptIdRef.current && attemptId < lastAttemptIdRef.current) return false;
         lastAttemptIdRef.current = attemptId;
       }
       if (status !== 'waking') {
@@ -140,19 +140,20 @@ export function useWakeProgress(sessionId: string | undefined): UseWakeProgressR
         setIsWaking(false);
         setWakePhase(null);
         setWakeWait(null);
-        return;
+        return true;
       }
       const settled = settledRef.current;
       if (settled) {
         // A late 'waking' snapshot cannot un-finish a wake that already settled; a
         // snapshot of a different attempt is a new wake and re-arms the latch.
         const newAttempt = !!attemptId && !!settled.attemptId && attemptId !== settled.attemptId;
-        if (!newAttempt) return;
+        if (!newAttempt) return false;
         settledRef.current = null;
         setWakePhase(null);
       }
       setIsWaking(true);
       setWakePhase((current) => (isForwardProgress(phase, current) ? phase : current));
+      return true;
     },
     []
   );
@@ -160,7 +161,13 @@ export function useWakeProgress(sessionId: string | undefined): UseWakeProgressR
   const hydrateWakeProgress = useCallback(
     (state: SessionStateSnapshot | null | undefined) => {
       if (!state) return;
-      applyStatus(state.recoveryStatus ?? null, state.wakePhase ?? null, state.wakeAttemptId);
+      const applied = applyStatus(
+        state.recoveryStatus ?? null,
+        state.wakePhase ?? null,
+        state.wakeAttemptId
+      );
+      // A snapshot the latch rejected as stale must not relabel the current wake either.
+      if (!applied) return;
       // Only the pull path carries the reason. A pushed phase can outdate it, so the
       // banner shows it only for the phase it describes (`WakeProgressBanner`).
       setWakeWait(

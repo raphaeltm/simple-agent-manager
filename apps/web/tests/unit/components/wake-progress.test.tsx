@@ -235,6 +235,29 @@ describe('useWakeProgress', () => {
     expect(result.current.wakePhase).toBe('node_selection');
   });
 
+  it('does not let a stale snapshot relabel the current wake', () => {
+    const { result } = renderHook(() => useWakeProgress('s1'));
+
+    act(() => {
+      result.current.hydrateWakeProgress(
+        snapshot({
+          recoveryStatus: 'waking',
+          wakePhase: 'waiting_for_node_capacity',
+          wakeAttemptId: '01B',
+          waitReason: 'provider_transient_capacity',
+          waitRetryAt: null,
+        })
+      );
+    });
+    act(() => {
+      result.current.hydrateWakeProgress(
+        snapshot({ recoveryStatus: 'waking', wakePhase: 'node_selection', wakeAttemptId: '01A' })
+      );
+    });
+
+    expect(result.current.wakeWait?.reason).toBe('provider_transient_capacity');
+  });
+
   it('keeps the latch when the settled wake had no attempt id', () => {
     // Without an id on the settled side nothing proves the next snapshot is a new wake;
     // a stale banner is worse than a missing one, so the latch holds.

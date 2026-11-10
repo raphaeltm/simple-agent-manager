@@ -62,7 +62,7 @@ The 2026-11-10 state-machine audit (Library `/engineering/research/state-machine
 ### D8. Second wake of the same chat is suppressed
 - `useWakeProgress.ts:89-118`: `settledRef` latches on `restored`/`failed` and only resets on `sessionId` change. After a wake settles, the chat sleeps again and is woken again in the same mount, so every `waking` update is dropped. `isWaking` stays false, and the socket gate `session.status === 'active' || wake.isWaking` (`useSessionLifecycle.ts:153`) stays closed.
 - The latch exists to drop a stale `waking` snapshot that lands after `restored`. During that window the session is still `sleeping` (or just turned `active`).
-- Re-arm only on an observed not-sleeping → `sleeping` transition (a new sleep episode). That keeps the stale-snapshot protection.
+- Fix (as implemented): the session detail carries `wakeAttemptId` (`session_snapshots.recovery_attempt_id`, a new ULID per wake claim), and `useWakeProgress(sessionId)` latches per attempt. A `waking` snapshot of the settled attempt stays dropped (the stale-snapshot guard); a different attempt re-arms the latch synchronously; a snapshot naming an older attempt than one already seen is ignored, including its wait reason. With no attempt id on either side the latch holds. (A first cut that re-armed on a not-sleeping → `sleeping` status flip was replaced after review: it ran one commit late and a stale `sleeping` read could re-arm it.)
 
 ## Implementation checklist
 
@@ -74,7 +74,7 @@ The 2026-11-10 state-machine audit (Library `/engineering/research/state-machine
 - [x] D5: add `destroying`/`deleting` to `NodeStatus`; add `deleting` to `NODE_CALLBACK_TERMINAL_STATUSES`; route test proving `/ready` and heartbeat do not revive a `deleting` node (plus a `running` control)
 - [x] D6: export shared drizzle predicate from `trigger-execution-sync.ts`; `setTaskStatus` uses it; real-SQL test proving `skipped`/`dropped` survive and `running` still syncs
 - [x] D7: CAS on env status in heartbeat write; test: concurrent `stopping` survives the heartbeat; `starting → active` control
-- [x] D8: `useWakeProgress(sessionId, sessionStatus)` re-arms on not-sleeping → `sleeping`; test second wake shows phases; control: late `waking` after `restored` while still `sleeping` stays suppressed
+- [x] D8: per-attempt wake latch (`wakeAttemptId` from `attachWakeState`); tests: a second wake (new attempt) shows phases, including one response that flips the chat back to `sleeping` and carries the next wake; controls: a stale same-attempt snapshot after `restored` stays suppressed, a settled wake with no id keeps the latch, an older attempt cannot end or relabel the current wake
 - [x] Docs: update any docs referencing chat `error` status / node statuses / stall detection
 - [x] Playwright visual audit for changed UI surfaces (chat session list badge, account map failed state), 375 and 1280
 - [ ] Staging: deploy; verify each defect fixed on live staging (see acceptance criteria)

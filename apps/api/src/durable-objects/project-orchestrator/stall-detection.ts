@@ -64,9 +64,18 @@ export async function detectStalls(
     // look stalled (rule 74: key on the condition, not a correlated signal).
     const session = sessionResolutions.get(task.id) ?? null;
     const updatedAt = Math.max(
-      new Date(task.updated_at).getTime(),
+      toEpochMs(task.updated_at) ?? Number.NEGATIVE_INFINITY,
       session?.lastMessageAt ?? Number.NEGATIVE_INFINITY
     );
+    // No usable progress time at all (an unparseable row): do not guess a stall.
+    if (!Number.isFinite(updatedAt)) {
+      log.warn('orchestrator.stall_progress_time_unknown', {
+        projectId,
+        missionId,
+        taskId: task.id,
+      });
+      continue;
+    }
     if (updatedAt > stallThreshold) continue;
 
     const recentStall = sql

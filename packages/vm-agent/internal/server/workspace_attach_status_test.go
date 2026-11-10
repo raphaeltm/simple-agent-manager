@@ -112,27 +112,45 @@ func TestWebSocketAttachKeepsExistingRuntimeStatus(t *testing.T) {
 				s, cookie := newAttachTestServer(t)
 				s.upsertWorkspaceRuntime(attachWorkspaceID, "octo/repo", "main", status, "ws-token",
 					workspaceRuntimeOpts{ProjectID: "proj-1", Lightweight: lightweightOpt(true)})
+				seededAt := runtimeUpdatedAt(t, s)
+				time.Sleep(2 * time.Millisecond)
 
 				attach(t, s, h, cookie)
 
-				if got := runtimeStatus(t, s); got != status {
-					t.Fatalf("attaching a browser changed the workspace status from %q to %q", status, got)
-				}
-				// Liveness: the handler did run its upsert on this runtime (it fills
-				// container defaults in place) rather than leaving it untouched. The
-				// Lightweight flag must also survive the real handler (rule 73).
-				runtime, _ := s.getWorkspaceRuntime(attachWorkspaceID)
-				s.workspaceMu.RLock()
-				projectID, workDir, lightweight := runtime.ProjectID, runtime.ContainerWorkDir, runtime.Lightweight
-				s.workspaceMu.RUnlock()
-				if projectID != "proj-1" || workDir == "" {
-					t.Fatalf("expected the attach to keep project and fill container defaults, got project=%q workDir=%q", projectID, workDir)
-				}
-				if !lightweight {
-					t.Fatal("attaching a browser cleared the runtime's Lightweight flag")
-				}
+				assertAttachKeptRuntime(t, s, status, seededAt)
 			})
 		}
+	}
+}
+
+func runtimeUpdatedAt(t *testing.T, s *Server) time.Time {
+	t.Helper()
+	runtime, ok := s.getWorkspaceRuntime(attachWorkspaceID)
+	if !ok {
+		t.Fatal("expected the seeded workspace runtime")
+	}
+	s.workspaceMu.RLock()
+	defer s.workspaceMu.RUnlock()
+	return runtime.UpdatedAt
+}
+
+// assertAttachKeptRuntime checks the attach left status and Lightweight alone. The
+// liveness half: the upsert's update branch always advances UpdatedAt, so an
+// UpdatedAt past the seed proves the handler's own upsert ran on this runtime (a
+// refused dial that never reached it would leave the seeded value).
+func assertAttachKeptRuntime(t *testing.T, s *Server, status string, seededAt time.Time) {
+	t.Helper()
+	runtime, _ := s.getWorkspaceRuntime(attachWorkspaceID)
+	s.workspaceMu.RLock()
+	defer s.workspaceMu.RUnlock()
+	if !runtime.UpdatedAt.After(seededAt) {
+		t.Fatal("the handler did not reach the runtime upsert")
+	}
+	if runtime.Status != status {
+		t.Fatalf("attaching a browser changed the workspace status from %q to %q", status, runtime.Status)
+	}
+	if !runtime.Lightweight {
+		t.Fatal("attaching a browser cleared the runtime's Lightweight flag")
 	}
 }
 

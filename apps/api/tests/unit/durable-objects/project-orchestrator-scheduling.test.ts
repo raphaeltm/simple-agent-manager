@@ -573,6 +573,29 @@ describe('Scheduling Cycle — Stall Detection', () => {
     }
   );
 
+  it('does not nudge a task with no usable progress time', async () => {
+    const sql = makeSqlStorage({
+      orchestrator_missions: [
+        { mission_id: 'mission-1', status: 'active', registered_at: Date.now() },
+      ],
+    });
+    const { env, mailboxMessages } = makeMockEnv({
+      tasks: [
+        makeTask({
+          id: 'stalled-task',
+          status: 'in_progress',
+          scheduler_state: 'running',
+          updated_at: 'not-a-timestamp',
+        }),
+      ],
+      sessions: [{ id: 'session-stalled-task', taskId: 'stalled-task', status: 'active' }],
+    });
+
+    await runSchedulingCycle(sql, env, 'proj-1', stallConfig);
+
+    expect(mailboxMessages).toHaveLength(0);
+  });
+
   it('does not nudge a task whose session produced output recently', async () => {
     // The task row is old, but the agent wrote a message 100ms ago: it is working.
     const { sql, env, mailboxMessages } = stallScenario({
