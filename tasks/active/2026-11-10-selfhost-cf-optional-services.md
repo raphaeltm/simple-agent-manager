@@ -93,14 +93,14 @@ absent or explicitly configured. Tests cover both configurations (apps/api rule 
 - task-completion-validator: FAIL -> fixing: LlmUnavailableError handling in agent loop/operator/diagnosis + tests; /ai/v1, diagnosis, operator endpoint tests; client IP sites; agent-loop split; trim unused public flags; Playwright spec commit. Decisions to record: catalog stays 404 (run_ai_model is Workers-AI-shaped), public docs out of scope per coordinator.
 - test-engineer, ui-ux-specialist: interrupted by restarts; resume.
 
-### Remaining
-- [ ] llm-chat-target: baseUrl-first read, fail closed when configured+unreadable, redirect:'error' for endpoint targets
-- [ ] LlmUnavailableError handling: agent loop, operator, diagnosis + tests
-- [ ] R2: key traversal guard, prefix trailing slash, R2_S3_* without endpoint -> null, endpoint host rule, client cache key incl. secret
-- [ ] container runtime gate in getVmAgentContainerConfig + sandbox; workers-ai.ts binding gateway check restored
-- [ ] client IP value validation; chat-load-diagnostics + app-error-handler via helper
-- [ ] ai-proxy-upstream: no third-party error body in logs
-- [ ] split agent-loop LLM calls out; trim public capabilities to consumed flags
-- [ ] tests: /ai/v1 endpoint + 404, diagnosis endpoint, operator endpoint
+### Remaining (commits 4203b1256..0251efe18 done)
+- [x] llm-chat-target: baseUrl-first read, fail closed when configured+unreadable, redirect:'error' for endpoint targets
+- [x] LlmUnavailableError handling: agent loop, operator, diagnosis + tests
+- [x] R2: key traversal guard, prefix trailing slash, R2_S3_* without endpoint -> null, endpoint host rule, client cache key incl. secret
+- [x] container runtime gate in getVmAgentContainerConfig + sandbox; workers-ai.ts binding gateway check restored
+- [x] client IP value validation; chat-load-diagnostics + app-error-handler via helper
+- [x] ai-proxy-upstream: no third-party error body in logs
+- [x] split agent-loop LLM calls out; trim public capabilities to consumed flags
+- [x] tests: /ai/v1 endpoint + 404, diagnosis endpoint, operator endpoint
 - [ ] Playwright spec + screenshots; full API + web suites
 - [ ] draft PR vs sam/selfhost-pass-2; publish URL + SHA to channel
