@@ -1,0 +1,3 @@
+celld stopped after 15 s; waiting one lease lifetime (CELLD_TTL_MS=10s)
+bucket 341M objects=28230  node-data.tar 152M
+downtime total 71 s

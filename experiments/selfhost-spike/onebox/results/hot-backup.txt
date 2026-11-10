@@ -1,0 +1,12 @@
+mirror start; acked before start: do=1749 d1=778
+mirror-exit=0
+hot mirror took 95 s
+restored bucket in 71 s
+restored node serving after 2 s
+do.load0=546ba561cbdc do.load1=c36e258d0524 do.load2=2fff07d47476 do.load3=46184436766d do.counts=7429/6151/6223/5686 d1=17146/71fe0cf5090e kv.hello=changed-after-backup r2=8ff55d8a466f 
+DO load0: acked-before-mirror=438 missing=0 present=7429
+DO load1: acked-before-mirror=433 missing=0 present=6151
+DO load2: acked-before-mirror=436 missing=0 present=6223
+DO load3: acked-before-mirror=442 missing=0 present=5686
+D1: acked-before-mirror=778 missing=0
+HOT BACKUP MISSING PRE-MIRROR WRITES: 0

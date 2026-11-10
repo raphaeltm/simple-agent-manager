@@ -1,0 +1,20 @@
+{
+ "id": "uid=1000(node) gid=1000(node) groups=1000(node),1000(node)",
+ "capEff": "0000000000000000",
+ "capBnd": "0000000000000000",
+ "noNewPrivs": "1",
+ "seccomp": "2",
+ "pidsMax": "1024",
+ "memMax": "1073741824",
+ "cpuMax": "25000 100000",
+ "pid1": "docker-init",
+ "rootfsWritable": "yes",
+ "npmGlobalUserPrefix": "is-number",
+ "gitClone": "README",
+ "internet": "HTTP 200",
+ "reach http://172.17.0.4:80/": "FAIL ECONNREFUSED",
+ "reach http://172.18.0.1:80/": "FAIL ECONNREFUSED",
+ "reach http://172.17.0.1:80/": "FAIL ECONNREFUSED",
+ "reach http://1.1.1.1/": "HTTP 200"
+}recv ctr-echo:hi0
+recv ctr-echo:hi1

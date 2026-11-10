@@ -1,0 +1,3 @@
+Status: Downloaded newer image for python:3.12-alpine
+/dev/pts/0
+pty-ok

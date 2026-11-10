@@ -1,0 +1,3 @@
+restored bucket in 56 s
+restored node serving after 0 s
+do.load0=c33016f3dbc4 do.load1=2122b3279153 do.load2=a8599e955c1b do.load3=2316fe6685d1 do.counts=6513/5130/5011/5048 d1=14539/33bcd8aa688b kv.hello=world r2=8ff55d8a466f 

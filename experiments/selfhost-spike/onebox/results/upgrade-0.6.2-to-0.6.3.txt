@@ -1,0 +1,3 @@
+v0.6.2 stopped (SIGTERM) after 15583 ms
+v0.6.3 serving writes; total upgrade downtime 16124 ms
+celld 0.6.3

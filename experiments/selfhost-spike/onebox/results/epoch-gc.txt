@@ -1,0 +1,3 @@
+acked writes from crash/hot/gc runs missing after epoch GC: 0
+cells/ before GC: ~43k objects ~250MB (see upgrade step); after GC: # 5356 objects, 45419513 bytes
+state identical across kill -9 after epoch GC
