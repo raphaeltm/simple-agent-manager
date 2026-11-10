@@ -74,8 +74,8 @@ ttsRoutes.post('/synthesize', async (c) => {
       textLength: text.length,
       mode,
     });
-    // The cause is logged above; the response must not carry internal error text.
-    throw errors.internal('TTS synthesis failed');
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    throw errors.internal(`TTS synthesis failed: ${errorMessage}`);
   }
 });
 

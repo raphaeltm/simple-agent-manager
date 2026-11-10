@@ -12,6 +12,7 @@ import {
   normalizeCatalog,
   normalizeCatalogModel,
   resetAgentModelCatalogCacheForTests,
+  WorkersAiUnavailableError,
 } from '../../../../src/services/agent-models/catalog';
 
 // Mirrors the Cloudflare /ai/models/search response's `.result` array exactly (73 real rows),
@@ -393,7 +394,7 @@ describe('getAgentModelCatalog', () => {
     const env = { KV: createKv() } as unknown as Env;
 
     await expect(getAgentModelCatalog(env, 3600, 1_700_000_000_000)).rejects.toThrow(
-      'The Workers AI binding (AI) is not configured for this deployment'
+      WorkersAiUnavailableError
     );
   });
 });

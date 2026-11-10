@@ -21,9 +21,15 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { expectJsonRecord } from '../../lib/runtime-validation';
 import { getCredentialEncryptionKey } from '../../lib/secrets';
-import { buildWorkersAIGatewayUrl } from '../../services/ai-proxy-shared';
 import { checkAiUsageGate } from '../../services/ai-token-budget';
 import { attachTokenUsageAccounting } from '../../services/ai-token-usage-accounting';
+import {
+  type ChatCompletionsTarget,
+  chatTargetHeaders,
+  LlmUnavailableError,
+  resolveCloudflareWorkersAiTarget,
+  resolveOpenAICompatibleTarget,
+} from '../../services/llm-chat-target';
 import { getPlatformAgentCredential } from '../../services/platform-credentials';
 import {
   buildAnthropicGatewayUrl,
@@ -65,7 +71,8 @@ async function callLLM(
   userId: string,
   conversationId: string,
   baseSystemPrompt: string,
-  tools: AnthropicToolDef[]
+  tools: AnthropicToolDef[],
+  endpoint: ChatCompletionsTarget | null
 ): Promise<Response> {
   const model = config.model;
   const systemPrompt = config.systemPromptAppend
@@ -87,7 +94,17 @@ async function callLLM(
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    if (isAnthropicModel(model)) {
+    if (endpoint) {
+      return await callOpenAIChatLLM(
+        endpoint,
+        systemPrompt,
+        messages,
+        openAITools,
+        aigMetadata,
+        config.maxTokens,
+        controller.signal
+      );
+    } else if (isAnthropicModel(model)) {
       return await callAnthropicLLM(
         env,
         model,
@@ -100,9 +117,10 @@ async function callLLM(
         tools
       );
     } else if (isWorkersAIModel(model)) {
-      return await callWorkersAILLM(
-        env,
-        model,
+      const target = resolveCloudflareWorkersAiTarget(env, model);
+      if (!target) throw new LlmUnavailableError('agent');
+      return await callOpenAIChatLLM(
+        target,
         systemPrompt,
         messages,
         openAITools,
@@ -185,10 +203,9 @@ async function callAnthropicLLM(
   });
 }
 
-/** Call Workers AI via AI Gateway (OpenAI-compatible). */
-async function callWorkersAILLM(
-  env: Env,
-  model: string,
+/** Call an OpenAI-format chat completions target (Workers AI or an OpenAI-compatible endpoint). */
+async function callOpenAIChatLLM(
+  target: ChatCompletionsTarget,
   systemPrompt: string,
   messages: OpenAIMessage[],
   openAITools: OpenAITool[],
@@ -196,20 +213,14 @@ async function callWorkersAILLM(
   maxTokens: number,
   signal: AbortSignal
 ): Promise<Response> {
-  const url = buildWorkersAIGatewayUrl(env);
-
   const fullMessages: OpenAIMessage[] = [{ role: 'system', content: systemPrompt }, ...messages];
 
-  return fetch(url, {
+  return fetch(target.url, {
     method: 'POST',
     signal,
-    headers: {
-      Authorization: `Bearer ${env.CF_API_TOKEN}`,
-      'Content-Type': 'application/json',
-      'cf-aig-metadata': aigMetadata,
-    },
+    headers: chatTargetHeaders(target, { 'cf-aig-metadata': aigMetadata }),
     body: JSON.stringify({
-      model,
+      model: target.model,
       max_tokens: maxTokens,
       messages: fullMessages,
       tools: openAITools.length > 0 ? openAITools : undefined,
@@ -463,7 +474,7 @@ export async function runAgentLoop(
   conversationId: string,
   historyRows: MessageRow[],
   userMessage: string,
-  config: SamConfig,
+  baseConfig: SamConfig,
   env: Env,
   userId: string,
   writer: WritableStreamDefaultWriter<Uint8Array>,
@@ -487,6 +498,10 @@ export async function runAgentLoop(
   ];
 
   const systemPrompt = options?.systemPrompt ?? SAM_SYSTEM_PROMPT;
+  // An admin-configured OpenAI-compatible endpoint replaces the model route for SAM and project
+  // agents (services/llm-chat-target.ts); without one the configured model routes as before.
+  const endpoint = await resolveOpenAICompatibleTarget(env, 'agent', baseConfig.model);
+  const config: SamConfig = endpoint ? { ...baseConfig, model: endpoint.model } : baseConfig;
   const tools = options?.tools ?? [];
   const executeToolFn =
     options?.executeTool ?? (async () => ({ error: 'No tool executor configured' }));
@@ -496,14 +511,14 @@ export async function runAgentLoop(
     searchMessages,
     ...options?.toolContextExtras,
   };
-  const useAnthropicParser = isAnthropicModel(config.model);
+  const useAnthropicParser = !endpoint && isAnthropicModel(config.model);
   const tokenUsageFormat = useAnthropicParser ? ('anthropic' as const) : ('openai' as const);
 
   // Workers AI models have smaller context windows, so use a tighter budget
   // unless the user explicitly set SAM_MAX_REQUEST_BODY_BYTES as an override.
   const hasExplicitOverride = !!env.SAM_MAX_REQUEST_BODY_BYTES;
   const effectiveBudget =
-    !hasExplicitOverride && isWorkersAIModel(config.model)
+    !hasExplicitOverride && (endpoint !== null || isWorkersAIModel(config.model))
       ? DEFAULT_SAM_MAX_REQUEST_BODY_BYTES_WORKERS_AI
       : config.maxRequestBodyBytes;
   const fixedOverhead = systemPrompt.length + JSON.stringify(tools).length + 500;
@@ -551,7 +566,8 @@ export async function runAgentLoop(
         userId,
         conversationId,
         systemPrompt,
-        tools
+        tools,
+        endpoint
       );
       response = await attachTokenUsageAccounting(response, {
         env,

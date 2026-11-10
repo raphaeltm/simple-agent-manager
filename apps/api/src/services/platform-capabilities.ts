@@ -76,17 +76,15 @@ export function hasCloudflareAccountApi(env: Pick<Env, 'CF_ACCOUNT_ID' | 'CF_API
 }
 
 /**
- * The AI Gateway id to route through, or null when the gateway cannot be reached.
+ * The AI Gateway id to route through, or null when the gateway cannot be addressed.
  *
  * `AI_GATEWAY_ID` alone is not the condition: `wrangler.toml` ships a default id, so a
- * runtime with no Cloudflare account still has it set. A gateway URL also needs the
- * account id, and its log API needs the API token.
+ * runtime with no Cloudflare account still has it set. Every gateway URL is
+ * `gateway.ai.cloudflare.com/v1/<account>/<gateway>/...`, so it also needs the account id.
  */
-export function resolveAiGatewayId(
-  env: Pick<Env, 'AI_GATEWAY_ID' | 'CF_ACCOUNT_ID' | 'CF_API_TOKEN'>
-): string | null {
+export function resolveAiGatewayId(env: Pick<Env, 'AI_GATEWAY_ID' | 'CF_ACCOUNT_ID'>): string | null {
   const gatewayId = env.AI_GATEWAY_ID?.trim();
-  if (!gatewayId || !hasCloudflareAccountApi(env)) return null;
+  if (!gatewayId || !present(env.CF_ACCOUNT_ID)) return null;
   return gatewayId;
 }
 

@@ -18,8 +18,9 @@ import {
 } from '../services/ai-anthropic-translate';
 import type { UpstreamAuth } from '../services/ai-billing';
 import { resolveUnifiedBillingToken } from '../services/ai-billing';
-import { buildAnthropicGatewayUrl, buildWorkersAIGatewayUrl } from '../services/ai-proxy-shared';
+import { buildAnthropicGatewayUrl } from '../services/ai-proxy-shared';
 import { copyCredentialLimitHeaders } from '../services/credential-limit-events';
+import { chatTargetHeaders, resolveWorkersAiChatTarget } from '../services/llm-chat-target';
 import { resolveAiGatewayId } from '../services/platform-capabilities';
 
 const anthropicContentBlockSchema = v.variant('type', [
@@ -74,16 +75,25 @@ export async function forwardToWorkersAI(
   modelId: string,
   aigMetadata: string
 ): Promise<Response> {
-  const gatewayUrl = buildWorkersAIGatewayUrl(env);
-  const gatewayBody = { ...body, model: modelId };
+  const target = await resolveWorkersAiChatTarget(env, 'aiProxy', modelId);
+  if (!target) {
+    // No Workers AI on this installation and no OpenAI-compatible endpoint configured.
+    return new Response(
+      JSON.stringify({
+        error: {
+          message: 'This model route is not available on this installation.',
+          type: 'invalid_request_error',
+          code: 'FEATURE_UNAVAILABLE',
+        },
+      }),
+      { status: 404, headers: { 'Content-Type': 'application/json' } }
+    );
+  }
+  const gatewayBody = { ...body, model: target.model };
 
-  const response = await fetch(gatewayUrl, {
+  const response = await fetch(target.url, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${env.CF_API_TOKEN}`,
-      'Content-Type': 'application/json',
-      'cf-aig-metadata': aigMetadata,
-    },
+    headers: chatTargetHeaders(target, { 'cf-aig-metadata': aigMetadata }),
     body: JSON.stringify(gatewayBody),
   });
 

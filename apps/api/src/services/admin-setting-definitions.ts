@@ -11,6 +11,7 @@ import {
 } from './connector-settings-definition';
 import { type FleetOpsSettingName } from './fleet-ops/settings-definitions';
 import { type LifecycleLatencySettingKey } from './lifecycle-latency/defaults';
+import { type LlmEndpointSettingName } from './llm-endpoint-settings';
 import { type OperationsTelemetrySettingName } from './operations-telemetry-defaults';
 import { type WORKFLOW_DEFAULTS } from './workflow-defaults';
 
@@ -28,6 +29,7 @@ export type AdminSettingName =
   | AgentEmailSettingName
   | FleetOpsSettingName
   | NodeTunnelSettingName
+  | LlmEndpointSettingName
   | GcpCatalogSettingName
   | OperationsTelemetrySettingName
   | 'chat.profileUsageWindowDays'
