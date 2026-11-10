@@ -25,8 +25,9 @@ describe('heartbeat IP backfill', () => {
     expect(heartbeatSection).toContain('!node.ipAddress');
   });
 
-  it('extracts IP from CF-Connecting-IP header', () => {
-    expect(heartbeatSection).toContain("c.req.header('CF-Connecting-IP')");
+  it('extracts IP from CF-Connecting-IP through the shared client-IP helper', () => {
+    // Behaviour (malformed header, X-Forwarded-For ignored): routes/node-lifecycle-byo.test.ts.
+    expect(heartbeatSection).toContain('clientIpFromHeaders((name) => c.req.header(name))');
   });
 
   it('only trusts CF-Connecting-IP (not X-Real-IP)', () => {

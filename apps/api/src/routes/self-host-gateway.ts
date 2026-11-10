@@ -1,7 +1,7 @@
 /**
  * Internal endpoints for the self-hosted box's gateway processes (deploy/selfhost/):
  *
- * - `POST /frps-plugin?op=Login|NewProxy|Ping` — frps server plugin. Authenticated with HTTP
+ * - `POST /frps-plugin?op=Login|NewProxy|Ping|NewWorkConn` — frps server plugin. Authenticated with HTTP
  *   basic auth whose password is REVERSE_TUNNEL_GATEWAY_SECRET (frps sends the userinfo of
  *   its plugin `addr`). Decisions: services/node-reverse-tunnel-authz.ts.
  * - `GET /node-websocket` — Caddy forward_auth for node WebSocket upgrades. Authenticated with
@@ -119,12 +119,16 @@ function forwardedGatewayTarget(env: Env, headers: Headers): URL | null {
   } catch {
     original = null;
   }
+  // The target check reads the URL that is re-dispatched (original.hostname), and the host
+  // must survive URL parsing unchanged: WHATWG parsing drops tabs/newlines, applies IDNA and
+  // reads userinfo, so a header whose parsed host differs from its text is refused outright
+  // rather than authorized as whichever workspace the parser happened to produce.
   const allowed =
     !!original &&
     original.hostname === host &&
     method === 'GET' &&
     upgrade === 'websocket' &&
-    isGatewayTarget(env, host, original.pathname);
+    isGatewayTarget(env, original.hostname, original.pathname);
   if (!allowed) {
     log.warn('self_host_gateway.forward_auth_not_a_gateway_route', {
       host,

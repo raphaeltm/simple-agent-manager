@@ -35,6 +35,13 @@ Upgrading a box from before the egress fence: add `gce` to `COMPOSE_PROFILES` if
 gs://, run `pnpm selfhost:deploy --init`, then `docker compose up -d --build`. celld switches to
 uid 7101; `celld-data-owner` re-owns its data volume on the way.
 
+`pnpm selfhost:deploy` also builds the vm-agent (in a pinned `golang` image, so the box needs no
+Go toolchain) and publishes it into the fleet bucket under the same keys the Cloudflare pipeline
+uses (`agents/releases/<release>/vm-agent-linux-<arch>`, immutable), then pins the Worker's
+`VM_AGENT_REQUIRED_VERSION` to that release. Nodes download it from `/api/agent/download`.
+`--skip-vm-agent` skips this for a control-plane-only box. The release is resolved from git
+history, so the checkout must be a full clone (not `--depth 1`).
+
 Worker secrets that are yours to supply (GitHub App, OAuth clients) go in
 `deploy/selfhost/.state/secrets.env` (`NAME=value`, mode 600). Platform keys are generated into
 `.state/platform-keys.json` and never regenerated: back up `.state/` and the bucket.
@@ -73,9 +80,25 @@ redacted.
 - `www.SAM_DOMAIN` answers 503 and the apex is not served; only the subdomains above are used.
 - `VM_AGENT_TRANSPORT=reverse-tunnel` is set for the box: nodes run a pinned frpc that dials
   `wss://api.SAM_DOMAIN/~!frp` and is exposed on a leased loopback port (20000-29999 by default);
-  frps asks the Worker to authorize every login, proxy and heartbeat. Node WebSockets go through
-  Caddy forward_auth (`caddy/sam.d/node-ws.caddy`); plain HTTP to nodes stays on the Worker and is
-  cut at `CELLD_FETCH_TIMEOUT_S`. The box needs a certificate nodes trust (frpc verifies it).
+  frps asks the Worker to authorize every login, proxy, heartbeat and work connection. Node
+  WebSockets go through Caddy forward_auth (`caddy/sam.d/node-ws.caddy`); plain HTTP to nodes
+  stays on the Worker and is cut at `CELLD_FETCH_TIMEOUT_S`. The box needs a certificate nodes
+  trust: frpc verifies it against the node's system CA store (`useSystemCa`) and refuses
+  anything else (`pnpm selfhost:live-test` runs the real frpc against untrusted, wrong-host and
+  trusted certificates). `SAM_TLS_MODE=internal` uses Caddy's private CA, which no node
+  trusts, so internal mode supports no remote reverse-tunnel nodes; use a `dns-<provider>` mode.
+- A released lease port is not reissued for twice the frps heartbeat timeout (180 s by default),
+  so a new node's traffic cannot reach the previous holder's frpc. With every free port cooling
+  down, provisioning fails with `port_range_cooling_down` and the time the first port frees up
+  (at most that age away); with every port held, `port_range_exhausted`. The deploy refuses a
+  lease range that contains any other box listener (celld, celld's operator port, frps, the
+  bundled store, Caddy) or holds more than 20000 ports.
+- When the deploy changes `.state/gateway.env` (heartbeat timeout, port range, gateway secret)
+  it writes the file and stops before touching the Worker: run `docker compose up -d` so frps
+  and Caddy load it, then `pnpm selfhost:deploy` again. frps reads `gateway.env` only at start,
+  and the Worker must never assume values the running frps is not enforcing. After pulling a
+  new release, run the deploy before restarting the stack: an older `gateway.env` can lack a
+  variable the new `frps.toml` reads.
 
 ## Outbound requests and the egress fence
 

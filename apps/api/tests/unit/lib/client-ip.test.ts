@@ -7,16 +7,44 @@ function read(headers: Record<string, string>) {
   return clientIpFromHeaders((name) => h.get(name));
 }
 
-describe('clientIpFromHeaders', () => {
-  it('prefers the ingress-set CF-Connecting-IP (Cloudflare behaviour)', () => {
-    expect(read({ 'CF-Connecting-IP': '203.0.113.7', 'X-Forwarded-For': '6.6.6.6' })).toBe(
-      '203.0.113.7'
-    );
-    expect(read({ 'CF-Connecting-IP': '2001:db8::7' })).toBe('2001:db8::7');
-  });
+/**
+ * What every call site read before the helper existed: the raw `CF-Connecting-IP` header. A
+ * well-formed address from Cloudflare must produce exactly this string, or rate-limit keys and
+ * stored addresses change on deploy.
+ */
+function preHelperValue(headers: Record<string, string>) {
+  return new Headers(headers).get('CF-Connecting-IP');
+}
 
-  it('falls back to the first X-Forwarded-For entry, not the whole list', () => {
-    expect(read({ 'X-Forwarded-For': '198.51.100.1, 10.0.0.1' })).toBe('198.51.100.1');
+/** IPv4 and IPv6 spellings an ingress can send, including non-canonical IPv6 forms. */
+const WELL_FORMED_SAMPLES = [
+  '203.0.113.7',
+  '198.51.100.255',
+  '0.0.0.0',
+  '010.001.1.1',
+  '::1',
+  '2001:db8::7',
+  '2a06:98c0:3600::103',
+  '1:2:3:4:5:6:7:8',
+  'fe80::1',
+  '0:0:0:0:0:0:0:1',
+  '2001:DB8:0:0:0:0:0:7',
+  '::ffff:198.51.100.9',
+];
+
+describe('clientIpFromHeaders', () => {
+  it.each(WELL_FORMED_SAMPLES)(
+    'returns the trusted header %s byte-identical to the pre-helper value',
+    (value) => {
+      const headers = { 'CF-Connecting-IP': value, 'X-Forwarded-For': '6.6.6.6' };
+      expect(read(headers)).toBe(value);
+      expect(read(headers)).toBe(preHelperValue(headers));
+    }
+  );
+
+  it('never reads X-Forwarded-For when the trusted header is missing', () => {
+    expect(read({ 'X-Forwarded-For': '198.51.100.1, 10.0.0.1' })).toBeNull();
+    expect(read({ 'X-Forwarded-For': '198.51.100.1' })).toBeNull();
   });
 
   it.each([
@@ -24,7 +52,6 @@ describe('clientIpFromHeaders', () => {
     'x'.repeat(100),
     '999.1.1.1',
     'not an ip',
-    '',
     // Hex-and-colon strings that are not IPv6 addresses: each would mint a distinct rate-limit key.
     ':',
     'ab:cd',
@@ -32,34 +59,15 @@ describe('clientIpFromHeaders', () => {
     'dead:beef:::::',
     '1.2.3.4:80',
     '1:2:3:4:5:6:7:8:9',
-  ])(
-    'treats a value that is not an IP literal (%j) as absent',
-    (value) => {
-      expect(read({ 'CF-Connecting-IP': value })).toBeNull();
-      expect(read({ 'CF-Connecting-IP': value, 'X-Forwarded-For': '198.51.100.2' })).toBe(
-        '198.51.100.2'
-      );
-    }
-  );
-
-  it.each(['::1', '2001:db8::1', '1:2:3:4:5:6:7:8', 'fe80::1'])(
-    'accepts the IPv6 literal %s',
-    (value) => {
-      expect(read({ 'CF-Connecting-IP': value })).toBe(value);
-    }
-  );
-
-  it.each([
-    ['0:0:0:0:0:0:0:1', '::1'],
-    ['2001:DB8:0:0:0:0:0:7', '2001:db8::7'],
-    ['010.001.1.1', '10.1.1.1'],
-    ['::ffff:198.51.100.9', '::ffff:c633:6409'],
-  ])('returns one canonical key for the spelling %s', (value, canonical) => {
-    expect(read({ 'CF-Connecting-IP': value })).toBe(canonical);
-    expect(read({ 'X-Forwarded-For': value })).toBe(canonical);
+    '[::1]',
+    'fe80::1%eth0',
+  ])('treats a malformed trusted header (%j) as absent, even beside X-Forwarded-For', (value) => {
+    expect(read({ 'CF-Connecting-IP': value })).toBeNull();
+    expect(read({ 'CF-Connecting-IP': value, 'X-Forwarded-For': '198.51.100.2' })).toBeNull();
   });
 
   it('is null when no ingress reported an address', () => {
     expect(read({})).toBeNull();
+    expect(read({ 'CF-Connecting-IP': '' })).toBeNull();
   });
 });

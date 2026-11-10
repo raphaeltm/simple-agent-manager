@@ -183,7 +183,7 @@ nodeDiagnosticsRoutes.get('/:id/logs/stream', async (c) => {
       if (!(err instanceof NodeAgentRouteError)) throw err;
       return c.json({ error: 'NODE_UNREACHABLE', message: 'Node is not reachable' }, 503);
     }
-    return gatewayDecisionResponse(c.req.raw, route, { url: vmUrl, headers });
+    return gatewayDecisionResponse(c.req.raw, route, { url: vmUrl, headers }, c.env);
   }
 
   return fetchNodeAgent(

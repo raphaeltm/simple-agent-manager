@@ -10,41 +10,121 @@
  */
 export const DEFAULT_REVERSE_TUNNEL_PORT_RANGE_START = 20000;
 export const DEFAULT_REVERSE_TUNNEL_PORT_RANGE_END = 29999;
+/** Same cap the Worker enforces (MAX_REVERSE_TUNNEL_PORT_RANGE_SIZE); a bigger range fails here. */
+export const MAX_REVERSE_TUNNEL_PORT_RANGE_SIZE = 20000;
+/** frps heartbeatTimeout; same default and bounds as the Worker (node-reverse-tunnel-config.ts). */
+export const DEFAULT_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS = 90;
+export const MIN_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS = 60;
+export const MAX_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS = 3600;
+/** A released port is not reissued before this many heartbeat timeouts (Worker floor too). */
+export const REVERSE_TUNNEL_PORT_REUSE_HEARTBEAT_MULTIPLE = 2;
+
+/**
+ * Every other loopback/host listener on the box, with the default docker-compose.yml uses. A
+ * leased port that equals one of them would let a node's frpc bind (or the Worker and Caddy
+ * proxy to) celld's API, celld's UNAUTHENTICATED operator listener, frps itself, the bundled
+ * object store or Caddy. frps' allowPorts is the only fence, so the range must exclude them.
+ */
+export const BOX_RESERVED_PORTS: Readonly<Record<string, number>> = {
+  CELLD_PORT: 8080,
+  CELLD_INTERNAL_PORT: 7001,
+  FRPS_BIND_PORT: 7000,
+  OBJECTSTORE_PORT: 9000,
+  OBJECTSTORE_CONSOLE_PORT: 9001,
+  HTTP_PORT: 80,
+  HTTPS_PORT: 443,
+};
 
 export interface PortRange {
   start: number;
   end: number;
 }
 
-function port(raw: string | undefined, fallback: number, name: string): number {
+export interface TunnelSettings {
+  range: PortRange;
+  heartbeatTimeoutSeconds: number;
+  /** Only when the box overrides it; otherwise the Worker uses its default (2 x heartbeat). */
+  portReuseMinAgeSeconds: number | null;
+}
+
+function integer(
+  raw: string | undefined,
+  fallback: number,
+  name: string,
+  bounds: { min: number; max: number }
+): number {
   if (raw === undefined || raw === '') return fallback;
   const value = Number(raw);
-  if (!Number.isInteger(value) || value < 1024 || value > 65535) {
-    throw new Error(`${name} must be an integer port between 1024 and 65535`);
+  if (!/^\d+$/.test(raw) || value < bounds.min || value > bounds.max) {
+    throw new Error(`${name} must be an integer between ${bounds.min} and ${bounds.max}`);
   }
   return value;
 }
 
+const PORT = { min: 1024, max: 65535 };
+
 export function resolveTunnelPortRange(box: Readonly<Record<string, string>>): PortRange {
-  const start = port(
+  const start = integer(
     box.REVERSE_TUNNEL_PORT_RANGE_START,
     DEFAULT_REVERSE_TUNNEL_PORT_RANGE_START,
-    'REVERSE_TUNNEL_PORT_RANGE_START'
+    'REVERSE_TUNNEL_PORT_RANGE_START',
+    PORT
   );
-  const end = port(
+  const end = integer(
     box.REVERSE_TUNNEL_PORT_RANGE_END,
     DEFAULT_REVERSE_TUNNEL_PORT_RANGE_END,
-    'REVERSE_TUNNEL_PORT_RANGE_END'
+    'REVERSE_TUNNEL_PORT_RANGE_END',
+    PORT
   );
   if (start > end) throw new Error('REVERSE_TUNNEL_PORT_RANGE_START is above _END');
+  if (end - start + 1 > MAX_REVERSE_TUNNEL_PORT_RANGE_SIZE) {
+    throw new Error(
+      `REVERSE_TUNNEL_PORT_RANGE_START.._END may hold at most ${MAX_REVERSE_TUNNEL_PORT_RANGE_SIZE} ports (the Worker refuses larger ranges)`
+    );
+  }
+  for (const [name, fallback] of Object.entries(BOX_RESERVED_PORTS)) {
+    const port = integer(box[name], fallback, name, { min: 1, max: 65535 });
+    if (port >= start && port <= end) {
+      throw new Error(
+        `REVERSE_TUNNEL_PORT_RANGE ${start}-${end} contains ${name} (${port}); a node could bind it`
+      );
+    }
+  }
   return { start, end };
 }
 
-/** Worker vars carrying the range. */
-export function tunnelRangeVars(range: PortRange): Record<string, string> {
+/** The range plus the heartbeat timeout frps enforces and the port-reuse age derived from it. */
+export function resolveTunnelSettings(box: Readonly<Record<string, string>>): TunnelSettings {
+  const heartbeatTimeoutSeconds = integer(
+    box.REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS,
+    DEFAULT_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS,
+    'REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS',
+    {
+      min: MIN_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS,
+      max: MAX_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS,
+    }
+  );
+  const floor = REVERSE_TUNNEL_PORT_REUSE_HEARTBEAT_MULTIPLE * heartbeatTimeoutSeconds;
+  const reuse = box.REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS;
+  const portReuseMinAgeSeconds =
+    reuse === undefined || reuse === ''
+      ? null
+      : integer(reuse, floor, 'REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS', {
+          min: floor,
+          max: 86_400,
+        });
+  return { range: resolveTunnelPortRange(box), heartbeatTimeoutSeconds, portReuseMinAgeSeconds };
+}
+
+/** Worker vars carrying the tunnel settings (the same values gateway.env gives frps). */
+export function tunnelWorkerVars(settings: TunnelSettings): Record<string, string> {
   return {
-    REVERSE_TUNNEL_PORT_RANGE_START: String(range.start),
-    REVERSE_TUNNEL_PORT_RANGE_END: String(range.end),
+    REVERSE_TUNNEL_PORT_RANGE_START: String(settings.range.start),
+    REVERSE_TUNNEL_PORT_RANGE_END: String(settings.range.end),
+    REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS: String(settings.heartbeatTimeoutSeconds),
+    ...(settings.portReuseMinAgeSeconds === null
+      ? {}
+      : { REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS: String(settings.portReuseMinAgeSeconds) }),
   };
 }
 
@@ -100,13 +180,35 @@ export function assertPresignCredentialIsScoped(
 }
 
 /** The dotenv docker compose passes to frps and Caddy (`env_file`). */
-export function renderGatewayEnv(gatewaySecret: string, range: PortRange): string {
+export function renderGatewayEnv(gatewaySecret: string, settings: TunnelSettings): string {
   if (!/^[0-9a-f]{64}$/.test(gatewaySecret)) {
     throw new Error('REVERSE_TUNNEL_GATEWAY_SECRET must be 32 bytes of lowercase hex');
   }
-  return Object.entries({ REVERSE_TUNNEL_GATEWAY_SECRET: gatewaySecret, ...tunnelRangeVars(range) })
+  const frps = {
+    REVERSE_TUNNEL_GATEWAY_SECRET: gatewaySecret,
+    REVERSE_TUNNEL_PORT_RANGE_START: String(settings.range.start),
+    REVERSE_TUNNEL_PORT_RANGE_END: String(settings.range.end),
+    REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS: String(settings.heartbeatTimeoutSeconds),
+  };
+  return Object.entries(frps)
     .map(([name, value]) => `${name}=${value}\n`)
     .join('');
+}
+
+/**
+ * What the deploy does with gateway.env. frps and Caddy read it only when they start, so when
+ * its content changes (heartbeat timeout, port range, secret) the Worker must not be updated in
+ * the same run: it would assume a heartbeat timeout (and so a port-reuse age) or a range that the
+ * running frps is not enforcing yet. A changed file outside `--init` therefore stops the deploy
+ * until the operator restarts the stack and runs it again.
+ */
+export function gatewayEnvAction(
+  existing: string | null,
+  next: string,
+  init: boolean
+): 'unchanged' | 'write' | 'write-then-restart' {
+  if (existing === next) return 'unchanged';
+  return init || existing === null ? 'write' : 'write-then-restart';
 }
 
 /**

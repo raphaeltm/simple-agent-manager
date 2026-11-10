@@ -167,6 +167,7 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
 
   try {
     let response: Response;
+    let estimateMissingUsage = false;
     if (provider === 'anthropic') {
       if (!anthropicAuth) {
         // provider === 'anthropic' guarantees anthropicAuth was resolved above
@@ -180,7 +181,12 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
       }
       response = await forwardToOpenAI(c.env, body, modelId, aigMetadata, openaiCredential.apiKey);
     } else {
-      response = await forwardToWorkersAI(c.env, body, modelId, aigMetadata);
+      ({ response, estimateMissingUsage } = await forwardToWorkersAI(
+        c.env,
+        body,
+        modelId,
+        aigMetadata
+      ));
     }
 
     log.info('ai_proxy.response', {
@@ -211,7 +217,9 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
       });
     }
 
-    return accountingResponse(c, response, prepared.userId, estimatedInputTokens);
+    return accountingResponse(c, response, prepared.userId, estimatedInputTokens, {
+      estimateMissingUsage,
+    });
   } catch (err) {
     log.error('ai_proxy.fetch_error', {
       userId: prepared.userId,

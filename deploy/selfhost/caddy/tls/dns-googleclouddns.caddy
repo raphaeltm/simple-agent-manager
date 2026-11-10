@@ -1,7 +1,11 @@
 # Let's Encrypt wildcard certificate through a DNS-01 challenge against Google Cloud DNS.
 # Credentials: Application Default Credentials (the VM's service account on GCE needs
 # roles/dns.admin on the zone's project). GCP_PROJECT is the project that owns the zone.
+# ACME_EMAIL may be empty (an account with no contact). ACME_CA defaults to Let's Encrypt
+# production; point it at https://acme-staging-v02.api.letsencrypt.org/directory for a first
+# trial run so a misconfiguration cannot spend the production rate limit.
 tls {$ACME_EMAIL} {
+	ca {$ACME_CA:https://acme-v02.api.letsencrypt.org/directory}
 	dns googleclouddns {
 		gcp_project {$GCP_PROJECT}
 	}

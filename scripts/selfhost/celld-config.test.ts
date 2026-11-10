@@ -122,6 +122,8 @@ describe('buildCelldConfig against the real apps/api/wrangler.toml', () => {
     expect((source.vars as Record<string, string>).AI_GATEWAY_ID).toBeTruthy();
     expect(config.vars.AI_GATEWAY_ID).toBe('');
     expect(config.vars.BASE_DOMAIN).toBe('sam.example.com');
+    // Provider ownership labels need it (resolveEnvironmentLabel); Cloudflare sets it at sync.
+    expect(config.vars.ENVIRONMENT).toBe('selfhost');
     // Ordinary tunables still flow through from wrangler.toml [vars].
     expect(config.vars.MAX_NODES_PER_USER).toBe(
       (source.vars as Record<string, string>).MAX_NODES_PER_USER

@@ -43,6 +43,12 @@ export const SELFHOST_VAR_OVERRIDES: Readonly<Record<string, string>> = {
   // Nodes reach the box through frps on loopback instead of per-node Cloudflare DNS/tunnels
   // (reverse-tunnel transport, sibling task T2 on sam/selfhost-pass-2).
   VM_AGENT_TRANSPORT: 'reverse-tunnel',
+  // The environment label that, with SAM_INSTALLATION_ID, scopes provider resources to this
+  // install (node-provider-labels.ts). Cloudflare deploys set staging/production in
+  // sync-wrangler-config.ts; unset, a node whose create response was lost can never be
+  // recovered ("Allocation ownership scope is unavailable") and the provider-orphan sweep is
+  // skipped. Verified on the T4 GCP box.
+  ENVIRONMENT: 'selfhost',
 };
 
 /** Keys the generator owns. Values a caller passes for these are rejected. */

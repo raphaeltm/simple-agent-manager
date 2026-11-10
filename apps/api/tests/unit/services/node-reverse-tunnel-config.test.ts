@@ -4,7 +4,9 @@ import {
   deriveReverseTunnelCredential,
   getReverseTunnelGatewaySecret,
   hashReverseTunnelCredential,
+  resolveReverseTunnelHeartbeatTimeoutSeconds,
   resolveReverseTunnelPortRange,
+  resolveReverseTunnelPortReuseMinAgeSeconds,
 } from '../../../src/services/node-reverse-tunnel-config';
 import { resolveManagedNodeTransport } from '../../../src/services/node-tunnel-config';
 
@@ -103,5 +105,53 @@ describe('gateway secret and credentials', () => {
       await deriveReverseTunnelCredential({ ENCRYPTION_KEY: 'z'.repeat(44) }, identity)
     ).not.toBe(a);
     expect(await hashReverseTunnelCredential(a)).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
+describe('heartbeat timeout and port reuse age', () => {
+  it('default to 90 s and 2 x 90 s', () => {
+    expect(resolveReverseTunnelHeartbeatTimeoutSeconds({})).toBe(90);
+    expect(resolveReverseTunnelPortReuseMinAgeSeconds({})).toBe(180);
+  });
+
+  it('derive the reuse age from a configured heartbeat timeout', () => {
+    const env = { REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS: ' 150 ' };
+    expect(resolveReverseTunnelHeartbeatTimeoutSeconds(env)).toBe(150);
+    expect(resolveReverseTunnelPortReuseMinAgeSeconds(env)).toBe(300);
+  });
+
+  it.each(['59', '3601', 'abc', '1.5', '-1', '90s'])(
+    'refuse heartbeat timeout %j (fail closed: no lease)',
+    (value) => {
+      const env = { REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS: value };
+      expect(() => resolveReverseTunnelHeartbeatTimeoutSeconds(env)).toThrow(/60-3600/);
+      expect(() => resolveReverseTunnelPortReuseMinAgeSeconds(env)).toThrow(/60-3600/);
+    }
+  );
+
+  it('accept a longer reuse age and refuse one below the floor or malformed', () => {
+    expect(
+      resolveReverseTunnelPortReuseMinAgeSeconds({
+        REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS: '600',
+      })
+    ).toBe(600);
+    expect(() =>
+      resolveReverseTunnelPortReuseMinAgeSeconds({
+        REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS: '179',
+      })
+    ).toThrow(/at least 180/);
+    expect(() =>
+      resolveReverseTunnelPortReuseMinAgeSeconds({
+        REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS: '120',
+        REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS: '200',
+      })
+    ).toThrow(/at least 240/);
+    for (const value of ['86401', 'x', '1e3']) {
+      expect(() =>
+        resolveReverseTunnelPortReuseMinAgeSeconds({
+          REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS: value,
+        })
+      ).toThrow(/REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS/);
+    }
   });
 });

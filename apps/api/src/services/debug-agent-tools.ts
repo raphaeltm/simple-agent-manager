@@ -14,7 +14,7 @@ import {
   chatTargetHeaders,
   fetchChatTarget,
   LlmUnavailableError,
-  resolveWorkersAiChatTarget,
+  resolveWorkersAiChatTargetWithin,
 } from './llm-chat-target';
 import {
   getErrorTrends,
@@ -201,11 +201,17 @@ export async function complete(
   messages: ChatMessage[],
   maxTokens: number
 ): Promise<Completion> {
-  const target = await resolveWorkersAiChatTarget(env, 'diagnosis', config.model);
-  if (!target) throw new LlmUnavailableError('diagnosis');
+  // One budget for the whole call, armed before the endpoint settings read.
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.timeoutMs);
   try {
+    const target = await resolveWorkersAiChatTargetWithin(
+      env,
+      'diagnosis',
+      config.model,
+      controller.signal
+    );
+    if (!target) throw new LlmUnavailableError('diagnosis');
     const response = await fetchChatTarget(target, {
       method: 'POST',
       signal: controller.signal,

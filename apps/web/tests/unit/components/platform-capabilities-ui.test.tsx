@@ -93,9 +93,12 @@ function withQueryClient(children: ReactNode) {
  */
 async function capabilitiesSettled() {
   await waitFor(() =>
-    expect(client.getQueryCache().getAll().every((query) => query.state.status === 'success')).toBe(
-      true
-    )
+    expect(
+      client
+        .getQueryCache()
+        .getAll()
+        .every((query) => query.state.status === 'success')
+    ).toBe(true)
   );
   expect(client.getQueryCache().getAll().length).toBeGreaterThan(0);
 }
@@ -121,8 +124,12 @@ const AGENT_MESSAGE = {
   timestamp: 1_787_000_000_000,
 } as ConversationItem;
 
-function agentBubble() {
-  return withQueryClient(<AcpConversationItemView item={AGENT_MESSAGE} />);
+/**
+ * A row takes server read-aloud from its list (one capabilities read per conversation, see
+ * tests/unit/pages/conversation-capabilities-observer.test.tsx for the query-to-row path).
+ */
+function agentBubble(serverTextToSpeech: boolean) {
+  return <AcpConversationItemView item={AGENT_MESSAGE} serverTextToSpeech={serverTextToSpeech} />;
 }
 
 afterEach(() => {
@@ -150,19 +157,16 @@ describe('voice input', () => {
 });
 
 describe('server read-aloud', () => {
-  it('drops the speaker when there is no server TTS (jsdom has no browser speech either)', async () => {
-    serveCapabilities(SELF_HOST);
-    render(agentBubble());
+  it('drops the speaker when there is no server TTS (jsdom has no browser speech either)', () => {
+    render(agentBubble(false));
 
-    await waitFor(() => expect(screen.queryByLabelText('Read aloud')).toBeNull());
+    expect(screen.queryByLabelText('Read aloud')).toBeNull();
     expect(screen.getByText(/the migration is applied/)).toBeInTheDocument();
   });
 
-  it('keeps the speaker when the installation has server TTS', async () => {
-    serveCapabilities(ASSUMED_PLATFORM_CAPABILITIES);
-    render(agentBubble());
+  it('keeps the speaker when the installation has server TTS', () => {
+    render(agentBubble(true));
 
-    await capabilitiesSettled();
     expect(screen.getByLabelText('Read aloud')).toBeInTheDocument();
   });
 });
@@ -306,9 +310,7 @@ describe('after a failed capabilities read', () => {
   it('keeps every service offered, then follows the real answer once a refetch succeeds', async () => {
     serveCapabilities({ error: 'INTERNAL_ERROR' }, 500);
     render(composer());
-    await waitFor(() =>
-      expect(client.getQueryCache().getAll()[0]?.state.status).toBe('error')
-    );
+    await waitFor(() => expect(client.getQueryCache().getAll()[0]?.state.status).toBe('error'));
     // Fail open: the mic stays while the answer is unknown.
     expect(screen.getByTestId('voice-button')).toBeInTheDocument();
 

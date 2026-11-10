@@ -8,6 +8,8 @@ import {
   __resetAdminSettingsCacheForTest,
   updateAdminSettings,
 } from '../../../src/services/admin-settings';
+import { buildBudgetKey } from '../../../src/services/ai-token-budget';
+import { estimateTokensFromText } from '../../../src/services/ai-token-usage-accounting';
 import {
   chatTargetHeaders,
   LlmUnavailableError,
@@ -409,6 +411,29 @@ describe('SAM and project agents through the real loop', () => {
     expect(JSON.parse(String(init.body))).toMatchObject({ model: 'agent-model', stream: true });
   });
 
+  it('ask the endpoint for usage and charge an output estimate when none arrives', async () => {
+    Object.assign(env, CLOUDFLARE);
+    await configureEndpoint({ baseUrl: 'https://llm.example.com/v1', model: 'default-model' });
+    const output = 'an answer from the operator endpoint';
+    const fetchMock = vi.fn(async () =>
+      sseResponse([JSON.stringify({ choices: [{ delta: { content: output } }] }), '[DONE]'])
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    await runAgentLoop('conv-1', [], 'hi', config, env, 'user-1', writer(), vi.fn());
+
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      stream: true,
+      stream_options: { include_usage: true },
+    });
+    const key = buildBudgetKey('user-1');
+    await vi.waitFor(async () => expect(await env.KV.get(key)).not.toBeNull());
+    const charged = JSON.parse(String(await env.KV.get(key))) as { outputTokens: number };
+    expect(charged.outputTokens).toBe(estimateTokensFromText(output));
+  });
+
   it('keep the Workers AI gateway route for @cf models when no endpoint is configured', async () => {
     Object.assign(env, CLOUDFLARE);
     const fetchMock = vi.fn(async () =>
@@ -432,6 +457,11 @@ describe('SAM and project agents through the real loop', () => {
       'https://gateway.ai.cloudflare.com/v1/account-1/sam/workers-ai/v1/chat/completions'
     );
     expect((init.headers as Record<string, string>)['cf-aig-metadata']).toContain('sam-session');
+    // The Cloudflare request is unchanged: no usage request added to it.
+    expect(JSON.parse(String(init.body))).not.toHaveProperty('stream_options');
+    // ...and a stream without a usage chunk is still charged nothing (reported-only accounting).
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(await env.KV.get(buildBudgetKey('user-1'))).toBeNull();
   });
 
   it('tell the user no model is configured, without an error log, when nothing can serve the turn', async () => {

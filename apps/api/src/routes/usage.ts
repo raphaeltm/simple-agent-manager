@@ -37,7 +37,7 @@ import {
 import { checkQuotaForUser, userHasOwnCloudCredentials } from '../services/compute-quotas';
 import { getCurrentPeriodBounds } from '../services/compute-usage';
 import { getUserNodeUsageSummary } from '../services/node-usage';
-import { resolveAiGatewayId } from '../services/platform-capabilities';
+import { isMonthlyCostCapAvailable, resolveAiGatewayId } from '../services/platform-capabilities';
 
 const usageRoutes = new Hono<{ Bindings: Env }>();
 
@@ -284,9 +284,12 @@ usageRoutes.get('/ai/budget', requireAuth(), requireApproved(), async (c) => {
   const dailyOutputPercent = effectiveLimits.dailyOutputTokenLimit > 0
     ? Math.min(100, (dailyUsage.outputTokens / effectiveLimits.dailyOutputTokenLimit) * 100)
     : 0;
-  const monthlyCostPercent = settings.monthlyCostCapUsd !== null && settings.monthlyCostCapUsd > 0
-    ? Math.min(100, (monthCostUsd / settings.monthlyCostCapUsd) * 100)
-    : null;
+  // Without AI Gateway a cap is neither settable nor enforced, so it has no utilization.
+  const monthlyCostCapAvailable = isMonthlyCostCapAvailable(c.env);
+  const monthlyCostPercent =
+    monthlyCostCapAvailable && settings.monthlyCostCapUsd !== null && settings.monthlyCostCapUsd > 0
+      ? Math.min(100, (monthCostUsd / settings.monthlyCostCapUsd) * 100)
+      : null;
 
   const exceeded = dailyInputPercent >= 100 || dailyOutputPercent >= 100
     || (monthlyCostPercent !== null && monthlyCostPercent >= 100);
@@ -300,6 +303,7 @@ usageRoutes.get('/ai/budget', requireAuth(), requireApproved(), async (c) => {
     },
     effectiveLimits,
     monthCostUsd,
+    monthlyCostCapAvailable,
     utilization: {
       dailyInputPercent: Math.round(dailyInputPercent * 10) / 10,
       dailyOutputPercent: Math.round(dailyOutputPercent * 10) / 10,

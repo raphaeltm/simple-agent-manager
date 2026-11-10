@@ -48,7 +48,10 @@ export const REVERSE_TUNNEL_CONNECTOR_RUNCMD = `  - 'logger -t sam-boot "PHASE S
   - 'logger -t sam-boot "PHASE END: tunnel-connector"'`;
 
 /**
- * frpc config, credential file and unit. loginFailExit=false + Restart=always: frpc keeps
+ * frpc config, credential file and unit. poolCount: frpc keeps work connections open ahead of
+ * use, so frps' NewWorkConn authorization (a plugin round trip to the control plane) happens
+ * when the pool refills, not on the path of each proxied connection.
+ * loginFailExit=false + Restart=always: frpc keeps
  * retrying (an frps restart, a Caddy restart, an authz rejection while the lease is being
  * fixed) instead of exiting. useSystemCa: frpc verifies the box's public certificate; without
  * it frpc would accept any certificate.
@@ -77,6 +80,7 @@ export const REVERSE_TUNNEL_WRITE_FILES = `${TUNNEL_LISTENER_WAIT_WRITE_FILE}
       transport.tls.useSystemCa = true
       transport.heartbeatInterval = {{ reverse_tunnel_heartbeat_interval_seconds }}
       transport.heartbeatTimeout = {{ reverse_tunnel_heartbeat_timeout_seconds }}
+      transport.poolCount = {{ reverse_tunnel_pool_count }}
       log.to = "console"
 
       [[proxies]]

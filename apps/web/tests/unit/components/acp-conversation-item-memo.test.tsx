@@ -3,12 +3,6 @@ import { render } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Cloudflare behaviour: every platform service present (absent case: platform-capabilities-ui.test.tsx).
-vi.mock('../../../src/hooks/usePlatformCapabilities', () => ({
-  usePlatformCapabilities: () => ({ speechToText: true, textToSpeech: true }),
-}));
-
-
 /**
  * Counts every react-markdown parse. `MessageBubble` renders agent text through
  * react-markdown + remark-gfm, so this counter is a direct measurement of the
@@ -36,9 +30,8 @@ vi.mock('../../../src/contexts/GlobalAudioContext', () => ({
 }));
 
 // Imported after the mocks so the mocked modules are in place.
-const { AcpConversationItemView } = await import(
-  '../../../src/components/project-message-view/AcpConversationItemView'
-);
+const { AcpConversationItemView } =
+  await import('../../../src/components/project-message-view/AcpConversationItemView');
 
 // `timestamp` must be a positive number — MessageBubble gates its action row
 // (which hosts the "Read aloud" control) on `!streaming && timestamp > 0`.
@@ -74,7 +67,12 @@ function Conversation({
   return (
     <>
       {items.map((item) => (
-        <AcpConversationItemView key={item.id} item={item} onFileClick={onFileClick} />
+        <AcpConversationItemView
+          serverTextToSpeech
+          key={item.id}
+          item={item}
+          onFileClick={onFileClick}
+        />
       ))}
     </>
   );
@@ -112,7 +110,9 @@ describe('AcpConversationItemView — MessageBubble memoization during streaming
 
   it('keeps settled bubbles memoized across many consecutive tokens', () => {
     const settled = Array.from({ length: 8 }, (_, i) => agentItem(`s${i}`, `settled ${i}`));
-    const stream = (text: string) => <Conversation items={[...settled, agentItem('live', text, true)]} />;
+    const stream = (text: string) => (
+      <Conversation items={[...settled, agentItem('live', text, true)]} />
+    );
 
     const { rerender } = render(stream(''));
     markdownRenders.mockClear();

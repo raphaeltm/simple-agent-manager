@@ -88,6 +88,31 @@ describe('setup routes', () => {
     await expect(res.json()).resolves.toMatchObject({ ok: true });
   });
 
+  it('rate-limits token attempts without a trusted client IP in one shared bucket, not per User-Agent', async () => {
+    const env = createEnv({ SETUP_RATE_LIMIT_MAX_ATTEMPTS: '2' } as Partial<Env>);
+    const app = createApp();
+    const attempt = (userAgent: string, ip?: string) =>
+      app.request(
+        '/api/setup/verify',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'User-Agent': userAgent,
+            ...(ip ? { 'CF-Connecting-IP': ip } : {}),
+          },
+          body: JSON.stringify({ token: 'wrong-token' }),
+        },
+        env
+      );
+    expect((await attempt('agent-a')).status).toBe(401);
+    expect((await attempt('agent-b')).status).toBe(401);
+    // A third User-Agent is not a fresh bucket: the shared one is spent.
+    expect((await attempt('agent-c')).status).toBe(429);
+    // Liveness control: a request with a trusted address still has its own bucket.
+    expect((await attempt('agent-c', '198.51.100.40')).status).toBe(401);
+  });
+
   it('rejects a literal null JSON body without crashing', async () => {
     const res = await createApp().request(
       '/api/setup/verify',

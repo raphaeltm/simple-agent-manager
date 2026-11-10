@@ -174,7 +174,8 @@ describe('GitHub sign-in through better-auth (vertical slice)', () => {
   /** Browser: click "Sign in with GitHub", approve on GitHub, land back on the callback. */
   async function signInWithGitHub(
     code?: string,
-    onBeforeCallback?: (state: string, authorizeUrl: URL) => void
+    onBeforeCallback?: (state: string, authorizeUrl: URL) => void,
+    callbackHeaders: Record<string, string> = {}
   ): Promise<Response> {
     const start = await app.request(
       `${API_ORIGIN}/api/auth/sign-in/social`,
@@ -200,7 +201,7 @@ describe('GitHub sign-in through better-auth (vertical slice)', () => {
     callback.searchParams.set('iss', 'https://github.com/login/oauth');
     const response = await app.request(
       callback.toString(),
-      { headers: { cookie: jar.header() } },
+      { headers: { cookie: jar.header(), ...callbackHeaders } },
       env
     );
     jar.store(response);
@@ -248,6 +249,18 @@ describe('GitHub sign-in through better-auth (vertical slice)', () => {
       'GET https://api.github.com/user',
       'GET https://api.github.com/user/emails',
     ]);
+  });
+
+  it('records the session IP from CF-Connecting-IP, never a client X-Forwarded-For', async () => {
+    const callback = await signInWithGitHub(undefined, undefined, {
+      'CF-Connecting-IP': '203.0.113.50',
+      'X-Forwarded-For': '198.51.100.99',
+    });
+    expect(callback.status).toBe(302);
+    const sessions = sqlite.prepare('SELECT ip_address FROM sessions').all() as Array<{
+      ip_address: string | null;
+    }>;
+    expect(sessions).toEqual([{ ip_address: '203.0.113.50' }]);
   });
 
   it('signs an existing GitHub user back into the account production already stores', async () => {

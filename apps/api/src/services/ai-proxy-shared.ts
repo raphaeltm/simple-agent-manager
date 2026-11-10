@@ -16,7 +16,7 @@ import {
   isCloudflareChatTarget,
   type LlmPurpose,
   LlmUnavailableError,
-  resolveWorkersAiChatTarget,
+  resolveWorkersAiChatTargetWithin,
 } from './llm-chat-target';
 import { resolveAiGatewayId } from './platform-capabilities';
 
@@ -204,18 +204,54 @@ export async function readSafeGatewayErrorDiagnostic(
   return parts.join(' ').slice(0, boundedMaxLength);
 }
 
+/** Bound on the sanitized reason logged for a failed third-party model call. */
+export const UPSTREAM_ERROR_REASON_MAX_LENGTH = 256;
+/**
+ * Bytes of a third-party error body read to find its `code`/`type` (never logged). An
+ * OpenAI-style body puts a long `message` first, so a window as small as the reason would cut
+ * the JSON before the fields that matter and log nothing.
+ */
+export const UPSTREAM_ERROR_BODY_PARSE_MAX_BYTES = 4096;
+
+/**
+ * Log fields for a failed model response, consuming its body. A Cloudflare or first-party
+ * provider route keeps logging up to 500 characters of the body, as it always has. A
+ * third-party endpoint's body is never logged: it can echo the configured key or the prompt, so
+ * only an allowlisted, bounded reason (`readSafeGatewayErrorDiagnostic`) is kept.
+ */
+export async function upstreamErrorLogFields(
+  response: Response,
+  thirdParty: boolean
+): Promise<{ body?: string; reason?: string }> {
+  if (!thirdParty) {
+    return { body: (await response.text().catch(() => 'Unknown error')).slice(0, 500) };
+  }
+  const reason = await readSafeGatewayErrorDiagnostic(
+    response,
+    UPSTREAM_ERROR_BODY_PARSE_MAX_BYTES
+  ).catch(() => undefined);
+  return reason ? { reason: reason.slice(0, UPSTREAM_ERROR_REASON_MAX_LENGTH) } : {};
+}
+
 export async function fetchWorkersAIChatCompletion(
   env: Env,
   options: WorkersAIChatCompletionOptions
 ): Promise<string | null> {
-  const target = await resolveWorkersAiChatTarget(env, options.purpose, options.modelId);
+  // One budget for the whole call, armed before the endpoint settings read.
+  const signal = AbortSignal.timeout(options.timeoutMs);
+  const target = await resolveWorkersAiChatTargetWithin(
+    env,
+    options.purpose,
+    options.modelId,
+    signal
+  );
   if (!target) throw new LlmUnavailableError(options.purpose);
   // reasoning_effort and chat_template_kwargs are Workers AI model quirks keyed by the
   // Cloudflare model id; another endpoint's model would reject or misread them.
   const cloudflare = isCloudflareChatTarget(target);
   const response = await fetchChatTarget(target, {
     method: 'POST',
-    signal: AbortSignal.timeout(options.timeoutMs),
+    signal,
     headers: chatTargetHeaders(target, { 'cf-aig-metadata': JSON.stringify(options.metadata) }),
     body: JSON.stringify({
       model: target.model,

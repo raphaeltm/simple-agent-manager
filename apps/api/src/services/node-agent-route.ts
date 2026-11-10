@@ -17,7 +17,11 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { getNodeBackendBaseUrl, type NodeBackendBaseUrlEnv } from './node-agent-readiness';
-import { reverseTunnelUpstreamOrigin } from './node-reverse-tunnel-config';
+import {
+  assertReverseTunnelUpstreamPort,
+  type ReverseTunnelRangeEnv,
+  reverseTunnelUpstreamOrigin,
+} from './node-reverse-tunnel-config';
 
 export type NodeAgentRoute =
   | { kind: 'container'; runtime: 'cf-container' }
@@ -88,7 +92,7 @@ export async function readNodeAgentRouteRow(
 export function nodeAgentRouteFromRow(
   nodeId: string,
   row: NodeAgentRouteRow | null,
-  env: NodeBackendBaseUrlEnv
+  env: NodeBackendBaseUrlEnv & ReverseTunnelRangeEnv
 ): NodeAgentRoute {
   if (row?.runtime === 'cf-container') return { kind: 'container', runtime: 'cf-container' };
   if (row?.transport === 'reverse-tunnel') {
@@ -97,6 +101,12 @@ export function nodeAgentRouteFromRow(
         nodeId,
         `Node ${nodeId} uses the reverse-tunnel transport but has no active lease for its current incarnation`
       );
+    }
+    // The upstream is a loopback port on this box: never route outside the lease range.
+    try {
+      assertReverseTunnelUpstreamPort(env, row.leasePort);
+    } catch (err) {
+      throw new NodeAgentRouteError(nodeId, err instanceof Error ? err.message : String(err));
     }
     return {
       kind: 'reverse-tunnel',
@@ -108,7 +118,7 @@ export function nodeAgentRouteFromRow(
 }
 
 export async function resolveNodeAgentRoute(
-  env: Pick<Env, 'DATABASE'> & NodeBackendBaseUrlEnv,
+  env: Pick<Env, 'DATABASE'> & NodeBackendBaseUrlEnv & ReverseTunnelRangeEnv,
   nodeId: string
 ): Promise<NodeAgentRoute> {
   return nodeAgentRouteFromRow(nodeId, await readNodeAgentRouteRow(env, nodeId), env);

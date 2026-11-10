@@ -7,6 +7,11 @@
  * node agent at that address. Everything here is bootstrap configuration that must agree with
  * the box's frps.toml and Caddy fragments (deploy/selfhost/), so it is not a runtime tunable.
  */
+import {
+  REVERSE_TUNNEL_HEARTBEAT_INTERVAL_SECONDS,
+  REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS,
+} from '@simple-agent-manager/cloud-init';
+
 import type { Env } from '../env';
 
 /**
@@ -27,6 +32,32 @@ export const MAX_REVERSE_TUNNEL_PORT_RANGE_SIZE = 20000;
 /** The gateway secret is a random token shared with frps and Caddy; refuse anything guessable. */
 export const MIN_REVERSE_TUNNEL_GATEWAY_SECRET_LENGTH = 32;
 
+/**
+ * frps drops a node that has not heartbeated for this long (frps `transport.heartbeatTimeout`).
+ * The box's deploy script resolves ONE value and writes it to both frps (gateway.env) and the
+ * Worker (REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS), so the port-reuse age below is derived
+ * from the timeout frps actually enforces. Default = the frpc-side timeout cloud-init renders.
+ */
+export const DEFAULT_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS = Number(
+  REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS
+);
+/** frpc pings every 30 s; a timeout under two intervals would drop healthy nodes. */
+export const MIN_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS =
+  2 * Number(REVERSE_TUNNEL_HEARTBEAT_INTERVAL_SECONDS);
+export const MAX_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS = 3600;
+/**
+ * A released port is not reissued until it has been released for at least this many heartbeat
+ * timeouts. Within one timeout frps has dropped any session that stopped pinging; a session
+ * still pinging is refused (Ping re-checks the lease) within one frpc interval. Twice the
+ * timeout leaves margin for both, so a new node's traffic (with the Worker-injected
+ * Authorization and node management tokens) can never land on the previous holder's frpc.
+ */
+export const REVERSE_TUNNEL_PORT_REUSE_HEARTBEAT_MULTIPLE = 2;
+export const DEFAULT_REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS =
+  REVERSE_TUNNEL_PORT_REUSE_HEARTBEAT_MULTIPLE * DEFAULT_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS;
+/** Upper bound on the reuse age: past a day a port is effectively never reused. */
+export const MAX_REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS = 86_400;
+
 const CREDENTIAL_LABEL = 'sam-reverse-tunnel-credential:v1';
 
 export type ReverseTunnelEnv = Pick<
@@ -34,6 +65,14 @@ export type ReverseTunnelEnv = Pick<
   | 'REVERSE_TUNNEL_GATEWAY_SECRET'
   | 'REVERSE_TUNNEL_PORT_RANGE_START'
   | 'REVERSE_TUNNEL_PORT_RANGE_END'
+  | 'REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS'
+  | 'REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS'
+>;
+
+/** The leased port range settings alone (route resolution needs no secret). */
+export type ReverseTunnelRangeEnv = Pick<
+  Env,
+  'REVERSE_TUNNEL_PORT_RANGE_START' | 'REVERSE_TUNNEL_PORT_RANGE_END'
 >;
 
 export interface ReverseTunnelPortRange {
@@ -51,7 +90,7 @@ function parsePort(name: string, raw: string | undefined, fallback: number): num
 }
 
 /** The leased port range. Fails closed on a malformed or oversized range. */
-export function resolveReverseTunnelPortRange(env: ReverseTunnelEnv): ReverseTunnelPortRange {
+export function resolveReverseTunnelPortRange(env: ReverseTunnelRangeEnv): ReverseTunnelPortRange {
   const start = parsePort(
     'REVERSE_TUNNEL_PORT_RANGE_START',
     env.REVERSE_TUNNEL_PORT_RANGE_START,
@@ -73,6 +112,82 @@ export function resolveReverseTunnelPortRange(env: ReverseTunnelEnv): ReverseTun
     );
   }
   return { start, end };
+}
+
+function parseSeconds(
+  name: string,
+  raw: string | undefined,
+  fallback: number,
+  bounds: { min: number; max: number }
+): number {
+  const value = raw?.trim() ?? '';
+  if (value === '') return fallback;
+  const parsed = Number(value);
+  if (!/^\d+$/.test(value) || parsed < bounds.min || parsed > bounds.max) {
+    throw new Error(
+      `${name} must be whole seconds ${bounds.min}-${bounds.max} (got ${JSON.stringify(value)})`
+    );
+  }
+  return parsed;
+}
+
+/** frps' heartbeat timeout as the Worker was told it (same resolved value as gateway.env). */
+export function resolveReverseTunnelHeartbeatTimeoutSeconds(
+  env: Pick<Env, 'REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS'>
+): number {
+  return parseSeconds(
+    'REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS',
+    env.REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS,
+    DEFAULT_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS,
+    {
+      min: MIN_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS,
+      max: MAX_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS,
+    }
+  );
+}
+
+/**
+ * Minimum age of a port's latest release before allocation may reissue it. Defaults to
+ * {@link REVERSE_TUNNEL_PORT_REUSE_HEARTBEAT_MULTIPLE} x the heartbeat timeout; an override may
+ * lengthen it but never shorten it below that floor (fails closed: no lease is written).
+ */
+export function resolveReverseTunnelPortReuseMinAgeSeconds(
+  env: Pick<
+    Env,
+    'REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS' | 'REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS'
+  >
+): number {
+  const floor =
+    REVERSE_TUNNEL_PORT_REUSE_HEARTBEAT_MULTIPLE * resolveReverseTunnelHeartbeatTimeoutSeconds(env);
+  const configured = parseSeconds(
+    'REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS',
+    env.REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS,
+    Math.max(DEFAULT_REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS, floor),
+    { min: 0, max: MAX_REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS }
+  );
+  if (configured < floor) {
+    throw new Error(
+      `REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS must be at least ${floor} ` +
+        `(${REVERSE_TUNNEL_PORT_REUSE_HEARTBEAT_MULTIPLE} x the frps heartbeat timeout)`
+    );
+  }
+  return configured;
+}
+
+/**
+ * Fail-closed membership check for a lease port about to become an upstream (a Worker fetch
+ * target or Caddy's X-SAM-Upstream). The lease table should only ever hold in-range ports, but
+ * the upstream is loopback on the control-plane box, next to celld's operator listener, frps
+ * and the object store, so a row outside the range (a manual edit, a range shrunk under live
+ * leases, a bug) must never be routed to. Throws on an out-of-range port or a malformed range.
+ */
+export function assertReverseTunnelUpstreamPort(env: ReverseTunnelRangeEnv, port: number): void {
+  const range = resolveReverseTunnelPortRange(env);
+  if (!Number.isInteger(port) || port < range.start || port > range.end) {
+    throw new Error(
+      `Reverse-tunnel lease port ${String(port)} is outside the configured range ${range.start}-${range.end}`
+    );
+  }
 }
 
 /** The configured gateway secret, or null when absent/too short (callers fail closed). */

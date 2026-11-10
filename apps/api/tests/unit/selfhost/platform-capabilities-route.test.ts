@@ -75,14 +75,14 @@ describe('GET /api/config/platform-capabilities', () => {
 
     expect(res.status).toBe(200);
     // Booleans the UI reads, and nothing else (no configuration fingerprint beyond them).
-    expect(body).toEqual({ speechToText: true, textToSpeech: true });
+    expect(body).toEqual({ speechToText: true, textToSpeech: true, monthlyCostCap: true });
   });
 
   it('reports the Cloudflare-only capabilities absent on a runtime without them', async () => {
     const { res, body } = await getCapabilities(selfHostedEnv());
 
     expect(res.status).toBe(200);
-    expect(body).toEqual({ speechToText: false, textToSpeech: false });
+    expect(body).toEqual({ speechToText: false, textToSpeech: false, monthlyCostCap: false });
   });
 
   it('turns text-to-speech off with TTS_ENABLED=false while speech-to-text stays on', async () => {
@@ -132,4 +132,3 @@ describe('GET /api/config/instant-runtime', () => {
     expect(body.enabled).toBe(false);
   });
 });
-
