@@ -411,10 +411,21 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
   // server-side (keyed on tunnelId presence, NOT nodeClass — a future public-IP BYO mode still wants
   // backfill) so a heartbeat can never create an A record that conflicts with the enrollment CNAME.
   // See security-critique #8 / architecture-critique #7.
-  if (node.tunnelId) {
+  // One exception: a deployment-role tunnel node whose provider reported no IP at create. Its
+  // app routes are grey-cloud A records to the node's public IP (services/dns-app-routes.ts),
+  // so it records the heartbeat's IPv4 egress as `ip_address` only. It never gets a backend A
+  // record: `effectiveNodeIp` stays null for every tunnel node.
+  const deploymentTunnelIpBackfill =
+    !!node.tunnelId && node.nodeRole === 'deployment' && !node.ipAddress;
+  if (node.tunnelId && !deploymentTunnelIpBackfill) {
     log.debug('heartbeat.ip_backfill_skipped_tunnel_node', { nodeId, action: 'skipped' });
   }
-  const heartbeatIp = node.tunnelId ? undefined : c.req.header('CF-Connecting-IP');
+  const connectingIp = c.req.header('CF-Connecting-IP');
+  const heartbeatIp = !node.tunnelId
+    ? connectingIp
+    : deploymentTunnelIpBackfill && isValidIPv4Address(connectingIp)
+      ? connectingIp
+      : undefined;
 
   // Defense-in-depth: backfill IP from heartbeat if node has no IP stored.
   // This self-heals Scaleway nodes where the IP wasn't captured at creation time.
@@ -428,7 +439,7 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
         action: 'ip_backfilled',
       });
       updatePayload.ipAddress = heartbeatIp;
-      effectiveNodeIp = heartbeatIp;
+      effectiveNodeIp = node.tunnelId ? null : heartbeatIp;
 
       // Always clear the "Awaiting IP allocation" error when IP is backfilled.
       // Use explicit SQL null to ensure Drizzle/D1 generates SET errorMessage = NULL

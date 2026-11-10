@@ -11,11 +11,11 @@ import {
   continueDirectWorkspaceCreation,
 } from '../services/direct-workspace-creation';
 import { NodeAllocationUncertainError } from '../services/node-allocation-recovery';
+import { provisionNode } from '../services/node-provisioning';
 import {
   resolveManagedNodeTransport,
   resolveNodeTunnelProvisioningBudgetMs,
 } from '../services/node-tunnel-config';
-import { provisionNode } from '../services/node-provisioning';
 import { persistError } from '../services/observability';
 import { taskStatusIsNonTerminalSql, TERMINAL_STATUS_VALUES } from '../services/task-status';
 import { confirmUnassignedWorkspaceAbsence } from '../services/unassigned-workspace-deletion';
@@ -216,8 +216,7 @@ export class NodeLifecycleProvisioning {
       // the attempt as a whole also gets the tunnel-setup budget when this incarnation uses
       // tunnel transport, because tunnel setup is about six sequential Cloudflare calls before
       // createVM. Setup is resumable, so an attempt that still runs out continues next time.
-      const attemptDeadlineMs =
-        timeout + (await this.tunnelSetupBudgetMs(node, intent));
+      const attemptDeadlineMs = timeout + (await this.tunnelSetupBudgetMs(node, intent));
       timer = setTimeout(
         () =>
           controller.abort(

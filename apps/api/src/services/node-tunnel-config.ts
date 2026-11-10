@@ -1,11 +1,17 @@
 /**
- * Transport selection and tunnel configuration for managed workspace VM nodes.
+ * Transport selection and tunnel configuration for managed VM nodes.
  *
- * `VM_AGENT_TRANSPORT='cloudflare-tunnel'` opts NEW managed workspace VM nodes into an
- * outbound-only Cloudflare named tunnel. An unset transport keeps legacy public-IP
- * transport unchanged; unsupported values fail provisioning. Deployment-role nodes and Instant (cf-container) runtimes are
- * deliberately excluded: deployment nodes serve public app routes on their own IP, and a
- * container runtime has no VM to run cloudflared on.
+ * `VM_AGENT_TRANSPORT='cloudflare-tunnel'` opts NEW managed VM nodes, workspace and deployment
+ * role alike, into an outbound-only Cloudflare named tunnel for the VM agent's control channel
+ * (`{nodeId}.vm.{BASE_DOMAIN}`). An unset transport keeps legacy public-IP transport
+ * unchanged; unsupported values fail provisioning. Instant (cf-container) runtimes are
+ * excluded: a container runtime has no VM to run cloudflared on.
+ *
+ * Deployment nodes keep their public app ingress: app routes stay grey-cloud A records to the
+ * node IP, with Caddy terminating TLS by ACME (services/dns-app-routes.ts). Routing app
+ * traffic through the tunnel would need edge certificates for nested `*.apps.` hostnames
+ * (Advanced Certificate Manager) and Cloudflare for SaaS for user custom domains; see
+ * tasks/archive/2026-11-10-tunnel-transport-hardening.md.
  */
 import {
   DEFAULT_CLOUDFLARE_TUNNEL_PORT,
@@ -125,7 +131,10 @@ export function resolveManagedNodeTransport(
   if (configured !== 'cloudflare-tunnel') {
     throw new Error(`Unsupported VM_AGENT_TRANSPORT ${JSON.stringify(configured)}`);
   }
-  if (node.isDeploymentNode || node.runtime !== 'vm' || node.nodeClass !== 'managed') return null;
+  if (node.runtime !== 'vm' || node.nodeClass !== 'managed') return null;
+  // Deployment nodes are included: the tunnel carries only their agent control channel, and
+  // their app routes keep using the public IP. A future tunnel transport must decide this
+  // separately for deployment nodes (their app ingress is not tunnelled).
   return 'cloudflare-tunnel';
 }
 

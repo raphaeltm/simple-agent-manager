@@ -15,6 +15,7 @@ import type { Env } from '../../src/env';
 import { nodesRoutes } from '../../src/routes/nodes';
 import { crudRoutes } from '../../src/routes/workspaces/crud';
 import { registerWorkspaceCreateRoute } from '../../src/routes/workspaces/workspace-create';
+import { updateAdminSettings } from '../../src/services/admin-settings';
 import { clearCapacityCatalogCache } from '../../src/services/default-capacity-source-credentials';
 import { encrypt } from '../../src/services/encryption';
 import { getSession } from '../../src/services/project-data';
@@ -22,7 +23,6 @@ import {
   attemptWorkspaceDeletion,
   loadWorkspaceDeletionIdentity,
 } from '../../src/services/workspace-deletion';
-import { updateAdminSettings } from '../../src/services/admin-settings';
 import { ensurePoolsWithStarterMachines } from '../helpers/capacity-pool-picks';
 import { FakeCloudflare } from '../helpers/fake-cloudflare-tunnels';
 import { seedInstallation, seedNode, seedProject, seedUser } from './helpers/seed-d1';

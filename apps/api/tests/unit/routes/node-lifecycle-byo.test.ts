@@ -300,6 +300,74 @@ describe('node-lifecycle BYO gates', () => {
       expect(state.updates.some((u) => 'ipAddress' in u)).toBe(false);
     });
 
+    function heartbeatFrom(ip: string) {
+      return getNodeLifecycleApp().request(
+        '/api/nodes/node-1/heartbeat',
+        {
+          method: 'POST',
+          headers: {
+            Authorization: 'Bearer node-token',
+            'Content-Type': 'application/json',
+            'CF-Connecting-IP': ip,
+          },
+          body: JSON.stringify({ nodeId: 'node-1' }),
+        },
+        { DATABASE: {}, BASE_DOMAIN: 'example.com' },
+        { waitUntil: vi.fn(), passThroughOnException: vi.fn() }
+      );
+    }
+
+    it('ignores the connecting IP of a workspace tunnel node even when one is sent', async () => {
+      state.node = makeNode({
+        transport: 'cloudflare-tunnel',
+        tunnelId: 'tunnel-uuid',
+        ipAddress: null,
+      });
+      const res = await heartbeatFrom('203.0.113.9');
+      expect(res.status).toBe(200);
+      expect(state.dns.create).toBeNull();
+      expect(state.updates.some((u) => 'ipAddress' in u)).toBe(false);
+    });
+
+    it('records the IPv4 of a deployment tunnel node with no IP, without any backend A record', async () => {
+      state.node = makeNode({
+        nodeRole: 'deployment',
+        status: 'creating',
+        transport: 'cloudflare-tunnel',
+        tunnelId: 'tunnel-uuid',
+        ipAddress: null,
+        errorMessage: 'Awaiting IP allocation — will be set on first heartbeat',
+      });
+      const res = await heartbeatFrom('203.0.113.8');
+      expect(res.status).toBe(200);
+      // App routes need the public IP (grey-cloud A records); the node hostname stays the CNAME.
+      expect(state.updates).toContainEqual(
+        expect.objectContaining({ ipAddress: '203.0.113.8', status: 'running' })
+      );
+      expect(state.dns.create).toBeNull();
+      expect(state.dns.update).toBeNull();
+    });
+
+    it('never backfills a deployment tunnel node from a non-IPv4 address or over a stored IP', async () => {
+      state.node = makeNode({
+        nodeRole: 'deployment',
+        transport: 'cloudflare-tunnel',
+        tunnelId: 'tunnel-uuid',
+        ipAddress: null,
+      });
+      expect((await heartbeatFrom('2001:db8::8')).status).toBe(200);
+      expect(state.updates.some((u) => 'ipAddress' in u)).toBe(false);
+      state.node = makeNode({
+        nodeRole: 'deployment',
+        transport: 'cloudflare-tunnel',
+        tunnelId: 'tunnel-uuid',
+        ipAddress: '198.51.100.4',
+      });
+      expect((await heartbeatFrom('203.0.113.8')).status).toBe(200);
+      expect(state.updates.some((u) => 'ipAddress' in u)).toBe(false);
+      expect(state.dns.create).toBeNull();
+    });
+
     it('DOES backfill IP + A record for a managed node without a tunnel', async () => {
       state.node = makeNode({ tunnelId: null, ipAddress: null });
       // CF-Connecting-IP drives the backfill on a non-tunnel node.

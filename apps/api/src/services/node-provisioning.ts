@@ -18,8 +18,8 @@ import { createNodeBackendDNSRecord } from './dns';
 import { GcpApiError, sanitizeGcpError } from './gcp-errors';
 import { signCurrentNodeCallbackToken } from './jwt';
 import {
-  type DurableNodeAllocation,
   durableAllocationMayHaveCreated,
+  type DurableNodeAllocation,
   NodeAllocationUncertainError,
   recoverNodeAllocation,
 } from './node-allocation-recovery';
@@ -455,8 +455,9 @@ export async function provisionNode(
     // Store the provider instance ID and mark as pending-ip; heartbeat backfill
     // will capture the IP when the VM agent sends its first heartbeat.
     // Tunnel nodes are reached through cloudflared, never the public IP: no IP wait and no
-    // A record. The heartbeat backfill also skips them (keyed on nodes.tunnel_id).
-    if (!vm.ip && !tunnel) {
+    // A record. The heartbeat backfill also skips them (keyed on nodes.tunnel_id). A deployment
+    // tunnel node still serves its app routes on the public IP, so it waits for one.
+    if (!vm.ip && (!tunnel || isDeploymentNode)) {
       log.info('node_provisioning.awaiting_ip_backfill', {
         nodeId: node.id,
         providerInstanceId: vm.id,
@@ -573,7 +574,12 @@ export async function provisionNode(
     // (a released row would refuse it forever), and an earlier attempt of it may already have
     // a VM holding this token. Its row is released by node teardown or the sweep once the
     // incarnation is no longer live.
-    if (tunnelJournaled && !durable && !providerCreateRequested && provisioningRuntimeIncarnationId) {
+    if (
+      tunnelJournaled &&
+      !durable &&
+      !providerCreateRequested &&
+      provisioningRuntimeIncarnationId
+    ) {
       await releaseTunnelBeforeVm(env, node.id, provisioningRuntimeIncarnationId);
     }
     if (err instanceof NodeAllocationUncertainError) throw err;

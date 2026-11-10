@@ -15,10 +15,10 @@ Deployment nodes are excluded from tunnels entirely.
 
 ## Staging evidence (queried 2026-11-10 22:50Z, staging D1 `node_cloudflare_tunnels`)
 
-| node | tunnel_id | status | reason | attempts | pending_create_count | last_error |
-| --- | --- | --- | --- | --- | --- | --- |
-| 01M73GH65N0542PA0ZV13AW6GN | NULL | cleanup_pending | provisioning_failed_before_vm | 8 (still retrying hourly) | 1 | NULL |
-| 01M73GRDNT3TF4S3Y8T6110ENW | 453a4e0f-… | cleaned (15 s after create) | provisioning_failed_before_vm | 0 | 0 | NULL |
+| node                       | tunnel_id  | status                      | reason                        | attempts                  | pending_create_count | last_error |
+| -------------------------- | ---------- | --------------------------- | ----------------------------- | ------------------------- | -------------------- | ---------- |
+| 01M73GH65N0542PA0ZV13AW6GN | NULL       | cleanup_pending             | provisioning_failed_before_vm | 8 (still retrying hourly) | 1                    | NULL       |
+| 01M73GRDNT3TF4S3Y8T6110ENW | 453a4e0f-… | cleaned (15 s after create) | provisioning_failed_before_vm | 0                         | 0                    | NULL       |
 
 Both node rows are gone (hard-deleted). Two separate defects are visible:
 
@@ -79,6 +79,7 @@ Both node rows are gone (hard-deleted). Two separate defects are visible:
 ## Design: deployment nodes on tunnel transport
 
 Facts (deployment-node map, file:line in the session notes):
+
 - App routes are `r{n}-{svc}-{port}-{envId}.apps.{BASE_DOMAIN}`: grey-cloud A records to
   `nodes.ip_address`, upserted on every release fetch (`deploy-release-callback.ts`), stale routes
   removed after each fetch, on environment delete and on node delete.
@@ -97,6 +98,7 @@ Decision. Deployment nodes use the tunnel for the **vm-agent control channel onl
 `{nodeId}.vm` hostname becomes a tunnel CNAME, the agent port and SSH are dropped publicly, and no
 per-node Origin CA certificate is issued. **App ingress stays public**: the same grey-cloud A
 records, Caddy and ACME, with 80/443 open. Reasons:
+
 1. Proxying app routes through the tunnel would make every route a proxied nested hostname. That
    fails browser TLS on Free/Pro zones without ACM or Total TLS, so it would need either a
    hostname-scheme change, which breaks every existing route URL and custom-domain CNAME, or paid
@@ -159,7 +161,7 @@ Filled in during Phase 6, with the provider on every row.
 ## Spend tracking
 
 | Run | Provider | VMs x minutes | Est. cost |
-| --- | --- | --- | --- |
+| --- | -------- | ------------- | --------- |
 
 ## Acceptance Criteria
 

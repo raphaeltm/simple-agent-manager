@@ -234,7 +234,10 @@ beforeEach(() => {
   );
   applySqliteMigration(
     sqlite,
-    new URL('../../../src/db/migrations/0233_node_tunnel_pending_create_last_at.sql', import.meta.url)
+    new URL(
+      '../../../src/db/migrations/0233_node_tunnel_pending_create_last_at.sql',
+      import.meta.url
+    )
   );
   env = tunnelEnv();
   cf = new FakeCloudflare(ACCOUNT, ZONE);

@@ -55,9 +55,7 @@ describe('an unobserved create settles after the settle window', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(start + 60_000);
     await runNodeTunnelCleanupSweep(env, new Date(start + 60_000));
-    expect(journal(node.id)).toMatchObject([
-      { status: 'cleanup_pending', pendingCreateCount: 1 },
-    ]);
+    expect(journal(node.id)).toMatchObject([{ status: 'cleanup_pending', pendingCreateCount: 1 }]);
 
     // Default vmTunnels.pendingCreateSettleMs is 15 minutes.
     const later = start + 16 * 60_000;
@@ -114,9 +112,7 @@ describe('an unobserved create settles after the settle window', () => {
       },
     });
     await runNodeTunnelCleanupSweep(env);
-    expect(journal(node.id)).toMatchObject([
-      { status: 'cleanup_pending', pendingCreateCount: 2 },
-    ]);
+    expect(journal(node.id)).toMatchObject([{ status: 'cleanup_pending', pendingCreateCount: 2 }]);
   });
 });
 
