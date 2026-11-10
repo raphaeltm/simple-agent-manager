@@ -95,6 +95,29 @@ export async function resolveNodeTunnelProvisioningBudgetMs(env: Env): Promise<n
   return runtimeValue(env, 'provisioningBudgetMs');
 }
 
+/**
+ * Tunnel-setup share of a durable provisioning attempt's deadline: zero unless the attempt
+ * will provision with tunnel transport, decided exactly as `provisionNode` decides it (a
+ * resumed incarnation keeps its recorded transport; a new one reads the installation setting).
+ */
+export async function durableAttemptTunnelBudgetMs(
+  env: Env,
+  node: { runtimeIncarnationId: string | null; transport: string | null } & ManagedNodeTransportInput,
+  resumingIncarnationId: string
+): Promise<number> {
+  let transport: string | null;
+  try {
+    transport =
+      node.runtimeIncarnationId === resumingIncarnationId
+        ? node.transport
+        : resolveManagedNodeTransport(env, node);
+  } catch {
+    // An invalid transport setting fails inside provisionNode with a recorded error.
+    return 0;
+  }
+  return transport === 'cloudflare-tunnel' ? resolveNodeTunnelProvisioningBudgetMs(env) : 0;
+}
+
 /** Cloud-init validates the supported release and timing bounds before rendering. */
 export function nodeTunnelBootVariables(env: TunnelBootConfigEnv) {
   return {
@@ -113,7 +136,6 @@ export function nodeTunnelBootVariables(env: TunnelBootConfigEnv) {
 }
 
 export interface ManagedNodeTransportInput {
-  isDeploymentNode: boolean;
   runtime: string;
   nodeClass: string;
 }

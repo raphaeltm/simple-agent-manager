@@ -416,7 +416,10 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
   // so it records the heartbeat's IPv4 egress as `ip_address` only. It never gets a backend A
   // record: `effectiveNodeIp` stays null for every tunnel node.
   const deploymentTunnelIpBackfill =
-    !!node.tunnelId && node.nodeRole === 'deployment' && !node.ipAddress;
+    !!node.tunnelId &&
+    node.nodeRole === 'deployment' &&
+    node.nodeClass === 'managed' &&
+    !node.ipAddress;
   if (node.tunnelId && !deploymentTunnelIpBackfill) {
     log.debug('heartbeat.ip_backfill_skipped_tunnel_node', { nodeId, action: 'skipped' });
   }

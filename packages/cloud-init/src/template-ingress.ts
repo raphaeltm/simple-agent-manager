@@ -322,7 +322,8 @@ export const TUNNEL_FIREWALL_WRITE_FILE = `  - path: /etc/sam/firewall/setup-fir
       # Whether the INPUT jump exists is decided BEFORE iptables-restore starts. The restore
       # holds the xtables lock while it reads stdin, so an iptables call inside the producer
       # below would wait on that lock forever under iptables-legacy.
-      jump_state() { if "$1" -C INPUT -j "$CHAIN" 2>/dev/null; then echo present; else echo absent; fi; }
+      # -w waits for the lock instead of misreading contention as "absent" (a duplicate jump).
+      jump_state() { if "$1" -C INPUT -j "$CHAIN" -w 2>/dev/null; then echo present; else echo absent; fi; }
       rules() {
         echo '*filter'
         echo ":$CHAIN - [0:0]"

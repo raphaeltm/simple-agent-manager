@@ -26,11 +26,10 @@ import { getTimeoutMs, IoTimeoutError } from './fetch-timeout';
 import { resolveNodeTunnelCleanupConfig, type TunnelEnv } from './node-tunnel-config';
 import {
   listDueNodeTunnelCleanups,
+  NODE_TUNNEL_LAST_ERROR_MAX_LENGTH,
   type NodeTunnelRow,
   releaseNonLiveNodeTunnels,
 } from './node-tunnel-journal';
-
-const LAST_ERROR_MAX_LENGTH = 500;
 
 type CleanupEnv = TunnelEnv;
 
@@ -114,7 +113,7 @@ async function recordCleanupFailure(env: CleanupEnv, row: NodeTunnelRow, err: un
   const now = Date.now();
   const message = (err instanceof Error ? err.message : String(err)).slice(
     0,
-    LAST_ERROR_MAX_LENGTH
+    NODE_TUNNEL_LAST_ERROR_MAX_LENGTH
   );
   await env.DATABASE.prepare(
     `UPDATE node_cloudflare_tunnels

@@ -307,6 +307,7 @@ export async function ensureNodeTunnelForProvisioning(
   if (resumed) {
     input.onPhase?.('token');
     const connectorToken = await getTunnelToken(env, resumed.tunnelId, options);
+    if (row.lastError) await persistOwned(env, row, 'last_error = NULL', []);
     log.info('node_tunnel.provisioning_resumed', {
       nodeId: input.nodeId,
       runtimeIncarnationId: input.runtimeIncarnationId,
@@ -333,6 +334,7 @@ export async function ensureNodeTunnelForProvisioning(
 
   input.onPhase?.('token');
   const connectorToken = await getTunnelToken(env, tunnelId, options);
+  if (row.lastError) await persistOwned(env, row, 'last_error = NULL', []);
   log.info('node_tunnel.provisioned', {
     nodeId: input.nodeId,
     runtimeIncarnationId: input.runtimeIncarnationId,

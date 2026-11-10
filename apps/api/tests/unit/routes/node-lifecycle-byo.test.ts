@@ -342,10 +342,40 @@ describe('node-lifecycle BYO gates', () => {
       expect(res.status).toBe(200);
       // App routes need the public IP (grey-cloud A records); the node hostname stays the CNAME.
       expect(state.updates).toContainEqual(
-        expect.objectContaining({ ipAddress: '203.0.113.8', status: 'running' })
+        expect.objectContaining({
+          ipAddress: '203.0.113.8',
+          status: 'running',
+          // The "Awaiting IP allocation" error is cleared in the same write.
+          errorMessage: expect.objectContaining({ sql: 'NULL' }),
+        })
       );
       expect(state.dns.create).toBeNull();
       expect(state.dns.update).toBeNull();
+    });
+
+    it('records the IPv4 of an already-running deployment tunnel node that has none', async () => {
+      state.node = makeNode({
+        nodeRole: 'deployment',
+        status: 'running',
+        transport: 'cloudflare-tunnel',
+        tunnelId: 'tunnel-uuid',
+        ipAddress: null,
+      });
+      expect((await heartbeatFrom('203.0.113.6')).status).toBe(200);
+      expect(state.updates).toContainEqual(expect.objectContaining({ ipAddress: '203.0.113.6' }));
+      expect(state.dns.create).toBeNull();
+    });
+
+    it('never backfills a user-owned tunnel node even with the deployment role (server-side class gate)', async () => {
+      state.node = makeNode({
+        nodeRole: 'deployment',
+        nodeClass: 'user-owned',
+        transport: 'cloudflare-tunnel',
+        tunnelId: 'tunnel-uuid',
+        ipAddress: null,
+      });
+      expect((await heartbeatFrom('203.0.113.5')).status).toBe(200);
+      expect(state.updates.some((u) => 'ipAddress' in u)).toBe(false);
     });
 
     it('never backfills a deployment tunnel node from a non-IPv4 address or over a stored IP', async () => {

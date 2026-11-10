@@ -39,6 +39,13 @@ const CALLERS: Record<string, { durable: boolean; reason: string }> = {
   },
 };
 
+function codeOnly(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/.*$/gm, '')
+    .replace(/^\s*(import|export)\b[^;]*?\bfrom\s+['"][^'"]+['"];?/gms, '');
+}
+
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
     const path = join(dir, name);
@@ -51,7 +58,9 @@ describe('provisionNode caller inventory', () => {
   const files = sourceFiles(SRC);
   const callers = files
     .filter((path) => !path.endsWith('services/node-provisioning.ts'))
-    .filter((path) => /\bprovisionNode\(/.test(readFileSync(path, 'utf8')))
+    // Any code reference (a call, a call split across lines, an alias, the function passed as
+    // a value), after removing comments and static import/export statements.
+    .filter((path) => /\bprovisionNode\b/.test(codeOnly(readFileSync(path, 'utf8'))))
     .map((path) => relative(SRC, path))
     .sort();
 
@@ -65,7 +74,8 @@ describe('provisionNode caller inventory', () => {
 
   it('only the enumerated durable caller passes durableAllocation', () => {
     for (const [file, { durable }] of Object.entries(CALLERS)) {
-      expect(readFileSync(join(SRC, file), 'utf8').includes('durableAllocation'), file).toBe(
+      // The option key in a call, not a mention in a comment.
+      expect(/^\s*durableAllocation:/m.test(readFileSync(join(SRC, file), 'utf8')), file).toBe(
         durable
       );
     }

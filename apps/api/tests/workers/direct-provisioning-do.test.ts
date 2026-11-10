@@ -729,17 +729,18 @@ describe('durable direct allocation on Cloudflare Tunnel transport', () => {
   it('resumes the same incarnation after its first attempt is cut mid tunnel setup by the real deadline', async () => {
     const cf = new FakeCloudflare('durable-account', 'durable-zone');
     // Real POST /nodes -> NodeLifecycle start -> alarm -> provisionNode. The first attempt's
-    // deadline is the 3 s request timeout plus a 1 ms tunnel budget, and the first tunnel
-    // list and create each take 1.7 s (each under the 3 s per-call timeout), so the real
-    // AbortController fires inside the create POST: a lost response that later commits.
+    // deadline is the 3 s request timeout plus a 1 ms tunnel budget. The first tunnel list
+    // takes 1.0 s and the create 2.5 s (each under the 3 s per-call timeout), so the real
+    // AbortController fires inside the create POST (between ~1.1 s and 3.5 s): a lost
+    // response that commits later.
     const f = await setup(false, false, true, cf);
     await updateAdminSettings(f.testEnv, {
       actorUserId: f.userId,
       changes: [{ name: 'vmTunnels.provisioningBudgetMs', value: 1 }],
     });
     f.release();
-    cf.inject('tunnel.list', { kind: 'hook', run: () => sleep(1700) });
-    cf.inject('tunnel.create', { kind: 'hook', run: () => sleep(1700) });
+    cf.inject('tunnel.list', { kind: 'hook', run: () => sleep(1000) });
+    cf.inject('tunnel.create', { kind: 'hook', run: () => sleep(2500) });
     if ((await f.intent())?.attempts === 0) await f.tick();
     await vi.waitFor(
       async () => expect((await f.intent())?.lastError).toMatch(/deadline elapsed/),
@@ -758,6 +759,8 @@ describe('durable direct allocation on Cloudflare Tunnel transport', () => {
     expect(afterFirst?.last_error).toMatch(/^aborted during tunnel: NodeAllocationUncertainError/);
     expect((await f.intent())?.providerCreateRequested).toBe(false);
     expect(f.creates).toHaveLength(0);
+    // Observe the premise instead of assuming it: the cut create commits after the abort.
+    await vi.waitFor(() => expect(cf.liveTunnels()).toHaveLength(1), { timeout: 5000 });
 
     await runInDurableObject(f.stub, async (instance) => {
       (instance as unknown as { provisioningController: unknown }).provisioningController =

@@ -157,7 +157,6 @@ const READ_PATHS: readonly ReadPath[] = [
       }
       return [
         resolveManagedNodeTransport(asEnv(env), {
-          isDeploymentNode: false,
           runtime: 'vm',
           nodeClass: 'managed',
         }),

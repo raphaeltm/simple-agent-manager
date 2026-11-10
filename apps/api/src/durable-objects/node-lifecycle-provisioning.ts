@@ -12,10 +12,8 @@ import {
 } from '../services/direct-workspace-creation';
 import { NodeAllocationUncertainError } from '../services/node-allocation-recovery';
 import { provisionNode } from '../services/node-provisioning';
-import {
-  resolveManagedNodeTransport,
-  resolveNodeTunnelProvisioningBudgetMs,
-} from '../services/node-tunnel-config';
+import { releaseDurableTunnelBeforeVm } from '../services/node-provisioning-predicates';
+import { durableAttemptTunnelBudgetMs } from '../services/node-tunnel-config';
 import { persistError } from '../services/observability';
 import { taskStatusIsNonTerminalSql, TERMINAL_STATUS_VALUES } from '../services/task-status';
 import { confirmUnassignedWorkspaceAbsence } from '../services/unassigned-workspace-deletion';
@@ -216,7 +214,7 @@ export class NodeLifecycleProvisioning {
       // the attempt as a whole also gets the tunnel-setup budget when this incarnation uses
       // tunnel transport, because tunnel setup is about six sequential Cloudflare calls before
       // createVM. Setup is resumable, so an attempt that still runs out continues next time.
-      const attemptDeadlineMs = timeout + (await this.tunnelSetupBudgetMs(node, intent));
+      const attemptDeadlineMs = timeout + (await durableAttemptTunnelBudgetMs(this.env, node, intent.incarnationId));
       timer = setTimeout(
         () =>
           controller.abort(
@@ -324,33 +322,6 @@ export class NodeLifecycleProvisioning {
   }
 
   /**
-   * Tunnel-setup share of this attempt's deadline: the transport this attempt will provision
-   * with, decided exactly as `provisionNode` decides it (a resumed incarnation keeps its
-   * recorded transport; a new one reads the installation setting). Zero when no tunnel.
-   */
-  private async tunnelSetupBudgetMs(
-    node: typeof schema.nodes.$inferSelect,
-    intent: DirectProvisioningIntent
-  ): Promise<number> {
-    let transport: string | null;
-    try {
-      transport =
-        node.runtimeIncarnationId === intent.incarnationId
-          ? node.transport
-          : resolveManagedNodeTransport(this.env, {
-              isDeploymentNode: false,
-              runtime: node.runtime,
-              nodeClass: node.nodeClass,
-            });
-    } catch {
-      // An invalid transport setting fails inside provisionNode with a recorded error.
-      return 0;
-    }
-    if (transport !== 'cloudflare-tunnel') return 0;
-    return resolveNodeTunnelProvisioningBudgetMs(this.env);
-  }
-
-  /**
    * Persist, before the provider create POST, that this allocation may now own a VM. Fenced on
    * the attempt that is sending it, so a superseded attempt cannot create. Throws when the
    * record cannot be made: provisionNode then never sends the POST.
@@ -375,9 +346,10 @@ export class NodeLifecycleProvisioning {
     status: 'complete' | 'failed',
     message: string | null
   ): Promise<void> {
-    await this.withLock(async () => {
+    const ended = await this.withLock(async () => {
       const current = await this.ctx.storage.get<DirectProvisioningIntent>(DIRECT_PROVISIONING_KEY);
-      if (!current || current.attempts !== intent.attempts || current.status !== 'pending') return;
+      if (!current || current.attempts !== intent.attempts || current.status !== 'pending')
+        return null;
       await this.ctx.storage.put(DIRECT_PROVISIONING_KEY, {
         ...current,
         status,
@@ -385,7 +357,9 @@ export class NodeLifecycleProvisioning {
         lastError: message,
       });
       await this.ctx.storage.deleteAlarm();
+      return current;
     });
+    if (ended && status === 'failed') await releaseDurableTunnelBeforeVm(this.env, ended);
   }
 
   private async publishExhaustion(intent: DirectProvisioningIntent): Promise<void> {
@@ -499,6 +473,7 @@ export class NodeLifecycleProvisioning {
           .run();
       }
     }
+    await releaseDurableTunnelBeforeVm(this.env, intent);
     await persistError(
       this.env.OBSERVABILITY_DATABASE,
       {

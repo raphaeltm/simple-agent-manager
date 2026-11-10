@@ -30,7 +30,7 @@ export interface NodeTunnelRow {
   /** POSTs without an observed terminal response; absence from inventory is not finality. */
   pendingCreateCount: number;
   /**
-   * When the latest unobserved POST was sent. Rows from before migration 0232 have no stamp and
+   * When the latest unobserved POST was sent. Rows from before migration 0233 have no stamp and
    * fall back to `created_at`, which precedes every POST for the row.
    */
   pendingCreateSince: string;
@@ -89,7 +89,11 @@ export async function readNodeTunnelById(
  * The only column assignments an owned-row update may make. A closed literal set, so no caller
  * can ever interpolate a computed string into the SQL below.
  */
-export type OwnedNodeTunnelAssignment = 'tunnel_id = ?' | "dns_record_id = ?, status = 'active'";
+export type OwnedNodeTunnelAssignment =
+  | 'tunnel_id = ?'
+  | "dns_record_id = ?, status = 'active'"
+  // Provisioning finished: an earlier attempt's recorded cause is no longer current.
+  | 'last_error = NULL';
 
 /** Update an owned (provisioning/active) row. Returns false when cleanup already claimed it. */
 export async function updateOwnedNodeTunnel(
@@ -177,7 +181,11 @@ export async function listDueNodeTunnelCleanups(
   return result.results ?? [];
 }
 
-const PROVISIONING_ERROR_MAX_LENGTH = 500;
+/**
+ * Storage-hygiene bound for `last_error` (provisioning and cleanup causes): an error message is
+ * diagnostic text, not data, and a fixed cap keeps one row from carrying a huge payload.
+ */
+export const NODE_TUNNEL_LAST_ERROR_MAX_LENGTH = 500;
 
 /**
  * Record why provisioning of this incarnation's tunnel failed or was cut off, on the journal row
@@ -193,10 +201,10 @@ export async function recordNodeTunnelProvisioningError(
   try {
     await env.DATABASE.prepare(
       `UPDATE node_cloudflare_tunnels SET last_error = ?, updated_at = ?
-        WHERE node_id = ? AND runtime_incarnation_id = ? AND status != 'cleaned'`
+        WHERE node_id = ? AND runtime_incarnation_id = ? AND status IN ('provisioning', 'active')`
     )
       .bind(
-        message.slice(0, PROVISIONING_ERROR_MAX_LENGTH),
+        message.slice(0, NODE_TUNNEL_LAST_ERROR_MAX_LENGTH),
         new Date().toISOString(),
         nodeId,
         runtimeIncarnationId

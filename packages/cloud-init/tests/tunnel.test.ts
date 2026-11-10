@@ -489,12 +489,6 @@ const canUseNetns =
     stdio: 'ignore',
   }).status === 0;
 
-/**
- * Real netfilter in a private network namespace (needs passwordless sudo;
- * skipped elsewhere). A checker loop watches the DROP rule and the INPUT jump
- * while the script is re-applied repeatedly: an atomic replacement never shows
- * a gap, where the previous flush-and-re-add approach would.
- */
 const canUseLegacyNetns =
   canUseNetns &&
   spawnSync('sudo', ['-n', 'unshare', '-n', 'iptables-legacy', '-w', '-L', 'INPUT', '-n'], {
@@ -508,6 +502,9 @@ const canUseLegacyNetns =
  * under `timeout -s KILL` so a regression fails fast and leaves no process holding the
  * host's lock (which would also hang Docker).
  */
+if (!canUseLegacyNetns) {
+  console.warn('SKIPPED: tunnel firewall iptables-legacy test needs passwordless sudo + netns');
+}
 describe.skipIf(!canUseLegacyNetns)('tunnel firewall under iptables-legacy', () => {
   it('applies and re-applies without deadlocking on the xtables lock', () => {
     const box = sandbox({ logger: 'true' });
@@ -532,6 +529,7 @@ describe.skipIf(!canUseLegacyNetns)('tunnel firewall under iptables-legacy', () 
 timeout -s KILL 15 bash ${fw}
 timeout -s KILL 15 bash ${fw}
 iptables-legacy -w -S > ${d}/v4
+ip6tables-legacy -w -S > ${d}/v6 2>/dev/null || true
 chown -R ${process.getuid?.() ?? 0} ${d}`;
     const result = spawnSync(
       'sudo',
@@ -544,9 +542,19 @@ chown -R ${process.getuid?.() ?? 0} ${d}`;
     // Re-applied once: the jump is not duplicated.
     expect(v4.match(/-A INPUT -j SAM-TUNNEL-INGRESS/g)).toHaveLength(1);
     expect(v4).toContain('-A SAM-TUNNEL-INGRESS -p tcp -m tcp --dport 8080 -j DROP');
+    const v6 = readFileSync(join(d, 'v6'), 'utf8');
+    if (v6.includes('SAM-TUNNEL-INGRESS')) {
+      expect(v6.match(/-A INPUT -j SAM-TUNNEL-INGRESS/g)).toHaveLength(1);
+    }
   }, 60_000);
 });
 
+/**
+ * Real netfilter in a private network namespace (needs passwordless sudo;
+ * skipped elsewhere). A checker loop watches the DROP rule and the INPUT jump
+ * while the script is re-applied repeatedly: an atomic replacement never shows
+ * a gap, where the previous flush-and-re-add approach would.
+ */
 describe.skipIf(!canUseNetns)('tunnel firewall against real netfilter', () => {
   it('re-applies without any window where the agent port is unprotected', () => {
     const box = sandbox({ logger: 'true' });

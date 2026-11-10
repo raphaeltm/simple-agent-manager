@@ -188,7 +188,6 @@ export async function provisionNode(
         ? 'cloudflare-tunnel'
         : null
       : resolveManagedNodeTransport(tunnelEnv, {
-          isDeploymentNode: !!deploymentContext,
           runtime: node.runtime,
           nodeClass: node.nodeClass,
         });
@@ -340,7 +339,14 @@ export async function provisionNode(
     let vm: Awaited<ReturnType<typeof provider.createVM>>;
     providerCreateRequested = true;
     try {
-      if (!recoverExisting) await durable?.markProviderCreateRequested?.();
+      if (!recoverExisting && durable?.markProviderCreateRequested) {
+        // Nothing may sit between this mark and the POST except the provider's own pre-POST
+        // work (GCP's OAuth token exchange); a cut there leaves the intent reconciling to
+        // exhaustion, which is the fail-closed outcome for an uncertain create.
+        throwIfProviderRequestAborted(providerContext);
+        await durable.markProviderCreateRequested();
+        throwIfProviderRequestAborted(providerContext);
+      }
       vm = await (recoverExisting && durable
         ? recoverNodeAllocation(provider, node, env, durable, providerContext)
         : providerContext
@@ -455,8 +461,9 @@ export async function provisionNode(
     // Store the provider instance ID and mark as pending-ip; heartbeat backfill
     // will capture the IP when the VM agent sends its first heartbeat.
     // Tunnel nodes are reached through cloudflared, never the public IP: no IP wait and no
-    // A record. The heartbeat backfill also skips them (keyed on nodes.tunnel_id). A deployment
-    // tunnel node still serves its app routes on the public IP, so it waits for one.
+    // A record (the heartbeat never creates one for them, keyed on nodes.tunnel_id). A
+    // deployment tunnel node still serves its app routes on the public IP, so it waits for
+    // one; its heartbeat records that IP without an A record (routes/node-lifecycle.ts).
     if (!vm.ip && (!tunnel || isDeploymentNode)) {
       log.info('node_provisioning.awaiting_ip_backfill', {
         nodeId: node.id,
