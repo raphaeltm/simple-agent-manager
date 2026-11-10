@@ -80,8 +80,6 @@ import { getRuntimeLimits } from '../../../src/services/limits';
 import { buildNodeCloudInit } from '../../../src/services/node-provisioning-cloud-init';
 import {
   resolveManagedNodeTransport,
-  resolveNodeTunnelApiConfig,
-  resolveNodeTunnelCleanupConfig,
   resolveVmAgentTunnelPort,
 } from '../../../src/services/node-tunnel-config';
 import {
@@ -131,7 +129,7 @@ const API = 'apps/api/src';
 
 const READ_PATHS: readonly ReadPath[] = [
   {
-    label: 'managed VM tunnel transport, connector boot, API retry and cleanup configuration',
+    label: 'managed VM tunnel transport and connector boot configuration',
     sources: [`${API}/services/node-tunnel-config.ts`],
     read: (env) => {
       let boot: string;
@@ -163,8 +161,6 @@ const READ_PATHS: readonly ReadPath[] = [
           runtime: 'vm',
           nodeClass: 'managed',
         }),
-        resolveNodeTunnelApiConfig(asEnv(env)),
-        resolveNodeTunnelCleanupConfig(asEnv(env)),
         boot,
       ];
     },

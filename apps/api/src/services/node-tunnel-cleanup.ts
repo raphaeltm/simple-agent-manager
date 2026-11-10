@@ -32,17 +32,17 @@ const LAST_ERROR_MAX_LENGTH = 500;
 
 type CleanupEnv = TunnelEnv;
 
-function cleanupOptions(env: CleanupEnv): CloudflareCallOptions {
+async function cleanupOptions(env: CleanupEnv): Promise<CloudflareCallOptions> {
   const interactive = getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
-  const background = resolveNodeTunnelCleanupConfig(env).requestTimeoutMs;
+  const background = (await resolveNodeTunnelCleanupConfig(env)).requestTimeoutMs;
   return { timeoutMs: Math.min(interactive, background) };
 }
 
-export function nodeTunnelCleanupBackoffMs(
+export async function nodeTunnelCleanupBackoffMs(
   env: Parameters<typeof resolveNodeTunnelCleanupConfig>[0],
   attempts: number
-): number {
-  const { backoffBaseMs: base, backoffMaxMs: max } = resolveNodeTunnelCleanupConfig(env);
+): Promise<number> {
+  const { backoffBaseMs: base, backoffMaxMs: max } = await resolveNodeTunnelCleanupConfig(env);
   const exponent = Math.min(Math.max(attempts - 1, 0), 20);
   return Math.min(base * 2 ** exponent, max);
 }
@@ -101,7 +101,7 @@ async function recordCleanupFailure(env: CleanupEnv, row: NodeTunnelRow, err: un
   )
     .bind(
       attempts,
-      new Date(now + nodeTunnelCleanupBackoffMs(env, attempts)).toISOString(),
+      new Date(now + (await nodeTunnelCleanupBackoffMs(env, attempts))).toISOString(),
       message,
       new Date(now).toISOString(),
       row.id
@@ -114,7 +114,7 @@ async function recordCleanupFailure(env: CleanupEnv, row: NodeTunnelRow, err: un
     attempts,
     ...serializeError(err),
   };
-  if (attempts >= resolveNodeTunnelCleanupConfig(env).stuckAttempts) {
+  if (attempts >= (await resolveNodeTunnelCleanupConfig(env)).stuckAttempts) {
     log.error('node_tunnel.cleanup_stuck', fields);
   } else {
     log.warn('node_tunnel.cleanup_failed', fields);
@@ -133,7 +133,7 @@ export async function cleanupNodeTunnelRow(env: CleanupEnv, row: NodeTunnelRow):
       // cannot prove these resources gone. Keep the identity for an operator.
       throw new Error('Tunnel journal belongs to a different Cloudflare account or zone');
     }
-    const options = cleanupOptions(env);
+    const options = await cleanupOptions(env);
     // DNS first: once the hostname stops resolving to the tunnel, the tunnel is unreachable.
     await deleteOwnDnsRecord(env, row, options);
     await deleteOwnTunnels(env, row, options);
@@ -187,7 +187,7 @@ export async function settleNodeTunnels(
     const due = await listDueNodeTunnelCleanups(
       env,
       new Date().toISOString(),
-      resolveNodeTunnelCleanupConfig(env).batchSize,
+      (await resolveNodeTunnelCleanupConfig(env)).batchSize,
       nodeId
     );
     for (const row of due) {
@@ -209,7 +209,7 @@ export async function runNodeTunnelCleanupSweep(
   const due = await listDueNodeTunnelCleanups(
     env,
     now.toISOString(),
-    resolveNodeTunnelCleanupConfig(env).batchSize
+    (await resolveNodeTunnelCleanupConfig(env)).batchSize
   );
   let cleaned = 0;
   for (const row of due) {

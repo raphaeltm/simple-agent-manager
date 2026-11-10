@@ -18,32 +18,17 @@ import {
 import type { NodeTransport } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
+import { resolveAdminSetting } from './admin-settings';
+import {
+  NODE_TUNNEL_RUNTIME_DEFAULTS,
+  type NodeTunnelSettingName,
+} from './admin-settings-node-tunnel-definitions';
 import { getNodeBackendHostname } from './dns-core';
 
 /** Worker configuration is canonical; no separate pre-integration environment contract. */
 export type TunnelEnv = Env;
 type TunnelTransportEnv = Pick<Env, 'VM_AGENT_TRANSPORT' | 'VM_AGENT_TUNNEL_PORT'>;
 
-export const DEFAULT_CF_TUNNEL_API_IDEMPOTENT_ATTEMPTS = 3;
-export const DEFAULT_CF_TUNNEL_API_RETRY_DELAY_MS = 250;
-export const DEFAULT_NODE_TUNNEL_CLEANUP_REQUEST_TIMEOUT_MS = 10_000;
-export const DEFAULT_NODE_TUNNEL_CLEANUP_BATCH_SIZE = 10;
-export const DEFAULT_NODE_TUNNEL_CLEANUP_BACKOFF_BASE_MS = 60_000;
-export const DEFAULT_NODE_TUNNEL_CLEANUP_BACKOFF_MAX_MS = 3_600_000;
-export const DEFAULT_NODE_TUNNEL_CLEANUP_STUCK_ATTEMPTS = 6;
-
-type TunnelApiConfigEnv = Pick<
-  Env,
-  'CF_TUNNEL_API_IDEMPOTENT_ATTEMPTS' | 'CF_TUNNEL_API_RETRY_DELAY_MS'
->;
-type TunnelCleanupConfigEnv = Pick<
-  Env,
-  | 'NODE_TUNNEL_CLEANUP_REQUEST_TIMEOUT_MS'
-  | 'NODE_TUNNEL_CLEANUP_BATCH_SIZE'
-  | 'NODE_TUNNEL_CLEANUP_BACKOFF_BASE_MS'
-  | 'NODE_TUNNEL_CLEANUP_BACKOFF_MAX_MS'
-  | 'NODE_TUNNEL_CLEANUP_STUCK_ATTEMPTS'
->;
 type TunnelBootConfigEnv = Pick<
   Env,
   | 'CLOUDFLARED_VERSION'
@@ -53,47 +38,33 @@ type TunnelBootConfigEnv = Pick<
   | 'VM_AGENT_TUNNEL_RESTART_SECONDS'
 >;
 
-function positiveInteger(raw: string | undefined, fallback: number): number {
-  const value = Number(raw);
-  return Number.isSafeInteger(value) && value > 0 ? value : fallback;
+async function runtimeValue(
+  env: Env,
+  key: keyof typeof NODE_TUNNEL_RUNTIME_DEFAULTS
+): Promise<number> {
+  const name: NodeTunnelSettingName = `vmTunnels.${key}`;
+  const value = await resolveAdminSetting(env, name);
+  return typeof value === 'number' ? value : NODE_TUNNEL_RUNTIME_DEFAULTS[key];
 }
 
-export function resolveNodeTunnelApiConfig(env: TunnelApiConfigEnv) {
-  return {
-    attempts: positiveInteger(
-      env.CF_TUNNEL_API_IDEMPOTENT_ATTEMPTS,
-      DEFAULT_CF_TUNNEL_API_IDEMPOTENT_ATTEMPTS
-    ),
-    retryDelayMs: positiveInteger(
-      env.CF_TUNNEL_API_RETRY_DELAY_MS,
-      DEFAULT_CF_TUNNEL_API_RETRY_DELAY_MS
-    ),
-  };
+export async function resolveNodeTunnelApiConfig(env: Env) {
+  const [attempts, retryDelayMs] = await Promise.all([
+    runtimeValue(env, 'apiAttempts'),
+    runtimeValue(env, 'apiRetryDelayMs'),
+  ]);
+  return { attempts, retryDelayMs };
 }
 
-export function resolveNodeTunnelCleanupConfig(env: TunnelCleanupConfigEnv) {
-  return {
-    requestTimeoutMs: positiveInteger(
-      env.NODE_TUNNEL_CLEANUP_REQUEST_TIMEOUT_MS,
-      DEFAULT_NODE_TUNNEL_CLEANUP_REQUEST_TIMEOUT_MS
-    ),
-    batchSize: positiveInteger(
-      env.NODE_TUNNEL_CLEANUP_BATCH_SIZE,
-      DEFAULT_NODE_TUNNEL_CLEANUP_BATCH_SIZE
-    ),
-    backoffBaseMs: positiveInteger(
-      env.NODE_TUNNEL_CLEANUP_BACKOFF_BASE_MS,
-      DEFAULT_NODE_TUNNEL_CLEANUP_BACKOFF_BASE_MS
-    ),
-    backoffMaxMs: positiveInteger(
-      env.NODE_TUNNEL_CLEANUP_BACKOFF_MAX_MS,
-      DEFAULT_NODE_TUNNEL_CLEANUP_BACKOFF_MAX_MS
-    ),
-    stuckAttempts: positiveInteger(
-      env.NODE_TUNNEL_CLEANUP_STUCK_ATTEMPTS,
-      DEFAULT_NODE_TUNNEL_CLEANUP_STUCK_ATTEMPTS
-    ),
-  };
+export async function resolveNodeTunnelCleanupConfig(env: Env) {
+  const [requestTimeoutMs, batchSize, backoffBaseMs, backoffMaxMs, stuckAttempts] =
+    await Promise.all([
+      runtimeValue(env, 'cleanupRequestTimeoutMs'),
+      runtimeValue(env, 'cleanupBatchSize'),
+      runtimeValue(env, 'cleanupBackoffBaseMs'),
+      runtimeValue(env, 'cleanupBackoffMaxMs'),
+      runtimeValue(env, 'cleanupStuckAttempts'),
+    ]);
+  return { requestTimeoutMs, batchSize, backoffBaseMs, backoffMaxMs, stuckAttempts };
 }
 
 /** Cloud-init validates the supported release and timing bounds before rendering. */

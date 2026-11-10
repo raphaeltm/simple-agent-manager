@@ -24,16 +24,7 @@ import { resolveNodeTunnelApiConfig } from './node-tunnel-config';
 
 const ERROR_MESSAGE_MAX_LENGTH = 200;
 
-export type CloudflareTunnelEnv = Pick<
-  Env,
-  | 'CF_API_TOKEN'
-  | 'CF_ACCOUNT_ID'
-  | 'CF_ZONE_ID'
-  | 'CF_API_TIMEOUT_MS'
-  | 'DNS_TTL_SECONDS'
-  | 'CF_TUNNEL_API_IDEMPOTENT_ATTEMPTS'
-  | 'CF_TUNNEL_API_RETRY_DELAY_MS'
->;
+export type CloudflareTunnelEnv = Env;
 
 export interface CloudflareCallOptions {
   /** Per-request timeout override (background cleanup uses a shorter budget). */
@@ -119,7 +110,7 @@ async function cloudflareRequest(
   body: unknown,
   options: CloudflareCallOptions = {}
 ): Promise<unknown> {
-  const retry = resolveNodeTunnelApiConfig(env);
+  const retry = await resolveNodeTunnelApiConfig(env);
   const attempts = method === 'POST' ? 1 : retry.attempts;
   const timeoutMs =
     options.timeoutMs ?? getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);

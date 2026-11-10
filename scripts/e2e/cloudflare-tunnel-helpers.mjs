@@ -166,14 +166,14 @@ export async function createSessionClient({
   };
 }
 
-async function socketPage(client, url, origin) {
+async function socketPage(client, url, origin, protocols = []) {
   client.guard(url, { websocket: true });
   const page = await client.pageAt(origin);
   try {
     await page.evaluate(
-      ({ url, timeout }) =>
+      ({ url, timeout, protocols }) =>
         new Promise((resolve, reject) => {
-          const ws = new WebSocket(url);
+          const ws = new WebSocket(url, protocols);
           ws.binaryType = 'arraybuffer';
           const state = (window.__samE2e = { ws, messages: [], closed: false, failed: false });
           ws.onmessage = (event) =>
@@ -198,7 +198,7 @@ async function socketPage(client, url, origin) {
             resolve();
           };
         }),
-      { url, timeout: client.timeoutMs }
+      { url, timeout: client.timeoutMs, protocols }
     );
   } catch {
     await page.close();
@@ -435,12 +435,18 @@ export async function assertPreviewStreaming(client, url, { minGapMs = 200, expe
 export async function assertPreviewWebSocket(
   client,
   url,
-  { text = 'sam-e2e-text', binary = [0, 1, 127, 128, 255], idleMs = 0 } = {}
+  { text = 'sam-e2e-text', binary = [0, 1, 127, 128, 255], idleMs = 0, protocols = [] } = {}
 ) {
   const target = client.guard(url, { websocket: true });
   const origin = new URL(target);
   origin.protocol = 'https:';
-  const page = await socketPage(client, target.href, origin.origin);
+  const page = await socketPage(client, target.href, origin.origin, protocols);
+  if (protocols.length) {
+    assert(
+      protocols.includes(await page.evaluate(() => window.__samE2e.ws.protocol)),
+      'WebSocket subprotocol was not preserved'
+    );
+  }
   const started = performance.now();
   try {
     await page.evaluate(
