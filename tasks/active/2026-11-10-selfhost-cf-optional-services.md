@@ -102,5 +102,22 @@ absent or explicitly configured. Tests cover both configurations (apps/api rule 
 - [x] ai-proxy-upstream: no third-party error body in logs
 - [x] split agent-loop LLM calls out; trim public capabilities to consumed flags
 - [x] tests: /ai/v1 endpoint + 404, diagnosis endpoint, operator endpoint
-- [ ] Playwright spec + screenshots; full API + web suites
-- [ ] draft PR vs sam/selfhost-pass-2; publish URL + SHA to channel
+- [x] Playwright spec + screenshots (spec fixed: epoch timestamps, held TTS; comment composer case added)
+- [x] draft PR vs sam/selfhost-pass-2 (#2622 kept); publish URL + SHA to channel at the end
+
+### Continuation (task 01M739ZV3VS1YV1RYZC53MVN7M, 2026-11-10, after the workspace eviction)
+- Merged origin/sam/selfhost-pass-2 twice: T1 (abf141a55; env.ts conflict, kept AI optional + ASSETS) and T2
+  (b7ce7341f; index.ts conflict, T2 moved the ws-* proxy imports out). T1's generator names agree:
+  CONTAINER_RUNTIME_AVAILABLE="false", R2_S3_BUCKET/R2_S3_KEY_PREFIX (trailing slash)/R2_S3_ENDPOINT/R2_S3_REGION.
+- test-engineer: H1 compose presign both stores + traversal, H2 settings API never returns key, M1/M2 (real
+  gap: an unreadable endpoint setting fell back to Cloudflare; now refused once this isolate saw an endpoint;
+  a cold isolate keeps the pre-endpoint route so Cloudflare is unchanged), M3, M4, M5 (IPv6 validation was
+  loose), M6, M7, L1 fixed. Deferred LOW: L5 classifier via sweep, L6 daily skipReason log line (pass-through;
+  source unit-tested), L7, L8 byte-identical presign signing, L9 snapshot presign operator store.
+- Found via test-engineer: OpenAI forwarders sent the Cloudflare token as cf-aig-authorization to
+  api.openai.com when the gateway was unaddressable, and cf-aig-metadata went to direct providers. Fixed at
+  resolveUnifiedBillingToken + aiGatewayOnlyHeaders.
+- ui-ux-specialist: HIGH comment composer kept pr-14 without a mic (fixed + Playwright measured case);
+  capabilities error was cached as success (now throws except 404; project route prefetches); endpoint-error
+  spec now clicks read-aloud. security-auditor delta: 0 CRIT/HIGH/MED; LOW-2 canonical IP keys and LOW-3
+  unified-billing save guard fixed; LOW-1 (cold-isolate outage) documented as an open question.
