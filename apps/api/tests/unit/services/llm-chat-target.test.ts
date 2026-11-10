@@ -321,4 +321,35 @@ describe('SAM and project agents through the real loop', () => {
     );
     expect((init.headers as Record<string, string>)['cf-aig-metadata']).toContain('sam-session');
   });
+
+  it('tell the user no model is configured, without an error log, when nothing can serve the turn', async () => {
+    Object.assign(env, { AI_GATEWAY_ID: 'sam' });
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const chunks: string[] = [];
+    const sink = new WritableStream<Uint8Array>({
+      write(chunk) {
+        chunks.push(new TextDecoder().decode(chunk));
+      },
+    }).getWriter();
+
+    await runAgentLoop(
+      'conv-1',
+      [],
+      'hi',
+      { ...config, model: '@cf/test/model' },
+      env,
+      'user-1',
+      sink,
+      vi.fn()
+    );
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    const stream = chunks.join('');
+    expect(stream).toContain('No language model is available on this installation');
+    expect(stream).toContain('"type":"done"');
+    expect(errors.mock.calls.flat().join(' ')).not.toContain('sam.llm_fetch_error');
+  });
 });
+
