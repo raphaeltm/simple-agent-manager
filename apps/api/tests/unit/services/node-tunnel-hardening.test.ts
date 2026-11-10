@@ -23,6 +23,7 @@ import {
   readNode,
   sqlite,
   tunnelEnv,
+  vmFor,
 } from './node-tunnel-fixture';
 
 afterEach(() => {
@@ -269,6 +270,32 @@ describe('deadline cuts on each side of the create POST', () => {
     // Resume fast path: no second ingress write, one tunnel.
     expect(cf.callCount('tunnel.configure')).toBe(configures);
     expect(cf.callCount('tunnel.create')).toBe(1);
+  });
+
+  it('a deadline that fires during a marked durable create never cancels the provider create', async () => {
+    const node = await freshNode();
+    const { store, allocation } = durableHarness(readNode(node.id)!.incarnation!);
+    const first = new AbortController();
+    let completed = false;
+    mocks.createVM.mockImplementationOnce(
+      async (_config: unknown, context?: { signal?: AbortSignal }) => {
+        // The attempt deadline fires mid-request (staging: inside GCP's token exchange).
+        first.abort(new NodeAllocationUncertainError('Provisioning request deadline elapsed'));
+        // The provider was not handed the attempt's signal, so its create runs to completion.
+        expect(context?.signal).toBeUndefined();
+        completed = true;
+        return vmFor();
+      }
+    );
+    await expect(
+      provisionNode(node.id, env, undefined, {
+        signal: first.signal,
+        durableAllocation: allocation(crypto.randomUUID()),
+      })
+    ).rejects.toBeInstanceOf(NodeAllocationUncertainError);
+    expect(store.providerCreateRequested).toBe(true);
+    expect(completed).toBe(true);
+    expect(mocks.createVM).toHaveBeenCalledTimes(1);
   });
 
   it('a durable attempt cut during the POST never creates a second VM on resume', async () => {

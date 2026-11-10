@@ -340,17 +340,22 @@ export async function provisionNode(
     providerCreateRequested = true;
     try {
       if (!recoverExisting && durable?.markProviderCreateRequested) {
-        // Nothing may sit between this mark and the POST except the provider's own pre-POST
-        // work (GCP's OAuth token exchange); a cut there leaves the intent reconciling to
-        // exhaustion, which is the fail-closed outcome for an uncertain create.
+        // The last cancellation point before the create: after the mark the create is not
+        // cancelled by the attempt deadline (below).
         throwIfProviderRequestAborted(providerContext);
         await durable.markProviderCreateRequested();
         throwIfProviderRequestAborted(providerContext);
       }
+      // Once a durable create is marked it runs to completion: the attempt deadline must not
+      // cut it between the mark and the POST (staging, GCP: the cut landed in the OAuth token
+      // exchange, leaving a recorded create with nothing to reconcile). createVM is bounded by
+      // the provider's own request and operation-poll timeouts; the abort check right after it
+      // still ends this attempt, and the next one reconciles the VM the POST created.
+      const createContext = durable ? undefined : providerContext;
       vm = await (recoverExisting && durable
         ? recoverNodeAllocation(provider, node, env, durable, providerContext)
-        : providerContext
-          ? provider.createVM(vmConfig, providerContext)
+        : createContext
+          ? provider.createVM(vmConfig, createContext)
           : provider.createVM(vmConfig));
     } catch (err) {
       if (err instanceof NodeAllocationUncertainError) throw err;
