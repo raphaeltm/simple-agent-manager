@@ -61,6 +61,7 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
     KV: mockKV as unknown as KVNamespace,
     AI_GATEWAY_ID: 'test-gw',
     CF_ACCOUNT_ID: 'test-account',
+    CF_API_TOKEN: 'test-token',
     AI_PROXY_DAILY_INPUT_TOKEN_LIMIT: undefined,
     AI_PROXY_DAILY_OUTPUT_TOKEN_LIMIT: undefined,
     ...overrides,
