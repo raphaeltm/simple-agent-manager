@@ -122,10 +122,6 @@ Shared project collaboration:
 - Member removal and ownership transfer flows with credential impact handling.
 - Sharing a chat with a teammate for a set time, so they can drive it on the owner's accounts.
 
-## Planned: Billing Integration
-
-- Billing integration.
-
 ## Planned: Role Assignment for Project Members
 
 - User-facing controls for assigning maintainer and viewer roles.

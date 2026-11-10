@@ -65,7 +65,7 @@ After a piece of work finishes, SAM keeps the environment **warm** for a short w
 
 ## Providers
 
-A **provider** is the cloud your compute runs on. For running workspaces, SAM supports **Hetzner**, **Scaleway**, **Vultr**, **Infomaniak**, **DigitalOcean**, **UpCloud**, and **Google Cloud**. SAM follows a **Bring Your Own Cloud (BYOC)** model: you add your own provider credential as a cloud account in **Settings → Infrastructure**, and VM costs are billed directly to your account. On the hosted platform, compute can be provided for you, so you may not need your own credential. Cloud credentials are never stored as environment variables.
+A **provider** is the cloud your compute runs on. For running workspaces, SAM supports **Hetzner**, **Scaleway**, **Vultr**, **Infomaniak**, **DigitalOcean**, **UpCloud**, and **Google Cloud**. SAM follows a **Bring Your Own Cloud (BYOC)** model: you add your own provider credential as a cloud account in **Settings → Infrastructure**, and VM costs are billed directly to your account. An installation administrator can share compute credentials, so individual users may not need their own. Cloud credentials are never stored as environment variables.
 
 You can set a **default provider** and **default location** per project, and the resource requirements new work inherits. The exact machine types, regions, and pricing are shown when you start work.
 
@@ -83,7 +83,7 @@ You normally do not have to configure any of this — SAM creates and maintains 
 
 ## Projects
 
-A **project** links a GitHub repository to its chats, agents, ideas, and activity. It's the primary organizational unit in SAM, and the **project chat is the primary way you interact with SAM**.
+A **project** links a repository to its chats, agents, ideas, and activity. The repository can be on GitHub or, where enabled, hosted by SAM on your Cloudflare account. It's the primary organizational unit in SAM, and the **project chat is the primary way you interact with SAM**.
 
 Each project has:
 
@@ -198,7 +198,7 @@ you turn it on in **Settings**. See [SAM Assistant](/docs/guides/sam-assistant/)
 
 ## Authentication
 
-SAM uses a **GitHub App** for both OAuth login and repository access. The app needs:
+SAM supports email-code sign-in where email sending is configured, plus GitHub, Google, and GitLab OAuth where enabled by the administrator. A **GitHub App** provides GitHub sign-in and repository access; it is not required for SAM-hosted repositories. For GitHub integration, the app needs:
 
 - **OAuth** — for user sign-in (BetterAuth handles session management)
 - **Contents: Read and write** — for cloning repos and pushing changes
