@@ -126,6 +126,23 @@ user data must page (seek by the table's total order, `LIMIT ?`) unless the call
 bound on the result set. `chat_messages`, `chat_messages_grouped`, and
 `tool_payload_archives` per session are unbounded; `chat_sessions` by id is one row.
 
+### D1 CPU Is A Ceiling Too, And A Correlated Subquery Multiplies It
+
+On 2026-11-10 two saves of a ~3,900-row capacity pool reset production D1 ("exceeded its CPU
+time limit") and overloaded it for every other request for about a minute each.
+`publishPoolEditAtomically` matched deployment mirrors through a subquery correlated on the
+primary's id list. D1 keeps no planner statistics, so SQLite drove it by `capacity_source_id`:
+a scan of the whole source for every row of the pool, about 15 million rows per statement.
+Every fixture had at most a hundred rows, so the same statement ran in milliseconds in tests.
+
+- A statement over a table that grows with a user's catalog or history must find correlated
+  rows by primary key or a unique key, not by a column thousands of rows share. Compute keys in
+  the Worker when they are derivable (mirror ids are `capacityCandidateIdForRole(id, role)`).
+- Test it at production row counts with production's indexes (`createDeclaredIndexes`), and
+  assert the `EXPLAIN QUERY PLAN` of the SQL the code actually issues, recorded from the D1
+  binding (`tests/unit/services/capacity-pool-edit-query-plan.test.ts`). Prove the assertion
+  red against the old statement.
+
 ### Hard Requirements
 
 1. **Name the substitutions your harness makes**, and for each, ask which production limits it does
