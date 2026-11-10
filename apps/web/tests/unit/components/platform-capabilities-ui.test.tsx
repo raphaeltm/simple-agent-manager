@@ -4,12 +4,17 @@
  */
 import type { ConversationItem } from '@simple-agent-manager/acp-client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
-import type { ReactNode } from 'react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { createRef, type ReactNode } from 'react';
+import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { TruncatedSummary } from '../../../src/components/chat/TruncatedSummary';
 import { ProjectChatComposer } from '../../../src/components/project-chat/ProjectChatComposer';
 import { AcpConversationItemView } from '../../../src/components/project-message-view/AcpConversationItemView';
+import { CommentComposer } from '../../../src/components/project-message-view/comments/CommentComposer';
+import { SamComposer } from '../../../src/components/sam/SamComposer';
+import { ProjectAgentChat } from '../../../src/pages/ProjectAgentChat';
 import {
   ASSUMED_PLATFORM_CAPABILITIES,
   getPlatformCapabilities,
@@ -29,6 +34,30 @@ vi.mock('@simple-agent-manager/acp-client', async (importOriginal) => {
 
 vi.mock('../../../src/contexts/GlobalAudioContext', () => ({
   useGlobalAudio: () => ({ startPlayback: vi.fn() }),
+}));
+
+// ProjectAgentChat's own data and canvas hooks; the capabilities query stays real.
+vi.mock('../../../src/hooks/useAgentChat', () => ({
+  useAgentChat: () => ({
+    messages: [],
+    inputValue: '',
+    setInputValue: vi.fn(),
+    isSending: false,
+    isLoading: false,
+    error: null,
+    sendMessage: vi.fn(),
+    stop: vi.fn(),
+    clearError: vi.fn(),
+  }),
+}));
+vi.mock('../../../src/pages/ProjectContext', () => ({
+  useProjectContext: () => ({ project: { name: 'Billing' } }),
+}));
+vi.mock('../../../src/pages/sam-prototype/webgl-background', () => ({
+  useWebGLBackground: vi.fn(),
+}));
+vi.mock('../../../src/pages/sam-prototype/voice-input', () => ({
+  useVoiceInput: () => ({ state: 'idle', toggle: vi.fn() }),
 }));
 
 Element.prototype.scrollIntoView = vi.fn();
@@ -51,9 +80,24 @@ function serveCapabilities(body: unknown, status = 200) {
   return fetchMock;
 }
 
+let client: QueryClient;
+
 function withQueryClient(children: ReactNode) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+}
+
+/**
+ * Waits until the capabilities query has answered. Without this, a "still shown" assertion
+ * passes on the assumed-present default before the server's answer is ever applied.
+ */
+async function capabilitiesSettled() {
+  await waitFor(() =>
+    expect(client.getQueryCache().getAll().every((query) => query.state.status === 'success')).toBe(
+      true
+    )
+  );
+  expect(client.getQueryCache().getAll().length).toBeGreaterThan(0);
 }
 
 function composer() {
@@ -97,10 +141,10 @@ describe('voice input', () => {
   });
 
   it('stays visible when the installation has speech-to-text', async () => {
-    const fetchMock = serveCapabilities(ASSUMED_PLATFORM_CAPABILITIES);
+    serveCapabilities(ASSUMED_PLATFORM_CAPABILITIES);
     render(composer());
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await capabilitiesSettled();
     expect(screen.getByTestId('voice-button')).toBeInTheDocument();
   });
 });
@@ -118,7 +162,127 @@ describe('server read-aloud', () => {
     serveCapabilities(ASSUMED_PLATFORM_CAPABILITIES);
     render(agentBubble());
 
-    expect(await screen.findByLabelText('Read aloud')).toBeInTheDocument();
+    await capabilitiesSettled();
+    expect(screen.getByLabelText('Read aloud')).toBeInTheDocument();
+  });
+});
+
+const SELF_HOST_STT_ONLY_OFF = { ...ASSUMED_PLATFORM_CAPABILITIES, speechToText: false };
+
+function samComposer() {
+  return withQueryClient(
+    <SamComposer
+      message=""
+      setMessage={vi.fn()}
+      onSend={vi.fn()}
+      onStop={vi.fn()}
+      active={false}
+      sending={false}
+      cancelling={false}
+      pending={false}
+      blocked={false}
+      error={null}
+      textareaRef={createRef<HTMLTextAreaElement>()}
+    />
+  );
+}
+
+function commentComposer() {
+  return withQueryClient(<CommentComposer onSubmit={vi.fn()} onCancel={vi.fn()} />);
+}
+
+function projectAgentChat() {
+  return withQueryClient(
+    <MemoryRouter initialEntries={['/projects/p1/agent']}>
+      <Routes>
+        <Route path="/projects/:id/agent" element={<ProjectAgentChat />} />
+      </Routes>
+    </MemoryRouter>
+  );
+}
+
+/** Each composer that offers voice input, with what proves it rendered. */
+const VOICE_SURFACES: Array<{
+  name: string;
+  render: () => ReactNode;
+  mic: () => HTMLElement | null;
+  live: () => HTMLElement;
+}> = [
+  {
+    name: 'SAM composer',
+    render: samComposer,
+    mic: () => screen.queryByTestId('voice-button'),
+    live: () => screen.getByRole('textbox'),
+  },
+  {
+    name: 'comment composer',
+    render: commentComposer,
+    mic: () => screen.queryByTestId('voice-button'),
+    live: () => screen.getByRole('button', { name: 'Comment' }),
+  },
+  {
+    name: 'project agent chat',
+    render: projectAgentChat,
+    mic: () => screen.queryByRole('button', { name: 'Start voice input' }),
+    live: () => screen.getByRole('textbox'),
+  },
+];
+
+describe.each(VOICE_SURFACES)('voice input in the $name', ({ render: build, mic, live }) => {
+  it('is hidden without speech-to-text', async () => {
+    serveCapabilities(SELF_HOST_STT_ONLY_OFF);
+    render(build());
+    await capabilitiesSettled();
+    expect(mic()).toBeNull();
+    expect(live()).toBeInTheDocument();
+  });
+
+  it('is offered with speech-to-text', async () => {
+    serveCapabilities(ASSUMED_PLATFORM_CAPABILITIES);
+    render(build());
+    await capabilitiesSettled();
+    expect(mic()).not.toBeNull();
+    expect(live()).toBeInTheDocument();
+  });
+});
+
+describe('task summary read-aloud', () => {
+  function openTruncatedSummary() {
+    let observed: ResizeObserverCallback | null = null;
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(cb: ResizeObserverCallback) {
+          observed = cb;
+        }
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      }
+    );
+    const result = render(
+      withQueryClient(<TruncatedSummary summary={'A long summary. '.repeat(20)} taskId="t1" />)
+    );
+    const text = result.container.querySelector('.line-clamp-2')!;
+    Object.defineProperty(text, 'scrollHeight', { value: 100, configurable: true });
+    Object.defineProperty(text, 'clientHeight', { value: 40, configurable: true });
+    act(() => observed?.([], {} as ResizeObserver));
+    fireEvent.click(screen.getByText('Read more'));
+  }
+
+  it('drops the speaker without server TTS', async () => {
+    serveCapabilities(SELF_HOST);
+    openTruncatedSummary();
+    await capabilitiesSettled();
+    expect(screen.queryByLabelText('Read summary aloud')).toBeNull();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('keeps the speaker with server TTS', async () => {
+    serveCapabilities(ASSUMED_PLATFORM_CAPABILITIES);
+    openTruncatedSummary();
+    await capabilitiesSettled();
+    expect(screen.getByLabelText('Read summary aloud')).toBeInTheDocument();
   });
 });
 
