@@ -1,0 +1,95 @@
+# DRAFT one-box layout for a celld-hosted SAM control plane (self-host spike, Track C).
+# Throwaway research artifact: not a supported install path. See FINDINGS.md.
+#
+#   internet ──443/80──> caddy ──http──> celld:8080 (API Worker + web UI assets)
+#                          │                 │
+#                          └─ s3.<domain> ──>├──> objectstore:9000 (fleet bucket, never public except r2/ presign path)
+#   nodes ──7000/tcp───> frps (placeholder: reverse tunnels, loopback-bound per node)
+#
+# Usage (local proof):  cp .env.example .env && docker compose up -d
+# Then deploy the Worker from the host with scripts/deploy.sh against 127.0.0.1:${S3_HOST_PORT}.
+name: sam-onebox
+
+x-s3-env: &s3-env
+  S3_ENDPOINT: http://objectstore:9000
+  AWS_REGION: us-east-1
+  AWS_ACCESS_KEY_ID: ${OBJECTSTORE_ROOT_USER:?set in .env}
+  AWS_SECRET_ACCESS_KEY: ${OBJECTSTORE_ROOT_PASSWORD:?set in .env}
+
+services:
+  objectstore:
+    # MinIO stopped publishing community images (minio/minio on Docker Hub is gone, quay.io
+    # needs auth). pgsty/minio is a community fork that passed `celld diagnose` in this spike.
+    # SeaweedFS also passed; Garage v2.5.0 FAILED (does not enforce If-None-Match). Pin by digest.
+    image: pgsty/minio:${MINIO_TAG:-latest}
+    command: ["server", "/data"]
+    environment:
+      MINIO_ROOT_USER: ${OBJECTSTORE_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${OBJECTSTORE_ROOT_PASSWORD}
+    volumes: [objectstore-data:/data]
+    ports: ["127.0.0.1:${S3_HOST_PORT:-9000}:9000"]   # operator CLI (celld deploy / d1 / backups) only
+    healthcheck: { test: ["CMD", "mc", "ready", "local"], interval: 5s, retries: 30 }
+    restart: unless-stopped
+
+  objectstore-init:
+    image: pgsty/minio:${MINIO_TAG:-latest}
+    depends_on: { objectstore: { condition: service_healthy } }
+    entrypoint: ["sh", "/init/minio-init.sh"]
+    environment:
+      <<: *s3-env
+      PRESIGN_USER: ${PRESIGN_USER:-presigner}
+      PRESIGN_PASSWORD: ${PRESIGN_PASSWORD:?set in .env}
+    volumes: ["./config/minio-init.sh:/init/minio-init.sh:ro", "./config/minio-r2-presign-policy.json:/init/policy.json:ro"]
+    restart: "no"
+
+  celld:
+    image: ghcr.io/denoland/celld:${CELLD_VERSION:-v0.6.3}
+    depends_on: { objectstore-init: { condition: service_completed_successfully } }
+    command: ["--bucket", "s3://celld-fleet"]
+    environment:
+      <<: *s3-env
+      CELLD_ADDR: 0.0.0.0:8080              # reached only by caddy on the compose network; never published
+      CELLD_INTERNAL_ADDR: 127.0.0.1:7001   # unauthenticated operator API: keep it in the container netns
+      CELLD_WATCH: /var/lib/celld
+      CELLD_TRUST_FORWARDED_HEADERS: "1"    # caddy overwrites X-Forwarded-Host/Proto
+      CELLD_LTX_RETENTION_SECS: "86400"     # epoch GC; without it the bucket grows on every activation
+    volumes:
+      - celld-data:/var/lib/celld
+      # Containers (Instant runtime) only: the Docker socket is root-equivalent on the host.
+      # - /var/run/docker.sock:/var/run/docker.sock
+    ports: ["127.0.0.1:${CELLD_HOST_PORT:-8080}:8080"]   # loopback only; caddy (host network) proxies here
+    stop_grace_period: 45s                  # > CELLD_SHUTDOWN_TOTAL_MS (40 s) for a clean handoff
+    restart: unless-stopped                 # celld docs: restart forever, >= one lease lifetime apart
+
+  caddy:
+    # Wildcard certs need DNS-01: build caddy with your DNS provider module
+    # (xcaddy build --with github.com/caddy-dns/<provider>) or use on-demand TLS (see FINDINGS item 4).
+    image: caddy:2
+    depends_on: [celld]
+    # Host networking: with Docker-published ports the spike saw the Docker gateway
+    # (172.21.0.1) as {remote_host}, which would break CF-Connecting-IP rate limiting.
+    network_mode: host
+    environment:
+      DOMAIN: ${DOMAIN:-onebox.test}
+      HTTP_PORT: ${HTTP_PORT:-80}
+      HTTPS_PORT: ${HTTPS_PORT:-443}
+      CELLD_UPSTREAM: 127.0.0.1:${CELLD_HOST_PORT:-8080}
+      OBJECTSTORE_UPSTREAM: 127.0.0.1:${S3_HOST_PORT:-9000}
+    volumes: ["./caddy/Caddyfile.compose:/etc/caddy/Caddyfile:ro", "caddy-data:/data"]
+    restart: unless-stopped
+
+  # Placeholder for the open reverse-tunnel gateway (Track B). Nodes dial 7000; each node's
+  # proxy binds a SAM-assigned port on the gateway's loopback, which the Worker would fetch.
+  # NOTE: celld containers cannot reach the host (nftables fence), so this matters for VM
+  # nodes, not for Instant containers on the same box.
+  frps:
+    image: ${FRPS_IMAGE:-snowdreamtech/frps:latest}
+    profiles: ["tunnel"]
+    ports: ["${FRPS_BIND_PORT:-7000}:7000"]
+    volumes: ["./config/frps.toml:/etc/frp/frps.toml:ro"]
+    restart: unless-stopped
+
+volumes:
+  objectstore-data:
+  celld-data:
+  caddy-data:

@@ -1,0 +1,4 @@
+# Placeholder (Track B owns the real design). Auth would be an frps server plugin that calls
+# the SAM API to validate the node's callback JWT and its assigned loopback port.
+bindPort = 7000
+proxyBindAddr = "127.0.0.1"

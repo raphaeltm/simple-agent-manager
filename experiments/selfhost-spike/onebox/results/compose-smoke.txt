@@ -1,0 +1,13 @@
+compose, caddy host-net, client=bridge container: {"url":"https://api.onebox.test/headers","cfip":"172.18.0.3"}
+{"ok":true,"k":"compose1","changes":1}
+app-assets SPA: 200 text/html; charset=utf-8
+open after 43 ms
+recv echo:ping0
+recv echo:ping1
+recv echo:ping2
+closed 1000
+presigned PUT via s3.<domain>: 200
+read via R2 binding: uploaded via public presigned urlGET s3.<domain>/celld-fleet/deploy/ (blocked at edge): 403
+sam-onebox-caddy-1 16.99MiB / 3.73GiB
+sam-onebox-celld-1 22.84MiB / 3.73GiB
+sam-onebox-objectstore-1 275.2MiB / 3.73GiB
