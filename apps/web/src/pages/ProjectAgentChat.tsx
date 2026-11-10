@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { useParams } from 'react-router';
 
 import { useAgentChat } from '../hooks/useAgentChat';
+import { usePlatformCapabilities } from '../hooks/usePlatformCapabilities';
 import { API_URL } from '../lib/api/client';
 import { useProjectContext } from './ProjectContext';
 import { glass, glow, MessageBubble } from './sam-prototype/components';
@@ -26,6 +27,7 @@ export function ProjectAgentChat() {
   const { setInputValue: setChatInputValue } = chat;
 
   const agentLabel = project?.name ?? 'Project Agent';
+  const { speechToText } = usePlatformCapabilities();
 
   // WebGL fluid background
   useWebGLBackground(canvasRef, amplitudeRef);
@@ -217,7 +219,8 @@ export function ProjectAgentChat() {
                 } as React.CSSProperties
               }
             />
-            {/* Mic button */}
+            {/* Mic button: voice input needs the installation's speech-to-text service */}
+            {speechToText && (
             <button
               type="button"
               onClick={voice.toggle}
@@ -242,6 +245,7 @@ export function ProjectAgentChat() {
                 <Mic className="w-4 h-4" aria-hidden="true" />
               )}
             </button>
+            )}
             {/* Send button */}
             <button
               type="button"

@@ -11,6 +11,20 @@ import { SessionFooter } from '../../../src/components/project-message-view/Sess
 import type { UseSessionLifecycleResult } from '../../../src/components/project-message-view/useSessionLifecycle.types';
 import type { ChatSessionResponse } from '../../../src/lib/api';
 
+// Cloudflare behaviour: every platform service present (absent case: platform-capabilities-ui.test.tsx).
+vi.mock('../../../src/hooks/usePlatformCapabilities', () => ({
+  usePlatformCapabilities: () => ({
+    speechToText: true,
+    textToSpeech: true,
+    guidedCredentialSetup: true,
+    analytics: true,
+    workerLogSearch: true,
+    artifacts: true,
+    emailSending: true,
+  }),
+}));
+
+
 vi.mock('@simple-agent-manager/acp-client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@simple-agent-manager/acp-client')>()),
   VoiceButton: () => null,

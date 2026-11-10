@@ -13,6 +13,7 @@ import {
 import { memo, useCallback } from 'react';
 
 import { useGlobalAudio } from '../../contexts/GlobalAudioContext';
+import { usePlatformCapabilities } from '../../hooks/usePlatformCapabilities';
 import { getTtsApiUrl } from '../../lib/api';
 import { noticeOf, systemRowNotice } from './sam-notice/notice-items';
 import { NoticeRow } from './sam-notice/NoticeRow';
@@ -162,7 +163,9 @@ function AcpConversationItemViewImpl({
     });
   }, [startPlayback, audioId, audioText]);
 
-  const handlePlayAudio = isAgentMessage ? playAudio : undefined;
+  // Without server text-to-speech the bubble falls back to the browser's own speech synthesis.
+  const { textToSpeech } = usePlatformCapabilities();
+  const handlePlayAudio = isAgentMessage && textToSpeech ? playAudio : undefined;
 
   switch (item.kind) {
     case 'user_message': {
@@ -211,7 +214,7 @@ function AcpConversationItemViewImpl({
           streaming={item.streaming}
           animated={animateText}
           timestamp={item.timestamp}
-          ttsApiUrl={getTtsUrl()}
+          ttsApiUrl={textToSpeech ? getTtsUrl() : undefined}
           ttsStorageId={item.id}
           onPlayAudio={handlePlayAudio}
           onFileClick={onFileClick}

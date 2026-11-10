@@ -7,6 +7,7 @@ import type { CommentMention } from '@simple-agent-manager/shared';
 import { Button, Textarea } from '@simple-agent-manager/ui';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
+import { usePlatformCapabilities } from '../../../hooks/usePlatformCapabilities';
 import { getTranscribeApiUrl } from '../../../lib/api/agents';
 import type { MessageCommentAction } from '../../../lib/api/comments';
 import { QuotedAnchor } from './CommentPrimitives';
@@ -63,6 +64,7 @@ export function CommentComposer({
   onCancel,
 }: CommentComposerProps) {
   const textareaId = useId();
+  const { speechToText } = usePlatformCapabilities();
   const [body, setBody] = useState('');
   const [action, setAction] = useState<MessageCommentAction>('note');
   const [submitting, setSubmitting] = useState(false);
@@ -182,14 +184,16 @@ export function CommentComposer({
             ...(recording ? { borderColor: 'var(--sam-color-danger)' } : {}),
           }}
         />
-        <div className="absolute bottom-1 right-1">
-          <VoiceButton
-            onTranscription={handleTranscription}
-            onStateChange={setVoiceState}
-            disabled={submitting}
-            apiUrl={transcribeApiUrl}
-          />
-        </div>
+        {speechToText && (
+          <div className="absolute bottom-1 right-1">
+            <VoiceButton
+              onTranscription={handleTranscription}
+              onStateChange={setVoiceState}
+              disabled={submitting}
+              apiUrl={transcribeApiUrl}
+            />
+          </div>
+        )}
       </div>
       {mentions.open && (
         <MemberMentionPalette

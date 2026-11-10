@@ -3,6 +3,20 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ChatMessageResponse } from '../../../src/lib/api';
 
+// Cloudflare behaviour: every platform service present (absent case: platform-capabilities-ui.test.tsx).
+vi.mock('../../../src/hooks/usePlatformCapabilities', () => ({
+  usePlatformCapabilities: () => ({
+    speechToText: true,
+    textToSpeech: true,
+    guidedCredentialSetup: true,
+    analytics: true,
+    workerLogSearch: true,
+    artifacts: true,
+    emailSending: true,
+  }),
+}));
+
+
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   getTtsApiUrl: () => 'https://api.example.test/tts',

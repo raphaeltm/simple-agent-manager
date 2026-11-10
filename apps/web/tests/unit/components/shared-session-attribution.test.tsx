@@ -7,6 +7,20 @@ import { userMessageAttribution } from '../../../src/components/project-message-
 import { chatMessagesToConversationItems } from '../../../src/components/project-message-view/types';
 import type { ChatMessageResponse } from '../../../src/lib/api';
 
+// Cloudflare behaviour: every platform service present (absent case: platform-capabilities-ui.test.tsx).
+vi.mock('../../../src/hooks/usePlatformCapabilities', () => ({
+  usePlatformCapabilities: () => ({
+    speechToText: true,
+    textToSpeech: true,
+    guidedCredentialSetup: true,
+    analytics: true,
+    workerLogSearch: true,
+    artifacts: true,
+    emailSending: true,
+  }),
+}));
+
+
 /**
  * Who sent a user-role transcript row (gap G3). The server writes the sender into the durable
  * delivery's tool metadata; the transcript must not show a teammate's words as the owner's.

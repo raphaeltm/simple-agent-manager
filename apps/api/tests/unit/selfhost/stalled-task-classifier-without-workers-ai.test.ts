@@ -144,7 +144,7 @@ describe('classifyLongRunningTaskStall', () => {
 
     const result = await classifyLongRunningTaskStall(baseEnv, { task, liveness, nowMs: NOW });
     expect(result).toBeNull();
-    expect(vi.getTimerCount()).toBe(0);
+    const armedTimers = vi.getTimerCount();
 
     // Run every timer the call could have armed, then let rejections surface as process events.
     await vi.advanceTimersByTimeAsync(DEFAULT_STALLED_TASK_CLASSIFIER_TIMEOUT_MS * 3);
@@ -152,6 +152,7 @@ describe('classifyLongRunningTaskStall', () => {
     await new Promise((resolve) => setImmediate(resolve));
 
     expect(unhandled).toEqual([]);
+    expect(armedTimers).toBe(0);
   });
 
   it('treats an AI binding without a run method as absent', async () => {
@@ -180,6 +181,10 @@ describe('classifyReconciliationLoop', () => {
     expect(run).toHaveBeenCalledTimes(1);
   });
 
+  // Behavioural contract only: before the guard this path also returned null and cleared its
+  // timer (its `finally` runs even when `ai.run` throws), so unlike the long-running classifier
+  // above this test does not go red when the guard is removed. It pins the outcome the guard
+  // now reaches without a swallowed TypeError.
   it('without Workers AI returns null and arms no timeout', async () => {
     vi.useFakeTimers({ now: NOW });
 
