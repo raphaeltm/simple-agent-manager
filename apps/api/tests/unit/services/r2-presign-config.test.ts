@@ -73,12 +73,25 @@ describe('resolveR2PresignConfig', () => {
     ['escaping key prefix', { R2_S3_KEY_PREFIX: 'r2/../deploy/' }],
     ['non-HTTP endpoint', { R2_S3_ENDPOINT: 'ftp://store' }],
     ['endpoint with credentials', { R2_S3_ENDPOINT: 'https://user:pass@store.example.com' }],
+    ['prefix without a trailing slash', { R2_S3_KEY_PREFIX: 'r2/sam-assets' }],
+    ['prefix with an empty segment', { R2_S3_KEY_PREFIX: 'r2//sam-assets/' }],
+    ['plain HTTP to a public host', { R2_S3_ENDPOINT: 'http://s3.example.com' }],
+    ['a metadata address', { R2_S3_ENDPOINT: 'https://169.254.169.254' }],
   ])('refuses a partial operator store (%s) instead of falling back to Cloudflare', (_, change) => {
     // CF_ACCOUNT_ID is present: a fallback would sign store keys for Cloudflare R2.
     const env = operatorStoreEnv({ CF_ACCOUNT_ID: 'acct123', ...change });
     expect(resolveR2PresignConfig(env)).toBeNull();
     expect(hasR2S3Credentials(env)).toBe(false);
   });
+
+  it.each(['R2_S3_BUCKET', 'R2_S3_KEY_PREFIX', 'R2_S3_REGION', 'R2_S3_FORCE_PATH_STYLE'] as const)(
+    'refuses %s without R2_S3_ENDPOINT instead of signing for Cloudflare R2',
+    (name) => {
+      const env = cloudflareEnv({ [name]: 'celld-fleet' });
+      expect(resolveR2PresignConfig(env)).toBeNull();
+      expect(hasR2S3Credentials(cloudflareEnv())).toBe(true);
+    }
+  );
 
   it('needs both halves of the credential in either mode', () => {
     expect(resolveR2PresignConfig(cloudflareEnv({ R2_SECRET_ACCESS_KEY: '' }))).toBeNull();
@@ -133,3 +146,20 @@ describe('presigned URLs address the object the R2 binding reads', () => {
     );
   });
 });
+
+describe('object keys under an operator prefix', () => {
+  it.each(['../deploy/workspaces-api/manifest.json', 'a/../../x', 'a/./b', '/abs', 'a\\b', 'a\u0000b'])(
+    'refuses %j so a signed URL cannot leave the prefix',
+    (key) => {
+      const target = getR2PresignTarget(operatorStoreEnv());
+      expect(() => target.objectKey(key)).toThrow('unsafe path segment');
+    }
+  );
+
+  it('keeps ordinary keys, and leaves Cloudflare keys untouched', () => {
+    expect(getR2PresignTarget(operatorStoreEnv()).objectKey('a/b.c/d')).toBe('r2/sam-assets/a/b.c/d');
+    // On Cloudflare there is no prefix to escape; object names stay opaque as before.
+    expect(getR2PresignTarget(cloudflareEnv()).objectKey('a/../b')).toBe('a/../b');
+  });
+});
+

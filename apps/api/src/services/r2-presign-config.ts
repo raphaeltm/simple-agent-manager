@@ -13,6 +13,7 @@
  * manifests with plaintext secrets.
  */
 import type { Env } from '../env';
+import { isAcceptableOperatorEndpoint } from '../lib/network-hosts';
 
 /** Cloudflare R2's S3 API ignores the region; SigV4 still needs one. */
 const DEFAULT_R2_S3_REGION = 'auto';
@@ -48,23 +49,39 @@ function text(value: string | undefined): string {
 
 function validEndpoint(value: string): boolean {
   try {
-    const url = new URL(value);
-    return (
-      (url.protocol === 'https:' || url.protocol === 'http:') &&
-      !url.username &&
-      !url.password &&
-      !url.search &&
-      !url.hash
-    );
+    return isAcceptableOperatorEndpoint(new URL(value));
   } catch {
     return false;
   }
 }
 
-/** A relative key prefix: no leading slash, no `..` segment, so it cannot escape its scope. */
-function validKeyPrefix(value: string): boolean {
-  return value.length > 0 && !value.startsWith('/') && !value.split('/').includes('..');
+/** True when any path segment could resolve outside its parent or confuse a gateway. */
+function hasUnsafeKeySegment(value: string): boolean {
+  // eslint-disable-next-line no-control-regex -- control characters are exactly what is refused
+  if (value.startsWith('/') || value.includes('\\') || /[\u0000-\u001f\u007f]/.test(value))
+    return true;
+  return value.split('/').some((segment) => segment === '.' || segment === '..');
 }
+
+/**
+ * A relative key prefix that ends in `/` (so `r2/<bucket>/` cannot glue onto the key) and has
+ * no empty, `.` or `..` segment, so it cannot escape its scope.
+ */
+function validKeyPrefix(value: string): boolean {
+  return (
+    value.endsWith('/') &&
+    !hasUnsafeKeySegment(value) &&
+    !value.slice(0, -1).split('/').some((segment) => segment === '')
+  );
+}
+
+/** Operator-store settings that mean nothing without R2_S3_ENDPOINT. */
+const OPERATOR_STORE_ONLY_VARS = [
+  'R2_S3_BUCKET',
+  'R2_S3_KEY_PREFIX',
+  'R2_S3_REGION',
+  'R2_S3_FORCE_PATH_STYLE',
+] as const;
 
 /**
  * The presign target, or null when presigning is not configured. A partially configured
@@ -77,6 +94,9 @@ export function resolveR2PresignConfig(env: R2PresignEnv): R2PresignConfig | nul
   if (!accessKeyId || !secretAccessKey) return null;
 
   const endpoint = text(env.R2_S3_ENDPOINT);
+  // A store setting without its endpoint is a misconfiguration, not "use Cloudflare": signing
+  // for R2 with an operator's key would put objects where the binding never reads them.
+  if (!endpoint && OPERATOR_STORE_ONLY_VARS.some((name) => text(env[name]))) return null;
   if (endpoint) {
     const bucket = text(env.R2_S3_BUCKET);
     const keyPrefix = text(env.R2_S3_KEY_PREFIX);
@@ -107,7 +127,15 @@ export function resolveR2PresignConfig(env: R2PresignEnv): R2PresignConfig | nul
   };
 }
 
-/** The store key for an R2 key: where the R2 binding keeps that object. */
+/**
+ * The store key for an R2 key: where the R2 binding keeps that object. Under an operator prefix
+ * the key must not be able to climb out of it (a gateway that normalises `..` would otherwise
+ * sign a URL outside the prefix, toward the fleet bucket's secrets). On Cloudflare (no prefix)
+ * keys are opaque object names and pass through unchanged.
+ */
 export function r2PresignObjectKey(config: R2PresignConfig, r2Key: string): string {
+  if (config.keyPrefix && hasUnsafeKeySegment(r2Key)) {
+    throw new Error('R2 object key has an unsafe path segment');
+  }
   return `${config.keyPrefix}${r2Key}`;
 }

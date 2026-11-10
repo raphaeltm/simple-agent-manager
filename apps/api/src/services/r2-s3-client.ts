@@ -36,6 +36,8 @@ function clientFor(config: R2PresignConfig, checksum: R2ChecksumMode): S3Client 
     config.region,
     config.forcePathStyle ?? null,
     config.accessKeyId,
+    // A secret rotated under the same key id must not keep signing with the old one.
+    config.secretAccessKey,
     checksum,
   ]);
   let client = clients.get(cacheKey);
