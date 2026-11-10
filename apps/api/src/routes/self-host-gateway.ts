@@ -119,12 +119,16 @@ function forwardedGatewayTarget(env: Env, headers: Headers): URL | null {
   } catch {
     original = null;
   }
+  // The target check reads the URL that is re-dispatched (original.hostname), and the host
+  // must survive URL parsing unchanged: WHATWG parsing drops tabs/newlines, applies IDNA and
+  // reads userinfo, so a header whose parsed host differs from its text is refused outright
+  // rather than authorized as whichever workspace the parser happened to produce.
   const allowed =
     !!original &&
     original.hostname === host &&
     method === 'GET' &&
     upgrade === 'websocket' &&
-    isGatewayTarget(env, host, original.pathname);
+    isGatewayTarget(env, original.hostname, original.pathname);
   if (!allowed) {
     log.warn('self_host_gateway.forward_auth_not_a_gateway_route', {
       host,

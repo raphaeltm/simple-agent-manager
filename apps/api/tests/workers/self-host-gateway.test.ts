@@ -473,6 +473,27 @@ describe('node WebSocket forward_auth', () => {
     expect(response.status).toBe(403);
   });
 
+  it('refuses a socket host that URL parsing would rewrite, with a same-workspace owner control', async () => {
+    await seedUser('rt-ws-host');
+    const node = await seedReverseNode('H', 'rt-ws-host');
+    const workspaceId = await seedWorkspaceOn(node, 'rt-ws-host', 'HH1');
+    await env.DATABASE.prepare('UPDATE workspaces SET ports_public_enabled = 1 WHERE id = ?')
+      .bind(workspaceId)
+      .run();
+    const clean = `ws-${workspaceId.toLowerCase()}--3000.${env.BASE_DOMAIN}`;
+    const owner = await call(gatewayCall(clean, '/'));
+    expect(owner.status).toBe(200);
+    expect(owner.headers.get('X-SAM-Upstream')).toBe(`127.0.0.1:${node.port}`);
+    // The URL parser strips the tab, so the parsed hostname is exactly `clean`; only the
+    // hostname-equality guard tells the two apart.
+    const rewritten = clean.replace('--3000.', '--3000\t.');
+    expect(new URL(`https://${rewritten}/`).hostname).toBe(clean);
+    const refused = await call(gatewayCall(rewritten, '/'));
+    expect(refused.status).toBe(403);
+    expect(refused.headers.get('X-SAM-Upstream')).toBeNull();
+    expect(upstream).not.toHaveBeenCalled();
+  });
+
   it('fails closed on a wrong or missing secret and on non-gateway targets', async () => {
     const host = `ws-01krrtx0000000000000000000.${env.BASE_DOMAIN}`;
     expect((await call(gatewayCall(host, '/', {}, 'y'.repeat(40)))).status).toBe(401);
