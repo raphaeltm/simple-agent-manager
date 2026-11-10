@@ -154,6 +154,8 @@ for (const [name, scenario] of SCENARIOS) {
       await expect(note).toContainText('Monthly cost caps are not available');
       if (scenario.storedCapUsd) await expect(note).toContainText('is not enforced here');
     }
+    // The app scrolls inside its own wrapper: capture the cap area (note, or the cap input).
+    await (scenario.capAvailable ? capInput : note).scrollIntoViewIfNeeded();
     await assertNoOverflow(page);
     await screenshot(page, `monthly-cap-budget-${name}`);
   });
@@ -165,10 +167,16 @@ for (const capAvailable of [true, false]) {
   }) => {
     await setupMocks(page, { capAvailable, storedCapUsd: null });
     await page.goto('/admin/ai-proxy');
-    await expect(page.getByText('Billing Mode')).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText('Billing Mode', { exact: true })).toBeVisible({ timeout: 10_000 });
     await expect(page.getByTestId('admin-monthly-cap-unavailable')).toHaveCount(
       capAvailable ? 0 : 1
     );
+    // The app scrolls inside its own wrapper, so bring the area under review into the capture.
+    await (
+      capAvailable
+        ? page.getByText('Default Model', { exact: true })
+        : page.getByTestId('admin-monthly-cap-unavailable')
+    ).scrollIntoViewIfNeeded();
     await assertNoOverflow(page);
     await screenshot(
       page,

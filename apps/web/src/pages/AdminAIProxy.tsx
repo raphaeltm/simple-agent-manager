@@ -249,9 +249,9 @@ export function AdminAIProxy() {
           data-testid="admin-monthly-cap-unavailable"
         >
           <span className="font-medium text-fg-primary">Monthly cost caps are unavailable.</span>{' '}
-          This installation has no Cloudflare AI Gateway (AI_GATEWAY_ID and CF_ACCOUNT_ID), which is
-          where SAM gets the cost of each AI call. Users cannot set a monthly cap; daily token
-          budgets still limit AI proxy usage.
+          This installation cannot read Cloudflare AI Gateway logs (AI_GATEWAY_ID, CF_ACCOUNT_ID and
+          CF_API_TOKEN), which is where SAM gets the cost of each AI call. Users cannot set a
+          monthly cap; daily token budgets still limit AI proxy usage.
         </div>
       )}
 

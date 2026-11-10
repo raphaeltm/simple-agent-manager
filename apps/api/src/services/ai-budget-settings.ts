@@ -83,7 +83,7 @@ export async function getAdminAiAllowance(
 
 /** Why a monthly cap cannot be set or enforced on an installation without AI Gateway. */
 export const MONTHLY_COST_CAP_UNAVAILABLE_MESSAGE =
-  'Monthly cost caps are not available on this installation: they are priced from Cloudflare AI Gateway logs (AI_GATEWAY_ID and CF_ACCOUNT_ID). Daily token limits still apply.';
+  'Monthly cost caps are not available on this installation: they are priced from Cloudflare AI Gateway logs (AI_GATEWAY_ID, CF_ACCOUNT_ID and CF_API_TOKEN). Daily token limits still apply.';
 
 /**
  * Validate and normalize budget update request. Returns validated settings or throws.

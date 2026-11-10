@@ -296,6 +296,7 @@ for (const monthlyCostCap of [true, false]) {
     await expect(page.locator('#onboarding-daily-input')).toBeVisible();
     await expect(page.locator('#onboarding-daily-output')).toBeVisible();
     await expect(page.locator('#onboarding-monthly-cap')).toHaveCount(monthlyCostCap ? 1 : 0);
+    await page.locator('#onboarding-daily-output').scrollIntoViewIfNeeded();
     await assertNoOverflow(page);
     await viewportScreenshot(
       page,
