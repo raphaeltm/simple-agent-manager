@@ -374,6 +374,36 @@ spikeProbeRoutes.post('/persist-batch', async (c) => {
   return c.json({ n, b, totalMs: Date.now() - t0, batches, replay: { ...replay, ms: Date.now() - replayT } });
 });
 
+// What a container-backed DO class does on a runtime with no container support.
+spikeProbeRoutes.get('/containers', async (c) => {
+  const out: Record<string, unknown> = {};
+  for (const name of ['VM_AGENT_CONTAINER', 'SANDBOX'] as const) {
+    const ns = (c.env as unknown as Record<string, DurableObjectNamespace | undefined>)[name];
+    if (!ns) {
+      out[name] = 'binding absent';
+      continue;
+    }
+    try {
+      const res = await ns.get(ns.idFromName('spike-container-probe')).fetch('http://container/ping');
+      out[name] = { status: res.status, body: (await res.text()).slice(0, 300) };
+    } catch (e) {
+      out[name] = { threw: `${(e as Error).name}: ${(e as Error).message}`.slice(0, 400) };
+    }
+  }
+  return c.json(out);
+});
+
+// SAM's node WebSocket proxy shape (index.ts: fetch upstream with Upgrade, return the response).
+spikeProbeRoutes.get('/ws-proxy', async (c) => {
+  const upstream = c.req.query('upstream') ?? 'http://127.0.0.1:9300/agent';
+  const headers = new Headers(c.req.raw.headers);
+  const res = await fetch(upstream, { headers });
+  if (c.req.query('mode') === 'rewrap') {
+    return new Response(res.body, { status: res.status, headers: res.headers, webSocket: res.webSocket });
+  }
+  return res;
+});
+
 spikeProbeRoutes.get('/alarm-status', async (c) => {
   if (!c.env.SPIKE_PROBE_DO) return c.json({ error: 'no SPIKE_PROBE_DO' }, 500);
   const stub = c.env.SPIKE_PROBE_DO.get(c.env.SPIKE_PROBE_DO.idFromName('probe'));

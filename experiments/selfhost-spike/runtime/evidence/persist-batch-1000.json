@@ -1,0 +1,65 @@
+{
+ "n": 1000,
+ "b": 100,
+ "totalMs": 933,
+ "batches": [
+  {
+   "ms": 176,
+   "persisted": 100,
+   "duplicates": 0
+  },
+  {
+   "ms": 101,
+   "persisted": 100,
+   "duplicates": 0
+  },
+  {
+   "ms": 57,
+   "persisted": 100,
+   "duplicates": 0
+  },
+  {
+   "ms": 86,
+   "persisted": 100,
+   "duplicates": 0
+  },
+  {
+   "ms": 61,
+   "persisted": 100,
+   "duplicates": 0
+  },
+  {
+   "ms": 111,
+   "persisted": 100,
+   "duplicates": 0
+  },
+  {
+   "ms": 47,
+   "persisted": 100,
+   "duplicates": 0
+  },
+  {
+   "ms": 111,
+   "persisted": 100,
+   "duplicates": 0
+  },
+  {
+   "ms": 59,
+   "persisted": 100,
+   "duplicates": 0
+  },
+  {
+   "ms": 115,
+   "persisted": 100,
+   "duplicates": 0
+  }
+ ],
+ "replay": {
+  "persisted": 0,
+  "duplicates": 1,
+  "limitReached": false,
+  "maxMessages": 100000,
+  "remainingCapacity": 98998,
+  "ms": 9
+ }
+}
