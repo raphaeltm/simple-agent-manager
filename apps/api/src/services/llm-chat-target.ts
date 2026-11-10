@@ -14,6 +14,7 @@
 import type { Env } from '../env';
 import { resolveD1BindingIdentity } from '../lib/d1-session';
 import { log } from '../lib/logger';
+import { classifyHost, guardedFetch } from '../lib/network-hosts';
 import { resolveAdminSettingDetailsMany } from './admin-settings-resolution';
 import {
   LLM_PURPOSE_MODEL_SETTING,
@@ -36,10 +37,10 @@ export interface ChatCompletionsTarget {
   /** Model id to send. */
   model: string;
   /**
-   * Redirect policy for the request. An admin-configured endpoint must not bounce the call (and
-   * its prompt) to a host the URL validation never saw; Cloudflare targets keep fetch's default.
+   * The admin opted in to this endpoint being on the private network
+   * (`llm.openAICompatible.allowPrivateNetwork`). Only meaningful for `openai-compatible`.
    */
-  redirect: 'error' | 'follow';
+  allowPrivateNetwork: boolean;
 }
 
 /**
@@ -47,13 +48,18 @@ export interface ChatCompletionsTarget {
  * `settings_unreadable` means the endpoint settings could not be read, so the call was refused
  * rather than sent to a provider the admin may have opted out of.
  */
-export type LlmUnavailableReason = 'not_configured' | 'settings_unreadable';
+export type LlmUnavailableReason =
+  | 'not_configured'
+  | 'settings_unreadable'
+  | 'private_network_not_allowed';
 
 const LLM_UNAVAILABLE_MESSAGES: Record<LlmUnavailableReason, string> = {
   not_configured:
     'No language model is available on this installation. Configure an OpenAI-compatible endpoint in admin settings (AI models).',
   settings_unreadable:
     'The language model settings could not be read, so the call was not sent. Try again shortly.',
+  private_network_not_allowed:
+    'The configured language model endpoint is on a private network address. Turn on llm.openAICompatible.allowPrivateNetwork in admin settings (AI models) to allow it.',
 };
 
 export class LlmUnavailableError extends Error {
@@ -74,16 +80,25 @@ function chatTarget(
   kind: ChatCompletionsTarget['kind'],
   baseUrl: string,
   apiKey: string | null,
-  model: string
+  model: string,
+  allowPrivateNetwork = false
 ): ChatCompletionsTarget {
-  return {
-    kind,
-    baseUrl,
-    url: `${baseUrl}/chat/completions`,
-    apiKey,
-    model,
-    redirect: kind === 'openai-compatible' ? 'error' : 'follow',
-  };
+  return { kind, baseUrl, url: `${baseUrl}/chat/completions`, apiKey, model, allowPrivateNetwork };
+}
+
+/**
+ * Fetch for a chat target's URL (`url` is `target.url` or an AI SDK provider's request URL on the
+ * same base). An admin-configured endpoint goes through the guarded fetch: its host and every
+ * redirect hop are checked, and a private-network host needs the admin's opt-in. Cloudflare
+ * targets are fixed Cloudflare hosts and keep the plain fetch.
+ */
+export function fetchChatTarget(
+  target: ChatCompletionsTarget,
+  init: RequestInit,
+  url: string = target.url
+): Promise<Response> {
+  if (isCloudflareChatTarget(target)) return fetch(url, init);
+  return guardedFetch(url, init, { allowPrivateNetwork: target.allowPrivateNetwork });
 }
 
 function stringValue(value: unknown): string | null {
@@ -143,20 +158,22 @@ export async function resolveOpenAICompatibleTarget(
       'llm.openAICompatible.apiKey',
       'llm.openAICompatible.model',
       LLM_PURPOSE_MODEL_SETTING[purpose],
+      'llm.openAICompatible.allowPrivateNetwork',
     ]);
     values = details.map((detail) => detail.value);
   } catch (err) {
     throw settingsUnreadable(purpose, err);
   }
-  const [apiKey, defaultModel, purposeModel] = values;
+  const [apiKey, defaultModel, purposeModel, allowPrivate] = values;
   const model = stringValue(purposeModel) ?? stringValue(defaultModel) ?? requestedModel;
   if (!model) return null;
-  return chatTarget(
-    'openai-compatible',
-    normalizeLlmBaseUrl(String(baseUrl)),
-    stringValue(apiKey),
-    model
-  );
+  const normalized = normalizeLlmBaseUrl(String(baseUrl));
+  const allowPrivateNetwork = allowPrivate === true;
+  // Refused here with a reason the admin can act on, rather than as a fetch error later.
+  if (!allowPrivateNetwork && classifyHost(new URL(normalized).hostname) === 'private') {
+    throw new LlmUnavailableError(purpose, 'private_network_not_allowed');
+  }
+  return chatTarget('openai-compatible', normalized, stringValue(apiKey), model, allowPrivateNetwork);
 }
 
 /** Cloudflare's Workers AI chat route (gateway first, then REST), or null off Cloudflare. */

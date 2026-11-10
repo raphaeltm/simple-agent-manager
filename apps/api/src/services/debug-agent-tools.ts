@@ -10,7 +10,12 @@ import {
 } from './debug-agent-common';
 import { completionSchema, parseDebugToolArgs } from './debug-agent-parsing';
 import { getDiagnosticIncidentByErrorId } from './diagnostic-incidents';
-import { chatTargetHeaders, LlmUnavailableError, resolveWorkersAiChatTarget } from './llm-chat-target';
+import {
+  chatTargetHeaders,
+  fetchChatTarget,
+  LlmUnavailableError,
+  resolveWorkersAiChatTarget,
+} from './llm-chat-target';
 import {
   getErrorTrends,
   getHealthSummary,
@@ -201,10 +206,9 @@ export async function complete(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.timeoutMs);
   try {
-    const response = await fetch(target.url, {
+    const response = await fetchChatTarget(target, {
       method: 'POST',
-      redirect: target.redirect,
-      signal: controller.signal,
+        signal: controller.signal,
       headers: chatTargetHeaders(target, {
         'cf-aig-metadata': JSON.stringify({
           source: featureKey,

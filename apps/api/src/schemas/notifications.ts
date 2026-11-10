@@ -6,6 +6,8 @@ import {
 } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
+import { classifyHost } from '../lib/network-hosts';
+
 // Derive validation schemas from the shared notification constants so the API
 // contract cannot drift from the canonical type/channel lists.
 const NotificationTypeSchema = v.picklist(NOTIFICATION_TYPES);
@@ -25,11 +27,16 @@ const HttpsWebPushEndpointSchema = v.pipe(
   v.check((value) => {
     try {
       const url = new URL(value);
-      return url.protocol === 'https:' && !url.username && !url.password;
+      return (
+        url.protocol === 'https:' &&
+        !url.username &&
+        !url.password &&
+        classifyHost(url.hostname) === 'public'
+      );
     } catch {
       return false;
     }
-  }, 'endpoint must be an HTTPS URL without credentials')
+  }, 'endpoint must be an HTTPS URL on a public host, without credentials')
 );
 
 const SubscriptionKeySchema = v.pipe(

@@ -1,3 +1,4 @@
+import type { MastraModelConfig } from '@mastra/core/llm';
 import type { PlatformAIModel, SamConfig } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -8,6 +9,7 @@ import { incrementProviderUsage, incrementTokenUsage } from '../../../services/a
 import {
   type ChatCompletionsTarget,
   chatTargetHeaders,
+  fetchChatTarget,
   LlmUnavailableError,
   resolveCloudflareWorkersAiTarget,
   resolveOpenAICompatibleTarget,
@@ -29,20 +31,11 @@ export async function resolveOperatorModel(
   env: Env,
   modelId: string,
   headers: { metadata: string; sessionAffinity: string }
-) {
+): Promise<MastraModelConfig> {
   const { ModelRouterLanguageModel, ModelsDevGateway } = await import('@mastra/core/llm');
   // An admin-configured OpenAI-compatible endpoint replaces the model route for the agent.
   const endpoint = await resolveOpenAICompatibleTarget(env, 'agent', modelId);
-  if (endpoint) {
-    return new ModelRouterLanguageModel({
-      providerId: OPENAI_COMPATIBLE_PROVIDER_ID,
-      modelId: endpoint.model,
-      url: endpoint.baseUrl,
-      apiKey: endpoint.apiKey ?? '',
-      headers: chatHeadersWithoutAuth(endpoint, headers),
-      api: 'chat',
-    });
-  }
+  if (endpoint) return openAICompatibleEndpointModel(endpoint, headers);
   if (modelId.startsWith('claude-')) {
     const auth = await resolveUpstreamAuth(env, drizzle(env.DATABASE));
     const gateway = new ModelsDevGateway({
@@ -74,6 +67,28 @@ export async function resolveOperatorModel(
     });
   }
   throw new Error('Unsupported SAM model provider');
+}
+
+/**
+ * The chat model for an admin-configured endpoint. This is what `ModelRouterLanguageModel` builds
+ * for a `url` config (the same @ai-sdk/openai-compatible version, `chatModel`, structured
+ * outputs on), built directly because the router has no `fetch` option: every request, including
+ * each redirect hop, must go through the endpoint's guarded fetch (`fetchChatTarget`).
+ */
+async function openAICompatibleEndpointModel(
+  endpoint: ChatCompletionsTarget,
+  headers: { metadata: string; sessionAffinity: string }
+): Promise<MastraModelConfig> {
+  const { createOpenAICompatible } = await import('@ai-sdk/openai-compatible');
+  return createOpenAICompatible({
+    name: OPENAI_COMPATIBLE_PROVIDER_ID,
+    baseURL: endpoint.baseUrl,
+    apiKey: endpoint.apiKey ?? undefined,
+    headers: chatHeadersWithoutAuth(endpoint, headers),
+    supportsStructuredOutputs: true,
+    fetch: (input, init) =>
+      fetchChatTarget(endpoint, init ?? {}, input instanceof Request ? input.url : String(input)),
+  }).chatModel(endpoint.model);
 }
 
 /** The router sets Authorization from apiKey; gateway attribution goes to Cloudflare only. */

@@ -1,3 +1,5 @@
+import { classifyHost } from './network-hosts';
+
 const P256_PUBLIC_KEY_BYTES = 65;
 const P256_PRIVATE_KEY_BYTES = 32;
 const AUTH_SECRET_BYTES = 16;
@@ -257,6 +259,10 @@ function validateEndpoint(endpoint: string): URL {
   }
   if (url.protocol !== 'https:' || url.username || url.password) {
     throw new Error('Web Push endpoint must be a valid HTTPS URL without credentials');
+  }
+  // The control plane POSTs to this user-supplied URL; push services are public hosts.
+  if (classifyHost(url.hostname) !== 'public') {
+    throw new Error('Web Push endpoint must be on a public host');
   }
   return url;
 }

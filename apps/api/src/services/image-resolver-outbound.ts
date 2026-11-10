@@ -1,9 +1,13 @@
+import { classifyHost } from '../lib/network-hosts';
 import type {
   ImageResolverConfig,
   ImageResolverEnv,
   ImageResolverOptions,
   RegistryAuth,
 } from './image-resolver';
+import { hasUnsafeRawUrlCharacters } from './image-resolver-oci';
+
+export { manifestUrl, parseBearerChallenge } from './image-resolver-oci';
 
 export const DEFAULT_IMAGE_RESOLVE_REQUEST_TIMEOUT_MS = 10_000;
 export const DEFAULT_IMAGE_RESOLVE_TOTAL_TIMEOUT_MS = 60_000;
@@ -12,15 +16,6 @@ export const DEFAULT_IMAGE_RESOLVE_MAX_REDIRECTS = 2;
 export const DEFAULT_IMAGE_RESOLVE_TOKEN_RESPONSE_MAX_BYTES = 65_536;
 export const DEFAULT_IMAGE_RESOLVE_MAX_CONCURRENT_FETCHES = 4;
 export const DEFAULT_IMAGE_RESOLVE_MAX_SERVICES = 50;
-
-const OCI_REPOSITORY_SEGMENT_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-const OCI_TAG_RE = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/;
-
-// Non-backtracking: the capture group is forced to start with a non-space
-// character so it cannot overlap with the preceding `\s+`.
-const BEARER_CHALLENGE_RE = /^Bearer\s+(\S.*)$/i;
-
-const PERCENT_ENCODED_CONTROL_RE = /%(?:0[0-9a-f]|1[0-9a-f]|7f)/i;
 
 interface ResolverFetchBudget {
   attempts: number;
@@ -102,16 +97,6 @@ export function configFromOptions(opts: ImageResolverOptions): ImageResolverConf
   };
 }
 
-function hasUnsafeRawUrlCharacters(value: string): boolean {
-  for (let index = 0; index < value.length; index += 1) {
-    const code = value.charCodeAt(index);
-    if (code <= 0x1f || code === 0x7f) {
-      return true;
-    }
-  }
-  return PERCENT_ENCODED_CONTROL_RE.test(value);
-}
-
 function rawAuthority(input: string): string {
   const match = /^https:\/\/([^/?#]*)/i.exec(input);
   return match?.[1] ?? '';
@@ -156,7 +141,8 @@ function validateOutboundUrl(input: string | URL, kind: OutboundUrlKind): URL {
   if (hostname.includes('%')) {
     throw new Error(`Unsafe ${kind} URL rejected: encoded hostnames are not allowed.`);
   }
-  if (isBlockedHostname(hostname)) {
+  // Shared classifier (lib/network-hosts): only public hosts are registry endpoints.
+  if (classifyHost(hostname) !== 'public') {
     throw new Error(
       `Unsafe ${kind} URL rejected: host ${hostname} is not a public registry endpoint.`
     );
@@ -179,133 +165,6 @@ function isCanonicalAuthority(authority: string, url: URL): boolean {
     if (parsed > 65_535 || String(parsed) !== rawPort) return false;
   }
   return url.host === url.host.toLowerCase();
-}
-
-function isBlockedHostname(hostname: string): boolean {
-  if (
-    hostname === 'localhost' ||
-    hostname.endsWith('.localhost') ||
-    hostname === 'metadata' ||
-    hostname.endsWith('.metadata') ||
-    hostname === 'metadata.google.internal' ||
-    hostname === 'metadata.azure.internal' ||
-    hostname === 'instance-data' ||
-    hostname.endsWith('.local') ||
-    hostname.endsWith('.localdomain') ||
-    hostname.endsWith('.internal')
-  ) {
-    return true;
-  }
-
-  const ipv4 = parseIpv4(hostname);
-  if (ipv4) {
-    return isUnsafeIpv4(ipv4);
-  }
-
-  const ipv6 = parseIpv6(hostname);
-  return ipv6 ? isUnsafeIpv6(ipv6) : false;
-}
-
-function parseIpv4(hostname: string): [number, number, number, number] | null {
-  const parts = hostname.split('.');
-  if (parts.length !== 4) return null;
-  const octets = parts.map((part) => {
-    if (!/^\d{1,3}$/.test(part)) return null;
-    const value = Number(part);
-    return Number.isInteger(value) && value >= 0 && value <= 255 ? value : null;
-  });
-  if (octets.some((part) => part === null)) return null;
-  return octets as [number, number, number, number];
-}
-
-function isUnsafeIpv4([a, b, c, d]: [number, number, number, number]): boolean {
-  return (
-    a === 0 ||
-    a === 10 ||
-    a === 127 ||
-    (a === 100 && b >= 64 && b <= 127) ||
-    (a === 169 && b === 254) ||
-    (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && b === 168) ||
-    (a === 192 && b === 0 && c === 0) ||
-    (a === 192 && b === 0 && c === 2) ||
-    (a === 198 && (b === 18 || b === 19)) ||
-    (a === 198 && b === 51 && c === 100) ||
-    (a === 203 && b === 0 && c === 113) ||
-    a >= 224 ||
-    (a === 255 && b === 255 && c === 255 && d === 255)
-  );
-}
-
-function parseIpv6(hostname: string): number[] | null {
-  const host = hostname.replace(/^\[/, '').replace(/\]$/, '').toLowerCase();
-  if (!host.includes(':') || host.includes('%')) return null;
-  const halves = host.split('::');
-  if (halves.length > 2) return null;
-
-  const head = parseIpv6Words(halves[0] ?? '');
-  const tail = parseIpv6Words(halves[1] ?? '');
-  if (!head || !tail) return null;
-  if (halves.length === 1 && head.length !== 8) return null;
-  if (halves.length === 2 && head.length + tail.length >= 8) return null;
-
-  const zeros = new Array(8 - head.length - tail.length).fill(0) as number[];
-  const words = [...head, ...zeros, ...tail];
-  if (words.length !== 8) return null;
-
-  const bytes: number[] = [];
-  for (const word of words) {
-    bytes.push((word >> 8) & 0xff, word & 0xff);
-  }
-  return bytes;
-}
-
-function parseIpv6Words(part: string): number[] | null {
-  if (!part) return [];
-  const pieces = part.split(':');
-  const words: number[] = [];
-  for (const piece of pieces) {
-    if (!piece) return null;
-    if (piece.includes('.')) {
-      const ipv4 = parseIpv4(piece);
-      if (!ipv4) return null;
-      words.push((ipv4[0] << 8) | ipv4[1], (ipv4[2] << 8) | ipv4[3]);
-      continue;
-    }
-    if (!/^[0-9a-f]{1,4}$/i.test(piece)) return null;
-    words.push(Number.parseInt(piece, 16));
-  }
-  return words;
-}
-
-function isUnsafeIpv6(bytes: number[]): boolean {
-  if (bytes.length !== 16) return true;
-  const first = bytes[0] ?? 0;
-  const second = bytes[1] ?? 0;
-  const isUnspecified = bytes.every((byte) => byte === 0);
-  const isLoopback = bytes.slice(0, 15).every((byte) => byte === 0) && bytes[15] === 1;
-  const isUniqueLocal = (first & 0xfe) === 0xfc;
-  const isLinkLocal = first === 0xfe && (second & 0xc0) === 0x80;
-  const isDeprecatedSiteLocal = first === 0xfe && (second & 0xc0) === 0xc0;
-  const isMulticast = first === 0xff;
-  const isIpv4Mapped =
-    bytes.slice(0, 10).every((byte) => byte === 0) && bytes[10] === 0xff && bytes[11] === 0xff;
-  const isIpv4Compatible =
-    bytes.slice(0, 12).every((byte) => byte === 0) && !bytes.slice(12).every((byte) => byte === 0);
-  const embeddedIpv4 =
-    isIpv4Mapped || isIpv4Compatible
-      ? ([bytes[12], bytes[13], bytes[14], bytes[15]] as [number, number, number, number])
-      : null;
-
-  return (
-    isUnspecified ||
-    isLoopback ||
-    isUniqueLocal ||
-    isLinkLocal ||
-    isDeprecatedSiteLocal ||
-    isMulticast ||
-    (embeddedIpv4 !== null && isUnsafeIpv4(embeddedIpv4))
-  );
 }
 
 /**
@@ -374,78 +233,6 @@ function realmOriginIsTrusted(realm: URL, registryBase: URL): boolean {
     registryBase.origin.toLowerCase() === 'https://registry-1.docker.io' &&
     realm.origin.toLowerCase() === 'https://auth.docker.io'
   );
-}
-
-function validateRepository(repository: string): string[] {
-  if (hasUnsafeRawUrlCharacters(repository) || repository.includes('%')) {
-    throw new Error(
-      'Unsafe image repository rejected: encoded or control characters are not allowed.'
-    );
-  }
-  if (repository.includes('?') || repository.includes('#') || repository.includes('\\')) {
-    throw new Error('Unsafe image repository rejected: URL delimiters are not allowed.');
-  }
-  const segments = repository.split('/');
-  if (
-    segments.length === 0 ||
-    segments.some((segment) => {
-      return (
-        segment.length === 0 ||
-        segment === '.' ||
-        segment === '..' ||
-        !OCI_REPOSITORY_SEGMENT_RE.test(segment)
-      );
-    })
-  ) {
-    throw new Error('Unsafe image repository rejected: invalid OCI repository path.');
-  }
-  return segments;
-}
-
-function validateTag(tag: string): string {
-  if (hasUnsafeRawUrlCharacters(tag) || tag.includes('%')) {
-    throw new Error('Unsafe image tag rejected: encoded or control characters are not allowed.');
-  }
-  if (tag.includes('/') || tag.includes('?') || tag.includes('#') || tag.includes('\\')) {
-    throw new Error('Unsafe image tag rejected: URL delimiters are not allowed.');
-  }
-  if (!OCI_TAG_RE.test(tag)) {
-    throw new Error('Unsafe image tag rejected: invalid OCI tag.');
-  }
-  return tag;
-}
-
-export function manifestUrl(base: string, repository: string, tag: string): string {
-  const repositoryPath = validateRepository(repository).map(encodeURIComponent).join('/');
-  const safeTag = encodeURIComponent(validateTag(tag));
-  return `${base}/v2/${repositoryPath}/manifests/${safeTag}`;
-}
-
-/**
- * Parse a WWW-Authenticate: Bearer realm="...",service="...",scope="..." header.
- */
-export function parseBearerChallenge(
-  header: string
-): { realm: string; service?: string; scope?: string } | null {
-  const match = BEARER_CHALLENGE_RE.exec(header);
-  if (!match) return null;
-
-  const [, params] = match;
-  if (params === undefined) return null;
-  const realm = extractParam(params, 'realm');
-  if (!realm) return null;
-
-  return {
-    realm,
-    service: extractParam(params, 'service'),
-    scope: extractParam(params, 'scope'),
-  };
-}
-
-function extractParam(params: string, key: string): string | undefined {
-  const re = new RegExp(`${key}="([^"]*)"`, 'i');
-  const m = re.exec(params);
-  return m ? m[1] : undefined;
 }
 
 function remainingTimeoutMs(config: ImageResolverConfig, budget: ResolverFetchBudget): number {

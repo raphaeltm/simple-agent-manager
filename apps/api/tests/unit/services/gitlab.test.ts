@@ -116,3 +116,86 @@ describe('verifyGitLabProjectAccess', () => {
     expect(metadata.gitlabProjectId).toBe(123);
   });
 });
+
+describe('GitLab API requests (self-host SSRF, T5)', () => {
+  const projectJson = JSON.stringify({
+    id: 123,
+    path_with_namespace: 'group/project',
+    name: 'project',
+    visibility: 'private',
+    default_branch: 'main',
+    web_url: 'https://gitlab.example.com/group/project',
+    permissions: { project_access: { access_level: 30 } },
+  });
+
+  it('refuses a redirect from the GitLab host to an internal address, never sending the token there', async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(null, { status: 302, headers: { Location: 'http://127.0.0.1:7001/state' } })
+    );
+    globalThis.fetch = fetchMock;
+
+    await expect(verifyGitLabProjectAccess({} as Env, 'gl_token', 123)).rejects.toMatchObject({
+      name: 'OutboundRequestRefusedError',
+      reason: 'host',
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ redirect: 'manual' });
+  });
+
+  it('follows a redirect within the configured host', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(null, {
+          status: 301,
+          headers: { Location: 'https://gitlab.example.com/api/v4/projects/123?moved=1' },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(projectJson, { status: 200, headers: { 'content-type': 'application/json' } })
+      );
+    globalThis.fetch = fetchMock;
+
+    await expect(verifyGitLabProjectAccess({} as Env, 'gl_token', 123)).resolves.toMatchObject({
+      gitlabProjectId: 123,
+    });
+    expect(new Headers((fetchMock.mock.calls[1]?.[1] as RequestInit).headers).get('authorization')).toBe(
+      'Bearer gl_token'
+    );
+  });
+
+  it('control: a self-managed GitLab the admin configured on the private network still works', async () => {
+    platformConfig.getGitLabOAuthConfig.mockResolvedValue({
+      host: 'http://localhost:8929',
+      apiBaseUrl: 'http://localhost:8929/api/v4',
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+    });
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(projectJson, { status: 200, headers: { 'content-type': 'application/json' } })
+    );
+    globalThis.fetch = fetchMock;
+
+    await expect(verifyGitLabProjectAccess({} as Env, 'gl_token', 123)).resolves.toMatchObject({
+      gitlabProjectId: 123,
+    });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('http://localhost:8929/api/v4/projects/123');
+  });
+
+  it('a public GitLab cannot redirect into the private network', async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(null, { status: 307, headers: { Location: 'https://10.0.0.8/api/v4/x' } })
+    );
+    globalThis.fetch = fetchMock;
+
+    await expect(verifyGitLabProjectAccess({} as Env, 'gl_token', 123)).rejects.toMatchObject({
+      name: 'OutboundRequestRefusedError',
+      reason: 'host',
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+});

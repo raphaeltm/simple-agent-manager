@@ -25,6 +25,7 @@ const LLM_ENDPOINT_SETTING_KEYS = [
   'taskTitleModel',
   'diagnosisModel',
   'aiProxyModel',
+  'allowPrivateNetwork',
 ] as const;
 
 type LlmEndpointSettingKey = (typeof LLM_ENDPOINT_SETTING_KEYS)[number];
@@ -84,6 +85,8 @@ const DESCRIPTIONS: Readonly<Record<LlmEndpointSettingKey, string>> = {
   diagnosisModel: 'Model id for the diagnosis runner on the OpenAI-compatible endpoint.',
   aiProxyModel:
     "Model id that serves the AI proxy's Workers AI route (/ai/v1) on the OpenAI-compatible endpoint.",
+  allowPrivateNetwork:
+    'Let SAM call an endpoint on this machine or its private network (loopback, 10/8, 172.16/12, 192.168/16, a Docker service name), such as a local model server. Off: such a base URL is refused when used. Cloud metadata addresses are refused either way.',
 };
 
 function definition(key: LlmEndpointSettingKey): AdminSettingDefinition {
@@ -97,6 +100,18 @@ function definition(key: LlmEndpointSettingKey): AdminSettingDefinition {
     // Redirecting every control-plane model call is spend- and data-affecting.
     risky: key === 'baseUrl' || key === 'apiKey',
   };
+  if (key === 'allowPrivateNetwork') {
+    // Reaching the operator's own network is a separate decision from "the URL is HTTP": a base
+    // URL on a private host is refused at use time unless this is on (llm-chat-target.ts).
+    return {
+      ...base,
+      type: 'boolean',
+      defaultValue: false,
+      risky: true,
+      secret: false,
+      validate: (value) => typeof value === 'boolean',
+    };
+  }
   if (key === 'apiKey') {
     return {
       ...base,
