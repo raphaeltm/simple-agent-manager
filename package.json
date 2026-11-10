@@ -38,6 +38,7 @@
     "setup:local": "tsx scripts/deploy/setup-local-dev.ts",
     "selfhost:deploy": "tsx scripts/selfhost/deploy.ts",
     "selfhost:test": "vitest run --config scripts/selfhost/vitest.config.ts",
+    "selfhost:live-test": "vitest run --config scripts/selfhost/live/vitest.config.ts",
     "quality:preflight": "tsx scripts/quality/check-preflight-evidence.ts",
     "test:acp-c2-remote-service": "node tests/fixtures/acp-c2-remote-service.test.mjs",
     "quality:wrangler-bindings": "tsx scripts/quality/check-wrangler-bindings.ts",

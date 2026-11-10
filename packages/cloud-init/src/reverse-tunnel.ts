@@ -35,6 +35,12 @@ export const REVERSE_TUNNEL_PROXY_NAME = 'sam-agent';
  */
 export const REVERSE_TUNNEL_HEARTBEAT_INTERVAL_SECONDS = '30';
 export const REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS = '90';
+/**
+ * Work connections frpc opens ahead of use. Each one is authorized by the control plane
+ * (frps NewWorkConn plugin op) when it is opened, so a warm pool keeps that round trip off the
+ * first request of a burst. Must not exceed frps `transport.maxPoolCount` (frp default 5).
+ */
+export const REVERSE_TUNNEL_POOL_COUNT = '2';
 
 /** base64url credential minted by the control plane (32-byte HMAC → 43 characters). */
 const CREDENTIAL_RE = /^[A-Za-z0-9_-]{32,128}$/;
@@ -111,10 +117,9 @@ export function reverseTunnelReplacements(variables: CloudInitVariables): Record
     '{{ reverse_tunnel_server_addr }}': server.host,
     '{{ reverse_tunnel_server_port }}': server.port,
     '{{ reverse_tunnel_proxy_name }}': REVERSE_TUNNEL_PROXY_NAME,
-    '{{ reverse_tunnel_heartbeat_interval_seconds }}':
-      REVERSE_TUNNEL_HEARTBEAT_INTERVAL_SECONDS,
-    '{{ reverse_tunnel_heartbeat_timeout_seconds }}':
-      REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS,
+    '{{ reverse_tunnel_heartbeat_interval_seconds }}': REVERSE_TUNNEL_HEARTBEAT_INTERVAL_SECONDS,
+    '{{ reverse_tunnel_heartbeat_timeout_seconds }}': REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS,
+    '{{ reverse_tunnel_pool_count }}': REVERSE_TUNNEL_POOL_COUNT,
     '{{ frpc_version }}': DEFAULT_FRPC_VERSION,
     '{{ frpc_url }}': `${FRPC_DOWNLOAD_BASE_URL}/v${DEFAULT_FRPC_VERSION}`,
     '{{ frpc_sha256_amd64 }}': release?.amd64 ?? '',

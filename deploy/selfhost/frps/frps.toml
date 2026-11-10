@@ -2,7 +2,8 @@
 # Validated with frp 0.72.0. frps renders this file as a Go template over its environment
 # (so no template braces may appear in comments either). Variables:
 #   FRPS_BIND_PORT, CELLD_PORT, REVERSE_TUNNEL_GATEWAY_SECRET,
-#   REVERSE_TUNNEL_PORT_RANGE_START, REVERSE_TUNNEL_PORT_RANGE_END
+#   REVERSE_TUNNEL_PORT_RANGE_START, REVERSE_TUNNEL_PORT_RANGE_END,
+#   REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS
 #
 # - frps listens on loopback only. Nodes reach it as frp over wss through Caddy on 443
 #   (caddy/sam.d/frp.caddy); there is no TLS here because Caddy terminates it.
@@ -10,7 +11,14 @@
 #   network) and Caddy (forward_auth WebSockets) reach nodes at 127.0.0.1:{leasePort}.
 # - The real gate is the SAM server plugin: it checks the node's per-node credential, that its
 #   node incarnation is live, and that it binds exactly its own leased port, on every Login,
-#   NewProxy and heartbeat (Ping). allowPorts and maxPortsPerClient are a second fence.
+#   NewProxy, heartbeat (Ping) and work connection (NewWorkConn, bound to the lease of the
+#   control session that owns its run id). allowPorts and maxPortsPerClient are a second fence.
+# - auth.token stays empty on purpose. With auth.method token, frp uses ONE token for every
+#   client: every node would have to hold it, so it cannot tell one node from another, and the
+#   plugin already authenticates each node with its own credential on every op. frp also uses
+#   the token as the control-channel encryption key; a key every node knows adds nothing over
+#   the TLS Caddy terminates. Per-node tokens are not possible (frps checks one token, and a
+#   mismatched key breaks the encrypted control channel).
 # - frps sends the plugin `addr` userinfo as HTTP basic auth; the password is the gateway
 #   secret. The plugin route answers 404 when the Worker has no secret, so frps then refuses
 #   every node (fail closed). The secret must be URL-safe (the generator makes it hex).
@@ -23,8 +31,10 @@ allowPorts = [
 maxPortsPerClient = 1
 # Caddy is the only TLS layer; frps sees plain WebSocket from it.
 transport.tls.force = false
-# A node that stops heartbeating is dropped after this long (frpc heartbeats every 30 s).
-transport.heartbeatTimeout = 90
+# A node that stops heartbeating is dropped after this long (frpc heartbeats every 30 s). The
+# deploy script writes the same value to the Worker, which will not reissue a released lease
+# port until twice this long has passed, so a new node's traffic cannot reach the old frpc.
+transport.heartbeatTimeout = {{ .Envs.REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS }}
 log.to = "console"
 log.level = "info"
 
@@ -32,4 +42,4 @@ log.level = "info"
 name = "sam-node-authz"
 addr = "http://frps:{{ .Envs.REVERSE_TUNNEL_GATEWAY_SECRET }}@127.0.0.1:{{ .Envs.CELLD_PORT }}"
 path = "/api/self-host/gateway/frps-plugin"
-ops = ["Login", "NewProxy", "Ping"]
+ops = ["Login", "NewProxy", "Ping", "NewWorkConn"]

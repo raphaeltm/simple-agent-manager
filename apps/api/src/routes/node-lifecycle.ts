@@ -412,9 +412,11 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
   // server-side (keyed on tunnelId presence, NOT nodeClass — a future public-IP BYO mode still wants
   // backfill) so a heartbeat can never create an A record that conflicts with the enrollment CNAME.
   // See security-critique #8 / architecture-critique #7.
+  // The `tunnelId` conjunct is the exact pre-existing predicate for every other transport (a
+  // cloudflare-tunnel node whose tunnel_id is still NULL keeps backfilling, as before).
   // Reverse-tunnel nodes have no tunnelId and no DNS record at all (frpc dials the box), so
-  // the gate also reads the node row's own transport, never anything the agent sends.
-  const tunnelIngress = !!node.tunnelId || isTunnelNodeTransport(node.transport);
+  // they are added separately from the node row's own transport, never from the agent.
+  const tunnelIngress = !!node.tunnelId || node.transport === 'reverse-tunnel';
   if (tunnelIngress) {
     log.debug('heartbeat.ip_backfill_skipped_tunnel_node', { nodeId, action: 'skipped' });
   }

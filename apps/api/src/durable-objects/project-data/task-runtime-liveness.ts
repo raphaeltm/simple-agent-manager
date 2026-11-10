@@ -242,7 +242,11 @@ async function classifyLocalTaskRuntime(
   if (!workspaceChatMatches) return { liveness: initialClassification, signals: livenessSignals };
   if (needsNodeHealthProbe(livenessSignals) && livenessSignals.workspace?.nodeId) {
     const nodeId = livenessSignals.workspace.nodeId;
-    const probe = await probeNodeHealthForTaskLiveness(env, nodeId);
+    const probe = await probeNodeHealthForTaskLiveness(
+      env,
+      nodeId,
+      livenessSignals.workspace.nodeTransport
+    );
     if (probe.outcome !== 'ok') {
       log.warn('node_health_probe_unhealthy', {
         projectId: task.projectId,

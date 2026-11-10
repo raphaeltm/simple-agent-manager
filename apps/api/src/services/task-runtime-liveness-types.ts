@@ -98,6 +98,12 @@ export interface RuntimeWorkspaceSnapshot {
   nodeId: string | null;
   userId: string | null;
   nodeRuntime: string | null;
+  /**
+   * `nodes.transport`, read by the same snapshot query. The node-health probe uses it to route
+   * a reverse-tunnel node through its lease without an extra D1 read for every other transport.
+   * Optional so older hand-built snapshots keep the public route.
+   */
+  nodeTransport?: string | null;
   nodeStatus: string | null;
   nodeHealthStatus: string | null;
   nodeHeartbeatAt: number | null;
@@ -261,8 +267,10 @@ export interface TaskRuntimeLivenessSignals {
 }
 
 export interface TaskLivenessNodeHealthProbeEnv {
-  /** When present, the probe resolves the node's real route (reverse-tunnel nodes have no DNS). */
+  /** Read only for a reverse-tunnel node: it resolves the node's lease (it has no DNS record). */
   DATABASE?: D1Database;
+  REVERSE_TUNNEL_PORT_RANGE_START?: string;
+  REVERSE_TUNNEL_PORT_RANGE_END?: string;
   BASE_DOMAIN?: string;
   VM_AGENT_PROTOCOL?: string;
   VM_AGENT_PORT?: string;

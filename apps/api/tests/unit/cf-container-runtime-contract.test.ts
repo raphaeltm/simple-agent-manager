@@ -83,7 +83,14 @@ describe('cf-container runtime spike contracts', () => {
     const localForward = read('routes/workspaces/local-forward.ts');
     const nodesRoute = read('routes/nodes/diagnostics.ts');
 
+    // The routing decision moved into node-agent-route.ts; the node row's runtime still decides
+    // the container path first, before any transport (behaviour: node-agent-route.test.ts).
+    const nodeAgentRoute = read('services/node-agent-route.ts');
+    expect(nodeAgent).toContain('const route = await resolveNodeAgentRoute(env, nodeId)');
     expect(nodeAgent).toContain("route.kind !== 'container'");
+    expect(nodeAgentRoute).toContain(
+      "if (row?.runtime === 'cf-container') return { kind: 'container', runtime: 'cf-container' };"
+    );
     expect(nodeAgent).toContain('getVmAgentContainerConfig(env)');
     expect(nodeAgent).toContain('!env.VM_AGENT_CONTAINER');
     expect(nodeAgent).toContain('fetchVmAgentContainer(');

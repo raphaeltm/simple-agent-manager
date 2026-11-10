@@ -6,7 +6,7 @@
  * incarnation is provably no longer the node's live runtime ({@link LIVE_INCARNATION_SQL}, the
  * same predicate the Cloudflare tunnel journal uses) or when the provisioner knows no VM was
  * ever requested for it. Releasing is the whole cleanup: frps holds no state SAM must delete,
- * and the frps plugin refuses Login/NewProxy/Ping for a released lease, so a straggling frpc
+ * and the frps plugin refuses Login/NewProxy/Ping/NewWorkConn for a released lease, so a straggling frpc
  * is disconnected at its next heartbeat. Rows are never deleted.
  */
 import type { Env } from '../env';
@@ -15,8 +15,10 @@ import {
   deriveReverseTunnelCredential,
   hashReverseTunnelCredential,
   resolveReverseTunnelPortRange,
+  resolveReverseTunnelPortReuseMinAgeSeconds,
   type ReverseTunnelEnv,
 } from './node-reverse-tunnel-config';
+import { isReverseTunnelInstallation } from './node-tunnel-config';
 import { LIVE_INCARNATION_SQL } from './node-tunnel-journal';
 
 export type ReverseTunnelLeaseStatus = 'active' | 'released';
@@ -44,9 +46,31 @@ const NODE_LIVE_FENCE_SQL = `id = ? AND user_id = ? AND runtime = 'vm' AND node_
 
 type LeaseEnv = Pick<Env, 'DATABASE'>;
 
+/**
+ * Why no lease was written. `port_range_exhausted`: every port in the range is held by an
+ * active lease. `port_range_cooling_down`: some ports are free but were released less than the
+ * minimum reuse age ago, so reissuing one could hand a new node's traffic to the previous
+ * holder's still-connected frpc. Both are capacity conditions; the others are not.
+ */
+export type ReverseTunnelLeaseErrorCode =
+  | 'port_range_exhausted'
+  | 'port_range_cooling_down'
+  | 'incarnation_not_live'
+  | 'lease_released'
+  | 'credential_mismatch';
+
 export class ReverseTunnelLeaseError extends Error {
   override name = 'ReverseTunnelLeaseError';
+  constructor(
+    readonly code: ReverseTunnelLeaseErrorCode,
+    message: string
+  ) {
+    super(message);
+  }
 }
+
+/** Sorts after every ISO timestamp: a released row with no released_at is treated as fresh. */
+const UNKNOWN_RELEASE_AT = '9999-12-31T23:59:59.999Z';
 
 export interface ReverseTunnelLeaseProvisioning {
   leaseId: string;
@@ -78,9 +102,12 @@ export async function readReverseTunnelLeaseByIncarnation(
  * Allocate (or adopt, on retry/resume) this incarnation's lease and return its port and
  * credential. The port is chosen and written by ONE statement: SQLite executes it with no
  * interleaving writer, so two nodes can never be handed the same port, and the partial unique
- * index on active ports is a second fence. Preference: never-used ports in ascending order,
- * then the least recently released, so a freed port is not immediately reissued to a new node
- * while a dying VM may still be retrying with it.
+ * index on active ports is a second fence. A released port is NOT a candidate until its latest
+ * release is older than the minimum reuse age (2 x the frps heartbeat timeout by default,
+ * {@link resolveReverseTunnelPortReuseMinAgeSeconds}): by then frps has dropped the previous
+ * holder's session, so a new node's traffic cannot reach it. Among candidates: never-used ports
+ * in ascending order, then the least recently released. When nothing qualifies the error says
+ * whether the range is full or only cooling down ({@link ReverseTunnelLeaseErrorCode}).
  *
  * The credential is derived from the lease id, so the row id is generated first and the hash
  * of the resulting credential is written in the same INSERT. Only the (node, incarnation)
@@ -91,13 +118,16 @@ export async function ensureReverseTunnelLease(
   input: EnsureReverseTunnelLeaseInput
 ): Promise<ReverseTunnelLeaseProvisioning> {
   const range = resolveReverseTunnelPortRange(env);
+  const reuseMinAgeSeconds = resolveReverseTunnelPortReuseMinAgeSeconds(env);
+  const nowMs = Date.now();
+  const reusableBefore = new Date(nowMs - reuseMinAgeSeconds * 1000).toISOString();
   const leaseId = crypto.randomUUID();
   const candidateCredential = await deriveReverseTunnelCredential(env, {
     leaseId,
     nodeId: input.nodeId,
     runtimeIncarnationId: input.runtimeIncarnationId,
   });
-  const now = new Date().toISOString();
+  const now = new Date(nowMs).toISOString();
   await env.DATABASE.prepare(
     `WITH RECURSIVE candidate_ports(port) AS (
        SELECT ? UNION ALL SELECT port + 1 FROM candidate_ports WHERE port < ?
@@ -114,6 +144,10 @@ export async function ensureReverseTunnelLease(
           WHERE NOT EXISTS (
             SELECT 1 FROM node_reverse_tunnel_leases a
              WHERE a.port = c.port AND a.status = 'active')
+            AND NOT EXISTS (
+            SELECT 1 FROM node_reverse_tunnel_leases r
+             WHERE r.port = c.port AND r.status = 'released'
+               AND COALESCE(r.released_at, '${UNKNOWN_RELEASE_AT}') > ?)
           ORDER BY last_released_at IS NOT NULL, last_released_at, c.port
           LIMIT 1
        ) chosen
@@ -130,6 +164,7 @@ export async function ensureReverseTunnelLease(
       await hashReverseTunnelCredential(candidateCredential),
       now,
       now,
+      reusableBefore,
       input.nodeId,
       input.userId,
       input.runtimeIncarnationId
@@ -147,21 +182,17 @@ export async function ensureReverseTunnelLease(
     )
       .bind(input.nodeId, input.userId, input.runtimeIncarnationId)
       .first<{ live: number }>();
-    if (live) {
-      log.error('node_reverse_tunnel.port_range_exhausted', {
-        nodeId: input.nodeId,
-        rangeStart: range.start,
-        rangeEnd: range.end,
-      });
+    if (!live) {
+      throw new ReverseTunnelLeaseError(
+        'incarnation_not_live',
+        'Node incarnation changed before a reverse-tunnel lease was written'
+      );
     }
-    throw new ReverseTunnelLeaseError(
-      live
-        ? `No free reverse-tunnel port in ${range.start}-${range.end}`
-        : 'Node incarnation changed before a reverse-tunnel lease was written'
-    );
+    throw await noFreePortError(env, input.nodeId, range, reusableBefore, reuseMinAgeSeconds);
   }
   if (row.userId !== input.userId || row.status !== 'active') {
     throw new ReverseTunnelLeaseError(
+      'lease_released',
       'Reverse-tunnel lease for this node incarnation was released'
     );
   }
@@ -178,10 +209,64 @@ export async function ensureReverseTunnelLease(
         });
   if ((await hashReverseTunnelCredential(credential)) !== row.credentialHash) {
     throw new ReverseTunnelLeaseError(
+      'credential_mismatch',
       'Reverse-tunnel credential cannot be re-derived for this lease'
     );
   }
   return { leaseId: row.id, port: row.port, credential };
+}
+
+/**
+ * Distinguish "every port is held" from "only recently released ports remain", record which,
+ * and name the earliest moment a cooling port becomes reusable. Failure path only: one
+ * statement over the range's released rows (indexed on port, released_at).
+ */
+async function noFreePortError(
+  env: LeaseEnv,
+  nodeId: string,
+  range: { start: number; end: number },
+  reusableBefore: string,
+  reuseMinAgeSeconds: number
+): Promise<ReverseTunnelLeaseError> {
+  const cooling = await env.DATABASE.prepare(
+    `SELECT COUNT(*) AS ports, MIN(last_released_at) AS oldest FROM (
+       SELECT r.port, MAX(COALESCE(r.released_at, '${UNKNOWN_RELEASE_AT}')) AS last_released_at
+         FROM node_reverse_tunnel_leases r
+        WHERE r.port BETWEEN ? AND ? AND r.status = 'released'
+          AND NOT EXISTS (SELECT 1 FROM node_reverse_tunnel_leases a
+                           WHERE a.port = r.port AND a.status = 'active')
+        GROUP BY r.port
+       HAVING last_released_at > ?)`
+  )
+    .bind(range.start, range.end, reusableBefore)
+    .first<{ ports: number; oldest: string | null }>();
+  const coolingPorts = cooling?.ports ?? 0;
+  const oldestMs = cooling?.oldest ? Date.parse(cooling.oldest) : Number.NaN;
+  const reusableAt = Number.isFinite(oldestMs)
+    ? new Date(oldestMs + reuseMinAgeSeconds * 1000).toISOString()
+    : null;
+  const code: ReverseTunnelLeaseErrorCode =
+    coolingPorts > 0 ? 'port_range_cooling_down' : 'port_range_exhausted';
+  log.error(`node_reverse_tunnel.${code}`, {
+    nodeId,
+    rangeStart: range.start,
+    rangeEnd: range.end,
+    coolingPorts,
+    reuseMinAgeSeconds,
+    reusableAt,
+  });
+  if (code === 'port_range_exhausted') {
+    return new ReverseTunnelLeaseError(
+      code,
+      `No free reverse-tunnel port in ${range.start}-${range.end}: every port holds an active lease`
+    );
+  }
+  const firstReusable = reusableAt ? `; the first becomes reusable at ${reusableAt}` : '';
+  return new ReverseTunnelLeaseError(
+    code,
+    `No reverse-tunnel port in ${range.start}-${range.end} is reusable yet: ${coolingPorts} ` +
+      `free port(s) were released less than ${reuseMinAgeSeconds}s ago${firstReusable}`
+  );
 }
 
 /**
@@ -242,7 +327,21 @@ export async function releaseNodeReverseTunnelLeases(
   }
 }
 
-/** Cron sweep: release every non-live active lease installation-wide (one statement). */
-export async function runReverseTunnelLeaseSweep(env: LeaseEnv): Promise<{ released: number }> {
+export type ReverseTunnelLeaseSweepResult =
+  { released: number } | { released: null; skipReason: 'transport_not_reverse_tunnel' };
+
+/**
+ * Cron sweep: release every non-live active lease installation-wide (one statement). Runs only
+ * on an installation configured for the reverse-tunnel transport; every other deployment
+ * (vm-public-dns, cloudflare-tunnel, Instant) makes no D1 call and reports why it skipped, so
+ * the tick is distinguishable from "ran and found nothing" in `cron.completed`. Leases are
+ * also released node-by-node on every teardown path, which does not depend on this sweep.
+ */
+export async function runReverseTunnelLeaseSweep(
+  env: LeaseEnv & Pick<Env, 'VM_AGENT_TRANSPORT'>
+): Promise<ReverseTunnelLeaseSweepResult> {
+  if (!isReverseTunnelInstallation(env)) {
+    return { released: null, skipReason: 'transport_not_reverse_tunnel' };
+  }
   return { released: await releaseNonLiveReverseTunnelLeases(env, 'runtime_not_live') };
 }
