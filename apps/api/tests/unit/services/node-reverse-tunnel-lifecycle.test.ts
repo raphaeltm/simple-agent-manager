@@ -234,23 +234,46 @@ describe('every lifecycle path releases the lease', () => {
     expect(leases(node.id)).toMatchObject([{ status: 'active' }]);
   });
 
-  it('strict deletion releases it after termination proof, and the port is reusable', async () => {
+  it('strict deletion releases it, and the port is reissued only after the minimum reuse age', async () => {
     setEnv(
       reverseEnv({
         REVERSE_TUNNEL_PORT_RANGE_START: '20600',
         REVERSE_TUNNEL_PORT_RANGE_END: '20600',
       })
     );
-    const node = await freshNode();
-    await provisionNode(node.id, env);
-    await deleteNodeResourcesStrict(node.id, USER, env);
-    expect(mocks.deleteVM).toHaveBeenCalled();
-    expect(leases(node.id)).toMatchObject([
-      { status: 'released', releaseReason: 'runtime_terminated', port: 20600 },
-    ]);
-    const next = await freshNode();
-    await provisionNode(next.id, env);
-    expect(leases(next.id)).toMatchObject([{ status: 'active', port: 20600 }]);
+    const start = Date.parse('2026-11-10T12:00:00.000Z');
+    vi.useFakeTimers({ toFake: ['Date'], now: start });
+    try {
+      const node = await freshNode();
+      await provisionNode(node.id, env);
+      await deleteNodeResourcesStrict(node.id, USER, env);
+      expect(mocks.deleteVM).toHaveBeenCalled();
+      expect(leases(node.id)).toMatchObject([
+        { status: 'released', releaseReason: 'runtime_terminated', port: 20600 },
+      ]);
+
+      // The incident: the only port was just released, and the previous holder's frpc may still
+      // be connected. A new node must NOT get it; the failure names the cooling-down reason.
+      vi.setSystemTime(start + 179_000);
+      const tooSoon = await freshNode();
+      await provisionNode(tooSoon.id, env);
+      expect(leases(tooSoon.id)).toEqual([]);
+      expect(mocks.createVM).toHaveBeenCalledTimes(1);
+      expect(
+        sqlite.prepare('SELECT status, error_message AS e FROM nodes WHERE id = ?').get(tooSoon.id)
+      ).toMatchObject({
+        status: 'error',
+        e: expect.stringContaining('released less than 180s ago'),
+      });
+
+      // Once the release is older than 2 x the 90 s frps heartbeat timeout, it is reissued.
+      vi.setSystemTime(start + 181_000);
+      const next = await freshNode();
+      await provisionNode(next.id, env);
+      expect(leases(next.id)).toMatchObject([{ status: 'active', port: 20600 }]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('a repeated strict deletion on the existing-proof path keeps it released', async () => {

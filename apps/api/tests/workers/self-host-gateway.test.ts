@@ -258,6 +258,89 @@ describe('lease allocation on D1', () => {
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
     const rejected = results.find((r) => r.status === 'rejected') as PromiseRejectedResult;
     expect(String(rejected.reason)).toContain('No free reverse-tunnel port in 28999-28999');
+    expect(rejected.reason).toMatchObject({ code: 'port_range_exhausted' });
+  });
+});
+
+describe('released port reuse age (real D1)', () => {
+  const onePort = (port: number, over: Record<string, string> = {}) =>
+    ({
+      ...testEnv(),
+      REVERSE_TUNNEL_PORT_RANGE_START: String(port),
+      REVERSE_TUNNEL_PORT_RANGE_END: String(port),
+      ...over,
+    }) as Env;
+
+  async function liveNode(label: string, userId: string) {
+    const nodeId = `RTA${label}${crypto.randomUUID().slice(0, 8)}`.toUpperCase();
+    const incarnation = crypto.randomUUID();
+    await seedNode(nodeId, userId, { status: 'running' });
+    await env.DATABASE.prepare(
+      `UPDATE nodes SET runtime = 'vm', node_class = 'managed', transport = 'reverse-tunnel',
+         runtime_incarnation_id = ? WHERE id = ?`
+    )
+      .bind(incarnation, nodeId)
+      .run();
+    return { nodeId, userId, runtimeIncarnationId: incarnation };
+  }
+  const releasedAgo = (port: number, seconds: number) =>
+    env.DATABASE.prepare(
+      "UPDATE node_reverse_tunnel_leases SET status = 'released', released_at = ? WHERE port = ? AND status = 'active'"
+    )
+      .bind(new Date(Date.now() - seconds * 1000).toISOString(), port)
+      .run();
+
+  it('refuses a port released under 2 x the heartbeat timeout ago, with the cooling-down reason', async () => {
+    await seedUser('rt-age');
+    const e = onePort(27100);
+    await ensureReverseTunnelLease(e, await liveNode('A', 'rt-age'));
+    await releasedAgo(27100, 60);
+    const err = await ensureReverseTunnelLease(e, await liveNode('B', 'rt-age')).catch((x) => x);
+    expect(err).toMatchObject({ name: 'ReverseTunnelLeaseError', code: 'port_range_cooling_down' });
+    expect(String(err.message)).toContain('released less than 180s ago');
+    expect(String(err.message)).toMatch(/first becomes reusable at 20\d\d-/);
+  });
+
+  it('control: reissues the port once its release is older than the minimum age', async () => {
+    await seedUser('rt-age-ok');
+    const e = onePort(27101);
+    await ensureReverseTunnelLease(e, await liveNode('A', 'rt-age-ok'));
+    await releasedAgo(27101, 181);
+    const lease = await ensureReverseTunnelLease(e, await liveNode('B', 'rt-age-ok'));
+    expect(lease.port).toBe(27101);
+  });
+
+  it('a larger configured age (and heartbeat timeout) is honoured', async () => {
+    await seedUser('rt-age-cfg');
+    const e = onePort(27102, { REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS: '150' });
+    await ensureReverseTunnelLease(e, await liveNode('A', 'rt-age-cfg'));
+    await releasedAgo(27102, 250);
+    const err = await ensureReverseTunnelLease(e, await liveNode('B', 'rt-age-cfg')).catch((x) => x);
+    expect(err).toMatchObject({ code: 'port_range_cooling_down' });
+    expect(String(err.message)).toContain('released less than 300s ago');
+  });
+
+  it('a range held entirely by active leases is reported as exhausted, not cooling', async () => {
+    await seedUser('rt-full');
+    const e = onePort(27103);
+    await ensureReverseTunnelLease(e, await liveNode('A', 'rt-full'));
+    const err = await ensureReverseTunnelLease(e, await liveNode('B', 'rt-full')).catch((x) => x);
+    expect(err).toMatchObject({ code: 'port_range_exhausted' });
+    expect(String(err.message)).toContain('every port holds an active lease');
+  });
+
+  it('writes no lease when the configured reuse age is below the 2 x heartbeat floor', async () => {
+    await seedUser('rt-floor');
+    const node = await liveNode('A', 'rt-floor');
+    await expect(
+      ensureReverseTunnelLease(onePort(27104, { REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS: '60' }), node)
+    ).rejects.toThrow(/at least 180/);
+    const rows = await env.DATABASE.prepare(
+      'SELECT COUNT(*) AS n FROM node_reverse_tunnel_leases WHERE node_id = ?'
+    )
+      .bind(node.nodeId)
+      .first<{ n: number }>();
+    expect(rows?.n).toBe(0);
   });
 });
 
