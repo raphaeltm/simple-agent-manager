@@ -103,6 +103,15 @@ export async function holdTaskForProviderLimit(
     profile
   );
   const key = reference ? await credentialLimitReferenceKey(reference) : null;
+  // The owner chose to start despite the hold (startProviderLimitTaskAnyway). It covers only
+  // the credential it was granted for: a different selection falls through to the checks
+  // below and blocks for review. A real provider rejection later parks the task as usual.
+  if (
+    previous?.phase === 'released' &&
+    previous.ownerOverride &&
+    previous.ownerOverride.credentialKey === key
+  )
+    return false;
   const window = await rejectedProviderWindow(rc.env, reference, now);
   let wait = previous;
   if (!ownerResumed && previous?.credentialKey && previous.credentialKey !== key) {

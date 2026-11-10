@@ -168,3 +168,87 @@ export async function resumeProviderLimitTask(env: Env, task: schema.Task, owner
   await projectData.syncProviderLimitAttention(env, task.projectId, task.id, task.chatSessionId);
   return result;
 }
+
+/** Statuses a task holds before its runner has started the agent. */
+const START_ANYWAY_TASK_STATUSES: readonly string[] = ['queued', 'delegated'];
+
+/**
+ * True while a task that has never started waits at admission on a provider limit.
+ * Only `waiting` qualifies: a `blocked` wait needs review (for example a changed
+ * credential) and keeps the explicit Resume path above.
+ */
+export function canStartProviderLimitTaskAnyway(
+  task: Pick<schema.Task, 'status' | 'admissionState'>,
+  wait: ProviderLimitWait | null
+): wait is ProviderLimitWait {
+  return (
+    task.admissionState === 'provider_limit_waiting' &&
+    START_ANYWAY_TASK_STATUSES.includes(task.status) &&
+    wait?.origin === 'admission' &&
+    wait.phase === 'waiting'
+  );
+}
+
+/**
+ * The owner chose to start a held, never-started task now. SAM's window only shows the
+ * subscription limit, and an account with extra credits can still serve the prompt. The
+ * override is recorded on the wait and covers only the credential it was granted for
+ * (`holdTaskForProviderLimit`); if the provider really rejects, the callback path parks
+ * the task as usual.
+ */
+export async function startProviderLimitTaskAnyway(
+  env: Env,
+  task: schema.Task,
+  ownerUserId: string
+) {
+  if (task.userId !== ownerUserId)
+    throw errors.forbidden('Only the task owner can start this task anyway');
+  const wait = parseProviderLimitWait(task.providerLimitWaitJson);
+  if (!canStartProviderLimitTaskAnyway(task, wait))
+    throw errors.conflict('This task is not waiting on a provider limit before it starts');
+  const now = Date.now();
+  const overridden = JSON.stringify({
+    ...wait,
+    phase: 'released',
+    ownerOverride: { credentialKey: wait.credentialKey, grantedAt: now },
+    scheduleKey: `provider-limit:${task.id}:override:${crypto.randomUUID()}`,
+  } satisfies ProviderLimitWait);
+  const cleared = await env.DATABASE.prepare(
+    `UPDATE tasks SET provider_limit_wait_json=?,admission_state=NULL,admission_reason=NULL,admission_next_retry_at=NULL,updated_at=?
+     WHERE id=? AND project_id=? AND user_id=? AND status IN ('queued','delegated')
+     AND admission_state='provider_limit_waiting' AND provider_limit_wait_json IS ?`
+  )
+    .bind(
+      overridden,
+      new Date(now).toISOString(),
+      task.id,
+      task.projectId,
+      ownerUserId,
+      task.providerLimitWaitJson
+    )
+    .run();
+  if (!cleared.meta.changes)
+    throw errors.conflict('Task changed while starting; refresh and try again');
+  try {
+    if (!(await nudgeTaskRunnerDO(env, task.id, 'Owner started despite provider limit')))
+      throw errors.conflict('The task runner is unavailable');
+  } catch (error) {
+    // Keep the hold (and its scheduled retry) rather than strand a task nobody will run.
+    await env.DATABASE.prepare(
+      `UPDATE tasks SET provider_limit_wait_json=?,admission_state='provider_limit_waiting',admission_reason=?,admission_next_retry_at=?
+       WHERE id=? AND provider_limit_wait_json IS ?`
+    )
+      .bind(
+        task.providerLimitWaitJson,
+        wait.reason,
+        new Date(wait.nextRetryAt).toISOString(),
+        task.id,
+        overridden
+      )
+      .run();
+    throw error;
+  }
+  if (task.chatSessionId)
+    await projectData.syncProviderLimitAttention(env, task.projectId, task.id, task.chatSessionId);
+  return { status: 'starting' as const, taskId: task.id };
+}

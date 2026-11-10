@@ -36,6 +36,11 @@ export const ProviderLimitWaitSchema = v.object({
   sourceAgentSessionId: v.optional(v.string()),
   sourceCredentialGeneration: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0))),
   reason: v.string(),
+  /** The owner chose to start despite this hold (for example to spend extra credits the
+   * subscription window does not reflect). Honoured only for the credential it names. */
+  ownerOverride: v.optional(
+    v.object({ credentialKey: v.nullable(v.string()), grantedAt: timestamp })
+  ),
 });
 export type ProviderLimitWait = v.InferOutput<typeof ProviderLimitWaitSchema>;
 export function parseProviderLimitWait(json: string | null | undefined): ProviderLimitWait | null {

@@ -23,6 +23,7 @@ import type { OperationContext } from '../operations/types';
 import { resolveTaskAgentProfileHint } from '../services/agent-profile-display';
 import * as projectDataService from '../services/project-data';
 import { parseProviderLimitWait } from '../services/provider-limit-policy';
+import { canStartProviderLimitTaskAnyway } from '../services/provider-limit-recovery';
 import { publicPlacementExplanationJson } from '../services/public-placement-explanation';
 import { isTaskStatus } from '../services/task-status';
 import { attachWakeState } from './chat/wake-state';
@@ -174,6 +175,10 @@ export function registerChatSessionDetailRoute(chatRoutes: Hono<{ Bindings: Env 
             providerLimitVersion: taskRow.admissionState?.startsWith('provider_limit_')
               ? (parseProviderLimitWait(taskRow.providerLimitWaitJson)?.scheduleKey ?? null)
               : null,
+            providerLimitCanStartAnyway: canStartProviderLimitTaskAnyway(
+              taskRow,
+              parseProviderLimitWait(taskRow.providerLimitWaitJson)
+            ),
             status: isTaskStatus(taskRow.status) ? taskRow.status : 'draft',
             executionStep: isTaskExecutionStep(taskRow.executionStep)
               ? taskRow.executionStep

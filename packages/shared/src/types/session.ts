@@ -37,6 +37,9 @@ export interface ChatSessionTaskEmbed {
   providerLimitReason?: string | null;
   /** Opaque wait generation; changes when a new blocked wait replaces an accepted resume. */
   providerLimitVersion?: string | null;
+  /** True while a never-started task waits at admission on a provider limit, so its owner
+   * may start it anyway (for example to spend extra credits the limit does not show). */
+  providerLimitCanStartAnyway?: boolean;
   id: string;
   /** Canonical, user-safe saved placement diagnostics, including queued runs. */
   placementExplanationJson?: string | null;

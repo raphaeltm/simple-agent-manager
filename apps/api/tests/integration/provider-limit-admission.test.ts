@@ -17,7 +17,11 @@ import {
 import { startSamAwareAgentSession } from '../../src/services/agent-session-bootstrap';
 import { assertProviderLimitCredentialPin } from '../../src/services/provider-limit-credential-pin';
 import { newProviderLimitWait } from '../../src/services/provider-limit-policy';
-import { resumeProviderLimitTask } from '../../src/services/provider-limit-recovery';
+import { cancelTask } from '../../src/services/cancel-task';
+import {
+  resumeProviderLimitTask,
+  startProviderLimitTaskAnyway,
+} from '../../src/services/provider-limit-recovery';
 import { createIncompatibleCapacityFixture } from '../helpers/incompatible-agent-capacity-fixture';
 import { createMemoryKv } from '../helpers/sqlite-d1';
 
@@ -48,6 +52,8 @@ vi.mock('../../src/services/project-data', () => ({
   createAttentionMarker: vi.fn(),
   resolveSessionAttentionMarkers: vi.fn(),
   sleepSession: vi.fn(),
+  recordActivityEvent: vi.fn(async () => undefined),
+  admitProjectEvent: vi.fn(async () => undefined),
 }));
 
 describe('provider admission through the TaskRunner alarm', () => {
@@ -438,5 +444,168 @@ describe('provider admission through the TaskRunner alarm', () => {
     expect(
       fixture.sqlite.prepare("SELECT admission_state FROM tasks WHERE id='task-1'").get()
     ).toEqual({ admission_state: 'provider_limit_blocked' });
+  });
+  describe('owner controls on a held, never-started task', () => {
+    async function heldTask() {
+      const db = drizzle(fixture.rc.env.DATABASE, { schema });
+      const task = await db.select().from(schema.tasks).where(eq(schema.tasks.id, 'task-1')).get();
+      if (!task) throw new Error('Missing task');
+      return { db, task };
+    }
+    function holdWithLiveWindow() {
+      const reset = Date.now() + 8 * 60 * 60_000;
+      rejected(reset);
+      return reset;
+    }
+
+    it('start anyway proceeds past a still-rejected window and starts the agent once', async () => {
+      const reset = holdWithLiveWindow();
+      const run = runner();
+      await run.runner.alarm();
+      expect(run.alarm()).toBeGreaterThan(reset);
+      const { task } = await heldTask();
+      expect(task).toMatchObject({ status: 'queued', admissionState: 'provider_limit_waiting' });
+
+      await expect(startProviderLimitTaskAnyway(fixture.rc.env, task, 'user-1')).resolves.toEqual({
+        status: 'starting',
+        taskId: 'task-1',
+      });
+      // The runner was nudged now, not at the reset.
+      expect(run.alarm()).toBe(Date.now());
+      await run.runner.alarm();
+      expect(run.state().currentStep).not.toBe('node_selection');
+      // The rejected window is untouched: the override, not a release, let it through.
+      expect(
+        fixture.sqlite.prepare('SELECT count(*) AS count FROM credential_limit_windows').get()
+      ).toEqual({ count: 1 });
+      const row = fixture.sqlite
+        .prepare(
+          "SELECT admission_state,provider_limit_wait_json AS value FROM tasks WHERE id='task-1'"
+        )
+        .get() as { admission_state: string | null; value: string };
+      expect(row.admission_state).toBeNull();
+      expect(JSON.parse(row.value)).toMatchObject({
+        phase: 'released',
+        ownerOverride: { credentialKey: 'cc_credentials:quota-key' },
+      });
+
+      // The pre-start re-check at agent_session honours the same override.
+      run.state().currentStep = 'agent_session';
+      run.state().stepResults.nodeId = 'existing-node';
+      run.state().stepResults.workspaceId = 'old-workspace';
+      fixture.sqlite.exec(
+        "UPDATE tasks SET status='delegated',workspace_id='old-workspace' WHERE id='task-1'"
+      );
+      await run.runner.alarm();
+      expect(startSamAwareAgentSession).toHaveBeenCalledOnce();
+      expect(run.state().currentStep).toBe('running');
+      await expect(
+        assertProviderLimitCredentialPin(
+          fixture.rc.env,
+          'old-workspace',
+          'cc_credentials:quota-key'
+        )
+      ).resolves.toBeUndefined();
+    });
+
+    it('without the override the same rejected window keeps holding (control)', async () => {
+      holdWithLiveWindow();
+      const run = runner();
+      await run.runner.alarm();
+      await run.runner.nudge('control');
+      await run.runner.alarm();
+      expect(run.state().currentStep).toBe('node_selection');
+      expect(
+        fixture.sqlite.prepare("SELECT admission_state FROM tasks WHERE id='task-1'").get()
+      ).toEqual({ admission_state: 'provider_limit_waiting' });
+    });
+
+    it('a credential change after the override blocks for review instead of starting', async () => {
+      holdWithLiveWindow();
+      const run = runner();
+      await run.runner.alarm();
+      const { task } = await heldTask();
+      await startProviderLimitTaskAnyway(fixture.rc.env, task, 'user-1');
+      vi.mocked(getSelectedAgentCredentialReference).mockResolvedValueOnce(
+        'cc_credentials:other-account'
+      );
+      await run.runner.alarm();
+      expect(run.state().currentStep).toBe('node_selection');
+      expect(run.alarm()).toBeNull();
+      expect(
+        fixture.sqlite.prepare("SELECT admission_state FROM tasks WHERE id='task-1'").get()
+      ).toEqual({ admission_state: 'provider_limit_blocked' });
+    });
+
+    it('refuses non-owners, blocked waits and callback-origin waits without changing the task', async () => {
+      holdWithLiveWindow();
+      const run = runner();
+      await run.runner.alarm();
+      const { task } = await heldTask();
+      await expect(startProviderLimitTaskAnyway(fixture.rc.env, task, 'user-2')).rejects.toThrow(
+        'Only the task owner'
+      );
+      const wait = JSON.parse(task.providerLimitWaitJson ?? 'null');
+      for (const variant of [
+        { ...wait, phase: 'blocked' },
+        { ...wait, origin: 'callback' },
+      ]) {
+        const json = JSON.stringify(variant);
+        await expect(
+          startProviderLimitTaskAnyway(
+            fixture.rc.env,
+            { ...task, providerLimitWaitJson: json },
+            'user-1'
+          )
+        ).rejects.toThrow('not waiting on a provider limit');
+      }
+      expect(
+        fixture.sqlite
+          .prepare(
+            "SELECT admission_state,provider_limit_wait_json AS value FROM tasks WHERE id='task-1'"
+          )
+          .get()
+      ).toEqual({ admission_state: 'provider_limit_waiting', value: task.providerLimitWaitJson });
+    });
+
+    it('restores the hold when the runner cannot be nudged', async () => {
+      holdWithLiveWindow();
+      const run = runner();
+      await run.runner.alarm();
+      const { task } = await heldTask();
+      vi.spyOn(run.runner, 'nudge').mockResolvedValueOnce(false);
+      await expect(startProviderLimitTaskAnyway(fixture.rc.env, task, 'user-1')).rejects.toThrow(
+        'task runner is unavailable'
+      );
+      expect(
+        fixture.sqlite
+          .prepare(
+            "SELECT admission_state,provider_limit_wait_json AS value FROM tasks WHERE id='task-1'"
+          )
+          .get()
+      ).toEqual({ admission_state: 'provider_limit_waiting', value: task.providerLimitWaitJson });
+    });
+
+    it('cancelling a held task means its reset alarm provisions nothing', async () => {
+      const reset = holdWithLiveWindow();
+      const run = runner();
+      await run.runner.alarm();
+      const { db, task } = await heldTask();
+      await cancelTask(fixture.rc.env, db, task, 'user-1');
+      expect(fixture.sqlite.prepare("SELECT status FROM tasks WHERE id='task-1'").get()).toEqual({
+        status: 'cancelled',
+      });
+      fixture.sqlite.exec('DELETE FROM credential_limit_windows');
+      vi.setSystemTime(reset + 60_000);
+      await run.runner.alarm();
+      // A released, uncancelled task leaves node_selection on this alarm (first test above);
+      // the cancelled one's runner is retired without advancing or re-arming.
+      expect(run.state().currentStep).toBe('node_selection');
+      expect(run.alarm()).toBeNull();
+      expect(startSamAwareAgentSession).not.toHaveBeenCalled();
+      expect(fixture.sqlite.prepare("SELECT status FROM tasks WHERE id='task-1'").get()).toEqual({
+        status: 'cancelled',
+      });
+    });
   });
 });
