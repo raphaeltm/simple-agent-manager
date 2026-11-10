@@ -203,6 +203,7 @@ export async function complete(
   try {
     const response = await fetch(target.url, {
       method: 'POST',
+      redirect: target.redirect,
       signal: controller.signal,
       headers: chatTargetHeaders(target, {
         'cf-aig-metadata': JSON.stringify({

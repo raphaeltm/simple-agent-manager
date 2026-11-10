@@ -217,6 +217,7 @@ async function callOpenAIChatLLM(
 
   return fetch(target.url, {
     method: 'POST',
+    redirect: target.redirect,
     signal,
     headers: chatTargetHeaders(target, { 'cf-aig-metadata': aigMetadata }),
     body: JSON.stringify({

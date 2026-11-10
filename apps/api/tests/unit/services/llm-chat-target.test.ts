@@ -7,6 +7,7 @@ import type { Env } from '../../../src/env';
 import { __resetAdminSettingsCacheForTest, updateAdminSettings } from '../../../src/services/admin-settings';
 import {
   chatTargetHeaders,
+  LlmUnavailableError,
   resolveWorkersAiChatTarget,
 } from '../../../src/services/llm-chat-target';
 import { validLlmBaseUrl } from '../../../src/services/llm-endpoint-settings';
@@ -98,6 +99,7 @@ describe('resolveWorkersAiChatTarget', () => {
       url: 'https://gateway.ai.cloudflare.com/v1/account-1/sam/workers-ai/v1/chat/completions',
       apiKey: 'cf-token',
       model: '@cf/model/a',
+      redirect: 'follow',
     });
   });
 
@@ -127,6 +129,8 @@ describe('resolveWorkersAiChatTarget', () => {
       url: 'http://127.0.0.1:4000/v1/chat/completions',
       apiKey: 'sk-endpoint-key',
       model: 'title-model',
+      // An endpoint target never follows a redirect to a host the validation did not see.
+      redirect: 'error',
     });
     expect((await resolveWorkersAiChatTarget(env, 'diagnosis', '@cf/m/x'))?.model).toBe(
       'default-model'
@@ -149,6 +153,26 @@ describe('resolveWorkersAiChatTarget', () => {
     expect(sqlite.prepare('SELECT value FROM platform_settings').all()).not.toContainEqual(
       expect.objectContaining({ value: expect.stringContaining('sk-endpoint-key') })
     );
+  });
+
+  it('fails closed when an endpoint is configured but its key cannot be read', async () => {
+    Object.assign(env, CLOUDFLARE);
+    await configureEndpoint({ baseUrl: 'https://llm.example.com/v1', apiKey: 'sk-endpoint-key' });
+    // A rotated ENCRYPTION_KEY makes the stored key undecryptable.
+    __resetAdminSettingsCacheForTest();
+    env.ENCRYPTION_KEY = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    await expect(resolveWorkersAiChatTarget(env, 'taskTitle', '@cf/m/x')).rejects.toThrow(
+      LlmUnavailableError
+    );
+  });
+
+  it('keeps the Cloudflare route when no endpoint is configured, without reading credentials', async () => {
+    Object.assign(env, CLOUDFLARE);
+    const prepare = vi.spyOn(env.DATABASE, 'prepare');
+    await resolveWorkersAiChatTarget(env, 'taskTitle', '@cf/m/x');
+    const sql = prepare.mock.calls.map(([query]) => String(query)).join('\n');
+    expect(sql).not.toContain('platform_credentials');
   });
 
   it('rejects an invalid base URL at the admin settings boundary', async () => {

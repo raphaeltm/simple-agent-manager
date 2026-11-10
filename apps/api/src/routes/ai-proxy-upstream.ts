@@ -93,6 +93,7 @@ export async function forwardToWorkersAI(
 
   const response = await fetch(target.url, {
     method: 'POST',
+    redirect: target.redirect,
     headers: chatTargetHeaders(target, { 'cf-aig-metadata': aigMetadata }),
     body: JSON.stringify(gatewayBody),
   });

@@ -214,6 +214,7 @@ export async function fetchWorkersAIChatCompletion(
   const cloudflare = isCloudflareChatTarget(target);
   const response = await fetch(target.url, {
     method: 'POST',
+    redirect: target.redirect,
     signal: AbortSignal.timeout(options.timeoutMs),
     headers: chatTargetHeaders(target, { 'cf-aig-metadata': JSON.stringify(options.metadata) }),
     body: JSON.stringify({

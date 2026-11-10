@@ -13,7 +13,7 @@
  */
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { resolveAdminSettingDetailsMany } from './admin-settings-resolution';
+import { resolveAdminSetting, resolveAdminSettingDetailsMany } from './admin-settings-resolution';
 import {
   LLM_PURPOSE_MODEL_SETTING,
   type LlmPurpose,
@@ -34,6 +34,11 @@ export interface ChatCompletionsTarget {
   apiKey: string | null;
   /** Model id to send. */
   model: string;
+  /**
+   * Redirect policy for the request. An admin-configured endpoint must not bounce the call (and
+   * its prompt) to a host the URL validation never saw; Cloudflare targets keep fetch's default.
+   */
+  redirect: 'error' | 'follow';
 }
 
 /** No endpoint can serve this call on this installation. A designed state, not a fault. */
@@ -56,7 +61,14 @@ function chatTarget(
   apiKey: string | null,
   model: string
 ): ChatCompletionsTarget {
-  return { kind, baseUrl, url: `${baseUrl}/chat/completions`, apiKey, model };
+  return {
+    kind,
+    baseUrl,
+    url: `${baseUrl}/chat/completions`,
+    apiKey,
+    model,
+    redirect: kind === 'openai-compatible' ? 'error' : 'follow',
+  };
 }
 
 function stringValue(value: unknown): string | null {
@@ -67,32 +79,35 @@ function stringValue(value: unknown): string | null {
  * The admin-configured OpenAI-compatible endpoint for `purpose`, or null when none is set.
  * `requestedModel` is used only when no endpoint model is configured.
  *
- * A settings read failure resolves to null (the Cloudflare route), matching how every other
- * admin setting degrades to its default during a D1 outage.
+ * The base URL is read first and alone: it is a plain setting, so an installation without an
+ * endpoint never queries the credential table, and a settings outage resolves it to its default
+ * (no endpoint), which keeps the Cloudflare route working as before. Once an endpoint IS
+ * configured, failing to read its key or models must not silently send the call to another
+ * provider, so that throws instead.
  */
 export async function resolveOpenAICompatibleTarget(
   env: Env,
   purpose: LlmPurpose,
   requestedModel: string | null = null
 ): Promise<ChatCompletionsTarget | null> {
+  const baseUrl = await resolveAdminSetting(env, 'llm.openAICompatible.baseUrl');
+  if (!validLlmBaseUrl(baseUrl)) return null;
   let values: unknown[];
   try {
     const details = await resolveAdminSettingDetailsMany(env, [
-      'llm.openAICompatible.baseUrl',
       'llm.openAICompatible.apiKey',
       'llm.openAICompatible.model',
       LLM_PURPOSE_MODEL_SETTING[purpose],
     ]);
     values = details.map((detail) => detail.value);
   } catch (err) {
-    log.warn('llm.endpoint_settings_unavailable', {
+    log.error('llm.endpoint_settings_unreadable', {
       purpose,
       error: err instanceof Error ? err.message : String(err),
     });
-    return null;
+    throw new LlmUnavailableError(purpose);
   }
-  const [baseUrl, apiKey, defaultModel, purposeModel] = values;
-  if (!validLlmBaseUrl(baseUrl)) return null;
+  const [apiKey, defaultModel, purposeModel] = values;
   const model = stringValue(purposeModel) ?? stringValue(defaultModel) ?? requestedModel;
   if (!model) return null;
   return chatTarget(
