@@ -77,7 +77,7 @@ An **account** is what an agent or a cloud machine runs on: a subscription you s
 
 A **compute pool** (also called a node pool or capacity pool) is the set of cloud machines SAM is allowed to rent on your behalf. Pools exist at three scopes — **project**, **user**, and **installation** — and SAM uses the first one that exists, in that order.
 
-Each pool holds the credentials that pay for its machines and the list of concrete provider instance types it permits, drawn from Hetzner's live catalog or standard sizes at the other providers, with estimated prices. Two settings shape what SAM does with that list: a **strategy** (which permitted machine to pick) and an **exhaustion policy** (what to do when none is available).
+Each pool holds the credentials that pay for its machines and the list of concrete provider instance types it permits, drawn from Hetzner's and GCP's live catalogs or standard sizes at the other providers, with estimated prices. Two settings shape what SAM does with that list: a **strategy** (which permitted machine to pick) and an **exhaustion policy** (what to do when none is available).
 
 You normally do not have to configure any of this — SAM creates and maintains a working pool for the credentials it can see. See the [Compute Pools guide](/docs/guides/compute-pools/) for the full picture.
 
