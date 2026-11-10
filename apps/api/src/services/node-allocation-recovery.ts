@@ -7,6 +7,7 @@ import {
 
 import type * as schema from '../db/schema';
 import type { Env } from '../env';
+import { GcpApiError, sanitizeGcpError } from './gcp-errors';
 import {
   buildNodeProviderLabels,
   resolveEnvironmentLabel,
@@ -16,11 +17,28 @@ import {
 /** A transport interruption or empty inventory cannot establish that no VM was allocated. */
 export class NodeAllocationUncertainError extends Error {
   constructor(
-    message = 'Provider allocation is unresolved; exact resource reconciliation is required'
+    message = 'Provider allocation is unresolved; exact resource reconciliation is required',
+    options?: { cause?: unknown }
   ) {
-    super(message);
+    super(message, options);
     this.name = 'NodeAllocationUncertainError';
   }
+}
+
+/**
+ * Log-safe description of a failed provisioning attempt, including the provider error an
+ * uncertain-allocation wrapper replaced. GCP errors go through the shared sanitizer, which
+ * logs the raw Google response server-side and returns the operator-facing hint.
+ */
+export function describeProvisioningAttemptFailure(error: unknown): Record<string, unknown> {
+  const describe = (value: unknown) =>
+    value instanceof GcpApiError
+      ? { name: value.name, step: value.step, statusCode: value.statusCode, message: sanitizeGcpError(value, 'node-provisioning-attempt') }
+      : value instanceof Error
+        ? { name: value.name, statusCode: (value as { statusCode?: unknown }).statusCode, message: value.message }
+        : { name: typeof value, message: String(value) };
+  const cause = error instanceof Error ? error.cause : undefined;
+  return { error: describe(error), ...(cause === undefined ? {} : { cause: describe(cause) }) };
 }
 
 export interface DurableNodeAllocation {
