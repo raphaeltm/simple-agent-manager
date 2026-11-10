@@ -28,6 +28,7 @@ export type FakeFault =
   | { kind: 'status'; status: number; code?: number }
   | { kind: 'network' }
   | { kind: 'lost-after-commit' }
+  | { kind: 'commit-later' }
   | { kind: 'hook'; run: () => void | Promise<void> }
   /** Answer normally; used to target a later call of the same operation. */
   | { kind: 'pass' };
@@ -61,6 +62,11 @@ export class FakeCloudflare {
   readonly calls: FakeCall[] = [];
   private readonly faults = new Map<string, FakeFault[]>();
   private counter = 0;
+  private delayed: Array<() => void> = [];
+
+  commitDelayed(): void {
+    for (const commit of this.delayed.splice(0)) commit();
+  }
 
   constructor(
     readonly accountId: string,
@@ -120,6 +126,12 @@ export class FakeCloudflare {
     if (fault?.kind === 'network') throw new TypeError('fetch failed');
     if (fault?.kind === 'status') {
       return fail(fault.status, fault.code ?? 10000, `injected ${op} failure`);
+    }
+    if (fault?.kind === 'commit-later') {
+      this.delayed.push(() => {
+        this.handle(op, method, path, url, body);
+      });
+      throw new TypeError('response lost before provider commit');
     }
     const response = this.handle(op, method, path, url, body);
     if (fault?.kind === 'lost-after-commit') throw new TypeError('connection reset');

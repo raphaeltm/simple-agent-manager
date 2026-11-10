@@ -123,19 +123,16 @@ Review-round discrimination checks (same method):
 
 ## Work bounds (rule 81)
 
-- Per row: at most ~6 single-attempt Cloudflare requests × 10 s
-  (`NODE_TUNNEL_CLEANUP_REQUEST_TIMEOUT_MS`), so 60 s worst case and under 1 s normally.
-- Per sweep tick (every 5 min): batch 10 (`NODE_TUNNEL_CLEANUP_BATCH_SIZE`), and no new row
-  starts after 30 s (`NODE_TUNNEL_CLEANUP_SWEEP_BUDGET_MS`). The worst-case tick is therefore
-  about 90 s with a fully degraded API, and normal throughput is 10 rows per 5 min, or
-  120 rows/h.
-- Outer probable limit: a burst of 500 node deletions in one hour (a fleet-wide cleanup)
-  drains in about 4.2 h at normal latency. Leftover tunnels are harmless: there is no connector
-  and the CNAME returns 530, never an IP fallback. With the API down, each row backs off
-  1 → 2 → 4 … min, capped at 60 min, and retries forever without losing its identity. It logs
-  `node_tunnel.cleanup_stuck` at error level from the 6th failed attempt.
-- Inline work: provisioning failure cleans at most 1 row of its own node (≤ 60 s). A
-  superseded-incarnation takeover cleans at most 2 rows. Strict deletion does no Cloudflare I/O.
+- The cron sweep shares one abort deadline across every Cloudflare request, including response
+  body reads: `vmTunnels.cleanupSweepBudgetMs` defaults to 30 seconds. At expiry it cancels
+  the current request, records pending/backoff state in D1, and starts no further rows. D1
+  bookkeeping is awaited and may complete after the external-I/O deadline. No detached
+  cleanup promise continues after the sweep returns. Individual request timeouts and batch
+  size remain configurable through typed admin settings.
+- Teardown releases ownership through D1 only; scheduled cleanup performs Cloudflare I/O.
+  Immediate provisioning-failure cleanup is limited to one row with single-attempt requests.
+  Exact-name duplicates can increase its request count; it is not described as a fixed
+  six-request bound.
 - Provisioning adds about 6–8 Cloudflare requests before `createVM`. Idempotent calls retry
   up to 3 times with 250/500 ms backoff; POST is never retried.
 
@@ -154,3 +151,19 @@ Review-round discrimination checks (same method):
 Real staging E2E: an actual managed VM, an agent serving port 3000 through the tunnel with the
 origin's inbound access blocked, node deletion removing the tunnel and DNS, and an Instant
 regression run.
+
+## Coordinator review corrections
+
+- A durable allocation resume no longer treats a failed tunnel/configuration lookup as proof
+  that no VM exists. Its active tunnel remains owned until actual runtime termination proof.
+- New incarnations persist transport and clear previous tunnel fields in the same D1 claim,
+  so rollback to public DNS cannot inherit tunnel-only Origin CA/heartbeat classification.
+- Migration 0231 journals each external create before POST. A lost response or process death
+  leaves a pending create count. Cleanup deletes visible owned resources but retains the
+  cleanup tombstone on capped backoff indefinitely: immediate empty inventory cannot prove
+  a delayed POST will never commit. This intentionally retains periodic reconciliation even
+  when a lost response's resource was subsequently found and removed. A confirmed in-flight
+  response settles its count; a later sweep can then finish cleanup normally.
+- Regression coverage includes resume lookup failure, transport rollback, atomic transport
+  persistence, late tunnel/DNS commits after an empty cleanup, and acknowledged POST racing
+  node deletion. The lifecycle test was split into a shared fixture and focused suites.

@@ -1633,11 +1633,12 @@ Tunnel API retries and resource cleanup use **Admin → Settings → Operations*
 | `vmTunnels.apiRetryDelayMs` | `250` | Linear retry delay step in milliseconds, range 1–30000. |
 | `vmTunnels.cleanupRequestTimeoutMs` | `10000` | Per-request background timeout, range 1–30000 ms, capped by `CF_API_TIMEOUT_MS`. |
 | `vmTunnels.cleanupBatchSize` | `10` | Journal rows processed per sweep, range 1–100. |
-| `vmTunnels.cleanupSweepBudgetMs` | `30000` | Time before the sweep stops starting new rows, range 1–120000 ms. An in-flight row may finish afterward; remaining rows stay due. |
+| `vmTunnels.cleanupSweepBudgetMs` | `30000` | Cloudflare I/O deadline for the sweep, range 1–120000 ms. Cancels an in-flight request; D1 bookkeeping finishes afterward and remaining rows stay due. |
 | `vmTunnels.cleanupBackoffBaseMs` | `60000` | Initial cleanup retry delay, range 1–86400000 ms. |
 | `vmTunnels.cleanupBackoffMaxMs` | `3600000` | Maximum cleanup retry delay, range 1–604800000 ms. Ownership remains recorded until cleanup succeeds. |
 | `vmTunnels.cleanupStuckAttempts` | `6` | Failed attempts before subsequent failures are logged at error severity, range 1–100. |
 
+If a Cloudflare create response is lost, cleanup retains the ownership journal and checks again at the capped backoff interval, even after finding no remaining resources. This prevents a delayed create from leaving an untracked tunnel or DNS record. A lost response can therefore leave a reconciliation row pending indefinitely without any live resource.
 
 | Variable                                       | Default | Description                                                                      |
 | ---------------------------------------------- | ------- | -------------------------------------------------------------------------------- |

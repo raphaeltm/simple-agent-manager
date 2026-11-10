@@ -239,6 +239,9 @@ export async function provisionNode(
             providerResult.exactCredentialBinding?.credentialFingerprint ??
             node.placementCredentialFingerprint,
           runtimeIncarnationId: provisioningRuntimeIncarnationId,
+          transport: transport ?? 'vm-public-dns',
+          tunnelId: null,
+          tunnelName: null,
           cleanupRetirementSourcesJson: null,
           runtimeTerminationConfirmedAt: null,
           updatedAt: new Date().toISOString(),
@@ -541,9 +544,14 @@ export async function provisionNode(
     throwIfProviderRequestAborted(providerContext);
     return { allocationConfirmed: true };
   } catch (err) {
-    // No provider create was ever requested for this incarnation, so no VM can hold its
-    // connector token: release the tunnel even on cancellation (D1 only, no Cloudflare I/O).
-    if (tunnelJournaled && !providerCreateRequested && provisioningRuntimeIncarnationId) {
+    // Only a fresh allocation can prove it never requested a VM. A durable resume may
+    // already have a VM holding this token, even when this invocation has not queried it.
+    if (
+      tunnelJournaled &&
+      !resuming &&
+      !providerCreateRequested &&
+      provisioningRuntimeIncarnationId
+    ) {
       await releaseTunnelBeforeVm(env, node.id, provisioningRuntimeIncarnationId);
     }
     if (err instanceof NodeAllocationUncertainError) throw err;

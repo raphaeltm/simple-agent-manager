@@ -27,13 +27,16 @@ export interface NodeTunnelRow {
   cleanupAttempts: number;
   cleanupNextAttemptAt: string | null;
   lastError: string | null;
+  /** POSTs without an observed terminal response; absence from inventory is not finality. */
+  pendingCreateCount: number;
 }
 
 export const NODE_TUNNEL_COLUMNS = `id, node_id AS nodeId, user_id AS userId,
   runtime_incarnation_id AS runtimeIncarnationId, account_id AS accountId, zone_id AS zoneId,
   tunnel_name AS tunnelName, tunnel_id AS tunnelId, hostname, dns_record_id AS dnsRecordId,
   status, cleanup_reason AS cleanupReason, cleanup_attempts AS cleanupAttempts,
-  cleanup_next_attempt_at AS cleanupNextAttemptAt, last_error AS lastError`;
+  cleanup_next_attempt_at AS cleanupNextAttemptAt, last_error AS lastError,
+  pending_create_count AS pendingCreateCount`;
 
 /**
  * True while `t`'s incarnation is still the node's live runtime: the node row exists, carries

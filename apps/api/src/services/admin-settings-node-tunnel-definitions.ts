@@ -46,7 +46,7 @@ export const NODE_TUNNEL_SETTINGS: readonly AdminSettingDefinition[] = [
     'vmTunnels.cleanupSweepBudgetMs',
     NODE_TUNNEL_RUNTIME_DEFAULTS.cleanupSweepBudgetMs,
     'Operations',
-    'Time budget in milliseconds before starting another tunnel cleanup row. An in-flight row may finish afterward; remaining rows stay due for the next sweep.',
+    'Cloudflare I/O deadline in milliseconds for one tunnel cleanup sweep. An in-flight request is cancelled at the deadline; D1 failure bookkeeping completes afterward and remaining rows stay due.',
     { min: 1, max: 120000 }
   ),
   integerDefinition(

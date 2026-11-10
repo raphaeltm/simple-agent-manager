@@ -20,7 +20,7 @@ import {
   tunnelCnameTarget,
 } from './cloudflare-tunnel-api';
 import { DEFAULT_CF_API_TIMEOUT_MS } from './dns-core';
-import { getTimeoutMs } from './fetch-timeout';
+import { getTimeoutMs, IoTimeoutError } from './fetch-timeout';
 import { resolveNodeTunnelCleanupConfig, type TunnelEnv } from './node-tunnel-config';
 import {
   listDueNodeTunnelCleanups,
@@ -32,11 +32,14 @@ const LAST_ERROR_MAX_LENGTH = 500;
 
 type CleanupEnv = TunnelEnv;
 
-async function cleanupOptions(env: CleanupEnv): Promise<CloudflareCallOptions> {
+async function cleanupOptions(
+  env: CleanupEnv,
+  signal?: AbortSignal
+): Promise<CloudflareCallOptions> {
   const interactive = getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
   const background = (await resolveNodeTunnelCleanupConfig(env)).requestTimeoutMs;
   // The persisted row backoff is the cleanup retry loop.
-  return { timeoutMs: Math.min(interactive, background), attempts: 1 };
+  return { timeoutMs: Math.min(interactive, background), attempts: 1, signal };
 }
 
 export async function nodeTunnelCleanupBackoffMs(
@@ -126,7 +129,11 @@ async function recordCleanupFailure(env: CleanupEnv, row: NodeTunnelRow, err: un
  * Delete one pending row's Cloudflare resources. Returns true once the row is `cleaned`.
  * Never throws: a failure is recorded on the row and retried later.
  */
-export async function cleanupNodeTunnelRow(env: CleanupEnv, row: NodeTunnelRow): Promise<boolean> {
+export async function cleanupNodeTunnelRow(
+  env: CleanupEnv,
+  row: NodeTunnelRow,
+  signal?: AbortSignal
+): Promise<boolean> {
   if (row.status !== 'cleanup_pending') return false;
   try {
     if (row.accountId !== env.CF_ACCOUNT_ID || row.zoneId !== env.CF_ZONE_ID) {
@@ -134,15 +141,28 @@ export async function cleanupNodeTunnelRow(env: CleanupEnv, row: NodeTunnelRow):
       // cannot prove these resources gone. Keep the identity for an operator.
       throw new Error('Tunnel journal belongs to a different Cloudflare account or zone');
     }
-    const options = await cleanupOptions(env);
+    const options = await cleanupOptions(env, signal);
     // DNS first: once the hostname stops resolving to the tunnel, the tunnel is unreachable.
     await deleteOwnDnsRecord(env, row, options);
     await deleteOwnTunnels(env, row, options);
+    if (row.pendingCreateCount > 0) {
+      // A POST may commit after the inventory/deletes above. Do not infer finality from an
+      // empty read. Keep this tombstone discoverable indefinitely at the capped retry rate.
+      const attempts = row.cleanupAttempts + 1;
+      const next = new Date(Date.now() + (await nodeTunnelCleanupBackoffMs(env, attempts)));
+      await env.DATABASE.prepare(
+        `UPDATE node_cloudflare_tunnels SET cleanup_attempts = ?, cleanup_next_attempt_at = ?,
+          last_error = NULL, updated_at = ? WHERE id = ? AND status = 'cleanup_pending'`
+      )
+        .bind(attempts, next.toISOString(), new Date().toISOString(), row.id)
+        .run();
+      return false;
+    }
     const now = new Date().toISOString();
     const done = await env.DATABASE.prepare(
       `UPDATE node_cloudflare_tunnels
           SET status = 'cleaned', cleaned_at = ?, last_error = NULL, updated_at = ?
-        WHERE id = ? AND status = 'cleanup_pending'`
+        WHERE id = ? AND status = 'cleanup_pending' AND pending_create_count = 0`
     )
       .bind(now, now, row.id)
       .run();
@@ -231,17 +251,26 @@ export async function runNodeTunnelCleanupSweep(
   const startedAt = clock();
   let attempted = 0;
   let cleaned = 0;
-  for (const row of due) {
-    if (clock() - startedAt >= budgetMs) {
-      log.warn('node_tunnel.sweep_budget_exhausted', {
-        budgetMs,
-        attempted,
-        deferred: due.length - attempted,
-      });
-      break;
+  const deadline = new AbortController();
+  const timer = setTimeout(
+    () => deadline.abort(new IoTimeoutError('Tunnel cleanup sweep deadline exceeded')),
+    budgetMs
+  );
+  try {
+    for (const row of due) {
+      if (deadline.signal.aborted || clock() - startedAt >= budgetMs) {
+        log.warn('node_tunnel.sweep_budget_exhausted', {
+          budgetMs,
+          attempted,
+          deferred: due.length - attempted,
+        });
+        break;
+      }
+      attempted++;
+      if (await cleanupNodeTunnelRow(env, row, deadline.signal)) cleaned++;
     }
-    attempted++;
-    if (await cleanupNodeTunnelRow(env, row)) cleaned++;
+  } finally {
+    clearTimeout(timer);
   }
   return { released, attempted, cleaned };
 }

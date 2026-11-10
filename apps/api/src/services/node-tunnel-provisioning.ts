@@ -36,6 +36,7 @@ import {
   resolveVmAgentTunnelPort,
   type TunnelEnv,
 } from './node-tunnel-config';
+import { withJournaledTunnelCreate } from './node-tunnel-create-journal';
 import {
   NODE_TUNNEL_COLUMNS,
   type NodeTunnelRow,
@@ -181,7 +182,11 @@ async function ensureNamedTunnel(
   const adopted = await adopt();
   if (adopted) return adopted;
   try {
-    return (await createRemoteTunnel(env, row.tunnelName, options)).id;
+    return (
+      await withJournaledTunnelCreate(env, row.id, () =>
+        createRemoteTunnel(env, row.tunnelName, options)
+      )
+    ).id;
   } catch (createErr) {
     if (options.signal?.aborted) throw createErr;
     // The create may have succeeded behind a lost response or a name conflict. The name
@@ -229,12 +234,14 @@ async function ensureTunnelCname(
       );
     }
     try {
-      const created = await createProxiedTunnelCname(
-        env,
-        row.hostname,
-        target,
-        `sam managed node tunnel ${row.tunnelName}`,
-        options
+      const created = await withJournaledTunnelCreate(env, row.id, () =>
+        createProxiedTunnelCname(
+          env,
+          row.hostname,
+          target,
+          `sam managed node tunnel ${row.tunnelName}`,
+          options
+        )
       );
       return created.id;
     } catch (err) {

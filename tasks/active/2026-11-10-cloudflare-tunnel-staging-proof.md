@@ -50,22 +50,22 @@ staging validation, covering all VM-agent communication and port forwarding,
 while retaining instant-container compatibility. Plan requested before execution.
 The earlier synthetic proof does not satisfy this phase.
 
-- [ ] Inventory every browser/API/CLI/MCP-to-agent path and callback; maintain an
+- [x] Inventory every browser/API/CLI/MCP-to-agent path and callback; maintain an
   endpoint-to-test matrix with live evidence or explicit failure-path coverage.
-- [ ] Centralize transport selection for tunnel VMs, legacy VMs, and instant
+- [x] Centralize transport selection for tunnel VMs, legacy VMs, and instant
   containers. Preserve container DO forwarding, timeout and cold-wake/no-wake
   semantics; containers must never acquire tunnel resources.
-- [ ] Provision one named tunnel per VM incarnation with journaled identity,
+- [x] Provision one named tunnel per VM incarnation with journaled identity,
   CNAME, connector bootstrap, readiness and credential protection. Node receives
   only its tunnel credential; account API token stays in control plane.
-- [ ] Implement dedicated externally-classified ingress; preserve private Docker
+- [x] Implement dedicated externally-classified ingress; preserve private Docker
   Git helper access; block public inbound IPv4/IPv6 before serving requests.
-- [ ] Cover all URL callers: readiness, management, terminal/ACP/boot-log streams,
+- [x] Cover all URL callers: readiness, management, terminal/ACP/boot-log streams,
   previews, local forwarding, files/attachments/snapshots, Git/worktrees, MCP
   tools/secret execution/build-publication and diagnostics/teardown callers.
 - [ ] Handle failed provisioning, cancellation, retries, connector restart,
   credential revocation, stale-incarnation cleanup and eventual deletion retries.
-- [ ] Wire installation settings, permissions, upgrade/clean-install support and
+- [x] Wire installation settings, permissions, upgrade/clean-install support and
   docs. Preserve existing direct-IP nodes; no IP fallback for tunnel nodes.
 - [ ] Deploy pinned staging build; actual agent creates/runs site on port3000
   through normal authenticated UI, inside a real managed devcontainer.
@@ -96,3 +96,21 @@ and one explicit instant-container fixture. Estimate spend before extended fault
 testing. Deliver staging implementation and evidence; production tunnel cutover
 is outside this phase. General-purpose raw public TCP/UDP exposure is not part
 of the existing HTTP/WebSocket forwarding contract.
+
+## Implementation checkpoint (2026-11-10)
+
+Integrated dedicated Go tunnel ingress, cloud-init connector/firewall, API tunnel
+creation and durable cleanup, caller URL consolidation, installer OAuth permission
+upgrade and eight typed admin settings. The parent review additionally required
+resume safety, transport-switch metadata and delayed external-create reconciliation;
+those fixes have focused regression coverage and are in final integration review.
+
+Root lint/typecheck/build pass. The full web test run passed its assertions but
+failed on an unrelated toast teardown timer; isolated file rerun passes and SAM idea
+`01M729EEJXM1W9QBKFC9QJEVRN` tracks it. This is not a clean root test-suite pass.
+
+Staging fixture project and both profiles exist; no test compute has been started.
+The staging-only transport variable is set for the upcoming deployment. Live
+scenario results belong in `experiments/cloudflare-tunnel/STAGING-E2E.md`.
+Admin settings passed read-only mocked desktop/mobile visual validation; deployed
+definitions still require the final live rerun.
