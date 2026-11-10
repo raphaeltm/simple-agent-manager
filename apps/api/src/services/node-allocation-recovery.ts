@@ -33,9 +33,18 @@ export class NodeAllocationUncertainError extends Error {
 export function describeProvisioningAttemptFailure(error: unknown): Record<string, unknown> {
   const describe = (value: unknown) =>
     value instanceof GcpApiError
-      ? { name: value.name, step: value.step, statusCode: value.statusCode, message: sanitizeGcpError(value, 'node-provisioning-attempt') }
+      ? {
+          name: value.name,
+          step: value.step,
+          statusCode: value.statusCode,
+          message: sanitizeGcpError(value, 'node-provisioning-attempt'),
+        }
       : value instanceof Error
-        ? { name: value.name, statusCode: (value as { statusCode?: unknown }).statusCode, message: value.message }
+        ? {
+            name: value.name,
+            statusCode: (value as { statusCode?: unknown }).statusCode,
+            message: value.message,
+          }
         : { name: typeof value, message: String(value) };
   const cause = error instanceof Error ? error.cause : undefined;
   return { error: describe(error), ...(cause === undefined ? {} : { cause: describe(cause) }) };

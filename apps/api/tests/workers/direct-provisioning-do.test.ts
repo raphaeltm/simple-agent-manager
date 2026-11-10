@@ -650,9 +650,22 @@ describe('durable direct workspace allocation', () => {
   });
 
   it('resumes a persisted uncertain allocation by exact incarnation without issuing another paid create', async () => {
+    const warn = vi.spyOn(console, 'warn');
     const f = await setup(true);
     if ((await f.intent())?.attempts === 0) await f.tick();
     await vi.waitFor(async () => expect((await f.intent())?.lastError).toMatch(/unresolved/));
+    // The generic uncertain-allocation message alone hid the cause on the self-hosted box; each
+    // attempt must log the provider error it wrapped.
+    const attemptLogs = warn.mock.calls
+      .map(([line]) => (typeof line === 'string' ? line : ''))
+      .filter((line) => line.includes('node_provisioning.attempt_failed'))
+      .map((line) => JSON.parse(line) as Record<string, any>);
+    expect(attemptLogs.length).toBeGreaterThan(0);
+    expect(attemptLogs[0]).toMatchObject({
+      nodeId: (await f.intent())?.input.nodeId,
+      error: { name: 'NodeAllocationUncertainError' },
+      cause: { message: expect.stringContaining('lost successful provider response') },
+    });
     await runInDurableObject(f.stub, async (instance) => {
       (instance as unknown as { provisioningController: unknown }).provisioningController =
         undefined;
