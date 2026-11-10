@@ -6,12 +6,26 @@
  * every request and drop client-supplied `CF-Connecting-IP`, `True-Client-IP` and
  * `X-Forwarded-For`. The `X-Forwarded-For` fallback (first entry) is only reached when no
  * ingress set the header, and is client-controlled there.
+ *
+ * Only an IP literal is returned: these values key rate limits, so anything else (an injected
+ * `:`-separated string, an oversized value) is treated as absent.
  */
 export function clientIpFromHeaders(
   header: (name: string) => string | null | undefined
 ): string | null {
   const connecting = header('CF-Connecting-IP')?.trim();
-  if (connecting) return connecting;
+  if (connecting && isIpLiteral(connecting)) return connecting;
   const forwarded = header('X-Forwarded-For')?.split(',')[0]?.trim();
-  return forwarded || null;
+  return forwarded && isIpLiteral(forwarded) ? forwarded : null;
+}
+
+/** Longest textual IPv6 form (IPv4-mapped, fully expanded). */
+const MAX_IP_LITERAL_LENGTH = 45;
+
+function isIpLiteral(value: string): boolean {
+  if (value.length > MAX_IP_LITERAL_LENGTH) return false;
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(value)) {
+    return value.split('.').every((octet) => Number(octet) <= 255);
+  }
+  return value.includes(':') && /^[0-9a-fA-F:.]+$/.test(value);
 }

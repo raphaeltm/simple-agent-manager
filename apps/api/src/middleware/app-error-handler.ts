@@ -2,6 +2,7 @@ import type { Context } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 
 import type { Env } from '../env';
+import { clientIpFromHeaders } from '../lib/client-ip';
 import { d1CauseCode, d1ErrorCategory, isFailedQueryError } from '../lib/d1-error-code';
 import { log, serializeError } from '../lib/logger';
 import { getTaskSubmitOperation } from '../lib/task-submit-diagnostics';
@@ -91,7 +92,7 @@ function scheduleErrorPersistence(
         workspaceId: identifiers.workspaceId ?? null,
         taskId: identifiers.taskId ?? null,
         sessionId: identifiers.sessionId ?? null,
-        ipAddress: c.req.header('CF-Connecting-IP') ?? null,
+        ipAddress: clientIpFromHeaders((name) => c.req.header(name)),
         userAgent: c.req.header('User-Agent') ?? null,
       },
       c.env
