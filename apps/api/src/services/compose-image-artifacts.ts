@@ -1,8 +1,9 @@
-import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
+import { getR2PresignTarget } from './r2-s3-client';
 
 const DEFAULT_UPLOAD_EXPIRY_SECONDS = 900;
 const DEFAULT_DOWNLOAD_EXPIRY_SECONDS = 900;
@@ -10,8 +11,6 @@ export const DEFAULT_COMPOSE_IMAGE_ARTIFACT_MAX_BYTES = 2 * 1024 * 1024 * 1024;
 export const COMPOSE_IMAGE_ARTIFACT_ARCHIVE_TYPE = 'docker-save';
 export const COMPOSE_IMAGE_ARTIFACT_MEDIA_TYPE = 'application/vnd.docker.image.rootfs.diff.tar';
 
-let s3Client: S3Client | null = null;
-let s3ClientKey = '';
 
 export interface ComposeImageArtifactRequest {
   serviceName: string;
@@ -77,26 +76,6 @@ function getDownloadExpiry(env: Env): number {
   );
 }
 
-function getS3Client(env: Env): S3Client {
-  if (!env.R2_ACCESS_KEY_ID || !env.R2_SECRET_ACCESS_KEY || !env.CF_ACCOUNT_ID) {
-    throw new Error(
-      'R2 S3 credentials not configured (R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, CF_ACCOUNT_ID required)'
-    );
-  }
-  const key = `${env.CF_ACCOUNT_ID}:${env.R2_ACCESS_KEY_ID}`;
-  if (!s3Client || s3ClientKey !== key) {
-    s3Client = new S3Client({
-      region: 'auto',
-      endpoint: `https://${env.CF_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-      credentials: {
-        accessKeyId: env.R2_ACCESS_KEY_ID,
-        secretAccessKey: env.R2_SECRET_ACCESS_KEY,
-      },
-    });
-    s3ClientKey = key;
-  }
-  return s3Client;
-}
 
 export function buildComposeImageArtifactKey(
   projectId: string,
@@ -198,11 +177,8 @@ export async function createComposeImageArtifactUploads(
     services: ComposeImageArtifactRequest[];
   }
 ): Promise<ComposeImageArtifactUpload[]> {
-  const bucket = env.R2_BUCKET_NAME;
-  if (!bucket) {
-    throw new Error('R2_BUCKET_NAME not configured');
-  }
-  const s3 = getS3Client(env);
+  // Compose artifacts have always been signed with the SDK's default checksum behaviour.
+  const target = getR2PresignTarget(env, 'SDK_DEFAULT');
   const expiresIn = getUploadExpiry(env);
   const maxBytes = getComposeImageArtifactMaxBytes(env);
 
@@ -221,8 +197,8 @@ export async function createComposeImageArtifactUploads(
         serviceName
       );
       const command = new PutObjectCommand({
-        Bucket: bucket,
-        Key: r2Key,
+        Bucket: target.bucket,
+        Key: target.objectKey(r2Key),
         ContentType: COMPOSE_IMAGE_ARTIFACT_MEDIA_TYPE,
       });
       return {
@@ -230,7 +206,7 @@ export async function createComposeImageArtifactUploads(
         sourceRef,
         localImageRef: cleanString(service.localImageRef) || sourceRef,
         r2Key,
-        uploadUrl: await getSignedUrl(s3, command, { expiresIn }),
+        uploadUrl: await getSignedUrl(target.client, command, { expiresIn }),
         expiresIn,
         maxBytes,
         archiveType: COMPOSE_IMAGE_ARTIFACT_ARCHIVE_TYPE,
@@ -264,19 +240,15 @@ export async function createComposeImageArtifactDownloads(
   env: Env,
   artifacts: ComposeImageArtifactDescriptor[]
 ): Promise<ComposeImageArtifactDownload[]> {
-  const bucket = env.R2_BUCKET_NAME;
-  if (!bucket) {
-    throw new Error('R2_BUCKET_NAME not configured');
-  }
-  const s3 = getS3Client(env);
+  const target = getR2PresignTarget(env, 'SDK_DEFAULT');
   const downloadExpiresIn = getDownloadExpiry(env);
 
   return Promise.all(
     artifacts.map(async (artifact) => ({
       ...artifact,
       downloadUrl: await getSignedUrl(
-        s3,
-        new GetObjectCommand({ Bucket: bucket, Key: artifact.r2Key }),
+        target.client,
+        new GetObjectCommand({ Bucket: target.bucket, Key: target.objectKey(artifact.r2Key) }),
         { expiresIn: downloadExpiresIn }
       ),
       downloadExpiresIn,

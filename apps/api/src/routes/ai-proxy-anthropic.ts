@@ -47,6 +47,7 @@ import {
   optionalExecutionContext,
 } from '../services/ai-token-usage-accounting';
 import { copyCredentialLimitHeaders } from '../services/credential-limit-events';
+import { aiGatewayOnlyHeaders } from '../services/platform-capabilities';
 import {
   anthropicBodyMaxBytes,
   anthropicBodyParseError,
@@ -188,7 +189,7 @@ aiProxyAnthropicRoutes.post('/messages', async (c) => {
   const upstreamHeaders: Record<string, string> = {
     ...upstreamAuth.headers,
     'Content-Type': 'application/json',
-    'cf-aig-metadata': aigMetadata,
+    ...aiGatewayOnlyHeaders(c.env, { 'cf-aig-metadata': aigMetadata }),
   };
 
   // Forward Anthropic-specific headers from the client
@@ -413,7 +414,7 @@ aiProxyAnthropicRoutes.post('/messages/count_tokens', async (c) => {
   const upstreamHeaders: Record<string, string> = {
     ...upstreamAuth.headers,
     'Content-Type': 'application/json',
-    'cf-aig-metadata': aigMetadata,
+    ...aiGatewayOnlyHeaders(c.env, { 'cf-aig-metadata': aigMetadata }),
   };
 
   const anthropicVersion = c.req.header('anthropic-version');

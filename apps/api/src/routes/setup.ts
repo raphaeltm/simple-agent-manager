@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import * as v from 'valibot';
 
 import type { Env } from '../env';
+import { clientIpFromHeaders } from '../lib/client-ip';
 import { expectJsonRecord, maybeJsonRecord } from '../lib/runtime-validation';
 import { AppError, errors } from '../middleware/error';
 import { parseOptionalBody } from '../schemas/_validator';
@@ -36,8 +37,7 @@ const SetupRequestBodySchema = v.object({
 
 function clientIdentifier(c: SetupContext): string {
   return (
-    c.req.header('CF-Connecting-IP') ??
-    c.req.header('X-Forwarded-For') ??
+    clientIpFromHeaders((name) => c.req.header(name)) ??
     c.req.header('User-Agent') ??
     'unknown'
   );

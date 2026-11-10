@@ -6,6 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ArchivedForkComposer } from '../../../src/components/project-message-view/ArchivedForkComposer';
 import { cleanupTerminalSecrets, resetAuthRevoked } from '../../../src/lib/terminal-cleanup';
 
+// Cloudflare behaviour: every platform service present (absent case: platform-capabilities-ui.test.tsx).
+vi.mock('../../../src/hooks/usePlatformCapabilities', () => ({
+  usePlatformCapabilities: () => ({ speechToText: true, textToSpeech: true }),
+}));
+
 vi.mock('../../../src/components/AuthProvider', () => ({
   useAuth: () => ({ user: { id: 'user-1' } }),
 }));

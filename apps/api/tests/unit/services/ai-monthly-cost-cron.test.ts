@@ -80,6 +80,7 @@ function createMockKV(failingKeys: Set<string> = new Set()): KVNamespace & {
 function makeEnv(overrides: Partial<Env> = {}): Env {
   return {
     AI_GATEWAY_ID: 'gateway-1',
+    CF_ACCOUNT_ID: 'account-1',
     KV: createMockKV(),
     AI_MONTHLY_COST_CACHE_TTL_SECONDS: undefined,
     AI_MONTHLY_COST_AGGREGATION_MAX_PAGES: undefined,
@@ -127,7 +128,13 @@ describe('runMonthlyCostAggregation', () => {
       KV: kv,
     }));
 
-    expect(result).toEqual({ enabled: false, usersUpdated: 0, totalEntries: 0, errors: 0 });
+    expect(result).toEqual({
+      enabled: false,
+      skipReason: 'ai_gateway_unavailable',
+      usersUpdated: 0,
+      totalEntries: 0,
+      errors: 0,
+    });
     expect(mockIterateGatewayLogs).not.toHaveBeenCalled();
     expect(kv.put).not.toHaveBeenCalled();
   });

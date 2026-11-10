@@ -1265,7 +1265,13 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
     if (c.env.ARTIFACTS_ENABLED !== 'true') {
       throw errors.forbidden('Artifacts provider is not enabled');
     }
-    if (!c.env.ARTIFACTS || !artifactsRepoId) {
+    if (!c.env.ARTIFACTS) {
+      throw errors.featureUnavailable(
+        'artifacts',
+        'SAM-native Git repositories are not available on this installation'
+      );
+    }
+    if (!artifactsRepoId) {
       throw errors.internal('Artifacts binding or repo ID missing');
     }
 

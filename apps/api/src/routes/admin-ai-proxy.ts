@@ -29,6 +29,7 @@ import { requireApproved, requireAuth, requireSuperadmin } from '../middleware/a
 import { errors } from '../middleware/error';
 import { jsonValidator } from '../schemas';
 import { resolveBillingMode, resolveUnifiedBillingToken } from '../services/ai-billing';
+import { resolveAiGatewayId } from '../services/platform-capabilities';
 import { getPlatformAgentCredential } from '../services/platform-credentials';
 
 // Fields are validated loosely (v.unknown()) so the handler's existing manual
@@ -218,6 +219,14 @@ adminAIProxyRoutes.patch('/config', jsonValidator(UpdateAiProxyBillingModeSchema
     throw errors.badRequest(
       'Cannot set billing mode to "unified" without CF_AIG_TOKEN configured. ' +
         'Set CF_AIG_TOKEN as a Worker secret first, or use "auto" mode.'
+    );
+  }
+
+  // Unified Billing exists only through AI Gateway (services/ai-billing.ts).
+  if (billingMode === 'unified' && !resolveAiGatewayId(c.env)) {
+    throw errors.badRequest(
+      'Cannot set billing mode to "unified" without AI Gateway (AI_GATEWAY_ID and CF_ACCOUNT_ID). ' +
+        'Use "auto" or "platform-key" on this installation.'
     );
   }
 

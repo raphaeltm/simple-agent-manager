@@ -5,6 +5,7 @@ import { createModuleLogger, serializeError } from '../lib/logger';
 import { requireApproved,requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { rateLimitTranscribe } from '../middleware/rate-limit';
+import { getWorkersAiBindingOrNull } from '../services/platform-capabilities';
 
 const log = createModuleLogger('transcribe');
 
@@ -47,6 +48,15 @@ const limitTranscription: MiddlewareHandler<{ Bindings: Env }> = (c, next) =>
  */
 transcribeRoutes.post('/', limitTranscription, async (c) => {
   const startTime = Date.now();
+  // Whisper runs on Workers AI; without the binding there is nothing to call. Refuse before
+  // reading the upload so the client gets a clear answer instead of a 500.
+  const ai = getWorkersAiBindingOrNull(c.env);
+  if (!ai) {
+    throw errors.featureUnavailable(
+      'speechToText',
+      'Speech-to-text is not available on this installation'
+    );
+  }
   log.info('request_received');
 
   const maxAudioSizeBytes = parseInt(
@@ -116,7 +126,7 @@ transcribeRoutes.post('/', limitTranscription, async (c) => {
   let result: { text?: string } | undefined;
   try {
     const aiStartTime = Date.now();
-    result = await c.env.AI.run(modelId, {
+    result = await ai.run(modelId, {
       audio: audioBase64,
     });
     const aiDurationMs = Date.now() - aiStartTime;

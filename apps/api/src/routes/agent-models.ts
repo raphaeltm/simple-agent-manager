@@ -21,7 +21,11 @@ import {
   requireActiveProjectMembership,
 } from '../middleware/project-auth';
 import { jsonValidator, UpdateProjectAgentModelsSchema } from '../schemas';
-import { buildCatalogResponse, getAgentModelCatalog } from '../services/agent-models/catalog';
+import {
+  buildCatalogResponse,
+  getAgentModelCatalog,
+  WorkersAiUnavailableError,
+} from '../services/agent-models/catalog';
 import {
   buildProjectAgentModelSettings,
   updateProjectAgentModelSettings,
@@ -36,7 +40,10 @@ agentModelCatalogRoutes.get('/catalog', async (c) => {
   let catalog;
   try {
     catalog = await getAgentModelCatalog(c.env, settings.catalogCacheSeconds);
-  } catch {
+  } catch (err) {
+    if (err instanceof WorkersAiUnavailableError) {
+      throw errors.featureUnavailable('workersAi', err.message);
+    }
     throw errors.serviceUnavailable(
       'The Cloudflare model catalog is unavailable right now. Try again shortly.'
     );

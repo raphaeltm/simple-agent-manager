@@ -16,6 +16,7 @@ import type { MutableRefObject } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useIsMobile } from '../../hooks/useIsMobile';
+import { usePlatformCapabilities } from '../../hooks/usePlatformCapabilities';
 import {
   getSendButtonTitle,
   getSendShortcutAriaKey,
@@ -98,6 +99,7 @@ export function ProjectChatComposer({
   const internalFileInputRef = useRef<HTMLInputElement | null>(null);
   const slashPaletteRef = useRef<SlashCommandPaletteHandle>(null);
   const mentionPaletteRef = useRef<MentionPaletteHandle>(null);
+  const { speechToText } = usePlatformCapabilities();
   const [cursorPos, setCursorPos] = useState(() => value.length);
   const dismissedSlashFilterRef = useRef<string | null>(null);
   const dismissedMentionFilterRef = useRef<string | null>(null);
@@ -375,11 +377,13 @@ export function ProjectChatComposer({
           }
           className="sam-well min-h-12 max-h-[160px] min-w-0 flex-1 resize-none overflow-y-auto rounded-[14px] border-0 bg-[var(--sam-form-bg)] px-4 py-3 font-[inherit] text-base leading-[1.5] text-fg-primary outline-none transition-shadow placeholder:text-fg-muted focus:shadow-[inset_0_1px_2px_var(--sam-glass-v2-well-shade),inset_0_0_0_1px_var(--sam-form-border-focus),0_0_0_3px_var(--sam-form-focus-ring)]"
         />
-        <VoiceButton
-          onTranscription={handleTranscription}
-          disabled={sending || disabled || readOnly}
-          apiUrl={transcribeApiUrl}
-        />
+        {speechToText && (
+          <VoiceButton
+            onTranscription={handleTranscription}
+            disabled={sending || disabled || readOnly}
+            apiUrl={transcribeApiUrl}
+          />
+        )}
         <button
           type="button"
           onClick={onSend}

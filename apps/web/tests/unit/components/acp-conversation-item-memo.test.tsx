@@ -3,6 +3,12 @@ import { render } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+// Cloudflare behaviour: every platform service present (absent case: platform-capabilities-ui.test.tsx).
+vi.mock('../../../src/hooks/usePlatformCapabilities', () => ({
+  usePlatformCapabilities: () => ({ speechToText: true, textToSpeech: true }),
+}));
+
+
 /**
  * Counts every react-markdown parse. `MessageBubble` renders agent text through
  * react-markdown + remark-gfm, so this counter is a direct measurement of the

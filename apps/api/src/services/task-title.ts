@@ -38,6 +38,7 @@ import {
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { fetchWorkersAIChatCompletion, WorkersAIGatewayError } from './ai-proxy-shared';
+import { LlmUnavailableError } from './llm-chat-target';
 
 /**
  * Build the system instructions for the title generation agent.
@@ -263,6 +264,7 @@ async function fetchTaskTitle(
 ): Promise<string | null> {
   const controls = getTaskTitleModelControls(modelId);
   return fetchWorkersAIChatCompletion(env, {
+    purpose: 'taskTitle',
     modelId,
     maxTokens: maxLength,
     timeoutMs,
@@ -344,6 +346,9 @@ export async function generateTaskTitle(
 
       return truncateTitle(title, maxLength);
     } catch (err) {
+      // No model on this installation: truncation is the designed title, not a failure to
+      // retry or warn about.
+      if (err instanceof LlmUnavailableError) return truncateTitle(message, maxLength);
       const classified = classifyError(err);
       lastError = classified;
 

@@ -86,7 +86,7 @@ describe('generatePresignedUploadUrl', () => {
     const env = makePresignEnv({ R2_BUCKET_NAME: undefined });
     await expect(
       generatePresignedUploadUrl(env, validOptions),
-    ).rejects.toThrow('R2_BUCKET_NAME not configured');
+    ).rejects.toThrow('R2_BUCKET_NAME');
   });
 
   it('rejects when R2 S3 credentials are missing', async () => {

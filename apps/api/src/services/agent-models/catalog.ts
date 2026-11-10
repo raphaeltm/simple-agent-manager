@@ -21,6 +21,7 @@ import {
 import type { Env } from '../../env';
 import { createModuleLogger } from '../../lib/logger';
 import { maybeJsonRecord } from '../../lib/runtime-validation';
+import { getWorkersAiBindingOrNull } from '../platform-capabilities';
 import { getWorkersAiBinding } from './workers-ai';
 
 const log = createModuleLogger('agent_models.catalog');
@@ -48,6 +49,14 @@ interface CachedCatalog {
 }
 
 let isolateCatalog: CachedCatalog | null = null;
+
+/** The runtime has no Workers AI binding, so there is no Cloudflare model catalog to read. */
+export class WorkersAiUnavailableError extends Error {
+  constructor() {
+    super('Agent model calls need Workers AI, which this installation does not have');
+    this.name = 'WorkersAiUnavailableError';
+  }
+}
 
 function propertyMap(value: unknown): Map<string, unknown> {
   const properties = new Map<string, unknown>();
@@ -211,6 +220,8 @@ export async function getAgentModelCatalog(
   cacheSeconds: number,
   now: number = Date.now()
 ): Promise<CachedCatalog> {
+  // Checked first: a catalog cached by another runtime would list models nothing here can run.
+  if (!getWorkersAiBindingOrNull(env)) throw new WorkersAiUnavailableError();
   const maxAgeMs = cacheSeconds * 1000;
   if (isolateCatalog && now - isolateCatalog.fetchedAt < maxAgeMs) return isolateCatalog;
   const kvCatalog = await readKvCatalog(env).catch(() => null);

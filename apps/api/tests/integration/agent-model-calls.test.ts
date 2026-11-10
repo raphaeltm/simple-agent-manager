@@ -199,6 +199,7 @@ describe('agent model calls through the MCP route', () => {
       KV: kv,
       AI: { run: aiRun, models: vi.fn(async () => CATALOG_ROWS) },
       AI_GATEWAY_ID: 'sam-gateway',
+      CF_ACCOUNT_ID: 'sam-account',
       BASE_DOMAIN: 'example.test',
     } as unknown as Env;
   });

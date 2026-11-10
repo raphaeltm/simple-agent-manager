@@ -43,6 +43,8 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
     DATABASE: {} as any,
     R2_ACCESS_KEY_ID: 'test-key-id',
     R2_SECRET_ACCESS_KEY: 'test-secret',
+    CF_ACCOUNT_ID: 'test-account',
+    R2_BUCKET_NAME: 'test-bucket',
     ...overrides,
   } as Env;
 }
@@ -201,5 +203,21 @@ describe('POST /projects/:projectId/tasks/request-upload', () => {
         contentType: 'text/csv',
       }),
     );
+  });
+});
+
+describe('request-upload presign configuration', () => {
+  it('refuses a partial operator store with 403 instead of failing inside the presigner', async () => {
+    mockGeneratePresignedUploadUrl.mockClear();
+    const { app, env } = makeApp(
+      makeEnv({ R2_S3_ENDPOINT: 'https://s3.example.com', R2_S3_BUCKET: 'fleet' })
+    );
+    const res = await postUpload(app, env, {
+      filename: 'a.txt',
+      size: 10,
+      contentType: 'text/plain',
+    });
+    expect(res.status).toBe(403);
+    expect(mockGeneratePresignedUploadUrl).not.toHaveBeenCalled();
   });
 });

@@ -15,6 +15,7 @@ import {
 } from 'react';
 
 import { useIsMobile } from '../../hooks/useIsMobile';
+import { usePlatformCapabilities } from '../../hooks/usePlatformCapabilities';
 import { getTranscribeApiUrl } from '../../lib/api/agents';
 import {
   getSendButtonTitle,
@@ -56,6 +57,7 @@ export function SamComposer({
   textareaRef,
 }: SamComposerProps) {
   const isMobile = useIsMobile();
+  const { speechToText } = usePlatformCapabilities();
   const [voiceState, setVoiceState] = useState<VoiceButtonState>('idle');
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const onTranscription = useCallback(
@@ -117,13 +119,15 @@ export function SamComposer({
             placeholder="Message SAM"
             className="min-h-11 min-w-0 flex-1 resize-none overflow-y-auto rounded-md border border-border-default bg-[var(--sam-form-bg)] px-3 py-2.5 text-base leading-normal text-fg-primary outline-none transition-colors placeholder:text-fg-muted focus:border-accent focus-visible:ring-2 focus-visible:ring-focus-ring"
           />
-          <VoiceButton
-            apiUrl={getTranscribeApiUrl()}
-            onTranscription={onTranscription}
-            onStateChange={onVoiceState}
-            onError={onVoiceError}
-            disabled={sending || pending}
-          />
+          {speechToText && (
+            <VoiceButton
+              apiUrl={getTranscribeApiUrl()}
+              onTranscription={onTranscription}
+              onStateChange={onVoiceState}
+              onError={onVoiceError}
+              disabled={sending || pending}
+            />
+          )}
           {active ? (
             <Button
               type="button"

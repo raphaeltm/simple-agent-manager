@@ -58,6 +58,17 @@ describe('buildAnthropicGatewayUrl', () => {
     const env = { CF_ACCOUNT_ID: 'acc-123' } as Parameters<typeof buildAnthropicGatewayUrl>[0];
     expect(buildAnthropicGatewayUrl(env)).toBe('https://api.anthropic.com/v1/messages');
   });
+
+  it('falls back to direct Anthropic API when there is a gateway ID but no account ID', () => {
+    // A gateway URL embeds the account, so the default gateway id alone cannot form one.
+    const env = { AI_GATEWAY_ID: 'sam' } as Parameters<typeof buildAnthropicGatewayUrl>[0];
+    expect(buildAnthropicGatewayUrl(env)).toBe('https://api.anthropic.com/v1/messages');
+  });
+
+  it('treats a blank account ID like a missing one', () => {
+    const env = { AI_GATEWAY_ID: 'sam', CF_ACCOUNT_ID: '   ' } as Parameters<typeof buildAnthropicGatewayUrl>[0];
+    expect(buildAnthropicGatewayUrl(env)).toBe('https://api.anthropic.com/v1/messages');
+  });
 });
 
 // =============================================================================
@@ -74,6 +85,16 @@ describe('buildAnthropicCountTokensUrl', () => {
 
   it('falls back to direct Anthropic API', () => {
     const env = { CF_ACCOUNT_ID: 'acc-123' } as Parameters<typeof buildAnthropicCountTokensUrl>[0];
+    expect(buildAnthropicCountTokensUrl(env)).toBe('https://api.anthropic.com/v1/messages/count_tokens');
+  });
+
+  it('falls back to direct Anthropic API when there is a gateway ID but no account ID', () => {
+    const env = { AI_GATEWAY_ID: 'sam' } as Parameters<typeof buildAnthropicCountTokensUrl>[0];
+    expect(buildAnthropicCountTokensUrl(env)).toBe('https://api.anthropic.com/v1/messages/count_tokens');
+  });
+
+  it('treats a blank account ID like a missing one', () => {
+    const env = { AI_GATEWAY_ID: 'sam', CF_ACCOUNT_ID: '' } as Parameters<typeof buildAnthropicCountTokensUrl>[0];
     expect(buildAnthropicCountTokensUrl(env)).toBe('https://api.anthropic.com/v1/messages/count_tokens');
   });
 });

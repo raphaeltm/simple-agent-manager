@@ -219,3 +219,34 @@ describe('integration mutation guardrails', () => {
     });
   });
 });
+describe('OpenAI-compatible LLM endpoint settings', () => {
+  const KEY = 'sk-endpoint-key-never-returned';
+  it('stores the API key but never returns it, while the base URL reads back', async () => {
+    const patch = await request(
+      {},
+      {
+        expectedRevision: 0,
+        changes: [
+          { name: 'llm.openAICompatible.baseUrl', value: 'https://llm.example.com/v1' },
+          { name: 'llm.openAICompatible.apiKey', value: KEY },
+        ],
+      }
+    );
+    expect(patch.status).toBe(200);
+    expect(await patch.text()).not.toContain(KEY);
+
+    const read = await request();
+    expect(read.status).toBe(200);
+    const text = await read.text();
+    // Neither the settings nor their history carry the key; the plain setting does read back.
+    expect(text).not.toContain(KEY);
+    const body = JSON.parse(text) as { settings: Array<{ name: string; value: unknown }> };
+    const byName = new Map(body.settings.map((setting) => [setting.name, setting]));
+    expect(byName.get('llm.openAICompatible.baseUrl')?.value).toBe('https://llm.example.com/v1');
+    expect(byName.get('llm.openAICompatible.apiKey')).toMatchObject({ configured: true });
+    // Stored, but only as ciphertext.
+    const rows = sqlite.prepare('SELECT * FROM platform_credentials').all();
+    expect(rows.length).toBeGreaterThan(0);
+    expect(JSON.stringify(rows)).not.toContain(KEY);
+  });
+});

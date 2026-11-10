@@ -80,6 +80,7 @@ export async function scheduled(
           cron: controller.cron,
           type: 'daily-forward',
           forwardEnabled: forward.enabled,
+          forwardSkipReason: forward.skipReason ?? null,
           forwardEventsQueried: forward.eventsQueried,
           forwardSegmentSent: forward.segment.sent,
           forwardGA4Sent: forward.ga4.sent,

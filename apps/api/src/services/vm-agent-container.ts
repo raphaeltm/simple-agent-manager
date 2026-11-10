@@ -15,6 +15,7 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { errors } from '../middleware/error';
 import { runCloudflareRuntimePhase } from './cloudflare-runtime-phase';
+import { isContainerWorkspaceRuntimeEnabled } from './platform-capabilities';
 import { resolveVmAgentContainerPort } from './vm-agent-container-port';
 
 /**
@@ -32,7 +33,7 @@ export interface VmAgentContainerConfig {
 
 export function getVmAgentContainerConfig(env: Env): VmAgentContainerConfig {
   return {
-    enabled: (env.CF_CONTAINER_ENABLED ?? env.SANDBOX_ENABLED) === 'true',
+    enabled: isContainerWorkspaceRuntimeEnabled(env),
     vmAgentPort: resolveVmAgentContainerPort(env),
     sleepAfter:
       env.CF_CONTAINER_SLEEP_AFTER || env.SANDBOX_SLEEP_AFTER || DEFAULT_CF_CONTAINER_SLEEP_AFTER,

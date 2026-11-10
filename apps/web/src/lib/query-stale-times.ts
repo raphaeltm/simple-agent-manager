@@ -79,3 +79,13 @@ export const PROJECT_CREATE_CONFIG_STALE_TIME_MS = resolveDurationMs(
   import.meta.env.VITE_PROJECT_CREATE_CONFIG_STALE_TIME_MS,
   DEFAULT_PROJECT_CREATE_CONFIG_STALE_TIME_MS
 );
+
+/**
+ * Platform capabilities (`GET /api/config/platform-capabilities`): which platform services the
+ * installation has. They change only when the installation is reconfigured.
+ */
+const DEFAULT_PLATFORM_CAPABILITIES_STALE_TIME_MS = 300_000;
+export const PLATFORM_CAPABILITIES_STALE_TIME_MS = resolveDurationMs(
+  import.meta.env.VITE_PLATFORM_CAPABILITIES_STALE_TIME_MS,
+  DEFAULT_PLATFORM_CAPABILITIES_STALE_TIME_MS
+);

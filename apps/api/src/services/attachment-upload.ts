@@ -12,7 +12,7 @@ import { ATTACHMENT_DEFAULTS, SAFE_FILENAME_REGEX } from '@simple-agent-manager/
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
-import { getR2S3Client } from './r2-s3-client';
+import { getR2PresignTarget } from './r2-s3-client';
 
 function getMaxBytes(env: Env): number {
   return parsePositiveInt(env.ATTACHMENT_UPLOAD_MAX_BYTES, ATTACHMENT_DEFAULTS.UPLOAD_MAX_BYTES);
@@ -83,22 +83,18 @@ export async function generatePresignedUploadUrl(
   }
 
   const r2Key = buildAttachmentR2Key(userId, uploadId, filename);
-  const bucketName = env.R2_BUCKET_NAME;
-  if (!bucketName) {
-    throw new Error('R2_BUCKET_NAME not configured');
-  }
-
-  const s3 = getR2S3Client(env);
+  // r2Key stays the R2 binding key; only the presigned URL addresses the store object.
+  const target = getR2PresignTarget(env);
   const expiresIn = getPresignExpiry(env);
 
   const command = new PutObjectCommand({
-    Bucket: bucketName,
-    Key: r2Key,
+    Bucket: target.bucket,
+    Key: target.objectKey(r2Key),
     ContentLength: size,
     ContentType: contentType,
   });
 
-  const uploadUrl = await getSignedUrl(s3, command, { expiresIn });
+  const uploadUrl = await getSignedUrl(target.client, command, { expiresIn });
 
   log.info('attachment_upload.presigned_url_generated', {
     userId,

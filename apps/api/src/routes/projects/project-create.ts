@@ -21,6 +21,7 @@ import {
   verifyGitLabProjectAccess,
 } from '../../services/gitlab';
 import { getRuntimeLimits } from '../../services/limits';
+import { isArtifactsAvailable } from '../../services/platform-capabilities';
 import {
   assertRepositoryAccess,
   isValidRepositoryFormat,
@@ -83,8 +84,12 @@ export function registerProjectCreateRoute(crudRoutes: Hono<{ Bindings: Env }>):
       if (!artifactsEnabled) {
         throw errors.badRequest('Artifacts repo provider is not enabled');
       }
-      if (!c.env.ARTIFACTS) {
-        throw errors.internal('Artifacts binding is not configured');
+      // Enabled but no binding: this runtime has no Cloudflare Artifacts (not a server fault).
+      if (!isArtifactsAvailable(c.env) || !c.env.ARTIFACTS) {
+        throw errors.featureUnavailable(
+          'artifacts',
+          'SAM-native Git repositories are not available on this installation'
+        );
       }
 
       // Check per-user Artifacts repo limit

@@ -201,6 +201,36 @@ describe('admin-costs routes', () => {
     expect(body.compute).toBeDefined();
   });
 
+  it('with a gateway id but no Cloudflare account returns 200 with empty LLM data and never calls the gateway', async () => {
+    // A self-hosted install that kept the default gateway id has nothing to query.
+    mockFetch.mockResolvedValue(makeGatewayResponse([makeLogEntry()]));
+    const app = createApp({ CF_ACCOUNT_ID: undefined });
+    const res = await app.request('/api/admin/costs');
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.llm.totalRequests).toBe(0);
+    expect(body.llm.totalCostUsd).toBe(0);
+    expect(body.llm.byModel).toHaveLength(0);
+    expect(body.compute.totalNodeHours).toBe(10);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('with a gateway id and a Cloudflare account queries that account\'s gateway (control)', async () => {
+    mockFetch.mockResolvedValue(makeGatewayResponse([makeLogEntry({ cost: 0.05 })]));
+    const app = createApp();
+    const res = await app.request('/api/admin/costs');
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.llm.totalRequests).toBe(1);
+    expect(body.llm.totalCostUsd).toBeCloseTo(0.05);
+    expect(mockFetch).toHaveBeenCalled();
+    expect(mockFetch.mock.calls[0]![0] as string).toContain(
+      `/accounts/${CF_ACCOUNT_ID}/ai-gateway/gateways/${AI_GATEWAY_ID}/logs`
+    );
+  });
+
   it('returns 404 when cost monitoring is disabled', async () => {
     const app = createApp({ COST_MONITORING_ENABLED: 'false' });
     const res = await app.request('/api/admin/costs');

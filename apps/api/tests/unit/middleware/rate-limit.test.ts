@@ -253,4 +253,34 @@ describe('rateLimit middleware (behavioral)', () => {
     const res3 = await app.request(req3, undefined, mockEnv);
     expect(res3.status).toBe(200);
   });
+  it('keys an IPv6 client by its address', async () => {
+    const app = createApp({ useIp: true, limit: 1 });
+    const call = (ip: string) =>
+      app.request(
+        new Request('http://localhost/test', { headers: { 'CF-Connecting-IP': ip } }),
+        undefined,
+        mockEnv
+      );
+    expect((await call('2001:db8::7')).status).toBe(200);
+    expect((await call('2001:db8::7')).status).toBe(429);
+    expect((await call('2001:db8::8')).status).toBe(200);
+    const keys = ((kv.put as any).mock.calls as [string, string][]).map(([k]) => k);
+    expect(keys.some((k) => k.includes('2001:db8::7'))).toBe(true);
+  });
+
+  it('cannot mint fresh buckets with forged non-IP header values', async () => {
+    const app = createApp({ useIp: true, limit: 1 });
+    const call = (forwarded: string) =>
+      app.request(
+        new Request('http://localhost/test', { headers: { 'X-Forwarded-For': forwarded } }),
+        undefined,
+        mockEnv
+      );
+    // Every forged value collapses to the shared "unknown" bucket instead of its own key.
+    expect((await call('1.2.3.4:80')).status).toBe(200);
+    expect((await call('1.2.3.4:81')).status).toBe(429);
+    expect((await call('ab:cd')).status).toBe(429);
+    const keys = ((kv.put as any).mock.calls as [string, string][]).map(([k]) => k);
+    expect(keys.every((k) => k.includes('unknown'))).toBe(true);
+  });
 });
