@@ -34,14 +34,14 @@ export class NodeAgentRouteError extends Error {
   }
 }
 
-interface NodeAgentRouteRow {
+export interface NodeAgentRouteRow {
   runtime: string | null;
   transport: string | null;
   leasePort: number | null;
 }
 
 /** One D1 read: runtime, transport and the current incarnation's active lease port. */
-async function readNodeAgentRouteRow(
+export async function readNodeAgentRouteRow(
   env: Pick<Env, 'DATABASE'>,
   nodeId: string
 ): Promise<NodeAgentRouteRow | null> {

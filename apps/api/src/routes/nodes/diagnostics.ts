@@ -18,6 +18,11 @@ import {
 } from '../../services/node-agent-diagnostics';
 import { getNodeBackendBaseUrl } from '../../services/node-agent-readiness';
 import { ownerNodeAccess, runNodeDiagnostic } from '../../services/node-diagnostics-access';
+import { resolveNodeAgentRoute } from '../../services/node-agent-route';
+import {
+  gatewayDecisionResponse,
+  isGatewayAuthorizationRequest,
+} from '../../services/node-websocket-gateway';
 
 export const nodeDiagnosticsRoutes = new Hono<{ Bindings: Env }>();
 
@@ -163,6 +168,14 @@ nodeDiagnosticsRoutes.get('/:id/logs/stream', async (c) => {
   }
   headers.set('Authorization', `Bearer ${token}`);
   headers.set('X-SAM-Node-Id', nodeId);
+
+  // Self-hosted WebSocket gateway: same auth and headers; Caddy carries the socket.
+  if (isGatewayAuthorizationRequest(c.req.raw)) {
+    return gatewayDecisionResponse(c.req.raw, await resolveNodeAgentRoute(c.env, nodeId), {
+      url: vmUrl,
+      headers,
+    });
+  }
 
   return fetchNodeAgent(
     nodeId,
