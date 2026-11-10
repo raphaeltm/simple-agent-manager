@@ -384,6 +384,7 @@ func New(cfg *config.Config) (*Server, error) {
 		DefaultRows:        cfg.DefaultRows,
 		DefaultCols:        cfg.DefaultCols,
 		WorkDir:            containerWorkDir,
+		Env:                standalonePTYEnvironment(cfg, cfg.WorkspaceID),
 		ContainerResolver:  containerResolver,
 		ContainerUser:      containerUser,
 		ProcessGroup:       cfg.IsStandaloneMode(),
