@@ -391,6 +391,13 @@ export interface SessionStateSnapshot {
   /** D1-sourced recovery status from session_snapshots (sleep/wake lifecycle). */
   recoveryStatus?: 'waking' | 'restored' | 'failed' | null;
   /**
+   * Identity of the wake attempt `recoveryStatus` describes
+   * (`session_snapshots.recovery_attempt_id`, a new ULID per wake claim). Lets the UI
+   * tell a stale snapshot of a finished wake from the start of the next one. Null
+   * when no wake has been claimed in this sleep episode.
+   */
+  wakeAttemptId?: string | null;
+  /**
    * Execution step of the replacement TaskRunner currently waking this session,
    * resolved from `session_snapshots.recovery_task_id` -> `tasks.execution_step`.
    * Drives phase-level wake progress in the UI. Null when no wake is in flight or

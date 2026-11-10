@@ -25,9 +25,10 @@
  * State resets on `sessionId` change so one conversation's wake can never paint a
  * banner over another's.
  *
- * The settled latch (below) re-arms when the session is seen going back to sleep
- * (any status → `sleeping`). A conversation can wake, sleep and wake again while the
- * tab stays open; without the re-arm the second wake's updates were all dropped.
+ * The settled latch (below) is per wake attempt. A conversation can wake, sleep and
+ * wake again while the tab stays open, and the server names each wake attempt
+ * (`wakeAttemptId`), so a snapshot of a different attempt is a new wake, while one of
+ * the attempt that already settled is stale.
  */
 
 import {
@@ -76,24 +77,28 @@ function isForwardProgress(
   return EXECUTION_STEP_ORDER[next] >= EXECUTION_STEP_ORDER[current];
 }
 
-export function useWakeProgress(
-  sessionId: string | undefined,
-  sessionStatus?: string | null
-): UseWakeProgressReturn {
+export function useWakeProgress(sessionId: string | undefined): UseWakeProgressReturn {
   const [isWaking, setIsWaking] = useState(false);
   const [wakePhase, setWakePhase] = useState<TaskExecutionStep | null>(null);
   const [wakeWait, setWakeWait] = useState<WakeWait | null>(null);
 
   /**
-   * Latches once this wake reaches a terminal status.
+   * Latches once a wake reaches a terminal status, and remembers which attempt.
    *
    * A poll response is assembled server-side before the client reads it, so a
    * poll that started before the wake finished can land *after* the push that
    * already reported `restored`. Without this latch that stale snapshot re-opens
    * the banner on a session that has finished waking — the status-level twin of
    * the phase-ordering guard.
+   *
+   * The latch is scoped to the attempt that settled. A `waking` snapshot naming a
+   * different attempt is the next wake of the same conversation and re-arms it.
+   * Without an attempt id on either side the latch holds, as it did before ids
+   * existed: a stale banner is worse than a missing one.
    */
-  const settledRef = useRef(false);
+  const settledRef = useRef<{ attemptId: string | null } | null>(null);
+  /** The newest wake attempt a snapshot has named. Pushes carry no attempt id. */
+  const lastAttemptIdRef = useRef<string | null>(null);
 
   // A wake belongs to exactly one conversation. Switching sessions must not carry
   // the previous conversation's banner across.
@@ -101,20 +106,9 @@ export function useWakeProgress(
     setIsWaking(false);
     setWakePhase(null);
     setWakeWait(null);
-    settledRef.current = false;
+    settledRef.current = null;
+    lastAttemptIdRef.current = null;
   }, [sessionId]);
-
-  // A new sleep episode means the next wake is a new wake: re-arm the latch. Only a
-  // transition re-arms it. A session still reported `sleeping` right after its wake
-  // restored is the stale window the latch exists for, so it must stay latched.
-  const previousStatusRef = useRef<string | null | undefined>(sessionStatus);
-  useEffect(() => {
-    const previous = previousStatusRef.current;
-    previousStatusRef.current = sessionStatus;
-    if (sessionStatus === 'sleeping' && previous != null && previous !== 'sleeping') {
-      settledRef.current = false;
-    }
-  }, [sessionStatus]);
 
   const clearWakeProgress = useCallback(() => {
     setIsWaking(false);
@@ -123,18 +117,32 @@ export function useWakeProgress(
   }, []);
 
   const applyStatus = useCallback(
-    (status: WakeRecoveryStatus | null | undefined, phase: TaskExecutionStep | null) => {
+    (
+      status: WakeRecoveryStatus | null | undefined,
+      phase: TaskExecutionStep | null,
+      attemptId?: string | null
+    ) => {
+      if (attemptId) lastAttemptIdRef.current = attemptId;
       if (status !== 'waking') {
         // 'restored' and 'failed' are both terminal for the banner. A failure
         // surfaces through the existing resume-error path, not this indicator.
-        if (status === 'restored' || status === 'failed') settledRef.current = true;
+        if (status === 'restored' || status === 'failed') {
+          settledRef.current = { attemptId: attemptId ?? lastAttemptIdRef.current };
+        }
         setIsWaking(false);
         setWakePhase(null);
         setWakeWait(null);
         return;
       }
-      // A late 'waking' snapshot cannot un-finish a wake that already settled.
-      if (settledRef.current) return;
+      const settled = settledRef.current;
+      if (settled) {
+        // A late 'waking' snapshot cannot un-finish a wake that already settled; a
+        // snapshot of a different attempt is a new wake and re-arms the latch.
+        const newAttempt = !!attemptId && !!settled.attemptId && attemptId !== settled.attemptId;
+        if (!newAttempt) return;
+        settledRef.current = null;
+        setWakePhase(null);
+      }
       setIsWaking(true);
       setWakePhase((current) => (isForwardProgress(phase, current) ? phase : current));
     },
@@ -144,7 +152,7 @@ export function useWakeProgress(
   const hydrateWakeProgress = useCallback(
     (state: SessionStateSnapshot | null | undefined) => {
       if (!state) return;
-      applyStatus(state.recoveryStatus ?? null, state.wakePhase ?? null);
+      applyStatus(state.recoveryStatus ?? null, state.wakePhase ?? null, state.wakeAttemptId);
       // Only the pull path carries the reason. A pushed phase can outdate it, so the
       // banner shows it only for the phase it describes (`WakeProgressBanner`).
       setWakeWait(

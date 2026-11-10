@@ -92,6 +92,30 @@ describe('attachWakeState (hydration)', () => {
     expect(result?.wakePhase).toBe('node_provisioning');
   });
 
+  // The client latches a finished wake per attempt, so it needs the attempt id to tell
+  // a stale snapshot of that wake from the start of the next one (audit D8).
+  it('reports which wake attempt the status describes', async () => {
+    const { sqlite, db } = makeDb();
+    seedSnapshot(sqlite, {
+      chatSessionId: SESSION_ID,
+      recoveryStatus: 'waking',
+      recoveryTaskId: 'recovery-task-1',
+    });
+    sqlite
+      .prepare(`UPDATE session_snapshots SET recovery_attempt_id = ? WHERE chat_session_id = ?`)
+      .run('01ATTEMPT2', SESSION_ID);
+    seedTask(sqlite, 'recovery-task-1', 'node_provisioning');
+
+    const result = await attachWakeState(db, BASE_STATE, {
+      projectId: 'p1',
+      sessionId: SESSION_ID,
+      sessionStatus: 'sleeping',
+    });
+
+    expect(result?.recoveryStatus).toBe('waking');
+    expect(result?.wakeAttemptId).toBe('01ATTEMPT2');
+  });
+
   it("does not leak another session's wake", async () => {
     // Discriminating: the join predicate is the only thing preventing this.
     // Delete `eq(sessionSnapshots.chatSessionId, sessionId)` and this fails.

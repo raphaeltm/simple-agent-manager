@@ -246,30 +246,34 @@ describe('useSessionLifecycle loading semantics', () => {
     expect(result.current.wakePhase).toBe('node_provisioning');
   });
 
-  it('opens the socket and shows phases for a second wake of the same open chat', async () => {
-    // State-machine audit D8. The chat wakes, finishes, sleeps again and is woken
-    // again while the tab stays open. The settled latch used to re-arm only on a
-    // session switch, so the second wake's `waking` updates were all dropped:
-    // `isWaking` stayed false and the socket gate (`active || isWaking`) stayed shut.
-    // Each server state below is delivered the way a poll delivers it (a refetch of
-    // the session detail), in order.
-    type ServerState = 'wake1' | 'restored' | 'asleep' | 'wake2';
-    let server: ServerState = 'wake1';
-    const response = (state: ServerState) => {
-      const status = state === 'restored' ? 'active' : 'sleeping';
-      const base = detail([msg('a', 1000)], false, status);
-      const wake =
-        state === 'wake1'
-          ? { recoveryStatus: 'waking', wakePhase: 'node_provisioning' }
-          : state === 'wake2'
-            ? { recoveryStatus: 'waking', wakePhase: 'workspace_creation' }
-            : state === 'restored'
-              ? { recoveryStatus: 'restored', wakePhase: null }
-              : {};
-      return { ...base, state: { ...base.state, ...wake } };
-    };
-    mocks.getChatSession.mockImplementation(async () => response(server));
+  // State-machine audit D8. The chat wakes, finishes, sleeps again and is woken again
+  // while the tab stays open. The settled latch used to clear only on a session switch,
+  // so the second wake's `waking` updates were all dropped: `isWaking` stayed false and
+  // the socket gate (`active || isWaking`) stayed shut. Each server state is delivered
+  // the way a poll delivers it (a refetch of the session detail), in order.
+  type ServerState = 'wake1' | 'restored' | 'stale1' | 'wake2';
+  /** The `session.wake_progress` push that ends a wake, as the socket delivers it. */
+  function pushWakeRestored() {
+    const socket = mocks.wsOptions.at(-1) as
+      { onWakeProgress?: (u: { recoveryStatus: 'restored'; wakePhase: null }) => void } | undefined;
+    expect(socket?.onWakeProgress).toBeTypeOf('function');
+    act(() => socket?.onWakeProgress?.({ recoveryStatus: 'restored', wakePhase: null }));
+  }
+  function wakeResponse(state: ServerState) {
+    const status = state === 'restored' ? 'active' : 'sleeping';
+    const base = detail([msg('a', 1000)], false, status);
+    const wake =
+      state === 'wake1' || state === 'stale1'
+        ? { recoveryStatus: 'waking', wakePhase: 'node_provisioning', wakeAttemptId: 'A' }
+        : state === 'wake2'
+          ? { recoveryStatus: 'waking', wakePhase: 'workspace_creation', wakeAttemptId: 'B' }
+          : {};
+    return { ...base, state: { ...base.state, ...wake } };
+  }
 
+  it('opens the socket and shows phases when the next wake arrives in the same response that flips the chat back to sleeping', async () => {
+    let server: ServerState = 'wake1';
+    mocks.getChatSession.mockImplementation(async () => wakeResponse(server));
     const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
       wrapper,
     });
@@ -281,22 +285,42 @@ describe('useSessionLifecycle loading semantics', () => {
     };
 
     await waitFor(() => expect(result.current.isWaking).toBe(true));
-
+    pushWakeRestored();
     await deliver('restored');
     await waitFor(() => expect(result.current.session?.status).toBe('active'));
     expect(result.current.isWaking).toBe(false);
+    const enabledWhileAwake = mocks.wsOptions.at(-1)?.enabled;
 
-    await deliver('asleep');
-    await waitFor(() => expect(result.current.session?.status).toBe('sleeping'));
-    expect(result.current.isWaking).toBe(false);
-    const enabledBeforeSecondWake = mocks.wsOptions.at(-1)?.enabled;
-
+    // One response carries both the flip back to `sleeping` and the new wake.
     await deliver('wake2');
     await waitFor(() => expect(result.current.isWaking).toBe(true));
     expect(result.current.wakePhase).toBe('workspace_creation');
     await waitFor(() => expect(mocks.wsOptions.at(-1)?.enabled).toBe(true));
-    // Liveness of the gate: it was shut while asleep, so the reopen is this wake's doing.
-    expect(enabledBeforeSecondWake).toBe(false);
+    expect(enabledWhileAwake).toBe(true); // liveness: the gate was open while active
+  });
+
+  it('does not reopen the banner for a stale poll of the finished wake', async () => {
+    // Control: after the restore, a late poll still reports the session `sleeping` and
+    // waking under the SAME attempt. That is the stale window the latch exists for.
+    let server: ServerState = 'wake1';
+    mocks.getChatSession.mockImplementation(async () => wakeResponse(server));
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+    const deliver = async (next: ServerState) => {
+      server = next;
+      await act(async () => {
+        await queryClient.invalidateQueries();
+      });
+    };
+
+    await waitFor(() => expect(result.current.isWaking).toBe(true));
+    pushWakeRestored();
+    await deliver('restored');
+    await waitFor(() => expect(result.current.session?.status).toBe('active'));
+    await deliver('stale1');
+    await waitFor(() => expect(result.current.session?.status).toBe('sleeping'));
+    expect(result.current.isWaking).toBe(false);
   });
 
   it('does NOT open the socket for an ordinary sleeping session', async () => {
