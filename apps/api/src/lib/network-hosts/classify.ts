@@ -53,6 +53,7 @@ function ipv4(a: number, b: number, c: number, d: number): number {
 /** `[start, prefixLength, class]` for IPv4 ranges that are not public; first match wins. */
 const IPV4_RANGES: ReadonlyArray<readonly [number, number, Exclude<HostClass, 'public'>]> = [
   [ipv4(100, 100, 100, 200), 32, 'forbidden'], // Alibaba Cloud metadata, inside CGNAT
+  [ipv4(168, 63, 129, 16), 32, 'forbidden'], // Azure WireServer (host agent), a public address
   [ipv4(0, 0, 0, 0), 8, 'forbidden'], // "this network"; 0.0.0.0 reaches local listeners
   [ipv4(169, 254, 0, 0), 16, 'forbidden'], // link-local, cloud metadata
   [ipv4(192, 0, 0, 0), 24, 'forbidden'], // IETF protocol assignments
@@ -168,6 +169,7 @@ const IPV6_EXACT: readonly Ipv6Range[] = [
   [ipv6('::'), 128, 'forbidden'], // unspecified
   [ipv6('::1'), 128, 'private'], // loopback
   [ipv6('fd00:ec2::254'), 128, 'forbidden'], // AWS IMDS over IPv6
+  [ipv6('fd20:ce::254'), 128, 'forbidden'], // GCE metadata over IPv6
 ];
 
 const IPV6_RANGES: readonly Ipv6Range[] = [
@@ -210,7 +212,8 @@ export function classifyIpv6(groups: number[]): HostClass {
 }
 
 function classifyName(host: string): HostClass {
-  if (METADATA_HOSTNAMES.has(host)) return 'forbidden';
+  if (METADATA_HOSTNAMES.has(host) || host.endsWith('.metadata.google.internal'))
+    return 'forbidden';
   if (host === 'localhost' || !host.includes('.')) return 'private';
   return PRIVATE_NAME_SUFFIXES.some((suffix) => host.endsWith(suffix)) ? 'private' : 'public';
 }

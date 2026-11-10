@@ -33,8 +33,9 @@ const BODY_HEADERS = ['content-type', 'content-length', 'content-encoding', 'con
 export interface OutboundPolicy {
   /**
    * Allow loopback, private-range and private-network names. Only for an endpoint an operator
-   * configured AND explicitly opted in to reaching on the private network. Forbidden hosts
-   * (metadata, link-local) are refused regardless.
+   * configured AND explicitly opted in to reaching on the private network. Redirect hops to a
+   * private host are allowed only on the original origin. Forbidden hosts (metadata,
+   * link-local) are refused regardless.
    */
   allowPrivateNetwork?: boolean;
   /** Redirect hops to follow; 0 refuses every redirect. Default DEFAULT_OUTBOUND_MAX_REDIRECTS. */
@@ -148,6 +149,13 @@ export async function guardedFetch(
 ): Promise<Response> {
   const maxRedirects = policy.maxRedirects ?? DEFAULT_OUTBOUND_MAX_REDIRECTS;
   let url = assertOutboundUrl(input, policy);
+  const origin = url.origin;
+  // The private-network opt-in covers the configured endpoint, not wherever it redirects: a
+  // hop to a private host must stay on the original origin.
+  const hopPolicy = (target: URL): OutboundPolicy => ({
+    ...policy,
+    allowPrivateNetwork: policy.allowPrivateNetwork === true && target.origin === origin,
+  });
   let request: RequestInit = { ...init, redirect: 'manual' };
   for (let hop = 0; ; hop += 1) {
     const response = policy.fetchFn
@@ -175,7 +183,7 @@ export async function guardedFetch(
         'Redirect Location is not a URL'
       );
     }
-    const next = assertOutboundUrl(target, policy);
+    const next = assertOutboundUrl(target, hopPolicy(target));
     request = nextHopInit(request, response.status, url, next);
     url = next;
   }

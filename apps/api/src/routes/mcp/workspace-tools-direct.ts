@@ -382,8 +382,11 @@ export async function handleCheckDnsStatus(
   try {
     // Try to fetch the workspace URL to check DNS + TLS in one call.
     // Note: this only confirms Cloudflare edge reachability, not VM agent health.
+    // The workspace (a node the user controls) answers this request, so a redirect it sends is
+    // reported, never followed: following it would let the node point the Worker anywhere.
     const res = await fetch(workspaceUrl, {
       method: 'HEAD',
+      redirect: 'manual',
       signal: AbortSignal.timeout(dnsTimeoutMs),
     });
 

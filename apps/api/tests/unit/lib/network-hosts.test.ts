@@ -29,6 +29,10 @@ const FORBIDDEN = [
   '::ffff:a9fe:a9fe',
   '[fd00:ec2::254]',
   '100.100.100.200', // Alibaba metadata
+  '168.63.129.16', // Azure WireServer
+  'fd20:ce::254', // GCE metadata over IPv6
+  '[fd20:ce::254]',
+  'computemetadata.metadata.google.internal',
   'metadata',
   'metadata.google.internal',
   'METADATA.GOOGLE.INTERNAL.',
@@ -122,6 +126,12 @@ const PUBLIC = [
   '[2a00:1450:4001::200e]',
   '::ffff:8.8.8.8',
   'xn--bcher-kva.example',
+  // Names that resolve to private addresses look public: the classifier sees names, not DNS
+  // answers. On a self-hosted box the egress fence (scripts/selfhost/egress-fence.ts) is what
+  // refuses the connection; these are pinned so nobody assumes the classifier covers DNS.
+  'localtest.me',
+  '127.0.0.1.nip.io',
+  '169.254.169.254.nip.io',
 ];
 
 describe('classifyHost', () => {
@@ -240,6 +250,54 @@ describe('guardedFetch', () => {
     await expect(guardedFetch('https://a.example.com/', {}, { fetchFn })).rejects.toMatchObject({
       reason: 'invalid_url',
     });
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['plain HTTP to a public host', 'http://b.example.com/'],
+    ['userinfo', 'https://u:p@b.example.com/'],
+    ['a file URL', 'file:///etc/passwd'],
+    ['a forbidden host', 'https://[fd20:ce::254]/'],
+  ])('refuses a hop to %s', async (_name, location) => {
+    const fetchFn = vi.fn(async () => redirect(302, location));
+    await expect(guardedFetch('https://a.example.com/', {}, { fetchFn })).rejects.toBeInstanceOf(
+      OutboundRequestRefusedError
+    );
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps GET on a 301 and 302', async () => {
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce(redirect(301, 'https://a.example.com/b'))
+      .mockResolvedValueOnce(redirect(302, 'https://a.example.com/c'))
+      .mockResolvedValueOnce(new Response('ok'));
+    await guardedFetch('https://a.example.com/a', { method: 'GET' }, { fetchFn });
+    expect((fetchFn.mock.calls[2]?.[1] as RequestInit).method).toBe('GET');
+  });
+
+  it('opted in: a same-origin hop on the private endpoint is followed', async () => {
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce(redirect(307, '/v1/chat/completions'))
+      .mockResolvedValueOnce(new Response('ok'));
+    const res = await guardedFetch(
+      'http://127.0.0.1:11434/v1/chat',
+      { method: 'POST', body: '{}' },
+      { fetchFn, allowPrivateNetwork: true }
+    );
+    expect(await res.text()).toBe('ok');
+    expect(fetchFn.mock.calls[1]?.[0]).toBe('http://127.0.0.1:11434/v1/chat/completions');
+  });
+
+  it.each([
+    ['another loopback port', 'http://127.0.0.1:7001/v1/state'],
+    ['another private host', 'http://10.0.0.8/'],
+  ])('opted in: a hop to %s is refused', async (_name, location) => {
+    const fetchFn = vi.fn(async () => redirect(302, location));
+    await expect(
+      guardedFetch('http://127.0.0.1:11434/v1', {}, { fetchFn, allowPrivateNetwork: true })
+    ).rejects.toMatchObject({ reason: 'host' });
     expect(fetchFn).toHaveBeenCalledTimes(1);
   });
 

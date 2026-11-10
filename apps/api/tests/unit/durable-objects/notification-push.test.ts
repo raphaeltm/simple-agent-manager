@@ -169,6 +169,8 @@ describe('deliverWebPushSubscription', () => {
 
     expect(result).toMatchObject({ kind: 'failure', status: 302 });
     expect(fetcher).toHaveBeenCalledOnce();
+    // The runtime must not follow it either: a mock cannot, so assert what the runtime is told.
+    expect(fetcher.mock.calls[0]?.[1]).toMatchObject({ redirect: 'manual' });
   });
 
   it.each([404, 410])('classifies HTTP %s as a scoped gone subscription', async (status) => {

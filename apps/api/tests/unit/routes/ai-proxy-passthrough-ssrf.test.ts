@@ -22,6 +22,7 @@ vi.mock('../../../src/services/provider-limit-credential-pin', () => ({
 }));
 
 const mockResolveForConsumer = vi.fn();
+const auth = vi.hoisted(() => ({ agentType: 'opencode' }));
 
 vi.mock('drizzle-orm/d1', () => ({ drizzle: () => ({}) }));
 vi.mock('../../../src/db/schema', () => ({}));
@@ -30,7 +31,7 @@ vi.mock('../../../src/services/ai-proxy-shared', () => ({
     userId: 'attacker-user',
     workspaceId: 'ws-attacker',
     projectId: 'proj-attacker',
-    agentType: 'opencode',
+    agentType: auth.agentType,
   })),
   updateAIProxyAgentCredentialAttribution: vi.fn(),
   AIProxyAuthError: class extends Error {
@@ -78,6 +79,7 @@ interface Recorded {
   method: string;
   url: string;
   body: string;
+  headers: IncomingMessage['headers'];
 }
 
 function listen(handler: (req: IncomingMessage, res: ServerResponse, body: string) => void) {
@@ -88,7 +90,7 @@ function listen(handler: (req: IncomingMessage, res: ServerResponse, body: strin
       body += chunk.toString();
     });
     req.on('end', () => {
-      hits.push({ method: req.method ?? '', url: req.url ?? '', body });
+      hits.push({ method: req.method ?? '', url: req.url ?? '', body, headers: req.headers });
       handler(req, res, body);
     });
   });
@@ -194,6 +196,7 @@ afterAll(async () => {
 });
 
 beforeEach(() => {
+  auth.agentType = 'opencode';
   internal.hits.length = 0;
   attacker.hits.length = 0;
   legitimate.hits.length = 0;
@@ -251,6 +254,9 @@ describe('AI proxy passthrough: redirect to an internal address', () => {
     expect(legitimate.hits).toHaveLength(1);
     expect(legitimate.hits[0]?.method).toBe('POST');
     expect(JSON.parse(legitimate.hits[0]?.body ?? '{}')).toMatchObject({ model: 'any-model' });
+    // The attacker's own key went to the attacker's host; it is not forwarded to another origin.
+    expect(attacker.hits[0]?.headers.authorization).toBe('Bearer sk-attacker-own-key');
+    expect(legitimate.hits[0]?.headers.authorization).toBeUndefined();
   });
 
   it('control: a streamed (SSE) response from a public endpoint is still relayed as a stream', async () => {
@@ -283,5 +289,82 @@ describe('AI proxy passthrough: redirect to an internal address', () => {
       credentialId: 'cred-attacker',
       reason: 'host',
     });
+  });
+});
+
+/** Anthropic dialect: an api-key credential with the base URL on the configuration. */
+function anthropicConfigurationWithBaseUrl(baseUrl: string) {
+  mockResolveForConsumer.mockImplementation((_db, _userId, _key, consumer) =>
+    Promise.resolve({
+      consumer,
+      configuration: { settings: { baseUrl, dialect: 'anthropic' } },
+      credential: { id: 'cred-anthropic', secret: { kind: 'api-key', apiKey: 'sk-ant-own' } },
+      source: 'user-attachment',
+    })
+  );
+}
+
+function postTo(path: string) {
+  return app.request(
+    path,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'claude-x', messages: [{ role: 'user', content: 'hi' }] }),
+    },
+    { DATABASE: {}, KV: {}, AI_PROXY_ENABLED: 'true' }
+  );
+}
+
+describe('every passthrough route goes through the guarded fetch', () => {
+  const ROUTES: Array<[string, string, string]> = [
+    ['Anthropic messages', '/ai/proxy/ws-token/anthropic/v1/messages', '/anthropic/v1/messages'],
+    [
+      'Anthropic count_tokens',
+      '/ai/proxy/ws-token/anthropic/v1/messages/count_tokens',
+      '/anthropic/v1/messages/count_tokens',
+    ],
+  ];
+
+  it.each(ROUTES)('%s refuses a redirect to an internal address', async (_name, path, upstream) => {
+    auth.agentType = 'claude-code';
+    attackerRedirect = {
+      status: 307,
+      location: () => `http://127.0.0.1:${portOf(internal.server)}/admin/state`,
+    };
+    anthropicConfigurationWithBaseUrl('https://attacker.test.example/anthropic');
+
+    const res = await postTo(path);
+
+    expect(attacker.hits.map((hit) => hit.url)).toEqual([upstream]);
+    expect(await res.text()).not.toContain(INTERNAL_SECRET);
+    expect(internal.hits).toHaveLength(0);
+    expect(res.status).toBe(502);
+  });
+
+  it.each(ROUTES)('control: %s reaches a public endpoint', async (_name, path) => {
+    auth.agentType = 'claude-code';
+    anthropicConfigurationWithBaseUrl('https://llm.test.example/anthropic');
+
+    const res = await postTo(path);
+
+    expect(res.status).toBe(200);
+    expect(legitimate.hits).toHaveLength(1);
+  });
+
+  it.each([
+    'https://127.0.0.1/anthropic',
+    'https://169.254.169.254/anthropic',
+    'https://localhost/anthropic',
+    'https://minio/anthropic',
+    'https://[::1]/anthropic',
+  ])('never calls a configuration base URL override on %s', async (baseUrl) => {
+    auth.agentType = 'claude-code';
+    anthropicConfigurationWithBaseUrl(baseUrl);
+
+    const res = await postTo('/ai/proxy/ws-token/anthropic/v1/messages');
+
+    expect(res.status).toBe(401);
+    expect(routedFetch).not.toHaveBeenCalled();
   });
 });

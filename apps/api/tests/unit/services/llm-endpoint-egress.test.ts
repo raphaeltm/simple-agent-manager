@@ -158,6 +158,30 @@ describe('every endpoint caller refuses a redirect to the metadata server', () =
   });
 });
 
+describe('every endpoint caller follows a validated redirect hop', () => {
+  it.each(CALLERS)('%s', async (_name, call) => {
+    await configureEndpoint({ baseUrl: 'https://llm.example.com/v1', model: 'm' });
+    fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(null, {
+          status: 307,
+          headers: { Location: 'https://llm2.example.com/v1/chat/completions' },
+        })
+      )
+      .mockImplementation(async () => Response.json(COMPLETION));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await call().catch(() => undefined);
+
+    // The hop was taken by the guard (a stub never follows), so it was validated and sent.
+    expect(requestedUrls().slice(0, 2)).toEqual([
+      'https://llm.example.com/v1/chat/completions',
+      'https://llm2.example.com/v1/chat/completions',
+    ]);
+  });
+});
+
 describe('a private-network endpoint is an explicit admin opt-in', () => {
   it('is refused with an actionable reason, without any request, when not opted in', async () => {
     await configureEndpoint({ baseUrl: 'http://127.0.0.1:11434/v1', model: 'llama' });
