@@ -9,7 +9,8 @@ import { platformCapabilitiesQueryOptions } from '../lib/query-options/platform-
 /**
  * Which platform services this installation has, so entry points that cannot work here
  * (voice input, server read-aloud) are hidden. Every surface shares one cached query; until
- * it answers, every service is assumed present, which is how the app behaved before.
+ * it answers, and while it fails, every service is assumed present, which is how the app
+ * behaved before. The project route prefetches it (lib/project-route-prefetch.ts).
  */
 export function usePlatformCapabilities(): PlatformCapabilities {
   const query = useQuery(platformCapabilitiesQueryOptions());

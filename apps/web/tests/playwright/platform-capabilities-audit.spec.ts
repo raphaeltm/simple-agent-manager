@@ -22,6 +22,9 @@
  *     `/api/tts/synthesize` with server TTS, or the browser's `speechSynthesis.speak`
  *     without it.
  *
+ * Screenshots differ only by the mic: the read-aloud button looks the same on the server and
+ * browser paths, so step 4's click assertion is what tells the TTS configurations apart.
+ *
  * Data includes a 200+ character agent message with a long unbroken URL, at the project's
  * mobile (375x667) and desktop (1280x800) viewports. `assertNoOverflow` also walks clipped
  * overflow (rule 56).
@@ -366,6 +369,11 @@ test.describe('Platform capabilities — endpoint failure', () => {
     await page.route('**/api/config/platform-capabilities', (route: Route) =>
       route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"boom"}' })
     );
+    const ttsRequests: string[] = [];
+    await page.route('**/api/tts/**', async (route: Route) => {
+      ttsRequests.push(`${route.request().method()} ${new URL(route.request().url()).pathname}`);
+      // Never answered: the assertion is about which path the click takes, not playback.
+    });
     const answered = page.waitForResponse('**/api/config/platform-capabilities');
     await page.goto(`/projects/${PROJECT_ID}/chat/session-1`);
     await answered;
@@ -375,5 +383,10 @@ test.describe('Platform capabilities — endpoint failure', () => {
     await expect(page.getByRole('button', { name: 'Read aloud' })).toHaveCount(1);
     await assertNoOverflow(page);
     await screenshot(page, `platform-capabilities-endpoint-error-${viewportName}`);
+    // The server read-aloud path stays offered, not only the browser fallback's button.
+    await page.getByRole('button', { name: 'Read aloud' }).click();
+    await expect
+      .poll(() => ttsRequests.some((r) => r.startsWith('POST /api/tts/synthesize')))
+      .toBe(true);
   });
 });

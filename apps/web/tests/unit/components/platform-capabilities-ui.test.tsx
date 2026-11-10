@@ -246,6 +246,22 @@ describe.each(VOICE_SURFACES)('voice input in the $name', ({ render: build, mic,
   });
 });
 
+describe('comment composer text width', () => {
+  it('reserves room for the mic only when the mic is offered', async () => {
+    serveCapabilities(SELF_HOST_STT_ONLY_OFF);
+    render(commentComposer());
+    await capabilitiesSettled();
+    expect(screen.getByRole('textbox')).not.toHaveClass('pr-14');
+  });
+
+  it('keeps the mic clear of dictated text when it is offered', async () => {
+    serveCapabilities(ASSUMED_PLATFORM_CAPABILITIES);
+    render(commentComposer());
+    await capabilitiesSettled();
+    expect(screen.getByRole('textbox')).toHaveClass('pr-14');
+  });
+});
+
 describe('task summary read-aloud', () => {
   function openTruncatedSummary() {
     let observed: ResizeObserverCallback | null = null;
@@ -286,10 +302,35 @@ describe('task summary read-aloud', () => {
   });
 });
 
+describe('after a failed capabilities read', () => {
+  it('keeps every service offered, then follows the real answer once a refetch succeeds', async () => {
+    serveCapabilities({ error: 'INTERNAL_ERROR' }, 500);
+    render(composer());
+    await waitFor(() =>
+      expect(client.getQueryCache().getAll()[0]?.state.status).toBe('error')
+    );
+    // Fail open: the mic stays while the answer is unknown.
+    expect(screen.getByTestId('voice-button')).toBeInTheDocument();
+
+    serveCapabilities(SELF_HOST);
+    await act(async () => {
+      await client.refetchQueries();
+    });
+    await capabilitiesSettled();
+    expect(screen.queryByTestId('voice-button')).toBeNull();
+    expect(screen.getByRole('combobox')).toBeInTheDocument();
+  });
+});
+
 describe('getPlatformCapabilities', () => {
   it('assumes every service when the API predates the endpoint', async () => {
     serveCapabilities({ error: 'NOT_FOUND' }, 404);
     await expect(getPlatformCapabilities()).resolves.toEqual(ASSUMED_PLATFORM_CAPABILITIES);
+  });
+
+  it('rejects on any other failure, so the query retries instead of caching a guess', async () => {
+    serveCapabilities({ error: 'INTERNAL_ERROR' }, 500);
+    await expect(getPlatformCapabilities()).rejects.toThrow();
   });
 
   it('reads known boolean fields only', async () => {

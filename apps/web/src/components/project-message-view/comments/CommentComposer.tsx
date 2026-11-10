@@ -174,8 +174,9 @@ export function CommentComposer({
               onCancel();
             }
           }}
-          // pr-14 reserves the mic's footprint so dictated text never runs under it.
-          className="pr-14 text-sm transition-colors"
+          // pr-14 reserves the mic's footprint so dictated text never runs under it; without
+          // the mic the text keeps the full width.
+          className={`${speechToText ? 'pr-14 ' : ''}text-sm transition-colors`}
           // Inline: both properties lose the Tailwind cascade to the base class's
           // `resize-y` / `border-border-default`. `resize` is off because the mic
           // overlay sits exactly on the native resize grip.

@@ -1,4 +1,4 @@
-import { request } from './client';
+import { ApiClientError, request } from './client';
 
 /** Mirrors `PublicPlatformCapabilities` in apps/api/src/services/platform-capabilities.ts. */
 export interface PlatformCapabilities {
@@ -16,7 +16,12 @@ export const ASSUMED_PLATFORM_CAPABILITIES: PlatformCapabilities = Object.freeze
   textToSpeech: true,
 });
 
-/** Which platform services this installation has (`GET /api/config/platform-capabilities`). */
+/**
+ * Which platform services this installation has (`GET /api/config/platform-capabilities`).
+ * An API that predates the endpoint (404) has every service, so that is an answer. Any other
+ * failure throws: the hook keeps assuming every service meanwhile, and the query retries
+ * instead of caching a guess for its whole stale time.
+ */
 export async function getPlatformCapabilities(signal?: AbortSignal): Promise<PlatformCapabilities> {
   try {
     const result = await request<Partial<PlatformCapabilities>>(
@@ -31,7 +36,9 @@ export async function getPlatformCapabilities(signal?: AbortSignal): Promise<Pla
     }
     return capabilities;
   } catch (error) {
-    if (signal?.aborted) throw error;
-    return ASSUMED_PLATFORM_CAPABILITIES;
+    if (error instanceof ApiClientError && error.status === 404) {
+      return ASSUMED_PLATFORM_CAPABILITIES;
+    }
+    throw error;
   }
 }

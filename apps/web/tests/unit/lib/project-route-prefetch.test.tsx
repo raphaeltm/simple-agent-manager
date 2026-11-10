@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   getProject: vi.fn(),
   listChatSessions: vi.fn(),
   getChatSession: vi.fn(),
+  getPlatformCapabilities: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
@@ -13,6 +14,11 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   getProject: mocks.getProject,
   listChatSessions: mocks.listChatSessions,
   getChatSession: mocks.getChatSession,
+}));
+
+vi.mock('../../../src/lib/api/platform-capabilities', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api/platform-capabilities')>()),
+  getPlatformCapabilities: mocks.getPlatformCapabilities,
 }));
 
 import { CHAT_SESSION_LIST_LIMIT } from '../../../src/lib/chat-query-config';
@@ -23,6 +29,7 @@ import {
   takeRoutePrefetchedTranscript,
 } from '../../../src/lib/project-route-prefetch';
 import { chatQueryKeys, projectQueryKeys } from '../../../src/lib/query-options';
+import { platformCapabilitiesQueryKeys } from '../../../src/lib/query-options/platform-capabilities';
 
 const SESSIONS = [{ id: 'session-1', topic: 'First', status: 'active' }];
 
@@ -43,6 +50,7 @@ beforeEach(() => {
   mocks.getProject.mockResolvedValue({ id: 'proj-1', name: 'Project' });
   mocks.listChatSessions.mockResolvedValue({ sessions: SESSIONS, total: 1 });
   mocks.getChatSession.mockResolvedValue({ session: { id: 'session-1' }, messages: [] });
+  mocks.getPlatformCapabilities.mockResolvedValue({ speechToText: false, textToSpeech: false });
 });
 
 describe('prefetchProjectRoute', () => {
@@ -68,6 +76,9 @@ describe('prefetchProjectRoute', () => {
     expect(
       client.getQueryState(initialChatSessionListQueryOptions('user-1', 'proj-1').queryKey)
     ).toBeDefined();
+    // The composer's voice-input decision is in flight before the composer mounts.
+    expect(mocks.getPlatformCapabilities).toHaveBeenCalledTimes(1);
+    expect(client.getQueryState(platformCapabilitiesQueryKeys.all())).toBeDefined();
   });
 
   it('starts the session list but no transcript for the bare chat route and the project index', () => {
