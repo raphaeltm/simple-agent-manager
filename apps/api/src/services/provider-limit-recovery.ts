@@ -1,6 +1,7 @@
 /** Owner recovery and the durable needs-attention state for provider waits. */
 import type * as schema from '../db/schema';
 import type { Env } from '../env';
+import { log } from '../lib/logger';
 import { errors } from '../middleware/error';
 import * as projectData from './project-data';
 import { parseProviderLimitWait, type ProviderLimitWait } from './provider-limit-policy';
@@ -114,6 +115,7 @@ export async function resumeProviderLimitTask(env: Env, task: schema.Task, owner
     ...wait,
     phase: 'released',
     attempts: 1,
+    ownerOverride: undefined,
     scheduleKey: `provider-limit:${task.id}:resume:${crypto.randomUUID()}`,
   });
   const results = await env.DATABASE.batch([
@@ -185,7 +187,9 @@ export function canStartProviderLimitTaskAnyway(
     task.admissionState === 'provider_limit_waiting' &&
     START_ANYWAY_TASK_STATUSES.includes(task.status) &&
     wait?.origin === 'admission' &&
-    wait.phase === 'waiting'
+    wait.phase === 'waiting' &&
+    // The override is scoped to one credential; a wait with none has nothing to scope it to.
+    wait.credentialKey !== null
   );
 }
 
@@ -201,11 +205,30 @@ export async function startProviderLimitTaskAnyway(
   task: schema.Task,
   ownerUserId: string
 ) {
-  if (task.userId !== ownerUserId)
+  const context = { taskId: task.id, projectId: task.projectId, callerUserId: ownerUserId };
+  if (task.userId !== ownerUserId) {
+    log.warn('provider_limit.start_anyway_rejected', {
+      ...context,
+      ownerUserId: task.userId,
+      reason: 'not_owner',
+      action: 'rejected',
+    });
     throw errors.forbidden('Only the task owner can start this task anyway');
+  }
   const wait = parseProviderLimitWait(task.providerLimitWaitJson);
-  if (!canStartProviderLimitTaskAnyway(task, wait))
+  const observed = wait; // un-narrowed copy for the rejection log
+  if (!canStartProviderLimitTaskAnyway(task, wait)) {
+    log.warn('provider_limit.start_anyway_rejected', {
+      ...context,
+      status: task.status,
+      admissionState: task.admissionState,
+      waitOrigin: observed?.origin ?? null,
+      waitPhase: observed?.phase ?? null,
+      reason: 'not_waiting_before_start',
+      action: 'rejected',
+    });
     throw errors.conflict('This task is not waiting on a provider limit before it starts');
+  }
   const now = Date.now();
   const overridden = JSON.stringify({
     ...wait,
@@ -229,26 +252,55 @@ export async function startProviderLimitTaskAnyway(
     .run();
   if (!cleared.meta.changes)
     throw errors.conflict('Task changed while starting; refresh and try again');
+  let nudged: boolean;
   try {
-    if (!(await nudgeTaskRunnerDO(env, task.id, 'Owner started despite provider limit')))
-      throw errors.conflict('The task runner is unavailable');
+    nudged = await nudgeTaskRunnerDO(env, task.id, 'Owner started despite provider limit');
   } catch (error) {
-    // Keep the hold (and its scheduled retry) rather than strand a task nobody will run.
+    // Ambiguous: the runner may already have acted on the override, so keep it rather than
+    // re-impose a hold on a task that could be provisioning. Its pending alarm still honours
+    // the override when it fires.
+    log.error('provider_limit.start_anyway_nudge_failed', {
+      ...context,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw errors.conflict('Start accepted, but the task runner did not confirm; refresh shortly');
+  }
+  if (!nudged) {
+    // The runner definitively has nothing to run: keep the hold (and its scheduled retry)
+    // rather than strand a task nobody will start.
     await env.DATABASE.prepare(
       `UPDATE tasks SET provider_limit_wait_json=?,admission_state='provider_limit_waiting',admission_reason=?,admission_next_retry_at=?
-       WHERE id=? AND provider_limit_wait_json IS ?`
+       WHERE id=? AND project_id=? AND user_id=? AND status IN ('queued','delegated')
+       AND admission_state IS NULL AND provider_limit_wait_json IS ?`
     )
       .bind(
         task.providerLimitWaitJson,
         wait.reason,
         new Date(wait.nextRetryAt).toISOString(),
         task.id,
+        task.projectId,
+        ownerUserId,
         overridden
       )
       .run();
-    throw error;
+    throw errors.conflict('The task runner is unavailable');
   }
-  if (task.chatSessionId)
-    await projectData.syncProviderLimitAttention(env, task.projectId, task.id, task.chatSessionId);
+  log.info('provider_limit.start_anyway_granted', {
+    ...context,
+    credentialKey: wait.credentialKey,
+    resetsAt: wait.resetsAt,
+    action: 'granted',
+  });
+  if (task.chatSessionId) {
+    // Best effort: the start already happened, so a failed attention sync must not 500.
+    await projectData
+      .syncProviderLimitAttention(env, task.projectId, task.id, task.chatSessionId)
+      .catch((error: unknown) =>
+        log.warn('provider_limit.start_anyway_attention_sync_failed', {
+          ...context,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      );
+  }
   return { status: 'starting' as const, taskId: task.id };
 }

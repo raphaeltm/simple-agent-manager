@@ -19,6 +19,7 @@ import { assertProviderLimitCredentialPin } from '../../src/services/provider-li
 import { newProviderLimitWait } from '../../src/services/provider-limit-policy';
 import { cancelTask } from '../../src/services/cancel-task';
 import {
+  canStartProviderLimitTaskAnyway,
   resumeProviderLimitTask,
   startProviderLimitTaskAnyway,
 } from '../../src/services/provider-limit-recovery';
@@ -586,6 +587,53 @@ describe('provider admission through the TaskRunner alarm', () => {
       ).toEqual({ admission_state: 'provider_limit_waiting', value: task.providerLimitWaitJson });
     });
 
+    it('a start anyway landing while a hold alarm is mid-flight is not overwritten by the old retry', async () => {
+      const reset = holdWithLiveWindow();
+      const run = runner();
+      await run.runner.alarm();
+      expect(run.alarm()).toBeGreaterThan(reset);
+      // Hold the next alarm inside its credential lookup: the load-bearing midpoint.
+      let release!: () => void;
+      vi.mocked(getSelectedAgentCredentialReference).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            release = () => resolve('cc_credentials:quota-key');
+          })
+      );
+      const inFlight = run.runner.alarm();
+      await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+      const { task } = await heldTask();
+      await startProviderLimitTaskAnyway(fixture.rc.env, task, 'user-1');
+      expect(run.alarm()).toBe(Date.now());
+      release();
+      await inFlight;
+      // Without the re-read the stale branch re-armed the alarm at the old reset.
+      expect(run.alarm()).toBeLessThanOrEqual(Date.now());
+      await run.runner.alarm();
+      expect(run.state().currentStep).not.toBe('node_selection');
+    });
+
+    it('an override does not survive a block: switching back to the old account still needs review', async () => {
+      holdWithLiveWindow();
+      const run = runner();
+      await run.runner.alarm();
+      const { task } = await heldTask();
+      await startProviderLimitTaskAnyway(fixture.rc.env, task, 'user-1');
+      vi.mocked(getSelectedAgentCredentialReference).mockResolvedValueOnce(
+        'cc_credentials:other-account'
+      );
+      await run.runner.alarm();
+      const blocked = fixture.sqlite
+        .prepare("SELECT provider_limit_wait_json AS value FROM tasks WHERE id='task-1'")
+        .get() as { value: string };
+      expect(JSON.parse(blocked.value)).toMatchObject({ phase: 'blocked' });
+      expect(JSON.parse(blocked.value).ownerOverride).toBeUndefined();
+      // Back on the original account, the blocked wait is not silently bypassed.
+      await run.runner.nudge('switched back');
+      await run.runner.alarm();
+      expect(run.state().currentStep).toBe('node_selection');
+    });
+
     it('cancelling a held task means its reset alarm provisions nothing', async () => {
       const reset = holdWithLiveWindow();
       const run = runner();
@@ -607,5 +655,47 @@ describe('provider admission through the TaskRunner alarm', () => {
         status: 'cancelled',
       });
     });
+  });
+});
+
+describe('canStartProviderLimitTaskAnyway', () => {
+  const base = newProviderLimitWait({
+    taskId: 'task-1',
+    origin: 'admission',
+    incidentId: 'admission:task-1:1',
+    credentialKey: 'cc_credentials:quota-key',
+    previous: null,
+    now: 1_000,
+    resetsAt: 1_000 + 60 * 60_000,
+  });
+  it.each([
+    ['queued admission wait', 'queued', 'provider_limit_waiting', base, true],
+    ['delegated admission wait', 'delegated', 'provider_limit_waiting', base, true],
+    ['blocked wait', 'queued', 'provider_limit_blocked', { ...base, phase: 'blocked' }, false],
+    [
+      'callback-origin wait',
+      'queued',
+      'provider_limit_waiting',
+      { ...base, origin: 'callback' },
+      false,
+    ],
+    ['started task', 'in_progress', 'provider_limit_waiting', base, false],
+    ['sleeping task', 'sleeping', 'provider_limit_waiting', base, false],
+    ['released hold', 'queued', null, { ...base, phase: 'released' }, false],
+    ['no wait', 'queued', 'provider_limit_waiting', null, false],
+    [
+      'wait with no credential',
+      'queued',
+      'provider_limit_waiting',
+      { ...base, credentialKey: null },
+      false,
+    ],
+  ] as const)('%s -> %s', (_name, status, admissionState, wait, expected) => {
+    expect(
+      canStartProviderLimitTaskAnyway(
+        { status, admissionState },
+        wait as Parameters<typeof canStartProviderLimitTaskAnyway>[1]
+      )
+    ).toBe(expected);
   });
 });
