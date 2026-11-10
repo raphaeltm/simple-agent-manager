@@ -57,8 +57,9 @@ Required pattern:
 ## Modifying Cloud-Init
 
 1. Edit `packages/cloud-init/src/template.ts`
-2. Update variable wiring in `packages/cloud-init/src/generate.ts` when needed
-3. Test cloud-init generation through the workspace provisioning flow
+2. Update variable types in `src/variables.ts`, validation in `src/validate.ts` and wiring in `src/generate.ts` when needed
+3. Ingress-mode blocks (Origin CA direct mode, Cloudflare Tunnel mode) live in `src/template-ingress.ts` and render only for their mode; keep user-data under the 32 KB Hetzner limit
+4. Test cloud-init generation through the workspace provisioning flow
 
 ### Runcmd Interpreter Contract
 
