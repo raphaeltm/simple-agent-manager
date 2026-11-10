@@ -17,6 +17,15 @@ export default {
         const body = await res.text();
         return Response.json({ target, status: res.status, ms: Date.now() - started, body: body.slice(0, 300) });
       }
+      if (mode === 'fwdauth') {
+        // Caddy forward_auth target: decide auth in the Worker, return the node's loopback upstream
+        // in a header so Caddy proxies the WebSocket itself (data path bypasses celld).
+        const node = request.headers.get('x-forwarded-host')?.split('.')[0]?.replace(/^ws-/, '');
+        const ports = JSON.parse(env.NODE_PORTS);
+        if (request.headers.get('x-spike-auth') !== 'let-me-in' && !(request.headers.get('x-forwarded-uri') || '').includes('auth=let-me-in')) return new Response('unauthorized', { status: 401 });
+        if (!ports[node]) return new Response('unknown node', { status: 404 });
+        return new Response(null, { status: 200, headers: { 'X-Node-Upstream': `127.0.0.1:${ports[node]}` } });
+      }
       if (mode === 'localws') {
         // Worker-terminated WebSocket (no upstream): does celld complete a handshake at all?
         const [client, server] = Object.values(new WebSocketPair()); server.accept();

@@ -1,0 +1,8 @@
+   151ms health null -> 200
+  6167ms stream ended after 6059 ms, 12 lines: ERR:UND_ERR_SOCKET
+  6186ms health 200 -> 502
+  6672ms stream ended after 4 ms, 0 lines: status 502
+  7176ms stream ended after 4 ms, 0 lines: status 502
+  7244ms health 502 -> 200 (outage 1057 ms)
+ 25025ms ws ended after 24921 ms, 6 msgs: close code=1000 reason="probe-end" clean=true
+ 25410ms probe done

@@ -1,0 +1,15 @@
+== localhost:8787 (dev)
+http://127.0.0.1:9201/health -> 200
+http://127.0.0.2:9104/ -> 200
+http://[::1]:9105/ -> 200
+http://172.18.0.1:9102/ -> 200
+http://172.17.0.3:9103/ -> Error: fetch: error sending request for url (http://172.17.0.3:9103/)
+== localhost:8790 (production-mode)
+http://127.0.0.1:9201/health -> 200
+http://127.0.0.2:9104/ -> 200
+http://[::1]:9105/ -> 200
+http://172.18.0.1:9102/ -> 200
+http://172.17.0.3:9103/ -> Error: fetch: error sending request for url (http://172.17.0.3:9103/)
+localhost:8787 http://172.17.0.4:9103/ (eth0, RFC1918) -> 200
+localhost:8790 http://172.17.0.4:9103/ (eth0, RFC1918) -> 200
+(172.17.0.3 above was this host's eth0 address before the workspace restart; it no longer exists)

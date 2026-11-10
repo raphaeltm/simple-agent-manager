@@ -1,0 +1,11 @@
+== forward_auth + Caddy-proxied WS, authorized
+2026-11-10T13:31:44.620Z open hello from node-b
+2026-11-10T13:31:44.626Z text echo ok = true
+2026-11-10T13:31:44.630Z binary echo ok = true
+2026-11-10T13:31:44.844Z server-initiated close -> {"code":4001,"reason":"server-chose-4001","wasClean":true}
+2026-11-10T13:31:44.879Z client-initiated close -> {"code":4002,"reason":"","wasClean":true}
+== no auth (expect 401 / ws error)
+2026-11-10T13:31:45.175Z FAILED ws error 
+curl GET no-auth -> 401
+== unknown node
+curl GET unknown node -> 404

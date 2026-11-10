@@ -1,5 +1,6 @@
-# One public port (443) on the box: Caddy terminates TLS for both the Worker (celld) and the
-# node tunnel (frp over WebSocket at frp's fixed path /~!frp).
+# One public port (443) on the box: Caddy terminates TLS for the Worker (celld), the node tunnel
+# (frp over WebSocket at frp's fixed path /~!frp), and (experiment) node WebSockets proxied by
+# Caddy itself after the Worker authorizes them via forward_auth.
 {
 	local_certs
 	skip_install_trust
@@ -11,4 +12,14 @@ box.spike.test:443 {
 	@frp path /~!frp
 	reverse_proxy @frp 127.0.0.1:7000
 	reverse_proxy 127.0.0.1:8787
+}
+
+# Experiment: ws-{node}.spike.test — Worker decides auth and the upstream, Caddy carries the bytes.
+*.spike.test:443 {
+	tls internal
+	forward_auth 127.0.0.1:8787 {
+		uri /fwdauth
+		copy_headers X-Node-Upstream
+	}
+	reverse_proxy {http.request.header.X-Node-Upstream}
 }

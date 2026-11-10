@@ -1,0 +1,26 @@
+### production-mode celld 0.6.2 (celld --bucket s3://celld-fleet on local pgsty/minio), Worker deployed with celld deploy
+== Q1 egress
+{"target":"http://127.0.0.1:9201/health","status":200,"ms":19,"body":"{\"host\":\"127.0.0.1:9201\",\"node\":\"
+
+{"error":"Error: fetch: error sending request for url (http://[::1]:9105/)"}
+
+{"error":"Error: fetch: error sending request for url (http://172.18.0.1:9102/)"}
+
+{"error":"Error: fetch: error sending request for url (http://172.17.0.3:9103/)"}
+
+== Q2 raw passthrough (SAM shape)
+2026-11-10T13:29:51.635Z FAILED ws error 
+== Q2 rewrap
+2026-11-10T13:29:51.861Z FAILED ws error 
+== Q2 pair bridge without waitUntil
+2026-11-10T13:30:07.057Z FAILED timeout waiting for message
+== Q2 pair bridge + waitUntil
+2026-11-10T13:30:07.305Z open hello from node-b
+2026-11-10T13:30:07.311Z text echo ok = true
+2026-11-10T13:30:07.316Z binary echo ok = true
+2026-11-10T13:30:07.324Z server-initiated close -> {"code":4001,"reason":"server-chose-4001","wasClean":true}
+2026-11-10T13:30:07.344Z client-initiated close -> {"code":4002,"reason":"client-chose-4002","wasClean":true}
+== Q4 Host override on plain fetch
+{"host":"node-b.nodes.internal","node":"node-b","ok":true,"spikeNode":"node-b","xff":"127.0.0.1"}
+
+== production-mode celld (default CELLD_FETCH_TIMEOUT_S), Worker /direct/9201 drip 28 x 5 s: http=200 total=120.003476s curl-exit=18 lines=24

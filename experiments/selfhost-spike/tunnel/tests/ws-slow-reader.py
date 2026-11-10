@@ -4,8 +4,10 @@
 import base64, os, socket, struct, sys, time
 host, port, path, mib, pause = sys.argv[1], int(sys.argv[2]), sys.argv[3], int(sys.argv[4]), float(sys.argv[5])
 s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 16384); s.connect((host, port))
+if port == 443:
+    import ssl; ctx = ssl.create_default_context(cafile=os.environ.get('SPIKE_CA')); s = ctx.wrap_socket(s, server_hostname=host)
 key = base64.b64encode(os.urandom(16)).decode()
-s.sendall(f"GET {path} HTTP/1.1\r\nHost: {host}:{port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n".encode())
+s.sendall(f"GET {path} HTTP/1.1\r\nHost: {host}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n".encode())
 buf = b''
 while b'\r\n\r\n' not in buf: buf += s.recv(4096)
 head, buf = buf.split(b'\r\n\r\n', 1); print(head.split(b'\r\n')[0].decode(), flush=True)

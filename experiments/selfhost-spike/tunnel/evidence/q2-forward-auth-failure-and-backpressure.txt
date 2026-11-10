@@ -1,0 +1,10 @@
+== Caddy-proxied WS (forward_auth), SIGKILL frpc at ~3 s
+3189ms close code=1006 clean=false after 4 msgs
+== same via Worker bridge, for comparison
+20111ms still open after 20s with 3 msgs (no close delivered)
+== Caddy-proxied WS, slow reader: 256 MiB flood, reader paused 20 s
+HTTP/1.1 101 Switching Protocols
+requested flood 256 MiB; not reading for 20.0s
+text: b'flood-done'
+received 268435456 of 268435456 bytes (256.00 MiB) in 31.3s
+2026/11/10 13:32:55 flood 256 MiB written in 31.222161252s

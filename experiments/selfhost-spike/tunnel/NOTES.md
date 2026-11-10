@@ -62,3 +62,10 @@ All rejections come from the Login/NewProxy plugin with a reason frpc logs:
 - proxy name not prefixed with own node id → reject; garbage token → Login reject; port 22 → reject
 - node-b kept serving throughout. A second session with node-a's own valid token claiming 17001 while node-a holds it → frps "port already used" (no hijack of a live slot).
 - frpc does NOT verify frps's certificate by default: frps here has no cert configured (auto self-signed) and frpc connected with no CA. Must set `transport.tls.trustedCaFile` or `useSystemCa = true` (frp source `client/connector.go`, `NewClientTLSConfigWithSystemCA`).
+
+## Q6/Q7 and design probe (verified) — details in FINDINGS.md and evidence/q6-*, q7-*, prod-mode-*
+- wss via Caddy:443 for all three nodes; frps bound 127.0.0.1:7000; no-CA frpc connects unverified; wrong CA rejected.
+- Failure table: frpc 1.05 s, frps 6.7 s, celld 1.4 s, Caddy 2.4 s, 20 s partition 21.5 s (hangs). Bridged WS never closes on tunnel loss (also on prod-mode celld); celld fires neither close nor error upstream.
+- Production-mode celld (`celld --bucket` on pgsty/minio + `celld deploy`): egress, WS raw/rewrap/pair results and the 120 s cap identical to `celld dev`.
+- Caddy `forward_auth` → Worker `/fwdauth` returns `X-Node-Upstream`, Caddy `reverse_proxy {http.request.header.X-Node-Upstream}`: WS works, 401/404 enforced, close 1006 within ~0.2 s of frpc kill, backpressure intact (256 MiB flood blocked the node writer 31 s).
+- vhost WebSocket fails: celld ignores custom Host on upgrade fetches (frps 404); `*.localhost` does not resolve in celld.
