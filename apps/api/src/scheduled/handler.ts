@@ -12,6 +12,7 @@ import {
   runLifecycleLatencyDailyEvaluation,
   runLifecycleLatencyWatchdog,
 } from '../services/lifecycle-latency';
+import { runNodeTunnelCleanupSweep } from '../services/node-tunnel-cleanup';
 import { isOperationalLoopEnabled } from '../services/operational-kill-switch';
 import { checkProvisioningTimeouts } from '../services/timeout';
 import { migrateOrphanedWorkspaces } from '../services/workspace-migration';
@@ -147,6 +148,11 @@ export async function scheduled(
   const terminalNodeLifecycleRepair = await sweeps.isolate('terminal_node_lifecycle_repair', () =>
     runTerminalNodeLifecycleRepair(env)
   );
+  // After node teardown: releases tunnels of incarnations torn down this tick and retries
+  // any pending Cloudflare tunnel/DNS deletion (services/node-tunnel-cleanup.ts).
+  const nodeTunnelCleanup = await sweeps.isolate('node_tunnel_cleanup', () =>
+    runNodeTunnelCleanupSweep(env)
+  );
   const providerOrphans = await sweeps.isolate('provider_orphan_reconciliation', () =>
     runProviderOrphanReconciliation(env)
   );
@@ -272,6 +278,9 @@ export async function scheduled(
     lifetimeNodesDestroyed: nodeCleanup?.lifetimeDestroyed,
     lifetimeNodesSkipped: nodeCleanup?.lifetimeSkipped,
     nodeCleanupErrors: nodeCleanup?.errors,
+    nodeTunnelsReleased: nodeTunnelCleanup?.released,
+    nodeTunnelCleanupsAttempted: nodeTunnelCleanup?.attempted,
+    nodeTunnelsCleaned: nodeTunnelCleanup?.cleaned,
     orphanedWorkspacesFlagged: nodeCleanup?.orphanedWorkspacesFlagged,
     orphanedNodesDestroyed: nodeCleanup?.orphanedNodesDestroyed,
     orphanedNodesSkipped: nodeCleanup?.orphanedNodesSkipped,
