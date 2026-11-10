@@ -12,6 +12,7 @@ import {
   resolveCloudflareWorkersAiTarget,
   resolveOpenAICompatibleTarget,
 } from '../../../services/llm-chat-target';
+import { aiGatewayOnlyHeaders } from '../../../services/platform-capabilities';
 import { buildAnthropicGatewayUrl } from '../agent-loop-helpers';
 
 /** Provider ID of the OpenAI-compatible Workers AI route; also its providerOptions key. */
@@ -57,7 +58,7 @@ export async function resolveOperatorModel(
       providerId: 'anthropic',
       modelId,
       apiKey: auth.headers['x-api-key'] ?? '',
-      headers: { ...auth.headers, 'cf-aig-metadata': headers.metadata },
+      headers: { ...auth.headers, ...aiGatewayOnlyHeaders(env, { 'cf-aig-metadata': headers.metadata }) },
     });
   }
   if (modelId.startsWith('@cf/') || modelId.startsWith('@hf/')) {

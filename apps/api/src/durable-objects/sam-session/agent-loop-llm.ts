@@ -15,6 +15,7 @@ import {
   LlmUnavailableError,
   resolveCloudflareWorkersAiTarget,
 } from '../../services/llm-chat-target';
+import { aiGatewayOnlyHeaders } from '../../services/platform-capabilities';
 import { getPlatformAgentCredential } from '../../services/platform-credentials';
 import {
   buildAnthropicGatewayUrl,
@@ -168,7 +169,7 @@ async function callAnthropicLLM(
       'x-api-key': apiKey,
       'anthropic-version': SAM_ANTHROPIC_VERSION,
       'content-type': 'application/json',
-      'cf-aig-metadata': aigMetadata,
+      ...aiGatewayOnlyHeaders(env, { 'cf-aig-metadata': aigMetadata }),
     },
     body: JSON.stringify({
       model,

@@ -26,7 +26,7 @@ import {
   LlmUnavailableError,
   resolveWorkersAiChatTarget,
 } from '../services/llm-chat-target';
-import { resolveAiGatewayId } from '../services/platform-capabilities';
+import { aiGatewayOnlyHeaders, resolveAiGatewayId } from '../services/platform-capabilities';
 
 const anthropicContentBlockSchema = v.variant('type', [
   v.object({ type: v.literal('text'), text: v.string() }),
@@ -167,7 +167,7 @@ export async function forwardToAnthropic(
       ...upstreamAuth.headers,
       'anthropic-version': '2023-06-01',
       'Content-Type': 'application/json',
-      'cf-aig-metadata': aigMetadata,
+      ...aiGatewayOnlyHeaders(env, { 'cf-aig-metadata': aigMetadata }),
     },
     body: JSON.stringify(anthropicRequest),
   });
@@ -246,7 +246,7 @@ export async function forwardToOpenAI(
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    'cf-aig-metadata': aigMetadata,
+    ...aiGatewayOnlyHeaders(env, { 'cf-aig-metadata': aigMetadata }),
   };
   if (cfToken) {
     headers['cf-aig-authorization'] = `Bearer ${cfToken}`;
@@ -307,7 +307,7 @@ export async function forwardToOpenAIResponses(
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    'cf-aig-metadata': aigMetadata,
+    ...aiGatewayOnlyHeaders(env, { 'cf-aig-metadata': aigMetadata }),
   };
   if (cfToken) {
     headers['cf-aig-authorization'] = `Bearer ${cfToken}`;

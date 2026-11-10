@@ -200,13 +200,12 @@ describe('resolveWorkersAiChatTarget', () => {
     expect((outcome as LlmUnavailableError).message).toContain('could not be read');
   });
 
-  it('refuses when settings cannot be read and none were ever read here', async () => {
+  it('keeps the pre-endpoint Cloudflare route when an isolate that never read the setting hits an outage', async () => {
     Object.assign(env, CLOUDFLARE);
     breakSettingsReads();
-    vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    await expect(resolveWorkersAiChatTarget(env, 'taskTitle', '@cf/m/x')).rejects.toMatchObject({
-      reason: 'settings_unreadable',
-    });
+    expect((await resolveWorkersAiChatTarget(env, 'taskTitle', '@cf/m/x'))?.kind).toBe(
+      'cloudflare-gateway'
+    );
   });
 
   it('keeps the Cloudflare route through an outage when the last read found no endpoint', async () => {

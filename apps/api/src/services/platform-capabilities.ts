@@ -92,6 +92,18 @@ export function resolveAiGatewayId(env: Pick<Env, 'AI_GATEWAY_ID' | 'CF_ACCOUNT_
 }
 
 /**
+ * AI Gateway request headers (`cf-aig-metadata` attribution with user and workspace ids), or
+ * nothing when the call goes straight to the provider. Only the gateway reads them, so a
+ * direct call to OpenAI or Anthropic must not carry SAM's internal ids.
+ */
+export function aiGatewayOnlyHeaders(
+  env: Pick<Env, 'AI_GATEWAY_ID' | 'CF_ACCOUNT_ID'>,
+  headers: Record<string, string>
+): Record<string, string> {
+  return resolveAiGatewayId(env) ? headers : {};
+}
+
+/**
  * Whether the container bindings are backed by a container runtime.
  *
  * On Cloudflare the container Durable Object bindings always are. Other runtimes may bind the

@@ -106,10 +106,11 @@ function settingsUnreadable(purpose: LlmPurpose, err: unknown): LlmUnavailableEr
 
 /**
  * The configured base URL, read alone: it is a plain setting, so an installation without an
- * endpoint never queries the credential table. When the read fails, the call goes to Cloudflare
- * only if this isolate last saw no endpoint. Otherwise (an endpoint was configured, or nothing
- * has been read yet) it is refused: an admin who pointed SAM at their own endpoint must not have
- * prompts sent to another provider because D1 hiccuped.
+ * endpoint never queries the credential table. When the read fails after this isolate has seen
+ * an endpoint configured, the call is refused: an admin who pointed SAM at their own endpoint
+ * must not have prompts sent to another provider because D1 hiccuped. An isolate that has not
+ * yet read the setting resolves it to its default (no endpoint), exactly as before endpoints
+ * existed, so a Cloudflare install keeps its route through an outage.
  */
 async function readConfiguredBaseUrl(env: Env, purpose: LlmPurpose): Promise<unknown> {
   const db = resolveD1BindingIdentity(env.DATABASE);
@@ -119,7 +120,7 @@ async function readConfiguredBaseUrl(env: Env, purpose: LlmPurpose): Promise<unk
     lastEndpointConfigured.set(db, validLlmBaseUrl(baseUrl));
     return baseUrl;
   } catch (err) {
-    if (lastEndpointConfigured.get(db) === false) return null;
+    if (lastEndpointConfigured.get(db) !== true) return null;
     throw settingsUnreadable(purpose, err);
   }
 }
