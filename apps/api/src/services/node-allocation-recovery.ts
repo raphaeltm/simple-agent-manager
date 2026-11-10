@@ -1,6 +1,7 @@
 import {
   hasAmbiguousLabel,
   type Provider,
+  ProviderError,
   type ProviderRequestContext,
   type VMInstance,
 } from '@simple-agent-manager/providers';
@@ -25,27 +26,49 @@ export class NodeAllocationUncertainError extends Error {
   }
 }
 
+/** Cap for any raw error message we cannot prove is free of provider resource paths. */
+const ATTEMPT_ERROR_MESSAGE_MAX_CHARS = 200;
+
 /**
  * Log-safe description of a failed provisioning attempt, including the provider error an
- * uncertain-allocation wrapper replaced. GCP errors go through the shared sanitizer, which
- * logs the raw Google response server-side and returns the operator-facing hint.
+ * uncertain-allocation wrapper replaced.
+ *
+ * A provisioning failure's cause is almost always a `ProviderError` (from `providerFetch` or the
+ * GCP adapter), whose `message` can embed the provider's raw response — GCP resource paths, zone
+ * URLs, service-account emails. Those must not reach logs (the same reason `node-provisioning.ts`
+ * runs `sanitizeGcpError`). So a `ProviderError` is reduced to its already-safe structured fields
+ * and its message is dropped. A `GcpApiError` keeps going through the sanitizer (operator hint;
+ * raw body stays server-side). Any other `Error` carries only our own internal messages, but is
+ * length-capped as a backstop.
  */
 export function describeProvisioningAttemptFailure(error: unknown): Record<string, unknown> {
-  const describe = (value: unknown) =>
-    value instanceof GcpApiError
-      ? {
-          name: value.name,
-          step: value.step,
-          statusCode: value.statusCode,
-          message: sanitizeGcpError(value, 'node-provisioning-attempt'),
-        }
-      : value instanceof Error
-        ? {
-            name: value.name,
-            statusCode: (value as { statusCode?: unknown }).statusCode,
-            message: value.message,
-          }
-        : { name: typeof value, message: String(value) };
+  const describe = (value: unknown): Record<string, unknown> => {
+    if (value instanceof GcpApiError) {
+      return {
+        name: value.name,
+        step: value.step,
+        statusCode: value.statusCode,
+        message: sanitizeGcpError(value, 'node-provisioning-attempt'),
+      };
+    }
+    if (value instanceof ProviderError) {
+      return {
+        name: value.name,
+        providerName: value.providerName,
+        statusCode: value.statusCode,
+        providerCode: value.providerCode,
+        category: value.category,
+      };
+    }
+    if (value instanceof Error) {
+      return {
+        name: value.name,
+        statusCode: (value as { statusCode?: unknown }).statusCode,
+        message: value.message.slice(0, ATTEMPT_ERROR_MESSAGE_MAX_CHARS),
+      };
+    }
+    return { name: typeof value };
+  };
   const cause = error instanceof Error ? error.cause : undefined;
   return { error: describe(error), ...(cause === undefined ? {} : { cause: describe(cause) }) };
 }
