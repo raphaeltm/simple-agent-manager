@@ -3,11 +3,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ChatMessageResponse } from '../../../src/lib/api';
 
-// Cloudflare behaviour: every platform service present (absent case: platform-capabilities-ui.test.tsx).
-vi.mock('../../../src/hooks/usePlatformCapabilities', () => ({
-  usePlatformCapabilities: () => ({ speechToText: true, textToSpeech: true }),
-}));
-
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   getTtsApiUrl: () => 'https://api.example.test/tts',
@@ -60,7 +55,7 @@ beforeEach(() => {
 
 describe('AcpConversationItemView — user message actions', () => {
   it('gives a persisted user message Info and Copy, but not Read aloud', () => {
-    const { container } = render(<AcpConversationItemView item={rowFor()} />);
+    const { container } = render(<AcpConversationItemView serverTextToSpeech item={rowFor()} />);
     const bubble = container.querySelector<HTMLElement>('.glass-msg-user');
     expect(bubble).not.toBeNull();
     expect(within(bubble!).getByRole('button', { name: 'Message info' })).toBeVisible();
@@ -69,14 +64,16 @@ describe('AcpConversationItemView — user message actions', () => {
   });
 
   it('copies the raw message text, markdown included', async () => {
-    render(<AcpConversationItemView item={rowFor()} />);
+    render(<AcpConversationItemView serverTextToSpeech item={rowFor()} />);
     fireEvent.click(screen.getByRole('button', { name: 'Copy message' }));
     expect(writeText).toHaveBeenCalledWith(RAW_TEXT);
     expect(await screen.findByRole('button', { name: 'Copied' })).toBeVisible();
   });
 
   it('shows the message metadata from Info', () => {
-    render(<AcpConversationItemView item={rowFor({ content: 'Ship it now' })} />);
+    render(
+      <AcpConversationItemView serverTextToSpeech item={rowFor({ content: 'Ship it now' })} />
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Message info' }));
     const dialog = screen.getByRole('dialog', { name: 'Message metadata' });
     expect(dialog).toHaveTextContent('Time:');
@@ -86,7 +83,11 @@ describe('AcpConversationItemView — user message actions', () => {
 
   it('gives a just-sent message both buttons while it is still fading in', () => {
     const { container } = render(
-      <AcpConversationItemView item={rowFor({ id: 'optimistic-1' })} animateUserMessage />
+      <AcpConversationItemView
+        serverTextToSpeech
+        item={rowFor({ id: 'optimistic-1' })}
+        animateUserMessage
+      />
     );
     expect(container.querySelectorAll('.glass-msg-user .char-fade').length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: 'Message info' })).toBeVisible();
@@ -94,14 +95,21 @@ describe('AcpConversationItemView — user message actions', () => {
   });
 
   it('gives SAM-injected context no message actions', () => {
-    const { container } = render(<AcpConversationItemView item={rowFor({ origin: 'system' })} />);
+    const { container } = render(
+      <AcpConversationItemView serverTextToSpeech item={rowFor({ origin: 'system' })} />
+    );
     expect(container.querySelector('details.sam-injected-message')).not.toBeNull();
     expect(screen.queryByRole('button', { name: 'Message info' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Copy message' })).toBeNull();
   });
 
   it('keeps all three buttons on agent messages', () => {
-    render(<AcpConversationItemView item={rowFor({ id: 'agent-1', role: 'assistant' })} />);
+    render(
+      <AcpConversationItemView
+        serverTextToSpeech
+        item={rowFor({ id: 'agent-1', role: 'assistant' })}
+      />
+    );
     expect(screen.getByRole('button', { name: 'Message info' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Read aloud' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Copy message' })).toBeVisible();

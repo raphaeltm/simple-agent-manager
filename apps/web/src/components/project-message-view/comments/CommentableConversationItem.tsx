@@ -45,6 +45,7 @@ export function CommentableConversationItem({
   onToggleGroup,
   groupLive,
   afterContent,
+  serverTextToSpeech,
 }: {
   index: number;
   firstItemIndex: number;
@@ -70,6 +71,8 @@ export function CommentableConversationItem({
   groupLive?: boolean;
   /** Durable interaction UI anchored directly after the message/tool row. */
   afterContent?: ReactNode;
+  /** Read once by the list (`AcpConversationItemView` explains why). */
+  serverTextToSpeech: boolean;
 }) {
   const isMessageRow =
     item.kind === 'agent_message' || (item.kind === 'user_message' && item.origin !== 'system');
@@ -114,6 +117,7 @@ export function CommentableConversationItem({
           groupExpanded={groupExpanded}
           onToggleGroup={onToggleGroup}
           groupLive={groupLive}
+          serverTextToSpeech={serverTextToSpeech}
         />
         {afterContent}
       </div>

@@ -4,6 +4,7 @@ import type { VirtuosoHandle } from 'react-virtuoso';
 
 import { useAcpPermissionInteractions } from '../../hooks/useAcpPermissionInteractions';
 import { useIsMobile } from '../../hooks/useIsMobile';
+import { usePlatformCapabilities } from '../../hooks/usePlatformCapabilities';
 import { useAuth } from '../AuthProvider';
 import { ChatFilePanel } from '../chat/ChatFilePanel';
 import { LoadingPane } from '../LoadingPane';
@@ -268,38 +269,39 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
     />
   ) : null;
 
+  // One capabilities read for the whole list; rows get the primitive (AcpConversationItemView).
+  const { textToSpeech } = usePlatformCapabilities();
   // Virtuoso supplies an offset index, so compare it after subtracting `firstItemIndex`.
   const renderConversationItem = useCallback(
-    (index: number, item: DisplayItem) => {
-      return (
-        <CommentableConversationItem
-          index={index}
-          firstItemIndex={lc.firstItemIndex}
-          item={item}
-          projectId={projectId}
-          highlighted={highlightedRowId === item.id}
-          onFileClick={fileClickHandler}
-          onLoadToolContent={handleLoadToolContent}
-          animateAgentText
-          animateUserMessage={item.kind === 'user_message' && animatedUserMsgIds.has(item.id)}
-          canComment={viewer.canComment}
-          canSendToAgent={viewer.canSendToAgent}
-          agentActivity={lc.agentActivity}
-          animationTargetIdx={animationTargetIdx}
-          commentState={commentUi.rowState}
-          groupExpanded={
-            item.kind === 'tool_call_group' ? groupRowState.groupExpandedFor(item.id) : undefined
-          }
-          onToggleGroup={groupRowState.onToggleGroup}
-          groupLive={groupRowState.groupLiveFor(item.id)}
-          afterContent={
-            permissionPlacement.anchored.has(item.id)
-              ? permissionPlacement.render(permissionPlacement.anchored.get(item.id) ?? [])
-              : null
-          }
-        />
-      );
-    },
+    (index: number, item: DisplayItem) => (
+      <CommentableConversationItem
+        index={index}
+        firstItemIndex={lc.firstItemIndex}
+        item={item}
+        projectId={projectId}
+        highlighted={highlightedRowId === item.id}
+        onFileClick={fileClickHandler}
+        onLoadToolContent={handleLoadToolContent}
+        animateAgentText
+        animateUserMessage={item.kind === 'user_message' && animatedUserMsgIds.has(item.id)}
+        canComment={viewer.canComment}
+        canSendToAgent={viewer.canSendToAgent}
+        agentActivity={lc.agentActivity}
+        animationTargetIdx={animationTargetIdx}
+        commentState={commentUi.rowState}
+        groupExpanded={
+          item.kind === 'tool_call_group' ? groupRowState.groupExpandedFor(item.id) : undefined
+        }
+        onToggleGroup={groupRowState.onToggleGroup}
+        groupLive={groupRowState.groupLiveFor(item.id)}
+        afterContent={
+          permissionPlacement.anchored.has(item.id)
+            ? permissionPlacement.render(permissionPlacement.anchored.get(item.id) ?? [])
+            : null
+        }
+        serverTextToSpeech={textToSpeech}
+      />
+    ),
     [
       highlightedRowId,
       projectId,
@@ -314,6 +316,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
       commentUi.rowState,
       groupRowState,
       permissionPlacement,
+      textToSpeech,
     ]
   );
 
