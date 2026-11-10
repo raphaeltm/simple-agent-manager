@@ -87,7 +87,7 @@ jobs:
           D1_RESTORE_RECOVERY_WINDOW_DAYS: ${{ vars.D1_RESTORE_RECOVERY_WINDOW_DAYS || '30' }}
 
       - name: Install Pulumi CLI
-        uses: pulumi/actions@8e5e406f4007fca908480587cb9893c07090f58d # v7.0.0
+        uses: pulumi/actions@96c7761824268174e0d2a4e8c7d75671eebd24a7 # v7.1.0
 
       - name: Validate Deployment Resource Names
         id: deploy_resources
