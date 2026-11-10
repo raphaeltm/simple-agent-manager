@@ -46,15 +46,13 @@ export function DeviceAuth() {
       return;
     }
     if (!isAuthenticated) {
-      if (!providers) {
-        setError('Sign-in options are still loading.');
-      } else if (providers.github) {
+      if (providers?.github) {
         await handleLogin('github');
-      } else if (providers.google) {
+      } else if (providers?.google) {
         await handleLogin('google');
-      } else if (providers.gitlab) {
+      } else if (providers?.gitlab) {
         await handleLogin('gitlab');
-      } else if (providers.email) {
+      } else if (providers?.email) {
         setError('Sign in with your email below, then authorize.');
       } else {
         setError('No login provider is configured.');

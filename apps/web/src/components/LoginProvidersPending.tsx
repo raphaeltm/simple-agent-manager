@@ -26,7 +26,10 @@ export function LoginProvidersPending({
       aria-label="Loading sign-in options"
       className="flex min-h-12 items-center justify-center py-2"
     >
-      <Spinner size="md" />
+      {/* The wrapper announces the state; hide the Spinner's own "Loading" status. */}
+      <span aria-hidden="true">
+        <Spinner size="md" />
+      </span>
     </div>
   );
 }

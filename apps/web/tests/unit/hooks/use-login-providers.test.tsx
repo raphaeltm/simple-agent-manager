@@ -63,15 +63,12 @@ it('ignores a malformed remembered answer', () => {
 it('keeps the remembered answer, not a failure, when the lookup fails', async () => {
   window.localStorage.setItem(LOGIN_PROVIDERS_STORAGE_KEY, JSON.stringify(EMAIL_ONLY));
   fetchLoginProviders.mockRejectedValue(new Error('network down'));
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const { result } = renderHook(() => useLoginProviders(), {
-    wrapper: ({ children }) => (
-      <QueryClientProvider client={client}>{children}</QueryClientProvider>
-    ),
-  });
+  // The hook sets its own retry count; skip the backoff so the query reaches its error state.
+  const client = new QueryClient();
+  client.setQueryDefaults(['login-providers'], { retryDelay: 0 });
+  const { result } = renderProviders(client);
 
-  await waitFor(() => expect(fetchLoginProviders).toHaveBeenCalled());
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  await waitFor(() => expect(client.getQueryState(['login-providers'])?.status).toBe('error'));
   expect(result.current.providers).toEqual(EMAIL_ONLY);
   expect(result.current.failed).toBe(false);
 });
@@ -88,7 +85,6 @@ it('recovers from a failed lookup, so an email-only install still offers its way
 });
 
 it('reports a failure with nothing remembered, and retry recovers', async () => {
-  fetchLoginProviders.mockRejectedValueOnce(new Error('network down'));
   // The hook's own `retry: 3` wins over client defaults, so drive it past the retries quickly.
   const client = new QueryClient();
   client.setQueryDefaults(['login-providers'], { retryDelay: 0 });
