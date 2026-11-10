@@ -33,6 +33,7 @@ import {
   setupAuditRoutes,
   setupProjectChatMocks,
 } from './audit-helpers';
+import { docsShot } from './docs-shot';
 import {
   dismissOnboarding,
   MARKETING_THEME,
@@ -711,6 +712,26 @@ test.describe('A. Compute pool editor', () => {
     await page.waitForTimeout(300);
     await scrollHeadingNearTop(page, machinesHeading, 24);
     await marketingShot(page, 'sam-compute-offerings-manager');
+
+    // Docs images for the Compute pools guide, "Provider order": the account list in ranked mode,
+    // at desktop and phone width. Written to apps/www only when DOCS_SHOTS is set.
+    const accounts = page.getByRole('region', { name: "In this project's pool" });
+    await accounts.getByRole('button', { name: 'Try accounts in this order' }).click();
+    await expect(accounts.getByRole('button', { name: /^Try .+ later$/ }).first()).toBeVisible();
+    for (const [name, width] of [
+      ['compute-pool-provider-order', 1440],
+      ['compute-pool-provider-order-mobile', 390],
+    ] as const) {
+      // A tall window, so the whole section is on screen above the sticky save bar.
+      await page.setViewportSize({ width, height: 2000 });
+      await accounts.evaluate((el) => el.scrollIntoView({ block: 'start' }));
+      await page.waitForTimeout(300);
+      const box = (await accounts.boundingBox())!;
+      await docsShot(page, name, {
+        clip: { x: box.x - 16, y: box.y - 16, width: box.width + 32, height: box.height + 32 },
+      });
+    }
+    await accounts.getByRole('button', { name: 'Every account is equal' }).click();
   });
 });
 

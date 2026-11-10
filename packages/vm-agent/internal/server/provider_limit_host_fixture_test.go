@@ -79,14 +79,10 @@ func (l providerLimitFixtureLauncher) Start(cfg acp.ProcessConfig) (*acp.AgentPr
 	return (acp.LocalLauncher{}).Start(cfg)
 }
 
-func runProviderWireThroughProductionHost(t *testing.T, name string, wire json.RawMessage, now time.Time, mode string) map[string]any {
+// installACPAdapterFixtureShims puts version-reporting shims for the pinned ACP adapters
+// on PATH, plus an npm that fails, so a fixture host never downloads an adapter.
+func installACPAdapterFixtureShims(t *testing.T, bin string) {
 	t.Helper()
-	bin := t.TempDir()
-	store, err := persistence.Open(filepath.Join(bin, "fixture.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
 	source, err := os.ReadFile(filepath.Join("..", "acp", "gateway.go"))
 	if err != nil {
 		t.Fatal(err)
@@ -112,6 +108,17 @@ func runProviderWireThroughProductionHost(t *testing.T, name string, wire json.R
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func runProviderWireThroughProductionHost(t *testing.T, name string, wire json.RawMessage, now time.Time, mode string) map[string]any {
+	t.Helper()
+	bin := t.TempDir()
+	store, err := persistence.Open(filepath.Join(bin, "fixture.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	installACPAdapterFixtureShims(t, bin)
 	received := make(chan map[string]any, 1)
 	control := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

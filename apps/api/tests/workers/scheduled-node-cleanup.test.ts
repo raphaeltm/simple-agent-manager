@@ -14,8 +14,10 @@
  * - Stale warm nodes: error is caught (no Hetzner), counted in result
  */
 import { env, runInDurableObject } from 'cloudflare:test';
+import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { runNodeCleanupSweep } from '../../src/scheduled/node-cleanup';
 import {
@@ -25,7 +27,10 @@ import {
 } from '../../src/scheduled/node-cleanup/shared';
 import { sweepTerminalCfContainers } from '../../src/scheduled/node-cleanup/terminal-cf-container-phase';
 import type { UnhealthyNodeBoundaries } from '../../src/scheduled/node-cleanup/unhealthy-nodes';
-import { sweepStaleStoppedWorkspaces } from '../../src/scheduled/node-cleanup/workspace-phases';
+import {
+  sweepOrphanedWorkspaces,
+  sweepStaleStoppedWorkspaces,
+} from '../../src/scheduled/node-cleanup/workspace-phases';
 import { ensureSessionRecovery } from '../../src/services/session-recovery';
 import { buildSessionSnapshotR2Key } from '../../src/services/session-snapshot-artifacts';
 import {
@@ -711,6 +716,7 @@ describe('runNodeCleanupSweep — vertical slice', () => {
       await seedAgentSession('agent-nc-orphan', wsId, USER_ID, { status: 'running' });
       await seedTask(taskId, PROJECT_ID, USER_ID, {
         status: 'cancelled',
+        completedAt: oldDate, // ended long before this sweep
         workspaceId: wsId,
       });
 
@@ -735,6 +741,258 @@ describe('runNodeCleanupSweep — vertical slice', () => {
       const events = await getObservabilityEvents('orphaned_workspace');
       expect(events.length).toBeGreaterThanOrEqual(1);
       expect(events[0].message).toContain('Orphaned workspace stopped');
+    });
+
+    it('gives a just-ended task the grace before stopping its long-lived workspace', async () => {
+      // Production 2026-11-08: an eviction's docker stop killed the agent, the VM agent
+      // posted a false 'failed', and this sweep stopped the hour-old workspace on the next
+      // tick, before the eviction was recorded. The eviction was then treated as superseded
+      // and never re-queued the task. The grace must run from the task's end too.
+      await seedBaseData();
+      const oldDate = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      const justNow = new Date(Date.now() - 30 * 1000).toISOString();
+      // 'just-failed-no-completed-at' covers terminal writers that leave completed_at
+      // NULL: the grace then runs from updated_at.
+      for (const [suffix, endedAt, completedAt] of [
+        ['just-failed', justNow, justNow],
+        ['just-failed-no-completed-at', justNow, null],
+        ['long-failed', oldDate, oldDate],
+      ] as const) {
+        const nodeId = `node-nc-grace-${suffix}`;
+        const wsId = `ws-nc-grace-${suffix}`;
+        await seedNode(nodeId, USER_ID, { status: 'running', createdAt: oldDate });
+        await seedWorkspace(wsId, nodeId, USER_ID, {
+          projectId: PROJECT_ID,
+          status: 'running',
+          chatSessionId: `session-nc-grace-${suffix}`,
+          createdAt: oldDate,
+        });
+        // An errored agent cannot be claimed by sleep, so only the orphan reaper decides.
+        await seedAgentSession(`agent-nc-grace-${suffix}`, wsId, USER_ID, { status: 'error' });
+        await seedTask(`task-nc-grace-${suffix}`, PROJECT_ID, USER_ID, {
+          status: 'failed',
+          workspaceId: wsId,
+          completedAt,
+          updatedAt: endedAt,
+        });
+      }
+
+      // The default grace (10 minutes) applies: nothing overrides it here.
+      const result = await runNodeCleanupSweep(env as unknown as Env);
+
+      expect(await getWorkspaceStatus('ws-nc-grace-just-failed')).toMatchObject({
+        status: 'running',
+      });
+      expect(await getWorkspaceStatus('ws-nc-grace-just-failed-no-completed-at')).toMatchObject({
+        status: 'running',
+      });
+      // Control: the same workspace whose task ended an hour ago is still reaped.
+      expect(await getWorkspaceStatus('ws-nc-grace-long-failed')).toMatchObject({
+        status: 'stopped',
+      });
+      expect(result.orphanedWorkspacesFlagged).toBe(1);
+
+      // Later tests in this file shorten the grace; keep the still-running row out of them.
+      for (const table of ['agent_sessions', 'tasks']) {
+        await env.DATABASE.prepare(
+          `DELETE FROM ${table} WHERE workspace_id LIKE 'ws-nc-grace-%'`
+        ).run();
+      }
+      await env.DATABASE.prepare(`DELETE FROM workspaces WHERE id LIKE 'ws-nc-grace-%'`).run();
+      await env.DATABASE.prepare(`DELETE FROM nodes WHERE id LIKE 'node-nc-grace-%'`).run();
+    });
+
+    it('waits for the latest terminal task on a reused workspace before orphan cleanup', async () => {
+      await seedBaseData();
+      const oldDate = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      const recentDate = new Date(Date.now() - 30 * 1000).toISOString();
+      for (const [suffix, latestEnd, completedAt, oldStatus] of [
+        ['recent', recentDate, recentDate, 'failed'],
+        ['recent-null-completion', recentDate, null, 'failed'],
+        ['old', oldDate, oldDate, 'failed'],
+        ['recent-after-completed', recentDate, recentDate, 'completed'],
+        ['old-after-completed', oldDate, oldDate, 'completed'],
+      ] as const) {
+        const nodeId = `node-nc-reused-grace-${suffix}`;
+        const workspaceId = `ws-nc-reused-grace-${suffix}`;
+        await seedNode(nodeId, USER_ID, { status: 'running', createdAt: oldDate });
+        await seedWorkspace(workspaceId, nodeId, USER_ID, {
+          projectId: PROJECT_ID,
+          status: 'running',
+          // Completed tasks with a chat are independently sleep-owned.
+          // Their orphan case has no chat; failed tasks retain the production chat link.
+          chatSessionId: oldStatus === 'completed' ? undefined : `chat-nc-reused-grace-${suffix}`,
+          createdAt: oldDate,
+        });
+        await seedAgentSession(`agent-nc-reused-grace-${suffix}`, workspaceId, USER_ID, {
+          status: 'error',
+        });
+        // Old task A must not qualify this reused workspace while task B is still
+        // inside the grace period, including writers that omit completed_at.
+        await seedTask(`task-nc-reused-grace-${suffix}-a`, PROJECT_ID, USER_ID, {
+          status: oldStatus,
+          workspaceId,
+          completedAt: oldDate,
+          updatedAt: oldDate,
+        });
+        await seedTask(`task-nc-reused-grace-${suffix}-b`, PROJECT_ID, USER_ID, {
+          status: 'failed',
+          workspaceId,
+          completedAt,
+          updatedAt: latestEnd,
+        });
+      }
+
+      const result = await runNodeCleanupSweep(env as unknown as Env);
+      expect(await getWorkspaceStatus('ws-nc-reused-grace-recent')).toMatchObject({
+        status: 'running',
+      });
+      expect(await getWorkspaceStatus('ws-nc-reused-grace-recent-null-completion')).toMatchObject({
+        status: 'running',
+      });
+      expect(await getWorkspaceStatus('ws-nc-reused-grace-old')).toMatchObject({
+        status: 'stopped',
+      });
+      expect(await getWorkspaceStatus('ws-nc-reused-grace-recent-after-completed')).toMatchObject({
+        status: 'running',
+      });
+      expect(await getWorkspaceStatus('ws-nc-reused-grace-old-after-completed')).toMatchObject({
+        status: 'stopped',
+      });
+      expect(result.orphanedWorkspacesFlagged).toBe(2);
+
+      for (const table of ['agent_sessions', 'tasks']) {
+        await env.DATABASE.prepare(
+          `DELETE FROM ${table} WHERE workspace_id LIKE 'ws-nc-reused-grace-%'`
+        ).run();
+      }
+      await env.DATABASE.prepare(
+        `DELETE FROM workspaces WHERE id LIKE 'ws-nc-reused-grace-%'`
+      ).run();
+      await env.DATABASE.prepare(`DELETE FROM nodes WHERE id LIKE 'node-nc-reused-grace-%'`).run();
+    });
+
+    it('uses genuine terminal history rather than later metadata edits for orphan grace', async () => {
+      await seedBaseData();
+      const oldDate = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      const recentDate = new Date(Date.now() - 30 * 1000).toISOString();
+      for (const [suffix, terminalAt] of [
+        ['old', oldDate],
+        ['recent', recentDate],
+      ] as const) {
+        const nodeId = `node-nc-terminal-history-${suffix}`;
+        const workspaceId = `ws-nc-terminal-history-${suffix}`;
+        const taskId = `task-nc-terminal-history-${suffix}`;
+        await seedNode(nodeId, USER_ID, {
+          status: 'running',
+          createdAt: oldDate,
+          lastHeartbeatAt: recentDate,
+        });
+        await seedWorkspace(workspaceId, nodeId, USER_ID, {
+          projectId: PROJECT_ID,
+          status: 'running',
+          createdAt: oldDate,
+          chatSessionId: `chat-nc-terminal-history-${suffix}`,
+        });
+        await seedAgentSession(`agent-nc-terminal-history-${suffix}`, workspaceId, USER_ID, {
+          status: 'error',
+        });
+        await seedTask(taskId, PROJECT_ID, USER_ID, {
+          status: 'failed',
+          workspaceId,
+          completedAt: null,
+          updatedAt: suffix === 'old' ? recentDate : oldDate,
+        });
+        // A preceding failure must not hide a later genuine failure after retry.
+        // A same-status metadata event must not extend the grace either.
+        for (const [eventSuffix, fromStatus, createdAt] of [
+          ['previous-failure', 'in_progress', oldDate],
+          ['terminal', 'in_progress', terminalAt],
+          ['metadata', 'failed', recentDate],
+        ] as const) {
+          await env.DATABASE.prepare(
+            `INSERT INTO task_status_events (id, task_id, from_status, to_status, actor_type, created_at)
+             VALUES (?, ?, ?, 'failed', 'system', ?)`
+          )
+            .bind(`${taskId}-${eventSuffix}`, taskId, fromStatus, createdAt)
+            .run();
+        }
+      }
+      const result = await runNodeCleanupSweep(env as unknown as Env);
+      expect(await getWorkspaceStatus('ws-nc-terminal-history-old')).toMatchObject({
+        status: 'stopped',
+      });
+      expect(await getWorkspaceStatus('ws-nc-terminal-history-recent')).toMatchObject({
+        status: 'running',
+      });
+      expect(result.orphanedWorkspacesFlagged).toBe(1);
+      // Keep the protected row out of later sweeps with shorter grace settings.
+      await env.DATABASE.prepare(
+        `DELETE FROM task_status_events WHERE task_id LIKE 'task-nc-terminal-history-%'`
+      ).run();
+      for (const table of ['agent_sessions', 'tasks']) {
+        await env.DATABASE.prepare(
+          `DELETE FROM ${table} WHERE workspace_id LIKE 'ws-nc-terminal-history-%'`
+        ).run();
+      }
+      await env.DATABASE.prepare(
+        `DELETE FROM workspaces WHERE id LIKE 'ws-nc-terminal-history-%'`
+      ).run();
+      await env.DATABASE.prepare(
+        `DELETE FROM nodes WHERE id LIKE 'node-nc-terminal-history-%'`
+      ).run();
+    });
+
+    it('compares mixed SQLite and ISO terminal timestamps chronologically', async () => {
+      await seedBaseData();
+      const now = new Date('2026-11-09T12:00:00.000Z');
+      const old = '2026-11-09T10:00:00.000Z';
+      const workspaceId = 'ws-nc-mixed-history';
+      const taskId = 'task-nc-mixed-history';
+      const db = drizzle(env.DATABASE, { schema });
+      await seedNode('node-nc-mixed-history', USER_ID);
+      await seedWorkspace(workspaceId, 'node-nc-mixed-history', USER_ID, {
+        projectId: PROJECT_ID,
+        status: 'running',
+        createdAt: old,
+      });
+      await seedTask(taskId, PROJECT_ID, USER_ID, {
+        status: 'failed',
+        workspaceId,
+        completedAt: null,
+        updatedAt: old,
+      });
+      for (const [suffix, at] of [
+        ['old-iso', '2026-11-09T11:00:00.000Z'],
+        ['recent-sqlite', '2026-11-09 11:59:30'],
+      ]) {
+        await env.DATABASE.prepare(
+          `INSERT INTO task_status_events
+          (id, task_id, from_status, to_status, actor_type, created_at)
+          VALUES (?, ?, 'in_progress', 'failed', 'system', ?)`
+        )
+          .bind(`${taskId}-${suffix}`, taskId, at)
+          .run();
+      }
+      const config = resolveCleanupConfig(env as unknown as Env);
+      await sweepOrphanedWorkspaces(db, env as unknown as Env, now, config, emptyResult());
+      expect(await getWorkspaceStatus(workspaceId)).toMatchObject({ status: 'running' });
+      await sweepOrphanedWorkspaces(
+        db,
+        env as unknown as Env,
+        new Date(now.getTime() + config.orphanGracePeriodMs + 1000),
+        config,
+        emptyResult()
+      );
+      expect(await getWorkspaceStatus(workspaceId)).toMatchObject({ status: 'stopped' });
+      await env.DATABASE.prepare(`DELETE FROM task_status_events WHERE task_id = ?`)
+        .bind(taskId)
+        .run();
+      await env.DATABASE.prepare(`DELETE FROM tasks WHERE id = ?`).bind(taskId).run();
+      await env.DATABASE.prepare(`DELETE FROM workspaces WHERE id = ?`).bind(workspaceId).run();
+      await env.DATABASE.prepare(`DELETE FROM nodes WHERE id = ?`)
+        .bind('node-nc-mixed-history')
+        .run();
     });
 
     it('leaves a failed task workspace to the sleep lifecycle only while its agent session can be slept', async () => {
@@ -762,6 +1020,7 @@ describe('runNodeCleanupSweep — vertical slice', () => {
         });
         await seedTask(`task-nc-failed-${suffix}`, PROJECT_ID, USER_ID, {
           status: 'failed',
+          completedAt: oldDate, // ended long before this sweep
           workspaceId: wsId,
         });
       }
@@ -810,6 +1069,7 @@ describe('runNodeCleanupSweep — vertical slice', () => {
         });
         await seedTask(`task-nc-failed-backstop-${suffix}`, PROJECT_ID, USER_ID, {
           status: 'failed',
+          completedAt: oldDate, // ended long before this sweep
           workspaceId: wsId,
         });
         await seedPendingSleepSnapshot({
@@ -868,6 +1128,7 @@ describe('runNodeCleanupSweep — vertical slice', () => {
       });
       await seedTask(taskId, PROJECT_ID, USER_ID, {
         status: 'failed',
+        completedAt: oldDate, // ended long before this sweep
         workspaceId: wsId,
       });
 

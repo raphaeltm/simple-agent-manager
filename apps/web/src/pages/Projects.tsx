@@ -33,9 +33,7 @@ export function Projects() {
         <p className="m-0 text-fg-muted flex items-center gap-2">
           Projects are repository-backed planning spaces for backlog tasks and delegation.
         </p>
-        <Button onClick={() => navigate('/projects/new')}>
-          New Project
-        </Button>
+        <Button onClick={() => navigate('/projects/new')}>New Project</Button>
       </div>
 
       {error && (
@@ -55,7 +53,12 @@ export function Projects() {
       )}
 
       {loading && projects.length === 0 ? (
-        <div role="status" aria-label="Loading projects" aria-busy="true" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div
+          role="status"
+          aria-label="Loading projects"
+          aria-busy="true"
+          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
+        >
           {Array.from({ length: 3 }, (_, i) => (
             <SkeletonCard key={i} lines={2} />
           ))}
@@ -69,12 +72,12 @@ export function Projects() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {projects.map((project) => (
-          <ProjectSummaryCard
-            key={project.id}
-            project={project}
-            queryScope={user?.id ?? ''}
-            onDelete={handleDelete}
-          />
+            <ProjectSummaryCard
+              key={project.id}
+              project={project}
+              queryScope={user?.id ?? ''}
+              onDelete={handleDelete}
+            />
           ))}
         </div>
       )}

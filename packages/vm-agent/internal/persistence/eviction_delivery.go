@@ -97,13 +97,20 @@ func (s *Store) RecordWorkspaceEviction(ctx context.Context, delivery EvictionDe
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET
 		container_stopped=MAX(eviction_deliveries.container_stopped, excluded.container_stopped),
 		snapshot_captured=MAX(eviction_deliveries.snapshot_captured, excluded.snapshot_captured),
+		interrupted_work=CASE
+			WHEN eviction_deliveries.interrupted_work=1 OR excluded.interrupted_work=1 THEN 1
+			ELSE COALESCE(eviction_deliveries.interrupted_work, excluded.interrupted_work) END,
 		payload_revision=eviction_deliveries.payload_revision + CASE
 			WHEN excluded.container_stopped > eviction_deliveries.container_stopped
 			  OR excluded.snapshot_captured > eviction_deliveries.snapshot_captured
+			  OR (excluded.interrupted_work IS NOT NULL AND
+			      (eviction_deliveries.interrupted_work IS NULL OR excluded.interrupted_work > eviction_deliveries.interrupted_work))
 			THEN 1 ELSE 0 END,
 		next_attempt_at=CASE
 			WHEN excluded.container_stopped > eviction_deliveries.container_stopped
 			  OR excluded.snapshot_captured > eviction_deliveries.snapshot_captured
+			  OR (excluded.interrupted_work IS NOT NULL AND
+			      (eviction_deliveries.interrupted_work IS NULL OR excluded.interrupted_work > eviction_deliveries.interrupted_work))
 			THEN MIN(eviction_deliveries.next_attempt_at, excluded.next_attempt_at)
 			ELSE eviction_deliveries.next_attempt_at END`,
 		delivery.ID, delivery.WorkspaceID, delivery.ProjectID, delivery.NodeID, delivery.ContainerID, delivery.Generation,

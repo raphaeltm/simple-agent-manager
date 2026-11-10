@@ -53,12 +53,7 @@ const TOOLS: ToolCard[] = [
 export function Tools() {
   return (
     <PageLayout title="Tools" maxWidth="xl">
-      <Breadcrumb
-        segments={[
-          { label: 'Home', path: '/dashboard' },
-          { label: 'Tools' },
-        ]}
-      />
+      <Breadcrumb segments={[{ label: 'Home', path: '/dashboard' }, { label: 'Tools' }]} />
 
       <p className="text-sm text-fg-muted mt-1 mb-6">
         Download clients, install integrations, and connect your own infrastructure to SAM.
@@ -71,9 +66,10 @@ export function Tools() {
           const content = (
             <div
               className={`rounded-xl border p-5 flex flex-col gap-3 transition-all duration-150
-                ${isAvailable
-                  ? 'border-border-default bg-bg-card cursor-pointer hover:border-accent hover:shadow-[0_0_0_1px_var(--accent)]'
-                  : 'border-border-default bg-bg-card opacity-55'
+                ${
+                  isAvailable
+                    ? 'border-border-default bg-bg-card cursor-pointer hover:border-accent hover:shadow-[0_0_0_1px_var(--accent)]'
+                    : 'border-border-default bg-bg-card opacity-55'
                 }`}
             >
               <div className="flex items-center justify-between">
@@ -93,9 +89,7 @@ export function Tools() {
 
               <h2 className="text-base font-semibold text-fg-primary m-0">{tool.name}</h2>
 
-              <p className="text-[13px] text-fg-muted m-0 leading-relaxed">
-                {tool.description}
-              </p>
+              <p className="text-[13px] text-fg-muted m-0 leading-relaxed">{tool.description}</p>
             </div>
           );
 

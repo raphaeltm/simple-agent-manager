@@ -21,7 +21,9 @@ const STEP_COLORS = [
   'var(--sam-color-danger)',
 ];
 
-export const FunnelChart: FC<{ data: Array<{ event_name: string; unique_users: number }> }> = ({ data }) => {
+export const FunnelChart: FC<{ data: Array<{ event_name: string; unique_users: number }> }> = ({
+  data,
+}) => {
   const dataMap = new Map(data.map((d) => [d.event_name, d.unique_users]));
   const steps = FUNNEL_STEPS.map((name) => ({
     name,
@@ -32,7 +34,11 @@ export const FunnelChart: FC<{ data: Array<{ event_name: string; unique_users: n
   const maxUsers = Math.max(...steps.map((s) => s.users), 1);
 
   if (steps.every((s) => s.users === 0)) {
-    return <Body className="text-fg-muted">No funnel data available yet. Data appears after user signups.</Body>;
+    return (
+      <Body className="text-fg-muted">
+        No funnel data available yet. Data appears after user signups.
+      </Body>
+    );
   }
 
   return (
@@ -40,13 +46,11 @@ export const FunnelChart: FC<{ data: Array<{ event_name: string; unique_users: n
       {steps.map((step, i) => {
         const widthPercent = Math.max((step.users / maxUsers) * 100, 8);
         const prevUsers = i > 0 ? (steps[i - 1]?.users ?? 0) : 0;
-        const conversionRate = i > 0 && prevUsers > 0
-          ? Math.round((step.users / prevUsers) * 100)
-          : null;
+        const conversionRate =
+          i > 0 && prevUsers > 0 ? Math.round((step.users / prevUsers) * 100) : null;
         const firstStepUsers = steps[0]?.users ?? 0;
-        const overallRate = firstStepUsers > 0
-          ? Math.round((step.users / firstStepUsers) * 100)
-          : 0;
+        const overallRate =
+          firstStepUsers > 0 ? Math.round((step.users / firstStepUsers) * 100) : 0;
         const color = STEP_COLORS[i] ?? STEP_COLORS[STEP_COLORS.length - 1];
 
         return (
@@ -77,8 +81,12 @@ export const FunnelChart: FC<{ data: Array<{ event_name: string; unique_users: n
             <div className="w-20 text-right flex-shrink-0">
               {conversionRate !== null ? (
                 <div className="flex flex-col items-end">
-                  <span className="text-xs font-medium text-fg-secondary tabular-nums">{conversionRate}%</span>
-                  <span className="text-[10px] text-fg-muted tabular-nums">{overallRate}% overall</span>
+                  <span className="text-xs font-medium text-fg-secondary tabular-nums">
+                    {conversionRate}%
+                  </span>
+                  <span className="text-[10px] text-fg-muted tabular-nums">
+                    {overallRate}% overall
+                  </span>
                 </div>
               ) : (
                 <span className="text-xs text-fg-muted">baseline</span>

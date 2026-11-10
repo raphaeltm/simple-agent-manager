@@ -3,11 +3,11 @@
     "agentType": "claude-code",
     "method": "npm",
     "package": "@agentclientprotocol/claude-agent-acp",
-    "version": "0.81.2",
+    "version": "0.102.0",
     "bin": "claude-agent-acp",
     "npmCompanion": {
       "package": "@anthropic-ai/claude-code",
-      "version": "2.1.281"
+      "version": "2.1.321"
     }
   },
   {

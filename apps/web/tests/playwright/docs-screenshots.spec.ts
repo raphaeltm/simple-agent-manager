@@ -20,7 +20,7 @@
 import { expect, type Page, type Route, test } from '@playwright/test';
 
 import { makeMockUser, seedTheme } from './audit-helpers';
-import { docsShot } from './docs-shot';
+import { DIALOG_PANE, docsShot, opaqueBackdrop } from './docs-shot';
 
 const MOCK_USER = makeMockUser({
   email: 'docs@example.com',
@@ -177,12 +177,9 @@ test('docs: report an issue dialog with consent expanded', async ({ page }) => {
   await page.getByRole('checkbox').check();
   await expect(page.getByText(REPORT_SESSION.id)).toBeVisible();
 
-  await page.addStyleTag({
-    content:
-      '.glass-backdrop-dim{background:#0a0e0c !important;opacity:1 !important;backdrop-filter:none !important;-webkit-backdrop-filter:none !important;}',
-  });
+  await opaqueBackdrop(page);
 
-  await docsShot(page, 'report-issue-dialog', dialog.locator('.glass-panel-container'));
+  await docsShot(page, 'report-issue-dialog', dialog.locator(DIALOG_PANE));
 });
 
 // ---------------------------------------------------------------------------

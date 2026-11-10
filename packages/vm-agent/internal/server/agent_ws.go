@@ -228,7 +228,7 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 func (s *Server) getOrCreateSessionHostForRestore(hostKey, workspaceID, sessionID string, session agentsessions.Session, runtime *WorkspaceRuntime, requestedWorktree string, restoreOwner bool) *acp.SessionHost {
 	// Fast path: check if host already exists.
 	s.sessionHostMu.Lock()
-	if !restoreOwner && (s.workspaceRestorePendingLocked(workspaceID) || s.workspaceCreationPendingLocked(workspaceID)) {
+	if s.isEvictionFinalizing(workspaceID) || (!restoreOwner && (s.workspaceRestorePendingLocked(workspaceID) || s.workspaceCreationPendingLocked(workspaceID))) {
 		s.sessionHostMu.Unlock()
 		return nil
 	}
@@ -252,7 +252,7 @@ func (s *Server) getOrCreateSessionHostForRestore(hostKey, workspaceID, sessionI
 
 	s.sessionHostMu.Lock()
 	defer s.sessionHostMu.Unlock()
-	if !restoreOwner && (s.workspaceRestorePendingLocked(workspaceID) || s.workspaceCreationPendingLocked(workspaceID)) {
+	if s.isEvictionFinalizing(workspaceID) || (!restoreOwner && (s.workspaceRestorePendingLocked(workspaceID) || s.workspaceCreationPendingLocked(workspaceID))) {
 		return nil
 	}
 

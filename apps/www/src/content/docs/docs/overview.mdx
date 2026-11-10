@@ -5,7 +5,7 @@ description: Simple Agent Manager — ephemeral AI coding environments on Cloudf
 
 import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
 
-**Simple Agent Manager (SAM)** is an open-source platform for getting real work done with AI coding agents. You import a GitHub repository, describe what you want in a chat, and SAM runs your choice of AI coding agent — Claude Code, OpenAI Codex, Gemini CLI, Google Antigravity, Mistral Vibe, OpenCode, or Amp — that can read your code, make changes, and open a pull request when you ask. SAM provisions the environment for you.
+**Simple Agent Manager (SAM)** is an open-source platform for getting real work done with AI coding agents. You create a project with a GitHub repository or, where enabled, a repository SAM hosts on the installation’s Cloudflare account, describe what you want in a chat, and SAM runs your choice of AI coding agent — Claude Code, OpenAI Codex, Gemini CLI, Google Antigravity, Mistral Vibe, OpenCode, or Amp — that can read your code, make changes, and open a pull request on GitHub when you ask. SAM provisions the environment for you.
 
 ## Why SAM?
 
@@ -14,8 +14,9 @@ AI coding agents need real development environments. SAM gives each agent an iso
 <CardGrid>
   <Card title="Bring Your Own Cloud" icon="cloud">
     Connect a Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, or GCP credential and VMs
-    run on your own infrastructure, billed to your account. On the hosted platform, compute can be
-    provided for you. Your cloud credentials are never stored as environment variables.
+    run on your own infrastructure, billed to your account. An installation administrator can also
+    provide shared compute credentials. Your cloud credentials are never stored as environment
+    variables.
   </Card>
   <Card title="Serverless Control Plane" icon="rocket">
     The API runs on Cloudflare Workers — zero infrastructure to manage. D1 for storage, KV for
@@ -26,19 +27,19 @@ AI coding agents need real development environments. SAM gives each agent an iso
     done. Warm node pooling reuses idle VMs for fast follow-up work.
   </Card>
   <Card title="Self-Hostable" icon="setting">
-    Fork the repo, configure a GitHub Environment, then run Deploy Production. Pulumi + GitHub
-    Actions provision the stack.
+    Install SAM in your own Cloudflare account from the browser with the installer, or fork the repo
+    and deploy it with GitHub Actions.
   </Card>
 </CardGrid>
 
 ## How It Works
 
-1. **Sign in** with GitHub via the web UI
-2. **Connect an AI agent** in Settings → Agents (Claude Code, Codex, Gemini CLI, and more)
-3. **Install the GitHub App** on the repositories you want to use
-4. **Import a project** — link a GitHub repo from the Dashboard
-5. **Chat** — describe what you want; SAM provisions a workspace and runs the agent for you
-6. **Get a pull request** — ask the agent to open one when the work is ready (or say so in your first message), then review it on GitHub. SAM doesn't publish anything on its own.
+1. **Sign in** via the web UI with GitHub, Google, GitLab or an emailed code
+2. **Let SAM set you up**: on your first visit it asks where agents should work and where your code
+   should live, connects your agent (Claude Code, Codex, Gemini CLI, and more), and creates your
+   first project, on a GitHub repository or a new one SAM hosts for you
+3. **Chat** — describe what you want; SAM provisions a workspace and runs the agent for you
+4. **Get a pull request** — for a GitHub-backed project, ask the agent to open one when the work is ready (or say so in your first message), then review it on GitHub. SAM doesn't publish anything on its own.
 
 ## Key Features
 
@@ -58,7 +59,7 @@ AI coding agents need real development environments. SAM gives each agent an iso
 - **Command palette** — quick navigation via Cmd+K / Ctrl+K
 - **In-app notifications** — finished tasks, agent questions, mentions, comments, and progress updates
 - **[App deployments](/docs/guides/app-deployments/)** — put your app on the internet: agents deploy it, and one page shows what's running, what went wrong, and the fix
-- **Bring your own cloud** — run on your own Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, or GCP account, or use hosted compute
+- **Bring your own cloud** — run on your own Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, or GCP account, or use compute credentials shared by your installation administrator
 
 <LinkCard
   title="Quickstart"

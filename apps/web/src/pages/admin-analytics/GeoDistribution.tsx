@@ -1,12 +1,7 @@
 import { Body } from '@simple-agent-manager/ui';
 import { scaleLinear } from 'd3-scale';
-import { type FC, useMemo,useState } from 'react';
-import {
-  ComposableMap,
-  Geographies,
-  Geography,
-  ZoomableGroup,
-} from 'react-simple-maps';
+import { type FC, useMemo, useState } from 'react';
+import { ComposableMap, Geographies, Geography, ZoomableGroup } from 'react-simple-maps';
 
 import type { AnalyticsGeoResponse } from '../../lib/api';
 import { adminChartSeries, chartAxisStroke } from './chartTokens';
@@ -21,27 +16,101 @@ const GEO_URL = import.meta.env.VITE_GEO_TOPOJSON_URL ?? DEFAULT_GEO_TOPOJSON_UR
  * We map from alpha-2 (what Cloudflare provides) to alpha-3 (what the map uses).
  */
 const ALPHA2_TO_ALPHA3: Record<string, string> = {
-  US: 'USA', DE: 'DEU', GB: 'GBR', FR: 'FRA', JP: 'JPN', CA: 'CAN',
-  AU: 'AUS', BR: 'BRA', IN: 'IND', NL: 'NLD', SE: 'SWE', SG: 'SGP',
-  CH: 'CHE', ES: 'ESP', IT: 'ITA', CN: 'CHN', KR: 'KOR', RU: 'RUS',
-  MX: 'MEX', AR: 'ARG', ZA: 'ZAF', NG: 'NGA', EG: 'EGY', TH: 'THA',
-  ID: 'IDN', PH: 'PHL', VN: 'VNM', PL: 'POL', CZ: 'CZE', AT: 'AUT',
-  BE: 'BEL', DK: 'DNK', FI: 'FIN', NO: 'NOR', IE: 'IRL', PT: 'PRT',
-  GR: 'GRC', HU: 'HUN', RO: 'ROU', IL: 'ISR', AE: 'ARE', SA: 'SAU',
-  NZ: 'NZL', CL: 'CHL', CO: 'COL', PE: 'PER', UA: 'UKR', TW: 'TWN',
-  MY: 'MYS', HK: 'HKG', PK: 'PAK', BD: 'BGD', KE: 'KEN', TR: 'TUR',
+  US: 'USA',
+  DE: 'DEU',
+  GB: 'GBR',
+  FR: 'FRA',
+  JP: 'JPN',
+  CA: 'CAN',
+  AU: 'AUS',
+  BR: 'BRA',
+  IN: 'IND',
+  NL: 'NLD',
+  SE: 'SWE',
+  SG: 'SGP',
+  CH: 'CHE',
+  ES: 'ESP',
+  IT: 'ITA',
+  CN: 'CHN',
+  KR: 'KOR',
+  RU: 'RUS',
+  MX: 'MEX',
+  AR: 'ARG',
+  ZA: 'ZAF',
+  NG: 'NGA',
+  EG: 'EGY',
+  TH: 'THA',
+  ID: 'IDN',
+  PH: 'PHL',
+  VN: 'VNM',
+  PL: 'POL',
+  CZ: 'CZE',
+  AT: 'AUT',
+  BE: 'BEL',
+  DK: 'DNK',
+  FI: 'FIN',
+  NO: 'NOR',
+  IE: 'IRL',
+  PT: 'PRT',
+  GR: 'GRC',
+  HU: 'HUN',
+  RO: 'ROU',
+  IL: 'ISR',
+  AE: 'ARE',
+  SA: 'SAU',
+  NZ: 'NZL',
+  CL: 'CHL',
+  CO: 'COL',
+  PE: 'PER',
+  UA: 'UKR',
+  TW: 'TWN',
+  MY: 'MYS',
+  HK: 'HKG',
+  PK: 'PAK',
+  BD: 'BGD',
+  KE: 'KEN',
+  TR: 'TUR',
 };
 
 /** Country display names for common codes. */
 const COUNTRY_NAMES: Record<string, string> = {
-  US: 'United States', DE: 'Germany', GB: 'United Kingdom', FR: 'France',
-  JP: 'Japan', CA: 'Canada', AU: 'Australia', BR: 'Brazil', IN: 'India',
-  NL: 'Netherlands', SE: 'Sweden', SG: 'Singapore', CH: 'Switzerland',
-  ES: 'Spain', IT: 'Italy', CN: 'China', KR: 'South Korea', RU: 'Russia',
-  MX: 'Mexico', AR: 'Argentina', ZA: 'South Africa', NZ: 'New Zealand',
-  IE: 'Ireland', NO: 'Norway', DK: 'Denmark', FI: 'Finland', PL: 'Poland',
-  PT: 'Portugal', BE: 'Belgium', AT: 'Austria', CZ: 'Czechia', IL: 'Israel',
-  AE: 'UAE', SA: 'Saudi Arabia', TR: 'Turkey', TW: 'Taiwan', HK: 'Hong Kong',
+  US: 'United States',
+  DE: 'Germany',
+  GB: 'United Kingdom',
+  FR: 'France',
+  JP: 'Japan',
+  CA: 'Canada',
+  AU: 'Australia',
+  BR: 'Brazil',
+  IN: 'India',
+  NL: 'Netherlands',
+  SE: 'Sweden',
+  SG: 'Singapore',
+  CH: 'Switzerland',
+  ES: 'Spain',
+  IT: 'Italy',
+  CN: 'China',
+  KR: 'South Korea',
+  RU: 'Russia',
+  MX: 'Mexico',
+  AR: 'Argentina',
+  ZA: 'South Africa',
+  NZ: 'New Zealand',
+  IE: 'Ireland',
+  NO: 'Norway',
+  DK: 'Denmark',
+  FI: 'Finland',
+  PL: 'Poland',
+  PT: 'Portugal',
+  BE: 'Belgium',
+  AT: 'Austria',
+  CZ: 'Czechia',
+  IL: 'Israel',
+  AE: 'UAE',
+  SA: 'Saudi Arabia',
+  TR: 'Turkey',
+  TW: 'Taiwan',
+  HK: 'Hong Kong',
 };
 
 interface Props {
@@ -75,7 +144,12 @@ export const GeoDistribution: FC<Props> = ({ data }) => {
   return (
     <div className="flex flex-col gap-4">
       {/* World map — decorative, data is in the table below */}
-      <div className="w-full rounded-lg border border-border-default overflow-hidden" style={{ height: 300 }} role="img" aria-label={`World map showing user distribution across ${data.geo.length} countries`}>
+      <div
+        className="w-full rounded-lg border border-border-default overflow-hidden"
+        style={{ height: 300 }}
+        role="img"
+        aria-label={`World map showing user distribution across ${data.geo.length} countries`}
+      >
         <ComposableMap
           projection="geoMercator"
           projectionConfig={{ scale: 120, center: [0, 30] }}
@@ -98,7 +172,12 @@ export const GeoDistribution: FC<Props> = ({ data }) => {
                       strokeWidth={isHovered ? 1.5 : 0.5}
                       style={{
                         default: { outline: 'none' },
-                        hover: { outline: 'none', fill: match ? 'var(--sam-color-success)' : 'var(--sam-color-bg-surface-hover)' },
+                        hover: {
+                          outline: 'none',
+                          fill: match
+                            ? 'var(--sam-color-success)'
+                            : 'var(--sam-color-bg-surface-hover)',
+                        },
                         pressed: { outline: 'none' },
                       }}
                       onMouseEnter={() => setHoveredCountry(alpha3)}
@@ -129,10 +208,18 @@ export const GeoDistribution: FC<Props> = ({ data }) => {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border-default text-left text-fg-muted">
-              <th scope="col" className="py-2 pr-4 font-medium">Country</th>
-              <th scope="col" className="py-2 pr-4 font-medium text-right">Users</th>
-              <th scope="col" className="py-2 pr-4 font-medium text-right">Events</th>
-              <th scope="col" className="py-2 font-medium text-right">Share</th>
+              <th scope="col" className="py-2 pr-4 font-medium">
+                Country
+              </th>
+              <th scope="col" className="py-2 pr-4 font-medium text-right">
+                Users
+              </th>
+              <th scope="col" className="py-2 pr-4 font-medium text-right">
+                Events
+              </th>
+              <th scope="col" className="py-2 font-medium text-right">
+                Share
+              </th>
             </tr>
           </thead>
           <tbody>

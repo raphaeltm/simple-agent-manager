@@ -1,28 +1,153 @@
 ---
-title: Cloudflare installer prototype
-description: Try the hosted SAM installer or deploy the same installer in your own Cloudflare account.
+title: Install SAM with the installer
+description: Install your own SAM in your Cloudflare account from the browser, finish its setup, update it, and host the installer yourself.
 ---
 
-The installer offers a guided start in your own Cloudflare account, without setting up GitHub first. Signing in to SAM afterwards requires GitHub, GitLab or Google through a configured provider; there is no email login. You can use the hosted version or run the same open-source installer yourself.
+The installer puts a complete SAM in your own Cloudflare account from your browser: you sign in
+with Cloudflare, pick a domain, approve, and about half an hour later your SAM is live. With the
+hosted installer you need no GitHub fork, no terminal and no secrets, but read the note below
+first: for now most people have to host the installer themselves, which takes a terminal and a
+Cloudflare API token. Your agents' machines then run on the cloud account you
+connect in SAM, as with any [self-hosted](/docs/guides/self-hosting/) instance.
 
-:::caution[Prototype]
-The default bootstrap mode creates a protected installation-service Worker. This preview branch adds durable owner recovery; the hosted deployment may still run an earlier revision, so check its displayed source version. Experimental full installation and update code is not enabled by default and has not completed authenticated end-to-end validation. To install SAM today, follow the [self-hosting guide](/docs/guides/self-hosting/).
+:::caution[Who can use the hosted installer today]
+At the time of writing, the hosted installer at
+[install.simple-agent-manager.org](https://install.simple-agent-manager.org) signs you in through a
+Cloudflare OAuth client that is still private, and Cloudflare only lets members of the account that
+owns a private client authorize it. Until it is made public, either
+[host the installer yourself](#host-the-installer-yourself) in full mode, where its sign-in works
+for your own account and the steps below are the same, or install with the
+[self-hosting guide](/docs/guides/self-hosting/). The installer also
+still labels a full installation as experimental: it first shipped on 8 November 2026.
 :::
 
-## Use the hosted installer
+## Before you start
 
-The staging prototype is at [install.sammy.party](https://install.sammy.party). Access initially requires membership in the staging Cloudflare account while its OAuth client is private. The production address is reserved at `install.simple-agent-manager.org`; it is not a promise of public availability.
+- A Cloudflare account with **Workers Paid** (SAM uses Cloudflare Containers, which need it).
+  Cloudflare bills your account for what SAM uses.
+- A domain that is active in that Cloudflare account. SAM lives at `app.` and `api.` on it, and
+  each workspace gets its own `ws-…` address.
+- An email address for the administrator account.
 
-1. Open the installer and select **Sign in with Cloudflare**.
-2. On Cloudflare, select the account you want to authorize and review the requested permissions.
-3. Back in the installer, choose your account and confirm creation of one installation-service Worker.
-4. On revisions with durable recovery, save the browser-generated recovery credential in your password manager **before** opening your service. Confirm that you saved it, then continue to claim ownership. Earlier hosted revisions have temporary owner access only.
+You don't need GitHub to install. Where your Cloudflare account has Cloudflare Artifacts, SAM can
+keep your projects' code itself; otherwise you connect GitHub after setup.
 
-Your Cloudflare password stays with Cloudflare. The hosted installer temporarily receives an OAuth token with the permissions you approve. Worker deployment permissions can cover existing Workers in that account, not only the newly created service.
+## Install
 
-The default hosted session lifetime is 15 minutes. In this preview branch, handoff removes hosted OAuth and deployment-credential copies but keeps the bounded claim record until its original expiry so interrupted handoff can be retried. Disconnect and expiry attempt cleanup and revocation; provider failures can delay cleanup. You can also revoke authorization from your Cloudflare profile. Disconnecting does not delete resources already transferred to your account.
+1. Open the installer and select **Set up your cloud**, then **Sign in with Cloudflare**. On
+   Cloudflare, pick the account to install into and approve the permissions. **What will SAM be
+   allowed to do?** lists them first. Your password stays with Cloudflare.
+2. **Choose your account.** Pick the **Cloudflare account** and the **Cloudflare domain**; the line
+   below shows the address SAM will live at. To put SAM under a subdomain such as
+   `sam.example.com`, open **Use a subdomain instead** and fill in **Install under**. A subdomain
+   needs a Cloudflare Advanced Certificate for HTTPS; the domain itself is covered automatically.
+   Enter **Your administrator email**: this is the only email that can create the first account on
+   your SAM. Select **Review installation →**.
+3. **Review your installation.** The summary says where SAM will live, and **What will be created**
+   lists the hostnames, the address sign-in codes are emailed from (`agents.` on your domain), your
+   account's `workers.dev` address, and the exact SAM version (source commit) that will be built.
+   Tick the box to confirm, then select **Install SAM in my account →**.
 
-With durable recovery, maintenance sessions last 24 hours by default and are independent of the hosted session. Use your saved recovery credential to return; signing in this way replaces the previous active maintenance session. To replace the credential, first save the proposed replacement, then confirm it. The old credential stays valid until confirmation. The maintenance service stores credential hashes, not the recovery value.
+   <img
+     src="/images/docs/installer-review-mobile.png"
+     alt="The installer's Review your installation step, step 3 of Connect, Choose, Review and Handoff. It says SAM will live at app.sam.example.com and that Cloudflare usage charges apply. What will be created lists the hostnames api, app, preview and a wildcard under sam.example.com, that sign-in codes come from agents.sam.example.com, a new workers.dev address and the source commit. A ticked box confirms the build in your account, above the Install SAM in my account button."
+     width="320"
+   />
+
+4. **Save your recovery credential.** The installer hands over to an installation service that now
+   runs in your account and that only you control (**Over to you.** → **Continue to my service →**).
+   It shows a recovery credential once: select **Copy**, save it in your password manager, tick
+   **I saved it.**, and select **Open my installation service**. You need this credential to come
+   back later. Bookmark the page that opens too: it is your installation service, and you return
+   there to update SAM.
+5. **Start the build.** **Continue to installation controls →**, then **Install SAM**. The page
+   shows each stage as it runs (**Step 3 of 13**, with **Show all stages**) and refreshes itself.
+   It usually takes about 30 minutes; when SAM's latest release has prebuilt parts that match the
+   version being installed, the installation service downloads and checks them instead of building
+   them, which is quicker. You can close the tab and come back. **Stop this build** cancels it.
+
+   <img
+     src="/images/docs/installer-build-progress-mobile.png"
+     alt="The installation service for sam.example.com while it builds: Installation in progress, Step 11 of 13: Publishing SAM, with a progress bar and the note that it usually takes about 30 minutes and refreshes every 15 seconds. The expanded stage list ticks off ten stages from Preparing the approved source to Starting the control plane, marks Publishing SAM in progress, and leaves Publishing the CLI and Checking your installation to come. Stop this build, Installation details and Access & recovery are collapsed below."
+     width="320"
+   />
+
+6. **Finish setting up SAM.** When the page says **SAM is live**, select **Finish setting up SAM →**.
+   The next page shows your setup token; select **Open SAM setup →**, and your new SAM opens with
+   the token filled in. Select **Let's go**. If email sending is ready, SAM emails a sign-in code
+   to your administrator email straight away; enter it to sign in, and SAM
+   [walks you through](/docs/quickstart/#2-let-sam-set-you-up) connecting an agent and creating
+   your first project.
+
+   <img
+     src="/images/docs/installer-sam-is-live-mobile.png"
+     alt="The installation service once the build has finished: a green check over sam.example.com, the heading SAM is live, the line Built and running in your own Cloudflare account, one last step and it's yours, a Finish setting up SAM button and a Check for an update link."
+     width="320"
+   />
+   <img
+     src="/images/docs/setup-welcome-mobile.png"
+     alt="The new SAM's setup page: Welcome to your SAM, sam.example.com is live, one step and you're in. A row reads Setup token filled in from your installer, with a Change link, above a Let's go button."
+     width="320"
+   />
+
+If Cloudflare is still verifying the address SAM emails from, setup says so: try again a few
+minutes later. If email couldn't be set up at all, setup asks you to choose how you'll sign in
+instead, with a GitHub, Google or GitLab OAuth app whose **Client ID** and **Client secret** you
+enter, then **Finish setup**. [Platform integrations after deploy](/docs/guides/self-hosting/#platform-integrations-after-deploy)
+in the self-hosting guide explains how to create each app. For Google sign-in, register the redirect
+address `https://api.<your domain>/api/auth/callback/google`.
+
+**Let other people in.** An emailed code only creates the administrator's account: everyone else
+needs another way to sign in the first time. Once you're in, add GitHub, Google or GitLab sign-in
+in **Admin → Integrations** (see [Platform integrations after deploy](/docs/guides/self-hosting/#platform-integrations-after-deploy)),
+then invite people to your projects. If you turned on signup approval, approve them in **Admin →
+Users**.
+
+### If the review is blocked
+
+Review stops before anything is created when something on the domain is in the way: existing DNS
+records or Workers routes on the hostnames SAM needs, or no active certificate for a subdomain.
+The message names what it found. Select **Use a different domain**, or remove what is in the way in
+the Cloudflare dashboard and select **I've removed them — check again**. An earlier installation
+you deleted can leave routes behind that block a new one on the same domain.
+
+### If the build fails
+
+The page says **Installation needs attention** and which stage it stopped in. Select **Retry
+deployment** to resume; work that already finished is reused. **Technical details** has the error
+to include if you report it.
+
+## Come back later
+
+The installation service is a Worker in your account named `sam-maintenance-…`, at its
+`workers.dev` address. Bookmark it when you first open it; you can also find it under **Workers &
+Pages** in the Cloudflare dashboard. Opening it asks for your **Recovery credential** (**Open your
+installation service**).
+Under **Access & recovery** you can **Replace recovery credential** (save the new one before you
+confirm; the old one keeps working until then) and **Sign out**. A session lasts 24 hours.
+
+## Update your SAM
+
+In the installation service, select **Check for an update**. If a newer SAM release exists, **Review
+your update** shows which version it would install; select **Approve and deploy this version**.
+Updates only move forward to newer releases. An update changes SAM's code, not its data: it is not
+a database rollback, so rolling back to an older version isn't offered.
+
+## Remove an installation
+
+There is no automatic uninstall. To remove SAM, delete its Workers, storage and DNS records in the
+Cloudflare dashboard, then the `sam-maintenance-…` installation service, and revoke the
+installer's authorization in your Cloudflare profile. Keep any data you want first. Leftover
+Workers routes block a new installation on the same domain until you remove them.
+
+## What the installer can access
+
+The hosted installer receives a short-lived Cloudflare OAuth token with the permissions you approve,
+for 15 minutes by default. At handoff it passes the work to the installation service in your
+account and drops its own copies. Deployment permissions can cover existing Workers in that
+account, not only SAM's. You can revoke the authorization from your Cloudflare profile at any time;
+that doesn't delete what was already created in your account. The installation service stores a
+hash of your recovery credential, not the credential itself.
 
 ## Host the installer yourself
 
@@ -39,13 +164,14 @@ You need:
 
 ### Deploy
 
-Install the repository dependencies, then supply your account credentials through your shell or secret manager. Do not commit the token or paste it into an issue or chat.
+Install the repository dependencies, then supply your account credentials through your shell or secret manager. Do not commit the token or paste it into an issue or chat. `INSTALLER_MODE=full` is what lets the installer install SAM; without it, a new installer starts in bootstrap mode and only creates the installation service.
 
 ```sh
 pnpm install --frozen-lockfile
 export CLOUDFLARE_API_TOKEN
 export CLOUDFLARE_ACCOUNT_ID
 export BASE_DOMAIN=example.com
+export INSTALLER_MODE=full
 pnpm --filter @simple-agent-manager/installer run deploy
 ```
 
@@ -53,31 +179,24 @@ The deployment creates the installer at `https://install.example.com`, provision
 
 Open that address and sign in with Cloudflare. Private clients can only be authorized by members of the owning Cloudflare account. Public promotion is self-serve: supply a name, logo, client URL and scopes, verify the client URL's domain with a DNS TXT record, then change visibility to public. There is no approval queue, and promotion is permanent. See Cloudflare's [domain verification and public-client setup](https://developers.cloudflare.com/fundamentals/oauth/create-an-oauth-client/).
 
+### What full mode asks for
+
+In full mode the installer's OAuth client asks for the broader permissions an installation needs: Workers, KV, R2, D1,
+Containers, DNS, certificates, Workers routes, AI Gateway, API tokens, email sending and routing,
+and Cloudflare Artifacts (the full list is `FULL_SCOPES` in `apps/installer/scripts/deploy.mjs`).
+Redeploying without `INSTALLER_MODE` keeps the deployed mode. The deployment publishes the installer
+before it creates or updates the OAuth client, so a token without OAuth Client write permission
+leaves an installer whose health check never reports `oauthConfigured`.
+
 ### Use an existing OAuth client
 
-Set `OAUTH_CLIENT_ID` and `OAUTH_CLIENT_SECRET` before running the deployment command. The client must use Authorization Code with `client_secret_post`, the callback `https://install.example.com/oauth/callback`, and scopes `account-settings.read workers-scripts.write`. Do not use `workers-scripts.edit`: it is the Workers Editor role, which cannot create the installation service Worker. Refresh tokens are not requested.
+Set `OAUTH_CLIENT_ID` and `OAUTH_CLIENT_SECRET` before running the deployment command. The client must use Authorization Code with `client_secret_post`, the callback `https://install.example.com/oauth/callback`, and, for bootstrap mode, the scopes `account-settings.read workers-scripts.write`. A full-mode installer's client needs every scope in `FULL_SCOPES` (see [What full mode asks for](#what-full-mode-asks-for)). Do not use `workers-scripts.edit`: it is the Workers Editor role, which cannot create the installation service Worker. Refresh tokens are not requested.
 
 If initial client creation succeeds but saving its secret fails, rotate the secret in Cloudflare and supply it through these variables before retrying. Rerunning deployment normally preserves the existing client and secrets.
 
-### Experimental installation support
+### Remove your installer
 
-The branch also contains source-pinned build, deployment, and explicit update orchestration in the user's account. This is not an enabled or verified public installation path yet. Fresh deployments start in bootstrap mode; normal redeployment preserves the existing mode and consent scopes. Full mode needs broader OAuth permissions, separate installation-owned credentials, paid-service prerequisites, and successful live validation of bootstrap revocation and a complete in-account build. No working enablement recipe is provided until those checks pass.
-
-A full installation can be deployed before configuring GitHub. Initial SAM setup uses `SETUP_TOKEN` to configure GitHub, GitLab or Google as a login provider (there is no email login); the intended administrator must then sign in with the configured provider-verified owner email. Recovery access to the maintenance service remains separate from SAM login.
-
-Update review selects an immutable release commit; it is not a preview of every infrastructure mutation. Code rollback is not database rollback. Automatic conflict merging, automatic uninstall, and verified recovery from every failure are not promised.
-
-Experimental full-mode source preservation stores the approved SAM checkout and full Git history in the installation's R2 storage, with an immutable commit/tree/content-digest manifest. Same-source recovery verifies and restores those saved bytes; toolchain and dependency downloads can still require network access.
-
-The in-account build stages SAM's published Codex runtime instead of compiling it. The archive's SHA-256 digest and size are pinned in the approved source, and the build stops if the staged bytes or any pinning component disagree. A build cache in the installation's own state storage lets retries of the same installation reuse its compiled VM-agent and CLI binaries, authenticated with a key only that installation holds. New installations for the same account and domain reuse only the approved source bundle, which is re-verified against the approved commit. Every reused file is checked against its recorded SHA-256 digest, and anything missing, unauthenticated or mismatched is rebuilt. The builder uses a `standard-4` container. Updates must be ahead of the installed source and implement the supported installer protocol before approval or paid build admission. These paths remain unverified end to end.
-
-The in-account build only produces artifacts; tests, lint and standalone typechecks run in repository CI for the pinned source. The last paid cold build failed while running Codex adapter tests. Removing those checks from the build path does not establish that a full cold build succeeds; another paid run requires explicit cost approval.
-
-The installer shares brand styles and Astro components with the homepage at build time. Its static output and the maintenance Worker's embedded shell are self-contained; they do not depend on the marketing site or SAM at runtime.
-
-### Remove a test deployment
-
-Delete the `sam-installer-self-hosted` Worker and its OAuth client in your Cloudflare dashboard. Remove only the `sam-maintenance-…` services and durable state belonging to your test, and revoke outstanding installer authorizations. Experimental full-mode tests may also create account tokens, a builder application, storage, and SAM resources. Review the installation's recorded resource identities and retain needed data or backups before deleting them; there is no automatic uninstall.
+Delete the `sam-installer-self-hosted` Worker and its OAuth client in your Cloudflare dashboard. Remove only the `sam-maintenance-…` services and durable state belonging to installations you no longer need, and revoke outstanding installer authorizations. Installations it made are separate: they live on in the accounts they were installed into (see [Remove an installation](#remove-an-installation)). Review the installation's recorded resource identities and retain needed data or backups before deleting them; there is no automatic uninstall.
 
 ## Inspect the code
 

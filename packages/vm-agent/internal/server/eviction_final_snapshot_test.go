@@ -440,6 +440,10 @@ func TestHibernateReportsQuiescedOnlyWhenCheckPasses(t *testing.T) {
 			}
 			mustWriteSnapshotFile(t, home, ".claude/settings.json", `{"ok":true}`)
 			t.Setenv("HOME", home)
+			// Keep the fixture independent of the invoking agent's state roots.
+			t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
+			t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude"))
+			t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
 			plane := serveEnforcingSnapshotControlPlane(t, 256*1024)
 			s := &Server{config: &config.Config{Role: config.RoleStandalone, ControlPlaneURL: plane.url}}
 			acpSessionID, wantStatus := "acp-1", "available"

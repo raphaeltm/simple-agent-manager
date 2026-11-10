@@ -62,6 +62,17 @@ function renderCreatedDetails(plan) {
     hosts.append(li);
   });
   appendDetailRow(list, 'Hostnames', hosts);
+  // configure-agent-email.ts writes Email Sending records under agents.<domain> only; agent
+  // email's root-domain changes are previewed and allowed later, in first-run setup.
+  const agentsHost = plan.hostnames
+    .find((host) => host.startsWith('app.'))
+    ?.replace(/^app\./, 'agents.');
+  if (agentsHost)
+    appendDetailRow(
+      list,
+      'Email',
+      `Sign-in codes come from ${agentsHost}. Its sending records are added under that name only.`
+    );
   appendDetailRow(
     list,
     'workers.dev address',

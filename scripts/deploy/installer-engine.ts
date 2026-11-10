@@ -1,8 +1,9 @@
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 import * as TOML from '@iarna/toml';
 
+import { AGENT_EMAIL_MARKER_FILE } from './configure-agent-email.js';
 import { CLI_OUTPUTS, openEngineBuildCache, VM_AGENT_OUTPUTS } from './installer-engine-cache.js';
 import {
   commandLabel,
@@ -139,6 +140,32 @@ export async function runInstallerEngine(
   const deployApi = () => {
     operation = 'worker.deploy';
     return deployEngineApi(c, runner, root, env);
+  };
+  // Installations always prepare Email Sending: email sign-in codes and agent email need it.
+  // The script skips itself when the token lacks the email permissions (installs created before
+  // the installer requested them), and any other failure leaves email off instead of failing
+  // the install: sign-in then falls back to an OAuth provider during first-run setup.
+  const prepareInstallationEmail = async () => {
+    env.AGENT_EMAIL_ENABLED = 'true';
+    try {
+      await pnpm('exec', 'tsx', 'scripts/deploy/configure-agent-email.ts');
+    } catch (error) {
+      if (!(error instanceof EngineCommandFailure)) throw error;
+      // A retry can reuse a checkout whose earlier run prepared email. Leaving that marker would
+      // make sync deploy the AGENT_EMAIL binding, so setup would offer email-only sign-in for a
+      // domain this run could not prepare.
+      rmSync(join(root, '.wrangler', AGENT_EMAIL_MARKER_FILE), { force: true });
+      // Logged as its own optional step so the install log shows why email is off.
+      // prepareInstallationEmail never runs for legacy-ci, so the tail goes to the owner only.
+      options.emit({
+        phase: 'agent-email',
+        status: 'failed',
+        operation: 'configure-agent-email',
+        exitCode: error.exitCode,
+        signal: error.signal,
+        tail: error.tail,
+      });
+    }
   };
   const phase = async (name: string, action: () => Promise<unknown>) => {
     state.status = 'running';
@@ -391,6 +418,7 @@ export async function runInstallerEngine(
     });
     if (c.profile === 'legacy-ci')
       await pnpm('exec', 'tsx', 'scripts/deploy/configure-agent-email.ts');
+    else await prepareInstallationEmail();
     await sync();
     await script('configure-r2-cors.sh');
     await script('configure-ai-gateway.sh');

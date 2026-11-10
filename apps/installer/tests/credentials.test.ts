@@ -32,7 +32,13 @@ interface Stored {
   policies: unknown[];
 }
 function fixture(
-  mode?: 'timeout-once' | 'runtime-fails' | 'invalid-value' | 'delete-fails',
+  mode?:
+    | 'timeout-once'
+    | 'runtime-fails'
+    | 'invalid-value'
+    | 'delete-fails'
+    | 'refuses-artifacts'
+    | 'deployment-fails',
   groups: typeof catalog = catalog
 ) {
   const tokens = new Map<string, Stored>();
@@ -53,6 +59,14 @@ function fixture(
       const plan = JSON.parse(String(init.body)) as { name: string; policies: unknown[] };
       plans.push(plan);
       if (mode === 'runtime-fails' && plan.name.endsWith('-runtime'))
+        return Response.json({ success: false }, { status: 403 });
+      if (mode === 'deployment-fails' && plan.name.endsWith('-deployment'))
+        return Response.json({ success: false }, { status: 403 });
+      // A grant that cannot delegate a beta group Cloudflare still lists.
+      if (
+        mode === 'refuses-artifacts' &&
+        JSON.stringify(plan).includes(`"${group('Artifacts Write').id}"`)
+      )
         return Response.json({ success: false }, { status: 403 });
       const id = (++count).toString(16).padStart(32, '0');
       tokens.set(id, { ...plan, id });
@@ -116,6 +130,14 @@ describe('installation credential principals', () => {
     );
     for (const name of ['Workers AI Write', 'AI Gateway Run', 'Workers Containers Write'])
       expect(runtime).toContain(group(name).id);
+    // Email: the deploy prepares Email Sending; the app's agent email setup turns on routing.
+    const deployment = JSON.stringify(f.plans.find((plan) => plan.name.endsWith('-deployment')));
+    expect(deployment).toContain(group('Email Sending Write').id);
+    for (const name of ['Zone Settings Read', 'Email Routing Rules Read'])
+      expect(deployment).toContain(group(name, 'com.cloudflare.api.account.zone').id);
+    expect(runtime).toContain(group('Email Sending Read').id);
+    for (const name of ['Zone Settings Write', 'Email Routing Rules Write'])
+      expect(runtime).toContain(group(name, 'com.cloudflare.api.account.zone').id);
     expect(serialize).not.toMatch(/API Tokens|OAuth/);
   });
   // Observed on staging 2026-11-06: an OAuth grant saw Workers Scripts Write and
@@ -289,4 +311,70 @@ it('aborts provisioning while keeping a separate live signal for owned-principal
   ).rejects.toThrow();
   expect(f.plans).toHaveLength(1);
   expect(f.deleted).toEqual(['1'.padStart(32, '0')]);
+});
+describe('optional Artifacts access for SAM-hosted repositories', () => {
+  const artifacts = () => [group('Artifacts Read').id, group('Artifacts Write').id];
+  const deploymentPlans = (f: ReturnType<typeof fixture>) =>
+    f.plans.filter((plan) => plan.name.endsWith('-deployment')).map((p) => JSON.stringify(p));
+
+  it('grants the deployment token Artifacts Read and Write when the catalog has them', async () => {
+    const f = fixture();
+    await createInstallationCredentials('bootstrap-secret', config, installation);
+    const [deployment] = deploymentPlans(f);
+    for (const id of artifacts()) expect(deployment).toContain(`"${id}"`);
+    // The runtime uses the Worker binding, so it never holds Artifacts groups.
+    const runtime = JSON.stringify(f.plans.find((plan) => plan.name.endsWith('-runtime')));
+    for (const id of artifacts()) expect(runtime).not.toContain(`"${id}"`);
+  });
+
+  it('installs without Artifacts on an account whose catalog lacks them', async () => {
+    const f = fixture(
+      undefined,
+      catalog.filter((entry) => !entry.name.startsWith('Artifacts'))
+    );
+    const credentials = await createInstallationCredentials(
+      'bootstrap-secret',
+      config,
+      installation
+    );
+    expect(credentials.tokenIds).toHaveLength(3);
+    expect(deploymentPlans(f)).toHaveLength(1);
+    expect(deploymentPlans(f)[0]).toContain(`"${group('Workers Scripts Write').id}"`);
+  });
+
+  it('leaves Artifacts out when the catalog lists a group ambiguously', async () => {
+    const duplicate = { ...group('Artifacts Write'), id: 'f'.repeat(32) };
+    const f = fixture(undefined, [...catalog, duplicate]);
+    await createInstallationCredentials('bootstrap-secret', config, installation);
+    const [deployment] = deploymentPlans(f);
+    for (const id of [...artifacts(), duplicate.id]) expect(deployment).not.toContain(`"${id}"`);
+    expect(deployment).toContain(`"${group('Workers Scripts Write').id}"`);
+  });
+
+  it('retries the deployment token without Artifacts when Cloudflare refuses them', async () => {
+    const f = fixture('refuses-artifacts');
+    const credentials = await createInstallationCredentials(
+      'bootstrap-secret',
+      config,
+      installation,
+      { createAttempts: 1 }
+    );
+    expect(credentials.tokenIds).toHaveLength(3);
+    const plans = deploymentPlans(f);
+    expect(plans).toHaveLength(2);
+    for (const id of artifacts()) expect(plans[0]).toContain(`"${id}"`);
+    for (const id of artifacts()) expect(plans[1]).not.toContain(`"${id}"`);
+    expect(plans[1]).toContain(`"${group('Workers Scripts Write').id}"`);
+  });
+
+  it('still fails when the deployment token is refused without optional groups too', async () => {
+    const f = fixture('deployment-fails');
+    await expect(
+      createInstallationCredentials('bootstrap-secret', config, installation, {
+        createAttempts: 1,
+      })
+    ).rejects.toThrow(/did not create the deployment account token \(HTTP 403\)/);
+    expect(deploymentPlans(f)).toHaveLength(2);
+    expect(f.plans.some((plan) => plan.name.endsWith('-runtime'))).toBe(false);
+  });
 });

@@ -211,10 +211,14 @@ func (h *SessionHost) armCrashRecoveryWatchdogLocked(notify recoveryNotify) {
 	if timeout <= 0 {
 		return
 	}
-	go h.watchCrashRecovery(timeout, notify)
+	h.crashRecoveryEpoch++
+	h.promptMu.Lock()
+	attempt := h.promptAttempt
+	h.promptMu.Unlock()
+	go h.watchCrashRecovery(timeout, notify, h.crashRecoveryEpoch, attempt)
 }
 
-func (h *SessionHost) watchCrashRecovery(timeout time.Duration, notify recoveryNotify) {
+func (h *SessionHost) watchCrashRecovery(timeout time.Duration, notify recoveryNotify, epoch uint64, attempt *promptAttempt) {
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 
@@ -224,11 +228,26 @@ func (h *SessionHost) watchCrashRecovery(timeout time.Duration, notify recoveryN
 	case <-timer.C:
 	}
 
+	h.finishCrashRecoveryTimeout(timeout, notify, epoch, attempt)
+}
+
+func (h *SessionHost) finishCrashRecoveryTimeout(timeout time.Duration, notify recoveryNotify, epoch uint64, attempt *promptAttempt) {
+	h.evictionDecisionMu.Lock()
+	defer h.evictionDecisionMu.Unlock()
+	h.mu.RLock()
+	active := h.crashRecoveryInProgress && h.crashRecoveryEpoch == epoch
+	h.mu.RUnlock()
+	if !active {
+		return
+	}
+	if h.parkRecoveryWatchdogForEviction(func() { h.finishCrashRecoveryTimeout(timeout, notify, epoch, attempt) }, attempt) {
+		return
+	}
 	message := fmt.Sprintf("Agent crash recovery timed out after %s", timeout)
 	err := fmt.Errorf("%s", message)
 
 	h.mu.Lock()
-	if !h.crashRecoveryInProgress {
+	if !h.crashRecoveryInProgress || h.crashRecoveryEpoch != epoch {
 		h.mu.Unlock()
 		return
 	}

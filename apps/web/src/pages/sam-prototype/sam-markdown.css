@@ -3,8 +3,12 @@
    inside SAM message bubbles.
    ═══════════════════════════════════════════════════════════════ */
 
-.sam-markdown > *:first-child { margin-top: 0; }
-.sam-markdown > *:last-child { margin-bottom: 0; }
+.sam-markdown > *:first-child {
+  margin-top: 0;
+}
+.sam-markdown > *:last-child {
+  margin-bottom: 0;
+}
 
 /* ── Headings ──────────────────────────────────────────────── */
 .sam-markdown h1 {
@@ -74,9 +78,16 @@
 }
 
 /* ── Inline formatting ─────────────────────────────────────── */
-.sam-markdown strong { color: #fff; font-weight: 600; }
-.sam-markdown em { font-style: italic; }
-.sam-markdown del { color: rgba(255, 255, 255, 0.6); }
+.sam-markdown strong {
+  color: #fff;
+  font-weight: 600;
+}
+.sam-markdown em {
+  font-style: italic;
+}
+.sam-markdown del {
+  color: rgba(255, 255, 255, 0.6);
+}
 
 /* ── Lists ─────────────────────────────────────────────────── */
 .sam-markdown ul,
@@ -87,12 +98,20 @@
   font-size: 0.92rem;
 }
 
-.sam-markdown li { margin: 4px 0; }
+.sam-markdown li {
+  margin: 4px 0;
+}
 .sam-markdown li > ul,
-.sam-markdown li > ol { margin: 2px 0; }
+.sam-markdown li > ol {
+  margin: 2px 0;
+}
 
-.sam-markdown ul { list-style: none; }
-.sam-markdown ul > li { position: relative; }
+.sam-markdown ul {
+  list-style: none;
+}
+.sam-markdown ul > li {
+  position: relative;
+}
 
 .sam-markdown ul > li::before {
   content: '';
@@ -119,12 +138,21 @@
   height: 3px;
 }
 
-.sam-markdown ol { list-style: decimal; }
-.sam-markdown ol > li::marker { color: rgba(60, 180, 120, 1); font-weight: 600; }
+.sam-markdown ol {
+  list-style: decimal;
+}
+.sam-markdown ol > li::marker {
+  color: rgba(60, 180, 120, 1);
+  font-weight: 600;
+}
 
 /* ── Task lists ────────────────────────────────────────────── */
-.sam-markdown li:has(> input[type='checkbox']) { list-style: none; }
-.sam-markdown li:has(> input[type='checkbox'])::before { display: none; }
+.sam-markdown li:has(> input[type='checkbox']) {
+  list-style: none;
+}
+.sam-markdown li:has(> input[type='checkbox'])::before {
+  display: none;
+}
 
 .sam-markdown input[type='checkbox'] {
   appearance: none;
@@ -195,7 +223,9 @@
   background: rgba(60, 180, 120, 0.04);
 }
 
-.sam-markdown tbody tr:last-child td { border-bottom: none; }
+.sam-markdown tbody tr:last-child td {
+  border-bottom: none;
+}
 
 /* ── Blockquotes ───────────────────────────────────────────── */
 .sam-markdown blockquote {
@@ -216,8 +246,12 @@
 .sam-markdown blockquote p {
   margin: 6px 0;
 }
-.sam-markdown blockquote p:first-child { margin-top: 0; }
-.sam-markdown blockquote p:last-child { margin-bottom: 0; }
+.sam-markdown blockquote p:first-child {
+  margin-top: 0;
+}
+.sam-markdown blockquote p:last-child {
+  margin-bottom: 0;
+}
 
 /* ── Horizontal rules ──────────────────────────────────────── */
 .sam-markdown hr {
@@ -243,7 +277,9 @@
   overflow: hidden;
   border: 1px solid rgba(60, 180, 120, 0.12);
   box-shadow: 0 0 10px rgba(40, 160, 100, 0.06);
-  transition: box-shadow 0.3s, border-color 0.3s;
+  transition:
+    box-shadow 0.3s,
+    border-color 0.3s;
 }
 
 .sam-code-block:hover {
@@ -294,13 +330,25 @@
 
 /* ── Mobile ────────────────────────────────────────────────── */
 @media (max-width: 640px) {
-  .sam-code-block { margin: 10px -14px; }
-  .sam-markdown table { font-size: 0.78rem; }
-  .sam-markdown th, .sam-markdown td { padding: 6px 8px; }
+  .sam-code-block {
+    margin: 10px -14px;
+  }
+  .sam-markdown table {
+    font-size: 0.78rem;
+  }
+  .sam-markdown th,
+  .sam-markdown td {
+    padding: 6px 8px;
+  }
 }
 
 /* ── Onboarding card animations ──────────────────────────── */
 @keyframes celebration-breathe {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 1; }
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
 }

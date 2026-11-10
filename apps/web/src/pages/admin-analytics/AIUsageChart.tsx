@@ -42,7 +42,7 @@ export const AIUsageChart: FC<Props> = ({ data }) => {
   const byDay = data?.byDay ?? [];
   const modelData = useMemo(
     () => (data?.byModel ?? []).map((m) => ({ ...m, label: shortModel(m.model) })),
-    [data?.byModel],
+    [data?.byModel]
   );
 
   if (!data || data.totalRequests === 0) {
@@ -54,9 +54,19 @@ export const AIUsageChart: FC<Props> = ({ data }) => {
       {/* KPI cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <KpiCard label="Requests" value={data.totalRequests.toLocaleString()} />
-        <KpiCard label="Total Tokens" value={formatTokens(data.totalInputTokens + data.totalOutputTokens)} subtitle={`${formatTokens(data.totalInputTokens)} in / ${formatTokens(data.totalOutputTokens)} out`} />
+        <KpiCard
+          label="Total Tokens"
+          value={formatTokens(data.totalInputTokens + data.totalOutputTokens)}
+          subtitle={`${formatTokens(data.totalInputTokens)} in / ${formatTokens(data.totalOutputTokens)} out`}
+        />
         <KpiCard label="Est. Cost" value={formatCost(data.totalCostUsd)} />
-        <KpiCard label="Cached" value={data.cachedRequests.toLocaleString()} subtitle={data.errorRequests > 0 ? `${data.errorRequests.toLocaleString()} errors` : undefined} />
+        <KpiCard
+          label="Cached"
+          value={data.cachedRequests.toLocaleString()}
+          subtitle={
+            data.errorRequests > 0 ? `${data.errorRequests.toLocaleString()} errors` : undefined
+          }
+        />
       </div>
 
       {/* Tokens by model — horizontal bar chart */}
@@ -65,7 +75,11 @@ export const AIUsageChart: FC<Props> = ({ data }) => {
           <h4 className="text-sm font-medium text-fg-secondary mb-2">Tokens by Model</h4>
           <div className="w-full" style={{ height: Math.max(120, modelData.length * 50) }}>
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={modelData} layout="vertical" margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+              <BarChart
+                data={modelData}
+                layout="vertical"
+                margin={{ top: 4, right: 4, left: 0, bottom: 0 }}
+              >
                 <CartesianGrid strokeDasharray="3 3" stroke={chartGridStroke} strokeOpacity={0.3} />
                 <XAxis type="number" tick={chartTick} tickFormatter={formatTokens} />
                 <YAxis type="category" dataKey="label" width={140} tick={chartTick} />
@@ -73,8 +87,18 @@ export const AIUsageChart: FC<Props> = ({ data }) => {
                   formatter={(value) => [formatTokens(Number(value)), '']}
                   contentStyle={chartTooltipStyle}
                 />
-                <Bar dataKey="inputTokens" stackId="tokens" fill={adminChartSeries[0]} name="Input" />
-                <Bar dataKey="outputTokens" stackId="tokens" fill={adminChartSeries[1]} name="Output" />
+                <Bar
+                  dataKey="inputTokens"
+                  stackId="tokens"
+                  fill={adminChartSeries[0]}
+                  name="Input"
+                />
+                <Bar
+                  dataKey="outputTokens"
+                  stackId="tokens"
+                  fill={adminChartSeries[1]}
+                  name="Output"
+                />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -131,14 +155,23 @@ export const AIUsageChart: FC<Props> = ({ data }) => {
                 {modelData.map((m, i) => (
                   <tr key={m.model} className="border-b border-border-default last:border-0">
                     <td className="py-2 pr-4">
-                      <span className="inline-block w-2 h-2 rounded-full mr-2" style={{ backgroundColor: adminChartSeries[i % adminChartSeries.length] }} />
+                      <span
+                        className="inline-block w-2 h-2 rounded-full mr-2"
+                        style={{ backgroundColor: adminChartSeries[i % adminChartSeries.length] }}
+                      />
                       <span className="text-fg-primary">{m.label}</span>
                       <span className="text-fg-muted ml-1 text-xs">({m.provider})</span>
                     </td>
                     <td className="text-right py-2 px-2 text-fg-secondary">{m.requests}</td>
-                    <td className="text-right py-2 px-2 text-fg-secondary">{formatTokens(m.inputTokens)}</td>
-                    <td className="text-right py-2 px-2 text-fg-secondary">{formatTokens(m.outputTokens)}</td>
-                    <td className="text-right py-2 pl-2 text-fg-primary font-medium">{formatCost(m.costUsd)}</td>
+                    <td className="text-right py-2 px-2 text-fg-secondary">
+                      {formatTokens(m.inputTokens)}
+                    </td>
+                    <td className="text-right py-2 px-2 text-fg-secondary">
+                      {formatTokens(m.outputTokens)}
+                    </td>
+                    <td className="text-right py-2 pl-2 text-fg-primary font-medium">
+                      {formatCost(m.costUsd)}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -151,7 +184,11 @@ export const AIUsageChart: FC<Props> = ({ data }) => {
 };
 
 /** Simple KPI card matching the existing analytics design. */
-const KpiCard: FC<{ label: string; value: string; subtitle?: string }> = ({ label, value, subtitle }) => (
+const KpiCard: FC<{ label: string; value: string; subtitle?: string }> = ({
+  label,
+  value,
+  subtitle,
+}) => (
   <div className="border border-border-default rounded-md bg-surface-secondary p-3">
     <div className="text-xs text-fg-muted uppercase tracking-wide">{label}</div>
     <div className="text-xl font-bold text-fg-primary mt-1">{value}</div>

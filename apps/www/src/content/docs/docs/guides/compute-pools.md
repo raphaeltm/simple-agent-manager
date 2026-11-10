@@ -42,33 +42,6 @@ Pools exist at three **scopes**, each edited in a different place:
 These are settings tabs. **Infrastructure** in the main navigation is something else: it opens the
 **Nodes** page, which lists your machines.
 
-### What each machine is using
-
-On the **Nodes** page each machine is named for what it is (provider, type and location, with its
-vCPU, memory and disk), not for the task that first started it; a machine whose hardware is not
-known yet is just called **Machine**. Its chart covers the last hour by default:
-memory rises above the middle line, CPU hangs below it, and the dashed lines mark what SAM set aside
-for the sessions running there. Stopped sessions stay in the list, but what was set aside for them
-no longer counts. When a running session has no reading yet, the machine's totals say **partial**. Under the chart, each session is a row with its chat's title (select
-it to open the chat), who started it, the project and how long it has been running, a small chart of
-its own, and what it is using against what was set aside, for example **2.9/4.0 GB** and
-**1.3/2.0 vCPU**.
-
-- **over limit** in red means a session is using more memory than was set aside for it. Memory is
-  what runs out: a session that keeps growing can be stopped for using too much.
-- **burst, fine** means a session is using more CPU than was set aside. That only makes work slower,
-  so it is not a problem on its own.
-
-Usage history comes from each machine in batches, every 15 minutes by default, so the right-hand end
-of a chart fills in later. When a machine reports its sessions' memory with its heartbeat, a dot
-at the right edge shows that latest reading, and the numbers use it. How far back the charts go is the admin setting `nodes.usageWindowMinutes`
-([Admin settings](/docs/guides/admin-settings/#the-settings)). Workspace links and the machine's full
-hardware details are under **Advanced**.
-
-A session in a project you have since left still shows its usage, because it runs on your machine,
-but not the project's name, the chat title or a link to the chat. If you have a very large number of
-sessions, or a session uploads unusually many history batches, the page says what it left out.
-
 A pool you can edit opens straight into its editor (`ComputePoolEditor`). A status chip says
 **Ready · N in pool** or **Empty · Instant sessions only**. Below it:
 
@@ -93,6 +66,41 @@ chat session's **infrastructure** section both show a "Current compute pool" lin
 state, strategy, and how many offerings are available.
 
 If the same Google Cloud connection appears twice with identical offerings, see [GCP duplicate pool entries](/docs/guides/google-cloud/#google-cloud-appears-twice-in-the-node-pool).
+
+### What each machine is using
+
+On the **Nodes** page each machine is named for what it is (provider, type and location, with its
+vCPU, memory and disk), not for the task that first started it; a machine whose hardware is not
+known yet is just called **Machine**. Its chart covers the last hour by default:
+memory rises above the middle line, CPU hangs below it, and the dashed lines mark what SAM set aside
+for the sessions running there. Stopped sessions stay in the list, but what was set aside for them
+no longer counts. When a running session has no reading yet, the machine's totals say **partial**. Under the chart, each session is a row with its chat's title (select
+it to open the chat), who started it, the project and how long it has been running, a small chart of
+its own, and what it is using against what was set aside, for example **2.8/4.0 GB** and
+**0.7/2.0 vCPU**.
+
+<picture>
+  <source media="(max-width: 40em)" srcset="/images/docs/nodes-machine-mobile.png 2x" />
+  <img
+    src="/images/docs/nodes-machine.png"
+    alt="A machine on the Nodes page titled Hetzner cx43, Nuremberg, 8 vCPU, 16 GB, 160 GB disk, €11.99 a month, marked Running. Its chart shows memory (9.1 GB of 16 GB) above the middle line and CPU (5.2 of 8 vCPU) below it, with dashed lines for what was set aside. Three sessions follow, each with a small chart: Add tax columns to receipts uses 2.8 of 4.0 GB; Run the full test suite uses 4.1 of 2.0 vCPU and is marked burst, fine; Load the March invoices uses 2.8 of 2.0 GB, shown in red as over limit. Advanced and Details links are at the bottom."
+  />
+</picture>
+
+- **over limit** in red means a session is using more memory than was set aside for it. Memory is
+  what runs out: a session that keeps growing can be stopped for using too much.
+- **burst, fine** means a session is using more CPU than was set aside. That only makes work slower,
+  so it is not a problem on its own.
+
+Usage history comes from each machine in batches, every 15 minutes by default, so the right-hand end
+of a chart fills in later. When a machine reports its sessions' memory with its heartbeat, a dot
+at the right edge shows that latest reading, and the numbers use it. How far back the charts go is the admin setting `nodes.usageWindowMinutes`
+([Admin settings](/docs/guides/admin-settings/#the-settings)). Workspace links and the machine's full
+hardware details are under **Advanced**.
+
+A session in a project you have since left still shows its usage, because it runs on your machine,
+but not the project's name, the chat title or a link to the chat. If you have a very large number of
+sessions, or a session uploads unusually many history batches, the page says what it left out.
 
 ### The other settings on the same page
 
@@ -223,6 +231,33 @@ A pool can rank its sources: for example Google Cloud first, Hetzner second. Whe
 strategy or price would otherwise prefer. Within one source, the strategy still decides. Sources the
 order does not list come after every listed one.
 
+Every account you want in the order must already be connected as one of the pool's
+[sources](#sources) and have machines in the pool, and a project or agent profile that sets a
+default provider still limits the pool to that provider. To choose which cloud account SAM tries
+first:
+
+1. Open the pool: **Project → Settings → Infrastructure** for a project's pool, or the
+   **Infrastructure** tab in **Settings** for your own (see
+   [Where to find pools](#where-to-find-pools-in-the-app)).
+2. In the pool's account list, choose **Try accounts in this order**. It appears once two accounts
+   that are on have machines in the pool; accounts with nothing picked are listed under
+   **Connected, not in this pool** and are not ranked.
+3. Use the up and down arrows to put the account SAM should try first at the top.
+4. Select **Save changes**.
+
+<picture>
+  <source media="(max-width: 40em)" srcset="/images/docs/compute-pool-provider-order-mobile.png 2x" />
+  <img
+    src="/images/docs/compute-pool-provider-order.png"
+    alt="The account list of a project's pool with Try accounts in this order chosen. Hetzner is ranked 1 with cx23 in Falkenstein at €5.49 a month, Scaleway 2 with PLAY2-MICRO in Paris at €7.99, and Vultr 3 with five machines from $24.00. Each account has up and down arrows and an on switch, and an Every account is equal button clears the order."
+  />
+</picture>
+
+Choose **Every account is equal** to clear the order. An account connected after you saved the
+order goes to the end of the list until you move it. If someone else saved the pool while you were
+editing, your changes are not saved: SAM says so, and you review the current pool and edit again.
+The same order can be set through the pool update API (`sourceOrder`, a list of source ids).
+
 - **A running machine with room is always used first.** The order only decides where a new machine
   comes from, so a warm Hetzner node is reused even when Google Cloud is ranked first.
 - **No order (the default) means every source is equal**, which is how pools behaved before ordering
@@ -255,15 +290,11 @@ SAM does **not** move to another provider after an error that could mean a machi
 anyway, such as a timeout or an unclear `503`, or after a permission or configuration error. Those
 fail the run, so a broken credential is not hidden and no machine is ever created twice.
 
-Sources that share a rank do not fall back to each other; give them different ranks if you want
-one to back up the other. Without an order, nothing falls back across sources. Each attempt,
+Sources that share a rank do not fall back to each other. Every source the order doesn't list
+shares last place, including an account connected after you saved the order, so add a new account
+to the order if you want it to back up another. (Two listed sources can share a rank only through
+the API; the editor's list always gives each account its own place.) Without an order, nothing falls back across sources. Each attempt,
 including skipped sources and the reason, appears in the run's placement details.
-
-**Setting the order.** In the pool's account list, select **Try accounts in this order**, then use the up
-and down arrows to put the account SAM should try first at the top, and **Save changes**. Select
-**Every account is equal** to clear the order. Only accounts with machines in the pool are ranked; a
-pool with a single such account has nothing to order. The same order can be set through the pool
-update API (`sourceOrder`, a list of source ids).
 
 ### Allowed offerings
 
@@ -563,7 +594,10 @@ A node accepts additional work only if **all** of these hold:
 - Live CPU is treated differently from memory and disk. CPU is shared out by the kernel, so a busy
   machine runs work more slowly rather than breaking, and each workspace's CPU is already reserved
   from the machine's budget above. Measured CPU therefore only blocks placement once the machine is
-  **saturated** (85% by default); below that, the reservations decide. SAM also gives its own agent
+  **saturated** (85% by default); below that, the reservations decide. A machine with no workspaces
+  on it yet, including a warm one, is never refused for being busy: a new machine is often busy
+  setting itself up, and nothing is there to slow down. It still needs a valid CPU reading, like
+  any machine. SAM also gives its own agent
   a larger share of the CPU than the workspace containers get, so a busy machine slows the work down
   without making the machine look unreachable.
 
@@ -661,21 +695,21 @@ remove it so a lower scope applies.
 
 ## Troubleshooting
 
-| Symptom                                                                | Likely cause                                                                                                                                                                                                                                                                                                                                                                               |
-| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| "Waiting for capacity" that never clears                               | The pool's allowed offerings are sold out in the chosen region. Add more machines or regions, or switch the policy to **Fallback chain**.                                                                                                                                                                                                                                                  |
-| Work fails immediately with a capacity error                           | Exhaustion policy is **Fail**, or the pool has no allowed offering that satisfies the requirements.                                                                                                                                                                                                                                                                                        |
-| "Capacity pool node limit (N) reached and no node can fit the request" | The user is at the pool's **Machine limit** and no running node has room. Raise the limit, lower the requirements so an existing node fits, or free a node.                                                                                                                                                                                                                                |
-| No offering satisfies the request                                      | Requirements exceed every allowed machine — remember the host memory reserve, so a 4 GiB offering tops out at a 3072 MiB reservation. Lower the requirements or add a bigger instance type.                                                                                                                                                                                                |
-| A new machine starts although an existing one looks free               | The existing machine's disk is at or above the deployment's disk-pressure threshold (80% by default, `TASK_RUN_NODE_DISK_PRESSURE_THRESHOLD_PERCENT`), its CPU is saturated (85% by default, or the project's **Node CPU Threshold**), or it hasn't reported fresh health readings. SAM won't add work to it until that clears; check the machine's page for its disk and CPU.             |
-| A new machine is provisioned for every task                            | Requirements ask for an exclusive node, each request fills a machine, or **Spread** has not reached the pool's **Machine limit**.                                                                                                                                                                                                                                                          |
-| Workspace machines are bigger or pricier than expected                 | Check the resolved requirements in the chat's infrastructure panel — a profile, skill, or project default may be raising the floor. Then open **Resources** on a finished session to see what it actually used ([Session Resource History](/docs/guides/session-resources/)).                                                                                                              |
-| A deployment machine is bigger than expected                           | Check the service CPU and memory limits in its deployment manifest, the pool's deployment strategy, and which smaller offerings the pool allows.                                                                                                                                                                                                                                           |
-| The pool cannot be edited                                              | The project has no pool of its own and shows the one it falls back to, read-only: follow **Edit your pool** (or **Edit the shared pool**), or connect a cloud account to the project to give it its own. Otherwise, editing a project's pool takes the project's owner or admin role (everyone who joins through an invitation is an admin), and the installation pool takes a superadmin. |
-| The project ignores your personal pool                                 | The project has its own pool. Remove it if you want the personal pool to apply.                                                                                                                                                                                                                                                                                                            |
-| Everything lands on one cloud although the pool allows several         | A default provider is set on the project or the agent profile, and it filters the others out.                                                                                                                                                                                                                                                                                              |
-| Too many, or too few, workspaces share a machine                       | Adjust explicit CPU, memory, and disk requirements, use **Exclusive node** for isolation, or change the pool strategy and **Machine limit**. [Session Resource History](/docs/guides/session-resources/) is the evidence for what the requirements should be.                                                                                                                              |
-| Work waits for capacity even though the policy is **Fail**             | The provider reported an account limit (server or vCPU core limit, the latter after trying smaller offerings under Fallback chain), or the pool's [Machine limit](#machine-limit) is reached. Both always wait.                                                                                                                                                                            |
+| Symptom                                                                | Likely cause                                                                                                                                                                                                                                                                                                                                                                                            |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| "Waiting for capacity" that never clears                               | The pool's allowed offerings are sold out in the chosen region. Add more machines or regions, or switch the policy to **Fallback chain**.                                                                                                                                                                                                                                                               |
+| Work fails immediately with a capacity error                           | Exhaustion policy is **Fail**, or the pool has no allowed offering that satisfies the requirements.                                                                                                                                                                                                                                                                                                     |
+| "Capacity pool node limit (N) reached and no node can fit the request" | The user is at the pool's **Machine limit** and no running node has room. Raise the limit, lower the requirements so an existing node fits, or free a node.                                                                                                                                                                                                                                             |
+| No offering satisfies the request                                      | Requirements exceed every allowed machine — remember the host memory reserve, so a 4 GiB offering tops out at a 3072 MiB reservation. Lower the requirements or add a bigger instance type.                                                                                                                                                                                                             |
+| A new machine starts although an existing one looks free               | The existing machine's disk is at or above the deployment's disk-pressure threshold (80% by default, `TASK_RUN_NODE_DISK_PRESSURE_THRESHOLD_PERCENT`), it already runs work and its CPU is saturated (85% by default, or the project's **Node CPU Threshold**), or it hasn't reported fresh health readings. SAM won't add work to it until that clears; check the machine's page for its disk and CPU. |
+| A new machine is provisioned for every task                            | Requirements ask for an exclusive node, each request fills a machine, or **Spread** has not reached the pool's **Machine limit**.                                                                                                                                                                                                                                                                       |
+| Workspace machines are bigger or pricier than expected                 | Check the resolved requirements in the chat's infrastructure panel — a profile, skill, or project default may be raising the floor. Then open **Resources** on a finished session to see what it actually used ([Session Resource History](/docs/guides/session-resources/)).                                                                                                                           |
+| A deployment machine is bigger than expected                           | Check the service CPU and memory limits in its deployment manifest, the pool's deployment strategy, and which smaller offerings the pool allows.                                                                                                                                                                                                                                                        |
+| The pool cannot be edited                                              | The project has no pool of its own and shows the one it falls back to, read-only: follow **Edit your pool** (or **Edit the shared pool**), or connect a cloud account to the project to give it its own. Otherwise, editing a project's pool takes the project's owner or admin role (everyone who joins through an invitation is an admin), and the installation pool takes a superadmin.              |
+| The project ignores your personal pool                                 | The project has its own pool. Remove it if you want the personal pool to apply.                                                                                                                                                                                                                                                                                                                         |
+| Everything lands on one cloud although the pool allows several         | A default provider is set on the project or the agent profile, and it filters the others out.                                                                                                                                                                                                                                                                                                           |
+| Too many, or too few, workspaces share a machine                       | Adjust explicit CPU, memory, and disk requirements, use **Exclusive node** for isolation, or change the pool strategy and **Machine limit**. [Session Resource History](/docs/guides/session-resources/) is the evidence for what the requirements should be.                                                                                                                                           |
+| Work waits for capacity even though the policy is **Fail**             | The provider reported an account limit (server or vCPU core limit, the latter after trying smaller offerings under Fallback chain), or the pool's [Machine limit](#machine-limit) is reached. Both always wait.                                                                                                                                                                                         |
 
 ## Where to look when you want the details
 

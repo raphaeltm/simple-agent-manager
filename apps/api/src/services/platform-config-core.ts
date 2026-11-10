@@ -49,7 +49,7 @@ const DEFAULT_PLATFORM_CONFIG_CACHE_MS = 60_000;
 
 /*
  * The writers below return nothing ON PURPOSE. A `ResolvedPlatformConfig` carries every platform
- * secret as plaintext `.value`, and `PUT /api/setup/config` once echoed a writer's result straight
+ * secret as plaintext `.value`, and a since-removed `PUT /api/setup/config` once echoed a writer's result straight
  * into its response body. Callers that need to report state use `getPlatformConfigStatus`, which
  * projects to booleans and source labels.
  */

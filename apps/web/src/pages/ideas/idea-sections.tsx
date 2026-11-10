@@ -14,12 +14,7 @@ import { RenderedMarkdown } from '../../components/MarkdownRenderer';
 import type { IdeaDetail } from '../../lib/api';
 import { projectIdeaPath, projectLibraryFilePath } from '../../lib/project-routes';
 import { Panel, SectionTitle } from '../automation/ui';
-import {
-  IdeaActionControl,
-  type IdeaActionHandlers,
-  IdeaStateIcon,
-  LiveDot,
-} from './parts';
+import { IdeaActionControl, type IdeaActionHandlers, IdeaStateIcon, LiveDot } from './parts';
 import {
   IDEA_STATE_LABELS,
   ideaPrimaryAction,

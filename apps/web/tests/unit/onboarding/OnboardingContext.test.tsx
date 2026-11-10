@@ -1,4 +1,5 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { QueryTestWrapper } from '../../test-utils/query-test-utils';
@@ -107,6 +108,29 @@ describe('OnboardingProvider', () => {
       expect(screen.getByTestId('overlay')).toHaveTextContent('closed');
       expect(localStorage.getItem(STORAGE_KEY)).toBe('true');
     });
+  });
+
+  // The wizard's own last step completes the setup. Closing the overlay right then skipped the
+  // hand-off to the first chat, so an open overlay stays up until the user closes it.
+  it('keeps an open overlay up when setup completes during the wizard', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <OnboardingProvider>
+          <Probe />
+        </OnboardingProvider>
+      </QueryClientProvider>
+    );
+    await expectReadyOverlay('open');
+
+    mockOwnSetup({ agentActive: true });
+    await act(async () => {
+      await client.invalidateQueries();
+    });
+    await waitFor(() => expect(mocks.listCredentials).toHaveBeenCalledTimes(2));
+
+    expect(screen.getByTestId('overlay')).toHaveTextContent('open');
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
   });
 
   it('does not flash the overlay for a set-up user while one status read is still in flight', async () => {

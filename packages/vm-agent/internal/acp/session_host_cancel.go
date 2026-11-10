@@ -129,6 +129,23 @@ func (h *SessionHost) startCancelGraceTimer(d time.Duration) (<-chan time.Time, 
 	return timer.C, func() { timer.Stop() }
 }
 
+func (h *SessionHost) finishPromptCancelled(attempt *promptAttempt, reqID json.RawMessage, info promptStartInfo) {
+	h.evictionDecisionMu.Lock()
+	defer h.evictionDecisionMu.Unlock()
+	if h.parkPromptCrashForEviction("prompt_cancelled", func() { h.finishPromptCancelled(attempt, reqID, info) }, attempt) {
+		return
+	}
+	if !attempt.completeWith(h, "cancelled", context.Canceled, func() { h.markPromptDoneForAttempt(attempt) }) {
+		return
+	}
+	slog.Info("ACP: Prompt cancelled", "promptId", attempt.id)
+	h.reportLifecycle("info", "ACP Prompt cancelled", attempt.logFields(map[string]interface{}{
+		"duration": time.Since(info.startedAt).String(),
+		"promptId": attempt.id,
+	}))
+	h.broadcastMessage(h.marshalJSONRPCError(reqID, -32800, "Prompt cancelled"))
+}
+
 // settleStuckPromptCancel handles a requested cancel whose attempt did not
 // finish within the grace period. A stop is never a task failure: the attempt
 // finishes "cancelled" and the agent process is restarted through the same

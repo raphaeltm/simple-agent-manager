@@ -201,23 +201,6 @@ async function setupMocks(
         loopback: { lastSent: null, lastReceived: null },
       });
 
-    if (path === '/api/setup/status') {
-      return respondJson(route, 200, {
-        completed: false,
-        open: true,
-        forced: false,
-        tokenConfigured: true,
-      });
-    }
-
-    if (path === '/api/setup/verify') {
-      return respondJson(route, 200, { ok: true, status: PLATFORM_STATUS });
-    }
-
-    if (path === '/api/setup/config' && request.method() === 'PUT') {
-      return respondJson(route, 200, { status: PLATFORM_STATUS });
-    }
-
     if (path === '/api/admin/platform-config') {
       return respondJson(route, 200, { status: PLATFORM_STATUS });
     }
@@ -226,21 +209,7 @@ async function setupMocks(
   });
 }
 
-test.describe('Platform config first-run and admin UI', () => {
-  test('setup token unlock shows integration sources', async ({ page }) => {
-    await setupMocks(page);
-    await page.goto('/setup');
-    await page.getByLabel('Setup token').fill('test-setup-token');
-    await page.getByRole('button', { name: 'Verify token' }).click();
-    await expect(page.getByTestId('platform-config-form')).toBeVisible();
-    await expect(page.getByText('set via environment fallback').first()).toBeVisible();
-    await expect(page.getByText('set here').first()).toBeVisible();
-    await expect(page.getByText('not configured').first()).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Google infrastructure OAuth' })).toHaveCount(0);
-    await assertNoOverflow(page);
-    await screenshot(page, 'platform-config-setup');
-  });
-
+test.describe('Platform config admin UI', () => {
   test('admin integrations page shows the shared config store', async ({ page }) => {
     await setupMocks(page);
     await page.goto('/admin/integrations');

@@ -1,10 +1,20 @@
+import type { Context } from 'hono';
 import { Hono } from 'hono';
 
 import { createAuth } from '../auth';
 import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
-import { expectJsonRecord } from '../lib/runtime-validation';
+import { expectJsonRecord, maybeJsonRecord } from '../lib/runtime-validation';
 import { errors } from '../middleware/error';
+import {
+  assertCodeAttemptBudget,
+  EMAIL_CODE_SIGN_IN_PATH,
+  emailCodeRedemptionAllowed,
+  isClosedEmailOtpPath,
+  rateLimitSignInCodes,
+  SEND_CODE_PATH,
+  withinEmailBudget,
+} from '../services/email-sign-in';
 import { readAuthSession } from '../services/read-auth-session';
 import { assertUserNotSuspended } from '../services/signup-approval';
 
@@ -47,9 +57,50 @@ authRoutes.get('/me', async (c) => {
  */
 authRoutes.get('/get-session', (c) => readAuthSession(c.env, c.req.raw));
 
+// Email sign-in codes cost an email each, and each redemption is a guess: limit both per IP
+// before BetterAuth sees them, and guesses also per address.
+authRoutes.post(SEND_CODE_PATH, rateLimitSignInCodes('email-sign-in-ip'));
+authRoutes.post(SEND_CODE_PATH, async (c, next) => {
+  const body: unknown = await c.req.raw
+    .clone()
+    .json()
+    .catch(() => null);
+  const email = maybeJsonRecord(body)?.email;
+  // Past the address's hourly budget, answer as usual without letting BetterAuth mint a new
+  // code: that would invalidate the last one the owner was actually emailed.
+  if (typeof email === 'string' && !(await withinEmailBudget(c.env, email))) {
+    log.warn('email_sign_in.code_not_sent', { reason: 'email_rate_limited' });
+    return c.json({ success: true });
+  }
+  return next();
+});
+authRoutes.post(EMAIL_CODE_SIGN_IN_PATH, rateLimitSignInCodes('email-sign-in-redeem-ip'));
+authRoutes.post(EMAIL_CODE_SIGN_IN_PATH, async (c, next) => {
+  const body: unknown = await c.req.raw
+    .clone()
+    .json()
+    .catch(() => null);
+  const email = maybeJsonRecord(body)?.email;
+  // Guesses for one address are capped across all IPs, for every address alike.
+  if (typeof email === 'string') await assertCodeAttemptBudget(c.env, email);
+  // Same answer as a wrong code, so this reveals nothing the code check would not.
+  if (typeof email !== 'string' || !(await emailCodeRedemptionAllowed(c.env, email))) {
+    return c.json({ code: 'INVALID_OTP', message: 'Invalid OTP' }, 400);
+  }
+  await next();
+  // BetterAuth answers 403 TOO_MANY_ATTEMPTS once a code has taken its guesses, which only an
+  // eligible address can reach. Answer exactly like a wrong code so the lockout cannot be used
+  // to tell which addresses have accounts; the lockout itself still holds.
+  if (c.res.status === 403) {
+    c.res = c.json({ code: 'INVALID_OTP', message: 'Invalid OTP' }, 400);
+  }
+});
+
 authRoutes.on(['GET', 'POST'], '/*', async (c) => {
+  // SAM has no passwords: the plugin's reset, verification and email-change routes stay closed.
+  if (isClosedEmailOtpPath(new URL(c.req.url).pathname)) throw errors.notFound('Route');
   try {
-    const auth = await createAuth(c.env);
+    const auth = await createAuth(c.env, { waitUntil: executionWaitUntil(c) });
     const response = await auth.handler(c.req.raw);
 
     // Log auth error metadata only. BetterAuth response bodies may include
@@ -67,5 +118,15 @@ authRoutes.on(['GET', 'POST'], '/*', async (c) => {
     return c.json({ error: 'AUTH_ERROR', message: 'Internal auth error' }, 500);
   }
 });
+
+/** The request's waitUntil, when the runtime provides one (Workers do; unit-test apps do not). */
+function executionWaitUntil(c: Context): ((promise: Promise<unknown>) => void) | undefined {
+  try {
+    const ctx = c.executionCtx;
+    return (promise) => ctx.waitUntil(promise);
+  } catch {
+    return undefined;
+  }
+}
 
 export { authRoutes };

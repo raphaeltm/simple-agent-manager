@@ -86,10 +86,7 @@ interface CelebrationCardData {
 }
 
 type OnboardingCardData =
-  | WelcomeCardData
-  | SetupChecklistData
-  | ActionCardData
-  | CelebrationCardData;
+  WelcomeCardData | SetupChecklistData | ActionCardData | CelebrationCardData;
 
 const nonEmptyStringSchema = v.pipe(
   v.string(),
