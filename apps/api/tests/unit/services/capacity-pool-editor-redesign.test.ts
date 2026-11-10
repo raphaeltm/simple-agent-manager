@@ -29,6 +29,7 @@ import {
 import { noEligibleCapacityCandidateMessage } from '../../../src/services/placement-resolution-error';
 import { resolveTaskStartPlacement } from '../../../src/services/placement-resolver';
 import { buildCapacityPoolSelection } from '../../../src/services/placement-resolver-capacity';
+import { offering } from '../../helpers/capacity-pool-offerings';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 import { seedCloudCredential, seedUser } from '../routes/capacity-pool-test-seeds';
 
@@ -45,44 +46,6 @@ function db() {
   seedUser(sqlite, 'user-1');
   const database = createSqliteD1WithBindLimit(sqlite, 100);
   return { d1: drizzle(database, { schema }), env: { DATABASE: database } as unknown as Env };
-}
-
-function offering(
-  provider: string,
-  location: string,
-  type: string,
-  extra: Partial<ProviderInstanceOffering> = {}
-): ProviderInstanceOffering {
-  return {
-    provider: provider as ProviderInstanceOffering['provider'],
-    providerInstanceSku: null,
-    id: type,
-    sku: type,
-    instanceType: type,
-    type,
-    providerInstanceType: type,
-    name: type,
-    displayName: type,
-    location,
-    vcpu: 4,
-    ramGb: 16,
-    memoryGb: 16,
-    memoryMb: 16_384,
-    storageGb: 50,
-    diskGb: 50,
-    price: '$97.09/mo',
-    priceMonthlyUsd: null,
-    priceHourlyUsd: null,
-    priceMonthly: 97.09,
-    priceHourly: 0.133,
-    currency: 'USD',
-    available: true,
-    stale: false,
-    status: null,
-    catalogSource: 'api',
-    catalogLastSeenAt: '2026-11-09T00:00:00.000Z',
-    ...extra,
-  } as ProviderInstanceOffering;
 }
 
 async function refresh(d1: ReturnType<typeof db>['d1'], offerings: ProviderInstanceOffering[]) {
