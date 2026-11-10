@@ -5,6 +5,7 @@ import { useSearchParams } from 'react-router';
 
 import { useAuth } from '../components/AuthProvider';
 import { EmailCodeSignIn } from '../components/EmailCodeSignIn';
+import { LoginProvidersPending } from '../components/LoginProvidersPending';
 import { useLoginProviders } from '../hooks/useLoginProviders';
 import { useToast } from '../hooks/useToast';
 import { approveDeviceCode } from '../lib/api';
@@ -22,7 +23,7 @@ export function DeviceAuth() {
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { isAuthenticated, isLoading } = useAuth();
-  const providers = useLoginProviders();
+  const { providers, failed: providersFailed, retry: retryProviders } = useLoginProviders();
   const toast = useToast();
 
   useEffect(() => {
@@ -45,7 +46,9 @@ export function DeviceAuth() {
       return;
     }
     if (!isAuthenticated) {
-      if (providers.github) {
+      if (!providers) {
+        setError('Sign-in options are still loading.');
+      } else if (providers.github) {
         await handleLogin('github');
       } else if (providers.google) {
         await handleLogin('google');
@@ -126,7 +129,10 @@ export function DeviceAuth() {
               </Button>
             ) : (
               <div className="space-y-2">
-                {providers.github && (
+                {!providers && (
+                  <LoginProvidersPending failed={providersFailed} retry={retryProviders} />
+                )}
+                {providers?.github && (
                   <Button
                     variant="primary"
                     onClick={handleApprove}
@@ -136,7 +142,7 @@ export function DeviceAuth() {
                     Log in with GitHub
                   </Button>
                 )}
-                {providers.google && (
+                {providers?.google && (
                   <Button
                     variant="secondary"
                     onClick={() => handleLogin('google')}
@@ -152,7 +158,7 @@ export function DeviceAuth() {
                     Log in with Google
                   </Button>
                 )}
-                {providers.gitlab && (
+                {providers?.gitlab && (
                   <Button
                     variant="secondary"
                     onClick={() => handleLogin('gitlab')}
@@ -168,7 +174,7 @@ export function DeviceAuth() {
                     Log in with GitLab
                   </Button>
                 )}
-                {providers.email && (
+                {providers?.email && (
                   // A code sign-in sets the session cookie outside BetterAuth's session store, so
                   // reload this page (code kept in the URL) for the provider to read it.
                   <EmailCodeSignIn
