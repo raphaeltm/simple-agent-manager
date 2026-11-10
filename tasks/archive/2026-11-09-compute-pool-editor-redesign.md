@@ -162,3 +162,14 @@ Raphaël approved a prototype (artifact `BLxnvbCWtMM4KBcRzjsc5c`, v3) and these 
 - Prototype: https://claude.ai/artifact/BLxnvbCWtMM4KBcRzjsc5c
 - `.claude/rules/74-proxy-signals-must-match-the-condition.md`, `67`, `44`, `71`, `81`
 - Previous PR: #2608 (publication deadline loop)
+
+## Verification Notes
+
+- Full suites green on the final branch: API 15,743 passed (4 skipped), web 5,073, shared 962,
+  providers 804; build, `pnpm check:fast` and `pnpm quality:migration-safety` pass.
+- Staging deploy (run 42675226281, commit 6fa8636) green. Staging D1: migration 0230 applied,
+  the array-only CHECK present, every pool kept its picks (18 / 96 / 18 active native rows).
+- Production and staging D1 had no pool whose only active rows were legacy size presets, so the
+  change empties no existing pool.
+- Live UI verification on staging was skipped at the user's direction (no staging login in this
+  session); it is done in production after the deploy instead.
