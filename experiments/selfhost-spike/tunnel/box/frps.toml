@@ -1,0 +1,23 @@
+# Box-side frps. Node-facing control port; every per-node proxy binds on loopback only,
+# so only the local Worker (celld) can reach nodes.
+bindAddr = "0.0.0.0"
+bindPort = 7000
+proxyBindAddr = "127.0.0.1"
+vhostHTTPPort = 7480
+tcpmuxHTTPConnectPort = 7490
+allowPorts = [{ start = 17000, end = 17999 }]
+transport.tls.force = true
+# Q5: per-node authorization via server plugin (see box/authz/). Shared token is
+# only a first gate; the plugin checks the per-node credential and the claimed slot.
+auth.method = "token"
+auth.token = "spike-shared-token"
+webServer.addr = "127.0.0.1"
+webServer.port = 7500
+log.to = "console"
+log.level = "info"
+
+[[httpPlugins]]
+name = "sam-node-authz"
+addr = "127.0.0.1:7600"
+path = "/frp/handler"
+ops = ["Login", "NewProxy"]
