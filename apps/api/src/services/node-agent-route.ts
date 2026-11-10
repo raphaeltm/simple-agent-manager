@@ -51,25 +51,28 @@ export async function readNodeAgentRouteRow(
 ): Promise<NodeAgentRouteRow | null> {
   const db = drizzle(env.DATABASE, { schema });
   const node = await db
-    .select({
-      runtime: schema.nodes.runtime,
-      transport: schema.nodes.transport,
-      runtimeIncarnationId: schema.nodes.runtimeIncarnationId,
-    })
+    .select({ runtime: schema.nodes.runtime, transport: schema.nodes.transport })
     .from(schema.nodes)
     .where(eq(schema.nodes.id, nodeId))
     .get();
   if (!node) return null;
-  if (node.transport !== 'reverse-tunnel' || !node.runtimeIncarnationId) {
+  if (node.transport !== 'reverse-tunnel') {
     return { runtime: node.runtime ?? null, transport: node.transport ?? null, leasePort: null };
   }
+  // The active lease of the node's CURRENT incarnation (a superseded one is never routed to).
   const lease = await db
     .select({ port: schema.nodeReverseTunnelLeases.port })
     .from(schema.nodeReverseTunnelLeases)
+    .innerJoin(
+      schema.nodes,
+      and(
+        eq(schema.nodes.id, schema.nodeReverseTunnelLeases.nodeId),
+        eq(schema.nodes.runtimeIncarnationId, schema.nodeReverseTunnelLeases.runtimeIncarnationId)
+      )
+    )
     .where(
       and(
         eq(schema.nodeReverseTunnelLeases.nodeId, nodeId),
-        eq(schema.nodeReverseTunnelLeases.runtimeIncarnationId, node.runtimeIncarnationId),
         eq(schema.nodeReverseTunnelLeases.status, 'active')
       )
     )
