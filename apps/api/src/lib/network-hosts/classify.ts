@@ -155,33 +155,58 @@ function startsWithZeros(groups: number[], count: number): boolean {
   return groups.slice(0, count).every((group) => group === 0);
 }
 
+function ipv6(text: string): bigint {
+  const groups = parseIpv6Literal(text);
+  if (!groups) throw new Error(`invalid IPv6 range ${text}`);
+  return groups.reduce((value, group) => (value << 16n) | BigInt(group), 0n);
+}
+
+type Ipv6Range = readonly [start: bigint, prefix: number, hostClass: Exclude<HostClass, 'public'>];
+
+/** Checked before embedded IPv4: these are themselves inside the IPv4-compatible block. */
+const IPV6_EXACT: readonly Ipv6Range[] = [
+  [ipv6('::'), 128, 'forbidden'], // unspecified
+  [ipv6('::1'), 128, 'private'], // loopback
+  [ipv6('fd00:ec2::254'), 128, 'forbidden'], // AWS IMDS over IPv6
+];
+
+const IPV6_RANGES: readonly Ipv6Range[] = [
+  [ipv6('fe80::'), 10, 'forbidden'], // link-local
+  [ipv6('ff00::'), 8, 'forbidden'], // multicast
+  [ipv6('2001::'), 32, 'forbidden'], // Teredo
+  [ipv6('2001:db8::'), 32, 'forbidden'], // documentation
+  [ipv6('100::'), 64, 'forbidden'], // discard
+  [ipv6('64:ff9b:1::'), 48, 'private'], // local-use NAT64
+  [ipv6('fec0::'), 10, 'private'], // deprecated site-local
+  [ipv6('fc00::'), 7, 'private'], // unique-local
+];
+
+function matchIpv6(value: bigint, ranges: readonly Ipv6Range[]): HostClass | null {
+  for (const [start, prefix, hostClass] of ranges) {
+    const shift = BigInt(128 - prefix);
+    if (value >> shift === start >> shift) return hostClass;
+  }
+  return null;
+}
+
+/** The IPv4 address an IPv6 literal routes to, for the forms that embed one. */
+function embeddedIpv4Of(groups: number[]): number | null {
+  const [g0 = 0, g1 = 0, g2 = 0, , g4 = 0, g5 = 0, g6 = 0, g7 = 0] = groups;
+  const mapped = startsWithZeros(groups, 5) && g5 === 0xffff; // ::ffff:a.b.c.d
+  const translated = startsWithZeros(groups, 4) && g4 === 0xffff && g5 === 0; // ::ffff:0:a.b.c.d
+  const compatible = startsWithZeros(groups, 6); // ::a.b.c.d
+  const nat64 = g0 === 0x64 && g1 === 0xff9b && startsWithZeros(groups.slice(2), 4);
+  if (mapped || translated || compatible || nat64) return embeddedIpv4(g6, g7);
+  return g0 === 0x2002 ? embeddedIpv4(g1, g2) : null; // 6to4
+}
+
 export function classifyIpv6(groups: number[]): HostClass {
-  const [g0 = 0, g1 = 0, , , , g5 = 0, g6 = 0, g7 = 0] = groups;
-  if (groups.every((group) => group === 0)) return 'forbidden'; // ::
-  if (startsWithZeros(groups, 7) && g7 === 1) return 'private'; // ::1
-  // IPv4-mapped ::ffff:a.b.c.d, -compatible ::a.b.c.d, -translated ::ffff:0:a.b.c.d
-  if (
-    (startsWithZeros(groups, 5) && g5 === 0xffff) ||
-    startsWithZeros(groups, 6) ||
-    (startsWithZeros(groups, 4) && groups[4] === 0xffff && g5 === 0)
-  ) {
-    return classifyIpv4(embeddedIpv4(g6, g7));
-  }
-  if (g0 === 0x64 && g1 === 0xff9b && startsWithZeros(groups.slice(2), 4)) {
-    return classifyIpv4(embeddedIpv4(g6, g7)); // NAT64 well-known prefix
-  }
-  if (g0 === 0x64 && g1 === 0xff9b && groups[2] === 1) return 'private'; // local-use NAT64
-  if (g0 === 0x2002) return classifyIpv4(embeddedIpv4(g1, groups[2])); // 6to4
-  if (g0 === 0xfd00 && g1 === 0x0ec2 && g7 === 0x254 && startsWithZeros(groups.slice(2), 5)) {
-    return 'forbidden'; // AWS IMDS over IPv6
-  }
-  if ((g0 & 0xffc0) === 0xfe80) return 'forbidden'; // link-local fe80::/10
-  if ((g0 & 0xff00) === 0xff00) return 'forbidden'; // multicast
-  if (g0 === 0x2001 && (g1 === 0 || g1 === 0x0db8)) return 'forbidden'; // Teredo, documentation
-  if (g0 === 0x0100 && startsWithZeros(groups.slice(1), 3)) return 'forbidden'; // discard 100::/64
-  if ((g0 & 0xffc0) === 0xfec0) return 'private'; // deprecated site-local
-  if ((g0 & 0xfe00) === 0xfc00) return 'private'; // unique-local fc00::/7
-  return 'public';
+  const value = groups.reduce((acc, group) => (acc << 16n) | BigInt(group), 0n);
+  const exact = matchIpv6(value, IPV6_EXACT);
+  if (exact) return exact;
+  const embedded = embeddedIpv4Of(groups);
+  if (embedded !== null) return classifyIpv4(embedded);
+  return matchIpv6(value, IPV6_RANGES) ?? 'public';
 }
 
 function classifyName(host: string): HostClass {
