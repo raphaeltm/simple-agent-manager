@@ -290,7 +290,12 @@ async function openChat(page: Page, viewer: Viewer) {
   await expect(page.getByText('Something went wrong')).toHaveCount(0);
   await expect(page.getByText(/passed 20 of 20 runs/).first()).toBeVisible({ timeout: 20_000 });
   // The agent has finished its turn; every image shows the same steady state.
-  await expect(page.getByTestId('session-floating-header')).toContainText('Idle');
+  // A phone's one-row header shows the state as a dot, named in the title button's label.
+  if (isMobile(page)) {
+    await expect(page.getByRole('button', { name: /Idle\. Show session info$/ })).toBeVisible();
+  } else {
+    await expect(page.getByTestId('session-floating-header')).toContainText('Idle');
+  }
 }
 
 function isMobile(page: Page): boolean {

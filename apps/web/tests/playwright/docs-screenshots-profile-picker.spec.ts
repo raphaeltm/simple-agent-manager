@@ -216,14 +216,16 @@ test('docs: a new chat offers recent profiles as cards', async ({ page }) => {
     return;
   }
   // On a desktop, keep to the chat column: from just above the question down to the composer.
-  const composer = page
-    .locator('textarea[role="combobox"]')
-    .locator('xpath=ancestor::*[contains(@class, "glass-chrome")][1]');
   const question = (await page.getByText('Who should take this?').boundingBox())!;
-  const box = (await composer.boundingBox())!;
+  const input = (await page.locator('textarea[role="combobox"]').boundingBox())!;
+  const to = (await toControl(page).boundingBox())!;
+  const grid = (await cards.boundingBox())!;
+  const left = Math.min(input.x, to.x, grid.x) - 24;
+  const right = Math.max(input.x + input.width, grid.x + grid.width) + 24;
   const top = Math.max(0, question.y - 48);
+  const bottom = Math.max(input.y + input.height, to.y + to.height) + 24;
   await docsShot(page, 'new-chat-profiles', {
-    clip: { x: box.x, y: top, width: box.width, height: box.y + box.height - top },
+    clip: { x: left, y: top, width: right - left, height: bottom - top },
   });
 });
 
