@@ -1,0 +1,9 @@
+{
+  "name": "tunnel-gateway-probe",
+  "main": "index.js",
+  "compatibility_date": "2026-11-01",
+  "vars": {
+    "FRP_VHOST_PORT": "7480",
+    "NODE_PORTS": "{\"node-a\":17001,\"node-b\":17002}"
+  }
+}
