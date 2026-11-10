@@ -13,7 +13,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import { stopSubtask } from '../../../src/durable-objects/sam-session/tools/stop-subtask';
 import type { ToolContext } from '../../../src/durable-objects/sam-session/types';
-import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
+import { createRacingD1 } from '../../helpers/racing-d1';
+import { createAllSchemaTables } from '../../helpers/sqlite-d1';
 
 const cleanup = vi.hoisted(() => vi.fn(async () => undefined));
 vi.mock('../../../src/services/task-terminal-cleanup', () => ({
@@ -28,31 +29,15 @@ let sqlite: Database.Database;
 let afterTaskRead: (() => void) | null;
 
 function racingD1(): D1Database {
-  const d1 = createSqliteD1(sqlite) as D1Database & {
-    prepare(sql: string): D1PreparedStatement;
-  };
-  const prepare = d1.prepare.bind(d1);
-  const after = <T>(sql: string, promise: Promise<T>): Promise<T> =>
-    promise.then((result) => {
-      if (afterTaskRead && /^\s*select/i.test(sql) && sql.includes('from "tasks"')) {
-        const hook = afterTaskRead;
-        afterTaskRead = null;
-        hook();
-      }
-      return result;
+  const race = createRacingD1(sqlite, 'tasks');
+  const hook = afterTaskRead;
+  if (hook) {
+    race.afterNextRead(() => {
+      afterTaskRead = null;
+      hook();
     });
-  const wrap = (sql: string, statement: D1PreparedStatement): D1PreparedStatement =>
-    ({
-      ...statement,
-      bind: (...params: unknown[]) => wrap(sql, statement.bind(...params)),
-      all: () => after(sql, statement.all()),
-      raw: (...args: unknown[]) =>
-        after(sql, (statement.raw as (...a: unknown[]) => Promise<unknown>)(...args)),
-      first: (...args: unknown[]) =>
-        after(sql, (statement.first as (...a: unknown[]) => Promise<unknown>)(...args)),
-      run: () => after(sql, statement.run()),
-    }) as D1PreparedStatement;
-  return { ...d1, prepare: (sql: string) => wrap(sql, prepare(sql)) } as D1Database;
+  }
+  return race.d1;
 }
 
 function seedTask(status: string, triggerExecutionStatus?: string): void {

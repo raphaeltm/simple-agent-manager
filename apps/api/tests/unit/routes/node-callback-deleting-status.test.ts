@@ -18,7 +18,8 @@ import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
 import { nodeLifecycleRoutes } from '../../../src/routes/node-lifecycle';
 import { signNodeCallbackToken } from '../../../src/services/jwt';
-import { createAllSchemaTables, createMemoryKv, createSqliteD1 } from '../../helpers/sqlite-d1';
+import { createRacingD1 } from '../../helpers/racing-d1';
+import { createAllSchemaTables, createMemoryKv } from '../../helpers/sqlite-d1';
 
 vi.mock('../../../src/services/vm-admission-control', () => ({
   wakeVmAdmissionWaiters: vi.fn(async () => undefined),
@@ -36,33 +37,16 @@ const NODE_ID = 'node-deploy-1';
 let sqlite: Database.Database;
 let afterFirstNodeRead: (() => void) | null;
 
-/** D1 over SQLite that runs `afterFirstNodeRead` right after the first read of `nodes`. */
 function racingD1(): D1Database {
-  const d1 = createSqliteD1(sqlite) as D1Database & {
-    prepare(sql: string): D1PreparedStatement;
-  };
-  const prepare = d1.prepare.bind(d1);
-  const after = <T>(sql: string, promise: Promise<T>): Promise<T> =>
-    promise.then((result) => {
-      if (afterFirstNodeRead && /^\s*select/i.test(sql) && sql.includes('from "nodes"')) {
-        const hook = afterFirstNodeRead;
-        afterFirstNodeRead = null;
-        hook();
-      }
-      return result;
+  const race = createRacingD1(sqlite, 'nodes');
+  const hook = afterFirstNodeRead;
+  if (hook) {
+    race.afterNextRead(() => {
+      afterFirstNodeRead = null;
+      hook();
     });
-  const wrap = (sql: string, statement: D1PreparedStatement): D1PreparedStatement =>
-    ({
-      ...statement,
-      bind: (...params: unknown[]) => wrap(sql, statement.bind(...params)),
-      all: () => after(sql, statement.all()),
-      raw: (...args: unknown[]) =>
-        after(sql, (statement.raw as (...a: unknown[]) => Promise<unknown>)(...args)),
-      first: (...args: unknown[]) =>
-        after(sql, (statement.first as (...a: unknown[]) => Promise<unknown>)(...args)),
-      run: () => after(sql, statement.run()),
-    }) as D1PreparedStatement;
-  return { ...d1, prepare: (sql: string) => wrap(sql, prepare(sql)) } as D1Database;
+  }
+  return race.d1;
 }
 
 function buildEnv(overrides: Record<string, string> = {}): Env {

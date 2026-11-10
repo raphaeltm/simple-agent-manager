@@ -13,7 +13,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import { applyDeploymentHeartbeat } from '../../../src/routes/node-heartbeat-deployment';
-import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
+import { createRacingD1 } from '../../helpers/racing-d1';
+import { createAllSchemaTables } from '../../helpers/sqlite-d1';
 
 const lifecycleEvents = vi.hoisted(() => [] as Array<Record<string, unknown>>);
 
@@ -33,40 +34,16 @@ const NOW = '2026-11-10T12:00:00.000Z';
 let sqlite: Database.Database;
 let afterEnvironmentRead: (() => void) | null;
 
-/**
- * D1 over SQLite that runs `afterEnvironmentRead` once, immediately after the first read
- * of `deployment_environments` resolves. That is the read-then-write midpoint.
- */
 function racingD1(): D1Database {
-  const d1 = createSqliteD1(sqlite) as D1Database & {
-    prepare(sql: string): D1PreparedStatement;
-  };
-  const prepare = d1.prepare.bind(d1);
-  const wrapResult = <T>(sql: string, promise: Promise<T>): Promise<T> =>
-    promise.then((result) => {
-      if (
-        afterEnvironmentRead &&
-        /^\s*select/i.test(sql) &&
-        sql.includes('"deployment_environments"')
-      ) {
-        const hook = afterEnvironmentRead;
-        afterEnvironmentRead = null;
-        hook();
-      }
-      return result;
+  const race = createRacingD1(sqlite, 'deployment_environments');
+  const hook = afterEnvironmentRead;
+  if (hook) {
+    race.afterNextRead(() => {
+      afterEnvironmentRead = null;
+      hook();
     });
-  const wrapStatement = (sql: string, statement: D1PreparedStatement): D1PreparedStatement =>
-    ({
-      ...statement,
-      bind: (...params: unknown[]) => wrapStatement(sql, statement.bind(...params)),
-      all: () => wrapResult(sql, statement.all()),
-      raw: (...args: unknown[]) =>
-        wrapResult(sql, (statement.raw as (...a: unknown[]) => Promise<unknown>)(...args)),
-      first: (...args: unknown[]) =>
-        wrapResult(sql, (statement.first as (...a: unknown[]) => Promise<unknown>)(...args)),
-      run: () => wrapResult(sql, statement.run()),
-    }) as D1PreparedStatement;
-  return { ...d1, prepare: (sql: string) => wrapStatement(sql, prepare(sql)) } as D1Database;
+  }
+  return race.d1;
 }
 
 function seedEnvironment(status: string): void {
