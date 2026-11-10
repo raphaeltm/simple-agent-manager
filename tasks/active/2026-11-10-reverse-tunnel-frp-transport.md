@@ -43,27 +43,47 @@ leased loopback port; Caddy carries browser WebSockets after the Worker authoriz
 
 ## Implementation checklist
 
-- [ ] shared: `NodeTransport` gains `reverse-tunnel`
-- [ ] cloud-init: frpc pinned+checksummed install, `sam-frpc.service` in the cloudflared slot, credential file, validation, tests (YAML parse + runcmd under sh)
-- [ ] D1 migration 0232 + schema
-- [ ] config: transport resolution, port range, gateway secret, credential key
-- [ ] lease service: allocate (atomic), release (unallocated, non-live), sweep, credential derive/verify
-- [ ] provisioning integration (no DNS, no IP wait, no Origin CA, resume keeps transport)
-- [ ] node route resolver at the seam: `fetchNodeAgent`, ws-* proxy, liveness probe; relay disabled for reverse-tunnel
-- [ ] server-side gates: Origin CA refusal, heartbeat IP backfill
-- [ ] release on every lifecycle path (enumerated in PR)
-- [ ] frps plugin route + tests (cross-node claim refused, owner control, discriminating)
-- [ ] gateway forward_auth route + interception in ws-* proxy and logs stream; split ws-* proxy out of index.ts
-- [ ] deploy/selfhost: frps.toml, caddy fragments
-- [ ] tests proving vm-public-dns / cloudflare-tunnel / cf-container paths unchanged
-- [ ] local proof: control-plane call, vm-agent WS with real JWT, port preview, refused cross-node claim, frpc/frps kill recovery
-- [ ] docs: env reference / .env.example / runtime tunables baseline
+- [x] shared: `NodeTransport` gains `reverse-tunnel`
+- [x] cloud-init: frpc pinned+checksummed install, `sam-frpc.service` in the cloudflared slot, credential file, validation, tests (YAML parse + runcmd under sh)
+- [x] D1 migration 0232 + schema
+- [x] config: transport resolution, port range, gateway secret, credential key
+- [x] lease service: allocate (atomic), release (unallocated, non-live), sweep, credential derive/verify
+- [x] provisioning integration (no DNS, no IP wait, no Origin CA, resume keeps transport)
+- [x] node route resolver at the seam: `fetchNodeAgent`, ws-* proxy, liveness probe; relay disabled for reverse-tunnel
+- [x] server-side gates: Origin CA refusal, heartbeat IP backfill
+- [x] release on every lifecycle path (enumerated in PR)
+- [x] frps plugin route + tests (cross-node claim refused, owner control, discriminating)
+- [x] gateway forward_auth route + interception in ws-* proxy and logs stream; split ws-* proxy out of index.ts
+- [x] deploy/selfhost: frps.toml, caddy fragments
+- [x] tests proving vm-public-dns / cloudflare-tunnel / cf-container paths unchanged
+- [x] local proof: control-plane call, vm-agent WS with real JWT, port preview, refused cross-node claim, frpc/frps kill recovery
+- [x] docs: env reference / .env.example / runtime tunables baseline
 
 ## Acceptance criteria
 
-- [ ] Explicit `VM_AGENT_TRANSPORT=reverse-tunnel` is the only way to select it; other values behave exactly as before (tests)
-- [ ] Two concurrent allocations never share a port (real SQL)
-- [ ] Every node deletion/cleanup path releases the lease (tests per path)
-- [ ] frps plugin refuses a valid credential claiming another node's port; owner control passes; proven discriminating
-- [ ] Gateway endpoint performs the existing ws-* auth (session, terminal token, port cookie/token, public ports) without a second implementation
-- [ ] Local run evidence recorded in the PR
+- [x] Explicit `VM_AGENT_TRANSPORT=reverse-tunnel` is the only way to select it; other values behave exactly as before (tests)
+- [x] Two concurrent allocations never share a port (real SQL)
+- [x] Every node deletion/cleanup path releases the lease (tests per path)
+- [x] frps plugin refuses a valid credential claiming another node's port; owner control passes; proven discriminating
+- [x] Gateway endpoint performs the existing ws-* auth (session, terminal token, port cookie/token, public ports) without a second implementation
+- [x] Local run evidence recorded in the PR
+
+## Implementation notes
+
+- Gateway decision via re-dispatch: `routes/self-host-gateway.ts` rebuilds the original request, marks it
+  (WeakMap, `services/node-websocket-gateway.ts`) and runs it through the SAM app; the ws-* proxy and the
+  logs-stream route return the upstream decision instead of fetching. No second auth implementation.
+- ws-* proxy moved verbatim from `index.ts` to `routes/workspace-subdomain-proxy.ts` (+ `workspace-port-access.ts`).
+- Non-reverse nodes keep the exact node query shape in `fetchNodeAgent` (route resolver reads the lease only for
+  reverse-tunnel nodes), so existing deployments run the same single query.
+- Plain HTTP previews stay on the Worker path (keeps ports-readiness payloads, redirects, Set-Cookie stripping);
+  only WebSocket upgrades go through Caddy. Worker-proxied node responses are cut at celld's
+  `CELLD_FETCH_TIMEOUT_S` (T1 sets 3600).
+- Found by the local E2E run and fixed: braces in an frps.toml comment (frps refuses to start); celld rebuilds
+  `request.url` from `X-Forwarded-Host` (gateway now reads `X-SAM-Gateway-Original-Host`; ws-* proxy never
+  forwards the gateway secret); Caddy `header_up {host}` after a `Host` override is unordered (`vars` capture);
+  node Set-Cookie on non-101 port responses (`header_down`).
+- Dead end: Caddy `header_down` is not applied to 101 upgrade responses; a response-writer `header` rule with
+  `match status 101` is needed for sockets.
+- Found an unrelated pre-existing deadlock in the tunnel firewall script under iptables-legacy:
+  `tasks/backlog/2026-11-10-tunnel-firewall-xtables-lock-deadlock.md`.
