@@ -19,7 +19,11 @@ vi.mock('../../src/components/AuthProvider', () => ({
   useAuth: () => ({ user: { id: mocks.userId }, isAuthenticated: true, isLoading: false }),
 }));
 vi.mock('../../src/hooks/useLoginProviders', () => ({
-  useLoginProviders: () => ({ github: true }),
+  useLoginProviders: () => ({
+    providers: { github: true, google: false, gitlab: false, email: false },
+    failed: false,
+    retry: () => {},
+  }),
 }));
 vi.mock('../../src/components/ApiTokens', () => ({
   ApiTokens: () => <div>Existing API tokens</div>,
