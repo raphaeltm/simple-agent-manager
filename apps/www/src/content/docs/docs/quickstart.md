@@ -20,7 +20,11 @@ whichever it offers. Where the instance can send email you can also select **Ema
 code**: enter your email, then the 6-digit **Sign-in code** from the email. A code expires after 5
 minutes; **Send a new code** gets another. Email codes only sign in an account that already exists
 (and, on a new installation, its administrator), so the first time, use one of the other buttons
-unless you are the person who installed SAM.
+unless you are the person who installed SAM. If an emailed code is the only option and you don't
+have an account yet, ask the person who runs SAM to add GitHub, Google or GitLab sign-in.
+
+If SAM says your account is waiting for approval, the instance approves new accounts by hand: ask
+the person who runs it to approve you.
 
 <img
   src="/images/docs/sign-in-email-code-mobile.png"
@@ -41,19 +45,28 @@ account leave open, so you may see fewer screens than this:
    administrator already set up. **On my own cloud account** connects your Hetzner, DigitalOcean,
    Google Cloud or other account for full machines.
 3. **Where should your code live?** **Let SAM keep it** creates a new Git repository for you with
-   no GitHub needed, where the instance offers it. **On GitHub** works on your GitHub repositories.
-4. **The steps.** A row at the top shows what is left, from **Agent**, **Cloud**, **GitHub** and
-   **Project**:
+   no GitHub needed, where the instance offers it. **On GitHub** (or **In my GitHub repositories**,
+   if you've already connected GitHub) works on your GitHub repositories.
+4. **The steps.** A row at the top shows the steps left: **Agent**, **Cloud**, **GitHub**,
+   **Project**.
    - **Who should do the coding?** Pick an agent, then how it signs in: **Sign in** with your
      Claude or ChatGPT subscription (**Connect with Claude Code** or **Connect with Codex** opens
      the guided sign-in), **API key**, or **SAM AI** when the instance offers SAM-managed AI.
+
+     <img
+       src="/images/docs/onboarding-agent-mobile.png"
+       alt="The Agent step, titled Who should do the coding?, with the steps Agent and Project shown above it. Claude Code is selected from seven agents (Claude Code, OpenAI Codex, Gemini CLI, Google Antigravity, Mistral Vibe, OpenCode and Amp). Below, Sign in is chosen over API key, with a Connect with Claude Code button and the note that it signs in to your Claude subscription with no setup token to paste."
+       width="320"
+     />
+
    - **Which cloud should I use?** Connect your cloud account (only if you chose your own).
    - **Let me into GitHub.** **Install the GitHub app** on the repositories you want, in the new
      tab. SAM notices when you're done.
    - **What are we building?** Name a new project, or choose a **Repository**, then **Create
      project**. SAM also creates the project's first [agent profile](/docs/guides/agents/#agent-profiles)
      for the agent you picked: an Instant chat profile, or a full-machine profile that works on its
-     own and pushes its branch.
+     own and pushes its branch. The full-machine profile's description says it opens pull
+     requests, but like every agent it opens one only when you ask (see [Chat](#5-chat)).
 5. **We're ready.** Select **Start your first chat**, and skip ahead to [Chat](#5-chat).
 
 <img
@@ -70,7 +83,7 @@ later.
 Go to **Settings → Agents** and click **Connect account**. Pick the AI coding agent you want to use — Claude Code, OpenAI Codex, Gemini CLI, Google Antigravity, Mistral Vibe, OpenCode, or Amp — connect it, then give the account a name such as Work or Personal. Depending on the agent, you'll paste an API key or connect a subscription. For Claude Code and Codex, a [guided sign-in](/docs/guides/agents/#connecting-a-subscription-with-guided-sign-in) links your Claude Max/Pro or ChatGPT plan in the browser — no terminal needed. Your credentials stay encrypted in the database — they're never stored as environment variables.
 
 :::note
-You need cloud compute to submit tasks. On a hosted instance it's usually provided for you. To work without any cloud credential at all, use an agent profile whose runtime is **Instant container** — [Instant sessions](/docs/guides/instant-sessions/) start in seconds but don't build your `.devcontainer` or provide Docker, and publication still requires an explicit request to the agent. If you're self-hosting or the operator requires it, add a [Hetzner API token](https://console.hetzner.cloud/), [Scaleway secret key](https://console.scaleway.com/iam/api-keys), [Vultr API key](https://my.vultr.com/settings/#settingsapi), [Infomaniak application credential](https://docs.infomaniak.cloud/identity/applications_credentials/), [DigitalOcean token](https://cloud.digitalocean.com/account/api/tokens), [UpCloud API subaccount](https://hub.upcloud.com/people/accounts), or GCP credential under **Settings → Infrastructure → Cloud accounts**. See [Bring Your Own Cloud](/docs/guides/creating-workspaces/#where-your-workspaces-run-bring-your-own-cloud) for the full list.
+You need cloud compute to submit tasks. On an instance someone else runs, the administrator may provide machines. To work without any cloud credential at all, use an agent profile whose runtime is **Instant container** — [Instant sessions](/docs/guides/instant-sessions/) start in seconds but don't build your `.devcontainer` or provide Docker, and publication still requires an explicit request to the agent. If you're self-hosting or the operator requires it, add a [Hetzner API token](https://console.hetzner.cloud/), [Scaleway secret key](https://console.scaleway.com/iam/api-keys), [Vultr API key](https://my.vultr.com/settings/#settingsapi), [Infomaniak application credential](https://docs.infomaniak.cloud/identity/applications_credentials/), [DigitalOcean token](https://cloud.digitalocean.com/account/api/tokens), [UpCloud API subaccount](https://hub.upcloud.com/people/accounts), or GCP credential under **Settings → Infrastructure → Cloud accounts**. See [Bring Your Own Cloud](/docs/guides/creating-workspaces/#where-your-workspaces-run-bring-your-own-cloud) for the full list.
 :::
 
 ### 4. Add a Repository
@@ -103,9 +116,10 @@ There are two ways to run your own SAM. Both need a Cloudflare account on the **
 ($5/month, for Durable Objects and Containers) and a domain whose DNS Cloudflare manages.
 
 - **The installer**, from your browser: sign in with Cloudflare, pick a domain, approve, and about
-  half an hour later your SAM is live. No GitHub fork or secrets to copy. See
-  [Install SAM with the installer](/docs/guides/installer/), including who can use the hosted
-  installer today.
+  half an hour later your SAM is live. No GitHub fork or secrets to copy. For now, though, the
+  hosted installer only works for a few accounts, so most people host the installer themselves
+  first (a terminal and a Cloudflare API token) or use the fork. See
+  [Install SAM with the installer](/docs/guides/installer/).
 - **A GitHub fork**, deployed by GitHub Actions. More steps, and you control every setting. The
   rest of this section summarizes it; it also needs a GitHub account.
 

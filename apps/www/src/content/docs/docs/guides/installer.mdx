@@ -3,9 +3,11 @@ title: Install SAM with the installer
 description: Install your own SAM in your Cloudflare account from the browser, finish its setup, update it, and host the installer yourself.
 ---
 
-The installer puts a complete SAM in your own Cloudflare account from your browser. You don't need
-a GitHub fork, a terminal or any secrets: you sign in with Cloudflare, pick a domain, approve, and
-about half an hour later your SAM is live. Your agents' machines then run on the cloud account you
+The installer puts a complete SAM in your own Cloudflare account from your browser: you sign in
+with Cloudflare, pick a domain, approve, and about half an hour later your SAM is live. With the
+hosted installer you need no GitHub fork, no terminal and no secrets, but read the note below
+first: for now most people have to host the installer themselves, which takes a terminal and a
+Cloudflare API token. Your agents' machines then run on the cloud account you
 connect in SAM, as with any [self-hosted](/docs/guides/self-hosting/) instance.
 
 :::caution[Who can use the hosted installer today]
@@ -13,8 +15,9 @@ At the time of writing, the hosted installer at
 [install.simple-agent-manager.org](https://install.simple-agent-manager.org) signs you in through a
 Cloudflare OAuth client that is still private, and Cloudflare only lets members of the account that
 owns a private client authorize it. Until it is made public, either
-[host the installer yourself](#host-the-installer-yourself), where its sign-in works for your own
-account, or install with the [self-hosting guide](/docs/guides/self-hosting/). The installer also
+[host the installer yourself](#host-the-installer-yourself) in full mode, where its sign-in works
+for your own account and the steps below are the same, or install with the
+[self-hosting guide](/docs/guides/self-hosting/). The installer also
 still labels a full installation as experimental: it first shipped on 8 November 2026.
 :::
 
@@ -55,7 +58,8 @@ keep your projects' code itself; otherwise you connect GitHub after setup.
    runs in your account and that only you control (**Over to you.** → **Continue to my service →**).
    It shows a recovery credential once: select **Copy**, save it in your password manager, tick
    **I saved it.**, and select **Open my installation service**. You need this credential to come
-   back later.
+   back later. Bookmark the page that opens too: it is your installation service, and you return
+   there to update SAM.
 5. **Start the build.** **Continue to installation controls →**, then **Install SAM**. The page
    shows each stage as it runs (**Step 3 of 13**, with **Show all stages**) and refreshes itself.
    It usually takes about 30 minutes; when SAM's latest release has prebuilt parts that match the
@@ -68,11 +72,12 @@ keep your projects' code itself; otherwise you connect GitHub after setup.
      width="320"
    />
 
-6. **Finish setting up SAM.** When the page says **SAM is live**, the **Finish setting up SAM** panel
-   shows a setup token. Select **Open SAM setup →**: your new SAM opens with the token filled in.
-   Select **Let's go**. If email sending is ready, SAM emails a sign-in code to your administrator
-   email straight away; enter it to sign in, and SAM [walks you through](/docs/quickstart/) connecting
-   an agent and creating your first project.
+6. **Finish setting up SAM.** When the page says **SAM is live**, select **Finish setting up SAM →**.
+   The next page shows your setup token; select **Open SAM setup →**, and your new SAM opens with
+   the token filled in. Select **Let's go**. If email sending is ready, SAM emails a sign-in code
+   to your administrator email straight away; enter it to sign in, and SAM
+   [walks you through](/docs/quickstart/#2-let-sam-set-you-up) connecting an agent and creating
+   your first project.
 
    <img
      src="/images/docs/installer-sam-is-live-mobile.png"
@@ -88,7 +93,13 @@ keep your projects' code itself; otherwise you connect GitHub after setup.
 If Cloudflare is still verifying the address SAM emails from, setup says so: try again a few
 minutes later. If email couldn't be set up at all, setup asks you to choose how you'll sign in
 instead, with a GitHub, Google or GitLab OAuth app whose **Client ID** and **Client secret** you
-enter, then **Finish setup**. You can add other sign-in methods later in **Admin → Integrations**.
+enter, then **Finish setup**. The [self-hosting guide](/docs/guides/self-hosting/#step-4-create-github-app)
+explains how to create each app and which redirect address to register.
+
+**Let other people in.** An emailed code only creates the administrator's account: everyone else
+needs another way to sign in the first time. Once you're in, add GitHub, Google or GitLab sign-in
+in **Admin → Integrations** (see [Platform integrations after deploy](/docs/guides/self-hosting/#platform-integrations-after-deploy)),
+then invite people to your projects.
 
 ### If the review is blocked
 
@@ -151,13 +162,14 @@ You need:
 
 ### Deploy
 
-Install the repository dependencies, then supply your account credentials through your shell or secret manager. Do not commit the token or paste it into an issue or chat.
+Install the repository dependencies, then supply your account credentials through your shell or secret manager. Do not commit the token or paste it into an issue or chat. `INSTALLER_MODE=full` is what lets the installer install SAM; without it, a new installer starts in bootstrap mode and only creates the installation service.
 
 ```sh
 pnpm install --frozen-lockfile
 export CLOUDFLARE_API_TOKEN
 export CLOUDFLARE_ACCOUNT_ID
 export BASE_DOMAIN=example.com
+export INSTALLER_MODE=full
 pnpm --filter @simple-agent-manager/installer run deploy
 ```
 
@@ -165,11 +177,9 @@ The deployment creates the installer at `https://install.example.com`, provision
 
 Open that address and sign in with Cloudflare. Private clients can only be authorized by members of the owning Cloudflare account. Public promotion is self-serve: supply a name, logo, client URL and scopes, verify the client URL's domain with a DNS TXT record, then change visibility to public. There is no approval queue, and promotion is permanent. See Cloudflare's [domain verification and public-client setup](https://developers.cloudflare.com/fundamentals/oauth/create-an-oauth-client/).
 
-### Full installations from your own installer
+### What full mode asks for
 
-A fresh installer deployment starts in bootstrap mode, which only creates the installation service.
-To offer full installations, as the hosted installer does, deploy with `INSTALLER_MODE=full`. Its
-OAuth client then asks for the broader permissions an installation needs: Workers, KV, R2, D1,
+In full mode the installer's OAuth client then asks for the broader permissions an installation needs: Workers, KV, R2, D1,
 Containers, DNS, certificates, Workers routes, AI Gateway, API tokens, email sending and routing,
 and Cloudflare Artifacts (the full list is `FULL_SCOPES` in `apps/installer/scripts/deploy.mjs`).
 Redeploying without `INSTALLER_MODE` keeps the deployed mode. The deployment publishes the installer
@@ -178,13 +188,13 @@ leaves an installer whose health check never reports `oauthConfigured`.
 
 ### Use an existing OAuth client
 
-Set `OAUTH_CLIENT_ID` and `OAUTH_CLIENT_SECRET` before running the deployment command. The client must use Authorization Code with `client_secret_post`, the callback `https://install.example.com/oauth/callback`, and scopes `account-settings.read workers-scripts.write`. Do not use `workers-scripts.edit`: it is the Workers Editor role, which cannot create the installation service Worker. Refresh tokens are not requested.
+Set `OAUTH_CLIENT_ID` and `OAUTH_CLIENT_SECRET` before running the deployment command. The client must use Authorization Code with `client_secret_post`, the callback `https://install.example.com/oauth/callback`, and, for bootstrap mode, the scopes `account-settings.read workers-scripts.write`. A full-mode installer's client needs every scope in `FULL_SCOPES` (see [What full mode asks for](#what-full-mode-asks-for)). Do not use `workers-scripts.edit`: it is the Workers Editor role, which cannot create the installation service Worker. Refresh tokens are not requested.
 
 If initial client creation succeeds but saving its secret fails, rotate the secret in Cloudflare and supply it through these variables before retrying. Rerunning deployment normally preserves the existing client and secrets.
 
 ### Remove your installer
 
-Delete the `sam-installer-self-hosted` Worker and its OAuth client in your Cloudflare dashboard. Remove only the `sam-maintenance-…` services and durable state belonging to your test, and revoke outstanding installer authorizations. Installations it made are separate: they live on in the accounts they were installed into (see [Remove an installation](#remove-an-installation)). Review the installation's recorded resource identities and retain needed data or backups before deleting them; there is no automatic uninstall.
+Delete the `sam-installer-self-hosted` Worker and its OAuth client in your Cloudflare dashboard. Remove only the `sam-maintenance-…` services and durable state belonging to installations you no longer need, and revoke outstanding installer authorizations. Installations it made are separate: they live on in the accounts they were installed into (see [Remove an installation](#remove-an-installation)). Review the installation's recorded resource identities and retain needed data or backups before deleting them; there is no automatic uninstall.
 
 ## Inspect the code
 

@@ -13,7 +13,14 @@
  *     --project="Desktop (1280x800)" --project="iPhone SE (375x667)"
  */
 import { expect, type Page, type Route, test } from '@playwright/test';
+import type {
+  CCProfileAttachmentItem,
+  CredentialLimitCredentialSummary,
+  CredentialLimitLevel,
+  CredentialLimitWindowSummary,
+} from '@simple-agent-manager/shared';
 
+import { accountRows, mergeRows } from '../unit/components/accounts/fixtures';
 import { makeMockUser, seedTheme } from './audit-helpers';
 import { docsShot, opaqueBackdrop } from './docs-shot';
 
@@ -140,6 +147,113 @@ const USAGE = ['p-brainstormer', 'p-careful-builder', 'p-code-reviewer'].map(
   })
 );
 
+/**
+ * Accounts and their usage, so each profile's ring shows what is left: the default Claude
+ * account is nearly used up, Careful Builder is pinned to a second Claude account with room
+ * (so SAM offers it as the switch), and the Codex account is comfortable.
+ */
+const ACCOUNTS = mergeRows(
+  accountRows({
+    id: 'personal',
+    name: 'Personal Max',
+    kind: 'agent',
+    target: 'claude-code',
+    credentialKind: 'oauth-token',
+    isDefault: true,
+  }),
+  accountRows({
+    id: 'team',
+    name: 'Team Claude',
+    kind: 'agent',
+    target: 'claude-code',
+    credentialKind: 'oauth-token',
+  }),
+  accountRows({
+    id: 'work',
+    name: 'Work ChatGPT',
+    kind: 'agent',
+    target: 'openai-codex',
+    credentialKind: 'oauth-token',
+    isDefault: true,
+  })
+);
+
+const PINS: CCProfileAttachmentItem[] = [
+  {
+    id: 'pin-careful',
+    configurationId: 'cfg-team',
+    agentProfileId: 'p-careful-builder',
+    profileName: 'Careful Builder',
+    projectId: PROJECT_ID,
+    projectName: PROJECT.name,
+    consumerKind: 'agent',
+    consumerTarget: 'claude-code',
+    isActive: true,
+    createdAt: '2026-11-01T00:00:00.000Z',
+    updatedAt: '2026-11-01T00:00:00.000Z',
+  },
+];
+
+function limitWindow(
+  windowType: string,
+  utilizationPercent: number,
+  level: CredentialLimitLevel,
+  resetsInMs: number,
+  now: number
+): CredentialLimitWindowSummary {
+  return {
+    windowType,
+    provider: windowType.startsWith('claude') ? 'anthropic' : 'openai',
+    source: 'mock',
+    status: level === 'ok' ? 'allowed' : 'allowed_warning',
+    level,
+    utilizationPercent,
+    limitAmount: null,
+    remainingAmount: null,
+    windowMinutes: windowType.endsWith('five_hour') ? 300 : 10080,
+    resetsAt: now + resetsInMs,
+    observedAt: now - 2 * 60_000,
+    updatedAt: now - 2 * 60_000,
+  };
+}
+
+function usage(
+  credentialId: string,
+  agentType: string,
+  windows: CredentialLimitWindowSummary[]
+): CredentialLimitCredentialSummary {
+  return {
+    credentialReference: `cc_credentials:${credentialId}`,
+    credentialId,
+    credentialName: null,
+    credentialSource: 'user',
+    provider: windows[0]!.provider,
+    providerMode: 'oauth',
+    agentType,
+    level: 'ok',
+    observedAt: Math.max(...windows.map((window) => window.observedAt)),
+    windows,
+  };
+}
+
+/** Reset times are relative to the response, with slack, so the countdown reads 52m. */
+function limits(now: number) {
+  return [
+    usage('cred-personal', 'claude-code', [
+      limitWindow('claude.five_hour', 94, 'critical', 52 * 60_000 + 30_000, now),
+      limitWindow('claude.seven_day', 61, 'ok', 3 * 24 * HOUR, now),
+    ]),
+    usage('cred-team', 'claude-code', [
+      limitWindow('claude.five_hour', 17, 'ok', 3 * HOUR, now),
+      limitWindow('claude.seven_day', 22, 'ok', 5 * 24 * HOUR, now),
+    ]),
+    usage('cred-work', 'openai-codex', [
+      limitWindow('codex.primary', 40, 'ok', 2 * HOUR, now),
+      limitWindow('codex.secondary', 35, 'ok', 4 * 24 * HOUR, now),
+    ]),
+  ];
+}
+
 async function setupMocks(page: Page) {
   await page.addInitScript((id) => {
     localStorage.setItem(`sam-onboarding-wizard-dismissed-${id}`, 'true');
@@ -150,6 +264,14 @@ async function setupMocks(page: Page) {
     if (path.includes('/api/auth/')) return respond(MOCK_USER);
     if (path.startsWith('/api/notifications'))
       return respond({ notifications: [], unreadCount: 0 });
+    if (path === '/api/cc/credentials') return respond({ credentials: ACCOUNTS.credentials });
+    if (path === '/api/cc/configurations')
+      return respond({ configurations: ACCOUNTS.configurations });
+    if (path === '/api/cc/attachments') return respond({ attachments: ACCOUNTS.attachments });
+    if (path === '/api/cc/profile-attachments') return respond({ attachments: PINS });
+    if (path === '/api/credentials/resolution-status') return respond({ consumers: [] });
+    if (path === '/api/credentials/limits')
+      return respond({ credentials: limits(Date.now()), generatedAt: Date.now() });
     // A finished setup, so the navigation shows no "Complete Setup" prompt.
     if (path === '/api/credentials/agent')
       return respond({ credentials: [{ agentType: 'claude-code', isActive: true }] });
@@ -210,6 +332,11 @@ test('docs: a new chat offers recent profiles as cards', async ({ page }) => {
   await expect(
     cards.getByText('Talk through ideas and designs before anyone writes code.')
   ).toBeVisible();
+  // The usage this image exists to show: a ring and words on the nearly-used-up account, and
+  // the warning above the message box.
+  const brainstormer = cards.getByRole('button', { name: /^Brainstormer/ });
+  await expect(brainstormer.getByText(/^6% left · resets/)).toBeVisible();
+  await expect(page.getByTestId('profile-usage-nudge')).toContainText('6% left on Personal Max');
   await page.mouse.move(2, 2);
   if (isMobile(page)) {
     await docsShot(page, 'new-chat-profiles-mobile');

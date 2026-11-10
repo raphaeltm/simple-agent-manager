@@ -547,15 +547,32 @@ async function editStressedPool(page: Page, screenshotName: string) {
     const viewport = page.viewportSize()!;
     const phone = viewport.width < 500;
     const section = page.getByRole('region', { name: 'Provider order' });
+    // The guide's example puts the account that allows machines first; restore the audit's
+    // order afterwards so the save below still checks what this test arranged.
+    const hetzner = order.getByRole('listitem').filter({ hasText: /^\d*\.?\s*Hetzner/ });
+    const hetznerTitle = (await hetzner.locator('div > div').first().textContent())!.replace(
+      /^\d+\.\s*/,
+      ''
+    );
+    const hetznerIndex = (await orderTitles(page)).indexOf(hetznerTitle);
+    for (let i = 0; i < hetznerIndex; i += 1)
+      await order.getByRole('button', { name: `Move ${hetznerTitle} up` }).click();
+    await expect(order.getByRole('listitem').first()).toContainText(hetznerTitle);
     // A tall window, scrolled so the section sits above the sticky save bar.
     await page.setViewportSize({ width: viewport.width, height: 2000 });
-    await section.evaluate((el) => el.scrollIntoView({ block: 'start' }));
+    await section.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+    const box = (await section.boundingBox())!;
     await docsShot(
       page,
       phone ? 'compute-pool-provider-order-mobile' : 'compute-pool-provider-order',
-      section
+      {
+        clip: { x: box.x - 16, y: box.y - 16, width: box.width + 32, height: box.height + 32 },
+      }
     );
     await page.setViewportSize(viewport);
+    for (let i = 0; i < hetznerIndex; i += 1)
+      await order.getByRole('button', { name: `Move ${hetznerTitle} down` }).click();
+    expect(await orderTitles(page)).toEqual(reorderedTitles);
   }
 
   // Each click removes its button, so always expand the first one left.

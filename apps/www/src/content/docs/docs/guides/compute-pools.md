@@ -71,8 +71,8 @@ memory rises above the middle line, CPU hangs below it, and the dashed lines mar
 for the sessions running there. Stopped sessions stay in the list, but what was set aside for them
 no longer counts. When a running session has no reading yet, the machine's totals say **partial**. Under the chart, each session is a row with its chat's title (select
 it to open the chat), who started it, the project and how long it has been running, a small chart of
-its own, and what it is using against what was set aside, for example **2.9/4.0 GB** and
-**1.3/2.0 vCPU**.
+its own, and what it is using against what was set aside, for example **2.8/4.0 GB** and
+**0.7/2.0 vCPU**.
 
 <picture>
   <source media="(max-width: 40em)" srcset="/images/docs/nodes-machine-mobile.png 2x" />
@@ -200,10 +200,13 @@ A pool can rank its sources: for example Google Cloud first, Hetzner second. Whe
 strategy or price would otherwise prefer. Within one source, the strategy still decides. Sources the
 order does not list come after every listed one.
 
-To choose which cloud account SAM tries first:
+Every account you want in the order must already be connected as one of the pool's
+[sources](#sources), and a project or agent profile that sets a default provider still limits the
+pool to that provider. To choose which cloud account SAM tries first:
 
-1. Open the pool on its Infrastructure page (see [Where to find pools](#where-to-find-pools-in-the-app))
-   and select **Edit**.
+1. Open the pool: **Project → Settings → Infrastructure** for a project's pool, or the
+   **Infrastructure** tab in **Settings** for your own (see
+   [Where to find pools](#where-to-find-pools-in-the-app)). Select **Edit**.
 2. Under **Provider order**, choose **Try accounts in this order**.
 3. Use the up and down arrows to put the account SAM should try first at the top. Each row says how
    many machine types it allows; an account with **No machines allowed yet** can't be used until you
@@ -214,7 +217,7 @@ To choose which cloud account SAM tries first:
   <source media="(max-width: 40em)" srcset="/images/docs/compute-pool-provider-order-mobile.png 2x" />
   <img
     src="/images/docs/compute-pool-provider-order.png"
-    alt="The Provider order section of a pool being edited. Try accounts in this order is selected over Every account is equal. Six accounts are listed in order with up and down arrows: Scaleway, then Hetzner with 9 allowed machines, then Google Cloud, Vultr, DigitalOcean and UpCloud, each reading No machines allowed yet."
+    alt="The Provider order section of a pool being edited. Try accounts in this order is selected over Every account is equal. Six accounts are listed in order with up and down arrows: Hetzner first, with 9 allowed machines, then Scaleway, Google Cloud, Vultr, DigitalOcean and UpCloud, each reading No machines allowed yet."
   />
 </picture>
 
@@ -257,8 +260,9 @@ SAM does **not** move to another provider after an error that could mean a machi
 anyway, such as a timeout or an unclear `503`, or after a permission or configuration error. Those
 fail the run, so a broken credential is not hidden and no machine is ever created twice.
 
-Sources that share a rank do not fall back to each other; give them different ranks if you want
-one to back up the other. Without an order, nothing falls back across sources. Each attempt,
+Sources that share a rank (possible only through the API; the editor's list always gives each
+account its own place) do not fall back to each other; give them different ranks if you want one to
+back up the other. Without an order, nothing falls back across sources. Each attempt,
 including skipped sources and the reason, appears in the run's placement details.
 
 ### Allowed offerings

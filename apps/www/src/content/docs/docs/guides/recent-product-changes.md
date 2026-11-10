@@ -65,12 +65,14 @@ Also changed this week:
   → [Wake failed](/docs/guides/session-troubleshooting/#wake-failed)
 - **The default disk is 15 GB** (it was 40 GB). Set **Disk (GB)** for large builds.
   → [Machine sizing](/docs/guides/creating-workspaces/#machine-sizing)
-- **Finished chats go to sleep sooner.** A chat idle for 15 minutes sleeps even while its agent
-  reports in, and background work keeps it awake for up to two hours.
+- **Finished chats go to sleep sooner.** A chat whose agent has done no work for 15 minutes now
+  sleeps, even though the agent still checks in with SAM, and work the agent left running in the
+  background keeps it awake for up to two hours.
 - **New machines aren't refused for being busy setting up,** and work goes to the reusable machine
   with the shortest setup queue. A fresh machine no longer fails its own first task.
-- **Codex runs without its apps and plugins** unless you turn them on, and a Codex chat on a pinned
-  account keeps refreshing that account, not your default.
+- **Codex runs without its apps and plugins** unless you turn them on in its config file, and a
+  Codex chat on a pinned account keeps refreshing that account, not your default.
+  → [OpenAI Codex](/docs/guides/agents/#openai-codex)
 - **Another agent's words never appear as yours.** Messages between agents, and prompts an agent
   scheduled, arrive as notices from SAM. → [Scheduled actions](/docs/guides/scheduled-actions/)
 - **Agents see fewer, grouped SAM tools** (`ideas_read`, `tasks_read` and so on, with a `method`).
@@ -82,7 +84,8 @@ Also changed this week:
 
 Which release brought what, if you update a self-hosted instance:
 
-- **v2026.11.04**: workspace stop in seconds, lifecycle latency monitoring, Operations tools (part).
+- **v2026.11.04**: workspace stop in seconds, lifecycle latency monitoring, the first Operations
+  debugger tools.
 - **v2026.11.05**: SAM Glass chat, live steering, the Nodes page, Operations approvals in chat.
 - **v2026.11.06**: Google Antigravity, the Account Map, event delivery steers by default.
 - **v2026.11.07**: Profiles page usage, provider-limit **Resume task**, bounded automatic sleep.
@@ -92,8 +95,10 @@ Which release brought what, if you update a self-hosted instance:
   picker, one memory policy for placement.
 - **v2026.11.09**: the provider order editor, the 15 GB disk default, hosted trials removed,
   hardened deployment publishing.
-- **The first release after v2026.11.09**: the new first-run setup and onboarding, email sign-in,
-  SAM-hosted repositories during onboarding.
+- **The next release after v2026.11.09** (not yet tagged when this was written): the new first-run
+  setup and onboarding, email sign-in, SAM-hosted repositories during onboarding.
+
+Also for admins:
 
 - **Operations debugger tools** let agents in the Operations project read across the fleet and ask
   to run approved actions, which superadmins approve on a card in the chat or in **Admin →

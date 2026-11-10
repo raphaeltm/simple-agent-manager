@@ -30,7 +30,10 @@ test.beforeEach(({ page }) => {
   test.skip((page.viewportSize()?.width ?? 0) > 500, 'phone captures only');
 });
 
-/** A fresh account on an installation that offers Instant and SAM-hosted repositories. */
+/**
+ * A fresh account on an installation that offers Instant, its own machines and SAM-hosted
+ * repositories, so every question shows all of its choices.
+ */
 async function setupOnboardingMocks(page: Page) {
   await page.route('**/api/**', async (route: Route) => {
     const p = new URL(route.request().url()).pathname;
@@ -46,7 +49,7 @@ async function setupOnboardingMocks(page: Page) {
       return jsonResponse(route, 200, {
         available: false,
         agentType: null,
-        hasInfraCredential: false,
+        hasInfraCredential: true,
         hasAgentCredential: false,
         dailyTokenBudget: 0,
         dailyTokenUsage: 0,
@@ -92,17 +95,16 @@ async function shot(page: Page, name: string) {
 
 test('docs: onboarding from hello to the first chat', async ({ page }) => {
   const wizard = await beginOnboarding(page);
-  await shot(page, 'onboarding-hello-mobile');
-
   await wizard.getByRole('button', { name: /Let's get you set up/ }).click();
   await expect(
     wizard.getByRole('heading', { name: 'Where should your agents work?' })
   ).toBeVisible();
+  for (const label of [/Right here, on Cloudflare/, /installation's machines/, /my own cloud/])
+    await expect(wizard.getByRole('button', { name: label })).toBeVisible();
   await shot(page, 'onboarding-where-agents-work-mobile');
 
   await wizard.getByRole('button', { name: /Right here, on Cloudflare/ }).click();
   await expect(wizard.getByRole('heading', { name: 'Where should your code live?' })).toBeVisible();
-  await shot(page, 'onboarding-where-code-lives-mobile');
 
   await wizard.getByRole('button', { name: /Let SAM keep it/ }).click();
   await expect(wizard.getByRole('heading', { name: 'Who should do the coding?' })).toBeVisible();
@@ -119,7 +121,6 @@ test('docs: onboarding from hello to the first chat', async ({ page }) => {
 
   await expect(wizard.getByRole('heading', { name: "We're ready." })).toBeVisible();
   await expect(wizard.getByRole('button', { name: /Start your first chat/ })).toBeVisible();
-  await shot(page, 'onboarding-ready-mobile');
 });
 
 /** A new instance whose email sending is ready, with no OAuth provider configured. */
