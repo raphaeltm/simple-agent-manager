@@ -7,11 +7,7 @@
  * resolves to is computed by the real account model and shared resolver.
  */
 import { expect, type Page, test } from '@playwright/test';
-import type {
-  CCProfileAttachmentItem,
-  CredentialLimitCredentialSummary,
-  CredentialLimitWindowSummary,
-} from '@simple-agent-manager/shared';
+import type { CCProfileAttachmentItem } from '@simple-agent-manager/shared';
 
 import { accountRows, mergeRows } from '../unit/components/accounts/fixtures';
 import {
@@ -22,6 +18,7 @@ import {
   seedTheme,
   setupAuditRoutes,
 } from './audit-helpers';
+import { credentialUsage as usage, limitWindow } from './credential-limit-fixtures';
 import { makeAgentProfile, respondToProfilePageRoute } from './profile-account-fixtures';
 
 const USER = makeMockUser({
@@ -149,47 +146,6 @@ const PINS: CCProfileAttachmentItem[] = [
     updatedAt: '2026-11-01T00:00:00.000Z',
   },
 ];
-
-function limitWindow(
-  windowType: string,
-  utilizationPercent: number,
-  overrides: Partial<CredentialLimitWindowSummary> = {}
-): CredentialLimitWindowSummary {
-  return {
-    windowType,
-    provider: windowType.startsWith('claude') ? 'anthropic' : 'openai',
-    source: 'mock',
-    status: 'allowed',
-    level: 'ok',
-    utilizationPercent,
-    limitAmount: null,
-    remainingAmount: null,
-    windowMinutes: windowType.endsWith('primary') ? 300 : windowType.endsWith('secondary') ? 10080 : null,
-    resetsAt: NOW + 3 * HOUR,
-    observedAt: NOW - 2 * 60_000,
-    updatedAt: NOW - 2 * 60_000,
-    ...overrides,
-  };
-}
-
-function usage(
-  credentialId: string,
-  agentType: string,
-  windows: CredentialLimitWindowSummary[]
-): CredentialLimitCredentialSummary {
-  return {
-    credentialReference: `cc_credentials:${credentialId}`,
-    credentialId,
-    credentialName: null,
-    credentialSource: 'user',
-    provider: windows[0]!.provider,
-    providerMode: 'oauth',
-    agentType,
-    level: 'ok',
-    observedAt: Math.max(...windows.map((w) => w.observedAt)),
-    windows,
-  };
-}
 
 const LIMITS = [
   usage('cred-max', 'claude-code', [

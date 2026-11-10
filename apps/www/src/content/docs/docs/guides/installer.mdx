@@ -93,13 +93,15 @@ keep your projects' code itself; otherwise you connect GitHub after setup.
 If Cloudflare is still verifying the address SAM emails from, setup says so: try again a few
 minutes later. If email couldn't be set up at all, setup asks you to choose how you'll sign in
 instead, with a GitHub, Google or GitLab OAuth app whose **Client ID** and **Client secret** you
-enter, then **Finish setup**. The [self-hosting guide](/docs/guides/self-hosting/#step-4-create-github-app)
-explains how to create each app and which redirect address to register.
+enter, then **Finish setup**. [Platform integrations after deploy](/docs/guides/self-hosting/#platform-integrations-after-deploy)
+in the self-hosting guide explains how to create each app. For Google sign-in, register the redirect
+address `https://api.<your domain>/api/auth/callback/google`.
 
 **Let other people in.** An emailed code only creates the administrator's account: everyone else
 needs another way to sign in the first time. Once you're in, add GitHub, Google or GitLab sign-in
 in **Admin → Integrations** (see [Platform integrations after deploy](/docs/guides/self-hosting/#platform-integrations-after-deploy)),
-then invite people to your projects.
+then invite people to your projects. If you turned on signup approval, approve them in **Admin →
+Users**.
 
 ### If the review is blocked
 
@@ -179,7 +181,7 @@ Open that address and sign in with Cloudflare. Private clients can only be autho
 
 ### What full mode asks for
 
-In full mode the installer's OAuth client then asks for the broader permissions an installation needs: Workers, KV, R2, D1,
+In full mode the installer's OAuth client asks for the broader permissions an installation needs: Workers, KV, R2, D1,
 Containers, DNS, certificates, Workers routes, AI Gateway, API tokens, email sending and routing,
 and Cloudflare Artifacts (the full list is `FULL_SCOPES` in `apps/installer/scripts/deploy.mjs`).
 Redeploying without `INSTALLER_MODE` keeps the deployed mode. The deployment publishes the installer
