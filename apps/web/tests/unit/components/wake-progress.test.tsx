@@ -168,6 +168,76 @@ describe('useWakeProgress', () => {
     expect(result.current.isWaking).toBe(true);
   });
 
+  // The same chat can wake, go back to sleep and wake again while the tab stays open.
+  // The settled latch used to re-arm only on a session switch, so every update of the
+  // second wake was dropped (state-machine audit D8).
+  it('shows a second wake of the same chat after it went back to sleep', () => {
+    const { result, rerender } = renderHook(
+      ({ status }: { status: string }) => useWakeProgress('s1', status),
+      { initialProps: { status: 'sleeping' } }
+    );
+
+    act(() => {
+      result.current.applyWakeProgress({ recoveryStatus: 'waking', wakePhase: 'agent_session' });
+    });
+    act(() => {
+      result.current.applyWakeProgress({ recoveryStatus: 'restored', wakePhase: null });
+    });
+    rerender({ status: 'active' });
+    rerender({ status: 'sleeping' });
+    act(() => {
+      result.current.applyWakeProgress({ recoveryStatus: 'waking', wakePhase: 'node_selection' });
+    });
+
+    expect(result.current.isWaking).toBe(true);
+    expect(result.current.wakePhase).toBe('node_selection');
+  });
+
+  it('keeps the latch when the first status read after the restore is sleeping', () => {
+    // Control for the re-arm: the stale window right after `restored` is exactly when
+    // the session can still read `sleeping`, including the very first status the view
+    // learns (it is unknown until the session loads). Only a real transition from a
+    // known non-sleeping status may re-arm.
+    const { result, rerender } = renderHook(
+      ({ status }: { status: string | undefined }) => useWakeProgress('s1', status),
+      { initialProps: { status: undefined as string | undefined } }
+    );
+
+    act(() => {
+      result.current.applyWakeProgress({ recoveryStatus: 'waking', wakePhase: 'agent_session' });
+    });
+    act(() => {
+      result.current.applyWakeProgress({ recoveryStatus: 'restored', wakePhase: null });
+    });
+    rerender({ status: 'sleeping' });
+    act(() => {
+      result.current.hydrateWakeProgress(
+        snapshot({ recoveryStatus: 'waking', wakePhase: 'workspace_ready' })
+      );
+    });
+
+    expect(result.current.isWaking).toBe(false);
+  });
+
+  it('keeps the latch while the session stays active', () => {
+    const { result, rerender } = renderHook(
+      ({ status }: { status: string }) => useWakeProgress('s1', status),
+      { initialProps: { status: 'sleeping' } }
+    );
+
+    act(() => {
+      result.current.applyWakeProgress({ recoveryStatus: 'restored', wakePhase: null });
+    });
+    rerender({ status: 'active' });
+    act(() => {
+      result.current.hydrateWakeProgress(
+        snapshot({ recoveryStatus: 'waking', wakePhase: 'workspace_ready' })
+      );
+    });
+
+    expect(result.current.isWaking).toBe(false);
+  });
+
   it('does not carry a wake across a session switch', () => {
     // Discriminating: without the sessionId reset effect, switching conversations
     // paints the previous one's banner over the new one.

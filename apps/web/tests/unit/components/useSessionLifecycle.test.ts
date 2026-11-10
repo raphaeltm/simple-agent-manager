@@ -246,6 +246,59 @@ describe('useSessionLifecycle loading semantics', () => {
     expect(result.current.wakePhase).toBe('node_provisioning');
   });
 
+  it('opens the socket and shows phases for a second wake of the same open chat', async () => {
+    // State-machine audit D8. The chat wakes, finishes, sleeps again and is woken
+    // again while the tab stays open. The settled latch used to re-arm only on a
+    // session switch, so the second wake's `waking` updates were all dropped:
+    // `isWaking` stayed false and the socket gate (`active || isWaking`) stayed shut.
+    // Each server state below is delivered the way a poll delivers it (a refetch of
+    // the session detail), in order.
+    type ServerState = 'wake1' | 'restored' | 'asleep' | 'wake2';
+    let server: ServerState = 'wake1';
+    const response = (state: ServerState) => {
+      const status = state === 'restored' ? 'active' : 'sleeping';
+      const base = detail([msg('a', 1000)], false, status);
+      const wake =
+        state === 'wake1'
+          ? { recoveryStatus: 'waking', wakePhase: 'node_provisioning' }
+          : state === 'wake2'
+            ? { recoveryStatus: 'waking', wakePhase: 'workspace_creation' }
+            : state === 'restored'
+              ? { recoveryStatus: 'restored', wakePhase: null }
+              : {};
+      return { ...base, state: { ...base.state, ...wake } };
+    };
+    mocks.getChatSession.mockImplementation(async () => response(server));
+
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+    const deliver = async (next: ServerState) => {
+      server = next;
+      await act(async () => {
+        await queryClient.invalidateQueries();
+      });
+    };
+
+    await waitFor(() => expect(result.current.isWaking).toBe(true));
+
+    await deliver('restored');
+    await waitFor(() => expect(result.current.session?.status).toBe('active'));
+    expect(result.current.isWaking).toBe(false);
+
+    await deliver('asleep');
+    await waitFor(() => expect(result.current.session?.status).toBe('sleeping'));
+    expect(result.current.isWaking).toBe(false);
+    const enabledBeforeSecondWake = mocks.wsOptions.at(-1)?.enabled;
+
+    await deliver('wake2');
+    await waitFor(() => expect(result.current.isWaking).toBe(true));
+    expect(result.current.wakePhase).toBe('workspace_creation');
+    await waitFor(() => expect(mocks.wsOptions.at(-1)?.enabled).toBe(true));
+    // Liveness of the gate: it was shut while asleep, so the reopen is this wake's doing.
+    expect(enabledBeforeSecondWake).toBe(false);
+  });
+
   it('does NOT open the socket for an ordinary sleeping session', async () => {
     // Control for the case above: without this, "enabled: true" could simply mean
     // the gate was removed, which would connect a socket for every sleeping

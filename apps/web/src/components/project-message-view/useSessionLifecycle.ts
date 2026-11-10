@@ -101,7 +101,7 @@ export function useSessionLifecycle(
     onStateSnapshot: hydratePlan,
   });
 
-  const wake = useWakeProgress(sessionId);
+  const wake = useWakeProgress(sessionId, session?.status);
   const { hydrateWakeProgress } = wake;
 
   const hydrateState = useCallback(

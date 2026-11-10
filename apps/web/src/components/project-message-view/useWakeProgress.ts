@@ -24,6 +24,10 @@
  *
  * State resets on `sessionId` change so one conversation's wake can never paint a
  * banner over another's.
+ *
+ * The settled latch (below) re-arms when the session is seen going back to sleep
+ * (any status → `sleeping`). A conversation can wake, sleep and wake again while the
+ * tab stays open; without the re-arm the second wake's updates were all dropped.
  */
 
 import {
@@ -72,7 +76,10 @@ function isForwardProgress(
   return EXECUTION_STEP_ORDER[next] >= EXECUTION_STEP_ORDER[current];
 }
 
-export function useWakeProgress(sessionId: string | undefined): UseWakeProgressReturn {
+export function useWakeProgress(
+  sessionId: string | undefined,
+  sessionStatus?: string | null
+): UseWakeProgressReturn {
   const [isWaking, setIsWaking] = useState(false);
   const [wakePhase, setWakePhase] = useState<TaskExecutionStep | null>(null);
   const [wakeWait, setWakeWait] = useState<WakeWait | null>(null);
@@ -96,6 +103,18 @@ export function useWakeProgress(sessionId: string | undefined): UseWakeProgressR
     setWakeWait(null);
     settledRef.current = false;
   }, [sessionId]);
+
+  // A new sleep episode means the next wake is a new wake: re-arm the latch. Only a
+  // transition re-arms it. A session still reported `sleeping` right after its wake
+  // restored is the stale window the latch exists for, so it must stay latched.
+  const previousStatusRef = useRef<string | null | undefined>(sessionStatus);
+  useEffect(() => {
+    const previous = previousStatusRef.current;
+    previousStatusRef.current = sessionStatus;
+    if (sessionStatus === 'sleeping' && previous != null && previous !== 'sleeping') {
+      settledRef.current = false;
+    }
+  }, [sessionStatus]);
 
   const clearWakeProgress = useCallback(() => {
     setIsWaking(false);
