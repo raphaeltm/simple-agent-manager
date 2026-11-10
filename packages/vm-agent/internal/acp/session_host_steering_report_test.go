@@ -24,7 +24,7 @@ func TestActivityReportCarriesSteeringSupportFromInitialize(t *testing.T) {
 	}{
 		{"stock codex 2.1.1", `{"name":"@agentclientprotocol/codex-acp","version":"2.1.1"}`, steeringMeta, false},
 		{"sam codex c2.3", `{"name":"@agentclientprotocol/codex-acp","version":"2.1.1-sam-c2.3"}`, steeringMeta, true},
-		{"claude pinned", `{"name":"@agentclientprotocol/claude-agent-acp","version":"0.88.0"}`, steeringMeta, true},
+		{"claude pinned", `{"name":"@agentclientprotocol/claude-agent-acp","version":"0.102.0"}`, steeringMeta, true},
 		{"adapter without steering", `{"name":"gemini","version":"0.61.0"}`, "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

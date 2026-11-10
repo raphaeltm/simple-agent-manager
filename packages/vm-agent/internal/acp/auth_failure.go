@@ -34,7 +34,7 @@ func ClassifyPromptError(err error) string {
 		if codexErrorInfo, ok := data["codexErrorInfo"].(string); ok && codexErrorInfo == "unauthorized" {
 			return "model_provider_credential_rejected"
 		}
-		// claude-agent-acp 0.81.2+ (verified through 0.88.0) attaches this categorical field to
+		// claude-agent-acp 0.81.2+ (verified through 0.102.0) attaches this categorical field to
 		// RequestError.internalError. Other data is untrusted wrapper metadata.
 		switch data["errorKind"] {
 		case "authentication_failed":

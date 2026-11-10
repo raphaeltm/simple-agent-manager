@@ -68,7 +68,7 @@
   },
   {
     "name": "claude_ask_user_question_selection_and_other",
-    "source": "claude-agent-acp@0.88.0 askUserQuestionsToCreateRequest",
+    "source": "claude-agent-acp@0.102.0 askUserQuestionsToCreateRequest",
     "schema": {
       "type": "object",
       "properties": {

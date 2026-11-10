@@ -9,6 +9,9 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 
 ### For everyone
 
+- **Claude Fable 5.2.** Anthropic's newest frontier model (1M-token context) is selectable for
+  Claude Code in an agent profile and through the SAM AI proxy. Sessions that start after the
+  update run a Claude Code version that supports it. → [Agent profiles](/docs/guides/agents/#agent-profiles)
 - **Install your own SAM from the browser.** The installer signs in with Cloudflare, builds a
   complete SAM in your account in about half an hour, then hands you a setup link, and later offers
   updates. No GitHub fork or secrets to copy. The hosted installer's Cloudflare sign-in isn't open
@@ -131,9 +134,6 @@ Also for admins:
 
 ### For everyone
 
-- **Claude Fable 5.2.** Anthropic's newest frontier model (1M-token context) is selectable for
-  Claude Code in an agent profile and through the SAM AI proxy. Sessions that start after the
-  update run a Claude Code version that supports it. → [Agent profiles](/docs/guides/agents/#agent-profiles)
 - **Choose which account each project and profile runs on.** Accounts you already connected can now
   be used anywhere: pin one to several projects with **Use in projects…** on its card in **Settings →
   Agents**, or pick it from a project's **Accounts** tab with **Use another account here**. **Make

@@ -15,15 +15,21 @@ newer is required.` The model is also missing from SAM's catalogs.
 - The `2.1.280` in the error is the binary bundled in `@anthropic-ai/claude-agent-sdk` 0.3.280
   inside `@agentclientprotocol/claude-agent-acp` 0.81.2, not the separately installed companion
   CLI (2.1.281). SAM never sets `CLAUDE_CODE_EXECUTABLE`, so the adapter runs its SDK's binary.
-- First adapter bundling SDK >= 0.3.290 is 0.88.0 (SDK 0.3.293). Release notes 0.82.0-0.88.0
-  reviewed. Compared against 0.81.2 source: `errorKind`/`authRequired` auth classification,
+- Anthropic's Claude Code docs (`code.claude.com/docs/en/model-config`) and help center article
+  15424964 say "Fable 5.2 requires Claude Code v2.1.321 or later". The API's rejection only names
+  2.1.290, which is a hard floor, not the supported minimum. CodeRabbit caught this after the PR
+  first pinned 0.88.0 (SDK 0.3.293). The only adapter bundling SDK >= 0.3.321 is 0.102.0 (SDK
+  0.3.321, `@agentclientprotocol/sdk` 2.5.0). Release notes 0.82.0-0.88.0 reviewed, and the
+  0.81.2/0.88.0/0.102.0 `dist/` diffed. Compared against 0.81.2 source: `errorKind`/`authRequired` auth classification,
   `_meta.steering` + `idleBehavior=promptRequired`, `usage_update` `_claude/rateLimit`, and
   `_claude/sdkMessage` raw-message contracts are unchanged.
+- Behaviour change: unsupported MCP elicitation modes answer `cancel` instead of `decline`
+  (0.102.0). The answer goes to Claude Code's MCP client; SAM never sees it.
 - Behaviour change: from 0.85 the AskUserQuestion "Other" fields carry
   `_meta._askUserQuestionCustomAnswer` only for AIR clients. SAM is not AIR. Both validators
   (`packages/shared/src/acp-form.ts`, `packages/vm-agent/internal/acp/acp_form_validation.go`)
   accept a field without `_meta`, no UI code reads the marker, and the adapter still reads
-  `question_<n>_custom` answers. The pinned fixture must be regenerated from 0.88.0.
+  `question_<n>_custom` answers. The pinned fixture must be regenerated from the pinned builder.
 - Pin locations (rule `packages/vm-agent/.claude/rules/06-vm-agent-patterns.md`): install
   manifest, `gateway.go`, `Dockerfile.vm-agent-container`, `Dockerfile.sandbox`, e2e mocks,
   pinned-adapter verification scripts, version/steering tests.
@@ -32,12 +38,14 @@ newer is required.` The model is also missing from SAM's catalogs.
 
 - [x] Add `claude-fable-5-2` to `CLAUDE_MODELS` and `PLATFORM_AI_MODELS` with published pricing
 - [x] Shared tests: dropdown presence, 1M list, no `[1m]` variant, `isKnownModel`, platform metadata
-- [x] Adapter 0.81.2 -> 0.88.0, companion CLI 2.1.281 -> 2.1.293, `claudeCodeMinVersion` -> 2.1.290
+- [x] Adapter 0.81.2 -> 0.102.0, companion CLI 2.1.281 -> 2.1.321, `claudeCodeMinVersion` -> 2.1.321
       across manifest, Go installer, Instant image, sandbox image, mocks
-- [x] Regenerate the Claude AskUserQuestion forms fixture from the 0.88.0 builder
+- [x] Regenerate the Claude AskUserQuestion forms fixture from the 0.102.0 builder; update the URL
+      verifier for `cancel` and the new session fields
 - [x] Update version-check and steering tests and adapter-version comments
 - [x] Docs: recent product changes, integrations page, changelog skill
-- [x] Local go-specialist review: PASS (no blocking findings)
+- [x] Local go-specialist review of 0.88.0: PASS (no blocking findings)
+- [x] CodeRabbit: Fable 5.2 needs 2.1.321 (repinned to 0.102.0); docs entry moved to the 4-10 Nov cycle
 - [ ] PR, CI, merge, production deploy, production verification with a real Fable 5.2 prompt
 
 ## Acceptance Criteria
@@ -48,17 +56,17 @@ newer is required.` The model is also missing from SAM's catalogs.
 
 ## Local Validation
 
+On the final 0.102.0 / 2.1.321 pins:
+
 - `pnpm --filter @simple-agent-manager/shared test -- model-catalog ai-model-registry acp-form`: 79 passed
 - `go test ./internal/acp` (Go 1.26.10): pass, including shell stale adapter/CLI checks
-- `TestShippedClaudeAdapterSteersRunningTurn` with real 0.88.0 adapter, against both the bundled
-  2.1.293 binary and the 2.1.293 companion: pass
+- `TestShippedClaudeAdapterSteersRunningTurn` with the real 0.102.0 adapter (Initialize, NewSession,
+  Prompt, mid-turn steer, end_turn), against both the bundled 2.1.321 binary and a 2.1.322 CLI: pass
 - `verify-pinned-acp-form-fixtures.mjs` and `verify-pinned-acp-url-paths.mjs` against installed
-  0.88.0 + codex-acp 2.1.1: pass
-- `pnpm quality:agent-install-manifest`, API `cf-container-runtime-contract` test,
-  `pnpm format:check`, shared typecheck/lint: pass
-- Guided sign-in driver (`claude-setup-token.mjs`) with real CLI 2.1.293 reaches
-  `waiting_for_user` with a validated authorize URL. Token capture needs a real account and was
-  not exercised locally.
+  0.102.0 + codex-acp 2.1.1: pass
+- `pnpm quality:agent-install-manifest`, API `cf-container-runtime-contract` test: pass
+- Guided sign-in driver (`claude-setup-token.mjs`) with real CLI 2.1.321 reaches `waiting_for_user`
+  with a validated authorize URL. Token capture needs a real account and was not exercised.
 
 ## Staging
 
