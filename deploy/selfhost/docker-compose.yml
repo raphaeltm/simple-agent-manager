@@ -117,9 +117,20 @@ services:
         '--console-address',
         '127.0.0.1:${OBJECTSTORE_CONSOLE_PORT:-9001}',
       ]
+    # Compose interpolates every service, including ones whose profile is off, so a `:?` here
+    # would stop a gs:// or s3:// install that never runs this store. The store checks instead,
+    # and refuses to start with MinIO's default root credential.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >-
+        test -n "$$MINIO_ROOT_USER" && test -n "$$MINIO_ROOT_PASSWORD" ||
+        { echo 'objectstore: set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env' >&2; exit 64; };
+        exec /usr/bin/docker-entrypoint.sh "$$@"
+      - objectstore
     environment:
-      MINIO_ROOT_USER: ${AWS_ACCESS_KEY_ID:?set AWS_ACCESS_KEY_ID in .env}
-      MINIO_ROOT_PASSWORD: ${AWS_SECRET_ACCESS_KEY:?set AWS_SECRET_ACCESS_KEY in .env}
+      MINIO_ROOT_USER: ${AWS_ACCESS_KEY_ID:-}
+      MINIO_ROOT_PASSWORD: ${AWS_SECRET_ACCESS_KEY:-}
     volumes:
       - objectstore-data:/data
     healthcheck:
@@ -140,8 +151,8 @@ services:
     environment:
       OBJECTSTORE_URL: http://127.0.0.1:${OBJECTSTORE_PORT:-9000}
       CELLD_BUCKET: ${CELLD_BUCKET:?set CELLD_BUCKET in .env}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
     volumes:
       - ./objectstore/init.sh:/init/init.sh:ro
     restart: 'no'
