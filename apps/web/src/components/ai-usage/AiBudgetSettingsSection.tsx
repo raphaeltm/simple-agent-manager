@@ -1,10 +1,11 @@
 import type { UserAiBudgetResponse } from '@simple-agent-manager/shared';
 import { Body, Card, CardTitle, SectionHeading, Spinner } from '@simple-agent-manager/ui';
-import { Info, Settings2, ShieldAlert } from 'lucide-react';
+import { Settings2, ShieldAlert } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 
 import { fetchUserAiBudget, updateUserAiBudget } from '../../lib/api';
 import { formatCost, formatTokens } from './format';
+import { MonthlyCapUnavailableNote } from './MonthlyCapUnavailableNote';
 
 // ---------------------------------------------------------------------------
 // Budget Utilization Bar
@@ -53,32 +54,6 @@ function BudgetBar({
   );
 }
 
-/**
- * Shown instead of the monthly cap when this installation has no Cloudflare AI Gateway, the only
- * source of per-call cost, so a cap could be set but never enforced.
- */
-function MonthlyCapUnavailableNote({ storedCapUsd }: { storedCapUsd: number | null }) {
-  return (
-    <div
-      className="flex items-start gap-2 rounded-md border border-border-default p-3"
-      data-testid="monthly-cap-unavailable"
-    >
-      <Info className="w-4 h-4 text-fg-muted flex-shrink-0 mt-0.5" aria-hidden="true" />
-      <Body className="text-fg-muted text-sm m-0 min-w-0 break-words">
-        Monthly cost caps are not available on this installation: there is no Cloudflare AI Gateway
-        to price AI usage. Daily token limits still apply.
-        {storedCapUsd !== null && storedCapUsd > 0 && (
-          <>
-            {' '}
-            Your saved cap of {formatCost(storedCapUsd)} is not enforced here; saving these settings
-            clears it.
-          </>
-        )}
-      </Body>
-    </div>
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Budget Settings Section
 // ---------------------------------------------------------------------------
@@ -98,6 +73,7 @@ export function AiBudgetSettingsSection() {
   const [alertThreshold, setAlertThreshold] = useState('80');
   // Until the budget loads, assume a cap is available (how the page behaved before the flag).
   const capAvailable = budget?.monthlyCostCapAvailable !== false;
+  const savedCapUsd = budget?.settings.monthlyCostCapUsd ?? null;
 
   const loadBudget = useCallback(async () => {
     try {
@@ -158,7 +134,9 @@ export function AiBudgetSettingsSection() {
         <div>
           <SectionHeading>Budget Controls</SectionHeading>
           <Body className="text-fg-muted text-sm">
-            Set personal spending limits for AI proxy usage
+            {capAvailable
+              ? 'Set personal spending limits for AI proxy usage'
+              : 'Set personal token limits for AI proxy usage'}
           </Body>
         </div>
         {!editing && (
@@ -210,7 +188,11 @@ export function AiBudgetSettingsSection() {
             />
           )}
           {!capAvailable && (
-            <MonthlyCapUnavailableNote storedCapUsd={budget.settings.monthlyCostCapUsd} />
+            <MonthlyCapUnavailableNote
+              audience="user"
+              storedCapUsd={budget.settings.monthlyCostCapUsd}
+              testId="monthly-cap-unavailable"
+            />
           )}
           {budget.exceeded && (
             <div
@@ -319,6 +301,12 @@ export function AiBudgetSettingsSection() {
             </div>
           </div>
 
+          {!capAvailable && savedCapUsd !== null && savedCapUsd > 0 && (
+            <p className="text-fg-muted text-xs m-0" data-testid="monthly-cap-cleared-on-save">
+              Saving clears your saved monthly cap of {formatCost(savedCapUsd)}, which is not
+              enforced on this installation.
+            </p>
+          )}
           <div className="flex gap-2 justify-end pt-2">
             <button
               type="button"

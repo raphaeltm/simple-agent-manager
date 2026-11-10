@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { RotateCcw } from 'lucide-react';
 import { useState } from 'react';
 
+import { MonthlyCapUnavailableNote } from '../components/ai-usage/MonthlyCapUnavailableNote';
 import { useQueryScope } from '../hooks/useQueryScope';
 import {
   type AIProxyConfigResponse,
@@ -171,8 +172,8 @@ export function AdminAIProxy() {
     <div className="space-y-6">
       <Body>
         Configure the default AI model and billing mode for the platform inference proxy. Models are
-        routed through Cloudflare AI Gateway. Workers AI models are Cloudflare-billed; Anthropic and
-        OpenAI models require credentials or Unified Billing.
+        routed through Cloudflare AI Gateway when this installation has one. Workers AI models are
+        Cloudflare-billed; Anthropic and OpenAI models require credentials or Unified Billing.
       </Body>
 
       {error && (
@@ -243,16 +244,7 @@ export function AdminAIProxy() {
       </Card>
 
       {config.monthlyCostCapAvailable === false && (
-        <div
-          role="status"
-          className="rounded-md border border-border-default p-3 text-sm text-fg-muted"
-          data-testid="admin-monthly-cap-unavailable"
-        >
-          <span className="font-medium text-fg-primary">Monthly cost caps are unavailable.</span>{' '}
-          This installation cannot read Cloudflare AI Gateway logs (AI_GATEWAY_ID, CF_ACCOUNT_ID and
-          CF_API_TOKEN), which is where SAM gets the cost of each AI call. Users cannot set a
-          monthly cap; daily token budgets still limit AI proxy usage.
-        </div>
+        <MonthlyCapUnavailableNote audience="admin" testId="admin-monthly-cap-unavailable" />
       )}
 
       {/* Default Model */}

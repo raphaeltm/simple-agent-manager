@@ -133,7 +133,7 @@ async function openBudgetEditor(page: Page) {
 
 const SCENARIOS: Array<[string, Scenario]> = [
   ['with-gateway', { capAvailable: true, storedCapUsd: 25 }],
-  ['no-gateway-saved-cap', { capAvailable: false, storedCapUsd: 1234.5 }],
+  ['no-gateway-saved-cap', { capAvailable: false, storedCapUsd: 98765432.1 }],
   ['no-gateway-no-cap', { capAvailable: false, storedCapUsd: null }],
 ];
 
@@ -158,6 +158,10 @@ for (const [name, scenario] of SCENARIOS) {
     await (scenario.capAvailable ? capInput : note).scrollIntoViewIfNeeded();
     await assertNoOverflow(page);
     await screenshot(page, `monthly-cap-budget-${name}`);
+    // The open editor (cap input, or the save-clears hint) beside Save.
+    await page.getByRole('button', { name: 'Save', exact: true }).scrollIntoViewIfNeeded();
+    await assertNoOverflow(page);
+    await screenshot(page, `monthly-cap-budget-${name}-form`);
   });
 }
 

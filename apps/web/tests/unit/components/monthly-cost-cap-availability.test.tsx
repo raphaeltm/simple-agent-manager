@@ -84,6 +84,9 @@ describe('AI budget settings monthly cap', () => {
     expect(note.textContent).toContain('Monthly cost caps are not available on this installation');
     // The saved cap is named as not enforced, so it cannot look active.
     expect(note.textContent).toContain('$12.50 is not enforced here');
+    // ...and the save side effect is stated beside Save too.
+    expect(screen.getByTestId('monthly-cap-cleared-on-save').textContent).toContain('$12.50');
+    expect(screen.getByText('Set personal token limits for AI proxy usage')).toBeTruthy();
     expect(screen.queryByLabelText('Monthly Cost Cap (USD)')).toBeNull();
     expect(screen.queryByText('Monthly Cost Cap')).toBeNull();
     // Liveness: the daily limits are still editable.
@@ -201,8 +204,11 @@ describe('admin AI proxy page', () => {
   it('tells the admin when monthly caps are unavailable', async () => {
     renderPage(false);
     const notice = await screen.findByTestId('admin-monthly-cap-unavailable');
-    expect(notice.textContent).toContain('Monthly cost caps are unavailable.');
-    expect(notice.textContent).toContain('daily token budgets still limit AI proxy usage');
+    expect(notice.textContent).toContain(
+      'Monthly cost caps are not available on this installation.'
+    );
+    expect(notice.textContent).toContain('CF_API_TOKEN');
+    expect(notice.textContent).toContain('Daily token limits still apply.');
   });
 
   it('shows no notice with AI Gateway, while the page still renders (control)', async () => {
