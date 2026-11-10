@@ -166,7 +166,7 @@ describe('rateLimit middleware (behavioral)', () => {
         limit: options.limit ?? 3,
         keyPrefix: options.keyPrefix ?? 'test',
         useIp: options.useIp,
-      }) as any,
+      }) as any
     );
 
     app.get('/test', (c) => c.json({ ok: true }));
@@ -292,9 +292,13 @@ describe('rateLimit middleware (behavioral)', () => {
     const app = createApp({ useIp: true, limit: 1 });
     const call = (headers: Record<string, string>) =>
       app.request(new Request('http://localhost/test', { headers }), undefined, mockEnv);
-    expect((await call({ 'CF-Connecting-IP': 'garbage', 'X-Forwarded-For': '198.51.100.1' })).status).toBe(200);
+    expect(
+      (await call({ 'CF-Connecting-IP': 'garbage', 'X-Forwarded-For': '198.51.100.1' })).status
+    ).toBe(200);
     // A client-chosen X-Forwarded-For cannot open a fresh bucket.
-    expect((await call({ 'CF-Connecting-IP': 'garbage', 'X-Forwarded-For': '198.51.100.2' })).status).toBe(429);
+    expect(
+      (await call({ 'CF-Connecting-IP': 'garbage', 'X-Forwarded-For': '198.51.100.2' })).status
+    ).toBe(429);
     expect((await call({ 'X-Forwarded-For': '198.51.100.3' })).status).toBe(429);
     const keys = ((kv.put as any).mock.calls as [string, string][]).map(([k]) => k);
     expect(keys.every((k) => k.startsWith('ratelimit:test:unknown:'))).toBe(true);

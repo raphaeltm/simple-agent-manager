@@ -203,6 +203,29 @@ export async function readSafeGatewayErrorDiagnostic(
   return parts.join(' ').slice(0, boundedMaxLength);
 }
 
+/** Bound on the sanitized reason logged for a failed third-party model call. */
+export const UPSTREAM_ERROR_REASON_MAX_LENGTH = 256;
+
+/**
+ * Log fields for a failed model response, consuming its body. A Cloudflare or first-party
+ * provider route keeps logging up to 500 characters of the body, as it always has. A
+ * third-party endpoint's body is never logged: it can echo the configured key or the prompt, so
+ * only an allowlisted, bounded reason (`readSafeGatewayErrorDiagnostic`) is kept.
+ */
+export async function upstreamErrorLogFields(
+  response: Response,
+  thirdParty: boolean
+): Promise<{ body?: string; reason?: string }> {
+  if (!thirdParty) {
+    return { body: (await response.text().catch(() => 'Unknown error')).slice(0, 500) };
+  }
+  const reason = await readSafeGatewayErrorDiagnostic(
+    response,
+    UPSTREAM_ERROR_REASON_MAX_LENGTH
+  ).catch(() => undefined);
+  return reason ? { reason } : {};
+}
+
 export async function fetchWorkersAIChatCompletion(
   env: Env,
   options: WorkersAIChatCompletionOptions

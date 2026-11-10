@@ -16,6 +16,7 @@ import { DEFAULT_SAM_MAX_REQUEST_BODY_BYTES_WORKERS_AI, type SamConfig } from '@
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { expectJsonRecord } from '../../lib/runtime-validation';
+import { upstreamErrorLogFields } from '../../services/ai-proxy-shared';
 import { checkAiUsageGate } from '../../services/ai-token-budget';
 import { attachTokenUsageAccounting } from '../../services/ai-token-usage-accounting';
 import { LlmUnavailableError, resolveOpenAICompatibleTarget } from '../../services/llm-chat-target';
@@ -421,10 +422,10 @@ export async function runAgentLoop(
     });
 
     if (!response.ok) {
-      const errorText = await response.text().catch(() => 'Unknown error');
       log.error('sam.llm_error', {
         status: response.status,
-        body: errorText.slice(0, 500),
+        // An admin-configured endpoint is third-party: a bounded, sanitized reason, never its body.
+        ...(await upstreamErrorLogFields(response, endpoint !== null)),
         model: config.model,
       });
       await writer.write(

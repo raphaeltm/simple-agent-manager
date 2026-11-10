@@ -18,7 +18,7 @@ import {
 } from '../services/ai-anthropic-translate';
 import type { UpstreamAuth } from '../services/ai-billing';
 import { resolveUnifiedBillingToken } from '../services/ai-billing';
-import { buildAnthropicGatewayUrl } from '../services/ai-proxy-shared';
+import { buildAnthropicGatewayUrl, upstreamErrorLogFields } from '../services/ai-proxy-shared';
 import { copyCredentialLimitHeaders } from '../services/credential-limit-events';
 import {
   chatTargetHeaders,
@@ -116,12 +116,10 @@ export async function forwardToWorkersAI(
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
     log.error('ai_proxy.workers_ai_error', {
       status: response.status,
       target: target.kind,
-      // A third-party endpoint's error body can echo the configured key; log Cloudflare's only.
-      ...(isCloudflareChatTarget(target) ? { body: errorText.slice(0, 500) } : {}),
+      ...(await upstreamErrorLogFields(response, !isCloudflareChatTarget(target))),
     });
     const errorHeaders = new Headers({ 'Content-Type': 'application/json' });
     copyCredentialLimitHeaders(response.headers, errorHeaders);
