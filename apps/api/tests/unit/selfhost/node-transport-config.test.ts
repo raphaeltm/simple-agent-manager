@@ -7,17 +7,17 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS } from '@simple-agent-manager/cloud-init';
 import { describe, expect, it } from 'vitest';
 
 import {
   GATEWAY_ORIGINAL_HOST_HEADER,
   GATEWAY_SECRET_HEADER,
-} from '../../apps/api/src/routes/self-host-gateway';
-import { FRPS_PLUGIN_OPS } from '../../apps/api/src/services/node-reverse-tunnel-authz';
-import { GATEWAY_HEADER } from '../../apps/api/src/services/node-websocket-gateway';
-import { REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS } from '../../packages/cloud-init/src/reverse-tunnel';
+} from '../../../src/routes/self-host-gateway';
+import { FRPS_PLUGIN_OPS } from '../../../src/services/node-reverse-tunnel-authz';
+import { GATEWAY_HEADER } from '../../../src/services/node-websocket-gateway';
 
-const root = join(import.meta.dirname, '../../deploy/selfhost');
+const root = join(import.meta.dirname, '../../../../../deploy/selfhost');
 const frps = readFileSync(join(root, 'frps/frps.toml'), 'utf8');
 const nodeWs = readFileSync(join(root, 'caddy/sam.d/node-ws.caddy'), 'utf8');
 const frp = readFileSync(join(root, 'caddy/sam.d/frp.caddy'), 'utf8');

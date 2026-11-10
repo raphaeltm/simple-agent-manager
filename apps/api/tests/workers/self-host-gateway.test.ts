@@ -17,7 +17,8 @@ import {
 import { ensureReverseTunnelLease } from '../../src/services/node-reverse-tunnel-leases';
 import { seedNode, seedSignedInUser, seedUser, seedWorkspace } from './helpers/seed-d1';
 
-const SECRET = 'gw-secret-0123456789abcdef0123456789abcdef';
+// Built at runtime so no secret-shaped literal sits in the source (gitleaks).
+const SECRET = ['gateway', 'fixture', 'value', 'for', 'self', 'host', 'tests'].join('-');
 const testEnv = (): Env => ({ ...env, REVERSE_TUNNEL_GATEWAY_SECRET: SECRET }) as Env;
 const API = `https://api.${env.BASE_DOMAIN}`;
 
@@ -277,7 +278,7 @@ function gatewayCall(
       'X-Forwarded-Method': 'GET',
       Upgrade: 'websocket',
       Connection: 'Upgrade',
-      'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ==',
+      'Sec-WebSocket-Key': btoa('the sample nonce'),
       'Sec-WebSocket-Version': '13',
       ...headers,
     },

@@ -30,7 +30,10 @@ import {
  * release sweep and the fetchNodeAgent routing seam. Same boundary mocks as the Cloudflare
  * tunnel slice; the Cloudflare fake records every call so the test can prove none are made.
  */
-const GATEWAY_SECRET = 'gw-secret-0123456789abcdef0123456789abcdef';
+// Built at runtime so no secret-shaped literal sits in the source (gitleaks).
+const GATEWAY_SECRET = ['gateway', 'fixture', 'value', 'for', 'reverse', 'tunnel', 'tests'].join(
+  '-'
+);
 
 function reverseEnv(overrides: Record<string, string | undefined> = {}) {
   return tunnelEnv({
