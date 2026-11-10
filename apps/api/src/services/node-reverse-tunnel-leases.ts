@@ -6,7 +6,7 @@
  * incarnation is provably no longer the node's live runtime ({@link LIVE_INCARNATION_SQL}, the
  * same predicate the Cloudflare tunnel journal uses) or when the provisioner knows no VM was
  * ever requested for it. Releasing is the whole cleanup: frps holds no state SAM must delete,
- * and the frps plugin refuses Login/NewProxy/Ping for a released lease, so a straggling frpc
+ * and the frps plugin refuses Login/NewProxy/Ping/NewWorkConn for a released lease, so a straggling frpc
  * is disconnected at its next heartbeat. Rows are never deleted.
  */
 import type { Env } from '../env';

@@ -1,8 +1,9 @@
 /**
- * Authorization decisions for the box's frps server plugin (Login, NewProxy, Ping).
+ * Authorization decisions for the box's frps server plugin (Login, NewProxy, Ping, NewWorkConn).
  *
  * frps is the only party that holds per-node tunnel listeners, and it asks SAM before every
- * login, every proxy registration and every heartbeat. SAM answers from values IT stored:
+ * login, every proxy registration, every heartbeat and every work connection. SAM answers from
+ * values IT stored:
  *
  * 1. the presented credential's SHA-256 equals the lease row's `credential_hash`
  *    (constant-time), for the exact (node id, incarnation) the frpc claims;
@@ -14,6 +15,16 @@
  * claim another node's identity, or keep a released lease alive: Ping re-runs 1-2, so frps
  * drops a session within one heartbeat of the lease being released. Anything malformed,
  * unknown or unsupported is refused (fail closed).
+ *
+ * NewWorkConn (verified against frps 0.72.0, server/service.go RegisterWorkConn): the content is
+ * `{ user: { user, metas, run_id }, run_id }`, where `user` is copied from the CONTROL session
+ * that owns the presented run_id, not from the dialing connection, and nothing in it describes
+ * the dialer (no address, no privilege key without auth.additionalScopes). So the plugin binds
+ * each work connection to that control's lease (1-2 again, and run_id must equal the control's),
+ * which refuses work connections into a released or superseded lease immediately instead of at
+ * the next Ping. It cannot tell the owner from another party presenting the owner's run_id:
+ * that rests on the run_id being a 64-bit crypto/rand value (frps util.RandID) that frps only
+ * ever returns to the owning frpc over its TLS session, and that SAM never logs.
  */
 import { REVERSE_TUNNEL_PROXY_NAME } from '@simple-agent-manager/cloud-init';
 import * as v from 'valibot';
@@ -23,8 +34,8 @@ import { constantTimeEqual } from '../lib/constant-time';
 import { log } from '../lib/logger';
 import { hashReverseTunnelCredential } from './node-reverse-tunnel-config';
 
-export type FrpsPluginOp = 'Login' | 'NewProxy' | 'Ping';
-export const FRPS_PLUGIN_OPS: readonly FrpsPluginOp[] = ['Login', 'NewProxy', 'Ping'];
+export type FrpsPluginOp = 'Login' | 'NewProxy' | 'Ping' | 'NewWorkConn';
+export const FRPS_PLUGIN_OPS: readonly FrpsPluginOp[] = ['Login', 'NewProxy', 'Ping', 'NewWorkConn'];
 
 export type FrpsPluginDecision = { allow: true } | { allow: false; reason: string; code: string };
 
@@ -43,6 +54,10 @@ const NewProxyContentSchema = v.object({
   remote_port: v.optional(v.number()),
 });
 const PingContentSchema = v.object({ user: UserSchema });
+const NewWorkConnContentSchema = v.object({
+  user: v.object({ user: BoundedString, metas: MetasSchema, run_id: BoundedString }),
+  run_id: BoundedString,
+});
 const BodySchema = v.object({ content: v.unknown() });
 
 interface LeaseAuthorityRow {
@@ -74,7 +89,12 @@ interface ClaimedIdentity {
 function parseIdentity(
   op: FrpsPluginOp,
   content: unknown
-): { identity: ClaimedIdentity; proxy?: v.InferOutput<typeof NewProxyContentSchema> } | null {
+): {
+  identity: ClaimedIdentity;
+  proxy?: v.InferOutput<typeof NewProxyContentSchema>;
+  /** NewWorkConn only: the work connection's run_id is the control session's own. */
+  workConnRunIdMatches?: boolean;
+} | null {
   if (op === 'Login') {
     const parsed = v.safeParse(LoginContentSchema, content);
     if (!parsed.success) return null;
@@ -100,6 +120,20 @@ function parseIdentity(
         credential: user.metas.credential,
       },
       proxy: parsed.output,
+    };
+  }
+  if (op === 'NewWorkConn') {
+    const parsed = v.safeParse(NewWorkConnContentSchema, content);
+    if (!parsed.success) return null;
+    const { user, run_id: runId } = parsed.output;
+    return {
+      identity: {
+        user: user.user,
+        nodeId: user.metas.node_id,
+        incarnation: user.metas.incarnation,
+        credential: user.metas.credential,
+      },
+      workConnRunIdMatches: runId === user.run_id,
     };
   }
   const parsed = v.safeParse(PingContentSchema, content);
@@ -201,7 +235,10 @@ export async function authorizeFrpsPluginRequest(
   const envelope = v.safeParse(BodySchema, body);
   const parsed = envelope.success ? parseIdentity(pluginOp, envelope.output.content) : null;
   if (!parsed) return logged(pluginOp, null, refuse('malformed', 'malformed plugin request'));
-  const { identity, proxy } = parsed;
+  const { identity, proxy, workConnRunIdMatches } = parsed;
+  if (workConnRunIdMatches === false) {
+    return logged(pluginOp, identity, refuse('run_id_mismatch', 'work connection run id mismatch'));
+  }
 
   const checked = await leaseRefusal(env, identity);
   if ('refusal' in checked) return logged(pluginOp, identity, checked.refusal);
@@ -209,7 +246,8 @@ export async function authorizeFrpsPluginRequest(
   const proxyRefusal = proxy ? newProxyRefusal(proxy, identity.nodeId, lease.port) : null;
   if (proxyRefusal) return logged(pluginOp, identity, proxyRefusal);
 
-  if (pluginOp !== 'Ping') {
+  // Ping and NewWorkConn fire per heartbeat / per proxied connection: allowed ones are not logged.
+  if (pluginOp === 'Login' || pluginOp === 'NewProxy') {
     log.info('node_reverse_tunnel.plugin_allowed', {
       op: pluginOp,
       nodeId: identity.nodeId,

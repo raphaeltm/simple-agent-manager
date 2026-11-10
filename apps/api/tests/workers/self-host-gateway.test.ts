@@ -170,6 +170,55 @@ describe('frps plugin endpoint', () => {
     });
   });
 
+  // Shape captured from a live frps 0.72.0 (server/service.go RegisterWorkConn): `user` is the
+  // owning control session's login identity; the top-level run_id is the work connection's.
+  const workConn = (n: SeededNode, runId = 'ca96075594c81cd0', controlRunId = runId) => ({
+    user: { user: n.nodeId, metas: metas(n), run_id: controlRunId },
+    run_id: runId,
+  });
+
+  it('admits a work connection into a live lease, and refuses it once the lease is released or superseded', async () => {
+    await seedUser('rt-wc');
+    const a = await seedReverseNode('C', 'rt-wc');
+    expect(await verdict(await call(frpsCall('NewWorkConn', workConn(a))))).toEqual({
+      reject: false,
+      unchange: true,
+    });
+    await env.DATABASE.prepare('UPDATE nodes SET runtime_incarnation_id = ? WHERE id = ?')
+      .bind(crypto.randomUUID(), a.nodeId)
+      .run();
+    expect(await verdict(await call(frpsCall('NewWorkConn', workConn(a))))).toEqual({
+      reject: true,
+      reject_reason: 'node incarnation is not live',
+    });
+    await env.DATABASE.prepare(
+      "UPDATE node_reverse_tunnel_leases SET status = 'released' WHERE node_id = ?"
+    )
+      .bind(a.nodeId)
+      .run();
+    expect(await verdict(await call(frpsCall('NewWorkConn', workConn(a))))).toEqual({
+      reject: true,
+      reject_reason: 'node lease is released',
+    });
+  });
+
+  it('refuses a work connection whose run id is not its control session\'s, or whose control credential is wrong', async () => {
+    await seedUser('rt-wc-bad');
+    const a = await seedReverseNode('K', 'rt-wc-bad');
+    const b = await seedReverseNode('L', 'rt-wc-bad');
+    expect(
+      await verdict(await call(frpsCall('NewWorkConn', workConn(a, 'aaaa', 'bbbb'))))
+    ).toEqual({ reject: true, reject_reason: 'work connection run id mismatch' });
+    const forged = workConn(b);
+    forged.user.metas = { ...metas(b), credential: a.credential };
+    expect((await verdict(await call(frpsCall('NewWorkConn', forged)))).reject).toBe(true);
+    // Owner control on the same fixture.
+    expect((await verdict(await call(frpsCall('NewWorkConn', workConn(b))))).reject).toBe(false);
+    expect(
+      await verdict(await call(frpsCall('NewWorkConn', { run_id: 'r' })))
+    ).toEqual({ reject: true, reject_reason: 'malformed plugin request' });
+  });
+
   it.each([
     ['an udp proxy', { proxy_type: 'udp' }, 'only one tcp proxy is allowed'],
     ['a foreign proxy name', { proxy_name: 'other.sam-agent' }, 'proxy name is not the node agent'],

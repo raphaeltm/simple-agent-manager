@@ -1,7 +1,7 @@
 /**
  * Internal endpoints for the self-hosted box's gateway processes (deploy/selfhost/):
  *
- * - `POST /frps-plugin?op=Login|NewProxy|Ping` — frps server plugin. Authenticated with HTTP
+ * - `POST /frps-plugin?op=Login|NewProxy|Ping|NewWorkConn` — frps server plugin. Authenticated with HTTP
  *   basic auth whose password is REVERSE_TUNNEL_GATEWAY_SECRET (frps sends the userinfo of
  *   its plugin `addr`). Decisions: services/node-reverse-tunnel-authz.ts.
  * - `GET /node-websocket` — Caddy forward_auth for node WebSocket upgrades. Authenticated with
