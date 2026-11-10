@@ -51,7 +51,7 @@ In Instant workspaces the SAM workspace agent shares the workspace's network and
 
 ## Nodes
 
-A **node** is a cloud VM that hosts one or more workspaces. You normally never think about nodes — SAM assigns your workspace to a healthy node or provisions a new one for you, from the machine types your [compute pool](#compute-pools) permits. To see them, select **Infrastructure** in the main navigation, which opens the **Nodes** page; each machine lists its workspaces.
+A **node** is a cloud VM that hosts one or more workspaces. You normally never think about nodes — SAM assigns your workspace to a healthy node or provisions a new one for you, from the machine types your [compute pool](#compute-pools) permits. To see them, select **Infrastructure** in the main navigation, which opens the **Nodes** page; each machine lists the sessions running on it and what they are using, with links to its workspaces under **Advanced**.
 
 Several workspaces can share one node when the node's CPU, memory, and disk reservations all still fit and nothing on it asked for exclusive use. Work can also ask for a node to itself; see [Compute Pools](/docs/guides/compute-pools/#resource-requirements-how-much-machine-work-asks-for).
 
@@ -183,6 +183,7 @@ SAM includes an in-app notification system with real-time delivery via WebSocket
 | `mention`        | Medium  | A teammate @mentions you in a comment                                                                                     |
 | `comment`        | Low     | New comments on your chat or your threads                                                                                 |
 | `session_access` | Medium  | A chat is shared with you, or your access to it is extended or removed; or a teammate passes your chat on to someone else |
+| `operations_approval` | High | An Operations agent asks to run an action (superadmins) |
 
 See the [Notifications guide](/docs/guides/notifications/) for full details.
 

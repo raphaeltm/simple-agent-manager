@@ -42,6 +42,26 @@ Pools exist at three **scopes**, each edited in a different place:
 These are settings tabs. **Infrastructure** in the main navigation is something else: it opens the
 **Nodes** page, which lists your machines.
 
+Each panel sums the pool up in one sentence (which provider, which regions, the smallest and
+largest machine), lists its settings in plain words, and shows the machine types it allows with the
+regions each one is allowed in. **Edit** opens the same panel for changes, with a Save bar that stays
+on screen.
+
+<picture>
+  <source type="image/webp" srcset="/images/features/sam-compute-pool-editor.webp" />
+  <img
+    src="/images/features/sam-compute-pool-editor.png"
+    alt="A project compute pool open for editing. Under &quot;How SAM uses machines&quot;: Placing agents is Pack, If the provider is out of capacity is Try other allowed machines, Machine limit per person is 3, and App deployments is Smallest fit. Under &quot;Allowed machines&quot;, a search box sits above one row per machine type with its vCPU, RAM, disk, and monthly price: cx23 is allowed in Falkenstein, and under &quot;Other machine types&quot;, cx33 can be allowed in Nuremberg and cpx31 in Helsinki, while cx43 shows &quot;Falkenstein · region sold out&quot;. A bar at the bottom reads &quot;No changes yet&quot;, with Cancel and Save changes."
+    loading="lazy"
+  />
+</picture>
+
+You can also see the pool in effect without leaving your work: the **workspace sidebar** and a
+chat session's **infrastructure** section both show a "Current compute pool" line with the scope,
+state, strategy, and how many offerings are available.
+
+If the same Google Cloud connection appears twice with identical offerings, see [GCP duplicate pool entries](/docs/guides/google-cloud/#google-cloud-appears-twice-in-the-node-pool).
+
 ### What each machine is using
 
 On the **Nodes** page each machine is named for what it is (provider, type and location, with its
@@ -68,26 +88,6 @@ hardware details are under **Advanced**.
 A session in a project you have since left still shows its usage, because it runs on your machine,
 but not the project's name, the chat title or a link to the chat. If you have a very large number of
 sessions, or a session uploads unusually many history batches, the page says what it left out.
-
-Each panel sums the pool up in one sentence (which provider, which regions, the smallest and
-largest machine), lists its settings in plain words, and shows the machine types it allows with the
-regions each one is allowed in. **Edit** opens the same panel for changes, with a Save bar that stays
-on screen.
-
-<picture>
-  <source type="image/webp" srcset="/images/features/sam-compute-pool-editor.webp" />
-  <img
-    src="/images/features/sam-compute-pool-editor.png"
-    alt="A project compute pool open for editing. Under &quot;How SAM uses machines&quot;: Placing agents is Pack, If the provider is out of capacity is Try other allowed machines, Machine limit per person is 3, and App deployments is Smallest fit. Under &quot;Allowed machines&quot;, a search box sits above one row per machine type with its vCPU, RAM, disk, and monthly price: cx23 is allowed in Falkenstein, and under &quot;Other machine types&quot;, cx33 can be allowed in Nuremberg and cpx31 in Helsinki, while cx43 shows &quot;Falkenstein · region sold out&quot;. A bar at the bottom reads &quot;No changes yet&quot;, with Cancel and Save changes."
-    loading="lazy"
-  />
-</picture>
-
-You can also see the pool in effect without leaving your work: the **workspace sidebar** and a
-chat session's **infrastructure** section both show a "Current compute pool" line with the scope,
-state, strategy, and how many offerings are available.
-
-If the same Google Cloud connection appears twice with identical offerings, see [GCP duplicate pool entries](/docs/guides/google-cloud/#google-cloud-appears-twice-in-the-node-pool).
 
 ### The other settings on the same page
 
@@ -192,6 +192,23 @@ A pool can rank its sources: for example Google Cloud first, Hetzner second. Whe
 strategy or price would otherwise prefer. Within one source, the strategy still decides. Sources the
 order does not list come after every listed one.
 
+To choose which cloud account SAM tries first:
+
+1. Open the pool on its Infrastructure page (see [Where to find pools](#where-to-find-pools-in-the-app))
+   and select **Edit**.
+2. Under **Provider order**, choose **Try accounts in this order**.
+3. Use the up and down arrows to put the account SAM should try first at the top. Each row says how
+   many machine types it allows; an account with **No machines allowed yet** can't be used until you
+   allow some under [Allowed offerings](#allowed-offerings).
+4. Select **Save changes**.
+
+The pool summary then states the order in one sentence, for example "Google Cloud first, then
+Hetzner". Choose **Every account is equal** to clear it. An account connected after you saved the
+order is listed "after those" until you place it. A pool with a single account has nothing to order,
+so the section only explains that. If someone else saved the pool while you were editing, your changes
+are not saved: SAM says so, and you review the current pool and edit again. The same order can be set through the pool update API
+(`sourceOrder`, a list of source ids).
+
 - **A running machine with room is always used first.** The order only decides where a new machine
   comes from, so a warm Hetzner node is reused even when Google Cloud is ranked first.
 - **No order (the default) means every source is equal**, which is how pools behaved before ordering
@@ -227,15 +244,6 @@ fail the run, so a broken credential is not hidden and no machine is ever create
 Sources that share a rank do not fall back to each other; give them different ranks if you want
 one to back up the other. Without an order, nothing falls back across sources. Each attempt,
 including skipped sources and the reason, appears in the run's placement details.
-
-**Setting the order.** Open the pool on its Infrastructure page and select **Edit**. Under
-**Provider order**, choose **Try accounts in this order**, then use the up and down arrows to put
-the account SAM should try first at the top, and **Save changes**. Choose **Every account is equal**
-to clear the order. The pool summary states the current order in one sentence, for example
-"Google Cloud first, then Hetzner". An account connected after the order was saved is listed
-"after those" until you place it. A pool with a single account has nothing to order, so the
-section only explains that. The same order can be set through the pool update API
-(`sourceOrder`, a list of source ids).
 
 ### Allowed offerings
 
@@ -534,7 +542,9 @@ A node accepts additional work only if **all** of these hold:
 - Live CPU is treated differently from memory and disk. CPU is shared out by the kernel, so a busy
   machine runs work more slowly rather than breaking, and each workspace's CPU is already reserved
   from the machine's budget above. Measured CPU therefore only blocks placement once the machine is
-  **saturated** (85% by default); below that, the reservations decide. SAM also gives its own agent
+  **saturated** (85% by default); below that, the reservations decide. A machine with no workspaces
+  on it yet, including a warm one, is never refused for CPU: a new machine is often busy setting
+  itself up, and nothing is there to slow down. SAM also gives its own agent
   a larger share of the CPU than the workspace containers get, so a busy machine slows the work down
   without making the machine look unreachable.
 
@@ -638,7 +648,7 @@ remove it so a lower scope applies.
 | Work fails immediately with a capacity error                           | Exhaustion policy is **Fail**, or the pool has no allowed offering that satisfies the requirements.                                                                                                                                                                                                                                                                                        |
 | "Capacity pool node limit (N) reached and no node can fit the request" | The user is at the pool's **Machine limit** and no running node has room. Raise the limit, lower the requirements so an existing node fits, or free a node.                                                                                                                                                                                                                                |
 | No offering satisfies the request                                      | Requirements exceed every allowed machine — remember the host memory reserve, so a 4 GiB offering tops out at a 3072 MiB reservation. Lower the requirements or allow a bigger instance type.                                                                                                                                                                                              |
-| A new machine starts although an existing one looks free               | The existing machine's disk is at or above the deployment's disk-pressure threshold (80% by default, `TASK_RUN_NODE_DISK_PRESSURE_THRESHOLD_PERCENT`), its CPU is saturated (85% by default, or the project's **Node CPU Threshold**), or it hasn't reported fresh health readings. SAM won't add work to it until that clears; check the machine's page for its disk and CPU.             |
+| A new machine starts although an existing one looks free               | The existing machine's disk is at or above the deployment's disk-pressure threshold (80% by default, `TASK_RUN_NODE_DISK_PRESSURE_THRESHOLD_PERCENT`), it already runs work and its CPU is saturated (85% by default, or the project's **Node CPU Threshold**), or it hasn't reported fresh health readings. SAM won't add work to it until that clears; check the machine's page for its disk and CPU.             |
 | A new machine is provisioned for every task                            | Requirements ask for an exclusive node, each request fills a machine, or **Spread** has not reached the pool's **Machine limit**.                                                                                                                                                                                                                                                          |
 | Workspace machines are bigger or pricier than expected                 | Check the resolved requirements in the chat's infrastructure panel — a profile, skill, or project default may be raising the floor. Then open **Resources** on a finished session to see what it actually used ([Session Resource History](/docs/guides/session-resources/)).                                                                                                              |
 | A deployment machine is bigger than expected                           | Check the service CPU and memory limits in its deployment manifest, the pool's deployment strategy, and which smaller offerings the pool allows.                                                                                                                                                                                                                                           |

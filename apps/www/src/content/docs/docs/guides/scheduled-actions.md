@@ -146,10 +146,13 @@ Select **New automation**, then **Once, at a time you pick**:
      the message can't reach it. For a reminder further out, use **Start a new chat**. You can message a chat you started, or one
      [shared with you](/docs/guides/collaboration/#share-a-chat) while your access lasts. A message
      you schedule into a shared chat shows as yours, and is cancelled if your access ends before
-     it's sent. An agent can schedule messages only into chats its user started.
+     it's sent. An agent can schedule messages only into chats its user started. A message an
+     agent scheduled never appears as if you wrote it: the chat shows a line from SAM saying the
+     schedule is due, and the agent reads the note itself.
    - **Start a new chat** starts a chat with the agent profile and skill you pick, using the
      project's settings and accounts as they are when it runs. It runs even if you've left or
-     archived the chat that set it up.
+     archived the chat that set it up. When an agent scheduled it, the first message ends by saying
+     an agent wrote it.
 3. Check the summary and save.
 
 The time must be within the next 30 days. It's the earliest the work starts: a full machine, a

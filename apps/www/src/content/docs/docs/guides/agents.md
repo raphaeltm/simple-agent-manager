@@ -378,7 +378,9 @@ coming before an agent stops on it.
   limit that will stop each one first, which helps pick the agent to use next.
 - **When you start a new chat**, each profile's icon in the cards, the profile list and **To** has a
   ring that shows how much is left on the limit that will stop it first. Words appear only when it
-  matters: `6% left · resets 52m` when a limit is close, `Out · back in 2h 10m` when one is used up.
+  matters: `6% left · resets 52m` when a limit is close, `Out · back in 2h 10m` when one is used up,
+  **No account connected** when the profile's agent has no account to run on, and for example
+  **Work Claude paused** when its account is [paused](#pausing-an-account).
   Used-up profiles move to a folded **Out for now** section at the end of the profile list. If the
   profile you picked is close or out, a line above the message box says so and, when another profile
   runs the same model on a different account with room, offers to switch to it (for example
@@ -393,7 +395,7 @@ provider's limits.
 The chip's colour shows the most serious state among the limits, and the dialog names it: **OK**,
 **Warning** (from 75%, or earlier if the provider warns), **Critical** (from 90%), or **Limit
 reached** (the provider is refusing requests). For your own subscription the percentages cover your
-whole account with that provider, so they include use outside SAM; a **Platform credential**'s
+whole account with that provider, so they include use outside SAM; a **Platform account**'s
 numbers are SAM's shared limits.
 
 SAM only learns a limit's usage while an agent runs on that account. Once a limit's reset time has
@@ -436,7 +438,7 @@ Which credentials report limits:
   only.
 - **OpenCode with an OpenCode Go key:** rolling, weekly, and monthly.
 - **Claude Code or Codex in the SAM provider mode:** the request and token rate limits the model
-  provider reports, shown as **Platform credential**.
+  provider reports, shown as **Platform account**.
 
 OpenCode Zen bills from a credit balance that only the OpenCode console shows, so Zen has no chip;
 OpenCode's agent settings link to the console instead. API keys used directly, and the other agents,
@@ -517,8 +519,10 @@ ID is refused.
 
 Some names carry a note. **(API key only)** works only when Codex uses an OpenAI API key, not a
 ChatGPT subscription connected with **Connect with Codex**. **Deprecated for ChatGPT sign-in** is
-being withdrawn for ChatGPT subscriptions. **Deprecated; retires 2026-10-31** stops working on that
-date. When a model leaves the list, a profile that used it keeps its ID as a custom model; if the
+being withdrawn for ChatGPT subscriptions. **(Deprecated)** still works but is on its way out, and
+**(Deprecated; routes to … on 2026-12-01)** means the provider starts answering that name with the
+newer model on that date. **(Legacy; routes to …)** already does: choosing it runs the newer model.
+Prefer a model without a note for new profiles. When a model leaves the list, a profile that used it keeps its ID as a custom model; if the
 provider stops offering it, chats fail with
 [Model unavailable for this account](/docs/guides/session-troubleshooting/#the-agent-or-a-tool-cant-sign-in),
 so choose a listed model.
@@ -751,7 +755,7 @@ change.
 | `comments_read` / `comments_write`                                                                                 | Comment threads on chat messages and library files. Methods: `list`, `get`, `list_file`; `create`, `reply`, `resolve`, `reopen`, `create_file`.                                                                                                                                                                                                                                |
 | `profiles_read` / `profiles_write`                                                                                 | Agent profiles and their environment variables. Methods: `list`, `get`, `env_vars`; `create`, `update`, `set_env_var`, `remove_env_var`.                                                                                                                                                                                                                                       |
 | `skills_read` / `skills_write`                                                                                     | Project skills. Methods: `list`, `get`; `create`, `update`.                                                                                                                                                                                                                                                                                                                    |
-| `deployments_read` / `deployments_write`                                                                           | App deployments. Methods: `guide`, `environments`, `preview_routes`, `routes`, `config`, `logs`, `publish_status`; `create_environment`, `set_config`, `publish`.                                                                                                                                                                                                              |
+| `deployments_read` / `deployments_write`                                                                           | App deployments. Methods: `guide`, `environments`, `preview_routes`, `routes`, `config`, `logs`, `publish_status`; `create_environment`, `set_config`, `publish`, `cancel_publish`.                                                                                                                                                                                                              |
 | `associate_pull_request`, `list_pull_request_associations`                                                         | Record that this task is responsible for a pull request it didn't open, and look up who is ([Pull requests an agent takes over](#pull-requests-an-agent-takes-over))                                                                                                                                                                                                           |
 | `exec_with_secrets`                                                                                                | Run a command in this workspace with selected **Secret** variables filled in; `exec_with_secrets_status` returns the result and `exec_with_secrets_cancel` stops it ([Run commands with secrets](/docs/guides/secret-execution/))                                                                                                                                              |
 | `send_message_to_subtask`                                                                                          | Send a message to another active agent in the project by task ID, usually a subtask; the recipient gets a SAM notice and reads it with `get_event`                                                                                                                                                                                                                                |
