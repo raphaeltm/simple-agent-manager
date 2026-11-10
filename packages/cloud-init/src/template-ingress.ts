@@ -132,15 +132,15 @@ export const TUNNEL_WRITE_FILES = `  - path: /usr/local/sbin/sam-wait-tunnel-lis
     permissions: '0755'
     content: |
       #!/bin/sh
-      # Expose nothing until the vm-agent's loopback tunnel listener answers.
-      i=0
-      until curl -fsS --max-time 2 -o /dev/null "http://127.0.0.1:{{ tunnel_port }}/health"; do
-        i=$((i + 1))
-        if [ "$i" -ge {{ tunnel_listener_wait_seconds }} ]; then
+      # Expose nothing until the vm-agent's loopback tunnel listener answers,
+      # giving up after an elapsed-time deadline (not an attempt count).
+      deadline=$(($(date +%s) + {{ tunnel_listener_wait_seconds }}))
+      until curl -fsS --max-time {{ tunnel_listener_probe_timeout_seconds }} -o /dev/null "http://127.0.0.1:{{ tunnel_port }}/health"; do
+        if [ "$(date +%s)" -ge "$deadline" ]; then
           logger -t sam-tunnel "tunnel listener 127.0.0.1:{{ tunnel_port }} not ready"
           exit 1
         fi
-        sleep 1
+        sleep {{ tunnel_listener_probe_interval_seconds }}
       done
 
   - path: /etc/systemd/system/sam-cloudflared.service
@@ -158,7 +158,7 @@ export const TUNNEL_WRITE_FILES = `  - path: /usr/local/sbin/sam-wait-tunnel-lis
       ExecStart=/usr/local/bin/cloudflared tunnel --no-autoupdate run --token-file /etc/sam/cloudflared/tunnel-token
       TimeoutStartSec=infinity
       Restart=always
-      RestartSec=5
+      RestartSec={{ tunnel_connector_restart_seconds }}
       Slice=sam-infra.slice
       NoNewPrivileges=yes
       ProtectSystem=strict

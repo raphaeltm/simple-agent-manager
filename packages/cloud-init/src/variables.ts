@@ -55,8 +55,14 @@ export interface CloudInitVariables {
   cloudflareTunnelPort?: string;
   /** cloudflared release with pinned checksums (default: 2026.10.7). Tunnel mode only. */
   cloudflaredVersion?: string;
-  /** Seconds the connector waits for the tunnel listener per start attempt (default: 120). */
+  /** Elapsed seconds the connector waits for the tunnel listener per start attempt (default: 120). */
   tunnelListenerWaitSeconds?: string;
+  /** Timeout of each tunnel listener health probe, in seconds (default: 2). */
+  tunnelListenerProbeTimeoutSeconds?: string;
+  /** Pause between tunnel listener health probes, in seconds (default: 1). */
+  tunnelListenerProbeIntervalSeconds?: string;
+  /** systemd RestartSec for the connector after it exits or fails to start (default: 5). */
+  tunnelConnectorRestartSeconds?: string;
   /** Node-scoped endpoint used at boot to sign a locally generated Origin CA CSR. */
   originCaCertificateUrl?: string;
   /** Deadline for the agent binary transfer, including DNS/connect time. */
