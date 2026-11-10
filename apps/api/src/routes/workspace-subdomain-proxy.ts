@@ -418,7 +418,9 @@ export async function workspaceSubdomainProxy(
   let response: Response;
   try {
     response = await fetch(vmUrl.toString(), {
-      redirect: targetPort !== null ? 'manual' : c.req.raw.redirect,
+      // A reverse-tunnel node sits on this box's loopback: never follow its redirects there.
+      redirect:
+        targetPort !== null || nodeRoute.kind === 'reverse-tunnel' ? 'manual' : c.req.raw.redirect,
       method: c.req.raw.method,
       headers,
       body: c.req.raw.body,

@@ -18,7 +18,11 @@ import {
   getNodeBackendBaseUrl,
   waitForNodeAgentReadyWith,
 } from './node-agent-readiness';
-import { resolveNodeAgentRoute, retargetNodeAgentUrl } from './node-agent-route';
+import {
+  nodeAgentRequestInit,
+  resolveNodeAgentRoute,
+  retargetNodeAgentUrl,
+} from './node-agent-route';
 import { recordNodeRoutingMetric } from './telemetry';
 import {
   fetchVmAgentContainer,
@@ -289,7 +293,11 @@ export async function fetchNodeAgent(
   const route = await resolveNodeAgentRoute(env, nodeId);
   if (route.kind !== 'container') {
     await beforeExternalMutation?.();
-    return fetchWithTimeout(retargetNodeAgentUrl(url, route), options, requestTimeoutMs);
+    return fetchWithTimeout(
+      retargetNodeAgentUrl(url, route),
+      nodeAgentRequestInit(route, options),
+      requestTimeoutMs
+    );
   }
 
   const config = getVmAgentContainerConfig(env);

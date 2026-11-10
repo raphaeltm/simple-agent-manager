@@ -13,7 +13,11 @@ export const FRPC_RELEASES: Readonly<Record<string, Readonly<{ amd64: string; ar
   },
 };
 
-/** frp release installed on reverse-tunnel nodes; must match the box's frps major/minor. */
+/**
+ * frp release installed on reverse-tunnel nodes. Deliberately code-pinned (no override var): it
+ * moves in lockstep with the box's frps image (deploy/selfhost/docker-compose.yml) and needs a
+ * reviewed checksum anyway. Upgrading means adding a FRPC_RELEASES entry and bumping both.
+ */
 export const DEFAULT_FRPC_VERSION = '0.72.0';
 
 /** Release download prefix; the pinned checksum, not the origin, authenticates the tarball. */
@@ -29,8 +33,8 @@ export const REVERSE_TUNNEL_PROXY_NAME = 'sam-agent';
  * frpc heartbeat cadence. Each heartbeat reaches the control plane's frps plugin as a `Ping`,
  * which re-checks the lease, so a released lease disconnects within about one interval.
  */
-export const DEFAULT_REVERSE_TUNNEL_HEARTBEAT_INTERVAL_SECONDS = '30';
-export const DEFAULT_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS = '90';
+export const REVERSE_TUNNEL_HEARTBEAT_INTERVAL_SECONDS = '30';
+export const REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS = '90';
 
 /** base64url credential minted by the control plane (32-byte HMAC → 43 characters). */
 const CREDENTIAL_RE = /^[A-Za-z0-9_-]{32,128}$/;
@@ -108,9 +112,9 @@ export function reverseTunnelReplacements(variables: CloudInitVariables): Record
     '{{ reverse_tunnel_server_port }}': server.port,
     '{{ reverse_tunnel_proxy_name }}': REVERSE_TUNNEL_PROXY_NAME,
     '{{ reverse_tunnel_heartbeat_interval_seconds }}':
-      DEFAULT_REVERSE_TUNNEL_HEARTBEAT_INTERVAL_SECONDS,
+      REVERSE_TUNNEL_HEARTBEAT_INTERVAL_SECONDS,
     '{{ reverse_tunnel_heartbeat_timeout_seconds }}':
-      DEFAULT_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS,
+      REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS,
     '{{ frpc_version }}': DEFAULT_FRPC_VERSION,
     '{{ frpc_url }}': `${FRPC_DOWNLOAD_BASE_URL}/v${DEFAULT_FRPC_VERSION}`,
     '{{ frpc_sha256_amd64 }}': release?.amd64 ?? '',

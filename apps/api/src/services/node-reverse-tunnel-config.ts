@@ -9,14 +9,19 @@
  */
 import type { Env } from '../env';
 
-/** Address frps binds per-node proxies on (frps `proxyBindAddr`); the Worker and Caddy share it. */
-export const DEFAULT_REVERSE_TUNNEL_UPSTREAM_HOST = '127.0.0.1';
+/**
+ * Address frps binds per-node proxies on (frps `proxyBindAddr`); the Worker and Caddy share it.
+ * Fixed, not configurable: anything but loopback would expose node agents beyond the box.
+ */
+export const REVERSE_TUNNEL_UPSTREAM_HOST = '127.0.0.1';
 /** Default leased port range; must equal frps `allowPorts` in deploy/selfhost/frps/frps.toml. */
 export const DEFAULT_REVERSE_TUNNEL_PORT_RANGE_START = 20000;
 export const DEFAULT_REVERSE_TUNNEL_PORT_RANGE_END = 29999;
 /**
- * Upper bound on the range size. Allocation enumerates the range inside one SQL statement, so
- * an accidental `1-65535` would make every allocation walk 65k rows.
+ * Upper bound on the range size. Allocation enumerates the range inside one SQL statement (a
+ * recursive CTE with one indexed lookup per candidate), so the worst case is one statement
+ * walking 20k rows per node provisioning: milliseconds on SQLite, well inside D1's statement
+ * limits, and provisioning is rare. Without the bound an accidental `1-65535` would walk 64k.
  */
 export const MAX_REVERSE_TUNNEL_PORT_RANGE_SIZE = 20000;
 /** The gateway secret is a random token shared with frps and Caddy; refuse anything guessable. */
@@ -78,7 +83,7 @@ export function getReverseTunnelGatewaySecret(env: ReverseTunnelEnv): string | n
 
 /** `http://127.0.0.1:{port}`: where the Worker and Caddy reach a reverse-tunnel node's agent. */
 export function reverseTunnelUpstreamOrigin(port: number): string {
-  return `http://${DEFAULT_REVERSE_TUNNEL_UPSTREAM_HOST}:${port}`;
+  return `http://${REVERSE_TUNNEL_UPSTREAM_HOST}:${port}`;
 }
 
 function base64Url(bytes: ArrayBuffer): string {

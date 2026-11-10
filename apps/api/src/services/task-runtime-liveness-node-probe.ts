@@ -11,6 +11,7 @@ import { DEFAULT_TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS } from '@simple-agen
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 import { getNodeBackendBaseUrl } from './node-agent-readiness';
 import {
+  nodeAgentRequestInit,
   NodeAgentRouteError,
   resolveNodeAgentRoute,
   retargetNodeAgentUrl,
@@ -95,6 +96,7 @@ export async function probeNodeHealthForTaskLiveness(
     VM_AGENT_PORT: env.VM_AGENT_PORT,
   };
   let url = `${getNodeBackendBaseUrl(nodeId, backendEnv)}/health`;
+  let init: RequestInit = { method: 'GET' };
 
   try {
     if (env.DATABASE) {
@@ -103,15 +105,24 @@ export async function probeNodeHealthForTaskLiveness(
       // read, keep the public URL this probe always used: the probe is a liveness signal, so
       // its worst outcome is an inconclusive failure, which withholds any terminal verdict.
       try {
-        url = retargetNodeAgentUrl(
-          url,
-          await resolveNodeAgentRoute({ DATABASE: env.DATABASE, ...backendEnv }, nodeId)
+        const route = await resolveNodeAgentRoute(
+          { DATABASE: env.DATABASE, ...backendEnv },
+          nodeId
         );
+        url = retargetNodeAgentUrl(url, route);
+        init = nodeAgentRequestInit(route, init);
       } catch (routeErr) {
         if (routeErr instanceof NodeAgentRouteError) throw routeErr;
+        console.warn(
+          JSON.stringify({
+            event: 'task_liveness.node_route_unreadable',
+            nodeId,
+            error: routeErr instanceof Error ? routeErr.message : String(routeErr),
+          })
+        );
       }
     }
-    const response = await fetchWithTimeout(url, { method: 'GET' }, timeoutMs);
+    const response = await fetchWithTimeout(url, init, timeoutMs);
     return {
       outcome: response.ok ? 'ok' : 'failed',
       timeoutMs,

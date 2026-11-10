@@ -15,7 +15,7 @@
  * any other 2xx the inner dispatch might produce (which it then refuses).
  */
 import type { NodeAgentRoute } from './node-agent-route';
-import { DEFAULT_REVERSE_TUNNEL_UPSTREAM_HOST } from './node-reverse-tunnel-config';
+import { REVERSE_TUNNEL_UPSTREAM_HOST } from './node-reverse-tunnel-config';
 
 /** Response headers Caddy copies into the upstream request (deploy/selfhost/caddy/sam.d/). */
 export const GATEWAY_HEADER = {
@@ -72,7 +72,7 @@ export function gatewayDecisionResponse(
   }
   const headers = new Headers({ 'Cache-Control': 'no-store' });
   headers.set(GATEWAY_HEADER.decision, nonce);
-  headers.set(GATEWAY_HEADER.upstream, `${DEFAULT_REVERSE_TUNNEL_UPSTREAM_HOST}:${route.port}`);
+  headers.set(GATEWAY_HEADER.upstream, `${REVERSE_TUNNEL_UPSTREAM_HOST}:${route.port}`);
   headers.set(GATEWAY_HEADER.upstreamUri, `${upstream.url.pathname}${upstream.url.search}`);
   // Always present (possibly empty): Caddy replaces the client's Authorization and Cookie
   // with exactly what the Worker would have forwarded, so a stripped credential stays stripped.

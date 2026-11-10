@@ -123,3 +123,13 @@ export function retargetNodeAgentUrl(url: string, route: NodeAgentRoute): string
   target.search = original.search;
   return target.toString();
 }
+
+/**
+ * Request options for a node fetch. A reverse-tunnel node lives on the control-plane box's
+ * loopback next to celld, the object store and other nodes' lease ports, so a redirect from a
+ * (possibly compromised) node must never be followed there: the 3xx is returned as-is.
+ * Public routes keep the caller's options unchanged.
+ */
+export function nodeAgentRequestInit(route: NodeAgentRoute, options: RequestInit): RequestInit {
+  return route.kind === 'reverse-tunnel' ? { ...options, redirect: 'manual' } : options;
+}

@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
 import worker from '../../src/index';
-import { signPortAccessToken } from '../../src/services/jwt';
+import { signPortAccessToken, signTerminalToken } from '../../src/services/jwt';
 import {
   deriveReverseTunnelCredential,
   hashReverseTunnelCredential,
@@ -388,6 +388,38 @@ describe('node WebSocket forward_auth', () => {
     expect(upstream).not.toHaveBeenCalled();
   });
 
+  it('refuses a socket to a node whose lease was released, with a live-lease owner control', async () => {
+    await seedUser('rt-ws-rel');
+    const live = await seedReverseNode('E', 'rt-ws-rel');
+    const released = await seedReverseNode('F', 'rt-ws-rel');
+    await env.DATABASE.prepare(
+      "UPDATE node_reverse_tunnel_leases SET status = 'released' WHERE node_id = ?"
+    )
+      .bind(released.nodeId)
+      .run();
+    const cookie = await seedSignedInUser('rt-ws-rel');
+    const logs = (n: SeededNode) =>
+      call(
+        gatewayCall(`api.${env.BASE_DOMAIN}`, `/api/nodes/${n.nodeId}/logs/stream`, {
+          Cookie: cookie,
+        })
+      );
+    const refused = await logs(released);
+    expect(refused.status).toBe(503);
+    expect(refused.headers.get('X-SAM-Upstream')).toBeNull();
+    expect((await logs(live)).headers.get('X-SAM-Upstream')).toBe(`127.0.0.1:${live.port}`);
+
+    const workspaceId = await seedWorkspaceOn(released, 'rt-ws-rel', 'RE1');
+    const socket = await call(
+      gatewayCall(`ws-${workspaceId.toLowerCase()}.${env.BASE_DOMAIN}`, '/agent/ws', {
+        Cookie: cookie,
+      })
+    );
+    expect(socket.status).toBe(503);
+    expect(socket.headers.get('X-SAM-Upstream')).toBeNull();
+    expect(upstream).not.toHaveBeenCalled();
+  });
+
   it('refuses a node that is not on the reverse-tunnel transport', async () => {
     await seedUser('rt-ws-dns');
     await seedNode('RTPUBLICDNSNODE', 'rt-ws-dns', { status: 'running' });
@@ -449,5 +481,367 @@ describe('node WebSocket forward_auth', () => {
       (await call(gatewayCall(host, '/', { Upgrade: '' }))).status,
       'plain HTTP is not a gateway route'
     ).toBe(403);
+  });
+});
+
+const sessionTokenOf = (cookie: string) => cookie.split('=')[1]!.split('.')[0]!;
+
+describe('ws-* proxy after the move out of index.ts (other transports unchanged)', () => {
+  it.each([
+    ['vm-public-dns', 'vm-public-dns'],
+    ['cloudflare-tunnel', 'cloudflare-tunnel'],
+    ['legacy NULL transport', null],
+  ] as const)('proxies a %s workspace to its public backend hostname', async (_name, transport) => {
+    const userId = `rt-pub-${transport ?? 'null'}`;
+    await seedUser(userId);
+    const nodeId = `RTPUB${(transport ?? 'NULL').replaceAll('-', '').toUpperCase()}`.slice(0, 20);
+    await seedNode(nodeId, userId, { status: 'running' });
+    await env.DATABASE.prepare('UPDATE nodes SET transport = ? WHERE id = ?')
+      .bind(transport, nodeId)
+      .run();
+    const workspaceId = {
+      'vm-public-dns': '01KRRTPBVMPD00000000000000',
+      'cloudflare-tunnel': '01KRRTPBCFTN00000000000000',
+      none: '01KRRTPBNXNE00000000000000',
+    }[transport ?? 'none'];
+    await seedWorkspace(workspaceId, nodeId, userId, { status: 'running' });
+    upstream.mockImplementation(async () => new Response('node says hi'));
+    const response = await call(
+      new Request(
+        `https://ws-${workspaceId.toLowerCase()}.${env.BASE_DOMAIN}/workspaces/x/files/list?p=1`,
+        {
+          headers: {
+            Cookie: await seedSignedInUser(userId),
+            'X-SAM-Node-Id': 'spoofed',
+            'X-SAM-Gateway-Secret': SECRET,
+          },
+        }
+      )
+    );
+    expect(await response.text()).toBe('node says hi');
+    expect(upstream).toHaveBeenCalledTimes(1);
+    const [target, init] = upstream.mock.calls[0] as [string, RequestInit];
+    expect(target).toBe(
+      `https://${nodeId.toLowerCase()}.vm.${env.BASE_DOMAIN}:8443/workspaces/x/files/list?p=1`
+    );
+    const sent = new Headers(init.headers);
+    expect(sent.get('x-sam-node-id')).toBe(nodeId);
+    expect(sent.get('x-sam-workspace-id')).toBe(workspaceId);
+    expect(sent.get('x-forwarded-host')).toBe(`ws-${workspaceId.toLowerCase()}.${env.BASE_DOMAIN}`);
+    expect(sent.get('x-sam-gateway-secret')).toBeNull();
+  });
+
+  it('serves a reverse-tunnel node on its lease without following node redirects', async () => {
+    await seedUser('rt-redir');
+    const node = await seedReverseNode('D', 'rt-redir');
+    const workspaceId = await seedWorkspaceOn(node, 'rt-redir', 'RD1');
+    upstream.mockImplementation(
+      async () =>
+        new Response(null, { status: 307, headers: { Location: 'http://127.0.0.1:7001/' } })
+    );
+    const response = await call(
+      new Request(`https://ws-${workspaceId.toLowerCase()}.${env.BASE_DOMAIN}/x`, {
+        headers: { Cookie: await seedSignedInUser('rt-redir') },
+      })
+    );
+    expect(response.status).toBe(307);
+    const [target, init] = upstream.mock.calls[0] as [string, RequestInit];
+    expect(target).toBe(`http://127.0.0.1:${node.port}/x`);
+    expect(init.redirect).toBe('manual');
+  });
+
+  it('answers 503 for a reverse-tunnel node whose lease is gone, without any fetch', async () => {
+    await seedUser('rt-gone');
+    const node = await seedReverseNode('Q', 'rt-gone');
+    const workspaceId = await seedWorkspaceOn(node, 'rt-gone', 'GN1');
+    await env.DATABASE.prepare(
+      "UPDATE node_reverse_tunnel_leases SET status = 'released' WHERE node_id = ?"
+    )
+      .bind(node.nodeId)
+      .run();
+    const response = await call(
+      new Request(`https://ws-${workspaceId.toLowerCase()}.${env.BASE_DOMAIN}/x`, {
+        headers: { Cookie: await seedSignedInUser('rt-gone') },
+      })
+    );
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ error: 'NODE_UNREACHABLE' });
+    expect(upstream).not.toHaveBeenCalled();
+  });
+
+  it('control: an Instant (cf-container) workspace keeps its container path and the gateway refuses it', async () => {
+    await seedUser('rt-cfc');
+    await seedNode('RTCFCNODE', 'rt-cfc', { status: 'running' });
+    await env.DATABASE.prepare("UPDATE nodes SET runtime = 'cf-container' WHERE id = ?")
+      .bind('RTCFCNODE')
+      .run();
+    const workspaceId = '01KRRTCFC00000000000000000';
+    await seedWorkspace(workspaceId, 'RTCFCNODE', 'rt-cfc', { status: 'running' });
+    const cookie = await seedSignedInUser('rt-cfc');
+    const http = await call(
+      new Request(`https://ws-${workspaceId.toLowerCase()}.${env.BASE_DOMAIN}/x`, {
+        headers: { Cookie: cookie },
+      }),
+      { ...testEnv(), CF_CONTAINER_ENABLED: 'false' } as Env
+    );
+    expect(http.status).toBe(503);
+    expect(await http.json()).toMatchObject({ error: 'CF_CONTAINER_DISABLED' });
+    const gateway = await call(
+      gatewayCall(`ws-${workspaceId.toLowerCase()}.${env.BASE_DOMAIN}`, '/agent/ws', {
+        Cookie: cookie,
+      })
+    );
+    expect(gateway.status).toBe(502);
+    expect(await gateway.json()).toMatchObject({ error: 'GATEWAY_UNSUPPORTED_TRANSPORT' });
+    expect(upstream).not.toHaveBeenCalled();
+  });
+});
+
+describe('gateway attack cases', () => {
+  it('refuses the node log stream to another user and to no session, with an owner control', async () => {
+    await seedUser('rt-la-owner');
+    await seedUser('rt-la-other');
+    const node = await seedReverseNode('W', 'rt-la-owner');
+    const path = `/api/nodes/${node.nodeId}/logs/stream`;
+    const owner = await call(
+      gatewayCall(`api.${env.BASE_DOMAIN}`, path, { Cookie: await seedSignedInUser('rt-la-owner') })
+    );
+    expect(owner.status).toBe(200);
+    expect(owner.headers.get('X-SAM-Upstream-Authorization')).toMatch(/^Bearer ey/);
+    for (const headers of [{ Cookie: await seedSignedInUser('rt-la-other') }, {}]) {
+      const refused = await call(gatewayCall(`api.${env.BASE_DOMAIN}`, path, headers));
+      expect([401, 403, 404]).toContain(refused.status);
+      expect(refused.headers.get('X-SAM-Upstream')).toBeNull();
+      expect(refused.headers.get('X-SAM-Upstream-Authorization')).toBeNull();
+      expect(refused.headers.get('Authorization')).toBeNull();
+    }
+  });
+
+  it('refuses the log stream of a node that is not on the reverse tunnel', async () => {
+    await seedUser('rt-la-dns');
+    await seedNode('RTLADNSNODE', 'rt-la-dns', { status: 'running' });
+    const response = await call(
+      gatewayCall(`api.${env.BASE_DOMAIN}`, '/api/nodes/RTLADNSNODE/logs/stream', {
+        Cookie: await seedSignedInUser('rt-la-dns'),
+      })
+    );
+    expect(response.status).toBe(502);
+    expect(response.headers.get('X-SAM-Upstream')).toBeNull();
+  });
+
+  it('authorizes a terminal socket with a terminal token for its workspace only', async () => {
+    await seedUser('rt-tt');
+    const node = await seedReverseNode('T', 'rt-tt');
+    const a = await seedWorkspaceOn(node, 'rt-tt', 'TA1');
+    const b = await seedWorkspaceOn(node, 'rt-tt', 'TB1');
+    const sessionToken = sessionTokenOf(await seedSignedInUser('rt-tt'));
+    const { token } = await signTerminalToken('rt-tt', a, testEnv(), { sessionToken });
+    const ok = await call(
+      gatewayCall(`ws-${a.toLowerCase()}.${env.BASE_DOMAIN}`, `/terminal/ws?token=${token}`)
+    );
+    expect(ok.status).toBe(200);
+    expect(ok.headers.get('X-SAM-Upstream-Uri')).toBe(`/terminal/ws?token=${token}`);
+    expect(ok.headers.get('X-SAM-Upstream-Cookie')).toBe('');
+    const otherWorkspace = await call(
+      gatewayCall(`ws-${b.toLowerCase()}.${env.BASE_DOMAIN}`, `/terminal/ws?token=${token}`)
+    );
+    expect(otherWorkspace.status).toBe(401);
+    expect(otherWorkspace.headers.get('X-SAM-Upstream')).toBeNull();
+    const portProxy = await signTerminalToken('port-proxy', a, testEnv(), { sessionToken });
+    const asPortProxy = await call(
+      gatewayCall(
+        `ws-${a.toLowerCase()}.${env.BASE_DOMAIN}`,
+        `/terminal/ws?token=${portProxy.token}`
+      )
+    );
+    expect(asPortProxy.status).toBe(401);
+  });
+});
+
+describe('lease allocation fence (real D1)', () => {
+  it.each([
+    ['another user', "user_id = 'rt-fence-other'"],
+    ['a user-owned machine', "node_class = 'user-owned'"],
+    ['an Instant container', "runtime = 'cf-container'"],
+    ['a replaced incarnation', "runtime_incarnation_id = 'other-incarnation'"],
+    ['a node with termination proof', "runtime_termination_confirmed_at = '2026-11-10T00:00:00Z'"],
+    ['a deleted node', "status = 'deleted'"],
+    ['a stopped node', "status = 'stopped'"],
+    ['a destroying node', "status = 'destroying'"],
+  ])('writes no lease for %s', async (_name, mutation) => {
+    await seedUser('rt-fence');
+    await seedUser('rt-fence-other');
+    const nodeId = `RTF${crypto.randomUUID().replaceAll('-', '').slice(0, 16)}`.toUpperCase();
+    const incarnation = crypto.randomUUID();
+    await seedNode(nodeId, 'rt-fence', { status: 'running' });
+    await env.DATABASE.prepare(
+      `UPDATE nodes SET runtime = 'vm', node_class = 'managed', transport = 'reverse-tunnel',
+         runtime_incarnation_id = ? WHERE id = ?`
+    )
+      .bind(incarnation, nodeId)
+      .run();
+    await env.DATABASE.prepare(`UPDATE nodes SET ${mutation} WHERE id = ?`).bind(nodeId).run();
+    await expect(
+      ensureReverseTunnelLease(testEnv(), {
+        nodeId,
+        userId: 'rt-fence',
+        runtimeIncarnationId: incarnation,
+      })
+    ).rejects.toThrow('Node incarnation changed before a reverse-tunnel lease was written');
+    const rows = await env.DATABASE.prepare(
+      'SELECT COUNT(*) AS n FROM node_reverse_tunnel_leases WHERE node_id = ?'
+    )
+      .bind(nodeId)
+      .first<{ n: number }>();
+    expect(rows?.n).toBe(0);
+  });
+
+  it('control: the live managed node gets a lease, and a second ensure adopts it', async () => {
+    await seedUser('rt-fence-ok');
+    const node = await seedReverseNode('O', 'rt-fence-ok');
+    const again = await Promise.all([
+      ensureReverseTunnelLease(testEnv(), {
+        nodeId: node.nodeId,
+        userId: 'rt-fence-ok',
+        runtimeIncarnationId: node.incarnation,
+      }),
+      ensureReverseTunnelLease(testEnv(), {
+        nodeId: node.nodeId,
+        userId: 'rt-fence-ok',
+        runtimeIncarnationId: node.incarnation,
+      }),
+    ]);
+    for (const lease of again) {
+      expect(lease.port).toBe(node.port);
+      expect(lease.credential).toBe(node.credential);
+    }
+  });
+
+  it('prefers never-used ports, then the least recently released', async () => {
+    await seedUser('rt-order');
+    const range = {
+      REVERSE_TUNNEL_PORT_RANGE_START: '27000',
+      REVERSE_TUNNEL_PORT_RANGE_END: '27002',
+    };
+    const e = { ...testEnv(), ...range } as Env;
+    const make = async (label: string) => {
+      const nodeId = `RTO${label}${crypto.randomUUID().slice(0, 8)}`.toUpperCase();
+      const incarnation = crypto.randomUUID();
+      await seedNode(nodeId, 'rt-order', { status: 'running' });
+      await env.DATABASE.prepare(
+        `UPDATE nodes SET runtime = 'vm', node_class = 'managed', transport = 'reverse-tunnel',
+           runtime_incarnation_id = ? WHERE id = ?`
+      )
+        .bind(incarnation, nodeId)
+        .run();
+      return (
+        await ensureReverseTunnelLease(e, {
+          nodeId,
+          userId: 'rt-order',
+          runtimeIncarnationId: incarnation,
+        })
+      ).port;
+    };
+    const release = (port: number, at: string) =>
+      env.DATABASE.prepare(
+        "UPDATE node_reverse_tunnel_leases SET status = 'released', released_at = ? WHERE port = ? AND status = 'active'"
+      )
+        .bind(at, port)
+        .run();
+    expect(await make('A')).toBe(27000);
+    expect(await make('B')).toBe(27001);
+    await release(27000, '2026-11-10T10:00:00Z');
+    expect(await make('C'), 'never-used port first').toBe(27002);
+    await release(27001, '2026-11-10T09:00:00Z');
+    expect(await make('D'), 'least recently released next').toBe(27001);
+  });
+});
+
+describe('frps plugin: every liveness conjunct', () => {
+  it.each([
+    ['destroying', "status = 'destroying'"],
+    ['stopped', "status = 'stopped'"],
+    ['deleted', "status = 'deleted'"],
+    ['terminated', "runtime_termination_confirmed_at = '2026-11-10T00:00:00Z'"],
+    ['moved to cloudflare-tunnel', "transport = 'cloudflare-tunnel'"],
+    ['user-owned', "node_class = 'user-owned'"],
+    ['cf-container', "runtime = 'cf-container'"],
+  ])('refuses Login, NewProxy and Ping for a %s node', async (_name, mutation) => {
+    await seedUser('rt-live');
+    const a = await seedReverseNode('L', 'rt-live');
+    const user = { user: a.nodeId, metas: metas(a), run_id: 'r' };
+    const ops = (): Array<[string, unknown]> => [
+      ['Login', { user: a.nodeId, metas: metas(a) }],
+      [
+        'NewProxy',
+        { user, proxy_name: `${a.nodeId}.sam-agent`, proxy_type: 'tcp', remote_port: a.port },
+      ],
+      ['Ping', { user }],
+    ];
+    for (const [op, content] of ops()) {
+      expect((await verdict(await call(frpsCall(op, content)))).reject, `control ${op}`).toBe(
+        false
+      );
+    }
+    await env.DATABASE.prepare(`UPDATE nodes SET ${mutation} WHERE id = ?`).bind(a.nodeId).run();
+    for (const [op, content] of ops()) {
+      expect(await verdict(await call(frpsCall(op, content)))).toEqual({
+        reject: true,
+        reject_reason: 'node incarnation is not live',
+      });
+    }
+  });
+
+  it('refuses a node whose row was hard-deleted', async () => {
+    await seedUser('rt-hard');
+    const a = await seedReverseNode('M', 'rt-hard');
+    await env.DATABASE.prepare('DELETE FROM nodes WHERE id = ?').bind(a.nodeId).run();
+    expect(
+      (await verdict(await call(frpsCall('Login', { user: a.nodeId, metas: metas(a) })))).reject
+    ).toBe(true);
+  });
+
+  it.each([
+    ['no remote port', undefined],
+    ['remote port 0 (frp: pick any)', 0],
+  ])('refuses NewProxy with %s', async (_name, remotePort) => {
+    await seedUser('rt-np');
+    const a = await seedReverseNode('N', 'rt-np');
+    const response = await call(
+      frpsCall('NewProxy', {
+        user: { user: a.nodeId, metas: metas(a), run_id: 'r' },
+        proxy_name: `${a.nodeId}.sam-agent`,
+        proxy_type: 'tcp',
+        ...(remotePort === undefined ? {} : { remote_port: remotePort }),
+      })
+    );
+    expect(await verdict(response)).toEqual({
+      reject: true,
+      reject_reason: 'remote port is not leased to this node',
+    });
+  });
+
+  it('refuses a basic-auth user other than frps and an oversized body', async () => {
+    const wrongUser = new Request(
+      'http://127.0.0.1:8080/api/self-host/gateway/frps-plugin?op=Login',
+      {
+        method: 'POST',
+        headers: { Authorization: `Basic ${btoa(`admin:${SECRET}`)}` },
+        body: '{}',
+      }
+    );
+    expect((await call(wrongUser)).status).toBe(401);
+    const big = new Request('http://127.0.0.1:8080/api/self-host/gateway/frps-plugin?op=Login', {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${btoa(`frps:${SECRET}`)}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ content: { pad: 'x'.repeat(20_000) } }),
+    });
+    expect(await verdict(await call(big))).toEqual({
+      reject: true,
+      reject_reason: 'request too large',
+    });
   });
 });

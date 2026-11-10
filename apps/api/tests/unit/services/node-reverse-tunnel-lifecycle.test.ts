@@ -143,6 +143,21 @@ describe('reverse-tunnel provisioning', () => {
     expect(leases(node.id)).toEqual([]);
   });
 
+  it.each([undefined, 'vm-public-dns'])(
+    'control: with VM_AGENT_TRANSPORT=%j a managed node stays on public DNS with no lease',
+    async (transport) => {
+      setEnv(reverseEnv({ VM_AGENT_TRANSPORT: transport }));
+      const node = await freshNode();
+      await provisionNode(node.id, env);
+      expect(readNode(node.id)?.transport).toBe('vm-public-dns');
+      expect(leases(node.id)).toEqual([]);
+      expect(mocks.createARecord).toHaveBeenCalled();
+      const [vars] = mocks.cloudInitVars;
+      expect(vars?.reverseTunnelCredential).toBeUndefined();
+      expect(vars?.originCaCertificateUrl).toContain('/origin-ca-certificate');
+    }
+  );
+
   it('excludes deployment nodes and keeps them on public DNS', async () => {
     const node = await freshNode({ nodeRole: 'deployment' });
     await provisionNode(node.id, env, undefined, undefined, { environmentId: 'env-1' });
@@ -285,6 +300,30 @@ describe('control plane -> node routing seam', () => {
     // Released lease: fail closed, no request at all (no DNS record exists to fall back to).
     await deleteNodeResourcesStrict(node.id, USER, env);
     seen.length = 0;
+    await expect(
+      fetchNodeAgent(
+        node.id,
+        env,
+        `https://${node.id.toLowerCase()}.vm.example.test:8443/health`,
+        {},
+        1000
+      )
+    ).rejects.toThrow(/no active lease/);
+    expect(seen).toEqual([]);
+  });
+
+  it('never routes to a lease held by a superseded incarnation', async () => {
+    const node = await freshNode();
+    await provisionNode(node.id, env);
+    sqlite
+      .prepare('UPDATE nodes SET runtime_incarnation_id = ? WHERE id = ?')
+      .run(crypto.randomUUID(), node.id);
+    expect(leases(node.id)).toMatchObject([{ status: 'active' }]);
+    const seen: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      seen.push(String(input instanceof Request ? input.url : input));
+      return new Response('ok');
+    }) as typeof fetch;
     await expect(
       fetchNodeAgent(
         node.id,

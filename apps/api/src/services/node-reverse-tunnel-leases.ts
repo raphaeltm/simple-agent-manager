@@ -83,7 +83,8 @@ export async function readReverseTunnelLeaseByIncarnation(
  * while a dying VM may still be retrying with it.
  *
  * The credential is derived from the lease id, so the row id is generated first and the hash
- * of the resulting credential is written in the same INSERT.
+ * of the resulting credential is written in the same INSERT. Only the (node, incarnation)
+ * conflict is absorbed (retry/resume adopts its own row); any other constraint failure throws.
  */
 export async function ensureReverseTunnelLease(
   env: LeaseEnv & ReverseTunnelEnv & Pick<Env, 'ENCRYPTION_KEY'>,
@@ -101,7 +102,7 @@ export async function ensureReverseTunnelLease(
     `WITH RECURSIVE candidate_ports(port) AS (
        SELECT ? UNION ALL SELECT port + 1 FROM candidate_ports WHERE port < ?
      )
-     INSERT OR IGNORE INTO node_reverse_tunnel_leases
+     INSERT INTO node_reverse_tunnel_leases
        (id, node_id, user_id, runtime_incarnation_id, port, credential_hash, status,
         release_reason, created_at, updated_at, released_at)
      SELECT ?, ?, ?, ?, chosen.port, ?, 'active', NULL, ?, ?, NULL
@@ -116,7 +117,8 @@ export async function ensureReverseTunnelLease(
           ORDER BY last_released_at IS NOT NULL, last_released_at, c.port
           LIMIT 1
        ) chosen
-      WHERE EXISTS (SELECT 1 FROM nodes WHERE ${NODE_LIVE_FENCE_SQL})`
+      WHERE EXISTS (SELECT 1 FROM nodes WHERE ${NODE_LIVE_FENCE_SQL})
+     ON CONFLICT (node_id, runtime_incarnation_id) DO NOTHING`
   )
     .bind(
       range.start,
@@ -145,6 +147,13 @@ export async function ensureReverseTunnelLease(
     )
       .bind(input.nodeId, input.userId, input.runtimeIncarnationId)
       .first<{ live: number }>();
+    if (live) {
+      log.error('node_reverse_tunnel.port_range_exhausted', {
+        nodeId: input.nodeId,
+        rangeStart: range.start,
+        rangeEnd: range.end,
+      });
+    }
     throw new ReverseTunnelLeaseError(
       live
         ? `No free reverse-tunnel port in ${range.start}-${range.end}`

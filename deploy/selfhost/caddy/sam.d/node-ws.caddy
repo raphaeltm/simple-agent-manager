@@ -56,6 +56,9 @@ handle @sam_node_ws_port {
 			header_up -X-SAM-Upstream-Uri
 			header_up -X-SAM-Upstream-Authorization
 			header_up -X-SAM-Upstream-Cookie
+			# Defence in depth: the gateway's own headers never reach a node.
+			header_up -X-SAM-Gateway-Secret
+			header_up -X-SAM-Gateway-Original-Host
 			header_down -Set-Cookie
 		}
 	}
@@ -93,6 +96,9 @@ handle @sam_node_ws {
 			header_up -X-SAM-Upstream-Uri
 			header_up -X-SAM-Upstream-Authorization
 			header_up -X-SAM-Upstream-Cookie
+			# Defence in depth: the gateway's own headers never reach a node.
+			header_up -X-SAM-Gateway-Secret
+			header_up -X-SAM-Gateway-Original-Host
 		}
 	}
 }

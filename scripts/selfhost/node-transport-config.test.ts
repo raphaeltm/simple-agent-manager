@@ -14,6 +14,7 @@ import {
   GATEWAY_SECRET_HEADER,
 } from '../../apps/api/src/routes/self-host-gateway';
 import { FRPS_PLUGIN_OPS } from '../../apps/api/src/services/node-reverse-tunnel-authz';
+import { REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS } from '../../packages/cloud-init/src/reverse-tunnel';
 import { GATEWAY_HEADER } from '../../apps/api/src/services/node-websocket-gateway';
 
 const root = join(import.meta.dirname, '../../deploy/selfhost');
@@ -36,6 +37,12 @@ describe('frps.toml', () => {
     expect(frps).toMatch(/^bindAddr = "127\.0\.0\.1"$/m);
     expect(frps).toMatch(/^proxyBindAddr = "127\.0\.0\.1"$/m);
     expect(frps).toMatch(/^maxPortsPerClient = 1$/m);
+  });
+
+  it('drops a silent node on the same heartbeat timeout frpc uses', () => {
+    expect(frps).toContain(
+      `transport.heartbeatTimeout = ${REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS}`
+    );
   });
 
   it('calls the Worker plugin route with basic auth for every op the Worker decides', () => {
