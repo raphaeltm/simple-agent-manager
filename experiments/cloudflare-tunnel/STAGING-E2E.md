@@ -1,6 +1,6 @@
 # Managed VM tunnel staging verification
 
-Status: implementation and local review in progress; live compute sweep pending.
+Status (2026-11-10 09:47 UTC): first managed staging sweep running; live findings fixed locally, final candidate redeployment and remaining lifecycle/fault checks pending.
 The earlier CI-loopback experiments are transport feasibility evidence, not this
 managed VM end-to-end proof. No production tunnel cutover is authorized here.
 
@@ -11,7 +11,11 @@ managed VM end-to-end proof. No production tunnel cutover is authorized here.
 - Owned Artifact project: `01M728XDW1JB2T08YCF2XR39H7` (`Tunnel E2E 2026-11-10`).
 - VM full profile: `01M728XGQ9FHXR3VPJ847VXD67`.
 - Instant profile: `01M728XHBQ93TEGAEJCCT89K0K`.
-- Candidate SHA, deployment run, sessions, workspace/node IDs: pending live sweep.
+- Initial deployed candidate: `d38788564d71f0956d7046407e3a300e91f09dd5`, successful [run 42788029854](https://github.com/raphaeltm/simple-agent-manager/actions/runs/42788029854).
+- Exact initial agent release: `07b7a279b10d80981fb8b37393cfcffc6801f38c`.
+- VM node `01M72C6GY6RFKSD9D6A1TX090V`, primary workspace `01M72CGEGDQDW0162ZZKK4P6AF`, session `b6b66d75-95f1-4601-b673-662e1d09cbb0`.
+- Second workspace `01M72D3QJW8CR74JEMY9CK1ZFT` is on that same VM; session `94528a0b-b56d-4945-a599-6a2f6e254162`.
+- Instant node `01M72CWK53HWK2QV8QHR0RS6KW`, workspace `01M72CWKDF0VKB48J3YRKYAW4N`, session `c156f907-cb25-4469-bb50-e79b81977bc9`.
 - Budget: one small VM normally, two workspaces sharing its port 3000; one
   bounded instant fixture. Clean up owned compute immediately after testing.
 
@@ -29,7 +33,7 @@ Arm and verify an independent host recovery timer before stopping the connector.
 
 ## Endpoint-to-scenario matrix
 
-Every live row below is pending until its exact result is recorded.
+The matrix defines coverage; only the explicit results below establish a live pass.
 
 | Surface                    | Live scenario                                                                                         | Complementary local coverage                                                                                                     |
 | -------------------------- | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
@@ -64,7 +68,7 @@ Every live row below is pending until its exact result is recorded.
   Tracked separately as SAM idea `01M729EEJXM1W9QBKFC9QJEVRN`; this is not a clean
   full-suite pass.
 - Independent lifecycle review found resume cleanup, transport-switch metadata,
-  and late Cloudflare-create cleanup gaps. Fixes and final re-review pending.
+  and late Cloudflare-create cleanup gaps. Fixes and final re-review passed before the initial staging deployment.
 
 ## Known boundaries to distinguish during the live sweep
 
@@ -76,3 +80,14 @@ Every live row below is pending until its exact result is recorded.
   `01M729PB2EKNX0SKZ68WG53DN8`.
 - General public TCP/UDP exposure is outside SAM's existing HTTP/WebSocket preview
   contract. Deployment-role nodes retain their current ingress behavior.
+
+## Initial live results (09:47 UTC; final candidate pending)
+
+- Fresh VM ready/heartbeat and exact agent release passed; D1 records tunnel transport and incarnation, and authoritative DNS contains only its proxied tunnel CNAME. Instant has no tunnel journal entry. The managed read-only debugging token cannot read tunnel details (401); this is an inventory-observation gap, not a tunnel failure.
+- Real UI agents built and pushed the HTTP/WS fixture, exposed port 3000 through MCP, and completed a harmless managed-secret execution job. VM and instant HTML/assets/POST worked.
+- VM terminal create/input/resize (31×97)/reattach, binary and text file transfer, file browser, Git status/diff, CLI HTTP forwarding, diagnostics/log WebSocket and five cross-user denials passed. Instant files, CLI, diagnostics, cross-user denials and private/public/private preview access passed.
+- Two workspaces on one VM served different port-3000 markers across three alternating reads each.
+- Primary rebuild returned202 and converged in26.65 seconds with its server healthy. Existing rebuild semantics reuse the container; a fresh fixture is needed to apply host-PID inspection settings.
+- Instant streaming, text/binary WebSocket, requested subprotocol and35-second idle socket passed. Agent follow-up, live steer, cancellation, reconnect and snapshot sleep passed; wake verification is in progress.
+- Live findings being fixed before final verification: SAM cookies reached preview applications; the Worker followed relative302 redirects against the agent path; instant PTY creation combined Setpgid and Setsid and failed with EPERM. Regression tests cover actual HTTP/WS auth boundaries and a real standalone PTY, including child-group shutdown.
+- Host firewall/connector outage/reboot, final auth negatives, complete lifecycle restoration and owned-resource cleanup remain pending. No origin-IP requests have been made.

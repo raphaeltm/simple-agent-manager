@@ -43,6 +43,7 @@ import { applyCacheHeaders } from './lib/cache-headers';
 import { withRequestScopedD1Bindings } from './lib/d1-session';
 import { log, serializeError } from './lib/logger';
 import { resolvePagesProxyTarget } from './lib/pages-proxy';
+import { stripPreviewAuthCookies } from './lib/preview-cookies';
 import { parseWorkspaceSubdomain } from './lib/workspace-subdomain';
 import { analyticsMiddleware } from './middleware/analytics';
 import { apiCors } from './middleware/api-cors';
@@ -514,6 +515,7 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
     }
 
     const headers = new Headers(c.req.raw.headers);
+    if (targetPort !== null) stripPreviewAuthCookies(headers);
     headers.delete('x-sam-node-id');
     headers.delete('x-sam-workspace-id');
     headers.delete('x-forwarded-host');
@@ -545,6 +547,7 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
     );
 
     const containerRequest = new Request(containerUrl.toString(), {
+      redirect: targetPort !== null ? 'manual' : c.req.raw.redirect,
       method: c.req.raw.method,
       headers,
       body: c.req.raw.body,
@@ -650,6 +653,7 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
 
   // Strip client-supplied routing headers and inject trusted routing context.
   const headers = new Headers(c.req.raw.headers);
+  if (targetPort !== null) stripPreviewAuthCookies(headers);
   headers.delete('x-sam-node-id');
   headers.delete('x-sam-workspace-id');
   headers.delete('x-forwarded-host');
@@ -666,6 +670,7 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
   let response: Response;
   try {
     response = await fetch(vmUrl.toString(), {
+      redirect: targetPort !== null ? 'manual' : c.req.raw.redirect,
       method: c.req.raw.method,
       headers,
       body: c.req.raw.body,

@@ -51,44 +51,44 @@ while retaining instant-container compatibility. Plan requested before execution
 The earlier synthetic proof does not satisfy this phase.
 
 - [x] Inventory every browser/API/CLI/MCP-to-agent path and callback; maintain an
-  endpoint-to-test matrix with live evidence or explicit failure-path coverage.
+      endpoint-to-test matrix with live evidence or explicit failure-path coverage.
 - [x] Centralize transport selection for tunnel VMs, legacy VMs, and instant
-  containers. Preserve container DO forwarding, timeout and cold-wake/no-wake
-  semantics; containers must never acquire tunnel resources.
+      containers. Preserve container DO forwarding, timeout and cold-wake/no-wake
+      semantics; containers must never acquire tunnel resources.
 - [x] Provision one named tunnel per VM incarnation with journaled identity,
-  CNAME, connector bootstrap, readiness and credential protection. Node receives
-  only its tunnel credential; account API token stays in control plane.
+      CNAME, connector bootstrap, readiness and credential protection. Node receives
+      only its tunnel credential; account API token stays in control plane.
 - [x] Implement dedicated externally-classified ingress; preserve private Docker
-  Git helper access; block public inbound IPv4/IPv6 before serving requests.
+      Git helper access; block public inbound IPv4/IPv6 before serving requests.
 - [x] Cover all URL callers: readiness, management, terminal/ACP/boot-log streams,
-  previews, local forwarding, files/attachments/snapshots, Git/worktrees, MCP
-  tools/secret execution/build-publication and diagnostics/teardown callers.
+      previews, local forwarding, files/attachments/snapshots, Git/worktrees, MCP
+      tools/secret execution/build-publication and diagnostics/teardown callers.
 - [ ] Handle failed provisioning, cancellation, retries, connector restart,
-  credential revocation, stale-incarnation cleanup and eventual deletion retries.
+      credential revocation, stale-incarnation cleanup and eventual deletion retries.
 - [x] Wire installation settings, permissions, upgrade/clean-install support and
-  docs. Preserve existing direct-IP nodes; no IP fallback for tunnel nodes.
+      docs. Preserve existing direct-IP nodes; no IP fallback for tunnel nodes.
 - [ ] Deploy pinned staging build; actual agent creates/runs site on port3000
-  through normal authenticated UI, inside a real managed devcontainer.
+      through normal authenticated UI, inside a real managed devcontainer.
 - [ ] Browser test assets, routes, queries, POST, redirects, auth/cookies,
-  public/private previews, HMR/WebSockets and closing/reopening exposure.
+      public/private previews, HMR/WebSockets and closing/reopening exposure.
 - [ ] Test second workspace using the same port on the same VM; test supported
-  CLI local forwarding and cross-user authorization with separate identities.
+      CLI local forwarding and cross-user authorization with separate identities.
 - [ ] Exercise agent prompt/stream/steer/cancel, terminal input/resize/reconnect,
-  workspace create/rebuild/stop/restart/delete, session sleep/wake/snapshot restore,
-  file upload/download, Git/credential refresh, MCP operations and diagnostics.
+      workspace create/rebuild/stop/restart/delete, session sleep/wake/snapshot restore,
+      file upload/download, Git/credential refresh, MCP operations and diagnostics.
 - [ ] Prove origin-IP independence with firewall/listener evidence, tunnel-only
-  DNS, explicit transport assertions and route logs. Stop tunnel: access fails
-  with no IP fallback; restart: recovery succeeds. Browser traces alone do not
-  establish the Worker-to-origin path.
+      DNS, explicit transport assertions and route logs. Stop tunnel: access fails
+      with no IP fallback; restart: recovery succeeds. Browser traces alone do not
+      establish the Worker-to-origin path.
 - [ ] Negative security tests: missing/invalid/expired/wrong-scope tokens, direct
-  tunnel credential/management access, preview-to-helper relay, reserved ports,
-  and absence of credentials in target apps or evidence logs.
+      tunnel credential/management access, preview-to-helper relay, reserved ports,
+      and absence of credentials in target apps or evidence logs.
 - [ ] Run applicable live user flows on actual instant containers: startup,
-  agent interaction, port3000 previews/WS, terminal, files/Git and sleep/wake/
-  cleanup. Verify no tunnel creation and correct routing in mixed deployments.
+      agent interaction, port3000 previews/WS, terminal, files/Git and sleep/wake/
+      cleanup. Verify no tunnel creation and correct routing in mixed deployments.
 - [ ] Review Go/security/Cloudflare/env/docs changes; resolve blocking findings.
 - [ ] Retain reproducible tests, screenshots/traces, exact candidate SHA and
-  task/session IDs, network-path evidence, and per-scenario results.
+      task/session IDs, network-path evidence, and per-scenario results.
 - [ ] Delete test VMs/containers/DNS/tunnels and verify remote inventory.
 
 Bound tests to one VM normally, a second only for required isolation/replacement,
@@ -114,3 +114,9 @@ The staging-only transport variable is set for the upcoming deployment. Live
 scenario results belong in `experiments/cloudflare-tunnel/STAGING-E2E.md`.
 Admin settings passed read-only mocked desktop/mobile visual validation; deployed
 definitions still require the final live rerun.
+
+## Live sweep checkpoint (09:47 UTC)
+
+The initial managed staging deployment is green and both real VM/instant agents ran the port3000 fixture. See the staging matrix for exact IDs and passed surfaces. Full API15,719 tests /1067 files, CI root Test, SonarCloud, secret scan and Durable Object Workers pass on8a3321ad5. Admin controls have reviewed desktop/mobile evidence posted on PR2615.
+
+Live testing found preview credential leakage, redirect auto-follow and an existing instant PTY spawn conflict. These are fixed with targeted regression coverage and independent review before the final staging candidate. Remaining lifecycle/fault/cleanup gates are open; this task is not complete.

@@ -97,9 +97,8 @@ export async function createSessionClient({
       return {
         name: part.slice(0, index).trim(),
         value: part.slice(index + 1).trim(),
-        ...(part.slice(0, index).trim().startsWith('__Host-')
-          ? { url: apiOrigin }
-          : { domain: `.${stagingBaseDomain}`, path: '/' }),
+        // Login cookies belong to the API host; never broadcast them to preview apps.
+        url: apiOrigin,
         secure: true,
         httpOnly: true,
         sameSite: 'Lax',

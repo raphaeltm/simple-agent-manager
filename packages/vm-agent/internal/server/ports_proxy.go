@@ -32,7 +32,15 @@ func (s *Server) handleWorkspacePortProxy(w http.ResponseWriter, r *http.Request
 	// Debug header to verify which binary version is running.
 	w.Header().Set("X-SAM-Port-Proxy", "v2-pathrw")
 
-	if !s.requireWorkspaceRequestAuth(w, r, workspaceID) {
+	// Preview requests carry the Worker's SAM credential in the query while
+	// Authorization belongs to the application. Authenticate a separate copy so
+	// application Bearer auth cannot shadow the SAM token or be consumed by it.
+	authRequest := r
+	if strings.TrimSpace(r.URL.Query().Get("token")) != "" {
+		authRequest = r.Clone(r.Context())
+		authRequest.Header.Del("Authorization")
+	}
+	if !s.requireWorkspaceRequestAuth(w, authRequest, workspaceID) {
 		slog.Warn("Port proxy auth failed",
 			"workspaceId", workspaceID,
 			"port", r.PathValue("port"))
@@ -145,6 +153,7 @@ func (s *Server) servePortProxy(w http.ResponseWriter, r *http.Request, workspac
 		req.URL.RawPath = ""
 		req.Host = publicHost
 		markProxiedRequest(req.Header)
+		s.stripPortProxyCredentials(req)
 		// Strip the auth token — it is consumed by the VM agent for authentication
 		// and must not leak to the container app running on the forwarded port.
 		q := req.URL.Query()
