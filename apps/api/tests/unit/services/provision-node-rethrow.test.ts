@@ -19,7 +19,8 @@ const { logError, logInfo, persistError, deleteNodeResourcesStrict } = vi.hoiste
   deleteNodeResourcesStrict: vi.fn(),
 }));
 
-vi.mock('../../../src/lib/logger', () => ({
+vi.mock('../../../src/lib/logger', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/logger')>()),
   log: { error: logError, info: logInfo, warn: vi.fn(), debug: vi.fn() },
   serializeError: (error: unknown) => ({
     error: error instanceof Error ? error.message : String(error),
