@@ -10,7 +10,7 @@
 //        [--no-bundle] [--secrets <dotenv file>]
 //
 // Writes <projectDir>/wrangler.json and prints a report of every dropped/translated key.
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync, symlinkSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { resolve, relative, dirname } from 'node:path';
 
@@ -74,10 +74,22 @@ out.migrations = (src.migrations ?? []).map((m) => {
 // (retired trial DOs) still need an export; index.ts keeps tombstones for them.
 
 // D1: celld needs migrations_dir relative to the project dir.
-out.d1_databases = (src.d1_databases ?? []).map((d) => ({
-  ...d,
-  migrations_dir: relative(outDir, resolve(apiDir, d.migrations_dir)),
-}));
+// celld requires migrations_dir to be a relative path INSIDE the project with no `..`.
+// With --main (project dir mirrors apps/api via a `src` symlink), keep the toml paths as-is.
+// celld also refuses a migrations_dir that has a subdirectory holding .sql files
+// (SAM nests src/db/migrations/observability inside src/db/migrations). So each database
+// gets a flat project-local directory of symlinks to its own .sql files.
+out.d1_databases = (src.d1_databases ?? []).map((d) => {
+  const flat = `d1-migrations/${d.binding.toLowerCase()}`;
+  const from = resolve(apiDir, d.migrations_dir);
+  const to = resolve(outDir, flat);
+  rmSync(to, { recursive: true, force: true });
+  mkdirSync(to, { recursive: true });
+  const files = readdirSync(from).filter((f) => f.toLowerCase().endsWith('.sql'));
+  for (const f of files) symlinkSync(resolve(from, f), resolve(to, f));
+  report.push(`TRANSLATE d1 ${d.binding}: migrations_dir ${d.migrations_dir} -> ${flat} (${files.length} flat symlinks)`);
+  return { ...d, migrations_dir: flat };
+});
 
 // celld rejects two r2 bindings that name the same bucket. SAM binds R2 and
 // PROJECT_DATA_ARCHIVE_R2 to ONE bucket (also in production: sync-wrangler-config.ts uses
