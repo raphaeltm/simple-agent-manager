@@ -4,6 +4,7 @@
  *
  *   pnpm selfhost:deploy [--env-file deploy/selfhost/.env] [--state-dir <env dir>/.state]
  *                        [--secrets <state-dir>/secrets.env] [--web-dist DIR] [--dry-run] [--init]
+ *                        [--skip-vm-agent]
  *
  * `--init` only generates the platform keys and `<state-dir>/gateway.env`, the shared secret
  * docker compose hands to frps and Caddy; run it once before the first `docker compose up`.
@@ -12,6 +13,11 @@
  * D1 migrations are applied idempotently, and `celld deploy` publishes a new version that the
  * node adopts in place. celld has no secrets store for real nodes, so secrets are rendered
  * into `vars` for the deploy only; the config left on disk afterwards carries none.
+ *
+ * Nodes download the vm-agent from this install, so the deploy builds it (pinned Go image) and
+ * publishes it into the fleet bucket the way the Cloudflare pipeline does, then pins
+ * VM_AGENT_REQUIRED_VERSION to that release. `--skip-vm-agent` skips both and leaves the
+ * version unpinned (nodes then use the legacy `agents/vm-agent-linux-<arch>` objects).
  *
  * The Cloudflare pipeline never runs this script.
  */
@@ -43,6 +49,11 @@ import {
   readSecretsFile,
   writePrivateFile,
 } from './secret-files.js';
+import {
+  buildVmAgentBinaries,
+  publishVmAgentArtifacts,
+  resolveVmAgentRelease,
+} from './vm-agent-artifacts.js';
 
 const REPO_ROOT = resolve(import.meta.dirname, '../..');
 const API_DIR = join(REPO_ROOT, 'apps/api');
@@ -214,6 +225,7 @@ async function main(): Promise<void> {
       'web-dist': { type: 'string' },
       'dry-run': { type: 'boolean', default: false },
       init: { type: 'boolean', default: false },
+      'skip-vm-agent': { type: 'boolean', default: false },
     },
   });
   const envFile = resolve(values['env-file'] ?? join(REPO_ROOT, 'deploy/selfhost/.env'));
@@ -264,6 +276,8 @@ async function main(): Promise<void> {
       ...tunnelRangeVars(tunnelRange),
     },
   });
+  const vmAgentRelease = values['skip-vm-agent'] ? null : resolveVmAgentRelease(REPO_ROOT);
+  if (vmAgentRelease) plan.config.vars.VM_AGENT_REQUIRED_VERSION = vmAgentRelease.release;
   // Needs the R2 binding's final bucket name, so it is applied after translation.
   Object.assign(plan.config.vars, presignVars(box, plan.config.vars.R2_BUCKET_NAME ?? ''));
   for (const line of plan.report) log(line);
@@ -283,6 +297,22 @@ async function main(): Promise<void> {
 
   const celld = await ensureCelldBinary(join(stateDir, 'bin'));
   const env = celldChildEnv(process.env, box, resolveEsbuild(API_DIR));
+
+  // Before the Worker that pins VM_AGENT_REQUIRED_VERSION is published, as on Cloudflare.
+  if (vmAgentRelease) {
+    const agentBucket = plan.config.r2_buckets.find((bucket) => bucket.binding === 'R2');
+    if (!agentBucket) throw new Error('the Worker has no R2 binding to serve the vm-agent from');
+    log(`building vm-agent release ${vmAgentRelease.release}`);
+    publishVmAgentArtifacts({
+      celld,
+      env,
+      fleetBucket: bucketOf(env),
+      r2BucketName: agentBucket.bucket_name,
+      binDir: buildVmAgentBinaries(REPO_ROOT, join(stateDir, 'go-cache'), vmAgentRelease),
+      release: vmAgentRelease.release,
+      log,
+    });
+  }
 
   // The secrets-free config is what stays on disk: migrations and operator `celld d1`/`kv`
   // commands read it. On an upgrade, migrations run before the new Worker version, as on
