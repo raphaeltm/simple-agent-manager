@@ -1,6 +1,11 @@
 {
   "$schema": "./fixtures/supply-chain/direct-dependency-evidence.schema.json",
   "npm": {
+    "@ai-sdk/openai-compatible": {
+      "registryUrl": "https://www.npmjs.com/package/@ai-sdk/openai-compatible",
+      "homepageUrl": "https://github.com/vercel/ai",
+      "necessity": "Builds the SAM operator's admin-configured OpenAI-compatible model with an injected guarded fetch; same version Mastra's ModelRouterLanguageModel bundles, which has no fetch option."
+    },
     "@astrojs/check": {
       "registryUrl": "https://www.npmjs.com/package/@astrojs/check",
       "necessity": "Validates Astro templates and embedded TypeScript."
