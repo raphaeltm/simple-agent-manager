@@ -1181,6 +1181,17 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   VM_AGENT_TRANSPORT?: string; // "vm-public-dns" (default) or "cloudflare-tunnel"
   VM_AGENT_TUNNEL_PORT?: string; // Dedicated loopback tunnel ingress port (default: 8444)
   CLOUDFLARED_VERSION?: string; // Pinned connector release supported by cloud-init (default: 2026.10.7)
+  VM_AGENT_TUNNEL_LISTENER_WAIT_SECONDS?: string; // Default: 120. Elapsed connector startup wait for the loopback agent listener (1-3600 seconds).
+  VM_AGENT_TUNNEL_PROBE_TIMEOUT_SECONDS?: string; // Default: 2. Maximum duration of one loopback health probe (1-60 seconds).
+  VM_AGENT_TUNNEL_PROBE_INTERVAL_SECONDS?: string; // Default: 1. Pause between loopback health probes (1-60 seconds).
+  VM_AGENT_TUNNEL_RESTART_SECONDS?: string; // Default: 5. Connector service restart delay (1-3600 seconds).
+  CF_TUNNEL_API_IDEMPOTENT_ATTEMPTS?: string; // Default: 3. Total attempts for transient tunnel API GET/PUT/DELETE failures; POST is never retried.
+  CF_TUNNEL_API_RETRY_DELAY_MS?: string; // Default: 250. Linear backoff step between idempotent tunnel API attempts.
+  NODE_TUNNEL_CLEANUP_REQUEST_TIMEOUT_MS?: string; // Default: 10000. Background cleanup request timeout, capped by CF_API_TIMEOUT_MS.
+  NODE_TUNNEL_CLEANUP_BATCH_SIZE?: string; // Default: 10. Maximum tunnel journal rows processed per cleanup sweep.
+  NODE_TUNNEL_CLEANUP_BACKOFF_BASE_MS?: string; // Default: 60000. Initial delay before retrying failed tunnel cleanup.
+  NODE_TUNNEL_CLEANUP_BACKOFF_MAX_MS?: string; // Default: 3600000. Maximum cleanup retry delay; cleanup retains ownership and retries without a lifetime cap.
+  NODE_TUNNEL_CLEANUP_STUCK_ATTEMPTS?: string; // Default: 6. Failed cleanup attempts before reporting subsequent failures at error severity.
   // VM agent TLS configuration
   VM_AGENT_PROTOCOL?: string; // "https" (default) or "http"
   VM_AGENT_PORT?: string; // "8443" (default) or custom port

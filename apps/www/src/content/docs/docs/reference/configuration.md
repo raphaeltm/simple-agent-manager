@@ -1628,6 +1628,17 @@ lifecycle bookkeeping.
 | `VM_AGENT_TRANSPORT` | `vm-public-dns` | Transport for newly provisioned managed workspace VMs: `vm-public-dns` or `cloudflare-tunnel`. Existing nodes, deployment nodes, and instant containers keep their current transport. |
 | `VM_AGENT_TUNNEL_PORT` | `8444` | Dedicated loopback HTTP ingress for cloudflared; must differ from the private agent listener port. |
 | `CLOUDFLARED_VERSION` | `2026.10.7` | Connector release; only versions with pinned architecture checksums in cloud-init are accepted. |
+| `VM_AGENT_TUNNEL_LISTENER_WAIT_SECONDS` | `120` | Elapsed connector startup wait for the loopback agent listener (1-3600 seconds). |
+| `VM_AGENT_TUNNEL_PROBE_TIMEOUT_SECONDS` | `2` | Maximum duration of one loopback health probe (1-60 seconds). |
+| `VM_AGENT_TUNNEL_PROBE_INTERVAL_SECONDS` | `1` | Pause between loopback health probes (1-60 seconds). |
+| `VM_AGENT_TUNNEL_RESTART_SECONDS` | `5` | Connector service restart delay (1-3600 seconds). |
+| `CF_TUNNEL_API_IDEMPOTENT_ATTEMPTS` | `3` | Total attempts for transient tunnel API GET/PUT/DELETE failures; POST is never retried. |
+| `CF_TUNNEL_API_RETRY_DELAY_MS` | `250` | Linear backoff step between idempotent tunnel API attempts. |
+| `NODE_TUNNEL_CLEANUP_REQUEST_TIMEOUT_MS` | `10000` | Background cleanup request timeout, capped by CF_API_TIMEOUT_MS. |
+| `NODE_TUNNEL_CLEANUP_BATCH_SIZE` | `10` | Maximum tunnel journal rows processed per cleanup sweep. |
+| `NODE_TUNNEL_CLEANUP_BACKOFF_BASE_MS` | `60000` | Initial delay before retrying failed tunnel cleanup. |
+| `NODE_TUNNEL_CLEANUP_BACKOFF_MAX_MS` | `3600000` | Maximum cleanup retry delay; cleanup retains ownership and retries without a lifetime cap. |
+| `NODE_TUNNEL_CLEANUP_STUCK_ATTEMPTS` | `6` | Failed cleanup attempts before reporting subsequent failures at error severity. |
 | `VM_AGENT_PROTOCOL`                            | `https` | Protocol for VM agent communication                                              |
 | `VM_AGENT_PORT`                                | `8443`  | VM agent listening port                                                          |
 | `VM_AGENT_MEMORY_RESERVE_MB`                   | `1024`  | Optional Docker workload-slice memory reserve for VM-agent reachability headroom |

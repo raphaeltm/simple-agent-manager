@@ -20,16 +20,19 @@ import type { Env } from '../env';
 import { readResponseJson } from '../lib/runtime-validation';
 import { CLOUDFLARE_API_BASE, DEFAULT_CF_API_TIMEOUT_MS, getDnsTTL } from './dns-core';
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
+import { resolveNodeTunnelApiConfig } from './node-tunnel-config';
 
-/** Attempts for idempotent (GET/PUT/DELETE) calls on transient failure. Never applied to POST. */
-export const DEFAULT_CF_TUNNEL_API_IDEMPOTENT_ATTEMPTS = 3;
-/** Linear backoff step between idempotent retries. */
-export const DEFAULT_CF_TUNNEL_API_RETRY_DELAY_MS = 250;
 const ERROR_MESSAGE_MAX_LENGTH = 200;
 
 export type CloudflareTunnelEnv = Pick<
   Env,
-  'CF_API_TOKEN' | 'CF_ACCOUNT_ID' | 'CF_ZONE_ID' | 'CF_API_TIMEOUT_MS' | 'DNS_TTL_SECONDS'
+  | 'CF_API_TOKEN'
+  | 'CF_ACCOUNT_ID'
+  | 'CF_ZONE_ID'
+  | 'CF_API_TIMEOUT_MS'
+  | 'DNS_TTL_SECONDS'
+  | 'CF_TUNNEL_API_IDEMPOTENT_ATTEMPTS'
+  | 'CF_TUNNEL_API_RETRY_DELAY_MS'
 >;
 
 export interface CloudflareCallOptions {
@@ -116,7 +119,8 @@ async function cloudflareRequest(
   body: unknown,
   options: CloudflareCallOptions = {}
 ): Promise<unknown> {
-  const attempts = method === 'POST' ? 1 : DEFAULT_CF_TUNNEL_API_IDEMPOTENT_ATTEMPTS;
+  const retry = resolveNodeTunnelApiConfig(env);
+  const attempts = method === 'POST' ? 1 : retry.attempts;
   const timeoutMs =
     options.timeoutMs ?? getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
   let lastError: CloudflareTunnelApiError | null = null;
@@ -145,7 +149,7 @@ async function cloudflareRequest(
         [],
         boundedMessage(err instanceof Error ? err.message : String(err))
       );
-      if (attempt < attempts) await sleep(DEFAULT_CF_TUNNEL_API_RETRY_DELAY_MS * attempt);
+      if (attempt < attempts) await sleep(retry.retryDelayMs * attempt);
       continue;
     }
     const envelope = await readEnvelope(response, operation);
@@ -162,7 +166,7 @@ async function cloudflareRequest(
       boundedMessage(envelope?.errors?.[0]?.message)
     );
     if (!lastError.transient || attempt >= attempts) throw lastError;
-    await sleep(DEFAULT_CF_TUNNEL_API_RETRY_DELAY_MS * attempt);
+    await sleep(retry.retryDelayMs * attempt);
   }
   throw lastError ?? new CloudflareTunnelApiError(operation, undefined, [], '');
 }

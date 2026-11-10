@@ -2,30 +2,116 @@
  * Transport selection and tunnel configuration for managed workspace VM nodes.
  *
  * `VM_AGENT_TRANSPORT='cloudflare-tunnel'` opts NEW managed workspace VM nodes into an
- * outbound-only Cloudflare named tunnel. Everything else keeps the legacy public-IP
- * transport unchanged. Deployment-role nodes and Instant (cf-container) runtimes are
+ * outbound-only Cloudflare named tunnel. An unset transport keeps legacy public-IP
+ * transport unchanged; unsupported values fail provisioning. Deployment-role nodes and Instant (cf-container) runtimes are
  * deliberately excluded: deployment nodes serve public app routes on their own IP, and a
  * container runtime has no VM to run cloudflared on.
  */
+import {
+  DEFAULT_CLOUDFLARE_TUNNEL_PORT,
+  DEFAULT_CLOUDFLARED_VERSION,
+  DEFAULT_TUNNEL_CONNECTOR_RESTART_SECONDS,
+  DEFAULT_TUNNEL_LISTENER_PROBE_INTERVAL_SECONDS,
+  DEFAULT_TUNNEL_LISTENER_PROBE_TIMEOUT_SECONDS,
+  DEFAULT_TUNNEL_LISTENER_WAIT_SECONDS,
+} from '@simple-agent-manager/cloud-init';
 import type { NodeTransport } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
 import { getNodeBackendHostname } from './dns-core';
 
-/** Loopback port of the VM agent's dedicated, externally-classified tunnel listener. */
-export const DEFAULT_VM_AGENT_TUNNEL_PORT = '8444';
+/** Worker configuration is canonical; no separate pre-integration environment contract. */
+export type TunnelEnv = Env;
+type TunnelTransportEnv = Pick<Env, 'VM_AGENT_TRANSPORT' | 'VM_AGENT_TUNNEL_PORT'>;
 
-/**
- * Tunnel transport knobs. Declared locally so this module compiles before the shared `Env`
- * declares them; `Env & TunnelTransportEnv` stays correct once it does.
- */
-export interface TunnelTransportEnv {
-  VM_AGENT_TRANSPORT?: string;
-  VM_AGENT_TUNNEL_PORT?: string;
-  CLOUDFLARED_VERSION?: string;
+export const DEFAULT_CF_TUNNEL_API_IDEMPOTENT_ATTEMPTS = 3;
+export const DEFAULT_CF_TUNNEL_API_RETRY_DELAY_MS = 250;
+export const DEFAULT_NODE_TUNNEL_CLEANUP_REQUEST_TIMEOUT_MS = 10_000;
+export const DEFAULT_NODE_TUNNEL_CLEANUP_BATCH_SIZE = 10;
+export const DEFAULT_NODE_TUNNEL_CLEANUP_BACKOFF_BASE_MS = 60_000;
+export const DEFAULT_NODE_TUNNEL_CLEANUP_BACKOFF_MAX_MS = 3_600_000;
+export const DEFAULT_NODE_TUNNEL_CLEANUP_STUCK_ATTEMPTS = 6;
+
+type TunnelApiConfigEnv = Pick<
+  Env,
+  'CF_TUNNEL_API_IDEMPOTENT_ATTEMPTS' | 'CF_TUNNEL_API_RETRY_DELAY_MS'
+>;
+type TunnelCleanupConfigEnv = Pick<
+  Env,
+  | 'NODE_TUNNEL_CLEANUP_REQUEST_TIMEOUT_MS'
+  | 'NODE_TUNNEL_CLEANUP_BATCH_SIZE'
+  | 'NODE_TUNNEL_CLEANUP_BACKOFF_BASE_MS'
+  | 'NODE_TUNNEL_CLEANUP_BACKOFF_MAX_MS'
+  | 'NODE_TUNNEL_CLEANUP_STUCK_ATTEMPTS'
+>;
+type TunnelBootConfigEnv = Pick<
+  Env,
+  | 'CLOUDFLARED_VERSION'
+  | 'VM_AGENT_TUNNEL_LISTENER_WAIT_SECONDS'
+  | 'VM_AGENT_TUNNEL_PROBE_TIMEOUT_SECONDS'
+  | 'VM_AGENT_TUNNEL_PROBE_INTERVAL_SECONDS'
+  | 'VM_AGENT_TUNNEL_RESTART_SECONDS'
+>;
+
+function positiveInteger(raw: string | undefined, fallback: number): number {
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value > 0 ? value : fallback;
 }
 
-export type TunnelEnv = Env & TunnelTransportEnv;
+export function resolveNodeTunnelApiConfig(env: TunnelApiConfigEnv) {
+  return {
+    attempts: positiveInteger(
+      env.CF_TUNNEL_API_IDEMPOTENT_ATTEMPTS,
+      DEFAULT_CF_TUNNEL_API_IDEMPOTENT_ATTEMPTS
+    ),
+    retryDelayMs: positiveInteger(
+      env.CF_TUNNEL_API_RETRY_DELAY_MS,
+      DEFAULT_CF_TUNNEL_API_RETRY_DELAY_MS
+    ),
+  };
+}
+
+export function resolveNodeTunnelCleanupConfig(env: TunnelCleanupConfigEnv) {
+  return {
+    requestTimeoutMs: positiveInteger(
+      env.NODE_TUNNEL_CLEANUP_REQUEST_TIMEOUT_MS,
+      DEFAULT_NODE_TUNNEL_CLEANUP_REQUEST_TIMEOUT_MS
+    ),
+    batchSize: positiveInteger(
+      env.NODE_TUNNEL_CLEANUP_BATCH_SIZE,
+      DEFAULT_NODE_TUNNEL_CLEANUP_BATCH_SIZE
+    ),
+    backoffBaseMs: positiveInteger(
+      env.NODE_TUNNEL_CLEANUP_BACKOFF_BASE_MS,
+      DEFAULT_NODE_TUNNEL_CLEANUP_BACKOFF_BASE_MS
+    ),
+    backoffMaxMs: positiveInteger(
+      env.NODE_TUNNEL_CLEANUP_BACKOFF_MAX_MS,
+      DEFAULT_NODE_TUNNEL_CLEANUP_BACKOFF_MAX_MS
+    ),
+    stuckAttempts: positiveInteger(
+      env.NODE_TUNNEL_CLEANUP_STUCK_ATTEMPTS,
+      DEFAULT_NODE_TUNNEL_CLEANUP_STUCK_ATTEMPTS
+    ),
+  };
+}
+
+/** Cloud-init validates the supported release and timing bounds before rendering. */
+export function nodeTunnelBootVariables(env: TunnelBootConfigEnv) {
+  return {
+    cloudflaredVersion: env.CLOUDFLARED_VERSION?.trim() || DEFAULT_CLOUDFLARED_VERSION,
+    tunnelListenerWaitSeconds:
+      env.VM_AGENT_TUNNEL_LISTENER_WAIT_SECONDS?.trim() || DEFAULT_TUNNEL_LISTENER_WAIT_SECONDS,
+    tunnelListenerProbeTimeoutSeconds:
+      env.VM_AGENT_TUNNEL_PROBE_TIMEOUT_SECONDS?.trim() ||
+      DEFAULT_TUNNEL_LISTENER_PROBE_TIMEOUT_SECONDS,
+    tunnelListenerProbeIntervalSeconds:
+      env.VM_AGENT_TUNNEL_PROBE_INTERVAL_SECONDS?.trim() ||
+      DEFAULT_TUNNEL_LISTENER_PROBE_INTERVAL_SECONDS,
+    tunnelConnectorRestartSeconds:
+      env.VM_AGENT_TUNNEL_RESTART_SECONDS?.trim() || DEFAULT_TUNNEL_CONNECTOR_RESTART_SECONDS,
+  };
+}
 
 export interface ManagedNodeTransportInput {
   isDeploymentNode: boolean;
@@ -51,7 +137,7 @@ export function resolveManagedNodeTransport(
 }
 
 export function resolveVmAgentTunnelPort(env: TunnelTransportEnv): string {
-  const port = env.VM_AGENT_TUNNEL_PORT?.trim() || DEFAULT_VM_AGENT_TUNNEL_PORT;
+  const port = env.VM_AGENT_TUNNEL_PORT?.trim() || DEFAULT_CLOUDFLARE_TUNNEL_PORT;
   const value = Number(port);
   if (!/^\d+$/.test(port) || value < 1 || value > 65535) {
     throw new Error(`VM_AGENT_TUNNEL_PORT must be numeric 1-65535 (got ${JSON.stringify(port)})`);

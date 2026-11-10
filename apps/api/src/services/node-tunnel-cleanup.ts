@@ -21,51 +21,28 @@ import {
 } from './cloudflare-tunnel-api';
 import { DEFAULT_CF_API_TIMEOUT_MS } from './dns-core';
 import { getTimeoutMs } from './fetch-timeout';
-import type { TunnelEnv } from './node-tunnel-config';
+import { resolveNodeTunnelCleanupConfig, type TunnelEnv } from './node-tunnel-config';
 import {
   listDueNodeTunnelCleanups,
   type NodeTunnelRow,
   releaseNonLiveNodeTunnels,
 } from './node-tunnel-journal';
 
-/** Background per-request budget: shorter than the interactive Cloudflare default (rule 47). */
-export const DEFAULT_NODE_TUNNEL_CLEANUP_REQUEST_TIMEOUT_MS = 10_000;
-/** Rows cleaned per sweep tick. Each row costs at most ~6 Cloudflare requests. */
-export const DEFAULT_NODE_TUNNEL_CLEANUP_BATCH_SIZE = 10;
-export const DEFAULT_NODE_TUNNEL_CLEANUP_BACKOFF_BASE_MS = 60_000;
-export const DEFAULT_NODE_TUNNEL_CLEANUP_BACKOFF_MAX_MS = 60 * 60_000;
-/** Failed attempts after which every further failure is logged at error level as stuck. */
-export const DEFAULT_NODE_TUNNEL_CLEANUP_STUCK_ATTEMPTS = 6;
 const LAST_ERROR_MAX_LENGTH = 500;
 
-/** Optional overrides, read through a narrow local interface (see node-tunnel-config.ts). */
-export interface NodeTunnelCleanupEnv {
-  NODE_TUNNEL_CLEANUP_REQUEST_TIMEOUT_MS?: string;
-  NODE_TUNNEL_CLEANUP_BATCH_SIZE?: string;
-  NODE_TUNNEL_CLEANUP_BACKOFF_BASE_MS?: string;
-  NODE_TUNNEL_CLEANUP_BACKOFF_MAX_MS?: string;
-}
-
-type CleanupEnv = TunnelEnv & NodeTunnelCleanupEnv;
+type CleanupEnv = TunnelEnv;
 
 function cleanupOptions(env: CleanupEnv): CloudflareCallOptions {
   const interactive = getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
-  const background = getTimeoutMs(
-    env.NODE_TUNNEL_CLEANUP_REQUEST_TIMEOUT_MS,
-    DEFAULT_NODE_TUNNEL_CLEANUP_REQUEST_TIMEOUT_MS
-  );
+  const background = resolveNodeTunnelCleanupConfig(env).requestTimeoutMs;
   return { timeoutMs: Math.min(interactive, background) };
 }
 
-export function nodeTunnelCleanupBackoffMs(env: NodeTunnelCleanupEnv, attempts: number): number {
-  const base = getTimeoutMs(
-    env.NODE_TUNNEL_CLEANUP_BACKOFF_BASE_MS,
-    DEFAULT_NODE_TUNNEL_CLEANUP_BACKOFF_BASE_MS
-  );
-  const max = getTimeoutMs(
-    env.NODE_TUNNEL_CLEANUP_BACKOFF_MAX_MS,
-    DEFAULT_NODE_TUNNEL_CLEANUP_BACKOFF_MAX_MS
-  );
+export function nodeTunnelCleanupBackoffMs(
+  env: Parameters<typeof resolveNodeTunnelCleanupConfig>[0],
+  attempts: number
+): number {
+  const { backoffBaseMs: base, backoffMaxMs: max } = resolveNodeTunnelCleanupConfig(env);
   const exponent = Math.min(Math.max(attempts - 1, 0), 20);
   return Math.min(base * 2 ** exponent, max);
 }
@@ -137,7 +114,7 @@ async function recordCleanupFailure(env: CleanupEnv, row: NodeTunnelRow, err: un
     attempts,
     ...serializeError(err),
   };
-  if (attempts >= DEFAULT_NODE_TUNNEL_CLEANUP_STUCK_ATTEMPTS) {
+  if (attempts >= resolveNodeTunnelCleanupConfig(env).stuckAttempts) {
     log.error('node_tunnel.cleanup_stuck', fields);
   } else {
     log.warn('node_tunnel.cleanup_failed', fields);
@@ -188,11 +165,6 @@ export async function cleanupNodeTunnelRow(env: CleanupEnv, row: NodeTunnelRow):
   }
 }
 
-function batchSize(env: NodeTunnelCleanupEnv): number {
-  const parsed = Number.parseInt(env.NODE_TUNNEL_CLEANUP_BATCH_SIZE ?? '', 10);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : DEFAULT_NODE_TUNNEL_CLEANUP_BATCH_SIZE;
-}
-
 export interface NodeTunnelCleanupResult {
   released: number;
   attempted: number;
@@ -215,7 +187,7 @@ export async function settleNodeTunnels(
     const due = await listDueNodeTunnelCleanups(
       env,
       new Date().toISOString(),
-      batchSize(env),
+      resolveNodeTunnelCleanupConfig(env).batchSize,
       nodeId
     );
     for (const row of due) {
@@ -234,7 +206,11 @@ export async function runNodeTunnelCleanupSweep(
   now: Date = new Date()
 ): Promise<NodeTunnelCleanupResult> {
   const released = await releaseNonLiveNodeTunnels(env, 'runtime_not_live');
-  const due = await listDueNodeTunnelCleanups(env, now.toISOString(), batchSize(env));
+  const due = await listDueNodeTunnelCleanups(
+    env,
+    now.toISOString(),
+    resolveNodeTunnelCleanupConfig(env).batchSize
+  );
   let cleaned = 0;
   for (const row of due) {
     if (await cleanupNodeTunnelRow(env, row)) cleaned++;

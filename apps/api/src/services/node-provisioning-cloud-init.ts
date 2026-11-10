@@ -6,25 +6,13 @@ import { type CloudInitVariables, generateCloudInit } from '@simple-agent-manage
 import { type TaskMode } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
-import type { TunnelTransportEnv } from './node-tunnel-config';
+import { nodeTunnelBootVariables } from './node-tunnel-config';
 import type { NodeTunnelProvisioning } from './node-tunnel-provisioning';
 import { errorReportCloudInitVariables } from './vm-error-report-config';
 import { resolveEffectiveNodeHostMemoryReserveMb } from './workspace-resource-capacity';
 
-/**
- * Tunnel-mode cloud-init variables (contract v1 with the cloud-init/vm-agent slice on
- * channel feature.vm-tunnels-staging). Declared here until `CloudInitVariables` carries
- * them; passed as a non-literal so this module also compiles against the older package.
- */
-export interface TunnelCloudInitVariables {
-  /** Per-tunnel connector token. SECRET; never the account API token. */
-  cloudflareTunnelToken: string;
-  cloudflareTunnelPort: string;
-  cloudflaredVersion?: string;
-}
-
 export interface NodeCloudInitInput {
-  env: Env & TunnelTransportEnv;
+  env: Env;
   node: { id: string; userId: string };
   runtimeIncarnationId: string | null;
   callbackToken: string;
@@ -43,7 +31,7 @@ export interface NodeCloudInitInput {
 export function buildNodeCloudInit(input: NodeCloudInitInput): string {
   const { env, node, taskContext, deploymentContext, tunnel } = input;
   const isDeploymentNode = !!deploymentContext;
-  const variables: CloudInitVariables & Partial<TunnelCloudInitVariables> = {
+  const variables: CloudInitVariables = {
     nodeId: node.id,
     nodeUserId: node.userId,
     nodeRuntimeIncarnationId: input.runtimeIncarnationId ?? undefined,
@@ -100,8 +88,7 @@ export function buildNodeCloudInit(input: NodeCloudInitInput): string {
   if (tunnel) {
     variables.cloudflareTunnelToken = tunnel.connectorToken;
     variables.cloudflareTunnelPort = tunnel.tunnelPort;
-    const cloudflaredVersion = env.CLOUDFLARED_VERSION?.trim();
-    if (cloudflaredVersion) variables.cloudflaredVersion = cloudflaredVersion;
+    Object.assign(variables, nodeTunnelBootVariables(env));
   }
   return generateCloudInit(variables);
 }

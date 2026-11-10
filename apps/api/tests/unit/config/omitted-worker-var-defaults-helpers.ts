@@ -16,6 +16,10 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..
  */
 const ALTERNATIVE_VALUES: Readonly<Record<string, string>> = {
   D1_SESSION_MODE: 'disabled',
+  VM_AGENT_TRANSPORT: 'cloudflare-tunnel',
+  VM_AGENT_TUNNEL_PORT: '9555', // 8443 is the main listener and must remain forbidden.
+  // Exercised through real cloud-init validation: no invented second pinned release.
+  CLOUDFLARED_VERSION: 'unsupported-test-release',
   HUMAN_INPUT_ESCALATION_FRACTIONS: '0.5',
   // The lease is floored at the probe timeout plus a margin (35000 by default), above 30000.
   TASK_RECONCILIATION_CANDIDATE_LEASE_MS: '60000',
