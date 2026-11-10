@@ -34,6 +34,9 @@ export const SELFHOST_VAR_OVERRIDES: Readonly<Record<string, string>> = {
   ANALYTICS_ENABLED: 'false',
   ANALYTICS_INGEST_ENABLED: 'false',
   COST_MONITORING_ENABLED: 'false',
+  // wrangler.toml ships AI_GATEWAY_ID="sam". Empty makes every gateway consumer take its
+  // no-gateway branch (direct Anthropic/OpenAI URLs, no AI Gateway log or cost queries).
+  AI_GATEWAY_ID: '',
   // Nodes reach the box through frps on loopback instead of per-node Cloudflare DNS/tunnels
   // (reverse-tunnel transport, sibling task T2 on sam/selfhost-pass-2).
   VM_AGENT_TRANSPORT: 'reverse-tunnel',
@@ -167,7 +170,12 @@ function translateMigrations(value: unknown, ctx: TranslateContext): void {
   // A celld fleet is always a clean install from the Cloudflare migration history's point of
   // view: fold every legacy `new_classes` create into `new_sqlite_classes` with the shared
   // resolver the Cloudflare pipeline uses for clean installs.
-  const resolved = resolveDurableObjectMigrations(entries, null) ?? [];
+  // An empty `new_classes: []` is a no-op the resolver leaves in place; drop it so it is not
+  // mistaken for an untranslatable key below.
+  const withoutEmpty = entries.map(({ new_classes, ...rest }) =>
+    new_classes?.length ? { ...rest, new_classes } : rest
+  );
+  const resolved = resolveDurableObjectMigrations(withoutEmpty, null) ?? [];
   ctx.out.migrations = resolved.map((entry) => {
     const extra = Object.keys(entry).filter((key) => key !== 'tag' && key !== 'new_sqlite_classes');
     if (extra.length > 0) {

@@ -1,6 +1,10 @@
-# PLACEHOLDER, owned by T2. frps listens on loopback only; nodes reach it as frp over wss
-# through Caddy on 443 (caddy/sam.d/frp.caddy). Each node's proxy also binds on loopback, where
-# the Worker (celld, host network) and Caddy forward_auth reach it.
+# PLACEHOLDER until the reverse-tunnel transport (task 01M72X0F03A7NVVJP28W9SC03Z) replaces it
+# with server-plugin auth. frps listens on loopback only; nodes reach it as frp over wss through
+# Caddy on 443 (caddy/sam.d/frp.caddy). Proxies bind on loopback and only inside the lease
+# range, where the Worker (celld, host network) and Caddy forward_auth reach them.
 bindAddr = "127.0.0.1"
 bindPort = {{ .Envs.FRPS_BIND_PORT }}
 proxyBindAddr = "127.0.0.1"
+allowPorts = [
+  { start = {{ .Envs.REVERSE_TUNNEL_PORT_RANGE_START }}, end = {{ .Envs.REVERSE_TUNNEL_PORT_RANGE_END }} },
+]

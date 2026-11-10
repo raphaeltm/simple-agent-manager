@@ -37,6 +37,30 @@ Worker's `vars` for `celld deploy` only and leaves a secrets-free `wrangler.json
 celld keeps every deployed version's vars in plaintext under `deploy/` in the fleet bucket. The
 bucket credential is therefore the root secret of the install.
 
+Plaintext copies of the Worker secrets live in: the bucket's `deploy/` manifests (every
+deployed version), the `celld-data` volume cache, the celld process, and `.state/` on the box.
+`REVERSE_TUNNEL_GATEWAY_SECRET` is also in `.state/gateway.env` and the Caddy and frps container
+environments (`docker inspect` shows it). Keep the operator out of the `docker` group unless they
+are trusted with all of it.
+
+Plain Worker var overrides (for example turning one of the self-host switches back on) also go in
+`secrets.env`; it is merged last. `--dry-run` prints the rendered config with those values
+redacted.
+
+## Known gaps in this pass
+
+- Off on purpose: Instant sessions and guided credential login (Cloudflare Containers), Artifacts
+  (SAM-native repos), Analytics Engine, AI Gateway, Workers AI features (TTS, task titles,
+  stalled-task classifier), email sign-in. Project creation needs a GitHub App or GitLab.
+- Still reachable but failing without Cloudflare: the SAM agent's default model
+  (`@cf/...` through AI Gateway), voice transcription, and the Workers AI model catalog (503).
+- `www.SAM_DOMAIN` answers 503 and the apex is not served; only the subdomains above are used.
+- `VM_AGENT_TRANSPORT=reverse-tunnel` is set for the box. Node provisioning needs the
+  reverse-tunnel transport from the same integration branch.
+- The Worker shares the host network, so its outbound `fetch` can reach loopback services
+  (celld's operator listener, the bundled store, frps) and, on GCE, the metadata server. There
+  is no egress fence yet.
+
 ## Code
 
 - `scripts/selfhost/celld-config.ts`: translates `apps/api/wrangler.toml` to celld's

@@ -118,6 +118,9 @@ describe('buildCelldConfig against the real apps/api/wrangler.toml', () => {
     for (const [key, value] of Object.entries(SELFHOST_VAR_OVERRIDES))
       expect(config.vars[key]).toBe(value);
     expect(config.vars.CF_CONTAINER_ENABLED).toBe('false');
+    // wrangler.toml's AI Gateway id would build gateway URLs with no account id.
+    expect((source.vars as Record<string, string>).AI_GATEWAY_ID).toBeTruthy();
+    expect(config.vars.AI_GATEWAY_ID).toBe('');
     expect(config.vars.BASE_DOMAIN).toBe('sam.example.com');
     // Ordinary tunables still flow through from wrangler.toml [vars].
     expect(config.vars.MAX_NODES_PER_USER).toBe(
@@ -165,6 +168,17 @@ describe('buildCelldConfig failure modes', () => {
     expect(() => buildCelldConfig(source, options)).toThrow(
       /d1_databases\[0\] has keys .*preview_database_id/
     );
+  });
+
+  it('accepts an empty legacy new_classes list', () => {
+    const source = base();
+    (source.migrations as unknown[]).push({
+      tag: 'v999',
+      new_classes: [],
+      new_sqlite_classes: ['X'],
+    });
+    const plan = buildCelldConfig(source, options);
+    expect(plan.config.migrations.at(-1)).toEqual({ tag: 'v999', new_sqlite_classes: ['X'] });
   });
 
   it('fails on a Durable Object migration celld cannot apply', () => {

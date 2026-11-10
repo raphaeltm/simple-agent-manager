@@ -58,6 +58,9 @@ services:
         CADDY_DNS_MODULE: ${CADDY_DNS_MODULE:-github.com/caddy-dns/googleclouddns@v1.1.0}
     image: sam-selfhost-caddy:local
     network_mode: host
+    # Internet-facing and holds the DNS-01 identity: only the capability to bind 80/443.
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
     depends_on: [celld]
     # REVERSE_TUNNEL_GATEWAY_SECRET (sent on forward_auth). Written by `pnpm selfhost:deploy --init`.
     env_file:
@@ -65,7 +68,7 @@ services:
         required: true
     environment:
       SAM_DOMAIN: ${SAM_DOMAIN:?set SAM_DOMAIN in .env}
-      SAM_TLS_MODE: ${SAM_TLS_MODE:-internal}
+      SAM_TLS_MODE: ${SAM_TLS_MODE:?set SAM_TLS_MODE in .env (internal or dns-<provider>)}
       ACME_EMAIL: ${ACME_EMAIL:-}
       GCP_PROJECT: ${GCP_PROJECT:-}
       HTTP_PORT: ${HTTP_PORT:-80}
@@ -83,7 +86,8 @@ services:
     image: ghcr.io/fatedier/frps:v0.72.0@sha256:17abb20dd392557a44070d9726954630c0eb1f7a9bd6ead5ae9150d165179ea4
     network_mode: host
     command: ['-c', '/etc/frp/frps.toml']
-    # REVERSE_TUNNEL_GATEWAY_SECRET (frps server-plugin auth). Written by `pnpm selfhost:deploy --init`.
+    # REVERSE_TUNNEL_GATEWAY_SECRET (frps server-plugin auth) and the lease port range.
+    # Written by `pnpm selfhost:deploy --init`.
     env_file:
       - path: ${SAM_SELFHOST_STATE_DIR:-./.state}/gateway.env
         required: true
@@ -91,9 +95,8 @@ services:
       FRPS_BIND_PORT: ${FRPS_BIND_PORT:-7000}
       CELLD_PORT: ${CELLD_PORT:-8080}
       SAM_DOMAIN: ${SAM_DOMAIN:?set SAM_DOMAIN in .env}
-      # Must match the Worker's lease range; the deploy script passes the same .env values.
-      REVERSE_TUNNEL_PORT_RANGE_START: ${REVERSE_TUNNEL_PORT_RANGE_START:-20000}
-      REVERSE_TUNNEL_PORT_RANGE_END: ${REVERSE_TUNNEL_PORT_RANGE_END:-29999}
+      # REVERSE_TUNNEL_PORT_RANGE_START/END come from gateway.env: the deploy script writes the
+      # same resolved range there and into the Worker's vars (scripts/selfhost/box-settings.ts).
     volumes:
       - ./frps:/etc/frp:ro
     restart: unless-stopped

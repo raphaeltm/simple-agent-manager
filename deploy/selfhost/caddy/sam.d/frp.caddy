@@ -1,3 +1,3 @@
-# PLACEHOLDER, owned by T2 (reverse-tunnel node transport): the frp-over-wss route to frps on
-# 127.0.0.1:{$FRPS_BIND_PORT}. Write it as a named matcher plus `handle @name { ... }` so the
-# catch-all Worker handle in ../Caddyfile stays last.
+# PLACEHOLDER until the reverse-tunnel transport (task 01M72X0F03A7NVVJP28W9SC03Z) replaces
+# it: the frp-over-wss route to frps on 127.0.0.1:{$FRPS_BIND_PORT}. Write it as a named matcher
+# plus `handle @name { ... }` so the catch-all Worker handle in ../Caddyfile stays last.

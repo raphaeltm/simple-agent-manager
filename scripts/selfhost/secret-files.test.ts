@@ -1,11 +1,17 @@
-import { chmodSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
 import { ensurePlatformKeys, PLATFORM_KEY_NAMES } from './platform-keys.js';
-import { assertPrivateFile, parseDotenv, readSecretsFile } from './secret-files.js';
+import {
+  assertPrivateFile,
+  ensurePrivateDir,
+  parseDotenv,
+  readSecretsFile,
+  writePrivateFile,
+} from './secret-files.js';
 
 function tempDir(): string {
   return mkdtempSync(join(tmpdir(), 'sam-selfhost-'));
@@ -55,6 +61,22 @@ describe('root-only secret files', () => {
     expect(() => readSecretsFile(path)).toThrow(/readable by group or others/);
     chmodSync(path, 0o600);
     expect(readSecretsFile(path)).toEqual({ A: '1' });
+  });
+
+  it('tightens an existing world-readable file before writing a secret into it', () => {
+    const path = join(tempDir(), 'platform-keys.json');
+    writeFileSync(path, '{}', { mode: 0o644 });
+    writePrivateFile(path, 'secret');
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    expect(readFileSync(path, 'utf8')).toBe('secret');
+  });
+
+  it('tightens an existing state directory', () => {
+    const dir = join(tempDir(), 'state');
+    mkdirSync(dir, { mode: 0o755 });
+    chmodSync(dir, 0o755);
+    ensurePrivateDir(dir);
+    expect(statSync(dir).mode & 0o777).toBe(0o700);
   });
 
   it('treats a missing secrets file as empty', () => {

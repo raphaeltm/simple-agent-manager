@@ -231,7 +231,8 @@ app.use('*', async (c, next) => {
     hasWebAssets: c.env.ASSETS !== undefined,
   });
 
-  // Self-hosted deployments serve the web UI from the Worker's static assets.
+  // Self-hosted deployments serve the web UI from the Worker's static assets. (`c.env.ASSETS`
+  // is re-checked only so TypeScript narrows the optional binding.)
   if (pagesTarget.type === 'assets' && c.env.ASSETS) {
     return c.env.ASSETS.fetch(c.req.raw);
   }

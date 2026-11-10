@@ -1,0 +1,112 @@
+/**
+ * Settings shared by more than one process on a celld box, resolved once by the deploy script
+ * so the Worker, frps and Caddy cannot disagree.
+ */
+
+/**
+ * Loopback ports frps may bind for node tunnels. The deploy script always passes the resolved
+ * range to BOTH the Worker (vars) and frps (gateway.env), so neither side's own default is ever
+ * relied on. Overridable per box with REVERSE_TUNNEL_PORT_RANGE_START/END in the compose .env.
+ */
+export const DEFAULT_REVERSE_TUNNEL_PORT_RANGE_START = 20000;
+export const DEFAULT_REVERSE_TUNNEL_PORT_RANGE_END = 29999;
+
+export interface PortRange {
+  start: number;
+  end: number;
+}
+
+function port(raw: string | undefined, fallback: number, name: string): number {
+  if (raw === undefined || raw === '') return fallback;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1024 || value > 65535) {
+    throw new Error(`${name} must be an integer port between 1024 and 65535`);
+  }
+  return value;
+}
+
+export function resolveTunnelPortRange(box: Readonly<Record<string, string>>): PortRange {
+  const start = port(
+    box.REVERSE_TUNNEL_PORT_RANGE_START,
+    DEFAULT_REVERSE_TUNNEL_PORT_RANGE_START,
+    'REVERSE_TUNNEL_PORT_RANGE_START'
+  );
+  const end = port(
+    box.REVERSE_TUNNEL_PORT_RANGE_END,
+    DEFAULT_REVERSE_TUNNEL_PORT_RANGE_END,
+    'REVERSE_TUNNEL_PORT_RANGE_END'
+  );
+  if (start > end) throw new Error('REVERSE_TUNNEL_PORT_RANGE_START is above _END');
+  return { start, end };
+}
+
+/** Worker vars carrying the range. */
+export function tunnelRangeVars(range: PortRange): Record<string, string> {
+  return {
+    REVERSE_TUNNEL_PORT_RANGE_START: String(range.start),
+    REVERSE_TUNNEL_PORT_RANGE_END: String(range.end),
+  };
+}
+
+/** The dotenv docker compose passes to frps and Caddy (`env_file`). */
+export function renderGatewayEnv(gatewaySecret: string, range: PortRange): string {
+  if (!/^[0-9a-f]{64}$/.test(gatewaySecret)) {
+    throw new Error('REVERSE_TUNNEL_GATEWAY_SECRET must be 32 bytes of lowercase hex');
+  }
+  return Object.entries({ REVERSE_TUNNEL_GATEWAY_SECRET: gatewaySecret, ...tunnelRangeVars(range) })
+    .map(([name, value]) => `${name}=${value}\n`)
+    .join('');
+}
+
+/**
+ * Host variables a celld child process may inherit; everything else is dropped. HOME and
+ * GOOGLE_APPLICATION_CREDENTIALS (a file path) let a gs:// bucket use Application Default
+ * Credentials when the deploy does not run on GCE.
+ */
+const INHERITED_ENV = [
+  'PATH',
+  'HOME',
+  'LANG',
+  'TMPDIR',
+  'RUST_LOG',
+  'GOOGLE_APPLICATION_CREDENTIALS',
+] as const;
+
+/** celld's storage settings, taken from the compose .env. */
+export const STORAGE_ENV_KEYS = [
+  'CELLD_BUCKET',
+  'S3_ENDPOINT',
+  'AWS_REGION',
+  'AWS_ACCESS_KEY_ID',
+  'AWS_SECRET_ACCESS_KEY',
+] as const;
+
+/**
+ * The environment for `celld deploy` / `celld d1`: an allowlist of host variables plus the
+ * box's storage settings and the esbuild path. Unrelated host secrets never reach celld.
+ */
+export function celldChildEnv(
+  host: NodeJS.ProcessEnv,
+  box: Readonly<Record<string, string>>,
+  esbuild: string
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { CELLD_ESBUILD: esbuild };
+  for (const key of INHERITED_ENV) if (host[key]) env[key] = host[key];
+  for (const key of STORAGE_ENV_KEYS) if (box[key]) env[key] = box[key];
+  return env;
+}
+
+/** Shortest value treated as a secret when scrubbing output; shorter ones are flags like "true". */
+const MIN_REDACTED_LENGTH = 8;
+
+/** Replaces every occurrence of each secret value (and each line of a multi-line one). */
+export function redactSecrets(text: string, secrets: readonly string[]): string {
+  const needles = secrets
+    .flatMap((secret) => [secret, ...secret.split('\n')])
+    .map((needle) => needle.trim())
+    .filter((needle) => needle.length >= MIN_REDACTED_LENGTH)
+    .sort((a, b) => b.length - a.length);
+  let out = text;
+  for (const needle of needles) out = out.split(needle).join('<redacted>');
+  return out;
+}

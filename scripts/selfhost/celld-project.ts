@@ -88,9 +88,15 @@ export function prepareCelldProject(options: PrepareProjectOptions): void {
     const staging = `${target}.next`;
     rmSync(staging, { recursive: true, force: true });
     // Source maps stay out of the box: they triple the upload and the browser never needs them.
+    // A symlink in the build could publish any file on the box at app.*; refuse it.
     cpSync(options.webDist, staging, {
       recursive: true,
-      filter: (src) => !src.endsWith('.map'),
+      filter: (src) => {
+        if (lstatSync(src).isSymbolicLink()) {
+          throw new Error(`${src} is a symlink; the web build must contain only regular files`);
+        }
+        return !src.endsWith('.map');
+      },
     });
     rmSync(target, { recursive: true, force: true });
     renameSync(staging, target);

@@ -6,7 +6,18 @@
  * read, and the rendered config that carries them is deleted after each deploy.
  */
 
-import { closeSync, existsSync, fstatSync, openSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  closeSync,
+  existsSync,
+  fchmodSync,
+  fstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  statSync,
+  writeSync,
+} from 'node:fs';
 
 import * as v from 'valibot';
 
@@ -32,11 +43,35 @@ export function assertPrivateFile(path: string): void {
   }
 }
 
-/** Writes `content` to a new or existing file with mode 0600, replacing its contents. */
+/**
+ * Writes `content` to a new or existing file with mode 0600, replacing its contents. The mode
+ * is enforced and checked on the open descriptor before any byte is written, so an existing
+ * world-readable file is tightened (or refused, if owned by someone else) first.
+ */
 export function writePrivateFile(path: string, content: string): void {
-  writeFileSync(path, content, { mode: 0o600 });
-  // writeFileSync honours `mode` only when it creates the file.
-  assertPrivateFile(path);
+  const fd = openSync(path, 'w', 0o600);
+  try {
+    fchmodSync(fd, 0o600);
+    const uid = process.getuid?.();
+    const stat = fstatSync(fd);
+    if (uid !== undefined && stat.uid !== uid) {
+      throw new Error(`${path} is owned by uid ${stat.uid}, not the deploying user (${uid})`);
+    }
+    writeSync(fd, content);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** Creates `dir` (mode 0700) or tightens an existing one, and checks it belongs to this user. */
+export function ensurePrivateDir(dir: string): void {
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  chmodSync(dir, 0o700);
+  const uid = process.getuid?.();
+  const stat = statSync(dir);
+  if (uid !== undefined && stat.uid !== uid) {
+    throw new Error(`${dir} is owned by uid ${stat.uid}, not the deploying user (${uid})`);
+  }
 }
 
 function unescapeDoubleQuoted(raw: string): string {

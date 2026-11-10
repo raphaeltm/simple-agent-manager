@@ -7,6 +7,7 @@ import {
   readFileSync,
   readlinkSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -91,6 +92,15 @@ describe('prepareCelldProject', () => {
     );
     expect(existsSync(join(projectDir, 'web/assets/app.js'))).toBe(true);
     expect(existsSync(join(projectDir, 'web/assets/app.js.map'))).toBe(false);
+  });
+
+  it('refuses a web build containing a symlink', () => {
+    const projectDir = join(mkdtempSync(join(tmpdir(), 'sam-celld-')), 'project');
+    const dist = fakeWebDist();
+    symlinkSync('/etc/hostname', join(dist, 'assets', 'leak.txt'));
+    expect(() =>
+      prepareCelldProject({ apiDir: API_DIR, projectDir, plan: plan(true), webDist: dist })
+    ).toThrow(/is a symlink/);
   });
 
   it('writes the config root-only', () => {

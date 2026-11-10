@@ -34,17 +34,31 @@ export function sha256Hex(bytes: Uint8Array): string {
 }
 
 /**
- * Returns a celld binary path: `CELLD_BIN` when set, otherwise the pinned release under
- * `binDir`, downloaded once. The compressed asset must match the pinned sha256.
+ * Returns a celld binary path: `CELLD_BIN` when set (unverified, and said so), otherwise the
+ * pinned release under `binDir`. The compressed asset is kept beside the binary; every run
+ * re-checks it against the pinned sha256 and the binary against its decompressed bytes, so a
+ * tampered cache is replaced rather than executed with the bucket credential.
  */
 export async function ensureCelldBinary(
   binDir: string,
   env: NodeJS.ProcessEnv = process.env
 ): Promise<string> {
-  if (env.CELLD_BIN) return env.CELLD_BIN;
+  if (env.CELLD_BIN) {
+    console.warn(`[selfhost] using CELLD_BIN=${env.CELLD_BIN} without checksum verification`);
+    return env.CELLD_BIN;
+  }
   const target = celldReleaseTarget();
+  const expected = CELLD_RELEASE_SHA256[target];
   const path = join(binDir, `celld-${CELLD_VERSION}`);
-  if (existsSync(path)) return path;
+  const gzPath = `${path}.gz`;
+
+  if (existsSync(gzPath) && existsSync(path)) {
+    const gz = readFileSync(gzPath);
+    if (sha256Hex(gz) === expected && sha256Hex(gunzipSync(gz)) === sha256Hex(readFileSync(path))) {
+      return path;
+    }
+    console.warn(`[selfhost] cached celld in ${binDir} failed verification; downloading again`);
+  }
 
   const base = env.CELLD_RELEASE_BASE_URL || DEFAULT_CELLD_RELEASE_BASE_URL;
   const url = `${base}/v${CELLD_VERSION}/celld-${target}.gz`;
@@ -52,10 +66,11 @@ export async function ensureCelldBinary(
   if (!response.ok) throw new Error(`downloading ${url}: HTTP ${response.status}`);
   const gz = new Uint8Array(await response.arrayBuffer());
   const actual = sha256Hex(gz);
-  const expected = CELLD_RELEASE_SHA256[target];
   if (actual !== expected) throw new Error(`${url}: sha256 ${actual}, expected ${expected}`);
 
   mkdirSync(binDir, { recursive: true, mode: 0o700 });
+  writeFileSync(`${gzPath}.download`, gz, { mode: 0o600 });
+  renameSync(`${gzPath}.download`, gzPath);
   const temp = `${path}.download`;
   writeFileSync(temp, gunzipSync(gz), { mode: 0o700 });
   chmodSync(temp, 0o700);

@@ -17,19 +17,27 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
 import * as TOML from '@iarna/toml';
 
 import type { WranglerToml } from '../deploy/types.js';
+import {
+  celldChildEnv,
+  redactSecrets,
+  renderGatewayEnv,
+  resolveTunnelPortRange,
+  tunnelRangeVars,
+} from './box-settings.js';
 import { ensureCelldBinary, resolveEsbuild } from './celld-binary.js';
 import { buildCelldConfig, type CelldWranglerConfig } from './celld-config.js';
 import { ASSETS_DIR, prepareCelldProject, SOURCE_LINK, writeCelldConfig } from './celld-project.js';
-import { ensurePlatformKeys, GATEWAY_KEY_NAMES } from './platform-keys.js';
+import { ensurePlatformKeys } from './platform-keys.js';
 import {
   assertPrivateFile,
+  ensurePrivateDir,
   parseDotenv,
   readSecretsFile,
   writePrivateFile,
@@ -45,25 +53,10 @@ const DEFAULT_MIGRATION_ATTEMPTS = 20;
 const DEFAULT_PREDEPLOY_MIGRATION_ATTEMPTS = 2;
 const DEFAULT_MIGRATION_RETRY_DELAY_MS = 3000;
 const DEFAULT_HEALTH_TIMEOUT_MS = 120_000;
+const DEFAULT_HEALTH_POLL_INTERVAL_MS = 2000;
+/** Upper bound on captured celld output (bundle reports are a few KiB). */
+const CHILD_OUTPUT_MAX_BYTES = 64 * 1024 * 1024;
 const DEFAULT_CELLD_PORT = '8080';
-
-/** Box settings `celld` needs on the deploying machine, read from the compose .env file. */
-const STORAGE_ENV_KEYS = [
-  'CELLD_BUCKET',
-  'S3_ENDPOINT',
-  'AWS_REGION',
-  'AWS_ACCESS_KEY_ID',
-  'AWS_SECRET_ACCESS_KEY',
-] as const;
-
-/**
- * Box settings frps also reads from the compose .env; the Worker must see the same values or
- * the leased ports and frps's allowPorts fence disagree. Passed as Worker vars when set.
- */
-const SHARED_BOX_VARS = [
-  'REVERSE_TUNNEL_PORT_RANGE_START',
-  'REVERSE_TUNNEL_PORT_RANGE_END',
-] as const;
 
 function log(message: string): void {
   console.log(`[selfhost] ${message}`);
@@ -84,15 +77,18 @@ interface RunResult {
   output: string;
 }
 
-/** Runs a command with output streamed to the console and also captured. */
+/** Secret values scrubbed from any child output before it is printed. */
+let knownSecrets: string[] = [];
+
+/** Runs a command, printing its output (with secret values scrubbed) and capturing it. */
 function run(command: string, args: string[], env: NodeJS.ProcessEnv, cwd = REPO_ROOT): RunResult {
   const result = spawnSync(command, args, {
     cwd,
     env,
     encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
+    maxBuffer: CHILD_OUTPUT_MAX_BYTES,
   });
-  const output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
+  const output = redactSecrets(`${result.stdout ?? ''}${result.stderr ?? ''}`, knownSecrets);
   process.stdout.write(output);
   if (result.error) throw result.error;
   return { status: result.status ?? 1, output };
@@ -178,7 +174,7 @@ async function waitForHealth(port: string, baseDomain: string): Promise<void> {
     } catch (error) {
       last = error instanceof Error ? error.message : String(error);
     }
-    await sleep(2000);
+    await sleep(intEnv('SELFHOST_HEALTH_POLL_INTERVAL_MS', DEFAULT_HEALTH_POLL_INTERVAL_MS));
   }
   throw new Error(`API Worker did not become healthy on 127.0.0.1:${port}: ${last}`);
 }
@@ -213,7 +209,7 @@ async function main(): Promise<void> {
     dirname(envFile),
     values['state-dir'] ?? box.SAM_SELFHOST_STATE_DIR ?? '.state'
   );
-  mkdirSync(stateDir, { recursive: true, mode: 0o700 });
+  ensurePrivateDir(stateDir);
   const secretsPath = resolve(values.secrets ?? join(stateDir, 'secrets.env'));
   const projectDir = join(stateDir, 'project');
   const baseDomain = box.SAM_DOMAIN;
@@ -224,7 +220,9 @@ async function main(): Promise<void> {
   if (generated.length > 0)
     log(`generated platform keys: ${generated.join(', ')} (back up ${stateDir})`);
   // docker compose passes this file to frps and Caddy (env_file); rewritten only on change.
-  const gatewayEnv = GATEWAY_KEY_NAMES.map((name) => `${name}=${keys[name]}\n`).join('');
+  // The port range goes to the Worker from the same resolved value (below).
+  const tunnelRange = resolveTunnelPortRange(box);
+  const gatewayEnv = renderGatewayEnv(keys.REVERSE_TUNNEL_GATEWAY_SECRET, tunnelRange);
   const gatewayEnvPath = join(stateDir, 'gateway.env');
   if (!existsSync(gatewayEnvPath) || readFileSync(gatewayEnvPath, 'utf8') !== gatewayEnv) {
     writePrivateFile(gatewayEnvPath, gatewayEnv);
@@ -237,6 +235,7 @@ async function main(): Promise<void> {
   }
   const { SAM_INSTALLATION_ID, ...platformSecrets } = keys;
   const secrets: Record<string, string> = { ...platformSecrets, ...operatorSecrets };
+  knownSecrets = Object.values(secrets);
 
   const source = TOML.parse(readFileSync(join(API_DIR, 'wrangler.toml'), 'utf8')) as WranglerToml;
   const plan = buildCelldConfig(source, {
@@ -246,12 +245,7 @@ async function main(): Promise<void> {
     vars: {
       SAM_INSTALLATION_ID,
       VAPID_SUBJECT: `https://app.${baseDomain}`,
-      ...Object.fromEntries(
-        SHARED_BOX_VARS.flatMap((key) => {
-          const value = box[key];
-          return value ? [[key, value] as const] : [];
-        })
-      ),
+      ...tunnelRangeVars(tunnelRange),
     },
   });
   for (const line of plan.report) log(line);
@@ -269,11 +263,7 @@ async function main(): Promise<void> {
   prepareCelldProject({ apiDir: API_DIR, projectDir, plan, webDist });
 
   const celld = await ensureCelldBinary(join(stateDir, 'bin'));
-  const env: NodeJS.ProcessEnv = { ...process.env, CELLD_ESBUILD: resolveEsbuild(API_DIR) };
-  for (const key of STORAGE_ENV_KEYS) {
-    if (box[key]) env[key] = box[key];
-    else delete env[key];
-  }
+  const env = celldChildEnv(process.env, box, resolveEsbuild(API_DIR));
 
   // The secrets-free config is what stays on disk: migrations and operator `celld d1`/`kv`
   // commands read it. On an upgrade, migrations run before the new Worker version, as on
@@ -290,14 +280,20 @@ async function main(): Promise<void> {
   if (preDeploy === 'no-leases')
     log('no node holds a lease yet (first deploy?); deploying before migrating');
 
-  // spawnSync blocks the event loop, so a Ctrl-C lands here after celld exits; `finally`
-  // alone would not run on a signal.
+  // spawnSync blocks the event loop, so a signal lands here after celld exits; `finally`
+  // alone would not run on one. A SIGKILL or power loss can still leave the secrets-bearing
+  // file until the next run rewrites it; it is 0600 in the 0700 state dir, which already holds
+  // the same values in platform-keys.json and secrets.env.
+  const signals = ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGQUIT'] as const;
   const scrub = (): void => {
-    writeCelldConfig(projectDir, plan.config);
+    try {
+      writeCelldConfig(projectDir, plan.config);
+    } catch (error) {
+      console.error(`[selfhost] could not scrub ${projectDir}/wrangler.json: ${String(error)}`);
+    }
     process.exit(130);
   };
-  process.once('SIGINT', scrub);
-  process.once('SIGTERM', scrub);
+  for (const signal of signals) process.once(signal, scrub);
   writeCelldConfig(projectDir, withSecrets);
   try {
     log(`celld deploy ${plan.config.name}`);
@@ -305,8 +301,7 @@ async function main(): Promise<void> {
     if (result.status !== 0) throw new Error(`celld deploy failed (exit ${result.status})`);
   } finally {
     writeCelldConfig(projectDir, plan.config);
-    process.off('SIGINT', scrub);
-    process.off('SIGTERM', scrub);
+    for (const signal of signals) process.off(signal, scrub);
   }
 
   if (preDeploy === 'no-leases') {

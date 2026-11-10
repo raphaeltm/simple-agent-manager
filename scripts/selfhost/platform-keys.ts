@@ -33,12 +33,6 @@ export const PLATFORM_KEY_NAMES = [
   'REVERSE_TUNNEL_GATEWAY_SECRET',
 ] as const;
 
-/**
- * Keys that frps and Caddy also need, written to `gateway.env` for docker compose. The Worker
- * authenticates frps's server plugin and Caddy's forward_auth with this shared secret.
- */
-export const GATEWAY_KEY_NAMES = ['REVERSE_TUNNEL_GATEWAY_SECRET'] as const;
-
 type PlatformKeyName = (typeof PLATFORM_KEY_NAMES)[number];
 
 /** Generators grouped so a pair is always created together. */
@@ -81,7 +75,9 @@ const GENERATORS: ReadonlyArray<{
     names: ['SAM_INSTALLATION_ID'],
     generate: () => ({ SAM_INSTALLATION_ID: randomBytes(16).toString('hex') }),
   },
-  // Hex so it is safe in frps's plugin URL userinfo.
+  // Shared with frps and Caddy through gateway.env (box-settings.ts). The Worker authenticates
+  // frps's server plugin and Caddy's forward_auth with it. Hex so it is safe in frps's plugin
+  // URL userinfo. Consumed by the reverse-tunnel transport (task 01M72X0F03A7NVVJP28W9SC03Z).
   {
     names: ['REVERSE_TUNNEL_GATEWAY_SECRET'],
     generate: () => ({ REVERSE_TUNNEL_GATEWAY_SECRET: randomBytes(32).toString('hex') }),
