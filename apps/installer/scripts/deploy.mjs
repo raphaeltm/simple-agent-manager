@@ -4,9 +4,10 @@ import { fileURLToPath } from 'node:url';
 
 // Verified against Cloudflare GET /oauth/scopes on 2026-10-28; the email scopes on
 // 2026-11-08 (email sign-in codes and agent email); the Artifacts scopes on
-// 2026-11-09. Validate the live
+// 2026-11-09; cloudflared Write on 2026-11-10. Validate the live
 // catalog before every registration/scope change; these are OAuth scope IDs,
 // not account-token permission-group display names.
+const TUNNEL_SCOPE = 'teams-connector-cloudflared.write';
 const FULL_SCOPES = [
   'account-settings.read',
   'account-api-tokens.write',
@@ -33,6 +34,7 @@ const FULL_SCOPES = [
   // SAM-hosted repositories on Cloudflare Artifacts (optional token groups in credentials.ts).
   'artifacts.read',
   'artifacts.write',
+  TUNNEL_SCOPE,
 ];
 const SECRET_NAMES = ['OAUTH_CLIENT_ID', 'OAUTH_CLIENT_SECRET'];
 process.chdir(fileURLToPath(new URL('..', import.meta.url)));
@@ -127,9 +129,13 @@ const deployedScopes = (currentVars.OAUTH_SCOPES || '').split(/\s+/).filter(Bool
 const SUPERSEDED_BOOTSTRAP_SCOPES = [['account-settings.read', 'workers-scripts.edit']];
 const supersededBootstrap =
   !full && SUPERSEDED_BOOTSTRAP_SCOPES.some((set) => sameScopes(set, deployedScopes));
+// A full installer now creates runtime credentials with cloudflared Write.
+// Reconcile that consent before repinning its source; preserve other operator
+// scopes and leave the minimal bootstrap installer unchanged.
+const preservedScopes = full ? [...new Set([...deployedScopes, TUNNEL_SCOPE])] : deployedScopes;
 const scopes =
   mode === 'preserve' && deployedScopes.length && !supersededBootstrap
-    ? deployedScopes
+    ? preservedScopes
     : full
       ? FULL_SCOPES
       : template.vars.OAUTH_SCOPES.split(/\s+/);
