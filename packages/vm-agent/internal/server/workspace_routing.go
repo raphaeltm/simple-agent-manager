@@ -55,6 +55,8 @@ type workspaceRuntimeOpts struct {
 	// runtime keeps its status. Attach paths use it instead of the positional status,
 	// which overwrites: a browser opening the agent or terminal WebSocket must not turn
 	// a stopped or errored workspace back into "running". Empty means not supplied.
+	// A non-empty positional status takes precedence on create, and persisted state
+	// found while hydrating (a metadata read failure, an evicted flag) overrides both.
 	CreateStatus string
 }
 

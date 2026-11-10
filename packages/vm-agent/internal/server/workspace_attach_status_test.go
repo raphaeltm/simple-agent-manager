@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/workspace/vm-agent/internal/auth"
 	"github.com/workspace/vm-agent/internal/config"
+	"github.com/workspace/vm-agent/internal/persistence"
 	"github.com/workspace/vm-agent/internal/pty"
 )
 
@@ -109,7 +111,7 @@ func TestWebSocketAttachKeepsExistingRuntimeStatus(t *testing.T) {
 			t.Run(h.name+"/"+status, func(t *testing.T) {
 				s, cookie := newAttachTestServer(t)
 				s.upsertWorkspaceRuntime(attachWorkspaceID, "octo/repo", "main", status, "ws-token",
-					workspaceRuntimeOpts{ProjectID: "proj-1"})
+					workspaceRuntimeOpts{ProjectID: "proj-1", Lightweight: lightweightOpt(true)})
 
 				attach(t, s, h, cookie)
 
@@ -117,10 +119,17 @@ func TestWebSocketAttachKeepsExistingRuntimeStatus(t *testing.T) {
 					t.Fatalf("attaching a browser changed the workspace status from %q to %q", status, got)
 				}
 				// Liveness: the handler did run its upsert on this runtime (it fills
-				// container defaults in place) rather than leaving it untouched.
+				// container defaults in place) rather than leaving it untouched. The
+				// Lightweight flag must also survive the real handler (rule 73).
 				runtime, _ := s.getWorkspaceRuntime(attachWorkspaceID)
-				if runtime.ProjectID != "proj-1" || runtime.ContainerWorkDir == "" {
-					t.Fatalf("expected the attach to keep project and fill container defaults, got %+v", runtime)
+				s.workspaceMu.RLock()
+				projectID, workDir, lightweight := runtime.ProjectID, runtime.ContainerWorkDir, runtime.Lightweight
+				s.workspaceMu.RUnlock()
+				if projectID != "proj-1" || workDir == "" {
+					t.Fatalf("expected the attach to keep project and fill container defaults, got project=%q workDir=%q", projectID, workDir)
+				}
+				if !lightweight {
+					t.Fatal("attaching a browser cleared the runtime's Lightweight flag")
 				}
 			})
 		}
@@ -138,6 +147,36 @@ func TestWebSocketAttachRebuildsMissingRuntimeAsRunning(t *testing.T) {
 
 			if got := runtimeStatus(t, s); got != "running" {
 				t.Fatalf("expected a missing runtime to be rebuilt as running, got %q", got)
+			}
+		})
+	}
+}
+
+// A runtime rebuilt for a workspace persisted as evicted stays evicted after an attach,
+// whatever CreateStatus says. Two layers hold this: hydration overrides CreateStatus
+// in the create branch, and the reconnect gate re-reads the persisted flag
+// (refreshWorkspaceEvictionState). Removing either one alone leaves this green; the
+// test guards the user-visible outcome, not the ordering inside the upsert.
+func TestWebSocketAttachRebuildsEvictedRuntimeAsEvicted(t *testing.T) {
+	for _, h := range attachHandlers {
+		t.Run(h.name, func(t *testing.T) {
+			s, cookie := newAttachTestServer(t)
+			store, err := persistence.Open(filepath.Join(t.TempDir(), "attach.db"))
+			if err != nil {
+				t.Fatalf("open store: %v", err)
+			}
+			t.Cleanup(func() { _ = store.Close() })
+			if err := store.UpsertWorkspaceMetadata(persistence.WorkspaceMetadata{
+				WorkspaceID: attachWorkspaceID, ContainerLabelVal: "/workspace/evicted", Evicted: true,
+			}); err != nil {
+				t.Fatalf("persist metadata: %v", err)
+			}
+			s.store = store
+
+			attach(t, s, h, cookie)
+
+			if got := runtimeStatus(t, s); got != "evicted" {
+				t.Fatalf("expected a rebuilt evicted runtime to stay evicted, got %q", got)
 			}
 		})
 	}
