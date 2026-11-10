@@ -7,7 +7,7 @@ import GitHubAppSetup from '../../../../components/GitHubAppSetup.astro';
 
 This guide walks you through deploying Simple Agent Manager to your own infrastructure. Deployment runs through the **Deploy Production** GitHub Actions workflow in your own fork, with Pulumi provisioning the Cloudflare resources.
 
-You can also explore the [guided installer prototype](/docs/guides/installer/), either hosted by us or deployed in your own account. It currently verifies account setup and ownership handoff; use this guide for a complete SAM installation.
+If you'd rather not fork and configure a repository, the [installer](/docs/guides/installer/) builds and deploys a complete SAM in your Cloudflare account from your browser, and updates it later. This guide is the fork-based path: more steps, and full control over every setting.
 
 ## Prerequisites
 
@@ -507,7 +507,7 @@ Use the manual workflow when you rotate deployment secrets, change GitHub Enviro
 
 On ordinary deployments without an installer owner binding, the first genuine human to sign in becomes the **superadmin** — the account that can approve other users, manage platform credentials, and reach the admin dashboard.
 
-Experimental installer deployments set the API Worker secret `BOOTSTRAP_OWNER_EMAIL` before enabling login. Until that owner is established, other identities are refused; only a matching verified email (from an OAuth provider, or proven by an emailed sign-in code) can establish initial administration. The owner is elected with an atomic database update, including concurrent callbacks from different providers. `SETUP_TOKEN` authorizes first-run setup; it does not itself grant a SAM user session. Finish `/setup`, then sign in with the approved owner email.
+Installer deployments set the API Worker secret `BOOTSTRAP_OWNER_EMAIL` before enabling login. Until that owner is established, other identities are refused; only a matching verified email (from an OAuth provider, or proven by an emailed sign-in code) can establish initial administration. The owner is elected with an atomic database update, including concurrent callbacks from different providers. `SETUP_TOKEN` authorizes first-run setup; it does not itself grant a SAM user session. Finish `/setup`, then sign in with the approved owner email.
 
 Email sign-in codes (`services/email-sign-in.ts`) create an account only for the installer owner email, before that owner exists. Otherwise only addresses that already belong to an account receive a code. Deployments without an owner email never create accounts by email, because the first person to ask for a code would become the administrator. The response is the same for every address, and the code is sent after the response, so its timing reveals nothing either. The password-reset, verification and email-change code routes are closed. Codes expire after 5 minutes and allow 3 attempts. Each address gets at most 5 codes an hour, each IP address at most 20 requests, and each address at most 10 code guesses an hour from all IP addresses combined (the `agentEmail.signInCodesPerEmailPerHour`, `agentEmail.signInCodesPerIpPerHour` and `agentEmail.signInCodeAttemptsPerEmailPerHour` settings). GitHub is not required before the instance exists. Preserve the owner binding across routine updates.
 

@@ -543,3 +543,20 @@ test('docs: fork composer, narrow', async ({ page }) => {
   test.skip(isMobile(page), 'desktop capture');
   await captureForkComposer(page, 1060, 'chat-fork-composer-mobile');
 });
+
+// ---------------------------------------------------------------------------
+// 4. The one-row chat header on a phone, and the info sheet its title opens
+// ---------------------------------------------------------------------------
+
+test('docs: chat header and info sheet on a phone', async ({ page }) => {
+  test.skip(!isMobile(page), 'phone capture');
+  await openChat(page, DIAGRAM.id);
+
+  const title = page.getByRole('button', { name: new RegExp(`^${DIAGRAM.topic}\\. .*Show session info$`) });
+  await expect(title).toBeVisible();
+  await title.click();
+  const sheet = page.getByRole('dialog').filter({ hasText: DIAGRAM.topic }).last();
+  await expect(sheet).toBeVisible();
+  await page.waitForTimeout(400);
+  await docsShot(page, 'chat-session-info-sheet-mobile');
+});

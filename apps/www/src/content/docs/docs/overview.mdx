@@ -25,19 +25,19 @@ AI coding agents need real development environments. SAM gives each agent an iso
     done. Warm node pooling reuses idle VMs for fast follow-up work.
   </Card>
   <Card title="Self-Hostable" icon="setting">
-    Fork the repo, configure a GitHub Environment, then run Deploy Production. Pulumi + GitHub
-    Actions provision the stack.
+    Install SAM in your own Cloudflare account from the browser with the installer, or fork the
+    repo and deploy it with GitHub Actions.
   </Card>
 </CardGrid>
 
 ## How It Works
 
-1. **Sign in** via the web UI using an option enabled by your administrator, such as an email code or GitHub
-2. **Connect an AI agent** in Settings → Agents (Claude Code, Codex, Gemini CLI, and more)
-3. **Choose where your code lives** — connect GitHub and install the GitHub App, or use a SAM-hosted repository where enabled
-4. **Create a project** — link a GitHub repo or let SAM host a new one from the Dashboard
-5. **Chat** — describe what you want; SAM provisions a workspace and runs the agent for you
-6. **Get a pull request** — for a GitHub-backed project, ask the agent to open one when the work is ready (or say so in your first message), then review it on GitHub. SAM doesn't publish anything on its own.
+1. **Sign in** via the web UI with GitHub, Google, GitLab or an emailed code
+2. **Let SAM set you up**: on your first visit it asks where agents should work and where your code
+   should live, connects your agent (Claude Code, Codex, Gemini CLI, and more), and creates your
+   first project, on a GitHub repository or a new one SAM hosts for you
+3. **Chat** — describe what you want; SAM provisions a workspace and runs the agent for you
+4. **Get a pull request** — for a GitHub-backed project, ask the agent to open one when the work is ready (or say so in your first message), then review it on GitHub. SAM doesn't publish anything on its own.
 
 ## Key Features
 
