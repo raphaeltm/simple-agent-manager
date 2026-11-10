@@ -5,6 +5,7 @@
  */
 import { randomBytes } from 'node:crypto';
 import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 
 import type { PortRange } from './box-settings.js';
@@ -70,6 +71,10 @@ export async function writeFenceFiles(input: {
     leaseRange,
     resolvConf: input.resolvConf ?? readFileSync('/etc/resolv.conf', 'utf8'),
     objectStore: await resolveObjectStoreEndpoints(box),
+    localAddresses: Object.values(networkInterfaces())
+      .flat()
+      .map((entry) => entry?.address ?? '')
+      .filter(Boolean),
   });
   const changed: string[] = [];
 

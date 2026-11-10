@@ -235,7 +235,11 @@ async function main(): Promise<void> {
   // The celld egress fence and celld.env (scripts/selfhost/egress-fence.ts).
   const fence = await writeFenceFiles({ stateDir, box, leaseRange: tunnelRange });
   for (const path of fence.changed) {
-    log(`wrote ${path}; (re)start the stack: docker compose up -d`);
+    log(
+      path.endsWith('.nft')
+        ? `wrote ${path}; the egress-fence service applies it within its recheck interval`
+        : `wrote ${path}; (re)start the stack: docker compose up -d`
+    );
   }
   if (values.init) return;
   const operatorSecrets = readSecretsFile(secretsPath);

@@ -27,6 +27,9 @@ services:
     network_mode: host
     # The egress fence matches this uid; celld/start.sh refuses to run as root.
     user: '${CELLD_UID:-7101}:${CELLD_UID:-7101}'
+    # The fence matches the uid: no capability or setuid path may change it.
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
     entrypoint: ['/bin/bash', '/etc/sam/celld-start.sh']
     depends_on:
       egress-fence:
@@ -46,6 +49,9 @@ services:
         required: true
     environment:
       HOME: /var/lib/celld
+      # celld/start.sh: wait for the fence at start, then re-check it while celld runs.
+      SAM_EGRESS_FENCE_WAIT_SECONDS: ${SAM_EGRESS_FENCE_WAIT_SECONDS:-60}
+      SAM_EGRESS_FENCE_CHECK_SECONDS: ${SAM_EGRESS_FENCE_CHECK_SECONDS:-5}
       CELLD_BUCKET: ${CELLD_BUCKET:?set CELLD_BUCKET in .env}
       # Empty means unset: gs:// buckets take no endpoint and use Application Default Credentials.
       S3_ENDPOINT: ${S3_ENDPOINT:-}

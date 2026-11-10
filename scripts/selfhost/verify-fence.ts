@@ -33,7 +33,7 @@ const DEFAULT_PUBLIC_PROBE = '1.1.1.1:443';
 const CONTROL_UID = 65534;
 const DEFAULT_PROBE_TIMEOUT_SECONDS = 3;
 
-export type ProbeOutcome = 'blocked' | 'open' | 'refused' | 'timeout' | 'error';
+export type ProbeOutcome = 'blocked' | 'open' | 'refused' | 'timeout' | 'unavailable' | 'error';
 
 export interface ProbeTarget {
   label: string;
@@ -44,6 +44,7 @@ export interface ProbeTarget {
 
 /**
  * A bash script that prints `<index> <outcome>` per target, from bash's /dev/tcp error text.
+ * "unavailable" is the host lacking the address family (IPv6 off), not a verdict on the fence.
  */
 export function buildProbeScript(targets: ProbeTarget[], timeoutSeconds: number): string {
   const lines = targets.map((target, index) => `probe ${index} '${target.host}' ${target.port}`);
@@ -53,6 +54,7 @@ export function buildProbeScript(targets: ProbeTarget[], timeoutSeconds: number)
     '  if [ $code -eq 0 ]; then echo "$1 open"',
     '  elif [[ "$out" == *"No route to host"* || "$out" == *"Permission denied"* ]]; then echo "$1 blocked"',
     '  elif [[ "$out" == *"Connection refused"* ]]; then echo "$1 refused"',
+    '  elif [[ "$out" == *"Cannot assign requested address"* || "$out" == *"Network is unreachable"* || "$out" == *"Address family not supported"* ]]; then echo "$1 unavailable"',
     '  elif [ $code -eq 124 ]; then echo "$1 timeout"',
     '  else echo "$1 error"; fi',
     '}',
@@ -63,31 +65,68 @@ export function buildProbeScript(targets: ProbeTarget[], timeoutSeconds: number)
 export function parseProbeOutput(output: string): Map<number, ProbeOutcome> {
   const results = new Map<number, ProbeOutcome>();
   for (const line of output.split('\n')) {
-    const match = /^(\d+) (blocked|open|refused|timeout|error)$/.exec(line.trim());
+    const match = /^(\d+) (blocked|open|refused|timeout|unavailable|error)$/.exec(line.trim());
     if (match) results.set(Number(match[1]), match[2] as ProbeOutcome);
   }
   return results;
 }
 
-/** Failures, one line each; empty when every target behaved as expected. */
+export interface ProbeVerdict {
+  failures: string[];
+  warnings: string[];
+}
+
+function isLoopbackHost(host: string): boolean {
+  return host === '::1' || host.startsWith('127.');
+}
+
+/**
+ * A forbidden target is fenced when celld's uid is refused and another uid is not: "No route
+ * to host" can also be the network's own answer for a remote address, never for loopback.
+ */
+function judgeForbidden(
+  target: ProbeTarget,
+  outcome: ProbeOutcome,
+  control: ProbeOutcome | undefined
+): { failure?: string; warning?: string } {
+  const name = `${target.label} (${target.host}:${target.port})`;
+  if (outcome === 'unavailable' && control === 'unavailable') {
+    return { warning: `${name}: address family unavailable on this host; not applicable` };
+  }
+  if (outcome !== 'blocked') return { failure: `${name} is NOT fenced: ${outcome}` };
+  if (control !== 'blocked') return {};
+  if (isLoopbackHost(target.host)) {
+    return { failure: `${name}: refused for every uid, so the probe cannot see the fence` };
+  }
+  return { warning: `${name}: the network refuses it for every uid too; inconclusive` };
+}
+
+/** Failures and warnings, one line each. `control` is the same probe run as another uid. */
 export function evaluateProbes(
   targets: ProbeTarget[],
-  results: Map<number, ProbeOutcome>
-): string[] {
-  const failures: string[] = [];
+  results: Map<number, ProbeOutcome>,
+  control: Map<number, ProbeOutcome> = new Map()
+): ProbeVerdict {
+  const verdict: ProbeVerdict = { failures: [], warnings: [] };
   targets.forEach((target, index) => {
     const outcome = results.get(index);
     if (outcome === undefined) {
-      failures.push(`${target.label}: no result`);
-    } else if (target.expect === 'blocked' && outcome !== 'blocked') {
-      failures.push(`${target.label} (${target.host}:${target.port}) is NOT fenced: ${outcome}`);
-    } else if (target.expect === 'reachable' && (outcome === 'blocked' || outcome === 'error')) {
-      failures.push(
-        `${target.label} (${target.host}:${target.port}) should be allowed: ${outcome}`
-      );
+      verdict.failures.push(`${target.label}: no result`);
+      return;
     }
+    if (target.expect === 'reachable') {
+      if (!['open', 'refused'].includes(outcome)) {
+        verdict.failures.push(
+          `${target.label} (${target.host}:${target.port}) should be reachable: ${outcome}`
+        );
+      }
+      return;
+    }
+    const { failure, warning } = judgeForbidden(target, outcome, control.get(index));
+    if (failure) verdict.failures.push(failure);
+    if (warning) verdict.warnings.push(warning);
   });
-  return failures;
+  return verdict;
 }
 
 /** What the fence must block and allow on this box. */
@@ -191,21 +230,19 @@ async function main(): Promise<void> {
     'inet',
     EGRESS_FENCE_TABLE,
   ]);
-  if (table.status !== 0) failures.push(`nftables table ${EGRESS_FENCE_TABLE} is not installed`);
+  if (table.status !== 0) {
+    failures.push(`nftables table ${EGRESS_FENCE_TABLE} not visible (is egress-fence running?)`);
+  }
 
   const targets = await fenceTargets(box, values['public-probe'] ?? DEFAULT_PUBLIC_PROBE);
-  failures.push(...evaluateProbes(targets, runProbes(envFile, targets, null)));
-
-  // Control: another uid must get through to the same forbidden target, or "blocked" above
-  // could mean the probe itself is broken.
-  const control: ProbeTarget[] = [
-    { ...targets[0]!, label: 'control (another uid)', expect: 'reachable' },
-  ];
-  const controlFailures = evaluateProbes(
-    control,
-    runProbes(envFile, control, `${CONTROL_UID}:${CONTROL_UID}`)
+  // The same probes as another uid: a target only counts as fenced if that uid gets through.
+  const verdict = evaluateProbes(
+    targets,
+    runProbes(envFile, targets, null),
+    runProbes(envFile, targets, `${CONTROL_UID}:${CONTROL_UID}`)
   );
-  failures.push(...controlFailures.map((line) => `${line}; the probe cannot be trusted`));
+  failures.push(...verdict.failures);
+  for (const warning of verdict.warnings) console.warn(`[selfhost] warning: ${warning}`);
 
   for (const target of targets) {
     console.log(

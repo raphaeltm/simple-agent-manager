@@ -60,10 +60,11 @@ const COMPOSE_PORT_DEFAULTS = {
 type ComposePort = keyof typeof COMPOSE_PORT_DEFAULTS;
 
 /** IPv4 destinations celld may never open a connection to (besides this host's own addresses). */
-const FORBIDDEN_IPV4 = [
+export const FORBIDDEN_IPV4 = [
   '0.0.0.0/8',
   '10.0.0.0/8',
   '100.64.0.0/10', // carrier-grade NAT, incl. Alibaba metadata 100.100.100.200
+  '168.63.129.16/32', // Azure WireServer (a public address; DNS to it is allowed above)
   '127.0.0.0/8',
   '169.254.0.0/16', // link-local, cloud metadata
   '172.16.0.0/12',
@@ -73,7 +74,7 @@ const FORBIDDEN_IPV4 = [
   '224.0.0.0/3', // multicast and reserved
 ];
 
-const FORBIDDEN_IPV6 = [
+export const FORBIDDEN_IPV6 = [
   '::/127', // unspecified and loopback
   '::ffff:0:0/96', // IPv4-mapped
   '64:ff9b::/96', // NAT64
@@ -102,6 +103,8 @@ export interface EgressFencePlan {
   localPublicPorts: number[];
   /** The listeners the plan must never allow; checked by assertFencePlan. */
   forbiddenLoopbackPorts: Record<string, number>;
+  /** This host's own addresses: an endpoint on one of them is checked like a loopback one. */
+  localAddresses: string[];
 }
 
 function intSetting(raw: string | undefined, fallback: number, name: string, min = 1): number {
@@ -172,6 +175,27 @@ export interface FencePlanInput {
   leaseRange: PortRange;
   resolvConf: string;
   objectStore: FenceEndpoint[];
+  /** This host's interface addresses (os.networkInterfaces()). */
+  localAddresses?: string[];
+}
+
+/**
+ * SAM_EGRESS_ALLOW: extra `address:port` pairs celld may reach (IP literals; IPv6 in brackets),
+ * comma-separated. For an endpoint an admin opted in to on the private network, such as a local
+ * model server for `llm.openAICompatible.allowPrivateNetwork`. Names are refused: the fence
+ * matches addresses, and a name could later resolve elsewhere.
+ */
+export function parseAllowedEndpoints(raw: string | undefined): FenceEndpoint[] {
+  if (!raw?.trim()) return [];
+  return raw.split(',').map((entry) => {
+    const match = /^\s*(?:\[([0-9a-fA-F:.]+)\]|([0-9.]+)):(\d{1,5})\s*$/.exec(entry);
+    const address = match?.[1] ?? match?.[2] ?? '';
+    const port = Number(match?.[3]);
+    if (!match || isIP(address) === 0 || !Number.isInteger(port) || port < 1 || port > 65535) {
+      throw new Error(`SAM_EGRESS_ALLOW entry "${entry.trim()}" must be IP:PORT or [IPv6]:PORT`);
+    }
+    return { address, port };
+  });
 }
 
 export function buildFencePlan({
@@ -179,10 +203,11 @@ export function buildFencePlan({
   leaseRange,
   resolvConf,
   objectStore,
+  localAddresses,
 }: FencePlanInput): EgressFencePlan {
   const loopbackPorts: number[] = [];
   const endpoints: FenceEndpoint[] = [];
-  for (const endpoint of objectStore) {
+  for (const endpoint of [...objectStore, ...parseAllowedEndpoints(box.SAM_EGRESS_ALLOW)]) {
     if (endpoint.address === '127.0.0.1') loopbackPorts.push(endpoint.port);
     else endpoints.push(endpoint);
   }
@@ -202,6 +227,7 @@ export function buildFencePlan({
       FRPS_BIND_PORT: composePort(box, 'FRPS_BIND_PORT'),
       OBJECTSTORE_CONSOLE_PORT: composePort(box, 'OBJECTSTORE_CONSOLE_PORT'),
     },
+    localAddresses: localAddresses ?? [],
   };
   assertFencePlan(plan);
   return plan;
@@ -211,18 +237,32 @@ function inRange(port: number, range: PortRange): boolean {
   return port >= range.start && port <= range.end;
 }
 
+function isLoopback(address: string): boolean {
+  return address === '::1' || address.startsWith('127.');
+}
+
 /**
  * Fails when the plan would let celld reach a listener it must never reach: its own public and
  * operator listeners, frps's control port, the object store console. An overlap means the box
  * is misconfigured (two services on one port), and the fence refuses rather than opening it.
  */
 export function assertFencePlan(plan: EgressFencePlan): void {
+  const local = new Set(plan.localAddresses);
   for (const [name, port] of Object.entries(plan.forbiddenLoopbackPorts)) {
     if (plan.loopbackPorts.includes(port) || inRange(port, plan.leaseRange)) {
       throw new Error(`egress fence would allow ${name} (${port}); change the conflicting port`);
     }
     if (plan.localPublicPorts.includes(port)) {
       throw new Error(`${name} (${port}) collides with Caddy's port`);
+    }
+    // celld and frps listen on loopback only today, but an endpoint on another local address
+    // (127.0.0.2, the box's own IP) on one of these ports would reach a listener bound there.
+    const opened = plan.endpoints.find(
+      (endpoint) =>
+        endpoint.port === port && (isLoopback(endpoint.address) || local.has(endpoint.address))
+    );
+    if (opened) {
+      throw new Error(`egress fence would allow ${name} (${opened.address}:${port}); refusing`);
     }
   }
 }
@@ -248,7 +288,7 @@ export function renderFenceRuleset(plan: EgressFencePlan): string {
   }
   const loopback = [`${plan.leaseRange.start}-${plan.leaseRange.end}`, ...plan.loopbackPorts];
   allowLines.push(
-    `ip daddr 127.0.0.1 tcp dport ${nftSet(loopback)} accept comment "node tunnel leases, local store, metadata proxy"`
+    `ip daddr 127.0.0.1 tcp dport ${nftSet(loopback)} accept comment "node tunnel leases and allowed local endpoints"`
   );
   for (const endpoint of plan.endpoints) {
     allowLines.push(

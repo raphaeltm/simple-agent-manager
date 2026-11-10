@@ -9,14 +9,18 @@
 	admin off
 	auto_https off
 	persist_config off
+	# Discard every log, errors included: a request URI carries the secret, and Caddy's error
+	# log records the original URI even after `uri strip_prefix`.
+	log default {
+		output discard
+	}
 }
 
 http://127.0.0.1:{$GCE_METADATA_PROXY_PORT} {
 	bind 127.0.0.1
 
 	@token {
-		path /{$GCE_METADATA_PROXY_SECRET}/computeMetadata/v1/instance/service-accounts/default/token
-		path /{$GCE_METADATA_PROXY_SECRET}/computeMetadata/v1/instance/service-accounts/default/email
+		path /{$GCE_METADATA_PROXY_SECRET}/computeMetadata/v1/instance/service-accounts/default/token /{$GCE_METADATA_PROXY_SECRET}/computeMetadata/v1/instance/service-accounts/default/email
 		header Metadata-Flavor Google
 		method GET
 	}
@@ -34,5 +38,4 @@ http://127.0.0.1:{$GCE_METADATA_PROXY_PORT} {
 	handle {
 		respond 404
 	}
-	# No access log: the request path carries the secret.
 }

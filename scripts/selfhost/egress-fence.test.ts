@@ -7,6 +7,8 @@ import { describe, expect, it } from 'vitest';
 import { assertPresignCredentialIsScoped } from './box-settings.js';
 import {
   buildFencePlan,
+  FORBIDDEN_IPV4,
+  FORBIDDEN_IPV6,
   metadataProxyEnabled,
   parseNameservers,
   renderCelldEnv,
@@ -66,23 +68,33 @@ describe('egress fence ruleset', () => {
     expect(dns).toBeLessThan(rules.indexOf('169.254.0.0/16'));
   });
 
-  it('drops this host, private, link-local, CGNAT and IPv6 local ranges', () => {
-    const rules = renderFenceRuleset(plan());
-    expect(rules).toContain(
-      'fib daddr type local counter reject with icmpx admin-prohibited'
+  it('refuses this host and every forbidden range, in the right family, after every accept', () => {
+    const rules = renderFenceRuleset(
+      plan({ CELLD_BUCKET: 'gs://b', SAM_EGRESS_ALLOW: '10.0.0.5:11434' }, [
+        { address: '10.1.2.3', port: 9000 },
+      ])
+    ).split('\n');
+    const refuse = 'counter reject with icmpx admin-prohibited';
+    const v4 = rules.findIndex(
+      (line) => line.trim().startsWith('ip daddr {') && line.includes(refuse)
     );
-    for (const range of [
-      '10.0.0.0/8',
-      '127.0.0.0/8',
-      '169.254.0.0/16',
-      '172.16.0.0/12',
-      '192.168.0.0/16',
-      '100.64.0.0/10',
-    ]) {
-      expect(rules).toContain(range);
+    const v6 = rules.findIndex(
+      (line) => line.trim().startsWith('ip6 daddr {') && line.includes(refuse)
+    );
+    const local = rules.findIndex((line) => line.includes(`fib daddr type local ${refuse}`));
+    expect(rules[v4]).toContain(`ip daddr { ${FORBIDDEN_IPV4.join(', ')} } ${refuse}`);
+    expect(rules[v6]).toContain(`ip6 daddr { ${FORBIDDEN_IPV6.join(', ')} } ${refuse}`);
+    const firstRefuse = Math.min(v4, v6, local);
+    const lastAccept = Math.max(
+      ...rules.map((line, index) => (line.includes(' accept') ? index : -1))
+    );
+    expect(local).toBeGreaterThan(0);
+    expect(lastAccept).toBeLessThan(firstRefuse);
+    for (const range of ['10.0.0.0/8', '127.0.0.0/8', '169.254.0.0/16', '168.63.129.16/32']) {
+      expect(FORBIDDEN_IPV4).toContain(range);
     }
     for (const range of ['::/127', 'fc00::/7', 'fe80::/10', '::ffff:0:0/96']) {
-      expect(rules).toContain(range);
+      expect(FORBIDDEN_IPV6).toContain(range);
     }
   });
 
@@ -123,6 +135,43 @@ describe('egress fence ruleset', () => {
 
   it("refuses a plan that would open celld's operator port as the object store port", () => {
     expect(() => plan({}, [{ address: '127.0.0.1', port: 7001 }])).toThrow(/CELLD_INTERNAL_PORT/);
+  });
+
+  it('opens an operator-allowed endpoint (SAM_EGRESS_ALLOW) at its exact address and port', () => {
+    const rules = renderFenceRuleset(
+      plan({ SAM_EGRESS_ALLOW: '127.0.0.1:11434, 10.0.0.5:8000,[fd00::5]:8080' })
+    );
+    expect(rules).toContain('ip daddr 127.0.0.1 tcp dport { 20000-29999, 11434 } accept');
+    expect(rules).toContain('ip daddr 10.0.0.5 tcp dport 8000 accept');
+    expect(rules).toContain('ip6 daddr fd00::5 tcp dport 8080 accept');
+  });
+
+  it.each(['ollama:11434', '10.0.0.5', '10.0.0.5:0', 'http://10.0.0.5:80'])(
+    'refuses a malformed SAM_EGRESS_ALLOW entry (%s)',
+    (entry) => {
+      expect(() => plan({ SAM_EGRESS_ALLOW: entry })).toThrow(/SAM_EGRESS_ALLOW/);
+    }
+  );
+
+  it.each([
+    ['127.0.0.1:7001', []],
+    ['127.0.0.2:7001', []],
+    ['[::1]:8080', []],
+    ['203.0.113.7:7000', ['203.0.113.7']],
+  ])('refuses an allowed endpoint that opens a listener (%s)', (entry, localAddresses) => {
+    expect(() =>
+      buildFencePlan({
+        box: { SAM_EGRESS_ALLOW: entry },
+        leaseRange: RANGE,
+        resolvConf: RESOLV,
+        objectStore: [],
+        localAddresses,
+      })
+    ).toThrow(/egress fence would allow/);
+  });
+
+  it('control: the same port on a remote address is fine', () => {
+    expect(() => plan({ SAM_EGRESS_ALLOW: '203.0.113.7:7000' })).not.toThrow();
   });
 
   it('refuses a box with no nameserver', () => {
@@ -231,33 +280,88 @@ describe('presign credential', () => {
 describe('verify-fence', () => {
   const targets: ProbeTarget[] = [
     { label: 'operator', host: '127.0.0.1', port: 7001, expect: 'blocked' },
+    { label: 'metadata', host: '169.254.169.254', port: 80, expect: 'blocked' },
+    { label: 'ipv6', host: '::1', port: 7001, expect: 'blocked' },
     { label: 'lease', host: '127.0.0.1', port: 20000, expect: 'reachable' },
+    { label: 'public', host: '1.1.1.1', port: 443, expect: 'reachable' },
   ];
+  const control = parseProbeOutput('0 open\n1 timeout\n2 refused\n3 refused\n4 open\n');
 
-  it('passes when forbidden targets are blocked and allowed ones are not', () => {
-    expect(evaluateProbes(targets, parseProbeOutput('0 blocked\n1 refused\n'))).toEqual([]);
+  it('passes when forbidden targets are blocked for celld and not for another uid', () => {
+    const verdict = evaluateProbes(
+      targets,
+      parseProbeOutput('0 blocked\n1 blocked\n2 blocked\n3 refused\n4 open\n'),
+      control
+    );
+    expect(verdict).toEqual({ failures: [], warnings: [] });
   });
 
   it.each(['open', 'refused', 'timeout', 'error'])(
     'fails when a forbidden target is %s',
     (outcome) => {
-      expect(evaluateProbes(targets, parseProbeOutput(`0 ${outcome}\n1 open\n`))[0]).toMatch(
-        /NOT fenced/
+      const verdict = evaluateProbes(
+        targets,
+        parseProbeOutput(`0 ${outcome}\n1 blocked\n2 blocked\n3 open\n4 open\n`),
+        control
       );
+      expect(verdict.failures).toEqual([expect.stringMatching(/operator .* NOT fenced/)]);
     }
   );
 
-  it('fails when an allowed target is blocked, or a result is missing', () => {
-    expect(evaluateProbes(targets, parseProbeOutput('0 blocked\n1 blocked\n'))[0]).toMatch(
-      /should be allowed/
+  it('a loopback target refused for every uid fails: the probe cannot see the fence', () => {
+    const verdict = evaluateProbes(
+      targets,
+      parseProbeOutput('0 blocked\n1 blocked\n2 blocked\n3 open\n4 open\n'),
+      parseProbeOutput('0 blocked\n1 timeout\n2 refused\n')
     );
-    expect(evaluateProbes(targets, parseProbeOutput('0 blocked\n'))[0]).toMatch(/no result/);
+    expect(verdict.failures).toEqual([expect.stringMatching(/operator .*cannot see the fence/)]);
+  });
+
+  it('a remote target the network refuses for every uid is a warning, not a pass or a failure', () => {
+    const verdict = evaluateProbes(
+      targets,
+      parseProbeOutput('0 blocked\n1 blocked\n2 blocked\n3 open\n4 open\n'),
+      parseProbeOutput('0 open\n1 blocked\n2 refused\n')
+    );
+    expect(verdict.failures).toEqual([]);
+    expect(verdict.warnings).toEqual([expect.stringMatching(/metadata .*inconclusive/)]);
+  });
+
+  it('IPv6 off on the host is not applicable, not a failure', () => {
+    const verdict = evaluateProbes(
+      targets,
+      parseProbeOutput('0 blocked\n1 blocked\n2 unavailable\n3 open\n4 open\n'),
+      parseProbeOutput('0 open\n1 timeout\n2 unavailable\n')
+    );
+    expect(verdict.failures).toEqual([]);
+    expect(verdict.warnings).toEqual([expect.stringMatching(/ipv6 .*not applicable/)]);
+  });
+
+  it.each(['blocked', 'timeout', 'error', 'unavailable'])(
+    'fails when an allowed target is %s',
+    (outcome) => {
+      const verdict = evaluateProbes(
+        targets,
+        parseProbeOutput(`0 blocked\n1 blocked\n2 blocked\n3 open\n4 ${outcome}\n`),
+        control
+      );
+      expect(verdict.failures).toEqual([expect.stringMatching(/public .*should be reachable/)]);
+    }
+  );
+
+  it('fails on a missing result and ignores garbage lines', () => {
+    const verdict = evaluateProbes(
+      targets,
+      parseProbeOutput('noise\n0 blocked\n1 blocked\n2 blocked\n3 open\n7 maybe\n'),
+      control
+    );
+    expect(verdict.failures).toEqual(['public: no result']);
   });
 
   it('builds one probe line per target', () => {
     const script = buildProbeScript(targets, 3);
     expect(script).toContain("probe 0 '127.0.0.1' 7001");
-    expect(script).toContain("probe 1 '127.0.0.1' 20000");
+    expect(script).toContain("probe 3 '127.0.0.1' 20000");
     expect(script).toContain('No route to host');
   });
 

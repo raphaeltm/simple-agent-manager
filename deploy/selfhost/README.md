@@ -118,7 +118,21 @@ What the fence cannot separate: Worker code and celld's storage client are one p
 Worker can reach the object store endpoint (without the fleet credential it gets nothing; the
 bundled store denies anonymous access) and the token proxy port. The deploy refuses a presign
 credential (`R2_ACCESS_KEY_ID`) equal to the fleet credential, since the presign credential is a
-Worker secret.
+Worker secret. That check catches a copied key only; it cannot prove a different key is scoped.
+
+A local model server (the admin setting `llm.openAICompatible.allowPrivateNetwork`) is on a
+private address the fence rejects. Allow exactly that address and port with `SAM_EGRESS_ALLOW`
+in `.env` (for example `127.0.0.1:11434`), then `pnpm selfhost:deploy --init`; the fence service
+picks up the re-rendered rules within `SAM_EGRESS_FENCE_RECHECK_SECONDS`. The deploy refuses an
+entry that would open celld's, frps's or the store console's port on any local address.
+
+Other limits: the loopback lease range (20000-29999 by default) is open to celld, so do not run
+other services on those ports. Nameservers come from `/etc/resolv.conf` when the deploy runs;
+re-run `pnpm selfhost:deploy --init` if they change. celld's entrypoint re-checks the fence every
+`SAM_EGRESS_FENCE_CHECK_SECONDS` (5) and stops celld if it is gone (measured: celld stopped
+admitting requests 0.6 s after the table was deleted, then drains in-flight work before exiting). Docker user-namespace
+remapping changes the host uid the fence must match; it is not supported (celld then refuses to
+start).
 
 ## Code
 
