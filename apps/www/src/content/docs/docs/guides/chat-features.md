@@ -5,7 +5,7 @@ description: Answering an agent's permission requests and questions, reading the
 
 SAM's project pages are chat-first interfaces where you interact with AI coding agents in real-time.
 
-Recent chat updates make the workspace feel more like a persistent work surface: task-backed chats can be forked consistently, SAM-injected setup context is collapsed out of the main conversation, and desktop sidebars can be collapsed when you need more room.
+The conversation is in the middle. The [session list](#switching-between-chats) is on the left, sorted so chats that need you come first, and the [tool rail](#the-session-tool-rail) is on the right. On a phone the session list opens from the button at the right end of the app bar.
 
 For private coordination across projects, enable the optional [SAM account assistant](/docs/guides/sam-assistant/). Its account conversation is separate from these project-visible coding sessions.
 
@@ -19,24 +19,28 @@ Files upload while you compose. Each one appears above the message input: an ima
 anything else as a card with a file-type icon, its name and its size. A paste shows its first line and
 how many lines it has, so two pastes are easy to tell apart. A ring or bar shows upload progress.
 
-Tap an attachment to check it before you send. Images open full size (switch between **Fit** and
-**100%**), videos play, and text files show numbered lines with a wrap toggle. Very large text shows its
+Tap an attachment to check it before you send. Images open fitted to the panel (switch between
+**Fit to panel** and **Actual size (1:1)**), videos play, and text files show numbered lines with a
+**Wrap** toggle. Very large text shows its
 first 2,000 lines or 256 KB, and the agent still gets the whole file. For a paste, **Edit in message**
 moves the text back into the input. Other file types show their type and size. Use the arrows to step
 through attachments, and **Remove** to drop one.
 
 Previews read the copy on your device, not the upload, so they work while a file is uploading and after
 an upload fails. A file that is empty or larger than the per-file limit is not uploaded. It still
-appears, marked **Failed** with the reason, so you can see which file it was. Select **✕** to remove an
-attachment. A failed attachment blocks sending until you remove it. You can send files with no text;
+appears, with the reason in red in place of its size (for example **Larger than the 50 MB limit**),
+so you can see which file it was. Select **✕** to remove an attachment. A failed attachment blocks sending until you remove it. You can send files with no text;
 the agent is asked to read them.
 
 The agent receives the files only when you send the message, together with each file's exact path in
 its workspace. You can attach files to a sleeping chat without waking it; sending the message wakes
 it, and the files are delivered once it's up.
 
-Limits: up to 20 files and 200 MB per message, 50 MB per file, and file names made only of
-unaccented letters (A–Z, a–z), digits, spaces, `.`, `_`, and `-`. Someone a chat is
+Limits: up to 20 files and 200 MB per message, and 50 MB per file. Any file name is accepted: SAM
+renames the file to safe characters before it uploads, so the agent sees the new name. Accents are
+dropped, and each run of spaces or symbols becomes one `_`, so `CleanShot 2026-11-04 at
+12.22.51@2x.png` arrives as `CleanShot_2026-11-04_at_12.22.51_2x.png`. Names longer than 255
+characters are shortened, keeping the extension. Someone a chat is
 [shared with](/docs/guides/collaboration/#share-a-chat) can attach files too, while their access
 lasts; the files are their own uploads and go only into that chat's workspace.
 
@@ -73,9 +77,9 @@ A message you send with **Steer** shows what happened to it underneath:
 Steering works with Claude Code, OpenCode, and Codex. Codex steers through SAM's Codex runtime,
 which every Codex chat and task uses unless its agent profile sets `SAM_CODEX_C2_CANDIDATE=0` (use
 that only for a devcontainer the runtime can't run in: it needs x86_64 and Node 22 or newer). When
-the agent can't steer, the composer offers no **Steer** choice while it works and every message is
-queued. On VMs started before this shipped, a steered message may still be sent as the next message
-instead, and its label says so. A sleeping chat is never woken just to steer it: the message queues and wakes the
+the agent can't steer, the chip shows **Queue** while it works and can't be switched; hover it to
+read why ("this agent can't take messages mid-turn"). On a VM started before 6 November 2026, a
+steered message may still be sent as the next message instead, and its label says so. A sleeping chat is never woken just to steer it: the message queues and wakes the
 chat as usual.
 
 ## When the Agent Needs You
@@ -184,6 +188,13 @@ own. **Decline** tells the agent you're skipping the question. A question waits 
 Questions appear only in sessions labelled **Chat** in the session list — see
 [Chat or Task](#chat-or-task).
 
+An agent can also ask with its `request_human_input` tool, which works in a **Task** too and, unlike
+the cards above, sends you a notification. That question appears as a card in the conversation as
+well, marked **Needs your answer** until someone answers it, then **Answered** with the choice
+that was made. Answer it on the card, from the notification bell, or in the question reader: it is
+the same answer wherever you give it. See
+[Read and answer an agent's question](/docs/guides/notifications/#read-and-answer-an-agents-question).
+
 ### Links to open
 
 Some tools — usually an [MCP server](/docs/guides/mcp-servers/) you connected — need you to sign in
@@ -254,7 +265,8 @@ a wide screen the replies stop at a comfortable reading width.
 
 ### Showing only the conversation on a phone
 
-On a phone, the button with two outward arrows at the bottom right of the conversation hides
+On a phone, the button with two outward arrows at the bottom right of the conversation (**Show
+only the conversation**) hides
 everything else: the app bar, the chat's title and status, the tool rail and the message box slide
 away, and the conversation fills the screen. If a message is being read aloud, its player stays so
 you can pause or stop it. Select the button again (now two inward arrows) to
@@ -278,6 +290,35 @@ Once a message has finished arriving, small icon buttons appear under it:
 Your own messages have **Info** and **Copy** too, so you can pick up a prompt you wrote earlier and
 reuse it.
 
+## The Chat Header
+
+The bar above the conversation names the chat and shows its state at a glance.
+
+**On a wide screen** the title sits above a row of small chips:
+
+- **State and workspace**, in one chip: for example **● Active · Full** (a full devcontainer) or
+  **● Sleeping · Lightweight**. If the project's devcontainer failed to build, an amber **Recovery
+  container** chip appears instead; hover it for what that means, and see
+  [Recovery is in progress](/docs/guides/session-troubleshooting/#recovery-is-in-progress) for what to do.
+- **Usage**, for example **Claude 15% · 17%**: how much of the account's limits this chat's agent has
+  used. It adds **rejected** only while the provider is refusing prompts. See
+  [Usage limits](/docs/guides/agents/#usage-limits).
+- **Who started it**, only when that was someone else in a [shared project](/docs/guides/collaboration/).
+- **Forwarded ports**: the first one opens the app your agent is running; **+N** shows the rest.
+
+Unresolved comments are counted on **Comments** in the tool rail, not in the header.
+
+**On a phone** the header is a single row: a coloured dot for the chat's state, its title, a
+comments chip when there are unresolved comments, and the first forwarded port. Tap the title (or
+**Details** in the tool rail) to open the chat's info sheet, with every chip, every port, the
+**Public ports** switch and the chat's details, including its
+[workload identity](/docs/guides/workload-identity/). Close it with ✕ or by tapping outside it.
+
+**Public ports** (under the header on a wide screen, in the info sheet on a phone) appears once the
+agent's workspace is serving a port. Off, opening a forwarded port's link needs you to be signed
+in to SAM. On, anyone with the link can open it, which is handy for showing a preview to someone
+without a SAM account. The setting belongs to the chat's workspace.
+
 ## The Session Tool Rail
 
 Most of what you can do _to_ a session — rather than _say_ to it — lives in the **tool rail** down
@@ -300,7 +341,7 @@ the conversation you are in rather than opening something beside it.)
 | **Fork**       | Start a new chat that can read this one — [Conversation Forking](#conversation-forking)                                                                            | When the session has a task                                                                                                                                                       |
 | **Report**     | File a problem report — [Reporting Issues](/docs/guides/reporting-issues/)                                                                                         | When the deployment has reporting configured                                                                                                                                      |
 | **Complete**   | Mark the task complete                                                                                                                                             | When the session has a task that is not already finished                                                                                                                          |
-| **Details**    | Session identifiers and the infrastructure it ran on                                                                                                               | Always                                                                                                                                                                            |
+| **Details**    | Session identifiers and the infrastructure it ran on. On a phone it opens the [chat's info sheet](#the-chat-header)                                                | Always                                                                                                                                                                            |
 
 ![The session tool rail in icons-and-labels mode, listing Files, Git, Timeline, Related, Resources, Automation and Comments, then Share, Retry and Fork after a divider, with Report, Complete and Details pinned at the bottom.](/images/docs/session-tool-rail.png)
 
@@ -458,13 +499,14 @@ Each card shows a tiered inline preview based on the file type:
 
 - **Images** render as an inline thumbnail.
 - **Markdown** shows a clamped source preview with a fade.
-- **PDFs and other types** show an icon with the file name and size.
+- **Videos, PDFs and other types** show an icon with the file name and size.
 
-Click a card to open the document full-screen. Markdown renders (with a toggle to see the
-source), images open in the image viewer, PDFs open in your browser's own PDF viewer, and every
-file has a **Download** button. When SAM knows where the file came from, a line under the
-title says so — "Uploaded by _the chat that made it_" — and expands to list every chat that
-touched the file and every idea it belongs to. The same line appears when you open a file from
+Click a card to open the document full-screen. Markdown renders (switch between **Rendered** and
+**Source**), images open in the image viewer, videos play with a seek bar, PDFs open in your
+browser's own PDF viewer, and every file has a download button. A video your browser can't play,
+or a file type with no preview, says so and offers the download instead. When SAM knows where the
+file came from, the line under the file name says so, for example "Uploaded by _the chat that made
+it_". Select it to see every chat that touched the file and every idea it belongs to. The same line appears when you open a file from
 the project's library. It is absent for files with nothing linked, and it never guesses: the
 chat named there is the one SAM recorded, not one the uploader claimed.
 
@@ -689,9 +731,9 @@ Tap the line to expand it:
 - **Cards.** One card for each thing the message is about, up to eight. When more project updates arrive at once, failures come first and the line says how many are shown. A task card opens a quick look with the task's current status and summary, and **Open its chat**. Chat, idea and machine cards open those pages. Pull request and GitHub cards open GitHub in a new tab.
 - **Show what the agent saw.** The exact text the agent received, IDs included.
 
-System messages, such as a failed build or a wake that could not finish, use the same line: the first line of the message, with the full text under **Show full message**. A system message the workspace itself reported (for example a sign-in flow that needs a local callback) shows as **Report from the workspace**, with its text quoted, because the workspace's credentials are also available to the agent (`markRuntimeReported` in `apps/api/src/durable-objects/project-data/sam-notice-metadata.ts`). A context note you supplied when starting the chat (for example the CLI's `--context-summary`, or the summary carried into a forked chat) shows as **Context for this chat**, with your text quoted.
+System messages, such as a failed build or a wake that could not finish, use the same line: the first line of the message, with the full text under **Show full message**. A system message the workspace itself reported (for example a sign-in flow that needs a local callback) shows as **Report from the workspace**, with its text quoted, because the workspace's credentials are also available to the agent, so the agent could have written it. A context note you supplied when starting the chat (for example the CLI's `--context-summary`, or the summary carried into a forked chat) shows as **Context for this chat**, with your text quoted.
 
-SAM writes these descriptions itself (`samNotice` in the message's metadata, built in `apps/api/src/services/sam-notice-builders.ts`). A notice an agent tries to attach to its own message is dropped, so a line like this always comes from SAM.
+SAM writes these descriptions itself. A notice an agent tries to attach to its own message is dropped, so a line like this always comes from SAM.
 
 ### Sleeping and recovering sessions
 
@@ -709,6 +751,8 @@ You may also see a banner telling you a message was saved but its delivery was i
 ## Starting a New Chat
 
 When you open a new chat with two or more agent profiles you haven't hidden, SAM asks **Who should take this?** and shows your recent profiles as cards; the one you used last is already selected. See [Choosing a profile for a new chat](/docs/guides/agents/#choosing-a-profile-for-a-new-chat). Otherwise SAM offers a few repo-aware **starter prompts** instead (for example, "What's in this repo?" or "Run the tests and fix any failures") so you can get moving without a blank page. Pick one or type your own.
+
+Each profile's icon has a ring showing how much of its account's usage is left, and a profile whose account is used up says when it is back, so you can pick one with room. To change the model, effort, skill or machine size for just this chat without editing the profile, use **Chat options**, the sliders button at the end of the **To** row. See [Choosing a profile for a new chat](/docs/guides/agents/#choosing-a-profile-for-a-new-chat).
 
 To send on a desktop keyboard, press **Cmd+Enter** on Mac or **Ctrl+Enter** on Windows/Linux — plain **Enter** inserts a new line so you can write multi-line prompts. The composer shows the correct shortcut for your platform as a hint. On mobile, tap the send button; **Enter** always inserts a new line.
 
@@ -752,20 +796,28 @@ For the full team workflow — inviting people, approving access, roles, and sha
 
 ## Focus Mode
 
-On desktop, project chat has three layout levels you can cycle with the **F** key (or the toggle at the bottom of the sidebar):
+On desktop, project chat has three layouts. Pick one with **Default / Focus / Zen** at the bottom
+of the sidebar, or press **F** to cycle through them:
 
-- **Default** — full navigation and session sidebars.
-- **Focus** — collapses the main navigation so you stay inside one project.
-- **Zen** — collapses the session sidebar too, for maximum reading and prompt-writing space.
+- **Default**: full navigation and the session list.
+- **Focus**: the navigation narrows to a strip of icons (hover one for its name), so the
+  conversation gets more room. The layout control becomes a single button that switches to the next
+  layout.
+- **Zen**: both sidebars disappear, leaving only the conversation.
 
-Reopen the sidebars whenever you need to switch projects, sessions, or settings. On a phone, use
-[Showing only the conversation](#showing-only-the-conversation-on-a-phone) instead.
+In Zen, a thin glowing strip runs down the left edge of the window. Point at its top half (or tab to
+it) and the navigation slides out; the bottom half does the same for the session list, so you can
+switch chats without leaving Zen. Move the pointer away or press **Escape** to hide it again. To
+leave Zen, choose **Default** in the navigation that slides out, click the strip, or press **F**.
+
+On a phone, use [Showing only the conversation](#showing-only-the-conversation-on-a-phone) instead.
 
 ## Command Palette
 
-Press **Cmd+K** (Mac) or **Ctrl+K** (Windows/Linux) to open the global command palette. This provides quick navigation across the app:
+The command palette finds a page, project, chat or node by typing part of its name. Open it with
+**Cmd+K** (Mac) or **Ctrl+K** (Windows/Linux), with **Search...** at the top of the sidebar, or on a
+phone with **Search...** in the menu (the ☰ button in the app bar).
 
-- Search and jump to projects
-- Navigate to settings, dashboard, or other pages
-- Access workspace actions
-- Available on both desktop and mobile (via the workspace action menu)
+Results are grouped as **Context** (things in the project you are in), **Navigation** (pages),
+**Projects**, **Chats**, **Quick Actions**, **Nodes** and **Actions**. Use the arrow keys and
+**Enter**, or tap a result.
