@@ -1,0 +1,810 @@
+{
+  "candidate": "90c87b98a6971d105b9d8db71e2b0b5429c81ba0",
+  "stagingDeployment": "https://github.com/raphaeltm/simple-agent-manager/actions/runs/42803738006",
+  "workerVersion": "8f14565a-6b97-4cd8-bc25-d8935de61529",
+  "bothRuntimeAgentVersionsVerified": true,
+  "publicOriginIpRequests": false,
+  "scope": "Actual staging runtime checks; local-only scenarios and forced-reboot ACP recovery failure remain explicitly documented in STAGING-E2E.md.",
+  "results": [
+    {
+      "runtime": "vm",
+      "scenario": "preview",
+      "checks": [
+        {
+          "check": "preview_http",
+          "passed": true,
+          "status": 200,
+          "bytes": 178,
+          "sha256": "662d4e844f24053181b462d4de4dfb49da32aa8016f355dff67a8910b0eddd88",
+          "durationMs": 507.5451270000003
+        },
+        {
+          "check": "preview_http",
+          "passed": true,
+          "status": 200,
+          "bytes": 29,
+          "sha256": "e778f59d13c5003ae4088b1ad598350e273913996301376b9d469469e2c8d782",
+          "durationMs": 345.1999530000003
+        },
+        {
+          "check": "preview_post_query_auth_stripped",
+          "passed": true
+        },
+        {
+          "check": "preview_http",
+          "passed": true,
+          "status": 302,
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "durationMs": 329.4138890000004
+        },
+        {
+          "check": "preview_http",
+          "passed": true,
+          "status": 404,
+          "bytes": 10,
+          "sha256": "7515bf959b73b956ceb967351c7e299cbb3668a53d35f9c770eb72e00d93ced6",
+          "durationMs": 334.99784599999975
+        },
+        {
+          "check": "preview_stream",
+          "passed": true,
+          "status": 200,
+          "bytes": 11,
+          "sha256": "9fcdfdf9ac4c9e7a1d717e9bf13f8fec583b8a47215c47f0c46eea8d95501c38",
+          "durationMs": 1653,
+          "firstByteMs": 453
+        },
+        {
+          "check": "preview_websocket",
+          "passed": true,
+          "durationMs": 35125.528223,
+          "frames": 3
+        }
+      ],
+      "notExecuted": [],
+      "privateEvidenceSha256": "9b2958727c2bc5402b97e2af0a5aaeaaf024d827cef19aa468fe1c54076ce36a"
+    },
+    {
+      "runtime": "vm",
+      "scenario": "preview-auth",
+      "checks": [
+        {
+          "check": "app_bearer_preserved",
+          "passed": true,
+          "status": 200
+        },
+        {
+          "check": "sam_bearer_stripped",
+          "passed": true,
+          "status": 200
+        },
+        {
+          "check": "no_authorization",
+          "passed": true,
+          "status": 200
+        },
+        {
+          "check": "app_auth_cannot_bypass_private_preview",
+          "passed": true,
+          "status": 401
+        }
+      ],
+      "notExecuted": [],
+      "privateEvidenceSha256": "8ba8013e207769344da2084723946064041e0bc7dd5882df6f8dbb8f686d3b8e"
+    },
+    {
+      "runtime": "vm",
+      "scenario": "preview-access",
+      "checks": [
+        {
+          "check": "private_preview_denies_anonymous",
+          "passed": true,
+          "status": 401
+        },
+        {
+          "check": "public_preview_allows_anonymous",
+          "passed": true
+        },
+        {
+          "check": "public_preview_closure",
+          "passed": true
+        }
+      ],
+      "notExecuted": [],
+      "privateEvidenceSha256": "93d605a00a043262880311fa80d22400257264c7fd9b466c0ecd77ea42a7ce84"
+    },
+    {
+      "runtime": "vm",
+      "scenario": "terminal",
+      "checks": [
+        {
+          "check": "terminal_create_input_resize",
+          "passed": true,
+          "resizeObservations": ["31 97"]
+        },
+        {
+          "check": "terminal_reattach_preserves_shell",
+          "passed": true
+        }
+      ],
+      "notExecuted": [],
+      "privateEvidenceSha256": "1f1eb058f676303335fd9e21fa01e1466274d5e19c363b0b087e36506a80dbd3"
+    },
+    {
+      "runtime": "vm",
+      "scenario": "files",
+      "checks": [
+        {
+          "check": "files_upload_download_exact_bytes",
+          "passed": true,
+          "bytes": 29,
+          "sha256": "70db9ec3ffb9f156a92ed71e0585c0831cc33122bc471d701765947462aa8dc4"
+        },
+        {
+          "check": "files_list",
+          "passed": true
+        },
+        {
+          "check": "files_find",
+          "passed": true
+        },
+        {
+          "check": "git_status",
+          "passed": true
+        },
+        {
+          "check": "files_view_exact_text",
+          "passed": true
+        },
+        {
+          "check": "files_raw_exact_text",
+          "passed": true
+        },
+        {
+          "check": "git_diff_exact_fixture_marker",
+          "passed": true
+        }
+      ],
+      "notExecuted": [],
+      "privateEvidenceSha256": "036de743c3d9cde816a09c0e7a1b8aec5eb1104723a2fca0b39add24c0a5eae0"
+    },
+    {
+      "runtime": "vm",
+      "scenario": "cli",
+      "checks": [
+        {
+          "check": "cli_asset",
+          "passed": true
+        },
+        {
+          "check": "cli_post_query",
+          "passed": true
+        }
+      ],
+      "notExecuted": [],
+      "privateEvidenceSha256": "2e47b3daba4ae4681d8715ad4e58b8f6b915a670b9b3eb7a6f2f85bf8b927998"
+    },
+    {
+      "runtime": "vm",
+      "scenario": "diagnostics",
+      "checks": [
+        {
+          "check": "node_system_info",
+          "passed": true
+        },
+        {
+          "check": "node_events",
+          "passed": true,
+          "count": 5
+        },
+        {
+          "check": "node_logs",
+          "passed": true,
+          "count": 5
+        },
+        {
+          "check": "node_logs_websocket",
+          "passed": true
+        }
+      ],
+      "notExecuted": [],
+      "privateEvidenceSha256": "2ab94585acea2d10ddf4d30e03b89f42b9a35e06bb2ab53d023093b8fbeb4d88"
+    },
+    {
+      "runtime": "vm",
+      "scenario": "cross-user",
+      "checks": [
+        {
+          "check": "cross_user_workspace_terminal_preview_files_diagnostics_denied",
+          "passed": true
+        }
+      ],
+      "notExecuted": [],
+      "privateEvidenceSha256": "37757eaa64441cdfeee1c1075cfb0e1f9f8de7fc2d4bd5d46a79ccbc128860e5"
+    },
+    {
+      "runtime": "vm",
+      "scenario": "security",
+      "checks": [
+        {
+          "check": "missing_port_credential_denied",
+          "passed": true,
+          "status": 401
+        },
+        {
+          "check": "invalid_port_credential_denied",
+          "passed": true,
+          "status": 401
+        },
+        {
+          "check": "wrong_port_scope_denied",
+          "passed": true,
+          "status": 401
+        },
+        {
+          "check": "wrong_workspace_scope_denied",
+          "passed": true,
+          "status": 401
+        },
+        {
+          "check": "tunnel_private_git_helper_denied",
+          "passed": true,
+          "status": 401
+        },
+        {
+          "check": "fresh_credential_positive_control",
+          "passed": true,
+          "status": 200
+        },
+        {
+          "check": "expired_port_credential_denied",
+          "passed": true,
+          "status": 401
+        }
+      ],
+      "notExecuted": [],
+      "privateEvidenceSha256": "0820b6a8e7e6f9dddd80edba67e9a71da4bafd36f5a44c0c7fdf0ed2d392405d"
+    },
+    {
+      "runtime": "vm",
+      "scenario": "longtail-attachment",
+      "checks": [
+        {
+          "check": "attachment_presigned_r2_upload",
+          "passed": true,
+          "bytes": 66,
+          "sha256": "3d0d15823647da172b0df09e819f7b4173dc32595f723d60788188db06251d79"
+        },
+        {
+          "check": "attachment_agent_read_exact_bytes",
+          "passed": true,
+          "bytes": 66,
+          "sha256": "3d0d15823647da172b0df09e819f7b4173dc32595f723d60788188db06251d79"
+        },
+        {
+          "check": "attachment_workspace_digest_verified",
+          "passed": true
+        },
+        {
+          "check": "attachment_workspace_copy_removed",
+          "passed": true
+        }
+      ],
+      "notExecuted": [],
+      "privateEvidenceSha256": "41ba41a3b7ac3d9acb56a159880f04e8baa3ad4cc5bfc2577c1762ccdf678791"
+    },
+    {
+      "runtime": "vm",
+      "scenario": "longtail-git-refresh",
+      "checks": [
+        {
+          "check": "git_helper_control_plane_exchange",
+          "passed": true
+        },
+        {
+          "check": "git_remote_read",
+          "passed": true
+        }
+      ],
+      "notExecuted": [],
+      "privateEvidenceSha256": "ef2f7ef4fc74817ba610d5c63483a59ce74f2d67ecd429a3e0a4e5519a3f011b"
+    },
+    {
+      "runtime": "vm",
+      "scenario": "longtail-worktrees",
+      "checks": [
+        {
+          "check": "worktrees_empty_token_denied",
+          "passed": true,
+          "status": 401
+        },
+        {
+          "check": "worktrees_list",
+          "passed": true
+        },
+        {
+          "check": "worktree_create_and_list",
+          "passed": true
+        },
+        {
+          "check": "worktree_created_repository_readable",
+          "passed": true
+        },
+        {
+          "check": "worktree_removed_and_local_branch_cleaned",
+          "passed": true
+        }
+      ],
+      "notExecuted": [],
+      "privateEvidenceSha256": "8aaec5500ad642b4cf857ed08267d530875e458f951ba6761a819d8207d2c46c"
+    },
+    {
+      "runtime": "vm",
+      "scenario": "longtail-boundaries",
+      "checks": [
+        {
+          "check": "management_empty_token_denied",
+          "passed": true,
+          "status": 401
+        },
+        {
+          "check": "management_workspace_token_denied",
+          "passed": true,
+          "status": 401
+        },
+        {
+          "check": "management_empty_token_denied",
+          "passed": true,
+          "status": 401
+        },
+        {
+          "check": "management_workspace_token_denied",
+          "passed": true,
+          "status": 401
+        },
+        {
+          "check": "management_empty_token_denied",
+          "passed": true,
+          "status": 401
+        },
+        {
+          "check": "management_workspace_token_denied",
+          "passed": true,
+          "status": 401
+        },
+        {
+          "check": "git_helper_external_denied",
+          "passed": true,
+          "status": 401
+        },
+        {
+          "check": "other_workspace_scope_denied",
+          "passed": true,
+          "status": 403
+        },
+        {
+          "check": "cross_user_terminal_token_denied",
+          "passed": true,
+          "status": 404
+        }
+      ],
+      "notExecuted": ["authorized_build_publication"],
+      "privateEvidenceSha256": "2bd952f0ee16e4a380b3d70737feb070e2d44ff1aa2d7b868f0f08df4bba642f"
+    },
+    {
+      "runtime": "instant",
+      "scenario": "preview",
+      "checks": [
+        {
+          "check": "preview_http",
+          "passed": true,
+          "status": 200,
+          "bytes": 180,
+          "sha256": "8ed29bd1493b6bb2664d3d924c678c7975de7bab9c64fffd29d76f5c40fe5f4f",
+          "durationMs": 369.8077400000002
+        },
+        {
+          "check": "preview_http",
+          "passed": true,
+          "status": 200,
+          "bytes": 34,
+          "sha256": "4036adbed8ba6357e27edc6b80401fd8ade5d29d9b5368ff3768e47f59de7150",
+          "durationMs": 368.0664219999999
+        },
+        {
+          "check": "preview_post_query_auth_stripped",
+          "passed": true
+        },
+        {
+          "check": "preview_http",
+          "passed": true,
+          "status": 302,
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "durationMs": 355.92202700000007
+        },
+        {
+          "check": "preview_http",
+          "passed": true,
+          "status": 404,
+          "bytes": 10,
+          "sha256": "7515bf959b73b956ceb967351c7e299cbb3668a53d35f9c770eb72e00d93ced6",
+          "durationMs": 356.52172100000007
+        },
+        {
+          "check": "preview_stream",
+          "passed": true,
+          "status": 200,
+          "bytes": 11,
+          "sha256": "9fcdfdf9ac4c9e7a1d717e9bf13f8fec583b8a47215c47f0c46eea8d95501c38",
+          "durationMs": 1639.3999999985099,
+          "firstByteMs": 440.59999999403954
+        },
+        {
+          "check": "preview_websocket",
+          "passed": true,
+          "durationMs": 35324.179836,
+          "frames": 3
+        }
+      ],
+      "notExecuted": [],
+      "privateEvidenceSha256": "5efd443efd9873372e440ba57a03bab0d3a81ef487024e534d994b3fae219e3c"
+    },
+    {
+      "runtime": "instant",
+      "scenario": "preview-auth",
+      "checks": [
+        {
+          "check": "app_bearer_preserved",
+          "passed": true,
+          "status": 200
+        },
+        {
+          "check": "sam_bearer_stripped",
+          "passed": true,
+          "status": 200
+        },
+        {
+          "check": "no_authorization",
+          "passed": true,
+          "status": 200
+        },
+        {
+          "check": "app_auth_cannot_bypass_private_preview",
+          "passed": true,
+          "status": 401
+        }
+      ],
+      "notExecuted": [],
+      "privateEvidenceSha256": "978d1fbb5a5ab1724a699a53927c6231513819260102c97f9e82e1066ad10793"
+    },
+    {
+      "runtime": "instant",
+      "scenario": "preview-access",
+      "checks": [
+        {
+          "check": "private_preview_denies_anonymous",
+          "passed": true,
+          "status": 401
+        },
+        {
+          "check": "public_preview_allows_anonymous",
+          "passed": true
+        },
+        {
+          "check": "public_preview_closure",
+          "passed": true
+        }
+      ],
+      "notExecuted": [],
+      "privateEvidenceSha256": "1c88d041e4766796332dd9739cf5a17e74761228b35e340d222a21d22f5e1c8c"
+    },
+    {
+      "runtime": "instant",
+      "scenario": "terminal",
+      "checks": [
+        {
+          "check": "terminal_create_input_resize",
+          "passed": true,
+          "resizeObservations": ["31 97"]
+        },
+        {
+          "check": "terminal_reattach_preserves_shell",
+          "passed": true
+        }
+      ],
+      "notExecuted": [],
+      "privateEvidenceSha256": "2f384b4162d5c3ded4a59e16db524a55b9c2d1054916dc45dc14ec01627a273b"
+    },
+    {
+      "runtime": "instant",
+      "scenario": "files",
+      "checks": [
+        {
+          "check": "files_upload_download_exact_bytes",
+          "passed": true,
+          "bytes": 29,
+          "sha256": "70db9ec3ffb9f156a92ed71e0585c0831cc33122bc471d701765947462aa8dc4"
+        },
+        {
+          "check": "files_list",
+          "passed": true
+        },
+        {
+          "check": "files_find",
+          "passed": true
+        },
+        {
+          "check": "git_status",
+          "passed": true
+        },
+        {
+          "check": "files_view_exact_text",
+          "passed": true
+        },
+        {
+          "check": "files_raw_exact_text",
+          "passed": true
+        },
+        {
+          "check": "git_diff_exact_fixture_marker",
+          "passed": true
+        }
+      ],
+      "notExecuted": [],
+      "privateEvidenceSha256": "6a9ad7cc8845f9c9d1167372f234c6a250af006e90119f54e7a888c0dbad3d55"
+    },
+    {
+      "runtime": "instant",
+      "scenario": "cli",
+      "checks": [
+        {
+          "check": "cli_asset",
+          "passed": true
+        },
+        {
+          "check": "cli_post_query",
+          "passed": true
+        }
+      ],
+      "notExecuted": [],
+      "privateEvidenceSha256": "815dff9a526bd03c41ebd7b83d20b220160d82085ff7e49c4dd47e4b8d9edd59"
+    },
+    {
+      "runtime": "instant",
+      "scenario": "diagnostics",
+      "checks": [
+        {
+          "check": "node_system_info",
+          "passed": true
+        },
+        {
+          "check": "node_events",
+          "passed": true,
+          "count": 5
+        },
+        {
+          "check": "node_logs",
+          "passed": true,
+          "count": 0
+        },
+        {
+          "check": "node_logs_websocket",
+          "passed": true
+        }
+      ],
+      "notExecuted": [],
+      "privateEvidenceSha256": "72c0bb3db3a3958f07e88b81154de5f768dc4b1391a1c8401ebb75dbd19e7dca"
+    },
+    {
+      "runtime": "instant",
+      "scenario": "cross-user",
+      "checks": [
+        {
+          "check": "cross_user_workspace_terminal_preview_files_diagnostics_denied",
+          "passed": true
+        }
+      ],
+      "notExecuted": [],
+      "privateEvidenceSha256": "49ebe6b7f4fc40af665c25a00afb9b2de473d79e9b56df36cea65fca17553ded"
+    },
+    {
+      "runtime": "instant",
+      "scenario": "security",
+      "checks": [
+        {
+          "check": "missing_port_credential_denied",
+          "passed": true,
+          "status": 401
+        },
+        {
+          "check": "invalid_port_credential_denied",
+          "passed": true,
+          "status": 401
+        },
+        {
+          "check": "wrong_port_scope_denied",
+          "passed": true,
+          "status": 401
+        },
+        {
+          "check": "wrong_workspace_scope_denied",
+          "passed": true,
+          "status": 401
+        },
+        {
+          "check": "tunnel_private_git_helper_denied",
+          "passed": true,
+          "status": 401
+        },
+        {
+          "check": "instant_self_listener_denied",
+          "passed": true,
+          "status": 403
+        },
+        {
+          "check": "fresh_credential_positive_control",
+          "passed": true,
+          "status": 200
+        },
+        {
+          "check": "expired_port_credential_denied",
+          "passed": true,
+          "status": 401
+        }
+      ],
+      "notExecuted": [],
+      "privateEvidenceSha256": "74d327afc1d20024cb1c4fbcac41866872a8f35a1a35e7e1388397e31d5e1874"
+    },
+    {
+      "runtime": "instant",
+      "scenario": "longtail-attachment",
+      "checks": [
+        {
+          "check": "attachment_presigned_r2_upload",
+          "passed": true,
+          "bytes": 66,
+          "sha256": "b37601b3c82904244c3ae52c8eb8fc4ad33efc17dbe7fb1a1385416ccde45a2f"
+        },
+        {
+          "check": "attachment_agent_read_exact_bytes",
+          "passed": true,
+          "bytes": 66,
+          "sha256": "b37601b3c82904244c3ae52c8eb8fc4ad33efc17dbe7fb1a1385416ccde45a2f"
+        },
+        {
+          "check": "attachment_workspace_digest_verified",
+          "passed": true
+        },
+        {
+          "check": "attachment_workspace_copy_removed",
+          "passed": true
+        }
+      ],
+      "notExecuted": [],
+      "privateEvidenceSha256": "652bb58a111430ebb375e078394d8ace17dc24a88a32fd8c178e23fb8b4e9548"
+    },
+    {
+      "runtime": "instant",
+      "scenario": "longtail-git-refresh",
+      "checks": [
+        {
+          "check": "git_helper_control_plane_exchange",
+          "passed": true
+        },
+        {
+          "check": "git_remote_read",
+          "passed": true
+        }
+      ],
+      "notExecuted": [],
+      "privateEvidenceSha256": "324917cfe5463e025df2d16d57390668aaaa87f93901bfd45b7f2f6972d621df"
+    },
+    {
+      "runtime": "instant",
+      "scenario": "longtail-worktrees",
+      "checks": [
+        {
+          "check": "worktrees_empty_token_denied",
+          "passed": true,
+          "status": 401
+        },
+        {
+          "check": "worktrees_list",
+          "passed": true
+        },
+        {
+          "check": "worktree_create_and_list",
+          "passed": true
+        },
+        {
+          "check": "worktree_created_repository_readable",
+          "passed": true
+        },
+        {
+          "check": "worktree_removed_and_local_branch_cleaned",
+          "passed": true
+        }
+      ],
+      "notExecuted": [],
+      "privateEvidenceSha256": "b3cf768b28489cbb32e8ed15499b0e3a5141c84ae377ccfab82d153e4e0ddf8d"
+    },
+    {
+      "runtime": "instant",
+      "scenario": "longtail-boundaries",
+      "checks": [
+        {
+          "check": "management_empty_token_denied",
+          "passed": true,
+          "status": 401
+        },
+        {
+          "check": "management_workspace_token_denied",
+          "passed": true,
+          "status": 401
+        },
+        {
+          "check": "management_empty_token_denied",
+          "passed": true,
+          "status": 401
+        },
+        {
+          "check": "management_workspace_token_denied",
+          "passed": true,
+          "status": 401
+        },
+        {
+          "check": "management_empty_token_denied",
+          "passed": true,
+          "status": 401
+        },
+        {
+          "check": "management_workspace_token_denied",
+          "passed": true,
+          "status": 401
+        },
+        {
+          "check": "git_helper_external_denied",
+          "passed": true,
+          "status": 401
+        },
+        {
+          "check": "other_workspace_scope_denied",
+          "passed": true,
+          "status": 403
+        },
+        {
+          "check": "cross_user_terminal_token_denied",
+          "passed": true,
+          "status": 404
+        }
+      ],
+      "notExecuted": ["authorized_build_publication"],
+      "privateEvidenceSha256": "9512bbc38346d67d6d5b43bd07e970091d134866f4ee57da4c8487186374d649"
+    }
+  ],
+  "attachmentStagedObjects": "Tiny staged R2 uploads remain under the normal retry/temporary-upload retention policy; no immediate object-deletion claim.",
+  "computeCleanupVerified": true,
+  "exportedAt": "2026-11-10T11:35:00.998668+00:00",
+  "cloudflareCleanup": {
+    "checkedAt": "2026-11-10T11:36:45Z",
+    "ownedJournalCount": 3,
+    "cleanedJournalCount": 3,
+    "lastCleanedAt": "2026-11-10T11:36:09.444Z",
+    "ownedDnsNamesChecked": 3,
+    "remainingOwnedDnsRecords": 0,
+    "independentTunnelInventory": {
+      "verified": false,
+      "httpStatus": 401,
+      "reason": "Debug token lacks independent tunnel inventory access; journal cleanup success and authoritative DNS absence are separately verified."
+    },
+    "retainedInstantNodeTombstone": [
+      {
+        "status": "deleted",
+        "runtime": "cf-container",
+        "runtimeTerminationConfirmedAt": "2026-11-10T11:21:36.188Z"
+      }
+    ]
+  }
+}
