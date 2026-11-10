@@ -50,11 +50,13 @@ function realMachineType() {
 
 interface FakeComputeOptions {
   instance?: Record<string, unknown>;
-  machineTypeStatus?: number;
+  /** Status per machineTypes.get call, in order; the last value repeats. Default: 200. */
+  machineTypeStatuses?: number[];
 }
 
 function installFakeCompute(options: FakeComputeOptions = {}) {
   const requests: string[] = [];
+  let machineTypeCalls = 0;
   globalThis.fetch = vi.fn(async (url: string | URL, init: RequestInit = {}) => {
     const target = String(url);
     const method = init.method ?? 'GET';
@@ -74,7 +76,9 @@ function installFakeCompute(options: FakeComputeOptions = {}) {
       return new Response(JSON.stringify(options.instance ?? realInstance()));
     }
     if (target === `${API}/zones/${ZONE}/machineTypes/e2-standard-4`) {
-      const status = options.machineTypeStatus ?? 200;
+      const statuses = options.machineTypeStatuses ?? [200];
+      const status = statuses[Math.min(machineTypeCalls, statuses.length - 1)] ?? 200;
+      machineTypeCalls++;
       return status === 200
         ? new Response(JSON.stringify(realMachineType()))
         : new Response(JSON.stringify({ error: { code: status, message: 'boom' } }), { status });
@@ -135,13 +139,33 @@ describe('GCP observed hardware', () => {
     });
   });
 
-  it('a failed machine type lookup leaves resources unknown and still returns the created VM', async () => {
-    installFakeCompute({ machineTypeStatus: 503 });
+  it('retries a transient machine type failure and still reports observed resources', async () => {
+    const requests = installFakeCompute({ machineTypeStatuses: [503, 200] });
 
     const vm = await createNode();
 
+    expect(vm.observedHardware.resources.source).toBe('observed');
+    expect(requests.filter((r) => r.includes('/machineTypes/'))).toHaveLength(2);
+  });
+
+  it('a machine type lookup that keeps failing leaves resources unknown and still returns the created VM', async () => {
+    const requests = installFakeCompute({ machineTypeStatuses: [503] });
+
+    const vm = await createNode();
+
+    // Bounded: DEFAULT_GCP_MACHINE_TYPE_LOOKUP_ATTEMPTS, then give up.
+    expect(requests.filter((r) => r.includes('/machineTypes/'))).toHaveLength(3);
     expect(vm.id).toBe('1861759100528809252');
     expect(vm.observedHardware.serverType).toEqual({ source: 'observed', value: 'e2-standard-4' });
+    expect(vm.observedHardware.resources.source).toBe('unknown');
+  });
+
+  it('a non-transient machine type failure (404) gives up without retrying', async () => {
+    const requests = installFakeCompute({ machineTypeStatuses: [404, 200] });
+
+    const vm = await createNode();
+
+    expect(requests.filter((r) => r.includes('/machineTypes/'))).toHaveLength(1);
     expect(vm.observedHardware.resources.source).toBe('unknown');
   });
 

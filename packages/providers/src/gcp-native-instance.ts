@@ -1,7 +1,13 @@
 import type { GcpApiScope } from './gcp-api';
-import { extractIp, mapGcpStatus } from './gcp-metadata';
+import {
+  DEFAULT_GCP_MACHINE_TYPE_LOOKUP_ATTEMPTS,
+  DEFAULT_GCP_MACHINE_TYPE_LOOKUP_RETRY_DELAY_MS,
+  extractIp,
+  mapGcpStatus,
+} from './gcp-metadata';
 import { observedHardware } from './native-vm-config';
 import {
+  providerDelay,
   providerFetch,
   rethrowIfProviderRequestAborted,
   throwIfProviderRequestAborted,
@@ -68,22 +74,44 @@ function gcpObservedResources(
  * type but not the type's vCPU or memory, so they are read with `machineTypes.get`
  * (https://cloud.google.com/compute/docs/reference/rest/v1/machineTypes/get).
  *
- * Best effort: a failed lookup leaves the resources unknown instead of failing the caller. After
- * createVM the instance already exists, and throwing there would orphan it. Cancellation still
- * propagates.
+ * The lookup is retried a bounded number of times, because observed hardware is written once at
+ * provisioning. If every attempt fails the resources stay unknown instead of failing the caller:
+ * after createVM the instance already exists, and throwing there would orphan it. Cancellation
+ * always propagates.
  */
 export async function gcpInstanceToObservedVM(
   scope: GcpApiScope,
   instance: GcpInstancePayload,
-  context?: ProviderRequestContext
+  context?: ProviderRequestContext,
+  retry: { attempts: number; delayMs: number } = {
+    attempts: DEFAULT_GCP_MACHINE_TYPE_LOOKUP_ATTEMPTS,
+    delayMs: DEFAULT_GCP_MACHINE_TYPE_LOOKUP_RETRY_DELAY_MS,
+  }
 ): Promise<VMInstance> {
   let machineType: GcpMachineTypeResources | null = null;
-  try {
-    machineType = await fetchGcpMachineTypeResources(scope, instance.machineType, context);
-  } catch (err) {
-    rethrowIfProviderRequestAborted(err, context);
+  for (let attempt = 1; attempt <= Math.max(1, retry.attempts); attempt++) {
+    try {
+      machineType = await fetchGcpMachineTypeResources(scope, instance.machineType, context);
+      break;
+    } catch (err) {
+      rethrowIfProviderRequestAborted(err, context);
+      if (attempt >= retry.attempts || !isTransientMachineTypeLookupError(err)) break;
+      await providerDelay(retry.delayMs, context);
+    }
   }
   return gcpInstanceToVM(instance, machineType);
+}
+
+/**
+ * Worth another try: GCP rate limiting (429), a server error (5xx), or our own request timeout
+ * (`providerFetch` wraps the timed-out fetch's AbortError/TimeoutError as `cause`). A 4xx or a
+ * malformed body will fail the same way again, so those give up at once.
+ */
+function isTransientMachineTypeLookupError(err: unknown): boolean {
+  if (!(err instanceof ProviderError)) return false;
+  if (err.statusCode !== undefined) return err.statusCode === 429 || err.statusCode >= 500;
+  const cause = err.cause;
+  return cause instanceof Error && (cause.name === 'AbortError' || cause.name === 'TimeoutError');
 }
 
 /**
