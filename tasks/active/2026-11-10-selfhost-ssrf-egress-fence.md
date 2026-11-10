@@ -31,29 +31,44 @@ redirect (`res.redirected` stays false, `res.url` unchanged), `redirect: 'manual
 
 Part A
 
-- [ ] network-hosts: one classifier (`classifyHost`) covering every IPv4/IPv6/name spelling
-- [ ] network-hosts: `guardedFetch` (pre-validate, redirect manual, per-hop revalidation, bounded hops)
-- [ ] Passthrough (3 fetches) through guardedFetch; save-time host check in composable-credentials
-- [ ] Use-time check in resolveProxyUpstream
-- [ ] LLM endpoint: `llm.openAICompatible.allowPrivateNetwork` opt-in; 4 direct sites through guardedFetch
-- [ ] Mastra operator model: openai-compatible model with guarded fetch
-- [ ] Web push: host check at save + guarded send
-- [ ] GitLab: guarded fetch
-- [ ] Image resolver: shared classifier (remove duplicate)
-- [ ] Tests: exploit regression through real route with real HTTP servers; classifier table;
+- [x] network-hosts: one classifier (`classifyHost`) covering every IPv4/IPv6/name spelling
+- [x] network-hosts: `guardedFetch` (pre-validate, redirect manual, per-hop revalidation, bounded hops)
+- [x] Passthrough (3 fetches) through guardedFetch; save-time host check in composable-credentials
+- [x] Use-time check in resolveProxyUpstream
+- [x] LLM endpoint: `llm.openAICompatible.allowPrivateNetwork` opt-in; 4 direct sites through guardedFetch
+- [x] Mastra operator model: openai-compatible model with guarded fetch
+- [x] Web push: host check at save + guarded send
+- [x] GitLab: guarded fetch
+- [x] Image resolver: shared classifier (remove duplicate)
+- [x] Tests: exploit regression through real route with real HTTP servers; classifier table;
       per-site guard tests (discriminating); public + opted-in local controls
 
 Part B
 
-- [ ] nftables egress fence for celld uid (compose service, fails closed)
-- [ ] GCE metadata: token proxy with secret path prefix; direct metadata blocked
-- [ ] `pnpm selfhost:verify-fence` operator check
-- [ ] Deploy refuses R2_ACCESS_KEY_ID == fleet AWS_ACCESS_KEY_ID
-- [ ] Real-stack proof from Worker code (probe worker, not in product)
-- [ ] README: replace "no egress fence yet" gap
+- [x] nftables egress fence for celld uid (compose service, fails closed)
+- [x] GCE metadata: token proxy with secret path prefix; direct metadata blocked
+- [x] `pnpm selfhost:verify-fence` operator check
+- [x] Deploy refuses R2_ACCESS_KEY_ID == fleet AWS_ACCESS_KEY_ID
+- [x] Real-stack proof from Worker code (probe worker, not in product)
+- [x] README: replace "no egress fence yet" gap
 
 ## Acceptance criteria
 
 - The passthrough exploit test fails on the old code and passes with the fix.
 - Forbidden targets fail from Worker code on a real celld box with the fence; allowed ones work.
 - Legitimate public endpoints and an opted-in local model endpoint still work.
+
+## Notes (implementation)
+
+- Fence verdict is `reject with icmpx admin-prohibited`, not `drop`: measured on this workspace,
+  a TCP SYN dropped in OUTPUT retransmits until connect() times out, which hung celld's start
+  check. Reject gives an immediate "No route to host" (EHOSTUNREACH).
+- celld's GCS client (Apache object_store in celld 0.6.3) honours GCE_METADATA_HOST including a
+  path prefix: verified with the real binary against a fake metadata server via the proxy.
+- When the token proxy is unreachable celld's own error chain contains the proxy URL with the
+  secret (celld process log only). A Worker R2 call with storage down saw only
+  `Error: write s3://bucket/key` (no cause chain). Residual documented in the PR.
+- `pnpm selfhost:deploy --env-file X` through pnpm/tsx is intercepted (`--env-file` is a Node
+  flag); pre-existing, the default path works. Not changed here.
+- Reviewer fixes: see PR "Specialist Review Evidence".
+
