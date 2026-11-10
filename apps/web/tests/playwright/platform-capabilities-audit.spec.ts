@@ -390,3 +390,50 @@ test.describe('Platform capabilities — endpoint failure', () => {
       .toBe(true);
   });
 });
+
+/**
+ * The message comment composer overlays its mic on the text box and reserves `pr-14` for it.
+ * Without speech-to-text that reservation must go too, or dictation-free text wraps 56px early.
+ * Opened from the real "Comment" control on an agent message, at both viewports.
+ */
+for (const config of [CONFIGS[0]!, CONFIGS[2]!]) {
+  test.describe(`Comment composer — ${config.name}`, () => {
+    test('text box width follows the mic', async ({ page }) => {
+      const viewportName = page.viewportSize()!.width <= 500 ? 'mobile' : 'desktop';
+      const harness = await setupHarness(page, config.capabilities);
+      await page.goto(`/projects/${PROJECT_ID}/chat/session-1`);
+      const answered = page.waitForResponse('**/api/config/platform-capabilities');
+      harness.releaseCapabilities();
+      await answered;
+
+      await page.getByRole('button', { name: 'Comment on this message' }).last().click();
+      const box = page.getByRole('combobox', { name: 'Add a comment…' });
+      await expect(box).toBeVisible();
+      await box.fill(`A comment with a long link ${LONG_URL}`);
+
+      const geometry = await box.evaluate((el) => {
+        const boxRect = el.getBoundingClientRect();
+        const mic = el.parentElement?.querySelector('button[aria-label="Start voice input"]');
+        const micRect = mic?.getBoundingClientRect() ?? null;
+        return {
+          paddingRight: parseFloat(getComputedStyle(el).paddingRight),
+          boxRight: boxRect.right,
+          mic: micRect ? { left: micRect.left, right: micRect.right } : null,
+        };
+      });
+
+      if (config.capabilities.speechToText) {
+        expect(geometry.mic).not.toBeNull();
+        // The mic sits inside the reserved strip, clear of the text area.
+        expect(geometry.mic!.left).toBeGreaterThanOrEqual(geometry.boxRight - geometry.paddingRight - 1);
+        expect(geometry.mic!.right).toBeLessThanOrEqual(geometry.boxRight + 1);
+      } else {
+        expect(geometry.mic).toBeNull();
+        // No strip reserved for a mic that is not there.
+        expect(geometry.paddingRight).toBeLessThan(20);
+      }
+      await assertNoOverflow(page);
+      await screenshot(page, `platform-capabilities-comment-${config.name}-${viewportName}`);
+    });
+  });
+}
