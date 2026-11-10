@@ -23,7 +23,7 @@ import {
   SIZE_MAP,
   withGcpErrorCategory,
 } from './gcp-metadata';
-import { gcpInstanceToVM, resolveGcpSourceImage } from './gcp-native-instance';
+import { gcpInstanceToObservedVM, resolveGcpSourceImage } from './gcp-native-instance';
 import type { GcpPriceTable } from './gcp-pricing';
 import { getProviderCatalogOfferings } from './instance-offerings';
 import { resolveVMConfigWithLegacySizeAdapter } from './native-vm-config';
@@ -47,7 +47,8 @@ import type {
   VolumeResizeConfig,
 } from './types';
 import { ProviderError } from './types';
-import { type GcpInstancePayload, parseProviderJson, validateGcpOperation } from './validation';
+import { parseProviderJson } from './validation';
+import { type GcpInstancePayload, validateGcpOperation } from './validation-gcp';
 
 export type { GcpTokenProvider } from './gcp-metadata';
 export {
@@ -256,7 +257,7 @@ export class GcpProvider implements Provider {
 
     // Read the created instance from the zone it was created in, never by name project-wide.
     const created = await getGcpInstanceInZone(this.api, zone, config.name, context);
-    const instance = created ? gcpInstanceToVM(created) : null;
+    const instance = created ? await gcpInstanceToObservedVM(this.api, created, context) : null;
     if (!instance) {
       throw new ProviderError(
         'gcp',
@@ -303,7 +304,7 @@ export class GcpProvider implements Provider {
     throwIfProviderRequestAborted(context);
     const instance = await this.findInstanceByIdOrName(id, context);
     if (!instance) return null;
-    return gcpInstanceToVM(instance);
+    return await gcpInstanceToObservedVM(this.api, instance, context);
   }
 
   async listVMs(

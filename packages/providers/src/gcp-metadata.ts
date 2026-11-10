@@ -15,7 +15,7 @@ import {
   SAM_VOLUME_FSTAB_OPTIONS,
   SAM_VOLUME_MOUNT_PATH_TEMPLATE,
 } from './types';
-import type { GcpNetworkInterfacePayload } from './validation';
+import type { GcpNetworkInterfacePayload } from './validation-gcp';
 
 export const COMPUTE_API_BASE = 'https://compute.googleapis.com/compute/v1';
 // 100 pages × 500 items/page ≈ 50,000 resources — well above any realistic fleet
