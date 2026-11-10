@@ -119,6 +119,58 @@ got. To change any other variable, edit
 | `PROJECT_MULTIPLAYER_CACHE_TTL_MS`                 | `10000`               | Per-isolate cache TTL for project multiplayer state counts used by trigger-bearing pages. Set to `0` to disable the cache.                                                                                                                                                                                                                                                                                                                                                                                               |
 | `CREDENTIAL_ATTRIBUTION_CACHE_TTL_MS`              | `10000`               | Per-isolate cache TTL for project credential attribution health used by trigger-bearing pages. Set to `0` to disable the cache.                                                                                                                                                                                                                                                                                                                                                                                          |
 
+## Partial Cloudflare configurations
+
+A Cloudflare deployment with every binding and the default `AI_GATEWAY_ID` plus `CF_ACCOUNT_ID`
+behaves as described elsewhere on this page. This section is for self-hosters on Cloudflare who run
+without some Cloudflare-only service, most often **AI Gateway**: `AI_GATEWAY_ID` cleared (or blank)
+while `CF_ACCOUNT_ID` and `CF_API_TOKEN` are still set. SAM decides what each service can do from
+one resolver, `resolvePlatformCapabilities()` in `apps/api/src/services/platform-capabilities.ts`;
+an AI Gateway counts only when both the gateway id and the account id are set
+(`resolveAiGatewayId()`).
+
+### Without AI Gateway
+
+| Area                       | Behaviour without AI Gateway                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Unified Billing            | Unavailable. `resolveUnifiedBillingToken()` (`services/ai-billing.ts`) returns nothing, so `auto` billing uses the Claude Code / Codex platform credentials, and the admin cannot select `unified` (`PATCH /api/admin/ai-proxy/config` answers 400). Before, the Cloudflare token was sent to OpenAI or Anthropic as `cf-aig-authorization` and those calls failed.                                                                                                                                                                     |
+| OpenAI and Anthropic calls | Go straight to `api.openai.com` / `api.anthropic.com` with the platform key, without `cf-aig-metadata` (the user and workspace ids are for the gateway only; `aiGatewayOnlyHeaders()`).                                                                                                                                                                                                                                                                                                                                                 |
+| Workers AI calls           | Use the account's Workers AI REST API, as before.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Monthly cost cap           | **Unavailable.** Spend is priced only from AI Gateway logs (`runMonthlyCostAggregation()`, `services/ai-monthly-cost-cron.ts`, which skips with `monthlyCostSkipReason: ai_gateway_unavailable`). `PUT /api/usage/ai/budget` refuses a monthly cap (400), `GET /api/usage/ai/budget` returns `monthlyCostCapAvailable: false`, a cap saved earlier is not enforced (`checkMonthlyCostCap()` reports `enforced: false`), and the settings page, onboarding and the admin AI proxy page say so. Daily token budgets still limit `/ai/v1`. |
+| AI usage pages             | `/api/usage/ai`, the budget page and admin costs show SAM's own token counts and no gateway cost.                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+
+With an admin-configured OpenAI-compatible endpoint (Admin → Settings → AI models), SAM asks the
+endpoint for its usage on streamed calls (`stream_options.include_usage`) and, when a response
+still reports none, charges an estimate from the response's own output to the daily token budget
+(`estimateTokensFromText()`, `services/ai-token-usage-accounting.ts`). Failed calls to that
+endpoint log the HTTP status and a short sanitized reason, never the response body.
+
+### Status codes for services this installation does not have
+
+A request for a service the installation lacks now gets a designed client error instead of a
+server error, so retries and alerts treat it as configuration rather than an outage. The body is
+`{ "error": "FEATURE_UNAVAILABLE", "message": "…", "details": { "feature": "<capability>" } }` for 404s (`errors.featureUnavailable()`, `middleware/error.ts`).
+
+| Request                                                                    | Missing                                                                         | Before                   | Now |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------- | ------------------------ | --- |
+| Admin analytics queries (`/api/admin/analytics/*`)                         | `CF_ACCOUNT_ID` or `CF_API_TOKEN`                                               | 500                      | 404 |
+| Admin worker log search                                                    | `CF_ACCOUNT_ID` or `CF_API_TOKEN`                                               | 400                      | 404 |
+| Speech-to-text (`/api/transcribe`), server text-to-speech (`/api/tts/*`)   | Workers AI binding (`AI`)                                                       | 500                      | 404 |
+| Agent model catalog (`GET /api/agent-models/catalog`); agent model runs answer `not_available` instead of `catalog_unavailable` | Workers AI binding | 503 | 404 |
+| Creating a SAM-native Git (Artifacts) project, workspace git token for one | `ARTIFACTS` binding while `ARTIFACTS_ENABLED=true`                              | 500                      | 404 |
+| `/ai/v1` Workers AI models                                                 | AI Gateway, account API and an OpenAI-compatible endpoint                       | upstream error           | 404 |
+| Chat attachment upload URL                                                 | presign configuration (`R2_*` credentials, bucket, account or `R2_S3_ENDPOINT`) | 500 later in the request | 403 |
+
+### Client IP address
+
+Rate limits, stored diagnostics, the node heartbeat IP backfill and the forwarded-for header on the
+VM hop all take the client address from `CF-Connecting-IP` only (`clientIpFromHeaders()`,
+`apps/api/src/lib/client-ip.ts`). Cloudflare's edge always sets it. A proxy in front of a
+non-Cloudflare runtime must set it from the TCP peer and drop any value the client sent (the
+self-host Caddy configuration does). `X-Forwarded-For` is never read. A request with a missing or
+malformed `CF-Connecting-IP` shares one rate-limit bucket with every other such request, so a
+misconfigured proxy shows up as rate limiting rather than as unlimited access.
+
 ## GitHub Environment Variables
 
 Set in GitHub Settings → Environments → production:
