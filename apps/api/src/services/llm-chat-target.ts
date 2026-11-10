@@ -14,6 +14,7 @@
 import type { Env } from '../env';
 import { resolveD1BindingIdentity } from '../lib/d1-session';
 import { log } from '../lib/logger';
+import { maybeJsonRecord } from '../lib/runtime-validation';
 import { resolveAdminSettingDetailsMany } from './admin-settings-resolution';
 import {
   LLM_PURPOSE_MODEL_SETTING,
@@ -221,6 +222,20 @@ export function resolveWorkersAiChatTargetWithin(
 
 function toError(reason: unknown): Error {
   return reason instanceof Error ? reason : new Error(String(reason));
+}
+
+/**
+ * A chat request body for `target`. A streamed call to an OpenAI-compatible endpoint asks for the
+ * final usage chunk (`stream_options.include_usage`, part of the OpenAI chat protocol) so SAM's
+ * accounting gets real counts. Cloudflare targets get `body` itself, byte for byte as before.
+ */
+export function withStreamUsageRequested(
+  target: ChatCompletionsTarget,
+  body: Record<string, unknown>
+): Record<string, unknown> {
+  if (isCloudflareChatTarget(target) || body.stream !== true) return body;
+  const streamOptions = maybeJsonRecord(body.stream_options) ?? {};
+  return { ...body, stream_options: { ...streamOptions, include_usage: true } };
 }
 
 /**

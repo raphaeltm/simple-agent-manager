@@ -30,10 +30,7 @@ type OpenAIProxyCredential = AIProxyCredentialAttribution & {
 };
 
 export function buildProxyMetadata(
-  auth: Pick<
-    AIProxyRequestContext,
-    'userId' | 'workspaceId' | 'projectId' | 'chatSessionId'
-  >,
+  auth: Pick<AIProxyRequestContext, 'userId' | 'workspaceId' | 'projectId' | 'chatSessionId'>,
   body: Record<string, unknown>,
   modelId: string
 ): string {
@@ -143,7 +140,8 @@ export function accountingResponse(
   c: AIProxyContext,
   response: Response,
   userId: string,
-  estimatedInputTokens: number
+  estimatedInputTokens: number,
+  options: { estimateMissingUsage?: boolean } = {}
 ): Promise<Response> {
   let executionCtx: Pick<ExecutionContext, 'waitUntil'> | undefined;
   try {
@@ -157,5 +155,6 @@ export function accountingResponse(
     format: 'openai',
     fallbackInputTokens: estimatedInputTokens,
     executionCtx,
+    estimateMissingUsage: options.estimateMissingUsage === true,
   });
 }

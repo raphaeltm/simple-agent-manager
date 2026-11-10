@@ -126,7 +126,7 @@ describe('SAM agent loop model error logging', () => {
 describe('/ai/v1 Workers AI route error logging', () => {
   it('logs status and a sanitized reason, never the endpoint body, for a configured endpoint', async () => {
     await configureEndpoint();
-    const res = await forwardToWorkersAI(env, { messages: [] }, '@cf/m/x', '{}');
+    const { response: res } = await forwardToWorkersAI(env, { messages: [] }, '@cf/m/x', '{}');
 
     expect(res.status).toBe(400);
     const record = loggedRecord('ai_proxy.workers_ai_error');
@@ -138,7 +138,7 @@ describe('/ai/v1 Workers AI route error logging', () => {
   });
 
   it('keeps logging the body for the Cloudflare gateway route (unchanged)', async () => {
-    const res = await forwardToWorkersAI(env, { messages: [] }, '@cf/m/x', '{}');
+    const { response: res } = await forwardToWorkersAI(env, { messages: [] }, '@cf/m/x', '{}');
 
     expect(res.status).toBe(400);
     const record = loggedRecord('ai_proxy.workers_ai_error');

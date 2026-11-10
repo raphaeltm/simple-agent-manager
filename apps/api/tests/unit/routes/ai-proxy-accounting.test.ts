@@ -42,6 +42,7 @@ vi.mock('../../../src/services/ai-proxy-shared', () => {
     buildAnthropicCountTokensUrl: () =>
       'https://gateway.example.com/anthropic/v1/messages/count_tokens',
     isAnthropicModel: (id: string) => id.startsWith('claude-'),
+    upstreamErrorLogFields: async () => ({}),
   };
 });
 vi.mock('../../../src/middleware/rate-limit', () => ({

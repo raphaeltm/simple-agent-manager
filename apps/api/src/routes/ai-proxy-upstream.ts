@@ -25,6 +25,7 @@ import {
   isCloudflareChatTarget,
   LlmUnavailableError,
   resolveWorkersAiChatTarget,
+  withStreamUsageRequested,
 } from '../services/llm-chat-target';
 import { aiGatewayOnlyHeaders, resolveAiGatewayId } from '../services/platform-capabilities';
 
@@ -73,40 +74,57 @@ function buildOpenAIResponsesUrl(env: Env): string {
 // Forwarding Functions
 // =============================================================================
 
+/**
+ * A forwarded Workers AI-route response, and whether its usage may need estimating: an
+ * admin-configured OpenAI-compatible endpoint can omit `usage`, Cloudflare's routes report it.
+ */
+export interface WorkersAiForward {
+  response: Response;
+  estimateMissingUsage: boolean;
+}
+
 /** Forward request to Workers AI (transparent OpenAI-format pass-through). */
 export async function forwardToWorkersAI(
   env: Env,
   body: Record<string, unknown>,
   modelId: string,
   aigMetadata: string
-): Promise<Response> {
+): Promise<WorkersAiForward> {
+  const forward = (response: Response, estimateMissingUsage = false): WorkersAiForward => ({
+    response,
+    estimateMissingUsage,
+  });
   let target: Awaited<ReturnType<typeof resolveWorkersAiChatTarget>>;
   try {
     target = await resolveWorkersAiChatTarget(env, 'aiProxy', modelId);
   } catch (err) {
     if (!(err instanceof LlmUnavailableError)) throw err;
     // The endpoint settings could not be read; the call is refused rather than sent elsewhere.
-    return new Response(
-      JSON.stringify({
-        error: { message: err.message, type: 'api_error', code: 'LLM_SETTINGS_UNAVAILABLE' },
-      }),
-      { status: 503, headers: { 'Content-Type': 'application/json' } }
+    return forward(
+      new Response(
+        JSON.stringify({
+          error: { message: err.message, type: 'api_error', code: 'LLM_SETTINGS_UNAVAILABLE' },
+        }),
+        { status: 503, headers: { 'Content-Type': 'application/json' } }
+      )
     );
   }
   if (!target) {
     // No Workers AI on this installation and no OpenAI-compatible endpoint configured.
-    return new Response(
-      JSON.stringify({
-        error: {
-          message: 'This model route is not available on this installation.',
-          type: 'invalid_request_error',
-          code: 'FEATURE_UNAVAILABLE',
-        },
-      }),
-      { status: 404, headers: { 'Content-Type': 'application/json' } }
+    return forward(
+      new Response(
+        JSON.stringify({
+          error: {
+            message: 'This model route is not available on this installation.',
+            type: 'invalid_request_error',
+            code: 'FEATURE_UNAVAILABLE',
+          },
+        }),
+        { status: 404, headers: { 'Content-Type': 'application/json' } }
+      )
     );
   }
-  const gatewayBody = { ...body, model: target.model };
+  const gatewayBody = withStreamUsageRequested(target, { ...body, model: target.model });
 
   const response = await fetch(target.url, {
     method: 'POST',
@@ -123,14 +141,16 @@ export async function forwardToWorkersAI(
     });
     const errorHeaders = new Headers({ 'Content-Type': 'application/json' });
     copyCredentialLimitHeaders(response.headers, errorHeaders);
-    return new Response(
-      JSON.stringify({
-        error: {
-          message: `AI inference failed (${response.status}). Please try again.`,
-          type: 'server_error',
-        },
-      }),
-      { status: response.status, headers: errorHeaders }
+    return forward(
+      new Response(
+        JSON.stringify({
+          error: {
+            message: `AI inference failed (${response.status}). Please try again.`,
+            type: 'server_error',
+          },
+        }),
+        { status: response.status, headers: errorHeaders }
+      )
     );
   }
 
@@ -144,7 +164,10 @@ export async function forwardToWorkersAI(
     responseHeaders.set('X-Accel-Buffering', 'no');
   }
 
-  return new Response(response.body, { status: response.status, headers: responseHeaders });
+  return forward(
+    new Response(response.body, { status: response.status, headers: responseHeaders }),
+    !isCloudflareChatTarget(target)
+  );
 }
 
 /** Forward request to Anthropic via AI Gateway (with format translation). */

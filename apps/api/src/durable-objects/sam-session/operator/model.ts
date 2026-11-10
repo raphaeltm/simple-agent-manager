@@ -5,6 +5,7 @@ import type { Env } from '../../../env';
 import { log } from '../../../lib/logger';
 import { resolveUpstreamAuth } from '../../../services/ai-billing';
 import { incrementProviderUsage, incrementTokenUsage } from '../../../services/ai-token-budget';
+import { estimateTokensFromText } from '../../../services/ai-token-usage-accounting';
 import {
   type ChatCompletionsTarget,
   chatTargetHeaders,
@@ -58,7 +59,10 @@ export async function resolveOperatorModel(
       providerId: 'anthropic',
       modelId,
       apiKey: auth.headers['x-api-key'] ?? '',
-      headers: { ...auth.headers, ...aiGatewayOnlyHeaders(env, { 'cf-aig-metadata': headers.metadata }) },
+      headers: {
+        ...auth.headers,
+        ...aiGatewayOnlyHeaders(env, { 'cf-aig-metadata': headers.metadata }),
+      },
     });
   }
   if (modelId.startsWith('@cf/') || modelId.startsWith('@hf/')) {
@@ -109,12 +113,6 @@ interface StepUsageInput {
   toolCalls: unknown[];
 }
 
-/** Bytes/3 over-counts typical English token density, so an estimate errs toward the budget. */
-function estimateTokens(value: unknown): number {
-  const text = typeof value === 'string' ? value : (JSON.stringify(value ?? '') ?? '');
-  return Math.ceil(new TextEncoder().encode(text).byteLength / 3);
-}
-
 /**
  * Charge one model step to the user's AI budget. A provider that omits usage (a streamed
  * response without a usage chunk) must not make the step free, so missing counts are
@@ -129,10 +127,12 @@ export async function recordOperatorStepUsage(
 ): Promise<void> {
   const reportedInput = step.usage.inputTokens;
   const reportedOutput = step.usage.outputTokens;
-  const input = reportedInput ?? estimateTokens(step.request.body);
+  const input = reportedInput ?? estimateTokensFromText(step.request.body);
   const output =
     reportedOutput ??
-    estimateTokens(`${step.text}${step.reasoningText ?? ''}${JSON.stringify(step.toolCalls)}`);
+    estimateTokensFromText(
+      `${step.text}${step.reasoningText ?? ''}${JSON.stringify(step.toolCalls)}`
+    );
   if (reportedInput === undefined || reportedOutput === undefined)
     log.warn('sam.operator.usage_estimated', {
       userId,

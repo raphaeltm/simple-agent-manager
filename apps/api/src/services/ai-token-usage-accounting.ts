@@ -12,6 +12,8 @@ export type TokenUsageFormat = 'openai' | 'anthropic';
 export interface ExtractedTokenUsage {
   inputTokens?: number;
   outputTokens?: number;
+  /** UTF-8 bytes of generated output seen, collected only when usage may need estimating. */
+  outputBytes?: number;
 }
 
 export interface TokenUsageAccountingOptions {
@@ -21,6 +23,27 @@ export interface TokenUsageAccountingOptions {
   fallbackInputTokens?: number;
   provider?: AiProviderUsageAttribution;
   executionCtx?: Pick<ExecutionContext, 'waitUntil'>;
+  /**
+   * Estimate counts the upstream did not report instead of charging nothing. Set only for an
+   * admin-configured OpenAI-compatible endpoint, which may omit `usage`; Cloudflare and
+   * first-party provider routes keep their reported-only accounting unchanged.
+   */
+  estimateMissingUsage?: boolean;
+}
+
+/** UTF-8 bytes/3 over-counts typical English token density, so an estimate errs toward the budget. */
+export function estimateTokensFromByteLength(byteLength: number): number {
+  return Math.ceil(Math.max(0, byteLength) / 3);
+}
+
+/** The one token estimator for model output SAM cannot get a count for (proxy and operator). */
+export function estimateTokensFromText(value: unknown): number {
+  const text = typeof value === 'string' ? value : (JSON.stringify(value ?? '') ?? '');
+  return estimateTokensFromByteLength(utf8ByteLength(text));
+}
+
+function utf8ByteLength(text: string): number {
+  return new TextEncoder().encode(text).byteLength;
 }
 
 export interface UpstreamTokenUsageAccountingOptions extends TokenUsageAccountingOptions {
@@ -29,26 +52,30 @@ export interface UpstreamTokenUsageAccountingOptions extends TokenUsageAccountin
 
 export async function accountTokenUsageFromJson(
   payload: unknown,
-  options: TokenUsageAccountingOptions,
+  options: TokenUsageAccountingOptions
 ): Promise<void> {
   const usage = extractJsonTokenUsage(payload, options.format);
+  if (options.estimateMissingUsage && usage.outputTokens === undefined) {
+    usage.outputBytes = jsonOutputByteLength(payload);
+  }
   await incrementExtractedUsage(usage, options);
 }
 
 export function accountTokenUsageFromStream(
   stream: ReadableStream<Uint8Array>,
-  options: TokenUsageAccountingOptions,
+  options: TokenUsageAccountingOptions
 ): void {
   scheduleTokenAccounting(
-    collectStreamTokenUsage(stream, options.format)
-      .then((usage) => incrementExtractedUsage(usage, options)),
-    options,
+    collectStreamTokenUsage(stream, options.format, options.estimateMissingUsage === true).then(
+      (usage) => incrementExtractedUsage(usage, options)
+    ),
+    options
   );
 }
 
 export async function attachTokenUsageAccounting(
   response: Response,
-  options: TokenUsageAccountingOptions,
+  options: TokenUsageAccountingOptions
 ): Promise<Response> {
   if (!response.ok) return response;
 
@@ -74,7 +101,12 @@ export async function attachTokenUsageAccounting(
   }
 
   try {
-    await accountTokenUsageFromJson(payload, { ...options, fallbackInputTokens: undefined });
+    // Reported JSON usage is authoritative, so the request estimate is dropped there unless this
+    // upstream may omit usage altogether.
+    await accountTokenUsageFromJson(
+      payload,
+      options.estimateMissingUsage ? options : { ...options, fallbackInputTokens: undefined }
+    );
   } catch (err) {
     log.warn('ai_proxy.token_usage_increment_failed', {
       userId: options.userId,
@@ -87,7 +119,7 @@ export async function attachTokenUsageAccounting(
 }
 
 export function optionalExecutionContext(
-  getExecutionCtx: () => Pick<ExecutionContext, 'waitUntil'>,
+  getExecutionCtx: () => Pick<ExecutionContext, 'waitUntil'>
 ): Pick<ExecutionContext, 'waitUntil'> | undefined {
   try {
     return getExecutionCtx();
@@ -98,20 +130,20 @@ export function optionalExecutionContext(
 
 export function attachUpstreamTokenUsageAccounting(
   upstreamResponse: Response,
-  options: UpstreamTokenUsageAccountingOptions,
+  options: UpstreamTokenUsageAccountingOptions
 ): Promise<Response> {
   return attachTokenUsageAccounting(
     new Response(upstreamResponse.body, {
       status: upstreamResponse.status,
       headers: options.headers,
     }),
-    options,
+    options
   );
 }
 
 export function extractJsonTokenUsage(
   payload: unknown,
-  format: TokenUsageFormat,
+  format: TokenUsageFormat
 ): ExtractedTokenUsage {
   const record = maybeJsonRecord(payload);
   const usage = maybeJsonRecord(record?.usage);
@@ -144,11 +176,12 @@ export function estimateInputTokensFromMessages(messages: unknown): number {
 export async function collectStreamTokenUsage(
   stream: ReadableStream<Uint8Array>,
   format: TokenUsageFormat,
+  collectOutputBytes = false
 ): Promise<ExtractedTokenUsage> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
-  const usage: ExtractedTokenUsage = {};
+  const usage: ExtractedTokenUsage = collectOutputBytes ? { outputBytes: 0 } : {};
 
   try {
     let keepReading = true;
@@ -172,19 +205,13 @@ export async function collectStreamTokenUsage(
 
 async function incrementExtractedUsage(
   usage: ExtractedTokenUsage,
-  options: TokenUsageAccountingOptions,
+  options: TokenUsageAccountingOptions
 ): Promise<void> {
   const inputTokens = usage.inputTokens ?? options.fallbackInputTokens ?? 0;
-  const outputTokens = usage.outputTokens ?? 0;
+  const outputTokens = usage.outputTokens ?? estimatedOutputTokens(usage, options);
   if (inputTokens <= 0 && outputTokens <= 0) return;
 
-  await incrementTokenUsage(
-    options.env.KV,
-    options.userId,
-    inputTokens,
-    outputTokens,
-    options.env,
-  );
+  await incrementTokenUsage(options.env.KV, options.userId, inputTokens, outputTokens, options.env);
   if (options.provider) {
     await incrementProviderUsage(
       options.env.KV,
@@ -192,15 +219,32 @@ async function incrementExtractedUsage(
       options.provider,
       inputTokens,
       outputTokens,
-      options.env,
+      options.env
     );
   }
+}
+
+/** Output tokens for a response that reported none: estimated where allowed, else none. */
+function estimatedOutputTokens(
+  usage: ExtractedTokenUsage,
+  options: TokenUsageAccountingOptions
+): number {
+  if (!options.estimateMissingUsage) return 0;
+  const output = estimateTokensFromByteLength(usage.outputBytes ?? 0);
+  log.warn('ai_proxy.usage_estimated', {
+    userId: options.userId,
+    format: options.format,
+    inputReported: usage.inputTokens !== undefined,
+    outputReported: false,
+    output,
+  });
+  return output;
 }
 
 function processSseBuffer(
   buffer: string,
   format: TokenUsageFormat,
-  usage: ExtractedTokenUsage,
+  usage: ExtractedTokenUsage
 ): string {
   const events = buffer.split(/\r?\n\r?\n/);
   const remainder = events.pop() ?? '';
@@ -227,7 +271,7 @@ function processSseBuffer(
 function applyStreamUsage(
   payload: unknown,
   format: TokenUsageFormat,
-  usage: ExtractedTokenUsage,
+  usage: ExtractedTokenUsage
 ): void {
   const record = maybeJsonRecord(payload);
   if (!record) return;
@@ -244,11 +288,36 @@ function applyStreamUsage(
   const jsonUsage = extractJsonTokenUsage(record, 'openai');
   usage.inputTokens = jsonUsage.inputTokens ?? usage.inputTokens;
   usage.outputTokens = jsonUsage.outputTokens ?? usage.outputTokens;
+  if (usage.outputBytes !== undefined) {
+    usage.outputBytes += choicesOutputByteLength(record.choices, 'delta');
+  }
+}
+
+/** Bytes of generated output in a chat completion's choices (`message`) or chunk (`delta`). */
+function choicesOutputByteLength(choices: unknown, field: 'message' | 'delta'): number {
+  if (!Array.isArray(choices)) return 0;
+  let bytes = 0;
+  for (const choice of choices) {
+    const part = maybeJsonRecord(maybeJsonRecord(choice)?.[field]);
+    if (!part) continue;
+    for (const key of ['content', 'reasoning_content', 'reasoning'] as const) {
+      if (typeof part[key] === 'string') bytes += utf8ByteLength(part[key]);
+    }
+    if (Array.isArray(part.tool_calls)) bytes += utf8ByteLength(JSON.stringify(part.tool_calls));
+  }
+  return bytes;
+}
+
+function jsonOutputByteLength(payload: unknown): number {
+  return choicesOutputByteLength(maybeJsonRecord(payload)?.choices, 'message');
 }
 
 function isStreamingResponse(response: Response): boolean {
   const contentType = response.headers.get('content-type') ?? '';
-  return contentType.includes('text/event-stream') || response.headers.get('cache-control') === 'no-cache';
+  return (
+    contentType.includes('text/event-stream') ||
+    response.headers.get('cache-control') === 'no-cache'
+  );
 }
 
 function numberValue(value: unknown): number | undefined {
@@ -271,7 +340,7 @@ function estimateContentChars(content: unknown): number {
 
 function scheduleTokenAccounting(
   promise: Promise<void>,
-  options: TokenUsageAccountingOptions,
+  options: TokenUsageAccountingOptions
 ): void {
   const logged = promise.catch((err) => {
     log.warn('ai_proxy.token_usage_increment_failed', {

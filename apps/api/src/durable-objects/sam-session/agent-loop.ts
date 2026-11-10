@@ -388,6 +388,7 @@ export async function runAgentLoop(
         userId,
         format: tokenUsageFormat,
         executionCtx,
+        estimateMissingUsage: endpoint !== null,
       });
     } catch (fetchErr) {
       // No model on this installation (no endpoint configured, no Cloudflare route): retrying
