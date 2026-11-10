@@ -2,7 +2,8 @@
 # Validated with frp 0.72.0. frps renders this file as a Go template over its environment
 # (so no template braces may appear in comments either). Variables:
 #   FRPS_BIND_PORT, CELLD_PORT, REVERSE_TUNNEL_GATEWAY_SECRET,
-#   REVERSE_TUNNEL_PORT_RANGE_START, REVERSE_TUNNEL_PORT_RANGE_END
+#   REVERSE_TUNNEL_PORT_RANGE_START, REVERSE_TUNNEL_PORT_RANGE_END,
+#   REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS
 #
 # - frps listens on loopback only. Nodes reach it as frp over wss through Caddy on 443
 #   (caddy/sam.d/frp.caddy); there is no TLS here because Caddy terminates it.
@@ -23,8 +24,10 @@ allowPorts = [
 maxPortsPerClient = 1
 # Caddy is the only TLS layer; frps sees plain WebSocket from it.
 transport.tls.force = false
-# A node that stops heartbeating is dropped after this long (frpc heartbeats every 30 s).
-transport.heartbeatTimeout = 90
+# A node that stops heartbeating is dropped after this long (frpc heartbeats every 30 s). The
+# deploy script writes the same value to the Worker, which will not reissue a released lease
+# port until twice this long has passed, so a new node's traffic cannot reach the old frpc.
+transport.heartbeatTimeout = {{ .Envs.REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS }}
 log.to = "console"
 log.level = "info"
 

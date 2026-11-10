@@ -14,7 +14,9 @@ import {
   GATEWAY_ORIGINAL_HOST_HEADER,
   GATEWAY_SECRET_HEADER,
 } from '../../../src/routes/self-host-gateway';
+import * as box from '../../../../../scripts/selfhost/box-settings';
 import { FRPS_PLUGIN_OPS } from '../../../src/services/node-reverse-tunnel-authz';
+import * as config from '../../../src/services/node-reverse-tunnel-config';
 import { GATEWAY_HEADER } from '../../../src/services/node-websocket-gateway';
 
 const root = join(import.meta.dirname, '../../../../../deploy/selfhost');
@@ -39,9 +41,42 @@ describe('frps.toml', () => {
     expect(frps).toMatch(/^maxPortsPerClient = 1$/m);
   });
 
-  it('drops a silent node on the same heartbeat timeout frpc uses', () => {
-    expect(frps).toContain(
-      `transport.heartbeatTimeout = ${REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS}`
+  it('takes its heartbeat timeout from the value the deploy also gives the Worker', () => {
+    expect(frps).toMatch(
+      /^transport\.heartbeatTimeout = \{\{ \.Envs\.REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS \}\}$/m
+    );
+    // One default everywhere: box deploy script, Worker, and the frpc side cloud-init renders.
+    expect(box.DEFAULT_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS).toBe(
+      Number(REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS)
+    );
+    expect(box.DEFAULT_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS).toBe(
+      config.DEFAULT_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS
+    );
+    expect(box.MIN_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS).toBe(
+      config.MIN_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS
+    );
+    expect(box.MAX_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS).toBe(
+      config.MAX_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS
+    );
+    expect(box.REVERSE_TUNNEL_PORT_REUSE_HEARTBEAT_MULTIPLE).toBe(
+      config.REVERSE_TUNNEL_PORT_REUSE_HEARTBEAT_MULTIPLE
+    );
+    // gateway.env carries exactly the lookups the template reads.
+    const gatewayEnv = box.renderGatewayEnv('ab'.repeat(32), box.resolveTunnelSettings({}));
+    for (const lookup of frps.match(/\{\{ \.Envs\.([A-Z_]+) \}\}/g) ?? []) {
+      const name = /Envs\.([A-Z_]+)/.exec(lookup)![1]!;
+      if (['FRPS_BIND_PORT', 'CELLD_PORT'].includes(name)) continue; // docker-compose environment
+      expect(gatewayEnv, name).toContain(`${name}=`);
+    }
+  });
+
+  it('caps and defaults the lease range the same way on the box and in the Worker', () => {
+    expect(box.MAX_REVERSE_TUNNEL_PORT_RANGE_SIZE).toBe(config.MAX_REVERSE_TUNNEL_PORT_RANGE_SIZE);
+    expect(box.DEFAULT_REVERSE_TUNNEL_PORT_RANGE_START).toBe(
+      config.DEFAULT_REVERSE_TUNNEL_PORT_RANGE_START
+    );
+    expect(box.DEFAULT_REVERSE_TUNNEL_PORT_RANGE_END).toBe(
+      config.DEFAULT_REVERSE_TUNNEL_PORT_RANGE_END
     );
   });
 

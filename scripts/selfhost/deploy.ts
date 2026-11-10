@@ -29,8 +29,8 @@ import {
   presignVars,
   redactSecrets,
   renderGatewayEnv,
-  resolveTunnelPortRange,
-  tunnelRangeVars,
+  resolveTunnelSettings,
+  tunnelWorkerVars,
 } from './box-settings.js';
 import { ensureCelldBinary, resolveEsbuild } from './celld-binary.js';
 import { buildCelldConfig, type CelldWranglerConfig } from './celld-config.js';
@@ -221,9 +221,10 @@ async function main(): Promise<void> {
   if (generated.length > 0)
     log(`generated platform keys: ${generated.join(', ')} (back up ${stateDir})`);
   // docker compose passes this file to frps and Caddy (env_file); rewritten only on change.
-  // The port range goes to the Worker from the same resolved value (below).
-  const tunnelRange = resolveTunnelPortRange(box);
-  const gatewayEnv = renderGatewayEnv(keys.REVERSE_TUNNEL_GATEWAY_SECRET, tunnelRange);
+  // The port range and heartbeat timeout go to the Worker from the same resolved values
+  // (below). Resolution fails the deploy on a range overlapping a box listener or too large.
+  const tunnelSettings = resolveTunnelSettings(box);
+  const gatewayEnv = renderGatewayEnv(keys.REVERSE_TUNNEL_GATEWAY_SECRET, tunnelSettings);
   const gatewayEnvPath = join(stateDir, 'gateway.env');
   if (!existsSync(gatewayEnvPath) || readFileSync(gatewayEnvPath, 'utf8') !== gatewayEnv) {
     writePrivateFile(gatewayEnvPath, gatewayEnv);
@@ -246,7 +247,7 @@ async function main(): Promise<void> {
     vars: {
       SAM_INSTALLATION_ID,
       VAPID_SUBJECT: `https://app.${baseDomain}`,
-      ...tunnelRangeVars(tunnelRange),
+      ...tunnelWorkerVars(tunnelSettings),
     },
   });
   // Needs the R2 binding's final bucket name, so it is applied after translation.

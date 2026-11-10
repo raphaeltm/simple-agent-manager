@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  BOX_RESERVED_PORTS,
   celldChildEnv,
   presignVars,
   redactSecrets,
   renderGatewayEnv,
   resolveTunnelPortRange,
-  tunnelRangeVars,
+  resolveTunnelSettings,
+  tunnelWorkerVars,
 } from './box-settings.js';
 import { parseDotenv } from './secret-files.js';
 
@@ -14,13 +16,24 @@ const SECRET = 'ab'.repeat(32);
 
 describe('tunnel port range', () => {
   it('defaults, and gives the Worker and frps the same values', () => {
-    const range = resolveTunnelPortRange({});
-    expect(range).toEqual({ start: 20000, end: 29999 });
-    const frps = parseDotenv(renderGatewayEnv(SECRET, range), 'gateway.env');
-    const worker = tunnelRangeVars(range);
-    expect(frps.REVERSE_TUNNEL_PORT_RANGE_START).toBe(worker.REVERSE_TUNNEL_PORT_RANGE_START);
-    expect(frps.REVERSE_TUNNEL_PORT_RANGE_END).toBe(worker.REVERSE_TUNNEL_PORT_RANGE_END);
+    const settings = resolveTunnelSettings({});
+    expect(settings).toEqual({
+      range: { start: 20000, end: 29999 },
+      heartbeatTimeoutSeconds: 90,
+      portReuseMinAgeSeconds: null,
+    });
+    const frps = parseDotenv(renderGatewayEnv(SECRET, settings), 'gateway.env');
+    const worker = tunnelWorkerVars(settings);
+    for (const name of [
+      'REVERSE_TUNNEL_PORT_RANGE_START',
+      'REVERSE_TUNNEL_PORT_RANGE_END',
+      'REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS',
+    ]) {
+      expect(frps[name], name).toBeDefined();
+      expect(frps[name], name).toBe(worker[name]);
+    }
     expect(frps.REVERSE_TUNNEL_GATEWAY_SECRET).toBe(SECRET);
+    expect(worker.REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS).toBeUndefined();
   });
 
   it('takes the box override and rejects bad ranges', () => {
@@ -38,8 +51,53 @@ describe('tunnel port range', () => {
     ).toThrow(/above/);
   });
 
+  it('enforces the same size cap as the Worker', () => {
+    const at = { REVERSE_TUNNEL_PORT_RANGE_START: '10000', REVERSE_TUNNEL_PORT_RANGE_END: '29999' };
+    expect(resolveTunnelPortRange(at)).toEqual({ start: 10000, end: 29999 });
+    expect(() =>
+      resolveTunnelPortRange({ ...at, REVERSE_TUNNEL_PORT_RANGE_START: '9999' })
+    ).toThrow(/at most 20000 ports/);
+  });
+
+  // Each box listener at its compose default, then moved into an otherwise valid range.
+  it.each(Object.entries(BOX_RESERVED_PORTS))(
+    'fails the deploy when the range contains %s',
+    (name, fallback) => {
+      if (fallback >= 1024) {
+        expect(() =>
+          resolveTunnelPortRange({
+            REVERSE_TUNNEL_PORT_RANGE_START: String(fallback),
+            REVERSE_TUNNEL_PORT_RANGE_END: String(fallback),
+          })
+        ).toThrow(new RegExp(`contains ${name} \\(${fallback}\\)`));
+      }
+      expect(() =>
+        resolveTunnelPortRange({ [name]: '20500' })
+      ).toThrow(new RegExp(`contains ${name} \\(20500\\)`));
+      // Control: the same listener moved just outside the range is accepted.
+      expect(resolveTunnelPortRange({ [name]: '30000' })).toEqual({ start: 20000, end: 29999 });
+    }
+  );
+
+  it('derives the reuse age floor from the heartbeat timeout frps gets', () => {
+    expect(resolveTunnelSettings({ REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS: '120' })).toMatchObject(
+      { heartbeatTimeoutSeconds: 120, portReuseMinAgeSeconds: null }
+    );
+    expect(() =>
+      resolveTunnelSettings({ REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS: '30' })
+    ).toThrow(/between 60 and 3600/);
+    const longer = resolveTunnelSettings({ REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS: '600' });
+    expect(tunnelWorkerVars(longer).REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS).toBe('600');
+    expect(() =>
+      resolveTunnelSettings({
+        REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS: '120',
+        REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS: '200',
+      })
+    ).toThrow(/between 240 and/);
+  });
+
   it('refuses a gateway secret that is not 32 bytes of hex', () => {
-    expect(() => renderGatewayEnv('short', resolveTunnelPortRange({}))).toThrow(/32 bytes/);
+    expect(() => renderGatewayEnv('short', resolveTunnelSettings({}))).toThrow(/32 bytes/);
   });
 });
 
