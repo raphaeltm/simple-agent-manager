@@ -23,6 +23,7 @@ import { signCallbackToken } from '../../../src/services/jwt';
 import { resolveTaskStartPlacementCredentialAttribution } from '../../../src/services/placement-resolver';
 import { resolveSessionRuntimeContract } from '../../../src/services/session-runtime-contract';
 import { DefaultVmPromptDeliveryAdapter } from '../../../src/services/vm-prompt-delivery-adapter';
+import { ensurePoolsWithStarterMachines } from '../../helpers/capacity-pool-picks';
 import { projectStub, sqlRows, testEnv } from './agent-message-channels';
 import { pauseAlarms, pauseNodeAlarms, type StateWriteHook } from './durable-alarm-control';
 import {
@@ -269,6 +270,13 @@ export async function readyReplacementNode(f: Fixture) {
     .from(schema.projects)
     .where(eq(schema.projects.id, f.projectId))
     .get())!;
+  // The replacement places onto the user's pool, and a new pool picks nothing by itself.
+  await ensurePoolsWithStarterMachines(db as never, {
+    userId: f.userId,
+    projectId: f.projectId,
+    includeInstallation: false,
+    owner: { userId: f.userId, projectId: f.projectId },
+  });
   const resolution = await resolveTaskStartPlacementCredentialAttribution(
     db,
     {

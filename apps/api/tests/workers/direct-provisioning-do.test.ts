@@ -1,9 +1,11 @@
 /** Registered HTTP -> real NodeLifecycle RPC/alarm/storage -> provider HTTP -> migrated D1. */
 import { makeSignature } from 'better-auth/crypto';
 import { env, runInDurableObject } from 'cloudflare:test';
+import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import * as schema from '../../src/db/schema';
 import type { NodeLifecycle } from '../../src/durable-objects/node-lifecycle';
 import {
   DIRECT_PROVISIONING_KEY,
@@ -20,6 +22,7 @@ import {
   attemptWorkspaceDeletion,
   loadWorkspaceDeletionIdentity,
 } from '../../src/services/workspace-deletion';
+import { ensurePoolsWithStarterMachines } from '../helpers/capacity-pool-picks';
 import { seedInstallation, seedNode, seedProject, seedUser } from './helpers/seed-d1';
 
 afterEach(() => {
@@ -167,6 +170,15 @@ async function setup(interrupt: boolean, interruptDispatch = false, directNode =
     })
   );
   clearCapacityCatalogCache();
+  // The request places onto the user's pool, built from the mocked catalog above; a new
+  // pool picks nothing by itself.
+  await ensurePoolsWithStarterMachines(drizzle(env.DATABASE, { schema }) as never, {
+    userId,
+    projectId,
+    includeInstallation: false,
+    env: testEnv,
+    owner: { userId, projectId },
+  });
   const app = new Hono<{ Bindings: Env }>();
   app.onError((error, c) => c.json({ error: error.message }, 500));
   registerWorkspaceCreateRoute(app);
