@@ -54,42 +54,13 @@ func (s *Server) handleWorkspacePortProxy(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Resolve the container bridge IP for workspace isolation.
-	// In container mode, the bridge IP is required — we cannot fall back to 127.0.0.1
-	// because the service runs inside the container, not on the host.
-	//
-	// Use per-workspace discovery (portDiscoveries) when available, because the
-	// server-level containerDiscovery may have a stale label value (e.g., "/workspace"
-	// when REPOSITORY was empty at startup). Per-workspace discoveries are created
-	// in StartPortScanner with the correct label for the workspace's repository.
-	targetHost := "127.0.0.1"
-	discovery := s.containerDiscovery // fallback
-	s.portScannerMu.RLock()
-	if wsDisc, ok := s.portDiscoveries[workspaceID]; ok {
-		discovery = wsDisc
-	}
-	s.portScannerMu.RUnlock()
-
-	if discovery != nil {
-		bridgeIP, bridgeErr := discovery.GetBridgeIP()
-		if bridgeErr == nil {
-			targetHost = bridgeIP
-			slog.Debug("Port proxy resolved bridge IP",
-				"workspaceId", workspaceID,
-				"port", port,
-				"bridgeIP", bridgeIP)
-		} else {
-			slog.Error("Port proxy: failed to resolve container bridge IP",
-				"workspaceId", workspaceID,
-				"port", port,
-				"error", bridgeErr)
-			// In container mode, falling back to 127.0.0.1 is wrong — the service
-			// runs inside the container at the bridge IP, not on the host.
-			// Return 503 so the client can retry after the container is ready.
-			writeError(w, http.StatusServiceUnavailable,
-				fmt.Sprintf("Container bridge IP not available yet (try again in a few seconds): %v", bridgeErr))
-			return
-		}
+	// Share workspace-scoped lazy discovery with CLI forwarding. The discovery
+	// cache is empty after reboot and port scanning may be disabled entirely.
+	targetHost, err := s.resolveWorkspaceBridgeIP(workspaceID)
+	if err != nil {
+		slog.Error("Port proxy: failed to resolve container bridge IP", "workspaceId", workspaceID, "port", port, "error", err)
+		writeError(w, http.StatusServiceUnavailable, fmt.Sprintf("Container bridge IP not available yet (try again in a few seconds): %v", err))
+		return
 	}
 
 	if s.isOwnListenerTarget(targetHost, port) {
@@ -187,6 +158,10 @@ func (s *Server) handleListWorkspacePorts(w http.ResponseWriter, r *http.Request
 	scanner := s.portScanners[workspaceID]
 	wsDiscovery := s.portDiscoveries[workspaceID]
 	s.portScannerMu.RUnlock()
+	var discoveryErr error
+	if s.config.ContainerMode {
+		wsDiscovery, discoveryErr = s.workspacePortDiscovery(workspaceID)
+	}
 
 	var detectedPorts interface{}
 	if scanner != nil {
@@ -214,14 +189,10 @@ func (s *Server) handleListWorkspacePorts(w http.ResponseWriter, r *http.Request
 		} else {
 			diag["bridgeIPError"] = err.Error()
 		}
-	} else if s.containerDiscovery != nil {
-		diag["fallbackDiscovery"] = true
-		if containerID, err := s.containerDiscovery.GetContainerID(); err == nil {
-			diag["containerID"] = containerID
-		} else {
-			diag["containerIDError"] = err.Error()
-		}
+	} else if discoveryErr != nil {
+		diag["containerIDError"] = discoveryErr.Error()
 	}
+
 	// Include workspace runtime info
 	s.workspaceMu.RLock()
 	if runtime, ok := s.workspaces[workspaceID]; ok {

@@ -890,29 +890,18 @@ func (s *Server) StartPortScanner(workspaceID string) {
 		return
 	}
 
-	// Create a per-workspace container discovery using the workspace's actual
-	// ContainerLabelValue. The server-level s.containerDiscovery may have a stale
-	// label value (e.g., "/workspace" when REPOSITORY was empty at startup), while
-	// the workspace runtime has the correct value (e.g., "/workspace/repo-name")
-	// derived from the repository passed during workspace creation.
-	var wsDiscovery *container.Discovery
-	s.workspaceMu.RLock()
-	if runtime, ok := s.workspaces[workspaceID]; ok && runtime.ContainerLabelValue != "" {
-		wsDiscovery = container.NewDiscovery(container.Config{
-			LabelKey:    s.config.ContainerLabelKey,
-			LabelValue:  runtime.ContainerLabelValue,
-			CacheTTL:    s.config.ContainerCacheTTL,
-			BridgeIPTTL: s.config.PortProxyCacheTTL,
-		})
-		slog.Info("Port scanner: using workspace-specific container label",
-			"workspaceId", workspaceID,
-			"labelValue", runtime.ContainerLabelValue)
-	}
-	s.workspaceMu.RUnlock()
+	// A new provision/rebuild may have changed the container label. Preserve
+	// scanner startup's existing behavior of replacing its discovery cache.
+	s.portScannerMu.Lock()
+	delete(s.portDiscoveries, workspaceID)
+	s.portScannerMu.Unlock()
 
-	// Fall back to server-level discovery if no workspace-specific one is available.
-	if wsDiscovery == nil {
-		wsDiscovery = s.containerDiscovery
+	// Scanning and forwarding must resolve the same workspace-owned container,
+	// including when discovery is recreated after a restart.
+	wsDiscovery, err := s.workspacePortDiscovery(workspaceID)
+	if err != nil {
+		slog.Info("Port scanner: workspace container route unavailable", "workspaceId", workspaceID, "error", err)
+		return
 	}
 
 	// Resolve container ID for scanning — if not available yet, the scanner
