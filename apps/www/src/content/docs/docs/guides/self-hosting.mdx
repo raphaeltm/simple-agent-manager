@@ -369,7 +369,7 @@ Pulumi also generates a non-secret, per-installation identity in stack state and
 :::
 
 :::note[VM TLS certificates]
-New VM nodes do not receive a shared Origin CA private key in cloud-init. The cloud-init template generates a node-local RSA key and CSR, then calls the node-scoped callback endpoint `POST /api/nodes/:id/origin-ca-certificate` with its callback JWT. The API Worker signs that CSR through Cloudflare Origin CA using `CF_API_TOKEN` (`packages/cloud-init/src/template.ts`, `apps/api/src/routes/node-lifecycle.ts`, `apps/api/src/services/origin-ca-certificates.ts`).
+New VM nodes do not receive a shared Origin CA private key in cloud-init. The cloud-init template generates a node-local RSA key and CSR, then calls the node-scoped callback endpoint `POST /api/nodes/:id/origin-ca-certificate` with its callback JWT. The API Worker signs that CSR through Cloudflare Origin CA using `CF_API_TOKEN` (`packages/cloud-init/src/template-ingress.ts`, `apps/api/src/routes/node-lifecycle.ts`, `apps/api/src/services/origin-ca-certificates.ts`).
 :::
 
 :::note[Analytics privacy and configuration]

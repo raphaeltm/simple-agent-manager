@@ -58,7 +58,7 @@ runcmd:
   - 'logger -t sam-boot "PHASE END: swap-setup"'
 
   - 'logger -t sam-boot "PHASE START: vm-agent-download"'
-  - mkdir -p /var/lib/vm-agent /etc/sam/tls /etc/sam/firewall
+  - mkdir -p /var/lib/vm-agent /etc/sam/tls /etc/sam/firewall /etc/sam/cloudflared
   - |
     ARCH=$(uname -m)
     case $ARCH in
@@ -75,90 +75,14 @@ runcmd:
       cat "$curl_output" | logger -t sam-boot
       rm -f "$curl_output"
       logger -t sam-boot "vm-agent download failed status=$curl_status"
-      curl -sS --max-time {{ cert_request_timeout_seconds }} -o /dev/null -X POST \\
-        -H "Authorization: Bearer {{ callback_token }}" -H "Content-Type: application/json" \\
-        --data '{"reason":"vm_agent_download"}' \\
-        "{{ control_plane_url }}/api/nodes/{{ node_id }}/boot-failure" 2>/dev/null || true
+      /usr/local/sbin/sam-boot-failure vm_agent_download
       exit "$curl_status"
     fi
     chmod +x /usr/local/bin/vm-agent
     logger -t sam-boot "vm-agent binary downloaded, size=$(stat -c%s /usr/local/bin/vm-agent 2>/dev/null || echo unknown)"
   - 'logger -t sam-boot "PHASE END: vm-agent-download"'
 
-  - 'logger -t sam-boot "PHASE START: origin-ca-bootstrap"'
-  - |
-    ORIGIN_CA_CERTIFICATE_URL="{{ origin_ca_certificate_url }}"
-    TLS_CERT_PATH="/etc/sam/tls/origin-ca.pem"
-    TLS_KEY_PATH="/etc/sam/tls/origin-ca-key.pem"
-    TLS_CSR_PATH="/etc/sam/tls/origin-ca.csr"
-    if [ -n "$ORIGIN_CA_CERTIFICATE_URL" ]; then
-      logger -t sam-boot "Generating node-local Origin CA private key and CSR"
-      ORIGIN_CA_OK=true
-      if [ ! -s "$TLS_KEY_PATH" ]; then
-        if openssl genrsa -out "$TLS_KEY_PATH" 2048 >/dev/null 2>&1; then
-          chmod 600 "$TLS_KEY_PATH"
-          logger -t sam-boot "RSA key generated"
-        else
-          logger -t sam-boot "ERROR: openssl genrsa failed"
-          ORIGIN_CA_OK=false
-        fi
-      fi
-      if [ "$ORIGIN_CA_OK" = true ]; then
-        if openssl req -new -key "$TLS_KEY_PATH" -out "$TLS_CSR_PATH" -subj "/CN={{ node_id }}" >/dev/null 2>&1; then
-          logger -t sam-boot "CSR generated"
-        else
-          logger -t sam-boot "ERROR: openssl req (CSR generation) failed"
-          ORIGIN_CA_OK=false
-        fi
-      fi
-      if [ "$ORIGIN_CA_OK" = true ]; then
-        ATTEMPT=1
-        DELAY={{ cert_base_delay_seconds }}
-        ORIGIN_CA_OK=false
-        while [ "$ATTEMPT" -le {{ cert_max_attempts }} ]; do
-          CURL_EXIT=0
-          HTTP_CODE=$(curl -sS --max-time {{ cert_request_timeout_seconds }} -o "$TLS_CERT_PATH" -w '%{http_code}' -X POST \\
-            -H "Authorization: Bearer {{ callback_token }}" \\
-            -H "Content-Type: text/plain" \\
-            --data-binary "@$TLS_CSR_PATH" \\
-            "$ORIGIN_CA_CERTIFICATE_URL" 2>/dev/null) || CURL_EXIT=$?
-          logger -t sam-boot "Origin CA cert request: attempt=$ATTEMPT HTTP=$HTTP_CODE curl_exit=$CURL_EXIT"
-          if [ "$CURL_EXIT" -eq 0 ] && { [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ]; }; then
-            if openssl x509 -in "$TLS_CERT_PATH" -noout >/dev/null 2>&1; then
-              ORIGIN_CA_OK=true
-              break
-            fi
-            logger -t sam-boot "ERROR: Origin CA response was not a certificate"
-            break
-          fi
-          # Auth/input failures cannot heal through retries. Transport/429/5xx can.
-          if [ "$CURL_EXIT" -eq 0 ]; then
-            case "$HTTP_CODE" in 429|5??) ;; *) break ;; esac
-          fi
-          if [ "$ATTEMPT" -ge {{ cert_max_attempts }} ]; then break; fi
-          if [ "$DELAY" -gt {{ cert_max_delay_seconds }} ]; then DELAY={{ cert_max_delay_seconds }}; fi
-          sleep "$DELAY"
-          DELAY=$((DELAY * 2))
-          ATTEMPT=$((ATTEMPT + 1))
-        done
-      fi
-      rm -f "$TLS_CSR_PATH"
-      if [ "$ORIGIN_CA_OK" = true ] && [ -s "$TLS_CERT_PATH" ]; then
-        chmod 0644 "$TLS_CERT_PATH"
-        logger -t sam-boot "Node-local Origin CA certificate installed"
-      else
-        logger -t sam-boot "ERROR: Origin CA bootstrap failed — refusing to start vm-agent without TLS"
-        rm -f "$TLS_CERT_PATH" "$TLS_KEY_PATH" "$TLS_CSR_PATH"
-        curl -sS --max-time {{ cert_request_timeout_seconds }} -o /dev/null -X POST \\
-          -H "Authorization: Bearer {{ callback_token }}" -H "Content-Type: application/json" \\
-          --data '{"reason":"origin_ca_bootstrap"}' \\
-          "{{ control_plane_url }}/api/nodes/{{ node_id }}/boot-failure" 2>/dev/null || true
-        exit 1
-      fi
-    else
-      logger -t sam-boot "Skipping Origin CA bootstrap; TLS disabled"
-    fi
-  - 'logger -t sam-boot "PHASE END: origin-ca-bootstrap"'
+{{ ingress_bootstrap_runcmd }}
 
   - 'logger -t sam-boot "PHASE START: resource-headroom"'
   - /usr/local/sbin/sam-configure-docker-memory.sh || exit $?
@@ -169,6 +93,8 @@ runcmd:
   - systemctl enable vm-agent
   - systemctl start vm-agent
   - 'logger -t sam-boot "PHASE END: vm-agent-start"'
+
+{{ ingress_connector_runcmd }}
 
   - 'logger -t sam-boot "PHASE START: caddy-setup"'
   - |
@@ -206,6 +132,8 @@ write_files:
       Environment=TASK_ID={{ task_id }}
       Environment=TASK_MODE={{ task_mode }}
       Environment=VM_AGENT_PORT={{ vm_agent_port }}
+      Environment=VM_AGENT_TUNNEL_ENABLED={{ tunnel_mode }}
+      Environment=VM_AGENT_TUNNEL_PORT={{ tunnel_port }}
       Environment=TLS_CERT_PATH={{ tls_cert_path }}
       Environment=TLS_KEY_PATH={{ tls_key_path }}
       Environment=PROVIDER={{ provider }}
@@ -551,6 +479,20 @@ write_files:
     content: |
       {{ callback_token }}
 
+  - path: /usr/local/sbin/sam-boot-failure
+    permissions: '0700'
+    content: |
+      #!/bin/sh
+      # Best-effort boot failure report while the vm-agent is not running yet.
+      # Reads the token file so the callback token is not repeated in user-data.
+      logger -t sam-boot "ERROR: boot failed reason=$1"
+      curl -sS --max-time {{ cert_request_timeout_seconds }} -o /dev/null -X POST \\
+        -H "Authorization: Bearer $(cat /etc/sam/callback-token)" \\
+        -H "Content-Type: application/json" --data "{\\"reason\\":\\"$1\\"}" \\
+        "{{ control_plane_url }}/api/nodes/{{ node_id }}/boot-failure" 2>/dev/null || true
+
+{{ ingress_write_files }}
+
   - path: /etc/workspace/config.json
     content: |
       {
@@ -579,6 +521,10 @@ write_files:
       # blackouts when any earlier step errored before ACCEPT rules were added.
 
       VM_AGENT_PORT="{{ vm_agent_port }}"
+      # Tunnel nodes have no public ingress at all: no Cloudflare allowlist, and
+      # the loopback tunnel listener port is dropped on external interfaces too.
+      TUNNEL_MODE="{{ tunnel_mode }}"
+      TUNNEL_PORT="{{ tunnel_port }}"
       CF_IPV4_URL="https://www.cloudflare.com/ips-v4"
       CF_IPV6_URL="https://www.cloudflare.com/ips-v6"
 
@@ -606,14 +552,18 @@ write_files:
       2a06:98c0::/29
       2c0f:f248::/32"
 
-      CF_IPV4=$(curl -sf --max-time {{ cf_ip_fetch_timeout }} "$CF_IPV4_URL" 2>/dev/null) || {
-        logger -t sam-firewall "WARNING: Failed to fetch CF IPv4 ranges, using fallback"
-        CF_IPV4="$FALLBACK_IPV4"
-      }
-      CF_IPV6=$(curl -sf --max-time {{ cf_ip_fetch_timeout }} "$CF_IPV6_URL" 2>/dev/null) || {
-        logger -t sam-firewall "WARNING: Failed to fetch CF IPv6 ranges, using fallback"
-        CF_IPV6="$FALLBACK_IPV6"
-      }
+      CF_IPV4=""
+      CF_IPV6=""
+      if [ "$TUNNEL_MODE" != true ]; then
+        CF_IPV4=$(curl -sf --max-time {{ cf_ip_fetch_timeout }} "$CF_IPV4_URL" 2>/dev/null) || {
+          logger -t sam-firewall "WARNING: Failed to fetch CF IPv4 ranges, using fallback"
+          CF_IPV4="$FALLBACK_IPV4"
+        }
+        CF_IPV6=$(curl -sf --max-time {{ cf_ip_fetch_timeout }} "$CF_IPV6_URL" 2>/dev/null) || {
+          logger -t sam-firewall "WARNING: Failed to fetch CF IPv6 ranges, using fallback"
+          CF_IPV6="$FALLBACK_IPV6"
+        }
+      fi
 
       # IPv4: policy ACCEPT so outbound reply packets are never dropped when
       # conntrack state is invalidated (the root cause of the 6-minute Cloudflare
@@ -635,8 +585,12 @@ write_files:
       iptables -A INPUT -p tcp --dport "$VM_AGENT_PORT" -j DROP
       iptables -A INPUT -p udp --dport "$VM_AGENT_PORT" -j DROP
       iptables -A INPUT -p tcp --dport 22 -j DROP
+      if [ "$TUNNEL_MODE" = true ]; then
+        iptables -A INPUT -p tcp --dport "$TUNNEL_PORT" -j DROP
+        iptables -A INPUT -p udp --dport "$TUNNEL_PORT" -j DROP
+      fi
 
-      # INSERT CF ACCEPT rules for VM_AGENT_PORT at top of chain.
+      # INSERT CF ACCEPT rules for VM_AGENT_PORT at top of chain (none in tunnel mode).
       while IFS= read -r cidr; do
         [ -n "$cidr" ] && iptables -I INPUT 1 -s "$cidr" -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
       done <<< "$CF_IPV4"
@@ -658,6 +612,10 @@ write_files:
         ip6tables -A INPUT -p tcp --dport "$VM_AGENT_PORT" -j DROP
         ip6tables -A INPUT -p udp --dport "$VM_AGENT_PORT" -j DROP
         ip6tables -A INPUT -p tcp --dport 22 -j DROP
+        if [ "$TUNNEL_MODE" = true ]; then
+          ip6tables -A INPUT -p tcp --dport "$TUNNEL_PORT" -j DROP
+          ip6tables -A INPUT -p udp --dport "$TUNNEL_PORT" -j DROP
+        fi
 
         while IFS= read -r cidr; do
           [ -n "$cidr" ] && ip6tables -I INPUT 1 -s "$cidr" -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
@@ -667,6 +625,12 @@ write_files:
         ip6tables -I INPUT 1 -i docker0 -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT
         ip6tables -I INPUT 1 -i lo -j ACCEPT
       else
+        # The agent binds 0.0.0.0, which Go serves dual-stack. A tunnel node with
+        # a global IPv6 address and no ip6tables would expose it: fail closed.
+        if [ "$TUNNEL_MODE" = true ] && [ -n "$(ip -6 addr show scope global 2>/dev/null)" ]; then
+          logger -t sam-firewall "ERROR: ip6tables unavailable on a tunnel node with global IPv6; refusing"
+          exit 1
+        fi
         logger -t sam-firewall "WARNING: ip6tables unavailable (kernel module not loaded), skipping IPv6 firewall rules"
       fi
 

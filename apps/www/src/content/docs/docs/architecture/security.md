@@ -235,11 +235,20 @@ When a new VM starts, cloud-init receives only the short-lived bootstrap/callbac
 New nodes use per-node Origin CA key material rather than a platform-shared private key:
 
 1. The API Worker passes a node-scoped certificate endpoint into cloud-init (`apps/api/src/services/nodes.ts`).
-2. Cloud-init generates `/etc/sam/tls/origin-ca-key.pem` locally on the VM, creates a CSR, and posts only that CSR to `POST /api/nodes/:id/origin-ca-certificate` with the node callback JWT (`packages/cloud-init/src/template.ts`).
+2. Cloud-init generates `/etc/sam/tls/origin-ca-key.pem` locally on the VM, creates a CSR, and posts only that CSR to `POST /api/nodes/:id/origin-ca-certificate` with the node callback JWT (`ORIGIN_CA_BOOTSTRAP_RUNCMD` in `packages/cloud-init/src/template-ingress.ts`).
 3. The API Worker verifies the callback token is node-scoped and matches `:id`, then signs the CSR through Cloudflare Origin CA using `CF_API_TOKEN` (`apps/api/src/routes/node-lifecycle.ts`, `apps/api/src/services/origin-ca-certificates.ts`).
 4. The VM stores the returned certificate at `/etc/sam/tls/origin-ca.pem` and starts the VM agent with `TLS_CERT_PATH` and `TLS_KEY_PATH`.
 
 The certificate hostnames remain wildcard-scoped (`*.BASE_DOMAIN`, `*.vm.BASE_DOMAIN`, and `BASE_DOMAIN`) so existing `ws-*` and `{node}.vm` routing continues to work. The private key is no longer shared across nodes or embedded in static cloud-init user-data. Each node receives a distinct private key and short-lived certificate, with `ORIGIN_CA_CERT_VALIDITY_DAYS` defaulting to 7 days.
+
+### Tunnel Ingress Nodes
+
+Cloud-init and the VM agent also support a node that is reachable only through an outbound Cloudflare Tunnel connector. A node is in this mode when cloud-init receives `cloudflareTunnelToken` (`isTunnelMode` in `packages/cloud-init/src/tunnel.ts`). Provisioning a tunnel per node and passing that token is control-plane work wired separately; direct-ingress nodes are unchanged.
+
+- The node receives only its own connector run token, never an account API token. Cloud-init writes it to `/etc/sam/cloudflared/tunnel-token` (mode `0400`, owned by the connector's system user) and skips Origin CA bootstrap entirely (`TUNNEL_BOOTSTRAP_RUNCMD` in `packages/cloud-init/src/template-ingress.ts`).
+- Cloud-init installs a pinned `cloudflared` release only after its SHA-256 matches the value recorded for that architecture (`CLOUDFLARED_RELEASES` in `packages/cloud-init/src/tunnel.ts`), then applies the firewall before the VM agent starts. In tunnel mode the firewall drops inbound IPv4 and IPv6 traffic to the agent port, the tunnel listener port and SSH, allows Docker bridges to reach the agent port, and does not allowlist Cloudflare IPs. It fails closed when the host has a global IPv6 address but `ip6tables` is unusable (`/etc/sam/firewall/setup-firewall.sh` in `packages/cloud-init/src/template.ts`).
+- The VM agent serves the connector on a separate listener bound to `127.0.0.1` (`VM_AGENT_TUNNEL_ENABLED`, `VM_AGENT_TUNNEL_PORT`, default `8444`). Every request on it is classified as relayed before routing (`classifyTunnelIngress` in `packages/vm-agent/internal/server/tunnel_ingress.go`). The connector reaches the agent from loopback, so without this the bearerless Git credential exchange that the main listener grants to local Docker helpers would be reachable from the internet. Tunnel requests use the same JWT, session and callback-token checks as before.
+- `sam-cloudflared.service` runs as an unprivileged system user and starts only after the tunnel listener answers `/health` (`TUNNEL_WRITE_FILES` in `packages/cloud-init/src/template-ingress.ts`). The tunnel's ingress service must be `http://127.0.0.1:<VM_AGENT_TUNNEL_PORT>`. The main agent port is never a valid tunnel target.
 
 ### Legacy Origin CA Rotation
 

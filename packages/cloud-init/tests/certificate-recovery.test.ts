@@ -2,8 +2,10 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 import YAML from 'yaml';
+
 import { generateCloudInit } from '../src/generate';
 
 function runBoot(statuses: string, valid = true) {
@@ -14,6 +16,7 @@ function runBoot(statuses: string, valid = true) {
     writeFileSync(join(bin, name), '#!/bin/sh\n' + content, { mode: 0o755 });
   script('logger', 'printf "%s\\n" "$*" >> "$TEST_DIR/log"');
   script('sleep', 'printf "%s\\n" "$*" >> "$TEST_DIR/sleeps"');
+  script('sam-boot-failure', 'printf "%s\\n" "$1" >> "$TEST_DIR/reports"');
   script(
     'openssl',
     `case "$1" in
@@ -23,8 +26,7 @@ function runBoot(statuses: string, valid = true) {
   );
   script(
     'curl',
-    `case "$*" in *boot-failure*) printf 'reported\\n' >> "$TEST_DIR/reports"; exit 0 ;; esac
-n=$(cat "$TEST_DIR/count"); n=$((n+1)); echo "$n" > "$TEST_DIR/count"
+    `n=$(cat "$TEST_DIR/count"); n=$((n+1)); echo "$n" > "$TEST_DIR/count"
 code=$(echo "$STATUSES" | cut -d, -f"$n")
 while [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then shift; printf 'certificate' > "$1"; fi; shift; done
 if [ "$code" = transport ]; then exit 28; fi
@@ -49,7 +51,10 @@ printf '%s' "$code"`
     (x) => typeof x === 'string' && x.includes('ORIGIN_CA_CERTIFICATE_URL=')
   )!;
   try {
-    const result = spawnSync('/bin/sh', ['-c', block.replaceAll('/etc/sam/tls', dir)], {
+    const rendered = block
+      .replaceAll('/etc/sam/tls', dir)
+      .replaceAll('/usr/local/sbin/sam-boot-failure', join(bin, 'sam-boot-failure'));
+    const result = spawnSync('/bin/sh', ['-c', rendered], {
       env: {
         ...process.env,
         PATH: `${bin}:${process.env.PATH}`,
@@ -83,7 +88,7 @@ describe('rendered POSIX certificate bootstrap', () => {
     const result = runBoot('503,503,503,503');
     expect(result.status).toBe(1);
     expect(result.calls).toBe(4);
-    expect(result.reports).toBe('reported\n');
+    expect(result.reports).toBe('origin_ca_bootstrap\n');
   });
   it('does not retry permanent authentication rejection', () => {
     const result = runBoot('403');
@@ -94,7 +99,7 @@ describe('rendered POSIX certificate bootstrap', () => {
   it('rejects an invalid certificate even with HTTP 200', () => {
     const result = runBoot('200', false);
     expect(result.status).toBe(1);
-    expect(result.reports).toBe('reported\n');
+    expect(result.reports).toBe('origin_ca_bootstrap\n');
   });
 });
 
@@ -107,14 +112,8 @@ describe('rendered agent download deadline', () => {
       writeFileSync(join(bin, name), '#!/bin/sh\n' + content, { mode: 0o755 });
     script('logger', 'cat >/dev/null');
     script('chmod', 'touch "$TEST_DIR/continued"');
-    script(
-      'curl',
-      `case "$*" in
-      *boot-failure*) printf 'reported' > "$TEST_DIR/report"; exit 0 ;;
-    esac
-    [ "$1" = --max-time ] && [ "$2" = 7 ] || exit 99
-    exit 28`
-    );
+    script('sam-boot-failure', 'printf "%s" "$1" > "$TEST_DIR/report"');
+    script('curl', '[ "$1" = --max-time ] && [ "$2" = 7 ] || exit 99\nexit 28');
     const config = YAML.parse(
       generateCloudInit({
         nodeId: 'node-test',
@@ -128,13 +127,17 @@ describe('rendered agent download deadline', () => {
     const block = config.runcmd.find((entry) => entry.includes('ARCH=$(uname -m)'));
     if (!block) throw new Error('Agent download block missing');
     try {
-      const result = spawnSync('/bin/sh', ['-c', block], {
+      const rendered = block.replaceAll(
+        '/usr/local/sbin/sam-boot-failure',
+        join(bin, 'sam-boot-failure')
+      );
+      const result = spawnSync('/bin/sh', ['-c', rendered], {
         env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TEST_DIR: dir },
         encoding: 'utf8',
         timeout: 2_000,
       });
       expect(result.status).toBe(28);
-      expect(readFileSync(join(dir, 'report'), 'utf8')).toBe('reported');
+      expect(readFileSync(join(dir, 'report'), 'utf8')).toBe('vm_agent_download');
       expect(() => readFileSync(join(dir, 'continued'))).toThrow();
       expect(result.stdout + result.stderr).not.toContain('CANARY-SECRET');
     } finally {
