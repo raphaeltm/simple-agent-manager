@@ -29,7 +29,7 @@ import { requireApproved, requireAuth, requireSuperadmin } from '../middleware/a
 import { errors } from '../middleware/error';
 import { jsonValidator } from '../schemas';
 import { resolveBillingMode, resolveUnifiedBillingToken } from '../services/ai-billing';
-import { resolveAiGatewayId } from '../services/platform-capabilities';
+import { isMonthlyCostCapAvailable, resolveAiGatewayId } from '../services/platform-capabilities';
 import { getPlatformAgentCredential } from '../services/platform-credentials';
 
 // Fields are validated loosely (v.unknown()) so the handler's existing manual
@@ -122,6 +122,8 @@ adminAIProxyRoutes.get('/config', async (c) => {
     hasOpenAICredential: hasOpenAI,
     hasUnifiedBilling,
     billingMode,
+    // Spend controls this installation can enforce: without AI Gateway only daily token budgets.
+    monthlyCostCapAvailable: isMonthlyCostCapAvailable(c.env),
     models,
   });
 });

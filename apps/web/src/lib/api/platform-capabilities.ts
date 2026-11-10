@@ -4,6 +4,8 @@ import { ApiClientError, request } from './client';
 export interface PlatformCapabilities {
   speechToText: boolean;
   textToSpeech: boolean;
+  /** Whether a monthly AI dollar cap can be set (needs Cloudflare AI Gateway). */
+  monthlyCostCap: boolean;
 }
 
 /**
@@ -14,6 +16,7 @@ export interface PlatformCapabilities {
 export const ASSUMED_PLATFORM_CAPABILITIES: PlatformCapabilities = Object.freeze({
   speechToText: true,
   textToSpeech: true,
+  monthlyCostCap: true,
 });
 
 /**

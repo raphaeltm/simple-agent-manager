@@ -320,6 +320,8 @@ export interface AIProxyConfigResponse {
   hasOpenAICredential: boolean;
   hasUnifiedBilling: boolean;
   billingMode: BillingMode;
+  /** False without Cloudflare AI Gateway: users cannot set a monthly cost cap. */
+  monthlyCostCapAvailable: boolean;
   models: Array<{
     id: string;
     label: string;

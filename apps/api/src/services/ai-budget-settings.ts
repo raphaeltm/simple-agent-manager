@@ -15,6 +15,7 @@ import {
 
 import type { Env } from '../env';
 import { expectJsonRecord } from '../lib/runtime-validation';
+import { isMonthlyCostCapAvailable } from './platform-capabilities';
 
 export interface AiBudgetLimits {
   maxDailyTokens: number;
@@ -80,6 +81,10 @@ export async function getAdminAiAllowance(
   return kv.get<AdminAiAllowance>(`${AI_ADMIN_ALLOWANCE_KV_PREFIX}:${userId}`, 'json');
 }
 
+/** Why a monthly cap cannot be set or enforced on an installation without AI Gateway. */
+export const MONTHLY_COST_CAP_UNAVAILABLE_MESSAGE =
+  'Monthly cost caps are not available on this installation: they are priced from Cloudflare AI Gateway logs (AI_GATEWAY_ID and CF_ACCOUNT_ID). Daily token limits still apply.';
+
 /**
  * Validate and normalize budget update request. Returns validated settings or throws.
  *
@@ -143,6 +148,7 @@ export function validateBudgetUpdate(
 
   if (request.monthlyCostCapUsd !== undefined) {
     if (request.monthlyCostCapUsd !== null) {
+      if (!isMonthlyCostCapAvailable(env)) throw new Error(MONTHLY_COST_CAP_UNAVAILABLE_MESSAGE);
       if (
         typeof request.monthlyCostCapUsd !== 'number' ||
         request.monthlyCostCapUsd < minMonthlyCap ||

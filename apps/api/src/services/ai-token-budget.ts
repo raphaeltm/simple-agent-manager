@@ -26,6 +26,7 @@ export {
   getAdminAiAllowance,
   getAiBudgetLimits,
   getUserBudgetSettings,
+  MONTHLY_COST_CAP_UNAVAILABLE_MESSAGE,
   saveUserBudgetSettings,
   validateBudgetUpdate,
 } from './ai-budget-settings';
@@ -33,6 +34,7 @@ export {
   buildMonthlyCostCacheKey,
   checkMonthlyCostCap,
   getCachedMonthlyCost,
+  type MonthlyCostCapCheck,
 } from './ai-monthly-cost-cap';
 
 export interface TokenBudget {
@@ -453,7 +455,7 @@ export async function checkAiUsageGate(
     return { allowed: false, reason: 'daily-token-budget', budget };
   }
 
-  const monthlyCap = await checkMonthlyCostCap(kv, userId);
+  const monthlyCap = await checkMonthlyCostCap(kv, userId, env);
   if (!monthlyCap.allowed) {
     return { allowed: false, reason: 'monthly-cost-cap', monthlyCap };
   }

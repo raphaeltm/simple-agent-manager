@@ -4,6 +4,7 @@ import { Button, SegmentedControl } from '@simple-agent-manager/ui';
 import { ArrowRight, Check } from 'lucide-react';
 import type { Dispatch, SetStateAction } from 'react';
 
+import { usePlatformCapabilities } from '../../../hooks/usePlatformCapabilities';
 import { FieldLabel, WELL_INPUT_CLASS } from './OnboardingParts';
 import { type AuthMethod, authMethodsForAgent, type StepFormState } from './step-actions';
 import { SubscriptionConnect } from './SubscriptionConnect';
@@ -164,10 +165,16 @@ function SamBudget({
   form: StepFormState;
   setForm: Dispatch<SetStateAction<StepFormState>>;
 }) {
+  // No monthly cap field where the installation cannot enforce one (no Cloudflare AI Gateway).
+  const { monthlyCostCap } = usePlatformCapabilities();
   const fields = [
     { id: 'onboarding-daily-input', key: 'dailyInputTokenLimit', label: 'Daily input tokens' },
     { id: 'onboarding-daily-output', key: 'dailyOutputTokenLimit', label: 'Daily output tokens' },
-    { id: 'onboarding-monthly-cap', key: 'monthlyCostCapUsd', label: 'Monthly cap (USD)' },
+    ...(monthlyCostCap
+      ? ([
+          { id: 'onboarding-monthly-cap', key: 'monthlyCostCapUsd', label: 'Monthly cap (USD)' },
+        ] as const)
+      : []),
   ] as const;
   return (
     <div className="mb-3">
@@ -175,7 +182,9 @@ function SamBudget({
         I route this agent through SAM&apos;s AI proxy and bill usage per task. Limits are optional;
         leave them empty for the defaults.
       </p>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <div
+        className={`grid grid-cols-1 gap-3 ${monthlyCostCap ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}
+      >
         {fields.map((field) => (
           <div key={field.id}>
             <FieldLabel htmlFor={field.id}>{field.label}</FieldLabel>

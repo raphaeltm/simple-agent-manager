@@ -4,7 +4,9 @@
  */
 import { AI_MONTHLY_COST_CACHE_KV_PREFIX } from '@simple-agent-manager/shared';
 
+import type { Env } from '../env';
 import { getUserBudgetSettings } from './ai-budget-settings';
+import { isMonthlyCostCapAvailable } from './platform-capabilities';
 
 // =============================================================================
 // Monthly Cost Cap Enforcement (KV-cached, written by cron)
@@ -29,24 +31,40 @@ export async function getCachedMonthlyCost(
   return Number.isNaN(parsed) ? null : parsed;
 }
 
+export interface MonthlyCostCapCheck {
+  allowed: boolean;
+  costUsd: number;
+  capUsd: number | null;
+  /** True only when a cap is set and this installation can enforce it. */
+  enforced: boolean;
+}
+
 /**
  * Check whether a user is within their monthly cost cap.
  *
  * Reads from KV cache (written by hourly cron). If no cache exists,
  * the check passes (fail-open) — the cron will populate it next run.
  *
- * Returns { allowed, costUsd, capUsd } where capUsd is null if no cap is set.
+ * Without an addressable AI Gateway no cost is ever cached, so the cap is unavailable rather
+ * than failing open forever in silence: new caps are refused (`validateBudgetUpdate`), the budget
+ * API and settings UI say so, and a cap stored while a gateway existed is reported
+ * `enforced: false` without a KV read. Daily token budgets still apply.
  */
 export async function checkMonthlyCostCap(
   kv: KVNamespace,
-  userId: string
-): Promise<{ allowed: boolean; costUsd: number; capUsd: number | null }> {
+  userId: string,
+  env: Pick<Env, 'AI_GATEWAY_ID' | 'CF_ACCOUNT_ID'>
+): Promise<MonthlyCostCapCheck> {
   const userSettings = await getUserBudgetSettings(kv, userId);
   const capUsd = userSettings?.monthlyCostCapUsd ?? null;
 
   // No cap set — always allowed
   if (capUsd === null || capUsd <= 0) {
-    return { allowed: true, costUsd: 0, capUsd };
+    return { allowed: true, costUsd: 0, capUsd, enforced: false };
+  }
+
+  if (!isMonthlyCostCapAvailable(env)) {
+    return { allowed: true, costUsd: 0, capUsd, enforced: false };
   }
 
   const costUsd = await getCachedMonthlyCost(kv, userId);
@@ -55,8 +73,8 @@ export async function checkMonthlyCostCap(
   // Window is at most 60 minutes after SAM mode activation or cap change.
   // Acceptable risk: daily token budget (checked separately) still applies.
   if (costUsd === null) {
-    return { allowed: true, costUsd: 0, capUsd };
+    return { allowed: true, costUsd: 0, capUsd, enforced: true };
   }
 
-  return { allowed: costUsd < capUsd, costUsd, capUsd };
+  return { allowed: costUsd < capUsd, costUsd, capUsd, enforced: true };
 }

@@ -1,6 +1,6 @@
 import type { UserAiBudgetResponse } from '@simple-agent-manager/shared';
 import { Body, Card, CardTitle, SectionHeading, Spinner } from '@simple-agent-manager/ui';
-import { Settings2, ShieldAlert } from 'lucide-react';
+import { Info, Settings2, ShieldAlert } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 
 import { fetchUserAiBudget, updateUserAiBudget } from '../../lib/api';
@@ -53,6 +53,32 @@ function BudgetBar({
   );
 }
 
+/**
+ * Shown instead of the monthly cap when this installation has no Cloudflare AI Gateway, the only
+ * source of per-call cost, so a cap could be set but never enforced.
+ */
+function MonthlyCapUnavailableNote({ storedCapUsd }: { storedCapUsd: number | null }) {
+  return (
+    <div
+      className="flex items-start gap-2 rounded-md border border-border-default p-3"
+      data-testid="monthly-cap-unavailable"
+    >
+      <Info className="w-4 h-4 text-fg-muted flex-shrink-0 mt-0.5" aria-hidden="true" />
+      <Body className="text-fg-muted text-sm m-0 min-w-0 break-words">
+        Monthly cost caps are not available on this installation: there is no Cloudflare AI Gateway
+        to price AI usage. Daily token limits still apply.
+        {storedCapUsd !== null && storedCapUsd > 0 && (
+          <>
+            {' '}
+            Your saved cap of {formatCost(storedCapUsd)} is not enforced here; saving these settings
+            clears it.
+          </>
+        )}
+      </Body>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Budget Settings Section
 // ---------------------------------------------------------------------------
@@ -70,6 +96,8 @@ export function AiBudgetSettingsSection() {
   const [dailyOutput, setDailyOutput] = useState('');
   const [monthlyCap, setMonthlyCap] = useState('');
   const [alertThreshold, setAlertThreshold] = useState('80');
+  // Until the budget loads, assume a cap is available (how the page behaved before the flag).
+  const capAvailable = budget?.monthlyCostCapAvailable !== false;
 
   const loadBudget = useCallback(async () => {
     try {
@@ -100,7 +128,8 @@ export function AiBudgetSettingsSection() {
       await updateUserAiBudget({
         dailyInputTokenLimit: dailyInput ? parseInt(dailyInput, 10) : null,
         dailyOutputTokenLimit: dailyOutput ? parseInt(dailyOutput, 10) : null,
-        monthlyCostCapUsd: monthlyCap ? parseFloat(monthlyCap) : null,
+        // A cap this installation cannot enforce is cleared, never sent (the API refuses it).
+        monthlyCostCapUsd: capAvailable && monthlyCap ? parseFloat(monthlyCap) : null,
         alertThresholdPercent: parseInt(alertThreshold, 10) || 80,
       });
       setSuccess(true);
@@ -172,13 +201,16 @@ export function AiBudgetSettingsSection() {
             limit={budget.effectiveLimits.dailyOutputTokenLimit}
             unit="tokens"
           />
-          {budget.settings.monthlyCostCapUsd !== null && (
+          {capAvailable && budget.settings.monthlyCostCapUsd !== null && (
             <BudgetBar
               label="Monthly Cost Cap"
               used={budget.monthCostUsd}
               limit={budget.settings.monthlyCostCapUsd}
               unit="$"
             />
+          )}
+          {!capAvailable && (
+            <MonthlyCapUnavailableNote storedCapUsd={budget.settings.monthlyCostCapUsd} />
           )}
           {budget.exceeded && (
             <div
@@ -252,21 +284,23 @@ export function AiBudgetSettingsSection() {
               />
             </div>
 
-            <div>
-              <label htmlFor="monthlyCap" className="block text-sm font-medium mb-1">
-                Monthly Cost Cap (USD)
-              </label>
-              <input
-                id="monthlyCap"
-                type="number"
-                min="0.01"
-                step="0.01"
-                value={monthlyCap}
-                onChange={(e) => setMonthlyCap(e.target.value)}
-                placeholder="No limit"
-                className="w-full px-3 py-2.5 min-h-[44px] rounded-md text-fg-primary text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-accent-primary"
-              />
-            </div>
+            {capAvailable && (
+              <div>
+                <label htmlFor="monthlyCap" className="block text-sm font-medium mb-1">
+                  Monthly Cost Cap (USD)
+                </label>
+                <input
+                  id="monthlyCap"
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  value={monthlyCap}
+                  onChange={(e) => setMonthlyCap(e.target.value)}
+                  placeholder="No limit"
+                  className="w-full px-3 py-2.5 min-h-[44px] rounded-md text-fg-primary text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-accent-primary"
+                />
+              </div>
+            )}
 
             <div>
               <label htmlFor="alertThreshold" className="block text-sm font-medium mb-1">

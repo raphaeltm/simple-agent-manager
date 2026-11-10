@@ -127,6 +127,9 @@ describe('buildBudgetKey', () => {
   });
 });
 
+/** A Cloudflare deployment's gateway, which the monthly cap is priced from. */
+const GATEWAY_ENV = { AI_GATEWAY_ID: 'sam', CF_ACCOUNT_ID: 'account-1' };
+
 describe('monthly cost cap', () => {
   it('builds the current-month cache key', () => {
     const key = buildMonthlyCostCacheKey('user-123');
@@ -145,8 +148,8 @@ describe('monthly cost cap', () => {
       })
     );
 
-    const result = await checkMonthlyCostCap(kv, 'user-cap');
-    expect(result).toEqual({ allowed: true, costUsd: 0, capUsd: 10 });
+    const result = await checkMonthlyCostCap(kv, 'user-cap', GATEWAY_ENV);
+    expect(result).toEqual({ allowed: true, costUsd: 0, capUsd: 10, enforced: true });
   });
 
   it('blocks when cached monthly cost reaches the configured cap', async () => {
@@ -162,8 +165,8 @@ describe('monthly cost cap', () => {
     );
     kv._store.set(buildMonthlyCostCacheKey('user-over-cap'), '10.000000');
 
-    const result = await checkMonthlyCostCap(kv, 'user-over-cap');
-    expect(result).toEqual({ allowed: false, costUsd: 10, capUsd: 10 });
+    const result = await checkMonthlyCostCap(kv, 'user-over-cap', GATEWAY_ENV);
+    expect(result).toEqual({ allowed: false, costUsd: 10, capUsd: 10, enforced: true });
   });
 });
 
@@ -432,6 +435,7 @@ describe('checkAiUsageGate', () => {
     ({
       AI_PROXY_DAILY_INPUT_TOKEN_LIMIT: undefined,
       AI_PROXY_DAILY_OUTPUT_TOKEN_LIMIT: undefined,
+      ...GATEWAY_ENV,
       ...overrides,
     }) as unknown as Env;
 
@@ -622,6 +626,7 @@ describe('validateBudgetUpdate', () => {
       AI_USAGE_MIN_DAILY_TOKEN_LIMIT: undefined,
       AI_USAGE_MAX_MONTHLY_COST_CAP_USD: undefined,
       AI_USAGE_MIN_MONTHLY_COST_CAP_USD: undefined,
+      ...GATEWAY_ENV,
       ...overrides,
     }) as unknown as Env;
 

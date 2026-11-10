@@ -242,6 +242,19 @@ export function AdminAIProxy() {
         </div>
       </Card>
 
+      {config.monthlyCostCapAvailable === false && (
+        <div
+          role="status"
+          className="rounded-md border border-border-default p-3 text-sm text-fg-muted"
+          data-testid="admin-monthly-cap-unavailable"
+        >
+          <span className="font-medium text-fg-primary">Monthly cost caps are unavailable.</span>{' '}
+          This installation has no Cloudflare AI Gateway (AI_GATEWAY_ID and CF_ACCOUNT_ID), which is
+          where SAM gets the cost of each AI call. Users cannot set a monthly cap; daily token
+          budgets still limit AI proxy usage.
+        </div>
+      )}
+
       {/* Default Model */}
       <Card>
         <div className="space-y-4 p-4">
