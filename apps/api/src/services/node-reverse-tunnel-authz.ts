@@ -134,6 +134,60 @@ async function readLeaseAuthority(
     .first<LeaseAuthorityRow>();
 }
 
+/** The lease row's node is the live managed reverse-tunnel incarnation the frpc claims. */
+function isLiveLeaseNode(lease: LeaseAuthorityRow, incarnation: string): boolean {
+  return (
+    lease.nodeIncarnation === incarnation &&
+    lease.nodeTerminatedAt === null &&
+    lease.nodeRuntime === 'vm' &&
+    lease.nodeClass === 'managed' &&
+    lease.nodeTransport === 'reverse-tunnel' &&
+    !!lease.nodeStatus &&
+    !NODE_TEARDOWN_STATUSES.has(lease.nodeStatus)
+  );
+}
+
+/** NewProxy: exactly the node's one tcp proxy, on exactly its leased port. */
+function newProxyRefusal(
+  proxy: v.InferOutput<typeof NewProxyContentSchema>,
+  nodeId: string,
+  port: number
+): FrpsPluginDecision | null {
+  if (proxy.proxy_type !== 'tcp') return refuse('proxy_type', 'only one tcp proxy is allowed');
+  if (proxy.proxy_name !== `${nodeId}.${REVERSE_TUNNEL_PROXY_NAME}`) {
+    return refuse('proxy_name', 'proxy name is not the node agent');
+  }
+  if (proxy.remote_port !== port) {
+    return refuse('port_not_leased', 'remote port is not leased to this node');
+  }
+  return null;
+}
+
+/** Credential, lease and node checks shared by every op. */
+async function leaseRefusal(
+  env: Pick<Env, 'DATABASE'>,
+  identity: ClaimedIdentity
+): Promise<{ refusal: FrpsPluginDecision } | { lease: LeaseAuthorityRow }> {
+  // frps names proxies `<user>.<name>`; binding user to the claimed node id keeps that name
+  // (and frp's per-user bookkeeping) tied to the identity the credential proves.
+  if (identity.user !== identity.nodeId) {
+    return { refusal: refuse('identity_mismatch', 'user must equal node id') };
+  }
+  const lease = await readLeaseAuthority(env, identity.nodeId, identity.incarnation);
+  // Hash even when no lease exists so a miss and a wrong credential take the same path.
+  const presentedHash = await hashReverseTunnelCredential(identity.credential);
+  if (!lease || !constantTimeEqual(presentedHash, lease.credentialHash)) {
+    return { refusal: refuse('bad_credential', 'invalid node credential') };
+  }
+  if (lease.leaseStatus !== 'active') {
+    return { refusal: refuse('lease_released', 'node lease is released') };
+  }
+  if (!isLiveLeaseNode(lease, identity.incarnation)) {
+    return { refusal: refuse('node_not_live', 'node incarnation is not live') };
+  }
+  return { lease };
+}
+
 /** Decide one frps plugin request. Never throws for bad input; D1 failures propagate. */
 export async function authorizeFrpsPluginRequest(
   env: Pick<Env, 'DATABASE'>,
@@ -149,48 +203,12 @@ export async function authorizeFrpsPluginRequest(
   if (!parsed) return logged(pluginOp, null, refuse('malformed', 'malformed plugin request'));
   const { identity, proxy } = parsed;
 
-  // frps names proxies `<user>.<name>`; binding user to the claimed node id keeps that name
-  // (and frp's per-user bookkeeping) tied to the identity the credential proves.
-  if (identity.user !== identity.nodeId) {
-    return logged(pluginOp, identity, refuse('identity_mismatch', 'user must equal node id'));
-  }
+  const checked = await leaseRefusal(env, identity);
+  if ('refusal' in checked) return logged(pluginOp, identity, checked.refusal);
+  const { lease } = checked;
+  const proxyRefusal = proxy ? newProxyRefusal(proxy, identity.nodeId, lease.port) : null;
+  if (proxyRefusal) return logged(pluginOp, identity, proxyRefusal);
 
-  const lease = await readLeaseAuthority(env, identity.nodeId, identity.incarnation);
-  // Hash even when no lease exists so a miss and a wrong credential take the same path.
-  const presentedHash = await hashReverseTunnelCredential(identity.credential);
-  if (!lease || !constantTimeEqual(presentedHash, lease.credentialHash)) {
-    return logged(pluginOp, identity, refuse('bad_credential', 'invalid node credential'));
-  }
-  if (lease.leaseStatus !== 'active') {
-    return logged(pluginOp, identity, refuse('lease_released', 'node lease is released'));
-  }
-  if (
-    lease.nodeIncarnation !== identity.incarnation ||
-    lease.nodeTerminatedAt !== null ||
-    lease.nodeRuntime !== 'vm' ||
-    lease.nodeClass !== 'managed' ||
-    lease.nodeTransport !== 'reverse-tunnel' ||
-    !lease.nodeStatus ||
-    NODE_TEARDOWN_STATUSES.has(lease.nodeStatus)
-  ) {
-    return logged(pluginOp, identity, refuse('node_not_live', 'node incarnation is not live'));
-  }
-
-  if (pluginOp === 'NewProxy' && proxy) {
-    if (proxy.proxy_type !== 'tcp') {
-      return logged(pluginOp, identity, refuse('proxy_type', 'only one tcp proxy is allowed'));
-    }
-    if (proxy.proxy_name !== `${identity.nodeId}.${REVERSE_TUNNEL_PROXY_NAME}`) {
-      return logged(pluginOp, identity, refuse('proxy_name', 'proxy name is not the node agent'));
-    }
-    if (proxy.remote_port !== lease.port) {
-      return logged(
-        pluginOp,
-        identity,
-        refuse('port_not_leased', 'remote port is not leased to this node')
-      );
-    }
-  }
   if (pluginOp !== 'Ping') {
     log.info('node_reverse_tunnel.plugin_allowed', {
       op: pluginOp,

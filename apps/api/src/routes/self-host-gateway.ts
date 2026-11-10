@@ -99,6 +99,69 @@ function isGatewayTarget(env: Env, host: string, path: string): boolean {
   return host === `api.${baseDomain}` && LOGS_STREAM_PATH_RE.test(path);
 }
 
+/**
+ * The original request Caddy is asking about, or null when it is not a node WebSocket upgrade
+ * the gateway may authorize (any other target is refused rather than re-dispatched).
+ */
+function forwardedGatewayTarget(env: Env, headers: Headers): URL | null {
+  const host = (headers.get('X-Forwarded-Host') ?? '').toLowerCase().replace(/:\d+$/, '');
+  const uri = headers.get('X-Forwarded-Uri') ?? '';
+  const method = (headers.get('X-Forwarded-Method') ?? '').toUpperCase();
+  const upgrade = (headers.get('Upgrade') ?? '').toLowerCase();
+  let original: URL | null = null;
+  try {
+    original = host && uri.startsWith('/') ? new URL(`https://${host}${uri}`) : null;
+  } catch {
+    original = null;
+  }
+  const allowed =
+    !!original &&
+    original.hostname === host &&
+    method === 'GET' &&
+    upgrade === 'websocket' &&
+    isGatewayTarget(env, host, original.pathname);
+  if (!allowed) {
+    log.warn('self_host_gateway.forward_auth_not_a_gateway_route', {
+      host,
+      method,
+      upgrade: upgrade || null,
+      action: 'rejected',
+    });
+    return null;
+  }
+  return original;
+}
+
+/** Map the re-dispatched handler's answer onto what Caddy's forward_auth understands. */
+function toForwardAuthResponse(inner: Request, response: Response, host: string): Response {
+  if (isGatewayDecisionFor(inner, response)) {
+    const decision = new Headers(response.headers);
+    decision.delete(GATEWAY_HEADER.decision);
+    return new Response(null, { status: 200, headers: decision });
+  }
+  if ((response.status >= 200 && response.status < 300) || response.status === 101) {
+    // Authorized-looking but no decision: never let Caddy proxy without an upstream.
+    log.error('self_host_gateway.forward_auth_missing_decision', {
+      host,
+      status: response.status,
+      action: 'rejected',
+    });
+    return Response.json(
+      { error: 'GATEWAY_NO_DECISION', message: 'Gateway could not route this request' },
+      { status: 502 }
+    );
+  }
+  // The handler's own refusal (401, 302 port-token redirect, 403, 404, 503 ...) goes to the
+  // client unchanged; strip anything that looks like a decision header defensively.
+  const refusal = new Headers(response.headers);
+  for (const name of Object.values(GATEWAY_HEADER)) refusal.delete(name);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: refusal,
+  });
+}
+
 export function createSelfHostGatewayRoutes(dispatch: GatewayDispatch) {
   const routes = new Hono<{ Bindings: Env }>();
 
@@ -126,75 +189,23 @@ export function createSelfHostGatewayRoutes(dispatch: GatewayDispatch) {
   routes.get('/node-websocket', async (c) => {
     const secret = getReverseTunnelGatewaySecret(c.env);
     if (!secret) return notFound();
-    const presented = c.req.header(GATEWAY_SECRET_HEADER) ?? '';
-    if (!constantTimeEqual(presented, secret)) {
+    if (!constantTimeEqual(c.req.header(GATEWAY_SECRET_HEADER) ?? '', secret)) {
       log.warn('self_host_gateway.forward_auth_unauthenticated', { action: 'rejected' });
       return unauthorized();
     }
-
-    const host = (c.req.header('X-Forwarded-Host') ?? '').toLowerCase().replace(/:\d+$/, '');
-    const uri = c.req.header('X-Forwarded-Uri') ?? '';
-    const method = (c.req.header('X-Forwarded-Method') ?? '').toUpperCase();
-    const upgrade = (c.req.header('Upgrade') ?? '').toLowerCase();
-    let original: URL | null = null;
-    if (host && uri.startsWith('/')) {
-      try {
-        original = new URL(`https://${host}${uri}`);
-      } catch {
-        original = null;
-      }
-    }
-    if (
-      !original ||
-      original.hostname !== host ||
-      method !== 'GET' ||
-      upgrade !== 'websocket' ||
-      !isGatewayTarget(c.env, host, original.pathname)
-    ) {
-      log.warn('self_host_gateway.forward_auth_not_a_gateway_route', {
-        host,
-        method,
-        upgrade: upgrade || null,
-        action: 'rejected',
-      });
+    const original = forwardedGatewayTarget(c.env, c.req.raw.headers);
+    if (!original) {
       return Response.json(
         { error: 'FORBIDDEN', message: 'Not a gateway WebSocket route' },
         { status: 403 }
       );
     }
-
     const headers = new Headers(c.req.raw.headers);
     for (const name of GATEWAY_INPUT_HEADERS) headers.delete(name);
     const inner = new Request(original.toString(), { method: 'GET', headers });
     markGatewayAuthorizationRequest(inner);
     const response = await dispatch(inner, c.env, c.executionCtx);
-
-    if (isGatewayDecisionFor(inner, response)) {
-      const decision = new Headers(response.headers);
-      decision.delete(GATEWAY_HEADER.decision);
-      return new Response(null, { status: 200, headers: decision });
-    }
-    if ((response.status >= 200 && response.status < 300) || response.status === 101) {
-      // Authorized-looking but no decision: never let Caddy proxy without an upstream.
-      log.error('self_host_gateway.forward_auth_missing_decision', {
-        host,
-        status: response.status,
-        action: 'rejected',
-      });
-      return Response.json(
-        { error: 'GATEWAY_NO_DECISION', message: 'Gateway could not route this request' },
-        { status: 502 }
-      );
-    }
-    // The handler's own refusal (401, 302 port-token redirect, 403, 404, 503 ...) goes to the
-    // client unchanged; strip anything that looks like a decision header defensively.
-    const refusal = new Headers(response.headers);
-    for (const name of Object.values(GATEWAY_HEADER)) refusal.delete(name);
-    return new Response(response.body, {
-      status: response.status,
-      statusText: response.statusText,
-      headers: refusal,
-    });
+    return toForwardAuthResponse(inner, response, original.hostname);
   });
 
   return routes;
