@@ -7,19 +7,35 @@ import type { Provider, ProviderRequestContext } from '@simple-agent-manager/pro
 import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
 import { deleteDNSRecord } from './dns';
-import type { ProvisionNodeRow } from './node-provisioning-predicates';
+import { type ProvisionNodeRow, releaseTunnelBeforeVm } from './node-provisioning-predicates';
 import { deleteNodeResourcesStrict } from './strict-node-deletion';
 
+/**
+ * Last-resort provider delete after strict teardown failed. Strict teardown is what records
+ * termination proof (and so releases the incarnation's Cloudflare tunnel); this fallback
+ * records none, so on a confirmed delete it releases that exact incarnation's tunnel itself,
+ * or the tunnel and its CNAME would outlive the VM forever.
+ */
 export async function deleteCreatedProviderVmDirectly(input: {
+  env: Env;
   provider: Pick<Provider, 'deleteVM'>;
   providerInstanceId: string;
   nodeId: string;
+  runtimeIncarnationId: string | null;
   providerContext?: ProviderRequestContext;
 }): Promise<void> {
   try {
     if (input.providerContext)
       await input.provider.deleteVM(input.providerInstanceId, input.providerContext);
     else await input.provider.deleteVM(input.providerInstanceId);
+    if (input.runtimeIncarnationId) {
+      await releaseTunnelBeforeVm(
+        input.env,
+        input.nodeId,
+        input.runtimeIncarnationId,
+        'provider_vm_deleted_directly'
+      );
+    }
   } catch (err) {
     log.error('node_provisioning.created_vm_direct_cleanup_failed', {
       nodeId: input.nodeId,
@@ -71,6 +87,8 @@ export async function cleanupCreatedVmAfterProvisioningRace(input: {
   }
 
   await deleteCreatedProviderVmDirectly({
+    env: input.env,
+    runtimeIncarnationId: input.runtimeIncarnationId,
     provider: input.provider,
     providerInstanceId: input.providerInstanceId,
     nodeId: input.node.id,

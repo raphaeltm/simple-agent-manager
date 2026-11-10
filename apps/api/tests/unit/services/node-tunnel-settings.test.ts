@@ -29,7 +29,7 @@ describe('managed VM tunnel admin settings', () => {
   it('exposes typed non-secret runtime controls through existing admin settings', async () => {
     const view = await readAdminSettings(env, { fresh: true });
     const controls = view.settings.filter((setting) => setting.name.startsWith('vmTunnels.'));
-    expect(controls).toHaveLength(7);
+    expect(controls).toHaveLength(8);
     expect(
       controls.every((setting) => setting.type === 'integer' && setting.secret === false)
     ).toBe(true);
@@ -37,6 +37,7 @@ describe('managed VM tunnel admin settings', () => {
     expect(await resolveNodeTunnelCleanupConfig(env)).toEqual({
       requestTimeoutMs: 10000,
       batchSize: 10,
+      sweepBudgetMs: 30000,
       backoffBaseMs: 60000,
       backoffMaxMs: 3600000,
       stuckAttempts: 6,
@@ -54,6 +55,7 @@ describe('managed VM tunnel admin settings', () => {
         { name: 'vmTunnels.apiRetryDelayMs', value: 7 },
         { name: 'vmTunnels.cleanupRequestTimeoutMs', value: 900 },
         { name: 'vmTunnels.cleanupBatchSize', value: 4 },
+        { name: 'vmTunnels.cleanupSweepBudgetMs', value: 5000 },
         { name: 'vmTunnels.cleanupBackoffBaseMs', value: 17 },
         { name: 'vmTunnels.cleanupBackoffMaxMs', value: 50 },
         { name: 'vmTunnels.cleanupStuckAttempts', value: 2 },
@@ -63,6 +65,7 @@ describe('managed VM tunnel admin settings', () => {
     expect(await resolveNodeTunnelCleanupConfig(env)).toEqual({
       requestTimeoutMs: 900,
       batchSize: 4,
+      sweepBudgetMs: 5000,
       backoffBaseMs: 17,
       backoffMaxMs: 50,
       stuckAttempts: 2,
@@ -111,5 +114,11 @@ describe('managed VM tunnel admin settings', () => {
     });
     await expect(listTunnelsByExactName(env, 'owned-name')).rejects.toMatchObject({ status: 503 });
     expect(request).toHaveBeenCalledTimes(2);
+    // Background cleanup overrides interactive retry settings with one attempt.
+    request.mockClear();
+    await expect(listTunnelsByExactName(env, 'owned-name', { attempts: 1 })).rejects.toMatchObject({
+      status: 503,
+    });
+    expect(request).toHaveBeenCalledTimes(1);
   });
 });

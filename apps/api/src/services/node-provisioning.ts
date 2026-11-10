@@ -425,6 +425,8 @@ export async function provisionNode(
           ...serializeError(cleanupErr),
         });
         await deleteCreatedProviderVmDirectly({
+          env,
+          runtimeIncarnationId: provisioningRuntimeIncarnationId,
           provider,
           providerInstanceId: vm.id,
           nodeId: node.id,

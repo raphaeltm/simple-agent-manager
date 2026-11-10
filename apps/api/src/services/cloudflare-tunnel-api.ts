@@ -29,6 +29,8 @@ export type CloudflareTunnelEnv = Env;
 export interface CloudflareCallOptions {
   /** Per-request timeout override (background cleanup uses a shorter budget). */
   timeoutMs?: number;
+  /** Idempotent attempt override; cleanup uses one attempt and its durable retry schedule. */
+  attempts?: number;
   signal?: AbortSignal;
 }
 
@@ -111,7 +113,7 @@ async function cloudflareRequest(
   options: CloudflareCallOptions = {}
 ): Promise<unknown> {
   const retry = await resolveNodeTunnelApiConfig(env);
-  const attempts = method === 'POST' ? 1 : retry.attempts;
+  const attempts = method === 'POST' ? 1 : Math.max(1, options.attempts ?? retry.attempts);
   const timeoutMs =
     options.timeoutMs ?? getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
   let lastError: CloudflareTunnelApiError | null = null;

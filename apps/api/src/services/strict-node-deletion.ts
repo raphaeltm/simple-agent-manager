@@ -16,7 +16,7 @@ import {
   resolveEnvironmentLabel,
   resolveInstallationId,
 } from './node-provider-labels';
-import { settleNodeTunnels } from './node-tunnel-cleanup';
+import { releaseNodeTunnels } from './node-tunnel-cleanup';
 import {
   type ContainerWorkspaceDeletionAuthority,
   requireNodeWorkspaceArtifactsDeleted,
@@ -226,11 +226,14 @@ async function reconcileStrictProviderlessVm(
 }
 
 /**
- * Release and clean the Cloudflare tunnel of every non-live incarnation of this VM node.
- * Instant (cf-container) runtimes never reach this: they never own tunnel resources.
+ * Mark the Cloudflare tunnel of every non-live incarnation of this node for deletion (one D1
+ * write; the cron sweep does the Cloudflare I/O, so teardown never waits on that API). Only
+ * managed tunnel-transport VM nodes own tunnels: legacy nodes and Instant containers pay
+ * nothing, and an incarnation missed here is still found by the sweep's own non-live scan.
  */
-async function releaseTerminatedNodeTunnels(env: Env, nodeId: string): Promise<void> {
-  await settleNodeTunnels(env, nodeId, 'runtime_terminated');
+async function releaseTerminatedNodeTunnels(env: Env, node: NodeRow): Promise<void> {
+  if (node.runtime !== 'vm' || node.transport !== 'cloudflare-tunnel') return;
+  await releaseNodeTunnels(env, node.id, 'runtime_terminated');
 }
 
 async function markWorkspaceRuntimeTerminationConfirmed(
@@ -435,7 +438,7 @@ export async function deleteNodeResourcesStrict(
       );
     }
     await markWorkspaceRuntimeTerminationConfirmed(db, node, node.runtimeTerminationConfirmedAt);
-    if (node.runtime === 'vm') await releaseTerminatedNodeTunnels(env, node.id);
+    await releaseTerminatedNodeTunnels(env, node);
     return {
       providerVm: node.providerInstanceId ? 'already-absent' : 'no-instance',
       runtimeTerminationConfirmedAt: node.runtimeTerminationConfirmedAt,
@@ -487,7 +490,7 @@ export async function deleteNodeResourcesStrict(
   const runtimeTerminationConfirmedAt = await markRuntimeTerminationConfirmed(db, node);
   // The proof makes this incarnation non-live, which releases its Cloudflare tunnel (if it
   // had one). Never throws: the tunnel journal keeps the identity for the cron sweep.
-  await releaseTerminatedNodeTunnels(env, node.id);
+  await releaseTerminatedNodeTunnels(env, node);
   if (options.cleanupDns !== false) {
     await deleteStrictNodeDnsRecord(
       node,

@@ -56,15 +56,16 @@ export async function resolveNodeTunnelApiConfig(env: Env) {
 }
 
 export async function resolveNodeTunnelCleanupConfig(env: Env) {
-  const [requestTimeoutMs, batchSize, backoffBaseMs, backoffMaxMs, stuckAttempts] =
+  const [requestTimeoutMs, batchSize, sweepBudgetMs, backoffBaseMs, backoffMaxMs, stuckAttempts] =
     await Promise.all([
       runtimeValue(env, 'cleanupRequestTimeoutMs'),
       runtimeValue(env, 'cleanupBatchSize'),
+      runtimeValue(env, 'cleanupSweepBudgetMs'),
       runtimeValue(env, 'cleanupBackoffBaseMs'),
       runtimeValue(env, 'cleanupBackoffMaxMs'),
       runtimeValue(env, 'cleanupStuckAttempts'),
     ]);
-  return { requestTimeoutMs, batchSize, backoffBaseMs, backoffMaxMs, stuckAttempts };
+  return { requestTimeoutMs, batchSize, sweepBudgetMs, backoffBaseMs, backoffMaxMs, stuckAttempts };
 }
 
 /** Cloud-init validates the supported release and timing bounds before rendering. */

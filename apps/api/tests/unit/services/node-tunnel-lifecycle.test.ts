@@ -16,6 +16,7 @@ import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { runNodeTunnelCleanupSweep } from '../../../src/services/node-tunnel-cleanup';
 import { resolveManagedNodeTransport } from '../../../src/services/node-tunnel-config';
+import { ensureNodeTunnelForProvisioning } from '../../../src/services/node-tunnel-provisioning';
 import { createNodeRecord, provisionNode } from '../../../src/services/nodes';
 import { deleteNodeResourcesStrict } from '../../../src/services/strict-node-deletion';
 import { FakeCloudflare } from '../../helpers/fake-cloudflare-tunnels';
@@ -538,47 +539,80 @@ describe('failures before the VM exists release and delete the tunnel', () => {
 });
 
 describe('node deletion and stale-incarnation cleanup', () => {
-  it('strict deletion removes the VM, then the CNAME and tunnel of that incarnation', async () => {
+  it('strict deletion removes the VM and only marks the tunnel (no Cloudflare I/O); the sweep deletes CNAME, connectors, tunnel in order', async () => {
     const node = await freshNode();
     await provisionNode(node.id, env);
     cf.liveTunnels()[0]!.connections = 2; // a live connector must be dropped first
+    const callsBeforeDelete = cf.calls.length;
     const result = await deleteNodeResourcesStrict(node.id, USER, env);
     expect(result.providerVm).toBe('deleted');
     expect(mocks.deleteVM).toHaveBeenCalledWith('vm-1');
+    // Teardown paths (delete route, DOs, other sweeps) never wait on the Cloudflare API.
+    expect(cf.calls.length).toBe(callsBeforeDelete);
     expect(journal(node.id)).toMatchObject([
-      { status: 'cleaned', cleanupReason: 'runtime_terminated' },
+      { status: 'cleanup_pending', cleanupReason: 'runtime_terminated' },
     ]);
+
+    expect(await runNodeTunnelCleanupSweep(env)).toMatchObject({ attempted: 1, cleaned: 1 });
+    expect(journal(node.id)).toMatchObject([{ status: 'cleaned' }]);
     expect(cf.liveTunnels()).toEqual([]);
     expect(cf.records()).toEqual([]);
-    // Ordering: DNS first, then connectors, then the tunnel.
-    const ops = cf.calls.map((call) => call.op);
+    const ops = cf.calls.slice(callsBeforeDelete).map((call) => call.op);
     expect(ops.lastIndexOf('dns.delete')).toBeLessThan(ops.indexOf('tunnel.connections_delete'));
     expect(ops.indexOf('tunnel.connections_delete')).toBeLessThan(ops.lastIndexOf('tunnel.delete'));
   });
 
-  it('a failed Cloudflare cleanup stays pending with backoff and is finished by a later sweep', async () => {
+  it('a repeated strict deletion on the existing-proof path still releases the tunnel', async () => {
     const node = await freshNode();
     await provisionNode(node.id, env);
-    cf.inject('tunnel.delete', { kind: 'status', status: 500 }, 3);
     await deleteNodeResourcesStrict(node.id, USER, env);
-    const [pending] = journal(node.id);
-    expect(pending).toMatchObject({
-      status: 'cleanup_pending',
-      cleanupAttempts: 1,
-      tunnelId: expect.any(String),
+    // Simulate the release write being lost (e.g. a D1 failure swallowed by the helper).
+    sqlite.prepare(`UPDATE node_cloudflare_tunnels SET status = 'active'`).run();
+    const retry = await deleteNodeResourcesStrict(node.id, USER, env);
+    expect(retry.providerVm).toBe('already-absent');
+    expect(mocks.deleteVM).toHaveBeenCalledTimes(1);
+    expect(journal(node.id)).toMatchObject([{ status: 'cleanup_pending' }]);
+  });
+
+  it('a failed Cloudflare cleanup stays pending with doubling, capped backoff and is finished by a later sweep', async () => {
+    env = tunnelEnv({
+      NODE_TUNNEL_CLEANUP_BACKOFF_BASE_MS: '60000',
+      NODE_TUNNEL_CLEANUP_BACKOFF_MAX_MS: '150000',
     });
-    expect(Date.parse(pending!.cleanupNextAttemptAt!)).toBeGreaterThan(Date.now());
-    expect(pending?.lastError).toContain('HTTP 500');
+    const node = await freshNode();
+    await provisionNode(node.id, env);
+    await deleteNodeResourcesStrict(node.id, USER, env);
+    cf.inject('tunnel.delete', { kind: 'status', status: 500 }, 3);
 
-    // Not due yet: the sweep must not hammer Cloudflare.
-    const callsBefore = cf.calls.length;
-    expect(await runNodeTunnelCleanupSweep(env)).toMatchObject({ attempted: 0 });
-    expect(cf.calls.length).toBe(callsBefore);
+    const delays: number[] = [];
+    let clock = Date.now();
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const before = Date.now();
+      expect(await runNodeTunnelCleanupSweep(env, new Date(clock))).toMatchObject({
+        attempted: 1,
+        cleaned: 0,
+      });
+      const [pending] = journal(node.id);
+      expect(pending).toMatchObject({ status: 'cleanup_pending', cleanupAttempts: attempt });
+      expect(pending?.lastError).toContain('HTTP 500');
+      delays.push(Date.parse(pending!.cleanupNextAttemptAt!) - before);
+      // Not due yet: the sweep must not hammer Cloudflare.
+      const calls = cf.calls.length;
+      expect(await runNodeTunnelCleanupSweep(env, new Date(clock))).toMatchObject({ attempted: 0 });
+      expect(cf.calls.length).toBe(calls);
+      clock = Date.parse(pending!.cleanupNextAttemptAt!) + 1;
+    }
+    // 60 s, 120 s, then capped at 150 s (single-attempt requests: one call per failure).
+    expect(delays[0]).toBeGreaterThanOrEqual(60_000);
+    expect(delays[0]).toBeLessThan(61_000);
+    expect(delays[1]).toBeGreaterThanOrEqual(120_000);
+    expect(delays[1]).toBeLessThan(121_000);
+    expect(delays[2]).toBeGreaterThanOrEqual(150_000);
+    expect(delays[2]).toBeLessThan(151_000);
+    expect(cf.callCount('tunnel.delete')).toBe(3);
 
-    // Due later: the identity survived, so the retry deletes exactly that tunnel.
-    expect(
-      await runNodeTunnelCleanupSweep(env, new Date(Date.now() + 2 * 60 * 60_000))
-    ).toMatchObject({
+    // Due again: the identity survived every failure, so the retry deletes exactly that tunnel.
+    expect(await runNodeTunnelCleanupSweep(env, new Date(clock))).toMatchObject({
       attempted: 1,
       cleaned: 1,
     });
@@ -608,10 +642,11 @@ describe('node deletion and stale-incarnation cleanup', () => {
     const node = await freshNode();
     await provisionNode(node.id, env);
     const [first] = journal(node.id);
-    // Stale cleanup fails, so incarnation A still owns the shared hostname.
-    cf.inject('dns.get', { kind: 'status', status: 500 }, 3);
+    // Stale cleanup fails, so incarnation A still owns the shared hostname (and is in backoff).
     await deleteNodeResourcesStrict(node.id, USER, env);
-    expect(journal(node.id)[0]).toMatchObject({ status: 'cleanup_pending' });
+    cf.inject('dns.get', { kind: 'status', status: 500 });
+    expect(await runNodeTunnelCleanupSweep(env)).toMatchObject({ attempted: 1, cleaned: 0 });
+    expect(journal(node.id)[0]).toMatchObject({ status: 'cleanup_pending', cleanupAttempts: 1 });
 
     // Re-provision the same node row (new incarnation B), as a durable re-allocation does.
     sqlite
@@ -688,5 +723,160 @@ describe('node deletion and stale-incarnation cleanup', () => {
         )
         .run()
     ).toThrow(/CHECK constraint failed/);
+  });
+});
+
+describe('edge branches of adoption, fencing and bounded cleanup', () => {
+  function journalName(nodeId: string): string {
+    return (
+      sqlite
+        .prepare('SELECT tunnel_name AS name FROM node_cloudflare_tunnels WHERE node_id = ?')
+        .get(nodeId) as { name: string }
+    ).name;
+  }
+
+  it('refuses to pick one of several live tunnels carrying the incarnation name', async () => {
+    const node = await freshNode();
+    cf.inject('tunnel.list', {
+      kind: 'hook',
+      run: () => {
+        cf.seedTunnel(journalName(node.id));
+        cf.seedTunnel(journalName(node.id));
+      },
+    });
+    await provisionNode(node.id, env);
+    expect(mocks.createVM).not.toHaveBeenCalled();
+    expect(cf.callCount('tunnel.create')).toBe(0);
+    expect(readNode(node.id)?.status).toBe('error');
+    // The release then deletes BOTH by exact name: both carry this incarnation's random UUID.
+    expect(journal(node.id)).toMatchObject([{ status: 'cleaned', tunnelId: null }]);
+    expect(cf.liveTunnels()).toEqual([]);
+  });
+
+  it('cleans a tunnel whose id was never recorded (lost create, failed recovery read) by exact name', async () => {
+    const node = await freshNode();
+    cf.inject('tunnel.create', { kind: 'lost-after-commit' });
+    cf.inject('tunnel.list', { kind: 'pass' });
+    cf.inject('tunnel.list', { kind: 'status', status: 400, code: 1000 });
+    await provisionNode(node.id, env);
+    expect(mocks.createVM).not.toHaveBeenCalled();
+    expect(journal(node.id)).toMatchObject([{ status: 'cleaned', tunnelId: null }]);
+    expect(cf.tunnels.size).toBe(1);
+    expect(cf.liveTunnels()).toEqual([]);
+  });
+
+  it('cleans a CNAME whose id was never recorded, and leaves a foreign same-name record alone', async () => {
+    const node = await freshNode();
+    cf.inject('dns.create', { kind: 'lost-after-commit' });
+    cf.inject('dns.list', { kind: 'pass' });
+    cf.inject('dns.list', { kind: 'status', status: 400, code: 1004 });
+    await provisionNode(node.id, env);
+    expect(mocks.createVM).not.toHaveBeenCalled();
+    expect(journal(node.id)).toMatchObject([{ status: 'cleaned', dnsRecordId: null }]);
+    expect(cf.records()).toEqual([]);
+    expect(cf.liveTunnels()).toEqual([]);
+  });
+
+  it('gives up on a CNAME create after one bounded retry', async () => {
+    const node = await freshNode();
+    cf.inject('dns.create', { kind: 'network' }, 2);
+    await provisionNode(node.id, env);
+    expect(cf.callCount('dns.create')).toBe(2);
+    expect(mocks.createVM).not.toHaveBeenCalled();
+    expect(readNode(node.id)?.status).toBe('error');
+    expect(journal(node.id)).toMatchObject([{ status: 'cleaned' }]);
+  });
+
+  it('refuses to re-provision an incarnation whose tunnel is already released, without touching Cloudflare', async () => {
+    const node = await freshNode();
+    await provisionNode(node.id, env);
+    const view = readNode(node.id)!;
+    sqlite.prepare(`UPDATE node_cloudflare_tunnels SET status = 'cleanup_pending'`).run();
+    const calls = cf.calls.length;
+    await expect(
+      ensureNodeTunnelForProvisioning(env, {
+        nodeId: node.id,
+        userId: USER,
+        runtimeIncarnationId: view.incarnation!,
+      })
+    ).rejects.toThrow('already being cleaned up');
+    expect(cf.calls.length).toBe(calls);
+  });
+
+  it('refuses to continue a journal written for a different Cloudflare account', async () => {
+    const node = await freshNode();
+    await provisionNode(node.id, env);
+    const view = readNode(node.id)!;
+    sqlite.prepare(`UPDATE node_cloudflare_tunnels SET account_id = 'other-account'`).run();
+    const calls = cf.calls.length;
+    await expect(
+      ensureNodeTunnelForProvisioning(env, {
+        nodeId: node.id,
+        userId: USER,
+        runtimeIncarnationId: view.incarnation!,
+      })
+    ).rejects.toThrow('different Cloudflare account');
+    expect(cf.calls.length).toBe(calls);
+  });
+
+  it('a VM deleted by the direct fallback (strict teardown failed) still releases its tunnel', async () => {
+    const node = await freshNode();
+    // Authority is revoked right after createVM; strict teardown then fails to resolve the
+    // provider, so provisioning falls back to a direct provider delete.
+    mocks.assertPlan
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('allocation revoked'));
+    mocks.createProvider
+      .mockResolvedValueOnce(provider)
+      .mockRejectedValueOnce(new Error('credential lookup failed'));
+    await provisionNode(node.id, env);
+    expect(mocks.deleteVM).toHaveBeenCalledWith('vm-1');
+    // No termination proof was recorded (strict teardown failed), so only the fallback's own
+    // release can free the tunnel.
+    expect(readNode(node.id)?.proof).toBeNull();
+    expect(journal(node.id)).toMatchObject([
+      { status: 'cleaned', cleanupReason: 'provider_vm_deleted_directly' },
+    ]);
+    expect(cf.liveTunnels()).toEqual([]);
+    expect(cf.records()).toEqual([]);
+  });
+
+  it('the sweep is bounded per tick by batch size and converges across ticks', async () => {
+    env = tunnelEnv({ NODE_TUNNEL_CLEANUP_BATCH_SIZE: '2' });
+    const nodes = [];
+    for (let i = 0; i < 5; i++) {
+      const node = await freshNode();
+      await provisionNode(node.id, env);
+      nodes.push(node);
+    }
+    sqlite.prepare('DELETE FROM nodes').run();
+    expect(await runNodeTunnelCleanupSweep(env)).toMatchObject({ released: 5, attempted: 2 });
+    expect(await runNodeTunnelCleanupSweep(env)).toMatchObject({ released: 0, attempted: 2 });
+    expect(await runNodeTunnelCleanupSweep(env)).toMatchObject({ attempted: 1, cleaned: 1 });
+    expect(await runNodeTunnelCleanupSweep(env)).toMatchObject({ attempted: 0 });
+    expect(nodes.flatMap((node) => journal(node.id)).map((row) => row.status)).toEqual(
+      Array(5).fill('cleaned')
+    );
+    expect(cf.liveTunnels()).toEqual([]);
+  });
+
+  it('the sweep stops starting rows once its wall-time budget is spent', async () => {
+    env = tunnelEnv({ NODE_TUNNEL_CLEANUP_SWEEP_BUDGET_MS: '1000' });
+    for (let i = 0; i < 3; i++) await provisionNode((await freshNode()).id, env);
+    sqlite.prepare('DELETE FROM nodes').run();
+    let now = 0;
+    // The budget is read before each row: 400 and 800 are within 1000 ms, 1200 is not.
+    const clock = () => {
+      const value = now;
+      now += 400;
+      return value;
+    };
+    expect(await runNodeTunnelCleanupSweep(env, new Date(), clock)).toMatchObject({
+      released: 3,
+      attempted: 2,
+      cleaned: 2,
+    });
+    expect(await runNodeTunnelCleanupSweep(env)).toMatchObject({ attempted: 1, cleaned: 1 });
   });
 });

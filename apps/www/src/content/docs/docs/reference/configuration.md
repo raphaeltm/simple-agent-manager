@@ -1629,10 +1629,11 @@ Tunnel API retries and resource cleanup use **Admin → Settings → Operations*
 
 | Admin setting | Default | Meaning |
 | --- | --- | --- |
-| `vmTunnels.apiAttempts` | `3` | Total attempts for transient GET/PUT/DELETE failures, range 1–10. Creation is never retried. |
+| `vmTunnels.apiAttempts` | `3` | Provisioning attempts for transient GET/PUT/DELETE failures, range 1–10. Creation is never retried; cleanup uses one attempt per request. |
 | `vmTunnels.apiRetryDelayMs` | `250` | Linear retry delay step in milliseconds, range 1–30000. |
 | `vmTunnels.cleanupRequestTimeoutMs` | `10000` | Per-request background timeout, range 1–30000 ms, capped by `CF_API_TIMEOUT_MS`. |
 | `vmTunnels.cleanupBatchSize` | `10` | Journal rows processed per sweep, range 1–100. |
+| `vmTunnels.cleanupSweepBudgetMs` | `30000` | Time before the sweep stops starting new rows, range 1–120000 ms. An in-flight row may finish afterward; remaining rows stay due. |
 | `vmTunnels.cleanupBackoffBaseMs` | `60000` | Initial cleanup retry delay, range 1–86400000 ms. |
 | `vmTunnels.cleanupBackoffMaxMs` | `3600000` | Maximum cleanup retry delay, range 1–604800000 ms. Ownership remains recorded until cleanup succeeds. |
 | `vmTunnels.cleanupStuckAttempts` | `6` | Failed attempts before subsequent failures are logged at error severity, range 1–100. |

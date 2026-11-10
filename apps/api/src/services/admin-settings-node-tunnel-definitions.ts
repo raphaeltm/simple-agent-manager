@@ -5,6 +5,7 @@ export const NODE_TUNNEL_RUNTIME_DEFAULTS = {
   apiRetryDelayMs: 250,
   cleanupRequestTimeoutMs: 10000,
   cleanupBatchSize: 10,
+  cleanupSweepBudgetMs: 30000,
   cleanupBackoffBaseMs: 60000,
   cleanupBackoffMaxMs: 3600000,
   cleanupStuckAttempts: 6,
@@ -17,7 +18,7 @@ export const NODE_TUNNEL_SETTINGS: readonly AdminSettingDefinition[] = [
     'vmTunnels.apiAttempts',
     NODE_TUNNEL_RUNTIME_DEFAULTS.apiAttempts,
     'Operations',
-    'Total attempts for transient tunnel API GET/PUT/DELETE failures. Creation is never retried.',
+    'Provisioning attempts for transient tunnel API GET/PUT/DELETE failures. Creation is never retried; cleanup always makes one attempt per request.',
     { min: 1, max: 10 }
   ),
   integerDefinition(
@@ -40,6 +41,13 @@ export const NODE_TUNNEL_SETTINGS: readonly AdminSettingDefinition[] = [
     'Operations',
     'Maximum tunnel journal rows processed per cleanup sweep.',
     { min: 1, max: 100 }
+  ),
+  integerDefinition(
+    'vmTunnels.cleanupSweepBudgetMs',
+    NODE_TUNNEL_RUNTIME_DEFAULTS.cleanupSweepBudgetMs,
+    'Operations',
+    'Time budget in milliseconds before starting another tunnel cleanup row. An in-flight row may finish afterward; remaining rows stay due for the next sweep.',
+    { min: 1, max: 120000 }
   ),
   integerDefinition(
     'vmTunnels.cleanupBackoffBaseMs',
