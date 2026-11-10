@@ -239,6 +239,9 @@ func (c *Config) Validate() error {
 	if c.Port < 1 || c.Port > 65535 {
 		errs = append(errs, fmt.Errorf("VM_AGENT_PORT must be 1-65535, got %d", c.Port))
 	}
+	if err := c.Tunnel.validate(c.Port); err != nil {
+		errs = append(errs, err)
+	}
 
 	// Control plane URL is required and must be valid
 	if c.ControlPlaneURL == "" {

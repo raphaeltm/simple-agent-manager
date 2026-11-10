@@ -71,6 +71,7 @@ type Server struct {
 	systemProvisioning     *systemProvisioningBarrier
 	config                 *config.Config
 	httpServer             *http.Server
+	tunnelServer           *http.Server // loopback Cloudflare Tunnel ingress; nil unless enabled
 	jwtValidator           *auth.JWTValidator
 	sessionManager         *auth.SessionManager
 	ptyManager             *pty.Manager
@@ -656,17 +657,7 @@ func New(cfg *config.Config) (*Server, error) {
 	mux := http.NewServeMux()
 	s.setupRoutes(mux)
 
-	// Create HTTP server with configurable timeouts.
-	// WriteTimeout is intentionally set to 0 because WebSocket connections
-	// are long-lived. Go's http.Server.WriteTimeout sets a deadline on the
-	// underlying net.Conn BEFORE the handler runs, which kills hijacked
-	// WebSocket connections after the timeout period.
-	s.httpServer = &http.Server{
-		Addr:        fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
-		Handler:     corsMiddleware(mux, cfg.AllowedOrigins),
-		ReadTimeout: cfg.HTTPReadTimeout,
-		IdleTimeout: cfg.HTTPIdleTimeout,
-	}
+	s.buildHTTPServers(mux)
 
 	return s, nil
 }
@@ -1019,7 +1010,8 @@ func (s *Server) stopAllPortScanners() {
 	}
 }
 
-// Start starts the HTTP server (plain HTTP or TLS based on config).
+// Start starts the HTTP listeners: the main listener (plain HTTP or TLS based
+// on config) and, when enabled, the loopback tunnel listener.
 func (s *Server) Start() error {
 	s.startWorkspaceDeletionReconciler()
 	s.startNodeHealthReporter()
@@ -1031,13 +1023,7 @@ func (s *Server) Start() error {
 	// Start error reporter background flush
 	s.errorReporter.Start()
 
-	if s.config.TLSEnabled {
-		slog.Info("Starting VM Agent with TLS", "addr", s.httpServer.Addr, "cert", s.config.TLSCertPath, "key", s.config.TLSKeyPath)
-		return s.httpServer.ListenAndServeTLS(s.config.TLSCertPath, s.config.TLSKeyPath)
-	}
-
-	slog.Info("Starting VM Agent", "addr", s.httpServer.Addr)
-	return s.httpServer.ListenAndServe()
+	return s.serveListeners()
 }
 
 func (s *Server) startResourceGuard() {
