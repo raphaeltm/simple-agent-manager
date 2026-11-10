@@ -70,7 +70,7 @@ services:
       SAM_DOMAIN: ${SAM_DOMAIN:?set SAM_DOMAIN in .env}
       SAM_TLS_MODE: ${SAM_TLS_MODE:?set SAM_TLS_MODE in .env (internal or dns-<provider>)}
       ACME_EMAIL: ${ACME_EMAIL:-}
-      ACME_CA: ${ACME_CA:-}
+      ACME_CA: ${ACME_CA:-https://acme-v02.api.letsencrypt.org/directory}
       GCP_PROJECT: ${GCP_PROJECT:-}
       HTTP_PORT: ${HTTP_PORT:-80}
       HTTPS_PORT: ${HTTPS_PORT:-443}
