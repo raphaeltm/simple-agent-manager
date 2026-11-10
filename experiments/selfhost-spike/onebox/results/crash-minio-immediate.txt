@@ -1,1 +1,2 @@
 kill -9 at 12:41:36.549, acked so far: do=2717 d1=1234
+# results/crash-minio-immediate.txt: first attempt; the immediate restart failed with "Address already in use" (see node log excerpt in FINDINGS item 2), so the script was changed to retry like a supervisor.
