@@ -1,7 +1,9 @@
 import {
+  DIRECT_FIREWALL_WRITE_FILE,
   ORIGIN_CA_BOOTSTRAP_RUNCMD,
   TUNNEL_BOOTSTRAP_RUNCMD,
   TUNNEL_CONNECTOR_RUNCMD,
+  TUNNEL_FIREWALL_WRITE_FILE,
   TUNNEL_WRITE_FILES,
 } from './template-ingress';
 import type { CloudInitVariables } from './variables';
@@ -114,6 +116,9 @@ export function ingressFragments(variables: CloudInitVariables): Record<string, 
     '{{ ingress_bootstrap_runcmd }}': tunnel ? TUNNEL_BOOTSTRAP_RUNCMD : ORIGIN_CA_BOOTSTRAP_RUNCMD,
     '{{ ingress_connector_runcmd }}': tunnel ? TUNNEL_CONNECTOR_RUNCMD : '',
     '{{ ingress_write_files }}': tunnel ? TUNNEL_WRITE_FILES : '',
+    '{{ ingress_firewall_write_file }}': tunnel
+      ? TUNNEL_FIREWALL_WRITE_FILE
+      : DIRECT_FIREWALL_WRITE_FILE,
   };
 }
 
@@ -124,6 +129,11 @@ export function tunnelReplacements(variables: CloudInitVariables): Record<string
   const release = CLOUDFLARED_RELEASES[version];
   return {
     '{{ tunnel_mode }}': tunnel ? 'true' : 'false',
+    // Every vm-agent start (boot, crash restart, reboot) re-applies the tunnel
+    // firewall atomically first; if that fails the agent does not listen.
+    '{{ vm_agent_exec_start_pre }}': tunnel
+      ? 'ExecStartPre=/etc/sam/firewall/setup-firewall.sh'
+      : '',
     '{{ tunnel_port }}': variables.cloudflareTunnelPort ?? DEFAULT_CLOUDFLARE_TUNNEL_PORT,
     '{{ tunnel_token }}': tunnel ? (variables.cloudflareTunnelToken ?? '') : '',
     '{{ tunnel_listener_wait_seconds }}':

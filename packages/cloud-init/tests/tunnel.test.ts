@@ -364,8 +364,11 @@ describe('executed tunnel boot sequence', () => {
 /** Runs setup-firewall.sh under bash with iptables tooling stubbed. */
 function runFirewall(vars: CloudInitVariables, env: Record<string, string> = {}) {
   const box = sandbox({
-    iptables: 'true',
-    ip6tables: 'true',
+    // `-C INPUT -j SAM-TUNNEL-INGRESS` reports whether the jump already exists.
+    iptables: 'case "$1" in -C) exit "${JUMP_EXIT:-1}" ;; esac',
+    ip6tables: 'case "$1" in -C) exit "${JUMP_EXIT:-1}" ;; -L) exit "${IP6_LIST_EXIT:-0}" ;; esac',
+    'iptables-restore': 'cat > "$TEST_DIR/restore-v4"; exit "${RESTORE_EXIT:-0}"',
+    'ip6tables-restore': 'cat > "$TEST_DIR/restore-v6"',
     'iptables-save': 'true',
     'ip6tables-save': 'true',
     modprobe: 'exit "${MODPROBE_EXIT:-0}"',
@@ -378,54 +381,170 @@ function runFirewall(vars: CloudInitVariables, env: Record<string, string> = {})
     join(box.dir, 'iptables')
   );
   const result = box.run('/bin/bash', script, env);
-  const lines = box.calls().split('\n');
-  return { result, lines, calls: box.calls() };
+  const restored = (family: 'v4' | 'v6') => {
+    try {
+      return readFileSync(join(box.dir, `restore-${family}`), 'utf8');
+    } catch {
+      return '';
+    }
+  };
+  return { result, lines: box.calls().split('\n'), calls: box.calls(), restored };
 }
 
-describe('executed firewall script', () => {
-  it('tunnel mode drops all public agent, tunnel and SSH ingress on IPv4 and IPv6', () => {
-    const { result, lines, calls } = runFirewall(tunnel());
+const TUNNEL_CHAIN_RULES = [
+  '-A SAM-TUNNEL-INGRESS -i lo -j RETURN',
+  '-A SAM-TUNNEL-INGRESS -i docker0 -p tcp --dport 8080 -j RETURN',
+  '-A SAM-TUNNEL-INGRESS -i br-+ -p tcp --dport 8080 -j RETURN',
+  '-A SAM-TUNNEL-INGRESS -p tcp --dport 8080 -j DROP',
+  '-A SAM-TUNNEL-INGRESS -p udp --dport 8080 -j DROP',
+  '-A SAM-TUNNEL-INGRESS -p tcp --dport 8444 -j DROP',
+  '-A SAM-TUNNEL-INGRESS -p udp --dport 8444 -j DROP',
+  '-A SAM-TUNNEL-INGRESS -p tcp --dport 22 -j DROP',
+];
+
+describe('executed tunnel firewall script', () => {
+  it('replaces one chain in a single restore transaction per family, never flushing INPUT', () => {
+    const { result, calls, restored } = runFirewall(tunnel());
     expect(result.status).toBe(0);
-    for (const ipt of ['iptables', 'ip6tables']) {
-      for (const rule of [
-        '-A INPUT -p tcp --dport 8080 -j DROP',
-        '-A INPUT -p udp --dport 8080 -j DROP',
-        '-A INPUT -p tcp --dport 8444 -j DROP',
-        '-A INPUT -p udp --dport 8444 -j DROP',
-        '-A INPUT -p tcp --dport 22 -j DROP',
-        '-I INPUT 1 -i lo -j ACCEPT',
-        '-I INPUT 1 -i docker0 -p tcp --dport 8080 -j ACCEPT',
-        '-I INPUT 1 -i br-+ -p tcp --dport 8080 -j ACCEPT',
-      ]) {
-        expect(lines).toContain(`${ipt} ${rule}`);
-      }
+    for (const family of ['v4', 'v6'] as const) {
+      expect(restored(family)).toBe(
+        [
+          '*filter',
+          ':SAM-TUNNEL-INGRESS - [0:0]',
+          '-I INPUT 1 -j SAM-TUNNEL-INGRESS',
+          ...TUNNEL_CHAIN_RULES,
+          'COMMIT',
+          '',
+        ].join('\n')
+      );
     }
-    // No public allowlist and no bridge path to the tunnel listener.
+    expect(calls).toContain('iptables-restore --noflush');
+    expect(calls).toContain('ip6tables-restore --noflush');
+    // No flush, policy change or one-by-one rule edits that could open a gap.
+    expect(calls).not.toMatch(/ -F| -P| -A | -I | -D /);
+    // No public allowlist.
     expect(calls).not.toContain('curl');
-    expect(calls).not.toMatch(/ -s \S+ .*-j ACCEPT/);
-    expect(calls).not.toMatch(/--dport 8444 -j ACCEPT/);
   });
 
-  it('tunnel mode fails closed when IPv6 is routable but ip6tables is unavailable', () => {
+  it('re-applies idempotently: an existing INPUT jump is not duplicated', () => {
+    const { result, restored } = runFirewall(tunnel(), { JUMP_EXIT: '0' });
+    expect(result.status).toBe(0);
+    expect(restored('v4')).not.toContain('-I INPUT');
+    expect(restored('v4')).toContain(':SAM-TUNNEL-INGRESS - [0:0]');
+  });
+
+  it('fails (so the vm-agent cannot start) when the restore transaction fails', () => {
+    const { result } = runFirewall(tunnel(), { RESTORE_EXIT: '1' });
+    expect(result.status).not.toBe(0);
+  });
+
+  it('fails closed when IPv6 is routable but ip6tables is unavailable', () => {
     const { result, calls } = runFirewall(tunnel(), {
-      MODPROBE_EXIT: '1',
+      IP6_LIST_EXIT: '1',
       GLOBAL_IPV6: 'inet6 2001:db8::5/64 scope global',
     });
     expect(result.status).toBe(1);
     expect(calls).toContain('refusing');
   });
 
-  it('tunnel mode tolerates missing ip6tables on an IPv4-only host', () => {
-    const { result } = runFirewall(tunnel(), { MODPROBE_EXIT: '1' });
+  it('protects IPv6 when ip6tables works even though modprobe is missing', () => {
+    const { result, restored } = runFirewall(tunnel(), { MODPROBE_EXIT: '127' });
     expect(result.status).toBe(0);
+    expect(restored('v6')).toContain('-A SAM-TUNNEL-INGRESS -p tcp --dport 8080 -j DROP');
   });
 
-  it('control: direct mode keeps the Cloudflare allowlist and opens no tunnel rules', () => {
+  it('tolerates missing ip6tables on an IPv4-only host', () => {
+    const { result, restored } = runFirewall(tunnel(), { IP6_LIST_EXIT: '1' });
+    expect(result.status).toBe(0);
+    expect(restored('v4')).toContain('-A SAM-TUNNEL-INGRESS -p tcp --dport 8080 -j DROP');
+  });
+
+  it('gates every vm-agent start on the firewall in tunnel mode only', () => {
+    const tunnelUnit = file(parse(tunnel()), '/etc/systemd/system/vm-agent.service').content;
+    expect(tunnelUnit).toContain(
+      'ExecStartPre=/etc/sam/firewall/setup-firewall.sh\nExecStart=/usr/local/bin/vm-agent\n'
+    );
+    const directUnit = file(parse(variables()), '/etc/systemd/system/vm-agent.service').content;
+    expect(directUnit).not.toContain('ExecStartPre');
+  });
+
+  it('control: direct mode keeps the Cloudflare allowlist and has no tunnel chain', () => {
     const { result, lines, calls } = runFirewall(variables());
     expect(result.status).toBe(0);
     expect(calls).toContain('curl ');
     expect(lines).toContain('iptables -I INPUT 1 -s 203.0.113.0/24 -p tcp --dport 8080 -j ACCEPT');
+    expect(calls).not.toContain('SAM-TUNNEL-INGRESS');
     expect(calls).not.toContain('8444');
+  });
+});
+
+const canUseNetns =
+  spawnSync('sudo', ['-n', 'unshare', '-n', 'iptables', '-w', '-L', 'INPUT', '-n'], {
+    stdio: 'ignore',
+  }).status === 0;
+
+/**
+ * Real netfilter in a private network namespace (needs passwordless sudo;
+ * skipped elsewhere). A checker loop watches the DROP rule and the INPUT jump
+ * while the script is re-applied repeatedly: an atomic replacement never shows
+ * a gap, where the previous flush-and-re-add approach would.
+ */
+describe.skipIf(!canUseNetns)('tunnel firewall against real netfilter', () => {
+  it('re-applies without any window where the agent port is unprotected', () => {
+    const box = sandbox({ logger: 'true' });
+    const script = file(parse(tunnel()), '/etc/sam/firewall/setup-firewall.sh').content.replaceAll(
+      '/etc/iptables',
+      join(box.dir, 'iptables')
+    );
+    const fw = join(box.dir, 'fw.sh');
+    writeFileSync(fw, script, { mode: 0o755 });
+    const d = box.dir;
+    const driver = `set -e
+bash ${fw}
+( while [ ! -e ${d}/stop ]; do
+    { iptables -w -C SAM-TUNNEL-INGRESS -p tcp --dport 8080 -j DROP && iptables -w -C INPUT -j SAM-TUNNEL-INGRESS; } 2>/dev/null || echo gap >> ${d}/gaps
+  done ) &
+for i in $(seq 25); do bash ${fw}; done
+touch ${d}/stop; wait
+iptables -w -S > ${d}/v4
+ip6tables -w -S > ${d}/v6 2>/dev/null || true
+chown -R ${process.getuid?.() ?? 0} ${d}`;
+    const result = spawnSync(
+      'sudo',
+      [
+        '-n',
+        'unshare',
+        '-n',
+        'env',
+        `PATH=${box.bin}:${process.env.PATH}`,
+        `TEST_DIR=${d}`,
+        'bash',
+        '-c',
+        driver,
+      ],
+      {
+        encoding: 'utf8',
+        timeout: 60_000,
+      }
+    );
+    expect(result.status, result.stderr).toBe(0);
+    let gaps = '';
+    try {
+      gaps = readFileSync(join(d, 'gaps'), 'utf8');
+    } catch {
+      gaps = '';
+    }
+    expect(gaps).toBe('');
+    // iptables -S spells the implicit protocol match out; normalize it away.
+    const listed = (family: string) =>
+      readFileSync(join(d, family), 'utf8')
+        .replace(/ -m (tcp|udp)/g, '')
+        .split('\n');
+    const v4 = listed('v4');
+    expect(v4.filter((l) => l === '-A INPUT -j SAM-TUNNEL-INGRESS')).toHaveLength(1);
+    for (const rule of TUNNEL_CHAIN_RULES) expect(v4).toContain(rule);
+    const v6 = listed('v6');
+    for (const rule of TUNNEL_CHAIN_RULES) expect(v6).toContain(rule);
   });
 });
 

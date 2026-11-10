@@ -34,29 +34,29 @@ API token, never fetches an Origin CA certificate, and blocks public inbound tra
 
 ## Checklist
 
-- [ ] Config: `VM_AGENT_TUNNEL_ENABLED` (default false), `VM_AGENT_TUNNEL_PORT` (default 8444),
+- [x] Config: `VM_AGENT_TUNNEL_ENABLED` (default false), `VM_AGENT_TUNNEL_PORT` (default 8444),
       validation (range, distinct from `VM_AGENT_PORT`).
-- [ ] Server: loopback-only tunnel listener wrapping the existing handler; every request classified
+- [x] Server: loopback-only tunnel listener wrapping the existing handler; every request classified
       relayed via request context before CORS/mux. `isRelayedRequest` honours the context marker.
-- [ ] Own-listener guard covers the tunnel port when enabled (port proxy + local forward).
-- [ ] Start binds both listeners before serving; Stop shuts both down; Start returns the first
+- [x] Own-listener guard covers the tunnel port when enabled (port proxy + local forward).
+- [x] Start binds both listeners before serving; Stop shuts both down; Start returns the first
       fatal serve error.
-- [ ] Go tests: bearerless Git credential refused via tunnel listener and allowed on main
+- [x] Go tests: bearerless Git credential refused via tunnel listener and allowed on main
       loopback; header spoofing (`Connection:` stripping) cannot unclassify; JWT routes still work
       through tunnel; port proxy/local forward refuse tunnel port; start/stop/bind failure; disabled
       by default (no listener).
-- [ ] Split `generate.ts` (validation/variables) to respect the file-size rule.
-- [ ] Cloud-init: new variables + validation (token charset/length, port, pinned version, tunnel +
+- [x] Split `generate.ts` (validation/variables) to respect the file-size rule.
+- [x] Cloud-init: new variables + validation (token charset/length, port, pinned version, tunnel +
       Origin CA mutual exclusion).
-- [ ] Cloud-init tunnel mode: pinned/checksummed cloudflared install, 0600 token file, systemd
+- [x] Cloud-init tunnel mode: pinned/checksummed cloudflared install, 0600 token file, systemd
       connector unit (hardened, `--token-file`, `--no-autoupdate`), firewall before agent start,
       wait for tunnel listener health before starting connector, boot-failure reporting.
-- [ ] Firewall tunnel mode: drop public inbound for agent port, tunnel port, SSH on IPv4/IPv6;
+- [x] Firewall tunnel mode: drop public inbound for agent port, tunnel port, SSH on IPv4/IPv6;
       allow docker bridges to agent port only; fail closed when global IPv6 exists without ip6tables.
-- [ ] Cloud-init tests: parsed YAML for tunnel + legacy; execute changed runcmd/firewall entries
+- [x] Cloud-init tests: parsed YAML for tunnel + legacy; execute changed runcmd/firewall entries
       under their interpreters with stubs.
-- [ ] Docs: VM agent env vars, cloud-init docs/self-hosting where behaviour is described.
-- [ ] Publish contract + completion evidence on `feature.vm-tunnels-staging`; send SHAs to parent.
+- [x] Docs: VM agent env vars, cloud-init docs/self-hosting where behaviour is described.
+- [x] Publish contract + completion evidence on `feature.vm-tunnels-staging`; send SHAs to parent.
 
 ## Acceptance criteria
 
@@ -68,3 +68,32 @@ API token, never fetches an Origin CA certificate, and blocks public inbound tra
   after the firewall and the loopback tunnel listener are ready.
 
 Local tests here are not staging proof; the parent runs live staging E2E.
+
+## Implementation notes
+
+- Commits: `82029044c` (vm-agent listener), `4e44fb8a8` (cloud-init tunnel mode), then a
+  follow-up for the parent's review finding: the tunnel firewall is a dedicated
+  `SAM-TUNNEL-INGRESS` chain replaced by one `iptables-restore --noflush` transaction per
+  family, and the vm-agent unit runs it as `ExecStartPre` in tunnel mode so a firewall
+  failure stops the agent from listening on every start/reboot.
+- A real-netfilter test (`sudo unshare -n`, skipped without passwordless sudo) re-applies the
+  script 25 times under a checker loop: 0 gaps. The same driver against a flush-and-re-add
+  variant recorded 151 gaps.
+- That test found that the first tunnel script skipped IPv6 when `modprobe` was missing even
+  though `ip6tables` worked. Usability of `ip6tables` now decides.
+- User-data size: legacy output was ~31.9 KB of 32 KB with a 700-char callback JWT. Mode-only
+  fragments and reading `/etc/sam/callback-token` bring it to ~30.2 KB (tunnel ~26.9 KB).
+- Local review (this slice): doc-sync PASS; security-auditor 0 CRITICAL/HIGH (LOW systemd
+  hardening applied; checksums verified against the release); task-completion-validator PASS
+  (`template.ts` split into `template-resources.ts`; the configuration.md env table lists
+  control-plane Worker vars, so the cloud-init-internal tunnel vars are documented in
+  security.md instead).
+
+## Deferred
+
+- Direct (legacy) nodes still install the firewall from `internal/provision` after the agent
+  starts listening; the provider cloud firewall is their primary gate. Tunnel nodes are gated
+  before start. A provider-level firewall for tunnel nodes (security MEDIUM: in-VM iptables is
+  the only layer) is control-plane work owned by the parent/lifecycle slice and was reported there.
+- Live staging proof (real VM, connector, firewall evidence) is owned by parent task
+  `01M719ZRT6MJX696B9FH8TBWX9`.
