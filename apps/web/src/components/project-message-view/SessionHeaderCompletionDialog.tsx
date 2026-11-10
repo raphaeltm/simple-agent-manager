@@ -9,7 +9,7 @@ const COPY = {
   },
   cancelled: {
     title: 'Cancel this task?',
-    body: 'This task has not started. Cancelling it stops it from starting later, including after a provider limit resets.',
+    body: "This task hasn't begun running. Cancelling it stops any setup in progress and keeps it from starting later, including after a provider limit resets.",
     confirm: 'Cancel task',
     variant: 'danger',
   },

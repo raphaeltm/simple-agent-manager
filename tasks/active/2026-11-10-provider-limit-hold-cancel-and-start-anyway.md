@@ -35,35 +35,45 @@ gives its owner no way out:
 - A genuine provider rejection after the override goes through `provider-limit-parking.ts`, which
   builds a fresh wait via `newProviderLimitWait()` (the override field is not carried), so the task
   parks normally.
-- Root cause of the false hold: `packages/vm-agent/internal/acp/session_host_usage_claude.go` keeps
+- Root cause of the false hold (tracked as idea `01M73WJGGD2TZP6XDFHJJWHD33`, with the callback-origin follow-up): `packages/vm-agent/internal/acp/session_host_usage_claude.go` keeps
   only `status/utilization/resetsAt` from Claude `rate_limit_info` and drops overage/extra-usage
   fields. Recorded as an idea (not fixed here: needs the exact Claude Code payload verified).
 - Callback-origin (mid-run, parked) waits are out of scope; recorded as follow-up in the idea.
 
 ## Implementation checklist
 
-- [ ] Shared/API: optional `ownerOverride { credentialKey, grantedAt }` on `ProviderLimitWaitSchema`
-- [ ] API: `startProviderLimitTaskAnyway()` service: owner only, admission origin, phase waiting|blocked,
+- [x] Shared/API: optional `ownerOverride { credentialKey, grantedAt }` on `ProviderLimitWaitSchema`
+- [x] API: `startProviderLimitTaskAnyway()` service: owner only, admission origin, phase waiting|blocked,
       status queued|delegated, CAS on wait JSON, records released wait + override, clears admission
       state, nudges the runner; restores the hold if the runner is unavailable
-- [ ] API: `POST /:taskId/provider-limit/start-anyway` route (task:write capability + owner)
-- [ ] API: admission honours an override for the same credential key at node_selection and agent_session;
+- [x] API: `POST /:taskId/provider-limit/start-anyway` route (task:write capability + owner)
+- [x] API: admission honours an override for the same credential key at node_selection and agent_session;
       a changed credential still blocks
-- [ ] API: expose `providerLimitCanStartAnyway` on the chat session task embed
-- [ ] Web: rail shows **Cancel task** (→ `cancelled`) instead of **Complete** for draft/ready/queued/delegated,
+- [x] API: expose `providerLimitCanStartAnyway` on the chat session task embed
+- [x] Web: rail shows **Cancel task** (→ `cancelled`) instead of **Complete** for draft/ready/queued/delegated,
       with its own confirm copy
-- [ ] Web: provider-limit notice offers **Start anyway** (owner, admission hold) with a line explaining it
+- [x] Web: provider-limit notice offers **Start anyway** (owner, admission hold) with a line explaining it
       may spend extra credits
-- [ ] Tests: runner-alarm integration (override proceeds past a live rejected window; credential change
+- [x] Tests: runner-alarm integration (override proceeds past a live rejected window; credential change
       still blocks; cancelled held task's alarm provisions nothing); route/service guards (non-owner,
       callback origin, wrong status); web rail + notice behaviour
-- [ ] Playwright visual audit (mobile + desktop) of the held-session notice and rail
-- [ ] Docs: user-facing provider-limit docs mention Cancel task / Start anyway
-- [ ] Idea: Claude overage fields ignored (root cause) + callback-origin force follow-up
+- [x] Playwright visual audit (mobile + desktop) of the held-session notice and rail
+- [x] Docs: user-facing provider-limit docs mention Cancel task / Start anyway
+- [x] Idea: Claude overage fields ignored (root cause) + callback-origin force follow-up
 
 ## Acceptance criteria
 
-- [ ] Owner can cancel a queued task held by a provider limit from the session view; it never provisions
-- [ ] Owner can start a held, never-started task immediately; it provisions and starts on the same credential
-- [ ] If the selected credential changes after the override, the task blocks for review again
-- [ ] Non-owners and callback-origin waits cannot use Start anyway
+- [x] Owner can cancel a queued task held by a provider limit from the session view; it never provisions
+- [x] Owner can start a held, never-started task immediately; it provisions and starts on the same credential
+- [x] If the selected credential changes after the override, the task blocks for review again
+- [x] Non-owners and callback-origin waits cannot use Start anyway
+
+## Notes
+
+- 2026-11-10: Raphaël approved the draft UI and said "Get them to prod. Skip staging." Staging is
+  waived for this PR only.
+- Start anyway is offered only for `waiting` admission holds. `blocked` holds keep Resume, which
+  accepts a changed credential; that keeps the override bound to the account the owner saw.
+- Review fixes: the mid-alarm re-arm race (Cloudflare M1), the override stripped on
+  block/resume/pin, a non-null key, owner-only flag, the live dialog intent (UI M1), disabled
+  until refetch (UI M2), and the provisioning slab hidden during a hold (UI M3).

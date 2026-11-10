@@ -107,6 +107,7 @@ async function openHeldChat(page: Page, variant: Variant) {
       outputBranch: 'sam/pr-shepherd-steady-state-43258a',
       startedAt: null,
       workspaceId: null,
+      admissionState: variant === 'blocked' ? 'provider_limit_blocked' : 'provider_limit_waiting',
     },
   });
   // Registered after the catch-all mocks: Playwright matches the newest route first.
@@ -151,6 +152,11 @@ for (const viewport of [
       await expect(notice).toContainText('extra credits');
       const start = notice.getByRole('button', { name: 'Start anyway' });
       await expect(start).toBeVisible();
+      // Held before start: no VM is being provisioned, so no provisioning slab. Wait for the
+      // own-task fetch that would restore it, so the absence is observed after that ran.
+      await page.waitForResponse((r) => r.url().endsWith('/tasks/task-1'));
+      await page.waitForTimeout(500);
+      await expect(page.getByTestId('provisioning-indicator')).toHaveCount(0);
       const rail = page.getByTestId('session-tool-rail');
       await expect(rail.getByRole('button', { name: /Cancel this task/ })).toBeVisible();
       await expect(rail.getByRole('button', { name: /Mark this task complete/ })).toHaveCount(0);

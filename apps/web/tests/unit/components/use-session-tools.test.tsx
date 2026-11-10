@@ -267,6 +267,53 @@ describe('useSessionTools', () => {
       });
     });
 
+    it('follows the live status if the task starts while the dialog is open', async () => {
+      const queuedInput = queued();
+      const { result, rerender } = renderHook(
+        (input: UseSessionToolsInput) => useSessionTools(input),
+        {
+          initialProps: queuedInput,
+        }
+      );
+      act(() => result.current.selectTool('cancel'));
+      expect(result.current.confirmIntent).toBe('cancelled');
+      const started = makeSession({ task: { id: 'task-1', status: 'in_progress' } } as never);
+      rerender({ ...queuedInput, session: started, taskEmbed: started.task ?? null });
+      expect(result.current.confirmIntent).toBe('completed');
+      await act(async () => {
+        await result.current.confirmComplete();
+      });
+      expect(mocks.updateProjectTaskStatus).toHaveBeenCalledWith('proj-1', 'task-1', {
+        toStatus: 'completed',
+      });
+      expect(mocks.updateProjectTaskStatus).not.toHaveBeenCalledWith('proj-1', 'task-1', {
+        toStatus: 'cancelled',
+      });
+    });
+
+    it('stays disabled after a successful cancel until the refetched status arrives', async () => {
+      const queuedInput = queued();
+      const { result, rerender } = renderHook(
+        (input: UseSessionToolsInput) => useSessionTools(input),
+        {
+          initialProps: queuedInput,
+        }
+      );
+      await act(async () => {
+        await result.current.confirmComplete();
+      });
+      const pending = result.current.actions.find((a) => a.id === 'cancel');
+      expect(pending).toMatchObject({ disabled: true, label: 'Cancelling...' });
+      await act(async () => {
+        await result.current.confirmComplete();
+      });
+      expect(mocks.updateProjectTaskStatus).toHaveBeenCalledTimes(1);
+      const cancelled = makeSession({ task: { id: 'task-1', status: 'cancelled' } } as never);
+      rerender({ ...queuedInput, session: cancelled, taskEmbed: cancelled.task ?? null });
+      expect(result.current.actions.find((a) => a.id === 'cancel')).toBeUndefined();
+      expect(result.current.actions.find((a) => a.id === 'complete')).toBeUndefined();
+    });
+
     it('still completes a started task after a cancel was opened and closed', async () => {
       const { result } = renderHook(() => useSessionTools(inputFor()));
       act(() => result.current.selectTool('cancel'));

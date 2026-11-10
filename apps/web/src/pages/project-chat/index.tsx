@@ -410,7 +410,8 @@ export function ProjectChat() {
             )}
             {state.provisioning &&
               state.sessionId === state.provisioning.sessionId &&
-              !isTerminal(state.provisioning.status) && (
+              !isTerminal(state.provisioning.status) &&
+              !state.provisioning.providerLimitHeld && (
                 <ProvisioningIndicator
                   state={state.provisioning}
                   bootLogCount={state.bootLogs.length}
