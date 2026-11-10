@@ -4,10 +4,14 @@
  */
 import type {
   CredentialLimitCredentialSummary,
+  CredentialLimitLevel,
   CredentialLimitWindowSummary,
 } from '@simple-agent-manager/shared';
 
 const MINUTE = 60_000;
+
+/** Least to most severe, as the API orders a credential's overall level. */
+const LEVEL_ORDER: CredentialLimitLevel[] = ['ok', 'warning', 'critical', 'rejected'];
 
 /** Window length from its type: five-hour/primary windows are 300 minutes, weekly 10080. */
 function windowMinutes(windowType: string): number | null {
@@ -40,7 +44,10 @@ export function limitWindow(
   };
 }
 
-/** The limits of one stored credential (`cc_credentials:<id>`), as the API reports them. */
+/**
+ * The limits of one stored credential (`cc_credentials:<id>`), as the API reports them: its
+ * level is the most severe level among its windows.
+ */
 export function credentialUsage(
   credentialId: string,
   agentType: string,
@@ -54,7 +61,11 @@ export function credentialUsage(
     provider: windows[0]!.provider,
     providerMode: 'oauth',
     agentType,
-    level: 'ok',
+    level: windows.reduce<CredentialLimitLevel>(
+      (worst, window) =>
+        LEVEL_ORDER.indexOf(window.level) > LEVEL_ORDER.indexOf(worst) ? window.level : worst,
+      'ok'
+    ),
     observedAt: Math.max(...windows.map((window) => window.observedAt)),
     windows,
   };

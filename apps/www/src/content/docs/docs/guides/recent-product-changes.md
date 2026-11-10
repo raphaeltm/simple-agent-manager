@@ -31,8 +31,10 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
   → [Usage limits](/docs/guides/agents/#usage-limits)
 - **Change the model or effort for one chat** under **Chat options** (the sliders button by **To**),
   without editing the profile. → [Choosing a profile for a new chat](/docs/guides/agents/#choosing-a-profile-for-a-new-chat)
-- **Steer a busy agent.** While Claude Code, Codex or OpenCode works, your message joins its current
-  turn by default; tap the **Steer** chip to **Queue** it for after the turn instead.
+- **Steer a busy agent.** While Claude Code, Codex or OpenCode works, your message tries to join its
+  current turn by default; tap the **Steer** chip to **Queue** it for after the turn instead. A
+  message with files always queues, and if the agent can't take it mid-turn it is sent next; the
+  label under the message says which happened.
   → [Sending a message while the agent works](/docs/guides/chat-features/#sending-a-message-while-the-agent-works)
 - **A new look for chat**, with glass panes over a dark green background. Agent replies no longer
   sit in bubbles, the session list puts **Needs attention** first, then **Awake**, **Sleeping** and
@@ -65,9 +67,10 @@ Also changed this week:
   → [Wake failed](/docs/guides/session-troubleshooting/#wake-failed)
 - **The default disk is 15 GB** (it was 40 GB). Set **Disk (GB)** for large builds.
   → [Machine sizing](/docs/guides/creating-workspaces/#machine-sizing)
-- **Finished chats go to sleep sooner.** A chat whose agent has done no work for 15 minutes now
-  sleeps, even though the agent still checks in with SAM, and work the agent left running in the
-  background keeps it awake for up to two hours.
+- **Finished chats go to sleep sooner.** A VM chat whose agent has done no work for 15 minutes now
+  sleeps, even though the agent still checks in with SAM (Instant chats keep their one-hour idle
+  window), and work the agent left running in the background keeps it awake for up to two hours.
+  → [Sleep and wake](/docs/guides/instant-sessions/#sleep-and-wake)
 - **New machines aren't refused for being busy setting up,** and work goes to the reusable machine
   with the shortest setup queue. A fresh machine no longer fails its own first task.
 - **Codex runs without its apps and plugins** unless you turn them on in its config file, and a

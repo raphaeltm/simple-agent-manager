@@ -101,9 +101,11 @@ Open a workspace to get a browser-based terminal — a full interactive shell th
 
 ### What SAM sets in the workspace
 
-The agent in every workspace runs with these environment variables, so the scripts it runs and
-your agent instructions can tell they are on SAM and which project, chat and task they belong to.
-On a machine shared by several chats, each chat's agent gets its own values.
+SAM sets these environment variables for the agent in a workspace, so the scripts it runs and your
+agent instructions can tell they are on SAM and which project, chat and task they belong to. On a
+machine shared by several chats, each chat's agent gets its own values. A value SAM has nothing for
+can be missing (for example `SAM_TASK_MODE` in a chat started directly in a workspace), so scripts
+should handle an unset variable.
 
 | Variable              | What it holds                                                             |
 | --------------------- | ------------------------------------------------------------------------- |

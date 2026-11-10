@@ -5,8 +5,9 @@
 The hosted installer's own pages still describe the pre-#2597 product:
 
 - `apps/installer/src/pages/index.astro` (hero): "Signing in to SAM afterwards requires GitHub, GitLab
-  or Google." Since #2597 a new installation signs its administrator in with an emailed code, and
-  GitHub, Google and GitLab are optional.
+  or Google." Since #2597 a new installation signs its administrator in with an emailed code when
+  its email setup succeeds; only if email setup fails does it need a GitHub, Google or GitLab OAuth
+  app. The replacement copy must keep that condition.
 - `apps/installer/public/app.js` (full-mode note): "Experimental full installation: …". Full mode is
   the production default since #2475 (`INSTALLER_MODE=full`); keep any caution that still applies,
   but name what is actually unverified rather than calling the whole path experimental.

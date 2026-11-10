@@ -260,9 +260,10 @@ SAM does **not** move to another provider after an error that could mean a machi
 anyway, such as a timeout or an unclear `503`, or after a permission or configuration error. Those
 fail the run, so a broken credential is not hidden and no machine is ever created twice.
 
-Sources that share a rank (possible only through the API; the editor's list always gives each
-account its own place) do not fall back to each other; give them different ranks if you want one to
-back up the other. Without an order, nothing falls back across sources. Each attempt,
+Sources that share a rank do not fall back to each other. Every source the order doesn't list
+shares last place, including an account connected after you saved the order, so add a new account
+to the order if you want it to back up another. (Two listed sources can share a rank only through
+the API; the editor's list always gives each account its own place.) Without an order, nothing falls back across sources. Each attempt,
 including skipped sources and the reason, appears in the run's placement details.
 
 ### Allowed offerings
@@ -563,8 +564,9 @@ A node accepts additional work only if **all** of these hold:
   machine runs work more slowly rather than breaking, and each workspace's CPU is already reserved
   from the machine's budget above. Measured CPU therefore only blocks placement once the machine is
   **saturated** (85% by default); below that, the reservations decide. A machine with no workspaces
-  on it yet, including a warm one, is never refused for CPU: a new machine is often busy setting
-  itself up, and nothing is there to slow down. SAM also gives its own agent
+  on it yet, including a warm one, is never refused for being busy: a new machine is often busy
+  setting itself up, and nothing is there to slow down. It still needs a valid CPU reading, like
+  any machine. SAM also gives its own agent
   a larger share of the CPU than the workspace containers get, so a busy machine slows the work down
   without making the machine look unreachable.
 
