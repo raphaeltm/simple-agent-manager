@@ -37,6 +37,7 @@ newer is required.` The model is also missing from SAM's catalogs.
 - [x] Regenerate the Claude AskUserQuestion forms fixture from the 0.88.0 builder
 - [x] Update version-check and steering tests and adapter-version comments
 - [x] Docs: recent product changes, integrations page, changelog skill
+- [x] Local go-specialist review: PASS (no blocking findings)
 - [ ] PR, CI, merge, production deploy, production verification with a real Fable 5.2 prompt
 
 ## Acceptance Criteria
