@@ -314,6 +314,12 @@ comments chip when there are unresolved comments, and the first forwarded port. 
 **Public ports** switch and the chat's details, including its
 [workload identity](/docs/guides/workload-identity/). Close it with ✕ or by tapping outside it.
 
+<img
+  src="/images/docs/chat-session-info-sheet-mobile.png"
+  alt="A chat's info sheet open on a phone, over the chat. It shows the title Explain the checkout request path with an Active chip, the initial prompt, copyable task, session and workspace references, the run (Claude Code, Conversation, Running, In progress, 1h 4m) and a collapsed Workload identity (OIDC) section. The chat-list button behind it carries an amber 1."
+  width="320"
+/>
+
 **Public ports** (under the header on a wide screen, in the info sheet on a phone) appears once the
 agent's workspace is serving a port. Off, opening a forwarded port's link needs you to be signed
 in to SAM. On, anyone with the link can open it, which is handy for showing a preview to someone

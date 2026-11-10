@@ -61,7 +61,8 @@ async function setupOnboardingMocks(page: Page) {
       return jsonResponse(route, 200, { credentials: [] });
     if (p === '/api/credentials' && method === 'GET') return jsonResponse(route, 200, []);
     if (p === '/api/github/installations') return jsonResponse(route, 200, []);
-    if (p === '/api/projects' && method === 'GET') return jsonResponse(route, 200, { projects: [] });
+    if (p === '/api/projects' && method === 'GET')
+      return jsonResponse(route, 200, { projects: [] });
     if (p === '/api/projects' && method === 'POST')
       return jsonResponse(route, 201, { id: 'proj-receipts', name: 'receipts-app' });
     if (/^\/api\/projects\/[^/]+\/agent-profiles$/.test(p) && method === 'POST')

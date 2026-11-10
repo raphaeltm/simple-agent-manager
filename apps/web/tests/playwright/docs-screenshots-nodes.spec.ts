@@ -183,7 +183,6 @@ async function setupApiMocks(
   });
 }
 
-
 const NODES = [
   makeNode({
     providerInstanceType: 'cx43',

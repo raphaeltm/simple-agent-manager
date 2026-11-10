@@ -552,7 +552,9 @@ test('docs: chat header and info sheet on a phone', async ({ page }) => {
   test.skip(!isMobile(page), 'phone capture');
   await openChat(page, DIAGRAM.id);
 
-  const title = page.getByRole('button', { name: new RegExp(`^${DIAGRAM.topic}\\. .*Show session info$`) });
+  const title = page.getByRole('button', {
+    name: new RegExp(`^${DIAGRAM.topic}\\. .*Show session info$`),
+  });
   await expect(title).toBeVisible();
   await title.click();
   const sheet = page.getByRole('dialog').filter({ hasText: DIAGRAM.topic }).last();

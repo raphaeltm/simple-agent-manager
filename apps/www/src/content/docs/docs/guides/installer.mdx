@@ -41,9 +41,16 @@ keep your projects' code itself; otherwise you connect GitHub after setup.
    Enter **Your administrator email**: this is the only email that can create the first account on
    your SAM. Select **Review installation →**.
 3. **Review your installation.** The summary says where SAM will live, and **What will be created**
-   lists the hostnames, the address sign-in codes are emailed from (`agents.` on your domain), and
-   the exact SAM version that will be built. Tick the box to confirm, then select **Install SAM in
-   my account →**.
+   lists the hostnames, the address sign-in codes are emailed from (`agents.` on your domain), your
+   account's `workers.dev` address, and the exact SAM version (source commit) that will be built.
+   Tick the box to confirm, then select **Install SAM in my account →**.
+
+   <img
+     src="/images/docs/installer-review-mobile.png"
+     alt="The installer's Review your installation step, step 3 of Connect, Choose, Review and Handoff. It says SAM will live at app.sam.example.com and that Cloudflare usage charges apply. What will be created lists the hostnames api, app, preview and a wildcard under sam.example.com, that sign-in codes come from agents.sam.example.com, a new workers.dev address and the source commit. A ticked box confirms the build in your account, above the Install SAM in my account button."
+     width="320"
+   />
+
 4. **Save your recovery credential.** The installer hands over to an installation service that now
    runs in your account and that only you control (**Over to you.** → **Continue to my service →**).
    It shows a recovery credential once: select **Copy**, save it in your password manager, tick
@@ -54,11 +61,29 @@ keep your projects' code itself; otherwise you connect GitHub after setup.
    It usually takes about 30 minutes; when SAM's latest release has prebuilt parts that match the
    version being installed, the installation service downloads and checks them instead of building
    them, which is quicker. You can close the tab and come back. **Stop this build** cancels it.
+
+   <img
+     src="/images/docs/installer-build-progress-mobile.png"
+     alt="The installation service for sam.example.com while it builds: Installation in progress, Step 11 of 13: Publishing SAM, with a progress bar and the note that it usually takes about 30 minutes and refreshes every 15 seconds. The expanded stage list ticks off ten stages from Preparing the approved source to Starting the control plane, marks Publishing SAM in progress, and leaves Publishing the CLI and Checking your installation to come. Stop this build, Installation details and Access & recovery are collapsed below."
+     width="320"
+   />
+
 6. **Finish setting up SAM.** When the page says **SAM is live**, the **Finish setting up SAM** panel
    shows a setup token. Select **Open SAM setup →**: your new SAM opens with the token filled in.
    Select **Let's go**. If email sending is ready, SAM emails a sign-in code to your administrator
    email straight away; enter it to sign in, and SAM [walks you through](/docs/quickstart/) connecting
    an agent and creating your first project.
+
+   <img
+     src="/images/docs/installer-sam-is-live-mobile.png"
+     alt="The installation service once the build has finished: a green check over sam.example.com, the heading SAM is live, the line Built and running in your own Cloudflare account, one last step and it's yours, a Finish setting up SAM button and a Check for an update link."
+     width="320"
+   />
+   <img
+     src="/images/docs/setup-welcome-mobile.png"
+     alt="The new SAM's setup page: Welcome to your SAM, sam.example.com is live, one step and you're in. A row reads Setup token filled in from your installer, with a Change link, above a Let's go button."
+     width="320"
+   />
 
 If Cloudflare is still verifying the address SAM emails from, setup says so: try again a few
 minutes later. If email couldn't be set up at all, setup asks you to choose how you'll sign in

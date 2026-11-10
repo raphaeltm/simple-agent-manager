@@ -78,7 +78,11 @@ const NORMAL: Profile[] = [
     runtime: 'cf-container',
     taskMode: 'conversation',
   }),
-  profile('opencode', 'OpenCode Explorer', { agentType: 'opencode', model: 'kimi-k2.5', runtime: 'cf-container' }),
+  profile('opencode', 'OpenCode Explorer', {
+    agentType: 'opencode',
+    model: 'kimi-k2.5',
+    runtime: 'cf-container',
+  }),
 ];
 
 const ROWS = mergeRows(
@@ -137,7 +141,11 @@ function limitWindow(
     utilizationPercent,
     limitAmount: null,
     remainingAmount: null,
-    windowMinutes: windowType.endsWith('primary') ? 300 : windowType.endsWith('secondary') ? 10080 : null,
+    windowMinutes: windowType.endsWith('primary')
+      ? 300
+      : windowType.endsWith('secondary')
+        ? 10080
+        : null,
     resetsAt: NOW + 3 * HOUR,
     observedAt: NOW - 2 * 60_000,
     updatedAt: NOW - 2 * 60_000,
@@ -186,7 +194,6 @@ const LIMITS = [
   ]),
 ];
 
-
 function handler(path: string, respond: AuditResponder): Promise<void> | undefined {
   if (path === '/api/cc/credentials') return respond(200, { credentials: ROWS.credentials });
   if (path === '/api/cc/configurations') {
@@ -234,6 +241,11 @@ test('docs: the Profiles page with resources and usage', async ({ page }) => {
   const last = (await row('OpenCode Explorer').boundingBox())!;
   const x = last.x - 24;
   await docsShot(page, 'profiles-page', {
-    clip: { x, y: heading.y - 24, width: last.width + 48, height: last.y + last.height + 24 - (heading.y - 24) },
+    clip: {
+      x,
+      y: heading.y - 24,
+      width: last.width + 48,
+      height: last.y + last.height + 24 - (heading.y - 24),
+    },
   });
 });

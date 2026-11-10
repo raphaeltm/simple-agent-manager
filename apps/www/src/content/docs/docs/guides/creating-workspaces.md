@@ -105,18 +105,18 @@ The agent in every workspace runs with these environment variables, so the scrip
 your agent instructions can tell they are on SAM and which project, chat and task they belong to.
 On a machine shared by several chats, each chat's agent gets its own values.
 
-| Variable              | What it holds                                                       |
-| --------------------- | ------------------------------------------------------------------- |
-| `SAM_WORKSPACE_ID`    | The workspace's ID. Its presence is the way to detect SAM           |
-| `SAM_WORKSPACE_URL`   | The workspace's own address                                          |
-| `SAM_API_URL`         | The SAM API's address                                                |
-| `SAM_NODE_ID`         | The machine it runs on                                               |
-| `SAM_PROJECT_ID`      | The project                                                          |
-| `SAM_CHAT_SESSION_ID` | The chat                                                             |
-| `SAM_TASK_ID`         | The task behind the chat                                             |
+| Variable              | What it holds                                                             |
+| --------------------- | ------------------------------------------------------------------------- |
+| `SAM_WORKSPACE_ID`    | The workspace's ID. Its presence is the way to detect SAM                 |
+| `SAM_WORKSPACE_URL`   | The workspace's own address                                               |
+| `SAM_API_URL`         | The SAM API's address                                                     |
+| `SAM_NODE_ID`         | The machine it runs on                                                    |
+| `SAM_PROJECT_ID`      | The project                                                               |
+| `SAM_CHAT_SESSION_ID` | The chat                                                                  |
+| `SAM_TASK_ID`         | The task behind the chat                                                  |
 | `SAM_TASK_MODE`       | `task` or `conversation`: whether the session is a **Task** or a **Chat** |
-| `SAM_REPOSITORY`      | The repository, as `owner/repo`                                      |
-| `SAM_BRANCH`          | The branch the workspace checked out                                 |
+| `SAM_REPOSITORY`      | The repository, as `owner/repo`                                           |
+| `SAM_BRANCH`          | The branch the workspace checked out                                      |
 
 ### Agent chat in a workspace
 
