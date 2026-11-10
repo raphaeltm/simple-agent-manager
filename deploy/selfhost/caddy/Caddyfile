@@ -1,0 +1,42 @@
+# One-box ingress for a celld-hosted SAM control plane.
+#
+# Every SAM hostname is one label under SAM_DOMAIN (api., app., ws-<id>., ws-<id>--<port>.), so
+# one wildcard certificate covers them all. Caddy runs on the host network: that is what lets
+# {remote_host} be the real client address (published Docker ports would show the bridge
+# gateway), and lets it reach celld and frps on loopback.
+{
+	http_port {$HTTP_PORT:80}
+	https_port {$HTTPS_PORT:443}
+	admin off
+}
+
+# Every route that proxies a client request (here and in sam.d/) imports this, so the client
+# address SAM sees always comes from the connection and never from a client-sent header.
+(sam_client_ip) {
+	header_up CF-Connecting-IP {remote_host}
+	header_up X-Real-IP {remote_host}
+	header_up X-Forwarded-For {remote_host}
+	header_up -True-Client-IP
+	header_up -CF-Ray
+}
+
+*.{$SAM_DOMAIN} {
+	import tls/{$SAM_TLS_MODE:internal}.caddy
+
+	# celld never compresses responses.
+	encode zstd gzip
+
+	# Routes owned by the node transport (frp over wss, node WebSockets). Each is a
+	# `handle @matcher { ... }` block; the matcher-less handle below always sorts last. A
+	# fragment that proxies to celld or a node must `import sam_client_ip` in its proxy block.
+	import sam.d/*.caddy
+
+	handle {
+		reverse_proxy 127.0.0.1:{$CELLD_PORT:8080} {
+			# SAM reads the client address from CF-Connecting-IP (rate limits, sign-in,
+			# heartbeat IP). celld builds request.url from X-Forwarded-Host/-Proto, which Caddy
+			# sets from the connection (CELLD_TRUST_FORWARDED_HEADERS=1).
+			import sam_client_ip
+		}
+	}
+}

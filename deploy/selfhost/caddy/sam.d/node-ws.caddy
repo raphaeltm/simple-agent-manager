@@ -1,0 +1,3 @@
+# PLACEHOLDER until the reverse-tunnel transport (task 01M72X0F03A7NVVJP28W9SC03Z) replaces
+# it: node WebSockets proxied by Caddy after Worker forward_auth (celld cannot return a
+# WebSocket the Worker obtained from fetch). Same shape as frp.caddy; import sam_client_ip.
