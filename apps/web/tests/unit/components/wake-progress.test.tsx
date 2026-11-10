@@ -217,6 +217,24 @@ describe('useWakeProgress', () => {
     expect(result.current.isWaking).toBe(false);
   });
 
+  it('ignores a late terminal snapshot of an older attempt during the next wake', () => {
+    const { result } = renderHook(() => useWakeProgress('s1'));
+
+    act(() => {
+      result.current.hydrateWakeProgress(
+        snapshot({ recoveryStatus: 'waking', wakePhase: 'node_selection', wakeAttemptId: '01B' })
+      );
+    });
+    act(() => {
+      result.current.hydrateWakeProgress(
+        snapshot({ recoveryStatus: 'restored', wakePhase: null, wakeAttemptId: '01A' })
+      );
+    });
+
+    expect(result.current.isWaking).toBe(true);
+    expect(result.current.wakePhase).toBe('node_selection');
+  });
+
   it('keeps the latch when the settled wake had no attempt id', () => {
     // Without an id on the settled side nothing proves the next snapshot is a new wake;
     // a stale banner is worse than a missing one, so the latch holds.

@@ -94,7 +94,9 @@ export function useWakeProgress(sessionId: string | undefined): UseWakeProgressR
    * The latch is scoped to the attempt that settled. A `waking` snapshot naming a
    * different attempt is the next wake of the same conversation and re-arms it.
    * Without an attempt id on either side the latch holds, as it did before ids
-   * existed: a stale banner is worse than a missing one.
+   * existed: a stale banner is worse than a missing one. Every wake claim writes an
+   * id (`services/session-recovery.ts`), so only a claim made before the
+   * `recovery_attempt_id` column existed can settle without one.
    */
   const settledRef = useRef<{ attemptId: string | null } | null>(null);
   /** The newest wake attempt a snapshot has named. Pushes carry no attempt id. */
@@ -122,7 +124,13 @@ export function useWakeProgress(sessionId: string | undefined): UseWakeProgressR
       phase: TaskExecutionStep | null,
       attemptId?: string | null
     ) => {
-      if (attemptId) lastAttemptIdRef.current = attemptId;
+      if (attemptId) {
+        // Attempt ids are ULIDs, so they sort by creation time. A snapshot naming an
+        // older attempt than one already seen is a stale poll: it must not end or
+        // restart the newer wake.
+        if (lastAttemptIdRef.current && attemptId < lastAttemptIdRef.current) return;
+        lastAttemptIdRef.current = attemptId;
+      }
       if (status !== 'waking') {
         // 'restored' and 'failed' are both terminal for the banner. A failure
         // surfaces through the existing resume-error path, not this indicator.
