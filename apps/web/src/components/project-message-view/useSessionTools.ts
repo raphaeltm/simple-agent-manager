@@ -86,6 +86,8 @@ export interface UseSessionToolsResult {
   reportOpen: boolean;
   closeReport: () => void;
   confirmCompleteOpen: boolean;
+  /** What the open confirm dialog will do: complete a started task or cancel an unstarted one. */
+  confirmIntent: 'completed' | 'cancelled';
   closeConfirmComplete: () => void;
   confirmComplete: () => Promise<void>;
   completeError: string | null;
@@ -122,6 +124,7 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
   const [detailsExpanded, setDetailsExpanded] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [confirmCompleteOpen, setConfirmCompleteOpen] = useState(false);
+  const [confirmIntent, setConfirmIntent] = useState<'completed' | 'cancelled'>('completed');
   const [completing, setCompleting] = useState(false);
   const [completeError, setCompleteError] = useState<string | null>(null);
 
@@ -157,17 +160,24 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
     try {
       // Task completion snapshots and sleeps resumable sessions server-side.
       // Destructive workspace deletion belongs only to the explicit archive/delete flow.
-      await updateProjectTaskStatus(projectId, taskEmbed.id, { toStatus: 'completed' });
+      // A task that never started can only be cancelled, which retires its queued run.
+      await updateProjectTaskStatus(projectId, taskEmbed.id, { toStatus: confirmIntent });
       // Reset before the callback so the button is not stuck in "Completing..." if the
       // parent's refresh is slower than expected.
       setCompleting(false);
       onSessionMutated?.();
     } catch (err) {
-      console.error('Failed to mark task complete:', err);
-      setCompleteError(err instanceof Error ? err.message : 'Failed to complete task');
+      console.error(`Failed to set task ${confirmIntent}:`, err);
+      setCompleteError(
+        err instanceof Error
+          ? err.message
+          : confirmIntent === 'cancelled'
+            ? 'Failed to cancel task'
+            : 'Failed to complete task'
+      );
       setCompleting(false);
     }
-  }, [projectId, taskEmbed?.id, completing, onSessionMutated]);
+  }, [projectId, taskEmbed?.id, completing, confirmIntent, onSessionMutated]);
 
   // Memoized: an inline array would hand the rail a new prop identity on every poll
   // tick, remounting the whole strip mid-interaction (rule 64).
@@ -261,6 +271,11 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
           setReportOpen(true);
           break;
         case 'complete':
+          setConfirmIntent('completed');
+          setConfirmCompleteOpen(true);
+          break;
+        case 'cancel':
+          setConfirmIntent('cancelled');
           setConfirmCompleteOpen(true);
           break;
         case 'details':
@@ -301,6 +316,7 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
     reportOpen,
     closeReport,
     confirmCompleteOpen,
+    confirmIntent,
     closeConfirmComplete,
     confirmComplete,
     completeError,

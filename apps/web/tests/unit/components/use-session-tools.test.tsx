@@ -245,6 +245,42 @@ describe('useSessionTools', () => {
     });
   });
 
+  describe('cancel a task that has not started', () => {
+    const queued = () => {
+      const session = makeSession({ task: { id: 'task-1', status: 'queued' } } as never);
+      return inputFor({ session, taskEmbed: session.task ?? null });
+    };
+
+    it('replaces Complete with Cancel task and sends cancelled after confirmation', async () => {
+      const { result } = renderHook(() => useSessionTools(queued()));
+      expect(result.current.actions.find((a) => a.id === 'complete')).toBeUndefined();
+      expect(result.current.actions.find((a) => a.id === 'cancel')).toBeDefined();
+      act(() => result.current.selectTool('cancel'));
+      expect(result.current.confirmCompleteOpen).toBe(true);
+      expect(result.current.confirmIntent).toBe('cancelled');
+      expect(mocks.updateProjectTaskStatus).not.toHaveBeenCalled();
+      await act(async () => {
+        await result.current.confirmComplete();
+      });
+      expect(mocks.updateProjectTaskStatus).toHaveBeenCalledWith('proj-1', 'task-1', {
+        toStatus: 'cancelled',
+      });
+    });
+
+    it('still completes a started task after a cancel was opened and closed', async () => {
+      const { result } = renderHook(() => useSessionTools(inputFor()));
+      act(() => result.current.selectTool('cancel'));
+      act(() => result.current.closeConfirmComplete());
+      act(() => result.current.selectTool('complete'));
+      await act(async () => {
+        await result.current.confirmComplete();
+      });
+      expect(mocks.updateProjectTaskStatus).toHaveBeenCalledWith('proj-1', 'task-1', {
+        toStatus: 'completed',
+      });
+    });
+  });
+
   it('returns no actions before the session has loaded', () => {
     const { result } = renderHook(() =>
       useSessionTools(inputFor({ session: null, taskEmbed: null }))

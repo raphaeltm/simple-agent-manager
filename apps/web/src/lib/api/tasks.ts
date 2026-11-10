@@ -312,6 +312,14 @@ export async function getTaskSessions(
   return request<TaskSessionsResponse>(`/api/projects/${projectId}/tasks/${taskId}/sessions`);
 }
 
+/** Start a never-started task now despite its provider-limit admission hold (owner only). */
+export function startProviderLimitTaskAnyway(projectId: string, taskId: string) {
+  return request<{ status: 'starting'; taskId: string }>(
+    `/api/projects/${projectId}/tasks/${taskId}/provider-limit/start-anyway`,
+    { method: 'POST' }
+  );
+}
+
 /** Resume an owner-held provider-limit wait from its saved snapshot. */
 export function resumeProviderLimitTask(projectId: string, taskId: string) {
   return request<{ status: 'waking'; taskId: string }>(

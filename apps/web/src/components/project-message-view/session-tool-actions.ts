@@ -22,6 +22,7 @@ import {
   RotateCcw,
   Users,
   Workflow,
+  XCircle,
 } from 'lucide-react';
 
 import type { ChatSessionResponse } from '../../lib/api';
@@ -72,6 +73,7 @@ export type SessionToolId =
   | 'fork'
   | 'report'
   | 'complete'
+  | 'cancel'
   | 'details';
 
 export interface SessionToolAction {
@@ -347,6 +349,26 @@ function buildSessionGroup(input: BuildSessionToolActionsInput): SessionToolSpec
   return actions;
 }
 
+/**
+ * How the rail can end this task. A task that has never started (draft, ready, queued,
+ * delegated) cannot be completed (`apps/api/src/services/task-status.ts`), only cancelled,
+ * which also stops a queued run from spawning later. Started tasks are completed.
+ */
+export function taskEndIntent(status: string | undefined): 'completed' | 'cancelled' | null {
+  switch (status) {
+    case 'in_progress':
+    case 'sleeping':
+      return 'completed';
+    case 'draft':
+    case 'ready':
+    case 'queued':
+    case 'delegated':
+      return 'cancelled';
+    default:
+      return null;
+  }
+}
+
 /** Cross-cutting tools, pinned to the bottom of the rail. */
 function buildMetaGroup(input: BuildSessionToolActionsInput): SessionToolSpec[] {
   const { taskEmbed, reportEnabled, completing = false, detailsExpanded = false } = input;
@@ -361,19 +383,22 @@ function buildMetaGroup(input: BuildSessionToolActionsInput): SessionToolSpec[] 
     });
   }
 
-  const canMarkComplete = !!(
-    taskEmbed?.id &&
-    taskEmbed.status !== 'completed' &&
-    taskEmbed.status !== 'cancelled' &&
-    taskEmbed.status !== 'failed'
-  );
-  if (canMarkComplete) {
+  const endIntent = taskEndIntent(taskEmbed?.id ? taskEmbed.status : undefined);
+  if (endIntent === 'completed') {
     actions.push({
       id: 'complete',
       label: completing ? 'Completing...' : 'Complete',
       hint: 'Mark this task complete',
       icon: CheckCircle2,
       tone: 'success',
+      disabled: completing,
+    });
+  } else if (endIntent === 'cancelled') {
+    actions.push({
+      id: 'cancel',
+      label: completing ? 'Cancelling...' : 'Cancel task',
+      hint: 'Cancel this task before it starts',
+      icon: XCircle,
       disabled: completing,
     });
   }
