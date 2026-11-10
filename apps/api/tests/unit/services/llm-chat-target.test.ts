@@ -63,7 +63,6 @@ describe('validLlmBaseUrl', () => {
     'http://172.20.0.3/v1',
     'http://[::1]:4000/v1',
     'http://[fd00::1]/v1',
-    'http://[fe80::1]/v1',
   ])('accepts %s', (url) => expect(validLlmBaseUrl(url)).toBe(true));
 
   it.each([
@@ -74,6 +73,12 @@ describe('validLlmBaseUrl', () => {
     'http://[2001:db8::1]/v1',
     'http://[::ffff:8.8.8.8]/v1',
     'http://[fe00::1]/v1',
+    // Metadata services and link-local addresses, over any scheme.
+    'http://[fe80::1]/v1',
+    'https://169.254.169.254/v1',
+    'http://metadata.google.internal/v1',
+    'https://metadata/v1',
+    'https://[fd00:ec2::254]/v1',
     'https://user:pass@llm.example.com/v1',
     'https://llm.example.com/v1?key=x',
     'https://llm.example.com/v1/chat/completions',

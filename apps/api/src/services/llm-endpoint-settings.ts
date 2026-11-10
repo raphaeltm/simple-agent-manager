@@ -7,6 +7,7 @@
  * encrypted in `platform_credentials` like every other secret admin setting. The dependency
  * back to the registry is type-only; only the shared secret length floor is imported at runtime.
  */
+import { isAcceptableOperatorEndpoint } from '../lib/network-hosts';
 import {
   type AdminSettingDefinition,
   type AdminSettingName,
@@ -43,49 +44,17 @@ const MAX_API_KEY_LENGTH = 4096;
 /** Longest accepted model id; real ids are far shorter. */
 const MAX_MODEL_ID_LENGTH = 200;
 
-/** IPv6 loopback, unique-local (fc00::/7) and link-local (fe80::/10); nothing else. */
-function isPrivateIpv6(host: string): boolean {
-  return host === '::1' || /^f[cd][0-9a-f]{2}:/.test(host) || /^fe[89ab][0-9a-f]:/.test(host);
-}
-
 /**
- * Loopback, RFC 1918, private IPv6, `.local`/`.internal` names and single-label hosts (Docker
- * service names) are on the operator's own network.
- */
-function isPrivateHost(hostname: string): boolean {
-  const host = hostname.replace(/^\[|\]$/g, '').toLowerCase();
-  // Every IPv6 literal contains ':'; decide those here so the single-label rule below cannot
-  // admit a public IPv6 (or IPv4-mapped) address.
-  if (host.includes(':')) return isPrivateIpv6(host);
-  if (host === 'localhost' || !host.includes('.')) return true;
-  if (host.endsWith('.local') || host.endsWith('.internal')) return true;
-  const octets = host.split('.').map(Number);
-  if (octets.length !== 4 || octets.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) {
-    return false;
-  }
-  const [a = -1, b = -1] = octets;
-  return a === 127 || a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
-}
-
-/**
- * An OpenAI-compatible base URL such as `https://llm.example.com/v1`. HTTPS anywhere; plain
- * HTTP only to a loopback or private-network host, so the API key never crosses the internet
- * unencrypted. No credentials, query or fragment: SAM appends `/chat/completions` itself.
+ * An OpenAI-compatible base URL such as `https://llm.example.com/v1`: HTTPS to any host but a
+ * metadata or link-local one; plain HTTP only to a private-network host, so the API key never
+ * crosses the internet unencrypted (lib/network-hosts.ts). No credentials, query or fragment:
+ * SAM appends `/chat/completions` itself.
  */
 export function validLlmBaseUrl(value: unknown): boolean {
   if (typeof value !== 'string' || value.trim().length === 0 || value.length > 2048) return false;
   try {
     const url = new URL(value.trim());
-    const secure = url.protocol === 'https:';
-    const privateHttp = url.protocol === 'http:' && isPrivateHost(url.hostname);
-    return (
-      (secure || privateHttp) &&
-      !url.username &&
-      !url.password &&
-      !url.search &&
-      !url.hash &&
-      !/\/chat\/completions\/?$/.test(url.pathname)
-    );
+    return isAcceptableOperatorEndpoint(url) && !/\/chat\/completions\/?$/.test(url.pathname);
   } catch {
     return false;
   }
