@@ -1,7 +1,12 @@
 import { applyD1Migrations, env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type { DiagnosisRunner } from '../../src/durable-objects/diagnosis-runner';
+import type { Env } from '../../src/env';
+import {
+  __resetAdminSettingsCacheForTest,
+  updateAdminSettings,
+} from '../../src/services/admin-settings';
 import { listDiagnosisEvents, reconcileDiagnosisRuns } from '../../src/services/diagnosis-runner';
 import { seedUser } from './helpers/seed-d1';
 
@@ -44,6 +49,52 @@ async function waitForModelAwait(runId: string): Promise<void> {
   }
   throw new Error('Diagnosis runner did not enter the model await');
 }
+
+const MODEL_ENDPOINT = 'https://llm.diagnosis-test.example/v1';
+
+/**
+ * Gives the runner a model route (an admin-configured OpenAI-compatible endpoint, the route a
+ * deployment without Cloudflare AI uses) and holds its response until the test releases it, so
+ * the race lands inside the real model await on purpose rather than on network timing. The
+ * released response is a valid completion: the late result must still lose.
+ */
+const SETTINGS_ADMIN = 'diagnosis-test-admin';
+
+async function holdModel(): Promise<() => void> {
+  await seedUser(SETTINGS_ADMIN, {
+    githubId: `gh-${SETTINGS_ADMIN}`,
+    email: `${SETTINGS_ADMIN}@test.com`,
+  });
+  await updateAdminSettings(env as unknown as Env, {
+    changes: [{ name: 'llm.openAICompatible.baseUrl', value: MODEL_ENDPOINT }],
+    actorUserId: SETTINGS_ADMIN,
+  });
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const passThrough = globalThis.fetch;
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+    const url = input instanceof Request ? input.url : String(input);
+    if (!url.startsWith(MODEL_ENDPOINT)) return passThrough(input, init);
+    await released;
+    return Response.json({
+      choices: [
+        { index: 0, message: { role: 'assistant', content: 'late' }, finish_reason: 'stop' },
+      ],
+    });
+  });
+  return release;
+}
+
+afterEach(async () => {
+  vi.restoreAllMocks();
+  await updateAdminSettings(env as unknown as Env, {
+    changes: [{ name: 'llm.openAICompatible.baseUrl', value: null }],
+    actorUserId: SETTINGS_ADMIN,
+  }).catch(() => undefined);
+  __resetAdminSettingsCacheForTest();
+});
 
 describe('DiagnosisRunner DO durability and fault injection', () => {
   it('starts idempotently and keeps one durable checkpoint/alarm after the 202 owner disappears', async () => {
@@ -138,6 +189,7 @@ describe('DiagnosisRunner DO durability and fault injection', () => {
 
   it('keeps cancellation terminal when it commits during the real model await', async () => {
     const runId = 'diagnosis-do-cancel-race-001';
+    const releaseModel = await holdModel();
     await seedRun(runId, 'diagnosis-user-cancel-race');
     const runner = stub(runId);
     await runner.start(runId);
@@ -150,6 +202,7 @@ describe('DiagnosisRunner DO durability and fault injection', () => {
         .bind(runId)
         .first<{ cancel_requested_at: string | null }>()
     ).toMatchObject({ cancel_requested_at: expect.any(String) });
+    releaseModel();
     await alarm;
     await runInDurableObject(runner, async (instance) => instance.alarm());
     await runInDurableObject(runner, async (instance) => instance.alarm());
@@ -176,6 +229,7 @@ describe('DiagnosisRunner DO durability and fault injection', () => {
 
   it('keeps deadline reconciliation terminal when it commits during the real model await', async () => {
     const runId = 'diagnosis-do-deadline-race-001';
+    const releaseModel = await holdModel();
     await seedRun(runId, 'diagnosis-user-deadline-race');
     const runner = stub(runId);
     await runner.start(runId);
@@ -188,6 +242,7 @@ describe('DiagnosisRunner DO durability and fault injection', () => {
       .bind(runId)
       .run();
     expect(await reconcileDiagnosisRuns(env)).toMatchObject({ terminalized: 1 });
+    releaseModel();
     await alarm;
     await runInDurableObject(runner, async (instance) => instance.alarm());
     await runInDurableObject(runner, async (instance) => instance.alarm());
