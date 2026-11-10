@@ -42,6 +42,7 @@ import {
   completeSessionSnapshotRecovery,
   recordSessionSnapshotProgress,
 } from '../../src/services/session-snapshots';
+import { ensurePoolsWithStarterMachines } from '../helpers/capacity-pool-picks';
 import { createAllSchemaTables, createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 import { createRouteTestApp } from '../unit/routes/route-test-app';
 
@@ -1554,6 +1555,13 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
         UPDATE workspaces SET vm_size = 'small', vm_location = 'nbg1', workspace_profile = 'lightweight' WHERE id = 'ws-a';
         UPDATE nodes SET vm_size = 'small', vm_location = 'nbg1', cloud_provider = 'hetzner' WHERE id = 'node-1';
       `);
+        // The user picked machines: the wake places on the pool, and nothing joins it on its own.
+        await ensurePoolsWithStarterMachines(drizzle(env.DATABASE, { schema }) as never, {
+          userId: 'user-1',
+          projectId: 'project-1',
+          includeInstallation: true,
+          env: env,
+        });
         const lifecycle = env.NODE_LIFECYCLE;
         env.NODE_LIFECYCLE = {
           ...lifecycle,

@@ -16,10 +16,32 @@ export class PlacementResolutionError extends Error {
   }
 }
 
+/**
+ * A pool with no machines in it (none picked, or only on switched-off accounts). Nothing joins
+ * a pool on its own, so this is an ordinary state for a new account: say so plainly and name
+ * both ways forward instead of describing resource requirements that are not the problem.
+ */
+export function emptyCapacityPoolMessage(scope: TaskStartCapacityPoolSelection['scope']): string {
+  const pool =
+    scope === 'project'
+      ? "This project's compute pool"
+      : scope === 'user'
+        ? 'Your compute pool'
+        : 'The shared compute pool';
+  const fix =
+    scope === 'installation'
+      ? 'Ask an admin to add machines to it'
+      : 'Add machines to it in its infrastructure settings';
+  return `${pool} has no machines, so work that needs a VM cannot start. ${fix}, or run this as an Instant session.`;
+}
+
 export function noEligibleCapacityCandidateMessage(
   placement: TaskStartPlacement,
   selection: TaskStartCapacityPoolSelection
 ): string {
+  if (selection.effectiveState === 'configured-empty') {
+    return emptyCapacityPoolMessage(selection.scope);
+  }
   const requirements = [
     `${Math.ceil(placement.resolvedReservation.cpuMillis / 1000)} vCPU`,
     `${placement.resolvedReservation.memoryMb} MB memory`,

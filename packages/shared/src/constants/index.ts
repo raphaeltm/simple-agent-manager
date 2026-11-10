@@ -17,6 +17,7 @@ export {
 } from './vm-sizes';
 
 // Providers & Locations
+export { providerLocationRegion, providerRegionMeta } from './provider-regions';
 export type { LocationMeta, ProviderHelpMeta } from './providers';
 export {
   describeValidLocations,

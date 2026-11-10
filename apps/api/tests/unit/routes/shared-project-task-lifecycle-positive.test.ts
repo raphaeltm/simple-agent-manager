@@ -86,6 +86,7 @@ import {
 } from '../../../src/routes/tasks/_helpers';
 import { crudRoutes } from '../../../src/routes/tasks/crud';
 import { runRoutes } from '../../../src/routes/tasks/run';
+import { ensurePoolsWithStarterMachines } from '../../helpers/capacity-pool-picks';
 
 let sqlite: Database.Database;
 let env: Env;
@@ -176,6 +177,12 @@ describe('shared-project task lifecycle — positive paths for a non-creator mem
         name: 'member hetzner',
       } as typeof schema.credentials.$inferInsert);
     await seedTask({ status: 'ready' });
+    // The member picked machines in their pool: nothing joins a pool on its own.
+    await ensurePoolsWithStarterMachines(db() as never, {
+      userId: MEMBER,
+      projectId: PROJECT,
+      env,
+    });
 
     const response = await makeApp(runRoutes).fetch(
       new Request(`https://api.test/api/projects/${PROJECT}/tasks/task-1/run`, {

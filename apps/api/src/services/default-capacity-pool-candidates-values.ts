@@ -6,24 +6,18 @@ import type {
   ProviderInstanceOffering,
   VMSize,
 } from '@simple-agent-manager/shared';
-import { isCapacityPoolStatus } from '@simple-agent-manager/shared';
+import { isCapacityPoolStatus, providerLocationRegion } from '@simple-agent-manager/shared';
 
 import type * as schema from '../db/schema';
 import { capacityCandidateAuthorityGeneration } from './capacity-pool-authority';
-import {
-  capacityCandidateIdForRole,
-  PRIMARY_CAPACITY_WORKLOAD_ROLE,
-} from './capacity-pool-workload-roles';
 import { type providerInstanceOfferingDbValues } from './default-capacity-pool-candidate-values';
 import {
   ACTIVE_STATUS,
   DEFAULT_MACHINE_CLASS,
   DEFAULT_RUNTIME,
-  DELETED_STATUS,
   DISABLED_STATUS,
   type ExistingCandidateRecord,
 } from './default-capacity-pool-candidates-common';
-import { legacyDefaultCandidateId } from './default-capacity-pool-helpers';
 
 export function candidateValueForOffering(input: {
   id: string;
@@ -107,28 +101,25 @@ export function isCurrentlySelectableOffering(offering: ProviderInstanceOffering
 }
 
 /**
- * Default pools discover the full provider-native catalog, but first creation only
- * selects concrete offerings that map to SAM's legacy supported sizes.
+ * Status for a pool row the pool has never had. Nothing joins a pool on its own: a newly
+ * connected account, a new machine type and a new region all start unselected.
  *
- * Status priority:
- * 1. Existing concrete row status: explicit user additions/removals win.
- * 2. Legacy small/medium/large migration status: preserves old removals.
- * 3. Legacy metadata match: old supported concrete SKU starts active.
- * 4. New non-legacy catalog row: visible in editor, disabled for placement.
+ * 1. An existing row keeps its status: a person's additions and removals win.
+ * 2. A new zone of a region the person picked joins it, because people pick regions and SAM
+ *    places into any zone of a picked region (`providerLocationRegion`). Only an ACTIVE row of
+ *    the same account, machine type and region counts; a removed or never-picked region stays out.
+ * 3. Anything else starts `disabled`: listed in the editor, never placed.
+ *
+ * Legacy `small`/`medium`/`large` hints deliberately play no part. They used to switch new rows
+ * on, which re-added machines and regions on every catalog refresh (2026-11-09).
  */
 export function initialStatusForProviderOffering(
   existingConcreteStatus: string | null | undefined,
-  legacyMigrationStatus: string | null | undefined,
-  legacyVmSize: VMSize | null
+  pickedRegion: boolean
 ): CapacityPoolStatus {
   const concreteStatus = normalizeCapacityPoolStatus(existingConcreteStatus);
   if (concreteStatus) return concreteStatus;
-
-  const legacyStatus = normalizeCapacityPoolStatus(legacyMigrationStatus);
-  if (legacyStatus === DISABLED_STATUS || legacyStatus === DELETED_STATUS) return legacyStatus;
-  if (legacyStatus === ACTIVE_STATUS) return ACTIVE_STATUS;
-
-  return legacyVmSize ? ACTIVE_STATUS : DISABLED_STATUS;
+  return pickedRegion ? ACTIVE_STATUS : DISABLED_STATUS;
 }
 
 export function normalizeCapacityPoolStatus(
@@ -137,23 +128,19 @@ export function normalizeCapacityPoolStatus(
   return isCapacityPoolStatus(value) ? value : null;
 }
 
-export function legacyStatusForOffering(
-  existingStatuses: ReadonlyMap<string, string>,
-  poolId: string,
-  sourceId: string,
+/** Key for "this machine type in this region" within one pool source. */
+export function offeringRegionKey(
   provider: CredentialProvider,
-  offering: ProviderInstanceOffering,
-  legacyVmSize: VMSize | null
+  location: string,
+  providerInstanceType: string | null,
+  providerInstanceSku: string | null
 ): string | null {
-  if (!legacyVmSize) return null;
-  return (
-    existingStatuses.get(
-      capacityCandidateIdForRole(
-        legacyDefaultCandidateId(poolId, sourceId, provider, offering.location, legacyVmSize),
-        PRIMARY_CAPACITY_WORKLOAD_ROLE
-      )
-    ) ?? null
-  );
+  if (!providerInstanceType) return null;
+  return JSON.stringify([
+    providerLocationRegion(provider, location),
+    providerInstanceType,
+    providerInstanceSku ?? null,
+  ]);
 }
 
 export function legacyVmSizeHintForOffering(

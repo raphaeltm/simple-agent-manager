@@ -61,6 +61,8 @@ export interface MachineGroup {
   providerLabel: string;
   kind: MachineSourceKind;
   credentialSource: string | null;
+  /** The connection's name when it has one (`CapacitySourceIdentity.label`). */
+  label: string | null;
   rows: MachineTypeRow[];
 }
 
@@ -218,6 +220,7 @@ export function buildMachineGroups(
         providerLabel: offering.providerLabel,
         kind: sourceKind(source),
         credentialSource: source?.credentialSource ?? null,
+        label: source?.label ?? null,
         rows: [],
       };
       groups.set(groupKey, group);
@@ -252,19 +255,6 @@ export function buildMachineGroups(
       Number(b.rows.some((row) => row.allowed)) - Number(a.rows.some((row) => row.allowed)) ||
       a.providerLabel.localeCompare(b.providerLabel)
   );
-}
-
-export function isCellAllowed(cell: MachineCell, draft: MachineDraft): boolean {
-  return draft.get(cell.key) ?? cell.allowed;
-}
-
-/** Flips one cell. Returning to the server state drops the cell from the draft. */
-export function toggleCell(draft: MachineDraft, cell: MachineCell): Map<string, boolean> {
-  const next = new Map(draft);
-  const desired = !isCellAllowed(cell, draft);
-  if (desired === cell.allowed) next.delete(cell.key);
-  else next.set(cell.key, desired);
-  return next;
 }
 
 export interface MachineChanges {

@@ -3,6 +3,8 @@ import type { SafeEffectiveCapacityPoolSummary } from '@simple-agent-manager/sha
 import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
 import { effectiveDefaultCapacityPoolScopeChain } from './capacity-pool-precedence';
+import { toSafeEffectiveCapacityPoolSummary } from './default-capacity-pool-safe-summary';
+import { attachCapacitySourceLabels } from './default-capacity-pool-source-labels';
 import {
   ACTIVE_STATUS,
   BACKFILL_PROJECT_CURSOR_KEY,
@@ -12,11 +14,7 @@ import {
   resolveBackfillScopeBatchSize,
   writeBackfillCursor,
 } from './default-capacity-pool-storage';
-import {
-  findDefaultPool,
-  readDefaultPoolSummary,
-  toSafeEffectiveCapacityPoolSummary,
-} from './default-capacity-pool-summaries';
+import { findDefaultPool, readDefaultPoolSummary } from './default-capacity-pool-summaries';
 import {
   type CapacityPoolSummary,
   type CapacityPoolSummaryWorkloadRoles,
@@ -211,6 +209,13 @@ export async function readDefaultCapacityPoolSummaries(
   options: DefaultCapacityPoolsBackfillOptions & {
     ensure?: boolean;
     includeDisabled?: boolean;
+    /**
+     * Attach account display names (default true). A caller that only runs `ensure` and drops
+     * the result passes false; `labelInstallation: false` skips the installation pool when the
+     * caller reads it but does not show it.
+     */
+    labels?: boolean;
+    labelInstallation?: boolean;
   } = {}
 ): Promise<DefaultCapacityPoolsEnsureResult> {
   if (options.ensure) {
@@ -253,5 +258,12 @@ export async function readDefaultCapacityPoolSummaries(
       : null,
   ]);
 
+  if (options.labels !== false) {
+    await attachCapacitySourceLabels(db, [
+      options.labelInstallation === false ? null : installation,
+      user,
+      project,
+    ]);
+  }
   return { installation, user, project };
 }

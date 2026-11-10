@@ -3725,6 +3725,12 @@ export const capacityPools = sqliteTable(
      * reuse of a running node never depends on it, so editing it does not bump `revision`.
      */
     sourceOrderJson: text('source_order_json'),
+    /**
+     * Accounts switched off in this pool: JSON array of capacity source ids. NULL = all on.
+     * Their candidates keep their statuses but are never placed (new VMs or reuse). Like the
+     * provider order, editing it does not bump `revision`; it is fenced on its own value.
+     */
+    excludedSourceIdsJson: text('excluded_source_ids_json'),
     migrationVersion: text('migration_version'),
     migrationState: text('migration_state').notNull().default('complete'),
     createdBy: text('created_by').references(() => users.id, { onDelete: 'set null' }),

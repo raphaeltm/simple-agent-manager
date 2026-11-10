@@ -15,6 +15,7 @@ import { AppError } from '../../../src/middleware/error';
 import { registerChatPromptRoute } from '../../../src/routes/chat-prompt-route';
 import { submitRoutes } from '../../../src/routes/tasks/submit';
 import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../../src/services/default-capacity-pools';
+import { pickStarterMachines } from '../../helpers/capacity-pool-picks';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 import { seedCloudCredential, seedProjectWithMember, seedUser } from './capacity-pool-test-seeds';
 
@@ -168,6 +169,7 @@ beforeEach(async () => {
     projectId: 'project-1',
     includeInstallation: false,
   });
+  await pickStarterMachines(drizzle(env.DATABASE, { schema }) as never);
   sqlite
     .prepare(
       "INSERT INTO nodes (id, user_id, status, runtime) VALUES ('node-1', 'user-1', 'running', 'vm')"

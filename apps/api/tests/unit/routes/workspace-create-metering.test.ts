@@ -284,6 +284,8 @@ async function createMeteringFixture(
     },
     passThroughOnException: vi.fn(),
   } as unknown as ExecutionContext;
+  // Pick machines with the live (stubbed) catalog in place: nothing joins a pool on its own.
+  await f.pickPools();
   const response = await app.request(
     '/',
     {

@@ -32,6 +32,7 @@ import { resolveCanonicalVmAllocationPlan } from '../../src/services/canonical-v
 import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../src/services/default-capacity-pools';
 import { provisionDeploymentNode } from '../../src/services/deployment-provisioning';
 import { encrypt } from '../../src/services/encryption';
+import { pickStarterMachines } from '../helpers/capacity-pool-picks';
 import { createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
 const OWNER_ID = 'owner-shared-deploy';
@@ -148,6 +149,7 @@ describe('deployment default-pool role eligibility contract', () => {
       includeInstallation: false,
       env,
     });
+    await pickStarterMachines(db as never);
 
     let completeProviderCall!: () => void;
     provisionNodeMock.mockImplementationOnce(
@@ -210,27 +212,9 @@ describe('deployment default-pool role eligibility contract', () => {
     await expect(result!.provisioningPromise).resolves.toBeUndefined();
   });
 
-  it('rejects deployment-only candidates for workspace allocations', async () => {
-    const { db, env } = createFixture();
-    await seedSharedProjectFixture(env);
-    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
-      userId: MEMBER_ID,
-      projectId: PROJECT_ID,
-      includeInstallation: false,
-      env,
-    });
-    sqlite
-      ?.prepare(
-        `UPDATE capacity_pool_candidates
-            SET workload_role = 'deployment'
-          WHERE pool_id IN (
-            SELECT id FROM capacity_pools
-             WHERE scope = 'project' AND owner_project_id = ?
-          )`
-      )
-      .run(PROJECT_ID);
-
-    const allocation = await resolveCanonicalVmAllocationPlan(db as never, env, {
+  /** Direct workspace allocation against the project's default pool, exactly as production calls it. */
+  function allocateWorkspace(db: ReturnType<typeof createFixture>['db'], env: Env) {
+    return resolveCanonicalVmAllocationPlan(db as never, env, {
       entryPoint: 'direct-workspace',
       taskId: 'workspace-wrong-role-proof',
       userId: MEMBER_ID,
@@ -248,16 +232,87 @@ describe('deployment default-pool role eligibility contract', () => {
       // Exercise a persisted wrong-role row without catalog reconciliation repairing it.
       capacityPoolEnsure: false,
     });
+  }
+
+  function countRows(table: 'nodes' | 'workspaces'): number {
+    return (sqlite!.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
+  }
+
+  async function seedPoolWithOnlyDeploymentRows() {
+    const { db, env } = createFixture();
+    await seedSharedProjectFixture(env);
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: MEMBER_ID,
+      projectId: PROJECT_ID,
+      includeInstallation: false,
+      env,
+    });
+    await pickStarterMachines(db as never);
+    sqlite
+      ?.prepare(
+        `UPDATE capacity_pool_candidates
+            SET workload_role = 'deployment'
+          WHERE pool_id IN (
+            SELECT id FROM capacity_pools
+             WHERE scope = 'project' AND owner_project_id = ?
+          )`
+      )
+      .run(PROJECT_ID);
+    return { db, env };
+  }
+
+  it('rejects deployment-only candidates for workspace allocations', async () => {
+    const { db, env } = await seedPoolWithOnlyDeploymentRows();
+    expect(countRows('workspaces')).toBe(0);
+    expect(countRows('nodes')).toBe(0);
+
+    const allocation = await allocateWorkspace(db, env);
 
     expect(allocation).toMatchObject({
       errorKind: 'placement',
-      // Deployment-only candidates are not eligible for a workspace allocation,
-      // and the refusal names the requested role rather than falling back to
-      // another pool.
-      error: expect.stringContaining('No eligible compute-pool offering'),
+      // Deployment-only candidates are not eligible for a workspace allocation, and the
+      // refusal does not fall back to another pool. With no workspace machines left the pool
+      // reads as empty for workspaces, so the refusal says so in plain words.
+      error: expect.stringContaining("This project's compute pool has no machines"),
     });
+    // A refused allocation must not leave a workspace or node behind.
+    expect(countRows('workspaces')).toBe(0);
+    expect(countRows('nodes')).toBe(0);
+  });
+
+  it('allocates the same workspace once the pool also holds an active workspace-role candidate', async () => {
+    const { db, env } = await seedPoolWithOnlyDeploymentRows();
+    // Control: identical fixture and call, plus one active workspace-role copy of a machine.
+    const columns = (
+      sqlite!.prepare('PRAGMA table_info(capacity_pool_candidates)').all() as Array<{
+        name: string;
+      }>
+    ).map((column) => column.name);
+    const source = sqlite!
+      .prepare("SELECT * FROM capacity_pool_candidates WHERE workload_role = 'deployment' LIMIT 1")
+      .get() as Record<string, unknown>;
+    const workspaceRow = {
+      ...source,
+      id: 'workspace-role-candidate',
+      workload_role: 'workspace',
+      status: 'active',
+    };
+    sqlite!
+      .prepare(
+        `INSERT INTO capacity_pool_candidates (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`
+      )
+      .run(...columns.map((column) => workspaceRow[column] as never));
+
+    const allocation = await allocateWorkspace(db, env);
+
+    expect(allocation).not.toHaveProperty('errorKind');
     expect(allocation).toMatchObject({
-      error: expect.stringContaining('workspace allocation'),
+      effectiveProvider: 'hetzner',
+      vmLocation: 'fsn1',
+      capacityPoolSelection: { scope: 'project', workloadRole: 'workspace' },
     });
+    // Planning an allocation reserves nothing: the node and workspace are created later.
+    expect(countRows('workspaces')).toBe(0);
+    expect(countRows('nodes')).toBe(0);
   });
 });

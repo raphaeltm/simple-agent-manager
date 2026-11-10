@@ -118,6 +118,7 @@ export {
   isCapacityPoolScope,
   isCapacityPoolStatus,
   isCapacityPoolStrategy,
+  isCapacitySourceExcluded,
   isCapacitySourceKind,
   isCapacityWorkloadRole,
   MAX_CAPACITY_POOL_SOURCE_ORDER_LENGTH,

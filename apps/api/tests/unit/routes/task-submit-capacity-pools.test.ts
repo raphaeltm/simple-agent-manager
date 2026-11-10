@@ -24,6 +24,7 @@ import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../../src/s
 import type { SamDispatchReservation } from '../../../src/services/sam-dispatch-reservation';
 import { resolveSkillProfile } from '../../../src/services/skills';
 import { submitTask } from '../../../src/services/submit-task';
+import { pickStarterMachines } from '../../helpers/capacity-pool-picks';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 import {
   seedCloudCredential,
@@ -209,6 +210,7 @@ async function seedProjectDefaultPool(env: Env): Promise<void> {
     projectId: 'project-1',
     includeInstallation: false,
   });
+  await pickStarterMachines(drizzle(env.DATABASE, { schema }) as never);
 }
 
 async function seedStaticDefaultPool(
@@ -220,6 +222,7 @@ async function seedStaticDefaultPool(
     projectId: input.projectId ?? null,
     includeInstallation: false,
   });
+  await pickStarterMachines(drizzle(env.DATABASE, { schema }) as never);
 }
 
 const executionCtx = {
@@ -548,6 +551,7 @@ describe('task submit capacity-pool placement', () => {
     mocks.enrichMessageWithMentions.mockImplementation(async (message) => ({
       enrichedMessage: message,
     }));
+    await seedProjectDefaultPool(fixture.env);
     return fixture;
   }
 
@@ -614,7 +618,11 @@ describe('task submit capacity-pool placement', () => {
     try {
       const app = createApp();
       const responses = await Promise.all([forkRequest(app, env), forkRequest(app, env)]);
-      expect(responses.map((r) => r.status).sort()).toEqual([202, 409]);
+      // The second concurrent submission either sees the first in flight (409) or replays its
+      // finished receipt (202), depending on timing. Either way exactly one runtime starts.
+      const statuses = responses.map((r) => r.status);
+      expect(statuses).toContain(202);
+      expect(statuses.every((status) => status === 202 || status === 409)).toBe(true);
       const first = await responses.find((r) => r.status === 202)!.json();
       const replay = await forkRequest(app, env);
       expect(replay.status).toBe(202);
@@ -868,6 +876,7 @@ describe('task submit capacity-pool placement', () => {
         projectId: 'project-1',
         includeInstallation: true,
       });
+      await pickStarterMachines(drizzle(env.DATABASE, { schema }) as never);
       const response = await createApp().request(
         '/api/projects/project-1/tasks/submit',
         {
@@ -1026,6 +1035,7 @@ describe('task submit capacity-pool placement', () => {
           projectId: 'project-1',
           includeInstallation: true,
         });
+        await pickStarterMachines(drizzle(env.DATABASE, { schema }) as never);
         env.CF_CONTAINER_ENABLED = 'true';
         sqlite
           .prepare(
@@ -1980,7 +1990,8 @@ describe('task submit capacity-pool placement', () => {
     expect(taskRow).toMatchObject({
       capacity_pool_id: 'cap-pool-default:project:project-1',
       capacity_pool_scope: 'project',
-      capacity_pool_revision: 1,
+      // Revision 2: picking the pool's machines (pickStarterMachines) is one saved edit.
+      capacity_pool_revision: 2,
       capacity_source_id: 'cap-source-default:project:project-cloud-1',
       capacity_pool_candidate_id:
         'cap-candidate-default:cap-pool-default:project:project-1:cap-source-default:project:project-cloud-1:hetzner:nbg1:cx23',
@@ -2263,7 +2274,7 @@ describe('task submit capacity-pool placement', () => {
       credentialAttributionUserId: 'user-a',
       credentialAttributionSource: 'user',
     });
-    await seedStaticDefaultPool(env, { userId: 'user-b', projectId: 'project-1' });
+    // user-b has no cloud credential and the project has none: there is no pool to seed or pick.
     authState.userId = 'user-b';
 
     const res = await createApp().request(

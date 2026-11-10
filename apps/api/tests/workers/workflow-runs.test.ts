@@ -6,7 +6,6 @@ import * as schema from '../../src/db/schema';
 import type { ProjectOrchestrator } from '../../src/durable-objects/project-orchestrator';
 import type { Env } from '../../src/env';
 import { handleCompleteTask } from '../../src/routes/mcp/task-tools';
-import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../src/services/default-capacity-pools';
 import { storeMcpToken } from '../../src/services/mcp-token';
 import * as projectData from '../../src/services/project-data';
 import { admitProjectEventSourceIntentById } from '../../src/services/project-event-source-outbox';
@@ -22,6 +21,7 @@ import {
   startWorkflowRun,
   type WorkflowRunRow,
 } from '../../src/services/workflow-runs';
+import { ensurePoolsWithStarterMachines } from '../helpers/capacity-pool-picks';
 import {
   seedInstallation,
   seedNode,
@@ -65,10 +65,11 @@ async function fixture(stepPlan?: (profileId: string) => Record<string, unknown>
   )
     .bind(`c-${suffix}`, userId, projectId)
     .run();
-  await ensureDefaultCapacityPoolsForExistingCredentials(drizzle(env.DATABASE, { schema }), {
+  await ensurePoolsWithStarterMachines(drizzle(env.DATABASE, { schema }) as never, {
     userId,
     projectId,
     includeInstallation: false,
+    owner: { userId, projectId },
   });
   const plan = {
     title: 'Write and review',

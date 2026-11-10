@@ -20,6 +20,7 @@ import { presentBlockedProviderLimitWait } from '../../src/services/provider-lim
 import { createAllSchemaTables } from '../helpers/sqlite-d1';
 import {
   createEvictionEnv,
+  pickEvictionPools,
   seedEvictionOwnerAndNode,
 } from '../helpers/workspace-eviction-route-harness';
 import { createSqlStorage } from '../unit/durable-objects/sql-storage-test-utils';
@@ -64,13 +65,14 @@ describe('blocked provider wait owner recovery', () => {
   let local: Database.Database;
   let env: Env;
   let app: Hono<{ Bindings: Env }>;
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
     boundary.userId = 'user-1';
     d1 = new Database(':memory:');
     createAllSchemaTables(d1, schema);
     env = createEvictionEnv(d1);
     seedEvictionOwnerAndNode(d1);
+    await pickEvictionPools(env);
     local = new Database(':memory:');
     boundary.sql = createSqlStorage(local);
     runMigrations(boundary.sql);

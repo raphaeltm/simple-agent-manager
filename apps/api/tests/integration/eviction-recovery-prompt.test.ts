@@ -27,6 +27,7 @@ import { createAllSchemaTables } from '../helpers/sqlite-d1';
 import {
   createEvictionApp,
   createEvictionEnv,
+  pickEvictionPools,
   postEvictionCallback,
   seedEvictionOwnerAndNode,
 } from '../helpers/workspace-eviction-route-harness';
@@ -65,7 +66,7 @@ describe('recovery prompt chosen by the wake cause', () => {
   let env: Env;
   let app: Hono<{ Bindings: Env }>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
     sqlite = new Database(':memory:');
     createAllSchemaTables(sqlite, schema);
@@ -75,7 +76,7 @@ describe('recovery prompt chosen by the wake cause', () => {
 
   afterEach(() => sqlite.close());
 
-  function seed({ taskMode, lifecycle, contractTaskMode }: SeedOptions) {
+  async function seed({ taskMode, lifecycle, contractTaskMode }: SeedOptions) {
     const slept = lifecycle === 'slept';
     const contract = contractTaskMode
       ? JSON.stringify({
@@ -97,6 +98,7 @@ describe('recovery prompt chosen by the wake cause', () => {
         })
       : null;
     seedEvictionOwnerAndNode(sqlite);
+    await pickEvictionPools(env);
     sqlite
       .prepare(
         `INSERT INTO workspaces
@@ -203,7 +205,7 @@ describe('recovery prompt chosen by the wake cause', () => {
   }
 
   it('tells an evicted task-mode agent to continue its task without replaying external effects', async () => {
-    seed({ taskMode: 'task', lifecycle: 'evictable' });
+    await seed({ taskMode: 'task', lifecycle: 'evictable' });
     await evict();
 
     const config = recoveryStart();
@@ -220,7 +222,7 @@ describe('recovery prompt chosen by the wake cause', () => {
   });
 
   it('follows the task mode the runtime contract recorded', async () => {
-    seed({ taskMode: 'conversation', lifecycle: 'evictable', contractTaskMode: 'task' });
+    await seed({ taskMode: 'conversation', lifecycle: 'evictable', contractTaskMode: 'task' });
     await evict();
 
     expect(recoveryStart()).toMatchObject({
@@ -233,7 +235,7 @@ describe('recovery prompt chosen by the wake cause', () => {
   it.each(['task', 'conversation'] as const)(
     'continues interrupted %s work after eviction',
     async (taskMode) => {
-      seed({ taskMode, lifecycle: 'evictable' });
+      await seed({ taskMode, lifecycle: 'evictable' });
       await evict(true);
       expect(recoveryStart()).toMatchObject({
         taskMode,
@@ -246,7 +248,7 @@ describe('recovery prompt chosen by the wake cause', () => {
   it.each(['task', 'conversation'] as const)(
     'leaves an idle %s session waiting for its human',
     async (taskMode) => {
-      seed({ taskMode, lifecycle: 'evictable' });
+      await seed({ taskMode, lifecycle: 'evictable' });
       await evict(false);
       expect(recoveryStart()).toMatchObject({
         taskMode,
@@ -257,13 +259,13 @@ describe('recovery prompt chosen by the wake cause', () => {
   );
 
   it('reconciles legacy conversation eviction when pre-stop evidence is unavailable', async () => {
-    seed({ taskMode: 'conversation', lifecycle: 'evictable' });
+    await seed({ taskMode: 'conversation', lifecycle: 'evictable' });
     await evict();
     expect(recoveryStart().restoredSessionPrompt).toBe(SESSION_RECOVERY_CONTINUE_TASK_PROMPT);
   });
 
   it('keeps the answer-the-follow-up wording when a queued user message wakes a task', async () => {
-    seed({ taskMode: 'task', lifecycle: 'slept' });
+    await seed({ taskMode: 'task', lifecycle: 'slept' });
     await deliverUserFollowUp();
 
     expect(recoveryStart()).toMatchObject({

@@ -128,6 +128,7 @@ adminCapacityPoolsRoutes.patch('/defaults', async (c) => {
     includeInstallation: true,
     ensure: true,
     includeDisabled: true,
+    labels: false,
     env: c.env,
   });
   const result = await updateDefaultCapacityPool(db, {

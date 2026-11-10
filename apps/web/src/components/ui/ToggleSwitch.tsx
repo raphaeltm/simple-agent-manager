@@ -1,11 +1,9 @@
 /**
- * Accessible switch primitive for the model picker.
+ * Accessible on/off switch shared across the app: the model picker, compute pool accounts and
+ * deployment settings.
  *
- * `packages/ui` has no Switch/Checkbox component yet (see
- * `apps/web/.claude/rules/04-ui-standards.md` item 5 — temporary local
- * exception: this task's scope is `apps/web/` only, so the primitive lives
- * here instead of upstreamed to `packages/ui`. A follow-up should move it
- * there if another surface needs a switch).
+ * `packages/ui` has no Switch component yet (see `apps/web/.claude/rules/04-ui-standards.md`
+ * item 5). It lives here, outside any one feature's folder, until it moves to `packages/ui`.
  *
  * A real `<button role="switch">`, not a decorative track nested inside a
  * separately-clickable row — that would be two interactive elements doing
@@ -13,7 +11,7 @@
  * assistive tech. Sized 44x24 (`w-11 h-6`) so the control itself, not just a
  * padded hit-slop hack, meets a 44px dimension.
  */
-interface ModelToggleSwitchProps {
+interface ToggleSwitchProps {
   checked: boolean;
   onChange: () => void;
   disabled?: boolean;
@@ -22,13 +20,13 @@ interface ModelToggleSwitchProps {
   id?: string;
 }
 
-export function ModelToggleSwitch({
+export function ToggleSwitch({
   checked,
   onChange,
   disabled = false,
   label,
   id,
-}: ModelToggleSwitchProps) {
+}: ToggleSwitchProps) {
   return (
     <button
       id={id}

@@ -27,11 +27,11 @@ import type { McpTokenData } from '../../src/routes/mcp/_helpers';
 import { handleDispatchTask } from '../../src/routes/mcp/dispatch-tool';
 import * as projectHelpers from '../../src/routes/projects/_helpers';
 import { recoverStuckTasks } from '../../src/scheduled/stuck-tasks';
-import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../src/services/default-capacity-pools';
 import * as projectDataService from '../../src/services/project-data';
 import { getOrchestratorStatus, startOrchestration } from '../../src/services/project-orchestrator';
 import * as vmAgentContainer from '../../src/services/vm-agent-container';
 import * as workspaceBranch from '../../src/services/workspace-branch';
+import { ensurePoolsWithStarterMachines } from '../helpers/capacity-pool-picks';
 import { seedReadyNode } from './helpers/ready-node';
 import { seedInstallation, seedMission, seedProject, seedTask, seedUser } from './helpers/seed-d1';
 import {
@@ -176,10 +176,11 @@ async function seedMissionFixture(label: string) {
   )
     .bind(`credential-${suffix}`, userId, projectId, `token-${suffix}`, `iv-${suffix}`, now, now)
     .run();
-  await ensureDefaultCapacityPoolsForExistingCredentials(drizzle(env.DATABASE, { schema }), {
+  await ensurePoolsWithStarterMachines(drizzle(env.DATABASE, { schema }) as never, {
     userId,
     projectId,
     includeInstallation: false,
+    owner: { userId, projectId },
   });
   // The coordinator that dispatches mission work (a Connector-started chat in production).
   await seedTask(parentTaskId, projectId, userId, { status: 'in_progress' });

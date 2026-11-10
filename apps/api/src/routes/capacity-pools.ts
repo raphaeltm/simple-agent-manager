@@ -95,6 +95,8 @@ async function readUserDefaultPoolSummaries(
     includeInstallation: true,
     ensure: false,
     includeDisabled: true,
+    // The user settings surface never shows the installation pool.
+    labelInstallation: false,
     env: input.env,
   });
 }
@@ -155,6 +157,7 @@ capacityPoolsRoutes.patch('/defaults', async (c) => {
     includeInstallation: false,
     ensure: true,
     includeDisabled: true,
+    labels: false,
     env: c.env,
   });
   const result = await updateDefaultCapacityPool(db, {

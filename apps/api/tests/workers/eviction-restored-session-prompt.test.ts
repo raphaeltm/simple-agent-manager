@@ -43,6 +43,7 @@ import {
 } from '../../src/services/session-sleep-fallback-messages';
 import { buildSessionSnapshotR2Key } from '../../src/services/session-snapshots';
 import { DefaultVmPromptDeliveryAdapter } from '../../src/services/vm-prompt-delivery-adapter';
+import { ensurePoolsWithStarterMachines } from '../helpers/capacity-pool-picks';
 import {
   acceptedPromptResponse,
   versionedPromptCapabilities,
@@ -181,6 +182,13 @@ async function agentOnVm(taskMode: TaskMode) {
       now
     ),
   ]);
+  // The wake places onto the user's pool, and a new pool picks nothing by itself.
+  await ensurePoolsWithStarterMachines(drizzle(env.DATABASE, { schema }) as never, {
+    userId,
+    projectId,
+    includeInstallation: false,
+    owner: { userId, projectId },
+  });
   await runInDurableObject(stub, async (_instance, state) => {
     pauseAlarms(state.storage);
     await state.storage.deleteAlarm();

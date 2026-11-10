@@ -64,6 +64,10 @@ SAM reads the Google Cloud machine catalog live; nothing about zones or prices i
   lists every zone where your project can create it, using the connection's own credentials.
   Arm (ARM64) types such as t2a are skipped, because SAM boots Google Cloud nodes from an amd64
   image.
+- **Regions, not zones.** The pool editor lists each machine type once per region (Belgium for
+  `europe-west1`, Iowa for `us-central1`). Adding a region lets SAM use any of its zones, including
+  zones Google adds to it later. See
+  [Compute Pools](/docs/guides/compute-pools/#allowed-offerings).
 - **Prices.** SAM reads Google's public Compute Engine list prices (USD, on demand) from the Cloud
   Billing Catalog API and prices each machine as its vCPUs times the core price plus its memory
   times the RAM price for that region. Prices are the same for every Google project, so SAM keeps
@@ -125,6 +129,6 @@ SAM currently maps Google 403 responses to generic permission advice, including 
 
 ### Google Cloud appears twice in the node pool
 
-Two headings such as **Google Cloud · Infrastructure settings** and **Google Cloud · Infrastructure settings (2)** can represent different connections. Older SAM versions can also show one GCP connection twice with identical machine offerings because they count its old and new credential-store copies as separate pool sources. Current versions recognize these managed copies as one connection.
+Two accounts such as **Google Cloud · SAM GCP Prod** and **Google Cloud · Infrastructure settings (2)** can represent different connections. A connection that was disconnected, deleted or disabled no longer appears in the pool at all. Older SAM versions can also show one GCP connection twice with identical machine offerings because they count its old and new credential-store copies as separate pool sources. Current versions recognize these managed copies as one connection.
 
 The repeated list is not evidence that two sets of VMs were created. After upgrading, SAM reconciles existing duplicate sources when the pool is refreshed, preserving allowed matching offerings and historical references used by running work. Distinct connections stay separate. If entries still repeat, ask your operator to inspect them: unmatched custom offerings or concurrent edits can defer automatic repair to avoid losing your selections. Do not disconnect accounts or delete WIF resources solely to remove a repeated heading. This issue is unrelated to Google API enablement or the selected default zone.

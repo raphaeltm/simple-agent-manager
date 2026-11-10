@@ -4,8 +4,7 @@ import type {
   CapacityPoolStrategy,
   DefaultCapacityPoolCandidateCatalogAddition,
 } from '@simple-agent-manager/shared';
-import { MAX_CAPACITY_POOL_SOURCE_ORDER_LENGTH } from '@simple-agent-manager/shared';
-import { and, eq, inArray, ne, or, sql } from 'drizzle-orm';
+import { and, eq, inArray, or, sql } from 'drizzle-orm';
 import type { BatchItem } from 'drizzle-orm/batch';
 import { type drizzle } from 'drizzle-orm/d1';
 
@@ -13,13 +12,17 @@ import * as schema from '../db/schema';
 import { D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
 import { nextCapacityPoolTimestamp } from './capacity-pool-clock';
 import { capacityCandidateIdForRole } from './capacity-pool-workload-roles';
-import { parseCapacityPoolSourceOrder } from './capacity-pools';
 import type { DefaultPoolScopeIdentity } from './default-capacity-pool-helpers';
+import {
+  publishSourceSettingsOnly,
+  resolveSourceSettingsUpdate,
+  sourceSettingsGuardSql,
+  type SourceSettingsUpdate,
+} from './default-capacity-pool-source-settings';
 import {
   type CandidateStatusUpdate,
   resolveCandidateStatusUpdates,
   resolveCatalogAdditionUpdates,
-  sourceScopePredicates,
 } from './default-capacity-pool-update-candidates';
 import {
   type CapacityPoolSummary,
@@ -42,6 +45,8 @@ export interface DefaultCapacityPoolUpdateInput extends DefaultPoolScopeIdentity
   catalogAdditions?: DefaultCapacityPoolCandidateCatalogAddition[];
   /** Provider order to store; `null` or `[]` clears it. Absent leaves it unchanged. */
   sourceOrder?: string[] | null;
+  /** Switched-off accounts to store; `null` or `[]` switches all on. Absent leaves them. */
+  excludedSourceIds?: string[] | null;
 }
 
 export interface DefaultCapacityPoolUpdateResult {
@@ -51,7 +56,10 @@ export interface DefaultCapacityPoolUpdateResult {
   unavailableCandidateIds: string[];
   missingCatalogAdditions: string[];
   unavailableCatalogAdditions: string[];
-  /** Ids in a requested provider order that are not capacity sources serving this pool. */
+  /**
+   * Ids in a requested provider order or switched-off list that are not capacity sources
+   * serving this pool.
+   */
   missingSourceIds: string[];
   /**
    * True when a concurrent editor advanced the pool between this edit's read and its write.
@@ -67,10 +75,13 @@ type PolicyUpdate = NonNullable<DefaultCapacityPoolUpdateInput['policy']>;
 
 /**
  * Binds consumed by an atomic candidate UPDATE before its `id IN (...)` list:
- * `status`, `updated_at` (SET), `pool_id`, role suffix and the fence's `id` + `revision`.
- * Each candidate id is bound twice: its direct update and current coupled-mirror lookup.
+ * `status`, `updated_at` (SET), `pool_id`, role suffix, the fence's `id` + `revision`, and up to
+ * two account-settings guards in the same fence (`sourceSettingsGuardSql`: provider order and
+ * switched-off accounts). Each candidate id is bound twice: its direct update and current
+ * coupled-mirror lookup.
  */
-const ATOMIC_CANDIDATE_UPDATE_FIXED_BIND_COUNT = 6;
+const MAX_SOURCE_SETTINGS_GUARD_BINDS = 2;
+const ATOMIC_CANDIDATE_UPDATE_FIXED_BIND_COUNT = 6 + MAX_SOURCE_SETTINGS_GUARD_BINDS;
 const ATOMIC_CANDIDATE_ID_CHUNK_SIZE = Math.max(
   1,
   Math.floor((D1_MAX_BOUND_PARAMETERS - ATOMIC_CANDIDATE_UPDATE_FIXED_BIND_COUNT) / 2)
@@ -146,20 +157,23 @@ export async function updateDefaultCapacityPool(
     });
   }
 
-  const sourceOrderResult = await resolveSourceOrderUpdate(db, pool, input);
-  if (sourceOrderResult.missingSourceIds.length > 0) {
-    return emptyUpdateResult({ missingSourceIds: sourceOrderResult.missingSourceIds });
+  const sourceSettings = await resolveSourceSettingsUpdate(
+    db,
+    pool,
+    input,
+    candidateResult.activatedSourceIds
+  );
+  if (sourceSettings.missingSourceIds.length > 0) {
+    return emptyUpdateResult({ missingSourceIds: sourceSettings.missingSourceIds });
   }
 
   const policyResult = resolvePolicyUpdate(pool, input.policy);
   const candidatesChanged = candidateResult.changedUpdates.length > 0;
   if (!policyResult.changed && !candidatesChanged) {
-    if (sourceOrderResult.changed) {
-      // Rank decides only which source a NEW VM comes from. Reuse authority requires a
-      // node's recorded pool revision to match (placement-authority.ts), so bumping the
-      // revision for a reorder would make every running node non-reusable and trigger a wave
-      // of new VMs. The revision is the fence, not the change.
-      const published = await publishSourceOrderOnly(db, pool, sourceOrderResult.json);
+    if (sourceSettings.changed) {
+      // Order and on/off do not bump the revision (see default-capacity-pool-source-settings.ts);
+      // the write is fenced on the values it read instead.
+      const published = await publishSourceSettingsOnly(db, pool, sourceSettings);
       if (!published) return emptyUpdateResult({ conflict: true });
     }
     // Ordinary no-op reads must not mutate: an unchanged edit publishes nothing and
@@ -172,14 +186,11 @@ export async function updateDefaultCapacityPool(
   const published = await publishPoolEditAtomically(db, {
     poolId: pool.id,
     guardRevision: pool.revision,
-    // A reorder does not bump the revision, so an edit that rewrites the order must also
-    // prove the order it read is still the stored one.
-    ...(sourceOrderResult.changed ? { guardSourceOrderJson: pool.sourceOrderJson ?? null } : {}),
+    // Order and on/off edits do not bump the revision, so an edit that rewrites them must also
+    // prove the values it read are still the stored ones.
+    sourceSettings,
     candidateUpdates: candidateResult.changedUpdates,
-    policyValues: {
-      ...policyResult.values,
-      ...(sourceOrderResult.changed ? { sourceOrderJson: sourceOrderResult.json } : {}),
-    },
+    policyValues: { ...policyResult.values, ...sourceSettings.values },
   });
   if (!published) {
     return emptyUpdateResult({ conflict: true });
@@ -211,23 +222,21 @@ async function publishPoolEditAtomically(
   input: {
     poolId: string;
     guardRevision: number;
-    /** When set, the edit also requires the stored provider order to still equal this value. */
-    guardSourceOrderJson?: string | null;
+    /** The order/on-off values the edit read; changed ones must still be stored. */
+    sourceSettings: SourceSettingsUpdate;
     candidateUpdates: CandidateStatusUpdate[];
-    policyValues: Partial<PolicyUpdate> & { sourceOrderJson?: string | null };
+    policyValues: Partial<PolicyUpdate> & SourceSettingsUpdate['values'];
   }
 ): Promise<boolean> {
   const now = nextCapacityPoolTimestamp();
   const nextRevision = input.guardRevision + 1;
-  // Every statement shares this fence, so a refused order guard cannot leave candidate rows
+  // Every statement shares this fence, so a refused settings guard cannot leave candidate rows
   // updated under a pool row that was not.
-  const sourceOrderGuard =
-    input.guardSourceOrderJson === undefined
-      ? sql``
-      : sql` AND source_order_json IS ${input.guardSourceOrderJson}`;
   const poolRevisionFence = sql`EXISTS (
     SELECT 1 FROM capacity_pools
-    WHERE id = ${input.poolId} AND revision = ${input.guardRevision}${sourceOrderGuard}
+    WHERE id = ${input.poolId} AND revision = ${input.guardRevision}${sourceSettingsGuardSql(
+      input.sourceSettings.guards
+    )}
   )`;
 
   // One statement per (target status, bind-safe id chunk) rather than one per row: a
@@ -318,82 +327,4 @@ function resolvePolicyUpdate(
   }
 
   return { changed: Object.keys(values).length > 0, values };
-}
-
-interface SourceOrderUpdateResult {
-  changed: boolean;
-  json: string | null;
-  missingSourceIds: string[];
-}
-
-/**
- * Validate a requested provider order: every id must be a capacity source in this pool's scope
- * that still serves the pool (has a non-deleted candidate in it). An empty list clears the order.
- */
-async function resolveSourceOrderUpdate(
-  db: Db,
-  pool: schema.CapacityPool,
-  input: DefaultCapacityPoolUpdateInput
-): Promise<SourceOrderUpdateResult> {
-  if (input.sourceOrder === undefined) {
-    return { changed: false, json: pool.sourceOrderJson ?? null, missingSourceIds: [] };
-  }
-  if (input.sourceOrder && input.sourceOrder.length > MAX_CAPACITY_POOL_SOURCE_ORDER_LENGTH) {
-    // The route rejects this first; the membership read below binds one parameter per id.
-    throw new Error(
-      `sourceOrder may list at most ${MAX_CAPACITY_POOL_SOURCE_ORDER_LENGTH} capacity sources`
-    );
-  }
-  const requested = input.sourceOrder && input.sourceOrder.length > 0 ? input.sourceOrder : null;
-  const json = requested ? JSON.stringify(requested) : null;
-  const current = parseCapacityPoolSourceOrder(pool.id, pool.sourceOrderJson);
-  const changed = JSON.stringify(current) !== JSON.stringify(requested);
-  if (!requested || !changed) return { changed, json, missingSourceIds: [] };
-
-  const serving = await db
-    .selectDistinct({ id: schema.capacityPoolCandidates.capacitySourceId })
-    .from(schema.capacityPoolCandidates)
-    .innerJoin(
-      schema.capacitySources,
-      eq(schema.capacitySources.id, schema.capacityPoolCandidates.capacitySourceId)
-    )
-    .where(
-      and(
-        eq(schema.capacityPoolCandidates.poolId, pool.id),
-        ne(schema.capacityPoolCandidates.status, 'deleted'),
-        inArray(schema.capacityPoolCandidates.capacitySourceId, requested),
-        ...sourceScopePredicates(input)
-      )
-    );
-  const servingIds = new Set(serving.map((row) => row.id));
-  return {
-    changed,
-    json,
-    missingSourceIds: requested.filter((id) => !servingIds.has(id)),
-  };
-}
-
-/**
- * Store a provider order alone, without bumping the revision. The revision alone cannot fence
- * this write, because a reorder never advances it: two concurrent reorders would both match it
- * and the later one would silently replace the earlier. So it also compares the stored order
- * with the one this edit read, and a changed order is a conflict.
- */
-async function publishSourceOrderOnly(
-  db: Db,
-  pool: schema.CapacityPool,
-  json: string | null
-): Promise<boolean> {
-  const result = await db
-    .update(schema.capacityPools)
-    .set({ sourceOrderJson: json })
-    .where(
-      and(
-        eq(schema.capacityPools.id, pool.id),
-        eq(schema.capacityPools.revision, pool.revision),
-        sql`${schema.capacityPools.sourceOrderJson} IS ${pool.sourceOrderJson ?? null}`
-      )
-    )
-    .run();
-  return (result as unknown as D1Result<unknown>).meta.changes === 1;
 }

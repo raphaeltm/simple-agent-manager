@@ -9,6 +9,7 @@ import type {
 } from '@simple-agent-manager/shared';
 import {
   isCapacityPlacementCredentialSource,
+  isCapacitySourceExcluded,
   isValidLocationForProvider,
   isValidProvider,
 } from '@simple-agent-manager/shared';
@@ -333,7 +334,13 @@ function isActiveCapacityPlacementOption(
   source: CapacitySourceIdentity,
   candidate: CapacityPoolCandidateDto
 ): boolean {
-  return pool.status === 'active' && source.status === 'active' && candidate.status === 'active';
+  return (
+    pool.status === 'active' &&
+    source.status === 'active' &&
+    // A switched-off account keeps its picks but is never placed (new VMs or reuse).
+    !isCapacitySourceExcluded(pool, source.id) &&
+    candidate.status === 'active'
+  );
 }
 
 function isCredentialPlacementSource(value: unknown): value is CredentialSource {

@@ -37,6 +37,7 @@ import { getNodeBackendBaseUrl } from '../../src/services/node-agent-readiness';
 import { validateProjectEventWakeRecoveryAuthority } from '../../src/services/project-data';
 import { resolveSessionRuntimeContract } from '../../src/services/session-runtime-contract';
 import { DefaultVmPromptDeliveryAdapter } from '../../src/services/vm-prompt-delivery-adapter';
+import { ensurePoolsWithStarterMachines } from '../helpers/capacity-pool-picks';
 import {
   acceptedPromptResponse,
   versionedPromptCapabilities,
@@ -168,6 +169,13 @@ async function sleepingConversationWokenByAgentDm() {
       now
     ),
   ]);
+  // The wake places onto the member's pool, and a new pool picks nothing by itself.
+  await ensurePoolsWithStarterMachines(db as never, {
+    userId: memberId,
+    projectId,
+    includeInstallation: false,
+    owner: { userId: memberId, projectId },
+  });
   await sqlRows(stub, "UPDATE chat_sessions SET status = 'sleeping' WHERE id = ?", b.sessionId);
 
   okBody(

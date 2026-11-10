@@ -11,6 +11,10 @@ import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
 import {
+  ensurePoolsWithStarterMachines,
+  pickStarterMachines,
+} from '../../helpers/capacity-pool-picks';
+import {
   createSchemaTables,
   createSqliteD1,
   createSqliteD1WithBindLimit,
@@ -215,6 +219,15 @@ describe('project capacity pool routes', () => {
       projectId: 'project-1',
     });
     seedPlatformCloudCredential(sqlite);
+    // The project's machines were picked: nothing joins a pool on its own.
+    await ensurePoolsWithStarterMachines(drizzle(env.DATABASE, { schema }) as never, {
+      userId: 'user-1',
+      projectId: 'project-1',
+      includeInstallation: false,
+      env,
+    });
+    // Only the request's own catalog reads are under test.
+    vi.mocked(providerCatalogs.buildProviderCatalogForCredential).mockClear();
 
     const res = await createApp().request(
       '/api/projects/project-1/capacity-pools/defaults?ensure=true',
@@ -496,6 +509,7 @@ describe('project capacity pool routes', () => {
       projectId: 'project-1',
     });
     await reconcileExistingDefaults(env);
+    await pickStarterMachines(drizzle(env.DATABASE, { schema }) as never);
 
     const res = await createApp().request(
       '/api/projects/project-1/capacity-pools/defaults',
@@ -532,6 +546,7 @@ describe('project capacity pool routes', () => {
     seedProjectMember(sqlite, { projectId: 'project-1', userId: 'user-1', role: 'viewer' });
     seedPlatformCloudCredential(sqlite, 'platform-cloud-canary');
     await reconcileExistingDefaults(env, { includeInstallation: true });
+    await pickStarterMachines(drizzle(env.DATABASE, { schema }) as never);
 
     const res = await createApp().request(
       '/api/projects/project-1/capacity-pools/defaults',
@@ -971,7 +986,7 @@ describe('project capacity pool routes', () => {
       sqlite
         .prepare(`SELECT status FROM capacity_pool_candidates WHERE id = ?`)
         .get(fallbackCandidate.id)
-    ).toEqual({ status: 'active' });
+    ).toEqual({ status: fallbackCandidate.status });
   });
 
   it('supports read-only inspection with ensure=false', async () => {

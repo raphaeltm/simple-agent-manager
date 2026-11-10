@@ -13,6 +13,7 @@ import { resolve } from 'node:path';
 import type { ProjectScheduledAction } from '@simple-agent-manager/shared';
 import type Database from 'better-sqlite3';
 import { getTableName, is } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
 import { SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -55,6 +56,7 @@ import {
   queueWorkspaceSessionSleep,
   sleepWorkspaceSession,
 } from '../../src/services/session-sleep';
+import { ensurePoolsWithStarterMachines } from '../helpers/capacity-pool-picks';
 import { createSleepProjectDataFixture } from '../helpers/session-sleep-project-data-fixture';
 import { createMemoryKv, createSchemaTables } from '../helpers/sqlite-d1';
 
@@ -901,6 +903,13 @@ describe('provider-limit callback reaches the durable scheduled VM wake', () => 
       VALUES ('cloud-credential','user-1','hetzner','cloud-provider','api-key',1,'encrypted','iv');
       UPDATE projects SET default_location='nbg1',default_branch='main',repository='owner/repo',installation_id='install-1' WHERE id='project-1';
       UPDATE nodes SET cloud_provider='hetzner',vm_size='small',vm_location='nbg1' WHERE id='node-1'`);
+    // The user picked machines: the wake places on the pool, and nothing joins it on its own.
+    await ensurePoolsWithStarterMachines(drizzle(env.DATABASE, { schema }) as never, {
+      userId: 'user-1',
+      projectId: 'project-1',
+      includeInstallation: true,
+      env: env,
+    });
     for (let prompt = 1; prompt <= 4; prompt++) {
       if (prompt > 1) {
         const row = d1

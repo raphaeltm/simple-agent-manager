@@ -120,6 +120,15 @@ const LEGACY_ALLOWED_DUPLICATE_FILES = new Map<string, Map<string, Set<string>>>
           '0217_session_snapshot_sleep_required_episode.sql',
         ]),
       ],
+      // The compute pool editor PR's switched-off accounts column was applied to staging on
+      // 2026-11-09 as d1_migrations id 263, before #2615 claimed prefix 0230 on main; staging
+      // applied that one as id 264. Wrangler keys applied migrations by exact filename, so
+      // renumbering this file would replay ALTER TABLE capacity_pools ADD COLUMN
+      // excluded_source_ids_json against staging and abort its migration run.
+      [
+        '0230',
+        new Set(['0230_capacity_pool_excluded_sources.sql', '0230_node_cloudflare_tunnels.sql']),
+      ],
     ]),
   ],
 ]);
