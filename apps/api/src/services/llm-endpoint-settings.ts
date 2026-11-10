@@ -33,6 +33,10 @@ export const LLM_PURPOSE_MODEL_SETTING: Readonly<Record<LlmPurpose, LlmEndpointS
   aiProxy: 'llm.openAICompatible.aiProxyModel',
 };
 
+/** Shortest and longest accepted API key. */
+const MIN_API_KEY_LENGTH = 8;
+const MAX_API_KEY_LENGTH = 4096;
+
 /** Longest accepted model id; real ids are far shorter. */
 const MAX_MODEL_ID_LENGTH = 200;
 
@@ -115,8 +119,11 @@ function definition(key: LlmEndpointSettingKey): AdminSettingDefinition {
       ...base,
       secret: true,
       credential: { provider: 'openai-compatible', kind: 'api-key' },
+      // Same floor as the OAuth secrets: a real key is never this short.
       validate: (value) =>
-        typeof value === 'string' && value.trim().length > 0 && value.length <= 4096,
+        typeof value === 'string' &&
+        value.trim().length >= MIN_API_KEY_LENGTH &&
+        value.length <= MAX_API_KEY_LENGTH,
     };
   }
   return {
