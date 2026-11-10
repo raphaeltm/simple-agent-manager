@@ -1,0 +1,14 @@
+# One public port (443) on the box: Caddy terminates TLS for both the Worker (celld) and the
+# node tunnel (frp over WebSocket at frp's fixed path /~!frp).
+{
+	local_certs
+	skip_install_trust
+	auto_https disable_redirects
+}
+
+box.spike.test:443 {
+	tls internal
+	@frp path /~!frp
+	reverse_proxy @frp 127.0.0.1:7000
+	reverse_proxy 127.0.0.1:8787
+}

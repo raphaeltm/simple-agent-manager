@@ -1,0 +1,17 @@
+== upload 1 GiB + 1 byte via Worker+tunnel (CELLD_MAX_REQUEST_BODY_BYTES default 1 GiB)
+{"error":"Error: fetch: error sending request for url (http://127.0.0.1:17002/sink)"}
+http=502 time=8.918064
+== drip 5 lines 1 s apart via Worker+tunnel: arrival time vs server timestamp
+(eval):5: no matches found: http://127.0.0.1:8787/tcp/node-b/drip?count=5&interval=1000
+== upload 1 GiB + 1 byte WITH Content-Length via Worker+tunnel
+curl: option --data-binary: out of memory
+curl: try 'curl --help' or 'curl --manual' for more information
+== drip 5 lines 1 s apart via Worker+tunnel: arrival time vs server timestamp
+line 0 lag=13ms
+line 1 lag=5ms
+line 2 lag=7ms
+line 3 lag=5ms
+line 4 lag=4ms
+== upload 1 GiB + 1 byte WITH Content-Length (curl -T file) via Worker+tunnel
+request body too large
+http=413 time=0.000781

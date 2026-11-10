@@ -1,0 +1,2 @@
+2026-11-10T13:03:13.573Z open; idling 330s
+2026-11-10T13:08:43.627Z echo after idle ok = true

@@ -1,0 +1,20 @@
+1-raw-loopback
+  download 1 GiB: http=200 bytes=1073741824 time=0.91s rate=1130 MiB/s
+  upload (chunked, duplex half): {"bytes":1073741824,"ms":5544,"node":"host-baseline","sha256":"49bc20df15e412a64472421e13fe86ff1c5165e18b2afccf160d4dc19fe68a14"}
+ 200 5.545520
+  /health latency x200: p50=0.7ms p95=1.0ms p99=1.2ms
+2-worker-only
+  download 1 GiB: http=200 bytes=1073741824 time=1.24s rate=828 MiB/s
+  upload (chunked, duplex half): {"bytes":1073741824,"ms":5634,"node":"host-baseline","sha256":"49bc20df15e412a64472421e13fe86ff1c5165e18b2afccf160d4dc19fe68a14"}
+ 200 5.638723
+  /health latency x200: p50=2.2ms p95=4.1ms p99=7.2ms
+3-tunnel-only
+  download 1 GiB: http=200 bytes=1073741824 time=4.71s rate=217 MiB/s
+  upload (chunked, duplex half): {"bytes":1073741824,"ms":8518,"node":"node-b","sha256":"49bc20df15e412a64472421e13fe86ff1c5165e18b2afccf160d4dc19fe68a14"}
+ 200 8.522720
+  /health latency x200: p50=2.7ms p95=4.9ms p99=8.0ms
+4-worker+tunnel
+  download 1 GiB: http=200 bytes=1073741824 time=5.10s rate=201 MiB/s
+  upload (chunked, duplex half): {"bytes":1073741824,"ms":9309,"node":"node-b","sha256":"49bc20df15e412a64472421e13fe86ff1c5165e18b2afccf160d4dc19fe68a14"}
+ 200 9.352924
+  /health latency x200: p50=3.0ms p95=4.4ms p99=5.6ms

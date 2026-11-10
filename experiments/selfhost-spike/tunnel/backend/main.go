@@ -76,6 +76,16 @@ func main() {
 				c.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(code, reason))
 				time.Sleep(200 * time.Millisecond); return
 			}
+			if mt == websocket.TextMessage && len(s) > 6 && s[:6] == "flood:" {
+				// Push N MiB in 64 KiB binary frames as fast as the connection accepts, then "flood-done".
+				mib, _ := strconv.Atoi(s[6:]); chunk := make([]byte, 64*1024); start := time.Now()
+				for i := 0; i < mib*16; i++ {
+					if err := c.WriteMessage(websocket.BinaryMessage, chunk); err != nil { log.Printf("flood write failed at frame %d: %v", i, err); return }
+				}
+				log.Printf("flood %d MiB written in %s", mib, time.Since(start))
+				c.WriteMessage(websocket.TextMessage, []byte("flood-done"))
+				continue
+			}
 			if mt == websocket.TextMessage && len(s) > 5 && s[:5] == "tick:" {
 				ms, _ := strconv.Atoi(s[5:])
 				go func() {

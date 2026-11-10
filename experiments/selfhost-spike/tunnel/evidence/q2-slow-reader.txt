@@ -1,0 +1,10 @@
+=== 127.0.0.1 17002 /ws (32 MiB, pause 20s)
+HTTP/1.1 101 Switching Protocols
+requested flood 32 MiB; not reading for 20.0s
+text: b'flood-done'
+received 33554432 of 33554432 bytes (32.00 MiB) in 20.3s
+=== 127.0.0.1 8787 /tcp/node-b/ws?_ws=pair&_wait=1 (32 MiB, pause 20s)
+HTTP/1.1 101 Switching Protocols
+requested flood 32 MiB; not reading for 20.0s
+text: b'flood-done'
+received 33554432 of 33554432 bytes (32.00 MiB) in 20.2s

@@ -51,3 +51,4 @@ try {
     ws.close(1000);
   }
 } catch (e) { log('FAILED', e.message); process.exit(1); }
+process.exit(0);

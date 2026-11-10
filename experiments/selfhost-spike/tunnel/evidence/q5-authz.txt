@@ -1,0 +1,38 @@
+## control: node-a, own token, own port 17001 (expect ALLOW)
+   frpc: 2026-11-10 13:10:19.999 [I] [client/service.go:389] [98816f9074eac4c6] login to server success, get run id [98816f9074eac4c6]
+   frpc: 2026-11-10 13:10:20.004 [W] [client/control.go:172] [98816f9074eac4c6] [node-a-ctl] start error: port already used
+   authz: {"t":"2026-11-10T13:10:19.996Z","op":"Login","decision":"allow","reason":null}
+   authz: {"t":"2026-11-10T13:10:20.003Z","op":"NewProxy","decision":"allow","reason":null}
+## node-a, own valid token, claims node-b port 17002 (expect REJECT)
+   frpc: 2026-11-10 13:10:23.745 [I] [client/service.go:389] [747ea616b564c174] login to server success, get run id [747ea616b564c174]
+   frpc: 2026-11-10 13:10:23.748 [W] [client/control.go:172] [747ea616b564c174] [node-a-evil] start error: node-a may only bind port 17001, claimed 17002
+   authz: {"t":"2026-11-10T13:10:23.744Z","op":"Login","decision":"allow","reason":null}
+   authz: {"t":"2026-11-10T13:10:23.747Z","op":"NewProxy","decision":"reject","reason":"node-a may only bind port 17001, claimed 17002"}
+## node-a, own valid token, claims node-b domain (expect REJECT)
+   frpc: 2026-11-10 13:10:27.555 [I] [client/service.go:389] [a72ae2192199a9f4] login to server success, get run id [a72ae2192199a9f4]
+   frpc: 2026-11-10 13:10:27.558 [W] [client/control.go:172] [a72ae2192199a9f4] [node-a-evil] start error: node-a may only claim node-a.nodes.internal, claimed ["node-b.nodes.internal"] sub=
+   authz: {"t":"2026-11-10T13:10:27.554Z","op":"Login","decision":"allow","reason":null}
+   authz: {"t":"2026-11-10T13:10:27.557Z","op":"NewProxy","decision":"reject","reason":"node-a may only claim node-a.nodes.internal, claimed [\"node-b.nodes.internal\"] sub="}
+## node-a token presented as nodeId=node-b (expect Login REJECT)
+   frpc: 2026-11-10 13:10:31.398 [W] [client/service.go:380] connect to server error: bad token for node-b
+   frpc: login to the server failed: bad token for node-b. With loginFailExit enabled, no additional retries will be attempted
+   authz: {"t":"2026-11-10T13:10:27.557Z","op":"NewProxy","decision":"reject","reason":"node-a may only claim node-a.nodes.internal, claimed [\"node-b.nodes.internal\"] sub="}
+   authz: {"t":"2026-11-10T13:10:31.397Z","op":"Login","decision":"reject","reason":"bad token for node-b"}
+## proxy name not prefixed with own node id (expect REJECT)
+   frpc: 2026-11-10 13:10:35.076 [I] [client/service.go:389] [e246b61f69d1c176] login to server success, get run id [e246b61f69d1c176]
+   frpc: 2026-11-10 13:10:35.081 [W] [client/control.go:172] [e246b61f69d1c176] [node-b-tcp] start error: proxy name node-b-tcp not owned by node-a
+   authz: {"t":"2026-11-10T13:10:35.074Z","op":"Login","decision":"allow","reason":null}
+   authz: {"t":"2026-11-10T13:10:35.081Z","op":"NewProxy","decision":"reject","reason":"proxy name node-b-tcp not owned by node-a"}
+## garbage token (expect Login REJECT)
+   frpc: 2026-11-10 13:10:38.748 [W] [client/service.go:380] connect to server error: bad token for node-a
+   frpc: login to the server failed: bad token for node-a. With loginFailExit enabled, no additional retries will be attempted
+   authz: {"t":"2026-11-10T13:10:35.081Z","op":"NewProxy","decision":"reject","reason":"proxy name node-b-tcp not owned by node-a"}
+   authz: {"t":"2026-11-10T13:10:38.747Z","op":"Login","decision":"reject","reason":"bad token for node-a"}
+## own token, port outside frps allowPorts 17000-17999 (expect REJECT)
+   frpc: 2026-11-10 13:10:42.398 [I] [client/service.go:389] [a89d06620256d689] login to server success, get run id [a89d06620256d689]
+   frpc: 2026-11-10 13:10:42.401 [W] [client/control.go:172] [a89d06620256d689] [node-a-p] start error: node-a may only bind port 17001, claimed 22
+   authz: {"t":"2026-11-10T13:10:42.397Z","op":"Login","decision":"allow","reason":null}
+   authz: {"t":"2026-11-10T13:10:42.400Z","op":"NewProxy","decision":"reject","reason":"node-a may only bind port 17001, claimed 22"}
+## node-b still serves its own slot after the attempts:
+{"host":"localhost:8787","node":"node-b","ok":true,"spikeNode":"","xff":""}
+

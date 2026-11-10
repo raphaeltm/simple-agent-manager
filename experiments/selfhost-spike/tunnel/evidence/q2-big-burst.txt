@@ -1,0 +1,31 @@
+== worker big 1
+2026-11-10T13:04:37.873Z big 1 MiB echo ok = true in 99 ms
+2026-11-10T13:04:37.885Z close {"code":1000,"reason":"","wasClean":true}
+exit=0
+== direct big 1
+2026-11-10T13:04:38.182Z big 1 MiB echo ok = true in 48 ms
+2026-11-10T13:04:38.196Z close {"code":1000,"reason":"","wasClean":true}
+== worker big 4
+2026-11-10T13:04:38.799Z big 4 MiB echo ok = true in 271 ms
+2026-11-10T13:04:38.806Z close {"code":1000,"reason":"","wasClean":true}
+exit=0
+== direct big 4
+2026-11-10T13:04:39.245Z big 4 MiB echo ok = true in 119 ms
+2026-11-10T13:04:39.252Z close {"code":1000,"reason":"","wasClean":true}
+== worker big 16
+2026-11-10T13:04:40.697Z big 16 MiB echo ok = true in 818 ms
+2026-11-10T13:04:40.714Z close {"code":1000,"reason":"","wasClean":true}
+exit=0
+== direct big 16
+2026-11-10T13:04:41.650Z big 16 MiB echo ok = true in 319 ms
+2026-11-10T13:04:41.661Z close {"code":1000,"reason":"","wasClean":true}
+== worker burst 8
+2026-11-10T13:04:42.113Z burst 8 MiB in 64 KiB frames: echoed 8388608 bytes in 250 ms = 32.0 MiB/s
+exit=0
+== direct burst 8
+2026-11-10T13:04:42.454Z burst 8 MiB in 64 KiB frames: echoed 8388608 bytes in 164 ms = 48.8 MiB/s
+== worker burst 32
+2026-11-10T13:04:43.550Z burst 32 MiB in 64 KiB frames: echoed 33554432 bytes in 905 ms = 35.4 MiB/s
+exit=0
+== direct burst 32
+2026-11-10T13:04:44.309Z burst 32 MiB in 64 KiB frames: echoed 33554432 bytes in 594 ms = 53.9 MiB/s

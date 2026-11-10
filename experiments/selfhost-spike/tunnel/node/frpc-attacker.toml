@@ -1,0 +1,15 @@
+# Parameterised frpc used by tests/authz-test.sh to try claiming slots it does not own.
+serverAddr = "{{ .Envs.FRP_SERVER_ADDR }}"
+serverPort = 7000
+loginFailExit = true
+auth.method = "token"
+auth.token = "spike-shared-token"
+metadatas.nodeId = "{{ .Envs.NODE_ID }}"
+metadatas.nodeToken = "{{ .Envs.NODE_TOKEN }}"
+
+[[proxies]]
+name = "{{ .Envs.PROXY_NAME }}"
+type = "{{ .Envs.PROXY_TYPE }}"
+localIP = "127.0.0.1"
+localPort = 8444
+{{ if eq .Envs.PROXY_TYPE "tcp" }}remotePort = {{ .Envs.CLAIM_PORT }}{{ else }}customDomains = ["{{ .Envs.CLAIM_DOMAIN }}"]{{ end }}

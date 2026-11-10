@@ -1,0 +1,13 @@
+--- 256 MiB flood to a reader paused 25 s, via Worker WebSocketPair bridge; celld RSS per process
+t+4s 21MiB 444MiB sum=465MiB
+t+8s 21MiB 430MiB sum=451MiB
+t+12s 21MiB 425MiB sum=446MiB
+t+16s 21MiB 423MiB sum=444MiB
+t+20s 21MiB 423MiB sum=444MiB
+t+24s 21MiB 423MiB sum=444MiB
+t+28s 21MiB 400MiB sum=421MiB
+t+32s 21MiB 309MiB sum=330MiB
+HTTP/1.1 101 Switching Protocols
+requested flood 256 MiB; not reading for 25.0s
+text: b'flood-done'
+received 268435456 of 268435456 bytes (256.00 MiB) in 26.0s
