@@ -183,7 +183,7 @@ export function MachineCatalogFilters({
             checked={filters.hideUnavailable}
             onChange={(event) => update('hideUnavailable', event.currentTarget.checked)}
           />
-          Hide unavailable
+          <span>Hide unavailable</span>
         </label>
       </div>
     </div>

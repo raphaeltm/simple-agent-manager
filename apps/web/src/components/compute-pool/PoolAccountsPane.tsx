@@ -40,10 +40,12 @@ function machineCount(count: number): string {
 }
 
 function cheapestLabel(items: MachineRegionRow[]): string | null {
-  const priced = items.filter((row) => row.monthlyPrice !== null && row.priceLabel);
-  if (priced.length === 0) return null;
-  const min = priced.reduce((best, row) =>
-    (row.monthlyPrice ?? Infinity) < (best.monthlyPrice ?? Infinity) ? row : best
+  const [first, ...rest] = items.filter((row) => row.monthlyPrice !== null && row.priceLabel);
+  if (!first) return null;
+  const priced = [first, ...rest];
+  const min = rest.reduce(
+    (best, row) => ((row.monthlyPrice ?? Infinity) < (best.monthlyPrice ?? Infinity) ? row : best),
+    first
   );
   const allSame = priced.every((row) => row.priceLabel === min.priceLabel);
   return allSame ? min.priceLabel : `from ${min.priceLabel}`;

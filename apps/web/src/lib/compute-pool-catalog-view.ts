@@ -40,7 +40,9 @@ export const DEFAULT_CATALOG_FILTERS: CatalogFilters = {
 
 /** Currency markers present in the rows, for one price limit each. */
 export function catalogCurrencies(rows: MachineRegionRow[]): string[] {
-  return [...new Set(rows.flatMap((row) => (row.currency ? [row.currency] : [])))].sort();
+  return [...new Set(rows.flatMap((row) => (row.currency ? [row.currency] : [])))].sort(
+    compareText
+  );
 }
 
 /**
