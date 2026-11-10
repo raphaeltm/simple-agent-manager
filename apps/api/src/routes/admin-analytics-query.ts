@@ -6,6 +6,7 @@ import { readResponseJson } from '../lib/runtime-validation';
 import { errors } from '../middleware/error';
 import { resolveAdminSetting } from '../services/admin-settings-resolution';
 import { fetchWithTimeout } from '../services/fetch-timeout';
+import { hasCloudflareAccountApi } from '../services/platform-capabilities';
 
 export const DEFAULT_ANALYTICS_SQL_API_URL = 'https://api.cloudflare.com/client/v4/accounts';
 
@@ -79,11 +80,15 @@ export const FEATURE_EVENTS = [
  */
 export async function queryAnalyticsEngine(env: Env, sql: string): Promise<unknown> {
   const baseUrl = env.ANALYTICS_SQL_API_URL || DEFAULT_ANALYTICS_SQL_API_URL;
-  const accountId = env.CF_ACCOUNT_ID;
-
-  if (!accountId) {
-    throw errors.internal('CF_ACCOUNT_ID is not configured');
+  // The SQL API is Cloudflare's. Without an account to query there is no analytics to show;
+  // that is a property of the installation, not a server fault.
+  if (!hasCloudflareAccountApi(env)) {
+    throw errors.featureUnavailable(
+      'analyticsQuery',
+      'Analytics is not available on this installation'
+    );
   }
+  const accountId = env.CF_ACCOUNT_ID;
 
   const url = `${baseUrl}/${accountId}/analytics_engine/sql`;
 

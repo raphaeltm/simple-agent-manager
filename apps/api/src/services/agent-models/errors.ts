@@ -12,6 +12,8 @@ export type AgentModelCallErrorCode =
   | 'input_too_large'
   | 'workspace_required'
   | 'catalog_unavailable'
+  /** This installation has no Workers AI; retrying cannot help (not a transient failure). */
+  | 'not_available'
   | 'upstream_error'
   | 'timeout';
 

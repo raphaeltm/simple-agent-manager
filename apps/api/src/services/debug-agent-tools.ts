@@ -18,6 +18,7 @@ import {
   queryErrors,
   redactSensitiveData,
 } from './observability';
+import { hasCloudflareAccountApi } from './platform-capabilities';
 
 export async function resolveWindow(
   env: Env,
@@ -151,6 +152,8 @@ export async function executeTool(
     } else if (call.function.name === 'get_error_trends') {
       const hours = (window.endMs - window.startMs) / 3_600_000;
       result = await getErrorTrends(env.OBSERVABILITY_DATABASE, hours <= 1 ? '1h' : '24h');
+    } else if (call.function.name === 'query_cloudflare_logs' && !hasCloudflareAccountApi(env)) {
+      result = { error: 'Worker log search is not available on this installation' };
     } else if (call.function.name === 'query_cloudflare_logs') {
       const args = parseDebugToolArgs(call.function.arguments);
       result = await queryCloudflareLogs({

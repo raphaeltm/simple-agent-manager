@@ -15,6 +15,7 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { errors } from '../middleware/error';
 import { runCloudflareRuntimePhase } from './cloudflare-runtime-phase';
+import { hasContainerRuntime } from './platform-capabilities';
 import { resolveVmAgentContainerPort } from './vm-agent-container-port';
 
 /**
@@ -45,7 +46,11 @@ export function getVmAgentContainerConfig(env: Env): VmAgentContainerConfig {
  * for one only when this is false.
  */
 export function isInstantRuntimeAvailable(env: Env): boolean {
-  return getVmAgentContainerConfig(env).enabled && Boolean(env.VM_AGENT_CONTAINER);
+  return (
+    getVmAgentContainerConfig(env).enabled &&
+    Boolean(env.VM_AGENT_CONTAINER) &&
+    hasContainerRuntime(env)
+  );
 }
 
 export function requireVmAgentContainer(env: Env): void {

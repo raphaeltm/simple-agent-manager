@@ -185,6 +185,7 @@ import { handleInboundAgentEmail } from './services/agent-email/inbound';
 import { agentEmailConfig } from './services/agent-email/setup-state';
 import { signTerminalToken, verifyPortAccessToken, verifyTerminalToken } from './services/jwt';
 import { getNodeBackendBaseUrl } from './services/node-agent-readiness';
+import { isArtifactsAvailable, publicPlatformCapabilities } from './services/platform-capabilities';
 import { assertSessionUserApproved } from './services/signup-approval';
 import { recordNodeRoutingMetric } from './services/telemetry';
 import { assertTerminalTokenSessionLive } from './services/terminal-token-liveness';
@@ -753,7 +754,14 @@ app.get('/health', (c) => {
 // Public config — exposes feature flags the UI needs before auth
 app.get('/api/config/artifacts-enabled', (c) => {
   applyCacheHeaders(c, 'public-config');
-  return c.json({ enabled: c.env.ARTIFACTS_ENABLED === 'true' && !!c.env.ARTIFACTS });
+  return c.json({ enabled: isArtifactsAvailable(c.env) });
+});
+
+// Public config — which platform services this installation has, so the UI can hide entry
+// points that cannot work here (services/platform-capabilities.ts). Booleans only.
+app.get('/api/config/platform-capabilities', (c) => {
+  applyCacheHeaders(c, 'public-config');
+  return c.json(publicPlatformCapabilities(c.env));
 });
 
 // Public config — whether agents can run on Instant (Cloudflare Containers) with no cloud account.
