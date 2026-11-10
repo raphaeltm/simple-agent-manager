@@ -39,7 +39,7 @@ describe('egress fence ruleset', () => {
     const rules = renderFenceRuleset(plan());
     expect(rules).toContain('meta skuid 7101 jump celld');
     expect(rules).toContain('ct state established,related accept');
-    expect(rules.indexOf('ct state established')).toBeLessThan(rules.indexOf('counter drop'));
+    expect(rules.indexOf('ct state established')).toBeLessThan(rules.indexOf('counter reject'));
   });
 
   it('replaces the table atomically: create, delete, define in one file', () => {
@@ -68,7 +68,9 @@ describe('egress fence ruleset', () => {
 
   it('drops this host, private, link-local, CGNAT and IPv6 local ranges', () => {
     const rules = renderFenceRuleset(plan());
-    expect(rules).toContain('fib daddr type local counter drop');
+    expect(rules).toContain(
+      'fib daddr type local counter reject with icmpx admin-prohibited'
+    );
     for (const range of [
       '10.0.0.0/8',
       '127.0.0.0/8',
@@ -256,7 +258,7 @@ describe('verify-fence', () => {
     const script = buildProbeScript(targets, 3);
     expect(script).toContain("probe 0 '127.0.0.1' 7001");
     expect(script).toContain("probe 1 '127.0.0.1' 20000");
-    expect(script).toContain('Operation not permitted');
+    expect(script).toContain('No route to host');
   });
 
   it('checks every listener celld must not reach, plus the allowed ones for this box', async () => {

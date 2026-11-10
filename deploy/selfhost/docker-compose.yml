@@ -135,6 +135,9 @@ services:
     pull_policy: never # built by the caddy service
     network_mode: host
     cap_drop: [ALL]
+    # The caddy binary carries the file capability cap_net_bind_service; exec fails without it
+    # in the bounding set. It listens on a high loopback port.
+    cap_add: [NET_BIND_SERVICE]
     command: ['caddy', 'run', '--config', '/etc/caddy/Caddyfile', '--adapter', 'caddyfile']
     env_file:
       - path: ${SAM_SELFHOST_STATE_DIR:-./.state}/celld.env

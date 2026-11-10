@@ -1,9 +1,10 @@
 #!/bin/bash
 # celld's entrypoint on a self-hosted box: refuse to start unless the egress fence is in effect.
 #
-# The fence (egress-fence service, scripts/selfhost/egress-fence.ts) drops this uid's
-# connections to loopback services, so connect() to celld's own operator port fails at once with
-# EPERM. Without the fence the same connect() is refused (nothing listens yet) or succeeds. After
+# The fence (egress-fence service, scripts/selfhost/egress-fence.ts) rejects this uid's
+# connections to loopback services with ICMP admin-prohibited, so connect() to celld's own
+# operator port fails at once with "No route to host". Without the fence the same connect() is
+# refused (nothing listens yet) or succeeds. Loopback is never naturally unreachable. After
 # a reboot Docker restarts containers without compose ordering, so this check, not depends_on,
 # is what keeps celld from serving unfenced.
 set -euo pipefail
@@ -18,7 +19,7 @@ fi
 
 while :; do
   result="$( (exec 3<>"/dev/tcp/${canary%:*}/${canary##*:}") 2>&1 || true)"
-  if [[ "$result" == *"Operation not permitted"* ]]; then
+  if [[ "$result" == *"No route to host"* ]]; then
     break
   fi
   if (( SECONDS >= deadline )); then

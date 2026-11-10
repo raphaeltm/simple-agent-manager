@@ -5,8 +5,9 @@
  *   pnpm selfhost:verify-fence [--env-file deploy/selfhost/.env] [--public-probe HOST:PORT]
  *
  * Probes run in a throwaway container of the celld service (same image, uid and host network),
- * so they get exactly what celld's sockets get. A dropped connection fails with EPERM; that is
- * "blocked". Every forbidden target must be blocked, every allowed one must not be, and a
+ * so they get exactly what celld's sockets get. The fence rejects with ICMP admin-prohibited, so a
+ * fenced connect() fails at once with "No route to host" (IPv4) or "Permission denied" (IPv6);
+ * that is "blocked". Every forbidden target must be blocked, every allowed one must not be, and a
  * control run as another uid must reach the same forbidden target, which proves the probe can
  * tell a fenced socket from an unreachable one.
  */
@@ -42,8 +43,7 @@ export interface ProbeTarget {
 }
 
 /**
- * A bash script that prints `<index> <outcome>` per target. bash's /dev/tcp reports EPERM as
- * "Operation not permitted", which is what an nftables drop in OUTPUT gives connect().
+ * A bash script that prints `<index> <outcome>` per target, from bash's /dev/tcp error text.
  */
 export function buildProbeScript(targets: ProbeTarget[], timeoutSeconds: number): string {
   const lines = targets.map((target, index) => `probe ${index} '${target.host}' ${target.port}`);
@@ -51,7 +51,7 @@ export function buildProbeScript(targets: ProbeTarget[], timeoutSeconds: number)
     'probe() {',
     `  out="$(timeout ${timeoutSeconds} bash -c "exec 3<>/dev/tcp/$2/$3" 2>&1)"; code=$?`,
     '  if [ $code -eq 0 ]; then echo "$1 open"',
-    '  elif [[ "$out" == *"Operation not permitted"* ]]; then echo "$1 blocked"',
+    '  elif [[ "$out" == *"No route to host"* || "$out" == *"Permission denied"* ]]; then echo "$1 blocked"',
     '  elif [[ "$out" == *"Connection refused"* ]]; then echo "$1 refused"',
     '  elif [ $code -eq 124 ]; then echo "$1 timeout"',
     '  else echo "$1 error"; fi',

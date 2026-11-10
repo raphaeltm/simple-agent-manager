@@ -93,9 +93,9 @@ its console), any private address, and the cloud metadata server. Two layers sto
    by `pnpm selfhost:deploy`, that lets that uid reach only the public internet, the
    `resolv.conf` nameservers on port 53, the node lease ports on 127.0.0.1, the object store
    endpoint celld uses (`S3_ENDPOINT`), the metadata token proxy, and Caddy's ports. Everything
-   else on the box and every private, link-local and metadata range is dropped. The service
+   else on the box and every private, link-local and metadata range is rejected. The service
    re-applies the table if a firewall reload removes it. celld's entrypoint (`celld/start.sh`)
-   will not start celld until a connection to its own operator port is dropped, so a reboot
+   will not start celld until a connection to its own operator port is rejected, so a reboot
    cannot bring celld up unfenced.
 
 Check it after install, after a firewall change, or any time:
@@ -104,7 +104,7 @@ Check it after install, after a firewall change, or any time:
 pnpm selfhost:verify-fence             # exits 1 and lists every gap if the fence is not in effect
 ```
 
-It probes from celld's uid on the host network (every forbidden target must fail with EPERM,
+It probes from celld's uid on the host network (every forbidden target must be rejected at once,
 every allowed one must not) and repeats one forbidden probe from another uid as a control.
 
 On GCE with a gs:// bucket, celld needs access tokens from the metadata server, which the fence

@@ -18,8 +18,11 @@
  * - Caddy's HTTP and HTTPS ports on this host's own addresses (the same thing the internet sees).
  *
  * Everything else on this host, and every private, link-local, metadata and reserved range, is
- * dropped. A dropped connect() fails at once with EPERM, which is how the verify command and the
- * celld start check tell "fenced" from "nothing listening".
+ * rejected with an ICMP administratively-prohibited error, so connect() fails at once with
+ * EHOSTUNREACH ("No route to host"; EACCES for IPv6). A plain `drop` would not do: a dropped TCP
+ * SYN in OUTPUT is retransmitted until connect() times out (measured on a 6.8 kernel), and a
+ * timeout cannot be told apart from a slow host. The fast, distinct error is how the verify
+ * command and the celld start check tell "fenced" from "nothing listening" (ECONNREFUSED).
  *
  * Worker code and celld's own storage client are one process, so the fence cannot tell them
  * apart: whatever celld needs, the Worker can reach too. That is why the object store is allowed
@@ -39,6 +42,9 @@ export const DEFAULT_CELLD_UID = 7101;
 
 /** Loopback port of the GCE metadata token proxy (profile `gce`). */
 export const DEFAULT_GCE_METADATA_PROXY_PORT = 7180;
+
+/** The verdict for everything the fence refuses (see the header for why not `drop`). */
+const REFUSE = 'counter reject with icmpx admin-prohibited';
 
 /** Ports docker-compose.yml defaults to; the fence must refuse the same listeners. */
 const COMPOSE_PORT_DEFAULTS = {
@@ -255,9 +261,9 @@ export function renderFenceRuleset(plan: EgressFencePlan): string {
   const body = [
     'ct state established,related accept',
     ...allowLines,
-    'fib daddr type local counter drop comment "anything else on this host"',
-    `ip daddr ${nftSet(FORBIDDEN_IPV4)} counter drop comment "private, link-local, metadata, reserved"`,
-    `ip6 daddr ${nftSet(FORBIDDEN_IPV6)} counter drop comment "private, link-local, reserved"`,
+    `fib daddr type local ${REFUSE} comment "anything else on this host"`,
+    `ip daddr ${nftSet(FORBIDDEN_IPV4)} ${REFUSE} comment "private, link-local, metadata, reserved"`,
+    `ip6 daddr ${nftSet(FORBIDDEN_IPV6)} ${REFUSE} comment "private, link-local, reserved"`,
   ];
   return [
     '#!/usr/sbin/nft -f',
@@ -284,7 +290,7 @@ export function renderCelldEnv(
   metadataProxySecret: string
 ): string {
   const values: Record<string, string> = {
-    // celld's start check connects here and must get EPERM (scripts in deploy/selfhost/celld).
+    // celld's start check connects here and must be refused by the fence (deploy/selfhost/celld/start.sh).
     SAM_EGRESS_FENCE_CANARY: `127.0.0.1:${plan.forbiddenLoopbackPorts.CELLD_INTERNAL_PORT}`,
   };
   if (metadataProxyEnabled(box)) {
