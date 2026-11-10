@@ -14,6 +14,7 @@
  */
 import type { Env } from '../env';
 import { hasAgentEmailBinding } from './agent-email/setup-state';
+import { resolveR2PresignConfig } from './r2-presign-config';
 
 /** One platform service. The name is also the `feature` field of a FEATURE_UNAVAILABLE error. */
 export type PlatformCapability =
@@ -57,6 +58,8 @@ type CapabilityEnv = Pick<
   | 'R2_S3_ENDPOINT'
   | 'R2_S3_BUCKET'
   | 'R2_S3_KEY_PREFIX'
+  | 'R2_S3_REGION'
+  | 'R2_S3_FORCE_PATH_STYLE'
 >;
 
 function present(value: string | undefined): boolean {
@@ -120,30 +123,6 @@ export function isArtifactsAvailable(env: Pick<Env, 'ARTIFACTS' | 'ARTIFACTS_ENA
   return env.ARTIFACTS_ENABLED === 'true' && !!env.ARTIFACTS;
 }
 
-/**
- * Presigned S3 uploads and downloads of R2 objects: Cloudflare's R2 S3 API with the account
- * id, or an operator-configured S3 endpoint that stores the R2 bucket's objects
- * (see `services/r2-s3-client.ts`).
- */
-export function hasR2PresignCredentials(
-  env: Pick<
-    Env,
-    | 'R2_ACCESS_KEY_ID'
-    | 'R2_SECRET_ACCESS_KEY'
-    | 'R2_BUCKET_NAME'
-    | 'CF_ACCOUNT_ID'
-    | 'R2_S3_ENDPOINT'
-    | 'R2_S3_BUCKET'
-    | 'R2_S3_KEY_PREFIX'
-  >
-): boolean {
-  if (!present(env.R2_ACCESS_KEY_ID) || !present(env.R2_SECRET_ACCESS_KEY)) return false;
-  if (present(env.R2_S3_ENDPOINT)) {
-    return present(env.R2_S3_BUCKET) && present(env.R2_S3_KEY_PREFIX);
-  }
-  return present(env.CF_ACCOUNT_ID) && present(env.R2_BUCKET_NAME);
-}
-
 /** Resolve every capability from bindings and settings. Pure and synchronous. */
 export function resolvePlatformCapabilities(env: CapabilityEnv): PlatformCapabilities {
   const workersAi = getWorkersAiBindingOrNull(env) !== null;
@@ -160,7 +139,7 @@ export function resolvePlatformCapabilities(env: CapabilityEnv): PlatformCapabil
     emailSending: hasAgentEmailBinding(env),
     cloudflareDns: present(env.CF_API_TOKEN) && present(env.CF_ZONE_ID),
     workersObservability: cloudflareAccountApi,
-    r2Presign: hasR2PresignCredentials(env),
+    r2Presign: resolveR2PresignConfig(env) !== null,
     speechToText: workersAi,
     textToSpeech: workersAi && env.TTS_ENABLED !== 'false',
   };

@@ -3,7 +3,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
-import { getR2S3Client, hasR2S3Credentials } from './r2-s3-client';
+import { getR2PresignTarget, hasR2S3Credentials } from './r2-s3-client';
 
 export const DEFAULT_SESSION_SNAPSHOT_UPLOAD_URL_TTL_SECONDS = 15 * 60;
 
@@ -28,14 +28,15 @@ export async function generateSessionSnapshotDirectUploadUrl(
     checksumHeader?: boolean;
   }
 ): Promise<string> {
+  const target = getR2PresignTarget(env);
   const command = new PutObjectCommand({
-    Bucket: env.R2_BUCKET_NAME,
-    Key: input.key,
+    Bucket: target.bucket,
+    Key: target.objectKey(input.key),
     ContentLength: input.sizeBytes,
     ContentType: input.contentType,
     ChecksumSHA256: checksumBase64(input.sha256),
   });
-  return getSignedUrl(getR2S3Client(env), command, {
+  return getSignedUrl(target.client, command, {
     expiresIn: parsePositiveInt(
       env.SESSION_SNAPSHOT_UPLOAD_URL_TTL_SECONDS,
       DEFAULT_SESSION_SNAPSHOT_UPLOAD_URL_TTL_SECONDS
