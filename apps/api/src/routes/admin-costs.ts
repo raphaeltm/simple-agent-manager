@@ -18,6 +18,7 @@ import {
   iterateGatewayLogs,
 } from '../services/ai-gateway-logs';
 import { getAllUsersNodeUsageSummary } from '../services/node-usage';
+import { resolveAiGatewayId } from '../services/platform-capabilities';
 
 // ---------------------------------------------------------------------------
 // Constants (configurable via env)
@@ -150,7 +151,7 @@ adminCostRoutes.get('/', async (c) => {
     (value) => ({ value }),
     (error: unknown) => ({ error })
   );
-  const gatewayId = c.env.AI_GATEWAY_ID;
+  const gatewayId = resolveAiGatewayId(c.env);
   if (gatewayId) {
     await iterateGatewayLogs(c.env, gatewayId, periodBounds.startDate, (entry) => {
       const cost = entry.cost || 0;

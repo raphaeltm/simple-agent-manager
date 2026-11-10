@@ -52,4 +52,13 @@ export const errors = {
 
   serviceUnavailable: (message = 'Service unavailable') =>
     new AppError(503, 'SERVICE_UNAVAILABLE', message),
+
+  /**
+   * A platform service this installation does not have (for example Workers AI off
+   * Cloudflare). A designed 4xx: the request was valid, the installation cannot serve it,
+   * and retrying will not help. `feature` names the capability in
+   * services/platform-capabilities.ts.
+   */
+  featureUnavailable: (feature: string, message: string) =>
+    new AppError(404, 'FEATURE_UNAVAILABLE', message, { feature }),
 };

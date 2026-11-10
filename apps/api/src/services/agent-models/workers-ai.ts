@@ -8,6 +8,7 @@
 import type { Env } from '../../env';
 import { createModuleLogger } from '../../lib/logger';
 import { maybeJsonRecord } from '../../lib/runtime-validation';
+import { resolveAiGatewayId } from '../platform-capabilities';
 
 const log = createModuleLogger('agent_models.workers_ai');
 
@@ -45,7 +46,7 @@ export function runWorkersAiModel(
   input: Record<string, unknown>,
   options: { signal: AbortSignal; metadata: GatewayMetadata }
 ): Promise<Response> {
-  const gatewayId = env.AI_GATEWAY_ID?.trim();
+  const gatewayId = resolveAiGatewayId(env);
   return getWorkersAiBinding(env).run(modelId, input, {
     returnRawResponse: true,
     signal: options.signal,

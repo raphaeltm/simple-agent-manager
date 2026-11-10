@@ -10,6 +10,7 @@
  */
 import type { Env } from '../env';
 import { expectJsonRecord } from '../lib/runtime-validation';
+import { resolveAiGatewayId } from './platform-capabilities';
 
 export {
   AIProxyAuthError,
@@ -69,7 +70,7 @@ export function buildAIGatewayMetadata(opts: {
 
 /** Build upstream URL for Anthropic Messages API via AI Gateway. */
 export function buildAnthropicGatewayUrl(env: Env): string {
-  const gatewayId = env.AI_GATEWAY_ID;
+  const gatewayId = resolveAiGatewayId(env);
   if (gatewayId) {
     return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${gatewayId}/anthropic/v1/messages`;
   }
@@ -79,7 +80,7 @@ export function buildAnthropicGatewayUrl(env: Env): string {
 
 /** Build upstream URL for Workers AI chat completions via AI Gateway. */
 export function buildWorkersAIGatewayUrl(env: Env): string {
-  const gatewayId = env.AI_GATEWAY_ID;
+  const gatewayId = resolveAiGatewayId(env);
   if (gatewayId) {
     return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${gatewayId}/workers-ai/v1/chat/completions`;
   }
@@ -245,7 +246,7 @@ export async function fetchWorkersAIChatCompletion(
 
 /** Build upstream URL for Anthropic token counting via AI Gateway. */
 export function buildAnthropicCountTokensUrl(env: Env): string {
-  const gatewayId = env.AI_GATEWAY_ID;
+  const gatewayId = resolveAiGatewayId(env);
   if (gatewayId) {
     return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${gatewayId}/anthropic/v1/messages/count_tokens`;
   }

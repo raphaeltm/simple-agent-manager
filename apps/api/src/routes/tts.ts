@@ -5,6 +5,7 @@ import { log } from '../lib/logger';
 import { getAuth, requireApproved,requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { parseOptionalBody, TtsRequestSchema } from '../schemas';
+import { getWorkersAiBindingOrNull } from '../services/platform-capabilities';
 import { getAudioFromR2, getTTSConfig,synthesizeSpeech } from '../services/tts';
 
 const ttsRoutes = new Hono<{ Bindings: Env }>();
@@ -32,6 +33,14 @@ ttsRoutes.post('/synthesize', async (c) => {
   if (!config.enabled) {
     throw errors.badRequest('Text-to-speech is disabled');
   }
+  // Synthesis runs on Workers AI. Without the binding, say so instead of retrying into a 500.
+  const ai = getWorkersAiBindingOrNull(c.env);
+  if (!ai) {
+    throw errors.featureUnavailable(
+      'textToSpeech',
+      'Text-to-speech is not available on this installation'
+    );
+  }
 
   const body = await parseOptionalBody(c.req.raw, TtsRequestSchema, {});
   if (!body.text || !body.storageId) {
@@ -50,7 +59,7 @@ ttsRoutes.post('/synthesize', async (c) => {
   }
 
   try {
-    const result = await synthesizeSpeech(text, storageId, c.env.AI, c.env.R2, config, userId, mode);
+    const result = await synthesizeSpeech(text, storageId, ai, c.env.R2, config, userId, mode);
 
     // Return the audio URL for the client to fetch
     return c.json({
@@ -65,8 +74,8 @@ ttsRoutes.post('/synthesize', async (c) => {
       textLength: text.length,
       mode,
     });
-    const errorMessage = err instanceof Error ? err.message : String(err);
-    throw errors.internal(`TTS synthesis failed: ${errorMessage}`);
+    // The cause is logged above; the response must not carry internal error text.
+    throw errors.internal('TTS synthesis failed');
   }
 });
 

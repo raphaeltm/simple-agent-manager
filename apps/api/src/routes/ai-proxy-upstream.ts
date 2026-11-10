@@ -20,6 +20,7 @@ import type { UpstreamAuth } from '../services/ai-billing';
 import { resolveUnifiedBillingToken } from '../services/ai-billing';
 import { buildAnthropicGatewayUrl, buildWorkersAIGatewayUrl } from '../services/ai-proxy-shared';
 import { copyCredentialLimitHeaders } from '../services/credential-limit-events';
+import { resolveAiGatewayId } from '../services/platform-capabilities';
 
 const anthropicContentBlockSchema = v.variant('type', [
   v.object({ type: v.literal('text'), text: v.string() }),
@@ -45,7 +46,7 @@ const anthropicResponseSchema = v.object({
 
 /** Build upstream URL for OpenAI chat completions via AI Gateway. */
 function buildOpenAIUrl(env: Env): string {
-  const gatewayId = env.AI_GATEWAY_ID;
+  const gatewayId = resolveAiGatewayId(env);
   if (gatewayId) {
     return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${gatewayId}/openai/v1/chat/completions`;
   }
@@ -55,7 +56,7 @@ function buildOpenAIUrl(env: Env): string {
 
 /** Build upstream URL for OpenAI Responses API via AI Gateway. */
 function buildOpenAIResponsesUrl(env: Env): string {
-  const gatewayId = env.AI_GATEWAY_ID;
+  const gatewayId = resolveAiGatewayId(env);
   if (gatewayId) {
     return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${gatewayId}/openai/v1/responses`;
   }

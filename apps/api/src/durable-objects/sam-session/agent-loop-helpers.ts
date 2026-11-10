@@ -9,7 +9,6 @@
  * locking, or handle captured async prerequisites; they are given inputs and
  * return outputs.
  */
-import type { Env } from '../../env';
 import { expectJsonRecord } from '../../lib/runtime-validation';
 import type { OpenAIMessage } from './payload-size';
 import type { AnthropicToolDef, CollectedToolCall, MessageRow, SamSseEvent } from './types';
@@ -219,10 +218,5 @@ export function toOpenAIMessages(rows: MessageRow[]): OpenAIMessage[] {
   return messages;
 }
 
-export function buildAnthropicGatewayUrl(env: Env): string {
-  const gatewayId = env.AI_GATEWAY_ID;
-  if (gatewayId) {
-    return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${gatewayId}/anthropic/v1/messages`;
-  }
-  return 'https://api.anthropic.com/v1/messages';
-}
+// One Anthropic URL builder for the proxy and the SAM agent (rule 24).
+export { buildAnthropicGatewayUrl } from '../../services/ai-proxy-shared';

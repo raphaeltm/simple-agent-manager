@@ -14,6 +14,7 @@ import { redactCredentialTokens } from '../lib/credential-token-redaction';
 import { log } from '../lib/logger';
 import { hasUnexpiredHumanInput } from '../services/acp-interaction-store';
 import { resolveAdminSetting } from '../services/admin-settings';
+import { getWorkersAiBindingOrNull } from '../services/platform-capabilities';
 import * as projectDataService from '../services/project-data';
 import type { TaskRuntimeLiveness } from '../services/task-runtime-liveness';
 
@@ -229,6 +230,10 @@ export async function classifyLongRunningTaskStall(
     await resolveAdminSetting(env, 'operations.stalledTaskClassifierEnabled')
   );
   if (!config.enabled || !input.task.chat_session_id) return null;
+  // The classifier is a Workers AI model. Without the binding there is no verdict to get, so
+  // skip before reading the transcript or arming a timeout that nothing would clear.
+  const ai = getWorkersAiBindingOrNull(env);
+  if (!ai) return null;
   const activeAgeMs = longTurnAge(input.liveness);
   if (activeAgeMs === null || activeAgeMs < config.minActivityAgeMs) return null;
 
@@ -283,7 +288,7 @@ export async function classifyLongRunningTaskStall(
       );
     });
     const payload = await Promise.race([
-      env.AI.run(config.model, {
+      ai.run(config.model, {
         model: config.selector,
         state,
         questions: {
@@ -344,6 +349,9 @@ export async function classifyReconciliationLoop(
     await resolveAdminSetting(env, 'operations.stalledTaskClassifierEnabled')
   );
   if (!config.enabled) return null;
+  // Same as classifyLongRunningTaskStall: no Workers AI, no advisory verdict.
+  const ai = getWorkersAiBindingOrNull(env);
+  if (!ai) return null;
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const timeout = new Promise<never>((_, reject) => {
@@ -353,7 +361,7 @@ export async function classifyReconciliationLoop(
       );
     });
     const payload = await Promise.race([
-      env.AI.run(config.model, {
+      ai.run(config.model, {
         model: config.selector,
         state: { transcript: formatTranscript(messages, config.transcriptMaxChars) },
         questions: {

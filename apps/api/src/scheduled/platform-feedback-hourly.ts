@@ -40,6 +40,7 @@ export function scheduleHourlyPlatformMaintenance(
         cron,
         type: 'monthly-cost-aggregation',
         monthlyCostEnabled: result?.enabled ?? false,
+        monthlyCostSkipReason: result?.skipReason ?? null,
         monthlyCostFailed: hourly.monthlyCost.status === 'rejected',
         feedbackTriageEnabled: feedbackTriage?.enabled ?? false,
         feedbackTriageFailed: hourly.feedbackTriage.status === 'rejected',
