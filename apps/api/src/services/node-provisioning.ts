@@ -46,8 +46,8 @@ import {
   deleteCreatedProviderVmDirectly,
 } from './node-provisioning-race-cleanup';
 export { resolveHetznerBaseImageOverride } from './node-provisioning-image';
-import { recordRejectedAllocationAbsence } from './node-rejection-proof';
 import { prepareNodeTunnelIngress, settleNodeTunnelIngress } from './node-provisioning-ingress';
+import { recordRejectedAllocationAbsence } from './node-rejection-proof';
 import { resolveManagedNodeTransport, type TunnelEnv } from './node-tunnel-config';
 import { persistError } from './observability';
 import {

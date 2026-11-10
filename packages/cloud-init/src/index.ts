@@ -6,6 +6,12 @@ export {
   validateCloudInitSize,
   validateCloudInitVariables,
 } from './generate';
+export {
+  DEFAULT_FRPC_VERSION,
+  FRPC_RELEASES,
+  isReverseTunnelMode,
+  REVERSE_TUNNEL_PROXY_NAME,
+} from './reverse-tunnel';
 export { CLOUD_INIT_TEMPLATE } from './template';
 export {
   CLOUDFLARED_RELEASES,
@@ -17,9 +23,3 @@ export {
   DEFAULT_TUNNEL_LISTENER_WAIT_SECONDS,
   isTunnelMode,
 } from './tunnel';
-export {
-  DEFAULT_FRPC_VERSION,
-  FRPC_RELEASES,
-  isReverseTunnelMode,
-  REVERSE_TUNNEL_PROXY_NAME,
-} from './reverse-tunnel';

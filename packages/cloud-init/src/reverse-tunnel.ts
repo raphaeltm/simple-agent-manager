@@ -6,13 +6,12 @@ import type { CloudInitVariables } from './variables';
  * `frp_sha256_checksums.txt` asset published with the GitHub release. Add a release here
  * (both architectures) before changing {@link DEFAULT_FRPC_VERSION}.
  */
-export const FRPC_RELEASES: Readonly<Record<string, Readonly<{ amd64: string; arm64: string }>>> =
-  {
-    '0.72.0': {
-      amd64: 'daf719b32ca2778770bb92955e231a07414d754378b9af328aa2642862479804',
-      arm64: '02180b857480302fd934e9ddbd50fe2f73229f99062f88756abc6de9df5e95cf',
-    },
-  };
+export const FRPC_RELEASES: Readonly<Record<string, Readonly<{ amd64: string; arm64: string }>>> = {
+  '0.72.0': {
+    amd64: 'daf719b32ca2778770bb92955e231a07414d754378b9af328aa2642862479804',
+    arm64: '02180b857480302fd934e9ddbd50fe2f73229f99062f88756abc6de9df5e95cf',
+  },
+};
 
 /** frp release installed on reverse-tunnel nodes; must match the box's frps major/minor. */
 export const DEFAULT_FRPC_VERSION = '0.72.0';
@@ -68,7 +67,9 @@ export function validateReverseTunnelVariables(
     errors.push('reverseTunnelCredential: must be 32-128 base64url characters');
   }
   if (!isSet(variables.nodeRuntimeIncarnationId)) {
-    errors.push('nodeRuntimeIncarnationId: required in reverse-tunnel mode (the frps plugin binds it)');
+    errors.push(
+      'nodeRuntimeIncarnationId: required in reverse-tunnel mode (the frps plugin binds it)'
+    );
   }
   if (isSet(variables.originCaCertificateUrl)) {
     errors.push(
@@ -77,9 +78,7 @@ export function validateReverseTunnelVariables(
   }
   const remote = variables.reverseTunnelRemotePort ?? '';
   if (!validPort(remote)) {
-    errors.push(
-      `reverseTunnelRemotePort: must be numeric 1-65535 (got ${JSON.stringify(remote)})`
-    );
+    errors.push(`reverseTunnelRemotePort: must be numeric 1-65535 (got ${JSON.stringify(remote)})`);
   }
 }
 

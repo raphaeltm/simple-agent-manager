@@ -62,8 +62,14 @@ describe('port range', () => {
   it.each([
     ['a privileged port', { REVERSE_TUNNEL_PORT_RANGE_START: '80' }],
     ['a non-number', { REVERSE_TUNNEL_PORT_RANGE_END: '30k' }],
-    ['an inverted range', { REVERSE_TUNNEL_PORT_RANGE_START: '30000', REVERSE_TUNNEL_PORT_RANGE_END: '29000' }],
-    ['an oversized range', { REVERSE_TUNNEL_PORT_RANGE_START: '1024', REVERSE_TUNNEL_PORT_RANGE_END: '65535' }],
+    [
+      'an inverted range',
+      { REVERSE_TUNNEL_PORT_RANGE_START: '30000', REVERSE_TUNNEL_PORT_RANGE_END: '29000' },
+    ],
+    [
+      'an oversized range',
+      { REVERSE_TUNNEL_PORT_RANGE_START: '1024', REVERSE_TUNNEL_PORT_RANGE_END: '65535' },
+    ],
   ])('fails closed on %s', (_name, env) => {
     expect(() => resolveReverseTunnelPortRange(env)).toThrow();
   });
@@ -72,7 +78,9 @@ describe('port range', () => {
 describe('gateway secret and credentials', () => {
   it('treats an absent or short gateway secret as unconfigured', () => {
     expect(getReverseTunnelGatewaySecret({})).toBeNull();
-    expect(getReverseTunnelGatewaySecret({ REVERSE_TUNNEL_GATEWAY_SECRET: 'x'.repeat(31) })).toBeNull();
+    expect(
+      getReverseTunnelGatewaySecret({ REVERSE_TUNNEL_GATEWAY_SECRET: 'x'.repeat(31) })
+    ).toBeNull();
     expect(getReverseTunnelGatewaySecret({ REVERSE_TUNNEL_GATEWAY_SECRET: 'x'.repeat(32) })).toBe(
       'x'.repeat(32)
     );
@@ -91,7 +99,9 @@ describe('gateway secret and credentials', () => {
     ]) {
       expect(await deriveReverseTunnelCredential(env, other)).not.toBe(a);
     }
-    expect(await deriveReverseTunnelCredential({ ENCRYPTION_KEY: 'z'.repeat(44) }, identity)).not.toBe(a);
+    expect(
+      await deriveReverseTunnelCredential({ ENCRYPTION_KEY: 'z'.repeat(44) }, identity)
+    ).not.toBe(a);
     expect(await hashReverseTunnelCredential(a)).toMatch(/^[0-9a-f]{64}$/);
   });
 });

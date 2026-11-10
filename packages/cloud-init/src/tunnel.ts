@@ -1,4 +1,9 @@
 import {
+  isReverseTunnelMode,
+  reverseTunnelReplacements,
+  validateReverseTunnelVariables,
+} from './reverse-tunnel';
+import {
   DIRECT_FIREWALL_WRITE_FILE,
   ORIGIN_CA_BOOTSTRAP_RUNCMD,
   TUNNEL_BOOTSTRAP_RUNCMD,
@@ -6,11 +11,6 @@ import {
   TUNNEL_FIREWALL_WRITE_FILE,
   TUNNEL_WRITE_FILES,
 } from './template-ingress';
-import {
-  isReverseTunnelMode,
-  reverseTunnelReplacements,
-  validateReverseTunnelVariables,
-} from './reverse-tunnel';
 import {
   REVERSE_TUNNEL_BOOTSTRAP_RUNCMD,
   REVERSE_TUNNEL_CONNECTOR_RUNCMD,

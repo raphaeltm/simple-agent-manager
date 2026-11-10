@@ -119,7 +119,12 @@ describe('reverse-tunnel provisioning', () => {
   });
 
   it('an exhausted range fails before any VM is requested', async () => {
-    setEnv(reverseEnv({ REVERSE_TUNNEL_PORT_RANGE_START: '20500', REVERSE_TUNNEL_PORT_RANGE_END: '20500' }));
+    setEnv(
+      reverseEnv({
+        REVERSE_TUNNEL_PORT_RANGE_START: '20500',
+        REVERSE_TUNNEL_PORT_RANGE_END: '20500',
+      })
+    );
     const first = await freshNode();
     const second = await freshNode();
     await provisionNode(first.id, env);
@@ -188,7 +193,9 @@ describe('every lifecycle path releases the lease', () => {
   it('a provider capacity rejection (node row deleted) releases it', async () => {
     const node = await freshNode();
     mocks.createVM.mockRejectedValueOnce(
-      new ProviderError('hetzner', 412, 'Placement unavailable', { providerCode: 'placement_error' })
+      new ProviderError('hetzner', 412, 'Placement unavailable', {
+        providerCode: 'placement_error',
+      })
     );
     await expect(
       provisionNode(node.id, env, undefined, { rethrowProviderError: true })
@@ -199,7 +206,9 @@ describe('every lifecycle path releases the lease', () => {
 
   it('an ambiguous createVM keeps it (a VM may hold its credential) across two sweeps', async () => {
     const node = await freshNode();
-    mocks.createVM.mockRejectedValueOnce(new ProviderError('hetzner', undefined, 'Network timeout'));
+    mocks.createVM.mockRejectedValueOnce(
+      new ProviderError('hetzner', undefined, 'Network timeout')
+    );
     await provisionNode(node.id, env);
     expect(leases(node.id)).toMatchObject([{ status: 'active' }]);
     expect(await runReverseTunnelLeaseSweep(env)).toEqual({ released: 0 });
@@ -208,7 +217,12 @@ describe('every lifecycle path releases the lease', () => {
   });
 
   it('strict deletion releases it after termination proof, and the port is reusable', async () => {
-    setEnv(reverseEnv({ REVERSE_TUNNEL_PORT_RANGE_START: '20600', REVERSE_TUNNEL_PORT_RANGE_END: '20600' }));
+    setEnv(
+      reverseEnv({
+        REVERSE_TUNNEL_PORT_RANGE_START: '20600',
+        REVERSE_TUNNEL_PORT_RANGE_END: '20600',
+      })
+    );
     const node = await freshNode();
     await provisionNode(node.id, env);
     await deleteNodeResourcesStrict(node.id, USER, env);
@@ -240,7 +254,9 @@ describe('every lifecycle path releases the lease', () => {
       .prepare('UPDATE nodes SET runtime_incarnation_id = ? WHERE id = ?')
       .run(crypto.randomUUID(), replaced.id);
     expect(await runReverseTunnelLeaseSweep(env)).toEqual({ released: 2 });
-    expect(leases(gone.id)).toMatchObject([{ status: 'released', releaseReason: 'runtime_not_live' }]);
+    expect(leases(gone.id)).toMatchObject([
+      { status: 'released', releaseReason: 'runtime_not_live' },
+    ]);
     expect(leases(replaced.id)).toMatchObject([{ status: 'released' }]);
     expect(leases(live.id)).toMatchObject([{ status: 'active' }]);
     expect(await runReverseTunnelLeaseSweep(env)).toEqual({ released: 0 });
@@ -270,7 +286,13 @@ describe('control plane -> node routing seam', () => {
     await deleteNodeResourcesStrict(node.id, USER, env);
     seen.length = 0;
     await expect(
-      fetchNodeAgent(node.id, env, `https://${node.id.toLowerCase()}.vm.example.test:8443/health`, {}, 1000)
+      fetchNodeAgent(
+        node.id,
+        env,
+        `https://${node.id.toLowerCase()}.vm.example.test:8443/health`,
+        {},
+        1000
+      )
     ).rejects.toThrow(/no active lease/);
     expect(seen).toEqual([]);
   });

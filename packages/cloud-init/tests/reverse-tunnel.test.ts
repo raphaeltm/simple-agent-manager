@@ -11,7 +11,11 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import YAML from 'yaml';
 
-import { generateCloudInit, validateCloudInitSize, validateCloudInitVariables } from '../src/generate';
+import {
+  generateCloudInit,
+  validateCloudInitSize,
+  validateCloudInitVariables,
+} from '../src/generate';
 import {
   DEFAULT_FRPC_VERSION,
   FRPC_RELEASES,
@@ -38,7 +42,11 @@ function variables(overrides?: Partial<CloudInitVariables>): CloudInitVariables 
 }
 
 const reverse = (overrides?: Partial<CloudInitVariables>) =>
-  variables({ reverseTunnelCredential: CREDENTIAL, reverseTunnelRemotePort: '20007', ...overrides });
+  variables({
+    reverseTunnelCredential: CREDENTIAL,
+    reverseTunnelRemotePort: '20007',
+    ...overrides,
+  });
 
 type Parsed = {
   runcmd: string[];
@@ -69,7 +77,10 @@ describe('reverse-tunnel variable validation', () => {
     ['missing lease port', { reverseTunnelRemotePort: '' }],
     ['lease port out of range', { reverseTunnelRemotePort: '70000' }],
     ['listener port equal to the agent port', { reverseTunnelLocalPort: '8080' }],
-    ['Origin CA in reverse-tunnel mode', { originCaCertificateUrl: 'https://api.box.example.org/c' }],
+    [
+      'Origin CA in reverse-tunnel mode',
+      { originCaCertificateUrl: 'https://api.box.example.org/c' },
+    ],
     ['a Cloudflare token as well', { cloudflareTunnelToken: 'c'.repeat(64) }],
     ['no runtime incarnation', { nodeRuntimeIncarnationId: '' }],
     ['a cloudflared-only setting', { cloudflaredVersion: '2026.10.7' }],
@@ -281,7 +292,9 @@ describe('executed reverse-tunnel boot sequence', () => {
   it('verifies and extracts frpc, closes ingress, then starts the agent and the connector', () => {
     const { result, calls } = runBootScript(reverse());
     expect(result.status).toBe(0);
-    expect(calls).toMatch(/install -m 0755 \S+\/frp_0\.72\.0_linux_amd64\/frpc \S+\/usr-local-bin\/frpc/);
+    expect(calls).toMatch(
+      /install -m 0755 \S+\/frp_0\.72\.0_linux_amd64\/frpc \S+\/usr-local-bin\/frpc/
+    );
     expect(calls).toContain('useradd --system --no-create-home --shell /usr/sbin/nologin sam-frpc');
     expect(calls).not.toContain('sam-boot-failure');
     const firewall = lineIndex(calls, 'firewall');

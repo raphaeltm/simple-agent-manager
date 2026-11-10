@@ -61,8 +61,8 @@ export function buildNodeCloudInit(input: NodeCloudInitInput): string {
     // refuses issuance server-side for tunnel transport).
     originCaCertificateUrl:
       tunnel || reverseTunnel
-      ? undefined
-      : `https://api.${env.BASE_DOMAIN}/api/nodes/${node.id}/origin-ca-certificate`,
+        ? undefined
+        : `https://api.${env.BASE_DOMAIN}/api/nodes/${node.id}/origin-ca-certificate`,
     vmAgentPort: env.VM_AGENT_PORT,
     vmAgentRequiredVersion: env.VM_AGENT_REQUIRED_VERSION?.trim(),
     vmAgentMemoryReserveMb: String(resolveEffectiveNodeHostMemoryReserveMb(env)),
@@ -97,11 +97,14 @@ export function buildNodeCloudInit(input: NodeCloudInitInput): string {
   if (reverseTunnel) {
     // Same loopback listener, firewall and connector timings as the Cloudflare tunnel; the
     // connector is frpc dialling the control plane's own HTTPS endpoint.
-    const { cloudflaredVersion: _cloudflaredOnly, ...timings } = nodeTunnelBootVariables(env);
+    const timings = nodeTunnelBootVariables(env);
     variables.reverseTunnelCredential = reverseTunnel.credential;
     variables.reverseTunnelRemotePort = String(reverseTunnel.port);
     variables.reverseTunnelLocalPort = reverseTunnel.localPort;
-    Object.assign(variables, timings);
+    variables.tunnelListenerWaitSeconds = timings.tunnelListenerWaitSeconds;
+    variables.tunnelListenerProbeTimeoutSeconds = timings.tunnelListenerProbeTimeoutSeconds;
+    variables.tunnelListenerProbeIntervalSeconds = timings.tunnelListenerProbeIntervalSeconds;
+    variables.tunnelConnectorRestartSeconds = timings.tunnelConnectorRestartSeconds;
   }
   return generateCloudInit(variables);
 }

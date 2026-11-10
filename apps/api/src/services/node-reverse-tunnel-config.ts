@@ -9,7 +9,6 @@
  */
 import type { Env } from '../env';
 
-
 /** Address frps binds per-node proxies on (frps `proxyBindAddr`); the Worker and Caddy share it. */
 export const DEFAULT_REVERSE_TUNNEL_UPSTREAM_HOST = '127.0.0.1';
 /** Default leased port range; must equal frps `allowPorts` in deploy/selfhost/frps/frps.toml. */
@@ -59,7 +58,9 @@ export function resolveReverseTunnelPortRange(env: ReverseTunnelEnv): ReverseTun
     DEFAULT_REVERSE_TUNNEL_PORT_RANGE_END
   );
   if (end < start) {
-    throw new Error('REVERSE_TUNNEL_PORT_RANGE_END must not be below REVERSE_TUNNEL_PORT_RANGE_START');
+    throw new Error(
+      'REVERSE_TUNNEL_PORT_RANGE_END must not be below REVERSE_TUNNEL_PORT_RANGE_START'
+    );
   }
   if (end - start + 1 > MAX_REVERSE_TUNNEL_PORT_RANGE_SIZE) {
     throw new Error(
@@ -106,7 +107,8 @@ export async function deriveReverseTunnelCredential(
   env: Pick<Env, 'ENCRYPTION_KEY'>,
   identity: ReverseTunnelCredentialIdentity
 ): Promise<string> {
-  if (!env.ENCRYPTION_KEY) throw new Error('ENCRYPTION_KEY is required for reverse-tunnel credentials');
+  if (!env.ENCRYPTION_KEY)
+    throw new Error('ENCRYPTION_KEY is required for reverse-tunnel credentials');
   const key = await crypto.subtle.importKey(
     'raw',
     new TextEncoder().encode(env.ENCRYPTION_KEY),

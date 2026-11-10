@@ -15,9 +15,8 @@
  * drops a session within one heartbeat of the lease being released. Anything malformed,
  * unknown or unsupported is refused (fail closed).
  */
-import * as v from 'valibot';
-
 import { REVERSE_TUNNEL_PROXY_NAME } from '@simple-agent-manager/cloud-init';
+import * as v from 'valibot';
 
 import type { Env } from '../env';
 import { constantTimeEqual } from '../lib/constant-time';
@@ -72,15 +71,21 @@ interface ClaimedIdentity {
   credential: string;
 }
 
-function parseIdentity(op: FrpsPluginOp, content: unknown):
-  | { identity: ClaimedIdentity; proxy?: v.InferOutput<typeof NewProxyContentSchema> }
-  | null {
+function parseIdentity(
+  op: FrpsPluginOp,
+  content: unknown
+): { identity: ClaimedIdentity; proxy?: v.InferOutput<typeof NewProxyContentSchema> } | null {
   if (op === 'Login') {
     const parsed = v.safeParse(LoginContentSchema, content);
     if (!parsed.success) return null;
     const { user, metas } = parsed.output;
     return {
-      identity: { user, nodeId: metas.node_id, incarnation: metas.incarnation, credential: metas.credential },
+      identity: {
+        user,
+        nodeId: metas.node_id,
+        incarnation: metas.incarnation,
+        credential: metas.credential,
+      },
     };
   }
   if (op === 'NewProxy') {

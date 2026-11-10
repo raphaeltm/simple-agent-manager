@@ -309,7 +309,11 @@ describe('node-lifecycle BYO gates', () => {
     it('does NOT backfill the IP or create an A record for a managed reverse-tunnel node', async () => {
       // Reverse-tunnel nodes carry no tunnelId: the gate must read the row's transport, and
       // CF-Connecting-IP (the node's real egress IP through Caddy) must not be backfilled.
-      state.node = makeNode({ transport: 'reverse-tunnel', tunnelId: null, ipAddress: '198.51.100.9' });
+      state.node = makeNode({
+        transport: 'reverse-tunnel',
+        tunnelId: null,
+        ipAddress: '198.51.100.9',
+      });
       const res = await getNodeLifecycleApp().request(
         '/api/nodes/node-1/heartbeat',
         {

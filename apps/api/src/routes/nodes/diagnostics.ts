@@ -17,8 +17,8 @@ import {
   openNodeDiagnosticDownload,
 } from '../../services/node-agent-diagnostics';
 import { getNodeBackendBaseUrl } from '../../services/node-agent-readiness';
-import { ownerNodeAccess, runNodeDiagnostic } from '../../services/node-diagnostics-access';
 import { resolveNodeAgentRoute } from '../../services/node-agent-route';
+import { ownerNodeAccess, runNodeDiagnostic } from '../../services/node-diagnostics-access';
 import {
   gatewayDecisionResponse,
   isGatewayAuthorizationRequest,

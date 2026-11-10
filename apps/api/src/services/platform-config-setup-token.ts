@@ -1,6 +1,6 @@
 import type { Env } from '../env';
-import { creatorId, positiveIntegerEnv } from './platform-config-store';
 import { constantTimeEqual } from '../lib/constant-time';
+import { creatorId, positiveIntegerEnv } from './platform-config-store';
 
 /* Setup-token verification and its D1-backed per-identifier attempt rate limit. */
 

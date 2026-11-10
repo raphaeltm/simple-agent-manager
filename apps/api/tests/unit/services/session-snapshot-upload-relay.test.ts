@@ -308,7 +308,9 @@ describe('session snapshot upload relay', () => {
       sourceNodeId: 'legacy-node',
     });
     expect(targets.needsRelayProvisioning).toBe(false);
-    expect(targets.upload.home).toMatch(/^\/api\/workspaces\/ws-1\/session-snapshot\/artifacts\/home/);
+    expect(targets.upload.home).toMatch(
+      /^\/api\/workspaces\/ws-1\/session-snapshot\/artifacts\/home/
+    );
     expect(mocks.provisionNode).not.toHaveBeenCalled();
     expect(lookups.some((sql) => sql.includes('agent_version = ?'))).toBe(false);
   });

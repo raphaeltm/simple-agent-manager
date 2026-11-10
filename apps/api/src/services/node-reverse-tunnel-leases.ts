@@ -11,13 +11,13 @@
  */
 import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
-import { LIVE_INCARNATION_SQL } from './node-tunnel-journal';
 import {
   deriveReverseTunnelCredential,
   hashReverseTunnelCredential,
   resolveReverseTunnelPortRange,
   type ReverseTunnelEnv,
 } from './node-reverse-tunnel-config';
+import { LIVE_INCARNATION_SQL } from './node-tunnel-journal';
 
 export type ReverseTunnelLeaseStatus = 'active' | 'released';
 
@@ -140,7 +140,9 @@ export async function ensureReverseTunnelLease(
     input.runtimeIncarnationId
   );
   if (!row) {
-    const live = await env.DATABASE.prepare(`SELECT 1 AS live FROM nodes WHERE ${NODE_LIVE_FENCE_SQL}`)
+    const live = await env.DATABASE.prepare(
+      `SELECT 1 AS live FROM nodes WHERE ${NODE_LIVE_FENCE_SQL}`
+    )
       .bind(input.nodeId, input.userId, input.runtimeIncarnationId)
       .first<{ live: number }>();
     throw new ReverseTunnelLeaseError(
@@ -150,7 +152,9 @@ export async function ensureReverseTunnelLease(
     );
   }
   if (row.userId !== input.userId || row.status !== 'active') {
-    throw new ReverseTunnelLeaseError('Reverse-tunnel lease for this node incarnation was released');
+    throw new ReverseTunnelLeaseError(
+      'Reverse-tunnel lease for this node incarnation was released'
+    );
   }
   // Adopting an earlier attempt's row (retry or durable resume): re-derive ITS credential. A
   // mismatch (for example a rotated ENCRYPTION_KEY) must not hand a VM a credential the plugin
@@ -164,7 +168,9 @@ export async function ensureReverseTunnelLease(
           runtimeIncarnationId: row.runtimeIncarnationId,
         });
   if ((await hashReverseTunnelCredential(credential)) !== row.credentialHash) {
-    throw new ReverseTunnelLeaseError('Reverse-tunnel credential cannot be re-derived for this lease');
+    throw new ReverseTunnelLeaseError(
+      'Reverse-tunnel credential cannot be re-derived for this lease'
+    );
   }
   return { leaseId: row.id, port: row.port, credential };
 }

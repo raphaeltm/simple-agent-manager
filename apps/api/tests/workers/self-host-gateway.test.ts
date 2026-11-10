@@ -88,9 +88,9 @@ describe('frps plugin endpoint', () => {
   it('admits the owner: Login, NewProxy on its own leased port, Ping', async () => {
     await seedUser('rt-owner');
     const a = await seedReverseNode('A', 'rt-owner');
-    expect(await verdict(await call(frpsCall('Login', { user: a.nodeId, metas: metas(a) })))).toEqual(
-      { reject: false, unchange: true }
-    );
+    expect(
+      await verdict(await call(frpsCall('Login', { user: a.nodeId, metas: metas(a) })))
+    ).toEqual({ reject: false, unchange: true });
     const proxy = {
       user: { user: a.nodeId, metas: metas(a), run_id: 'r1' },
       proxy_name: `${a.nodeId}.sam-agent`,
@@ -118,7 +118,10 @@ describe('frps plugin endpoint', () => {
         })
       );
     const attack = await verdict(await claim(victim.port));
-    expect(attack).toEqual({ reject: true, reject_reason: 'remote port is not leased to this node' });
+    expect(attack).toEqual({
+      reject: true,
+      reject_reason: 'remote port is not leased to this node',
+    });
     // Owner-path control with the same credential and fixture: its own port is admitted.
     expect((await verdict(await claim(attacker.port))).reject).toBe(false);
   });
@@ -237,7 +240,11 @@ describe('lease allocation on D1', () => {
         .bind(incarnations[i], id)
         .run();
     }
-    const oneFreePort = { ...testEnv(), REVERSE_TUNNEL_PORT_RANGE_START: '28999', REVERSE_TUNNEL_PORT_RANGE_END: '28999' };
+    const oneFreePort = {
+      ...testEnv(),
+      REVERSE_TUNNEL_PORT_RANGE_START: '28999',
+      REVERSE_TUNNEL_PORT_RANGE_END: '28999',
+    };
     const results = await Promise.allSettled(
       ids.map((nodeId, i) =>
         ensureReverseTunnelLease(oneFreePort as Env, {
