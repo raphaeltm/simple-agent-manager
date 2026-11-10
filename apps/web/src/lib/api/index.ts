@@ -613,7 +613,6 @@ export {
 export { getWorkflowRun, listWorkflowRuns } from './workflows';
 export {
   createAgentSession,
-  createWorkspace,
   deleteWorkspace,
   getPortAccessUrl,
   getTerminalToken,
