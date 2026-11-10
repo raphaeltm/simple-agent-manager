@@ -1,0 +1,8 @@
+# Let's Encrypt wildcard certificate through a DNS-01 challenge against Google Cloud DNS.
+# Credentials: Application Default Credentials (the VM's service account on GCE needs
+# roles/dns.admin on the zone's project). GCP_PROJECT is the project that owns the zone.
+tls {$ACME_EMAIL} {
+	dns googleclouddns {
+		gcp_project {$GCP_PROJECT}
+	}
+}

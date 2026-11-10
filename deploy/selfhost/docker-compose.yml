@@ -1,0 +1,153 @@
+# One-box self-hosted SAM control plane on celld (https://celld.dev).
+#
+#   browser / nodes --443--> caddy --127.0.0.1:CELLD_PORT--> celld (API Worker + web UI assets)
+#                              |                               |  \--127.0.0.1:<lease port>--> frps --> node
+#                              \--frp over wss, node WS------> frps (127.0.0.1:FRPS_BIND_PORT)
+#                                                              celld --> fleet bucket (GCS, S3, or the bundled store)
+#
+# caddy, celld and frps share the host network on purpose: the Worker's fetch to a node's
+# loopback lease port runs in celld's network namespace, and Caddy forward_auth proxies node
+# WebSockets to the same port. Everything except Caddy listens on 127.0.0.1 only.
+#
+# Usage: cp .env.example .env && chmod 600 .env && edit it; `pnpm selfhost:deploy --init`
+# (platform keys + .state/gateway.env); docker compose up -d; then `pnpm selfhost:deploy`.
+# Images are pinned by digest; the pinned celld version must match CELLD_VERSION in
+# scripts/selfhost/versions.ts, which the deploy script uses for `celld deploy`.
+name: sam-selfhost
+
+services:
+  celld:
+    image: ghcr.io/denoland/celld:v0.6.3@sha256:22bca1b40a9e4c434cc149d8913d7eaafa9792961a8c05f9fecf921d416216dc
+    network_mode: host
+    depends_on:
+      objectstore-init:
+        condition: service_completed_successfully
+        required: false # only with the local-store profile
+    environment:
+      CELLD_BUCKET: ${CELLD_BUCKET:?set CELLD_BUCKET in .env}
+      # Empty means unset: gs:// buckets take no endpoint and use Application Default Credentials.
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      CELLD_ADDR: 127.0.0.1:${CELLD_PORT:-8080}
+      # Unauthenticated operator API (work, eviction, state, shutdown): loopback only.
+      CELLD_INTERNAL_ADDR: 127.0.0.1:${CELLD_INTERNAL_PORT:-7001}
+      CELLD_WATCH: /var/lib/celld
+      # Caddy replaces X-Forwarded-Host/-Proto, so request.url is https://<host>/...
+      CELLD_TRUST_FORWARDED_HEADERS: '1'
+      # Delete superseded LTX epochs; without it the bucket grows on every cell activation.
+      CELLD_LTX_RETENTION_SECS: ${CELLD_LTX_RETENTION_SECS:-86400}
+      # Outbound fetch timeout. celld's default (120 s) cuts Worker-proxied streams mid-body.
+      # Worker-proxied node responses (file transfers, port previews) are cut at this cap.
+      CELLD_FETCH_TIMEOUT_S: ${CELLD_FETCH_TIMEOUT_S:-3600}
+      RUST_LOG: ${CELLD_RUST_LOG:-info}
+    volumes:
+      # A cache on one node: the bucket is the durable copy and the only thing to back up.
+      - celld-data:/var/lib/celld
+    # Above CELLD_SHUTDOWN_TOTAL_MS (40 s) so a stop is a clean lease handoff.
+    stop_grace_period: 50s
+    # celld docs: restart without an attempt limit. An immediate restart can hit
+    # "Address already in use"; Docker's restart backoff covers that.
+    restart: unless-stopped
+
+  caddy:
+    build:
+      context: ./caddy
+      args:
+        CADDY_DNS_MODULE: ${CADDY_DNS_MODULE:-github.com/caddy-dns/googleclouddns@v1.1.0}
+    image: sam-selfhost-caddy:local
+    network_mode: host
+    # Internet-facing and holds the DNS-01 identity: only the capability to bind 80/443.
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    depends_on: [celld]
+    # REVERSE_TUNNEL_GATEWAY_SECRET (sent on forward_auth). Written by `pnpm selfhost:deploy --init`.
+    env_file:
+      - path: ${SAM_SELFHOST_STATE_DIR:-./.state}/gateway.env
+        required: true
+    environment:
+      SAM_DOMAIN: ${SAM_DOMAIN:?set SAM_DOMAIN in .env}
+      SAM_TLS_MODE: ${SAM_TLS_MODE:?set SAM_TLS_MODE in .env (internal or dns-<provider>)}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+      GCP_PROJECT: ${GCP_PROJECT:-}
+      HTTP_PORT: ${HTTP_PORT:-80}
+      HTTPS_PORT: ${HTTPS_PORT:-443}
+      CELLD_PORT: ${CELLD_PORT:-8080}
+      FRPS_BIND_PORT: ${FRPS_BIND_PORT:-7000}
+    volumes:
+      - ./caddy:/etc/caddy:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+
+  frps:
+    profiles: [tunnel]
+    image: ghcr.io/fatedier/frps:v0.72.0@sha256:17abb20dd392557a44070d9726954630c0eb1f7a9bd6ead5ae9150d165179ea4
+    network_mode: host
+    command: ['-c', '/etc/frp/frps.toml']
+    # REVERSE_TUNNEL_GATEWAY_SECRET (frps server-plugin auth) and the lease port range.
+    # Written by `pnpm selfhost:deploy --init`.
+    env_file:
+      - path: ${SAM_SELFHOST_STATE_DIR:-./.state}/gateway.env
+        required: true
+    environment:
+      FRPS_BIND_PORT: ${FRPS_BIND_PORT:-7000}
+      CELLD_PORT: ${CELLD_PORT:-8080}
+      SAM_DOMAIN: ${SAM_DOMAIN:?set SAM_DOMAIN in .env}
+      # REVERSE_TUNNEL_PORT_RANGE_START/END come from gateway.env: the deploy script writes the
+      # same resolved range there and into the Worker's vars (scripts/selfhost/box-settings.ts).
+    volumes:
+      - ./frps:/etc/frp:ro
+    restart: unless-stopped
+
+  # Bundled object store for boxes without an external bucket. celld does not qualify it for
+  # production (MinIO community fork; it passes celld's storage test). Prefer GCS/S3/R2/Azure.
+  objectstore:
+    profiles: [local-store]
+    # pgsty/minio RELEASE.2026-08-04T00-00-00Z (minio/minio images are no longer published).
+    image: pgsty/minio@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
+    network_mode: host
+    command:
+      [
+        'server',
+        '/data',
+        '--address',
+        '127.0.0.1:${OBJECTSTORE_PORT:-9000}',
+        '--console-address',
+        '127.0.0.1:${OBJECTSTORE_CONSOLE_PORT:-9001}',
+      ]
+    environment:
+      MINIO_ROOT_USER: ${AWS_ACCESS_KEY_ID:?set AWS_ACCESS_KEY_ID in .env}
+      MINIO_ROOT_PASSWORD: ${AWS_SECRET_ACCESS_KEY:?set AWS_SECRET_ACCESS_KEY in .env}
+    volumes:
+      - objectstore-data:/data
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 5s
+      retries: 30
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+  objectstore-init:
+    profiles: [local-store]
+    image: pgsty/minio@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
+    network_mode: host
+    depends_on:
+      objectstore:
+        condition: service_healthy
+    entrypoint: ['sh', '/init/init.sh']
+    environment:
+      OBJECTSTORE_URL: http://127.0.0.1:${OBJECTSTORE_PORT:-9000}
+      CELLD_BUCKET: ${CELLD_BUCKET:?set CELLD_BUCKET in .env}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+    volumes:
+      - ./objectstore/init.sh:/init/init.sh:ro
+    restart: 'no'
+
+volumes:
+  celld-data:
+  caddy-data:
+  caddy-config:
+  objectstore-data:

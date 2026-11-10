@@ -101,6 +101,9 @@ jobs:
               - 'apps/api/scripts/**'
               - 'apps/api/container-entrypoints/**'
               - 'scripts/deploy/**'
+              # Self-hosted (celld) packaging: generator, deploy script, one-box stack.
+              - 'scripts/selfhost/**'
+              - 'deploy/selfhost/**'
               # The generated Worker config is built from wrangler.toml, so its text-binding
               # guard and effective-config tests must run when only wrangler.toml changes.
               - 'apps/api/wrangler.toml'
@@ -601,7 +604,9 @@ jobs:
         run: pnpm quality:file-sizes
 
       - name: Type check deployment scripts
-        run: npx tsc --project scripts/deploy/tsconfig.json --noEmit
+        run: |
+          npx tsc --project scripts/deploy/tsconfig.json --noEmit
+          npx tsc --project scripts/selfhost/tsconfig.json --noEmit
 
       - name: Validate script syntax
         run: |
@@ -614,6 +619,10 @@ jobs:
       # compatibility regression suite (clean install vs applied history).
       - name: Run deploy and quality script tests
         run: pnpm quality:scripts:test
+
+      # celld wrangler.json generator, root-only secret files, pinned versions.
+      - name: Run self-host packaging tests
+        run: pnpm selfhost:test
 
       - name: Verify installer engine, runtime integrity and bounded proof contracts
         run: |
