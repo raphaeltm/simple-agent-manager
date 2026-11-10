@@ -115,6 +115,23 @@ if (secretsFile) {
   report.push(`MERGE ${Object.keys(secrets).length} throwaway secrets into vars (plaintext)`);
 }
 
+// --probe: wire the spike-only SpikeProbeDO (apps/api/src/spike-probe.ts) and enable /__spike.
+if (flag('--probe')) {
+  out.durable_objects.bindings.push({ name: 'SPIKE_PROBE_DO', class_name: 'SpikeProbeDO' });
+  const last = out.migrations.at(-1).tag;
+  out.migrations.push({ tag: `v${Number(last.slice(1)) + 1}`, new_sqlite_classes: ['SpikeProbeDO'] });
+  out.vars = { ...out.vars, SPIKE_PROBE: 'true' };
+  report.push('ADD SpikeProbeDO binding + migration, SPIKE_PROBE=true');
+}
+
+// --var NAME=VALUE (repeatable): override/add plain vars (e.g. feature flags for self-host).
+for (let i = 0; i < args.length; i++) {
+  if (args[i] !== '--var') continue;
+  const [k, ...rest] = args[i + 1].split('=');
+  out.vars = { ...out.vars, [k]: rest.join('=') };
+  report.push(`VAR ${k}=${rest.join('=')}`);
+}
+
 mkdirSync(outDir, { recursive: true });
 writeFileSync(resolve(outDir, 'wrangler.json'), JSON.stringify(out, null, 2) + '\n');
 console.log(`wrote ${resolve(outDir, 'wrangler.json')}`);

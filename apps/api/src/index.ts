@@ -27,6 +27,8 @@ export { TaskRunner } from './durable-objects/task-runner';
 // anonymous-trial product, so they must stay exported (see durable-objects/retired-trial.ts).
 export { TrialCounter, TrialEventBus, TrialOrchestrator } from './durable-objects/retired-trial';
 export { VmAgentContainer } from './durable-objects/vm-agent-container';
+// SPIKE ONLY (self-host Track A): runtime probe DO + routes, gated by SPIKE_PROBE.
+export { SpikeProbeDO } from './spike-probe';
 export type { Env } from './env';
 export { Sandbox as SandboxDO } from '@cloudflare/sandbox';
 
@@ -194,6 +196,8 @@ import {
   isInstantRuntimeAvailable,
   SAM_PROXIED_REQUEST_HEADER,
 } from './services/vm-agent-container';
+
+import { spikeProbeRoutes } from './spike-probe';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -729,6 +733,9 @@ app.use('*', requestLoggingMiddleware());
 app.use('*', analyticsMiddleware());
 
 app.use('*', apiCors);
+
+// SPIKE ONLY (self-host Track A): /__spike/* runtime probes, 404 unless SPIKE_PROBE=true.
+app.route('/__spike', spikeProbeRoutes);
 
 // Health check — public endpoint returns minimal info only
 app.get('/health', (c) => {

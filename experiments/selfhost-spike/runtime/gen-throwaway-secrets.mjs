@@ -41,9 +41,7 @@ const out = {
   GITHUB_APP_ID: '1',
   GITHUB_APP_PRIVATE_KEY: rsa.privateKey,
   GITHUB_APP_SLUG: 'spike-app',
-  CF_API_TOKEN: 'spike-not-a-real-token',
-  CF_ZONE_ID: 'spike-zone',
-  CF_ACCOUNT_ID: 'spike-account',
+  // No CF_API_TOKEN / CF_ZONE_ID / CF_ACCOUNT_ID: the spike measures a no-Cloudflare install.
   BASE_DOMAIN: 'spike.localhost',
 };
 process.stdout.write(JSON.stringify(out, null, 2) + '\n');
