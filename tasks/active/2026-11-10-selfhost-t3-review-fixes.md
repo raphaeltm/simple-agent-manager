@@ -34,13 +34,25 @@ A Cloudflare deployment with every binding and setting present behaves exactly a
    changes need tests + public docs note.
 
 ## Checklist
-- [ ] 1 monthly cap unavailable without gateway: capability, gate, budget GET/PUT, admin AI proxy config, UI
-- [ ] 2 include_usage for custom endpoint streams + shared estimator for missing output (proxy + agent loop)
-- [ ] 3 capability read once per list owner, passed as primitive prop; observer/re-render test
-- [ ] 4 settings read inside the time budget (task title, diagnosis); deferred-read tests
-- [ ] 5 diagnosis race tests over both routes
-- [ ] 6 sanitized error reason, no third-party bodies (agent loop + proxy)
-- [ ] 7 one client-IP rule; all call sites; byte-identical IPv4/IPv6 test
-- [ ] 8 partial-Cloudflare tests + docs note in reference/configuration.md
-- [ ] Each fix proven discriminating (revert -> named test red)
+- [x] 1 monthly cap unavailable without gateway: capability, gate, budget GET/PUT, admin AI proxy config, UI (eba74739a, d3e1e6759, 91832a531)
+- [x] 2 include_usage for custom endpoint streams + shared estimator for missing output (proxy + agent loop) (b5724a341)
+- [x] 3 capability read once per list owner, passed as primitive prop; observer/re-render test (399574a7b)
+- [x] 4 settings read inside the time budget (task title, diagnosis); deferred-read tests (bbcc57584)
+- [x] 5 diagnosis race tests over both routes (2766d6242, ordering fix d3e1e6759)
+- [x] 6 sanitized error reason, no third-party bodies (agent loop + proxy) (c9222bbcd, parse window d3e1e6759)
+- [x] 7 one client-IP rule; all call sites; byte-identical IPv4/IPv6 test (3d1b4cef7; BetterAuth d3e1e6759)
+- [x] 8 partial-Cloudflare tests + docs note in reference/configuration.md (9a2407803)
+- [x] Each fix proven discriminating (revert -> named test red): recorded in the PR body table
 - [ ] Local gates, reviewers, draft PR, CI dispatch, channel publish
+
+## Decisions
+- Item 1: explicitly unavailable (not enforced from SAM's records): SAM's own usage carries no
+  price for an operator's model, so a dollar figure would be invented. Available only when the
+  cost cron can read gateway logs (gateway id + account id + CF_API_TOKEN). A cap saved earlier is
+  reported `enforced: false`, not enforced (fail-closed would block AI for a convenience control).
+- Item 7: only CF-Connecting-IP is trusted (also for BetterAuth); missing/malformed -> one shared
+  bucket; well-formed values verbatim (no canonicalisation) so keys stay byte-identical.
+- Rule 18 splits done as separate pure-extraction commits: agent-loop-streams.ts,
+  components/ai-usage/*, ai-budget-settings.ts + ai-monthly-cost-cap.ts.
+  routes/node-lifecycle.ts (848 lines) carries a pre-existing FILE SIZE EXCEPTION; +1 line.
+
