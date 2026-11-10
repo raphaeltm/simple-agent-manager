@@ -154,6 +154,17 @@ describe('egress fence ruleset', () => {
   );
 
   it.each([
+    '169.254.169.254:80',
+    '[fe80::1]:80',
+    '100.100.100.200:80',
+    '168.63.129.16:80',
+    '0.0.0.0:80',
+    '[fd20:ce::254]:80',
+  ])('refuses an allowlist entry for a metadata or link-local address (%s)', (entry) => {
+    expect(() => plan({ SAM_EGRESS_ALLOW: entry })).toThrow(/metadata, link-local or reserved/);
+  });
+
+  it.each([
     ['127.0.0.1:7001', []],
     ['127.0.0.2:7001', []],
     ['[::1]:8080', []],

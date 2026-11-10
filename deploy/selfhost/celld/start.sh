@@ -32,6 +32,9 @@ fenced() {
   [[ "$result" == *"No route to host"* ]]
 }
 
+# PID 1 in the container: without a trap, `docker stop` during the wait would be ignored.
+trap 'exit 143' TERM INT
+
 deadline=$((SECONDS + wait_seconds))
 until fenced; do
   if ((SECONDS >= deadline)); then
@@ -45,11 +48,19 @@ done
 pid=$!
 trap 'kill -TERM "$pid" 2>/dev/null || true' TERM INT
 
+# Two consecutive failed checks, so a transient failure of the check itself (fork, fds) or a
+# rules file caught mid-rewrite does not restart celld; still fail closed within 2 intervals.
+misses=0
 while kill -0 "$pid" 2>/dev/null; do
   sleep "$check_seconds" &
   wait $! || true
   kill -0 "$pid" 2>/dev/null || break
-  if ! fenced; then
+  if fenced; then
+    misses=0
+    continue
+  fi
+  misses=$((misses + 1))
+  if ((misses >= 2)); then
     log "egress fence disappeared (connect ${canary}: ${result:-connected}); stopping celld"
     kill -TERM "$pid" 2>/dev/null || true
     wait "$pid" || true

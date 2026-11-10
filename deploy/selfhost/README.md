@@ -130,7 +130,8 @@ Other limits: the loopback lease range (20000-29999 by default) is open to celld
 other services on those ports. Nameservers come from `/etc/resolv.conf` when the deploy runs;
 re-run `pnpm selfhost:deploy --init` if they change. celld's entrypoint re-checks the fence every
 `SAM_EGRESS_FENCE_CHECK_SECONDS` (5) and stops celld if it is gone (measured: celld stopped
-admitting requests 0.6 s after the table was deleted, then drains in-flight work before exiting). Docker user-namespace
+admitting requests 0.6 s after the table was deleted, then drains in-flight work before exiting;
+it now acts on two consecutive failed checks, so within 10 s by default). Docker user-namespace
 remapping changes the host uid the fence must match; it is not supported (celld then refuses to
 start).
 

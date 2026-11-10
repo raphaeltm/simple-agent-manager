@@ -165,6 +165,48 @@ describe('composable credentials routes', () => {
       expect(insert).not.toHaveBeenCalled();
     });
 
+    function postConfiguration(baseUrl: string) {
+      return app.request(
+        '/api/cc/configurations',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: 'Override',
+            consumerKind: 'agent',
+            consumerTarget: 'claude-code',
+            settings: { baseUrl, dialect: 'anthropic' },
+          }),
+        },
+        env
+      );
+    }
+
+    it.each(['https://10.0.0.5/anthropic', 'https://169.254.169.254/', 'https://localhost/x'])(
+      'refuses a configuration baseUrl override on %s before storing anything',
+      async (baseUrl) => {
+        const insert = vi.fn();
+        (mockDB as unknown as { insert: typeof insert }).insert = insert;
+
+        const res = await postConfiguration(baseUrl);
+
+        expect(res.status).toBe(400);
+        expect(insert).not.toHaveBeenCalled();
+      }
+    );
+
+    it('control: stores a configuration override on a public HTTPS host', async () => {
+      const values = vi.fn().mockResolvedValue(undefined);
+      (mockDB as unknown as { insert: ReturnType<typeof vi.fn> }).insert = vi
+        .fn()
+        .mockReturnValue({ values });
+
+      const res = await postConfiguration('https://anthropic-alt.example.com/anthropic');
+
+      expect(res.status).toBe(201);
+      expect(values).toHaveBeenCalledOnce();
+    });
+
     it('control: stores an HTTPS endpoint on a public host', async () => {
       const values = vi.fn().mockResolvedValue(undefined);
       (mockDB as unknown as { insert: ReturnType<typeof vi.fn> }).insert = vi

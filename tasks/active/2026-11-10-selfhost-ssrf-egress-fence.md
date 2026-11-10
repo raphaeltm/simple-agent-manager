@@ -71,4 +71,8 @@ Part B
 - `pnpm selfhost:deploy --env-file X` through pnpm/tsx is intercepted (`--env-file` is a Node
   flag); pre-existing, the default path works. Not changed here.
 - Reviewer fixes: see PR "Specialist Review Evidence".
+- Residuals accepted (documented in README and PR): token-proxy secret can appear in celld's own
+  error log when the proxy is unreachable; the node tunnel and gs:// write were proven with a
+  lease-port stand-in and a fake metadata server, not a real node or real GCE.
+- Discrimination evidence (guard removed once, named tests red) is listed in the PR body.
 

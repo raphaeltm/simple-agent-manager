@@ -185,6 +185,32 @@ export interface FencePlanInput {
  * model server for `llm.openAICompatible.allowPrivateNetwork`. Names are refused: the fence
  * matches addresses, and a name could later resolve elsewhere.
  */
+/**
+ * Addresses no allowlist entry may open: link-local (incl. every cloud metadata server), the
+ * named metadata hosts and the unspecified/reserved ranges. Private and loopback addresses stay
+ * allowed, since a local model server lives there.
+ */
+function isNeverAllowed(address: string): boolean {
+  const lower = address.toLowerCase();
+  if (isIP(lower) === 6) {
+    return (
+      lower === '::' ||
+      /^fe[89ab]/.test(lower) ||
+      lower === 'fd20:ce::254' ||
+      lower === 'fd00:ec2::254' ||
+      lower.startsWith('ff')
+    );
+  }
+  const [a = 0, b = 0] = lower.split('.').map(Number);
+  return (
+    a === 0 ||
+    a >= 224 ||
+    (a === 169 && b === 254) ||
+    lower === '100.100.100.200' ||
+    lower === '168.63.129.16'
+  );
+}
+
 export function parseAllowedEndpoints(raw: string | undefined): FenceEndpoint[] {
   if (!raw?.trim()) return [];
   return raw.split(',').map((entry) => {
@@ -193,6 +219,11 @@ export function parseAllowedEndpoints(raw: string | undefined): FenceEndpoint[] 
     const port = Number(match?.[3]);
     if (!match || isIP(address) === 0 || !Number.isInteger(port) || port < 1 || port > 65535) {
       throw new Error(`SAM_EGRESS_ALLOW entry "${entry.trim()}" must be IP:PORT or [IPv6]:PORT`);
+    }
+    if (isNeverAllowed(address)) {
+      throw new Error(
+        `SAM_EGRESS_ALLOW entry "${entry.trim()}" is a metadata, link-local or reserved address`
+      );
     }
     return { address, port };
   });
