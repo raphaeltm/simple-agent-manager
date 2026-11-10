@@ -267,6 +267,31 @@ describe('workspace local-forward routes', () => {
     expect(response.headers.get('Set-Cookie')).toContain('app_session=next');
   });
 
+  it.each([
+    ['203.0.113.7', '203.0.113.7'],
+    ['2001:DB8:0:0:0:0:0:7', '2001:DB8:0:0:0:0:0:7'],
+    ['not-an-ip', ''],
+  ])('forwards the trusted client IP %s to the VM as X-Forwarded-For %j', async (cfIp, expected) => {
+    const response = await worker.default.fetch(
+      new Request(
+        'https://api.workspaces.example.com/api/workspaces/ws-1/local-forward/5173/path',
+        {
+          headers: {
+            Authorization: 'Bearer app-token',
+            'X-SAM-Forward-Token': 'forward-token',
+            'CF-Connecting-IP': cfIp,
+            'X-Forwarded-For': '198.51.100.66',
+          },
+        }
+      ),
+      env
+    );
+
+    expect(response.status).toBe(200);
+    const [, init] = firstFetchCall();
+    expect((init?.headers as Headers).get('X-Forwarded-For')).toBe(expected);
+  });
+
   it('returns app redirects without following them with internal forwarding headers', async () => {
     vi.stubGlobal(
       'fetch',

@@ -35,12 +35,9 @@ const SetupRequestBodySchema = v.object({
   config: v.optional(v.unknown()),
 });
 
+/** The setup-token rate-limit key: the trusted client IP, else one shared bucket (lib/client-ip). */
 function clientIdentifier(c: SetupContext): string {
-  return (
-    clientIpFromHeaders((name) => c.req.header(name)) ??
-    c.req.header('User-Agent') ??
-    'unknown'
-  );
+  return clientIpFromHeaders((name) => c.req.header(name)) ?? 'unknown';
 }
 
 function setupClosed(): AppError {

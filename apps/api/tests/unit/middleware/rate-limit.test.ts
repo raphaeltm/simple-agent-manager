@@ -268,6 +268,38 @@ describe('rateLimit middleware (behavioral)', () => {
     expect(keys.some((k) => k.includes('2001:db8::7'))).toBe(true);
   });
 
+  it.each([
+    '203.0.113.7',
+    '2001:db8::7',
+    '2a06:98c0:3600::103',
+    '0:0:0:0:0:0:0:1',
+    '2001:DB8:0:0:0:0:0:7',
+    '::ffff:198.51.100.9',
+  ])('keys a well-formed CF-Connecting-IP %s exactly as before the shared helper', async (ip) => {
+    const app = createApp({ useIp: true, limit: 5 });
+    await app.request(
+      new Request('http://localhost/test', { headers: { 'CF-Connecting-IP': ip } }),
+      undefined,
+      mockEnv
+    );
+    const keys = ((kv.put as any).mock.calls as [string, string][]).map(([k]) => k);
+    const windowStart = getCurrentWindowStart(DEFAULT_WINDOW_SECONDS);
+    // The pre-helper key: the raw header value, byte for byte.
+    expect(keys).toEqual([`ratelimit:test:${ip}:${windowStart}`]);
+  });
+
+  it('puts requests with a malformed or missing trusted header in one shared bucket', async () => {
+    const app = createApp({ useIp: true, limit: 1 });
+    const call = (headers: Record<string, string>) =>
+      app.request(new Request('http://localhost/test', { headers }), undefined, mockEnv);
+    expect((await call({ 'CF-Connecting-IP': 'garbage', 'X-Forwarded-For': '198.51.100.1' })).status).toBe(200);
+    // A client-chosen X-Forwarded-For cannot open a fresh bucket.
+    expect((await call({ 'CF-Connecting-IP': 'garbage', 'X-Forwarded-For': '198.51.100.2' })).status).toBe(429);
+    expect((await call({ 'X-Forwarded-For': '198.51.100.3' })).status).toBe(429);
+    const keys = ((kv.put as any).mock.calls as [string, string][]).map(([k]) => k);
+    expect(keys.every((k) => k.startsWith('ratelimit:test:unknown:'))).toBe(true);
+  });
+
   it('cannot mint fresh buckets with forged non-IP header values', async () => {
     const app = createApp({ useIp: true, limit: 1 });
     const call = (forwarded: string) =>

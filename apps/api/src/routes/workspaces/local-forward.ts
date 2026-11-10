@@ -5,6 +5,7 @@ import { Hono } from 'hono';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
+import { clientIpFromHeaders } from '../../lib/client-ip';
 import { log, serializeError } from '../../lib/logger';
 import { expectJsonRecord } from '../../lib/runtime-validation';
 import { getUserId, requireApproved, requireAuth } from '../../middleware/auth';
@@ -242,7 +243,7 @@ async function handleLocalForwardProxy(c: Context<{ Bindings: Env }>) {
   headers.set('X-SAM-Local-Authority', claims.localAuthority);
   headers.set('X-Forwarded-Host', claims.localAuthority);
   headers.set('X-Forwarded-Proto', 'http');
-  headers.set('X-Forwarded-For', c.req.header('CF-Connecting-IP') ?? '');
+  headers.set('X-Forwarded-For', clientIpFromHeaders((name) => c.req.header(name)) ?? '');
 
   const response = await fetchNodeAgent(
     claims.nodeId,
