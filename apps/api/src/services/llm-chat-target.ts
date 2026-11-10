@@ -197,6 +197,33 @@ export async function resolveWorkersAiChatTarget(
 }
 
 /**
+ * `resolveWorkersAiChatTarget` inside the caller's own time budget. The endpoint settings read
+ * is a D1 query, so without this a D1 hang would cost a call its settings-read wait on top of its
+ * own timeout (and a retried call would pay it per attempt). The read cannot be cancelled, so it
+ * races `signal`: when the budget runs out the call rejects with the signal's reason and the read
+ * is left to settle unobserved.
+ */
+export function resolveWorkersAiChatTargetWithin(
+  env: Env,
+  purpose: LlmPurpose,
+  model: string,
+  signal: AbortSignal
+): Promise<ChatCompletionsTarget | null> {
+  if (signal.aborted) return Promise.reject(toError(signal.reason));
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(toError(signal.reason));
+    signal.addEventListener('abort', onAbort, { once: true });
+    resolveWorkersAiChatTarget(env, purpose, model)
+      .then(resolve, reject)
+      .finally(() => signal.removeEventListener('abort', onAbort));
+  });
+}
+
+function toError(reason: unknown): Error {
+  return reason instanceof Error ? reason : new Error(String(reason));
+}
+
+/**
  * Request headers for a chat target. `cf-aig-metadata` carries user and workspace ids for
  * gateway analytics, so it goes to Cloudflare targets only, never to a third-party endpoint.
  */

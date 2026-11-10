@@ -15,7 +15,7 @@ import {
   isCloudflareChatTarget,
   type LlmPurpose,
   LlmUnavailableError,
-  resolveWorkersAiChatTarget,
+  resolveWorkersAiChatTargetWithin,
 } from './llm-chat-target';
 import { resolveAiGatewayId } from './platform-capabilities';
 
@@ -230,7 +230,14 @@ export async function fetchWorkersAIChatCompletion(
   env: Env,
   options: WorkersAIChatCompletionOptions
 ): Promise<string | null> {
-  const target = await resolveWorkersAiChatTarget(env, options.purpose, options.modelId);
+  // One budget for the whole call, armed before the endpoint settings read.
+  const signal = AbortSignal.timeout(options.timeoutMs);
+  const target = await resolveWorkersAiChatTargetWithin(
+    env,
+    options.purpose,
+    options.modelId,
+    signal
+  );
   if (!target) throw new LlmUnavailableError(options.purpose);
   // reasoning_effort and chat_template_kwargs are Workers AI model quirks keyed by the
   // Cloudflare model id; another endpoint's model would reject or misread them.
@@ -238,7 +245,7 @@ export async function fetchWorkersAIChatCompletion(
   const response = await fetch(target.url, {
     method: 'POST',
     redirect: target.redirect,
-    signal: AbortSignal.timeout(options.timeoutMs),
+    signal,
     headers: chatTargetHeaders(target, { 'cf-aig-metadata': JSON.stringify(options.metadata) }),
     body: JSON.stringify({
       model: target.model,

@@ -10,7 +10,11 @@ import {
 } from './debug-agent-common';
 import { completionSchema, parseDebugToolArgs } from './debug-agent-parsing';
 import { getDiagnosticIncidentByErrorId } from './diagnostic-incidents';
-import { chatTargetHeaders, LlmUnavailableError, resolveWorkersAiChatTarget } from './llm-chat-target';
+import {
+  chatTargetHeaders,
+  LlmUnavailableError,
+  resolveWorkersAiChatTargetWithin,
+} from './llm-chat-target';
 import {
   getErrorTrends,
   getHealthSummary,
@@ -196,11 +200,17 @@ export async function complete(
   messages: ChatMessage[],
   maxTokens: number
 ): Promise<Completion> {
-  const target = await resolveWorkersAiChatTarget(env, 'diagnosis', config.model);
-  if (!target) throw new LlmUnavailableError('diagnosis');
+  // One budget for the whole call, armed before the endpoint settings read.
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.timeoutMs);
   try {
+    const target = await resolveWorkersAiChatTargetWithin(
+      env,
+      'diagnosis',
+      config.model,
+      controller.signal
+    );
+    if (!target) throw new LlmUnavailableError('diagnosis');
     const response = await fetch(target.url, {
       method: 'POST',
       redirect: target.redirect,
