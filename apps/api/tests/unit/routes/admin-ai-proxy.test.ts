@@ -226,4 +226,27 @@ describe('admin AI proxy config routes — PATCH /config (billingMode)', () => {
     const body = (await res.json()) as { message: string };
     expect(body.message).toContain('Cannot set billing mode to "unified"');
   });
+  it('refuses unified billing without an addressable AI Gateway, and accepts it with one', async () => {
+    const save = (env: Partial<Env>) =>
+      honoApp.request(
+        '/api/admin/ai-proxy/config',
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ billingMode: 'unified' }),
+        },
+        bindings(env)
+      );
+
+    const refused = await save({ CF_AIG_TOKEN: 'aig-token', AI_GATEWAY_ID: 'sam' });
+    expect(refused.status).toBe(400);
+    expect(((await refused.json()) as { message: string }).message).toContain('AI Gateway');
+
+    const accepted = await save({
+      CF_AIG_TOKEN: 'aig-token',
+      AI_GATEWAY_ID: 'sam',
+      CF_ACCOUNT_ID: 'account-1',
+    });
+    expect(accepted.status).toBe(200);
+  });
 });

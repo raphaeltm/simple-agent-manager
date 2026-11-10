@@ -42,12 +42,22 @@ describe('clientIpFromHeaders', () => {
     }
   );
 
-  it.each(['::1', '2001:db8::1', '::ffff:198.51.100.9', '1:2:3:4:5:6:7:8', 'fe80::1'])(
+  it.each(['::1', '2001:db8::1', '1:2:3:4:5:6:7:8', 'fe80::1'])(
     'accepts the IPv6 literal %s',
     (value) => {
       expect(read({ 'CF-Connecting-IP': value })).toBe(value);
     }
   );
+
+  it.each([
+    ['0:0:0:0:0:0:0:1', '::1'],
+    ['2001:DB8:0:0:0:0:0:7', '2001:db8::7'],
+    ['010.001.1.1', '10.1.1.1'],
+    ['::ffff:198.51.100.9', '::ffff:c633:6409'],
+  ])('returns one canonical key for the spelling %s', (value, canonical) => {
+    expect(read({ 'CF-Connecting-IP': value })).toBe(canonical);
+    expect(read({ 'X-Forwarded-For': value })).toBe(canonical);
+  });
 
   it('is null when no ingress reported an address', () => {
     expect(read({})).toBeNull();
