@@ -93,6 +93,27 @@ test.describe('homepage', () => {
     expect(await runningAnimations(page)).toBe(0);
   });
 
+  test('pausing during the intro settles the stack without animating it', async ({ page }) => {
+    await page.goto('/');
+    const hero = page.locator('[data-fh-hero]');
+    // Record every pose the hero takes from the moment the visitor presses Pause.
+    await page.getByRole('button', { name: 'Pause animation' }).click();
+    await hero.evaluate((el) => {
+      const seen: string[] = [];
+      (window as unknown as { __poses: string[] }).__poses = seen;
+      new MutationObserver(() => seen.push(el.dataset.motion ?? '')).observe(el, {
+        attributes: true,
+        attributeFilter: ['data-motion'],
+      });
+    });
+    await page.locator('[data-fh-stage]').evaluate((el) => el.scrollIntoView({ block: 'center' }));
+    await expect(hero).toHaveAttribute('data-motion', 'live', { timeout: 10_000 });
+    await page.waitForTimeout(3500);
+    const poses = await page.evaluate(() => (window as unknown as { __poses: string[] }).__poses);
+    expect(poses).not.toContain('assembling');
+    await expect(hero).toHaveAttribute('data-paused', '');
+  });
+
   test('stage screens are real UI; phones drop the inset', async ({ page }) => {
     await page.goto('/');
     const phone = (page.viewportSize()?.width ?? 1280) < 768;

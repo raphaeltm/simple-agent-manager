@@ -102,19 +102,31 @@ const INSETS: Record<FactoryInset, typeof MockIdeas> = {
 <script>
   import { createPointerFollower, FINE_POINTER_QUERY, REDUCED_MOTION_QUERY } from '../../lib/motion';
 
-  // Each stage picture leans toward the pointer in 3D, the inset floating at its own depth.
-  if (window.matchMedia(FINE_POINTER_QUERY).matches && !window.matchMedia(REDUCED_MOTION_QUERY).matches) {
-    for (const art of document.querySelectorAll<HTMLElement>('.stage-art')) {
+  // Each stage picture leans toward the pointer in 3D, the inset floating at its own depth. The
+  // reduced-motion preference is read live, so turning it on mid-visit flattens every picture.
+  const reducedMotion = window.matchMedia(REDUCED_MOTION_QUERY);
+  if (window.matchMedia(FINE_POINTER_QUERY).matches) {
+    const arts = [...document.querySelectorAll<HTMLElement>('.stage-art')];
+    const flatten = (art: HTMLElement) => {
+      art.style.setProperty('--tx', '0deg');
+      art.style.setProperty('--ty', '0deg');
+    };
+    for (const art of arts) {
       const follow = createPointerFollower((x, y) => {
+        if (reducedMotion.matches) return flatten(art);
         art.style.setProperty('--tx', `${(x * 9).toFixed(2)}deg`);
         art.style.setProperty('--ty', `${(-y * 7).toFixed(2)}deg`);
       });
       art.addEventListener('pointermove', (event) => {
+        if (reducedMotion.matches) return;
         const box = art.getBoundingClientRect();
         follow((event.clientX - box.left) / box.width - 0.5, (event.clientY - box.top) / box.height - 0.5);
       });
       art.addEventListener('pointerleave', () => follow(0, 0));
     }
+    reducedMotion.addEventListener('change', () => {
+      if (reducedMotion.matches) arts.forEach(flatten);
+    });
   }
 
   for (const root of document.querySelectorAll<HTMLElement>('[data-line]')) {

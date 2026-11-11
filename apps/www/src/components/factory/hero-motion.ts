@@ -90,6 +90,8 @@ export function initFactoryHero(hero: HTMLElement) {
   let beatTimer = 0;
   let beatIndex = 0;
   let introTimers: number[] = [];
+  let introGeneration = 0;
+  let introReady = false;
 
   const running = () => !userPaused && onScreen && !document.hidden && !reduced.matches;
 
@@ -129,48 +131,77 @@ export function initFactoryHero(hero: HTMLElement) {
     beatTimer = 0;
   }
 
-  /** Apply the current running state to the floor, the beats and the CSS animations. */
-  function sync() {
-    const live = running();
-    hero.toggleAttribute('data-paused', !live);
-    if (live) {
-      field?.resume();
-      if (!beatTimer) startBeats();
-    } else {
-      field?.pause();
-      stopBeats();
-    }
-  }
-
-  function intro() {
-    introTimers.forEach((t) => window.clearTimeout(t));
-    if (reduced.matches) {
-      hero.dataset.motion = 'rest';
-      stage?.removeAttribute('data-beat');
-      return;
-    }
-    // Jump straight to the exploded pose (no transition), then let it assemble.
+  /** Jump to a pose with transitions off, so nothing animates on the way there. */
+  function snapTo(motion: string) {
     hero.dataset.motionSnap = '';
-    hero.dataset.motion = 'intro';
-    hero.getBoundingClientRect(); // Apply the exploded pose before transitions come back on.
+    hero.dataset.motion = motion;
+    hero.getBoundingClientRect(); // Apply the pose before transitions come back on.
     requestAnimationFrame(() =>
       requestAnimationFrame(() => {
         delete hero.dataset.motionSnap;
       }),
     );
+  }
+
+  function clearIntroTimers() {
+    introTimers.forEach((t) => window.clearTimeout(t));
+    introTimers = [];
+  }
+
+  /** Exploded to assembled to live. Only runs while motion is allowed. */
+  function assemble() {
+    clearIntroTimers();
+    introTimers = [
+      window.setTimeout(() => {
+        hero.dataset.motion = 'assembling';
+        if (field && fieldRoot) field.wakeNear(fieldRoot.clientWidth * 0.5, fieldRoot.clientHeight * 0.86, 460, 16);
+      }, INTRO_HOLD_MS),
+      window.setTimeout(() => {
+        introTimers = [];
+        hero.dataset.motion = 'live';
+        sync();
+      }, INTRO_HOLD_MS + ASSEMBLE_MS),
+    ];
+  }
+
+  /** Apply the current running state to the floor, the beats, the intro and the CSS animations. */
+  function sync() {
+    const live = running();
+    hero.toggleAttribute('data-paused', !live);
+    const midIntro = hero.dataset.motion === 'intro' || hero.dataset.motion === 'assembling';
+    if (live) {
+      field?.resume();
+      if (midIntro && introReady && !introTimers.length) assemble();
+      if (hero.dataset.motion === 'live' && !beatTimer) startBeats();
+    } else {
+      field?.pause();
+      stopBeats();
+      // Paused (or off screen) mid-intro: settle into the composed stack at once, never moving
+      // while the control says the animation is paused.
+      if (midIntro && introReady) {
+        clearIntroTimers();
+        snapTo('live');
+      }
+    }
+  }
+
+  function intro() {
+    clearIntroTimers();
+    const generation = ++introGeneration;
+    introReady = false;
+    if (reduced.matches) {
+      hero.dataset.motion = 'rest';
+      stage?.removeAttribute('data-beat');
+      return;
+    }
+    snapTo('intro');
     // Hold the exploded pose until the screens have arrived and the stack is on screen, so the
     // visitor sees it assemble (and it never assembles empty).
     void Promise.all([stackImagesReady(stack), inView(stage)]).then(() => {
-      introTimers = [
-        window.setTimeout(() => {
-          hero.dataset.motion = 'assembling';
-          if (field && fieldRoot) field.wakeNear(fieldRoot.clientWidth * 0.5, fieldRoot.clientHeight * 0.86, 460, 16);
-        }, INTRO_HOLD_MS),
-        window.setTimeout(() => {
-          hero.dataset.motion = 'live';
-          sync();
-        }, INTRO_HOLD_MS + ASSEMBLE_MS),
-      ];
+      if (generation !== introGeneration) return;
+      introReady = true;
+      if (running()) assemble();
+      else snapTo('live');
     });
   }
 
