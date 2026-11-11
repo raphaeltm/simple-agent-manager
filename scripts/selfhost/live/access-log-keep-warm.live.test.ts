@@ -15,7 +15,7 @@ import { randomBytes } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { caddyRuntimeImage, freePort, REPO_ROOT, sleep, waitFor } from './harness';
 
@@ -99,7 +99,8 @@ async function startCaddy(extra: Record<string, string>): Promise<Stack> {
     'Caddy to serve TLS',
     async () => {
       try {
-        return (await get(stack, `app.${DOMAIN}`, '/ready')).status === 200;
+        // Any HTTP answer means Caddy serves TLS; a stack whose upstream is down answers 502.
+        return (await get(stack, `app.${DOMAIN}`, '/ready')).status > 0;
       } catch {
         return false;
       }
@@ -140,6 +141,11 @@ function accessLines(stack: Stack): Array<Record<string, unknown>> {
     .split('\n')
     .filter((line) => line.includes('"http.log.access'))
     .map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
+/** Removes every running stack, so pings counted next come only from the stack a test starts. */
+function stopStacks(): void {
+  for (const stack of stacks.splice(0)) spawnSync('docker', ['rm', '-f', stack.container]);
 }
 
 function healthHitsSince(start: number): Hit[] {
@@ -244,6 +250,7 @@ describe('access log', () => {
 });
 
 describe('keep-warm', () => {
+  beforeEach(stopStacks);
   it('sends GET /health on the API host while idle', async () => {
     const start = hits.length;
     await startCaddy({ SAM_KEEP_WARM: 'on', SAM_KEEP_WARM_INTERVAL: '1s' });
