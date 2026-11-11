@@ -140,7 +140,11 @@ describe('GCP boot disk type', () => {
     );
     expect(stockout).toBeInstanceOf(ProviderError);
     expect((stockout as ProviderError).category).toBe('transient_capacity');
+    expect((stockout as ProviderError).providerCode).toBe('ZONE_RESOURCE_POOL_EXHAUSTED');
+    expect((stockout as ProviderError).message).toContain('does not have enough resources');
 
+    // The TaskRunner descends to the next offering by calling createVM again with its location;
+    // the provider itself never changes zone within one call.
     const created = await provider.createVM(vmConfig({ location: 'us-central1-c' }));
     expect(created.name).toBe('node-disk');
 
@@ -169,6 +173,8 @@ describe('GCP boot disk type', () => {
     });
   });
 
+  // Pins existing classification (not the disk type change): pd-balanced draws on the regional
+  // SSD_TOTAL_GB quota, and running out of it must reach the TaskRunner as quota_exceeded.
   it('reports an exhausted SSD quota as quota_exceeded', async () => {
     const message = "Quota 'SSD_TOTAL_GB' exceeded.  Limit: 500.0 in region us-central1.";
     globalThis.fetch = vi.fn(async (input: string | URL, init: RequestInit = {}) => {

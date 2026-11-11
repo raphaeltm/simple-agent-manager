@@ -36,6 +36,7 @@ tokenProvider, defaultZone)` directly. An override field would have no setter: n
 - [x] Tests through `createVM`: default, non-default zone, stockout then another zone, explicit size, SSD quota category, Hetzner control
 - [x] Discrimination: removing `diskType` fails 4 tests; a fixed zone fails the 2 zone tests
 - [x] One docs bullet in `apps/www/src/content/docs/docs/guides/google-cloud.md`
+- [x] Local review: task-completion-validator, constitution-validator, doc-sync-validator, test-engineer all PASS; LOW notes applied (docs wording/placement, stockout fixture asserts code+message)
 - [ ] PR, CI, local review, CodeRabbit wait, merge, Deploy Production watched
 
 ## Acceptance criteria
@@ -43,3 +44,7 @@ tokenProvider, defaultZone)` directly. An override field would have no setter: n
 - [x] New GCP nodes request `pd-balanced` in the zone they are created in
 - [x] Other providers' request bodies unchanged
 - [ ] Deployed to production (staging skipped by Raphaël's explicit instruction for this task)
+
+## Notes
+
+- Pre-existing, out of scope: `GCP_DISK_SIZE_GB` is documented (`reference/configuration.md`) and declared in `apps/api/src/env.ts` but nothing passes it to `GcpProvider`; recorded as a SAM idea.
