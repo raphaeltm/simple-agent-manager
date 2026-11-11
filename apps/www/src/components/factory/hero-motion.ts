@@ -22,8 +22,8 @@ type Beat = 'needs' | 'agent' | 'wf' | 'review';
 const PHONE_QUERY = '(max-width: 767px)';
 
 const FIELD_OPTIONS: Record<Layout, GlassNodeFieldOptions> = {
-  desktop: { mode: 'floor', seed: 11, density: 0.2, pitch: 58, vanishX: 0.5, horizonY: 0.52, zmax: 2600, focal: 820 },
-  phone: { mode: 'floor', seed: 11, density: 0.2, pitch: 56, vanishX: 0.5, horizonY: 0.58, zmax: 2000, focal: 700 },
+  desktop: { mode: 'floor', seed: 11, density: 0.22, pitch: 58, vanishX: 0.5, horizonY: 0.4, zmax: 2600, focal: 820 },
+  phone: { mode: 'floor', seed: 11, density: 0.22, pitch: 56, vanishX: 0.5, horizonY: 0.5, zmax: 2000, focal: 700 },
 };
 
 /** Where on the floor (fractions of the field) each beat lights up, and how. */
@@ -35,6 +35,25 @@ const BEATS: { beat: Beat; at: readonly [number, number]; light: 'amber' | 'gree
 ];
 
 const INTRO_HOLD_MS = 1300;
+/** Longest the exploded pose waits for the stack's screens to download before assembling anyway. */
+const IMAGE_WAIT_MS = 2500;
+
+/** Resolves once every screen in the stack has decoded (in the active theme), or after the wait. */
+function stackImagesReady(stack: HTMLElement | null): Promise<void> {
+  if (!stack) return Promise.resolve();
+  const urls = [...stack.querySelectorAll<HTMLElement>('.fshot')]
+    .map((el) => /url\(["']?([^"')]+)["']?\)/.exec(getComputedStyle(el).backgroundImage)?.[1])
+    .filter((url): url is string => Boolean(url));
+  const loads = urls.map((url) => {
+    const img = new Image();
+    img.src = url;
+    return img.decode().catch(() => undefined);
+  });
+  return Promise.race([
+    Promise.all(loads).then(() => undefined),
+    new Promise<void>((resolve) => window.setTimeout(resolve, IMAGE_WAIT_MS)),
+  ]);
+}
 const ASSEMBLE_MS = 1900;
 const BEAT_MS = 2600;
 
@@ -118,18 +137,20 @@ export function initFactoryHero(hero: HTMLElement) {
     hero.dataset.motion = 'intro';
     void hero.offsetHeight;
     requestAnimationFrame(() => requestAnimationFrame(() => hero.removeAttribute('data-motion-snap')));
-    introTimers = [
-      window.setTimeout(() => {
-        hero.dataset.motion = 'assembling';
-        const [fx, fy] = [0.5, 0.86];
-        if (field && fieldRoot) field.wakeNear(fieldRoot.clientWidth * fx, fieldRoot.clientHeight * fy, 460, 16);
-      }, INTRO_HOLD_MS),
-      window.setTimeout(() => {
-        hero.dataset.motion = 'live';
-        sync();
-        startBeats();
-      }, INTRO_HOLD_MS + ASSEMBLE_MS),
-    ];
+    // Hold the exploded pose until the screens have arrived, so they never assemble empty.
+    void stackImagesReady(stack).then(() => {
+      introTimers = [
+        window.setTimeout(() => {
+          hero.dataset.motion = 'assembling';
+          if (field && fieldRoot) field.wakeNear(fieldRoot.clientWidth * 0.5, fieldRoot.clientHeight * 0.86, 460, 16);
+        }, INTRO_HOLD_MS),
+        window.setTimeout(() => {
+          hero.dataset.motion = 'live';
+          sync();
+          startBeats();
+        }, INTRO_HOLD_MS + ASSEMBLE_MS),
+      ];
+    });
   }
 
   // Pointer tilt: the stack leans toward the pointer, a few degrees at most.
