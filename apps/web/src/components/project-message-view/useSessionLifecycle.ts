@@ -1,7 +1,7 @@
 import type { PromptDeliveryIntent } from '@simple-agent-manager/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { WakeProgressUpdate } from '../../hooks/useChatWebSocket';
+import type { SessionUpdatedFields, WakeProgressUpdate } from '../../hooks/useChatWebSocket';
 import { useChatWebSocket } from '../../hooks/useChatWebSocket';
 import { useTokenRefresh } from '../../hooks/useTokenRefresh';
 import { useWorkspacePorts } from '../../hooks/useWorkspacePorts';
@@ -248,12 +248,9 @@ export function useSessionLifecycle(
       },
       [startVerifyDecayTimer, stopVerifyDecayTimer]
     ),
-    onSessionUpdated: useCallback(
-      (updates: Partial<Pick<ChatSessionResponse, 'topic' | 'workspaceId' | 'agentSessionId'>>) => {
-        setSession((prev) => (prev ? { ...prev, ...updates } : prev));
-      },
-      []
-    ),
+    onSessionUpdated: useCallback((updates: SessionUpdatedFields) => {
+      setSession((prev) => (prev ? { ...prev, ...updates } : prev));
+    }, []),
     // Pushed wake phase — arrives well ahead of the fallback poll, so the banner
     // tracks the actual wake instead of lagging a poll interval behind it.
     onWakeProgress: useCallback(

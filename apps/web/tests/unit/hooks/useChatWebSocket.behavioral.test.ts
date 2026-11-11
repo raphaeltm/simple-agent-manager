@@ -443,6 +443,39 @@ describe('useChatWebSocket (behavioral)', () => {
     expect(onSessionUpdated).toHaveBeenCalledWith({ agentSessionId: 'acp-123' });
   });
 
+  it('forwards the lifecycle status the DO pushes on sleep and wake', () => {
+    // `applySessionSleep` / `wakeSession` broadcast { sessionId, status }.
+    const onSessionUpdated = vi.fn();
+    renderHook(() => useChatWebSocket({ ...defaultProps, onSessionUpdated }));
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateOpen();
+      MockWebSocket.instances[0]!.simulateMessage({
+        type: 'session.updated',
+        sessionId: 'sess-1',
+        status: 'sleeping',
+      });
+    });
+
+    expect(onSessionUpdated).toHaveBeenCalledWith({ status: 'sleeping' });
+  });
+
+  it('does not forward a status that is not a chat session status', () => {
+    const onSessionUpdated = vi.fn();
+    renderHook(() => useChatWebSocket({ ...defaultProps, onSessionUpdated }));
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateOpen();
+      MockWebSocket.instances[0]!.simulateMessage({
+        type: 'session.updated',
+        sessionId: 'sess-1',
+        status: 'hibernating',
+      });
+    });
+
+    expect(onSessionUpdated).not.toHaveBeenCalled();
+  });
+
   it('does not forward a non-string agentSessionId', () => {
     const onSessionUpdated = vi.fn();
     renderHook(() => useChatWebSocket({ ...defaultProps, onSessionUpdated }));
