@@ -469,7 +469,7 @@ describe('stuck-task sweep — superseded predecessors are cancelled, never fail
 
     expect(fetchWithTimeoutMock).toHaveBeenCalledWith(
       'https://01m064tg56ecjw1d127h32brvj.vm.example.test:8443/health',
-      { method: 'GET' },
+      { method: 'GET', redirect: 'manual' },
       5_000
     );
     expect(insertedSuccessor).toBe(false);
