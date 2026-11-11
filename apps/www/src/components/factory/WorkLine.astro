@@ -1,0 +1,470 @@
+---
+/**
+ * "How work moves": one idea travelling through six stages, each with a real screen. A rail that
+ * reads like a pipeline sticks under the header and fills as the visitor scrolls. Each stage's
+ * picture plays once when it enters the view (rises, the inset lands, one control is ringed, a
+ * note lands) and then rests; the markup is the resting frame.
+ */
+import { factoryStages } from '../../data/factory-stages';
+import Shot from './Shot.astro';
+---
+
+<section class="fh-section line" id="how-work-moves" aria-labelledby="line-title" data-line>
+  <div class="container">
+    <div class="fh-head fh-head--center line-head">
+      <p class="fh-kicker">How work moves</p>
+      <h2 class="fh-h2" id="line-title">From an idea to a running change, with your team at every gate</h2>
+      <p class="fh-lede">
+        Follow one request through a team’s process: Northwind’s payments team wants failed webhook
+        deliveries retried. Agents do the steps. People decide where it matters.
+      </p>
+    </div>
+  </div>
+
+  <nav class="line-rail" aria-label="Stages of the process">
+    <div class="container line-rail-inner">
+      <span class="line-track" aria-hidden="true"><span class="line-fill" data-line-fill></span></span>
+      <ol class="line-stops">
+        {factoryStages.map((s, i) => (
+          <li>
+            <a href={`#stage-${s.id}`} class="line-stop" data-line-stop={i} aria-label={s.name}>
+              <span class="line-dot" aria-hidden="true"></span>
+              <span class="line-label">{s.name}</span>
+            </a>
+          </li>
+        ))}
+      </ol>
+    </div>
+  </nav>
+
+  <div class="container line-stages">
+    {factoryStages.map((s, i) => (
+      <article class:list={['stage', { 'stage--flip': i % 2 === 1 }]} id={`stage-${s.id}`} data-stage={i}>
+        <div class="stage-copy" data-reveal>
+          <p class="fh-kicker stage-kicker">
+            <span class="stage-n">{String(i + 1).padStart(2, '0')}</span>
+            {s.name}
+          </p>
+          <h3 class="stage-title">{s.title}</h3>
+          <p class="stage-body">{s.body}</p>
+          <p class="stage-who"><span aria-hidden="true">●</span>{s.who}</p>
+        </div>
+        <figure
+          class:list={['stage-figure', { 'stage-figure--inset': s.inset, 'stage-figure--inset-left': s.insetSide === 'left' }]}
+          data-reveal
+          data-play
+        >
+          <div class="stage-art">
+            <div class="fh-frame stage-frame">
+              <div class="stage-desk">
+                <Shot name={s.main} />
+                {s.ring && (
+                  <span
+                    class="stage-ring"
+                    aria-hidden="true"
+                    style={`left:${s.ring[0]}%;top:${s.ring[1]}%;width:${s.ring[2]}%;height:${s.ring[3]}%`}
+                  />
+                )}
+              </div>
+              <div class="stage-phone">
+                <Shot name={s.phone} />
+              </div>
+            </div>
+            {s.inset && (
+              <div class="stage-inset">
+                <Shot name={s.inset} />
+              </div>
+            )}
+          </div>
+          {s.note && <figcaption class="stage-note">{s.note}</figcaption>}
+        </figure>
+      </article>
+    ))}
+  </div>
+</section>
+
+<script>
+  for (const root of document.querySelectorAll<HTMLElement>('[data-line]')) {
+    const stages = [...root.querySelectorAll<HTMLElement>('[data-stage]')];
+    const stops = [...root.querySelectorAll<HTMLElement>('[data-line-stop]')];
+    const fill = root.querySelector<HTMLElement>('[data-line-fill]');
+    const show = (i: number) => {
+      stops.forEach((s, j) => {
+        s.classList.toggle('is-done', j < i);
+        s.classList.toggle('is-current', j === i);
+        if (j === i) s.setAttribute('aria-current', 'step');
+        else s.removeAttribute('aria-current');
+      });
+      if (fill) fill.style.transform = `scaleX(${stages.length > 1 ? i / (stages.length - 1) : 1})`;
+    };
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) show(Number((e.target as HTMLElement).dataset.stage));
+        }
+      },
+      { rootMargin: '-45% 0px -45% 0px' },
+    );
+    stages.forEach((s) => io.observe(s));
+    show(0);
+  }
+</script>
+
+<style>
+  .line .line-head {
+    margin-bottom: 84px;
+  }
+
+  /* ---- Rail ---- */
+  .line-rail {
+    position: sticky;
+    top: var(--header-height);
+    z-index: 5;
+    padding: 12px 0;
+    background: color-mix(in srgb, var(--color-bg-body) 94%, transparent);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border-block: 1px solid var(--color-border-subtle);
+  }
+
+  /* Fills the strip between the floating header and the rail, so page content can't show
+     through it. The section heading keeps enough margin above the rail for this strip. */
+  .line-rail::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 100%;
+    height: calc(var(--header-height) + 8px);
+    background: var(--color-bg-body);
+  }
+
+  .line-rail-inner {
+    position: relative;
+  }
+
+  .line-track {
+    position: absolute;
+    left: calc(24px + 6px);
+    right: calc(24px + 6px);
+    top: 50%;
+    height: 2px;
+    background: var(--color-border);
+    transform: translateY(-50%);
+  }
+
+  .line-fill {
+    display: block;
+    height: 100%;
+    background: var(--color-accent-strong);
+    box-shadow: 0 0 10px var(--color-accent-strong);
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 0.6s cubic-bezier(0.2, 1, 0.3, 1);
+  }
+
+  .line-stops {
+    position: relative;
+    list-style: none;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .line-stop {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--color-fg-dim);
+    text-decoration: none;
+    background: var(--color-bg-body);
+    border: 1px solid var(--color-border-subtle);
+    transition:
+      color 0.3s ease,
+      border-color 0.3s ease;
+  }
+
+  /* Upcoming stops are hollow, done and current stops filled, so state isn't colour alone. */
+  .line-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: transparent;
+    box-sizing: border-box;
+    border: 1.5px solid var(--color-border);
+    transition: background 0.3s ease, box-shadow 0.3s ease;
+  }
+
+  .line-stop.is-done {
+    color: var(--color-fg-muted);
+  }
+
+  .line-stop.is-done .line-dot {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+  }
+
+  .line-stop.is-current {
+    color: var(--color-fg-primary);
+    border-color: var(--color-accent-strong);
+  }
+
+  .line-stop.is-current .line-dot {
+    background: var(--color-accent-strong);
+    border-color: var(--color-accent-strong);
+    box-shadow: 0 0 10px var(--color-accent-strong);
+  }
+
+  /* ---- Stages ---- */
+  .line-stages {
+    display: grid;
+    gap: 132px;
+    padding-top: 88px;
+  }
+
+  .stage {
+    display: grid;
+    grid-template-columns: minmax(0, 4fr) minmax(0, 7fr);
+    gap: 64px;
+    align-items: center;
+    scroll-margin-top: calc(var(--header-height) + 100px);
+  }
+
+  .stage--flip {
+    grid-template-columns: minmax(0, 7fr) minmax(0, 4fr);
+  }
+
+  .stage--flip .stage-copy {
+    order: 2;
+  }
+
+  .stage-kicker {
+    display: flex;
+    gap: 10px;
+  }
+
+  .stage-n {
+    color: var(--color-fg-dim);
+  }
+
+  .stage-title {
+    margin-top: 10px;
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: clamp(1.5rem, 2.6vw, 2.125rem);
+    line-height: 1.12;
+    color: var(--color-fg-primary);
+  }
+
+  .stage-body {
+    margin-top: 14px;
+    color: var(--color-fg-muted);
+    line-height: 1.65;
+    max-width: 46ch;
+  }
+
+  .stage-who {
+    display: inline-flex;
+    gap: 8px;
+    align-items: center;
+    margin-top: 18px;
+    padding: 5px 12px;
+    border-radius: 999px;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--color-fg-muted);
+    border: 1px solid var(--color-border-subtle);
+  }
+
+  .stage-who span {
+    font-size: 0.5rem;
+    color: var(--fh-accent-text);
+  }
+
+  .stage-figure {
+    position: relative;
+    margin: 0;
+    display: grid;
+    gap: 16px;
+  }
+
+  .stage-art {
+    position: relative;
+  }
+
+  .stage-figure--inset .stage-art {
+    padding-bottom: 48px;
+  }
+
+  .stage-desk {
+    position: relative;
+  }
+
+  .stage-phone {
+    display: none;
+  }
+
+  .stage-ring {
+    position: absolute;
+    border-radius: 10px;
+    box-shadow: 0 0 0 2px var(--fh-ring), 0 0 28px -4px var(--fh-ring);
+    opacity: 0;
+  }
+
+  .stage-inset {
+    position: absolute;
+    overflow: hidden;
+    border-radius: 12px;
+    border: 1px solid var(--glass-border-hover);
+    background: var(--color-bg-inset);
+    box-shadow: var(--fh-frame-shadow);
+    width: 44%;
+    right: -4%;
+    bottom: 0;
+    opacity: 0;
+    transform: translateY(24px) scale(0.95);
+  }
+
+  .stage-figure--inset-left .stage-inset {
+    right: auto;
+    left: -4%;
+  }
+
+  .stage-note {
+    display: flex;
+    gap: 10px;
+    align-items: baseline;
+    font-size: 0.9375rem;
+    line-height: 1.45;
+    color: var(--color-fg-primary);
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  .stage-note::before {
+    content: '';
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--color-accent-strong);
+    box-shadow: 0 0 10px var(--color-accent-strong);
+    transform: translateY(-1px);
+  }
+
+  [data-play].is-in .stage-inset {
+    transition:
+      opacity 0.5s ease 0.5s,
+      transform 0.8s cubic-bezier(0.2, 1.25, 0.3, 1) 0.5s;
+    opacity: 1;
+    transform: none;
+  }
+
+  [data-play].is-in .stage-ring {
+    animation: stage-ring 2.8s ease 1s both;
+  }
+
+  [data-play].is-in .stage-note {
+    transition:
+      opacity 0.45s ease 1.7s,
+      transform 0.7s cubic-bezier(0.2, 1.3, 0.3, 1) 1.7s;
+    opacity: 1;
+    transform: none;
+  }
+
+  @keyframes stage-ring {
+    0% {
+      opacity: 0;
+      transform: scale(1.06);
+    }
+    22%,
+    70% {
+      opacity: 1;
+      transform: none;
+    }
+    100% {
+      opacity: 0.4;
+      transform: none;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .stage-inset,
+    .stage-note {
+      opacity: 1;
+      transform: none;
+    }
+
+    .stage-ring {
+      opacity: 0.4;
+    }
+
+    [data-play].is-in .stage-ring {
+      animation: none;
+    }
+
+    .line-fill,
+    .line-stop,
+    .line-dot {
+      transition: none;
+    }
+  }
+
+  @media (max-width: 900px) {
+    .stage,
+    .stage--flip {
+      grid-template-columns: 1fr;
+      gap: 32px;
+    }
+
+    .stage--flip .stage-copy {
+      order: 0;
+    }
+
+    .line-stages {
+      gap: 96px;
+      padding-top: 56px;
+    }
+  }
+
+  @media (max-width: 767px) {
+    /* Phones get a phone-width capture of the same screen; desktop art and insets would be unreadable. */
+    .stage-desk,
+    .stage-inset {
+      display: none;
+    }
+
+    .stage-phone {
+      display: block;
+    }
+
+    .stage-figure--inset .stage-art {
+      padding-bottom: 0;
+    }
+
+    .stage-phone :global(.fshot) {
+      max-height: 560px;
+      background-size: 100% auto;
+      background-position: top center;
+    }
+
+    .line-stop {
+      padding: 6px;
+    }
+
+    .line-label {
+      display: none;
+    }
+
+    .line-stop.is-current .line-label {
+      display: inline;
+    }
+
+    .line-stop.is-current {
+      padding-inline: 10px;
+    }
+  }
+</style>

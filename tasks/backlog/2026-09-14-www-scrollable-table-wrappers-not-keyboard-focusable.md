@@ -40,7 +40,7 @@ For each `overflow-x: auto` wrapper around a `<table>`, add:
 <div class="table-wrapper" tabindex="0" role="region" aria-label="<descriptive label>">
 ```
 
-(See the applied fix in `Comparison.astro` for the pattern.)
+(The pattern above was first applied to the homepage comparison table, `Comparison.astro`, removed with the old homepage on 2026-11-11.)
 
 ## Acceptance Criteria
 
