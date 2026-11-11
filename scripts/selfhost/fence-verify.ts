@@ -133,7 +133,7 @@ function localTargets(
   ];
 }
 
-function remoteTargets(): VerifyTarget[] {
+function remoteTargets(box: Readonly<Record<string, string>>): VerifyTarget[] {
   return [
     ...REMOTE_PROBES.map((probe) => ({
       label: probe.name,
@@ -142,9 +142,15 @@ function remoteTargets(): VerifyTarget[] {
       expect: 'blocked' as const,
     })),
     {
-      label: 'private 172.16/12 (Docker bridges)',
+      // On a Docker host 172.17.0.1 is docker0, this host's own address, and the fence opens
+      // Caddy's ports on every local address by design (Caddy binds all of them; reaching it
+      // there is no more than reaching it from the internet). Port 80 there is Caddy, so a
+      // probe on it reported a gap on every Docker box (T8, real GCE). The operator port must
+      // be refused whether the address is local ("anything else on this host") or remote
+      // (the private-range rule), so it proves the rule either way.
+      label: 'private 172.16/12 (Docker bridge gateway), operator port',
       host: '172.17.0.1',
-      port: 80,
+      port: composePort(box, 'CELLD_INTERNAL_PORT'),
       expect: 'blocked',
     },
     { label: 'private 192.168/16', host: '192.168.255.1', port: 80, expect: 'blocked' },
@@ -166,7 +172,7 @@ export async function verifyTargets(input: TargetInput): Promise<VerifyTarget[]>
   });
   const targets: VerifyTarget[] = [
     ...localTargets(box, own),
-    ...remoteTargets(),
+    ...remoteTargets(box),
     allow('node tunnel lease port', '127.0.0.1', range.start),
     allow('public internet', publicHost, Number(publicPort)),
     ...own.map((host) =>

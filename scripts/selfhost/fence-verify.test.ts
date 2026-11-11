@@ -120,6 +120,32 @@ describe('verify-fence judging', () => {
 });
 
 describe('verify-fence targets', () => {
+  // T8 on real GCE: docker0 (172.17.0.1) is one of this host's own addresses, and the fence opens
+  // Caddy's HTTP/HTTPS ports on every local address. A probe expecting 172.17.0.1:80 refused
+  // reported "EGRESS FENCE NOT IN EFFECT" on every Docker host while the fence was correct.
+  it("never expects a Caddy port refused on any of this host's own addresses (Docker bridge included)", async () => {
+    const local = ['127.0.0.1', '10.42.0.2', '172.17.0.1', 'fe80::4001:aff:fe2a:2'];
+    const targets = await verifyTargets({
+      box: { CELLD_BUCKET: 'gs://b', CELLD_INTERNAL_PORT: '7011' },
+      range: RANGE,
+      publicProbe: '1.1.1.1:443',
+      localAddresses: local,
+    });
+    const caddyPorts = new Set([80, 443]);
+    const contradicting = targets.filter(
+      (t) =>
+        t.expect === 'blocked' &&
+        caddyPorts.has(t.port) &&
+        local.includes(t.host) &&
+        t.host !== '127.0.0.1'
+    );
+    expect(contradicting).toEqual([]);
+    // The Docker bridge gateway is still probed, on the operator port the fence must refuse there.
+    expect(targets).toContainEqual(
+      expect.objectContaining({ host: '172.17.0.1', port: 7011, expect: 'blocked' })
+    );
+  });
+
   it('covers every listener, local spelling, remote class and IPv6 form, plus the positive controls', async () => {
     const targets = await verifyTargets({
       box: { S3_ENDPOINT: 'http://127.0.0.1:9000', CELLD_BUCKET: 's3://b' },
@@ -148,7 +174,7 @@ describe('verify-fence targets', () => {
         '10.255.255.1:80',
         '169.254.169.254:80',
         '100.100.100.200:80',
-        '172.17.0.1:80',
+        '172.17.0.1:7001',
         '192.168.255.1:80',
         'fd00::1:80',
         'fd20:ce::254:80',

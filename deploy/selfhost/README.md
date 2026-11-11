@@ -237,19 +237,36 @@ forbidden target is probed over TCP and UDP: a UDP send the fence refuses fails 
 not permitted", which only the local firewall produces, so a target the network would refuse
 anyway still proves the fence. It also checks that celld can resolve a public name, that the
 fence's DNS rule opens every nameserver celld uses, and that the attestation is current.
+Caddy's ports are open on every address of this host, including Docker's bridge gateway
+(`172.17.0.1` on docker0), because Caddy listens on all of them; the verifier probes the bridge
+gateway on celld's operator port, which the fence must refuse there.
 
 On GCE with a gs:// bucket, celld needs access tokens from the metadata server, which the fence
 blocks. The `gce` profile runs a small proxy (`metadata-proxy/Caddyfile`) that serves only the
 default service account's access token, only for GET with the `Metadata-Flavor` header, and only
 under a random path prefix that is in celld's environment (`.state/celld.env`) and not in the
-Worker's. Every other metadata path is 404. Whatever scope the caller asks for, the token is
-scoped to Cloud Storage (`GCE_METADATA_PROXY_SCOPES`, default `devstorage.read_write`; only Cloud
-Storage scopes are accepted), so it cannot call Cloud DNS even when the VM's service account can.
-The scope limits the API, not the bucket: the token reaches every bucket the service account has
-IAM access to, so grant that account the fleet bucket only. Caddy's DNS-01 renewals use the
-metadata server directly (Caddy is not fenced) and keep the VM's own scopes.
+Worker's. Every other metadata path is 404.
 
-Worker code cannot read the secret path. Verified on celld 0.6.3 with `nodejs_compat`: `process.env`
+The proxy does NOT narrow what the token can do on GCE. It asks for `GCE_METADATA_PROXY_SCOPES`
+(default `devstorage.read_write`), but the GCE metadata server ignores the `scopes` parameter for
+the default service account: on a real GCE VM with the `cloud-platform` access scope, a token
+fetched through the proxy carried `cloud-platform` (checked with Google's tokeninfo, 2026-11-11).
+Such a token can do everything the VM's service account may do: on the test box that was read,
+write and delete on every bucket in the project and Cloud DNS administration. The protection is
+the path secret, so limit what that token is worth:
+
+- Give the box its own service account, granted `roles/storage.objectAdmin` on the fleet bucket
+  only (a bucket-level binding, not a project role), plus Cloud DNS rights on the install's zone
+  only when `SAM_TLS_MODE=dns-googleclouddns` (Caddy uses the same identity for DNS-01).
+- Do not give that account rights on any other bucket, such as backups or hand-off buckets.
+- Optionally set the VM's access scopes to `devstorage.read_write` (plus
+  `ndev.clouddns.readwrite` for DNS-01) instead of `cloud-platform`. Changing scopes needs the VM
+  stopped.
+
+Caddy's DNS-01 renewals use the metadata server directly (Caddy is not fenced).
+
+Worker code cannot read the secret path. Verified on celld 0.6.3 with `nodejs_compat`, locally and
+on the real GCE box with a gs:// bucket, from code deployed into the Worker: `process.env`
 is an empty stub, `node:fs` is a virtual filesystem (`/proc/self/environ`, `/etc/passwd` and `/`
 are not found), `node:os` returns placeholders, there is no `child_process`, and `file://` fetches
 fail. celld's own log does not contain it at `RUST_LOG=info` or `debug`; it appears in celld's error

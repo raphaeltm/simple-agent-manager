@@ -46,10 +46,11 @@ export const EGRESS_FENCE_TABLE = 'sam_celld_egress';
 export const DEFAULT_CELLD_UID = 7101;
 
 /**
- * OAuth scope the GCE metadata token proxy forces on every token it hands celld: Cloud Storage
- * read/write, which is what celld's bucket client needs (objects, conditional writes, deletes of
- * superseded LTX files). Not the VM's full scope set, which on the recommended setup also lets
- * the service account edit Cloud DNS.
+ * OAuth scope the GCE metadata token proxy requests for celld: Cloud Storage read/write, which is
+ * what celld's bucket client needs (objects, conditional writes, deletes of superseded LTX files).
+ * The real GCE metadata server ignores `scopes` for the default service account (verified on GCE
+ * 2026-11-11: the token carried the VM's `cloud-platform` scope), so this narrows nothing there;
+ * the service account's IAM grants are what bound the token (README "metadata token proxy").
  */
 export const DEFAULT_GCE_METADATA_PROXY_SCOPES =
   'https://www.googleapis.com/auth/devstorage.read_write';
