@@ -73,6 +73,7 @@ export type OutboundRefusalReason =
   | 'host'
   | 'redirect_limit'
   | 'redirect_unreplayable'
+  | 'redirect_cross_origin_body'
   | 'deadline';
 
 /** The request was refused before it was sent, or its deadline passed between hops. */
@@ -159,6 +160,16 @@ function nextHopInit(init: RequestInit, status: number, from: URL, to: URL): Req
     for (const name of BODY_HEADERS) headers.delete(name);
     return { ...init, method: 'GET', body: undefined, headers };
   }
+  // A 307/308 keeps the method and body. Sending that body to another origin hands it to a
+  // server the original request never named (an LLM prompt holding other users' content, a form
+  // with secrets), so a cross-origin 307/308 with a body is refused; same-origin ones replay.
+  if (from.origin !== to.origin && init.body !== undefined && init.body !== null) {
+    throw new OutboundRequestRefusedError(
+      'redirect_cross_origin_body',
+      to.hostname,
+      'Outbound redirect would send the request body to another origin'
+    );
+  }
   if (!isReplayableBody(init.body)) {
     throw new OutboundRequestRefusedError(
       'redirect_unreplayable',
@@ -189,9 +200,7 @@ async function nextHopUrl(
   policy: OutboundPolicy,
   origin: string
 ): Promise<URL | null> {
-  const location = REDIRECT_STATUSES.has(response.status)
-    ? response.headers.get('location')
-    : null;
+  const location = REDIRECT_STATUSES.has(response.status) ? response.headers.get('location') : null;
   if (!location) return null;
   await response.body?.cancel().catch(() => undefined);
   const maxRedirects = policy.maxRedirects ?? DEFAULT_OUTBOUND_MAX_REDIRECTS;
