@@ -85,15 +85,15 @@ afterEach(() => {
   sqlite.close();
 });
 
-function seedNode(transport: string | null) {
+function seedNode(transport: string | null, runtime = 'vm') {
   const now = new Date().toISOString();
   sqlite
     .prepare(
       `INSERT INTO nodes (id, user_id, name, status, health_status, vm_size, vm_location,
-                          cloud_provider, transport, created_at, updated_at)
-       VALUES (?, 'user-1', 'node', 'running', 'healthy', 'cpx21', 'nbg1', 'hetzner', ?, ?, ?)`
+                          cloud_provider, transport, runtime, created_at, updated_at)
+       VALUES (?, 'user-1', 'node', 'running', 'healthy', 'cpx21', 'nbg1', 'hetzner', ?, ?, ?, ?)`
     )
-    .run(NODE_ID, transport, now, now);
+    .run(NODE_ID, transport, runtime, now, now);
 }
 
 describe('fetchNodeAgent never follows a node redirect', () => {
@@ -119,5 +119,57 @@ describe('fetchNodeAgent never follows a node redirect', () => {
     expect(response.ok).toBe(false); // callers (nodeAgentRequest and others) treat it as a failure
     expect(response.headers.get('location')).toContain('/v1/state');
     expect(internal.hits).toEqual([]);
+  });
+});
+
+/** What every case asserts: the node was asked with its token, its 302 came back untouched. */
+function expectRedirectReturned(response: Response, url = '/workspaces/w1/files') {
+  expect(node.hits).toEqual([{ url, authorization: 'Bearer node-management-token' }]);
+  expect(response.status).toBe(302);
+  expect(response.headers.get('location')).toContain('/v1/state');
+  expect(internal.hits).toEqual([]);
+}
+
+describe('the other fetchNodeAgent paths never follow a node redirect either', () => {
+  it('without a DATABASE binding (the no-database branch)', async () => {
+    const response = await fetchNodeAgent(
+      NODE_ID,
+      { BASE_DOMAIN } as Env,
+      `https://${NODE_ID}.vm.${BASE_DOMAIN}:8443/workspaces/w1/files`,
+      { headers: { Authorization: 'Bearer node-management-token' } },
+      5_000
+    );
+    expectRedirectReturned(response);
+  });
+
+  it('a cf-container node, through the container binding', async () => {
+    seedNode(null, 'cf-container');
+    // The VmAgentContainer DO forwards the Request it receives unchanged to the container's
+    // port (`containerFetch(request, port)` / `tcpPort.fetch(url, request)`), so the redirect
+    // mode is whatever fetchNodeAgent put on it. This stub does the same with a real fetch to
+    // the node stand-in.
+    const forward = (request: Request) => {
+      const url = new URL(request.url);
+      url.port = String(portOf(node.server));
+      return realFetch(new Request(url, request));
+    };
+    const stub = { proxyHttp: forward, proxyHttpNoWake: forward, proxyHttpGuarded: forward };
+    const containerEnv = {
+      ...env,
+      CF_CONTAINER_ENABLED: 'true',
+      VM_AGENT_CONTAINER: { idFromName: () => 'container-id', get: () => stub },
+    } as unknown as Env;
+    for (const noWakeContainer of [false, true]) {
+      node.hits.length = 0;
+      const response = await fetchNodeAgent(
+        NODE_ID,
+        containerEnv,
+        `https://${NODE_ID}.vm.${BASE_DOMAIN}:8443/workspaces/w1/files`,
+        { headers: { Authorization: 'Bearer node-management-token' } },
+        5_000,
+        { noWakeContainer }
+      );
+      expectRedirectReturned(response);
+    }
   });
 });

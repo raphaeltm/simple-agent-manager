@@ -73,6 +73,14 @@ export const OUTBOUND_FETCH_ALLOWLIST: readonly AllowlistEntry[] = [
     reason: 'Cloudflare Pages proxy (PAGES_PROJECT_NAME env var)',
   },
   {
+    file: 'routes/mcp/check-dns-status.ts',
+    fn: 'fetchFn',
+    call: 'fetch',
+    controller: 'guard',
+    reason:
+      "check_dns_status's fetchFn for guardedFetch, recording each hop's status; it only sees URLs that passed guardedFetch's host, scheme and same-origin checks",
+  },
+  {
     file: 'lib/network-hosts/guarded-fetch.ts',
     fn: 'guardedFetch',
     call: 'fetch',

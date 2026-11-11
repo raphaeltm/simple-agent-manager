@@ -158,7 +158,7 @@ describe('every endpoint caller refuses a redirect to the metadata server', () =
   });
 });
 
-describe('every endpoint caller follows a validated redirect hop', () => {
+describe('every endpoint caller follows a validated same-origin redirect hop', () => {
   it.each(CALLERS)('%s', async (_name, call) => {
     await configureEndpoint({ baseUrl: 'https://llm.example.com/v1', model: 'm' });
     fetchMock = vi
@@ -166,7 +166,7 @@ describe('every endpoint caller follows a validated redirect hop', () => {
       .mockResolvedValueOnce(
         new Response(null, {
           status: 307,
-          headers: { Location: 'https://llm2.example.com/v1/chat/completions' },
+          headers: { Location: 'https://llm.example.com/v2/chat/completions' },
         })
       )
       .mockImplementation(async () => Response.json(COMPLETION));
@@ -177,8 +177,28 @@ describe('every endpoint caller follows a validated redirect hop', () => {
     // The hop was taken by the guard (a stub never follows), so it was validated and sent.
     expect(requestedUrls().slice(0, 2)).toEqual([
       'https://llm.example.com/v1/chat/completions',
-      'https://llm2.example.com/v1/chat/completions',
+      'https://llm.example.com/v2/chat/completions',
     ]);
+  });
+});
+
+describe('no endpoint caller sends its prompt to another origin on a 307', () => {
+  it.each(CALLERS)('%s', async (_name, call) => {
+    await configureEndpoint({ baseUrl: 'https://llm.example.com/v1', model: 'm' });
+    fetchMock = vi.fn(
+      async () =>
+        new Response(null, {
+          status: 307,
+          headers: { Location: 'https://llm2.example.com/v1/chat/completions' },
+        })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await call().catch(() => undefined);
+
+    // Liveness: the configured endpoint was asked; the other origin never was.
+    expect(requestedUrls()).toContain('https://llm.example.com/v1/chat/completions');
+    expect(requestedUrls().filter((url) => url.startsWith('https://llm2.'))).toEqual([]);
   });
 });
 
