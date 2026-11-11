@@ -17,7 +17,12 @@ const AGENTS = ['Claude Code', 'OpenAI Codex', 'Gemini CLI', 'Mistral Vibe'];
  */
 export function Landing() {
   const { isAuthenticated, isLoading } = useAuth();
-  const { providers, failed: providersFailed, retry: retryProviders } = useLoginProviders();
+  const {
+    providers,
+    failed: providersFailed,
+    retry: retryProviders,
+    agentSignIn,
+  } = useLoginProviders();
   const navigate = useNavigate();
   const location = useLocation();
   // Capture state.from once on mount to avoid double-navigation when
@@ -100,6 +105,24 @@ export function Landing() {
                 ))}
               </div>
             </>
+          )}
+
+          {agentSignIn === 'accepts' && (
+            <p
+              role="note"
+              className="mb-4 rounded-lg border border-border-default bg-inset px-3 py-2 text-xs text-fg-muted"
+            >
+              This is a test instance. Agents from a trusted SAM installation can sign in here as
+              selected test users.
+            </p>
+          )}
+          {agentSignIn === 'unknown' && providers && (
+            <p
+              role="note"
+              className="mb-4 rounded-lg border border-border-default bg-inset px-3 py-2 text-xs text-fg-muted"
+            >
+              Couldn&apos;t check whether agents can sign in to this instance.
+            </p>
           )}
 
           {!providers && (

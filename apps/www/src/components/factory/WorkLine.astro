@@ -5,8 +5,30 @@
  * picture plays once when it enters the view (rises, the inset lands, one control is ringed, a
  * note lands) and then rests; the markup is the resting frame.
  */
-import { factoryStages } from '../../data/factory-stages';
-import Shot from './Shot.astro';
+import { factoryStages, type FactoryInset, type FactoryScreen } from '../../data/factory-stages';
+import MockAccount from './mock/MockAccount.astro';
+import MockComments from './mock/MockComments.astro';
+import MockDeploy from './mock/MockDeploy.astro';
+import MockDeployPolicy from './mock/MockDeployPolicy.astro';
+import MockIdea from './mock/MockIdea.astro';
+import MockIdeas from './mock/MockIdeas.astro';
+import MockLibraryComment from './mock/MockLibraryComment.astro';
+import MockProfiles from './mock/MockProfiles.astro';
+import MockWorkflow from './mock/MockWorkflow.astro';
+
+const SCREENS: Record<FactoryScreen, typeof MockIdeas> = {
+  ideas: MockIdeas,
+  comments: MockComments,
+  profiles: MockProfiles,
+  workflow: MockWorkflow,
+  idea: MockIdea,
+  deploy: MockDeploy,
+};
+const INSETS: Record<FactoryInset, typeof MockIdeas> = {
+  library: MockLibraryComment,
+  account: MockAccount,
+  policy: MockDeployPolicy,
+};
 ---
 
 <section class="fh-section line" id="how-work-moves" aria-labelledby="line-title" data-line>
@@ -55,24 +77,18 @@ import Shot from './Shot.astro';
           data-play
         >
           <div class="stage-art">
-            <div class="fh-frame stage-frame">
-              <div class="stage-desk">
-                <Shot name={s.main} />
-                {s.ring && (
-                  <span
-                    class="stage-ring"
-                    aria-hidden="true"
-                    style={`left:${s.ring[0]}%;top:${s.ring[1]}%;width:${s.ring[2]}%;height:${s.ring[3]}%`}
-                  />
-                )}
-              </div>
-              <div class="stage-phone">
-                <Shot name={s.phone} />
-              </div>
+            <div class="fh-frame stage-frame" role="img" aria-label={s.alt}>
+              {(() => {
+                const Screen = SCREENS[s.screen];
+                return <Screen />;
+              })()}
             </div>
             {s.inset && (
-              <div class="stage-inset">
-                <Shot name={s.inset} />
+              <div class="stage-inset" aria-hidden="true">
+                {(() => {
+                  const Inset = INSETS[s.inset];
+                  return <Inset />;
+                })()}
               </div>
             )}
           </div>
@@ -84,6 +100,35 @@ import Shot from './Shot.astro';
 </section>
 
 <script>
+  import { createPointerFollower, FINE_POINTER_QUERY, REDUCED_MOTION_QUERY } from '../../lib/motion';
+
+  // Each stage picture leans toward the pointer in 3D, the inset floating at its own depth. The
+  // reduced-motion preference is read live, so turning it on mid-visit flattens every picture.
+  const reducedMotion = window.matchMedia(REDUCED_MOTION_QUERY);
+  if (window.matchMedia(FINE_POINTER_QUERY).matches) {
+    const arts = [...document.querySelectorAll<HTMLElement>('.stage-art')];
+    const flatten = (art: HTMLElement) => {
+      art.style.setProperty('--tx', '0deg');
+      art.style.setProperty('--ty', '0deg');
+    };
+    for (const art of arts) {
+      const follow = createPointerFollower((x, y) => {
+        if (reducedMotion.matches) return flatten(art);
+        art.style.setProperty('--tx', `${(x * 9).toFixed(2)}deg`);
+        art.style.setProperty('--ty', `${(-y * 7).toFixed(2)}deg`);
+      });
+      art.addEventListener('pointermove', (event) => {
+        if (reducedMotion.matches) return;
+        const box = art.getBoundingClientRect();
+        follow((event.clientX - box.left) / box.width - 0.5, (event.clientY - box.top) / box.height - 0.5);
+      });
+      art.addEventListener('pointerleave', () => follow(0, 0));
+    }
+    reducedMotion.addEventListener('change', () => {
+      if (reducedMotion.matches) arts.forEach(flatten);
+    });
+  }
+
   for (const root of document.querySelectorAll<HTMLElement>('[data-line]')) {
     const stages = [...root.querySelectorAll<HTMLElement>('[data-stage]')];
     const stops = [...root.querySelectorAll<HTMLElement>('[data-line-stop]')];
@@ -291,27 +336,26 @@ import Shot from './Shot.astro';
     gap: 16px;
   }
 
+  .stage-figure {
+    perspective: 1600px;
+  }
+
   .stage-art {
     position: relative;
+    transform-style: preserve-3d;
+    transform: rotateY(var(--tx, 0deg)) rotateX(var(--ty, 0deg));
+  }
+
+  .stage-frame {
+    transform: translateZ(0);
+  }
+
+  .stage-inset {
+    translate: 0 0 60px;
   }
 
   .stage-figure--inset .stage-art {
     padding-bottom: 48px;
-  }
-
-  .stage-desk {
-    position: relative;
-  }
-
-  .stage-phone {
-    display: none;
-  }
-
-  .stage-ring {
-    position: absolute;
-    border-radius: 10px;
-    box-shadow: 0 0 0 2px var(--fh-ring), 0 0 28px -4px var(--fh-ring);
-    opacity: 0;
   }
 
   .stage-inset {
@@ -363,10 +407,6 @@ import Shot from './Shot.astro';
     transform: none;
   }
 
-  [data-play].is-in .stage-ring {
-    animation: stage-ring 2.8s ease 1s both;
-  }
-
   [data-play].is-in .stage-note {
     transition:
       opacity 0.45s ease 1.7s,
@@ -375,35 +415,11 @@ import Shot from './Shot.astro';
     transform: none;
   }
 
-  @keyframes stage-ring {
-    0% {
-      opacity: 0;
-      transform: scale(1.06);
-    }
-    22%,
-    70% {
-      opacity: 1;
-      transform: none;
-    }
-    100% {
-      opacity: 0.4;
-      transform: none;
-    }
-  }
-
   @media (prefers-reduced-motion: reduce) {
     .stage-inset,
     .stage-note {
       opacity: 1;
       transform: none;
-    }
-
-    .stage-ring {
-      opacity: 0.4;
-    }
-
-    [data-play].is-in .stage-ring {
-      animation: none;
     }
 
     .line-fill,
@@ -431,24 +447,13 @@ import Shot from './Shot.astro';
   }
 
   @media (max-width: 767px) {
-    /* Phones get a phone-width capture of the same screen; desktop art and insets would be unreadable. */
-    .stage-desk,
+    /* Phones show the main screen only (it reflows to the width); the inset would crowd it. */
     .stage-inset {
       display: none;
     }
 
-    .stage-phone {
-      display: block;
-    }
-
     .stage-figure--inset .stage-art {
       padding-bottom: 0;
-    }
-
-    .stage-phone :global(.fshot) {
-      max-height: 560px;
-      background-size: 100% auto;
-      background-position: top center;
     }
 
     .line-stop {

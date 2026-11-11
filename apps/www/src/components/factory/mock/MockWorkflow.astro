@@ -1,0 +1,334 @@
+---
+/**
+ * HTML version of a workflow run's Graph view: build, two reviews at once, apply both, then wait
+ * for CI on the pull request. Nodes and edges share one 560 x 520 coordinate space (nodes are
+ * placed in % of it, edges are an SVG with the same viewBox), so they always line up. On wide
+ * containers the step details sit beside the graph, as in the app.
+ */
+import './mock.css';
+
+const W = 560;
+const H = 520;
+const nodes = [
+  { id: 1, x: 150, y: 16, w: 240, h: 84, title: 'Build the retry schedule', state: 'done', who: 'Careful Builder' },
+  { id: 2, x: 24, y: 152, w: 236, h: 84, title: 'Review the code', state: 'done', who: 'Code Reviewer', picked: true },
+  { id: 3, x: 300, y: 152, w: 236, h: 84, title: 'Try it against a flaky endpoint', state: 'running', who: 'Careful Builder' },
+  { id: 4, x: 150, y: 290, w: 240, h: 84, title: 'Apply both reviews', state: 'waiting', who: 'Careful Builder' },
+  { id: 5, x: 150, y: 420, w: 240, h: 84, title: 'Wait for CI on PR #482', state: 'wait-ci' },
+] as const;
+
+type GraphNode = (typeof nodes)[number];
+const bottom = (n: GraphNode) => [n.x + n.w / 2, n.y + n.h] as const;
+const top = (n: GraphNode) => [n.x + n.w / 2, n.y] as const;
+const curve = (a: readonly [number, number], b: readonly [number, number]) => {
+  const mid = (a[1] + b[1]) / 2;
+  return `M${a[0]} ${a[1]} C${a[0]} ${mid}, ${b[0]} ${mid}, ${b[0]} ${b[1]}`;
+};
+const [n1, n2, n3, n4, n5] = nodes;
+const edges = [
+  { d: curve(bottom(n1), top(n2)), kind: 'done' },
+  { d: curve(bottom(n1), top(n3)), kind: 'live' },
+  { d: curve(bottom(n2), top(n4)), kind: 'quiet' },
+  { d: curve(bottom(n3), top(n4)), kind: 'wait' },
+  { d: curve(bottom(n4), top(n5)), kind: 'wait' },
+];
+const dots = nodes.flatMap((n) => [top(n), bottom(n)]);
+const pct = (v: number, of: number) => `${((v / of) * 100).toFixed(3)}%`;
+const box = (x: number, y: number, w: number, h: number) =>
+  `left:${pct(x, W)};top:${pct(y, H)};width:${pct(w, W)};height:${pct(h, H)}`;
+const stateLabel = (n: GraphNode) => (n.state === 'done' ? 'Done' : n.state === 'running' ? 'Running' : 'Waiting');
+---
+
+<div class="mk wf">
+  <div class="mk-pad wf-in">
+    <p class="mk-back">‹ Workflows</p>
+    <p class="mk-h">Retry failed webhook deliveries</p>
+    <p class="wf-status"><span class="mk-badge">Running</span><span class="mk-sub">Started by you · 2 h ago</span></p>
+    <p class="wf-bar" aria-hidden="true"><span class="done"></span><span class="done"></span><span class="run"></span><span></span><span></span></p>
+    <p class="mk-meta">2 of 5 steps done · 1 running · 2 waiting</p>
+
+    <div class="wf-body">
+      <div class="wf-left">
+        <p class="tabs"><span>Steps</span><span class="tab-on">Graph</span><span>Activity</span></p>
+        <div class="canvas">
+          <div class="graph">
+            <svg class="edges" viewBox={`0 0 ${W} ${H}`} aria-hidden="true">
+              {edges.map((e) => <path class={e.kind} d={e.d} />)}
+              {dots.map(([x, y]) => <circle cx={x} cy={y} r="3.5" />)}
+            </svg>
+            <div class="pair" style={box(12, 140, 536, 108)} data-ring></div>
+            {nodes.map((n) => (
+              <div class:list={['node', `node--${n.state}`, { 'node--picked': 'picked' in n && n.picked }]} style={box(n.x, n.y, n.w, n.h)}>
+                <p class="node-title">
+                  {n.state === 'done' && <span class="ok">✓</span>}
+                  {n.state === 'running' && <span class="mk-spin" aria-hidden="true"></span>}
+                  {n.state === 'waiting' && <span class="ring" aria-hidden="true"></span>}
+                  {n.state === 'wait-ci' && (
+                    <svg class="mk-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h10M7 21h10M8 3c0 5 8 5 8 9s-8 4-8 9M16 3c0 5-8 5-8 9" /></svg>
+                  )}
+                  <span><span class="num">{n.id}</span> {n.title}</span>
+                </p>
+                <p class="node-meta">
+                  <b class:list={{ ok: n.state === 'done' || n.state === 'running' }}>{stateLabel(n)}</b>
+                  {'who' in n && <span> · {n.who}</span>}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <aside class="detail mk-card">
+        <p class="mk-back">← About this run</p>
+        <p class="label">Step 2 of 5</p>
+        <p class="detail-title">Review the code</p>
+        <p class="detail-who"><span class="mk-badge">Done</span><span class="mk-sub">Code Reviewer</span></p>
+        <p class="ok">Done in 29m.</p>
+        <span class="mk-btn">Open the chat</span>
+        <p class="label">What it was asked to do</p>
+        <p class="mk-sub">Do the work for “Review the code”. Save anything others need in the project Library and finish with complete_task.</p>
+        <p class="label">What it gets from earlier steps</p>
+        <div class="handoff mk-card">
+          <p class="handoff-title"><span class="ok">✓</span> Build the retry schedule</p>
+          <p>Opened PR #482: retries back off from 1 minute to 12 hours over 3 days, and the delivery log shows each attempt.</p>
+        </div>
+      </aside>
+    </div>
+  </div>
+</div>
+
+<style>
+  .wf-in {
+    display: grid;
+    gap: 7px;
+  }
+
+  .wf-status {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+
+  .wf-bar {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 4px;
+    margin-top: 4px;
+  }
+
+  .wf-bar span {
+    height: 5px;
+    border-radius: 3px;
+    background: var(--mk-line);
+  }
+
+  .wf-bar .done {
+    background: color-mix(in srgb, var(--mk-green) 55%, transparent);
+  }
+
+  .wf-bar .run {
+    background: var(--mk-green);
+  }
+
+  .wf-body {
+    display: grid;
+    gap: 14px;
+    margin-top: 8px;
+  }
+
+  @container (min-width: 620px) {
+    .wf-body {
+      grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+      align-items: start;
+    }
+  }
+
+  .wf-left {
+    display: grid;
+    gap: 10px;
+  }
+
+  .tabs {
+    display: flex;
+    gap: 18px;
+    padding-bottom: 6px;
+    font-weight: 700;
+    color: var(--mk-muted);
+    border-bottom: 1px solid var(--mk-line);
+  }
+
+  .tab-on {
+    color: var(--mk-ink);
+    box-shadow: 0 7px 0 -5px var(--mk-green);
+  }
+
+  /* The graph canvas: a dotted field, as in the app. */
+  .canvas {
+    container-type: inline-size;
+    padding: 4%;
+    border-radius: 12px;
+    border: 1px solid var(--mk-line);
+    background:
+      radial-gradient(circle, var(--mk-line-strong) 0.8px, transparent 1.2px) 0 0 / 14px 14px,
+      var(--mk-surface);
+  }
+
+  .graph {
+    position: relative;
+    aspect-ratio: 560 / 520;
+    /* Text scales with the graph: about 14 units of the 560-unit layout. */
+    font-size: calc(100cqi / 560 * 14);
+  }
+
+  .edges {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+  }
+
+  .edges path {
+    fill: none;
+    stroke-width: 1.6;
+  }
+
+  .edges .done {
+    stroke: color-mix(in srgb, var(--mk-green) 55%, transparent);
+  }
+
+  .edges .live {
+    stroke: var(--mk-green);
+    stroke-width: 2.2;
+  }
+
+  .edges .quiet {
+    stroke: color-mix(in srgb, var(--mk-green) 35%, transparent);
+  }
+
+  .edges .wait {
+    stroke: var(--mk-line-strong);
+    stroke-dasharray: 4 4;
+  }
+
+  .edges circle {
+    fill: var(--mk-line-strong);
+  }
+
+  .pair {
+    position: absolute;
+    border-radius: 14px;
+    border: 2px solid color-mix(in srgb, var(--mk-green) 35%, transparent);
+    background: color-mix(in srgb, var(--mk-green) 6%, transparent);
+  }
+
+  .node {
+    position: absolute;
+    display: grid;
+    align-content: space-between;
+    padding: 0.7em 0.85em;
+    border-radius: 0.8em;
+    background: var(--mk-raised);
+    border: 1px solid var(--mk-line-strong);
+    box-shadow: 0 6px 16px -10px rgb(0 0 0 / 0.4);
+  }
+
+  .node--picked {
+    border: 2px solid var(--mk-green);
+  }
+
+  .node--running {
+    border-color: color-mix(in srgb, var(--mk-green) 55%, transparent);
+  }
+
+  .node-title {
+    display: flex;
+    gap: 0.45em;
+    align-items: flex-start;
+    font-weight: 700;
+    line-height: 1.25;
+  }
+
+  .node-title .mk-spin,
+  .node-title .ring {
+    width: 0.95em;
+    height: 0.95em;
+    margin-top: 0.15em;
+  }
+
+  .node-title .mk-ico {
+    width: 1em;
+    height: 1em;
+    margin-top: 0.1em;
+  }
+
+  .num {
+    color: var(--mk-muted);
+  }
+
+  .ring {
+    flex: none;
+    border-radius: 50%;
+    border: 1.5px dashed var(--mk-dim);
+  }
+
+  .node-meta {
+    font-size: 0.86em;
+    color: var(--mk-muted);
+  }
+
+  .node--waiting .node-meta b,
+  .node--wait-ci .node-meta b {
+    color: var(--mk-muted);
+  }
+
+  .ok {
+    color: var(--mk-green);
+  }
+
+  .detail {
+    display: none;
+  }
+
+  @container (min-width: 620px) {
+    .detail {
+      display: grid;
+      justify-items: start;
+      gap: 7px;
+      padding: 14px;
+      font-size: 0.92em;
+    }
+  }
+
+  .label {
+    margin-top: 4px;
+    font-size: 0.8em;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--mk-muted);
+  }
+
+  .detail-title {
+    font-weight: 700;
+    font-size: 1.2em;
+  }
+
+  .detail-who {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .handoff {
+    display: grid;
+    gap: 6px;
+    padding: 10px 12px;
+  }
+
+  .handoff-title {
+    display: flex;
+    gap: 6px;
+    font-weight: 700;
+  }
+</style>

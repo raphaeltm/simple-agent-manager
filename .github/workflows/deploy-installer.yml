@@ -50,7 +50,7 @@ jobs:
       - run: pnpm --filter @simple-agent-manager/installer test
       - name: Browser audit
         run: |
-          pnpm --filter @simple-agent-manager/installer exec playwright install --with-deps chromium
+          bash scripts/ci/run-with-apt-mirror-fallback.sh pnpm --filter @simple-agent-manager/installer exec playwright install --with-deps chromium
           pnpm --filter @simple-agent-manager/installer dev > /tmp/installer-dev.log 2>&1 &
           INSTALLER_DEV_PID=$!
           trap 'kill "$INSTALLER_DEV_PID" 2>/dev/null || true' EXIT

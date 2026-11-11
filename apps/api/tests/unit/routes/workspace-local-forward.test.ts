@@ -149,7 +149,9 @@ describe('workspace local-forward routes', () => {
         mode: 'http',
         localAuthority: 'localhost:5173',
       },
-      env
+      env,
+      // An ordinary session: no cap below the token's own lifetime.
+      { notAfter: undefined }
     );
     expect(await response.json()).toMatchObject({
       token: 'forward-token',

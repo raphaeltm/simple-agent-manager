@@ -531,3 +531,4 @@ crons = ["*/5 * * * *", "30 * * * *", "0 3 * * *"]
 # - R2_SECRET_ACCESS_KEY (optional — R2 S3-compatible API token secret, enables task attachment presigned uploads)
 # - CF_AIG_TOKEN (optional — Cloudflare AI Gateway Unified Billing token; enables OpenAI/Anthropic models without separate API keys)
 # - SMOKE_TEST_AUTH_ENABLED (optional — enables smoke-test token auth for test environments)
+# - AGENT_SIGN_IN_TRUST (optional — test instances only: JSON trust configuration for agent sign-in through workload identity; see services/agent-sign-in/config.ts)

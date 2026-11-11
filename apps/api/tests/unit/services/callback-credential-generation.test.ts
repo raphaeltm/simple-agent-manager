@@ -299,6 +299,12 @@ describe('every callback credential is verified where the generation is checked'
       const source = readFileSync(file, 'utf8');
       return /\bjwtVerify\s*\(/.test(source) || /\bcompactVerify\s*\(/.test(source);
     });
-    expect(verifiers.map((file) => path.relative(SRC_ROOT, file))).toEqual(['services/jwt.ts']);
+    // services/agent-sign-in/verify.ts verifies tokens from an EXTERNAL trusted issuer against
+    // that issuer's published keys, with this instance's agent sign-in endpoint as the exact
+    // audience and `type: workload-identity` required, so a SAM callback token cannot pass it.
+    expect(verifiers.map((file) => path.relative(SRC_ROOT, file)).sort()).toEqual([
+      'services/agent-sign-in/verify.ts',
+      'services/jwt.ts',
+    ]);
   });
 });

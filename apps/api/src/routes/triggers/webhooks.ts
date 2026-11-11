@@ -7,7 +7,7 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { parsePositiveInt, requireRouteParam } from '../../lib/route-helpers';
 import { buildTrustedApiUrl } from '../../lib/trusted-origins';
-import { getAuth } from '../../middleware/auth';
+import { getAuth, rejectAgentSignInSession } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { jsonValidator, TriggerPreviewSchema } from '../../schemas';
 import { renderTemplate } from '../../services/trigger-template';
@@ -55,7 +55,7 @@ async function loadWebhookTrigger(env: Env, projectId: string, triggerId: string
   return { ...row, config: toWebhookTriggerConfig(row.config) };
 }
 
-webhookRoutes.post('/:triggerId/webhook/rotate', async (c) => {
+webhookRoutes.post('/:triggerId/webhook/rotate', rejectAgentSignInSession(), async (c) => {
   const projectId = requireRouteParam(c, 'projectId');
   const triggerId = requireRouteParam(c, 'triggerId');
   const db = drizzle(c.env.DATABASE, { schema });

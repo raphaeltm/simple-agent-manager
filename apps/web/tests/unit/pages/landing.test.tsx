@@ -121,6 +121,75 @@ describe('Landing page content', () => {
   });
 });
 
+describe('Landing agent sign-in notice', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    window.localStorage.clear();
+  });
+
+  it('tells people when the instance accepts agent sign-in', async () => {
+    fetchLoginProviders.mockResolvedValue({ ...GITHUB_ONLY, agentSignIn: true });
+    renderLanding();
+    expect(await screen.findByRole('note')).toHaveTextContent(
+      /test instance\. Agents from a trusted SAM installation can sign in here/
+    );
+  });
+
+  it('shows a remembered notice at once and clears it when the live answer says off', async () => {
+    window.localStorage.setItem(
+      LOGIN_PROVIDERS_STORAGE_KEY,
+      JSON.stringify({ ...GITHUB_ONLY, agentSignIn: true })
+    );
+    let answer: (value: unknown) => void = () => {};
+    fetchLoginProviders.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+    renderLanding();
+    expect(screen.getByRole('note')).toBeInTheDocument();
+
+    answer({ ...EMAIL_ONLY, agentSignIn: false });
+    // Liveness: the live answer rendered (email form, no GitHub), and the notice is gone.
+    expect(await screen.findByRole('textbox', { name: /email/i })).toBeInTheDocument();
+    expect(screen.queryByRole('note')).not.toBeInTheDocument();
+  });
+
+  it('does not let a remembered "off" hide the notice once the live answer says on', async () => {
+    window.localStorage.setItem(
+      LOGIN_PROVIDERS_STORAGE_KEY,
+      JSON.stringify({ ...GITHUB_ONLY, agentSignIn: false })
+    );
+    let answer: (value: unknown) => void = () => {};
+    fetchLoginProviders.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+    renderLanding();
+    // While the lookup runs the remembered options show, but the remembered "off" claims nothing.
+    expect(screen.getByRole('button', { name: /Sign in with GitHub/ })).toBeInTheDocument();
+    expect(screen.queryByRole('note')).not.toBeInTheDocument();
+
+    answer({ ...GITHUB_ONLY, agentSignIn: true });
+    expect(await screen.findByRole('note')).toHaveTextContent(/test instance/);
+  });
+
+  it('says it could not check, rather than nothing, when the lookup fails on a remembered "off"', async () => {
+    window.localStorage.setItem(
+      LOGIN_PROVIDERS_STORAGE_KEY,
+      JSON.stringify({ ...GITHUB_ONLY, agentSignIn: false })
+    );
+    fetchLoginProviders.mockRejectedValue(new Error('network down'));
+    renderLanding();
+    expect(await screen.findByRole('note')).toHaveTextContent(
+      /Couldn.t check whether agents can sign in to this instance/
+    );
+    // Liveness: the remembered sign-in options are still offered.
+    expect(screen.getByRole('button', { name: /Sign in with GitHub/ })).toBeInTheDocument();
+  });
+
+  it('says nothing about agent sign-in on an ordinary instance', async () => {
+    fetchLoginProviders.mockResolvedValue({ ...GITHUB_ONLY, agentSignIn: false });
+    renderLanding();
+    // Liveness: the deployment's answer rendered, so the absence below is meaningful.
+    expect(await screen.findByRole('button', { name: /Sign in with GitHub/ })).toBeInTheDocument();
+    expect(screen.queryByRole('note')).not.toBeInTheDocument();
+  });
+});
+
 describe('Landing sign-in options before the deployment answers', () => {
   beforeEach(() => {
     vi.clearAllMocks();

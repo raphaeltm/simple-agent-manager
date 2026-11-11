@@ -194,9 +194,49 @@ export const sessions = sqliteTable(
     userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    /**
+     * A lifetime refresh may not extend (migration 0234). Set only on agent sign-in sessions;
+     * NULL for every other session. Enforced by `session.update.before` in auth.ts.
+     */
+    hardExpiresAt: integer('hard_expires_at', { mode: 'timestamp_ms' }),
   },
   (table) => ({
     userIdIdx: index('idx_sessions_user_id').on(table.userId),
+  })
+);
+
+/**
+ * Accepted agent sign-ins through workload identity (`services/agent-sign-in/`). Each row is
+ * the audit record, the replay guard (unique issuer + jti) and one unit of the per-principal
+ * rate limit. No foreign keys: the record outlives sign-out and user deletion. Times are ms.
+ */
+export const agentSignIns = sqliteTable(
+  'agent_sign_ins',
+  {
+    id: text('id').primaryKey(),
+    issuer: text('issuer').notNull(),
+    jti: text('jti').notNull(),
+    sourceSubject: text('source_subject').notNull(),
+    sourceProjectId: text('source_project_id').notNull(),
+    sourceUserId: text('source_user_id').notNull(),
+    sourceAgentProfileId: text('source_agent_profile_id'),
+    sourceTaskId: text('source_task_id'),
+    sourceWorkspaceId: text('source_workspace_id'),
+    targetUserId: text('target_user_id').notNull(),
+    sessionId: text('session_id'),
+    tokenExpiresAt: integer('token_expires_at').notNull(),
+    sessionExpiresAt: integer('session_expires_at').notNull(),
+    createdAt: integer('created_at').notNull(),
+  },
+  (table) => ({
+    issuerJtiIdx: uniqueIndex('idx_agent_sign_ins_issuer_jti').on(table.issuer, table.jti),
+    principalCreatedIdx: index('idx_agent_sign_ins_principal_created').on(
+      table.issuer,
+      table.sourceProjectId,
+      table.sourceUserId,
+      table.createdAt
+    ),
+    sessionIdx: index('idx_agent_sign_ins_session').on(table.sessionId),
   })
 );
 

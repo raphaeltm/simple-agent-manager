@@ -645,6 +645,7 @@
             "R2_ACCESS_KEY_ID": "${{ secrets.R2_ACCESS_KEY_ID }}",
             "R2_SECRET_ACCESS_KEY": "${{ secrets.R2_SECRET_ACCESS_KEY }}",
             "SMOKE_TEST_AUTH_ENABLED": "${{ secrets.SMOKE_TEST_AUTH_ENABLED }}",
+            "AGENT_SIGN_IN_TRUST": "${{ secrets.AGENT_SIGN_IN_TRUST }}",
             "DEPLOY_SIGNING_PRIVATE_KEY": "${{ secrets.DEPLOY_SIGNING_PRIVATE_KEY }}",
             "DEPLOY_SIGNING_PUBLIC_KEY": "${{ secrets.DEPLOY_SIGNING_PUBLIC_KEY }}",
             "SEGMENT_WRITE_KEY": "${{ secrets.SEGMENT_WRITE_KEY }}",
