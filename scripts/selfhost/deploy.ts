@@ -7,9 +7,7 @@
  *                        [--skip-vm-agent]
  *
  * `--init` only generates the platform keys and `<state-dir>/gateway.env`, the shared secret
- * docker compose hands to frps and Caddy, plus the mail collector's UI password when that profile
- * is on (mail-settings.ts); run it before the first `docker compose up` and after turning the
- * collector on.
+ * docker compose hands to frps and Caddy; run it once before the first `docker compose up`.
  *
  * Re-runnable: platform keys are generated once and kept, the project directory is rebuilt,
  * D1 migrations are applied idempotently, and `celld deploy` publishes a new version that the
@@ -20,6 +18,10 @@
  * publishes it into the fleet bucket the way the Cloudflare pipeline does, then pins
  * VM_AGENT_REQUIRED_VERSION to that release. `--skip-vm-agent` skips both and leaves the
  * version unpinned (nodes then use the legacy `agents/vm-agent-linux-<arch>` objects).
+ *
+ * Email (mail-settings.ts): the Worker gets SMTP settings from the .env, or points at the
+ * `mail-collector` profile, whose UI password only `--init` generates; run `--init` again after
+ * turning that profile on.
  *
  * The Cloudflare pipeline never runs this script.
  */

@@ -131,6 +131,9 @@ address); it then signs in by requesting a code. Pass `--env-file` as for the de
 `--dry-run` to print the SQL without running it. While `BOOTSTRAP_OWNER_EMAIL` is set and that
 owner has never signed in, SAM admits only the owner.
 
+Code: `scripts/selfhost/mail-settings.ts` (SMTP settings, collector), `caddy/mail-collector/` and
+`caddy/start.sh` (collector route), `scripts/selfhost/create-account.ts` (account command).
+
 ## Known gaps in this pass
 
 - Off on purpose: Instant sessions and guided credential login (Cloudflare Containers), Artifacts
@@ -175,5 +178,3 @@ owner has never signed in, SAM admits only the owner.
   `wrangler.json` and fails on any key it has no rule for.
 - `scripts/selfhost/deploy.ts`: the deploy and upgrade flow above.
 - `caddy/sam.d/` and `frps/frps.toml`: node-transport routes and config (reverse tunnel).
-- `scripts/selfhost/mail-settings.ts`, `caddy/mail-collector/`, `caddy/start.sh`: SMTP settings
-  and the mail collector. `scripts/selfhost/create-account.ts`: the account command.
