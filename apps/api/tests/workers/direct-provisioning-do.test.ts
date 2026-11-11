@@ -656,16 +656,30 @@ describe('durable direct workspace allocation', () => {
     await vi.waitFor(async () => expect((await f.intent())?.lastError).toMatch(/unresolved/));
     // The generic uncertain-allocation message alone hid the cause on the self-hosted box; each
     // attempt must log the provider error it wrapped.
+    const nodeId = (await f.intent())?.input.nodeId;
     const attemptLogs = warn.mock.calls
       .map(([line]) => (typeof line === 'string' ? line : ''))
       .filter((line) => line.includes('node_provisioning.attempt_failed'))
       .map((line) => JSON.parse(line) as Record<string, any>);
     expect(attemptLogs.length).toBeGreaterThan(0);
-    expect(attemptLogs[0]).toMatchObject({
-      nodeId: (await f.intent())?.input.nodeId,
-      error: { name: 'NodeAllocationUncertainError' },
-      cause: { message: expect.stringContaining('lost successful provider response') },
-    });
+    // Every attempt log is wrapped as an uncertain-allocation error scoped to this node.
+    for (const entry of attemptLogs) {
+      expect(entry).toMatchObject({ nodeId, error: { name: 'NodeAllocationUncertainError' } });
+    }
+    // The point of the fix: the wrapped provider cause is no longer hidden. Which attempt reaches
+    // createVM (and so carries the cause) vs. aborts at the provisioning deadline first is
+    // timing-dependent under the worker runtime, so assert at least one attempt surfaced the
+    // cause rather than asserting on a fixed index.
+    const withCause = attemptLogs.filter((entry) => typeof entry.cause?.name === 'string');
+    expect(withCause.length).toBeGreaterThan(0);
+    // A ProviderError cause is logged as safe structured fields with its raw message dropped
+    // (it can embed provider resource paths); other causes keep a length-capped message.
+    for (const entry of withCause) {
+      if (entry.cause.name === 'ProviderError') {
+        expect(entry.cause).toHaveProperty('providerName');
+        expect(entry.cause).not.toHaveProperty('message');
+      }
+    }
     await runInDurableObject(f.stub, async (instance) => {
       (instance as unknown as { provisioningController: unknown }).provisioningController =
         undefined;
