@@ -261,6 +261,7 @@ jobs:
               "R2_ACCESS_KEY_ID": ${{ toJSON(secrets.R2_ACCESS_KEY_ID || '') }},
               "R2_SECRET_ACCESS_KEY": ${{ toJSON(secrets.R2_SECRET_ACCESS_KEY || '') }},
               "SEGMENT_WRITE_KEY": ${{ toJSON(secrets.SEGMENT_WRITE_KEY || '') }},
+              "AGENT_SIGN_IN_TRUST": ${{ toJSON(secrets.AGENT_SIGN_IN_TRUST || '') }},
               "SMOKE_TEST_AUTH_ENABLED": ${{ toJSON(secrets.SMOKE_TEST_AUTH_ENABLED || '') }},
               "VAPID_PRIVATE_KEY": ${{ toJSON(secrets.VAPID_PRIVATE_KEY || '') }},
               "VAPID_PUBLIC_KEY": ${{ toJSON(secrets.VAPID_PUBLIC_KEY || '') }},
@@ -1925,6 +1926,7 @@ jobs:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           SMOKE_TEST_AUTH_ENABLED: ${{ secrets.SMOKE_TEST_AUTH_ENABLED }}
+          AGENT_SIGN_IN_TRUST: ${{ secrets.AGENT_SIGN_IN_TRUST }}
           DEPLOY_SIGNING_PRIVATE_KEY: ${{ secrets.DEPLOY_SIGNING_PRIVATE_KEY }}
           DEPLOY_SIGNING_PUBLIC_KEY: ${{ secrets.DEPLOY_SIGNING_PUBLIC_KEY }}
           SEGMENT_WRITE_KEY: ${{ secrets.SEGMENT_WRITE_KEY }}

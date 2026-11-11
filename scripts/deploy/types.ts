@@ -336,6 +336,7 @@ export const OPTIONAL_SECRETS = [
   'SEGMENT_WRITE_KEY',
   'GA4_API_SECRET',
   'GA4_MEASUREMENT_ID',
+  'AGENT_SIGN_IN_TRUST',
 ] as const;
 
 export const DNS_RECORDS = ['api', 'app', '*'] as const;
