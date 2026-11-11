@@ -26,20 +26,21 @@ export class NodeAllocationUncertainError extends Error {
   }
 }
 
-/** Cap for any raw error message we cannot prove is free of provider resource paths. */
+/** Cap for the one error message we author ourselves and know is free of external detail. */
 const ATTEMPT_ERROR_MESSAGE_MAX_CHARS = 200;
 
 /**
  * Log-safe description of a failed provisioning attempt, including the provider error an
  * uncertain-allocation wrapper replaced.
  *
- * A provisioning failure's cause is almost always a `ProviderError` (from `providerFetch` or the
- * GCP adapter), whose `message` can embed the provider's raw response — GCP resource paths, zone
- * URLs, service-account emails. Those must not reach logs (the same reason `node-provisioning.ts`
- * runs `sanitizeGcpError`). So a `ProviderError` is reduced to its already-safe structured fields
- * and its message is dropped. A `GcpApiError` keeps going through the sanitizer (operator hint;
- * raw body stays server-side). Any other `Error` carries only our own internal messages, but is
- * length-capped as a backstop.
+ * No raw message from an arbitrary error is logged: a provisioning cause is almost always a
+ * `ProviderError` (from `providerFetch`/the GCP adapter) whose `message` can embed the provider's
+ * raw response — resource paths, zone URLs, service-account emails — and a generic error could
+ * carry SQL, bound parameters, or user-controlled text. So:
+ * - `GcpApiError` → the sanitizer's operator hint (raw body stays server-side);
+ * - `ProviderError` → its already-safe structured fields, message dropped;
+ * - `NodeAllocationUncertainError` → its own authored message (the only message we control), capped;
+ * - any other `Error` → name + statusCode only, message dropped.
  */
 export function describeProvisioningAttemptFailure(error: unknown): Record<string, unknown> {
   const describe = (value: unknown): Record<string, unknown> => {
@@ -60,12 +61,11 @@ export function describeProvisioningAttemptFailure(error: unknown): Record<strin
         category: value.category,
       };
     }
+    if (value instanceof NodeAllocationUncertainError) {
+      return { name: value.name, message: value.message.slice(0, ATTEMPT_ERROR_MESSAGE_MAX_CHARS) };
+    }
     if (value instanceof Error) {
-      return {
-        name: value.name,
-        statusCode: (value as { statusCode?: unknown }).statusCode,
-        message: value.message.slice(0, ATTEMPT_ERROR_MESSAGE_MAX_CHARS),
-      };
+      return { name: value.name, statusCode: (value as { statusCode?: unknown }).statusCode };
     }
     return { name: typeof value };
   };

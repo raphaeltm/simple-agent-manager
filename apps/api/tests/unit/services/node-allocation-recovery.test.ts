@@ -39,11 +39,16 @@ describe('describeProvisioningAttemptFailure', () => {
     expect(serialized).not.toContain('error during placement');
   });
 
-  it('length-caps a generic error message as a backstop', () => {
-    const err = new Error('x'.repeat(500));
-    const described = describeProvisioningAttemptFailure(err) as {
-      error: { message: string };
-    };
+  it('drops the raw message of a generic error (may carry SQL/params/user text)', () => {
+    const err = new Error('DB error near "SELECT secret FROM users WHERE token = abc123"');
+    const described = describeProvisioningAttemptFailure(err) as { error: Record<string, unknown> };
+    expect(described.error).toEqual({ name: 'Error', statusCode: undefined });
+    expect(JSON.stringify(described)).not.toContain('SELECT secret');
+  });
+
+  it('keeps and length-caps our own authored NodeAllocationUncertainError message', () => {
+    const err = new NodeAllocationUncertainError('y'.repeat(500));
+    const described = describeProvisioningAttemptFailure(err) as { error: { message: string } };
     expect(described.error.message.length).toBe(200);
   });
 });
