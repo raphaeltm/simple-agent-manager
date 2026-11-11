@@ -101,6 +101,16 @@ export const factoryShots = {
     height: 939,
     alt: "Who can deploy to staging: agents can deploy here, only these two profiles, Claude Code Opus 5 and Codex 5.5 High",
   },
+  'wf-chip': {
+    width: 640,
+    height: 309,
+    alt: 'Workflow steps: build the retry schedule, done; review the code, done; try it against a flaky endpoint, running',
+  },
+  'agent-chip': {
+    width: 560,
+    height: 94,
+    alt: 'The Careful Builder profile: Claude, Opus 5.5, high effort, with a ring showing how much of its account is left',
+  },
 } satisfies Record<string, FactoryShot>;
 
 export type FactoryShotName = keyof typeof factoryShots;

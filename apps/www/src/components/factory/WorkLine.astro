@@ -84,6 +84,23 @@ import Shot from './Shot.astro';
 </section>
 
 <script>
+  import { createPointerFollower, FINE_POINTER_QUERY, REDUCED_MOTION_QUERY } from '../../lib/motion';
+
+  // Each stage picture leans toward the pointer in 3D, the inset floating at its own depth.
+  if (window.matchMedia(FINE_POINTER_QUERY).matches && !window.matchMedia(REDUCED_MOTION_QUERY).matches) {
+    for (const art of document.querySelectorAll<HTMLElement>('.stage-art')) {
+      const follow = createPointerFollower((x, y) => {
+        art.style.setProperty('--tx', `${(x * 9).toFixed(2)}deg`);
+        art.style.setProperty('--ty', `${(-y * 7).toFixed(2)}deg`);
+      });
+      art.addEventListener('pointermove', (event) => {
+        const box = art.getBoundingClientRect();
+        follow((event.clientX - box.left) / box.width - 0.5, (event.clientY - box.top) / box.height - 0.5);
+      });
+      art.addEventListener('pointerleave', () => follow(0, 0));
+    }
+  }
+
   for (const root of document.querySelectorAll<HTMLElement>('[data-line]')) {
     const stages = [...root.querySelectorAll<HTMLElement>('[data-stage]')];
     const stops = [...root.querySelectorAll<HTMLElement>('[data-line-stop]')];
@@ -291,8 +308,22 @@ import Shot from './Shot.astro';
     gap: 16px;
   }
 
+  .stage-figure {
+    perspective: 1600px;
+  }
+
   .stage-art {
     position: relative;
+    transform-style: preserve-3d;
+    transform: rotateY(var(--tx, 0deg)) rotateX(var(--ty, 0deg));
+  }
+
+  .stage-frame {
+    transform: translateZ(0);
+  }
+
+  .stage-inset {
+    translate: 0 0 60px;
   }
 
   .stage-figure--inset .stage-art {

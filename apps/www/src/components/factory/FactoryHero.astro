@@ -1,17 +1,20 @@
 ---
 /**
- * Software-factory homepage hero: the promise, then the real SAM home screen rising into place
- * with two real cards from the same project floating in front (an agent waiting on a person, and
- * a pull request whose checks passed). The animation plays once and ends within 4 s; the resting
- * frame is the markup, which is what reduced-motion visitors see.
+ * Software-factory homepage hero: the promise, over the brand's glass node floor, then the real
+ * SAM screens as a 3D stack that assembles and comes alive (HeroStack.astro, hero-motion.ts).
+ * The motion runs while the hero is on screen, so the hero has a pause control (WCAG 2.2.2).
+ * The resting markup is the composed frame, which is what no-JS and reduced-motion visitors see.
  */
 import Badge from '../../../../../packages/ui/src/brand/Badge.astro';
 import { SINGLE_VM_INSTALL_SHIPPED } from '../../data/factory-shots';
-import Shot from './Shot.astro';
+import HeroStack from './HeroStack.astro';
 ---
 
-<section class="fh-hero" aria-labelledby="fh-hero-title">
+<section class="fh-hero" aria-labelledby="fh-hero-title" data-fh-hero data-motion="rest">
   <div class="fh-hero-light" aria-hidden="true"></div>
+  <div class="fh-hero-field" data-fh-field aria-hidden="true"></div>
+  <div class="fh-hero-haze" data-fh-haze aria-hidden="true"></div>
+  <div class="fh-hero-alert" aria-hidden="true"></div>
   <div class="container fh-hero-inner">
     <Badge>Open source · Your infrastructure</Badge>
     <h1 class="fh-hero-title" id="fh-hero-title">
@@ -34,20 +37,22 @@ import Shot from './Shot.astro';
       </li>
     </ul>
 
-    <div class="fh-stage">
-      <div class="fh-screen fh-frame">
-        <Shot name="dashboard" eager />
-      </div>
-      <div class="fh-card fh-card--wait">
-        <Shot name="needs-you" eager />
-      </div>
-      <div class="fh-card fh-card--done">
-        <Shot name="idea-review" eager />
-      </div>
+    <HeroStack />
+    <div class="fh-hero-foot">
+      <p class="fh-note">Real SAM screens · sample project</p>
+      <button type="button" class="fh-pause" data-fh-pause aria-pressed="false" aria-label="Pause animation">
+        <svg class="fh-pause-icon fh-pause-icon--pause" viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="3" width="3" height="10" rx="1"/><rect x="9" y="3" width="3" height="10" rx="1"/></svg>
+        <svg class="fh-pause-icon fh-pause-icon--play" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.5v9l7.5-4.5z"/></svg>
+      </button>
     </div>
-    <p class="fh-note">Real SAM screens · sample project</p>
   </div>
 </section>
+
+<script>
+  import { initFactoryHero } from './hero-motion';
+
+  for (const hero of document.querySelectorAll<HTMLElement>('[data-fh-hero]')) initFactoryHero(hero);
+</script>
 
 <style>
   .fh-hero {
@@ -127,91 +132,100 @@ import Shot from './Shot.astro';
     transform: translateY(-50%);
   }
 
-  /* ---- The stage: the home screen tilts up into place, cards land in front ---- */
-  .fh-stage {
-    position: relative;
-    width: min(1060px, 100%);
-    margin-top: 16px;
-    perspective: 1900px;
-  }
-
-  .fh-screen {
-    transform: rotateX(12deg);
-    transform-origin: center bottom;
-    animation: fh-rise 1.6s cubic-bezier(0.16, 1.1, 0.3, 1) both;
-  }
-
-  @keyframes fh-rise {
-    from {
-      transform: rotateX(36deg) translateY(48px);
-      opacity: 0;
-    }
-  }
-
-  .fh-card {
-    position: absolute;
-    border-radius: 12px;
-    overflow: hidden;
-    border: 1px solid var(--glass-border-hover);
-    box-shadow:
-      0 24px 50px -16px rgb(0 0 0 / 0.75),
-      0 0 0 1px rgb(255 255 255 / 0.04);
-    animation: fh-land 0.9s cubic-bezier(0.2, 1.3, 0.3, 1) both;
-  }
-
-  :global(html[data-theme='light']) .fh-card {
-    box-shadow: 0 22px 46px -18px rgb(16 40 28 / 0.4);
-  }
-
-  .fh-card--wait {
-    left: -3%;
-    bottom: 9%;
-    width: 46%;
-    animation-delay: 1.3s;
-  }
-
-  .fh-card--wait::after {
-    content: '';
+  /* ---- The floor: brand glass nodes, fading out behind the copy ---- */
+  .fh-hero-field {
     position: absolute;
     inset: 0;
-    border-radius: inherit;
-    box-shadow: 0 0 0 2px var(--fh-amber), 0 0 34px -4px var(--fh-amber);
+    z-index: -1;
+    pointer-events: none;
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, rgb(0 0 0 / 0.25) 30%, #000 62%);
+    mask-image: linear-gradient(to bottom, transparent 0%, rgb(0 0 0 / 0.25) 30%, #000 62%);
+  }
+
+  /* Haze at the horizon, so the floor recedes instead of ending. */
+  .fh-hero-haze {
+    --haze: 7 13 11;
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: calc(var(--horizon, 520px) - 120px);
+    z-index: -1;
+    height: 180px;
+    pointer-events: none;
+    background: linear-gradient(to bottom, transparent, rgb(var(--haze) / 0.85) 50%, transparent);
+  }
+
+  :global(html[data-theme='light']) .fh-hero-haze {
+    --haze: 230 237 232;
+  }
+
+  /* Amber light while an agent needs a person. */
+  .fh-hero-alert {
+    position: absolute;
+    left: 10%;
+    bottom: 4%;
+    z-index: -1;
+    width: 50%;
+    height: 50%;
+    pointer-events: none;
+    background: radial-gradient(closest-side, rgb(245 158 11 / 0.18), transparent 75%);
     opacity: 0;
-    animation: fh-glow 1.8s ease 2.1s both;
+    transition: opacity 900ms ease;
   }
 
-  .fh-card--done {
-    right: -3%;
-    top: 16%;
-    width: 30%;
-    animation-delay: 2.2s;
+  [data-alert] .fh-hero-alert {
+    opacity: 1;
   }
 
-  @keyframes fh-land {
-    from {
-      opacity: 0;
-      transform: translateY(26px) scale(0.94);
-    }
+  .fh-hero-foot {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    width: min(1080px, 100%);
   }
 
-  @keyframes fh-glow {
-    40% {
-      opacity: 1;
-    }
-    to {
-      opacity: 0.35;
-    }
+  .fh-pause {
+    display: inline-grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    color: var(--color-fg-muted);
+    background: color-mix(in srgb, var(--color-bg-surface) 70%, transparent);
+    border: 1px solid var(--glass-border-hover);
+    cursor: pointer;
   }
 
+  .fh-pause:hover {
+    color: var(--color-fg-primary);
+  }
+
+  .fh-pause:focus-visible {
+    outline: 2px solid var(--color-accent-strong);
+    outline-offset: 2px;
+  }
+
+  .fh-pause-icon {
+    width: 14px;
+    height: 14px;
+    fill: currentColor;
+  }
+
+  .fh-pause-icon--play,
+  .fh-pause[aria-pressed='true'] .fh-pause-icon--pause {
+    display: none;
+  }
+
+  .fh-pause[aria-pressed='true'] .fh-pause-icon--play {
+    display: block;
+  }
+
+  /* Nothing to pause with reduced motion. */
   @media (prefers-reduced-motion: reduce) {
-    .fh-screen,
-    .fh-card,
-    .fh-card--wait::after {
-      animation: none;
-    }
-
-    .fh-card--wait::after {
-      opacity: 0.35;
+    .fh-pause,
+    .fh-hero-alert {
+      display: none;
     }
   }
 
@@ -230,24 +244,6 @@ import Shot from './Shot.astro';
 
     .fh-proof li + li::before {
       display: none;
-    }
-
-    .fh-stage {
-      margin-top: 18px;
-      padding-bottom: 64px;
-    }
-
-    .fh-card--wait {
-      left: 2%;
-      bottom: 0;
-      width: 80%;
-    }
-
-    .fh-card--done {
-      right: 0;
-      top: auto;
-      bottom: 52%;
-      width: 46%;
     }
   }
 </style>
