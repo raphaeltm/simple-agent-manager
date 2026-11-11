@@ -16,7 +16,6 @@
  */
 import { execFileSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import {
   createServer,
   type IncomingHttpHeaders,
@@ -30,7 +29,7 @@ import type { Duplex } from 'node:stream';
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { freePort, REPO_ROOT, waitFor } from './harness';
+import { caddyRuntimeImage, freePort, REPO_ROOT, waitFor } from './harness';
 
 const DOMAIN = 'sam.test';
 const SECRET = randomBytes(32).toString('hex');
@@ -55,13 +54,6 @@ let celld: Server;
 let node: Server;
 let ports: { https: number; http: number; celld: number; frps: number; node: number };
 let container = '';
-
-function caddyImage(): string {
-  const dockerfile = readFileSync(`${CADDY_DIR}/Dockerfile`, 'utf8');
-  const runtime = [...dockerfile.matchAll(/^FROM (\S+)(?: AS \S+)?$/gm)].map((m) => m[1]!).at(-1);
-  if (!runtime?.includes('@sha256:')) throw new Error('Caddy runtime image is not digest-pinned');
-  return runtime;
-}
 
 const record = (req: IncomingMessage): Seen => ({
   method: req.method ?? '',
@@ -133,7 +125,7 @@ beforeAll(async () => {
     '-v',
     `${CADDY_DIR}:/etc/caddy:ro`,
     ...Object.entries(env).flatMap(([name, value]) => ['-e', `${name}=${value}`]),
-    caddyImage(),
+    caddyRuntimeImage(),
     'caddy',
     'run',
     '--config',

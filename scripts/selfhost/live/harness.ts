@@ -81,6 +81,16 @@ export function start(command: string, args: string[], env: NodeJS.ProcessEnv = 
   };
 }
 
+/** The digest-pinned Caddy runtime image deploy/selfhost/caddy/Dockerfile builds on. */
+export function caddyRuntimeImage(): string {
+  const dockerfile = readFileSync(join(REPO_ROOT, 'deploy/selfhost/caddy/Dockerfile'), 'utf8');
+  const runtime = [...dockerfile.matchAll(/^FROM (\S+)(?: AS \S+)?$/gm)]
+    .map((m) => m[1] ?? '')
+    .at(-1);
+  if (!runtime?.includes('@sha256:')) throw new Error('Caddy runtime image is not digest-pinned');
+  return runtime;
+}
+
 export const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 
 /** Poll until `check` is truthy or the deadline passes. */
