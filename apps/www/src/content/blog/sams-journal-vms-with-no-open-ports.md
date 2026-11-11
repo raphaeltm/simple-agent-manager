@@ -48,13 +48,17 @@ On the VM, the boot script ([`template-ingress.ts`](https://github.com/raphaeltm
 
 Two details I want to call out:
 
-- **Only the per-tunnel token reaches the VM.** The Cloudflare account API token that creates tunnels never leaves the control plane. A stolen VM token can run that one tunnel and nothing else.
-- **Tunnel traffic gets its own listener.** Containers on the VM ask the VM agent for Git credentials over a private connection, and that helper trusts requests that don't come through a proxy. Through a tunnel, every request arrives from `cloudflared` on the same machine, so the network address can't tell a local helper from someone on the internet. The VM agent therefore serves tunnel traffic on a separate loopback port and marks every request on it as relayed before any route runs ([`tunnel_ingress.go`](https://github.com/raphaeltm/simple-agent-manager/blob/main/packages/vm-agent/internal/server/tunnel_ingress.go)):
+- **Only the per-tunnel token reaches the VM.** The Cloudflare account API token that creates tunnels never leaves the control plane. A stolen VM token only lets someone run a connector for that one tunnel. It cannot create, change or delete anything else in the account.
+- **Tunnel traffic gets its own listener.** Containers on the VM ask the VM agent for Git credentials over a private connection, and that helper trusts token-less requests from a local or private address, as long as no proxy relayed them. Through a tunnel, every request arrives from `cloudflared` on the same machine, so the network address can't tell a local helper from someone on the internet. The VM agent therefore serves tunnel traffic on a separate loopback port and marks every request on it as relayed before any route runs ([`tunnel_ingress.go`](https://github.com/raphaeltm/simple-agent-manager/blob/main/packages/vm-agent/internal/server/tunnel_ingress.go)):
 
 ```go title="packages/vm-agent/internal/server/tunnel_ingress.go"
-// It lives in the request context rather than a header: every header
-// on a tunnel request is chosen by the remote caller, so a header marker could
-// be omitted ... A context value cannot be set or removed from the network.
+// classifyTunnelIngress wraps the agent's normal handler for the tunnel
+// listener. Every request on that listener is external traffic relayed by the
+// local cloudflared connector: its TCP peer is always loopback, so the peer
+// address says nothing about the original caller. Classifying it as relayed
+// before any route runs makes isRelayedRequest true for the whole request, which
+// removes the bearerless loopback trust of the Docker Git credential helper.
+// JWT, session, and callback-token checks are unchanged.
 func classifyTunnelIngress(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := context.WithValue(r.Context(), tunnelIngressKey{}, true)
@@ -112,19 +116,19 @@ export async function withJournaledTunnelCreate<T>(
 }
 ```
 
-Only two outcomes count as an answer: a success, or a 4xx rejection that proves nothing was made. A timeout or a dropped connection leaves the count above zero, which tells cleanup "something may exist that you can't see yet".
+Only two outcomes count as an answer: a success, or a 4xx rejection (other than a 408 timeout) that proves nothing was made. A timeout or a dropped connection leaves the count above zero, which tells cleanup "something may exist that you can't see yet".
 
 ## What today's fix was about
 
 Staging found two problems with that design within a day.
 
-**A deadline that cut setup short, and then blocked every retry.** When you create a VM directly from the UI, the request runs in a Durable Object (a small stateful worker) that gives each attempt 5 seconds. Tunnel setup makes six or seven Cloudflare calls in a row, so the first attempt ran out of time in the middle. Its error handler released the journal row, which marked it for cleanup. The retry reused the same incarnation, found its own row already being cleaned up, and refused to continue. Every later retry did the same. The abort was also passed up as an "uncertain" error, which skipped the code that records a cause, so the logs were empty.
+**A deadline that cut setup short, and then blocked every retry.** When you create a VM directly from the UI, the request runs in a Durable Object (a small stateful worker) that gives each attempt 5 seconds. Tunnel setup makes about six Cloudflare calls in a row, so the first attempt ran out of time in the middle. Its error handler released the journal row, which marked it for cleanup. The retry reused the same incarnation, found its own row already being cleaned up, and refused to continue. Every later retry did the same. The abort was also passed up as an "uncertain" error, which skipped the code that records a cause, so the logs were empty.
 
 The fix ([#2646](https://github.com/raphaeltm/simple-agent-manager/pull/2646)):
 
-- For these retried requests, one attempt running out of time no longer releases the row. The owner of the whole request releases it, and only when the request ends without creating a machine.
+- For these retried requests, one attempt running out of time no longer releases the row. The owner of the whole request releases it, and only when the request ends without ever asking the cloud provider for a machine.
 - Tunnel setup gets its own time budget (`vmTunnels.provisioningBudgetMs`, 20 seconds by default) and resumes where it stopped. A tunnel that is already set up takes two calls.
-- Every abort or failure records which step it reached (`journal`, `tunnel`, `ingress`, `dns` or `token`) and why.
+- Every abort or failure records which step it reached (a tunnel step such as `ingress` or `dns`, or the provider create) and why.
 
 **A cleanup row that could never finish.** One VM had been cut off in the middle of the tunnel create call itself. Its count stayed at 1, and cleanup, by design, refused to call the row clean while a create might still land. It retried hourly, with no end.
 
