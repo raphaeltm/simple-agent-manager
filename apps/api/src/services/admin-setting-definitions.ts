@@ -113,6 +113,7 @@ export type AdminSettingName =
   | 'performance.providerCatalogTimeoutMs'
   | 'performance.githubRequestTimeoutMs'
   | 'performance.githubInstallationsDeadlineMs'
+  | 'performance.userAccessTokenLockTimeoutMs'
   | 'performance.projectRecentTimeoutMs'
   | 'performance.externalReadTimeoutMs'
   | 'performance.configReadTimeoutMs'
