@@ -50,7 +50,7 @@ the existing rollout coordinator owns deployment timing.
 - [x] Wiring assertions check installer helper paths/system-dependency flags and benchmark
       preparation order/mode; source review verifies the existing action pin and test commands.
 - [x] Final focused validation and discriminating mutation checks recorded below.
-- [ ] Fresh security/constitution/test/completion local reviewers complete and findings resolved.
+- [x] Fresh security/constitution/test/completion local reviewers complete and findings resolved.
 - [ ] Fresh final-candidate CI and candidate-only CodSpeed run pass; no gate is bypassed.
 - [ ] Best-effort CodeRabbit request/wait and binding findings resolved before merge.
 
@@ -87,7 +87,7 @@ Parent independently read the first two completed logs: each first attempt hit18
 fetched Ubuntu indexes and all required font packages through the independent mirror. The tests
 then completed successfully. This is real fallback evidence during the outage, rather than a
 simulated DNS configuration or a claim based only on an install step. Initial CI Workflow failed
-five non-hermetic DNS tests; that failure remains visible and must be fixed on the final head.
+five non-hermetic DNS tests; the hermetic correction passed final-code CI Workflow job130660308539.
 
 Final local validation: 5 focused CI quality files / 44 tests PASS; ESLint, Prettier,
 shell syntax and git diff whitespace checks PASS. Seven final guard mutations were detected:
@@ -95,6 +95,7 @@ shell syntax and git diff whitespace checks PASS. Seven final guard mutations we
 | Removed or weakened guard       | Discriminating result                                                    |
 | ------------------------------- | ------------------------------------------------------------------------ |
 | Positive duration validation    | Negative diagnostic-timeout test failed                                  |
+| Shell integer round-trip        | Both overflowing-duration cases failed                                   |
 | dpkg process detection          | dpkg-only cleanup test failed                                            |
 | Nonzero second-attempt result   | Failed-fallback test failed                                              |
 | Installer helper adapter        | Cross-workflow install wiring test failed                                |
@@ -103,8 +104,10 @@ shell syntax and git diff whitespace checks PASS. Seven final guard mutations we
 
 All mutated files were restored. Six results are assertion failures; the poll-bound result is
 an externally enforced liveness deadline, rather than a claimed completed assertion. The intact
-baseline completed that case in about3seconds. Fresh specialist reports and final CI remain
-pending in the PR body.
+baseline completed that case in about3seconds. Independent security/constitution and test reviews PASS on d3c0d0e; completion/source review PASS
+with documentation findings corrected. Final CI, manual benchmark proof, CodeRabbit and release gates remain pending in the PR body.
+Implementation completion/doc review PASS after the seventh mutation row was corrected; this
+archived record does not claim a merge or deployment.
 Staging exemption: config-only CI scripts/workflow wiring and tests; no application runtime or
 cloud infrastructure change. A staging deploy would not exercise the changed mechanism. Actual
 candidate Actions runs provide the equivalent evidence; no shared staging mutation is required.
