@@ -23,3 +23,7 @@ GitHub" is advisory only), and there is no "Connect GitHub" control for an email
 - [ ] Decide (human) whether approving a member who cannot run work should warn the owner, and
       whether email accounts get a "Connect GitHub" path.
 - [ ] The GitHub sign-in required dialog has an opaque surface at mobile and desktop.
+- [ ] A transient token-lock timeout (`503 token_lock_timeout` from the per-user
+      `GitHubUserAccessTokenLock`, added in PR #2653) is also mapped to "no token", so it shows
+      the same "authorization has expired" text. Map it to a retryable error instead (enumerate
+      every caller of `getGitHubUserAccessToken` first: rule 67). Found in T12 review.
