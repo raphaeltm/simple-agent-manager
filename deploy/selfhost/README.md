@@ -148,6 +148,22 @@ owner has never signed in, SAM admits only the owner.
 Code: `scripts/selfhost/mail-settings.ts` (SMTP settings, collector), `caddy/mail-collector/` and
 `caddy/start.sh` (collector route), `scripts/selfhost/create-account.ts` (account command).
 
+## Machines for workspaces
+
+Nodes come from a compute pool. A box with a platform cloud credential (for example the GCP
+service account in Admin → Integrations) gives every account the installation pool; nobody needs
+a cloud account of their own. Connecting the credential adds no machines: open
+**Admin → Infrastructure** and add machine types and regions to the installation pool.
+
+Include at least one machine with 8 GB of memory. A default task asks for 2 vCPU, 4 GB of memory
+and 15 GB of disk (`PLATFORM_RESOURCE_DEFAULTS` in
+`packages/shared/src/constants/resource-defaults.ts`), and placement first subtracts a 1 GiB host
+reserve from the machine's memory (`placement-resolver-capacity.ts`), so a 4 GB machine such as
+Google Cloud `e2-medium` cannot hold one. With only `e2-medium` in the pool, every default task and
+chat fails with "No eligible compute-pool offering is available in the installation default pool
+for this task's requirements (2 vCPU, 4096 MB memory, 15 GB disk)". On Google Cloud add
+`e2-standard-2` (2 vCPU, 8 GB); keep `e2-medium` for smaller work if you like.
+
 ## Known gaps in this pass
 
 - Off on purpose: Instant sessions and guided credential login (Cloudflare Containers), Artifacts
