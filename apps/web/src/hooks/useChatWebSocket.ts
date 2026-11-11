@@ -24,8 +24,11 @@ export type SessionUpdatedFields = Partial<
   Pick<ChatSessionResponse, 'topic' | 'workspaceId' | 'agentSessionId' | 'status'>
 >;
 
-/** Every `ChatSessionStatus`; anything else in a push is ignored. */
-const CHAT_SESSION_STATUSES: readonly string[] = ['active', 'sleeping', 'stopped', 'failed'];
+/**
+ * The statuses the DO pushes in `session.updated` (`applySessionSleep`, `wakeSession`).
+ * Stopped and failed arrive as their own events, which also clear the agent's activity.
+ */
+const PUSHED_SESSION_STATUSES: readonly string[] = ['active', 'sleeping'];
 
 const BASE_RECONNECT_DELAY = 1000;
 const MAX_RECONNECT_DELAY = 30000;
@@ -275,7 +278,7 @@ export function useChatWebSocket({
             // `wakeSession`). A connected active tab does not poll, so dropping it
             // left an open tab showing an active composer after the server slept the
             // session, and the next message went out as a prompt, not a wake.
-            if (typeof p.status === 'string' && CHAT_SESSION_STATUSES.includes(p.status)) {
+            if (typeof p.status === 'string' && PUSHED_SESSION_STATUSES.includes(p.status)) {
               updates.status = p.status;
             }
             if (typeof p.topic === 'string' || p.topic === null) {

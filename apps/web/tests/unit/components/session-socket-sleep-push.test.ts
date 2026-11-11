@@ -89,16 +89,29 @@ const reply: ChatMessageResponse = {
   sequence: 1000,
 };
 
-function activeDetail() {
+interface DetailOptions {
+  status?: string;
+  topic?: string;
+  agentCompletedAt?: number | null;
+  wake?: { attemptId: string; phase: string } | null;
+}
+
+function detail({
+  status = 'active',
+  topic = 'T',
+  agentCompletedAt = null,
+  wake = null,
+}: DetailOptions = {}) {
   const session = {
     id: 'sess-1',
     workspaceId: 'ws-1',
-    topic: 'T',
-    status: 'active',
+    topic,
+    status,
     messageCount: 1,
     startedAt: 0,
     endedAt: null,
     createdAt: 0,
+    agentCompletedAt,
     viewerAccess: 'owner',
   } as ChatSessionResponse;
   return {
@@ -114,8 +127,19 @@ function activeDetail() {
       promptStartedAt: null,
       agentType: null,
       lastStopReason: null,
+      ...(wake
+        ? { recoveryStatus: 'waking', wakeAttemptId: wake.attemptId, wakePhase: wake.phase }
+        : {}),
     },
   };
+}
+
+function deferred<T>() {
+  let resolve: (value: T) => void = () => {};
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
 }
 
 function sessionUpdated(payload: Record<string, unknown>) {
@@ -132,7 +156,9 @@ describe('server-side sleep pushed to an open chat', () => {
     FakeWebSocket.instances = [];
     vi.stubGlobal('WebSocket', FakeWebSocket);
     queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    mocks.getChatSession.mockResolvedValue(activeDetail());
+    // Reset, not just clear: a queued one-shot read left by one test must not leak into the next.
+    mocks.getChatSession.mockReset();
+    mocks.getChatSession.mockResolvedValue(detail());
     mocks.listChatMessages.mockResolvedValue({ messages: [], hasMore: false });
   });
   afterEach(() => {
@@ -152,21 +178,65 @@ describe('server-side sleep pushed to an open chat', () => {
 
   it('shows the chat as sleeping and closes the socket when the DO pushes the sleep', async () => {
     const { result, socket } = await renderConnected();
+    // What the server returns once the session has slept.
+    mocks.getChatSession.mockResolvedValue(detail({ status: 'sleeping' }));
 
     act(() => socket.deliver(sessionUpdated({ status: 'sleeping' })));
 
     await waitFor(() => expect(result.current.sessionState).toBe('sleeping'));
-    // The socket is gated on an active (or waking) session, so a slept chat lets go of it
-    // and the next message goes down the wake path.
+    // The socket is gated on an active (or waking) session, so a slept chat lets go of it;
+    // with `sleeping` as its state, the composer offers to wake the agent.
     await waitFor(() => expect(socket.readyState).toBe(FakeWebSocket.CLOSED));
     // The transcript is still on screen.
     expect(result.current.messages.map((m) => m.id)).toEqual(['m1']);
   });
 
-  it('ignores a status that is not a chat session status', async () => {
+  it('shows a woken chat as active at once, then catches up on the rest of the session', async () => {
+    // A wake in flight in this tab: the chat is sleeping, the previous turn completed, and
+    // the socket is open because the wake is waking.
+    mocks.getChatSession.mockResolvedValueOnce(
+      detail({
+        status: 'sleeping',
+        agentCompletedAt: 900,
+        wake: { attemptId: '01WAKEATTEMPT', phase: 'agent_session' },
+      })
+    );
+    const view = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), { wrapper });
+    const { result } = view;
+    await waitFor(() => expect(result.current.isWaking).toBe(true));
+    expect(result.current.sessionState).toBe('sleeping');
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    const socket = FakeWebSocket.instances[0]!;
+    act(() => socket.open());
+
+    // The reconcile read is held open so the pushed state alone can be observed.
+    const reconcileRead = deferred<ReturnType<typeof detail>>();
+    mocks.getChatSession.mockReturnValueOnce(reconcileRead.promise);
+    const callsBefore = mocks.getChatSession.mock.calls.length;
+
+    // `wakeSession` pushes the new status; on the server it also cleared agent_completed_at.
+    act(() => socket.deliver(sessionUpdated({ status: 'active', workspaceId: 'ws-2' })));
+
+    // Not `idle`: the previous turn's completion must not survive the wake.
+    await waitFor(() => expect(result.current.sessionState).toBe('active'));
+    expect(result.current.session?.agentCompletedAt).toBeNull();
+    expect(result.current.session?.workspaceId).toBe('ws-2');
+    await waitFor(() => expect(mocks.getChatSession.mock.calls.length).toBe(callsBefore + 1));
+
+    await act(async () => {
+      reconcileRead.resolve(detail({ status: 'active', topic: 'Caught up' }));
+      await reconcileRead.promise;
+    });
+
+    // Fields the push did not carry arrive from the reconcile read.
+    await waitFor(() => expect(result.current.session?.topic).toBe('Caught up'));
+    expect(result.current.sessionState).toBe('active');
+  });
+
+  it('ignores a status the DO does not push on session.updated', async () => {
     const { result, socket } = await renderConnected();
 
-    act(() => socket.deliver(sessionUpdated({ status: 'hibernating', topic: 'Renamed' })));
+    act(() => socket.deliver(sessionUpdated({ status: 'stopped', topic: 'Renamed' })));
 
     // The valid field in the same push still lands, so the push was processed.
     await waitFor(() => expect(result.current.session?.topic).toBe('Renamed'));
