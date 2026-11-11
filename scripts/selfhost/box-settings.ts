@@ -3,6 +3,11 @@
  * so the Worker, frps and Caddy cannot disagree.
  */
 
+import {
+  DEFAULT_MAIL_COLLECTOR_SMTP_PORT,
+  DEFAULT_MAIL_COLLECTOR_UI_PORT,
+} from './mail-settings.js';
+
 /**
  * Loopback ports frps may bind for node tunnels. The deploy script always passes the resolved
  * range to BOTH the Worker (vars) and frps (gateway.env), so neither side's own default is ever
@@ -33,6 +38,9 @@ export const BOX_RESERVED_PORTS: Readonly<Record<string, number>> = {
   OBJECTSTORE_CONSOLE_PORT: 9001,
   HTTP_PORT: 80,
   HTTPS_PORT: 443,
+  // Reserved even with the collector off: a node holding its port would receive sign-in codes.
+  MAIL_COLLECTOR_SMTP_PORT: DEFAULT_MAIL_COLLECTOR_SMTP_PORT,
+  MAIL_COLLECTOR_UI_PORT: DEFAULT_MAIL_COLLECTOR_UI_PORT,
 };
 
 export interface PortRange {

@@ -16,6 +16,7 @@ import {
   renderFenceRuleset,
   resolveObjectStoreEndpoints,
 } from './egress-fence.js';
+import { mailEgressEndpoints } from './mail-settings.js';
 import { writePrivateFile } from './secret-files.js';
 
 /** Compose profile that runs the metadata token proxy. */
@@ -71,6 +72,7 @@ export async function writeFenceFiles(input: {
     leaseRange,
     resolvConf: input.resolvConf ?? readFileSync('/etc/resolv.conf', 'utf8'),
     objectStore: await resolveObjectStoreEndpoints(box),
+    serviceEndpoints: mailEgressEndpoints(box),
     localAddresses: Object.values(networkInterfaces())
       .flat()
       .map((entry) => entry?.address ?? '')

@@ -68,6 +68,12 @@ export async function providerFetch(
 /**
  * Keep cancellation active through response-body delivery while returning an
  * equivalent, unread response to existing callers.
+ *
+ * The body is read once under the abort race and re-wrapped, rather than teed with
+ * `response.clone()`: some Workers runtimes (celld, the self-hosted control plane) refuse to
+ * clone a streaming response before it is consumed, which failed every provider and STS call
+ * on a self-hosted install. The re-wrapped response keeps status, statusText and headers;
+ * no caller reads `url`, `redirected` or `type`.
  */
 export async function completeAbortableResponse(
   response: Response,
@@ -75,17 +81,17 @@ export async function completeAbortableResponse(
 ): Promise<Response> {
   if (signal.aborted) throw signal.reason;
   if (!response.body) return response;
-  const replayableResponse = response.clone();
-
-  try {
-    await drainResponseBody(response, signal);
-    if (signal.aborted) throw signal.reason;
-    return replayableResponse;
-  } catch (error) {
-    void replayableResponse.body?.cancel(error).catch(() => undefined);
-    throw error;
-  }
+  const body = await readResponseBody(response, signal);
+  if (signal.aborted) throw signal.reason;
+  return new Response(NULL_BODY_STATUSES.has(response.status) ? null : body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
 }
+
+/** Statuses whose Response may not carry a body (the Fetch spec's null body statuses). */
+const NULL_BODY_STATUSES = new Set([204, 205, 304]);
 
 type ProviderAbortSource =
   { type: 'caller'; signal: AbortSignal } | { type: 'timeout' } | undefined;
@@ -136,7 +142,7 @@ function createProviderAbortScope(
   };
 }
 
-async function drainResponseBody(response: Response, signal: AbortSignal): Promise<void> {
+async function readResponseBody(response: Response, signal: AbortSignal): Promise<ArrayBuffer> {
   if (signal.aborted) throw signal.reason;
   let onAbort: (() => void) | undefined;
   const aborted = new Promise<never>((_resolve, reject) => {
@@ -149,7 +155,7 @@ async function drainResponseBody(response: Response, signal: AbortSignal): Promi
   });
 
   try {
-    await Promise.race([response.arrayBuffer(), aborted]);
+    return await Promise.race([response.arrayBuffer(), aborted]);
   } finally {
     if (onAbort) signal.removeEventListener('abort', onAbort);
   }

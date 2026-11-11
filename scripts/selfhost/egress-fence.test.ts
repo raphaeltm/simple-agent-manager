@@ -276,6 +276,37 @@ describe('object store endpoints', () => {
   });
 });
 
+describe('mail collector (T6) through the fence', () => {
+  it('opens the collector SMTP port on loopback only when the profile is on', async () => {
+    const stateDir = mkdtempSync(join(tmpdir(), 'fence-mail-'));
+    const on = { COMPOSE_PROFILES: 'tunnel,mail-collector', MAIL_COLLECTOR_SMTP_PORT: '2525' };
+    await writeFenceFiles({ stateDir, box: on, leaseRange: RANGE, resolvConf: RESOLV });
+    expect(readFileSync(join(stateDir, 'egress-fence.nft'), 'utf8')).toContain(
+      'ip daddr 127.0.0.1 tcp dport { 20000-29999, 2525 } accept'
+    );
+    const offDir = mkdtempSync(join(tmpdir(), 'fence-mail-off-'));
+    await writeFenceFiles({
+      stateDir: offDir,
+      box: { COMPOSE_PROFILES: 'tunnel' },
+      leaseRange: RANGE,
+      resolvConf: RESOLV,
+    });
+    expect(readFileSync(join(offDir, 'egress-fence.nft'), 'utf8')).not.toMatch(/2525|1025/);
+  });
+
+  it("refuses a collector SMTP port that would open celld's operator listener", () => {
+    expect(() =>
+      buildFencePlan({
+        box: {},
+        leaseRange: RANGE,
+        resolvConf: RESOLV,
+        objectStore: [],
+        serviceEndpoints: [{ address: '127.0.0.1', port: 7001 }],
+      })
+    ).toThrow(/egress fence would allow CELLD_INTERNAL_PORT/);
+  });
+});
+
 describe('celld.env and the metadata token proxy', () => {
   it('lists one start-check probe per rule class, local spellings on the operator port', () => {
     const withHost = buildFencePlan({

@@ -219,6 +219,8 @@ export interface FencePlanInput {
   leaseRange: PortRange;
   resolvConf: string;
   objectStore: FenceEndpoint[];
+  /** Other box services celld must reach (the mail collector's SMTP port: mailEgressEndpoints). */
+  serviceEndpoints?: FenceEndpoint[];
   /** This host's interface addresses (os.networkInterfaces()). */
   localAddresses?: string[];
 }
@@ -248,11 +250,13 @@ export function buildFencePlan({
   leaseRange,
   resolvConf,
   objectStore,
+  serviceEndpoints = [],
   localAddresses,
 }: FencePlanInput): EgressFencePlan {
   const loopbackPorts: number[] = [];
   const endpoints: FenceEndpoint[] = [];
-  for (const endpoint of [...objectStore, ...parseAllowedEndpoints(box.SAM_EGRESS_ALLOW)]) {
+  const allowed = parseAllowedEndpoints(box.SAM_EGRESS_ALLOW);
+  for (const endpoint of [...objectStore, ...serviceEndpoints, ...allowed]) {
     // The one choke point for every endpoint the fence opens, whatever produced it.
     assertOpenable(endpoint.address, 'egress fence endpoint');
     if (endpoint.address === '127.0.0.1') loopbackPorts.push(endpoint.port);

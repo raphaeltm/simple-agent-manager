@@ -37,6 +37,7 @@
     "setup:github": "tsx scripts/deploy/setup-github.ts",
     "setup:local": "tsx scripts/deploy/setup-local-dev.ts",
     "selfhost:deploy": "tsx scripts/selfhost/deploy.ts",
+    "selfhost:create-account": "tsx scripts/selfhost/create-account.ts",
     "selfhost:test": "vitest run --config scripts/selfhost/vitest.config.ts",
     "selfhost:live-test": "vitest run --config scripts/selfhost/live/vitest.config.ts",
     "selfhost:verify-fence": "tsx scripts/selfhost/verify-fence.ts",

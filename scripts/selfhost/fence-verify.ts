@@ -19,6 +19,7 @@ import {
   resolveObjectStoreEndpoints,
 } from './egress-fence.js';
 import { hostAddresses, type ProbeOutcome, type ProbeSpec, REMOTE_PROBES } from './fence-probes.js';
+import { mailEgressEndpoints } from './mail-settings.js';
 
 export interface VerifyTarget {
   label: string;
@@ -177,6 +178,9 @@ export async function verifyTargets(input: TargetInput): Promise<VerifyTarget[]>
   }
   if (metadataProxyEnabled(box)) {
     targets.push(allow('metadata token proxy', '127.0.0.1', metadataProxyPort(box)));
+  }
+  for (const endpoint of mailEgressEndpoints(box)) {
+    targets.push(allow('mail collector SMTP', endpoint.address, endpoint.port));
   }
   return targets;
 }

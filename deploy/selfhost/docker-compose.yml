@@ -178,10 +178,15 @@ services:
     cap_drop: [ALL]
     cap_add: [NET_BIND_SERVICE]
     depends_on: [celld]
+    # Hashes the mail collector's UI password (when that profile is on) before starting Caddy.
+    entrypoint: ['/bin/sh', '/etc/caddy/start.sh']
     # REVERSE_TUNNEL_GATEWAY_SECRET (sent on forward_auth). Written by `pnpm selfhost:deploy --init`.
+    # mail-collector.env: SAM_MAIL_COLLECTOR=on|off and the collector UI password (on only).
     env_file:
       - path: ${SAM_SELFHOST_STATE_DIR:-./.state}/gateway.env
         required: true
+      - path: ${SAM_SELFHOST_STATE_DIR:-./.state}/mail-collector.env
+        required: false
     environment:
       SAM_DOMAIN: ${SAM_DOMAIN:?set SAM_DOMAIN in .env}
       SAM_TLS_MODE: ${SAM_TLS_MODE:?set SAM_TLS_MODE in .env (internal or dns-<provider>)}
@@ -216,6 +221,40 @@ services:
       # same resolved range there and into the Worker's vars (scripts/selfhost/box-settings.ts).
     volumes:
       - ./frps:/etc/frp:ro
+    restart: unless-stopped
+
+  # Mail collector for TEST installs (profile `mail-collector`, off by default): catches every
+  # email SAM sends (sign-in codes) so it can be read at https://mail.SAM_DOMAIN behind basic
+  # auth (caddy/mail-collector/on.caddy). Anyone who can read it can sign in as any account.
+  # SMTP and the UI listen on loopback only; the deploy points the Worker at the SMTP port
+  # (scripts/selfhost/mail-settings.ts) and refuses the profile without the generated UI password.
+  mail-collector:
+    profiles: [mail-collector]
+    # Mailpit v1.33.1
+    image: axllent/mailpit:v1.33.1@sha256:aef2aacc11f075ec0fb6874275ee4a421e688e11a96ebb296134d1735c7761ce
+    network_mode: host
+    user: '65534:65534'
+    # MP_UI_AUTH=collector:<generated password>: Mailpit requires it for its UI, API and send API
+    # too, so nothing on the box (celld included) reads codes on loopback without it. Written by
+    # `pnpm selfhost:deploy --init`; compose refuses to start the collector without the file.
+    env_file:
+      - path: ${SAM_SELFHOST_STATE_DIR:-./.state}/mail-collector-ui.env
+        required: true
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    command:
+      - --smtp
+      - 127.0.0.1:${MAIL_COLLECTOR_SMTP_PORT:-1025}
+      - --listen
+      - 127.0.0.1:${MAIL_COLLECTOR_UI_PORT:-8025}
+      # Messages live in /tmp (tmpfs) and are gone on restart; codes expire in minutes anyway.
+      - --max-age
+      - 1d
+      - --disable-version-check
+      - --smtp-disable-rdns
+      - --block-remote-css-and-fonts
     restart: unless-stopped
 
   # Bundled object store for boxes without an external bucket. celld does not qualify it for

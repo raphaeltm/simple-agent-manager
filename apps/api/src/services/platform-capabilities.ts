@@ -13,7 +13,7 @@
  * capability to true, so its behaviour does not change.
  */
 import type { Env } from '../env';
-import { hasAgentEmailBinding } from './agent-email/setup-state';
+import { emailTransportKind } from './agent-email/provider';
 import { resolveR2PresignConfig } from './r2-presign-config';
 
 /** One platform service. The name is also the `feature` field of a FEATURE_UNAVAILABLE error. */
@@ -52,6 +52,12 @@ type CapabilityEnv = Pick<
   | 'SETUP_SESSION_POOL'
   | 'AGENT_EMAIL'
   | 'BASE_DOMAIN'
+  | 'SMTP_HOST'
+  | 'SMTP_PORT'
+  | 'SMTP_TLS'
+  | 'SMTP_USERNAME'
+  | 'SMTP_PASSWORD'
+  | 'SMTP_FROM'
   | 'TTS_ENABLED'
   | 'R2_ACCESS_KEY_ID'
   | 'R2_SECRET_ACCESS_KEY'
@@ -179,7 +185,9 @@ export function resolvePlatformCapabilities(env: CapabilityEnv): PlatformCapabil
     artifacts: isArtifactsAvailable(env),
     containerRuntime: hasContainerRuntime(env),
     guidedCredentialSetup: isGuidedCredentialSetupAvailable(env),
-    emailSending: hasAgentEmailBinding(env),
+    // SAM can send its own email (sign-in codes): Cloudflare Email Sending or SMTP. Agent email
+    // (inbound mail, replies) still needs the Cloudflare binding (agent-email/setup-state.ts).
+    emailSending: emailTransportKind(env) !== null,
     cloudflareDns: present(env.CF_API_TOKEN) && present(env.CF_ZONE_ID),
     workersObservability: cloudflareAccountApi,
     r2Presign: resolveR2PresignConfig(env) !== null,

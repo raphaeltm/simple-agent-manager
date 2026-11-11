@@ -183,6 +183,23 @@ describe('verify-fence targets', () => {
   });
 });
 
+describe('verify-fence and the mail collector', () => {
+  it('checks the collector SMTP port as a positive control when the profile is on', async () => {
+    const targets = await verifyTargets({
+      box: { COMPOSE_PROFILES: 'mail-collector' },
+      range: RANGE,
+      publicProbe: '1.1.1.1:443',
+      localAddresses: [],
+    });
+    expect(targets).toContainEqual({
+      label: 'mail collector SMTP',
+      host: '127.0.0.1',
+      port: 1025,
+      expect: 'reachable',
+    });
+  });
+});
+
 describe('resolver drift and attestation', () => {
   it('reports nameservers celld uses that the DNS sets do not open', () => {
     expect(missingNameservers(['127.0.0.53'], ['127.0.0.53', '1.1.1.1'])).toEqual([]);
