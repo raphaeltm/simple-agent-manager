@@ -38,7 +38,7 @@ This starts:
 ## Prerequisites
 
 ```bash
-node --version   # v20.x or higher
+node --version   # v22.14+ (Node 22 LTS) or v24.x or higher
 pnpm --version   # 9.x or higher
 ```
 
