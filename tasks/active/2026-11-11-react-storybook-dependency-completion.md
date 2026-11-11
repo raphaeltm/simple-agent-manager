@@ -23,25 +23,30 @@ the exact PR number and head. Do not merge.
   `@storybook/react-vite`, `@storybook/addon-docs`, `@storybook/addon-a11y`). Storybook releases
   these in lockstep; align them all on 10.6.6 (the #2640 target).
 - `.storybook/main.ts` / `preview.ts` use only stable public APIs; no config change needed.
-- Lockfile change beyond the bumped packages: `scheduler` 0.27.0 → 0.28.0 (react-dom dependency)
-  and dedupe removals only.
+- Lockfile change beyond the bumped packages: `scheduler` 0.27.0 → 0.28.0 (react-dom dependency),
+  transitive `react-docgen` consolidated on 8.0.4 (8.0.3 dropped) and dedupe removals
+  (`@babel/parser@7.29.9`, `axe-core@4.13.0`, `ws@8.21.3`, `@storybook/icons@2.1.0`; other
+  versions of each remain).
+- Local app Playwright audit: 13 failures plus 1 flake reproduce identically on clean `main`
+  (pre-existing). The untracked ones are filed in
+  `tasks/backlog/2026-11-11-preexisting-chats-auth-immersive-audit-failures.md`.
 
 ## Implementation Checklist
 
 - [x] Catalog: react, react-dom 19.3.1; @types/react, @types/react-dom 19.3.0
 - [x] packages/ui: all Storybook packages 10.6.6
 - [x] Regenerate pnpm-lock.yaml; confirm a single react/react-dom version resolves
-- [ ] Typecheck, lint, tests for web, ui, terminal, acp-client
-- [ ] Storybook build + Storybook Playwright audit (packages/ui)
-- [ ] Playwright desktop/mobile screenshot audit of the app, reviewed and posted
-- [ ] Local specialist review (task-completion-validator, ui-ux-specialist)
+- [x] Typecheck and tests for web (5082), ui (137), terminal (105), acp-client (586); lint in CI
+- [x] Storybook build + Storybook Playwright audit (packages/ui): 68/68
+- [x] Playwright desktop/mobile screenshot audit of the app, reviewed and posted (PR #2657 comment 6796792306)
+- [x] Local specialist review (task-completion-validator PASS, ui-ux-specialist PASS)
 - [ ] Staging deploy + live verification
 - [ ] Draft PR with `needs-human-review`; report exact head to coordinator
 
 ## Acceptance Criteria
 
-- [ ] Exactly one `react` and one `react-dom` version (19.3.1) in the lockfile
-- [ ] All Storybook packages resolve to the same version
+- [x] Exactly one `react` and one `react-dom` version (19.3.1) in the lockfile
+- [x] All Storybook packages resolve to the same version
 - [ ] Terminal, UI, web, acp-client tests pass; Storybook builds and its Playwright audit passes
 - [ ] CI green on the candidate head, including Test and Workspace Quality Surfaces
 - [ ] Staging app loads and works with zero React errors
