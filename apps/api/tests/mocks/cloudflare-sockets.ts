@@ -26,6 +26,17 @@ interface SocketOptions {
   allowHalfOpen: boolean;
 }
 
+/**
+ * TLS options that verify the certificate against `name`, as the runtime does. SNI is sent only
+ * for a DNS name (RFC 6066); an IP address is still checked, explicitly.
+ */
+function verifyAs(name: string): Pick<tls.ConnectionOptions, 'servername' | 'checkServerIdentity'> {
+  return {
+    servername: net.isIP(name) ? undefined : name,
+    checkServerIdentity: (_host, cert) => tls.checkServerIdentity(name, cert),
+  };
+}
+
 class NodeBackedSocket {
   readonly readable: ReadableStream<Uint8Array>;
   readonly writable: WritableStream<Uint8Array>;
@@ -78,7 +89,7 @@ class NodeBackedSocket {
     this.raw.removeAllListeners('data');
     this.raw.removeAllListeners('end');
     const servername = options?.expectedServerHostname ?? this.hostname;
-    const secure = tls.connect({ socket: this.raw, servername, ca: testCa });
+    const secure = tls.connect({ socket: this.raw, ...verifyAs(servername), ca: testCa });
     return new NodeBackedSocket(secure, 'on', servername, 'secureConnect');
   }
 
@@ -93,7 +104,7 @@ export function connect(address: SocketAddress, options?: SocketOptions): NodeBa
     const raw = tls.connect({
       host: address.hostname,
       port: address.port,
-      servername: net.isIP(address.hostname) ? undefined : address.hostname,
+      ...verifyAs(address.hostname),
       ca: testCa,
     });
     return new NodeBackedSocket(raw, 'on', address.hostname, 'secureConnect');
