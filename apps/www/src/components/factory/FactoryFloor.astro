@@ -42,8 +42,8 @@ const facts = [
         <p class="fh-kicker">The floor</p>
         <h2 class="fh-h2 floor-title" id="floor-title">One install. As many machines as the work needs.</h2>
         <p class="fh-lede">
-          Under every process is a place for agents to run. SAM turns your cloud accounts into one,
-          for a single team or for many.
+          Under every process is a place for agents to run. SAM turns your cloud accounts into one
+          pool of machines that every project draws from.
         </p>
       </div>
       <ol class="floor-facts">
@@ -52,8 +52,10 @@ const facts = [
             <span class="floor-n" aria-hidden="true">{String(i + 1).padStart(2, '0')}</span>
             <span>
               <strong>{f.title}</strong>
-              {f.soon && <span class="fh-soon">soon</span>}
-              <span class="floor-body">{f.body}</span>
+              <span class="floor-body">
+                {f.body}
+                {f.soon && <span class="fh-soon">soon</span>}
+              </span>
             </span>
           </li>
         ))}
@@ -129,7 +131,7 @@ const facts = [
 
   .floor-grid {
     display: grid;
-    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+    grid-template-columns: minmax(0, 4fr) minmax(0, 6fr);
     gap: 56px;
     align-items: center;
   }

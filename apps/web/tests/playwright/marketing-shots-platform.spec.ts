@@ -1499,7 +1499,7 @@ async function setupDeploymentMocks(page: Page) {
     }
     if (path.match(/\/environments\/[^/]+\/volumes$/)) return respond(route, 200, { volumes: [] });
     if (path === `/api/projects/${PROJECT_ID}/tasks/${DEPLOY_TASK_ID}`) {
-      return respond(route, 200, { id: DEPLOY_TASK_ID, projectId: PROJECT_ID, title: 'Make refunds idempotent', status: 'completed' });
+      return respond(route, 200, { id: DEPLOY_TASK_ID, projectId: PROJECT_ID, title: 'Retry failed webhook deliveries', status: 'completed' });
     }
     if (path.match(/\/environments\/[^/]+\/(logs|containers|metrics)$/)) {
       return respond(route, 200, { entries: [], containers: [], systemInfo: null, fallbackMetrics: null });
@@ -1538,9 +1538,21 @@ test('sam-app-deployment-detail', async ({ page }) => {
   await expect(page.getByText('Running version 14.').first()).toBeVisible();
   await expect(page.getByText('staging.payments.northwindlabs.dev').first()).toBeVisible();
   // Who shipped it, from which chat: the release the agent submitted.
-  await expect(page.getByRole('region', { name: 'Recent deploys' }).getByText('“Make refunds idempotent”').first()).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Recent deploys' }).getByText('“Retry failed webhook deliveries”').first()).toBeVisible();
   await expect(page.locator('body')).not.toContainText('Something went wrong');
 
   await assertNoOverflow(page);
   await marketingShot(page, 'sam-app-deployment-detail');
+});
+
+test('sam-app-deployment-policy', async ({ page }) => {
+  await setupDeploymentMocks(page);
+  await page.goto(`/projects/${PROJECT_ID}/deployments/env-staging`);
+
+  const access = page.getByRole('region', { name: 'Who can deploy' });
+  await expect(access.getByText('Agents can deploy here')).toBeVisible();
+  await expect(access.getByText('2 profiles can deploy here.')).toBeVisible();
+  await expect(page.locator('body')).not.toContainText('Something went wrong');
+
+  await marketingShot(page, 'sam-app-deployment-policy', access);
 });

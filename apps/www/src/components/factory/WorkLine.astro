@@ -11,7 +11,7 @@ import Shot from './Shot.astro';
 
 <section class="fh-section line" id="how-work-moves" aria-labelledby="line-title" data-line>
   <div class="container">
-    <div class="fh-head fh-head--center">
+    <div class="fh-head fh-head--center line-head">
       <p class="fh-kicker">How work moves</p>
       <h2 class="fh-h2" id="line-title">From an idea to a running change, with your team at every gate</h2>
       <p class="fh-lede">
@@ -49,23 +49,34 @@ import Shot from './Shot.astro';
           <p class="stage-body">{s.body}</p>
           <p class="stage-who"><span aria-hidden="true">●</span>{s.who}</p>
         </div>
-        <figure class:list={['stage-figure', { 'stage-figure--inset': s.inset }]} data-reveal data-play>
-          <div class="fh-frame stage-frame">
-            <Shot name={s.main} />
-            {s.ring && (
-              <span
-                class="stage-ring"
-                aria-hidden="true"
-                style={`left:${s.ring[0]}%;top:${s.ring[1]}%;width:${s.ring[2]}%;height:${s.ring[3]}%`}
-              />
+        <figure
+          class:list={['stage-figure', { 'stage-figure--inset': s.inset, 'stage-figure--inset-left': s.insetSide === 'left' }]}
+          data-reveal
+          data-play
+        >
+          <div class="stage-art">
+            <div class="fh-frame stage-frame">
+              <div class="stage-desk">
+                <Shot name={s.main} />
+                {s.ring && (
+                  <span
+                    class="stage-ring"
+                    aria-hidden="true"
+                    style={`left:${s.ring[0]}%;top:${s.ring[1]}%;width:${s.ring[2]}%;height:${s.ring[3]}%`}
+                  />
+                )}
+              </div>
+              <div class="stage-phone">
+                <Shot name={s.phone} />
+              </div>
+            </div>
+            {s.inset && (
+              <div class="stage-inset">
+                <Shot name={s.inset} />
+              </div>
             )}
           </div>
-          {s.inset && (
-            <div class="stage-inset">
-              <Shot name={s.inset} />
-            </div>
-          )}
-          {s.note && <p class="stage-note">{s.note}</p>}
+          {s.note && <figcaption class="stage-note">{s.note}</figcaption>}
         </figure>
       </article>
     ))}
@@ -100,16 +111,32 @@ import Shot from './Shot.astro';
 </script>
 
 <style>
+  .line .line-head {
+    margin-bottom: 84px;
+  }
+
   /* ---- Rail ---- */
   .line-rail {
     position: sticky;
     top: var(--header-height);
     z-index: 5;
     padding: 12px 0;
-    background: color-mix(in srgb, var(--color-bg-canvas) 82%, transparent);
+    background: color-mix(in srgb, var(--color-bg-body) 94%, transparent);
     backdrop-filter: blur(14px);
     -webkit-backdrop-filter: blur(14px);
     border-block: 1px solid var(--color-border-subtle);
+  }
+
+  /* Fills the strip between the floating header and the rail, so page content can't show
+     through it. The section heading keeps enough margin above the rail for this strip. */
+  .line-rail::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 100%;
+    height: calc(var(--header-height) + 8px);
+    background: var(--color-bg-body);
   }
 
   .line-rail-inner {
@@ -153,7 +180,7 @@ import Shot from './Shot.astro';
     font-size: 0.8125rem;
     color: var(--color-fg-dim);
     text-decoration: none;
-    background: var(--color-bg-canvas);
+    background: var(--color-bg-body);
     border: 1px solid var(--color-border-subtle);
     transition:
       color 0.3s ease,
@@ -195,14 +222,14 @@ import Shot from './Shot.astro';
 
   .stage {
     display: grid;
-    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+    grid-template-columns: minmax(0, 4fr) minmax(0, 7fr);
     gap: 64px;
     align-items: center;
-    scroll-margin-top: calc(var(--header-height) + 90px);
+    scroll-margin-top: calc(var(--header-height) + 100px);
   }
 
   .stage--flip {
-    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+    grid-template-columns: minmax(0, 7fr) minmax(0, 4fr);
   }
 
   .stage--flip .stage-copy {
@@ -255,10 +282,24 @@ import Shot from './Shot.astro';
   .stage-figure {
     position: relative;
     margin: 0;
+    display: grid;
+    gap: 16px;
   }
 
-  .stage-figure--inset {
-    padding-bottom: 56px;
+  .stage-art {
+    position: relative;
+  }
+
+  .stage-figure--inset .stage-art {
+    padding-bottom: 48px;
+  }
+
+  .stage-desk {
+    position: relative;
+  }
+
+  .stage-phone {
+    display: none;
   }
 
   .stage-ring {
@@ -275,37 +316,38 @@ import Shot from './Shot.astro';
     border: 1px solid var(--glass-border-hover);
     background: var(--color-bg-inset);
     box-shadow: var(--fh-frame-shadow);
-    width: 50%;
+    width: 44%;
     right: -4%;
     bottom: 0;
     opacity: 0;
     transform: translateY(24px) scale(0.95);
   }
 
+  .stage-figure--inset-left .stage-inset {
+    right: auto;
+    left: -4%;
+  }
+
   .stage-note {
-    position: absolute;
-    left: 4%;
-    bottom: -18px;
-    max-width: 60%;
-    padding: 9px 14px;
-    border-radius: 12px;
-    font-size: 0.875rem;
-    line-height: 1.4;
+    display: flex;
+    gap: 10px;
+    align-items: baseline;
+    font-size: 0.9375rem;
+    line-height: 1.45;
     color: var(--color-fg-primary);
-    background: var(--color-bg-surface);
-    border: 1px solid var(--glass-border-hover);
-    box-shadow: 0 18px 40px -14px rgb(0 0 0 / 0.55);
     opacity: 0;
-    transform: translateY(12px);
+    transform: translateY(10px);
   }
 
-  .stage-figure--inset .stage-note {
-    bottom: 64px;
-  }
-
-  .stage--flip .stage-note {
-    left: auto;
-    right: 4%;
+  .stage-note::before {
+    content: '';
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--color-accent-strong);
+    box-shadow: 0 0 10px var(--color-accent-strong);
+    transform: translateY(-1px);
   }
 
   [data-play].is-in .stage-inset {
@@ -379,28 +421,29 @@ import Shot from './Shot.astro';
       gap: 96px;
       padding-top: 56px;
     }
-
-    .stage-inset {
-      width: 58%;
-      right: -2%;
-    }
-
-    .stage-note,
-    .stage--flip .stage-note {
-      position: relative;
-      left: 0;
-      right: auto;
-      bottom: 0;
-      max-width: none;
-      margin-top: 12px;
-    }
-
-    .stage-figure--inset .stage-note {
-      bottom: 0;
-    }
   }
 
   @media (max-width: 767px) {
+    /* Phones get a phone-width capture of the same screen; desktop art and insets would be unreadable. */
+    .stage-desk,
+    .stage-inset {
+      display: none;
+    }
+
+    .stage-phone {
+      display: block;
+    }
+
+    .stage-figure--inset .stage-art {
+      padding-bottom: 0;
+    }
+
+    .stage-phone :global(.fshot) {
+      max-height: 560px;
+      background-size: 100% auto;
+      background-position: top center;
+    }
+
     .line-stop {
       padding: 6px;
     }
