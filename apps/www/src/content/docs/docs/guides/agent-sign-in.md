@@ -203,7 +203,12 @@ await page.context().addCookies([
 await page.goto('https://app.test.example.org');
 ```
 
-**3. Work, then sign out** when you are done, from the user menu or from Playwright with
+**3. Work, clean up, then sign out.** Before you sign out, remove what you created for the
+test and no longer need: stop and delete deployments, delete workspaces and nodes, and undo
+configuration changes you made only for the test. A deployment keeps serving, and a node keeps
+costing money, after your session ends. Leave something running only when the person who asked
+for the test wants to look at it, and tell them it is there. Then sign out, from the user menu or
+from Playwright with
 `await page.request.post('https://api.test.example.org/api/auth/sign-out', { data: {}, headers: { origin: 'https://app.test.example.org' } })`.
 Signing out deletes the session at once instead of leaving it valid until it expires.
 
