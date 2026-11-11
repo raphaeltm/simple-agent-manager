@@ -19,7 +19,7 @@ Complete only PRs #2628, #2629, #2630, #2635, #2637 and #2639 in one coherent ca
 ## Checklist / acceptance
 
 - [x] Reconcile scope and ownership before mutation; protect originals as drafts with held associations.
-- [ ] Apply six upgrades and necessary Node contract alignment; narrow lock diff; early push.
+- [x] Apply six upgrades and necessary Node contract alignment; narrow lock diff; early push.
 - [ ] Install frozen lock; validate native SQLite under Node 22/24 and module checksums/libc pairing.
 - [ ] Full relevant lint, typecheck, tests, build; VM race/vet and linux amd64/arm64 builds; Worker tests.
 - [ ] Local Go/security, Cloudflare/Pulumi, completion/doc/constitution specialist reviews; address findings.
@@ -39,4 +39,8 @@ Complete only PRs #2628, #2629, #2630, #2635, #2637 and #2639 in one coherent ca
 
 ## Validation evidence
 
-Pending; maintained in PR and local .do-state.md. Task remains active until gates finish.
+- Implementation pushed at `e532ed7032bf946678ae98db8daec801cb139f49`; frozen install and `go mod tidy`/`go mod verify` passed. Native SQLite 13.0.3 opens and runs transactional SQL under Node 24.22.1 and Node 22.23.4 (SQLite 3.53.4).
+- Go/security local specialist review PASS at implementation head: module/toolchain/libc compatibility, remote JWKS refresh delta, strict JWT claims/algorithm checks and x/sys directory security calls unchanged. No introduced findings. Inherited JWKS refresh context cancellation tracked separately as SAM Idea `01M75B2DJRJB3RPW2K106ETMEQ`.
+- Workspace restarted during overlapping broad validation; interrupted logs are not treated as passing evidence. Sequential rerun in progress, without changing repository concurrency/resource defaults.
+- npm/infra local reviewer must finish; full suites, Worker tests, fresh-VM staging and exact-head PR/CodeRabbit evidence remain pending. Task intentionally active until those gates finish.
+- Shared staging owner #2627 estimates release at 13:45 UTC after its D3/D8 lifecycle checks and cleanup; actual release notice required before deployment.
