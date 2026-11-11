@@ -2,15 +2,17 @@
 #
 # The egress fence keeps celld (and so every Worker) away from 169.254.169.254. celld still needs
 # an access token for its gs:// bucket, so its object_store client is pointed here through
-# GCE_METADATA_HOST=127.0.0.1:<port>/<secret>. Only the service-account token and email are
-# served, only under the secret path that lives in celld's environment, and only with the
-# Metadata-Flavor header. Worker code can reach this port (celld can) but not the path.
+# GCE_METADATA_HOST=127.0.0.1:<port>/<secret>. This serves exactly one thing: the default service
+# account's access token, scoped to Cloud Storage whatever the caller asks for, only under the
+# secret path that lives in celld's environment, only for GET with the Metadata-Flavor header.
+# Every other metadata path (identity tokens, email, attributes, project and instance data) is
+# 404. Worker code can reach this port (celld can) but not the path.
 {
 	admin off
 	auto_https off
 	persist_config off
 	# Discard every log, errors included: a request URI carries the secret, and Caddy's error
-	# log records the original URI even after `uri strip_prefix`.
+	# log records the original URI even after a rewrite.
 	log default {
 		output discard
 	}
@@ -20,12 +22,16 @@ http://127.0.0.1:{$GCE_METADATA_PROXY_PORT} {
 	bind 127.0.0.1
 
 	@token {
-		path /{$GCE_METADATA_PROXY_SECRET}/computeMetadata/v1/instance/service-accounts/default/token /{$GCE_METADATA_PROXY_SECRET}/computeMetadata/v1/instance/service-accounts/default/email
+		path /{$GCE_METADATA_PROXY_SECRET}/computeMetadata/v1/instance/service-accounts/default/token
 		header Metadata-Flavor Google
 		method GET
 	}
 	handle @token {
-		uri strip_prefix /{$GCE_METADATA_PROXY_SECRET}
+		# Replaces the whole URI, query included: a caller's `scopes` (or anything else) never
+		# reaches the metadata server. The token is limited to GCE_METADATA_PROXY_SCOPES (Cloud
+		# Storage read/write by default), so it cannot call Cloud DNS or any other API the VM's
+		# service account may also hold.
+		rewrite * /computeMetadata/v1/instance/service-accounts/default/token?scopes={$GCE_METADATA_PROXY_SCOPES:https://www.googleapis.com/auth/devstorage.read_write}
 		reverse_proxy {$GCE_METADATA_UPSTREAM:169.254.169.254:80} {
 			header_up Host metadata.google.internal
 			# The metadata server refuses requests that carry X-Forwarded-For.

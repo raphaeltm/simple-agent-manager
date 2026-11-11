@@ -2,7 +2,8 @@
  * The egress fence against real tools: rendered rulesets go through `nft -c` (the kernel's own
  * parser), and celld's entrypoint runs under bash. nft needs netlink access; where neither `nft`
  * nor passwordless `sudo nft` can check a ruleset, those cases are skipped and say so. The
- * success path of celld/start.sh needs a live fence and is proven on a real stack (PR evidence).
+ * success path of celld/start.sh needs a live fence: live/fence-netns.live.test.ts applies the
+ * rendered ruleset in a network namespace and runs start.sh and fence.sh against it.
  */
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
@@ -104,31 +105,27 @@ describe.skipIf(process.getuid?.() === 0)('celld/start.sh refuses to run celld u
   });
   afterAll(() => new Promise<void>((done) => open.close(() => done())));
 
-  it('without a canary configured', async () => {
-    const run = await runStart({});
+  const attestation = join(dir, 'attestation');
+
+  it('without probes configured', async () => {
+    const run = await runStart({ SAM_EGRESS_FENCE_ATTESTATION: attestation });
     expect(run.status).not.toBe(0);
-    expect(run.output).toContain('SAM_EGRESS_FENCE_CANARY');
+    expect(run.output).toContain('SAM_EGRESS_FENCE_PROBES');
     expect(run.celldRan).toBe(false);
   });
 
-  it('when the canary is refused (no fence, nothing listening)', async () => {
+  it.each([
+    ['nothing listening', () => closedPort],
+    ['a listener', () => portOf(open)],
+  ])('when a probe is sent unhindered (no fence, %s)', async (_name, port) => {
     const run = await runStart({
-      SAM_EGRESS_FENCE_CANARY: `127.0.0.1:${closedPort}`,
-      SAM_EGRESS_FENCE_WAIT_SECONDS: '1',
-    });
-    expect(run.status).toBe(1);
-    expect(run.output).toMatch(/egress fence is not in effect .*Connection refused.*not starting/s);
-    expect(run.celldRan).toBe(false);
-  });
-
-  it('when the canary connects (no fence, the port is reachable)', async () => {
-    const run = await runStart({
-      SAM_EGRESS_FENCE_CANARY: `127.0.0.1:${portOf(open)}`,
+      SAM_EGRESS_FENCE_PROBES: `loopback-v4,127.0.0.1,${port()}`,
+      SAM_EGRESS_FENCE_ATTESTATION: attestation,
       SAM_EGRESS_FENCE_WAIT_SECONDS: '1',
     });
     expect(run.status).toBe(1);
     expect(run.output).toMatch(
-      /egress fence is not in effect \(connect 127\.0\.0\.1:\d+: connected\)/
+      /egress fence is not in effect \(loopback-v4 \(127\.0\.0\.1:\d+\): sent\); not starting/
     );
     expect(run.celldRan).toBe(false);
   });

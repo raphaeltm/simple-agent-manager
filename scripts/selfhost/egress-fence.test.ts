@@ -7,9 +7,11 @@ import { describe, expect, it } from 'vitest';
 import { assertPresignCredentialIsScoped } from './box-settings.js';
 import {
   buildFencePlan,
+  DEFAULT_GCE_METADATA_PROXY_SCOPES,
   FORBIDDEN_IPV4,
   FORBIDDEN_IPV6,
   metadataProxyEnabled,
+  metadataProxyScopes,
   parseNameservers,
   renderCelldEnv,
   renderFenceRuleset,
@@ -59,12 +61,17 @@ describe('egress fence ruleset', () => {
     }
   });
 
-  it('allows DNS only to the configured nameservers, before the link-local drop', () => {
+  it('allows DNS only to the nameserver sets, seeded from resolv.conf, before the link-local drop', () => {
     const rules = renderFenceRuleset(plan());
-    const dns = rules.indexOf(
-      'ip daddr { 127.0.0.53, 169.254.169.254 } meta l4proto { tcp, udp } th dport 53 accept'
+    expect(rules).toContain(
+      '  set dns4 {\n    type ipv4_addr\n    elements = { 127.0.0.53, 169.254.169.254 }\n  }'
     );
+    expect(rules).toContain('  set dns6 {\n    type ipv6_addr\n  }');
+    const dns = rules.indexOf('ip daddr @dns4 meta l4proto { tcp, udp } th dport 53 accept');
     expect(dns).toBeGreaterThan(0);
+    expect(
+      rules.indexOf('ip6 daddr @dns6 meta l4proto { tcp, udp } th dport 53 accept')
+    ).toBeGreaterThan(0);
     expect(dns).toBeLessThan(rules.indexOf('169.254.0.0/16'));
   });
 
@@ -93,15 +100,28 @@ describe('egress fence ruleset', () => {
     for (const range of ['10.0.0.0/8', '127.0.0.0/8', '169.254.0.0/16', '168.63.129.16/32']) {
       expect(FORBIDDEN_IPV4).toContain(range);
     }
-    for (const range of ['::/127', 'fc00::/7', 'fe80::/10', '::ffff:0:0/96']) {
+    for (const range of ['::/96', 'fc00::/7', 'fe80::/10', '::ffff:0:0/96']) {
       expect(FORBIDDEN_IPV6).toContain(range);
     }
   });
 
-  it('lets celld reach Caddy on its own addresses, but only on the HTTP(S) ports', () => {
-    expect(renderFenceRuleset(plan({ HTTPS_PORT: '8443' }))).toContain(
-      'fib daddr type local tcp dport { 80, 8443 } accept'
+  it('refuses the IPv6 transition ranges the API classifier refuses (6to4, Teredo, ::/96)', () => {
+    for (const range of ['2002::/16', '2001::/32', '::/96', '::ffff:0:0:0/96', '64:ff9b::/96']) {
+      expect(FORBIDDEN_IPV6).toContain(range);
+    }
+    for (const range of ['192.0.2.0/24', '198.51.100.0/24', '203.0.113.0/24', '192.88.99.0/24']) {
+      expect(FORBIDDEN_IPV4).toContain(range);
+    }
+  });
+
+  it('lets celld reach Caddy on its own non-loopback addresses, only on the HTTP(S) ports', () => {
+    const rules = renderFenceRuleset(plan({ HTTPS_PORT: '8443' }));
+    expect(rules).toContain(
+      'ip daddr != 127.0.0.0/8 fib daddr type local tcp dport { 80, 8443 } accept'
     );
+    expect(rules).toContain('ip6 daddr != ::1 fib daddr type local tcp dport { 80, 8443 } accept');
+    // No unqualified local accept: that would also open 127.0.0.1:80 and every local address.
+    expect(rules).not.toMatch(/^\s*fib daddr type local tcp dport/m);
   });
 
   it('allows the bundled object store port, and a LAN store at its exact address', () => {
@@ -109,7 +129,7 @@ describe('egress fence ruleset', () => {
       'ip daddr 127.0.0.1 tcp dport { 20000-29999, 9000 } accept'
     );
     expect(renderFenceRuleset(plan({}, [{ address: '10.1.2.3', port: 9000 }]))).toContain(
-      'ip daddr 10.1.2.3 tcp dport 9000 accept comment "object store"'
+      'ip daddr 10.1.2.3 tcp dport 9000 accept comment "object store or allowed endpoint"'
     );
   });
 
@@ -202,6 +222,37 @@ describe('parseNameservers', () => {
   });
 });
 
+describe('operator endpoints never open metadata, link-local or reserved addresses', () => {
+  it.each([
+    '169.254.169.254',
+    '::ffff:169.254.169.254',
+    '::ffff:a9fe:a9fe',
+    '64:ff9b::a9fe:a9fe',
+    '2002:a9fe:a9fe::1',
+    'fe80::1',
+    'fd00:ec2::254',
+    'fd20:ce::254',
+    '100.100.100.200',
+    '168.63.129.16',
+    '0.0.0.0',
+  ])('S3_ENDPOINT resolving to %s is refused', async (address) => {
+    await expect(
+      resolveObjectStoreEndpoints({ S3_ENDPOINT: 'https://store.example' }, async () => [address])
+    ).rejects.toThrow(/never opens it/);
+    expect(() => plan({}, [{ address, port: 80 }])).toThrow(/never opens it/);
+  });
+
+  it('control: private, loopback and public store addresses stay openable', async () => {
+    for (const address of ['10.0.0.9', '127.0.0.1', '192.168.1.5', 'fd12::5', '203.0.114.9']) {
+      expect(
+        await resolveObjectStoreEndpoints({ S3_ENDPOINT: 'https://store.example' }, async () => [
+          address,
+        ])
+      ).toEqual([{ address, port: 443 }]);
+    }
+  });
+});
+
 describe('object store endpoints', () => {
   it('none without S3_ENDPOINT; literal and resolved addresses with the right port', async () => {
     expect(await resolveObjectStoreEndpoints({})).toEqual([]);
@@ -217,9 +268,53 @@ describe('object store endpoints', () => {
 });
 
 describe('celld.env and the metadata token proxy', () => {
-  it('names the start check canary (celld operator port)', () => {
-    const env = parseDotenv(renderCelldEnv({}, plan(), ''), 'celld.env');
-    expect(env).toEqual({ SAM_EGRESS_FENCE_CANARY: '127.0.0.1:7001' });
+  it('lists one start-check probe per rule class, local spellings on the operator port', () => {
+    const withHost = buildFencePlan({
+      box: {},
+      leaseRange: RANGE,
+      resolvConf: RESOLV,
+      objectStore: [],
+      localAddresses: ['127.0.0.1', '::1', 'fe80::1', '10.0.0.4', '2a01:4f8::1'],
+    });
+    const env = parseDotenv(renderCelldEnv({}, withHost, ''), 'celld.env');
+    expect(Object.keys(env)).toEqual(['SAM_EGRESS_FENCE_PROBES']);
+    expect(env.SAM_EGRESS_FENCE_PROBES!.split(' ')).toEqual([
+      'loopback-v4,127.0.0.1,7001',
+      'loopback-other-v4,127.0.0.2,7001',
+      'loopback-v6,::1,7001',
+      'host-address-v4,10.0.0.4,7001',
+      'host-address-v6,2a01:4f8::1,7001',
+      'private-v4,10.255.255.1,80',
+      'metadata-v4,169.254.169.254,80',
+      'cgnat-v4,100.100.100.200,80',
+      'unique-local-v6,fd00::1,80',
+      'metadata-v6,fd20:ce::254,80',
+      '6to4-v6,2002:a9fe:a9fe::1,80',
+      'teredo-v6,2001::1,80',
+    ]);
+  });
+
+  it('forces a Cloud Storage scope on the token proxy and refuses any other scope', () => {
+    const box = { CELLD_BUCKET: 'gs://b' };
+    const env = parseDotenv(renderCelldEnv(box, plan(box), SECRET), 'celld.env');
+    expect(env.GCE_METADATA_PROXY_SCOPES).toBe(DEFAULT_GCE_METADATA_PROXY_SCOPES);
+    expect(DEFAULT_GCE_METADATA_PROXY_SCOPES).toBe(
+      'https://www.googleapis.com/auth/devstorage.read_write'
+    );
+    expect(
+      metadataProxyScopes({
+        GCE_METADATA_PROXY_SCOPES: 'https://www.googleapis.com/auth/devstorage.read_only',
+      })
+    ).toBe('https://www.googleapis.com/auth/devstorage.read_only');
+    for (const scope of [
+      'https://www.googleapis.com/auth/cloud-platform',
+      'https://www.googleapis.com/auth/ndev.clouddns.readwrite',
+      'https://www.googleapis.com/auth/devstorage.read_write,https://www.googleapis.com/auth/cloud-platform',
+    ]) {
+      expect(() => metadataProxyScopes({ GCE_METADATA_PROXY_SCOPES: scope })).toThrow(
+        /not a Cloud Storage scope/
+      );
+    }
   });
 
   it('points celld at the proxy with the secret path for a gs:// bucket', () => {

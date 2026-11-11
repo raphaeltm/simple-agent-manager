@@ -49,9 +49,12 @@ services:
         required: true
     environment:
       HOME: /var/lib/celld
-      # celld/start.sh: wait for the fence at start, then re-check it while celld runs.
+      # celld/start.sh: wait for the fence at start, then re-check it while celld runs; celld
+      # is killed when a probe is not rejected or the fence service's attestation goes stale.
       SAM_EGRESS_FENCE_WAIT_SECONDS: ${SAM_EGRESS_FENCE_WAIT_SECONDS:-60}
-      SAM_EGRESS_FENCE_CHECK_SECONDS: ${SAM_EGRESS_FENCE_CHECK_SECONDS:-5}
+      SAM_EGRESS_FENCE_CHECK_SECONDS: ${SAM_EGRESS_FENCE_CHECK_SECONDS:-1}
+      SAM_EGRESS_FENCE_ATTESTATION: /run/sam-egress-fence/attestation
+      SAM_EGRESS_FENCE_ATTESTATION_MAX_AGE_SECONDS: ${SAM_EGRESS_FENCE_ATTESTATION_MAX_AGE_SECONDS:-20}
       CELLD_BUCKET: ${CELLD_BUCKET:?set CELLD_BUCKET in .env}
       # Empty means unset: gs:// buckets take no endpoint and use Application Default Credentials.
       S3_ENDPOINT: ${S3_ENDPOINT:-}
@@ -74,25 +77,33 @@ services:
       # A cache on one node: the bucket is the durable copy and the only thing to back up.
       - celld-data:/var/lib/celld
       - ./celld/start.sh:/etc/sam/celld-start.sh:ro
+      - egress-fence-attestation:/run/sam-egress-fence:ro
     # Above CELLD_SHUTDOWN_TOTAL_MS (40 s) so a stop is a clean lease handoff.
     stop_grace_period: 50s
     # celld docs: restart without an attempt limit. An immediate restart can hit
     # "Address already in use"; Docker's restart backoff covers that.
     restart: unless-stopped
 
-  # Installs the celld egress fence in the host's nftables and re-applies it if a firewall
-  # reload removes it. Needs only NET_ADMIN on the host network. Stopping it leaves the fence in
-  # place.
+  # Installs the celld egress fence in the host's nftables, re-applies it if a firewall reload
+  # removes it, and attests to celld that the table matches the rendered rules. Needs only
+  # NET_ADMIN on the host network. Stopping it leaves the fence in place; celld then stops once
+  # the attestation is older than SAM_EGRESS_FENCE_ATTESTATION_MAX_AGE_SECONDS.
   egress-fence:
     build: ./egress-fence
     image: sam-selfhost-egress-fence:local
     network_mode: host
     cap_drop: [ALL]
     cap_add: [NET_ADMIN]
+    security_opt: ['no-new-privileges:true']
+    read_only: true
+    tmpfs: [/tmp]
     environment:
-      SAM_EGRESS_FENCE_RECHECK_SECONDS: ${SAM_EGRESS_FENCE_RECHECK_SECONDS:-15}
+      SAM_EGRESS_FENCE_RECHECK_SECONDS: ${SAM_EGRESS_FENCE_RECHECK_SECONDS:-5}
     volumes:
       - ${SAM_SELFHOST_STATE_DIR:-./.state}/egress-fence.nft:/etc/sam/egress-fence.nft:ro
+      # The host's resolver list, so a changed nameserver re-opens DNS (fence.sh sync_dns).
+      - /etc/resolv.conf:/etc/sam/host-resolv.conf:ro
+      - egress-fence-attestation:/run/sam-egress-fence
     healthcheck:
       test: ['CMD', '/bin/sh', '/usr/local/bin/sam-egress-fence', 'check']
       interval: 5s
@@ -270,6 +281,7 @@ services:
 
 volumes:
   celld-data:
+  egress-fence-attestation:
   caddy-data:
   caddy-config:
   objectstore-data:

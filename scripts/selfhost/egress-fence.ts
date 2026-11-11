@@ -33,12 +33,38 @@ import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 
 import type { PortRange } from './box-settings.js';
+import { assertOpenable } from './fence-addresses.js';
+import { formatProbes, startCheckProbes } from './fence-probes.js';
 
 /** nftables table name; the start check and the verify command look for it. */
 export const EGRESS_FENCE_TABLE = 'sam_celld_egress';
 
 /** uid (and gid) celld runs as; the fence matches its sockets. */
 export const DEFAULT_CELLD_UID = 7101;
+
+/**
+ * OAuth scope the GCE metadata token proxy forces on every token it hands celld: Cloud Storage
+ * read/write, which is what celld's bucket client needs (objects, conditional writes, deletes of
+ * superseded LTX files). Not the VM's full scope set, which on the recommended setup also lets
+ * the service account edit Cloud DNS.
+ */
+export const DEFAULT_GCE_METADATA_PROXY_SCOPES =
+  'https://www.googleapis.com/auth/devstorage.read_write';
+
+/** Scopes GCE_METADATA_PROXY_SCOPES may name: Cloud Storage ones only. */
+const STORAGE_SCOPE =
+  /^https:\/\/www\.googleapis\.com\/auth\/devstorage\.(read_only|read_write|full_control)$/;
+
+/** The proxy's forced scopes; anything but Cloud Storage scopes is refused. */
+export function metadataProxyScopes(box: Readonly<Record<string, string>>): string {
+  const raw = box.GCE_METADATA_PROXY_SCOPES?.trim() || DEFAULT_GCE_METADATA_PROXY_SCOPES;
+  const scopes = raw.split(',').map((scope) => scope.trim());
+  const bad = scopes.find((scope) => !STORAGE_SCOPE.test(scope));
+  if (bad !== undefined) {
+    throw new Error(`GCE_METADATA_PROXY_SCOPES: "${bad}" is not a Cloud Storage scope`);
+  }
+  return scopes.join(',');
+}
 
 /** Loopback port of the GCE metadata token proxy (profile `gce`). */
 export const DEFAULT_GCE_METADATA_PROXY_PORT = 7180;
@@ -69,18 +95,31 @@ export const FORBIDDEN_IPV4 = [
   '169.254.0.0/16', // link-local, cloud metadata
   '172.16.0.0/12',
   '192.0.0.0/24',
+  '192.0.2.0/24', // documentation
+  '192.88.99.0/24', // 6to4 relay anycast
   '192.168.0.0/16',
   '198.18.0.0/15',
+  '198.51.100.0/24', // documentation
+  '203.0.113.0/24', // documentation
   '224.0.0.0/3', // multicast and reserved
 ];
 
+/**
+ * The same ranges apps/api/src/lib/network-hosts refuses, plus every IPv6 form that embeds an
+ * IPv4 address or tunnels to one (6to4, Teredo), refused wholesale: the kernel would route them
+ * to a relay, where the embedded address is out of the fence's sight.
+ */
 export const FORBIDDEN_IPV6 = [
-  '::/127', // unspecified and loopback
+  '::/96', // unspecified, loopback and IPv4-compatible
   '::ffff:0:0/96', // IPv4-mapped
+  '::ffff:0:0:0/96', // IPv4-translated
   '64:ff9b::/96', // NAT64
   '64:ff9b:1::/48',
   '100::/64',
-  'fc00::/7', // unique-local (incl. AWS IMDS fd00:ec2::254)
+  '2001::/32', // Teredo
+  '2001:db8::/32', // documentation
+  '2002::/16', // 6to4
+  'fc00::/7', // unique-local (incl. AWS IMDS fd00:ec2::254, GCE fd20:ce::254)
   'fe80::/10', // link-local
   'fec0::/10',
   'ff00::/8',
@@ -167,6 +206,8 @@ export async function resolveObjectStoreEndpoints(
   const host = url.hostname.replace(/^\[|\]$/g, '');
   const addresses = isIP(host) ? [host] : await resolve(host);
   if (addresses.length === 0) throw new Error(`S3_ENDPOINT host ${host} did not resolve`);
+  // Checked on the resolved addresses: a name pointing at 169.254.169.254 is refused too.
+  for (const address of addresses) assertOpenable(address, `S3_ENDPOINT (${host})`);
   return addresses.map((address) => ({ address, port: defaultPort(url) }));
 }
 
@@ -185,32 +226,6 @@ export interface FencePlanInput {
  * model server for `llm.openAICompatible.allowPrivateNetwork`. Names are refused: the fence
  * matches addresses, and a name could later resolve elsewhere.
  */
-/**
- * Addresses no allowlist entry may open: link-local (incl. every cloud metadata server), the
- * named metadata hosts and the unspecified/reserved ranges. Private and loopback addresses stay
- * allowed, since a local model server lives there.
- */
-function isNeverAllowed(address: string): boolean {
-  const lower = address.toLowerCase();
-  if (isIP(lower) === 6) {
-    return (
-      lower === '::' ||
-      /^fe[89ab]/.test(lower) ||
-      lower === 'fd20:ce::254' ||
-      lower === 'fd00:ec2::254' ||
-      lower.startsWith('ff')
-    );
-  }
-  const [a = 0, b = 0] = lower.split('.').map(Number);
-  return (
-    a === 0 ||
-    a >= 224 ||
-    (a === 169 && b === 254) ||
-    lower === '100.100.100.200' ||
-    lower === '168.63.129.16'
-  );
-}
-
 export function parseAllowedEndpoints(raw: string | undefined): FenceEndpoint[] {
   if (!raw?.trim()) return [];
   return raw.split(',').map((entry) => {
@@ -220,11 +235,7 @@ export function parseAllowedEndpoints(raw: string | undefined): FenceEndpoint[] 
     if (!match || isIP(address) === 0 || !Number.isInteger(port) || port < 1 || port > 65535) {
       throw new Error(`SAM_EGRESS_ALLOW entry "${entry.trim()}" must be IP:PORT or [IPv6]:PORT`);
     }
-    if (isNeverAllowed(address)) {
-      throw new Error(
-        `SAM_EGRESS_ALLOW entry "${entry.trim()}" is a metadata, link-local or reserved address`
-      );
-    }
+    assertOpenable(address, `SAM_EGRESS_ALLOW entry "${entry.trim()}"`);
     return { address, port };
   });
 }
@@ -239,6 +250,8 @@ export function buildFencePlan({
   const loopbackPorts: number[] = [];
   const endpoints: FenceEndpoint[] = [];
   for (const endpoint of [...objectStore, ...parseAllowedEndpoints(box.SAM_EGRESS_ALLOW)]) {
+    // The one choke point for every endpoint the fence opens, whatever produced it.
+    assertOpenable(endpoint.address, 'egress fence endpoint');
     if (endpoint.address === '127.0.0.1') loopbackPorts.push(endpoint.port);
     else endpoints.push(endpoint);
   }
@@ -308,40 +321,44 @@ function nftSet(values: Array<string | number>): string {
 
 /** The nftables ruleset for `plan`; applied atomically (create, delete, define) by `nft -f`. */
 export function renderFenceRuleset(plan: EgressFencePlan): string {
-  const allowLines: string[] = [];
-  for (const family of ['ip', 'ip6'] as const) {
-    const servers = plan.dnsServers.filter((server) => addressFamily(server) === family);
-    if (servers.length > 0) {
-      allowLines.push(
-        `${family} daddr ${nftSet(servers)} meta l4proto { tcp, udp } th dport 53 accept comment "DNS"`
-      );
-    }
-  }
   const loopback = [`${plan.leaseRange.start}-${plan.leaseRange.end}`, ...plan.loopbackPorts];
-  allowLines.push(
-    `ip daddr 127.0.0.1 tcp dport ${nftSet(loopback)} accept comment "node tunnel leases and allowed local endpoints"`
-  );
-  for (const endpoint of plan.endpoints) {
-    allowLines.push(
-      `${addressFamily(endpoint.address)} daddr ${endpoint.address} tcp dport ${endpoint.port} accept comment "object store"`
-    );
-  }
-  allowLines.push(
-    `fib daddr type local tcp dport ${nftSet(plan.localPublicPorts)} accept comment "Caddy, as the internet sees it"`
-  );
+  const caddy = nftSet(plan.localPublicPorts);
+  const allowLines = [
+    // The fence service keeps these sets equal to the nameservers celld's resolv.conf names
+    // (deploy/selfhost/egress-fence/fence.sh), so a resolver change cannot cut DNS silently.
+    'ip daddr @dns4 meta l4proto { tcp, udp } th dport 53 accept comment "DNS"',
+    'ip6 daddr @dns6 meta l4proto { tcp, udp } th dport 53 accept comment "DNS"',
+    `ip daddr 127.0.0.1 tcp dport ${nftSet(loopback)} accept comment "node tunnel leases and allowed local endpoints"`,
+    ...plan.endpoints.map(
+      (endpoint) =>
+        `${addressFamily(endpoint.address)} daddr ${endpoint.address} tcp dport ${endpoint.port} accept comment "object store or allowed endpoint"`
+    ),
+    // Worker requests to the install's own hostnames (check_dns_status probes
+    // https://ws-<id>.<domain>) reach Caddy at the box's own address when that address is on an
+    // interface (a public IP on the NIC, or a LAN install). Loopback is not that path.
+    `ip daddr != 127.0.0.0/8 fib daddr type local tcp dport ${caddy} accept comment "Caddy on this host's own addresses"`,
+    `ip6 daddr != ::1 fib daddr type local tcp dport ${caddy} accept comment "Caddy on this host's own addresses"`,
+  ];
   const body = [
     'ct state established,related accept',
     ...allowLines,
     `fib daddr type local ${REFUSE} comment "anything else on this host"`,
     `ip daddr ${nftSet(FORBIDDEN_IPV4)} ${REFUSE} comment "private, link-local, metadata, reserved"`,
-    `ip6 daddr ${nftSet(FORBIDDEN_IPV6)} ${REFUSE} comment "private, link-local, reserved"`,
+    `ip6 daddr ${nftSet(FORBIDDEN_IPV6)} ${REFUSE} comment "private, link-local, transition, reserved"`,
   ];
+  const dnsSet = (name: string, type: string, family: 'ip' | 'ip6'): string[] => {
+    const servers = plan.dnsServers.filter((server) => addressFamily(server) === family);
+    const elements = servers.length > 0 ? [`    elements = { ${servers.join(', ')} }`] : [];
+    return [`  set ${name} {`, `    type ${type}`, ...elements, '  }'];
+  };
   return [
     '#!/usr/sbin/nft -f',
     '# Generated by `pnpm selfhost:deploy` (scripts/selfhost/egress-fence.ts). Do not edit.',
     `table inet ${EGRESS_FENCE_TABLE}`,
     `delete table inet ${EGRESS_FENCE_TABLE}`,
     `table inet ${EGRESS_FENCE_TABLE} {`,
+    ...dnsSet('dns4', 'ipv4_addr', 'ip'),
+    ...dnsSet('dns6', 'ipv6_addr', 'ip6'),
     '  chain output {',
     '    type filter hook output priority filter; policy accept;',
     `    meta skuid ${plan.celldUid} jump celld`,
@@ -361,8 +378,9 @@ export function renderCelldEnv(
   metadataProxySecret: string
 ): string {
   const values: Record<string, string> = {
-    // celld's start check connects here and must be refused by the fence (deploy/selfhost/celld/start.sh).
-    SAM_EGRESS_FENCE_CANARY: `127.0.0.1:${plan.forbiddenLoopbackPorts.CELLD_INTERNAL_PORT}`,
+    // celld's start and periodic checks connect to each and require the fence to reject every
+    // one: a missing rule class keeps celld from starting, or stops it (deploy/selfhost/celld/start.sh).
+    SAM_EGRESS_FENCE_PROBES: formatProbes(startCheckProbes(plan)),
   };
   if (metadataProxyEnabled(box)) {
     if (!/^[0-9a-f]{64}$/.test(metadataProxySecret)) {
@@ -375,6 +393,7 @@ export function renderCelldEnv(
     values.GCE_METADATA_IP = host;
     values.GCE_METADATA_PROXY_SECRET = metadataProxySecret;
     values.GCE_METADATA_PROXY_PORT = String(metadataProxyPort(box));
+    values.GCE_METADATA_PROXY_SCOPES = metadataProxyScopes(box);
   }
   return Object.entries(values)
     .map(([name, value]) => `${name}=${value}\n`)
