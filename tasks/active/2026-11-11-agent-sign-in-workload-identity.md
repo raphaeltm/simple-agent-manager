@@ -132,9 +132,11 @@ until the coordinator merges.
 - [x] F4: Landing disclosure: remembered `false` never hides it; failed lookup says unknown.
 - [x] F5: guide: turning off does not end sessions; revocation procedure, tested statement.
 - [x] Discrimination proofs A-I (see PR body).
-- [ ] Security auditor on the new diff
-- [ ] Staging redeploy + live check (agent sign-in, F1-F3 refused live)
-- [ ] CodeRabbit threads replied/resolved; incremental review wait
+- [x] Security auditor on the new diff: 0 CRITICAL/HIGH; M1 (watch resume via pause) and M2
+      (BetterAuth cookie cache after revocation) fixed in 1a172adda; M3 docs; M4 accepted (PR table)
+- [x] Staging redeploy (run 43030244402) + live check: sign-in 200; F2/F3 and same-class routes 403;
+      fresh VM: terminal/node tokens and the VM agent cookie expire at the session cap; cleaned up
+- [x] CodeRabbit threads replied/resolved; incremental wait: "Review skipped", nothing new
 
 Residuals filed/flagged for Raphaël:
 - Agent runs (chat/task) started by an agent session hold their own MCP token for the run's
