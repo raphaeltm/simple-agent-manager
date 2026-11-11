@@ -16,8 +16,11 @@ export function CopyableId({
 }) {
   const [copied, setCopied] = useState(false);
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
   const handleCopy = useCallback(() => {
     void navigator.clipboard.writeText(value).then(() => {
+      // The write can resolve after unmount; arming the timer then would leak it.
+      if (!mountedRef.current) return;
       setCopied(true);
       if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
       copiedTimerRef.current = setTimeout(() => setCopied(false), COPIED_FEEDBACK_MS);
@@ -25,12 +28,13 @@ export function CopyableId({
   }, [value]);
   // The feedback timer must not outlive the pill: a state update after unmount (or after a
   // test environment is torn down) is wasted work and, in jsdom, throws `window is not defined`.
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
       if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
-    },
-    []
-  );
+    };
+  }, []);
 
   return (
     <button
