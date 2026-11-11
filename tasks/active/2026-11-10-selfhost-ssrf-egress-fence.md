@@ -76,3 +76,24 @@ Part B
   lease-port stand-in and a fake metadata server, not a real node or real GCE.
 - Discrimination evidence (guard removed once, named tests red) is listed in the PR body.
 
+
+## Follow-up (task 01M73VYBDA1PA99GMHJQNF30C0): base merge and review items 1-12
+
+- [x] Merge origin/sam/selfhost-pass-2 (638eb6cdc) — b0604ac52
+- [x] 1 metadata proxy forced storage scope, token path only; Worker cannot read celld env/fs (verified on celld 0.6.3)
+- [x] 2 start check per rule class + attestation, SIGKILL, window measured (0.12-0.76 s; ~1.2 s by construction)
+- [x] 3 verify-fence: UDP EPERM judging, DNS as celld, resolver drift, attestation, more targets
+- [x] 4 IPv6 transition ranges, narrowed Caddy accept, never-allowed endpoints, nft pin, container hardening
+- [x] 5 namespace suite (fence-netns.live.test.ts), fence.sh re-apply, fence disappearing
+- [x] 6 per-call-site AST inventory (137 sites)
+- [x] 7 node agents never followed on any transport
+- [x] 8 GitLab private opt-in, guarded profile fetch, refusal mapping
+- [x] 9 hop-limit admin setting, header allowlist, whole-operation deadline
+- [x] 10 operator model equivalence through real Mastra; duplicate provider copy recorded (+34 KB gz)
+- [x] 11 check_dns_status final status via validated hops
+- [x] 12 GitLab cross-origin redirect, chains at each call site, celld runtime redirect test
+
+Findings while doing it: a refused TCP connect fails after ~1.06 s (first SYN retransmit), not at
+once; Debian 12 nft 1.0.6 segfaults listing named sets created by nft 1.1.3 (DNS moved to a chain
+of anonymous-set rules); boolean OAuth admin settings could not be read back (fixed). Proofs and
+commits: PR #2641 body, "Item map".
