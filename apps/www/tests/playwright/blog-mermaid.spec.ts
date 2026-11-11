@@ -96,6 +96,11 @@ const mermaidPosts = [
     path: '/blog/sams-journal-recovery-needs-a-safe-handoff/',
     screenshotName: 'safe-recovery-handoff',
   },
+  {
+    name: 'the VM tunnel journal',
+    path: '/blog/sams-journal-vms-with-no-open-ports/',
+    screenshotName: 'vm-tunnel',
+  },
 ];
 
 for (const post of mermaidPosts) {
