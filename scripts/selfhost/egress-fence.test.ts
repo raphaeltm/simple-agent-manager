@@ -19,13 +19,6 @@ import {
 } from './egress-fence.js';
 import { assertComposeProfiles, writeFenceFiles } from './fence-state.js';
 import { parseDotenv } from './secret-files.js';
-import {
-  buildProbeScript,
-  evaluateProbes,
-  fenceTargets,
-  parseProbeOutput,
-  type ProbeTarget,
-} from './verify-fence.js';
 
 const RANGE = { start: 20000, end: 29999 };
 const RESOLV = 'nameserver 127.0.0.53\nnameserver 169.254.169.254\noptions edns0\n';
@@ -380,110 +373,5 @@ describe('presign credential', () => {
       })
     ).not.toThrow();
     expect(() => assertPresignCredentialIsScoped({}, {})).not.toThrow();
-  });
-});
-
-describe('verify-fence', () => {
-  const targets: ProbeTarget[] = [
-    { label: 'operator', host: '127.0.0.1', port: 7001, expect: 'blocked' },
-    { label: 'metadata', host: '169.254.169.254', port: 80, expect: 'blocked' },
-    { label: 'ipv6', host: '::1', port: 7001, expect: 'blocked' },
-    { label: 'lease', host: '127.0.0.1', port: 20000, expect: 'reachable' },
-    { label: 'public', host: '1.1.1.1', port: 443, expect: 'reachable' },
-  ];
-  const control = parseProbeOutput('0 open\n1 timeout\n2 refused\n3 refused\n4 open\n');
-
-  it('passes when forbidden targets are blocked for celld and not for another uid', () => {
-    const verdict = evaluateProbes(
-      targets,
-      parseProbeOutput('0 blocked\n1 blocked\n2 blocked\n3 refused\n4 open\n'),
-      control
-    );
-    expect(verdict).toEqual({ failures: [], warnings: [] });
-  });
-
-  it.each(['open', 'refused', 'timeout', 'error'])(
-    'fails when a forbidden target is %s',
-    (outcome) => {
-      const verdict = evaluateProbes(
-        targets,
-        parseProbeOutput(`0 ${outcome}\n1 blocked\n2 blocked\n3 open\n4 open\n`),
-        control
-      );
-      expect(verdict.failures).toEqual([expect.stringMatching(/operator .* NOT fenced/)]);
-    }
-  );
-
-  it('a loopback target refused for every uid fails: the probe cannot see the fence', () => {
-    const verdict = evaluateProbes(
-      targets,
-      parseProbeOutput('0 blocked\n1 blocked\n2 blocked\n3 open\n4 open\n'),
-      parseProbeOutput('0 blocked\n1 timeout\n2 refused\n')
-    );
-    expect(verdict.failures).toEqual([expect.stringMatching(/operator .*cannot see the fence/)]);
-  });
-
-  it('a remote target the network refuses for every uid is a warning, not a pass or a failure', () => {
-    const verdict = evaluateProbes(
-      targets,
-      parseProbeOutput('0 blocked\n1 blocked\n2 blocked\n3 open\n4 open\n'),
-      parseProbeOutput('0 open\n1 blocked\n2 refused\n')
-    );
-    expect(verdict.failures).toEqual([]);
-    expect(verdict.warnings).toEqual([expect.stringMatching(/metadata .*inconclusive/)]);
-  });
-
-  it('IPv6 off on the host is not applicable, not a failure', () => {
-    const verdict = evaluateProbes(
-      targets,
-      parseProbeOutput('0 blocked\n1 blocked\n2 unavailable\n3 open\n4 open\n'),
-      parseProbeOutput('0 open\n1 timeout\n2 unavailable\n')
-    );
-    expect(verdict.failures).toEqual([]);
-    expect(verdict.warnings).toEqual([expect.stringMatching(/ipv6 .*not applicable/)]);
-  });
-
-  it.each(['blocked', 'timeout', 'error', 'unavailable'])(
-    'fails when an allowed target is %s',
-    (outcome) => {
-      const verdict = evaluateProbes(
-        targets,
-        parseProbeOutput(`0 blocked\n1 blocked\n2 blocked\n3 open\n4 ${outcome}\n`),
-        control
-      );
-      expect(verdict.failures).toEqual([expect.stringMatching(/public .*should be reachable/)]);
-    }
-  );
-
-  it('fails on a missing result and ignores garbage lines', () => {
-    const verdict = evaluateProbes(
-      targets,
-      parseProbeOutput('noise\n0 blocked\n1 blocked\n2 blocked\n3 open\n7 maybe\n'),
-      control
-    );
-    expect(verdict.failures).toEqual(['public: no result']);
-  });
-
-  it('builds one probe line per target', () => {
-    const script = buildProbeScript(targets, 3);
-    expect(script).toContain("probe 0 '127.0.0.1' 7001");
-    expect(script).toContain("probe 3 '127.0.0.1' 20000");
-    expect(script).toContain('No route to host');
-  });
-
-  it('checks every listener celld must not reach, plus the allowed ones for this box', async () => {
-    const all = await fenceTargets({ CELLD_BUCKET: 'gs://b' }, '1.1.1.1:443');
-    const blocked = all.filter((t) => t.expect === 'blocked').map((t) => `${t.host}:${t.port}`);
-    expect(blocked).toEqual(
-      expect.arrayContaining([
-        '127.0.0.1:7001',
-        '127.0.0.1:8080',
-        '127.0.0.1:7000',
-        '169.254.169.254:80',
-        '::1:7001',
-      ])
-    );
-    const allowed = all.filter((t) => t.expect === 'reachable').map((t) => `${t.host}:${t.port}`);
-    expect(allowed).toEqual(['127.0.0.1:20000', '1.1.1.1:443', '127.0.0.1:7180']);
   });
 });

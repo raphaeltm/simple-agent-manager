@@ -3,252 +3,200 @@
  * Checks that the celld egress fence is in effect on this box, and fails loudly if not.
  *
  *   pnpm selfhost:verify-fence [--env-file deploy/selfhost/.env] [--public-probe HOST:PORT]
+ *                              [--public-name NAME]
  *
  * Probes run in a throwaway container of the celld service (same image, uid and host network),
- * so they get exactly what celld's sockets get. The fence rejects with ICMP admin-prohibited, so a
- * fenced connect() fails at once with "No route to host" (IPv4) or "Permission denied" (IPv6);
- * that is "blocked". Every forbidden target must be blocked, every allowed one must not be, and a
- * control run as another uid must reach the same forbidden target, which proves the probe can
- * tell a fenced socket from an unreachable one.
+ * so they get exactly what celld's sockets get; a control repeats them as another uid. What is
+ * checked and how it is judged: fence-verify.ts. Also checked: name resolution as celld, that
+ * the fence's DNS sets open every nameserver celld's resolv.conf names (resolver drift), and
+ * that the fence service's attestation, which celld requires, is current.
  */
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { networkInterfaces } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
+import * as v from 'valibot';
+
 import { resolveTunnelPortRange } from './box-settings.js';
+import { EGRESS_FENCE_TABLE, parseNameservers } from './egress-fence.js';
+import { buildProbeScript, parseProbeOutput, type ProbeOutcome } from './fence-probes.js';
 import {
-  composePort,
-  EGRESS_FENCE_TABLE,
-  metadataProxyEnabled,
-  metadataProxyPort,
-  resolveObjectStoreEndpoints,
-} from './egress-fence.js';
+  attestationProblem,
+  judgeTargets,
+  missingNameservers,
+  probeSpecs,
+  type VerifyTarget,
+  verifyTargets,
+} from './fence-verify.js';
 import { parseDotenv } from './secret-files.js';
 
 const REPO_ROOT = resolve(import.meta.dirname, '../..');
 const COMPOSE_FILE = join(REPO_ROOT, 'deploy/selfhost/docker-compose.yml');
 const DEFAULT_PUBLIC_PROBE = '1.1.1.1:443';
+const DEFAULT_PUBLIC_NAME = 'example.com';
 /** uid for the control probe: any uid but celld's. */
 const CONTROL_UID = 65534;
-const DEFAULT_PROBE_TIMEOUT_SECONDS = 3;
+/** Above the ~1 s a refused TCP connect() takes (it is reported on the first SYN retransmit). */
+const DEFAULT_PROBE_TIMEOUT_SECONDS = 4;
+/** Same default as SAM_EGRESS_FENCE_ATTESTATION_MAX_AGE_SECONDS in docker-compose.yml. */
+const DEFAULT_ATTESTATION_MAX_AGE_SECONDS = 20;
+const ATTESTATION_PATH = '/run/sam-egress-fence/attestation';
 
-export type ProbeOutcome = 'blocked' | 'open' | 'refused' | 'timeout' | 'unavailable' | 'error';
-
-export interface ProbeTarget {
-  label: string;
-  host: string;
-  port: number;
-  expect: 'blocked' | 'reachable';
+interface Run {
+  status: number;
+  output: string;
 }
 
-/**
- * A bash script that prints `<index> <outcome>` per target, from bash's /dev/tcp error text.
- * "unavailable" is the host lacking the address family (IPv6 off), not a verdict on the fence.
- */
-export function buildProbeScript(targets: ProbeTarget[], timeoutSeconds: number): string {
-  const lines = targets.map((target, index) => `probe ${index} '${target.host}' ${target.port}`);
-  return [
-    'probe() {',
-    `  out="$(timeout ${timeoutSeconds} bash -c "exec 3<>/dev/tcp/$2/$3" 2>&1)"; code=$?`,
-    '  if [ $code -eq 0 ]; then echo "$1 open"',
-    '  elif [[ "$out" == *"No route to host"* || "$out" == *"Permission denied"* ]]; then echo "$1 blocked"',
-    '  elif [[ "$out" == *"Connection refused"* ]]; then echo "$1 refused"',
-    '  elif [[ "$out" == *"Cannot assign requested address"* || "$out" == *"Network is unreachable"* || "$out" == *"Address family not supported"* ]]; then echo "$1 unavailable"',
-    '  elif [ $code -eq 124 ]; then echo "$1 timeout"',
-    '  else echo "$1 error"; fi',
-    '}',
-    ...lines,
-  ].join('\n');
-}
-
-export function parseProbeOutput(output: string): Map<number, ProbeOutcome> {
-  const results = new Map<number, ProbeOutcome>();
-  for (const line of output.split('\n')) {
-    const match = /^(\d+) (blocked|open|refused|timeout|unavailable|error)$/.exec(line.trim());
-    if (match) results.set(Number(match[1]), match[2] as ProbeOutcome);
-  }
-  return results;
-}
-
-export interface ProbeVerdict {
-  failures: string[];
-  warnings: string[];
-}
-
-function isLoopbackHost(host: string): boolean {
-  return host === '::1' || host.startsWith('127.');
-}
-
-/**
- * A forbidden target is fenced when celld's uid is refused and another uid is not: "No route
- * to host" can also be the network's own answer for a remote address, never for loopback.
- */
-function judgeForbidden(
-  target: ProbeTarget,
-  outcome: ProbeOutcome,
-  control: ProbeOutcome | undefined
-): { failure?: string; warning?: string } {
-  const name = `${target.label} (${target.host}:${target.port})`;
-  if (outcome === 'unavailable' && control === 'unavailable') {
-    return { warning: `${name}: address family unavailable on this host; not applicable` };
-  }
-  if (outcome !== 'blocked') return { failure: `${name} is NOT fenced: ${outcome}` };
-  if (control !== 'blocked') return {};
-  if (isLoopbackHost(target.host)) {
-    return { failure: `${name}: refused for every uid, so the probe cannot see the fence` };
-  }
-  return { warning: `${name}: the network refuses it for every uid too; inconclusive` };
-}
-
-/** Failures and warnings, one line each. `control` is the same probe run as another uid. */
-export function evaluateProbes(
-  targets: ProbeTarget[],
-  results: Map<number, ProbeOutcome>,
-  control: Map<number, ProbeOutcome> = new Map()
-): ProbeVerdict {
-  const verdict: ProbeVerdict = { failures: [], warnings: [] };
-  targets.forEach((target, index) => {
-    const outcome = results.get(index);
-    if (outcome === undefined) {
-      verdict.failures.push(`${target.label}: no result`);
-      return;
-    }
-    if (target.expect === 'reachable') {
-      if (!['open', 'refused'].includes(outcome)) {
-        verdict.failures.push(
-          `${target.label} (${target.host}:${target.port}) should be reachable: ${outcome}`
-        );
-      }
-      return;
-    }
-    const { failure, warning } = judgeForbidden(target, outcome, control.get(index));
-    if (failure) verdict.failures.push(failure);
-    if (warning) verdict.warnings.push(warning);
-  });
-  return verdict;
-}
-
-/** What the fence must block and allow on this box. */
-export async function fenceTargets(
-  box: Readonly<Record<string, string>>,
-  publicProbe: string
-): Promise<ProbeTarget[]> {
-  const range = resolveTunnelPortRange(box);
-  const loopback = (label: string, port: number, expect: ProbeTarget['expect']): ProbeTarget => ({
-    label,
-    host: '127.0.0.1',
-    port,
-    expect,
-  });
-  const [publicHost = '', publicPort = '443'] = publicProbe.split(/:(?=\d+$)/);
-  const targets: ProbeTarget[] = [
-    loopback('celld operator listener', composePort(box, 'CELLD_INTERNAL_PORT'), 'blocked'),
-    loopback('celld public listener', composePort(box, 'CELLD_PORT'), 'blocked'),
-    loopback('frps control port', composePort(box, 'FRPS_BIND_PORT'), 'blocked'),
-    loopback('object store console', composePort(box, 'OBJECTSTORE_CONSOLE_PORT'), 'blocked'),
-    loopback('Caddy admin API', 2019, 'blocked'),
-    {
-      label: 'IPv6 loopback',
-      host: '::1',
-      port: composePort(box, 'CELLD_INTERNAL_PORT'),
-      expect: 'blocked',
-    },
-    { label: 'cloud metadata server', host: '169.254.169.254', port: 80, expect: 'blocked' },
-    { label: 'private 10/8', host: '10.255.255.1', port: 80, expect: 'blocked' },
-    {
-      label: 'private 172.16/12 (Docker bridges)',
-      host: '172.17.0.1',
-      port: 80,
-      expect: 'blocked',
-    },
-    { label: 'private 192.168/16', host: '192.168.255.1', port: 80, expect: 'blocked' },
-    { label: 'carrier-grade NAT', host: '100.100.100.200', port: 80, expect: 'blocked' },
-    loopback('node tunnel lease port', range.start, 'reachable'),
-    { label: 'public internet', host: publicHost, port: Number(publicPort), expect: 'reachable' },
-  ];
-  for (const endpoint of await resolveObjectStoreEndpoints(box)) {
-    targets.push({
-      label: 'object store',
-      host: endpoint.address,
-      port: endpoint.port,
-      expect: 'reachable',
-    });
-  }
-  if (metadataProxyEnabled(box)) {
-    targets.push(loopback('metadata token proxy', metadataProxyPort(box), 'reachable'));
-  }
-  return targets;
-}
-
-function compose(envFile: string, args: string[]): { status: number; output: string } {
-  const result = spawnSync(
-    'docker',
-    ['compose', '-f', COMPOSE_FILE, '--env-file', envFile, ...args],
-    { encoding: 'utf8', cwd: dirname(COMPOSE_FILE) }
-  );
+function run(command: string, args: string[]): Run {
+  const result = spawnSync(command, args, { encoding: 'utf8', cwd: dirname(COMPOSE_FILE) });
   return { status: result.status ?? 1, output: `${result.stdout ?? ''}${result.stderr ?? ''}` };
 }
 
-function runProbes(
-  envFile: string,
-  targets: ProbeTarget[],
-  user: string | null
-): Map<number, ProbeOutcome> {
-  const script = buildProbeScript(targets, DEFAULT_PROBE_TIMEOUT_SECONDS);
-  const userArgs = user ? ['--user', user] : [];
-  const result = compose(envFile, [
-    'run',
-    '--rm',
-    '--no-deps',
-    '-T',
-    ...userArgs,
-    '--entrypoint',
-    'bash',
-    'celld',
-    '-c',
-    script,
-  ]);
-  return parseProbeOutput(result.output);
+function compose(envFile: string, args: string[]): Run {
+  return run('docker', ['compose', '-f', COMPOSE_FILE, '--env-file', envFile, ...args]);
 }
 
-async function main(): Promise<void> {
-  const { values } = parseArgs({
-    options: { 'env-file': { type: 'string' }, 'public-probe': { type: 'string' } },
-  });
-  const envFile = resolve(values['env-file'] ?? join(REPO_ROOT, 'deploy/selfhost/.env'));
-  const box = parseDotenv(readFileSync(envFile, 'utf8'), envFile);
-  const failures: string[] = [];
+/** A sleeping container of the celld service to run probes in; removed by the caller. */
+function startProbeContainer(envFile: string): string {
+  const name = `sam-verify-fence-${process.pid}`;
+  const started = compose(envFile, [
+    'run',
+    '-d',
+    '--rm',
+    '--no-deps',
+    '--name',
+    name,
+    '--entrypoint',
+    'sleep',
+    'celld',
+    '600',
+  ]);
+  if (started.status !== 0) throw new Error(`cannot start a probe container: ${started.output}`);
+  return name;
+}
 
-  const table = compose(envFile, [
+function inContainer(name: string, args: string[], user?: number): Run {
+  const userArgs = user === undefined ? [] : ['--user', `${user}:${user}`];
+  return run('docker', ['exec', ...userArgs, name, ...args]);
+}
+
+function probe(
+  name: string,
+  targets: readonly VerifyTarget[],
+  user?: number
+): Map<number, ProbeOutcome> {
+  const script = buildProbeScript(probeSpecs(targets), DEFAULT_PROBE_TIMEOUT_SECONDS);
+  return parseProbeOutput(inContainer(name, ['bash', '-c', script], user).output);
+}
+
+/** The nameservers in the applied dns4/dns6 sets, from the fence service. */
+function appliedNameservers(envFile: string): string[] | null {
+  const listed = compose(envFile, [
     'exec',
     '-T',
     'egress-fence',
     'nft',
+    '-j',
     'list',
     'table',
     'inet',
     EGRESS_FENCE_TABLE,
   ]);
-  if (table.status !== 0) {
-    failures.push(`nftables table ${EGRESS_FENCE_TABLE} not visible (is egress-fence running?)`);
+  return listed.status === 0 ? dnsSetElements(JSON.parse(listed.output) as unknown) : null;
+}
+
+/** celld's resolv.conf: the running celld container's, else the probe container's. */
+function celldNameservers(envFile: string, probeContainer: string): string[] {
+  const running = compose(envFile, ['exec', '-T', 'celld', 'cat', '/etc/resolv.conf']);
+  const text =
+    running.status === 0
+      ? running.output
+      : inContainer(probeContainer, ['cat', '/etc/resolv.conf']).output;
+  return parseNameservers(text);
+}
+
+function checkService(envFile: string, probeContainer: string, failures: string[]): void {
+  const applied = appliedNameservers(envFile);
+  if (applied === null) {
+    failures.push(
+      'cannot read the fence from the egress-fence service: it is not running, and celld ' +
+        'stops serving once its attestation is stale'
+    );
+    return;
   }
-
-  const targets = await fenceTargets(box, values['public-probe'] ?? DEFAULT_PUBLIC_PROBE);
-  // The same probes as another uid: a target only counts as fenced if that uid gets through.
-  const verdict = evaluateProbes(
-    targets,
-    runProbes(envFile, targets, null),
-    runProbes(envFile, targets, `${CONTROL_UID}:${CONTROL_UID}`)
-  );
-  failures.push(...verdict.failures);
-  for (const warning of verdict.warnings) console.warn(`[selfhost] warning: ${warning}`);
-
-  for (const target of targets) {
-    console.log(
-      `  ${target.expect === 'blocked' ? 'deny ' : 'allow'}  ${target.label} ${target.host}:${target.port}`
+  const missing = missingNameservers(celldNameservers(envFile, probeContainer), applied);
+  if (missing.length > 0) {
+    failures.push(
+      `resolver drift: celld uses ${missing.join(', ')}, which the fence's DNS sets do not ` +
+        'open; the egress-fence service syncs them from resolv.conf within its recheck interval'
     );
   }
+  const attestation = compose(envFile, ['exec', '-T', 'egress-fence', 'cat', ATTESTATION_PATH]);
+  const problem = attestationProblem(
+    attestation.output,
+    Math.floor(Date.now() / 1000),
+    DEFAULT_ATTESTATION_MAX_AGE_SECONDS
+  );
+  if (problem) failures.push(`${problem}; celld stops serving without it`);
+}
+
+function localAddresses(): string[] {
+  return Object.values(networkInterfaces())
+    .flat()
+    .map((entry) => entry?.address ?? '')
+    .filter(Boolean);
+}
+
+async function verify(envFile: string, publicProbe: string, publicName: string): Promise<string[]> {
+  const box = parseDotenv(readFileSync(envFile, 'utf8'), envFile);
+  const own = localAddresses();
+  const targets = await verifyTargets({
+    box,
+    range: resolveTunnelPortRange(box),
+    publicProbe,
+    localAddresses: own,
+  });
+  const name = startProbeContainer(envFile);
+  try {
+    const verdict = judgeTargets(
+      targets,
+      probe(name, targets),
+      probe(name, targets, CONTROL_UID),
+      new Set(own)
+    );
+    for (const note of verdict.notes) console.warn(`[selfhost] note: ${note}`);
+    const failures = [...verdict.failures];
+    if (inContainer(name, ['getent', 'ahosts', publicName]).status !== 0) {
+      failures.push(`celld cannot resolve ${publicName}: DNS is blocked or the resolver is down`);
+    }
+    checkService(envFile, name, failures);
+    for (const target of targets) {
+      console.log(
+        `  ${target.expect === 'blocked' ? 'deny ' : 'allow'}  ${target.label} ${target.host}:${target.port}`
+      );
+    }
+    return failures;
+  } finally {
+    run('docker', ['rm', '-f', name]);
+  }
+}
+
+async function main(): Promise<void> {
+  const { values } = parseArgs({
+    options: {
+      'env-file': { type: 'string' },
+      'public-probe': { type: 'string' },
+      'public-name': { type: 'string' },
+    },
+  });
+  const envFile = resolve(values['env-file'] ?? join(REPO_ROOT, 'deploy/selfhost/.env'));
+  const failures = await verify(
+    envFile,
+    values['public-probe'] ?? DEFAULT_PUBLIC_PROBE,
+    values['public-name'] ?? DEFAULT_PUBLIC_NAME
+  );
   if (failures.length > 0) {
     console.error('\n[selfhost] EGRESS FENCE NOT IN EFFECT:');
     for (const failure of failures) console.error(`  - ${failure}`);
