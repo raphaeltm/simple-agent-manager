@@ -1,0 +1,19 @@
+---
+/**
+ * Candidate homepage (2026-11-11): SAM as the open-source operating system for software factories.
+ * The whole body lives in FactoryHome so shipping it means rendering <FactoryHome /> from
+ * src/pages/index.astro. Unlinked and noindex until then.
+ */
+import Base from '../../layouts/Base.astro';
+import Header from '../../components/Header.astro';
+import FactoryHome from '../../components/factory/FactoryHome.astro';
+---
+
+<Base
+  title="SAM: the open-source operating system for scalable software factories"
+  description="Simple Agent Manager is where your team plans, builds, reviews and ships with AI coding agents, on machines in your own cloud. Open source under AGPL-3.0."
+  noindex
+>
+  <Header />
+  <FactoryHome />
+</Base>

@@ -1,0 +1,70 @@
+---
+/**
+ * One real SAM screen, in the theme the visitor is using. Both theme variants are CSS custom
+ * properties (`themedImage`), and the image only loads once the shot is near the viewport
+ * (`data-near`, set by the script below), so a visitor downloads one theme's images as they scroll.
+ */
+import { factoryShotFiles, factoryShots, type FactoryShotName } from '../../data/factory-shots';
+import { themedImage } from '../../lib/themed-image';
+
+interface Props {
+  name: FactoryShotName;
+  /** Decorative copies (the same screen described elsewhere) pass true. */
+  decorative?: boolean;
+  /** Load straight away, for the first screen. */
+  eager?: boolean;
+  class?: string;
+}
+
+const { name, decorative = false, eager = false, class: className } = Astro.props;
+const shot = factoryShots[name];
+---
+
+<div
+  class:list={['fshot', className]}
+  style={themedImage(factoryShotFiles(name), shot)}
+  data-fshot
+  data-near={eager ? '' : undefined}
+  role={decorative ? undefined : 'img'}
+  aria-label={decorative ? undefined : shot.alt}
+  aria-hidden={decorative ? 'true' : undefined}
+>
+</div>
+
+<noscript><style>.fshot { background-image: var(--img-dark); }</style></noscript>
+
+<script>
+  const shots = [...document.querySelectorAll<HTMLElement>('[data-fshot]:not([data-near])')];
+  if (!('IntersectionObserver' in window)) {
+    shots.forEach((s) => s.setAttribute('data-near', ''));
+  } else {
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (!e.isIntersecting) continue;
+          e.target.setAttribute('data-near', '');
+          io.unobserve(e.target);
+        }
+      },
+      { rootMargin: '900px 0px' },
+    );
+    shots.forEach((s) => io.observe(s));
+  }
+</script>
+
+<style>
+  .fshot {
+    display: block;
+    width: 100%;
+    background-size: 100% 100%;
+    background-repeat: no-repeat;
+  }
+
+  .fshot[data-near] {
+    background-image: var(--img-dark);
+  }
+
+  :global(html[data-theme='light']) .fshot[data-near] {
+    background-image: var(--img-light);
+  }
+</style>

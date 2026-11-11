@@ -1,0 +1,147 @@
+/*
+ * Shared layout for the software-factory homepage (FactoryHome.astro and its sections).
+ * Colours come from the brand tokens so both site themes work.
+ */
+
+.fh {
+  --fh-amber: #f5b14a;
+  --fh-ring: rgb(74 222 128 / 0.9);
+  --fh-frame-shadow:
+    0 1px 0 rgb(255 255 255 / 0.12) inset,
+    0 30px 70px -28px rgb(0 0 0 / 0.85),
+    0 40px 120px -60px rgb(34 197 94 / 0.4);
+  overflow-x: clip;
+}
+
+:root[data-theme='light'] .fh {
+  --fh-amber: #b45309;
+  --fh-ring: rgb(21 128 61 / 0.85);
+  --fh-frame-shadow:
+    0 1px 0 rgb(255 255 255 / 0.7) inset,
+    0 26px 60px -30px rgb(16 40 28 / 0.35),
+    0 30px 90px -60px rgb(21 128 61 / 0.35);
+}
+
+.fh-section {
+  position: relative;
+  padding: 104px 0;
+}
+
+.fh-kicker {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  letter-spacing: 0.02em;
+  color: var(--color-accent-strong);
+}
+
+.fh-h2 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: clamp(1.875rem, 3.6vw, 2.75rem);
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+  color: var(--color-fg-primary);
+  max-width: 24ch;
+}
+
+.fh-lede {
+  font-size: 1.125rem;
+  line-height: 1.6;
+  color: var(--color-fg-muted);
+  max-width: 62ch;
+}
+
+.fh-head {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 56px;
+}
+
+.fh-head--center {
+  justify-items: center;
+  text-align: center;
+}
+
+.fh-head--center .fh-h2,
+.fh-head--center .fh-lede {
+  margin-inline: auto;
+}
+
+.fh-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+/* A real screen in a glass frame. */
+.fh-frame {
+  position: relative;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  border: 1px solid var(--glass-border-hover);
+  background: var(--color-bg-inset);
+  box-shadow: var(--fh-frame-shadow);
+}
+
+.fh-note {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--color-fg-dim);
+}
+
+.fh-soon {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fh-amber);
+  border: 1px solid currentColor;
+  vertical-align: 2px;
+}
+
+/* Scroll reveal: elements rise into place once (FactoryHome's script adds .is-in). */
+.fh [data-reveal] {
+  opacity: 0;
+  transform: translateY(22px);
+  transition:
+    opacity 0.7s ease,
+    transform 0.9s cubic-bezier(0.2, 1, 0.3, 1);
+  transition-delay: var(--delay, 0ms);
+}
+
+.fh [data-reveal].is-in {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fh [data-reveal] {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
+@media (max-width: 767px) {
+  .fh-section {
+    padding: 72px 0;
+  }
+
+  .fh-head {
+    margin-bottom: 36px;
+  }
+
+  .fh-lede {
+    font-size: 1rem;
+  }
+
+  .fh-actions .sam-btn {
+    flex: 1 1 0;
+    justify-content: center;
+    padding-inline: 12px;
+  }
+}

@@ -417,12 +417,17 @@ export async function assertThemeButtonsNotClipped(page: Page) {
  * For `'system'`, pass `prefersDark` to deterministically control the OS
  * preference: a `matchMedia` override is installed before the app boots so the
  * pre-paint script and ThemeContext resolve `system` to a known value.
+ *
+ * `SHOT_THEME=dark|light` overrides the requested theme, so screenshot specs written for one
+ * theme can also capture the other (the website shows its product images in both).
  */
 export async function seedTheme(
   page: Page,
   theme: 'dark' | 'light' | 'system',
   prefersDark = true
 ) {
+  const forced = process.env.SHOT_THEME;
+  if (forced === 'dark' || forced === 'light') theme = forced;
   await page.addInitScript(
     ({ value, dark }) => {
       window.localStorage.setItem('sam-theme', value);
