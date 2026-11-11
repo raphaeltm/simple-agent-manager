@@ -1,0 +1,109 @@
+---
+/**
+ * The questions a platform team asks before a trial, answered with what ships today. Sources:
+ * guides/installer.mdx, guides/self-hosting.mdx (sign-in, approval, GitHub App), guides/collaboration.md
+ * (small teams per project), architecture/security.md, guides/compute-pools.md (limits, quotas).
+ */
+import { SINGLE_VM_INSTALL_SHIPPED } from '../../data/factory-shots';
+
+const answers = [
+  {
+    q: 'Where does it run?',
+    a: `The control plane runs in your own Cloudflare account${SINGLE_VM_INSTALL_SHIPPED ? ' or on a single VM you run' : ''}. Agent machines run in your cloud accounts. There is no SAM-hosted service in the path.`,
+    link: { href: '/docs/architecture/security/', text: 'Security model' },
+  },
+  {
+    q: 'How long does setup take?',
+    a: 'About half an hour once the installer is running. Today you run the installer yourself, with a terminal and a Cloudflare API token. You need Workers Paid and a domain, then a cloud account and an agent key or subscription.',
+    link: { href: '/docs/guides/installer/', text: 'Installer guide' },
+  },
+  {
+    q: 'Who gets in?',
+    a: 'People sign in with GitHub, Google, GitLab or an emailed code, and admins can require approval for new accounts. There is no SSO yet. A project is built for a small team; run as many projects as you need.',
+  },
+  {
+    q: 'How are agents kept apart?',
+    a: 'Every task gets its own container on a machine in your account. Credentials are stored encrypted and scoped to a person or a project, and the GitHub App only has the permissions you grant it.',
+  },
+  {
+    q: 'How is spend kept in check?',
+    a: 'Set a machine limit per person and a monthly compute quota. Idle machines stay warm for 30 minutes, then shut down. Admins see estimated machine cost per person, and model spend for work that goes through SAM.',
+  },
+  {
+    q: 'Does it hold up?',
+    a: 'SAM is built with SAM: agents running on it write the platform, this site and its docs.',
+  },
+];
+---
+
+<section class="fh-section questions" aria-labelledby="questions-title">
+  <div class="container">
+    <div class="fh-head">
+      <p class="fh-kicker">Before you trial it</p>
+      <h2 class="fh-h2" id="questions-title">The questions a platform team asks first</h2>
+    </div>
+    <dl class="q-grid">
+      {answers.map((x, i) => (
+        <div class="q-item" data-reveal style={`--delay:${(i % 3) * 80}ms`}>
+          <dt>{x.q}</dt>
+          <dd>
+            {x.a}
+            {x.link && <a href={x.link.href} class="q-link">{x.link.text}</a>}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  </div>
+</section>
+
+<style>
+  .q-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 32px 36px;
+  }
+
+  .q-item {
+    padding-top: 18px;
+    border-top: 1px solid var(--color-border-subtle);
+  }
+
+  .q-item dt {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 1.125rem;
+    color: var(--color-fg-primary);
+    margin-bottom: 8px;
+  }
+
+  .q-item dd {
+    color: var(--color-fg-muted);
+    font-size: 0.9375rem;
+    line-height: 1.6;
+  }
+
+  .q-link {
+    display: inline-block;
+    margin-left: 6px;
+    color: var(--fh-accent-text);
+    font-size: 0.875rem;
+    text-decoration: none;
+  }
+
+  .q-link::after {
+    content: ' →';
+  }
+
+  @media (max-width: 900px) {
+    .q-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 600px) {
+    .q-grid {
+      grid-template-columns: 1fr;
+      gap: 24px;
+    }
+  }
+</style>

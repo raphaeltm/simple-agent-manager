@@ -1,0 +1,253 @@
+---
+/**
+ * Software-factory homepage hero: the promise, then the real SAM home screen rising into place
+ * with two real cards from the same project floating in front (an agent waiting on a person, and
+ * a pull request whose checks passed). The animation plays once and ends within 4 s; the resting
+ * frame is the markup, which is what reduced-motion visitors see.
+ */
+import Badge from '../../../../../packages/ui/src/brand/Badge.astro';
+import { SINGLE_VM_INSTALL_SHIPPED } from '../../data/factory-shots';
+import Shot from './Shot.astro';
+---
+
+<section class="fh-hero" aria-labelledby="fh-hero-title">
+  <div class="fh-hero-light" aria-hidden="true"></div>
+  <div class="container fh-hero-inner">
+    <Badge>Open source · Your infrastructure</Badge>
+    <h1 class="fh-hero-title" id="fh-hero-title">
+      The open-source operating system for scalable <span class="gradient-text">software factories</span>
+    </h1>
+    <p class="fh-lede fh-hero-lede">
+      Simple Agent Manager is where your team plans, builds, reviews and ships with AI coding agents.
+      It runs on machines in your own cloud, so you set the rules and keep the code.
+    </p>
+    <div class="fh-actions fh-hero-actions">
+      <a href="/self-host/" class="sam-btn sam-btn--primary">Deploy SAM</a>
+      <a href="#how-work-moves" class="sam-btn sam-btn--glass">See how work moves</a>
+    </div>
+    <ul class="fh-proof" aria-label="At a glance">
+      <li>7 coding agents</li>
+      <li>7 cloud providers</li>
+      <li>AGPL-3.0 license</li>
+      <li>
+        Your Cloudflare account or one VM{!SINGLE_VM_INSTALL_SHIPPED && <span class="fh-soon">soon</span>}
+      </li>
+    </ul>
+
+    <div class="fh-stage">
+      <div class="fh-screen fh-frame">
+        <Shot name="dashboard" eager />
+      </div>
+      <div class="fh-card fh-card--wait">
+        <Shot name="needs-you" eager />
+      </div>
+      <div class="fh-card fh-card--done">
+        <Shot name="idea-review" eager />
+      </div>
+    </div>
+    <p class="fh-note">Real SAM screens · sample project</p>
+  </div>
+</section>
+
+<style>
+  .fh-hero {
+    position: relative;
+    isolation: isolate;
+    padding: calc(var(--header-height) + 20px) 0 24px;
+    text-align: center;
+  }
+
+  .fh-hero-light {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background:
+      radial-gradient(48% 36% at 50% 82%, rgb(34 197 94 / 0.22), transparent 70%),
+      radial-gradient(56% 50% at 50% 0%, rgb(6 78 59 / 0.45), transparent 72%);
+  }
+
+  :global(html[data-theme='light']) .fh-hero-light {
+    background:
+      radial-gradient(48% 36% at 50% 82%, rgb(34 197 94 / 0.16), transparent 70%),
+      radial-gradient(56% 50% at 50% 0%, rgb(187 247 208 / 0.6), transparent 72%);
+  }
+
+  .fh-hero-inner {
+    display: grid;
+    /* minmax(0, 1fr): the no-wrap proof items must not widen the column past a 320px screen. */
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+    gap: 18px;
+  }
+
+  .fh-hero-title {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: clamp(2.25rem, 4.4vw, 3.5rem);
+    line-height: 1.04;
+    letter-spacing: -0.02em;
+    max-width: 23ch;
+    text-wrap: balance;
+  }
+
+  .fh-hero-lede {
+    max-width: 56ch;
+    text-wrap: pretty;
+  }
+
+  .fh-hero-actions {
+    justify-content: center;
+  }
+
+  .fh-proof {
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 6px 26px;
+    font-family: var(--font-mono);
+    font-size: 0.78125rem;
+    color: var(--color-fg-dim);
+  }
+
+  .fh-proof li {
+    position: relative;
+    white-space: nowrap;
+  }
+
+  .fh-proof li + li::before {
+    content: '';
+    position: absolute;
+    left: -15px;
+    top: 50%;
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--color-accent);
+    transform: translateY(-50%);
+  }
+
+  /* ---- The stage: the home screen tilts up into place, cards land in front ---- */
+  .fh-stage {
+    position: relative;
+    width: min(1060px, 100%);
+    margin-top: 16px;
+    perspective: 1900px;
+  }
+
+  .fh-screen {
+    transform: rotateX(12deg);
+    transform-origin: center bottom;
+    animation: fh-rise 1.6s cubic-bezier(0.16, 1.1, 0.3, 1) both;
+  }
+
+  @keyframes fh-rise {
+    from {
+      transform: rotateX(36deg) translateY(48px);
+      opacity: 0;
+    }
+  }
+
+  .fh-card {
+    position: absolute;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid var(--glass-border-hover);
+    box-shadow:
+      0 24px 50px -16px rgb(0 0 0 / 0.75),
+      0 0 0 1px rgb(255 255 255 / 0.04);
+    animation: fh-land 0.9s cubic-bezier(0.2, 1.3, 0.3, 1) both;
+  }
+
+  :global(html[data-theme='light']) .fh-card {
+    box-shadow: 0 22px 46px -18px rgb(16 40 28 / 0.4);
+  }
+
+  .fh-card--wait {
+    left: -3%;
+    bottom: 9%;
+    width: 46%;
+    animation-delay: 1.3s;
+  }
+
+  .fh-card--wait::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    box-shadow: 0 0 0 2px var(--fh-amber), 0 0 34px -4px var(--fh-amber);
+    opacity: 0;
+    animation: fh-glow 1.8s ease 2.1s both;
+  }
+
+  .fh-card--done {
+    right: -3%;
+    top: 16%;
+    width: 30%;
+    animation-delay: 2.2s;
+  }
+
+  @keyframes fh-land {
+    from {
+      opacity: 0;
+      transform: translateY(26px) scale(0.94);
+    }
+  }
+
+  @keyframes fh-glow {
+    40% {
+      opacity: 1;
+    }
+    to {
+      opacity: 0.35;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .fh-screen,
+    .fh-card,
+    .fh-card--wait::after {
+      animation: none;
+    }
+
+    .fh-card--wait::after {
+      opacity: 0.35;
+    }
+  }
+
+  @media (max-width: 767px) {
+    .fh-hero {
+      padding-top: calc(var(--header-height) + 36px);
+    }
+
+    .fh-proof {
+      gap: 4px 18px;
+    }
+
+    .fh-proof li {
+      white-space: normal;
+    }
+
+    .fh-proof li + li::before {
+      display: none;
+    }
+
+    .fh-stage {
+      margin-top: 18px;
+      padding-bottom: 64px;
+    }
+
+    .fh-card--wait {
+      left: 2%;
+      bottom: 0;
+      width: 80%;
+    }
+
+    .fh-card--done {
+      right: 0;
+      top: auto;
+      bottom: 52%;
+      width: 46%;
+    }
+  }
+</style>
