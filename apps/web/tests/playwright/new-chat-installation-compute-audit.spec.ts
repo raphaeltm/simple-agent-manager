@@ -129,13 +129,15 @@ async function setupMocks(page: Page, scenario: Scenario) {
         // not provisioning. The red "stopped by audit" text in screenshots is this response.
         return respond(503, { error: 'AUDIT_STOP', message: 'stopped by audit' });
       }
-      if (subPath === '/agent-profiles') return respond(200, { items: scenario.profiles });
-      if (subPath === '/agent-profiles/picker')
-        return respond(200, { usageWindowDays: 30, usage: [], hiddenProfileIds: [] });
-      if (subPath === '/skills') return respond(200, { items: [] });
-      if (subPath === '/cached-commands') return respond(200, { commands: [] });
-      if (subPath === '/tasks') return respond(200, { tasks: [], nextCursor: null });
-      if (subPath === '/sessions') return respond(200, { sessions: [], total: 0, hasMore: false });
+      const projectReads: Record<string, unknown> = {
+        '/agent-profiles': { items: scenario.profiles },
+        '/agent-profiles/picker': { usageWindowDays: 30, usage: [], hiddenProfileIds: [] },
+        '/sessions': { sessions: [], total: 0, hasMore: false },
+        '/tasks': { tasks: [], nextCursor: null },
+        '/cached-commands': { commands: [] },
+        '/skills': { items: [] },
+      };
+      if (subPath in projectReads) return respond(200, projectReads[subPath]);
       return respond(200, MOCK_PROJECT);
     }
     if (path === '/api/projects')
