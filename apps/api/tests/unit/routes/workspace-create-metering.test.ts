@@ -605,12 +605,17 @@ describe('fresh workspace metering through registered HTTP and real SQL', () => 
     }
   );
 
-  it('lets a slow create outlive the attempt deadline, then reconciles the accepted VM on a later tick', async () => {
+  it('lets a slow create outlive the attempt deadline, records it, and finishes on a later tick', async () => {
     const f = await createMeteringFixture({ hangProvider: true });
     // The 200 ms attempt deadline did not cancel the marked create (staging: GCP's create was
-    // cut that way inside its token exchange, leaving nothing to reconcile).
+    // cut that way inside its token exchange, leaving nothing to reconcile). The VM identity
+    // is recorded in the same attempt; the public-IP DNS step keeps the deadline and finishes
+    // on the next tick.
     expect(f.providerSignals[0]?.aborted).toBe(false);
     expect(f.providerCreates).toHaveLength(1);
+    expect(f.f.sqlite.prepare('SELECT provider_instance_id FROM nodes').get()).toEqual({
+      provider_instance_id: expect.any(String),
+    });
     expect(usage(f.f, f.workspaceId)).toEqual([]);
     f.releaseHealth(Response.json({ status: 'ok' }));
     await f.durable.tick();

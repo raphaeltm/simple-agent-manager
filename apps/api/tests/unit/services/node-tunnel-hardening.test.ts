@@ -287,15 +287,17 @@ describe('deadline cuts on each side of the create POST', () => {
         return vmFor();
       }
     );
+    // The attempt also publishes what it created: one durable attempt, one VM, running node.
     await expect(
       provisionNode(node.id, env, undefined, {
         signal: first.signal,
         durableAllocation: allocation(crypto.randomUUID()),
       })
-    ).rejects.toBeInstanceOf(NodeAllocationUncertainError);
+    ).resolves.toEqual({ allocationConfirmed: true });
     expect(store.providerCreateRequested).toBe(true);
     expect(completed).toBe(true);
     expect(mocks.createVM).toHaveBeenCalledTimes(1);
+    expect(readNode(node.id)).toMatchObject({ status: 'running', transport: 'cloudflare-tunnel' });
   });
 
   it('a deadline that fires during recovery still records the adopted VM, so the next attempt finishes', async () => {

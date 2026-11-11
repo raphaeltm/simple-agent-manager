@@ -383,10 +383,12 @@ export async function provisionNode(
       }
       throw err;
     }
-    // A durable attempt records the identity it just created or adopted before honouring a
-    // fired deadline: that write is the progress the next attempt resumes from. Later abort
-    // checks (below) still end the attempt.
-    if (!durable) throwIfProviderRequestAborted(providerContext);
+    // From here on a durable attempt publishes what it created or adopted regardless of the
+    // attempt deadline: D1 writes and authority re-checks, each bounded by its own timeout
+    // (the public-IP DNS call below keeps the deadline). Cutting it here only made every later attempt repeat the
+    // same publish (staging, GCP, 2026-11-11). Non-durable callers keep their cancellation.
+    const publishContext = durable ? undefined : providerContext;
+    throwIfProviderRequestAborted(publishContext);
 
     // Persist the provider identity before the post-request authority check so
     // a revocation that races createVM can strictly destroy the paid resource.
@@ -415,7 +417,7 @@ export async function provisionNode(
         provider,
         providerInstanceId: vm.id,
         runtimeIncarnationId: provisioningRuntimeIncarnationId,
-        providerContext,
+        providerContext: publishContext,
       });
       throw new Error('Node lifecycle changed before provider identity could be recorded');
     }
@@ -439,7 +441,7 @@ export async function provisionNode(
       try {
         await deleteNodeResourcesStrict(node.id, node.userId, env, {
           cleanupDns: false,
-          providerRequestContext: providerContext,
+          providerRequestContext: publishContext,
           expectedRuntime: {
             userId: node.userId,
             runtime: node.runtime,
@@ -459,7 +461,7 @@ export async function provisionNode(
           provider,
           providerInstanceId: vm.id,
           nodeId: node.id,
-          providerContext,
+          providerContext: publishContext,
         });
       }
       throw authorityErr;
@@ -505,11 +507,11 @@ export async function provisionNode(
           provider,
           providerInstanceId: vm.id,
           runtimeIncarnationId: provisioningRuntimeIncarnationId,
-          providerContext,
+          providerContext: publishContext,
         });
         throw new Error('Node lifecycle changed before pending-IP state could be published');
       }
-      throwIfProviderRequestAborted(providerContext);
+      throwIfProviderRequestAborted(publishContext);
       return { allocationConfirmed: true };
     }
 
@@ -521,6 +523,8 @@ export async function provisionNode(
           ? await createNodeBackendDNSRecord(node.id, vm.ip, env, providerContext?.signal, true)
           : await createNodeBackendDNSRecord(node.id, vm.ip, env);
       } catch (dnsErr) {
+        // The DNS create stays on the attempt's deadline: a lost response is cut and adopted
+        // exactly on replay (createNodeBackendDNSRecord recoverExisting). Tunnel nodes skip it.
         throwIfProviderRequestAborted(providerContext);
         log.error('node_provisioning.dns_record_failed', {
           nodeId: node.id,
@@ -530,7 +534,7 @@ export async function provisionNode(
       }
     }
 
-    throwIfProviderRequestAborted(providerContext);
+    throwIfProviderRequestAborted(publishContext);
     const finalUpdate = await db
       .update(schema.nodes)
       .set({
@@ -565,11 +569,11 @@ export async function provisionNode(
         providerInstanceId: vm.id,
         runtimeIncarnationId: provisioningRuntimeIncarnationId,
         backendDnsRecordId,
-        providerContext,
+        providerContext: publishContext,
       });
       throw new Error('Node lifecycle changed before running state could be published');
     }
-    throwIfProviderRequestAborted(providerContext);
+    throwIfProviderRequestAborted(publishContext);
     return { allocationConfirmed: true };
   } catch (err) {
     // Record the cause first, aborts included: the abort branches below rethrow before any
