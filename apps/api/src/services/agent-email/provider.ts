@@ -10,13 +10,11 @@
  * whenever it exists, so a Cloudflare deployment behaves exactly as before.
  */
 import type { Env } from '../../env';
-import { createModuleLogger } from '../../lib/logger';
+import { log } from '../../lib/logger';
 import { agentEmailDomain } from './address';
 import { sendSmtpMessage, type SmtpConnect } from './smtp-client';
 import { resolveSmtpConfig, type SmtpConfig, type SmtpEnv } from './smtp-config';
 import { buildSmtpMessage } from './smtp-message';
-
-const log = createModuleLogger('agent-email-provider');
 
 export interface OutboundAgentEmail {
   from: { email: string; name: string };
