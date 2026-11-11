@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   getProviderCatalog: vi.fn(),
   listProjects: vi.fn(),
   getProject: vi.fn(),
+  getTrialStatus: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
@@ -25,6 +26,7 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   getProviderCatalog: mocks.getProviderCatalog,
   listProjects: mocks.listProjects,
   getProject: mocks.getProject,
+  getTrialStatus: mocks.getTrialStatus,
 }));
 
 vi.mock('../../../src/components/UserMenu', () => ({
@@ -57,6 +59,14 @@ describe('CreateWorkspace', () => {
     mocks.listCredentials.mockResolvedValue([
       { provider: 'hetzner', createdAt: '2026-01-01T00:00:00Z' },
     ]);
+    mocks.getTrialStatus.mockResolvedValue({
+      available: false,
+      agentType: null,
+      hasInfraCredential: false,
+      hasAgentCredential: false,
+      dailyTokenBudget: null,
+      dailyTokenUsage: null,
+    });
     mocks.listGitHubInstallations.mockResolvedValue([
       {
         id: 'inst-1',
@@ -181,6 +191,30 @@ describe('CreateWorkspace', () => {
 
     renderCreateWorkspace();
     expect(await screen.findByText('Setup Required')).toBeInTheDocument();
+    expect(mocks.getTrialStatus).toHaveBeenCalled();
+  });
+
+  // A self-hosted install provides machines with the SAM-managed AI proxy off: the server reports
+  // `available: false` with `hasInfraCredential: true`. Installation machines still count.
+  it('counts installation machines as a cloud provider when the AI proxy is off', async () => {
+    mocks.listCredentials.mockResolvedValue([]);
+    mocks.listGitHubInstallations.mockResolvedValue([]);
+    mocks.getTrialStatus.mockResolvedValue({
+      available: false,
+      agentType: null,
+      hasInfraCredential: true,
+      hasAgentCredential: false,
+      dailyTokenBudget: null,
+      dailyTokenUsage: null,
+    });
+
+    renderCreateWorkspace();
+
+    // GitHub is missing so the checklist stays visible; the cloud row is the one under test.
+    expect(await screen.findByText('Required to access repositories')).toBeInTheDocument();
+    expect(await screen.findByText('Connected')).toBeInTheDocument();
+    expect(screen.queryByText(/Connect a cloud provider in Settings/)).not.toBeInTheDocument();
+    expect(mocks.getProviderCatalog).toHaveBeenCalled();
   });
 
   it('shows prerequisites checklist with loading states initially', async () => {

@@ -88,7 +88,7 @@ export function useSetupStatus(queryScope: string): SetupStatus {
   const hasRepoSource = hasGitHub || hasProject;
   const hasAgent = hasAgentCredential || catalog.agents.some((agent) => agent.configured);
   const instantEnabled = instantQuery.data === true;
-  const platformCompute = trial.trial?.hasInfraCredential === true;
+  const platformCompute = trial.platformCompute;
   const hasCompute = hasCloud || instantEnabled || platformCompute;
 
   // Loading until every read has settled. Deciding on the first read to land read the others
