@@ -319,6 +319,14 @@ marked unavailable and cannot be added; one already in the pool can still be rem
 
 Only machines in the pool, on accounts that are on, are eligible for placement.
 
+**Include a machine big enough for the default.** With the platform defaults (2 vCPU, 4 GB memory,
+15 GB disk) and the 1 GiB host memory reserve, a task needs a machine with at least 5 GiB of memory:
+a pool that holds only 4 GB machines (Google Cloud `e2-medium`, Hetzner `cx22`) can never place
+default work, and starting it fails with "No eligible compute-pool offering is available … for this
+task's requirements (2 vCPU, 4096 MB memory, 15 GB disk)". Add an 8 GB machine (for example
+`e2-standard-2`) next to the small one, or lower the platform default memory (see
+[Resource requirements](#resource-requirements-how-much-machine-work-asks-for)).
+
 #### How refresh treats your choices
 
 Refresh updates catalog facts — prices, specs, availability, new machine types — without undoing
