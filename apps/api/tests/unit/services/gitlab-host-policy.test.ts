@@ -8,7 +8,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import { handleAppError } from '../../../src/middleware/app-error-handler';
+import {
+  __resetAdminSettingsCacheForTest,
+  updateAdminSettings,
+} from '../../../src/services/admin-settings';
 import { verifyGitLabProjectAccess } from '../../../src/services/gitlab';
+import { createAdminSettingsEnv } from '../../helpers/admin-settings-env';
 
 const platformConfig = vi.hoisted(() => ({ getGitLabOAuthConfig: vi.fn() }));
 vi.mock('../../../src/services/platform-config', () => platformConfig);
@@ -112,6 +117,33 @@ describe('GitLab host policy', () => {
     });
     // outbound.maxRedirects defaults to 3 (settings unreadable here, so the default applies).
     expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it('the chain is cut at outbound.maxRedirects as the admin set it, not the default', async () => {
+    configure('https://gitlab.example.com', false);
+    __resetAdminSettingsCacheForTest();
+    const { sqlite, env } = createAdminSettingsEnv();
+    try {
+      await updateAdminSettings(env, {
+        changes: [{ name: 'outbound.maxRedirects', value: 1 }],
+        actorUserId: 'admin',
+      });
+      let hop = 0;
+      fetchMock.mockImplementation(
+        async () =>
+          new Response(null, {
+            status: 302,
+            headers: { location: `https://gitlab.example.com/api/v4/loop/${(hop += 1)}` },
+          })
+      );
+      await expect(verifyGitLabProjectAccess(env, 'glpat', 5)).rejects.toMatchObject({
+        statusCode: 502,
+        error: 'GITLAB_REQUEST_REFUSED',
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      sqlite.close();
+    }
   });
 
   it('a redirect to a refused host is a 502 GITLAB_REQUEST_REFUSED through the app error handler', async () => {

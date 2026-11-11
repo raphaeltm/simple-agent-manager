@@ -174,7 +174,11 @@ describe('GitLab sign-in through better-auth (vertical slice)', () => {
     const callback = new URL(REDIRECT_URI);
     callback.searchParams.set('code', network.approve(authorizeUrl));
     callback.searchParams.set('state', authorizeUrl.searchParams.get('state') ?? '');
-    const response = await app.request(callback.toString(), { headers: { cookie: jar.header() } }, env);
+    const response = await app.request(
+      callback.toString(),
+      { headers: { cookie: jar.header() } },
+      env
+    );
     jar.store(response);
     return response;
   }
@@ -227,6 +231,35 @@ describe('GitLab sign-in through better-auth (vertical slice)', () => {
     expect(sessionCount()).toBe(0);
     // Token exchange, then the profile request plus outbound.maxRedirects (3) hops.
     expect(network.requests.filter((r) => r === `GET ${PUBLIC_HOST}/api/v4/user`)).toHaveLength(4);
+  });
+
+  it('the profile fetch cuts a redirect chain at outbound.maxRedirects as the admin set it', async () => {
+    const env = envFor(PUBLIC_HOST);
+    // The admin's real settings writer, on the same database; 1 is not the default (3).
+    await updateAdminSettings(
+      {
+        ...env,
+        GITLAB_HOST: undefined,
+        GITLAB_CLIENT_ID: undefined,
+        GITLAB_CLIENT_SECRET: undefined,
+      } as Env,
+      { changes: [{ name: 'outbound.maxRedirects', value: 1 }], actorUserId: 'admin' }
+    );
+    __resetAdminSettingsCacheForTest();
+    let hop = 0;
+    const network = createFakeNetwork(PUBLIC_HOST, {
+      userResponse: () =>
+        new Response(null, {
+          status: 302,
+          headers: { location: `${PUBLIC_HOST}/api/v4/user?hop=${(hop += 1)}` },
+        }),
+    });
+    vi.stubGlobal('fetch', network.fetch);
+    const callback = await signIn(env, network);
+    expect(callback.headers.get('location')).toContain('error=');
+    expect(sessionCount()).toBe(0);
+    // The profile request plus one hop.
+    expect(network.requests.filter((r) => r === `GET ${PUBLIC_HOST}/api/v4/user`)).toHaveLength(2);
   });
 
   it('a private GitLab host without the admin opt-in is not offered for sign-in', async () => {

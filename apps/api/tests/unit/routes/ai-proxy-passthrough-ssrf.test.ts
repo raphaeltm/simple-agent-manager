@@ -15,7 +15,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from 'node:net';
 
 import { Hono } from 'hono';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../../src/services/provider-limit-credential-pin', () => ({
   assertProviderLimitCredentialPin: vi.fn(async () => {}),
@@ -25,7 +25,6 @@ const mockResolveForConsumer = vi.fn();
 const auth = vi.hoisted(() => ({ agentType: 'opencode' }));
 
 vi.mock('drizzle-orm/d1', () => ({ drizzle: () => ({}) }));
-vi.mock('../../../src/db/schema', () => ({}));
 vi.mock('../../../src/services/ai-proxy-shared', () => ({
   verifyAIProxyAuth: vi.fn(async () => ({
     userId: 'attacker-user',
@@ -53,9 +52,16 @@ vi.mock('../../../src/services/credential-limit-events', () => ({
   recordProxyCredentialLimitObservationsFromHeaders: vi.fn(),
 }));
 const mockLogWarn = vi.fn();
-vi.mock('../../../src/lib/logger', () => ({
-  log: { info: vi.fn(), error: vi.fn(), warn: (...args: unknown[]) => mockLogWarn(...args) },
-}));
+vi.mock('../../../src/lib/logger', () => {
+  const log = {
+    debug: vi.fn(),
+    info: vi.fn(),
+    error: vi.fn(),
+    warn: (...args: unknown[]) => mockLogWarn(...args),
+  };
+  // admin-settings (the hop-limit setting test) creates module loggers at import.
+  return { log, createModuleLogger: () => log, serializeError: (err: unknown) => ({ err }) };
+});
 vi.mock('../../../src/lib/secrets', () => ({ getCredentialEncryptionKey: () => 'k' }));
 vi.mock('../../../src/services/composable-credentials/resolve', () => ({
   resolveForConsumer: (...args: unknown[]) => mockResolveForConsumer(...args),
@@ -71,6 +77,11 @@ vi.mock('../../../src/services/composable-credentials/profile-context', () => ({
 }));
 
 import { aiProxyPassthroughRoutes } from '../../../src/routes/ai-proxy-passthrough';
+import {
+  __resetAdminSettingsCacheForTest,
+  updateAdminSettings,
+} from '../../../src/services/admin-settings';
+import { createAdminSettingsEnv } from '../../helpers/admin-settings-env';
 
 const INTERNAL_SECRET = 'INTERNAL-ONLY-RESPONSE-7f3c';
 const CHAT_PATH = '/ai/proxy/ws-token/openai/v1/chat/completions';
@@ -165,6 +176,9 @@ function credentialWithBaseUrl(baseUrl: string) {
   );
 }
 
+/** The DATABASE binding the routes see; a real settings database in the hop-limit setting test. */
+let database: unknown = {};
+
 function postChat(extra: Record<string, unknown> = {}) {
   return app.request(
     CHAT_PATH,
@@ -177,7 +191,7 @@ function postChat(extra: Record<string, unknown> = {}) {
         ...extra,
       }),
     },
-    { DATABASE: {}, KV: {}, AI_PROXY_ENABLED: 'true' }
+    { DATABASE: database, KV: {}, AI_PROXY_ENABLED: 'true' }
   );
 }
 
@@ -241,7 +255,9 @@ describe('AI proxy passthrough: redirect to an internal address', () => {
     expect(legitimate.hits[0]?.method).toBe('POST');
   });
 
-  it('control: a 307 from one public host to another is followed with the body replayed', async () => {
+  it('a 307 from one public host to another is refused: the prompt never reaches the second host', async () => {
+    // A 307 keeps the body; following it would hand the request (prompts, tool results) to a
+    // host the credential never named. guardedFetch refuses it (redirect_cross_origin_body).
     attackerRedirect = {
       status: 307,
       location: () => 'https://llm.test.example/v1/chat/completions',
@@ -250,13 +266,11 @@ describe('AI proxy passthrough: redirect to an internal address', () => {
 
     const res = await postChat();
 
-    expect(res.status).toBe(200);
-    expect(legitimate.hits).toHaveLength(1);
-    expect(legitimate.hits[0]?.method).toBe('POST');
-    expect(JSON.parse(legitimate.hits[0]?.body ?? '{}')).toMatchObject({ model: 'any-model' });
-    // The attacker's own key went to the attacker's host; it is not forwarded to another origin.
+    expect(res.status).toBe(502);
+    expect(legitimate.hits).toHaveLength(0);
+    // Liveness: the configured host was called once, with its own key.
+    expect(attacker.hits).toHaveLength(1);
     expect(attacker.hits[0]?.headers.authorization).toBe('Bearer sk-attacker-own-key');
-    expect(legitimate.hits[0]?.headers.authorization).toBeUndefined();
   });
 
   it('control: a streamed (SSE) response from a public endpoint is still relayed as a stream', async () => {
@@ -312,7 +326,7 @@ function postTo(path: string) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: 'claude-x', messages: [{ role: 'user', content: 'hi' }] }),
     },
-    { DATABASE: {}, KV: {}, AI_PROXY_ENABLED: 'true' }
+    { DATABASE: database, KV: {}, AI_PROXY_ENABLED: 'true' }
   );
 }
 
@@ -394,11 +408,39 @@ describe('a redirect chain longer than the hop limit (outbound.maxRedirects, def
     const res = await (dialect === 'openai' ? postChat() : postTo(path));
 
     // The first request plus three validated hops; the fourth Location is never requested.
-    expect(attacker.hits.map((hit) => hit.url).slice(1)).toEqual([
-      '/loop/1',
-      '/loop/2',
-      '/loop/3',
-    ]);
+    expect(attacker.hits.map((hit) => hit.url).slice(1)).toEqual(['/loop/1', '/loop/2', '/loop/3']);
+    expect(res.status).toBe(502);
+  });
+});
+
+describe('the passthrough reads outbound.maxRedirects as the admin set it', () => {
+  let sqlite: { close: () => void } | undefined;
+  afterEach(() => {
+    sqlite?.close();
+    sqlite = undefined;
+    database = {};
+    __resetAdminSettingsCacheForTest();
+  });
+
+  it('cuts the chain after one hop when the setting is 1, not the default 3', async () => {
+    __resetAdminSettingsCacheForTest();
+    const settings = createAdminSettingsEnv();
+    sqlite = settings.sqlite;
+    await updateAdminSettings(settings.env, {
+      changes: [{ name: 'outbound.maxRedirects', value: 1 }],
+      actorUserId: 'admin',
+    });
+    database = settings.env.DATABASE;
+    let hop = 0;
+    attackerRedirect = {
+      status: 307,
+      location: () => `https://attacker.test.example/loop/${(hop += 1)}`,
+    };
+    credentialWithBaseUrl('https://attacker.test.example/v1');
+
+    const res = await postChat();
+
+    expect(attacker.hits.map((hit) => hit.url).slice(1)).toEqual(['/loop/1']);
     expect(res.status).toBe(502);
   });
 });

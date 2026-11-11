@@ -321,15 +321,15 @@ describe('guardedFetch', () => {
       .fn()
       .mockResolvedValueOnce(redirect(307, 'https://b.example.com/x'))
       .mockResolvedValueOnce(new Response('ok'));
+    // Bodiless: a cross-origin 307/308 that carries a body is refused outright.
     await guardedFetch(
       'https://a.example.com/',
       {
-        method: 'POST',
-        body: '{}',
+        method: 'GET',
         headers: {
           Authorization: 'Bearer k',
           'x-api-key': 'k',
-          'content-type': 'application/json',
+          accept: 'application/json',
         },
       },
       { fetchFn }
@@ -337,8 +337,7 @@ describe('guardedFetch', () => {
     const headers = new Headers((fetchFn.mock.calls[1]?.[1] as RequestInit).headers);
     expect(headers.get('authorization')).toBeNull();
     expect(headers.get('x-api-key')).toBeNull();
-    expect(headers.get('content-type')).toBe('application/json');
-    expect((fetchFn.mock.calls[1]?.[1] as RequestInit).body).toBe('{}');
+    expect(headers.get('accept')).toBe('application/json');
   });
 
   it('keeps credential headers on a same-origin redirect', async () => {
