@@ -1,0 +1,164 @@
+---
+/**
+ * 01 Essence: a statement that lights up word by word as it scrolls past, the name story,
+ * and the four principles as cards that stack on top of each other.
+ */
+import SectionHead from './SectionHead.astro';
+
+const statement =
+  'SAM runs coding agents on your own cloud. Each task gets its own workspace, your whole team can see what the agents are doing, and the servers stay in an account you control.';
+const statementWords = statement.split(' ');
+
+const principles = [
+  {
+    word: 'Simple',
+    line: 'The name is a promise.',
+    body: 'One clear action per screen, plain words, and no jargon we have not explained. If a layout needs a legend, simplify the layout.',
+    shows: 'Generous space, one accent colour, short labels.',
+  },
+  {
+    word: 'Honest',
+    line: 'Show the real thing.',
+    body: 'Screenshots come from the real app. We describe features that ship today and label experiments as experiments.',
+    shows: 'Real UI with mock data. No mockups of features that do not exist.',
+  },
+  {
+    word: 'Yours',
+    line: 'Your cloud, your keys, your agents.',
+    body: 'SAM is open source and runs on infrastructure you own. We always say where things run and who can see them.',
+    shows: 'Plain statements about hosting, cost and access.',
+  },
+  {
+    word: 'Calm',
+    line: 'Agents are busy so you do not have to be.',
+    body: 'The work underneath is noisy. The interface stays quiet: dark glass, one green, and motion that settles.',
+    shows: 'Faint glows, short animations, colour only when it means something.',
+  },
+];
+---
+
+<section id="essence" class="bg-section" aria-labelledby="essence-title">
+  <div class="container">
+    <SectionHead id="essence" title="A helper that carries the work">
+      SAM is named after Samwise Gamgee, the friend who carries the load the whole way. That is
+      the job: SAM handles the servers, the cleanup and the bookkeeping so the work keeps moving.
+    </SectionHead>
+
+    <div class="bg-statement" data-progress>
+      <p>
+        {statementWords.map((word, index) => (
+          <Fragment><span style={`--k:${(index / statementWords.length).toFixed(3)}`}>{word}</span>{' '}</Fragment>
+        ))}
+      </p>
+    </div>
+
+    <h3 class="bg-sub">Four principles</h3>
+    <ol class="bg-stack">
+      {principles.map((principle, index) => (
+        <li class="bg-stack-card sam-glass sam-glass--slab sam-glass-rim" style={`--i:${index}`}>
+          <span class="bg-stack-n">0{index + 1}</span>
+          <div class="bg-stack-word">{principle.word}</div>
+          <div class="bg-stack-body">
+            <p class="bg-stack-line">{principle.line}</p>
+            <p>{principle.body}</p>
+            <p class="bg-stack-shows"><strong>In design:</strong> {principle.shows}</p>
+          </div>
+        </li>
+      ))}
+    </ol>
+  </div>
+</section>
+
+<style>
+  /* --- Statement: words light up as the paragraph crosses the screen --- */
+  .bg-statement p {
+    max-width: 980px;
+    font-family: var(--font-display);
+    font-size: clamp(1.75rem, 4.2vw, 3.25rem);
+    font-weight: 500;
+    line-height: 1.18;
+    letter-spacing: -0.025em;
+  }
+
+  .bg-statement span {
+    color: var(--color-fg-primary);
+  }
+
+  :global(html.bg-motion) .bg-statement span {
+    /* Each word turns on once progress passes its place in the sentence. */
+    opacity: calc(0.18 + clamp(0, (var(--p, 1) * 2.1 - 0.45 - var(--k)) * 8, 1) * 0.82);
+  }
+
+  /* --- Stacked principle cards --- */
+  .bg-stack {
+    display: grid;
+    gap: 22vh;
+    list-style: none;
+    padding-bottom: 8vh;
+  }
+
+  .bg-stack-card {
+    position: sticky;
+    top: calc(var(--header-height) + 32px + var(--i) * 22px);
+    display: grid;
+    gap: 16px 40px;
+    padding: 32px;
+    border-radius: 28px;
+    /* Opaque enough that a card hides the one it covers. */
+    background:
+      linear-gradient(160deg, var(--sam-glass-v2-sheen), transparent 40%),
+      var(--sam-glass-v2-fill-solid);
+  }
+
+  @media (min-width: 900px) {
+    .bg-stack-card {
+      grid-template-columns: 64px minmax(0, 1fr) minmax(0, 1fr);
+      align-items: end;
+      padding: 48px;
+      min-height: 320px;
+    }
+  }
+
+  .bg-stack-n {
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
+    color: var(--color-accent-strong);
+    align-self: start;
+  }
+
+  html[data-theme='light'] .bg-stack-n {
+    color: var(--color-accent);
+  }
+
+  .bg-stack-word {
+    font-family: var(--font-display);
+    font-size: clamp(3.25rem, 8vw, 6.5rem);
+    font-weight: 600;
+    line-height: 0.9;
+    letter-spacing: -0.045em;
+  }
+
+  .bg-stack-body {
+    display: grid;
+    gap: 10px;
+    color: var(--color-fg-muted);
+  }
+
+  .bg-stack-line {
+    font-family: var(--font-display);
+    font-size: 1.375rem;
+    font-weight: 600;
+    color: var(--color-fg-primary);
+  }
+
+  .bg-stack-shows {
+    padding-top: 10px;
+    border-top: 1px solid var(--color-border-subtle);
+    font-size: 0.9375rem;
+  }
+
+  .bg-stack-shows strong {
+    color: var(--color-fg-primary);
+    font-weight: 600;
+  }
+</style>

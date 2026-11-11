@@ -1,0 +1,249 @@
+---
+/**
+ * 06 Motion: each curve drawn as a graph with a dot that runs it. The race plays once when
+ * it comes into view (about a second) and again from the Replay button.
+ */
+import { cubicBezier, EASINGS } from '../../data/brand';
+import SectionHead from './SectionHead.astro';
+
+const curvePath = ([x1, y1, x2, y2]: readonly [number, number, number, number]) =>
+  `M0 100 C ${x1 * 100} ${100 - y1 * 100}, ${x2 * 100} ${100 - y2 * 100}, 100 0`;
+
+const durations = [
+  { what: 'Hover and press', ms: '150 to 200 ms', curve: 'ease' },
+  { what: 'Chips, counts, toggles', ms: '360 to 520 ms', curve: 'Spring' },
+  { what: 'Drawers and sheets', ms: '250 to 320 ms', curve: 'Settle' },
+  { what: 'Layers and sections', ms: '700 to 900 ms', curve: 'Glide' },
+  { what: 'A whole story', ms: 'Under 5 s, or add a pause button', curve: 'Glide' },
+];
+---
+
+<section id="motion" class="bg-section" aria-labelledby="motion-title">
+  <div class="container">
+    <SectionHead id="motion" title="Motion that settles">
+      Things in SAM move the way objects do: they start quickly and come to rest gently. Motion
+      explains what changed and where it went. When it has done that, it stops.
+    </SectionHead>
+
+    <div class="bg-easing sam-glass sam-glass-rim" data-easing-demo data-reveal="scale">
+      <div class="bg-easing-grid">
+        {EASINGS.map((easing) => (
+          <figure class:list={['bg-curve', { 'is-avoid': easing.name === 'Linear' }]} style={`--ease:${cubicBezier(easing.curve)};--dur:${easing.duration}ms`}>
+            <svg viewBox="-6 -40 112 180" class="bg-curve-graph" aria-hidden="true">
+              <path d="M0 100 H100 M0 100 V0" class="axis" />
+              <path d={curvePath(easing.curve)} class="curve" pathLength="1" />
+            </svg>
+            <div class="bg-curve-lane" aria-hidden="true"><span class="bg-curve-dot"></span></div>
+            <figcaption>
+              <strong>{easing.name}</strong>
+              <code>{cubicBezier(easing.curve)}</code>
+              <span>{easing.use}</span>
+            </figcaption>
+          </figure>
+        ))}
+      </div>
+      <button class="sam-btn sam-btn--glass sam-btn--sm bg-easing-replay" type="button" data-easing-replay>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+        Replay
+      </button>
+    </div>
+
+    <div class="bg-durations">
+      <h3 class="bg-sub">How long</h3>
+      <table>
+        <thead><tr><th scope="col">What moves</th><th scope="col">Duration</th><th scope="col">Curve</th></tr></thead>
+        <tbody>
+          {durations.map((row) => (
+            <tr data-reveal="left"><td>{row.what}</td><td>{row.ms}</td><td><code>{row.curve}</code></td></tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+
+    <ul class="bg-rules">
+      <li class="sam-glass sam-glass-rim"><strong>Move to explain.</strong> Animate what changed: a pane arriving, a layer separating, a count landing. Never animate for decoration.</li>
+      <li class="sam-glass sam-glass-rim"><strong>Never linear.</strong> Ease out with Glide or Settle, or use Spring for small things. Linear is only for progress bars.</li>
+      <li class="sam-glass sam-glass-rim"><strong>Stop within five seconds.</strong> Anything that plays on its own and runs longer needs a pause control (WCAG 2.2.2).</li>
+      <li class="sam-glass sam-glass-rim"><strong>Reduced motion gets the final frame.</strong> Build the resting state first, then animate toward it. Animate only transform and opacity.</li>
+    </ul>
+  </div>
+</section>
+
+<style>
+  .bg-easing {
+    position: relative;
+    padding: clamp(20px, 4vw, 40px);
+    border-radius: 28px;
+  }
+
+  .bg-easing-grid {
+    display: grid;
+    gap: 28px;
+  }
+
+  @media (min-width: 640px) {
+    .bg-easing-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .bg-easing-grid {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+  }
+
+  .bg-curve {
+    display: grid;
+    align-content: start;
+    gap: 14px;
+  }
+
+  .bg-curve-graph {
+    width: 100%;
+    max-width: 220px;
+    height: 150px;
+    overflow: visible;
+  }
+
+  .bg-curve-graph .axis {
+    fill: none;
+    stroke: var(--color-border);
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .bg-curve-graph .curve {
+    fill: none;
+    stroke: var(--color-accent-strong);
+    stroke-width: 2.5;
+    stroke-linecap: round;
+    vector-effect: non-scaling-stroke;
+    stroke-dasharray: 1;
+    stroke-dashoffset: 0;
+  }
+
+  .is-avoid .curve {
+    stroke: #f87171;
+    stroke-dasharray: 0.03 0.03;
+  }
+
+  /* The graph draws itself in when the demo plays. */
+  [data-easing-demo][data-playing] .bg-curve:not(.is-avoid) .curve {
+    animation: bg-draw 1.2s var(--ease-glide) both;
+  }
+
+  @keyframes bg-draw {
+    from {
+      stroke-dashoffset: 1;
+    }
+  }
+
+  .bg-curve-lane {
+    position: relative;
+    height: 28px;
+    border-radius: 999px;
+    container-type: inline-size;
+    background: var(--sam-glass-v2-well);
+    box-shadow: inset 0 1px 2px var(--sam-glass-v2-well-shade);
+  }
+
+  .bg-curve-dot {
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #bcfc54, #22c55e 60%, #15803d);
+    box-shadow: 0 0 14px rgb(34 197 94 / 0.55);
+    /* Resting frame: the dot has arrived at the end of its lane. */
+    translate: calc(100cqw - 28px) 0;
+  }
+
+  .is-avoid .bg-curve-dot {
+    background: #f87171;
+    box-shadow: none;
+  }
+
+  [data-easing-demo][data-playing] .bg-curve-dot {
+    animation: bg-run var(--dur) var(--ease) 0.25s both;
+  }
+
+  @keyframes bg-run {
+    from {
+      translate: 0 0;
+    }
+  }
+
+  .bg-curve figcaption {
+    display: grid;
+    gap: 4px;
+  }
+
+  .bg-curve strong {
+    font-family: var(--font-display);
+    font-size: 1.25rem;
+    font-weight: 600;
+  }
+
+  .bg-curve code {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--color-fg-muted);
+  }
+
+  .bg-curve span {
+    font-size: 0.875rem;
+    color: var(--color-fg-muted);
+  }
+
+  .bg-easing-replay {
+    margin-top: 28px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    [data-easing-demo][data-playing] .bg-curve-dot,
+    [data-easing-demo][data-playing] .bg-curve .curve {
+      animation: none;
+    }
+  }
+
+  /* --- Durations --- */
+  .bg-durations {
+    margin-bottom: 40px;
+    overflow-x: auto;
+  }
+
+  .bg-durations table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9375rem;
+  }
+
+  .bg-durations th {
+    padding: 0 12px 12px 0;
+    text-align: left;
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--color-fg-dim);
+  }
+
+  .bg-durations td {
+    padding: 16px 12px 16px 0;
+    border-top: 1px solid var(--color-border-subtle);
+    color: var(--color-fg-muted);
+  }
+
+  .bg-durations td:first-child {
+    color: var(--color-fg-primary);
+  }
+
+  .bg-durations code {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+  }
+</style>
