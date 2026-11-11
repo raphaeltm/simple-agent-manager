@@ -38,6 +38,12 @@ export interface SessionWakeProgressInput {
   recoveryStatus: SessionWakeRecoveryStatus;
   /** Null when the wake is claimed but the runner has not reported a step yet. */
   wakePhase?: TaskExecutionStep | null;
+  /**
+   * The wake claim this runner serves (`session_snapshots.recovery_attempt_id`). The
+   * client keys its settled latch on it, so a terminal push must name its attempt or
+   * the next wake of the same chat looks like the one that just ended.
+   */
+  wakeAttemptId?: string | null;
 }
 
 export interface SessionWakeProgressHooks {
@@ -63,6 +69,7 @@ export function publishSessionWakeProgress(
       sessionId: input.chatSessionId,
       recoveryStatus: input.recoveryStatus,
       wakePhase: input.wakePhase ?? null,
+      wakeAttemptId: input.wakeAttemptId ?? null,
       at: now,
     },
     input.chatSessionId

@@ -5,7 +5,12 @@ import type { WakeWaitReason } from './wake-wait';
 // Chat Sessions
 // =============================================================================
 
-export type ChatSessionStatus = 'active' | 'sleeping' | 'stopped' | 'error';
+/**
+ * Chat session lifecycle as the ProjectData DO stores it (`chat_sessions.status`).
+ * A session that ended in failure is `failed` (`failSession`, `project-data/sessions.ts`);
+ * the DO has never written `error`.
+ */
+export type ChatSessionStatus = 'active' | 'sleeping' | 'stopped' | 'failed';
 
 export interface ChatSession {
   id: string;
@@ -22,7 +27,7 @@ export interface ChatSession {
   lastMessageAt: number | null;
   /** Computed: true when status === 'active' && agentCompletedAt != null */
   isIdle: boolean;
-  /** Computed: true when status === 'stopped' */
+  /** Computed: true when status is 'stopped' or 'failed' */
   isTerminated: boolean;
   /** Computed: derived from workspaceId + BASE_DOMAIN */
   workspaceUrl: string | null;
@@ -385,6 +390,13 @@ export interface SessionStateSnapshot {
   steeringSupported?: boolean | null;
   /** D1-sourced recovery status from session_snapshots (sleep/wake lifecycle). */
   recoveryStatus?: 'waking' | 'restored' | 'failed' | null;
+  /**
+   * Identity of the wake attempt `recoveryStatus` describes
+   * (`session_snapshots.recovery_attempt_id`, a new ULID per wake claim). Lets the UI
+   * tell a stale snapshot of a finished wake from the start of the next one. Null
+   * when no wake has been claimed in this sleep episode.
+   */
+  wakeAttemptId?: string | null;
   /**
    * Execution step of the replacement TaskRunner currently waking this session,
    * resolved from `session_snapshots.recovery_task_id` -> `tasks.execution_step`.
