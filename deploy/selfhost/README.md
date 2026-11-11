@@ -164,6 +164,55 @@ chat fails with "No eligible compute-pool offering is available in the installat
 for this task's requirements (2 vCPU, 4096 MB memory, 15 GB disk)". On Google Cloud add
 `e2-standard-2` (2 vCPU, 8 GB); keep `e2-medium` for smaller work if you like.
 
+## Logs
+
+Caddy writes one JSON access-log line per request, for every SAM host (`app.`, `api.`, `ws-*`,
+`mail.`), to its stdout (`caddy/Caddyfile`). Each line has the host, method, path, protocol,
+client address, status, response size and `duration` in seconds. For a WebSocket the duration is
+the connection's lifetime and the line is written when the socket closes, so a hung or cut
+connection shows up with its length. Caddy's own log (proxy errors, certificates) goes to stderr.
+
+Neither log contains a header or a query string (`caddy/log-redaction.caddy`): cookies,
+`Authorization`, SAM's `X-SAM-*` gateway headers and the gateway secret are dropped, and every
+query string is replaced with `?<redacted>`, because terminal and port-access tokens and OAuth
+codes travel there. Compose caps Caddy's log at about `CADDY_LOG_MAX_SIZE` x `CADDY_LOG_MAX_FILES`
+(50 MB x 5).
+
+On the box (the operator path is SSH; nothing here adds a listener):
+
+```bash
+cd deploy/selfhost
+docker compose logs --since 30m caddy 2>/dev/null | grep http.log.access   # access log
+docker compose logs --since 30m caddy | grep -v http.log.access            # Caddy's own log
+docker compose logs --since 30m celld                                      # celld and Worker logs
+```
+
+Reading these without SSH needs something new, so this pass does not build it. Options, for a
+later decision:
+
+- **Cloud Logging (GCE boxes).** Docker's built-in `gcplogs` logging driver sends the caddy and
+  celld logs to the box's own Google Cloud project, where an operator reads them with
+  `gcloud logging read` under their own IAM. No new listener. It needs `roles/logging.logWriter`
+  for the VM's service account and a viewer role for the operator, it is GCE-specific, and the
+  logs leave the box (the same trust domain as the fleet bucket, which already holds the Worker
+  secrets in plaintext).
+- **An admin-only SAM route.** Worker code on celld cannot read files or reach Docker, and the
+  egress fence keeps it off loopback services on purpose. A route would need a new log service
+  on the box that the fence lets celld reach, which is new attack surface for the most privileged
+  code path on the box.
+
+## Cold starts
+
+celld retires a stateless Worker isolate after about 8 s idle, and the next request waits
+1.5-2.2 s while a new isolate loads the 29 MB bundle. As a stopgap Caddy keeps one warm: an
+active health check sends `GET /health` to celld every `SAM_KEEP_WARM_INTERVAL` (default `5s`,
+allowed `1s`-`7s`) for as long as Caddy runs (`caddy/keep-warm/on.caddy`). The check sits on a
+route that serves no request, so a failing `/health` cannot take the real proxy out of service.
+`/health` reads no storage and is not in SAM's request log or Caddy's access log. Set
+`SAM_KEEP_WARM=off` in `.env` and run `docker compose up -d caddy` to turn it off. The upstream
+fix (celld keeping isolates warm, or an idle setting) is tracked in
+`tasks/backlog/2026-11-11-selfhost-celld-isolate-cold-start-slow-page-loads.md`.
+
 ## Known gaps in this pass
 
 - Off on purpose: Instant sessions and guided credential login (Cloudflare Containers), Artifacts

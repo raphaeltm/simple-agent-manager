@@ -28,3 +28,11 @@ Separately, and not self-host specific: `GET /api/github/installations` syncs li
 - [ ] Decide the fix: upstream celld (keep N warm isolates, or an idle-retirement setting) vs a box-level keep-warm vs accepting it
 - [ ] Caddy access logging (or celld request logging for `app.*`) on self-host boxes, so slow-load reports can be traced
 - [ ] After the fix, a cold navigation to a project page on the box renders the project in under ~1.5 s
+
+## Stopgap shipped (T14, 2026-11-11)
+
+Caddy keeps one isolate warm with an active health check (`deploy/selfhost/caddy/keep-warm/on.caddy`,
+`SAM_KEEP_WARM`, `SAM_KEEP_WARM_INTERVAL`, README "Cold starts"). This task stays open for the
+upstream celld fix: keep a minimum number of warm isolates, or an idle-retirement setting. The
+stopgap keeps only the isolate the ping lands on; a burst that needs celld's second slot can still
+pay a cold start (seen once in the T14 baseline: 1,630 ms on a warm-phase request).

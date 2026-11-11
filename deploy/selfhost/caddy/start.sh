@@ -21,4 +21,20 @@ on)
 	exit 64
 	;;
 esac
+# Keep-warm (keep-warm/on.caddy). A bad value must fail here with a clear message, not as a
+# missing import file or a Caddy duration parse error.
+case "${SAM_KEEP_WARM:-on}" in
+on | off) ;;
+*)
+	echo "caddy: SAM_KEEP_WARM must be on or off" >&2
+	exit 64
+	;;
+esac
+case "${SAM_KEEP_WARM_INTERVAL:-5s}" in
+[1-7]s) ;;
+*)
+	echo "caddy: SAM_KEEP_WARM_INTERVAL must be 1s to 7s (celld retires an isolate idle for about 8 s)" >&2
+	exit 64
+	;;
+esac
 exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile

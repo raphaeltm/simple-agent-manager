@@ -197,6 +197,17 @@ services:
       HTTPS_PORT: ${HTTPS_PORT:-443}
       CELLD_PORT: ${CELLD_PORT:-8080}
       FRPS_BIND_PORT: ${FRPS_BIND_PORT:-7000}
+      # Keep-warm for celld's stateless Worker isolate (caddy/keep-warm/on.caddy): on unless set
+      # to off; the interval must stay below celld's ~8 s idle retirement. start.sh validates both.
+      SAM_KEEP_WARM: ${SAM_KEEP_WARM:-on}
+      SAM_KEEP_WARM_INTERVAL: ${SAM_KEEP_WARM_INTERVAL:-5s}
+    # The access log goes to stdout (README "Logs"). Docker's default json-file driver never
+    # rotates, so cap this service's log: about CADDY_LOG_MAX_SIZE x CADDY_LOG_MAX_FILES on disk.
+    logging:
+      driver: json-file
+      options:
+        max-size: ${CADDY_LOG_MAX_SIZE:-50m}
+        max-file: '${CADDY_LOG_MAX_FILES:-5}'
     volumes:
       - ./caddy:/etc/caddy:ro
       - caddy-data:/data

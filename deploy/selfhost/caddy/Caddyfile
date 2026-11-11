@@ -8,6 +8,13 @@
 	http_port {$HTTP_PORT:80}
 	https_port {$HTTPS_PORT:443}
 	admin off
+
+	# Caddy's own log (errors, proxy failures, certificates) on stderr. Its error entries carry the
+	# request, so it gets the same redaction as the access log below.
+	log default {
+		output stderr
+		import log-redaction.caddy
+	}
 }
 
 # Every route that proxies a client request (here and in sam.d/) imports this, so the client
@@ -23,12 +30,24 @@
 *.{$SAM_DOMAIN} {
 	import tls/{$SAM_TLS_MODE:internal}.caddy
 
+	# Access log for every SAM host (app., api., ws-*, mail.): one JSON line per request on
+	# stdout (`docker compose logs caddy`), with host, method, path, status, duration (seconds,
+	# for a WebSocket the connection's lifetime), sizes and client address. Headers and query
+	# strings are never logged (log-redaction.caddy).
+	log {
+		output stdout
+		import log-redaction.caddy
+	}
+
 	# celld never compresses responses.
 	encode zstd gzip
 
 	# The mail collector's UI on its own host when the `mail-collector` profile is on
 	# (caddy/start.sh); an empty file otherwise.
 	import mail-collector/{$SAM_MAIL_COLLECTOR:off}.caddy
+
+	# Keeps celld's stateless Worker isolate warm (keep-warm/on.caddy) unless SAM_KEEP_WARM=off.
+	import keep-warm/{$SAM_KEEP_WARM:on}.caddy
 
 	# Routes owned by the node transport (frp over wss, node WebSockets). Each is a
 	# `handle @matcher { ... }` block; the matcher-less handle below always sorts last. A

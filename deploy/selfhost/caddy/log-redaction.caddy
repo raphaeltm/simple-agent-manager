@@ -1,0 +1,14 @@
+# Shared by the access log and Caddy's own log (Caddyfile). What a log line may contain about a
+# request: host, method, path, protocol, client address and port, TLS details, status, sizes and
+# duration. What it may not: any request or response header (cookies, Authorization, SAM's
+# X-SAM-* gateway headers, the gateway secret) and any query string (terminal and port-access
+# tokens, OAuth codes and state travel there). Caddy already redacts Cookie, Set-Cookie,
+# Authorization and Proxy-Authorization by default; deleting the header maps outright also
+# covers every other header, including ones forward_auth copies onto the request.
+format filter {
+	wrap json
+	request>headers delete
+	resp_headers delete
+	request>uri regexp "\?.*$" "?<redacted>"
+	user_id delete
+}
