@@ -93,7 +93,7 @@ The 2026-11-10 state-machine audit (Library `/engineering/research/state-machine
 - [x] A deployment env heartbeat does not overwrite a concurrent `stopping`/`error`; `starting → active` still happens.
 - [x] A chat that wakes, sleeps again and is woken again in the same open tab shows the wake banner and phases on the second wake.
 - [x] Each guard was deleted once and its attack test went red (rule 62).
-- [x] Verified end to end on staging where the staging environment can exercise it. D2, D3, D4, D6 and D8 were verified live. D1, D5 and D7 are proven by real-SQL or route tests (see the staging evidence).
+- [x] Verified end to end on staging. D2, D3, D4, D6, D7 and D8 were verified live, and D5's outcome (no revival of a deleted node) was observed. D1 is covered by tests only (see the staging evidence).
 
 ## References
 
@@ -133,8 +133,16 @@ The 2026-11-10 state-machine audit (Library `/engineering/research/state-machine
   - D8 on f3009d1c6:
     - After the server put the chat to sleep, the open tab switched to the wake composer within about 2 s.
     - Wake 1 showed 5 phases. Wake 2 in the same tab showed 6 phases, starting with "Waiting for the previous workspace to finish shutting down...". Both replied.
+- 2026-11-11, head de33618ec (deploy 43067755851; the live bundle carries the narrowed `[active, sleeping]` push list):
+  - D8: a VM chat on GCP, with one tab open throughout. After each server-side sleep the tab switched to the wake composer within about 1 s. Wake 1 showed 6 phases; wake 2 showed 5, starting with "Waiting for the previous workspace to finish shutting down...". Both replied.
+  - D3: `terminal/ws/multi` and `terminal/ws` opened on 01M75WN3H35A8Y7984Y7VGNT7W, which stayed `running`.
+  - D7: a fresh deployment environment on GCP.
+    - Its release applied through the heartbeat compare-and-set (`observed=applied`, `seq=1`).
+    - After stop and start it went `starting → active` at 18:04:25.
+    - The first stop failed on a pre-existing 5 s teardown budget (`tasks/backlog/2026-11-11-gcp-deployment-node-teardown-5s-timeout.md`); a retry succeeded.
+  - D5: all three deployment nodes reached `deleted` with termination proof. Checked four times over about 80 s, none was revived by a later heartbeat.
 - Not exercised live:
-  - D1: needs a stalled mission task over the stall timeout. It is covered through `detectStalls` with real session rows.
-  - D5 and D7: the staging deployment environment has a stale volume. They are covered by real-SQL and route tests.
-- Cleanup: the D3 workspace was deleted. The D8 chat was stopped, its workspace deleted (`workspaceDeleted: true`) and task 01M75A34RBDASNT5SWTCDYTPN5 cancelled. "staging free" was published at 16:16 UTC.
+  - D1: needs a mission task stalled for 20 minutes. It is covered through `detectStalls` with real session rows.
+  - The `deleting` node status itself was not reached on staging; it is covered by route tests on a real SQL engine.
+- Cleanup: all D3/D8 workspaces and chats were stopped or deleted, both deployment environments were deleted, and all four VMs (three deployment nodes and one workspace node) were deleted. Tasks 01M75A34RBDASNT5SWTCDYTPN5 and 01M75VBN1QASC4K70M6V34E12A were cancelled. "staging free" was published at 16:16 and 18:12 UTC.
 - Pre-existing gap found: `tasks/backlog/2026-11-11-wake-start-offers-steer.md`.
