@@ -13,9 +13,11 @@ import * as v from 'valibot';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { guardedFetch, OutboundRequestRefusedError } from '../../lib/network-hosts';
 import { parsePositiveInt } from '../../lib/route-helpers';
 import { runWorkspaceOperation } from '../../operations/workspace-adapter';
 import { listAgentActivityTasks } from '../../services/agent-activity';
+import { resolveOutboundMaxRedirects } from '../../services/outbound-fetch-settings';
 import {
   getMcpLimits,
   INTERNAL_ERROR,
@@ -367,6 +369,33 @@ export async function handleReportEnvironmentIssue(
 
 // ─── Category C: Handled in Worker (no VM agent needed) ─────────────────────
 
+/** The workspace answered, but redirected somewhere the guarded fetch would not go. */
+function dnsRedirectRefused(
+  requestId: string | number | null,
+  hostname: string,
+  refusal: OutboundRequestRefusedError
+): JsonRpcResponse {
+  return jsonRpcSuccess(requestId, {
+    content: [
+      {
+        type: 'text',
+        text: JSON.stringify(
+          {
+            hostname,
+            dnsResolved: true,
+            tlsValid: true,
+            status: 'redirect_refused',
+            refusal: refusal.reason,
+            note: 'The workspace answered with a redirect SAM does not follow (a private or non-HTTPS address, or too many hops).',
+          },
+          null,
+          2
+        ),
+      },
+    ],
+  });
+}
+
 export async function handleCheckDnsStatus(
   requestId: string | number | null,
   tokenData: McpTokenData,
@@ -382,13 +411,14 @@ export async function handleCheckDnsStatus(
   try {
     // Try to fetch the workspace URL to check DNS + TLS in one call.
     // Note: this only confirms Cloudflare edge reachability, not VM agent health.
-    // The workspace (a node the user controls) answers this request, so a redirect it sends is
-    // reported, never followed: following it would let the node point the Worker anywhere.
-    const res = await fetch(workspaceUrl, {
-      method: 'HEAD',
-      redirect: 'manual',
-      signal: AbortSignal.timeout(dnsTimeoutMs),
-    });
+    // The workspace (a node the user controls) answers this request, so its redirects are
+    // followed only through the guarded fetch: public HTTPS hops only, each one checked, at most
+    // `outbound.maxRedirects`. httpStatus is the final status, as it was before the guard.
+    const res = await guardedFetch(
+      workspaceUrl,
+      { method: 'HEAD', signal: AbortSignal.timeout(dnsTimeoutMs) },
+      { allowPrivateNetwork: false, maxRedirects: await resolveOutboundMaxRedirects(env) }
+    );
 
     return jsonRpcSuccess(requestId, {
       content: [
@@ -410,6 +440,7 @@ export async function handleCheckDnsStatus(
       ],
     });
   } catch (e) {
+    if (e instanceof OutboundRequestRefusedError) return dnsRedirectRefused(requestId, hostname, e);
     // Distinguish TLS errors from DNS/network errors
     const errorMsg = e instanceof Error ? e.message : String(e);
     const isTlsError =

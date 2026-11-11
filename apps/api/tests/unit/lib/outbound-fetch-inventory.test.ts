@@ -31,8 +31,6 @@ const NOT_USER_CONTROLLED: Record<string, string> = {
   'routes/admin-analytics-query.ts': `Cloudflare Analytics API: ${OPERATOR}, superadmin route`,
   'routes/ai-proxy-anthropic.ts': `Anthropic / AI Gateway: ${CONSTANT}`,
   'routes/google-auth.ts': `Google OAuth: ${CONSTANT}`,
-  'routes/mcp/workspace-tools-direct.ts':
-    'check_dns_status: https://ws-{id}.{BASE_DOMAIN}, redirect: manual (node-answered, never followed)',
   'routes/project-deployment.ts': `Google token endpoint: ${CONSTANT}`,
   'routes/projects/devcontainer-configs.ts': `api.github.com: ${CONSTANT}`,
   'routes/workspace-subdomain-proxy.ts': PLATFORM_NODE,
