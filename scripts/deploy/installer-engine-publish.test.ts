@@ -29,7 +29,7 @@ const write = (root: string, path: string, data: string) => {
 };
 const RELEASE = 'a'.repeat(40);
 const DATE = '2026-11-07T21:52:36Z';
-const GO = 'go version go1.26.10 linux/amd64';
+const GO = 'go version go1.26.11 linux/amd64';
 const DIGEST = `sha256:${'d'.repeat(64)}`;
 
 /** A repository with the agent outputs built and one container class. */
@@ -116,7 +116,7 @@ describe('prebuilt artifact publisher', () => {
       base: 'https://example.com',
       manifest,
       kind: 'vm-agent',
-      key: vmAgentPrebuiltKey(RELEASE, DATE, 'go version go1.26.11 linux/amd64'),
+      key: vmAgentPrebuiltKey(RELEASE, DATE, 'go version go1.26.10 linux/amd64'),
       root: temp(),
       paths: VM_AGENT_OUTPUTS,
       timeoutMs: 5_000,

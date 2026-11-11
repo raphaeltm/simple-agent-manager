@@ -37,7 +37,7 @@ env:
   # Must match the Go toolchain installations pin (installer-engine.ts preflight).
   # Not named GO_VERSION: packages/vm-agent/Makefile embeds GO_VERSION in the
   # binary, and an installation builds with the Makefile's own default.
-  GO_TOOLCHAIN_VERSION: '1.26.10'
+  GO_TOOLCHAIN_VERSION: '1.26.11'
 
 jobs:
   publish:
