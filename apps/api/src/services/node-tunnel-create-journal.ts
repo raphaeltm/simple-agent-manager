@@ -4,18 +4,20 @@ import type { TunnelEnv } from './node-tunnel-config';
 /**
  * Persist POST intent before sending it. Only an observed success or definitive rejection
  * settles that intent. A timeout, cancellation or process death leaves durable uncertainty:
- * cleanup keeps polling, even after an empty inventory, for a possible late commit.
+ * cleanup keeps polling, even after an empty inventory, for a possible late commit, until the
+ * settle window after `pending_create_last_at` has passed (node-tunnel-cleanup.ts).
  */
 export async function withJournaledTunnelCreate<T>(
   env: TunnelEnv,
   journalId: string,
   create: () => Promise<T>
 ): Promise<T> {
+  const claimedAt = new Date().toISOString();
   const claim = await env.DATABASE.prepare(
     `UPDATE node_cloudflare_tunnels SET pending_create_count = pending_create_count + 1,
-       updated_at = ? WHERE id = ? AND status IN ('provisioning', 'active')`
+       pending_create_last_at = ?, updated_at = ? WHERE id = ? AND status IN ('provisioning', 'active')`
   )
-    .bind(new Date().toISOString(), journalId)
+    .bind(claimedAt, claimedAt, journalId)
     .run();
   if ((claim.meta?.changes ?? 0) !== 1) {
     throw new Error('Tunnel ownership was released before Cloudflare create');

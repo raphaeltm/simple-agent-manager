@@ -19,6 +19,7 @@ import {
   isToolStripMode,
   type SessionToolAction,
   type SessionToolId,
+  taskEndIntent,
   TOOL_STRIP_MODE_STORAGE_KEY,
   type ToolStripMode,
 } from './session-tool-actions';
@@ -86,6 +87,8 @@ export interface UseSessionToolsResult {
   reportOpen: boolean;
   closeReport: () => void;
   confirmCompleteOpen: boolean;
+  /** What the open confirm dialog will do: complete a started task or cancel an unstarted one. */
+  confirmIntent: 'completed' | 'cancelled';
   closeConfirmComplete: () => void;
   confirmComplete: () => Promise<void>;
   completeError: string | null;
@@ -124,6 +127,13 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
   const [confirmCompleteOpen, setConfirmCompleteOpen] = useState(false);
   const [completing, setCompleting] = useState(false);
   const [completeError, setCompleteError] = useState<string | null>(null);
+  // Derived from the live status, never captured at click time: a task that starts while the
+  // dialog is open must not be cancelled under "has not started" copy (and vice versa).
+  const endIntent = taskEndIntent(taskEmbed?.status);
+  // The status the task had when an end action succeeded. Until a refetch moves it, the control
+  // stays disabled so a second press cannot re-send against stale state.
+  const [settledStatus, setSettledStatus] = useState<string | null>(null);
+  const ending = completing || (settledStatus !== null && settledStatus === taskEmbed?.status);
 
   const queryScope = useQueryScope();
   const reportConfig = useQuery({
@@ -150,24 +160,36 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
   }, []);
 
   const confirmComplete = useCallback(async () => {
-    if (!taskEmbed?.id || completing) return;
+    if (!taskEmbed?.id || ending || !endIntent) {
+      setConfirmCompleteOpen(false);
+      return;
+    }
+    const confirmIntent = endIntent;
     setCompleteError(null);
     setCompleting(true);
     setConfirmCompleteOpen(false);
     try {
       // Task completion snapshots and sleeps resumable sessions server-side.
       // Destructive workspace deletion belongs only to the explicit archive/delete flow.
-      await updateProjectTaskStatus(projectId, taskEmbed.id, { toStatus: 'completed' });
+      // A task that never started can only be cancelled, which retires its queued run.
+      await updateProjectTaskStatus(projectId, taskEmbed.id, { toStatus: confirmIntent });
       // Reset before the callback so the button is not stuck in "Completing..." if the
       // parent's refresh is slower than expected.
+      setSettledStatus(taskEmbed.status ?? null);
       setCompleting(false);
       onSessionMutated?.();
     } catch (err) {
-      console.error('Failed to mark task complete:', err);
-      setCompleteError(err instanceof Error ? err.message : 'Failed to complete task');
+      console.error(`Failed to set task ${confirmIntent}:`, err);
+      setCompleteError(
+        err instanceof Error
+          ? err.message
+          : confirmIntent === 'cancelled'
+            ? 'Failed to cancel task'
+            : 'Failed to complete task'
+      );
       setCompleting(false);
     }
-  }, [projectId, taskEmbed?.id, completing, onSessionMutated]);
+  }, [projectId, taskEmbed?.id, taskEmbed?.status, ending, endIntent, onSessionMutated]);
 
   // Memoized: an inline array would hand the rail a new prop identity on every poll
   // tick, remounting the whole strip mid-interaction (rule 64).
@@ -195,7 +217,7 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
       sharedWithCount,
       canManageShare,
       canBrowseWorkspace,
-      completing,
+      completing: ending,
       detailsExpanded,
     });
   }, [
@@ -220,7 +242,7 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
     sharedWithCount,
     canManageShare,
     canBrowseWorkspace,
-    completing,
+    ending,
     detailsExpanded,
   ]);
 
@@ -261,6 +283,7 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
           setReportOpen(true);
           break;
         case 'complete':
+        case 'cancel':
           setConfirmCompleteOpen(true);
           break;
         case 'details':
@@ -301,6 +324,7 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
     reportOpen,
     closeReport,
     confirmCompleteOpen,
+    confirmIntent: endIntent ?? 'completed',
     closeConfirmComplete,
     confirmComplete,
     completeError,

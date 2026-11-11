@@ -1,5 +1,11 @@
 # Refresh the desktop hero marketing capture
 
+## Status (2026-11-11)
+
+The homepage hero this capture fed was removed with the software-factory homepage, along with
+`build-hero-layers.ts`. The fix is still needed only if `sam-hero-live-session` is kept for other
+uses; it is now covered by `2026-11-11-marketing-shots-drift-after-sam-glass.md`.
+
 ## Problem
 
 `apps/web/tests/playwright/marketing-shots-platform.spec.ts` › `sam-hero-live-session` no longer
@@ -14,15 +20,12 @@ Found 2026-10-15 while capturing the phone source for the glasshouse homepage he
 (`tasks/archive/2026-10-14-glasshouse-homepage-a2.md`). The marketing capture specs are not part
 of CI (only `*audit.spec.ts` runs), so the stale assertion went unnoticed.
 
-The homepage hero layers are cropped from this capture by `apps/www/scripts/build-hero-layers.ts`
-(window geometry and streaming steps are measured on the current image).
+The homepage hero layers used to be cropped from this capture; that hero and its script were
+removed on 2026-11-11.
 
 ## Acceptance Criteria
 
 - [ ] The `sam-hero-live-session` capture passes against the current chat UI (assert the grouped
       tool row, or expand the group, instead of the individual Read row)
 - [ ] Both themes re-captured (`MARKETING_SHOTS=1`, then `MARKETING_THEME=light`)
-- [ ] `pnpm --filter @simple-agent-manager/www build:hero-layers` re-run, with the `desktop` window
-      geometry and `steps` in the script re-measured against the new image
 - [ ] `pnpm --filter @simple-agent-manager/www optimize:features` re-run for the feature page copy
-- [ ] Homepage hero checked visually in both themes (streaming beats reveal whole rows)

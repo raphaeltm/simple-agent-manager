@@ -23,6 +23,7 @@ import type { OperationContext } from '../operations/types';
 import { resolveTaskAgentProfileHint } from '../services/agent-profile-display';
 import * as projectDataService from '../services/project-data';
 import { parseProviderLimitWait } from '../services/provider-limit-policy';
+import { canStartProviderLimitTaskAnyway } from '../services/provider-limit-recovery';
 import { publicPlacementExplanationJson } from '../services/public-placement-explanation';
 import { isTaskStatus } from '../services/task-status';
 import { attachWakeState } from './chat/wake-state';
@@ -128,6 +129,7 @@ export function registerChatSessionDetailRoute(chatRoutes: Hono<{ Bindings: Env 
             finalizedAt: schema.tasks.finalizedAt,
             taskMode: schema.tasks.taskMode,
             agentProfileHint: schema.tasks.agentProfileHint,
+            userId: schema.tasks.userId,
           })
           .from(schema.tasks)
           .where(eq(schema.tasks.id, taskId))
@@ -174,6 +176,13 @@ export function registerChatSessionDetailRoute(chatRoutes: Hono<{ Bindings: Env 
             providerLimitVersion: taskRow.admissionState?.startsWith('provider_limit_')
               ? (parseProviderLimitWait(taskRow.providerLimitWaitJson)?.scheduleKey ?? null)
               : null,
+            // Only the task's owner may start it anyway (startProviderLimitTaskAnyway).
+            providerLimitCanStartAnyway:
+              taskRow.userId === userId &&
+              canStartProviderLimitTaskAnyway(
+                taskRow,
+                parseProviderLimitWait(taskRow.providerLimitWaitJson)
+              ),
             status: isTaskStatus(taskRow.status) ? taskRow.status : 'draft',
             executionStep: isTaskExecutionStep(taskRow.executionStep)
               ? taskRow.executionStep

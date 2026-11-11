@@ -10,7 +10,7 @@ import {
 } from '../../../src/services/node-reverse-tunnel-config';
 import { resolveManagedNodeTransport } from '../../../src/services/node-tunnel-config';
 
-const managedVm = { isDeploymentNode: false, runtime: 'vm', nodeClass: 'managed' };
+const managedVm = { nodeRole: 'workspace', runtime: 'vm', nodeClass: 'managed' };
 
 describe('transport selection', () => {
   it('selects reverse-tunnel only when explicitly configured', () => {
@@ -32,6 +32,15 @@ describe('transport selection', () => {
     ).toBe('cloudflare-tunnel');
   });
 
+  it('control: cloudflare-tunnel still gives a deployment node the tunnel (#2646)', () => {
+    expect(
+      resolveManagedNodeTransport(
+        { VM_AGENT_TRANSPORT: 'cloudflare-tunnel' },
+        { ...managedVm, nodeRole: 'deployment' }
+      )
+    ).toBe('cloudflare-tunnel');
+  });
+
   it.each(['reverse_tunnel', 'frp', 'Reverse-Tunnel'])('fails closed on %j', (value) => {
     expect(() => resolveManagedNodeTransport({ VM_AGENT_TRANSPORT: value }, managedVm)).toThrow(
       /Unsupported VM_AGENT_TRANSPORT/
@@ -39,7 +48,7 @@ describe('transport selection', () => {
   });
 
   it.each([
-    ['a deployment node', { ...managedVm, isDeploymentNode: true }],
+    ['a deployment node', { ...managedVm, nodeRole: 'deployment' }],
     ['an Instant container', { ...managedVm, runtime: 'cf-container' }],
     ['a user-owned machine', { ...managedVm, nodeClass: 'user-owned' }],
   ])('never gives %s the reverse tunnel', (_name, node) => {

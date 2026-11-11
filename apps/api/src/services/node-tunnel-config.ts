@@ -1,13 +1,21 @@
 /**
- * Transport selection and tunnel configuration for managed workspace VM nodes.
+ * Transport selection and tunnel configuration for managed VM nodes.
  *
- * `VM_AGENT_TRANSPORT='cloudflare-tunnel'` opts NEW managed workspace VM nodes into an
- * outbound-only Cloudflare named tunnel. `VM_AGENT_TRANSPORT='reverse-tunnel'` (self-hosted
- * control plane) gives them a pinned frpc that dials the control-plane box instead
- * (services/node-reverse-tunnel-*.ts). An unset transport keeps legacy public-IP
- * transport unchanged; unsupported values fail provisioning. Deployment-role nodes and Instant (cf-container) runtimes are
- * deliberately excluded: deployment nodes serve public app routes on their own IP, and a
- * container runtime has no VM to run cloudflared on.
+ * `VM_AGENT_TRANSPORT='cloudflare-tunnel'` opts NEW managed VM nodes, workspace and deployment
+ * role alike, into an outbound-only Cloudflare named tunnel for the VM agent's control channel
+ * (`{nodeId}.vm.{BASE_DOMAIN}`). `VM_AGENT_TRANSPORT='reverse-tunnel'` (self-hosted control
+ * plane) gives NEW managed workspace VM nodes a pinned frpc that dials the control-plane box
+ * instead (services/node-reverse-tunnel-*.ts); deployment nodes stay on public-IP transport
+ * there, because the reverse-tunnel path has only been built and verified for workspace nodes.
+ * An unset transport keeps legacy public-IP transport unchanged; unsupported values fail
+ * provisioning. Instant (cf-container) runtimes are excluded: a container runtime has no VM to
+ * run a tunnel client on.
+ *
+ * Deployment nodes keep their public app ingress: app routes stay grey-cloud A records to the
+ * node IP, with Caddy terminating TLS by ACME (services/dns-app-routes.ts). Routing app
+ * traffic through the tunnel would need edge certificates for nested `*.apps.` hostnames
+ * (Advanced Certificate Manager) and Cloudflare for SaaS for user custom domains; see
+ * tasks/archive/2026-11-10-tunnel-transport-hardening.md.
  */
 import {
   DEFAULT_CLOUDFLARE_TUNNEL_PORT,
@@ -58,16 +66,60 @@ export async function resolveNodeTunnelApiConfig(env: Env) {
 }
 
 export async function resolveNodeTunnelCleanupConfig(env: Env) {
-  const [requestTimeoutMs, batchSize, sweepBudgetMs, backoffBaseMs, backoffMaxMs, stuckAttempts] =
-    await Promise.all([
-      runtimeValue(env, 'cleanupRequestTimeoutMs'),
-      runtimeValue(env, 'cleanupBatchSize'),
-      runtimeValue(env, 'cleanupSweepBudgetMs'),
-      runtimeValue(env, 'cleanupBackoffBaseMs'),
-      runtimeValue(env, 'cleanupBackoffMaxMs'),
-      runtimeValue(env, 'cleanupStuckAttempts'),
-    ]);
-  return { requestTimeoutMs, batchSize, sweepBudgetMs, backoffBaseMs, backoffMaxMs, stuckAttempts };
+  const [
+    requestTimeoutMs,
+    batchSize,
+    sweepBudgetMs,
+    backoffBaseMs,
+    backoffMaxMs,
+    stuckAttempts,
+    pendingCreateSettleMs,
+  ] = await Promise.all([
+    runtimeValue(env, 'cleanupRequestTimeoutMs'),
+    runtimeValue(env, 'cleanupBatchSize'),
+    runtimeValue(env, 'cleanupSweepBudgetMs'),
+    runtimeValue(env, 'cleanupBackoffBaseMs'),
+    runtimeValue(env, 'cleanupBackoffMaxMs'),
+    runtimeValue(env, 'cleanupStuckAttempts'),
+    runtimeValue(env, 'pendingCreateSettleMs'),
+  ]);
+  return {
+    requestTimeoutMs,
+    batchSize,
+    sweepBudgetMs,
+    backoffBaseMs,
+    backoffMaxMs,
+    stuckAttempts,
+    pendingCreateSettleMs,
+  };
+}
+
+/** Extra durable-attempt time for tunnel setup (see `NodeLifecycleProvisioning.run`). */
+export async function resolveNodeTunnelProvisioningBudgetMs(env: Env): Promise<number> {
+  return runtimeValue(env, 'provisioningBudgetMs');
+}
+
+/**
+ * Tunnel-setup share of a durable provisioning attempt's deadline: zero unless the attempt
+ * will provision with tunnel transport, decided exactly as `provisionNode` decides it (a
+ * resumed incarnation keeps its recorded transport; a new one reads the installation setting).
+ */
+export async function durableAttemptTunnelBudgetMs(
+  env: Env,
+  node: { runtimeIncarnationId: string | null; transport: string | null } & ManagedNodeTransportInput,
+  resumingIncarnationId: string
+): Promise<number> {
+  let transport: string | null;
+  try {
+    transport =
+      node.runtimeIncarnationId === resumingIncarnationId
+        ? node.transport
+        : resolveManagedNodeTransport(env, node);
+  } catch {
+    // An invalid transport setting fails inside provisionNode with a recorded error.
+    return 0;
+  }
+  return transport === 'cloudflare-tunnel' ? resolveNodeTunnelProvisioningBudgetMs(env) : 0;
 }
 
 /** Cloud-init validates the supported release and timing bounds before rendering. */
@@ -88,9 +140,10 @@ export function nodeTunnelBootVariables(env: TunnelBootConfigEnv) {
 }
 
 export interface ManagedNodeTransportInput {
-  isDeploymentNode: boolean;
   runtime: string;
   nodeClass: string;
+  /** The node row's own `node_role` ('workspace' | 'deployment'); required so no caller can omit it. */
+  nodeRole: string;
 }
 
 /**
@@ -106,8 +159,15 @@ export function resolveManagedNodeTransport(
   if (configured !== 'cloudflare-tunnel' && configured !== 'reverse-tunnel') {
     throw new Error(`Unsupported VM_AGENT_TRANSPORT ${JSON.stringify(configured)}`);
   }
-  if (node.isDeploymentNode || node.runtime !== 'vm' || node.nodeClass !== 'managed') return null;
-  return configured;
+  if (node.runtime !== 'vm' || node.nodeClass !== 'managed') return null;
+  if (configured === 'reverse-tunnel') {
+    // Self-hosted box: only workspace nodes have a reverse-tunnel path (lease, frpc
+    // cloud-init, node-agent route seam). Deployment nodes keep public-IP transport.
+    return node.nodeRole === 'deployment' ? null : 'reverse-tunnel';
+  }
+  // Deployment nodes are included: the tunnel carries only their agent control channel, and
+  // their app routes keep using the public IP.
+  return 'cloudflare-tunnel';
 }
 
 /**

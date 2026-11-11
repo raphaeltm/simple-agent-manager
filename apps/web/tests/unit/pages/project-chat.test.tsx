@@ -2762,30 +2762,33 @@ describe('ProjectChat no longer executes ideas', () => {
 describe('ProjectChat compute gate (installation machines, AI proxy off)', () => {
   const GATE_MESSAGE = /Cloud credentials required/;
 
+  const SUBMITTED = {
+    taskId: 'task-gate',
+    sessionId: 'session-gate',
+    branchName: 'sam/task-gate',
+    status: 'queued',
+  } as const;
+  const QUEUED_ROW = {
+    id: 'task-gate',
+    status: 'queued',
+    executionStep: null,
+    errorMessage: null,
+  } as const;
+
   beforeEach(() => {
     vi.clearAllMocks();
     // No cloud account of the user's own.
     mocks.listCredentials.mockResolvedValue([]);
-    mocks.getProviderCatalog.mockResolvedValue({ catalogs: [] });
     mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
     mocks.listAgentProfiles.mockResolvedValue([
       makeAgentProfile({ id: 'prof-gate', name: 'Conversation profile' }),
     ]);
-    mocks.listSkills.mockResolvedValue([]);
-    mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
+    mocks.submitTask.mockResolvedValue(SUBMITTED);
+    mocks.getProjectTask.mockResolvedValue(QUEUED_ROW);
+    mocks.getProviderCatalog.mockResolvedValue({ catalogs: [] });
     mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
-    mocks.submitTask.mockResolvedValue({
-      taskId: 'task-gate',
-      sessionId: 'session-gate',
-      branchName: 'sam/task-gate',
-      status: 'queued',
-    });
-    mocks.getProjectTask.mockResolvedValue({
-      id: 'task-gate',
-      status: 'queued',
-      executionStep: null,
-      errorMessage: null,
-    });
+    mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
+    mocks.listSkills.mockResolvedValue([]);
   });
 
   async function typeAndSend(text: string) {

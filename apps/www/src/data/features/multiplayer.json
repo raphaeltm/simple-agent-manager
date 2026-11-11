@@ -20,11 +20,6 @@
       "caption": "One project, every member’s sessions — switch between my sessions and all sessions"
     }
   ],
-  "homepage": {
-    "headline": "Invite with a link, approve who joins",
-    "body": "Anyone in the project can create an invite link. Nobody joins until an owner or admin approves, and SAM shows whether the person can already see the GitHub repo, so you know who you're letting in.",
-    "caption": "Members, requests, and the invite link in project settings"
-  },
   "details": [
     {
       "headline": "Invite, request, approve",

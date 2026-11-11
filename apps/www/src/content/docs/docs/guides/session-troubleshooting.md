@@ -173,6 +173,16 @@ never switches to another model, profile, or credential to get around a limit.
   **Blocked before provider prompt:** followed by the reset time, and its machine stays up
   meanwhile. Despite the word "Blocked", it starts by itself after the reset.
 
+**Changed your mind, or want it to run now?** For a task that is waiting and has never started:
+
+- **Cancel task** in the chat's tool rail (it replaces **Complete** for a task that hasn't started)
+  cancels it, so nothing starts at the reset.
+- **Start anyway** on the waiting notice (task owner only) starts it now despite the limit, for
+  example when the account has extra credits or overage that the subscription window doesn't show.
+  SAM records your choice for the account selected at that moment; if the task's account changes
+  before it starts, it stops at **Needs you** instead. If the provider really does refuse the
+  prompt, SAM pauses the task the usual way.
+
 **Needs you**, with a reason starting **Blocked:**, means SAM stopped waiting. The task won't carry on by itself, and a reply in
 the chat doesn't restart it:
 

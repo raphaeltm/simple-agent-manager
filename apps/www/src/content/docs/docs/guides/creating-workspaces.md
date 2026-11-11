@@ -3,7 +3,7 @@ title: Workspaces
 description: How workspaces are provisioned, used, and managed in SAM.
 ---
 
-A **workspace** is the environment an AI coding agent runs in — your repository, cloned and ready, with the tools the agent needs. In everyday use you rarely create one by hand: SAM provisions a workspace for you automatically when you start working in a project chat. This guide explains that automatic flow and the direct controls available for power users.
+A **workspace** is the environment an AI coding agent runs in — your repository, cloned and ready, with the tools the agent needs. You don't create one by hand: SAM provisions a workspace for you automatically when you start working in a project chat. This guide explains that automatic flow and the direct controls available for power users.
 
 ## The Normal Flow: Workspaces Come From Chat
 
@@ -89,7 +89,8 @@ on a phone, in the menu). It opens the **Nodes** page, which lists each machine 
 running on it (see [What each machine is using](/docs/guides/compute-pools/#what-each-machine-is-using)).
 Open **Advanced** on a machine for links to its workspaces, or select **Details** to see all of them
 under **Workspaces**. There's no longer a single list of every workspace; old links to the
-Workspaces page open Nodes. **Create Workspace** is on a machine's page.
+Workspaces page open Nodes. There's no form for creating a workspace by hand: start a project chat
+and SAM provisions one, and old links to the create-workspace form open Nodes.
 
 ### Terminal
 

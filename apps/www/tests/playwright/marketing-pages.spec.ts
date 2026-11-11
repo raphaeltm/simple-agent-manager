@@ -1,7 +1,7 @@
 import { expect, expectNoOverflowOrSeriousAxeViolations, test } from './fixtures';
 
 const PAGES: { path: string; slug: string; heading: string | RegExp }[] = [
-  { path: '/', slug: 'home', heading: /Run AI coding agents/i },
+  { path: '/', slug: 'home', heading: /operating system for scalable software factories/i },
   {
     path: '/features/',
     slug: 'features-index',
@@ -24,7 +24,7 @@ for (const { path, slug, heading } of PAGES) {
     // full-page capture waits for that, so settle every section up front.
     await page.addStyleTag({
       content:
-        '.animate-on-scroll{opacity:1 !important;transform:none !important;transition:none !important}',
+        '.animate-on-scroll,.fh [data-reveal]{opacity:1 !important;transform:none !important;transition:none !important}',
     });
     await page.waitForTimeout(300);
 

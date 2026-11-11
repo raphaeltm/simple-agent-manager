@@ -273,6 +273,7 @@ substitute coverage.
 
 Instant automatic port discovery remains intentionally absent; manual preview
 routing is verified independently. General public TCP/UDP exposure is outside the
-existing HTTP/WebSocket product contract. Deployment-role ingress is unchanged.
+existing HTTP/WebSocket product contract. Deployment-role app ingress is unchanged (since the
+2026-11-10 hardening, deployment nodes use the tunnel for their agent channel only).
 Legacy nested-hostname direct TLS remains a separately tracked pre-existing path;
 current Worker routing and new-agent direct R2 uploads do not use that path.

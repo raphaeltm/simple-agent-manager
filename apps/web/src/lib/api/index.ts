@@ -584,6 +584,7 @@ export {
   requestAttachmentUpload,
   resumeProviderLimitTask,
   runProjectTask,
+  startProviderLimitTaskAnyway,
   submitTask,
   updateProjectTask,
   updateProjectTaskStatus,
@@ -613,7 +614,6 @@ export {
 export { getWorkflowRun, listWorkflowRuns } from './workflows';
 export {
   createAgentSession,
-  createWorkspace,
   deleteWorkspace,
   getPortAccessUrl,
   getTerminalToken,

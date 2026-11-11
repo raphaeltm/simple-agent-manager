@@ -15,22 +15,6 @@ const project = {
   defaultLocation: 'nbg1',
   resourceRequirementsJson: '{"minMemoryGb":4}',
 };
-const node = {
-  id: 'existing-node',
-  name: 'Existing native node',
-  status: 'running',
-  healthStatus: 'healthy',
-  nodeRole: 'workspace',
-  cloudProvider: 'hetzner',
-  vmSize: 'small',
-  vmLocation: 'hel1',
-  providerInstanceType: 'cx53',
-  providerInstanceVcpuCount: 16,
-  providerInstanceMemoryMb: 32768,
-  providerInstanceDiskGb: 320,
-  createdAt: '2026-09-07T10:00:00Z',
-  updatedAt: '2026-09-07T10:00:00Z',
-};
 function nativeOffering(provider: CredentialProvider, location: string, instanceType: string): ProviderInstanceOffering {
   return {
     provider, location, providerInstanceType: instanceType, providerInstanceSku: null,
@@ -57,7 +41,7 @@ const catalogs: ProviderCatalog[] = (['hetzner', 'gcp'] as const).map((provider)
     : [nativeOffering(provider, 'europe-west1-b', 'c3-standard-8')],
 }));
 
-async function openSurface(page: Page, surface: 'nodes' | 'workspace' | 'task', options: { existingNode?: boolean; rejectCreate?: boolean; catalogs?: ProviderCatalog[]; poolSummary?: SafeEffectiveCapacityPoolSummary } = {}) {
+async function openSurface(page: Page, surface: 'nodes' | 'task', options: { rejectCreate?: boolean; catalogs?: ProviderCatalog[]; poolSummary?: SafeEffectiveCapacityPoolSummary } = {}) {
   const writes: Array<{ path: string; body: Record<string, unknown> }> = [];
   const errors: string[] = [];
   const unexpected: string[] = [];
@@ -70,7 +54,7 @@ async function openSurface(page: Page, surface: 'nodes' | 'workspace' | 'task', 
     const path = new URL(route.request().url()).pathname;
     // Vite source module URLs can contain /lib/api/; they are not API requests.
     if (!path.startsWith('/api/')) return route.continue();
-    if (route.request().method() === 'POST' && ['/api/nodes', '/api/workspaces'].includes(path)) {
+    if (route.request().method() === 'POST' && path === '/api/nodes') {
       writes.push({ path, body: route.request().postDataJSON() });
       return options.rejectCreate
         ? route.fulfill({ status: 409, json: { error: 'CONFLICT', message: 'Capacity changed. Please retry.' } })
@@ -90,7 +74,7 @@ async function openSurface(page: Page, surface: 'nodes' | 'workspace' | 'task', 
     else if (path === '/api/projects') body = { projects: [project], hasMore: false };
     else if (path === '/api/projects/creation-project') body = project;
     else if (path.endsWith('/agent-profiles') || path.endsWith('/skills')) body = { items: [] };
-    else if (path === '/api/nodes') body = options.existingNode ? [node] : [];
+    else if (path === '/api/nodes') body = [];
     else if (path === '/api/workspaces') body = [];
     else {
       unexpected.push(path);
@@ -100,15 +84,6 @@ async function openSurface(page: Page, surface: 'nodes' | 'workspace' | 'task', 
   });
   await page.goto(`/compute-creation-audit?surface=${surface}`);
   return { writes, errors, unexpected };
-}
-
-async function openWorkspace(page: Page, options: { existingNode?: boolean; rejectCreate?: boolean } = {}) {
-  const state = await openSurface(page, 'workspace', options);
-  await page.getByLabel('Project', { exact: true }).selectOption(project.id);
-  await expect(page.getByLabel('Workspace Name')).toHaveValue(`${project.name} Workspace`);
-  await expect(page.getByLabel('Repository', { exact: true })).toHaveValue(project.repository);
-  await expect(page.getByRole('button', { name: 'Create Workspace', exact: true })).toBeEnabled();
-  return state;
 }
 
 test('Nodes create posts the selected native offering and shows API rejection', async ({ page }) => {
@@ -292,71 +267,6 @@ for (const poolState of ['configured-empty', 'migration-pending', 'source-disabl
     expect(state.errors).toEqual([]);
   });
 }
-
-for (const mode of ['blank', 'partial', 'cleared'] as const) {
-  test(`CreateWorkspace ${mode} resources preserve inheritance and native request semantics`, async ({ page }) => {
-    const state = await openWorkspace(page);
-    await expect(page.getByLabel('vCPU', { exact: true })).toHaveValue('');
-    await expect(page.getByLabel('Memory (GB)')).toHaveValue('');
-    if (mode !== 'blank') {
-      await page.getByLabel('vCPU', { exact: true }).fill('2.5');
-      await page.getByLabel('Disk (GB)').fill('20');
-      await page.getByLabel('Exclusive node').click();
-      if (mode === 'cleared') {
-        await page.getByRole('button', { name: 'Inherit project default' }).click();
-        await expect(page.getByLabel('vCPU', { exact: true })).toHaveValue('');
-        await expect(page.getByLabel('Disk (GB)')).toHaveValue('');
-        expect(await page.getByLabel('Exclusive node').evaluate((el) => (el as HTMLInputElement).indeterminate)).toBe(true);
-      }
-    }
-    await page.getByRole('button', { name: 'Create Workspace', exact: true }).scrollIntoViewIfNeeded();
-    await screenshot(page, `compute-create-workspace-${mode}`);
-    await assertNoOverflow(page);
-    await page.getByRole('button', { name: 'Create Workspace', exact: true }).click();
-    await expect(page.getByTestId('destination')).toHaveText('/workspaces/created-resource');
-    expect(state.writes).toHaveLength(1);
-    const payload = state.writes[0]!.body;
-    expect(payload).toMatchObject({ projectId: project.id, repository: project.repository, provider: 'hetzner', vmLocation: 'nbg1' });
-    expect(payload).not.toHaveProperty('vmSize');
-    if (mode === 'partial') expect(payload.resourceRequirements).toEqual({ minVcpu: 2.5, minDiskGb: 20, exclusiveNode: true });
-    else expect(payload).not.toHaveProperty('resourceRequirements');
-    expect(state.errors).toEqual([]);
-    expect(state.unexpected).toEqual([]);
-  });
-}
-
-test('CreateWorkspace explicit node omits hidden resource overrides and provider authority', async ({ page }) => {
-  const state = await openWorkspace(page, { existingNode: true });
-  await page.getByLabel('vCPU', { exact: true }).fill('3');
-  await page.getByLabel('Node', { exact: true }).selectOption(node.id);
-  await expect(page.getByLabel('vCPU', { exact: true })).toHaveCount(0);
-  await screenshot(page, 'compute-create-workspace-existing-node');
-  await assertNoOverflow(page);
-  await page.getByRole('button', { name: 'Create Workspace', exact: true }).click();
-  await expect(page.getByTestId('destination')).toHaveText('/workspaces/created-resource');
-  expect(state.writes).toHaveLength(1);
-  expect(state.writes[0]!.body).toMatchObject({ nodeId: node.id, vmLocation: 'hel1' });
-  for (const field of ['vmSize', 'provider', 'resourceRequirements']) expect(state.writes[0]!.body).not.toHaveProperty(field);
-  expect(state.errors).toEqual([]);
-  expect(state.unexpected).toEqual([]);
-});
-
-test('CreateWorkspace invalid number blocks submission and API error retains values', async ({ page }) => {
-  const state = await openWorkspace(page, { rejectCreate: true });
-  await page.getByLabel('vCPU', { exact: true }).fill('-1');
-  await page.getByRole('button', { name: 'Create Workspace', exact: true }).click();
-  expect(await page.getByLabel('vCPU', { exact: true }).evaluate((el) => (el as HTMLInputElement).validity.rangeUnderflow)).toBe(true);
-  expect(state.writes).toHaveLength(0);
-  await page.getByLabel('vCPU', { exact: true }).fill('2.5');
-  await page.getByRole('button', { name: 'Create Workspace', exact: true }).click();
-  await expect(page.getByText('Capacity changed. Please retry.', { exact: true })).toBeVisible();
-  await expect(page.getByLabel('vCPU', { exact: true })).toHaveValue('2.5');
-  expect(state.writes).toHaveLength(1);
-  await screenshot(page, 'compute-create-workspace-error');
-  await assertNoOverflow(page);
-  expect(state.errors).toEqual([]);
-  expect(state.unexpected).toEqual([]);
-});
 
 test('unused standalone TaskSubmitForm validates then emits fractional resources and clears to inheritance', async ({ page }) => {
   const state = await openSurface(page, 'task');

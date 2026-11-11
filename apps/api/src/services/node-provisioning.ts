@@ -1,5 +1,6 @@
 import { validateCloudInitSize } from '@simple-agent-manager/cloud-init';
 import {
+  isProviderCreateNotDispatched,
   isTransientCapacityError,
   ProviderError,
   type ProviderRequestContext,
@@ -18,6 +19,7 @@ import { createNodeBackendDNSRecord } from './dns';
 import { GcpApiError, sanitizeGcpError } from './gcp-errors';
 import { signCurrentNodeCallbackToken } from './jwt';
 import {
+  durableAllocationMayHaveCreated,
   type DurableNodeAllocation,
   NodeAllocationUncertainError,
   recoverNodeAllocation,
@@ -49,6 +51,11 @@ export { resolveHetznerBaseImageOverride } from './node-provisioning-image';
 import { prepareNodeTunnelIngress, settleNodeTunnelIngress } from './node-provisioning-ingress';
 import { recordRejectedAllocationAbsence } from './node-rejection-proof';
 import { resolveManagedNodeTransport, type TunnelEnv } from './node-tunnel-config';
+import type { NodeTunnelProvisioningPhase } from './node-tunnel-provisioning';
+import {
+  describeProvisioningFailure,
+  recordTunnelProvisioningFailure,
+} from './node-tunnel-provisioning-failure';
 import { persistError } from './observability';
 import {
   createProviderForUser,
@@ -141,6 +148,7 @@ export async function provisionNode(
   let providerRejectionProofAt: string | null = null;
   // Tunnel bookkeeping for the failure path: was ownership journaled, and could a VM exist?
   let tunnelJournaled = false;
+  let tunnelPhase: NodeTunnelProvisioningPhase | null = null;
   let providerCreateRequested = false;
   const attributionUserId = node.credentialAttributionUserId ?? node.userId;
   const attributionProjectId =
@@ -160,6 +168,9 @@ export async function provisionNode(
     !!durable &&
     node.runtimeIncarnationId === durable.incarnationId &&
     node.runtimeTerminationConfirmedAt === null;
+  // A resumed attempt reconciles the exact inventory only when an earlier attempt may have
+  // sent the create; one cut before its create POST (e.g. inside tunnel setup) creates instead.
+  const recoverExisting = resuming && !!durable && durableAllocationMayHaveCreated(durable);
   if (
     durable &&
     !resuming &&
@@ -177,9 +188,9 @@ export async function provisionNode(
         ? node.transport
         : null
       : resolveManagedNodeTransport(tunnelEnv, {
-          isDeploymentNode: !!deploymentContext,
           runtime: node.runtime,
           nodeClass: node.nodeClass,
+          nodeRole: node.nodeRole,
         });
     if (!resuming)
       await assertNodeAllocationPlanCurrent(
@@ -263,7 +274,11 @@ export async function provisionNode(
       onOwnershipRecorded: () => {
         tunnelJournaled = true;
       },
+      onPhase: (phase) => {
+        tunnelPhase = phase;
+      },
     });
+    tunnelPhase = null;
 
     const cloudInit = buildNodeCloudInit({
       env,
@@ -291,7 +306,7 @@ export async function provisionNode(
     // Last authority check before the paid provider allocation. A revocation
     // that races createVM is handled by the post-request check below, which can
     // strictly destroy the resource using the persisted provider identity.
-    if (!resuming) {
+    if (!recoverExisting) {
       await assertNodeAllocationPlanCurrent(
         env,
         node.id,
@@ -320,12 +335,28 @@ export async function provisionNode(
       node
     );
     let vm: Awaited<ReturnType<typeof provider.createVM>>;
-    providerCreateRequested = true;
+    // A durable attempt counts as having requested a create only once its mark is recorded, so
+    // a failure before the mark is attributed to `before_provider`, not `provider_create`.
+    if (!durable?.markProviderCreateRequested || recoverExisting) providerCreateRequested = true;
     try {
-      vm = await (resuming && durable
-        ? recoverNodeAllocation(provider, node, env, durable, providerContext)
-        : providerContext
-          ? provider.createVM(vmConfig, providerContext)
+      if (!recoverExisting && durable?.markProviderCreateRequested) {
+        // The last cancellation point before the create. Not after the mark: a cut there would
+        // leave a recorded create that was never sent, which every later attempt can only fail
+        // to reconcile. After the mark the create is not cancelled by the deadline (below).
+        throwIfProviderRequestAborted(providerContext);
+        await durable.markProviderCreateRequested();
+        providerCreateRequested = true;
+      }
+      // A durable create or recovery runs to completion once started: the attempt deadline
+      // must not cut it. Staging, GCP: a cut between the mark and the POST (inside the OAuth
+      // token exchange) left a recorded create with nothing to reconcile, and a cut inside the
+      // read-only recovery (aggregated list + getVM) repeated on every attempt. Both are
+      // bounded by the provider's own request (30 s) and operation-poll timeouts.
+      const createContext = durable ? undefined : providerContext;
+      vm = await (recoverExisting && durable
+        ? recoverNodeAllocation(provider, node, env, durable, createContext)
+        : createContext
+          ? provider.createVM(vmConfig, createContext)
           : provider.createVM(vmConfig));
     } catch (err) {
       if (err instanceof NodeAllocationUncertainError) throw err;
@@ -348,12 +379,35 @@ export async function provisionNode(
         providerRejectionProofAt = proof?.proofAt ?? null;
         rejectedPlacementPredicate = proof?.placementPredicate;
       }
+      if (
+        durable &&
+        !recoverExisting &&
+        durable.clearProviderCreateRequested &&
+        isProviderCreateNotDispatched(err)
+      ) {
+        // The provider proved its create request was never sent (GCP: token exchange or
+        // firewall ensure failed). Withdraw the record so the next attempt creates again
+        // (bounded by the intent's attempt and age limits), and keep the real error as the cause.
+        await durable.clearProviderCreateRequested();
+        providerCreateRequested = false;
+        throw new NodeAllocationUncertainError(
+          `Provider create was not sent; the next attempt retries it (${describeProvisioningFailure(err)})`
+        );
+      }
       if (durable && !providerAllocationRejected) {
-        throw new NodeAllocationUncertainError(undefined, { cause: err });
+        throw new NodeAllocationUncertainError(
+          `Provider allocation is unresolved; exact resource reconciliation is required (${describeProvisioningFailure(err)})`,
+          { cause: err }
+        );
       }
       throw err;
     }
-    throwIfProviderRequestAborted(providerContext);
+    // From here on a durable attempt publishes what it created or adopted regardless of the
+    // attempt deadline: D1 writes and authority re-checks, each bounded by its own timeout
+    // (the public-IP DNS call below keeps the deadline). Cutting it here only made every later attempt repeat the
+    // same publish (staging, GCP, 2026-11-11). Non-durable callers keep their cancellation.
+    const publishContext = durable ? undefined : providerContext;
+    throwIfProviderRequestAborted(publishContext);
 
     // Persist the provider identity before the post-request authority check so
     // a revocation that races createVM can strictly destroy the paid resource.
@@ -382,7 +436,7 @@ export async function provisionNode(
         provider,
         providerInstanceId: vm.id,
         runtimeIncarnationId: provisioningRuntimeIncarnationId,
-        providerContext,
+        providerContext: publishContext,
       });
       throw new Error('Node lifecycle changed before provider identity could be recorded');
     }
@@ -406,7 +460,7 @@ export async function provisionNode(
       try {
         await deleteNodeResourcesStrict(node.id, node.userId, env, {
           cleanupDns: false,
-          providerRequestContext: providerContext,
+          providerRequestContext: publishContext,
           expectedRuntime: {
             userId: node.userId,
             runtime: node.runtime,
@@ -426,7 +480,7 @@ export async function provisionNode(
           provider,
           providerInstanceId: vm.id,
           nodeId: node.id,
-          providerContext,
+          providerContext: publishContext,
         });
       }
       throw authorityErr;
@@ -436,9 +490,12 @@ export async function provisionNode(
     // Store the provider instance ID and mark as pending-ip; heartbeat backfill
     // will capture the IP when the VM agent sends its first heartbeat.
     // Tunnel nodes are reached through cloudflared or frpc, never the public IP: no IP wait
-    // and no A record. The heartbeat backfill also skips them (keyed on the node's transport).
+    // and no A record (the heartbeat never creates one for them, keyed on the node's
+    // transport). A deployment tunnel node (cloudflare-tunnel only; reverse-tunnel excludes
+    // deployment nodes) still serves its app routes on the public IP, so it waits for one;
+    // its heartbeat records that IP without an A record (routes/node-lifecycle.ts).
     const tunnelIngress = !!tunnel || !!reverseTunnel;
-    if (!vm.ip && !tunnelIngress) {
+    if (!vm.ip && (!tunnelIngress || isDeploymentNode)) {
       log.info('node_provisioning.awaiting_ip_backfill', {
         nodeId: node.id,
         providerInstanceId: vm.id,
@@ -471,11 +528,11 @@ export async function provisionNode(
           provider,
           providerInstanceId: vm.id,
           runtimeIncarnationId: provisioningRuntimeIncarnationId,
-          providerContext,
+          providerContext: publishContext,
         });
         throw new Error('Node lifecycle changed before pending-IP state could be published');
       }
-      throwIfProviderRequestAborted(providerContext);
+      throwIfProviderRequestAborted(publishContext);
       return { allocationConfirmed: true };
     }
 
@@ -487,6 +544,8 @@ export async function provisionNode(
           ? await createNodeBackendDNSRecord(node.id, vm.ip, env, providerContext?.signal, true)
           : await createNodeBackendDNSRecord(node.id, vm.ip, env);
       } catch (dnsErr) {
+        // The DNS create stays on the attempt's deadline: a lost response is cut and adopted
+        // exactly on replay (createNodeBackendDNSRecord recoverExisting). Tunnel nodes skip it.
         throwIfProviderRequestAborted(providerContext);
         log.error('node_provisioning.dns_record_failed', {
           nodeId: node.id,
@@ -496,7 +555,7 @@ export async function provisionNode(
       }
     }
 
-    throwIfProviderRequestAborted(providerContext);
+    throwIfProviderRequestAborted(publishContext);
     const finalUpdate = await db
       .update(schema.nodes)
       .set({
@@ -531,18 +590,33 @@ export async function provisionNode(
         providerInstanceId: vm.id,
         runtimeIncarnationId: provisioningRuntimeIncarnationId,
         backendDnsRecordId,
-        providerContext,
+        providerContext: publishContext,
       });
       throw new Error('Node lifecycle changed before running state could be published');
     }
-    throwIfProviderRequestAborted(providerContext);
+    throwIfProviderRequestAborted(publishContext);
     return { allocationConfirmed: true };
   } catch (err) {
-    // Only a fresh allocation can prove it never requested a VM. A durable resume may
-    // already have a VM holding this token, even when this invocation has not queried it.
+    // Record the cause first, aborts included: the abort branches below rethrow before any
+    // other log or row write, which left staging failures with no recorded cause.
+    if (tunnelJournaled && provisioningRuntimeIncarnationId) {
+      await recordTunnelProvisioningFailure(env, {
+        nodeId: node.id,
+        runtimeIncarnationId: provisioningRuntimeIncarnationId,
+        phase: tunnelPhase ?? (providerCreateRequested ? 'provider_create' : 'before_provider'),
+        durable: !!durable,
+        aborted: options?.signal?.aborted === true,
+        error: err,
+      });
+    }
+    // Only a non-durable call can release before the VM: it minted this incarnation and will
+    // never resume it. A durable allocation resumes the SAME incarnation on its next attempt
+    // (a released row would refuse it forever), and an earlier attempt of it may already have
+    // a VM holding this token. Its row is released by node teardown or the sweep once the
+    // incarnation is no longer live.
     if (
       tunnelJournaled &&
-      !resuming &&
+      !durable &&
       !providerCreateRequested &&
       provisioningRuntimeIncarnationId
     ) {

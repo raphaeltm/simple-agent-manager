@@ -491,8 +491,14 @@ describe('SessionHeader', () => {
     expect(nodeLink).toHaveAttribute('href', '/nodes/node-1');
   });
 
+  it('offers Cancel task, not Complete, for a task that has not started', () => {
+    renderHeader({ taskEmbed: makeTaskEmbed({ status: 'queued' }) });
+    expect(screen.getByLabelText('Cancel this task before it starts')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Mark this task complete')).not.toBeInTheDocument();
+  });
+
   it('shows the Complete control when the task is eligible', () => {
-    renderHeader({ taskEmbed: makeTaskEmbed({ status: 'running' }) });
+    renderHeader({ taskEmbed: makeTaskEmbed({ status: 'in_progress' }) });
     expect(screen.getByLabelText('Mark this task complete')).toBeInTheDocument();
   });
 
