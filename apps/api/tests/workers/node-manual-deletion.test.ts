@@ -371,6 +371,48 @@ describe('owner-confirmed removal of a node SAM cannot delete', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it('releases the tunnel of a providerless tunnel node at once (staging GCP shape)', async () => {
+    // Staging 2026-11-10: a GCP durable create that never landed leaves a providerless node
+    // that strict deletion cannot reconcile; owner attestation is the escape, and it must
+    // hand the incarnation's tunnel to cleanup immediately rather than at the next sweep.
+    const seeded = await seedStuckDeploymentNode('tunnel');
+    await env.DATABASE.prepare(
+      `UPDATE nodes SET provider_instance_id = NULL, node_role = 'workspace', cloud_provider = 'gcp',
+         transport = 'cloudflare-tunnel', tunnel_id = 'tunnel-1', tunnel_name = 'sam-tunnel-1'
+       WHERE id = ?`
+    )
+      .bind(seeded.nodeId)
+      .run();
+    await env.DATABASE.prepare(
+      `INSERT INTO node_cloudflare_tunnels (id, node_id, user_id, runtime_incarnation_id, account_id,
+         zone_id, tunnel_name, tunnel_id, hostname, dns_record_id, status, created_at, updated_at)
+       VALUES (?, ?, ?, 'incarnation-legacy', 'acct', 'zone', 'sam-tunnel-1', 'tunnel-1',
+         'h.vm.example', 'dns-1', 'active', ?, ?)`
+    )
+      .bind(
+        `journal-${seeded.nodeId}`,
+        seeded.nodeId,
+        seeded.userId,
+        new Date().toISOString(),
+        new Date().toISOString()
+      )
+      .run();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('unexpected', { status: 500 }))
+    );
+
+    const response = await confirmManualDeletion(seeded.userId, seeded.nodeId);
+    expect(response.status).toBe(200);
+    expect(
+      await env.DATABASE.prepare(
+        'SELECT status, cleanup_reason FROM node_cloudflare_tunnels WHERE node_id = ?'
+      )
+        .bind(seeded.nodeId)
+        .first()
+    ).toEqual({ status: 'cleanup_pending', cleanup_reason: 'owner_attested_termination' });
+  });
+
   it('sends a machine the owner enrolled to Delete instead, and changes nothing', async () => {
     const seeded = await seedStuckDeploymentNode('user-owned');
     await env.DATABASE.prepare(`UPDATE nodes SET node_class = 'user-owned' WHERE id = ?`)
