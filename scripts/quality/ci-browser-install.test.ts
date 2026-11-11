@@ -446,6 +446,14 @@ describe('run-with-apt-mirror-fallback.sh', () => {
     ['a non-numeric settle timeout', { APT_MIRROR_FALLBACK_SETTLE_TIMEOUT_SECONDS: 'soon' }],
     ['a negative DNS timeout', { APT_MIRROR_FALLBACK_RESOLVE_TIMEOUT_SECONDS: '-1' }],
     ['a zero poll interval', { APT_MIRROR_FALLBACK_SETTLE_POLL_SECONDS: '0' }],
+    [
+      'an overflowing settle budget',
+      { APT_MIRROR_FALLBACK_SETTLE_TIMEOUT_SECONDS: '18446744073709551616' },
+    ],
+    [
+      'an overflowing poll interval',
+      { APT_MIRROR_FALLBACK_SETTLE_POLL_SECONDS: '9223372036854775808' },
+    ],
   ])('rejects %s before running anything', (_label, env) => {
     const sandbox = createSandbox();
 

@@ -63,7 +63,12 @@ fail_usage() {
 [[ $# -ge 1 ]] || fail_usage 'usage: run-with-apt-mirror-fallback.sh <command> [args...]'
 
 for setting in attempt_timeout kill_grace settle_timeout resolve_timeout settle_poll; do
-  [[ ${!setting} =~ ^[1-9][0-9]*$ ]] || fail_usage "$setting must be a positive integer, got '${!setting}'"
+  # Round-trip through the shell's integer representation before using arithmetic.
+  # A huge decimal can otherwise wrap and turn a bounded settle poll into a long sleep.
+  [[ ${!setting} =~ ^[1-9][0-9]*$ ]] &&
+    normalized=$(printf '%d' "${!setting}" 2>/dev/null) &&
+    [[ $normalized == "${!setting}" ]] ||
+    fail_usage "$setting must be a positive integer in the shell's supported range, got '${!setting}'"
 done
 
 fallback_list=()

@@ -8,10 +8,6 @@ Ubuntu packages, before their browser or benchmark tests ran. Raphaël requested
 Claudiii/Fable5.2/high. Task01M75JHJG4MSGSDZ39Y34D4STH produced the initial candidate
 8fd94b15b1e2aef097329ff938388b188f4e168e in draft PR2659.
 
-The parent Shepherd continues the same branch after intentionally stopping that child at16:03.
-The task record reported a provider wait, while its transcript shows a short resumed turn.
-Its final WIP snapshot01M75JXT3KGBJHJQTC8W15FNHP was captured successfully at16:03:44;
-source history and unpushed work remain preserved. No replacement task or profile change.
 This is a CI-only repair. No shared staging or production deployment is triggered by this task;
 the existing rollout coordinator owns deployment timing.
 
@@ -38,7 +34,7 @@ the existing rollout coordinator owns deployment timing.
 ## Implementation checklist
 
 - [x] Bounded unchanged command, one signed-mirror fallback retry, nonzero exit on failure.
-- [x] Explicit HTTPS-only fallback validation and positive configurable durations.
+- [x] Explicit HTTPS-only fallback validation and positive configurable durations within the shell integer range.
 - [x] DNS diagnostic and settle-poll durations have defaults/environment overrides; clamp each
       poll to the remaining settle budget. Capture positional status once (Sonar shell:S7679).
 - [x] CI's three browser installs and the installer browser audit retain --with-deps chromium
@@ -51,7 +47,8 @@ the existing rollout coordinator owns deployment timing.
 - [x] Hermetic shell-boundary tests cover ordinary success, fallback ordering, HTTPS validation,
       failed fallback, disabled fallback, absent mirrorlist, stuck/delayed apt-get, dpkg-only
       cleanup, SIGTERM-resistant commands, bounded second attempts and hanging DNS lookups.
-- [x] Installer and benchmark wiring assertions preserve the full command and test/action order.
+- [x] Wiring assertions check installer helper paths/system-dependency flags and benchmark
+      preparation order/mode; source review verifies the existing action pin and test commands.
 - [x] Final focused validation and discriminating mutation checks recorded below.
 - [ ] Fresh security/constitution/test/completion local reviewers complete and findings resolved.
 - [ ] Fresh final-candidate CI and candidate-only CodSpeed run pass; no gate is bypassed.
@@ -92,8 +89,8 @@ then completed successfully. This is real fallback evidence during the outage, r
 simulated DNS configuration or a claim based only on an install step. Initial CI Workflow failed
 five non-hermetic DNS tests; that failure remains visible and must be fixed on the final head.
 
-Final local validation: 5 focused CI quality files / 42 tests PASS; ESLint, Prettier,
-shell syntax and git diff whitespace checks PASS. Six final guard mutations were detected:
+Final local validation: 5 focused CI quality files / 44 tests PASS; ESLint, Prettier,
+shell syntax and git diff whitespace checks PASS. Seven final guard mutations were detected:
 
 | Removed or weakened guard       | Discriminating result                                                    |
 | ------------------------------- | ------------------------------------------------------------------------ |
@@ -104,19 +101,19 @@ shell syntax and git diff whitespace checks PASS. Six final guard mutations were
 | Strict apt-index error mode     | Benchmark setup wiring test failed                                       |
 | Poll clamped to settle deadline | Long-poll case exceeded the12second harness budget; process group killed |
 
-All mutated files were restored. Five results are assertion failures; the poll-bound result is
+All mutated files were restored. Six results are assertion failures; the poll-bound result is
 an externally enforced liveness deadline, rather than a claimed completed assertion. The intact
 baseline completed that case in about3seconds. Fresh specialist reports and final CI remain
 pending in the PR body.
 Staging exemption: config-only CI scripts/workflow wiring and tests; no application runtime or
 cloud infrastructure change. A staging deploy would not exercise the changed mechanism. Actual
-candidate Actions runs provide the equivalent evidence; shared staging remains with #2627.
+candidate Actions runs provide the equivalent evidence; no shared staging mutation is required.
 
 ## Scope disposition and references
 
 Manual acp-codex-review-build.yml also uses apt but is not a current release gate or incident
-owner's branch. Preserve a SAM Idea follow-up rather than expanding into an unexercised manual
-builder. This does not waive any failing required check on the current candidate.
+owner's branch. Follow-up Idea01M75Q9AWW6PBQQ6X7R0HND2EB records this manual builder rather than expanding the
+current repair into an unexercised workload. This does not waive any failing required check on the current candidate.
 
 - PR: https://github.com/raphaeltm/simple-agent-manager/pull/2659
 - Primary incident evidence: main43037509441; PR2656 job130571384550;
