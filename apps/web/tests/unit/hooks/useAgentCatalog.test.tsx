@@ -181,10 +181,9 @@ describe('useProviderCatalog', () => {
   it('passes scoped catalog options into the query function', async () => {
     const { Wrapper } = createWrapper();
 
-    renderHook(
-      () => useProviderCatalog('user-1', { scope: 'project', projectId: 'project-1' }),
-      { wrapper: Wrapper }
-    );
+    renderHook(() => useProviderCatalog('user-1', { scope: 'project', projectId: 'project-1' }), {
+      wrapper: Wrapper,
+    });
 
     await waitFor(() =>
       expect(mocks.getProviderCatalog).toHaveBeenCalledWith({
@@ -206,13 +205,17 @@ describe('useProviderCatalog', () => {
     expect(result.current.catalogs).toEqual([]);
     expect(result.current.catalog).toBeNull();
   });
-
 });
 
 describe('useTrialStatus', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.getTrialStatus.mockResolvedValue({ available: true, agentType: 'opencode' });
+    mocks.getTrialStatus.mockResolvedValue({
+      available: true,
+      agentType: 'opencode',
+      hasInfraCredential: true,
+      hasAgentCredential: true,
+    });
   });
 
   it('deduplicates concurrent consumers and exposes availability', async () => {
@@ -226,19 +229,19 @@ describe('useTrialStatus', () => {
       { wrapper: Wrapper }
     );
 
-    await waitFor(() => expect(result.current.checklist.available).toBe(true));
-    expect(result.current.projectChat.available).toBe(true);
+    await waitFor(() => expect(result.current.checklist.platformCompute).toBe(true));
+    expect(result.current.projectChat.platformCompute).toBe(true);
     expect(mocks.getTrialStatus).toHaveBeenCalledTimes(1);
   });
 
   it('serves a remounting consumer from cache', async () => {
     const { Wrapper } = createWrapper();
     const first = renderHook(() => useTrialStatus('user-1'), { wrapper: Wrapper });
-    await waitFor(() => expect(first.result.current.available).toBe(true));
+    await waitFor(() => expect(first.result.current.platformCompute).toBe(true));
     first.unmount();
 
     const second = renderHook(() => useTrialStatus('user-1'), { wrapper: Wrapper });
-    expect(second.result.current.available).toBe(true);
+    expect(second.result.current.platformCompute).toBe(true);
     expect(second.result.current.loading).toBe(false);
     expect(mocks.getTrialStatus).toHaveBeenCalledTimes(1);
   });
@@ -250,7 +253,43 @@ describe('useTrialStatus', () => {
     const { result } = renderHook(() => useTrialStatus('user-1'), { wrapper: Wrapper });
 
     await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(result.current.available).toBe(false);
+    expect(result.current.platformCompute).toBe(false);
     expect(result.current.trial).toBeNull();
+  });
+
+  // Installation machines are independent of the SAM-managed AI proxy: a self-hosted install
+  // answers `available: false` (proxy off) with `hasInfraCredential: true`.
+  it('reports installation machines from hasInfraCredential, not from available', async () => {
+    const { Wrapper } = createWrapper();
+    mocks.getTrialStatus.mockResolvedValue({
+      available: false,
+      agentType: null,
+      hasInfraCredential: true,
+      hasAgentCredential: false,
+      dailyTokenBudget: null,
+      dailyTokenUsage: null,
+    });
+
+    const { result } = renderHook(() => useTrialStatus('user-1'), { wrapper: Wrapper });
+
+    await waitFor(() => expect(result.current.trial).not.toBeNull());
+    expect(result.current.platformCompute).toBe(true);
+  });
+
+  it('reports no installation machines without a platform cloud credential', async () => {
+    const { Wrapper } = createWrapper();
+    mocks.getTrialStatus.mockResolvedValue({
+      available: false,
+      agentType: null,
+      hasInfraCredential: false,
+      hasAgentCredential: true,
+      dailyTokenBudget: null,
+      dailyTokenUsage: null,
+    });
+
+    const { result } = renderHook(() => useTrialStatus('user-1'), { wrapper: Wrapper });
+
+    await waitFor(() => expect(result.current.trial).not.toBeNull());
+    expect(result.current.platformCompute).toBe(false);
   });
 });

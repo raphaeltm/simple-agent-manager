@@ -19,6 +19,10 @@ Public marketing website, blog, and documentation at `simple-agent-manager.org`.
 | `src/components/scenes/` | `FeatureScene.astro` (renders a scene in the hero's glass language; markup is the final frame) and `scene-motion.ts` (loads layers near the viewport, plays the story once in view, rests) |
 | `scripts/build-feature-scenes.ts` | Crops the scenes' layers (dark + light) into `public/images/scenes/` and `src/data/feature-scenes.json`; shares crop helpers with the hero script (`scripts/lib/real-ui-layers.ts`) |
 | `src/lib/motion.ts` | Motion shared by the hero and the scenes: the page-wide pause flag behind the hero's pause control, the story budget (`MAX_STORY_MS`, `STEP_SETTLE_MS`), the timeline, and the pointer follower used for tilt |
+| `src/pages/brand/index.astro` | Brand and style guide (`/brand/`). Published but not launched: `noindex`, excluded from the sitemap in `astro.config.ts`, linked from nowhere |
+| `src/components/brand/` | Brand guide sections, the `Lockup` component and `brand-motion.ts` (reveals, scroll progress `--p`, the pinned colour track, copy buttons) |
+| `src/data/brand-content.json`, `src/data/brand.ts` | Brand guide content (palette, type scale, easings, copy examples, glossary) and its load-time validation and colour helpers. Token-backed swatches are checked against the CSS by `tests/brand-guide.test.ts` |
+| `scripts/build-brand-lockups.ts` | Renders the downloadable lockup PNGs in `public/images/brand/` with Chillax embedded; fails if the font does not load |
 | `src/pages/integrations/` | Integration showcase pages |
 | `src/pages/presentations/` | Presentation/talk pages |
 | `src/components/` | Astro/React components used in pages |
@@ -57,6 +61,7 @@ pnpm --filter @simple-agent-manager/www compress:screenshots public/images/blog/
 - Scene boxes are source pixels. After re-capturing a source screenshot, re-run `build:feature-scenes` and check the boxes still outline the same UI (look at each scene; `homepage-scenes.spec.ts` writes every resting frame to `.codex/tmp/playwright-screenshots/`). Chips float in front of the window and perspective enlarges them, so they stay within 96% of the stage width (the window within 99%); `homepage-scenes.spec.ts` measures every layer at 11 widths in the intro and at rest.
 
 - Astro caches rendered Markdown, including each code block's `<link>` to the hashed `ec.*.css`, in `node_modules/.astro/data-store.json`. After changing Expressive Code settings, delete that file before building or previewing, or code blocks link a stylesheet that no longer exists and render unstyled. CI builds start clean.
+- Brand guide motion follows the hero's rules: markup is the final frame, `html.bg-motion` (set only when motion is allowed) gates every hidden or scroll-linked state, and nothing plays on its own for more than 5 s. A `data-reveal="wipe"` element starts clipped to nothing, so it uses its own threshold-0 observer; IntersectionObserver measures the clipped box. When a brand colour, font or rule changes, update `src/data/brand.ts` and the guide in the same PR.
 - `pnpm build:assets` runs before both `dev` and `build` — if you add new scripts, wire them there
 - The analytics tracker (`scripts/build-tracker.ts`) is bundled at build time, not at runtime
 - Do NOT confuse this with `apps/web/` — different stack (Astro vs React+Vite), different domain

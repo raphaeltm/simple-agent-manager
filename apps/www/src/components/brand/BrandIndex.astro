@@ -1,0 +1,293 @@
+---
+/**
+ * The principle band (two rows that slide against each other with scroll), the contents
+ * list, and the fixed section rail shown on wide screens.
+ */
+import { SECTIONS } from '../../data/brand';
+
+const blurbs: Record<(typeof SECTIONS)[number]['id'], string> = {
+  essence: 'What SAM is, and the four ideas behind every choice.',
+  logo: 'The lockup, the mascot, clear space and what not to do.',
+  colour: 'One green, a deep void, and colours that mean something.',
+  type: 'Chillax for headlines, the system font for reading.',
+  material: 'Glass panes over a dark green void, lit from the edges.',
+  motion: 'Curves, durations and when to stop moving.',
+  interface: 'Buttons, chips and the pieces of the app.',
+  voice: 'How SAM writes: plain, specific and honest.',
+  imagery: 'Real screens with mock data, framed in glass.',
+  assets: 'Logos, icons and the font, ready to download.',
+};
+
+const band = ['Simple', 'Honest', 'Yours', 'Calm'];
+const row = [...band, ...band, ...band];
+---
+
+<div class="bg-band" data-progress aria-hidden="true">
+  <div class="bg-band-row bg-band-row--a">
+    {row.map((word, index) => <span class:list={{ solid: index % 2 === 0 }} data-word={word}></span>)}
+  </div>
+  <div class="bg-band-row bg-band-row--b">
+    {row.map((word, index) => <span class:list={{ solid: index % 2 === 1 }} data-word={word}></span>)}
+  </div>
+</div>
+
+<section id="contents" class="bg-section bg-contents" aria-labelledby="contents-title">
+  <div class="container">
+    <h2 id="contents-title" class="bg-kicker">Contents</h2>
+    <ol class="bg-contents-list">
+      {SECTIONS.map((section, index) => (
+        <li data-reveal style={`--i:${index % 2}`}>
+          <a href={`#${section.id}`}>
+            <span class="n">{String(index + 1).padStart(2, '0')}</span>
+            <span class="t">{section.label}</span>
+            <span class="b">{blurbs[section.id]}</span>
+            <svg class="a" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7"/><path d="M7 7h10v10"/></svg>
+          </a>
+        </li>
+      ))}
+    </ol>
+  </div>
+</section>
+
+<nav class="bg-rail" data-rail aria-label="Guide sections">
+  <span class="bg-rail-track" aria-hidden="true"><span class="bg-rail-fill"></span></span>
+  <ol>
+    {SECTIONS.map((section, index) => (
+      <li>
+        <a href={`#${section.id}`}>
+          <span class="n">{String(index + 1).padStart(2, '0')}</span>
+          <span class="t">{section.label}</span>
+        </a>
+      </li>
+    ))}
+  </ol>
+</nav>
+
+<style>
+  /* --- Principle band --- */
+  .bg-band {
+    display: grid;
+    gap: 4px;
+    padding: 40px 0;
+    overflow: clip;
+    border-block: 1px solid var(--color-border-subtle);
+    font-family: var(--font-display);
+    font-size: clamp(3rem, 9vw, 7.5rem);
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: -0.04em;
+  }
+
+  .bg-band-row {
+    display: flex;
+    gap: 0.4em;
+    width: max-content;
+    white-space: nowrap;
+  }
+
+  /* Decoration only: the words are drawn as generated content, so they are not page text. */
+  .bg-band-row span::before {
+    content: attr(data-word);
+  }
+
+  .bg-band-row span {
+    color: transparent;
+    -webkit-text-stroke: 1px var(--color-border);
+  }
+
+  .bg-band-row span.solid {
+    color: var(--color-fg-primary);
+    -webkit-text-stroke: 0;
+  }
+
+  .bg-band-row--b span.solid {
+    color: var(--color-accent-strong);
+  }
+
+  .bg-band-row--a {
+    transform: translate3d(-10%, 0, 0);
+  }
+
+  .bg-band-row--b {
+    transform: translate3d(-30%, 0, 0);
+  }
+
+  :global(html.bg-motion) .bg-band-row--a {
+    transform: translate3d(calc(-4% - var(--p, 0) * 22%), 0, 0);
+  }
+
+  :global(html.bg-motion) .bg-band-row--b {
+    transform: translate3d(calc(-36% + var(--p, 0) * 22%), 0, 0);
+  }
+
+  /* --- Contents --- */
+  .bg-contents {
+    padding-top: 80px;
+  }
+
+  .bg-contents-list {
+    display: grid;
+    margin-top: 24px;
+    list-style: none;
+    border-top: 1px solid var(--color-border-subtle);
+  }
+
+  @media (min-width: 900px) {
+    .bg-contents-list {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      column-gap: 48px;
+    }
+  }
+
+  .bg-contents-list li {
+    border-bottom: 1px solid var(--color-border-subtle);
+  }
+
+  .bg-contents-list a {
+    position: relative;
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) 24px;
+    grid-template-areas: 'n t a' '. b .';
+    column-gap: 12px;
+    row-gap: 2px;
+    padding: 22px 12px;
+    color: var(--color-fg-primary);
+    isolation: isolate;
+  }
+
+  /* The highlight wipes in from the left. */
+  .bg-contents-list a::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: var(--radius-md);
+    background: linear-gradient(90deg, var(--color-accent-glow), transparent);
+    clip-path: inset(0 100% 0 0);
+    transition: clip-path 0.6s var(--ease-glide);
+  }
+
+  .bg-contents-list a:hover::before,
+  .bg-contents-list a:focus-visible::before {
+    clip-path: inset(0 0 0 0);
+  }
+
+  .bg-contents-list .n {
+    grid-area: n;
+    padding-top: 6px;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--color-accent-strong);
+  }
+
+  html[data-theme='light'] .bg-contents-list .n {
+    color: var(--color-accent);
+  }
+
+  .bg-contents-list .t {
+    grid-area: t;
+    font-family: var(--font-display);
+    font-size: 1.625rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    transition: transform 0.5s var(--ease-glide);
+  }
+
+  .bg-contents-list .b {
+    grid-area: b;
+    color: var(--color-fg-muted);
+    font-size: 0.9375rem;
+  }
+
+  .bg-contents-list .a {
+    grid-area: a;
+    margin-top: 8px;
+    color: var(--color-fg-dim);
+    transition:
+      transform 0.5s var(--ease-glide),
+      color 0.2s ease;
+  }
+
+  .bg-contents-list a:hover .t {
+    transform: translateX(8px);
+  }
+
+  .bg-contents-list a:hover .a {
+    color: var(--color-accent-strong);
+    transform: translate(3px, -3px);
+  }
+
+  /* --- Rail (wide screens only) --- */
+  .bg-rail {
+    position: fixed;
+    top: 50%;
+    right: 20px;
+    z-index: 40;
+    display: none;
+    transform: translateY(-50%);
+  }
+
+  @media (min-width: 1440px) {
+    .bg-rail {
+      display: flex;
+      gap: 12px;
+    }
+  }
+
+  .bg-rail-track {
+    position: relative;
+    width: 2px;
+    border-radius: 2px;
+    background: var(--color-border-subtle);
+    overflow: hidden;
+  }
+
+  .bg-rail-fill {
+    position: absolute;
+    inset: 0;
+    background: var(--color-accent-strong);
+    transform-origin: top;
+    transform: scaleY(var(--bg-page-p, 0));
+  }
+
+  .bg-rail ol {
+    display: grid;
+    gap: 4px;
+    list-style: none;
+  }
+
+  .bg-rail a {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 6px;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--color-fg-dim);
+  }
+
+  .bg-rail .t {
+    max-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    opacity: 0;
+    transition:
+      max-width 0.5s var(--ease-glide),
+      opacity 0.3s ease;
+  }
+
+  .bg-rail a:hover .t,
+  .bg-rail a:focus-visible .t,
+  .bg-rail a[aria-current] .t {
+    max-width: 120px;
+    opacity: 1;
+  }
+
+  .bg-rail a[aria-current] {
+    color: var(--color-fg-primary);
+  }
+
+  .bg-rail a[aria-current] .n {
+    color: var(--color-accent-strong);
+  }
+</style>

@@ -9,8 +9,13 @@ import { trialStatusQueryOptions } from '../lib/query-options';
 
 interface UseTrialStatusResult {
   trial: TrialStatusResponse | null;
-  /** Whether installation platform compute (platform cloud credential + AI proxy) is available. */
-  available: boolean;
+  /**
+   * Whether the installation provides machines: an enabled platform cloud credential exists, so
+   * SAM can provision for a user who has no cloud account of their own. This is independent of
+   * the SAM-managed AI proxy (`hasAgentCredential`); an install with the proxy off still has
+   * installation compute, and agents then use the user's own agent credential.
+   */
+  platformCompute: boolean;
   loading: boolean;
   isRefreshing: boolean;
   error: string | null;
@@ -33,7 +38,7 @@ export function useTrialStatus(queryScope: string): UseTrialStatusResult {
 
   return {
     trial: query.data ?? null,
-    available: query.data?.available ?? false,
+    platformCompute: query.data?.hasInfraCredential === true,
     loading: Boolean(queryScope) && query.isPending && query.data === undefined,
     isRefreshing: query.isFetching && query.data !== undefined,
     error:

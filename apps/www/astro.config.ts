@@ -129,7 +129,8 @@ export default defineConfig({
       ],
       disable404Route: true,
     }),
-    sitemap(),
+    // The brand guide (/brand/) is published but not launched: keep it out of the sitemap.
+    sitemap({ filter: (page) => !new URL(page).pathname.startsWith('/brand/') }),
   ],
   build: {
     assets: '_assets',
