@@ -5,11 +5,16 @@ import * as v from 'valibot';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
-import { classifyHost, guardedFetch } from '../lib/network-hosts';
+import { guardedFetch } from '../lib/network-hosts';
 import { readResponseJson } from '../lib/runtime-validation';
 import { errors } from '../middleware/error';
 import { getTimeoutMs } from './fetch-timeout';
 import { requireGitLabUserAccessTokenForOwner } from './gitlab-access-token';
+import {
+  assertGitLabHostAllowed,
+  DEFAULT_GITLAB_API_TIMEOUT_MS,
+  gitLabRequestError,
+} from './gitlab-host-policy';
 import { resolveOutboundMaxRedirects } from './outbound-fetch-settings';
 import { getGitLabOAuthConfig } from './platform-config';
 
@@ -26,10 +31,6 @@ export {
 } from './gitlab-access-token';
 
 const MIN_GITLAB_WRITE_ACCESS_LEVEL = 30; // Developer
-
-// Bound every GitLab API call so a slow or unreachable GitLab host cannot hold a
-// Cloudflare Worker open indefinitely. Configurable via GITLAB_API_TIMEOUT_MS.
-const DEFAULT_GITLAB_API_TIMEOUT_MS = 30_000;
 
 const gitlabAccessSchema = v.object({
   access_level: v.number(),
@@ -109,12 +110,18 @@ export type StoredGitLabRepositoryMetadata = GitLabRepositoryMetadata & {
   userId: string;
 };
 
-async function getGitLabApiBase(env: Env): Promise<{ host: string; apiBaseUrl: string }> {
+async function getGitLabApiBase(
+  env: Env
+): Promise<{ host: string; apiBaseUrl: string; allowPrivateNetwork: boolean }> {
   const config = await getGitLabOAuthConfig(env);
   if (!config) {
     throw errors.badRequest('GitLab is not configured on this deployment');
   }
-  return { host: config.host, apiBaseUrl: config.apiBaseUrl };
+  return {
+    host: config.host,
+    apiBaseUrl: config.apiBaseUrl,
+    allowPrivateNetwork: config.allowPrivateNetwork,
+  };
 }
 
 async function gitlabFetch(
@@ -123,7 +130,9 @@ async function gitlabFetch(
   pathAndQuery: string,
   init?: RequestInit
 ): Promise<Response> {
-  const { apiBaseUrl } = await getGitLabApiBase(env);
+  const { apiBaseUrl, allowPrivateNetwork } = await getGitLabApiBase(env);
+  // A private host needs the admin opt-in (gitlab-host-policy.ts); refused before any request.
+  assertGitLabHostAllowed(apiBaseUrl, allowPrivateNetwork);
   const headers = new Headers(init?.headers);
   headers.set('Authorization', `Bearer ${accessToken}`);
   if (!headers.has('Accept')) {
@@ -132,18 +141,17 @@ async function gitlabFetch(
   // One deadline for the whole call, every redirect hop included: the worst case is
   // GITLAB_API_TIMEOUT_MS, not that times (outbound.maxRedirects + 1).
   const deadlineMs = getTimeoutMs(env.GITLAB_API_TIMEOUT_MS, DEFAULT_GITLAB_API_TIMEOUT_MS);
-  // The host is admin-configured (validateGitLabHost). A private host is allowed only when the
-  // admin configured a private host (a self-managed GitLab on the LAN); either way a redirect
-  // cannot take the request, and its bearer token, anywhere the configured host could not go.
-  return guardedFetch(
-    `${apiBaseUrl}${pathAndQuery}`,
-    { ...init, headers },
-    {
-      allowPrivateNetwork: classifyHost(new URL(apiBaseUrl).hostname) === 'private',
-      maxRedirects: await resolveOutboundMaxRedirects(env),
-      deadlineMs,
-    }
-  );
+  // A redirect cannot take the request, or its bearer token, anywhere the configured host could
+  // not go; a refusal mid-flight is a 502/504 with a stable code, not an uncaught 500.
+  try {
+    return await guardedFetch(
+      `${apiBaseUrl}${pathAndQuery}`,
+      { ...init, headers },
+      { allowPrivateNetwork, maxRedirects: await resolveOutboundMaxRedirects(env), deadlineMs }
+    );
+  } catch (err) {
+    throw gitLabRequestError(err);
+  }
 }
 
 function encodeProjectId(projectId: number | string): string {

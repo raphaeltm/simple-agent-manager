@@ -66,7 +66,10 @@ describe('GitLab API deadline', () => {
     // Three 300 ms responses: each fits in 700 ms on its own, the call as a whole does not.
     const env = { GITLAB_API_TIMEOUT_MS: '700' } as Env;
     const started = Date.now();
-    await expect(verifyGitLabProjectAccess(env, 'glpat', 1)).rejects.toThrow();
+    await expect(verifyGitLabProjectAccess(env, 'glpat', 1)).rejects.toMatchObject({
+      statusCode: 504,
+      error: 'GITLAB_TIMEOUT',
+    });
     expect(Date.now() - started).toBeLessThan(950);
     expect(requests).toBe(3);
   });

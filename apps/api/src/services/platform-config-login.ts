@@ -6,6 +6,8 @@ export interface ResolvedLoginOAuthConfig {
   github: Pick<ResolvedPlatformConfig['github'], 'clientId' | 'clientSecret'>;
   google: ResolvedPlatformConfig['google'];
   gitlab: ResolvedPlatformConfig['gitlab'];
+  /** `integration.gitlab.allowPrivateNetwork`: the admin opted in to a private GitLab host. */
+  gitlabAllowPrivateNetwork?: boolean;
 }
 
 type Setting = Awaited<ReturnType<typeof resolveAdminSettingDetailsMany>>[number];
@@ -26,16 +28,26 @@ function loginValue(setting: Setting | undefined): ResolvedPlatformValue {
 
 /** Session bootstrap needs login clients, never App/webhook/feedback or infrastructure config. */
 export async function resolveLoginOAuthConfig(env: Env): Promise<ResolvedLoginOAuthConfig> {
-  const [githubId, githubSecret, googleId, googleSecret, gitlabHost, gitlabId, gitlabSecret] =
-    await resolveAdminSettingDetailsMany(env, [
-      'integration.github.clientId',
-      'integration.github.clientSecret',
-      'integration.google.clientId',
-      'integration.google.clientSecret',
-      'integration.gitlab.host',
-      'integration.gitlab.clientId',
-      'integration.gitlab.clientSecret',
-    ]);
+  const [
+    githubId,
+    githubSecret,
+    googleId,
+    googleSecret,
+    gitlabHost,
+    gitlabId,
+    gitlabSecret,
+    gitlabAllowPrivate,
+  ] = await resolveAdminSettingDetailsMany(env, [
+    'integration.github.clientId',
+    'integration.github.clientSecret',
+    'integration.google.clientId',
+    'integration.google.clientSecret',
+    'integration.gitlab.host',
+    'integration.gitlab.clientId',
+    'integration.gitlab.clientSecret',
+    // Same batch, so the opt-in adds no settings read to session bootstrap.
+    'integration.gitlab.allowPrivateNetwork',
+  ]);
   return {
     github: { clientId: loginValue(githubId), clientSecret: loginValue(githubSecret) },
     google: { clientId: loginValue(googleId), clientSecret: loginValue(googleSecret) },
@@ -44,5 +56,6 @@ export async function resolveLoginOAuthConfig(env: Env): Promise<ResolvedLoginOA
       clientId: loginValue(gitlabId),
       clientSecret: loginValue(gitlabSecret),
     },
+    gitlabAllowPrivateNetwork: gitlabAllowPrivate?.value === true,
   };
 }

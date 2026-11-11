@@ -136,8 +136,8 @@ describe('GitLab API requests (self-host SSRF, T5)', () => {
     globalThis.fetch = fetchMock;
 
     await expect(verifyGitLabProjectAccess({} as Env, 'gl_token', 123)).rejects.toMatchObject({
-      name: 'OutboundRequestRefusedError',
-      reason: 'host',
+      statusCode: 502,
+      error: 'GITLAB_REQUEST_REFUSED',
     });
 
     expect(fetchMock).toHaveBeenCalledOnce();
@@ -172,6 +172,8 @@ describe('GitLab API requests (self-host SSRF, T5)', () => {
       apiBaseUrl: 'http://localhost:8929/api/v4',
       clientId: 'client-id',
       clientSecret: 'client-secret',
+      // The explicit admin opt-in (integration.gitlab.allowPrivateNetwork).
+      allowPrivateNetwork: true,
     });
     const fetchMock = vi.fn(
       async () =>
@@ -193,8 +195,8 @@ describe('GitLab API requests (self-host SSRF, T5)', () => {
     globalThis.fetch = fetchMock;
 
     await expect(verifyGitLabProjectAccess({} as Env, 'gl_token', 123)).rejects.toMatchObject({
-      name: 'OutboundRequestRefusedError',
-      reason: 'host',
+      statusCode: 502,
+      error: 'GITLAB_REQUEST_REFUSED',
     });
     expect(fetchMock).toHaveBeenCalledOnce();
   });
