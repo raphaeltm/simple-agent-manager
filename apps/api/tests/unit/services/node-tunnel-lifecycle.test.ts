@@ -183,21 +183,18 @@ describe('managed node tunnel provisioning', () => {
     const env = { VM_AGENT_TRANSPORT: 'cloudflare-tunnel' };
     expect(
       resolveManagedNodeTransport(env, {
-        
         runtime: 'cf-container',
         nodeClass: 'managed',
       })
     ).toBeNull();
     expect(
       resolveManagedNodeTransport(env, {
-        
         runtime: 'vm',
         nodeClass: 'user-owned',
       })
     ).toBeNull();
     expect(
       resolveManagedNodeTransport(env, {
-        
         runtime: 'vm',
         nodeClass: 'managed',
       })

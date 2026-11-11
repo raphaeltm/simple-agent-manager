@@ -121,34 +121,48 @@ recorded as a follow-up idea with the two prerequisites above.
 
 ## Implementation Checklist
 
-- [ ] Durable resume never meets a self-released row: release pre-VM only for non-durable callers
+- [x] Durable resume never meets a self-released row: release pre-VM only for non-durable callers
       (`!durable && !providerCreateRequested`), with the reasoning in a comment
-- [ ] Record the failure cause before any rethrow, abort included: structured
+- [x] Record the failure cause before any rethrow, abort included: structured
       `node_provisioning.attempt_failed` log (phase, durable, aborted, reason) and journal
       `last_error` (`recordNodeTunnelProvisioningError`)
-- [ ] Phase tracking in `ensureNodeTunnelForProvisioning` so the recorded cause names the step
-- [ ] Resumable fast path: an `active` row with tunnel + DNS ids skips ingress PUT and CNAME search
+- [x] Phase tracking in `ensureNodeTunnelForProvisioning` so the recorded cause names the step
+- [x] Resumable fast path: an `active` row with tunnel + DNS ids skips ingress PUT and CNAME search
       (verifies the DNS record by id, then fetches the token)
-- [ ] Durable attempt deadline covers tunnel setup: request timeout + `vmTunnels.provisioningBudgetMs`
+- [x] Durable attempt deadline covers tunnel setup: request timeout + `vmTunnels.provisioningBudgetMs`
       (admin setting, default 20 s) when the incarnation uses tunnel transport; per-call timeout
       unchanged
-- [ ] Pending-create escape: migration `0232` adds `pending_create_last_at`; claim stamps it;
+- [x] Pending-create escape: migration `0233` (0232 is taken by the self-host branch) adds `pending_create_last_at`; claim stamps it;
       cleanup treats an unobserved create older than `vmTunnels.pendingCreateSettleMs` (default
       15 min) as settled once its own inventory is deleted; anchored on
       `COALESCE(pending_create_last_at, created_at)` so existing stranded rows recover
-- [ ] Flake fix: releases write `cleanup_next_attempt_at = NULL` (already due); controlled-ordering
+- [x] Flake fix: releases write `cleanup_next_attempt_at = NULL` (already due); controlled-ordering
       regression test
-- [ ] xtables-lock fix in `TUNNEL_FIREWALL_WRITE_FILE` (compute the `-C` check before
+- [x] xtables-lock fix in `TUNNEL_FIREWALL_WRITE_FILE` (compute the `-C` check before
       `iptables-restore` starts)
-- [ ] Deployment nodes: include them in `resolveManagedNodeTransport`; awaiting-IP path for
+- [x] Deployment nodes: include them in `resolveManagedNodeTransport`; awaiting-IP path for
       deployment tunnel nodes with no IP; heartbeat IP-only backfill for deployment tunnel nodes
-- [ ] Caller enumeration test for `provisionNode` (machine-checked, rule 61)
-- [ ] Tests per entry point: direct (Workers DO test, slow Cloudflare forcing an abort mid tunnel
+- [x] Caller enumeration test for `provisionNode` (machine-checked, rule 61)
+- [x] Tests per entry point: direct (Workers DO test, slow Cloudflare forcing an abort mid tunnel
       setup, converges on attempt 2), deployment provisioning with tunnel, relay node with tunnel,
       TaskRunner (existing #2615 coverage, re-verified)
-- [ ] Docs: `node-tunnel-config.ts` header, public docs for tunnel transport and deployment nodes,
+- [x] Docs: `node-tunnel-config.ts` header, public docs for tunnel transport and deployment nodes,
       self-hosting notes
-- [ ] Follow-up idea: full app-route tunneling (Cloudflare for SaaS + flat hostnames)
+- [x] Follow-up idea: full app-route tunneling (Cloudflare for SaaS + flat hostnames): idea `01M745ZZ5BP6CPNRT9P95NWF3Q`
+- [x] Staging-found: a create marked as requested is not cancelled by the attempt deadline
+      (`ca425a898`); the mark is persisted before the POST (`providerCreateRequested`)
+- [x] Staging-found: GCP recovery adopts its VM (zone `location`, `getVM` observed hardware,
+      exact re-read) (`7e1d7334d`)
+- [x] Staging-found: recovery and the durable publish tail are not cut by the deadline; the
+      identity is recorded first; the public-IP DNS create keeps the deadline (`b98b460ed`,
+      `94ef8bd45`)
+- [x] Staging-found: GCP deployment hardening refreshes the iptables snapshot before installing
+      `iptables-persistent` (`f4ba88f09`)
+- [x] Owner-attested manual deletion releases the node's tunnel inline (`56286ae15`)
+- [x] Entry-point tests through `provisionDeploymentNode` and `ensureSessionSnapshotUploadRelay`
+      (`6e078ff50`)
+- [x] Backlog: strict providerless deletion for non-Hetzner providers
+      (`tasks/backlog/2026-11-11-providerless-node-deletion-non-hetzner.md`)
 
 ## Throughput and worst case (rule 81)
 
@@ -186,6 +200,9 @@ All rows ran on `app.sammy.party` (staging, `VM_AGENT_TRANSPORT=cloudflare-tunne
 | --- | --- | --- | --- | --- | --- |
 | S1 | GCP `europe-west1-b` e2-medium | Direct `POST /api/nodes` (NodeLifecycle durable) | `vmTunnels.provisioningBudgetMs=1`, i.e. the incident's 5 s deadline | **Tunnel part PASS; found and fixed a new defect** | Node `01M73XZ9JPMCMEGPYCNEPCV62E` (build 4a… run 42924408696): <ul><li>23:51:33 `attempt_aborted` in phase `ingress` (the incident). The row was not released.</li><li>23:52:02 the resumed attempt finished the tunnel (`node_tunnel.provisioned`), then `attempt_aborted` in `provider_create`.</li><li>23:52:30 `provisioning_resumed` (fast path, 2 calls).</li><li>23:53:01 onward, every attempt failed with `Allocation inventory has no exact match; a second create is forbidden`. The 5 s cut landed after the create-requested mark but before GCP accepted the POST (in its OAuth token exchange), and no VM existed in GCP.</li><li>Fixed in `ca425a898`: once marked, a durable create is not cancelled by the attempt deadline.</li></ul> |
 | S1-teardown | GCP | `DELETE /api/nodes/:id`, then `POST /api/nodes/:id/manual-deletion` | Providerless GCP node | PASS (pre-existing gap recorded) | <ul><li>Strict delete returns 409 for a providerless node on any non-Hetzner provider (`reconcileStrictProviderlessVm`: inventory completeness is guaranteed only for Hetzner). That is pre-existing, so it is filed as backlog.</li><li>Owner attestation returned 200. The sweep cleaned the journal at 00:01:05Z, 75 s later, and the `{node}.vm` CNAME is gone.</li><li>Inline release on attestation was added in `56286ae15`.</li></ul> |
+| S10 | Hetzner `fsn1` cx23 | Direct `POST /api/nodes`: **the incident's exact path and condition** | `vmTunnels.provisioningBudgetMs=1` (5 s attempts) | **PASS** | Node `01M745JK3DMWP97N8ZCD4Q79T6`: <ul><li>02:04:25 `attempt_aborted` in `ingress`. The row was not released, where pre-fix it went `cleanup_pending` and was refused for good.</li><li>02:04:54 tunnel provisioned; cut before the create mark.</li><li>02:05:24 fast-path resume, one Hetzner create; `running` at 02:05:26 with provider id 175589457.</li><li>Journal `active`, CNAME `→ ba0292a1….cfargotunnel.com`.</li><li>The budget was reset to its default afterwards.</li></ul> |
+| Sweep convergence | GCP and Hetzner | Cron sweep after teardown | none | **PASS** | <ul><li>S4 (GCP): journal `cleaned` at 01:40:51, CNAME gone (deleted 01:36:46).</li><li>S9 (Hetzner): `cleaned` at 01:51:10, CNAME gone (deleted 01:49:07).</li><li>S1: `cleaned` at 00:01:05.</li><li>S8 deployment environment delete: `nodeDeleted:true`, `dnsRecordsDeleted:1` (app route); journal `cleanup_pending`/`runtime_terminated`, cleaned by the next tick.</li><li>Each finished within 1-2 cron ticks.</li></ul> |
+| S8 | GCP `europe-west1-b` e2-medium | Deployment node: environment `tunnel-gcp`, compose release (nginx) | none | **Tunnel PASS; release FAIL on a GCP-only defect, fixed** | Release `01M744SA02PCWFC9MFPDRS667J` → deployment node `01M744SC4N3WFSYFHYDPQQJZA1`: `transport=cloudflare-tunnel`, `running`/`healthy`, journal `active`, CNAME in place; Caddy installed; agent ready at 01:53:21Z. <br>`compose up` then failed: `Failed to Setup IP tables … DOCKER-FORWARD: No chain/target/match by that name`. Cause: deployment hardening installs `iptables-persistent`, whose postinst restores a pre-Docker `rules.v4` with a filter-table flush. GCP's Ubuntu image installs Docker after cloud-init's first firewall run; Hetzner's docker-ce image does not. Fixed in `f4ba88f09` (refresh the snapshot before the install). <br>Docker Hub returned 429 from Worker IPs for `nginx:alpine`, so the release uses `public.ecr.aws/nginx/nginx:stable-alpine` (unrelated to tunnels). |
 | S9 | Hetzner `fsn1` (S6's node) | Warm-node reuse: delete the workspace, then a new TaskRunner task with no node pinned | none | **PASS** | Task `01M744GXEMN3XP48E2CC59ZPD8` → workspace `01M744H5H52X9EHMJ5C4CSE1V3` on the same node `01M743ZGW2EVZ2QTJ0ERYMTXJM`, with 0 nodes created after 01:45Z. |
 | S9-teardown | Hetzner | Delete the workspace, then `DELETE /api/nodes/:id` | none | **PASS** | Both returned 200 (01:49:07); `GET` on the node then returns 404. The journal and CNAME are cleaned by the sweep (verified below). |
 | S6 | Hetzner `fsn1` cx23 | TaskRunner `POST /tasks/submit` (chat, fresh node) | none (waited `waiting_for_node_capacity` while the 3-node pool cap was held by the S2/S3 rows) | **PASS** | Task `01M742STVZG7TZXP45AB7Z96VB` → node `01M743ZGW2EVZ2QTJ0ERYMTXJM` (`running`/`healthy`, journal `active`, CNAME `→ 36be9c99….cfargotunnel.com`) → workspace `01M74497ZRSNT53CW1MMCV7Z46` `running`. The agent replied `TUNNEL-OK Linux`. On 5.75.225.129, 8443 (the agent port, from `VM_AGENT_PORT`), 8444 and 22 time out (dropped); 8080, 80, 443 and 9999 return RST (closed, no listener). |
@@ -201,6 +218,10 @@ All rows ran on `app.sammy.party` (staging, `VM_AGENT_TRANSPORT=cloudflare-tunne
 
 | Run | Provider | VMs x minutes | Est. cost |
 | --- | -------- | ------------- | --------- |
+| S1-S4, S5, S7, S8 (e2-medium, ~$0.037/h) | GCP | S2 ~2.5 h and S3 ~2 h (identity-less VMs awaiting manual delete), S4 ~35 min, S8 ~12 min, plus the S8 rerun | < $0.40 |
+| S6/S9, S10 (cx23, ~€0.009/h) | Hetzner | ~15 min + ~10 min | < $0.01 |
+| Tunnel and DNS API calls, Worker requests | Cloudflare | about 10 tunnels | ~$0 (included) |
+| **Total** | | | **< $0.50**: well under the $20 Hetzner+CF cap and the GCP budget |
 
 ## Acceptance Criteria
 
