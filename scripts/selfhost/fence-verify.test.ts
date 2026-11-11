@@ -144,6 +144,21 @@ describe('verify-fence targets', () => {
     expect(targets).toContainEqual(
       expect.objectContaining({ host: '172.17.0.1', port: 7011, expect: 'blocked' })
     );
+    // The private range is proved at an address that is not this host's own, so a dropped
+    // 172.16.0.0/12 rule cannot hide behind "anything else on this host".
+    const range172 = targets.find((t) => t.label === 'private 172.16/12');
+    expect(range172?.expect).toBe('blocked');
+    expect(local).not.toContain(range172?.host);
+  });
+
+  it('picks another 172.16/12 probe address when the first candidate is local', async () => {
+    const targets = await verifyTargets({
+      box: { CELLD_BUCKET: 'gs://b' },
+      range: RANGE,
+      publicProbe: '1.1.1.1:443',
+      localAddresses: ['172.31.255.254'],
+    });
+    expect(targets.find((t) => t.label === 'private 172.16/12')?.host).toBe('172.30.255.254');
   });
 
   it('covers every listener, local spelling, remote class and IPv6 form, plus the positive controls', async () => {
@@ -175,6 +190,7 @@ describe('verify-fence targets', () => {
         '169.254.169.254:80',
         '100.100.100.200:80',
         '172.17.0.1:7001',
+        '172.31.255.254:80',
         '192.168.255.1:80',
         'fd00::1:80',
         'fd20:ce::254:80',

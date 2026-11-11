@@ -129,7 +129,7 @@ beforeEach(() => {
 });
 
 describe('GCE metadata token proxy', () => {
-  it('serves the token with the Cloud Storage scope, whatever the caller asked for', async () => {
+  it('requests the Cloud Storage scope upstream, whatever the caller asked for (GCE itself ignores it)', async () => {
     const asked = `/${SECRET}${TOKEN_PATH}?scopes=https://www.googleapis.com/auth/cloud-platform&audience=x`;
     const reply = await ask(asked, { headers: { 'X-Forwarded-For': '10.0.0.9' } });
     expect(reply).toEqual({ status: 200, body: expect.stringContaining('"access_token":"stub"') });
@@ -140,7 +140,7 @@ describe('GCE metadata token proxy', () => {
     expect(seen[0]!.headers['x-forwarded-for']).toBeUndefined();
   });
 
-  it('control: a plain token request gets the same forced scope', async () => {
+  it('control: a plain token request is rewritten to the same requested scope', async () => {
     expect((await ask(`/${SECRET}${TOKEN_PATH}`)).status).toBe(200);
     expect(seen.map((request) => request.url)).toEqual([
       `${TOKEN_PATH}?scopes=${DEFAULT_GCE_METADATA_PROXY_SCOPES}`,

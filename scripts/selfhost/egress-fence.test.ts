@@ -334,7 +334,7 @@ describe('celld.env and the metadata token proxy', () => {
     ]);
   });
 
-  it('forces a Cloud Storage scope on the token proxy and refuses any other scope', () => {
+  it('requests a Cloud Storage scope for the token proxy (GCE ignores it) and refuses any other scope', () => {
     const box = { CELLD_BUCKET: 'gs://b' };
     const env = parseDotenv(renderCelldEnv(box, plan(box), SECRET), 'celld.env');
     expect(env.GCE_METADATA_PROXY_SCOPES).toBe(DEFAULT_GCE_METADATA_PROXY_SCOPES);
