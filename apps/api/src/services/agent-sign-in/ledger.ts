@@ -49,11 +49,11 @@ export async function claimAgentSignIn(
        source_agent_profile_id, source_task_id, source_workspace_id, target_user_id,
        token_expires_at, session_expires_at, created_at
      )
-     SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13
+     SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
      WHERE (
        SELECT COUNT(*) FROM agent_sign_ins
-       WHERE issuer = ?2 AND source_project_id = ?5 AND source_user_id = ?6 AND created_at > ?14
-     ) < ?15
+       WHERE issuer = ? AND source_project_id = ? AND source_user_id = ? AND created_at > ?
+     ) < ?
      ON CONFLICT(issuer, jti) DO NOTHING
      RETURNING id`
   )
@@ -71,6 +71,9 @@ export async function claimAgentSignIn(
       record.tokenExpiresAtMs,
       record.sessionExpiresAtMs,
       nowMs,
+      record.issuer,
+      record.sourceProjectId,
+      record.sourceUserId,
       windowStartMs,
       maxPerHour
     )

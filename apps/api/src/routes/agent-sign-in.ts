@@ -14,7 +14,7 @@
  * Mounted under `/api/auth` before the BetterAuth catch-all (index.ts).
  */
 import { SYSTEM_USER_ID } from '@simple-agent-manager/shared';
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 import * as v from 'valibot';
 
 import type { Env } from '../env';
@@ -74,10 +74,7 @@ async function hasEstablishedAdministrator(env: Env): Promise<boolean> {
   return Boolean(row);
 }
 
-async function exchange(
-  c: { env: Env; req: { json: () => Promise<unknown> } },
-  trust: AgentSignInTrust
-): Promise<Response> {
+async function exchange(c: Context<{ Bindings: Env }>, trust: AgentSignInTrust): Promise<Response> {
   const env = c.env;
   let raw: unknown;
   try {
@@ -182,6 +179,7 @@ async function exchange(
       reason: 'rate_limited',
       action: 'rejected',
     });
+    c.header('Retry-After', String(claim.retryAfterSeconds));
     throw new RateLimitError(claim.retryAfterSeconds);
   }
 
