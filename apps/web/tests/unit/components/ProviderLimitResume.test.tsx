@@ -15,12 +15,20 @@ import {
 } from '../../../src/components/project-message-view/SessionStatusBanners';
 import type { UseSessionLifecycleResult } from '../../../src/components/project-message-view/useSessionLifecycle.types';
 
-const mocks = vi.hoisted(() => ({ resume: vi.fn(), invalidate: vi.fn(), navigate: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  resume: vi.fn(),
+  startAnyway: vi.fn(),
+  invalidate: vi.fn(),
+  navigate: vi.fn(),
+}));
 vi.mock('react-router', async (original) => ({
   ...(await original<typeof import('react-router')>()),
   useNavigate: () => mocks.navigate,
 }));
-vi.mock('../../../src/lib/api/tasks', () => ({ resumeProviderLimitTask: mocks.resume }));
+vi.mock('../../../src/lib/api/tasks', () => ({
+  resumeProviderLimitTask: mocks.resume,
+  startProviderLimitTaskAnyway: mocks.startAnyway,
+}));
 vi.mock('../../../src/lib/query-client', () => ({
   queryClient: { invalidateQueries: mocks.invalidate },
 }));
@@ -165,5 +173,49 @@ describe('provider limit owner recovery', () => {
     render(<SessionStatusBanners lc={lifecycle(false)} projectId="project-1" />);
     expect(screen.getByText(task.providerLimitReason!)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Resume task' })).not.toBeInTheDocument();
+  });
+
+  it('offers Start anyway to the owner of a waiting, never-started task and calls its endpoint', async () => {
+    mocks.startAnyway.mockResolvedValue({ status: 'starting', taskId: task.id });
+    const waiting = {
+      ...lifecycle(),
+      resumeError: null,
+      taskEmbed: {
+        ...task,
+        providerLimitReason: 'Waiting for provider limit reset at 06:58 UTC (2026-11-11).',
+        providerLimitCanStartAnyway: true,
+      },
+    } as unknown as UseSessionLifecycleResult;
+    render(<SessionStatusBanners lc={waiting} projectId="project-1" />);
+    expect(screen.getByText('Waiting for provider limit reset')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Resume task' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Start anyway' }));
+    expect(mocks.startAnyway).toHaveBeenCalledWith('project-1', 'task-1');
+    expect(mocks.resume).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Starting…' })).toBeDisabled());
+  });
+
+  it('withholds Start anyway from readers and when the server does not allow it', () => {
+    const embed = {
+      ...task,
+      providerLimitReason: 'Waiting for provider limit reset at 06:58 UTC (2026-11-11).',
+    };
+    const reader = {
+      ...lifecycle(false),
+      resumeError: null,
+      taskEmbed: { ...embed, providerLimitCanStartAnyway: true },
+    } as unknown as UseSessionLifecycleResult;
+    const notAllowed = {
+      ...lifecycle(),
+      resumeError: null,
+      taskEmbed: { ...embed, providerLimitCanStartAnyway: false },
+    } as unknown as UseSessionLifecycleResult;
+    for (const lc of [reader, notAllowed]) {
+      const view = render(<SessionStatusBanners lc={lc} projectId="project-1" />);
+      // Liveness: the waiting notice itself rendered.
+      expect(screen.getByText('Waiting for provider limit reset')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Start anyway' })).not.toBeInTheDocument();
+      view.unmount();
+    }
   });
 });

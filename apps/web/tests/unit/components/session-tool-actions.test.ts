@@ -15,6 +15,7 @@ import {
   isToolStripMode,
   nextToolStripMode,
   type SessionToolAction,
+  taskEndIntent,
   TOOL_STRIP_MODES,
   type ToolStripMode,
 } from '../../../src/components/project-message-view/session-tool-actions';
@@ -214,5 +215,36 @@ describe('buildSessionToolActions — shared sessions', () => {
     expect(viewer).not.toContain('git');
     // Everything that stays inside the chat is still there.
     expect(viewer).toEqual(expect.arrayContaining(['timeline', 'automation', 'comments']));
+  });
+});
+
+describe('taskEndIntent', () => {
+  // A task that never started can only be cancelled (TRANSITIONS in
+  // apps/api/src/services/task-status.ts); terminal tasks offer neither control.
+  it.each([
+    ['draft', 'cancelled'],
+    ['ready', 'cancelled'],
+    ['queued', 'cancelled'],
+    ['delegated', 'cancelled'],
+    ['in_progress', 'completed'],
+    ['sleeping', 'completed'],
+    ['completed', null],
+    ['failed', null],
+    ['cancelled', null],
+    [undefined, null],
+  ] as const)('%s -> %s', (status, intent) => {
+    expect(taskEndIntent(status)).toBe(intent);
+  });
+
+  it('pins Cancel task to the meta group, like Complete', () => {
+    const actions = buildSessionToolActions({
+      session: { id: 's1', workspaceId: null, taskId: 't1' } as never,
+      sessionState: 'active',
+      taskEmbed: { id: 't1', status: 'queued' } as never,
+      reportEnabled: false,
+      unresolvedCommentCount: 0,
+    } as BuildSessionToolActionsInput);
+    expect(actions.find((a) => a.id === 'cancel')?.group).toBe('meta');
+    expect(actions.find((a) => a.id === 'complete')).toBeUndefined();
   });
 });

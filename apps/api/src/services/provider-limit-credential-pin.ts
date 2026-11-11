@@ -60,7 +60,7 @@ export async function assertProviderLimitCredentialPin(
     )
       .bind(
         wait
-          ? JSON.stringify({ ...wait, phase: 'blocked', reason })
+          ? JSON.stringify({ ...wait, phase: 'blocked', reason, ownerOverride: undefined })
           : task.provider_limit_wait_json,
         reason,
         task.id,
