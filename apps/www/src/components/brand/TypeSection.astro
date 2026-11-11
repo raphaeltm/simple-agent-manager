@@ -84,7 +84,7 @@ const familyVar = { display: 'var(--font-display)', body: 'var(--font-body)', mo
     <ul class="bg-rules">
       <li class="sam-glass sam-glass-rim"><strong>Sentence case.</strong> Headings, buttons and menus capitalise only the first word and names: "Create a workspace", not "Create A Workspace".</li>
       <li class="sam-glass sam-glass-rim"><strong>Chillax never sets paragraphs.</strong> It is for short lines at large sizes. Body text, tables and forms use the system font.</li>
-      <li class="sam-glass sam-glass-rim"><strong>Tighten big type.</strong> Display sizes use -0.035em tracking and a line height near 1. Small type keeps the default spacing.</li>
+      <li class="sam-glass sam-glass-rim"><strong>Tighten big type.</strong> Display sizes tighten to about -0.035em, and up to -0.045em at the very largest, with a line height near 1. Small type keeps the default spacing.</li>
       <li class="sam-glass sam-glass-rim"><strong>Embed the font in images.</strong> When rendering a social card or slide, load the Chillax file itself, then look at the result. A missing font falls back silently.</li>
     </ul>
   </div>
@@ -117,9 +117,9 @@ const familyVar = { display: 'var(--font-display)', body: 'var(--font-body)', mo
     background-image: linear-gradient(100deg, #3f5c00 0%, #15803d 50%, #166534 100%);
   }
 
-  /* Weight follows the scroll (200 to 700) until the slider is used. */
+  /* Weight follows the scroll from 200 up to the slider's 600, until the slider is used. */
   :global(html.bg-motion) .bg-specimen-word:not([data-manual]) {
-    font-weight: calc(200 + 500 * min(1, var(--p, 0.8) * 1.6));
+    font-weight: calc(200 + 400 * min(1, var(--p, 1) * 2));
   }
 
   .bg-specimen-meta {

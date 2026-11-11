@@ -29,7 +29,7 @@ const durations = [
       <div class="bg-easing-grid">
         {EASINGS.map((easing) => (
           <figure class:list={['bg-curve', { 'is-avoid': easing.name === 'Linear' }]} style={`--ease:${cubicBezier(easing.curve)};--dur:${easing.duration}ms`}>
-            <svg viewBox="-6 -40 112 180" class="bg-curve-graph" aria-hidden="true">
+            <svg viewBox="-6 -40 112 180" class="bg-curve-graph" preserveAspectRatio="xMinYMid meet" aria-hidden="true">
               <path d="M0 100 H100 M0 100 V0" class="axis" />
               <path d={curvePath(easing.curve)} class="curve" pathLength="1" />
             </svg>
@@ -156,7 +156,7 @@ const durations = [
     height: 20px;
     border-radius: 50%;
     background: radial-gradient(circle at 35% 30%, #bcfc54, #22c55e 60%, #15803d);
-    box-shadow: 0 0 14px rgb(34 197 94 / 0.55);
+    box-shadow: 0 0 14px rgb(34 197 94 / 0.3);
     /* Resting frame: the dot has arrived at the end of its lane. */
     translate: calc(100cqw - 28px) 0;
   }
@@ -203,6 +203,10 @@ const durations = [
   }
 
   @media (prefers-reduced-motion: reduce) {
+    .bg-easing-replay {
+      display: none;
+    }
+
     [data-easing-demo][data-playing] .bg-curve-dot,
     [data-easing-demo][data-playing] .bg-curve .curve {
       animation: none;

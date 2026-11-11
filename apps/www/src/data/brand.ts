@@ -49,7 +49,7 @@ export const SWATCHES: readonly Swatch[] = [
     name: 'Hair Lime',
     hex: '#86cc00',
     group: 'mascot',
-    role: "The mascot's hair. Illustration only, never interface.",
+    role: "The mascot's hair. Illustration and brand graphics, never buttons or text.",
   },
   { name: 'Hair Light', hex: '#bcfc54', group: 'mascot', role: 'Highlights in the hair.' },
   { name: 'Hair Shadow', hex: '#466200', group: 'mascot', role: 'Outlines and shade in the hair.' },

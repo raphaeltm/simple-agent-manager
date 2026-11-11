@@ -54,6 +54,10 @@ let frame = 0;
 
 function progressOf(el: HTMLElement, viewport: number) {
   const rect = el.getBoundingClientRect();
+  if (el.dataset.progress === 'leave') {
+    // 0 while the element's top is at the top of the screen, 1 once it has scrolled away.
+    return rect.height > 0 ? clamp01(-rect.top / rect.height) : 0;
+  }
   if (el.dataset.progress === 'pin') {
     const travel = rect.height - viewport;
     return travel > 0 ? clamp01(-rect.top / travel) : 0;
@@ -166,6 +170,7 @@ function setupCopy() {
     try {
       await navigator.clipboard.writeText(value);
     } catch {
+      if (status) status.textContent = `Could not copy. Select ${value} and copy it.`;
       return;
     }
     button.setAttribute('data-copied', '');
@@ -220,7 +225,8 @@ function setupEasings() {
       play();
       observer.disconnect();
     },
-    { threshold: 0.5 }
+    // The demo is taller than a phone screen, so wait for it to fill the lower screen instead.
+    { threshold: 0, rootMargin: '0px 0px -35% 0px' }
   );
   observer.observe(demo);
 }

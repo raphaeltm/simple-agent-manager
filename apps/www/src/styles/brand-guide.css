@@ -32,6 +32,7 @@
 
 .bg-head {
   position: relative;
+  isolation: isolate;
   display: grid;
   gap: 18px;
   max-width: 760px;
@@ -233,13 +234,13 @@ html.bg-motion .bg-words:not(.is-in) .w > span {
   font-family: var(--font-mono);
   font-size: 0.8125rem;
   color: inherit;
-  background: rgb(255 255 255 / 0.08);
+  background: color-mix(in srgb, var(--color-fg-primary) 8%, transparent);
   cursor: pointer;
   transition: background 0.2s ease;
 }
 
 .bg-copy:hover {
-  background: rgb(255 255 255 / 0.16);
+  background: color-mix(in srgb, var(--color-fg-primary) 16%, transparent);
 }
 
 .bg-copy[data-copied]::after {

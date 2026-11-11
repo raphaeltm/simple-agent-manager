@@ -32,6 +32,9 @@ test.describe('brand guide', () => {
   test('sections reveal as they scroll into view', async ({ page }) => {
     await page.goto(PATH);
     await expect(page.locator('html')).toHaveClass(/bg-motion/);
+    // At the top of the page the hero is at rest, not part-way through its scroll motion.
+    const hero = page.locator('.bg-hero');
+    await expect.poll(() => hero.evaluate((el) => el.style.getPropertyValue('--p'))).toBe('0.0000');
     const heading = page.locator('#voice-title');
     await expect(heading).not.toHaveClass(/is-in/);
     await heading.scrollIntoViewIfNeeded();

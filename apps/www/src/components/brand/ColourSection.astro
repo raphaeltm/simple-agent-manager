@@ -29,6 +29,9 @@ const proportions = [
     </SectionHead>
   </div>
 
+  <div class="container">
+    <a class="bg-skip" href="#colour-signals">Skip the palette</a>
+  </div>
   <div class="bg-pin" data-pin data-progress="pin">
     <div class="bg-pin-sticky">
       <ol class="bg-track" data-pin-track>
@@ -57,7 +60,7 @@ const proportions = [
   </div>
 
   <div class="container">
-    <h3 class="bg-sub">Colours that mean something</h3>
+    <h3 class="bg-sub" id="colour-signals" tabindex="-1">Colours that mean something</h3>
     <ul class="bg-signals">
       {signals.map((swatch, index) => (
         <li class="sam-glass sam-glass-rim" data-reveal style={`--i:${index}`}>
@@ -92,6 +95,21 @@ const proportions = [
 </section>
 
 <style>
+  /* Shown only when focused, so keyboard users can pass the palette's many copy buttons. */
+  .bg-skip {
+    position: absolute;
+    left: -9999px;
+    padding: 8px 14px;
+    border-radius: var(--radius-md);
+    background: var(--color-bg-surface);
+  }
+
+  .bg-skip:focus-visible {
+    position: static;
+    display: inline-block;
+    margin-bottom: 16px;
+  }
+
   /* --- Track: a grid by default, a pinned horizontal strip on wide screens with motion --- */
   .bg-pin {
     position: relative;
@@ -156,6 +174,7 @@ const proportions = [
     box-shadow:
       inset 0 1px 0 rgb(255 255 255 / 0.14),
       inset 0 0 0 1px rgb(255 255 255 / 0.06),
+      0 0 0 1px var(--color-border-subtle),
       0 30px 60px -30px rgb(0 0 0 / 0.6);
   }
 
