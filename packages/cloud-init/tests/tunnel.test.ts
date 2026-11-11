@@ -489,6 +489,66 @@ const canUseNetns =
     stdio: 'ignore',
   }).status === 0;
 
+const canUseLegacyNetns =
+  canUseNetns &&
+  spawnSync('sudo', ['-n', 'unshare', '-n', 'iptables-legacy', '-w', '-L', 'INPUT', '-n'], {
+    stdio: 'ignore',
+  }).status === 0;
+
+/**
+ * iptables-legacy holds the global xtables lock (/run/xtables.lock, shared across network
+ * namespaces) for the whole of an `iptables-restore`, including while it reads stdin. A lock
+ * taking `iptables` call inside the restore's producer therefore deadlocks. Every call runs
+ * under `timeout -s KILL` so a regression fails fast and leaves no process holding the
+ * host's lock (which would also hang Docker).
+ */
+if (!canUseLegacyNetns) {
+  console.warn('SKIPPED: tunnel firewall iptables-legacy test needs passwordless sudo + netns');
+}
+describe.skipIf(!canUseLegacyNetns)('tunnel firewall under iptables-legacy', () => {
+  it('applies and re-applies without deadlocking on the xtables lock', () => {
+    const box = sandbox({ logger: 'true' });
+    for (const [name, target] of [
+      ['iptables', 'iptables-legacy'],
+      ['iptables-restore', 'iptables-legacy-restore'],
+      ['iptables-save', 'iptables-legacy-save'],
+      ['ip6tables', 'ip6tables-legacy'],
+      ['ip6tables-restore', 'ip6tables-legacy-restore'],
+      ['ip6tables-save', 'ip6tables-legacy-save'],
+    ]) {
+      writeFileSync(join(box.bin, name), `#!/bin/sh\nexec ${target} "$@"\n`, { mode: 0o755 });
+    }
+    const script = file(parse(tunnel()), '/etc/sam/firewall/setup-firewall.sh').content.replaceAll(
+      '/etc/iptables',
+      join(box.dir, 'iptables')
+    );
+    const fw = join(box.dir, 'fw.sh');
+    writeFileSync(fw, script, { mode: 0o755 });
+    const d = box.dir;
+    const driver = `set -e
+timeout -s KILL 15 bash ${fw}
+timeout -s KILL 15 bash ${fw}
+iptables-legacy -w -S > ${d}/v4
+ip6tables-legacy -w -S > ${d}/v6 2>/dev/null || true
+chown -R ${process.getuid?.() ?? 0} ${d}`;
+    const result = spawnSync(
+      'sudo',
+      ['-n', 'unshare', '-n', 'env', `PATH=${box.bin}:${process.env.PATH}`, 'bash', '-c', driver],
+      { encoding: 'utf8', timeout: 45_000 }
+    );
+    expect(result.status, result.stderr).toBe(0);
+    const v4 = readFileSync(join(d, 'v4'), 'utf8');
+    expect(v4).toContain('-A INPUT -j SAM-TUNNEL-INGRESS');
+    // Re-applied once: the jump is not duplicated.
+    expect(v4.match(/-A INPUT -j SAM-TUNNEL-INGRESS/g)).toHaveLength(1);
+    expect(v4).toContain('-A SAM-TUNNEL-INGRESS -p tcp -m tcp --dport 8080 -j DROP');
+    const v6 = readFileSync(join(d, 'v6'), 'utf8');
+    if (v6.includes('SAM-TUNNEL-INGRESS')) {
+      expect(v6.match(/-A INPUT -j SAM-TUNNEL-INGRESS/g)).toHaveLength(1);
+    }
+  }, 60_000);
+});
+
 /**
  * Real netfilter in a private network namespace (needs passwordless sudo;
  * skipped elsewhere). A checker loop watches the DROP rule and the INPUT jump

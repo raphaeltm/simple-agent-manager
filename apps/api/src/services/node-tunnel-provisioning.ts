@@ -55,11 +55,19 @@ export interface NodeTunnelProvisioning {
   connectorToken: string;
 }
 
+/** The tunnel setup step in progress, reported so a failure or abort names where it stopped. */
+export type NodeTunnelProvisioningPhase = 'journal' | 'tunnel' | 'ingress' | 'dns' | 'token';
+
 export interface EnsureNodeTunnelInput {
   nodeId: string;
   userId: string;
   runtimeIncarnationId: string;
   signal?: AbortSignal;
+  /**
+   * Called as each step starts. A callback rather than a wrapped error, so an abort still
+   * surfaces as the caller's own `signal.reason` (see `rethrowIfProviderRequestAborted`).
+   */
+  onPhase?: (phase: NodeTunnelProvisioningPhase) => void;
 }
 
 /** Fence for every node-row write: the exact live managed VM incarnation. */
@@ -288,8 +296,28 @@ export async function ensureNodeTunnelForProvisioning(
   const hostname = nodeTunnelHostname(input.nodeId, env);
   const options: CloudflareCallOptions = { signal: input.signal };
 
+  input.onPhase?.('journal');
   const row = await journalTunnelOwnership(env, input, tunnelName, hostname);
 
+  // Resume fast path. `active` is written only after ingress and the CNAME both converged
+  // (below), so an earlier attempt that got that far needs just a DNS re-check and the token:
+  // two Cloudflare calls instead of six, which is what lets a deadline-cut attempt finish on
+  // the next one (rule 81).
+  const resumed = await resumeActiveTunnel(env, row, options, input);
+  if (resumed) {
+    input.onPhase?.('token');
+    const connectorToken = await getTunnelToken(env, resumed.tunnelId, options);
+    if (row.lastError) await persistOwned(env, row, 'last_error = NULL', []);
+    log.info('node_tunnel.provisioning_resumed', {
+      nodeId: input.nodeId,
+      runtimeIncarnationId: input.runtimeIncarnationId,
+      tunnelId: resumed.tunnelId,
+      dnsRecordId: resumed.dnsRecordId,
+    });
+    return { tunnelId: resumed.tunnelId, tunnelName, hostname, tunnelPort, connectorToken };
+  }
+
+  input.onPhase?.('tunnel');
   const tunnelId = await ensureNamedTunnel(env, row, options);
   if (row.tunnelId !== tunnelId) {
     await persistOwned(env, row, 'tunnel_id = ?', [tunnelId]);
@@ -297,12 +325,16 @@ export async function ensureNodeTunnelForProvisioning(
   }
   await writeNodeTunnelFields(env, input, { tunnelId });
 
+  input.onPhase?.('ingress');
   await putTunnelIngress(env, tunnelId, buildNodeTunnelIngress(hostname, tunnelPort), options);
 
+  input.onPhase?.('dns');
   const dnsRecordId = await ensureTunnelCname(env, row, tunnelCnameTarget(tunnelId), options);
   await persistOwned(env, row, `dns_record_id = ?, status = 'active'`, [dnsRecordId]);
 
+  input.onPhase?.('token');
   const connectorToken = await getTunnelToken(env, tunnelId, options);
+  if (row.lastError) await persistOwned(env, row, 'last_error = NULL', []);
   log.info('node_tunnel.provisioned', {
     nodeId: input.nodeId,
     runtimeIncarnationId: input.runtimeIncarnationId,
@@ -310,4 +342,32 @@ export async function ensureNodeTunnelForProvisioning(
     dnsRecordId,
   });
   return { tunnelId, tunnelName, hostname, tunnelPort, connectorToken };
+}
+
+/**
+ * For a row an earlier attempt already made `active`: confirm its CNAME still points at its
+ * tunnel and the node row carries the tunnel id, then skip the ingress and DNS convergence
+ * steps. Anything unexpected returns null and the full idempotent path runs instead.
+ */
+async function resumeActiveTunnel(
+  env: TunnelEnv,
+  row: NodeTunnelRow,
+  options: CloudflareCallOptions,
+  input: EnsureNodeTunnelInput
+): Promise<{ tunnelId: string; dnsRecordId: string } | null> {
+  if (row.status !== 'active' || !row.tunnelId || !row.dnsRecordId) return null;
+  input.onPhase?.('dns');
+  const record = await getDnsRecord(env, row.dnsRecordId, options);
+  const target = tunnelCnameTarget(row.tunnelId);
+  if (
+    !record ||
+    record.type !== 'CNAME' ||
+    record.name !== row.hostname ||
+    record.content !== target ||
+    record.proxied !== true
+  ) {
+    return null;
+  }
+  await writeNodeTunnelFields(env, input, { tunnelId: row.tunnelId });
+  return { tunnelId: row.tunnelId, dnsRecordId: row.dnsRecordId };
 }

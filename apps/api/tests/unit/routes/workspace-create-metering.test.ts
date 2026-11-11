@@ -204,10 +204,19 @@ async function createMeteringFixture(
         inventory.push(server);
         if (init?.signal) providerSignals.push(init.signal);
         if (options.hangProvider)
-          await new Promise((_resolve, reject) => {
-            init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), {
-              once: true,
-            });
+          // A create that outlives the 200 ms attempt deadline but is still alive: it must
+          // finish (a marked durable create is not cancelled by the attempt deadline). A dead
+          // one ends at the provider's own request timeout (providerFetch, 30 s).
+          await new Promise<void>((resolve, reject) => {
+            const timer = setTimeout(resolve, 600);
+            init?.signal?.addEventListener(
+              'abort',
+              () => {
+                clearTimeout(timer);
+                reject(init.signal?.reason);
+              },
+              { once: true }
+            );
           });
         providerEntered();
         if (options.interruptProvider)
@@ -596,10 +605,17 @@ describe('fresh workspace metering through registered HTTP and real SQL', () => 
     }
   );
 
-  it('aborts a dead create request at the background deadline and reconciles the accepted VM on a later tick', async () => {
+  it('lets a slow create outlive the attempt deadline, records it, and finishes on a later tick', async () => {
     const f = await createMeteringFixture({ hangProvider: true });
-    expect(f.providerSignals[0]?.aborted).toBe(true);
+    // The 200 ms attempt deadline did not cancel the marked create (staging: GCP's create was
+    // cut that way inside its token exchange, leaving nothing to reconcile). The VM identity
+    // is recorded in the same attempt; the public-IP DNS step keeps the deadline and finishes
+    // on the next tick.
+    expect(f.providerSignals[0]?.aborted).toBe(false);
     expect(f.providerCreates).toHaveLength(1);
+    expect(f.f.sqlite.prepare('SELECT provider_instance_id FROM nodes').get()).toEqual({
+      provider_instance_id: expect.any(String),
+    });
     expect(usage(f.f, f.workspaceId)).toEqual([]);
     f.releaseHealth(Response.json({ status: 'ok' }));
     await f.durable.tick();

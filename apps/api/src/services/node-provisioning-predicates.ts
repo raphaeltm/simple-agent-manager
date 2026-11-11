@@ -89,6 +89,30 @@ export async function releaseTunnelBeforeVm(
   }
 }
 
+/**
+ * A durable allocation that ENDED (failed or exhausted) with positive evidence that no attempt
+ * ever sent the provider create POST (`providerCreateRequested === false`, persisted before
+ * every POST) owns no VM, so its tunnel is released now instead of waiting for node teardown.
+ * Absent evidence (`true`, or an intent from before the field existed) keeps the tunnel: a VM
+ * may hold its token. Never throws.
+ */
+export async function releaseDurableTunnelBeforeVm(
+  env: Env,
+  intent: {
+    input: { nodeId: string };
+    incarnationId: string;
+    providerCreateRequested?: boolean;
+  }
+): Promise<void> {
+  if (intent.providerCreateRequested !== false) return;
+  await releaseTunnelBeforeVm(
+    env,
+    intent.input.nodeId,
+    intent.incarnationId,
+    'durable_provisioning_ended_before_vm'
+  );
+}
+
 export function truncateNodeErrorMessage(message: string): string {
   return message.length > NODE_ERROR_MESSAGE_MAX_LENGTH
     ? message.slice(0, NODE_ERROR_MESSAGE_MAX_LENGTH) + '...'

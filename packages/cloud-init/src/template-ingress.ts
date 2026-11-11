@@ -319,10 +319,15 @@ export const TUNNEL_FIREWALL_WRITE_FILE = `  - path: /etc/sam/firewall/setup-fir
       VM_AGENT_PORT="{{ vm_agent_port }}"
       TUNNEL_PORT="{{ tunnel_port }}"
       CHAIN=SAM-TUNNEL-INGRESS
+      # Whether the INPUT jump exists is decided BEFORE iptables-restore starts. The restore
+      # holds the xtables lock while it reads stdin, so an iptables call inside the producer
+      # below would wait on that lock forever under iptables-legacy.
+      # -w waits for the lock instead of misreading contention as "absent" (a duplicate jump).
+      jump_state() { if "$1" -C INPUT -j "$CHAIN" -w 2>/dev/null; then echo present; else echo absent; fi; }
       rules() {
         echo '*filter'
         echo ":$CHAIN - [0:0]"
-        "$1" -C INPUT -j "$CHAIN" 2>/dev/null || echo "-I INPUT 1 -j $CHAIN"
+        [ "$2" = present ] || echo "-I INPUT 1 -j $CHAIN"
         echo "-A $CHAIN -i lo -j RETURN"
         echo "-A $CHAIN -i docker0 -p tcp --dport $VM_AGENT_PORT -j RETURN"
         echo "-A $CHAIN -i br-+ -p tcp --dport $VM_AGENT_PORT -j RETURN"
@@ -333,11 +338,13 @@ export const TUNNEL_FIREWALL_WRITE_FILE = `  - path: /etc/sam/firewall/setup-fir
         echo "-A $CHAIN -p tcp --dport 22 -j DROP"
         echo COMMIT
       }
-      rules iptables | iptables-restore --noflush
+      jump_v4=$(jump_state iptables)
+      rules iptables "$jump_v4" | iptables-restore --noflush
       # Usability of ip6tables, not modprobe, decides: the module may be built in.
       modprobe ip6_tables 2>/dev/null || true
       if ip6tables -L -n >/dev/null 2>&1; then
-        rules ip6tables | ip6tables-restore --noflush
+        jump_v6=$(jump_state ip6tables)
+        rules ip6tables "$jump_v6" | ip6tables-restore --noflush
       elif [ -n "$(ip -6 addr show scope global 2>/dev/null)" ]; then
         # Go serves 0.0.0.0 dual-stack: global IPv6 without ip6tables is exposure.
         logger -t sam-firewall "ERROR: ip6tables unavailable on a tunnel node with global IPv6; refusing"

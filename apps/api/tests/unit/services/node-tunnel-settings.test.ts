@@ -9,6 +9,7 @@ import { nodeTunnelCleanupBackoffMs } from '../../../src/services/node-tunnel-cl
 import {
   resolveNodeTunnelApiConfig,
   resolveNodeTunnelCleanupConfig,
+  resolveNodeTunnelProvisioningBudgetMs,
 } from '../../../src/services/node-tunnel-config';
 import { createAdminSettingsEnv } from '../../helpers/admin-settings-env';
 
@@ -29,7 +30,7 @@ describe('managed VM tunnel admin settings', () => {
   it('exposes typed non-secret runtime controls through existing admin settings', async () => {
     const view = await readAdminSettings(env, { fresh: true });
     const controls = view.settings.filter((setting) => setting.name.startsWith('vmTunnels.'));
-    expect(controls).toHaveLength(8);
+    expect(controls).toHaveLength(10);
     expect(
       controls.every((setting) => setting.type === 'integer' && setting.secret === false)
     ).toBe(true);
@@ -41,7 +42,9 @@ describe('managed VM tunnel admin settings', () => {
       backoffBaseMs: 60000,
       backoffMaxMs: 3600000,
       stuckAttempts: 6,
+      pendingCreateSettleMs: 900000,
     });
+    expect(await resolveNodeTunnelProvisioningBudgetMs(env)).toBe(20000);
   });
 
   it('updates every consumer without redeploy and resetting restores code defaults', async () => {
@@ -59,9 +62,12 @@ describe('managed VM tunnel admin settings', () => {
         { name: 'vmTunnels.cleanupBackoffBaseMs', value: 17 },
         { name: 'vmTunnels.cleanupBackoffMaxMs', value: 50 },
         { name: 'vmTunnels.cleanupStuckAttempts', value: 2 },
+        { name: 'vmTunnels.provisioningBudgetMs', value: 1234 },
+        { name: 'vmTunnels.pendingCreateSettleMs', value: 60000 },
       ],
     });
     expect(await resolveNodeTunnelApiConfig(env)).toEqual({ attempts: 2, retryDelayMs: 7 });
+    expect(await resolveNodeTunnelProvisioningBudgetMs(env)).toBe(1234);
     expect(await resolveNodeTunnelCleanupConfig(env)).toEqual({
       requestTimeoutMs: 900,
       batchSize: 4,
@@ -69,6 +75,7 @@ describe('managed VM tunnel admin settings', () => {
       backoffBaseMs: 17,
       backoffMaxMs: 50,
       stuckAttempts: 2,
+      pendingCreateSettleMs: 60000,
     });
     expect(await nodeTunnelCleanupBackoffMs(env, 1)).toBe(17);
     expect(await nodeTunnelCleanupBackoffMs(env, 3)).toBe(50);

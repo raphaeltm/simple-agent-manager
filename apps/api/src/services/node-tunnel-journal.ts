@@ -29,6 +29,11 @@ export interface NodeTunnelRow {
   lastError: string | null;
   /** POSTs without an observed terminal response; absence from inventory is not finality. */
   pendingCreateCount: number;
+  /**
+   * When the latest unobserved POST was sent. Rows from before migration 0233 have no stamp and
+   * fall back to `created_at`, which precedes every POST for the row.
+   */
+  pendingCreateSince: string;
 }
 
 export const NODE_TUNNEL_COLUMNS = `id, node_id AS nodeId, user_id AS userId,
@@ -36,7 +41,8 @@ export const NODE_TUNNEL_COLUMNS = `id, node_id AS nodeId, user_id AS userId,
   tunnel_name AS tunnelName, tunnel_id AS tunnelId, hostname, dns_record_id AS dnsRecordId,
   status, cleanup_reason AS cleanupReason, cleanup_attempts AS cleanupAttempts,
   cleanup_next_attempt_at AS cleanupNextAttemptAt, last_error AS lastError,
-  pending_create_count AS pendingCreateCount`;
+  pending_create_count AS pendingCreateCount,
+  COALESCE(pending_create_last_at, created_at) AS pendingCreateSince`;
 
 /**
  * True while `t`'s incarnation is still the node's live runtime: the node row exists, carries
@@ -83,7 +89,11 @@ export async function readNodeTunnelById(
  * The only column assignments an owned-row update may make. A closed literal set, so no caller
  * can ever interpolate a computed string into the SQL below.
  */
-export type OwnedNodeTunnelAssignment = 'tunnel_id = ?' | "dns_record_id = ?, status = 'active'";
+export type OwnedNodeTunnelAssignment =
+  | 'tunnel_id = ?'
+  | "dns_record_id = ?, status = 'active'"
+  // Provisioning finished: an earlier attempt's recorded cause is no longer current.
+  | 'last_error = NULL';
 
 /** Update an owned (provisioning/active) row. Returns false when cleanup already claimed it. */
 export async function updateOwnedNodeTunnel(
@@ -104,6 +114,11 @@ export async function updateOwnedNodeTunnel(
 /**
  * Move every owned row whose incarnation is no longer live into `cleanup_pending`.
  * Scoped to one node when `nodeId` is given; otherwise installation-wide (sweep).
+ *
+ * Released rows are due immediately: both releases write `cleanup_next_attempt_at = NULL`, which
+ * {@link listDueNodeTunnelCleanups} treats as due. A wall-clock stamp written here could be later
+ * than the `now` a sweep captured before releasing, leaving a row released in that same sweep not
+ * yet due (idea 01M73MNS3QD04CTD4P0GH7C8RC).
  */
 export async function releaseNonLiveNodeTunnels(
   env: JournalEnv,
@@ -113,13 +128,13 @@ export async function releaseNonLiveNodeTunnels(
   const now = new Date().toISOString();
   const result = await env.DATABASE.prepare(
     `UPDATE node_cloudflare_tunnels AS t
-        SET status = 'cleanup_pending', cleanup_reason = ?, cleanup_next_attempt_at = ?,
+        SET status = 'cleanup_pending', cleanup_reason = ?, cleanup_next_attempt_at = NULL,
             updated_at = ?
       WHERE ${OWNED_STATUSES_SQL}
         ${nodeId ? 'AND t.node_id = ?' : ''}
         AND NOT ${LIVE_INCARNATION_SQL}`
   )
-    .bind(reason, now, now, ...(nodeId ? [nodeId] : []))
+    .bind(reason, now, ...(nodeId ? [nodeId] : []))
     .run();
   return result.meta?.changes ?? 0;
 }
@@ -138,11 +153,11 @@ export async function releaseUnallocatedNodeTunnel(
   const now = new Date().toISOString();
   const result = await env.DATABASE.prepare(
     `UPDATE node_cloudflare_tunnels AS t
-        SET status = 'cleanup_pending', cleanup_reason = ?, cleanup_next_attempt_at = ?,
+        SET status = 'cleanup_pending', cleanup_reason = ?, cleanup_next_attempt_at = NULL,
             updated_at = ?
       WHERE t.node_id = ? AND t.runtime_incarnation_id = ? AND ${OWNED_STATUSES_SQL}`
   )
-    .bind(reason, now, now, nodeId, runtimeIncarnationId)
+    .bind(reason, now, nodeId, runtimeIncarnationId)
     .run();
   return (result.meta?.changes ?? 0) === 1;
 }
@@ -164,4 +179,38 @@ export async function listDueNodeTunnelCleanups(
     .bind(now, ...(nodeId ? [nodeId] : []), limit)
     .all<NodeTunnelRow>();
   return result.results ?? [];
+}
+
+/**
+ * Storage-hygiene bound for `last_error` (provisioning and cleanup causes): an error message is
+ * diagnostic text, not data, and a fixed cap keeps one row from carrying a huge payload.
+ */
+export const NODE_TUNNEL_LAST_ERROR_MAX_LENGTH = 500;
+
+/**
+ * Record why provisioning of this incarnation's tunnel failed or was cut off, on the journal row
+ * itself, so a later cleanup or resume is diagnosable without logs. Never overwrites a cleaned
+ * row. Never throws: diagnostics must not change the failure path.
+ */
+export async function recordNodeTunnelProvisioningError(
+  env: JournalEnv,
+  nodeId: string,
+  runtimeIncarnationId: string,
+  message: string
+): Promise<void> {
+  try {
+    await env.DATABASE.prepare(
+      `UPDATE node_cloudflare_tunnels SET last_error = ?, updated_at = ?
+        WHERE node_id = ? AND runtime_incarnation_id = ? AND status IN ('provisioning', 'active')`
+    )
+      .bind(
+        message.slice(0, NODE_TUNNEL_LAST_ERROR_MAX_LENGTH),
+        new Date().toISOString(),
+        nodeId,
+        runtimeIncarnationId
+      )
+      .run();
+  } catch {
+    // The caller already logs the failure with full context.
+  }
 }

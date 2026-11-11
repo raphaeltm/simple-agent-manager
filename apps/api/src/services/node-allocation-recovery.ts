@@ -27,6 +27,29 @@ export interface DurableNodeAllocation {
   createdAt: number;
   initialIncarnationId: string;
   incarnationId: string;
+  /**
+   * Whether any attempt of this allocation may already have sent the provider create POST.
+   * `false` is positive evidence that none did, so a resumed attempt may create. Anything else
+   * (`true`, or `undefined` for intents persisted before this field existed) means a VM may
+   * exist and a resume must reconcile the exact inventory instead of creating again.
+   */
+  providerCreateRequested?: boolean;
+  /**
+   * Durably records that a create POST is about to be sent, BEFORE it is sent. Must throw when
+   * the record cannot be made, so an unrecorded create is never sent.
+   */
+  markProviderCreateRequested?: () => Promise<void>;
+  /**
+   * Withdraws that record after the provider proved its create request was never sent
+   * (`isProviderCreateNotDispatched`), so the next attempt may create. Fenced on the attempt
+   * that made the mark; must throw rather than leave the record ambiguous.
+   */
+  clearProviderCreateRequested?: () => Promise<void>;
+}
+
+/** True when a resumed attempt must reconcile inventory rather than create (see above). */
+export function durableAllocationMayHaveCreated(allocation: DurableNodeAllocation): boolean {
+  return allocation.providerCreateRequested !== false;
 }
 
 /** Only the exact persisted create incarnation may supply a lost provider response. */
@@ -61,8 +84,26 @@ export async function recoverNodeAllocation(
         ? 'Allocation inventory has no exact match; a second create is forbidden'
         : 'Allocation inventory has multiple exact matches; operator recovery is required'
     );
-  const vm = exact[0];
-  if (!vm) throw new NodeAllocationUncertainError();
+  const listed = exact[0];
+  if (!listed) throw new NodeAllocationUncertainError();
+  // Inventory reads may omit native hardware (GCP lists without machineTypes.get). Re-read the
+  // exact instance by id for the observed identity, and require it to be the same resource with
+  // the same exact ownership labels.
+  const vm =
+    listed.observedHardware.resources.source === 'observed'
+      ? listed
+      : await (provider.getObservedVM
+          ? provider.getObservedVM(listed.id, context)
+          : provider.getVM(listed.id, context));
+  if (
+    !vm ||
+    vm.id !== listed.id ||
+    !Object.entries(labels).every(
+      ([key, value]) => !hasAmbiguousLabel(vm.labels, key) && vm.labels[key] === value
+    )
+  ) {
+    throw new NodeAllocationUncertainError('Allocation inventory identity changed during recovery');
+  }
   if (
     (node.providerInstanceId && node.providerInstanceId !== vm.id) ||
     vm.location !== node.vmLocation ||
