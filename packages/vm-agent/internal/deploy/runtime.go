@@ -109,9 +109,11 @@ func ensureDeploymentNetworkHardening(ctx context.Context, reporter *errorreport
 	// (GCP's Ubuntu image, not Hetzner's docker-ce image) the snapshot has no Docker chains, so the
 	// restore deleted DOCKER-FORWARD and every later `docker network create` / compose up failed
 	// (staging, GCP deployment node, 2026-11-11). The setup script is idempotent and ends with
-	// iptables-save, so running it first makes the restore reload the current rules.
+	// iptables-save, so running it first makes the restore reload the current rules. Rules a
+	// container start adds between this save and the postinst restore would still be lost; this
+	// runs inside EnsureRuntime, before the agent serves releases, so nothing starts in between.
 	if err := runRuntimeCommand(ctx, firewallSetupScriptPath); err != nil {
-		return fmt.Errorf("run firewall setup script: %w", err)
+		return fmt.Errorf("run firewall setup script (pre-persistence snapshot): %w", err)
 	}
 	if err := ensureFirewallPersistence(ctx); err != nil {
 		err = fmt.Errorf("install iptables-persistent: %w", err)
@@ -123,7 +125,7 @@ func ensureDeploymentNetworkHardening(ctx context.Context, reporter *errorreport
 	}
 
 	if err := runRuntimeCommand(ctx, firewallSetupScriptPath); err != nil {
-		return fmt.Errorf("run firewall setup script: %w", err)
+		return fmt.Errorf("run firewall setup script (post-persistence): %w", err)
 	}
 	config.CloseIdleControlPlaneConnections()
 
