@@ -128,6 +128,7 @@ If a trusted workload may be compromised, end its sessions as well as turning th
    The next request with a deleted session is refused (`401`), and so is every terminal
    connection that session's terminal tokens would open, because those are checked against the
    live session on each connection.
+
 3. **Without database access**, an administrator signed in normally can suspend the target
    account in **Admin → Users**. A suspended account's sessions, agent or not, are refused on the
    next request. Approve it again afterwards.

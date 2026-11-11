@@ -13,6 +13,7 @@ import Database from 'better-sqlite3';
 import { Hono } from 'hono';
 import {
   calculateJwkThumbprint,
+  decodeJwt,
   exportJWK,
   exportPKCS8,
   exportSPKI,
@@ -31,15 +32,24 @@ import { apiTokenRoutes } from '../../src/routes/api-tokens';
 import { authRoutes } from '../../src/routes/auth';
 import { connectorConsentRoutes } from '../../src/routes/connector-oauth';
 import { deviceFlowRoutes } from '../../src/routes/device-flow';
+import { nodeLifecycleRoutes } from '../../src/routes/node-lifecycle';
+import { nodesRoutes } from '../../src/routes/nodes';
+import { notificationRoutes } from '../../src/routes/notifications';
+import { projectScheduleRoutes } from '../../src/routes/project-schedules';
+import { projectStandingWatchRoutes } from '../../src/routes/project-standing-watches';
 import { projectsRoutes } from '../../src/routes/projects';
+import { terminalRoutes } from '../../src/routes/terminal';
 import { triggersRoutes } from '../../src/routes/triggers';
+import { workspacesRoutes } from '../../src/routes/workspaces';
 import {
   isAgentSignInEnabled,
   resolveAgentSignInTrust,
 } from '../../src/services/agent-sign-in/config';
 import { __resetAgentSignInKeyCacheForTest } from '../../src/services/agent-sign-in/verify';
 import { __resetPlatformConfigCacheForTest } from '../../src/services/platform-config';
+import { verifyPortAccessToken } from '../../src/services/jwt';
 import { createSessionCookieForUser } from '../../src/services/session-factory';
+import { assertTerminalTokenSessionLive } from '../../src/services/terminal-token-liveness';
 import {
   getWorkloadJWKS,
   signWorkloadIdentityToken,
@@ -127,7 +137,14 @@ function buildApp() {
   app.route('/api/connector/consent', connectorConsentRoutes);
   app.route('/api/projects/:projectId/triggers', triggersRoutes);
   app.route('/api/projects', projectsRoutes);
+  app.route('/api/projects/:projectId/schedules', projectScheduleRoutes);
+  app.route('/api/projects/:projectId/standing-watches', projectStandingWatchRoutes);
   app.route('/api/admin', adminRoutes);
+  app.route('/api/workspaces', workspacesRoutes);
+  app.route('/api/terminal', terminalRoutes);
+  app.route('/api/nodes', nodesRoutes);
+  app.route('/api/nodes', nodeLifecycleRoutes);
+  app.route('/api/notifications', notificationRoutes);
   app.notFound((c) => c.json({ error: 'NOT_FOUND', message: 'Endpoint not found' }, 404));
   return app;
 }
@@ -463,14 +480,6 @@ describe('agent sign-in through workload identity (vertical slice)', () => {
         const control = await post(path, ordinary, body);
         expect({ path, status: control.status }).toEqual({ path, status: ordinaryStatus });
       }
-      // A non-webhook trigger mints no credential, so it is not refused (reaches the project check).
-      const cron = await post('/api/projects/proj-x/triggers', agent, {
-        name: 'c',
-        sourceType: 'cron',
-        cronExpression: '0 * * * *',
-        promptTemplate: 'p',
-      });
-      expect(cron.status).toBe(404);
     });
 
     it('cannot approve accounts or change roles even as an administrator target', async () => {
@@ -528,6 +537,154 @@ describe('agent sign-in through workload identity (vertical slice)', () => {
       expect(control.status).toBe(200);
     });
 
+    it('cannot list sessions with a cookie written with whitespace before "="', async () => {
+      // BetterAuth's cookie parser trims around "=", so this form authenticates. A guard that
+      // looked for "better-auth.session_token=" in the header would miss it and let it through.
+      const spaced = (await agentCookie()).replace('=', ' =');
+      expect(spaced).toMatch(/session_token =/);
+      expect((await me(spaced)).status).toBe(200);
+      const listed = await app.request(
+        `${API_ORIGIN}/api/auth/list-sessions`,
+        { headers: { cookie: spaced } },
+        env
+      );
+      expect(listed.status).toBe(403);
+      // Control: an ordinary session in the same form still lists its sessions.
+      const control = await app.request(
+        `${API_ORIGIN}/api/auth/list-sessions`,
+        { headers: { cookie: (await ordinaryCookie()).replace('=', ' =') } },
+        env
+      );
+      expect(control.status).toBe(200);
+    });
+
+    it('cannot create a trigger of any source type (ordinary session reaches the project check)', async () => {
+      const agent = await agentCookie();
+      const ordinary = await ordinaryCookie();
+      const bodies = [
+        { name: 'c', sourceType: 'cron', cronExpression: '0 * * * *', promptTemplate: 'p' },
+        {
+          name: 'e',
+          sourceType: 'email',
+          promptTemplate: 'p',
+          emailConfig: { allowedSenders: ['operator@outside.example'] },
+        },
+        { name: 'g', sourceType: 'github', promptTemplate: 'p' },
+        { name: 'w', sourceType: 'webhook', promptTemplate: 'p' },
+      ];
+      for (const body of bodies) {
+        const refused = await post('/api/projects/proj-x/triggers', agent, body);
+        expect({ sourceType: body.sourceType, status: refused.status }).toEqual({
+          sourceType: body.sourceType,
+          status: 403,
+        });
+        expect(((await refused.json()) as { message: string }).message).toMatch(REFUSED);
+        const control = await post('/api/projects/proj-x/triggers', ordinary, body);
+        expect(((await control.json()) as { message?: string }).message ?? '').not.toMatch(REFUSED);
+      }
+    });
+
+    it('may only pause or disable a trigger, never change what it does', async () => {
+      const agent = await agentCookie();
+      const ordinary = await ordinaryCookie();
+      const patch = (cookie: string, body: unknown) =>
+        app.request(
+          `${API_ORIGIN}/api/projects/proj-x/triggers/trig-x`,
+          {
+            method: 'PATCH',
+            headers: { 'content-type': 'application/json', cookie },
+            body: JSON.stringify(body),
+          },
+          env
+        );
+      const refusedBodies = [
+        { emailConfig: { allowedSenders: ['operator@outside.example'] } },
+        { status: 'active' },
+        { promptTemplate: 'new' },
+        { cronExpression: '* * * * *' },
+        { status: 'paused', promptTemplate: 'new' },
+      ];
+      for (const body of refusedBodies) {
+        const refused = await patch(agent, body);
+        expect({ body, status: refused.status }).toEqual({ body, status: 403 });
+        // Control: an ordinary session gets past the guard to the project check.
+        const control = await patch(ordinary, body);
+        expect({ body, status: control.status }).toEqual({ body, status: 404 });
+      }
+      // Standing a trigger down is allowed: it reaches the project check, like an ordinary session.
+      for (const status of ['paused', 'disabled']) {
+        expect((await patch(agent, { status })).status).toBe(404);
+      }
+    });
+
+    it('cannot arm schedules or standing watches, but can cancel, pause and revoke them', async () => {
+      sqlite
+        .prepare(`INSERT INTO projects (id, user_id, name) VALUES ('proj-own', ?, 'P')`)
+        .run(TARGET_ID);
+      sqlite
+        .prepare(
+          `INSERT INTO project_members (project_id, user_id, role, status, created_at, updated_at)
+           VALUES ('proj-own', ?, 'owner', 'active', datetime('now'), datetime('now'))`
+        )
+        .run(TARGET_ID);
+      const agent = await agentCookie();
+      const ordinary = await ordinaryCookie();
+      const refusedPaths = [
+        '/api/projects/proj-own/schedules',
+        '/api/projects/proj-own/schedules/sch-x/reschedule',
+        '/api/projects/proj-own/schedules/sch-x/reconcile',
+        '/api/projects/proj-own/standing-watches',
+        '/api/projects/proj-own/standing-watches/w-x/update',
+      ];
+      for (const path of refusedPaths) {
+        const refused = await post(path, agent, {});
+        expect({ path, status: refused.status }).toEqual({ path, status: 403 });
+        expect(((await refused.json()) as { message: string }).message).toMatch(REFUSED);
+        const control = await post(path, ordinary, {});
+        expect({ path, refused: REFUSED.test(await control.text()) }).toEqual({
+          path,
+          refused: false,
+        });
+      }
+      for (const path of [
+        '/api/projects/proj-own/schedules/sch-x/cancel',
+        '/api/projects/proj-own/standing-watches/w-x/pause',
+        '/api/projects/proj-own/standing-watches/w-x/revoke',
+      ]) {
+        const allowed = await post(path, agent, {});
+        expect({ path, refused: REFUSED.test(await allowed.text()) }).toEqual({
+          path,
+          refused: false,
+        });
+      }
+    });
+
+    it('cannot add a push subscription or make workspace ports public', async () => {
+      const agent = await agentCookie();
+      const ordinary = await ordinaryCookie();
+      const subscribe = await post('/api/notifications/push/subscriptions', agent, {
+        endpoint: 'https://push.outside.example/x',
+        keys: { p256dh: 'k', auth: 'a' },
+      });
+      expect(subscribe.status).toBe(403);
+      const subscribeControl = await post('/api/notifications/push/subscriptions', ordinary, {});
+      expect(subscribeControl.status).toBe(400); // past the guard, to body validation
+
+      const ports = (cookie: string, enabled: boolean) =>
+        app.request(
+          `${API_ORIGIN}/api/workspaces/ws-x/ports-public`,
+          {
+            method: 'PATCH',
+            headers: { 'content-type': 'application/json', cookie },
+            body: JSON.stringify({ enabled }),
+          },
+          env
+        );
+      expect((await ports(agent, true)).status).toBe(403);
+      expect((await ports(ordinary, true)).status).toBe(404); // control: reaches ownership check
+      expect((await ports(agent, false)).status).toBe(404); // closing ports is allowed
+    });
+
     it('is refused once past its hard expiry even if its expiry was extended', async () => {
       const cookie = await agentCookie();
       // Simulate a refresh that escaped the clamp: the row says 7 days, the cap has passed.
@@ -540,6 +697,176 @@ describe('agent sign-in through workload identity (vertical slice)', () => {
           .status
       ).toBe(401);
     });
+  });
+
+  describe('credentials an agent session mints end with it', () => {
+    const TTL_SECONDS = 60; // shorter than every token's own lifetime, so the cap is what decides
+
+    beforeEach(() => {
+      env.AGENT_SIGN_IN_TRUST = trustJson({ sessionTtlSeconds: TTL_SECONDS });
+      // This instance's own signing keys (port, terminal, node and forward tokens).
+      env.JWT_PRIVATE_KEY = otherKeys.privatePem;
+      env.JWT_PUBLIC_KEY = otherKeys.publicPem;
+      sqlite
+        .prepare(`INSERT INTO nodes (id, user_id, status) VALUES ('node-1', ?, 'running')`)
+        .run(TARGET_ID);
+      sqlite
+        .prepare(
+          `INSERT INTO workspaces (id, user_id, node_id, status) VALUES ('ws-1', ?, 'node-1', 'running')`
+        )
+        .run(TARGET_ID);
+    });
+
+    async function agentSession(): Promise<{ cookie: string; capSeconds: number }> {
+      const response = await exchange(await issuer.sign());
+      expect(response.status).toBe(200);
+      const cap = (
+        sqlite.prepare('SELECT hard_expires_at AS cap FROM sessions').get() as { cap: number }
+      ).cap;
+      return { cookie: cookieFrom(response), capSeconds: Math.floor(cap / 1000) };
+    }
+
+    function call(method: string, path: string, cookie: string, body?: unknown) {
+      return app.request(
+        `${API_ORIGIN}${path}`,
+        {
+          method,
+          headers: {
+            cookie,
+            accept: 'application/json',
+            ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+          },
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        },
+        env
+      );
+    }
+
+    /** Every session route that hands the caller a token, and how to read the token. */
+    const MINTERS: Array<[string, (cookie: string) => Promise<string>]> = [
+      [
+        'port access',
+        async (cookie) =>
+          (
+            (await (
+              await call('GET', '/api/workspaces/ws-1/port-access?port=3000', cookie)
+            ).json()) as {
+              token: string;
+            }
+          ).token,
+      ],
+      [
+        'terminal',
+        async (cookie) =>
+          (
+            (await (
+              await call('POST', '/api/terminal/token', cookie, { workspaceId: 'ws-1' })
+            ).json()) as {
+              token: string;
+            }
+          ).token,
+      ],
+      [
+        'node management',
+        async (cookie) =>
+          (
+            (await (await call('POST', '/api/nodes/node-1/token', cookie)).json()) as {
+              token: string;
+            }
+          ).token,
+      ],
+      [
+        'local forward',
+        async (cookie) =>
+          (
+            (await (
+              await call('POST', '/api/workspaces/ws-1/forwards', cookie, {
+                remotePort: 3000,
+                localAuthority: 'localhost:3000',
+              })
+            ).json()) as { token: string }
+          ).token,
+      ],
+    ];
+
+    it('caps every token at the session hard expiry (ordinary sessions keep the full lifetime)', async () => {
+      const { cookie, capSeconds } = await agentSession();
+      const ordinary = await ordinaryCookie();
+      for (const [name, mint] of MINTERS) {
+        const capped = decodeJwt(await mint(cookie));
+        expect({ name, exp: capped.exp }).toEqual({ name, exp: capSeconds });
+        // Control: the same route for an ordinary session issues a token past the cap.
+        const full = decodeJwt(await mint(ordinary));
+        expect({ name, past: (full.exp ?? 0) > capSeconds }).toEqual({ name, past: true });
+        expect(full.sessionNotAfter).toBeUndefined();
+      }
+    });
+
+    it('tells the VM agent to end the session it builds from a terminal token at the cap', async () => {
+      const { cookie, capSeconds } = await agentSession();
+      const terminal = decodeJwt(await MINTERS[1]![1](cookie));
+      expect(terminal.sessionNotAfter).toBe(capSeconds);
+    });
+
+    it('refuses a port-access token after the session has expired', async () => {
+      const { cookie, capSeconds } = await agentSession();
+      const agentToken = await MINTERS[0]![1](cookie);
+      const ordinaryToken = await MINTERS[0]![1](await ordinaryCookie());
+      await expect(verifyPortAccessToken(agentToken, env)).resolves.toMatchObject({
+        workspace: 'ws-1',
+      });
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime((capSeconds + 1) * 1000);
+      await expect(verifyPortAccessToken(agentToken, env)).rejects.toThrow();
+      // Control: an ordinary session's link is still good at the same moment.
+      await expect(verifyPortAccessToken(ordinaryToken, env)).resolves.toMatchObject({
+        workspace: 'ws-1',
+      });
+    });
+
+    it('refuses a terminal token once the session is past its hard expiry, even if extended', async () => {
+      const { cookie } = await agentSession();
+      const payload = decodeJwt(await MINTERS[1]![1](cookie));
+      const terminal = {
+        workspace: 'ws-1',
+        subject: TARGET_ID,
+        sessionToken: payload.sessionToken as string,
+      };
+      await expect(assertTerminalTokenSessionLive(env, terminal)).resolves.toBeUndefined();
+      // A refresh that escaped the clamp: expires_at says 7 days, the hard cap has passed.
+      sqlite
+        .prepare(
+          'UPDATE sessions SET expires_at = ?, hard_expires_at = ? WHERE hard_expires_at IS NOT NULL'
+        )
+        .run(Date.now() + 7 * 86_400_000, Date.now() - 1000);
+      await expect(assertTerminalTokenSessionLive(env, terminal)).rejects.toThrow(/expired/);
+    });
+
+    it('the documented revocation ends every agent session and leaves ordinary sessions alone', async () => {
+      const { cookie } = await agentSession();
+      const payload = decodeJwt(await MINTERS[1]![1](cookie));
+      const ordinary = await ordinaryCookie();
+      expect((await me(cookie)).status).toBe(200);
+
+      // Exactly the statement in docs/guides/agent-sign-in.md (incident response).
+      sqlite.exec('DELETE FROM sessions WHERE hard_expires_at IS NOT NULL');
+
+      expect((await me(cookie)).status).toBe(401);
+      await expect(
+        assertTerminalTokenSessionLive(env, {
+          workspace: 'ws-1',
+          subject: TARGET_ID,
+          sessionToken: payload.sessionToken as string,
+        })
+      ).rejects.toThrow(/not live/);
+      expect((await me(ordinary)).status).toBe(200);
+      // The audit record survives revocation.
+      expect(auditRows()).toHaveLength(1);
+    });
+
+    async function ordinaryCookie(): Promise<string> {
+      return (await createSessionCookieForUser(env, TARGET_ID)).sessionCookie;
+    }
   });
 
   describe('agent profile pin', () => {
