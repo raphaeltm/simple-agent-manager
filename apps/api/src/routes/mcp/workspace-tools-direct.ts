@@ -25,18 +25,11 @@ import {
   jsonRpcSuccess,
   type McpTokenData,
 } from './_helpers';
-import { requireWorkspace } from './workspace-tools';
 
 // ─── Configurable defaults (Constitution Principle XI) ──────────────────────
 
-/** Timeout for DNS check calls. Override via WORKSPACE_TOOL_DNS_TIMEOUT_MS. */
-const DEFAULT_DNS_CHECK_TIMEOUT_MS = 10_000;
 /** Max size (bytes) for diagnostic data in report_environment_issue. Override via WORKSPACE_TOOL_DIAGNOSTIC_MAX_BYTES. */
 const DEFAULT_DIAGNOSTIC_MAX_BYTES = 4096;
-
-function getDnsCheckTimeout(env: Env): number {
-  return parsePositiveInt(env.WORKSPACE_TOOL_DNS_TIMEOUT_MS, DEFAULT_DNS_CHECK_TIMEOUT_MS);
-}
 
 // ─── Category A: Handled directly in sam-mcp ────────────────────────────────
 
@@ -359,75 +352,6 @@ export async function handleReportEnvironmentIssue(
             status: 'report_failed',
             note: 'Issue was logged but storage failed',
           }),
-        },
-      ],
-    });
-  }
-}
-
-// ─── Category C: Handled in Worker (no VM agent needed) ─────────────────────
-
-export async function handleCheckDnsStatus(
-  requestId: string | number | null,
-  tokenData: McpTokenData,
-  env: Env
-): Promise<JsonRpcResponse> {
-  const err = requireWorkspace(requestId, tokenData);
-  if (err) return err;
-
-  const workspaceUrl = `https://ws-${tokenData.workspaceId}.${env.BASE_DOMAIN}`;
-  const hostname = `ws-${tokenData.workspaceId}.${env.BASE_DOMAIN}`;
-  const dnsTimeoutMs = getDnsCheckTimeout(env);
-
-  try {
-    // Try to fetch the workspace URL to check DNS + TLS in one call.
-    // Note: this only confirms Cloudflare edge reachability, not VM agent health.
-    const res = await fetch(workspaceUrl, {
-      method: 'HEAD',
-      signal: AbortSignal.timeout(dnsTimeoutMs),
-    });
-
-    return jsonRpcSuccess(requestId, {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(
-            {
-              hostname,
-              workspaceUrl,
-              dnsResolved: true,
-              tlsValid: true,
-              httpStatus: res.status,
-              note: 'Confirms Cloudflare edge reachability. Does not verify VM agent health.',
-            },
-            null,
-            2
-          ),
-        },
-      ],
-    });
-  } catch (e) {
-    // Distinguish TLS errors from DNS/network errors
-    const errorMsg = e instanceof Error ? e.message : String(e);
-    const isTlsError =
-      errorMsg.includes('SSL') || errorMsg.includes('TLS') || errorMsg.includes('certificate');
-
-    return jsonRpcSuccess(requestId, {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(
-            {
-              hostname,
-              workspaceUrl,
-              dnsResolved: isTlsError, // TLS error means DNS resolved but cert failed
-              tlsValid: false,
-              status: isTlsError ? 'tls_error' : 'dns_not_resolved',
-              error: errorMsg,
-            },
-            null,
-            2
-          ),
         },
       ],
     });

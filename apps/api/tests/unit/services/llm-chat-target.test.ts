@@ -104,7 +104,7 @@ describe('resolveWorkersAiChatTarget', () => {
       url: 'https://gateway.ai.cloudflare.com/v1/account-1/sam/workers-ai/v1/chat/completions',
       apiKey: 'cf-token',
       model: '@cf/model/a',
-      redirect: 'follow',
+      allowPrivateNetwork: false,
     });
   });
 
@@ -128,14 +128,20 @@ describe('resolveWorkersAiChatTarget', () => {
       model: 'default-model',
       taskTitleModel: 'title-model',
     });
+    // A loopback endpoint needs the admin's private-network opt-in (llm-endpoint-egress.test.ts).
+    await updateAdminSettings(env, {
+      changes: [{ name: 'llm.openAICompatible.allowPrivateNetwork', value: true }],
+      actorUserId: 'admin',
+    });
     expect(await resolveWorkersAiChatTarget(env, 'taskTitle', '@cf/m/x')).toEqual({
       kind: 'openai-compatible',
       baseUrl: 'http://127.0.0.1:4000/v1',
       url: 'http://127.0.0.1:4000/v1/chat/completions',
       apiKey: 'sk-endpoint-key',
       model: 'title-model',
-      // An endpoint target never follows a redirect to a host the validation did not see.
-      redirect: 'error',
+      allowPrivateNetwork: true,
+      // outbound.maxRedirects, read in the same settings batch.
+      maxRedirects: 3,
     });
     expect((await resolveWorkersAiChatTarget(env, 'diagnosis', '@cf/m/x'))?.model).toBe(
       'default-model'

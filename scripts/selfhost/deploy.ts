@@ -6,8 +6,9 @@
  *                        [--secrets <state-dir>/secrets.env] [--web-dist DIR] [--dry-run] [--init]
  *                        [--skip-vm-agent]
  *
- * `--init` only generates the platform keys and `<state-dir>/gateway.env`, the shared secret
- * docker compose hands to frps and Caddy; run it once before the first `docker compose up`.
+ * `--init` only generates the platform keys, `<state-dir>/gateway.env` (the shared secret
+ * docker compose hands to frps and Caddy), and the celld egress fence files
+ * (`egress-fence.nft`, `celld.env`); run it once before the first `docker compose up`.
  *
  * Re-runnable: platform keys are generated once and kept, the project directory is rebuilt,
  * D1 migrations are applied idempotently, and `celld deploy` publishes a new version that the
@@ -35,6 +36,7 @@ import * as TOML from '@iarna/toml';
 
 import type { WranglerToml } from '../deploy/types.js';
 import {
+  assertPresignCredentialIsScoped,
   celldChildEnv,
   gatewayEnvAction,
   presignVars,
@@ -46,6 +48,7 @@ import {
 import { ensureCelldBinary, resolveEsbuild } from './celld-binary.js';
 import { buildCelldConfig, type CelldWranglerConfig } from './celld-config.js';
 import { ASSETS_DIR, prepareCelldProject, SOURCE_LINK, writeCelldConfig } from './celld-project.js';
+import { writeFenceFiles } from './fence-state.js';
 import {
   ensureMailCollectorPassword,
   MAIL_COLLECTOR_PASSWORD_FILE,
@@ -284,6 +287,16 @@ async function main(): Promise<void> {
   // The port range and heartbeat timeout go to the Worker from the same resolved values
   // (below). Resolution fails the deploy on a range overlapping a box listener or too large.
   const tunnelSettings = resolveTunnelSettings(box);
+  // The celld egress fence and celld.env (scripts/selfhost/egress-fence.ts), written before the
+  // gateway.env check so a restart it asks for also picks up a changed fence.
+  const fence = await writeFenceFiles({ stateDir, box, leaseRange: tunnelSettings.range });
+  for (const path of fence.changed) {
+    log(
+      path.endsWith('.nft')
+        ? `wrote ${path}; the egress-fence service applies it within its recheck interval`
+        : `wrote ${path}; (re)start the stack: docker compose up -d`
+    );
+  }
   syncGatewayEnv(
     join(stateDir, 'gateway.env'),
     renderGatewayEnv(keys.REVERSE_TUNNEL_GATEWAY_SECRET, tunnelSettings),
@@ -305,6 +318,7 @@ async function main(): Promise<void> {
   for (const name of ['BASE_DOMAIN', 'R2_BUCKET_NAME', 'VM_AGENT_REQUIRED_VERSION']) {
     if (name in operatorSecrets) throw new Error(`${secretsPath}: ${name} is generated; remove it`);
   }
+  assertPresignCredentialIsScoped(box, operatorSecrets);
   const { SAM_INSTALLATION_ID, ...platformSecrets } = keys;
   const secrets: Record<string, string> = { ...platformSecrets, ...operatorSecrets };
   knownSecrets = Object.values(secrets);

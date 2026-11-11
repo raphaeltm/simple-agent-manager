@@ -132,6 +132,47 @@ describe('deliverWebPushSubscription', () => {
     );
   });
 
+  it.each([
+    'https://127.0.0.1/send/abc',
+    'https://169.254.169.254/latest/meta-data/',
+    'https://[::1]/send',
+    'https://objectstore:9000/send',
+  ])('never posts to a stored non-public endpoint (%s)', async (endpoint) => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 201 }));
+
+    const result = await deliverWebPushSubscription({ ...SUBSCRIPTION, endpoint }, '{}', ENV, {
+      fetcher,
+      encrypt: vi.fn().mockResolvedValue(Uint8Array.of(1)),
+      authorize: vi.fn().mockResolvedValue('vapid token'),
+      now: () => 1000,
+      sleep: vi.fn(),
+    });
+
+    expect(result).toEqual({ kind: 'failure', attempts: 0, status: null });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('treats a redirect from the push service as a failure and never follows it', async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(null, { status: 302, headers: { Location: 'http://127.0.0.1:7001/' } })
+      );
+
+    const result = await deliverWebPushSubscription(SUBSCRIPTION, '{}', ENV, {
+      fetcher,
+      encrypt: vi.fn().mockResolvedValue(Uint8Array.of(1)),
+      authorize: vi.fn().mockResolvedValue('vapid token'),
+      now: () => 1000,
+      sleep: vi.fn(),
+    });
+
+    expect(result).toMatchObject({ kind: 'failure', status: 302 });
+    expect(fetcher).toHaveBeenCalledOnce();
+    // The runtime must not follow it either: a mock cannot, so assert what the runtime is told.
+    expect(fetcher.mock.calls[0]?.[1]).toMatchObject({ redirect: 'manual' });
+  });
+
   it.each([404, 410])('classifies HTTP %s as a scoped gone subscription', async (status) => {
     const result = await deliverWebPushSubscription(SUBSCRIPTION, '{}', ENV, {
       fetcher: vi.fn().mockResolvedValue(new Response(null, { status })),

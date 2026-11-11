@@ -163,6 +163,30 @@ export function presignVars(
   return vars;
 }
 
+/**
+ * The presign credential (R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY, a Worker secret) must be
+ * scoped to the R2 prefix. The fleet credential reads every Worker secret in the bucket's deploy
+ * manifests, so a Worker holding it would hold the whole install. Refuse the deploy if they match.
+ */
+export function assertPresignCredentialIsScoped(
+  box: Readonly<Record<string, string>>,
+  secrets: Readonly<Record<string, string>>
+): void {
+  const pairs: Array<[string, string]> = [
+    ['R2_ACCESS_KEY_ID', 'AWS_ACCESS_KEY_ID'],
+    ['R2_SECRET_ACCESS_KEY', 'AWS_SECRET_ACCESS_KEY'],
+  ];
+  for (const [presign, fleet] of pairs) {
+    const presignValue = secrets[presign]?.trim();
+    if (presignValue && presignValue === box[fleet]?.trim()) {
+      throw new Error(
+        `${presign} is the fleet bucket credential (${fleet}); use a credential scoped to the ` +
+          'R2 prefix (deploy/selfhost/README.md, presigned uploads)'
+      );
+    }
+  }
+}
+
 /** The dotenv docker compose passes to frps and Caddy (`env_file`). */
 export function renderGatewayEnv(gatewaySecret: string, settings: TunnelSettings): string {
   if (!/^[0-9a-f]{64}$/.test(gatewaySecret)) {

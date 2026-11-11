@@ -12,6 +12,7 @@ import { getCredentialEncryptionKey } from '../../lib/secrets';
 import {
   type ChatCompletionsTarget,
   chatTargetHeaders,
+  fetchChatTarget,
   LlmUnavailableError,
   resolveCloudflareWorkersAiTarget,
   withStreamUsageRequested,
@@ -195,9 +196,8 @@ async function callOpenAIChatLLM(
 ): Promise<Response> {
   const fullMessages: OpenAIMessage[] = [{ role: 'system', content: systemPrompt }, ...messages];
 
-  return fetch(target.url, {
+  return fetchChatTarget(target, {
     method: 'POST',
-    redirect: target.redirect,
     signal,
     headers: chatTargetHeaders(target, { 'cf-aig-metadata': aigMetadata }),
     body: JSON.stringify(

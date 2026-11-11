@@ -12,6 +12,7 @@ import type { Env } from '../env';
 import { expectJsonRecord } from '../lib/runtime-validation';
 import {
   chatTargetHeaders,
+  fetchChatTarget,
   isCloudflareChatTarget,
   type LlmPurpose,
   LlmUnavailableError,
@@ -248,9 +249,8 @@ export async function fetchWorkersAIChatCompletion(
   // reasoning_effort and chat_template_kwargs are Workers AI model quirks keyed by the
   // Cloudflare model id; another endpoint's model would reject or misread them.
   const cloudflare = isCloudflareChatTarget(target);
-  const response = await fetch(target.url, {
+  const response = await fetchChatTarget(target, {
     method: 'POST',
-    redirect: target.redirect,
     signal,
     headers: chatTargetHeaders(target, { 'cf-aig-metadata': JSON.stringify(options.metadata) }),
     body: JSON.stringify({

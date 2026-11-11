@@ -770,6 +770,51 @@ describe('ws-* proxy after the move out of index.ts (other transports unchanged)
     expect(sent.get('x-sam-gateway-secret')).toBeNull();
   });
 
+  it.each([
+    ['vm-public-dns', 'vm-public-dns', 'follow'],
+    ['cloudflare-tunnel', 'cloudflare-tunnel', 'follow'],
+    ['legacy NULL transport', null, 'follow'],
+    // Cloudflare-shaped control: an incoming request there already has redirect mode manual.
+    ['vm-public-dns (incoming manual)', 'vm-public-dns', 'manual'],
+  ] as const)(
+    'passes a %s node redirect to the browser unchanged, never following it',
+    async (_name, transport, incomingRedirect) => {
+      const userId = `rd-${transport ?? 'null'}-${incomingRedirect}`;
+      await seedUser(userId);
+      const nodeId = `RD${(transport ?? 'NULL').replaceAll('-', '').toUpperCase()}${incomingRedirect === 'manual' ? 'M' : 'F'}`.slice(
+        0,
+        20
+      );
+      await seedNode(nodeId, userId, { status: 'running' });
+      await env.DATABASE.prepare('UPDATE nodes SET transport = ? WHERE id = ?')
+        .bind(transport, nodeId)
+        .run();
+      const workspaceId = {
+        'vm-public-dns:follow': '01KRRTRDVMPF00000000000000',
+        'cloudflare-tunnel:follow': '01KRRTRDCFTF00000000000000',
+        'none:follow': '01KRRTRDNXNF00000000000000',
+        'vm-public-dns:manual': '01KRRTRDVMPM00000000000000',
+      }[`${transport ?? 'none'}:${incomingRedirect}`]!;
+      await seedWorkspace(workspaceId, nodeId, userId, { status: 'running' });
+      upstream.mockImplementation(
+        async () =>
+          new Response(null, { status: 302, headers: { Location: 'http://127.0.0.1:7001/v1/state' } })
+      );
+      const response = await call(
+        new Request(`https://ws-${workspaceId.toLowerCase()}.${env.BASE_DOMAIN}/x`, {
+          // celld hands the Worker an incoming request whose mode can be `follow`.
+          redirect: incomingRedirect,
+          headers: { Cookie: await seedSignedInUser(userId) },
+        })
+      );
+      expect(response.status).toBe(302);
+      expect(response.headers.get('location')).toBe('http://127.0.0.1:7001/v1/state');
+      expect(upstream).toHaveBeenCalledTimes(1);
+      const [, init] = upstream.mock.calls[0] as [string, RequestInit];
+      expect(init.redirect).toBe('manual');
+    }
+  );
+
   it('serves a reverse-tunnel node on its lease without following node redirects', async () => {
     await seedUser('rt-redir');
     const node = await seedReverseNode('D', 'rt-redir');

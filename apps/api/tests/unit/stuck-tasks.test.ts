@@ -615,7 +615,7 @@ describe('recoverStuckTasks', () => {
 
       expect(fetchWithTimeoutMock).toHaveBeenCalledWith(
         'https://node-1.vm.example.test:8443/health',
-        { method: 'GET' },
+        { method: 'GET', redirect: 'manual' },
         DEFAULT_TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS
       );
       expect(result.failedInProgress).toBe(0);

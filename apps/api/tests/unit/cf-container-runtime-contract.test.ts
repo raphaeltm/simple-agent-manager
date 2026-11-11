@@ -95,9 +95,9 @@ describe('cf-container runtime spike contracts', () => {
     expect(nodeAgent).toContain('!env.VM_AGENT_CONTAINER');
     expect(nodeAgent).toContain('fetchVmAgentContainer(');
     expect(nodeAgent).toContain('function requestInitWithoutSignal');
-    expect(nodeAgent).toContain(
-      'new Request(containerUrl.toString(), requestInitWithoutSignal(options))'
-    );
+    // The container path strips the abort signal (SPIKE PR #1544). Its redirect behaviour is
+    // tested by running it: tests/unit/services/node-agent-redirects.test.ts.
+    expect(nodeAgent).toContain('requestInitWithoutSignal(');
     expect(nodeAgent).toContain(
       "return fetchNodeAgent(nodeId, env, url, { method: 'GET', headers }, timeoutMs)"
     );

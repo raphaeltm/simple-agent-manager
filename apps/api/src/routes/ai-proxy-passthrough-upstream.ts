@@ -18,6 +18,8 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { log } from '../lib/logger';
+import { assertOutboundUrl, OutboundRequestRefusedError } from '../lib/network-hosts';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import type { AiProviderUsageAttribution } from '../services/ai-token-budget';
 import { resolveSessionProfileCredentialContext } from '../services/composable-credentials/profile-context';
@@ -55,12 +57,23 @@ function stringSetting(value: unknown): string | null {
   return typeof value === 'string' && value.trim() !== '' ? value.trim() : null;
 }
 
-function isHttpsUrl(value: string): boolean {
+/**
+ * A base URL the passthrough may call: HTTPS to a public host. Checked at use time because a
+ * credential saved before the save-time check (composable-credentials.ts) may still hold a
+ * private or metadata host; such a credential is skipped, never called.
+ */
+function isUsableUpstreamBaseUrl(value: string, credentialId: string): boolean {
   try {
-    return new URL(value).protocol === 'https:';
-  } catch {
-    return false;
+    if (assertOutboundUrl(value).protocol === 'https:') return true;
+    log.warn('ai_proxy_passthrough.upstream_refused', { credentialId, reason: 'scheme' });
+  } catch (err) {
+    // Without this a refused credential reads as "no compatible credential" with no trace.
+    log.warn('ai_proxy_passthrough.upstream_refused', {
+      credentialId,
+      reason: err instanceof OutboundRequestRefusedError ? err.reason : 'invalid_url',
+    });
   }
+  return false;
 }
 
 function candidateCapabilities(
@@ -211,7 +224,8 @@ export async function resolveProxyUpstream(input: {
     if (!credentialSupportsDialect(secret, settings, input.dialect)) continue;
     const apiKey = credentialApiKey(secret);
     const baseUrl = resolvedBaseUrl(secret, settings);
-    if (!apiKey || !baseUrl || !isHttpsUrl(baseUrl)) continue;
+    if (!apiKey || !baseUrl) continue;
+    if (!isUsableUpstreamBaseUrl(baseUrl, resolved.credential.id)) continue;
     return {
       agentType: capability.agentType,
       dialect: input.dialect,

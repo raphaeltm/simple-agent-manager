@@ -12,6 +12,7 @@ import { completionSchema, parseDebugToolArgs } from './debug-agent-parsing';
 import { getDiagnosticIncidentByErrorId } from './diagnostic-incidents';
 import {
   chatTargetHeaders,
+  fetchChatTarget,
   LlmUnavailableError,
   resolveWorkersAiChatTargetWithin,
 } from './llm-chat-target';
@@ -211,9 +212,8 @@ export async function complete(
       controller.signal
     );
     if (!target) throw new LlmUnavailableError('diagnosis');
-    const response = await fetch(target.url, {
+    const response = await fetchChatTarget(target, {
       method: 'POST',
-      redirect: target.redirect,
       signal: controller.signal,
       headers: chatTargetHeaders(target, {
         'cf-aig-metadata': JSON.stringify({

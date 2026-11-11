@@ -9,12 +9,14 @@ through an SMTP relay or, on a test install, the bundled mail collector (see Ema
 
 ## What runs
 
-| Service       | Network | Listens on                      | Notes                                                    |
-| ------------- | ------- | ------------------------------- | -------------------------------------------------------- |
-| `caddy`       | host    | `:80`, `:443`                   | wildcard `*.SAM_DOMAIN`, sets `CF-Connecting-IP`         |
-| `celld`       | host    | `127.0.0.1:8080`, `:7001` (ops) | API Worker + web UI (`ASSETS`), cron triggers            |
-| `frps`        | host    | `127.0.0.1:7000`                | profile `tunnel`; nodes arrive as frp over wss via Caddy |
-| `objectstore` | host    | `127.0.0.1:9000`                | profile `local-store`; otherwise use a GCS/S3 bucket     |
+| Service              | Network | Listens on                      | Notes                                                    |
+| -------------------- | ------- | ------------------------------- | -------------------------------------------------------- |
+| `caddy`              | host    | `:80`, `:443`                   | wildcard `*.SAM_DOMAIN`, sets `CF-Connecting-IP`         |
+| `celld`              | host    | `127.0.0.1:8080`, `:7001` (ops) | API Worker + web UI (`ASSETS`), cron triggers; uid 7101  |
+| `egress-fence`       | host    | none                            | installs and keeps the celld nftables egress fence       |
+| `gce-metadata-proxy` | host    | `127.0.0.1:7180`                | profile `gce`; access tokens for a gs:// bucket          |
+| `frps`               | host    | `127.0.0.1:7000`                | profile `tunnel`; nodes arrive as frp over wss via Caddy |
+| `objectstore`        | host    | `127.0.0.1:9000`                | profile `local-store`; otherwise use a GCS/S3 bucket     |
 
 Profile `mail-collector` (off by default, test installs only) adds `mail-collector`: Mailpit on
 `127.0.0.1:1025` (SMTP) and `127.0.0.1:8025` (UI, published at `mail.SAM_DOMAIN`). See Email sign-in.
@@ -27,10 +29,17 @@ Needs Docker with Compose v2.20+, Node 22+ and pnpm, and a checkout of this repo
 cp deploy/selfhost/.env.example deploy/selfhost/.env && chmod 600 deploy/selfhost/.env
 $EDITOR deploy/selfhost/.env           # SAM_DOMAIN, TLS mode, bucket
 pnpm install
-pnpm selfhost:deploy --init            # platform keys + .state/gateway.env, once
+pnpm selfhost:deploy --init            # platform keys, gateway.env, egress fence files
 docker compose -f deploy/selfhost/docker-compose.yml up -d
 pnpm selfhost:deploy                   # build web, migrate, deploy; re-run to upgrade
+pnpm selfhost:verify-fence             # the egress fence is in effect (see below)
 ```
+
+Upgrading a box from before the egress fence: add `gce` to `COMPOSE_PROFILES` if the bucket is
+gs://, run `pnpm selfhost:deploy --init`, then `docker compose up -d --build`. celld switches to
+uid 7101; `celld-data-owner` re-owns its data volume on the way. Every upgrade that changes the
+fence needs the `--build`: celld does not start until the rebuilt fence service attests to the
+new rules.
 
 `pnpm selfhost:deploy` also builds the vm-agent (in a pinned `golang` image, so the box needs no
 Go toolchain) and publishes it into the fleet bucket under the same keys the Cloudflare pipeline
@@ -110,10 +119,10 @@ gone when the container restarts. To turn it off: remove the profile from `COMPO
 `docker compose --profile mail-collector rm -sf mail-collector`. Login pages can take a minute to
 stop offering email (the public config is cached for 60 s).
 
-With the celld egress fence (PR #2641), celld must be allowed to reach the collector's SMTP port.
-`mailEgressEndpoints()` in `scripts/selfhost/mail-settings.ts` names it for the fence; until the
-fence reads it, add `SAM_EGRESS_ALLOW=127.0.0.1:1025` (or your `MAIL_COLLECTOR_SMTP_PORT`). A
-relay on the internet needs no entry; a relay on a private address needs one in `SAM_EGRESS_ALLOW`.
+The celld egress fence opens the collector's SMTP port on 127.0.0.1 by itself when the profile is
+on (`mailEgressEndpoints()` in `scripts/selfhost/mail-settings.ts`, read by the fence renderer);
+run `pnpm selfhost:deploy --init` after turning the profile on or off. A relay on the internet
+needs no entry; a relay on a private address needs one in `SAM_EGRESS_ALLOW`.
 
 **The first account.** On a fresh box with a sender and no OAuth app, set
 `BOOTSTRAP_OWNER_EMAIL=you@example.com` in `.state/secrets.env` before the first deploy; that
@@ -173,9 +182,109 @@ Code: `scripts/selfhost/mail-settings.ts` (SMTP settings, collector), `caddy/mai
   and the Worker must never assume values the running frps is not enforcing. After pulling a
   new release, run the deploy before restarting the stack: an older `gateway.env` can lack a
   variable the new `frps.toml` reads.
-- The Worker shares the host network, so its outbound `fetch` can reach loopback services
-  (celld's operator listener, the bundled store, frps) and, on GCE, the metadata server. There
-  is no egress fence yet.
+
+## Outbound requests and the egress fence
+
+The Worker shares the host network, so without limits its `fetch` could reach every loopback
+service (celld's unauthenticated operator listener, frps's control port, the object store and
+its console), any private address, and the cloud metadata server. Two layers stop that:
+
+1. The API checks every URL a user or admin chose before it calls it, and never lets the
+   runtime follow a redirect (`apps/api/src/lib/network-hosts`). User URLs must be public HTTPS.
+   An admin's OpenAI-compatible endpoint on this machine or its private network (a local model
+   server) needs the `llm.openAICompatible.allowPrivateNetwork` admin setting; metadata and
+   link-local addresses are refused either way. These checks see names, not DNS answers.
+2. The egress fence holds whatever the Worker asks for. celld runs as `CELLD_UID` (7101), and
+   the `egress-fence` service installs an nftables table, rendered into `.state/egress-fence.nft`
+   by `pnpm selfhost:deploy`, that lets that uid reach only the public internet, the
+   nameservers in `resolv.conf` on port 53, the node lease ports on 127.0.0.1, the object store
+   endpoint celld uses (`S3_ENDPOINT`), the metadata token proxy, and Caddy's ports on the box's
+   own non-loopback addresses. Everything else on the box (loopback, `127.0.0.2`, `::1`, the
+   box's own addresses on any other port) and every private, link-local, metadata, reserved and
+   IPv6 transition range (6to4, Teredo, NAT64, IPv4-compatible) is rejected. No setting can open
+   a metadata, link-local or reserved address: the deploy refuses an `S3_ENDPOINT` that resolves
+   to one, and any such `SAM_EGRESS_ALLOW` entry.
+
+The `egress-fence` service re-applies the table within `SAM_EGRESS_FENCE_RECHECK_SECONDS` (5) if
+it is missing or differs from the rendered rules, keeps the DNS rule equal to the nameservers in
+`resolv.conf` (a resolver change does not cut celld off), and after every exact match writes an
+attestation celld requires. celld's entrypoint (`celld/start.sh`) starts celld only when both
+hold: a probe per rule class (celld's operator port on every local spelling, one private,
+metadata, CGNAT and IPv6 range each) is refused, and the attestation is newer than
+`SAM_EGRESS_FENCE_ATTESTATION_MAX_AGE_SECONDS` (20). It repeats the check every
+`SAM_EGRESS_FENCE_CHECK_SECONDS` (1) and SIGKILLs celld (no drain, which would let in-flight Worker
+code keep connecting) when either fails; Docker restarts it and it waits for the fence again. A
+reboot cannot bring celld up unfenced.
+
+Worst-case unfenced window:
+
+- Table removed (`nft flush ruleset`, a firewall reload): at most one check interval plus two
+  probe rounds, about 1.2 s by default. Measured on celld 0.6.3: killed 0.12 to 0.76 s after the
+  table was deleted (5 runs).
+- A rule changed that the probes do not cover, with the fence service running: re-applied within
+  its recheck interval (5 s).
+- The same with the fence service stopped: celld is killed once the attestation is older than
+  its limit (20 s). Stopping the fence service therefore stops celld after 20 s.
+
+Check it after install, after a firewall change, or any time:
+
+```bash
+pnpm selfhost:verify-fence             # exits 1 and lists every gap if the fence is not in effect
+```
+
+It probes from celld's uid on the host network and repeats every probe as another uid. Each
+forbidden target is probed over TCP and UDP: a UDP send the fence refuses fails with "Operation
+not permitted", which only the local firewall produces, so a target the network would refuse
+anyway still proves the fence. It also checks that celld can resolve a public name, that the
+fence's DNS rule opens every nameserver celld uses, and that the attestation is current.
+
+On GCE with a gs:// bucket, celld needs access tokens from the metadata server, which the fence
+blocks. The `gce` profile runs a small proxy (`metadata-proxy/Caddyfile`) that serves only the
+default service account's access token, only for GET with the `Metadata-Flavor` header, and only
+under a random path prefix that is in celld's environment (`.state/celld.env`) and not in the
+Worker's. Every other metadata path is 404. Whatever scope the caller asks for, the token is
+scoped to Cloud Storage (`GCE_METADATA_PROXY_SCOPES`, default `devstorage.read_write`; only Cloud
+Storage scopes are accepted), so it cannot call Cloud DNS even when the VM's service account can.
+The scope limits the API, not the bucket: the token reaches every bucket the service account has
+IAM access to, so grant that account the fleet bucket only. Caddy's DNS-01 renewals use the
+metadata server directly (Caddy is not fenced) and keep the VM's own scopes.
+
+Worker code cannot read the secret path. Verified on celld 0.6.3 with `nodejs_compat`: `process.env`
+is an empty stub, `node:fs` is a virtual filesystem (`/proc/self/environ`, `/etc/passwd` and `/`
+are not found), `node:os` returns placeholders, there is no `child_process`, and `file://` fetches
+fail. celld's own log does not contain it at `RUST_LOG=info` or `debug`; it appears in celld's error
+output when the proxy is unreachable (after a redeploy or a proxy crash). Whether a storage error
+that reaches Worker code carries that chain is untested for gs:// (with an unreachable S3 store a
+Worker saw only `Error: write s3://...`); if one did, the secret alone still opens nothing the API
+lets a user reach. The proxy refuses everything when its secret is missing or malformed.
+
+What the fence cannot separate: Worker code and celld's storage client are one process. A
+Worker can reach the object store endpoint (without the fleet credential it gets nothing; the
+bundled store denies anonymous access) and the token proxy port. The deploy refuses a presign
+credential (`R2_ACCESS_KEY_ID`) equal to the fleet credential, since the presign credential is a
+Worker secret. That check catches a copied key only; it cannot prove a different key is scoped.
+
+A local model server (the admin setting `llm.openAICompatible.allowPrivateNetwork`) is on a
+private address the fence rejects. Allow exactly that address and port with `SAM_EGRESS_ALLOW`
+in `.env` (for example `127.0.0.1:11434`), then `pnpm selfhost:deploy --init`; the fence service
+picks up the re-rendered rules within `SAM_EGRESS_FENCE_RECHECK_SECONDS`. The deploy refuses an
+entry that would open celld's, frps's or the store console's port on any local address.
+
+A self-managed GitLab on this machine or the private network (`integration.gitlab.host`, for
+example `https://gitlab.example.lan` resolving to 10.0.0.5) is refused for sign-in and API calls
+until an admin turns on `integration.gitlab.allowPrivateNetwork` (Admin, Settings, OAuth); sign-in
+with it is not offered until then. The fence still rejects the address: add it to
+`SAM_EGRESS_ALLOW` (for example `10.0.0.5:443`) and run `pnpm selfhost:deploy --init`, as for a
+local model server. SAM never follows a redirect from GitLab to another private host. The host
+must be HTTPS (plain HTTP is accepted only for `localhost`), and celld's TLS client trusts only
+public certificate authorities, so a private GitLab needs a publicly trusted certificate.
+
+Other limits: the loopback lease range (20000-29999 by default) is open to celld, so do not run
+other services on those ports. The start check probes the box's own addresses as they were at
+`pnpm selfhost:deploy --init`; if a public address on the NIC changes, celld stops (fail closed)
+until you run it again. Docker user-namespace remapping changes the host uid the fence
+must match; it is not supported (celld then refuses to start). A refused TCP connection fails
+after about a second (the kernel reports the reject on the first SYN retransmit), not at once.
 
 ## Code
 
@@ -183,3 +292,5 @@ Code: `scripts/selfhost/mail-settings.ts` (SMTP settings, collector), `caddy/mai
   `wrangler.json` and fails on any key it has no rule for.
 - `scripts/selfhost/deploy.ts`: the deploy and upgrade flow above.
 - `caddy/sam.d/` and `frps/frps.toml`: node-transport routes and config (reverse tunnel).
+- `scripts/selfhost/egress-fence.ts`, `egress-fence/`, `celld/start.sh`, `metadata-proxy/`: the
+  egress fence; `scripts/selfhost/verify-fence.ts`: `pnpm selfhost:verify-fence`.

@@ -262,7 +262,8 @@ export async function workspaceSubdomainProxy(
     );
 
     const containerRequest = new Request(containerUrl.toString(), {
-      redirect: targetPort !== null ? 'manual' : c.req.raw.redirect,
+      // Never follow a node's redirect; it goes back to the browser as-is (nodeAgentRequestInit).
+      redirect: 'manual',
       method: c.req.raw.method,
       headers,
       body: c.req.raw.body,
@@ -419,9 +420,11 @@ export async function workspaceSubdomainProxy(
   let response: Response;
   try {
     response = await fetch(vmUrl.toString(), {
-      // A reverse-tunnel node sits on this box's loopback: never follow its redirects there.
-      redirect:
-        targetPort !== null || nodeRoute.kind === 'reverse-tunnel' ? 'manual' : c.req.raw.redirect,
+      // Never follow a node's redirect, on any transport: the 3xx goes back to the browser
+      // as-is (nodeAgentRequestInit). On Cloudflare the incoming request's mode was already
+      // `manual`; a runtime whose incoming requests default to `follow` (celld) would otherwise
+      // follow a node's redirect into this box's loopback with the proxied headers.
+      redirect: 'manual',
       method: c.req.raw.method,
       headers,
       body: c.req.raw.body,

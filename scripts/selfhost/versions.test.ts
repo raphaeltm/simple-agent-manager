@@ -19,16 +19,22 @@ describe('pinned versions', () => {
 
   it('pins every compose image by digest', () => {
     const images = [...COMPOSE.matchAll(/^\s*image:\s*(\S+)/gm)].map((m) => m[1]!);
-    // The locally built Caddy image pins its base images by digest in caddy/Dockerfile.
-    const pulled = images.filter((image) => image !== 'sam-selfhost-caddy:local');
+    // Locally built images pin their base images by digest in their Dockerfiles.
+    const local: Record<string, string> = {
+      'sam-selfhost-caddy:local': 'caddy/Dockerfile',
+      'sam-selfhost-egress-fence:local': 'egress-fence/Dockerfile',
+    };
+    const pulled = images.filter((image) => !(image in local));
     expect(pulled.length).toBeGreaterThanOrEqual(4);
     for (const image of pulled) expect(image).toMatch(/@sha256:[0-9a-f]{64}$/);
-    const dockerfile = readFileSync(
-      resolve(import.meta.dirname, '../../deploy/selfhost/caddy/Dockerfile'),
-      'utf8'
-    );
-    for (const from of dockerfile.matchAll(/^FROM\s+(\S+)/gm))
-      expect(from[1]).toMatch(/@sha256:[0-9a-f]{64}$/);
+    for (const dockerfilePath of Object.values(local)) {
+      const dockerfile = readFileSync(
+        resolve(import.meta.dirname, '../../deploy/selfhost', dockerfilePath),
+        'utf8'
+      );
+      for (const from of dockerfile.matchAll(/^FROM\s+(\S+)/gm))
+        expect(from[1]).toMatch(/@sha256:[0-9a-f]{64}$/);
+    }
   });
 
   it('has a checksum for every release target it can select', () => {

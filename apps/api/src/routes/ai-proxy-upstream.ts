@@ -22,6 +22,7 @@ import { buildAnthropicGatewayUrl, upstreamErrorLogFields } from '../services/ai
 import { copyCredentialLimitHeaders } from '../services/credential-limit-events';
 import {
   chatTargetHeaders,
+  fetchChatTarget,
   isCloudflareChatTarget,
   LlmUnavailableError,
   resolveWorkersAiChatTarget,
@@ -126,9 +127,8 @@ export async function forwardToWorkersAI(
   }
   const gatewayBody = withStreamUsageRequested(target, { ...body, model: target.model });
 
-  const response = await fetch(target.url, {
+  const response = await fetchChatTarget(target, {
     method: 'POST',
-    redirect: target.redirect,
     headers: chatTargetHeaders(target, { 'cf-aig-metadata': aigMetadata }),
     body: JSON.stringify(gatewayBody),
   });

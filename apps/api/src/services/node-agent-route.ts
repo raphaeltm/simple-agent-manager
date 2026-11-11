@@ -138,11 +138,15 @@ export function retargetNodeAgentUrl(url: string, route: NodeAgentRoute): string
 }
 
 /**
- * Request options for a node fetch. A reverse-tunnel node lives on the control-plane box's
- * loopback next to celld, the object store and other nodes' lease ports, so a redirect from a
- * (possibly compromised) node must never be followed there: the 3xx is returned as-is.
- * Public routes keep the caller's options unchanged.
+ * Request options for a control-plane fetch to a node, on EVERY route and transport. A node
+ * agent never redirects the control plane (the vm-agent sends no 3xx), so a redirect can only
+ * come from a misbehaving or compromised node, and following it would carry the management
+ * Authorization header wherever it points: on a self-hosted box, celld's loopback services
+ * and other nodes' lease ports; on any box, an arbitrary host. The 3xx is returned as-is and
+ * callers treat it as not ok. Proxied browser requests pass it through to the browser
+ * unchanged. On Cloudflare an incoming request's redirect mode is already `manual`, so the
+ * workspace proxy behaves as before there.
  */
-export function nodeAgentRequestInit(route: NodeAgentRoute, options: RequestInit): RequestInit {
-  return route.kind === 'reverse-tunnel' ? { ...options, redirect: 'manual' } : options;
+export function nodeAgentRequestInit(options: RequestInit): RequestInit {
+  return { ...options, redirect: 'manual' };
 }
