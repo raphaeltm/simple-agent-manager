@@ -28,6 +28,12 @@ export const DEFAULT_GCP_MAX_LIST_PAGES = 100;
 export const DEFAULT_GCP_MACHINE_TYPE_LOOKUP_ATTEMPTS = 3;
 /** Delay between those attempts. */
 export const DEFAULT_GCP_MACHINE_TYPE_LOOKUP_RETRY_DELAY_MS = 1000;
+/**
+ * Boot disk type for SAM-created VMs. Compute Engine gives an API-created disk with no type
+ * `pd-standard` (HDD-backed). `pd-balanced` is SSD-backed and counts against the region's
+ * `SSD_TOTAL_GB` quota.
+ */
+export const DEFAULT_GCP_BOOT_DISK_TYPE = 'pd-balanced';
 
 /** GCP codes that say the zone cannot supply this machine type right now. */
 const GCP_STOCKOUT_CODES = new Set([

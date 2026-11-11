@@ -1,5 +1,6 @@
 import type { GcpApiScope } from './gcp-api';
 import {
+  DEFAULT_GCP_BOOT_DISK_TYPE,
   DEFAULT_GCP_MACHINE_TYPE_LOOKUP_ATTEMPTS,
   DEFAULT_GCP_MACHINE_TYPE_LOOKUP_RETRY_DELAY_MS,
   extractIp,
@@ -147,6 +148,22 @@ export async function fetchGcpMachineTypeResources(
   return {
     vcpuCount: requirePositiveInteger(root, 'guestCpus', 'gcp', ctx),
     memoryMb: requirePositiveInteger(root, 'memoryMb', 'gcp', ctx),
+  };
+}
+
+/**
+ * The boot disk entry of an `instances.insert` body. The disk type is a zonal resource, so its
+ * URL must name the zone the instance is inserted into (the same zone as the insert URL).
+ */
+export function gcpBootDisk(zone: string, sourceImage: string, diskSizeGb: number) {
+  return {
+    boot: true,
+    autoDelete: true,
+    initializeParams: {
+      sourceImage,
+      diskSizeGb: String(diskSizeGb),
+      diskType: `zones/${zone}/diskTypes/${DEFAULT_GCP_BOOT_DISK_TYPE}`,
+    },
   };
 }
 

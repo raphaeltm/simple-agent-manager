@@ -74,6 +74,7 @@ SAM reads the Google Cloud machine catalog live; nothing about zones or prices i
   one price list for the whole installation and refreshes it about once a day in the background,
   using any connected Google Cloud credential (platform credentials first) with a token limited to
   read-only Cloud Billing access. The price excludes the boot disk.
+- **Boot disk.** Each node boots from a 50 GB balanced persistent disk (`pd-balanced`, SSD-backed) in the node's zone (`gcpBootDisk()` in `packages/providers/src/gcp-native-instance.ts`). It counts against the region's `SSD_TOTAL_GB` quota ("Persistent disk SSD (GB)"), so each node in a region needs 50 GB of it. When that quota runs out, node creation fails with `Quota 'SSD_TOTAL_GB' exceeded`.
 - **Price unavailable.** If no connected project has the Cloud Billing API enabled, or Google has no
   list price SAM recognises for a machine in a region, the machine is still offered but shows
   "Price unavailable". SAM never guesses a price. Enable `cloudbilling.googleapis.com` in the
