@@ -10,7 +10,10 @@ import {
   assertDirectCreationAuthority,
   continueDirectWorkspaceCreation,
 } from '../services/direct-workspace-creation';
-import { NodeAllocationUncertainError } from '../services/node-allocation-recovery';
+import {
+  describeProvisioningAttemptFailure,
+  NodeAllocationUncertainError,
+} from '../services/node-allocation-recovery';
 import { provisionNode } from '../services/node-provisioning';
 import { persistError } from '../services/observability';
 import { taskStatusIsNonTerminalSql, TERMINAL_STATUS_VALUES } from '../services/task-status';
@@ -289,6 +292,13 @@ export class NodeLifecycleProvisioning {
         ));
       if (completed) await this.finish(intent, 'complete', null);
     } catch (error) {
+      // Every attempt's cause is logged: lastError is overwritten by the next attempt and only
+      // surfaces after exhaustion, so the first failure would otherwise be invisible.
+      log.warn('node_provisioning.attempt_failed', {
+        nodeId: intent.input.nodeId,
+        attempt: intent.attempts,
+        ...describeProvisioningAttemptFailure(error),
+      });
       await this.withLock(async () => {
         const current =
           await this.ctx.storage.get<DirectProvisioningIntent>(DIRECT_PROVISIONING_KEY);

@@ -91,6 +91,51 @@ describe('providerFetch', () => {
     expect(body).toEqual({ data: 'ok' });
   });
 
+  it('returns a readable body on a runtime that cannot clone an unconsumed streaming response', async () => {
+    // celld (self-hosted control plane) throws this from Response.clone() on a streaming body.
+    class UncloneableResponse extends Response {
+      override clone(): Response {
+        throw new TypeError('Cannot clone a streaming response before consumption');
+      }
+    }
+    const streamed = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"access_token":'));
+        controller.enqueue(new TextEncoder().encode('"t","expires_in":3599}'));
+        controller.close();
+      },
+    });
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new UncloneableResponse(streamed, {
+        status: 201,
+        statusText: 'Created',
+        headers: { 'content-type': 'application/json', etag: 'abc' },
+      })
+    );
+
+    const response = await providerFetch('gcp', 'https://sts.googleapis.test/v1/token');
+
+    expect(response.status).toBe(201);
+    expect(response.statusText).toBe('Created');
+    expect(response.headers.get('etag')).toBe('abc');
+    expect(response.bodyUsed).toBe(false);
+    await expect(response.json()).resolves.toEqual({ access_token: 't', expires_in: 3599 });
+  });
+
+  it('keeps a null-body status bodiless after reading it', async () => {
+    const body = new ReadableStream<Uint8Array>({ start: (controller) => controller.close() });
+    const upstream = new Response(null, { status: 204 });
+    Object.defineProperty(upstream, 'body', { value: body });
+    globalThis.fetch = vi.fn().mockResolvedValue(upstream);
+
+    const response = await providerFetch('digitalocean', 'https://api.digitalocean.test/v2/x', {
+      method: 'DELETE',
+    });
+
+    expect(response.status).toBe(204);
+    expect(response.body).toBeNull();
+  });
+
   it('does not start a request when the existing RequestInit signal is already cancelled', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response('should not run'));
     globalThis.fetch = fetchMock;

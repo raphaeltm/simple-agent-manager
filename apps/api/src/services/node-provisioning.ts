@@ -349,7 +349,7 @@ export async function provisionNode(
         rejectedPlacementPredicate = proof?.placementPredicate;
       }
       if (durable && !providerAllocationRejected) {
-        throw new NodeAllocationUncertainError();
+        throw new NodeAllocationUncertainError(undefined, { cause: err });
       }
       throw err;
     }
