@@ -1,0 +1,11 @@
+# Mail collector UI (compose profile `mail-collector`, scripts/selfhost/mail-settings.ts).
+# Anyone who can read the collector can sign in to SAM as any account, so it is served only
+# behind basic auth with the generated password. start.sh hashes that password before Caddy
+# starts; only the hash is in the config. Mailpit itself listens on loopback.
+@sam_mail_collector host {$MAIL_COLLECTOR_HOST_LABEL}.{$SAM_DOMAIN}
+handle @sam_mail_collector {
+	basic_auth {
+		{$MAIL_COLLECTOR_UI_USER} {$MAIL_COLLECTOR_UI_HASH}
+	}
+	reverse_proxy 127.0.0.1:{$MAIL_COLLECTOR_UI_PORT}
+}

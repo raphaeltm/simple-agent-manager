@@ -13,8 +13,6 @@
  * - SMTP_USERNAME and SMTP_PASSWORD come together or not at all;
  * - SMTP_FROM is required: the relay decides which senders it accepts, so SAM cannot guess.
  */
-import type { Env } from '../../env';
-
 export type SmtpTlsMode = 'starttls' | 'tls' | 'none';
 
 /** Submission port for STARTTLS (RFC 6409). */
@@ -31,10 +29,19 @@ export interface SmtpConfig {
   from: string;
 }
 
-export type SmtpEnv = Pick<
-  Env,
-  'SMTP_HOST' | 'SMTP_PORT' | 'SMTP_TLS' | 'SMTP_USERNAME' | 'SMTP_PASSWORD' | 'SMTP_FROM'
->;
+/**
+ * The settings this module reads. Declared here rather than picked from `Env` so the self-host
+ * deploy script (scripts/selfhost/mail-settings.ts) can validate a box's settings with this
+ * same function; `Env` satisfies it structurally.
+ */
+export interface SmtpEnv {
+  SMTP_HOST?: string;
+  SMTP_PORT?: string;
+  SMTP_TLS?: string;
+  SMTP_USERNAME?: string;
+  SMTP_PASSWORD?: string;
+  SMTP_FROM?: string;
+}
 
 export type SmtpConfigResult =
   | { status: 'absent' }
