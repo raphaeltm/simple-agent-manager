@@ -152,8 +152,8 @@ export const FEATURE_SETTINGS: AdminSettingDefinition[] = [
     'performance.userAccessTokenLockTimeoutMs',
     DEFAULT_USER_ACCESS_TOKEN_LOCK_TIMEOUT_MS,
     'Operations',
-    'Maximum milliseconds one GitHub or GitLab user-token lookup may hold its per-user lock before later lookups proceed.',
-    { min: 1_000, max: 120_000 }
+    'Milliseconds a GitHub or GitLab user-token lookup may hold its per-user lock before a waiting lookup takes it over. Lower values risk two refreshes overlapping.',
+    { min: 10_000, max: 120_000 }
   ),
   integerDefinition(
     'performance.projectRecentTimeoutMs',

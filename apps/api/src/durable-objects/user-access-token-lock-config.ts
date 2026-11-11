@@ -6,7 +6,9 @@
  * Durable Object (which imports the registry's resolver).
  *
  * A lookup is a few D1 reads plus at most one OAuth refresh round trip, normally well under
- * 2 s. 20 s leaves a wide margin above that and stays far below "forever", which is what an
- * unbounded lock turns one hung lookup into for every later lookup by the same user.
+ * 2 s. The deadline is a last resort for a lookup that never settles: past it, a waiter
+ * takes the lock over and could overlap a refresh that is somehow still running. 60 s keeps
+ * that overlap out of reach of any merely slow lookup while staying far below "forever",
+ * which is what an unbounded lock turns one hung lookup into for every later lookup.
  */
-export const DEFAULT_USER_ACCESS_TOKEN_LOCK_TIMEOUT_MS = 20_000;
+export const DEFAULT_USER_ACCESS_TOKEN_LOCK_TIMEOUT_MS = 60_000;
