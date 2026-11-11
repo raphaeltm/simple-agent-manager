@@ -152,12 +152,17 @@ async function openNewChat(page: Page, scenario: Scenario) {
     localStorage.setItem(`sam-onboarding-wizard-dismissed-${userId}`, 'true');
   }, USER_ID);
   await setupMocks(page, scenario);
-  const trialStatusRead = page.waitForResponse((r) => r.url().endsWith('/api/trial-status'));
+  // The gate refuses only once both compute reads have answered, so wait for both bodies
+  // and then for a painted frame, by which React has committed the query results.
+  const computeReads = ['/api/trial-status', '/api/credentials'].map((suffix) =>
+    page.waitForResponse((r) => new URL(r.url()).pathname.endsWith(suffix))
+  );
   await page.goto(`/projects/${PROJECT_ID}/chat`);
   await expect(page.locator('textarea[role="combobox"]')).toBeVisible();
-  await trialStatusRead;
-  // Let the query result commit before the send.
-  await page.waitForTimeout(300);
+  await Promise.all((await Promise.all(computeReads)).map((response) => response.finished()));
+  await page.evaluate(
+    () => new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)))
+  );
 }
 
 async function send(page: Page, text: string) {
