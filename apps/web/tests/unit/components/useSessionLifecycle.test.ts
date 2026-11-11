@@ -271,7 +271,8 @@ describe('useSessionLifecycle loading semantics', () => {
     return { ...base, state: { ...base.state, ...wake } };
   }
 
-  it('opens the socket and shows phases when the next wake arrives in the same response that flips the chat back to sleeping', async () => {
+  /** Renders a chat whose first wake (attempt A) is restored; `deliver` swaps what the server returns. */
+  async function renderAfterRestoredWake() {
     let server: ServerState = 'wake1';
     mocks.getChatSession.mockImplementation(async () => wakeResponse(server));
     const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
@@ -283,11 +284,15 @@ describe('useSessionLifecycle loading semantics', () => {
         await queryClient.invalidateQueries();
       });
     };
-
     await waitFor(() => expect(result.current.isWaking).toBe(true));
     pushWakeRestored();
     await deliver('restored');
     await waitFor(() => expect(result.current.session?.status).toBe('active'));
+    return { result, deliver };
+  }
+
+  it('opens the socket and shows phases when the next wake arrives in the same response that flips the chat back to sleeping', async () => {
+    const { result, deliver } = await renderAfterRestoredWake();
     expect(result.current.isWaking).toBe(false);
     const enabledWhileAwake = mocks.wsOptions.at(-1)?.enabled;
 
@@ -302,22 +307,7 @@ describe('useSessionLifecycle loading semantics', () => {
   it('does not reopen the banner for a stale poll of the finished wake', async () => {
     // Control: after the restore, a late poll still reports the session `sleeping` and
     // waking under the SAME attempt. That is the stale window the latch exists for.
-    let server: ServerState = 'wake1';
-    mocks.getChatSession.mockImplementation(async () => wakeResponse(server));
-    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
-      wrapper,
-    });
-    const deliver = async (next: ServerState) => {
-      server = next;
-      await act(async () => {
-        await queryClient.invalidateQueries();
-      });
-    };
-
-    await waitFor(() => expect(result.current.isWaking).toBe(true));
-    pushWakeRestored();
-    await deliver('restored');
-    await waitFor(() => expect(result.current.session?.status).toBe('active'));
+    const { result, deliver } = await renderAfterRestoredWake();
     await deliver('stale1');
     await waitFor(() => expect(result.current.session?.status).toBe('sleeping'));
     expect(result.current.isWaking).toBe(false);

@@ -24,51 +24,24 @@ const mocks = vi.hoisted(() => ({
   stopVerifyDecayTimer: vi.fn(),
 }));
 
-vi.mock('../../../src/lib/api', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../../src/lib/api')>()),
-  getChatSession: mocks.getChatSession,
-  listChatMessages: mocks.listChatMessages,
-  getSessionAccess: mocks.getSessionAccess,
-  getWorkspace: vi.fn(),
-  getNode: vi.fn(),
-  getTerminalToken: vi.fn(),
-  getTranscribeApiUrl: vi.fn(() => 'https://api.test/api/transcribe'),
-  resetIdleTimer: vi.fn(),
-  sendFollowUpPrompt: vi.fn(),
-  cancelAgentPrompt: vi.fn(),
-  uploadSessionFiles: vi.fn(),
-  requestAttachmentUpload: vi.fn(),
-  uploadAttachmentToR2: vi.fn(),
-}));
-vi.mock('../../../src/components/AuthProvider', () => ({
-  useAuth: () => ({ user: { id: 'user-1' } }),
-}));
-vi.mock('../../../src/hooks/useQueryScope', () => ({
-  useQueryScope: () => 'user-1',
-}));
-vi.mock('../../../src/hooks/useTokenRefresh', () => ({
-  useTokenRefresh: () => ({ token: null }),
-}));
-vi.mock('../../../src/hooks/useWorkspacePorts', () => ({
-  useWorkspacePorts: () => ({ ports: [] }),
-}));
-vi.mock('../../../src/components/project-message-view/useActivityVerifyTimer', () => ({
-  useActivityVerifyTimer: () => ({
-    startVerifyDecayTimer: mocks.startVerifyDecayTimer,
-    stopVerifyDecayTimer: mocks.stopVerifyDecayTimer,
-  }),
-}));
-vi.mock('../../../src/components/project-message-view/useConnectionRecovery', () => ({
-  useConnectionRecovery: () => ({
-    isResuming: false,
-    resumeError: null,
-    showConnectionBanner: false,
-    idleCountdownMs: null,
-    clearResumeError: vi.fn(),
-    reportDeliveryError: vi.fn(),
-    resumeAndSend: vi.fn(),
-  }),
-}));
+const harness = vi.hoisted(() => () => import('../helpers/session-lifecycle-mocks'));
+vi.mock('../../../src/lib/api', async (importOriginal) =>
+  (await harness()).lifecycleApiMock(importOriginal, {
+    getChatSession: mocks.getChatSession,
+    listChatMessages: mocks.listChatMessages,
+    getSessionAccess: mocks.getSessionAccess,
+  })
+);
+vi.mock('../../../src/components/AuthProvider', async () => (await harness()).authMock());
+vi.mock('../../../src/hooks/useQueryScope', async () => (await harness()).queryScopeMock());
+vi.mock('../../../src/hooks/useTokenRefresh', async () => (await harness()).tokenRefreshMock());
+vi.mock('../../../src/hooks/useWorkspacePorts', async () => (await harness()).workspacePortsMock());
+vi.mock('../../../src/components/project-message-view/useActivityVerifyTimer', async () =>
+  (await harness()).activityVerifyTimerMock(mocks.startVerifyDecayTimer, mocks.stopVerifyDecayTimer)
+);
+vi.mock('../../../src/components/project-message-view/useConnectionRecovery', async () =>
+  (await harness()).connectionRecoveryMock()
+);
 vi.mock('../../../src/components/project-message-view/types', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/components/project-message-view/types')>()),
   // Keep the fallback poll out: the push alone must move the tab, as on staging.
