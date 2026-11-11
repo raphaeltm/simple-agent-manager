@@ -28,23 +28,31 @@
 #   APT_MIRROR_FALLBACK_ATTEMPT_TIMEOUT_SECONDS  wall-clock bound for each attempt
 #   APT_MIRROR_FALLBACK_KILL_GRACE_SECONDS       grace between SIGTERM and SIGKILL
 #   APT_MIRROR_FALLBACK_SETTLE_TIMEOUT_SECONDS   wait for a leftover apt-get to exit
+#   APT_MIRROR_FALLBACK_RESOLVE_TIMEOUT_SECONDS  bound each diagnostic DNS lookup
+#   APT_MIRROR_FALLBACK_SETTLE_POLL_SECONDS      interval between process-table checks
 #   APT_MIRROR_FALLBACK_MIRRORLIST               mirrorlist file apt reads
 #
-# Worst case with the defaults: 180 + 10 (first attempt) + 30 (settle) + 180 + 10 (second
-# attempt) = 410 seconds, against 20-35 seconds for a healthy install.
+# With the runner's three mirrors, the configured wait budget is 180 + 10 (first attempt)
+# + 3 * 5 (DNS diagnostics) + 30 (settle) + 180 + 10 (second attempt) = 425 seconds,
+# plus local process/file operations. A healthy install takes 20-35 seconds.
 set -euo pipefail
 
 readonly DEFAULT_FALLBACK_URLS='https://mirrors.edge.kernel.org/ubuntu/'
 readonly DEFAULT_ATTEMPT_TIMEOUT_SECONDS=180
 readonly DEFAULT_KILL_GRACE_SECONDS=10
 readonly DEFAULT_SETTLE_TIMEOUT_SECONDS=30
+readonly DEFAULT_RESOLVE_TIMEOUT_SECONDS=5
+readonly DEFAULT_SETTLE_POLL_SECONDS=1
 readonly DEFAULT_MIRRORLIST=/etc/apt/apt-mirrors.txt
 readonly FALLBACK_DISABLED=none
+readonly APT_PROCESS_PATTERN='apt-get|dpkg'
 
 fallback_urls=${APT_MIRROR_FALLBACK_URLS:-$DEFAULT_FALLBACK_URLS}
 attempt_timeout=${APT_MIRROR_FALLBACK_ATTEMPT_TIMEOUT_SECONDS:-$DEFAULT_ATTEMPT_TIMEOUT_SECONDS}
 kill_grace=${APT_MIRROR_FALLBACK_KILL_GRACE_SECONDS:-$DEFAULT_KILL_GRACE_SECONDS}
 settle_timeout=${APT_MIRROR_FALLBACK_SETTLE_TIMEOUT_SECONDS:-$DEFAULT_SETTLE_TIMEOUT_SECONDS}
+resolve_timeout=${APT_MIRROR_FALLBACK_RESOLVE_TIMEOUT_SECONDS:-$DEFAULT_RESOLVE_TIMEOUT_SECONDS}
+settle_poll=${APT_MIRROR_FALLBACK_SETTLE_POLL_SECONDS:-$DEFAULT_SETTLE_POLL_SECONDS}
 mirrorlist=${APT_MIRROR_FALLBACK_MIRRORLIST:-$DEFAULT_MIRRORLIST}
 
 fail_usage() {
@@ -54,7 +62,7 @@ fail_usage() {
 
 [[ $# -ge 1 ]] || fail_usage 'usage: run-with-apt-mirror-fallback.sh <command> [args...]'
 
-for setting in attempt_timeout kill_grace settle_timeout; do
+for setting in attempt_timeout kill_grace settle_timeout resolve_timeout settle_poll; do
   [[ ${!setting} =~ ^[1-9][0-9]*$ ]] || fail_usage "$setting must be a positive integer, got '${!setting}'"
 done
 
@@ -74,10 +82,11 @@ run_attempt() {
 }
 
 describe_status() {
-  if [[ $1 -eq 124 || $1 -eq 137 ]]; then
-    echo "timed out after ${attempt_timeout}s (exit $1)"
+  local exit_status=$1
+  if [[ $exit_status -eq 124 || $exit_status -eq 137 ]]; then
+    echo "timed out after ${attempt_timeout}s (exit $exit_status)"
   else
-    echo "exit $1"
+    echo "exit $exit_status"
   fi
 }
 
@@ -89,7 +98,7 @@ report_mirror_resolution() {
     host=${uri#*://}
     host=${host%%/*}
     host=${host%%:*}
-    if timeout 5 getent hosts "$host" >/dev/null 2>&1; then
+    if timeout "$resolve_timeout" getent hosts "$host" >/dev/null 2>&1; then
       echo "  $host resolves"
     else
       echo "  $host does NOT resolve"
@@ -97,22 +106,23 @@ report_mirror_resolution() {
   done <"$mirrorlist"
 }
 
-# The command usually starts apt-get through sudo, and sudo does not pass on a signal sent
-# from its own process group. A timed-out attempt therefore leaves a root-owned apt-get
-# running and holding the apt locks, which would make the second attempt fail at once.
+# A timeout can leave root-owned apt-get descendants holding apt locks, depending on
+# sudo's signal handling. Do not assume that stopping the parent released those locks.
 # Stop it as root and wait for apt-get and dpkg to be gone before touching the mirrorlist.
 stop_leftover_apt() {
-  pgrep -x 'apt-get|dpkg' >/dev/null 2>&1 || return 0
+  pgrep -x "$APT_PROCESS_PATTERN" >/dev/null 2>&1 || return 0
   echo 'A previous apt-get is still running; stopping it before the fallback attempt.'
   sudo pkill -TERM -x apt-get || true
-  local waited=0
-  while pgrep -x 'apt-get|dpkg' >/dev/null 2>&1; do
+  local waited=0 delay
+  while pgrep -x "$APT_PROCESS_PATTERN" >/dev/null 2>&1; do
     if [[ $waited -ge $settle_timeout ]]; then
       echo "::error::apt-get did not exit within ${settle_timeout}s; not starting a second attempt on a locked apt." >&2
       return 1
     fi
-    sleep 1
-    waited=$((waited + 1))
+    delay=$((settle_timeout - waited))
+    if [[ $delay -gt $settle_poll ]]; then delay=$settle_poll; fi
+    sleep "$delay"
+    waited=$((waited + delay))
   done
 }
 

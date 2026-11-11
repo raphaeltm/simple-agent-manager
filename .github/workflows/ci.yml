@@ -115,6 +115,8 @@ jobs:
               - '.github/workflows/teardown*.yml'
             ci-workflow:
               - '.github/workflows/ci.yml'
+              - '.github/workflows/codspeed.yml'
+              - '.github/workflows/deploy-installer.yml'
               - 'scripts/quality/ci*.test.ts'
               - 'scripts/ci/run-with-apt-mirror-fallback.sh'
             marketing-site:

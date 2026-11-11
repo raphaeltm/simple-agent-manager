@@ -4,7 +4,7 @@
  * runner's own Ubuntu mirrors are unreachable (2026-11-11 Canonical DNS outage).
  *
  * The behaviour tests run the real script. Only the outside world is faked: the installing
- * command, `sudo`, and the process table (`pgrep`/`pkill`). The fake installer decides its
+ * command, `sudo`, DNS (`getent`), and the process table (`pgrep`/`pkill`). The fake installer decides its
  * exit code from the mirrorlist file the script is expected to rewrite, so a retry that did
  * not really switch mirrors still fails.
  */
@@ -15,21 +15,28 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 
-import { workflowSource } from './workflow-test-helpers';
+import { workflowFileNames, workflowSource } from './workflow-test-helpers';
 
 const HELPER_REPO_PATH = 'scripts/ci/run-with-apt-mirror-fallback.sh';
 const HELPER = fileURLToPath(new URL(`../../${HELPER_REPO_PATH}`, import.meta.url));
 const DEFAULT_FALLBACK = 'https://mirrors.edge.kernel.org/ubuntu/';
 const INSTALL_ARGS = ['install', '--with-deps', 'chromium'];
+const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url));
+const SCRIPT_CASE_TIMEOUT_MS = 15_000;
+const directories: string[] = [];
+afterEach(() =>
+  directories.splice(0).forEach((dir) => rmSync(dir, { recursive: true, force: true }))
+);
 
 /** The mirrorlist GitHub ships on hosted Ubuntu runners: three names in one DNS zone. */
 const RUNNER_MIRRORLIST = [
@@ -43,6 +50,9 @@ type InstallerMode =
   | 'ok' // the runner's own mirrors work
   | 'needs-fallback' // fails fast (apt exit 100) unless the fallback mirror is first
   | 'hangs-without-fallback' // hangs, leaving apt-get behind, unless the fallback is first
+  | 'ignores-term-without-fallback'
+  | 'hangs-on-fallback'
+  | 'dpkg-without-fallback'
   | 'always-fails'; // nothing works, not even the fallback
 
 interface Sandbox {
@@ -52,6 +62,9 @@ interface Sandbox {
   sudoCalls: string;
   pkillCalls: string;
   aptRunning: string;
+  dpkgRunning: string;
+  dnsCalls: string;
+  pgrepCalls: string;
   installer: string;
 }
 
@@ -62,6 +75,7 @@ function writeExecutable(path: string, body: string): void {
 
 function createSandbox(options: { mirrorlist?: string | null } = {}): Sandbox {
   const dir = mkdtempSync(join(tmpdir(), 'apt-mirror-fallback-'));
+  directories.push(dir);
   const bin = join(dir, 'bin');
   mkdirSync(bin);
   const sandbox: Sandbox = {
@@ -71,6 +85,9 @@ function createSandbox(options: { mirrorlist?: string | null } = {}): Sandbox {
     sudoCalls: join(dir, 'sudo-calls.log'),
     pkillCalls: join(dir, 'pkill-calls.log'),
     aptRunning: join(dir, 'apt-get.running'),
+    dpkgRunning: join(dir, 'dpkg.running'),
+    dnsCalls: join(dir, 'dns-calls.log'),
+    pgrepCalls: join(dir, 'pgrep-calls.log'),
     installer: join(bin, 'fake-playwright'),
   };
   if (options.mirrorlist !== null) {
@@ -97,6 +114,17 @@ fi
 case "$FAKE_MODE" in
   ok) exit 0 ;;
   always-fails) exit 100 ;;
+  ignores-term-without-fallback)
+    [[ "$first_mirror" == "$FAKE_FALLBACK" ]] && exit 0
+    trap '' TERM
+    sleep 60 ;;
+  hangs-on-fallback)
+    [[ "$first_mirror" == "$FAKE_FALLBACK" ]] || exit 100
+    sleep 60 ;;
+  dpkg-without-fallback)
+    [[ "$first_mirror" == "$FAKE_FALLBACK" ]] && exit 0
+    : > "$FAKE_DPKG_RUNNING"
+    exit 100 ;;
   needs-fallback) [[ "$first_mirror" == "$FAKE_FALLBACK" ]] && exit 0; exit 100 ;;
   hangs-without-fallback)
     [[ "$first_mirror" == "$FAKE_FALLBACK" ]] && exit 0
@@ -107,12 +135,34 @@ esac
   );
   // sudo: run the command, and record that it was asked to.
   writeExecutable(join(bin, 'sudo'), `printf '%s\\n' "$*" >> "$FAKE_SUDO_CALLS"\nexec "$@"\n`);
-  // pgrep: "is apt-get or dpkg running?" answered from a marker file.
-  writeExecutable(join(bin, 'pgrep'), `[[ -e "$FAKE_APT_RUNNING" ]]\n`);
+  // DNS is an external boundary. Never resolve live outage domains in a unit test.
+  writeExecutable(
+    join(bin, 'getent'),
+    `printf '%s\\n' "$*" >> "$FAKE_DNS_CALLS"
+case "\${FAKE_DNS_MODE:-ok}" in
+  fail) exit 2 ;;
+  hang) sleep 60 ;;
+  *) exit 0 ;;
+esac
+`
+  );
+  // Process lifetimes are controlled at the real pgrep boundary, including dpkg-only state.
+  writeExecutable(
+    join(bin, 'pgrep'),
+    `printf '%s\\n' "$*" >> "$FAKE_PGREP_CALLS"
+if [[ -n "\${FAKE_EXIT_AFTER_CHECKS:-}" ]]; then
+  checks=$(wc -l < "$FAKE_PGREP_CALLS")
+  if [[ $checks -ge $FAKE_EXIT_AFTER_CHECKS ]]; then rm -f -- "$FAKE_APT_RUNNING" "$FAKE_DPKG_RUNNING"; fi
+fi
+pattern="\${@: -1}"
+[[ -e "$FAKE_APT_RUNNING" && apt-get =~ ^($pattern)$ ]] ||
+  [[ -e "$FAKE_DPKG_RUNNING" && dpkg =~ ^($pattern)$ ]]
+`
+  );
   // pkill: records the request; the process dies unless the test says it is stuck.
   writeExecutable(
     join(bin, 'pkill'),
-    `printf '%s\\n' "$*" >> "$FAKE_PKILL_CALLS"\n[[ "\${FAKE_APT_STUCK:-}" == 1 ]] || rm -f -- "$FAKE_APT_RUNNING"\n`
+    `printf '%s\\n' "$*" >> "$FAKE_PKILL_CALLS"\n[[ "\${FAKE_APT_STUCK:-}" == 1 || -n "\${FAKE_EXIT_AFTER_CHECKS:-}" ]] || rm -f -- "$FAKE_APT_RUNNING"\n`
   );
   return sandbox;
 }
@@ -125,7 +175,7 @@ function runHelper(
 ) {
   const result = spawnSync('bash', [HELPER, ...args], {
     encoding: 'utf8',
-    timeout: 60_000,
+    timeout: 12_000,
     env: {
       PATH: `${join(sandbox.dir, 'bin')}:${process.env.PATH ?? ''}`,
       HOME: sandbox.dir,
@@ -137,6 +187,9 @@ function runHelper(
       FAKE_SUDO_CALLS: sandbox.sudoCalls,
       FAKE_PKILL_CALLS: sandbox.pkillCalls,
       FAKE_APT_RUNNING: sandbox.aptRunning,
+      FAKE_DPKG_RUNNING: sandbox.dpkgRunning,
+      FAKE_DNS_CALLS: sandbox.dnsCalls,
+      FAKE_PGREP_CALLS: sandbox.pgrepCalls,
       ...env,
     },
   });
@@ -151,6 +204,7 @@ const FAST_TIMEOUTS = {
   APT_MIRROR_FALLBACK_ATTEMPT_TIMEOUT_SECONDS: '1',
   APT_MIRROR_FALLBACK_KILL_GRACE_SECONDS: '1',
   APT_MIRROR_FALLBACK_SETTLE_TIMEOUT_SECONDS: '2',
+  APT_MIRROR_FALLBACK_RESOLVE_TIMEOUT_SECONDS: '1',
 };
 
 describe('run-with-apt-mirror-fallback.sh', () => {
@@ -222,6 +276,104 @@ describe('run-with-apt-mirror-fallback.sh', () => {
     expect(result.output).toContain('apt-get did not exit within 2s');
   });
 
+  it(
+    'waits for a leftover apt-get that takes a moment to exit',
+    () => {
+      const sandbox = createSandbox();
+      const result = runHelper(sandbox, 'hangs-without-fallback', {
+        ...FAST_TIMEOUTS,
+        APT_MIRROR_FALLBACK_SETTLE_TIMEOUT_SECONDS: '4',
+        FAKE_EXIT_AFTER_CHECKS: '4',
+      });
+      expect(result.status, result.output).toBe(0);
+      expect(lines(sandbox.pgrepCalls)).toHaveLength(4);
+      expect(lines(sandbox.calls)).toHaveLength(2);
+      expect(existsSync(sandbox.aptRunning)).toBe(false);
+    },
+    SCRIPT_CASE_TIMEOUT_MS
+  );
+
+  it(
+    'waits for dpkg to exit even when there is no apt-get to stop',
+    () => {
+      const sandbox = createSandbox();
+      const result = runHelper(sandbox, 'dpkg-without-fallback', {
+        ...FAST_TIMEOUTS,
+        FAKE_EXIT_AFTER_CHECKS: '3',
+      });
+      expect(result.status, result.output).toBe(0);
+      expect(lines(sandbox.pgrepCalls)).toHaveLength(3);
+      expect(existsSync(sandbox.dpkgRunning)).toBe(false);
+      expect(lines(sandbox.pkillCalls)).toEqual(['-TERM -x apt-get']);
+      expect(lines(sandbox.calls)).toHaveLength(2);
+    },
+    SCRIPT_CASE_TIMEOUT_MS
+  );
+
+  it(
+    'kills a first attempt that ignores SIGTERM, then uses the fallback',
+    () => {
+      const sandbox = createSandbox();
+      const result = runHelper(sandbox, 'ignores-term-without-fallback', FAST_TIMEOUTS);
+      expect(result.status, result.output).toBe(0);
+      expect(lines(sandbox.calls)).toHaveLength(2);
+      expect(result.output).toContain('exit 137');
+    },
+    SCRIPT_CASE_TIMEOUT_MS
+  );
+
+  it('retries the unchanged apt-index command used before the benchmark action', () => {
+    const sandbox = createSandbox();
+    const args = ['update', '-o', 'APT::Update::Error-Mode=any'];
+    const result = runHelper(sandbox, 'needs-fallback', {}, [sandbox.installer, ...args]);
+    expect(result.status, result.output).toBe(0);
+    expect(lines(sandbox.calls)).toEqual([args.join(' '), args.join(' ')]);
+  });
+
+  it(
+    'bounds the second attempt too',
+    () => {
+      const sandbox = createSandbox();
+      const result = runHelper(sandbox, 'hangs-on-fallback', FAST_TIMEOUTS);
+      expect(result.status, result.output).toBe(124);
+      expect(lines(sandbox.calls)).toHaveLength(2);
+      expect(result.output).toContain('Second attempt with the fallback mirror also failed');
+    },
+    SCRIPT_CASE_TIMEOUT_MS
+  );
+
+  it(
+    'does not let a hanging DNS lookup hold up the fallback',
+    () => {
+      const sandbox = createSandbox({ mirrorlist: 'https://archive.ubuntu.com/ubuntu/\n' });
+      const result = runHelper(sandbox, 'needs-fallback', {
+        ...FAST_TIMEOUTS,
+        FAKE_DNS_MODE: 'hang',
+      });
+      expect(result.status, result.output).toBe(0);
+      expect(lines(sandbox.dnsCalls)).toEqual(['hosts archive.ubuntu.com']);
+      expect(result.output).toContain('archive.ubuntu.com does NOT resolve');
+      expect(lines(sandbox.calls)).toHaveLength(2);
+    },
+    SCRIPT_CASE_TIMEOUT_MS
+  );
+
+  it(
+    'caps a long poll interval to the remaining settle budget',
+    () => {
+      const sandbox = createSandbox();
+      const result = runHelper(sandbox, 'hangs-without-fallback', {
+        ...FAST_TIMEOUTS,
+        FAKE_APT_STUCK: '1',
+        APT_MIRROR_FALLBACK_SETTLE_POLL_SECONDS: '60',
+      });
+      expect(result.status, result.output).toBe(124);
+      expect(result.output).toContain('apt-get did not exit within 2s');
+      expect(lines(sandbox.calls)).toHaveLength(1);
+    },
+    SCRIPT_CASE_TIMEOUT_MS
+  );
+
   it('fails closed when the fallback mirror cannot serve the install either', () => {
     const sandbox = createSandbox();
 
@@ -292,6 +444,8 @@ describe('run-with-apt-mirror-fallback.sh', () => {
     ],
     ['a zero timeout', { APT_MIRROR_FALLBACK_ATTEMPT_TIMEOUT_SECONDS: '0' }],
     ['a non-numeric settle timeout', { APT_MIRROR_FALLBACK_SETTLE_TIMEOUT_SECONDS: 'soon' }],
+    ['a negative DNS timeout', { APT_MIRROR_FALLBACK_RESOLVE_TIMEOUT_SECONDS: '-1' }],
+    ['a zero poll interval', { APT_MIRROR_FALLBACK_SETTLE_POLL_SECONDS: '0' }],
   ])('rejects %s before running anything', (_label, env) => {
     const sandbox = createSandbox();
 
@@ -311,63 +465,106 @@ describe('run-with-apt-mirror-fallback.sh', () => {
   });
 });
 
-interface CiJob {
+interface WorkflowJob {
   if?: string;
-  steps?: Array<{ name?: string; run?: string; with?: { filters?: string } }>;
+  steps?: Array<{
+    name?: string;
+    run?: string;
+    uses?: string;
+    'working-directory'?: string;
+    with?: { filters?: string; mode?: string };
+  }>;
 }
 
-function ciJobs(): Record<string, CiJob> {
-  return (parse(workflowSource('ci.yml')) as { jobs: Record<string, CiJob> }).jobs;
+function workflowJobs(path: string): Record<string, WorkflowJob> {
+  return (parse(workflowSource(path)) as { jobs?: Record<string, WorkflowJob> }).jobs ?? {};
 }
 
 function ciPathFilters(): Record<string, string[]> {
-  const filters = ciJobs()
+  const filters = workflowJobs('ci.yml')
     .changes?.steps?.map((step) => step.with?.filters)
     .find((value): value is string => typeof value === 'string');
   if (!filters) throw new Error('ci.yml changes job has no paths-filter block');
   return parse(filters) as Record<string, string[]>;
 }
 
-const BROWSER_JOBS = ['workspace-quality-surfaces', 'marketing-site', 'playwright-visual'];
+const CI_BROWSER_JOBS = ['workspace-quality-surfaces', 'marketing-site', 'playwright-visual'];
+const BROWSER_INSTALL_JOBS = [
+  ...CI_BROWSER_JOBS.map((job) => `ci.yml:${job}`),
+  'deploy-installer.yml:deploy',
+];
 
-describe('ci.yml browser install wiring', () => {
-  it('installs Chromium with its system dependencies through the fallback helper in every browser job', () => {
-    const jobs = ciJobs();
+function browserInstallCommands() {
+  return workflowFileNames().flatMap((path) =>
+    Object.entries(workflowJobs(path)).flatMap(([job, definition]) =>
+      (definition.steps ?? []).flatMap((step) =>
+        (step.run ?? '')
+          .split('\n')
+          .map((line) => line.trim())
+          .filter((line) => /\binstall\s+--with-deps\s+chromium\b/u.test(line))
+          .map((line) => ({
+            job: `${path}:${job}`,
+            workingDirectory: step['working-directory'] ?? '.',
+            line,
+          }))
+      )
+    )
+  );
+}
 
-    const installingJobs = Object.entries(jobs)
-      .filter(([, job]) => job.steps?.some((step) => step.run?.includes('playwright install')))
-      .map(([name]) => name);
-    expect(installingJobs.sort()).toEqual([...BROWSER_JOBS].sort());
-
-    for (const name of BROWSER_JOBS) {
-      const installs = (jobs[name]?.steps ?? []).filter((step) =>
-        step.run?.includes('playwright install')
-      );
-      expect(installs, `${name} install steps`).toHaveLength(1);
-      expect(installs[0]?.run?.trim(), name).toMatch(
-        /^bash \.\.\/\.\.\/scripts\/ci\/run-with-apt-mirror-fallback\.sh \S+( \S+)? install --with-deps chromium$/u
-      );
+describe('workflow browser install wiring', () => {
+  it('installs Chromium with its system dependencies through the helper in every workflow', () => {
+    const commands = browserInstallCommands();
+    expect(commands.map((command) => command.job).sort()).toEqual([...BROWSER_INSTALL_JOBS].sort());
+    for (const { job, workingDirectory, line } of commands) {
+      const match =
+        /^bash (\S*run-with-apt-mirror-fallback\.sh) \S.* install --with-deps chromium$/u.exec(
+          line
+        );
+      expect(match, `${job}: ${line}`).not.toBeNull();
+      expect(resolve(REPO_ROOT, workingDirectory, match![1]!), job).toBe(HELPER);
     }
   });
 
-  it('runs every browser job, and the helper tests, when the helper itself changes', () => {
+  it('runs every CI browser job and helper tests when the helper changes', () => {
     const filters = ciPathFilters();
     expect(filters['browser-install']).toEqual([HELPER_REPO_PATH]);
-    expect(filters['ci-workflow']).toContain(HELPER_REPO_PATH);
+    expect(filters['ci-workflow']).toEqual(
+      expect.arrayContaining([
+        HELPER_REPO_PATH,
+        '.github/workflows/codspeed.yml',
+        '.github/workflows/deploy-installer.yml',
+      ])
+    );
     expect(workflowSource('ci.yml')).toContain(
       'browser-install: ${{ steps.filter.outputs.browser-install }}'
     );
+    const jobs = workflowJobs('ci.yml');
+    for (const name of CI_BROWSER_JOBS)
+      expect(jobs[name]?.if, name).toContain("needs.changes.outputs.browser-install == 'true'");
+    expect(
+      jobs['ci-workflow']?.steps?.find((step) => step.name === 'Validate CI workflow wiring')?.run
+    ).toContain('ci-browser-install.test.ts');
+  });
 
-    const jobs = ciJobs();
-    for (const name of BROWSER_JOBS) {
-      expect(jobs[name]?.if, `${name} if`).toContain(
-        "needs.changes.outputs.browser-install == 'true'"
-      );
-    }
-
-    const wiringStep = jobs['ci-workflow']?.steps?.find(
-      (step) => step.name === 'Validate CI workflow wiring'
+  it('prepares signed apt indexes through the helper before running the unchanged benchmark action', () => {
+    const steps = workflowJobs('codspeed.yml').benchmarks?.steps ?? [];
+    const prep = steps.findIndex(
+      (step) => step.name === 'Prepare apt indexes for benchmark dependencies'
     );
-    expect(wiringStep?.run).toContain('ci-browser-install.test.ts');
+    const action = steps.findIndex((step) => step.uses?.startsWith('CodSpeedHQ/action@'));
+    expect(prep).toBeGreaterThanOrEqual(0);
+    expect(action).toBeGreaterThan(prep);
+    expect(steps[prep]?.run).toBe(
+      'bash scripts/ci/run-with-apt-mirror-fallback.sh sudo apt-get update -o APT::Update::Error-Mode=any'
+    );
+    expect(steps[action]?.with?.mode).toBe('simulation');
+    const workflow = parse(workflowSource('codspeed.yml')) as {
+      on: Record<string, { paths?: string[] }>;
+    };
+    for (const trigger of ['push', 'pull_request']) {
+      expect(workflow.on[trigger]?.paths).not.toContain(HELPER_REPO_PATH);
+      expect(workflow.on[trigger]?.paths).not.toContain('.github/workflows/codspeed.yml');
+    }
   });
 });
