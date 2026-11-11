@@ -164,8 +164,9 @@ export function CreateWorkspace() {
     Promise.all([listCredentials().catch(() => []), getTrialStatus().catch(() => null)])
       .then(([creds, trial]) => {
         const hasUserCreds = hasByocComputeCredential(creds);
-        const trialAvailable = trial?.available ?? false;
-        const hasCloud = hasUserCreds || trialAvailable;
+        // Installation machines count whether or not the SAM-managed AI proxy is on.
+        const platformCompute = trial?.hasInfraCredential === true;
+        const hasCloud = hasUserCreds || platformCompute;
         setHasCloudProvider(hasCloud);
         setCloudStatus(hasCloud ? 'ready' : 'missing');
 

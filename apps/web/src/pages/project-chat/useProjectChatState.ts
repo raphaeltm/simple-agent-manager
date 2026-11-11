@@ -100,9 +100,12 @@ export function useProjectChatState() {
   // mount effect local to this hook, duplicating requests that the settings pages,
   // onboarding wizards, task forms and workspace creation were already making.
   const { credentials } = useCredentials(queryScope);
-  const { available: trialAvailable } = useTrialStatus(queryScope);
+  // "Is there compute this user may provision on": their own cloud account, or the installation's
+  // machines. Not the SAM-managed AI proxy (`available`), which is off on installs that provide
+  // machines but leave agent credentials to each user; keying on it refused every send there.
+  const { platformCompute } = useTrialStatus(queryScope);
   const hasUserCloudCredentials = hasByocComputeCredential(credentials);
-  const hasCloudCredentials = hasUserCloudCredentials || trialAvailable;
+  const hasCloudCredentials = hasUserCloudCredentials || platformCompute;
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Sidebar filtering

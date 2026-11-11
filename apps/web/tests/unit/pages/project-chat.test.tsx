@@ -1680,7 +1680,11 @@ describe('ProjectChat profile setup wizard', () => {
 
   it('allows inherited workload resources without a personal cloud key', async () => {
     mocks.listCredentials.mockResolvedValue([]);
-    mocks.getTrialStatus.mockResolvedValue({ available: true });
+    mocks.getTrialStatus.mockResolvedValue({
+      available: true,
+      hasInfraCredential: true,
+      hasAgentCredential: true,
+    });
     mocks.getProviderCatalog.mockResolvedValue({ catalogs: [TEST_PROVIDER_CATALOG] });
     mocks.listAgents.mockResolvedValue(AGENTS_MULTI);
 
@@ -2748,5 +2752,104 @@ describe('ProjectChat no longer executes ideas', () => {
     const body = mocks.submitTask.mock.calls[0]?.[1] as Record<string, unknown>;
     expect(body.message).toBe('Run the tests.');
     expect(body).not.toHaveProperty('sourceIdeaId');
+  });
+});
+
+// The composer's "is there compute I may use" gate. Installation machines (an enabled platform
+// cloud credential, reported as `hasInfraCredential`) count whether or not the SAM-managed AI proxy
+// is on. Self-hosted installs run with the proxy off, so `available` is false there while the
+// installation still provides machines: keying the gate on `available` refused every send.
+describe('ProjectChat compute gate (installation machines, AI proxy off)', () => {
+  const GATE_MESSAGE = /Cloud credentials required/;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // No cloud account of the user's own.
+    mocks.listCredentials.mockResolvedValue([]);
+    mocks.getProviderCatalog.mockResolvedValue({ catalogs: [] });
+    mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
+    mocks.listAgentProfiles.mockResolvedValue([
+      makeAgentProfile({ id: 'prof-gate', name: 'Conversation profile' }),
+    ]);
+    mocks.listSkills.mockResolvedValue([]);
+    mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
+    mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
+    mocks.submitTask.mockResolvedValue({
+      taskId: 'task-gate',
+      sessionId: 'session-gate',
+      branchName: 'sam/task-gate',
+      status: 'queued',
+    });
+    mocks.getProjectTask.mockResolvedValue({
+      id: 'task-gate',
+      status: 'queued',
+      executionStep: null,
+      errorMessage: null,
+    });
+  });
+
+  async function typeAndSend(text: string) {
+    const textarea = await screen.findByPlaceholderText(
+      'Describe what you want the agent to do...'
+    );
+    fireEvent.change(textarea, { target: { value: text } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+  }
+
+  it('sends when the installation provides machines and the AI proxy is off', async () => {
+    // What GET /api/trial-status returns on a self-hosted box (verified on the live test box).
+    mocks.getTrialStatus.mockResolvedValue({
+      available: false,
+      agentType: null,
+      hasInfraCredential: true,
+      hasAgentCredential: false,
+      dailyTokenBudget: null,
+      dailyTokenUsage: null,
+    });
+
+    renderProjectChat();
+
+    // The provider catalog is only read once the hook decides compute exists, so this is the
+    // real hook reaching "has compute" from the server answer, not a value the test injected.
+    await waitFor(() => expect(mocks.getProviderCatalog).toHaveBeenCalled());
+    await typeAndSend('Say hello');
+
+    await waitFor(() => {
+      expect(mocks.submitTask).toHaveBeenCalledWith(
+        PROJECT_ID,
+        expect.objectContaining({ message: 'Say hello', agentProfileId: 'prof-gate' })
+      );
+    });
+    expect(screen.queryByText(GATE_MESSAGE)).not.toBeInTheDocument();
+  });
+
+  it('still refuses when there is neither a user cloud account nor installation machines', async () => {
+    mocks.getTrialStatus.mockResolvedValue({
+      available: false,
+      agentType: null,
+      hasInfraCredential: false,
+      hasAgentCredential: false,
+      dailyTokenBudget: null,
+      dailyTokenUsage: null,
+    });
+
+    renderProjectChat();
+
+    // Let both compute reads settle before sending, so the refusal comes from their answers
+    // and not from a send that raced them.
+    await waitFor(() => {
+      expect(mocks.getTrialStatus).toHaveBeenCalled();
+      expect(mocks.listCredentials).toHaveBeenCalled();
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    // Liveness: the composer and its profile rendered, so an absent submit is the gate.
+    expect(getProfileControl()).toHaveTextContent('Conversation profile');
+    await typeAndSend('Say hello');
+
+    expect(await screen.findByText(GATE_MESSAGE)).toBeInTheDocument();
+    expect(mocks.submitTask).not.toHaveBeenCalled();
+    expect(mocks.getProviderCatalog).not.toHaveBeenCalled();
   });
 });
