@@ -21,6 +21,10 @@ const authState = vi.hoisted(() => ({ userId: 'user-1' }));
 const admissionState = vi.hoisted(() => ({ renderedPrompt: '' }));
 
 vi.mock('../../src/middleware/auth', () => ({
+  // Agent sign-in session guards: inert for these ordinary-session route tests.
+  rejectAgentSignInSession: () => async (_c: unknown, next: () => Promise<void>) => next(),
+  assertNotAgentSignInSession: () => undefined,
+
   getAuth: () => ({ user: { id: authState.userId } }),
 }));
 
