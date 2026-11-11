@@ -16,28 +16,30 @@ Real SAM screens for `src/components/factory/`, each in a dark (`<name>.webp`) a
      (`sam-comments-library-file`), `marketing-shots-platform` (`sam-app-deployment-detail`,
      `sam-app-deployment-policy`), `marketing-shots-factory` (`sam-factory-workflow`)
    - Images marked "phone" come from the docs specs run under an `iPhone SE (375x667)` project.
-3. Crop (source pixels, at 2x) and export to WebP (quality 82) at the width shown.
+3. Crop (source pixels, at 2x), add the padding shown on all sides in the capture's own background
+   colour (sampled 3px in from the crop's top-left corner), and export to WebP (quality 82) at the
+   width shown. The padding keeps the app's cards off the frame edge.
 
-| Image | Source capture | Crop `[left, top, width, height]` | Width |
-| --- | --- | --- | --- |
-| dashboard | sam-dashboard-overview | full | 1800 |
-| needs-you | ideas-list-1440 | 0, 408, 1545, 352 | 900 |
-| ideas | ideas-list-1440 | 0, 0, 1545, 1650 | 1100 |
-| ideas-phone | phone ideas-list-mobile-375 | 0, 140, 750, 1230 | 750 |
-| idea-review | idea-page-1440 | 1500, 110, 784, 300 | 700 |
-| idea-page | idea-page-1440 | 0, 0, 2284, 1150 | 1400 |
-| idea-page-phone | phone idea-page-mobile-375 | 0, 160, 750, 900 | 750 |
-| comment-reader | comment-reader-1440 | 0, 0, 2348, 1100 | 1300 |
-| comment-phone | phone comment-reader-mobile-375 | 0, 150, 750, 1474 | 750 |
-| library-doc | sam-comments-library-file | 1960, 120, 880, 620 | 700 |
-| profiles | new-chat-profile-list-1440 | 0, 0, 880, 760 | 880 |
-| profiles-phone | phone new-chat-profiles-mobile-375 | 0, 160, 750, 900 | 750 |
-| account-pick | accounts-profile-account-1440 | full | 800 |
-| workflow | sam-factory-workflow | 504, 100, 1896, 1600 | 1300 |
-| workflow-phone | sam-factory-workflow | 780, 640, 980, 940 | 800 |
-| machine | nodes-machine-1280 | full | 1400 |
-| deploy | sam-app-deployment-detail | 520, 120, 1820, 1180 | 1300 |
-| deploy-policy | sam-app-deployment-policy | full | 856 |
+| Image | Source capture | Crop `[left, top, width, height]` | Padding | Width |
+| --- | --- | --- | --- | --- |
+| dashboard | sam-dashboard-overview | full | 0 | 1800 |
+| needs-you | ideas-list-1440 | 0, 404, 1548, 360 | 28 | 900 |
+| ideas | ideas-list-1440 | 0, 0, 2284, 1650 | 48 | 1300 |
+| ideas-phone | phone ideas-list-mobile-375 | 0, 140, 750, 1230 | 0 | 750 |
+| idea-review | idea-page-1440 | 1512, 100, 772, 330 | 28 | 700 |
+| idea-page | idea-page-1440 | 0, 0, 2284, 1060 | 48 | 1400 |
+| idea-page-phone | phone idea-page-mobile-375 | 0, 160, 750, 900 | 0 | 750 |
+| comment-reader | comment-reader-1440 | 0, 0, 2348, 1100 | 48 | 1300 |
+| comment-phone | phone comment-reader-mobile-375 | 0, 150, 750, 1474 | 0 | 750 |
+| library-doc | sam-comments-library-file | 1930, 90, 910, 680 | 48 | 700 |
+| profiles | new-chat-profile-list-1440 | 0, 0, 880, 680 | 48 | 880 |
+| profiles-phone | phone new-chat-profiles-mobile-375 | 0, 160, 750, 900 | 0 | 750 |
+| account-pick | accounts-profile-account-1440 | full | 48 | 800 |
+| workflow | sam-factory-workflow | 504, 100, 2330, 1600 | 48 | 1400 |
+| workflow-phone | sam-factory-workflow | 780, 640, 980, 940 | 48 | 800 |
+| machine | nodes-machine-1280 | full | 48 | 1400 |
+| deploy | sam-app-deployment-detail | 520, 120, 1820, 1000 | 48 | 1300 |
+| deploy-policy | sam-app-deployment-policy | full | 48 | 856 |
 
 After re-capturing, check the highlight rings in `src/data/factory-stages.ts` and
 `FactoryFloor.astro` still outline the same controls.
