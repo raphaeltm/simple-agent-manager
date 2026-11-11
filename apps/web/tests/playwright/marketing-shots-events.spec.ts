@@ -4,8 +4,6 @@
  * watch, and agent channels. Renders the REAL production components with mocked
  * API data and captures the images embedded in the public marketing site
  * (apps/www/src/data/features/events.json -> apps/www/public/images/features).
- * The homepage scene (apps/www/src/data/scenes/events.json) crops
- * sam-triggers-sources; re-check its boxes after re-capturing it.
  *
  * Run with the marketing output flag to write committed images:
  *   MARKETING_SHOTS=1 PLAYWRIGHT_BASE_URL=http://localhost:4173 \

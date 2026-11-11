@@ -1099,8 +1099,8 @@ test('sam-hero-live-session', async ({ page }) => {
   await marketingShot(page, 'sam-hero-live-session');
 });
 
-// The same session on a phone: the source for the marketing homepage's mobile
-// hero (apps/www/scripts/build-hero-layers.ts crops its layers from it).
+// The same session on a phone (the brand guide's imagery uses a crop of it:
+// apps/www/public/images/hero/phone.webp).
 test.describe('hero on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 

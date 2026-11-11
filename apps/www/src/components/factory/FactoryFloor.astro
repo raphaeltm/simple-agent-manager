@@ -25,11 +25,11 @@ const facts = [
   },
   {
     title: 'When memory runs short, the work moves',
-    body: 'SAM saves the session, stops it, and restarts the work on another machine.',
+    body: 'SAM tries to save the session, then restarts the work on another machine.',
   },
   {
-    title: 'No ceiling of its own',
-    body: 'Allow each person 10 machines, the default, or many more. Your cloud quota sets the real limit.',
+    title: 'Limits you set',
+    body: 'Choose how many machines each person may run, and raise the installation’s ceiling as far as your cloud quota goes.',
   },
 ];
 ---
@@ -68,7 +68,7 @@ const facts = [
         <span class="floor-ring" aria-hidden="true"></span>
       </div>
       <p class="floor-chip" aria-hidden="true">
-        <span class="floor-dot"></span>Short on memory: session saved, restarting on another machine
+        <span class="floor-dot"></span>Short on memory: saving the session to restart it on another machine
       </p>
       <figcaption class="fh-note">One machine, three tasks, each in its own container</figcaption>
     </figure>
