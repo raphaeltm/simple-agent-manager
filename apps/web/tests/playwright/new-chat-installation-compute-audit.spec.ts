@@ -125,7 +125,8 @@ async function setupMocks(page: Page, scenario: Scenario) {
       const subPath = match[2] || '';
       if (subPath === '/tasks/submit' && request.method() === 'POST') {
         scenario.submits.push(request.postData() ?? '');
-        // Hold the submit open: the audit is about the gate, not provisioning.
+        // Answer the submit with an error: the audit is about the gate reaching the server,
+        // not provisioning. The red "stopped by audit" text in screenshots is this response.
         return respond(503, { error: 'AUDIT_STOP', message: 'stopped by audit' });
       }
       if (subPath === '/agent-profiles') return respond(200, { items: scenario.profiles });

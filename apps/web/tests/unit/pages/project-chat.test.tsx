@@ -2823,6 +2823,42 @@ describe('ProjectChat compute gate (installation machines, AI proxy off)', () =>
     expect(screen.queryByText(GATE_MESSAGE)).not.toBeInTheDocument();
   });
 
+  it('does not refuse a send made while the compute reads are still in flight', async () => {
+    // Hold GET /api/trial-status open so the send lands before it answers (cold load).
+    let releaseTrialStatus: (value: unknown) => void = () => undefined;
+    mocks.getTrialStatus.mockReturnValue(
+      new Promise((resolve) => {
+        releaseTrialStatus = resolve;
+      })
+    );
+
+    renderProjectChat();
+
+    await waitFor(() => expect(mocks.getTrialStatus).toHaveBeenCalled());
+    // Liveness: the composer and its profile rendered before the send.
+    await waitFor(() => expect(getProfileControl()).toHaveTextContent('Conversation profile'));
+    await typeAndSend('Say hello');
+
+    await waitFor(() => {
+      expect(mocks.submitTask).toHaveBeenCalledWith(
+        PROJECT_ID,
+        expect.objectContaining({ message: 'Say hello' })
+      );
+    });
+    expect(screen.queryByText(GATE_MESSAGE)).not.toBeInTheDocument();
+
+    await act(async () => {
+      releaseTrialStatus({
+        available: false,
+        agentType: null,
+        hasInfraCredential: true,
+        hasAgentCredential: false,
+        dailyTokenBudget: null,
+        dailyTokenUsage: null,
+      });
+    });
+  });
+
   it('still refuses when there is neither a user cloud account nor installation machines', async () => {
     mocks.getTrialStatus.mockResolvedValue({
       available: false,
