@@ -171,7 +171,53 @@ describe('selfhost create-account SQL', () => {
     expect(runCommand('dev@example.com', true)[0]).toMatchObject({
       id: 'github-user',
       role: 'superadmin',
+      // Promotion never lifts a suspension.
+      status: 'suspended',
+    });
+  });
+
+  it('approves a pending account when promoting it', () => {
+    sqlite
+      .prepare(
+        `INSERT INTO users (id, email, email_verified, name, role, status, created_at, updated_at)
+         VALUES ('waiting', 'waiting@example.com', 1, 'Waiting', 'user', 'pending', 1, 1)`
+      )
+      .run();
+    expect(runCommand('waiting@example.com')[0]).toMatchObject({ status: 'pending' });
+    expect(runCommand('waiting@example.com', true)[0]).toMatchObject({
+      role: 'superadmin',
       status: 'active',
+    });
+  });
+
+  describe('with an installer owner (BOOTSTRAP_OWNER_EMAIL)', () => {
+    const OWNER = 'owner@example.com';
+    beforeEach(() => {
+      env = { ...env, BOOTSTRAP_OWNER_EMAIL: OWNER } as Env;
+    });
+
+    it('admits a created teammate only once the owner exists, as the command warns', async () => {
+      runCommand('teammate@example.com');
+      // The owner has not signed in: SAM admits no one else yet.
+      expect(await signInByEmail('teammate@example.com')).toBeNull();
+
+      // Owner path: creating the owner as superadmin establishes them...
+      runCommand(OWNER, true);
+      expect(await signInByEmail(OWNER)).toMatchObject({ email: OWNER, role: 'superadmin' });
+      // ...and the teammate is admitted from then on.
+      expect(await signInByEmail('teammate@example.com')).toMatchObject({
+        email: 'teammate@example.com',
+        role: 'user',
+      });
+    });
+
+    it('lets the owner, created as a plain account, sign in and become the administrator', async () => {
+      runCommand(OWNER);
+      expect(await signInByEmail(OWNER)).toMatchObject({
+        email: OWNER,
+        role: 'superadmin',
+        status: 'active',
+      });
     });
   });
 

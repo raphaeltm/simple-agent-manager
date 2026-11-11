@@ -95,6 +95,13 @@ async function main(): Promise<void> {
   process.stdout.write(redactSecrets(`${result.stdout ?? ''}${result.stderr ?? ''}`, secrets));
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(`celld d1 execute failed (exit ${result.status})`);
+  // The last statement reports the account; no row means nothing usable was written.
+  if (!result.stdout?.includes(email)) {
+    throw new Error(`no account for ${email} after the command; nothing was created`);
+  }
+  if (/\bsuspended\b/.test(result.stdout)) {
+    log(`note: ${email} is suspended; an administrator must reactivate it in Admin → Users`);
+  }
   log(`done: ${email} can now request a sign-in code at https://app.${box.SAM_DOMAIN ?? ''}`);
   // Until the installer owner has signed in once, SAM admits no one else (bootstrap-owner.ts).
   const owner = readSecretsFile(join(stateDir, 'secrets.env')).BOOTSTRAP_OWNER_EMAIL?.trim();

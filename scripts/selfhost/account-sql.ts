@@ -10,7 +10,8 @@
  *
  * Rules:
  * - Idempotent: an existing account is never duplicated or overwritten. `--superadmin` promotes
- *   it (role superadmin, status active), which is what an operator running this asks for.
+ *   it to superadmin and approves it if it was pending, but never lifts a suspension: that stays
+ *   an explicit admin decision in the app.
  * - The operator vouches for the address, so a new row is `email_verified = 1` and `active`,
  *   whatever the signup approval mode says.
  * - Internal sentinel rows (`status = 'system'`, e.g. `system_anonymous_trials`) are never
@@ -73,7 +74,9 @@ export function createAccountSql(plan: AccountPlan): string {
      WHERE NOT EXISTS (SELECT 1 FROM users WHERE lower(trim(email)) = '${email}')`,
     ...(plan.superadmin
       ? [
-          `UPDATE users SET role = 'superadmin', status = 'active', updated_at = ${nowMs}
+          `UPDATE users SET role = 'superadmin',
+             status = CASE WHEN status = 'pending' THEN 'active' ELSE status END,
+             updated_at = ${nowMs}
            WHERE ${MATCH(email)}`,
         ]
       : []),

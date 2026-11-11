@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -11,7 +11,7 @@ import {
   mailEgressEndpoints,
   renderMailCollectorEnv,
   smtpWorkerVars,
-  syncMailCollectorEnv,
+  writeMailCollectorFiles,
 } from './mail-settings.js';
 
 const DOMAIN = 'sam.example.com';
@@ -161,16 +161,77 @@ describe('renderMailCollectorEnv', () => {
       ).toThrow('MAIL_COLLECTOR_HOST_LABEL');
     }
   });
+});
 
-  it('is rewritten only when its content changes', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'sam-mail-env-'));
-    const path = join(dir, 'mail-collector.env');
-    try {
-      expect(syncMailCollectorEnv(path, 'SAM_MAIL_COLLECTOR=off\n')).toBe(true);
-      expect(syncMailCollectorEnv(path, 'SAM_MAIL_COLLECTOR=off\n')).toBe(false);
-      expect(statSync(path).mode & 0o777).toBe(0o600);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
+describe('writeMailCollectorFiles', () => {
+  const password = 'b'.repeat(64);
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'sam-mail-files-'));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('gives Mailpit its own copy of the credentials, privately, while the profile is on', () => {
+    const changed = writeMailCollectorFiles(dir, COLLECTOR, password);
+    expect(changed.map((path) => path.slice(dir.length + 1)).sort()).toEqual([
+      'mail-collector-ui.env',
+      'mail-collector.env',
+    ]);
+    expect(readFileSync(join(dir, 'mail-collector-ui.env'), 'utf8')).toBe(
+      `MP_UI_AUTH=collector:${password}\n`
+    );
+    for (const name of ['mail-collector.env', 'mail-collector-ui.env']) {
+      expect(statSync(join(dir, name)).mode & 0o777).toBe(0o600);
     }
+    expect(writeMailCollectorFiles(dir, COLLECTOR, password)).toEqual([]);
+  });
+
+  it('turning the profile off turns the Caddy route off and removes the password copy', () => {
+    writeMailCollectorFiles(dir, COLLECTOR, password);
+    writeMailCollectorFiles(dir, { COMPOSE_PROFILES: 'tunnel' }, null);
+    expect(readFileSync(join(dir, 'mail-collector.env'), 'utf8')).toBe('SAM_MAIL_COLLECTOR=off\n');
+    expect(existsSync(join(dir, 'mail-collector-ui.env'))).toBe(false);
+  });
+
+  it('refuses to turn the collector on without the generated password', () => {
+    expect(() => writeMailCollectorFiles(dir, COLLECTOR, null)).toThrow(
+      'needs its generated UI password'
+    );
+    expect(existsSync(join(dir, 'mail-collector-ui.env'))).toBe(false);
+  });
+});
+
+describe('half-applied SMTP settings', () => {
+  it.each([
+    [{ SMTP_FROM: 'a@b.example' }, {}, 'SMTP_FROM'],
+    [{ SMTP_USERNAME: 'u' }, {}, 'SMTP_USERNAME'],
+    [{}, { SMTP_PASSWORD: 'p' }, 'SMTP_PASSWORD'],
+    [{ ...COLLECTOR, SMTP_USERNAME: 'u' }, {}, 'SMTP_USERNAME'],
+    [{ ...COLLECTOR, SMTP_TLS: 'tls' }, {}, 'SMTP_TLS'],
+    [COLLECTOR, { SMTP_PASSWORD: 'p' }, 'SMTP_PASSWORD'],
+  ] as Array<[Record<string, string>, Record<string, string>, string]>)(
+    'refuses %o / secrets %o',
+    (box, secrets, name) => {
+      expect(() => smtpWorkerVars(box, secrets, DOMAIN)).toThrow(
+        `${name} set without an SMTP relay`
+      );
+    }
+  );
+
+  it('control: SMTP_FROM may accompany the collector', () => {
+    expect(smtpWorkerVars({ ...COLLECTOR, SMTP_FROM: 'a@b.example' }, {}, DOMAIN).SMTP_FROM).toBe(
+      'a@b.example'
+    );
+  });
+});
+
+describe('collector ports', () => {
+  it.each([
+    [{ MAIL_COLLECTOR_SMTP_PORT: '25' }, 'MAIL_COLLECTOR_SMTP_PORT must be'],
+    [{ MAIL_COLLECTOR_UI_PORT: '70000' }, 'MAIL_COLLECTOR_UI_PORT must be'],
+    [{ MAIL_COLLECTOR_UI_PORT: '80x' }, 'MAIL_COLLECTOR_UI_PORT must be'],
+    [{ MAIL_COLLECTOR_SMTP_PORT: '2525', MAIL_COLLECTOR_UI_PORT: '2525' }, 'must differ'],
+  ])('refuses %o', (ports, message) => {
+    expect(() => mailEgressEndpoints({ ...COLLECTOR, ...ports })).toThrow(message);
   });
 });

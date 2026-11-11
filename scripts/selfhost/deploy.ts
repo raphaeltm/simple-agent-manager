@@ -48,13 +48,11 @@ import { buildCelldConfig, type CelldWranglerConfig } from './celld-config.js';
 import { ASSETS_DIR, prepareCelldProject, SOURCE_LINK, writeCelldConfig } from './celld-project.js';
 import {
   ensureMailCollectorPassword,
-  MAIL_COLLECTOR_ENV_FILE,
   MAIL_COLLECTOR_PASSWORD_FILE,
   MAIL_COLLECTOR_UI_USER,
   mailCollectorHostLabel,
-  renderMailCollectorEnv,
   smtpWorkerVars,
-  syncMailCollectorEnv,
+  writeMailCollectorFiles,
 } from './mail-settings.js';
 import { ensurePlatformKeys } from './platform-keys.js';
 import {
@@ -298,9 +296,8 @@ async function main(): Promise<void> {
     box,
     values.init ?? false
   );
-  const collectorEnvPath = join(stateDir, MAIL_COLLECTOR_ENV_FILE);
-  if (syncMailCollectorEnv(collectorEnvPath, renderMailCollectorEnv(box, collectorPassword))) {
-    log(`wrote ${collectorEnvPath}; restart Caddy so it applies: docker compose up -d`);
+  for (const path of writeMailCollectorFiles(stateDir, box, collectorPassword)) {
+    log(`wrote ${path}; restart the stack so it applies: docker compose up -d`);
   }
   if (values.init) return;
   const operatorSecrets = readSecretsFile(secretsPath);

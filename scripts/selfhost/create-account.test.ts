@@ -25,9 +25,7 @@ describe('createAccountSql', () => {
 
   it('promotes only with --superadmin', () => {
     expect(createAccountSql({ ...plan, superadmin: false })).not.toContain('UPDATE users');
-    expect(createAccountSql({ ...plan, superadmin: true })).toContain(
-      "UPDATE users SET role = 'superadmin', status = 'active'"
-    );
+    expect(createAccountSql({ ...plan, superadmin: true })).toContain("UPDATE users SET role = 'superadmin', status = CASE WHEN status = 'pending'");
   });
 
   it('refuses values it did not generate or check', () => {

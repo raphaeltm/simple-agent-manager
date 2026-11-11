@@ -90,13 +90,13 @@ message on loopback and shows it at `https://mail.SAM_DOMAIN` behind basic auth.
 
 > **Anyone who can read the collector can sign in to SAM as any account.** Every sign-in code
 > lands there. Use it only on a test install, keep the password private, and turn the profile
-> off for a real one. Local users on the box can also read it on `127.0.0.1:8025` without the
-> password.
+> off for a real one. Mailpit checks the same password itself (`MP_UI_AUTH`), so the loopback
+> port `127.0.0.1:8025` needs it too; anyone who can run `docker inspect` on the box can read it.
 
 ```bash
 # .env: add the profile (it is off by default)
 COMPOSE_PROFILES=tunnel,mail-collector
-pnpm selfhost:deploy --init            # generates .state/mail-collector-ui-password
+pnpm selfhost:deploy --init            # generates the UI password and .state/mail-collector*.env
 docker compose -f deploy/selfhost/docker-compose.yml up -d
 pnpm selfhost:deploy                   # points the Worker at the collector
 cat deploy/selfhost/.state/mail-collector-ui-password   # user: collector
@@ -131,7 +131,7 @@ pnpm selfhost:create-account --email you@example.com --superadmin      # or an a
 
 It writes the `users` row BetterAuth reads, through `celld d1 execute`, so the stack must be
 running and deployed. It is idempotent: an existing account is left as it is, except that
-`--superadmin` promotes it. The new account is active and its email verified (you vouch for the
+`--superadmin` promotes it (and approves it if it was pending; it never lifts a suspension). The new account is active and its email verified (you vouch for the
 address); it then signs in by requesting a code. Pass `--env-file` as for the deploy, and
 `--dry-run` to print the SQL without running it. While `BOOTSTRAP_OWNER_EMAIL` is set and that
 owner has never signed in, SAM admits only the owner.

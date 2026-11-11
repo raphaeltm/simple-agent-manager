@@ -19,6 +19,8 @@ export type SmtpConnect = typeof connect;
 
 /** Longest single server reply accepted; real replies are a few hundred bytes. */
 const MAX_REPLY_BYTES = 64 * 1024;
+/** Most lines in one multi-line reply; EHLO answers with a few dozen at most. */
+const MAX_REPLY_LINES = 100;
 
 export class SmtpError extends Error {
   constructor(
@@ -52,6 +54,7 @@ class SmtpConnection {
 
   async reply(): Promise<Reply> {
     const lines: string[] = [];
+    let bytes = 0;
     for (;;) {
       const end = this.buffer.indexOf('\r\n');
       if (end < 0) {
@@ -67,6 +70,10 @@ class SmtpConnection {
         throw new SmtpError('inconsistent SMTP reply codes');
       }
       lines.push(line);
+      bytes += line.length + 2;
+      if (bytes > MAX_REPLY_BYTES || lines.length > MAX_REPLY_LINES) {
+        throw new SmtpError('SMTP reply too long');
+      }
       if (match[2] === ' ') return { code, lines: lines.map((entry) => entry.slice(4)) };
     }
   }

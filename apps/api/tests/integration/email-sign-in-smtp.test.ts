@@ -4,6 +4,8 @@
  * on 127.0.0.1 reached through `cloudflare:sockets` (Node-backed in tests). No `AGENT_EMAIL`
  * binding, as on a self-hosted celld box. Controls prove a Cloudflare install is unchanged.
  */
+import { readFileSync } from 'node:fs';
+
 import Database from 'better-sqlite3';
 import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -13,14 +15,27 @@ import type { Env } from '../../src/env';
 import { handleAppError } from '../../src/middleware/app-error-handler';
 import { authRoutes } from '../../src/routes/auth';
 import {
+  __resetAdminSettingsCacheForTest,
+  updateAdminSettings,
+} from '../../src/services/admin-settings';
+import {
+  activeAgentEmailSender,
+  agentEmailConfig,
+} from '../../src/services/agent-email/setup-state';
+import {
   emailSignInAvailable,
   emailSignInReadiness,
   emailSignUpOffered,
 } from '../../src/services/email-sign-in';
 import { resolvePlatformCapabilities } from '../../src/services/platform-capabilities';
 import { __resetPlatformConfigCacheForTest } from '../../src/services/platform-config';
-import { type FakeSmtpServer, startFakeSmtpServer } from '../helpers/fake-smtp-server';
+import {
+  createTestTlsCertificates,
+  type FakeSmtpServer,
+  startFakeSmtpServer,
+} from '../helpers/fake-smtp-server';
 import { createAllSchemaTables, createMemoryKv, createSqliteD1 } from '../helpers/sqlite-d1';
+import { __setTestTlsCa } from '../mocks/cloudflare-sockets';
 
 const API_ORIGIN = 'https://api.example.com';
 const APP_ORIGIN = 'https://app.example.com';
@@ -76,11 +91,13 @@ describe('email sign-in over SMTP (vertical slice)', () => {
     smtp = await startFakeSmtpServer({ mode: 'plain' });
     env = makeEnv();
     __resetPlatformConfigCacheForTest();
+    __resetAdminSettingsCacheForTest();
     cookie = '';
   });
 
   afterEach(async () => {
     vi.restoreAllMocks();
+    __setTestTlsCa(undefined);
     sqlite.close();
     await smtp.close();
   });
@@ -163,10 +180,108 @@ describe('email sign-in over SMTP (vertical slice)', () => {
     expect(smtp.messages).toHaveLength(5);
   });
 
-  it('reports a send failure without failing the request or leaking which address it was', async () => {
+  /** Structured error log lines (JSON) emitted while `run` executes. */
+  async function errorLogs(run: () => Promise<unknown>): Promise<string[]> {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      await run();
+      return spy.mock.calls.map((call) => String(call[0]));
+    } finally {
+      spy.mockRestore();
+    }
+  }
+
+  it('logs a failed send without the address, and answers exactly as for a sent code', async () => {
+    const sent = await requestCode(OWNER);
     await smtp.close();
-    const response = await requestCode(OWNER);
-    expect(response.status).toBe(200);
+    let failed: Response | undefined;
+    const logs = await errorLogs(async () => {
+      failed = await requestCode('owner@example.com');
+    });
+    expect(failed?.status).toBe(sent.status);
+    expect(await failed?.text()).toBe(await sent.text());
+    const line = logs.find((entry) => entry.includes('email_sign_in.send_failed'));
+    expect(line).toContain('"transport":"smtp"');
+    expect(logs.join('\n')).not.toContain(OWNER);
+    // Liveness: the code before the outage was delivered over the same transport.
+    expect(smtp.messages).toHaveLength(1);
+  });
+
+  it('logs a refused recipient without the address', async () => {
+    await smtp.close();
+    smtp = await startFakeSmtpServer({ mode: 'plain', rcptCode: 550 });
+    env = makeEnv();
+    const logs = await errorLogs(() => requestCode(OWNER));
+    expect(logs.find((entry) => entry.includes('email_sign_in.send_failed'))).toContain(
+      'SMTP RCPT TO refused with 550'
+    );
+    expect(logs.join('\n')).not.toContain(OWNER);
+    expect(smtp.messages).toHaveLength(0);
+  });
+
+  it('sends through a real relay shape from env vars: STARTTLS by default, then AUTH PLAIN', async () => {
+    const certs = createTestTlsCertificates(['localhost']);
+    __setTestTlsCa(certs.ca);
+    await smtp.close();
+    smtp = await startFakeSmtpServer({
+      mode: 'starttls',
+      tls: certs,
+      credentials: { username: 'relay-user', password: 'relay-pass' },
+    });
+    env = makeEnv({
+      SMTP_HOST: 'localhost',
+      SMTP_PORT: String(smtp.port),
+      SMTP_TLS: undefined,
+      SMTP_USERNAME: 'relay-user',
+      SMTP_PASSWORD: 'relay-pass',
+    });
+    await requestCode(OWNER);
+    expect(smtp.messages).toEqual([
+      expect.objectContaining({ secure: true, authenticatedAs: 'relay-user', from: FROM }),
+    ]);
+    expect(smtp.commands[0]).toBe('EHLO api.example.com');
+    expect(smtp.messages[0]?.data).toMatch(/Message-ID: <[0-9a-f]{32}@example\.com>/);
+
+    // A wrong password delivers nothing and the request still answers as usual.
+    env = makeEnv({ ...env, SMTP_PASSWORD: 'wrong' } as Partial<Env>);
+    const logs = await errorLogs(() => requestCode(OWNER));
+    expect(smtp.messages).toHaveLength(1);
+    expect(logs.find((entry) => entry.includes('email_sign_in.send_failed'))).toContain('535');
+    expect(logs.join('\n')).not.toContain('wrong');
+  });
+
+  it('bounds the send by the agentEmail.smtpTimeoutMs admin setting', async () => {
+    sqlite.exec(
+      readFileSync(
+        new URL('../../src/db/migrations/0196_admin_settings.sql', import.meta.url),
+        'utf8'
+      )
+    );
+    sqlite
+      .prepare(
+        `INSERT INTO users (id, email, email_verified, name, role, status, created_at, updated_at)
+         VALUES ('admin-user', 'admin@example.com', 1, 'Admin', 'superadmin', 'active', 1, 1)`
+      )
+      .run();
+    await updateAdminSettings(env, {
+      changes: [{ name: 'agentEmail.smtpTimeoutMs', value: 1000 }],
+      actorUserId: 'admin-user',
+    });
+    __resetAdminSettingsCacheForTest();
+    await smtp.close();
+    smtp = await startFakeSmtpServer({ mode: 'plain', silent: true });
+    env = makeEnv();
+    const started = Date.now();
+    const logs = await errorLogs(() => requestCode(OWNER));
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(logs.find((entry) => entry.includes('email_sign_in.send_failed'))).toContain(
+      'timed out after 1000 ms'
+    );
+  });
+
+  it('keeps agent email (inbound mail, replies) off: it still needs the Cloudflare binding', async () => {
+    await expect(agentEmailConfig(env)).resolves.toEqual({ enabled: false, domain: null });
+    await expect(activeAgentEmailSender(env)).resolves.toBeNull();
   });
 
   it('decides readiness without calling Cloudflare', async () => {

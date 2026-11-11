@@ -13,8 +13,10 @@ import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { request as httpsRequest } from 'node:https';
+import { connect } from 'node:net';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { parse } from 'yaml';
 
 import { freePort, REPO_ROOT, waitFor } from './harness';
 
@@ -229,5 +231,128 @@ describe('mail collector on without its password', () => {
       return state.startsWith('exited') ? state : '';
     });
     expect(exit).toBe('exited 64');
+  });
+});
+
+/** The mail-collector service exactly as docker-compose.yml defines it, on free ports. */
+function collectorService(smtpPort: number, uiPort: number): { image: string; command: string[] } {
+  const compose = parse(
+    readFileSync(`${REPO_ROOT}/deploy/selfhost/docker-compose.yml`, 'utf8')
+  ) as {
+    services: Record<string, { image: string; command: string[] }>;
+  };
+  const service = compose.services['mail-collector']!;
+  const command = service.command.map((arg) =>
+    arg
+      .replace('${MAIL_COLLECTOR_SMTP_PORT:-1025}', String(smtpPort))
+      .replace('${MAIL_COLLECTOR_UI_PORT:-8025}', String(uiPort))
+  );
+  return { image: service.image, command };
+}
+
+/** One plaintext SMTP exchange, the way the Worker talks to the collector (SMTP_TLS=none). */
+function sendPlainSmtp(port: number, to: string, subject: string): Promise<string[]> {
+  const script = [
+    'EHLO api.sam.test',
+    'MAIL FROM:<sign-in@sam.test>',
+    `RCPT TO:<${to}>`,
+    'DATA',
+    `From: sign-in@sam.test\r\nTo: ${to}\r\nSubject: ${subject}\r\n\r\nYour code is 123456\r\n.`,
+    'QUIT',
+  ];
+  return new Promise((done, fail) => {
+    const replies: string[] = [];
+    const socket = connect(port, '127.0.0.1');
+    let buffer = '';
+    socket.on('data', (chunk: Buffer) => {
+      buffer += chunk.toString();
+      const lines = buffer.split('\r\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) {
+        if (!/^\d{3} /.test(line)) continue;
+        replies.push(line.slice(0, 3));
+        const next = script.shift();
+        if (next) socket.write(`${next}\r\n`);
+      }
+    });
+    socket.on('close', () => done(replies));
+    socket.on('error', fail);
+  });
+}
+
+describe('the real collector (Mailpit) as compose runs it', () => {
+  const password = randomBytes(32).toString('hex');
+  let smtpPort = 0;
+  let uiPort = 0;
+  const name = `sam-live-mailpit-${randomBytes(4).toString('hex')}`;
+
+  beforeAll(async () => {
+    smtpPort = await freePort();
+    uiPort = await freePort();
+    const { image, command } = collectorService(smtpPort, uiPort);
+    stacks.push({ container: name, https: 0, logs: () => '' });
+    execFileSync('docker', [
+      'run',
+      '-d',
+      '--name',
+      name,
+      '--network',
+      'host',
+      '--user',
+      '65534:65534',
+      '--read-only',
+      '--tmpfs',
+      '/tmp',
+      '--cap-drop',
+      'ALL',
+      '-e',
+      `MP_UI_AUTH=${USER}:${password}`,
+      image,
+      ...command,
+    ]);
+    await waitFor('Mailpit to listen', async () => {
+      try {
+        return (await fetch(`http://127.0.0.1:${uiPort}/api/v1/messages`)).status === 401;
+      } catch {
+        return false;
+      }
+    });
+  });
+
+  it('accepts plaintext SMTP on loopback and shows the message to the password only', async () => {
+    expect(await sendPlainSmtp(smtpPort, 'owner@example.com', 'live code')).toEqual([
+      '220',
+      '250',
+      '250',
+      '250',
+      '354',
+      '250',
+      '221',
+    ]);
+    const unauthenticated = await fetch(`http://127.0.0.1:${uiPort}/api/v1/messages`);
+    expect(unauthenticated.status).toBe(401);
+    const wrong = await fetch(`http://127.0.0.1:${uiPort}/api/v1/messages`, {
+      headers: { Authorization: basic(USER, 'wrong') },
+    });
+    expect(wrong.status).toBe(401);
+    const list = (await (
+      await fetch(`http://127.0.0.1:${uiPort}/api/v1/messages`, {
+        headers: { Authorization: basic(USER, password) },
+      })
+    ).json()) as { messages: Array<{ Subject: string; To: Array<{ Address: string }> }> };
+    expect(list.messages).toEqual([
+      expect.objectContaining({
+        Subject: 'live code',
+        To: [expect.objectContaining({ Address: 'owner@example.com' })],
+      }),
+    ]);
+  });
+
+  it('refuses the send API without the password too', async () => {
+    const res = await fetch(`http://127.0.0.1:${uiPort}/api/v1/send`, {
+      method: 'POST',
+      body: '{}',
+    });
+    expect(res.status).toBe(401);
   });
 });

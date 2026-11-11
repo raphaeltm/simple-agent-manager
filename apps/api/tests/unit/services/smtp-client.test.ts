@@ -143,18 +143,116 @@ describe('sendSmtpMessage', () => {
   it('refuses a certificate from an untrusted issuer', async () => {
     const smtp = await start({ mode: 'implicit' });
     await expect(send(config(smtp.port, { host: 'localhost', tls: 'tls' }))).rejects.toThrow(
-      SmtpError
+      /self.signed|unable to verify|certificate/i
     );
     expect(smtp.messages).toHaveLength(0);
   });
 
-  it('refuses a certificate that does not name the configured host', async () => {
-    __setTestTlsCa(certs.ca);
-    const smtp = await start({ mode: 'starttls' });
-    await expect(
-      send(config(smtp.port, { host: 'other.example.org', tls: 'starttls' }))
-    ).rejects.toThrow(SmtpError);
+  it('refuses a trusted certificate that does not name the configured host', async () => {
+    // Names mail.example.com and 127.0.0.1, not localhost: the TLS handshake itself must fail.
+    const other = createTestTlsCertificates(['mail.example.com']);
+    __setTestTlsCa(other.ca);
+    const smtp = await start({ mode: 'starttls', tls: other });
+    await expect(send(config(smtp.port, { host: 'localhost', tls: 'starttls' }))).rejects.toThrow(
+      /altnames|does not match|hostname/i
+    );
+    expect(smtp.commands).toEqual(['EHLO api.example.com', 'STARTTLS']);
     expect(smtp.messages).toHaveLength(0);
+  });
+
+  it('control: the same certificate is accepted for a name it does carry', async () => {
+    const other = createTestTlsCertificates(['mail.example.com']);
+    __setTestTlsCa(other.ca);
+    const smtp = await start({ mode: 'starttls', tls: other });
+    await send(config(smtp.port, { host: '127.0.0.1', tls: 'starttls' }));
+    expect(smtp.messages).toEqual([expect.objectContaining({ secure: true })]);
+  });
+
+  it('refuses when the server answers STARTTLS with an error, and never continues in plaintext', async () => {
+    const smtp = await start({ mode: 'starttls', startTlsCode: 454 });
+    const failure = await send(config(smtp.port, { host: 'localhost', tls: 'starttls' })).catch(
+      (error: unknown) => error
+    );
+    expect((failure as SmtpError).replyCode).toBe(454);
+    expect(smtp.commands).toEqual(['EHLO api.example.com', 'STARTTLS']);
+  });
+
+  it('reports a wrong password by reply code without the password in the error', async () => {
+    const smtp = await start({ mode: 'plain', credentials: { username: 'u', password: 'right' } });
+    const failure = await send(
+      config(smtp.port, { credentials: { username: 'u', password: 'wrong-secret' } })
+    ).catch((error: unknown) => error);
+    expect((failure as SmtpError).replyCode).toBe(535);
+    expect((failure as SmtpError).message).not.toContain('wrong-secret');
+    expect(smtp.commands.some((command) => command.startsWith('MAIL'))).toBe(false);
+  });
+
+  it('authenticates with a non-ASCII password (UTF-8)', async () => {
+    const smtp = await start({
+      mode: 'plain',
+      credentials: { username: 'u', password: 'pässwörd€' },
+    });
+    await send(config(smtp.port, { credentials: { username: 'u', password: 'pässwörd€' } }));
+    expect(smtp.messages[0]?.authenticatedAs).toBe('u');
+  });
+
+  it.each([
+    ['MAIL FROM', { mailCode: 553 }, 553],
+    ['message', { dataCode: 554 }, 554],
+  ] as Array<[string, Partial<FakeSmtpOptions>, number]>)(
+    'reports a refused %s as a failure',
+    async (step, options, code) => {
+      const smtp = await start({ mode: 'plain', ...options });
+      const failure = await send(config(smtp.port)).catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(SmtpError);
+      expect((failure as SmtpError).message).toBe(`SMTP ${step} refused with ${code}`);
+      expect(smtp.messages).toHaveLength(0);
+    }
+  );
+
+  it('treats a dropped QUIT after an accepted message as delivered', async () => {
+    const smtp = await start({ mode: 'plain', dropOnQuit: true });
+    await send(config(smtp.port));
+    expect(smtp.messages).toHaveLength(1);
+  });
+
+  it.each([
+    ['a malformed reply', 'garbage\r\n', 'malformed SMTP reply'],
+    [
+      'inconsistent multi-line codes',
+      '220-first\r\n221 second\r\n',
+      'inconsistent SMTP reply codes',
+    ],
+    ['an endless reply line', 'x'.repeat(70 * 1024), 'SMTP reply too long'],
+    ['too many reply lines', '220-x\r\n'.repeat(150), 'SMTP reply too long'],
+  ])('refuses %s', async (_, rawGreeting, message) => {
+    const smtp = await start({ mode: 'plain', rawGreeting });
+    await expect(send(config(smtp.port))).rejects.toThrow(message);
+  });
+
+  it('cannot be made to inject SMTP commands through the body (smuggling)', async () => {
+    const smtp = await start({ mode: 'plain' });
+    for (const text of [
+      'x\n.\nMAIL FROM:<a@b.example>\nRCPT TO:<c@d.example>',
+      'x\r.\rMAIL FROM:<a@b.example>',
+      'x\r\n.\r\nRCPT TO:<c@d.example>',
+    ]) {
+      await sendSmtpMessage(config(smtp.port), delivery(text), {
+        timeoutMs: 5_000,
+        heloName: 'api.example.com',
+      });
+    }
+    expect(smtp.messages).toHaveLength(3);
+    expect(smtp.commands.filter((command) => command.startsWith('MAIL'))).toHaveLength(3);
+    expect(smtp.commands.filter((command) => command.startsWith('RCPT'))).toHaveLength(3);
+  });
+
+  it('gives up at the deadline during a stalled TLS handshake', async () => {
+    // A plaintext listener that never answers a TLS ClientHello.
+    const smtp = await start({ mode: 'plain', silent: true });
+    await expect(send(config(smtp.port, { host: 'localhost', tls: 'tls' }), 300)).rejects.toThrow(
+      'timed out after 300 ms'
+    );
   });
 
   it('reports a refused recipient by reply code without echoing the server text', async () => {

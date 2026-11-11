@@ -7,8 +7,8 @@
  *
  * Every setting is checked here and an invalid set disables SMTP outright (fail closed):
  * - SMTP_TLS is `starttls` (default), `tls` (implicit TLS) or `none`;
- * - `none` sends in plaintext, so it is accepted only for a loopback host (the box's own mail
- *   collector). A remote relay must use TLS; celld and workerd verify its certificate chain and
+ * - `none` sends in plaintext, so it is accepted only for a loopback IP literal (the box's own
+ *   mail collector). A remote relay must use TLS; celld and workerd verify its certificate chain and
  *   hostname (celld trusts only its bundled public roots, so the relay needs a public CA);
  * - SMTP_USERNAME and SMTP_PASSWORD come together or not at all;
  * - SMTP_FROM is required: the relay decides which senders it accepts, so SAM cannot guess.
@@ -53,11 +53,14 @@ const HOST_PATTERN =
   /^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*|\[[0-9A-Fa-f:.]+\])$/;
 
 /**
- * An ASCII address with no spaces, quotes, angle brackets or control characters: it is written
- * verbatim into `MAIL FROM:<...>` and the From header, so nothing in it may end a command.
+ * A plain ASCII address: letters, digits, `.`, `_`, `+` and `-` before the `@`. It is written
+ * verbatim into `MAIL FROM:<...>`, `RCPT TO:<...>` and the From/To headers, so nothing in it may
+ * end a command, and characters that relays have historically treated as routing or command
+ * syntax (`%`, `!`, `|`, quotes) are refused rather than passed on. An account whose address
+ * does not match gets no code (the send is refused and logged).
  */
 export const SMTP_ADDRESS_PATTERN =
-  /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/;
+  /^[A-Za-z0-9._+-]+@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*$/;
 const MAX_ADDRESS_LENGTH = 254;
 
 export function isSmtpAddress(value: string): boolean {
@@ -68,10 +71,16 @@ function trimmed(value: string | undefined): string {
   return value?.trim() ?? '';
 }
 
-/** Hosts plaintext SMTP may go to: only this machine. */
+/**
+ * Hosts plaintext SMTP may go to: this machine, by IP literal. A name such as `localhost` is
+ * refused because its resolution belongs to the runtime's resolver, not to SAM.
+ */
 export function isLoopbackHost(host: string): boolean {
-  const bare = host.replace(/^\[|\]$/g, '').toLowerCase();
-  return bare === 'localhost' || bare === '::1' || /^127(?:\.\d{1,3}){3}$/.test(bare);
+  const bare = host.replace(/^\[|\]$/g, '');
+  return (
+    bare === '::1' ||
+    /^127\.(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){2}$/.test(bare)
+  );
 }
 
 function parseTlsMode(raw: string): SmtpTlsMode | null {

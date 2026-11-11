@@ -87,6 +87,16 @@ export interface FakeSmtpOptions {
   credentials?: { username: string; password: string };
   /** Reply code for RCPT TO (default 250). */
   rcptCode?: number;
+  /** Reply code for MAIL FROM (default 250). */
+  mailCode?: number;
+  /** Final reply code after the message data (default 250). */
+  dataCode?: number;
+  /** Reply code for STARTTLS (default 220); anything else refuses the upgrade. */
+  startTlsCode?: number;
+  /** Sent instead of the normal greeting line (malformed or oversized reply tests). */
+  rawGreeting?: string;
+  /** Close the connection when QUIT arrives, without answering. */
+  dropOnQuit?: boolean;
   /** Extra bytes sent right after "220 Ready to start TLS" (STARTTLS injection). */
   injectAfterStartTls?: string;
   /** Never answer the greeting (deadline tests). */
@@ -134,8 +144,17 @@ export async function startFakeSmtpServer(options: FakeSmtpOptions): Promise<Fak
       if (inData) {
         if (line === '.') {
           inData = false;
-          messages.push({ from, to, data: dataLines.join('\r\n'), secure, authenticatedAs: user });
-          write('250 2.0.0 queued');
+          const code = options.dataCode ?? 250;
+          if (code === 250) {
+            messages.push({
+              from,
+              to,
+              data: dataLines.join('\r\n'),
+              secure,
+              authenticatedAs: user,
+            });
+          }
+          write(`${code} 2.0.0 data`);
         } else dataLines.push(line.startsWith('.') ? line.slice(1) : line);
         return;
       }
@@ -147,6 +166,8 @@ export async function startFakeSmtpServer(options: FakeSmtpOptions): Promise<Fak
         if (options.credentials) ext.push('250-AUTH PLAIN LOGIN');
         ext.push('250 8BITMIME');
         ext.forEach(write);
+      } else if (verb === 'STARTTLS' && offerStartTls && !secure && options.startTlsCode) {
+        write(`${options.startTlsCode} 4.7.0 TLS not available`);
       } else if (verb === 'STARTTLS' && offerStartTls && !secure) {
         write(`220 2.0.0 Ready to start TLS${options.injectAfterStartTls ?? ''}`);
         socket.removeAllListeners('data');
@@ -166,7 +187,7 @@ export async function startFakeSmtpServer(options: FakeSmtpOptions): Promise<Fak
       } else if (verb === 'MAIL') {
         from = /<(.*)>/.exec(line)?.[1] ?? '';
         to = [];
-        write('250 2.1.0 OK');
+        write(`${options.mailCode ?? 250} 2.1.0 sender`);
       } else if (verb === 'RCPT') {
         to.push(/<(.*)>/.exec(line)?.[1] ?? '');
         write(`${options.rcptCode ?? 250} 2.1.5 recipient`);
@@ -174,6 +195,8 @@ export async function startFakeSmtpServer(options: FakeSmtpOptions): Promise<Fak
         inData = true;
         dataLines = [];
         write('354 End data with <CR><LF>.<CR><LF>');
+      } else if (verb === 'QUIT' && options.dropOnQuit) {
+        socket.destroy();
       } else if (verb === 'QUIT') {
         write('221 2.0.0 Bye');
         socket.end();
@@ -190,7 +213,8 @@ export async function startFakeSmtpServer(options: FakeSmtpOptions): Promise<Fak
     };
     socket.on('data', onData);
     socket.on('error', () => undefined);
-    if (!options.silent) write('220 fake.example.com ESMTP test');
+    if (options.rawGreeting !== undefined) socket.write(options.rawGreeting);
+    else if (!options.silent) write('220 fake.example.com ESMTP test');
   };
 
   const server =

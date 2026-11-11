@@ -12,7 +12,8 @@
  * Both at once is refused: one install, one place its codes go.
  */
 import { randomBytes } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { resolveSmtpConfig } from '../../apps/api/src/services/agent-email/smtp-config.js';
 import { writePrivateFile } from './secret-files.js';
@@ -32,6 +33,8 @@ const UI_PASSWORD_BYTES = 32;
 export const MAIL_COLLECTOR_PASSWORD_FILE = 'mail-collector-ui-password';
 /** env_file docker compose gives Caddy (caddy/start.sh, caddy/mail-collector/on.caddy). */
 export const MAIL_COLLECTOR_ENV_FILE = 'mail-collector.env';
+/** env_file docker compose gives Mailpit: MP_UI_AUTH, its own check of the same credentials. */
+export const MAIL_COLLECTOR_UI_ENV_FILE = 'mail-collector-ui.env';
 
 /** Worker vars the box .env may set; SMTP_PASSWORD belongs in secrets.env. */
 const SMTP_VAR_NAMES = [
@@ -107,13 +110,26 @@ export function smtpWorkerVars(
     );
   }
   const configured = Boolean(box.SMTP_HOST?.trim());
+  const collector = mailCollectorEnabled(box);
+  if (collector && configured) {
+    throw new Error(
+      `SMTP_HOST is set and the ${MAIL_COLLECTOR_PROFILE} profile is on; choose one place for sign-in codes`
+    );
+  }
+  // A half-applied set would deploy with email sign-in silently off (or silently ignored).
+  const relayOnly = SMTP_VAR_NAMES.filter((name) => name !== 'SMTP_FROM' && name !== 'SMTP_HOST');
+  const stray = [
+    ...(configured || collector ? [] : SMTP_VAR_NAMES.filter((name) => box[name])),
+    ...(collector ? relayOnly.filter((name) => box[name]) : []),
+    ...(!configured && secrets.SMTP_PASSWORD ? ['SMTP_PASSWORD'] : []),
+  ];
+  if (stray.length > 0) {
+    throw new Error(
+      `${stray.join(', ')} set without an SMTP relay (SMTP_HOST); remove it or set SMTP_HOST`
+    );
+  }
   let vars: Record<string, string> = {};
-  if (mailCollectorEnabled(box)) {
-    if (configured) {
-      throw new Error(
-        `SMTP_HOST is set and the ${MAIL_COLLECTOR_PROFILE} profile is on; choose one place for sign-in codes`
-      );
-    }
+  if (collector) {
     vars = {
       SMTP_HOST: '127.0.0.1',
       SMTP_PORT: String(mailCollectorPorts(box).smtp),
@@ -171,25 +187,56 @@ export function ensureMailCollectorPassword(path: string, box: Box, init: boolea
 export function renderMailCollectorEnv(box: Box, password: string | null): string {
   const values: Record<string, string> = { SAM_MAIL_COLLECTOR: 'off' };
   if (mailCollectorEnabled(box)) {
-    if (!password || !/^[0-9a-f]{64}$/.test(password)) {
-      throw new Error('the mail collector needs its generated UI password');
-    }
     Object.assign(values, {
       SAM_MAIL_COLLECTOR: 'on',
       MAIL_COLLECTOR_HOST_LABEL: mailCollectorHostLabel(box),
       MAIL_COLLECTOR_UI_PORT: String(mailCollectorPorts(box).ui),
       MAIL_COLLECTOR_UI_USER,
-      MAIL_COLLECTOR_UI_PASSWORD: password,
+      MAIL_COLLECTOR_UI_PASSWORD: generatedPassword(password),
     });
   }
+  return dotenv(values);
+}
+
+function generatedPassword(password: string | null): string {
+  if (!password || !/^[0-9a-f]{64}$/.test(password)) {
+    throw new Error('the mail collector needs its generated UI password');
+  }
+  return password;
+}
+
+function dotenv(values: Record<string, string>): string {
   return Object.entries(values)
     .map(([name, value]) => `${name}=${value}\n`)
     .join('');
 }
 
-/** Writes mail-collector.env when its content changed; true when it did. */
-export function syncMailCollectorEnv(path: string, content: string): boolean {
+function writeIfChanged(path: string, content: string): boolean {
   if (existsSync(path) && readFileSync(path, 'utf8') === content) return false;
   writePrivateFile(path, content);
   return true;
+}
+
+/**
+ * Writes the collector's env files and returns the paths that changed: mail-collector.env for
+ * Caddy (always, so turning the profile off also turns the route off) and, while the profile is
+ * on, mail-collector-ui.env for Mailpit's own UI authentication (removed when it is off).
+ */
+export function writeMailCollectorFiles(
+  stateDir: string,
+  box: Box,
+  password: string | null
+): string[] {
+  const changed: string[] = [];
+  const caddyEnv = join(stateDir, MAIL_COLLECTOR_ENV_FILE);
+  if (writeIfChanged(caddyEnv, renderMailCollectorEnv(box, password))) changed.push(caddyEnv);
+  const uiEnv = join(stateDir, MAIL_COLLECTOR_UI_ENV_FILE);
+  if (mailCollectorEnabled(box)) {
+    const auth = dotenv({ MP_UI_AUTH: `${MAIL_COLLECTOR_UI_USER}:${generatedPassword(password)}` });
+    if (writeIfChanged(uiEnv, auth)) changed.push(uiEnv);
+  } else if (existsSync(uiEnv)) {
+    rmSync(uiEnv);
+    changed.push(uiEnv);
+  }
+  return changed;
 }

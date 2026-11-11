@@ -213,7 +213,9 @@ export async function deliverSignInCode(env: Env, email: string, code: string): 
       log.info('email_sign_in.code_not_sent', { reason: 'no_account' });
       return;
     }
-    const { smtpTimeoutMs } = await getAgentEmailLimits(env);
+    // The timeout setting is read only where it applies, so a Cloudflare send costs no read.
+    const smtpTimeoutMs =
+      emailTransportKind(env) === 'smtp' ? (await getAgentEmailLimits(env)).smtpTimeoutMs : 0;
     const transport = systemEmailTransportFor(env, { smtpTimeoutMs });
     if (!transport) return;
     const message = signInCodeEmail(env.BASE_DOMAIN, code);

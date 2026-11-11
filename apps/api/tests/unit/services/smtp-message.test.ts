@@ -78,6 +78,8 @@ describe('buildSmtpMessage', () => {
     ['from name', { from: { email: 'sign-in@example.com', name: 'SAM\r\nBcc: x@example.com' } }],
     ['recipient', { to: 'owner@example.com>\r\nRCPT TO:<victim@example.com' }],
     ['sender address', { from: { email: 'a@b.example\r\n', name: 'SAM' } }],
+    ['recipient with routing characters', { to: 'a%b@example.com' }],
+    ['recipient with a pipe', { to: '|cmd@example.com' }],
     ['extra header value', { headers: { 'X-Thing': 'ok\r\nBcc: victim@example.com' } }],
     ['extra header name', { headers: { 'X-Bad Name': 'x' } }],
     ['reserved header', { headers: { Bcc: 'victim@example.com' } }],
