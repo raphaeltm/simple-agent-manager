@@ -142,6 +142,33 @@ describe('an unobserved create settles after the settle window', () => {
     expect(journal(node.id)).toMatchObject([{ status: 'cleanup_pending' }]);
   });
 
+  it('judges settling when the inventory reads start, not after the deletes finish', async () => {
+    const node = await strandedPendingCreate();
+    const { at } = sqlite
+      .prepare('SELECT pending_create_last_at AS at FROM node_cloudflare_tunnels WHERE node_id = ?')
+      .get(node.id) as { at: string };
+    const since = Date.parse(at);
+    expect(Number.isFinite(since)).toBe(true);
+    // The window ends while the sweep is mid-inventory: a create that committed just before the
+    // reads began is found by them, but one landing during a slow read may not be. Only a sweep
+    // whose reads STARTED after the window may settle.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(since + 15 * 60_000 - 1);
+    cf.inject('tunnel.list', {
+      kind: 'hook',
+      run: async () => {
+        vi.setSystemTime(Date.now() + 10_000);
+      },
+    });
+    const result = await runNodeTunnelCleanupSweep(env, new Date(Date.now() + 120 * 60_000));
+    expect(result.attempted).toBe(1);
+    expect(cf.callCount('tunnel.list')).toBeGreaterThan(0);
+    expect(journal(node.id)).toMatchObject([{ status: 'cleanup_pending', pendingCreateCount: 1 }]);
+    // The next sweep starts after the window and settles the row (control).
+    await runNodeTunnelCleanupSweep(env, new Date(Date.now() + 120 * 60_000));
+    expect(journal(node.id)).toMatchObject([{ status: 'cleaned', pendingCreateCount: 0 }]);
+  });
+
   it('anchors a row stranded before migration 0233 on created_at', async () => {
     const node = await strandedPendingCreate();
     const old = new Date(Date.now() - 2 * 60 * 60_000).toISOString();
@@ -275,6 +302,27 @@ describe('deadline cuts on each side of the create POST', () => {
     // Resume fast path: no second ingress write, one tunnel.
     expect(cf.callCount('tunnel.configure')).toBe(configures);
     expect(cf.callCount('tunnel.create')).toBe(1);
+  });
+
+  it('a mark that cannot be recorded is attributed to before_provider, not to the create', async () => {
+    const node = await freshNode();
+    const { store, allocation } = durableHarness(readNode(node.id)!.incarnation!);
+    await expect(
+      provisionNode(node.id, env, undefined, {
+        signal: new AbortController().signal,
+        durableAllocation: {
+          ...allocation(crypto.randomUUID()),
+          markProviderCreateRequested: async () => {
+            throw new NodeAllocationUncertainError(
+              'Provisioning attempt was superseded before its provider create record changed'
+            );
+          },
+        },
+      })
+    ).rejects.toBeInstanceOf(NodeAllocationUncertainError);
+    expect(mocks.createVM).not.toHaveBeenCalled();
+    expect(store.providerCreateRequested).toBe(false);
+    expect(journal(node.id)[0]!.lastError).toMatch(/^failed during before_provider: /);
   });
 
   it('a deadline that fires while the create is being marked does not strand the mark', async () => {

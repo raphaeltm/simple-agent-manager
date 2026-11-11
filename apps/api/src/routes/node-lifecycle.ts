@@ -424,11 +424,12 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
     log.debug('heartbeat.ip_backfill_skipped_tunnel_node', { nodeId, action: 'skipped' });
   }
   const connectingIp = c.req.header('CF-Connecting-IP');
-  const heartbeatIp = !node.tunnelId
-    ? connectingIp
-    : deploymentTunnelIpBackfill && isValidIPv4Address(connectingIp)
-      ? connectingIp
-      : undefined;
+  let heartbeatIp: string | undefined;
+  if (!node.tunnelId) {
+    heartbeatIp = connectingIp;
+  } else if (deploymentTunnelIpBackfill && isValidIPv4Address(connectingIp)) {
+    heartbeatIp = connectingIp;
+  }
 
   // Defense-in-depth: backfill IP from heartbeat if node has no IP stored.
   // This self-heals Scaleway nodes where the IP wasn't captured at creation time.

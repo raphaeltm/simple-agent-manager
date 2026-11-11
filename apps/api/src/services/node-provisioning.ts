@@ -341,7 +341,9 @@ export async function provisionNode(
       node
     );
     let vm: Awaited<ReturnType<typeof provider.createVM>>;
-    providerCreateRequested = true;
+    // A durable attempt counts as having requested a create only once its mark is recorded, so
+    // a failure before the mark is attributed to `before_provider`, not `provider_create`.
+    if (!durable?.markProviderCreateRequested || recoverExisting) providerCreateRequested = true;
     try {
       if (!recoverExisting && durable?.markProviderCreateRequested) {
         // The last cancellation point before the create. Not after the mark: a cut there would
@@ -349,6 +351,7 @@ export async function provisionNode(
         // to reconcile. After the mark the create is not cancelled by the deadline (below).
         throwIfProviderRequestAborted(providerContext);
         await durable.markProviderCreateRequested();
+        providerCreateRequested = true;
       }
       // A durable create or recovery runs to completion once started: the attempt deadline
       // must not cut it. Staging, GCP: a cut between the mark and the POST (inside the OAuth

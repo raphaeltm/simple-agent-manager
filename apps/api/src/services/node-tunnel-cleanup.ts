@@ -159,11 +159,14 @@ export async function cleanupNodeTunnelRow(
       throw new Error('Tunnel journal belongs to a different Cloudflare account or zone');
     }
     const options = await cleanupOptions(env, signal);
+    // Settling is judged at the moment the inventory reads START: a create that commits after
+    // the window but before the reads is still found and deleted by them.
+    const inventoryStartedAtMs = Date.now();
     // DNS first: once the hostname stops resolving to the tunnel, the tunnel is unreachable.
     await deleteOwnDnsRecord(env, row, options);
     await deleteOwnTunnels(env, row, options);
     const { pendingCreateSettleMs } = await resolveNodeTunnelCleanupConfig(env);
-    const settled = pendingCreateSettled(row, pendingCreateSettleMs, Date.now());
+    const settled = pendingCreateSettled(row, pendingCreateSettleMs, inventoryStartedAtMs);
     if (row.pendingCreateCount > 0 && !settled) {
       // A POST may commit after the inventory/deletes above. Do not infer finality from an
       // empty read inside the settle window; keep polling at the capped retry rate. This is
