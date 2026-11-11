@@ -1,0 +1,475 @@
+---
+/**
+ * "How work moves": one idea travelling through six stages, each with a real screen. A rail that
+ * reads like a pipeline sticks under the header and fills as the visitor scrolls. Each stage's
+ * picture plays once when it enters the view (rises, the inset lands, one control is ringed, a
+ * note lands) and then rests; the markup is the resting frame.
+ */
+import { factoryStages, type FactoryInset, type FactoryScreen } from '../../data/factory-stages';
+import MockAccount from './mock/MockAccount.astro';
+import MockComments from './mock/MockComments.astro';
+import MockDeploy from './mock/MockDeploy.astro';
+import MockDeployPolicy from './mock/MockDeployPolicy.astro';
+import MockIdea from './mock/MockIdea.astro';
+import MockIdeas from './mock/MockIdeas.astro';
+import MockLibraryComment from './mock/MockLibraryComment.astro';
+import MockProfiles from './mock/MockProfiles.astro';
+import MockWorkflow from './mock/MockWorkflow.astro';
+
+const SCREENS: Record<FactoryScreen, typeof MockIdeas> = {
+  ideas: MockIdeas,
+  comments: MockComments,
+  profiles: MockProfiles,
+  workflow: MockWorkflow,
+  idea: MockIdea,
+  deploy: MockDeploy,
+};
+const INSETS: Record<FactoryInset, typeof MockIdeas> = {
+  library: MockLibraryComment,
+  account: MockAccount,
+  policy: MockDeployPolicy,
+};
+---
+
+<section class="fh-section line" id="how-work-moves" aria-labelledby="line-title" data-line>
+  <div class="container">
+    <div class="fh-head fh-head--center line-head">
+      <p class="fh-kicker">How work moves</p>
+      <h2 class="fh-h2" id="line-title">From an idea to a running change, with your team at every gate</h2>
+      <p class="fh-lede">
+        Follow one request through a team’s process: Northwind’s payments team wants failed webhook
+        deliveries retried. Agents do the steps. People decide where it matters.
+      </p>
+    </div>
+  </div>
+
+  <nav class="line-rail" aria-label="Stages of the process">
+    <div class="container line-rail-inner">
+      <span class="line-track" aria-hidden="true"><span class="line-fill" data-line-fill></span></span>
+      <ol class="line-stops">
+        {factoryStages.map((s, i) => (
+          <li>
+            <a href={`#stage-${s.id}`} class="line-stop" data-line-stop={i} aria-label={s.name}>
+              <span class="line-dot" aria-hidden="true"></span>
+              <span class="line-label">{s.name}</span>
+            </a>
+          </li>
+        ))}
+      </ol>
+    </div>
+  </nav>
+
+  <div class="container line-stages">
+    {factoryStages.map((s, i) => (
+      <article class:list={['stage', { 'stage--flip': i % 2 === 1 }]} id={`stage-${s.id}`} data-stage={i}>
+        <div class="stage-copy" data-reveal>
+          <p class="fh-kicker stage-kicker">
+            <span class="stage-n">{String(i + 1).padStart(2, '0')}</span>
+            {s.name}
+          </p>
+          <h3 class="stage-title">{s.title}</h3>
+          <p class="stage-body">{s.body}</p>
+          <p class="stage-who"><span aria-hidden="true">●</span>{s.who}</p>
+        </div>
+        <figure
+          class:list={['stage-figure', { 'stage-figure--inset': s.inset, 'stage-figure--inset-left': s.insetSide === 'left' }]}
+          data-reveal
+          data-play
+        >
+          <div class="stage-art">
+            <div class="fh-frame stage-frame" role="img" aria-label={s.alt}>
+              {(() => {
+                const Screen = SCREENS[s.screen];
+                return <Screen />;
+              })()}
+            </div>
+            {s.inset && (
+              <div class="stage-inset" aria-hidden="true">
+                {(() => {
+                  const Inset = INSETS[s.inset];
+                  return <Inset />;
+                })()}
+              </div>
+            )}
+          </div>
+          {s.note && <figcaption class="stage-note">{s.note}</figcaption>}
+        </figure>
+      </article>
+    ))}
+  </div>
+</section>
+
+<script>
+  import { createPointerFollower, FINE_POINTER_QUERY, REDUCED_MOTION_QUERY } from '../../lib/motion';
+
+  // Each stage picture leans toward the pointer in 3D, the inset floating at its own depth. The
+  // reduced-motion preference is read live, so turning it on mid-visit flattens every picture.
+  const reducedMotion = window.matchMedia(REDUCED_MOTION_QUERY);
+  if (window.matchMedia(FINE_POINTER_QUERY).matches) {
+    const arts = [...document.querySelectorAll<HTMLElement>('.stage-art')];
+    const flatten = (art: HTMLElement) => {
+      art.style.setProperty('--tx', '0deg');
+      art.style.setProperty('--ty', '0deg');
+    };
+    for (const art of arts) {
+      const follow = createPointerFollower((x, y) => {
+        if (reducedMotion.matches) return flatten(art);
+        art.style.setProperty('--tx', `${(x * 9).toFixed(2)}deg`);
+        art.style.setProperty('--ty', `${(-y * 7).toFixed(2)}deg`);
+      });
+      art.addEventListener('pointermove', (event) => {
+        if (reducedMotion.matches) return;
+        const box = art.getBoundingClientRect();
+        follow((event.clientX - box.left) / box.width - 0.5, (event.clientY - box.top) / box.height - 0.5);
+      });
+      art.addEventListener('pointerleave', () => follow(0, 0));
+    }
+    reducedMotion.addEventListener('change', () => {
+      if (reducedMotion.matches) arts.forEach(flatten);
+    });
+  }
+
+  for (const root of document.querySelectorAll<HTMLElement>('[data-line]')) {
+    const stages = [...root.querySelectorAll<HTMLElement>('[data-stage]')];
+    const stops = [...root.querySelectorAll<HTMLElement>('[data-line-stop]')];
+    const fill = root.querySelector<HTMLElement>('[data-line-fill]');
+    const show = (i: number) => {
+      stops.forEach((s, j) => {
+        s.classList.toggle('is-done', j < i);
+        s.classList.toggle('is-current', j === i);
+        if (j === i) s.setAttribute('aria-current', 'step');
+        else s.removeAttribute('aria-current');
+      });
+      if (fill) fill.style.transform = `scaleX(${stages.length > 1 ? i / (stages.length - 1) : 1})`;
+    };
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) show(Number((e.target as HTMLElement).dataset.stage));
+        }
+      },
+      { rootMargin: '-45% 0px -45% 0px' },
+    );
+    stages.forEach((s) => io.observe(s));
+    show(0);
+  }
+</script>
+
+<style>
+  .line .line-head {
+    margin-bottom: 84px;
+  }
+
+  /* ---- Rail ---- */
+  .line-rail {
+    position: sticky;
+    top: var(--header-height);
+    z-index: 5;
+    padding: 12px 0;
+    background: color-mix(in srgb, var(--color-bg-body) 94%, transparent);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border-block: 1px solid var(--color-border-subtle);
+  }
+
+  /* Fills the strip between the floating header and the rail, so page content can't show
+     through it. The section heading keeps enough margin above the rail for this strip. */
+  .line-rail::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 100%;
+    height: calc(var(--header-height) + 8px);
+    background: var(--color-bg-body);
+  }
+
+  .line-rail-inner {
+    position: relative;
+  }
+
+  .line-track {
+    position: absolute;
+    left: calc(24px + 6px);
+    right: calc(24px + 6px);
+    top: 50%;
+    height: 2px;
+    background: var(--color-border);
+    transform: translateY(-50%);
+  }
+
+  .line-fill {
+    display: block;
+    height: 100%;
+    background: var(--color-accent-strong);
+    box-shadow: 0 0 10px var(--color-accent-strong);
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 0.6s cubic-bezier(0.2, 1, 0.3, 1);
+  }
+
+  .line-stops {
+    position: relative;
+    list-style: none;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .line-stop {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--color-fg-dim);
+    text-decoration: none;
+    background: var(--color-bg-body);
+    border: 1px solid var(--color-border-subtle);
+    transition:
+      color 0.3s ease,
+      border-color 0.3s ease;
+  }
+
+  /* Upcoming stops are hollow, done and current stops filled, so state isn't colour alone. */
+  .line-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: transparent;
+    box-sizing: border-box;
+    border: 1.5px solid var(--color-border);
+    transition: background 0.3s ease, box-shadow 0.3s ease;
+  }
+
+  .line-stop.is-done {
+    color: var(--color-fg-muted);
+  }
+
+  .line-stop.is-done .line-dot {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+  }
+
+  .line-stop.is-current {
+    color: var(--color-fg-primary);
+    border-color: var(--color-accent-strong);
+  }
+
+  .line-stop.is-current .line-dot {
+    background: var(--color-accent-strong);
+    border-color: var(--color-accent-strong);
+    box-shadow: 0 0 10px var(--color-accent-strong);
+  }
+
+  /* ---- Stages ---- */
+  .line-stages {
+    display: grid;
+    gap: 132px;
+    padding-top: 88px;
+  }
+
+  .stage {
+    display: grid;
+    grid-template-columns: minmax(0, 4fr) minmax(0, 7fr);
+    gap: 64px;
+    align-items: center;
+    scroll-margin-top: calc(var(--header-height) + 100px);
+  }
+
+  .stage--flip {
+    grid-template-columns: minmax(0, 7fr) minmax(0, 4fr);
+  }
+
+  .stage--flip .stage-copy {
+    order: 2;
+  }
+
+  .stage-kicker {
+    display: flex;
+    gap: 10px;
+  }
+
+  .stage-n {
+    color: var(--color-fg-dim);
+  }
+
+  .stage-title {
+    margin-top: 10px;
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: clamp(1.5rem, 2.6vw, 2.125rem);
+    line-height: 1.12;
+    color: var(--color-fg-primary);
+  }
+
+  .stage-body {
+    margin-top: 14px;
+    color: var(--color-fg-muted);
+    line-height: 1.65;
+    max-width: 46ch;
+  }
+
+  .stage-who {
+    display: inline-flex;
+    gap: 8px;
+    align-items: center;
+    margin-top: 18px;
+    padding: 5px 12px;
+    border-radius: 999px;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--color-fg-muted);
+    border: 1px solid var(--color-border-subtle);
+  }
+
+  .stage-who span {
+    font-size: 0.5rem;
+    color: var(--fh-accent-text);
+  }
+
+  .stage-figure {
+    position: relative;
+    margin: 0;
+    display: grid;
+    gap: 16px;
+  }
+
+  .stage-figure {
+    perspective: 1600px;
+  }
+
+  .stage-art {
+    position: relative;
+    transform-style: preserve-3d;
+    transform: rotateY(var(--tx, 0deg)) rotateX(var(--ty, 0deg));
+  }
+
+  .stage-frame {
+    transform: translateZ(0);
+  }
+
+  .stage-inset {
+    translate: 0 0 60px;
+  }
+
+  .stage-figure--inset .stage-art {
+    padding-bottom: 48px;
+  }
+
+  .stage-inset {
+    position: absolute;
+    overflow: hidden;
+    border-radius: 12px;
+    border: 1px solid var(--glass-border-hover);
+    background: var(--color-bg-inset);
+    box-shadow: var(--fh-frame-shadow);
+    width: 44%;
+    right: -4%;
+    bottom: 0;
+    opacity: 0;
+    transform: translateY(24px) scale(0.95);
+  }
+
+  .stage-figure--inset-left .stage-inset {
+    right: auto;
+    left: -4%;
+  }
+
+  .stage-note {
+    display: flex;
+    gap: 10px;
+    align-items: baseline;
+    font-size: 0.9375rem;
+    line-height: 1.45;
+    color: var(--color-fg-primary);
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  .stage-note::before {
+    content: '';
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--color-accent-strong);
+    box-shadow: 0 0 10px var(--color-accent-strong);
+    transform: translateY(-1px);
+  }
+
+  [data-play].is-in .stage-inset {
+    transition:
+      opacity 0.5s ease 0.5s,
+      transform 0.8s cubic-bezier(0.2, 1.25, 0.3, 1) 0.5s;
+    opacity: 1;
+    transform: none;
+  }
+
+  [data-play].is-in .stage-note {
+    transition:
+      opacity 0.45s ease 1.7s,
+      transform 0.7s cubic-bezier(0.2, 1.3, 0.3, 1) 1.7s;
+    opacity: 1;
+    transform: none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .stage-inset,
+    .stage-note {
+      opacity: 1;
+      transform: none;
+    }
+
+    .line-fill,
+    .line-stop,
+    .line-dot {
+      transition: none;
+    }
+  }
+
+  @media (max-width: 900px) {
+    .stage,
+    .stage--flip {
+      grid-template-columns: 1fr;
+      gap: 32px;
+    }
+
+    .stage--flip .stage-copy {
+      order: 0;
+    }
+
+    .line-stages {
+      gap: 96px;
+      padding-top: 56px;
+    }
+  }
+
+  @media (max-width: 767px) {
+    /* Phones show the main screen only (it reflows to the width); the inset would crowd it. */
+    .stage-inset {
+      display: none;
+    }
+
+    .stage-figure--inset .stage-art {
+      padding-bottom: 0;
+    }
+
+    .line-stop {
+      padding: 6px;
+    }
+
+    .line-label {
+      display: none;
+    }
+
+    .line-stop.is-current .line-label {
+      display: inline;
+    }
+
+    .line-stop.is-current {
+      padding-inline: 10px;
+    }
+  }
+</style>

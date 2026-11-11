@@ -19,11 +19,6 @@
       "caption": "A live project chat — plan, tool calls, comments, infrastructure, and task status in one view"
     }
   ],
-  "homepage": {
-    "headline": "Use the agent that fits the job",
-    "body": "Pick Claude Code, Codex, Gemini CLI, or another agent for each new chat. Bring your Claude or ChatGPT plan, or an API key.",
-    "caption": "The new-chat screen, with starter prompts and the agent picker"
-  },
   "details": [
     {
       "headline": "Multiple agents, one interface",

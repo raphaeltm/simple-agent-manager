@@ -100,7 +100,10 @@ export const DIALOG_PANE = '.sam-glass-rim >> nth=0';
  * through its rounded corners in a cropped docs or blog image.
  */
 export async function opaqueBackdrop(page: Page, theme: 'dark' | 'light' = 'dark'): Promise<void> {
-  const background = theme === 'dark' ? '#0a0e0c' : '#eef3ef';
+  // SHOT_THEME overrides the theme, matching `seedTheme`, so a light capture gets a light backdrop.
+  const forced = process.env.SHOT_THEME;
+  const resolved = forced === 'dark' || forced === 'light' ? forced : theme;
+  const background = resolved === 'dark' ? '#0a0e0c' : '#eef3ef';
   await page.addStyleTag({
     content: `.glass-backdrop-dim,[data-dialog-backdrop],.sam-scrim{background:${background} !important;opacity:1 !important;backdrop-filter:none !important;-webkit-backdrop-filter:none !important;}`,
   });

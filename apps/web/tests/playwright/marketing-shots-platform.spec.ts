@@ -1036,10 +1036,11 @@ test('sam-hero-live-session', async ({ page }) => {
   ).toBeVisible();
   await expect(page.getByText("I'll add idempotency protection in four steps", { exact: false })).toBeVisible();
   await expect(page.getByText('Bash: pytest tests/webhooks/test_refund_idempotency.py -q')).toBeVisible();
-  await expect(page.getByText('Read payments/webhooks/refund_handler.py')).toBeVisible();
+  // Finished and running tool calls collapse into one group row.
+  await expect(page.getByRole('button', { name: /^3 tool calls · running Bash/ })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Plan' })).toBeVisible();
-  // Two open review comments drive the header's "2" discovery chip.
-  await expect(page.getByRole('button', { name: /2 unresolved comments?/ })).toBeVisible();
+  // The open review comment shows as a count on the agent's message.
+  await expect(page.getByRole('button', { name: /1 comment on this message, 1 unresolved/ })).toBeVisible();
 
   // Verify the session header's expandable infra/task-status panel renders
   // correctly, then collapse it again. Left open, its absolutely-positioned
@@ -1056,8 +1057,8 @@ test('sam-hero-live-session', async ({ page }) => {
   // The composer stays empty with its normal placeholder — the conversation
   // itself (plan + tool cards) is the subject of this shot, not the mention
   // palette, which would hide the bottom third of the chat.
-  await expect(page.getByPlaceholder(/Agent is working|Send a message/)).toBeVisible();
-  await expect(page.getByPlaceholder(/Agent is working|Send a message/)).toHaveValue('');
+  await expect(page.getByPlaceholder(/Steer the agent|Agent is working|Send a message/)).toBeVisible();
+  await expect(page.getByPlaceholder(/Steer the agent|Agent is working|Send a message/)).toHaveValue('');
 
   // The CompletionDock's floating "bump" (the red Interrupt button) is
   // deliberately positioned to poke up over the bottom of the scrollable
@@ -1099,8 +1100,8 @@ test('sam-hero-live-session', async ({ page }) => {
   await marketingShot(page, 'sam-hero-live-session');
 });
 
-// The same session on a phone: the source for the marketing homepage's mobile
-// hero (apps/www/scripts/build-hero-layers.ts crops its layers from it).
+// The same session on a phone (the brand guide's imagery uses a crop of it:
+// apps/www/public/images/hero/phone.webp).
 test.describe('hero on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 
@@ -1499,7 +1500,7 @@ async function setupDeploymentMocks(page: Page) {
     }
     if (path.match(/\/environments\/[^/]+\/volumes$/)) return respond(route, 200, { volumes: [] });
     if (path === `/api/projects/${PROJECT_ID}/tasks/${DEPLOY_TASK_ID}`) {
-      return respond(route, 200, { id: DEPLOY_TASK_ID, projectId: PROJECT_ID, title: 'Make refunds idempotent', status: 'completed' });
+      return respond(route, 200, { id: DEPLOY_TASK_ID, projectId: PROJECT_ID, title: 'Retry failed webhook deliveries', status: 'completed' });
     }
     if (path.match(/\/environments\/[^/]+\/(logs|containers|metrics)$/)) {
       return respond(route, 200, { entries: [], containers: [], systemInfo: null, fallbackMetrics: null });
@@ -1538,9 +1539,21 @@ test('sam-app-deployment-detail', async ({ page }) => {
   await expect(page.getByText('Running version 14.').first()).toBeVisible();
   await expect(page.getByText('staging.payments.northwindlabs.dev').first()).toBeVisible();
   // Who shipped it, from which chat: the release the agent submitted.
-  await expect(page.getByRole('region', { name: 'Recent deploys' }).getByText('“Make refunds idempotent”').first()).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Recent deploys' }).getByText('“Retry failed webhook deliveries”').first()).toBeVisible();
   await expect(page.locator('body')).not.toContainText('Something went wrong');
 
   await assertNoOverflow(page);
   await marketingShot(page, 'sam-app-deployment-detail');
+});
+
+test('sam-app-deployment-policy', async ({ page }) => {
+  await setupDeploymentMocks(page);
+  await page.goto(`/projects/${PROJECT_ID}/deployments/env-staging`);
+
+  const access = page.getByRole('region', { name: 'Who can deploy' });
+  await expect(access.getByText('Agents can deploy here')).toBeVisible();
+  await expect(access.getByText('2 profiles can deploy here.')).toBeVisible();
+  await expect(page.locator('body')).not.toContainText('Something went wrong');
+
+  await marketingShot(page, 'sam-app-deployment-policy', access);
 });
