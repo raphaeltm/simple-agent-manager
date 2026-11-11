@@ -34,6 +34,7 @@ const { rows } = Astro.props;
     ))}
   </div>
   <div class="sm-frame">
+    <p class="sm-caption" data-caption aria-live="polite">{rows[0].what}</p>
     {rows.map((r, i) => (
       <img
         src={r.src}
@@ -50,13 +51,16 @@ const { rows } = Astro.props;
 
 <script>
   const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const DWELL = 5200;
+  const DWELL = 6500;
   for (const root of document.querySelectorAll<HTMLElement>('[data-monitor]')) {
     const tabs = [...root.querySelectorAll<HTMLButtonElement>('[data-tab]')];
     const panels = [...root.querySelectorAll<HTMLElement>('[data-panel]')];
+    const caption = root.querySelector<HTMLElement>('[data-caption]');
     let current = 0;
     let auto = !reduce;
     let timer = 0;
+    let shown = 0;
+    let hovering = false;
 
     const select = (i: number) => {
       current = i;
@@ -65,10 +69,11 @@ const { rows } = Astro.props;
         t.classList.remove('is-timing');
       });
       panels.forEach((p, j) => p.classList.toggle('is-on', j === i));
-      // Phones show the tabs as a scrolling row: keep the current one in view.
-      const row = tabs[i].parentElement;
-      if (row && row.scrollWidth > row.clientWidth) row.scrollTo({ left: tabs[i].offsetLeft - row.offsetLeft, behavior: reduce ? 'auto' : 'smooth' });
-      if (auto) {
+      if (caption) caption.textContent = tabs[i].querySelector('.sm-what')?.textContent ?? '';
+      // Advance on its own through one full round, then stop and let the visitor drive.
+      shown += 1;
+      if (shown > tabs.length) auto = false;
+      if (auto && !hovering) {
         // Restart the progress bar animation.
         void tabs[i].offsetWidth;
         tabs[i].classList.add('is-timing');
@@ -85,10 +90,31 @@ const { rows } = Astro.props;
       }),
     );
 
+    // Hovering or focusing pauses the round so a row can be read.
+    const pause = () => {
+      hovering = true;
+      clearTimeout(timer);
+      tabs.forEach((t) => t.classList.remove('is-timing'));
+    };
+    const resume = () => {
+      hovering = false;
+      if (auto) {
+        shown -= 1;
+        select(current);
+      }
+    };
+    root.addEventListener('pointerenter', pause);
+    root.addEventListener('pointerleave', resume);
+    root.addEventListener('focusin', pause);
+    root.addEventListener('focusout', resume);
+
     root.style.setProperty('--dwell', `${DWELL}ms`);
     const io = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && auto) select(current);
+        if (entries[0].isIntersecting && auto) {
+          shown = Math.max(0, shown - 1);
+          select(current);
+        }
         else clearTimeout(timer);
       },
       { threshold: 0.3 },
@@ -202,6 +228,10 @@ const { rows } = Astro.props;
       0 40px 120px -60px rgb(34 197 94 / 0.35);
   }
 
+  .sm-caption {
+    display: none;
+  }
+
   .sm-img {
     position: absolute;
     inset: 0;
@@ -216,7 +246,7 @@ const { rows } = Astro.props;
 
   .sm-img.is-on {
     opacity: 1;
-    transform: scale(1.12);
+    transform: scale(1.03);
     animation: sm-pan var(--dwell, 5s) ease-in-out forwards;
   }
 
@@ -239,32 +269,62 @@ const { rows } = Astro.props;
   @media (max-width: 900px) {
     .sm {
       grid-template-columns: 1fr;
-      gap: 14px;
+      gap: 12px;
     }
 
     .sm-frame {
       position: relative;
       top: 0;
       order: -1;
+      overflow: visible;
+      aspect-ratio: auto;
+      height: auto;
+      background: none;
+      border: 0;
+      box-shadow: none;
+    }
+
+    .sm-frame::before {
+      content: '';
+      display: block;
+      aspect-ratio: 16 / 10;
+      border-radius: 14px;
+      background: #07100c;
+      border: 1px solid rgb(255 255 255 / 0.1);
+    }
+
+    .sm-img {
+      height: auto;
+      aspect-ratio: 16 / 10;
+      border-radius: 14px;
+    }
+
+    .sm-caption {
+      display: block;
+      margin-top: 10px;
+      min-height: 3em;
+      font-size: 0.875rem;
+      line-height: 1.45;
+      color: var(--color-fg-muted);
     }
 
     .sm-tabs {
-      display: flex;
-      overflow-x: auto;
-      scroll-snap-type: x mandatory;
-      gap: 8px;
-      padding-bottom: 4px;
-      scrollbar-width: none;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px;
     }
 
     .sm-tab {
-      flex: 0 0 76%;
-      scroll-snap-align: start;
+      padding: 8px 10px 10px;
       border-color: var(--color-border-subtle);
     }
 
-    .sm-tab .sm-what {
-      display: block;
+    .sm-sam {
+      font-size: 0.9375rem;
+    }
+
+    .sm-tab .sm-what,
+    .sm-tab[aria-selected='true'] .sm-what {
+      display: none;
     }
   }
 </style>

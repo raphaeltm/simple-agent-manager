@@ -31,6 +31,7 @@ const { steps, done } = Astro.props;
         <h3 class="boot-title" id={`boot-step-${i}`}>{s.title}</h3>
         <p class="boot-body">{s.body}</p>
         <img class="boot-inline" src={s.src} alt={s.alt} loading="lazy" decoding="async" />
+        <p class="boot-inline-log"><span class="ok">ok</span>{s.log}</p>
       </section>
     ))}
   </div>
@@ -64,7 +65,8 @@ const { steps, done } = Astro.props;
 <script>
   const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   for (const root of document.querySelectorAll<HTMLElement>('[data-boot]')) {
-    if (reduce) continue;
+    // The sticky stage needs room beside the copy; phones keep the stacked layout.
+    if (reduce || !window.matchMedia('(min-width: 901px)').matches) continue;
     root.classList.add('is-live');
     const steps = [...root.querySelectorAll<HTMLElement>('[data-step]')];
     const shots = [...root.querySelectorAll<HTMLElement>('[data-shot]')];
@@ -77,8 +79,11 @@ const { steps, done } = Astro.props;
       current = i;
       shots.forEach((s, j) => s.classList.toggle('is-on', j === i));
       steps.forEach((s, j) => s.classList.toggle('is-current', j === i));
+      // Keep the log short: the last few layers, plus the final line once everything is up.
+      const last = i === steps.length - 1;
       lines.forEach((l, j) => {
-        l.classList.toggle('is-shown', j <= i || (i === steps.length - 1 && j === steps.length));
+        const recent = j <= i && j > i - (last ? 3 : 4);
+        l.classList.toggle('is-shown', recent || (last && j === steps.length));
         l.classList.toggle('is-latest', j === i);
       });
       if (count) count.textContent = `${i + 1}/${steps.length}`;
@@ -144,6 +149,13 @@ const { steps, done } = Astro.props;
     border: 1px solid rgb(255 255 255 / 0.1);
   }
 
+  .boot-inline-log {
+    margin-top: 10px;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--color-fg-muted);
+  }
+
   .boot-stage {
     display: none;
   }
@@ -172,7 +184,8 @@ const { steps, done } = Astro.props;
     opacity: 1;
   }
 
-  .is-live .boot-inline {
+  .is-live .boot-inline,
+  .is-live .boot-inline-log {
     display: none;
   }
 
@@ -291,39 +304,9 @@ const { steps, done } = Astro.props;
     }
   }
 
-  /* Phones: the stage sits at the top of the screen and the copy scrolls under it. */
   @media (max-width: 900px) {
-    .boot.is-live {
-      grid-template-columns: 1fr;
-      gap: 0;
-    }
-
-    .is-live .boot-stage {
-      order: -1;
-      top: calc(var(--header-height) + 8px);
-      z-index: 2;
-      gap: 8px;
-      padding-bottom: 10px;
-      background: linear-gradient(to bottom, var(--color-bg-body) 85%, transparent);
-    }
-
-    .is-live .boot-step {
-      min-height: 62vh;
-      justify-content: flex-start;
-      padding-top: 32px;
-    }
-
-    .boot-log {
-      font-size: 0.6875rem;
-      padding: 8px 12px;
-    }
-
-    .boot-lines {
-      min-height: calc(1.55em * 2);
-    }
-
-    .boot-line.is-shown:not(.is-latest):not(.boot-line--done) {
-      display: none;
+    .boot-steps {
+      gap: 44px;
     }
   }
 </style>

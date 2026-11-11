@@ -241,8 +241,8 @@ const { back, middle, front, toasts } = Astro.props;
   }
 
   .sh-toast.is-old {
-    opacity: 0.45;
-    transform: translateY(-64px) scale(0.94);
+    opacity: 0;
+    transform: translateY(-40px) scale(0.94);
   }
 
   .sh-toast--wait {
@@ -295,11 +295,11 @@ const { back, middle, front, toasts } = Astro.props;
     }
 
     .sh-layer {
-      width: 84%;
+      width: 80%;
     }
 
     [data-state='open'] .sh-back {
-      left: 16%;
+      left: 14%;
       transform: translateZ(-160px);
     }
 
@@ -317,10 +317,20 @@ const { back, middle, front, toasts } = Astro.props;
       padding: 2px 8px;
     }
 
+    .sh {
+      margin-bottom: 64px;
+    }
+
     .sh-toasts {
-      right: 0;
-      bottom: -4%;
-      width: 72%;
+      right: auto;
+      left: 0;
+      bottom: -64px;
+      width: 100%;
+      height: 60px;
+    }
+
+    .sh-toast {
+      padding: 9px 12px;
     }
   }
 </style>

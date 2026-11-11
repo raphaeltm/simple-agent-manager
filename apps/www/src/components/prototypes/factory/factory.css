@@ -159,6 +159,14 @@
     font-size: 1rem;
   }
 
+  .fx-proof span::before {
+    display: none;
+  }
+
+  .fx-proof {
+    gap: 4px 14px;
+  }
+
   .fx-actions .sam-btn {
     flex: 1 1 0;
     justify-content: center;

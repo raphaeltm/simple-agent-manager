@@ -10,6 +10,7 @@ import OsCode from '../../components/prototypes/os/OsCode.astro';
 import OsPillars from '../../components/prototypes/os/OsPillars.astro';
 import StackHero from '../../components/prototypes/os/StackHero.astro';
 import SystemMonitor from '../../components/prototypes/os/SystemMonitor.astro';
+import TeamProof from '../../components/prototypes/os/TeamProof.astro';
 import { proofStrip } from '../../data/proof-strip';
 import '../../components/prototypes/factory/factory.css';
 
@@ -17,13 +18,13 @@ const img = (name: string) => `/images/prototypes/os/${name}.webp`;
 const githubUrl = 'https://github.com/raphaeltm/simple-agent-manager';
 
 const monitor = [
-  { os: 'Process', sam: 'Agent sessions', what: 'One agent on one task, in its own workspace, streaming every step.', src: img('sam-hero-live-session'), alt: 'A live agent session streaming its plan and tool calls', from: '60% 0%', to: '90% 40%' },
-  { os: 'Scheduler', sam: 'Compute pools', what: 'Puts each job on a machine that fits, reuses warm ones, and says why.', src: img('sam-compute-placement-decision'), alt: 'Placement decision for a session', from: '100% 0%', to: '100% 60%' },
-  { os: 'Scheduled jobs', sam: 'Triggers', what: 'Starts work on a schedule, a GitHub event, a webhook, or when something happens, like CI finishing.', src: img('sam-events-watches'), alt: 'An event watch that starts an investigator chat when CI finishes', from: '30% 0%', to: '70% 50%' },
-  { os: 'Processes talking', sam: 'Subtasks and messages', what: 'Agents start, message, interrupt and stop other agents.', src: img('sam-agents-orchestration'), alt: 'A lead agent and the subtasks it started', from: '50% 0%', to: '50% 60%' },
-  { os: 'Shared files', sam: 'Library and memory', what: 'Files and project facts every agent can read and add to.', src: img('sam-context-memory'), alt: 'Project memory entries with confidence and source', from: '40% 0%', to: '80% 50%' },
-  { os: 'Users', sam: 'Members and profiles', what: 'Who is on the project, and which agent and account each kind of job uses.', src: img('sam-collab-members-access'), alt: 'Project members and pending access requests', from: '50% 0%', to: '50% 70%' },
-  { os: 'System log', sam: 'Activity and usage', what: 'Every run and its chat, machine hours per person, and tokens for work sent through SAM’s AI proxy.', src: img('sam-admin-costs'), alt: 'Installation cost summary', from: '40% 0%', to: '60% 70%' },
+  { os: 'Process', sam: 'Agent sessions', what: 'One agent on one task, in its own workspace, streaming every step.', src: img('crop-live'), alt: 'A live agent session streaming its plan and tool calls', from: '50% 0%', to: '50% 100%' },
+  { os: 'Scheduler', sam: 'Compute pools', what: 'Puts each job on a machine with room, sets CPU and memory aside for it, and reuses warm machines.', src: img('crop-nodes'), alt: 'Machines with what each session uses against what SAM set aside', from: '0% 0%', to: '0% 100%' },
+  { os: 'Scheduled jobs', sam: 'Triggers', what: 'Starts work on a schedule, a GitHub event, a webhook, or when something happens, like CI finishing.', src: img('crop-watch'), alt: 'An event watch that starts an investigator chat when CI finishes', from: '0% 0%', to: '100% 60%' },
+  { os: 'Processes talking', sam: 'Subtasks and messages', what: 'Agents start, message, interrupt and stop other agents.', src: img('crop-orch'), alt: 'A lead agent and the subtasks it started', from: '50% 0%', to: '50% 100%' },
+  { os: 'Shared files', sam: 'Library and memory', what: 'Files and project facts every agent can read and add to.', src: img('crop-memory'), alt: 'Project memory entries with confidence and source', from: '0% 0%', to: '0% 100%' },
+  { os: 'Users', sam: 'Members and profiles', what: 'Who is on the project, and which agent and account each kind of job uses.', src: img('crop-members'), alt: 'Project members and pending access requests', from: '0% 0%', to: '0% 100%' },
+  { os: 'System log', sam: 'Activity and usage', what: 'Every run and its chat, machine hours per person, and costs across the installation.', src: img('crop-costs'), alt: 'Installation cost monitor', from: '0% 0%', to: '0% 100%' },
 ];
 ---
 
@@ -38,7 +39,7 @@ const monitor = [
       <div class="hero-glow" aria-hidden="true"></div>
       <div class="container hero-inner">
         <div class="hero-copy">
-          <h1 class="hero-title">The open-source operating system for scalable <span class="gradient-text">software factories</span></h1>
+          <h1 class="hero-title">The <span class="nowrap">open-source</span> operating system for scalable <span class="gradient-text">software factories</span></h1>
           <p class="fx-lede">
             In a software factory, work arrives from issues, schedules and webhooks, and agents turn
             it into pull requests for a whole team. SAM runs that underneath: it puts each agent on
@@ -49,18 +50,19 @@ const monitor = [
             <a href="/self-host/" class="sam-btn sam-btn--primary">Deploy SAM</a>
             <a href={githubUrl} class="sam-btn sam-btn--glass" target="_blank" rel="noopener noreferrer">Read the source</a>
           </div>
-          <p class="fx-proof">{proofStrip.map((p) => <span>{p}</span>)}</p>
+          <p class="hosting">Control plane in your Cloudflare account. Agent machines in your cloud accounts. No SAM-hosted service.</p>
+          <p class="fx-proof">{proofStrip.slice(0, 3).map((p) => <span>{p}</span>)}</p>
         </div>
         <div class="hero-figure">
           <StackHero
-            back={{ label: 'Machines', src: img('sam-nodes-multi-provider'), alt: '', focus: '0% 0%' }}
-            middle={{ label: 'Agents', src: img('sam-agents-orchestration'), alt: '', focus: '50% 0%' }}
+            back={{ label: 'Machines', src: img('crop-nodes'), alt: '', focus: '0% 0%' }}
+            middle={{ label: 'Agents', src: img('crop-orch'), alt: '', focus: '50% 30%' }}
             front={{
               label: 'Interface',
               shots: [
-                { src: img('sam-hero-live-session'), alt: '', focus: '0% 0%' },
-                { src: img('sam-comments-chat-thread'), alt: '', focus: '0% 0%' },
-                { src: img('sam-events-watches'), alt: '', focus: '0% 0%' },
+                { src: img('crop-live'), alt: '', focus: '50% 100%' },
+                { src: img('crop-comments'), alt: '', focus: '0% 40%' },
+                { src: img('crop-watch'), alt: '', focus: '0% 0%' },
               ],
             }}
             toasts={[
@@ -82,6 +84,12 @@ const monitor = [
           <p class="fx-lede">Built for teams running agents across many repos and many people.</p>
         </div>
         <SystemMonitor rows={monitor} />
+      </div>
+    </section>
+
+    <section class="fx-section">
+      <div class="container">
+        <TeamProof />
       </div>
     </section>
 
@@ -149,9 +157,19 @@ const monitor = [
   .hero-title {
     font-family: var(--font-display);
     font-weight: 600;
-    font-size: clamp(2.125rem, 4.2vw, 3.375rem);
+    font-size: clamp(2rem, 3.9vw, 3.125rem);
     line-height: 1.05;
     letter-spacing: -0.02em;
+  }
+
+  .nowrap {
+    white-space: nowrap;
+  }
+
+  .hosting {
+    font-size: 0.9375rem;
+    color: var(--color-fg-primary);
+    max-width: 52ch;
   }
 
   .hero-figure {
@@ -180,6 +198,22 @@ const monitor = [
       grid-template-columns: 1fr;
       gap: 32px;
     }
+
+    /* Phones: show the product right under the headline, then the words. */
+    .hero-inner {
+      gap: 18px;
+    }
+
+    .hero-copy {
+      display: contents;
+    }
+
+    .hero-title { order: 1; }
+    .hero-figure { order: 2; }
+    .hero-copy .fx-lede { order: 3; }
+    .hero-copy .fx-actions { order: 4; }
+    .hosting { order: 5; }
+    .hero-copy .fx-proof { order: 6; }
 
     .hero-note {
       justify-self: start;

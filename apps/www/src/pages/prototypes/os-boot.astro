@@ -10,6 +10,7 @@ import FactoryCta from '../../components/prototypes/factory/FactoryCta.astro';
 import BootSequence from '../../components/prototypes/os/BootSequence.astro';
 import OsCode from '../../components/prototypes/os/OsCode.astro';
 import OsPillars from '../../components/prototypes/os/OsPillars.astro';
+import TeamProof from '../../components/prototypes/os/TeamProof.astro';
 import { proofStrip } from '../../data/proof-strip';
 import '../../components/prototypes/factory/factory.css';
 
@@ -20,82 +21,82 @@ const steps = [
   {
     layer: 'Machines',
     title: 'Connect the hardware',
-    body: 'Add machine types from your own cloud accounts: GCP, Hetzner, Scaleway, Vultr, DigitalOcean, UpCloud and Infomaniak. Nothing joins a pool until you add it.',
-    log: 'machines: 3 providers in the project pool',
-    src: img('sam-nodes-multi-provider'),
-    alt: 'Machines across several cloud providers with CPU, memory and disk use',
-    from: '30% 0%',
-    to: '70% 40%',
+    body: 'Add machine types from your own cloud accounts: GCP, Hetzner, Scaleway, Vultr, DigitalOcean, UpCloud and Infomaniak. Nothing joins a pool until you add it, and every machine shows its price.',
+    log: 'machines: Hetzner, Scaleway and Vultr in the project pool',
+    src: img('crop-pool'),
+    alt: 'A project compute pool with Hetzner, Scaleway and Vultr machines and their monthly prices',
+    from: '0% 0%',
+    to: '0% 100%',
   },
   {
     layer: 'Scheduler',
     title: 'Place every job',
-    body: 'Each task asks for CPU, memory and disk. SAM picks a machine that fits, reuses a warm one when it can, and records why.',
-    log: 'scheduler: placing by Balanced strategy',
-    src: img('sam-compute-placement-decision'),
-    alt: 'A placement decision showing the machine chosen for a session and why',
-    from: '100% 0%',
-    to: '100% 60%',
+    body: 'Each task asks for CPU, memory and disk. SAM puts it on a machine with room, sets that much aside, reuses warm machines, and shows what each agent really uses.',
+    log: 'scheduler: CPU and memory set aside for every session',
+    src: img('crop-nodes'),
+    alt: 'Machines with what each session uses against what SAM set aside',
+    from: '0% 0%',
+    to: '0% 100%',
   },
   {
     layer: 'Processes',
     title: 'Run any coding agent',
     body: 'Claude Code, Codex, Gemini CLI, OpenCode and more, each in its own workspace. Profiles pin the agent, model and account for each kind of job.',
-    log: 'agents: 7 coding agents available',
-    src: img('sam-hero-live-session'),
+    log: 'agents: Claude Code, Codex and 5 more ready',
+    src: img('crop-live'),
     alt: 'A live agent session streaming its plan and tool calls',
     from: '50% 0%',
-    to: '90% 50%',
+    to: '50% 100%',
   },
   {
     layer: 'Memory',
     title: 'Give every agent the same playbook',
     body: 'Project rules and memory reach every session, with where each fact came from and when it was last confirmed.',
-    log: 'memory: project rules loaded',
-    src: img('sam-context-memory'),
+    log: 'memory: project rules and facts loaded into every session',
+    src: img('crop-memory'),
     alt: 'Project memory entries with confidence and source',
-    from: '40% 0%',
-    to: '80% 50%',
+    from: '0% 0%',
+    to: '0% 100%',
   },
   {
     layer: 'Processes talking',
     title: 'Let agents run agents',
     body: 'A lead agent starts workers, sends them messages, interrupts them and reads what they report back. You talk to one agent; it keeps the rest on track.',
-    log: 'messages: agents can reach each other',
-    src: img('sam-agents-orchestration'),
+    log: 'messages: lead agent started 3 workers',
+    src: img('crop-orch'),
     alt: 'A lead agent and the subtasks it started',
     from: '50% 0%',
-    to: '50% 60%',
+    to: '50% 100%',
   },
   {
     layer: 'Scheduled jobs',
     title: 'Start work without a person',
     body: 'Schedules, GitHub issues and pull requests, webhooks and event watches start agents. This one starts an investigator whenever CI finishes.',
-    log: 'triggers: schedules, GitHub and webhooks armed',
-    src: img('sam-events-watches'),
+    log: 'triggers: "Flaky test triage" runs when CI finishes',
+    src: img('crop-watch'),
     alt: 'An event watch that starts an investigator chat when CI finishes',
-    from: '30% 0%',
-    to: '70% 50%',
+    from: '0% 0%',
+    to: '100% 60%',
   },
   {
     layer: 'Users',
     title: 'Bring the team',
-    body: 'Invite people into a project, share profiles and skills, and see when shared work is running on someone’s personal key.',
-    log: 'users: 5 members on Payments API',
-    src: img('sam-collab-members-access'),
+    body: 'Invite people into a project, approve who joins, share profiles and skills, and see when shared work is running on someone\u2019s personal key.',
+    log: 'users: 5 members, 2 waiting for approval',
+    src: img('crop-members'),
     alt: 'Project members and pending access requests',
-    from: '50% 0%',
-    to: '50% 70%',
+    from: '0% 0%',
+    to: '0% 100%',
   },
   {
     layer: 'System log',
     title: 'See what ran and what it cost',
-    body: 'Every run and its chat, machine hours per person, and costs across the installation.',
-    log: 'log: usage and costs recording',
-    src: img('sam-admin-costs'),
-    alt: 'Installation cost summary',
-    from: '40% 0%',
-    to: '60% 70%',
+    body: 'Every run and its chat, machine hours per person, and costs across the installation, by person and by model.',
+    log: 'costs: $2,828 this month, by person and by model',
+    src: img('crop-costs'),
+    alt: 'Installation cost monitor',
+    from: '0% 0%',
+    to: '0% 100%',
   },
 ];
 ---
@@ -120,11 +121,12 @@ const steps = [
           <a href="/self-host/" class="sam-btn sam-btn--primary">Deploy SAM</a>
           <a href={githubUrl} class="sam-btn sam-btn--glass" target="_blank" rel="noopener noreferrer">Read the source</a>
         </div>
-        <p class="fx-proof hero-proof">{proofStrip.map((p) => <span>{p}</span>)}</p>
+        <p class="hosting">Control plane in your Cloudflare account. Agent machines in your cloud accounts. No SAM-hosted service.</p>
+        <p class="fx-proof hero-proof">{proofStrip.slice(0, 3).map((p) => <span>{p}</span>)}</p>
 
         <div class="monitor" aria-hidden="true">
           <div class="monitor-screen">
-            <img src={img('sam-dashboard-overview')} alt="" />
+            <img src={img('crop-dashboard')} alt="" />
           </div>
           <div class="monitor-term sam-glass sam-glass-rim">
             <span class="t-line t1 t-head">Right now</span>
@@ -139,10 +141,16 @@ const steps = [
 
     <section class="fx-section">
       <div class="container">
+        <TeamProof />
+      </div>
+    </section>
+
+    <section class="fx-section">
+      <div class="container">
         <div class="fx-head">
           <p class="fx-kicker">Boot sequence</p>
           <h2 class="fx-h2">Every layer of a software factory, already built</h2>
-          <p class="fx-lede">Built for teams running agents across many repos and many people. Scroll to bring each layer up.</p>
+          <p class="fx-lede">Each layer is a part of SAM you can use today. Scroll to bring them up in order.</p>
         </div>
         <BootSequence steps={steps} done="software factory running" />
       </div>
@@ -183,7 +191,7 @@ const steps = [
   .hero {
     position: relative;
     isolation: isolate;
-    padding: calc(var(--header-height) + 72px) 0 40px;
+    padding: calc(var(--header-height) + 48px) 0 40px;
     text-align: center;
   }
 
@@ -205,14 +213,19 @@ const steps = [
   .hero-title {
     font-family: var(--font-display);
     font-weight: 600;
-    font-size: clamp(2.125rem, 5vw, 4rem);
+    font-size: clamp(2.125rem, 4.4vw, 3.5rem);
     line-height: 1.04;
     letter-spacing: -0.02em;
-    max-width: 18ch;
+    max-width: 20ch;
   }
 
   .hero-lede {
     max-width: 58ch;
+  }
+
+  .hosting {
+    font-size: 0.9375rem;
+    color: var(--color-fg-primary);
   }
 
   .hero-actions,
@@ -228,7 +241,7 @@ const steps = [
   }
 
   .monitor-screen {
-    aspect-ratio: 16 / 9;
+    aspect-ratio: 1700 / 784;
     border-radius: 18px;
     overflow: hidden;
     border: 1px solid rgb(255 255 255 / 0.12);

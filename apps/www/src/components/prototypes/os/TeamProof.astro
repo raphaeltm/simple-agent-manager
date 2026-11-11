@@ -1,0 +1,156 @@
+---
+/**
+ * Prototype: the questions a platform team asks before trialling SAM, answered with what ships
+ * today (sources: docs/guides/installer.mdx, docs/architecture/security.md,
+ * docs/guides/compute-pools.md, docs/guides/collaboration.md). No unverified scale claims.
+ */
+interface Props {
+  heading?: string;
+}
+
+const { heading = 'The questions a platform team asks first' } = Astro.props;
+const img = (name: string) => `/images/prototypes/os/${name}.webp`;
+
+const answers = [
+  {
+    q: 'Where does it run?',
+    a: 'The control plane runs in your own Cloudflare account. Agent machines run in your cloud accounts. There is no SAM-hosted service in the path.',
+    link: { href: '/docs/architecture/security/', text: 'Security model' },
+  },
+  {
+    q: 'How long to set up?',
+    a: 'The installer puts SAM in your Cloudflare account in about half an hour. You need Workers Paid and a domain, then a cloud account and an agent key or subscription.',
+    link: { href: '/docs/guides/installer/', text: 'Installer guide' },
+  },
+  {
+    q: 'Who gets in?',
+    a: 'People sign in with GitHub, Google, GitLab or an emailed code. Admins can require approval for new accounts, and an owner or admin approves each request to join a project.',
+  },
+  {
+    q: 'How are agents kept apart?',
+    a: 'Every task gets its own workspace container on a machine in your account. Credentials are stored encrypted and scoped to a person or a project.',
+  },
+  {
+    q: 'How is spend kept in check?',
+    a: 'Set a machine limit per person and a monthly compute quota. Idle machines stay warm for 30 minutes for reuse, then shut down. Admins see cost per person and per model.',
+  },
+  {
+    q: 'Does it hold up?',
+    a: 'SAM is built with SAM. Agents running on SAM write the platform, this site and its docs every day, many at a time, on machines in more than one cloud.',
+  },
+];
+---
+
+<div class="proof">
+  <div class="proof-head">
+    <p class="fx-kicker">Built for teams</p>
+    <h2 class="fx-h2">{heading}</h2>
+  </div>
+  <div class="proof-grid">
+    <dl class="proof-answers">
+      {answers.map((x) => (
+        <div class="proof-item animate-on-scroll">
+          <dt>{x.q}</dt>
+          <dd>
+            {x.a}
+            {x.link && <a href={x.link.href} class="proof-link">{x.link.text}</a>}
+          </dd>
+        </div>
+      ))}
+    </dl>
+    <div class="proof-shots">
+      <figure class="proof-shot animate-on-scroll">
+        <img src={img('crop-costs')} alt="Admin cost monitor: LLM cost, monthly projection, compute estimate, daily cost and cost by user" loading="lazy" decoding="async" />
+        <figcaption>Admin → Costs: spend per person and per model</figcaption>
+      </figure>
+      <figure class="proof-shot animate-on-scroll">
+        <img src={img('crop-attrib')} alt="Credential attribution: shared automation running on a member's personal key, with a Fix link" loading="lazy" decoding="async" />
+        <figcaption>Who pays: shared work running on a personal key gets flagged</figcaption>
+      </figure>
+    </div>
+  </div>
+</div>
+
+<style>
+  .proof-head {
+    display: grid;
+    gap: 12px;
+    margin-bottom: 36px;
+  }
+
+  .proof-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+    gap: 32px;
+    align-items: start;
+  }
+
+  .proof-answers {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 24px 28px;
+  }
+
+  .proof-item dt {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 1.125rem;
+    margin-bottom: 6px;
+  }
+
+  .proof-item dd {
+    color: var(--color-fg-muted);
+    font-size: 0.9375rem;
+    line-height: 1.55;
+  }
+
+  .proof-link {
+    display: inline-block;
+    margin-left: 6px;
+    color: #4ade80;
+    font-size: 0.875rem;
+    text-decoration: none;
+  }
+
+  .proof-link::after {
+    content: ' →';
+  }
+
+  .proof-shots {
+    display: grid;
+    gap: 18px;
+  }
+
+  .proof-shot {
+    margin: 0;
+    display: grid;
+    gap: 8px;
+  }
+
+  .proof-shot img {
+    display: block;
+    width: 100%;
+    border-radius: 12px;
+    border: 1px solid rgb(255 255 255 / 0.1);
+    box-shadow: 0 24px 50px -24px rgb(0 0 0 / 0.8);
+  }
+
+  .proof-shot figcaption {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--color-fg-dim);
+  }
+
+  @media (max-width: 900px) {
+    .proof-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 600px) {
+    .proof-answers {
+      grid-template-columns: 1fr;
+      gap: 18px;
+    }
+  }
+</style>
