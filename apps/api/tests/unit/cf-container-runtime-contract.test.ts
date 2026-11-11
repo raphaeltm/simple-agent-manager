@@ -96,7 +96,7 @@ describe('cf-container runtime spike contracts', () => {
     expect(nodeAgent).toContain('fetchVmAgentContainer(');
     expect(nodeAgent).toContain('function requestInitWithoutSignal');
     expect(nodeAgent).toContain(
-      'new Request(containerUrl.toString(), requestInitWithoutSignal(options))'
+      'requestInitWithoutSignal(nodeAgentRequestInit(options))'
     );
     expect(nodeAgent).toContain(
       "return fetchNodeAgent(nodeId, env, url, { method: 'GET', headers }, timeoutMs)"

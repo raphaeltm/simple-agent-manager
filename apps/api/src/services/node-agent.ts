@@ -285,7 +285,7 @@ export async function fetchNodeAgent(
   } = controls;
   if (!env.DATABASE || typeof env.DATABASE.prepare !== 'function') {
     await beforeExternalMutation?.();
-    return fetchWithTimeout(url, options, requestTimeoutMs);
+    return fetchWithTimeout(url, nodeAgentRequestInit(options), requestTimeoutMs);
   }
 
   // Single seam for control plane -> node HTTP: the node row decides container, reverse
@@ -295,7 +295,7 @@ export async function fetchNodeAgent(
     await beforeExternalMutation?.();
     return fetchWithTimeout(
       retargetNodeAgentUrl(url, route),
-      nodeAgentRequestInit(route, options),
+      nodeAgentRequestInit(options),
       requestTimeoutMs
     );
   }
@@ -334,13 +334,19 @@ export async function fetchNodeAgent(
         ? fetchVmAgentContainerNoWake(
             env,
             nodeId,
-            new Request(containerUrl.toString(), requestInitWithoutSignal(options)),
+            new Request(
+              containerUrl.toString(),
+              requestInitWithoutSignal(nodeAgentRequestInit(options))
+            ),
             vmAgentPort
           )
         : fetchVmAgentContainer(
             env,
             nodeId,
-            new Request(containerUrl.toString(), requestInitWithoutSignal(options)),
+            new Request(
+              containerUrl.toString(),
+              requestInitWithoutSignal(nodeAgentRequestInit(options))
+            ),
             vmAgentPort,
             sourceTaskGuard
           ),
