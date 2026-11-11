@@ -230,6 +230,22 @@ describe('selfhost create-account SQL', () => {
     ).toEqual({ status: 'system', role: 'superadmin' });
   });
 
+  it("reports no row for the real sentinel's address and writes nothing", () => {
+    sqlite
+      .prepare(
+        `INSERT INTO users (id, email, email_verified, name, role, status, created_at, updated_at)
+         VALUES ('sentinel-2', 'anonymous-trials@simple-agent-manager.internal', 0, 'S', 'user', 'system', 0, 0)`
+      )
+      .run();
+    // The address passes the pattern (migration 0043's sentinel), so only the SQL protects it.
+    expect(runCommand('anonymous-trials@simple-agent-manager.internal', true)).toEqual([]);
+    expect(
+      sqlite
+        .prepare(`SELECT id, role, status FROM users WHERE email LIKE 'anonymous-trials@%'`)
+        .all()
+    ).toEqual([{ id: 'sentinel-2', role: 'user', status: 'system' }]);
+  });
+
   it.each(["x'@example.com", 'a@b', 'a b@example.com', 'system@internal', 'é@example.com'])(
     'refuses %s before building any SQL',
     (email) => {

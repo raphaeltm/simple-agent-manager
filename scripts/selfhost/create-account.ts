@@ -17,7 +17,12 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
-import { createAccountSql, generateAccountId, normalizeAccountEmail } from './account-sql.js';
+import {
+  createAccountSql,
+  generateAccountId,
+  normalizeAccountEmail,
+  parseAccountReport,
+} from './account-sql.js';
 import { celldChildEnv, redactSecrets } from './box-settings.js';
 import { ensureCelldBinary, resolveEsbuild } from './celld-binary.js';
 import { assertPrivateFile, parseDotenv, readSecretsFile } from './secret-files.js';
@@ -96,10 +101,9 @@ async function main(): Promise<void> {
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(`celld d1 execute failed (exit ${result.status})`);
   // The last statement reports the account; no row means nothing usable was written.
-  if (!result.stdout?.includes(email)) {
-    throw new Error(`no account for ${email} after the command; nothing was created`);
-  }
-  if (/\bsuspended\b/.test(result.stdout)) {
+  const account = parseAccountReport(result.stdout ?? '', email);
+  if (!account) throw new Error(`no account for ${email} after the command; nothing was created`);
+  if (account.status === 'suspended') {
     log(`note: ${email} is suspended; an administrator must reactivate it in Admin → Users`);
   }
   log(`done: ${email} can now request a sign-in code at https://app.${box.SAM_DOMAIN ?? ''}`);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createAccountSql } from './account-sql.js';
+import { createAccountSql, parseAccountReport } from './account-sql.js';
 import { mainDatabaseName } from './create-account.js';
 
 describe('mainDatabaseName', () => {
@@ -25,7 +25,9 @@ describe('createAccountSql', () => {
 
   it('promotes only with --superadmin', () => {
     expect(createAccountSql({ ...plan, superadmin: false })).not.toContain('UPDATE users');
-    expect(createAccountSql({ ...plan, superadmin: true })).toContain("UPDATE users SET role = 'superadmin', status = CASE WHEN status = 'pending'");
+    expect(createAccountSql({ ...plan, superadmin: true })).toContain(
+      "UPDATE users SET role = 'superadmin', status = CASE WHEN status = 'pending'"
+    );
   });
 
   it('refuses values it did not generate or check', () => {
@@ -38,5 +40,33 @@ describe('createAccountSql', () => {
     expect(() => createAccountSql({ ...plan, superadmin: false, nowMs: Number.NaN })).toThrow(
       'bad timestamp'
     );
+  });
+});
+
+describe('parseAccountReport', () => {
+  // `celld d1 execute` output, as observed on celld 0.6.3.
+  const table = [
+    'id                                email                 role  status  emailVerified  activeSuperadmins',
+    '--------------------------------  --------------------  ----  ------  -------------  -----------------',
+    'UNX8rGfGHBFjvlB7HLFS4ZRF6XTp3BBI  teammate@example.com  user  active  1              1',
+    'Executed 2 statement(s) in 3ms',
+  ].join('\n');
+
+  it('reads the account row', () => {
+    expect(parseAccountReport(table, 'teammate@example.com')).toEqual({
+      id: 'UNX8rGfGHBFjvlB7HLFS4ZRF6XTp3BBI',
+      role: 'user',
+      status: 'active',
+    });
+  });
+
+  it('finds nothing when the report has no row, even if the address appears elsewhere', () => {
+    const empty = [
+      "INSERT INTO users ... '01234567890123456789012345678901', 'teammate@example.com' ...;",
+      'id  email  role  status  emailVerified  activeSuperadmins',
+      'Executed 2 statement(s) in 1ms',
+    ].join('\n');
+    expect(parseAccountReport(empty, 'teammate@example.com')).toBeNull();
+    expect(parseAccountReport(table, 'other@example.com')).toBeNull();
   });
 });

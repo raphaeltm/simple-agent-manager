@@ -15,7 +15,11 @@
  * - The operator vouches for the address, so a new row is `email_verified = 1` and `active`,
  *   whatever the signup approval mode says.
  * - Internal sentinel rows (`status = 'system'`, e.g. `system_anonymous_trials`) are never
- *   matched, promoted or counted as an administrator (apps/api/.claude/rules/40).
+ *   matched, promoted or counted as an administrator (apps/api/.claude/rules/40). Their addresses
+ *   can pass the email pattern: asking for one inserts nothing (the INSERT sees the row) and
+ *   reports nothing (the report excludes it), so `parseAccountReport` finds no row and the
+ *   command fails. The INSERT deliberately does not exclude them, which would duplicate the
+ *   address.
  */
 import { randomInt } from 'node:crypto';
 
@@ -85,4 +89,26 @@ export function createAccountSql(plan: AccountPlan): string {
      FROM users WHERE ${MATCH(email)}`,
   ];
   return statements.map((statement) => `${statement.replace(/\s+/g, ' ').trim()};`).join('\n');
+}
+
+export interface AccountReport {
+  id: string;
+  role: string;
+  status: string;
+}
+
+/**
+ * The account row from `celld d1 execute`'s table output: the line that starts with a generated
+ * id followed by exactly this address. Null when the report has no such row (nothing usable was
+ * written). Matching the whole row, not the address anywhere in the output, keeps an echoed SQL
+ * statement from passing for a result.
+ */
+export function parseAccountReport(output: string, email: string): AccountReport | null {
+  for (const line of output.split('\n')) {
+    const [id = '', address, role = '', status = ''] = line.trim().split(/\s+/);
+    if (/^[A-Za-z0-9]{1,64}$/.test(id) && address === email && role && status) {
+      return { id, role, status };
+    }
+  }
+  return null;
 }
