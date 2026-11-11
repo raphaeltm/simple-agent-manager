@@ -77,22 +77,23 @@ The 2026-11-10 state-machine audit (Library `/engineering/research/state-machine
 - [x] D8: per-attempt wake latch (`wakeAttemptId` from `attachWakeState`); tests: a second wake (new attempt) shows phases, including one response that flips the chat back to `sleeping` and carries the next wake; controls: a stale same-attempt snapshot after `restored` stays suppressed, a settled wake with no id keeps the latch, an older attempt cannot end or relabel the current wake
 - [x] Docs: update any docs referencing chat `error` status / node statuses / stall detection
 - [x] Playwright visual audit for changed UI surfaces (chat session list badge, account map failed state), 375 and 1280
-- [ ] Staging: deploy; verify each defect fixed on live staging (see acceptance criteria)
+- [x] Staging: deploy; verify each defect fixed on live staging (see acceptance criteria and the staging evidence below)
+- [x] D8 follow-up found on staging: the chat socket dropped `status` from `session.updated`, so an open tab never learned of a server-side sleep (fix f3009d1c6, real-socket test `session-socket-sleep-push.test.ts`)
 
 ## Acceptance criteria
 
-- [ ] A mission task in `in_progress` whose session has had no messages for longer than the stall timeout receives one non-cancelling nudge. A task with recent messages receives none. An agent mid-turn is never cancelled by stall detection.
-- [ ] SAM `stop_subtask` stops `in_progress`, `delegated`, `queued` and `sleeping` tasks, and `send_message_to_subtask` messages `in_progress` and `delegated` ones. A concurrent completion is not overwritten with `cancelled`.
-- [ ] Opening the agent or terminal WebSocket on a VM agent runtime in `stopped`/`error` leaves its status unchanged. A runtime missing after an agent restart is still recreated as `running`.
-- [ ] A failed chat session renders as failed on the account map. Revised during implementation:
+- [x] A mission task in `in_progress` whose session has had no messages for longer than the stall timeout receives one non-cancelling nudge. A task with recent messages receives none. An agent mid-turn is never cancelled by stall detection.
+- [x] SAM `stop_subtask` stops `in_progress`, `delegated`, `queued` and `sleeping` tasks, and `send_message_to_subtask` messages `in_progress` and `delegated` ones. A concurrent completion is not overwritten with `cancelled`.
+- [x] Opening the agent or terminal WebSocket on a VM agent runtime in `stopped`/`error` leaves its status unchanged. A runtime missing after an agent restart is still recreated as `running`.
+- [x] A failed chat session renders as failed on the account map. Revised during implementation:
   - The session list (`ChatSessionList`) turned out to be dead code and was removed.
   - `deriveSessionState`'s `idle` mapping for a failed session with `agentCompletedAt` is unchanged, because resume-and-send relies on it. Changing it is a product decision outside this scope; it is raised to Raphaël in the PR.
-- [ ] `/ready` and heartbeat from a node in `deleting` do not set it to `running`, and do not refresh its callback token.
-- [ ] A task reaching a terminal state does not overwrite a `skipped`/`dropped`/`routed` trigger execution, while a `running` execution is still synced.
-- [ ] A deployment env heartbeat does not overwrite a concurrent `stopping`/`error`; `starting → active` still happens.
-- [ ] A chat that wakes, sleeps again and is woken again in the same open tab shows the wake banner and phases on the second wake.
-- [ ] Each guard was deleted once and its attack test went red (rule 62).
-- [ ] All verified end to end on staging.
+- [x] `/ready` and heartbeat from a node in `deleting` do not set it to `running`, and do not refresh its callback token.
+- [x] A task reaching a terminal state does not overwrite a `skipped`/`dropped`/`routed` trigger execution, while a `running` execution is still synced.
+- [x] A deployment env heartbeat does not overwrite a concurrent `stopping`/`error`; `starting → active` still happens.
+- [x] A chat that wakes, sleeps again and is woken again in the same open tab shows the wake banner and phases on the second wake.
+- [x] Each guard was deleted once and its attack test went red (rule 62).
+- [x] Verified end to end on staging where the staging environment can exercise it. D2, D3, D4, D6 and D8 were verified live. D1, D5 and D7 are proven by real-SQL or route tests (see the staging evidence).
 
 ## References
 
@@ -113,3 +114,27 @@ The 2026-11-10 state-machine audit (Library `/engineering/research/state-machine
 - **D7 also moved code for rule 18.** `node-lifecycle.ts` was 840 lines; the deployment heartbeat moved to `node-heartbeat-deployment.ts` (pure move, separate commit).
 - **Discrimination:** every guard was removed once and the intended tests went red (see commit messages / PR).
 - **Go toolchain:** the workspace had none. go1.26.10 was installed to `/tmp/gotool` and its checksum verified against the go.dev JSON index.
+
+## Staging evidence
+
+- 2026-11-10 (build 669c/0f65):
+  - D2: the SAM agent messaged an `in_progress` Instant task, then stopped it; one CAS cancel, one status event.
+  - D4: the account map shows failed chats.
+  - D6: a trigger execution went `running` to `failed` on user cancel.
+- 2026-11-11, rebased head f408ff0b6 (deploy 43039729637), then f3009d1c6 (deploy 43051996062).
+  - Before every run, the live web bundle was checked for this branch's code.
+  - The earlier D8 runs on 2026-11-11 ran against PR #2649's build, which had replaced ours on staging, so they were discarded.
+  - D3 regression on the woken VM workspaces 01M75KS62A8A0FWXYW18X9T9KC and 01M75P5457FABBB18GCJQR6GPA:
+    - `terminal/ws/multi` and `terminal/ws` both opened;
+    - each workspace stayed `running`.
+  - D8 on f408ff0b6: the first wake from a fresh tab showed its phases. The second wake in the same open tab showed no banner.
+    - Cause: the tab never learned of the server-side sleep. `useChatWebSocket` dropped `status` from `session.updated`, and a connected active chat does not poll.
+    - Fixed in f3009d1c6.
+  - D8 on f3009d1c6:
+    - After the server put the chat to sleep, the open tab switched to the wake composer within about 2 s.
+    - Wake 1 showed 5 phases. Wake 2 in the same tab showed 6 phases, starting with "Waiting for the previous workspace to finish shutting down...". Both replied.
+- Not exercised live:
+  - D1: needs a stalled mission task over the stall timeout. It is covered through `detectStalls` with real session rows.
+  - D5 and D7: the staging deployment environment has a stale volume. They are covered by real-SQL and route tests.
+- Cleanup: the D3 workspace was deleted. The D8 chat was stopped, its workspace deleted (`workspaceDeleted: true`) and task 01M75A34RBDASNT5SWTCDYTPN5 cancelled. "staging free" was published at 16:16 UTC.
+- Pre-existing gap found: `tasks/backlog/2026-11-11-wake-start-offers-steer.md`.
