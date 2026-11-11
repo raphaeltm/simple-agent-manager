@@ -113,3 +113,33 @@ the workload identity (OIDC) token SAM already issues through `exec_with_secrets
   `/api/auth/me` works with the cookie and an audit row exists.
 - Session lifetime stays bounded after a BetterAuth refresh.
 - An agent signs in on staging through this path; wrong audience is rejected live.
+
+## CodeRabbit round (task `01M75A21P5H2T3VXANW3GK8JX2`, 2026-11-11)
+
+CodeRabbit reviewed at 12:40Z with five findings. Owner approved shipping; PR stays unmerged
+until the coordinator merges.
+
+- [x] F1: session-minted tokens capped at the hard expiry (`credentialNotAfter`, `cappedExpiry`):
+      port access, terminal, node management, local forward. Terminal tokens carry
+      `sessionNotAfter`; the VM agent caps the 24 h session cookie it makes from them
+      (`packages/vm-agent/internal/auth/session.go sessionExpiry`), because
+      `{node}.vm.{domain}:8443` bypasses the Worker. Terminal-token liveness checks the hard cap.
+- [x] F2: BetterAuth guard resolves the session through BetterAuth; no cookie substring check.
+      Regression test with `session_token =VALUE` (verified red with the old shortcut).
+- [x] F3: triggers of every source type refused; PATCH only to pause/disable.
+- [x] Same class, found by enumeration: schedules (create/reschedule/reconcile), standing
+      watches (create/update), push subscriptions, public ports.
+- [x] F4: Landing disclosure: remembered `false` never hides it; failed lookup says unknown.
+- [x] F5: guide: turning off does not end sessions; revocation procedure, tested statement.
+- [x] Discrimination proofs A-I (see PR body).
+- [ ] Security auditor on the new diff
+- [ ] Staging redeploy + live check (agent sign-in, F1-F3 refused live)
+- [ ] CodeRabbit threads replied/resolved; incremental review wait
+
+Residuals filed/flagged for Raphaël:
+- Agent runs (chat/task) started by an agent session hold their own MCP token for the run's
+  lifetime; MCP tools (e.g. webhook trigger create) are not session-aware.
+- Persistent configuration (credentials, base URLs, runtime env, profiles, skills) set by the
+  session is read by later runs; not enforceable route by route.
+- `tasks/backlog/2026-11-11-mcp-connection-url-change-keeps-stored-secret.md` (pre-existing).
+- Old VM agents ignore `sessionNotAfter` until nodes rotate.
