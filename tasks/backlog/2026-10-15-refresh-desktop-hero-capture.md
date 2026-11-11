@@ -1,5 +1,11 @@
 # Refresh the desktop hero marketing capture
 
+## Status (2026-11-11)
+
+The homepage hero this capture fed was removed with the software-factory homepage, along with
+`build-hero-layers.ts`. The fix is still needed only if `sam-hero-live-session` is kept for other
+uses; it is now covered by `2026-11-11-marketing-shots-drift-after-sam-glass.md`.
+
 ## Problem
 
 `apps/web/tests/playwright/marketing-shots-platform.spec.ts` › `sam-hero-live-session` no longer
