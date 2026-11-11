@@ -1,0 +1,365 @@
+---
+/**
+ * PROTOTYPE B (2026-11-10): homepage reframed as "the operating system for software factories".
+ * Not linked from navigation, noindex. Do not ship without explicit approval.
+ */
+import Base from '../../layouts/Base.astro';
+import Header from '../../components/Header.astro';
+import FactoryCta from '../../components/prototypes/factory/FactoryCta.astro';
+import OsStack from '../../components/prototypes/factory/OsStack.astro';
+import { proofStrip } from '../../data/proof-strip';
+import '../../components/prototypes/factory/factory.css';
+
+const githubUrl = 'https://github.com/raphaeltm/simple-agent-manager';
+
+const mapping = [
+  { os: 'Process', sam: 'Agent session', what: 'One agent on one task, in its own workspace.' },
+  { os: 'Scheduler', sam: 'Compute pools', what: 'Puts each job on a machine that fits, and reuses warm ones.' },
+  { os: 'cron', sam: 'Triggers', what: 'Starts work on a schedule, a GitHub event or a webhook.' },
+  { os: 'Signals and pipes', sam: 'Subtasks and messages', what: 'Agents start, message, interrupt and stop other agents.' },
+  { os: 'Filesystem', sam: 'Library and memory', what: 'Shared files and facts every agent can read and write.' },
+  { os: 'Users and groups', sam: 'Members and profiles', what: 'Who can start work, with which agent, on whose account.' },
+  { os: 'System log', sam: 'Activity and usage', what: 'Every run, tool call, token and machine hour, per person.' },
+];
+
+const codeHtml = `<span class="c">// Split the migration across workers</span>
+<span class="f">dispatch_task</span>({
+  description: <span class="s">"Move refunds to the ledger schema"</span>,
+  agentProfileId: <span class="s">"backend-worker"</span>,
+})
+
+<span class="c">// Steer one while it runs</span>
+<span class="f">send_durable_message</span>({
+  targetTaskId: <span class="s">"01M7…"</span>,
+  message: <span class="s">"Dry-run the backfill first."</span>,
+  messageClass: <span class="s">"interrupt"</span>,
+})
+
+<span class="c">// Keep it going every night</span>
+<span class="f">create_trigger</span>({
+  name: <span class="s">"Nightly dependency audit"</span>,
+  cronExpression: <span class="s">"0 2 * * *"</span>,
+  promptTemplate: <span class="s">"Audit dependencies and open a PR."</span>,
+})`;
+
+const pillars = [
+  {
+    title: 'Your machines',
+    points: [
+      'Seven cloud providers in one pool',
+      'Pools per project, per person, or for everyone',
+      'Machines are reused while they have room',
+      'Every placement records why it chose that machine',
+    ],
+  },
+  {
+    title: 'Your agents',
+    points: [
+      'Seven coding agents, mixed in one project',
+      'Profiles pick the agent, model and account',
+      'Use subscriptions or API keys',
+      'Sessions can be resumed days later',
+    ],
+  },
+  {
+    title: 'Your control plane',
+    points: [
+      'AGPL-3.0, every line readable',
+      'Deploys to your own Cloudflare account',
+      'Credentials encrypted per person and per project',
+      'No hosted service required',
+    ],
+  },
+];
+---
+
+<Base
+  title="SAM: the open-source operating system for software factories"
+  description="SAM schedules coding agents onto your machines, gives them memory and permissions, lets them coordinate, and records everything. Open source, on your own cloud."
+  noindex
+>
+  <Header />
+  <main class="fx-page">
+    <section class="b-hero">
+      <div class="b-hero-glow" aria-hidden="true"></div>
+      <div class="container b-hero-inner">
+        <div class="b-hero-copy">
+          <h1 class="b-title">The operating system for your <span class="gradient-text">software factory</span></h1>
+          <p class="fx-lede">
+            A software factory runs hundreds of agent jobs for many people at once. SAM does the work
+            underneath: it puts agents on machines, gives them memory and permissions, lets them
+            coordinate, and keeps a record of everything. Open source, on your own cloud.
+          </p>
+          <div class="fx-actions">
+            <a href="/self-host/" class="sam-btn sam-btn--primary">Deploy SAM</a>
+            <a href={githubUrl} class="sam-btn sam-btn--glass" target="_blank" rel="noopener noreferrer">Read the source</a>
+          </div>
+          <p class="fx-proof">{proofStrip.map((p) => <span>{p}</span>)}</p>
+        </div>
+        <div class="b-hero-figure">
+          <OsStack />
+        </div>
+      </div>
+    </section>
+
+    <section class="fx-section">
+      <div class="container">
+        <div class="fx-head">
+          <p class="fx-kicker">If you know an operating system, you know SAM</p>
+          <h2 class="fx-h2">Agents are the programs. SAM runs them.</h2>
+        </div>
+        <div class="b-map sam-glass sam-glass-rim">
+          <div class="b-map-row b-map-head" aria-hidden="true">
+            <span>In an OS</span><span>In SAM</span><span>What it does</span>
+          </div>
+          {mapping.map((m) => (
+            <div class="b-map-row">
+              <span class="b-os">{m.os}</span>
+              <span class="b-sam">{m.sam}</span>
+              <span class="b-what">{m.what}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+
+    <section class="fx-section">
+      <div class="container b-split">
+        <div class="fx-head">
+          <p class="fx-kicker">Programmable from the inside</p>
+          <h2 class="fx-h2">Agents can run the factory too</h2>
+          <p class="fx-lede">
+            Everything a person does in SAM, an agent can do through SAM's MCP tools. A lead agent
+            splits a job across workers, steers them while they run, and sets up the schedule that
+            keeps the work going.
+          </p>
+        </div>
+        <figure class="b-code sam-glass sam-glass-rim">
+          <figcaption class="b-code-cap"><span>lead-agent</span><span>MCP tool calls</span></figcaption>
+          <pre><code set:html={codeHtml} /></pre>
+        </figure>
+      </div>
+    </section>
+
+    <section class="fx-section">
+      <div class="container">
+        <div class="fx-head fx-head--center">
+          <p class="fx-kicker">Every layer is yours</p>
+          <h2 class="fx-h2">Scale up without handing anything over</h2>
+        </div>
+        <div class="b-pillars">
+          {pillars.map((p) => (
+            <div class="b-pillar sam-glass sam-glass-rim">
+              <h3 class="b-pillar-title">{p.title}</h3>
+              <ul>{p.points.map((pt) => <li>{pt}</li>)}</ul>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+
+    <section class="fx-section fx-section--tight">
+      <div class="container b-split b-split--shot">
+        <div class="fx-head">
+          <p class="fx-kicker">The console</p>
+          <h2 class="fx-h2">Watch every machine and every agent</h2>
+          <p class="fx-lede">
+            Node health across every provider, what each agent is waiting on, and where the money
+            goes. On your desk or on your phone.
+          </p>
+        </div>
+        <div class="fx-shot">
+          <img src="/images/features/sam-nodes-multi-provider.webp" alt="Nodes across several cloud providers with CPU, memory and disk use" loading="lazy" width="1920" height="1200" />
+        </div>
+      </div>
+    </section>
+
+    <FactoryCta
+      title="Boot your factory"
+      body="Deploy SAM to your Cloudflare account, connect a cloud and an agent, and start your first job. Grow it from there."
+    />
+  </main>
+</Base>
+
+<style>
+  .b-hero {
+    position: relative;
+    isolation: isolate;
+    padding: calc(var(--header-height) + 80px) 0 88px;
+  }
+
+  .b-hero-glow {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background:
+      radial-gradient(38% 50% at 76% 46%, rgb(34 197 94 / 0.18), transparent 70%),
+      radial-gradient(50% 60% at 8% 8%, rgb(6 78 59 / 0.38), transparent 72%);
+  }
+
+  .b-hero-inner {
+    display: grid;
+    grid-template-columns: minmax(0, 11fr) minmax(0, 12fr);
+    gap: 56px;
+    align-items: center;
+  }
+
+  .b-hero-copy {
+    display: grid;
+    gap: 22px;
+    justify-items: start;
+  }
+
+  .b-title {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: clamp(2.375rem, 4.8vw, 3.75rem);
+    line-height: 1.04;
+    letter-spacing: -0.02em;
+  }
+
+  .b-map {
+    position: relative;
+    border-radius: var(--radius-xl);
+    padding: 8px 0;
+  }
+
+  .b-map-row {
+    display: grid;
+    grid-template-columns: minmax(0, 3fr) minmax(0, 4fr) minmax(0, 8fr);
+    gap: 24px;
+    padding: 16px 28px;
+    border-top: 1px solid var(--color-border-subtle);
+    align-items: baseline;
+  }
+
+  .b-map-head {
+    border-top: none;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--color-fg-dim);
+    padding-block: 12px;
+  }
+
+  .b-os {
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
+    color: var(--color-fg-dim);
+  }
+
+  .b-sam {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 1.125rem;
+    color: var(--color-accent-strong);
+  }
+
+  .b-what {
+    color: var(--color-fg-muted);
+  }
+
+  .b-split {
+    display: grid;
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+    gap: 48px;
+    align-items: center;
+  }
+
+  .b-split .fx-head {
+    margin-bottom: 0;
+  }
+
+  .b-code {
+    position: relative;
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+  }
+
+  .b-code-cap {
+    display: flex;
+    justify-content: space-between;
+    padding: 10px 16px;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--color-fg-dim);
+    border-bottom: 1px solid var(--color-border-subtle);
+  }
+
+  .b-code pre {
+    margin: 0;
+    padding: 18px 20px;
+    overflow-x: auto;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    line-height: 1.65;
+    color: var(--color-fg-primary);
+    background: transparent;
+  }
+
+  .b-code .c { color: var(--color-fg-dim); }
+  .b-code .f { color: #6ee7b7; }
+  .b-code .s { color: #fcd38a; }
+
+  .b-pillars {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+  }
+
+  .b-pillar {
+    position: relative;
+    padding: 28px 24px;
+    border-radius: var(--radius-lg);
+  }
+
+  .b-pillar-title {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 1.375rem;
+    margin-bottom: 14px;
+  }
+
+  .b-pillar ul {
+    display: grid;
+    gap: 10px;
+    padding-left: 18px;
+    color: var(--color-fg-muted);
+    line-height: 1.5;
+  }
+
+  .b-pillar li::marker {
+    color: var(--color-accent-strong);
+  }
+
+  @media (max-width: 900px) {
+    .b-hero-inner,
+    .b-split {
+      grid-template-columns: 1fr;
+      gap: 32px;
+    }
+
+    .b-pillars {
+      grid-template-columns: 1fr;
+    }
+
+    .b-map-row {
+      grid-template-columns: 1fr;
+      gap: 2px;
+      padding: 14px 18px;
+    }
+
+    .b-map-head {
+      display: none;
+    }
+
+    .b-map-row:nth-child(2) {
+      border-top: none;
+    }
+  }
+
+  @media (max-width: 767px) {
+    .b-hero {
+      padding-top: calc(var(--header-height) + 48px);
+    }
+  }
+</style>

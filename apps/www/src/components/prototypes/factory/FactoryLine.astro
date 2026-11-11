@@ -1,0 +1,275 @@
+---
+/**
+ * Prototype A hero diagram: work flowing through a SAM installation, from intake to output.
+ * Static HTML with sample data. Purely illustrative; every stage maps to a shipped feature.
+ */
+const intake = [
+  { src: 'GitHub issue', text: 'Refund webhook charges twice', meta: '#482 opened' },
+  { src: 'Schedule', text: 'Update dependencies', meta: 'nightly 02:00' },
+  { src: 'Webhook', text: 'TypeError in checkout', meta: 'error tracker' },
+  { src: 'Idea', text: 'Split billing into its own service', meta: 'plan ready' },
+];
+
+const crews = [
+  { name: 'Bug fixer', agent: 'Claude Code', count: 4 },
+  { name: 'Upkeep', agent: 'Codex', count: 2 },
+  { name: 'Lead', agent: 'Claude Code', count: 1, note: 'running 3 subtasks' },
+];
+
+const machines = [
+  { where: 'gcp · europe-west1', tiles: ['live', 'live', 'live', 'wait'] },
+  { where: 'hetzner · fsn1', tiles: ['live', 'live', 'idle'] },
+  { where: 'scaleway · par2', tiles: ['live', 'live'] },
+];
+
+const outputs = [
+  { kind: 'live', text: 'PR #1931 ready for review' },
+  { kind: 'live', text: 'PR #1930 merged' },
+  { kind: 'wait', text: 'Question for Priya' },
+  { kind: 'live', text: 'Nightly report filed' },
+];
+---
+
+<div class="line" role="img" aria-label="Sample flow: four pieces of work arrive from GitHub, a schedule, a webhook and an idea. Three agent profiles pick them up. Agents run in workspaces on machines in three clouds. Out come pull requests, a question for a person, and a report.">
+  <div class="stage">
+    <p class="stage-label">Comes in</p>
+    {intake.map((i) => (
+      <div class="card sam-glass sam-glass-rim">
+        <span class="card-src">{i.src}</span>
+        <span class="card-text">{i.text}</span>
+        <span class="card-meta">{i.meta}</span>
+      </div>
+    ))}
+  </div>
+
+  <div class="pipe" aria-hidden="true"><span></span></div>
+
+  <div class="stage">
+    <p class="stage-label">Picked up by</p>
+    {crews.map((c) => (
+      <div class="card card--crew sam-glass sam-glass-rim">
+        <span class="crew-avatar" aria-hidden="true">{c.name.slice(0, 1)}</span>
+        <span class="crew-body">
+          <span class="card-text">{c.name}</span>
+          <span class="card-meta">{c.agent} · {c.count} running</span>
+          {c.note && <span class="card-meta card-meta--accent">{c.note}</span>}
+        </span>
+      </div>
+    ))}
+  </div>
+
+  <div class="pipe" aria-hidden="true"><span></span></div>
+
+  <div class="stage">
+    <p class="stage-label">Working on</p>
+    {machines.map((m) => (
+      <div class="card card--node sam-glass sam-glass-rim">
+        <span class="card-meta">{m.where}</span>
+        <span class="tiles">
+          {m.tiles.map((t) => <span class={`tile tile--${t}`}></span>)}
+        </span>
+      </div>
+    ))}
+  </div>
+
+  <div class="pipe" aria-hidden="true"><span></span></div>
+
+  <div class="stage">
+    <p class="stage-label">Goes out</p>
+    {outputs.map((o) => (
+      <div class="card card--out sam-glass sam-glass-rim">
+        <span class={`dot dot--${o.kind}`} aria-hidden="true"></span>
+        <span class="card-text">{o.text}</span>
+      </div>
+    ))}
+  </div>
+</div>
+
+<style>
+  .line {
+    display: grid;
+    grid-template-columns: 1fr 28px 1fr 28px 1fr 28px 1fr;
+    align-items: start;
+    gap: 0;
+  }
+
+  .stage {
+    display: grid;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .stage-label {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--color-fg-dim);
+    margin-bottom: 2px;
+  }
+
+  .card {
+    position: relative;
+    display: grid;
+    gap: 3px;
+    padding: 11px 12px;
+    border-radius: var(--radius-md);
+    min-width: 0;
+  }
+
+  .card-src {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    color: var(--color-accent-strong);
+  }
+
+  .card-text {
+    font-size: 0.875rem;
+    line-height: 1.3;
+    color: var(--color-fg-primary);
+  }
+
+  .card-meta {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    color: var(--color-fg-dim);
+  }
+
+  .card-meta--accent {
+    color: var(--color-accent-strong);
+  }
+
+  .card--crew {
+    grid-template-columns: 30px 1fr;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .crew-body {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .crew-avatar {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 0.875rem;
+    color: #052e16;
+    background: linear-gradient(140deg, #4ade80, #16a34a);
+  }
+
+  .tiles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-top: 4px;
+  }
+
+  .tile {
+    width: 22px;
+    height: 22px;
+    border-radius: 5px;
+    border: 1px solid rgb(255 255 255 / 0.08);
+  }
+
+  .tile--live {
+    background: linear-gradient(160deg, rgb(74 222 128 / 0.55), rgb(22 163 74 / 0.3));
+    box-shadow: 0 0 10px rgb(34 197 94 / 0.25);
+  }
+
+  .tile--wait {
+    background: linear-gradient(160deg, rgb(245 177 74 / 0.7), rgb(180 83 9 / 0.35));
+    box-shadow: 0 0 10px rgb(245 177 74 / 0.3);
+  }
+
+  .tile--idle {
+    background: rgb(255 255 255 / 0.04);
+  }
+
+  .card--out {
+    grid-template-columns: 8px 1fr;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+  }
+
+  .dot--live {
+    background: var(--color-accent-strong);
+  }
+
+  .dot--wait {
+    background: #f5b14a;
+  }
+
+  .pipe {
+    position: relative;
+    align-self: stretch;
+    margin-top: 26px;
+  }
+
+  .pipe span {
+    position: absolute;
+    left: 4px;
+    right: 4px;
+    top: 50%;
+    height: 2px;
+    border-radius: 2px;
+    background: linear-gradient(90deg, rgb(52 211 153 / 0.1), rgb(52 211 153 / 0.6), rgb(52 211 153 / 0.1));
+  }
+
+  .pipe span::after {
+    content: '';
+    position: absolute;
+    right: -2px;
+    top: -4px;
+    border: 5px solid transparent;
+    border-left: 6px solid rgb(52 211 153 / 0.7);
+  }
+
+  @media (max-width: 900px) {
+    .line {
+      grid-template-columns: 1fr;
+    }
+
+    .stage {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .stage-label {
+      grid-column: 1 / -1;
+    }
+
+    .pipe {
+      height: 26px;
+      margin: 4px 0;
+    }
+
+    .pipe span {
+      left: 50%;
+      right: auto;
+      top: 2px;
+      bottom: 2px;
+      width: 2px;
+      height: auto;
+      background: linear-gradient(180deg, rgb(52 211 153 / 0.1), rgb(52 211 153 / 0.6));
+    }
+
+    .pipe span::after {
+      right: auto;
+      left: -4px;
+      top: auto;
+      bottom: -6px;
+      border: 5px solid transparent;
+      border-top: 6px solid rgb(52 211 153 / 0.7);
+    }
+  }
+</style>

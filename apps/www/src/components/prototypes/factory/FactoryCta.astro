@@ -1,0 +1,50 @@
+---
+/** Closing call to action plus site footer for the software-factory prototypes. */
+import Footer from '../../../../../../packages/ui/src/brand/Footer.astro';
+
+interface Props {
+  title: string;
+  body: string;
+}
+
+const { title, body } = Astro.props;
+---
+
+<section class="fx-section">
+  <div class="container">
+    <div class="cta sam-glass sam-glass-rim">
+      <h2 class="fx-h2 cta-title">{title}</h2>
+      <p class="fx-lede cta-body">{body}</p>
+      <div class="fx-actions cta-actions">
+        <a href="/self-host/" class="sam-btn sam-btn--primary">Deploy SAM</a>
+        <a href="/docs/" class="sam-btn sam-btn--glass">Read the docs</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<Footer />
+
+<style>
+  .cta {
+    position: relative;
+    display: grid;
+    justify-items: center;
+    gap: 16px;
+    max-width: 680px;
+    margin: 0 auto;
+    padding: 48px 32px;
+    border-radius: var(--radius-xl);
+    text-align: center;
+  }
+
+  .cta-title,
+  .cta-body {
+    margin-inline: auto;
+  }
+
+  .cta-actions {
+    justify-content: center;
+    margin-top: 8px;
+  }
+</style>

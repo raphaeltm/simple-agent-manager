@@ -1,0 +1,111 @@
+---
+/**
+ * Prototype B hero diagram: SAM drawn as an operating-system stack, as tilted glass layers.
+ * Static, illustrative. Every chip names something that ships today.
+ */
+const layers = [
+  {
+    name: 'Ways in',
+    chips: ['Web app', 'Phone', 'MCP tools', 'GitHub events', 'Webhooks', 'Schedules'],
+  },
+  {
+    name: 'Agents',
+    chips: ['Claude Code', 'Codex', 'Gemini CLI', 'OpenCode', 'Mistral Vibe', '+2 more'],
+    live: true,
+  },
+  {
+    name: 'Services',
+    chips: ['Placement', 'Subtasks', 'Messages', 'Memory', 'Rules', 'Secrets'],
+  },
+  {
+    name: 'People',
+    chips: ['Members', 'Profiles', 'Who pays', 'Usage'],
+  },
+  {
+    name: 'Machines',
+    chips: ['GCP', 'Hetzner', 'Scaleway', 'Vultr', 'DigitalOcean', 'UpCloud', 'Infomaniak'],
+  },
+];
+---
+
+<div class="stack" role="img" aria-label="SAM drawn as five layers. Ways in: web app, phone, MCP tools, GitHub events, webhooks and schedules. Agents: Claude Code, Codex, Gemini CLI, OpenCode, Mistral Vibe and more. Services: placement, subtasks, messages, memory, rules and secrets. People: members, profiles, who pays, usage. Machines: seven cloud providers.">
+  {layers.map((l, i) => (
+    <div class="layer sam-glass sam-glass-rim" style={`--i:${i}`}>
+      <span class="layer-name">{l.name}</span>
+      <span class="layer-chips">
+        {l.chips.map((c) => <span class={`chip ${l.live ? 'chip--live' : ''}`}>{c}</span>)}
+      </span>
+    </div>
+  ))}
+</div>
+
+<style>
+  .stack {
+    position: relative;
+    display: grid;
+    gap: 14px;
+    perspective: 1400px;
+    perspective-origin: 30% 10%;
+  }
+
+  .layer {
+    position: relative;
+    display: grid;
+    grid-template-columns: 96px 1fr;
+    align-items: center;
+    gap: 14px;
+    padding: 16px 18px;
+    border-radius: var(--radius-lg);
+    transform: rotateX(18deg) rotateY(-14deg) translateX(calc(var(--i) * 14px));
+    transform-origin: left center;
+  }
+
+  .layer:nth-child(2) {
+    box-shadow:
+      var(--sam-glass-v2-depth),
+      0 0 0 1px rgb(52 211 153 / 0.35),
+      0 20px 60px -20px rgb(34 197 94 / 0.45);
+  }
+
+  .layer-name {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--color-accent-strong);
+  }
+
+  .layer-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 0.8125rem;
+    color: var(--color-fg-primary);
+    background: rgb(255 255 255 / 0.05);
+    border: 1px solid rgb(255 255 255 / 0.08);
+    white-space: nowrap;
+  }
+
+  .chip--live::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--color-accent-strong);
+    box-shadow: 0 0 8px var(--color-accent-strong);
+  }
+
+  @media (max-width: 900px) {
+    .layer {
+      grid-template-columns: 1fr;
+      gap: 8px;
+      transform: none;
+    }
+  }
+</style>

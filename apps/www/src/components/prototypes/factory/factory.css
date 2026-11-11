@@ -1,0 +1,148 @@
+/*
+ * Shared layout for the software-factory homepage prototypes
+ * (src/pages/prototypes/software-factory-*.astro). Prototype only: not linked from navigation.
+ */
+
+.fx-page {
+  --fx-ink: var(--color-fg-primary);
+  --fx-muted: var(--color-fg-muted);
+  --fx-dim: var(--color-fg-dim);
+  --fx-line: rgb(52 211 153 / 0.35);
+  --fx-amber: #f5b14a;
+  overflow-x: clip;
+}
+
+.fx-section {
+  padding: 96px 0;
+}
+
+.fx-section--tight {
+  padding: 64px 0;
+}
+
+.fx-kicker {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  color: var(--color-accent-strong);
+  letter-spacing: 0.02em;
+}
+
+.fx-h2 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: clamp(1.875rem, 3.6vw, 2.75rem);
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+  color: var(--fx-ink);
+  max-width: 22ch;
+}
+
+.fx-lede {
+  font-size: 1.125rem;
+  line-height: 1.6;
+  color: var(--fx-muted);
+  max-width: 60ch;
+}
+
+.fx-head {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 48px;
+}
+
+.fx-head--center {
+  justify-items: center;
+  text-align: center;
+}
+
+.fx-head--center .fx-h2,
+.fx-head--center .fx-lede {
+  margin-inline: auto;
+}
+
+/* A framed screenshot of the real app. */
+.fx-shot {
+  position: relative;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--color-bg-inset);
+  box-shadow: var(--sam-glass-v2-depth);
+}
+
+.fx-shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.fx-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--fx-muted);
+  background: rgb(255 255 255 / 0.04);
+  border: 1px solid var(--color-border-subtle);
+  white-space: nowrap;
+}
+
+.fx-chip--live::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-accent-strong);
+  box-shadow: 0 0 8px var(--color-accent-strong);
+}
+
+.fx-chip--wait::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--fx-amber);
+}
+
+.fx-proof {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  font-family: var(--font-mono);
+  font-size: 0.78125rem;
+  color: var(--fx-dim);
+}
+
+.fx-proof span + span::before {
+  content: '·';
+  margin-right: 10px;
+  color: var(--color-accent);
+}
+
+.fx-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.fx-note {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--fx-dim);
+}
+
+@media (max-width: 767px) {
+  .fx-section {
+    padding: 64px 0;
+  }
+
+  .fx-head {
+    margin-bottom: 32px;
+  }
+
+  .fx-lede {
+    font-size: 1rem;
+  }
+}
