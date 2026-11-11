@@ -1,4 +1,11 @@
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -71,6 +78,18 @@ describe('sandbox image build context', () => {
       sources.map((s) => s.replace('scripts/', '')).sort()
     );
     expect(readdirSync(dir).sort()).toEqual(['Dockerfile', 'scripts']);
+  });
+
+  it('refuses a symlinked COPY source and a continued COPY line', () => {
+    const apiDir = mkdtempSync(join(tmpdir(), 'sam-guided-login-api-'));
+    mkdirSync(join(apiDir, 'scripts'));
+    writeFileSync(join(apiDir, '.dev.vars'), 'SECRET=1\n');
+    symlinkSync(join(apiDir, '.dev.vars'), join(apiDir, 'scripts', 'a.mjs'));
+    writeFileSync(join(apiDir, 'Dockerfile.sandbox'), 'FROM x\nCOPY scripts/a.mjs /x\n');
+    expect(() =>
+      materialiseSandboxImageContext(apiDir, mkdtempSync(join(tmpdir(), 'sam-p-')))
+    ).toThrow(/not a regular file/);
+    expect(() => dockerfileCopySources('COPY scripts/a.mjs \\\n  /x')).toThrow(/continuation/);
   });
 
   it('fails on a missing COPY source', () => {

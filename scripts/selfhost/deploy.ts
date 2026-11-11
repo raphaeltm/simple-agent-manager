@@ -46,7 +46,11 @@ import {
   tunnelWorkerVars,
 } from './box-settings.js';
 import { ensureCelldBinary, resolveEsbuild } from './celld-binary.js';
-import { buildCelldConfig, type CelldWranglerConfig } from './celld-config.js';
+import {
+  buildCelldConfig,
+  type CelldWranglerConfig,
+  OPERATOR_FORBIDDEN_VARS,
+} from './celld-config.js';
 import { ASSETS_DIR, prepareCelldProject, SOURCE_LINK, writeCelldConfig } from './celld-project.js';
 import {
   assertContainerEngineReady,
@@ -329,7 +333,7 @@ async function main(): Promise<void> {
   if (values.init) return;
   const operatorSecrets = readSecretsFile(secretsPath);
   // VM_AGENT_REQUIRED_VERSION must name the release this deploy published (or stay unset).
-  for (const name of ['BASE_DOMAIN', 'R2_BUCKET_NAME', 'VM_AGENT_REQUIRED_VERSION']) {
+  for (const name of OPERATOR_FORBIDDEN_VARS) {
     if (name in operatorSecrets) throw new Error(`${secretsPath}: ${name} is generated; remove it`);
   }
   assertPresignCredentialIsScoped(box, operatorSecrets);

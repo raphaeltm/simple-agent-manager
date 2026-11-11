@@ -58,6 +58,20 @@ export const SELFHOST_VAR_OVERRIDES: Readonly<Record<string, string>> = {
   ENVIRONMENT: 'selfhost',
 };
 
+/**
+ * Vars the deployment writes and an operator's secrets.env may not override (deploy.ts merges
+ * secrets.env last). The container declarations state what celld runs; an override would
+ * advertise guided login with no container behind it, or Instant, whose vm-agent cannot reach
+ * this box.
+ */
+export const OPERATOR_FORBIDDEN_VARS = [
+  'BASE_DOMAIN',
+  'R2_BUCKET_NAME',
+  'VM_AGENT_REQUIRED_VERSION',
+  'CONTAINER_RUNTIME_AVAILABLE',
+  'SANDBOX_CONTAINER_RUNTIME_AVAILABLE',
+] as const;
+
 /** Keys the generator owns. Values a caller passes for these are rejected. */
 const GENERATED_VAR_KEYS = [
   'BASE_DOMAIN',

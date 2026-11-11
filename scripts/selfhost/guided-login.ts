@@ -11,7 +11,7 @@
  * minimal image build context. celld builds an image from the Dockerfile's own directory, so the
  * context is materialised inside the project dir with only the files the Dockerfile copies.
  */
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join, normalize } from 'node:path';
 
 /** The one container class a box runs. VmAgentContainer (Instant) is never emitted. */
@@ -80,6 +80,9 @@ export function dockerfileCopySources(dockerfile: string): string[] {
   for (const line of dockerfile.split('\n')) {
     const match = /^\s*COPY\s+(.+)$/i.exec(line);
     if (!match) continue;
+    if (match[1]!.trim().endsWith('\\')) {
+      throw new Error(`Dockerfile COPY continuation lines are not supported: ${line.trim()}`);
+    }
     const parts = match[1]!.trim().split(/\s+/);
     if (parts.some((part) => part.startsWith('--') || part.startsWith('['))) {
       throw new Error(`Dockerfile COPY form not supported here: ${line.trim()}`);
@@ -113,6 +116,10 @@ export function materialiseSandboxImageContext(
   for (const source of dockerfileCopySources(dockerfile)) {
     const from = join(apiDir, source);
     if (!existsSync(from)) throw new Error(`${dockerfileName} copies ${source}, which is missing`);
+    // A symlink could pull any file on the box into an image stored in the fleet bucket.
+    if (!lstatSync(from).isFile()) {
+      throw new Error(`${dockerfileName} copies ${source}, which is not a regular file`);
+    }
     mkdirSync(dirname(join(target, source)), { recursive: true });
     copyFileSync(from, join(target, source));
   }

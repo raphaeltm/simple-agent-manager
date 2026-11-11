@@ -5,7 +5,11 @@ import * as TOML from '@iarna/toml';
 import { describe, expect, it } from 'vitest';
 
 import type { WranglerToml } from '../deploy/types.js';
-import { buildCelldConfig, SELFHOST_VAR_OVERRIDES } from './celld-config.js';
+import {
+  buildCelldConfig,
+  OPERATOR_FORBIDDEN_VARS,
+  SELFHOST_VAR_OVERRIDES,
+} from './celld-config.js';
 
 const WRANGLER_TOML = resolve(import.meta.dirname, '../../apps/api/wrangler.toml');
 
@@ -251,5 +255,12 @@ describe('buildCelldConfig with guided login on', () => {
         vars: { SANDBOX_CONTAINER_RUNTIME_AVAILABLE: 'true' },
       })
     ).toThrow(/generated/);
+  });
+});
+
+describe('operator overrides', () => {
+  it('cannot override the container runtime declarations from secrets.env', () => {
+    expect(OPERATOR_FORBIDDEN_VARS).toContain('CONTAINER_RUNTIME_AVAILABLE');
+    expect(OPERATOR_FORBIDDEN_VARS).toContain('SANDBOX_CONTAINER_RUNTIME_AVAILABLE');
   });
 });
