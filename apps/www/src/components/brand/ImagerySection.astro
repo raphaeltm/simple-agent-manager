@@ -33,7 +33,7 @@ import SectionHead from './SectionHead.astro';
     </figure>
 
     <ul class="bg-rules">
-      <li class="sam-glass sam-glass-rim"><strong>Capture the real UI, and recapture it.</strong> Use the marketing screenshot specs in apps/web with mock data, and re-run them when the app changes. Never draw a screen the app does not have, and never ship one it no longer has.</li>
+      <li class="sam-glass sam-glass-rim"><strong>Capture the real UI, and recapture it.</strong> Use the marketing screenshot specs in apps/web with mock data. When the app changes, capture both themes again, run <code>build:brand-captures</code> and commit the new images. Never draw a screen the app does not have, and never ship one it no longer has.</li>
       <li class="sam-glass sam-glass-rim"><strong>Ship dark and light.</strong> Every capture comes as a pair so it matches the reader's theme.</li>
       <li class="sam-glass sam-glass-rim"><strong>Frame in glass, crop with intent.</strong> Show the part that tells the story. A detail at readable size beats a whole page shrunk down.</li>
       <li class="sam-glass sam-glass-rim"><strong>Keep it sharp and light.</strong> Export at 2x, serve WebP, and give every image its width and height so nothing jumps.</li>

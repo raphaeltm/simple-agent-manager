@@ -5,12 +5,18 @@
  *   public/images/brand/app-detail{,-light}.webp   the plan and tool group, cropped from the desktop
  *
  * Capture first (apps/web, against `vite preview` with VITE_API_URL=http://localhost:4173),
- * once per theme, copying the output away between runs because Playwright clears its
- * output folder:
- *   MARKETING_THEME=dark|light PLAYWRIGHT_BASE_URL=http://localhost:4173 \
+ * once per theme. Playwright clears its output folder on every run, so copy the PNGs away
+ * between runs:
+ *   MARKETING_THEME=dark PLAYWRIGHT_BASE_URL=http://localhost:4173 \
  *     npx playwright test tests/playwright/marketing-shots-platform.spec.ts -g sam-hero \
  *     --project="Desktop (1280x800)"
- * Then: pnpm --filter @simple-agent-manager/www build:brand-captures <dir with the PNGs>
+ *   (copy ../../.codex/tmp/playwright-screenshots/sam-hero-*.png to a folder)
+ *   MARKETING_THEME=light PLAYWRIGHT_BASE_URL=http://localhost:4173 \
+ *     npx playwright test tests/playwright/marketing-shots-platform.spec.ts -g sam-hero \
+ *     --project="Desktop (1280x800)"
+ *   (copy the -light PNGs to the same folder)
+ * Then build and commit the WebP outputs:
+ *   pnpm --filter @simple-agent-manager/www build:brand-captures <that folder>
  */
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
