@@ -1,0 +1,179 @@
+---
+/**
+ * HTML version of a workflow run: build, two reviews at once, apply both, then wait for CI on the
+ * pull request. On wide containers the step details sit beside the graph, as in the app.
+ */
+import './mock.css';
+---
+
+<div class="mk wf">
+  <div class="mk-pad wf-in">
+    <p class="mk-back">‹ Workflows</p>
+    <p class="mk-h">Retry failed webhook deliveries</p>
+    <p class="wf-status"><span class="mk-badge">Running</span><span class="mk-meta">Started by you · 2 h ago</span></p>
+    <p class="wf-bar" aria-hidden="true"><span class="done"></span><span class="done"></span><span class="run"></span><span></span><span></span></p>
+    <p class="mk-meta">2 of 5 steps done · 1 running · 2 waiting</p>
+
+    <div class="wf-body">
+      <div class="graph mk-card">
+        <div class="node n1"><p><span class="ok">✓</span> 1 Build the retry schedule</p><p class="mk-meta"><b class="ok">Done</b> · Careful Builder</p></div>
+        <div class="pair" data-ring>
+          <div class="node node--hi"><p><span class="ok">✓</span> 2 Review the code</p><p class="mk-meta"><b class="ok">Done</b> · Code Reviewer</p></div>
+          <div class="node node--run"><p><span class="mk-spin" aria-hidden="true"></span> 3 Try it against a flaky endpoint</p><p class="mk-meta"><b class="ok">Running</b> · Careful Builder</p></div>
+        </div>
+        <div class="node n4 node--wait"><p>◌ 4 Apply both reviews</p><p class="mk-meta">Waiting · Careful Builder</p></div>
+        <div class="node n5 node--wait"><p><svg class="mk-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h10M7 21h10M8 3c0 5 8 5 8 9s-8 4-8 9M16 3c0 5-8 5-8 9" /></svg> 5 Wait for CI on PR #482</p><p class="mk-meta">Waiting</p></div>
+      </div>
+
+      <aside class="detail mk-card">
+        <p class="mk-meta">STEP 2 OF 5</p>
+        <p class="detail-title">Review the code</p>
+        <p><span class="mk-badge">Done</span> <span class="mk-meta">Code Reviewer · done in 29m</span></p>
+        <span class="mk-btn">Open the chat</span>
+        <p class="mk-meta">WHAT IT GETS FROM EARLIER STEPS</p>
+        <p class="detail-quote">Opened PR #482: retries back off from 1 minute to 12 hours over 3 days, and the delivery log shows each attempt.</p>
+      </aside>
+    </div>
+  </div>
+</div>
+
+<style>
+  .wf-in {
+    display: grid;
+    gap: 7px;
+  }
+
+  .wf-status {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .wf-bar {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 4px;
+  }
+
+  .wf-bar span {
+    height: 5px;
+    border-radius: 3px;
+    background: var(--mk-line);
+  }
+
+  .wf-bar .done {
+    background: color-mix(in srgb, var(--mk-green) 70%, transparent);
+  }
+
+  .wf-bar .run {
+    background: var(--mk-green);
+  }
+
+  .wf-body {
+    display: grid;
+    gap: 12px;
+    margin-top: 6px;
+  }
+
+  @container (min-width: 600px) {
+    .wf-body {
+      grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+    }
+  }
+
+  .graph {
+    position: relative;
+    display: grid;
+    gap: 22px;
+    justify-items: center;
+    padding: 16px 12px;
+    font-size: 0.9em;
+  }
+
+  /* The flow's spine runs behind the steps, which sit on it like stations. */
+  .graph::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 34px;
+    bottom: 34px;
+    width: 2px;
+    transform: translateX(-50%);
+    background: linear-gradient(to bottom, var(--mk-green) 0 42%, var(--mk-line-strong) 42%);
+  }
+
+  .node {
+    position: relative;
+    display: grid;
+    gap: 3px;
+    padding: 8px 10px;
+    border-radius: 9px;
+    background: var(--mk-raised);
+    border: 1px solid var(--mk-line);
+  }
+
+  .node p:first-child {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    font-weight: 700;
+  }
+
+  .n1,
+  .n4,
+  .n5 {
+    width: 52%;
+  }
+
+  .pair {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    width: 100%;
+    border-radius: 11px;
+  }
+
+  .node--hi {
+    border: 2px solid var(--mk-green);
+  }
+
+  .node--run {
+    border-color: color-mix(in srgb, var(--mk-green) 55%, transparent);
+  }
+
+  .node--wait {
+    color: var(--mk-muted);
+    border-style: dashed;
+  }
+
+  .ok {
+    color: var(--mk-green);
+  }
+
+  .detail {
+    display: none;
+  }
+
+  @container (min-width: 600px) {
+    .detail {
+      display: grid;
+      align-content: start;
+      justify-items: start;
+      gap: 8px;
+      padding: 14px;
+      font-size: 0.92em;
+    }
+  }
+
+  .detail-title {
+    font-weight: 700;
+    font-size: 1.15em;
+  }
+
+  .detail-quote {
+    padding: 8px 10px;
+    border-radius: 8px;
+    color: var(--mk-muted);
+    border: 1px solid var(--mk-line);
+  }
+</style>

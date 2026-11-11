@@ -7,7 +7,7 @@
  * few seconds and then holds still, so the section needs no pause control.
  */
 import { SINGLE_VM_INSTALL_SHIPPED } from '../../data/factory-shots';
-import Shot from './Shot.astro';
+import MockMachine from './mock/MockMachine.astro';
 
 const facts = [
   {
@@ -64,8 +64,7 @@ const facts = [
 
     <figure class="floor-figure" data-reveal data-play>
       <div class="fh-frame floor-frame">
-        <Shot name="machine" />
-        <span class="floor-ring" aria-hidden="true"></span>
+        <MockMachine />
       </div>
       <p class="floor-chip" aria-hidden="true">
         <span class="floor-dot"></span>Short on memory: saving the session to restart it on another machine
@@ -176,22 +175,12 @@ const facts = [
   }
 
   .floor-figure {
+    /* The task that ran out of memory is ringed in amber. */
+    --fh-ring: var(--fh-amber);
     position: relative;
     margin: 0;
     display: grid;
     gap: 12px;
-  }
-
-  /* Ring around the task that ran out of memory (its row on the machine, in % of the image). */
-  .floor-ring {
-    position: absolute;
-    left: 3.5%;
-    top: 71.2%;
-    width: 93%;
-    height: 11.7%;
-    border-radius: 10px;
-    box-shadow: 0 0 0 2px var(--fh-amber), 0 0 30px -6px var(--fh-amber);
-    opacity: 0;
   }
 
   .floor-chip {
@@ -223,29 +212,12 @@ const facts = [
     flex: none;
   }
 
-  [data-play].is-in .floor-ring {
-    animation: floor-ring 2.6s ease 0.8s both;
-  }
-
   [data-play].is-in .floor-chip {
     transition:
       opacity 0.5s ease 2s,
       transform 0.7s cubic-bezier(0.2, 1.3, 0.3, 1) 2s;
     opacity: 1;
     transform: none;
-  }
-
-  @keyframes floor-ring {
-    0% {
-      opacity: 0;
-    }
-    25%,
-    70% {
-      opacity: 1;
-    }
-    100% {
-      opacity: 0.45;
-    }
   }
 
   .floor-bridge {
@@ -263,18 +235,11 @@ const facts = [
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .floor-ring {
-      opacity: 0.45;
-    }
-
     .floor-chip {
       opacity: 1;
       transform: none;
     }
 
-    [data-play].is-in .floor-ring {
-      animation: none;
-    }
   }
 
   @media (max-width: 900px) {

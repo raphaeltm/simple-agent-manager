@@ -1,0 +1,235 @@
+/*
+ * Shared look for the homepage's HTML versions of SAM screens (src/components/factory/mock/).
+ * They mirror the app's components and the Northwind Labs mock data, follow the site theme, and
+ * reflow with their container (container queries), so phones get a real narrow layout.
+ */
+
+.mk {
+  --mk-bg: #0b1311;
+  --mk-surface: #121c19;
+  --mk-raised: #17231f;
+  --mk-line: rgb(255 255 255 / 0.09);
+  --mk-line-strong: rgb(255 255 255 / 0.16);
+  --mk-ink: #e6f2ee;
+  --mk-muted: #9fb7ae;
+  --mk-dim: #7d968c;
+  --mk-green: #22c55e;
+  --mk-green-soft: rgb(34 197 94 / 0.14);
+  --mk-btn: #16a34a;
+  --mk-amber: #f59e0b;
+  --mk-red: #ef4444;
+  --mk-blue: #60a5fa;
+  --mk-violet: #c084fc;
+  container-type: inline-size;
+  display: block;
+  text-align: left;
+  color: var(--mk-ink);
+  background: var(--mk-bg);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+html[data-theme='light'] .mk {
+  --mk-bg: #f3f7f4;
+  --mk-surface: #fbfdfb;
+  --mk-raised: #ffffff;
+  --mk-line: rgb(17 39 29 / 0.12);
+  --mk-line-strong: rgb(17 39 29 / 0.22);
+  --mk-ink: #11271d;
+  --mk-muted: #45584f;
+  --mk-dim: #46594f;
+  /* Deeper green and amber in light mode, so small labels on tinted fills keep 4.5:1. */
+  --mk-green: #166534;
+  --mk-green-soft: rgb(21 128 61 / 0.12);
+  --mk-btn: #15803d;
+  --mk-amber: #92400e;
+  --mk-red: #b91c1c;
+  --mk-blue: #1d4ed8;
+  --mk-violet: #7e22ce;
+}
+
+.mk p,
+.mk h4,
+.mk ul {
+  margin: 0;
+}
+
+.mk ul {
+  list-style: none;
+  padding: 0;
+}
+
+.mk-pad {
+  padding: 18px 20px;
+}
+
+.mk-h {
+  font-size: 1.45em;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.mk-sub {
+  color: var(--mk-muted);
+}
+
+.mk-meta {
+  font-size: 0.85em;
+  color: var(--mk-dim);
+}
+
+.mk-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+}
+
+.mk-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 0.78em;
+  color: var(--mk-muted);
+  background: var(--mk-line);
+}
+
+.mk-back {
+  font-size: 0.85em;
+  color: var(--mk-muted);
+}
+
+.mk-card {
+  border-radius: 12px;
+  border: 1px solid var(--mk-line);
+  background: var(--mk-surface);
+}
+
+.mk-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: 0.92em;
+  white-space: nowrap;
+  color: #fff;
+  background: var(--mk-btn);
+}
+
+.mk-btn--ghost {
+  color: var(--mk-ink);
+  background: transparent;
+  border: 1px solid var(--mk-line-strong);
+}
+
+.mk-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 0.78em;
+  font-weight: 700;
+  color: var(--mk-green);
+  background: var(--mk-green-soft);
+}
+
+.mk-badge--amber {
+  color: var(--mk-amber);
+  background: color-mix(in srgb, var(--mk-amber) 14%, transparent);
+}
+
+.mk-avatar {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font-size: 0.7em;
+  font-weight: 700;
+  color: var(--mk-green);
+  background: var(--mk-green-soft);
+  border: 1px solid color-mix(in srgb, var(--mk-green) 40%, transparent);
+}
+
+.mk-ico {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.mk-mono {
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+/* Profile ring: a conic gauge of how much of the account is left, round the agent's initial. */
+.mk-ring {
+  --left: 72;
+  --ring: var(--mk-green);
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background:
+    radial-gradient(closest-side, var(--mk-surface) 78%, transparent 80%),
+    conic-gradient(var(--ring) 0 calc(var(--left) * 1%), var(--mk-line) calc(var(--left) * 1%) 100%);
+}
+
+.mk-ring span {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font-size: 0.8em;
+  font-weight: 700;
+  color: var(--mk-amber);
+  background: color-mix(in srgb, var(--mk-amber) 14%, transparent);
+}
+
+.mk-ring--low {
+  --left: 6;
+  --ring: var(--mk-amber);
+}
+
+.mk-ring--codex span {
+  color: var(--mk-blue);
+  background: color-mix(in srgb, var(--mk-blue) 14%, transparent);
+}
+
+.mk-spin {
+  display: inline-block;
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--mk-green) 30%, transparent);
+  border-top-color: var(--mk-green);
+  animation: mk-spin 1s linear 5;
+}
+
+@keyframes mk-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mk-spin {
+    animation: none;
+  }
+}

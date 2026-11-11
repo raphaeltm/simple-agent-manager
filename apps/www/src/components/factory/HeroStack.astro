@@ -7,11 +7,12 @@
  * pointer. The markup is the resting frame: no-JS and reduced-motion visitors see it composed.
  */
 import HeroCard from './HeroCard.astro';
+import MockMachine from './mock/MockMachine.astro';
 import Shot from './Shot.astro';
 
-// The two big screens are captures; the small cards are HTML (HeroCard) so they stay sharp.
+// The home screen is a capture; everything else is HTML (HeroCard, MockMachine) so it stays sharp.
 const planes = [
-  { id: 'machine', shot: 'machine', label: 'Machines in your cloud', z: -120 },
+  { id: 'machine', label: 'Machines in your cloud', z: -120 },
   { id: 'app', shot: 'dashboard', label: 'Your team’s work', z: 0 },
   { id: 'agent', card: 'agent', label: 'Agents you choose', z: 80 },
   { id: 'wf', card: 'wf', label: 'Steps they run', z: 60 },
@@ -26,7 +27,7 @@ const planes = [
       <div class={`hs-plane hs-${p.id}`} style={`--z:${p.z};--i:${i}`} data-plane={p.id}>
         <div class="hs-float">
           <div class="hs-card">
-            {'shot' in p ? <Shot name={p.shot} eager decorative={p.id !== 'app'} /> : <HeroCard kind={p.card} />}
+            {p.id === 'machine' ? <MockMachine /> : 'shot' in p ? <Shot name={p.shot} eager /> : <HeroCard kind={p.card} />}
           </div>
           <span class="hs-fig" aria-hidden="true">{String(i + 1).padStart(2, '0')} · {p.label}</span>
         </div>
@@ -58,6 +59,10 @@ const planes = [
     transform-style: preserve-3d;
     transform: translateY(var(--ty, 0px)) rotateX(calc(var(--sx) + var(--rx, 0deg)))
       rotateY(calc(var(--sy) + var(--ry, 0deg))) rotateZ(var(--sz)) scale(var(--sc));
+  }
+
+  /* The pose eases only while the stack assembles; pointer tilt eases itself (hero-motion.ts). */
+  :global([data-motion='assembling']) .hs-stack {
     transition: transform 1800ms var(--ease-pose);
   }
 
@@ -121,9 +126,10 @@ const planes = [
       0 1px 0 rgb(255 255 255 / 0.12) inset,
       0 26px 60px -22px rgb(0 0 0 / 0.85),
       0 0 0 0 transparent;
+    /* Beats ease in and out slowly: a card lifts a little and glows, then settles. */
     transition:
-      box-shadow 600ms ease,
-      transform 600ms cubic-bezier(0.2, 1.3, 0.3, 1);
+      box-shadow 1600ms ease-in-out,
+      transform 1800ms cubic-bezier(0.37, 0, 0.25, 1);
   }
 
   :global(html[data-theme='light']) .hs-card {
@@ -204,7 +210,7 @@ const planes = [
 
   /* Beats: one card at a time lights up (hero-motion.ts sets data-beat on the stage). */
   :global([data-beat='needs']) .hs-needs .hs-card {
-    transform: translateZ(30px) scale(1.03);
+    transform: translateZ(14px) scale(1.012);
     box-shadow:
       0 0 0 2px var(--fh-amber),
       0 0 46px -6px var(--fh-amber),
@@ -214,7 +220,7 @@ const planes = [
   :global([data-beat='agent']) .hs-agent .hs-card,
   :global([data-beat='wf']) .hs-wf .hs-card,
   :global([data-beat='review']) .hs-review .hs-card {
-    transform: translateZ(30px) scale(1.04);
+    transform: translateZ(14px) scale(1.015);
     box-shadow:
       0 0 0 2px var(--fh-ring),
       0 0 46px -6px var(--fh-ring),

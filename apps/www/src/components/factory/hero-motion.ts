@@ -40,7 +40,7 @@ const INTRO_HOLD_MS = 1300;
 const IMAGE_WAIT_MS = 2500;
 
 /** Resolves once enough of the element is on screen for the visitor to see it move. */
-function inView(el: HTMLElement | null, ratio = 0.3): Promise<void> {
+function inView(el: HTMLElement | null, ratio = 0.2): Promise<void> {
   if (!el || !('IntersectionObserver' in window)) return Promise.resolve();
   return new Promise((resolve) => {
     const io = new IntersectionObserver(
@@ -72,7 +72,7 @@ function stackImagesReady(stack: HTMLElement | null): Promise<void> {
   ]);
 }
 const ASSEMBLE_MS = 1900;
-const BEAT_MS = 2600;
+const BEAT_MS = 4200;
 
 export function initFactoryHero(hero: HTMLElement) {
   const fieldRoot = hero.querySelector<HTMLElement>('[data-fh-field]');
