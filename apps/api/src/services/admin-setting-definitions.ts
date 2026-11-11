@@ -1,6 +1,7 @@
 import type { Env } from '../env';
 import { type GcpCatalogSettingName } from './admin-settings-gcp-catalog-definitions';
 import type { NodeTunnelSettingName } from './admin-settings-node-tunnel-definitions';
+import { type OutboundSettingName } from './admin-settings-outbound-definitions';
 import { type AgentEmailSettingName } from './agent-email/setting-definitions';
 import { type AgentModelSettingKey } from './agent-models/settings-definition';
 import { type ConnectorReadSettingName } from './connector-read-settings-definition';
@@ -32,6 +33,7 @@ export type AdminSettingName =
   | LlmEndpointSettingName
   | GcpCatalogSettingName
   | OperationsTelemetrySettingName
+  | OutboundSettingName
   | 'chat.profileUsageWindowDays'
   | 'nodes.usageWindowMinutes'
   | 'nodes.usageChunkLookbackMinutes'

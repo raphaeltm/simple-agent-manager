@@ -253,8 +253,11 @@ async function hasEmergencyVeto(
 }
 export type OverrideRows = Awaited<ReturnType<AdminSettingsCache['read']>>;
 function validStoredValue(def: AdminSettingDefinition, value: unknown): boolean {
-  // Preserve legacy nonempty OAuth values; stricter validation applies to new edits.
-  if (def.category === 'OAuth') return typeof value === 'string' && Boolean(value.trim());
+  // Preserve legacy nonempty OAuth strings; stricter validation applies to new edits. A
+  // non-string OAuth setting (integration.gitlab.allowPrivateNetwork) has its own validator.
+  if (def.category === 'OAuth' && def.type === 'string') {
+    return typeof value === 'string' && Boolean(value.trim());
+  }
   return def.validate(value);
 }
 async function credentialDetails(

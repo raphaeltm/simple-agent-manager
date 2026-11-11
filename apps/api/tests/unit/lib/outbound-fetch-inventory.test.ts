@@ -16,7 +16,7 @@ const SRC = resolve(import.meta.dirname, '../../../src');
 const CONSTANT = 'fixed provider host (constant URL); path/query from platform data only';
 const OPERATOR = 'operator-configured env var, not user-settable';
 const PLATFORM_NODE =
-  'platform-built node URL (node row, or 127.0.0.1:{lease} with redirect: manual on self-host)';
+  'platform-built node URL (node row, or 127.0.0.1:{lease} on self-host); redirect: manual on every transport (nodeAgentRequestInit)';
 
 /** Files whose outbound URLs no user, member or node chooses, with the reason. */
 const NOT_USER_CONTROLLED: Record<string, string> = {
@@ -31,8 +31,6 @@ const NOT_USER_CONTROLLED: Record<string, string> = {
   'routes/admin-analytics-query.ts': `Cloudflare Analytics API: ${OPERATOR}, superadmin route`,
   'routes/ai-proxy-anthropic.ts': `Anthropic / AI Gateway: ${CONSTANT}`,
   'routes/google-auth.ts': `Google OAuth: ${CONSTANT}`,
-  'routes/mcp/workspace-tools-direct.ts':
-    'check_dns_status: https://ws-{id}.{BASE_DOMAIN}, redirect: manual (node-answered, never followed)',
   'routes/project-deployment.ts': `Google token endpoint: ${CONSTANT}`,
   'routes/projects/devcontainer-configs.ts': `api.github.com: ${CONSTANT}`,
   'routes/workspace-subdomain-proxy.ts': PLATFORM_NODE,

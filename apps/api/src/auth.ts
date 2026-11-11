@@ -19,6 +19,7 @@ import {
 } from './services/bootstrap-owner';
 import { emailSignInPlugins } from './services/email-sign-in';
 import { refreshGitHubAccessToken } from './services/github-oauth-refresh';
+import { gitLabLoginProvider } from './services/gitlab-login-provider';
 import {
   resolveLoginOAuthConfig,
   selectGitHubOAuthConfig,
@@ -268,15 +269,11 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
     };
   }
 
-  if (gitlabOAuth) {
+  // Not registered when the admin's GitLab host may not be called (gitlab-login-provider.ts).
+  const gitlabProvider = gitlabOAuth ? gitLabLoginProvider(env, gitlabOAuth) : null;
+  if (gitlabProvider) {
     trustedProviders.push('gitlab');
-    socialProviders.gitlab = {
-      clientId: gitlabOAuth.clientId,
-      clientSecret: gitlabOAuth.clientSecret,
-      issuer: gitlabOAuth.host,
-      scope: ['read_user', 'api', 'read_repository', 'write_repository'],
-      overrideUserInfoOnSignIn: true,
-    };
+    socialProviders.gitlab = gitlabProvider;
   }
 
   return betterAuth({

@@ -1663,6 +1663,18 @@ lifecycle bookkeeping.
 | `DIGITALOCEAN_REGION`                      | `fra1`             | Default DigitalOcean region                                           |
 | `DIGITALOCEAN_IMAGE`                       | `ubuntu-24-04-x64` | Default Droplet image slug                                            |
 | `CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS` | `120000`           | Instant-session create-workspace budget (includes in-container clone) |
+| `GITLAB_API_TIMEOUT_MS`                    | `30000`            | One deadline for a whole GitLab API call, every redirect hop included |
+
+### Outbound requests to URLs a user or admin chose
+
+SAM never lets the runtime follow a redirect for a URL a user or admin chose (AI proxy base URLs, the OpenAI-compatible endpoint, GitLab, `check_dns_status`). It checks every hop itself (`apps/api/src/lib/network-hosts/guarded-fetch.ts`). A hop to another origin keeps only `Accept`, `Accept-Language`, `Content-Type`, `Content-Language` and `User-Agent`; every other header, including any credential, is dropped.
+
+| Admin setting | Default | Meaning |
+| --- | --- | --- |
+| `outbound.maxRedirects` | `3` | Redirect hops followed, each re-checked, range 0–10. `0` refuses every redirect. Category **Operations**. |
+| `integration.gitlab.allowPrivateNetwork` | `false` | Allow a GitLab host on this machine or its private network for sign-in and the GitLab API. Off: such a host is refused (API calls answer `400 GITLAB_PRIVATE_NETWORK_NOT_ALLOWED`) and GitLab sign-in is not offered. Metadata and link-local hosts are refused either way. Category **OAuth**. |
+
+A GitLab request SAM refuses mid-flight (a redirect to a refused host, too many redirects) answers `502 GITLAB_REQUEST_REFUSED`; one that passes `GITLAB_API_TIMEOUT_MS` answers `504 GITLAB_TIMEOUT`. GitLab token exchange and refresh are better-auth requests that refuse every redirect; SAM fetches the GitLab profile itself through the checks above.
 
 ## Admin Observability
 

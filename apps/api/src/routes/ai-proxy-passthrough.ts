@@ -84,7 +84,7 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages', async (c) => {
   const upstreamUrl = joinUpstreamUrl(upstream.baseUrl, 'v1/messages');
 
   try {
-    const upstreamResponse = await fetchProxyUpstream(upstreamUrl, upstreamHeaders, body);
+    const upstreamResponse = await fetchProxyUpstream(c.env, upstreamUrl, upstreamHeaders, body);
 
     log.info('ai_proxy_passthrough.anthropic.response', {
       userId,
@@ -169,7 +169,7 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages/count_tokens', as
   const countTokensUrl = joinUpstreamUrl(upstream.baseUrl, 'v1/messages/count_tokens');
 
   try {
-    const upstreamResponse = await fetchProxyUpstream(countTokensUrl, upstreamHeaders, body);
+    const upstreamResponse = await fetchProxyUpstream(c.env, countTokensUrl, upstreamHeaders, body);
 
     if (!upstreamResponse.ok) {
       log.error('ai_proxy_passthrough.anthropic.count_tokens_error', {
@@ -247,7 +247,7 @@ aiProxyPassthroughRoutes.post('/:wstoken/openai/v1/chat/completions', async (c) 
   });
 
   try {
-    const upstreamResponse = await fetchProxyUpstream(upstreamUrl, upstreamHeaders, body);
+    const upstreamResponse = await fetchProxyUpstream(c.env, upstreamUrl, upstreamHeaders, body);
 
     log.info('ai_proxy_passthrough.openai.response', {
       userId,

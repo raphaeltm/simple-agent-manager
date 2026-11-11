@@ -120,7 +120,8 @@ export async function probeNodeHealthForTaskLiveness(
     VM_AGENT_PORT: env.VM_AGENT_PORT,
   };
   let url = `${getNodeBackendBaseUrl(nodeId, backendEnv)}/health`;
-  let init: RequestInit = { method: 'GET' };
+  // Never follow a node's redirect, on any transport (node-agent-route.ts).
+  const init = nodeAgentRequestInit({ method: 'GET' });
   // Existing transports keep the exact budget they always had; only the reverse-tunnel route
   // read spends part of it.
   let fetchTimeoutMs = timeoutMs;
@@ -142,7 +143,6 @@ export async function probeNodeHealthForTaskLiveness(
         timeoutMs
       );
       url = retargetNodeAgentUrl(url, route);
-      init = nodeAgentRequestInit(route, init);
       fetchTimeoutMs = Math.max(1, timeoutMs - (Date.now() - startedAt));
     }
     const response = await fetchWithTimeout(url, init, fetchTimeoutMs);

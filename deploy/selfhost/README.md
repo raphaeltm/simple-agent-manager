@@ -149,6 +149,15 @@ in `.env` (for example `127.0.0.1:11434`), then `pnpm selfhost:deploy --init`; t
 picks up the re-rendered rules within `SAM_EGRESS_FENCE_RECHECK_SECONDS`. The deploy refuses an
 entry that would open celld's, frps's or the store console's port on any local address.
 
+A self-managed GitLab on this machine or the private network (`integration.gitlab.host`, for
+example `http://10.0.0.5`) is refused for sign-in and API calls until an admin turns on
+`integration.gitlab.allowPrivateNetwork` (Admin, Settings, OAuth); sign-in with it is not offered
+until then. The fence still rejects the address: add it to `SAM_EGRESS_ALLOW` (for example
+`10.0.0.5:443`) and run `pnpm selfhost:deploy --init`, as for a local model server. SAM never
+follows a redirect from GitLab to another private host, and celld's TLS client trusts only public
+certificate authorities, so a private GitLab must serve a publicly trusted certificate or plain
+HTTP on the private network.
+
 Other limits: the loopback lease range (20000-29999 by default) is open to celld, so do not run
 other services on those ports. Nameservers come from `/etc/resolv.conf` when the deploy runs;
 re-run `pnpm selfhost:deploy --init` if they change. celld's entrypoint re-checks the fence every

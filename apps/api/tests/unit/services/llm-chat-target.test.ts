@@ -140,6 +140,8 @@ describe('resolveWorkersAiChatTarget', () => {
       apiKey: 'sk-endpoint-key',
       model: 'title-model',
       allowPrivateNetwork: true,
+      // outbound.maxRedirects, read in the same settings batch.
+      maxRedirects: 3,
     });
     expect((await resolveWorkersAiChatTarget(env, 'diagnosis', '@cf/m/x'))?.model).toBe(
       'default-model'

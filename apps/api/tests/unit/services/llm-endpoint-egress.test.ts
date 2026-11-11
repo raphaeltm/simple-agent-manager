@@ -182,6 +182,33 @@ describe('every endpoint caller follows a validated redirect hop', () => {
   });
 });
 
+describe('every endpoint caller stops at outbound.maxRedirects', () => {
+  it.each(CALLERS)('%s', async (_name, call) => {
+    await configureEndpoint({ baseUrl: 'https://llm.example.com/v1', model: 'm' });
+    await updateAdminSettings(env, {
+      changes: [{ name: 'outbound.maxRedirects', value: 2 }],
+      actorUserId: 'admin',
+    });
+    // Every response redirects one hop further on the same public origin, forever.
+    fetchMock = vi.fn(async (input: string | Request) => {
+      const url = new URL(input instanceof Request ? input.url : input);
+      const hop = Number(/\/hop(\d+)$/.exec(url.pathname)?.[1] ?? '0') + 1;
+      return new Response(null, {
+        status: 307,
+        headers: { Location: `https://llm.example.com/v1/hop${hop}` },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await call().catch(() => undefined);
+
+    // Liveness: the limit was reached (hop2 requested); the third hop never was. A caller
+    // may retry the whole request, so only the hop depth is asserted, not the call count.
+    expect(requestedUrls()).toContain('https://llm.example.com/v1/hop2');
+    expect(requestedUrls()).not.toContain('https://llm.example.com/v1/hop3');
+  });
+});
+
 describe('a private-network endpoint is an explicit admin opt-in', () => {
   it('is refused with an actionable reason, without any request, when not opted in', async () => {
     await configureEndpoint({ baseUrl: 'http://127.0.0.1:11434/v1', model: 'llama' });

@@ -368,3 +368,37 @@ describe('every passthrough route goes through the guarded fetch', () => {
     expect(routedFetch).not.toHaveBeenCalled();
   });
 });
+
+describe('a redirect chain longer than the hop limit (outbound.maxRedirects, default 3)', () => {
+  it.each([
+    ['OpenAI chat', CHAT_PATH, 'openai'],
+    ['Anthropic messages', '/ai/proxy/ws-token/anthropic/v1/messages', 'anthropic'],
+    [
+      'Anthropic count_tokens',
+      '/ai/proxy/ws-token/anthropic/v1/messages/count_tokens',
+      'anthropic',
+    ],
+  ])('%s stops after the limit and answers 502', async (_name, path, dialect) => {
+    let hop = 0;
+    attackerRedirect = {
+      status: 307,
+      location: () => `https://attacker.test.example/loop/${(hop += 1)}`,
+    };
+    if (dialect === 'openai') {
+      credentialWithBaseUrl('https://attacker.test.example/v1');
+    } else {
+      auth.agentType = 'claude-code';
+      anthropicConfigurationWithBaseUrl('https://attacker.test.example/anthropic');
+    }
+
+    const res = await (dialect === 'openai' ? postChat() : postTo(path));
+
+    // The first request plus three validated hops; the fourth Location is never requested.
+    expect(attacker.hits.map((hit) => hit.url).slice(1)).toEqual([
+      '/loop/1',
+      '/loop/2',
+      '/loop/3',
+    ]);
+    expect(res.status).toBe(502);
+  });
+});

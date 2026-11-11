@@ -32,12 +32,21 @@ function normalizeBaseUrl(value: string): string {
   }
 }
 
-export function selectGitLabOAuthConfig(config: Pick<ResolvedLoginOAuthConfig, 'gitlab'>): {
+export interface GitLabOAuthConfig {
   host: string;
   apiBaseUrl: string;
   clientId: string;
   clientSecret: string;
-} | null {
+  /**
+   * `integration.gitlab.allowPrivateNetwork`. A host on the private network is refused unless
+   * this is on (services/gitlab-host-policy.ts); it is never inferred from the host itself.
+   */
+  allowPrivateNetwork: boolean;
+}
+
+export function selectGitLabOAuthConfig(
+  config: Pick<ResolvedLoginOAuthConfig, 'gitlab' | 'gitlabAllowPrivateNetwork'>
+): GitLabOAuthConfig | null {
   if (
     !config.gitlab.host.value ||
     !config.gitlab.clientId.value ||
@@ -50,15 +59,11 @@ export function selectGitLabOAuthConfig(config: Pick<ResolvedLoginOAuthConfig, '
     apiBaseUrl: `${host}/api/v4`,
     clientId: config.gitlab.clientId.value,
     clientSecret: config.gitlab.clientSecret.value,
+    allowPrivateNetwork: config.gitlabAllowPrivateNetwork === true,
   };
 }
 
-export async function getGitLabOAuthConfig(env: Env): Promise<{
-  host: string;
-  apiBaseUrl: string;
-  clientId: string;
-  clientSecret: string;
-} | null> {
+export async function getGitLabOAuthConfig(env: Env): Promise<GitLabOAuthConfig | null> {
   return selectGitLabOAuthConfig(await resolveLoginOAuthConfig(env));
 }
 

@@ -200,6 +200,7 @@ describe('admin platform config routes', () => {
       apiBaseUrl: 'https://gitlab.admin.example.com/api/v4',
       clientId: 'gitlab-admin-client',
       clientSecret: 'gitlab-admin-secret',
+      allowPrivateNetwork: false,
     });
   });
 

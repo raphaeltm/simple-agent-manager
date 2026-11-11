@@ -359,6 +359,7 @@ describe('platform config resolver', () => {
       apiBaseUrl: 'https://gitlab.runtime.example.com/api/v4',
       clientId: 'runtime-gitlab-client',
       clientSecret: 'runtime-gitlab-secret',
+      allowPrivateNetwork: false,
     });
   });
 

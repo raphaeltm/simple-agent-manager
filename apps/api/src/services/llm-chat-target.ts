@@ -23,6 +23,7 @@ import {
   normalizeLlmBaseUrl,
   validLlmBaseUrl,
 } from './llm-endpoint-settings';
+import { outboundMaxRedirectsValue } from './outbound-fetch-settings';
 import { hasCloudflareAccountApi, resolveAiGatewayId } from './platform-capabilities';
 
 export type { LlmPurpose } from './llm-endpoint-settings';
@@ -42,6 +43,8 @@ export interface ChatCompletionsTarget {
    * (`llm.openAICompatible.allowPrivateNetwork`). Only meaningful for `openai-compatible`.
    */
   allowPrivateNetwork: boolean;
+  /** Redirect hops the guarded fetch follows (`outbound.maxRedirects`). Only for `openai-compatible`. */
+  maxRedirects?: number;
 }
 
 /**
@@ -97,7 +100,10 @@ export function fetchChatTarget(
   url: string = target.url
 ): Promise<Response> {
   if (isCloudflareChatTarget(target)) return fetch(url, init);
-  return guardedFetch(url, init, { allowPrivateNetwork: target.allowPrivateNetwork });
+  return guardedFetch(url, init, {
+    allowPrivateNetwork: target.allowPrivateNetwork,
+    maxRedirects: target.maxRedirects,
+  });
 }
 
 function stringValue(value: unknown): string | null {
@@ -158,12 +164,13 @@ export async function resolveOpenAICompatibleTarget(
       'llm.openAICompatible.model',
       LLM_PURPOSE_MODEL_SETTING[purpose],
       'llm.openAICompatible.allowPrivateNetwork',
+      'outbound.maxRedirects',
     ]);
     values = details.map((detail) => detail.value);
   } catch (err) {
     throw settingsUnreadable(purpose, err);
   }
-  const [apiKey, defaultModel, purposeModel, allowPrivate] = values;
+  const [apiKey, defaultModel, purposeModel, allowPrivate, maxRedirects] = values;
   const model = stringValue(purposeModel) ?? stringValue(defaultModel) ?? requestedModel;
   if (!model) return null;
   const normalized = normalizeLlmBaseUrl(String(baseUrl));
@@ -172,13 +179,10 @@ export async function resolveOpenAICompatibleTarget(
   if (!allowPrivateNetwork && classifyHost(new URL(normalized).hostname) === 'private') {
     throw new LlmUnavailableError(purpose, 'private_network_not_allowed');
   }
-  return chatTarget(
-    'openai-compatible',
-    normalized,
-    stringValue(apiKey),
-    model,
-    allowPrivateNetwork
-  );
+  return {
+    ...chatTarget('openai-compatible', normalized, stringValue(apiKey), model, allowPrivateNetwork),
+    maxRedirects: outboundMaxRedirectsValue(maxRedirects),
+  };
 }
 
 /** Cloudflare's Workers AI chat route (gateway first, then REST), or null off Cloudflare. */
