@@ -19,15 +19,38 @@ export interface SessionFactoryUser {
 export interface CreatedSessionCookie {
   cookieHeader: string;
   sessionCookie: string;
+  sessionId: string;
+  expiresAt: Date;
+}
+
+export interface SessionLifetimeOptions {
+  /**
+   * Fixed lifetime for this session, in seconds, applied to both the stored session and the
+   * cookie. Omitted: BetterAuth's normal lifetime and API_TOKEN_SESSION_DURATION_SECONDS.
+   * BetterAuth extends a session on refresh, so a caller that needs a hard cap must also
+   * record it where the session.update hook in `auth.ts` can clamp to it.
+   */
+  ttlSeconds?: number;
 }
 
 export async function createSessionCookieForUser(
   env: Env,
-  userId: string
+  userId: string,
+  options: SessionLifetimeOptions = {}
 ): Promise<CreatedSessionCookie> {
   const auth = await createAuth(env);
   const ctx = await auth.$context;
-  const session = await ctx.internalAdapter.createSession(userId, false);
+  const { ttlSeconds } = options;
+  const session =
+    ttlSeconds === undefined
+      ? await ctx.internalAdapter.createSession(userId, false)
+      : // overrideAll lets our expiresAt replace BetterAuth's default lifetime.
+        await ctx.internalAdapter.createSession(
+          userId,
+          false,
+          { expiresAt: new Date(Date.now() + ttlSeconds * 1000) },
+          true
+        );
 
   if (!session) {
     throw errors.badRequest('Failed to create session');
@@ -49,7 +72,9 @@ export async function createSessionCookieForUser(
   const isSecure = `https://api.${baseDomain}`.startsWith('https://');
   const cookieName = isSecure ? '__Secure-better-auth.session_token' : 'better-auth.session_token';
   const sessionDurationSeconds =
-    parseInt(env.API_TOKEN_SESSION_DURATION_SECONDS || '', 10) || DEFAULT_SESSION_DURATION_SECONDS;
+    ttlSeconds ??
+    (parseInt(env.API_TOKEN_SESSION_DURATION_SECONDS || '', 10) ||
+      DEFAULT_SESSION_DURATION_SECONDS);
   const sessionCookie = `${cookieName}=${signedValue}`;
   const cookieHeader = [
     sessionCookie,
@@ -60,7 +85,7 @@ export async function createSessionCookieForUser(
     ...(isSecure ? [`Secure`, `Domain=.${baseDomain}`] : []),
   ].join('; ');
 
-  return { cookieHeader, sessionCookie };
+  return { cookieHeader, sessionCookie, sessionId: session.id, expiresAt: session.expiresAt };
 }
 
 export async function getAuthenticatedUser(
@@ -82,9 +107,19 @@ export async function buildSessionLoginResponse(
   env: Env,
   user: SessionFactoryUser
 ): Promise<Response> {
+  return (await createSessionLogin(env, user)).response;
+}
+
+/** Sign `user` in: the approval gate, a BetterAuth session, and the login response. */
+export async function createSessionLogin(
+  env: Env,
+  user: SessionFactoryUser,
+  options: SessionLifetimeOptions = {}
+): Promise<{ response: Response; session: CreatedSessionCookie }> {
   await assertUserCanCreateSession(env, user);
-  const { cookieHeader, sessionCookie } = await createSessionCookieForUser(env, user.id);
-  return new Response(
+  const session = await createSessionCookieForUser(env, user.id, options);
+  const { cookieHeader, sessionCookie } = session;
+  const response = new Response(
     JSON.stringify({
       success: true,
       user: { id: user.id, email: user.email, name: user.name },
@@ -98,6 +133,7 @@ export async function buildSessionLoginResponse(
       },
     }
   );
+  return { response, session };
 }
 
 export async function assertUserCanCreateSession(

@@ -11,6 +11,7 @@ import type { Env } from './env';
 import { createModuleLogger } from './lib/logger';
 import { readResponseJson } from './lib/runtime-validation';
 import { getBetterAuthSecret } from './lib/secrets';
+import { clampAgentSignInSession } from './services/agent-sign-in/ledger';
 import {
   bootstrapOwnerEmail,
   bootstrapSessionAllowed,
@@ -431,6 +432,18 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
                 userId,
                 error: err instanceof Error ? err.message : String(err),
               });
+            }
+          },
+        },
+        update: {
+          // Agent sign-in sessions (services/agent-sign-in/) have a hard expiry. BetterAuth's
+          // refresh would otherwise extend them to the normal seven days on first use. No-op
+          // for every other session. Not wrapped in try/catch on purpose: if the clamp cannot
+          // run, the refreshing request fails rather than leaving an extended agent session.
+          after: async (session) => {
+            const sessionId = (session as { id?: unknown } | null)?.id;
+            if (typeof sessionId === 'string' && sessionId) {
+              await clampAgentSignInSession(env, sessionId);
             }
           },
         },
