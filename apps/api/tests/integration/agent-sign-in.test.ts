@@ -46,8 +46,8 @@ import {
   resolveAgentSignInTrust,
 } from '../../src/services/agent-sign-in/config';
 import { __resetAgentSignInKeyCacheForTest } from '../../src/services/agent-sign-in/verify';
-import { __resetPlatformConfigCacheForTest } from '../../src/services/platform-config';
 import { verifyPortAccessToken } from '../../src/services/jwt';
+import { __resetPlatformConfigCacheForTest } from '../../src/services/platform-config';
 import { createSessionCookieForUser } from '../../src/services/session-factory';
 import { assertTerminalTokenSessionLive } from '../../src/services/terminal-token-liveness';
 import {
