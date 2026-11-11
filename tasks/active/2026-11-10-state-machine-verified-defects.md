@@ -141,6 +141,11 @@ The 2026-11-10 state-machine audit (Library `/engineering/research/state-machine
     - After stop and start it went `starting → active` at 18:04:25.
     - The first stop failed on a pre-existing 5 s teardown budget (`tasks/backlog/2026-11-11-gcp-deployment-node-teardown-5s-timeout.md`); a retry succeeded.
   - D5: all three deployment nodes reached `deleted` with termination proof. Checked four times over about 80 s, none was revived by a later heartbeat.
+- 2026-11-11, final head d56e65e64 (deploy 43089832918; it includes CodeRabbit round 2 and `main`'s #2649, and the live bundle parses the pushed `wakeAttemptId`):
+  - D8: a new GCP VM chat. The open tab picked up each server-side sleep within about 1 s. Wake 1 showed 6 phases and wake 2 showed 5; both replied.
+  - D3: `terminal/ws/multi` and `terminal/ws` opened on 01M763MC96MH8JH73W5ENXA010, which stayed `running`.
+  - One sleep returned 500 (`snapshot_verify` timed out during a slow home upload) and its retry succeeded. That path is pre-existing: `tasks/backlog/2026-11-11-sleep-snapshot-verify-500.md`.
+  - Cleanup: the chat stopped, its workspace and node deleted, and task 01M7634404EYNVXGXK2TF6JDFK cancelled.
 - Not exercised live:
   - D1: needs a mission task stalled for 20 minutes. It is covered through `detectStalls` with real session rows.
   - The `deleting` node status itself was not reached on staging; it is covered by route tests on a real SQL engine.
