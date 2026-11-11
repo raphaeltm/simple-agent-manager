@@ -77,14 +77,14 @@ const INSETS: Record<FactoryInset, typeof MockIdeas> = {
           data-play
         >
           <div class="stage-art">
-            <div class="fh-frame stage-frame">
+            <div class="fh-frame stage-frame" role="img" aria-label={s.alt}>
               {(() => {
                 const Screen = SCREENS[s.screen];
                 return <Screen />;
               })()}
             </div>
             {s.inset && (
-              <div class="stage-inset">
+              <div class="stage-inset" aria-hidden="true">
                 {(() => {
                   const Inset = INSETS[s.inset];
                   return <Inset />;

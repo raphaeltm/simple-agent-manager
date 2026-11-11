@@ -165,7 +165,6 @@ export function initFactoryHero(hero: HTMLElement) {
         window.setTimeout(() => {
           hero.dataset.motion = 'live';
           sync();
-          startBeats();
         }, INTRO_HOLD_MS + ASSEMBLE_MS),
       ];
     });
@@ -187,8 +186,8 @@ export function initFactoryHero(hero: HTMLElement) {
 
   pauseButton?.addEventListener('click', () => {
     userPaused = !userPaused;
+    // One label; the pressed state says whether it is paused.
     pauseButton.setAttribute('aria-pressed', String(userPaused));
-    pauseButton.setAttribute('aria-label', userPaused ? 'Play animation' : 'Pause animation');
     sync();
   });
 

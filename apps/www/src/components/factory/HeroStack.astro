@@ -26,7 +26,7 @@ const planes = [
     {planes.map((p, i) => (
       <div class={`hs-plane hs-${p.id}`} style={`--z:${p.z};--i:${i}`} data-plane={p.id}>
         <div class="hs-float">
-          <div class="hs-card">
+          <div class="hs-card" aria-hidden={p.id === 'app' ? undefined : 'true'}>
             {p.id === 'machine' ? <MockMachine /> : 'shot' in p ? <Shot name={p.shot} eager /> : <HeroCard kind={p.card} />}
           </div>
           <span class="hs-fig" aria-hidden="true">{String(i + 1).padStart(2, '0')} · {p.label}</span>

@@ -1,4 +1,4 @@
-import { expect, type Page, test } from './fixtures';
+import { expect, expectNoOverflowOrSeriousAxeViolations, type Page, test } from './fixtures';
 
 /**
  * Homepage (src/components/factory/): real SAM screens in both themes, stages that play once and
@@ -98,6 +98,8 @@ test.describe('homepage', () => {
     const phone = (page.viewportSize()?.width ?? 1280) < 768;
     const figure = page.locator('#stage-shape .stage-figure');
     await figure.scrollIntoViewIfNeeded();
+    // The screen is HTML (not a capture), presented to screen readers as one labelled image.
+    await expect(figure.getByRole('img', { name: /Send to agent/ })).toBeVisible();
     await expect(figure.getByText('Send to agent', { exact: true })).toBeVisible();
     await expect(figure.locator('.stage-inset')).toBeVisible({ visible: !phone });
   });
@@ -110,7 +112,7 @@ test.describe('homepage', () => {
     await expect(hero.locator('[data-fh-field] canvas')).toHaveCount(2);
     await page.getByRole('button', { name: 'Pause animation' }).click();
     await expect(hero).toHaveAttribute('data-paused', '');
-    await expect(page.getByRole('button', { name: 'Play animation' })).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByRole('button', { name: 'Pause animation' })).toHaveAttribute('aria-pressed', 'true');
     const heroRunning = () =>
       page.evaluate(() => {
         const root = document.querySelector('[data-fh-hero]');
@@ -144,6 +146,14 @@ test.describe('homepage', () => {
         .filter((box) => box.left < -0.5 || box.right > window.innerWidth + 0.5).length,
     );
     expect(outside).toBe(0);
+  });
+
+  test('dark theme has no serious axe violations', async ({ page }) => {
+    // marketing-pages.spec.ts covers the light theme; the HTML screens have their own dark palette.
+    await useTheme(page, 'dark');
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto('/');
+    await expectNoOverflowOrSeriousAxeViolations(page);
   });
 
   test('the homepage stays under 1,000 elements', async ({ page }) => {

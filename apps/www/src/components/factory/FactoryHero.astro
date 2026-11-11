@@ -39,7 +39,7 @@ import HeroStack from './HeroStack.astro';
 
     <HeroStack />
     <div class="fh-hero-foot">
-      <p class="fh-note">Real SAM screens · sample project</p>
+      <p class="fh-note fh-hero-note">SAM’s interface · sample project</p>
       <button type="button" class="fh-pause" data-fh-pause aria-pressed="false" aria-label="Pause animation">
         <svg class="fh-pause-icon fh-pause-icon--pause" viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="3" width="3" height="10" rx="1"/><rect x="9" y="3" width="3" height="10" rx="1"/></svg>
         <svg class="fh-pause-icon fh-pause-icon--play" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.5v9l7.5-4.5z"/></svg>
@@ -183,6 +183,13 @@ import HeroStack from './HeroStack.astro';
     justify-content: center;
     gap: 14px;
     width: min(1080px, 100%);
+  }
+
+  /* The caption sits over the lit floor, so it gets a backdrop to stay readable. */
+  .fh-hero-note {
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--color-bg-body) 82%, transparent);
   }
 
   .fh-pause {
