@@ -194,6 +194,11 @@ export const sessions = sqliteTable(
     userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    /**
+     * A lifetime refresh may not extend (migration 0234). Set only on agent sign-in sessions;
+     * NULL for every other session. Enforced by `session.update.before` in auth.ts.
+     */
+    hardExpiresAt: integer('hard_expires_at', { mode: 'timestamp_ms' }),
   },
   (table) => ({
     userIdIdx: index('idx_sessions_user_id').on(table.userId),

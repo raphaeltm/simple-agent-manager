@@ -7,9 +7,11 @@
  * (`services/agent-sign-in/config.ts`); without it this handler steps aside and the request is
  * answered exactly as if the route did not exist.
  *
- * The session is created by the same path as token-login (`createSessionLogin`), so it passes
- * the same approval gate and BetterAuth session hooks. This endpoint never creates accounts and
- * never changes roles.
+ * The session is created by the same functions as token-login (`assertUserCanCreateSession`,
+ * `createSessionCookieForUser`, `sessionLoginResponse`), so it passes the same approval gate and
+ * BetterAuth session hooks. It carries a hard lifetime and cannot mint longer-lived credentials
+ * (`services/agent-sign-in/session-cap.ts`). This endpoint never creates accounts and never
+ * changes roles.
  *
  * Mounted under `/api/auth` before the BetterAuth catch-all (index.ts).
  */
@@ -20,18 +22,22 @@ import * as v from 'valibot';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { errors } from '../middleware/error';
-import { RateLimitError, rateLimit } from '../middleware/rate-limit';
+import { rateLimit, RateLimitError } from '../middleware/rate-limit';
 import {
   AGENT_SIGN_IN_ROUTE,
-  type AgentSignInTrust,
   agentSignInAudience,
+  type AgentSignInTrust,
   isAllowedSource,
   isAllowedTarget,
   resolveAgentSignInTrust,
 } from '../services/agent-sign-in/config';
 import { claimAgentSignIn, linkAgentSignInSession } from '../services/agent-sign-in/ledger';
 import { verifyAgentSignInToken } from '../services/agent-sign-in/verify';
-import { assertUserCanCreateSession, createSessionLogin } from '../services/session-factory';
+import {
+  assertUserCanCreateSession,
+  createSessionCookieForUser,
+  sessionLoginResponse,
+} from '../services/session-factory';
 
 const AgentSignInRequestSchema = v.object({
   token: v.pipe(v.string(), v.trim(), v.nonEmpty()),
@@ -98,7 +104,7 @@ async function exchange(c: Context<{ Bindings: Env }>, trust: AgentSignInTrust):
     jti: claims.jti,
   };
 
-  if (!isAllowedSource(trust, source)) {
+  if (!isAllowedSource(trust, { ...source, agentProfileId: claims.agent_profile_id ?? null })) {
     log.warn('agent_sign_in.rejected', {
       ...logContext,
       reason: 'source_not_allowed',
@@ -145,6 +151,8 @@ async function exchange(c: Context<{ Bindings: Env }>, trust: AgentSignInTrust):
 
   const nowMs = Date.now();
   const sessionExpiresAtMs = nowMs + trust.sessionTtlSeconds * 1000;
+  // The token is spent here, before the session exists. If session creation then fails, the
+  // audit row keeps session_id NULL and the token stays spent: fail closed, never reusable.
   const claim = await claimAgentSignIn(
     env,
     {
@@ -183,8 +191,9 @@ async function exchange(c: Context<{ Bindings: Env }>, trust: AgentSignInTrust):
     throw new RateLimitError(claim.retryAfterSeconds);
   }
 
-  const { response, session } = await createSessionLogin(env, sessionUser, {
-    ttlSeconds: trust.sessionTtlSeconds,
+  // The approval gate already ran above, before anything was recorded.
+  const session = await createSessionCookieForUser(env, user.id, {
+    expiresAt: new Date(sessionExpiresAtMs),
   });
   await linkAgentSignInSession(env, claim.id, session.sessionId);
   log.info('agent_sign_in.accepted', {
@@ -193,7 +202,7 @@ async function exchange(c: Context<{ Bindings: Env }>, trust: AgentSignInTrust):
     targetUserId: user.id,
     sessionExpiresAt: new Date(sessionExpiresAtMs).toISOString(),
   });
-  return response;
+  return sessionLoginResponse(sessionUser, session);
 }
 
 const agentSignInRoutes = new Hono<{ Bindings: Env }>();

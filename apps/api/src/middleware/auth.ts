@@ -5,6 +5,7 @@ import type { createAuth } from '../auth';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { expectJsonRecord } from '../lib/runtime-validation';
+import { isAgentSignInSession, isPastHardExpiry } from '../services/agent-sign-in/session-cap';
 import { withAuthReadDeadline } from '../services/read-auth-session';
 import {
   assertUserAllowedBySignupApproval,
@@ -29,6 +30,12 @@ export interface AuthContext {
     id: string | null;
     token: string | null;
     expiresAt: Date;
+    /**
+     * Created by agent sign-in through workload identity (services/agent-sign-in/). Such a
+     * session has a hard lifetime and must not mint longer-lived credentials; see
+     * `rejectAgentSignInSession`.
+     */
+    agentSignIn: boolean;
   };
 }
 
@@ -97,6 +104,7 @@ function buildAuthContext(session: AuthSession): AuthContext {
           ? sessionRecord.token
           : null,
       expiresAt: session.session.expiresAt,
+      agentSignIn: isAgentSignInSession(sessionRecord),
     },
   };
 }
@@ -136,7 +144,9 @@ export function requireAuth(): MiddlewareHandler<{ Bindings: Env }> {
           query: { disableCookieCache: true },
         })
       );
-      if (!session?.user) throw errors.unauthorized('Authentication required');
+      if (!session?.user || isPastHardExpiry(session.session)) {
+        throw errors.unauthorized('Authentication required');
+      }
       const authContext = buildAuthContext(session);
       assertUserNotSuspended(authContext.user);
       c.set('auth', authContext);
@@ -162,7 +172,7 @@ export function optionalAuth(): MiddlewareHandler<{ Bindings: Env }> {
         })
       );
 
-      if (session?.user) {
+      if (session?.user && !isPastHardExpiry(session.session)) {
         const authContext = buildAuthContext(session);
         assertUserNotSuspended(authContext.user);
         c.set('auth', authContext);
@@ -171,6 +181,29 @@ export function optionalAuth(): MiddlewareHandler<{ Bindings: Env }> {
       log.warn('optional_auth.check_failed', { error: String(e) });
     }
 
+    await next();
+  };
+}
+
+/**
+ * Refuse a session created by agent sign-in through workload identity. Apply to every route that
+ * mints a credential which outlives the session (personal access tokens, device-flow approval,
+ * OAuth consent): otherwise a one-hour agent session could turn itself into a lasting one.
+ * Must be used AFTER requireAuth(). No I/O: the marker comes back with the session.
+ */
+export function rejectAgentSignInSession(): MiddlewareHandler<{ Bindings: Env }> {
+  return async (c: Context<{ Bindings: Env }>, next: Next) => {
+    const auth = c.get('auth');
+    if (!auth) throw errors.unauthorized('Authentication required');
+    if (auth.session.agentSignIn) {
+      log.warn('agent_sign_in.credential_mint_refused', {
+        userId: auth.user.id,
+        sessionId: auth.session.id,
+        path: new URL(c.req.url).pathname,
+        action: 'rejected',
+      });
+      throw errors.forbidden('Agent sign-in sessions cannot create credentials');
+    }
     await next();
   };
 }

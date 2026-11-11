@@ -75,12 +75,12 @@ import { agentCredentialSetupSessionsRoutes } from './routes/agent-credential-se
 import { agentModelCatalogRoutes, projectAgentModelRoutes } from './routes/agent-models';
 import { agentProfileRoutes } from './routes/agent-profiles';
 import { agentSettingsRoutes } from './routes/agent-settings';
+import { agentSignInRoutes } from './routes/agent-sign-in';
 import { agentsCatalogRoutes } from './routes/agents-catalog';
 import { aiProxyRoutes } from './routes/ai-proxy';
 import { aiProxyAnthropicRoutes } from './routes/ai-proxy-anthropic';
 import { aiProxyPassthroughRoutes } from './routes/ai-proxy-passthrough';
 import { analyticsIngestRoutes } from './routes/analytics-ingest';
-import { agentSignInRoutes } from './routes/agent-sign-in';
 import { apiTokenRoutes } from './routes/api-tokens';
 import { authRoutes } from './routes/auth';
 import { bootstrapRoutes } from './routes/bootstrap';
@@ -184,7 +184,7 @@ import {
 import { scheduled } from './scheduled/handler';
 import { handleInboundAgentEmail } from './services/agent-email/inbound';
 import { agentEmailConfig } from './services/agent-email/setup-state';
-import { resolveAgentSignInTrust } from './services/agent-sign-in/config';
+import { isAgentSignInEnabled } from './services/agent-sign-in/config';
 import { signTerminalToken, verifyPortAccessToken, verifyTerminalToken } from './services/jwt';
 import { getNodeBackendBaseUrl } from './services/node-agent-readiness';
 import { assertSessionUserApproved } from './services/signup-approval';
@@ -799,7 +799,7 @@ app.get('/api/config/login-providers', async (c) => {
     email: emailSignInAvailable(c.env),
     // Shown on the sign-in page so anyone using the instance can tell it accepts agent
     // sign-in. A boolean only: the trusted issuer and allowlists are not published.
-    agentSignIn: resolveAgentSignInTrust(c.env) !== null,
+    agentSignIn: isAgentSignInEnabled(c.env),
   });
 });
 

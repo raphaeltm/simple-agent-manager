@@ -1,6 +1,6 @@
 import { expect, type Page, type Route, test } from '@playwright/test';
 
-import { assertNoOverflow } from './audit-helpers';
+import { assertNoOverflow, seedTheme } from './audit-helpers';
 
 // ---------------------------------------------------------------------------
 // API Mock — unauthenticated user (no session)
@@ -195,6 +195,15 @@ for (const viewport of [
       expect(box!.y + box!.height).toBeLessThanOrEqual(github!.y);
       await assertNoOverflow(page);
       await screenshot(page, `landing-agent-sign-in-${viewport.name}`);
+    });
+
+    test('the agent sign-in notice in the light theme', async ({ page }) => {
+      await seedTheme(page, 'light');
+      await setupApiMocks(page, { ...ALL_PROVIDERS, agentSignIn: true });
+      await page.goto('/');
+      await expect(page.getByRole('note')).toBeVisible();
+      await assertNoOverflow(page);
+      await screenshot(page, `landing-agent-sign-in-light-${viewport.name}`);
     });
 
     test('an ordinary instance shows no agent sign-in notice', async ({ page }) => {

@@ -5,7 +5,7 @@ import * as v from 'valibot';
 
 import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
-import { requireApproved, requireAuth } from '../middleware/auth';
+import { rejectAgentSignInSession, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { getCurrentWindowStart, rateLimit } from '../middleware/rate-limit';
 import { jsonValidator } from '../schemas';
@@ -164,7 +164,8 @@ connectorOAuthRoutes.all('/oauth/register', protocol);
 connectorOAuthRoutes.all('/oauth/revoke', protocol);
 
 export const connectorConsentRoutes = new Hono<{ Bindings: Env }>();
-connectorConsentRoutes.use('*', requireAuth(), requireApproved());
+// Consent grants an OAuth client lasting access; an agent sign-in session must not grant it.
+connectorConsentRoutes.use('*', requireAuth(), requireApproved(), rejectAgentSignInSession());
 connectorConsentRoutes.get('/', async (c) => {
   const settings = await getConnectorSettings(c.env);
   if (!settings.enabled) throw errors.forbidden('Connector disabled by the administrator');

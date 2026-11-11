@@ -99,3 +99,19 @@ it('reports a failure with nothing remembered, and retry recovers', async () => 
   await waitFor(() => expect(result.current.providers).toEqual(EMAIL_ONLY));
   expect(result.current.failed).toBe(false);
 });
+
+it('ignores a remembered answer whose agent sign-in flag is not a boolean', () => {
+  fetchLoginProviders.mockReturnValue(new Promise(() => {}));
+  window.localStorage.setItem(
+    LOGIN_PROVIDERS_STORAGE_KEY,
+    JSON.stringify({ ...EMAIL_ONLY, agentSignIn: 0 })
+  );
+  expect(renderProviders().result.current.providers).toBeNull();
+
+  // Control: a boolean flag, or none at all (older deployments), is a valid remembered answer.
+  window.localStorage.setItem(
+    LOGIN_PROVIDERS_STORAGE_KEY,
+    JSON.stringify({ ...EMAIL_ONLY, agentSignIn: true })
+  );
+  expect(renderProviders().result.current.providers).toEqual({ ...EMAIL_ONLY, agentSignIn: true });
+});

@@ -113,24 +113,3 @@ export async function linkAgentSignInSession(
     .bind(sessionId, signInId)
     .run();
 }
-
-/**
- * Hold an agent sign-in session to the expiry recorded when it was issued.
- *
- * BetterAuth extends a session on refresh (`expiresAt - expiresIn + updateAge <= now`, true at
- * once for a short session), which would turn a one-hour agent session into a seven-day one.
- * `auth.ts` runs this after every session update. For an ordinary session the subquery is NULL,
- * the comparison is NULL and nothing is written.
- */
-export const CLAMP_AGENT_SIGN_IN_SESSION_SQL = `
-UPDATE sessions
-SET expires_at = (SELECT a.session_expires_at FROM agent_sign_ins a WHERE a.session_id = sessions.id)
-WHERE id = ?
-  AND expires_at > (SELECT a.session_expires_at FROM agent_sign_ins a WHERE a.session_id = sessions.id)`;
-
-export async function clampAgentSignInSession(
-  env: Pick<Env, 'DATABASE'>,
-  sessionId: string
-): Promise<void> {
-  await env.DATABASE.prepare(CLAMP_AGENT_SIGN_IN_SESSION_SQL).bind(sessionId).run();
-}

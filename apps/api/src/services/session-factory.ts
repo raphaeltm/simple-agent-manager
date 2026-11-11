@@ -4,6 +4,11 @@ import { createAuth } from '../auth';
 import type { Env } from '../env';
 import { getBetterAuthSecret } from '../lib/secrets';
 import { errors } from '../middleware/error';
+import {
+  HARD_EXPIRES_AT_FIELD,
+  isAgentSignInSession,
+  isPastHardExpiry,
+} from './agent-sign-in/session-cap';
 import { assertSessionUserApproved, assertUserNotSuspended } from './signup-approval';
 
 const DEFAULT_SESSION_DURATION_SECONDS = 7 * 24 * 60 * 60;
@@ -25,12 +30,13 @@ export interface CreatedSessionCookie {
 
 export interface SessionLifetimeOptions {
   /**
-   * Fixed lifetime for this session, in seconds, applied to both the stored session and the
-   * cookie. Omitted: BetterAuth's normal lifetime and API_TOKEN_SESSION_DURATION_SECONDS.
-   * BetterAuth extends a session on refresh, so a caller that needs a hard cap must also
-   * record it where the session.update hook in `auth.ts` can clamp to it.
+   * Fixed expiry for this session, applied to both the stored session and the cookie.
+   * Omitted: BetterAuth's normal lifetime and API_TOKEN_SESSION_DURATION_SECONDS.
+   * The lifetime is also stored as the session's hard expiry, which BetterAuth's refresh cannot
+   * extend and which marks the session as an agent sign-in session
+   * (`services/agent-sign-in/session-cap.ts`).
    */
-  ttlSeconds?: number;
+  expiresAt?: Date;
 }
 
 export async function createSessionCookieForUser(
@@ -40,17 +46,11 @@ export async function createSessionCookieForUser(
 ): Promise<CreatedSessionCookie> {
   const auth = await createAuth(env);
   const ctx = await auth.$context;
-  const { ttlSeconds } = options;
+  const { expiresAt } = options;
   const session =
-    ttlSeconds === undefined
+    expiresAt === undefined
       ? await ctx.internalAdapter.createSession(userId, false)
-      : // overrideAll lets our expiresAt replace BetterAuth's default lifetime.
-        await ctx.internalAdapter.createSession(
-          userId,
-          false,
-          { expiresAt: new Date(Date.now() + ttlSeconds * 1000) },
-          true
-        );
+      : await createCappedSession(ctx, userId, expiresAt);
 
   if (!session) {
     throw errors.badRequest('Failed to create session');
@@ -72,9 +72,10 @@ export async function createSessionCookieForUser(
   const isSecure = `https://api.${baseDomain}`.startsWith('https://');
   const cookieName = isSecure ? '__Secure-better-auth.session_token' : 'better-auth.session_token';
   const sessionDurationSeconds =
-    ttlSeconds ??
-    (parseInt(env.API_TOKEN_SESSION_DURATION_SECONDS || '', 10) ||
-      DEFAULT_SESSION_DURATION_SECONDS);
+    expiresAt !== undefined
+      ? Math.max(1, Math.ceil((expiresAt.getTime() - Date.now()) / 1000))
+      : parseInt(env.API_TOKEN_SESSION_DURATION_SECONDS || '', 10) ||
+        DEFAULT_SESSION_DURATION_SECONDS;
   const sessionCookie = `${cookieName}=${signedValue}`;
   const cookieHeader = [
     sessionCookie,
@@ -88,6 +89,24 @@ export async function createSessionCookieForUser(
   return { cookieHeader, sessionCookie, sessionId: session.id, expiresAt: session.expiresAt };
 }
 
+async function createCappedSession(
+  ctx: Awaited<Awaited<ReturnType<typeof createAuth>>['$context']>,
+  userId: string,
+  expiresAt: Date
+) {
+  // overrideAll lets these fields replace BetterAuth's default lifetime.
+  return ctx.internalAdapter.createSession(
+    userId,
+    false,
+    { expiresAt, [HARD_EXPIRES_AT_FIELD]: expiresAt },
+    true
+  );
+}
+
+/**
+ * The signed-in user, for routes that grant a credential to another client (device-flow
+ * approval). Refuses an agent sign-in session: it must not mint a credential that outlives it.
+ */
 export async function getAuthenticatedUser(
   c: Context<{ Bindings: Env }>
 ): Promise<{ id: string; status?: string | null }> {
@@ -96,10 +115,13 @@ export async function getAuthenticatedUser(
     headers: c.req.raw.headers,
     query: { disableCookieCache: true },
   });
-  if (!session?.user) {
+  if (!session?.user || isPastHardExpiry(session.session)) {
     throw errors.unauthorized('Not authenticated');
   }
   assertUserNotSuspended(session.user);
+  if (isAgentSignInSession(session.session)) {
+    throw errors.forbidden('Agent sign-in sessions cannot create credentials');
+  }
   return session.user;
 }
 
@@ -107,33 +129,29 @@ export async function buildSessionLoginResponse(
   env: Env,
   user: SessionFactoryUser
 ): Promise<Response> {
-  return (await createSessionLogin(env, user)).response;
+  await assertUserCanCreateSession(env, user);
+  return sessionLoginResponse(user, await createSessionCookieForUser(env, user.id));
 }
 
-/** Sign `user` in: the approval gate, a BetterAuth session, and the login response. */
-export async function createSessionLogin(
-  env: Env,
+/** The login response for a session already created for `user`: JSON plus Set-Cookie. */
+export function sessionLoginResponse(
   user: SessionFactoryUser,
-  options: SessionLifetimeOptions = {}
-): Promise<{ response: Response; session: CreatedSessionCookie }> {
-  await assertUserCanCreateSession(env, user);
-  const session = await createSessionCookieForUser(env, user.id, options);
-  const { cookieHeader, sessionCookie } = session;
-  const response = new Response(
+  session: CreatedSessionCookie
+): Response {
+  return new Response(
     JSON.stringify({
       success: true,
       user: { id: user.id, email: user.email, name: user.name },
-      sessionCookie,
+      sessionCookie: session.sessionCookie,
     }),
     {
       status: 200,
       headers: {
         'Content-Type': 'application/json',
-        'Set-Cookie': cookieHeader,
+        'Set-Cookie': session.cookieHeader,
       },
     }
   );
-  return { response, session };
 }
 
 export async function assertUserCanCreateSession(

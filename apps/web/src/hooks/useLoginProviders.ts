@@ -33,8 +33,12 @@ export const LOGIN_PROVIDERS_STORAGE_KEY = 'sam:login-providers';
 function isLoginProviders(value: unknown): value is LoginProviders {
   if (!value || typeof value !== 'object') return false;
   const record = value as Record<string, unknown>;
-  return (['github', 'google', 'gitlab', 'email'] as const).every(
-    (key) => typeof record[key] === 'boolean'
+  return (
+    (['github', 'google', 'gitlab', 'email'] as const).every(
+      (key) => typeof record[key] === 'boolean'
+    ) &&
+    // Optional: answers remembered from deployments without the field still count.
+    (record.agentSignIn === undefined || typeof record.agentSignIn === 'boolean')
   );
 }
 

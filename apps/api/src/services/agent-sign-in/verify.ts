@@ -12,27 +12,30 @@ import { createRemoteJWKSet, decodeProtectedHeader, errors as joseErrors, jwtVer
 import * as v from 'valibot';
 
 import { AppError } from '../../middleware/error';
-import { type AgentSignInTrust, agentSignInJwksUrl } from './config';
+import { agentSignInJwksUrl, type AgentSignInTrust } from './config';
 
-/** jose's default; the issuer's key endpoint is a static document that answers in milliseconds. */
-export const AGENT_SIGN_IN_JWKS_TIMEOUT_MS = 5_000;
-/** Minimum time between key refetches triggered by an unknown key ID (jose's default). */
-export const AGENT_SIGN_IN_JWKS_COOLDOWN_MS = 30_000;
+/**
+ * Minimum time between key refetches triggered by an unknown key ID (jose's default). Fixed on
+ * purpose: it bounds how often a caller presenting made-up key IDs can make this instance fetch
+ * the issuer's keys, and loosening it only weakens that bound.
+ */
+export const DEFAULT_AGENT_SIGN_IN_JWKS_COOLDOWN_MS = 30_000;
 const MAX_TOKEN_LENGTH = 16_384;
 
 type RemoteJwks = ReturnType<typeof createRemoteJWKSet>;
-const jwksByIssuer = new Map<string, { cacheSeconds: number; jwks: RemoteJwks }>();
+const jwksByIssuer = new Map<string, { settings: string; jwks: RemoteJwks }>();
 
-/** Per-isolate key cache for the trusted issuer. Rebuilt when the cache TTL setting changes. */
+/** Per-isolate key cache for the trusted issuer. Rebuilt when its cache or timeout settings change. */
 function issuerKeys(trust: AgentSignInTrust): RemoteJwks {
+  const settings = `${trust.jwksCacheSeconds}:${trust.jwksTimeoutSeconds}`;
   const cached = jwksByIssuer.get(trust.issuer);
-  if (cached && cached.cacheSeconds === trust.jwksCacheSeconds) return cached.jwks;
+  if (cached && cached.settings === settings) return cached.jwks;
   const jwks = createRemoteJWKSet(agentSignInJwksUrl(trust), {
     cacheMaxAge: trust.jwksCacheSeconds * 1000,
-    cooldownDuration: AGENT_SIGN_IN_JWKS_COOLDOWN_MS,
-    timeoutDuration: AGENT_SIGN_IN_JWKS_TIMEOUT_MS,
+    cooldownDuration: DEFAULT_AGENT_SIGN_IN_JWKS_COOLDOWN_MS,
+    timeoutDuration: trust.jwksTimeoutSeconds * 1000,
   });
-  jwksByIssuer.set(trust.issuer, { cacheSeconds: trust.jwksCacheSeconds, jwks });
+  jwksByIssuer.set(trust.issuer, { settings, jwks });
   return jwks;
 }
 

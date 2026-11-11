@@ -39,7 +39,12 @@ export const MAX_AGENT_SIGN_IN_MAX_ATTEMPTS_PER_IP_PER_HOUR = 10_000;
 /** How long the issuer's published keys are cached per isolate. */
 export const DEFAULT_AGENT_SIGN_IN_JWKS_CACHE_SECONDS = 600;
 export const MIN_AGENT_SIGN_IN_JWKS_CACHE_SECONDS = 30;
-export const MAX_AGENT_SIGN_IN_JWKS_CACHE_SECONDS = 86_400;
+/** Bounded so a key the issuer has rotated out stops being trusted within an hour. */
+export const MAX_AGENT_SIGN_IN_JWKS_CACHE_SECONDS = 3600;
+
+/** Timeout for fetching the issuer's keys. The key document is static and normally fast. */
+export const DEFAULT_AGENT_SIGN_IN_JWKS_TIMEOUT_SECONDS = 5;
+export const MAX_AGENT_SIGN_IN_JWKS_TIMEOUT_SECONDS = 30;
 
 /** Allowed clock skew for exp/iat between the two instances. */
 export const DEFAULT_AGENT_SIGN_IN_CLOCK_TOLERANCE_SECONDS = 30;
@@ -88,7 +93,14 @@ const TargetsSchema = v.union([
 const AgentSignInTrustSchema = v.strictObject({
   issuer: IssuerSchema,
   allowedSources: v.pipe(
-    v.array(v.strictObject({ projectId: NonEmptyId, userId: NonEmptyId })),
+    v.array(
+      v.strictObject({
+        projectId: NonEmptyId,
+        userId: NonEmptyId,
+        /** Optional: also require this agent profile (the token's agent_profile_id). */
+        agentProfileId: v.optional(NonEmptyId),
+      })
+    ),
     v.minLength(1)
   ),
   allowedTargets: TargetsSchema,
@@ -107,6 +119,10 @@ const AgentSignInTrustSchema = v.strictObject({
   jwksCacheSeconds: v.optional(
     integerIn(MIN_AGENT_SIGN_IN_JWKS_CACHE_SECONDS, MAX_AGENT_SIGN_IN_JWKS_CACHE_SECONDS),
     DEFAULT_AGENT_SIGN_IN_JWKS_CACHE_SECONDS
+  ),
+  jwksTimeoutSeconds: v.optional(
+    integerIn(1, MAX_AGENT_SIGN_IN_JWKS_TIMEOUT_SECONDS),
+    DEFAULT_AGENT_SIGN_IN_JWKS_TIMEOUT_SECONDS
   ),
   clockToleranceSeconds: v.optional(
     integerIn(0, MAX_AGENT_SIGN_IN_CLOCK_TOLERANCE_SECONDS),
@@ -156,6 +172,11 @@ export function resolveAgentSignInTrust(
   return trust;
 }
 
+/** Whether this instance accepts agent sign-in (published as a boolean on the sign-in page). */
+export function isAgentSignInEnabled(env: Pick<Env, 'AGENT_SIGN_IN_TRUST'>): boolean {
+  return resolveAgentSignInTrust(env) !== null;
+}
+
 /** This instance's expected audience: its own exchange endpoint URL, built from BASE_DOMAIN. */
 export function agentSignInAudience(env: Pick<Env, 'BASE_DOMAIN'>): string {
   return `https://api.${env.BASE_DOMAIN}${AGENT_SIGN_IN_PATH}`;
@@ -168,10 +189,13 @@ export function agentSignInJwksUrl(trust: AgentSignInTrust): URL {
 
 export function isAllowedSource(
   trust: AgentSignInTrust,
-  source: { projectId: string; userId: string }
+  source: { projectId: string; userId: string; agentProfileId: string | null }
 ): boolean {
   return trust.allowedSources.some(
-    (allowed) => allowed.projectId === source.projectId && allowed.userId === source.userId
+    (allowed) =>
+      allowed.projectId === source.projectId &&
+      allowed.userId === source.userId &&
+      (allowed.agentProfileId === undefined || allowed.agentProfileId === source.agentProfileId)
   );
 }
 

@@ -5,7 +5,12 @@ import { Hono } from 'hono';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { ulid } from '../lib/ulid';
-import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
+import {
+  getUserId,
+  rejectAgentSignInSession,
+  requireApproved,
+  requireAuth,
+} from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { rateLimit } from '../middleware/rate-limit';
 import { ApiTokenCreateSchema, ApiTokenRedeemSchema, jsonValidator } from '../schemas';
@@ -79,6 +84,8 @@ apiTokenRoutes.post(
   '/api-tokens',
   requireAuth(),
   requireApproved(),
+  // A personal access token outlives the session; an agent sign-in session must not mint one.
+  rejectAgentSignInSession(),
   jsonValidator(ApiTokenCreateSchema),
   async (c) => {
     const userId = getUserId(c);

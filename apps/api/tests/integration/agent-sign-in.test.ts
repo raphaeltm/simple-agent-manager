@@ -10,6 +10,7 @@
  */
 import { SYSTEM_USER_ID } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
+import { Hono } from 'hono';
 import {
   calculateJwkThumbprint,
   exportJWK,
@@ -19,15 +20,20 @@ import {
   importPKCS8,
   SignJWT,
 } from 'jose';
-import { Hono } from 'hono';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { handleAppError } from '../../src/middleware/app-error-handler';
 import { agentSignInRoutes } from '../../src/routes/agent-sign-in';
+import { apiTokenRoutes } from '../../src/routes/api-tokens';
 import { authRoutes } from '../../src/routes/auth';
-import { resolveAgentSignInTrust } from '../../src/services/agent-sign-in/config';
+import { connectorConsentRoutes } from '../../src/routes/connector-oauth';
+import { deviceFlowRoutes } from '../../src/routes/device-flow';
+import {
+  isAgentSignInEnabled,
+  resolveAgentSignInTrust,
+} from '../../src/services/agent-sign-in/config';
 import { __resetAgentSignInKeyCacheForTest } from '../../src/services/agent-sign-in/verify';
 import { __resetPlatformConfigCacheForTest } from '../../src/services/platform-config';
 import { createSessionCookieForUser } from '../../src/services/session-factory';
@@ -111,8 +117,11 @@ function buildApp() {
   // Mounted, in order, and with errors handled exactly as src/index.ts does.
   const app = new Hono<{ Bindings: Env }>();
   app.onError(handleAppError);
+  app.route('/api/auth', apiTokenRoutes);
   app.route('/api/auth', agentSignInRoutes);
+  app.route('/api/auth', deviceFlowRoutes);
   app.route('/api/auth', authRoutes);
+  app.route('/api/connector/consent', connectorConsentRoutes);
   app.notFound((c) => c.json({ error: 'NOT_FOUND', message: 'Endpoint not found' }, 404));
   return app;
 }
@@ -135,8 +144,10 @@ describe('agent sign-in through workload identity (vertical slice)', () => {
     issuer = issuerInstance(trustedKeys);
     sqlite = new Database(':memory:');
     createAllSchemaTables(sqlite, schema);
-    // The ledger's replay guard is the migration's UNIQUE(issuer, jti): use the shipped SQL.
+    // The ledger's replay guard is the migration's UNIQUE(issuer, jti): use the shipped SQL...
     sqlite.exec('DROP TABLE agent_sign_ins');
+    // ...and its sessions.hard_expires_at column, which the migration adds.
+    sqlite.exec('ALTER TABLE sessions DROP COLUMN hard_expires_at');
     applySqliteMigration(
       sqlite,
       new URL('../../src/db/migrations/0234_agent_sign_ins.sql', import.meta.url)
@@ -247,6 +258,7 @@ describe('agent sign-in through workload identity (vertical slice)', () => {
 
   describe('success', () => {
     it('signs the agent in as the allowed target with a short session and an audit record', async () => {
+      expect(isAgentSignInEnabled(env)).toBe(true);
       const token = await issuer.sign();
       const response = await exchange(token);
 
@@ -264,10 +276,10 @@ describe('agent sign-in through workload identity (vertical slice)', () => {
 
       const [row, ...rest] = auditRows();
       expect(rest).toHaveLength(0);
-      const sessionRow = sqlite.prepare('SELECT id, expires_at FROM sessions').get() as {
-        id: string;
-        expires_at: number;
-      };
+      const sessionRow = sqlite
+        .prepare('SELECT id, expires_at, hard_expires_at FROM sessions')
+        .get() as { id: string; expires_at: number; hard_expires_at: number };
+      expect(sessionRow.hard_expires_at).toBe(Number(auditRows()[0]?.session_expires_at));
       expect(row).toMatchObject({
         issuer: ISSUER,
         source_subject: 'project:proj-trusted:user:user-trusted:profile:profile-1',
@@ -322,7 +334,11 @@ describe('agent sign-in through workload identity (vertical slice)', () => {
     });
 
     it('leaves ordinary sessions to refresh normally (control for the clamp)', async () => {
-      const ordinary = await createSessionCookieForUser(env, 'other-user', { ttlSeconds: 120 });
+      const ordinary = await createSessionCookieForUser(env, 'other-user');
+      // Age it so BetterAuth's refresh is due, exactly as for the agent session above.
+      sqlite
+        .prepare('UPDATE sessions SET expires_at = ? WHERE id = ?')
+        .run(Date.now() + 120_000, ordinary.sessionId);
       expect((await me(ordinary.sessionCookie)).status).toBe(200);
       const { expires_at } = sqlite
         .prepare('SELECT expires_at FROM sessions WHERE id = ?')
@@ -330,6 +346,127 @@ describe('agent sign-in through workload identity (vertical slice)', () => {
       // Refreshed past its two-minute creation lifetime: proof the refresh ran and the clamp
       // only applies to agent sign-in sessions.
       expect(expires_at - Date.now()).toBeGreaterThan(24 * 60 * 60 * 1000);
+    });
+  });
+
+  describe('what an agent session may not do', () => {
+    async function agentCookie(): Promise<string> {
+      const response = await exchange(await issuer.sign());
+      expect(response.status).toBe(200);
+      return cookieFrom(response);
+    }
+
+    async function ordinaryCookie(): Promise<string> {
+      return (await createSessionCookieForUser(env, TARGET_ID)).sessionCookie;
+    }
+
+    function post(path: string, cookie: string, body: unknown = {}) {
+      return app.request(
+        `${API_ORIGIN}${path}`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            cookie,
+            origin: `https://app.${TARGET_DOMAIN}`,
+          },
+          body: JSON.stringify(body),
+        },
+        env
+      );
+    }
+
+    const REFUSED = /Agent sign-in sessions cannot create credentials/;
+
+    it('cannot mint a personal access token (ordinary session can)', async () => {
+      const refused = await post('/api/auth/api-tokens', await agentCookie(), { name: 'escape' });
+      expect(refused.status).toBe(403);
+      expect(((await refused.json()) as { message: string }).message).toMatch(REFUSED);
+      expect(sqlite.prepare('SELECT COUNT(*) AS n FROM smoke_test_tokens').get()).toEqual({ n: 0 });
+
+      const allowed = await post('/api/auth/api-tokens', await ordinaryCookie(), { name: 'ok' });
+      expect(allowed.status).toBe(201);
+    });
+
+    it('cannot approve a device sign-in (ordinary session reaches the code check)', async () => {
+      const refused = await post('/api/auth/device/approve', await agentCookie(), {
+        userCode: 'ABCD-EFGH',
+      });
+      expect(refused.status).toBe(403);
+      expect(((await refused.json()) as { message: string }).message).toMatch(REFUSED);
+
+      const ordinary = await post('/api/auth/device/approve', await ordinaryCookie(), {
+        userCode: 'ABCD-EFGH',
+      });
+      expect(ordinary.status).toBe(404);
+    });
+
+    it('cannot grant connector OAuth consent', async () => {
+      const refused = await app.request(
+        `${API_ORIGIN}/api/connector/consent`,
+        { headers: { cookie: await agentCookie() } },
+        env
+      );
+      expect(refused.status).toBe(403);
+      expect(((await refused.json()) as { message: string }).message).toMatch(REFUSED);
+
+      const ordinary = await app.request(
+        `${API_ORIGIN}/api/connector/consent`,
+        { headers: { cookie: await ordinaryCookie() } },
+        env
+      );
+      expect(((await ordinary.json()) as { message?: string }).message ?? '').not.toMatch(REFUSED);
+    });
+
+    it('cannot change the account through BetterAuth, but can sign out', async () => {
+      const cookie = await agentCookie();
+      const link = await post('/api/auth/link-social', cookie, { provider: 'github' });
+      expect(link.status).toBe(403);
+      expect(((await link.json()) as { message: string }).message).toMatch(/can only sign out/);
+
+      const ordinaryLink = await post('/api/auth/link-social', await ordinaryCookie(), {
+        provider: 'github',
+      });
+      expect(
+        ordinaryLink.status === 403 && /can only sign out/.test(await ordinaryLink.text())
+      ).toBe(false);
+
+      const signOut = await post('/api/auth/sign-out', cookie);
+      expect(signOut.status).toBe(200);
+      expect((await me(cookie)).status).toBe(401);
+    });
+
+    it('is refused once past its hard expiry even if its expiry was extended', async () => {
+      const cookie = await agentCookie();
+      // Simulate a refresh that escaped the clamp: the row says 7 days, the cap has passed.
+      sqlite
+        .prepare('UPDATE sessions SET expires_at = ?, hard_expires_at = ?')
+        .run(Date.now() + 7 * 86_400_000, Date.now() - 1000);
+      expect((await me(cookie)).status).toBe(401);
+      expect(
+        (await app.request(`${API_ORIGIN}/api/auth/api-tokens`, { headers: { cookie } }, env))
+          .status
+      ).toBe(401);
+    });
+  });
+
+  describe('agent profile pin', () => {
+    it('accepts only the pinned profile when a source names one', async () => {
+      env.AGENT_SIGN_IN_TRUST = trustJson({
+        allowedSources: [
+          { projectId: SOURCE_PROJECT, userId: SOURCE_USER, agentProfileId: 'profile-1' },
+        ],
+      });
+      expect((await exchange(await issuer.sign())).status).toBe(200);
+      await (async () => {
+        const response = await exchange(
+          await issuer.sign({ ...CLAIMS, agent_profile_id: 'profile-2' })
+        );
+        expect(response.status).toBe(403);
+        expect(((await response.json()) as { message: string }).message).toMatch(
+          /not allowed to sign in/
+        );
+      })();
     });
   });
 
@@ -358,6 +495,8 @@ describe('agent sign-in through workload identity (vertical slice)', () => {
     ])('behaves as if the endpoint did not exist when configuration is %s', async (_label, raw) => {
       env.AGENT_SIGN_IN_TRUST = raw;
       expect(resolveAgentSignInTrust(env)).toBeNull();
+      // The flag the sign-in page shows (GET /api/config/login-providers) is off too.
+      expect(isAgentSignInEnabled(env)).toBe(false);
       const token = await issuer.sign();
       const unknown = await unknownRouteResponse();
       const response = await exchange(token);
@@ -451,25 +590,28 @@ describe('agent sign-in through workload identity (vertical slice)', () => {
       await expectRejected(await exchange(await forge({ type: 'session' })), 401, /\(claims\)/);
     });
 
-    it.each(['project_id', 'user_id', 'jti'])('rejects a token missing %s', async (claim) => {
-      const nowSeconds = Math.floor(Date.now() / 1000);
-      const { keys } = await getWorkloadJWKS(issuer.env);
-      const payload: Record<string, unknown> = {
-        ...CLAIMS,
-        type: 'workload-identity',
-        iss: ISSUER,
-        sub: 's',
-        aud: AUDIENCE,
-        iat: nowSeconds,
-        exp: nowSeconds + 300,
-        jti: crypto.randomUUID(),
-      };
-      delete payload[claim];
-      const token = await new SignJWT(payload)
-        .setProtectedHeader({ alg: 'RS256', kid: keys[0]?.kid ?? '' })
-        .sign(await importPKCS8(trustedKeys.privatePem, 'RS256'));
-      await expectRejected(await exchange(token), 401, /\(claims\)/);
-    });
+    it.each(['project_id', 'user_id', 'jti', 'sub', 'iss', 'aud', 'exp', 'iat'])(
+      'rejects a token missing %s',
+      async (claim) => {
+        const nowSeconds = Math.floor(Date.now() / 1000);
+        const { keys } = await getWorkloadJWKS(issuer.env);
+        const payload: Record<string, unknown> = {
+          ...CLAIMS,
+          type: 'workload-identity',
+          iss: ISSUER,
+          sub: 's',
+          aud: AUDIENCE,
+          iat: nowSeconds,
+          exp: nowSeconds + 300,
+          jti: crypto.randomUUID(),
+        };
+        delete payload[claim];
+        const token = await new SignJWT(payload)
+          .setProtectedHeader({ alg: 'RS256', kid: keys[0]?.kid ?? '' })
+          .sign(await importPKCS8(trustedKeys.privatePem, 'RS256'));
+        await expectRejected(await exchange(token), 401, /\((claims|issuer|audience)\)/);
+      }
+    );
 
     it('caches the issuer keys across exchanges', async () => {
       env.AGENT_SIGN_IN_TRUST = trustJson({ allowedTargets: '*' });
@@ -549,6 +691,30 @@ describe('agent sign-in through workload identity (vertical slice)', () => {
         (sqlite.prepare('SELECT role FROM users WHERE id = ?').get(TARGET_ID) as { role: string })
           .role
       ).toBe('user');
+    });
+  });
+
+  describe('per-IP attempt bound', () => {
+    it('limits exchange attempts per client IP before verifying the token', async () => {
+      env.AGENT_SIGN_IN_TRUST = trustJson({ maxAttemptsPerIpPerHour: 2 });
+      await expectRejected(
+        await exchange('not-a-jwt', TARGET_ID, '198.51.100.1'),
+        401,
+        /malformed/
+      );
+      await expectRejected(
+        await exchange('not-a-jwt', TARGET_ID, '198.51.100.1'),
+        401,
+        /malformed/
+      );
+      // Third attempt from the same address is refused even with a valid token.
+      await expectRejected(
+        await exchange(await issuer.sign(), TARGET_ID, '198.51.100.1'),
+        429,
+        /Too many requests/
+      );
+      // Another address is unaffected (control).
+      expect((await exchange(await issuer.sign(), TARGET_ID, '198.51.100.2')).status).toBe(200);
     });
   });
 

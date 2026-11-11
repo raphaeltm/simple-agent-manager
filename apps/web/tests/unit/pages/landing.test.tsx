@@ -135,6 +135,22 @@ describe('Landing agent sign-in notice', () => {
     );
   });
 
+  it('shows a remembered notice at once and clears it when the live answer says off', async () => {
+    window.localStorage.setItem(
+      LOGIN_PROVIDERS_STORAGE_KEY,
+      JSON.stringify({ ...GITHUB_ONLY, agentSignIn: true })
+    );
+    let answer: (value: unknown) => void = () => {};
+    fetchLoginProviders.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+    renderLanding();
+    expect(screen.getByRole('note')).toBeInTheDocument();
+
+    answer({ ...EMAIL_ONLY, agentSignIn: false });
+    // Liveness: the live answer rendered (email form, no GitHub), and the notice is gone.
+    expect(await screen.findByRole('textbox', { name: /email/i })).toBeInTheDocument();
+    expect(screen.queryByRole('note')).not.toBeInTheDocument();
+  });
+
   it('says nothing about agent sign-in on an ordinary instance', async () => {
     fetchLoginProviders.mockResolvedValue({ ...GITHUB_ONLY, agentSignIn: false });
     renderLanding();

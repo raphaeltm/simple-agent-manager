@@ -6,6 +6,7 @@ import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
 import { expectJsonRecord, maybeJsonRecord } from '../lib/runtime-validation';
 import { errors } from '../middleware/error';
+import { isAgentSignInSession, isPastHardExpiry } from '../services/agent-sign-in/session-cap';
 import {
   assertCodeAttemptBudget,
   EMAIL_CODE_SIGN_IN_PATH,
@@ -31,7 +32,7 @@ authRoutes.get('/me', async (c) => {
     query: { disableCookieCache: true },
   });
 
-  if (!session?.user) {
+  if (!session?.user || isPastHardExpiry(session.session)) {
     throw errors.unauthorized('Not authenticated');
   }
 
@@ -101,6 +102,16 @@ authRoutes.on(['GET', 'POST'], '/*', async (c) => {
   if (isClosedEmailOtpPath(new URL(c.req.url).pathname)) throw errors.notFound('Route');
   try {
     const auth = await createAuth(c.env, { waitUntil: executionWaitUntil(c) });
+    if (await isAgentSessionChangingAccount(auth, c.req.raw)) {
+      log.warn('agent_sign_in.auth_action_refused', {
+        path: new URL(c.req.url).pathname,
+        action: 'rejected',
+      });
+      return c.json(
+        { error: 'FORBIDDEN', message: 'Agent sign-in sessions can only sign out here' },
+        403
+      );
+    }
     const response = await auth.handler(c.req.raw);
 
     // Log auth error metadata only. BetterAuth response bodies may include
@@ -118,6 +129,29 @@ authRoutes.on(['GET', 'POST'], '/*', async (c) => {
     return c.json({ error: 'AUTH_ERROR', message: 'Internal auth error' }, 500);
   }
 });
+
+/** BetterAuth actions an agent sign-in session may take. Everything else that writes is refused. */
+const AGENT_SESSION_AUTH_ACTIONS = new Set(['/api/auth/sign-out']);
+
+/**
+ * Whether this is a BetterAuth write made with an agent sign-in session (other than signing
+ * out). Linking a social account, for one, would give the agent's operator a lasting way into
+ * the target account; an agent session must stay as short as it was issued. Reads the session
+ * only for BetterAuth POSTs that carry a session cookie, which are rare.
+ */
+async function isAgentSessionChangingAccount(
+  auth: Awaited<ReturnType<typeof createAuth>>,
+  request: Request
+): Promise<boolean> {
+  if (request.method !== 'POST') return false;
+  if (AGENT_SESSION_AUTH_ACTIONS.has(new URL(request.url).pathname)) return false;
+  if (!request.headers.get('cookie')?.includes('better-auth.session_token=')) return false;
+  const current = await auth.api.getSession({
+    headers: request.headers,
+    query: { disableCookieCache: true, disableRefresh: true },
+  });
+  return isAgentSignInSession(current?.session);
+}
 
 /** The request's waitUntil, when the runtime provides one (Workers do; unit-test apps do not). */
 function executionWaitUntil(c: Context): ((promise: Promise<unknown>) => void) | undefined {

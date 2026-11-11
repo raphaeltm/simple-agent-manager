@@ -35,6 +35,12 @@ Each token can be used once. The session expires after one hour by default and i
 while in use. The endpoint never creates accounts and never changes anyone's role; the target
 must already exist and pass the same approval checks as any other sign-in.
 
+An agent session can use the app like the target user, but it cannot turn itself into a longer
+lived credential: it cannot create personal access tokens, approve a CLI device sign-in, grant
+connector (OAuth) consent, or link a social account. It can sign out. Anything else the target
+account can create, such as triggers, workspaces or stored credentials, it can create too, so
+choose target accounts that only hold test data.
+
 ## Set it up (operator, once)
 
 You need three things from the **trusted** installation. Open a running chat there, choose
@@ -46,8 +52,8 @@ You need three things from the **trusted** installation. Open a running chat the
 - **User ID** of the user who owns the agent's chats in that project
 
 On the **test** instance, decide which existing accounts agents may sign in as. Use account IDs
-where you can; email addresses also work and are matched case-insensitively against the stored
-account.
+where you can. Email addresses also work and are matched case-insensitively against the stored
+account, but an address can be registered again if its account is deleted, while an ID cannot.
 
 Then set one value, `AGENT_SIGN_IN_TRUST`, on the test instance:
 
@@ -59,16 +65,17 @@ Then set one value, `AGENT_SIGN_IN_TRUST`, on the test instance:
 }
 ```
 
-| Field                     | Required | Meaning                                                                                                     |
-| ------------------------- | -------- | ----------------------------------------------------------------------------------------------------------- |
-| `issuer`                  | yes      | The trusted installation's issuer, exactly as shown in its identity panel. `https` only, no trailing slash. |
-| `allowedSources`          | yes      | Project and user pairs from the token's `project_id` and `user_id` claims. Both must match the same entry.  |
-| `allowedTargets`          | yes      | Account IDs or email addresses on this instance, or the string `"*"` for any account (see below).           |
-| `sessionTtlSeconds`       | no       | Session lifetime, `60`–`86400`. Default `3600`.                                                             |
-| `maxSignInsPerHour`       | no       | Accepted sign-ins per source project and user in any rolling hour, `1`–`1000`. Default `20`.                |
-| `maxAttemptsPerIpPerHour` | no       | Exchange attempts per client IP per hour, checked before the token is verified. Default `60`.               |
-| `jwksCacheSeconds`        | no       | How long the issuer's public keys are cached, `30`–`86400`. Default `600`.                                  |
-| `clockToleranceSeconds`   | no       | Allowed clock difference between the installations, `0`–`300`. Default `30`.                                |
+| Field                     | Required | Meaning                                                                                                                                                                               |
+| ------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `issuer`                  | yes      | The trusted installation's issuer, exactly as shown in its identity panel. `https` only, no trailing slash.                                                                           |
+| `allowedSources`          | yes      | Project and user pairs from the token's `project_id` and `user_id` claims. Both must match the same entry. An entry may also name `agentProfileId` to accept only that agent profile. |
+| `allowedTargets`          | yes      | Account IDs or email addresses on this instance, or the string `"*"` for any account (see below).                                                                                     |
+| `sessionTtlSeconds`       | no       | Session lifetime, `60`–`86400`. Default `3600`.                                                                                                                                       |
+| `maxSignInsPerHour`       | no       | Accepted sign-ins per source project and user in any rolling hour, `1`–`1000`. Default `20`.                                                                                          |
+| `maxAttemptsPerIpPerHour` | no       | Exchange attempts per client IP per hour, checked before the token is verified, `1`–`10000`. Default `60`.                                                                            |
+| `jwksCacheSeconds`        | no       | How long the issuer's public keys are cached, `30`–`3600`. Default `600`.                                                                                                             |
+| `jwksTimeoutSeconds`      | no       | Timeout for fetching the issuer's public keys, `1`–`30`. Default `5`.                                                                                                                 |
+| `clockToleranceSeconds`   | no       | Allowed clock difference between the installations, `0`–`300`. Default `30`.                                                                                                          |
 
 Unknown fields, a missing field or an invalid value switch the feature off and log
 `agent_sign_in.config_invalid`. A typo can never widen what is allowed.
@@ -82,7 +89,9 @@ Where to set the value:
 
 - **SAM's GitHub Actions deployment:** add `AGENT_SIGN_IN_TRUST` as a secret of the GitHub
   Environment you deploy (for example `staging`), then run the deployment. The deploy copies it
-  to the API Worker. It cannot be set from the admin settings page or the API.
+  to the API Worker. Write the JSON on one line: GitHub masks multi-line secrets line by line.
+  The GitHub secret is the only source: a value set by hand on the Worker is removed by the next
+  deployment. It cannot be set from the admin settings page or the API.
 - **Local development:** add it to `apps/api/.dev.vars`.
 
 The test instance must have an administrator account before agents can sign in.
@@ -141,9 +150,11 @@ await page.goto('https://app.test.example.org');
 **3. Work, then sign out** from the user menu when you are done. Signing out deletes the
 session at once instead of leaving it valid until it expires.
 
-The session value appears in the command output and therefore in the chat. It is a session for a
-test account that expires within the configured lifetime; treat it like any other test
-credential and sign out when finished.
+The session value appears in the command output and therefore in the chat, where anyone who can
+read the chat could use it until it expires or you sign out. It cannot be extended or turned into
+another credential. If your Playwright runs as a script rather than through the MCP tool, write
+the response to a file readable only by you (`umask 077; curl … -o session.json`) and read it
+in the script instead of printing it.
 
 ## Audit
 
@@ -156,16 +167,18 @@ Anyone using the test instance can tell it accepts agent sign-in: its sign-in pa
 
 ## If it fails
 
-| Response                                           | Meaning                                                                                           |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `404 NOT_FOUND`                                    | The feature is off on this instance, or its configuration is invalid.                             |
-| `401 … (audience)`                                 | The token was requested for a different audience. Use the URL from [The audience](#the-audience). |
-| `401 … (issuer)`, `(unknown_key)`, `(signature)`   | The token did not come from the configured issuer, or that issuer's keys changed.                 |
-| `401 … (expired)`, `(too_old)`, `(not_yet_valid)`  | Use the token straight away; check both installations' clocks.                                    |
-| `401 … (replayed)`                                 | Each token works once. Run the command again for a fresh token.                                   |
-| `401 … (claims)`, `(algorithm)`, `(malformed)`     | Not a SAM workload identity token.                                                                |
-| `403 This workload is not allowed to sign in here` | The token's project and user are not an `allowedSources` pair.                                    |
-| `403 Target user is not allowed for agent sign-in` | The target does not exist or is not in `allowedTargets`.                                          |
-| `403` pending approval or suspended                | The target account cannot sign in at all right now.                                               |
-| `429`                                              | Too many sign-ins for this source in the last hour; wait for `Retry-After`.                       |
-| `503 ISSUER_KEYS_UNAVAILABLE`                      | The test instance could not fetch the issuer's public keys. Check that the issuer is reachable.   |
+| Response                                           | Meaning                                                                                                             |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `404 NOT_FOUND`                                    | The feature is off on this instance, or its configuration is invalid.                                               |
+| `401 … (audience)`                                 | The token was requested for a different audience. Use the URL from [The audience](#the-audience).                   |
+| `401 … (issuer)`, `(unknown_key)`, `(signature)`   | The token did not come from the configured issuer, or that issuer's keys changed.                                   |
+| `401 … (expired)`, `(too_old)`, `(not_yet_valid)`  | Use the token straight away; check both installations' clocks.                                                      |
+| `401 … (replayed)`                                 | Each token works once. Run the command again for a fresh token.                                                     |
+| `401 … (claims)`, `(algorithm)`, `(malformed)`     | Not a SAM workload identity token.                                                                                  |
+| `403 This workload is not allowed to sign in here` | The token's project and user are not an `allowedSources` pair.                                                      |
+| `403 Target user is not allowed for agent sign-in` | The target does not exist or is not in `allowedTargets`.                                                            |
+| `403` pending approval or suspended                | The target account cannot sign in at all right now.                                                                 |
+| `403 … until this instance has an administrator`   | The test instance has no administrator account yet. Sign one in first.                                              |
+| `403 Agent sign-in sessions cannot create …`       | The agent session tried to create a token, approve a device or grant consent. Not allowed.                          |
+| `429`                                              | Too many sign-ins for this source in the last hour, or too many attempts from this address; wait for `Retry-After`. |
+| `503 ISSUER_KEYS_UNAVAILABLE`                      | The test instance could not fetch the issuer's public keys. Check that the issuer is reachable.                     |

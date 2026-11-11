@@ -11,7 +11,7 @@ import type { Env } from './env';
 import { createModuleLogger } from './lib/logger';
 import { readResponseJson } from './lib/runtime-validation';
 import { getBetterAuthSecret } from './lib/secrets';
-import { clampAgentSignInSession } from './services/agent-sign-in/ledger';
+import { clampSessionRefresh, HARD_EXPIRES_AT_FIELD } from './services/agent-sign-in/session-cap';
 import {
   bootstrapOwnerEmail,
   bootstrapSessionAllowed,
@@ -314,6 +314,14 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
         enabled: true,
         maxAge: 5 * 60, // 5 minutes
       },
+      additionalFields: {
+        // Hard lifetime of an agent sign-in session (migration 0234). Server-only.
+        [HARD_EXPIRES_AT_FIELD]: {
+          type: 'date',
+          required: false,
+          input: false,
+        },
+      },
     },
     socialProviders,
     plugins: emailSignInPlugins(env),
@@ -436,16 +444,10 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
           },
         },
         update: {
-          // Agent sign-in sessions (services/agent-sign-in/) have a hard expiry. BetterAuth's
-          // refresh would otherwise extend them to the normal seven days on first use. No-op
-          // for every other session. Not wrapped in try/catch on purpose: if the clamp cannot
-          // run, the refreshing request fails rather than leaving an extended agent session.
-          after: async (session) => {
-            const sessionId = (session as { id?: unknown } | null)?.id;
-            if (typeof sessionId === 'string' && sessionId) {
-              await clampAgentSignInSession(env, sessionId);
-            }
-          },
+          // Agent sign-in sessions carry a hard expiry (services/agent-sign-in/session-cap.ts).
+          // Lower a refresh's new expiry to it inside BetterAuth's own UPDATE. No-op for every
+          // session without a cap.
+          before: async (data, ctx) => clampSessionRefresh(data, ctx),
         },
       },
     },
