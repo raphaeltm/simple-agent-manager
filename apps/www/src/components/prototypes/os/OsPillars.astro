@@ -1,0 +1,88 @@
+---
+/** Prototype: "every layer is yours" pillars, shared by the OS homepage prototypes. */
+const pillars = [
+  {
+    title: 'Your machines',
+    points: [
+      'Seven cloud providers in one pool',
+      'Pools per project, per person, or for everyone',
+      'Machines are reused while they have room',
+      'Every placement records why it chose that machine',
+    ],
+  },
+  {
+    title: 'Your agents',
+    points: [
+      'Seven coding agents, mixed in one project',
+      'Profiles pick the agent, model and account',
+      'Use subscriptions or API keys',
+      'Sessions can be picked up again up to a week later',
+    ],
+  },
+  {
+    title: 'Your control plane',
+    points: [
+      'AGPL-3.0, every line readable',
+      'Deploys to your own Cloudflare account',
+      'Credentials stored encrypted, scoped to a person or project',
+      'No hosted service required',
+    ],
+  },
+];
+---
+
+<div class="pillars">
+  {pillars.map((p) => (
+    <div class="pillar sam-glass sam-glass-rim animate-on-scroll">
+      <h3 class="pillar-title">{p.title}</h3>
+      <ul>{p.points.map((pt) => <li>{pt}</li>)}</ul>
+    </div>
+  ))}
+</div>
+
+<style>
+  .pillars {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+  }
+
+  .pillar {
+    position: relative;
+    padding: 28px 24px;
+    border-radius: var(--radius-lg);
+  }
+
+  .pillar:nth-child(2) {
+    transition-delay: 0.08s;
+  }
+
+  .pillar:nth-child(3) {
+    transition-delay: 0.16s;
+  }
+
+  .pillar-title {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 1.375rem;
+    margin-bottom: 14px;
+  }
+
+  .pillar ul {
+    display: grid;
+    gap: 10px;
+    padding-left: 18px;
+    color: var(--color-fg-muted);
+    line-height: 1.5;
+  }
+
+  .pillar li::marker {
+    color: var(--color-accent-strong);
+  }
+
+  @media (max-width: 900px) {
+    .pillars {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

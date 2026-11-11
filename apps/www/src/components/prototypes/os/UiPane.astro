@@ -1,0 +1,58 @@
+---
+/**
+ * A real SAM screen in a glass frame (prototype). Images come from fresh captures of the
+ * production web app with mock data (apps/web/tests/playwright/marketing-shots-*.spec.ts).
+ */
+interface Props {
+  src: string;
+  alt: string;
+  label?: string;
+  /** CSS object-position, to keep the important part in view when the frame crops. */
+  focus?: string;
+  class?: string;
+  eager?: boolean;
+}
+
+const { src, alt, label, focus = 'top left', class: className = '', eager = false } = Astro.props;
+---
+
+<figure class:list={['pane', className]}>
+  <img src={src} alt={alt} style={`object-position:${focus}`} loading={eager ? 'eager' : 'lazy'} decoding="async" />
+  {label && <figcaption class="pane-label">{label}</figcaption>}
+</figure>
+
+<style>
+  .pane {
+    position: relative;
+    margin: 0;
+    border-radius: 14px;
+    overflow: hidden;
+    background: #07100c;
+    border: 1px solid rgb(255 255 255 / 0.09);
+    box-shadow:
+      0 1px 0 rgb(255 255 255 / 0.12) inset,
+      0 22px 50px -18px rgb(0 0 0 / 0.75),
+      0 40px 90px -40px rgb(34 197 94 / 0.25);
+  }
+
+  .pane img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .pane-label {
+    position: absolute;
+    left: 12px;
+    top: 12px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    color: #bbf7d0;
+    background: rgb(5 20 13 / 0.82);
+    border: 1px solid rgb(74 222 128 / 0.35);
+    backdrop-filter: blur(8px);
+  }
+</style>

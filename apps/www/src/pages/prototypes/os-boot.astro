@@ -1,0 +1,338 @@
+---
+/**
+ * PROTOTYPE OS-2 "Boot sequence" (2026-11-11): homepage as "the open-source operating system
+ * for scalable software factories". Scrolling boots SAM layer by layer over real screens.
+ * Not linked, noindex, not for merge.
+ */
+import Base from '../../layouts/Base.astro';
+import Header from '../../components/Header.astro';
+import FactoryCta from '../../components/prototypes/factory/FactoryCta.astro';
+import BootSequence from '../../components/prototypes/os/BootSequence.astro';
+import OsCode from '../../components/prototypes/os/OsCode.astro';
+import OsPillars from '../../components/prototypes/os/OsPillars.astro';
+import { proofStrip } from '../../data/proof-strip';
+import '../../components/prototypes/factory/factory.css';
+
+const img = (name: string) => `/images/prototypes/os/${name}.webp`;
+const githubUrl = 'https://github.com/raphaeltm/simple-agent-manager';
+
+const steps = [
+  {
+    layer: 'Machines',
+    title: 'Connect the hardware',
+    body: 'Add machine types from your own cloud accounts: GCP, Hetzner, Scaleway, Vultr, DigitalOcean, UpCloud and Infomaniak. Nothing joins a pool until you add it.',
+    log: 'machines: 3 providers in the project pool',
+    src: img('sam-nodes-multi-provider'),
+    alt: 'Machines across several cloud providers with CPU, memory and disk use',
+    from: '30% 0%',
+    to: '70% 40%',
+  },
+  {
+    layer: 'Scheduler',
+    title: 'Place every job',
+    body: 'Each task asks for CPU, memory and disk. SAM picks a machine that fits, reuses a warm one when it can, and records why.',
+    log: 'scheduler: placing by Balanced strategy',
+    src: img('sam-compute-placement-decision'),
+    alt: 'A placement decision showing the machine chosen for a session and why',
+    from: '100% 0%',
+    to: '100% 60%',
+  },
+  {
+    layer: 'Processes',
+    title: 'Run any coding agent',
+    body: 'Claude Code, Codex, Gemini CLI, OpenCode and more, each in its own workspace. Profiles pin the agent, model and account for each kind of job.',
+    log: 'agents: 7 coding agents available',
+    src: img('sam-hero-live-session'),
+    alt: 'A live agent session streaming its plan and tool calls',
+    from: '50% 0%',
+    to: '90% 50%',
+  },
+  {
+    layer: 'Memory',
+    title: 'Give every agent the same playbook',
+    body: 'Project rules and memory reach every session, with where each fact came from and when it was last confirmed.',
+    log: 'memory: project rules loaded',
+    src: img('sam-context-memory'),
+    alt: 'Project memory entries with confidence and source',
+    from: '40% 0%',
+    to: '80% 50%',
+  },
+  {
+    layer: 'Processes talking',
+    title: 'Let agents run agents',
+    body: 'A lead agent starts workers, sends them messages, interrupts them and reads what they report back. You talk to one agent; it keeps the rest on track.',
+    log: 'messages: agents can reach each other',
+    src: img('sam-agents-orchestration'),
+    alt: 'A lead agent and the subtasks it started',
+    from: '50% 0%',
+    to: '50% 60%',
+  },
+  {
+    layer: 'Scheduled jobs',
+    title: 'Start work without a person',
+    body: 'Schedules, GitHub issues and pull requests, webhooks and event watches start agents. This one starts an investigator whenever CI finishes.',
+    log: 'triggers: schedules, GitHub and webhooks armed',
+    src: img('sam-events-watches'),
+    alt: 'An event watch that starts an investigator chat when CI finishes',
+    from: '30% 0%',
+    to: '70% 50%',
+  },
+  {
+    layer: 'Users',
+    title: 'Bring the team',
+    body: 'Invite people into a project, share profiles and skills, and see when shared work is running on someone’s personal key.',
+    log: 'users: 5 members on Payments API',
+    src: img('sam-collab-members-access'),
+    alt: 'Project members and pending access requests',
+    from: '50% 0%',
+    to: '50% 70%',
+  },
+  {
+    layer: 'System log',
+    title: 'See what ran and what it cost',
+    body: 'Every run and its chat, machine hours per person, and costs across the installation.',
+    log: 'log: usage and costs recording',
+    src: img('sam-admin-costs'),
+    alt: 'Installation cost summary',
+    from: '40% 0%',
+    to: '60% 70%',
+  },
+];
+---
+
+<Base
+  title="SAM: the open-source operating system for scalable software factories"
+  description="SAM puts coding agents on your machines, gives them your project's rules and memory, lets them coordinate, and records what ran. Open source, on your own cloud."
+  noindex
+>
+  <Header />
+  <main class="fx-page">
+    <section class="hero">
+      <div class="hero-glow" aria-hidden="true"></div>
+      <div class="container hero-inner">
+        <h1 class="hero-title">The open-source operating system for scalable <span class="gradient-text">software factories</span></h1>
+        <p class="fx-lede hero-lede">
+          Work arrives from issues, schedules and webhooks. Agents turn it into pull requests for a
+          whole team. SAM is the layer underneath: machines, agents, memory, messages and people,
+          on your own cloud.
+        </p>
+        <div class="fx-actions hero-actions">
+          <a href="/self-host/" class="sam-btn sam-btn--primary">Deploy SAM</a>
+          <a href={githubUrl} class="sam-btn sam-btn--glass" target="_blank" rel="noopener noreferrer">Read the source</a>
+        </div>
+        <p class="fx-proof hero-proof">{proofStrip.map((p) => <span>{p}</span>)}</p>
+
+        <div class="monitor" aria-hidden="true">
+          <div class="monitor-screen">
+            <img src={img('sam-dashboard-overview')} alt="" />
+          </div>
+          <div class="monitor-term sam-glass sam-glass-rim">
+            <span class="t-line t1 t-head">Right now</span>
+            <span class="t-line t2"><span class="t-ok">ok</span> 12 agents running on 4 machines</span>
+            <span class="t-line t3"><span class="t-wait">..</span> 1 waiting on Priya</span>
+            <span class="t-line t4"><span class="t-ok">ok</span> 3 pull requests ready</span>
+          </div>
+        </div>
+        <p class="fx-note">Real SAM screen · sample project</p>
+      </div>
+    </section>
+
+    <section class="fx-section">
+      <div class="container">
+        <div class="fx-head">
+          <p class="fx-kicker">Boot sequence</p>
+          <h2 class="fx-h2">Every layer of a software factory, already built</h2>
+          <p class="fx-lede">Built for teams running agents across many repos and many people. Scroll to bring each layer up.</p>
+        </div>
+        <BootSequence steps={steps} done="software factory running" />
+      </div>
+    </section>
+
+    <section class="fx-section">
+      <div class="container split">
+        <div class="fx-head">
+          <p class="fx-kicker">Programmable from the inside</p>
+          <h2 class="fx-h2">Agents can run the factory too</h2>
+          <p class="fx-lede">
+            Agents use the same tools you do to start work, message running agents and set
+            schedules, through SAM's MCP server.
+          </p>
+        </div>
+        <OsCode />
+      </div>
+    </section>
+
+    <section class="fx-section">
+      <div class="container">
+        <div class="fx-head fx-head--center">
+          <p class="fx-kicker">Every layer is yours</p>
+          <h2 class="fx-h2">Your machines, your agents, your control plane</h2>
+        </div>
+        <OsPillars />
+      </div>
+    </section>
+
+    <FactoryCta
+      title="Boot your own"
+      body="Deploy SAM to your Cloudflare account, connect a cloud and an agent, and start your first job. Add repos, people and triggers from there."
+    />
+  </main>
+</Base>
+
+<style>
+  .hero {
+    position: relative;
+    isolation: isolate;
+    padding: calc(var(--header-height) + 72px) 0 40px;
+    text-align: center;
+  }
+
+  .hero-glow {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background:
+      radial-gradient(50% 40% at 50% 78%, rgb(34 197 94 / 0.2), transparent 70%),
+      radial-gradient(50% 50% at 50% 0%, rgb(6 78 59 / 0.4), transparent 72%);
+  }
+
+  .hero-inner {
+    display: grid;
+    justify-items: center;
+    gap: 20px;
+  }
+
+  .hero-title {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: clamp(2.125rem, 5vw, 4rem);
+    line-height: 1.04;
+    letter-spacing: -0.02em;
+    max-width: 18ch;
+  }
+
+  .hero-lede {
+    max-width: 58ch;
+  }
+
+  .hero-actions,
+  .hero-proof {
+    justify-content: center;
+  }
+
+  .monitor {
+    position: relative;
+    width: min(1040px, 100%);
+    margin-top: 28px;
+    perspective: 1800px;
+  }
+
+  .monitor-screen {
+    aspect-ratio: 16 / 9;
+    border-radius: 18px;
+    overflow: hidden;
+    border: 1px solid rgb(255 255 255 / 0.12);
+    box-shadow:
+      0 1px 0 rgb(255 255 255 / 0.14) inset,
+      0 40px 90px -30px rgb(0 0 0 / 0.85),
+      0 60px 160px -60px rgb(34 197 94 / 0.45);
+    transform: rotateX(14deg);
+    transform-origin: center bottom;
+    animation: monitor-rise 1.6s cubic-bezier(0.16, 1.1, 0.3, 1) both;
+  }
+
+  .monitor-screen img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: top left;
+  }
+
+  @keyframes monitor-rise {
+    from {
+      transform: rotateX(38deg) translateY(40px);
+      opacity: 0;
+    }
+  }
+
+  .monitor-term {
+    position: absolute;
+    left: -2%;
+    bottom: -6%;
+    display: grid;
+    gap: 4px;
+    padding: 14px 18px;
+    border-radius: 14px;
+    text-align: left;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--color-fg-primary);
+    min-width: 300px;
+  }
+
+  .t-line {
+    opacity: 0;
+    animation: t-in 0.35s ease forwards;
+  }
+
+  .t1 { animation-delay: 0.9s; }
+  .t2 { animation-delay: 1.6s; }
+  .t3 { animation-delay: 2.2s; }
+  .t4 { animation-delay: 2.8s; }
+
+  @keyframes t-in {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  .t-head { color: var(--color-fg-dim); font-size: 0.75rem; }
+  .t-ok { color: #4ade80; margin-right: 8px; }
+  .t-wait { color: #f5b14a; margin-right: 8px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .monitor-screen,
+    .t-line {
+      animation: none;
+      opacity: 1;
+    }
+  }
+
+  .split {
+    display: grid;
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+    gap: 48px;
+    align-items: center;
+  }
+
+  .split .fx-head {
+    margin-bottom: 0;
+  }
+
+  @media (max-width: 900px) {
+    .split {
+      grid-template-columns: 1fr;
+      gap: 32px;
+    }
+
+    .monitor-term {
+      position: relative;
+      left: 0;
+      bottom: 0;
+      margin-top: 12px;
+      min-width: 0;
+      font-size: 0.75rem;
+    }
+  }
+
+  @media (max-width: 767px) {
+    .hero {
+      padding-top: calc(var(--header-height) + 40px);
+    }
+  }
+</style>

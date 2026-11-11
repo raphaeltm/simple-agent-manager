@@ -1,0 +1,329 @@
+---
+/**
+ * Prototype: SAM "boots" layer by layer as the visitor scrolls. A sticky stage shows the real
+ * SAM screen for the current layer beside a boot log; each step's copy scrolls past on the left.
+ * Without JS or with reduced motion, every step shows its own screen inline.
+ */
+interface Step {
+  layer: string;
+  title: string;
+  body: string;
+  log: string;
+  src: string;
+  alt: string;
+  from?: string;
+  to?: string;
+}
+
+interface Props {
+  steps: Step[];
+  done: string;
+}
+
+const { steps, done } = Astro.props;
+---
+
+<div class="boot" data-boot>
+  <div class="boot-steps">
+    {steps.map((s, i) => (
+      <section class="boot-step" data-step={i} aria-labelledby={`boot-step-${i}`}>
+        <p class="boot-layer"><span class="boot-n">{String(i + 1).padStart(2, '0')}</span>{s.layer}</p>
+        <h3 class="boot-title" id={`boot-step-${i}`}>{s.title}</h3>
+        <p class="boot-body">{s.body}</p>
+        <img class="boot-inline" src={s.src} alt={s.alt} loading="lazy" decoding="async" />
+      </section>
+    ))}
+  </div>
+
+  <div class="boot-stage" aria-hidden="true">
+    <div class="boot-frame">
+      {steps.map((s, i) => (
+        <img
+          src={s.src}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          class:list={['boot-img', { 'is-on': i === 0 }]}
+          data-shot={i}
+          style={`--from:${s.from ?? 'left top'};--to:${s.to ?? 'right top'}`}
+        />
+      ))}
+    </div>
+    <div class="boot-log sam-glass sam-glass-rim">
+      <div class="boot-log-head"><span>sam</span><span data-boot-count>0/{steps.length}</span></div>
+      <ol class="boot-lines">
+        {steps.map((s, i) => (
+          <li class="boot-line" data-line={i}><span class="ok">ok</span>{s.log}</li>
+        ))}
+        <li class="boot-line boot-line--done" data-line={steps.length}><span class="ok">ok</span>{done}</li>
+      </ol>
+    </div>
+  </div>
+</div>
+
+<script>
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  for (const root of document.querySelectorAll<HTMLElement>('[data-boot]')) {
+    if (reduce) continue;
+    root.classList.add('is-live');
+    const steps = [...root.querySelectorAll<HTMLElement>('[data-step]')];
+    const shots = [...root.querySelectorAll<HTMLElement>('[data-shot]')];
+    const lines = [...root.querySelectorAll<HTMLElement>('[data-line]')];
+    const count = root.querySelector<HTMLElement>('[data-boot-count]');
+    let current = -1;
+
+    const show = (i: number) => {
+      if (i === current) return;
+      current = i;
+      shots.forEach((s, j) => s.classList.toggle('is-on', j === i));
+      steps.forEach((s, j) => s.classList.toggle('is-current', j === i));
+      lines.forEach((l, j) => {
+        l.classList.toggle('is-shown', j <= i || (i === steps.length - 1 && j === steps.length));
+        l.classList.toggle('is-latest', j === i);
+      });
+      if (count) count.textContent = `${i + 1}/${steps.length}`;
+    };
+
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) show(Number((e.target as HTMLElement).dataset.step));
+        }
+      },
+      { rootMargin: '-45% 0px -45% 0px' },
+    );
+    steps.forEach((s) => io.observe(s));
+    show(0);
+  }
+</script>
+
+<style>
+  .boot {
+    position: relative;
+  }
+
+  /* ---- Static layout (no JS / reduced motion): each step carries its own image ---- */
+  .boot-steps {
+    display: grid;
+    gap: 56px;
+  }
+
+  .boot-layer {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: #4ade80;
+  }
+
+  .boot-n {
+    color: var(--color-fg-dim);
+  }
+
+  .boot-title {
+    margin-top: 8px;
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: clamp(1.5rem, 2.6vw, 2rem);
+    line-height: 1.12;
+  }
+
+  .boot-body {
+    margin-top: 10px;
+    color: var(--color-fg-muted);
+    line-height: 1.6;
+    max-width: 44ch;
+  }
+
+  .boot-inline {
+    display: block;
+    width: 100%;
+    margin-top: 18px;
+    border-radius: 12px;
+    border: 1px solid rgb(255 255 255 / 0.1);
+  }
+
+  .boot-stage {
+    display: none;
+  }
+
+  /* ---- Live layout: copy scrolls on the left, the stage stays put on the right ---- */
+  .boot.is-live {
+    display: grid;
+    grid-template-columns: minmax(0, 4fr) minmax(0, 7fr);
+    gap: 48px;
+  }
+
+  .is-live .boot-steps {
+    gap: 0;
+  }
+
+  .is-live .boot-step {
+    min-height: 78vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    opacity: 0.28;
+    transition: opacity 0.5s ease;
+  }
+
+  .is-live .boot-step.is-current {
+    opacity: 1;
+  }
+
+  .is-live .boot-inline {
+    display: none;
+  }
+
+  .is-live .boot-stage {
+    display: grid;
+    gap: 14px;
+    position: sticky;
+    top: calc(var(--header-height) + 40px);
+    align-self: start;
+  }
+
+  .boot-frame {
+    position: relative;
+    aspect-ratio: 16 / 10;
+    border-radius: 16px;
+    overflow: hidden;
+    background: #07100c;
+    border: 1px solid rgb(255 255 255 / 0.1);
+    box-shadow:
+      0 1px 0 rgb(255 255 255 / 0.12) inset,
+      0 30px 70px -24px rgb(0 0 0 / 0.8),
+      0 40px 120px -60px rgb(34 197 94 / 0.35);
+  }
+
+  .boot-img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: var(--from);
+    opacity: 0;
+    transform: translateY(18px) scale(1.06);
+    transition:
+      opacity 0.6s ease,
+      transform 0.9s cubic-bezier(0.2, 1.2, 0.3, 1);
+  }
+
+  .boot-img.is-on {
+    opacity: 1;
+    transform: scale(1.1);
+    animation: boot-pan 7s ease-in-out infinite alternate;
+  }
+
+  @keyframes boot-pan {
+    from {
+      object-position: var(--from);
+    }
+    to {
+      object-position: var(--to);
+    }
+  }
+
+  .boot-log {
+    position: relative;
+    border-radius: 14px;
+    padding: 12px 16px 14px;
+    font-family: var(--font-mono);
+    font-size: 0.78125rem;
+  }
+
+  .boot-log-head {
+    display: flex;
+    justify-content: space-between;
+    color: var(--color-fg-dim);
+    margin-bottom: 8px;
+  }
+
+  .boot-lines {
+    list-style: none;
+    display: grid;
+    gap: 3px;
+    min-height: calc(1.55em * 5);
+    align-content: end;
+  }
+
+  .boot-line {
+    display: none;
+    color: var(--color-fg-muted);
+    line-height: 1.55;
+  }
+
+  .boot-line.is-shown {
+    display: block;
+    animation: boot-in 0.4s ease both;
+  }
+
+  .boot-line.is-latest {
+    color: var(--color-fg-primary);
+  }
+
+  .boot-line--done.is-shown {
+    color: #4ade80;
+  }
+
+  .ok {
+    display: inline-block;
+    margin-right: 10px;
+    color: #4ade80;
+  }
+
+  .ok::before {
+    content: '[ ';
+    color: var(--color-fg-dim);
+  }
+
+  .ok::after {
+    content: ' ]';
+    color: var(--color-fg-dim);
+  }
+
+  @keyframes boot-in {
+    from {
+      opacity: 0;
+      transform: translateX(-6px);
+    }
+  }
+
+  /* Phones: the stage sits at the top of the screen and the copy scrolls under it. */
+  @media (max-width: 900px) {
+    .boot.is-live {
+      grid-template-columns: 1fr;
+      gap: 0;
+    }
+
+    .is-live .boot-stage {
+      order: -1;
+      top: calc(var(--header-height) + 8px);
+      z-index: 2;
+      gap: 8px;
+      padding-bottom: 10px;
+      background: linear-gradient(to bottom, var(--color-bg-body) 85%, transparent);
+    }
+
+    .is-live .boot-step {
+      min-height: 62vh;
+      justify-content: flex-start;
+      padding-top: 32px;
+    }
+
+    .boot-log {
+      font-size: 0.6875rem;
+      padding: 8px 12px;
+    }
+
+    .boot-lines {
+      min-height: calc(1.55em * 2);
+    }
+
+    .boot-line.is-shown:not(.is-latest):not(.boot-line--done) {
+      display: none;
+    }
+  }
+</style>

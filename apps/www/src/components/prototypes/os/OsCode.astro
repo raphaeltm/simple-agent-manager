@@ -1,0 +1,240 @@
+---
+/**
+ * Prototype: a lead agent's MCP tool calls, "run" one at a time when scrolled into view. Each
+ * call lights up and its result appears beside it. Tool names and parameters are real
+ * (apps/api/src/routes/mcp/tool-definitions-*.ts); the values are sample data.
+ */
+const calls = [
+  {
+    comment: 'Split the migration across workers',
+    fn: 'dispatch_task',
+    args: [
+      ['description', '"Move refunds to the ledger schema"'],
+      ['agentProfileId', '"backend-worker"'],
+    ],
+    result: 'Task started on backend-worker',
+  },
+  {
+    comment: 'Steer one while it runs',
+    fn: 'send_durable_message',
+    args: [
+      ['targetTaskId', '"01M7…"'],
+      ['message', '"Dry-run the backfill first."'],
+      ['messageClass', '"interrupt"'],
+    ],
+    result: 'Worker interrupted, reads the note next',
+  },
+  {
+    comment: 'Keep it going every night',
+    fn: 'create_trigger',
+    args: [
+      ['name', '"Nightly dependency audit"'],
+      ['cronExpression', '"0 2 * * *"'],
+      ['promptTemplate', '"Audit dependencies and open a PR."'],
+    ],
+    result: 'Schedule saved: daily at 02:00',
+  },
+];
+---
+
+<div class="oscode" data-oscode>
+  <figure class="code sam-glass sam-glass-rim">
+    <figcaption class="code-cap"><span>lead agent</span><span>SAM MCP tools</span></figcaption>
+    <div class="code-body">
+      {calls.map((c, i) => (
+        <div class="call" data-call={i}>
+          <div class="ln c">// {c.comment}</div>
+          <div class="ln"><span class="f">{c.fn}</span>({'{'}</div>
+          {c.args.map(([k, v]) => (
+            <div class="ln arg">{k}: <span class="s">{v}</span>,</div>
+          ))}
+          <div class="ln">{'})'}</div>
+        </div>
+      ))}
+    </div>
+  </figure>
+  <ol class="results" aria-label="Results">
+    {calls.map((c, i) => (
+      <li class="result" data-result={i}>
+        <span class="tick" aria-hidden="true"></span>
+        <span class="result-fn">{c.fn}</span>
+        <span class="result-text">{c.result}</span>
+      </li>
+    ))}
+  </ol>
+</div>
+
+<script>
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  for (const root of document.querySelectorAll<HTMLElement>('[data-oscode]')) {
+    const calls = [...root.querySelectorAll<HTMLElement>('[data-call]')];
+    const results = [...root.querySelectorAll<HTMLElement>('[data-result]')];
+    if (reduce) {
+      results.forEach((r) => r.classList.add('is-done'));
+      continue;
+    }
+    root.classList.add('is-animated');
+    let timer = 0;
+    const run = () => {
+      let i = 0;
+      const step = () => {
+        calls.forEach((c, j) => c.classList.toggle('is-running', j === i));
+        if (i > 0) results[i - 1].classList.add('is-done');
+        if (i === calls.length) {
+          timer = window.setTimeout(() => {
+            results.forEach((r) => r.classList.remove('is-done'));
+            run();
+          }, 4200);
+          return;
+        }
+        i += 1;
+        timer = window.setTimeout(step, 1700);
+      };
+      step();
+    };
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          io.disconnect();
+          run();
+        }
+      },
+      { threshold: 0.4 },
+    );
+    io.observe(root);
+    window.addEventListener('pagehide', () => clearTimeout(timer));
+  }
+</script>
+
+<style>
+  .oscode {
+    display: grid;
+    gap: 14px;
+  }
+
+  .code {
+    position: relative;
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+  }
+
+  .code-cap {
+    display: flex;
+    justify-content: space-between;
+    padding: 10px 16px;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--color-fg-dim);
+    border-bottom: 1px solid var(--color-border-subtle);
+  }
+
+  .code-body {
+    padding: 12px 8px;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    line-height: 1.6;
+    color: var(--color-fg-primary);
+  }
+
+  .call {
+    padding: 6px 12px;
+    border-radius: 8px;
+    transition: background 0.4s ease, box-shadow 0.4s ease;
+  }
+
+  .call + .call {
+    margin-top: 6px;
+  }
+
+  .is-animated .call {
+    opacity: 0.55;
+    transition: opacity 0.4s ease, background 0.4s ease, box-shadow 0.4s ease;
+  }
+
+  .is-animated .call.is-running {
+    opacity: 1;
+    background: rgb(34 197 94 / 0.08);
+    box-shadow: inset 2px 0 0 #4ade80;
+  }
+
+  .ln {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .arg {
+    padding-left: 2ch;
+  }
+
+  .c { color: var(--color-fg-dim); }
+  .f { color: #6ee7b7; }
+  .s { color: #fcd38a; }
+
+  .results {
+    list-style: none;
+    display: grid;
+    gap: 8px;
+  }
+
+  .result {
+    display: grid;
+    grid-template-columns: 18px auto 1fr;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 14px;
+    border-radius: 10px;
+    font-size: 0.875rem;
+    color: var(--color-fg-primary);
+    background: rgb(255 255 255 / 0.03);
+    border: 1px solid var(--color-border-subtle);
+  }
+
+  .is-animated .result {
+    opacity: 0.25;
+    transform: translateY(6px);
+    transition: opacity 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.2), transform 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+  }
+
+  .is-animated .result.is-done,
+  .result.is-done {
+    opacity: 1;
+    transform: none;
+    border-color: rgb(74 222 128 / 0.35);
+  }
+
+  .tick {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 1.5px solid var(--color-fg-dim);
+  }
+
+  .result.is-done .tick {
+    border-color: #4ade80;
+    background: radial-gradient(circle, #4ade80 0 4px, transparent 5px);
+  }
+
+  .result-fn {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: #6ee7b7;
+  }
+
+  .result-text {
+    color: var(--color-fg-muted);
+  }
+
+  @media (max-width: 600px) {
+    .code-body {
+      font-size: 0.75rem;
+    }
+
+    .result {
+      grid-template-columns: 18px 1fr;
+    }
+
+    .result-fn {
+      display: none;
+    }
+  }
+</style>

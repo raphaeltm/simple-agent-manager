@@ -1,0 +1,326 @@
+---
+/**
+ * Prototype hero visual: real SAM screens as an exploded stack of OS layers (machines at the
+ * back, running agents in the middle, the interface in front). On load the layers spread apart;
+ * then the front screen cycles through real views and notifications arrive. Reduced motion shows
+ * the resting frame.
+ */
+interface Shot {
+  src: string;
+  alt: string;
+  focus?: string;
+}
+
+interface Props {
+  back: Shot & { label: string };
+  middle: Shot & { label: string };
+  front: { label: string; shots: Shot[] };
+  toasts: { tone: 'wait' | 'done' | 'info'; title: string; meta: string }[];
+}
+
+const { back, middle, front, toasts } = Astro.props;
+---
+
+<div class="sh" data-stack-hero data-state="flat" role="img" aria-label="Real SAM screens drawn as layers: machines at the back, running agents in the middle, and the chat interface in front, with notifications arriving.">
+  <div class="sh-scene" data-stack-scene>
+    <div class="sh-layer sh-back" style="--z:0">
+      <img src={back.src} alt="" style={`object-position:${back.focus ?? 'top left'}`} />
+      <span class="sh-label">{back.label}</span>
+    </div>
+    <div class="sh-layer sh-mid" style="--z:1">
+      <img src={middle.src} alt="" style={`object-position:${middle.focus ?? 'top left'}`} />
+      <span class="sh-label">{middle.label}</span>
+    </div>
+    <div class="sh-layer sh-front" style="--z:2">
+      {front.shots.map((s, i) => (
+        <img src={s.src} alt="" class:list={['sh-front-img', { 'is-on': i === 0 }]} data-front-shot style={`object-position:${s.focus ?? 'top left'}`} />
+      ))}
+      <span class="sh-label">{front.label}</span>
+    </div>
+  </div>
+  <div class="sh-toasts" aria-hidden="true">
+    {toasts.map((t) => (
+      <div class={`sh-toast sh-toast--${t.tone}`} data-toast>
+        <span class="sh-dot"></span>
+        <span class="sh-toast-body">
+          <span class="sh-toast-title">{t.title}</span>
+          <span class="sh-toast-meta">{t.meta}</span>
+        </span>
+      </div>
+    ))}
+  </div>
+</div>
+
+<script>
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  for (const root of document.querySelectorAll<HTMLElement>('[data-stack-hero]')) {
+    const shots = [...root.querySelectorAll<HTMLElement>('[data-front-shot]')];
+    const toasts = [...root.querySelectorAll<HTMLElement>('[data-toast]')];
+    const scene = root.querySelector<HTMLElement>('[data-stack-scene]');
+    if (reduce) {
+      root.dataset.state = 'open';
+      toasts.slice(0, 2).forEach((t) => t.classList.add('is-on'));
+      continue;
+    }
+    // Spread the layers apart once the first paint has happened.
+    requestAnimationFrame(() => requestAnimationFrame(() => (root.dataset.state = 'open')));
+
+    let shot = 0;
+    let toast = 0;
+    window.setInterval(() => {
+      if (document.hidden || shots.length < 2) return;
+      shots[shot].classList.remove('is-on');
+      shot = (shot + 1) % shots.length;
+      shots[shot].classList.add('is-on');
+    }, 4200);
+
+    const showToast = () => {
+      if (!document.hidden && toasts.length) {
+        toasts.forEach((t) => t.classList.remove('is-on', 'is-old'));
+        toasts[toast].classList.add('is-on');
+        const prev = toasts[(toast + toasts.length - 1) % toasts.length];
+        if (prev !== toasts[toast]) prev.classList.add('is-old');
+        toast = (toast + 1) % toasts.length;
+      }
+    };
+    window.setTimeout(() => {
+      showToast();
+      window.setInterval(showToast, 2800);
+    }, 1400);
+
+    // Gentle parallax with the pointer.
+    if (scene && window.matchMedia('(pointer: fine)').matches) {
+      root.addEventListener('pointermove', (e) => {
+        const r = root.getBoundingClientRect();
+        scene.style.setProperty('--px', String((e.clientX - r.left) / r.width - 0.5));
+        scene.style.setProperty('--py', String((e.clientY - r.top) / r.height - 0.5));
+      });
+      root.addEventListener('pointerleave', () => {
+        scene.style.setProperty('--px', '0');
+        scene.style.setProperty('--py', '0');
+      });
+    }
+  }
+</script>
+
+<style>
+  .sh {
+    position: relative;
+    aspect-ratio: 16 / 12;
+    perspective: 2000px;
+    perspective-origin: 40% 30%;
+  }
+
+  .sh-scene {
+    --px: 0;
+    --py: 0;
+    position: absolute;
+    inset: 0;
+    transform-style: preserve-3d;
+    transform: rotateX(calc(10deg - var(--py) * 4deg)) rotateY(calc(-20deg + var(--px) * 6deg));
+    transition: transform 0.6s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  .sh-layer {
+    position: absolute;
+    width: 78%;
+    aspect-ratio: 16 / 10;
+    border-radius: 14px;
+    overflow: hidden;
+    background: #07100c;
+    border: 1px solid rgb(255 255 255 / 0.1);
+    box-shadow:
+      0 1px 0 rgb(255 255 255 / 0.14) inset,
+      0 30px 60px -20px rgb(0 0 0 / 0.8),
+      0 40px 120px -50px rgb(34 197 94 / 0.35);
+    transform-origin: center;
+    /* Flat: all layers on top of each other. Open: spread along depth and the diagonal. */
+    left: 11%;
+    top: 14%;
+    transform: translateZ(0);
+    transition:
+      transform 1.4s cubic-bezier(0.16, 1.2, 0.3, 1),
+      left 1.4s cubic-bezier(0.16, 1.2, 0.3, 1),
+      top 1.4s cubic-bezier(0.16, 1.2, 0.3, 1),
+      opacity 0.8s ease;
+    transition-delay: calc((2 - var(--z)) * 90ms);
+  }
+
+  .sh-layer img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  [data-state='open'] .sh-back {
+    left: 22%;
+    top: 0%;
+    transform: translateZ(-220px);
+    opacity: 0.75;
+  }
+
+  [data-state='open'] .sh-mid {
+    left: 11%;
+    top: 14%;
+    transform: translateZ(-90px);
+    opacity: 0.9;
+  }
+
+  [data-state='open'] .sh-front {
+    left: 0%;
+    top: 30%;
+    transform: translateZ(40px);
+  }
+
+  .sh-front-img {
+    opacity: 0;
+    transform: scale(1.02);
+    transition: opacity 0.9s ease, transform 4.4s ease-out;
+  }
+
+  .sh-front-img.is-on {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  .sh-label {
+    position: absolute;
+    left: 12px;
+    top: 12px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    color: #bbf7d0;
+    background: rgb(5 20 13 / 0.85);
+    border: 1px solid rgb(74 222 128 / 0.4);
+    opacity: 0;
+    transition: opacity 0.6s ease 1.2s;
+  }
+
+  [data-state='open'] .sh-label {
+    opacity: 1;
+  }
+
+  .sh-toasts {
+    position: absolute;
+    right: -2%;
+    bottom: 6%;
+    width: min(320px, 56%);
+    height: 140px;
+    pointer-events: none;
+  }
+
+  .sh-toast {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: grid;
+    grid-template-columns: 10px 1fr;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: rgb(8 18 14 / 0.92);
+    border: 1px solid rgb(255 255 255 / 0.1);
+    box-shadow: 0 18px 40px -12px rgb(0 0 0 / 0.8);
+    backdrop-filter: blur(10px);
+    opacity: 0;
+    transform: translateY(16px) scale(0.96);
+    transition:
+      opacity 0.45s ease,
+      transform 0.6s cubic-bezier(0.2, 1.3, 0.3, 1);
+  }
+
+  .sh-toast.is-on {
+    opacity: 1;
+    transform: none;
+  }
+
+  .sh-toast.is-old {
+    opacity: 0.45;
+    transform: translateY(-64px) scale(0.94);
+  }
+
+  .sh-toast--wait {
+    border-color: rgb(245 177 74 / 0.5);
+  }
+
+  .sh-toast--done {
+    border-color: rgb(74 222 128 / 0.45);
+  }
+
+  .sh-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #4ade80;
+    box-shadow: 0 0 10px #4ade80;
+  }
+
+  .sh-toast--wait .sh-dot {
+    background: #f5b14a;
+    box-shadow: 0 0 10px #f5b14a;
+  }
+
+  .sh-toast--info .sh-dot {
+    background: #7dd3fc;
+    box-shadow: 0 0 10px #7dd3fc;
+  }
+
+  .sh-toast-body {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .sh-toast-title {
+    font-size: 0.8125rem;
+    color: var(--color-fg-primary);
+  }
+
+  .sh-toast-meta {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    color: var(--color-fg-dim);
+  }
+
+  @media (max-width: 900px) {
+    .sh {
+      aspect-ratio: 16 / 13;
+      perspective: 1400px;
+    }
+
+    .sh-layer {
+      width: 84%;
+    }
+
+    [data-state='open'] .sh-back {
+      left: 16%;
+      transform: translateZ(-160px);
+    }
+
+    [data-state='open'] .sh-mid {
+      left: 8%;
+      top: 15%;
+    }
+
+    [data-state='open'] .sh-front {
+      top: 30%;
+    }
+
+    .sh-label {
+      font-size: 0.625rem;
+      padding: 2px 8px;
+    }
+
+    .sh-toasts {
+      right: 0;
+      bottom: -4%;
+      width: 72%;
+    }
+  }
+</style>

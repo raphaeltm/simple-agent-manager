@@ -1,0 +1,270 @@
+---
+/**
+ * Prototype: the OS-to-SAM mapping as a "system monitor". Each row is a tab; the frame on the
+ * right shows the real SAM screen for that row and slowly pans across it. Tabs advance on their
+ * own until the visitor picks one.
+ */
+interface Row {
+  os: string;
+  sam: string;
+  what: string;
+  src: string;
+  alt: string;
+  /** Pan start and end, as object-position values. */
+  from?: string;
+  to?: string;
+}
+
+interface Props {
+  rows: Row[];
+}
+
+const { rows } = Astro.props;
+---
+
+<div class="sm" data-monitor>
+  <div class="sm-tabs" role="tablist" aria-label="Operating system ideas and the SAM feature for each">
+    {rows.map((r, i) => (
+      <button type="button" role="tab" class="sm-tab" aria-selected={i === 0 ? 'true' : 'false'} data-tab={i}>
+        <span class="sm-os">{r.os}</span>
+        <span class="sm-sam">{r.sam}</span>
+        <span class="sm-what">{r.what}</span>
+        <span class="sm-progress" aria-hidden="true"></span>
+      </button>
+    ))}
+  </div>
+  <div class="sm-frame">
+    {rows.map((r, i) => (
+      <img
+        src={r.src}
+        alt={r.alt}
+        loading="lazy"
+        decoding="async"
+        class:list={['sm-img', { 'is-on': i === 0 }]}
+        data-panel={i}
+        style={`--from:${r.from ?? 'left top'};--to:${r.to ?? 'right top'}`}
+      />
+    ))}
+  </div>
+</div>
+
+<script>
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const DWELL = 5200;
+  for (const root of document.querySelectorAll<HTMLElement>('[data-monitor]')) {
+    const tabs = [...root.querySelectorAll<HTMLButtonElement>('[data-tab]')];
+    const panels = [...root.querySelectorAll<HTMLElement>('[data-panel]')];
+    let current = 0;
+    let auto = !reduce;
+    let timer = 0;
+
+    const select = (i: number) => {
+      current = i;
+      tabs.forEach((t, j) => {
+        t.setAttribute('aria-selected', String(j === i));
+        t.classList.remove('is-timing');
+      });
+      panels.forEach((p, j) => p.classList.toggle('is-on', j === i));
+      // Phones show the tabs as a scrolling row: keep the current one in view.
+      const row = tabs[i].parentElement;
+      if (row && row.scrollWidth > row.clientWidth) row.scrollTo({ left: tabs[i].offsetLeft - row.offsetLeft, behavior: reduce ? 'auto' : 'smooth' });
+      if (auto) {
+        // Restart the progress bar animation.
+        void tabs[i].offsetWidth;
+        tabs[i].classList.add('is-timing');
+        clearTimeout(timer);
+        timer = window.setTimeout(() => select((current + 1) % tabs.length), DWELL);
+      }
+    };
+
+    tabs.forEach((t, i) =>
+      t.addEventListener('click', () => {
+        auto = false;
+        clearTimeout(timer);
+        select(i);
+      }),
+    );
+
+    root.style.setProperty('--dwell', `${DWELL}ms`);
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && auto) select(current);
+        else clearTimeout(timer);
+      },
+      { threshold: 0.3 },
+    );
+    io.observe(root);
+  }
+</script>
+
+<style>
+  .sm {
+    display: grid;
+    grid-template-columns: minmax(0, 5fr) minmax(0, 8fr);
+    gap: 28px;
+    align-items: start;
+  }
+
+  .sm-tabs {
+    display: grid;
+    gap: 6px;
+  }
+
+  .sm-tab {
+    position: relative;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 2px;
+    padding: 12px 16px 14px;
+    text-align: left;
+    border-radius: 12px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+    overflow: hidden;
+    transition: background 0.3s ease, border-color 0.3s ease;
+  }
+
+  .sm-tab:hover {
+    background: rgb(255 255 255 / 0.03);
+  }
+
+  .sm-tab[aria-selected='true'] {
+    background: rgb(34 197 94 / 0.07);
+    border-color: rgb(74 222 128 / 0.3);
+  }
+
+  .sm-tab:focus-visible {
+    outline: 2px solid var(--sam-glass-v2-focus, #34d399);
+    outline-offset: 2px;
+  }
+
+  .sm-os {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--color-fg-dim);
+  }
+
+  .sm-sam {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 1.125rem;
+    color: var(--color-fg-primary);
+  }
+
+  .sm-tab[aria-selected='true'] .sm-sam {
+    color: #4ade80;
+  }
+
+  .sm-what {
+    font-size: 0.875rem;
+    line-height: 1.45;
+    color: var(--color-fg-muted);
+    display: none;
+  }
+
+  .sm-tab[aria-selected='true'] .sm-what {
+    display: block;
+  }
+
+  .sm-progress {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    height: 2px;
+    width: 0;
+    background: #4ade80;
+  }
+
+  .sm-tab.is-timing .sm-progress {
+    animation: sm-fill var(--dwell, 5s) linear forwards;
+  }
+
+  @keyframes sm-fill {
+    to {
+      width: 100%;
+    }
+  }
+
+  .sm-frame {
+    position: sticky;
+    top: calc(var(--header-height) + 24px);
+    aspect-ratio: 16 / 10;
+    border-radius: 16px;
+    overflow: hidden;
+    background: #07100c;
+    border: 1px solid rgb(255 255 255 / 0.1);
+    box-shadow:
+      0 1px 0 rgb(255 255 255 / 0.12) inset,
+      0 30px 70px -24px rgb(0 0 0 / 0.8),
+      0 40px 120px -60px rgb(34 197 94 / 0.35);
+  }
+
+  .sm-img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: var(--from);
+    opacity: 0;
+    transform: scale(1.04);
+    transition: opacity 0.7s ease, transform 0.9s cubic-bezier(0.2, 0.9, 0.3, 1);
+  }
+
+  .sm-img.is-on {
+    opacity: 1;
+    transform: scale(1.12);
+    animation: sm-pan var(--dwell, 5s) ease-in-out forwards;
+  }
+
+  @keyframes sm-pan {
+    from {
+      object-position: var(--from);
+    }
+    to {
+      object-position: var(--to);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .sm-img.is-on {
+      animation: none;
+      transform: none;
+    }
+  }
+
+  @media (max-width: 900px) {
+    .sm {
+      grid-template-columns: 1fr;
+      gap: 14px;
+    }
+
+    .sm-frame {
+      position: relative;
+      top: 0;
+      order: -1;
+    }
+
+    .sm-tabs {
+      display: flex;
+      overflow-x: auto;
+      scroll-snap-type: x mandatory;
+      gap: 8px;
+      padding-bottom: 4px;
+      scrollbar-width: none;
+    }
+
+    .sm-tab {
+      flex: 0 0 76%;
+      scroll-snap-align: start;
+      border-color: var(--color-border-subtle);
+    }
+
+    .sm-tab .sm-what {
+      display: block;
+    }
+  }
+</style>
