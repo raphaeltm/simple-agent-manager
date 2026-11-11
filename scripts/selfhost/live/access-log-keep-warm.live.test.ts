@@ -207,6 +207,34 @@ describe('access log', () => {
     }
   });
 
+  it('replaces a credential carried in the path, and leaves other paths alone', async () => {
+    const token = `pt${randomBytes(12).toString('hex')}`;
+    const cases: Array<[string, string, string]> = [
+      [
+        `api.${DOMAIN}`,
+        `/ai/proxy/${token}/anthropic/v1/messages`,
+        '/ai/proxy/<redacted>/anthropic/v1/messages',
+      ],
+      [`api.${DOMAIN}`, `/api/bootstrap/${token}`, '/api/bootstrap/<redacted>'],
+      [
+        `api.${DOMAIN}`,
+        `/api/projects/invite-links/${token}/request?x=1`,
+        '/api/projects/invite-links/<redacted>/request?<redacted>',
+      ],
+      [`app.${DOMAIN}`, `/projects/invite/${token}`, '/projects/invite/<redacted>'],
+      [`preview.${DOMAIN}`, `/p/proj/file/1/9999/${token}/index.html`, '/p/<redacted>'],
+      [`api.${DOMAIN}`, '/api/projects/p1/sessions', '/api/projects/p1/sessions'],
+    ];
+    for (const [host, path] of cases) expect((await get(stack, host, path)).status).toBe(200);
+    await waitFor('every path-case line', async () => {
+      const uris = accessLines(stack).map((line) => (line.request as { uri?: string }).uri);
+      return cases.every(([, , logged]) => uris.includes(logged));
+    });
+    // Liveness: the token reached celld unchanged; only the log is redacted.
+    expect(hits.filter((hit) => hit.url.includes(token))).toHaveLength(5);
+    expect(stack.stdout() + stack.stderr()).not.toContain(token);
+  });
+
   it('redacts the query of a proxy-error entry in Caddy own log', async () => {
     const down = await startCaddy({ SAM_KEEP_WARM: 'off', CELLD_PORT: String(await freePort()) });
     expect((await get(down, `api.${DOMAIN}`, `/x?t=${SECRETS.query}`)).status).toBe(502);
@@ -248,7 +276,7 @@ describe('keep-warm', () => {
 
   it.each([
     [{ SAM_KEEP_WARM: 'yes' }, /SAM_KEEP_WARM must be on or off/],
-    [{ SAM_KEEP_WARM_INTERVAL: '30s' }, /SAM_KEEP_WARM_INTERVAL must be 1s to 7s/],
+    [{ SAM_KEEP_WARM_INTERVAL: '7s' }, /SAM_KEEP_WARM_INTERVAL must be 1s to 6s/],
   ])('start.sh refuses %j', async (extra, message) => {
     const container = `sam-live-log-${randomBytes(4).toString('hex')}`;
     const run = spawnSync(

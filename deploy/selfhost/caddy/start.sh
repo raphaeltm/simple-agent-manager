@@ -31,9 +31,9 @@ on | off) ;;
 	;;
 esac
 case "${SAM_KEEP_WARM_INTERVAL:-5s}" in
-[1-7]s) ;;
+[1-6]s) ;;
 *)
-	echo "caddy: SAM_KEEP_WARM_INTERVAL must be 1s to 7s (celld retires an isolate idle for about 8 s)" >&2
+	echo "caddy: SAM_KEEP_WARM_INTERVAL must be 1s to 6s (celld retires an isolate idle for about 8 s)" >&2
 	exit 64
 	;;
 esac

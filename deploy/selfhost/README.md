@@ -175,8 +175,11 @@ connection shows up with its length. Caddy's own log (proxy errors, certificates
 Neither log contains a header or a query string (`caddy/log-redaction.caddy`): cookies,
 `Authorization`, SAM's `X-SAM-*` gateway headers and the gateway secret are dropped, and every
 query string is replaced with `?<redacted>`, because terminal and port-access tokens and OAuth
-codes travel there. Compose caps Caddy's log at about `CADDY_LOG_MAX_SIZE` x `CADDY_LOG_MAX_FILES`
-(50 MB x 5).
+codes travel there. Routes that carry a credential in the path (the AI proxy's workspace token,
+bootstrap and invite tokens, signed preview URLs) have that segment replaced too; the list is in
+`caddy/log-redaction.caddy` and must grow with any new route of that kind. Compose caps Caddy's log at about `CADDY_LOG_MAX_SIZE` x `CADDY_LOG_MAX_FILES`
+(50 MB x 5). Anyone can add lines by sending requests, so a burst can rotate older lines away
+before you read them.
 
 On the box (the operator path is SSH; nothing here adds a listener):
 
@@ -194,8 +197,9 @@ later decision:
   celld logs to the box's own Google Cloud project, where an operator reads them with
   `gcloud logging read` under their own IAM. No new listener. It needs `roles/logging.logWriter`
   for the VM's service account and a viewer role for the operator, it is GCE-specific, and the
-  logs leave the box (the same trust domain as the fleet bucket, which already holds the Worker
-  secrets in plaintext).
+  logs leave the box. Cloud Logging read access is often granted more widely than access to the
+  fleet bucket, and celld's log carries whatever Worker code logs, so decide who can read it
+  before turning this on.
 - **An admin-only SAM route.** Worker code on celld cannot read files or reach Docker, and the
   egress fence keeps it off loopback services on purpose. A route would need a new log service
   on the box that the fence lets celld reach, which is new attack surface for the most privileged
@@ -206,7 +210,7 @@ later decision:
 celld retires a stateless Worker isolate after about 8 s idle, and the next request waits
 1.5-2.2 s while a new isolate loads the 29 MB bundle. As a stopgap Caddy keeps one warm: an
 active health check sends `GET /health` to celld every `SAM_KEEP_WARM_INTERVAL` (default `5s`,
-allowed `1s`-`7s`) for as long as Caddy runs (`caddy/keep-warm/on.caddy`). The check sits on a
+allowed `1s`-`6s`) for as long as Caddy runs (`caddy/keep-warm/on.caddy`). The check sits on a
 route that serves no request, so a failing `/health` cannot take the real proxy out of service.
 `/health` reads no storage and is not in SAM's request log or Caddy's access log. Set
 `SAM_KEEP_WARM=off` in `.env` and run `docker compose up -d caddy` to turn it off. The upstream
