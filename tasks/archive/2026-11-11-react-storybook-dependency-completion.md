@@ -10,8 +10,10 @@ terminal tests failed to import (CI run 42900302518). Dependabot PR #2640 bumped
 
 Both are partial updates of packages that are released in lockstep. This replacement candidate
 moves each lockstep group together. Coordinated by PR Shepherd (2026-11-11); channel
-`feature.pr-shepherd-deps-20261111`. Draft + `needs-human-review` until the coordinator approves
-the exact PR number and head. Do not merge.
+`feature.pr-shepherd-deps-20261111`. The coordinator released the original agent draft hold
+for PR #2657 at exact head `b7ec231ff57f200c943e465afe2afc435681fb6a` on 2026-11-11
+at approximately 20:04 UTC. The coordinator owns the merge after the current gates pass;
+originals #2638/#2640 stay open until the replacement is verified merged.
 
 ## Research Findings
 
@@ -49,13 +51,35 @@ the exact PR number and head. Do not merge.
 - [x] Playwright desktop/mobile screenshot audit of the app, reviewed and posted (PR #2657 comment 6796792306)
 - [x] Local specialist review (task-completion-validator PASS, ui-ux-specialist PASS)
 - [x] Staging deploy + live verification (run 43056907125, PR comment 6801695391)
-- [ ] Draft PR with `needs-human-review`; report exact head to coordinator
+- [x] Open protected draft #2657 and report the exact head; coordinator readiness release recorded above
+- [x] Stabilize the SAM notice audit by scrolling the virtualized log before expanding its row; original assertions retained, 80/80 stress runs passed
 
 ## Acceptance Criteria
 
 - [x] Exactly one `react` and one `react-dom` version (19.3.1) in the lockfile
-- [x] All Storybook packages resolve to the same version
-- [ ] Terminal, UI, web, acp-client tests pass; Storybook builds and its Playwright audit passes
-- [ ] CI green on the candidate head, including Test and Workspace Quality Surfaces
+- [x] All Storybook lockstep release packages resolve to 10.6.6; auxiliary packages retain their independent versions
+- [x] Terminal, UI, web, acp-client tests pass; Storybook builds and its Playwright audit passes (68/68)
+- [x] Source head CI is green, including Test and Workspace Quality Surfaces: run 43082588893 attempt 2
 - [x] Staging app loads and works with zero React errors
-- [ ] PR stays DRAFT + `needs-human-review`; originals #2638/#2640 untouched
+- [x] Preserve the coordinator draft hold until explicit readiness approval; originals #2638/#2640 remain untouched pending verified replacement merge
+
+## Completion Evidence
+
+- Source head: `b7ec231ff57f200c943e465afe2afc435681fb6a`. CI run
+  [43082588893](https://github.com/raphaeltm/simple-agent-manager/actions/runs/43082588893)
+  attempt 2 passed all 19 applicable checks. The single authorized Visual job retry passed;
+  the original unrelated mobile timeline timeout remains documented in the PR.
+- Staging run 43056907125 verified `0e4dbc2e09d9800df95ba58d357bd0051e08ab65`.
+  The coordinator independently confirmed identical runtime sources, shared packages,
+  catalog, lockfile and root package inputs at the source head. Later main integration,
+  including #2649, was covered by synthetic merge CI at
+  `98bee79c870d6c645f65829720a02e2bf72093b8`; it is not claimed as staged by this run.
+- All local reviewers completed with PASS or ADDRESSED. The parent completion-validator
+  refresh before archive passed checks A–F with no HIGH or CRITICAL findings.
+- The notice-audit reviewer identified pre-existing expansion-state loss when a row unmounts,
+  plus three LOW findings. They are preserved in Idea `01M75YG63HR3CH40KGZKD5M46W`.
+- [CodeRabbit approved](https://github.com/raphaeltm/simple-agent-manager/pull/2657#pullrequestreview-5864822833)
+  the source head at 20:12:36 UTC with no inline comments, review threads or unresolved feedback.
+- This archival change modifies only the task record. The coordinator will reconcile the
+  new documentation head, CI and incremental review before merge, then verify production
+  deployment and inspect the originals' remaining diffs before closure.
