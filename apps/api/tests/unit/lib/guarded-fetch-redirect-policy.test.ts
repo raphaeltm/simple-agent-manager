@@ -83,23 +83,25 @@ describe('cross-origin hops keep only the safe header list', () => {
 describe('one deadline bounds the whole operation', () => {
   let server: Server;
   let base: string;
-  // Each hop answers after `hopDelayMs`; /final answers headers at once and its body later.
-  const hopDelayMs = 300;
-
+  // Each hop answers after `?delay=` ms (300 by default); /final answers headers at once and
+  // ends its body 800 ms later.
   beforeEach(async () => {
     server = createServer((req: IncomingMessage, res: ServerResponse) => {
       const url = new URL(req.url ?? '/', 'http://x');
       if (url.pathname === '/final') {
         res.writeHead(200, { 'content-type': 'text/plain' });
         res.write('head-');
-        setTimeout(() => res.end('tail'), 400);
+        setTimeout(() => res.end('tail'), 800);
         return;
       }
       const hop = Number(url.searchParams.get('hop') ?? '0');
+      const delay = url.searchParams.get('delay') ?? '300';
       setTimeout(() => {
-        res.writeHead(302, { location: hop >= 2 ? '/final' : `/hop?hop=${hop + 1}` });
+        res.writeHead(302, {
+          location: hop >= 2 ? '/final' : `/hop?hop=${hop + 1}&delay=${delay}`,
+        });
         res.end();
-      }, hopDelayMs);
+      }, Number(delay));
     });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -119,16 +121,17 @@ describe('one deadline bounds the whole operation', () => {
     ).catch((err: unknown) => err);
     expect(error).toBeInstanceOf(OutboundRequestRefusedError);
     expect((error as OutboundRequestRefusedError).reason).toBe('deadline');
-    expect(Date.now() - started).toBeLessThan(900);
+    // The chain alone takes ~900 ms before /final's body even starts.
+    expect(Date.now() - started).toBeLessThan(1_200);
   });
 
-  it('control: with a deadline the chain fits in, the final body is read in full', async () => {
-    // Headers of /final arrive at ~900 ms; its body ends ~400 ms after the deadline would
-    // have cut a per-request signal. The deadline stops once the final response is in hand.
+  it('control: with a deadline the hops fit in, the final body is read in full', async () => {
+    // Instant hops, then /final's headers at once and its body 800 ms later: well past the
+    // 400 ms deadline. The deadline stops once the final response is in hand.
     const res = await guardedFetch(
-      `${base}/hop?hop=0`,
+      `${base}/hop?hop=0&delay=0`,
       {},
-      { allowPrivateNetwork: true, deadlineMs: 1_000 }
+      { allowPrivateNetwork: true, deadlineMs: 400 }
     );
     expect(await res.text()).toBe('head-tail');
   });
