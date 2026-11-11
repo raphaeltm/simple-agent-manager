@@ -118,3 +118,40 @@ export function materialiseSandboxImageContext(
   }
   return `${SANDBOX_IMAGE_DIR}/Dockerfile`;
 }
+
+/** What `docker info --format '{{json .Runtimes}}'` answered, or why it could not. */
+export type EngineProbe = { ok: true; runtimesJson: string } | { ok: false; error: string };
+
+/**
+ * Refuses a deploy that would advertise guided login with nothing able to run it. Without a
+ * daemon, or with the runtime unregistered, every session fails only after the Sandbox SDK's
+ * ~150 s start-retry window, and its teardown waits through a second one (measured on the
+ * prototype box, celld 0.6.3: `unknown or invalid runtime name: runsc`). Checked on the deploying
+ * machine, which on a one-box install is the node; a node whose engine changes later is not
+ * covered.
+ */
+export function assertContainerEngineReady(
+  settings: GuidedLoginSettings,
+  probe: EngineProbe
+): void {
+  if (!probe.ok) {
+    throw new Error(
+      `SAM_GUIDED_LOGIN=on needs a Docker daemon on this box (docker info failed: ${probe.error})`
+    );
+  }
+  if (!settings.runtime) return;
+  let runtimes: unknown;
+  try {
+    runtimes = JSON.parse(probe.runtimesJson);
+  } catch {
+    throw new Error(
+      `could not read the Docker daemon's runtimes: ${probe.runtimesJson.slice(0, 200)}`
+    );
+  }
+  if (typeof runtimes !== 'object' || runtimes === null || !(settings.runtime in runtimes)) {
+    throw new Error(
+      `SAM_GUIDED_LOGIN_RUNTIME=${settings.runtime} is not registered with the Docker daemon ` +
+        `(for gVisor: install runsc, run \`sudo runsc install\`, restart Docker)`
+    );
+  }
+}

@@ -226,9 +226,49 @@ anyone is using the box. Set `SAM_KEEP_WARM=off` in `.env` and run `docker compo
 to turn it off. The upstream fix (celld keeping a warm stateless isolate, or a retirement
 setting) is tracked in `tasks/backlog/2026-11-11-selfhost-celld-isolate-cold-start-slow-page-loads.md`.
 
+## Guided credential login (opt-in, experimental)
+
+The "sign in with your Claude / ChatGPT subscription" button runs the provider's CLI in a Sandbox
+SDK container (`SandboxDO`, `apps/api/Dockerfile.sandbox`). celld's experimental container support
+runs it on this box. Off by default; pasting `claude setup-token` output or `auth.json` works
+either way. Instant sessions stay off: their vm-agent must call the API on this box, and the
+deployment declares `CONTAINER_RUNTIME_AVAILABLE=false` for them whatever the switches say.
+
+```bash
+sudo apt-get install runsc && sudo runsc install && sudo systemctl restart docker   # gVisor
+# .env:
+SAM_GUIDED_LOGIN=on
+DOCKER_SOCKET_GID=<stat -c %g /var/run/docker.sock>
+COMPOSE_FILE=docker-compose.yml:docker-compose.guided-login.yml
+pnpm selfhost:deploy --init && docker compose up -d && pnpm selfhost:deploy
+```
+
+- The deploy emits a `containers` entry for `SandboxDO` only, with `runtime` gVisor (`runsc`;
+  `SAM_GUIDED_LOGIN_RUNTIME`) and instance type `basic` (1 GiB, 1/4 vCPU;
+  `SAM_GUIDED_LOGIN_INSTANCE_TYPE`), and builds the 2.3 GB image into the fleet bucket. It refuses
+  to deploy when Docker or the runtime is missing (`assertContainerEngineReady`): without them
+  every session fails only after about 2.5 minutes.
+- The compose override hands celld the Docker socket and binds `/var/lib/celld` at the same path
+  (celld bind-mounts the containers' `resolv.conf` from it). The Docker socket is root on this
+  host: a compromise of the celld process is now a compromise of the box. Worker code has no
+  socket or filesystem API.
+- celld's own fence lets the container reach the Internet and nothing on the box, the VPC,
+  private ranges or metadata. It does not stop the box's own public address: the container reaches
+  SAM's public HTTPS like any Internet client. SAM's egress fence lets celld (uid 7101) reach the
+  container bridge `celld0` (TCP only) and nothing else in 172.16/12.
+- The container runs a pinned vendor CLI and holds the fresh credential until the DO reads and
+  stores it encrypted, on the same host as `ENCRYPTION_KEY`. gVisor puts a user-space kernel
+  between that CLI and the host kernel. Use it only where the people who can sign in are trusted
+  with the box (single trust domain).
+
+Code: `scripts/selfhost/guided-login.ts`, `docker-compose.guided-login.yml`, the `containers`
+rule in `celld-config.ts`, `hasSandboxContainerRuntime` in
+`apps/api/src/services/platform-capabilities.ts`.
+
 ## Known gaps in this pass
 
-- Off on purpose: Instant sessions and guided credential login (Cloudflare Containers), Artifacts
+- Off on purpose: Instant sessions (Cloudflare Containers; never on a box), guided credential login
+  unless turned on (see Guided credential login), Artifacts
   (SAM-native repos), Analytics Engine, AI Gateway, Workers AI features (TTS, task titles,
   stalled-task classifier), agent email (inbound mail and replies; sign-in codes work over SMTP).
   Project creation needs a GitHub App or GitLab.

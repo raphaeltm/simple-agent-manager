@@ -48,7 +48,11 @@ import {
 import { ensureCelldBinary, resolveEsbuild } from './celld-binary.js';
 import { buildCelldConfig, type CelldWranglerConfig } from './celld-config.js';
 import { ASSETS_DIR, prepareCelldProject, SOURCE_LINK, writeCelldConfig } from './celld-project.js';
-import { guidedLoginSettings } from './guided-login.js';
+import {
+  assertContainerEngineReady,
+  type EngineProbe,
+  guidedLoginSettings,
+} from './guided-login.js';
 import { writeFenceFiles } from './fence-state.js';
 import {
   ensureMailCollectorPassword,
@@ -145,6 +149,15 @@ function buildWeb(baseDomain: string): string {
  * (`shared`, `providers`, `cloud-init`) through their built `dist/` entry points. A fresh
  * checkout has none, so build the API's dependencies (not the API itself) first.
  */
+function probeDockerRuntimes(): EngineProbe {
+  const result = spawnSync('docker', ['info', '--format', '{{json .Runtimes}}'], {
+    encoding: 'utf8',
+  });
+  if (result.error) return { ok: false, error: result.error.message };
+  if (result.status !== 0) return { ok: false, error: (result.stderr ?? '').trim().slice(0, 300) };
+  return { ok: true, runtimesJson: (result.stdout ?? '').trim() };
+}
+
 function buildApiDependencies(): void {
   log("building the API Worker's workspace dependencies");
   const result = spawnSync(
@@ -325,11 +338,12 @@ async function main(): Promise<void> {
   knownSecrets = Object.values(secrets);
 
   const source = TOML.parse(readFileSync(join(API_DIR, 'wrangler.toml'), 'utf8')) as WranglerToml;
+  const guidedLogin = guidedLoginSettings(box);
   const plan = buildCelldConfig(source, {
     main: `${SOURCE_LINK}/index.ts`,
     baseDomain,
     assetsDirectory: ASSETS_DIR,
-    guidedLogin: guidedLoginSettings(box),
+    guidedLogin,
     vars: {
       SAM_INSTALLATION_ID,
       VAPID_SUBJECT: `https://app.${baseDomain}`,
@@ -353,6 +367,7 @@ async function main(): Promise<void> {
   }
 
   // First, so a box without a working Docker fails before minutes of other builds.
+  if (guidedLogin) assertContainerEngineReady(guidedLogin, probeDockerRuntimes());
   let vmAgentBinDir: string | null = null;
   if (vmAgentRelease) {
     log(`building vm-agent release ${vmAgentRelease.release}`);

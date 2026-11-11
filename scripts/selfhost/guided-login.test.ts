@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
+  assertContainerEngineReady,
   dockerfileCopySources,
   guidedLoginSettings,
   materialiseSandboxImageContext,
@@ -79,5 +80,38 @@ describe('sandbox image build context', () => {
     expect(() =>
       materialiseSandboxImageContext(apiDir, mkdtempSync(join(tmpdir(), 'sam-p-')))
     ).toThrow(/missing/);
+  });
+});
+
+describe('assertContainerEngineReady', () => {
+  const runsc = { runtime: 'runsc', instanceType: 'basic' };
+  const runtimes = (names: string[]) =>
+    JSON.stringify(Object.fromEntries(names.map((name) => [name, { path: name }])));
+
+  it('passes when the daemon has the runtime', () => {
+    expect(() =>
+      assertContainerEngineReady(runsc, { ok: true, runtimesJson: runtimes(['runc', 'runsc']) })
+    ).not.toThrow();
+  });
+
+  it('refuses a daemon without the runtime (the prototype box before `runsc install`)', () => {
+    expect(() =>
+      assertContainerEngineReady(runsc, { ok: true, runtimesJson: runtimes(['runc']) })
+    ).toThrow(/not registered/);
+  });
+
+  it('refuses when there is no daemon', () => {
+    expect(() =>
+      assertContainerEngineReady(runsc, { ok: false, error: 'Cannot connect to the Docker daemon' })
+    ).toThrow(/needs a Docker daemon/);
+  });
+
+  it('needs only the daemon for the default runtime', () => {
+    expect(() =>
+      assertContainerEngineReady(
+        { runtime: null, instanceType: 'basic' },
+        { ok: true, runtimesJson: runtimes(['runc']) }
+      )
+    ).not.toThrow();
   });
 });
