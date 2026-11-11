@@ -1663,6 +1663,15 @@ lifecycle bookkeeping.
 | `DIGITALOCEAN_REGION`                      | `fra1`             | Default DigitalOcean region                                           |
 | `DIGITALOCEAN_IMAGE`                       | `ubuntu-24-04-x64` | Default Droplet image slug                                            |
 | `CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS` | `120000`           | Instant-session create-workspace budget (includes in-container clone) |
+| `GITLAB_API_TIMEOUT_MS`                    | `30000`            | One deadline for a whole GitLab API call, every redirect hop included |
+
+### Outbound requests to URLs a user or admin chose
+
+SAM never lets the runtime follow a redirect for a URL a user or admin chose (AI proxy base URLs, the OpenAI-compatible endpoint, GitLab, `check_dns_status`). It checks every hop itself (`apps/api/src/lib/network-hosts/guarded-fetch.ts`). A hop to another origin keeps only `Accept`, `Accept-Language`, `Content-Type`, `Content-Language` and `User-Agent`; every other header, including any credential, is dropped.
+
+| Admin setting | Default | Meaning |
+| --- | --- | --- |
+| `outbound.maxRedirects` | `3` | Redirect hops followed, each re-checked, range 0–10. `0` refuses every redirect. Category **Operations**. |
 
 ## Admin Observability
 

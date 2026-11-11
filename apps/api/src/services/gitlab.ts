@@ -8,8 +8,9 @@ import type { Env } from '../env';
 import { classifyHost, guardedFetch } from '../lib/network-hosts';
 import { readResponseJson } from '../lib/runtime-validation';
 import { errors } from '../middleware/error';
-import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
+import { getTimeoutMs } from './fetch-timeout';
 import { requireGitLabUserAccessTokenForOwner } from './gitlab-access-token';
+import { resolveOutboundMaxRedirects } from './outbound-fetch-settings';
 import { getGitLabOAuthConfig } from './platform-config';
 
 // Access-token helpers live in gitlab-access-token.ts; re-exported so callers keep one import.
@@ -128,7 +129,9 @@ async function gitlabFetch(
   if (!headers.has('Accept')) {
     headers.set('Accept', 'application/json');
   }
-  const timeoutMs = getTimeoutMs(env.GITLAB_API_TIMEOUT_MS, DEFAULT_GITLAB_API_TIMEOUT_MS);
+  // One deadline for the whole call, every redirect hop included: the worst case is
+  // GITLAB_API_TIMEOUT_MS, not that times (outbound.maxRedirects + 1).
+  const deadlineMs = getTimeoutMs(env.GITLAB_API_TIMEOUT_MS, DEFAULT_GITLAB_API_TIMEOUT_MS);
   // The host is admin-configured (validateGitLabHost). A private host is allowed only when the
   // admin configured a private host (a self-managed GitLab on the LAN); either way a redirect
   // cannot take the request, and its bearer token, anywhere the configured host could not go.
@@ -137,7 +140,8 @@ async function gitlabFetch(
     { ...init, headers },
     {
       allowPrivateNetwork: classifyHost(new URL(apiBaseUrl).hostname) === 'private',
-      fetchFn: (url, hopInit) => fetchWithTimeout(url, hopInit, timeoutMs),
+      maxRedirects: await resolveOutboundMaxRedirects(env),
+      deadlineMs,
     }
   );
 }

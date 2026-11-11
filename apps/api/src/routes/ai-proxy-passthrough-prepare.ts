@@ -24,6 +24,7 @@ import {
 } from '../middleware/rate-limit';
 import { AIProxyAuthError, verifyAIProxyAuth } from '../services/ai-proxy-shared';
 import { checkAiUsageGate } from '../services/ai-token-budget';
+import { resolveOutboundMaxRedirects } from '../services/outbound-fetch-settings';
 import type { PreloadedRuntimeRows } from '../services/workspace-runtime-assets';
 import {
   anthropicError,
@@ -284,7 +285,8 @@ export function upstreamFetchErrorMeta(err: unknown): Record<string, string> {
  * and every redirect hop re-validated instead of followed by the runtime. A refused URL or hop
  * throws `OutboundRequestRefusedError`, which each route reports as an upstream failure.
  */
-export function fetchProxyUpstream(
+export async function fetchProxyUpstream(
+  env: Env,
   url: string,
   headers: Record<string, string>,
   body: Record<string, unknown>
@@ -292,7 +294,7 @@ export function fetchProxyUpstream(
   return guardedFetch(
     url,
     { method: 'POST', headers, body: JSON.stringify(body) },
-    { allowPrivateNetwork: false }
+    { allowPrivateNetwork: false, maxRedirects: await resolveOutboundMaxRedirects(env) }
   );
 }
 
