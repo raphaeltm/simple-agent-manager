@@ -7,6 +7,7 @@ import Base from '../../layouts/Base.astro';
 import Header from '../../components/Header.astro';
 import FactoryCta from '../../components/prototypes/factory/FactoryCta.astro';
 import FactoryLine from '../../components/prototypes/factory/FactoryLine.astro';
+import FeatureScene from '../../components/scenes/FeatureScene.astro';
 import { proofStrip } from '../../data/proof-strip';
 import '../../components/prototypes/factory/factory.css';
 
@@ -18,43 +19,43 @@ const stations = [
     step: '01',
     title: 'Work arrives on its own',
     body: 'Start agents from GitHub issues, comments, pull requests and pushes, on a schedule, or from any system that can send a webhook. Or write an idea with a plan and hand it over when it is ready.',
-    img: 'sam-triggers-sources',
-    alt: 'Automation page listing schedules, GitHub triggers and webhooks',
+    scene: 'events',
+    caption: 'Automation: schedules, GitHub triggers and webhooks',
   },
   {
     step: '02',
     title: 'Every agent starts with the same playbook',
     body: 'Profiles pin the agent, model and account for a kind of job. Skills hold the steps for repeatable work. Project rules and memory reach every session, so the hundredth run follows the same conventions as the first.',
-    img: 'sam-context-policies',
-    alt: 'Project policies that every agent session receives',
+    scene: 'agent-context',
+    caption: 'Project rules every session receives',
   },
   {
     step: '03',
     title: 'Each job gets its own machine',
     body: 'Every task runs in its own workspace on a server SAM picks from your compute pool. Pools span seven cloud providers, reuse machines that still have room, and record why each job landed where it did.',
-    img: 'sam-compute-placement-decision',
-    alt: 'Placement decision showing which machine a task was sent to and why',
+    scene: 'compute-pools',
+    caption: 'Where each job ran, and why',
   },
   {
     step: '04',
     title: 'Agents run other agents',
     body: 'A lead agent can split a big job, start agents for each part, send them messages, stop them, and read what they report back. You talk to one agent. It keeps the rest on track.',
     img: 'sam-agents-orchestration',
-    alt: 'A lead agent with its running subtasks',
+    caption: 'A lead agent and the agents it started',
   },
   {
     step: '05',
     title: 'People step in where judgment matters',
-    body: 'Agents ask when they are stuck, and you answer from your phone. Comment on a sentence an agent wrote and send the thread back to it. Nothing merges because a timer ran out.',
-    img: 'sam-comments-chat-thread',
-    alt: 'A comment thread on an agent reply, ready to send back to the agent',
+    body: 'Agents ask when they are stuck, and you answer from your phone. Comment on a sentence an agent wrote and send the thread back to it. Each answer lands in the same session, so the agent picks up where it stopped.',
+    scene: 'comments',
+    caption: 'A comment thread sent back to the agent',
   },
   {
     step: '06',
-    title: 'See the whole floor',
-    body: 'Every member’s sessions in one list, which keys pay for shared work, and token and machine usage per person. Admins get costs for the whole installation.',
-    img: 'sam-admin-costs',
-    alt: 'Admin cost summary with token and machine spend per person'
+    title: 'One installation for the whole team',
+    body: 'Invite people into a project and share profiles, skills and files. See everyone\u2019s sessions in the project, which keys pay for shared work, and machine hours per person. Before someone leaves, preview what they own.',
+    scene: 'multiplayer',
+    caption: 'Everyone on the project, and whose keys pay',
   },
 ];
 
@@ -68,7 +69,7 @@ const blocks = [
   { name: 'Compute pools', text: 'Which clouds and machine types work may use.' },
   { name: 'Subtasks and messages', text: 'Agents starting and talking to other agents.' },
   { name: 'Library', text: 'Shared files, reports and reference docs.' },
-  { name: 'Usage', text: 'Tokens and machine hours, per person and per model.' },
+  { name: 'Usage', text: 'Machine hours per person, and tokens for work sent through SAM\u2019s AI proxy.' },
 ];
 ---
 
@@ -87,14 +88,16 @@ const blocks = [
             The building blocks for your <span class="gradient-text">software factory</span>
           </h1>
           <p class="fx-lede">
-            SAM is open source. It gives your team the parts to turn a steady stream of work into
-            shipped code: triggers that start agents, a workspace for every task, agents that manage
-            other agents, and one place to review it all. You run it on your own cloud.
+            SAM is open source. It gives your team the parts to turn a steady stream of issues,
+            schedules and alerts into pull requests: triggers that start agents, a workspace for every
+            task, agents that run other agents, and one list of everything waiting on a person. You run
+            it on your own cloud.
           </p>
           <div class="fx-actions">
             <a href={deployUrl} class="sam-btn sam-btn--primary">Deploy SAM</a>
             <a href={githubUrl} class="sam-btn sam-btn--glass" target="_blank" rel="noopener noreferrer">Read the source</a>
           </div>
+          <p class="fx-for">Built for teams running agents across many repos and many people.</p>
           <p class="fx-proof">{proofStrip.map((p) => <span>{p}</span>)}</p>
         </div>
         <div class="a-hero-figure">
@@ -123,8 +126,15 @@ const blocks = [
                 <h3 class="a-station-title">{s.title}</h3>
                 <p class="a-station-body">{s.body}</p>
               </div>
-              <div class="fx-shot">
-                <img src={`/images/features/${s.img}.webp`} alt={s.alt} loading="lazy" width="1920" height="1200" />
+              <div class="a-scene">
+                {s.scene ? (
+                  <FeatureScene slug={s.scene} side={i % 2 ? 'left' : 'right'} href={`/features/${s.scene}/`} label={s.title} caption={s.caption} />
+                ) : (
+                  <figure class="a-flat">
+                    <div class="fx-shot"><img src={`/images/features/${s.img}.webp`} alt={s.caption} loading="lazy" width="1920" height="1200" /></div>
+                    <figcaption class="fx-note">{s.caption}</figcaption>
+                  </figure>
+                )}
               </div>
             </li>
           ))}
@@ -138,9 +148,9 @@ const blocks = [
           <p class="fx-kicker">The blocks</p>
           <h2 class="fx-h2">Put them together the way your team works</h2>
           <p class="fx-lede">
-            Every block is something people use in the app and agents use through SAM's MCP tools.
-            An agent can start another agent, add a schedule, write a skill or file an idea, so the
-            factory can improve while it runs.
+            Each block works on its own, and they combine. Agents use many of them too, through
+            SAM's MCP tools: an agent can start another agent, add a schedule, write a skill or file
+            an idea.
           </p>
         </div>
         <ul class="a-blocks">
@@ -154,31 +164,12 @@ const blocks = [
       </div>
     </section>
 
-    <section class="fx-section">
-      <div class="container a-split">
-        <div class="fx-head">
-          <p class="fx-kicker">Built for many people</p>
-          <h2 class="fx-h2">One installation for the whole team</h2>
-          <ul class="a-list">
-            <li>Invite people to a project. An owner approves each request.</li>
-            <li>Share profiles, skills, environment variables and files across members.</li>
-            <li>Switch between your sessions and everyone's.</li>
-            <li>See when shared automation is running on someone's personal key, and fix it.</li>
-            <li>Preview what a person owns before they leave the team.</li>
-          </ul>
-        </div>
-        <div class="fx-shot">
-          <img src="/images/features/sam-collab-credential-attribution.webp" alt="Credential attribution panel showing which member's key pays for shared work" loading="lazy" width="1920" height="1200" />
-        </div>
-      </div>
-    </section>
-
     <section class="fx-section fx-section--tight">
       <div class="container">
         <div class="a-own sam-glass sam-glass-rim">
           <div>
             <p class="fx-kicker">Yours to run</p>
-            <h2 class="fx-h2">No vendor between you and your factory</h2>
+            <h2 class="fx-h2">You run every part of it</h2>
           </div>
           <dl class="a-own-grid">
             <div><dt>The code</dt><dd>AGPL-3.0. Read it, change it, run it.</dd></div>
@@ -191,8 +182,8 @@ const blocks = [
     </section>
 
     <FactoryCta
-      title="Start with one line. Add more as you grow."
-      body="Deploy SAM to your Cloudflare account, connect a cloud and an agent, and point your first trigger at a repo."
+      title="Start with one repo and one trigger"
+      body="Deploy SAM to your Cloudflare account, connect a cloud and an agent, and let the first issue come in. Add repos, people and agents from there."
     />
   </main>
 </Base>
@@ -226,7 +217,7 @@ const blocks = [
   }
 
   .a-hero-copy .fx-lede {
-    max-width: 64ch;
+    max-width: 70ch;
   }
 
   .a-title {
@@ -282,6 +273,12 @@ const blocks = [
     line-height: 1.65;
   }
 
+  .a-flat {
+    display: grid;
+    gap: 14px;
+    justify-items: center;
+  }
+
   .a-blocks {
     list-style: none;
     display: grid;
@@ -308,29 +305,6 @@ const blocks = [
     font-size: 0.875rem;
     line-height: 1.5;
     color: var(--color-fg-muted);
-  }
-
-  .a-split {
-    display: grid;
-    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
-    gap: 48px;
-    align-items: center;
-  }
-
-  .a-split .fx-head {
-    margin-bottom: 0;
-  }
-
-  .a-list {
-    display: grid;
-    gap: 10px;
-    padding-left: 18px;
-    color: var(--color-fg-muted);
-    line-height: 1.55;
-  }
-
-  .a-list li::marker {
-    color: var(--color-accent-strong);
   }
 
   .a-own {
@@ -371,7 +345,6 @@ const blocks = [
     }
 
     .a-station,
-    .a-split,
     .a-own {
       grid-template-columns: 1fr;
       gap: 24px;

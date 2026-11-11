@@ -15,11 +15,11 @@ const githubUrl = 'https://github.com/raphaeltm/simple-agent-manager';
 const mapping = [
   { os: 'Process', sam: 'Agent session', what: 'One agent on one task, in its own workspace.' },
   { os: 'Scheduler', sam: 'Compute pools', what: 'Puts each job on a machine that fits, and reuses warm ones.' },
-  { os: 'cron', sam: 'Triggers', what: 'Starts work on a schedule, a GitHub event or a webhook.' },
-  { os: 'Signals and pipes', sam: 'Subtasks and messages', what: 'Agents start, message, interrupt and stop other agents.' },
-  { os: 'Filesystem', sam: 'Library and memory', what: 'Shared files and facts every agent can read and write.' },
-  { os: 'Users and groups', sam: 'Members and profiles', what: 'Who can start work, with which agent, on whose account.' },
-  { os: 'System log', sam: 'Activity and usage', what: 'Every run, tool call, token and machine hour, per person.' },
+  { os: 'Scheduled jobs', sam: 'Triggers', what: 'Starts work on a schedule, a GitHub event or a webhook.' },
+  { os: 'Processes talking', sam: 'Subtasks and messages', what: 'Agents start, message, interrupt and stop other agents.' },
+  { os: 'Shared files', sam: 'Library and memory', what: 'Files and project facts every agent can read and add to.' },
+  { os: 'Users', sam: 'Members and profiles', what: 'Who is on the project, and which agent and account each kind of job uses.' },
+  { os: 'System log', sam: 'Activity and usage', what: 'Every run and its chat, machine hours per person, and tokens for work sent through SAM\u2019s AI proxy.' },
 ];
 
 const codeHtml = `<span class="c">// Split the migration across workers</span>
@@ -58,7 +58,7 @@ const pillars = [
       'Seven coding agents, mixed in one project',
       'Profiles pick the agent, model and account',
       'Use subscriptions or API keys',
-      'Sessions can be resumed days later',
+      'Sessions can be picked up again up to a week later',
     ],
   },
   {
@@ -66,7 +66,7 @@ const pillars = [
     points: [
       'AGPL-3.0, every line readable',
       'Deploys to your own Cloudflare account',
-      'Credentials encrypted per person and per project',
+      'Credentials stored encrypted, scoped to a person or project',
       'No hosted service required',
     ],
   },
@@ -86,14 +86,16 @@ const pillars = [
         <div class="b-hero-copy">
           <h1 class="b-title">The operating system for your <span class="gradient-text">software factory</span></h1>
           <p class="fx-lede">
-            A software factory runs hundreds of agent jobs for many people at once. SAM does the work
-            underneath: it puts agents on machines, gives them memory and permissions, lets them
-            coordinate, and keeps a record of everything. Open source, on your own cloud.
+            In a software factory, work arrives from issues, schedules and webhooks, and agents turn
+            it into pull requests for a whole team. SAM is the layer underneath: it puts each agent on
+            a machine, gives it the project's rules and memory, lets agents coordinate, and records
+            what ran. Open source, on your own cloud.
           </p>
           <div class="fx-actions">
             <a href="/self-host/" class="sam-btn sam-btn--primary">Deploy SAM</a>
             <a href={githubUrl} class="sam-btn sam-btn--glass" target="_blank" rel="noopener noreferrer">Read the source</a>
           </div>
+          <p class="fx-for">Built for teams running agents across many repos and many people.</p>
           <p class="fx-proof">{proofStrip.map((p) => <span>{p}</span>)}</p>
         </div>
         <div class="b-hero-figure">
@@ -129,9 +131,9 @@ const pillars = [
           <p class="fx-kicker">Programmable from the inside</p>
           <h2 class="fx-h2">Agents can run the factory too</h2>
           <p class="fx-lede">
-            Everything a person does in SAM, an agent can do through SAM's MCP tools. A lead agent
-            splits a job across workers, steers them while they run, and sets up the schedule that
-            keeps the work going.
+            Agents use the same tools you do to start work, message running agents and set
+            schedules, through SAM's MCP server. A lead agent splits a job across workers, steers
+            them while they run, and sets up the schedule that keeps the work going.
           </p>
         </div>
         <figure class="b-code sam-glass sam-glass-rim">
@@ -145,7 +147,7 @@ const pillars = [
       <div class="container">
         <div class="fx-head fx-head--center">
           <p class="fx-kicker">Every layer is yours</p>
-          <h2 class="fx-h2">Scale up without handing anything over</h2>
+          <h2 class="fx-h2">Your machines, your agents, your control plane</h2>
         </div>
         <div class="b-pillars">
           {pillars.map((p) => (
@@ -175,8 +177,8 @@ const pillars = [
     </section>
 
     <FactoryCta
-      title="Boot your factory"
-      body="Deploy SAM to your Cloudflare account, connect a cloud and an agent, and start your first job. Grow it from there."
+      title="Deploy SAM on your own cloud"
+      body="Deploy it to your Cloudflare account, connect a cloud and an agent, and start your first job. Add repos, people and triggers from there."
     />
   </main>
 </Base>
@@ -358,6 +360,12 @@ const pillars = [
   }
 
   @media (max-width: 767px) {
+    .b-code pre {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      font-size: 0.75rem;
+    }
+
     .b-hero {
       padding-top: calc(var(--header-height) + 48px);
     }

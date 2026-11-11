@@ -241,11 +241,20 @@ const outputs = [
     }
 
     .stage {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px;
     }
 
-    .stage-label {
-      grid-column: 1 / -1;
+    .card {
+      padding: 8px 12px;
+    }
+
+    /* On phones show the first two items per stage so the whole line fits in about one screen. */
+    .card:nth-of-type(n + 3) {
+      display: none;
+    }
+
+    .card-src {
+      display: none;
     }
 
     .pipe {

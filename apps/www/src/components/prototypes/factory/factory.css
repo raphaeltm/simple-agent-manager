@@ -63,6 +63,7 @@
 /* A framed screenshot of the real app. */
 .fx-shot {
   position: relative;
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   overflow: hidden;
   background: var(--color-bg-inset);
@@ -109,16 +110,28 @@
 .fx-proof {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px 10px;
+  gap: 6px 22px;
+  overflow: hidden; /* clips the separator of whichever item starts a wrapped line */
   font-family: var(--font-mono);
   font-size: 0.78125rem;
   color: var(--fx-dim);
 }
 
-.fx-proof span + span::before {
+.fx-proof span {
+  position: relative;
+  white-space: nowrap;
+}
+
+.fx-proof span::before {
   content: '·';
-  margin-right: 10px;
+  position: absolute;
+  left: -14px;
   color: var(--color-accent);
+}
+
+.fx-for {
+  font-size: 0.9375rem;
+  color: var(--fx-ink);
 }
 
 .fx-actions {
@@ -144,5 +157,11 @@
 
   .fx-lede {
     font-size: 1rem;
+  }
+
+  .fx-actions .sam-btn {
+    flex: 1 1 0;
+    justify-content: center;
+    padding-inline: 12px;
   }
 }

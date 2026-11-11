@@ -56,7 +56,8 @@ const layers = [
     gap: 14px;
     padding: 16px 18px;
     border-radius: var(--radius-lg);
-    transform: rotateX(18deg) rotateY(-14deg) translateX(calc(var(--i) * 14px));
+    transform: rotateX(16deg) rotateY(-12deg) translateX(calc(var(--i) * 10px));
+    margin-right: calc(var(--i) * 10px + 24px);
     transform-origin: left center;
   }
 
@@ -102,10 +103,25 @@ const layers = [
   }
 
   @media (max-width: 900px) {
+    .stack {
+      gap: 8px;
+    }
+
     .layer {
       grid-template-columns: 1fr;
-      gap: 8px;
+      gap: 6px;
+      padding: 10px 12px;
+      margin-right: 0;
       transform: none;
+    }
+
+    .layer-chips {
+      gap: 4px;
+    }
+
+    .chip {
+      padding: 2px 8px;
+      font-size: 0.75rem;
     }
   }
 </style>
