@@ -2,12 +2,12 @@ import { DEFAULT_GCP_MAX_LIST_PAGES, gcpOperationError } from './gcp-metadata';
 import { providerDelay, providerFetch, throwIfProviderRequestAborted } from './provider-fetch';
 import type { ProviderRequestContext } from './types';
 import { ProviderError } from './types';
+import { parseProviderJson } from './validation';
 import {
   type GcpAggregatedScope,
-  parseProviderJson,
   validateGcpAggregatedInstances,
   validateGcpOperation,
-} from './validation';
+} from './validation-gcp';
 
 /** What the shared GCP request helpers need from a configured `GcpProvider`. */
 export interface GcpApiScope {

@@ -12,7 +12,8 @@ import {
 } from './provider-fetch';
 import type { ProviderRequestContext, VMInstance } from './types';
 import { ProviderError } from './types';
-import { type GcpInstancePayload, parseProviderJson, validateGcpInstance } from './validation';
+import { parseProviderJson } from './validation';
+import { type GcpInstancePayload, validateGcpInstance } from './validation-gcp';
 
 /**
  * Find a GCP instance by numeric ID or name: a direct GET per configured zone,

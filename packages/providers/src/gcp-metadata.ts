@@ -15,11 +15,19 @@ import {
   SAM_VOLUME_FSTAB_OPTIONS,
   SAM_VOLUME_MOUNT_PATH_TEMPLATE,
 } from './types';
-import type { GcpNetworkInterfacePayload } from './validation';
+import type { GcpNetworkInterfacePayload } from './validation-gcp';
 
 export const COMPUTE_API_BASE = 'https://compute.googleapis.com/compute/v1';
 // 100 pages × 500 items/page ≈ 50,000 resources — well above any realistic fleet
 export const DEFAULT_GCP_MAX_LIST_PAGES = 100;
+/**
+ * Attempts at `machineTypes.get` when mapping a created or fetched instance. Observed hardware is
+ * written once, at provisioning, so a single transient failure would otherwise leave the node
+ * unable to admit workspaces for its whole life.
+ */
+export const DEFAULT_GCP_MACHINE_TYPE_LOOKUP_ATTEMPTS = 3;
+/** Delay between those attempts. */
+export const DEFAULT_GCP_MACHINE_TYPE_LOOKUP_RETRY_DELAY_MS = 1000;
 
 /** GCP codes that say the zone cannot supply this machine type right now. */
 const GCP_STOCKOUT_CODES = new Set([
