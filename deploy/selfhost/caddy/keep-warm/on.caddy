@@ -1,0 +1,32 @@
+# Keep-warm (self-host stopgap, README "Cold starts"). On every 30 s pool tick (REAP_INTERVAL,
+# not configurable) celld 0.6.3 retires one stateless Worker isolate that hosts no cells whenever no
+# JS turn is running at that instant (celld_logic::isolate::retire), so a quiet box has no warm
+# isolate and the next request waits 1.5-2.4 s while a new one loads the bundle. Caddy's active
+# health check sends GET /health to celld every SAM_KEEP_WARM_INTERVAL (default 5s) for as long as
+# Caddy runs. A ping cannot stop a retirement, but the next ping pays the restart, so only a request
+# arriving between a tick and the restarted isolate waits: about (interval / 2 + restart time) of
+# every 30 s. Measured on the test box (T14): 1 of 14 first-requests-after-idle cold, vs 8 of 8.
+#
+# The check lives on a route that never matches a request (`expression false`): an active
+# health check runs for every provisioned reverse_proxy whether or not traffic reaches it, and
+# its verdict only gates this unused route, so a failed or slow /health can never take the real
+# proxy below out of service. /health reads no storage and is excluded from SAM's request log.
+# Health checks are not requests to the site, so they do not appear in the access log.
+#
+# Upstream: drop this once celld can keep isolates warm itself (tasks/backlog/
+# 2026-11-11-selfhost-celld-isolate-cold-start-slow-page-loads.md).
+@sam_keep_warm expression false
+handle @sam_keep_warm {
+	reverse_proxy 127.0.0.1:{$CELLD_PORT:8080} {
+		health_uri /health
+		health_interval {$SAM_KEEP_WARM_INTERVAL:5s}
+		health_timeout 10s
+		health_headers {
+			# celld builds request.url from X-Forwarded-Host (CELLD_TRUST_FORWARDED_HEADERS=1);
+			# /health is routed on the API host.
+			Host api.{$SAM_DOMAIN}
+			X-Forwarded-Host api.{$SAM_DOMAIN}
+			X-Forwarded-Proto https
+		}
+	}
+}

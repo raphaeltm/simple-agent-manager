@@ -67,6 +67,7 @@ export {
 } from './types';
 
 // Re-export utilities
+export { isProviderCreateNotDispatched, markProviderCreateNotDispatched } from './create-dispatch';
 export { hasAmbiguousLabel } from './kv-tags';
 export {
   completeAbortableResponse,

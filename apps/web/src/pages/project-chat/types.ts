@@ -83,6 +83,14 @@ export interface ProvisioningState {
   /** VM size actually provisioned. Differs from requestedVmSize only when
    *  size-fallback descended on transient capacity exhaustion. */
   provisionedVmSize: string | null;
+  /** The task is held by a provider usage limit before it starts: no VM is being provisioned,
+   * so the provisioning slab is hidden and the chat's provider-limit notice speaks for it. */
+  providerLimitHeld?: boolean;
+}
+
+/** True while a provider-limit hold (waiting or blocked) keeps the task from starting. */
+export function isProviderLimitHeld(task: { admissionState?: string | null }): boolean {
+  return task.admissionState?.startsWith('provider_limit_') === true;
 }
 
 export function isTerminal(status: TaskStatus): boolean {

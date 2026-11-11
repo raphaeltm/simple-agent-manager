@@ -126,14 +126,48 @@ describe('managed node tunnel provisioning', () => {
     expect(vars).not.toHaveProperty('cloudflareTunnelPort');
   });
 
-  it('excludes deployment-role nodes even when tunnel transport is enabled', async () => {
+  it('gives deployment-role nodes the tunnel for their agent channel and keeps the IP for app routes', async () => {
     const node = await freshNode({ nodeRole: 'deployment' });
     await provisionNode(node.id, env, undefined, undefined, { environmentId: 'env-1' });
-    expect(cf.calls).toEqual([]);
+    const [tunnel] = cf.liveTunnels();
+    expect(tunnel?.ingress).toEqual([
+      { hostname: `${node.id.toLowerCase()}.vm.example.test`, service: 'http://127.0.0.1:8444' },
+      { service: 'http_status:404' },
+    ]);
     expect(readNode(node.id)).toMatchObject({
-      transport: 'vm-public-dns',
-      backendDnsRecordId: 'a-record-1',
+      status: 'running',
+      transport: 'cloudflare-tunnel',
+      tunnelId: tunnel?.id,
+      // App routes are grey-cloud A records to this IP (dns-app-routes.ts).
+      ipAddress: '203.0.113.1',
+      backendDnsRecordId: null,
     });
+    expect(mocks.createARecord).not.toHaveBeenCalled();
+    expect(mocks.cloudInitVars[0]).toMatchObject({
+      role: 'deployment',
+      environmentId: 'env-1',
+      cloudflareTunnelToken: tunnel?.token,
+      originCaCertificateUrl: undefined,
+    });
+    expect(journal(node.id)).toMatchObject([{ status: 'active' }]);
+  });
+
+  it('waits for an IP on a deployment tunnel node whose provider reports none at create', async () => {
+    mocks.createVM.mockImplementationOnce(async () => ({ ...vmFor(), ip: '' }));
+    const deployment = await freshNode({ nodeRole: 'deployment' });
+    await provisionNode(deployment.id, env, undefined, undefined, { environmentId: 'env-1' });
+    expect(readNode(deployment.id)).toMatchObject({
+      status: 'creating',
+      transport: 'cloudflare-tunnel',
+      ipAddress: null,
+      backendDnsRecordId: null,
+    });
+    // Control: a workspace tunnel node never needs its public IP.
+    mocks.createVM.mockImplementationOnce(async () => ({ ...vmFor(), ip: '' }));
+    const workspace = await freshNode();
+    await provisionNode(workspace.id, env);
+    expect(readNode(workspace.id)).toMatchObject({ status: 'running', ipAddress: null });
+    expect(mocks.createARecord).not.toHaveBeenCalled();
   });
 
   it('fails closed on an unknown transport value instead of exposing the public IP', async () => {
@@ -149,23 +183,23 @@ describe('managed node tunnel provisioning', () => {
     const env = { VM_AGENT_TRANSPORT: 'cloudflare-tunnel' };
     expect(
       resolveManagedNodeTransport(env, {
-        isDeploymentNode: false,
         runtime: 'cf-container',
         nodeClass: 'managed',
+        nodeRole: 'workspace',
       })
     ).toBeNull();
     expect(
       resolveManagedNodeTransport(env, {
-        isDeploymentNode: false,
         runtime: 'vm',
         nodeClass: 'user-owned',
+        nodeRole: 'workspace',
       })
     ).toBeNull();
     expect(
       resolveManagedNodeTransport(env, {
-        isDeploymentNode: false,
         runtime: 'vm',
         nodeClass: 'managed',
+        nodeRole: 'workspace',
       })
     ).toBe('cloudflare-tunnel');
   });
@@ -223,7 +257,16 @@ describe('ambiguous Cloudflare outcomes and retries', () => {
     expect(listVMs).toHaveBeenCalled();
     expect(cf.callCount('tunnel.create')).toBe(1);
     expect(mocks.createVM).toHaveBeenCalledTimes(1);
-    expect(journal(node.id)).toEqual(before);
+    // Ownership is unchanged; only the recorded cause of the failed attempt moved.
+    expect(journal(node.id).map(({ lastError: _ignored, ...rest }) => rest)).toEqual(
+      before.map(({ lastError: _ignored, ...rest }) => rest)
+    );
+    expect(journal(node.id)[0]!.lastError).toMatch(
+      /^failed during provider_create: NodeAllocationUncertainError: .*second create is forbidden/
+    );
+    // The resume fast path: the active row needs only its DNS re-check and the token.
+    expect(cf.callCount('tunnel.configure')).toBe(1);
+    expect(cf.callCount('dns.list')).toBe(1);
   });
 });
 

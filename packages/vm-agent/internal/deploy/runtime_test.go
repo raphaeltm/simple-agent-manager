@@ -186,3 +186,54 @@ func TestEnsureDeploymentNetworkHardeningFailsWhenFirewallScriptIsMissing(t *tes
 		t.Fatalf("ensureDeploymentNetworkHardening error = %q, want missing script context", err)
 	}
 }
+
+func TestEnsureDeploymentNetworkHardeningSnapshotsRulesBeforePersistenceInstall(t *testing.T) {
+	// iptables-persistent's postinst restores rules.v4 with a flush; the snapshot must be
+	// refreshed first or Docker's chains are lost on images where Docker came later (GCP).
+	binDir, logPath := prependFakeBin(t)
+	writeExecutable(t, binDir, "apt-get", "#!/bin/sh\necho \"apt-get $*\" >> \"$CALL_LOG\"\nexit 0\n")
+	writeExecutable(t, binDir, "debconf-set-selections", "#!/bin/sh\necho \"debconf-set-selections\" >> \"$CALL_LOG\"\nexit 0\n")
+	writeExecutable(t, binDir, "systemctl", "#!/bin/sh\necho \"systemctl $*\" >> \"$CALL_LOG\"\nexit 0\n")
+	firewallScript := writeExecutable(t, t.TempDir(), "setup-firewall.sh", "#!/bin/sh\necho firewall-script >> \"$CALL_LOG\"\nexit 0\n")
+	originalPath := firewallSetupScriptPath
+	firewallSetupScriptPath = firewallScript
+	t.Cleanup(func() { firewallSetupScriptPath = originalPath })
+
+	if err := ensureDeploymentNetworkHardening(context.Background(), nil); err != nil {
+		t.Fatalf("ensureDeploymentNetworkHardening: %v", err)
+	}
+	calls := readCallLog(t, logPath)
+	install := strings.Index(calls, "apt-get install -y iptables-persistent")
+	first := strings.Index(calls, "firewall-script")
+	if install < 0 || first < 0 || first > install {
+		t.Fatalf("firewall snapshot must run before the persistence install; calls:\n%s", calls)
+	}
+	if strings.Count(calls, "firewall-script") != 2 || strings.LastIndex(calls, "firewall-script") < install {
+		t.Fatalf("firewall script must run once before and once after the install; calls:\n%s", calls)
+	}
+}
+
+func TestEnsureDeploymentNetworkHardeningStopsBeforeInstallWhenSnapshotFails(t *testing.T) {
+	// A failed pre-install snapshot must not go on to install iptables-persistent: its postinst
+	// would restore the stale rules.v4 this run exists to refresh.
+	binDir, logPath := prependFakeBin(t)
+	writeExecutable(t, binDir, "apt-get", "#!/bin/sh\necho \"apt-get $*\" >> \"$CALL_LOG\"\nexit 0\n")
+	writeExecutable(t, binDir, "debconf-set-selections", "#!/bin/sh\nexit 0\n")
+	writeExecutable(t, binDir, "systemctl", "#!/bin/sh\necho \"systemctl $*\" >> \"$CALL_LOG\"\nexit 0\n")
+	marker := filepath.Join(t.TempDir(), "ran-once")
+	// Fails on the first invocation only, so a pass here cannot come from the post-install run.
+	firewallScript := writeExecutable(t, t.TempDir(), "setup-firewall.sh",
+		"#!/bin/sh\necho firewall-script >> \"$CALL_LOG\"\nif [ ! -f "+marker+" ]; then touch "+marker+"; exit 23; fi\nexit 0\n")
+	originalPath := firewallSetupScriptPath
+	firewallSetupScriptPath = firewallScript
+	t.Cleanup(func() { firewallSetupScriptPath = originalPath })
+
+	err := ensureDeploymentNetworkHardening(context.Background(), nil)
+	if err == nil || !strings.Contains(err.Error(), "pre-persistence snapshot") {
+		t.Fatalf("ensureDeploymentNetworkHardening error = %v, want pre-persistence snapshot failure", err)
+	}
+	calls := readCallLog(t, logPath)
+	if strings.Contains(calls, "iptables-persistent") || strings.Count(calls, "firewall-script") != 1 {
+		t.Fatalf("a failed snapshot must stop before the install; calls:\n%s", calls)
+	}
+}

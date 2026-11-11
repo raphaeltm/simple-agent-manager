@@ -12,13 +12,14 @@ Public marketing website, blog, and documentation at `simple-agent-manager.org`.
 | `src/content/docs/` | Starlight documentation pages (MDX/MD) |
 | `src/content/blog/` | Blog posts (Markdown with frontmatter) |
 | `src/pages/index.astro` | Landing page |
-| `src/components/Hero.astro` | Homepage hero: copy, glass node floor (`@simple-agent-manager/ui/glass/node-field`), real-UI stage, pause control |
-| `src/components/hero/` | Hero parts: `HeroStack` (desktop 3D stack), `HeroPhone` (mobile), `StreamingWindow` (transcript strip), `hero-motion.ts` (timeline, tilt, pause), `layers.ts` (themed layer styles) |
-| `scripts/build-hero-layers.ts` | Crops the hero's real-UI layers (dark + light) from committed screenshots into `public/images/hero/` and `src/data/hero-layers.json` |
-| `src/data/scenes/*.json` | One animated real-UI preview ("scene") per homepage feature section: crops, tiles, highlight rings, lights, step timings. Their order is the homepage tour order (`index.ts` validates them at load) |
-| `src/components/scenes/` | `FeatureScene.astro` (renders a scene in the hero's glass language; markup is the final frame) and `scene-motion.ts` (loads layers near the viewport, plays the story once in view, rests) |
-| `scripts/build-feature-scenes.ts` | Crops the scenes' layers (dark + light) into `public/images/scenes/` and `src/data/feature-scenes.json`; shares crop helpers with the hero script (`scripts/lib/real-ui-layers.ts`) |
-| `src/lib/motion.ts` | Motion shared by the hero and the scenes: the page-wide pause flag behind the hero's pause control, the story budget (`MAX_STORY_MS`, `STEP_SETTLE_MS`), the timeline, and the pointer follower used for tilt |
+| `src/components/factory/` | Homepage (`FactoryHome.astro`): hero, "the floor" (infrastructure over the glass node floor), the six-stage "how work moves" line with its sticky rail, roles, questions and CTA. `Shot.astro` renders one real SAM screen in the active theme and loads it near the viewport |
+| `src/data/factory-shots.ts`, `src/data/factory-stages.ts` | The homepage's real screens (sizes, alt text) and its stages (copy, highlight rings). `SINGLE_VM_INSTALL_SHIPPED` labels the single-VM control plane "soon" until it ships |
+| `public/images/factory/README.md` | How each homepage screen was captured and cropped (dark + light, desktop + phone) |
+| `src/lib/motion.ts` | Motion helpers shared by the brand guide: reduced-motion and fine-pointer queries, and the pointer follower used for tilt |
+| `src/pages/brand/index.astro` | Brand and style guide (`/brand/`). Published but not launched: `noindex`, excluded from the sitemap in `astro.config.ts`, linked from nowhere |
+| `src/components/brand/` | Brand guide sections, the `Lockup` component and `brand-motion.ts` (reveals, scroll progress `--p`, the pinned colour track, copy buttons) |
+| `src/data/brand-content.json`, `src/data/brand.ts` | Brand guide content (palette, type scale, easings, copy examples, glossary) and its load-time validation and colour helpers. Token-backed swatches are checked against the CSS by `tests/brand-guide.test.ts` |
+| `scripts/build-brand-lockups.ts` | Renders the downloadable lockup PNGs in `public/images/brand/` with Chillax embedded; fails if the font does not load |
 | `src/pages/integrations/` | Integration showcase pages |
 | `src/pages/presentations/` | Presentation/talk pages |
 | `src/components/` | Astro/React components used in pages |
@@ -32,8 +33,6 @@ Public marketing website, blog, and documentation at `simple-agent-manager.org`.
 pnpm --filter @simple-agent-manager/www dev       # Local dev server
 pnpm --filter @simple-agent-manager/www build     # Production build
 pnpm --filter @simple-agent-manager/www preview   # Preview production build
-pnpm --filter @simple-agent-manager/www build:hero-layers  # Rebuild hero layers after re-capturing hero screenshots
-pnpm --filter @simple-agent-manager/www build:feature-scenes  # Rebuild feature scene layers after editing a scene or re-capturing its sources
 pnpm --filter @simple-agent-manager/www compress:screenshots public/images/blog/<slug>  # Palette-compress committed docs/blog screenshots
 ```
 
@@ -48,15 +47,11 @@ pnpm --filter @simple-agent-manager/www compress:screenshots public/images/blog/
 
 ## Gotchas
 
-- Hero layers are CSS backgrounds chosen by theme and breakpoint, so a visitor downloads one theme's set for one layout. After re-capturing `sam-hero-live-session`, `sam-hero-phone` or the crop sources (`apps/web/tests/playwright/marketing-shots-*.spec.ts`), re-run `build:hero-layers` and re-check the window geometry in the script if the captured layout moved.
-- The hero's resting markup is its final frame (no JS, reduced motion); `hero-motion.ts` only animates toward it. Keep the pause control working: it must stop every hero animation (WCAG 2.2.2).
 - Glass surfaces use the shared `.sam-glass*` classes from `@simple-agent-manager/ui/glass.css` (imported in `Base.astro`); buttons use `.sam-btn` in `global.css`.
-- Feature scenes follow the same rules as the hero: every pixel comes from a committed capture, only timing is simulated, and the markup is the resting frame. A story's last step plus `STEP_SETTLE_MS` must end within 5 s (WCAG 2.2.2 without its own control; the loader rejects longer stories, and CSS transitions a step starts stay within `STEP_SETTLE_MS`), highlight rings must be gone by the last step, and a story rests early when its scene leaves the screen, the tab is hidden, or the hero's pause control is pressed (`src/lib/motion.ts`). Animate only opacity and transform: a moving highlight is one element per stop, not a box whose edges transition. Scene images are CSS backgrounds that load only when a scene is near the viewport; `Base.astro` has the `<noscript>` fallback.
-- The homepage text beside each scene (headline, body, caption) is the section's `homepage` field in `src/data/features/<slug>.json`, so feature pages keep their own detail rows. The scene JSON only adds the screen-reader description of the animation. A section's `label`, `title`, and `subtitle` also render on its `/features/` page.
 - Write or change homepage copy with the SAM skills `homepage-copy` (lead with the visitor's need, verify every claim in code or docs) and `humanizer` (remove AI-writing tells).
-- Scene boxes are source pixels. After re-capturing a source screenshot, re-run `build:feature-scenes` and check the boxes still outline the same UI (look at each scene; `homepage-scenes.spec.ts` writes every resting frame to `.codex/tmp/playwright-screenshots/`). Chips float in front of the window and perspective enlarges them, so they stay within 96% of the stage width (the window within 99%); `homepage-scenes.spec.ts` measures every layer at 11 widths in the intro and at rest.
 
 - Astro caches rendered Markdown, including each code block's `<link>` to the hashed `ec.*.css`, in `node_modules/.astro/data-store.json`. After changing Expressive Code settings, delete that file before building or previewing, or code blocks link a stylesheet that no longer exists and render unstyled. CI builds start clean.
+- Brand guide motion: markup is the final frame, `html.bg-motion` (set only when motion is allowed) gates every hidden or scroll-linked state, and nothing plays on its own for more than 5 s. A `data-reveal="wipe"` element starts clipped to nothing, so it uses its own threshold-0 observer; IntersectionObserver measures the clipped box. When a brand colour, font or rule changes, update `src/data/brand.ts` and the guide in the same PR.
 - `pnpm build:assets` runs before both `dev` and `build` — if you add new scripts, wire them there
 - The analytics tracker (`scripts/build-tracker.ts`) is bundled at build time, not at runtime
 - Do NOT confuse this with `apps/web/` — different stack (Astro vs React+Vite), different domain

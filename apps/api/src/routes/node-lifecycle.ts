@@ -418,10 +418,26 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
   // Reverse-tunnel nodes have no tunnelId and no DNS record at all (frpc dials the box), so
   // they are added separately from the node row's own transport, never from the agent.
   const tunnelIngress = !!node.tunnelId || node.transport === 'reverse-tunnel';
-  if (tunnelIngress) {
+  // One exception: a deployment-role Cloudflare tunnel node whose provider reported no IP at
+  // create. Its app routes are grey-cloud A records to the node's public IP
+  // (services/dns-app-routes.ts), so it records the heartbeat's IPv4 egress as `ip_address`
+  // only. It never gets a backend A record: `effectiveNodeIp` stays null for every tunnel node.
+  // Reverse-tunnel deployment nodes do not exist (resolveManagedNodeTransport excludes them).
+  const deploymentTunnelIpBackfill =
+    !!node.tunnelId &&
+    node.nodeRole === 'deployment' &&
+    node.nodeClass === 'managed' &&
+    !node.ipAddress;
+  if (tunnelIngress && !deploymentTunnelIpBackfill) {
     log.debug('heartbeat.ip_backfill_skipped_tunnel_node', { nodeId, action: 'skipped' });
   }
-  const heartbeatIp = tunnelIngress ? null : clientIpFromHeaders((name) => c.req.header(name));
+  const connectingIp = clientIpFromHeaders((name) => c.req.header(name));
+  let heartbeatIp: string | null = null;
+  if (!tunnelIngress) {
+    heartbeatIp = connectingIp;
+  } else if (deploymentTunnelIpBackfill && isValidIPv4Address(connectingIp)) {
+    heartbeatIp = connectingIp;
+  }
 
   // Defense-in-depth: backfill IP from heartbeat if node has no IP stored.
   // This self-heals Scaleway nodes where the IP wasn't captured at creation time.
@@ -435,7 +451,7 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
         action: 'ip_backfilled',
       });
       updatePayload.ipAddress = heartbeatIp;
-      effectiveNodeIp = heartbeatIp;
+      effectiveNodeIp = node.tunnelId ? null : heartbeatIp;
 
       // Always clear the "Awaiting IP allocation" error when IP is backfilled.
       // Use explicit SQL null to ensure Drizzle/D1 generates SET errorMessage = NULL

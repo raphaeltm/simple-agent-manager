@@ -19,6 +19,7 @@ import { settleNodeTunnels } from './node-tunnel-cleanup';
 import {
   ensureNodeTunnelForProvisioning,
   type NodeTunnelProvisioning,
+  type NodeTunnelProvisioningPhase,
 } from './node-tunnel-provisioning';
 
 export interface NodeTunnelIngress {
@@ -33,6 +34,8 @@ export interface PrepareNodeTunnelIngressInput {
   signal?: AbortSignal;
   /** Called before any ownership write, so the caller's failure path knows to release it. */
   onOwnershipRecorded: () => void;
+  /** Cloudflare tunnel only: the step in progress, for the failure diagnostic. */
+  onPhase?: (phase: NodeTunnelProvisioningPhase) => void;
 }
 
 export async function prepareNodeTunnelIngress(
@@ -58,7 +61,11 @@ export async function prepareNodeTunnelIngress(
   };
   if (transport === 'cloudflare-tunnel') {
     return {
-      tunnel: await ensureNodeTunnelForProvisioning(env, { ...owner, signal: input.signal }),
+      tunnel: await ensureNodeTunnelForProvisioning(env, {
+        ...owner,
+        signal: input.signal,
+        onPhase: input.onPhase,
+      }),
       reverseTunnel: null,
     };
   }

@@ -164,6 +164,68 @@ chat fails with "No eligible compute-pool offering is available in the installat
 for this task's requirements (2 vCPU, 4096 MB memory, 15 GB disk)". On Google Cloud add
 `e2-standard-2` (2 vCPU, 8 GB); keep `e2-medium` for smaller work if you like.
 
+## Logs
+
+Caddy writes one JSON access-log line per request, for every SAM host (`app.`, `api.`, `ws-*`,
+`mail.`), to its stdout (`caddy/Caddyfile`). Each line has the host, method, path, protocol,
+client address, status, response size and `duration` in seconds. For a WebSocket the duration is
+the connection's lifetime and the line is written when the socket closes, so a hung or cut
+connection shows up with its length. Caddy's own log (proxy errors, certificates) goes to stderr.
+
+Neither log contains a header or a query string (`caddy/log-redaction.caddy`): cookies,
+`Authorization`, SAM's `X-SAM-*` gateway headers and the gateway secret are dropped, and every
+query string is replaced with `?<redacted>`, because terminal and port-access tokens and OAuth
+codes travel there. Routes that carry a credential in the path (the AI proxy's workspace token,
+bootstrap and invite tokens, signed preview URLs) have that segment replaced too; the list is in
+`caddy/log-redaction.caddy` and must grow with any new route of that kind. Compose caps Caddy's log at about `CADDY_LOG_MAX_SIZE` x `CADDY_LOG_MAX_FILES`
+(50 MB x 5). Anyone can add lines by sending requests, so a burst can rotate older lines away
+before you read them.
+
+On the box (the operator path is SSH; nothing here adds a listener):
+
+```bash
+cd deploy/selfhost
+docker compose logs --since 30m caddy 2>/dev/null | grep http.log.access   # access log
+docker compose logs --since 30m caddy | grep -v http.log.access            # Caddy's own log
+docker compose logs --since 30m celld                                      # celld and Worker logs
+```
+
+Reading these without SSH needs something new, so this pass does not build it. Options, for a
+later decision:
+
+- **Cloud Logging (GCE boxes).** Docker's built-in `gcplogs` logging driver sends the caddy and
+  celld logs to the box's own Google Cloud project, where an operator reads them with
+  `gcloud logging read` under their own IAM. No new listener. It needs `roles/logging.logWriter`
+  for the VM's service account and a viewer role for the operator, it is GCE-specific, and the
+  logs leave the box. Cloud Logging read access is often granted more widely than access to the
+  fleet bucket, and celld's log carries whatever Worker code logs, so decide who can read it
+  before turning this on.
+- **An admin-only SAM route.** Worker code on celld cannot read files or reach Docker, and the
+  egress fence keeps it off loopback services on purpose. A route would need a new log service
+  on the box that the fence lets celld reach, which is new attack surface for the most privileged
+  code path on the box.
+
+## Cold starts
+
+On every 30 s pool tick celld retires one stateless Worker isolate that hosts no Durable Object
+whenever no request is executing JavaScript at that instant (`REAP_INTERVAL` and
+`celld_logic::isolate::retire` in celld 0.6.3; neither is configurable). A quiet box therefore has
+no warm isolate, and the next request waits 1.5-2.4 s while a new one loads the bundle. As a
+stopgap Caddy sends `GET /health` to celld every `SAM_KEEP_WARM_INTERVAL` (default `5s`, allowed
+`1s`-`6s`) for as long as Caddy runs (`caddy/keep-warm/on.caddy`). A ping cannot prevent a
+retirement, but the next ping pays the restart, so a user's request waits only if it arrives in
+the window between a tick and the restarted isolate: about half the interval plus the restart
+time, out of every 30 s. On the test box the first request after an idle spell went from 8 of 8
+cold (1.5-1.7 s) to 1 of 14 cold. A shorter interval narrows the window a little; the restart
+time does not change.
+
+The check sits on a route that serves no request, so a failing `/health` cannot take the real
+proxy out of service. `/health` reads no storage and is not in SAM's request log or Caddy's
+access log. Each tick costs one isolate start (about 1.5 s of CPU every 30 s) whether or not
+anyone is using the box. Set `SAM_KEEP_WARM=off` in `.env` and run `docker compose up -d caddy`
+to turn it off. The upstream fix (celld keeping a warm stateless isolate, or a retirement
+setting) is tracked in `tasks/backlog/2026-11-11-selfhost-celld-isolate-cold-start-slow-page-loads.md`.
+
 ## Known gaps in this pass
 
 - Off on purpose: Instant sessions and guided credential login (Cloudflare Containers), Artifacts

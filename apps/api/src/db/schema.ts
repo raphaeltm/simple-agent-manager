@@ -1786,6 +1786,8 @@ export const nodeCloudflareTunnels = sqliteTable(
     cleanupReason: text('cleanup_reason'),
     cleanupAttempts: integer('cleanup_attempts').notNull().default(0),
     pendingCreateCount: integer('pending_create_count').notNull().default(0),
+    /** Latest unobserved create POST; bounds how long a pending count blocks cleanup. */
+    pendingCreateLastAt: text('pending_create_last_at'),
     cleanupNextAttemptAt: text('cleanup_next_attempt_at'),
     lastError: text('last_error'),
     createdAt: text('created_at').notNull(),

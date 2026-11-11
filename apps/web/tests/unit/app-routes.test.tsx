@@ -111,10 +111,6 @@ vi.mock('../../src/pages/SettingsInfrastructure', () => ({
   SettingsInfrastructure: () => <div data-testid="settings-infrastructure-page" />,
 }));
 
-vi.mock('../../src/pages/CreateWorkspace', () => ({
-  CreateWorkspace: () => <div data-testid="create-workspace-page" />,
-}));
-
 vi.mock('../../src/pages/Workspace', () => ({
   Workspace: () => <div data-testid="workspace-page" />,
 }));
@@ -309,6 +305,12 @@ describe('App routes', () => {
       renderAt(from);
       expect(await screen.findByTestId(testId)).toHaveTextContent(to);
     });
+  });
+
+  it('redirects the removed /workspaces/new form to Nodes', async () => {
+    renderAt('/workspaces/new');
+    expect(await screen.findByTestId('nodes-page')).toBeInTheDocument();
+    expect(screen.queryByTestId('workspace-page')).not.toBeInTheDocument();
   });
 
   it('routes /tools to the Tools page', async () => {

@@ -1,0 +1,86 @@
+---
+/**
+ * The SAM lockup: mascot + "SAM" + "Simple Agent Manager", set in Chillax.
+ * Sized in em, so set `font-size` on the element (or pass `size`) to scale every part together.
+ * `compact` drops the sub-line; use it only where the sub-line would be too small to read.
+ * `tone` pins the colours for a known ground; `auto` follows the site theme.
+ */
+interface Props {
+  variant?: 'full' | 'compact';
+  tone?: 'auto' | 'on-dark' | 'on-light';
+  size?: string;
+  class?: string;
+}
+
+const { variant = 'full', tone = 'auto', size, class: className } = Astro.props;
+---
+
+<span
+  class:list={['lockup', `lockup--${variant}`, `lockup--${tone}`, className]}
+  style={size ? `font-size:${size}` : undefined}
+  role="img"
+  aria-label={variant === 'full' ? 'SAM, Simple Agent Manager' : 'SAM'}
+>
+  <img class="lockup-mark" src="/images/sam-head.png" width="1024" height="1024" alt="" aria-hidden="true" />
+  <span class="lockup-words" aria-hidden="true">
+    <span class="lockup-sam">SAM</span>
+    {variant === 'full' && <span class="lockup-sub">Simple Agent Manager</span>}
+  </span>
+</span>
+
+<style>
+  .lockup {
+    --lockup-sam: var(--color-accent-strong);
+    --lockup-sub: var(--color-fg-primary);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.32em;
+    font-family: var(--font-display);
+    line-height: 1;
+  }
+
+  .lockup--on-dark {
+    --lockup-sam: #22c55e;
+    --lockup-sub: #e6f2ee;
+  }
+
+  .lockup--on-light {
+    --lockup-sam: #16a34a;
+    --lockup-sub: #2e4a31;
+  }
+
+  .lockup-mark {
+    width: 2.1em;
+    height: auto;
+    flex: none;
+  }
+
+  .lockup--compact .lockup-mark {
+    width: 1.5em;
+  }
+
+  .lockup-words {
+    display: grid;
+    gap: 0.16em;
+  }
+
+  .lockup-sam {
+    font-size: 1.62em;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    line-height: 0.82;
+    color: var(--lockup-sam);
+  }
+
+  .lockup--compact .lockup-sam {
+    font-size: 1.2em;
+  }
+
+  .lockup-sub {
+    font-size: 0.4em;
+    font-weight: 600;
+    letter-spacing: 0.035em;
+    white-space: nowrap;
+    color: var(--lockup-sub);
+  }
+</style>

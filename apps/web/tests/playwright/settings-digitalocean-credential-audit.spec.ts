@@ -249,7 +249,7 @@ test.describe('Settings DigitalOcean credential audit', () => {
     await screenshot(page, `settings-digitalocean-connectflow-grid-${suffix}`);
     await assertNoOverflow(page);
   });
-  test('admin option and workspace availability render DigitalOcean at mobile + desktop', async ({
+  test('admin option renders DigitalOcean at mobile + desktop', async ({
     page,
   }, testInfo) => {
     await setupApiMocks(page, { existingDigitalOcean: true });
@@ -261,13 +261,6 @@ test.describe('Settings DigitalOcean credential audit', () => {
     await page.getByRole('button', { name: 'Add Credential' }).click();
     await expect(page.getByLabel('Provider')).toContainText('DigitalOcean');
     await screenshot(page, 'settings-digitalocean-admin-' + suffix);
-    await assertNoOverflow(page);
-
-    await page.goto('/workspaces/new');
-    await page.locator('main').getByRole('combobox').first().selectOption('proj-1');
-    await expect(page.getByLabel('Workspace Name')).toBeVisible();
-    await expect(page.getByText('(DigitalOcean)', { exact: true })).toBeVisible();
-    await screenshot(page, 'settings-digitalocean-workspace-' + suffix);
     await assertNoOverflow(page);
   });
 });

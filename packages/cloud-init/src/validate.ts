@@ -100,8 +100,10 @@ export function validateCloudInitVariables(variables: CloudInitVariables): void 
     errors.push(`jwksUrl: must be a valid HTTPS URL (got ${JSON.stringify(variables.jwksUrl)})`);
   }
   if (!variables.callbackToken || !SAFE_TOKEN_RE.test(variables.callbackToken)) {
+    // Never echo the value: it is a signed credential, and this message reaches node error
+    // fields, logs and the tunnel journal's last_error.
     errors.push(
-      `callbackToken: must contain only safe token characters (got ${JSON.stringify(variables.callbackToken)})`
+      `callbackToken: must contain only safe token characters (length ${variables.callbackToken?.length ?? 0})`
     );
   }
 

@@ -1,0 +1,27 @@
+# Shared by the access log and Caddy's own log (Caddyfile). What a log line may contain about a
+# request: host, method, path, protocol, client address and port, TLS details, status, sizes and
+# duration. What it may not: any request or response header (cookies, Authorization, SAM's
+# X-SAM-* gateway headers, the gateway secret), any query string (terminal and port-access
+# tokens, OAuth codes and state travel there), or a credential that a route carries in its path.
+# Caddy already redacts Cookie, Set-Cookie, Authorization and Proxy-Authorization by default;
+# deleting the header maps outright also covers every other header, including ones forward_auth
+# copies onto the request. `headers` is where reverse_proxy's debug entries put response headers.
+#
+# Credentials in paths (keep in sync with the routes; scripts/selfhost/caddy-logging-compose.test.ts):
+#   /ai/proxy/<workspace callback JWT>/...      apps/api/src/routes/ai-proxy-passthrough.ts
+#   /api/bootstrap/<bootstrap token>            apps/api/src/routes/bootstrap.ts
+#   /api/projects/invite-links/<invite token>   apps/api/src/routes/projects/members.ts
+#   /projects/invite/<invite token>             apps/web/src/App.tsx (the app's HTML document)
+#   /p/<project>/<file>/<version>/<expiry>/<signature>/...  services/interactive-preview.ts
+format filter {
+	wrap json
+	request>headers delete
+	resp_headers delete
+	headers delete
+	user_id delete
+	request>uri multi_regexp {
+		regexp "^(/ai/proxy/|/api/bootstrap/|/api/projects/invite-links/|/projects/invite/)[^/?]*" "${1}<redacted>"
+		regexp "^/p/[^?]*" "/p/<redacted>"
+		regexp "\?.*$" "?<redacted>"
+	}
+}

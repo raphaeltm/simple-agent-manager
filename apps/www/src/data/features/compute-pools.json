@@ -20,11 +20,6 @@
       "caption": "Choose exactly which machines SAM may rent, account by account"
     }
   ],
-  "homepage": {
-    "headline": "Choose which machines agents may use",
-    "body": "Add machine types and regions from each connected cloud account, with prices in the provider's own currency. Nothing joins a pool until you add it. SAM can run several agents on each server, so you don't rent one per task.",
-    "caption": "The machine types and regions you add, then the server SAM chose for a task"
-  },
   "details": [
     {
       "headline": "Choose exact machine types and regions",

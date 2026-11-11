@@ -120,6 +120,9 @@ async function setupMocks(page: Page, scenario: Scenario) {
       });
     if (path === '/api/github/installations') return respond(200, []);
     if (path === '/api/workspaces') return respond(200, []);
+    if (path === '/api/projects')
+      return respond(200, { projects: [MOCK_PROJECT], nextCursor: null });
+    if (path.startsWith('/api/provider')) return respond(200, { catalogs: [] });
     const match = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
     if (match) {
       const subPath = match[2] || '';
@@ -129,18 +132,17 @@ async function setupMocks(page: Page, scenario: Scenario) {
         // not provisioning. The red "stopped by audit" text in screenshots is this response.
         return respond(503, { error: 'AUDIT_STOP', message: 'stopped by audit' });
       }
-      if (subPath === '/agent-profiles') return respond(200, { items: scenario.profiles });
-      if (subPath === '/agent-profiles/picker')
-        return respond(200, { usageWindowDays: 30, usage: [], hiddenProfileIds: [] });
-      if (subPath === '/skills') return respond(200, { items: [] });
-      if (subPath === '/cached-commands') return respond(200, { commands: [] });
-      if (subPath === '/tasks') return respond(200, { tasks: [], nextCursor: null });
-      if (subPath === '/sessions') return respond(200, { sessions: [], total: 0, hasMore: false });
+      const projectReads: Record<string, unknown> = {
+        '/agent-profiles': { items: scenario.profiles },
+        '/agent-profiles/picker': { usageWindowDays: 30, usage: [], hiddenProfileIds: [] },
+        '/sessions': { sessions: [], total: 0, hasMore: false },
+        '/tasks': { tasks: [], nextCursor: null },
+        '/cached-commands': { commands: [] },
+        '/skills': { items: [] },
+      };
+      if (subPath in projectReads) return respond(200, projectReads[subPath]);
       return respond(200, MOCK_PROJECT);
     }
-    if (path === '/api/projects')
-      return respond(200, { projects: [MOCK_PROJECT], nextCursor: null });
-    if (path.startsWith('/api/provider')) return respond(200, { catalogs: [] });
     return respond(200, {});
   });
 }
@@ -150,12 +152,17 @@ async function openNewChat(page: Page, scenario: Scenario) {
     localStorage.setItem(`sam-onboarding-wizard-dismissed-${userId}`, 'true');
   }, USER_ID);
   await setupMocks(page, scenario);
-  const trialStatusRead = page.waitForResponse((r) => r.url().endsWith('/api/trial-status'));
+  // The gate refuses only once both compute reads have answered, so wait for both bodies
+  // and then for a painted frame, by which React has committed the query results.
+  const computeReads = ['/api/trial-status', '/api/credentials'].map((suffix) =>
+    page.waitForResponse((r) => new URL(r.url()).pathname.endsWith(suffix))
+  );
   await page.goto(`/projects/${PROJECT_ID}/chat`);
   await expect(page.locator('textarea[role="combobox"]')).toBeVisible();
-  await trialStatusRead;
-  // Let the query result commit before the send.
-  await page.waitForTimeout(300);
+  await Promise.all((await Promise.all(computeReads)).map((response) => response.finished()));
+  await page.evaluate(
+    () => new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)))
+  );
 }
 
 async function send(page: Page, text: string) {

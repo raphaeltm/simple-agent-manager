@@ -10,7 +10,6 @@ import {
 /**
  * Visual audit for pages with no prior Playwright coverage:
  *
- * - /workspaces/new      (create-workspace form)
  * - /projects/:id/activity       (activity feed)
  * - /projects/:id/notifications  (project notifications, all types)
  * - /projects/:id/settings/runtime (runtime env vars + files)
@@ -337,11 +336,6 @@ async function visit(page: Page, path: string, name: string) {
 }
 
 test.describe('Uncovered pages sweep', () => {
-  test('create workspace form', async ({ page }) => {
-    await setupMocks(page);
-    await visit(page, '/workspaces/new', 'sweep-create-workspace');
-  });
-
   test('project activity feed', async ({ page }) => {
     await setupMocks(page);
     await visit(page, `/projects/${PROJECT_ID}/activity`, 'sweep-project-activity');

@@ -128,7 +128,7 @@ See the [local development guide](https://simple-agent-manager.org/docs/guides/l
 - [Docs](https://simple-agent-manager.org/docs/): agents, workflows, automation, and teams
 - [Self-hosting guide](https://simple-agent-manager.org/docs/guides/self-hosting/): deploy your own instance
 - [Security model](https://simple-agent-manager.org/docs/architecture/security/): how credentials are encrypted and isolated
-- [How SAM compares](https://simple-agent-manager.org/#comparison): with vendor cloud agents and self-hosted dev environments
+- [How work moves through SAM](https://simple-agent-manager.org/#how-work-moves): one request from idea to a running change
 - [Blog](https://simple-agent-manager.org/blog/): what we are building and why
 
 ## License

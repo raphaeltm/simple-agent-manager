@@ -74,14 +74,16 @@ export interface DefaultCapacityPoolUpdateResult {
 type PolicyUpdate = NonNullable<DefaultCapacityPoolUpdateInput['policy']>;
 
 /**
- * Binds consumed by an atomic candidate UPDATE before its `id IN (...)` list:
- * `status`, `updated_at` (SET), `pool_id`, role suffix, the fence's `id` + `revision`, and up to
- * two account-settings guards in the same fence (`sourceSettingsGuardSql`: provider order and
- * switched-off accounts). Each candidate id is bound twice: its direct update and current
- * coupled-mirror lookup.
+ * Binds consumed by an atomic candidate UPDATE besides its two id lists:
+ * `status`, `updated_at` (SET), `pool_id`, the fence's `id` + `revision`, and up to two
+ * account-settings guards in the same fence (`sourceSettingsGuardSql`: provider order and
+ * switched-off accounts). Each candidate id is bound twice: once as itself and once as its
+ * deployment-mirror id. One spare is kept.
  */
 const MAX_SOURCE_SETTINGS_GUARD_BINDS = 2;
 const ATOMIC_CANDIDATE_UPDATE_FIXED_BIND_COUNT = 6 + MAX_SOURCE_SETTINGS_GUARD_BINDS;
+/** Length of the suffix `capacityCandidateIdForRole` appends for a deployment mirror. */
+const DEPLOYMENT_MIRROR_SUFFIX_LENGTH = capacityCandidateIdForRole('', 'deployment').length;
 const ATOMIC_CANDIDATE_ID_CHUNK_SIZE = Math.max(
   1,
   Math.floor((D1_MAX_BOUND_PARAMETERS - ATOMIC_CANDIDATE_UPDATE_FIXED_BIND_COUNT) / 2)
@@ -250,6 +252,7 @@ async function publishPoolEditAtomically(
   for (const [status, ids] of idsByStatus) {
     for (let offset = 0; offset < ids.length; offset += ATOMIC_CANDIDATE_ID_CHUNK_SIZE) {
       const chunk = ids.slice(offset, offset + ATOMIC_CANDIDATE_ID_CHUNK_SIZE);
+      const mirrorIds = chunk.map((id) => capacityCandidateIdForRole(id, 'deployment'));
       statements.push(
         db
           .update(schema.capacityPoolCandidates)
@@ -261,12 +264,16 @@ async function publishPoolEditAtomically(
                 inArray(schema.capacityPoolCandidates.id, chunk),
                 // Include a mirror materialized AFTER the editor read its sibling list.
                 // Match exact native identity; legacy null-typed rows never couple.
-                sql`EXISTS (SELECT 1 FROM capacity_pool_candidates AS primary_member
-                  WHERE primary_member.id IN (${sql.join(
-                    chunk.map((id) => sql`${id}`),
-                    sql`, `
-                  )})
-                    AND primary_member.id || ${capacityCandidateIdForRole('', 'deployment')} = capacity_pool_candidates.id
+                //
+                // Both sides are looked up by primary key: the mirror by its computed id, and
+                // its primary by stripping the role suffix. Correlating on the primary's id
+                // list instead let SQLite scan every row of the source for every row of the
+                // pool, which reset production D1 on a ~3,900-row pool (2026-11-10).
+                and(
+                  inArray(schema.capacityPoolCandidates.id, mirrorIds),
+                  sql`EXISTS (SELECT 1 FROM capacity_pool_candidates AS primary_member
+                  WHERE primary_member.id = substr(capacity_pool_candidates.id, 1,
+                      length(capacity_pool_candidates.id) - ${sql.raw(String(DEPLOYMENT_MIRROR_SUFFIX_LENGTH))})
                     AND primary_member.pool_id = capacity_pool_candidates.pool_id
                     AND primary_member.capacity_source_id = capacity_pool_candidates.capacity_source_id
                     AND primary_member.provider = capacity_pool_candidates.provider
@@ -274,6 +281,7 @@ async function publishPoolEditAtomically(
                     AND primary_member.provider_instance_type IS NOT NULL
                     AND primary_member.provider_instance_type = capacity_pool_candidates.provider_instance_type
                     AND primary_member.provider_instance_sku IS capacity_pool_candidates.provider_instance_sku)`
+                )
               ),
               poolRevisionFence
             )

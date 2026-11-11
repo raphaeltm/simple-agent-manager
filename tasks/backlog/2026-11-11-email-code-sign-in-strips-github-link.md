@@ -12,8 +12,10 @@ Cause: better-auth 1.7.14 `revokeUnprovenAccountAccess`
 account link and session of a user whose `emailVerified` is false when an email-code sign-in
 proves the mailbox, then sets `emailVerified=true`. This is deliberate anti-takeover behaviour.
 SAM creates GitHub users with `emailVerified=false` whenever GitHub's `/user/emails` call fails
-(`apps/api/src/auth.ts`, `getUserInfo`, the `github_emails_unavailable` branch falls back to the
-`<id>+<login>@users.noreply.github.com` address with `emailVerified=false`).
+(`apps/api/src/auth.ts`, `getUserInfo`, the `github_emails_unavailable` branch). In that case SAM
+keeps the email from the `/user` response as unverified when there is one, and uses the
+`<id>+<login>@users.noreply.github.com` address only when there is none. So refusing email codes
+for noreply addresses would not cover an account that kept a real, unverified email.
 
 ## Context
 

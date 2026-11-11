@@ -110,6 +110,7 @@ export function SessionMessageViewDialogs({
       />
       <SessionHeaderCompletionDialog
         isOpen={sessionTools.confirmCompleteOpen}
+        intent={sessionTools.confirmIntent}
         onClose={sessionTools.closeConfirmComplete}
         onConfirm={sessionTools.confirmComplete}
       />

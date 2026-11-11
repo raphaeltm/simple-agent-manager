@@ -306,34 +306,120 @@ describe('node-lifecycle BYO gates', () => {
       expect(state.updates.some((u) => 'ipAddress' in u)).toBe(false);
     });
 
-    it('does NOT backfill the IP or create an A record for a managed reverse-tunnel node', async () => {
-      // Reverse-tunnel nodes carry no tunnelId: the gate must read the row's transport, and
-      // CF-Connecting-IP (the node's real egress IP through Caddy) must not be backfilled.
-      state.node = makeNode({
-        transport: 'reverse-tunnel',
-        tunnelId: null,
-        ipAddress: '198.51.100.9',
-      });
-      const res = await getNodeLifecycleApp().request(
+    function heartbeatFrom(ip: string) {
+      return getNodeLifecycleApp().request(
         '/api/nodes/node-1/heartbeat',
         {
           method: 'POST',
           headers: {
             Authorization: 'Bearer node-token',
             'Content-Type': 'application/json',
-            'CF-Connecting-IP': '203.0.113.7',
+            'CF-Connecting-IP': ip,
           },
           body: JSON.stringify({ nodeId: 'node-1' }),
         },
         { DATABASE: {}, BASE_DOMAIN: 'example.com' },
         { waitUntil: vi.fn(), passThroughOnException: vi.fn() }
       );
+    }
+
+    it('ignores the connecting IP of a workspace tunnel node even when one is sent', async () => {
+      state.node = makeNode({
+        transport: 'cloudflare-tunnel',
+        tunnelId: 'tunnel-uuid',
+        ipAddress: null,
+      });
+      const res = await heartbeatFrom('203.0.113.9');
+      expect(res.status).toBe(200);
+      expect(state.dns.create).toBeNull();
+      expect(state.updates.some((u) => 'ipAddress' in u)).toBe(false);
+    });
+
+    it('does NOT backfill the IP or create an A record for a managed reverse-tunnel node', async () => {
+      // Reverse-tunnel nodes carry no tunnelId: the gate must read the row's transport, and
+      // CF-Connecting-IP (the node's real egress IP through Caddy) must not be backfilled,
+      // even when the node has no stored IP (the case that would otherwise backfill).
+      state.node = makeNode({
+        transport: 'reverse-tunnel',
+        tunnelId: null,
+        ipAddress: null,
+      });
+      const res = await heartbeatFrom('203.0.113.7');
       expect(res.status).toBe(200);
       expect(state.dns.create).toBeNull();
       expect(state.dns.update).toBeNull();
       expect(state.updates.some((u) => 'ipAddress' in u)).toBe(false);
       // Liveness: the heartbeat itself was recorded.
       expect(state.updates).toContainEqual(expect.objectContaining({ healthStatus: 'healthy' }));
+    });
+
+    it('records the IPv4 of a deployment tunnel node with no IP, without any backend A record', async () => {
+      state.node = makeNode({
+        nodeRole: 'deployment',
+        status: 'creating',
+        transport: 'cloudflare-tunnel',
+        tunnelId: 'tunnel-uuid',
+        ipAddress: null,
+        errorMessage: 'Awaiting IP allocation — will be set on first heartbeat',
+      });
+      const res = await heartbeatFrom('203.0.113.8');
+      expect(res.status).toBe(200);
+      // App routes need the public IP (grey-cloud A records); the node hostname stays the CNAME.
+      expect(state.updates).toContainEqual(
+        expect.objectContaining({
+          ipAddress: '203.0.113.8',
+          status: 'running',
+          // The "Awaiting IP allocation" error is cleared in the same write.
+          errorMessage: expect.objectContaining({ sql: 'NULL' }),
+        })
+      );
+      expect(state.dns.create).toBeNull();
+      expect(state.dns.update).toBeNull();
+    });
+
+    it('records the IPv4 of an already-running deployment tunnel node that has none', async () => {
+      state.node = makeNode({
+        nodeRole: 'deployment',
+        status: 'running',
+        transport: 'cloudflare-tunnel',
+        tunnelId: 'tunnel-uuid',
+        ipAddress: null,
+      });
+      expect((await heartbeatFrom('203.0.113.6')).status).toBe(200);
+      expect(state.updates).toContainEqual(expect.objectContaining({ ipAddress: '203.0.113.6' }));
+      expect(state.dns.create).toBeNull();
+    });
+
+    it('never backfills a user-owned tunnel node even with the deployment role (server-side class gate)', async () => {
+      state.node = makeNode({
+        nodeRole: 'deployment',
+        nodeClass: 'user-owned',
+        transport: 'cloudflare-tunnel',
+        tunnelId: 'tunnel-uuid',
+        ipAddress: null,
+      });
+      expect((await heartbeatFrom('203.0.113.5')).status).toBe(200);
+      expect(state.updates.some((u) => 'ipAddress' in u)).toBe(false);
+    });
+
+    it('never backfills a deployment tunnel node from a non-IPv4 address or over a stored IP', async () => {
+      state.node = makeNode({
+        nodeRole: 'deployment',
+        transport: 'cloudflare-tunnel',
+        tunnelId: 'tunnel-uuid',
+        ipAddress: null,
+      });
+      expect((await heartbeatFrom('2001:db8::8')).status).toBe(200);
+      expect(state.updates.some((u) => 'ipAddress' in u)).toBe(false);
+      state.node = makeNode({
+        nodeRole: 'deployment',
+        transport: 'cloudflare-tunnel',
+        tunnelId: 'tunnel-uuid',
+        ipAddress: '198.51.100.4',
+      });
+      expect((await heartbeatFrom('203.0.113.8')).status).toBe(200);
+      expect(state.updates.some((u) => 'ipAddress' in u)).toBe(false);
+      expect(state.dns.create).toBeNull();
     });
 
     it('DOES backfill IP + A record for a managed node without a tunnel', async () => {

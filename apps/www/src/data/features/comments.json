@@ -20,11 +20,6 @@
       "caption": "Comment on exactly the sentence you mean, then send it to the agent as context"
     }
   ],
-  "homepage": {
-    "headline": "Review the documents agents write",
-    "body": "Agents can save plans and reports to the project library, and your team can comment on any passage. All threads land in one inbox, sorted by whether they're waiting on you.",
-    "caption": "A reply on a passage in a migration plan"
-  },
   "details": [
     {
       "headline": "Comment on exactly what you mean",

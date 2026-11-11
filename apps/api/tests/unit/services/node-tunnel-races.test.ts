@@ -10,7 +10,9 @@ import { deleteNodeResourcesStrict } from '../../../src/services/strict-node-del
 import { cf, env, freshNode, journal, mocks, readNode, sqlite, USER } from './node-tunnel-fixture';
 
 describe('tunnel lifecycle crash and cancellation fences', () => {
-  it.each(['tunnel.configure', 'tunnel.token'])(
+  // The resumed steps of an already-active row: its DNS re-check and the token fetch (the resume
+  // fast path skips ingress and CNAME convergence; see node-tunnel-provisioning.ts).
+  it.each(['dns.get', 'tunnel.token'])(
     'retains a possibly allocated VM tunnel when resumed %s fails',
     async (operation) => {
       const node = await freshNode();

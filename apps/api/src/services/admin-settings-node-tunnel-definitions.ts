@@ -9,6 +9,8 @@ export const NODE_TUNNEL_RUNTIME_DEFAULTS = {
   cleanupBackoffBaseMs: 60000,
   cleanupBackoffMaxMs: 3600000,
   cleanupStuckAttempts: 6,
+  provisioningBudgetMs: 20000,
+  pendingCreateSettleMs: 900000,
 } as const;
 
 export type NodeTunnelSettingName = `vmTunnels.${keyof typeof NODE_TUNNEL_RUNTIME_DEFAULTS}`;
@@ -69,5 +71,19 @@ export const NODE_TUNNEL_SETTINGS: readonly AdminSettingDefinition[] = [
     'Operations',
     'Failed cleanup attempts before subsequent failures are reported at error severity.',
     { min: 1, max: 100 }
+  ),
+  integerDefinition(
+    'vmTunnels.provisioningBudgetMs',
+    NODE_TUNNEL_RUNTIME_DEFAULTS.provisioningBudgetMs,
+    'Operations',
+    'Extra time in milliseconds a durable provisioning attempt gets for tunnel setup (about six sequential Cloudflare calls) on top of the provisioning request timeout. Tunnel setup is resumable, so an attempt that still runs out continues from its recorded progress on the next attempt.',
+    { min: 1, max: 120000 }
+  ),
+  integerDefinition(
+    'vmTunnels.pendingCreateSettleMs',
+    NODE_TUNNEL_RUNTIME_DEFAULTS.pendingCreateSettleMs,
+    'Operations',
+    'How long in milliseconds cleanup keeps waiting for a tunnel or DNS create whose response was never observed. After this window, a cleanup that found and deleted nothing left for the row marks it cleaned.',
+    { min: 60000, max: 86400000 }
   ),
 ];
