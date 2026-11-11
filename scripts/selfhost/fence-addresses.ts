@@ -21,6 +21,13 @@ const NEVER_ALLOWED_IPV4: ReadonlyArray<readonly [string, number]> = [
 
 const NEVER_ALLOWED_IPV6: ReadonlyArray<readonly [string, number]> = [
   ['::', 128], // unspecified
+  // Transition forms that embed or tunnel to an IPv4 address the fence cannot see. No operator
+  // endpoint needs them, and the fence rejects them anyway (FORBIDDEN_IPV6).
+  ['::ffff:0:0:0', 96], // IPv4-translated
+  ['64:ff9b::', 96], // NAT64
+  ['64:ff9b:1::', 48], // local-use NAT64
+  ['2001::', 32], // Teredo
+  ['2002::', 16], // 6to4
   ['fe80::', 10], // link-local
   ['fd00:ec2::254', 128], // AWS IMDS over IPv6
   ['fd20:ce::254', 128], // GCE metadata over IPv6
@@ -59,6 +66,13 @@ function translatedIpv4(groups: number[]): string | null {
   return g0 === 0x2002 ? word(g1, g2) : null;
 }
 
+/** ::a.b.c.d (deprecated IPv4-compatible), which is everything in ::/96 but :: and ::1. */
+function isIpv4Compatible(groups: number[]): boolean {
+  const high = groups.slice(0, 6).every((group) => group === 0);
+  const [g6 = 0, g7 = 0] = groups.slice(6);
+  return high && (g6 !== 0 || g7 > 1);
+}
+
 /**
  * Whether no configuration may open `address`: metadata, link-local and reserved addresses in
  * every spelling (IPv4-mapped, NAT64 and 6to4 forms of them included).
@@ -69,6 +83,7 @@ export function isNeverAllowed(address: string): boolean {
   if (family !== 6) return true; // not an IP literal: the fence matches addresses only
   if (neverAllowed.check(address, 'ipv6')) return true;
   const groups = ipv6Groups(address);
+  if (groups && isIpv4Compatible(groups)) return true;
   const embedded = groups ? translatedIpv4(groups) : null;
   return embedded !== null && neverAllowed.check(embedded, 'ipv4');
 }

@@ -69,7 +69,8 @@ export function formatProbes(probes: readonly FenceProbe[]): string {
   return probes.map((probe) => `${probe.name},${probe.host},${probe.port}`).join(' ');
 }
 
-export type ProbeOutcome = 'blocked' | 'open' | 'refused' | 'timeout' | 'unavailable' | 'error';
+export type ProbeOutcome =
+  'blocked' | 'open' | 'refused' | 'unreachable' | 'timeout' | 'unavailable' | 'error';
 
 export interface ProbeSpec {
   host: string;
@@ -94,11 +95,15 @@ export function buildProbeScript(targets: readonly ProbeSpec[], timeoutSeconds: 
     'probe() {',
     '  if [ "$2" = udp ]; then',
     `    out="$(timeout ${timeoutSeconds} bash -c 'exec 3<>"/dev/udp/$0/$1" && printf x >&3 && sleep 0.2 && printf x >&3' "$3" "$4" 2>&1)"; code=$?`,
+    // For UDP only EPERM is the fence: "No route to host" can be a router's ICMP answer.
+    '    blocked="Operation not permitted"; unreachable="No route to host"',
     '  else',
     `    out="$(timeout ${timeoutSeconds} bash -c 'exec 3<>"/dev/tcp/$0/$1"' "$3" "$4" 2>&1)"; code=$?`,
+    '    blocked="No route to host"; unreachable="@none@"',
     '  fi',
     '  if [ $code -eq 0 ]; then echo "$1 open"',
-    '  elif [[ "$out" == *"No route to host"* || "$out" == *"Permission denied"* || "$out" == *"Operation not permitted"* ]]; then echo "$1 blocked"',
+    '  elif [[ "$out" == *"$blocked"* || ( "$2" = tcp && "$out" == *"Permission denied"* ) ]]; then echo "$1 blocked"',
+    '  elif [[ "$out" == *"$unreachable"* ]]; then echo "$1 unreachable"',
     '  elif [[ "$out" == *"Connection refused"* ]]; then echo "$1 refused"',
     '  elif [[ "$out" == *"Cannot assign requested address"* || "$out" == *"Network is unreachable"* || "$out" == *"Address family not supported"* ]]; then echo "$1 unavailable"',
     '  elif [ $code -eq 124 ]; then echo "$1 timeout"',
@@ -112,7 +117,9 @@ export function buildProbeScript(targets: readonly ProbeSpec[], timeoutSeconds: 
 export function parseProbeOutput(output: string): Map<number, ProbeOutcome> {
   const results = new Map<number, ProbeOutcome>();
   for (const line of output.split('\n')) {
-    const match = /^(\d+) (blocked|open|refused|timeout|unavailable|error)$/.exec(line.trim());
+    const match = /^(\d+) (blocked|open|refused|unreachable|timeout|unavailable|error)$/.exec(
+      line.trim()
+    );
     if (match) results.set(Number(match[1]), match[2] as ProbeOutcome);
   }
   return results;

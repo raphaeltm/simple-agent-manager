@@ -622,6 +622,12 @@ jobs:
       - name: Run deploy and quality script tests
         run: pnpm quality:scripts:test
 
+      # Before the self-host suites: rendered rulesets go through `nft -c`, and the egress-fence
+      # live suite installs them in a network namespace and probes them as the fenced and a
+      # control uid (sudo, iproute2, nftables, util-linux setpriv). Both fail, not skip, in CI.
+      - name: Install nftables for the egress-fence tests
+        run: command -v nft >/dev/null || (sudo apt-get update && sudo apt-get install -y --no-install-recommends nftables)
+
       # celld wrangler.json generator, root-only secret files, pinned versions.
       - name: Run self-host packaging tests
         run: pnpm selfhost:test
@@ -630,11 +636,6 @@ jobs:
       # fragments against stub upstreams, and the pinned frpc/frps 0.72.0 (checksum-verified)
       # with the generated frpc.toml: gateway 404s and path tricks, X-SAM-* stripping, the 101
       # Set-Cookie rule, frpc certificate verification, the NewWorkConn plugin payload.
-      # The egress-fence suite installs the rendered ruleset in a network namespace and probes it
-      # as the fenced and a control uid (sudo, iproute2, nftables, util-linux setpriv).
-      - name: Install nftables for the egress-fence namespace test
-        run: command -v nft >/dev/null || (sudo apt-get update && sudo apt-get install -y --no-install-recommends nftables)
-
       - name: Run self-host live tests (Caddy in Docker, real frp, celld, fence in a namespace)
         run: pnpm selfhost:live-test
 

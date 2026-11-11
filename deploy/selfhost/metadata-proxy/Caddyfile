@@ -25,6 +25,9 @@ http://127.0.0.1:{$GCE_METADATA_PROXY_PORT} {
 		path /{$GCE_METADATA_PROXY_SECRET}/computeMetadata/v1/instance/service-accounts/default/token
 		header Metadata-Flavor Google
 		method GET
+		# Fail closed on a missing or malformed secret: an empty one would turn the matcher into
+		# the bare metadata path.
+		expression `'{$GCE_METADATA_PROXY_SECRET}'.size() == 64 && '{$GCE_METADATA_PROXY_SECRET}'.matches('^[0-9a-f]+$')`
 	}
 	handle @token {
 		# Replaces the whole URI, query included: a caller's `scopes` (or anything else) never

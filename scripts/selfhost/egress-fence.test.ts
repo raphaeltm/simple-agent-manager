@@ -230,6 +230,12 @@ describe('operator endpoints never open metadata, link-local or reserved address
     '100.100.100.200',
     '168.63.129.16',
     '0.0.0.0',
+    '::ffff:0:a9fe:a9fe',
+    '::ffff:0:169.254.169.254',
+    '::a9fe:a9fe',
+    '::169.254.169.254',
+    '64:ff9b:1::a9fe:a9fe',
+    '2001:0:4136:e378:8000:63bf:3fff:fdd2',
   ])('S3_ENDPOINT resolving to %s is refused', async (address) => {
     await expect(
       resolveObjectStoreEndpoints({ S3_ENDPOINT: 'https://store.example' }, async () => [address])
@@ -238,7 +244,15 @@ describe('operator endpoints never open metadata, link-local or reserved address
   });
 
   it('control: private, loopback and public store addresses stay openable', async () => {
-    for (const address of ['10.0.0.9', '127.0.0.1', '192.168.1.5', 'fd12::5', '203.0.114.9']) {
+    for (const address of [
+      '10.0.0.9',
+      '127.0.0.1',
+      '::1',
+      '::ffff:10.0.0.9',
+      '192.168.1.5',
+      'fd12::5',
+      '203.0.114.9',
+    ]) {
       expect(
         await resolveObjectStoreEndpoints({ S3_ENDPOINT: 'https://store.example' }, async () => [
           address,

@@ -110,8 +110,8 @@ export class NetnsLab {
         address.includes(':') ? `addr add ${address} dev lo nodad` : `addr add ${address} dev lo`
       ),
     ]);
-    this.spawn(peer, ['node', '-e', listenerScript(peerPorts)]);
-    this.spawn(fenced, ['node', '-e', listenerScript(fencedPorts)]);
+    this.spawn(peer, [process.execPath, '-e', listenerScript(peerPorts)]);
+    this.spawn(fenced, [process.execPath, '-e', listenerScript(fencedPorts)]);
   }
 
   /** A long-running root process in `ns`; stopped by teardown. */

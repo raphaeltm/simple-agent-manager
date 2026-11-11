@@ -171,8 +171,11 @@ metadata server directly (Caddy is not fenced) and keep the VM's own scopes.
 Worker code cannot read the secret path. Verified on celld 0.6.3 with `nodejs_compat`: `process.env`
 is an empty stub, `node:fs` is a virtual filesystem (`/proc/self/environ`, `/etc/passwd` and `/`
 are not found), `node:os` returns placeholders, there is no `child_process`, and `file://` fetches
-fail. celld's own log does not contain it either at `RUST_LOG=info` or `debug`; it appears only in
-celld's error output when the proxy is unreachable (operator-visible, never Worker-visible).
+fail. celld's own log does not contain it at `RUST_LOG=info` or `debug`; it appears in celld's error
+output when the proxy is unreachable (after a redeploy or a proxy crash). Whether a storage error
+that reaches Worker code carries that chain is untested for gs:// (with an unreachable S3 store a
+Worker saw only `Error: write s3://...`); if one did, the secret alone still opens nothing the API
+lets a user reach. The proxy refuses everything when its secret is missing or malformed.
 
 What the fence cannot separate: Worker code and celld's storage client are one process. A
 Worker can reach the object store endpoint (without the fleet credential it gets nothing; the
@@ -187,16 +190,18 @@ picks up the re-rendered rules within `SAM_EGRESS_FENCE_RECHECK_SECONDS`. The de
 entry that would open celld's, frps's or the store console's port on any local address.
 
 A self-managed GitLab on this machine or the private network (`integration.gitlab.host`, for
-example `http://10.0.0.5`) is refused for sign-in and API calls until an admin turns on
-`integration.gitlab.allowPrivateNetwork` (Admin, Settings, OAuth); sign-in with it is not offered
-until then. The fence still rejects the address: add it to `SAM_EGRESS_ALLOW` (for example
-`10.0.0.5:443`) and run `pnpm selfhost:deploy --init`, as for a local model server. SAM never
-follows a redirect from GitLab to another private host, and celld's TLS client trusts only public
-certificate authorities, so a private GitLab must serve a publicly trusted certificate or plain
-HTTP on the private network.
+example `https://gitlab.example.lan` resolving to 10.0.0.5) is refused for sign-in and API calls
+until an admin turns on `integration.gitlab.allowPrivateNetwork` (Admin, Settings, OAuth); sign-in
+with it is not offered until then. The fence still rejects the address: add it to
+`SAM_EGRESS_ALLOW` (for example `10.0.0.5:443`) and run `pnpm selfhost:deploy --init`, as for a
+local model server. SAM never follows a redirect from GitLab to another private host. The host
+must be HTTPS (plain HTTP is accepted only for `localhost`), and celld's TLS client trusts only
+public certificate authorities, so a private GitLab needs a publicly trusted certificate.
 
 Other limits: the loopback lease range (20000-29999 by default) is open to celld, so do not run
-other services on those ports. Docker user-namespace remapping changes the host uid the fence
+other services on those ports. The start check probes the box's own addresses as they were at
+`pnpm selfhost:deploy --init`; if a public address on the NIC changes, celld stops (fail closed)
+until you run it again. Docker user-namespace remapping changes the host uid the fence
 must match; it is not supported (celld then refuses to start). A refused TCP connection fails
 after about a second (the kernel reports the reject on the first SYN retransmit), not at once.
 

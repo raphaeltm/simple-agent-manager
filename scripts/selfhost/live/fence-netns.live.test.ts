@@ -13,7 +13,12 @@ import { join, resolve } from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { buildFencePlan, renderFenceRuleset } from '../egress-fence.js';
+import {
+  buildFencePlan,
+  FORBIDDEN_IPV4,
+  FORBIDDEN_IPV6,
+  renderFenceRuleset,
+} from '../egress-fence.js';
 import {
   buildProbeScript,
   formatProbes,
@@ -22,11 +27,14 @@ import {
   type ProbeSpec,
   startCheckProbes,
 } from '../fence-probes.js';
+import { dnsChainAddresses } from '../fence-verify.js';
 import { FENCED_PUBLIC_ADDRESS, labUnavailableReason, NetnsLab } from './netns-lab.js';
 
 const REPO = resolve(import.meta.dirname, '../../..');
 const FENCED_UID = 7101;
 const CONTROL_UID = 65534;
+/** Same as verify-fence: a refused TCP connect is reported ~1 s in (first SYN retransmit). */
+const PROBE_TIMEOUT_SECONDS = 4;
 const unavailable = labUnavailableReason();
 // CI must run this suite: a runner without the tools is a failure there, not a skip.
 if (unavailable && process.env.CI)
@@ -109,7 +117,8 @@ describe.skipIf(unavailable !== null)('egress fence in a network namespace', () 
 
   const probe = (cases: readonly ProbeSpec[], uid: number): Map<number, ProbeOutcome> =>
     parseProbeOutput(
-      lab.exec(lab.fenced, ['/bin/bash', '-c', buildProbeScript(cases, 2)], uid).output
+      lab.exec(lab.fenced, ['/bin/bash', '-c', buildProbeScript(cases, PROBE_TIMEOUT_SECONDS)], uid)
+        .output
     );
 
   beforeAll(() => {
@@ -140,6 +149,18 @@ describe.skipIf(unavailable !== null)('egress fence in a network namespace', () 
         fenced: testCase.fenced,
         control: testCase.control,
       });
+    });
+
+    // Every forbidden range, not just the classes above: a mistyped CIDR that nft accepts would
+    // otherwise pass. UDP, because only the fence answers a send with EPERM.
+    const RANGES = [...FORBIDDEN_IPV4, ...FORBIDDEN_IPV6]
+      .map((cidr) => [cidr, representative(cidr)] as const)
+      .filter((entry): entry is readonly [string, string] => entry[1] !== null);
+
+    it.each(RANGES)('forbidden range %s (UDP to %s)', (_cidr, host) => {
+      const spec = [{ host, port: 9, protocol: 'udp' as const }];
+      expect(probe(spec, FENCED_UID).get(0)).toBe('blocked');
+      expect(probe(spec, CONTROL_UID).get(0)).not.toBe('blocked');
     });
 
     it('control: without the table the fenced uid reaches every target the control uid does', () => {
@@ -216,23 +237,55 @@ describe.skipIf(unavailable !== null)('egress fence in a network namespace', () 
         /egress fence is gone \(loopback-v4 \(127\.0\.0\.1:7001\): .*\); killed celld/
       );
       expect(existsSync(`/proc/${pid}`)).toBe(false);
-      // Check interval 1 s, plus the immediate re-check: measured well under 2 s.
-      expect(window).toBeLessThan(2500);
+      // By construction one check interval (1 s) plus two probe rounds; measured 0.1-0.8 s. The
+      // bound is loose so a loaded runner does not flake; the README states the real figure.
+      expect(window).toBeLessThan(4000);
       console.log(`[fence-netns] celld killed ${window} ms after the table was flushed`);
     });
 
     it('celld is killed when the fence service stops attesting, even with the table intact', async () => {
       lab.nft(lab.fenced, ['-f', rulesFile]);
+      // Fresh enough for the start check, stale a few seconds later; nothing refreshes it.
       writeFileSync(manual, `ok ${Math.floor(Date.now() / 1000)}\n`, { mode: 0o644 });
       const run = startCelld({
         SAM_EGRESS_FENCE_ATTESTATION: manual,
-        SAM_EGRESS_FENCE_ATTESTATION_MAX_AGE_SECONDS: '2',
+        SAM_EGRESS_FENCE_ATTESTATION_MAX_AGE_SECONDS: '5',
       });
       await waitFor(() => existsSync(run.pidFile), 10_000);
       expect(await run.exited).toBe(1);
       expect(run.output()).toMatch(
         /egress fence is gone \(attestation 'ok \d+' is not a recent ok/
       );
+    });
+
+    it.each([
+      ['missing', null, /no attestation at /],
+      ['not ok', 'stale 9999999999\n', /attestation 'stale \d+' is not a recent ok/],
+      ['garbage', 'ok soon\n', /attestation 'ok soon' is not a recent ok/],
+    ])('celld does not start when the attestation is %s', async (_name, content, message) => {
+      lab.nft(lab.fenced, ['-f', rulesFile]);
+      const file = join(dir, `attestation-${_name}`);
+      if (content !== null) writeFileSync(file, content, { mode: 0o644 });
+      const run = startCelld({
+        SAM_EGRESS_FENCE_ATTESTATION: file,
+        SAM_EGRESS_FENCE_WAIT_SECONDS: '2',
+      });
+      expect(await run.exited).toBe(1);
+      expect(run.output()).toMatch(message);
+      expect(existsSync(run.pidFile)).toBe(false);
+    });
+
+    it('verify-fence reads the DNS rule from real nft output', () => {
+      lab.nft(lab.fenced, ['-f', rulesFile]);
+      const listing = lab.exec(lab.fenced, [
+        '/usr/sbin/nft',
+        'list',
+        'chain',
+        'inet',
+        'sam_celld_egress',
+        'dns',
+      ]).output;
+      expect(dnsChainAddresses(listing)).toEqual(['10.99.0.2']);
     });
 
     it.each([
@@ -301,6 +354,21 @@ describe.skipIf(unavailable !== null)('egress fence in a network namespace', () 
     }
   });
 });
+
+/**
+ * An address inside `cidr`: the network address plus one. fe80::/10 needs a scope id, which no
+ * URL can carry, so it has none; multicast uses a global-scope group.
+ */
+function representative(cidr: string): string | null {
+  const [base = '', bits = '0'] = cidr.split('/');
+  if (base === 'fe80::') return null;
+  if (base === 'ff00::') return 'ff0e::1';
+  if (base === '::') return '::2';
+  if (base.includes(':')) return base.endsWith('::') ? `${base}1` : base.replace(/0$/, '1');
+  const octets = base.split('.').map(Number);
+  const value = octets.reduce((acc, octet) => acc * 256 + octet, 0) + (Number(bits) === 32 ? 0 : 1);
+  return [24, 16, 8, 0].map((shift) => Math.floor(value / 2 ** shift) % 256).join('.');
+}
 
 async function waitFor(condition: () => boolean, timeoutMs = 10_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;

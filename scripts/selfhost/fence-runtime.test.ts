@@ -32,6 +32,8 @@ function nftChecker(): string[] | null {
 }
 
 const nft = nftChecker();
+// CI installs nftables before this suite; there a missing checker is a failure, not a skip.
+if (nft === null && process.env.CI) throw new Error('nft -c is unavailable in CI');
 
 describe.skipIf(nft === null)('rendered rulesets pass nft -c', () => {
   const RESOLV = 'nameserver 127.0.0.53\nnameserver 2001:4860:4860::8888\n';

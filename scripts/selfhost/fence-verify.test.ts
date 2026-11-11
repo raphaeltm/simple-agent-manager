@@ -1,3 +1,5 @@
+import { spawnSync } from 'node:child_process';
+
 import { describe, expect, it } from 'vitest';
 
 import { buildProbeScript, parseProbeOutput, type ProbeOutcome } from './fence-probes.js';
@@ -228,5 +230,63 @@ describe('applied DNS rules', () => {
     ].join('\n');
     expect(dnsChainAddresses(listing)).toEqual(['127.0.0.53', '169.254.169.254', 'fd00::53']);
     expect(dnsChainAddresses('Error: No such file or directory')).toEqual([]);
+  });
+});
+
+describe('probe script classification (real bash, canned kernel errors)', () => {
+  // `timeout N bash -c CMD host port`: a stub that prints the error the kernel would give.
+  const stub = [
+    'timeout() {',
+    '  case "$5" in',
+    '    udp-eperm) echo "bash: line 1: printf: write error: Operation not permitted"; return 1;;',
+    '    udp-noroute) echo "bash: line 1: printf: write error: No route to host"; return 1;;',
+    '    tcp-noroute) echo "bash: connect: No route to host"; return 1;;',
+    '    tcp-eacces) echo "bash: connect: Permission denied"; return 1;;',
+    '    refused) echo "bash: connect: Connection refused"; return 1;;',
+    '    nonet) echo "bash: connect: Network is unreachable"; return 1;;',
+    '    slow) return 124;;',
+    '    *) return 0;;',
+    '  esac',
+    '}',
+  ].join('\n');
+
+  it('counts only EPERM as the fence for UDP; a router\'s "No route to host" is not', () => {
+    const script = buildProbeScript(
+      [
+        { host: 'udp-eperm', port: 9, protocol: 'udp' },
+        { host: 'udp-noroute', port: 9, protocol: 'udp' },
+        { host: 'tcp-noroute', port: 80 },
+        { host: 'tcp-eacces', port: 80 },
+        { host: 'refused', port: 80 },
+        { host: 'nonet', port: 80 },
+        { host: 'slow', port: 80 },
+        { host: 'open', port: 80 },
+      ],
+      4
+    );
+    const result = spawnSync('bash', ['-c', `${stub}\n${script}`], { encoding: 'utf8' });
+    expect(parseProbeOutput(result.stdout)).toEqual(
+      new Map<number, ProbeOutcome>([
+        [0, 'blocked'],
+        [1, 'unreachable'],
+        [2, 'blocked'],
+        [3, 'blocked'],
+        [4, 'refused'],
+        [5, 'unavailable'],
+        [6, 'timeout'],
+        [7, 'open'],
+      ])
+    );
+  });
+
+  it('a remote target whose UDP probe the network refuses is NOT fenced', () => {
+    const verdict = judgeTargets(
+      [REMOTE],
+      results('blocked', 'unreachable'),
+      results('blocked', 'unreachable')
+    );
+    expect(verdict.failures).toEqual([
+      'private-v4 (10.255.255.1:80) is NOT fenced: UDP unreachable',
+    ]);
   });
 });
