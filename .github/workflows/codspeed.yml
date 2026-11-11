@@ -43,6 +43,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # The action installs apt dependencies internally. Prepare the same signed
+      # indexes through the bounded fallback first; keep the upstream action intact.
+      - name: Prepare apt indexes for benchmark dependencies
+        run: bash scripts/ci/run-with-apt-mirror-fallback.sh sudo apt-get update -o APT::Update::Error-Mode=any
+
       - name: Run benchmarks
         uses: CodSpeedHQ/action@af75f77f17a054769abefaa42fe8dc2975469b5f # v5.6.3
         with:

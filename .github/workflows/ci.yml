@@ -47,6 +47,7 @@ jobs:
       marketing-site: ${{ steps.filter.outputs.marketing-site }}
       repo-quality: ${{ steps.filter.outputs.repo-quality }}
       web-ui: ${{ steps.filter.outputs.web-ui }}
+      browser-install: ${{ steps.filter.outputs.browser-install }}
       go-modules: ${{ steps.filter.outputs.go-modules }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -114,7 +115,10 @@ jobs:
               - '.github/workflows/teardown*.yml'
             ci-workflow:
               - '.github/workflows/ci.yml'
+              - '.github/workflows/codspeed.yml'
+              - '.github/workflows/deploy-installer.yml'
               - 'scripts/quality/ci*.test.ts'
+              - 'scripts/ci/run-with-apt-mirror-fallback.sh'
             marketing-site:
               - 'apps/www/**'
               - '.github/workflows/deploy-www.yml'
@@ -141,6 +145,10 @@ jobs:
               - 'packages/ui/**'
               - 'packages/terminal/**'
               - 'packages/acp-client/**'
+            # The helper every browser job installs Chromium through. A change to it
+            # must run those jobs, or it is never exercised against a real runner.
+            browser-install:
+              - 'scripts/ci/run-with-apt-mirror-fallback.sh'
             go-modules:
               - '**/go.mod'
               - '**/go.sum'
@@ -240,7 +248,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Validate CI workflow wiring
-        run: pnpm exec vitest run --config scripts/quality/vitest.config.ts ci-quality-program.test.ts ci-worker-suite.test.ts check-runtime-tunables.test.ts ci-workspace-surfaces.test.ts
+        run: pnpm exec vitest run --config scripts/quality/vitest.config.ts ci-quality-program.test.ts ci-worker-suite.test.ts check-runtime-tunables.test.ts ci-workspace-surfaces.test.ts ci-browser-install.test.ts
 
   ui-compliance:
     name: UI Compliance
@@ -427,7 +435,7 @@ jobs:
   workspace-quality-surfaces:
     name: Workspace Quality Surfaces
     needs: [changes]
-    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.repo-quality == 'true'
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && (needs.changes.outputs.repo-quality == 'true' || needs.changes.outputs.browser-install == 'true')
     timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
@@ -452,9 +460,11 @@ jobs:
       - name: Build public docs and check internal links
         run: pnpm --filter @simple-agent-manager/www build && pnpm --filter @simple-agent-manager/www check:links
 
+      # The helper reruns the same install against a fallback Ubuntu mirror when the
+      # runner's own apt mirrors are unreachable. See the script header.
       - name: Install Chromium
         working-directory: packages/ui
-        run: ./node_modules/.bin/playwright install --with-deps chromium
+        run: bash ../../scripts/ci/run-with-apt-mirror-fallback.sh ./node_modules/.bin/playwright install --with-deps chromium
 
       - name: Audit Storybook in desktop and mobile browsers
         run: pnpm --filter @simple-agent-manager/ui test:storybook
@@ -477,7 +487,7 @@ jobs:
   marketing-site:
     name: Marketing Site
     needs: [changes]
-    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.marketing-site == 'true'
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && (needs.changes.outputs.marketing-site == 'true' || needs.changes.outputs.browser-install == 'true')
     # Setup/build takes ~11 minutes; leave time for the browser suite.
     timeout-minutes: 25
     runs-on: ubuntu-latest
@@ -505,7 +515,7 @@ jobs:
 
       - name: Install Chromium
         working-directory: apps/www
-        run: ./node_modules/.bin/playwright install --with-deps chromium
+        run: bash ../../scripts/ci/run-with-apt-mirror-fallback.sh ./node_modules/.bin/playwright install --with-deps chromium
 
       - name: Test public site in desktop and mobile browsers
         run: pnpm --filter @simple-agent-manager/www test:browser
@@ -524,7 +534,7 @@ jobs:
     needs: [changes]
     # Visual audits are informational and only relevant to reviewing a change.
     # Restrict to pull requests so they never run on push to main.
-    if: github.event_name == 'pull_request' && needs.changes.outputs.web-ui == 'true'
+    if: github.event_name == 'pull_request' && (needs.changes.outputs.web-ui == 'true' || needs.changes.outputs.browser-install == 'true')
     timeout-minutes: 45
     runs-on: ubuntu-latest
     steps:
@@ -545,7 +555,7 @@ jobs:
 
       - name: Install Playwright browsers
         working-directory: apps/web
-        run: npx playwright install --with-deps chromium
+        run: bash ../../scripts/ci/run-with-apt-mirror-fallback.sh npx playwright install --with-deps chromium
 
       - name: Prepare screenshot output directory
         working-directory: apps/web
