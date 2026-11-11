@@ -630,7 +630,12 @@ jobs:
       # fragments against stub upstreams, and the pinned frpc/frps 0.72.0 (checksum-verified)
       # with the generated frpc.toml: gateway 404s and path tricks, X-SAM-* stripping, the 101
       # Set-Cookie rule, frpc certificate verification, the NewWorkConn plugin payload.
-      - name: Run self-host live tests (Caddy in Docker, real frp)
+      # The egress-fence suite installs the rendered ruleset in a network namespace and probes it
+      # as the fenced and a control uid (sudo, iproute2, nftables, util-linux setpriv).
+      - name: Install nftables for the egress-fence namespace test
+        run: command -v nft >/dev/null || (sudo apt-get update && sudo apt-get install -y --no-install-recommends nftables)
+
+      - name: Run self-host live tests (Caddy in Docker, real frp, celld, fence in a namespace)
         run: pnpm selfhost:live-test
 
       - name: Verify installer engine, runtime integrity and bounded proof contracts

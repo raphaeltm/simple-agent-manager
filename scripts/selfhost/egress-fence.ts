@@ -15,19 +15,22 @@
  * - the node tunnel lease ports on 127.0.0.1 (frps binds them there);
  * - the object store endpoint celld itself uses, when that is on this box or the private network;
  * - the GCE metadata token proxy, when the bucket is gs:// (see metadataProxy below);
- * - Caddy's HTTP and HTTPS ports on this host's own addresses (the same thing the internet sees).
+ * - Caddy's HTTP and HTTPS ports on this host's own non-loopback addresses (what the internet sees).
  *
- * Everything else on this host, and every private, link-local, metadata and reserved range, is
- * rejected with an ICMP administratively-prohibited error, so connect() fails at once with
- * EHOSTUNREACH ("No route to host"; EACCES for IPv6). A plain `drop` would not do: a dropped TCP
- * SYN in OUTPUT is retransmitted until connect() times out (measured on a 6.8 kernel), and a
- * timeout cannot be told apart from a slow host. The fast, distinct error is how the verify
- * command and the celld start check tell "fenced" from "nothing listening" (ECONNREFUSED).
+ * Everything else on this host, and every private, link-local, metadata, reserved and IPv6
+ * transition range, is rejected with an ICMP administratively-prohibited error. connect() then
+ * fails with EHOSTUNREACH ("No route to host"; EACCES for IPv6) on the first SYN retransmit,
+ * about a second in, and a UDP send fails at once with EPERM. A plain `drop` would not do: a
+ * dropped TCP SYN in OUTPUT is retransmitted until connect() times out (measured on a 6.8
+ * kernel), and a timeout cannot be told apart from a slow host. The distinct errors are how the
+ * verify command and the celld start check tell "fenced" from "nothing listening"
+ * (fence-probes.ts).
  *
  * Worker code and celld's own storage client are one process, so the fence cannot tell them
  * apart: whatever celld needs, the Worker can reach too. That is why the object store is allowed
  * only at its exact address and port, and why the metadata server sits behind a proxy that
- * answers only celld (its secret path is in celld's environment, which Worker code cannot read).
+ * answers only celld (its secret path is in celld's environment, which Worker code cannot read:
+ * verified on celld 0.6.3, where process.env is an empty stub and node:fs a virtual filesystem).
  */
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';

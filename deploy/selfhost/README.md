@@ -33,7 +33,9 @@ pnpm selfhost:verify-fence             # the egress fence is in effect (see belo
 
 Upgrading a box from before the egress fence: add `gce` to `COMPOSE_PROFILES` if the bucket is
 gs://, run `pnpm selfhost:deploy --init`, then `docker compose up -d --build`. celld switches to
-uid 7101; `celld-data-owner` re-owns its data volume on the way.
+uid 7101; `celld-data-owner` re-owns its data volume on the way. Every upgrade that changes the
+fence needs the `--build`: celld does not start until the rebuilt fence service attests to the
+new rules.
 
 `pnpm selfhost:deploy` also builds the vm-agent (in a pinned `golang` image, so the box needs no
 Go toolchain) and publishes it into the fleet bucket under the same keys the Cloudflare pipeline
@@ -114,12 +116,34 @@ its console), any private address, and the cloud metadata server. Two layers sto
 2. The egress fence holds whatever the Worker asks for. celld runs as `CELLD_UID` (7101), and
    the `egress-fence` service installs an nftables table, rendered into `.state/egress-fence.nft`
    by `pnpm selfhost:deploy`, that lets that uid reach only the public internet, the
-   `resolv.conf` nameservers on port 53, the node lease ports on 127.0.0.1, the object store
-   endpoint celld uses (`S3_ENDPOINT`), the metadata token proxy, and Caddy's ports. Everything
-   else on the box and every private, link-local and metadata range is rejected. The service
-   re-applies the table if a firewall reload removes it. celld's entrypoint (`celld/start.sh`)
-   will not start celld until a connection to its own operator port is rejected, so a reboot
-   cannot bring celld up unfenced.
+   nameservers in `resolv.conf` on port 53, the node lease ports on 127.0.0.1, the object store
+   endpoint celld uses (`S3_ENDPOINT`), the metadata token proxy, and Caddy's ports on the box's
+   own non-loopback addresses. Everything else on the box (loopback, `127.0.0.2`, `::1`, the
+   box's own addresses on any other port) and every private, link-local, metadata, reserved and
+   IPv6 transition range (6to4, Teredo, NAT64, IPv4-compatible) is rejected. No setting can open
+   a metadata, link-local or reserved address: the deploy refuses an `S3_ENDPOINT` that resolves
+   to one, and any such `SAM_EGRESS_ALLOW` entry.
+
+The `egress-fence` service re-applies the table within `SAM_EGRESS_FENCE_RECHECK_SECONDS` (5) if
+it is missing or differs from the rendered rules, keeps the DNS rule equal to the nameservers in
+`resolv.conf` (a resolver change does not cut celld off), and after every exact match writes an
+attestation celld requires. celld's entrypoint (`celld/start.sh`) starts celld only when both
+hold: a probe per rule class (celld's operator port on every local spelling, one private,
+metadata, CGNAT and IPv6 range each) is refused, and the attestation is newer than
+`SAM_EGRESS_FENCE_ATTESTATION_MAX_AGE_SECONDS` (20). It repeats the check every
+`SAM_EGRESS_FENCE_CHECK_SECONDS` (1) and SIGKILLs celld (no drain, which would let in-flight Worker
+code keep connecting) when either fails; Docker restarts it and it waits for the fence again. A
+reboot cannot bring celld up unfenced.
+
+Worst-case unfenced window:
+
+- Table removed (`nft flush ruleset`, a firewall reload): at most one check interval plus two
+  probe rounds, about 1.2 s by default. Measured on celld 0.6.3: killed 0.12 to 0.76 s after the
+  table was deleted (5 runs).
+- A rule changed that the probes do not cover, with the fence service running: re-applied within
+  its recheck interval (5 s).
+- The same with the fence service stopped: celld is killed once the attestation is older than
+  its limit (20 s). Stopping the fence service therefore stops celld after 20 s.
 
 Check it after install, after a firewall change, or any time:
 
@@ -127,15 +151,28 @@ Check it after install, after a firewall change, or any time:
 pnpm selfhost:verify-fence             # exits 1 and lists every gap if the fence is not in effect
 ```
 
-It probes from celld's uid on the host network (every forbidden target must be rejected at once,
-every allowed one must not) and repeats one forbidden probe from another uid as a control.
+It probes from celld's uid on the host network and repeats every probe as another uid. Each
+forbidden target is probed over TCP and UDP: a UDP send the fence refuses fails with "Operation
+not permitted", which only the local firewall produces, so a target the network would refuse
+anyway still proves the fence. It also checks that celld can resolve a public name, that the
+fence's DNS rule opens every nameserver celld uses, and that the attestation is current.
 
 On GCE with a gs:// bucket, celld needs access tokens from the metadata server, which the fence
 blocks. The `gce` profile runs a small proxy (`metadata-proxy/Caddyfile`) that serves only the
-service-account token and email, only with the `Metadata-Flavor` header, and only under a random
-path prefix that is in celld's environment (`.state/celld.env`) and not in the Worker's. Worker
-code can reach the proxy port, as celld can, but not that path. Give the VM's service account
-access to the fleet bucket only.
+default service account's access token, only for GET with the `Metadata-Flavor` header, and only
+under a random path prefix that is in celld's environment (`.state/celld.env`) and not in the
+Worker's. Every other metadata path is 404. Whatever scope the caller asks for, the token is
+scoped to Cloud Storage (`GCE_METADATA_PROXY_SCOPES`, default `devstorage.read_write`; only Cloud
+Storage scopes are accepted), so it cannot call Cloud DNS even when the VM's service account can.
+The scope limits the API, not the bucket: the token reaches every bucket the service account has
+IAM access to, so grant that account the fleet bucket only. Caddy's DNS-01 renewals use the
+metadata server directly (Caddy is not fenced) and keep the VM's own scopes.
+
+Worker code cannot read the secret path. Verified on celld 0.6.3 with `nodejs_compat`: `process.env`
+is an empty stub, `node:fs` is a virtual filesystem (`/proc/self/environ`, `/etc/passwd` and `/`
+are not found), `node:os` returns placeholders, there is no `child_process`, and `file://` fetches
+fail. celld's own log does not contain it either at `RUST_LOG=info` or `debug`; it appears only in
+celld's error output when the proxy is unreachable (operator-visible, never Worker-visible).
 
 What the fence cannot separate: Worker code and celld's storage client are one process. A
 Worker can reach the object store endpoint (without the fleet credential it gets nothing; the
@@ -159,13 +196,9 @@ certificate authorities, so a private GitLab must serve a publicly trusted certi
 HTTP on the private network.
 
 Other limits: the loopback lease range (20000-29999 by default) is open to celld, so do not run
-other services on those ports. Nameservers come from `/etc/resolv.conf` when the deploy runs;
-re-run `pnpm selfhost:deploy --init` if they change. celld's entrypoint re-checks the fence every
-`SAM_EGRESS_FENCE_CHECK_SECONDS` (5) and stops celld if it is gone (measured: celld stopped
-admitting requests 0.6 s after the table was deleted, then drains in-flight work before exiting;
-it now acts on two consecutive failed checks, so within 10 s by default). Docker user-namespace
-remapping changes the host uid the fence must match; it is not supported (celld then refuses to
-start).
+other services on those ports. Docker user-namespace remapping changes the host uid the fence
+must match; it is not supported (celld then refuses to start). A refused TCP connection fails
+after about a second (the kernel reports the reject on the first SYN retransmit), not at once.
 
 ## Code
 

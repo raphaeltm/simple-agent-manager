@@ -12,7 +12,8 @@
 # Egress fence: celld runs as its own uid (CELLD_UID) and the `egress-fence` service installs an
 # nftables table for that uid (.state/egress-fence.nft, rendered by the deploy script) that keeps
 # Worker code away from loopback services, private ranges and the metadata server. celld's
-# entrypoint (celld/start.sh) refuses to start until the fence is in effect. Check it any time
+# entrypoint (celld/start.sh) starts celld only while the fence is in effect and kills it when the
+# fence goes (see README "Worst-case unfenced window"). Check it any time
 # with `pnpm selfhost:verify-fence`.
 #
 # Usage: cp .env.example .env && chmod 600 .env && edit it; `pnpm selfhost:deploy --init`
@@ -42,7 +43,7 @@ services:
       gce-metadata-proxy:
         condition: service_started
         required: false # only with the gce profile
-    # SAM_EGRESS_FENCE_CANARY, and on a gs:// bucket GCE_METADATA_HOST/IP pointing at the token
+    # SAM_EGRESS_FENCE_PROBES, and on a gs:// bucket GCE_METADATA_HOST/IP pointing at the token
     # proxy. Written by `pnpm selfhost:deploy --init`.
     env_file:
       - path: ${SAM_SELFHOST_STATE_DIR:-./.state}/celld.env
