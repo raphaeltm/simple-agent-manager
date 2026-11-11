@@ -132,7 +132,9 @@ export function aiGatewayOnlyHeaders(
 }
 
 /**
- * Whether the container bindings are backed by a container runtime.
+ * Whether the container bindings, and in particular VM_AGENT_CONTAINER (Instant), are backed by
+ * a container runtime. The SANDBOX binding has its own declaration that falls back to this one:
+ * see `hasSandboxContainerRuntime`.
  *
  * On Cloudflare the container Durable Object bindings always are. Other runtimes may bind the
  * same classes as plain Durable Objects with no container behind them, and a binding cannot

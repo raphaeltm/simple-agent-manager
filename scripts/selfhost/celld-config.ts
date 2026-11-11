@@ -72,6 +72,16 @@ export const OPERATOR_FORBIDDEN_VARS = [
   'SANDBOX_CONTAINER_RUNTIME_AVAILABLE',
 ] as const;
 
+/** Throws when secrets.env sets a var the deployment writes (`OPERATOR_FORBIDDEN_VARS`). */
+export function assertOperatorSecretsAllowed(
+  secrets: Readonly<Record<string, string>>,
+  secretsPath: string
+): void {
+  for (const name of OPERATOR_FORBIDDEN_VARS) {
+    if (name in secrets) throw new Error(`${secretsPath}: ${name} is generated; remove it`);
+  }
+}
+
 /** Keys the generator owns. Values a caller passes for these are rejected. */
 const GENERATED_VAR_KEYS = [
   'BASE_DOMAIN',

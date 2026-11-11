@@ -6,8 +6,8 @@ import { describe, expect, it } from 'vitest';
 
 import type { WranglerToml } from '../deploy/types.js';
 import {
+  assertOperatorSecretsAllowed,
   buildCelldConfig,
-  OPERATOR_FORBIDDEN_VARS,
   SELFHOST_VAR_OVERRIDES,
 } from './celld-config.js';
 
@@ -259,8 +259,17 @@ describe('buildCelldConfig with guided login on', () => {
 });
 
 describe('operator overrides', () => {
-  it('cannot override the container runtime declarations from secrets.env', () => {
-    expect(OPERATOR_FORBIDDEN_VARS).toContain('CONTAINER_RUNTIME_AVAILABLE');
-    expect(OPERATOR_FORBIDDEN_VARS).toContain('SANDBOX_CONTAINER_RUNTIME_AVAILABLE');
+  it('refuses the container runtime declarations in secrets.env', () => {
+    for (const name of ['CONTAINER_RUNTIME_AVAILABLE', 'SANDBOX_CONTAINER_RUNTIME_AVAILABLE']) {
+      expect(() => assertOperatorSecretsAllowed({ [name]: 'true' }, 'secrets.env')).toThrow(
+        new RegExp(`${name} is generated`)
+      );
+    }
+  });
+
+  it('still accepts ordinary switches (turning a self-host switch back on)', () => {
+    expect(() =>
+      assertOperatorSecretsAllowed({ TTS_ENABLED: 'true', CF_CONTAINER_ENABLED: 'true' }, 'x')
+    ).not.toThrow();
   });
 });

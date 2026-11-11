@@ -4,7 +4,8 @@ Status: integration branch work (self-host pass 2). Not a supported install path
 
 The SAM API Worker and web UI run on [celld](https://celld.dev) behind Caddy on one machine,
 with no Cloudflare account. Nodes reach the box through frps (the reverse-tunnel transport).
-Instant sessions, Workers AI features, Analytics Engine and Artifacts are off. Email sign-in works
+Instant sessions, Workers AI features, Analytics Engine and Artifacts are off; guided
+credential login is opt-in (see Guided credential login). Email sign-in works
 through an SMTP relay or, on a test install, the bundled mail collector (see Email sign-in below).
 
 ## What runs
@@ -251,7 +252,8 @@ pnpm selfhost:deploy --init && docker compose up -d && pnpm selfhost:deploy
 - The compose override hands celld the Docker socket and binds `/var/lib/celld` at the same path
   (celld bind-mounts the containers' `resolv.conf` from it). The Docker socket is root on this
   host: a compromise of the celld process is now a compromise of the box. Worker code has no
-  socket or filesystem API.
+  socket or filesystem API. Concurrent sessions are capped by `MAX_CONCURRENT_SETUP_SESSIONS`
+  (default 2), so the sandboxes commit at most 2 GiB by default.
 - celld's own fence lets the container reach the Internet and nothing on the box, the VPC,
   private ranges or metadata. It does not stop the box's own public address: the container reaches
   SAM's public HTTPS like any Internet client. SAM's egress fence lets celld (uid 7101) reach the

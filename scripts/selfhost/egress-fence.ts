@@ -37,8 +37,8 @@ import { isIP } from 'node:net';
 
 import type { PortRange } from './box-settings.js';
 import { assertOpenable } from './fence-addresses.js';
-import { CELLD_CONTAINER_BRIDGE, guidedLoginSettings } from './guided-login.js';
 import { formatProbes, startCheckProbes } from './fence-probes.js';
+import { CELLD_CONTAINER_BRIDGE, guidedLoginSettings } from './guided-login.js';
 
 /** nftables table name; the start check and the verify command look for it. */
 export const EGRESS_FENCE_TABLE = 'sam_celld_egress';

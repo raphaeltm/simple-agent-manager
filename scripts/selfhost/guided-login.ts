@@ -78,12 +78,12 @@ export function guidedLoginSettings(
 export function dockerfileCopySources(dockerfile: string): string[] {
   const sources: string[] = [];
   for (const line of dockerfile.split('\n')) {
-    const match = /^\s*COPY\s+(.+)$/i.exec(line);
-    if (!match) continue;
-    if (match[1]!.trim().endsWith('\\')) {
+    const args = /^\s*COPY\s+(.+)$/i.exec(line)?.[1]?.trim();
+    if (args === undefined) continue;
+    if (args.endsWith('\\')) {
       throw new Error(`Dockerfile COPY continuation lines are not supported: ${line.trim()}`);
     }
-    const parts = match[1]!.trim().split(/\s+/);
+    const parts = args.split(/\s+/);
     if (parts.some((part) => part.startsWith('--') || part.startsWith('['))) {
       throw new Error(`Dockerfile COPY form not supported here: ${line.trim()}`);
     }

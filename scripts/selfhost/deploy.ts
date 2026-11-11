@@ -47,17 +47,17 @@ import {
 } from './box-settings.js';
 import { ensureCelldBinary, resolveEsbuild } from './celld-binary.js';
 import {
+  assertOperatorSecretsAllowed,
   buildCelldConfig,
   type CelldWranglerConfig,
-  OPERATOR_FORBIDDEN_VARS,
 } from './celld-config.js';
 import { ASSETS_DIR, prepareCelldProject, SOURCE_LINK, writeCelldConfig } from './celld-project.js';
+import { writeFenceFiles } from './fence-state.js';
 import {
   assertContainerEngineReady,
   type EngineProbe,
   guidedLoginSettings,
 } from './guided-login.js';
-import { writeFenceFiles } from './fence-state.js';
 import {
   ensureMailCollectorPassword,
   MAIL_COLLECTOR_PASSWORD_FILE,
@@ -148,11 +148,6 @@ function buildWeb(baseDomain: string): string {
   return join(WEB_DIR, 'dist');
 }
 
-/**
- * celld bundles `apps/api/src` with its own esbuild, which resolves the workspace packages
- * (`shared`, `providers`, `cloud-init`) through their built `dist/` entry points. A fresh
- * checkout has none, so build the API's dependencies (not the API itself) first.
- */
 function probeDockerRuntimes(): EngineProbe {
   const result = spawnSync('docker', ['info', '--format', '{{json .Runtimes}}'], {
     encoding: 'utf8',
@@ -161,6 +156,12 @@ function probeDockerRuntimes(): EngineProbe {
   if (result.status !== 0) return { ok: false, error: (result.stderr ?? '').trim().slice(0, 300) };
   return { ok: true, runtimesJson: (result.stdout ?? '').trim() };
 }
+
+/**
+ * celld bundles `apps/api/src` with its own esbuild, which resolves the workspace packages
+ * (`shared`, `providers`, `cloud-init`) through their built `dist/` entry points. A fresh
+ * checkout has none, so build the API's dependencies (not the API itself) first.
+ */
 
 function buildApiDependencies(): void {
   log("building the API Worker's workspace dependencies");
@@ -333,9 +334,7 @@ async function main(): Promise<void> {
   if (values.init) return;
   const operatorSecrets = readSecretsFile(secretsPath);
   // VM_AGENT_REQUIRED_VERSION must name the release this deploy published (or stay unset).
-  for (const name of OPERATOR_FORBIDDEN_VARS) {
-    if (name in operatorSecrets) throw new Error(`${secretsPath}: ${name} is generated; remove it`);
-  }
+  assertOperatorSecretsAllowed(operatorSecrets, secretsPath);
   assertPresignCredentialIsScoped(box, operatorSecrets);
   const { SAM_INSTALLATION_ID, ...platformSecrets } = keys;
   const secrets: Record<string, string> = { ...platformSecrets, ...operatorSecrets };
