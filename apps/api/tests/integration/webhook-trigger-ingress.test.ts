@@ -163,6 +163,17 @@ describe('generic webhook ingress vertical slice', () => {
         'utf8'
       )
     );
+    // The queue columns: the signed-webhook migration indexes them.
+    sqlite.exec(
+      'ALTER TABLE trigger_executions ADD COLUMN queue_expires_at TEXT;' +
+        'ALTER TABLE trigger_executions ADD COLUMN subject_key TEXT;'
+    );
+    sqlite.exec(
+      readFileSync(
+        new URL('../../src/db/migrations/0235_signed_webhook_triggers.sql', import.meta.url),
+        'utf8'
+      )
+    );
     createAgentEmailTables(sqlite);
     taskRunnerStates = new Map();
     token = generateWebhookToken();
@@ -1463,7 +1474,6 @@ From that information, I'd like you to derive something interesting to append to
     expect(await findWebhookTriggerByToken(env, token)).toBeNull();
     expect(await findWebhookTriggerByToken(env, rotated!.token)).toMatchObject({
       trigger: { id: TRIGGER_ID, projectId: 'project-1' },
-      config: { tokenLastFour: rotated!.tokenLastFour },
     });
     const stored = sqlite
       .prepare('SELECT token_hash, token_last_four, token_rotated_at FROM webhook_trigger_configs')

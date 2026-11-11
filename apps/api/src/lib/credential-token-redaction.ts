@@ -41,3 +41,14 @@ const CREDENTIAL_TOKEN_PATTERN = new RegExp(
 export function redactCredentialTokens(text: string, replacement: string): string {
   return text.replace(CREDENTIAL_TOKEN_PATTERN, replacement);
 }
+
+/** The same shapes, anchored: the whole value starts as a credential token. */
+const CREDENTIAL_TOKEN_START = new RegExp(`^(?:${CREDENTIAL_TOKEN_SHAPES.join('|')})`, 'i');
+
+/**
+ * Whether `value` starts as a known credential token (a provider API key, a GitHub token, a SAM
+ * token). For refusing a pasted credential where another kind of value belongs; never echo it.
+ */
+export function startsWithCredentialToken(value: string): boolean {
+  return CREDENTIAL_TOKEN_START.test(value);
+}

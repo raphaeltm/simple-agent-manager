@@ -3,6 +3,8 @@ import {
   GITHUB_AUTHOR_ASSOCIATIONS,
   GITHUB_REVIEW_STATES,
   GITHUB_TRIGGER_EVENT_TYPES,
+  isWebhookFilterPresenceOperator,
+  WEBHOOK_FILTER_OPERATORS,
 } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
@@ -73,17 +75,54 @@ const WebhookFilterSchema = v.pipe(
         'Filter path contains a forbidden segment'
       )
     ),
-    operator: v.picklist(['exists', 'equals', 'contains']),
+    operator: v.picklist(WEBHOOK_FILTER_OPERATORS),
     value: v.optional(WebhookFilterValueSchema),
   }),
   v.check(
     (filter) =>
-      filter.operator === 'exists' ? filter.value === undefined : filter.value !== undefined,
-    'Filter value is required for equals/contains and forbidden for exists'
+      isWebhookFilterPresenceOperator(filter.operator)
+        ? filter.value === undefined
+        : filter.value !== undefined,
+    'Filter value is required for equals/contains and forbidden for exists/notExists'
   )
 );
 
+/** A header SAM reads itself (signature or event ID), so credential-like names are allowed. */
+const WebhookHeaderNameSchema = v.pipe(
+  v.string(),
+  v.trim(),
+  v.toLowerCase(),
+  v.minLength(1),
+  v.regex(/^[a-z0-9!#$%&'*+.^_`|~-]+$/, 'Header name is invalid')
+);
+
+const WebhookDotPathSchema = v.pipe(
+  v.string(),
+  v.trim(),
+  v.minLength(1),
+  v.check(
+    (path) =>
+      path
+        .split('.')
+        .every((part) => part && !['__proto__', 'prototype', 'constructor'].includes(part)),
+    'Path contains a forbidden segment'
+  )
+);
+
+const WebhookVerificationSchema = v.variant('scheme', [
+  v.strictObject({ scheme: v.literal('sam_bearer') }),
+  v.strictObject({ scheme: v.literal('slack_v0') }),
+  v.strictObject({ scheme: v.literal('hmac_sha256_body'), header: WebhookHeaderNameSchema }),
+]);
+
+const WebhookEventIdSchema = v.union([
+  v.strictObject({ path: WebhookDotPathSchema }),
+  v.strictObject({ header: WebhookHeaderNameSchema }),
+]);
+
 const WebhookConfigValueSchema = v.strictObject({
+  verification: v.optional(WebhookVerificationSchema),
+  eventId: v.optional(WebhookEventIdSchema),
   sourceLabel: v.optional(v.string()),
   filterMode: v.optional(v.picklist(['all', 'any'])),
   filters: v.optional(v.array(WebhookFilterSchema)),

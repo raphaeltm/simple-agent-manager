@@ -1,7 +1,9 @@
-import type {
-  WebhookFilterResult,
-  WebhookTemplateContext,
-  WebhookTriggerFilter,
+import {
+  WEBHOOK_EVENT_ID_MAX_BYTES,
+  type WebhookEventIdLocation,
+  type WebhookFilterResult,
+  type WebhookTemplateContext,
+  type WebhookTriggerFilter,
 } from '@simple-agent-manager/shared';
 
 import { canonicalJson } from '../lib/canonical-json';
@@ -79,6 +81,7 @@ export function evaluateWebhookFilters(
   const results = filters.map((filter) => {
     const actual = resolveWebhookPath(body, filter.path, maxDepth);
     if (filter.operator === 'exists') return actual !== undefined;
+    if (filter.operator === 'notExists') return actual === undefined;
     if (filter.operator === 'equals') return valuesEqual(actual, filter.value);
     return containsValue(actual, filter.value);
   });
@@ -93,9 +96,15 @@ export function evaluateWebhookFilters(
   };
 }
 
+/** Name fragments that mark a header as a credential or a signature, whoever the sender is. */
+const FORBIDDEN_HEADER_FRAGMENTS = ['token', 'signature', 'hmac', 'secret'];
+
 export function normalizeIncludedHeaders(headers: string[]): string[] {
   return [...new Set(headers.map((header) => header.trim().toLowerCase()))].filter(
-    (header) => header && !FORBIDDEN_HEADERS.has(header) && !header.includes('token')
+    (header) =>
+      header &&
+      !FORBIDDEN_HEADERS.has(header) &&
+      !FORBIDDEN_HEADER_FRAGMENTS.some((fragment) => header.includes(fragment))
   );
 }
 
@@ -152,4 +161,31 @@ export function buildWebhookContext(input: BuildWebhookContextInput): WebhookTem
     project: { id: input.trigger.projectId, name: input.projectName },
     execution: { id: input.executionId, sequenceNumber: String(input.sequenceNumber) },
   };
+}
+
+/**
+ * Reads the sender's event ID from its configured place. The ID is the duplicate key, so only a
+ * non-empty string or number of bounded size counts: an absent, empty, structured or oversized
+ * value returns null and the caller starts nothing rather than skipping the duplicate check.
+ */
+export function readWebhookEventId(
+  location: WebhookEventIdLocation | null,
+  body: Record<string, unknown>,
+  headers: Headers,
+  maxPathDepth: number
+): string | null {
+  if (!location) return null;
+  const raw =
+    'header' in location
+      ? headers.get(location.header)
+      : resolveWebhookPath(body, location.path, maxPathDepth);
+  const value =
+    typeof raw === 'string'
+      ? raw.trim()
+      : typeof raw === 'number' && Number.isFinite(raw)
+        ? String(raw)
+        : '';
+  if (!value || new TextEncoder().encode(value).byteLength > WEBHOOK_EVENT_ID_MAX_BYTES)
+    return null;
+  return value;
 }
