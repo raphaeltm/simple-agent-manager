@@ -177,6 +177,33 @@ for (const viewport of [
       await screenshot(page, `landing-all-providers-${viewport.name}`);
     });
 
+    test('a test instance says it accepts agent sign-in', async ({ page }) => {
+      await setupApiMocks(page, { ...ALL_PROVIDERS, agentSignIn: true });
+      await page.goto('/');
+      const notice = page.getByRole('note');
+      await expect(notice).toBeVisible();
+      await expect(notice).toContainText('Agents from a trusted SAM installation');
+      await expect(page.getByText('Sign in with GitHub')).toBeVisible();
+      // The notice sits inside the card, not past its edges.
+      const card = await page.locator('.sam-glass').first().boundingBox();
+      const box = await notice.boundingBox();
+      expect(box && card).toBeTruthy();
+      expect(box!.x).toBeGreaterThanOrEqual(card!.x);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(card!.x + card!.width + 1);
+      // Above the sign-in buttons, so it is read before anyone signs in.
+      const github = await page.getByText('Sign in with GitHub').boundingBox();
+      expect(box!.y + box!.height).toBeLessThanOrEqual(github!.y);
+      await assertNoOverflow(page);
+      await screenshot(page, `landing-agent-sign-in-${viewport.name}`);
+    });
+
+    test('an ordinary instance shows no agent sign-in notice', async ({ page }) => {
+      await setupApiMocks(page, { ...ALL_PROVIDERS, agentSignIn: false });
+      await page.goto('/');
+      await expect(page.getByText('Sign in with GitHub')).toBeVisible();
+      await expect(page.getByRole('note')).toHaveCount(0);
+    });
+
     test('a remembered answer shows at once while the lookup hangs', async ({ page }) => {
       await setupApiMocks(page, 'hang');
       await page.addInitScript((value) => {

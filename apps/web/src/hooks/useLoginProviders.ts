@@ -8,6 +8,11 @@ export interface LoginProviders {
   google: boolean;
   gitlab: boolean;
   email: boolean;
+  /**
+   * The deployment accepts agent sign-in through workload identity (a test instance).
+   * Optional so an older deployment's answer, or one remembered by this browser, still parses.
+   */
+  agentSignIn?: boolean;
 }
 
 export interface LoginProvidersState {

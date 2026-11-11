@@ -102,6 +102,16 @@ export function Landing() {
             </>
           )}
 
+          {providers?.agentSignIn && (
+            <p
+              role="note"
+              className="mb-4 rounded-lg border border-border-default bg-inset px-3 py-2 text-xs text-fg-muted"
+            >
+              This is a test instance. Agents from a trusted SAM installation can sign in here as
+              selected test users.
+            </p>
+          )}
+
           {!providers && (
             <div className="mb-3">
               <LoginProvidersPending failed={providersFailed} retry={retryProviders} />

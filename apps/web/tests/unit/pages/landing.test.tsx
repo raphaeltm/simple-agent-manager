@@ -121,6 +121,29 @@ describe('Landing page content', () => {
   });
 });
 
+describe('Landing agent sign-in notice', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    window.localStorage.clear();
+  });
+
+  it('tells people when the instance accepts agent sign-in', async () => {
+    fetchLoginProviders.mockResolvedValue({ ...GITHUB_ONLY, agentSignIn: true });
+    renderLanding();
+    expect(await screen.findByRole('note')).toHaveTextContent(
+      /test instance\. Agents from a trusted SAM installation can sign in here/
+    );
+  });
+
+  it('says nothing about agent sign-in on an ordinary instance', async () => {
+    fetchLoginProviders.mockResolvedValue({ ...GITHUB_ONLY, agentSignIn: false });
+    renderLanding();
+    // Liveness: the deployment's answer rendered, so the absence below is meaningful.
+    expect(await screen.findByRole('button', { name: /Sign in with GitHub/ })).toBeInTheDocument();
+    expect(screen.queryByRole('note')).not.toBeInTheDocument();
+  });
+});
+
 describe('Landing sign-in options before the deployment answers', () => {
   beforeEach(() => {
     vi.clearAllMocks();

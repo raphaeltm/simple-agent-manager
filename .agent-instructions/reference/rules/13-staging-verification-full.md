@@ -96,6 +96,45 @@ After staging deployment succeeds, use Playwright to test the live app:
    - Do not use SAM CLI login as the normal staging verification path. The required flow is browser auth through Playwright, then browser navigation to `https://app.sammy.party`.
    - If the env var is not set, ask the human — do NOT skip this step
 
+   **Alternative: sign in with your workload identity (no stored token).** When staging is
+   configured to trust production (`AGENT_SIGN_IN_TRUST` in the `staging` GitHub Environment),
+   an agent running in the SAM project on production can sign in as the staging smoke-test user
+   without `SAM_PLAYWRIGHT_PRIMARY_USER`. Guide: `apps/www/src/content/docs/docs/guides/agent-sign-in.md`.
+
+   Staging trusts:
+
+   | Value | |
+   | --- | --- |
+   | Issuer | `https://api.simple-agent-manager.org/oidc` |
+   | Source project | `01KHRJGANBBWGDY1NZ0KVF0D4J` (SAM) |
+   | Source user | `4bw1FJlXCOgSGq0TsQgpiMAhQKjGOSXx` (chats owned by this user) |
+   | Target | `toWzGjNW3IyUkCVItRQv3qSn0wI8c22y` (the staging smoke-test user) |
+   | Audience | `https://api.sammy.party/api/auth/workload-identity-login` |
+
+   a. Exchange a token (one `exec_with_secrets` call; the token never appears in output):
+
+   ```json
+   {
+     "shell": "bash",
+     "secretNames": [],
+     "oidc": { "audience": "https://api.sammy.party/api/auth/workload-identity-login" },
+     "command": "printf '{\"token\":\"%s\",\"target\":\"%s\"}' \"$SAM_OIDC_TOKEN\" toWzGjNW3IyUkCVItRQv3qSn0wI8c22y | curl -sS --fail-with-body https://api.sammy.party/api/auth/workload-identity-login -H 'content-type: application/json' --data-binary @-"
+   }
+   ```
+
+   b. In Playwright, add the returned `sessionCookie` (`__Secure-better-auth.session_token=VALUE`)
+   for `.sammy.party` and open the app:
+
+   ```js
+   await page.context().addCookies([{ name: '__Secure-better-auth.session_token', value: 'VALUE',
+     domain: '.sammy.party', path: '/', httpOnly: true, secure: true, sameSite: 'Lax' }]);
+   await page.goto('https://app.sammy.party');
+   ```
+
+   c. Sign out from the user menu when finished. Each token works once (request a new one per
+   sign-in); the session lasts one hour. A `404` means staging is not configured for it; fall
+   back to the stored smoke token. Production must never carry `AGENT_SIGN_IN_TRUST`.
+
 2. Navigate to `https://app.sammy.party` (staging) — the session cookie from step 1 authenticates you
 3. Verify your changes work as intended (see verification checklists below)
 4. Verify existing core workflows still work (see regression checklist below)
