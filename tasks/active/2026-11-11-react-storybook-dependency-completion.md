@@ -48,7 +48,7 @@ the exact PR number and head. Do not merge.
 - [x] Storybook build + Storybook Playwright audit (packages/ui): 68/68
 - [x] Playwright desktop/mobile screenshot audit of the app, reviewed and posted (PR #2657 comment 6796792306)
 - [x] Local specialist review (task-completion-validator PASS, ui-ux-specialist PASS)
-- [ ] Staging deploy + live verification
+- [x] Staging deploy + live verification (run 43056907125, PR comment 6801695391)
 - [ ] Draft PR with `needs-human-review`; report exact head to coordinator
 
 ## Acceptance Criteria
@@ -57,5 +57,5 @@ the exact PR number and head. Do not merge.
 - [x] All Storybook packages resolve to the same version
 - [ ] Terminal, UI, web, acp-client tests pass; Storybook builds and its Playwright audit passes
 - [ ] CI green on the candidate head, including Test and Workspace Quality Surfaces
-- [ ] Staging app loads and works with zero React errors
+- [x] Staging app loads and works with zero React errors
 - [ ] PR stays DRAFT + `needs-human-review`; originals #2638/#2640 untouched
