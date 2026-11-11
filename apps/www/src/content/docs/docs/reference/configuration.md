@@ -163,6 +163,33 @@ server error, so retries and alerts treat it as configuration rather than an out
 | `/ai/v1` Workers AI models                                                 | AI Gateway, account API and an OpenAI-compatible endpoint                       | upstream error           | 404 |
 | Chat attachment upload URL                                                 | presign configuration (`R2_*` credentials, bucket, account or `R2_S3_ENDPOINT`) | 500 later in the request | 403 |
 
+### Email sign-in without Cloudflare Email Sending
+
+Without the `AGENT_EMAIL` binding, SAM can send its own sign-in codes through an SMTP relay. The
+transport is chosen in one place, `emailTransportKind()` in
+`apps/api/src/services/agent-email/provider.ts`: the binding wins whenever it exists, so a
+Cloudflare deployment with Email Sending is unchanged. Agent email (inbound mail and replies)
+still needs the binding. These Worker settings are bootstrap configuration because the first
+account may sign up by email before any administrator exists. Today the self-host deploy
+(`scripts/selfhost/mail-settings.ts`) sets them; the Cloudflare pipeline does not forward them.
+
+| Setting         | Default                               | Description                                                                                                                     |
+| --------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `SMTP_HOST`     | _(unset)_                             | Relay host. Unset means no SMTP transport.                                                                                      |
+| `SMTP_TLS`      | `starttls`                            | `starttls`, `tls` (implicit TLS) or `none`. `none` is accepted only for a loopback host (a mail collector on the same machine). |
+| `SMTP_PORT`     | `587` for `starttls`, `465` for `tls` | Required with `none`.                                                                                                           |
+| `SMTP_USERNAME` | _(unset)_                             | Sent with `AUTH PLAIN`, only after TLS (or over loopback). Set with `SMTP_PASSWORD` (a secret) or not at all.                   |
+| `SMTP_FROM`     | _(required)_                          | The address sign-in codes come from. It must be one the relay accepts.                                                          |
+
+`resolveSmtpConfig()` (`services/agent-email/smtp-config.ts`) refuses an invalid set as a whole and
+logs the reason once per isolate; email sign-in is then not offered. A server that does not offer
+STARTTLS in `starttls` mode is refused, never used in plaintext, and the certificate chain and host
+name are verified. On celld only publicly trusted certificates are accepted (celld ignores the
+system CA store and `SSL_CERT_FILE`). The whole exchange is bounded by the
+`agentEmail.smtpTimeoutMs` admin setting. Email sign-in readiness on first-run setup reports
+`ready` for SMTP without calling Cloudflare. Every other email sign-in rule (codes only for existing
+accounts or the installer owner, identical responses, rate limits) is the same for both transports.
+
 ### Client IP address
 
 Rate limits, stored diagnostics, the node heartbeat IP backfill and the forwarded-for header on the

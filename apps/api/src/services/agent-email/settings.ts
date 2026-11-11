@@ -22,6 +22,7 @@ export interface AgentEmailLimits {
   signInCodesPerEmailPerHour: number;
   signInCodesPerIpPerHour: number;
   signInCodeAttemptsPerEmailPerHour: number;
+  smtpTimeoutMs: number;
 }
 
 const FIELD_BY_SETTING: Record<AgentEmailSettingName, keyof AgentEmailLimits> = {
@@ -43,6 +44,7 @@ const FIELD_BY_SETTING: Record<AgentEmailSettingName, keyof AgentEmailLimits> = 
   'agentEmail.signInCodesPerEmailPerHour': 'signInCodesPerEmailPerHour',
   'agentEmail.signInCodesPerIpPerHour': 'signInCodesPerIpPerHour',
   'agentEmail.signInCodeAttemptsPerEmailPerHour': 'signInCodeAttemptsPerEmailPerHour',
+  'agentEmail.smtpTimeoutMs': 'smtpTimeoutMs',
 };
 
 // resolveAdminSetting degrades to the registry default on a store outage; the guard only

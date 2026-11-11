@@ -26,6 +26,10 @@
 	# celld never compresses responses.
 	encode zstd gzip
 
+	# The mail collector's UI on its own host when the `mail-collector` profile is on
+	# (caddy/start.sh); an empty file otherwise.
+	import mail-collector/{$SAM_MAIL_COLLECTOR:off}.caddy
+
 	# Routes owned by the node transport (frp over wss, node WebSockets). Each is a
 	# `handle @matcher { ... }` block; the matcher-less handle below always sorts last. A
 	# fragment that proxies to celld or a node must `import sam_client_ip` in its proxy block.
