@@ -51,7 +51,7 @@ the existing rollout coordinator owns deployment timing.
       preparation order/mode; source review verifies the existing action pin and test commands.
 - [x] Final focused validation and discriminating mutation checks recorded below.
 - [x] Fresh security/constitution/test/completion local reviewers complete and findings resolved.
-- [ ] Fresh final-candidate CI and candidate-only CodSpeed run pass; no gate is bypassed.
+- [x] Final-code functional CI and candidate-only CodSpeed run pass at f3082616; fresh metadata-event CI remains pending as documented below.
 - [ ] Best-effort CodeRabbit request/wait and binding findings resolved before merge.
 
 ## Acceptance criteria
@@ -105,7 +105,7 @@ shell syntax and git diff whitespace checks PASS. Seven final guard mutations we
 All mutated files were restored. Six results are assertion failures; the poll-bound result is
 an externally enforced liveness deadline, rather than a claimed completed assertion. The intact
 baseline completed that case in about3seconds. Independent security/constitution and test reviews PASS on d3c0d0e; completion/source review PASS
-with documentation findings corrected. Final CI, manual benchmark proof, CodeRabbit and release gates remain pending in the PR body.
+with documentation findings corrected. Final-code functional CI and manual benchmark proof passed at f3082616; fresh checkpoint-head CI, CodeRabbit and release gates remain pending.
 Implementation completion/doc review PASS after the seventh mutation row was corrected; this
 archived record does not claim a merge or deployment.
 Staging exemption: config-only CI scripts/workflow wiring and tests; no application runtime or
@@ -127,3 +127,24 @@ current repair into an unexercised workload. This does not waive any failing req
 - https://manpages.debian.org/trixie/apt/apt-transport-mirror.1.en.html
 - Rules25,62,74,81 and ConstitutionXI apply. Planning/task file stays on the candidate branch
   because the rollout coordinator owns main; no extra main push for planning.
+
+## Final-code validation and release metadata
+
+Final-code candidate `f3082616cee9a20699b257bd6df1a2417b4cb956` completed all selected functional
+jobs in CI43060883884, including Marketing130664284917, Workspace130664285256,
+Playwright Visual130664284742, CI Workflow, deploy-script validation and volume mount.
+Manual CodSpeed43060976790 passed the signed-index fallback, unchanged upstream action and
+performance analysis on that exact head. Sonar quality gate passed with zero open issues.
+
+Parent reviewed all88 associations across2 pages, current head/checks/comments/reviews and
+review threads (none), then recorded exact-head readiness approval and released its own
+agent-brief draft/needs-human-review marker at17:16UTC. This was an agent release condition,
+not a human hold. No implementation, test, workflow or dependency content changed afterward.
+
+The one evidence-job rerun130683311101 still failed because `pr-evidence-source.ts` unions
+frozen event labels with live labels. This intentionally retains a stop signal for the original
+run even after live removal. We preserve that security behavior: this documentation checkpoint
+creates a new synchronize event after the marker was removed. Its fresh CI remains required;
+no check is waived or manually marked successful. Existing code reviews and functional proof
+remain attributable to the identical implementation, while current-head metadata/CI is reconciled
+before CodeRabbit and merge. No production deployment is claimed here.
