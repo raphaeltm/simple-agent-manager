@@ -346,14 +346,14 @@ export async function provisionNode(
         await durable.markProviderCreateRequested();
         throwIfProviderRequestAborted(providerContext);
       }
-      // Once a durable create is marked it runs to completion: the attempt deadline must not
-      // cut it between the mark and the POST (staging, GCP: the cut landed in the OAuth token
-      // exchange, leaving a recorded create with nothing to reconcile). createVM is bounded by
-      // the provider's own request and operation-poll timeouts; the abort check right after it
-      // still ends this attempt, and the next one reconciles the VM the POST created.
+      // A durable create or recovery runs to completion once started: the attempt deadline
+      // must not cut it. Staging, GCP: a cut between the mark and the POST (inside the OAuth
+      // token exchange) left a recorded create with nothing to reconcile, and a cut inside the
+      // read-only recovery (aggregated list + getVM) repeated on every attempt. Both are
+      // bounded by the provider's own request (30 s) and operation-poll timeouts.
       const createContext = durable ? undefined : providerContext;
       vm = await (recoverExisting && durable
-        ? recoverNodeAllocation(provider, node, env, durable, providerContext)
+        ? recoverNodeAllocation(provider, node, env, durable, createContext)
         : createContext
           ? provider.createVM(vmConfig, createContext)
           : provider.createVM(vmConfig));
@@ -383,7 +383,10 @@ export async function provisionNode(
       }
       throw err;
     }
-    throwIfProviderRequestAborted(providerContext);
+    // A durable attempt records the identity it just created or adopted before honouring a
+    // fired deadline: that write is the progress the next attempt resumes from. Later abort
+    // checks (below) still end the attempt.
+    if (!durable) throwIfProviderRequestAborted(providerContext);
 
     // Persist the provider identity before the post-request authority check so
     // a revocation that races createVM can strictly destroy the paid resource.

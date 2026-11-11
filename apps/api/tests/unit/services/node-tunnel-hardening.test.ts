@@ -298,6 +298,71 @@ describe('deadline cuts on each side of the create POST', () => {
     expect(mocks.createVM).toHaveBeenCalledTimes(1);
   });
 
+  it('a deadline that fires during recovery still records the adopted VM, so the next attempt finishes', async () => {
+    const node = await freshNode();
+    const { buildNodeProviderLabels } = await import('../../../src/services/node-provider-labels');
+    const incarnationId = crypto.randomUUID();
+    const durable = {
+      createdAt: Date.now() - 1000,
+      initialIncarnationId: readNode(node.id)!.incarnation!,
+      incarnationId,
+      providerCreateRequested: true,
+      markProviderCreateRequested: async () => undefined,
+    };
+    // Attempt 1 claims the incarnation, finishes the tunnel and is cut before the create.
+    const first = new AbortController();
+    await expect(
+      provisionNode(node.id, env, undefined, {
+        signal: first.signal,
+        durableAllocation: { ...durable, providerCreateRequested: false },
+        assertExternalMutationAuthority: async () => {
+          first.abort(new NodeAllocationUncertainError('deadline'));
+          throw first.signal.reason;
+        },
+      })
+    ).rejects.toBeInstanceOf(NodeAllocationUncertainError);
+    // Staging GCP: the VM exists, and the deadline fires while recovery reads the inventory.
+    const vm = {
+      ...vmFor(),
+      location: 'nbg1',
+      createdAt: new Date().toISOString(),
+      labels: buildNodeProviderLabels({
+        nodeId: node.id,
+        isDeploymentNode: false,
+        installationId: env.SAM_INSTALLATION_ID!,
+        environmentLabel: 'test',
+        runtimeIncarnationId: incarnationId,
+      }),
+    };
+    const second = new AbortController();
+    const listVMs = vi.fn(async (_labels: unknown, context?: { signal?: AbortSignal }) => {
+      second.abort(new NodeAllocationUncertainError('Provisioning request deadline elapsed'));
+      // Recovery is read-only and not cancelled by the attempt deadline.
+      expect(context?.signal).toBeUndefined();
+      return [vm];
+    });
+    mocks.createProvider.mockResolvedValue({
+      ...provider,
+      provider: { ...provider.provider, listVMs },
+    });
+    await provisionNode(node.id, env, undefined, {
+      signal: second.signal,
+      durableAllocation: durable,
+    }).catch((err: unknown) => {
+      expect(err).toBeInstanceOf(NodeAllocationUncertainError);
+    });
+    // Progress persisted despite the cut: the adopted identity is on the node row.
+    expect(readNode(node.id)?.providerInstanceId).toBe(vm.id);
+    expect(mocks.createVM).not.toHaveBeenCalled();
+
+    await provisionNode(node.id, env, undefined, {
+      signal: new AbortController().signal,
+      durableAllocation: durable,
+    });
+    expect(readNode(node.id)).toMatchObject({ status: 'running', providerInstanceId: vm.id });
+    expect(mocks.createVM).not.toHaveBeenCalled();
+  });
+
   it('a durable attempt cut during the POST never creates a second VM on resume', async () => {
     const node = await freshNode();
     const { store, allocation } = durableHarness(readNode(node.id)!.incarnation!);
