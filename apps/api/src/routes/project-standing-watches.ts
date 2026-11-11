@@ -58,6 +58,14 @@ projectStandingWatchRoutes.get('/:id', async (c) => {
   if (!watch) throw errors.notFound('Standing watch');
   return c.json({ watch });
 });
+function pausesWatch(request: unknown): boolean {
+  return (
+    typeof request === 'object' &&
+    request !== null &&
+    (request as Record<string, unknown>).paused === true
+  );
+}
+
 // A standing watch sends messages as the person after an agent sign-in session that set it has
 // ended; such a session may pause or revoke watches but not create or change them.
 projectStandingWatchRoutes.post('/', async (c) => {
@@ -72,13 +80,17 @@ projectStandingWatchRoutes.post('/', async (c) => {
 });
 for (const operation of ['update', 'pause', 'revoke'] as const) {
   projectStandingWatchRoutes.post(`/:id/${operation}`, async (c) => {
-    if (operation === 'update') assertNotAgentSignInSession(c);
+    const request = await scheduleRequestBody(c.req.raw, c.env);
+    // `pause` toggles both ways (`paused: false` resumes), so only `paused: true` stands down.
+    if (operation === 'update' || (operation === 'pause' && !pausesWatch(request))) {
+      assertNotAgentSignInSession(c);
+    }
     return c.json(
       await projectData.mutateProjectStandingWatch(c.env, requireRouteParam(c, 'projectId'), {
         userId: getUserId(c),
         id: requireRouteParam(c, 'id'),
         operation,
-        request: await scheduleRequestBody(c.req.raw, c.env),
+        request,
       })
     );
   });

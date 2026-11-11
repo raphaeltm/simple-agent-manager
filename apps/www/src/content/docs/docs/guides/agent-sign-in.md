@@ -36,14 +36,26 @@ while in use. The endpoint never creates accounts and never changes anyone's rol
 must already exist and pass the same approval checks as any other sign-in.
 
 An agent session can use the app like the target user, but it cannot make its access outlast the
-session. It is refused when it tries to create a personal access token, approve a CLI device
-sign-in, grant connector (OAuth) consent, create or rotate a webhook trigger credential, create a
-project invite link, approve a project access request, approve accounts, change roles or signup
-approval, or use any BetterAuth account endpoint other than reading its session and signing out
-(so it cannot link a social account or list the account's other sessions). Everything else the
-target account can do, it can do, including creating triggers, workspaces and stored
-credentials. Treat this list as a safeguard, not a boundary: choose target accounts that only
-hold test data, and never an administrator.
+session:
+
+- **Refused:** creating a personal access token, approving a CLI device sign-in, granting
+  connector (OAuth) consent, creating a project invite link, approving a project access request,
+  approving accounts, changing roles or signup approval, creating a trigger of any kind (cron,
+  email, GitHub or webhook), changing a trigger other than pausing or disabling it, rotating a
+  webhook credential, creating or re-arming a schedule, creating, changing or resuming a standing
+  watch, adding a push notification subscription, making a workspace's ports public, and any
+  BetterAuth account endpoint other than reading its session and signing out (so it cannot link
+  a social account or list the account's other sessions).
+- **Capped:** terminal, port-access, node management and local-forward tokens it mints expire at
+  the session's hard expiry at the latest, and so does a node's own session cookie made from such
+  a terminal token.
+- **Allowed:** everything else the target account can do, including starting chats, tasks and
+  workspaces (which run under their own task and workspace lifetimes), storing credentials,
+  editing profiles, skills and runtime settings, and deploying apps.
+
+Treat these limits as a safeguard, not a boundary: choose target accounts that only hold test
+data. An administrator target can also change instance-wide settings during the session, so
+allow one only when agents need to test administration.
 
 ## Set it up (operator, once)
 
@@ -125,18 +137,23 @@ If a trusted workload may be compromised, end its sessions as well as turning th
      "DELETE FROM sessions WHERE hard_expires_at IS NOT NULL"
    ```
 
-   The next request with a deleted session is refused (`401`), and so is every terminal
-   connection that session's terminal tokens would open, because those are checked against the
-   live session on each connection.
+   The next request with a deleted session is refused (`401`). Terminal tokens that session
+   minted stop working through the workspace proxy too, because the proxy checks each one
+   against the live session.
 
 3. **Without database access**, an administrator signed in normally can suspend the target
    account in **Admin → Users**. A suspended account's sessions, agent or not, are refused on the
    next request. Approve it again afterwards.
-4. **What can outlive the deletion, briefly.** Short tokens the session minted are capped at the
-   session's hard expiry but are not tied to the session row: a port-access link (15 minutes by
-   default), a node management token (1 hour by default) and a local-forward token (5 minutes by
-   default). A terminal or port connection that was already open stays open until it closes. To
-   cut those at once, stop the workspaces the target account owns.
+4. **Stop the target account's workspaces** to cut what deleting sessions does not reach. Every
+   token an agent session mints expires at the session's hard expiry at the latest, but these are
+   not tied to the session row and keep working until then:
+   - a terminal token (1 hour by default) presented straight to a node, and the node's own
+     session cookie made from it, which a current node ends at the session's hard expiry. A node
+     running a VM agent older than this release keeps that cookie for its full `SESSION_TTL`
+     (24 hours by default) until the node is replaced;
+   - a port-access link (15 minutes by default), a node management token (1 hour by default) and
+     a local-forward token (5 minutes by default);
+   - any terminal or port connection that is already open.
 
 ### The audience
 

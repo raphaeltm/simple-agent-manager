@@ -65,7 +65,10 @@ function getIssuer(env: Env): string {
  * that session cannot outlive it.
  */
 function cappedExpiry(expiryMs: number, notAfter?: Date): Date {
-  const expiresAt = Date.now() + expiryMs;
+  const now = Date.now();
+  // requireAuth already refuses a session past its cap; never mint an already-dead token.
+  if (notAfter && notAfter.getTime() <= now) throw new Error('Session credential cap has passed');
+  const expiresAt = now + expiryMs;
   return new Date(notAfter ? Math.min(expiresAt, notAfter.getTime()) : expiresAt);
 }
 

@@ -112,7 +112,7 @@ authRoutes.on(['GET', 'POST'], '/*', async (c) => {
         403
       );
     }
-    const response = await auth.handler(c.req.raw);
+    const response = await auth.handler(withoutSessionCookieCache(c.req.raw));
 
     // Log auth error metadata only. BetterAuth response bodies may include
     // upstream OAuth data or request-specific values that do not belong in
@@ -157,6 +157,31 @@ async function isAgentSessionChangingAccount(
     query: { disableCookieCache: true, disableRefresh: true },
   });
   return isAgentSignInSession(current?.session);
+}
+
+/** BetterAuth's signed session cache cookie (`session_data`, possibly chunked as `.0`, `.1`). */
+const SESSION_CACHE_COOKIE = /(^|\.)session_data(\.\d+)?$/;
+
+/**
+ * The request without BetterAuth's session cache cookie, so the handler reads the session from
+ * the database, as `isAgentSessionChangingAccount` does. Otherwise the gate and the handler could
+ * disagree: a session deleted by sign-out or the documented revocation is absent for the gate
+ * (so it is not refused as an agent session) while the handler still accepts its cached copy for
+ * up to the cache's maxAge, long enough to link a social account. These endpoints are rare (the
+ * app polls GET /get-session, which has its own route), so the extra read costs little.
+ */
+function withoutSessionCookieCache(request: Request): Request {
+  const cookie = request.headers.get('cookie');
+  if (!cookie) return request;
+  const pairs = cookie.split(';');
+  const kept = pairs.filter(
+    (pair) => !SESSION_CACHE_COOKIE.test((pair.split('=', 1)[0] ?? '').trim())
+  );
+  if (kept.length === pairs.length) return request;
+  const headers = new Headers(request.headers);
+  if (kept.length) headers.set('cookie', kept.join(';'));
+  else headers.delete('cookie');
+  return new Request(request, { headers });
 }
 
 /** The request's waitUntil, when the runtime provides one (Workers do; unit-test apps do not). */

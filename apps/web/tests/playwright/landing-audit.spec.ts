@@ -225,6 +225,25 @@ for (const viewport of [
       await screenshot(page, `landing-remembered-${viewport.name}`);
     });
 
+    test('a failed lookup on a remembered "off" says it could not check agent sign-in', async ({
+      page,
+    }) => {
+      await setupApiMocks(page, 'error');
+      await page.addInitScript((value) => {
+        window.localStorage.setItem('sam:login-providers', value);
+      }, JSON.stringify({ ...ALL_PROVIDERS, agentSignIn: false }));
+      await page.goto('/');
+      // The hook retries three times with backoff (~7s) before giving up.
+      const notice = page.getByRole('note');
+      await expect(notice).toContainText('check whether agents can sign in', { timeout: 20_000 });
+      await expect(page.getByText('Sign in with GitHub')).toBeVisible();
+      const github = await page.getByText('Sign in with GitHub').boundingBox();
+      const box = await notice.boundingBox();
+      expect(box!.y + box!.height).toBeLessThanOrEqual(github!.y);
+      await assertNoOverflow(page);
+      await screenshot(page, `landing-agent-sign-in-unknown-${viewport.name}`);
+    });
+
     test('a failed lookup with nothing remembered offers a retry', async ({ page }) => {
       await setupApiMocks(page, 'error');
       await page.goto('/');

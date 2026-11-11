@@ -558,6 +558,48 @@ describe('agent sign-in through workload identity (vertical slice)', () => {
       expect(control.status).toBe(200);
     });
 
+    it('a revoked agent session cannot use BetterAuth through its cached session cookie', async () => {
+      const cookie = await agentCookie();
+      // GET /get-session hands back BetterAuth's signed session cache cookie (session_data).
+      const read = await app.request(
+        `${API_ORIGIN}/api/auth/get-session`,
+        { headers: { cookie } },
+        env
+      );
+      expect(read.status).toBe(200);
+      const cache = (read.headers.getSetCookie?.() ?? [read.headers.get('set-cookie') ?? ''])
+        .map((value) => value.split(';', 1)[0] ?? '')
+        .filter((pair) => pair.includes('session_data='));
+      expect(cache.length).toBeGreaterThan(0);
+      const withCache = [cookie, ...cache].join('; ');
+
+      // The documented revocation deletes the row; the cache cookie still carries a signed copy.
+      sqlite.exec('DELETE FROM sessions WHERE hard_expires_at IS NOT NULL');
+      const listed = await app.request(
+        `${API_ORIGIN}/api/auth/list-sessions`,
+        { headers: { cookie: withCache } },
+        env
+      );
+      expect(listed.status).toBe(401);
+
+      // Control: a live ordinary session with its cache cookie still lists its sessions.
+      const ordinary = await ordinaryCookie();
+      const ordinaryRead = await app.request(
+        `${API_ORIGIN}/api/auth/get-session`,
+        { headers: { cookie: ordinary } },
+        env
+      );
+      const ordinaryCache = (ordinaryRead.headers.getSetCookie?.() ?? [])
+        .map((value) => value.split(';', 1)[0] ?? '')
+        .filter((pair) => pair.includes('session_data='));
+      const control = await app.request(
+        `${API_ORIGIN}/api/auth/list-sessions`,
+        { headers: { cookie: [ordinary, ...ordinaryCache].join('; ') } },
+        env
+      );
+      expect(control.status).toBe(200);
+    });
+
     it('cannot create a trigger of any source type (ordinary session reaches the project check)', async () => {
       const agent = await agentCookie();
       const ordinary = await ordinaryCookie();
@@ -636,6 +678,17 @@ describe('agent sign-in through workload identity (vertical slice)', () => {
         '/api/projects/proj-own/standing-watches',
         '/api/projects/proj-own/standing-watches/w-x/update',
       ];
+      // `pause` with `paused: false` resumes a watch, so it is refused like any other re-arm.
+      const resume = await post('/api/projects/proj-own/standing-watches/w-x/pause', agent, {
+        expectedVersion: 1,
+        paused: false,
+      });
+      expect(resume.status).toBe(403);
+      const pause = await post('/api/projects/proj-own/standing-watches/w-x/pause', agent, {
+        expectedVersion: 1,
+        paused: true,
+      });
+      expect(REFUSED.test(await pause.text())).toBe(false);
       for (const path of refusedPaths) {
         const refused = await post(path, agent, {});
         expect({ path, status: refused.status }).toEqual({ path, status: 403 });
@@ -648,7 +701,6 @@ describe('agent sign-in through workload identity (vertical slice)', () => {
       }
       for (const path of [
         '/api/projects/proj-own/schedules/sch-x/cancel',
-        '/api/projects/proj-own/standing-watches/w-x/pause',
         '/api/projects/proj-own/standing-watches/w-x/revoke',
       ]) {
         const allowed = await post(path, agent, {});
