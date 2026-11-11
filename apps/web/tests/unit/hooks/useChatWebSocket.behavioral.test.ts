@@ -320,6 +320,8 @@ describe('useChatWebSocket (behavioral)', () => {
     expect(onWakeProgress).toHaveBeenCalledWith({
       recoveryStatus: 'waking',
       wakePhase: 'node_provisioning',
+      // A server that predates attempt ids sends none; the hook keeps its old latch.
+      wakeAttemptId: null,
     });
   });
 
@@ -343,10 +345,12 @@ describe('useChatWebSocket (behavioral)', () => {
     expect(onWakeProgress).toHaveBeenNthCalledWith(1, {
       recoveryStatus: 'restored',
       wakePhase: null,
+      wakeAttemptId: null,
     });
     expect(onWakeProgress).toHaveBeenNthCalledWith(2, {
       recoveryStatus: 'failed',
       wakePhase: null,
+      wakeAttemptId: null,
     });
   });
 
@@ -366,7 +370,44 @@ describe('useChatWebSocket (behavioral)', () => {
       });
     });
 
-    expect(onWakeProgress).toHaveBeenCalledWith({ recoveryStatus: 'waking', wakePhase: null });
+    expect(onWakeProgress).toHaveBeenCalledWith({
+      recoveryStatus: 'waking',
+      wakePhase: null,
+      wakeAttemptId: null,
+    });
+  });
+
+  it('forwards the wake attempt a push names, and drops a non-string one', () => {
+    const onWakeProgress = vi.fn();
+    renderHook(() => useChatWebSocket({ ...defaultProps, onWakeProgress }));
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateOpen();
+      MockWebSocket.instances[0]!.simulateMessage({
+        type: 'session.wake_progress',
+        payload: {
+          sessionId: 'sess-1',
+          recoveryStatus: 'restored',
+          wakePhase: null,
+          wakeAttemptId: '01WAKEATTEMPT',
+        },
+      });
+      MockWebSocket.instances[0]!.simulateMessage({
+        type: 'session.wake_progress',
+        payload: { sessionId: 'sess-1', recoveryStatus: 'waking', wakeAttemptId: 42 },
+      });
+    });
+
+    expect(onWakeProgress).toHaveBeenNthCalledWith(1, {
+      recoveryStatus: 'restored',
+      wakePhase: null,
+      wakeAttemptId: '01WAKEATTEMPT',
+    });
+    expect(onWakeProgress).toHaveBeenNthCalledWith(2, {
+      recoveryStatus: 'waking',
+      wakePhase: null,
+      wakeAttemptId: null,
+    });
   });
 
   it('ignores a session.wake_progress with an unknown recovery status', () => {

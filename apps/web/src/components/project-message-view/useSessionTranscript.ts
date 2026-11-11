@@ -47,8 +47,16 @@ export interface SessionTranscript {
    * `afterReadsSettle` runs once no transcript read is in flight, for other state to re-read.
    */
   catchUpTail: (afterReadsSettle?: () => void) => void;
-  /** Merges a newest-window response, draining any gap to the loaded tail first. */
-  mergeRecentWindow: (recent: ChatSessionDetailResponse, signal?: AbortSignal) => Promise<void>;
+  /**
+   * Merges a newest-window response, draining any gap to the loaded tail first. When
+   * `isCurrent` says the read was overtaken while it merged, its rows still land but its
+   * session and state snapshots do not overwrite newer ones.
+   */
+  mergeRecentWindow: (
+    recent: ChatSessionDetailResponse,
+    signal?: AbortSignal,
+    isCurrent?: () => boolean
+  ) => Promise<void>;
   /** Loads the next page of older history. */
   loadMore: () => Promise<void>;
   /** Loads older pages until `target` is loaded or history runs out. */
@@ -190,7 +198,7 @@ export function useSessionTranscript(projectId: string, sessionId: string): Sess
    * so the transcript never keeps a hole.
    */
   const mergeRecentWindow = useCallback(
-    async (recent: ChatSessionDetailResponse, signal?: AbortSignal) => {
+    async (recent: ChatSessionDetailResponse, signal?: AbortSignal, isCurrent?: () => boolean) => {
       const current = readDetail() ?? { ...recent, messages: NO_MESSAGES };
       const merged = await mergeRecentWindowOrRefresh(
         projectId,
@@ -204,15 +212,17 @@ export function useSessionTranscript(projectId: string, sessionId: string): Sess
         // page) are in neither of its inputs; keep them.
         const merging = new Set(current.messages.map((message) => message.id));
         const arrived = latest?.messages.filter((message) => !merging.has(message.id)) ?? [];
+        // Checked here, after every await: an overtaken read keeps the newer snapshots.
+        const overtaken = latest && isCurrent ? !isCurrent() : false;
         return {
           ...(latest ?? merged),
-          ...merged,
+          ...(overtaken ? { hasMore: merged.hasMore } : merged),
           messages:
             arrived.length > 0
               ? mergeMessages(merged.messages, arrived, 'append')
               : merged.messages,
           // A window that carries no state snapshot must not erase the last known one.
-          state: merged.state ?? latest?.state ?? null,
+          state: overtaken ? (latest?.state ?? null) : (merged.state ?? latest?.state ?? null),
         };
       });
     },

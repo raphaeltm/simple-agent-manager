@@ -217,6 +217,78 @@ describe('useWakeProgress', () => {
     expect(result.current.isWaking).toBe(false);
   });
 
+  it('re-arms for the next wake when only pushes named the settled attempt', () => {
+    // A tab that saw the first wake only over the socket: no snapshot ever named its
+    // attempt, so the push must, or the latch holds an unknown attempt forever.
+    const { result } = renderHook(() => useWakeProgress('s1'));
+
+    act(() => {
+      result.current.applyWakeProgress({
+        recoveryStatus: 'waking',
+        wakePhase: 'agent_session',
+        wakeAttemptId: '01A',
+      });
+    });
+    expect(result.current.isWaking).toBe(true);
+    act(() => {
+      result.current.applyWakeProgress({
+        recoveryStatus: 'restored',
+        wakePhase: null,
+        wakeAttemptId: '01A',
+      });
+    });
+    expect(result.current.isWaking).toBe(false);
+
+    act(() => {
+      result.current.hydrateWakeProgress(
+        snapshot({ recoveryStatus: 'waking', wakePhase: 'node_selection', wakeAttemptId: '01B' })
+      );
+    });
+
+    expect(result.current.isWaking).toBe(true);
+    expect(result.current.wakePhase).toBe('node_selection');
+  });
+
+  it('keeps the latch for a stale snapshot of a wake that settled by push', () => {
+    // Control for the case above: the same attempt, still reported waking, is stale.
+    const { result } = renderHook(() => useWakeProgress('s1'));
+
+    act(() => {
+      result.current.applyWakeProgress({
+        recoveryStatus: 'restored',
+        wakePhase: null,
+        wakeAttemptId: '01A',
+      });
+    });
+    act(() => {
+      result.current.hydrateWakeProgress(
+        snapshot({ recoveryStatus: 'waking', wakePhase: 'workspace_ready', wakeAttemptId: '01A' })
+      );
+    });
+
+    expect(result.current.isWaking).toBe(false);
+  });
+
+  it('starts a newer attempt from its own phase when the older one never settled', () => {
+    // The older wake's restore was never seen, so no latch is set; its later phase must
+    // not make the newer wake's earlier phases look like they go backwards.
+    const { result } = renderHook(() => useWakeProgress('s1'));
+
+    act(() => {
+      result.current.hydrateWakeProgress(
+        snapshot({ recoveryStatus: 'waking', wakePhase: 'agent_session', wakeAttemptId: '01A' })
+      );
+    });
+    act(() => {
+      result.current.hydrateWakeProgress(
+        snapshot({ recoveryStatus: 'waking', wakePhase: 'node_selection', wakeAttemptId: '01B' })
+      );
+    });
+
+    expect(result.current.isWaking).toBe(true);
+    expect(result.current.wakePhase).toBe('node_selection');
+  });
+
   it('ignores a late terminal snapshot of an older attempt during the next wake', () => {
     const { result } = renderHook(() => useWakeProgress('s1'));
 

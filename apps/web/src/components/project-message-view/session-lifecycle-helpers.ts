@@ -1,3 +1,5 @@
+import { type Dispatch, type SetStateAction, useCallback, useRef } from 'react';
+
 import type { SessionUpdatedFields } from '../../hooks/useChatWebSocket';
 import type {
   ChatSessionDetailResponse,
@@ -57,21 +59,63 @@ export function applyPushedSessionUpdate(
   return next;
 }
 
+type MergeRecentWindow = (
+  recent: ChatSessionDetailResponse,
+  signal?: AbortSignal,
+  isCurrent?: () => boolean
+) => Promise<void>;
+
 /**
  * A status push carries only the status. Reads the newest window, as the fallback poll
  * would, so the rest of the session and its state snapshot catch up: a connected active
  * chat does not poll, so nothing else would refresh them.
  */
-export function reconcileAfterStatusPush(
+function reconcileAfterStatusPush(
   projectId: string,
   sessionId: string,
-  mergeRecentWindow: (recent: ChatSessionDetailResponse) => Promise<void>
+  mergeRecentWindow: MergeRecentWindow,
+  isCurrent: () => boolean
 ): void {
   fetchNewestPage(projectId, sessionId)
-    .then((recent) => (recent.session.id === sessionId ? mergeRecentWindow(recent) : undefined))
+    .then((recent) =>
+      recent.session.id === sessionId ? mergeRecentWindow(recent, undefined, isCurrent) : undefined
+    )
     .catch((err: unknown) => {
       // Best effort: the pushed status is already applied; the next push, reconnect or
       // poll reconciles the rest.
       console.warn('Session reconcile after a status push failed', err);
     });
+}
+
+/**
+ * Handles `session.updated` pushes for the open chat. A status push is applied at once
+ * (`applyPushedSessionUpdate`) and followed by a reconcile read, fenced so a read
+ * overtaken by a later push or a stop cannot roll the session back. `invalidateStatus`
+ * supersedes in-flight reads without starting one (the stop handler calls it).
+ */
+export function useSessionStatusPush(
+  projectId: string,
+  sessionId: string,
+  mergeRecentWindow: MergeRecentWindow,
+  setSession: Dispatch<SetStateAction<ChatSessionResponse | null>>
+): { onSessionUpdated: (updates: SessionUpdatedFields) => void; invalidateStatus: () => void } {
+  const generation = useRef(0);
+  const invalidateStatus = useCallback(() => {
+    generation.current += 1;
+  }, []);
+  const onSessionUpdated = useCallback(
+    (updates: SessionUpdatedFields) => {
+      setSession((prev) => applyPushedSessionUpdate(prev, updates));
+      const mine = ++generation.current;
+      if (!updates.status) return;
+      reconcileAfterStatusPush(
+        projectId,
+        sessionId,
+        mergeRecentWindow,
+        () => generation.current === mine
+      );
+    },
+    [projectId, sessionId, mergeRecentWindow, setSession]
+  );
+  return { onSessionUpdated, invalidateStatus };
 }

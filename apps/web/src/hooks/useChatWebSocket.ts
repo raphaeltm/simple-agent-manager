@@ -86,6 +86,8 @@ interface UseChatWebSocketOptions {
 export interface WakeProgressUpdate {
   recoveryStatus: 'waking' | 'restored' | 'failed';
   wakePhase: TaskExecutionStep | null;
+  /** The wake claim the push belongs to; null or absent from a server that predates it. */
+  wakeAttemptId?: string | null;
 }
 
 export interface UseChatWebSocketReturn {
@@ -326,6 +328,7 @@ export function useChatWebSocket({
                 // An unknown/absent step is normal early in a wake — the runner has
                 // been claimed but has not written its first execution step yet.
                 wakePhase: isTaskExecutionStep(p.wakePhase) ? p.wakePhase : null,
+                wakeAttemptId: typeof p.wakeAttemptId === 'string' ? p.wakeAttemptId : null,
               });
             }
           } else if (data.type === 'session.access.changed') {

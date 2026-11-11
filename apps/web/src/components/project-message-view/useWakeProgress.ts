@@ -99,7 +99,7 @@ export function useWakeProgress(sessionId: string | undefined): UseWakeProgressR
    * `recovery_attempt_id` column existed can settle without one.
    */
   const settledRef = useRef<{ attemptId: string | null } | null>(null);
-  /** The newest wake attempt a snapshot has named. Pushes carry no attempt id. */
+  /** The newest wake attempt a snapshot or push has named. */
   const lastAttemptIdRef = useRef<string | null>(null);
 
   // A wake belongs to exactly one conversation. Switching sessions must not carry
@@ -129,6 +129,9 @@ export function useWakeProgress(sessionId: string | undefined): UseWakeProgressR
         // older attempt than one already seen is a stale poll: it must not end or
         // restart the newer wake.
         if (lastAttemptIdRef.current && attemptId < lastAttemptIdRef.current) return false;
+        // A newer attempt starts from no phase, settled or not: the previous attempt's
+        // later phase would otherwise reject this one's earlier phases as backwards.
+        if (lastAttemptIdRef.current && attemptId !== lastAttemptIdRef.current) setWakePhase(null);
         lastAttemptIdRef.current = attemptId;
       }
       if (status !== 'waking') {
@@ -179,7 +182,7 @@ export function useWakeProgress(sessionId: string | undefined): UseWakeProgressR
 
   const applyWakeProgress = useCallback(
     (update: WakeProgressUpdate) => {
-      applyStatus(update.recoveryStatus, update.wakePhase);
+      applyStatus(update.recoveryStatus, update.wakePhase, update.wakeAttemptId);
     },
     [applyStatus]
   );

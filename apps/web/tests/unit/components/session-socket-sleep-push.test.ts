@@ -67,6 +67,7 @@ interface DetailOptions {
   topic?: string;
   agentCompletedAt?: number | null;
   wake?: { attemptId: string; phase: string } | null;
+  messages?: ChatMessageResponse[];
 }
 
 function detail({
@@ -74,6 +75,7 @@ function detail({
   topic = 'T',
   agentCompletedAt = null,
   wake = null,
+  messages = [reply],
 }: DetailOptions = {}) {
   const session = {
     id: 'sess-1',
@@ -89,7 +91,7 @@ function detail({
   } as ChatSessionResponse;
   return {
     session,
-    messages: [reply],
+    messages,
     hasMore: false,
     state: {
       activity: 'idle',
@@ -204,6 +206,52 @@ describe('server-side sleep pushed to an open chat', () => {
     // Fields the push did not carry arrive from the reconcile read.
     await waitFor(() => expect(result.current.session?.topic).toBe('Caught up'));
     expect(result.current.sessionState).toBe('active');
+  });
+
+  it('a reconcile read overtaken by a later push keeps its rows but not its session', async () => {
+    const { result, socket } = await renderConnected();
+    const reconcileRead = deferred<ReturnType<typeof detail>>();
+    mocks.getChatSession.mockReturnValueOnce(reconcileRead.promise);
+
+    // A same-status push (a re-wake) starts a read; a rename arrives while it is in flight.
+    act(() => socket.deliver(sessionUpdated({ status: 'active' })));
+    await waitFor(() => expect(mocks.getChatSession).toHaveBeenCalledTimes(2));
+    act(() => socket.deliver(sessionUpdated({ topic: 'Renamed' })));
+    await waitFor(() => expect(result.current.session?.topic).toBe('Renamed'));
+
+    const newer: ChatMessageResponse = { ...reply, id: 'm2', createdAt: 2000, sequence: 2000 };
+    await act(async () => {
+      reconcileRead.resolve(detail({ topic: 'Read before the rename', messages: [reply, newer] }));
+      await reconcileRead.promise;
+    });
+
+    await waitFor(() => expect(result.current.messages.map((m) => m.id)).toEqual(['m1', 'm2']));
+    expect(result.current.session?.topic).toBe('Renamed');
+  });
+
+  it('a reconcile read overtaken by a stop does not reopen the chat', async () => {
+    const { result, socket } = await renderConnected();
+    const reconcileRead = deferred<ReturnType<typeof detail>>();
+    mocks.getChatSession.mockReturnValueOnce(reconcileRead.promise);
+
+    act(() => socket.deliver(sessionUpdated({ status: 'active' })));
+    await waitFor(() => expect(mocks.getChatSession).toHaveBeenCalledTimes(2));
+    act(() => socket.deliver({ type: 'session.stopped', payload: { sessionId: 'sess-1' } }));
+    await waitFor(() => expect(result.current.sessionState).toBe('terminated'));
+
+    const newer: ChatMessageResponse = { ...reply, id: 'm2', createdAt: 2000, sequence: 2000 };
+    await act(async () => {
+      // A real read differs from the cached session (here its topic); an identical one would be
+      // kept by the query cache's structural sharing and could not show an overwrite.
+      reconcileRead.resolve(
+        detail({ status: 'active', topic: 'Read before the stop', messages: [reply, newer] })
+      );
+      await reconcileRead.promise;
+    });
+
+    // Liveness: the read was merged (its new row landed); it just did not win.
+    await waitFor(() => expect(result.current.messages.map((m) => m.id)).toEqual(['m1', 'm2']));
+    expect(result.current.session?.status).toBe('stopped');
   });
 
   it('ignores a status the DO does not push on session.updated', async () => {

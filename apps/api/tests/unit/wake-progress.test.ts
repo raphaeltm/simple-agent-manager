@@ -245,7 +245,12 @@ describe('publishSessionWakeProgress', () => {
 
     publishSessionWakeProgress(
       { broadcastEvent },
-      { chatSessionId: SESSION_ID, recoveryStatus: 'waking', wakePhase: 'agent_session' },
+      {
+        chatSessionId: SESSION_ID,
+        recoveryStatus: 'waking',
+        wakePhase: 'agent_session',
+        wakeAttemptId: '01WAKEATTEMPT',
+      },
       1234
     );
 
@@ -256,6 +261,7 @@ describe('publishSessionWakeProgress', () => {
       sessionId: SESSION_ID,
       recoveryStatus: 'waking',
       wakePhase: 'agent_session',
+      wakeAttemptId: '01WAKEATTEMPT',
       at: 1234,
     });
     // Third arg scopes delivery — without it the event fans out to every socket.
@@ -270,6 +276,7 @@ describe('publishSessionWakeProgress', () => {
       1
     );
     expect(broadcastEvent.mock.calls[0][1].wakePhase).toBeNull();
+    expect(broadcastEvent.mock.calls[0][1].wakeAttemptId).toBeNull();
   });
 });
 
@@ -293,6 +300,7 @@ describe('notifyWakeProgress', () => {
       projectId: 'p1',
       chatSessionId: SESSION_ID,
       step: 'workspace_creation',
+      attemptId: '01WAKEATTEMPT',
     });
 
     expect(sent).toBe(true);
@@ -301,6 +309,7 @@ describe('notifyWakeProgress', () => {
       chatSessionId: SESSION_ID,
       recoveryStatus: 'waking',
       wakePhase: 'workspace_creation',
+      wakeAttemptId: '01WAKEATTEMPT',
     });
   });
 
