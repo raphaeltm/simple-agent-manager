@@ -74,25 +74,37 @@ the workload identity (OIDC) token SAM already issues through `exec_with_secrets
 
 ## Implementation checklist
 
-- [ ] Migration `0234_agent_sign_ins.sql` + drizzle schema
-- [ ] `services/agent-sign-in/config.ts` (trust config parse, audience, defaults)
-- [ ] `services/agent-sign-in/verify.ts` (JWKS cache, jwtVerify, claims schema)
-- [ ] `services/agent-sign-in/ledger.ts` (atomic claim, session link, clamp SQL)
-- [ ] `routes/agent-sign-in.ts` + mount before BetterAuth catch-all
-- [ ] `session-factory.ts` TTL option + return session id
-- [ ] `auth.ts` session update clamp hook
-- [ ] Require an active superadmin (role hooks inert); reject `system` sentinel targets
-- [ ] `Env.AGENT_SIGN_IN_TRUST`; runtime-tunables bootstrap exception
-- [ ] Deploy wiring: configure-secrets (set, or delete when unset), workflow env blocks,
+- [x] Migration `0234_agent_sign_ins.sql` + drizzle schema
+- [x] `services/agent-sign-in/config.ts` (trust config parse, audience, defaults)
+- [x] `services/agent-sign-in/verify.ts` (JWKS cache, jwtVerify, claims schema)
+- [x] `services/agent-sign-in/ledger.ts` (atomic claim, session link)
+- [x] `routes/agent-sign-in.ts` + mount before BetterAuth catch-all
+- [x] `session-factory.ts` fixed-expiry option + return session id
+- [x] Hard session cap: `sessions.hard_expires_at`, clamped in `session.update.before` (BetterAuth's own refresh write) + read-side check (replaced the first-cut `update.after` clamp, which failed open — Cloudflare/security review)
+- [x] Require an active superadmin (role hooks inert); reject `system` sentinel targets
+- [x] `Env.AGENT_SIGN_IN_TRUST`; runtime-tunables bootstrap exception
+- [x] Deploy wiring: configure-secrets (set, or delete when unset), workflow env blocks,
       installer manifest, OPTIONAL_SECRETS, wrangler.toml comment, .env.example
-- [ ] `login-providers` exposes `agentSignIn`; sign-in page notice; Playwright audit
-- [ ] Integration tests (real BetterAuth + SQLite + generated RSA keys + fake JWKS fetch)
-- [ ] Discrimination proofs for main guards (record in PR)
-- [ ] Public docs page + configuration reference; staging rule 13 + full reference
-- [ ] Security auditor + other reviewers
+- [x] `login-providers` exposes `agentSignIn`; sign-in page notice; Playwright audit
+- [x] Integration tests (real BetterAuth + SQLite + generated RSA keys + fake JWKS fetch)
+- [x] Discrimination proofs for main guards (record in PR)
+- [x] Public docs page + configuration reference; staging rule 13 + full reference
+- [x] Security auditor + other reviewers
 - [ ] Staging: configure trust, exchange real production token, Playwright as smoke user,
       wrong-audience rejection; confirm production has no configuration
 - [ ] Draft PR with threat model and "When this lands on the self-host branch"
+
+- [x] Agent sign-in sessions cannot mint longer-lived credentials (PAT, device approval, connector consent, BetterAuth writes except sign-out) — security review HIGH
+- [x] Optional `agentProfileId` pin; configurable JWKS timeout; JWKS cache max 1 h
+
+## Review notes
+
+- Security auditor: 0 CRITICAL, 1 HIGH (credential escalation from agent session) fixed; MEDIUM clamp fail-open fixed by in-write clamp;
+  MEDIUM printed cookie kept by design (Playwright MCP `browser_run_code` is a vm sandbox without file access) and documented, now
+  unescalatable and bounded by the TTL.
+- Cloudflare: clamp per-request double write and fail-open fixed; duplicate approval read removed; lint fixed. Agent sessions still do
+  BetterAuth's own refresh UPDATE on every request (a <6-day session is always "due"); accepted for low-traffic test sessions.
+- `agent_sign_ins` retention: kept as the durable audit record; growth bounded by `maxSignInsPerHour` per allowed principal.
 
 ## Acceptance criteria
 
