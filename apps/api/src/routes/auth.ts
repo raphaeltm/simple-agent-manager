@@ -140,15 +140,18 @@ const AGENT_SESSION_AUTH_ENDPOINTS = new Set(['/api/auth/get-session', '/api/aut
  * Whether this BetterAuth request is made with an agent sign-in session and is not one of the
  * endpoints above. Linking a social account, for one, would give the agent's operator a lasting
  * way into the target account, and listing sessions would expose the account's other sessions.
- * Reads the session only for BetterAuth requests that carry a session cookie, which are rare
- * (the app polls /get-session, which is excluded).
+ *
+ * The session is resolved by BetterAuth itself, never by inspecting the Cookie header: BetterAuth's
+ * cookie parser accepts forms a substring check would miss (whitespace before `=`, for one), so
+ * any shortcut here would be a second, looser parser in front of the real one. A request without
+ * a session cookie costs nothing extra (BetterAuth returns before touching the database); the app
+ * polls GET /get-session, which has its own route above.
  */
 async function isAgentSessionChangingAccount(
   auth: Awaited<ReturnType<typeof createAuth>>,
   request: Request
 ): Promise<boolean> {
   if (AGENT_SESSION_AUTH_ENDPOINTS.has(new URL(request.url).pathname)) return false;
-  if (!request.headers.get('cookie')?.includes('better-auth.session_token=')) return false;
   const current = await auth.api.getSession({
     headers: request.headers,
     query: { disableCookieCache: true, disableRefresh: true },

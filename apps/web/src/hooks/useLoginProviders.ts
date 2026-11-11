@@ -25,6 +25,25 @@ export interface LoginProvidersState {
   /** The lookup failed and there is no remembered answer to show instead. */
   failed: boolean;
   retry: () => void;
+  /**
+   * Whether this deployment accepts agent sign-in, for the sign-in page's disclosure. Only the
+   * live answer can say `refuses`: a remembered `false` may predate trust being turned on, so it
+   * never hides the disclosure. A remembered `true` is shown until the live answer arrives.
+   * `checking` while the first lookup runs; `unknown` when it failed.
+   */
+  agentSignIn: AgentSignInDisclosure;
+}
+
+export type AgentSignInDisclosure = 'accepts' | 'refuses' | 'checking' | 'unknown';
+
+function agentSignInDisclosure(
+  live: LoginProviders | undefined,
+  remembered: LoginProviders | null,
+  lookupFailed: boolean
+): AgentSignInDisclosure {
+  if (live) return live.agentSignIn ? 'accepts' : 'refuses';
+  if (remembered?.agentSignIn) return 'accepts';
+  return lookupFailed ? 'unknown' : 'checking';
 }
 
 /** Last answer seen in this browser, shown on the next visit while the live lookup runs. */
@@ -81,5 +100,10 @@ export function useLoginProviders(): LoginProvidersState {
   });
   const retry = useCallback(() => void refetch(), [refetch]);
   const providers = data ?? remembered;
-  return { providers, failed: isError && !providers, retry };
+  return {
+    providers,
+    failed: isError && !providers,
+    retry,
+    agentSignIn: agentSignInDisclosure(data, remembered, isError),
+  };
 }

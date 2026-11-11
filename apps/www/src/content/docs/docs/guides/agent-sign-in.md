@@ -103,6 +103,40 @@ The test instance must have an administrator account before agents can sign in.
 To turn the feature off, delete the secret and deploy again. The deployment removes the Worker
 secret when the GitHub secret is gone.
 
+Turning the feature off stops **new** sign-ins only. Sessions that already exist keep working
+until their own hard expiry (`sessionTtlSeconds`, at most 24 hours), because the check that ends
+them reads the session, not the secret.
+
+### Revoke existing agent sessions (incident response)
+
+If a trusted workload may be compromised, end its sessions as well as turning the feature off:
+
+1. **Stop new sign-ins:** delete the `AGENT_SIGN_IN_TRUST` secret and deploy, as above.
+2. **Delete every agent sign-in session.** Agent sessions are the only rows in `sessions` with a
+   `hard_expires_at`, so this leaves everyone's ordinary sessions alone. With Wrangler and an
+   account token that can write the test instance's D1 database (replace the database name):
+
+   ```bash
+   # See them first: which workload signed in as whom, and when the session would end.
+   npx wrangler d1 execute TEST_INSTANCE_DB --remote --command \
+     "SELECT a.source_subject, a.target_user_id, s.id, s.hard_expires_at FROM sessions s LEFT JOIN agent_sign_ins a ON a.session_id = s.id WHERE s.hard_expires_at IS NOT NULL"
+   # End them.
+   npx wrangler d1 execute TEST_INSTANCE_DB --remote --command \
+     "DELETE FROM sessions WHERE hard_expires_at IS NOT NULL"
+   ```
+
+   The next request with a deleted session is refused (`401`), and so is every terminal
+   connection that session's terminal tokens would open, because those are checked against the
+   live session on each connection.
+3. **Without database access**, an administrator signed in normally can suspend the target
+   account in **Admin → Users**. A suspended account's sessions, agent or not, are refused on the
+   next request. Approve it again afterwards.
+4. **What can outlive the deletion, briefly.** Short tokens the session minted are capped at the
+   session's hard expiry but are not tied to the session row: a port-access link (15 minutes by
+   default), a node management token (1 hour by default) and a local-forward token (5 minutes by
+   default). A terminal or port connection that was already open stays open until it closes. To
+   cut those at once, stop the workspaces the target account owns.
+
 ### The audience
 
 The audience the agent requests is the test instance's own endpoint URL:

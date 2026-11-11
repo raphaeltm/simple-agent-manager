@@ -115,3 +115,34 @@ it('ignores a remembered answer whose agent sign-in flag is not a boolean', () =
   );
   expect(renderProviders().result.current.providers).toEqual({ ...EMAIL_ONLY, agentSignIn: true });
 });
+
+it('discloses agent sign-in only from a live answer or a remembered yes', async () => {
+  window.localStorage.setItem(
+    LOGIN_PROVIDERS_STORAGE_KEY,
+    JSON.stringify({ ...EMAIL_ONLY, agentSignIn: false })
+  );
+  let answer: (value: unknown) => void = () => {};
+  fetchLoginProviders.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+  const { result } = renderProviders();
+  // A remembered "off" is not an answer: it may predate trust being turned on.
+  expect(result.current.agentSignIn).toBe('checking');
+  act(() => answer({ ...EMAIL_ONLY, agentSignIn: false }));
+  await waitFor(() => expect(result.current.agentSignIn).toBe('refuses'));
+
+  window.localStorage.setItem(
+    LOGIN_PROVIDERS_STORAGE_KEY,
+    JSON.stringify({ ...EMAIL_ONLY, agentSignIn: true })
+  );
+  fetchLoginProviders.mockReturnValue(new Promise(() => {}));
+  expect(renderProviders().result.current.agentSignIn).toBe('accepts');
+});
+
+it('reports agent sign-in as unknown when the lookup fails without a remembered yes', async () => {
+  window.localStorage.setItem(LOGIN_PROVIDERS_STORAGE_KEY, JSON.stringify(EMAIL_ONLY));
+  fetchLoginProviders.mockRejectedValue(new Error('network down'));
+  const client = new QueryClient();
+  client.setQueryDefaults(['login-providers'], { retryDelay: 0 });
+  const { result } = renderProviders(client);
+  await waitFor(() => expect(result.current.agentSignIn).toBe('unknown'));
+  expect(result.current.providers).toEqual(EMAIL_ONLY);
+});

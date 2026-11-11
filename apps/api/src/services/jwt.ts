@@ -60,6 +60,16 @@ function getIssuer(env: Env): string {
 }
 
 /**
+ * A token's expiry: `expiryMs` from now, but never later than `notAfter` when given. Session
+ * routes pass an agent sign-in session's hard expiry (`credentialNotAfter`), so a token minted by
+ * that session cannot outlive it.
+ */
+function cappedExpiry(expiryMs: number, notAfter?: Date): Date {
+  const expiresAt = Date.now() + expiryMs;
+  return new Date(notAfter ? Math.min(expiresAt, notAfter.getTime()) : expiresAt);
+}
+
+/**
  * Get terminal token expiry in milliseconds.
  * Default: 1 hour.
  */
@@ -85,16 +95,19 @@ export async function signTerminalToken(
   userId: string,
   workspaceId: string,
   env: Env,
-  options: { sessionToken?: string | null } = {}
+  options: { sessionToken?: string | null; notAfter?: Date } = {}
 ): Promise<{ token: string; expiresAt: string }> {
   const privateKey = await importPKCS8(env.JWT_PRIVATE_KEY, 'RS256');
-  const expiry = getTerminalTokenExpiry(env);
-  const expiresAt = new Date(Date.now() + expiry);
+  const expiresAt = cappedExpiry(getTerminalTokenExpiry(env), options.notAfter);
   const issuer = getIssuer(env);
 
   const token = await new SignJWT({
     workspace: workspaceId,
     ...(options.sessionToken ? { sessionToken: options.sessionToken } : {}),
+    // The VM agent turns this token into its own session cookie (SESSION_TTL, 24 h by default)
+    // and caps that session here (packages/vm-agent/internal/auth/session.go sessionExpiry), so a
+    // capped control-plane session's terminal access ends with it even off the Worker path.
+    ...(options.notAfter ? { sessionNotAfter: Math.floor(options.notAfter.getTime() / 1000) } : {}),
   })
     .setProtectedHeader({ alg: 'RS256', kid: KEY_ID })
     .setIssuer(issuer)
@@ -231,11 +244,11 @@ export async function signNodeManagementToken(
   userId: string,
   nodeId: string,
   workspaceId: string | null,
-  env: Env
+  env: Env,
+  options: { notAfter?: Date } = {}
 ): Promise<{ token: string; expiresAt: string }> {
   const privateKey = await importPKCS8(env.JWT_PRIVATE_KEY, 'RS256');
-  const expiry = getTerminalTokenExpiry(env);
-  const expiresAt = new Date(Date.now() + expiry);
+  const expiresAt = cappedExpiry(getTerminalTokenExpiry(env), options.notAfter);
   const issuer = getIssuer(env);
 
   const token = await new SignJWT({
@@ -440,11 +453,11 @@ export async function signPortAccessToken(
   userId: string,
   workspaceId: string,
   port: number,
-  env: Env
+  env: Env,
+  options: { notAfter?: Date } = {}
 ): Promise<string> {
   const privateKey = await importPKCS8(env.JWT_PRIVATE_KEY, 'RS256');
-  const expiry = getPortAccessTokenExpiry(env);
-  const expiresAt = new Date(Date.now() + expiry);
+  const expiresAt = cappedExpiry(getPortAccessTokenExpiry(env), options.notAfter);
   const issuer = getIssuer(env);
 
   const token = await new SignJWT({
@@ -498,11 +511,11 @@ export async function verifyPortAccessToken(
 
 export async function signLocalForwardToken(
   claims: Omit<LocalForwardTokenPayload, 'subject'>,
-  env: Env
+  env: Env,
+  options: { notAfter?: Date } = {}
 ): Promise<{ token: string; expiresAt: string }> {
   const privateKey = await importPKCS8(env.JWT_PRIVATE_KEY, 'RS256');
-  const expiry = getLocalForwardTokenExpiry(env);
-  const expiresAt = new Date(Date.now() + expiry);
+  const expiresAt = cappedExpiry(getLocalForwardTokenExpiry(env), options.notAfter);
   const issuer = getIssuer(env);
 
   const token = await new SignJWT({

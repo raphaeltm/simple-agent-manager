@@ -4,7 +4,7 @@ import { Hono } from 'hono';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { requireRouteParam } from '../lib/route-helpers';
-import { getUserId } from '../middleware/auth';
+import { assertNotAgentSignInSession, getUserId } from '../middleware/auth';
 import { AppError, errors } from '../middleware/error';
 import { requireProjectCapability } from '../middleware/project-auth';
 import * as projectData from '../services/project-data';
@@ -58,24 +58,28 @@ projectStandingWatchRoutes.get('/:id', async (c) => {
   if (!watch) throw errors.notFound('Standing watch');
   return c.json({ watch });
 });
-projectStandingWatchRoutes.post('/', async (c) =>
-  c.json(
+// A standing watch sends messages as the person after an agent sign-in session that set it has
+// ended; such a session may pause or revoke watches but not create or change them.
+projectStandingWatchRoutes.post('/', async (c) => {
+  assertNotAgentSignInSession(c);
+  return c.json(
     await projectData.createProjectStandingWatch(c.env, requireRouteParam(c, 'projectId'), {
       userId: getUserId(c),
       request: await scheduleRequestBody(c.req.raw, c.env),
     }),
     201
-  )
-);
+  );
+});
 for (const operation of ['update', 'pause', 'revoke'] as const) {
-  projectStandingWatchRoutes.post(`/:id/${operation}`, async (c) =>
-    c.json(
+  projectStandingWatchRoutes.post(`/:id/${operation}`, async (c) => {
+    if (operation === 'update') assertNotAgentSignInSession(c);
+    return c.json(
       await projectData.mutateProjectStandingWatch(c.env, requireRouteParam(c, 'projectId'), {
         userId: getUserId(c),
         id: requireRouteParam(c, 'id'),
         operation,
         request: await scheduleRequestBody(c.req.raw, c.env),
       })
-    )
-  );
+    );
+  });
 }

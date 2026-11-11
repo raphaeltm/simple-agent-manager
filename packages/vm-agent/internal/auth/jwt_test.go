@@ -441,3 +441,41 @@ func TestValidateWorkspaceCallbackToken(t *testing.T) {
 		}
 	})
 }
+
+// The control plane (apps/api/src/services/jwt.ts signTerminalToken) writes the cap as the
+// numeric claim "sessionNotAfter". Sign the wire shape, not the Go struct, so a renamed JSON tag
+// on either side fails here.
+func TestValidateWorkspaceToken_SessionNotAfterCapsTheSession(t *testing.T) {
+	validator, key := testJWKS(t, "node-123")
+	notAfter := time.Now().Add(5 * time.Minute).Unix()
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
+		"iss":             "test-issuer",
+		"aud":             "test-audience",
+		"sub":             "user-1",
+		"exp":             time.Now().Add(time.Hour).Unix(),
+		"workspace":       "ws-123",
+		"sessionNotAfter": notAfter,
+	})
+	token.Header["kid"] = "test-key-1"
+	signed, err := token.SignedString(key)
+	if err != nil {
+		t.Fatalf("sign token: %v", err)
+	}
+
+	claims, err := validator.ValidateWorkspaceToken(signed, "ws-123")
+	if err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if claims.SessionNotAfter != notAfter {
+		t.Fatalf("sessionNotAfter = %d, want %d", claims.SessionNotAfter, notAfter)
+	}
+	sm := newTestSessionManager()
+	defer sm.Stop()
+	session, err := sm.CreateSession(claims)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.ExpiresAt.Unix() != notAfter {
+		t.Fatalf("session expires at %d, want %d", session.ExpiresAt.Unix(), notAfter)
+	}
+}

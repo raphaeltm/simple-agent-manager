@@ -5,7 +5,11 @@ import type { createAuth } from '../auth';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { expectJsonRecord } from '../lib/runtime-validation';
-import { isAgentSignInSession, isPastHardExpiry } from '../services/agent-sign-in/session-cap';
+import {
+  isAgentSignInSession,
+  isPastHardExpiry,
+  sessionHardExpiry,
+} from '../services/agent-sign-in/session-cap';
 import { withAuthReadDeadline } from '../services/read-auth-session';
 import {
   assertUserAllowedBySignupApproval,
@@ -36,6 +40,8 @@ export interface AuthContext {
      * `rejectAgentSignInSession`.
      */
     agentSignIn: boolean;
+    /** The agent sign-in session's hard expiry; null for an ordinary session. */
+    hardExpiresAt: Date | null;
   };
 }
 
@@ -73,6 +79,11 @@ function resolveSessionStatus(rawStatus: unknown, userId: string): UserStatus {
   return rawStatus as UserStatus;
 }
 
+function hardExpiryDate(sessionRecord: unknown): Date | null {
+  const ms = sessionHardExpiry(sessionRecord);
+  return ms === null ? null : new Date(ms);
+}
+
 type AuthSession = NonNullable<
   Awaited<ReturnType<Awaited<ReturnType<typeof createAuth>>['api']['getSession']>>
 >;
@@ -105,6 +116,7 @@ function buildAuthContext(session: AuthSession): AuthContext {
           : null,
       expiresAt: session.session.expiresAt,
       agentSignIn: isAgentSignInSession(sessionRecord),
+      hardExpiresAt: hardExpiryDate(sessionRecord),
     },
   };
 }
@@ -197,6 +209,16 @@ export function rejectAgentSignInSession(): MiddlewareHandler<{ Bindings: Env }>
     assertNotAgentSignInSession(c);
     await next();
   };
+}
+
+/**
+ * The latest instant a credential minted for this request may stay valid: an agent sign-in
+ * session's hard expiry, so a token it mints (terminal, port access, node management, local
+ * forward) dies with it. Undefined for an ordinary session, whose tokens keep their own lifetime.
+ */
+export function credentialNotAfter(c: Context<{ Bindings: Env }>): Date | undefined {
+  const auth = c.get('auth');
+  return auth?.session.hardExpiresAt ?? undefined;
 }
 
 /** The check behind `rejectAgentSignInSession`, for handlers that refuse only some requests. */
