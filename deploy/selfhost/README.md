@@ -237,26 +237,52 @@ forbidden target is probed over TCP and UDP: a UDP send the fence refuses fails 
 not permitted", which only the local firewall produces, so a target the network would refuse
 anyway still proves the fence. It also checks that celld can resolve a public name, that the
 fence's DNS rule opens every nameserver celld uses, and that the attestation is current.
+Ports 80 and 443 (`HTTP_PORT`/`HTTPS_PORT`) are open to celld on every non-loopback address of
+this host, including Docker's bridge gateway (`172.17.0.1` on docker0), because Caddy listens on
+all of them. The rule matches the port, not Caddy: any other service bound to one of those ports
+on a specific local address (a VPN or LAN interface) is reachable from Worker code too. The
+verifier probes the bridge gateway on celld's operator port, and the private 172.16/12 range at
+an address that is not this host's own.
 
 On GCE with a gs:// bucket, celld needs access tokens from the metadata server, which the fence
 blocks. The `gce` profile runs a small proxy (`metadata-proxy/Caddyfile`) that serves only the
 default service account's access token, only for GET with the `Metadata-Flavor` header, and only
 under a random path prefix that is in celld's environment (`.state/celld.env`) and not in the
-Worker's. Every other metadata path is 404. Whatever scope the caller asks for, the token is
-scoped to Cloud Storage (`GCE_METADATA_PROXY_SCOPES`, default `devstorage.read_write`; only Cloud
-Storage scopes are accepted), so it cannot call Cloud DNS even when the VM's service account can.
-The scope limits the API, not the bucket: the token reaches every bucket the service account has
-IAM access to, so grant that account the fleet bucket only. Caddy's DNS-01 renewals use the
-metadata server directly (Caddy is not fenced) and keep the VM's own scopes.
+Worker's. Every other metadata path is 404.
 
-Worker code cannot read the secret path. Verified on celld 0.6.3 with `nodejs_compat`: `process.env`
+The proxy does NOT narrow what the token can do on GCE. It asks for `GCE_METADATA_PROXY_SCOPES`
+(default `devstorage.read_write`), but the GCE metadata server ignores the `scopes` parameter for
+the default service account: on a real GCE VM with the `cloud-platform` access scope, a token
+fetched through the proxy carried `cloud-platform` (checked with Google's tokeninfo on
+2026-11-11; a direct metadata request with `?scopes=…devstorage.read_write` got `cloud-platform`
+too). Such a token can do everything the VM's service account may do: on the test box that was read,
+write and delete on every bucket in the project and Cloud DNS administration. The protection is
+the path secret, so limit what that token is worth:
+
+- Give the box its own service account, granted `roles/storage.objectAdmin` on the fleet bucket
+  only (a bucket-level binding, not a project role), plus Cloud DNS rights on the install's zone
+  only when `SAM_TLS_MODE=dns-googleclouddns` (Caddy uses the same identity for DNS-01). Even
+  that minimum is read, write and delete on the whole control-plane datastore and every deployed
+  Worker secret. `roles/storage.objectUser` lacks only object ACL/IAM rights; it has not been
+  tested with celld.
+- Do not give that account rights on any other bucket, such as backups or hand-off buckets.
+- Optionally set the VM's access scopes to `devstorage.read_write` (plus
+  `ndev.clouddns.readwrite` for DNS-01) instead of `cloud-platform`. Changing scopes needs the VM
+  stopped.
+
+Caddy's DNS-01 renewals use the metadata server directly (Caddy is not fenced).
+
+Worker code cannot read the secret path. Verified on celld 0.6.3 with `nodejs_compat`, locally and
+on the real GCE box with a gs:// bucket, from code deployed into the Worker: `process.env`
 is an empty stub, `node:fs` is a virtual filesystem (`/proc/self/environ`, `/etc/passwd` and `/`
 are not found), `node:os` returns placeholders, there is no `child_process`, and `file://` fetches
 fail. celld's own log does not contain it at `RUST_LOG=info` or `debug`; it appears in celld's error
 output when the proxy is unreachable (after a redeploy or a proxy crash). Whether a storage error
 that reaches Worker code carries that chain is untested for gs:// (with an unreachable S3 store a
-Worker saw only `Error: write s3://...`); if one did, the secret alone still opens nothing the API
-lets a user reach. The proxy refuses everything when its secret is missing or malformed.
+Worker saw only `Error: write s3://...`). If one ever did, and the error reached a user, that
+user could make the Worker fetch a token through the proxy and send it anywhere (the fence allows
+the public internet): the token can do whatever the service account may do (see above). The proxy
+refuses everything when its secret is missing or malformed.
 
 What the fence cannot separate: Worker code and celld's storage client are one process. A
 Worker can reach the object store endpoint (without the fleet credential it gets nothing; the

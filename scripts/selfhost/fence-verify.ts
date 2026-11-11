@@ -133,7 +133,24 @@ function localTargets(
   ];
 }
 
-function remoteTargets(): VerifyTarget[] {
+/**
+ * A 172.16.0.0/12 address that is not one of this host's own, so the probe exercises the
+ * private-range rule. On a Docker host 172.17.0.1 is local and is refused by "anything else on
+ * this host" first, so it cannot prove the range (security review of #2647).
+ */
+const PRIVATE_172_CANDIDATES = ['172.31.255.254', '172.30.255.254', '172.29.255.254'];
+
+function remotePrivate172(localAddresses: readonly string[]): string {
+  const local = new Set(localAddresses);
+  const free = PRIVATE_172_CANDIDATES.find((address) => !local.has(address));
+  if (!free) throw new Error('every 172.16/12 probe candidate is a local address on this host');
+  return free;
+}
+
+function remoteTargets(
+  box: Readonly<Record<string, string>>,
+  localAddresses: readonly string[]
+): VerifyTarget[] {
   return [
     ...REMOTE_PROBES.map((probe) => ({
       label: probe.name,
@@ -142,8 +159,20 @@ function remoteTargets(): VerifyTarget[] {
       expect: 'blocked' as const,
     })),
     {
-      label: 'private 172.16/12 (Docker bridges)',
+      // On a Docker host 172.17.0.1 is docker0, this host's own address, and the fence opens
+      // ports 80/443 on every local address by design (Caddy binds all of them; reaching it
+      // there is no more than reaching it from the internet). Port 80 there is Caddy, so a
+      // probe on it reported a gap on every Docker box (T8, real GCE). The operator port must
+      // be refused there whether the address is local or remote. The private range itself is
+      // proved by the next target, which is never a local address.
+      label: 'Docker bridge gateway, operator port',
       host: '172.17.0.1',
+      port: composePort(box, 'CELLD_INTERNAL_PORT'),
+      expect: 'blocked',
+    },
+    {
+      label: 'private 172.16/12',
+      host: remotePrivate172(localAddresses),
       port: 80,
       expect: 'blocked',
     },
@@ -166,7 +195,7 @@ export async function verifyTargets(input: TargetInput): Promise<VerifyTarget[]>
   });
   const targets: VerifyTarget[] = [
     ...localTargets(box, own),
-    ...remoteTargets(),
+    ...remoteTargets(box, input.localAddresses),
     allow('node tunnel lease port', '127.0.0.1', range.start),
     allow('public internet', publicHost, Number(publicPort)),
     ...own.map((host) =>
