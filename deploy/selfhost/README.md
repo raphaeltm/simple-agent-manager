@@ -110,6 +110,11 @@ gone when the container restarts. To turn it off: remove the profile from `COMPO
 `docker compose --profile mail-collector rm -sf mail-collector`. Login pages can take a minute to
 stop offering email (the public config is cached for 60 s).
 
+With the celld egress fence (PR #2641), celld must be allowed to reach the collector's SMTP port.
+`mailEgressEndpoints()` in `scripts/selfhost/mail-settings.ts` names it for the fence; until the
+fence reads it, add `SAM_EGRESS_ALLOW=127.0.0.1:1025` (or your `MAIL_COLLECTOR_SMTP_PORT`). A
+relay on the internet needs no entry; a relay on a private address needs one in `SAM_EGRESS_ALLOW`.
+
 **The first account.** On a fresh box with a sender and no OAuth app, set
 `BOOTSTRAP_OWNER_EMAIL=you@example.com` in `.state/secrets.env` before the first deploy; that
 address can then sign up by email at `https://app.SAM_DOMAIN` and becomes the administrator.
