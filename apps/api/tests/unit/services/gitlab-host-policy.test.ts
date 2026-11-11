@@ -73,6 +73,47 @@ describe('GitLab host policy', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('follows a cross-origin public redirect without the token, and succeeds', async () => {
+    configure('https://gitlab.example.com', false);
+    fetchMock.mockResolvedValueOnce(
+      new Response(null, {
+        status: 307,
+        headers: { location: 'https://gitlab-cdn.example.net/api/v4/projects/5' },
+      })
+    );
+    await expect(verifyGitLabProjectAccess({} as Env, 'glpat-secret', 5)).resolves.toMatchObject({
+      gitlabProjectId: 5,
+    });
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      'https://gitlab.example.com/api/v4/projects/5',
+      'https://gitlab-cdn.example.net/api/v4/projects/5',
+    ]);
+    const first = new Headers((fetchMock.mock.calls[0]?.[1] as RequestInit).headers);
+    const hop = new Headers((fetchMock.mock.calls[1]?.[1] as RequestInit).headers);
+    expect(first.get('authorization')).toBe('Bearer glpat-secret');
+    expect(hop.get('authorization')).toBeNull();
+    expect(hop.get('private-token')).toBeNull();
+    expect(hop.get('accept')).toBe('application/json');
+  });
+
+  it('a redirect chain longer than the hop limit is a 502 after exactly limit + 1 requests', async () => {
+    configure('https://gitlab.example.com', false);
+    let hop = 0;
+    fetchMock.mockImplementation(
+      async () =>
+        new Response(null, {
+          status: 302,
+          headers: { location: `https://gitlab.example.com/api/v4/loop/${(hop += 1)}` },
+        })
+    );
+    await expect(verifyGitLabProjectAccess({} as Env, 'glpat', 5)).rejects.toMatchObject({
+      statusCode: 502,
+      error: 'GITLAB_REQUEST_REFUSED',
+    });
+    // outbound.maxRedirects defaults to 3 (settings unreadable here, so the default applies).
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
   it('a redirect to a refused host is a 502 GITLAB_REQUEST_REFUSED through the app error handler', async () => {
     configure('https://gitlab.example.com', false);
     fetchMock.mockResolvedValueOnce(

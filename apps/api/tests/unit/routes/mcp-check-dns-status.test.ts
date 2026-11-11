@@ -47,6 +47,21 @@ describe('check_dns_status', () => {
     expect(resultOf(res)).toMatchObject({ httpStatus: 200, dnsResolved: true, tlsValid: true });
   });
 
+  it('a redirect chain longer than the hop limit is reported after limit + 1 requests', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    let hop = 0;
+    const fetchMock = vi.fn(async () =>
+      redirect(`https://ws-ws1.sam.example.com/loop/${(hop += 1)}`)
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await handleCheckDnsStatus(1, TOKEN, ENV);
+
+    // outbound.maxRedirects defaults to 3 (no settings database here, so the default applies).
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(resultOf(res)).toMatchObject({ status: 'redirect_refused', refusal: 'redirect_limit' });
+  });
+
   it('a redirect to a loopback service is reported, never requested', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const fetchMock = vi.fn(async () => redirect('http://127.0.0.1:7001/'));

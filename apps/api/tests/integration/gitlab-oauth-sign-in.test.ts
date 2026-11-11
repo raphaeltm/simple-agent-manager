@@ -73,7 +73,7 @@ function createFakeNetwork(host: string, options: FakeOptions = {}) {
       issued.add(token);
       return Response.json({ access_token: token, token_type: 'bearer', expires_in: 7200 });
     }
-    if (request.method === 'GET' && url.href === `${host}/api/v4/user`) {
+    if (request.method === 'GET' && `${url.origin}${url.pathname}` === `${host}/api/v4/user`) {
       const bearer = request.headers.get('authorization')?.replace(/^Bearer /i, '') ?? '';
       if (!issued.has(bearer)) return Response.json({ message: '401' }, { status: 401 });
       return options.userResponse?.() ?? Response.json(GITLAB_USER);
@@ -210,6 +210,23 @@ describe('GitLab sign-in through better-auth (vertical slice)', () => {
     expect(network.requests).not.toContain('GET http://127.0.0.1:7001/v1/state');
     // Liveness: the flow did reach GitLab's profile endpoint.
     expect(network.requests).toContain(`GET ${PUBLIC_HOST}/api/v4/user`);
+  });
+
+  it('a profile redirect chain longer than the hop limit ends the sign-in without a session', async () => {
+    let hop = 0;
+    const network = createFakeNetwork(PUBLIC_HOST, {
+      userResponse: () =>
+        new Response(null, {
+          status: 302,
+          headers: { location: `${PUBLIC_HOST}/api/v4/user?hop=${(hop += 1)}` },
+        }),
+    });
+    vi.stubGlobal('fetch', network.fetch);
+    const callback = await signIn(envFor(PUBLIC_HOST), network);
+    expect(callback.headers.get('location')).toContain('error=');
+    expect(sessionCount()).toBe(0);
+    // Token exchange, then the profile request plus outbound.maxRedirects (3) hops.
+    expect(network.requests.filter((r) => r === `GET ${PUBLIC_HOST}/api/v4/user`)).toHaveLength(4);
   });
 
   it('a private GitLab host without the admin opt-in is not offered for sign-in', async () => {
