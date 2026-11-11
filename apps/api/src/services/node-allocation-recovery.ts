@@ -78,8 +78,24 @@ export async function recoverNodeAllocation(
         ? 'Allocation inventory has no exact match; a second create is forbidden'
         : 'Allocation inventory has multiple exact matches; operator recovery is required'
     );
-  const vm = exact[0];
-  if (!vm) throw new NodeAllocationUncertainError();
+  const listed = exact[0];
+  if (!listed) throw new NodeAllocationUncertainError();
+  // Inventory reads may omit native hardware (GCP lists without machineTypes.get). Re-read the
+  // exact instance by id for the observed identity, and require it to be the same resource with
+  // the same exact ownership labels.
+  const vm =
+    listed.observedHardware.resources.source === 'observed'
+      ? listed
+      : await provider.getVM(listed.id, context);
+  if (
+    !vm ||
+    vm.id !== listed.id ||
+    !Object.entries(labels).every(
+      ([key, value]) => !hasAmbiguousLabel(vm.labels, key) && vm.labels[key] === value
+    )
+  ) {
+    throw new NodeAllocationUncertainError('Allocation inventory identity changed during recovery');
+  }
   if (
     (node.providerInstanceId && node.providerInstanceId !== vm.id) ||
     vm.location !== node.vmLocation ||

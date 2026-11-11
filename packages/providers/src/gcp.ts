@@ -23,11 +23,7 @@ import {
   SIZE_MAP,
   withGcpErrorCategory,
 } from './gcp-metadata';
-import {
-  gcpInstanceToObservedVM,
-  gcpInstanceToVM,
-  resolveGcpSourceImage,
-} from './gcp-native-instance';
+import { gcpInstanceToObservedVM, resolveGcpSourceImage } from './gcp-native-instance';
 import type { GcpPriceTable } from './gcp-pricing';
 import { getProviderCatalogOfferings } from './instance-offerings';
 import { resolveVMConfigWithLegacySizeAdapter } from './native-vm-config';
@@ -308,9 +304,10 @@ export class GcpProvider implements Provider {
     throwIfProviderRequestAborted(context);
     const instance = await this.findInstanceByIdOrName(id, context);
     if (!instance) return null;
-    // No machine type lookup: getVM callers check existence and ownership (deletion, orphan
-    // reconciliation), never observed hardware, which is written only from createVM.
-    return gcpInstanceToVM(instance);
+    // With observed hardware: durable allocation recovery adopts a VM whose create response
+    // was cut off, and verifies its native hardware against the persisted plan
+    // (apps/api node-allocation-recovery.ts). One extra machineTypes.get per call.
+    return gcpInstanceToObservedVM(this.api, instance, context);
   }
 
   async listVMs(

@@ -25,6 +25,8 @@ export interface GcpInstancePayload {
   status: string;
   machineType: string;
   creationTimestamp: string;
+  /** Zone URL the instance lives in (`instances` resources always state it). */
+  zone?: string;
   labels?: Record<string, string>;
   networkInterfaces?: GcpNetworkInterfacePayload[];
   /** Size of the boot disk in GB (`disks[boot=true].diskSizeGb`), when the response states it. */
@@ -64,6 +66,7 @@ export function validateGcpInstance(payload: unknown, context: string): GcpInsta
   const labels = optionalStringRecord(root, 'labels', 'gcp', context);
   const networkInterfaces = optionalGcpNetworkInterfaces(root, context);
   const bootDiskSizeGb = gcpBootDiskSizeGb(root);
+  const zone = optionalString(root, 'zone', 'gcp', context);
 
   return {
     id: requireString(root, 'id', 'gcp', context),
@@ -71,6 +74,7 @@ export function validateGcpInstance(payload: unknown, context: string): GcpInsta
     status: requireString(root, 'status', 'gcp', context),
     machineType: requireString(root, 'machineType', 'gcp', context),
     creationTimestamp: requireString(root, 'creationTimestamp', 'gcp', context),
+    ...(zone ? { zone } : {}),
     ...(labels ? { labels } : {}),
     ...(networkInterfaces ? { networkInterfaces } : {}),
     ...(bootDiskSizeGb !== undefined ? { bootDiskSizeGb } : {}),

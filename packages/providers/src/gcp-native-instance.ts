@@ -35,9 +35,13 @@ export function gcpInstanceToVM(
   machineType?: GcpMachineTypeResources | null
 ): VMInstance {
   const machineTypeName = instance.machineType.split('/').pop() || instance.machineType;
+  // Provider-reported location: the zone GCP says the instance lives in (allocation recovery
+  // compares it with the node's persisted vmLocation).
+  const location = instance.zone?.split('/').pop() || undefined;
   return {
     id: instance.id || instance.name,
     name: instance.name,
+    ...(location ? { location } : {}),
     ip: extractIp(instance.networkInterfaces),
     status: mapGcpStatus(instance.status),
     serverType: machineTypeName,

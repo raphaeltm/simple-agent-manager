@@ -152,11 +152,41 @@ recorded as a follow-up idea with the two prerequisites above.
 
 ## Throughput and worst case (rule 81)
 
-Filled in after implementation; see the PR body.
+**Durable direct provisioning.**
+- Each attempt's deadline is `NODE_PROVISIONING_REQUEST_TIMEOUT_MS` (5 s) plus `vmTunnels.provisioningBudgetMs` (20 s) = 25 s.
+- Each Cloudflare or provider request is still capped at 5 s.
+- Attempts run every 30 s, bounded by 30 attempts or 15 min.
+- Tunnel setup is six sequential Cloudflare calls (list, create, ingress PUT, DNS list, CNAME create, token) plus about eight D1 writes. Typically that is 2-4 s, so the tunnel and the VM finish in one attempt.
+- Progress persists per step: `tunnel_id` after the create, then `status='active'` after ingress and CNAME. A resumed `active` row needs only a DNS re-check and the token (two calls).
+- Outer limit, with every call close to its 5 s timeout:
+  - Attempt 1 finishes the list, create, PUT and DNS list (20 s), records `tunnel_id`, and is cut.
+  - Attempt 2, 30 s later, does the PUT, CNAME and token (15 s), then the create POST.
+  - Worst case is therefore about 2 attempts, roughly 60 s, before the provider create starts.
+- The provider phase (all providers, not tunnel-specific):
+  - Hetzner's create returns in 1-3 s.
+  - GCP's create POSTs and then polls the insert operation (10-40 s), so the 5 s request share usually cuts it after the POST.
+  - `providerCreateRequested=true` is recorded before the POST, so the next attempt reconciles the exact inventory and adopts the VM. GCP direct provisioning therefore normally takes 2 attempts (+30 s).
+
+**Unobserved creates.**
+- A row with `pending_create_count > 0` settles once `vmTunnels.pendingCreateSettleMs` (15 min) has passed since the last unobserved POST.
+- Cleanup backoff doubles from 1 min, so the interval spanning the window's end is at most the time already elapsed.
+- Worst case to cleaned is therefore about 2 × settle = 30 min at the defaults (bounded by `cleanupBackoffMaxMs` = 1 h for larger windows). Tested in `node-tunnel-hardening.test.ts` with the real sweep driven sweep by sweep.
+
+**Cleanup sweep.**
+- Each 5-minute cron tick handles up to `cleanupBatchSize` = 10 rows within `cleanupSweepBudgetMs` = 30 s.
+- At most 5 Cloudflare calls per row, about 0.3 s each when healthy: 10 rows per tick, or 120 rows/h.
+- At the outer limit (every call at the 10 s cleanup timeout), about 1 row per tick. The remaining rows stay due, with nothing lost.
+- At 1,000 tunnels per account (Cloudflare quota, inactive tunnels counted), even the degraded rate clears a 100-row backlog in under 9 h.
 
 ## Staging scenario matrix
 
-Filled in during Phase 6, with the provider on every row.
+All rows ran on `app.sammy.party` (staging, `VM_AGENT_TRANSPORT=cloudflare-tunnel`) as the smoke user.
+
+| # | Provider | Path (entry point) | Fault injected | Result | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| S1 | GCP `europe-west1-b` e2-medium | Direct `POST /api/nodes` (NodeLifecycle durable) | `vmTunnels.provisioningBudgetMs=1`, i.e. the incident's 5 s deadline | **Tunnel part PASS; found and fixed a new defect** | Node `01M73XZ9JPMCMEGPYCNEPCV62E` (build 4a… run 42924408696): <ul><li>23:51:33 `attempt_aborted` in phase `ingress` (the incident). The row was not released.</li><li>23:52:02 the resumed attempt finished the tunnel (`node_tunnel.provisioned`), then `attempt_aborted` in `provider_create`.</li><li>23:52:30 `provisioning_resumed` (fast path, 2 calls).</li><li>23:53:01 onward, every attempt failed with `Allocation inventory has no exact match; a second create is forbidden`. The 5 s cut landed after the create-requested mark but before GCP accepted the POST (in its OAuth token exchange), and no VM existed in GCP.</li><li>Fixed in `ca425a898`: once marked, a durable create is not cancelled by the attempt deadline.</li></ul> |
+| S1-teardown | GCP | `DELETE /api/nodes/:id`, then `POST /api/nodes/:id/manual-deletion` | Providerless GCP node | PASS (pre-existing gap recorded) | <ul><li>Strict delete returns 409 for a providerless node on any non-Hetzner provider (`reconcileStrictProviderlessVm`: inventory completeness is guaranteed only for Hetzner). That is pre-existing, so it is filed as backlog.</li><li>Owner attestation returned 200. The sweep cleaned the journal at 00:01:05Z, 75 s later, and the `{node}.vm` CNAME is gone.</li><li>Inline release on attestation was added in `56286ae15`.</li></ul> |
+
 
 ## Spend tracking
 
