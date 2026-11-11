@@ -1324,6 +1324,7 @@
     "VM_AGENT_TUNNEL_LISTENER_WAIT_SECONDS": "Rendered into the connector startup script in VM cloud-init. Existing VMs retain their provisioned script; changing the Worker only affects subsequent VM bootstrap.",
     "VM_AGENT_TUNNEL_PROBE_TIMEOUT_SECONDS": "Rendered into the connector health-probe script in VM cloud-init. Existing VMs retain their provisioned script; changing the Worker only affects subsequent VM bootstrap.",
     "VM_AGENT_TUNNEL_PROBE_INTERVAL_SECONDS": "Rendered into the connector health-probe script in VM cloud-init. Existing VMs retain their provisioned script; changing the Worker only affects subsequent VM bootstrap.",
-    "VM_AGENT_TUNNEL_RESTART_SECONDS": "Rendered into the connector systemd unit at VM bootstrap. Changing this Worker variable cannot update installed units; it applies only to subsequently provisioned VMs."
+    "VM_AGENT_TUNNEL_RESTART_SECONDS": "Rendered into the connector systemd unit at VM bootstrap. Changing this Worker variable cannot update installed units; it applies only to subsequently provisioned VMs.",
+    "AGENT_SIGN_IN_TRUST": "Trust root for agent sign-in through workload identity: which external issuer, source workloads and target accounts may obtain a session. Deploy-time Worker secret only, by design: an admin-editable setting would let a compromised admin account open a sign-in door."
   }
 }

@@ -10,7 +10,12 @@ import { crudRoutes } from '../../src/routes/triggers/crud';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../helpers/sqlite-d1';
 import { seedProjectWithMember, seedUser } from '../unit/routes/capacity-pool-test-seeds';
 
-vi.mock('../../src/middleware/auth', () => ({ getAuth: () => ({ user: { id: 'user' } }) }));
+vi.mock('../../src/middleware/auth', () => ({
+  // Agent sign-in session guards: inert for these ordinary-session route tests.
+  rejectAgentSignInSession: () => async (_c: unknown, next: () => Promise<void>) => next(),
+  assertNotAgentSignInSession: () => undefined,
+  getAuth: () => ({ user: { id: 'user' } }),
+}));
 vi.mock('../../src/services/project-multiplayer', () => ({
   getProjectMultiplayerState: vi.fn().mockResolvedValue({ multiplayerActive: false }),
   clearProjectMultiplayerStateCache: vi.fn(),
@@ -190,7 +195,9 @@ describe('GitHub REST/MCP configuration parity', () => {
     const config = { eventType: 'push', filters: { branches: ['main'] } };
     const updated = await request(`/${created.id}`, 'PATCH', { githubConfig: config });
     expect(updated.status).toBe(200);
-    expect(((await updated.json()) as { githubConfig: unknown }).githubConfig).toMatchObject(config);
+    expect(((await updated.json()) as { githubConfig: unknown }).githubConfig).toMatchObject(
+      config
+    );
     const mcp = parse(await handleUpdateTrigger('2', { triggerId: created.id }, token, env));
     expect(mcp.githubConfig).toMatchObject(config);
     expect(mcp.nextFireAt).toBeNull();
@@ -266,7 +273,9 @@ describe('GitHub REST/MCP configuration parity', () => {
       corrupt();
       const repaired = await request(`/${created.id}`, 'PATCH', { githubConfig: config });
       expect(repaired.status).toBe(200);
-      expect(((await repaired.json()) as { githubConfig: unknown }).githubConfig).toMatchObject(config);
+      expect(((await repaired.json()) as { githubConfig: unknown }).githubConfig).toMatchObject(
+        config
+      );
     }
   );
   it('rejects source-mismatched and malformed REST updates without changing the config', async () => {

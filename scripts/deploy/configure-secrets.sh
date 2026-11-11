@@ -482,6 +482,18 @@ else
   echo -e "${YELLOW}ℹ  Skipping SMOKE_TEST_AUTH_ENABLED (not set — smoke test token auth disabled)${NC}"
 fi
 
+# Agent sign-in through workload identity (optional — test instances only). One JSON secret
+# holds the whole trust configuration (apps/api/src/services/agent-sign-in/config.ts). It is
+# deploy-time only so an admin account cannot turn it on. When the GitHub secret is removed the
+# Worker secret is deleted too, so removing the secret and redeploying switches the feature off.
+AGENT_SIGN_IN_TRUST="${AGENT_SIGN_IN_TRUST:-}"
+if [ -n "$AGENT_SIGN_IN_TRUST" ]; then
+  set_worker_secret "AGENT_SIGN_IN_TRUST" "$AGENT_SIGN_IN_TRUST" "$ENVIRONMENT" "false"
+else
+  echo -e "${YELLOW}ℹ  AGENT_SIGN_IN_TRUST not set — agent sign-in disabled; removing any previous value${NC}"
+  queue_stale_worker_secret_delete "AGENT_SIGN_IN_TRUST"
+fi
+
 # NOTE: Hetzner tokens are NOT platform secrets.
 # Users provide their own tokens through the Settings UI, stored encrypted per-user in the database.
 

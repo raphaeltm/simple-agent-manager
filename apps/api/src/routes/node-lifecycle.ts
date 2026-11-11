@@ -16,7 +16,7 @@ import type { Env } from '../env';
 import { extractBearerToken } from '../lib/auth-helpers';
 import { log } from '../lib/logger';
 import { maybeJsonRecord } from '../lib/runtime-validation';
-import { getUserId } from '../middleware/auth';
+import { credentialNotAfter, getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireNodeOwnership } from '../middleware/node-auth';
 import { jsonValidator, NodeHeartbeatSchema } from '../schemas';
@@ -152,7 +152,9 @@ nodeLifecycleRoutes.post('/:id/token', async (c) => {
     throw errors.badRequest(`Node is not running (status: ${node.status})`);
   }
 
-  const { token, expiresAt } = await signNodeManagementToken(userId, nodeId, null, c.env);
+  const { token, expiresAt } = await signNodeManagementToken(userId, nodeId, null, c.env, {
+    notAfter: credentialNotAfter(c),
+  });
   const nodeAgentUrl = getNodeBackendBaseUrl(nodeId, c.env);
 
   return c.json({ token, expiresAt, nodeAgentUrl });
