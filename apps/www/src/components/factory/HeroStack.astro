@@ -6,15 +6,17 @@
  * assembles it, then lets the cards take turns lighting up while the stack floats and follows the
  * pointer. The markup is the resting frame: no-JS and reduced-motion visitors see it composed.
  */
+import HeroCard from './HeroCard.astro';
 import Shot from './Shot.astro';
 
+// The two big screens are captures; the small cards are HTML (HeroCard) so they stay sharp.
 const planes = [
-  { id: 'machine', shot: 'machine', label: 'Machines in your cloud', z: -150 },
+  { id: 'machine', shot: 'machine', label: 'Machines in your cloud', z: -120 },
   { id: 'app', shot: 'dashboard', label: 'Your team’s work', z: 0 },
-  { id: 'agent', shot: 'agent-chip', label: 'Agents you choose', z: 110 },
-  { id: 'wf', shot: 'wf-chip', label: 'Steps they run', z: 80 },
-  { id: 'review', shot: 'idea-review', label: 'Checks passed', z: 150 },
-  { id: 'needs', shot: 'needs-you', label: 'Needs you', z: 190 },
+  { id: 'agent', card: 'agent', label: 'Agents you choose', z: 80 },
+  { id: 'wf', card: 'wf', label: 'Steps they run', z: 60 },
+  { id: 'review', card: 'review', label: 'Checks passed', z: 110 },
+  { id: 'needs', card: 'needs', label: 'Needs you', z: 140 },
 ] as const;
 ---
 
@@ -24,7 +26,7 @@ const planes = [
       <div class={`hs-plane hs-${p.id}`} style={`--z:${p.z};--i:${i}`} data-plane={p.id}>
         <div class="hs-float">
           <div class="hs-card">
-            <Shot name={p.shot} eager decorative={p.id !== 'app'} />
+            {'shot' in p ? <Shot name={p.shot} eager decorative={p.id !== 'app'} /> : <HeroCard kind={p.card} />}
           </div>
           <span class="hs-fig" aria-hidden="true">{String(i + 1).padStart(2, '0')} · {p.label}</span>
         </div>
@@ -39,16 +41,16 @@ const planes = [
     position: relative;
     width: min(1080px, 100%);
     aspect-ratio: 16 / 10.4;
-    margin-top: 8px;
+    margin-top: 40px;
     perspective: 2000px;
     perspective-origin: 50% 30%;
   }
 
   /* Pose: resting tilt plus the pointer (--rx/--ry). Intro: exploded, seen from above. */
   .hs-stack {
-    --sx: 16deg;
-    --sy: -14deg;
-    --sz: 2deg;
+    --sx: 9deg;
+    --sy: -10deg;
+    --sz: 1deg;
     --sc: 1;
     --spread: 1;
     position: absolute;
@@ -60,12 +62,12 @@ const planes = [
   }
 
   :global([data-motion='intro']) .hs-stack {
-    --sx: 52deg;
+    --sx: 46deg;
     --sy: 0deg;
-    --sz: -28deg;
+    --sz: -24deg;
     --sc: 0.74;
-    --spread: 1.9;
-    --ty: 90px;
+    --spread: 2;
+    --ty: 110px;
   }
 
   .hs-plane {
@@ -156,20 +158,20 @@ const planes = [
   }
 
   .hs-agent {
-    left: 3%;
-    top: 8%;
-    width: 30%;
+    left: 2%;
+    top: 12%;
+    width: 31%;
   }
 
   .hs-wf {
     right: 0;
-    top: 46%;
-    width: 33%;
+    top: 48%;
+    width: 36%;
   }
 
   .hs-review {
-    right: 2%;
-    top: 4%;
+    right: 1%;
+    top: 9%;
     width: 30%;
   }
 
@@ -241,9 +243,9 @@ const planes = [
     }
 
     .hs-stack {
-      --sx: 12deg;
-      --sy: -8deg;
-      --sz: 1deg;
+      --sx: 7deg;
+      --sy: -6deg;
+      --sz: 0.5deg;
     }
 
     .hs-app {
@@ -270,9 +272,9 @@ const planes = [
     }
 
     .hs-needs {
-      left: -2%;
+      left: 8%;
       bottom: 0;
-      width: 72%;
+      width: 70%;
     }
 
     .hs-fig {

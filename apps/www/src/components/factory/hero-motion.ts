@@ -1,7 +1,8 @@
 /**
  * Homepage hero motion: the glass node floor, and the stack of real screens over it.
  *
- * On load the stack is exploded with each layer labelled, then it assembles into its tilted pose.
+ * On load the stack is exploded with each layer labelled; once it is on screen (and its screens
+ * have loaded) it assembles into its tilted pose.
  * While the hero is live the layers float, the stack follows the pointer, and the cards take turns
  * lighting up, each with a matching light on the floor (amber when an agent needs a person, green
  * when work moves on). This runs for more than 5 s, so the hero has a pause control (WCAG 2.2.2);
@@ -37,6 +38,22 @@ const BEATS: { beat: Beat; at: readonly [number, number]; light: 'amber' | 'gree
 const INTRO_HOLD_MS = 1300;
 /** Longest the exploded pose waits for the stack's screens to download before assembling anyway. */
 const IMAGE_WAIT_MS = 2500;
+
+/** Resolves once enough of the element is on screen for the visitor to see it move. */
+function inView(el: HTMLElement | null, ratio = 0.3): Promise<void> {
+  if (!el || !('IntersectionObserver' in window)) return Promise.resolve();
+  return new Promise((resolve) => {
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((e) => e.isIntersecting && e.intersectionRatio >= ratio)) return;
+        io.disconnect();
+        resolve();
+      },
+      { threshold: [ratio] },
+    );
+    io.observe(el);
+  });
+}
 
 /** Resolves once every screen in the stack has decoded (in the active theme), or after the wait. */
 function stackImagesReady(stack: HTMLElement | null): Promise<void> {
@@ -137,8 +154,9 @@ export function initFactoryHero(hero: HTMLElement) {
     hero.dataset.motion = 'intro';
     void hero.offsetHeight;
     requestAnimationFrame(() => requestAnimationFrame(() => hero.removeAttribute('data-motion-snap')));
-    // Hold the exploded pose until the screens have arrived, so they never assemble empty.
-    void stackImagesReady(stack).then(() => {
+    // Hold the exploded pose until the screens have arrived and the stack is on screen, so the
+    // visitor sees it assemble (and it never assembles empty).
+    void Promise.all([stackImagesReady(stack), inView(stage)]).then(() => {
       introTimers = [
         window.setTimeout(() => {
           hero.dataset.motion = 'assembling';

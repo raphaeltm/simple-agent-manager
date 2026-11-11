@@ -1,0 +1,394 @@
+---
+/**
+ * A small SAM UI card for the hero stack, rendered as HTML so it stays sharp at any size and
+ * follows the site theme. Each one mirrors a real component and its mock data (Northwind Labs):
+ * the Ideas "needs you" card, an idea's "In review" status, a profile row in the new-chat picker,
+ * and a workflow's step graph. Text sizes use container units, so a card scales with its plane.
+ */
+interface Props {
+  kind: 'needs' | 'review' | 'agent' | 'wf';
+}
+
+const { kind } = Astro.props;
+---
+
+<div class={`hc hc--${kind}`}>
+  <div class="hc-in">
+    {kind === 'needs' && (
+      <>
+        <p class="hc-crumb">
+          <svg class="hc-ico hc-ico--amber" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M9.5 9.2a2.6 2.6 0 0 1 5 .9c0 1.7-2.5 2.4-2.5 3.9" /><path d="M12 17h.01" /></svg>
+          Retry failed webhook deliveries <span class="hc-chev">›</span>
+        </p>
+        <p class="hc-title">Careful Builder asked you something</p>
+        <p class="hc-body">Stripe gives up after 3 days. Should we match that, or cap retries at 5 attempts?</p>
+        <span class="hc-btn hc-btn--pulse">Answer</span>
+      </>
+    )}
+    {kind === 'review' && (
+      <div class="hc-row">
+        <span class="hc-tile">
+          <svg class="hc-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="2.5" /><circle cx="18" cy="18" r="2.5" /><path d="M6 8.5v13" /><path d="M11 6h4a3 3 0 0 1 3 3v6.5" /></svg>
+        </span>
+        <div>
+          <p class="hc-title">In review</p>
+          <p class="hc-body hc-body--strong">PR #482 is open, checks passed</p>
+          <p class="hc-meta">From GitHub, 2 minutes ago</p>
+          <span class="hc-btn">Review PR #482</span>
+        </div>
+      </div>
+    )}
+    {kind === 'agent' && (
+      <div class="hc-row hc-row--center">
+        <span class="hc-ring" aria-hidden="true"><span>O</span></span>
+        <div>
+          <p class="hc-name">Careful Builder</p>
+          <p class="hc-meta">Claude · Opus 5.5 · high effort</p>
+        </div>
+        <span class="hc-left">72% left</span>
+      </div>
+    )}
+    {kind === 'wf' && (
+      <div class="hc-graph">
+        <svg class="hc-wires" viewBox="0 0 100 60" preserveAspectRatio="none" aria-hidden="true">
+          <path d="M50 22 C50 32, 25 30, 25 38" />
+          <path class="hc-wire-live" d="M50 22 C50 32, 75 30, 75 38" />
+        </svg>
+        <div class="hc-node hc-node--top">
+          <p class="hc-node-title"><span class="hc-check">✓</span> 1 Build the retry schedule</p>
+          <p class="hc-node-meta"><b class="hc-ok">Done</b> · Careful Builder</p>
+        </div>
+        <div class="hc-node hc-node--left hc-node--done">
+          <p class="hc-node-title"><span class="hc-check">✓</span> 2 Review the code</p>
+          <p class="hc-node-meta"><b class="hc-ok">Done</b> · Code Reviewer</p>
+        </div>
+        <div class="hc-node hc-node--right" data-wf-step>
+          <p class="hc-node-title"><span class="hc-spin" aria-hidden="true"></span><span class="hc-check hc-check--late">✓</span> 3 Try it against a flaky endpoint</p>
+          <p class="hc-node-meta"><b class="hc-run">Running</b><b class="hc-ok hc-ok--late">Done</b> · Careful Builder</p>
+        </div>
+      </div>
+    )}
+  </div>
+</div>
+
+<style>
+  .hc {
+    --hc-surface: #121c19;
+    --hc-line: rgb(255 255 255 / 0.1);
+    --hc-ink: #e6f2ee;
+    --hc-muted: #9fb7ae;
+    --hc-green: #22c55e;
+    --hc-btn: #16a34a;
+    --hc-amber: #f59e0b;
+    --hc-violet: #c084fc;
+    container-type: inline-size;
+    text-align: left;
+    color: var(--hc-ink);
+    background: var(--hc-surface);
+  }
+
+  :global(html[data-theme='light']) .hc {
+    --hc-surface: #fbfdfb;
+    --hc-line: rgb(17 39 29 / 0.14);
+    --hc-ink: #11271d;
+    --hc-muted: #4e6158;
+    --hc-green: #15803d;
+    --hc-btn: #15803d;
+    --hc-amber: #b45309;
+    --hc-violet: #7e22ce;
+  }
+
+  .hc-in {
+    display: grid;
+    gap: 0.5em;
+    padding: 1.15em 1.3em;
+    font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    line-height: 1.35;
+  }
+
+  .hc p {
+    margin: 0;
+  }
+
+  .hc-ico {
+    width: 1.25em;
+    height: 1.25em;
+    flex: none;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .hc-ico--amber {
+    color: var(--hc-amber);
+  }
+
+  .hc-title {
+    font-weight: 700;
+    font-size: 1.12em;
+  }
+
+  .hc-body {
+    color: var(--hc-muted);
+  }
+
+  .hc-body--strong {
+    color: var(--hc-ink);
+  }
+
+  .hc-meta {
+    font-size: 0.85em;
+    color: var(--hc-muted);
+  }
+
+  .hc-btn {
+    justify-self: start;
+    display: inline-block;
+    margin-top: 0.35em;
+    padding: 0.5em 1em;
+    border-radius: 0.55em;
+    font-weight: 700;
+    color: #fff;
+    background: var(--hc-btn);
+    box-shadow: 0 0 0 0 transparent;
+  }
+
+  .hc-row {
+    display: flex;
+    gap: 0.9em;
+    align-items: flex-start;
+  }
+
+  .hc-row > div {
+    display: grid;
+    gap: 0.25em;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .hc-row--center {
+    align-items: center;
+  }
+
+  /* ---- needs you ---- */
+  .hc--needs {
+    background: color-mix(in srgb, var(--hc-amber) 9%, var(--hc-surface));
+  }
+
+  .hc--needs .hc-in {
+    font-size: 3.1cqi;
+  }
+
+  .hc-crumb {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    font-weight: 700;
+    font-size: 0.92em;
+  }
+
+  .hc-chev {
+    color: var(--hc-green);
+  }
+
+  /* ---- in review ---- */
+  .hc--review .hc-in {
+    font-size: 4.1cqi;
+  }
+
+  .hc-tile {
+    display: grid;
+    place-items: center;
+    width: 2.6em;
+    height: 2.6em;
+    flex: none;
+    border-radius: 0.6em;
+    color: var(--hc-violet);
+    background: color-mix(in srgb, var(--hc-violet) 16%, transparent);
+  }
+
+  /* ---- agent profile ---- */
+  .hc--agent .hc-in {
+    font-size: 4.2cqi;
+    padding-block: 0.9em;
+  }
+
+  .hc-ring {
+    display: grid;
+    place-items: center;
+    width: 2.6em;
+    height: 2.6em;
+    flex: none;
+    border-radius: 50%;
+    background:
+      radial-gradient(closest-side, var(--hc-surface) 76%, transparent 78%),
+      conic-gradient(var(--hc-green) 0 72%, var(--hc-line) 72% 100%);
+  }
+
+  .hc-ring span {
+    display: grid;
+    place-items: center;
+    width: 1.7em;
+    height: 1.7em;
+    border-radius: 50%;
+    font-weight: 700;
+    color: var(--hc-amber);
+    background: color-mix(in srgb, var(--hc-amber) 14%, transparent);
+  }
+
+  .hc-name {
+    font-size: 1.12em;
+    font-weight: 600;
+  }
+
+  .hc-left {
+    font-size: 0.85em;
+    color: var(--hc-green);
+    white-space: nowrap;
+  }
+
+  /* ---- workflow ---- */
+  .hc--wf .hc-in {
+    font-size: 2.6cqi;
+    padding: 1.4em 1.2em;
+  }
+
+  .hc-graph {
+    position: relative;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto auto;
+    gap: 2.6em 1.1em;
+  }
+
+  .hc-wires {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    fill: none;
+    stroke: var(--hc-line);
+    stroke-width: 0.8;
+    vector-effect: non-scaling-stroke;
+    overflow: visible;
+  }
+
+  .hc-wire-live {
+    stroke: var(--hc-green);
+    stroke-dasharray: 4 4;
+  }
+
+  .hc-node {
+    position: relative;
+    display: grid;
+    gap: 0.4em;
+    padding: 0.8em 0.95em;
+    border-radius: 0.8em;
+    background: var(--hc-surface);
+    border: 1px solid var(--hc-line);
+  }
+
+  .hc-node--top {
+    grid-column: 1 / 3;
+    justify-self: center;
+    width: 52%;
+  }
+
+  .hc-node--done {
+    border: 2px solid var(--hc-green);
+  }
+
+  .hc-node--right {
+    border-color: color-mix(in srgb, var(--hc-green) 60%, transparent);
+  }
+
+  .hc-node-title {
+    display: flex;
+    gap: 0.45em;
+    font-weight: 700;
+  }
+
+  .hc-node-meta {
+    font-size: 0.88em;
+    color: var(--hc-muted);
+  }
+
+  .hc-ok {
+    color: var(--hc-green);
+  }
+
+  .hc-run {
+    color: var(--hc-green);
+  }
+
+  .hc-check {
+    color: var(--hc-green);
+  }
+
+  .hc-spin {
+    display: inline-block;
+    flex: none;
+    width: 0.95em;
+    height: 0.95em;
+    margin-top: 0.15em;
+    border-radius: 50%;
+    border: 2px solid color-mix(in srgb, var(--hc-green) 30%, transparent);
+    border-top-color: var(--hc-green);
+  }
+
+  .hc-check--late,
+  .hc-ok--late {
+    display: none;
+  }
+
+  /* ---- Live touches (only while the hero is live and not paused) ---- */
+  :global([data-motion='live']:not([data-paused])) .hc-spin {
+    animation: hc-spin 0.9s linear infinite;
+  }
+
+  :global([data-motion='live']:not([data-paused])) .hc-wire-live {
+    animation: hc-flow 1.2s linear infinite;
+  }
+
+  /* When its beat comes round, the running step finishes. */
+  :global([data-beat='wf']) [data-wf-step] .hc-spin,
+  :global([data-beat='wf']) [data-wf-step] .hc-run {
+    display: none;
+  }
+
+  :global([data-beat='wf']) [data-wf-step] .hc-check--late,
+  :global([data-beat='wf']) [data-wf-step] .hc-ok--late {
+    display: inline;
+  }
+
+  :global([data-beat='wf']) [data-wf-step] {
+    border: 2px solid var(--hc-green);
+  }
+
+  :global([data-motion='live']:not([data-paused]) [data-beat='needs']) .hc-btn--pulse {
+    animation: hc-pulse 1.3s ease-out 2;
+  }
+
+  @keyframes hc-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @keyframes hc-flow {
+    to {
+      stroke-dashoffset: -16;
+    }
+  }
+
+  @keyframes hc-pulse {
+    0% {
+      box-shadow: 0 0 0 0 color-mix(in srgb, var(--hc-btn) 60%, transparent);
+    }
+    100% {
+      box-shadow: 0 0 0 0.9em transparent;
+    }
+  }
+</style>

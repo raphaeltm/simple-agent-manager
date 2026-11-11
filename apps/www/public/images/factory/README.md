@@ -1,6 +1,6 @@
 # Software-factory homepage images
 
-Real SAM screens for `src/components/factory/`, each in a dark (`<name>.webp`) and light
+Real SAM screens for `src/components/factory/` (the hero's small cards are HTML, `HeroCard.astro`), each in a dark (`<name>.webp`) and light
 (`<name>-light.webp`) variant. Captured 2026-11-11 from the current app with mocked Northwind Labs data.
 
 ## How they were made
@@ -23,10 +23,8 @@ Real SAM screens for `src/components/factory/`, each in a dark (`<name>.webp`) a
 | Image | Source capture | Crop `[left, top, width, height]` | Padding | Width |
 | --- | --- | --- | --- | --- |
 | dashboard | sam-dashboard-overview | full | 0 | 1800 |
-| needs-you | ideas-list-1440 | 0, 404, 1548, 360 | 28 | 900 |
 | ideas | ideas-list-1440 | 0, 0, 2284, 1650 | 48 | 1300 |
 | ideas-phone | phone ideas-list-mobile-375 | 0, 140, 750, 1230 | 0 | 750 |
-| idea-review | idea-page-1440 | 1512, 100, 772, 330 | 28 | 700 |
 | idea-page | idea-page-1440 | 0, 0, 2284, 1060 | 48 | 1400 |
 | idea-page-phone | phone idea-page-mobile-375 | 0, 160, 750, 900 | 0 | 750 |
 | comment-reader | comment-reader-1440 | 0, 0, 2348, 1100 | 48 | 1300 |

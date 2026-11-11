@@ -16,11 +16,6 @@ export const factoryShots = {
     height: 1125,
     alt: "The SAM home screen: active tasks across the Payments, Merchant Portal and Ledger projects, some in progress, one sleeping, two queued",
   },
-  'needs-you': {
-    width: 900,
-    height: 233,
-    alt: "An idea that needs you: Careful Builder asked a question about retrying failed webhook deliveries, with an Answer button",
-  },
   'ideas': {
     width: 1300,
     height: 954,
@@ -30,11 +25,6 @@ export const factoryShots = {
     width: 750,
     height: 1230,
     alt: "The Ideas page on a phone: an agent's question, a failed run and a merged pull request, each with its next step as a button",
-  },
-  'idea-review': {
-    width: 700,
-    height: 326,
-    alt: "An idea in review: PR #482 is open and its checks passed, with a Review PR button",
   },
   'idea-page': {
     width: 1400,
@@ -100,16 +90,6 @@ export const factoryShots = {
     width: 856,
     height: 939,
     alt: "Who can deploy to staging: agents can deploy here, only these two profiles, Claude Code Opus 5 and Codex 5.5 High",
-  },
-  'wf-chip': {
-    width: 640,
-    height: 309,
-    alt: 'Workflow steps: build the retry schedule, done; review the code, done; try it against a flaky endpoint, running',
-  },
-  'agent-chip': {
-    width: 560,
-    height: 94,
-    alt: 'The Careful Builder profile: Claude, Opus 5.5, high effort, with a ring showing how much of its account is left',
   },
 } satisfies Record<string, FactoryShot>;
 
