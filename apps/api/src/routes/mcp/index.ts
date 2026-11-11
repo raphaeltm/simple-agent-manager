@@ -28,6 +28,7 @@ import {
   METHOD_NOT_FOUND,
 } from './_helpers';
 import { isAutoLinkTool, scheduleToolAutoLink } from './auto-link-tools';
+import { handleCheckDnsStatus } from './check-dns-status';
 import {
   handleCreateMessageCommentThread,
   handleGetMessageCommentThread,
@@ -75,11 +76,7 @@ import {
   handleGetWorkspaceDiffSummary,
   handleGetWorkspaceInfo,
 } from './workspace-tools';
-import {
-  handleCheckDnsStatus,
-  handleGetTaskDependencies,
-  handleReportEnvironmentIssue,
-} from './workspace-tools-direct';
+import { handleGetTaskDependencies, handleReportEnvironmentIssue } from './workspace-tools-direct';
 
 // Re-export public API for backward compatibility
 export type { TokenRow } from './session-tools';

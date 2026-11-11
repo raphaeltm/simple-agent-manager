@@ -1667,7 +1667,7 @@ lifecycle bookkeeping.
 
 ### Outbound requests to URLs a user or admin chose
 
-SAM never lets the runtime follow a redirect for a URL a user or admin chose (AI proxy base URLs, the OpenAI-compatible endpoint, GitLab, `check_dns_status`). It checks every hop itself (`apps/api/src/lib/network-hosts/guarded-fetch.ts`). A hop to another origin keeps only `Accept`, `Accept-Language`, `Content-Type`, `Content-Language` and `User-Agent`; every other header, including any credential, is dropped.
+SAM never lets the runtime follow a redirect for a URL a user or admin chose (AI proxy base URLs, the OpenAI-compatible endpoint, GitLab, `check_dns_status`). It checks every hop itself (`apps/api/src/lib/network-hosts/guarded-fetch.ts`). A hop to another origin keeps only `Accept`, `Accept-Language`, `Content-Type`, `Content-Language` and `User-Agent`; every other header, including any credential, is dropped. A 307 or 308 that would carry a request body to another origin is refused. `check_dns_status` follows only redirects that stay on the workspace's own origin and reports any other redirect with its status, without requesting it.
 
 | Admin setting | Default | Meaning |
 | --- | --- | --- |
