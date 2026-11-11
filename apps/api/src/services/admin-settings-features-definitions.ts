@@ -1,5 +1,6 @@
 import { DEFAULT_COMMENT_NOTIFICATION_WINDOW_MS } from '@simple-agent-manager/shared';
 
+import { DEFAULT_USER_ACCESS_TOKEN_LOCK_TIMEOUT_MS } from '../durable-objects/user-access-token-lock-config';
 import {
   type AdminSettingDefinition,
   DEFAULT_COMMENT_CONTEXT_MAX_ROWS,
@@ -146,6 +147,13 @@ export const FEATURE_SETTINGS: AdminSettingDefinition[] = [
     'Operations',
     'Maximum milliseconds for GitHub installation discovery.',
     { min: 100, max: 120_000 }
+  ),
+  integerDefinition(
+    'performance.userAccessTokenLockTimeoutMs',
+    DEFAULT_USER_ACCESS_TOKEN_LOCK_TIMEOUT_MS,
+    'Operations',
+    'Maximum milliseconds one GitHub or GitLab user-token lookup may hold its per-user lock before later lookups proceed.',
+    { min: 1_000, max: 120_000 }
   ),
   integerDefinition(
     'performance.projectRecentTimeoutMs',

@@ -4,7 +4,10 @@ import * as v from 'valibot';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { readResponseJson } from '../lib/runtime-validation';
+import { resolveAdminSetting } from '../services/admin-settings-resolution';
+import { IoTimeoutError, withDeadline } from '../services/fetch-timeout';
 import { getBetterAuthAccessTokenForProvider } from '../services/user-access-token';
+import { DEFAULT_USER_ACCESS_TOKEN_LOCK_TIMEOUT_MS } from './user-access-token-lock-config';
 
 const requestSchema = v.object({
   userId: v.string(),
@@ -25,6 +28,23 @@ type TokenLockPayload = v.InferOutput<typeof requestSchema>;
  * the DO lock because reading before acquiring the lock would let overlapping
  * callers race with the same stale refresh token.
  *
+ * The lock is an in-memory promise chain, so a lookup that never settles would
+ * queue every later lookup by the same user behind it until the object restarts.
+ * On the self-hosted celld runtime that happened whenever a browser aborted a
+ * request mid-lookup: celld cancels the Durable Object event and drops its pending
+ * I/O promises without settling them, unless the event has `waitUntil` work. One
+ * aborted page load made every chat send for that user hang for 80 minutes. Two
+ * guards keep the chain moving:
+ *
+ * 1. Each lookup is registered with `ctx.waitUntil`, so a caller that goes away
+ *    does not orphan the lookup it started (celld keeps a `waitUntil` event's I/O).
+ * 2. Each waiter bounds both its wait for the previous holder and its own lookup by
+ *    `performance.userAccessTokenLockTimeoutMs`, measured with timers it owns. A
+ *    deadline created inside the holder would be dropped with the holder's other
+ *    I/O, so it cannot be the only guard. A waiter that outlasts a stuck holder
+ *    proceeds; a stuck holder that later wakes could then overlap it, which is far
+ *    less harmful than a user who can never get a token again.
+ *
  * Subclasses only supply the BetterAuth provider id; the exported subclass
  * names are bound in wrangler.toml and must not change.
  */
@@ -33,12 +53,21 @@ export abstract class UserAccessTokenLock extends DurableObject<Env> {
 
   private refreshLock: Promise<unknown> = Promise.resolve();
 
-  private withRefreshLock<T>(fn: () => Promise<T>): Promise<T> {
-    const run = this.refreshLock.then(() => fn());
+  private withRefreshLock<T>(
+    fn: () => Promise<T>,
+    timeoutMs: number,
+    onStaleHolder: () => void
+  ): Promise<T> {
+    const previous = this.refreshLock;
+    const run = waitForHolder(previous, timeoutMs, onStaleHolder).then(() =>
+      withDeadline(() => fn(), timeoutMs)
+    );
     this.refreshLock = run.then(
       () => undefined,
       () => undefined
     );
+    // Keep the lookup alive if the caller disconnects (see the class comment).
+    this.ctx.waitUntil(this.refreshLock);
     return run;
   }
 
@@ -60,7 +89,34 @@ export abstract class UserAccessTokenLock extends DurableObject<Env> {
       return Response.json({ error: 'invalid_request' }, { status: 400 });
     }
 
-    return this.withRefreshLock(() => this.getAccessToken(payload));
+    // Resolved before queueing, so a slow settings read never holds the lock.
+    const timeoutMs = await this.lockTimeoutMs();
+    const context = { flow: payload.flow, userId: payload.userId, timeoutMs };
+    try {
+      return await this.withRefreshLock(
+        () => this.getAccessToken(payload),
+        timeoutMs,
+        () =>
+          log.warn(`${this.providerId}.user_access_token_lock.stale_holder`, {
+            ...context,
+            action: 'proceeded',
+          })
+      );
+    } catch (err) {
+      if (!(err instanceof IoTimeoutError)) throw err;
+      log.warn(`${this.providerId}.user_access_token_lock.timeout`, {
+        ...context,
+        action: 'released_lock',
+      });
+      return Response.json({ error: 'token_lock_timeout' }, { status: 503 });
+    }
+  }
+
+  private async lockTimeoutMs(): Promise<number> {
+    const value = Number(
+      await resolveAdminSetting(this.env, 'performance.userAccessTokenLockTimeoutMs')
+    );
+    return Number.isFinite(value) && value > 0 ? value : DEFAULT_USER_ACCESS_TOKEN_LOCK_TIMEOUT_MS;
   }
 
   private async getAccessToken(payload: TokenLockPayload): Promise<Response> {
@@ -94,4 +150,23 @@ export abstract class UserAccessTokenLock extends DurableObject<Env> {
       return Response.json({ error: 'token_unavailable' }, { status: 401 });
     }
   }
+}
+
+/**
+ * Wait for the previous lock holder, but no longer than `timeoutMs`, using a timer this
+ * waiter owns. Never rejects: a failed or stuck holder must not fail the next lookup.
+ */
+function waitForHolder(
+  previous: Promise<unknown>,
+  timeoutMs: number,
+  onStale: () => void
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const stale = new Promise<'stale'>((resolve) => {
+    timer = setTimeout(() => resolve('stale'), timeoutMs);
+  });
+  return Promise.race([previous.then(() => 'settled' as const), stale]).then((outcome) => {
+    clearTimeout(timer);
+    if (outcome === 'stale') onStale();
+  });
 }
