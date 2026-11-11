@@ -14,6 +14,7 @@ import {
   metadataProxyScopes,
   parseNameservers,
   renderCelldEnv,
+  renderDnsRules,
   renderFenceRuleset,
   resolveObjectStoreEndpoints,
 } from './egress-fence.js';
@@ -54,18 +55,19 @@ describe('egress fence ruleset', () => {
     }
   });
 
-  it('allows DNS only to the nameserver sets, seeded from resolv.conf, before the link-local drop', () => {
+  it('allows DNS only to the nameservers, in chain dns, jumped to before any refusal', () => {
     const rules = renderFenceRuleset(plan());
     expect(rules).toContain(
-      '  set dns4 {\n    type ipv4_addr\n    elements = { 127.0.0.53, 169.254.169.254 }\n  }'
+      '  chain dns {\n    ip daddr { 127.0.0.53, 169.254.169.254 } meta l4proto { tcp, udp } th dport 53 accept comment "DNS"\n  }'
     );
-    expect(rules).toContain('  set dns6 {\n    type ipv6_addr\n  }');
-    const dns = rules.indexOf('ip daddr @dns4 meta l4proto { tcp, udp } th dport 53 accept');
-    expect(dns).toBeGreaterThan(0);
-    expect(
-      rules.indexOf('ip6 daddr @dns6 meta l4proto { tcp, udp } th dport 53 accept')
-    ).toBeGreaterThan(0);
-    expect(dns).toBeLessThan(rules.indexOf('169.254.0.0/16'));
+    expect(rules.indexOf('jump dns')).toBeGreaterThan(0);
+    expect(rules.indexOf('jump dns')).toBeLessThan(rules.indexOf('counter reject'));
+    // Anonymous sets only: Debian 12's nft 1.0.6 crashes listing a named set a newer nft created.
+    expect(rules).not.toMatch(/^\s*set /m);
+    expect(renderDnsRules(['10.0.0.2', 'fd00::53'])).toEqual([
+      'ip daddr { 10.0.0.2 } meta l4proto { tcp, udp } th dport 53 accept comment "DNS"',
+      'ip6 daddr { fd00::53 } meta l4proto { tcp, udp } th dport 53 accept comment "DNS"',
+    ]);
   });
 
   it('refuses this host and every forbidden range, in the right family, after every accept', () => {

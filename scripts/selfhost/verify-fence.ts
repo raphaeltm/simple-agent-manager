@@ -17,13 +17,12 @@ import { networkInterfaces } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
-import * as v from 'valibot';
-
 import { resolveTunnelPortRange } from './box-settings.js';
 import { EGRESS_FENCE_TABLE, parseNameservers } from './egress-fence.js';
 import { buildProbeScript, parseProbeOutput, type ProbeOutcome } from './fence-probes.js';
 import {
   attestationProblem,
+  dnsChainAddresses,
   judgeTargets,
   missingNameservers,
   probeSpecs,
@@ -91,20 +90,20 @@ function probe(
   return parseProbeOutput(inContainer(name, ['bash', '-c', script], user).output);
 }
 
-/** The nameservers in the applied dns4/dns6 sets, from the fence service. */
+/** The nameservers chain `dns` of the applied fence opens, from the fence service; null if unreadable. */
 function appliedNameservers(envFile: string): string[] | null {
   const listed = compose(envFile, [
     'exec',
     '-T',
     'egress-fence',
     'nft',
-    '-j',
     'list',
-    'table',
+    'chain',
     'inet',
     EGRESS_FENCE_TABLE,
+    'dns',
   ]);
-  return listed.status === 0 ? dnsSetElements(JSON.parse(listed.output) as unknown) : null;
+  return listed.status === 0 ? dnsChainAddresses(listed.output) : null;
 }
 
 /** celld's resolv.conf: the running celld container's, else the probe container's. */

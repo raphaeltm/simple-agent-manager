@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { buildProbeScript, parseProbeOutput, type ProbeOutcome } from './fence-probes.js';
 import {
   attestationProblem,
+  dnsChainAddresses,
   judgeTargets,
   missingNameservers,
   probeSpecs,
@@ -214,20 +215,18 @@ describe('probe script', () => {
   });
 });
 
-describe('applied DNS sets', () => {
-  it('reads the dns4/dns6 elements from nft -j output and ignores everything else', async () => {
-    const { dnsSetElements } = await import('./verify-fence.js');
-    expect(
-      dnsSetElements({
-        nftables: [
-          { metainfo: {} },
-          { set: { name: 'dns4', elem: ['127.0.0.53', '169.254.169.254'] } },
-          { set: { name: 'dns6' } },
-          { set: { name: 'other', elem: ['10.0.0.1'] } },
-          { rule: {} },
-        ],
-      })
-    ).toEqual(['127.0.0.53', '169.254.169.254']);
-    expect(dnsSetElements('garbage')).toEqual([]);
+describe('applied DNS rules', () => {
+  it('reads the nameservers chain dns opens, single address or set, and nothing else', () => {
+    const listing = [
+      'table inet sam_celld_egress {',
+      '\tchain dns {',
+      '\t\tip daddr { 127.0.0.53, 169.254.169.254 } meta l4proto { tcp, udp } th dport 53 accept comment "DNS"',
+      '\t\tip6 daddr fd00::53 meta l4proto { tcp, udp } th dport 53 accept comment "DNS"',
+      '\t\tip daddr 10.0.0.1 tcp dport 80 accept',
+      '\t}',
+      '}',
+    ].join('\n');
+    expect(dnsChainAddresses(listing)).toEqual(['127.0.0.53', '169.254.169.254', 'fd00::53']);
+    expect(dnsChainAddresses('Error: No such file or directory')).toEqual([]);
   });
 });

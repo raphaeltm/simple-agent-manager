@@ -203,3 +203,12 @@ export function attestationProblem(
     ? `the fence service's attestation is ${age}s old (limit ${maxAgeSeconds}s)`
     : null;
 }
+
+/** Nameserver addresses opened by chain `dns` in `nft list chain inet <table> dns` output. */
+export function dnsChainAddresses(listing: string): string[] {
+  return listing.split('\n').flatMap((line) => {
+    const match = /daddr (?:\{ ([^}]*) \}|(\S+)) .*th dport 53 accept/.exec(line);
+    const addresses = match?.[1] ?? match?.[2];
+    return addresses ? addresses.split(',').map((address) => address.trim()) : [];
+  });
+}

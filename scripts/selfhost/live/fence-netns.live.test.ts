@@ -193,11 +193,11 @@ describe.skipIf(unavailable !== null)('egress fence in a network namespace', () 
 
     it('follows a nameserver change, so DNS is not cut off silently', async () => {
       writeFileSync(resolvFile, 'nameserver 192.168.255.1\n');
-      await waitFor(() => /set dns4 \{[^}]*192\.168\.255\.1/s.test(table()), 5000);
+      await waitFor(() => /chain dns \{\n[^\n]*192\.168\.255\.1[^\n]*dport 53/.test(table()), 5000);
       expect(probe([{ host: '192.168.255.1', port: 53 }], FENCED_UID).get(0)).not.toBe('blocked');
       expect(probe([{ host: '10.99.0.2', port: 53 }], FENCED_UID).get(0)).toBe('blocked');
       writeFileSync(resolvFile, 'nameserver 10.99.0.2\n');
-      await waitFor(() => /set dns4 \{[^}]*10\.99\.0\.2/s.test(table()), 5000);
+      await waitFor(() => /chain dns \{\n[^\n]*10\.99\.0\.2[^\n]*dport 53/.test(table()), 5000);
     });
 
     it('celld starts under the full fence, and is killed within the check window when it goes', async () => {

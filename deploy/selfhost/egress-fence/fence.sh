@@ -8,10 +8,10 @@
 #          attestation file celld's entrypoint requires (celld/start.sh)
 #   check  exit 0 only when the table is present and matches what was applied (healthcheck)
 #
-# DNS: the rules file declares sets dns4/dns6 that open port 53 only. This keeps them equal to
-# the nameservers in this container's resolv.conf (a host-network container gets the same one
-# celld does) plus the host's own file, so a resolver change re-opens DNS instead of silently
-# cutting celld off. Port 53 on a nameserver is the only thing that path opens.
+# DNS: the rules file has a chain `dns` that opens port 53 on the nameservers only. This keeps
+# it equal to the nameservers in this container's resolv.conf (a host-network container gets the
+# same one celld does) plus the host's own file, so a resolver change re-opens DNS instead of
+# silently cutting celld off. Port 53 on a nameserver is the only thing that path opens.
 #
 # Stopping this container does not remove the fence, but celld stops once the attestation is
 # older than its limit (fail closed: nothing is watching the table any more).
@@ -38,20 +38,22 @@ nameservers() {
   done | grep -E '^([0-9]{1,3}(\.[0-9]{1,3}){3}|[0-9a-fA-F:.]*:[0-9a-fA-F:.]*)$' | sort -u || true
 }
 
-# Replaces the dns4/dns6 sets in one transaction; keeps the rendered ones if none were found.
+# Replaces the rules of chain `dns` in one transaction; keeps the rendered ones if none were
+# found. Same rule text as renderDnsRules() in scripts/selfhost/egress-fence.ts.
 sync_dns() {
   servers="$(nameservers)"
   if [ -z "$servers" ]; then
-    log "no nameserver in $RESOLV_FILES; keeping the rendered DNS sets"
+    log "no nameserver in $RESOLV_FILES; keeping the rendered DNS rules"
     return
   fi
-  v4="$(echo "$servers" | grep -v : | paste -sd, - || true)"
-  v6="$(echo "$servers" | grep : | paste -sd, - || true)"
+  v4="$(echo "$servers" | grep -v : | paste -sd, - | sed 's/,/, /g' || true)"
+  v6="$(echo "$servers" | grep : | paste -sd, - | sed 's/,/, /g' || true)"
   {
-    echo "flush set inet $TABLE dns4"
-    echo "flush set inet $TABLE dns6"
-    [ -n "$v4" ] && echo "add element inet $TABLE dns4 { $v4 }"
-    [ -n "$v6" ] && echo "add element inet $TABLE dns6 { $v6 }"
+    echo "flush chain inet $TABLE dns"
+    for family in ip ip6; do
+      list="$v4"; [ "$family" = ip6 ] && list="$v6"
+      [ -n "$list" ] && echo "add rule inet $TABLE dns $family daddr { $list } meta l4proto { tcp, udp } th dport 53 accept comment \"DNS\""
+    done
     true
   } | nft -f -
 }
