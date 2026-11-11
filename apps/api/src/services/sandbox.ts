@@ -1,12 +1,12 @@
 import type { Env } from '../env';
 import { errors } from '../middleware/error';
 import { runCloudflareRuntimePhase } from './cloudflare-runtime-phase';
-import { hasContainerRuntime } from './platform-capabilities';
+import { hasSandboxContainerRuntime } from './platform-capabilities';
 
 export function getSandboxConfig(env: Env) {
   return {
     // The legacy prototype also needs a container runtime behind the SANDBOX binding.
-    enabled: env.SANDBOX_ENABLED === 'true' && hasContainerRuntime(env),
+    enabled: env.SANDBOX_ENABLED === 'true' && hasSandboxContainerRuntime(env),
     execTimeoutMs: Number.parseInt(env.SANDBOX_EXEC_TIMEOUT_MS || '30000', 10),
     gitTimeoutMs: Number.parseInt(env.SANDBOX_GIT_TIMEOUT_MS || '120000', 10),
     sleepAfter: env.SANDBOX_SLEEP_AFTER || '10m',

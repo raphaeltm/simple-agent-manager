@@ -1,0 +1,23 @@
+# Guided credential login (opt-in). Use with SAM_GUIDED_LOGIN=on in .env and
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.guided-login.yml
+# (paths relative to deploy/selfhost; README "Guided credential login").
+#
+# celld starts the sign-in sandbox through the host's Docker daemon. That gives the celld process
+# the Docker socket, which is root-equivalent on this host (README, security). Worker JavaScript
+# cannot reach it: it has no filesystem, no process and no socket API (celld docs/security).
+services:
+  celld:
+    # The socket's group, so uid 7101 can use it without becoming root.
+    group_add: ['${DOCKER_SOCKET_GID:?set DOCKER_SOCKET_GID (stat -c %g /var/run/docker.sock)}']
+    environment:
+      DOCKER_HOST: unix:///var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # celld writes the containers' resolv.conf into its data dir and asks the daemon to
+      # bind-mount it by that path, so the data dir must have the same path on the host
+      # (replaces the celld-data volume; the bucket stays the durable copy).
+      - /var/lib/celld:/var/lib/celld
+
+  celld-data-owner:
+    volumes:
+      - /var/lib/celld:/var/lib/celld

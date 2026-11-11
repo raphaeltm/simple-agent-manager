@@ -32,6 +32,25 @@ function plan(
   return buildFencePlan({ box, leaseRange: RANGE, resolvConf: RESOLV, objectStore });
 }
 
+describe('egress fence with guided login (celld containers)', () => {
+  const BRIDGE_RULE =
+    'oifname "celld0" ip daddr 172.16.0.0/12 meta l4proto tcp accept comment "celld containers (guided login)"';
+
+  it('lets celld reach its own container bridge only when guided login is on', () => {
+    expect(renderFenceRuleset(plan())).not.toContain('oifname');
+    const rules = renderFenceRuleset(plan({ SAM_GUIDED_LOGIN: 'on' }));
+    expect(rules).toContain(BRIDGE_RULE);
+    // Before the refusals, which would otherwise reject 172.16/12.
+    expect(rules.indexOf(BRIDGE_RULE)).toBeLessThan(rules.indexOf('ip daddr { 0.0.0.0/8'));
+  });
+
+  it('still refuses the same private range on any other interface', () => {
+    const rules = renderFenceRuleset(plan({ SAM_GUIDED_LOGIN: 'on' }));
+    expect(rules).toMatch(/ip daddr \{[^}]*172\.16\.0\.0\/12[^}]*\} counter reject/);
+    expect(rules).not.toMatch(/^\s*ip daddr 172\.16\.0\.0\/12[^\n]*accept/m);
+  });
+});
+
 describe('egress fence ruleset', () => {
   it('fences only the celld uid and lets established traffic (Caddy -> celld replies) through', () => {
     const rules = renderFenceRuleset(plan());

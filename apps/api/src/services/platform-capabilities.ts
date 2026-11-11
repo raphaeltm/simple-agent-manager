@@ -47,6 +47,7 @@ type CapabilityEnv = Pick<
   | 'ARTIFACTS'
   | 'ARTIFACTS_ENABLED'
   | 'CONTAINER_RUNTIME_AVAILABLE'
+  | 'SANDBOX_CONTAINER_RUNTIME_AVAILABLE'
   | 'SANDBOX'
   | 'CREDENTIAL_SETUP_SESSION'
   | 'SETUP_SESSION_POOL'
@@ -92,7 +93,9 @@ export function hasCloudflareAccountApi(env: Pick<Env, 'CF_ACCOUNT_ID' | 'CF_API
  * runtime with no Cloudflare account still has it set. Every gateway URL is
  * `gateway.ai.cloudflare.com/v1/<account>/<gateway>/...`, so it also needs the account id.
  */
-export function resolveAiGatewayId(env: Pick<Env, 'AI_GATEWAY_ID' | 'CF_ACCOUNT_ID'>): string | null {
+export function resolveAiGatewayId(
+  env: Pick<Env, 'AI_GATEWAY_ID' | 'CF_ACCOUNT_ID'>
+): string | null {
   const gatewayId = env.AI_GATEWAY_ID?.trim();
   if (!gatewayId || !present(env.CF_ACCOUNT_ID)) return null;
   return gatewayId;
@@ -141,6 +144,21 @@ export function hasContainerRuntime(env: Pick<Env, 'CONTAINER_RUNTIME_AVAILABLE'
 }
 
 /**
+ * Whether the SANDBOX binding (the Sandbox SDK container that guided credential setup runs) is
+ * backed by a container runtime. Declared per class because a runtime can back one container
+ * class and not another: celld runs the sign-in sandbox but never Instant, whose vm-agent must
+ * call back into the box (scripts/selfhost/celld-config.ts). Unset falls back to the shared
+ * declaration, so Cloudflare deployments, which back every class, are unchanged.
+ */
+export function hasSandboxContainerRuntime(
+  env: Pick<Env, 'CONTAINER_RUNTIME_AVAILABLE' | 'SANDBOX_CONTAINER_RUNTIME_AVAILABLE'>
+): boolean {
+  const declared = env.SANDBOX_CONTAINER_RUNTIME_AVAILABLE?.trim();
+  if (declared) return declared.toLowerCase() !== 'false';
+  return hasContainerRuntime(env);
+}
+
+/**
  * Whether Instant (raw container) workspaces may run: the operator switch is on AND a container
  * runtime backs the bindings. The one gate for both advertising Instant and choosing it, so the
  * two cannot diverge on a runtime whose container classes are plain Durable Objects.
@@ -155,11 +173,15 @@ export function isContainerWorkspaceRuntimeEnabled(
 export function isGuidedCredentialSetupAvailable(
   env: Pick<
     Env,
-    'CONTAINER_RUNTIME_AVAILABLE' | 'SANDBOX' | 'CREDENTIAL_SETUP_SESSION' | 'SETUP_SESSION_POOL'
+    | 'CONTAINER_RUNTIME_AVAILABLE'
+    | 'SANDBOX_CONTAINER_RUNTIME_AVAILABLE'
+    | 'SANDBOX'
+    | 'CREDENTIAL_SETUP_SESSION'
+    | 'SETUP_SESSION_POOL'
   >
 ): boolean {
   return (
-    hasContainerRuntime(env) &&
+    hasSandboxContainerRuntime(env) &&
     !!env.SANDBOX &&
     !!env.CREDENTIAL_SETUP_SESSION &&
     !!env.SETUP_SESSION_POOL

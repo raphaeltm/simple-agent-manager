@@ -49,18 +49,19 @@ describe('buildCelldConfig against the real apps/api/wrangler.toml', () => {
   });
 
   it('drops every Cloudflare-only key and reports why', () => {
-    for (const key of [
-      'port',
-      'limits',
-      'alias',
-      'artifacts',
-      'analytics_engine_datasets',
-      'ai',
-      'containers',
-    ]) {
+    for (const key of ['port', 'limits', 'alias', 'artifacts', 'analytics_engine_datasets', 'ai']) {
       expect(config).not.toHaveProperty(key);
       expect(plan.report.some((line) => line.startsWith(`drop [${key}]`))).toBe(true);
     }
+  });
+
+  it('runs no container by default and declares neither class backed', () => {
+    expect(config).not.toHaveProperty('containers');
+    for (const className of ['SandboxDO', 'VmAgentContainer']) {
+      expect(plan.report).toContain(`drop container ${className}: stays bound as a plain DO`);
+    }
+    expect(config.vars.CONTAINER_RUNTIME_AVAILABLE).toBe('false');
+    expect(config.vars.SANDBOX_CONTAINER_RUNTIME_AVAILABLE).toBe('false');
   });
 
   it('folds every legacy new_classes create into new_sqlite_classes, keeping tag order', () => {
@@ -206,5 +207,49 @@ describe('buildCelldConfig failure modes', () => {
 
   it('omits assets when no web build is given', () => {
     expect(buildCelldConfig(base(), options).config).not.toHaveProperty('assets');
+  });
+});
+
+describe('buildCelldConfig with guided login on', () => {
+  const source = loadToml();
+  const plan = buildCelldConfig(source, {
+    ...options,
+    guidedLogin: { runtime: 'runsc', instanceType: 'basic' },
+  });
+
+  it('emits only the sign-in sandbox, under gVisor and the basic type', () => {
+    expect(plan.config.containers).toEqual([
+      {
+        class_name: 'SandboxDO',
+        image: 'containers/sandbox/Dockerfile',
+        instance_type: 'basic',
+        max_instances: 6,
+        runtime: 'runsc',
+      },
+    ]);
+    expect(plan.report).toContain('drop container VmAgentContainer: stays bound as a plain DO');
+  });
+
+  it('declares the sandbox backed and Instant not', () => {
+    expect(plan.config.vars.SANDBOX_CONTAINER_RUNTIME_AVAILABLE).toBe('true');
+    expect(plan.config.vars.CONTAINER_RUNTIME_AVAILABLE).toBe('false');
+    expect(plan.config.vars.CF_CONTAINER_ENABLED).toBe('false');
+  });
+
+  it('omits runtime for the daemon default', () => {
+    const daemon = buildCelldConfig(source, {
+      ...options,
+      guidedLogin: { runtime: null, instanceType: 'basic' },
+    });
+    expect(daemon.config.containers?.[0]).not.toHaveProperty('runtime');
+  });
+
+  it('refuses the sandbox declaration from caller vars', () => {
+    expect(() =>
+      buildCelldConfig(source, {
+        ...options,
+        vars: { SANDBOX_CONTAINER_RUNTIME_AVAILABLE: 'true' },
+      })
+    ).toThrow(/generated/);
   });
 });

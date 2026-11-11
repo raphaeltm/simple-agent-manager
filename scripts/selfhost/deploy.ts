@@ -48,6 +48,7 @@ import {
 import { ensureCelldBinary, resolveEsbuild } from './celld-binary.js';
 import { buildCelldConfig, type CelldWranglerConfig } from './celld-config.js';
 import { ASSETS_DIR, prepareCelldProject, SOURCE_LINK, writeCelldConfig } from './celld-project.js';
+import { guidedLoginSettings } from './guided-login.js';
 import { writeFenceFiles } from './fence-state.js';
 import {
   ensureMailCollectorPassword,
@@ -328,6 +329,7 @@ async function main(): Promise<void> {
     main: `${SOURCE_LINK}/index.ts`,
     baseDomain,
     assetsDirectory: ASSETS_DIR,
+    guidedLogin: guidedLoginSettings(box),
     vars: {
       SAM_INSTALLATION_ID,
       VAPID_SUBJECT: `https://app.${baseDomain}`,

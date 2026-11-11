@@ -37,6 +37,7 @@ import { isIP } from 'node:net';
 
 import type { PortRange } from './box-settings.js';
 import { assertOpenable } from './fence-addresses.js';
+import { CELLD_CONTAINER_BRIDGE, guidedLoginSettings } from './guided-login.js';
 import { formatProbes, startCheckProbes } from './fence-probes.js';
 
 /** nftables table name; the start check and the verify command look for it. */
@@ -148,6 +149,11 @@ export interface EgressFencePlan {
   forbiddenLoopbackPorts: Record<string, number>;
   /** This host's own addresses: an endpoint on one of them is checked like a loopback one. */
   localAddresses: string[];
+  /**
+   * celld's container bridge interfaces celld may connect into (guided login). celld reaches the
+   * sandbox at its bridge address in 172.16/12; celld's own fence keeps the container off the box.
+   */
+  containerBridges: string[];
 }
 
 function intSetting(raw: string | undefined, fallback: number, name: string, min = 1): number {
@@ -280,6 +286,7 @@ export function buildFencePlan({
       OBJECTSTORE_CONSOLE_PORT: composePort(box, 'OBJECTSTORE_CONSOLE_PORT'),
     },
     localAddresses: localAddresses ?? [],
+    containerBridges: guidedLoginSettings(box) ? [CELLD_CONTAINER_BRIDGE] : [],
   };
   assertFencePlan(plan);
   return plan;
@@ -357,6 +364,12 @@ export function renderFenceRuleset(plan: EgressFencePlan): string {
     // interface (a public IP on the NIC, or a LAN install). Loopback is not that path.
     `ip daddr != 127.0.0.0/8 fib daddr type local tcp dport ${caddy} accept comment "Caddy on this host's own addresses"`,
     `ip6 daddr != ::1 fib daddr type local tcp dport ${caddy} accept comment "Caddy on this host's own addresses"`,
+    // Matched on the egress interface, so only a route into celld's own bridge qualifies; the
+    // same private range anywhere else (another Docker network, the VPC) is still refused.
+    ...plan.containerBridges.map(
+      (bridge) =>
+        `oifname "${bridge}" ip daddr 172.16.0.0/12 meta l4proto tcp accept comment "celld containers (guided login)"`
+    ),
   ];
   const body = [
     'ct state established,related accept',

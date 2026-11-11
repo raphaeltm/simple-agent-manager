@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import type { Env } from '../../../src/env';
 import {
   hasContainerRuntime,
+  hasSandboxContainerRuntime,
+  isContainerWorkspaceRuntimeEnabled,
   isGuidedCredentialSetupAvailable,
   publicPlatformCapabilities,
   resolveAiGatewayId,
@@ -79,10 +81,12 @@ describe('resolvePlatformCapabilities', () => {
   });
 
   it('needs both the flag and the binding for Artifacts', () => {
-    expect(resolvePlatformCapabilities(cloudflareEnv({ ARTIFACTS_ENABLED: 'false' })).artifacts).toBe(
+    expect(
+      resolvePlatformCapabilities(cloudflareEnv({ ARTIFACTS_ENABLED: 'false' })).artifacts
+    ).toBe(false);
+    expect(resolvePlatformCapabilities(cloudflareEnv({ ARTIFACTS: undefined })).artifacts).toBe(
       false
     );
-    expect(resolvePlatformCapabilities(cloudflareEnv({ ARTIFACTS: undefined })).artifacts).toBe(false);
   });
 });
 
@@ -92,7 +96,9 @@ describe('resolveAiGatewayId', () => {
   });
 
   it('ignores the wrangler.toml default gateway id when there is no Cloudflare account', () => {
-    expect(resolveAiGatewayId({ AI_GATEWAY_ID: 'sam', CF_ACCOUNT_ID: undefined as never })).toBeNull();
+    expect(
+      resolveAiGatewayId({ AI_GATEWAY_ID: 'sam', CF_ACCOUNT_ID: undefined as never })
+    ).toBeNull();
   });
 
   it('is null without a gateway id even with an account', () => {
@@ -118,6 +124,54 @@ describe('container runtime declaration', () => {
     expect(isGuidedCredentialSetupAvailable(cloudflareEnv({ SETUP_SESSION_POOL: undefined }))).toBe(
       false
     );
+  });
+});
+
+describe('per-class container runtime declaration (celld runs the sandbox, never Instant)', () => {
+  // What scripts/selfhost/celld-config.ts writes when SAM_GUIDED_LOGIN is on.
+  const celldGuidedLogin = {
+    CF_CONTAINER_ENABLED: 'false',
+    SANDBOX_ENABLED: 'false',
+    CONTAINER_RUNTIME_AVAILABLE: 'false',
+    SANDBOX_CONTAINER_RUNTIME_AVAILABLE: 'true',
+  } as const;
+
+  it('offers guided setup while Instant stays unavailable', () => {
+    const env = cloudflareEnv(celldGuidedLogin);
+    expect(isGuidedCredentialSetupAvailable(env)).toBe(true);
+    expect(isContainerWorkspaceRuntimeEnabled(env)).toBe(false);
+    const capabilities = resolvePlatformCapabilities(env);
+    expect(capabilities.guidedCredentialSetup).toBe(true);
+    expect(capabilities.containerRuntime).toBe(false);
+  });
+
+  it('keeps Instant off even when an operator turns the Instant switch back on', () => {
+    // secrets.env can override CF_CONTAINER_ENABLED; the runtime declaration still refuses.
+    const env = cloudflareEnv({ ...celldGuidedLogin, CF_CONTAINER_ENABLED: 'true' });
+    expect(isContainerWorkspaceRuntimeEnabled(env)).toBe(false);
+    expect(isGuidedCredentialSetupAvailable(env)).toBe(true);
+  });
+
+  it('falls back to the shared declaration when the sandbox one is unset', () => {
+    expect(hasSandboxContainerRuntime({})).toBe(true);
+    expect(hasSandboxContainerRuntime({ CONTAINER_RUNTIME_AVAILABLE: 'false' })).toBe(false);
+    expect(hasSandboxContainerRuntime({ CONTAINER_RUNTIME_AVAILABLE: 'true' })).toBe(true);
+  });
+
+  it('lets the sandbox declaration refuse on its own', () => {
+    const env = cloudflareEnv({ SANDBOX_CONTAINER_RUNTIME_AVAILABLE: 'False' });
+    expect(isGuidedCredentialSetupAvailable(env)).toBe(false);
+    // Instant follows its own declaration, which is unset (available) here.
+    expect(hasContainerRuntime(env)).toBe(true);
+  });
+
+  it('is the default celld state: neither class has a runtime', () => {
+    const env = cloudflareEnv({
+      ...celldGuidedLogin,
+      SANDBOX_CONTAINER_RUNTIME_AVAILABLE: undefined,
+    });
+    expect(isGuidedCredentialSetupAvailable(env)).toBe(false);
+    expect(isContainerWorkspaceRuntimeEnabled(env)).toBe(false);
   });
 });
 
