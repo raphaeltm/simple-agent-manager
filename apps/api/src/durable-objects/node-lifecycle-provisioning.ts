@@ -214,7 +214,8 @@ export class NodeLifecycleProvisioning {
       // the attempt as a whole also gets the tunnel-setup budget when this incarnation uses
       // tunnel transport, because tunnel setup is about six sequential Cloudflare calls before
       // createVM. Setup is resumable, so an attempt that still runs out continues next time.
-      const attemptDeadlineMs = timeout + (await durableAttemptTunnelBudgetMs(this.env, node, intent.incarnationId));
+      const attemptDeadlineMs =
+        timeout + (await durableAttemptTunnelBudgetMs(this.env, node, intent.incarnationId));
       timer = setTimeout(
         () =>
           controller.abort(
@@ -251,7 +252,8 @@ export class NodeLifecycleProvisioning {
               initialIncarnationId: intent.initialIncarnationId,
               incarnationId: intent.incarnationId,
               providerCreateRequested: intent.providerCreateRequested,
-              markProviderCreateRequested: () => this.markProviderCreateRequested(intent),
+              markProviderCreateRequested: () => this.recordCreateRequested(intent, true),
+              clearProviderCreateRequested: () => this.recordCreateRequested(intent, false),
             },
             authorityProjectId: input.workspace?.placement.projectId,
             assertExternalMutationAuthority: workspaceInput
@@ -322,20 +324,19 @@ export class NodeLifecycleProvisioning {
   }
 
   /**
-   * Persist, before the provider create POST, that this allocation may now own a VM. Fenced on
-   * the attempt that is sending it, so a superseded attempt cannot create. Throws when the
-   * record cannot be made: provisionNode then never sends the POST.
+   * Record, before the create POST, that a VM may exist (`true`); withdraw it once the provider
+   * proved the request was never sent (`false`). Fenced on the attempt; throws when superseded.
    */
-  private async markProviderCreateRequested(intent: DirectProvisioningIntent): Promise<void> {
+  private async recordCreateRequested(intent: DirectProvisioningIntent, requested: boolean) {
     await this.withLock(async () => {
       const current = await this.ctx.storage.get<DirectProvisioningIntent>(DIRECT_PROVISIONING_KEY);
       if (!current || current.attempts !== intent.attempts || current.status !== 'pending') {
         throw new NodeAllocationUncertainError(
-          'Provisioning attempt was superseded before the provider create'
+          'Provisioning attempt was superseded before its provider create record changed'
         );
       }
-      if (current.providerCreateRequested !== true) {
-        current.providerCreateRequested = true;
+      if (current.providerCreateRequested !== requested) {
+        current.providerCreateRequested = requested;
         await this.ctx.storage.put(DIRECT_PROVISIONING_KEY, current);
       }
     });

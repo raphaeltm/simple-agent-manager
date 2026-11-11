@@ -313,6 +313,12 @@ export interface Provider {
   /** Get VM by ID. Returns null if not found (no throw). */
   getVM(id: string, context?: ProviderRequestContext): Promise<VMInstance | null>;
 
+  /**
+   * Get VM by ID with observed native hardware, for providers whose `getVM` and `listVMs` omit
+   * it (GCP). Optional: callers fall back to `getVM`. Returns null if not found (no throw).
+   */
+  getObservedVM?(id: string, context?: ProviderRequestContext): Promise<VMInstance | null>;
+
   /** List VMs with optional label-based filtering */
   listVMs(labels?: Record<string, string>, context?: ProviderRequestContext): Promise<VMInstance[]>;
 

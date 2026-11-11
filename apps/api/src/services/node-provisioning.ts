@@ -1,5 +1,6 @@
 import { validateCloudInitSize } from '@simple-agent-manager/cloud-init';
 import {
+  isProviderCreateNotDispatched,
   isTransientCapacityError,
   ProviderError,
   type ProviderRequestContext,
@@ -55,7 +56,10 @@ import {
   type NodeTunnelProvisioning,
   type NodeTunnelProvisioningPhase,
 } from './node-tunnel-provisioning';
-import { recordTunnelProvisioningFailure } from './node-tunnel-provisioning-failure';
+import {
+  describeProvisioningFailure,
+  recordTunnelProvisioningFailure,
+} from './node-tunnel-provisioning-failure';
 import { persistError } from './observability';
 import {
   createProviderForUser,
@@ -340,11 +344,11 @@ export async function provisionNode(
     providerCreateRequested = true;
     try {
       if (!recoverExisting && durable?.markProviderCreateRequested) {
-        // The last cancellation point before the create: after the mark the create is not
-        // cancelled by the attempt deadline (below).
+        // The last cancellation point before the create. Not after the mark: a cut there would
+        // leave a recorded create that was never sent, which every later attempt can only fail
+        // to reconcile. After the mark the create is not cancelled by the deadline (below).
         throwIfProviderRequestAborted(providerContext);
         await durable.markProviderCreateRequested();
-        throwIfProviderRequestAborted(providerContext);
       }
       // A durable create or recovery runs to completion once started: the attempt deadline
       // must not cut it. Staging, GCP: a cut between the mark and the POST (inside the OAuth
@@ -378,8 +382,25 @@ export async function provisionNode(
         providerRejectionProofAt = proof?.proofAt ?? null;
         rejectedPlacementPredicate = proof?.placementPredicate;
       }
+      if (
+        durable &&
+        !recoverExisting &&
+        durable.clearProviderCreateRequested &&
+        isProviderCreateNotDispatched(err)
+      ) {
+        // The provider proved its create request was never sent (GCP: token exchange or
+        // firewall ensure failed). Withdraw the record so the next attempt creates again
+        // (bounded by the intent's attempt and age limits), and keep the real error as the cause.
+        await durable.clearProviderCreateRequested();
+        providerCreateRequested = false;
+        throw new NodeAllocationUncertainError(
+          `Provider create was not sent; the next attempt retries it (${describeProvisioningFailure(err)})`
+        );
+      }
       if (durable && !providerAllocationRejected) {
-        throw new NodeAllocationUncertainError();
+        throw new NodeAllocationUncertainError(
+          `Provider allocation is unresolved; exact resource reconciliation is required (${describeProvisioningFailure(err)})`
+        );
       }
       throw err;
     }

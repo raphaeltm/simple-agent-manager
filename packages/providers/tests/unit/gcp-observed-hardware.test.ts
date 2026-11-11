@@ -128,15 +128,25 @@ describe('GCP observed hardware', () => {
     expect(requests.some((r) => r.includes('www.googleapis.com'))).toBe(false);
   });
 
-  it('getVM reports observed hardware and the zone, for allocation recovery', async () => {
+  it('getObservedVM reports observed hardware and the zone, for allocation recovery', async () => {
     const requests = installFakeCompute();
 
-    const vm = await newProvider().getVM('node-gcp');
+    const vm = await newProvider().getObservedVM('node-gcp');
 
     expect(vm?.id).toBe('1861759100528809252');
     expect(vm?.observedHardware.resources.source).toBe('observed');
     expect(vm?.location).toBe(ZONE);
     expect(requests.filter((r) => r.includes('/machineTypes/'))).toHaveLength(1);
+  });
+
+  it('getVM stays a single lookup for existence and ownership callers', async () => {
+    const requests = installFakeCompute();
+
+    const vm = await newProvider().getVM('node-gcp');
+
+    expect(vm?.id).toBe('1861759100528809252');
+    expect(vm?.location).toBe(ZONE);
+    expect(requests.filter((r) => r.includes('/machineTypes/'))).toHaveLength(0);
   });
 
   it('retries a transient machine type failure and still reports observed resources', async () => {

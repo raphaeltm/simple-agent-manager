@@ -10,6 +10,7 @@ import type { NodeLifecycle } from '../../src/durable-objects/node-lifecycle';
 import {
   DIRECT_PROVISIONING_KEY,
   type DirectProvisioningIntent,
+  NodeLifecycleProvisioning,
 } from '../../src/durable-objects/node-lifecycle-provisioning';
 import type { Env } from '../../src/env';
 import { nodesRoutes } from '../../src/routes/nodes';
@@ -796,5 +797,41 @@ describe('durable direct allocation on Cloudflare Tunnel transport', () => {
     expect(cf.records()).toMatchObject([
       { type: 'CNAME', content: `${node!.tunnel_id}.cfargotunnel.com`, proxied: true },
     ]);
+  });
+});
+
+describe('the durable create record is written only by its own attempt', () => {
+  it('marks and withdraws the record for the current attempt and refuses a superseded one', async () => {
+    const stub = env.NODE_LIFECYCLE.get(
+      env.NODE_LIFECYCLE.idFromName('record-' + crypto.randomUUID())
+    );
+    await runInDurableObject(stub, async (_instance, state) => {
+      const intent = {
+        attempts: 3,
+        status: 'pending',
+        providerCreateRequested: false,
+      } as unknown as DirectProvisioningIntent;
+      await state.storage.put(DIRECT_PROVISIONING_KEY, intent);
+      const controller = new NodeLifecycleProvisioning(state, env as unknown as Env) as unknown as {
+        recordCreateRequested(i: DirectProvisioningIntent, requested: boolean): Promise<void>;
+      };
+      const stored = async () =>
+        (await state.storage.get<DirectProvisioningIntent>(DIRECT_PROVISIONING_KEY))
+          ?.providerCreateRequested;
+
+      await controller.recordCreateRequested(intent, true);
+      expect(await stored()).toBe(true);
+      await controller.recordCreateRequested(intent, false);
+      expect(await stored()).toBe(false);
+
+      // A superseded attempt (a later one has started) can neither mark nor withdraw.
+      await state.storage.put(DIRECT_PROVISIONING_KEY, {
+        ...intent,
+        attempts: 4,
+        providerCreateRequested: true,
+      });
+      await expect(controller.recordCreateRequested(intent, false)).rejects.toThrow(/superseded/);
+      expect(await stored()).toBe(true);
+    });
   });
 });

@@ -1,6 +1,7 @@
 // Register shared boundary mocks before importing production services.
 import './node-tunnel-fixture';
 
+import { markProviderCreateNotDispatched, ProviderError } from '@simple-agent-manager/providers';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { NodeAllocationUncertainError } from '../../../src/services/node-allocation-recovery';
@@ -210,13 +211,17 @@ describe('every failed tunnel attempt records its cause', () => {
 describe('deadline cuts on each side of the create POST', () => {
   function durableHarness(initial: string) {
     const store = { providerCreateRequested: false };
-    const allocation = (incarnationId: string) => ({
+    const allocation = (incarnationId: string, onMark?: () => void) => ({
       createdAt: Date.now(),
       initialIncarnationId: initial,
       incarnationId,
       providerCreateRequested: store.providerCreateRequested,
       markProviderCreateRequested: async () => {
         store.providerCreateRequested = true;
+        onMark?.();
+      },
+      clearProviderCreateRequested: async () => {
+        store.providerCreateRequested = false;
       },
     });
     return { store, allocation };
@@ -270,6 +275,69 @@ describe('deadline cuts on each side of the create POST', () => {
     // Resume fast path: no second ingress write, one tunnel.
     expect(cf.callCount('tunnel.configure')).toBe(configures);
     expect(cf.callCount('tunnel.create')).toBe(1);
+  });
+
+  it('a deadline that fires while the create is being marked does not strand the mark', async () => {
+    const node = await freshNode();
+    const { store, allocation } = durableHarness(readNode(node.id)!.incarnation!);
+    const first = new AbortController();
+    // The deadline elapses during the mark's storage write. Pre-fix an abort check after the
+    // mark threw here: a recorded create that was never sent, which no attempt could reconcile.
+    await expect(
+      provisionNode(node.id, env, undefined, {
+        signal: first.signal,
+        durableAllocation: allocation(crypto.randomUUID(), () =>
+          first.abort(new NodeAllocationUncertainError('Provisioning request deadline elapsed'))
+        ),
+      })
+    ).resolves.toEqual({ allocationConfirmed: true });
+    expect(store.providerCreateRequested).toBe(true);
+    expect(mocks.createVM).toHaveBeenCalledTimes(1);
+    expect(readNode(node.id)).toMatchObject({ status: 'running' });
+  });
+
+  it('a provider failure proven unsent withdraws the mark, keeps its cause, and the resume creates', async () => {
+    const node = await freshNode();
+    const { store, allocation } = durableHarness(readNode(node.id)!.incarnation!);
+    const incarnationId = crypto.randomUUID();
+    // GCP: the token exchange failed before the insert (gcp-create-dispatch.test.ts).
+    const unsent = markProviderCreateNotDispatched(
+      new ProviderError('gcp', 503, 'GCP token exchange failed')
+    );
+    mocks.createVM.mockRejectedValueOnce(unsent);
+    const err = await provisionNode(node.id, env, undefined, {
+      signal: new AbortController().signal,
+      durableAllocation: allocation(incarnationId),
+    }).catch((e: unknown) => e);
+    // A retryable attempt failure (the node is not marked error), carrying the real cause.
+    expect(err).toBeInstanceOf(NodeAllocationUncertainError);
+    expect(String((err as Error).message)).toContain('GCP token exchange failed');
+    expect(readNode(node.id)).toMatchObject({ status: 'creating' });
+    expect(store.providerCreateRequested).toBe(false);
+    // The tunnel is kept for the resume: the durable owner, not this attempt, releases it.
+    expect(journal(node.id)).toMatchObject([{ status: 'active' }]);
+
+    await provisionNode(node.id, env, undefined, {
+      signal: new AbortController().signal,
+      durableAllocation: allocation(incarnationId),
+    });
+    expect(mocks.createVM).toHaveBeenCalledTimes(2);
+    expect(store.providerCreateRequested).toBe(true);
+    expect(readNode(node.id)).toMatchObject({ status: 'running', transport: 'cloudflare-tunnel' });
+  });
+
+  it('an unproven provider failure keeps the mark and names its cause (control)', async () => {
+    const node = await freshNode();
+    const { store, allocation } = durableHarness(readNode(node.id)!.incarnation!);
+    mocks.createVM.mockRejectedValueOnce(new ProviderError('gcp', 503, 'insert failed'));
+    const err = await provisionNode(node.id, env, undefined, {
+      signal: new AbortController().signal,
+      durableAllocation: allocation(crypto.randomUUID()),
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(NodeAllocationUncertainError);
+    expect(String((err as Error).message)).toContain('insert failed');
+    // The insert may have committed: only reconciliation may proceed.
+    expect(store.providerCreateRequested).toBe(true);
   });
 
   it('a deadline that fires during a marked durable create never cancels the provider create', async () => {

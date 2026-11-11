@@ -39,6 +39,12 @@ export interface DurableNodeAllocation {
    * the record cannot be made, so an unrecorded create is never sent.
    */
   markProviderCreateRequested?: () => Promise<void>;
+  /**
+   * Withdraws that record after the provider proved its create request was never sent
+   * (`isProviderCreateNotDispatched`), so the next attempt may create. Fenced on the attempt
+   * that made the mark; must throw rather than leave the record ambiguous.
+   */
+  clearProviderCreateRequested?: () => Promise<void>;
 }
 
 /** True when a resumed attempt must reconcile inventory rather than create (see above). */
@@ -86,7 +92,9 @@ export async function recoverNodeAllocation(
   const vm =
     listed.observedHardware.resources.source === 'observed'
       ? listed
-      : await provider.getVM(listed.id, context);
+      : await (provider.getObservedVM
+          ? provider.getObservedVM(listed.id, context)
+          : provider.getVM(listed.id, context));
   if (
     !vm ||
     vm.id !== listed.id ||
