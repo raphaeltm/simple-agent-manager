@@ -9,13 +9,15 @@ through an SMTP relay or, on a test install, the bundled mail collector (see Ema
 
 ## What runs
 
-| Service          | Network | Listens on                            | Notes                                                                 |
-| ---------------- | ------- | ------------------------------------- | --------------------------------------------------------------------- |
-| `caddy`          | host    | `:80`, `:443`                         | wildcard `*.SAM_DOMAIN`, sets `CF-Connecting-IP`                      |
-| `celld`          | host    | `127.0.0.1:8080`, `:7001` (ops)       | API Worker + web UI (`ASSETS`), cron triggers                         |
-| `frps`           | host    | `127.0.0.1:7000`                      | profile `tunnel`; nodes arrive as frp over wss via Caddy              |
-| `objectstore`    | host    | `127.0.0.1:9000`                      | profile `local-store`; otherwise use a GCS/S3 bucket                  |
-| `mail-collector` | host    | `127.0.0.1:1025` (SMTP), `:8025` (UI) | profile `mail-collector`, TEST installs only; UI at `mail.SAM_DOMAIN` |
+| Service       | Network | Listens on                      | Notes                                                    |
+| ------------- | ------- | ------------------------------- | -------------------------------------------------------- |
+| `caddy`       | host    | `:80`, `:443`                   | wildcard `*.SAM_DOMAIN`, sets `CF-Connecting-IP`         |
+| `celld`       | host    | `127.0.0.1:8080`, `:7001` (ops) | API Worker + web UI (`ASSETS`), cron triggers            |
+| `frps`        | host    | `127.0.0.1:7000`                | profile `tunnel`; nodes arrive as frp over wss via Caddy |
+| `objectstore` | host    | `127.0.0.1:9000`                | profile `local-store`; otherwise use a GCS/S3 bucket     |
+
+Profile `mail-collector` (off by default, test installs only) adds `mail-collector`: Mailpit on
+`127.0.0.1:1025` (SMTP) and `127.0.0.1:8025` (UI, published at `mail.SAM_DOMAIN`). See Email sign-in.
 
 ## Install or upgrade
 
