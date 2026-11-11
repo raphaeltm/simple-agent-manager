@@ -114,6 +114,18 @@ test.describe('homepage', () => {
     expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
   });
 
+  test('nothing in the hero is wider than a 320px screen', async ({ page }) => {
+    // The page clips horizontal overflow, so measure the hero's own boxes, not the document.
+    await page.setViewportSize({ width: 320, height: 640 });
+    await page.goto('/');
+    const outside = await page.evaluate(() =>
+      [...document.querySelectorAll('.fh-hero h1, .fh-hero p, .fh-hero .sam-btn, .fh-hero li')]
+        .map((el) => el.getBoundingClientRect())
+        .filter((box) => box.left < -0.5 || box.right > window.innerWidth + 0.5).length,
+    );
+    expect(outside).toBe(0);
+  });
+
   test('the homepage stays under 1,000 elements', async ({ page }) => {
     await page.goto('/');
     expect(await page.evaluate(() => document.getElementsByTagName('*').length)).toBeLessThan(1000);

@@ -74,6 +74,8 @@ import Shot from './Shot.astro';
 
   .fh-hero-inner {
     display: grid;
+    /* minmax(0, 1fr): the no-wrap proof items must not widen the column past a 320px screen. */
+    grid-template-columns: minmax(0, 1fr);
     justify-items: center;
     gap: 18px;
   }
@@ -220,6 +222,10 @@ import Shot from './Shot.astro';
 
     .fh-proof {
       gap: 4px 18px;
+    }
+
+    .fh-proof li {
+      white-space: normal;
     }
 
     .fh-proof li + li::before {

@@ -187,11 +187,14 @@ import Shot from './Shot.astro';
       border-color 0.3s ease;
   }
 
+  /* Upcoming stops are hollow, done and current stops filled, so state isn't colour alone. */
   .line-dot {
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: var(--color-border);
+    background: transparent;
+    box-sizing: border-box;
+    border: 1.5px solid var(--color-border);
     transition: background 0.3s ease, box-shadow 0.3s ease;
   }
 
@@ -201,6 +204,7 @@ import Shot from './Shot.astro';
 
   .line-stop.is-done .line-dot {
     background: var(--color-accent);
+    border-color: var(--color-accent);
   }
 
   .line-stop.is-current {
@@ -210,6 +214,7 @@ import Shot from './Shot.astro';
 
   .line-stop.is-current .line-dot {
     background: var(--color-accent-strong);
+    border-color: var(--color-accent-strong);
     box-shadow: 0 0 10px var(--color-accent-strong);
   }
 
