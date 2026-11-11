@@ -20,7 +20,7 @@ Complete only PRs #2628, #2629, #2630, #2635, #2637 and #2639 in one coherent ca
 
 - [x] Reconcile scope and ownership before mutation; protect originals as drafts with held associations.
 - [x] Apply six upgrades and necessary Node contract alignment; narrow lock diff; early push.
-- [ ] Install frozen lock; validate native SQLite under Node 22/24 and module checksums/libc pairing.
+- [x] Install frozen lock; validate native SQLite under Node 22/24 and module checksums/libc pairing.
 - [ ] Full relevant lint, typecheck, tests, build; VM race/vet and linux amd64/arm64 builds; Worker tests.
 - [ ] Local Go/security, Cloudflare/Pulumi, completion/doc/constitution specialist reviews; address findings.
 - [ ] Coordinated exact-candidate staging deployment + browser runtime tests; fresh VM heartbeat/access and cleanup.
@@ -42,7 +42,9 @@ Complete only PRs #2628, #2629, #2630, #2635, #2637 and #2639 in one coherent ca
 - Implementation pushed at `e532ed7032bf946678ae98db8daec801cb139f49`; frozen install and `go mod tidy`/`go mod verify` passed. Native SQLite 13.0.3 opens and runs transactional SQL under Node 24.22.1 and Node 22.23.4 (SQLite 3.53.4).
 - Go/security local specialist review PASS at implementation head: module/toolchain/libc compatibility, remote JWKS refresh delta, strict JWT claims/algorithm checks and x/sys directory security calls unchanged. No introduced findings. Inherited JWKS refresh context cancellation tracked separately as SAM Idea `01M75B2DJRJB3RPW2K106ETMEQ`.
 - Workspace restarted during overlapping broad validation; interrupted logs are not treated as passing evidence. Sequential rerun in progress, without changing repository concurrency/resource defaults.
-- npm/infra local reviewer must finish; full suites, Worker tests, fresh-VM staging and exact-head PR/CodeRabbit evidence remain pending. Task intentionally active until those gates finish.
-- Shared staging owner #2627 estimates release at 13:45 UTC after its D3/D8 lifecycle checks and cleanup; actual release notice required before deployment.
+- npm/infra local review ADDRESSED/PASS after the native ABI floor correction; full suites, Worker tests, fresh-VM staging and exact-head PR/CodeRabbit evidence remain pending. Task intentionally active until those gates finish.
+- Shared staging owner #2627 updated release estimate to about 14:40 UTC: shared token-login hourly limit delayed D8 until 14:00. Actual cleanup and staging-free notice remain required before deployment; backend then frontend order agreed.
 
 - npm/Cloudflare/doc/constitution local review completed: Pulumi consumed resource Args/State/shared declarations unchanged, optional static exists methods additive; SDK/plugin compatibility confirmed. One native ABI contract finding addressed: package coarse >=22 is insufficient because binding.gyp uses NAPI_VERSION=10; root now ^22.14.0 || >=24.0.0, local development docs aligned. Official matrix: https://nodejs.org/api/n-api.html#node-api-version-matrix .
+
+- Completion specialist checks A/B PASS, D/E N/A: no implementation gaps, eight scoped files and no unrelated surviving package-record changes. C/F remain WARN until local/Workers/staging/VM/exact-head CI gates finish. Task remains active, not release-ready.
