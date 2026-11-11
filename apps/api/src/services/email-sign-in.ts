@@ -1,10 +1,12 @@
 /**
- * Email sign-in: BetterAuth's emailOTP plugin, sending a six-digit code through the agent email
- * send binding (`./agent-email/provider.ts`) from `sign-in@agents.<BASE_DOMAIN>`.
- *
- * It exists only where the deploy prepared Email Sending (`hasAgentEmailBinding`): installer
- * installs and GitHub Actions deploys whose token has the email permissions. Turning inbound
- * agent email on is a separate admin step; sending does not need it.
+ * Email sign-in: BetterAuth's emailOTP plugin, sending a six-digit code through SAM's email
+ * transport (`./agent-email/provider.ts`, `emailTransportKind`):
+ * - Cloudflare Email Sending (the `AGENT_EMAIL` binding), from `sign-in@agents.<BASE_DOMAIN>`:
+ *   installer installs and GitHub Actions deploys whose token has the email permissions.
+ *   Turning inbound agent email on is a separate admin step; sending does not need it.
+ * - SMTP (`SMTP_*`), from `SMTP_FROM`, on installs without the binding, such as a self-hosted
+ *   celld box (`scripts/selfhost/mail-settings.ts`).
+ * With neither, email sign-in is not offered.
  *
  * Who gets a code:
  * - an address that already belongs to an account;
@@ -31,9 +33,12 @@ import {
 } from '../middleware/rate-limit';
 import { agentEmailDomain } from './agent-email/address';
 import { listSendingSubdomains } from './agent-email/cloudflare-email-api';
-import { agentEmailSenderFor } from './agent-email/provider';
+import {
+  type EmailTransportEnv,
+  emailTransportKind,
+  systemEmailTransportFor,
+} from './agent-email/provider';
 import { getAgentEmailLimits } from './agent-email/settings';
-import { hasAgentEmailBinding } from './agent-email/setup-state';
 import { bootstrapOwnerEmail, bootstrapOwnerEstablished } from './bootstrap-owner';
 
 const log = createModuleLogger('email-sign-in');
@@ -61,13 +66,13 @@ export function isClosedEmailOtpPath(pathname: string): boolean {
   return path.startsWith('/email-otp/') || path === '/forget-password/email-otp';
 }
 
-export function emailSignInAvailable(env: Pick<Env, 'AGENT_EMAIL' | 'BASE_DOMAIN'>): boolean {
-  return hasAgentEmailBinding(env);
+export function emailSignInAvailable(env: EmailTransportEnv): boolean {
+  return emailTransportKind(env) !== null;
 }
 
 /** Can the first account be created by email? Only where the installer named its owner. */
 export function emailSignUpOffered(
-  env: Pick<Env, 'AGENT_EMAIL' | 'BASE_DOMAIN' | 'BOOTSTRAP_OWNER_EMAIL'>
+  env: EmailTransportEnv & Pick<Env, 'BOOTSTRAP_OWNER_EMAIL'>
 ): boolean {
   return emailSignInAvailable(env) && Boolean(env.BOOTSTRAP_OWNER_EMAIL?.trim());
 }
@@ -75,18 +80,21 @@ export function emailSignUpOffered(
 /**
  * Can first-run setup rely on email sign-in right now?
  *
- * - `unavailable`: no email sign-up here (no send binding, or no installer owner email).
+ * - `unavailable`: no email sign-up here (no email transport, or no installer owner email).
  * - `verifying`: Cloudflare has not finished verifying the sending domain, so a code would not
  *   arrive. Setup must not close on email alone yet: with no OAuth provider it would lock the
  *   owner out.
  * - `ready`: the sending domain is enabled, or its state could not be read. An unreadable state
  *   (older runtime tokens lack Email Sending Read) keeps the previous behaviour rather than
- *   blocking setup on a permission the deploy may not have granted.
+ *   blocking setup on a permission the deploy may not have granted. An SMTP transport is
+ *   `ready` without any check: Cloudflare's sending-domain API is only asked about its own
+ *   binding, and SMTP has no domain verification step SAM could read.
  */
 export type EmailSignInReadiness = 'unavailable' | 'verifying' | 'ready';
 
 export async function emailSignInReadiness(env: Env): Promise<EmailSignInReadiness> {
   if (!emailSignUpOffered(env)) return 'unavailable';
+  if (emailTransportKind(env) !== 'cloudflare') return 'ready';
   const domain = agentEmailDomain(env.BASE_DOMAIN).toLowerCase();
   try {
     const subdomains = await listSendingSubdomains(env);
@@ -198,29 +206,29 @@ export function signInCodeEmail(baseDomain: string, code: string) {
 
 /** Sends the code when the address may sign in; otherwise sends nothing. Never throws. */
 export async function deliverSignInCode(env: Env, email: string, code: string): Promise<void> {
-  const sender = agentEmailSenderFor(env);
-  if (!sender) return;
+  if (!emailTransportKind(env)) return;
   try {
     const known = await accountExists(env, email);
     if (!known && !(await emailSignUpAllowed(env, email))) {
       log.info('email_sign_in.code_not_sent', { reason: 'no_account' });
       return;
     }
+    const { smtpTimeoutMs } = await getAgentEmailLimits(env);
+    const transport = systemEmailTransportFor(env, { smtpTimeoutMs });
+    if (!transport) return;
     const message = signInCodeEmail(env.BASE_DOMAIN, code);
-    await sender.send({
-      from: {
-        email: `${EMAIL_SIGN_IN_LOCAL_PART}@${agentEmailDomain(env.BASE_DOMAIN)}`,
-        name: 'SAM',
-      },
+    await transport.sender.send({
+      from: { email: transport.systemFrom(EMAIL_SIGN_IN_LOCAL_PART), name: 'SAM' },
       to: email,
       subject: message.subject,
       text: message.text,
       headers: {},
     });
-    log.info('email_sign_in.code_sent', { newAccount: !known });
+    log.info('email_sign_in.code_sent', { newAccount: !known, transport: transport.kind });
   } catch (error) {
     log.error('email_sign_in.send_failed', {
       error: error instanceof Error ? error.message : String(error),
+      transport: emailTransportKind(env),
     });
   }
 }

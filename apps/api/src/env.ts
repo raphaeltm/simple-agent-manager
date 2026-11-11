@@ -55,6 +55,15 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   // This Worker's own script name, generated with AGENT_EMAIL; the admin setup points the
   // agent@ Email Routing rule at it.
   AGENT_EMAIL_WORKER_NAME?: string;
+  // SMTP relay for SAM's own email (sign-in codes) where AGENT_EMAIL is absent, e.g. a
+  // self-hosted celld box (scripts/selfhost/mail-settings.ts). Ignored when AGENT_EMAIL exists.
+  // Parsed and validated by services/agent-email/smtp-config.ts; invalid settings disable it.
+  SMTP_HOST?: string;
+  SMTP_PORT?: string; // default by SMTP_TLS: 587 (starttls), 465 (tls); required for none
+  SMTP_TLS?: string; // 'starttls' (default) | 'tls' | 'none' (loopback hosts only)
+  SMTP_USERNAME?: string;
+  SMTP_PASSWORD?: string; // secret
+  SMTP_FROM?: string; // address sign-in codes come from, e.g. sign-in@<BASE_DOMAIN>
   // Cloudflare Artifacts for SAM-native Git repos (optional — absent when ARTIFACTS_ENABLED is falsy)
   ARTIFACTS?: {
     create(
