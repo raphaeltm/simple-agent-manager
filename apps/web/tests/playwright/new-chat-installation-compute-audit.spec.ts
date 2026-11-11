@@ -120,6 +120,9 @@ async function setupMocks(page: Page, scenario: Scenario) {
       });
     if (path === '/api/github/installations') return respond(200, []);
     if (path === '/api/workspaces') return respond(200, []);
+    if (path === '/api/projects')
+      return respond(200, { projects: [MOCK_PROJECT], nextCursor: null });
+    if (path.startsWith('/api/provider')) return respond(200, { catalogs: [] });
     const match = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
     if (match) {
       const subPath = match[2] || '';
@@ -140,9 +143,6 @@ async function setupMocks(page: Page, scenario: Scenario) {
       if (subPath in projectReads) return respond(200, projectReads[subPath]);
       return respond(200, MOCK_PROJECT);
     }
-    if (path === '/api/projects')
-      return respond(200, { projects: [MOCK_PROJECT], nextCursor: null });
-    if (path.startsWith('/api/provider')) return respond(200, { catalogs: [] });
     return respond(200, {});
   });
 }
