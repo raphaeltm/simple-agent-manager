@@ -497,7 +497,11 @@ describe('durable attempt tunnel budget through the real resolver', () => {
 describe('persisted causes never carry token-shaped values', () => {
   it('redacts JWTs and long opaque tokens', () => {
     // Joined at runtime so the source holds no JWT-shaped literal for secret scanners.
-    const jwt = ['eyJhbGciOiJFUzI1NiJ9', 'eyJzdWIiOiJub2RlLTEifQ', 'c2lnbmF0dXJlLXZhbHVlLWhlcmU'].join('.');
+    const jwt = [
+      'eyJhbGciOiJFUzI1NiJ9',
+      'eyJzdWIiOiJub2RlLTEifQ',
+      'c2lnbmF0dXJlLXZhbHVlLWhlcmU',
+    ].join('.');
     const opaque = 'A'.repeat(80);
     const text = describeProvisioningFailure(new Error(`bad ${jwt} and ${opaque} end`));
     expect(text).toBe('Error: bad [redacted] and [redacted] end');
