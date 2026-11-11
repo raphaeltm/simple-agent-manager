@@ -4,7 +4,7 @@
 
 On the celld self-host box (`app.vmtest.sam2.party`, celld 0.6.3), page loads after a short pause take 2-4 s, and sometimes two cold starts in a row.
 
-celld's stateless isolate pool (2 slots) retires any isolate that has been idle for about 8 s or more, on a tick every 30 s (`celld::pool: isolate retiring`). The next request then waits while a new isolate loads the 29 MB SAM bundle, which takes about 1.5-2.2 s. The web app (`app.*`, served by the same Worker through `ASSETS`) and the API (`api.*`) both pay this.
+celld's stateless isolate pool retires one isolate that hosts no cells on every 30 s pool tick whenever no JS turn is running at that instant (`REAP_INTERVAL` in `crates/celld/runtime.rs` and `celld_logic::isolate::retire` in `crates/logic/isolate.rs`, v0.6.3; corrected in T14, which read the source: idleness does not matter, and an isolate started 1.7 s before a tick was retired at it). The next request then waits while a new isolate loads the 29 MB SAM bundle, which takes about 1.5-2.2 s. The web app (`app.*`, served by the same Worker through `ASSETS`) and the API (`api.*`) both pay this.
 
 ## Context
 
@@ -35,4 +35,8 @@ Caddy keeps one isolate warm with an active health check (`deploy/selfhost/caddy
 `SAM_KEEP_WARM`, `SAM_KEEP_WARM_INTERVAL`, README "Cold starts"). This task stays open for the
 upstream celld fix: keep a minimum number of warm isolates, or an idle-retirement setting. The
 stopgap keeps only the isolate the ping lands on; a burst that needs celld's second slot can still
-pay a cold start (seen once in the T14 baseline: 1,630 ms on a warm-phase request).
+pay a cold start (seen once in the T14 baseline: 1,630 ms on a warm-phase request). Pings cannot
+stop a tick's retirement; they only make the next ping, not a user, pay the restart. Measured:
+1 of 14 first-requests-after-idle cold with keep-warm at 5 s, vs 8 of 8 before. The upstream ask
+is therefore specific: keep at least one warm stateless isolate (a `min_stateless`), or retire only
+isolates idle longer than a configurable age.

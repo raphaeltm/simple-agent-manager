@@ -207,15 +207,24 @@ later decision:
 
 ## Cold starts
 
-celld retires a stateless Worker isolate after about 8 s idle, and the next request waits
-1.5-2.2 s while a new isolate loads the 29 MB bundle. As a stopgap Caddy keeps one warm: an
-active health check sends `GET /health` to celld every `SAM_KEEP_WARM_INTERVAL` (default `5s`,
-allowed `1s`-`6s`) for as long as Caddy runs (`caddy/keep-warm/on.caddy`). The check sits on a
-route that serves no request, so a failing `/health` cannot take the real proxy out of service.
-`/health` reads no storage and is not in SAM's request log or Caddy's access log. Set
-`SAM_KEEP_WARM=off` in `.env` and run `docker compose up -d caddy` to turn it off. The upstream
-fix (celld keeping isolates warm, or an idle setting) is tracked in
-`tasks/backlog/2026-11-11-selfhost-celld-isolate-cold-start-slow-page-loads.md`.
+On every 30 s pool tick celld retires one stateless Worker isolate that hosts no Durable Object
+whenever no request is executing JavaScript at that instant (`REAP_INTERVAL` and
+`celld_logic::isolate::retire` in celld 0.6.3; neither is configurable). A quiet box therefore has
+no warm isolate, and the next request waits 1.5-2.4 s while a new one loads the bundle. As a
+stopgap Caddy sends `GET /health` to celld every `SAM_KEEP_WARM_INTERVAL` (default `5s`, allowed
+`1s`-`6s`) for as long as Caddy runs (`caddy/keep-warm/on.caddy`). A ping cannot prevent a
+retirement, but the next ping pays the restart, so a user's request waits only if it arrives in
+the window between a tick and the restarted isolate: about half the interval plus the restart
+time, out of every 30 s. On the test box the first request after an idle spell went from 8 of 8
+cold (1.5-1.7 s) to 1 of 14 cold. A shorter interval narrows the window a little; the restart
+time does not change.
+
+The check sits on a route that serves no request, so a failing `/health` cannot take the real
+proxy out of service. `/health` reads no storage and is not in SAM's request log or Caddy's
+access log. Each tick costs one isolate start (about 1.5 s of CPU every 30 s) whether or not
+anyone is using the box. Set `SAM_KEEP_WARM=off` in `.env` and run `docker compose up -d caddy`
+to turn it off. The upstream fix (celld keeping a warm stateless isolate, or a retirement
+setting) is tracked in `tasks/backlog/2026-11-11-selfhost-celld-isolate-cold-start-slow-page-loads.md`.
 
 ## Known gaps in this pass
 

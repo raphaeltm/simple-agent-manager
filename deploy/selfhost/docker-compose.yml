@@ -198,7 +198,8 @@ services:
       CELLD_PORT: ${CELLD_PORT:-8080}
       FRPS_BIND_PORT: ${FRPS_BIND_PORT:-7000}
       # Keep-warm for celld's stateless Worker isolate (caddy/keep-warm/on.caddy): on unless set
-      # to off; the interval must stay below celld's ~8 s idle retirement. start.sh validates both.
+      # to off; the interval (1s-6s) sets how long a cold window follows each 30 s celld pool tick.
+      # start.sh validates both.
       SAM_KEEP_WARM: ${SAM_KEEP_WARM:-on}
       SAM_KEEP_WARM_INTERVAL: ${SAM_KEEP_WARM_INTERVAL:-5s}
     # The access log goes to stdout (README "Logs"). Docker's default json-file driver never
