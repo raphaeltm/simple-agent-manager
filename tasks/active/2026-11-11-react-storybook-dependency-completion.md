@@ -31,10 +31,18 @@ the exact PR number and head. Do not merge.
   (pre-existing). The untracked ones are filed in
   `tasks/backlog/2026-11-11-preexisting-chats-auth-immersive-audit-failures.md`.
 
+- CI Test job on abc13d3c failed with one uncaught `ReferenceError: window is not defined` from
+  react-dom `dispatchSetState`, raised by `CopyableId`'s 1.5s copy-feedback timer firing after the
+  `session-header.test.tsx` jsdom environment was torn down (all 5082 tests passed). The
+  `resolveUpdatePriority` source is identical in 19.2.7 and 19.3.1, so this is a latent unmount
+  race that the new timing exposed. Fix: clear the timer on unmount. The same pattern in other
+  components is tracked in `tasks/backlog/2026-11-11-preexisting-chats-auth-immersive-audit-failures.md`.
+
 ## Implementation Checklist
 
 - [x] Catalog: react, react-dom 19.3.1; @types/react, @types/react-dom 19.3.0
 - [x] packages/ui: all Storybook packages 10.6.6
+- [x] Clear `CopyableId` copy-feedback timer on unmount, plus a regression test proven discriminating
 - [x] Regenerate pnpm-lock.yaml; confirm a single react/react-dom version resolves
 - [x] Typecheck and tests for web (5082), ui (137), terminal (105), acp-client (586); lint in CI
 - [x] Storybook build + Storybook Playwright audit (packages/ui): 68/68

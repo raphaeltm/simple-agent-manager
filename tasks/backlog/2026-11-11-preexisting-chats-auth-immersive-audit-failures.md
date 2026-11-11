@@ -31,3 +31,17 @@ identical on `main` and that branch, so these failures predate it.
 - [ ] The immersive-scroll test waits for a rendered top row (for example, polls `topRow()` until
       non-null) and passes 50/50 with `--repeat-each=50`
 - [ ] Decide whether CI's `playwright-visual` job should run these specs at 375x667 and 1280x800
+
+## Related: copy-feedback timers that outlive their component
+
+PR #2657 fixed `CopyableId` (`apps/web/src/components/project-message-view/CopyableId.tsx`). Its
+1.5s "copied" reset timer was never cleared on unmount, and on CI it fired after jsdom teardown
+(`ReferenceError: window is not defined`), failing the web Test job. The same uncleared
+`setTimeout(() => setX(false), N)` pattern remains in `ApiTokens.tsx:97`, `admin/LogStream.tsx:75`,
+`admin/CopyableIdPill.tsx:23`, `admin/ObservabilityLogEntry.tsx:128`, `shared/log/CopyButton.tsx:30`,
+`pages/ToolsCli.tsx:78`, `pages/sam-prototype/sam-markdown.tsx:42` and
+`pages/SettingsComputeUsage.tsx:344`.
+
+- [ ] Clear each timer on unmount (timer ref + cleanup effect, as in `CopyableId` and
+      `packages/acp-client/src/components/MessageActions.tsx`), or extract one shared hook
+- [ ] Add an unmount test per component that asserts no timer remains pending (`vi.getTimerCount()`)
