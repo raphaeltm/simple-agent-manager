@@ -12,6 +12,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('drizzle-orm/d1');
 vi.mock('../../../src/middleware/auth', () => ({
+  // Agent sign-in session guards: inert for these ordinary-session route tests.
+  rejectAgentSignInSession: () => async (_c: unknown, next: () => Promise<void>) => next(),
+  assertNotAgentSignInSession: () => undefined,
+
   requireAuth: () => vi.fn((c: any, next: any) => next()),
   requireApproved: () => vi.fn((c: any, next: any) => next()),
   getUserId: () => 'user-1',
@@ -134,18 +138,22 @@ describe('projects runtime config routes', () => {
       []
     );
 
-    const res = await app.request('/api/projects/proj-1/runtime/env-vars', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        key: 'API_TOKEN',
-        value: 'plain-secret',
-        isSecret: true,
-      }),
-    }, {
-      DATABASE: {} as any,
-      ENCRYPTION_KEY: 'test-key',
-    } as Env);
+    const res = await app.request(
+      '/api/projects/proj-1/runtime/env-vars',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          key: 'API_TOKEN',
+          value: 'plain-secret',
+          isSecret: true,
+        }),
+      },
+      {
+        DATABASE: {} as any,
+        ENCRYPTION_KEY: 'test-key',
+      } as Env
+    );
 
     expect(res.status).toBe(200);
     expect(mocks.encrypt).toHaveBeenCalledWith('plain-secret', 'test-key');

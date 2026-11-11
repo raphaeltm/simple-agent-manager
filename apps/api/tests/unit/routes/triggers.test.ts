@@ -19,6 +19,10 @@ import type { Env } from '../../../src/env';
 
 // Mock auth middleware — pass through, inject auth context
 vi.mock('../../../src/middleware/auth', () => ({
+  // Agent sign-in session guards: inert for these ordinary-session route tests.
+  rejectAgentSignInSession: () => async (_c: unknown, next: () => Promise<void>) => next(),
+  assertNotAgentSignInSession: () => undefined,
+
   requireAuth: () =>
     vi.fn((c: any, next: any) => {
       c.set('auth', { user: { id: 'test-user-id', name: 'Test User', email: 'test@example.com' } });

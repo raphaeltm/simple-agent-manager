@@ -223,3 +223,55 @@ func TestSessionManagerStopWaitsForCleanupExit(t *testing.T) {
 		t.Fatal("Stop returned before cleanup goroutine exited")
 	}
 }
+
+func TestCreateSession_CappedBySessionNotAfter(t *testing.T) {
+	sm := newTestSessionManager() // TTL 1h
+	defer sm.Stop()
+
+	notAfter := time.Now().Add(10 * time.Minute).Unix()
+	capped, err := sm.CreateSession(&Claims{Workspace: "ws-AAA", SessionNotAfter: notAfter})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := capped.ExpiresAt.Unix(); got != notAfter {
+		t.Fatalf("capped session expires at %d, want the token's sessionNotAfter %d", got, notAfter)
+	}
+	rec := httptest.NewRecorder()
+	sm.SetCookieForWorkspace(rec, capped, "ws-AAA")
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Expires.Unix() != notAfter {
+			t.Fatalf("cookie %s expires at %v, want %d", cookie.Name, cookie.Expires, notAfter)
+		}
+	}
+
+	// Control: a token without the claim keeps the configured TTL.
+	ordinary, err := sm.CreateSession(&Claims{Workspace: "ws-AAA"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ordinary.ExpiresAt.Before(time.Now().Add(59 * time.Minute)) {
+		t.Fatalf("ordinary session expires at %v, want about an hour from now", ordinary.ExpiresAt)
+	}
+
+	// A cap later than the TTL does not extend the session.
+	late, err := sm.CreateSession(&Claims{Workspace: "ws-AAA", SessionNotAfter: time.Now().Add(48 * time.Hour).Unix()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if late.ExpiresAt.After(time.Now().Add(time.Hour + time.Minute)) {
+		t.Fatalf("a later cap extended the session to %v", late.ExpiresAt)
+	}
+}
+
+func TestGetSession_RefusesSessionPastSessionNotAfter(t *testing.T) {
+	sm := newTestSessionManager()
+	defer sm.Stop()
+
+	session, err := sm.CreateSession(&Claims{Workspace: "ws-AAA", SessionNotAfter: time.Now().Add(-time.Second).Unix()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sm.GetSession(session.ID) != nil {
+		t.Fatal("a session past its sessionNotAfter must not be returned")
+	}
+}

@@ -69,7 +69,7 @@ func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	runtime := s.upsertWorkspaceRuntime(workspaceID, "", "", "running", "")
+	runtime := s.upsertWorkspaceRuntimeForAttach(workspaceID)
 	if !s.requireWorkspaceReconnectState(w, r, runtime) {
 		return
 	}

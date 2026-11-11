@@ -14,6 +14,10 @@ import { markAgentEmailSetUp } from '../../helpers/agent-email-tables';
 import { createAllSchemaTables, createMemoryKv, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 vi.mock('../../../src/middleware/auth', () => ({
+  // Agent sign-in session guards: inert for these ordinary-session route tests.
+  rejectAgentSignInSession: () => async (_c: unknown, next: () => Promise<void>) => next(),
+  assertNotAgentSignInSession: () => undefined,
+
   requireAuth: () =>
     vi.fn((c: { set: (key: string, value: unknown) => void }, next: () => Promise<void>) => {
       c.set('auth', { user: { id: 'user-1', name: 'Owner', email: 'Owner@Example.com' } });

@@ -567,6 +567,7 @@ export class TaskRunner extends DurableObject<Env> {
               projectId: currentState.projectId,
               chatSessionId: wakeChatSessionId,
               step,
+              attemptId: currentState.config.recoveryAttemptId,
             })
           );
         }

@@ -86,6 +86,7 @@ export async function attachWakeState(
     const [row] = await db
       .select({
         recoveryStatus: schema.sessionSnapshots.recoveryStatus,
+        recoveryAttemptId: schema.sessionSnapshots.recoveryAttemptId,
         executionStep: schema.tasks.executionStep,
         admissionReason: schema.tasks.admissionReason,
         admissionNextRetryAt: schema.tasks.admissionNextRetryAt,
@@ -141,6 +142,8 @@ export async function attachWakeState(
     return {
       ...(state ?? EMPTY_STATE),
       recoveryStatus,
+      // Lets the client tell a stale snapshot of a finished wake from a new wake.
+      wakeAttemptId: row.recoveryAttemptId ?? null,
       wakePhase,
       waitReason: admissionWait,
       waitRetryAt: admissionWait ? (row.admissionNextRetryAt ?? null) : null,

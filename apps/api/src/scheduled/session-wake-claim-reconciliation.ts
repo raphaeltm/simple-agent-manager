@@ -158,6 +158,7 @@ export async function runDeadWakeClaimReconciliation(
             projectId: row.projectId as string,
             chatSessionId: row.chatSessionId,
             status: 'failed',
+            attemptId: row.recoveryAttemptId,
           })
         )
       )

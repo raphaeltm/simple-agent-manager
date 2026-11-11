@@ -92,7 +92,7 @@ func (sm *SessionManager) CreateSession(claims *Claims) (*Session, error) {
 		UserID:    claims.Subject,
 		Claims:    claims,
 		CreatedAt: now,
-		ExpiresAt: now.Add(sm.ttl),
+		ExpiresAt: sessionExpiry(now, sm.ttl, claims),
 	}
 
 	sm.mu.Lock()
@@ -109,6 +109,17 @@ func (sm *SessionManager) CreateSession(claims *Claims) (*Session, error) {
 	sm.sessionOrder = append(sm.sessionOrder, sessionID)
 
 	return session, nil
+}
+
+// sessionExpiry is now+ttl, capped at the token's SessionNotAfter when it carries one.
+func sessionExpiry(now time.Time, ttl time.Duration, claims *Claims) time.Time {
+	expiresAt := now.Add(ttl)
+	if claims != nil && claims.SessionNotAfter > 0 {
+		if notAfter := time.Unix(claims.SessionNotAfter, 0); notAfter.Before(expiresAt) {
+			return notAfter
+		}
+	}
+	return expiresAt
 }
 
 // GetSession retrieves a session by ID.
