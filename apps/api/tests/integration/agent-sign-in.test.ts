@@ -25,11 +25,14 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { handleAppError } from '../../src/middleware/app-error-handler';
+import { adminRoutes } from '../../src/routes/admin';
 import { agentSignInRoutes } from '../../src/routes/agent-sign-in';
 import { apiTokenRoutes } from '../../src/routes/api-tokens';
 import { authRoutes } from '../../src/routes/auth';
 import { connectorConsentRoutes } from '../../src/routes/connector-oauth';
 import { deviceFlowRoutes } from '../../src/routes/device-flow';
+import { projectsRoutes } from '../../src/routes/projects';
+import { triggersRoutes } from '../../src/routes/triggers';
 import {
   isAgentSignInEnabled,
   resolveAgentSignInTrust,
@@ -122,6 +125,9 @@ function buildApp() {
   app.route('/api/auth', deviceFlowRoutes);
   app.route('/api/auth', authRoutes);
   app.route('/api/connector/consent', connectorConsentRoutes);
+  app.route('/api/projects/:projectId/triggers', triggersRoutes);
+  app.route('/api/projects', projectsRoutes);
+  app.route('/api/admin', adminRoutes);
   app.notFound((c) => c.json({ error: 'NOT_FOUND', message: 'Endpoint not found' }, 404));
   return app;
 }
@@ -434,6 +440,92 @@ describe('agent sign-in through workload identity (vertical slice)', () => {
       const signOut = await post('/api/auth/sign-out', cookie);
       expect(signOut.status).toBe(200);
       expect((await me(cookie)).status).toBe(401);
+    });
+
+    it('cannot grant lasting access: invites, access approvals, webhook credentials', async () => {
+      const agent = await agentCookie();
+      const ordinary = await ordinaryCookie();
+      const cases: Array<[string, unknown, number]> = [
+        // [path, body, status an ordinary session reaches past the guard: project not found]
+        ['/api/projects/proj-x/invite-links', {}, 404],
+        ['/api/projects/proj-x/access-requests/req-x/approve', {}, 404],
+        [
+          '/api/projects/proj-x/triggers',
+          { name: 'w', sourceType: 'webhook', promptTemplate: 'p' },
+          404,
+        ],
+        ['/api/projects/proj-x/triggers/trig-x/webhook/rotate', {}, 404],
+      ];
+      for (const [path, body, ordinaryStatus] of cases) {
+        const refused = await post(path, agent, body);
+        expect({ path, status: refused.status }).toEqual({ path, status: 403 });
+        expect(((await refused.json()) as { message: string }).message).toMatch(REFUSED);
+        const control = await post(path, ordinary, body);
+        expect({ path, status: control.status }).toEqual({ path, status: ordinaryStatus });
+      }
+      // A non-webhook trigger mints no credential, so it is not refused (reaches the project check).
+      const cron = await post('/api/projects/proj-x/triggers', agent, {
+        name: 'c',
+        sourceType: 'cron',
+        cronExpression: '0 * * * *',
+        promptTemplate: 'p',
+      });
+      expect(cron.status).toBe(404);
+    });
+
+    it('cannot approve accounts or change roles even as an administrator target', async () => {
+      env.AGENT_SIGN_IN_TRUST = trustJson({ allowedTargets: [ADMIN_ID] });
+      const response = await exchange(await issuer.sign(), ADMIN_ID);
+      const agent = cookieFrom(response);
+      const ordinary = (await createSessionCookieForUser(env, ADMIN_ID)).sessionCookie;
+      const patch = (path: string, cookie: string, body: unknown) =>
+        app.request(
+          `${API_ORIGIN}${path}`,
+          {
+            method: path.endsWith('signup-approval') ? 'PUT' : 'PATCH',
+            headers: { 'content-type': 'application/json', cookie },
+            body: JSON.stringify(body),
+          },
+          env
+        );
+      const actions = [
+        ['/api/admin/users/pending-user', { action: 'approve' }],
+        ['/api/admin/users/pending-user/role', { role: 'admin' }],
+        ['/api/admin/signup-approval', { requireApproval: false }],
+      ] as const;
+      for (const [path, body] of actions) {
+        const refused = await patch(path, agent, body);
+        expect({ path, status: refused.status }).toEqual({ path, status: 403 });
+        expect(((await refused.json()) as { message: string }).message).toMatch(REFUSED);
+      }
+      const pendingStatus = () =>
+        (
+          sqlite.prepare('SELECT status FROM users WHERE id = ?').get('pending-user') as {
+            status: string;
+          }
+        ).status;
+      expect(pendingStatus()).toBe('pending');
+      // Control: the same administrator with an ordinary session gets past the guard.
+      for (const [path, body] of actions) {
+        const control = await patch(path, ordinary, body);
+        expect(((await control.json()) as { message?: string }).message ?? '').not.toMatch(REFUSED);
+      }
+      expect(pendingStatus()).toBe('active');
+    });
+
+    it('cannot list the account’s sessions through BetterAuth', async () => {
+      const listed = await app.request(
+        `${API_ORIGIN}/api/auth/list-sessions`,
+        { headers: { cookie: await agentCookie() } },
+        env
+      );
+      expect(listed.status).toBe(403);
+      const control = await app.request(
+        `${API_ORIGIN}/api/auth/list-sessions`,
+        { headers: { cookie: await ordinaryCookie() } },
+        env
+      );
+      expect(control.status).toBe(200);
     });
 
     it('is refused once past its hard expiry even if its expiry was extended', async () => {

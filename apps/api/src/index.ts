@@ -185,6 +185,7 @@ import { scheduled } from './scheduled/handler';
 import { handleInboundAgentEmail } from './services/agent-email/inbound';
 import { agentEmailConfig } from './services/agent-email/setup-state';
 import { isAgentSignInEnabled } from './services/agent-sign-in/config';
+import { isPastHardExpiry } from './services/agent-sign-in/session-cap';
 import { signTerminalToken, verifyPortAccessToken, verifyTerminalToken } from './services/jwt';
 import { getNodeBackendBaseUrl } from './services/node-agent-readiness';
 import { assertSessionUserApproved } from './services/signup-approval';
@@ -381,7 +382,8 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
       headers: c.req.raw.headers,
       query: { disableCookieCache: true },
     });
-    if (session?.user) {
+    // An agent sign-in session past its hard expiry is no session (agent-sign-in/session-cap.ts).
+    if (session?.user && !isPastHardExpiry(session.session)) {
       await assertSessionUserApproved(c.env, session.user);
       userId = session.user.id;
     }

@@ -130,21 +130,24 @@ authRoutes.on(['GET', 'POST'], '/*', async (c) => {
   }
 });
 
-/** BetterAuth actions an agent sign-in session may take. Everything else that writes is refused. */
-const AGENT_SESSION_AUTH_ACTIONS = new Set(['/api/auth/sign-out']);
+/**
+ * BetterAuth endpoints an agent sign-in session may use: read its own session, sign out. The
+ * reads are answered before this check (GET /get-session has its own route above).
+ */
+const AGENT_SESSION_AUTH_ENDPOINTS = new Set(['/api/auth/get-session', '/api/auth/sign-out']);
 
 /**
- * Whether this is a BetterAuth write made with an agent sign-in session (other than signing
- * out). Linking a social account, for one, would give the agent's operator a lasting way into
- * the target account; an agent session must stay as short as it was issued. Reads the session
- * only for BetterAuth POSTs that carry a session cookie, which are rare.
+ * Whether this BetterAuth request is made with an agent sign-in session and is not one of the
+ * endpoints above. Linking a social account, for one, would give the agent's operator a lasting
+ * way into the target account, and listing sessions would expose the account's other sessions.
+ * Reads the session only for BetterAuth requests that carry a session cookie, which are rare
+ * (the app polls /get-session, which is excluded).
  */
 async function isAgentSessionChangingAccount(
   auth: Awaited<ReturnType<typeof createAuth>>,
   request: Request
 ): Promise<boolean> {
-  if (request.method !== 'POST') return false;
-  if (AGENT_SESSION_AUTH_ACTIONS.has(new URL(request.url).pathname)) return false;
+  if (AGENT_SESSION_AUTH_ENDPOINTS.has(new URL(request.url).pathname)) return false;
   if (!request.headers.get('cookie')?.includes('better-auth.session_token=')) return false;
   const current = await auth.api.getSession({
     headers: request.headers,

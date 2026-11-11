@@ -35,11 +35,15 @@ Each token can be used once. The session expires after one hour by default and i
 while in use. The endpoint never creates accounts and never changes anyone's role; the target
 must already exist and pass the same approval checks as any other sign-in.
 
-An agent session can use the app like the target user, but it cannot turn itself into a longer
-lived credential: it cannot create personal access tokens, approve a CLI device sign-in, grant
-connector (OAuth) consent, or link a social account. It can sign out. Anything else the target
-account can create, such as triggers, workspaces or stored credentials, it can create too, so
-choose target accounts that only hold test data.
+An agent session can use the app like the target user, but it cannot make its access outlast the
+session. It is refused when it tries to create a personal access token, approve a CLI device
+sign-in, grant connector (OAuth) consent, create or rotate a webhook trigger credential, create a
+project invite link, approve a project access request, approve accounts, change roles or signup
+approval, or use any BetterAuth account endpoint other than reading its session and signing out
+(so it cannot link a social account or list the account's other sessions). Everything else the
+target account can do, it can do, including creating triggers, workspaces and stored
+credentials. Treat this list as a safeguard, not a boundary: choose target accounts that only
+hold test data, and never an administrator.
 
 ## Set it up (operator, once)
 
@@ -147,11 +151,13 @@ await page.context().addCookies([
 await page.goto('https://app.test.example.org');
 ```
 
-**3. Work, then sign out** from the user menu when you are done. Signing out deletes the
-session at once instead of leaving it valid until it expires.
+**3. Work, then sign out** when you are done, from the user menu or from Playwright with
+`await page.request.post('https://api.test.example.org/api/auth/sign-out', { data: {}, headers: { origin: 'https://app.test.example.org' } })`.
+Signing out deletes the session at once instead of leaving it valid until it expires.
 
-The session value appears in the command output and therefore in the chat, where anyone who can
-read the chat could use it until it expires or you sign out. It cannot be extended or turned into
+The session value appears in the command output and therefore in the chat (and in what the agent
+sends to its model provider), where anyone who can read it could use it until it expires or you
+sign out. For this flow, prefer a short `sessionTtlSeconds` such as `600`. It cannot be extended or turned into
 another credential. If your Playwright runs as a script rather than through the MCP tool, write
 the response to a file readable only by you (`umask 077; curl … -o session.json`) and read it
 in the script instead of printing it.
@@ -160,8 +166,9 @@ in the script instead of printing it.
 
 Every accepted sign-in writes a row to the test instance's `agent_sign_ins` table: issuer, token
 ID, the source subject, project, user, profile, task and workspace, the target account, the
-session and its expiry. The row is kept after sign-out. Rejections are logged as
-`agent_sign_in.rejected` with a reason.
+session and its expiry. The table is a permanent audit record: rows are kept after sign-out and
+are never cleaned up (at most `maxSignInsPerHour` rows per allowed source per hour). Rejections
+are logged as `agent_sign_in.rejected` with a reason.
 
 Anyone using the test instance can tell it accepts agent sign-in: its sign-in page says so.
 
@@ -179,6 +186,6 @@ Anyone using the test instance can tell it accepts agent sign-in: its sign-in pa
 | `403 Target user is not allowed for agent sign-in` | The target does not exist or is not in `allowedTargets`.                                                            |
 | `403` pending approval or suspended                | The target account cannot sign in at all right now.                                                                 |
 | `403 … until this instance has an administrator`   | The test instance has no administrator account yet. Sign one in first.                                              |
-| `403 Agent sign-in sessions cannot create …`       | The agent session tried to create a token, approve a device or grant consent. Not allowed.                          |
+| `403 Agent sign-in sessions cannot create …`       | The agent session tried to mint a credential or grant access (see How it works). Not allowed.                       |
 | `429`                                              | Too many sign-ins for this source in the last hour, or too many attempts from this address; wait for `Retry-After`. |
 | `503 ISSUER_KEYS_UNAVAILABLE`                      | The test instance could not fetch the issuer's public keys. Check that the issuer is reachable.                     |

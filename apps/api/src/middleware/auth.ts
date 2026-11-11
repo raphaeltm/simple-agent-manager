@@ -187,25 +187,30 @@ export function optionalAuth(): MiddlewareHandler<{ Bindings: Env }> {
 
 /**
  * Refuse a session created by agent sign-in through workload identity. Apply to every route that
- * mints a credential which outlives the session (personal access tokens, device-flow approval,
- * OAuth consent): otherwise a one-hour agent session could turn itself into a lasting one.
+ * mints a credential or grants access which outlives the session (personal access tokens,
+ * device-flow approval, OAuth consent, webhook credentials, project invites and access approvals,
+ * account approval and roles): otherwise a one-hour agent session could make itself lasting.
  * Must be used AFTER requireAuth(). No I/O: the marker comes back with the session.
  */
 export function rejectAgentSignInSession(): MiddlewareHandler<{ Bindings: Env }> {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
-    const auth = c.get('auth');
-    if (!auth) throw errors.unauthorized('Authentication required');
-    if (auth.session.agentSignIn) {
-      log.warn('agent_sign_in.credential_mint_refused', {
-        userId: auth.user.id,
-        sessionId: auth.session.id,
-        path: new URL(c.req.url).pathname,
-        action: 'rejected',
-      });
-      throw errors.forbidden('Agent sign-in sessions cannot create credentials');
-    }
+    assertNotAgentSignInSession(c);
     await next();
   };
+}
+
+/** The check behind `rejectAgentSignInSession`, for handlers that refuse only some requests. */
+export function assertNotAgentSignInSession(c: Context<{ Bindings: Env }>): void {
+  const auth = c.get('auth');
+  if (!auth) throw errors.unauthorized('Authentication required');
+  if (!auth.session.agentSignIn) return;
+  log.warn('agent_sign_in.credential_mint_refused', {
+    userId: auth.user.id,
+    sessionId: auth.session.id,
+    path: new URL(c.req.url).pathname,
+    action: 'rejected',
+  });
+  throw errors.forbidden('Agent sign-in sessions cannot create credentials or grant access');
 }
 
 /**

@@ -18,7 +18,7 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
-import { getUserId } from '../../middleware/auth';
+import { getUserId, rejectAgentSignInSession } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireProjectAccess, requireProjectCapability } from '../../middleware/project-auth';
 import {
@@ -393,6 +393,8 @@ projectMembersRoutes.get('/:id/members', async (c) => {
 
 projectMembersRoutes.post(
   '/:id/invite-links',
+  // An invite grants lasting access to whoever redeems it.
+  rejectAgentSignInSession(),
   jsonValidator(CreateProjectInviteSchema),
   async (c) => {
     const userId = getUserId(c);
@@ -638,6 +640,7 @@ projectMembersRoutes.post('/invite-links/:token/request', async (c) => {
 
 projectMembersRoutes.post(
   '/:id/access-requests/:requestId/approve',
+  rejectAgentSignInSession(),
   jsonValidator(DecideProjectAccessRequestSchema),
   async (c) => {
     const approverId = getUserId(c);

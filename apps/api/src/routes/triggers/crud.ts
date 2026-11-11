@@ -19,7 +19,7 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { parsePositiveInt, requireRouteParam } from '../../lib/route-helpers';
-import { getAuth } from '../../middleware/auth';
+import { assertNotAgentSignInSession, getAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { CreateTriggerSchema, jsonValidator, UpdateTriggerSchema } from '../../schemas';
 import {
@@ -167,8 +167,10 @@ crudRoutes.post('/', jsonValidator(CreateTriggerSchema), async (c) => {
   const projectId = requireRouteParam(c, 'projectId');
   const db = drizzle(c.env.DATABASE, { schema });
   const userId = getAuth(c).user.id;
-  const project = await requireProjectTaskWrite(db, projectId, userId);
   const body = c.req.valid('json');
+  // A webhook trigger returns a credential that outlives the session.
+  if (body.sourceType === 'webhook') assertNotAgentSignInSession(c);
+  const project = await requireProjectTaskWrite(db, projectId, userId);
   const { created, webhookToken } = await createTrigger(db, c.env, project, userId, body);
   const id = created.id;
   clearTriggerPageCaches(projectId);

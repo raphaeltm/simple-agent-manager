@@ -131,7 +131,7 @@ After staging deployment succeeds, use Playwright to test the live app:
    await page.goto('https://app.sammy.party');
    ```
 
-   c. Sign out from the user menu when finished. Each token works once (request a new one per
+   c. Sign out when finished (`POST https://api.sammy.party/api/auth/sign-out` from the browser context, with `origin: https://app.sammy.party`). Each token works once (request a new one per
    sign-in); the session lasts one hour. A `404` means staging is not configured for it; fall
    back to the stored smoke token. Production must never carry `AGENT_SIGN_IN_TRUST`.
 
