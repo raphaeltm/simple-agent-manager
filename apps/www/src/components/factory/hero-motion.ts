@@ -150,10 +150,14 @@ export function initFactoryHero(hero: HTMLElement) {
       return;
     }
     // Jump straight to the exploded pose (no transition), then let it assemble.
-    hero.setAttribute('data-motion-snap', '');
+    hero.dataset.motionSnap = '';
     hero.dataset.motion = 'intro';
-    void hero.offsetHeight;
-    requestAnimationFrame(() => requestAnimationFrame(() => hero.removeAttribute('data-motion-snap')));
+    hero.getBoundingClientRect(); // Apply the exploded pose before transitions come back on.
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        delete hero.dataset.motionSnap;
+      }),
+    );
     // Hold the exploded pose until the screens have arrived and the stack is on screen, so the
     // visitor sees it assemble (and it never assembles empty).
     void Promise.all([stackImagesReady(stack), inView(stage)]).then(() => {
