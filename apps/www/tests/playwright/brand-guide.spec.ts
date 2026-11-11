@@ -48,6 +48,7 @@ test.describe('brand guide', () => {
   });
 
   test('copies a colour value from its swatch', async ({ page, context, browserName }) => {
+    // Both projects run Chromium; the guard documents that clipboard permissions are Chromium-only.
     test.skip(browserName !== 'chromium', 'clipboard permissions are Chromium-only');
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -90,9 +91,15 @@ test.describe('brand guide', () => {
     const travel = await pin.evaluate((el) => el.offsetHeight - window.innerHeight);
     expect(travel).toBeGreaterThan(200);
 
+    const progressAt = (fraction: number) => fraction.toFixed(2);
     const shiftAt = async (fraction: number) => {
       await page.evaluate((y) => window.scrollTo(0, y), top + travel * fraction);
-      await page.waitForTimeout(200);
+      // Wait for the scroll handler to write the new progress before reading the transform.
+      await expect
+        .poll(async () =>
+          Number(await pin.evaluate((el) => el.style.getPropertyValue('--p'))).toFixed(2)
+        )
+        .toBe(progressAt(fraction));
       return track.evaluate((el) => new DOMMatrixReadOnly(getComputedStyle(el).transform).m41);
     };
     const start = await shiftAt(0.05);
@@ -103,12 +110,15 @@ test.describe('brand guide', () => {
   test('tabbing to an off-screen swatch scrolls the pinned track to it', async ({
     page,
   }, testInfo) => {
+    // Phones keep the palette as a plain grid, so there is no pinned track to scroll.
     test.skip(testInfo.project.name.includes('Mobile'), 'the track only pins on wide screens');
     await page.goto(PATH);
     await expect(page.locator('[data-pin]')).toHaveAttribute('data-pinned', '');
     const last = page.getByRole('button', { name: 'Copy Forest Ink hex #11271d' });
     await last.focus();
-    await page.waitForTimeout(250);
+    // The focus handler scrolls the page; wait until the window has moved before measuring.
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+    await expect.poll(async () => (await last.boundingBox())?.x ?? -1).toBeGreaterThanOrEqual(0);
     const box = await last.boundingBox();
     const viewport = page.viewportSize()!;
     expect(box).not.toBeNull();

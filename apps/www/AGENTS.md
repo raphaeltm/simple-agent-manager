@@ -21,7 +21,7 @@ Public marketing website, blog, and documentation at `simple-agent-manager.org`.
 | `src/lib/motion.ts` | Motion shared by the hero and the scenes: the page-wide pause flag behind the hero's pause control, the story budget (`MAX_STORY_MS`, `STEP_SETTLE_MS`), the timeline, and the pointer follower used for tilt |
 | `src/pages/brand/index.astro` | Brand and style guide (`/brand/`). Published but not launched: `noindex`, excluded from the sitemap in `astro.config.ts`, linked from nowhere |
 | `src/components/brand/` | Brand guide sections, the `Lockup` component and `brand-motion.ts` (reveals, scroll progress `--p`, the pinned colour track, copy buttons) |
-| `src/data/brand.ts` | Brand guide content: palette (token-backed swatches are checked against the CSS by `tests/brand-guide.test.ts`), type scale, easings, copy examples, glossary |
+| `src/data/brand-content.json`, `src/data/brand.ts` | Brand guide content (palette, type scale, easings, copy examples, glossary) and its load-time validation and colour helpers. Token-backed swatches are checked against the CSS by `tests/brand-guide.test.ts` |
 | `scripts/build-brand-lockups.ts` | Renders the downloadable lockup PNGs in `public/images/brand/` with Chillax embedded; fails if the font does not load |
 | `src/pages/integrations/` | Integration showcase pages |
 | `src/pages/presentations/` | Presentation/talk pages |

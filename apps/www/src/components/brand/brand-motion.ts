@@ -119,7 +119,7 @@ function setupPinTracks() {
   // track shows that card, because a transformed track cannot scroll itself into view.
   for (const pin of pins) {
     pin.addEventListener('focusin', (event) => {
-      if (!pin.hasAttribute('data-pinned')) return;
+      if (pin.dataset.pinned === undefined) return;
       const track = pin.querySelector<HTMLElement>('[data-pin-track]');
       const card = (event.target as HTMLElement).closest<HTMLElement>('[data-pin-card]');
       const shift = Number(pin.style.getPropertyValue('--shift'));
@@ -137,7 +137,8 @@ function setupPinTracks() {
   layout();
   window.addEventListener('resize', layout);
   WIDE_TRACK_QUERY.addEventListener('change', layout);
-  document.fonts?.ready.then(layout);
+  // Chillax changes card widths once it loads; a failed font load keeps the first layout.
+  document.fonts?.ready.then(layout).catch(() => undefined);
   return layout;
 }
 
@@ -173,9 +174,11 @@ function setupCopy() {
       if (status) status.textContent = `Could not copy. Select ${value} and copy it.`;
       return;
     }
-    button.setAttribute('data-copied', '');
+    button.dataset.copied = '';
     if (status) status.textContent = `Copied ${value}`;
-    window.setTimeout(() => button.removeAttribute('data-copied'), 1600);
+    window.setTimeout(() => {
+      delete button.dataset.copied;
+    }, 1600);
   });
 }
 
@@ -188,7 +191,7 @@ function setupWeight() {
       if (output) output.value = input.value;
     };
     input.addEventListener('input', () => {
-      target?.setAttribute('data-manual', '');
+      if (target) target.dataset.manual = '';
       apply();
     });
     apply();
@@ -210,13 +213,14 @@ function setupEasings() {
   const demo = document.querySelector<HTMLElement>('[data-easing-demo]');
   if (!demo) return;
   const play = () => {
-    demo.removeAttribute('data-playing');
-    void demo.offsetWidth;
-    demo.setAttribute('data-playing', '');
+    delete demo.dataset.playing;
+    // Reading layout restarts the CSS animations when the attribute comes back.
+    demo.getBoundingClientRect();
+    demo.dataset.playing = '';
   };
   demo.querySelector('[data-easing-replay]')?.addEventListener('click', play);
   if (reduced.matches) {
-    demo.setAttribute('data-playing', '');
+    demo.dataset.playing = '';
     return;
   }
   const observer = new IntersectionObserver(

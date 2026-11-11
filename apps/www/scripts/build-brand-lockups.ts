@@ -13,7 +13,7 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { chromium } from '@playwright/test';
+import { chromium, type Page } from '@playwright/test';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const font = readFileSync(resolve(root, 'public/fonts/Chillax-Variable.woff2')).toString('base64');
@@ -45,24 +45,28 @@ function html(tone: keyof typeof TONES) {
   </body></html>`;
 }
 
+async function render(page: Page, tone: keyof typeof TONES) {
+  await page.setContent(html(tone));
+  await page.evaluate(() => document.fonts.ready);
+  const loaded = await page.evaluate(() => document.fonts.check(`700 100px Chillax`));
+  if (!loaded)
+    throw new Error('Chillax did not load; refusing to render a lockup in a fallback font');
+  const path = resolve(outDir, `sam-lockup-${tone}.png`);
+  await page.locator('.lockup').screenshot({ path, omitBackground: true });
+  console.log(`wrote ${path}`);
+}
+
 async function main() {
   mkdirSync(outDir, { recursive: true });
   const browser = await chromium.launch();
   try {
-    const page = await browser.newPage({
+    const context = await browser.newContext({
       deviceScaleFactor: SCALE,
       viewport: { width: 1200, height: 600 },
     });
-    for (const tone of Object.keys(TONES) as (keyof typeof TONES)[]) {
-      await page.setContent(html(tone));
-      await page.evaluate(() => document.fonts.ready);
-      const loaded = await page.evaluate(() => document.fonts.check(`700 100px Chillax`));
-      if (!loaded)
-        throw new Error('Chillax did not load; refusing to render a lockup in a fallback font');
-      const path = resolve(outDir, `sam-lockup-${tone}.png`);
-      await page.locator('.lockup').screenshot({ path, omitBackground: true });
-      console.log(`wrote ${path}`);
-    }
+    // One page per tone, rendered in parallel.
+    const tones = Object.keys(TONES) as (keyof typeof TONES)[];
+    await Promise.all(tones.map(async (tone) => render(await context.newPage(), tone)));
   } finally {
     await browser.close();
   }
