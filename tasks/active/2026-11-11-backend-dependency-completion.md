@@ -22,7 +22,7 @@ Complete only PRs #2628, #2629, #2630, #2635, #2637 and #2639 in one coherent ca
 - [x] Apply six upgrades and necessary Node contract alignment; narrow lock diff; early push.
 - [x] Install frozen lock; validate native SQLite under Node 22/24 and module checksums/libc pairing.
 - [ ] Full relevant lint, typecheck, tests, build; VM race/vet and linux amd64/arm64 builds; Worker tests.
-- [ ] Local Go/security, Cloudflare/Pulumi, completion/doc/constitution specialist reviews; address findings.
+- [x] Local Go/security, Cloudflare/Pulumi, completion/doc/constitution specialist reviews; address findings.
 - [ ] Coordinated exact-candidate staging deployment + browser runtime tests; fresh VM heartbeat/access and cleanup.
 - [ ] Draft replacement PR links originals, exact-head CI/check URLs, residual findings, CodeRabbit request/wait evidence.
 - [ ] Publish readiness evidence; no ready/merge before coordinator's explicit PR + full-head approval.
@@ -53,3 +53,6 @@ Complete only PRs #2628, #2629, #2630, #2635, #2637 and #2639 in one coherent ca
 - Native SQLite 13.0.3 transaction also passed on exact Node22.14.0/NAPI10 minimum; Node22.23.4 and24.22.1 were already verified. Go race/vet/all four deployment-platform builds and Workers-specific suite are next, sequentially.
 
 - Race validation found one intermittent scheduling assertion in `TestExpiredEvictionReopensAdmissionAndNextEpisodeParks`: prompt completion can arrive before replay's deferred admission release. Candidate focused10 failed once; clean-main10 plus paired main50/candidate50 passed. This does not prove dependency causation or empirical baseline reproduction. Independent Go/test-engineer review approved a test-only bounded wait on actual admission via the existing `waitFor` helper; permanent fencing still times out and all subsequent stale-episode assertions remain. No eviction runtime logic changed. Focused50 and fullrace reruns required; this small adjacent correction is included solely to finish the real validation gate.
+
+- At `0737a5e7e944511f1e59c80a5dfeaeb043cd0799`, corrected focused race test passed 50/50; full `go test -race ./...` passed (13:49 UTC), `go vet ./...` passed (13:50), and `make build-all` passed Linux/macOS amd64/arm64 (13:52). Builds use resolved content release `e532ed7032bf946678ae98db8daec801cb139f49` and its pinned build date, distinct from documentation/test head. Initial race failure remains recorded above. Workers-specific suite is still running; no pass claimed.
+- Final local eviction Go/test-engineer review PASS/ADDRESSED on actual `0737a5e7e` diff. Completion validator PASS for implementation readiness for staging at that head: A/B/C/F pass, D/E not applicable. Staging/VM, exact-head CI and CodeRabbit remain release gates.
