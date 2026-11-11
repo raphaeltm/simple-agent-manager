@@ -161,6 +161,16 @@ recorded as a follow-up idea with the two prerequisites above.
 - [x] Owner-attested manual deletion releases the node's tunnel inline (`56286ae15`)
 - [x] Entry-point tests through `provisionDeploymentNode` and `ensureSessionSnapshotUploadRelay`
       (`6e078ff50`)
+- [x] Review round 2 (cloudflare-specialist), H1: a provider failure before the create POST (GCP
+      token exchange or firewall ensure) no longer wedges the durable intent. GCP marks such errors
+      not dispatched (`create-dispatch.ts`), and the intent withdraws its create record and retries.
+      The abort check after the mark is removed, and the uncertain error keeps the provider cause.
+- [x] Review round 2, M3: GCP's observed-hardware read is opt-in (`getObservedVM`), so `getVM`
+      callers (deletion, orphan sweep) keep one lookup
+- [x] Review round 2, M1/M2 (attempt ceiling, DNS signal) deferred with justification:
+      `tasks/backlog/2026-11-11-durable-provisioning-attempt-ceiling.md`
+- [x] go-specialist MEDIUMs: both firewall runs pinned around the install; snapshot failure stops
+      before the install; distinct error labels
 - [x] Backlog: strict providerless deletion for non-Hetzner providers
       (`tasks/backlog/2026-11-11-providerless-node-deletion-non-hetzner.md`)
 
@@ -186,6 +196,18 @@ recorded as a follow-up idea with the two prerequisites above.
 - Cleanup backoff doubles from 1 min, so the interval spanning the window's end is at most the time already elapsed.
 - Worst case to cleaned is therefore about 2 × settle = 30 min at the defaults (bounded by `cleanupBackoffMaxMs` = 1 h for larger windows). Tested in `node-tunnel-hardening.test.ts` with the real sweep driven sweep by sweep.
 
+**Whole-attempt bound (changed by this work).**
+- A durable attempt no longer cancels the provider create, recovery or publish tail with its
+  deadline, because each cut stranded GCP VMs. Every request is still capped by the provider's own
+  timeout (30 s on GCP).
+- The attempt as a whole is unbounded. Worst case for a GCP create: firewall ensure (3-6 × 30 s),
+  the insert, the operation poll (up to 5 min) and the machine-type lookup, roughly 10-13 min. The
+  intent's 15 min age limit is not checked while an attempt is in flight.
+- Typical on staging (S11): about 30 s to `running`.
+- A ceiling is deferred: `tasks/backlog/2026-11-11-durable-provisioning-attempt-ceiling.md`.
+- A pre-POST failure proven unsent (`isProviderCreateNotDispatched`) costs one attempt (+30 s),
+  bounded by the intent's 30 attempts / 15 min.
+
 **Cleanup sweep.**
 - Each 5-minute cron tick handles up to `cleanupBatchSize` = 10 rows within `cleanupSweepBudgetMs` = 30 s.
 - At most 5 Cloudflare calls per row, about 0.3 s each when healthy: 10 rows per tick, or 120 rows/h.
@@ -198,11 +220,14 @@ All rows ran on `app.sammy.party` (staging, `VM_AGENT_TRANSPORT=cloudflare-tunne
 
 | # | Provider | Path (entry point) | Fault injected | Result | Evidence |
 | --- | --- | --- | --- | --- | --- |
-| S1 | GCP `europe-west1-b` e2-medium | Direct `POST /api/nodes` (NodeLifecycle durable) | `vmTunnels.provisioningBudgetMs=1`, i.e. the incident's 5 s deadline | **Tunnel part PASS; found and fixed a new defect** | Node `01M73XZ9JPMCMEGPYCNEPCV62E` (build 4a… run 42924408696): <ul><li>23:51:33 `attempt_aborted` in phase `ingress` (the incident). The row was not released.</li><li>23:52:02 the resumed attempt finished the tunnel (`node_tunnel.provisioned`), then `attempt_aborted` in `provider_create`.</li><li>23:52:30 `provisioning_resumed` (fast path, 2 calls).</li><li>23:53:01 onward, every attempt failed with `Allocation inventory has no exact match; a second create is forbidden`. The 5 s cut landed after the create-requested mark but before GCP accepted the POST (in its OAuth token exchange), and no VM existed in GCP.</li><li>Fixed in `ca425a898`: once marked, a durable create is not cancelled by the attempt deadline.</li></ul> |
+| S1 | GCP `europe-west1-b` e2-medium | Direct `POST /api/nodes` (NodeLifecycle durable) | `vmTunnels.provisioningBudgetMs=1`, i.e. the incident's 5 s deadline | **Tunnel part PASS; found and fixed a new defect** | Node `01M73XZ9JPMCMEGPYCNEPCV62E` (build 4a… run 42924408696): <ul><li>23:51:33 `attempt_aborted` in phase `ingress` (the incident). The row was not released.</li><li>23:52:02 the resumed attempt finished the tunnel (`node_tunnel.provisioned`), then `attempt_aborted` in `provider_create`.</li><li>23:52:30 `provisioning_resumed` (fast path, 2 calls).</li><li>23:53:01 onward, every attempt failed with `Allocation inventory has no exact match; a second create is forbidden`. The 5 s cut landed after the create-requested mark but before GCP accepted the POST (in its OAuth token exchange), and no VM existed in GCP.</li><li>Fixed in `ca425a898`: once marked, a durable create is not cancelled by the attempt deadline. Round 2 (`f27f32fe2`) completed this: the abort check after the mark is gone, and a pre-POST provider failure proven unsent withdraws the mark.</li></ul> |
 | S1-teardown | GCP | `DELETE /api/nodes/:id`, then `POST /api/nodes/:id/manual-deletion` | Providerless GCP node | PASS (pre-existing gap recorded) | <ul><li>Strict delete returns 409 for a providerless node on any non-Hetzner provider (`reconcileStrictProviderlessVm`: inventory completeness is guaranteed only for Hetzner). That is pre-existing, so it is filed as backlog.</li><li>Owner attestation returned 200. The sweep cleaned the journal at 00:01:05Z, 75 s later, and the `{node}.vm` CNAME is gone.</li><li>Inline release on attestation was added in `56286ae15`.</li></ul> |
 | S10 | Hetzner `fsn1` cx23 | Direct `POST /api/nodes`: **the incident's exact path and condition** | `vmTunnels.provisioningBudgetMs=1` (5 s attempts) | **PASS** | Node `01M745JK3DMWP97N8ZCD4Q79T6`: <ul><li>02:04:25 `attempt_aborted` in `ingress`. The row was not released, where pre-fix it went `cleanup_pending` and was refused for good.</li><li>02:04:54 tunnel provisioned; cut before the create mark.</li><li>02:05:24 fast-path resume, one Hetzner create; `running` at 02:05:26 with provider id 175589457.</li><li>Journal `active`, CNAME `→ ba0292a1….cfargotunnel.com`.</li><li>The budget was reset to its default afterwards.</li></ul> |
 | Sweep convergence | GCP and Hetzner | Cron sweep after teardown | none | **PASS** | <ul><li>S4 (GCP): journal `cleaned` at 01:40:51, CNAME gone (deleted 01:36:46).</li><li>S9 (Hetzner): `cleaned` at 01:51:10, CNAME gone (deleted 01:49:07).</li><li>S1: `cleaned` at 00:01:05.</li><li>S8 deployment environment delete: `nodeDeleted:true`, `dnsRecordsDeleted:1` (app route); journal `cleanup_pending`/`runtime_terminated`, cleaned by the next tick.</li><li>Each finished within 1-2 cron ticks.</li></ul> |
 | S8 | GCP `europe-west1-b` e2-medium | Deployment node: environment `tunnel-gcp`, compose release (nginx) | none | **Tunnel PASS; release FAIL on a GCP-only defect, fixed** | Release `01M744SA02PCWFC9MFPDRS667J` → deployment node `01M744SC4N3WFSYFHYDPQQJZA1`: `transport=cloudflare-tunnel`, `running`/`healthy`, journal `active`, CNAME in place; Caddy installed; agent ready at 01:53:21Z. <br>`compose up` then failed: `Failed to Setup IP tables … DOCKER-FORWARD: No chain/target/match by that name`. Cause: deployment hardening installs `iptables-persistent`, whose postinst restores a pre-Docker `rules.v4` with a filter-table flush. GCP's Ubuntu image installs Docker after cloud-init's first firewall run; Hetzner's docker-ce image does not. Fixed in `f4ba88f09` (refresh the snapshot before the install). <br>Docker Hub returned 429 from Worker IPs for `nginx:alpine`, so the release uses `public.ecr.aws/nginx/nginx:stable-alpine` (unrelated to tunnels). |
+| S11 | GCP `europe-west1-b` e2-medium | Direct `POST /api/nodes` on the round-2 deploy (`409ab6418`: create-dispatch proof, no post-mark abort) | none (default budget) | **PASS** | Node `01M74855JSAT2KX12DPX6TZCVD`: <ul><li>`creating` 02:49:26 → `running` 02:49:56 (provider id 2265876434585020719) → `healthy` 02:51:28.</li><li>Journal `active`, CNAME `→ 0fdabb34….cfargotunnel.com`.</li><li>`GET /api/nodes/:id/system-info` returned 200 through the tunnel.</li><li>Strict delete returned 200, and the journal moved to `cleanup_pending`/`runtime_terminated`.</li></ul> |
+| Final convergence | GCP and Hetzner | D1 journal, zone CNAMEs and GCP inventory after every teardown (02:57Z) | none | **PASS** (2 rows await a human delete) | <ul><li>Journals S1, S4, S6/S9, S8, S8 rerun and S10 are `cleaned`, with `pending_create_count=0` and 0 cleanup attempts. S11 is `cleanup_pending` until the next tick.</li><li>S2 and S3 stay `active` by design: their identity-less GCP VMs still run, so their tunnels are in use.</li><li>The only tunnel CNAMEs in the zone are S2's, S3's and S11's.</li><li>No other stray node rows remain. Deleting the S2/S3 VMs needs `compute.instances.delete` in `sam-staging-infra`, which the read-only access lacks. Owner attestation then cleans them.</li></ul> |
+| S8 rerun | GCP `europe-west1-b` e2-medium | Deployment node: environment `tunnel-gcp-2`, compose release (nginx), on deploy `f4ba88f09` | none | **PASS** | Environment `01M746C65DTTZ233WSV8MXNCV4`, release `01M746CA9367MEJNCJX4G94HVK` → node `01M746CESBE7JEN5A5WSQN91N4` (`transport=cloudflare-tunnel`, `node_role=deployment`, IP recorded at create). <ul><li>Release created 02:18:20, `applying` 02:22:17, `applied` 02:23:09 (observed seq 1, no error).</li><li>`https://r1-web-80-01m746c65dttz233wsv8mxncv4.apps.sammy.party/` → 200, the nginx welcome page; cert issued by Let's Encrypt (Caddy ACME) for the route hostname; the A record is the node IP (grey cloud).</li><li>8443, 8444 and 22 on the node IP are filtered.</li><li>Journal `active`, CNAME `→ 07ef96fa….cfargotunnel.com` proxied.</li><li>A custom domain was not attached: it uses the same Caddy/A-record path, which this PR does not change.</li></ul> |
 | S9 | Hetzner `fsn1` (S6's node) | Warm-node reuse: delete the workspace, then a new TaskRunner task with no node pinned | none | **PASS** | Task `01M744GXEMN3XP48E2CC59ZPD8` → workspace `01M744H5H52X9EHMJ5C4CSE1V3` on the same node `01M743ZGW2EVZ2QTJ0ERYMTXJM`, with 0 nodes created after 01:45Z. |
 | S9-teardown | Hetzner | Delete the workspace, then `DELETE /api/nodes/:id` | none | **PASS** | Both returned 200 (01:49:07); `GET` on the node then returns 404. The journal and CNAME are cleaned by the sweep (verified below). |
 | S6 | Hetzner `fsn1` cx23 | TaskRunner `POST /tasks/submit` (chat, fresh node) | none (waited `waiting_for_node_capacity` while the 3-node pool cap was held by the S2/S3 rows) | **PASS** | Task `01M742STVZG7TZXP45AB7Z96VB` → node `01M743ZGW2EVZ2QTJ0ERYMTXJM` (`running`/`healthy`, journal `active`, CNAME `→ 36be9c99….cfargotunnel.com`) → workspace `01M74497ZRSNT53CW1MMCV7Z46` `running`. The agent replied `TUNNEL-OK Linux`. On 5.75.225.129, 8443 (the agent port, from `VM_AGENT_PORT`), 8444 and 22 time out (dropped); 8080, 80, 443 and 9999 return RST (closed, no listener). |
@@ -218,23 +243,28 @@ All rows ran on `app.sammy.party` (staging, `VM_AGENT_TRANSPORT=cloudflare-tunne
 
 | Run | Provider | VMs x minutes | Est. cost |
 | --- | -------- | ------------- | --------- |
-| S1-S4, S5, S7, S8 (e2-medium, ~$0.037/h) | GCP | S2 ~2.5 h and S3 ~2 h (identity-less VMs awaiting manual delete), S4 ~35 min, S8 ~12 min, plus the S8 rerun | < $0.40 |
+| S1-S5, S7, S8, S11 (e2-medium, ~$0.037/h) | GCP | S2 ~2.7 h and S3 ~2.3 h so far (identity-less VMs awaiting manual delete, ~$0.07/h together), S4 ~35 min, S8 ~12 min, S8 rerun ~15 min, S11 ~8 min | < $0.45 |
 | S6/S9, S10 (cx23, ~€0.009/h) | Hetzner | ~15 min + ~10 min | < $0.01 |
 | Tunnel and DNS API calls, Worker requests | Cloudflare | about 10 tunnels | ~$0 (included) |
 | **Total** | | | **< $0.50**: well under the $20 Hetzner+CF cap and the GCP budget |
 
 ## Acceptance Criteria
 
-- [ ] Direct provisioning (POST /api/nodes, POST /api/workspaces needing a node) with tunnels
+- [x] Direct provisioning (POST /api/nodes, POST /api/workspaces needing a node) with tunnels
       succeeds on staging on GCP and Hetzner, including an attempt aborted mid tunnel setup
-- [ ] Every abort or failure in tunnel setup records a cause in logs and the journal
-- [ ] No journal row can stay `cleanup_pending` forever because of an unobserved create
-- [ ] A deployment node on GCP provisions with tunnel transport, applies a real app release, serves
-      it over its route hostname, and tears down with its journal cleaned and DNS gone
-- [ ] Node deletion and the cleanup sweep converge (journal `cleaned`, no tunnel or CNAME left)
-- [ ] Warm tunnel node reuse works
-- [ ] Flaky tunnel tests are deterministic
-- [ ] Production `VM_AGENT_TRANSPORT` untouched
+      (S4, S5, S10, S11; `direct-provisioning-do.test.ts`)
+- [x] Every abort or failure in tunnel setup records a cause in logs and the journal (S1, S10;
+      `node-tunnel-hardening.test.ts`)
+- [x] No journal row can stay `cleanup_pending` forever because of an unobserved create (settle
+      tests driven through the real sweep; final convergence)
+- [x] A deployment node on GCP provisions with tunnel transport, applies a real app release, serves
+      it over its route hostname, and tears down with its journal cleaned and DNS gone (S8 rerun;
+      journal cleaned 02:35:57)
+- [x] Node deletion and the cleanup sweep converge (journal `cleaned`, no tunnel or CNAME left)
+      (final convergence row; the S2/S3 VMs await a human delete)
+- [x] Warm tunnel node reuse works (S9)
+- [x] Flaky tunnel tests are deterministic (controlled-ordering regression tests)
+- [x] Production `VM_AGENT_TRANSPORT` untouched (no wrangler.toml, workflow or deploy-script change)
 
 ## References
 
