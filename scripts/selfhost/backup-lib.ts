@@ -37,6 +37,7 @@ import {
 } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 
+import { recordBackup } from './install-record';
 import { KEY_SERVICE_BACKUP_EXCLUDES } from './key-service';
 import { ensurePrivateDir } from './secret-files';
 
@@ -399,6 +400,8 @@ export function runBackup(
   writeFileSync(join(dest, MANIFEST_NAME), `${JSON.stringify(manifest, null, 2)}\n`, {
     mode: 0o600,
   });
+  // Listed for `pnpm selfhost:teardown`, which deletes a backup only with --delete-backups.
+  recordBackup(ctx.stateDir, dest);
   ctx.log(
     `backup complete: ${manifest.objectCount} objects, celld down ${(manifest.downtimeMs / 1000).toFixed(1)} s -> ${dest}`
   );

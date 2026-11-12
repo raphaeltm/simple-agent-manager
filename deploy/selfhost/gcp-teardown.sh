@@ -133,7 +133,7 @@ teardown_pool() {
   description="$(gcloud iam workload-identity-pools describe "$POOL_ID" --project="$PROJECT" \
     --location=global --format='value(description)')"
   case "$description" in
-    *"$ISSUER"*) ;;
+    *"$ISSUER") ;;
     *) LEFT+=("pool ${name}: its description does not name ${ISSUER}; refused"); return ;;
   esac
   change iam workload-identity-pools delete "$POOL_ID" --project="$PROJECT" --location=global --quiet
@@ -148,7 +148,7 @@ teardown_service_account() {
   fi
   description="$(gcloud iam service-accounts describe "$email" --project="$PROJECT" --format='value(description)')"
   case "$description" in
-    *"$ISSUER"*) ;;
+    *"$ISSUER") ;;
     *) LEFT+=("service account ${email}: its description does not name ${ISSUER}; refused"); return ;;
   esac
   change iam service-accounts delete "$email" --project="$PROJECT" --quiet
@@ -169,6 +169,11 @@ run_teardown() {
         "projects/${PROJECT}/"*|"projects/${PROJECT}#"*|*"@${PROJECT}.iam.gserviceaccount.com") ;;
         *) continue ;;
       esac
+      if [ "$KEEP_KMS" -eq 1 ] && { [ "$kind" = kms-key ] || [ "$kind" = kms-key-ring ] ||
+        { [ "$kind" = iam-binding ] && [ "${name#*/cryptoKeys/}" != "$name" ]; }; }; then
+        LEFT+=("${kind} ${name}: kept (--keep-kms)")
+        continue
+      fi
       if [ "$action" != "created" ]; then
         LEFT+=("${kind} ${name}: existed before the bootstrap; kept")
         continue

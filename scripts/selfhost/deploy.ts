@@ -82,6 +82,7 @@ import {
   guidedLoginSettings,
 } from './guided-login.js';
 import { inboundMailWorkerVars } from './inbound-mail-settings.js';
+import { recordInstall } from './install-record.js';
 import { resolveKeyProviderBox } from './key-choice.js';
 import { detectKeyCandidates } from './key-platforms.js';
 import {
@@ -229,6 +230,8 @@ async function main(): Promise<void> {
   // Sealed secrets (key-service.ts): the platform keys and secrets.env go into a bundle only the
   // key agent can open, and no secret is passed to celld. Off: every secret is a Worker var.
   const { keyService, keys, sealed } = await resolveDeployKeys({ box, stateDir, secretsPath, log });
+  // What this install is, for `pnpm selfhost:teardown` (install-record.ts). No secrets.
+  if (!values['dry-run']) recordInstall(stateDir, envFile, box, keys.SAM_INSTALLATION_ID);
   // docker compose passes this file to frps and Caddy (env_file); rewritten only on change.
   // The port range and heartbeat timeout go to the Worker from the same resolved values
   // (below). Resolution fails the deploy on a range overlapping a box listener or too large.

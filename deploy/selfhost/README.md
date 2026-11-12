@@ -271,7 +271,8 @@ box and its backups are gone.
 recorded creating, each proven this install's again first (the provider trusts this issuer, the
 pool's and service account's descriptions name it, the key carries its `sam-install` label).
 Anything that existed before, fails its proof, or is not in the record is left and listed. It
-prints what it removed and what it left. Cloud KMS: the grant goes at once. A key version can be
+prints what it removed and what it left. `--keep-kms` leaves the key, its ring and the box's grant on it
+(`pnpm selfhost:teardown --keep-data` passes it). Cloud KMS: the grant goes at once. A key version can be
 deleted only after it is destroyed, a key only when all its versions are deleted, a key ring only
 when all its keys are (Google:
 [Delete Cloud KMS resources](https://docs.cloud.google.com/kms/docs/delete-kms-resources),
@@ -298,6 +299,8 @@ az role assignment delete --assignee "$PRINCIPAL" --role "Key Vault Crypto Servi
 az keyvault key delete --vault-name "$VAULT" --name "$NAME"
 az keyvault delete --name "$VAULT" --resource-group "$RG"   # only a vault created for SAM
 ```
+
+**The whole install:** `pnpm selfhost:teardown` (see Removing an install) runs these in order.
 
 **The box side** (also destructive). The key agent, the bundles and the file key live in
 `.state/key-agent/`. A box cannot go back to plaintext deploy vars once `platform-keys.json` is
@@ -488,6 +491,97 @@ ref out, runs `pnpm selfhost:deploy --init`, restarts the stack only when a comp
 the previous ref when no D1 migration ran, otherwise restore the pre-upgrade backup into an
 empty bucket. Code: `scripts/selfhost/upgrade-lib.ts`. Use `--box-env` (not `--env-file`, which
 Node takes) to point these commands at another `.env`.
+
+## Removing an install
+
+`pnpm selfhost:teardown` removes what this install created or helped create
+(`scripts/selfhost/teardown.ts`). Run it on the box, with `gcloud` logged in as a project owner if
+nodes ran in Google Cloud (the box VM's own account cannot delete VMs).
+
+```bash
+pnpm selfhost:teardown                                          # inventory: read only (the default)
+pnpm selfhost:teardown --keep-data --dry-run                    # the plan, changes nothing
+pnpm selfhost:teardown --keep-data --confirm <SAM_DOMAIN>
+pnpm selfhost:teardown --remove-everything --dry-run
+pnpm selfhost:teardown --remove-everything --confirm <SAM_DOMAIN> [--delete-backups] [--destroy-key]
+```
+
+The inventory lists every item, where it is (on the box, in the object store, in your cloud made by
+the bootstrap, in your cloud made by SAM at runtime, outside SAM), how it is removed, and what each
+mode does with it. Without `--confirm`, a terminal asks you to type the domain; anywhere else the
+command refuses.
+
+**What it may remove.** Only what `.state/created-resources.json` lists, or what it finds by the
+exact names and labels the install itself sets, shown as "discovered, not recorded". The record is
+written when things are created: `pnpm selfhost:deploy` (with or without `--init`) records the
+installation id and domain, the compose project, `.state/`, `.env` and the bucket; every backup is
+recorded when taken; `pnpm selfhost:gcp-bootstrap` records what it created. On an install from
+before the record, run `pnpm selfhost:deploy --init` once (it changes nothing else) so the
+installation id is recorded, and pass `--adopt-discovered` to remove bootstrap resources found by
+name (each still proven by its issuer description or `sam-install` label).
+
+**Proofs before a delete** (security review): the bucket is emptied only under its prefix, or when
+the install created it; a bucket you brought with no SAM prefix is left for you with the command.
+`.state/` is emptied only when it is recorded as this install's state or holds its keys, and never
+when it is `/`, your home or contains the checkout. A backup is deleted only at an absolute path
+holding a version-1 `backup-manifest.json`. Node VMs are touched only when the record names exactly
+one installation id, for this `.env`'s domain.
+
+**Order** (`teardown-model.ts`): 1. stop the stack (`docker compose stop`), so SAM starts no new
+work or VMs; 2. node VMs; 3. cloud identity and keys (the bootstrap's own `--teardown`); 4. bucket
+contents; 5. the box. If an item fails, later steps are not attempted (the identity that could still
+delete a VM is kept), and running the same command again continues. Each removed item is marked
+`removedAt` in the record, which teardown itself keeps as its receipt.
+
+| Mode                  | Removes                                                                                                                                                | Keeps                                                                                                                           |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| `--keep-data`         | node VMs and their disks; the bootstrap's pool, provider, node service account and its roles; containers                                               | bucket, volumes, images, `.state/` (bundles, key file), `.env`, backups, the KMS key and the box's grant on it, DNS, GitHub App |
+| `--remove-everything` | the above, plus the KMS grant, every object under `CELLD_BUCKET`, compose volumes (the bundled store's bucket too) and built images, `.state/`, `.env` | the record, the key file and the KMS key (without `--destroy-key`), backups (without `--delete-backups`)                        |
+
+Destructive flags, each only with `--remove-everything`:
+
+- `--delete-backups` deletes the local backups (a directory is deleted only when it holds
+  `backup-manifest.json`). A deleted backup can never be restored.
+- `--destroy-key` deletes the key file (and a legacy `platform-keys.json`) and schedules
+  destruction of the Cloud KMS key's versions (`gcp-bootstrap.sh --destroy-key-versions`). Every
+  sealed bundle and every backup sealed with that key becomes unrecoverable. Cloud KMS destroys
+  after 30 days by default (`gcloud kms keys versions restore` undoes it until then); run the
+  teardown again after that to delete the key and its ring.
+
+**Bringing a `--keep-data` install back:** `docker compose -f deploy/selfhost/docker-compose.yml up
+-d`, then `pnpm selfhost:gcp-bootstrap` again. Google keeps a deleted workload identity pool for 30
+days and its id cannot be reused until then, so within that window either undelete it
+(`gcloud iam workload-identity-pools undelete sam-<hash> --location=global --project <id>`) or pass
+a new `--pool-id` and enter the new values in Admin → Integrations. The app still lists the deleted
+nodes: delete them in Admin → Nodes once it is up (the provider treats a VM that is already gone
+as deleted: `deleteVM` in `packages/providers/src/gcp.ts`).
+
+**Node VMs and their ownership proof** (`teardown-gcp.ts`): a VM is this install's only when its
+labels `managed=simple-agent-manager`, `installation=<this install's id>` and `env=selfhost` all
+match, the labels SAM's provider sets on every VM (`node-provider-labels.ts`). Right before the
+delete it is described again and must still be the same VM (same id) with the same labels. Boot
+disks go with the VM; a disk of that VM without auto-delete is deleted afterwards only when no other
+VM uses it. Another install's VM is listed as refused and never touched.
+
+**Left for you** (printed with the exact place or command, and listed in the summary):
+
+- the firewall rules `sam-allow-agent` and `sam-allow-app-routes`: SAM's provider uses one fixed
+  name per Google Cloud project for every install there, with no install identity on them, so
+  teardown cannot prove they are this install's (`gcloud compute firewall-rules delete ...`);
+- node VMs on any provider other than Google Cloud: delete the nodes in Admin → Nodes before
+  teardown, or the servers labelled `managed=simple-agent-manager` and `installation=<id>` in the
+  provider's console;
+- the GitHub App made through Admin → Integrations: GitHub → Settings → Developer settings → GitHub
+  Apps → the App → Advanced → Delete GitHub App;
+- the DNS records (`*.SAM_DOMAIN`, and with inbound mail the MX record and the `sam-smtp-in` rule),
+  the bucket itself when you created it, the machine, its service account and bucket grant, OAuth
+  clients and SMTP credentials, and an AWS or Azure key (commands under Removing what setup
+  created).
+
+**Other clouds today:** the core (`teardown-model.ts`, `teardown-box.ts`) is cloud-neutral: an
+AWS, Azure, Hetzner or bare-metal box gets the box, bucket (gs:// or s3://) and backup removal and
+the full inventory. Only Google Cloud has an adapter for node VMs and a bootstrap teardown; on other
+clouds those items are left for you with the console steps.
 
 ## Logs
 

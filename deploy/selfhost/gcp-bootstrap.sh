@@ -37,6 +37,8 @@
 #   --teardown              remove what this script created for this install (see README)
 #   --destroy-key-versions <key id>  with --teardown: schedule destruction of the key's versions.
 #                           Every bundle and backup sealed with the key becomes unrecoverable.
+#   --keep-kms              with --teardown: leave the KMS key, its ring and the box's grant on it
+#                           (pnpm selfhost:teardown --keep-data uses this)
 #   --dry-run               print every gcloud command that would change something; change nothing
 set -euo pipefail
 
@@ -57,6 +59,7 @@ KMS_LOCATION="global"
 KEY_RING="sam-selfhost"
 KEY_ID=""
 DESTROY_KEY=""
+KEEP_KMS=0
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATE_DIR="${HERE}/.state"
 RECORD_TOOL="${HERE}/created-resources.mjs"
@@ -84,8 +87,9 @@ while [ $# -gt 0 ]; do
     --state-dir) STATE_DIR="${2:-}"; shift 2 ;;
     --teardown) TEARDOWN=1; shift ;;
     --destroy-key-versions) DESTROY_KEY="${2:-}"; shift 2 ;;
+    --keep-kms) KEEP_KMS=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
-    -h|--help) sed -n '2,47p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,42p' "$0"; exit 0 ;;
     *) die "unknown argument: $1 (see --help)" ;;
   esac
 done
@@ -118,6 +122,8 @@ printf '%s' "$KMS_LOCATION" | grep -Eq '^[a-z0-9-]{1,63}$' || die "invalid --kms
 printf '%s' "$KEY_RING" | grep -Eq '^[A-Za-z0-9_-]{1,63}$' || die "invalid --key-ring: $KEY_RING"
 printf '%s' "$KEY_ID" | grep -Eq '^[A-Za-z0-9_-]{1,63}$' || die "invalid --key: $KEY_ID"
 [ -z "$DESTROY_KEY" ] || [ "$TEARDOWN" -eq 1 ] || die "--destroy-key-versions needs --teardown"
+[ "$KEEP_KMS" -eq 0 ] || [ "$TEARDOWN" -eq 1 ] || die "--keep-kms needs --teardown"
+[ "$KEEP_KMS" -eq 0 ] || [ -z "$DESTROY_KEY" ] || die "--keep-kms and --destroy-key-versions contradict each other"
 
 SA_EMAIL="${SA_ID}@${PROJECT}.iam.gserviceaccount.com"
 CONDITION="assertion.iss == '${ISSUER}'"
