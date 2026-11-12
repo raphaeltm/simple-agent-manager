@@ -73,7 +73,7 @@ async function readFulfilBody(
     expected !== undefined &&
     (typeof expected !== 'string' || expected.length === 0 || expected.length > 64)
   ) {
-    throw errors.badRequest('expectedExistingVersion must be a timestamp string');
+    throw errors.badRequest('expectedExistingVersion must be the version string the card showed');
   }
   return {
     value: record.value,

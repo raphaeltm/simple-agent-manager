@@ -79,14 +79,11 @@ function lifetimeText(request: RuntimeSecretRequest, valueExpired: boolean): str
 }
 
 /**
- * `agentNotified` is false only right after this person's own save or decline failed to queue
- * the agent's notice; the text then states the outcome without claiming the agent was told.
+ * The record says what happened, not whether the agent's notice was delivered (a notice can fail
+ * and be retried, and a reload forgets this browser's save), so the text never claims the agent
+ * was told. A save whose notice could not be queued adds its own warning below.
  */
-function outcomeText(
-  request: RuntimeSecretRequest,
-  valueExpired: boolean,
-  agentNotified: boolean
-): string {
+function outcomeText(request: RuntimeSecretRequest, valueExpired: boolean): string {
   const by = request.resolvedByName ? ` by ${request.resolvedByName}` : '';
   const when = request.resolvedAt ? ` on ${formatDateTime(request.resolvedAt)}` : '';
   switch (request.status) {
@@ -94,15 +91,11 @@ function outcomeText(
       if (valueExpired) {
         return `Supplied${by}${when}. The value has expired, so the agent can no longer use it. Ask the agent to request it again if it is still needed.`;
       }
-      return agentNotified
-        ? `Supplied${by}${when}. The agent was told the name, never the value, and can use it until it expires or is deleted.`
-        : `Supplied${by}${when}. The agent can use it until it expires or is deleted.`;
+      return `Supplied${by}${when}. The agent sees the name, never the value, and can use it until it expires or is deleted.`;
     case 'declined':
-      return agentNotified
-        ? `Declined${by}${when}. The agent was told not to wait for it.`
-        : `Declined${by}${when}.`;
+      return `Declined${by}${when}. SAM tells the agent not to wait for it.`;
     case 'expired':
-      return 'Nobody supplied a value in time. The agent was told not to wait for it.';
+      return 'Nobody supplied a value in time. SAM tells the agent not to wait for it.';
     case 'pending':
       return 'Waiting for a project owner or admin to supply the value.';
   }
@@ -238,7 +231,7 @@ export const SecretRequestCard: FC<SecretRequestCardProps> = ({ item, projectId 
           />
         ) : (
           <p role="status" className="m-0 text-sm text-fg-muted [overflow-wrap:anywhere]">
-            {outcomeText(request, valueExpired, unconfirmedOutcome === null)}
+            {outcomeText(request, valueExpired)}
             {request.status === 'pending' && ` Open until ${formatDateTime(request.expiresAt)}.`}
           </p>
         )}

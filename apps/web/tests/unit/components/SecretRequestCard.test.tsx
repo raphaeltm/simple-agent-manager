@@ -370,6 +370,25 @@ describe('secret request card in chat', () => {
     );
   });
 
+  it.each([
+    [
+      'fulfilled',
+      { status: 'fulfilled', resolvedByName: 'Raph', resolvedAt: '2026-11-12T10:01:00.000Z' },
+    ],
+    [
+      'declined',
+      { status: 'declined', resolvedByName: 'Raph', resolvedAt: '2026-11-12T10:01:00.000Z' },
+    ],
+    ['expired', { status: 'expired' }],
+  ] as const)('a reloaded %s card never claims the agent was told', async (_label, overrides) => {
+    // A reload has no memory of this browser's save; the record does not say the notice landed.
+    getSecretRequest.mockResolvedValue(response({ canResolve: false }, overrides));
+    renderCard();
+    await screen.findByTestId('secret-request-card');
+    expect(screen.getByRole('status')).not.toHaveTextContent(/was told/);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
   it('clears a save error once the value is edited', async () => {
     getSecretRequest.mockResolvedValue(response());
     fulfillSecretRequest.mockRejectedValue(new Error('value exceeds max size of 65536 bytes'));

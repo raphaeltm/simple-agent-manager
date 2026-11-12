@@ -438,7 +438,11 @@ describe('optional TTL', () => {
       body: { key: 'MANUAL_TOKEN', value: OTHER_SENTINEL, isSecret: true },
     });
     expect(manual.status).toBe(200);
+    const request = await createRequest({ ttlSeconds: 60 });
+    expect((await fulfill(request.id, { value: SENTINEL })).status).toBe(200);
     vi.setSystemTime(new Date('2027-01-01T00:00:00Z'));
+    // The expired collected value is refused while the manual one beside it still works.
+    await expect(execEnv(['STRIPE_API_KEY'])).rejects.toThrow('not a managed secret');
     expect((await execEnv(['MANUAL_TOKEN'])).envVars[0]?.value).toBe(OTHER_SENTINEL);
   });
 });
@@ -456,15 +460,26 @@ describe('replacing an existing value', () => {
     const request = await createRequest();
     const card = await (
       await call(`/api/projects/${P1}/secret-requests/${request.id}`)
-    ).json<{ existing: { collected: boolean } | null }>();
+    ).json<{ existing: { collected: boolean; version: string } | null }>();
     expect(card.existing).toMatchObject({ isSecret: true, collected: false });
+    expect(card.existing?.version).toMatch(/^[0-9a-f]{64}$/);
 
     const refused = await fulfill(request.id, { value: SENTINEL });
     expect(refused.status).toBe(409);
     expect(requestRow(request.id).status).toBe('pending');
     expect((await execEnv(['STRIPE_API_KEY'])).envVars[0]?.value).toBe(OTHER_SENTINEL);
 
-    const replaced = await fulfill(request.id, { value: SENTINEL, replaceExisting: true });
+    // Replacing without naming the value it confirms is refused: consent is to one exact value.
+    const unversioned = await fulfill(request.id, { value: SENTINEL, replaceExisting: true });
+    expect(unversioned.status).toBe(409);
+    expect(requestRow(request.id).status).toBe('pending');
+    expect((await execEnv(['STRIPE_API_KEY'])).envVars[0]?.value).toBe(OTHER_SENTINEL);
+
+    const replaced = await fulfill(request.id, {
+      value: SENTINEL,
+      replaceExisting: true,
+      expectedExistingVersion: card.existing?.version,
+    });
     expect(replaced.status).toBe(200);
     expect(requestRow(request.id)).toMatchObject({ status: 'fulfilled', replaced_existing: 1 });
     expect((await execEnv(['STRIPE_API_KEY'])).envVars[0]?.value).toBe(SENTINEL);
@@ -472,7 +487,14 @@ describe('replacing an existing value', () => {
 
   it('a later manual edit clears the collected provenance and expiry', async () => {
     const request = await createRequest({ ttlSeconds: 3600 });
-    await fulfill(request.id, { value: SENTINEL, replaceExisting: true });
+    const card = await (
+      await call(`/api/projects/${P1}/secret-requests/${request.id}`)
+    ).json<{ existing: { version: string } | null }>();
+    await fulfill(request.id, {
+      value: SENTINEL,
+      replaceExisting: true,
+      expectedExistingVersion: card.existing?.version,
+    });
     expect(envRow('STRIPE_API_KEY')).toMatchObject({ secret_request_id: request.id });
     await call(`/api/projects/${P1}/runtime/env-vars`, {
       method: 'POST',
@@ -836,10 +858,29 @@ describe('hardening', () => {
       expect((await fulfill(request.id, { value: SENTINEL })).status).toBe(200);
     }
     vi.setSystemTime(new Date('2026-11-12T10:05:00Z'));
+    // Record each value DELETE's bind count: the SQLite adapter has no D1 bind ceiling, so the
+    // batch cap is only observable through what each statement binds.
+    const realPrepare = env.DATABASE.prepare.bind(env.DATABASE);
+    const deleteBinds: number[] = [];
+    env.DATABASE.prepare = ((sql: string) => {
+      const statement = realPrepare(sql);
+      if (!/delete from "?project_runtime_env_vars"?/i.test(sql)) return statement;
+      const realBind = statement.bind.bind(statement);
+      statement.bind = ((...values: unknown[]) => {
+        deleteBinds.push(values.length);
+        return realBind(...values);
+      }) as typeof statement.bind;
+      return statement;
+    }) as typeof env.DATABASE.prepare;
     expect(await purgeRuntimeSecretMaterial(env)).toMatchObject({
       valuesPurged: 5,
       incomplete: false,
     });
+    env.DATABASE.prepare = realPrepare;
+    // Five rows at a batch of two: three statements, each binding at most the batch plus the
+    // one reserved expiry bind.
+    expect(deleteBinds).toHaveLength(3);
+    expect(Math.max(...deleteBinds)).toBeLessThanOrEqual(2 + 1);
     expect(main.prepare('SELECT COUNT(*) AS n FROM project_runtime_env_vars').get()).toEqual({
       n: 0,
     });

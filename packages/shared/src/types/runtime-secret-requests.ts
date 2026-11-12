@@ -76,8 +76,9 @@ export interface FulfillRuntimeSecretRequestBody {
   /** Required when a project variable with this name already exists. */
   replaceExisting?: boolean;
   /**
-   * `version` of the existing value the person confirmed replacing. If the value has changed
-   * since, the save is refused and the card asks again.
+   * `version` of the existing value the person confirmed replacing. Required whenever a value
+   * with this name exists; if it is missing or the value has changed since, the save is refused
+   * and the card asks again.
    */
   expectedExistingVersion?: string;
 }

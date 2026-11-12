@@ -408,13 +408,14 @@ export async function fulfillRuntimeSecretRequest(
       `${row.envKey} already exists in this project. Confirm that the new value should replace it.`
     );
   }
+  // Consent is to one exact value: replacing requires the version the person was shown.
   if (
     prepared.existing &&
-    input.expectedExistingVersion &&
-    (await runtimeEnvValueVersion(prepared.existing)) !== input.expectedExistingVersion
+    (!input.expectedExistingVersion ||
+      (await runtimeEnvValueVersion(prepared.existing)) !== input.expectedExistingVersion)
   ) {
     throw errors.conflict(
-      `${row.envKey} changed since you confirmed replacing it. Reload and confirm again.`
+      `Confirm replacing the current value of ${row.envKey}: it is missing from the request or changed since you confirmed. Reload and confirm again.`
     );
   }
   // The claim compares expiry against, and the TTL starts from, the moment of the write, not

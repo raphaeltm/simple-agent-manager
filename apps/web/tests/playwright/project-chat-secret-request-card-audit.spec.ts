@@ -225,7 +225,9 @@ async function setupMocks(
 
   page.on('request', (req) => {
     const body = req.postData();
-    if (body && !req.url().includes('/secret-requests/')) captured.otherBodies.push(body);
+    // Only the fulfil call may carry the value: decline and every other write are captured.
+    if (body && !/\/secret-requests\/[^/]+\/fulfill(\?|$)/.test(req.url()))
+      captured.otherBodies.push(body);
   });
 
   await page.route(
