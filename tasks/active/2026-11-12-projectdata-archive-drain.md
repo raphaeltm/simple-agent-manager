@@ -61,6 +61,26 @@ The SAM root ProjectData DO is at 9.08 GB of a 10e9 limit (2026-11-12 12:20Z ale
 
 ### PR A: flip, publish, then reclaim (bounded finalize)
 
+Research (2026-11-12, current main):
+- Coordinator phases (`scheduled/project-data-archive-sharding.ts`): `migrateClaimedCandidate` →
+  ensureSourcePrepared → ensureTargetPrepared → `copySourceChunks` → `sealTargetAndSource`
+  (target `archiveTargetSeal` + source `archiveSourceMarkTargetSealed`) → `persistRecoveryManifest`
+  (R2 manifest + source mark) → `finalizeSourceAndPublish` (`archiveSourceFinalizeDelete`, CAS
+  journal → source_deleted, then `publishSourceDeletedGap` CAS → published + `publishArchivedLocation`).
+- Root `finalizeSourceDelete` (`durable-objects/project-data/archive-sharding.ts`) re-runs
+  `assertEligibleTerminalSource` and the full `computeTerminalVersion` hash, then in ONE
+  `transactionSync` deletes grouped FTS markers + grouped rows (paged), `tool_payload_archives`,
+  `chat_messages`, and writes the `chat_sessions.archive_*` anchors + intent `source_deleted`.
+- Root exact reads (`archiveSourceReadMessages`, `archiveSourceReadMessageCount`,
+  `assertSourceExactReadAvailable`) FAIL CLOSED while any source intent is active
+  (`isActiveSourceIntentState` = anything but `rehome_exported`). Routing
+  (`services/project-data-archive-routing.ts` `resolveExactReadOwner`) also refuses `migrating` /
+  `frozen` locations. So today a session is unreadable for the whole migration; with multi-tick
+  copies (PR B) that window must become readable on root until the flip.
+- `recoverCrashGaps` republishes `source_deleted`/`published` journals whose location is not yet
+  `archive_shard`; journal transitions table `ARCHIVE_JOURNAL_TRANSITIONS` in routing service
+  already allows `source_deleted -> source_deleted`.
+
 - [ ] Flip transaction keeps anchors, drops whole-session deletes; `source_deleted` means
       "flipped + published, reclaim outstanding"; bounded reclaim RPC pages; copy-back requires
       `published`; root read fence; search dedupe verified; maintenance audit (item 7).
