@@ -21,7 +21,21 @@ import {
 import { type HostedGitScope, mintHostedGitToken } from '../../../src/services/hosted-git/tokens';
 import { signCurrentWorkspaceCallbackToken } from '../../../src/services/jwt';
 
-export { HostedGitRepo } from '../../../src/durable-objects/hosted-git-repo';
+import { HostedGitRepo } from '../../../src/durable-objects/hosted-git-repo';
+
+/** Test-only: run the GC alarm on demand (production schedules it 5 minutes after a push). */
+export class HostedGitRepoTest extends HostedGitRepo {
+  override async fetch(req: Request): Promise<Response> {
+    if (new URL(req.url).pathname === '/__test/gc') {
+      this.ctx.storage.sql.exec(
+        "INSERT INTO meta (key, value) VALUES ('gc-pending', '1') ON CONFLICT(key) DO UPDATE SET value = '1'"
+      );
+      await this.alarm();
+      return new Response('ok');
+    }
+    return super.fetch(req);
+  }
+}
 
 const app = new Hono<{ Bindings: Env }>();
 app.onError(handleAppError);
@@ -56,6 +70,19 @@ app.post('/__test/hosted-git-token', async (c) => {
     callbackGeneration?: string | null;
   }>();
   return c.json(await mintHostedGitToken(c.env, body));
+});
+
+app.post('/__test/gc/:repo', async (c) => {
+  const ns = c.env.HOSTED_GIT!;
+  await ns.get(ns.idFromName(c.req.param('repo'))).fetch('https://hosted-git/__test/gc');
+  const info = await ns.get(ns.idFromName(c.req.param('repo'))).fetch('https://hosted-git/info');
+  return c.json(await info.json());
+});
+
+app.get('/__test/info/:repo', async (c) => {
+  const ns = c.env.HOSTED_GIT!;
+  const info = await ns.get(ns.idFromName(c.req.param('repo'))).fetch('https://hosted-git/info');
+  return c.json(await info.json());
 });
 
 app.post('/__test/workspace-callback-token', async (c) => {

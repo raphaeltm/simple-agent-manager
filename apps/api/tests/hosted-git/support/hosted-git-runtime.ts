@@ -75,7 +75,7 @@ export async function startHostedGitRuntime(
     compatibilityFlags: ['nodejs_compat'],
     host: '127.0.0.1',
     port: 0,
-    durableObjects: { HOSTED_GIT: { className: 'HostedGitRepo', useSQLite: true } },
+    durableObjects: { HOSTED_GIT: { className: 'HostedGitRepoTest', useSQLite: true } },
     d1Databases: ['DATABASE', 'OBSERVABILITY_DATABASE'],
     kvNamespaces: ['KV'],
     outboundService: (request: Request) => outbound(request),

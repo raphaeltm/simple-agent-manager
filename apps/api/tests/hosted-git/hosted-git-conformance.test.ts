@@ -500,6 +500,36 @@ describe('browsing a hosted repository through the repo-browse API', () => {
   });
 });
 
+describe('garbage collection', () => {
+  it('reclaims the objects of a deleted branch and keeps the repository intact', async () => {
+    const owner = await createEmailOnlyUser();
+    const project = await createHostedProject(owner, 'GC Me');
+    const token = await mintToken(project, 'write');
+    const work = await freshDir('gc');
+    await gitOk(['clone', localRemote(project.repository, token), work]);
+    await gitOk(['checkout', '-b', 'throwaway'], work);
+    for (let i = 0; i < 20; i++) await writeFile(join(work, `junk-${i}.bin`), randomBytes(4096));
+    await gitOk(['add', '.'], work);
+    await gitOk(['commit', '-m', 'junk'], work);
+    await gitOk(['push', 'origin', 'throwaway'], work);
+    type Info = { objects: number };
+    const before = (await (
+      await runtime.fetch(`/__test/info/${project.artifactsRepoId}`)
+    ).json()) as Info;
+    await gitOk(['push', 'origin', '--delete', 'throwaway'], work);
+    const after = (await (
+      await runtime.fetch(`/__test/gc/${project.artifactsRepoId}`, { method: 'POST' })
+    ).json()) as Info;
+    // 20 blobs + 1 tree + 1 commit were only reachable from the deleted branch.
+    expect(before.objects - after.objects).toBeGreaterThanOrEqual(22);
+
+    const check = await freshDir('gc-check');
+    await gitOk(['clone', localRemote(project.repository, token), check]);
+    expect(await readFile(join(check, 'README.md'), 'utf8')).toContain('GC Me');
+    expect((await git(['fsck', '--strict'], check)).code).toBe(0);
+  });
+});
+
 describe('import from a public git URL', () => {
   it('imports the source default branch and history into a new hosted project', async () => {
     const owner = await createEmailOnlyUser();

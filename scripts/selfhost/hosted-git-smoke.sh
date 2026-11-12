@@ -8,6 +8,8 @@
 #   SAM_API_TOKEN    an API token of an email-only account (Settings -> API tokens), exchanged
 #                    for a session cookie via POST /api/auth/token-login. Never printed.
 #   SAM_INSECURE=1   optional: skip TLS verification (SAM_TLS_MODE=internal boxes)
+#   SMOKE_IMPORT_URL optional: also create a project imported from this public repository
+#                    (github.com, gitlab.com, codeberg.org or bitbucket.org), then clone it
 #   SMOKE_RUN_TASK=1 optional: also submit an agent task that commits and pushes a branch from
 #                    a workspace, then wait for that branch (SMOKE_TASK_TIMEOUT_S, default 1200)
 #
@@ -74,6 +76,17 @@ step "fresh clone sees the branch"
 step "unauthenticated clone is refused"
 if "${GIT[@]}" clone -q "$remote" "${WORK}/anon" 2>/dev/null; then fail "anonymous clone succeeded"; fi
 echo "refused as expected"
+
+if [[ -n "${SMOKE_IMPORT_URL:-}" ]]; then
+  step "import ${SMOKE_IMPORT_URL}"
+  imported="$(python3 -c 'import json,os,sys; print(json.dumps({"name": sys.argv[1], "repoProvider": "artifacts", "importUrl": os.environ["SMOKE_IMPORT_URL"]}))' "${name}-import" |
+    "${CURL[@]}" -X POST -H 'content-type: application/json' --data @- "${API}/api/projects")"
+  imported_id="$(json "['id']" <<<"$imported")"
+  imported_remote="$(json "['repository']" <<<"$imported")"
+  itoken="$("${CURL[@]}" -X POST "${API}/api/projects/${imported_id}/hosted-git/token" | json "['token']")"
+  "${GIT[@]}" clone -q "$(authed "$imported_remote" "$itoken")" "${WORK}/imported"
+  echo "imported HEAD $(git -C "${WORK}/imported" log -1 --format='%h %s')"
+fi
 
 if [[ "${SMOKE_RUN_TASK:-}" == "1" ]]; then
   step "workspace task clones and pushes (provisions a node; minutes)"

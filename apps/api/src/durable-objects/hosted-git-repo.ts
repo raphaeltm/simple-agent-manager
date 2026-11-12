@@ -3,7 +3,7 @@
  *
  * Adapted from dgit's `RepoCell` (https://github.com/littledivy/durable-git, MIT, commit
  * d5eba04, see `src/vendor/dgit/UPSTREAM.md`): the git protocol paths, delete and the GC alarm.
- * Dropped: the web UI, R2 pack offload and the content API. Added: SAM's push and repository caps
+ * Dropped: the web UI, R2 pack offload and the content API. GC lives in `hosted-git-gc.ts`. Added: SAM's push and repository caps
  * (`services/hosted-git/limits.ts`), checked before a pack is stored.
  *
  * Authentication is NOT done here. The only caller is `services/hosted-git/http.ts`, which checks
@@ -33,6 +33,7 @@ import {
 import { GitStore } from '../vendor/dgit/git/store';
 import { concat, td, te } from '../vendor/dgit/git/util';
 import { gunzipLimited } from '../vendor/dgit/git/zlib';
+import { type HostedGitGcResult, runHostedGitGc } from './hosted-git-gc';
 
 /** An upload-pack request is wants/haves/caps only. */
 const MAX_UPLOAD_PACK_BYTES = 16 * 1024 * 1024;
@@ -176,13 +177,36 @@ export class HostedGitRepo extends DurableObject {
 
   async alarm(): Promise<void> {
     if (this.store.getMeta('gc-pending') !== '1') return;
+    // GC drops packs: never while a clone is streaming. Leave gc-pending set and retry.
     if (this.activeUploads > 0) {
       await this.ctx.storage.setAlarm(Date.now() + 30_000).catch(() => undefined);
       return;
     }
+    // Clear first (at most once), so a throwing sweep cannot cause a retry storm.
     this.store.setMeta('gc-pending', '0');
-    // dgit's GC (repacking loose objects) is not vendored; packs stay as pushed. The flag is
-    // cleared so the alarm does not re-arm. Orphaned pack rows are swept at the next push.
+    try {
+      const result = await this.gc();
+      log.info('hosted_git.gc', { ...result });
+    } catch (err) {
+      log.error('hosted_git.gc_failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  /** GC serialized behind pushes and with no other request interleaving (it resets packs). */
+  private gc(): Promise<HostedGitGcResult> {
+    let result: HostedGitGcResult = { removed: 0, kept: 0 };
+    const run = this.receiveChain.then(() =>
+      this.ctx.blockConcurrencyWhile(async () => {
+        result = await runHostedGitGc(this.store);
+      })
+    );
+    this.receiveChain = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run.then(() => result);
   }
 
   private async upload(req: Request): Promise<Response> {
