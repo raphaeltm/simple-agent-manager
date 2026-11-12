@@ -40,7 +40,7 @@ metadata-only receipt and uses it immediately through `exec_with_secrets`.
 
 ## Design
 
-- D1 migration 0235: new table `runtime_secret_requests` (id, project_id FK cascade,
+- D1 migration 0236 (0235 was taken by #2664): new table `runtime_secret_requests` (id, project_id FK cascade,
   requesting task/authority task/chat session/agent session/workspace, requester_user_id,
   env_key, reason, ttl_seconds NULL, status pending|fulfilled|declined|expired, expires_at ms,
   resolved_by/at, secret_expires_at ms, replaced_existing, created/updated) + indexes; and
