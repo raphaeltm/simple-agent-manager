@@ -15,9 +15,11 @@ import { createServer, request as httpRequest } from 'node:http';
 import type { Duplex } from 'node:stream';
 
 import {
+  DEFAULT_MAX_SANDBOX_AGE_SECONDS,
   inspectContainer,
   logEvent,
   reapingNode,
+  reapOverageSandboxes,
   reapStaleSandboxes,
   RESPONSE_FILTERS,
   UPSTREAM,
@@ -366,10 +368,26 @@ try {
 } catch {
   // No stale socket from a previous run.
 }
+const MAX_SANDBOX_AGE_SECONDS = Number.parseInt(
+  process.env.SAM_DOCKER_PROXY_MAX_SANDBOX_AGE_SECONDS ?? String(DEFAULT_MAX_SANDBOX_AGE_SECONDS),
+  10
+);
+const SWEEP_INTERVAL_MS = Number.parseInt(
+  process.env.SAM_DOCKER_PROXY_SWEEP_INTERVAL_MS ?? '60000',
+  10
+);
+
 server.listen(LISTEN, () => {
   chmodSync(LISTEN, SOCKET_MODE);
   logEvent('listening', { socket: LISTEN, upstream: UPSTREAM, policy: POLICY_PATH });
   currentPolicy();
+  setInterval(() => {
+    const policy = currentPolicy();
+    if (!policy) return;
+    reapOverageSandboxes(policy, MAX_SANDBOX_AGE_SECONDS).catch((error: unknown) =>
+      logEvent('reap_failed', { error: String(error).slice(0, 300) })
+    );
+  }, SWEEP_INTERVAL_MS).unref();
 });
 
 for (const signal of ['SIGTERM', 'SIGINT'] as const) {

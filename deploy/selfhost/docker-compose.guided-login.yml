@@ -23,6 +23,10 @@ services:
     cap_drop: [ALL]
     security_opt: ['no-new-privileges:true']
     read_only: true
+    environment:
+      # Sandboxes older than this are removed (a setup session lives at most 15 minutes by
+      # default; raise this if you raise the setup-session TTL).
+      SAM_DOCKER_PROXY_MAX_SANDBOX_AGE_SECONDS: ${SAM_DOCKER_PROXY_MAX_SANDBOX_AGE_SECONDS:-1800}
     # Bounded so a misbehaving (or compromised) celld cannot exhaust the host through it.
     mem_limit: 256m
     pids_limit: 64

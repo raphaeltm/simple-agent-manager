@@ -635,6 +635,76 @@ describe.skipIf(!dockerAvailable)('docker socket proxy (live, real daemon)', () 
     expect(docker('logs', PROXY)).toContain('"event":"reaped_stale_sandbox"');
   });
 
+  it('removes sandboxes older than the maximum session age, and nothing else', async () => {
+    // A second proxy with a 3 s age limit and a 1 s sweep, on its own socket.
+    const sweeper = `${PROXY}-age`;
+    const dir = join(DIR, 'sock-age');
+    mkdirSync(dir, { recursive: true });
+    chmodSync(dir, 0o777);
+    const socketGid = docker(
+      'run',
+      '--rm',
+      '-v',
+      '/var/run/docker.sock:/s',
+      BASE,
+      'stat',
+      '-c',
+      '%g',
+      '/s'
+    );
+    const sandbox = await createSandbox('over-age');
+    expect(sandbox.status).toBe(201);
+    const lookalike = docker(
+      'run',
+      '-d',
+      '--label',
+      `celld.node=${NODE}`,
+      '--label',
+      'celld.class=SandboxDO',
+      BASE,
+      'sleep',
+      '300'
+    );
+    created.add(lookalike);
+    docker(
+      'run',
+      '-d',
+      '--name',
+      sweeper,
+      '--network',
+      'none',
+      '--read-only',
+      '--cap-drop',
+      'ALL',
+      '--group-add',
+      socketGid,
+      '-e',
+      'SAM_DOCKER_PROXY_MAX_SANDBOX_AGE_SECONDS=3',
+      '-e',
+      'SAM_DOCKER_PROXY_SWEEP_INTERVAL_MS=1000',
+      '-v',
+      '/var/run/docker.sock:/var/run/docker.sock',
+      '-v',
+      `${dir}:/run/sam-docker-proxy`,
+      '-v',
+      `${join(DIR, 'policy')}:/etc/sam/docker-proxy:ro`,
+      IMAGE
+    );
+    created.add(sweeper);
+    try {
+      await waitFor(
+        'the over-age sandbox to be removed',
+        () => spawnSync('docker', ['inspect', sandbox.json.Id], { stdio: 'ignore' }).status !== 0,
+        20_000,
+        () => docker('logs', sweeper)
+      );
+      expect(inspectDirect(lookalike).State.Running).toBe(true);
+      expect(docker('logs', sweeper)).toContain('"reason":"over_max_age"');
+    } finally {
+      spawnSync('docker', ['rm', '-f', sweeper], { stdio: 'ignore' });
+    }
+  });
+
   it('logs refusals without request bodies', async () => {
     await sleep(200);
     const logs = docker('logs', PROXY);

@@ -98,23 +98,70 @@ export const RESPONSE_FILTERS: Record<string, (answer: unknown) => unknown> = {
  * celld reaps for node X, every other celld *sandbox* (same checks as any lifecycle call: node
  * label, the pinned runtime, a celld bridge, not privileged) is a leftover of an earlier session.
  */
-export async function reapStaleSandboxes(currentNode: string, policy: ProxyPolicy): Promise<void> {
+/**
+ * Removes celld sandboxes that match `stale` (same ownership checks as any lifecycle call: node
+ * label, the pinned runtime, a celld bridge, not privileged). Returns how many were removed.
+ */
+async function reapSandboxes(
+  policy: ProxyPolicy,
+  reason: string,
+  stale: (entry: Record<string, unknown>, labels: Record<string, unknown>) => boolean
+): Promise<number> {
   const filters = encodeURIComponent(JSON.stringify({ label: ['celld.node', 'celld.class'] }));
   const reply = await upstreamJson('GET', `/containers/json?all=true&filters=${filters}`);
-  if (reply.status !== 200) return;
+  if (reply.status !== 200) return 0;
   const list: unknown = JSON.parse(reply.body);
+  let removed = 0;
   for (const entry of Array.isArray(list) ? list : []) {
     if (!isRecord(entry) || typeof entry.Id !== 'string' || !isRecord(entry.Labels)) continue;
-    if (entry.Labels['celld.node'] === currentNode) continue;
+    if (!stale(entry, entry.Labels)) continue;
     const facts = await inspectContainer(entry.Id);
     if (!facts || isCelldContainer(facts, policy) !== 'sandbox') continue;
-    const removed = await upstreamJson('DELETE', `/containers/${facts.id}?force=true`);
+    const answer = await upstreamJson('DELETE', `/containers/${facts.id}?force=true`);
+    if (answer.status === 204) removed += 1;
     logEvent('reaped_stale_sandbox', {
+      reason,
       container: facts.id.slice(0, 12),
       node: String(facts.labels['celld.node']).slice(0, 64),
-      status: removed.status,
+      status: answer.status,
     });
   }
+  return removed;
+}
+
+/**
+ * celld gets a new node-session id every time it starts, and its start-up reap removes only
+ * containers labelled with its own id, so a sandbox left by a celld that died stays running (with
+ * whatever the sign-in CLI holds). This box runs one celld, so when celld reaps for node X, every
+ * other celld sandbox is a leftover of an earlier session.
+ */
+export function reapStaleSandboxes(currentNode: string, policy: ProxyPolicy): Promise<number> {
+  return reapSandboxes(
+    policy,
+    'previous_node',
+    (_entry, labels) => labels['celld.node'] !== currentNode
+  );
+}
+
+/** Oldest a sign-in sandbox may get: a setup session lives at most 15 minutes (default). */
+export const DEFAULT_MAX_SANDBOX_AGE_SECONDS = 30 * 60;
+
+/**
+ * A start still being retried when its session's teardown ran can finish afterwards (seen on the
+ * prototype box; e.g. a cancel during a cold image load), leaving a sandbox nobody will destroy.
+ * No sign-in sandbox legitimately outlives its session, so anything older than `maxAgeSeconds`
+ * is removed.
+ */
+export function reapOverageSandboxes(
+  policy: ProxyPolicy,
+  maxAgeSeconds: number,
+  nowSeconds = Date.now() / 1000
+): Promise<number> {
+  return reapSandboxes(
+    policy,
+    'over_max_age',
+    (entry) => typeof entry.Created === 'number' && nowSeconds - entry.Created > maxAgeSeconds
+  );
 }
 
 /** The node celld is reaping for, from its own `GET /containers/json` label filter. */
