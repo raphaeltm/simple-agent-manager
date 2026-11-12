@@ -13,7 +13,7 @@ import { describe, expect,it } from 'vitest';
 const indexFile = readFileSync(resolve(process.cwd(), 'src/index.ts'), 'utf8');
 const routeFile = readFileSync(resolve(process.cwd(), 'src/routes/agent-profiles.ts'), 'utf8');
 const serviceFile = readFileSync(resolve(process.cwd(), 'src/services/agent-profiles.ts'), 'utf8');
-const schemaFile = readFileSync(resolve(process.cwd(), 'src/db/schema.ts'), 'utf8');
+const schemaFile = readFileSync(resolve(process.cwd(), '../../packages/worker-core/src/schema.ts'), 'utf8');
 
 describe('agent profiles integration wiring', () => {
   it('registers agent-profiles route under /api/projects/:projectId/', () => {

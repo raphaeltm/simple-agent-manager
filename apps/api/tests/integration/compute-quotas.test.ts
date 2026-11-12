@@ -18,7 +18,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 describe('compute quota pipeline', () => {
-  const schemaFile = readFileSync(resolve(process.cwd(), 'src/db/schema.ts'), 'utf8');
+  const schemaFile = readFileSync(resolve(process.cwd(), '../../packages/worker-core/src/schema.ts'), 'utf8');
   const serviceFile = readFileSync(
     resolve(process.cwd(), 'src/services/compute-quotas.ts'),
     'utf8'

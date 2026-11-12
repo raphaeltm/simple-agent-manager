@@ -32,7 +32,7 @@ export const EXEMPT_PATTERNS = [
 // Pre-existing files are tracked here to prevent NEW violations while allowing
 // gradual cleanup. When splitting a file below, remove it from this list.
 export const EXEMPT_FILES = new Set([
-  'apps/api/src/db/schema.ts', // Database schema — splitting creates import complexity
+  'packages/worker-core/src/schema.ts', // Database schema — splitting creates import complexity
   // Pre-existing Go files (tracked for future splitting)
   'packages/vm-agent/internal/bootstrap/bootstrap.go',
   'packages/vm-agent/internal/acp/session_host.go',

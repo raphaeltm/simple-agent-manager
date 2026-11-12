@@ -350,7 +350,7 @@ or time range without receiving raw R2 keys.
 - `chat_sessions` — session metadata, lifecycle status, message counts
 - `chat_messages` — append-only streaming token log; each row is one streaming chunk from Claude Code, not a logical message. Consecutive same-role tokens (assistant, tool, thinking) are grouped into logical messages at the API and UI layers. The `origin` column tags SAM-injected content (e.g. the `get_instructions` reminder) as `system` (NULL/absent = normal `user` message); `origin=system` rows are excluded from grouping/materialization, full-text search, topic auto-capture, and attention resolution, and are rendered collapsed in the chat UI.
 - `chat_messages_grouped` — materialized grouped messages, built by concatenating consecutive same-role tokens. Populated incrementally (`materializeSession()`, `apps/api/src/durable-objects/project-data/materialization.ts`) each time a session sleeps, stops, fails, or is terminalized by idle cleanup; `chat_sessions.materialized_through_created_at` / `materialized_through_sequence` record how far each session has been indexed, so a pass only covers what arrived since. Source for FTS5 full-text search.
-- `chat_messages_grouped_fts` — FTS5 virtual table indexed on grouped message content, using the `unicode61` tokenizer (case- and diacritic-folding, no stemming). Queries are the ANDed words of the search text, with punctuation, quotes, and FTS5 operators stripped (`buildSafeFtsQuery()` in `apps/api/src/lib/fts5.ts`), so there is no phrase or prefix matching.
+- `chat_messages_grouped_fts` — FTS5 virtual table indexed on grouped message content, using the `unicode61` tokenizer (case- and diacritic-folding, no stemming). Queries are the ANDed words of the search text, with punctuation, quotes, and FTS5 operators stripped (`buildSafeFtsQuery()` in `packages/worker-core/src/fts5.ts`), so there is no phrase or prefix matching.
 - `activity_events` — audit trail (workspace created, session stopped, etc.)
 - `chat_session_ideas` — many-to-many links between sessions and ideas
 - `task_status_events` — idea lifecycle transitions with actor tracking
@@ -393,7 +393,7 @@ for the next pass.
 
 - **Everything indexed so far**: word search. The query's words are ANDed, and everything outside
   ASCII letters, digits, `_`, and whitespace is stripped first (`buildSafeFtsQuery()` in
-  `apps/api/src/lib/fts5.ts`). That removes punctuation, quotes, and FTS5 operators, but also
+  `packages/worker-core/src/fts5.ts`). That removes punctuation, quotes, and FTS5 operators, but also
   accented and non-Latin letters: `déploiement` becomes `d ploiement`. Because the index folds
   diacritics, the unaccented form (`deploiement`) matches indexed text; words in non-Latin scripts
   cannot be searched.
@@ -420,7 +420,7 @@ short escaped predicate per term, and indexed search uses the equivalent bounded
 and 40 terms); `SEARCH_QUERY_MAX_TERM_LENGTH` keeps each LIKE term inside SQLite's pattern budget
 (default 48 bytes; higher overrides are clamped). Responses return the effective `query`, a
 `queryTruncated` flag, and `queryLimits`, so a caller can tell an exact search from one a guardrail
-trimmed (`apps/api/src/lib/search-query-limits.ts`).
+trimmed (`packages/worker-core/src/search-query-limits.ts`).
 
 Project-wide `sessions_read` method `search` also traverses the project's archived history. A call can return
 provisional results plus `archiveSearch.continuation`; pass that continuation back with the same

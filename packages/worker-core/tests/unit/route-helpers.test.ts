@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { parsePositiveInt, requireRouteParam } from '../../../src/lib/route-helpers';
+import { parsePositiveInt, requireRouteParam } from '../../src/route-helpers';
 
 describe('requireRouteParam', () => {
   function makeContext(params: Record<string, string | undefined>) {

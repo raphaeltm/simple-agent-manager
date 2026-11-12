@@ -155,7 +155,7 @@ function capacityPoolSelection(overrides: {
 }
 
 describe('Project default provider — schema', () => {
-  const schema = apiSrc('db/schema.ts');
+  const schema = apiSrc('../../../packages/worker-core/src/schema.ts');
 
   it('projects table has defaultProvider column', () => {
     expect(schema).toContain("defaultProvider: text('default_provider')");

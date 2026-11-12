@@ -7,7 +7,7 @@ import {
   escapeSearchQueryForLike,
   getSearchQueryLikePatterns,
   normalizeSearchQuery,
-} from '../../../src/lib/search-query-limits';
+} from '../../src/search-query-limits';
 
 describe('search query limits', () => {
   it('preserves a normal query and reports the defaults', () => {
