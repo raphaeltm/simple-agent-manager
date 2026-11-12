@@ -43,6 +43,9 @@ services:
       gce-metadata-proxy:
         condition: service_started
         required: false # only with the gce profile
+      key-agent:
+        condition: service_healthy
+        required: false # only with the key-agent profile (SAM_KEY_PROVIDER)
     # SAM_EGRESS_FENCE_PROBES, and on a gs:// bucket GCE_METADATA_HOST/IP pointing at the token
     # proxy. Written by `pnpm selfhost:deploy --init`.
     env_file:
@@ -147,6 +150,36 @@ services:
 
   # Token proxy for celld's gs:// bucket on GCE (deploy/selfhost/metadata-proxy/Caddyfile): the
   # fence blocks the metadata server, so celld fetches its access token here instead.
+  # Sealed Worker secrets (SAM_KEY_PROVIDER; scripts/selfhost/key-service.ts). Holds the key
+  # provider and opens the sealed bundle for celld's Worker over 127.0.0.1, refusing every peer
+  # uid but celld's (key-agent/peer.ts). Its own uid, no capabilities, read-only root; the egress
+  # fence does not apply to it (it matches celld's uid), so it can reach the key service.
+  key-agent:
+    profiles: [key-agent]
+    build: ./key-agent
+    image: sam-selfhost-key-agent:local
+    network_mode: host
+    # The uid that owns .state (the deploy checks SAM_KEY_AGENT_UID): the bundles and the KEK are
+    # mode 0600 files of the operator, and with no capabilities nobody else can read them. Unset,
+    # it runs as nobody and fails closed (cannot read the key file).
+    user: '${SAM_KEY_AGENT_UID:-65534}'
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    read_only: true
+    env_file:
+      - path: ${SAM_SELFHOST_STATE_DIR:-./.state}/key-agent/agent.env
+        required: true
+    environment:
+      SAM_KEY_AGENT_ALLOWED_UIDS: ${CELLD_UID:-7101}
+    volumes:
+      - ${SAM_SELFHOST_STATE_DIR:-./.state}/key-agent:/etc/sam/key-agent:ro
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:'+(process.env.SAM_KEY_AGENT_PORT||7190)+'/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
   gce-metadata-proxy:
     profiles: [gce]
     image: sam-selfhost-caddy:local

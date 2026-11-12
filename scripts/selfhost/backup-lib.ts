@@ -35,11 +35,21 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 
+import { KEY_SERVICE_BACKUP_EXCLUDES } from './key-service';
 import { ensurePrivateDir } from './secret-files';
 
 /** The objectstore image docker-compose.yml pins; `mc` ships in it. */
+/**
+ * The key file and key-service credentials stay out of every backup: with sealed secrets they are
+ * what turns the bundle (which the backup does hold) into plaintext. Back them up apart, offline.
+ */
+export function isKeyServiceSecretPath(stateDir: string, src: string): boolean {
+  const rel = relative(stateDir, src);
+  return KEY_SERVICE_BACKUP_EXCLUDES.some((path) => rel === path || rel.startsWith(`${path}/`));
+}
+
 export const OBJECTSTORE_IMAGE =
   'pgsty/minio@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372';
 export const MANIFEST_NAME = 'backup-manifest.json';
@@ -317,7 +327,11 @@ export function runBackup(
       renameSync(fullDir, bucketDir);
     }
     deltaCopyMs = ctx.now() - stoppedAt;
-    cpSync(ctx.stateDir, join(dest, STATE_DIR), { recursive: true, preserveTimestamps: true });
+    cpSync(ctx.stateDir, join(dest, STATE_DIR), {
+      recursive: true,
+      preserveTimestamps: true,
+      filter: (src) => !isKeyServiceSecretPath(ctx.stateDir, src),
+    });
     cpSync(ctx.envFile, join(dest, ENV_FILE), { preserveTimestamps: true });
   } finally {
     ctx.log('starting celld');

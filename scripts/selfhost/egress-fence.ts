@@ -43,6 +43,7 @@ import {
   CELLD_SANDBOX_BRIDGES,
   guidedLoginSettings,
 } from './guided-login.js';
+import { keyAgentPort, keyServiceEnabled } from './key-service.js';
 
 /** nftables table name; the start check and the verify command look for it. */
 export const EGRESS_FENCE_TABLE = 'sam_celld_egress';
@@ -281,6 +282,9 @@ export function buildFencePlan({
     else endpoints.push(endpoint);
   }
   if (metadataProxyEnabled(box)) loopbackPorts.push(metadataProxyPort(box));
+  // The key agent (key-service.ts): the one new loopback port, and only with SAM_KEY_PROVIDER set.
+  // The agent itself refuses every peer uid but celld's, so opening it here lets in nothing else.
+  if (keyServiceEnabled(box)) loopbackPorts.push(keyAgentPort(box));
   const dnsServers = parseNameservers(resolvConf);
   if (dnsServers.length === 0) throw new Error('no nameserver in resolv.conf; celld needs DNS');
   const plan: EgressFencePlan = {

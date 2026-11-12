@@ -5,6 +5,6 @@
     // deploy/selfhost/docker-proxy runs under Node's type stripping, which needs .ts specifiers.
     "allowImportingTsExtensions": true
   },
-  "include": ["**/*.ts", "../../deploy/selfhost/docker-proxy/*.ts"],
+  "include": ["**/*.ts", "../../deploy/selfhost/docker-proxy/*.ts", "../../deploy/selfhost/key-agent/*.ts"],
   "exclude": ["node_modules", "dist"]
 }
