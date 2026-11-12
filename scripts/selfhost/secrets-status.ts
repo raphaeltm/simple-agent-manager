@@ -30,13 +30,13 @@ export function describeKeyStatus(box: Box, stateDir: string): string[] {
     ];
   }
   const provider = explicit ?? recorded?.provider ?? '';
-  const reason =
-    explicit && recorded?.provider !== explicit
-      ? `SAM_KEY_PROVIDER=${explicit} in .env (run --init to record it)`
-      : (recorded?.reason ?? '');
+  const reason = explicit ? `SAM_KEY_PROVIDER=${explicit} in .env` : (recorded?.reason ?? '');
   lines.push(`key provider: ${provider}`);
   lines.push(`  why:        ${reason}`);
-  if (recorded) lines.push(`  recorded:   ${recorded.chosenAt} (${recorded.source})`);
+  if (recorded && !explicit) lines.push(`  recorded:   ${recorded.chosenAt} (${recorded.source})`);
+  if (recorded && explicit && recorded.provider !== explicit) {
+    lines.push(`  overrides:  the recorded choice ${recorded.provider} (${recorded.reason})`);
+  }
   if (provider === LEGACY_KEY_PROVIDER) {
     lines.push(
       '  LEGACY: every Worker secret is a deploy var, stored in plaintext in the fleet bucket.'

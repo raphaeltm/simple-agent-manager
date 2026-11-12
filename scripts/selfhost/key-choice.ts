@@ -5,6 +5,7 @@
  *
  * Order of authority:
  *  1. `SAM_KEY_PROVIDER` in `.env`: the operator's explicit choice, including `legacy-plaintext`.
+ *     Never recorded: removing the line resumes the recorded choice.
  *  2. The recorded choice.
  *  3. On `--init` only: an automatic choice. Bundles already on the box decide it (their provider
  *     is the only one that can open them); otherwise the candidates for the detected platform are
@@ -255,18 +256,15 @@ export async function resolveKeyProviderBox(input: {
   const recorded = readKeyChoice(stateDir);
   let choice: KeyChoice;
   if (explicit) {
-    choice =
-      recorded?.provider === explicit && recorded.source === 'env'
-        ? recorded
-        : {
-            format: KEY_CHOICE_FORMAT,
-            provider: explicit,
-            settings: {},
-            reason: `SAM_KEY_PROVIDER=${explicit} in .env`,
-            source: 'env',
-            chosenAt: new Date().toISOString(),
-          };
-    if (init && choice !== recorded) writeKeyChoice(stateDir, choice);
+    // Not recorded: the .env line is its own record, and removing it resumes the recorded choice.
+    choice = {
+      format: KEY_CHOICE_FORMAT,
+      provider: explicit,
+      settings: {},
+      reason: `SAM_KEY_PROVIDER=${explicit} in .env`,
+      source: 'env',
+      chosenAt: new Date().toISOString(),
+    };
   } else if (recorded) {
     choice = recorded;
   } else if (init) {

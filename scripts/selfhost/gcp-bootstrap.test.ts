@@ -3,7 +3,7 @@
  * Google Cloud state as files, so a second run sees what the first created.
  */
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -12,25 +12,9 @@ import { beforeEach, describe, expect, it } from 'vitest';
 const SCRIPT = resolve(import.meta.dirname, '../../deploy/selfhost/gcp-bootstrap.sh');
 const ISSUER = 'https://api.vmtest.example.org';
 
-// State: one file per resource in $STATE. Every call is appended to $STATE/calls.
+// The fake keeps Google Cloud state in $STATE/gcp.json and appends every call to $STATE/calls.
 const FAKE_GCLOUD = `#!/usr/bin/env bash
-echo "$*" >> "$STATE/calls"
-args="$*"
-case "$args" in
-  "projects describe"*) echo 123456789012 ;;
-  "services enable"*) ;;
-  "iam workload-identity-pools providers describe"*)
-    [ -f "$STATE/provider" ] || exit 1
-    case "$args" in *"value(oidc.issuerUri)"*) cat "$STATE/provider" ;; esac ;;
-  "iam workload-identity-pools providers create-oidc"*)
-    for a in "$@"; do case "$a" in --issuer-uri=*) printf '%s' "\${a#--issuer-uri=}" > "$STATE/provider" ;; esac; done ;;
-  "iam workload-identity-pools describe"*) [ -f "$STATE/pool" ] || exit 1 ;;
-  "iam workload-identity-pools create"*) touch "$STATE/pool" ;;
-  "iam service-accounts describe"*) [ -f "$STATE/sa" ] || exit 1 ;;
-  "iam service-accounts create"*) touch "$STATE/sa" ;;
-  "projects add-iam-policy-binding"*|"iam service-accounts add-iam-policy-binding"*) ;;
-  *) echo "fake gcloud: unexpected: $args" >&2; exit 2 ;;
-esac
+exec node ${JSON.stringify(resolve(import.meta.dirname, 'testdata/fake-gcloud-iam.mjs'))} "$@"
 `;
 const FAKE_CURL = `#!/usr/bin/env bash
 printf '{"issuer":"%s","jwks_uri":"%s/.well-known/jwks.json"}' "$FAKE_ISSUER" "$FAKE_ISSUER"
@@ -48,17 +32,43 @@ beforeEach(() => {
   chmodSync(join(bin, 'curl'), 0o755);
 });
 
-function run(args: string[], advertisedIssuer = ISSUER) {
-  const result = spawnSync('bash', [SCRIPT, ...args], {
+function run(args: string[], advertisedIssuer = ISSUER, env: NodeJS.ProcessEnv = {}) {
+  const result = spawnSync('bash', [SCRIPT, ...args, '--state-dir', join(state, 'box-state')], {
     encoding: 'utf8',
     env: {
       ...process.env,
       PATH: `${bin}:${process.env.PATH}`,
       STATE: state,
       FAKE_ISSUER: advertisedIssuer,
+      ...env,
     },
   });
   return { ...result, calls: calls() };
+}
+
+interface FakeGcp {
+  pools: Record<string, { description: string }>;
+  providers: Record<string, { issuer: string }>;
+  accounts: Record<string, { description: string }>;
+  bindings: string[];
+  rings: Record<string, object>;
+  keys: Record<string, { labels: Record<string, string>; versions: Record<string, string> }>;
+}
+
+function gcp(): FakeGcp {
+  return JSON.parse(readFileSync(join(state, 'gcp.json'), 'utf8')) as FakeGcp;
+}
+
+function setGcp(update: (db: FakeGcp) => void): void {
+  const db = gcp();
+  update(db);
+  writeFileSync(join(state, 'gcp.json'), JSON.stringify(db));
+}
+
+function record(): { resources: Array<Record<string, unknown>> } {
+  return JSON.parse(readFileSync(join(state, 'box-state/created-resources.json'), 'utf8')) as {
+    resources: Array<Record<string, unknown>>;
+  };
 }
 
 function calls(): string[] {
@@ -70,7 +80,7 @@ function calls(): string[] {
 }
 
 const MUTATING =
-  /^(services enable|iam workload-identity-pools( providers)? create|iam service-accounts create|projects add-iam-policy-binding|iam service-accounts add-iam-policy-binding)/;
+  /^(services enable|iam workload-identity-pools( providers)? (create|delete)|iam service-accounts (create|delete)|projects (add|remove)-iam-policy-binding|iam service-accounts add-iam-policy-binding|kms (keyrings|keys) (create|delete|add-iam-policy-binding|remove-iam-policy-binding)|kms keys versions (destroy|delete))/;
 
 describe('pnpm selfhost:gcp-bootstrap', () => {
   it('creates the pool, issuer-scoped provider, service account and bindings, and prints the five form values', () => {
@@ -133,7 +143,7 @@ describe('pnpm selfhost:gcp-bootstrap', () => {
     );
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain(`already trusts ${ISSUER}`);
-    expect(readFileSync(join(state, 'provider'), 'utf8')).toBe(ISSUER);
+    expect(gcp().providers['sam-api'].issuer).toBe(ISSUER);
   });
 
   it('refuses an install whose discovery document names a different issuer', () => {
@@ -150,5 +160,258 @@ describe('pnpm selfhost:gcp-bootstrap', () => {
     const result = run(['--project', 'sam-vm-test', '--api-url', "https://app.x.org' || true"]);
     expect(result.status).not.toBe(0);
     expect(result.calls).toEqual([]);
+  });
+});
+
+const BOX_SA = 'sam-box@sam-vm-test.iam.gserviceaccount.com';
+const KEY_PATH = (key: string) => `sam-selfhost/${key}`;
+const kmsArgs = [
+  '--project',
+  'sam-vm-test',
+  '--api-url',
+  ISSUER,
+  '--kms',
+  '--box-service-account',
+  BOX_SA,
+];
+
+function keyName(): string {
+  const key = Object.keys(gcp().keys)[0] ?? '';
+  return key.split('/')[1] ?? '';
+}
+
+describe('--kms: the sealed-secrets key', () => {
+  it('creates a labelled key, grants the box encrypt/decrypt on that key only, prints the reference', () => {
+    const result = run(kmsArgs);
+    expect(result.status, result.stderr).toBe(0);
+    const key = keyName();
+    expect(key).toMatch(/^sam-[0-9a-f]{8}$/);
+    // Same derivation as the pool id: the install's name, which --init looks for by default.
+    expect(key).toBe(Object.keys(gcp().pools)[0]);
+    expect(gcp().keys[KEY_PATH(key)]?.labels).toEqual({ 'sam-install': key.slice(4) });
+    const kmsGrants = gcp().bindings.filter((b) => b.startsWith('key:'));
+    expect(kmsGrants).toEqual([
+      `key:${KEY_PATH(key)} roles/cloudkms.cryptoKeyEncrypterDecrypter serviceAccount:${BOX_SA}`,
+    ]);
+    // No ring- or project-level KMS grant.
+    expect(gcp().bindings.filter((b) => b.includes('cloudkms') && !b.startsWith('key:'))).toEqual(
+      []
+    );
+    expect(result.stdout).toContain(
+      `SAM_GCP_KMS_KEY=projects/sam-vm-test/locations/global/keyRings/sam-selfhost/cryptoKeys/${key}`
+    );
+  });
+
+  it('records what it created, provider-neutral, with no secret, and is idempotent', () => {
+    expect(run(kmsArgs).status).toBe(0);
+    const first = record();
+    expect(first).toMatchObject({ format: 'sam-created-resources/1' });
+    const kinds = first.resources.map((r) => `${String(r.kind)}:${String(r.action)}`).sort();
+    expect(kinds).toEqual([
+      'iam-binding:created',
+      'iam-binding:created',
+      'iam-binding:created',
+      'kms-key-ring:created',
+      'kms-key:created',
+      'service-account:created',
+      'workload-identity-pool:created',
+      'workload-identity-provider:created',
+    ]);
+    for (const r of first.resources) {
+      expect(Object.keys(r).sort()).toEqual(
+        ['action', 'attributes', 'cloud', 'createdAt', 'createdBy', 'kind', 'name'].sort()
+      );
+      expect(r).toMatchObject({ cloud: 'gcp', createdBy: 'gcp-bootstrap' });
+    }
+    const before = calls().length;
+    const again = run(kmsArgs);
+    expect(again.status, again.stderr).toBe(0);
+    expect(again.calls.slice(before).filter((c) => / create/.test(c))).toEqual([]);
+    // A second run never downgrades "created" to "reused".
+    expect(record().resources.map((r) => r.action)).toEqual(first.resources.map((r) => r.action));
+  });
+
+  it('dry run changes nothing and writes no record', () => {
+    const result = run([...kmsArgs, '--dry-run']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.calls.filter((c) => MUTATING.test(c))).toEqual([]);
+    expect(result.stdout).toContain('would run: gcloud kms keys create');
+    expect(existsSync(join(state, 'box-state/created-resources.json'))).toBe(false);
+  });
+
+  it('reads the box identity from the VM and warns when its scopes cannot reach Cloud KMS', () => {
+    const result = run(
+      [
+        '--project',
+        'sam-vm-test',
+        '--api-url',
+        ISSUER,
+        '--kms-only',
+        '--box-instance',
+        'sam-box',
+        '--box-zone',
+        'europe-west1-b',
+      ],
+      ISSUER,
+      {
+        FAKE_BOX_SA: BOX_SA,
+        FAKE_BOX_SCOPES: 'https://www.googleapis.com/auth/devstorage.read_write',
+      }
+    );
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).toContain('access scopes allow neither cloud-platform nor cloudkms');
+    expect(gcp().bindings).toEqual([
+      `key:${KEY_PATH(keyName())} roles/cloudkms.cryptoKeyEncrypterDecrypter serviceAccount:${BOX_SA}`,
+    ]);
+    // --kms-only: no pool, provider or node service account.
+    expect(gcp().pools).toEqual({});
+    expect(gcp().accounts).toEqual({});
+  });
+
+  it("refuses to use a key with that name that is not this install's", () => {
+    expect(run(kmsArgs).status).toBe(0);
+    const key = keyName();
+    setGcp((db) => {
+      const entry = db.keys[KEY_PATH(key)];
+      if (entry) entry.labels = { 'sam-install': 'deadbeef' };
+    });
+    const result = run(kmsArgs);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('not labelled sam-install=');
+  });
+});
+
+describe('--teardown', () => {
+  it('removes exactly what it created; the key stays until its versions are explicitly destroyed', () => {
+    // Something this bootstrap did not create, in the same project: must survive.
+    expect(run(kmsArgs).status).toBe(0);
+    const key = keyName();
+    setGcp((db) => {
+      db.accounts['other@sam-vm-test.iam.gserviceaccount.com'] = { description: 'someone else' };
+      db.bindings.push(
+        'project:sam-vm-test roles/viewer serviceAccount:other@sam-vm-test.iam.gserviceaccount.com'
+      );
+    });
+    const result = run(['--project', 'sam-vm-test', '--api-url', ISSUER, '--teardown']);
+    expect(result.status, result.stderr).toBe(0);
+    const db = gcp();
+    expect(db.pools).toEqual({});
+    expect(db.providers).toEqual({});
+    expect(Object.keys(db.accounts)).toEqual(['other@sam-vm-test.iam.gserviceaccount.com']);
+    expect(db.bindings).toEqual([
+      'project:sam-vm-test roles/viewer serviceAccount:other@sam-vm-test.iam.gserviceaccount.com',
+    ]);
+    // Grant gone at once; the key and its version kept, and said so with the consequence.
+    expect(db.keys[KEY_PATH(key)]?.versions).toEqual({ 1: 'ENABLED' });
+    expect(result.stdout).toContain('unrecoverable');
+    expect(result.stdout).toContain(`--destroy-key-versions ${key}`);
+    expect(
+      record()
+        .resources.filter((r) => !r.removedAt)
+        .map((r) => r.kind)
+        .sort()
+    ).toEqual(['kms-key', 'kms-key-ring']);
+  });
+
+  it('with --destroy-key-versions: schedules destruction, then a later run deletes key and ring', () => {
+    expect(
+      run([...kmsArgs.slice(0, 5), '--kms-only', '--box-service-account', BOX_SA]).status
+    ).toBe(0);
+    const key = keyName();
+    const wrong = run([
+      '--project',
+      'sam-vm-test',
+      '--api-url',
+      ISSUER,
+      '--teardown',
+      '--destroy-key-versions',
+      'not-this-key',
+    ]);
+    expect(wrong.status).toBe(0);
+    expect(gcp().keys[KEY_PATH(key)]?.versions).toEqual({ 1: 'ENABLED' });
+
+    const first = run([
+      '--project',
+      'sam-vm-test',
+      '--api-url',
+      ISSUER,
+      '--teardown',
+      '--destroy-key-versions',
+      key,
+    ]);
+    expect(first.status, first.stderr).toBe(0);
+    expect(gcp().keys[KEY_PATH(key)]?.versions).toEqual({ 1: 'DESTROY_SCHEDULED' });
+    expect(first.stdout).toContain('scheduled for destruction');
+    expect(first.stdout).toContain('gcloud kms keys versions restore');
+
+    // 30 days later Google has destroyed the version.
+    setGcp((db) => {
+      const entry = db.keys[KEY_PATH(key)];
+      if (entry) entry.versions = { 1: 'DESTROYED' };
+    });
+    const second = run(['--project', 'sam-vm-test', '--api-url', ISSUER, '--teardown']);
+    expect(second.status, second.stderr).toBe(0);
+    expect(gcp().keys).toEqual({});
+    expect(gcp().rings).toEqual({});
+    expect(record().resources.every((r) => typeof r.removedAt === 'string')).toBe(true);
+  });
+
+  it('refuses what fails its ownership proof, and leaves what existed before', () => {
+    // The node service account existed before the bootstrap: it is recorded as reused.
+    writeFileSync(
+      join(state, 'gcp.json'),
+      JSON.stringify({
+        pools: {},
+        providers: {},
+        accounts: { 'sam-nodes@sam-vm-test.iam.gserviceaccount.com': { description: 'shared' } },
+        bindings: [],
+        rings: {},
+        keys: {},
+      })
+    );
+    expect(run(['--project', 'sam-vm-test', '--api-url', ISSUER]).status).toBe(0);
+    // Someone rewrote the pool's description after creation: no proof it is this install's.
+    setGcp((db) => {
+      for (const pool of Object.values(db.pools)) pool.description = 'renamed by hand';
+    });
+    const result = run(['--project', 'sam-vm-test', '--api-url', ISSUER, '--teardown']);
+    expect(result.status, result.stderr).toBe(0);
+    const db = gcp();
+    expect(Object.keys(db.pools)).toHaveLength(1);
+    expect(Object.keys(db.accounts)).toEqual(['sam-nodes@sam-vm-test.iam.gserviceaccount.com']);
+    // Its project roles stay too: the account is shared, the roles are not this install's alone.
+    expect(db.bindings.filter((b) => b.startsWith('project:'))).toHaveLength(2);
+    expect(result.stdout).toMatch(/pool .*does not name .*; refused/);
+    expect(result.stdout).toContain('existed before the bootstrap; kept');
+  });
+
+  it('dry run removes nothing and keeps the record as it was', () => {
+    expect(run(kmsArgs).status).toBe(0);
+    const before = JSON.stringify(gcp());
+    const recorded = JSON.stringify(record());
+    const n = calls().length;
+    const result = run([
+      '--project',
+      'sam-vm-test',
+      '--api-url',
+      ISSUER,
+      '--teardown',
+      '--dry-run',
+      '--destroy-key-versions',
+      keyName(),
+    ]);
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.stringify(gcp())).toBe(before);
+    expect(JSON.stringify(record())).toBe(recorded);
+    expect(result.calls.slice(n).filter((c) => MUTATING.test(c))).toEqual([]);
+    expect(result.stdout).toContain('would run: gcloud iam workload-identity-pools delete');
+    expect(result.stdout).toContain('would run: gcloud kms keys versions destroy');
+  });
+
+  it('without a record, refuses rather than guess', () => {
+    const result = run(['--project', 'sam-vm-test', '--api-url', ISSUER, '--teardown']);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('removes only what it recorded creating');
+    expect(result.calls.filter((c) => MUTATING.test(c))).toEqual([]);
   });
 });

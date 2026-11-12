@@ -180,4 +180,20 @@ describe('pnpm selfhost:deploy --init (sealed secrets by default)', () => {
       if (value.length >= 16) expect(status.out).not.toContain(value);
     }
   });
+
+  it('refuses legacy-plaintext on a sealed box (it would generate new platform keys)', async () => {
+    const envFile = writeBox(dir);
+    expect((await runDeploy(envFile, ['--init'])).status).toBe(0);
+    const sealed = await sealedSecrets();
+    writeBox(dir, ['SAM_KEY_PROVIDER=legacy-plaintext']);
+    const result = await runDeploy(envFile, ['--init']);
+    expect(result.status).not.toBe(0);
+    expect(result.out).toContain('lose every stored credential');
+    expect(existsSync(join(state, 'platform-keys.json'))).toBe(false);
+    expect((await sealedSecrets()).ENCRYPTION_KEY).toBe(sealed.ENCRYPTION_KEY);
+    // The refused override left the recorded choice alone: removing the line just works again.
+    expect(choice()).toMatchObject({ provider: 'file', source: 'auto' });
+    writeBox(dir);
+    expect((await runDeploy(envFile, ['--init'])).status).toBe(0);
+  });
 });

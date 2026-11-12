@@ -127,6 +127,111 @@ bundle. A `platform-keys.json` that disagrees with the bundle stops the deploy. 
 `scripts/selfhost/key-service.ts`, `scripts/selfhost/key-choice.ts`, `deploy/selfhost/key-agent/`,
 `apps/api/src/selfhost/runtime-secrets.ts`.
 
+#### Cloud key, one-time setup
+
+On Google Cloud, AWS or Azure the box can seal with a cloud key through its own VM identity, so no
+key is stored on the box: revoking the grant stops new Worker isolates within the agent's 300 s
+cache, and the cloud's audit log records every use. Set the key up once, then run
+`pnpm selfhost:deploy --init` on a new box (it finds the key by itself), or
+`pnpm selfhost:secrets switch --to auto` on a box already sealed with the file key. The key's
+default name is `sam-` plus 8 hex digits derived from your domain, the same on every cloud:
+
+```bash
+NAME=sam-$(printf 'https://api.%s' "$SAM_DOMAIN" | sha256sum | cut -c1-8)
+```
+
+**Google Cloud** (as a project owner; the box VM needs the `cloud-platform` access scope):
+
+```bash
+pnpm selfhost:gcp-bootstrap -- --project <id> --api-url https://api.<SAM_DOMAIN> --kms-only \
+  --box-instance <box VM> --box-zone <zone> --dry-run    # then again without --dry-run
+```
+
+It creates or reuses the key ring `sam-selfhost` (location `global`; `--kms-location`) and the
+key `$NAME` labelled `sam-install`, grants `roles/cloudkms.cryptoKeyEncrypterDecrypter` to the box
+VM's service account on that key only, and prints `SAM_GCP_KMS_KEY=...`. Use `--kms` instead of
+`--kms-only` to also run the node setup above.
+
+**AWS** (the box is an EC2 instance with an instance profile; IMDSv2 is enough):
+
+```bash
+REGION=<the box's region>; ROLE=<the box instance profile's role name>
+KEY_ID=$(aws kms create-key --region "$REGION" --description "SAM sealed secrets $SAM_DOMAIN" \
+  --tags TagKey=sam-install,TagValue="${NAME#sam-}" --query KeyMetadata.KeyId --output text)
+aws kms create-alias --region "$REGION" --alias-name "alias/$NAME" --target-key-id "$KEY_ID"
+KEY_ARN=$(aws kms describe-key --region "$REGION" --key-id "$KEY_ID" --query KeyMetadata.Arn --output text)
+aws iam put-role-policy --role-name "$ROLE" --policy-name sam-sealed-secrets --policy-document \
+  "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"kms:Encrypt\",\"kms:Decrypt\"],\"Resource\":\"$KEY_ARN\"}]}"
+```
+
+The default key policy delegates to IAM, so the role policy above is the only grant. The AWS
+provider has been tested against a fake of the KMS API and AWS's published SigV4 vectors, not
+against real AWS yet.
+
+**Azure** (the box VM gets a system-assigned managed identity; you need rights to create role
+assignments):
+
+```bash
+RG=<resource group>; VM=<box VM>; VAULT=<a new, globally unique vault name>
+az keyvault create --name "$VAULT" --resource-group "$RG" --enable-rbac-authorization true \
+  --enable-purge-protection true
+az keyvault key create --vault-name "$VAULT" --name "$NAME" --kty RSA --size 3072 \
+  --ops wrapKey unwrapKey --tags sam-install="${NAME#sam-}"   # you need Key Vault Crypto Officer
+PRINCIPAL=$(az vm identity assign --resource-group "$RG" --name "$VM" --query systemAssignedIdentity -o tsv)
+SCOPE="$(az keyvault show --name "$VAULT" --query id -o tsv)/keys/$NAME"
+az role assignment create --assignee-object-id "$PRINCIPAL" --assignee-principal-type ServicePrincipal \
+  --role "Key Vault Crypto Service Encryption User" --scope "$SCOPE"
+echo "SAM_AZURE_KEY_VAULT_URL=https://$VAULT.vault.azure.net"   # put this line in .env
+```
+
+A vault URL cannot be derived, so on Azure the `.env` line is required; `SAM_AZURE_KEY_NAME`
+defaults to `$NAME`. With a user-assigned identity, also set `SAM_AZURE_CLIENT_ID`.
+
+### Removing what setup created
+
+Each setup step has a matching removal. Removing a key is **destructive**: every sealed bundle,
+and every backup of the box, that was sealed with it becomes unrecoverable. Keep the key until the
+box and its backups are gone.
+
+**Google Cloud.** `pnpm selfhost:gcp-bootstrap -- --project <id> --api-url https://api.<SAM_DOMAIN>
+--teardown [--dry-run]` reads `.state/created-resources.json` and removes only what the bootstrap
+recorded creating, each proven this install's again first (the provider trusts this issuer, the
+pool's and service account's descriptions name it, the key carries its `sam-install` label).
+Anything that existed before, fails its proof, or is not in the record is left and listed. It
+prints what it removed and what it left. Cloud KMS: the grant goes at once. A key version can be
+deleted only after it is destroyed, a key only when all its versions are deleted, a key ring only
+when all its keys are (Google: "Delete Cloud KMS resources"). So
+`--teardown --destroy-key-versions <key id>` schedules destruction (30 days by default, billed
+until destroyed, `gcloud kms keys versions restore` undoes it until then), and a `--teardown` after
+that deletes the versions, the key and the ring. A deleted key's name cannot be reused. Key rings
+are free; Google keeps a deleted workload identity pool for 30 days. Enabled APIs stay enabled.
+
+**AWS.**
+
+```bash
+aws iam delete-role-policy --role-name "$ROLE" --policy-name sam-sealed-secrets
+aws kms delete-alias --region "$REGION" --alias-name "alias/$NAME"
+# Destructive: 7-30 day waiting period; `aws kms cancel-key-deletion` undoes it until then.
+aws kms schedule-key-deletion --region "$REGION" --key-id "$KEY_ID" --pending-window-in-days 30
+```
+
+**Azure.**
+
+```bash
+az role assignment delete --assignee "$PRINCIPAL" --role "Key Vault Crypto Service Encryption User" --scope "$SCOPE"
+# Destructive: soft-deleted for the vault's retention period; `az keyvault key recover` undoes it.
+az keyvault key delete --vault-name "$VAULT" --name "$NAME"
+az keyvault delete --name "$VAULT" --resource-group "$RG"   # only a vault created for SAM
+```
+
+**The box side** (also destructive). The key agent, the bundles and the file key live in
+`.state/key-agent/`. A box cannot go back to plaintext deploy vars once `platform-keys.json` is
+gone: `SAM_KEY_PROVIDER=legacy-plaintext` then refuses, because it would generate new platform
+keys and every stored credential would become unreadable. To decommission a box:
+`docker compose -f deploy/selfhost/docker-compose.yml down`, then `rm -r .state/key-agent` removes
+the bundles, the file key and the recorded choice. Without a copy of the key (the file key kept
+off the box, or the cloud key), the install's platform keys and every backup are gone with it.
+
 ## Email sign-in
 
 SAM emails a six-digit sign-in code. On a box there is no Cloudflare Email Sending, so the Worker
@@ -260,6 +365,10 @@ only tokens whose issuer is this install's API origin, and a `sam-nodes` service
 It prints the five values for **Admin → Integrations → Google Cloud**. Re-running it changes
 nothing; it refuses to retarget a provider that trusts another install
 (`deploy/selfhost/gcp-bootstrap.sh`).
+
+It records what it created (not what it found) in `.state/created-resources.json` (names,
+project, time; no secrets; `--state-dir` to put it elsewhere). `--teardown` removes exactly those
+resources and nothing else; see Removing what setup created.
 
 Include at least one machine with 8 GB of memory. A default task asks for 2 vCPU, 4 GB of memory
 and 15 GB of disk (`PLATFORM_RESOURCE_DEFAULTS` in

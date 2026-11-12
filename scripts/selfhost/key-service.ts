@@ -364,6 +364,19 @@ export async function resolveDeployKeys(input: {
   const keyService = keyServiceSettings(box, stateDir);
   const platformKeysPath = join(stateDir, 'platform-keys.json');
   if (!keyService) {
+    // A sealed box has no platform-keys.json: the legacy path would generate NEW keys, and every
+    // credential stored under the old ENCRYPTION_KEY would become unreadable.
+    if (
+      !existsSync(platformKeysPath) &&
+      listBundles(join(stateDir, KEY_AGENT_DIR, 'bundles')).length > 0
+    ) {
+      throw new Error(
+        `${LEGACY_KEY_PROVIDER} needs ${platformKeysPath}, but this box's platform keys are sealed ` +
+          '(key-agent/bundles). Going back would generate new keys and lose every stored ' +
+          'credential: remove SAM_KEY_PROVIDER, or restore platform-keys.json from a backup taken ' +
+          'before the box was sealed'
+      );
+    }
     for (const path of ensureLegacyAgentEnv(stateDir, keyAgentPort(box))) log(`wrote ${path}`);
     const ensured = ensurePlatformKeys(platformKeysPath);
     if (ensured.generated.length > 0) {
