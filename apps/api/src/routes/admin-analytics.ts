@@ -5,7 +5,7 @@ import { getAnalyticsDataset } from '../lib/analytics-config';
 import { requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { getForwardStatus } from '../services/analytics-forward';
-import { hasCloudflareAccountApi } from '../services/platform-capabilities';
+import { resolvePlatformCapabilities } from '../services/platform-capabilities';
 import { registerAdminAudienceAnalyticsRoutes } from './admin-analytics-audience';
 import {
   DEFAULT_GEO_LIMIT,
@@ -22,11 +22,14 @@ const adminAnalyticsRoutes = new Hono<{ Bindings: Env }>();
 // All analytics routes require superadmin
 adminAnalyticsRoutes.use('/*', requireAuth(), requireApproved(), requireSuperadmin());
 
-// Every query route reads Cloudflare's Analytics Engine SQL API. Without a Cloudflare account
-// there is nothing to query (and the dataset name is never generated), so answer "not
+// Every query route reads Cloudflare's Analytics Engine SQL API, or the D1 sink on self-host
+// (ANALYTICS_SINK="d1"). With neither there is nothing to query (and the dataset name is never generated), so answer "not
 // available" before any route builds SQL. Forward status is local state and stays readable.
 adminAnalyticsRoutes.use('/*', async (c, next) => {
-  if (!hasCloudflareAccountApi(c.env) && !c.req.path.endsWith('/forward-status')) {
+  if (
+    !resolvePlatformCapabilities(c.env).analyticsQuery &&
+    !c.req.path.endsWith('/forward-status')
+  ) {
     throw errors.featureUnavailable(
       'analyticsQuery',
       'Analytics is not available on this installation'

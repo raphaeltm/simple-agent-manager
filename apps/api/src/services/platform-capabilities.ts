@@ -15,6 +15,7 @@
 import type { Env } from '../env';
 import { emailTransportKind } from './agent-email/provider';
 import { hasInboundAgentEmail } from './agent-email/self-host-inbound';
+import { isAnalyticsD1SinkEnabled } from './analytics-d1-sink';
 import { resolveArtifactsBackend } from './hosted-git/backend';
 import { resolveR2PresignConfig } from './r2-presign-config';
 
@@ -47,6 +48,8 @@ type CapabilityEnv = Pick<
   | 'CF_API_TOKEN'
   | 'CF_ZONE_ID'
   | 'ANALYTICS'
+  | 'ANALYTICS_SINK'
+  | 'OBSERVABILITY_DATABASE'
   | 'ARTIFACTS'
   | 'ARTIFACTS_ENABLED'
   | 'HOSTED_GIT'
@@ -197,8 +200,9 @@ export function resolvePlatformCapabilities(env: CapabilityEnv): PlatformCapabil
     aiGateway: resolveAiGatewayId(env) !== null,
     monthlyCostCap: isMonthlyCostCapAvailable(env),
     cloudflareAccountApi,
-    analyticsIngest: !!env.ANALYTICS,
-    analyticsQuery: cloudflareAccountApi,
+    // Self-host: ANALYTICS_SINK="d1" records and reads analytics in D1 (analytics-d1-sink.ts).
+    analyticsIngest: !!env.ANALYTICS || isAnalyticsD1SinkEnabled(env),
+    analyticsQuery: cloudflareAccountApi || isAnalyticsD1SinkEnabled(env),
     artifacts: isArtifactsAvailable(env),
     containerRuntime: hasContainerRuntime(env),
     guidedCredentialSetup: isGuidedCredentialSetupAvailable(env),

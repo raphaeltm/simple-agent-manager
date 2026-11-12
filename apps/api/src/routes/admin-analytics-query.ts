@@ -5,6 +5,7 @@ import { log } from '../lib/logger';
 import { readResponseJson } from '../lib/runtime-validation';
 import { errors } from '../middleware/error';
 import { resolveAdminSetting } from '../services/admin-settings-resolution';
+import { isAnalyticsD1SinkEnabled, queryAnalyticsD1 } from '../services/analytics-d1-sink';
 import { fetchWithTimeout } from '../services/fetch-timeout';
 import { hasCloudflareAccountApi } from '../services/platform-capabilities';
 
@@ -79,6 +80,10 @@ export const FEATURE_EVENTS = [
  * Execute an Analytics Engine SQL query via the Cloudflare API.
  */
 export async function queryAnalyticsEngine(env: Env, sql: string): Promise<unknown> {
+  // Self-host: the same queries, translated to SQLite, over the D1 sink.
+  if (isAnalyticsD1SinkEnabled(env)) {
+    return queryAnalyticsD1(env.OBSERVABILITY_DATABASE, sql);
+  }
   const baseUrl = env.ANALYTICS_SQL_API_URL || DEFAULT_ANALYTICS_SQL_API_URL;
   // The SQL API is Cloudflare's. Without an account to query there is no analytics to show;
   // that is a property of the installation, not a server fault.

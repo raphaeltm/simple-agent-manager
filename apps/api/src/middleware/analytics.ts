@@ -2,6 +2,7 @@ import type { MiddlewareHandler } from 'hono';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { resolveAnalyticsSink } from '../services/analytics-d1-sink';
 
 // ---------------------------------------------------------------------------
 // Event name mapping: HTTP method + route pattern → human-readable event name
@@ -179,8 +180,8 @@ export function analyticsMiddleware(): MiddlewareHandler<{ Bindings: Env }> {
     const enabled = c.env.ANALYTICS_ENABLED !== 'false';
     if (!enabled) return;
 
-    // Check if the binding exists (graceful degradation for local dev)
-    const analytics = c.env.ANALYTICS;
+    // Analytics Engine, or the D1 sink on self-host (graceful degradation for local dev)
+    const analytics = resolveAnalyticsSink(c.env);
     if (!analytics) return;
 
     const path = new URL(c.req.url).pathname;
@@ -235,7 +236,7 @@ export function analyticsMiddleware(): MiddlewareHandler<{ Bindings: Env }> {
         const responseTimeMs = Date.now() - startTime;
         const statusCode = c.res.status;
 
-        await analytics.writeDataPoint({
+        await analytics.write([{
           indexes: [userId],
           blobs: [
             eventName,       // blob1
@@ -255,7 +256,7 @@ export function analyticsMiddleware(): MiddlewareHandler<{ Bindings: Env }> {
             statusCode,      // double2
             0,               // double3 (reserved)
           ],
-        });
+        }]);
       } catch (err) {
         // Analytics failures must NEVER surface to the user
         log.warn('analytics.write_failed', { error: err instanceof Error ? err.message : String(err) });

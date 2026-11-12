@@ -1345,6 +1345,10 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   ANALYTICS_WEBSITE_TRAFFIC_TOP_PAGES_LIMIT?: string; // Max top pages per section in website traffic (default: 20)
   // Analytics ingest endpoint (Phase 2 — client-side events)
   ANALYTICS_INGEST_ENABLED?: string; // "true" (default) or "false"
+  /** "d1" records and reads product analytics in OBSERVABILITY_DATABASE (self-host; services/analytics-d1-sink.ts). Unset: Analytics Engine. */
+  ANALYTICS_SINK?: string;
+  ANALYTICS_D1_RETENTION_DAYS?: string; // default 90
+  ANALYTICS_D1_MAX_ROWS?: string; // default 500000
   RATE_LIMIT_ANALYTICS_INGEST?: string; // Rate limit per IP per hour (default: 500)
   MAX_ANALYTICS_INGEST_BATCH_SIZE?: string; // Max events per batch (default: 25)
   MAX_ANALYTICS_INGEST_BODY_BYTES?: string; // Max request body bytes (default: 65536)
