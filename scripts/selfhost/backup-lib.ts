@@ -25,7 +25,16 @@
  * `.env`). The backup directory is created mode 0700; keep copies where only the operator can
  * read them.
  */
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { join, resolve } from 'node:path';
 
 import { ensurePrivateDir } from './secret-files';
@@ -35,6 +44,12 @@ export const OBJECTSTORE_IMAGE =
   'pgsty/minio@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372';
 export const MANIFEST_NAME = 'backup-manifest.json';
 export const BUCKET_DIR = 'bucket';
+/** Where the live pre-copy lands. It is renamed to BUCKET_DIR before the delta copy (runBackup). */
+export const LIVE_DIR = '.bucket-live';
+/** A from-scratch copy, used only when the delta copy fails (runBackup). */
+export const FULL_DIR = '.bucket-full';
+/** Suffix of gcloud's in-flight download files; one left by an aborted pass is not an object. */
+const GCLOUD_TEMP_SUFFIX = '_.gstmp';
 export const STATE_DIR = 'state';
 export const ENV_FILE = 'env';
 
@@ -226,6 +241,19 @@ function countFiles(dir: string): number {
   return count;
 }
 
+function firstLine(err: unknown): string {
+  return err instanceof Error ? (err.message.split('\n')[0] ?? '').slice(0, 200) : String(err);
+}
+
+/** Deletes gcloud download temporaries an aborted pass left behind (they are not bucket objects). */
+function removeGcloudTemporaries(dir: string): void {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) removeGcloudTemporaries(path);
+    else if (entry.name.endsWith(GCLOUD_TEMP_SUFFIX)) rmSync(path, { force: true });
+  }
+}
+
 /** Live pre-copy, short stop, delta, restart. Returns the manifest written into `dest`. */
 export function runBackup(
   ctx: BoxContext,
@@ -238,22 +266,34 @@ export function runBackup(
   ensurePrivateDir(dest);
   const bucketDir = join(dest, BUCKET_DIR);
 
+  const liveDir = join(dest, LIVE_DIR);
+  const fullDir = join(dest, FULL_DIR);
+
   const precopyStart = ctx.now();
   ctx.log(`live pre-copy of ${ctx.box.CELLD_BUCKET} (celld keeps running)`);
   // Best effort: a running node rewrites its lease, waker and capacity objects every few seconds,
   // so `gcloud storage rsync` meets generations that vanished mid-copy (404) and exits non-zero.
   // The pre-copy only shortens the downtime; the delta copy below, with celld stopped, is the one
   // that must succeed, and it fails loudly if the store itself is unreachable.
+  //
+  // The pre-copy goes to its own directory. An aborted gcloud pass leaves state keyed by the
+  // destination path it was writing (resumable-download tracker files, `_.gstmp` temporaries), and
+  // a second rsync into the SAME paths tripped over it on the box: `[Errno 2] No such file or
+  // directory: <backup>/bucket/nodes/node_<id>.json` for objects celld removed between the passes.
+  // Renaming the tree before the delta copy means gcloud has no state for any destination path it
+  // is about to write; only the bytes carry over.
   try {
-    pullBucket(ctx, bucketDir);
+    pullBucket(ctx, liveDir);
   } catch (err) {
     ctx.log(
-      `live pre-copy incomplete, the delta copy with celld stopped will finish it: ${
-        err instanceof Error ? err.message.split('\n')[0]?.slice(0, 200) : String(err)
-      }`
+      `live pre-copy incomplete, the delta copy with celld stopped will finish it: ${firstLine(err)}`
     );
   }
   const precopyMs = ctx.now() - precopyStart;
+  if (existsSync(liveDir)) {
+    removeGcloudTemporaries(liveDir);
+    renameSync(liveDir, bucketDir);
+  }
 
   ctx.log('stopping celld for the delta copy');
   compose(ctx, ['stop', 'celld']);
@@ -261,7 +301,21 @@ export function runBackup(
   let deltaCopyMs = 0;
   let startedAt = stoppedAt;
   try {
-    pullBucket(ctx, bucketDir);
+    // With celld stopped the bucket is the consistent state. The mirror (with deletion) converges
+    // the local tree on exactly that: objects celld removed after the pre-copy are deleted here.
+    try {
+      pullBucket(ctx, bucketDir);
+    } catch (err) {
+      // Whatever the local tree holds, a copy into a directory no pass has touched cannot meet it.
+      // Costs a full copy of downtime, once, instead of leaving the operator without a backup.
+      ctx.log(
+        `delta copy failed, copying the whole bucket again with celld stopped: ${firstLine(err)}`
+      );
+      rmSync(fullDir, { recursive: true, force: true });
+      pullBucket(ctx, fullDir);
+      rmSync(bucketDir, { recursive: true, force: true });
+      renameSync(fullDir, bucketDir);
+    }
     deltaCopyMs = ctx.now() - stoppedAt;
     cpSync(ctx.stateDir, join(dest, STATE_DIR), { recursive: true, preserveTimestamps: true });
     cpSync(ctx.envFile, join(dest, ENV_FILE), { preserveTimestamps: true });

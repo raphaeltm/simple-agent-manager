@@ -2,6 +2,7 @@
  * Incarnation fences and exact provider resolution shared by strict node teardown.
  * Split out of `strict-node-deletion.ts` (rule 18); behavior unchanged.
  */
+import { hasAmbiguousLabel, type VMInstance } from '@simple-agent-manager/providers';
 import { type CredentialProvider } from '@simple-agent-manager/shared';
 import { and, eq, sql } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
@@ -238,4 +239,23 @@ export async function resolveStrictNodeProvider(
     );
   }
   return providerResult;
+}
+
+/**
+ * Providers whose filtered inventory read is complete or fails closed. Hetzner: fully paginated,
+ * fail-closed list. GCP: fully paginated aggregated list that throws when any zone is
+ * unreachable (`listGcpInstances` in packages/providers/src/gcp-instance-lookup.ts). A GCP node
+ * whose create response was cut can reach `destroying` without `provider_instance_id`
+ * (self-host box, 2026-11-11); its VM is found here by its exact ownership labels.
+ */
+export const COMPLETE_INVENTORY_PROVIDERS = new Set(['hetzner', 'gcp']);
+
+/** Every ownership label repeats exactly, and none is ambiguous, on the server the provider returned. */
+export function providerInventoryMatchesLabels(
+  server: VMInstance,
+  labels: Record<string, string>
+): boolean {
+  return Object.entries(labels).every(
+    ([key, value]) => !hasAmbiguousLabel(server.labels, key) && server.labels[key] === value
+  );
 }
