@@ -25,7 +25,7 @@ async function stableHash(value: string): Promise<string> {
 export async function enforceCredentialMutationRateLimit(
   env: Env,
   principalId: string,
-  scope: 'gcp-service-account' | 'google-infra-oauth' | 'gcp-verify'
+  scope: 'gcp-service-account' | 'google-infra-oauth' | 'gcp-verify' | 'github-app-manifest'
 ): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
   const windowSeconds = DEFAULT_WINDOW_SECONDS;

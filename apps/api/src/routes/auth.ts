@@ -96,6 +96,25 @@ authRoutes.post(EMAIL_CODE_SIGN_IN_PATH, async (c, next) => {
   }
 });
 
+/**
+ * "Connect GitHub/GitLab" links only the providers whose sign-in keeps a linked account's own
+ * email (`keepLinkedAccountEmail` in their `getUserInfo`); linking accepts a provider account
+ * with a different email (`accountLinking.allowDifferentEmails`), so any other provider could
+ * later overwrite the SAM email at sign-in.
+ */
+const LINKABLE_PROVIDERS = new Set(['github', 'gitlab']);
+authRoutes.post('/link-social', async (c, next) => {
+  const body: unknown = await c.req.raw
+    .clone()
+    .json()
+    .catch(() => null);
+  const provider = maybeJsonRecord(body)?.provider;
+  if (typeof provider !== 'string' || !LINKABLE_PROVIDERS.has(provider)) {
+    throw errors.badRequest('Only GitHub and GitLab can be connected to an account');
+  }
+  return next();
+});
+
 authRoutes.on(['GET', 'POST'], '/*', async (c) => {
   // SAM has no passwords: the plugin's reset, verification and email-change routes stay closed.
   if (isClosedEmailOtpPath(new URL(c.req.url).pathname)) throw errors.notFound('Route');

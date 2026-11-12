@@ -285,4 +285,35 @@ describe('GitLab sign-in through better-auth (vertical slice)', () => {
     expect(callback.headers.get('location')).toBe(CALLBACK_URL);
     expect(sessionCount()).toBe(1);
   });
+
+  it('a GitLab account linked by "Connect GitLab" keeps the SAM email at sign-in', async () => {
+    // The row shape better-auth's /link-social leaves: a verified email account plus a GitLab
+    // account with a different email, keyed on String(profile.id).
+    sqlite
+      .prepare(
+        `INSERT INTO users (id, email, email_verified, name, role, status, created_at, updated_at)
+         VALUES ('email-user', 'owner@box.example', 1, 'owner', 'user', 'active', 1, 1)`
+      )
+      .run();
+    sqlite
+      .prepare(
+        `INSERT INTO accounts (id, account_id, provider_id, user_id, created_at, updated_at)
+         VALUES ('linked', ?, 'gitlab', 'email-user', 1, 1)`
+      )
+      .run(String(GITLAB_USER.id));
+    const network = createFakeNetwork(PUBLIC_HOST);
+    vi.stubGlobal('fetch', network.fetch);
+    const callback = await signIn(envFor(PUBLIC_HOST), network);
+    expect(callback.headers.get('location')).toBe(CALLBACK_URL);
+    expect(sqlite.prepare('SELECT DISTINCT user_id FROM sessions').all()).toEqual([
+      { user_id: 'email-user' },
+    ]);
+    expect(
+      sqlite
+        .prepare(
+          `SELECT email, email_verified AS verified, name FROM users WHERE id = 'email-user'`
+        )
+        .get()
+    ).toEqual({ email: 'owner@box.example', verified: 1, name: GITLAB_USER.name });
+  });
 });

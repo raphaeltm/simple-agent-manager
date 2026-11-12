@@ -1,3 +1,4 @@
+import { SYSTEM_USER_ID } from '@simple-agent-manager/shared';
 import type { Context } from 'hono';
 import { Hono } from 'hono';
 import * as v from 'valibot';
@@ -16,6 +17,7 @@ import {
   isSetupTokenConfigured,
   type PlatformIntegrationInput,
   previewPlatformIntegrationConfig,
+  setSetupCompleted,
   verifySetupToken,
 } from '../services/platform-config';
 import {
@@ -106,6 +108,30 @@ async function signInSummary(env: Env) {
   };
 }
 
+/**
+ * Close first-run setup on an installation that has no setup token but already has an owner.
+ *
+ * Setup can only be finished with `SETUP_TOKEN`, which only the Cloudflare installer generates.
+ * Installs made another way (a self-hosted celld box: `pnpm selfhost:create-account` creates the
+ * owner) have no token, so `/setup` was a dead end that kept saying "This instance has no setup
+ * token". Once an active superadmin exists, everything setup configures is in Admin →
+ * Integrations, so setup is recorded as complete. `SETUP_FORCE=true` keeps it open. An install
+ * that has a token is unchanged: its owner finishes setup with it.
+ */
+async function closeSetupWithoutToken(env: Env): Promise<boolean> {
+  if (env.SETUP_FORCE === 'true' || isSetupTokenConfigured(env)) return false;
+  const owner = await env.DATABASE.prepare(
+    `SELECT id FROM users
+     WHERE role = 'superadmin' AND status = 'active' AND id != ?
+     LIMIT 1`
+  )
+    .bind(SYSTEM_USER_ID)
+    .first<{ id: string }>();
+  if (!owner) return false;
+  await setSetupCompleted(env, owner.id);
+  return true;
+}
+
 async function assertSetupOpen(env: Env): Promise<void> {
   if (await isSetupCompleted(env)) {
     throw setupClosed();
@@ -124,7 +150,7 @@ async function assertSetupToken(env: Env, token: string, identifier: string): Pr
 }
 
 setupRoutes.get('/status', async (c) => {
-  const completed = await isSetupCompleted(c.env);
+  const completed = (await isSetupCompleted(c.env)) || (await closeSetupWithoutToken(c.env));
   if (completed) {
     throw setupClosed();
   }

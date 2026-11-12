@@ -4,6 +4,7 @@ import { useCallback,useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router';
 
 import { getGitHubInstallUrl, listGitHubInstallations, listRepositories } from '../lib/api';
+import { ApiClientError } from '../lib/api/client';
 
 /**
  * GitHub App section for settings page.
@@ -17,6 +18,8 @@ export function GitHubAppSection() {
   const [error, setError] = useState<string | null>(null);
   const [installUrl, setInstallUrl] = useState<string | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [notConnected, setNotConnected] = useState(false);
+  const [installUnavailable, setInstallUnavailable] = useState<string | null>(null);
 
   const loadInstallations = useCallback(async () => {
     try {
@@ -35,7 +38,12 @@ export function GitHubAppSection() {
         }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load installations');
+      // An email-signed account has no GitHub link yet; the section above offers to connect it.
+      if (err instanceof ApiClientError && err.code === 'GITHUB_NOT_CONNECTED') {
+        setNotConnected(true);
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to load installations');
+      }
     } finally {
       setLoading(false);
     }
@@ -46,6 +54,11 @@ export function GitHubAppSection() {
       const { url } = await getGitHubInstallUrl();
       setInstallUrl(url);
     } catch (err) {
+      // No GitHub App on this installation yet: the API says who can fix it and where.
+      if (err instanceof ApiClientError && err.code === 'GITHUB_APP_NOT_CONFIGURED') {
+        setInstallUnavailable(err.message);
+        return;
+      }
       console.error('Failed to get install URL:', err);
     }
   }, []);
@@ -91,6 +104,17 @@ export function GitHubAppSection() {
     return <Alert variant="error">{error}</Alert>;
   }
 
+  if (notConnected) {
+    return (
+      <div className="glass-surface rounded-lg p-4">
+        <p className="m-0 text-sm text-fg-muted">
+          Connect GitHub above, then install the GitHub App on the accounts whose repositories SAM
+          should use.
+        </p>
+      </div>
+    );
+  }
+
   if (installations.length === 0) {
     return (
       <div className="glass-surface rounded-lg p-4 flex flex-col gap-4">
@@ -102,6 +126,7 @@ export function GitHubAppSection() {
         <p className="text-fg-muted">
           Install the GitHub App to access your repositories for workspace creation.
         </p>
+        {installUnavailable && <Alert variant="warning">{installUnavailable}</Alert>}
         <div>
           <Button onClick={handleInstallClick} disabled={!installUrl}>
             <svg className="h-5 w-5 mr-2" fill="currentColor" viewBox="0 0 24 24">

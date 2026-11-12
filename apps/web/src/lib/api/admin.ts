@@ -411,4 +411,10 @@ export type {
   PlatformIntegrationConfigInput,
   PlatformIntegrationStatus,
 } from './admin-platform-config';
-export { fetchAdminPlatformConfig, updateAdminPlatformConfig } from './admin-platform-config';
+export type { GitHubAppManifestComplete, GitHubAppManifestStart } from './admin-platform-config';
+export {
+  completeGitHubAppManifest,
+  fetchAdminPlatformConfig,
+  startGitHubAppManifest,
+  updateAdminPlatformConfig,
+} from './admin-platform-config';

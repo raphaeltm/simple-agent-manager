@@ -94,3 +94,34 @@ export async function updateAdminPlatformConfig(
     body: JSON.stringify({ config }),
   });
 }
+
+export interface GitHubAppManifestStart {
+  /** GitHub's "new App from manifest" URL, with the state SAM checks on return. */
+  postUrl: string;
+  manifest: Record<string, unknown>;
+  state: string;
+}
+
+export async function startGitHubAppManifest(input: {
+  name?: string;
+  organization?: string;
+}): Promise<GitHubAppManifestStart> {
+  return request<GitHubAppManifestStart>('/api/admin/platform-config/github-app/manifest', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export interface GitHubAppManifestComplete extends PlatformConfigStatusResponse {
+  app: { slug: string; htmlUrl: string | null; owner: string | null; installUrl: string };
+}
+
+export async function completeGitHubAppManifest(
+  code: string,
+  state: string
+): Promise<GitHubAppManifestComplete> {
+  return request<GitHubAppManifestComplete>(
+    '/api/admin/platform-config/github-app/manifest/complete',
+    { method: 'POST', body: JSON.stringify({ code, state }) }
+  );
+}

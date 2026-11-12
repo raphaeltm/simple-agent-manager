@@ -52,6 +52,34 @@ export async function signInWithGitLab() {
   });
 }
 
+/** A sign-in provider an existing account can connect ("Connect GitHub"). */
+export type LinkableProvider = 'github' | 'gitlab';
+
+/**
+ * Connect a provider to the signed-in account through BetterAuth's own `/link-social` flow:
+ * the provider's consent screen, then back to `returnTo`. The API allows the provider account's
+ * email to differ from the SAM one only on this explicit, signed-in path.
+ */
+export async function connectProvider(
+  provider: LinkableProvider,
+  returnTo: string = window.location.href
+): Promise<void> {
+  // Errors come back to the same page too, not to the API's bare error page.
+  const { error } = await authClient.linkSocial({
+    provider,
+    callbackURL: returnTo,
+    errorCallbackURL: returnTo,
+  });
+  if (error) throw new Error(error.message || `Could not connect ${provider}`);
+}
+
+/** The providers already connected to the signed-in account (BetterAuth `/list-accounts`). */
+export async function listConnectedProviders(): Promise<string[]> {
+  const { data, error } = await authClient.listAccounts();
+  if (error) throw new Error(error.message || 'Could not list connected accounts');
+  return (data ?? []).map((account) => account.providerId);
+}
+
 /**
  * Email a sign-in code. The API answers the same whether or not the address can sign in,
  * so the caller always moves on to the code step.

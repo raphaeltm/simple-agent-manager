@@ -11,7 +11,9 @@
  * Who gets a code:
  * - an address that already belongs to an account;
  * - the installer's owner email (`BOOTSTRAP_OWNER_EMAIL`) until that owner exists.
- * Everyone else gets nothing. The response is the same either way, and the code is sent after
+ * An account created by a provider sign-in whose email is unverified and that still has its
+ * provider link gets a note telling it to sign in with that provider instead of a code
+ * (`findAccountByEmail`). Everyone else gets nothing. The response is the same either way, and the code is sent after
  * the response (`CreateAuthOptions.waitUntil`), so neither the body nor the timing reveals which
  * addresses have accounts. Installations without an owner email do not offer email sign-up: the
  * first person to request a code would become the administrator. `databaseHooks.user.create.before` in `../auth.ts` still
@@ -122,14 +124,34 @@ export async function emailSignUpAllowed(env: Env, email: string): Promise<boole
  */
 export async function emailCodeRedemptionAllowed(env: Env, email: string): Promise<boolean> {
   const normalized = email.trim().toLowerCase();
-  return (await accountExists(env, normalized)) || (await emailSignUpAllowed(env, normalized));
+  const account = await findAccountByEmail(env, normalized);
+  if (account) return !account.providerOnly;
+  return emailSignUpAllowed(env, normalized);
 }
 
-async function accountExists(env: Env, email: string): Promise<boolean> {
-  const row = await env.DATABASE.prepare('SELECT 1 FROM users WHERE lower(email) = ? LIMIT 1')
+/**
+ * An account that a provider sign-in created with an unproven email, and that still has its
+ * provider link. SAM stores a GitHub user's email as unverified when GitHub's `/user/emails`
+ * call fails (`getUserInfo` in `../auth.ts`). Redeeming an email code for such an account makes
+ * BetterAuth's emailOTP route call `revokeUnprovenAccountAccess`, which deletes every provider
+ * link and session of the account (deliberate anti-takeover behaviour), so the user would
+ * silently lose GitHub. These accounts get no code: `deliverSignInCode` mails a note telling
+ * them to sign in with their provider, and redemption is refused like a wrong code.
+ */
+interface EmailAccountState {
+  providerOnly: boolean;
+}
+
+async function findAccountByEmail(env: Env, email: string): Promise<EmailAccountState | null> {
+  const row = await env.DATABASE.prepare(
+    `SELECT u.email_verified AS emailVerified,
+            EXISTS (SELECT 1 FROM accounts a WHERE a.user_id = u.id) AS linked
+     FROM users u WHERE lower(u.email) = ? LIMIT 1`
+  )
     .bind(email)
-    .first();
-  return row !== null;
+    .first<{ emailVerified: number | null; linked: number }>();
+  if (!row) return null;
+  return { providerOnly: !row.emailVerified && Boolean(row.linked) };
 }
 
 async function sha256Hex(value: string): Promise<string> {
@@ -204,11 +226,33 @@ export function signInCodeEmail(baseDomain: string, code: string) {
   };
 }
 
-/** Sends the code when the address may sign in; otherwise sends nothing. Never throws. */
+/** Sent instead of a code to an account that must sign in with its provider (see above). */
+export function providerSignInRequiredEmail(baseDomain: string) {
+  const appUrl = `https://app.${baseDomain}`;
+  return {
+    subject: 'Sign in to SAM with GitHub',
+    text: [
+      `Someone asked for a code to sign in to SAM at ${appUrl} with this address.`,
+      '',
+      'This account was created by signing in with GitHub (or another provider), and its email',
+      'address has not been confirmed, so SAM does not send it sign-in codes: using one would',
+      'disconnect the account from GitHub. Open the sign-in page and choose "Sign in with GitHub"',
+      '(or the provider you used before) instead.',
+      '',
+      "If you didn't ask for a code, you can ignore this email.",
+    ].join('\n'),
+  };
+}
+
+/**
+ * Sends the code when the address may sign in, a provider sign-in note to an account that must
+ * use its provider, and nothing otherwise. Never throws.
+ */
 export async function deliverSignInCode(env: Env, email: string, code: string): Promise<void> {
   if (!emailTransportKind(env)) return;
   try {
-    const known = await accountExists(env, email);
+    const account = await findAccountByEmail(env, email);
+    const known = account !== null;
     if (!known && !(await emailSignUpAllowed(env, email))) {
       log.info('email_sign_in.code_not_sent', { reason: 'no_account' });
       return;
@@ -218,7 +262,12 @@ export async function deliverSignInCode(env: Env, email: string, code: string): 
       emailTransportKind(env) === 'smtp' ? (await getAgentEmailLimits(env)).smtpTimeoutMs : 0;
     const transport = systemEmailTransportFor(env, { smtpTimeoutMs });
     if (!transport) return;
-    const message = signInCodeEmail(env.BASE_DOMAIN, code);
+    // The note goes to the mailbox, not into the API response, so the response still reveals
+    // nothing about which addresses have accounts.
+    const message = account?.providerOnly
+      ? providerSignInRequiredEmail(env.BASE_DOMAIN)
+      : signInCodeEmail(env.BASE_DOMAIN, code);
+    if (account?.providerOnly) log.info('email_sign_in.code_not_sent', { reason: 'provider_only' });
     await transport.sender.send({
       from: { email: transport.systemFrom(EMAIL_SIGN_IN_LOCAL_PART), name: 'SAM' },
       to: email,
@@ -226,7 +275,9 @@ export async function deliverSignInCode(env: Env, email: string, code: string): 
       text: message.text,
       headers: {},
     });
-    log.info('email_sign_in.code_sent', { newAccount: !known, transport: transport.kind });
+    if (!account?.providerOnly) {
+      log.info('email_sign_in.code_sent', { newAccount: !known, transport: transport.kind });
+    }
   } catch (error) {
     log.error('email_sign_in.send_failed', {
       error: error instanceof Error ? error.message : String(error),
