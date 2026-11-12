@@ -141,6 +141,25 @@ PR A progress (branch `sam/archive-flip-reclaim`, worktree `/workspaces/sam-arch
       attempts on progress; reserve writes once; estimator cap; flip-or-unwind; remove 10k gate.
 - [ ] Seal/verification bounded and resumable (item 6); measure memory/CPU/lease.
 
+## Compact-path staging checks (reusable; run after setting staging PROJECT_DATA_ARCHIVE_COMPACT_ENABLED=true and deploying)
+
+1. Bindings: `GET /accounts/<acct>/workers/scripts/sam-api-staging/settings` shows
+   `PROJECT_DATA_ARCHIVE_COMPACT_ENABLED=true`, `_WALL_TIME_MS=60000`, `_SWEEP_SESSIONS=50`.
+2. Wait for a tick: `project_data_archive_global_sweep_cadence.last_started_at` must be after the
+   API deploy time; `last_status='succeeded'`; the duration is roughly the wall time when work exists.
+3. D1: `SELECT state, storage_format, error_code, count(*) FROM project_data_archive_migrations
+   WHERE updated_at > now-1h GROUP BY 1,2,3`. Expect `published` rows with
+   `storage_format='r2-gzip-v1'`, and several per tick (not exactly one).
+4. Logs `project_data_archive_candidate_migrated`: one per publish, with `phaseDurationsMs`.
+   `project_data_archive_write_budget_reserved`: one per candidate.
+5. Refusal releases its reservation: when `project_data_archive_candidate_refused` appears,
+   `project_data_archive_unused_reservations` gains a receipt whose `estimated_writes` equals that
+   candidate's reserved estimate.
+6. Restore: delete the variable, redeploy, confirm the binding is gone or false.
+
+Staging result 2026-11-12 22:20Z (578d1fdeb): 7 compact publishes in a 61.5 s tick, 1 refusal with
+a 1,284-write receipt, ProjectData DO p99 unchanged.
+
 ## Notes
 
 - PR 1 discrimination (2026-11-12, `tests/workers/project-data-archive-drain-relief.test.ts`):
