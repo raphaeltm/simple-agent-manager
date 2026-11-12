@@ -1,11 +1,11 @@
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-import * as schema from '../../../src/db/schema';
 import { createAttentionMarker } from '@simple-agent-manager/project-data/internal/do/attention';
 import { processExpiredAttentionMarkers } from '@simple-agent-manager/project-data/internal/do/attention-expiry';
 import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import * as schema from '../../../src/db/schema';
 import {
   failedTaskIncompleteSnapshotMessage,
   failedTaskNoticeId,

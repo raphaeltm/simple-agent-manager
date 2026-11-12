@@ -8,9 +8,6 @@
  * at-cap behaviour itself is proven only in production; these tests pin the
  * delete-first transaction shape and every candidate/budget guard.
  */
-import { env, runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
-
 import {
   GROUPED_PAGE_SIZES_SQL,
   type GroupedFtsWallRecoveryRequest,
@@ -18,6 +15,9 @@ import {
 } from '@simple-agent-manager/project-data/internal/do/grouped-fts-wall-recovery';
 import { materializeSession } from '@simple-agent-manager/project-data/internal/do/materialization';
 import { resolveStorageSafetyConfig } from '@simple-agent-manager/project-data/internal/do/storage-safety';
+import { env, runInDurableObject } from 'cloudflare:test';
+import { describe, expect, it } from 'vitest';
+
 import type { Env as WorkerEnv } from '../../src/env';
 import * as projectDataService from '../../src/services/project-data';
 import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';

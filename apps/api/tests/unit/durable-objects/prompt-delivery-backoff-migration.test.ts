@@ -1,6 +1,3 @@
-import Database from 'better-sqlite3';
-import { describe, expect, it } from 'vitest';
-
 import { resolveDurableExecutionConfig } from '@simple-agent-manager/project-data/internal/do/durable-execution-config';
 import {
   MIGRATIONS,
@@ -11,6 +8,9 @@ import {
   claimDuePromptDeliveries,
   computePromptDeliveryAlarmTime,
 } from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
+import Database from 'better-sqlite3';
+import { describe, expect, it } from 'vitest';
+
 import { createSqlStorage } from './sql-storage-test-utils';
 
 describe('prompt target backoff additive migration', () => {

@@ -20,11 +20,6 @@
  * activity writer (`upsertActivityState`), and the real `persistError`. The clock
  * is injected, so a 25-hour runtime costs nothing to simulate.
  */
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-import * as observabilitySchema from '../../src/db/observability-schema';
-import * as schema from '../../src/db/schema';
 import {
   createAttentionMarker,
   hasPendingHumanInput,
@@ -33,6 +28,11 @@ import { runMigrations } from '@simple-agent-manager/project-data/internal/do/mi
 import { upsertActivityState } from '@simple-agent-manager/project-data/internal/do/session-state';
 import { readTaskAcpLivenessSignals } from '@simple-agent-manager/project-data/internal/do/task-acp-liveness-signals';
 import type { Env as ProjectDataEnv } from '@simple-agent-manager/project-data/internal/do/types';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import * as observabilitySchema from '../../src/db/observability-schema';
+import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { recoverStuckTasks } from '../../src/scheduled/stuck-tasks';
 import { hasUnexpiredHumanInput } from '../../src/services/acp-interaction-store';

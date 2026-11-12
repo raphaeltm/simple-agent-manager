@@ -97,6 +97,7 @@ vi.mock('../../src/services/project-data', async () => {
 
 import * as comments from '@simple-agent-manager/project-data/internal/do/comments';
 import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+
 import { chatCommentRoutes } from '../../src/routes/chat-comments';
 
 const HUMAN = { kind: 'human' as const, id: 'user-2', name: 'Grace' };

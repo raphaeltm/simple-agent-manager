@@ -14,11 +14,11 @@
  *
  * See: .claude/rules/35-vertical-slice-testing.md
  */
+import { DEFAULT_MAX_MESSAGES_PER_SESSION } from '@simple-agent-manager/project-data/internal/do/messages';
+import * as sessionState from '@simple-agent-manager/project-data/internal/do/sessions';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it, vi } from 'vitest';
 
-import { DEFAULT_MAX_MESSAGES_PER_SESSION } from '@simple-agent-manager/project-data/internal/do/messages';
-import * as sessionState from '@simple-agent-manager/project-data/internal/do/sessions';
 import type { Env } from '../../src/env';
 // Import service functions under test
 import * as svc from '../../src/services/project-data';

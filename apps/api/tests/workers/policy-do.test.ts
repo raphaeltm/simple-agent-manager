@@ -4,10 +4,9 @@
  * Runs inside the workerd runtime via @cloudflare/vitest-pool-workers,
  * exercising real SQLite storage, DO lifecycle, and migrations.
  */
+import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-
-import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
 
 function getStub(projectId: string): DurableObjectStub<ProjectData> {
   const id = env.PROJECT_DATA.idFromName(projectId);

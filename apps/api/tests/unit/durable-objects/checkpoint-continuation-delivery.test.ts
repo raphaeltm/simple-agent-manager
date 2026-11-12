@@ -5,11 +5,6 @@
  * continuations queued by the production builder, and D1 holding the task. Every refusal has an
  * owner control beside it (rule 28).
  */
-import type { PromptDeliverySource } from '@simple-agent-manager/shared';
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-
-import * as schema from '../../../src/db/schema';
 import { invalidCheckpointContinuationTarget } from '@simple-agent-manager/project-data/internal/do/checkpoint-continuation-delivery';
 import { getMessage } from '@simple-agent-manager/project-data/internal/do/mailbox';
 import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
@@ -18,6 +13,11 @@ import {
   type PromptDeliveryClaim,
 } from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
 import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
+import type { PromptDeliverySource } from '@simple-agent-manager/shared';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import * as schema from '../../../src/db/schema';
 import { restoredSessionPromptDelivery } from '../../../src/services/restored-session-prompt';
 import { SESSION_RECOVERY_CONTINUE_TASK_PROMPT } from '../../../src/services/session-sleep-fallback-messages';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';

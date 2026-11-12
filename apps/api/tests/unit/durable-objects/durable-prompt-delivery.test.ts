@@ -1,7 +1,3 @@
-import type { PromptDeliverySource } from '@simple-agent-manager/shared';
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
 import { processPromptDeliveryAlarm } from '@simple-agent-manager/project-data/internal/do/durability-foundation';
 import type { DurableExecutionConfig } from '@simple-agent-manager/project-data/internal/do/durable-execution-config';
 import * as mailbox from '@simple-agent-manager/project-data/internal/do/mailbox';
@@ -21,6 +17,10 @@ import {
 } from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
 import { runPromptDeliveryClaim } from '@simple-agent-manager/project-data/internal/do/prompt-delivery-runner';
 import * as sessionState from '@simple-agent-manager/project-data/internal/do/session-state';
+import type { PromptDeliverySource } from '@simple-agent-manager/shared';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { NodeAgentHttpError } from '../../../src/services/node-agent';
 import {
   DefaultVmPromptDeliveryAdapter,

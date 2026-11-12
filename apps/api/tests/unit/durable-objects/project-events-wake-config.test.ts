@@ -1,8 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
-
 import { computeProjectEventMaterializationAlarmTime } from '@simple-agent-manager/project-data/internal/do/project-events-scheduler';
 import { isProjectEventWakeEnabled } from '@simple-agent-manager/project-data/internal/do/project-events-wake-config';
 import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
+import { describe, expect, it, vi } from 'vitest';
 
 // Drive the scheduler's real resolver: no feature-flag mocks or injected default.
 describe('project event wake activation', () => {

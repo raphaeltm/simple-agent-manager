@@ -5,12 +5,12 @@
  * through DO SQLite to state retrieval — verifying the complete data flow
  * that the UI relies on for hydration.
  */
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-
 import { persistMessageWithSideEffects } from '@simple-agent-manager/project-data/internal/do/message-persistence';
 import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import * as sessionState from '@simple-agent-manager/project-data/internal/do/session-state';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
 import { createSqlStorage } from './sql-storage-test-utils';
 
 describe('Session State Mirror — vertical slice', () => {

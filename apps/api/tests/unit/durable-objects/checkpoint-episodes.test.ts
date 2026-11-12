@@ -1,8 +1,8 @@
+import * as checkpoints from '@simple-agent-manager/project-data/internal/do/checkpoint-episodes';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import * as checkpoints from '@simple-agent-manager/project-data/internal/do/checkpoint-episodes';
-import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import { createSqlStorage } from './sql-storage-test-utils';
 
 describe('ProjectData checkpoint episodes', () => {

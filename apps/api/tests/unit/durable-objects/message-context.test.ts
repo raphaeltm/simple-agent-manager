@@ -8,15 +8,15 @@
  * when the anchor is a later chunk — and that each side stops after the configured number of
  * messages, the row cap, or the start/end of the transcript.
  */
-import Database from 'better-sqlite3';
-import { beforeEach, describe, expect, it } from 'vitest';
-
 import {
   type MessageContextRequest,
   readSourceMessageContext,
 } from '@simple-agent-manager/project-data/internal/do/message-context';
 import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
+import Database from 'better-sqlite3';
+import { beforeEach, describe, expect, it } from 'vitest';
+
 import { createSqlStorage } from './sql-storage-test-utils';
 
 const PROJECT = 'project-1';

@@ -6,15 +6,15 @@
  * `databaseSize` after deletes, local limits on forcing exact SQLITE_FULL, and
  * alarm-driven telemetry writes.
  */
-import { env, runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it, vi } from 'vitest';
-
 import { runProjectDataGroupedFtsCleanup } from '@simple-agent-manager/project-data/internal/do/grouped-fts-cleanup';
 import {
   DEFAULT_PROJECT_DATA_STORAGE_LIMIT_BYTES,
   type ProjectDataStorageStatus,
   resolveStorageSafetyConfig,
 } from '@simple-agent-manager/project-data/internal/do/storage-safety';
+import { env, runInDurableObject } from 'cloudflare:test';
+import { describe, expect, it, vi } from 'vitest';
+
 import type { Env as WorkerEnv } from '../../src/env';
 import * as projectDataService from '../../src/services/project-data';
 import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';

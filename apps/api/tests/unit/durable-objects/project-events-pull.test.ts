@@ -1,6 +1,3 @@
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
 import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import {
   ackProjectEventDelivery,
@@ -15,6 +12,9 @@ import {
   runProjectEventRetention,
 } from '@simple-agent-manager/project-data/internal/do/project-events';
 import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { createSqlStorage } from './sql-storage-test-utils';
 
 const PROJECT_ID = 'project-events-pull-project';

@@ -9,9 +9,6 @@
  * the SHAPE that prevents it — SQLite rows read by one search — and the coverage disclosure a
  * consumer relies on to know the result is partial.
  */
-import { env, runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
-
 import { createRowMeteredSqlStorage } from '@simple-agent-manager/project-data/internal/do/alarm-sections';
 import { materializeSession } from '@simple-agent-manager/project-data/internal/do/materialization';
 import {
@@ -20,6 +17,9 @@ import {
   type MessageSearchBounds,
   searchMessagesWithCoverage,
 } from '@simple-agent-manager/project-data/internal/do/message-search';
+import { env, runInDurableObject } from 'cloudflare:test';
+import { describe, expect, it } from 'vitest';
+
 import type { ProjectDataTestDouble } from './support/expected-error-doubles';
 
 const WIDE: MessageSearchBounds = {

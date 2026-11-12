@@ -8,13 +8,13 @@
  * session with positive work, scanning past newer sessions that are idle or
  * unproven, exactly as the reader did before the evidence refactor.
  */
-import Database from 'better-sqlite3';
-import { beforeEach, describe, expect, it } from 'vitest';
-
 import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import { upsertActivityState } from '@simple-agent-manager/project-data/internal/do/session-state';
 import { readTaskAcpLivenessSignals } from '@simple-agent-manager/project-data/internal/do/task-acp-liveness-signals';
 import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
+import Database from 'better-sqlite3';
+import { beforeEach, describe, expect, it } from 'vitest';
+
 import { createSqlStorage } from './sql-storage-test-utils';
 
 const CHAT_SESSION_ID = 'chat-1';

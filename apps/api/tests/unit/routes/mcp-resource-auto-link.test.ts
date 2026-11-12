@@ -51,9 +51,10 @@ vi.mock('../../../src/services/workspace-file-transfer', async (original) => ({
   uploadToWorkspace: fileMocks.toWorkspace,
 }));
 
-import * as schema from '../../../src/db/schema';
 import { recordLink as recordDoLink } from '@simple-agent-manager/project-data/internal/do/links';
 import { MIGRATIONS } from '@simple-agent-manager/project-data/internal/do/migrations';
+
+import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { recordAutoLink } from '../../../src/operations/link-core';
 import {

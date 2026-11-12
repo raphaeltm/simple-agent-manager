@@ -1,9 +1,9 @@
 /** Tests for explicit control-plane activity writes. */
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import { upsertActivityState } from '@simple-agent-manager/project-data/internal/do/session-state';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
-import { upsertActivityState } from '@simple-agent-manager/project-data/internal/do/session-state';
 import { createSqlStorage } from './sql-storage-test-utils';
 
 describe('explicit session activity transitions', () => {

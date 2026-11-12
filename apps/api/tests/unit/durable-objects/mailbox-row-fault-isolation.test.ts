@@ -2,11 +2,11 @@
  * One inbox row that no longer matches the row schema (this branch added strict picklists
  * for `delivery_intent` and `steer_outcome`) must not fail a whole mailbox read (rule 50).
  */
+import * as mailbox from '@simple-agent-manager/project-data/internal/do/mailbox';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import * as mailbox from '@simple-agent-manager/project-data/internal/do/mailbox';
-import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import { createSqlStorage } from './sql-storage-test-utils';
 
 describe('mailbox reads tolerate one malformed row', () => {

@@ -1,6 +1,3 @@
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
 import {
   persistMessageBatchWithSideEffects,
   persistMessageWithSideEffects,
@@ -17,6 +14,9 @@ import {
   writeReconciliationEpisode,
 } from '@simple-agent-manager/project-data/internal/do/reconciliation-episode';
 import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import {
   acceptedPromptResponse,
   versionedPromptCapabilities,

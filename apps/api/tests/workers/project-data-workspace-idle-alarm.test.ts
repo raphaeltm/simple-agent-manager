@@ -5,6 +5,7 @@
  * Sweep edge cases live in `tests/unit/conversation-idle-timeout.test.ts`; this proves the
  * production handler is wired to them.
  */
+import { PROJECT_DATA_ALARM_SCHEDULE_META_KEY } from '@simple-agent-manager/project-data/internal/do/alarm-sections';
 import {
   DEFAULT_WORKSPACE_IDLE_MIN_ALARM_DELAY_MS,
   DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS,
@@ -12,7 +13,6 @@ import {
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
-import { PROJECT_DATA_ALARM_SCHEDULE_META_KEY } from '@simple-agent-manager/project-data/internal/do/alarm-sections';
 import type { ProjectDataTestDouble } from './support/expected-error-doubles';
 
 const QUIET_FOR_MS = 10 * 60_000;

@@ -11,10 +11,10 @@
  * - Diagnostic gathering (workspace/node status from D1)
  * - Bounded D1 discovery resumes and wraps through a real KV cursor
  */
+import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
-import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
 import type { TaskRunner, TaskRunnerState } from '../../src/durable-objects/task-runner';
 import type { Env } from '../../src/env';
 import {

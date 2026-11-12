@@ -1,8 +1,7 @@
 import { readFileSync } from 'node:fs';
 
-import { describe, expect, it } from 'vitest';
-
 import { PROJECT_DATA_ALARM_SECTIONS } from '@simple-agent-manager/project-data/internal/do/alarm-schedule';
+import { describe, expect, it } from 'vitest';
 
 const source = readFileSync(
   new URL('../../../../../packages/project-data/src/do/index.ts', import.meta.url),

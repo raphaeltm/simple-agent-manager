@@ -1,8 +1,9 @@
-import { NodeLifecycle } from '../../../src/durable-objects/node-lifecycle';
-import { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
 import * as archiveSharding from '@simple-agent-manager/project-data/internal/do/archive-sharding';
+import { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
 import * as mailbox from '@simple-agent-manager/project-data/internal/do/mailbox';
 import * as messages from '@simple-agent-manager/project-data/internal/do/messages';
+
+import { NodeLifecycle } from '../../../src/durable-objects/node-lifecycle';
 
 export interface CapturedExpectedError {
   threw: boolean;

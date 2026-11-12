@@ -1,9 +1,8 @@
-import { beforeEach, describe, expect, it } from 'vitest';
-
 import {
   getCachedCommands,
   saveCachedCommands,
 } from '@simple-agent-manager/project-data/internal/do/commands';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 /**
  * Minimal in-memory SQLite mock for testing cached commands.

@@ -3,10 +3,10 @@
  *
  * Runs inside the workerd runtime via @cloudflare/vitest-pool-workers.
  */
+import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
-import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
 import type { Env } from '../../src/env';
 import {
   getAttentionRequest as readAttentionRequest,

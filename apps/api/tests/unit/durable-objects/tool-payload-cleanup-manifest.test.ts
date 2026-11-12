@@ -9,14 +9,13 @@
  * These tests drive the real readers against a real in-memory R2 double with real
  * digests, so every assertion exercises the production parse path.
  */
-import { describe, expect, it } from 'vitest';
-
 import {
   readToolPayloadCleanupManifestBatch,
   readToolPayloadCleanupManifestRoot,
   type ToolPayloadCleanupManifestBatchProof,
   type ToolPayloadCleanupManifestRoot,
 } from '@simple-agent-manager/project-data/internal/do/tool-payload-cleanup-manifest';
+import { describe, expect, it } from 'vitest';
 
 const PROJECT_ID = 'project-manifest-structural';
 const PLAN_ID = 'plan-manifest-structural';

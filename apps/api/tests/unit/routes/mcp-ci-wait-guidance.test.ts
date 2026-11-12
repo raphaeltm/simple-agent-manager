@@ -1,7 +1,7 @@
+import { filterMatchesProjectEvent } from '@simple-agent-manager/project-data/internal/do/project-events-normalization';
 import type { ProjectEventFilterV1 } from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
 
-import { filterMatchesProjectEvent } from '@simple-agent-manager/project-data/internal/do/project-events-normalization';
 import { buildEventingInstructions } from '../../../src/routes/mcp/instruction-eventing-guidance';
 import { PROJECT_EVENT_SUBSCRIPTION_TOOLS } from '../../../src/routes/mcp/tool-definitions-event-subscription-tools';
 

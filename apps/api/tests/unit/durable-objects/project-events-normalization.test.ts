@@ -1,11 +1,10 @@
-import { DEFAULT_PROJECT_EVENT_LIMITS } from '@simple-agent-manager/shared';
-import { describe, expect, it } from 'vitest';
-
 import {
   compileProjectEventFilter,
   normalizeProjectEventInput,
 } from '@simple-agent-manager/project-data/internal/do/project-events-normalization';
 import { normalizeDeliveryBatchInput } from '@simple-agent-manager/project-data/internal/do/project-events-subscription-normalization';
+import { DEFAULT_PROJECT_EVENT_LIMITS } from '@simple-agent-manager/shared';
+import { describe, expect, it } from 'vitest';
 
 const baseLimits = DEFAULT_PROJECT_EVENT_LIMITS;
 

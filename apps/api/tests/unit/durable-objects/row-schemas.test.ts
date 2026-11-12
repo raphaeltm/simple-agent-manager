@@ -9,9 +9,6 @@
  * - JSON string fields are parsed (toolMetadata, payload)
  * - Aggregate helpers extract the correct scalar value
  */
-import * as v from 'valibot';
-import { describe, expect, it } from 'vitest';
-
 import {
   parseAcpSessionHeartbeatCheck,
   parseAcpSessionLineage,
@@ -45,6 +42,8 @@ import {
   parseWorkspaceId,
   parseWorkspaceIdleCheck,
 } from '@simple-agent-manager/project-data/internal/do/row-schemas';
+import * as v from 'valibot';
+import { describe, expect, it } from 'vitest';
 
 // =============================================================================
 // Generic helpers

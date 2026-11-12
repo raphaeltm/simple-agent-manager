@@ -35,11 +35,12 @@ import {
   wakeSession,
 } from '@simple-agent-manager/project-data/internal/do/sessions';
 import { readTaskAcpLivenessSignals } from '@simple-agent-manager/project-data/internal/do/task-acp-liveness-signals';
-import { getLocalTaskRuntimeLiveness } from '../../src/services/task-runtime-liveness-local';
 import type { Env as ProjectDataEnv } from '@simple-agent-manager/project-data/internal/do/types';
 import { checkWorkspaceIdleTimeouts } from '@simple-agent-manager/project-data/internal/do/workspace-idle-timeouts';
+
 import type { Env } from '../../src/env';
 import { getTaskRuntimeLiveness } from '../../src/scheduled/stuck-tasks';
+import { getLocalTaskRuntimeLiveness } from '../../src/services/task-runtime-liveness-local';
 import { createSqliteD1 } from '../helpers/sqlite-d1';
 import { createSqlStorage } from './durable-objects/sql-storage-test-utils';
 

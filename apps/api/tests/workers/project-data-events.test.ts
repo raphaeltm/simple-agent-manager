@@ -1,6 +1,3 @@
-import { env, runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
-
 import type { AdmitProjectEventInput } from '@simple-agent-manager/project-data/internal/do/project-events';
 import {
   runProjectEventWakeMaterializationBatch,
@@ -24,6 +21,9 @@ import {
 } from '@simple-agent-manager/project-data/internal/do/project-events-wake-delivery';
 import type { PromptDeliveryResult } from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
 import { parseMailboxMessageRow } from '@simple-agent-manager/project-data/internal/do/row-schemas';
+import { env, runInDurableObject } from 'cloudflare:test';
+import { describe, expect, it } from 'vitest';
+
 import type { Env } from '../../src/env';
 import * as svc from '../../src/services/project-data';
 import { seedMaterializationFairnessPrefix } from './helpers/project-event-fairness-fixture';

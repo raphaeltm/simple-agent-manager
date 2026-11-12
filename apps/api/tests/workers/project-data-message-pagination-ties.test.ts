@@ -10,6 +10,7 @@
  * pages through. Archived sessions are read through the service, which routes
  * to the archive shard only while archive sharding is enabled.
  */
+import { runProjectDataArchiveSharding } from '@simple-agent-manager/project-data/internal/scheduled/project-data-archive-sharding';
 import {
   formatMessageCursor,
   type MessageCursor,
@@ -19,7 +20,6 @@ import { env, SELF } from 'cloudflare:test';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
-import { runProjectDataArchiveSharding } from '@simple-agent-manager/project-data/internal/scheduled/project-data-archive-sharding';
 import * as projectDataService from '../../src/services/project-data';
 import { createSessionCookieForUser } from '../../src/services/session-factory';
 import {

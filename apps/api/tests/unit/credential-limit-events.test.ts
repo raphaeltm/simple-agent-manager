@@ -2,15 +2,15 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
 import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import {
   admitProjectEvent as admitProjectDataEvent,
   createProjectEventSubscription,
 } from '@simple-agent-manager/project-data/internal/do/project-events';
 import type { Env as ProjectDataEnv } from '@simple-agent-manager/project-data/internal/do/types';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { log } from '../../src/lib/logger';
 import {
   type AcpUsageCallbackReport,

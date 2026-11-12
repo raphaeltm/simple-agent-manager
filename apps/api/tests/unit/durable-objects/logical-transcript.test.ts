@@ -8,10 +8,6 @@
  * filters that cannot return an empty page without progress, bounded scans that still advance,
  * tool activity summarized from metadata only, and the latest user/assistant messages.
  */
-import { formatMessageCursor, type MessagePosition } from '@simple-agent-manager/shared';
-import Database from 'better-sqlite3';
-import { beforeEach, describe, expect, it } from 'vitest';
-
 import { readSourceLogicalMessage } from '@simple-agent-manager/project-data/internal/do/logical-message';
 import {
   type LogicalEntry,
@@ -24,6 +20,10 @@ import {
 } from '@simple-agent-manager/project-data/internal/do/logical-transcript-model';
 import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
+import { formatMessageCursor, type MessagePosition } from '@simple-agent-manager/shared';
+import Database from 'better-sqlite3';
+import { beforeEach, describe, expect, it } from 'vitest';
+
 import { createSqlStorage } from './sql-storage-test-utils';
 
 const PROJECT = 'project-1';

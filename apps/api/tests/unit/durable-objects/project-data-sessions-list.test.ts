@@ -1,10 +1,10 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-
 import {
   getSession,
   getSessionsByTaskIds,
   listSessions,
 } from '@simple-agent-manager/project-data/internal/do/session-reads';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
 import { log } from '../../../src/lib/logger';
 
 type QueryRow = Record<string, unknown>;

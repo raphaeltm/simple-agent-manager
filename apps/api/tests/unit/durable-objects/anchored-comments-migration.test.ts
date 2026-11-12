@@ -6,9 +6,6 @@
  * Runs the real migration chain on a real SQLite engine with foreign keys enforced, as
  * Durable Object SQLite does.
  */
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
 import {
   checkLegacyCommentParity,
   copyLegacyCommentRows,
@@ -21,6 +18,9 @@ import {
 } from '@simple-agent-manager/project-data/internal/do/migrations';
 import { listProjectCommentInbox } from '@simple-agent-manager/project-data/internal/do/project-comment-inbox';
 import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { createSqlStorage } from './sql-storage-test-utils';
 
 const MIGRATION_073 = '073-anchored-comment-threads';

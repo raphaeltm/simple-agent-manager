@@ -14,14 +14,14 @@
  * coverage for the acceptance criterion "PR #1840's reconciled-activity behavior is
  * preserved, not clobbered".
  */
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-
 import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import {
   getSessionState,
   upsertActivityState,
 } from '@simple-agent-manager/project-data/internal/do/session-state';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
 import { createSqlStorage } from './sql-storage-test-utils';
 
 const SESSION = 'acp-joint-1';

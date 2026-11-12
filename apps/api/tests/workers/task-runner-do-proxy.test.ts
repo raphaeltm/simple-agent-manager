@@ -6,10 +6,10 @@
  *
  * Uses Miniflare with real DOs — no vi.mock().
  */
+import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
 import type { TaskRunner } from '../../src/durable-objects/task-runner';
 import type { TaskRunnerState } from '../../src/durable-objects/task-runner/types';
 import type { TaskStartCapacityPoolSelection } from '../../src/services/placement-resolver';

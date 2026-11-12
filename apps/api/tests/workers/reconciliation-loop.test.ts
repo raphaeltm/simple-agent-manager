@@ -1,6 +1,3 @@
-import { env, runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
-
 import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
 import {
   computeReconciliationAlarmTime,
@@ -12,6 +9,8 @@ import {
   writeReconciliationEpisode,
 } from '@simple-agent-manager/project-data/internal/do/reconciliation-episode';
 import { guardReconciliationLoop } from '@simple-agent-manager/project-data/internal/do/reconciliation-loop';
+import { env, runInDurableObject } from 'cloudflare:test';
+import { describe, expect, it } from 'vitest';
 
 /** Real DO RPC message ingress and Workers SQLite; no deployed test endpoint. */
 describe('reconciliation pause through Workers message ingress', () => {

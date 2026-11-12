@@ -7,6 +7,14 @@
  * schedule a message into it. Expiry is reached by moving a grant's `expires_at` into the past in
  * the object's own storage; everything after that is production code.
  */
+import { resolveDurableExecutionConfig } from '@simple-agent-manager/project-data/internal/do/durable-execution-config';
+import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
+import { runScheduleAlarm } from '@simple-agent-manager/project-data/internal/do/project-event-schedules-runner';
+import { createSchedule as storeSchedule } from '@simple-agent-manager/project-data/internal/do/project-event-schedules-storage';
+import { admitProjectEvent } from '@simple-agent-manager/project-data/internal/do/project-events';
+import { createWatch as storeWatch } from '@simple-agent-manager/project-data/internal/do/project-standing-watches-storage';
+import { claimDuePromptDeliveries } from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
+import { runPromptDeliveryClaim } from '@simple-agent-manager/project-data/internal/do/prompt-delivery-runner';
 import type {
   ProjectScheduleMutationResult,
   ProjectStandingWatchMutationResult,
@@ -15,14 +23,6 @@ import { env, runInDurableObject, SELF } from 'cloudflare:test';
 import { Hono } from 'hono';
 import { beforeAll, describe, expect, it } from 'vitest';
 
-import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
-import { resolveDurableExecutionConfig } from '@simple-agent-manager/project-data/internal/do/durable-execution-config';
-import { runScheduleAlarm } from '@simple-agent-manager/project-data/internal/do/project-event-schedules-runner';
-import { createSchedule as storeSchedule } from '@simple-agent-manager/project-data/internal/do/project-event-schedules-storage';
-import { admitProjectEvent } from '@simple-agent-manager/project-data/internal/do/project-events';
-import { createWatch as storeWatch } from '@simple-agent-manager/project-data/internal/do/project-standing-watches-storage';
-import { claimDuePromptDeliveries } from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
-import { runPromptDeliveryClaim } from '@simple-agent-manager/project-data/internal/do/prompt-delivery-runner';
 import type { Env } from '../../src/env';
 import { handleAppError } from '../../src/middleware/app-error-handler';
 import { requireApproved, requireAuth } from '../../src/middleware/auth';

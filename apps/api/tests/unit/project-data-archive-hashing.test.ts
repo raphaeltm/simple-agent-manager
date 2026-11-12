@@ -1,5 +1,3 @@
-import { describe, expect, it } from 'vitest';
-
 import {
   canonicalizeArchiveRows,
   canonicalRowsSha256,
@@ -7,6 +5,7 @@ import {
   createCanonicalRowsHasher,
   sha256Hex,
 } from '@simple-agent-manager/project-data/internal/archive/hashing';
+import { describe, expect, it } from 'vitest';
 
 const COLUMNS = ['id', 'session_id', 'role', 'content', 'tool_metadata', 'created_at'] as const;
 

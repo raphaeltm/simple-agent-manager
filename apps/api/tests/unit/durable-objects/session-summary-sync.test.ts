@@ -1,7 +1,3 @@
-import Database from 'better-sqlite3';
-import { describe, expect, it } from 'vitest';
-
-import * as schema from '../../../src/db/schema';
 import {
   createAttentionMarker,
   resolveAttentionMarkerById,
@@ -12,6 +8,10 @@ import {
   syncSessionSummariesToD1,
 } from '@simple-agent-manager/project-data/internal/do/session-summary-sync';
 import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
+import Database from 'better-sqlite3';
+import { describe, expect, it } from 'vitest';
+
+import * as schema from '../../../src/db/schema';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 import { createSqlStorage } from './sql-storage-test-utils';
 

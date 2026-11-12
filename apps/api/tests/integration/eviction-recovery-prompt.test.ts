@@ -4,17 +4,17 @@
  * message keeps telling the agent to answer it. Both paths run the real recovery code
  * from their production entry points; only the TaskRunner start is a boundary.
  */
-import Database from 'better-sqlite3';
-import type { Hono } from 'hono';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-import * as schema from '../../src/db/schema';
 import {
   type DurabilityFoundationHooks,
   processPromptDeliveryAlarm,
 } from '@simple-agent-manager/project-data/internal/do/durability-foundation';
 import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import { acceptPromptDelivery } from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
+import Database from 'better-sqlite3';
+import type { Hono } from 'hono';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { buildAcpInteractionRuntimeConfig } from '../../src/services/acp-interaction-runtime-config';
 import type { SessionSleepFallbackRecord } from '../../src/services/session-sleep-episode';

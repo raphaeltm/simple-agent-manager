@@ -1,12 +1,12 @@
-import Database from 'better-sqlite3';
-import { describe, expect, it } from 'vitest';
-
 import {
   getLinkSnapshot,
   listLinksForTargets,
   recordLink,
 } from '@simple-agent-manager/project-data/internal/do/links';
 import { MIGRATIONS } from '@simple-agent-manager/project-data/internal/do/migrations';
+import Database from 'better-sqlite3';
+import { describe, expect, it } from 'vitest';
+
 import { createSqlStorage } from './sql-storage-test-utils';
 
 const limits = {

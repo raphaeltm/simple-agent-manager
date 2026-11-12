@@ -4,10 +4,9 @@
  * and checkpoint-continuation checks share `sourceValidationReadFailure`; this pins the error
  * text each one reports.
  */
-import { describe, expect, it } from 'vitest';
-
 import type { PromptDeliveryClaim } from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
 import { sourceValidationReadFailure } from '@simple-agent-manager/project-data/internal/do/prompt-delivery-source-guards';
+import { describe, expect, it } from 'vitest';
 
 function claimIn(mode: PromptDeliveryClaim['mode']): PromptDeliveryClaim {
   return {

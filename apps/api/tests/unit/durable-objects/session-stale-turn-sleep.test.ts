@@ -11,9 +11,6 @@
  * asks the real teardown gate, whose stale-turn bound is read through the real admin settings
  * resolver (`operations.sessionStaleTurnNoWorkMinutes`).
  */
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
 import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import {
   applyProbeOutcome,
@@ -25,6 +22,9 @@ import {
   refreshWorkingActivityForChatSession,
   upsertActivityState,
 } from '@simple-agent-manager/project-data/internal/do/session-state';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import type { Env } from '../../../src/env';
 import { DEFAULT_SESSION_STALE_TURN_NO_WORK_MINUTES } from '../../../src/services/session-idleness';
 import {

@@ -10,6 +10,12 @@
  * is fast-forwarded in the isolated prompt controls. The stitched workspace-linking cases below
  * instead drive snapshot completion, node selection, provisioning/readiness and TaskRunner linking.
  */
+import { resolveDurableExecutionConfig } from '@simple-agent-manager/project-data/internal/do/durable-execution-config';
+import {
+  claimDuePromptDeliveries,
+  type PromptDeliveryResult,
+} from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
+import { runPromptDeliveryClaim } from '@simple-agent-manager/project-data/internal/do/prompt-delivery-runner';
 import { buildVmPromptDeliveryCapabilitiesPath } from '@simple-agent-manager/shared';
 import { env, runInDurableObject, SELF } from 'cloudflare:test';
 import { eq } from 'drizzle-orm';
@@ -17,12 +23,6 @@ import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
-import { resolveDurableExecutionConfig } from '@simple-agent-manager/project-data/internal/do/durable-execution-config';
-import {
-  claimDuePromptDeliveries,
-  type PromptDeliveryResult,
-} from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
-import { runPromptDeliveryClaim } from '@simple-agent-manager/project-data/internal/do/prompt-delivery-runner';
 import type { TaskRunner, TaskRunnerState } from '../../src/durable-objects/task-runner';
 import { ensureSessionLinked } from '../../src/durable-objects/task-runner/session-linking';
 import type { TaskRunnerContext } from '../../src/durable-objects/task-runner/types';

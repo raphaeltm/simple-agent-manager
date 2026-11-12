@@ -8,10 +8,9 @@
  * subscription on the chat session, then `createAcpSession` exactly as the
  * chat-start and task-runner paths call it.
  */
+import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-
-import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
 
 function getStub(projectId: string): DurableObjectStub<ProjectData> {
   const id = env.PROJECT_DATA.idFromName(projectId);

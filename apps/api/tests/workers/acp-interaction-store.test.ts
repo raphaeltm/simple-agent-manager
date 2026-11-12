@@ -1,8 +1,8 @@
+import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 import type { InteractionStore } from '../../src/durable-objects/interaction-store';
-import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
 import type { Env } from '../../src/env';
 
 const PROJECT_ID = 'project-acp-interactions';

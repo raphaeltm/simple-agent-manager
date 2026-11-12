@@ -1,3 +1,4 @@
+import { resolveProjectEventDelivery } from '@simple-agent-manager/project-data/internal/do/project-events';
 import type {
   ProjectEventDeliveryAdapterCapability,
   ProjectEventRecord,
@@ -6,8 +7,6 @@ import type {
   ProjectEventSubscriptionRecord,
 } from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
-
-import { resolveProjectEventDelivery } from '@simple-agent-manager/project-data/internal/do/project-events';
 
 const NOW = 10_000;
 

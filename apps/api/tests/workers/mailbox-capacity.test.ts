@@ -1,6 +1,3 @@
-import { env, runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
-
 import { enqueueMessage } from '@simple-agent-manager/project-data/internal/do/mailbox';
 import {
   isMailboxAtCapacity,
@@ -8,6 +5,9 @@ import {
 } from '@simple-agent-manager/project-data/internal/do/mailbox-capacity';
 import { isTargetAtWakeCapacity } from '@simple-agent-manager/project-data/internal/do/project-events-wake-targets';
 import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
+import { env, runInDurableObject } from 'cloudflare:test';
+import { describe, expect, it } from 'vitest';
+
 import type { ProjectDataTestDouble } from './support/expected-error-doubles';
 
 describe('indexed project mailbox admission capacity', () => {

@@ -1,11 +1,11 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-
 import { getMessages } from '@simple-agent-manager/project-data/internal/do/messages';
 import {
   boundToolMetadataForStorage,
   DEFAULT_PROJECT_DATA_TOOL_METADATA_MAX_BYTES,
 } from '@simple-agent-manager/project-data/internal/do/tool-metadata-storage';
 import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
 import { log } from '../../../src/lib/logger';
 
 type QueryRow = Record<string, unknown>;

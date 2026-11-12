@@ -1,6 +1,3 @@
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
 import {
   acceptPromptDelivery,
   type DurabilityFoundationHooks,
@@ -14,6 +11,9 @@ import {
   nudgePromptDeliveriesForTarget,
   type PromptDeliveryResult,
 } from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { DefaultVmPromptDeliveryAdapter } from '../../../src/services/vm-prompt-delivery-adapter';
 import { versionedPromptCapabilities } from '../../helpers/vm-prompt-delivery-fixtures';
 import { createSqlStorage } from './sql-storage-test-utils';

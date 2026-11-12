@@ -1,10 +1,10 @@
-import Database from 'better-sqlite3';
-import { describe, expect, it } from 'vitest';
-
 import {
   MIGRATIONS,
   runMigrations,
 } from '@simple-agent-manager/project-data/internal/do/migrations';
+import Database from 'better-sqlite3';
+import { describe, expect, it } from 'vitest';
+
 import { createSqlStorage } from './sql-storage-test-utils';
 
 /**

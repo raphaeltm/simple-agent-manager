@@ -1,8 +1,8 @@
 /** Constitution XV helpers: urgency of a peer batch, and author lines on agent-written text. */
-import { describe, expect, it } from 'vitest';
-
 import { urgentAgentMessageClass } from '@simple-agent-manager/project-data/internal/do/agent-message-notice';
 import { scheduledTaskPrompt } from '@simple-agent-manager/project-data/internal/do/project-event-schedules-admission';
+import { describe, expect, it } from 'vitest';
+
 import {
   parentAgentAttribution,
   samAssistantAttribution,

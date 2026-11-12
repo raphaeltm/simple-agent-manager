@@ -1,6 +1,3 @@
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
 import {
   checkHeartbeatTimeouts,
   computeHeartbeatAlarmTime,
@@ -8,6 +5,9 @@ import {
 import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import { shouldDeferRuntimeHeartbeatTimeout } from '@simple-agent-manager/project-data/internal/do/runtime-heartbeat-policy';
 import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { createSqlStorage } from './durable-objects/sql-storage-test-utils';
 
 describe('ACP heartbeat timeout policy', () => {

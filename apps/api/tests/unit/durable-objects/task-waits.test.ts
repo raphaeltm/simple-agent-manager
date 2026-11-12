@@ -1,6 +1,3 @@
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-
 import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import type { TaskWaitConfig } from '@simple-agent-manager/project-data/internal/do/task-wait-config';
 import {
@@ -14,6 +11,9 @@ import {
   recordTaskWaitWakeFailure,
   resolveTaskWait,
 } from '@simple-agent-manager/project-data/internal/do/task-waits';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
 import { createSqlStorage } from './sql-storage-test-utils';
 
 const config: TaskWaitConfig = {

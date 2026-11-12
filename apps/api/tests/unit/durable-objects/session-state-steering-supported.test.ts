@@ -1,12 +1,12 @@
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
 import {
   type DurabilityFoundationHooks,
   reportActivity,
 } from '@simple-agent-manager/project-data/internal/do/durability-foundation';
 import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import { getSessionState } from '@simple-agent-manager/project-data/internal/do/session-state-read';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { createSqlStorage } from './sql-storage-test-utils';
 
 // The composer hides Steer when the session's adapter cannot steer. The ProjectData DO

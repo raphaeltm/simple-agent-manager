@@ -9,10 +9,10 @@
  * the chat-session-access route calls them (see packages/project-data/src/do/index.ts
  * ~lines 1460-1566, `createSessionAccessGrant` / `revokeSessionAccessGrant`).
  */
+import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
-import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
 import type { Env } from '../../src/env';
 import * as projectDataService from '../../src/services/project-data';
 

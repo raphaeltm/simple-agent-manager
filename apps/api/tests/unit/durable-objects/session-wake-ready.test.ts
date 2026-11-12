@@ -1,6 +1,3 @@
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
 import { resolveDurableExecutionConfig } from '@simple-agent-manager/project-data/internal/do/durable-execution-config';
 import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import {
@@ -15,6 +12,9 @@ import {
   isSessionWakeReadyCurrent,
   type SessionWakeReadyInput,
 } from '@simple-agent-manager/project-data/internal/do/session-wake-ready';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import type { Env } from '../../../src/env';
 import { versionedPromptCapabilities } from '../../helpers/vm-prompt-delivery-fixtures';
 import { createSqlStorage } from './sql-storage-test-utils';

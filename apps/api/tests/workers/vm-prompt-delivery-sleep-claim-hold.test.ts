@@ -11,18 +11,18 @@
  * required sleep's cancel in `sleepWorkspaceSession`), a message queued for the session is due,
  * and the production delivery runner attempts it against a VM double that would accept it.
  */
-import { buildVmPromptDeliveryCapabilitiesPath } from '@simple-agent-manager/shared';
-import { env, runInDurableObject } from 'cloudflare:test';
-import { drizzle } from 'drizzle-orm/d1';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-
-import * as schema from '../../src/db/schema';
 import { resolveDurableExecutionConfig } from '@simple-agent-manager/project-data/internal/do/durable-execution-config';
 import {
   claimDuePromptDeliveries,
   type PromptDeliveryResult,
 } from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
 import { runPromptDeliveryClaim } from '@simple-agent-manager/project-data/internal/do/prompt-delivery-runner';
+import { buildVmPromptDeliveryCapabilitiesPath } from '@simple-agent-manager/shared';
+import { env, runInDurableObject } from 'cloudflare:test';
+import { drizzle } from 'drizzle-orm/d1';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { getNodeBackendBaseUrl } from '../../src/services/node-agent-readiness';
 import * as projectData from '../../src/services/project-data';

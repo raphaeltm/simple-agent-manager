@@ -10,15 +10,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import type { ProjectScheduledAction } from '@simple-agent-manager/shared';
-import type Database from 'better-sqlite3';
-import { getTableName, is } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/d1';
-import { SQLiteTable } from 'drizzle-orm/sqlite-core';
-import { Hono } from 'hono';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-import * as schema from '../../src/db/schema';
 import {
   createAttentionMarker,
   listActiveAttentionMarkers,
@@ -42,6 +33,15 @@ import {
 } from '@simple-agent-manager/project-data/internal/do/project-event-schedules-storage';
 import { admitProjectEvent } from '@simple-agent-manager/project-data/internal/do/project-events';
 import { syncProviderLimitAttention } from '@simple-agent-manager/project-data/internal/do/provider-limit-attention';
+import type { ProjectScheduledAction } from '@simple-agent-manager/shared';
+import type Database from 'better-sqlite3';
+import { getTableName, is } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
+import { SQLiteTable } from 'drizzle-orm/sqlite-core';
+import { Hono } from 'hono';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { AppError } from '../../src/middleware/error';
 import { taskCallbackRoute } from '../../src/routes/tasks/callback';

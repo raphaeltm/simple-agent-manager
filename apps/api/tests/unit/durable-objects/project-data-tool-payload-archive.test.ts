@@ -1,5 +1,3 @@
-import { describe, expect, it } from 'vitest';
-
 import {
   DEFAULT_PROJECT_DATA_EVENT_LOG_CLEANUP_RECHECK_MS,
   DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_CHUNK_BYTES,
@@ -23,6 +21,7 @@ import {
   writeToolPayloadArchiveObject,
 } from '@simple-agent-manager/project-data/internal/do/tool-payload-archive-r2';
 import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
+import { describe, expect, it } from 'vitest';
 
 describe('ProjectData tool payload archive helpers', () => {
   it('builds deterministic project-scoped private R2 keys', () => {

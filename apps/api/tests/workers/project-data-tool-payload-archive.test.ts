@@ -1,6 +1,3 @@
-import { env, runInDurableObject, SELF } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
-
 import { toolPayloadStorageReliefRawWindowQuery } from '@simple-agent-manager/project-data/internal/do/storage-relief-measurement';
 import {
   classifyStorageUsage,
@@ -14,8 +11,11 @@ import {
   writeToolPayloadCleanupManifestRoot,
 } from '@simple-agent-manager/project-data/internal/do/tool-payload-cleanup-manifest';
 import { runProjectDataManualToolPayloadCleanup } from '@simple-agent-manager/project-data/internal/do/tool-payload-manual-cleanup';
-import type { Env as WorkerEnv } from '../../src/env';
 import { runProjectDataStorageReliefPreflight } from '@simple-agent-manager/project-data/internal/scheduled/project-data-storage-relief-preflight';
+import { env, runInDurableObject, SELF } from 'cloudflare:test';
+import { describe, expect, it } from 'vitest';
+
+import type { Env as WorkerEnv } from '../../src/env';
 import { storeMcpToken } from '../../src/services/mcp-token';
 import { measureProjectDataStorageRelief } from '../../src/services/project-data';
 import {

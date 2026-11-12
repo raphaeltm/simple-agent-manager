@@ -1,7 +1,3 @@
-import Database from 'better-sqlite3';
-import { afterEach, describe, expect, it } from 'vitest';
-
-import * as schema from '../../../src/db/schema';
 import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import {
   reconcileSchedule,
@@ -13,6 +9,10 @@ import {
 } from '@simple-agent-manager/project-data/internal/do/project-event-schedules-storage';
 import { createWatch } from '@simple-agent-manager/project-data/internal/do/project-standing-watches-storage';
 import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
+import Database from 'better-sqlite3';
+import { afterEach, describe, expect, it } from 'vitest';
+
+import * as schema from '../../../src/db/schema';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const databases: Database.Database[] = [];

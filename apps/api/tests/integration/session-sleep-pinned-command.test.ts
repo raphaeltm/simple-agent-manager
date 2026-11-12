@@ -5,15 +5,15 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import Database from 'better-sqlite3';
-import { expect, it, vi } from 'vitest';
-
-import * as schema from '../../src/db/schema';
 import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import {
   getSessionState,
   upsertActivityState,
 } from '@simple-agent-manager/project-data/internal/do/session-state';
+import Database from 'better-sqlite3';
+import { expect, it, vi } from 'vitest';
+
+import * as schema from '../../src/db/schema';
 import { runSessionSleepSweep } from '../../src/scheduled/session-sleep';
 import { resolveSessionStaleTurnMs } from '../../src/services/session-sleep-eligibility';
 import { createMemoryKv, createSchemaTables } from '../helpers/sqlite-d1';

@@ -10,16 +10,16 @@
  * lifecycle writes, and the resumer's own claim gate. Substituted: ProjectData, the
  * VM agent, R2 and the NodeLifecycle DO — the external control planes.
  */
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/d1';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-import * as schema from '../../src/db/schema';
 import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import {
   getSessionState as readProjectDataSessionState,
   upsertActivityState,
 } from '@simple-agent-manager/project-data/internal/do/session-state';
+import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/d1';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { emptyResult, resolveCleanupConfig } from '../../src/scheduled/node-cleanup/shared';
 import { sweepTerminalCfContainers } from '../../src/scheduled/node-cleanup/terminal-cf-container-phase';

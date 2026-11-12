@@ -14,10 +14,6 @@
  *  (c) genuinely prompting session         → probe does NOT flip it (control)
  *  (d) cancel-path turn ending             → terminal transition is recorded
  */
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-import * as schema from '../../../src/db/schema';
 import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import { nudgePromptDeliveriesForTarget } from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
 import { probeStaleSessionActivity } from '@simple-agent-manager/project-data/internal/do/session-activity-probe';
@@ -34,6 +30,10 @@ import {
   recordTurnEnd,
   upsertActivityState,
 } from '@simple-agent-manager/project-data/internal/do/session-state';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import * as schema from '../../../src/db/schema';
 import { listAgentSessionsOnNode } from '../../../src/services/node-agent';
 import { recordAcpActivityCallbackMetric } from '../../../src/services/telemetry';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';

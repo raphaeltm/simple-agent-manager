@@ -7,14 +7,13 @@
  * the sweep spent four days re-picking a session it could never reserve. These cases pin the
  * derivation that replaced the second hand-set number.
  */
-import { describe, expect, it } from 'vitest';
-
 import {
   ARCHIVE_DEFAULT_SWEEP_UNIT_OVERHEAD_PERCENT,
   ARCHIVE_WRITE_FIXED_RESERVATION,
   archiveAffordableMessageCeiling,
   archiveAffordableWriteUnits,
 } from '@simple-agent-manager/project-data/internal/archive/write-budget';
+import { describe, expect, it } from 'vitest';
 
 describe('archive affordability ceilings', () => {
   it('reproduces the production numbers that deadlocked the sweep', () => {

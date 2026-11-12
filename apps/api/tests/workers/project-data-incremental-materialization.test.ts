@@ -19,11 +19,11 @@
  * grouped/FTS index — which is what makes these assertions discriminating
  * rather than accidentally satisfied by the raw-message LIKE fallback.
  */
+import { runProjectDataGroupedFtsCleanup } from '@simple-agent-manager/project-data/internal/do/grouped-fts-cleanup';
+import { resolveStorageSafetyConfig } from '@simple-agent-manager/project-data/internal/do/storage-safety';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
-import { runProjectDataGroupedFtsCleanup } from '@simple-agent-manager/project-data/internal/do/grouped-fts-cleanup';
-import { resolveStorageSafetyConfig } from '@simple-agent-manager/project-data/internal/do/storage-safety';
 import type { Env as WorkerEnv } from '../../src/env';
 import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
 import type { ProjectDataTestDouble } from './support/expected-error-doubles';

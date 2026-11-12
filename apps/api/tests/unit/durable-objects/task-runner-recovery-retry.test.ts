@@ -1,13 +1,13 @@
 /** Real bootstrap, token lifecycle and recovery SQL; only VM HTTP/DO/KV are faked. */
+import {
+  linkSessionToWorkspace,
+  sleepSession,
+} from '@simple-agent-manager/project-data/internal/do/sessions';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
-import {
-  linkSessionToWorkspace,
-  sleepSession,
-} from '@simple-agent-manager/project-data/internal/do/sessions';
 import { TaskRunner } from '../../../src/durable-objects/task-runner';
 import { handleAgentSession } from '../../../src/durable-objects/task-runner/agent-session-step';
 import { isTransientError } from '../../../src/durable-objects/task-runner/helpers';

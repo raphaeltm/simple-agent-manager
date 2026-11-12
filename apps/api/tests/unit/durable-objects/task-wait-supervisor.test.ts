@@ -1,6 +1,3 @@
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
 import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import { processTaskWaits } from '@simple-agent-manager/project-data/internal/do/task-wait-supervisor';
 import {
@@ -9,6 +6,9 @@ import {
   getTaskWait,
 } from '@simple-agent-manager/project-data/internal/do/task-waits';
 import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { createSqlStorage } from './sql-storage-test-utils';
 
 const taskWaitConfig = {

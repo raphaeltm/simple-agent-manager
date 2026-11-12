@@ -8,13 +8,13 @@
  * inbox and session-topic reads, and assert both that every row came back and that no
  * statement bound more than the ceiling.
  */
-import Database from 'better-sqlite3';
-import { beforeEach, describe, expect, it } from 'vitest';
-
 import * as comments from '@simple-agent-manager/project-data/internal/do/comments';
 import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import { listProjectCommentInbox } from '@simple-agent-manager/project-data/internal/do/project-comment-inbox';
 import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
+import Database from 'better-sqlite3';
+import { beforeEach, describe, expect, it } from 'vitest';
+
 import { createSqlStorage } from './sql-storage-test-utils';
 
 /**

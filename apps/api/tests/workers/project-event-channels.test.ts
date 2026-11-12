@@ -1,6 +1,3 @@
-import { env, runInDurableObject, SELF } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
-
 import { catchUpChannel } from '@simple-agent-manager/project-data/internal/do/project-event-channels-follow';
 import {
   prepareChannelPublish,
@@ -10,6 +7,9 @@ import {
   channelHistory,
   cleanupEmptyChannels,
 } from '@simple-agent-manager/project-data/internal/do/project-event-channels-storage';
+import { env, runInDurableObject, SELF } from 'cloudflare:test';
+import { describe, expect, it } from 'vitest';
+
 import type { Env } from '../../src/env';
 import { storeMcpToken } from '../../src/services/mcp-token';
 import * as service from '../../src/services/project-data';

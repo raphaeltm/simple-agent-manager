@@ -33,15 +33,15 @@
  * The reservation runs against a real SQLite engine through `createSqliteD1`, not a stub,
  * because the thing under test is a conditional UPDATE predicate (`.claude/rules/28`).
  */
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-
 import {
   ARCHIVE_WRITE_FIXED_RESERVATION,
   archiveAffordableMessageCeiling,
   archiveWriteBudgetConfig,
   reserveArchiveWrites,
 } from '@simple-agent-manager/project-data/internal/archive/write-budget';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
 import {
   PREVIOUS_SWEEP_MESSAGE_BUDGET,
   SHIPPED_DAILY_WRITE_BUDGET,

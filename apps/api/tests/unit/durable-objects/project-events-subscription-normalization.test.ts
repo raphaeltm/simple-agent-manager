@@ -1,12 +1,11 @@
+import { normalizeSubscriptionInput } from '@simple-agent-manager/project-data/internal/do/project-events-subscription-normalization';
+import { stableStringify } from '@simple-agent-manager/project-data/internal/do/project-events-values';
 import {
   type CreateProjectEventSubscriptionInput,
   DEFAULT_PROJECT_EVENT_LIMITS,
   type ProjectEventDeliveryPreference,
 } from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
-
-import { normalizeSubscriptionInput } from '@simple-agent-manager/project-data/internal/do/project-events-subscription-normalization';
-import { stableStringify } from '@simple-agent-manager/project-data/internal/do/project-events-values';
 
 const limits = DEFAULT_PROJECT_EVENT_LIMITS;
 const target = { sessionId: 'chat-1', taskId: 'task-1' };

@@ -5,6 +5,7 @@
  * via DO RPC methods, then reads them back — proving the real SQLite storage
  * and DO lifecycle work end-to-end.
  */
+import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
 import type { HandoffLimits, MissionStateLimits } from '@simple-agent-manager/shared';
 import {
   DEFAULT_HANDOFF_MAX_ARTIFACT_REFS,
@@ -19,8 +20,6 @@ import {
 } from '@simple-agent-manager/shared';
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-
-import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
 
 function getStub(projectId: string): DurableObjectStub<ProjectData> {
   const id = env.PROJECT_DATA.idFromName(projectId);

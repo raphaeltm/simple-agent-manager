@@ -26,6 +26,12 @@ const PORT_MODULES = {
   operations: () => import('../../src/project-data-ports/operations').then((m) => m.operationsPort),
 } as const;
 
+/**
+ * Loading the port modules is the first import of a large worker graph in a file; under CI
+ * coverage instrumentation that alone took over Vitest's 10 s default hook timeout.
+ */
+const PORT_SETUP_TIMEOUT_MS = 120_000;
+
 beforeAll(async () => {
   const { configureProjectDataPorts } =
     await import('@simple-agent-manager/project-data/internal/do/ports');
@@ -39,4 +45,4 @@ beforeAll(async () => {
       }
     })
   );
-});
+}, PORT_SETUP_TIMEOUT_MS);

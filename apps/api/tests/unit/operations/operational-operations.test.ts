@@ -1,14 +1,14 @@
 import { readFileSync } from 'node:fs';
 
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-import * as schema from '../../../src/db/schema';
 import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import {
   getSessionState,
   updateCurrentPlan,
 } from '@simple-agent-manager/project-data/internal/do/session-state';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import {
   samChatDeliveryGet,

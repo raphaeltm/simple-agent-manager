@@ -1,4 +1,8 @@
 import {
+  copyBackProjectDataArchiveMigration,
+  runScopedProjectDataArchiveCanary,
+} from '@simple-agent-manager/project-data/internal/scheduled/project-data-archive-sharding';
+import {
   createExecutionContext,
   env,
   runInDurableObject,
@@ -8,10 +12,6 @@ import { describe, expect, it } from 'vitest';
 
 import type { Env as WorkerEnv } from '../../src/env';
 import worker from '../../src/index';
-import {
-  copyBackProjectDataArchiveMigration,
-  runScopedProjectDataArchiveCanary,
-} from '@simple-agent-manager/project-data/internal/scheduled/project-data-archive-sharding';
 import * as projectDataService from '../../src/services/project-data';
 import {
   countTargetMessages,

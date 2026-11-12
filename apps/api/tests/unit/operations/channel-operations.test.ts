@@ -1,15 +1,4 @@
 import {
-  DIRECT_CHANNEL_RANGE_END,
-  PROJECT_EVENT_CHANNEL_SOURCE,
-  PROJECT_EVENT_CHANNEL_TYPE,
-  type ProjectEventChannelActor,
-  type ProjectEventSubscriptionOwner,
-} from '@simple-agent-manager/shared';
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-import * as schema from '../../../src/db/schema';
-import {
   prepareAgentChannelMessage,
   sendAgentChannelMessage,
 } from '@simple-agent-manager/project-data/internal/do/agent-message-channels';
@@ -34,6 +23,17 @@ import {
   ProjectEventNotFoundError,
   ProjectEventValidationError,
 } from '@simple-agent-manager/project-data/internal/do/project-events-contracts';
+import {
+  DIRECT_CHANNEL_RANGE_END,
+  PROJECT_EVENT_CHANNEL_SOURCE,
+  PROJECT_EVENT_CHANNEL_TYPE,
+  type ProjectEventChannelActor,
+  type ProjectEventSubscriptionOwner,
+} from '@simple-agent-manager/shared';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { sharedTextCap } from '../../../src/operations/channel-core';
 import {

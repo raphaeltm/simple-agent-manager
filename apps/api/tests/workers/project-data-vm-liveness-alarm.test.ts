@@ -3,10 +3,10 @@
  * heartbeat maintenance treated stale ProjectData ACP rows as authoritative VM
  * runtime death.
  */
+import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
 import type { Env } from '../../src/env';
 import {
   seedInstallation,

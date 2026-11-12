@@ -4,9 +4,6 @@
  * `01M27M86R544BQX86VZANZGSQ2`). Scheduler edge cases live in the unit suite; these prove the
  * production handler is wired to it.
  */
-import { env, runInDurableObject } from 'cloudflare:test';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-
 import {
   computeProjectDataAlarmSectionTimes,
   PROJECT_DATA_ALARM_FAILED_SECTION_RETRY_MS,
@@ -14,6 +11,9 @@ import {
 } from '@simple-agent-manager/project-data/internal/do/alarm-schedule';
 import { PROJECT_DATA_ALARM_SCHEDULE_META_KEY } from '@simple-agent-manager/project-data/internal/do/alarm-sections';
 import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
+import { env, runInDurableObject } from 'cloudflare:test';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
 import type { ProjectDataTestDouble } from './support/expected-error-doubles';
 
 type Completion = {

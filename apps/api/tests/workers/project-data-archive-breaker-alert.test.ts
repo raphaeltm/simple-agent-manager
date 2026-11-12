@@ -5,13 +5,13 @@
  * The node unit suite proves the sweep-driven paths on better-sqlite3; this one proves the
  * production bindings honour the same contract.
  */
+import { poisonProjectDataArchiveMigration } from '@simple-agent-manager/project-data/internal/scheduled/project-data-archive-sharding';
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 import type { NotificationService } from '../../src/durable-objects/notification';
 import type { Env as WorkerEnv } from '../../src/env';
 import { PROJECT_DATA_ARCHIVE_BREAKER_OPENED_ALERT } from '../../src/scheduled/project-data-archive-breaker-alerts';
-import { poisonProjectDataArchiveMigration } from '@simple-agent-manager/project-data/internal/scheduled/project-data-archive-sharding';
 import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
 
 const testEnv = env as unknown as WorkerEnv;

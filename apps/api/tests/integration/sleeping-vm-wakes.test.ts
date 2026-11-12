@@ -7,11 +7,6 @@
  * authority the wake carries. `eviction-recovery-prompt.test.ts` runs the real wake from a
  * queued-message delivery down to the TaskRunner start it requests.
  */
-import type { ProjectScheduledAction } from '@simple-agent-manager/shared';
-import type Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-import * as schema from '../../src/db/schema';
 import {
   type DurabilityFoundationHooks,
   finalizeAcceptedPromptDelivery,
@@ -34,6 +29,11 @@ import {
   runProjectEventWakeMaterializationBatch,
   selectProjectEventWakeMaterializationCandidates,
 } from '@simple-agent-manager/project-data/internal/do/project-events-materialization';
+import type { ProjectScheduledAction } from '@simple-agent-manager/shared';
+import type Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { isSessionRecoverySourceTaskGuardValid } from '../../src/services/session-recovery-authority';
 import { sleepWorkspaceSession } from '../../src/services/session-sleep';

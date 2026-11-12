@@ -1,8 +1,8 @@
+import { computeProjectDataAlarmTime } from '@simple-agent-manager/project-data/internal/do/alarm-schedule';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { computeProjectDataAlarmTime } from '@simple-agent-manager/project-data/internal/do/alarm-schedule';
-import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import { createSqlStorage } from './sql-storage-test-utils';
 
 describe('ProjectData shared alarm deadlines', () => {

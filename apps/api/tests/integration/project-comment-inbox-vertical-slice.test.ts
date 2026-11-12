@@ -78,6 +78,7 @@ vi.mock('../../src/services/project-data', async () => {
 import * as comments from '@simple-agent-manager/project-data/internal/do/comments';
 import * as fileComments from '@simple-agent-manager/project-data/internal/do/library-file-comments';
 import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+
 import { projectCommentRoutes } from '../../src/routes/project-comments';
 
 const HUMAN = { kind: 'human' as const, id: 'user-1', name: 'Ada' };

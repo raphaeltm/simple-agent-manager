@@ -1,8 +1,3 @@
-import { env, runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
-
-import type { Env as WorkerEnv } from '../../src/env';
-import { D1_MAX_BOUND_PARAMETERS } from '../../src/lib/d1-limits';
 import { ARCHIVE_WRITE_FIXED_RESERVATION } from '@simple-agent-manager/project-data/internal/archive/write-budget';
 import {
   abandonProjectDataArchiveMigration,
@@ -10,6 +5,11 @@ import {
   runProjectDataArchiveSharding,
   runScopedProjectDataArchiveCanary,
 } from '@simple-agent-manager/project-data/internal/scheduled/project-data-archive-sharding';
+import { env, runInDurableObject } from 'cloudflare:test';
+import { describe, expect, it } from 'vitest';
+
+import type { Env as WorkerEnv } from '../../src/env';
+import { D1_MAX_BOUND_PARAMETERS } from '../../src/lib/d1-limits';
 import * as projectDataService from '../../src/services/project-data';
 import {
   countTargetMessages,

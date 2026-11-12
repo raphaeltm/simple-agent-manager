@@ -8,10 +8,10 @@
  * inside this object's own alarm back into itself. Unit tests mock that boundary,
  * so this runs it at Workers-runtime fidelity (real D1, real Durable Object).
  */
+import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
 import type { Env } from '../../src/env';
 import {
   failedTaskNoticeId,

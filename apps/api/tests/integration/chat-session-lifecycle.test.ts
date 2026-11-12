@@ -11,9 +11,8 @@
  *
  * Uses the same InMemorySqlStorage approach as project-data.test.ts.
  */
-import { beforeEach, describe, expect, it } from 'vitest';
-
 import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 /**
  * Minimal in-memory SQL storage mock for ProjectData DO operations.

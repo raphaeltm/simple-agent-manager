@@ -1,9 +1,9 @@
+import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
 import { makeSignature } from 'better-auth/crypto';
 import { env, runInDurableObject, SELF } from 'cloudflare:test';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { NotificationService } from '../../src/durable-objects/notification';
-import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
 import { encryptWebPushPayload } from '../../src/lib/web-push';
 import { storeMcpToken } from '../../src/services/mcp-token';
 import {

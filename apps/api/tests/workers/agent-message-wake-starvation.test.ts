@@ -1,6 +1,3 @@
-import { runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
-
 import {
   runProjectEventWakeMaterializationBatch,
   selectProjectEventWakeMaterializationCandidates,
@@ -9,6 +6,9 @@ import {
   computeProjectEventMaterializationAlarmTime,
   recordSchedulerFailure,
 } from '@simple-agent-manager/project-data/internal/do/project-events-scheduler';
+import { runInDurableObject } from 'cloudflare:test';
+import { describe, expect, it } from 'vitest';
+
 import {
   type ChannelReceipt,
   inboxRows,

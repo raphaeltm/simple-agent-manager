@@ -7,6 +7,7 @@
  * - Policy limits resolution from env vars
  * - Configurable defaults via env
  */
+import { parsePolicyRow } from '@simple-agent-manager/project-data/internal/do/row-schemas';
 import {
   isPolicyCategory,
   isPolicySource,
@@ -16,8 +17,6 @@ import {
   resolvePolicyLimits,
 } from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
-
-import { parsePolicyRow } from '@simple-agent-manager/project-data/internal/do/row-schemas';
 
 // ─── Shared Types & Guards ──────────────────────────────────────────────────
 

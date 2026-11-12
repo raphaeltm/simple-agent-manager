@@ -30,15 +30,15 @@
  * @see .claude/rules/74-proxy-signals-must-match-the-condition.md — a gate keyed on a signal
  *      (feature enabled globally) strictly broader than its condition (this object has work due).
  */
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-
 import {
   computeStorageSafetyAlarmTime,
   STORAGE_SAFETY_MIN_ALARM_SPACING_MS,
 } from '@simple-agent-manager/project-data/internal/do/storage-safety-alarm-time';
 import { writeStorageSafetyMeta } from '@simple-agent-manager/project-data/internal/do/storage-safety-meta';
 import { writeProjectDataToolPayloadArchiveLastRunAt } from '@simple-agent-manager/project-data/internal/do/tool-payload-cleanup-state';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
 import type { Env } from '../../../src/env';
 import { createSqlStorage } from './sql-storage-test-utils';
 

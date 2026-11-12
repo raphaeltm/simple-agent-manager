@@ -128,6 +128,7 @@ vi.mock('../../src/services/project-data', async () => {
 });
 
 import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+
 import { libraryCommentRoutes } from '../../src/routes/library-comments';
 
 let databases: Database.Database[] = [];

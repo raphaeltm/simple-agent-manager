@@ -4,9 +4,6 @@
  * Uses better-sqlite3 as a stand-in for DO SQLite to test the pure
  * functions in attention.ts without requiring the workerd runtime.
  */
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-
 import {
   completeAttentionAnswer,
   computeAttentionAlarmTime,
@@ -23,6 +20,9 @@ import {
   resolveAttentionMarkers,
 } from '@simple-agent-manager/project-data/internal/do/attention';
 import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
 import { createSqlStorage } from './sql-storage-test-utils';
 
 describe('Attention Markers Module', () => {

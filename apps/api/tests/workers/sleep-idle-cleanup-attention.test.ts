@@ -1,8 +1,8 @@
+import { terminalizeIdleTaskInD1 } from '@simple-agent-manager/project-data/internal/do/idle-cleanup-terminalization';
+import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
-import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
-import { terminalizeIdleTaskInD1 } from '@simple-agent-manager/project-data/internal/do/idle-cleanup-terminalization';
 import type { Env } from '../../src/env';
 import { runSessionSleepLifecycleRepair } from '../../src/scheduled/session-sleep-lifecycle-repair';
 import { sleepSession } from '../../src/services/project-data';

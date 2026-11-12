@@ -1,6 +1,5 @@
-import { describe, expect, it } from 'vitest';
-
 import { resolveTaskWaitConfig } from '@simple-agent-manager/project-data/internal/do/task-wait-config';
+import { describe, expect, it } from 'vitest';
 
 describe('task wait configuration', () => {
   it('uses bounded defaults', () => {

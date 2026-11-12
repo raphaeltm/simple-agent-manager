@@ -7,7 +7,6 @@ vi.mock('../../../src/services/reserved-task-submission', () => ({
   submitReservedTask: submitReservedTaskMock,
 }));
 
-import * as schema from '../../../src/db/schema';
 import type { DurabilityFoundationHooks } from '@simple-agent-manager/project-data/internal/do/durability-foundation';
 import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import type { ProjectEventScheduleEnv } from '@simple-agent-manager/project-data/internal/do/project-event-schedules-config';
@@ -37,6 +36,8 @@ import {
 } from '@simple-agent-manager/project-data/internal/do/project-standing-watches-storage';
 import { acceptPromptDeliveryInTransaction } from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
 import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
+
+import * as schema from '../../../src/db/schema';
 import type { ReservedTaskSubmissionInput } from '../../../src/services/reserved-task-submission';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 

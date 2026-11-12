@@ -15,13 +15,6 @@
  * ProjectData RPC hop — whose session transitions still run ProjectData's real
  * functions against the same SQLite.
  */
-import { buildVmPromptDeliveryCapabilitiesPath } from '@simple-agent-manager/shared';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/d1';
-import { Hono } from 'hono';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-import * as schema from '../../src/db/schema';
 import * as attention from '@simple-agent-manager/project-data/internal/do/attention';
 import { processPromptDeliveryAlarm } from '@simple-agent-manager/project-data/internal/do/durability-foundation';
 import * as mailbox from '@simple-agent-manager/project-data/internal/do/mailbox';
@@ -38,6 +31,13 @@ import {
   type SessionWakeReadyInput,
 } from '@simple-agent-manager/project-data/internal/do/session-wake-ready';
 import * as sessions from '@simple-agent-manager/project-data/internal/do/sessions';
+import { buildVmPromptDeliveryCapabilitiesPath } from '@simple-agent-manager/shared';
+import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/d1';
+import { Hono } from 'hono';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import * as schema from '../../src/db/schema';
 import { VmAgentContainer } from '../../src/durable-objects/vm-agent-container';
 import type { Env } from '../../src/env';
 import { AppError } from '../../src/middleware/error';

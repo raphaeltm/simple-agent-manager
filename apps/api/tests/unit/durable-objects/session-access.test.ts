@@ -1,7 +1,3 @@
-import type { PromptDeliverySource } from '@simple-agent-manager/shared';
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
 import type { DurableExecutionConfig } from '@simple-agent-manager/project-data/internal/do/durable-execution-config';
 import * as mailbox from '@simple-agent-manager/project-data/internal/do/mailbox';
 import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
@@ -25,6 +21,10 @@ import {
 } from '@simple-agent-manager/project-data/internal/do/session-access';
 import { handleExpiredGrants } from '@simple-agent-manager/project-data/internal/do/session-access-expiry';
 import { SESSION_ACCESS_UNDELIVERED_SUMMARY_LIMIT } from '@simple-agent-manager/project-data/internal/do/session-access-store';
+import type { PromptDeliverySource } from '@simple-agent-manager/shared';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import type { VmPromptDeliveryAdapter } from '../../../src/services/vm-prompt-delivery-adapter';
 import { createSqlStorage } from './sql-storage-test-utils';
 

@@ -3,11 +3,11 @@
  * alarm: an agent-written prompt reaches the chat only as a SAM notice naming the schedule, while
  * a person's prompt and SAM's own fixed continuation text are still delivered as written.
  */
+import { runScheduleAlarm } from '@simple-agent-manager/project-data/internal/do/project-event-schedules-runner';
 import type { ProjectSchedule, ProjectScheduleMutationResult } from '@simple-agent-manager/shared';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
-import { runScheduleAlarm } from '@simple-agent-manager/project-data/internal/do/project-event-schedules-runner';
 import type { Env } from '../../src/env';
 import * as service from '../../src/services/project-data';
 import { body, fixture } from './helpers/event-channels';

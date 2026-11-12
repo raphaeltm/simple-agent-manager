@@ -4,9 +4,6 @@
  * Uses better-sqlite3 as a stand-in for DO SQLite. D1 queries and
  * VM agent calls are mocked since they cross service boundaries.
  */
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
 import { computeProjectDataAlarmTime } from '@simple-agent-manager/project-data/internal/do/alarm-schedule';
 import {
   createAttentionMarker,
@@ -20,6 +17,9 @@ import {
   getReconciliationCandidates,
   processReconciliationCandidates,
 } from '@simple-agent-manager/project-data/internal/do/reconciliation';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import {
   acceptedPromptResponse,
   missingPromptReceipt,

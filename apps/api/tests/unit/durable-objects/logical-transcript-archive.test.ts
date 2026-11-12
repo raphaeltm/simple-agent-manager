@@ -5,9 +5,8 @@
  * steps (prepare, export, commit, seal), and each archived read must equal the same read taken
  * from the live transcript before it moved.
  */
-import Database from 'better-sqlite3';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-
+import { writeCompactChunk } from '@simple-agent-manager/project-data/internal/archive/compact-r2';
+import { PROJECT_DATA_ARCHIVE_TABLES } from '@simple-agent-manager/project-data/internal/archive/contract';
 import * as archive from '@simple-agent-manager/project-data/internal/do/archive-sharding';
 import {
   readSourceLogicalMessage,
@@ -25,8 +24,9 @@ import {
 } from '@simple-agent-manager/project-data/internal/do/message-context';
 import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
-import { writeCompactChunk } from '@simple-agent-manager/project-data/internal/archive/compact-r2';
-import { PROJECT_DATA_ARCHIVE_TABLES } from '@simple-agent-manager/project-data/internal/archive/contract';
+import Database from 'better-sqlite3';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
 import { createSqlStorage } from './sql-storage-test-utils';
 
 const BASE = {

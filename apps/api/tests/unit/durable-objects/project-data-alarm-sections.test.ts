@@ -6,8 +6,6 @@
  * into the future relative to the moment they are computed, so the tests below drive the scheduler
  * the way production does: a recalculation on every RPC, then a tick.
  */
-import { afterEach, describe, expect, it, vi } from 'vitest';
-
 import {
   PROJECT_DATA_ALARM_FAILED_SECTION_RETRY_MS,
   PROJECT_DATA_ALARM_SECTIONS,
@@ -23,6 +21,7 @@ import {
   ProjectDataAlarmTick,
   resolveProjectDataAlarmGatingConfig,
 } from '@simple-agent-manager/project-data/internal/do/alarm-sections';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const T0 = 1_790_000_000_000;
 const CONFIG: ProjectDataAlarmGatingConfig = resolveProjectDataAlarmGatingConfig({});

@@ -1,6 +1,7 @@
 /**
  * Unit tests for mailbox shared types, constants, and migration safety.
  */
+import { MIGRATIONS } from '@simple-agent-manager/project-data/internal/do/migrations';
 import {
   DELIVERY_STATE_TRANSITIONS,
   DELIVERY_STATES,
@@ -14,8 +15,6 @@ import {
   TURN_STOP_URGENCY_THRESHOLD,
 } from '@simple-agent-manager/shared';
 import { describe, expect, it, vi } from 'vitest';
-
-import { MIGRATIONS } from '@simple-agent-manager/project-data/internal/do/migrations';
 
 describe('Mailbox Types and Constants', () => {
   it('defines 5 message classes in escalating order', () => {

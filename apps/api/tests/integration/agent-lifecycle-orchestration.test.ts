@@ -6,10 +6,6 @@
  * reconciliation. D1 and VM-agent delivery stay mocked because they cross
  * service boundaries, but time and message flow are simulated end to end.
  */
-import { VM_PROMPT_DELIVERY_PROTOCOL_VERSION } from '@simple-agent-manager/shared';
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
 import { updateMessageActivity } from '@simple-agent-manager/project-data/internal/do/activity';
 import {
   createAttentionMarker,
@@ -31,6 +27,10 @@ import {
 } from '@simple-agent-manager/project-data/internal/do/reconciliation';
 import { failSession } from '@simple-agent-manager/project-data/internal/do/sessions';
 import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
+import { VM_PROMPT_DELIVERY_PROTOCOL_VERSION } from '@simple-agent-manager/shared';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { nodeAgentRequest, sendPromptToAgentOnNode } from '../../src/services/node-agent';
 import {
   acceptedPromptResponse,

@@ -10,14 +10,14 @@
  * `tests/workers/project-data-incremental-materialization.test.ts`
  * and `tests/workers/project-data-do.test.ts`.
  */
-import { describe, expect, it } from 'vitest';
-
 import {
   DEFAULT_MATERIALIZATION_SWEEP_LIMIT,
   DEFAULT_MATERIALIZATION_SWEEP_SCAN_LIMIT,
   resolveMaterializationSweepConfig,
 } from '@simple-agent-manager/project-data/internal/do/materialization';
 import { MIGRATIONS } from '@simple-agent-manager/project-data/internal/do/migrations';
+import { describe, expect, it } from 'vitest';
+
 import { buildSafeFtsQuery } from '../../../src/lib/fts5';
 
 // ── Grouping logic (mirrors ProjectData.materializeSession and mcp.ts groupTokensIntoMessages) ──

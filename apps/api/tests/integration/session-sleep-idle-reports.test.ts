@@ -1,4 +1,9 @@
 /** Real activity writes → eligibility → scheduled sleep → VM teardown. */
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import {
+  getSessionState,
+  upsertActivityState,
+} from '@simple-agent-manager/project-data/internal/do/session-state';
 import {
   DEFAULT_TASK_RUN_ABSOLUTE_CEILING_MS,
   DEFAULT_TASK_RUN_ABSOLUTE_CEILING_SLEEP_GRACE_MS,
@@ -7,11 +12,6 @@ import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
-import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
-import {
-  getSessionState,
-  upsertActivityState,
-} from '@simple-agent-manager/project-data/internal/do/session-state';
 import { runSessionSleepSweep } from '../../src/scheduled/session-sleep';
 import { evaluateRunawayCostCeiling } from '../../src/scheduled/stuck-task-ceiling';
 import { parseHarnessWorkConfig } from '../../src/services/session-idleness';

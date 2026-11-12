@@ -1,6 +1,3 @@
-import Database from 'better-sqlite3';
-import { afterEach, describe, expect, it } from 'vitest';
-
 import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import {
   boundedScheduleTaskLabel,
@@ -19,6 +16,9 @@ import {
   updateWatch,
 } from '@simple-agent-manager/project-data/internal/do/project-standing-watches-storage';
 import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
+import Database from 'better-sqlite3';
+import { afterEach, describe, expect, it } from 'vitest';
+
 import { validateReservedTaskSubmissionInput } from '../../../src/services/reserved-task-submission-intent';
 
 const databases: Database.Database[] = [];

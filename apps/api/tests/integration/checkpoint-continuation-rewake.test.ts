@@ -6,10 +6,6 @@
  * without a misleading wake failure, and one that expires while the chat sleeps is reported.
  * Only the wake itself (`ensureSessionRecovery`) is a boundary.
  */
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-import * as schema from '../../src/db/schema';
 import {
   type DurabilityFoundationHooks,
   processPromptDeliveryAlarm,
@@ -17,6 +13,10 @@ import {
 import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import { acceptPromptDelivery } from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
 import { WAKE_FAILED_ATTENTION_KIND } from '@simple-agent-manager/project-data/internal/do/wake-failure';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { restoredSessionPromptDelivery } from '../../src/services/restored-session-prompt';
 import { SESSION_RECOVERY_CONTINUE_TASK_PROMPT } from '../../src/services/session-sleep-fallback-messages';

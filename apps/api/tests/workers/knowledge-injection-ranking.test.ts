@@ -16,10 +16,9 @@
  *
  * Everything is driven through the production RPC methods.
  */
+import { computeRelevanceScore } from '@simple-agent-manager/project-data/internal/do/knowledge';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
-
-import { computeRelevanceScore } from '@simple-agent-manager/project-data/internal/do/knowledge';
 
 const DAY_MS = 86_400_000;
 

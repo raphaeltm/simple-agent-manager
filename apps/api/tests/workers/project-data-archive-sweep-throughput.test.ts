@@ -26,12 +26,12 @@
  * almost nothing, which would shrink every R2 chunk and understate both the compression cost
  * and the bytes moved — the opposite of what a capacity fixture should do.
  */
+import { runProjectDataArchiveSharding } from '@simple-agent-manager/project-data/internal/scheduled/project-data-archive-sharding';
 import type { MessagePosition } from '@simple-agent-manager/shared';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 import type { Env as WorkerEnv } from '../../src/env';
-import { runProjectDataArchiveSharding } from '@simple-agent-manager/project-data/internal/scheduled/project-data-archive-sharding';
 import * as projectDataService from '../../src/services/project-data';
 import {
   PREVIOUS_SWEEP_MESSAGE_BUDGET,

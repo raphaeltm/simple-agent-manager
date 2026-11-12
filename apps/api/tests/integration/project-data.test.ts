@@ -10,9 +10,8 @@
  * Uses an in-memory SqlStorage mock that faithfully implements the SQL
  * operations used by the DO, allowing us to test the logic without Miniflare.
  */
-import { beforeEach, describe, expect, it } from 'vitest';
-
 import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 /**
  * In-memory SQL database mock that supports the subset of SQL operations
