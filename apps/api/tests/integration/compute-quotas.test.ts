@@ -41,7 +41,7 @@ describe('compute quota pipeline', () => {
   );
   // Per-field resolvers (credential lookup policy included) split out of placement-resolver.ts.
   const placementFieldResolution = readFileSync(
-    resolve(process.cwd(), 'src/services/placement-field-resolution.ts'),
+    resolve(process.cwd(), 'src/scheduler-core/placement-field-resolution.ts'),
     'utf8'
   );
   const nodeStepsFile = readFileSync(

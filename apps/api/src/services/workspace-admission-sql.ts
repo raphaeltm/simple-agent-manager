@@ -208,7 +208,7 @@ export function workspaceAdmissionEligibilitySql(): string {
 }
 
 /**
- * SQL twin of `measuredHostOverheadMb` (`workspace-resource-capacity.ts`): the host reserve, or the
+ * SQL twin of `measuredHostOverheadMb` (`scheduler-core/workspace-resource-capacity.ts`): the host reserve, or the
  * measured use no workspace observation explains when that is larger. Charging measured use on top
  * of the reserve counted host overhead twice; see the evaluator for the condition this encodes.
  */

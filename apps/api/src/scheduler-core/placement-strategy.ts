@@ -6,7 +6,7 @@
  * WHAT THIS MODULE IS NOT
  * -----------------------
  * It does not re-implement any hard constraint.
- * `evaluateWorkspaceReservationCapacity` (services/workspace-resource-capacity.ts)
+ * `evaluateWorkspaceReservationCapacity` (scheduler-core/workspace-resource-capacity.ts)
  * remains the single admission gate for finite CPU/memory/storage budgets,
  * exclusivity, the disk-pressure veto, and the
  * fail-closed handling of untrusted/stale capacity. This module only ORDERS

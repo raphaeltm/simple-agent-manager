@@ -37,7 +37,7 @@ Moves as the pure half of a split file: `workspace-resource-capacity` (evaluatio
 `workspace-reservation-usage` (usage type and parsers), `capacity-pool-precedence`
 (scope chain), `capacity-pool-placement-settings` (selection defaults),
 `workspace-runtime` (`decideWorkspaceRuntime`), `default-capacity-pool-helpers`
-(`timestampVersion`), `default-capacity-pool-types` (`CapacityPoolSummary`).
+(`timestampVersion`). `placement-resolver-capacity` reads the shared `DefaultCapacityPoolSummary`.
 
 ## Plan
 
