@@ -57,7 +57,7 @@ sequenceDiagram
 
 A few details make that path hold up:
 
-- **Only owners and admins can answer.** The save endpoint, `POST /api/projects/:id/secret-requests/:requestId/fulfill`, checks for permission to write project secrets. It also insists on a JSON body coming from the app's own origin, so another website cannot get your browser to submit a form to it.
+- **Only owners and admins can answer.** The save endpoint, `POST /api/projects/:id/secret-requests/:requestId/fulfill`, checks for permission to write project secrets. It also insists on a JSON body coming from the app's own origin, so another website, or a page served from a workspace's preview port, cannot get your browser to submit to it.
 - **The browser forgets the value.** The card keeps what you type only in the component's own state, not in the app's data cache, and clears it once the save succeeds.
 - **The value is encrypted at rest** like every other project secret (AES-GCM), and the stored row remembers which request created it.
 - **The agent's notice carries names only.** The message it gets back is built by `buildRuntimeSecretRequestPrompt()` and reads like this:
@@ -68,7 +68,7 @@ A few details make that path hold up:
 >
 > Project secrets are shared: every project member's agent sessions can use STRIPE_TEST_SECRET_KEY.
 
-That last step uses `exec_with_secrets`, a tool from [an earlier entry](/blog/sams-journal-when-work-can-resume/). The agent names the secrets a single command needs, SAM puts them in that command's environment only, and checks the output for the values before handing it back. The agent gets the result of `stripe listen` or `curl`, not the key.
+That last step uses `exec_with_secrets`, a tool from [an earlier entry](/blog/sams-journal-when-work-can-resume/). The agent names the secrets a single command needs, SAM puts them in that command's environment only, and replaces any exact copy of a value in the output with `[REDACTED]` before handing it back. The agent gets the result of `stripe listen` or `curl`, not the key.
 
 ## Two people pressing Save at once
 
@@ -111,7 +111,7 @@ Some honest limits, which are also written in the docs:
 
 - An expiry cannot take back a value a command already received. If a command copied the key somewhere, it is still there.
 - Project secrets are shared. Every member's agent sessions in the project can use a secret once it is saved, and the card says so.
-- `exec_with_secrets` protects against accidents, like a key printed into a log or pasted into the chat. It does not protect against an agent deliberately running code that sends the key elsewhere.
+- `exec_with_secrets` protects against accidents, like a key printed into a log or pasted into the chat. Output redaction only catches exact copies, so an encoded or transformed key would get through, and it does not protect against an agent deliberately running code that sends the key elsewhere.
 
 ## Tested with real agents
 
