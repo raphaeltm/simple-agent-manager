@@ -110,9 +110,12 @@ export interface TaskLifecyclePort {
     request: TaskTerminalTransitionRequest
   ): Promise<TaskTerminalTransitionOutcome>;
   /** Preserve a failed task's work through the sleep lifecycle, or surface its loss. */
-  preserveFailedWorkOrSurfaceLoss(env: Env, input: FailedTaskWorkInput): Promise<FailedTaskWorkOutcome>;
-  /** Tear down a task's runtime (TaskRunner `cleanupTaskRun`). */
-  cleanupTaskRun(env: Env, taskId: string): Promise<void>;
+  preserveFailedWorkOrSurfaceLoss(
+    env: Env,
+    input: FailedTaskWorkInput
+  ): Promise<FailedTaskWorkOutcome>;
+  /** Tear down a task's runtime through the TaskRunner's shared lifecycle cleanup. */
+  releaseTaskRun(env: Env, taskId: string): Promise<void>;
   /** Mirror a task's terminal status onto its trigger execution, if any. */
   syncTriggerExecutionStatus(
     env: Env,
@@ -253,7 +256,10 @@ export interface SessionLifecyclePort {
   /** A parent-wake source task still authorizes recovery (non-terminal, still bound). */
   isSourceTaskGuardValid(env: Env, guard: SessionRecoverySourceTaskGuard): Promise<boolean>;
   /** A restorable snapshot carries an authorized wake claim for this task. */
-  hasAuthorizedRestorableSnapshotWakeClaim(env: Env, input: SnapshotWakeClaimInput): Promise<boolean>;
+  hasAuthorizedRestorableSnapshotWakeClaim(
+    env: Env,
+    input: SnapshotWakeClaimInput
+  ): Promise<boolean>;
   /** The conversation's snapshot is restorable or its sleep is in flight. */
   findRestorableOrInFlightSleepSnapshot(
     env: Env,
@@ -342,7 +348,10 @@ export interface RuntimePort {
   /** The node agent's raw agent-session inventory for a workspace (unvalidated). */
   listAgentSessions(env: Env, request: NodeAgentSessionRequest): Promise<unknown>;
   /** A slept Instant container runs nothing; probing it would wake it. */
-  isSleepingContainerRuntime(node: { nodeRuntime: string | null; nodeStatus: string | null }): boolean;
+  isSleepingContainerRuntime(node: {
+    nodeRuntime: string | null;
+    nodeStatus: string | null;
+  }): boolean;
   /** A cf-container's lifecycle has ended, so its heartbeat silence is conclusive. */
   inspectContainerLifecycle(
     env: Env,
@@ -436,7 +445,11 @@ export interface OperationsPort {
   /** Record an archive circuit-breaker opening and notify operators once; never throws. */
   alertArchiveBreakerOpened(env: Env, opening: ProjectDataArchiveBreakerOpening): Promise<void>;
   /** Operational master brake for DO alarms; true means the alarm was deferred. */
-  deferAlarmWhenDisabled(env: Env, storage: DurableObjectStorage, durableObject: string): Promise<boolean>;
+  deferAlarmWhenDisabled(
+    env: Env,
+    storage: DurableObjectStorage,
+    durableObject: string
+  ): Promise<boolean>;
   /** Transcript window for the stalled-task loop classifier. */
   stalledTaskClassifierConfig(env: Env): StalledTaskClassifierConfig;
   /** Advisory classification of a paused reconciliation loop; null when unavailable. */
@@ -480,24 +493,34 @@ export interface ProjectDataPorts {
 const PORTS_KEY = Symbol.for('sam.project-data.ports');
 
 interface PortsHolder {
-  [PORTS_KEY]?: ProjectDataPorts;
+  [PORTS_KEY]?: Partial<ProjectDataPorts>;
 }
 
 /**
- * Install the worker's port implementation. Called once from the worker entry at
- * module load (and from test setup), before any ProjectData code runs.
+ * Install port implementations. The worker entry installs every port once at
+ * module load (`project-data-wiring.ts`); test setup may install them one port at
+ * a time. Later calls replace the ports they name and keep the rest.
  */
-export function configureProjectDataPorts(ports: ProjectDataPorts): void {
-  (globalThis as PortsHolder)[PORTS_KEY] = ports;
+export function configureProjectDataPorts(ports: Partial<ProjectDataPorts>): void {
+  const holder = globalThis as PortsHolder;
+  holder[PORTS_KEY] = { ...holder[PORTS_KEY], ...ports };
 }
 
-/** The configured ports; throws if the worker never configured them (a wiring bug). */
+/**
+ * The configured ports. Reading a port the worker never installed throws, naming
+ * it: that is a wiring bug, never a runtime condition to tolerate.
+ */
 export function projectDataPorts(): ProjectDataPorts {
-  const configured = (globalThis as PortsHolder)[PORTS_KEY];
-  if (!configured) {
-    throw new Error(
-      'ProjectData ports are not configured: call configureProjectDataPorts() from the worker entry'
-    );
-  }
-  return configured;
+  const configured = (globalThis as PortsHolder)[PORTS_KEY] ?? {};
+  return new Proxy(configured, {
+    get(target, name: string | symbol) {
+      const port = Reflect.get(target, name);
+      if (port === undefined && typeof name === 'string') {
+        throw new Error(
+          `ProjectData port "${name}" is not configured: call configureProjectDataPorts() from the worker entry`
+        );
+      }
+      return port;
+    },
+  }) as ProjectDataPorts;
 }

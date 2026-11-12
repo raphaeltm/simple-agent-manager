@@ -107,7 +107,7 @@ export async function terminallyFailDeadTarget(
     })
   );
 
-  waitUntil(hooks, cleanupTaskRun(env, candidate.workspaceId, candidate.taskId));
+  waitUntil(hooks, releaseDeadTargetTaskRun(env, candidate.workspaceId, candidate.taskId));
 
   log.warn('reconciliation.dead_target_failed', {
     sessionId: candidate.sessionId,
@@ -121,9 +121,13 @@ export async function terminallyFailDeadTarget(
   return true;
 }
 
-async function cleanupTaskRun(env: DOEnv, workspaceId: string, taskId: string): Promise<void> {
+async function releaseDeadTargetTaskRun(
+  env: DOEnv,
+  workspaceId: string,
+  taskId: string
+): Promise<void> {
   try {
-    await projectDataPorts().tasks.cleanupTaskRun(env, taskId);
+    await projectDataPorts().tasks.releaseTaskRun(env, taskId);
   } catch (err) {
     log.error('reconciliation.cleanup_task_run_failed', {
       workspaceId,

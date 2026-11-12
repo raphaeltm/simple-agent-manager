@@ -318,7 +318,7 @@ async function failExpiredTaskMarker(
 
 async function cleanupExpiredTaskRun(env: Env, workspaceId: string, taskId: string): Promise<void> {
   try {
-    await projectDataPorts().tasks.cleanupTaskRun(env, taskId);
+    await projectDataPorts().tasks.releaseTaskRun(env, taskId);
   } catch (err) {
     log.error('reconciliation.cleanup_task_run_failed', {
       workspaceId,

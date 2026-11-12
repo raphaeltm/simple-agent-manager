@@ -15,7 +15,7 @@ beforeAll(async () => {
   // worker's ports even before the entry module, which also configures them, is evaluated.
   const [{ configureProjectDataPorts }, { workerProjectDataPorts }] = await Promise.all([
     import('../../src/durable-objects/project-data/ports'),
-    import('../../src/project-data-ports'),
+    import('../../src/project-data-ports/index'),
   ]);
   configureProjectDataPorts(workerProjectDataPorts);
   await applyD1Migrations(env.DATABASE, injectedMigrations('D1_MIGRATIONS_JSON'));

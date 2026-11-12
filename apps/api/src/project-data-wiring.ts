@@ -5,7 +5,7 @@
  * before any ProjectData code can run (client, scheduled job or Durable Object).
  */
 import { configureProjectDataPorts } from './durable-objects/project-data/ports';
-import { workerProjectDataPorts } from './project-data-ports';
+import { workerProjectDataPorts } from './project-data-ports/index';
 
 configureProjectDataPorts(workerProjectDataPorts);
 
