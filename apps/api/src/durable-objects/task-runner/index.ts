@@ -369,6 +369,8 @@ export class TaskRunner extends DurableObject<Env> {
         ))
       )
         return false;
+      if (!state.config.recoveryAttemptId || !(await this.isCurrentRecoveryAttempt(state)))
+        return false;
       return persistProviderLimitRecoveryNudge(this.ctx.storage, state, approval);
     }
     await this.ctx.storage.setAlarm(Date.now());

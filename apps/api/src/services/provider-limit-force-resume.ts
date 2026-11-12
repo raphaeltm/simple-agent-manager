@@ -20,8 +20,12 @@ import {
   providerLimitRecoveryApprovalD1Fence,
 } from './provider-limit-recovery-approval';
 import { requireSessionWriter } from './session-access';
-import { ensureSessionRecovery, type SessionRecoveryResult } from './session-recovery';
-import { nudgeTaskRunnerDO } from './task-runner-do';
+import {
+  canRepairSessionRecoveryRunner,
+  ensureSessionRecovery,
+  type SessionRecoveryResult,
+} from './session-recovery';
+import { getTaskRunnerStatus, nudgeTaskRunnerDO } from './task-runner-do';
 
 export function canResumeProviderLimitTaskAnyway(
   task: Pick<schema.Task, 'status' | 'admissionState'>,
@@ -185,8 +189,7 @@ export async function forceResumeSavedProviderLimitTask(
       throw errors.conflict('Resume accepted, but the runner did not confirm; refresh shortly');
     }
     if (!nudged) {
-      await restoreHold();
-      throw errors.conflict('The existing recovery runner is unavailable; try again shortly');
+      await handleRefusedRecoveryNudge(env, task, snapshot.recovery_attempt_id, restoreHold);
     }
   } else {
     let result: SessionRecoveryResult;
@@ -210,7 +213,13 @@ export async function forceResumeSavedProviderLimitTask(
       throw errors.conflict(`Unable to resume the saved task: ${result.reason}`);
     }
   }
-  await acknowledgeProviderLimitRecovery(env, task.id, overridden);
+  await acknowledgeProviderLimitRecovery(
+    env,
+    task.id,
+    overridden,
+    false,
+    snapshot.recovery_status === 'waking' ? snapshot.recovery_attempt_id : undefined
+  );
   await projectData
     .syncProviderLimitAttention(env, task.projectId, task.id, task.chatSessionId)
     .catch(() =>
@@ -245,21 +254,62 @@ export async function forceResumeSavedProviderLimitTask(
   }
 }
 
+async function handleRefusedRecoveryNudge(
+  env: Env,
+  task: Pick<schema.Task, 'id' | 'projectId' | 'userId' | 'chatSessionId'>,
+  recoveryAttemptId: string | null,
+  restoreHold: () => Promise<void>
+): Promise<never> {
+  let status;
+  try {
+    status = await getTaskRunnerStatus(env, task.id);
+  } catch {
+    throw errors.conflict('Resume accepted, but the runner did not confirm; refresh shortly');
+  }
+  // Claim-before-runner crashes need the pending receipt for bounded repair.
+  if (
+    canRepairSessionRecoveryRunner(status, {
+      taskId: task.id,
+      projectId: task.projectId,
+      userId: task.userId,
+      chatSessionId: task.chatSessionId ?? '',
+      recoveryAttemptId: recoveryAttemptId ?? '',
+    })
+  )
+    throw errors.conflict('Resume accepted; the recovery runner will be repaired shortly');
+  await restoreHold();
+  throw errors.conflict('The existing recovery runner is unavailable; try again shortly');
+}
+
 /** Exact approval CAS: a newer rejection/approval must retain its own intent. */
 export async function acknowledgeProviderLimitRecovery(
   env: Env,
   taskId: string,
   receipt: string,
-  requireCommittedRun = false
+  requireCommittedRun = false,
+  expectedRecoveryAttemptId?: string | null
 ) {
   const approval = await loadProviderLimitRecoveryApproval(env, taskId, receipt);
   if (!approval) return;
   const fence = providerLimitRecoveryApprovalD1Fence('tasks', approval, true, requireCommittedRun);
+  // A claim can advance after the DO's authority read but before its ACK.
+  // Clear only the attempt that this caller actually nudged.
+  const claimFence =
+    expectedRecoveryAttemptId === undefined
+      ? { sql: '', params: [] }
+      : {
+          sql: `AND EXISTS (SELECT 1 FROM session_snapshots acknowledged_snapshot
+      WHERE acknowledged_snapshot.id=? AND acknowledged_snapshot.project_id=tasks.project_id
+        AND acknowledged_snapshot.chat_session_id=tasks.chat_session_id
+        AND acknowledged_snapshot.user_id=tasks.user_id
+        AND acknowledged_snapshot.recovery_attempt_id IS ?)`,
+          params: [approval.snapshotId, expectedRecoveryAttemptId],
+        };
   await env.DATABASE.prepare(
     `UPDATE tasks SET admission_state=NULL,admission_reason=NULL,admission_next_retry_at=NULL
-     WHERE id=? AND admission_state='provider_limit_recovery_pending' ${fence.sql}`
+     WHERE id=? AND admission_state='provider_limit_recovery_pending' ${fence.sql} ${claimFence.sql}`
   )
-    .bind(taskId, ...fence.params)
+    .bind(taskId, ...fence.params, ...claimFence.params)
     .run();
 }
 

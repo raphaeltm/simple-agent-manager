@@ -246,6 +246,15 @@ describe('provider wait credential pin at the authenticated secret injection rou
       }
     );
 
+    function useDatabaseClock(now: () => number) {
+      sqlite.function('julianday', { varargs: true }, (...args: unknown[]) => {
+        let milliseconds = Date.parse(String(args[0]));
+        if (args[0] === 'now') milliseconds = now();
+        else if (args[1] === 'unixepoch') milliseconds = Number(args[0]) * 1000;
+        return milliseconds / 86_400_000 + 2_440_587.5;
+      });
+    }
+
     function beforeMarkerAuthorization(mutate: () => void) {
       const prepare = env.DATABASE.prepare.bind(env.DATABASE);
       env.DATABASE.prepare = ((query: string) => {
@@ -265,7 +274,7 @@ describe('provider wait credential pin at the authenticated secret injection rou
       }) as typeof env.DATABASE.prepare;
     }
 
-    function afterAttribution(mutate: () => void) {
+    function afterAttribution(mutate: () => void | Promise<void>) {
       const prepare = env.DATABASE.prepare.bind(env.DATABASE);
       env.DATABASE.prepare = ((query: string) => {
         const statement = prepare(query);
@@ -276,7 +285,7 @@ describe('provider wait credential pin at the authenticated secret injection rou
           const first = bound.first.bind(bound);
           bound.first = (async () => {
             const result = await first();
-            mutate();
+            await mutate();
             return result;
           }) as typeof bound.first;
           return bound;
@@ -284,6 +293,64 @@ describe('provider wait credential pin at the authenticated secret injection rou
         return statement;
       }) as typeof env.DATABASE.prepare;
     }
+
+    it('refuses an overlapping older attribution without revoking consent for the newer callback', async () => {
+      const approved = scopedApproval();
+      function gate() {
+        let release = () => {};
+        const promise = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return { promise, release: () => release() };
+      }
+      const ready = [gate(), gate()];
+      const proceed = [gate(), gate()];
+      let writes = 0;
+      afterAttribution(async () => {
+        const turn = writes++;
+        ready[turn].release();
+        await proceed[turn].promise;
+      });
+      const older = inject();
+      await ready[0].promise;
+      const newer = inject();
+      await ready[1].promise;
+      try {
+        proceed[0].release();
+        const staleResponse = await older;
+        expect(staleResponse.status).toBe(409);
+        expect(await staleResponse.text()).not.toContain(key.secret);
+        expect(
+          (
+            sqlite.prepare('SELECT provider_limit_wait_json AS value FROM tasks').get() as {
+              value: string;
+            }
+          ).value
+        ).toBe(approved);
+        expect(sqlite.prepare('SELECT admission_state FROM tasks').get()).toEqual({
+          admission_state: null,
+        });
+        proceed[1].release();
+        const currentResponse = await newer;
+        expect(currentResponse.status, await currentResponse.clone().text()).toBe(200);
+        expect(await currentResponse.json()).toMatchObject({
+          apiKey: key.secret,
+          credentialGeneration: 2,
+        });
+        const saved = JSON.parse(
+          (
+            sqlite.prepare('SELECT provider_limit_wait_json AS value FROM tasks').get() as {
+              value: string;
+            }
+          ).value
+        );
+        expect(saved.ownerOverride.firstInjection.credentialGeneration).toBe(2);
+        expect(saved.ownerOverride.grantedAt).toBe(JSON.parse(approved).ownerOverride.grantedAt);
+      } finally {
+        proceed.forEach((item) => item.release());
+        await Promise.all([older, newer]);
+      }
+    });
 
     function expiredScopedApproval(withMarker = false) {
       const approved = JSON.parse(scopedApproval());
@@ -305,6 +372,7 @@ describe('provider wait credential pin at the authenticated secret injection rou
 
     it('refreshes after expiry only after a real pre-expiry final authorization', async () => {
       const approved = JSON.parse(scopedApproval());
+      useDatabaseClock(() => Date.now());
       sqlite
         .prepare("UPDATE tasks SET status='in_progress',started_at=?")
         .run(new Date(approved.ownerOverride.grantedAt).toISOString());
@@ -367,12 +435,7 @@ describe('provider wait credential pin at the authenticated secret injection rou
           sqlite.exec("UPDATE tasks SET status='queued'");
         }
         let dbNow = approved.ownerOverride.grantedAt + 1;
-        sqlite.function('julianday', { varargs: true }, (...args: unknown[]) => {
-          let milliseconds = Date.parse(String(args[0]));
-          if (args[0] === 'now') milliseconds = dbNow;
-          else if (args[1] === 'unixepoch') milliseconds = Number(args[0]) * 1000;
-          return milliseconds / 86_400_000 + 2_440_587.5;
-        });
+        useDatabaseClock(() => dbNow);
         beforeMarkerAuthorization(() => {
           dbNow = approved.ownerOverride.expiresAt + 1;
         });
@@ -390,40 +453,50 @@ describe('provider wait credential pin at the authenticated secret injection rou
       }
     );
 
-    it.each(['fresh rejection', 'membership', 'attribution generation', 'profile agent'])(
-      'does not release the secret when %s changes at the final marker CAS',
-      async (change) => {
-        const approved = JSON.parse(scopedApproval());
-        const fresh = JSON.stringify({
-          ...approved,
-          phase: 'waiting',
-          scheduleKey: 'fresh-rejection',
-          ownerOverride: undefined,
-        });
-        beforeMarkerAuthorization(() => {
-          if (change === 'fresh rejection')
-            sqlite.prepare('UPDATE tasks SET provider_limit_wait_json=?').run(fresh);
-          else if (change === 'membership')
+    it.each([
+      'fresh rejection',
+      'membership',
+      'attribution generation',
+      'profile agent',
+      'superseded with membership removed',
+      'superseded with profile changed',
+    ])('does not release the secret when %s changes at the final marker CAS', async (change) => {
+      const approved = JSON.parse(scopedApproval());
+      const fresh = JSON.stringify({
+        ...approved,
+        phase: 'waiting',
+        scheduleKey: 'fresh-rejection',
+        ownerOverride: undefined,
+      });
+      beforeMarkerAuthorization(() => {
+        if (change === 'fresh rejection')
+          sqlite.prepare('UPDATE tasks SET provider_limit_wait_json=?').run(fresh);
+        else if (change === 'membership')
+          sqlite.exec("UPDATE project_members SET status='removed'");
+        else if (change === 'profile agent')
+          sqlite.exec("UPDATE agent_profiles SET agent_type='claude-code'");
+        else {
+          sqlite.exec(
+            'UPDATE agent_sessions SET agent_credential_generation=agent_credential_generation+1'
+          );
+          if (change === 'superseded with membership removed')
             sqlite.exec("UPDATE project_members SET status='removed'");
-          else if (change === 'profile agent')
+          else if (change === 'superseded with profile changed')
             sqlite.exec("UPDATE agent_profiles SET agent_type='claude-code'");
-          else
-            sqlite.exec(
-              'UPDATE agent_sessions SET agent_credential_generation=agent_credential_generation+1'
-            );
-        });
-        const response = await inject();
-        expect(response.status).toBe(409);
-        expect(await response.text()).not.toContain(key.secret);
-        const saved = (
-          sqlite.prepare('SELECT provider_limit_wait_json AS value FROM tasks').get() as {
-            value: string;
-          }
-        ).value;
-        if (change === 'fresh rejection') expect(saved).toBe(fresh);
-        else expect(JSON.parse(saved).ownerOverride).toBeUndefined();
-      }
-    );
+        }
+      });
+      const response = await inject();
+      expect(response.status).toBe(409);
+      expect(await response.text()).not.toContain(key.secret);
+      const saved = (
+        sqlite.prepare('SELECT provider_limit_wait_json AS value FROM tasks').get() as {
+          value: string;
+        }
+      ).value;
+      if (change === 'fresh rejection') expect(saved).toBe(fresh);
+      else if (change === 'attribution generation') expect(saved).toBe(JSON.stringify(approved));
+      else expect(JSON.parse(saved).ownerOverride).toBeUndefined();
+    });
 
     it.each([
       ['delegated', 'current'],
@@ -518,7 +591,9 @@ describe('provider wait credential pin at the authenticated secret injection rou
       const saved = sqlite.prepare('SELECT provider_limit_wait_json AS value FROM tasks').get() as {
         value: string;
       };
-      expect(JSON.parse(saved.value).ownerOverride).toBeUndefined();
+      if (_scope === 'newer credential attribution')
+        expect(JSON.parse(saved.value).ownerOverride).toBeDefined();
+      else expect(JSON.parse(saved.value).ownerOverride).toBeUndefined();
     });
   });
 

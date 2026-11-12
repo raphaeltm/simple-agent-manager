@@ -205,6 +205,7 @@ export async function startRecoveryTask(
       opencodeBaseUrl: contract?.opencodeBaseUrl ?? null,
       systemPromptAppend: profile?.systemPromptAppend ?? null,
       agentProfileHint: task.agentProfileHint,
+      skillId: task.skillId,
       projectScaling: {
         taskExecutionTimeoutMs: context.project.taskExecutionTimeoutMs,
         nodeCpuThresholdPercent: context.project.nodeCpuThresholdPercent,

@@ -135,6 +135,8 @@ export interface TaskRunConfig {
   systemPromptAppend: string | null;
   /** Agent profile ID — stored on workspace for GitHub CLI policy enforcement. */
   agentProfileHint: string | null;
+  /** Saved skill identity; optional for runners persisted before skill propagation. */
+  skillId?: string | null;
   /** File attachments uploaded to R2 before task submission. Null = no attachments. */
   attachments: TaskAttachment[] | null;
   /** Per-project scaling overrides. Null values mean "use platform default". */

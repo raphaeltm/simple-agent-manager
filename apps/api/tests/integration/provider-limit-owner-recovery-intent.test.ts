@@ -24,6 +24,7 @@ describe('durable owner-approved provider recovery', () => {
     vi.resetAllMocks();
     boundary.userId = 'user-1';
     boundary.nudge.mockResolvedValue(true);
+    boundary.status.mockResolvedValue({ taskId: 'task-1' });
     boundary.selected.mockResolvedValue('cc_credentials:account-1');
     harness = await createOwnerResumeHarness({
       KV: {
@@ -97,6 +98,155 @@ describe('durable owner-approved provider recovery', () => {
     expect(task().provider_limit_wait_json).toBe(receipt);
   });
 
+  it('repairs a provably stale runner on the current claim instead of acknowledging the old attempt', async () => {
+    d1.exec('UPDATE workspaces SET runtime_deletion_confirmed_at=CURRENT_TIMESTAMP');
+    const receipt = await interruptAfterRelease();
+    const retained = claim();
+    boundary.nudge.mockResolvedValueOnce(false);
+    boundary.status.mockResolvedValueOnce({
+      taskId: 'task-1',
+      projectId: 'project-1',
+      userId: 'user-1',
+      completed: false,
+      currentStep: 'workspace_ready',
+      config: { recoveryAttemptId: 'older-claim', resumeSnapshotChatSessionId: 'chat-1' },
+    });
+    await preserveProviderLimitWait(env, 'task-1', Date.now());
+    expect(boundary.start).toHaveBeenCalledOnce();
+    expect(boundary.start.mock.calls[0]?.[1]).toMatchObject({
+      taskId: 'task-1',
+      recoveryAttemptId: 'existing-claim',
+      providerLimitRecoveryApproval: { receipt },
+    });
+    expect(boundary.nudge).toHaveBeenCalledTimes(2);
+    expect(task()).toMatchObject({ admission_state: null, provider_limit_wait_json: receipt });
+    expect(claim()).toEqual(retained);
+  });
+
+  it.each([
+    'equal attempt',
+    'task',
+    'project',
+    'user',
+    'session',
+    'nonrecovery',
+    'empty attempt',
+    'malformed step',
+    'malformed completion',
+  ])('never repairs a false nudge with unproven or nonstale %s evidence', async (changed) => {
+    const receipt = await interruptAfterRelease();
+    const retained = claim();
+    const status = {
+      taskId: 'task-1',
+      projectId: 'project-1',
+      userId: 'user-1',
+      completed: false as unknown,
+      currentStep: 'workspace_ready' as unknown,
+      config: {
+        recoveryAttemptId: 'older-claim' as unknown,
+        resumeSnapshotChatSessionId: 'chat-1' as unknown,
+      },
+    };
+    if (changed === 'equal attempt') status.config.recoveryAttemptId = 'existing-claim';
+    if (changed === 'task') status.taskId = 'foreign-task';
+    if (changed === 'project') status.projectId = 'foreign-project';
+    if (changed === 'user') status.userId = 'foreign-owner';
+    if (changed === 'session') status.config.resumeSnapshotChatSessionId = 'foreign-chat';
+    if (changed === 'nonrecovery') status.config.recoveryAttemptId = null;
+    if (changed === 'empty attempt') status.config.recoveryAttemptId = '';
+    if (changed === 'malformed step') status.currentStep = null;
+    if (changed === 'malformed completion') status.completed = undefined;
+    boundary.nudge.mockResolvedValueOnce(false);
+    boundary.status.mockResolvedValueOnce(status);
+    await preserveProviderLimitWait(env, 'task-1', Date.now());
+    expect(boundary.start).not.toHaveBeenCalled();
+    expect(task()).toMatchObject({
+      admission_state: 'provider_limit_recovery_pending',
+      provider_limit_wait_json: receipt,
+    });
+    expect(claim()).toEqual(retained);
+  });
+
+  it('starts a missing runner on its existing queued wake claim without renewing or replacing that claim', async () => {
+    d1.exec('UPDATE workspaces SET runtime_deletion_confirmed_at=CURRENT_TIMESTAMP');
+    const receipt = await interruptAfterRelease();
+    const retained = claim();
+    boundary.nudge.mockResolvedValueOnce(false);
+    boundary.status.mockResolvedValueOnce(null);
+    await preserveProviderLimitWait(env, 'task-1', Date.now());
+    expect(boundary.start).toHaveBeenCalledOnce();
+    expect(boundary.start.mock.calls[0]?.[1]).toMatchObject({
+      taskId: 'task-1',
+      recoveryAttemptId: 'existing-claim',
+      providerLimitRecoveryApproval: { receipt },
+    });
+    expect(boundary.nudge).toHaveBeenCalledTimes(2);
+    expect(task()).toMatchObject({ admission_state: null, provider_limit_wait_json: receipt });
+    expect(claim()).toEqual(retained);
+    await preserveProviderLimitWait(env, 'task-1', Date.now());
+    expect(boundary.start).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['existing', { completed: false }],
+    ['terminal', { completed: true }],
+    ['ambiguous', undefined],
+  ])(
+    'does not infer missing state from a false nudge with %s runner evidence',
+    async (_label, status) => {
+      const receipt = await interruptAfterRelease();
+      const retained = claim();
+      boundary.nudge.mockResolvedValueOnce(false);
+      boundary.status.mockResolvedValueOnce(status);
+      await preserveProviderLimitWait(env, 'task-1', Date.now());
+      expect(boundary.start).not.toHaveBeenCalled();
+      expect(task()).toMatchObject({
+        admission_state: 'provider_limit_recovery_pending',
+        provider_limit_wait_json: receipt,
+      });
+      expect(claim()).toEqual(retained);
+    }
+  );
+
+  it('preserves the same pending approval when the authoritative runner probe fails', async () => {
+    const receipt = await interruptAfterRelease();
+    const retained = claim();
+    boundary.nudge.mockResolvedValueOnce(false);
+    boundary.status.mockRejectedValueOnce(new Error('runner probe unavailable'));
+    await expect(preserveProviderLimitWait(env, 'task-1', Date.now())).rejects.toThrow(
+      'runner probe unavailable'
+    );
+    expect(boundary.start).not.toHaveBeenCalled();
+    expect(task()).toMatchObject({
+      admission_state: 'provider_limit_recovery_pending',
+      provider_limit_wait_json: receipt,
+    });
+    expect(claim()).toEqual(retained);
+  });
+
+  it.each([
+    ['claim replaced', "UPDATE session_snapshots SET recovery_attempt_id='newer-claim'"],
+    ['task cancelled', "UPDATE tasks SET status='cancelled'"],
+    [
+      'consent replaced',
+      "UPDATE tasks SET provider_limit_wait_json=json_set(provider_limit_wait_json,'$.scheduleKey','new-consent')",
+    ],
+  ])(
+    'does not bootstrap a missing runner if %s while presence is being probed',
+    async (_label, change) => {
+      await interruptAfterRelease();
+      boundary.nudge.mockResolvedValueOnce(false);
+      boundary.status.mockImplementationOnce(async () => {
+        d1.exec(change);
+        return null;
+      });
+      await preserveProviderLimitWait(env, 'task-1', Date.now());
+      expect(boundary.start).not.toHaveBeenCalled();
+      expect(task().admission_state).toBe('provider_limit_recovery_pending');
+      expect(boundary.nudge).toHaveBeenCalledOnce();
+    }
+  );
+
   it('bounds a stalled runner so later candidates and the scan cursor still progress', async () => {
     const receipt = await interruptAfterRelease();
     const retained = claim();
@@ -124,6 +274,18 @@ describe('durable owner-approved provider recovery', () => {
       status: 'queued',
     });
   }, 1000);
+
+  it('retains pending consent when the claim advances after a successful nudge', async () => {
+    const receipt = await interruptAfterRelease();
+    boundary.nudge.mockImplementationOnce(async () => {
+      d1.exec("UPDATE session_snapshots SET recovery_attempt_id='next-claim'");
+      return true;
+    });
+    await preserveProviderLimitWait(env, 'task-1', Date.now());
+    expect(task().admission_state).toBe('provider_limit_recovery_pending');
+    expect(task().provider_limit_wait_json).toBe(receipt);
+    expect(claim().recovery_attempt_id).toBe('next-claim');
+  });
 
   it('does not acknowledge a late nudge after its background wait timed out', async () => {
     const receipt = await interruptAfterRelease();

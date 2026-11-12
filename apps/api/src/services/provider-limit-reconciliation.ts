@@ -31,8 +31,12 @@ import {
   providerLimitRecoveryApprovalIsCurrent,
 } from './provider-limit-recovery-approval';
 import { requireSessionWriter } from './session-access';
-import { ensureSessionRecovery } from './session-recovery';
-import { nudgeTaskRunnerDO } from './task-runner-do';
+import {
+  canRepairSessionRecoveryRunner,
+  ensureSessionRecovery,
+  startMissingSessionRecoveryRunner,
+} from './session-recovery';
+import { getTaskRunnerStatus, nudgeTaskRunnerDO } from './task-runner-do';
 
 export function resolveProviderLimitRecoveryRpcTimeoutMs(env: Env): number {
   return parsePositiveInt(
@@ -358,13 +362,43 @@ async function dispatchOwnerApprovedRecovery(
   // The timeout bounds only this sweep's wait. The same durable approval guards
   // any late claim/start, while acknowledgement stays exclusively in this caller.
   const accepted = await withinRecoveryRpcBudget(env, async () => {
-    if (snapshot.recovery_status === 'waking')
-      return nudgeTaskRunnerDO(
+    if (snapshot.recovery_status === 'waking') {
+      if (
+        await nudgeTaskRunnerDO(
+          env,
+          task.id,
+          'Retry owner-approved provider limit recovery',
+          approval
+        )
+      )
+        return true;
+      const status = await getTaskRunnerStatus(env, task.id);
+      if (
+        !snapshot.recovery_attempt_id ||
+        !canRepairSessionRecoveryRunner(status, {
+          taskId: task.id,
+          projectId: task.projectId,
+          userId: task.userId,
+          chatSessionId,
+          recoveryAttemptId: snapshot.recovery_attempt_id,
+        })
+      )
+        return false;
+      const result = await startMissingSessionRecoveryRunner(
         env,
-        task.id,
-        'Retry owner-approved provider limit recovery',
-        approval
+        task.projectId,
+        chatSessionId,
+        {
+          taskId: task.id,
+          projectId: task.projectId,
+          chatSessionId,
+          requiredProjectMemberId: task.userId,
+          providerLimitApproval: approval,
+        },
+        snapshot.recovery_attempt_id
       );
+      return result.status === 'waking';
+    }
     const result = await ensureSessionRecovery(env, task.projectId, chatSessionId, {
       taskId: task.id,
       projectId: task.projectId,
@@ -379,7 +413,13 @@ async function dispatchOwnerApprovedRecovery(
     !(await providerLimitRecoveryApprovalIsCurrent(env, task.id, task.projectId, approval))
   )
     return;
-  await acknowledgeProviderLimitRecovery(env, task.id, receipt);
+  await acknowledgeProviderLimitRecovery(
+    env,
+    task.id,
+    receipt,
+    false,
+    snapshot.recovery_status === 'waking' ? snapshot.recovery_attempt_id : undefined
+  );
 }
 
 /** Persisted consent covers only this owner, task scope and original deadline. */

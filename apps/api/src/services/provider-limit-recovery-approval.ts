@@ -53,12 +53,14 @@ export function providerLimitRecoveryApprovalCondition(
     : sql`0`;
   const source = sql`EXISTS (SELECT 1 FROM session_snapshots approved_snapshot JOIN agent_sessions approved_agent
       ON approved_agent.id=json_extract(${approval.receipt},'$.sourceAgentSessionId')
-        AND approved_agent.workspace_id=approved_snapshot.workspace_id
         AND approved_agent.user_id=approved_snapshot.user_id
+      JOIN workspaces approved_source_workspace ON approved_source_workspace.id=approved_agent.workspace_id
       WHERE approved_snapshot.id=${approval.snapshotId}
         AND approved_snapshot.project_id=${task}.project_id
         AND approved_snapshot.chat_session_id=${task}.chat_session_id
         AND approved_snapshot.user_id=${task}.user_id
+        AND approved_source_workspace.project_id=${task}.project_id
+        AND approved_source_workspace.user_id=${task}.user_id
         AND approved_agent.agent_credential_reference IS ${approval.sourceCredentialReference}
         AND approved_agent.agent_credential_generation=json_extract(${approval.receipt},'$.sourceCredentialGeneration')
         AND approved_agent.agent_profile_id IS json_extract(${approval.receipt},'$.ownerOverride.profileId')

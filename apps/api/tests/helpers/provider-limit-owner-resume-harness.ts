@@ -26,6 +26,7 @@ const boundary = vi.hoisted(() => ({
   userId: 'user-1',
   start: vi.fn(),
   nudge: vi.fn<(...args: unknown[]) => Promise<boolean>>(),
+  status: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
   selected: vi.fn<(...args: unknown[]) => Promise<string | null>>(),
   sql: null as unknown as SqlStorage,
 }));
@@ -43,6 +44,7 @@ vi.mock('../../src/services/task-runner-do', () => ({
   startTaskRunnerDO: (...args: unknown[]) => boundary.start(...args),
   ensureTaskRunnerStarted: vi.fn(async () => false),
   nudgeTaskRunnerDO: (...args: unknown[]) => boundary.nudge(...args),
+  getTaskRunnerStatus: (...args: unknown[]) => boundary.status(...args),
 }));
 vi.mock('../../src/services/project-data', () => ({
   getSessionAccess: async (_env: unknown, _project: string, sessionId: string, userId: string) => ({

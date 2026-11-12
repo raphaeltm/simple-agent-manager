@@ -136,7 +136,10 @@ async function assertTaskCredentialPin(
     key === wait.credentialKey &&
     wait.phase !== 'blocked'
   ) {
-    approvalInvalid = !(await authorizeFinalInjection(env, task, wait, request));
+    const authorization = await authorizeFinalInjection(env, task, wait, request);
+    if (authorization === 'superseded')
+      throw errors.conflict('Credential attribution was superseded; retry the current request');
+    approvalInvalid = authorization !== 'authorized';
   }
   if (
     wait?.credentialKey &&
@@ -293,41 +296,8 @@ function hasPriorInjection(
   );
 }
 
-async function authorizeFinalInjection(
-  env: Env,
-  task: ProviderLimitPinTask,
-  wait: ProviderLimitWait,
-  request: ProviderLimitPinRequest
-): Promise<boolean> {
-  const approval = wait.ownerOverride;
-  const generation = request.finalInjection?.credentialGeneration;
-  if (
-    !approval ||
-    !request.requestedAgentSessionId ||
-    !Number.isSafeInteger(generation) ||
-    !generation ||
-    generation < 1
-  )
-    return false;
-  const now = Date.now();
-  const expired = approval.expiresAt !== undefined && now >= approval.expiresAt;
-  if (expired && !hasPriorInjection(task, approval, request.requestedAgentSessionId, generation))
-    return false;
-  if (now < approval.grantedAt) return false;
-  const firstInjection = approval.firstInjection ?? {
-    authorizedAt: now,
-    workspaceId: task.workspaceId,
-    callbackGeneration: task.callbackGeneration,
-    agentSessionId: request.requestedAgentSessionId,
-    credentialGeneration: generation,
-  };
-  // Exact receipt + current returned attribution generation: a lost CAS never releases a secret.
-  const scope = scopedPinPredicate(task, request);
-  const authorized = await env.DATABASE.prepare(
-    `UPDATE tasks SET provider_limit_wait_json=?
-    WHERE id=? AND EXISTS (SELECT 1 ${scope.sql}
-      AND a.agent_credential_generation=? AND a.agent_credential_reference IS ?
-      AND (
+// Shared atomic deadline/committed-run fence for release and supersession classification.
+const FINAL_INJECTION_AUTHORITY_SQL = `AND (
         (ROUND((julianday('now')-2440587.5)*86400000)
           >=json_extract(t.provider_limit_wait_json,'$.ownerOverride.grantedAt')
           AND ROUND((julianday('now')-2440587.5)*86400000)
@@ -343,7 +313,43 @@ async function authorizeFinalInjection(
           AND json_extract(t.provider_limit_wait_json,'$.ownerOverride.firstInjection.agentSessionId')=a.id
           AND json_extract(t.provider_limit_wait_json,'$.ownerOverride.firstInjection.credentialGeneration')
             <=a.agent_credential_generation)
-      ))`
+      )`;
+
+async function authorizeFinalInjection(
+  env: Env,
+  task: ProviderLimitPinTask,
+  wait: ProviderLimitWait,
+  request: ProviderLimitPinRequest
+): Promise<'authorized' | 'superseded' | 'invalid'> {
+  const approval = wait.ownerOverride;
+  const generation = request.finalInjection?.credentialGeneration;
+  if (
+    !approval ||
+    !request.requestedAgentSessionId ||
+    !Number.isSafeInteger(generation) ||
+    !generation ||
+    generation < 1
+  )
+    return 'invalid';
+  const now = Date.now();
+  const expired = approval.expiresAt !== undefined && now >= approval.expiresAt;
+  if (expired && !hasPriorInjection(task, approval, request.requestedAgentSessionId, generation))
+    return 'invalid';
+  if (now < approval.grantedAt) return 'invalid';
+  const firstInjection = approval.firstInjection ?? {
+    authorizedAt: now,
+    workspaceId: task.workspaceId,
+    callbackGeneration: task.callbackGeneration,
+    agentSessionId: request.requestedAgentSessionId,
+    credentialGeneration: generation,
+  };
+  // Exact receipt + current returned attribution generation: a lost CAS never releases a secret.
+  const scope = scopedPinPredicate(task, request);
+  const authorized = await env.DATABASE.prepare(
+    `UPDATE tasks SET provider_limit_wait_json=?
+    WHERE id=? AND EXISTS (SELECT 1 ${scope.sql}
+      AND a.agent_credential_generation=? AND a.agent_credential_reference IS ?
+      ${FINAL_INJECTION_AUTHORITY_SQL})`
   )
     .bind(
       JSON.stringify({ ...wait, ownerOverride: { ...approval, firstInjection } }),
@@ -353,7 +359,16 @@ async function authorizeFinalInjection(
       request.reference
     )
     .run();
-  return authorized.meta.changes === 1;
+  if (authorized.meta.changes === 1) return 'authorized';
+  // A newer same-account attribution invalidates this response, not owner consent.
+  const newer = await env.DATABASE.prepare(
+    `SELECT 1 AS valid ${scope.sql}
+    AND a.agent_credential_generation>? AND a.agent_credential_reference IS ?
+    ${FINAL_INJECTION_AUTHORITY_SQL} LIMIT 1`
+  )
+    .bind(...scope.values, generation, request.reference)
+    .first();
+  return newer?.valid === 1 ? 'superseded' : 'invalid';
 }
 
 async function resolveTaskPinProfile(

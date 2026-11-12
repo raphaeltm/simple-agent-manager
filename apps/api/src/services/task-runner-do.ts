@@ -227,6 +227,8 @@ export async function startTaskRunnerDO(
     systemPromptAppend?: string | null;
     /** Agent profile ID — stored on workspace for GitHub CLI policy enforcement. */
     agentProfileHint?: string | null;
+    /** Skill selected for the task and replacement agent session. */
+    skillId?: string | null;
     /** File attachments uploaded to R2 before task submission. */
     attachments?: TaskAttachment[] | null;
     /** Per-project scaling overrides. */
@@ -335,6 +337,7 @@ export async function startTaskRunnerDO(
       opencodeBaseUrl: input.opencodeBaseUrl ?? null,
       systemPromptAppend: input.systemPromptAppend ?? null,
       agentProfileHint: input.agentProfileHint ?? null,
+      skillId: input.skillId ?? null,
       attachments: input.attachments ?? null,
       projectScaling: input.projectScaling ?? null,
       resourceRequirements: input.resourceRequirements ?? null,

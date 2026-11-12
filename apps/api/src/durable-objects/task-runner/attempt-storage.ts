@@ -20,6 +20,11 @@ export async function putTaskRunnerState(
   const superseded = await storage.transaction(async (transaction) => {
     const current = await transaction.get<TaskRunnerState>('state');
     if (current && attemptOf(current) !== attemptOf(state)) return { attempt: attemptOf(current) };
+    // Step writers retain state across RPCs. A same-attempt owner nudge is the
+    // sole approval writer; carry its latest receipt into both storage and the
+    // caller's live state so later assertions cannot silently forget consent.
+    if (current?.config.providerLimitRecoveryApproval)
+      state.config.providerLimitRecoveryApproval = current.config.providerLimitRecoveryApproval;
     await transaction.put('state', state);
     if (options.deleteAlarm) await transaction.deleteAlarm();
     return null;

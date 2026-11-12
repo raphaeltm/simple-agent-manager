@@ -10,6 +10,7 @@ import {
   buildVisibleInitialPrompt,
 } from '../../services/agent-bootstrap-prompt';
 import type { SamAwareAgentStartResult } from '../../services/agent-session-bootstrap';
+import { parseProviderLimitWait } from '../../services/provider-limit-policy';
 import { getRecoverySourceTaskGuard } from './helpers';
 import { transitionToInProgress } from './in-progress-transition';
 import { prepareSnapshotRestoreAttempt } from './snapshot-restore-retry';
@@ -115,6 +116,13 @@ export async function handleAgentSession(
       agentSessionId: sessionId,
       // Dispatch resolves the profile hint to its ID before persisting runner state.
       agentProfileId: state.config.agentProfileHint,
+      // A previously claimed runner predates this config field. Its newly
+      // approved receipt carries the same skill checked at every authority fence.
+      skillId:
+        state.config.skillId ??
+        parseProviderLimitWait(state.config.providerLimitRecoveryApproval?.receipt)?.ownerOverride
+          ?.skillId ??
+        null,
       label: buildTaskAgentSessionLabel(state.config.taskTitle),
       agentType,
       visibleInitialPrompt: buildVisibleTaskInitialPrompt(state),
