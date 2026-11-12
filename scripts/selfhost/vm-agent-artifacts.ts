@@ -29,7 +29,7 @@ import { sha256Hex } from './celld-binary.js';
 
 /** Matches `toolchain` in packages/vm-agent/go.mod. */
 export const VM_AGENT_BUILD_IMAGE =
-  'golang:1.26.10-bookworm@sha256:5de7c99eb78ca5e515a4c340235d0955ec5964a5071c492c15503d7c267da473';
+  'golang:1.26.11-bookworm@sha256:dc40a13b61304647ed7e5d581d246b86413dfc29d63c6d018310feb93cd98fc0';
 
 export const VM_AGENT_ARCHITECTURES = ['amd64', 'arm64'] as const;
 export type VmAgentArchitecture = (typeof VM_AGENT_ARCHITECTURES)[number];
