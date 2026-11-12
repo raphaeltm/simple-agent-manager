@@ -1,5 +1,6 @@
 /**
- * GCP nodes boot from a `pd-balanced` disk in the zone they are created in.
+ * GCP nodes boot from a `pd-balanced` disk in the zone they are created in, on machine series
+ * that support Persistent Disk. Hyperdisk-only series (N4, C4, ...) keep sending no disk type.
  *
  * Compute Engine gives an API-created disk with no type `pd-standard`. Every case drives the real
  * `GcpProvider.createVM` and reads the `instances.insert` body and URL it sent.
@@ -153,6 +154,39 @@ describe('GCP boot disk type', () => {
       ['us-central1-c', 'zones/us-central1-c/diskTypes/pd-balanced'],
     ]);
   });
+
+  it.each(['n4-standard-4', 'c4-standard-8', 'c4a-standard-4', 'n4d-standard-4'])(
+    'sends no disk type for Hyperdisk-only %s, as before',
+    async (instanceType) => {
+      const inserts: Insert[] = [];
+      stubCompute(inserts);
+      const provider = new GcpProvider('test-project', async () => 'token', DEFAULT_ZONE);
+
+      await provider.createVM(vmConfig({ location: DEFAULT_ZONE, instanceType }));
+
+      expect(inserts).toHaveLength(1);
+      expect(inserts[0]!.body.machineType).toBe(
+        `zones/${DEFAULT_ZONE}/machineTypes/${instanceType}`
+      );
+      expect(bootDisk(inserts[0]!)).toEqual({
+        sourceImage: 'projects/ubuntu-os-cloud/global/images/family/ubuntu-2404-lts-amd64',
+        diskSizeGb: '50',
+      });
+    }
+  );
+
+  it.each(['e2-medium', 'n2d-standard-8', 't2d-standard-4', 'c3-standard-4', 'n2-standard-4'])(
+    'requests pd-balanced for Persistent Disk series %s',
+    async (instanceType) => {
+      const inserts: Insert[] = [];
+      stubCompute(inserts);
+      const provider = new GcpProvider('test-project', async () => 'token', DEFAULT_ZONE);
+
+      await provider.createVM(vmConfig({ location: DEFAULT_ZONE, instanceType }));
+
+      expect(bootDisk(inserts[0]!).diskType).toBe(`zones/${DEFAULT_ZONE}/diskTypes/pd-balanced`);
+    }
+  );
 
   it('keeps a requested boot disk size alongside the disk type', async () => {
     const inserts: Insert[] = [];

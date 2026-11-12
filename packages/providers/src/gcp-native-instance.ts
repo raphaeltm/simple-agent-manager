@@ -4,6 +4,7 @@ import {
   DEFAULT_GCP_MACHINE_TYPE_LOOKUP_ATTEMPTS,
   DEFAULT_GCP_MACHINE_TYPE_LOOKUP_RETRY_DELAY_MS,
   extractIp,
+  GCP_PD_BALANCED_BOOT_SERIES,
   mapGcpStatus,
 } from './gcp-metadata';
 import { observedHardware } from './native-vm-config';
@@ -153,16 +154,25 @@ export async function fetchGcpMachineTypeResources(
 
 /**
  * The boot disk entry of an `instances.insert` body. The disk type is a zonal resource, so its
- * URL must name the zone the instance is inserted into (the same zone as the insert URL).
+ * URL must name the zone the instance is inserted into (the same zone as the insert URL). It is
+ * set only for machine series that support Persistent Disk; see `GCP_PD_BALANCED_BOOT_SERIES`.
  */
-export function gcpBootDisk(zone: string, sourceImage: string, diskSizeGb: number) {
+export function gcpBootDisk(
+  zone: string,
+  machineType: string,
+  sourceImage: string,
+  diskSizeGb: number
+) {
+  const series = machineType.split('-', 1)[0] ?? '';
   return {
     boot: true,
     autoDelete: true,
     initializeParams: {
       sourceImage,
       diskSizeGb: String(diskSizeGb),
-      diskType: `zones/${zone}/diskTypes/${DEFAULT_GCP_BOOT_DISK_TYPE}`,
+      ...(GCP_PD_BALANCED_BOOT_SERIES.has(series)
+        ? { diskType: `zones/${zone}/diskTypes/${DEFAULT_GCP_BOOT_DISK_TYPE}` }
+        : {}),
     },
   };
 }

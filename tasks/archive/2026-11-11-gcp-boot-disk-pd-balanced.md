@@ -48,3 +48,4 @@ tokenProvider, defaultZone)` directly. An override field would have no setter: n
 ## Notes
 
 - Pre-existing, out of scope: `GCP_DISK_SIZE_GB` is documented (`reference/configuration.md`) and declared in `apps/api/src/env.ts` but nothing passes it to `GcpProvider`; recorded as a SAM idea.
+- CodeRabbit (Major): Hyperdisk-only series (N4, C4, C4A, N4D, ...) reject Persistent Disk. Google's docs do not say what `instances.insert` picks for an unset type on those series, so `pd-balanced` is now sent only for series in `GCP_PD_BALANCED_BOOT_SERIES` (e2, n1, n2, n2d, t2d, c2, c2d, c3, c3d). Every other series keeps sending no type, as before. Tests: 4 Hyperdisk-only cases (red with the guard removed) and 5 PD-series controls.

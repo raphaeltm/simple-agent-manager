@@ -213,6 +213,7 @@ export class GcpProvider implements Provider {
       disks: [
         gcpBootDisk(
           zone,
+          nativeConfig.instanceType,
           resolveGcpSourceImage(nativeConfig.image ?? this.imageFamily, this.imageProject),
           nativeConfig.bootDiskSizeGb ?? this.diskSizeGb
         ),
