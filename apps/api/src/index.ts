@@ -12,6 +12,7 @@ export { AiTokenBudgetCounter } from './durable-objects/ai-token-budget-counter'
 export { CodexRefreshLock } from './durable-objects/codex-refresh-lock';
 export { CredentialSetupSession } from './durable-objects/credential-setup-session';
 export { DiagnosisRunner } from './durable-objects/diagnosis-runner';
+export { HostedGitRepo } from './durable-objects/hosted-git-repo';
 export { GitHubUserAccessTokenLock } from './durable-objects/github-user-access-token-lock';
 export { GitLabUserAccessTokenLock } from './durable-objects/gitlab-user-access-token-lock';
 export { InteractionStore } from './durable-objects/interaction-store';
@@ -171,6 +172,8 @@ import { workspacesRoutes } from './routes/workspaces';
 import { scheduled } from './scheduled/handler';
 import { handleInboundAgentEmail } from './services/agent-email/inbound';
 import { agentEmailConfig } from './services/agent-email/setup-state';
+import { isLocalHostedGitActive } from './services/hosted-git/backend';
+import { handleHostedGitRequest, HOSTED_GIT_PATH_PREFIX } from './services/hosted-git/http';
 import { isArtifactsAvailable, publicPlatformCapabilities } from './services/platform-capabilities';
 import { isInstantRuntimeAvailable } from './services/vm-agent-container';
 
@@ -244,6 +247,15 @@ app.use('*', requestLoggingMiddleware());
 app.use('*', analyticsMiddleware());
 
 app.use('*', apiCors);
+
+// Git smart HTTP for SAM-hosted repositories (self-host). Authenticated per request with a
+// repository token, not a session cookie, so it sits before every session-auth router. Inactive
+// (falls through to 404) unless this install uses the local hosted git backend.
+app.all(`${HOSTED_GIT_PATH_PREFIX}*`, async (c, next) => {
+  if (!isLocalHostedGitActive(c.env)) return next();
+  const response = await handleHostedGitRequest(c.req.raw, c.env);
+  return response ?? next();
+});
 
 // Health check — public endpoint returns minimal info only
 app.get('/health', (c) => {

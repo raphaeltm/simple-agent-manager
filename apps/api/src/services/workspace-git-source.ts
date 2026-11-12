@@ -13,7 +13,8 @@ export type WorkspaceGitSource = {
   repositoryPath: string | null;
 };
 
-export type WorkspaceGitSourceProject = Pick<schema.Project, 'id' | 'repoProvider'>;
+export type WorkspaceGitSourceProject = Pick<schema.Project, 'id' | 'repoProvider'> &
+  Partial<Pick<schema.Project, 'repository'>>;
 
 const DEFAULT_GITHUB_SOURCE: WorkspaceGitSource = {
   repoProvider: 'github',
@@ -35,11 +36,49 @@ function normalizeRepoProvider(
   }
 }
 
+/** Cloudflare Artifacts hosts; the VM agent recognizes these by name (gitrepo.IsArtifactsHost). */
+function isCloudflareArtifactsHost(host: string): boolean {
+  return host === 'artifacts.cloudflare.net' || host.endsWith('.artifacts.cloudflare.net');
+}
+
+/**
+ * An Artifacts project's clone URL is `projects.repository`. For a Cloudflare Artifacts remote
+ * nothing changes (the VM agent knows the host). For a SAM-hosted repository on a self-hosted
+ * install (`https://api.<BASE_DOMAIN>/git/<repo>.git`) the VM agent is told the host, so it
+ * attaches the workspace's git token to the clone and its credential helper answers for it.
+ */
+async function resolveArtifactsGitSource(
+  db: Db,
+  project: WorkspaceGitSourceProject
+): Promise<WorkspaceGitSource> {
+  const artifactsSource: WorkspaceGitSource = { ...DEFAULT_GITHUB_SOURCE, repoProvider: 'artifacts' };
+  let repository = project.repository;
+  if (repository === undefined) {
+    const rows = await db
+      .select({ repository: schema.projects.repository })
+      .from(schema.projects)
+      .where(eq(schema.projects.id, project.id))
+      .limit(1);
+    repository = rows[0]?.repository;
+  }
+  let host: string | null = null;
+  try {
+    host = repository ? new URL(repository).host.toLowerCase() : null;
+  } catch {
+    host = null;
+  }
+  if (!host || !repository || isCloudflareArtifactsHost(host)) return artifactsSource;
+  return { ...artifactsSource, cloneUrl: repository, repositoryHost: host };
+}
+
 export async function resolveWorkspaceGitSource(
   db: Db,
   project: WorkspaceGitSourceProject
 ): Promise<WorkspaceGitSource> {
   const repoProvider = normalizeRepoProvider(project.repoProvider);
+  if (repoProvider === 'artifacts') {
+    return resolveArtifactsGitSource(db, project);
+  }
   if (repoProvider !== 'gitlab') {
     return {
       ...DEFAULT_GITHUB_SOURCE,

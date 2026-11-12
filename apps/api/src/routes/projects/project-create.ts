@@ -21,7 +21,7 @@ import {
   verifyGitLabProjectAccess,
 } from '../../services/gitlab';
 import { getRuntimeLimits } from '../../services/limits';
-import { isArtifactsAvailable } from '../../services/platform-capabilities';
+import { artifactsRemoteFetch, resolveArtifactsBackend } from '../../services/hosted-git/backend';
 import {
   assertRepositoryAccess,
   isValidRepositoryFormat,
@@ -85,7 +85,8 @@ export function registerProjectCreateRoute(crudRoutes: Hono<{ Bindings: Env }>):
         throw errors.badRequest('Artifacts repo provider is not enabled');
       }
       // Enabled but no binding: this runtime has no Cloudflare Artifacts (not a server fault).
-      if (!isArtifactsAvailable(c.env) || !c.env.ARTIFACTS) {
+      const artifacts = resolveArtifactsBackend(c.env);
+      if (!artifacts) {
         throw errors.featureUnavailable(
           'artifacts',
           'SAM-native Git repositories are not available on this installation'
@@ -124,7 +125,7 @@ export function registerProjectCreateRoute(crudRoutes: Hono<{ Bindings: Env }>):
       // Must be sanitized: Artifacts rejects uppercase/spaces (the ULID projectId
       // is uppercase and normalizedName preserves spaces).
       const repoName = toArtifactsRepoName(normalizedName, projectId);
-      const created = await c.env.ARTIFACTS.create(repoName, {
+      const created = await artifacts.create(repoName, {
         description: description || undefined,
         setDefaultBranch: defaultBranch,
       });
@@ -142,6 +143,7 @@ export function registerProjectCreateRoute(crudRoutes: Hono<{ Bindings: Env }>):
           branch: defaultBranch,
           projectName: name,
           description,
+          fetchImpl: artifactsRemoteFetch(c.env),
         });
       } catch (seedError) {
         log.error('project_create.artifacts_seed_failed', {
@@ -153,7 +155,7 @@ export function registerProjectCreateRoute(crudRoutes: Hono<{ Bindings: Env }>):
         // Best-effort cleanup: the repo exists but has no usable content, and no
         // project row will reference it. Delete it so it does not leak quota.
         try {
-          await c.env.ARTIFACTS.delete(created.name);
+          await artifacts.delete(created.name);
         } catch (cleanupError) {
           log.error('project_create.artifacts_seed_cleanup_failed', {
             projectId,

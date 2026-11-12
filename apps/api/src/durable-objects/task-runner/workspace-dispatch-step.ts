@@ -11,13 +11,14 @@ import type { TaskRunnerContext, TaskRunnerState } from './types';
 
 type TaskRunnerProjectRepo = {
   repoProvider: string | null;
+  repository?: string | null;
 };
 
 async function loadTaskRunnerProjectRepo(
   state: TaskRunnerState,
   rc: TaskRunnerContext
 ): Promise<TaskRunnerProjectRepo | null> {
-  return rc.env.DATABASE.prepare(`SELECT repo_provider AS repoProvider FROM projects WHERE id = ?`)
+  return rc.env.DATABASE.prepare(`SELECT repo_provider AS repoProvider, repository FROM projects WHERE id = ?`)
     .bind(state.projectId)
     .first<TaskRunnerProjectRepo>();
 }
@@ -38,6 +39,7 @@ async function createWorkspaceOnVmAgent(
   const gitSource = await resolveWorkspaceGitSource(drizzle(rc.env.DATABASE, { schema }), {
     id: state.projectId,
     repoProvider: projectRepo?.repoProvider ?? 'github',
+    ...(projectRepo?.repository ? { repository: projectRepo.repository } : {}),
   });
   const checkoutBranch = state.config.outputBranch || state.config.branch;
   const baseBranch =

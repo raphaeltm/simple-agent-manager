@@ -24,6 +24,8 @@ import { parsePositiveInt } from '../../lib/route-helpers';
 import { getCredentialEncryptionKey } from '../../lib/secrets';
 import { ulid } from '../../lib/ulid';
 import { requireApproved, requireAuth } from '../../middleware/auth';
+import { hostedGitHost, isLocalHostedGitActive, resolveArtifactsBackend } from '../../services/hosted-git/backend';
+import { mintHostedGitToken } from '../../services/hosted-git/tokens';
 import { errors } from '../../middleware/error';
 import {
   AgentTypeBodySchema,
@@ -1265,7 +1267,8 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
     if (c.env.ARTIFACTS_ENABLED !== 'true') {
       throw errors.forbidden('Artifacts provider is not enabled');
     }
-    if (!c.env.ARTIFACTS) {
+    const artifacts = resolveArtifactsBackend(c.env);
+    if (!artifacts) {
       throw errors.featureUnavailable(
         'artifacts',
         'SAM-native Git repositories are not available on this installation'
@@ -1282,9 +1285,19 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
     const ttl = Number.isFinite(rawTtl) && rawTtl > 0 && rawTtl <= 86400 ? rawTtl : 3600;
     // Use requested scope or default to 'write' (agents need push access)
     const requestedScope = c.req.query('scope') === 'read' ? ('read' as const) : ('write' as const);
-    const repo = await c.env.ARTIFACTS.get(artifactsRepoId);
+    const repo = await artifacts.get(artifactsRepoId);
     await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'git_token');
-    const tokenResult = await repo.createToken(requestedScope, ttl);
+    // SAM-hosted repositories (self-host): the token is bound to this workspace, so the git
+    // server refuses it once the workspace stops (services/hosted-git/http.ts).
+    const localHostedGit = isLocalHostedGitActive(c.env);
+    const tokenResult = localHostedGit
+      ? await mintHostedGitToken(c.env, {
+          repo: artifactsRepoId,
+          scope: requestedScope,
+          ttlSeconds: ttl,
+          workspaceId: workspace.workspaceId,
+        }).then((minted) => ({ plaintext: minted.token, expiresAt: minted.expiresAt, expires_at: undefined }))
+      : await repo.createToken(requestedScope, ttl);
 
     // Strip ?expires= suffix from token for git credential use
     const tokenSecret = tokenResult.plaintext.split('?expires=')[0] || tokenResult.plaintext;
@@ -1319,6 +1332,9 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
       token: tokenSecret,
       expiresAt: tokenResult.expiresAt ?? tokenResult.expires_at,
       cloneUrl,
+      // The VM agent's credential helper answers for this host with this username; a hosted
+      // repository's host (api.<BASE_DOMAIN>) is not one it recognizes by name.
+      ...(localHostedGit ? { host: hostedGitHost(c.env), username: 'x' } : {}),
     });
   }
 
