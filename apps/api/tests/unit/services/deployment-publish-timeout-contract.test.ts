@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 
 import { expect, it } from 'vitest';
 
+import { resolveAdminSetting } from '../../../src/services/admin-settings';
 import { DEPLOYMENT_PUBLISH_SETTINGS } from '../../../src/services/admin-settings-deployment-publish-definitions';
 import { DEFAULT_DEPLOY_PUBLISH_JOB_DEADLINE_MARGIN_MS } from '../../../src/services/deployment-publish-job-defaults';
 import { getDeploymentPublishJobSettings } from '../../../src/services/deployment-publish-job-settings';
@@ -15,7 +16,9 @@ it.skipIf(process.env.SAM_PUBLISH_TIMEOUT_CONTRACT !== '1')(
   async () => {
     const { sqlite, env } = createAdminSettingsEnv();
     try {
-      const settings = await getDeploymentPublishJobSettings(env);
+      const settings = await getDeploymentPublishJobSettings({
+        resolveSetting: (name) => resolveAdminSetting(env, name),
+      });
       expect(() =>
         execFileSync(
           'go',

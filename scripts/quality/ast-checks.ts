@@ -377,11 +377,12 @@ function main() {
   } else {
     project.addSourceFilesAtPaths([
       resolve(ROOT, 'apps/api/src/**/*.ts'),
-      // Pure code lifted out of the worker keeps the same checks (worker modularization).
+      // Worker modules lifted into packages keep the API checks (worker modularization).
       resolve(ROOT, 'packages/scheduler-core/src/**/*.ts'),
       // Worker modules extracted into packages still run in this Worker (worker modularization).
       resolve(ROOT, 'packages/project-data/src/**/*.ts'),
       resolve(ROOT, 'packages/agent-email/src/**/*.ts'),
+      resolve(ROOT, 'packages/app-deployment/src/**/*.ts'),
     ]);
   }
 

@@ -104,7 +104,7 @@ vi.mock('drizzle-orm', () => ({
   inArray: (col: unknown, vals: unknown) => [col, vals],
 }));
 
-vi.mock('../../../src/db/schema', () => ({
+vi.mock('@simple-agent-manager/worker-core/schema', () => ({
   deploymentEnvironments: {
     id: 'de.id',
     projectId: 'de.projectId',

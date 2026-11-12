@@ -8,8 +8,8 @@ import type { DeploymentManifest } from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 
-import type { ComposeRenderContext } from '../../../src/services/compose-renderer';
-import { collectSecretNames, renderCompose } from '../../../src/services/compose-renderer';
+import type { ComposeRenderContext } from '../../src/compose-renderer';
+import { collectSecretNames, renderCompose } from '../../src/compose-renderer';
 
 // =============================================================================
 // Helpers
@@ -79,7 +79,11 @@ describe('collectSecretNames', () => {
           volumes: [],
         },
         worker: {
-          image: { registry: 'docker.io', repository: 'app/worker', digest: 'sha256:' + 'b'.repeat(64) },
+          image: {
+            registry: 'docker.io',
+            repository: 'app/worker',
+            digest: 'sha256:' + 'b'.repeat(64),
+          },
           env: {
             QUEUE_URL: { secret: 'QUEUE_SECRET' },
             SHARED_KEY: { secret: 'SHARED_SECRET' }, // same secret referenced in both services
@@ -132,12 +136,12 @@ describe('renderCompose with secrets', () => {
     expect(() => renderCompose(manifest, { ...CTX, resolvedSecrets: {} })).toThrow(
       expect.objectContaining({
         message: expect.stringContaining('SECRET_A'),
-      }),
+      })
     );
     expect(() => renderCompose(manifest, { ...CTX, resolvedSecrets: {} })).toThrow(
       expect.objectContaining({
         message: expect.stringContaining('SECRET_B'),
-      }),
+      })
     );
   });
 

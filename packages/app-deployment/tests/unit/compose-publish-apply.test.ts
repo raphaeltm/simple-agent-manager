@@ -4,7 +4,7 @@ import { parse as parseYaml } from 'yaml';
 import {
   buildComposePublishApplyPayload,
   type ComposePublishSubmission,
-} from '../../../src/services/compose-publish-apply';
+} from '../../src/compose-publish-apply';
 
 const ENVIRONMENT_ID = 'env-crewai-1';
 const RELEASE_ID = 'release-ulid-1';

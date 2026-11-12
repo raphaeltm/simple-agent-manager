@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { sanitizePublishEventText } from '../../../src/services/deployment-publish-jobs';
+import { sanitizePublishEventText } from '../../src/deployment-publish-jobs';
 
 describe('deployment publish job event sanitization', () => {
   it('redacts signed R2 URLs, bearer tokens, JWTs, and secret-like fields', () => {

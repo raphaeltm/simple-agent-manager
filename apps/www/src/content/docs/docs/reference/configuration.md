@@ -355,7 +355,7 @@ fetch/apply events, a valid manifest, and a release version that is not the obse
 applied version. Unknown statuses, malformed manifests, missing observed state, active
 `applying` observations, and recent release events fail closed. Compose artifact cleanup
 then re-derives references from the remaining manifests
-(`apps/api/src/scheduled/compose-image-artifact-cleanup.ts:runComposeImageArtifactCleanup()`).
+(`packages/app-deployment/src/scheduled/compose-image-artifact-cleanup.ts:runComposeImageArtifactCleanup()`).
 
 | Variable                                                 | Default                                | Description                                                                                           |
 | -------------------------------------------------------- | -------------------------------------- | ----------------------------------------------------------------------------------------------------- |

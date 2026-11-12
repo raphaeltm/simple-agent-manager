@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { createImageResolver, ImageResolveError } from '../../src/services/image-resolver';
+import { createImageResolver, ImageResolveError } from '../../src/image-resolver';
 
 // =============================================================================
 // Helpers — realistic mock registry HTTP responses

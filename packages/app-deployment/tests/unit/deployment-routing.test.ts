@@ -6,7 +6,7 @@ import {
   buildReleaseRouteTargets,
   collectEnvironmentRouteHostnames,
   environmentPortOffset,
-} from '../../../src/services/deployment-routing';
+} from '../../src/deployment-routing';
 
 function manifest() {
   return {

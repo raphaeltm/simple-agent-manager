@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   buildVerifiedCustomRouteTargets,
   getEnvironmentPublicRouteTargets,
-} from '../../../src/services/deployment-custom-domains';
-import { environmentPortOffset } from '../../../src/services/deployment-routing';
+} from '../../src/deployment-custom-domains';
+import { environmentPortOffset } from '../../src/deployment-routing';
 
 type PublicRouteDb = Parameters<typeof getEnvironmentPublicRouteTargets>[0];
 type CustomDomainDb = Parameters<typeof buildVerifiedCustomRouteTargets>[0];
