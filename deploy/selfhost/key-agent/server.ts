@@ -19,14 +19,14 @@
  * Run with Node's type stripping: `node server.ts`.
  */
 import { createPrivateKey, type KeyObject, sign } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { join } from 'node:path';
 
 import { BUNDLE_ID, openBundle, parseBundle, type Secrets } from './bundle.ts';
 import { loopbackPeerUid } from './peer.ts';
 import { type KeyProvider, KeyProviderError } from './provider.ts';
-import { createKeyProvider } from './providers.ts';
+import { createKeyProvider, LEGACY_KEY_PROVIDER } from './providers.ts';
 
 export const DEFAULT_KEY_AGENT_PORT = 7190;
 export const DEFAULT_CACHE_SECONDS = 300;
@@ -78,6 +78,12 @@ function toOpened(installationId: string, all: Secrets): Opened {
 
 export interface AgentOptions {
   provider: KeyProvider;
+  /**
+   * During `pnpm selfhost:secrets switch`: the provider the box used before, so the Worker version
+   * still running keeps getting its (old) bundle until the new version is deployed. Chosen by the
+   * bundle header, never tried as a fallback.
+   */
+  previousProvider?: KeyProvider;
   bundleDir: string;
   allowedUids: ReadonlySet<number>;
   cacheMs: number;
@@ -143,12 +149,17 @@ export function createKeyAgent(options: AgentOptions): Server {
       const started = now();
       try {
         const bundle = parseBundle(text);
-        const opened = toOpened(bundle.installationId, await openBundle(bundle, options.provider));
+        const previous = options.previousProvider;
+        const provider =
+          previous && bundle.provider === previous.name && bundle.keyRef === previous.keyRef
+            ? previous
+            : options.provider;
+        const opened = toOpened(bundle.installationId, await openBundle(bundle, provider));
         cache.set(bundleId, { opened, openedAt: now() });
         log({
           event: 'key_agent.bundle_opened',
           bundleId,
-          provider: options.provider.name,
+          provider: provider.name,
           ms: now() - started,
         });
         return opened;
@@ -265,12 +276,73 @@ function parseUids(raw: string | undefined): Set<number> {
   return new Set(uids);
 }
 
+/**
+ * Started as root (docker-compose.yml: no SAM_KEY_AGENT_UID), the agent becomes the owner of its
+ * state directory before it reads anything or opens a socket: the bundles and the key file are
+ * that user's mode-0600 files. The container holds only CAP_SETUID and CAP_SETGID for this, and
+ * both are gone once the uid is no longer 0. A root-owned directory leaves it root, without any
+ * other capability.
+ */
+export function dropToOwnerOf(dir: string): { uid: number; gid: number } | null {
+  if (process.getuid?.() !== 0 || !process.setuid || !process.setgid || !process.setgroups) {
+    return null;
+  }
+  const { uid, gid } = statSync(dir);
+  if (uid === 0) return null;
+  process.setgroups([gid]);
+  process.setgid(gid);
+  process.setuid(uid);
+  if (process.getuid() !== uid || process.getgid?.() !== gid) {
+    throw new Error(`could not become ${uid}:${gid}`);
+  }
+  return { uid, gid };
+}
+
+/** A box with sealing off (`legacy-plaintext`): healthy for compose, no secrets for anyone. */
+export function createLegacyAgent(): Server {
+  return createServer((request, response) => {
+    if (request.method === 'GET' && request.url === '/healthz') {
+      reply(response, 200, { ok: true, sealed: false });
+      return;
+    }
+    reply(response, 503, { error: 'sealed_secrets_off' });
+  });
+}
+
+/** Name of the file `selfhost:secrets switch` writes while it moves the box to another provider. */
+export const PREVIOUS_PROVIDER_ENV = 'previous.env';
+
+/** The previous provider's settings (`NAME=value` lines), if a switch is in progress. */
+export function previousProvider(stateDir: string): KeyProvider | undefined {
+  let text: string;
+  try {
+    text = readFileSync(join(stateDir, PREVIOUS_PROVIDER_ENV), 'utf8');
+  } catch {
+    return undefined;
+  }
+  const env: Record<string, string> = {};
+  for (const line of text.split('\n')) {
+    const match = /^([A-Z][A-Z0-9_]*)=(.*)$/.exec(line.trim());
+    if (match?.[1]) env[match[1]] = match[2] ?? '';
+  }
+  return createKeyProvider(env);
+}
+
 function main(): void {
   const env = process.env;
+  const dropped = dropToOwnerOf(env.SAM_KEY_AGENT_STATE_DIR ?? '/etc/sam/key-agent');
+  if (dropped) console.log(JSON.stringify({ event: 'key_agent.dropped_root', ...dropped }));
   const port = Number(env.SAM_KEY_AGENT_PORT ?? DEFAULT_KEY_AGENT_PORT);
+  if (env.SAM_KEY_PROVIDER?.trim() === LEGACY_KEY_PROVIDER) {
+    createLegacyAgent().listen(port, '127.0.0.1', () => {
+      console.log(JSON.stringify({ event: 'key_agent.legacy_plaintext', port }));
+    });
+    return;
+  }
   const cacheSeconds = Number(env.SAM_KEY_AGENT_CACHE_SECONDS ?? DEFAULT_CACHE_SECONDS);
   const server = createKeyAgent({
     provider: createKeyProvider(env),
+    previousProvider: previousProvider(env.SAM_KEY_AGENT_STATE_DIR ?? '/etc/sam/key-agent'),
     bundleDir: env.SAM_KEY_AGENT_BUNDLE_DIR ?? '/etc/sam/key-agent/bundles',
     allowedUids: parseUids(env.SAM_KEY_AGENT_ALLOWED_UIDS),
     cacheMs: Math.max(0, cacheSeconds) * 1000,

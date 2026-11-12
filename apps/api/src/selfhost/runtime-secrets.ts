@@ -18,6 +18,7 @@
  */
 
 import { log } from '../lib/logger';
+import { type JsonRecord, maybeJsonRecord } from '../lib/runtime-validation';
 
 export const DEFAULT_KEY_AGENT_TIMEOUT_MS = 3000;
 const AGENT_URL = /^http:\/\/127\.0\.0\.1:\d{1,5}\/v1\/secrets$/;
@@ -158,12 +159,9 @@ async function fetchSecrets(agent: AgentSettings): Promise<RuntimeSecrets> {
   if (response.status !== 200) {
     let error: unknown;
     try {
-      const parsed = JSON.parse(text) as unknown;
-      error =
-        typeof parsed === 'object' && parsed !== null
-          ? (parsed as Record<string, unknown>).error
-          : undefined;
+      error = maybeJsonRecord(JSON.parse(text) as unknown)?.error;
     } catch {
+      // never repeat the parser's message: it can quote the body
       error = undefined;
     }
     throw new RuntimeSecretsUnavailableError(
@@ -179,11 +177,11 @@ async function fetchSecrets(agent: AgentSettings): Promise<RuntimeSecrets> {
       "key agent answer is not signed by this deployment's agent key"
     );
   }
-  let record: { bundleId?: unknown; nonce?: unknown; secrets?: unknown } = {};
+  let record: JsonRecord = {};
   try {
-    const parsed: unknown = JSON.parse(text) as unknown;
-    if (typeof parsed === 'object' && parsed !== null) record = parsed as typeof record;
+    record = maybeJsonRecord(JSON.parse(text) as unknown) ?? {};
   } catch {
+    // never repeat the parser's message: the body carries the secrets
     record = {};
   }
   const secrets = record.secrets;

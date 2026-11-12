@@ -27,6 +27,8 @@ import { type BoxContext, runBackup, type RunResult } from './backup-lib';
 
 /** Files under .state/ that docker compose services read (env_file, mounts). */
 const GENERATED_STATE_FILE = /\.(env|nft|caddy|toml|json)$/;
+/** Generated files in subdirectories of .state/ that a compose service reads. */
+const GENERATED_NESTED_FILES = ['key-agent/agent.env'];
 const MIGRATIONS_DIR = 'apps/api/src/db/migrations/';
 
 export interface UpgradeOptions {
@@ -65,7 +67,23 @@ function stateFingerprint(stateDir: string): string {
       // a directory or unreadable entry is not a compose input
     }
   }
+  for (const name of GENERATED_NESTED_FILES) {
+    const path = join(stateDir, name);
+    if (existsSync(path)) hash.update(name).update(readFileSync(path));
+  }
   return hash.digest('hex');
+}
+
+/**
+ * A plaintext box (platform-keys.json present) with no recorded key provider and no
+ * SAM_KEY_PROVIDER in .env: one the upgrade must not switch to sealed secrets by itself.
+ */
+export function holdOnPlaintext(ctx: Pick<BoxContext, 'box' | 'stateDir'>): boolean {
+  return (
+    existsSync(join(ctx.stateDir, 'platform-keys.json')) &&
+    !existsSync(join(ctx.stateDir, 'key-agent', 'choice.json')) &&
+    !ctx.box.SAM_KEY_PROVIDER?.trim()
+  );
 }
 
 export function rollbackSteps(
@@ -147,7 +165,17 @@ export async function runUpgrade(ctx: BoxContext, opts: UpgradeOptions): Promise
     git(['checkout', '--detach', to]);
     pnpm(['install', '--frozen-lockfile']);
     const before = stateFingerprint(ctx.stateDir);
-    pnpm(['selfhost:deploy', '--init']);
+    // A box that still runs on plaintext files stays on them: switching to sealed secrets is
+    // `pnpm selfhost:secrets migrate`, which checks the chain first and rolls back on failure.
+    const hold = holdOnPlaintext(ctx);
+    if (hold) {
+      ctx.log(
+        'this box still has its plaintext secret files: the upgrade keeps it on plaintext deploy ' +
+          'vars; afterwards, `pnpm selfhost:secrets migrate` seals it safely'
+      );
+    }
+    const keyArgs = hold ? ['--key-provider', 'legacy-plaintext'] : [];
+    pnpm(['selfhost:deploy', '--init', ...keyArgs]);
     const stateChanged = stateFingerprint(ctx.stateDir) !== before;
     if (composeFilesChanged || stateChanged) {
       ctx.log(
@@ -170,7 +198,7 @@ export async function runUpgrade(ctx: BoxContext, opts: UpgradeOptions): Promise
     } else {
       ctx.log('compose inputs unchanged; the stack keeps running');
     }
-    pnpm(['selfhost:deploy']);
+    pnpm(['selfhost:deploy', ...keyArgs]);
     if (!(await opts.checkHealth())) throw new Error('the API is not healthy after the upgrade');
   } catch (error) {
     const steps = rollbackSteps(from, migrationsChanged, composeFilesChanged, opts.backupDir);
@@ -181,6 +209,17 @@ export async function runUpgrade(ctx: BoxContext, opts: UpgradeOptions): Promise
   }
 
   const rollback = rollbackSteps(from, migrationsChanged, composeFilesChanged, opts.backupDir);
+  // A box held on plaintext above, or one sealed whose plaintext files remain: migrate finishes it.
+  if (
+    existsSync(join(ctx.stateDir, 'platform-keys.json')) &&
+    ctx.box.SAM_KEY_PROVIDER?.trim() !== 'legacy-plaintext'
+  ) {
+    ctx.log(
+      'plaintext secrets are still on this box (.state/platform-keys.json, secrets.env): run ' +
+        '`pnpm selfhost:secrets migrate` to seal (or verify) and remove them, then ' +
+        '`pnpm selfhost:secrets plaintext` for the old copies in the bucket and backups'
+    );
+  }
   ctx.log(`upgraded to ${to}; healthy. To roll back:`);
   for (const step of rollback) ctx.log(`  ${step}`);
   return { from, to, backupDir: opts.backupDir, composeRestarted, migrationsChanged, rollback };

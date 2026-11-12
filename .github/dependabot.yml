@@ -63,6 +63,11 @@ updates:
     directory: '/deploy/selfhost/docker-proxy'
     schedule:
       interval: weekly
+  # Self-hosted key agent for sealed Worker secrets (node, pinned by digest).
+  - package-ecosystem: 'docker'
+    directory: '/deploy/selfhost/key-agent'
+    schedule:
+      interval: weekly
   # Self-hosted sam-mx build (golang + alpine, both pinned by digest).
   - package-ecosystem: 'docker'
     directory: '/deploy/selfhost/sam-mx'

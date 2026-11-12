@@ -139,6 +139,7 @@ describe('dependency governance', () => {
       'deploy/selfhost/caddy/Dockerfile',
       'deploy/selfhost/docker-proxy/Dockerfile',
       'deploy/selfhost/egress-fence/Dockerfile',
+      'deploy/selfhost/key-agent/Dockerfile',
       'deploy/selfhost/sam-mx/Dockerfile',
       'scripts/e2e/workspace-mock/Dockerfile',
     ]);
@@ -149,6 +150,7 @@ describe('dependency governance', () => {
       '/deploy/selfhost/caddy',
       '/deploy/selfhost/docker-proxy',
       '/deploy/selfhost/egress-fence',
+      '/deploy/selfhost/key-agent',
       '/deploy/selfhost/sam-mx',
       '/scripts/e2e/workspace-mock',
     ]);

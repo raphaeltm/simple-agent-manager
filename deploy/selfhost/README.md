@@ -20,6 +20,7 @@ install, the bundled mail collector (see Email sign-in below).
 | `frps`               | host    | `127.0.0.1:7000`                | profile `tunnel`; nodes arrive as frp over wss via Caddy |
 | `objectstore`        | host    | `127.0.0.1:9000`                | profile `local-store`; otherwise use a GCS/S3 bucket     |
 | `docker-proxy`       | none    | a unix socket shared with celld | guided login only: filters celld's Docker API calls      |
+| `key-agent`          | host    | `127.0.0.1:7190`                | opens the sealed Worker secrets for celld only           |
 
 Profile `mail-collector` (off by default, test installs only) adds `mail-collector`: Mailpit on
 `127.0.0.1:1025` (SMTP) and `127.0.0.1:8025` (UI, published at `mail.SAM_DOMAIN`). See Email sign-in.
@@ -32,7 +33,7 @@ Needs Docker with Compose v2.20+, Node 22+ and pnpm, and a checkout of this repo
 cp deploy/selfhost/.env.example deploy/selfhost/.env && chmod 600 deploy/selfhost/.env
 $EDITOR deploy/selfhost/.env           # SAM_DOMAIN, TLS mode, bucket
 pnpm install
-pnpm selfhost:deploy --init            # platform keys, gateway.env, egress fence files
+pnpm selfhost:deploy --init            # key provider, sealed platform keys, gateway.env, fence files
 docker compose -f deploy/selfhost/docker-compose.yml up -d
 pnpm selfhost:deploy                   # build web, migrate, deploy; re-run to upgrade
 pnpm selfhost:verify-fence             # the egress fence is in effect (see below)
@@ -52,19 +53,19 @@ uses (`agents/releases/<release>/vm-agent-linux-<arch>`, immutable), then pins t
 history, so the checkout must be a full clone (not `--depth 1`).
 
 Worker secrets that are yours to supply (GitHub App, OAuth clients) go in
-`deploy/selfhost/.state/secrets.env` (`NAME=value`, mode 600). Platform keys are generated into
-`.state/platform-keys.json` and never regenerated: back up `.state/` and the bucket.
+`deploy/selfhost/.state/secrets.env` (`NAME=value`, mode 600). The deploy seals them, with the
+platform keys it generates once, into a bundle only the box's key agent can open (Sealed secrets,
+below). Back up `.state/` and the bucket, and keep the key apart from both.
 
-celld has no secrets store for real nodes. Unless sealed secrets are on (below), `pnpm selfhost:deploy` renders secrets into the
-Worker's `vars` for `celld deploy` only and leaves a secrets-free `wrangler.json` behind, but
-celld keeps every deployed version's vars in plaintext under `deploy/` in the fleet bucket. The
-bucket credential is therefore the root secret of the install.
+celld has no secrets store for real nodes, and it keeps every deployed version's vars in plaintext
+under `deploy/` in the fleet bucket. So the Worker gets its secrets at runtime from the key agent
+and the deploy vars carry none. Only `SAM_KEY_PROVIDER=legacy-plaintext` (below) still renders
+secrets into `vars`, and then the bucket credential is the root secret of the install.
 
-Plaintext copies of the Worker secrets live in: the bucket's `deploy/` manifests (every
-deployed version), the `celld-data` volume cache, the celld process, and `.state/` on the box.
-`REVERSE_TUNNEL_GATEWAY_SECRET` is also in `.state/gateway.env` and the Caddy and frps container
-environments (`docker inspect` shows it). Keep the operator out of the `docker` group unless they
-are trusted with all of it.
+Plaintext copies of the Worker secrets live in the celld process (the Worker's memory) and, for its
+300 s cache, the key agent's memory. `REVERSE_TUNNEL_GATEWAY_SECRET` is also in `.state/gateway.env`
+and the Caddy and frps container environments (`docker inspect` shows it). Keep the operator out
+of the `docker` group unless they are trusted with all of it.
 
 Presigned browser uploads go straight to the fleet bucket. Set `R2_S3_ENDPOINT` in `.env` and a
 credential scoped to `<bucket>/<prefix>/r2/<R2 bucket>/*` as `R2_ACCESS_KEY_ID` /
@@ -75,27 +76,236 @@ Plain Worker var overrides (for example turning one of the self-host switches ba
 `secrets.env`; it is merged last. `--dry-run` prints the rendered config with those values
 redacted.
 
-### Sealed secrets (opt-in, spike)
+### Sealed secrets (on by default)
 
-With `SAM_KEY_PROVIDER` set in `.env` (and `key-agent` in `COMPOSE_PROFILES`, and
-`SAM_KEY_AGENT_UID` set to the uid that owns `.state/`), the deploy passes no secret to celld.
-It seals the platform keys and `secrets.env` into `.state/key-agent/bundles/<id>.json` (AES-256-GCM
-under a random data key; the data key is wrapped by the key service), and the Worker gets them at
-runtime from the `key-agent` service on `127.0.0.1:SAM_KEY_AGENT_PORT` (7190), which answers only
-celld's uid. The deployed vars carry only `SAM_KEY_AGENT_URL` and the bundle id, so the bucket's
-`deploy/` manifests and the celld-data cache hold no secret. If the agent is down the API answers
-503 `SECRETS_UNAVAILABLE` (`docker compose ps key-agent`).
+The deploy passes no secret to celld. It seals the platform keys and `secrets.env` into
+`.state/key-agent/bundles/<id>.json` (AES-256-GCM under a random data key; the data key is wrapped
+by a key provider), and the Worker gets them at runtime from the `key-agent` service on
+`127.0.0.1:SAM_KEY_AGENT_PORT` (7190), which answers only celld's uid. The deployed vars carry
+only `SAM_KEY_AGENT_URL`, the bundle id and the agent's public verify key, so the bucket's
+`deploy/` manifests hold no secret. If the agent is down the API answers 503
+`SECRETS_UNAVAILABLE` (`docker compose ps key-agent`). Each fresh Worker isolate pays one loopback
+request (about 4 ms); the agent keeps an opened bundle for 300 s.
 
-Providers: `file` (a 32-byte key in `.state/key-agent/kek`, the baseline for a box with no key
-service), `transit` (Vault or OpenBao: `SAM_TRANSIT_ADDR`, `SAM_TRANSIT_KEY`, AppRole
-`SAM_TRANSIT_ROLE_ID` with the secret id in `.state/key-agent/credentials/transit-secret-id`),
-`gcp-kms` (`SAM_GCP_KMS_KEY`, the VM's service account), `azure-kv` (`SAM_AZURE_KEY_VAULT_URL`,
-`SAM_AZURE_KEY_NAME`, the VM's managed identity). Backups leave out `.state/key-agent/kek` and
-`.state/key-agent/credentials/`: keep the file key somewhere else, offline. Once a deploy has run
-from the bundle, `platform-keys.json` and `secrets.env` can be deleted; later edits go in a fresh
-`secrets.env` and are merged into a new bundle. A `platform-keys.json` that disagrees with the
-bundle stops the deploy. Code: `scripts/selfhost/key-service.ts`, `deploy/selfhost/key-agent/`,
+**Which key provider.** `pnpm selfhost:deploy --init` chooses once, records the choice and why
+in `.state/key-agent/choice.json`, and every deploy prints it (`key provider: file (...)`);
+`pnpm selfhost:secrets status` shows it later with the key reference and the bundles (never key
+material). Without a recorded choice a plain `pnpm selfhost:deploy` stops and asks for `--init`.
+The automatic choice:
+
+1. Bundles already on the box decide: only their provider can open them.
+2. Otherwise `--init` asks the instance metadata services which cloud this VM is on (Google,
+   AWS IMDSv2 and Azure IMDS in parallel, `SAM_METADATA_PROBE_TIMEOUT_MS`, default 1500 ms each;
+   an answer counts only with that platform's own marker, never from host names).
+3. On a cloud, it tries the key for this install through the VM's own identity: the key set in
+   `.env`, else the one the one-time setup below creates (named `sam-<8 hex>` from your domain,
+   like the bootstrap's pool id). It is chosen only if a real wrap and unwrap round trip succeeds.
+4. Otherwise, and on any other host, the file key. The printed line says why in plain words, for
+   example `key provider: file (on Google Cloud (project p), but Cloud KMS key projects/p/... is
+not usable (denied: ...); using a key file on this box)`.
+
+Moving to another provider later (for example after setting up a cloud key) is never a silent
+change at a deploy:
+
+```bash
+pnpm selfhost:secrets switch --to auto --dry-run    # or --to gcp-kms|aws-kms|azure-kv|transit|file
+pnpm selfhost:secrets switch --to auto
+pnpm selfhost:secrets reseal                        # same provider: new data key, current KEK version
+```
+
+`switch` opens the secrets with the current provider, checks the target with a wrap and unwrap
+round trip, seals them with it, and moves the running install over without a gap: while the new
+Worker version deploys, the agent opens each bundle with the provider its header names (the old one
+from `.state/key-agent/previous.env`, removed afterwards). If the first request to the new version
+is not healthy it restores the previous provider and redeploys. Remove a `SAM_KEY_PROVIDER` line
+from `.env` first; it would override the switch. Keep the old key while older bundles and backups
+sealed with it exist. Code: `scripts/selfhost/secrets-switch.ts`.
+
+| `SAM_KEY_PROVIDER` | Key                                                                                                                                                                                                                         | Settings                                                                                                                                    |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| unset (default)    | chosen by `--init`                                                                                                                                                                                                          |                                                                                                                                             |
+| `file`             | 32 bytes in `.state/key-agent/kek`, created at the first seal                                                                                                                                                               |                                                                                                                                             |
+| `transit`          | Vault or OpenBao transit key, off the box                                                                                                                                                                                   | `SAM_TRANSIT_ADDR`, `SAM_TRANSIT_KEY`, AppRole `SAM_TRANSIT_ROLE_ID` with the secret id in `.state/key-agent/credentials/transit-secret-id` |
+| `gcp-kms`          | Cloud KMS key, the VM's service account                                                                                                                                                                                     | `SAM_GCP_KMS_KEY`                                                                                                                           |
+| `azure-kv`         | Key Vault key, the VM's managed identity                                                                                                                                                                                    | `SAM_AZURE_KEY_VAULT_URL`, `SAM_AZURE_KEY_NAME`                                                                                             |
+| `aws-kms`          | KMS symmetric key, the EC2 instance role through IMDSv2 (or a stored access key in `.state/key-agent/credentials/aws-credentials` off AWS); tested against a fake and AWS's SigV4 vectors, **not yet run against real AWS** | `SAM_AWS_KMS_KEY_ID` (key id, ARN or `alias/...`), `SAM_AWS_KMS_REGION`                                                                     |
+| `legacy-plaintext` | **none: LEGACY.** Every Worker secret is a deploy var, stored in plaintext in the fleet bucket for every deployed version and in every backup                                                                               |                                                                                                                                             |
+
+The agent container starts as root only to become the owner of `.state/key-agent` (it keeps no
+capability after that); set `SAM_KEY_AGENT_UID` to pin the uid instead.
+
+Backups leave out `.state/key-agent/kek` and `.state/key-agent/credentials/`. **With the file
+key, store a copy off the box** (a password manager or offline media): without it the install
+cannot be recovered from a backup alone, because its platform keys (`ENCRYPTION_KEY` protects every
+stored credential) and `secrets.env` values are sealed with it. The deploy says so once, when it
+creates the key. `pnpm selfhost:secrets key-file` prints where the key is and its fingerprint;
+`pnpm selfhost:secrets verify-key-copy <path>` checks a copy matches (neither prints the key). Once a deploy has run from the bundle, `platform-keys.json` and
+`secrets.env` can be deleted; later edits go in a fresh `secrets.env` and are merged into a new
+bundle. A `platform-keys.json` that disagrees with the bundle stops the deploy. Code:
+`scripts/selfhost/key-service.ts`, `scripts/selfhost/key-choice.ts`, `deploy/selfhost/key-agent/`,
 `apps/api/src/selfhost/runtime-secrets.ts`.
+
+#### Moving an existing install to sealed secrets
+
+A box installed before sealed secrets were the default keeps its secrets in `.state/platform-keys.json`
+and `secrets.env`, and its Worker gets them as deploy vars. One command moves it:
+
+```bash
+pnpm selfhost:secrets migrate                          # seal, check, switch, verify
+pnpm selfhost:secrets migrate --key-copy <path>        # file key: removes the plaintext files
+```
+
+It seals the existing files unchanged (`--init` chooses the provider), proves the chain end to end
+before anything switches (the agent's code answers the Worker's real loader with every secret the
+files hold), starts the key agent and the updated fence, deploys the Worker without secret vars,
+makes celld adopt it at once (`POST /reload` on its internal listener) and requires the first
+request to the new version to be healthy and the current deploy version in the bucket to hold no
+secret. Any failure after the switch redeploys the previous behaviour
+(`pnpm selfhost:deploy --key-provider legacy-plaintext`) and removes nothing. The plaintext files go
+last, and with the file key only once `--key-copy` proves a matching copy exists: until then they
+are the only other copy of the platform keys. `pnpm selfhost:upgrade` never makes this switch by itself: it keeps a box that
+still has its plaintext files on plaintext deploy vars and tells you to run `migrate`. Code: `scripts/selfhost/secrets-migrate.ts`.
+
+#### Old plaintext copies: bucket deploy versions and backups
+
+Sealing stops new plaintext. What older deploys and backups already hold stays:
+
+```bash
+pnpm selfhost:secrets plaintext [--backups <dir or gs://|s3:// url> ...]   # read-only listing
+```
+
+It lists every deploy version under `deploy/<script>/<version>/` in the fleet bucket that holds
+secret vars (names only), which versions celld still reads, the local backups (default
+`deploy/selfhost/backups/`; repeat `--backups` for more, including a backup bucket, grouped by
+folder) holding `platform-keys.json`, `secrets.env`, the key file or plaintext deploy versions
+(archives are named, not opened), and how to rotate each exposed secret. Copies it is not pointed
+at are not visible to it: treat every backup taken before the box was sealed as holding every
+secret.
+
+Rotating is the fix that does not depend on deleting anything: a rotated secret's old copies are
+worthless. `ENCRYPTION_KEY` and the generated platform keys cannot be rotated by a SAM command yet;
+the listing says what that exposure means.
+
+Deleting old versions: celld (v0.6.3, from its source) reads only the version
+`deploy/current.json` names, the ones `deploy/<script>/current.json` name, and the ones a queue
+attachment (`deploy/queues/<queue>/consumer.json`) names; it never deletes old versions. But
+celld's documentation says operators must not delete objects under `deploy/`. So deletion is
+opt-in and narrow:
+
+```bash
+pnpm selfhost:secrets plaintext --purge --confirm <CELLD_BUCKET>
+```
+
+It runs only with the pinned celld 0.6.3, deletes only versions that hold secret vars and that no
+pointer or attachment names (re-read before each deletion), and refuses while the current
+version still holds plaintext. Code: `scripts/selfhost/plaintext-scan.ts`.
+
+#### Cloud key, one-time setup
+
+On Google Cloud, AWS or Azure the box can seal with a cloud key through its own VM identity, so no
+key is stored on the box: revoking the grant stops new Worker isolates within the agent's 300 s
+cache, and the cloud's audit log records every use. Set the key up once, then run
+`pnpm selfhost:deploy --init` on a new box (it finds the key by itself), or
+`pnpm selfhost:secrets switch --to auto` on a box already sealed with the file key. The key's
+default name is `sam-` plus 8 hex digits derived from your domain, the same on every cloud:
+
+```bash
+NAME=sam-$(printf 'https://api.%s' "$SAM_DOMAIN" | sha256sum | cut -c1-8)
+```
+
+**Google Cloud** (as a project owner; the box VM needs the `cloud-platform` access scope):
+
+```bash
+pnpm selfhost:gcp-bootstrap -- --project <id> --api-url https://api.<SAM_DOMAIN> --kms-only \
+  --box-instance <box VM> --box-zone <zone> --dry-run    # then again without --dry-run
+```
+
+It creates or reuses the key ring `sam-selfhost` (location `global`; `--kms-location`) and the
+key `$NAME` labelled `sam-install`, grants `roles/cloudkms.cryptoKeyEncrypterDecrypter` to the box
+VM's service account on that key only, and prints `SAM_GCP_KMS_KEY=...`. Use `--kms` instead of
+`--kms-only` to also run the node setup above.
+
+**AWS** (the box is an EC2 instance with an instance profile; IMDSv2 is enough):
+
+```bash
+REGION=<the box's region>; ROLE=<the box instance profile's role name>
+KEY_ID=$(aws kms create-key --region "$REGION" --description "SAM sealed secrets $SAM_DOMAIN" \
+  --tags TagKey=sam-install,TagValue="${NAME#sam-}" --query KeyMetadata.KeyId --output text)
+aws kms create-alias --region "$REGION" --alias-name "alias/$NAME" --target-key-id "$KEY_ID"
+KEY_ARN=$(aws kms describe-key --region "$REGION" --key-id "$KEY_ID" --query KeyMetadata.Arn --output text)
+aws iam put-role-policy --role-name "$ROLE" --policy-name sam-sealed-secrets --policy-document \
+  "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"kms:Encrypt\",\"kms:Decrypt\"],\"Resource\":\"$KEY_ARN\"}]}"
+```
+
+The default key policy delegates to IAM, so the role policy above is the only grant. The AWS
+provider has been tested against a fake of the KMS API and AWS's published SigV4 vectors, not
+against real AWS yet.
+
+**Azure** (the box VM gets a system-assigned managed identity; you need rights to create role
+assignments):
+
+```bash
+RG=<resource group>; VM=<box VM>; VAULT=<a new, globally unique vault name>
+az keyvault create --name "$VAULT" --resource-group "$RG" --enable-rbac-authorization true \
+  --enable-purge-protection true
+az keyvault key create --vault-name "$VAULT" --name "$NAME" --kty RSA --size 3072 \
+  --ops wrapKey unwrapKey --tags sam-install="${NAME#sam-}"   # you need Key Vault Crypto Officer
+PRINCIPAL=$(az vm identity assign --resource-group "$RG" --name "$VM" --query systemAssignedIdentity -o tsv)
+SCOPE="$(az keyvault show --name "$VAULT" --query id -o tsv)/keys/$NAME"
+az role assignment create --assignee-object-id "$PRINCIPAL" --assignee-principal-type ServicePrincipal \
+  --role "Key Vault Crypto Service Encryption User" --scope "$SCOPE"
+echo "SAM_AZURE_KEY_VAULT_URL=https://$VAULT.vault.azure.net"   # put this line in .env
+```
+
+A vault URL cannot be derived, so on Azure the `.env` line is required; `SAM_AZURE_KEY_NAME`
+defaults to `$NAME`. With a user-assigned identity, also set `SAM_AZURE_CLIENT_ID`.
+
+### Removing what setup created
+
+Each setup step has a matching removal. Removing a key is **destructive**: every sealed bundle,
+and every backup of the box, that was sealed with it becomes unrecoverable. Keep the key until the
+box and its backups are gone.
+
+**Google Cloud.** `pnpm selfhost:gcp-bootstrap -- --project <id> --api-url https://api.<SAM_DOMAIN>
+--teardown [--dry-run]` reads `.state/created-resources.json` and removes only what the bootstrap
+recorded creating, each proven this install's again first (the provider trusts this issuer, the
+pool's and service account's descriptions name it, the key carries its `sam-install` label).
+Anything that existed before, fails its proof, or is not in the record is left and listed. It
+prints what it removed and what it left. Cloud KMS: the grant goes at once. A key version can be
+deleted only after it is destroyed, a key only when all its versions are deleted, a key ring only
+when all its keys are (Google:
+[Delete Cloud KMS resources](https://docs.cloud.google.com/kms/docs/delete-kms-resources),
+[Destroy and restore key versions](https://docs.cloud.google.com/kms/docs/destroy-restore)). So
+`--teardown --destroy-key-versions <key id>` schedules destruction (30 days by default, billed
+until destroyed, `gcloud kms keys versions restore` undoes it until then), and a `--teardown` after
+that deletes the versions, the key and the ring. A deleted key's name cannot be reused. Key rings
+are free; Google keeps a deleted workload identity pool for 30 days. Enabled APIs stay enabled.
+
+**AWS.**
+
+```bash
+aws iam delete-role-policy --role-name "$ROLE" --policy-name sam-sealed-secrets
+aws kms delete-alias --region "$REGION" --alias-name "alias/$NAME"
+# Destructive: 7-30 day waiting period; `aws kms cancel-key-deletion` undoes it until then.
+aws kms schedule-key-deletion --region "$REGION" --key-id "$KEY_ID" --pending-window-in-days 30
+```
+
+**Azure.**
+
+```bash
+az role assignment delete --assignee "$PRINCIPAL" --role "Key Vault Crypto Service Encryption User" --scope "$SCOPE"
+# Destructive: soft-deleted for the vault's retention period; `az keyvault key recover` undoes it.
+az keyvault key delete --vault-name "$VAULT" --name "$NAME"
+az keyvault delete --name "$VAULT" --resource-group "$RG"   # only a vault created for SAM
+```
+
+**The box side** (also destructive). The key agent, the bundles and the file key live in
+`.state/key-agent/`. A box cannot go back to plaintext deploy vars once `platform-keys.json` is
+gone: `SAM_KEY_PROVIDER=legacy-plaintext` then refuses, because it would generate new platform
+keys and every stored credential would become unreadable. To decommission a box:
+`docker compose -f deploy/selfhost/docker-compose.yml down`, then `rm -r .state/key-agent` removes
+the bundles, the file key and the recorded choice. Without a copy of the key (the file key kept
+off the box, or the cloud key), the install's platform keys and every backup are gone with it.
 
 ## Email sign-in
 
@@ -231,6 +441,10 @@ It prints the five values for **Admin → Integrations → Google Cloud**. Re-ru
 nothing; it refuses to retarget a provider that trusts another install
 (`deploy/selfhost/gcp-bootstrap.sh`).
 
+It records what it created (not what it found) in `.state/created-resources.json` (names,
+project, time; no secrets; `--state-dir` to put it elsewhere). `--teardown` removes exactly those
+resources and nothing else; see Removing what setup created.
+
 Include at least one machine with 8 GB of memory. A default task asks for 2 vCPU, 4 GB of memory
 and 15 GB of disk (`PLATFORM_RESOURCE_DEFAULTS` in
 `packages/shared/src/constants/resource-defaults.ts`), and placement first subtracts a 1 GiB host
@@ -256,11 +470,13 @@ stopped, deletions included. The delta copy writes into a different directory th
 did, so state an aborted `gcloud` pass left behind cannot break it; if the delta copy still
 fails, the whole bucket is copied again into a fresh directory before celld restarts (longer
 downtime, still recorded). gs:// buckets copy with `gcloud storage rsync`; s3:// buckets (the
-bundled store too) with `mc mirror` from the pinned objectstore image. Without sealed secrets a
-backup holds every Worker secret in plaintext. With them it holds the sealed bundle, not the key
-file, but still `.env`, `.state/gateway.env` and the metadata-proxy and mail-collector secrets in
-plaintext, and the bucket's older deploy versions keep whatever they were deployed with. Keep
-backups where only you can read them. Restore refuses a bucket that
+bundled store too) with `mc mirror` from the pinned objectstore image. A backup of a sealed box
+holds the sealed bundles but not the key file or key-service credentials, so their secrets cannot
+be opened without the key kept apart. It still holds `.env`, `.state/gateway.env` and the
+metadata-proxy and mail-collector secrets in plaintext, and the bucket's older deploy versions keep
+whatever they were deployed with (`pnpm selfhost:secrets plaintext`). A backup of a
+`legacy-plaintext` box, or one taken before the box was sealed, holds every Worker secret in
+plaintext. Keep backups where only you can read them. Restore refuses a bucket that
 holds objects or a `.state/` with platform keys, and leaves celld stopped: start it with the same
 SAM checkout the backup recorded (`samCommit` in the manifest), never an older one. There is no
 point-in-time recovery: a backup is the recovery point. Code: `scripts/selfhost/backup-lib.ts`.

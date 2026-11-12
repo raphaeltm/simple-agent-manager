@@ -97,7 +97,7 @@ export interface BoxContext {
   user?: string;
 }
 
-interface BucketUrl {
+export interface BucketUrl {
   scheme: 'gs' | 's3';
   bucket: string;
   prefix: string;
@@ -113,7 +113,7 @@ export function parseBucketUrl(url: string): BucketUrl {
   };
 }
 
-function check(result: RunResult, what: string): RunResult {
+export function check(result: RunResult, what: string): RunResult {
   if (result.status !== 0) {
     // stderr of gcloud/mc/docker carries no secret (credentials travel in the environment).
     // gcloud prints progress first; its ERROR lines are the part worth reporting.
@@ -129,7 +129,7 @@ function check(result: RunResult, what: string): RunResult {
   return result;
 }
 
-function mcEnv(ctx: BoxContext): NodeJS.ProcessEnv {
+export function mcEnv(ctx: BoxContext): NodeJS.ProcessEnv {
   const endpoint = ctx.box.S3_ENDPOINT?.trim();
   const key = ctx.box.AWS_ACCESS_KEY_ID ?? '';
   const secret = ctx.box.AWS_SECRET_ACCESS_KEY ?? '';
@@ -140,7 +140,7 @@ function mcEnv(ctx: BoxContext): NodeJS.ProcessEnv {
   return { ...process.env, MC_HOST_src: url.toString().replace(/\/$/, '') };
 }
 
-function mcArgs(ctx: BoxContext, mounts: string[], mcCommand: string[]): string[] {
+export function mcArgs(ctx: BoxContext, mounts: string[], mcCommand: string[]): string[] {
   return [
     'run',
     '--rm',
@@ -159,7 +159,7 @@ function mcArgs(ctx: BoxContext, mounts: string[], mcCommand: string[]): string[
   ];
 }
 
-function bucketPath(url: BucketUrl): string {
+export function bucketPath(url: BucketUrl): string {
   return url.prefix ? `${url.bucket}/${url.prefix}` : url.bucket;
 }
 

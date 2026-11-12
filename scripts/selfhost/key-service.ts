@@ -1,8 +1,9 @@
 /**
- * Sealed Worker secrets for a celld box (opt-in: `SAM_KEY_PROVIDER` in `.env`).
+ * Sealed Worker secrets for a celld box: the default. `SAM_KEY_PROVIDER` in `.env` overrides the
+ * provider `--init` chose (key-choice.ts); `legacy-plaintext` keeps the old behaviour.
  *
- * Without it the deploy passes every secret as a Worker var, and celld stores each deployed
- * version's vars in plaintext in the fleet bucket. With it the deploy seals the secrets into a
+ * Legacy: the deploy passes every secret as a Worker var, and celld stores each deployed
+ * version's vars in plaintext in the fleet bucket. Sealed: the deploy seals the secrets into a
  * bundle under `<state>/key-agent/bundles/`, passes only the bundle id and the agent's loopback
  * URL as vars, and the API Worker fetches the secrets at runtime from the `key-agent` compose
  * service (deploy/selfhost/key-agent), which alone can open the bundle with the key service.
@@ -23,7 +24,11 @@ import {
 } from '../../deploy/selfhost/key-agent/bundle.ts';
 import type { KeyProvider } from '../../deploy/selfhost/key-agent/provider.ts';
 import { generateFileKek } from '../../deploy/selfhost/key-agent/provider-file.ts';
-import { createKeyProvider, KEY_PROVIDERS } from '../../deploy/selfhost/key-agent/providers.ts';
+import {
+  createKeyProvider,
+  KEY_PROVIDERS,
+  LEGACY_KEY_PROVIDER,
+} from '../../deploy/selfhost/key-agent/providers.ts';
 import { SIGNING_KEY_NAME } from '../../deploy/selfhost/key-agent/server.ts';
 import { completePlatformKeys, ensurePlatformKeys, PLATFORM_KEY_NAMES } from './platform-keys.js';
 import {
@@ -32,9 +37,10 @@ import {
   readSecretsFile,
   writePrivateFile,
 } from './secret-files.js';
+import { keyFileNotice } from './secrets-keyfile.js';
 
+export { LEGACY_KEY_PROVIDER };
 export const KEY_AGENT_DIR = 'key-agent';
-export const KEY_AGENT_PROFILE = 'key-agent';
 export const DEFAULT_KEY_AGENT_PORT = 7190;
 /** Bundles kept after a seal: the Worker version still running during a deploy asks for its own. */
 export const DEFAULT_KEPT_BUNDLES = 3;
@@ -44,6 +50,7 @@ const CONTAINER_DIR = '/etc/sam/key-agent';
 const CREDENTIAL_FILES: Readonly<Record<string, string>> = {
   SAM_TRANSIT_TOKEN_FILE: 'transit-token',
   SAM_TRANSIT_SECRET_ID_FILE: 'transit-secret-id',
+  SAM_AWS_CREDENTIALS_FILE: 'aws-credentials',
 };
 /** Non-secret provider settings copied from `.env` into the agent's environment. */
 const PROVIDER_SETTINGS = [
@@ -59,6 +66,10 @@ const PROVIDER_SETTINGS = [
   'SAM_AZURE_KEY_NAME',
   'SAM_AZURE_CLIENT_ID',
   'SAM_AZURE_IMDS_HOST',
+  'SAM_AWS_KMS_KEY_ID',
+  'SAM_AWS_KMS_REGION',
+  'SAM_AWS_KMS_ENDPOINT',
+  'SAM_AWS_IMDS_HOST',
 ] as const;
 /** Box files that can unlock the bundle; backups leave them out (backup-lib.ts). */
 export const KEY_SERVICE_BACKUP_EXCLUDES = [`${KEY_AGENT_DIR}/kek`, `${KEY_AGENT_DIR}/credentials`];
@@ -76,9 +87,10 @@ export interface KeyServiceSettings {
   containerEnv: Record<string, string>;
 }
 
+/** Whether this box seals its secrets. `box` is the effective box (key-choice.ts applyKeyChoice). */
 export function keyServiceEnabled(box: Box): boolean {
   const value = box.SAM_KEY_PROVIDER?.trim() ?? '';
-  return value !== '' && value !== 'off';
+  return value !== '' && value !== LEGACY_KEY_PROVIDER;
 }
 
 export function keyAgentPort(box: Box): number {
@@ -96,14 +108,17 @@ export function keyServiceSettings(box: Box, stateDir: string): KeyServiceSettin
   const provider = (box.SAM_KEY_PROVIDER ?? '').trim();
   if (!Object.hasOwn(KEY_PROVIDERS, provider)) {
     throw new Error(
-      `SAM_KEY_PROVIDER must be off or one of ${Object.keys(KEY_PROVIDERS).join(', ')}`
+      `SAM_KEY_PROVIDER must be empty (automatic), ${LEGACY_KEY_PROVIDER}, or one of ` +
+        Object.keys(KEY_PROVIDERS).join(', ')
     );
   }
+  // Optional: unset, the agent drops to the owner of the key-agent directory (server.ts).
   const uid = process.getuid?.();
-  if (uid !== undefined && box.SAM_KEY_AGENT_UID?.trim() !== String(uid)) {
+  const pinned = box.SAM_KEY_AGENT_UID?.trim();
+  if (uid !== undefined && pinned && pinned !== String(uid)) {
     throw new Error(
-      `SAM_KEY_AGENT_UID must be ${uid}, the uid that owns ${stateDir}: the key-agent container ` +
-        'runs as it to read the sealed bundles and the key file (mode 0600)'
+      `SAM_KEY_AGENT_UID must be ${uid} (the uid that owns ${stateDir}) or unset: the key-agent ` +
+        'container must run as the owner of the sealed bundles and the key file (mode 0600)'
     );
   }
   const dir = join(stateDir, KEY_AGENT_DIR);
@@ -116,6 +131,8 @@ export function keyServiceSettings(box: Box, stateDir: string): KeyServiceSettin
       containerEnv[name] = value;
     }
   }
+  // Test-only switch (plain-HTTP fake Key Vault): honoured by the deploy, never given to the agent.
+  if (box.SAM_AZURE_ALLOW_HTTP_FOR_TESTS === '1') hostEnv.SAM_AZURE_ALLOW_HTTP_FOR_TESTS = '1';
   if (provider === 'file') {
     hostEnv.SAM_KEY_FILE = join(dir, 'kek');
     containerEnv.SAM_KEY_FILE = `${CONTAINER_DIR}/kek`;
@@ -149,6 +166,21 @@ export function renderKeyAgentEnv(settings: KeyServiceSettings): string {
     SAM_KEY_AGENT_BUNDLE_DIR: `${CONTAINER_DIR}/bundles`,
   }).map(([name, value]) => `${name}=${value}`);
   return `${lines.join('\n')}\n`;
+}
+
+/**
+ * The agent's env_file on a legacy box. The service always runs (docker-compose.yml); with this
+ * it answers health checks and refuses every secrets request, and the fence gives celld no way
+ * to reach it anyway (egress-fence.ts opens its port only when sealing is on).
+ */
+export function ensureLegacyAgentEnv(stateDir: string, port: number): string[] {
+  const dir = join(stateDir, KEY_AGENT_DIR);
+  ensurePrivateDir(dir);
+  const envPath = join(dir, 'agent.env');
+  const env = `SAM_KEY_PROVIDER=${LEGACY_KEY_PROVIDER}\nSAM_KEY_AGENT_PORT=${port}\n`;
+  if (existsSync(envPath) && readFileSync(envPath, 'utf8') === env) return [];
+  writePrivateFile(envPath, env);
+  return [envPath];
 }
 
 /** Creates the agent's directories, and the file provider's KEK once. */
@@ -268,6 +300,10 @@ export async function resolveSealedSecrets(input: ResolveSecretsInput): Promise<
   if (!/^[0-9a-f]{32}$/.test(installationId)) throw new Error('SAM_INSTALLATION_ID is missing');
   ensurePrivateDir(settings.bundleDir);
   const bundle = await sealSecrets(secrets, provider, { installationId });
+  // Never leave a bundle the key service cannot open: unwrap it once before it is written.
+  if (!sameSecrets(await openBundle(bundle, provider), secrets)) {
+    throw new Error(`bundle ${bundle.bundleId} did not open to the secrets it sealed`);
+  }
   writePrivateFile(
     join(settings.bundleDir, `${bundle.bundleId}.json`),
     `${JSON.stringify(bundle, null, 2)}\n`
@@ -309,18 +345,6 @@ export function agentVerifyKey(secrets: Readonly<Record<string, string>>): strin
   return Buffer.from(String(jwk.x), 'base64url').toString('base64');
 }
 
-/** The key-agent compose profile and SAM_KEY_PROVIDER must agree, like the gce profile. */
-export function assertKeyAgentProfile(box: Box): void {
-  const profiles = (box.COMPOSE_PROFILES ?? '').split(',').map((p) => p.trim());
-  const wanted = keyServiceEnabled(box);
-  if (wanted && !profiles.includes(KEY_AGENT_PROFILE)) {
-    throw new Error('SAM_KEY_PROVIDER is set: add `key-agent` to COMPOSE_PROFILES');
-  }
-  if (!wanted && profiles.includes(KEY_AGENT_PROFILE)) {
-    throw new Error('COMPOSE_PROFILES has `key-agent` but SAM_KEY_PROVIDER is off; remove it');
-  }
-}
-
 type PlatformKeys = Record<(typeof PLATFORM_KEY_NAMES)[number], string>;
 
 /**
@@ -338,17 +362,34 @@ export async function resolveDeployKeys(input: {
   sealed: ResolvedSecrets | null;
 }> {
   const { box, stateDir, log } = input;
-  assertKeyAgentProfile(box);
   const keyService = keyServiceSettings(box, stateDir);
   const platformKeysPath = join(stateDir, 'platform-keys.json');
   if (!keyService) {
+    // A sealed box has no platform-keys.json: the legacy path would generate NEW keys, and every
+    // credential stored under the old ENCRYPTION_KEY would become unreadable.
+    if (
+      !existsSync(platformKeysPath) &&
+      listBundles(join(stateDir, KEY_AGENT_DIR, 'bundles')).length > 0
+    ) {
+      throw new Error(
+        `${LEGACY_KEY_PROVIDER} needs ${platformKeysPath}, but this box's platform keys are sealed ` +
+          '(key-agent/bundles). Going back would generate new keys and lose every stored ' +
+          'credential: remove SAM_KEY_PROVIDER, or restore platform-keys.json from a backup taken ' +
+          'before the box was sealed'
+      );
+    }
+    for (const path of ensureLegacyAgentEnv(stateDir, keyAgentPort(box))) log(`wrote ${path}`);
     const ensured = ensurePlatformKeys(platformKeysPath);
     if (ensured.generated.length > 0) {
       log(`generated platform keys: ${ensured.generated.join(', ')} (back up ${stateDir})`);
     }
     return { keyService, keys: ensured.keys, sealed: null };
   }
-  for (const path of ensureKeyServiceFiles(keyService)) log(`wrote ${path}`);
+  for (const path of ensureKeyServiceFiles(keyService)) {
+    log(`wrote ${path}`);
+    // Once, when the file key is created: the operator must keep a copy off the box.
+    if (path === keyService.hostEnv.SAM_KEY_FILE) for (const line of keyFileNotice(path)) log(line);
+  }
   const sealed = await resolveSealedSecrets({
     settings: keyService,
     platformKeysFile: existsSync(platformKeysPath) ? readPrivateJson(platformKeysPath) : null,

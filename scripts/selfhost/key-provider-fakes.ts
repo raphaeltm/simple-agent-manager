@@ -26,6 +26,13 @@ export interface FakeKeyService {
   close(): Promise<void>;
 }
 
+export interface FakeKeyServiceOptions {
+  /** Only these keys exist (Cloud KMS names, Key Vault key names); others answer 404. */
+  existingKeys?: readonly string[];
+  /** The project id the fake GCE metadata server reports. */
+  gcpProject?: string;
+}
+
 async function body(request: IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
   for await (const chunk of request) chunks.push(chunk as Buffer);
@@ -37,7 +44,10 @@ async function body(request: IncomingMessage): Promise<Record<string, unknown>> 
   }
 }
 
-export async function startFakeKeyServices(): Promise<FakeKeyService> {
+export async function startFakeKeyServices(
+  options: FakeKeyServiceOptions = {}
+): Promise<FakeKeyService> {
+  const exists = (name: string) => !options.existingKeys || options.existingKeys.includes(name);
   const token = randomBytes(16).toString('hex');
   let denied = false;
   const gcpKeys = new Map<string, Buffer>();
@@ -64,6 +74,20 @@ export async function startFakeKeyServices(): Promise<FakeKeyService> {
         response.end(JSON.stringify(payload));
       };
       const url = new URL(request.url ?? '/', 'http://fake');
+      // Platform identity (platform-probe.ts): each answers only with its own request marker.
+      if (url.pathname === '/computeMetadata/v1/project/project-id') {
+        if (request.headers['metadata-flavor'] !== 'Google') return send(403, {});
+        response.writeHead(200, { 'content-type': 'text/plain', 'metadata-flavor': 'Google' });
+        return response.end(options.gcpProject ?? 'sam-test-project');
+      }
+      if (url.pathname === '/metadata/instance/compute') {
+        if (request.headers.metadata !== 'true') return send(400, {});
+        return send(200, {
+          vmId: '00000000-0000-4000-8000-000000000001',
+          location: 'westeurope',
+          subscriptionId: '00000000-0000-4000-8000-0000000000aa',
+        });
+      }
       // Token endpoints (GCE metadata, Azure IMDS).
       if (url.pathname === '/computeMetadata/v1/instance/service-accounts/default/token') {
         if (request.headers['metadata-flavor'] !== 'Google') return send(403, {});
@@ -81,6 +105,7 @@ export async function startFakeKeyServices(): Promise<FakeKeyService> {
       const gcp = /^\/v1\/(projects\/[^:]+):(encrypt|decrypt)$/.exec(url.pathname);
       if (gcp) {
         const [, name = '', op] = gcp;
+        if (!exists(name)) return send(404, { error: { status: 'NOT_FOUND' } });
         let key = gcpKeys.get(name);
         if (!key) {
           key = randomBytes(32);
@@ -121,6 +146,7 @@ export async function startFakeKeyServices(): Promise<FakeKeyService> {
       );
       if (az && url.searchParams.get('api-version') === '7.4' && input.alg === 'RSA-OAEP-256') {
         const [, name = '', version, op] = az;
+        if (!exists(name)) return send(404, { error: { code: 'KeyNotFound' } });
         const resolved = azureVersion(name, version);
         if (!resolved.pair) return send(404, { error: { code: 'KeyNotFound' } });
         const kid = `http://${request.headers.host}/keys/${name}/${resolved.version}`;
