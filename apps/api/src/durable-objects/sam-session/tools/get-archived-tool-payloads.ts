@@ -3,12 +3,10 @@
  * archived from Durable Object SQLite into private R2.
  */
 import type { Env } from '../../../env';
-import * as projectDataService from '../../../services/project-data';
+import { operationDeps } from '../../../operation-ports';
+import { readArchivedToolPayloads } from '../../../operations/workspace-history';
 import type { AnthropicToolDef, ToolContext } from '../types';
 import { resolveProjectWithOwnership } from './helpers';
-
-const DEFAULT_LIMIT = 10;
-const DEFAULT_MAX_LIMIT = 50;
 
 export const getArchivedToolPayloadsDef: AnthropicToolDef = {
   name: 'get_archived_tool_payloads',
@@ -41,7 +39,7 @@ export const getArchivedToolPayloadsDef: AnthropicToolDef = {
       },
       limit: {
         type: 'number',
-        description: `Max archived payloads to return. Defaults to ${DEFAULT_LIMIT}, max ${DEFAULT_MAX_LIMIT}.`,
+        description: `Max archived payloads to return. Defaults to 10, max 50.`,
       },
     },
     required: ['projectId'],
@@ -56,12 +54,6 @@ function parseOptionalTimestamp(value: unknown): number | null {
   if (!trimmed) return null;
   const parsed = Date.parse(trimmed);
   return Number.isFinite(parsed) ? parsed : null;
-}
-
-function parsePositiveInteger(value: string | undefined, fallback: number): number {
-  if (!value) return fallback;
-  const parsed = Number.parseInt(value, 10);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 export async function getArchivedToolPayloads(
@@ -98,23 +90,14 @@ export async function getArchivedToolPayloads(
     return { error: 'Project not found or not owned by you.' };
   }
 
-  if (sessionId) {
-    const session = await projectDataService.getSession(env, project.id, sessionId);
-    if (!session) return { error: 'Session not found in this project.' };
-  }
-
-  const maxLimit = parsePositiveInteger(env.MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX, DEFAULT_MAX_LIMIT);
-  const defaultLimit = parsePositiveInteger(
-    env.MCP_ARCHIVED_TOOL_PAYLOAD_LIST_LIMIT,
-    DEFAULT_LIMIT
-  );
-  const limit = Math.min(Math.max(1, Math.round(input.limit || defaultLimit)), maxLimit);
-
-  return projectDataService.getArchivedToolPayloads(env, project.id, {
-    ...(messageId ? { messageId } : {}),
-    ...(sessionId ? { sessionId } : {}),
-    ...(startTime !== null ? { startTime } : {}),
-    ...(endTime !== null ? { endTime } : {}),
-    limit,
+  const read = await readArchivedToolPayloads(operationDeps(env), {
+    projectId: project.id,
+    messageId: messageId || null,
+    sessionId: sessionId || null,
+    startTime,
+    endTime,
+    requestedLimit: input.limit || null,
   });
+  if (!read.ok) return { error: 'Session not found in this project.' };
+  return read.result;
 }

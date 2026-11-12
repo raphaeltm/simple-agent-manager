@@ -47,5 +47,7 @@ export function getPlatformOperationLimits(env: OperationsEnv) {
     ),
     dispatchMaxPriority: parsePositiveInt(env.MCP_DISPATCH_MAX_PRIORITY, 100),
     knowledgeSearchLimit: parsePositiveInt(env.KNOWLEDGE_SEARCH_LIMIT, 20),
+    archivedToolPayloadListLimit: parsePositiveInt(env.MCP_ARCHIVED_TOOL_PAYLOAD_LIST_LIMIT, 10),
+    archivedToolPayloadListMax: parsePositiveInt(env.MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX, 50),
   };
 }

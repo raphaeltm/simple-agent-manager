@@ -4,7 +4,6 @@
  * Missions are top-level orchestration containers. They live in D1 and
  * are registered with the ProjectOrchestrator DO for scheduling.
  */
-import { DEFAULT_MISSION_MAX_PER_PROJECT } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -12,11 +11,9 @@ import * as schema from '../../../db/schema';
 import type { Env } from '../../../env';
 import { log } from '../../../lib/logger';
 import { ulid } from '../../../lib/ulid';
-import * as orchestratorService from '../../../services/project-orchestrator';
+import { operationDeps } from '../../../operation-ports';
+import { createMissionRecord, missionTextLimits } from '../../../operations/missions';
 import type { AnthropicToolDef, ToolContext } from '../types';
-
-const DEFAULT_TITLE_MAX_LENGTH = 200;
-const DEFAULT_DESCRIPTION_MAX_LENGTH = 5000;
 
 export const createMissionDef: AnthropicToolDef = {
   name: 'create_mission',
@@ -46,7 +43,7 @@ export const createMissionDef: AnthropicToolDef = {
 
 export async function createMission(
   input: { projectId: string; title: string; description?: string },
-  ctx: ToolContext,
+  ctx: ToolContext
 ): Promise<unknown> {
   const env = ctx.env as unknown as Env;
   const db = drizzle(env.DATABASE, { schema });
@@ -58,54 +55,34 @@ export async function createMission(
     return { error: 'title is required.' };
   }
 
-  const titleMaxLen = Number(env.MISSION_TITLE_MAX_LENGTH) || DEFAULT_TITLE_MAX_LENGTH;
-  const descMaxLen = Number(env.MISSION_DESCRIPTION_MAX_LENGTH) || DEFAULT_DESCRIPTION_MAX_LENGTH;
+  const { titleMaxLength, descriptionMaxLength } = missionTextLimits(env);
 
-  const title = input.title.trim().slice(0, titleMaxLen);
-  const description = input.description?.trim().slice(0, descMaxLen) ?? null;
+  const title = input.title.trim().slice(0, titleMaxLength);
+  const description = input.description?.trim().slice(0, descriptionMaxLength) ?? null;
 
   // ── Verify ownership ──────────────────────────────────────────────────
   const [project] = await db
     .select({ id: schema.projects.id })
     .from(schema.projects)
-    .where(
-      and(
-        eq(schema.projects.id, input.projectId),
-        eq(schema.projects.userId, ctx.userId),
-      ),
-    )
+    .where(and(eq(schema.projects.id, input.projectId), eq(schema.projects.userId, ctx.userId)))
     .limit(1);
 
   if (!project) {
     return { error: 'Project not found or not owned by you.' };
   }
 
-  // ── Enforce per-project limit ─────────────────────────────────────────
-  const maxPerProject = Number(env.MISSION_MAX_PER_PROJECT) || DEFAULT_MISSION_MAX_PER_PROJECT;
-  const countRow = await env.DATABASE.prepare(
-    'SELECT COUNT(*) as cnt FROM missions WHERE project_id = ?',
-  ).bind(input.projectId).first<{ cnt: number }>();
-  if (countRow && countRow.cnt >= maxPerProject) {
-    return { error: `Maximum missions per project (${maxPerProject}) reached.` };
-  }
-
-  // ── Insert mission ────────────────────────────────────────────────────
   const id = ulid();
-  const now = new Date().toISOString();
-  await env.DATABASE.prepare(
-    `INSERT INTO missions (id, project_id, user_id, title, description, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'planning', ?, ?)`,
-  ).bind(id, input.projectId, ctx.userId, title, description, now, now).run();
-
-  // Register with orchestrator for scheduling (best-effort)
-  try {
-    await orchestratorService.startOrchestration(env, input.projectId, id);
-  } catch (err) {
-    log.warn('sam.create_mission.orchestrator_start_failed', {
-      missionId: id,
-      projectId: input.projectId,
-      error: err instanceof Error ? err.message : String(err),
-    });
+  const created = await createMissionRecord(operationDeps(env), {
+    id,
+    projectId: input.projectId,
+    userId: ctx.userId,
+    title,
+    description,
+    budgetConfig: null,
+    surface: 'sam',
+  });
+  if (!created.ok) {
+    return { error: `Maximum missions per project (${created.maxPerProject}) reached.` };
   }
 
   log.info('sam.create_mission.created', {

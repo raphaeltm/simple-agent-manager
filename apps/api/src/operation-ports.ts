@@ -43,6 +43,7 @@ import { getConnectorReadLimits } from './services/connector-read-settings';
 import { listProjectCredentialLimits } from './services/credential-limit-events/read';
 import { getInstallationToken } from './services/github-app';
 import * as projectData from './services/project-data';
+import { startOrchestration } from './services/project-orchestrator';
 import { authorizeSendChat, sendChat, validateSendChatContent } from './services/send-chat';
 import { requireSessionWriter } from './services/session-access';
 import { parseHarnessWorkConfig } from './services/session-idleness';
@@ -50,6 +51,7 @@ import { submitTask } from './services/submit-task';
 import { getRecentAssistantMessagesForTask } from './services/task-final-assistant-message';
 import { clearTriggerPageCaches } from './services/trigger-cache';
 import { createTrigger, validateCron } from './services/trigger-create';
+import { getWorkspaceResourceHistory } from './services/workspace-resource-history';
 
 export function createOperationPorts(env: Env): OperationPorts {
   const db = () => drizzle(env.DATABASE, { schema });
@@ -64,6 +66,8 @@ export function createOperationPorts(env: Env): OperationPorts {
     projectData: {
       getSession: (...a) => projectData.getSession(env, ...a),
       getSessionsByTaskIds: (...a) => projectData.getSessionsByTaskIds(env, ...a),
+      listSessions: (...a) => projectData.listSessions(env, ...a),
+      getArchivedToolPayloads: (...a) => projectData.getArchivedToolPayloads(env, ...a),
       getMessages: (...a) => projectData.getMessages(env, ...a),
       searchMessagesWithArchiveMetadata: (...a) =>
         projectData.searchMessagesWithArchiveMetadata(env, ...a),
@@ -149,6 +153,12 @@ export function createOperationPorts(env: Env): OperationPorts {
             'listNotifications'
           >
         ).listNotifications(userId, options),
+    },
+    workspaces: {
+      resourceHistory: (...a) => getWorkspaceResourceHistory(env, ...a),
+    },
+    missions: {
+      startOrchestration: (projectId, missionId) => startOrchestration(env, projectId, missionId),
     },
   };
 }

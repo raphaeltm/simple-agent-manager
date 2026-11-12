@@ -40,6 +40,7 @@ import type * as sessionIdleness from '../services/session-idleness';
 import type * as submitTaskService from '../services/submit-task';
 import type * as taskFinalAssistantMessage from '../services/task-final-assistant-message';
 import type * as triggerCreate from '../services/trigger-create';
+import type * as workspaceResourceHistory from '../services/workspace-resource-history';
 import type { OperationContext } from './types';
 
 /** A worker function with its leading `env` parameter already bound. */
@@ -50,6 +51,8 @@ type Bound<F> = F extends (env: any, ...args: infer A) => infer R ? (...args: A)
 export interface OperationProjectDataPort {
   getSession: Bound<typeof projectData.getSession>;
   getSessionsByTaskIds: Bound<typeof projectData.getSessionsByTaskIds>;
+  listSessions: Bound<typeof projectData.listSessions>;
+  getArchivedToolPayloads: Bound<typeof projectData.getArchivedToolPayloads>;
   getMessages: Bound<typeof projectData.getMessages>;
   searchMessagesWithArchiveMetadata: Bound<typeof projectData.searchMessagesWithArchiveMetadata>;
   getLogicalTranscriptPage: Bound<typeof projectData.getLogicalTranscriptPage>;
@@ -187,6 +190,17 @@ export interface OperationConfigPort {
   harnessWork(): ReturnType<typeof sessionIdleness.parseHarnessWorkConfig>;
 }
 
+/** Workspace runtime observations. */
+export interface OperationWorkspacePort {
+  resourceHistory: Bound<typeof workspaceResourceHistory.getWorkspaceResourceHistory>;
+}
+
+/** Mission scheduling (ProjectOrchestrator Durable Object). */
+export interface OperationMissionPort {
+  /** Registers a mission with the project's orchestrator for scheduling. */
+  startOrchestration(projectId: string, missionId: string): Promise<void>;
+}
+
 export interface OperationPorts {
   config: OperationConfigPort;
   projectData: OperationProjectDataPort;
@@ -197,4 +211,6 @@ export interface OperationPorts {
   tasks: OperationTaskPort;
   triggers: OperationTriggerPort;
   account: OperationAccountPort;
+  workspaces: OperationWorkspacePort;
+  missions: OperationMissionPort;
 }

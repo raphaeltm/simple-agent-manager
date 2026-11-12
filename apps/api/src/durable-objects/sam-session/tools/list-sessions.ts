@@ -5,7 +5,8 @@
  * project, enabling further inspection via get_session_messages or search_task_messages.
  */
 import type { Env } from '../../../env';
-import * as projectDataService from '../../../services/project-data';
+import { operationDeps } from '../../../operation-ports';
+import { listSessionSummaries } from '../../../operations/session-list';
 import type { AnthropicToolDef, ToolContext } from '../types';
 import { resolveProjectWithOwnership } from './helpers';
 
@@ -46,7 +47,7 @@ export const listSessionsDef: AnthropicToolDef = {
 
 export async function listSessions(
   input: { projectId: string; status?: string; taskId?: string; limit?: number },
-  ctx: ToolContext,
+  ctx: ToolContext
 ): Promise<unknown> {
   if (!input.projectId?.trim()) {
     return { error: 'projectId is required.' };
@@ -68,27 +69,11 @@ export async function listSessions(
   const status = input.status || null;
   const taskId = input.taskId?.trim() || null;
 
-  const { sessions, total } = await projectDataService.listSessions(
-    env,
-    project.id,
+  const { sessions, total } = await listSessionSummaries(operationDeps(env), project.id, {
     status,
     limit,
-    0,
     taskId,
-  );
+  });
 
-  return {
-    sessions: sessions.map((s: Record<string, unknown>) => ({
-      id: s.id,
-      topic: s.topic,
-      status: s.status,
-      messageCount: s.messageCount,
-      taskId: s.taskId,
-      workspaceId: s.workspaceId,
-      startedAt: s.startedAt,
-      endedAt: s.endedAt,
-    })),
-    total,
-    projectId: project.id,
-  };
+  return { sessions, total, projectId: project.id };
 }

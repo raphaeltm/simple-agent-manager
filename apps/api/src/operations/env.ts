@@ -39,4 +39,9 @@ export interface OperationsEnv {
   CONNECTOR_RESPONSE_MAX_BYTES?: string;
   SESSION_SLEEP_AFTER_MS?: string; // Idle duration before verified snapshot teardown (default: 900000)
   CRON_TEMPLATE_MAX_LENGTH?: string; // Max prompt template length (default: 8000)
+  MCP_ARCHIVED_TOOL_PAYLOAD_LIST_LIMIT?: string; // Default archived payloads per get_archived_tool_payloads (default: 10)
+  MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX?: string; // Max archived payloads per get_archived_tool_payloads (default: 50)
+  MISSION_TITLE_MAX_LENGTH?: string;
+  MISSION_DESCRIPTION_MAX_LENGTH?: string;
+  MISSION_MAX_PER_PROJECT?: string;
 }
