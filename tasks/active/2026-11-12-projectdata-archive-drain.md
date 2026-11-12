@@ -92,6 +92,33 @@ Research (2026-11-12, current main):
       "flipped + published, reclaim outstanding"; bounded reclaim RPC pages; copy-back requires
       `published`; root read fence; search dedupe verified; maintenance audit (item 7).
 
+Measurements (2026-11-12):
+- Production `candidate_migrated`, 4.4k-9k msgs: prepare 0.38-0.78 s (includes the root terminal
+  hash), copy 15.8-23.5 s (11-20 chunks, ~1.1 s/chunk), seal 0.23-0.59 s, manifest 0.47-1.24 s,
+  finalize 3.7-9.4 s of which source delete 0.7-5.5 s. Total ~3.5 ms/msg.
+- Local workerd, 20k production-shaped msgs: `computeTerminalVersion` 1.13 s (0.056 ms/msg);
+  `DELETE chat_messages` 0.25 s. Production per-row cost is several times higher (9 GB object).
+- Size distribution of sessions >10k (prod D1): 249 at 10-20k, 78 at 20-50k, 11 at 50-100k,
+  max exactly 100,000 = `DEFAULT_MAX_MESSAGES_PER_SESSION`. Outer probable limit: 100k msgs.
+- Extrapolated at 100k: root hash ~8 s per pass (bounded by the message cap; memory paged), copy
+  ~250-450 s (must span ticks), source delete up to ~60 s in one root transaction (must page).
+  Compact seal is O(chunks) and cheap.
+
+PR A design (decided):
+- Flip = `finalizeSourceDelete` minus the deletes: same proof checks and terminal-version
+  recompute, writes anchors + intent `source_deleted` in one transaction. Journal then goes to
+  `published` exactly as today, so journal state meanings do not change (old code in a mixed
+  deploy sees the same states).
+- Reclaim is driven by the ROOT intent, not the journal: root RPC lists `source_deleted`
+  intents that still own rows (EXISTS on chat_messages / grouped / tool_payload_archives);
+  root RPC deletes one bounded page (messages first so materialization cannot regenerate,
+  then grouped + FTS markers, then tool payload archives). Coordinator reclaims after each flip
+  and in a reclaim pass at the start of each tick, under the tick deadline.
+- Root exact reads for a `source_deleted` intent already fail closed; routing already points
+  at the shard. Copy-back must refuse while reclaim is outstanding.
+- Audit (item 7): tool-payload cleanup, grouped FTS cleanup, materialization, storage
+  measurement, breaker alerts, root search dedupe.
+
 ### PR B: resumable cursor for every size
 
 - [ ] Deadline threaded into chunk loop/phase boundaries/reclaim; yield releases lease and resets
