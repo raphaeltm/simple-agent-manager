@@ -219,6 +219,7 @@ export function sandboxCreate(body: unknown, policy: ProxyPolicy): Record<string
     NanoCpus: cpus,
     Memory: memory,
     MemorySwap: memory,
+    LogConfig: CELLD_LOG_CONFIG,
   };
   if (binds) hostConfig.Binds = binds;
   const out: Record<string, unknown> = {
@@ -230,6 +231,16 @@ export function sandboxCreate(body: unknown, policy: ProxyPolicy): Record<string
   if (cmd) out.Cmd = cmd;
   return out;
 }
+
+/**
+ * Every container celld creates logs to a bounded file whatever the daemon's default driver is:
+ * celld cannot set LogConfig, and an unbounded json-file log from a sandbox printing in a loop
+ * would fill /var/lib/docker. celld reads sandbox output through `GET /logs`, which this keeps.
+ */
+export const CELLD_LOG_CONFIG = Object.freeze({
+  Type: 'json-file',
+  Config: Object.freeze({ 'max-size': '1m', 'max-file': '1' }),
+});
 
 /** `POST /containers/create` for celld's one-shot fence container. */
 export async function fenceCreate(
@@ -261,7 +272,7 @@ export async function fenceCreate(
     Env: [env[0]],
     Cmd: [...CELLD_FENCE_CMD],
     Labels: { 'celld.node': labels['celld.node'], 'celld.fence': '1' },
-    HostConfig: { NetworkMode: 'host', CapAdd: ['NET_ADMIN'] },
+    HostConfig: { NetworkMode: 'host', CapAdd: ['NET_ADMIN'], LogConfig: CELLD_LOG_CONFIG },
   };
 }
 export function execCreate(body: unknown): Record<string, unknown> {

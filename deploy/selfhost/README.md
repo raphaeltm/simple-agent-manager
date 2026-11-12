@@ -359,9 +359,15 @@ docker-proxy` (method, path, reason; never a body).
   start retries. A cancelled, expired or failed session marks its D1 row terminal before any
   sandbox call, so a retry is never blocked by a session whose teardown was interrupted.
 - Concurrent sessions are capped by `MAX_CONCURRENT_SETUP_SESSIONS` (default 2), so the
-  sandboxes commit at most 2 GiB by default.
-- celld's own fence lets the container reach the Internet and nothing on the box, the VPC,
-  private ranges or metadata. It does not stop the box's own public address: the container reaches
+  sandboxes commit at most 2 GiB by default. That cap lives in the Worker; the proxy holds its own
+  (`SAM_DOCKER_PROXY_MAX_CONTAINERS`, default 4 celld containers at once, counted and created one
+  at a time), gives every celld container a 1 MB log, and removes anonymous volumes with the
+  container, so a compromised celld cannot exhaust memory or disk through sandboxes either.
+- Sandboxes reach the Internet and nothing on the box, the VPC, private ranges or metadata.
+  celld installs rules for that with its fence container, but nothing makes celld run it, so SAM's
+  `egress-fence` service (root, re-applied every 5 s) holds the same boundary itself: chains
+  `sandbox_input` and `sandbox_forward` on `celld0`/`celld1` in `.state/egress-fence.nft`
+  (`renderSandboxChains` in `scripts/selfhost/egress-fence.ts`). It does not stop the box's own public address: the container reaches
   SAM's public HTTPS like any Internet client. SAM's egress fence lets celld (uid 7101) reach the
   container bridge `celld0` (TCP only) and nothing else in 172.16/12.
 - The container runs a pinned vendor CLI and holds the fresh credential until the DO reads and

@@ -25,6 +25,13 @@ export const SANDBOX_IMAGE_DIR = 'containers/sandbox';
 /** Host interface of celld's Internet-enabled container bridge (celld 0.6.3 `OPEN_BRIDGE`). */
 export const CELLD_CONTAINER_BRIDGE = 'celld0';
 
+/**
+ * Both of celld's container bridges (celld 0.6.3 `networks()`: `celld` -> celld0, `celld-internal`
+ * -> celld1). SAM's egress fence keeps sandboxes on them off the box and private ranges itself,
+ * so a compromised celld that skips its own fence container still cannot reach them.
+ */
+export const CELLD_SANDBOX_BRIDGES = ['celld0', 'celld1'] as const;
+
 /** gVisor: the sandbox runs a vendor CLI and handles a fresh credential on the control-plane box. */
 export const DEFAULT_GUIDED_LOGIN_RUNTIME = 'runsc';
 
@@ -196,7 +203,11 @@ export function assertContainerEngineReady(
       `could not read the Docker daemon's runtimes: ${probe.runtimesJson.slice(0, 200)}`
     );
   }
-  if (typeof runtimes !== 'object' || runtimes === null || !Object.hasOwn(runtimes, settings.runtime)) {
+  if (
+    typeof runtimes !== 'object' ||
+    runtimes === null ||
+    !Object.hasOwn(runtimes, settings.runtime)
+  ) {
     throw new Error(
       `SAM_GUIDED_LOGIN_RUNTIME=${settings.runtime} is not registered with the Docker daemon ` +
         `(for gVisor: install runsc, run \`sudo runsc install\`, restart Docker)`

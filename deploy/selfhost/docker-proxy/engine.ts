@@ -117,7 +117,7 @@ async function reapSandboxes(
     if (!stale(entry, entry.Labels)) continue;
     const facts = await inspectContainer(entry.Id);
     if (!facts || isCelldContainer(facts, policy) !== 'sandbox') continue;
-    const answer = await upstreamJson('DELETE', `/containers/${facts.id}?force=true`);
+    const answer = await upstreamJson('DELETE', `/containers/${facts.id}?force=true&v=true`);
     if (answer.status === 204) removed += 1;
     logEvent('reaped_stale_sandbox', {
       reason,
@@ -141,6 +141,19 @@ export function reapStaleSandboxes(currentNode: string, policy: ProxyPolicy): Pr
     'previous_node',
     (_entry, labels) => labels['celld.node'] !== currentNode
   );
+}
+
+/**
+ * Containers celld has on the daemon right now (sandboxes and fence runs, any state), or null when
+ * the daemon cannot say. Every celld container carries `celld.node`, and only celld can create
+ * through the proxy, so this is what a create would add to.
+ */
+export async function countCelldContainers(): Promise<number | null> {
+  const filters = encodeURIComponent(JSON.stringify({ label: ['celld.node'] }));
+  const reply = await upstreamJson('GET', `/containers/json?all=true&filters=${filters}`);
+  if (reply.status !== 200) return null;
+  const list: unknown = JSON.parse(reply.body);
+  return Array.isArray(list) ? list.length : null;
 }
 
 /** Oldest a sign-in sandbox may get: a setup session lives at most 15 minutes (default). */

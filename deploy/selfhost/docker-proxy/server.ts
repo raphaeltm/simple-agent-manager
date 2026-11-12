@@ -15,6 +15,7 @@ import { createServer, request as httpRequest } from 'node:http';
 import type { Duplex } from 'node:stream';
 
 import {
+  countCelldContainers,
   DEFAULT_MAX_SANDBOX_AGE_SECONDS,
   inspectContainer,
   logEvent,
@@ -31,6 +32,16 @@ const POLICY_PATH = process.env.SAM_DOCKER_PROXY_POLICY ?? '/etc/sam/docker-prox
 const SOCKET_MODE = Number.parseInt(process.env.SAM_DOCKER_PROXY_SOCKET_MODE ?? '660', 8);
 const MAX_BODY_BYTES = Number.parseInt(process.env.SAM_DOCKER_PROXY_MAX_BODY_BYTES ?? '262144', 10);
 /** Exec ids this proxy created, oldest first; bounded so a long-lived proxy does not grow. */
+/**
+ * Most celld containers (sandboxes plus fence runs) that may exist at once. The Worker caps
+ * concurrent sign-ins (MAX_CONCURRENT_SETUP_SESSIONS, default 2), but a compromised celld is on
+ * the far side of that cap; this one holds even then. Each sandbox may commit the instance type's
+ * memory, so the default bounds sign-in memory at 4 GiB with the basic type.
+ */
+const MAX_CELLD_CONTAINERS = Number.parseInt(
+  process.env.SAM_DOCKER_PROXY_MAX_CONTAINERS ?? '4',
+  10
+);
 const MAX_TRACKED_EXECS = Number.parseInt(process.env.SAM_DOCKER_PROXY_MAX_EXECS ?? '4096', 10);
 
 const HOP_BY_HOP = new Set([
@@ -183,14 +194,57 @@ function readBody(req: IncomingMessage): Promise<Buffer | null> {
   });
 }
 
+/**
+ * Creates run one at a time, from the count to the daemon's answer, so parallel creates cannot all
+ * see room under MAX_CELLD_CONTAINERS. Resolves to the release function for this turn.
+ */
+let createTail: Promise<void> = Promise.resolve();
+function takeCreateTurn(): Promise<() => void> {
+  let release!: () => void;
+  const done = new Promise<void>((resolve) => (release = resolve));
+  const turn = createTail.then(() => release);
+  createTail = createTail.then(() => done);
+  return turn;
+}
+
+/** Null when the create may go ahead; otherwise the refusal. Fails closed if the count fails. */
+async function createCapRefusal(): Promise<Extract<Decision, { allow: false }> | null> {
+  const live = await countCelldContainers().catch(() => null);
+  if (live === null) {
+    return { allow: false, status: 503, reason: 'create: cannot count celld containers' };
+  }
+  if (live >= MAX_CELLD_CONTAINERS) {
+    return {
+      allow: false,
+      status: 429,
+      reason: `create: celld already has ${live} containers (limit ${MAX_CELLD_CONTAINERS})`,
+    };
+  }
+  return null;
+}
+
 async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const method = req.method ?? 'GET';
   const url = req.url ?? '/';
   const raw = await readBody(req);
-  const decision: Decision =
+  let decision: Decision =
     raw === null
       ? { allow: false, status: 413, reason: 'request body is too large' }
       : await decideRequest(method, url, raw, false);
+  let releaseCreate: (() => void) | null = null;
+  if (decision.allow && decision.route.startsWith('containers.create.')) {
+    releaseCreate = await takeCreateTurn();
+    const refusal = await createCapRefusal();
+    if (refusal) {
+      releaseCreate();
+      releaseCreate = null;
+      decision = refusal;
+    }
+  }
+  const finishCreate = () => {
+    releaseCreate?.();
+    releaseCreate = null;
+  };
   logDecision(method, url, decision);
   if (!decision.allow) {
     res.writeHead(decision.status, { 'Content-Type': 'application/json', Connection: 'close' });
@@ -234,16 +288,21 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
       });
       return;
     }
+    // The daemon has answered the create: the container now counts (or never will).
+    reply.on('end', finishCreate);
+    reply.on('close', finishCreate);
     res.writeHead(reply.statusCode ?? 502, forwardHeaders(reply.headers));
     reply.pipe(res);
   });
   upstream.on('error', (error) => {
+    finishCreate();
     logEvent('upstream_error', { route: decision.route, error: String(error) });
     if (!res.headersSent) res.writeHead(502, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ message: 'sam-docker-proxy: the container engine did not answer' }));
   });
   // A long-polled wait whose caller went away must not hold the daemon connection.
   res.on('close', () => {
+    finishCreate();
     if (!res.writableFinished) upstream.destroy();
   });
   upstream.end(decision.body ?? undefined);

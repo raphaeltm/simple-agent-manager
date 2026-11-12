@@ -368,7 +368,8 @@ const RULES: Readonly<Record<string, Rule>> = {
   },
   artifacts: {
     kind: 'drop',
-    reason: 'Cloudflare Artifacts binding; the HostedGitRepo Durable Object serves SAM-native repos',
+    reason:
+      'Cloudflare Artifacts binding; the HostedGitRepo Durable Object serves SAM-native repos',
   },
   analytics_engine_datasets: {
     kind: 'drop',

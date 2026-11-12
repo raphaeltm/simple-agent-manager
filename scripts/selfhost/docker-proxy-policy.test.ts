@@ -134,6 +134,12 @@ describe('sandbox create', () => {
     ]);
     expect(forwarded.HostConfig.Runtime).toBe('runsc');
     expect(decision.target).toBe(`/containers/create?name=${NAME}`);
+    // Bounded logs whatever the daemon's default driver: a sandbox printing in a loop cannot fill
+    // /var/lib/docker.
+    expect(forwarded.HostConfig.LogConfig).toEqual({
+      Type: 'json-file',
+      Config: { 'max-size': '1m', 'max-file': '1' },
+    });
   });
 
   it.each([
@@ -234,8 +240,14 @@ describe('fence create', () => {
     HostConfig: { NetworkMode: 'host', CapAdd: ['NET_ADMIN'] },
   };
 
-  it("allows celld's exact fence container", async () => {
-    expect((await create(fence, null)).allow).toBe(true);
+  it("allows celld's exact fence container, with bounded logs", async () => {
+    const decision = await create(fence, null);
+    expect(decision.allow).toBe(true);
+    if (!decision.allow) return;
+    expect(JSON.parse(decision.body ?? '').HostConfig.LogConfig).toEqual({
+      Type: 'json-file',
+      Config: { 'max-size': '1m', 'max-file': '1' },
+    });
   });
 
   it.each([
@@ -267,8 +279,10 @@ describe('container lifecycle', () => {
       allow: true,
       target: `/containers/${SANDBOX_ID}/kill?signal=SIGKILL`,
     });
+    // Removal always takes the container's anonymous volumes with it.
     expect(await call('DELETE', '/containers/celld-fence?force=true')).toMatchObject({
       allow: true,
+      target: expect.stringMatching(/^\/containers\/[0-9a-f]+\?force=true&v=true$/),
     });
   });
 

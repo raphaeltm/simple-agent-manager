@@ -16,6 +16,8 @@ services:
     pull_policy: never # built by the docker-proxy service
     network_mode: none
     user: '0:0'
+    read_only: true
+    security_opt: ['no-new-privileges:true']
     cap_drop: [ALL]
     cap_add: [CHOWN, FOWNER]
     entrypoint:
@@ -50,6 +52,8 @@ services:
       # Sandboxes older than this are removed (a setup session lives at most 15 minutes by
       # default; raise this if you raise the setup-session TTL).
       SAM_DOCKER_PROXY_MAX_SANDBOX_AGE_SECONDS: ${SAM_DOCKER_PROXY_MAX_SANDBOX_AGE_SECONDS:-1800}
+      # Most celld containers (sign-in sandboxes and fence runs) at once, whatever celld asks for.
+      SAM_DOCKER_PROXY_MAX_CONTAINERS: ${SAM_DOCKER_PROXY_MAX_CONTAINERS:-4}
     # Bounded so a misbehaving (or compromised) celld cannot exhaust the host through it.
     mem_limit: 256m
     pids_limit: 64

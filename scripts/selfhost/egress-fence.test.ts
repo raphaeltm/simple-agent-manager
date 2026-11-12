@@ -51,6 +51,31 @@ describe('egress fence with guided login (celld containers)', () => {
   });
 });
 
+describe('egress fence: celld sandboxes (guided login)', () => {
+  it('keeps sandboxes off the host and private ranges without relying on celld’s fence', () => {
+    expect(renderFenceRuleset(plan())).not.toContain('sandbox_');
+    const rules = renderFenceRuleset(plan({ SAM_GUIDED_LOGIN: 'on' }));
+    const from = 'iifname { "celld0", "celld1" }';
+    // Replies to connections the host opened (celld driving the sandbox), then nothing else.
+    expect(rules).toContain('type filter hook input priority filter; policy accept;');
+    expect(rules).toContain(`${from} ct state established,related accept`);
+    expect(rules).toMatch(
+      /iifname \{ "celld0", "celld1" \} counter reject[^\n]*nothing on this host/
+    );
+    expect(rules.indexOf(`${from} ct state established`)).toBeLessThan(
+      rules.indexOf('nothing on this host')
+    );
+    // Forwarded traffic: the same forbidden ranges as celld's own uid, metadata included.
+    expect(rules).toContain('type filter hook forward priority filter; policy accept;');
+    expect(rules).toMatch(
+      /iifname \{ "celld0", "celld1" \} ip daddr \{[^}]*169\.254\.0\.0\/16[^}]*172\.16\.0\.0\/12[^}]*\} counter reject/
+    );
+    expect(rules).toMatch(
+      /iifname \{ "celld0", "celld1" \} ip6 daddr \{[^}]*fc00::\/7[^}]*\} counter reject/
+    );
+  });
+});
+
 describe('egress fence ruleset', () => {
   it('fences only the celld uid and lets established traffic (Caddy -> celld replies) through', () => {
     const rules = renderFenceRuleset(plan());

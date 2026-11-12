@@ -65,12 +65,18 @@ interface Reply {
   json: any; // eslint-disable-line @typescript-eslint/no-explicit-any -- Docker answers vary
 }
 
-function call(method: string, path: string, body?: unknown, rawBody?: string): Promise<Reply> {
+function call(
+  method: string,
+  path: string,
+  body?: unknown,
+  rawBody?: string,
+  socketPath = SOCKET
+): Promise<Reply> {
   return new Promise((resolve, reject) => {
     const text = rawBody ?? (body === undefined ? '' : JSON.stringify(body));
     const req = request(
       {
-        socketPath: SOCKET,
+        socketPath,
         method,
         path,
         headers: {
@@ -240,6 +246,9 @@ describe.skipIf(!dockerAvailable)('docker socket proxy (live, real daemon)', () 
       socketGid,
       '-e',
       'SAM_DOCKER_PROXY_SOCKET_MODE=666', // the test runner is not in celld's group
+      '-e',
+      // This suite keeps its sandboxes until afterAll; the cap has its own test below.
+      'SAM_DOCKER_PROXY_MAX_CONTAINERS=1000',
       '-v',
       '/var/run/docker.sock:/var/run/docker.sock',
       '-v',
@@ -702,6 +711,82 @@ describe.skipIf(!dockerAvailable)('docker socket proxy (live, real daemon)', () 
       expect(docker('logs', sweeper)).toContain('"reason":"over_max_age"');
     } finally {
       spawnSync('docker', ['rm', '-f', sweeper], { stdio: 'ignore' });
+    }
+  });
+
+  it('caps how many containers celld can have, even when it asks in parallel', async () => {
+    // A second proxy whose cap leaves room for exactly two more celld containers on this daemon.
+    const capped = `${PROXY}-cap`;
+    const dir = join(DIR, 'sock-cap');
+    mkdirSync(dir, { recursive: true });
+    chmodSync(dir, 0o777);
+    const socketGid = docker(
+      'run',
+      '--rm',
+      '-v',
+      '/var/run/docker.sock:/s',
+      BASE,
+      'stat',
+      '-c',
+      '%g',
+      '/s'
+    );
+    const live = docker('ps', '-aq', '--filter', 'label=celld.node')
+      .split('\n')
+      .filter(Boolean).length;
+    docker(
+      'run',
+      '-d',
+      '--name',
+      capped,
+      '--network',
+      'none',
+      '--read-only',
+      '--cap-drop',
+      'ALL',
+      '--group-add',
+      socketGid,
+      '-e',
+      'SAM_DOCKER_PROXY_SOCKET_MODE=666',
+      '-e',
+      `SAM_DOCKER_PROXY_MAX_CONTAINERS=${live + 2}`,
+      '-v',
+      '/var/run/docker.sock:/var/run/docker.sock',
+      '-v',
+      `${dir}:/run/sam-docker-proxy`,
+      '-v',
+      `${join(DIR, 'policy')}:/etc/sam/docker-proxy:ro`,
+      IMAGE
+    );
+    created.add(capped);
+    const socket = join(dir, 'docker.sock');
+    try {
+      await waitFor(
+        'the capped proxy socket',
+        async () =>
+          (await call('GET', '/_ping', undefined, undefined, socket).catch(() => null))?.status ===
+          200,
+        30_000,
+        () => docker('logs', capped)
+      );
+      const replies = await Promise.all(
+        Array.from({ length: 6 }, (_, i) =>
+          call(
+            'POST',
+            `/containers/create?name=${containerName(`cap-${i}`)}`,
+            sandboxBody(),
+            undefined,
+            socket
+          )
+        )
+      );
+      for (const reply of replies) {
+        if (reply.status === 201) created.add((reply.json as { Id: string }).Id);
+      }
+      expect(replies.map((r) => r.status).sort()).toEqual([201, 201, 429, 429, 429, 429]);
+      expect(docker('logs', capped)).toContain(`limit ${live + 2}`);
+    } finally {
+      spawnSync('docker', ['rm', '-f', capped], { stdio: 'ignore' });
     }
   });
 

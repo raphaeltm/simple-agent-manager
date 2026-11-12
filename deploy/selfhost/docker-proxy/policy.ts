@@ -216,6 +216,8 @@ async function route(request: ProxyRequest, context: DecisionContext): Promise<D
     if (method === 'DELETE' && action === undefined) {
       noBody();
       const params = query(url, { force: TRUE_FALSE }, 'remove');
+      // Anonymous volumes an image declares go with the container, or every sandbox leaks one.
+      params.set('v', 'true');
       const id = await ownedContainer(ref, context, 'any');
       return allow(method, 'containers.remove', withQuery(`/containers/${id}`, params));
     }
