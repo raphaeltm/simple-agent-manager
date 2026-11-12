@@ -23,6 +23,7 @@ import type { Env } from '../../../src/env';
 import type { AuthContext } from '../../../src/middleware/auth';
 import { AppError } from '../../../src/middleware/error';
 import { registerChatAgentCredentialRoute } from '../../../src/routes/chat-agent-credential';
+import { buildAcpInteractionRuntimeConfig } from '../../../src/services/acp-interaction-runtime-config';
 import { listAcpSessions } from '../../../src/services/project-data';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
@@ -98,6 +99,7 @@ describe('session agent credential', () => {
         accountName: 'Claude Max (personal)',
         isOwnSession: true,
       },
+      runtime: null,
     });
   });
 
@@ -123,7 +125,7 @@ describe('session agent credential', () => {
     const { status, body } = await read('runner');
 
     expect(status).toBe(200);
-    expect(body).toEqual({ credential: null });
+    expect(body).toEqual({ credential: null, runtime: null });
   });
 
   it('refuses someone who is not a project member', async () => {
@@ -133,5 +135,91 @@ describe('session agent credential', () => {
     const { status } = await read('stranger');
 
     expect(status).toBe(404);
+  });
+
+  describe('effective configuration', () => {
+    function setContract(sessionId: string, contract: unknown, skillId: string | null = null) {
+      sqlite
+        .prepare('UPDATE agent_sessions SET runtime_contract_json = ?, skill_id = ? WHERE id = ?')
+        .run(
+          typeof contract === 'string' ? contract : JSON.stringify(contract),
+          skillId,
+          sessionId
+        );
+    }
+    const CONTRACT = {
+      version: 1,
+      agentType: 'claude-code',
+      model: 'claude-opus-5-5',
+      effort: 'max',
+      permissionMode: 'acceptEdits',
+      opencodeProvider: null,
+      opencodeBaseUrl: 'https://private.example.test/v1',
+      settingsResolved: true,
+      acpInteractions: buildAcpInteractionRuntimeConfig({} as Env, 'task'),
+      promptKind: 'task',
+      taskContext: null,
+    };
+
+    beforeEach(() => {
+      sqlite.exec(`
+        INSERT INTO skills (id, project_id, user_id, name, created_at, updated_at)
+          VALUES ('sk-project', 'p1', 'runner', 'do', '${NOW}', '${NOW}'),
+                 ('sk-personal', NULL, 'runner', 'my secret recipe', '${NOW}', '${NOW}');
+      `);
+    });
+
+    it('returns the model, effort, permission mode and skill the session froze', async () => {
+      setContract('s1', CONTRACT, 'sk-project');
+      const { body } = await read('member');
+
+      expect(body.runtime).toEqual({
+        agentType: 'claude-code',
+        model: 'claude-opus-5-5',
+        effort: 'max',
+        permissionMode: 'acceptEdits',
+        opencodeProvider: null,
+        skillName: 'do',
+      });
+      // A custom OpenCode base URL can be private; it never leaves the server.
+      expect(JSON.stringify(body)).not.toContain('private.example.test');
+    });
+
+    it('reads the chat’s own agent session row, not another one in the workspace', async () => {
+      setContract('s-other', { ...CONTRACT, model: 'claude-haiku-5-5' });
+      setContract('s1', CONTRACT);
+      const { body } = await read('runner');
+
+      expect(body.runtime).toMatchObject({ model: 'claude-opus-5-5' });
+    });
+
+    it('shows a personal skill’s name only to the person who ran it', async () => {
+      setContract('s1', CONTRACT, 'sk-personal');
+
+      expect((await read('runner')).body.runtime).toMatchObject({
+        skillName: 'my secret recipe',
+      });
+      const member = await read('member');
+      expect(member.body.runtime).toMatchObject({ skillName: null, model: 'claude-opus-5-5' });
+      expect(JSON.stringify(member.body)).not.toContain('my secret recipe');
+    });
+
+    it('returns the configuration even before the agent has a credential', async () => {
+      sqlite.exec(`UPDATE agent_sessions SET agent_credential_reference = NULL WHERE id = 's1'`);
+      setContract('s1', CONTRACT);
+      const { body } = await read('runner');
+
+      expect(body.credential).toBeNull();
+      expect(body.runtime).toMatchObject({ permissionMode: 'acceptEdits' });
+    });
+
+    it('omits an unreadable contract instead of failing the whole response', async () => {
+      setContract('s1', '{"version":1,"agentType":');
+      const { status, body } = await read('runner');
+
+      expect(status).toBe(200);
+      expect(body.runtime).toBeNull();
+      expect(body.credential).toMatchObject({ credentialScope: 'profile' });
+    });
   });
 });

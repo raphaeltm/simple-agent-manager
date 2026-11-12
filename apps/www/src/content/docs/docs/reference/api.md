@@ -577,7 +577,12 @@ project's profiles; the offboarding preview reports `personalProfilePinCount`.
 `GET /api/projects/:projectId/sessions/:sessionId/agent-credential` reports which
 account a chat's agent ran on: `credentialSource` (who owns it), `credentialScope`
 (`profile`, `project`, `user` or `platform`), and `accountName`, which is returned only
-to the person who ran the session.
+to the person who ran the session. Its `runtime` object is the configuration the session
+froze when it started (`agent_sessions.runtime_contract_json`): `model` (null means the
+agent's default), `effort`, `permissionMode` and `opencodeProvider`, plus `skillName`,
+the skill's current name (looked up live, so a renamed skill shows its new name; a
+personal skill's name is returned only to the person who ran the session). `runtime` is
+null for sessions started before that record existed.
 
 ### `POST /api/credentials`
 

@@ -477,7 +477,7 @@ Private VM-agent node-management routes: `POST /workspaces/:workspaceId/mcp/secr
 ### Workload identity
 
 - `GET /oidc/.well-known/openid-configuration` and `GET /oidc/.well-known/jwks.json` — public provider-neutral workload issuer discovery and active public key. Separate from legacy GCP/internal JWT issuer.
-- `GET /api/projects/:projectId/sessions/:sessionId/agent-credential` — Which account the chat's agent ran on: `credentialSource`, `credentialScope` (`profile`/`project`/`user`/`platform`), and `accountName` (only for the session's own user).
+- `GET /api/projects/:projectId/sessions/:sessionId/agent-credential` — Which account the chat's agent ran on: `credentialSource`, `credentialScope` (`profile`/`project`/`user`/`platform`), and `accountName` (only for the session's own user); plus `runtime` — the session's frozen effective `model`, `effort`, `permissionMode`, `opencodeProvider` and `skillName` (personal skills only to the runner), null for pre-contract sessions.
 - `GET /api/projects/:projectId/sessions/:sessionId/workload-identity` — authenticated project-member read-only current workload metadata (issuer, subject, TTL, claims). Never mints a token. Unavailable runtime returns 409.
 - `exec_with_secrets` accepts optional `oidc: { audience: string }`; privately injects reserved `SAM_OIDC_TOKEN`, including when `secretNames` is empty. Same-session job status/cancel semantics are unchanged.
 
