@@ -79,3 +79,7 @@ Staying in the worker, with reasons:
   scanner and `no-console` cover `packages/repo-hosting/src`. Full API unit suite: 0 failed
   assertions; the only file that fails to load is `secret-request-delivery-guard.test.ts`, which
   also fails on core (imports a module W1 moved; reported to the coordinator).
+- 2026-11-12: overlap note (no W7 conflict): peer task 01M77Q6A32CJRZAE06QE8NH1YJ draft PR #2693
+  touches `services/default-capacity-pool-candidate-staging.ts`, `services/capacity-pool-refresh-work.ts`,
+  `scheduled/capacity-pool-continuation.ts`, `services/session-wake-ready-authority.ts` and ProjectData
+  `session-wake-ready.ts` (W1 package). Whichever lands second ports to the new paths.
