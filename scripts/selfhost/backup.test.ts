@@ -33,7 +33,8 @@ const SECRET = 'store-secret-value-123';
 let root: string;
 let calls: Array<{ command: string; args: string[]; env?: NodeJS.ProcessEnv }>;
 let clock: number;
-let failDeltaCopy: boolean;
+/** How many pulls after the live one fail (1: the delta copy; 2: the delta and the full copy). */
+let failDeltaCopy: number;
 let failLiveCopy: boolean;
 
 function tree(dir: string, base = dir): Record<string, string> {
@@ -70,7 +71,8 @@ function fakeRun(command: string, args: string[], env?: NodeJS.ProcessEnv): RunR
       if (src.startsWith('src/')) {
         // bucket -> backup; the second (delta) pull can be made to fail
         const pulls = calls.filter((c) => c.args.includes('/backup') && c.args[0] === 'run');
-        if (failDeltaCopy && pulls.length === 2) return { status: 1, stdout: '', stderr: 'boom' };
+        if (pulls.length >= 2 && pulls.length <= 1 + failDeltaCopy)
+          return { status: 1, stdout: '', stderr: 'boom' };
         if (failLiveCopy && pulls.length === 1) {
           // a running node rewrote an object mid-copy: part of the bucket arrives, then 404
           mkdirSync(join(hostDir, 'd1'), { recursive: true });
@@ -114,7 +116,7 @@ beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'sam-backup-'));
   calls = [];
   clock = 1_000_000;
-  failDeltaCopy = false;
+  failDeltaCopy = 0;
   failLiveCopy = false;
   const fleet = join(root, 'store/fleet/celld');
   mkdirSync(join(fleet, 'd1'), { recursive: true });
@@ -176,8 +178,36 @@ describe('runBackup', () => {
     expect(calls.at(-1)!.args.slice(-2)).toEqual(['start', 'celld']);
   });
 
-  it('restarts celld when the delta copy fails', () => {
-    failDeltaCopy = true;
+  it('falls back to a whole copy into an untouched directory when the delta copy fails', () => {
+    failDeltaCopy = 1;
+    const logs: string[] = [];
+    const dest = join(root, 'backups/b4');
+    const manifest = runBackup(
+      { ...ctx('s3://fleet/celld', join(root, 'state')), log: (m) => logs.push(m) },
+      dest
+    );
+    const pulls = calls
+      .filter((c) => c.args[0] === 'run')
+      .map((c) => c.args[c.args.indexOf('-v') + 1]);
+    expect(pulls).toEqual([
+      `${join(dest, '.bucket-live')}:/backup`,
+      `${join(dest, 'bucket')}:/backup`,
+      `${join(dest, '.bucket-full')}:/backup`,
+    ]);
+    expect(logs.some((l) => l.startsWith('delta copy failed'))).toBe(true);
+    expect(manifest.objectCount).toBe(2);
+    expect(readdirSync(dest).sort()).toEqual(['backup-manifest.json', 'bucket', 'env', 'state']);
+    expect(tree(join(dest, 'bucket'))).toEqual({
+      'd1/main.ltx': 'rows',
+      'current.json': '{"v":3}',
+    });
+    // celld stays stopped through both copies, and the downtime records both.
+    expect(calls.map((c) => c.args.at(-1)).filter((a) => a === 'celld')).toHaveLength(2);
+    expect(manifest.downtimeMs).toBe(3000); // stop t+2s, failed delta t+3s, whole copy t+4s, start t+5s
+  });
+
+  it('restarts celld when the delta copy and the whole copy both fail', () => {
+    failDeltaCopy = 2;
     expect(() =>
       runBackup(ctx('s3://fleet/celld', join(root, 'state')), join(root, 'backups/b2'))
     ).toThrow(/mc mirror/);
@@ -199,6 +229,8 @@ describe('runBackup', () => {
       return { status: 0, stdout: '', stderr: '' };
     };
     runBackup({ ...ctx('gs://my-bucket/celld', join(root, 'state')), run }, join(root, 'b3'));
+    // live pass into its own directory; the delta pass into `bucket`, a path gcloud never wrote
+    expect(calls[2]?.args.at(-1)).toBe(join(root, 'b3/bucket'));
     expect(calls[0]).toMatchObject({
       command: 'gcloud',
       args: [
@@ -207,7 +239,7 @@ describe('runBackup', () => {
         '--recursive',
         '--delete-unmatched-destination-objects',
         'gs://my-bucket/celld',
-        join(root, 'b3/bucket'),
+        join(root, 'b3/.bucket-live'),
       ],
     });
   });
