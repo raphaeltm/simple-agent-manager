@@ -37,6 +37,12 @@ describe('buildReadmeContent', () => {
     expect(readme).toContain('# My Cool Project');
   });
 
+  it('names no hosting vendor, so it is true on Cloudflare and on a self-hosted box', () => {
+    const readme = buildReadmeContent('P');
+    expect(readme).toContain("this installation's own Git server");
+    expect(readme).not.toMatch(/Cloudflare/);
+  });
+
   it('includes the description when provided', () => {
     const readme = buildReadmeContent('P', 'A serverless todo app');
     expect(readme).toContain('A serverless todo app');
