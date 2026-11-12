@@ -19,6 +19,8 @@ through `RepoHostingPorts` (`src/ports.ts`):
 | `auth`           | `apps/api/src/repo-hosting-ports/auth.ts`            | Better Auth owns OAuth token storage; only the worker builds it |
 
 `apps/api/src/repo-hosting-wiring.ts` installs both; the worker entry imports it first.
+`@simple-agent-manager/repo-hosting/ports` is the registry alone (no runtime imports), for test
+setup that must not load the package's D1 schema.
 
 Webhook and trigger processing (`github-trigger-*`, `github-project-event-*`,
 `github-pull-request-*`) stays in the worker: it depends on triggers, ProjectData and route

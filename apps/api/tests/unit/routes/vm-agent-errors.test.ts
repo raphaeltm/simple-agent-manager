@@ -50,12 +50,15 @@ vi.mock('drizzle-orm', () => ({
   inArray: vi.fn(),
 }));
 
-// Mock schema
-vi.mock('../../../src/db/schema', () => ({
+// Mock schema. Repo-hosting code reached through the routes (services/gitlab) reads the tables
+// from worker-core directly, so it gets the same stub.
+const schemaMock = vi.hoisted(() => ({
   nodes: { id: 'id', userId: 'userId', status: 'status', createdAt: 'createdAt' },
   workspaces: { id: 'id', userId: 'userId', nodeId: 'nodeId', status: 'status' },
   agentSessions: { workspaceId: 'workspaceId' },
 }));
+vi.mock('../../../src/db/schema', () => schemaMock);
+vi.mock('@simple-agent-manager/worker-core/schema', () => schemaMock);
 
 // Mock services
 vi.mock('../../../src/services/limits', () => ({

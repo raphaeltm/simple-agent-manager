@@ -13,7 +13,9 @@ import { beforeAll } from 'vitest';
 const PORT_SETUP_TIMEOUT_MS = 120_000;
 
 beforeAll(async () => {
-  const { configureRepoHostingPort } = await import('@simple-agent-manager/repo-hosting');
+  // The ports entry imports nothing at runtime; the package root would load every module and the
+  // D1 schema, which breaks test files that mock drizzle-orm.
+  const { configureRepoHostingPort } = await import('@simple-agent-manager/repo-hosting/ports');
   await Promise.all([
     import('../../src/repo-hosting-ports/platform-config')
       .then((m) => configureRepoHostingPort('platformConfig', m.platformConfigPort))
