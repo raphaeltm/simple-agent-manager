@@ -43,3 +43,7 @@ The integration-only branch merges this output with Sol6511b14d. Its owner fixtu
 ## Staging coordination
 
 The coordinator assigned bounded cleanup of two old empty staging GCP test nodes after confirming their provider identities. Both ordinary authenticated DELETE requests returned409 because runtime termination could not be confirmed. Read-only D1 reports provenance quarantine and no termination proof; logs redact the underlying error, so a precise credential mismatch is unproven. Coordinator is arranging human cleanup. No new VM, staging deployment, production mutation or replay has been performed by this task. One disposable2vCPU/4GB VM is planned for sequential combined catalog/recovery and owner-force validation after the shared resource ceiling clears.
+
+## Import-boundary regression caught by broad validation
+
+The broad native API run found that importing the resolver through `routes/credentials` registered unrelated credential routes while chat was loading, breaking the existing narrow schema mock in `chat-prompt-cancel`. The owner service now imports the identical resolver from its backing `agent-key-resolution` service. The existing failing chat suite and owner-action suite pass100 tests together; security review confirms a plain re-export replacement with no behavioral change. Current-head CI remains the authoritative complete-suite gate; earlier mixed-head and stopped local runs are not full passing evidence.
