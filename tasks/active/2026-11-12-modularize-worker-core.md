@@ -27,11 +27,11 @@ Branch: `sam/w0-worker-core-create-ervkbr` (SAM output branch) → PR base `sam/
 
 ## Test counts (before → after)
 
-| Suite                          | Before (core branch)                                           | After                                                          |
-| ------------------------------ | -------------------------------------------------------------- | -------------------------------------------------------------- |
-| `apps/api` unit (`vitest run`) | 1087 files / 16,016 cases (derived: after + the 4 moved files) | 1083 files / 15,962 cases (15,958 passed, 4 skipped as before) |
-| `packages/worker-core`         | —                                                              | 6 files / 64 cases (54 moved + 10 new)                         |
-| `scripts/quality`              | 60 files / 876 cases                                           | 61 files (+ `worker-module-boundaries.test.ts`, 39 cases)      |
-| Total                          |                                                                | +49 cases, nothing deleted                                     |
+| Suite                          | Before (core branch)                                           | After                                                                 |
+| ------------------------------ | -------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `apps/api` unit (`vitest run`) | 1087 files / 16,016 cases (derived: after + the 4 moved files) | 1083 files / 15,962 cases (15,958 passed, 4 skipped as before)        |
+| `packages/worker-core`         | —                                                              | 6 files / 64 cases (54 moved + 10 new)                                |
+| `scripts/quality`              | 59 files / 852 cases                                           | 60 files / 891 cases (+ `worker-module-boundaries.test.ts`, 39 cases) |
+| Total                          |                                                                | +49 cases, nothing deleted                                            |
 
 Moved, not deleted (case counts unchanged): `d1-error-code` (30), `fetch-timeout` (16), `runtime-validation` (6), `structured-logging-format` (2) = 54. Edited in place with unchanged case counts: `credential-token-redaction`, `cf-container-runtime-contract`, and the schema-path readers.
