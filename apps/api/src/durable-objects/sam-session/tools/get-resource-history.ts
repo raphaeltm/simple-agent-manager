@@ -1,9 +1,10 @@
 /**
  * SAM get_resource_history tool — inspect workspace resource summaries and lazy chunk detail.
  */
+import { readResourceHistory } from '@simple-agent-manager/operations';
+
 import type { Env } from '../../../env';
 import { operationDeps } from '../../../operation-ports';
-import { readResourceHistory } from '../../../operations/workspace-history';
 import type { AnthropicToolDef, ToolContext } from '../types';
 import { resolveProjectWithOwnership } from './helpers';
 

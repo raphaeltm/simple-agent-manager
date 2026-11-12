@@ -1,3 +1,4 @@
+import { recordWorkStartIdeaLink } from '@simple-agent-manager/operations';
 import type { AgentProfileRuntime, TaskAttachment, TaskMode } from '@simple-agent-manager/shared';
 import {
   CHAT_CONTEXT_SUMMARY_SOURCE,
@@ -12,7 +13,6 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import { operationDeps } from '../operation-ports';
-import { recordWorkStartIdeaLink } from '../operations/start-work-core';
 import { startSamAwareAgentSession } from './agent-session-bootstrap';
 import { explicitRuntimeAdapterSnapshot } from './canonical-vm-allocation';
 import { capacityPlacementSnapshotDbValues } from './capacity-placement-snapshot';

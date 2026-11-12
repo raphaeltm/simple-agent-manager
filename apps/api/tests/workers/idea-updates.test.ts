@@ -1,16 +1,12 @@
+import type { OperationError } from '@simple-agent-manager/operations';
+import type { OperationContext } from '@simple-agent-manager/operations';
+import { addIdeaUpdate, deleteIdeaUpdate, listIdeaUpdates } from '@simple-agent-manager/operations';
+import { samIdeaUpdate, samIdeaUpdatesList } from '@simple-agent-manager/operations';
 import { env, SELF } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import type { Env } from '../../src/env';
 import { createOperationPorts } from '../../src/operation-ports';
-import type { OperationError } from '../../src/operations/errors';
-import {
-  addIdeaUpdate,
-  deleteIdeaUpdate,
-  listIdeaUpdates,
-} from '../../src/operations/idea-update-core';
-import { samIdeaUpdate, samIdeaUpdatesList } from '../../src/operations/platform-operations';
-import type { OperationContext } from '../../src/operations/types';
 import { handleUpdateIdea } from '../../src/routes/mcp/idea-tools';
 import { CONNECTOR_DEFAULTS } from '../../src/services/connector-settings';
 import type { McpTokenData } from '../../src/services/mcp-token';

@@ -90,7 +90,7 @@ vi.mock('../../../src/services/admin-settings', async (original) => ({
     ]),
 }));
 
-vi.mock('../../../src/operations/agent-linked-context', () => ({
+vi.mock('@simple-agent-manager/operations/internal/agent-linked-context', () => ({
   getAgentLinkedContext: vi.fn().mockImplementation(async (_ctx, input) => ({
     kind: input.ideaId ? 'idea' : input.fileId ? 'file' : 'session',
     id: input.ideaId ?? input.fileId ?? input.sessionId,

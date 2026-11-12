@@ -6,13 +6,14 @@
  * (`services/node-diagnostics-access.ts`), with operator access built from this call's gate
  * grant. Raw node output is returned only inside untrusted-data envelopes.
  */
+import { untrustedTextBlock } from '@simple-agent-manager/operations';
+
 import type { Env } from '../../env';
 import {
   checkRateLimit,
   createRateLimitKey,
   getCurrentWindowStart,
 } from '../../middleware/rate-limit';
-import { untrustedTextBlock } from '../../operations/untrusted-text';
 import { captureDebugPackage } from '../../services/fleet-ops/debug-packages';
 import {
   NODE_LOG_LEVELS,

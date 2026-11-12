@@ -1,3 +1,6 @@
+import { toOperationHttpError } from '@simple-agent-manager/operations';
+import { applyIdeaStatusTransition, isIdeaStatus } from '@simple-agent-manager/operations';
+import { getIdeaSessionLinks } from '@simple-agent-manager/operations';
 import {
   type ListTaskEventsResponse,
   type ListTasksResponse,
@@ -22,9 +25,6 @@ import { getUserId, requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireOwnedWorkspace, requireProjectCapability } from '../../middleware/project-auth';
 import { operationDeps, webOperationContext } from '../../operation-ports';
-import { toOperationHttpError } from '../../operations/errors';
-import { applyIdeaStatusTransition, isIdeaStatus } from '../../operations/idea-transitions';
-import { getIdeaSessionLinks } from '../../operations/link-core';
 import {
   CreateTaskDependencySchema,
   CreateTaskSchema,

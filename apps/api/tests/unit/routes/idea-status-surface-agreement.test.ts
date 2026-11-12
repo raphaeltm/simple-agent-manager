@@ -45,9 +45,10 @@ vi.mock('../../../src/services/project-data', async (importOriginal) => ({
   recordActivityEvent: vi.fn().mockResolvedValue(undefined),
 }));
 
+import type { OperationContext } from '@simple-agent-manager/operations';
+import { updateIdea } from '@simple-agent-manager/operations';
+
 import { createOperationPorts } from '../../../src/operation-ports';
-import { updateIdea } from '../../../src/operations/idea-core';
-import type { OperationContext } from '../../../src/operations/types';
 import { ideaRoutes } from '../../../src/routes/ideas';
 import { crudRoutes } from '../../../src/routes/tasks/crud';
 

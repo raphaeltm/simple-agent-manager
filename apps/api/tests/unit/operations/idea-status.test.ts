@@ -6,15 +6,15 @@
  * the weak-link case (a chat that only read the idea must not move it) and the
  * merge-already-answered case (the question is asked once, not on every page load).
  */
-import type { IdeaPullRequest } from '@simple-agent-manager/shared';
-import { describe, expect, it } from 'vitest';
-
 import {
   deriveIdeaStatus,
   type IdeaStatusInput,
   type IdeaStatusLinkedSession,
   isLinkedWorkActive,
-} from '../../../src/operations/idea-status';
+} from '@simple-agent-manager/operations';
+import type { IdeaPullRequest } from '@simple-agent-manager/shared';
+import { describe, expect, it } from 'vitest';
+
 import { WAKEABLE_TASK_STATUSES } from '../../../src/services/task-status';
 
 const WAKEABLE: ReadonlySet<string> = new Set(WAKEABLE_TASK_STATUSES);

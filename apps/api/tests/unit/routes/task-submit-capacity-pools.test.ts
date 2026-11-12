@@ -1055,7 +1055,8 @@ describe('task submit capacity-pool placement', () => {
           mocks.acceptInstantSession.mockRejectedValueOnce(
             new AppError(403, 'FORBIDDEN', 'Denied after task insert')
           );
-        const { samChatStart } = await import('../../../src/operations/connector-operations');
+        const { samChatStart } =
+          await import('@simple-agent-manager/operations/internal/connector-operations');
         const context = {
           env,
           ports: createOperationPorts(env),
@@ -1127,8 +1128,10 @@ describe('task submit capacity-pool placement', () => {
           .run(runtime);
         mocks.acceptInstantSession.mockResolvedValue({ chatSessionId: 'instant-chat' });
         mocks.continueInstantSessionLaunch.mockResolvedValue({});
-        const { samChatStart } = await import('../../../src/operations/connector-operations');
-        const { samTaskGet } = await import('../../../src/operations/platform-operations');
+        const { samChatStart } =
+          await import('@simple-agent-manager/operations/internal/connector-operations');
+        const { samTaskGet } =
+          await import('@simple-agent-manager/operations/internal/platform-operations');
         const context = {
           env,
           ports: createOperationPorts(env),

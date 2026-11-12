@@ -67,14 +67,23 @@ const relativePackagePath = {
   regex: '^\\.{1,2}/(.*/)?packages/',
   message: 'Import the package by name through its public entry point, not by relative path.',
 };
+// A package's `./internal/*` entry exists only so worker tests can mock or drive one of its
+// modules (a `vi.mock` of a public re-export does not reach imports made inside the package);
+// worker source and other packages use public entries only.
+const packageInternalPath = {
+  regex: '^@simple-agent-manager/[^/]+/internal(/|$)',
+  message:
+    "A package's ./internal/* entry is for apps/api tests only; import its public entry point.",
+};
 const packageBoundaryPatterns = [
   { regex: `^@simple-agent-manager/(${appPackageNames.join('|')})(/|$)`, message: appsMessage },
   { regex: '^\\.{1,2}/(.*/)?apps/', message: appsMessage },
   // Package-to-package edges go through public entry points too.
   deepPackagePath,
   relativePackagePath,
+  packageInternalPath,
 ];
-const workerBoundaryPatterns = [deepPackagePath, relativePackagePath];
+const workerBoundaryPatterns = [deepPackagePath, relativePackagePath, packageInternalPath];
 const workerTestBoundaryPatterns = [
   deepPackagePath,
   {

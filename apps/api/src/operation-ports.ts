@@ -5,6 +5,8 @@
  * method closes over the request's `env`, so operations never pass the full worker `Env`.
  * Construction is a handful of closures per request; there is no I/O here.
  */
+import type { OperationPorts, ProjectEventErrorKind } from '@simple-agent-manager/operations';
+import type { OperationContext, OperationDeps } from '@simple-agent-manager/operations';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from './db/schema';
@@ -26,8 +28,6 @@ import type { Env } from './env';
 import { parsePositiveInt } from './lib/route-helpers';
 import { getTrustedApiOrigin } from './lib/trusted-origins';
 import { requireProjectAccess, requireProjectCapability } from './middleware/project-auth';
-import type { OperationPorts, ProjectEventErrorKind } from './operations/ports';
-import type { OperationContext, OperationDeps } from './operations/types';
 import { attachWakeState } from './routes/chat/wake-state';
 import { answerAgentInteraction } from './routes/chat-acp-interactions';
 import { resolveChatAgentState } from './routes/chat-agent-state';

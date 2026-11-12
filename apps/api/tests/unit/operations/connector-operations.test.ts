@@ -1,13 +1,6 @@
 import { readFileSync } from 'node:fs';
 
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-import * as schema from '../../../src/db/schema';
-import type { Env } from '../../../src/env';
-import { markRejectedBeforeEffects } from '../../../src/lib/operation-effect-boundary';
-import { AppError } from '../../../src/middleware/error';
-import { createOperationPorts } from '../../../src/operation-ports';
+import type { OperationContext } from '@simple-agent-manager/operations';
 import {
   samAgentAnswer,
   samChatSend,
@@ -17,8 +10,8 @@ import {
   samProjectGet,
   samProjectsList,
   samWorkStop,
-} from '../../../src/operations/connector-operations';
-import { OperationError } from '../../../src/operations/errors';
+} from '@simple-agent-manager/operations';
+import { OperationError } from '@simple-agent-manager/operations';
 import {
   samChatRead,
   samIdeaCreate,
@@ -26,8 +19,15 @@ import {
   samIdeaUpdate,
   samProfilesList,
   samTasksList,
-} from '../../../src/operations/platform-operations';
-import type { OperationContext } from '../../../src/operations/types';
+} from '@simple-agent-manager/operations';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import * as schema from '../../../src/db/schema';
+import type { Env } from '../../../src/env';
+import { markRejectedBeforeEffects } from '../../../src/lib/operation-effect-boundary';
+import { AppError } from '../../../src/middleware/error';
+import { createOperationPorts } from '../../../src/operation-ports';
 import { executeConnectorWrite } from '../../../src/services/connector-execution';
 import * as projectData from '../../../src/services/project-data';
 import { sessionAccessFromGetSession } from '../../helpers/session-access-mock';

@@ -1,7 +1,7 @@
 /**
  * The workspace `sam-mcp` tools and the /sam agent tools share one operation function for
  * archived tool payloads, resource history, session listing and mission creation
- * (`src/operations/workspace-history.ts`, `session-list.ts`, `missions.ts`). These tests drive
+ * (`packages/operations/src/workspace-history.ts`, `session-list.ts`, `missions.ts`). These tests drive
  * each surface's real handler and pin both halves of the contract: the shared read/write is
  * the same, and each surface keeps its own authorization, wording and output shape.
  */

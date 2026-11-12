@@ -4,6 +4,7 @@
  *
  * dispatch_task lives in dispatch-tool.ts due to its size.
  */
+import { ensurePullRequest } from '@simple-agent-manager/operations';
 import {
   DEFAULT_NOTIFICATION_FULL_BODY_LENGTH,
   MAX_NOTIFICATION_BODY_LENGTH,
@@ -17,7 +18,6 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
-import { ensurePullRequest } from '../../operations/pull-request-core';
 import * as notificationService from '../../services/notification';
 import * as orchestratorService from '../../services/project-orchestrator';
 import { recomputeMissionSchedulerStates } from '../../services/scheduler-state-sync';

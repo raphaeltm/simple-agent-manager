@@ -4,8 +4,10 @@ import { describe, expect, it, vi } from 'vitest';
 const snapshot = vi.hoisted(() => vi.fn());
 const prStates = vi.hoisted(() => vi.fn().mockResolvedValue({}));
 vi.mock('../../../src/services/project-data', () => ({ getResourceLinkSnapshot: snapshot }));
-vi.mock('../../../src/operations/pull-request-core', async (importActual) => ({
-  ...(await importActual<typeof import('../../../src/operations/pull-request-core')>()),
+vi.mock('@simple-agent-manager/operations/internal/pull-request-core', async (importActual) => ({
+  ...(await importActual<
+    typeof import('@simple-agent-manager/operations/internal/pull-request-core')
+  >()),
   getPullRequestStates: prStates,
 }));
 vi.mock('../../../src/services/admin-settings', () => ({
@@ -21,11 +23,12 @@ vi.mock('../../../src/services/admin-settings', () => ({
     ]),
 }));
 
+import { getIdeaContext, getSessionContext } from '@simple-agent-manager/operations';
+
 import { MIGRATIONS } from '../../../src/durable-objects/migrations';
 import { getLinkSnapshot, recordLink } from '../../../src/durable-objects/project-data/links';
 import type { Env } from '../../../src/env';
 import { operationDeps } from '../../../src/operation-ports';
-import { getIdeaContext, getSessionContext } from '../../../src/operations/link-core';
 import { resolveAdminSettingDetailsMany } from '../../../src/services/admin-settings';
 import { createSqlStorage } from '../durable-objects/sql-storage-test-utils';
 

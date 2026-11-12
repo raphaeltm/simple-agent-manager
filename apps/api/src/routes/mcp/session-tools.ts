@@ -3,10 +3,11 @@
  *
  * Also exports TokenRow and groupTokensIntoMessages for use by tests and other modules.
  */
+import { listSessionSummaries } from '@simple-agent-manager/operations';
+import { readArchivedToolPayloads, readResourceHistory } from '@simple-agent-manager/operations';
+
 import type { Env } from '../../env';
 import { operationDeps } from '../../operation-ports';
-import { listSessionSummaries } from '../../operations/session-list';
-import { readArchivedToolPayloads, readResourceHistory } from '../../operations/workspace-history';
 import * as projectDataService from '../../services/project-data';
 import {
   getMcpLimits,

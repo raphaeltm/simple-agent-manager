@@ -10,22 +10,22 @@
  * The project predicate is a SQL `WHERE`, so it is tested against SQLite rather than a mock
  * whose `.where()` ignores its arguments (rule 28). Every attack case has an owner control.
  */
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-
-import * as schema from '../../../src/db/schema';
-import type { Env } from '../../../src/env';
-import { createOperationPorts } from '../../../src/operation-ports';
-import { OperationError } from '../../../src/operations/errors';
-import { updateIdea } from '../../../src/operations/idea-core';
+import type { OperationContext } from '@simple-agent-manager/operations';
+import { OperationError } from '@simple-agent-manager/operations';
+import { updateIdea } from '@simple-agent-manager/operations';
 import {
   acknowledgeIdeaMerge,
   applyIdeaStatusTransition,
   canTransitionIdeaStatus,
   getAllowedIdeaTransitions,
   validateIdeaStatusTransition,
-} from '../../../src/operations/idea-transitions';
-import type { OperationContext } from '../../../src/operations/types';
+} from '@simple-agent-manager/operations';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import * as schema from '../../../src/db/schema';
+import type { Env } from '../../../src/env';
+import { createOperationPorts } from '../../../src/operation-ports';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const PROJECT = 'project-1';

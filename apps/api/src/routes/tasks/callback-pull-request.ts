@@ -1,10 +1,10 @@
+import { ensurePullRequest, parseProjectPullRequestUrl } from '@simple-agent-manager/operations';
 import { eq } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
-import { ensurePullRequest, parseProjectPullRequestUrl } from '../../operations/pull-request-core';
 
 type TaskDb = ReturnType<typeof drizzle<typeof schema>>;
 

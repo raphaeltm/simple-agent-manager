@@ -1,5 +1,5 @@
-// Moved to the operations layer (`operations/connector-limits.ts`); this path re-exports it so existing
-// importers keep working.
+// Moved to @simple-agent-manager/operations (`packages/operations/src/connector-limits.ts`); this path
+// re-exports it so existing importers keep working.
 export {
   DEFAULT_CONNECTOR_CLIENT_IDLE_TTL_SECONDS,
   DEFAULT_CONNECTOR_CLIENT_NAME_MAX_LENGTH,
@@ -10,4 +10,4 @@ export {
   DEFAULT_CONNECTOR_REQUEST_MAX_BYTES,
   DEFAULT_CONNECTOR_RESPONSE_MAX_BYTES,
   MIN_CONNECTOR_RESPONSE_MAX_BYTES,
-} from '../operations/connector-limits';
+} from '@simple-agent-manager/operations';

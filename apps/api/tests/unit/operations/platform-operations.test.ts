@@ -1,11 +1,6 @@
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-import * as schema from '../../../src/db/schema';
-import type { Env } from '../../../src/env';
-import { createOperationPorts } from '../../../src/operation-ports';
-import { OperationError, operationErrorHttpStatus } from '../../../src/operations/errors';
-import { getPlatformOperationLimits } from '../../../src/operations/limits';
+import type { Actor, OperationContext } from '@simple-agent-manager/operations';
+import { OperationError, operationErrorHttpStatus } from '@simple-agent-manager/operations';
+import { getPlatformOperationLimits } from '@simple-agent-manager/operations';
 import {
   samChatRead,
   samChatsSearch,
@@ -17,13 +12,15 @@ import {
   samProfilesList,
   samTaskGet,
   samTasksList,
-} from '../../../src/operations/platform-operations';
-import { operationInputJsonSchema, operations } from '../../../src/operations/registry';
-import type { Actor, OperationContext } from '../../../src/operations/types';
-import {
-  UNTRUSTED_TEXT_GUIDANCE,
-  untrustedTextBlock,
-} from '../../../src/operations/untrusted-text';
+} from '@simple-agent-manager/operations';
+import { operationInputJsonSchema, operations } from '@simple-agent-manager/operations';
+import { UNTRUSTED_TEXT_GUIDANCE, untrustedTextBlock } from '@simple-agent-manager/operations';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import * as schema from '../../../src/db/schema';
+import type { Env } from '../../../src/env';
+import { createOperationPorts } from '../../../src/operation-ports';
 import { getMcpLimits } from '../../../src/routes/mcp/_helpers';
 import { runWorkspaceOperation } from '../../../src/routes/mcp/workspace-operation-adapter';
 import { handleGetPeerAgentOutput } from '../../../src/routes/mcp/workspace-tools-direct';
@@ -45,7 +42,7 @@ vi.mock('../../../src/services/project-data', async (importOriginal) => {
     searchKnowledgeObservations: vi.fn().mockResolvedValue([]),
   };
 });
-vi.mock('../../../src/operations/agent-linked-context', () => ({
+vi.mock('@simple-agent-manager/operations/internal/agent-linked-context', () => ({
   getAgentLinkedContext: vi.fn().mockResolvedValue({
     kind: 'idea',
     id: 'idea-owner',

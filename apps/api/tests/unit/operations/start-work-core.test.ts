@@ -9,17 +9,20 @@ import Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const recordLinkMock = vi.hoisted(() => vi.fn());
-vi.mock('../../../src/operations/link-core', () => ({ recordLink: recordLinkMock }));
+vi.mock('@simple-agent-manager/operations/internal/link-core', () => ({
+  recordLink: recordLinkMock,
+}));
 
-import type { Env } from '../../../src/env';
-import { AppError } from '../../../src/middleware/error';
-import { operationDeps } from '../../../src/operation-ports';
-import { ideaTaskPredicateSql } from '../../../src/operations/idea-identity';
+import { ideaTaskPredicateSql } from '@simple-agent-manager/operations';
 import {
   classifyWorkStartIdea,
   recordWorkStartIdeaLink,
   requireOpenIdeaForWorkStart,
-} from '../../../src/operations/start-work-core';
+} from '@simple-agent-manager/operations';
+
+import type { Env } from '../../../src/env';
+import { AppError } from '../../../src/middleware/error';
+import { operationDeps } from '../../../src/operation-ports';
 
 function fixture() {
   const db = new Database(':memory:');

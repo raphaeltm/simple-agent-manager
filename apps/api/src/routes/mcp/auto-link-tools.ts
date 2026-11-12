@@ -1,8 +1,9 @@
+import { recordAutoLink } from '@simple-agent-manager/operations';
+
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { expectJsonRecord } from '../../lib/runtime-validation';
 import { operationDeps } from '../../operation-ports';
-import { recordAutoLink } from '../../operations/link-core';
 import { type JsonRpcResponse, type McpTokenData, resolveSessionId } from './_helpers';
 
 const RELATIONS = {

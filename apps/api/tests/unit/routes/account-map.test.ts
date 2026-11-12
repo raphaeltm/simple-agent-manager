@@ -34,7 +34,9 @@ vi.mock('../../../src/services/project-data', () => ({
 vi.mock('../../../src/services/agent-activity', () => ({
   listAgentActivityTasks: vi.fn(),
 }));
-vi.mock('../../../src/operations/link-core', () => ({ listLinksForTargets: vi.fn() }));
+vi.mock('@simple-agent-manager/operations/internal/link-core', () => ({
+  listLinksForTargets: vi.fn(),
+}));
 vi.mock('../../../src/services/admin-settings', () => ({
   resolveAdminSettingDetailsMany: vi
     .fn()

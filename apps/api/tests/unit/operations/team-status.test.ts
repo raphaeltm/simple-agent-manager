@@ -4,15 +4,15 @@
  * ProjectData (session summaries), the AI budget meter and provider limit windows are external
  * boundaries and are mocked; everything read from D1 runs the production queries.
  */
+import type { OperationContext } from '@simple-agent-manager/operations';
+import { responseBytes, resultByteBudget } from '@simple-agent-manager/operations';
+import { samTeamStatus } from '@simple-agent-manager/operations';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { createOperationPorts } from '../../../src/operation-ports';
-import { responseBytes, resultByteBudget } from '../../../src/operations/response-budget';
-import { samTeamStatus } from '../../../src/operations/team-operations';
-import type { OperationContext } from '../../../src/operations/types';
 import { getConnectorReadLimits } from '../../../src/services/connector-read-settings';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 

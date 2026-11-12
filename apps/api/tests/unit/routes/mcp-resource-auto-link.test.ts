@@ -28,7 +28,7 @@ vi.mock('../../../src/services/admin-settings', () => ({
       { value: 500 },
     ]),
 }));
-vi.mock('../../../src/operations/agent-linked-context', () => ({
+vi.mock('@simple-agent-manager/operations/internal/agent-linked-context', () => ({
   getAgentLinkedContext: vi.fn().mockResolvedValue({ kind: 'idea', id: 'idea1' }),
 }));
 vi.mock('../../../src/middleware/project-auth', async (original) => ({
@@ -51,12 +51,13 @@ vi.mock('../../../src/services/workspace-file-transfer', async (original) => ({
   uploadToWorkspace: fileMocks.toWorkspace,
 }));
 
+import { recordAutoLink } from '@simple-agent-manager/operations';
+
 import * as schema from '../../../src/db/schema';
 import { MIGRATIONS } from '../../../src/durable-objects/migrations';
 import { recordLink as recordDoLink } from '../../../src/durable-objects/project-data/links';
 import type { Env } from '../../../src/env';
 import { operationDeps } from '../../../src/operation-ports';
-import { recordAutoLink } from '../../../src/operations/link-core';
 import {
   createJsonKv,
   createMcpApp,

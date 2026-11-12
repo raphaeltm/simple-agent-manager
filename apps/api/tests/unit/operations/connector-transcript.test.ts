@@ -1,3 +1,7 @@
+import type { OperationContext } from '@simple-agent-manager/operations';
+import { readChat, searchChats } from '@simple-agent-manager/operations';
+import { readChatMessage } from '@simple-agent-manager/operations';
+import { responseBytes, resultByteBudget } from '@simple-agent-manager/operations';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -7,10 +11,6 @@ import type { MessageContextReader } from '../../../src/durable-objects/project-
 import { formatMessageRows, getMessages } from '../../../src/durable-objects/project-data/messages';
 import type { Env } from '../../../src/env';
 import { createOperationPorts } from '../../../src/operation-ports';
-import { readChat, searchChats } from '../../../src/operations/chat-core';
-import { readChatMessage } from '../../../src/operations/chat-transcript';
-import { responseBytes, resultByteBudget } from '../../../src/operations/response-budget';
-import type { OperationContext } from '../../../src/operations/types';
 import { getConnectorReadLimits } from '../../../src/services/connector-read-settings';
 import * as projectData from '../../../src/services/project-data';
 import { getLatestAssistantMessageForTask } from '../../../src/services/task-final-assistant-message';

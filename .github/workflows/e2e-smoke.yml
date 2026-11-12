@@ -9,6 +9,7 @@ on:
       - 'packages/shared/**'
       - 'packages/task-runner/**'
       - 'packages/scheduler-core/**'
+      - 'packages/operations/**'
       - 'scripts/e2e/**'
       - 'scripts/deploy/configure-docker-mirror.mjs'
       - 'package.json'

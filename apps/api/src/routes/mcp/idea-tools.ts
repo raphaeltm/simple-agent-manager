@@ -3,10 +3,11 @@
  * find_related_ideas) and idea management (create_idea, update_idea, get_idea,
  * list_ideas, search_ideas).
  */
+import { ideaTaskPredicateSql } from '@simple-agent-manager/operations';
+import { listLinks, recordLink, removeLink } from '@simple-agent-manager/operations';
+
 import type { Env } from '../../env';
 import { operationDeps } from '../../operation-ports';
-import { ideaTaskPredicateSql } from '../../operations/idea-identity';
-import { listLinks, recordLink, removeLink } from '../../operations/link-core';
 import {
   getMcpLimits,
   INVALID_PARAMS,
@@ -223,7 +224,7 @@ export async function handleCreateIdea(
   return runWorkspaceOperation('create_idea', requestId, params, tokenData, env);
 }
 
-export { validateIdeaStatusTransition } from '../../operations/idea-transitions';
+export { validateIdeaStatusTransition } from '@simple-agent-manager/operations';
 
 export async function handleUpdateIdea(
   requestId: string | number | null,

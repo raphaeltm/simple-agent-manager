@@ -3,6 +3,7 @@
  *
  * Mounted by `routes/chat.ts` under `/api/projects/:projectId/sessions`, after its auth middleware.
  */
+import { listLinks, recordLink, removeLink } from '@simple-agent-manager/operations';
 import { and, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -14,7 +15,6 @@ import { getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
 import { operationDeps } from '../operation-ports';
-import { listLinks, recordLink, removeLink } from '../operations/link-core';
 import { LinkTaskToChatSchema, parseOptionalBody } from '../schemas';
 
 const chatIdeaRoutes = new Hono<{ Bindings: Env }>();

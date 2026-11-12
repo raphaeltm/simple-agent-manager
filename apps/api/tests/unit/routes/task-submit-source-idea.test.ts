@@ -40,7 +40,9 @@ const mocks = vi.hoisted(() => ({
   enrichMessageWithMentions: vi.fn(),
 }));
 
-vi.mock('../../../src/operations/link-core', () => ({ recordLink: mocks.recordLink }));
+vi.mock('@simple-agent-manager/operations/internal/link-core', () => ({
+  recordLink: mocks.recordLink,
+}));
 
 vi.mock('../../../src/services/instant-session', () => ({
   acceptInstantSession: mocks.acceptInstantSession,

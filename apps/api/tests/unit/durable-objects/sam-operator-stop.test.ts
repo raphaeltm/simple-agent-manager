@@ -1,3 +1,4 @@
+import { samWorkStop } from '@simple-agent-manager/operations';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -5,7 +6,6 @@ import * as schema from '../../../src/db/schema';
 import { OperatorController } from '../../../src/durable-objects/sam-session/operator/controller';
 import type { Env } from '../../../src/env';
 import { createOperationPorts } from '../../../src/operation-ports';
-import { samWorkStop } from '../../../src/operations/connector-operations';
 import * as nodeAgent from '../../../src/services/node-agent';
 import { cleanupTerminalTaskResources } from '../../../src/services/task-terminal-cleanup';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';

@@ -4,6 +4,7 @@
  * Missions are top-level orchestration containers. They live in D1 and
  * are registered with the ProjectOrchestrator DO for scheduling.
  */
+import { createMissionRecord, missionTextLimits } from '@simple-agent-manager/operations';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -12,7 +13,6 @@ import type { Env } from '../../../env';
 import { log } from '../../../lib/logger';
 import { ulid } from '../../../lib/ulid';
 import { operationDeps } from '../../../operation-ports';
-import { createMissionRecord, missionTextLimits } from '../../../operations/missions';
 import type { AnthropicToolDef, ToolContext } from '../types';
 
 export const createMissionDef: AnthropicToolDef = {

@@ -1,5 +1,16 @@
 import { readFileSync } from 'node:fs';
 
+import type { OperationContext } from '@simple-agent-manager/operations';
+import {
+  samChatDeliveryGet,
+  samChatInteractions,
+  samChatInterrupt,
+  samChatJobs,
+  samChatStatus,
+  samOperationGet,
+  samWorkChanges,
+} from '@simple-agent-manager/operations';
+import { samChatRead } from '@simple-agent-manager/operations';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -11,17 +22,6 @@ import {
 } from '../../../src/durable-objects/project-data/session-state';
 import type { Env } from '../../../src/env';
 import { createOperationPorts } from '../../../src/operation-ports';
-import {
-  samChatDeliveryGet,
-  samChatInteractions,
-  samChatInterrupt,
-  samChatJobs,
-  samChatStatus,
-  samOperationGet,
-  samWorkChanges,
-} from '../../../src/operations/operational-operations';
-import { samChatRead } from '../../../src/operations/platform-operations';
-import type { OperationContext } from '../../../src/operations/types';
 import { operationReceiptId } from '../../../src/services/cli-operation-receipts';
 import { recordOperationalJob } from '../../../src/services/operational-job-observations';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';

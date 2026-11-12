@@ -4,9 +4,9 @@
  * the active shared-access grants. Split out of `chat.ts`
  * (`.claude/rules/18-file-size-limits.md`).
  */
-import {
-  parseProviderLimitWait,
-} from '@simple-agent-manager/scheduler-core';
+import type { OperationContext } from '@simple-agent-manager/operations';
+import { getPullRequestStates } from '@simple-agent-manager/operations';
+import { parseProviderLimitWait } from '@simple-agent-manager/scheduler-core';
 import type { ChatSessionTaskEmbed } from '@simple-agent-manager/shared';
 import {
   DEFAULT_CHAT_SESSION_DELTA_MESSAGE_LIMIT,
@@ -22,8 +22,6 @@ import { log } from '../lib/logger';
 import { expectJsonRecord } from '../lib/runtime-validation';
 import { errors } from '../middleware/error';
 import { operationDeps } from '../operation-ports';
-import { getPullRequestStates } from '../operations/pull-request-core';
-import type { OperationContext } from '../operations/types';
 import { resolveTaskAgentProfileHint } from '../services/agent-profile-display';
 import * as projectDataService from '../services/project-data';
 import { canStartProviderLimitTaskAnyway } from '../services/provider-limit-recovery';

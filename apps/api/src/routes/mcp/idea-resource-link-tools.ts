@@ -1,7 +1,8 @@
+import { recordLink, removeLink } from '@simple-agent-manager/operations';
+
 import type { Env } from '../../env';
 import { AppError } from '../../middleware/error';
 import { operationDeps } from '../../operation-ports';
-import { recordLink, removeLink } from '../../operations/link-core';
 import {
   INVALID_PARAMS,
   jsonRpcError,

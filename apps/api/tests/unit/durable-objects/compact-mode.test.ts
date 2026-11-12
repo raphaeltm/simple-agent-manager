@@ -9,6 +9,7 @@
  * - contentSize accurately reflects UTF-8 byte count
  * - parseChatMessageRowCompact produces compact output
  */
+import { UNTRUSTED_TEXT_GUIDANCE } from '@simple-agent-manager/operations';
 import { describe, expect, it } from 'vitest';
 
 import { getMessageToolContent } from '../../../src/durable-objects/project-data/messages';
@@ -17,7 +18,6 @@ import {
   parseChatMessageRowCompact,
   stripToolMetadataContent,
 } from '../../../src/durable-objects/project-data/row-schemas';
-import { UNTRUSTED_TEXT_GUIDANCE } from '../../../src/operations/untrusted-text';
 
 describe('stripToolMetadataContent', () => {
   it('strips content array and adds contentSize', () => {

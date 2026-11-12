@@ -1,3 +1,8 @@
+import {
+  getFileContext,
+  getIdeaContext,
+  getSessionContext,
+} from '@simple-agent-manager/operations';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -7,7 +12,6 @@ import { requireRouteParam } from '../lib/route-helpers';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { requireProjectAccess } from '../middleware/project-auth';
 import { operationDeps } from '../operation-ports';
-import { getFileContext, getIdeaContext, getSessionContext } from '../operations/link-core';
 
 export const resourceLinkRoutes = new Hono<{ Bindings: Env }>();
 

@@ -4,6 +4,18 @@
  * Membership, recurring schedules (cron triggers), receipts and audit run against a real SQLite
  * engine, so project predicates are evaluated rather than assumed.
  */
+import type { OperationContext } from '@simple-agent-manager/operations';
+import { OperationError } from '@simple-agent-manager/operations';
+import { operationInputJsonSchema } from '@simple-agent-manager/operations';
+import {
+  samScheduleCancel,
+  samScheduleCreate,
+  samScheduleGet,
+  samSchedulesList,
+  samScheduleUpdate,
+  scheduleCreateStartsWork,
+  scheduleOperations,
+} from '@simple-agent-manager/operations';
 import type { ProjectSchedule, ProjectScheduleMutationResult } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -14,18 +26,6 @@ import { ProjectEventValidationError } from '../../../src/durable-objects/projec
 import type { Env } from '../../../src/env';
 import { log } from '../../../src/lib/logger';
 import { createOperationPorts } from '../../../src/operation-ports';
-import { OperationError } from '../../../src/operations/errors';
-import { operationInputJsonSchema } from '../../../src/operations/registry';
-import {
-  samScheduleCancel,
-  samScheduleCreate,
-  samScheduleGet,
-  samSchedulesList,
-  samScheduleUpdate,
-  scheduleCreateStartsWork,
-  scheduleOperations,
-} from '../../../src/operations/schedule-operations';
-import type { OperationContext } from '../../../src/operations/types';
 import { CONNECTOR_DEFAULTS } from '../../../src/services/connector-settings-definition';
 import { applySqliteMigration, createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 

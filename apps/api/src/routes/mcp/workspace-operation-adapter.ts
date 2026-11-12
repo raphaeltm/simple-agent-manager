@@ -1,6 +1,5 @@
-import type { Env } from '../../env';
-import { createOperationPorts } from '../../operation-ports';
-import { OperationError } from '../../operations/errors';
+import type { OperationContext } from '@simple-agent-manager/operations';
+import { OperationError } from '@simple-agent-manager/operations';
 import {
   type platformOperations,
   samChatRead,
@@ -15,8 +14,10 @@ import {
   samProfilesList,
   samTaskGet,
   samTasksList,
-} from '../../operations/platform-operations';
-import type { OperationContext } from '../../operations/types';
+} from '@simple-agent-manager/operations';
+
+import type { Env } from '../../env';
+import { createOperationPorts } from '../../operation-ports';
 import {
   INTERNAL_ERROR,
   INVALID_PARAMS,

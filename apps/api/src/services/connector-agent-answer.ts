@@ -1,3 +1,5 @@
+import type { ConnectorAnswerChoice } from '@simple-agent-manager/operations';
+import { OperationError } from '@simple-agent-manager/operations';
 import type {
   AcpInteractionAnswerDecision,
   AcpInteractionBrowserAnswer,
@@ -6,8 +8,6 @@ import type {
 import { validFormAnswerDecision } from '../durable-objects/interaction-store-form';
 import { sha256 } from '../durable-objects/interaction-store-model';
 import type { Env } from '../env';
-import type { ConnectorAnswerChoice } from '../operations/connector-answer-input';
-import { OperationError } from '../operations/errors';
 import { getAcpInteractionConfig } from './acp-interaction-config';
 import { getInteractionDetail, getPendingInteractionDetails } from './acp-interaction-store';
 

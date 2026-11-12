@@ -16,9 +16,10 @@ vi.mock('../../../src/services/admin-settings', () => ({
     ]),
 }));
 
+import { recordLink } from '@simple-agent-manager/operations';
+
 import type { Env } from '../../../src/env';
 import { operationDeps } from '../../../src/operation-ports';
-import { recordLink } from '../../../src/operations/link-core';
 
 function fixture() {
   const db = new Database(':memory:');

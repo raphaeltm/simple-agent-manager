@@ -10,6 +10,10 @@
  * See: specs/022-simplified-chat-ux/contracts/task-submit.md
  */
 import {
+  recordWorkStartIdeaLink,
+  requireOpenIdeaForWorkStart,
+} from '@simple-agent-manager/operations';
+import {
   collectStoredResourceRequirementLayers,
   createPersistedTaskResourcePlanJson,
   firstResourceRequirementLayer,
@@ -38,10 +42,6 @@ import { ulid } from '../lib/ulid';
 import { errors } from '../middleware/error';
 import { requireProjectCapability } from '../middleware/project-auth';
 import { operationDeps } from '../operation-ports';
-import {
-  recordWorkStartIdeaLink,
-  requireOpenIdeaForWorkStart,
-} from '../operations/start-work-core';
 import { requireRepositoryAccess } from '../routes/projects/_helpers';
 import { type SubmitTaskSchema } from '../schemas';
 import { resolveTaskAgentOverrides } from '../services/agent-profiles';

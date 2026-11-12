@@ -4,11 +4,11 @@
  * Missions metadata lives in D1 (cross-project queryable).
  * State entries and handoff packets live in ProjectData DO (per-project, high-write).
  */
+import { createMissionRecord, missionTextLimits } from '@simple-agent-manager/operations';
 import { isMissionStateEntryType, MISSION_STATE_ENTRY_TYPES } from '@simple-agent-manager/shared';
 
 import type { Env } from '../../env';
 import { operationDeps } from '../../operation-ports';
-import { createMissionRecord, missionTextLimits } from '../../operations/missions';
 import * as projectDataService from '../../services/project-data';
 import {
   INVALID_PARAMS,

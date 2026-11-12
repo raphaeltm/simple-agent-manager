@@ -1,4 +1,7 @@
 import { createMcpHandler, McpServer } from '@modelcontextprotocol/server';
+import type { Operation } from '@simple-agent-manager/operations';
+import { OperationError, operationErrorHttpStatus } from '@simple-agent-manager/operations';
+import { operations } from '@simple-agent-manager/operations';
 import { toJsonSchema } from '@valibot/to-json-schema';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -9,9 +12,6 @@ import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { AppError } from '../middleware/error';
 import { createOperationPorts, type WorkerOperationContext } from '../operation-ports';
-import { OperationError, operationErrorHttpStatus } from '../operations/errors';
-import { operations } from '../operations/registry';
-import type { Operation } from '../operations/types';
 import { auditConnectorWrite, consumeConnectorBudget } from '../services/connector-execution';
 import {
   DEFAULT_CONNECTOR_REQUEST_MAX_BYTES,

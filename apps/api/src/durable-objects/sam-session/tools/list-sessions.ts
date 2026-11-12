@@ -4,9 +4,10 @@
  * Allows SAM to discover available sessions (task and conversation) within a
  * project, enabling further inspection via get_session_messages or search_task_messages.
  */
+import { listSessionSummaries } from '@simple-agent-manager/operations';
+
 import type { Env } from '../../../env';
 import { operationDeps } from '../../../operation-ports';
-import { listSessionSummaries } from '../../../operations/session-list';
 import type { AnthropicToolDef, ToolContext } from '../types';
 import { resolveProjectWithOwnership } from './helpers';
 

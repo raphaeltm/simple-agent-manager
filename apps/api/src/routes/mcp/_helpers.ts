@@ -3,13 +3,13 @@
  *
  * Used across all MCP tool handler files (instruction-tools, task-tools, session-tools, idea-tools).
  */
+import { getPlatformOperationLimits } from '@simple-agent-manager/operations';
 import { DEFAULT_PROJECT_EVENT_LIMITS } from '@simple-agent-manager/shared';
 
 import type { McpRateCounter } from '../../durable-objects/mcp-rate-counter';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
-import { getPlatformOperationLimits } from '../../operations/limits';
 import type { McpTokenData } from '../../services/mcp-token';
 import { validateActiveWorkspaceMcpToken } from '../../services/mcp-token-lifecycle';
 import { readStorageActivation } from '../../services/reliability-storage';

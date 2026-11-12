@@ -1,3 +1,13 @@
+import type { OperationContext } from '@simple-agent-manager/operations';
+import { sharedTextCap } from '@simple-agent-manager/operations';
+import {
+  channelOperations,
+  samChannelGet,
+  samChannelHistory,
+  samChannelsList,
+  samChannelSubscriptionCancel,
+} from '@simple-agent-manager/operations';
+import { OperationError } from '@simple-agent-manager/operations';
 import {
   DIRECT_CHANNEL_RANGE_END,
   PROJECT_EVENT_CHANNEL_SOURCE,
@@ -36,16 +46,6 @@ import {
 } from '../../../src/durable-objects/project-data/project-events-contracts';
 import type { Env } from '../../../src/env';
 import { createOperationPorts } from '../../../src/operation-ports';
-import { sharedTextCap } from '../../../src/operations/channel-core';
-import {
-  channelOperations,
-  samChannelGet,
-  samChannelHistory,
-  samChannelsList,
-  samChannelSubscriptionCancel,
-} from '../../../src/operations/channel-operations';
-import { OperationError } from '../../../src/operations/errors';
-import type { OperationContext } from '../../../src/operations/types';
 import { applySqliteMigration, createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 import { createSqlStorage } from '../durable-objects/sql-storage-test-utils';
 

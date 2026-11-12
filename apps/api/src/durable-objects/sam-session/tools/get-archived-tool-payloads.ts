@@ -2,9 +2,10 @@
  * SAM get_archived_tool_payloads tool — retrieve ProjectData tool payloads
  * archived from Durable Object SQLite into private R2.
  */
+import { readArchivedToolPayloads } from '@simple-agent-manager/operations';
+
 import type { Env } from '../../../env';
 import { operationDeps } from '../../../operation-ports';
-import { readArchivedToolPayloads } from '../../../operations/workspace-history';
 import type { AnthropicToolDef, ToolContext } from '../types';
 import { resolveProjectWithOwnership } from './helpers';
 

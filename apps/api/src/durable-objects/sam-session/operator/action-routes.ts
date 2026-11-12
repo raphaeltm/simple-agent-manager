@@ -1,8 +1,8 @@
+import { operations } from '@simple-agent-manager/operations';
 import * as v from 'valibot';
 
 import type { Env } from '../../../env';
 import { createOperationPorts } from '../../../operation-ports';
-import { operations } from '../../../operations/registry';
 import { assertOperatorExecution, assertOperatorResource } from './operations';
 import { actionProjection } from './projection';
 import type { OperatorStore } from './store';

@@ -1,14 +1,14 @@
+import type { OperationContext } from '@simple-agent-manager/operations';
+import { addIdeaUpdate } from '@simple-agent-manager/operations';
+import { getPlatformOperationLimits } from '@simple-agent-manager/operations';
+import { recordLink } from '@simple-agent-manager/operations';
+import { samIdeaGet, samLinkedContextGet } from '@simple-agent-manager/operations';
+import { ensurePullRequest } from '@simple-agent-manager/operations';
 import { env, SELF } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import type { Env } from '../../src/env';
 import { createOperationPorts, operationDeps } from '../../src/operation-ports';
-import { addIdeaUpdate } from '../../src/operations/idea-update-core';
-import { getPlatformOperationLimits } from '../../src/operations/limits';
-import { recordLink } from '../../src/operations/link-write';
-import { samIdeaGet, samLinkedContextGet } from '../../src/operations/platform-operations';
-import { ensurePullRequest } from '../../src/operations/pull-request-core';
-import type { OperationContext } from '../../src/operations/types';
 import { hmacToken } from '../../src/routes/api-tokens';
 import { handleGetIdea, handleGetLinkedContext } from '../../src/routes/mcp/idea-tools';
 import { resolveAdminSetting, updateAdminSettings } from '../../src/services/admin-settings';
