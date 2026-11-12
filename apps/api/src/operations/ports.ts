@@ -43,6 +43,7 @@ import type * as sessionAccess from '../services/session-access';
 import type * as sessionIdleness from '../services/session-idleness';
 import type * as submitTaskService from '../services/submit-task';
 import type * as taskFinalAssistantMessage from '../services/task-final-assistant-message';
+import type * as taskStatus from '../services/task-status';
 import type * as triggerCreate from '../services/trigger-create';
 import type * as triggerExecutionPrincipal from '../services/trigger-execution-principal';
 import type * as triggerStatus from '../services/trigger-status';
@@ -180,6 +181,10 @@ export interface OperationTaskPort {
   >;
   listAgentActivity: Bound<typeof agentActivity.listAgentActivityTasks>;
   listCredentialLimits: Bound<typeof credentialLimits.listProjectCredentialLimits>;
+  isStatus: typeof taskStatus.isTaskStatus;
+  canTransition: typeof taskStatus.canTransitionTaskStatus;
+  /** Live plus sleeping task statuses: a task that still holds or can reclaim a runtime. */
+  wakeableStatuses: ReadonlySet<string>;
 }
 
 /** Recurring trigger (cron) persistence and validation. */

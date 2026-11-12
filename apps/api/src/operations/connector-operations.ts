@@ -4,7 +4,6 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as v from 'valibot';
 
 import * as schema from '../db/schema';
-import { canTransitionTaskStatus, isTaskStatus } from '../services/task-status';
 import { authorizeProjectOperation } from './authorization';
 import { ConnectorAnswerFields } from './connector-answer-input';
 import {
@@ -245,11 +244,11 @@ export const samWorkStop = defineOperation({
       if (!task) throw new OperationError('not_found', 'Task not found');
       sessionId = task.chatSessionId ?? undefined;
       if (!sessionId) {
-        if (!isTaskStatus(task.status))
+        if (!ctx.ports.tasks.isStatus(task.status))
           throw new OperationError('conflict', 'Task has an invalid status');
         const terminal =
           task.status === 'completed' || task.status === 'cancelled' || task.status === 'failed';
-        if (!terminal && !canTransitionTaskStatus(task.status, 'cancelled'))
+        if (!terminal && !ctx.ports.tasks.canTransition(task.status, 'cancelled'))
           throw new OperationError('conflict', 'Task cannot be cancelled in its current state');
         return ctx.ports.connector.executeWrite(ctx, 'sam_work_stop', input, async () => {
           const updated = await ctx.ports.tasks.cancel(task, ctx.actor.userId, {

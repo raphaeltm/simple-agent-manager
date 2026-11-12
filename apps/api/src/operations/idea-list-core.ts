@@ -286,13 +286,14 @@ function countsFor(entry: IdeaEvidence, snapshot: IdeaWorkSnapshot | undefined):
   };
 }
 
-function derivedFor(row: IdeaRow, entry: IdeaEvidence): IdeaDerivedStatus {
+function derivedFor(ctx: OperationContext, row: IdeaRow, entry: IdeaEvidence): IdeaDerivedStatus {
   return deriveIdeaStatus({
     ideaStatus: row.status,
     ideaUpdatedAt: row.updated_at,
     mergeAcknowledgedAt: row.idea_merge_ack_at,
     sessions: entry.sessions,
     pullRequests: entry.pullRequests,
+    wakeableTaskStatuses: ctx.ports.tasks.wakeableStatuses,
   });
 }
 
@@ -332,7 +333,7 @@ export async function listIdeasWithDerivedStatus(
       summary: ideaSummary(row.description),
       createdAt: row.created_at,
       updatedAt: row.updated_at,
-      derived: derivedFor(row, entry),
+      derived: derivedFor(ctx, row, entry),
       counts: countsFor(entry, snapshots[row.id]),
       filedByAgent: filedByAgent(row),
       filedBy: filedByLabel(row),
@@ -374,7 +375,7 @@ export async function getIdeaWithDerivedStatus(
     status: row.status,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    derived: derivedFor(row, entry),
+    derived: derivedFor(ctx, row, entry),
     counts: countsFor(entry, snapshots[row.id]),
     filedByAgent: filedByAgent(row),
     filedBy: filedByLabel(row),

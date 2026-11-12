@@ -68,6 +68,11 @@ import {
 import { DEFAULT_SESSION_SLEEP_AFTER_MS } from './services/session-snapshots';
 import { submitTask } from './services/submit-task';
 import { getRecentAssistantMessagesForTask } from './services/task-final-assistant-message';
+import {
+  canTransitionTaskStatus,
+  isTaskStatus,
+  WAKEABLE_TASK_STATUSES,
+} from './services/task-status';
 import { clearTriggerPageCaches } from './services/trigger-cache';
 import { createTrigger, validateCron } from './services/trigger-create';
 import { resolveTriggerExecutionUserId } from './services/trigger-execution-principal';
@@ -83,6 +88,8 @@ function classifyProjectEventError(error: unknown): ProjectEventErrorKind | null
   if (error instanceof ProjectEventIdempotencyConflictError) return 'idempotency_conflict';
   return null;
 }
+
+const WAKEABLE_TASK_STATUS_SET: ReadonlySet<string> = new Set(WAKEABLE_TASK_STATUSES);
 
 export function createOperationPorts(env: Env): OperationPorts {
   const db = () => drizzle(env.DATABASE, { schema });
@@ -191,6 +198,9 @@ export function createOperationPorts(env: Env): OperationPorts {
       recentAssistantMessages: (...a) => getRecentAssistantMessagesForTask(env, ...a),
       listAgentActivity: (...a) => listAgentActivityTasks(env, ...a),
       listCredentialLimits: (...a) => listProjectCredentialLimits(env, ...a),
+      isStatus: isTaskStatus,
+      canTransition: canTransitionTaskStatus,
+      wakeableStatuses: WAKEABLE_TASK_STATUS_SET,
     },
     triggers: {
       create: (...a) => createTrigger(db(), env, ...a),

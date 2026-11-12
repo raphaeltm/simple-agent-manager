@@ -35,8 +35,6 @@ import type {
 } from '@simple-agent-manager/shared';
 import { ideaNeedsYou } from '@simple-agent-manager/shared';
 
-import { LIVE_TASK_STATUSES, SLEEPING_TASK_STATUSES } from '../services/task-status';
-
 /** How much of an agent's question or failure message travels with the status. */
 export const DEFAULT_IDEA_STATUS_NOTE_MAX_LENGTH = 280;
 
@@ -79,21 +77,24 @@ export interface IdeaStatusInput {
   mergeAcknowledgedAt?: string | null;
   sessions: readonly IdeaStatusLinkedSession[];
   pullRequests: readonly IdeaPullRequest[];
+  /**
+   * Task statuses that still hold or will reclaim a runtime: live plus sleeping
+   * (`WAKEABLE_TASK_STATUSES`, supplied through `ports.tasks.wakeableStatuses`).
+   */
+  wakeableTaskStatuses: ReadonlySet<string>;
 }
 
 /**
- * A task that still holds or will reclaim a runtime. A sleeping task has released its runtime
+ * Work is active when its task can still run, or when a task-less chat is still open. A task
+ * counts when it still holds or will reclaim a runtime: a sleeping task has released its runtime
  * but keeps its identity and can be woken, so from the idea's point of view the work has not
  * finished — it is still in progress.
  */
-const ACTIVE_TASK_STATUSES: ReadonlySet<string> = new Set([
-  ...LIVE_TASK_STATUSES,
-  ...SLEEPING_TASK_STATUSES,
-]);
-
-/** Work is active when its task can still run, or when a task-less chat is still open. */
-export function isLinkedWorkActive(session: IdeaStatusLinkedSession): boolean {
-  if (session.taskStatus) return ACTIVE_TASK_STATUSES.has(session.taskStatus);
+export function isLinkedWorkActive(
+  session: IdeaStatusLinkedSession,
+  wakeableTaskStatuses: ReadonlySet<string>
+): boolean {
+  if (session.taskStatus) return wakeableTaskStatuses.has(session.taskStatus);
   return session.sessionStatus === 'active';
 }
 
@@ -241,7 +242,8 @@ export function deriveIdeaStatus(input: IdeaStatusInput): IdeaDerivedStatus {
     });
   }
 
-  const active = byActivity.find(isLinkedWorkActive) ?? null;
+  const active =
+    byActivity.find((session) => isLinkedWorkActive(session, input.wakeableTaskStatuses)) ?? null;
 
   // 3. The latest work failed and nothing is running.
   if (!active) {

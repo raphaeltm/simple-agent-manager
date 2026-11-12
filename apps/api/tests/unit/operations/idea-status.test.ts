@@ -15,6 +15,9 @@ import {
   type IdeaStatusLinkedSession,
   isLinkedWorkActive,
 } from '../../../src/operations/idea-status';
+import { WAKEABLE_TASK_STATUSES } from '../../../src/services/task-status';
+
+const WAKEABLE: ReadonlySet<string> = new Set(WAKEABLE_TASK_STATUSES);
 
 const NOW = Date.parse('2026-10-23T12:00:00.000Z');
 const minutesAgo = (minutes: number) => NOW - minutes * 60_000;
@@ -57,6 +60,7 @@ function input(overrides: Partial<IdeaStatusInput> = {}): IdeaStatusInput {
     ideaUpdatedAt: '2026-10-20T09:00:00.000Z',
     sessions: [],
     pullRequests: [],
+    wakeableTaskStatuses: WAKEABLE,
     ...overrides,
   };
 }
@@ -477,15 +481,21 @@ describe('isLinkedWorkActive', () => {
     ['cancelled', false],
     ['draft', false],
   ])('a %s task counts as active: %s', (taskStatus, expected) => {
-    expect(isLinkedWorkActive(session({ taskStatus }))).toBe(expected);
+    expect(isLinkedWorkActive(session({ taskStatus }), WAKEABLE)).toBe(expected);
   });
 
   it('falls back to the chat session for a chat with no task', () => {
     expect(
-      isLinkedWorkActive(session({ taskId: null, taskStatus: null, sessionStatus: 'active' }))
+      isLinkedWorkActive(
+        session({ taskId: null, taskStatus: null, sessionStatus: 'active' }),
+        WAKEABLE
+      )
     ).toBe(true);
     expect(
-      isLinkedWorkActive(session({ taskId: null, taskStatus: null, sessionStatus: 'stopped' }))
+      isLinkedWorkActive(
+        session({ taskId: null, taskStatus: null, sessionStatus: 'stopped' }),
+        WAKEABLE
+      )
     ).toBe(false);
   });
 });
