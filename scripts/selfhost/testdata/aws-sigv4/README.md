@@ -5,6 +5,8 @@ Copied unchanged from the AWS signing test suite in
 Apache License 2.0), a subset of cases: `request.txt`, `context.json` and the expected
 `header-canonical-request.txt`, `header-string-to-sign.txt` and `header-signature.txt`.
 
+The upstream `LICENSE` and `NOTICE` are copied alongside.
+
 `scripts/selfhost/aws-sigv4.test.ts` checks the key agent's signer
 (`deploy/selfhost/key-agent/aws-sigv4.ts`) against them, so the AWS KMS fake used by the
 conformance suite cannot simply agree with a wrong signer. The credentials are AWS's published

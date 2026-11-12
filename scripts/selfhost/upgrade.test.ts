@@ -138,14 +138,21 @@ describe('runUpgrade', () => {
     expect((await upgrade()).composeRestarted).toBe(true);
   });
 
-  it('tells a box upgraded from plaintext to finish with selfhost:secrets migrate', async () => {
+  it('keeps a plaintext box on plaintext deploy vars and points to selfhost:secrets migrate', async () => {
     writeFileSync(join(root, 'state/platform-keys.json'), '{}');
     await upgrade();
+    // Both deploy steps hold the box on its plaintext files: no unchecked switch to sealed.
+    expect(compact()).toContain('pnpm selfhost:deploy --init --key-provider legacy-plaintext');
+    expect(compact()).toContain('pnpm selfhost:deploy --key-provider legacy-plaintext');
     expect(logs.join('\n')).toContain('pnpm selfhost:secrets migrate');
-    logs = [];
-    rmSync(join(root, 'state/platform-keys.json'));
-    rmSync(join(root, 'bk'), { recursive: true, force: true });
+  });
+
+  it('upgrades a sealed box (a recorded key provider) on the sealed path, with no hint', async () => {
+    mkdirSync(join(root, 'state/key-agent'), { recursive: true });
+    writeFileSync(join(root, 'state/key-agent/choice.json'), '{}');
     await upgrade();
+    expect(compact()).toContain('pnpm selfhost:deploy --init');
+    expect(compact().filter((step) => step.includes('legacy-plaintext'))).toEqual([]);
     expect(logs.join('\n')).not.toContain('pnpm selfhost:secrets migrate');
   });
 

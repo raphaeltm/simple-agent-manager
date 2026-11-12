@@ -8,7 +8,8 @@
 # the label sam-install=<hash> the bootstrap set. Anything that fails its proof, anything recorded
 # as `reused` (it existed before), and anything not in the record is left alone and reported.
 #
-# Cloud KMS (docs.cloud.google.com/kms/docs/delete-kms-resources, destroy-restore): a key version
+# Cloud KMS (https://docs.cloud.google.com/kms/docs/delete-kms-resources and
+# https://docs.cloud.google.com/kms/docs/destroy-restore, read 2026-11-12): a key version
 # can be deleted only once DESTROYED, a key only once all its versions are deleted, a key ring only
 # once all its keys are. Destroying is scheduled (30 days by default, restorable until then), and
 # every version not yet destroyed is billed. So a teardown removes the grant at once; destroying

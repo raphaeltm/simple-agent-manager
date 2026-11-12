@@ -74,6 +74,18 @@ function stateFingerprint(stateDir: string): string {
   return hash.digest('hex');
 }
 
+/**
+ * A plaintext box (platform-keys.json present) with no recorded key provider and no
+ * SAM_KEY_PROVIDER in .env: one the upgrade must not switch to sealed secrets by itself.
+ */
+export function holdOnPlaintext(ctx: Pick<BoxContext, 'box' | 'stateDir'>): boolean {
+  return (
+    existsSync(join(ctx.stateDir, 'platform-keys.json')) &&
+    !existsSync(join(ctx.stateDir, 'key-agent', 'choice.json')) &&
+    !ctx.box.SAM_KEY_PROVIDER?.trim()
+  );
+}
+
 export function rollbackSteps(
   from: string,
   migrationsChanged: boolean,
@@ -153,7 +165,17 @@ export async function runUpgrade(ctx: BoxContext, opts: UpgradeOptions): Promise
     git(['checkout', '--detach', to]);
     pnpm(['install', '--frozen-lockfile']);
     const before = stateFingerprint(ctx.stateDir);
-    pnpm(['selfhost:deploy', '--init']);
+    // A box that still runs on plaintext files stays on them: switching to sealed secrets is
+    // `pnpm selfhost:secrets migrate`, which checks the chain first and rolls back on failure.
+    const hold = holdOnPlaintext(ctx);
+    if (hold) {
+      ctx.log(
+        'this box still has its plaintext secret files: the upgrade keeps it on plaintext deploy ' +
+          'vars; afterwards, `pnpm selfhost:secrets migrate` seals it safely'
+      );
+    }
+    const keyArgs = hold ? ['--key-provider', 'legacy-plaintext'] : [];
+    pnpm(['selfhost:deploy', '--init', ...keyArgs]);
     const stateChanged = stateFingerprint(ctx.stateDir) !== before;
     if (composeFilesChanged || stateChanged) {
       ctx.log(
@@ -176,7 +198,7 @@ export async function runUpgrade(ctx: BoxContext, opts: UpgradeOptions): Promise
     } else {
       ctx.log('compose inputs unchanged; the stack keeps running');
     }
-    pnpm(['selfhost:deploy']);
+    pnpm(['selfhost:deploy', ...keyArgs]);
     if (!(await opts.checkHealth())) throw new Error('the API is not healthy after the upgrade');
   } catch (error) {
     const steps = rollbackSteps(from, migrationsChanged, composeFilesChanged, opts.backupDir);
@@ -187,15 +209,14 @@ export async function runUpgrade(ctx: BoxContext, opts: UpgradeOptions): Promise
   }
 
   const rollback = rollbackSteps(from, migrationsChanged, composeFilesChanged, opts.backupDir);
-  // Sealed secrets are the default: an upgraded plaintext box is now sealed, but the plaintext
-  // files stay until the migration verifies the sealed deploy and a copy of the key exists.
+  // A box held on plaintext above, or one sealed whose plaintext files remain: migrate finishes it.
   if (
     existsSync(join(ctx.stateDir, 'platform-keys.json')) &&
     ctx.box.SAM_KEY_PROVIDER?.trim() !== 'legacy-plaintext'
   ) {
     ctx.log(
       'plaintext secrets are still on this box (.state/platform-keys.json, secrets.env): run ' +
-        '`pnpm selfhost:secrets migrate` to verify the sealed deploy and remove them, then ' +
+        '`pnpm selfhost:secrets migrate` to seal (or verify) and remove them, then ' +
         '`pnpm selfhost:secrets plaintext` for the old copies in the bucket and backups'
     );
   }

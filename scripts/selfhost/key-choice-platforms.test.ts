@@ -236,6 +236,24 @@ describe('Azure', () => {
     );
   });
 
+  it('vault configured but the managed identity is refused: file key (denied)', async () => {
+    fake = await startFakeKeyServices({ existingKeys: [KEY_NAME] });
+    fake.setDenied(true);
+    const envFile = writeBox(dir, [
+      ...elsewhere('azure'),
+      `SAM_AZURE_IMDS_HOST=${fake.host}`,
+      `SAM_AZURE_KEY_VAULT_URL=http://${fake.host}`,
+      'SAM_AZURE_ALLOW_HTTP_FOR_TESTS=1',
+      dmi('azure'),
+    ]);
+    const init = await runDeploy(envFile, ['--init']);
+    expect(init.status, init.out).toBe(0);
+    expect(init.out).toMatch(
+      /key provider: file \(on Azure \(westeurope\), but Key Vault key .* is not usable \(denied:/
+    );
+    expect(bundleProviders()).toEqual(['file']);
+  });
+
   it('on Azure with no vault configured: file key, and the line names the missing setting', async () => {
     fake = await startFakeKeyServices();
     const envFile = writeBox(dir, [

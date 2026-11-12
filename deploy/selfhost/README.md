@@ -163,8 +163,8 @@ request to the new version to be healthy and the current deploy version in the b
 secret. Any failure after the switch redeploys the previous behaviour
 (`pnpm selfhost:deploy --key-provider legacy-plaintext`) and removes nothing. The plaintext files go
 last, and with the file key only once `--key-copy` proves a matching copy exists: until then they
-are the only other copy of the platform keys. `pnpm selfhost:upgrade` seals an upgraded box by
-itself and then tells you to run `migrate` to finish. Code: `scripts/selfhost/secrets-migrate.ts`.
+are the only other copy of the platform keys. `pnpm selfhost:upgrade` never makes this switch by itself: it keeps a box that
+still has its plaintext files on plaintext deploy vars and tells you to run `migrate`. Code: `scripts/selfhost/secrets-migrate.ts`.
 
 #### Old plaintext copies: bucket deploy versions and backups
 
@@ -273,7 +273,9 @@ pool's and service account's descriptions name it, the key carries its `sam-inst
 Anything that existed before, fails its proof, or is not in the record is left and listed. It
 prints what it removed and what it left. Cloud KMS: the grant goes at once. A key version can be
 deleted only after it is destroyed, a key only when all its versions are deleted, a key ring only
-when all its keys are (Google: "Delete Cloud KMS resources"). So
+when all its keys are (Google:
+[Delete Cloud KMS resources](https://docs.cloud.google.com/kms/docs/delete-kms-resources),
+[Destroy and restore key versions](https://docs.cloud.google.com/kms/docs/destroy-restore)). So
 `--teardown --destroy-key-versions <key id>` schedules destruction (30 days by default, billed
 until destroyed, `gcloud kms keys versions restore` undoes it until then), and a `--teardown` after
 that deletes the versions, the key and the ring. A deleted key's name cannot be reused. Key rings
