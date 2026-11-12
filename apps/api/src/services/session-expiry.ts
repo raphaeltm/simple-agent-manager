@@ -52,7 +52,19 @@ export async function expireSleepingConversation(
   return true;
 }
 
-/** Metadata-only pass: legacy degraded snapshots keep their R2 artifacts. */
+/**
+ * Metadata-only pass: legacy degraded snapshots keep their R2 artifacts.
+ *
+ * Selects every expired degraded sleeper, whatever state its task is in. A sleeper whose task
+ * already finished is the commonest case: until 2026-11-12 an open-task requirement here left
+ * 296 production conversations `sleeping` forever, which also kept them out of the archive
+ * drain. `expireSleepingConversation` cancels any open task and then stops the session, and
+ * with no open task it just stops it.
+ *
+ * The one state it declines, a queued or delegated task, is excluded here too. Otherwise those
+ * rows would come back every sweep and, ordered by expiry, fill the batch ahead of rows that
+ * can make progress (`.claude/rules/47`).
+ */
 export async function expireDegradedSleepingConversations(
   env: Env,
   now: Date,
@@ -62,10 +74,10 @@ export async function expireDegradedSleepingConversations(
     `SELECT id, project_id, chat_session_id FROM session_snapshots
      WHERE expires_at <= ? AND sleeping_at IS NOT NULL AND sleep_status = 'sleeping'
        AND status = 'degraded' AND sleep_fallback_json IS NULL
-       AND EXISTS (SELECT 1 FROM tasks t
+       AND NOT EXISTS (SELECT 1 FROM tasks t
          WHERE t.project_id = session_snapshots.project_id
            AND t.chat_session_id = session_snapshots.chat_session_id
-           AND (t.status IN ('sleeping', 'in_progress') OR t.terminal_reason = 'snapshot_expired'))
+           AND t.status IN ('queued', 'delegated'))
        AND (recovery_status IS NULL OR recovery_status != 'waking')
      ORDER BY expires_at, id LIMIT ?`
   )

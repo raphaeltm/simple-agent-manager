@@ -737,6 +737,11 @@ function assertEligibleTerminalSource(
       'ProjectData archive refuses sessions with active ACP runtime rows'
     );
   }
+  // `activity = 'error'` is deliberately not a refusal: `failSession` writes it as the terminal
+  // mirror of a failed session, so on a session that has been terminal for the whole grace it
+  // describes no live writer. Live work is still refused by prompting/recovering, an active or
+  // settling runtime, and the active ACP check above. Counting 'error' froze 125 production
+  // sessions (2026-11-12) that nothing could ever unfreeze.
   if (
     countRows(
       sql,
@@ -745,7 +750,7 @@ function assertEligibleTerminalSource(
        LEFT JOIN acp_sessions acp ON acp.id = ss.session_id
        WHERE (ss.session_id = ? OR acp.chat_session_id = ?)
          AND (
-           ss.activity IN ('prompting', 'recovering', 'error')
+           ss.activity IN ('prompting', 'recovering')
            OR ss.runtime_work_state IN ('active', 'settling')
          )`,
       sessionId,
@@ -781,11 +786,21 @@ function assertEligibleTerminalSource(
       'ProjectData archive refuses sessions with active idle-cleanup schedule rows'
     );
   }
+  // A marker blocks archiving only while it is live by its own contract: an expiring marker
+  // until it expires, a non-expiring one (`idle_cleanup_failed`, `wake_failed`) for the session
+  // grace after it was raised. Neither kind is resolved when the session stops or fails, so the
+  // old unconditional check froze 35 production sessions (2026-11-12) behind markers nothing
+  // would ever resolve. Markers stay in the root object either way; archiving does not move them.
   if (
     countRows(
       sql,
-      'SELECT COUNT(*) AS count FROM session_attention_markers WHERE session_id = ? AND resolved_at IS NULL',
-      sessionId
+      `SELECT COUNT(*) AS count FROM session_attention_markers
+       WHERE session_id = ?
+         AND resolved_at IS NULL
+         AND (expires_at > ? OR (expires_at IS NULL AND created_at > ?))`,
+      sessionId,
+      now,
+      now - minTerminalAgeMs
     ) > 0
   ) {
     throw new ProjectDataArchiveInvariantError(

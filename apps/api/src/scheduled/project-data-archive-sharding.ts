@@ -1281,61 +1281,31 @@ function precopyRefusalExclusionBinds(
 }
 
 /**
- * Keep the largest-first candidate prefix whose cumulative `message_count` fits the
- * tick's message budget. Legacy admission retains its first oversized candidate; compact
- * admission is strict and excludes oversized sessions before the SQL LIMIT. Sessions
- * are the unit of work, so `message_count` from `session_summaries` is the size proxy the
- * coordinator can see without touching a Durable Object.
- */
-/**
- * Greedy cumulative `message_count` packer, as a stateful admitter.
+ * Keep the largest-first candidate prefix whose cumulative `message_count` fits `budget`.
+ * Legacy admission stops at the first overflow but keeps an oversized first candidate;
+ * strict (compact) admission skips past an overflow to smaller candidates.
  *
- * One implementation, two consumers (`.claude/rules/24`, `.claude/rules/59`): the scoped
- * canary's up-front `selected` disclosure, and the authoritative journaling loop in
- * `processArchiveMigrationBatch`. The loop needs the stateful form because the cumulative
- * budget bounds bytes MOVED, so it may only count candidates that were actually journaled —
- * a candidate the write budget refused moved nothing and must leave the budget untouched.
+ * Used only by the operator-scoped canary, which discloses its selection up front. The
+ * unscoped sweep has no cumulative budget: it is bounded by wall time, session slots and the
+ * daily write budget (`processArchiveMigrationBatch`).
  */
-function createMessageBudgetPacker(budget: number, strict: boolean) {
-  let used = 0;
-  let kept = 0;
-  let closed = false;
-  return {
-    /**
-     * Returns a `commit` callback when the candidate fits, or `null` when it does not.
-     *
-     * The budget is charged only when `commit` runs, so a candidate admitted here and then
-     * refused downstream (by the daily write budget, or by a lost journal race) leaves the
-     * budget untouched — it moved no rows, so it must not be billed for any.
-     */
-    admit(candidate: CandidateRow): (() => void) | null {
-      if (closed) return null;
-      const size = Math.max(0, Number(candidate.message_count) || 0);
-      if (used + size > budget && (strict || kept > 0)) {
-        // Non-strict keeps the historical `break`: stop at the first overflow rather than
-        // descending past it. Strict descends, which is what makes fall-through possible.
-        if (!strict) closed = true;
-        return null;
-      }
-      return () => {
-        used += size;
-        kept++;
-      };
-    },
-  };
-}
-
 function applyMessageBudget(
   candidates: CandidateRow[],
   budget: number,
   strict = false
 ): CandidateRow[] {
-  const packer = createMessageBudgetPacker(budget, strict);
-  return candidates.filter((candidate) => {
-    const commit = packer.admit(candidate);
-    commit?.();
-    return commit !== null;
-  });
+  let used = 0;
+  const kept: CandidateRow[] = [];
+  for (const candidate of candidates) {
+    const size = Math.max(0, Number(candidate.message_count) || 0);
+    if (used + size > budget && (strict || kept.length > 0)) {
+      if (!strict) break;
+      continue;
+    }
+    used += size;
+    kept.push(candidate);
+  }
+  return kept;
 }
 
 /**
@@ -3939,10 +3909,11 @@ async function processArchiveMigrationBatch(input: {
       });
     }
   };
+  /** Returns true when the root refused the candidate before copying anything. */
   const processOne = async (
     migration: MigrationRow,
     writeReservation?: ArchiveWriteReservation
-  ): Promise<void> => {
+  ): Promise<boolean> => {
     try {
       const result = await migrateCandidate(
         input.env,
@@ -3951,12 +3922,16 @@ async function processArchiveMigrationBatch(input: {
         migration,
         input.now
       );
-      if (result.leaseNotAcquired) await releaseUnused(writeReservation);
+      // A pre-copy refusal wrote only its journal row, so the whole estimate is unused. Holding
+      // it would let refusals drain the daily allowance: on 2026-11-12 production reserved
+      // 16,514 writes for a session the root refused three seconds later, every tick.
+      if (result.leaseNotAcquired || result.refused) await releaseUnused(writeReservation);
       if (result.migrated) input.stats.migrated++;
       if (result.refused) input.stats.refused++;
       if (result.recoveredCrashGap) input.stats.recoveredCrashGaps++;
       input.stats.chunksCopied += result.chunksCopied;
       input.stats.rowsCopied += result.rowsCopied;
+      return result.refused === true;
     } catch (caught) {
       const error = caught instanceof ClaimedMigrationFailure ? caught.cause : caught;
       const lease = caught instanceof ClaimedMigrationFailure ? caught.lease : undefined;
@@ -3981,6 +3956,7 @@ async function processArchiveMigrationBatch(input: {
         sessionId: migration.session_id,
         ...serializeError(error),
       });
+      return false;
     }
   };
   const outOfTime = () => Date.now() - input.startedAt >= input.config.wallTimeMs;
@@ -3995,24 +3971,20 @@ async function processArchiveMigrationBatch(input: {
   // row (and its `migrating` location fence) is created, so a tick never leaves sessions it
   // did not reach fenced until the next cadence-gated sweep.
   //
-  // Both per-tick bounds are applied HERE rather than to the candidate list, because both
-  // describe work the tick actually performs: `pendingSlots` counts `migrating` fences
-  // opened, and the message budget counts rows moved. A candidate the write budget refuses
-  // opened no fence and moved no rows, so it consumes neither — it simply falls through to
-  // the next, smaller candidate. Refusing without descending is what left production
-  // re-picking one unaffordable session every hour for four days.
+  // The tick is bounded by work it actually does: wall time (checked between candidates),
+  // `pendingSlots` (sessions copied or still in flight), and the daily write budget. There is
+  // deliberately no cumulative message budget here any more. It charged refused candidates
+  // for rows they never moved, and with largest-first selection one refusal used most of it,
+  // so production published exactly one session per tick (2026-11-12: 70 a day, ~45k
+  // messages, against ~85k ingested). The per-candidate size ceiling still applies in
+  // `projectDataArchiveCandidateSql`. A candidate the write budget or the root refuses moved
+  // nothing, so it consumes no slot and the loop falls through to the next one.
   const pending = input.pending ?? [];
   const slots = input.pendingSlots;
-  const packer = createMessageBudgetPacker(
-    input.config.sweepMessageBudget,
-    input.env.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED === 'true'
-  );
   let journaled = 0;
   for (const candidate of pending) {
     if (journaled >= slots) break;
     if (outOfTime()) return;
-    const commitMessageBudget = packer.admit(candidate);
-    if (!commitMessageBudget) continue;
     const reservation =
       input.env.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED === 'true'
         ? await reserve(candidate.project_id, candidate.session_id)
@@ -4023,10 +3995,9 @@ async function processArchiveMigrationBatch(input: {
       await releaseUnused(reservation);
       continue;
     }
-    commitMessageBudget();
-    journaled++;
     input.onJournaled?.(candidate, migration);
-    await processOne(migration, reservation);
+    const refused = await processOne(migration, reservation);
+    if (!refused) journaled++;
   }
 }
 

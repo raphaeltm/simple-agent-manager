@@ -104,8 +104,13 @@ export const PROJECT_DATA_ARCHIVE_DEFAULT_SESSION_GRACE_MS = 7 * 24 * 60 * 60 * 
  * `error_code = PROJECT_DATA_ARCHIVE_PRECOPY_REFUSED_ERROR_CODE`; this window is the rule-47
  * expiring marker that keeps such a session from re-consuming a slot every tick while the
  * refusal condition persists. An operator canary that names the session bypasses it.
+ *
+ * One day (was seven until 2026-11-12). A refusal now costs one prepare RPC: its write
+ * reservation is released and it takes no session slot, so retrying daily is cheap, and a
+ * session whose refusal condition clears (a turn ends, a marker ages out) is archived the next
+ * day instead of a week later.
  */
-export const PROJECT_DATA_ARCHIVE_DEFAULT_PRECOPY_REFUSAL_RETRY_MS = 7 * 24 * 60 * 60 * 1000;
+export const PROJECT_DATA_ARCHIVE_DEFAULT_PRECOPY_REFUSAL_RETRY_MS = 24 * 60 * 60 * 1000;
 export const PROJECT_DATA_ARCHIVE_PRECOPY_REFUSED_ERROR_CODE = 'precopy_refused';
 /**
  * Minimum age of a `failed` journal before an unscoped sweep reclaims it. With a 15-minute

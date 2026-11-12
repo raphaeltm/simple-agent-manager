@@ -39,20 +39,20 @@ The SAM root ProjectData DO is at 9.08 GB of a 10e9 limit (2026-11-12 12:20Z ale
 
 ### PR 1: relief (fill the tick, stop false refusals, end dead sleepers)
 
-- [ ] 1a `processArchiveMigrationBatch`: drop the cumulative message packer from the journaling
+- [x] 1a `processArchiveMigrationBatch`: drop the cumulative message packer from the journaling
       loop (per-candidate ceiling stays in SQL). A refused candidate releases its write
       reservation and does not consume a session slot.
-- [ ] 1a wrangler.toml: `WALL_TIME_MS` 10000 → 60000, `SWEEP_SESSIONS` 8 → 50; update comments
+- [x] 1a wrangler.toml: `WALL_TIME_MS` 10000 → 60000, `SWEEP_SESSIONS` 8 → 50; update comments
       and configuration docs. Throughput at the outer limit stated in PR (rule 81).
-- [ ] 1b `assertEligibleTerminalSource`: drop `'error'` from the activity refusal; keep
+- [x] 1b `assertEligibleTerminalSource`: drop `'error'` from the activity refusal; keep
       prompting/recovering and runtime_work_state active/settling.
-- [ ] 1b attention refusal only for markers that are unresolved, unexpired, and created within
+- [x] 1b attention refusal only for markers that are unresolved, unexpired, and created within
       the session grace.
-- [ ] 1b Refusal retry window default 7 d → 1 d (refusals are now cheap: released reservation,
+- [x] 1b Refusal retry window default 7 d → 1 d (refusals are now cheap: released reservation,
       no slot). Permanent, so no expiry knob is needed; document it.
-- [ ] 1c `expireDegradedSleepingConversations`: remove the open-task EXISTS; exclude sessions
+- [x] 1c `expireDegradedSleepingConversations`: remove the open-task EXISTS; exclude sessions
       with queued/delegated tasks in SQL so they cannot sit at the head of the batch.
-- [ ] Tests: real scheduled trigger with a refused large candidate first and many small sessions
+- [x] Tests: real scheduled trigger with a refused large candidate first and many small sessions
       after (several publish in one tick; reservation released); real failSession then prepare
       accepted, with prompting / fresh-marker controls; snapshot-purge trigger terminalizes a
       degraded no-fallback sleeper with a completed task; zombie (queued task) row ahead of valid
@@ -72,6 +72,17 @@ The SAM root ProjectData DO is at 9.08 GB of a 10e9 limit (2026-11-12 12:20Z ale
 - [ ] Seal/verification bounded and resumable (item 6); measure memory/CPU/lease.
 
 ## Notes
+
+- PR 1 discrimination (2026-11-12, `tests/workers/project-data-archive-drain-relief.test.ts`):
+  reverting `scheduled/project-data-archive-sharding.ts` reddens exactly "publishes the smaller
+  sessions behind a refused largest candidate" and "releases the write reservation"; reverting
+  `durable-objects/project-data/archive-sharding.ts` reddens exactly the failSession case and the
+  two stale-marker cases (controls stay green); reverting `services/session-expiry.ts` reddens
+  exactly the completed-task sleeper and the queued-zombie cases. New allowance test
+  (`write-budget-shipped-factor.test.ts`) goes red at a 1,900,000 allowance (694 < 720).
+- PR 1 test imports of ProjectData internals: none beyond existing public RPCs on the DO stub.
+  New file: `apps/api/tests/workers/project-data-archive-drain-relief.test.ts`. No DO or D1
+  migrations.
 
 - 2026-11-12 17:06Z workspace was recycled while paused; untracked `.do-state.md` was lost.
   Keep durable state here and push.
