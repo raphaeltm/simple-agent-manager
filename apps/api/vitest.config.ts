@@ -17,7 +17,8 @@ export default defineConfig({
     server: { deps: { inline: ['@cloudflare/workers-oauth-provider'] } },
     globals: true,
     include: ['tests/**/*.test.ts'],
-    exclude: ['tests/workers/**'],
+    // tests/hosted-git runs the real git CLI against Miniflare: pnpm test:hosted-git.
+    exclude: ['tests/workers/**', 'tests/hosted-git/**'],
     coverage: coverageConfig(['src/**/*.ts'], {
       statements: 45,
       branches: 40,

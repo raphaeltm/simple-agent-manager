@@ -12,6 +12,7 @@
     "test:scheduler": "vitest run tests/simulation/*.test.ts",
     "test:scheduler:nightly": "SCHEDULER_SIM_PROFILE=nightly vitest run tests/simulation/*.test.ts",
     "test:debugging-workers": "vitest run --config vitest.debugging.workers.config.ts",
+    "test:hosted-git": "vitest run --config vitest.hosted-git.config.ts",
     "test:workers": "node tests/workers/run-workers-tests.mjs",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
