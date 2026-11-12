@@ -79,8 +79,14 @@ export function parseBucketUrl(url: string): BucketUrl {
 function check(result: RunResult, what: string): RunResult {
   if (result.status !== 0) {
     // stderr of gcloud/mc/docker carries no secret (credentials travel in the environment).
+    // gcloud prints progress first; its ERROR lines are the part worth reporting.
+    const errorLines = result.stderr
+      .split('\n')
+      .filter((line) => /^ERROR\b/.test(line.trim()))
+      .slice(0, 5)
+      .join('\n');
     throw new Error(
-      `${what} failed (exit ${result.status}): ${result.stderr.trim().slice(0, 500)}`
+      `${what} failed (exit ${result.status}): ${(errorLines || result.stderr.trim()).slice(0, 800)}`
     );
   }
   return result;
@@ -234,7 +240,19 @@ export function runBackup(
 
   const precopyStart = ctx.now();
   ctx.log(`live pre-copy of ${ctx.box.CELLD_BUCKET} (celld keeps running)`);
-  pullBucket(ctx, bucketDir);
+  // Best effort: a running node rewrites its lease, waker and capacity objects every few seconds,
+  // so `gcloud storage rsync` meets generations that vanished mid-copy (404) and exits non-zero.
+  // The pre-copy only shortens the downtime; the delta copy below, with celld stopped, is the one
+  // that must succeed, and it fails loudly if the store itself is unreachable.
+  try {
+    pullBucket(ctx, bucketDir);
+  } catch (err) {
+    ctx.log(
+      `live pre-copy incomplete, the delta copy with celld stopped will finish it: ${
+        err instanceof Error ? err.message.split('\n')[0]?.slice(0, 200) : String(err)
+      }`
+    );
+  }
   const precopyMs = ctx.now() - precopyStart;
 
   ctx.log('stopping celld for the delta copy');

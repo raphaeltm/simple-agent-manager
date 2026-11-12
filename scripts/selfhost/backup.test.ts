@@ -34,6 +34,7 @@ let root: string;
 let calls: Array<{ command: string; args: string[]; env?: NodeJS.ProcessEnv }>;
 let clock: number;
 let failDeltaCopy: boolean;
+let failLiveCopy: boolean;
 
 function tree(dir: string, base = dir): Record<string, string> {
   const out: Record<string, string> = {};
@@ -70,6 +71,16 @@ function fakeRun(command: string, args: string[], env?: NodeJS.ProcessEnv): RunR
         // bucket -> backup; the second (delta) pull can be made to fail
         const pulls = calls.filter((c) => c.args.includes('/backup') && c.args[0] === 'run');
         if (failDeltaCopy && pulls.length === 2) return { status: 1, stdout: '', stderr: 'boom' };
+        if (failLiveCopy && pulls.length === 1) {
+          // a running node rewrote an object mid-copy: part of the bucket arrives, then 404
+          mkdirSync(join(hostDir, 'd1'), { recursive: true });
+          writeFileSync(join(hostDir, 'd1/main.ltx'), 'stale');
+          return {
+            status: 1,
+            stdout: '',
+            stderr: 'ERROR: gs://b/celld%2Fwake%2Fwaker.json#1 not found: 404.',
+          };
+        }
         rmSync(hostDir, { recursive: true, force: true });
         cpSync(storePath(src), hostDir, { recursive: true });
       } else {
@@ -104,6 +115,7 @@ beforeEach(() => {
   calls = [];
   clock = 1_000_000;
   failDeltaCopy = false;
+  failLiveCopy = false;
   const fleet = join(root, 'store/fleet/celld');
   mkdirSync(join(fleet, 'd1'), { recursive: true });
   writeFileSync(join(fleet, 'd1/main.ltx'), 'rows');
@@ -144,6 +156,24 @@ describe('runBackup', () => {
     for (const call of calls) expect(call.args.join(' ')).not.toContain(SECRET);
     expect(calls[0]!.env?.MC_HOST_src).toContain(SECRET);
     expect(readFileSync(join(dest, MANIFEST_NAME), 'utf8')).not.toContain(SECRET);
+  });
+
+  it('finishes the backup when the live pre-copy fails because objects changed mid-copy', () => {
+    failLiveCopy = true;
+    const logs: string[] = [];
+    const dest = join(root, 'backups/b3');
+    const manifest = runBackup(
+      { ...ctx('s3://fleet/celld', join(root, 'state')), log: (m) => logs.push(m) },
+      dest
+    );
+    expect(manifest.objectCount).toBe(2);
+    // the delta copy with celld stopped replaced the stale partial copy
+    expect(tree(join(dest, 'bucket'))).toEqual({
+      'd1/main.ltx': 'rows',
+      'current.json': '{"v":3}',
+    });
+    expect(logs.some((l) => l.startsWith('live pre-copy incomplete'))).toBe(true);
+    expect(calls.at(-1)!.args.slice(-2)).toEqual(['start', 'celld']);
   });
 
   it('restarts celld when the delta copy fails', () => {
