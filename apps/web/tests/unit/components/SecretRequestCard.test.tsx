@@ -160,7 +160,9 @@ describe('secret request card in chat', () => {
     });
     renderCard();
     await screen.findByTestId('secret-request-card');
-    expect(screen.getByText(/already exists in this project as a manually set secret/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/already exists in this project as a manually set secret/)
+    ).toBeInTheDocument();
 
     fireEvent.change(valueInput(), { target: { value: SENTINEL } });
     expect(screen.getByRole('button', { name: 'Save secret' })).toBeDisabled();

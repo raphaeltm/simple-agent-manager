@@ -13,7 +13,8 @@ const SENTINEL = 'sk_live_SYNTHETIC_SENTINEL_value_never_in_chat';
 
 const USER = { id: 'user-owner', name: 'Owner', email: 'owner@example.com', role: 'user' };
 
-const LONG_NAME = 'SUPER_LONG_THIRD_PARTY_SERVICE_PRODUCTION_READ_WRITE_API_TOKEN_FOR_REGION_EU_WEST';
+const LONG_NAME =
+  'SUPER_LONG_THIRD_PARTY_SERVICE_PRODUCTION_READ_WRITE_API_TOKEN_FOR_REGION_EU_WEST';
 const LONG_REASON =
   'I need a Cloudflare API token to create the DNS records for the preview environment. ' +
   'Create it at https://dash.cloudflare.com/profile/api-tokens/a/very/long/path/that/does/not/break/naturally ' +
@@ -342,7 +343,9 @@ async function auditStates(page: Page, name: string) {
   await setupMocks(page, STATE_MESSAGES);
   await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`);
   const cards = page.getByTestId('secret-request-card');
-  await expect(cards.filter({ hasText: 'STRIPE_API_KEY' }).getByText(/Supplied by Raphaël/)).toBeVisible();
+  await expect(
+    cards.filter({ hasText: 'STRIPE_API_KEY' }).getByText(/Supplied by Raphaël/)
+  ).toBeVisible();
   await assertNoOverflow(page);
   await page.getByRole('log', { name: 'Conversation' }).hover();
   await page.mouse.wheel(0, -3000);

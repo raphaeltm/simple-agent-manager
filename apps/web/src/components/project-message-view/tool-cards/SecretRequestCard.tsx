@@ -177,8 +177,8 @@ export const SecretRequestCard: FC<SecretRequestCardProps> = ({ item, projectId 
         </p>
         {(request.status === 'pending' || request.status === 'fulfilled') && (
           <p className="m-0 text-xs text-fg-muted">
-            {request.status === 'pending' ? 'Saved' : 'Stored'} as an encrypted project secret
-            that every project member&apos;s agent sessions can use. {lifetimeText(request)}
+            {request.status === 'pending' ? 'Saved' : 'Stored'} as an encrypted project secret that
+            every project member&apos;s agent sessions can use. {lifetimeText(request)}
           </p>
         )}
       </div>

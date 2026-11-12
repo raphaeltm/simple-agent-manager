@@ -80,7 +80,11 @@ export const SecretRequestForm: FC<SecretRequestFormProps> = ({
   }
 
   return (
-    <form className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2" onSubmit={(event) => void save(event)} autoComplete="off">
+    <form
+      className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2"
+      onSubmit={(event) => void save(event)}
+      autoComplete="off"
+    >
       <label htmlFor={inputId} className="min-w-0 text-xs text-fg-muted [overflow-wrap:anywhere]">
         Value for <span className="font-semibold text-fg-primary">{request.envKey}</span>
       </label>
