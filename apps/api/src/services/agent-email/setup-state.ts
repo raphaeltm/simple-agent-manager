@@ -27,6 +27,8 @@ import { log } from '../../lib/logger';
 import { readSetting } from '../platform-config-store';
 import { agentEmailDomain } from './address';
 import { type AgentEmailSender, agentEmailSenderFor } from './provider';
+import { isSelfHostInboundEmailConfigured, selfHostAgentEmailSender } from './self-host-inbound';
+import { getAgentEmailLimits } from './settings';
 
 /** `platform_settings` key of the on-switch. Not an admin setting: only the setup writes it. */
 export const AGENT_EMAIL_SETUP_KEY = 'agent_email.setup';
@@ -101,9 +103,14 @@ export async function readAgentEmailSetup(env: Env): Promise<AgentEmailSetupReco
   return raw ? parseStored(setupRecordSchema, raw, AGENT_EMAIL_SETUP_KEY) : null;
 }
 
-/** On: the deploy prepared it and an admin set it up for the current agent email domain. */
+/**
+ * On, on Cloudflare: the deploy prepared it and an admin set it up for the current agent email
+ * domain. On a self-hosted box without the binding: the deploy installed the sam-mx receiver and
+ * an SMTP relay exists (self-host-inbound.ts). The operator opts in through the box .env and
+ * publishes the MX record themselves, so there is no Cloudflare setup record to wait for.
+ */
 export async function isAgentEmailOn(env: Env): Promise<boolean> {
-  if (!hasAgentEmailBinding(env)) return false;
+  if (!hasAgentEmailBinding(env)) return isSelfHostInboundEmailConfigured(env);
   const record = await readAgentEmailSetup(env);
   return record?.domain === agentEmailDomain(env.BASE_DOMAIN);
 }
@@ -123,7 +130,10 @@ export async function agentEmailConfig(env: Env): Promise<AgentEmailConfigRespon
 
 /** The sender, only while agent email is on. */
 export async function activeAgentEmailSender(env: Env): Promise<AgentEmailSender | null> {
-  return (await isAgentEmailOn(env)) ? agentEmailSenderFor(env) : null;
+  if (!(await isAgentEmailOn(env))) return null;
+  if (hasAgentEmailBinding(env)) return agentEmailSenderFor(env);
+  const { smtpTimeoutMs } = await getAgentEmailLimits(env);
+  return selfHostAgentEmailSender(env, { smtpTimeoutMs });
 }
 
 function setupAttemptKey(domain: string): string {

@@ -14,6 +14,7 @@
  */
 import type { Env } from '../env';
 import { emailTransportKind } from './agent-email/provider';
+import { hasInboundAgentEmail } from './agent-email/self-host-inbound';
 import { resolveR2PresignConfig } from './r2-presign-config';
 
 /** One platform service. The name is also the `feature` field of a FEATURE_UNAVAILABLE error. */
@@ -28,6 +29,7 @@ export type PlatformCapability =
   | 'containerRuntime'
   | 'guidedCredentialSetup'
   | 'emailSending'
+  | 'inboundAgentEmail'
   | 'cloudflareDns'
   | 'workersObservability'
   | 'r2Presign'
@@ -58,6 +60,8 @@ type CapabilityEnv = Pick<
   | 'SMTP_USERNAME'
   | 'SMTP_PASSWORD'
   | 'SMTP_FROM'
+  | 'AGENT_EMAIL_INBOUND_SMTP'
+  | 'REVERSE_TUNNEL_GATEWAY_SECRET'
   | 'TTS_ENABLED'
   | 'R2_ACCESS_KEY_ID'
   | 'R2_SECRET_ACCESS_KEY'
@@ -92,7 +96,9 @@ export function hasCloudflareAccountApi(env: Pick<Env, 'CF_ACCOUNT_ID' | 'CF_API
  * runtime with no Cloudflare account still has it set. Every gateway URL is
  * `gateway.ai.cloudflare.com/v1/<account>/<gateway>/...`, so it also needs the account id.
  */
-export function resolveAiGatewayId(env: Pick<Env, 'AI_GATEWAY_ID' | 'CF_ACCOUNT_ID'>): string | null {
+export function resolveAiGatewayId(
+  env: Pick<Env, 'AI_GATEWAY_ID' | 'CF_ACCOUNT_ID'>
+): string | null {
   const gatewayId = env.AI_GATEWAY_ID?.trim();
   if (!gatewayId || !present(env.CF_ACCOUNT_ID)) return null;
   return gatewayId;
@@ -185,9 +191,11 @@ export function resolvePlatformCapabilities(env: CapabilityEnv): PlatformCapabil
     artifacts: isArtifactsAvailable(env),
     containerRuntime: hasContainerRuntime(env),
     guidedCredentialSetup: isGuidedCredentialSetupAvailable(env),
-    // SAM can send its own email (sign-in codes): Cloudflare Email Sending or SMTP. Agent email
-    // (inbound mail, replies) still needs the Cloudflare binding (agent-email/setup-state.ts).
+    // SAM can send its own email (sign-in codes): Cloudflare Email Sending or SMTP.
     emailSending: emailTransportKind(env) !== null,
+    // Agent email can arrive here: Cloudflare Email Routing (the binding; an admin still has to
+    // run the setup) or the self-hosted sam-mx receiver (agent-email/self-host-inbound.ts).
+    inboundAgentEmail: hasInboundAgentEmail(env),
     cloudflareDns: present(env.CF_API_TOKEN) && present(env.CF_ZONE_ID),
     workersObservability: cloudflareAccountApi,
     r2Presign: resolveR2PresignConfig(env) !== null,

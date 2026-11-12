@@ -226,11 +226,87 @@ anyone is using the box. Set `SAM_KEEP_WARM=off` in `.env` and run `docker compo
 to turn it off. The upstream fix (celld keeping a warm stateless isolate, or a retirement
 setting) is tracked in `tasks/backlog/2026-11-11-selfhost-celld-isolate-cold-start-slow-page-loads.md`.
 
+## Inbound agent email
+
+Agent email gives each email trigger its own address, `agent+<key>@agents.SAM_DOMAIN`. Mail from
+an allowed sender starts (or continues) work, and the agent answers with `reply_to_email`. On
+Cloudflare that runs on Email Routing; on a box the `mail-in` profile runs **sam-mx**
+(`deploy/selfhost/sam-mx`, Go, `emersion/go-smtp` + `go-msgauth` + `blitiri.com.ar/go/spf`, all
+MIT), an SMTP receiver on port 25:
+
+- It accepts `RCPT TO` only for agent addresses on `agents.SAM_DOMAIN` (it can never relay), one
+  recipient per message, up to `SAM_MX_MAX_MESSAGE_BYTES` (5 MiB by default).
+- It requires the From domain to be authenticated: SPF for the envelope sender or a DKIM
+  signature, **aligned** with the From domain (DMARC pass). This is stricter than Cloudflare,
+  which enforces only the policy a domain publishes, because the trigger's allowed-sender list
+  compares From addresses.
+- It hands each message, during the SMTP session, to the Worker on loopback
+  (`POST /api/self-host/gateway/inbound-email`, authenticated with the gateway secret from
+  `.state/gateway.env`; Caddy answers 404 for that path from the internet). The Worker runs the
+  same handler as on Cloudflare and requires the From it parses to have the domain sam-mx
+  authenticated. Its verdict becomes the SMTP reply: 250, 550 (unknown address, sender not
+  allowed, too large, failed authentication) or 451 (SAM unreachable; the sender retries).
+  Nothing is ever bounced, so a forged sender gets no backscatter.
+- Limits: `SAM_MX_MAX_CONNECTIONS` (20), `SAM_MX_MAX_CONNECTIONS_PER_IP` (3, an IPv6 client counts
+  as its /64), `SAM_MX_CONNECTIONS_PER_IP_PER_MINUTE` (30), `SAM_MX_MESSAGES_PER_CONNECTION` (10),
+  `SAM_MX_MAX_SESSION` (15m), a 512 MB container memory limit, plus the Worker's own per-trigger
+  hourly limit. Header blocks two parsers could read differently (`From :`, a repeated `From`,
+  `Subject` or `Message-ID`, bare LF) are refused, a DKIM signature counts only if it signs
+  `Subject` and `Message-ID`, and the Worker requires the From it parses to be exactly the address
+  sam-mx authenticated.
+- It runs as its own uid (`SAM_MX_UID`, 7102) with every capability dropped except binding port 25. It never sends mail: replies go through the Worker's SMTP relay (`SMTP_*`, or the mail
+  collector on a test install), From `SMTP_FROM` with `Reply-To` set to the trigger's agent
+  address and `In-Reply-To` and `References` set, so the sender's answer returns to the same
+  trigger.
+
+```bash
+# .env: add the profile (off by default) next to an SMTP relay or the mail collector
+COMPOSE_PROFILES=tunnel,mail-in
+pnpm selfhost:deploy                      # sets AGENT_EMAIL_INBOUND_SMTP=true for the Worker
+docker compose -f deploy/selfhost/docker-compose.yml up -d --build sam-mx
+```
+
+The deploy refuses `mail-in` without an SMTP transport for replies. For real mail the box also
+needs:
+
+- **DNS**: `agents.SAM_DOMAIN. MX 10 mx.SAM_DOMAIN.` The wildcard `*.SAM_DOMAIN` A record already
+  points `mx.` at the box. No PTR record is needed to receive.
+- **Firewall**: inbound tcp/25 to the box (GCP: a VPC ingress rule, for example
+  `gcloud compute firewall-rules create sam-smtp-in --allow tcp:25 --target-tags <box tag>`).
+  Outbound 25 is never used; GCP and Hetzner block it anyway.
+- **Optional STARTTLS**: mount a certificate and key and set `SAM_MX_TLS_CERT` and
+  `SAM_MX_TLS_KEY`. Without them senders deliver in plaintext.
+
+Then create an email trigger in the app (Automation); its address and allowed senders show there.
+
+**Smoke test without DNS** (from the box itself): add `SAM_MX_TRUSTED_NETWORKS=127.0.0.1/32` to
+`.env` and `docker compose up -d sam-mx`. Mail from that network skips SPF/DKIM/DMARC (only
+loopback networks are accepted there), so you can inject as an allowed sender:
+
+```bash
+swaks --server 127.0.0.1:25 --to 'agent+<key>@agents.SAM_DOMAIN' \
+  --from you@example.com --header 'Subject: smoke test' --body 'Say hello by email.'
+# 250 = SAM stored it and started the trigger; watch the task appear in the project.
+# A sender outside the trigger's allowed list gets "550 5.7.1 Sender not allowed".
+```
+
+With the `mail-collector` profile on, the agent's `reply_to_email` lands in the collector at
+`https://mail.SAM_DOMAIN`. Remove `SAM_MX_TRUSTED_NETWORKS` afterwards.
+
+The celld egress fence needs no change: it matches celld's uid only, sam-mx calls celld (not the
+other way round), and the fence still refuses the Worker any connection to port 25.
+
+Code: `deploy/selfhost/sam-mx/` (receiver and its tests),
+`apps/api/src/routes/self-host-gateway-inbound-email.ts` (gateway route),
+`apps/api/src/services/agent-email/self-host-inbound.ts` (on-switch, SMTP reply sender),
+`scripts/selfhost/inbound-mail-settings.ts` (deploy wiring).
+
 ## Known gaps in this pass
 
 - Off on purpose: Instant sessions and guided credential login (Cloudflare Containers), Artifacts
   (SAM-native repos), Analytics Engine, AI Gateway, Workers AI features (TTS, task titles,
-  stalled-task classifier), agent email (inbound mail and replies; sign-in codes work over SMTP).
+  stalled-task classifier). Agent email needs the `mail-in` profile (see Inbound agent email); the
+  admin agent-email setup and loopback test remain Cloudflare-only.
   Project creation needs a GitHub App or GitLab.
 - Without Cloudflare, voice transcription, server read-aloud and the Workers AI model catalog
   answer `404 FEATURE_UNAVAILABLE`, and the web UI hides the mic and server read-aloud. The SAM
