@@ -23,25 +23,25 @@ import {
   createAttentionMarker,
   listActiveAttentionMarkers,
   resolveAttentionMarkers,
-} from '../../src/durable-objects/project-data/attention';
+} from '@simple-agent-manager/project-data/internal/do/attention';
 import {
   type DurabilityFoundationHooks,
   processPromptDeliveryAlarm,
-} from '../../src/durable-objects/project-data/durability-foundation';
-import { resolveDurableExecutionConfig } from '../../src/durable-objects/project-data/durable-execution-config';
-import { persistMessage } from '../../src/durable-objects/project-data/messages';
+} from '@simple-agent-manager/project-data/internal/do/durability-foundation';
+import { resolveDurableExecutionConfig } from '@simple-agent-manager/project-data/internal/do/durable-execution-config';
+import { persistMessage } from '@simple-agent-manager/project-data/internal/do/messages';
 import {
   OWNER_ONLY_SCHEDULE,
   requireScheduleAction,
-} from '../../src/durable-objects/project-data/project-event-schedules-authority';
-import { runScheduleAlarm } from '../../src/durable-objects/project-data/project-event-schedules-runner';
+} from '@simple-agent-manager/project-data/internal/do/project-event-schedules-authority';
+import { runScheduleAlarm } from '@simple-agent-manager/project-data/internal/do/project-event-schedules-runner';
 import {
   cancelSchedule,
   createSchedule,
   getSchedule,
-} from '../../src/durable-objects/project-data/project-event-schedules-storage';
-import { admitProjectEvent } from '../../src/durable-objects/project-data/project-events';
-import { syncProviderLimitAttention } from '../../src/durable-objects/project-data/provider-limit-attention';
+} from '@simple-agent-manager/project-data/internal/do/project-event-schedules-storage';
+import { admitProjectEvent } from '@simple-agent-manager/project-data/internal/do/project-events';
+import { syncProviderLimitAttention } from '@simple-agent-manager/project-data/internal/do/provider-limit-attention';
 import type { Env } from '../../src/env';
 import { AppError } from '../../src/middleware/error';
 import { taskCallbackRoute } from '../../src/routes/tasks/callback';

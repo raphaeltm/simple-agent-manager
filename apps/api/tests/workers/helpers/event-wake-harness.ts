@@ -7,11 +7,11 @@
 import { runInDurableObject } from 'cloudflare:test';
 import { expect } from 'vitest';
 
-import { runProjectEventWakeMaterializationBatch } from '../../../src/durable-objects/project-data/project-events-materialization';
-import { computeProjectEventMaterializationAlarmTime } from '../../../src/durable-objects/project-data/project-events-scheduler';
-import { advanceProjectEventPromptAttemptCheckpoint } from '../../../src/durable-objects/project-data/project-events-wake-delivery';
-import type { PromptDeliveryResult } from '../../../src/durable-objects/project-data/prompt-delivery';
-import { parseMailboxMessageRow } from '../../../src/durable-objects/project-data/row-schemas';
+import { runProjectEventWakeMaterializationBatch } from '@simple-agent-manager/project-data/internal/do/project-events-materialization';
+import { computeProjectEventMaterializationAlarmTime } from '@simple-agent-manager/project-data/internal/do/project-events-scheduler';
+import { advanceProjectEventPromptAttemptCheckpoint } from '@simple-agent-manager/project-data/internal/do/project-events-wake-delivery';
+import type { PromptDeliveryResult } from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
+import { parseMailboxMessageRow } from '@simple-agent-manager/project-data/internal/do/row-schemas';
 import {
   sqlRows,
   testEnv,

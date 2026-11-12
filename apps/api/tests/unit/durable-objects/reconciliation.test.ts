@@ -7,19 +7,19 @@
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { computeProjectDataAlarmTime } from '../../../src/durable-objects/project-data/alarm-schedule';
+import { computeProjectDataAlarmTime } from '@simple-agent-manager/project-data/internal/do/alarm-schedule';
 import {
   createAttentionMarker,
   getExpiredMarkers,
   resolveAttentionMarkerById,
   resolveAttentionMarkers,
-} from '../../../src/durable-objects/project-data/attention';
-import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
+} from '@simple-agent-manager/project-data/internal/do/attention';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import {
   computeReconciliationAlarmTime,
   getReconciliationCandidates,
   processReconciliationCandidates,
-} from '../../../src/durable-objects/project-data/reconciliation';
+} from '@simple-agent-manager/project-data/internal/do/reconciliation';
 import {
   acceptedPromptResponse,
   missingPromptReceipt,
@@ -267,7 +267,7 @@ const FIVE_MINUTES = 5 * 60 * 1000;
 const ONE_MINUTE = 60 * 1000;
 const THIRTY_MINUTES = 30 * 60 * 1000;
 const TWO_HOURS = 2 * 60 * 60 * 1000;
-type ProjectDataEnv = import('../../../src/durable-objects/project-data/types').Env;
+type ProjectDataEnv = import('@simple-agent-manager/project-data/internal/do/types').Env;
 
 describe('Task Reconciliation Module', () => {
   let db: Database.Database;
@@ -300,11 +300,16 @@ describe('Task Reconciliation Module', () => {
         )
       );
     nodeAgentMocks.cancelAgentSessionOnNode.mockResolvedValue({ success: true, status: 200 });
-    nodeAgentMocks.listAgentSessionsOnNode.mockReset().mockImplementation(async (_nodeId: string, workspaceId: string) => ({
-      sessions: db.prepare('SELECT id, workspace_id AS workspaceId, status FROM acp_sessions WHERE workspace_id = ?')
-        .all(workspaceId).map((session) => ({ ...(session as object), hostStatus: 'ready' })),
-    }));
-
+    nodeAgentMocks.listAgentSessionsOnNode
+      .mockReset()
+      .mockImplementation(async (_nodeId: string, workspaceId: string) => ({
+        sessions: db
+          .prepare(
+            'SELECT id, workspace_id AS workspaceId, status FROM acp_sessions WHERE workspace_id = ?'
+          )
+          .all(workspaceId)
+          .map((session) => ({ ...(session as object), hostStatus: 'ready' })),
+      }));
   });
 
   afterEach(() => {
@@ -668,7 +673,7 @@ describe('Task Reconciliation Module', () => {
       });
       const env = {
         DATABASE: mockDb,
-      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      } as unknown as import('@simple-agent-manager/project-data/internal/do/types').Env;
 
       const candidates = await getReconciliationCandidates(sql, env);
       expect(candidates).toHaveLength(0);
@@ -684,7 +689,7 @@ describe('Task Reconciliation Module', () => {
       });
       const env = {
         DATABASE: mockDb,
-      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      } as unknown as import('@simple-agent-manager/project-data/internal/do/types').Env;
 
       const candidates = await getReconciliationCandidates(sql, env);
       expect(candidates).toHaveLength(0);
@@ -876,7 +881,7 @@ describe('Task Reconciliation Module', () => {
       );
       const env = {
         DATABASE: mockDb,
-      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      } as unknown as import('@simple-agent-manager/project-data/internal/do/types').Env;
       const broadcastEvent = vi.fn();
 
       await processReconciliationCandidates(sql, env, broadcastEvent);
@@ -905,7 +910,7 @@ describe('Task Reconciliation Module', () => {
       );
       const env = {
         DATABASE: mockDb,
-      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      } as unknown as import('@simple-agent-manager/project-data/internal/do/types').Env;
       const broadcastEvent = vi.fn();
 
       await processReconciliationCandidates(sql, env, broadcastEvent);
@@ -931,7 +936,7 @@ describe('Task Reconciliation Module', () => {
       const mockDb = createMockD1({ 'task-1': { task_mode: 'task', status: 'in_progress' } });
       const env = {
         DATABASE: mockDb,
-      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      } as unknown as import('@simple-agent-manager/project-data/internal/do/types').Env;
       const broadcastEvent = vi.fn();
 
       const processed = await processReconciliationCandidates(sql, env, broadcastEvent);
@@ -945,7 +950,7 @@ describe('Task Reconciliation Module', () => {
       });
       const env = {
         DATABASE: mockDb,
-      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      } as unknown as import('@simple-agent-manager/project-data/internal/do/types').Env;
       const broadcastEvent = vi.fn();
 
       const processed = await processReconciliationCandidates(sql, env, broadcastEvent);
@@ -1148,7 +1153,7 @@ describe('Task Reconciliation Module', () => {
       const env = {
         DATABASE: mockDb,
         TASK_RECONCILIATION_NODE_CALL_TIMEOUT_MS: '1234',
-      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      } as unknown as import('@simple-agent-manager/project-data/internal/do/types').Env;
       const broadcastEvent = vi.fn();
 
       await processReconciliationCandidates(sql, env, broadcastEvent);
@@ -1180,7 +1185,7 @@ describe('Task Reconciliation Module', () => {
       );
       const env = {
         DATABASE: mockDb,
-      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      } as unknown as import('@simple-agent-manager/project-data/internal/do/types').Env;
       const broadcastEvent = vi.fn();
 
       const processed = await processReconciliationCandidates(sql, env, broadcastEvent);
@@ -1782,7 +1787,7 @@ describe('Task Reconciliation Module', () => {
       );
       const env = {
         DATABASE: mockDb,
-      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      } as unknown as import('@simple-agent-manager/project-data/internal/do/types').Env;
       const broadcastEvent = vi.fn();
 
       const processed = await processReconciliationCandidates(sql, env, broadcastEvent);
@@ -2038,7 +2043,7 @@ describe('Task Reconciliation Module', () => {
     it('returns null when no task-mode sessions exist', () => {
       const env = {
         DATABASE: createMockD1(),
-      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      } as unknown as import('@simple-agent-manager/project-data/internal/do/types').Env;
       const time = computeReconciliationAlarmTime(sql, env);
       expect(time).toBeNull();
     });
@@ -2047,7 +2052,7 @@ describe('Task Reconciliation Module', () => {
       setupTaskSession({ lastActivityAt: now - 60000 }); // 1 minute ago
       const env = {
         DATABASE: createMockD1(),
-      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      } as unknown as import('@simple-agent-manager/project-data/internal/do/types').Env;
 
       const time = computeReconciliationAlarmTime(sql, env);
       expect(time).not.toBeNull();
@@ -2059,7 +2064,7 @@ describe('Task Reconciliation Module', () => {
       setupTaskSession({ lastActivityAt: now - 60000, withIdleCleanup: false });
       const env = {
         DATABASE: createMockD1(),
-      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      } as unknown as import('@simple-agent-manager/project-data/internal/do/types').Env;
 
       const time = computeReconciliationAlarmTime(sql, env);
       expect(time).toBe(now - 60000 + FIVE_MINUTES);
@@ -2070,7 +2075,7 @@ describe('Task Reconciliation Module', () => {
       setupTaskSession({ lastActivityAt: now - 10 * 60 * 1000 });
       const env = {
         DATABASE: createMockD1(),
-      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      } as unknown as import('@simple-agent-manager/project-data/internal/do/types').Env;
 
       const time = computeReconciliationAlarmTime(sql, env);
       expect(time).not.toBeNull();
@@ -2083,7 +2088,7 @@ describe('Task Reconciliation Module', () => {
       const env = {
         DATABASE: createMockD1(),
         TASK_RECONCILIATION_MIN_ALARM_DELAY_MS: String(customDelayMs),
-      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      } as unknown as import('@simple-agent-manager/project-data/internal/do/types').Env;
 
       const time = computeReconciliationAlarmTime(sql, env);
 
@@ -2114,7 +2119,7 @@ describe('Task Reconciliation Module', () => {
       });
       const env = {
         DATABASE: createMockD1(),
-      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      } as unknown as import('@simple-agent-manager/project-data/internal/do/types').Env;
 
       const time = computeReconciliationAlarmTime(sql, env);
       expect(time).toBeNull();
@@ -2126,7 +2131,7 @@ describe('Task Reconciliation Module', () => {
       const env = {
         DATABASE: createMockD1(),
         TASK_RECONCILIATION_IDLE_MS: String(customIdleMs),
-      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      } as unknown as import('@simple-agent-manager/project-data/internal/do/types').Env;
 
       const time = computeReconciliationAlarmTime(sql, env);
       expect(time).toBe(now - 60000 + customIdleMs);
@@ -2308,7 +2313,7 @@ describe('Task Reconciliation Module', () => {
       });
       const env = {
         DATABASE: mockDb,
-      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      } as unknown as import('@simple-agent-manager/project-data/internal/do/types').Env;
 
       const candidates = await getReconciliationCandidates(sql, env);
       expect(candidates).toHaveLength(0);

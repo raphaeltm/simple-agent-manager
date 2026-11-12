@@ -14,7 +14,7 @@ beforeAll(async () => {
   // Tests that call ProjectData modules directly (not through the Durable Object) need the
   // worker's ports even before the entry module, which also configures them, is evaluated.
   const [{ configureProjectDataPorts }, { workerProjectDataPorts }] = await Promise.all([
-    import('../../src/durable-objects/project-data/ports'),
+    import('@simple-agent-manager/project-data/internal/do/ports'),
     import('../../src/project-data-ports/index'),
   ]);
   configureProjectDataPorts(workerProjectDataPorts);

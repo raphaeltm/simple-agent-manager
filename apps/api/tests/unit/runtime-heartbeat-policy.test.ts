@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { shouldDeferRuntimeHeartbeatTimeout } from '../../src/durable-objects/project-data/runtime-heartbeat-policy';
-import type { Env } from '../../src/durable-objects/project-data/types';
+import { shouldDeferRuntimeHeartbeatTimeout } from '@simple-agent-manager/project-data/internal/do/runtime-heartbeat-policy';
+import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
 import type { VmAgentContainerLifecycleStatus } from '../../src/durable-objects/vm-agent-container-lifecycle';
 
 function createEnv(input: {

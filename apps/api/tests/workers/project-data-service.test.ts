@@ -1,7 +1,7 @@
 /**
  * Vertical slice tests for the project-data DO proxy service.
  *
- * Exercises the service layer (apps/api/src/services/project-data.ts) which
+ * Exercises the service layer (packages/project-data/src/client/project-data.ts) which
  * wraps RPC calls to the ProjectData Durable Object. Successful calls go through:
  *   service function → getStub(env, projectId) → ensureProjectId() → DO method
  * Expected rejection cases call the same synchronous core guard through the
@@ -17,8 +17,8 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it, vi } from 'vitest';
 
-import { DEFAULT_MAX_MESSAGES_PER_SESSION } from '../../src/durable-objects/project-data/messages';
-import * as sessionState from '../../src/durable-objects/project-data/sessions';
+import { DEFAULT_MAX_MESSAGES_PER_SESSION } from '@simple-agent-manager/project-data/internal/do/messages';
+import * as sessionState from '@simple-agent-manager/project-data/internal/do/sessions';
 import type { Env } from '../../src/env';
 // Import service functions under test
 import * as svc from '../../src/services/project-data';

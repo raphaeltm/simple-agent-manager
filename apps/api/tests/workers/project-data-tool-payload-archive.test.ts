@@ -1,21 +1,21 @@
 import { env, runInDurableObject, SELF } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
-import { toolPayloadStorageReliefRawWindowQuery } from '../../src/durable-objects/project-data/storage-relief-measurement';
+import { toolPayloadStorageReliefRawWindowQuery } from '@simple-agent-manager/project-data/internal/do/storage-relief-measurement';
 import {
   classifyStorageUsage,
   DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS,
   DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_RECHECK_MS,
   resolveStorageSafetyConfig,
-} from '../../src/durable-objects/project-data/storage-safety';
-import { runProjectDataToolPayloadCleanup } from '../../src/durable-objects/project-data/tool-payload-cleanup';
+} from '@simple-agent-manager/project-data/internal/do/storage-safety';
+import { runProjectDataToolPayloadCleanup } from '@simple-agent-manager/project-data/internal/do/tool-payload-cleanup';
 import {
   writeToolPayloadCleanupManifestBatch,
   writeToolPayloadCleanupManifestRoot,
-} from '../../src/durable-objects/project-data/tool-payload-cleanup-manifest';
-import { runProjectDataManualToolPayloadCleanup } from '../../src/durable-objects/project-data/tool-payload-manual-cleanup';
+} from '@simple-agent-manager/project-data/internal/do/tool-payload-cleanup-manifest';
+import { runProjectDataManualToolPayloadCleanup } from '@simple-agent-manager/project-data/internal/do/tool-payload-manual-cleanup';
 import type { Env as WorkerEnv } from '../../src/env';
-import { runProjectDataStorageReliefPreflight } from '../../src/scheduled/project-data-storage-relief-preflight';
+import { runProjectDataStorageReliefPreflight } from '@simple-agent-manager/project-data/internal/scheduled/project-data-storage-relief-preflight';
 import { storeMcpToken } from '../../src/services/mcp-token';
 import { measureProjectDataStorageRelief } from '../../src/services/project-data';
 import {
@@ -477,9 +477,7 @@ function captureWarnEvents(): {
       lines.flatMap((line) => {
         try {
           const parsed: unknown = JSON.parse(line);
-          return parsed && typeof parsed === 'object'
-            ? [parsed as Record<string, unknown>]
-            : [];
+          return parsed && typeof parsed === 'object' ? [parsed as Record<string, unknown>] : [];
         } catch {
           return [];
         }
@@ -713,11 +711,7 @@ describe('ProjectData tool payload R2 archival', () => {
     await seedToolMessages(stub, [
       { id: 'refusal-cadence', createdAt: FIXED_NOW - 2_000, sequence: 1 },
     ]);
-    const approval = await approvedCleanupEnv(
-      projectId,
-      'refusal-cadence-plan',
-      FIXED_NOW - 1_000
-    );
+    const approval = await approvedCleanupEnv(projectId, 'refusal-cadence-plan', FIXED_NOW - 1_000);
     const missingHashOnly = {
       ...approval,
       PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_SHA256: '',
@@ -773,7 +767,11 @@ describe('ProjectData tool payload R2 archival', () => {
     await seedToolMessages(stub, [
       { id: 'refusal-hash-format', createdAt: FIXED_NOW - 2_000, sequence: 1 },
     ]);
-    const approval = await approvedCleanupEnv(projectId, 'refusal-hash-format-plan', FIXED_NOW - 1_000);
+    const approval = await approvedCleanupEnv(
+      projectId,
+      'refusal-hash-format-plan',
+      FIXED_NOW - 1_000
+    );
 
     const warnings = captureWarnEvents();
     try {

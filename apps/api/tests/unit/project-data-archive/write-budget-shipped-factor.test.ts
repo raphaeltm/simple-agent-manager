@@ -42,7 +42,7 @@ import {
   ARCHIVE_WRITE_FIXED_RESERVATION,
   archiveWriteBudgetConfig,
   reserveArchiveWrites,
-} from '../../../src/project-data-archive/write-budget';
+} from '@simple-agent-manager/project-data/internal/archive/write-budget';
 import { shippedBudgetEnv, shippedSweepTicksPerDay } from '../../helpers/shipped-archive-budget';
 import { createSqliteD1 } from '../../helpers/sqlite-d1';
 

@@ -9,8 +9,8 @@
  * See: specs/018-project-first-architecture/research.md (Decision 6)
  */
 import { MAILBOX_DEFAULTS } from '@simple-agent-manager/shared';
-
 import { log } from '@simple-agent-manager/worker-core';
+
 import { migrateAnchoredComments } from './anchored-comments-migration';
 import { migrateProjectSchedules } from './project-event-schedules-schema';
 import { migrateResourceLinks } from './resource-links-migration';

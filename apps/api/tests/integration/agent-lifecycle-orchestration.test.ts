@@ -10,27 +10,27 @@ import { VM_PROMPT_DELIVERY_PROTOCOL_VERSION } from '@simple-agent-manager/share
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { updateMessageActivity } from '../../src/durable-objects/project-data/activity';
+import { updateMessageActivity } from '@simple-agent-manager/project-data/internal/do/activity';
 import {
   createAttentionMarker,
   getExpiredMarkers,
   resolveAttentionMarkerById,
   resolveAttentionMarkers,
   resolveAttentionMarkersByKind,
-} from '../../src/durable-objects/project-data/attention';
+} from '@simple-agent-manager/project-data/internal/do/attention';
 import {
   resetIdleCleanup,
   scheduleIdleCleanup,
   stopWorkspaceInD1,
-} from '../../src/durable-objects/project-data/idle-cleanup';
-import { persistMessage } from '../../src/durable-objects/project-data/messages';
-import { runMigrations } from '../../src/durable-objects/project-data/migrations';
+} from '@simple-agent-manager/project-data/internal/do/idle-cleanup';
+import { persistMessage } from '@simple-agent-manager/project-data/internal/do/messages';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import {
   getReconciliationCandidates,
   processReconciliationCandidates,
-} from '../../src/durable-objects/project-data/reconciliation';
-import { failSession } from '../../src/durable-objects/project-data/sessions';
-import type { Env } from '../../src/durable-objects/project-data/types';
+} from '@simple-agent-manager/project-data/internal/do/reconciliation';
+import { failSession } from '@simple-agent-manager/project-data/internal/do/sessions';
+import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
 import { nodeAgentRequest, sendPromptToAgentOnNode } from '../../src/services/node-agent';
 import {
   acceptedPromptResponse,
@@ -73,7 +73,10 @@ function createSqlStorage(db: Database.Database): SqlStorage {
   return {
     exec(query: string, ...params: unknown[]) {
       const trimmed = query.trim().toUpperCase();
-      const isSelect = trimmed.startsWith('SELECT') || trimmed.startsWith('WITH') || trimmed.startsWith('PRAGMA TABLE_INFO');
+      const isSelect =
+        trimmed.startsWith('SELECT') ||
+        trimmed.startsWith('WITH') ||
+        trimmed.startsWith('PRAGMA TABLE_INFO');
 
       if (isSelect) {
         const rows = params.length > 0 ? db.prepare(query).all(...params) : db.prepare(query).all();
@@ -164,10 +167,16 @@ describe('agent lifecycle orchestration integration', () => {
     db = new Database(':memory:');
     sql = createSqlStorage(db);
     runMigrations(sql);
-    nodeAgentMocks.listAgentSessionsOnNode.mockReset().mockImplementation(async (_nodeId: string, workspaceId: string) => ({
-      sessions: db.prepare('SELECT id, workspace_id AS workspaceId, status FROM acp_sessions WHERE workspace_id = ?')
-        .all(workspaceId).map((session) => ({ ...(session as object), hostStatus: 'ready' })),
-    }));
+    nodeAgentMocks.listAgentSessionsOnNode
+      .mockReset()
+      .mockImplementation(async (_nodeId: string, workspaceId: string) => ({
+        sessions: db
+          .prepare(
+            'SELECT id, workspace_id AS workspaceId, status FROM acp_sessions WHERE workspace_id = ?'
+          )
+          .all(workspaceId)
+          .map((session) => ({ ...(session as object), hostStatus: 'ready' })),
+      }));
     tasks = {
       'task-1': {
         task_mode: 'task',

@@ -8,9 +8,9 @@
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { persistMessageWithSideEffects } from '../../../src/durable-objects/project-data/message-persistence';
-import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
-import * as sessionState from '../../../src/durable-objects/project-data/session-state';
+import { persistMessageWithSideEffects } from '@simple-agent-manager/project-data/internal/do/message-persistence';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import * as sessionState from '@simple-agent-manager/project-data/internal/do/session-state';
 import { createSqlStorage } from './sql-storage-test-utils';
 
 describe('Session State Mirror — vertical slice', () => {
@@ -505,7 +505,7 @@ describe('Session State Mirror — vertical slice', () => {
       expect(history.activityReason).toBe('completed');
     });
 
-    it('never reaches another chat session\'s rows', () => {
+    it("never reaches another chat session's rows", () => {
       seedLinkedSession('chat-a', 'acp-a');
       seedLinkedSession('chat-b', 'acp-b');
       sessionState.upsertActivityState(sql, 'acp-a', { activity: 'prompting' });

@@ -46,20 +46,20 @@ vi.mock('../../src/middleware/project-auth', () => ({
 
 vi.mock('../../src/services/project-data', async () => {
   const contracts = await vi.importActual<
-    typeof import('../../src/durable-objects/project-data/comment-contracts')
-  >('../../src/durable-objects/project-data/comment-contracts');
+    typeof import('@simple-agent-manager/project-data/internal/do/comment-contracts')
+  >('@simple-agent-manager/project-data/internal/do/comment-contracts');
   const comments = await vi.importActual<
-    typeof import('../../src/durable-objects/project-data/comments')
-  >('../../src/durable-objects/project-data/comments');
+    typeof import('@simple-agent-manager/project-data/internal/do/comments')
+  >('@simple-agent-manager/project-data/internal/do/comments');
   const context = await vi.importActual<
-    typeof import('../../src/durable-objects/project-data/message-context')
-  >('../../src/durable-objects/project-data/message-context');
+    typeof import('@simple-agent-manager/project-data/internal/do/message-context')
+  >('@simple-agent-manager/project-data/internal/do/message-context');
   const access = await vi.importActual<
-    typeof import('../../src/durable-objects/project-data/session-access')
-  >('../../src/durable-objects/project-data/session-access');
+    typeof import('@simple-agent-manager/project-data/internal/do/session-access')
+  >('@simple-agent-manager/project-data/internal/do/session-access');
   const reads = await vi.importActual<
-    typeof import('../../src/durable-objects/project-data/session-reads')
-  >('../../src/durable-objects/project-data/session-reads');
+    typeof import('@simple-agent-manager/project-data/internal/do/session-reads')
+  >('@simple-agent-manager/project-data/internal/do/session-reads');
 
   const sqlFor = (projectId: string): SqlStorage => {
     const storage = harness.storages.get(projectId);
@@ -95,8 +95,8 @@ vi.mock('../../src/services/project-data', async () => {
   };
 });
 
-import * as comments from '../../src/durable-objects/project-data/comments';
-import { runMigrations } from '../../src/durable-objects/project-data/migrations';
+import * as comments from '@simple-agent-manager/project-data/internal/do/comments';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import { chatCommentRoutes } from '../../src/routes/chat-comments';
 
 const HUMAN = { kind: 'human' as const, id: 'user-2', name: 'Grace' };

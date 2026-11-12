@@ -18,9 +18,9 @@ import {
   DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS,
   WORKSPACE_IDLE_CHECK_INTERVAL_MS,
 } from '@simple-agent-manager/shared';
-
 import { createModuleLogger, serializeError } from '@simple-agent-manager/worker-core';
 import { parsePositiveInt } from '@simple-agent-manager/worker-core';
+
 import { recordActivityEventInternal } from './activity';
 import {
   listReporterScopedTaskCandidates,

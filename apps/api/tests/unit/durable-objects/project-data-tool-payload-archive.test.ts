@@ -13,16 +13,16 @@ import {
   DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS,
   DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_WALL_TIME_MS,
   resolveStorageSafetyConfig,
-} from '../../../src/durable-objects/project-data/storage-safety';
+} from '@simple-agent-manager/project-data/internal/do/storage-safety';
 import {
   buildToolPayloadArchiveKey,
   DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX,
-} from '../../../src/durable-objects/project-data/tool-payload-archive';
+} from '@simple-agent-manager/project-data/internal/do/tool-payload-archive';
 import {
   parseToolPayloadArchiveObjectText,
   writeToolPayloadArchiveObject,
-} from '../../../src/durable-objects/project-data/tool-payload-archive-r2';
-import type { Env } from '../../../src/durable-objects/project-data/types';
+} from '@simple-agent-manager/project-data/internal/do/tool-payload-archive-r2';
+import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
 
 describe('ProjectData tool payload archive helpers', () => {
   it('builds deterministic project-scoped private R2 keys', () => {

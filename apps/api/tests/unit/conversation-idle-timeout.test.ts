@@ -14,29 +14,30 @@ const loggerMocks = vi.hoisted(() => ({
   error: vi.fn(),
   debug: vi.fn(),
 }));
-vi.mock('../../src/lib/logger', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../src/lib/logger')>()),
+// ProjectData modules (and the worker's lib/logger re-export) take the logger from worker-core.
+vi.mock('@simple-agent-manager/worker-core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@simple-agent-manager/worker-core')>()),
   createModuleLogger: () => loggerMocks,
 }));
 
-import { updateMessageActivity } from '../../src/durable-objects/project-data/activity';
+import { updateMessageActivity } from '@simple-agent-manager/project-data/internal/do/activity';
 import {
   computeProjectDataAlarmSectionTimes,
   computeProjectDataAlarmTime,
-} from '../../src/durable-objects/project-data/alarm-schedule';
-import { processExpiredCleanups } from '../../src/durable-objects/project-data/idle-cleanup';
-import { terminalizeIdleTaskInD1 } from '../../src/durable-objects/project-data/idle-cleanup-terminalization';
-import { runMigrations } from '../../src/durable-objects/project-data/migrations';
+} from '@simple-agent-manager/project-data/internal/do/alarm-schedule';
+import { processExpiredCleanups } from '@simple-agent-manager/project-data/internal/do/idle-cleanup';
+import { terminalizeIdleTaskInD1 } from '@simple-agent-manager/project-data/internal/do/idle-cleanup-terminalization';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import {
   sleepSession,
   stopSessionInternal,
   updateSessionTopic,
   wakeSession,
-} from '../../src/durable-objects/project-data/sessions';
-import { readTaskAcpLivenessSignals } from '../../src/durable-objects/project-data/task-acp-liveness-signals';
+} from '@simple-agent-manager/project-data/internal/do/sessions';
+import { readTaskAcpLivenessSignals } from '@simple-agent-manager/project-data/internal/do/task-acp-liveness-signals';
 import { getLocalTaskRuntimeLiveness } from '../../src/services/task-runtime-liveness-local';
-import type { Env as ProjectDataEnv } from '../../src/durable-objects/project-data/types';
-import { checkWorkspaceIdleTimeouts } from '../../src/durable-objects/project-data/workspace-idle-timeouts';
+import type { Env as ProjectDataEnv } from '@simple-agent-manager/project-data/internal/do/types';
+import { checkWorkspaceIdleTimeouts } from '@simple-agent-manager/project-data/internal/do/workspace-idle-timeouts';
 import type { Env } from '../../src/env';
 import { getTaskRuntimeLiveness } from '../../src/scheduled/stuck-tasks';
 import { createSqliteD1 } from '../helpers/sqlite-d1';

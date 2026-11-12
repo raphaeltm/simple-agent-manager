@@ -1,13 +1,13 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
-import { enqueueMessage } from '../../src/durable-objects/project-data/mailbox';
+import { enqueueMessage } from '@simple-agent-manager/project-data/internal/do/mailbox';
 import {
   isMailboxAtCapacity,
   MAILBOX_CAPACITY_QUERY,
-} from '../../src/durable-objects/project-data/mailbox-capacity';
-import { isTargetAtWakeCapacity } from '../../src/durable-objects/project-data/project-events-wake-targets';
-import type { Env } from '../../src/durable-objects/project-data/types';
+} from '@simple-agent-manager/project-data/internal/do/mailbox-capacity';
+import { isTargetAtWakeCapacity } from '@simple-agent-manager/project-data/internal/do/project-events-wake-targets';
+import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
 import type { ProjectDataTestDouble } from './support/expected-error-doubles';
 
 describe('indexed project mailbox admission capacity', () => {

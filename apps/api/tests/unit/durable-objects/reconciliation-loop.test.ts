@@ -4,19 +4,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   persistMessageBatchWithSideEffects,
   persistMessageWithSideEffects,
-} from '../../../src/durable-objects/project-data/message-persistence';
-import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
+} from '@simple-agent-manager/project-data/internal/do/message-persistence';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import {
   computeReconciliationAlarmTime,
   getReconciliationCandidates,
   processReconciliationCandidates,
-} from '../../../src/durable-objects/project-data/reconciliation';
+} from '@simple-agent-manager/project-data/internal/do/reconciliation';
 import {
   ensureReconciliationEpisode,
   readReconciliationEpisode,
   writeReconciliationEpisode,
-} from '../../../src/durable-objects/project-data/reconciliation-episode';
-import type { Env } from '../../../src/durable-objects/project-data/types';
+} from '@simple-agent-manager/project-data/internal/do/reconciliation-episode';
+import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
 import {
   acceptedPromptResponse,
   versionedPromptCapabilities,

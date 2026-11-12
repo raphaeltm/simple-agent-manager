@@ -21,8 +21,8 @@ import {
   releaseAttentionAnswer,
   resolveAttentionMarkerById,
   resolveAttentionMarkers,
-} from '../../../src/durable-objects/project-data/attention';
-import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
+} from '@simple-agent-manager/project-data/internal/do/attention';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import { createSqlStorage } from './sql-storage-test-utils';
 
 describe('Attention Markers Module', () => {

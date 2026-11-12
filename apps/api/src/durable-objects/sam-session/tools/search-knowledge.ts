@@ -18,7 +18,7 @@ export const searchKnowledgeDef: AnthropicToolDef = {
   name: 'search_knowledge',
   description:
     'Search the knowledge graph for stored observations and facts. ' +
-    'If projectId is omitted, searches across ALL of the user\'s projects. ' +
+    "If projectId is omitted, searches across ALL of the user's projects. " +
     'Use this to recall preferences, context, expertise, and past decisions. ' +
     'Over-limit queries are truncated and disclosed in the response.',
   input_schema: {
@@ -26,11 +26,13 @@ export const searchKnowledgeDef: AnthropicToolDef = {
     properties: {
       query: {
         type: 'string',
-        description: 'Search query — matches against entity names and observation content. Over-limit input is truncated.',
+        description:
+          'Search query — matches against entity names and observation content. Over-limit input is truncated.',
       },
       projectId: {
         type: 'string',
-        description: 'Optional. Limit search to a specific project. If omitted, searches all projects.',
+        description:
+          'Optional. Limit search to a specific project. If omitted, searches all projects.',
       },
       entityType: {
         type: 'string',
@@ -48,7 +50,7 @@ export const searchKnowledgeDef: AnthropicToolDef = {
 
 export async function searchKnowledge(
   input: { query: string; projectId?: string; entityType?: string; limit?: number },
-  ctx: ToolContext,
+  ctx: ToolContext
 ): Promise<unknown> {
   const inputQuery = input.query?.trim();
   if (!inputQuery) {
@@ -58,9 +60,11 @@ export async function searchKnowledge(
   const env = ctx.env as unknown as Env;
   const normalizedQuery = normalizeSearchQuery(inputQuery, env);
   const limit = Math.min(Math.max(1, input.limit ?? DEFAULT_LIMIT), MAX_LIMIT);
-  const entityType = input.entityType && KNOWLEDGE_ENTITY_TYPES.includes(input.entityType as (typeof KNOWLEDGE_ENTITY_TYPES)[number])
-    ? input.entityType
-    : null;
+  const entityType =
+    input.entityType &&
+    KNOWLEDGE_ENTITY_TYPES.includes(input.entityType as (typeof KNOWLEDGE_ENTITY_TYPES)[number])
+      ? input.entityType
+      : null;
 
   const db = drizzle(env.DATABASE, { schema });
 
@@ -69,12 +73,7 @@ export async function searchKnowledge(
     const project = await db
       .select({ id: schema.projects.id })
       .from(schema.projects)
-      .where(
-        and(
-          eq(schema.projects.id, input.projectId),
-          eq(schema.projects.userId, ctx.userId),
-        ),
-      )
+      .where(and(eq(schema.projects.id, input.projectId), eq(schema.projects.userId, ctx.userId)))
       .get();
 
     if (!project) {
@@ -82,7 +81,12 @@ export async function searchKnowledge(
     }
 
     const results = await projectDataService.searchKnowledgeObservations(
-      env, input.projectId, normalizedQuery.query, entityType, null, limit,
+      env,
+      input.projectId,
+      normalizedQuery.query,
+      entityType,
+      null,
+      limit
     );
 
     return {
@@ -110,7 +114,12 @@ export async function searchKnowledge(
   const searchPromises = userProjects.map(async (p) => {
     try {
       const results = await projectDataService.searchKnowledgeObservations(
-        env, p.id, normalizedQuery.query, entityType, null, perProjectLimit,
+        env,
+        p.id,
+        normalizedQuery.query,
+        entityType,
+        null,
+        perProjectLimit
       );
       return results.map((r: Record<string, unknown>) => ({
         ...r,
@@ -125,8 +134,10 @@ export async function searchKnowledge(
   const allResults = (await Promise.all(searchPromises)).flat();
 
   // Sort by confidence descending, take top `limit`
-  allResults.sort((a: Record<string, unknown>, b: Record<string, unknown>) =>
-    ((b.confidence as number) ?? 0) - ((a.confidence as number) ?? 0));
+  allResults.sort(
+    (a: Record<string, unknown>, b: Record<string, unknown>) =>
+      ((b.confidence as number) ?? 0) - ((a.confidence as number) ?? 0)
+  );
   const trimmed = allResults.slice(0, limit);
 
   return {

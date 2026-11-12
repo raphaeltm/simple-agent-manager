@@ -7,7 +7,7 @@ import * as schema from '../../../src/db/schema';
 import {
   linkSessionToWorkspace,
   sleepSession,
-} from '../../../src/durable-objects/project-data/sessions';
+} from '@simple-agent-manager/project-data/internal/do/sessions';
 import { TaskRunner } from '../../../src/durable-objects/task-runner';
 import { handleAgentSession } from '../../../src/durable-objects/task-runner/agent-session-step';
 import { isTransientError } from '../../../src/durable-objects/task-runner/helpers';

@@ -4,6 +4,7 @@
  */
 import { createModuleLogger, serializeError } from '@simple-agent-manager/worker-core';
 import { isDurableObjectStorageFullError } from '@simple-agent-manager/worker-core';
+
 import { SEARCH_INDEX_STATE_PRUNED } from './materialization';
 
 const log = createModuleLogger('project_data.grouped_fts_wall_recovery');

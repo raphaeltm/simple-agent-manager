@@ -9,11 +9,11 @@ import Database from 'better-sqlite3';
 import { expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
-import { runMigrations } from '../../src/durable-objects/project-data/migrations';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import {
   getSessionState,
   upsertActivityState,
-} from '../../src/durable-objects/project-data/session-state';
+} from '@simple-agent-manager/project-data/internal/do/session-state';
 import { runSessionSleepSweep } from '../../src/scheduled/session-sleep';
 import { resolveSessionStaleTurnMs } from '../../src/services/session-sleep-eligibility';
 import { createMemoryKv, createSchemaTables } from '../helpers/sqlite-d1';

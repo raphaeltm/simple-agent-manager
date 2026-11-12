@@ -10,9 +10,9 @@ import {
   DEFAULT_IDLE_CLEANUP_RETRY_DELAY_MS,
   DEFAULT_SESSION_IDLE_TIMEOUT_MINUTES,
 } from '@simple-agent-manager/shared';
-
 import { createModuleLogger, serializeError } from '@simple-agent-manager/worker-core';
 import { parsePositiveInt } from '@simple-agent-manager/worker-core';
+
 import { recordActivityEventInternal } from './activity';
 import { createAttentionMarker } from './attention';
 import { terminalizeIdleTaskInD1 } from './idle-cleanup-terminalization';

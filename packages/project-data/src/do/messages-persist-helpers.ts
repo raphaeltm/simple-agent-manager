@@ -8,6 +8,7 @@
  * acyclic: messages.ts imports from this file, never the reverse.
  */
 import { log } from '@simple-agent-manager/worker-core';
+
 import { parseMaxSeq, parseMessageCount, parseWorkspaceId } from './row-schemas';
 import { boundToolMetadataForStorage } from './tool-metadata-storage';
 import type { Env } from './types';

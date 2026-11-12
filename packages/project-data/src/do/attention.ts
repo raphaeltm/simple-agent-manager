@@ -11,9 +11,9 @@ import {
   DEFAULT_HUMAN_INPUT_TIMEOUT_MS,
   DEFAULT_HUMAN_INPUT_UNDELIVERED_GRACE_MS,
 } from '@simple-agent-manager/shared';
-
 import { createModuleLogger } from '@simple-agent-manager/worker-core';
 import { parseJsonRecord } from '@simple-agent-manager/worker-core';
+
 import {
   parseAttentionExpiryRow,
   parseAttentionMarkerRow,

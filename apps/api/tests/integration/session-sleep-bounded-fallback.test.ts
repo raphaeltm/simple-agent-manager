@@ -21,7 +21,7 @@ import * as schema from '../../src/db/schema';
 import {
   guardedSessionSleep,
   type SessionSleepRuntimeGuard,
-} from '../../src/durable-objects/project-data/session-sleep-runtime-guard';
+} from '@simple-agent-manager/project-data/internal/do/session-sleep-runtime-guard';
 import type { Env } from '../../src/env';
 import { sessionSnapshotRoutes } from '../../src/routes/workspaces/session-snapshots';
 import { sweepStoppedHandoffNodes } from '../../src/scheduled/node-cleanup/node-phases';

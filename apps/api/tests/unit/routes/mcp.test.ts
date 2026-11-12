@@ -7,10 +7,10 @@ import * as schema from '../../../src/db/schema';
 import {
   type LogicalTranscriptRequest,
   readSourceLogicalTranscript,
-} from '../../../src/durable-objects/project-data/logical-transcript';
-import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
-import type { Env as ProjectDataEnv } from '../../../src/durable-objects/project-data/types';
-import type { ProjectDataArchiveExactReadInput } from '../../../src/project-data-archive/contract';
+} from '@simple-agent-manager/project-data/internal/do/logical-transcript';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import type { Env as ProjectDataEnv } from '@simple-agent-manager/project-data/internal/do/types';
+import type { ProjectDataArchiveExactReadInput } from '@simple-agent-manager/project-data/internal/archive/contract';
 import { groupTokensIntoMessages } from '../../../src/routes/mcp';
 import { MCP_TOOLS } from '../../../src/routes/mcp/tool-definitions';
 import * as projectHelpers from '../../../src/routes/projects/_helpers';

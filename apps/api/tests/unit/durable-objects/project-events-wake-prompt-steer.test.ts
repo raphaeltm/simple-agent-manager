@@ -1,7 +1,7 @@
 import type { ProjectEventSubscriptionRecord } from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
 
-import { buildWakePromptInput } from '../../../src/durable-objects/project-data/project-events-wake-prompt';
+import { buildWakePromptInput } from '@simple-agent-manager/project-data/internal/do/project-events-wake-prompt';
 
 function subscription(requested: string): ProjectEventSubscriptionRecord {
   return {

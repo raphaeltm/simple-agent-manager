@@ -1,20 +1,20 @@
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { resolveDurableExecutionConfig } from '../../../src/durable-objects/project-data/durable-execution-config';
-import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
+import { resolveDurableExecutionConfig } from '@simple-agent-manager/project-data/internal/do/durable-execution-config';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import {
   acceptPromptDelivery,
   applyPromptDeliveryResult,
   claimDuePromptDeliveries,
   computePromptDeliveryAlarmTime,
   markPromptDeliverySubmitting,
-} from '../../../src/durable-objects/project-data/prompt-delivery';
+} from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
 import {
   applySessionWakeReady,
   isSessionWakeReadyCurrent,
   type SessionWakeReadyInput,
-} from '../../../src/durable-objects/project-data/session-wake-ready';
+} from '@simple-agent-manager/project-data/internal/do/session-wake-ready';
 import type { Env } from '../../../src/env';
 import { versionedPromptCapabilities } from '../../helpers/vm-prompt-delivery-fixtures';
 import { createSqlStorage } from './sql-storage-test-utils';

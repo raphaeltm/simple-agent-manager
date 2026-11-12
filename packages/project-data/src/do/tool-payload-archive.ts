@@ -1,4 +1,5 @@
 import { createModuleLogger, serializeError } from '@simple-agent-manager/worker-core';
+
 import { stripToolMetadataPayloadForStorage } from './tool-metadata-storage';
 import {
   type PreparedToolPayloadArchive,

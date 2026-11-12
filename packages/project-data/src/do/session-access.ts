@@ -16,8 +16,8 @@ import {
   isShareableChatSessionStatus,
   type SessionAccessRevokeReason,
 } from '@simple-agent-manager/shared';
-
 import { createModuleLogger } from '@simple-agent-manager/worker-core';
+
 import { handleExpiredGrants } from './session-access-expiry';
 import {
   cancelUndeliveredSenderPrompts,

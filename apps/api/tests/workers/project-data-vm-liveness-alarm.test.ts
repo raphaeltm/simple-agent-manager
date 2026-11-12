@@ -6,7 +6,7 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { ProjectData } from '../../src/durable-objects/project-data';
+import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
 import type { Env } from '../../src/env';
 import {
   seedInstallation,
@@ -138,7 +138,6 @@ describe('ProjectData alarm VM liveness safety', () => {
       .bind(workspaceId)
       .first<{ status: string }>();
     expect(workspace?.status).toBe('running');
-
   });
 
   it('replays 01M1M75WA3V528VYZCWQGGM3NT through the stale-mirror alarm', async () => {

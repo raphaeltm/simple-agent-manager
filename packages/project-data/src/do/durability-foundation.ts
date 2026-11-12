@@ -2,8 +2,8 @@ import type {
   CheckpointEpisodeTransitionInput,
   CreateCheckpointEpisodeInput,
 } from '@simple-agent-manager/shared';
-
 import { createModuleLogger, serializeError } from '@simple-agent-manager/worker-core';
+
 import * as activityEvents from './activity';
 import * as attention from './attention';
 import * as checkpoints from './checkpoint-episodes';

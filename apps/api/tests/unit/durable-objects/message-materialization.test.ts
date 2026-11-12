@@ -16,8 +16,8 @@ import {
   DEFAULT_MATERIALIZATION_SWEEP_LIMIT,
   DEFAULT_MATERIALIZATION_SWEEP_SCAN_LIMIT,
   resolveMaterializationSweepConfig,
-} from '../../../src/durable-objects/project-data/materialization';
-import { MIGRATIONS } from '../../../src/durable-objects/project-data/migrations';
+} from '@simple-agent-manager/project-data/internal/do/materialization';
+import { MIGRATIONS } from '@simple-agent-manager/project-data/internal/do/migrations';
 import { buildSafeFtsQuery } from '../../../src/lib/fts5';
 
 // ── Grouping logic (mirrors ProjectData.materializeSession and mcp.ts groupTokensIntoMessages) ──

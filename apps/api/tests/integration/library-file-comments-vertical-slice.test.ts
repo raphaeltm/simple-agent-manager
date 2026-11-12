@@ -70,11 +70,11 @@ vi.mock('../../src/middleware/project-auth', () => ({
 // into the real DO module against that project's real SQLite.
 vi.mock('../../src/services/project-data', async () => {
   const contracts = await vi.importActual<
-    typeof import('../../src/durable-objects/project-data/comment-contracts')
-  >('../../src/durable-objects/project-data/comment-contracts');
+    typeof import('@simple-agent-manager/project-data/internal/do/comment-contracts')
+  >('@simple-agent-manager/project-data/internal/do/comment-contracts');
   const fileComments = await vi.importActual<
-    typeof import('../../src/durable-objects/project-data/library-file-comments')
-  >('../../src/durable-objects/project-data/library-file-comments');
+    typeof import('@simple-agent-manager/project-data/internal/do/library-file-comments')
+  >('@simple-agent-manager/project-data/internal/do/library-file-comments');
 
   const sqlFor = (projectId: string): SqlStorage => {
     const storage = harness.storages.get(projectId);
@@ -106,7 +106,11 @@ vi.mock('../../src/services/project-data', async () => {
       ),
     createFileCommentThread: async (_env: Env, projectId: string, input: unknown) =>
       throughRpc(() =>
-        fileComments.createFileCommentThread(sqlFor(projectId), harness.env as never, input as never)
+        fileComments.createFileCommentThread(
+          sqlFor(projectId),
+          harness.env as never,
+          input as never
+        )
       ),
     createFileCommentReply: async (_env: Env, projectId: string, input: unknown) =>
       throughRpc(() =>
@@ -123,7 +127,7 @@ vi.mock('../../src/services/project-data', async () => {
   };
 });
 
-import { runMigrations } from '../../src/durable-objects/project-data/migrations';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import { libraryCommentRoutes } from '../../src/routes/library-comments';
 
 let databases: Database.Database[] = [];

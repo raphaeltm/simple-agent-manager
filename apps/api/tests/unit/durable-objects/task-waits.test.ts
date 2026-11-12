@@ -1,8 +1,8 @@
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
-import type { TaskWaitConfig } from '../../../src/durable-objects/project-data/task-wait-config';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import type { TaskWaitConfig } from '@simple-agent-manager/project-data/internal/do/task-wait-config';
 import {
   cancelTaskWait,
   computeTaskWaitAlarmTime,
@@ -13,7 +13,7 @@ import {
   recordTaskWaitObservations,
   recordTaskWaitWakeFailure,
   resolveTaskWait,
-} from '../../../src/durable-objects/project-data/task-waits';
+} from '@simple-agent-manager/project-data/internal/do/task-waits';
 import { createSqlStorage } from './sql-storage-test-utils';
 
 const config: TaskWaitConfig = {

@@ -74,7 +74,14 @@ const packageBoundaryPatterns = [
   deepPackagePath,
   relativePackagePath,
 ];
-const workerBoundaryPatterns = [deepPackagePath, relativePackagePath];
+// ProjectData's `./internal/*` entry exists only so worker tests can drive Durable Object
+// internals next to worker modules; worker source uses the package's public entries.
+const projectDataInternalPath = {
+  regex: '^@simple-agent-manager/project-data/internal(/|$)',
+  message:
+    'Worker source imports @simple-agent-manager/project-data through its public entries (., ./durable-object, ./scheduled); ./internal/* is for apps/api tests only.',
+};
+const workerBoundaryPatterns = [deepPackagePath, relativePackagePath, projectDataInternalPath];
 const workerTestBoundaryPatterns = [
   deepPackagePath,
   {

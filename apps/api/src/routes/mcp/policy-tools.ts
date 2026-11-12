@@ -35,13 +35,16 @@ function validatePageNumber(
   value: unknown,
   fieldName: 'limit' | 'offset',
   defaultValue: number,
-  maxValue?: number,
+  maxValue?: number
 ): { ok: true; value: number } | { ok: false; response: JsonRpcResponse } {
   if (value === undefined) {
     return { ok: true, value: defaultValue };
   }
   if (typeof value !== 'number' || !Number.isFinite(value)) {
-    return { ok: false, response: jsonRpcError(requestId, INVALID_PARAMS, `${fieldName} must be a number`) };
+    return {
+      ok: false,
+      response: jsonRpcError(requestId, INVALID_PARAMS, `${fieldName} must be a number`),
+    };
   }
   const rounded = Math.round(value);
   const minBounded = fieldName === 'offset' ? Math.max(0, rounded) : Math.max(1, rounded);
@@ -55,14 +58,20 @@ function validatePageNumber(
  */
 function parseLifecycleParams(
   requestId: string | number | null,
-  params: Record<string, unknown>,
-): { ok: true; scope?: PolicyScope; expiresAt?: number | null } | { ok: false; response: JsonRpcResponse } {
+  params: Record<string, unknown>
+):
+  | { ok: true; scope?: PolicyScope; expiresAt?: number | null }
+  | { ok: false; response: JsonRpcResponse } {
   let scope: PolicyScope | undefined;
   if (params.scope !== undefined) {
     if (typeof params.scope !== 'string' || !isPolicyScope(params.scope)) {
       return {
         ok: false,
-        response: jsonRpcError(requestId, INVALID_PARAMS, `scope must be one of: ${POLICY_SCOPES.join(', ')}`),
+        response: jsonRpcError(
+          requestId,
+          INVALID_PARAMS,
+          `scope must be one of: ${POLICY_SCOPES.join(', ')}`
+        ),
       };
     }
     scope = params.scope;
@@ -75,7 +84,11 @@ function parseLifecycleParams(
     } else if (typeof params.expiresAt !== 'number' || !Number.isFinite(params.expiresAt)) {
       return {
         ok: false,
-        response: jsonRpcError(requestId, INVALID_PARAMS, 'expiresAt must be a number (epoch milliseconds) or null'),
+        response: jsonRpcError(
+          requestId,
+          INVALID_PARAMS,
+          'expiresAt must be a number (epoch milliseconds) or null'
+        ),
       };
     } else {
       expiresAt = params.expiresAt;
@@ -89,32 +102,53 @@ export async function handleAddPolicy(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const limits = getPolicyLimits(env);
 
   // Validate category
   const category = typeof params.category === 'string' ? params.category : '';
   if (!isPolicyCategory(category)) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'category must be one of: rule, constraint, delegation, preference');
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'category must be one of: rule, constraint, delegation, preference'
+    );
   }
 
   // Validate title
   const title = typeof params.title === 'string' ? sanitizeUserInput(params.title.trim()) : '';
   if (!title) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'title is required and must be a non-empty string');
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'title is required and must be a non-empty string'
+    );
   }
   if (title.length > limits.titleMaxLength) {
-    return jsonRpcError(requestId, INVALID_PARAMS, `title exceeds maximum length of ${limits.titleMaxLength} characters`);
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      `title exceeds maximum length of ${limits.titleMaxLength} characters`
+    );
   }
 
   // Validate content
-  const content = typeof params.content === 'string' ? sanitizeUserInput(params.content.trim()) : '';
+  const content =
+    typeof params.content === 'string' ? sanitizeUserInput(params.content.trim()) : '';
   if (!content) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'content is required and must be a non-empty string');
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'content is required and must be a non-empty string'
+    );
   }
   if (content.length > limits.contentMaxLength) {
-    return jsonRpcError(requestId, INVALID_PARAMS, `content exceeds maximum length of ${limits.contentMaxLength} characters`);
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      `content exceeds maximum length of ${limits.contentMaxLength} characters`
+    );
   }
 
   // Validate source (optional, defaults to 'explicit')
@@ -129,8 +163,17 @@ export async function handleAddPolicy(
   // Validate confidence (optional)
   let confidence = limits.defaultConfidence;
   if (params.confidence !== undefined) {
-    if (typeof params.confidence !== 'number' || !Number.isFinite(params.confidence) || params.confidence < 0 || params.confidence > 1) {
-      return jsonRpcError(requestId, INVALID_PARAMS, 'confidence must be a number between 0.0 and 1.0');
+    if (
+      typeof params.confidence !== 'number' ||
+      !Number.isFinite(params.confidence) ||
+      params.confidence < 0 ||
+      params.confidence > 1
+    ) {
+      return jsonRpcError(
+        requestId,
+        INVALID_PARAMS,
+        'confidence must be a number between 0.0 and 1.0'
+      );
     }
     confidence = params.confidence;
   }
@@ -153,12 +196,16 @@ export async function handleAddPolicy(
 
   try {
     const result = await projectDataService.createPolicy(
-      env, tokenData.projectId,
-      category, title, content, source,
+      env,
+      tokenData.projectId,
+      category,
+      title,
+      content,
+      source,
       tokenData.taskId, // use current taskId's session as source
       confidence,
       scope,
-      expiresAt,
+      expiresAt
     );
 
     log.info('mcp.add_policy', {
@@ -171,16 +218,21 @@ export async function handleAddPolicy(
     });
 
     return jsonRpcSuccess(requestId, {
-      content: [{ type: 'text', text: JSON.stringify({
-        id: result.id,
-        category,
-        title,
-        source,
-        confidence,
-        scope,
-        expiresAt,
-        createdAt: result.now,
-      }) }],
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            id: result.id,
+            category,
+            title,
+            source,
+            confidence,
+            scope,
+            expiresAt,
+            createdAt: result.now,
+          }),
+        },
+      ],
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -192,20 +244,30 @@ export async function handleListPolicies(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const limits = getPolicyLimits(env);
 
   let category: PolicyCategory | null = null;
   if (params.category !== undefined) {
     if (typeof params.category !== 'string' || !isPolicyCategory(params.category)) {
-      return jsonRpcError(requestId, INVALID_PARAMS, `category must be one of: ${POLICY_CATEGORIES.join(', ')}`);
+      return jsonRpcError(
+        requestId,
+        INVALID_PARAMS,
+        `category must be one of: ${POLICY_CATEGORIES.join(', ')}`
+      );
     }
     category = params.category;
   }
 
   const includeInactive = params.includeInactive === true;
-  const limitResult = validatePageNumber(requestId, params.limit, 'limit', limits.listPageSize, limits.listMaxPageSize);
+  const limitResult = validatePageNumber(
+    requestId,
+    params.limit,
+    'limit',
+    limits.listPageSize,
+    limits.listMaxPageSize
+  );
   if (!limitResult.ok) return limitResult.response;
   const offsetResult = validatePageNumber(requestId, params.offset, 'offset', 0);
   if (!offsetResult.ok) return offsetResult.response;
@@ -213,7 +275,12 @@ export async function handleListPolicies(
   const offset = offsetResult.value;
 
   const result = await projectDataService.listPolicies(
-    env, tokenData.projectId, category, !includeInactive, limit, offset,
+    env,
+    tokenData.projectId,
+    category,
+    !includeInactive,
+    limit,
+    offset
   );
 
   return jsonRpcSuccess(requestId, {
@@ -225,7 +292,7 @@ export async function handleGetPolicy(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const policyId = typeof params.policyId === 'string' ? params.policyId.trim() : '';
   if (!policyId) {
@@ -246,7 +313,7 @@ export async function handleUpdatePolicy(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const limits = getPolicyLimits(env);
 
@@ -261,23 +328,37 @@ export async function handleUpdatePolicy(
     const title = typeof params.title === 'string' ? sanitizeUserInput(params.title.trim()) : '';
     if (!title) return jsonRpcError(requestId, INVALID_PARAMS, 'title must be a non-empty string');
     if (title.length > limits.titleMaxLength) {
-      return jsonRpcError(requestId, INVALID_PARAMS, `title exceeds maximum length of ${limits.titleMaxLength} characters`);
+      return jsonRpcError(
+        requestId,
+        INVALID_PARAMS,
+        `title exceeds maximum length of ${limits.titleMaxLength} characters`
+      );
     }
     updates.title = title;
   }
 
   if (params.content !== undefined) {
-    const content = typeof params.content === 'string' ? sanitizeUserInput(params.content.trim()) : '';
-    if (!content) return jsonRpcError(requestId, INVALID_PARAMS, 'content must be a non-empty string');
+    const content =
+      typeof params.content === 'string' ? sanitizeUserInput(params.content.trim()) : '';
+    if (!content)
+      return jsonRpcError(requestId, INVALID_PARAMS, 'content must be a non-empty string');
     if (content.length > limits.contentMaxLength) {
-      return jsonRpcError(requestId, INVALID_PARAMS, `content exceeds maximum length of ${limits.contentMaxLength} characters`);
+      return jsonRpcError(
+        requestId,
+        INVALID_PARAMS,
+        `content exceeds maximum length of ${limits.contentMaxLength} characters`
+      );
     }
     updates.content = content;
   }
 
   if (params.category !== undefined) {
     if (typeof params.category !== 'string' || !isPolicyCategory(params.category)) {
-      return jsonRpcError(requestId, INVALID_PARAMS, 'category must be one of: rule, constraint, delegation, preference');
+      return jsonRpcError(
+        requestId,
+        INVALID_PARAMS,
+        'category must be one of: rule, constraint, delegation, preference'
+      );
     }
     updates.category = params.category;
   }
@@ -290,8 +371,17 @@ export async function handleUpdatePolicy(
   }
 
   if (params.confidence !== undefined) {
-    if (typeof params.confidence !== 'number' || !Number.isFinite(params.confidence) || params.confidence < 0 || params.confidence > 1) {
-      return jsonRpcError(requestId, INVALID_PARAMS, 'confidence must be a number between 0.0 and 1.0');
+    if (
+      typeof params.confidence !== 'number' ||
+      !Number.isFinite(params.confidence) ||
+      params.confidence < 0 ||
+      params.confidence > 1
+    ) {
+      return jsonRpcError(
+        requestId,
+        INVALID_PARAMS,
+        'confidence must be a number between 0.0 and 1.0'
+      );
     }
     updates.confidence = params.confidence;
   }
@@ -329,12 +419,19 @@ export async function handleUpdatePolicy(
   let updated: boolean;
   try {
     updated = await projectDataService.updatePolicy(
-      env, tokenData.projectId, policyId, updates as Parameters<typeof projectDataService.updatePolicy>[3],
+      env,
+      tokenData.projectId,
+      policyId,
+      updates as Parameters<typeof projectDataService.updatePolicy>[3]
     );
   } catch (err) {
     // The DO enforces the same invariant as a final guard; it crosses the RPC
     // boundary as a plain Error, so map by message rather than by type (rule 63).
-    return jsonRpcError(requestId, INVALID_PARAMS, err instanceof Error ? err.message : String(err));
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      err instanceof Error ? err.message : String(err)
+    );
   }
 
   if (!updated) {
@@ -356,7 +453,7 @@ export async function handleRemovePolicy(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const policyId = typeof params.policyId === 'string' ? params.policyId.trim() : '';
   if (!policyId) {

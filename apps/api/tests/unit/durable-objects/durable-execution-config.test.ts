@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   promptDeliveryBackoffMs,
   resolveDurableExecutionConfig,
-} from '../../../src/durable-objects/project-data/durable-execution-config';
+} from '@simple-agent-manager/project-data/internal/do/durable-execution-config';
 
 describe('durable execution configuration', () => {
   it('enables durable delivery by default while optional supervisor paths stay off', () => {

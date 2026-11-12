@@ -10,6 +10,7 @@
  */
 import { createModuleLogger, serializeError } from '@simple-agent-manager/worker-core';
 import { parsePositiveInt } from '@simple-agent-manager/worker-core';
+
 import { isCompletingSessionProtected } from './completion-drain';
 import { projectDataPorts, type SleepSnapshotLifecycle } from './ports';
 import type { Env } from './types';

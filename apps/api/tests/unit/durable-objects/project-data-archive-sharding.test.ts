@@ -21,13 +21,13 @@ import {
   ProjectDataArchiveInvariantError,
   resolveArchiveHashPageRows,
   sealArchiveTarget,
-} from '../../../src/durable-objects/project-data/archive-sharding';
+} from '@simple-agent-manager/project-data/internal/do/archive-sharding';
 import {
   persistMessage,
   PROJECT_DATA_TRANSCRIPT_WRITE_FENCED,
   RPC_SIZE_BUDGET_BYTES,
-} from '../../../src/durable-objects/project-data/messages';
-import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
+} from '@simple-agent-manager/project-data/internal/do/messages';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import { D1_MAX_BOUND_PARAMETERS } from '../../../src/lib/d1-limits';
 import {
   isProjectDataArchiveSourcePrepareRefusal,
@@ -36,7 +36,7 @@ import {
   PROJECT_DATA_ARCHIVE_SURFACE_INVENTORY,
   PROJECT_DATA_ARCHIVE_TABLES,
   type ProjectDataArchiveSurface,
-} from '../../../src/project-data-archive/contract';
+} from '@simple-agent-manager/project-data/internal/archive/contract';
 import { createSqlStorage } from './sql-storage-test-utils';
 
 const NOW = 2_000_000;

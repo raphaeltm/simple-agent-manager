@@ -1,13 +1,16 @@
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 
-import { resolveDurableExecutionConfig } from '../../../src/durable-objects/project-data/durable-execution-config';
-import { MIGRATIONS, runMigrations } from '../../../src/durable-objects/project-data/migrations';
+import { resolveDurableExecutionConfig } from '@simple-agent-manager/project-data/internal/do/durable-execution-config';
+import {
+  MIGRATIONS,
+  runMigrations,
+} from '@simple-agent-manager/project-data/internal/do/migrations';
 import {
   applyPromptDeliveryResult,
   claimDuePromptDeliveries,
   computePromptDeliveryAlarmTime,
-} from '../../../src/durable-objects/project-data/prompt-delivery';
+} from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
 import { createSqlStorage } from './sql-storage-test-utils';
 
 describe('prompt target backoff additive migration', () => {

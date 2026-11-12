@@ -1,10 +1,10 @@
 /** Shared real SQLite chat and durable-delivery hooks for canonical sleep tests. */
+import type { DurabilityFoundationHooks } from '@simple-agent-manager/project-data/internal/do/durability-foundation';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import { sleepSession as sleepChatSession } from '@simple-agent-manager/project-data/internal/do/sessions';
 import Database from 'better-sqlite3';
 import { expect, vi } from 'vitest';
 
-import type { DurabilityFoundationHooks } from '../../src/durable-objects/project-data/durability-foundation';
-import { runMigrations } from '../../src/durable-objects/project-data/migrations';
-import { sleepSession as sleepChatSession } from '../../src/durable-objects/project-data/sessions';
 import type { Env } from '../../src/env';
 import { createSqlStorage } from '../unit/durable-objects/sql-storage-test-utils';
 

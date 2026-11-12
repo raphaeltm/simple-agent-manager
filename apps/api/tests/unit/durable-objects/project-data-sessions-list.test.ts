@@ -4,7 +4,7 @@ import {
   getSession,
   getSessionsByTaskIds,
   listSessions,
-} from '../../../src/durable-objects/project-data/session-reads';
+} from '@simple-agent-manager/project-data/internal/do/session-reads';
 import { log } from '../../../src/lib/logger';
 
 type QueryRow = Record<string, unknown>;

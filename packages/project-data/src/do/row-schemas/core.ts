@@ -1,6 +1,5 @@
-import * as v from 'valibot';
-
 import { log } from '@simple-agent-manager/worker-core';
+import * as v from 'valibot';
 
 // =============================================================================
 // Generic parse helpers

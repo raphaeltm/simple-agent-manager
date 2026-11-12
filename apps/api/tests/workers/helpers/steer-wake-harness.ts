@@ -10,11 +10,11 @@ import { expect, vi } from 'vitest';
 import {
   type DurabilityFoundationHooks,
   processPromptDeliveryAlarm,
-} from '../../../src/durable-objects/project-data/durability-foundation';
+} from '@simple-agent-manager/project-data/internal/do/durability-foundation';
 import {
   nudgePromptDeliveriesForTarget,
   type PromptDeliveryResult,
-} from '../../../src/durable-objects/project-data/prompt-delivery';
+} from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
 import { DefaultVmPromptDeliveryAdapter } from '../../../src/services/vm-prompt-delivery-adapter';
 import { versionedPromptCapabilities } from '../../helpers/vm-prompt-delivery-fixtures';
 import { testEnv } from './agent-message-channels';

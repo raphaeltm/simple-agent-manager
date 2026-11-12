@@ -27,9 +27,9 @@
  * - `PROJECT_DATA_ALARM_SECTION_GATING_ENABLED=false` restores run-everything ticks.
  */
 import { isJsonRecord } from '@simple-agent-manager/shared';
-
 import { createModuleLogger } from '@simple-agent-manager/worker-core';
 import { parsePositiveInt } from '@simple-agent-manager/worker-core';
+
 import {
   PROJECT_DATA_ALARM_FAILED_SECTION_RETRY_MS,
   PROJECT_DATA_ALARM_SECTIONS,

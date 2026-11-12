@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import {
   ackProjectEventDelivery,
   admitProjectEvent,
@@ -13,8 +13,8 @@ import {
   ProjectEventAckStateError,
   ProjectEventCursorError,
   runProjectEventRetention,
-} from '../../../src/durable-objects/project-data/project-events';
-import type { Env } from '../../../src/durable-objects/project-data/types';
+} from '@simple-agent-manager/project-data/internal/do/project-events';
+import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
 import { createSqlStorage } from './sql-storage-test-utils';
 
 const PROJECT_ID = 'project-events-pull-project';

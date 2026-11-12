@@ -1,10 +1,10 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
-import { repairProjectEventOrphanMatches } from '../../src/durable-objects/project-data/project-events-orphan-retention';
-import { markSchedulerSuccess } from '../../src/durable-objects/project-data/project-events-scheduler';
-import { runProjectEventRetention } from '../../src/durable-objects/project-data/project-events-status-retention';
-import type { Env } from '../../src/durable-objects/project-data/types';
+import { repairProjectEventOrphanMatches } from '@simple-agent-manager/project-data/internal/do/project-events-orphan-retention';
+import { markSchedulerSuccess } from '@simple-agent-manager/project-data/internal/do/project-events-scheduler';
+import { runProjectEventRetention } from '@simple-agent-manager/project-data/internal/do/project-events-status-retention';
+import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
 import type { ProjectDataTestDouble } from './support/expected-error-doubles';
 
 const NOW = 100_000;

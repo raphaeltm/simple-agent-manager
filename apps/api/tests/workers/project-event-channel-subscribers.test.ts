@@ -5,7 +5,7 @@ import type {
 import { env, runInDurableObject, SELF } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
-import { listChannelSubscribers } from '../../src/durable-objects/project-data/project-event-channel-subscribers';
+import { listChannelSubscribers } from '@simple-agent-manager/project-data/internal/do/project-event-channel-subscribers';
 import type { Env } from '../../src/env';
 import { storeMcpToken } from '../../src/services/mcp-token';
 import * as service from '../../src/services/project-data';

@@ -1,4 +1,5 @@
 import { createModuleLogger, serializeError } from '@simple-agent-manager/worker-core';
+
 import * as activity from './activity';
 import { createAttentionMarker } from './attention';
 import { persistSystemMessage } from './messages';

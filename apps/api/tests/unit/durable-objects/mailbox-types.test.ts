@@ -15,7 +15,7 @@ import {
 } from '@simple-agent-manager/shared';
 import { describe, expect, it, vi } from 'vitest';
 
-import { MIGRATIONS } from '../../../src/durable-objects/project-data/migrations';
+import { MIGRATIONS } from '@simple-agent-manager/project-data/internal/do/migrations';
 
 describe('Mailbox Types and Constants', () => {
   it('defines 5 message classes in escalating order', () => {
@@ -137,7 +137,7 @@ describe('Migration 025 mailbox TTL backfill', () => {
 
     expect(exec).toHaveBeenCalledWith(
       expect.stringMatching(/UPDATE session_inbox[\s\S]*WHERE expires_at IS NULL/i),
-      MAILBOX_DEFAULTS.TTL_MS,
+      MAILBOX_DEFAULTS.TTL_MS
     );
   });
 });

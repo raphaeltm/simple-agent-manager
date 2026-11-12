@@ -19,8 +19,8 @@
  * sidebar.
  */
 import { DEFAULT_SESSION_INDEX_MAX_ROWS } from '@simple-agent-manager/shared';
-
 import { createModuleLogger } from '@simple-agent-manager/worker-core';
+
 import { getAttentionSummary } from './attention';
 import type { Env } from './types';
 

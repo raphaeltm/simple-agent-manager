@@ -7,7 +7,7 @@ import type { ProjectSchedule, ProjectScheduleMutationResult } from '@simple-age
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
-import { runScheduleAlarm } from '../../src/durable-objects/project-data/project-event-schedules-runner';
+import { runScheduleAlarm } from '@simple-agent-manager/project-data/internal/do/project-event-schedules-runner';
 import type { Env } from '../../src/env';
 import * as service from '../../src/services/project-data';
 import { body, fixture } from './helpers/event-channels';

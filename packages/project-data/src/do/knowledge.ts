@@ -7,10 +7,10 @@ import type {
   KnowledgeSourceType,
 } from '@simple-agent-manager/shared';
 import { KNOWLEDGE_DEFAULTS } from '@simple-agent-manager/shared';
-
 import { buildSafeFtsQuery } from '@simple-agent-manager/worker-core';
 import { createModuleLogger } from '@simple-agent-manager/worker-core';
 import { getSearchQueryLikePatterns } from '@simple-agent-manager/worker-core';
+
 import {
   parseCountCnt,
   parseKnowledgeEntityIndexRow,

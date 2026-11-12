@@ -41,7 +41,7 @@ import {
   archiveAffordableMessageCeiling,
   archiveWriteBudgetConfig,
   reserveArchiveWrites,
-} from '../../../src/project-data-archive/write-budget';
+} from '@simple-agent-manager/project-data/internal/archive/write-budget';
 import {
   PREVIOUS_SWEEP_MESSAGE_BUDGET,
   SHIPPED_DAILY_WRITE_BUDGET,

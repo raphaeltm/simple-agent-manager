@@ -28,11 +28,11 @@ import * as schema from '../../src/db/schema';
 import {
   createAttentionMarker,
   hasPendingHumanInput,
-} from '../../src/durable-objects/project-data/attention';
-import { runMigrations } from '../../src/durable-objects/project-data/migrations';
-import { upsertActivityState } from '../../src/durable-objects/project-data/session-state';
-import { readTaskAcpLivenessSignals } from '../../src/durable-objects/project-data/task-acp-liveness-signals';
-import type { Env as ProjectDataEnv } from '../../src/durable-objects/project-data/types';
+} from '@simple-agent-manager/project-data/internal/do/attention';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import { upsertActivityState } from '@simple-agent-manager/project-data/internal/do/session-state';
+import { readTaskAcpLivenessSignals } from '@simple-agent-manager/project-data/internal/do/task-acp-liveness-signals';
+import type { Env as ProjectDataEnv } from '@simple-agent-manager/project-data/internal/do/types';
 import type { Env } from '../../src/env';
 import { recoverStuckTasks } from '../../src/scheduled/stuck-tasks';
 import { hasUnexpiredHumanInput } from '../../src/services/acp-interaction-store';

@@ -1,2 +1,7 @@
-/** Moved to ProjectData (shared session access). Re-exported for existing importers. */
-export * from '../durable-objects/project-data/shared-session-names';
+// Moved to @simple-agent-manager/project-data (worker modularization W1). Re-exported so the
+// worker's existing importers are unchanged.
+export {
+  buildSharedSessionSpeakerLine,
+  loadSharedSessionNames,
+  type SharedSessionNames,
+} from '@simple-agent-manager/project-data';

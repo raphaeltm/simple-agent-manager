@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 import type { NotificationService } from '../../src/durable-objects/notification';
 import type { Env as WorkerEnv } from '../../src/env';
 import { PROJECT_DATA_ARCHIVE_BREAKER_OPENED_ALERT } from '../../src/scheduled/project-data-archive-breaker-alerts';
-import { poisonProjectDataArchiveMigration } from '../../src/scheduled/project-data-archive-sharding';
+import { poisonProjectDataArchiveMigration } from '@simple-agent-manager/project-data/internal/scheduled/project-data-archive-sharding';
 import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
 
 const testEnv = env as unknown as WorkerEnv;

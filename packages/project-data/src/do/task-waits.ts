@@ -1,6 +1,6 @@
 import { TASK_TERMINAL_STATUSES } from '@simple-agent-manager/shared';
-
 import { createModuleLogger } from '@simple-agent-manager/worker-core';
+
 import type { TaskWaitConfig } from './task-wait-config';
 
 const log = createModuleLogger('project_data.task_waits');

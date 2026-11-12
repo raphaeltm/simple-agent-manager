@@ -15,9 +15,9 @@ import {
   GROUPED_PAGE_SIZES_SQL,
   type GroupedFtsWallRecoveryRequest,
   runGroupedFtsWallRecovery,
-} from '../../src/durable-objects/project-data/grouped-fts-wall-recovery';
-import { materializeSession } from '../../src/durable-objects/project-data/materialization';
-import { resolveStorageSafetyConfig } from '../../src/durable-objects/project-data/storage-safety';
+} from '@simple-agent-manager/project-data/internal/do/grouped-fts-wall-recovery';
+import { materializeSession } from '@simple-agent-manager/project-data/internal/do/materialization';
+import { resolveStorageSafetyConfig } from '@simple-agent-manager/project-data/internal/do/storage-safety';
 import type { Env as WorkerEnv } from '../../src/env';
 import * as projectDataService from '../../src/services/project-data';
 import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';

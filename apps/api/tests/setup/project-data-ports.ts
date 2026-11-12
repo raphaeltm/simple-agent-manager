@@ -28,7 +28,7 @@ const PORT_MODULES = {
 
 beforeAll(async () => {
   const { configureProjectDataPorts } =
-    await import('../../src/durable-objects/project-data/ports');
+    await import('@simple-agent-manager/project-data/internal/do/ports');
   await Promise.all(
     Object.entries(PORT_MODULES).map(async ([name, load]) => {
       try {

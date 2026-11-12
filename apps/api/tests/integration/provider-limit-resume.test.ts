@@ -8,10 +8,10 @@ import {
   createAttentionMarker,
   listActiveAttentionMarkers,
   resolveAttentionMarkers,
-} from '../../src/durable-objects/project-data/attention';
-import { runMigrations } from '../../src/durable-objects/project-data/migrations';
-import { syncProviderLimitAttention } from '../../src/durable-objects/project-data/provider-limit-attention';
-import { sleepSession } from '../../src/durable-objects/project-data/sessions';
+} from '@simple-agent-manager/project-data/internal/do/attention';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import { syncProviderLimitAttention } from '@simple-agent-manager/project-data/internal/do/provider-limit-attention';
+import { sleepSession } from '@simple-agent-manager/project-data/internal/do/sessions';
 import type { Env } from '../../src/env';
 import { AppError } from '../../src/middleware/error';
 import { providerLimitResumeRoutes } from '../../src/routes/tasks/provider-limit-resume';

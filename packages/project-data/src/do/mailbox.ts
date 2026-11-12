@@ -18,9 +18,9 @@ import {
   DURABLE_MESSAGE_CLASSES,
   MAILBOX_DEFAULTS,
 } from '@simple-agent-manager/shared';
-
 import { createModuleLogger } from '@simple-agent-manager/worker-core';
 import { ulid } from '@simple-agent-manager/worker-core';
+
 import { isMailboxAtCapacity } from './mailbox-capacity';
 import { parseMailboxMessageRow } from './row-schemas';
 

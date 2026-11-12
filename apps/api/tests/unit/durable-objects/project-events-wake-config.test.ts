@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { computeProjectEventMaterializationAlarmTime } from '../../../src/durable-objects/project-data/project-events-scheduler';
-import { isProjectEventWakeEnabled } from '../../../src/durable-objects/project-data/project-events-wake-config';
-import type { Env } from '../../../src/durable-objects/project-data/types';
+import { computeProjectEventMaterializationAlarmTime } from '@simple-agent-manager/project-data/internal/do/project-events-scheduler';
+import { isProjectEventWakeEnabled } from '@simple-agent-manager/project-data/internal/do/project-events-wake-config';
+import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
 
 // Drive the scheduler's real resolver: no feature-flag mocks or injected default.
 describe('project event wake activation', () => {

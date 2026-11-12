@@ -18,9 +18,9 @@ import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
-import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
-import { nudgePromptDeliveriesForTarget } from '../../../src/durable-objects/project-data/prompt-delivery';
-import { probeStaleSessionActivity } from '../../../src/durable-objects/project-data/session-activity-probe';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import { nudgePromptDeliveriesForTarget } from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
+import { probeStaleSessionActivity } from '@simple-agent-manager/project-data/internal/do/session-activity-probe';
 import {
   applyProbeOutcome,
   classifyProbeResponse,
@@ -28,12 +28,12 @@ import {
   publishTurnEnd,
   selectStaleActivityProbeCandidates,
   type StaleActivityCandidate,
-} from '../../../src/durable-objects/project-data/session-activity-reconciliation';
+} from '@simple-agent-manager/project-data/internal/do/session-activity-reconciliation';
 import {
   getSessionState,
   recordTurnEnd,
   upsertActivityState,
-} from '../../../src/durable-objects/project-data/session-state';
+} from '@simple-agent-manager/project-data/internal/do/session-state';
 import { listAgentSessionsOnNode } from '../../../src/services/node-agent';
 import { recordAcpActivityCallbackMetric } from '../../../src/services/telemetry';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';

@@ -1,4 +1,3 @@
-import type { ProjectDataEnv as Env } from '../do/types';
 import {
   PROJECT_DATA_ARCHIVE_DEFAULT_SHARD_COUNT,
   PROJECT_DATA_ARCHIVE_JOURNAL_STATES,
@@ -11,6 +10,7 @@ import {
   type ProjectDataArchiveOwnerKind,
   type ProjectDataArchiveOwnerRef,
 } from '../archive/contract';
+import type { ProjectDataEnv as Env } from '../do/types';
 
 export class ProjectDataArchiveRoutingError extends Error {
   readonly code = 'PROJECT_DATA_ARCHIVE_ROUTING_UNSAFE';

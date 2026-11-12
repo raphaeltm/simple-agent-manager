@@ -11,14 +11,14 @@ import {
   acceptPromptDelivery,
   type DurabilityFoundationHooks,
   processPromptDeliveryAlarm,
-} from '../../../src/durable-objects/project-data/durability-foundation';
-import { resolveDurableExecutionConfig } from '../../../src/durable-objects/project-data/durable-execution-config';
-import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
+} from '@simple-agent-manager/project-data/internal/do/durability-foundation';
+import { resolveDurableExecutionConfig } from '@simple-agent-manager/project-data/internal/do/durable-execution-config';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import {
   computePromptDeliveryAlarmTime,
   nudgePromptDeliveriesForTarget,
   type PromptDeliveryResult,
-} from '../../../src/durable-objects/project-data/prompt-delivery';
+} from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
 import { DefaultVmPromptDeliveryAdapter } from '../../../src/services/vm-prompt-delivery-adapter';
 import { versionedPromptCapabilities } from '../../helpers/vm-prompt-delivery-fixtures';
 import { createSqlStorage } from './sql-storage-test-utils';

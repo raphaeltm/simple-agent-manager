@@ -9,7 +9,7 @@ import { SAM_NOTICE_METADATA_KEY } from '@simple-agent-manager/shared';
 import { runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
-import { runScheduleAlarm } from '../../src/durable-objects/project-data/project-event-schedules-runner';
+import { runScheduleAlarm } from '@simple-agent-manager/project-data/internal/do/project-event-schedules-runner';
 import { deliverOperationsDecision } from '../../src/services/operations-actions/decision-delivery';
 import { createProjectSchedule } from '../../src/services/project-data';
 import { queueRestoredSessionPrompt } from '../../src/services/restored-session-prompt';

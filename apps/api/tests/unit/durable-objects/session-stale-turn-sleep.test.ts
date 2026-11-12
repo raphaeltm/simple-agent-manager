@@ -14,17 +14,17 @@
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import {
   applyProbeOutcome,
   selectStaleActivityProbeCandidates,
-} from '../../../src/durable-objects/project-data/session-activity-reconciliation';
+} from '@simple-agent-manager/project-data/internal/do/session-activity-reconciliation';
 import {
   getSessionState,
   markPromptAccepted,
   refreshWorkingActivityForChatSession,
   upsertActivityState,
-} from '../../../src/durable-objects/project-data/session-state';
+} from '@simple-agent-manager/project-data/internal/do/session-state';
 import type { Env } from '../../../src/env';
 import { DEFAULT_SESSION_STALE_TURN_NO_WORK_MINUTES } from '../../../src/services/session-idleness';
 import {

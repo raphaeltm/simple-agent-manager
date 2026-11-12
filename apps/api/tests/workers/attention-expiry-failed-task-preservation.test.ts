@@ -11,7 +11,7 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { ProjectData } from '../../src/durable-objects/project-data';
+import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
 import type { Env } from '../../src/env';
 import {
   failedTaskNoticeId,

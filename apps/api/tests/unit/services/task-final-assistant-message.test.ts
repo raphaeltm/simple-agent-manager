@@ -3,12 +3,12 @@
  * read through the real whole-message reader over a real SQLite transcript, stored the way the VM
  * agent stores replies: one row per streamed chunk. Only the Durable Object transport is replaced.
  */
+import { readSourceLogicalTranscript } from '@simple-agent-manager/project-data/internal/do/logical-transcript';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import type { Env as ProjectDataEnv } from '@simple-agent-manager/project-data/internal/do/types';
 import Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { readSourceLogicalTranscript } from '../../../src/durable-objects/project-data/logical-transcript';
-import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
-import type { Env as ProjectDataEnv } from '../../../src/durable-objects/project-data/types';
 import { log } from '../../../src/lib/logger';
 import {
   getLatestAssistantMessageForTask,

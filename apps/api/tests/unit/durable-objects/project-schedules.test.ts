@@ -8,25 +8,25 @@ vi.mock('../../../src/services/reserved-task-submission', () => ({
 }));
 
 import * as schema from '../../../src/db/schema';
-import type { DurabilityFoundationHooks } from '../../../src/durable-objects/project-data/durability-foundation';
-import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
-import type { ProjectEventScheduleEnv } from '../../../src/durable-objects/project-data/project-event-schedules-config';
+import type { DurabilityFoundationHooks } from '@simple-agent-manager/project-data/internal/do/durability-foundation';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import type { ProjectEventScheduleEnv } from '@simple-agent-manager/project-data/internal/do/project-event-schedules-config';
 import {
   computeScheduleAlarmTime,
   runScheduleAlarm,
-} from '../../../src/durable-objects/project-data/project-event-schedules-runner';
+} from '@simple-agent-manager/project-data/internal/do/project-event-schedules-runner';
 import {
   cancelSchedule,
   createSchedule,
   getSchedule,
   listSchedules,
   rescheduleSchedule,
-} from '../../../src/durable-objects/project-data/project-event-schedules-storage';
-import { admitProjectEvent } from '../../../src/durable-objects/project-data/project-events';
+} from '@simple-agent-manager/project-data/internal/do/project-event-schedules-storage';
+import { admitProjectEvent } from '@simple-agent-manager/project-data/internal/do/project-events';
 import {
   computeStandingWatchAlarmTime,
   runStandingWatchAlarm,
-} from '../../../src/durable-objects/project-data/project-standing-watches-runner';
+} from '@simple-agent-manager/project-data/internal/do/project-standing-watches-runner';
 import {
   createWatch,
   getWatch,
@@ -34,9 +34,9 @@ import {
   pauseWatch,
   revokeWatch,
   updateWatch,
-} from '../../../src/durable-objects/project-data/project-standing-watches-storage';
-import { acceptPromptDeliveryInTransaction } from '../../../src/durable-objects/project-data/prompt-delivery';
-import type { Env } from '../../../src/durable-objects/project-data/types';
+} from '@simple-agent-manager/project-data/internal/do/project-standing-watches-storage';
+import { acceptPromptDeliveryInTransaction } from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
+import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
 import type { ReservedTaskSubmissionInput } from '../../../src/services/reserved-task-submission';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 

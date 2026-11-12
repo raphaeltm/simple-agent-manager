@@ -4,9 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   type DurabilityFoundationHooks,
   reportActivity,
-} from '../../../src/durable-objects/project-data/durability-foundation';
-import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
-import { getSessionState } from '../../../src/durable-objects/project-data/session-state-read';
+} from '@simple-agent-manager/project-data/internal/do/durability-foundation';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import { getSessionState } from '@simple-agent-manager/project-data/internal/do/session-state-read';
 import { createSqlStorage } from './sql-storage-test-utils';
 
 // The composer hides Steer when the session's adapter cannot steer. The ProjectData DO

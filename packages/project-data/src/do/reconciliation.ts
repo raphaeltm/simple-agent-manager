@@ -13,8 +13,8 @@
  * - Sessions that already have an unresolved `reconciliation_checkin` marker
  */
 import { SAM_NOTICE_METADATA_KEY } from '@simple-agent-manager/shared';
-
 import { createModuleLogger, serializeError } from '@simple-agent-manager/worker-core';
+
 import { recordActivityEventInternal } from './activity';
 import { createAttentionMarker } from './attention';
 import { persistMessage } from './messages';

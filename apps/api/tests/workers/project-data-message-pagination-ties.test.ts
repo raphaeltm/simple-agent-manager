@@ -19,7 +19,7 @@ import { env, SELF } from 'cloudflare:test';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
-import { runProjectDataArchiveSharding } from '../../src/scheduled/project-data-archive-sharding';
+import { runProjectDataArchiveSharding } from '@simple-agent-manager/project-data/internal/scheduled/project-data-archive-sharding';
 import * as projectDataService from '../../src/services/project-data';
 import { createSessionCookieForUser } from '../../src/services/session-factory';
 import {

@@ -6,6 +6,7 @@
  * keeps the SQL state machine (`.claude/rules/18-file-size-limits.md`).
  */
 import { createModuleLogger, serializeError } from '@simple-agent-manager/worker-core';
+
 import { recordActivityEventInternal } from './activity';
 import { projectDataPorts } from './ports';
 import {

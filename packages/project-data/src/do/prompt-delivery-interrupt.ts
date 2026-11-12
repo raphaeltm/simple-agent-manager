@@ -12,8 +12,8 @@
  * very next prompt.
  */
 import type { SqlStorage } from '@cloudflare/workers-types';
-
 import { createModuleLogger } from '@simple-agent-manager/worker-core';
+
 import * as activity from './activity';
 import { projectDataPorts, type VmPromptDeliveryTarget } from './ports';
 import type { PromptDeliveryClaim } from './prompt-delivery';

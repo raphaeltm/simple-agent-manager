@@ -10,14 +10,14 @@ import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
-import { invalidCheckpointContinuationTarget } from '../../../src/durable-objects/project-data/checkpoint-continuation-delivery';
-import { getMessage } from '../../../src/durable-objects/project-data/mailbox';
-import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
+import { invalidCheckpointContinuationTarget } from '@simple-agent-manager/project-data/internal/do/checkpoint-continuation-delivery';
+import { getMessage } from '@simple-agent-manager/project-data/internal/do/mailbox';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import {
   acceptPromptDelivery,
   type PromptDeliveryClaim,
-} from '../../../src/durable-objects/project-data/prompt-delivery';
-import type { Env } from '../../../src/durable-objects/project-data/types';
+} from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
+import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
 import { restoredSessionPromptDelivery } from '../../../src/services/restored-session-prompt';
 import { SESSION_RECOVERY_CONTINUE_TASK_PROMPT } from '../../../src/services/session-sleep-fallback-messages';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';

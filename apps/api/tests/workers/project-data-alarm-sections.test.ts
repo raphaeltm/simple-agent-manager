@@ -11,9 +11,9 @@ import {
   computeProjectDataAlarmSectionTimes,
   PROJECT_DATA_ALARM_FAILED_SECTION_RETRY_MS,
   PROJECT_DATA_ALARM_SECTIONS,
-} from '../../src/durable-objects/project-data/alarm-schedule';
-import { PROJECT_DATA_ALARM_SCHEDULE_META_KEY } from '../../src/durable-objects/project-data/alarm-sections';
-import type { Env } from '../../src/durable-objects/project-data/types';
+} from '@simple-agent-manager/project-data/internal/do/alarm-schedule';
+import { PROJECT_DATA_ALARM_SCHEDULE_META_KEY } from '@simple-agent-manager/project-data/internal/do/alarm-sections';
+import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
 import type { ProjectDataTestDouble } from './support/expected-error-doubles';
 
 type Completion = {

@@ -7,7 +7,7 @@
 import { runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
-import { runMigrations } from '../../src/durable-objects/project-data/migrations';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import * as svc from '../../src/services/project-data';
 import {
   type ChannelReceipt,

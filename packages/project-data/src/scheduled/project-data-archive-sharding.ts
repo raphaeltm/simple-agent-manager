@@ -1,16 +1,6 @@
 // FILE SIZE EXCEPTION: ProjectData archive-sharding coordinator — keeping the D1 CAS journal, lease recovery, failure controls, copy-back, and publish/finalize gates in one module preserves the audited migration state-machine order. See .claude/rules/18-file-size-limits.md
-import type { ProjectData } from '../do';
-import type {
-  ArchiveSourceAbandonIntentResult,
-  ArchiveSourceFinalizeDeleteResult,
-  ArchiveSourceInspectIntentResult,
-  ArchiveSourcePrepareResult,
-  ArchiveTargetAbandonResult,
-  ArchiveTargetInspectResult,
-} from '../do/archive-sharding';
-import { projectDataPorts } from '../do/ports';
-import type { ProjectDataEnv } from '../do/types';
 import { createModuleLogger, serializeError } from '@simple-agent-manager/worker-core';
+
 import { breakerWasClosedBeforeOpening } from '../archive/breaker-opening';
 import {
   COMPACT_ARCHIVE_CHUNK_BYTES,
@@ -70,6 +60,17 @@ import {
   isProjectDataArchiveExactRoutingEnabled,
   rootProjectDataOwner,
 } from '../client/project-data-archive-routing';
+import type { ProjectData } from '../do';
+import type {
+  ArchiveSourceAbandonIntentResult,
+  ArchiveSourceFinalizeDeleteResult,
+  ArchiveSourceInspectIntentResult,
+  ArchiveSourcePrepareResult,
+  ArchiveTargetAbandonResult,
+  ArchiveTargetInspectResult,
+} from '../do/archive-sharding';
+import { projectDataPorts } from '../do/ports';
+import type { ProjectDataEnv } from '../do/types';
 
 /** The Worker cron runs this job; the deployed Worker always binds the archive bucket. */
 type Env = ProjectDataEnv & { PROJECT_DATA_ARCHIVE_R2: R2Bucket };

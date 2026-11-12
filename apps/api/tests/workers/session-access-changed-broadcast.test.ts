@@ -6,13 +6,13 @@
  *
  * Follows the exact harness shape of tests/workers/acp-session-created-broadcast.test.ts: a
  * browser-style WebSocket subscription on the chat session, then the real DO RPCs exactly as
- * the chat-session-access route calls them (see src/durable-objects/project-data/index.ts
+ * the chat-session-access route calls them (see packages/project-data/src/do/index.ts
  * ~lines 1460-1566, `createSessionAccessGrant` / `revokeSessionAccessGrant`).
  */
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
-import type { ProjectData } from '../../src/durable-objects/project-data';
+import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
 import type { Env } from '../../src/env';
 import * as projectDataService from '../../src/services/project-data';
 

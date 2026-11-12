@@ -19,7 +19,7 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { computeRelevanceScore } from '../../src/durable-objects/project-data/knowledge';
+import { computeRelevanceScore } from '@simple-agent-manager/project-data/internal/do/knowledge';
 
 const DAY_MS = 86_400_000;
 

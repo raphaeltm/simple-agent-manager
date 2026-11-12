@@ -4,8 +4,8 @@
  * queues the scheduled message or reserves the task submission.
  */
 import type { ProjectSchedule } from '@simple-agent-manager/shared';
-
 import { ulid } from '@simple-agent-manager/worker-core';
+
 import { projectDataPorts } from './ports';
 import {
   assertScheduleWriterStillActive,

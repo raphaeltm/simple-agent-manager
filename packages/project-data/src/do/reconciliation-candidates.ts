@@ -1,7 +1,7 @@
 import { TASK_TERMINAL_STATUSES } from '@simple-agent-manager/shared';
+import { createModuleLogger, serializeError } from '@simple-agent-manager/worker-core';
 import * as v from 'valibot';
 
-import { createModuleLogger, serializeError } from '@simple-agent-manager/worker-core';
 import { readProjectEventWakeLeaseUntil } from './project-events-wake-delivery';
 import {
   CANDIDATE_GATE_META_PREFIX,

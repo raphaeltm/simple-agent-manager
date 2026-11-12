@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
-import { projectDataArchiveCandidateSql } from '../../src/scheduled/project-data-archive-sharding';
+import { projectDataArchiveCandidateSql } from '@simple-agent-manager/project-data/internal/scheduled/project-data-archive-sharding';
 import { selectStuckTaskCandidates } from '../../src/scheduled/stuck-tasks';
 import { WORKSPACE_UPLOAD_CONTEXT_QUERY } from '../../src/services/workspace-resource-history';
 import { createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';

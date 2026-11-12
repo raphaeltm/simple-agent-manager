@@ -1,6 +1,6 @@
 import { DEFAULT_TASK_LIVENESS_MAX_ACP_SESSIONS } from '@simple-agent-manager/shared';
-
 import { parsePositiveInt } from '@simple-agent-manager/worker-core';
+
 import { projectDataPorts } from './ports';
 import { getSessionState } from './session-state';
 import type { Env } from './types';

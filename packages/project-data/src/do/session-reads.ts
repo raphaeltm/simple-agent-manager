@@ -3,6 +3,7 @@
  * (`.claude/rules/50`), degrading to "that row is missing" rather than failing the whole read.
  */
 import { log } from '@simple-agent-manager/worker-core';
+
 import { getAttentionSummary } from './attention';
 import { parseChatSessionListRow, parseCountCnt } from './row-schemas';
 

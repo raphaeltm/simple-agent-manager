@@ -6,7 +6,7 @@ import {
   createCanonicalRowsChainHasher,
   createCanonicalRowsHasher,
   sha256Hex,
-} from '../../src/project-data-archive/hashing';
+} from '@simple-agent-manager/project-data/internal/archive/hashing';
 
 const COLUMNS = ['id', 'session_id', 'role', 'content', 'tool_metadata', 'created_at'] as const;
 

@@ -4,7 +4,7 @@ import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { InteractionStore } from '../../src/durable-objects/interaction-store';
-import type { ProjectData } from '../../src/durable-objects/project-data';
+import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
 import type { Env } from '../../src/env';
 import { classifyLongRunningTaskStall } from '../../src/scheduled/stalled-task-classifier';
 import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';

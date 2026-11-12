@@ -12,18 +12,18 @@ import { formatMessageCursor, type MessagePosition } from '@simple-agent-manager
 import Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { readSourceLogicalMessage } from '../../../src/durable-objects/project-data/logical-message';
+import { readSourceLogicalMessage } from '@simple-agent-manager/project-data/internal/do/logical-message';
 import {
   type LogicalEntry,
   type LogicalTranscriptRequest,
   readSourceLogicalTranscript,
-} from '../../../src/durable-objects/project-data/logical-transcript';
+} from '@simple-agent-manager/project-data/internal/do/logical-transcript';
 import {
   assembleMessage,
   type Run,
-} from '../../../src/durable-objects/project-data/logical-transcript-model';
-import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
-import type { Env } from '../../../src/durable-objects/project-data/types';
+} from '@simple-agent-manager/project-data/internal/do/logical-transcript-model';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
 import { createSqlStorage } from './sql-storage-test-utils';
 
 const PROJECT = 'project-1';

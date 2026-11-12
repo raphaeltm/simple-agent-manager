@@ -1,4 +1,7 @@
 // FILE SIZE EXCEPTION: This bounded emergency preflight is one resumable fail-closed state machine; splitting its lease, cursor, manifest, and completion invariants during the P0 rollout would make the audited transition order harder to verify. See .claude/rules/18-file-size-limits.md
+import { createModuleLogger, serializeError } from '@simple-agent-manager/worker-core';
+
+import { measureProjectDataStorageRelief } from '../client/project-data';
 import type {
   ProjectDataStorageReliefMeasureCursor,
   ProjectDataStorageReliefToolPayloadSessionMeasure,
@@ -14,8 +17,6 @@ import {
   writeToolPayloadCleanupManifestRoot,
 } from '../do/tool-payload-cleanup-manifest';
 import type { ProjectDataEnv } from '../do/types';
-import { createModuleLogger, serializeError } from '@simple-agent-manager/worker-core';
-import { measureProjectDataStorageRelief } from '../client/project-data';
 
 /** The Worker cron runs this job; the deployed Worker always binds the archive bucket. */
 type Env = ProjectDataEnv & { PROJECT_DATA_ARCHIVE_R2: R2Bucket };

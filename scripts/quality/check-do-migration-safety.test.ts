@@ -104,7 +104,7 @@ describe('DO migration safety — current migrations are non-destructive', () =>
     const migrations = readFileSync(
       join(
         import.meta.dirname,
-        '../../apps/api/src/durable-objects/project-data/migrations.ts'
+        '../../packages/project-data/src/do/migrations.ts'
       ),
       'utf-8'
     );
@@ -131,7 +131,7 @@ describe('DO migration safety — current migrations are non-destructive', () =>
     const migrations = readFileSync(
       join(
         import.meta.dirname,
-        '../../apps/api/src/durable-objects/project-data/migrations.ts'
+        '../../packages/project-data/src/do/migrations.ts'
       ),
       'utf-8'
     );
@@ -156,7 +156,7 @@ describe('DO migration safety — current migrations are non-destructive', () =>
     const migrations = readFileSync(
       join(
         import.meta.dirname,
-        '../../apps/api/src/durable-objects/project-data/migrations.ts'
+        '../../packages/project-data/src/do/migrations.ts'
       ),
       'utf-8'
     );

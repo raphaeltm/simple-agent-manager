@@ -12,7 +12,7 @@ import {
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
-import { PROJECT_DATA_ALARM_SCHEDULE_META_KEY } from '../../src/durable-objects/project-data/alarm-sections';
+import { PROJECT_DATA_ALARM_SCHEDULE_META_KEY } from '@simple-agent-manager/project-data/internal/do/alarm-sections';
 import type { ProjectDataTestDouble } from './support/expected-error-doubles';
 
 const QUIET_FOR_MS = 10 * 60_000;

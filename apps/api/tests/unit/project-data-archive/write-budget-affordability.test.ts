@@ -14,7 +14,7 @@ import {
   ARCHIVE_WRITE_FIXED_RESERVATION,
   archiveAffordableMessageCeiling,
   archiveAffordableWriteUnits,
-} from '../../../src/project-data-archive/write-budget';
+} from '@simple-agent-manager/project-data/internal/archive/write-budget';
 
 describe('archive affordability ceilings', () => {
   it('reproduces the production numbers that deadlocked the sweep', () => {

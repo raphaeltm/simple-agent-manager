@@ -13,10 +13,10 @@
 import Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import * as comments from '../../../src/durable-objects/project-data/comments';
-import * as fileComments from '../../../src/durable-objects/project-data/library-file-comments';
-import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
-import type { Env } from '../../../src/durable-objects/project-data/types';
+import * as comments from '@simple-agent-manager/project-data/internal/do/comments';
+import * as fileComments from '@simple-agent-manager/project-data/internal/do/library-file-comments';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
 import { createSqlStorage } from './sql-storage-test-utils';
 
 const ALICE = { kind: 'human' as const, id: 'user-alice', name: 'Alice' };

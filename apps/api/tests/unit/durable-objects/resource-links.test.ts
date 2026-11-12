@@ -5,8 +5,8 @@ import {
   getLinkSnapshot,
   listLinksForTargets,
   recordLink,
-} from '../../../src/durable-objects/project-data/links';
-import { MIGRATIONS } from '../../../src/durable-objects/project-data/migrations';
+} from '@simple-agent-manager/project-data/internal/do/links';
+import { MIGRATIONS } from '@simple-agent-manager/project-data/internal/do/migrations';
 import { createSqlStorage } from './sql-storage-test-utils';
 
 const limits = {

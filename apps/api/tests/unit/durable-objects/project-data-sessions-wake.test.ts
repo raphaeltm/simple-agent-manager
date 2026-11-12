@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { wakeSession } from '../../../src/durable-objects/project-data/sessions';
+import { wakeSession } from '@simple-agent-manager/project-data/internal/do/sessions';
 
 function makeWakeSql(rowsWritten: number) {
   const exec = vi.fn(() => ({ rowsWritten, toArray: () => [{ found: 1 }] }));

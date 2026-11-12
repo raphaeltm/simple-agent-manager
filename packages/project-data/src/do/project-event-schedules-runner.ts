@@ -1,7 +1,7 @@
 import type { ProjectSchedule } from '@simple-agent-manager/shared';
+import { ulid } from '@simple-agent-manager/worker-core';
 import * as v from 'valibot';
 
-import { ulid } from '@simple-agent-manager/worker-core';
 import {
   type DurabilityFoundationHooks,
   finalizeAcceptedPromptDelivery,

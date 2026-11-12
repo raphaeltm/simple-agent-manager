@@ -44,7 +44,7 @@ import {
   parseTrailingGroup,
   parseWorkspaceId,
   parseWorkspaceIdleCheck,
-} from '../../../src/durable-objects/project-data/row-schemas';
+} from '@simple-agent-manager/project-data/internal/do/row-schemas';
 
 // =============================================================================
 // Generic helpers

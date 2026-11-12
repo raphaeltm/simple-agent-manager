@@ -2,8 +2,8 @@ import {
   isUrgentMessageClass,
   type VmPromptDeliveryCapabilities,
 } from '@simple-agent-manager/shared';
-
 import { createModuleLogger } from '@simple-agent-manager/worker-core';
+
 import * as activity from './activity';
 import { invalidCheckpointContinuationTarget } from './checkpoint-continuation-delivery';
 import type { DurableExecutionConfig } from './durable-execution-config';

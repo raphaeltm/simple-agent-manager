@@ -7,8 +7,8 @@
  * (`{ kind: 'message', sessionId }`), and rows map to `MessageCommentThread`.
  */
 import type { MessageCommentReply, MessageCommentThread } from '@simple-agent-manager/shared';
-
 import { chunk, D1_MAX_BOUND_PARAMETERS } from '@simple-agent-manager/worker-core';
+
 import {
   createReplyRecord,
   createThreadRecord,

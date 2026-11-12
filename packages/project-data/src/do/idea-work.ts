@@ -17,8 +17,8 @@
  * turned into a failed list for the whole project.
  */
 import { isStrongLinkRelation, type LinkRelation } from '@simple-agent-manager/shared';
-
 import { createModuleLogger } from '@simple-agent-manager/worker-core';
+
 import { countIdeaUpdates } from './idea-updates';
 import { type IdeaAssetLink, listIdeaAssetLinksForTargets, listLinksForTargets } from './links';
 import { parseIdeaNeedsInputRow, parseIdeaWorkSessionRow } from './row-schemas';

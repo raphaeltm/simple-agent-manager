@@ -9,7 +9,7 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import type { ProjectData } from '../../src/durable-objects/project-data';
+import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
 import type { TaskRunner } from '../../src/durable-objects/task-runner';
 import type { TaskRunnerState } from '../../src/durable-objects/task-runner/types';
 import type { TaskStartCapacityPoolSelection } from '../../src/services/placement-resolver';
@@ -493,7 +493,13 @@ describe('task-runner-do proxy — Worker→DO contract', () => {
     const workspaceId = 'workspace-advance-error';
     await bindWorkspace(taskId, workspaceId);
 
-    await advanceTaskRunnerWorkspaceReady(env, taskId, 'error', 'Container build failed: OOM', workspaceId);
+    await advanceTaskRunnerWorkspaceReady(
+      env,
+      taskId,
+      'error',
+      'Container build failed: OOM',
+      workspaceId
+    );
 
     const stub = getStub(taskId);
     const status = (await stub.getStatus()) as TaskRunnerState;
@@ -505,7 +511,13 @@ describe('task-runner-do proxy — Worker→DO contract', () => {
   it('advanceTaskRunnerWorkspaceReady is a no-op on uninitialized DO', async () => {
     // Calling advance on a DO that was never started should not throw
     await expect(
-      advanceTaskRunnerWorkspaceReady(env, 'task-advance-noop-001', 'running', null, 'workspace-noop')
+      advanceTaskRunnerWorkspaceReady(
+        env,
+        'task-advance-noop-001',
+        'running',
+        null,
+        'workspace-noop'
+      )
     ).resolves.toBeUndefined();
 
     // Verify DO remains uninitialized

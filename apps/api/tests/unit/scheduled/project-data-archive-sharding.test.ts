@@ -7,7 +7,7 @@ import type {
   ProjectDataArchiveChunk,
   ProjectDataArchiveJournalState,
   ProjectDataArchiveTableName,
-} from '../../../src/project-data-archive/contract';
+} from '@simple-agent-manager/project-data/internal/archive/contract';
 import {
   abandonProjectDataArchiveMigration,
   copyBackProjectDataArchiveMigration,
@@ -16,7 +16,7 @@ import {
   poisonProjectDataArchiveMigration,
   runProjectDataArchiveSharding,
   runScopedProjectDataArchiveCanary,
-} from '../../../src/scheduled/project-data-archive-sharding';
+} from '@simple-agent-manager/project-data/internal/scheduled/project-data-archive-sharding';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const NOW = Date.now() + 60_000;

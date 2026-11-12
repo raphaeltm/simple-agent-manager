@@ -8,9 +8,9 @@ import {
   STEER_OUTCOMES,
   VM_PROMPT_RECEIPT_STATES,
 } from '@simple-agent-manager/shared';
+import { expectJsonRecord } from '@simple-agent-manager/worker-core';
 import * as v from 'valibot';
 
-import { expectJsonRecord } from '@simple-agent-manager/worker-core';
 import { parseRow, safeParseJson } from './core';
 
 // =============================================================================

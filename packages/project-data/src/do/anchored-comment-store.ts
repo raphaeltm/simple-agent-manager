@@ -9,10 +9,10 @@
  */
 import type { CommentAnchorKind, CommentMention } from '@simple-agent-manager/shared';
 import { COMMENT_ANCHOR_KINDS, COMMENT_STATUSES } from '@simple-agent-manager/shared';
-import * as v from 'valibot';
-
 import { chunk, D1_MAX_BOUND_PARAMETERS } from '@simple-agent-manager/worker-core';
 import { createModuleLogger } from '@simple-agent-manager/worker-core';
+import * as v from 'valibot';
+
 import {
   ANCHOR_SCOPE_PREDICATE,
   anchorScopeParams,

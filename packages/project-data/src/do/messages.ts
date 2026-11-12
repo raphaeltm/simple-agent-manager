@@ -3,8 +3,8 @@
  * `message-search.ts`; its DO-facing entry points are re-exported here.
  */
 import type { MessageCursor } from '@simple-agent-manager/shared';
-
 import { log } from '@simple-agent-manager/worker-core';
+
 import {
   PROJECT_DATA_ARCHIVE_SOURCE_INTENT_STATES,
   type ProjectDataArchiveSourceIntentState,

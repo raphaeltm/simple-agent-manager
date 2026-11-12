@@ -1,4 +1,3 @@
-import type { ProjectDataEnv as Env } from '../do/types';
 import {
   PROJECT_DATA_ARCHIVE_JOURNAL_STATES,
   PROJECT_DATA_ARCHIVE_LOCATION_STATES,
@@ -6,6 +5,7 @@ import {
   type ProjectDataArchiveJournalState,
   type ProjectDataArchiveLocationState,
 } from '../archive/contract';
+import type { ProjectDataEnv as Env } from '../do/types';
 import { isProjectDataArchiveExactRoutingEnabled } from './project-data-archive-routing';
 
 const DEFAULT_ARCHIVE_ROLLOUT_LIST_LIMIT = 25;

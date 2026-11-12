@@ -7,7 +7,7 @@ import type {
 } from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
 
-import { resolveProjectEventDelivery } from '../../../src/durable-objects/project-data/project-events';
+import { resolveProjectEventDelivery } from '@simple-agent-manager/project-data/internal/do/project-events';
 
 const NOW = 10_000;
 

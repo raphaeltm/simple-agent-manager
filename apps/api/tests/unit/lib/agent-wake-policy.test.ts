@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { SESSION_WRITER_PROMPT_SOURCES } from '../../../src/durable-objects/project-data/session-access-store';
+import { SESSION_WRITER_PROMPT_SOURCES } from '@simple-agent-manager/project-data/internal/do/session-access-store';
 import {
   agentWakeRecord,
   decideAgentWake,

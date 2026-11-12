@@ -46,6 +46,7 @@
  * storage is slower still, so the 32 MiB ceiling keeps a call to a few seconds.
  */
 import { createModuleLogger, serializeError } from '@simple-agent-manager/worker-core';
+
 import { type PageRow, prunePage } from './grouped-fts-wall-recovery-prune';
 import type { StorageSafetyConfig } from './storage-safety';
 import type { Env } from './types';

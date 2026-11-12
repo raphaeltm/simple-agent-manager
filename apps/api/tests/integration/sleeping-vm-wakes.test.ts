@@ -16,24 +16,24 @@ import {
   type DurabilityFoundationHooks,
   finalizeAcceptedPromptDelivery,
   processPromptDeliveryAlarm,
-} from '../../src/durable-objects/project-data/durability-foundation';
+} from '@simple-agent-manager/project-data/internal/do/durability-foundation';
 import {
   OWNER_ONLY_SCHEDULE,
   requireScheduleAction,
-} from '../../src/durable-objects/project-data/project-event-schedules-authority';
-import { runScheduleAlarm } from '../../src/durable-objects/project-data/project-event-schedules-runner';
+} from '@simple-agent-manager/project-data/internal/do/project-event-schedules-authority';
+import { runScheduleAlarm } from '@simple-agent-manager/project-data/internal/do/project-event-schedules-runner';
 import {
   createSchedule,
   getSchedule,
-} from '../../src/durable-objects/project-data/project-event-schedules-storage';
+} from '@simple-agent-manager/project-data/internal/do/project-event-schedules-storage';
 import {
   admitProjectEvent,
   createProjectEventSubscription,
-} from '../../src/durable-objects/project-data/project-events';
+} from '@simple-agent-manager/project-data/internal/do/project-events';
 import {
   runProjectEventWakeMaterializationBatch,
   selectProjectEventWakeMaterializationCandidates,
-} from '../../src/durable-objects/project-data/project-events-materialization';
+} from '@simple-agent-manager/project-data/internal/do/project-events-materialization';
 import type { Env } from '../../src/env';
 import { isSessionRecoverySourceTaskGuardValid } from '../../src/services/session-recovery-authority';
 import { sleepWorkspaceSession } from '../../src/services/session-sleep';

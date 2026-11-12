@@ -11,7 +11,7 @@ import { env, runInDurableObject } from 'cloudflare:test';
 import { Hono } from 'hono';
 import { beforeAll, describe, expect, it } from 'vitest';
 
-import type { ProjectData } from '../../src/durable-objects/project-data';
+import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
 import type { Env } from '../../src/env';
 import { handleAppError } from '../../src/middleware/app-error-handler';
 import { requireApproved, requireAuth } from '../../src/middleware/auth';

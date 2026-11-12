@@ -1,15 +1,15 @@
 import { env, runInDurableObject, SELF } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
-import { catchUpChannel } from '../../src/durable-objects/project-data/project-event-channels-follow';
+import { catchUpChannel } from '@simple-agent-manager/project-data/internal/do/project-event-channels-follow';
 import {
   prepareChannelPublish,
   publishChannel,
-} from '../../src/durable-objects/project-data/project-event-channels-publish';
+} from '@simple-agent-manager/project-data/internal/do/project-event-channels-publish';
 import {
   channelHistory,
   cleanupEmptyChannels,
-} from '../../src/durable-objects/project-data/project-event-channels-storage';
+} from '@simple-agent-manager/project-data/internal/do/project-event-channels-storage';
 import type { Env } from '../../src/env';
 import { storeMcpToken } from '../../src/services/mcp-token';
 import * as service from '../../src/services/project-data';

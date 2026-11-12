@@ -32,6 +32,7 @@ import {
   getSearchQueryLikePatterns,
   normalizeSearchQueryWithLimits,
 } from '@simple-agent-manager/worker-core';
+
 import {
   appendRoleCondition,
   buildFtsQuery,

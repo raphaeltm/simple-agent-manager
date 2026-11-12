@@ -13,10 +13,10 @@ import * as schema from '../../src/db/schema';
 import {
   type DurabilityFoundationHooks,
   processPromptDeliveryAlarm,
-} from '../../src/durable-objects/project-data/durability-foundation';
-import { runMigrations } from '../../src/durable-objects/project-data/migrations';
-import { acceptPromptDelivery } from '../../src/durable-objects/project-data/prompt-delivery';
-import { WAKE_FAILED_ATTENTION_KIND } from '../../src/durable-objects/project-data/wake-failure';
+} from '@simple-agent-manager/project-data/internal/do/durability-foundation';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import { acceptPromptDelivery } from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
+import { WAKE_FAILED_ATTENTION_KIND } from '@simple-agent-manager/project-data/internal/do/wake-failure';
 import type { Env } from '../../src/env';
 import { restoredSessionPromptDelivery } from '../../src/services/restored-session-prompt';
 import { SESSION_RECOVERY_CONTINUE_TASK_PROMPT } from '../../src/services/session-sleep-fallback-messages';

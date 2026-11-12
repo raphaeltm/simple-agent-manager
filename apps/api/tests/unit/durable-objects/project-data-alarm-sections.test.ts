@@ -13,7 +13,7 @@ import {
   PROJECT_DATA_ALARM_SECTIONS,
   type ProjectDataAlarmSection,
   type ProjectDataAlarmSectionTimes,
-} from '../../../src/durable-objects/project-data/alarm-schedule';
+} from '@simple-agent-manager/project-data/internal/do/alarm-schedule';
 import {
   createRowMeteredSqlStorage,
   DEFAULT_PROJECT_DATA_ALARM_DUE_TOLERANCE_MS,
@@ -22,7 +22,7 @@ import {
   ProjectDataAlarmSectionScheduler,
   ProjectDataAlarmTick,
   resolveProjectDataAlarmGatingConfig,
-} from '../../../src/durable-objects/project-data/alarm-sections';
+} from '@simple-agent-manager/project-data/internal/do/alarm-sections';
 
 const T0 = 1_790_000_000_000;
 const CONFIG: ProjectDataAlarmGatingConfig = resolveProjectDataAlarmGatingConfig({});

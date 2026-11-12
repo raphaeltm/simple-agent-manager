@@ -12,12 +12,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   checkLegacyCommentParity,
   copyLegacyCommentRows,
-} from '../../../src/durable-objects/project-data/anchored-comments-migration';
-import * as comments from '../../../src/durable-objects/project-data/comments';
-import * as fileComments from '../../../src/durable-objects/project-data/library-file-comments';
-import { MIGRATIONS, runMigrations } from '../../../src/durable-objects/project-data/migrations';
-import { listProjectCommentInbox } from '../../../src/durable-objects/project-data/project-comment-inbox';
-import type { Env } from '../../../src/durable-objects/project-data/types';
+} from '@simple-agent-manager/project-data/internal/do/anchored-comments-migration';
+import * as comments from '@simple-agent-manager/project-data/internal/do/comments';
+import * as fileComments from '@simple-agent-manager/project-data/internal/do/library-file-comments';
+import {
+  MIGRATIONS,
+  runMigrations,
+} from '@simple-agent-manager/project-data/internal/do/migrations';
+import { listProjectCommentInbox } from '@simple-agent-manager/project-data/internal/do/project-comment-inbox';
+import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
 import { createSqlStorage } from './sql-storage-test-utils';
 
 const MIGRATION_073 = '073-anchored-comment-threads';

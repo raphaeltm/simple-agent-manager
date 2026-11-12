@@ -14,7 +14,7 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
-import type { ProjectData } from '../../src/durable-objects/project-data';
+import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
 
 function getStub(projectId: string): DurableObjectStub<ProjectData> {
   const id = env.PROJECT_DATA.idFromName(projectId);

@@ -1,6 +1,6 @@
+import { expectJsonRecord, maybeJsonRecord } from '@simple-agent-manager/worker-core';
 import * as v from 'valibot';
 
-import { expectJsonRecord, maybeJsonRecord } from '@simple-agent-manager/worker-core';
 import { parseRow, safeParseJson } from './core';
 
 // =============================================================================

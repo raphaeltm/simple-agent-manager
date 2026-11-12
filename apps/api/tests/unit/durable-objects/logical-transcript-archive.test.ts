@@ -8,25 +8,25 @@
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import * as archive from '../../../src/durable-objects/project-data/archive-sharding';
+import * as archive from '@simple-agent-manager/project-data/internal/do/archive-sharding';
 import {
   readSourceLogicalMessage,
   readTargetLogicalMessage,
-} from '../../../src/durable-objects/project-data/logical-message';
+} from '@simple-agent-manager/project-data/internal/do/logical-message';
 import {
   type LogicalTranscriptRequest,
   type LogicalTranscriptResult,
   readSourceLogicalTranscript,
   readTargetLogicalTranscript,
-} from '../../../src/durable-objects/project-data/logical-transcript';
+} from '@simple-agent-manager/project-data/internal/do/logical-transcript';
 import {
   readTargetMessageContext,
   targetTranscriptReader,
-} from '../../../src/durable-objects/project-data/message-context';
-import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
-import type { Env } from '../../../src/durable-objects/project-data/types';
-import { writeCompactChunk } from '../../../src/project-data-archive/compact-r2';
-import { PROJECT_DATA_ARCHIVE_TABLES } from '../../../src/project-data-archive/contract';
+} from '@simple-agent-manager/project-data/internal/do/message-context';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
+import { writeCompactChunk } from '@simple-agent-manager/project-data/internal/archive/compact-r2';
+import { PROJECT_DATA_ARCHIVE_TABLES } from '@simple-agent-manager/project-data/internal/archive/contract';
 import { createSqlStorage } from './sql-storage-test-utils';
 
 const BASE = {

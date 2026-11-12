@@ -9,9 +9,9 @@
  * expires_at > now`, read against server time on every check, so authorization never depends
  * on when an alarm fires or what a browser timer shows.
  */
+import { createModuleLogger } from '@simple-agent-manager/worker-core';
 import * as v from 'valibot';
 
-import { createModuleLogger } from '@simple-agent-manager/worker-core';
 import { HUMAN_PROMPT_DELIVERY_TRIGGERS } from './agent-wake-policy';
 import { cancelCreatorSchedulesForSession } from './project-event-schedules-storage';
 import { parseRow } from './row-schemas';

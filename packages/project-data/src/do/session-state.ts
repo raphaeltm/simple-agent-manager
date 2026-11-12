@@ -11,8 +11,8 @@ import type {
   SessionActivitySource,
   SessionActivityTerminalReason,
 } from '@simple-agent-manager/shared';
-
 import { createModuleLogger } from '@simple-agent-manager/worker-core';
+
 import { WORKING_ACTIVITIES } from './session-state-prompt';
 import {
   type ActivityReportOutcome,

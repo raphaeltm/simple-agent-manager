@@ -16,7 +16,7 @@ import {
   readToolPayloadCleanupManifestRoot,
   type ToolPayloadCleanupManifestBatchProof,
   type ToolPayloadCleanupManifestRoot,
-} from '../../../src/durable-objects/project-data/tool-payload-cleanup-manifest';
+} from '@simple-agent-manager/project-data/internal/do/tool-payload-cleanup-manifest';
 
 const PROJECT_ID = 'project-manifest-structural';
 const PLAN_ID = 'plan-manifest-structural';

@@ -8,8 +8,8 @@ import {
   SAM_NOTICE_METADATA_KEY,
   SAM_RUNTIME_REPORTED_KEY,
 } from '@simple-agent-manager/shared';
-
 import { log } from '@simple-agent-manager/worker-core';
+
 import type { AcceptPromptDeliveryInput } from './prompt-delivery';
 
 /**

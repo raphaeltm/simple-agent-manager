@@ -13,8 +13,8 @@ import {
   type ProjectEventSubscriptionOwner,
   type ProjectEventSubscriptionRecord,
 } from '@simple-agent-manager/shared';
-
 import { createModuleLogger } from '@simple-agent-manager/worker-core';
+
 import {
   ProjectEventLimitExceededError,
   ProjectEventNotFoundError,

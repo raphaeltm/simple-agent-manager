@@ -1,7 +1,7 @@
 import { isJsonRecord } from '@simple-agent-manager/shared';
-
 import { createModuleLogger } from '@simple-agent-manager/worker-core';
 import { ulid } from '@simple-agent-manager/worker-core';
+
 import { recordActivityEventInternal } from './activity';
 import {
   reconciliationCandidateLeaseMs,

@@ -1,5 +1,6 @@
 // FILE SIZE EXCEPTION: Exact-manifest cleanup is one transactionally budgeted fail-closed state machine; keeping admission, R2 verification, CAS stripping, replay, and terminal markers together preserves the audited mutation order during the P0 rollout. See .claude/rules/18-file-size-limits.md
 import { createModuleLogger, serializeError } from '@simple-agent-manager/worker-core';
+
 import type { ProjectDataStorageTelemetry, StorageSafetyConfig } from './storage-safety';
 import {
   META_LAST_STATUS,

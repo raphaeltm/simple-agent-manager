@@ -22,8 +22,8 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { ProjectData } from '../../src/durable-objects/project-data';
-import { shouldDeferRuntimeHeartbeatTimeout } from '../../src/durable-objects/project-data/runtime-heartbeat-policy';
+import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
+import { shouldDeferRuntimeHeartbeatTimeout } from '@simple-agent-manager/project-data/internal/do/runtime-heartbeat-policy';
 import type { VmAgentContainerLifecycleStatus } from '../../src/durable-objects/vm-agent-container-lifecycle';
 import type { Env } from '../../src/env';
 import { recoverStuckTasks } from '../../src/scheduled/stuck-tasks';

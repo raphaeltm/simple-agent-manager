@@ -3,7 +3,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import { describe, expect, it } from 'vitest';
 
 import * as schema from '../../src/db/schema';
-import { upsertActivityState } from '../../src/durable-objects/project-data/session-state';
+import { upsertActivityState } from '@simple-agent-manager/project-data/internal/do/session-state';
 import type { Env } from '../../src/env';
 import { runTerminalSessionLedgerReconciliation } from '../../src/scheduled/terminal-session-ledger-reconciliation';
 import { getAcpActivityAdmissionConfig } from '../../src/services/acp-activity-admission';

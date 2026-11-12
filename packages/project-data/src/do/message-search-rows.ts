@@ -3,6 +3,7 @@
  */
 import { buildSafeFtsQuery } from '@simple-agent-manager/worker-core';
 import { log } from '@simple-agent-manager/worker-core';
+
 import { parseSearchResultRow, type SearchResultParsed } from './row-schemas';
 
 export type SearchResult = {

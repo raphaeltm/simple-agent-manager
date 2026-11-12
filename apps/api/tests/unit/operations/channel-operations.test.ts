@@ -12,28 +12,28 @@ import * as schema from '../../../src/db/schema';
 import {
   prepareAgentChannelMessage,
   sendAgentChannelMessage,
-} from '../../../src/durable-objects/project-data/agent-message-channels';
-import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
-import { listChannelSubscribers } from '../../../src/durable-objects/project-data/project-event-channel-subscribers';
+} from '@simple-agent-manager/project-data/internal/do/agent-message-channels';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import { listChannelSubscribers } from '@simple-agent-manager/project-data/internal/do/project-event-channel-subscribers';
 import {
   prepareChannelPublish,
   publishChannel,
-} from '../../../src/durable-objects/project-data/project-event-channels-publish';
+} from '@simple-agent-manager/project-data/internal/do/project-event-channels-publish';
 import {
   channelHistory,
   listChannels,
-} from '../../../src/durable-objects/project-data/project-event-channels-storage';
+} from '@simple-agent-manager/project-data/internal/do/project-event-channels-storage';
 import {
   cancelProjectEventSubscription,
   createProjectEventSubscription,
   getProjectEventSubscription,
-} from '../../../src/durable-objects/project-data/project-events';
+} from '@simple-agent-manager/project-data/internal/do/project-events';
 import {
   ProjectEventCursorError,
   ProjectEventLimitExceededError,
   ProjectEventNotFoundError,
   ProjectEventValidationError,
-} from '../../../src/durable-objects/project-data/project-events-contracts';
+} from '@simple-agent-manager/project-data/internal/do/project-events-contracts';
 import type { Env } from '../../../src/env';
 import { sharedTextCap } from '../../../src/operations/channel-core';
 import {

@@ -15,11 +15,11 @@ import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
-import { runMigrations } from '../../src/durable-objects/project-data/migrations';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import {
   getSessionState as readProjectDataSessionState,
   upsertActivityState,
-} from '../../src/durable-objects/project-data/session-state';
+} from '@simple-agent-manager/project-data/internal/do/session-state';
 import type { Env } from '../../src/env';
 import { emptyResult, resolveCleanupConfig } from '../../src/scheduled/node-cleanup/shared';
 import { sweepTerminalCfContainers } from '../../src/scheduled/node-cleanup/terminal-cf-container-phase';

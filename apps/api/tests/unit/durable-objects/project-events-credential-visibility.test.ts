@@ -7,7 +7,7 @@ import {
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import {
   ackProjectEventDelivery,
   admitProjectEvent,
@@ -15,9 +15,9 @@ import {
   createProjectEventSubscription,
   getProjectEvent,
   listProjectEventSubscriptionEvents,
-} from '../../../src/durable-objects/project-data/project-events';
-import { runProjectEventWakeMaterializationBatch } from '../../../src/durable-objects/project-data/project-events-materialization';
-import type { Env } from '../../../src/durable-objects/project-data/types';
+} from '@simple-agent-manager/project-data/internal/do/project-events';
+import { runProjectEventWakeMaterializationBatch } from '@simple-agent-manager/project-data/internal/do/project-events-materialization';
+import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
 import { createSqlStorage } from './sql-storage-test-utils';
 
 const PROJECT_ID = 'credential-visibility-project';

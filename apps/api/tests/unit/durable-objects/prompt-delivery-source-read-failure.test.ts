@@ -6,8 +6,8 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import type { PromptDeliveryClaim } from '../../../src/durable-objects/project-data/prompt-delivery';
-import { sourceValidationReadFailure } from '../../../src/durable-objects/project-data/prompt-delivery-source-guards';
+import type { PromptDeliveryClaim } from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
+import { sourceValidationReadFailure } from '@simple-agent-manager/project-data/internal/do/prompt-delivery-source-guards';
 
 function claimIn(mode: PromptDeliveryClaim['mode']): PromptDeliveryClaim {
   return {

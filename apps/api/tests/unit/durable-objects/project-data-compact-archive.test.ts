@@ -1,19 +1,19 @@
 import Database from 'better-sqlite3';
 import { describe, expect, it, vi } from 'vitest';
 
-import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import {
   ARCHIVE_IMMUTABLE_JSON_MAX_OBJECT_BYTES,
   COMPACT_ARCHIVE_MAX_OBJECT_BYTES,
   readCompactChunk,
   writeCompactChunk,
   writeImmutableJson,
-} from '../../../src/project-data-archive/compact-r2';
-import type { ProjectDataArchiveChunk } from '../../../src/project-data-archive/contract';
+} from '@simple-agent-manager/project-data/internal/archive/compact-r2';
+import type { ProjectDataArchiveChunk } from '@simple-agent-manager/project-data/internal/archive/contract';
 import {
   canonicalRowsSha256,
   createCanonicalRowsChainHasher,
-} from '../../../src/project-data-archive/hashing';
+} from '@simple-agent-manager/project-data/internal/archive/hashing';
 import { createSqlStorage } from './sql-storage-test-utils';
 
 const columns = [
@@ -168,10 +168,12 @@ describe('compact archive migration compatibility', () => {
     'preserves exact paging, tools, search and default-size recovery for $count rows ($metadataBytes byte metadata)',
     { timeout: 30_000 },
     async ({ count, metadataBytes }) => {
-      const archive = await import('../../../src/durable-objects/project-data/archive-sharding');
-      const { getMessages } = await import('../../../src/durable-objects/project-data/messages');
+      const archive =
+        await import('@simple-agent-manager/project-data/internal/do/archive-sharding');
+      const { getMessages } =
+        await import('@simple-agent-manager/project-data/internal/do/messages');
       const { PROJECT_DATA_ARCHIVE_TABLES } =
-        await import('../../../src/project-data-archive/contract');
+        await import('@simple-agent-manager/project-data/internal/archive/contract');
       const sourceDb = new Database(':memory:');
       const targetDb = new Database(':memory:');
       const source = createSqlStorage(sourceDb);

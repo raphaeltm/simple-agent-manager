@@ -1,24 +1,24 @@
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import {
   boundedScheduleTaskLabel,
   type ProjectEventScheduleEnv,
   scheduleLimits,
-} from '../../../src/durable-objects/project-data/project-event-schedules-config';
+} from '@simple-agent-manager/project-data/internal/do/project-event-schedules-config';
 import {
   cancelSchedule,
   createSchedule,
-} from '../../../src/durable-objects/project-data/project-event-schedules-storage';
-import { normalizeScheduledAction } from '../../../src/durable-objects/project-data/project-event-schedules-validation';
-import { resolveProjectEventLimits } from '../../../src/durable-objects/project-data/project-events-limits';
+} from '@simple-agent-manager/project-data/internal/do/project-event-schedules-storage';
+import { normalizeScheduledAction } from '@simple-agent-manager/project-data/internal/do/project-event-schedules-validation';
+import { resolveProjectEventLimits } from '@simple-agent-manager/project-data/internal/do/project-events-limits';
 import {
   createWatch,
   revokeWatch,
   updateWatch,
-} from '../../../src/durable-objects/project-data/project-standing-watches-storage';
-import type { Env } from '../../../src/durable-objects/project-data/types';
+} from '@simple-agent-manager/project-data/internal/do/project-standing-watches-storage';
+import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
 import { validateReservedTaskSubmissionInput } from '../../../src/services/reserved-task-submission-intent';
 
 const databases: Database.Database[] = [];

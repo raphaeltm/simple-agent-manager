@@ -1,6 +1,6 @@
 import { isJsonRecord } from '@simple-agent-manager/shared';
-
 import { createModuleLogger, serializeError } from '@simple-agent-manager/worker-core';
+
 import type { ProjectDataCleanupTerminationReason } from './grouped-fts-cleanup';
 import type {
   ProjectDataStorageStatus,

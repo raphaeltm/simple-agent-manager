@@ -9,4 +9,4 @@ import { workerProjectDataPorts } from './project-data-ports/index';
 
 configureProjectDataPorts(workerProjectDataPorts);
 
-export { ProjectData } from './durable-objects/project-data';
+export { ProjectData } from '@simple-agent-manager/project-data/durable-object';

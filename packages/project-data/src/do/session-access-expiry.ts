@@ -7,6 +7,7 @@
  * sender no longer controls the session, whichever way their access ended.
  */
 import { createModuleLogger } from '@simple-agent-manager/worker-core';
+
 import { decideAgentWake, isHumanPromptDeliveryTrigger } from './agent-wake-policy';
 import {
   cancelUndeliveredSenderPrompts,

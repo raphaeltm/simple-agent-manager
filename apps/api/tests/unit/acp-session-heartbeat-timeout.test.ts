@@ -4,10 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   checkHeartbeatTimeouts,
   computeHeartbeatAlarmTime,
-} from '../../src/durable-objects/project-data/acp-sessions';
-import { runMigrations } from '../../src/durable-objects/project-data/migrations';
-import { shouldDeferRuntimeHeartbeatTimeout } from '../../src/durable-objects/project-data/runtime-heartbeat-policy';
-import type { Env } from '../../src/durable-objects/project-data/types';
+} from '@simple-agent-manager/project-data/internal/do/acp-sessions';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import { shouldDeferRuntimeHeartbeatTimeout } from '@simple-agent-manager/project-data/internal/do/runtime-heartbeat-policy';
+import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
 import { createSqlStorage } from './durable-objects/sql-storage-test-utils';
 
 describe('ACP heartbeat timeout policy', () => {
