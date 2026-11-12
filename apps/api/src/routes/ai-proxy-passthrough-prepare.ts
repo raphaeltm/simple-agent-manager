@@ -22,7 +22,7 @@ import {
   createRateLimitKey,
   getCurrentWindowStart,
 } from '../middleware/rate-limit';
-import { isAiProxyEnabled } from '../services/ai-proxy-availability';
+import { isAiProxyEnabled, isAiProxyKillSwitchEngaged } from '../services/ai-proxy-availability';
 import { AIProxyAuthError, verifyAIProxyAuth } from '../services/ai-proxy-shared';
 import { checkAiUsageGate } from '../services/ai-token-budget';
 import { resolveOutboundMaxRedirects } from '../services/outbound-fetch-settings';
@@ -187,7 +187,8 @@ export async function prepareProxyRequest(
   c: ProxyContext,
   options: PrepareProxyOptions
 ): Promise<PreparedProxyResult> {
-  if (!(await isAiProxyEnabled(c.env))) {
+  // Kill switch first; the no-gateway gate runs after auth (isAiProxyEnabled).
+  if (isAiProxyKillSwitchEngaged(c.env)) {
     return { ok: false, response: options.disabledResponse() };
   }
 
@@ -204,6 +205,11 @@ export async function prepareProxyRequest(
       return { ok: false, response: options.authErrorResponse(err) };
     }
     return { ok: false, response: options.invalidTokenResponse() };
+  }
+
+  // No AI Gateway and the admin has not enabled the direct upstream.
+  if (!(await isAiProxyEnabled(c.env))) {
+    return { ok: false, response: options.disabledResponse() };
   }
 
   const { allowed, remaining, resetAt, limit } = await checkPassthroughRateLimit(

@@ -3,6 +3,7 @@
  * (real session auth and superadmin gates), a real SQL engine and KV, and the real platform
  * config store. Only GitHub is faked, at the network boundary.
  */
+import { generateKeyPairSync } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
 import Database from 'better-sqlite3';
@@ -28,8 +29,10 @@ import { createSessionCookieForUser } from '../../src/services/session-factory';
 import { createAllSchemaTables, createMemoryKv, createSqliteD1 } from '../helpers/sqlite-d1';
 
 const API = 'https://api.example.com';
-const PEM =
-  '-----BEGIN RSA PRIVATE KEY-----\nMIIBOgIBAAJBAKj34GkxFhD90vcNLYLInFEX6Ppy1tPf9Cnzj4p4WGeKLs1Pt8Qu\n-----END RSA PRIVATE KEY-----\n';
+// Generated at test time so no private-key material is checked in.
+const PEM = generateKeyPairSync('rsa', { modulusLength: 2048 })
+  .privateKey.export({ type: 'pkcs1', format: 'pem' })
+  .toString();
 
 function createFakeGitHub() {
   const codes = new Map<string, Record<string, unknown>>();

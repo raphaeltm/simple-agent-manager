@@ -26,6 +26,7 @@ import {
 import { checkModelTierAllowance, describeModelTierDenial } from '../services/ai-model-tier-gate';
 import {
   aiProxyDisabledMessage,
+  isAiProxyKillSwitchEngaged,
   resolveAiProxyAvailability,
 } from '../services/ai-proxy-availability';
 import {
@@ -75,9 +76,9 @@ export function aiProxyBodyParseError(c: AIProxyContext, error: unknown): Respon
 export async function prepareAIProxyRequest(
   c: AIProxyContext
 ): Promise<Response | AIProxyRequestContext> {
-  const availability = await resolveAiProxyAvailability(c.env);
-  if (!availability.enabled) {
-    return proxyJsonError(c, aiProxyDisabledMessage(availability), 'service_unavailable', 503);
+  // Kill switch first; the no-gateway gate runs after auth (resolveAiProxyAvailability).
+  if (isAiProxyKillSwitchEngaged(c.env)) {
+    return proxyJsonError(c, 'AI proxy is disabled', 'service_unavailable', 503);
   }
 
   const token = extractCallbackToken(c.req.header('Authorization'), undefined);
@@ -93,6 +94,11 @@ export async function prepareAIProxyRequest(
   const db = drizzle(c.env.DATABASE, { schema });
   try {
     const auth = await verifyAIProxyAuth(token, c.env, db);
+    // No AI Gateway and the admin has not enabled the direct upstream.
+    const availability = await resolveAiProxyAvailability(c.env);
+    if (!availability.enabled) {
+      return proxyJsonError(c, aiProxyDisabledMessage(availability), 'service_unavailable', 503);
+    }
     return { ...auth, db };
   } catch (err) {
     if (err instanceof AIProxyAuthError) {

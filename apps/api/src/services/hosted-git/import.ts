@@ -10,6 +10,10 @@
  */
 import git from 'isomorphic-git';
 
+import {
+  guardedFetch,
+  OutboundRequestRefusedError,
+} from '../../lib/network-hosts/guarded-fetch';
 import { errors } from '../../middleware/error';
 import { createFetchHttpClient } from '../repo-browse/fetch-http-client';
 import { MemoryFS } from '../repo-browse/memory-fs';
@@ -58,12 +62,36 @@ export function parseHostedGitImportUrl(
 
 class ImportTooLargeError extends Error {}
 
-/** A fetch that refuses to download more than `maxBytes` of response bodies in total. */
+/** Every request of an import stays on an allowlisted forge, whatever path git asks for. */
+function assertImportHost(url: URL): void {
+  if (!DEFAULT_HOSTED_GIT_IMPORT_HOSTS.includes(url.hostname.toLowerCase())) {
+    throw new OutboundRequestRefusedError('host', url.hostname, 'import host is not allowlisted');
+  }
+}
+
+/**
+ * A fetch that refuses to download more than `maxBytes` of response bodies in total. The URL is
+ * user-chosen, so it goes through the guarded fetch: public https host only, the forge allowlist
+ * on every request, and no redirect is ever followed.
+ */
 function cappedFetch(maxBytes: number): typeof fetch {
   let total = 0;
   return async (input, init) => {
-    const res = await fetch(input, { ...init, redirect: 'manual' });
+    const url = input instanceof Request ? input.url : input;
+    let res: Response;
+    try {
+      res = await guardedFetch(url, init ?? {}, {
+        maxRedirects: 0,
+        validateUrl: assertImportHost,
+      });
+    } catch (err) {
+      if (err instanceof OutboundRequestRefusedError && err.reason === 'redirect_limit') {
+        throw errors.badRequest('importUrl redirected; use the repository URL it redirects to');
+      }
+      throw err;
+    }
     if (res.status >= 300 && res.status < 400) {
+      // A 3xx without a Location header: guardedFetch returns it as the final response.
       throw errors.badRequest('importUrl redirected; use the repository URL it redirects to');
     }
     if (!res.body) return res;

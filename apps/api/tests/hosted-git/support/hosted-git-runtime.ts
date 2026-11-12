@@ -4,7 +4,7 @@
  * and real Durable Object SQLite. Same approach as tests/workers/support/sam-native-runtime.ts.
  */
 import { execFile } from 'node:child_process';
-import { generateKeyPairSync } from 'node:crypto';
+import { generateKeyPairSync, randomBytes } from 'node:crypto';
 import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -81,7 +81,8 @@ export async function startHostedGitRuntime(
     outboundService: (request: Request) => outbound(request),
     bindings: {
       BASE_DOMAIN: HOSTED_GIT_TEST_BASE_DOMAIN,
-      ENCRYPTION_KEY: 'SK4ihJazAK3GIWUQcM6nZ1odR6KQHrqRAVSp6HdPxrg=',
+      // Generated per runtime so no key material is checked in.
+      ENCRYPTION_KEY: randomBytes(32).toString('base64'),
       ARTIFACTS_ENABLED: 'true',
       HOSTED_GIT_BACKEND: 'durable-object',
       JWT_PRIVATE_KEY: privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
