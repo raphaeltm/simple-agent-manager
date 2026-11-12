@@ -7,6 +7,7 @@
  */
 import { Hono } from 'hono';
 
+import { HostedGitRepo } from '../../../src/durable-objects/hosted-git-repo';
 import type { Env } from '../../../src/env';
 import { handleAppError } from '../../../src/middleware/app-error-handler';
 import { hostedGitTokenRoutes } from '../../../src/routes/projects/hosted-git-token';
@@ -20,8 +21,6 @@ import {
 } from '../../../src/services/hosted-git/http';
 import { type HostedGitScope, mintHostedGitToken } from '../../../src/services/hosted-git/tokens';
 import { signCurrentWorkspaceCallbackToken } from '../../../src/services/jwt';
-
-import { HostedGitRepo } from '../../../src/durable-objects/hosted-git-repo';
 
 /** Test-only: run the GC alarm on demand (production schedules it 5 minutes after a push). */
 export class HostedGitRepoTest extends HostedGitRepo {
