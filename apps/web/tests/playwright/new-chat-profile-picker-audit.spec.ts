@@ -362,6 +362,18 @@ test.describe('New-chat profile picker', () => {
 
     await toControl(page).click();
     await expect(sheet(page)).toBeVisible();
+    const search = sheet(page).getByRole('searchbox', { name: 'Search profiles' });
+    if ((page.viewportSize()?.width ?? 0) > 767) {
+      // Desktop: the cursor is already in search, so typing filters immediately.
+      await expect(search).toBeFocused();
+      await page.keyboard.type('astra');
+      await expect(search).toHaveValue('astra');
+      await search.fill('');
+    } else {
+      // Phone: focusing would raise the keyboard over the list, so focus stays on the sheet.
+      await expect(search).not.toBeFocused();
+      await expect(sheet(page)).toBeFocused();
+    }
     for (const label of ['Recent', 'Chat & explore', 'Build & open PRs']) {
       await expect(sheet(page).getByText(label, { exact: true })).toBeVisible();
     }

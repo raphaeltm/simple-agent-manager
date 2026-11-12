@@ -341,7 +341,11 @@ whose account is paused stops the run rather than switching to another account (
 Claude Code on …**, with **How SAM picks the account** behind it. The breakdown opens on its own when a
 choice is skipped or stops the run, or when no account is available. A chat's session details show
 the account its agent ran on and which step chose it. Other members see only the step, not your
-account's name. When a member leaves a project, their choices on its profiles are removed.
+account's name. The details' **Configuration** section shows what the agent actually runs with after
+every override (profile, skill, project default, your agent settings): its **Model**, **Effort**,
+**Permissions**, OpenCode **Provider** and **Skill**. Codex always runs with full access and never
+asks, whatever permission mode is set, and the section says so. A skill that is not shared with the
+project shows its name only to you. When a member leaves a project, their choices on its profiles are removed.
 
 ### Agent defaults
 
