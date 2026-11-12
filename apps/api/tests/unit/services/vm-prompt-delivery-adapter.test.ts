@@ -180,6 +180,44 @@ describe('VM prompt delivery adapter', () => {
     });
   });
 
+  it.each([null, 0])(
+    'committed wake authority result %s controls submission independently of transport success',
+    async (released) => {
+      const row = {
+        ...targetRow,
+        snapshot_recovery_status: 'restored',
+        snapshot_recovery_task_id: 'wake-task',
+        snapshot_recovery_workspace_id: 'workspace-1',
+        snapshot_recovery_attempt_id: 'wake-attempt',
+        wake_task_status: 'in_progress',
+      };
+      const env = envWithTarget(row);
+      const signalSessionWakeReady = vi.fn().mockResolvedValue(released);
+      env.PROJECT_DATA = {
+        idFromName: vi.fn(),
+        get: vi.fn(() => ({ signalSessionWakeReady })),
+      } as unknown as Env['PROJECT_DATA'];
+      mocks.nodeAgentRequest.mockResolvedValue(protocolFixture.capabilities);
+      mocks.sendPromptToAgentOnNode.mockResolvedValue({
+        ...protocolFixture.newPrompt,
+        sessionId: 'acp-1',
+        receipt: {
+          ...(protocolFixture.newPrompt.receipt as Record<string, unknown>),
+          deliveryId: 'delivery-1',
+        },
+      });
+      const result = await new DefaultVmPromptDeliveryAdapter(env).submit(input(false));
+      expect(signalSessionWakeReady).toHaveBeenCalledOnce();
+      expect(result).toMatchObject({ kind: released === null ? 'retry' : 'accepted' });
+      if (released === null) {
+        expect(mocks.nodeAgentRequest).not.toHaveBeenCalled();
+        expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+      } else {
+        expect(mocks.sendPromptToAgentOnNode).toHaveBeenCalledOnce();
+      }
+    }
+  );
+
   it('returns a terminal denial when source authority is revoked during transport preparation', async () => {
     mocks.nodeAgentRequest.mockResolvedValue(protocolFixture.capabilities);
     let transportStarted!: () => void;

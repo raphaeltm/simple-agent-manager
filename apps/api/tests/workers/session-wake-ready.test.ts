@@ -240,13 +240,69 @@ describe('wake completion → D1 authority → DO scheduling → HTTP prompt adm
               }
             : { runtime, nodeId, runtimeIncarnationId: 'obsolete' },
       } satisfies SessionWakeReadyInput;
-      expect(await stub.signalSessionWakeReady(stale)).toBe(0);
+      expect(await stub.signalSessionWakeReady(stale)).toBeNull();
       await runInDurableObject(stub, (_instance, state) => state.storage.deleteAlarm());
     }
   );
 });
 
 describe('readiness RPC interleaving', () => {
+  it('read-only steering never activates or nudges a committed wake and rejects a rebound task', async () => {
+    const { stub, input } = await fixture('vm');
+    await stub.sleepSession(input.chatSessionId);
+    const activation = vi.fn();
+    const readOnlyBindings = {
+      ...bindings,
+      PROJECT_DATA: { idFromName: activation, get: activation },
+    } as unknown as Env;
+    const resolve = () =>
+      resolveVmPromptDeliveryTarget(
+        readOnlyBindings,
+        input.projectId,
+        input.chatSessionId,
+        undefined,
+        async () => null,
+        { allowWake: false }
+      );
+    expect(await resolve()).toMatchObject({ kind: 'ready' });
+    expect(await stub.getSession(input.chatSessionId)).toMatchObject({ status: 'sleeping' });
+    await env.DATABASE.prepare('UPDATE tasks SET workspace_id = NULL WHERE id = ?')
+      .bind(input.fence.runtime === 'vm' ? input.fence.taskId : '')
+      .run();
+    expect(await resolve()).toMatchObject({ kind: 'retry' });
+    expect(activation).not.toHaveBeenCalled();
+    await runInDurableObject(stub, (_instance, state) => {
+      expect(state.storage.sql.exec('SELECT * FROM session_wake_readiness').toArray()).toEqual([]);
+      expect(
+        state.storage.sql
+          .exec('SELECT next_attempt_at FROM session_inbox WHERE id = ?', 'first')
+          .toArray()[0]?.next_attempt_at
+      ).toBeGreaterThan(Date.now());
+      return state.storage.deleteAlarm();
+    });
+  });
+
+  it('returns null for rejected local authority while a valid duplicate zero remains accepted', async () => {
+    const { stub, input } = await fixture('vm');
+    expect(await stub.signalSessionWakeReady(input)).toBeGreaterThan(0);
+    expect(await stub.signalSessionWakeReady(input)).toBe(0);
+    expect(await signalSessionWakeReadyBestEffort(bindings, input)).toBe(true);
+    await stub.stopSession(input.chatSessionId, { deferAlarm: true });
+    expect(await stub.signalSessionWakeReady(input)).toBeNull();
+    expect(await signalSessionWakeReadyBestEffort(bindings, input)).toBe(false);
+    expect(
+      await resolveVmPromptDeliveryTarget(
+        bindings,
+        input.projectId,
+        input.chatSessionId,
+        undefined,
+        async () => null
+      )
+    ).toMatchObject({ kind: 'retry' });
+    expect(await stub.getSession(input.chatSessionId)).toMatchObject({ status: 'stopped' });
+    await runInDurableObject(stub, (_instance, state) => state.storage.deleteAlarm());
+  });
+
   it('keeps restored VM chat sleeping until handoff, then repairs a lost notification by hydration', async () => {
     const { stub, input, userId } = await fixture('vm');
     await addReadinessDistractors(input, userId);
@@ -342,7 +398,7 @@ describe('readiness RPC interleaving', () => {
       session: { status: 'sleeping' },
       state: { recoveryStatus: 'waking' },
     });
-    expect(await stub.signalSessionWakeReady(input)).toBe(0);
+    expect(await stub.signalSessionWakeReady(input)).toBeNull();
     expect(await stub.getSession(input.chatSessionId)).toMatchObject({ status: 'sleeping' });
     await env.DATABASE.prepare(
       "UPDATE tasks SET status = 'in_progress', execution_step = 'running' WHERE id = ?"
@@ -357,7 +413,7 @@ describe('readiness RPC interleaving', () => {
     expect(await stub.getSession(input.chatSessionId)).toMatchObject({ status: 'active' });
     expect(await stub.signalSessionWakeReady(input)).toBe(0);
     await stub.sleepSession(input.chatSessionId);
-    expect(await stub.signalSessionWakeReady(input)).toBe(0);
+    expect(await stub.signalSessionWakeReady(input)).toBeNull();
     expect(await stub.getSession(input.chatSessionId)).toMatchObject({ status: 'sleeping' });
     await runInDurableObject(stub, (_instance, state) => state.storage.deleteAlarm());
   });
@@ -418,7 +474,7 @@ describe('readiness RPC interleaving', () => {
         { deferActivation: true, recoveryAttemptId: 'wake-1' }
       )
     ).toBe(false);
-    expect(await stub.signalSessionWakeReady(input)).toBe(0);
+    expect(await stub.signalSessionWakeReady(input)).toBeNull();
     expect(await stub.getSession(input.chatSessionId)).toMatchObject({ status: 'sleeping' });
     await runInDurableObject(stub, (_instance, state) => state.storage.deleteAlarm());
   });
@@ -472,7 +528,7 @@ describe('readiness RPC interleaving', () => {
             expect(await instance.sleepSession(input.chatSessionId)).toBe(true);
           }
           release();
-          expect(await signal).toBe(0);
+          expect(await signal).toBeNull();
           expect(await instance.getSession(input.chatSessionId)).toMatchObject(
             action === 'stop'
               ? { status: 'stopped' }

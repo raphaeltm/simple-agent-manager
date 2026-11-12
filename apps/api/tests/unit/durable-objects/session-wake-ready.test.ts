@@ -269,13 +269,13 @@ describe('readiness against actual SQL authority', () => {
         db.exec(`CREATE TABLE nodes (id TEXT, runtime TEXT, status TEXT, runtime_incarnation_id TEXT);
         CREATE TABLE workspaces (id TEXT, node_id TEXT, project_id TEXT, chat_session_id TEXT, status TEXT, runtime_deletion_confirmed_at TEXT, user_id TEXT);
         CREATE TABLE agent_sessions (id TEXT, workspace_id TEXT, status TEXT, user_id TEXT);
-        CREATE TABLE session_snapshots (chat_session_id TEXT, project_id TEXT, recovery_status TEXT, recovery_workspace_id TEXT, recovery_task_id TEXT, recovery_attempt_id TEXT);
-        CREATE TABLE tasks (id TEXT, project_id TEXT, chat_session_id TEXT, status TEXT);
+        CREATE TABLE session_snapshots (chat_session_id TEXT, project_id TEXT, recovery_status TEXT, recovery_workspace_id TEXT, recovery_task_id TEXT, recovery_attempt_id TEXT, user_id TEXT);
+        CREATE TABLE tasks (id TEXT, project_id TEXT, chat_session_id TEXT, status TEXT, workspace_id TEXT, user_id TEXT);
         INSERT INTO workspaces VALUES ('workspace','node','project','chat','running',NULL,'owner');
         INSERT INTO agent_sessions VALUES ('agent','workspace','running','owner');
         INSERT INTO agent_sessions VALUES ('foreign-agent','workspace','running','other-user');
-        INSERT INTO session_snapshots VALUES ('chat','project','restored','workspace','task','wake-1');
-        INSERT INTO tasks VALUES ('task','project','chat','in_progress');`);
+        INSERT INTO session_snapshots VALUES ('chat','project','restored','workspace','task','wake-1','owner');
+        INSERT INTO tasks VALUES ('task','project','chat','in_progress','workspace','owner');`);
         db.prepare('INSERT INTO nodes VALUES (?, ?, ?, ?)').run(
           'node',
           runtime,
@@ -305,6 +305,23 @@ describe('readiness against actual SQL authority', () => {
         expect(
           await isSessionWakeReadyCurrent(env, { ...ready, agentSessionId: 'foreign-agent' })
         ).toBe(false);
+        if (runtime === 'vm') {
+          for (const mutation of [
+            "UPDATE tasks SET workspace_id = 'replacement-workspace'",
+            'UPDATE tasks SET workspace_id = NULL',
+            "UPDATE tasks SET user_id = 'other-user'",
+            "UPDATE session_snapshots SET user_id = 'other-user'",
+          ]) {
+            // All other ready rows remain intact: only the handoff identity differs.
+            expect(await isSessionWakeReadyCurrent(env, ready)).toBe(true);
+            db.exec(mutation);
+            expect(await isSessionWakeReadyCurrent(env, ready)).toBe(false);
+            db.exec(
+              "UPDATE tasks SET workspace_id = 'workspace', user_id = 'owner'; UPDATE session_snapshots SET user_id = 'owner'"
+            );
+          }
+          expect(await isSessionWakeReadyCurrent(env, ready)).toBe(true);
+        }
         if (runtime === 'vm')
           db.exec("UPDATE session_snapshots SET recovery_attempt_id = 'new-wake'");
         else db.exec("UPDATE nodes SET runtime_incarnation_id = 'new-incarnation'");

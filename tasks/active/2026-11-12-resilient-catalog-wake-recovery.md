@@ -63,6 +63,9 @@ write round trips. At 20 seconds of shared work per minute, the idealized throug
 `1861.5 / 20 = 93.075`, or roughly 93 minutes. Reads, provider fetches, promotion processing,
 partial-pass scheduling and other overhead can make actual completion take longer, exhausting
 the default two-hour deadline visibly if they exceed the remaining budget.
+With two changed sources of that size in each of the same 51 scopes (102 sources total), the
+same idealized estimate doubles to approximately 186 minutes before overhead, already exceeding
+the two-hour default. These are workload sensitivity estimates, not completion guarantees.
 The same optimistic calculation for 401 scopes is `401 * 36.5 / 20 = 731.825` minutes (about 12.2 hours),
 well beyond the default recovery deadline. Multiple changed sources per scope multiply the work;
 larger/slower workloads may also exceed the deadline. They must fail visibly while retaining
@@ -76,7 +79,6 @@ enumeration as well as completed publication.
 Staging measurement of provider fetch, staging batches, cursor persistence and promotion latency
 is pending. Record measured timing and the tested catalog/source/scope counts with the final
 staging evidence; revise estimates if those measurements differ materially.
-
 
 ## Implementation evidence before full release gates
 

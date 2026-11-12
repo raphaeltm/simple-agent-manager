@@ -15,6 +15,7 @@ import type { ProjectEventWakeRecoveryGuard } from './session-recovery-authority
 import { classifySessionRecoveryRefusal } from './session-recovery-refusals';
 import { sessionSleepClaimLeaseMs } from './session-snapshot-sleep-claim';
 import { signalSessionWakeReadyBestEffort } from './session-wake-ready';
+import { isSessionWakeReadyCurrent } from './session-wake-ready-authority';
 
 export interface VmPromptDeliveryTarget {
   projectId: string;
@@ -411,28 +412,32 @@ export async function resolveVmPromptDeliveryTarget(
   if (
     row.node_runtime === 'vm' &&
     row.snapshot_recovery_status === 'restored' &&
-    row.snapshot_recovery_workspace_id === row.workspace_id &&
     row.snapshot_recovery_task_id &&
-    row.snapshot_recovery_attempt_id &&
-    ['in_progress', 'awaiting_followup'].includes(row.wake_task_status ?? '')
+    row.snapshot_recovery_attempt_id
   ) {
+    const readiness = {
+      projectId,
+      chatSessionId,
+      workspaceId: row.workspace_id,
+      agentSessionId: row.agent_session_id,
+      fence: {
+        runtime: 'vm' as const,
+        taskId: row.snapshot_recovery_task_id,
+        recoveryAttemptId: row.snapshot_recovery_attempt_id,
+      },
+    };
+    if (!allowWake) {
+      // Steering and receipt probes can read committed authority, but cannot activate a chat,
+      // nudge its inbox or re-arm its alarm. Use the exact mutation path's D1 predicate.
+      if (!(await isSessionWakeReadyCurrent(env, readiness)))
+        return { kind: 'retry', reason: 'Committed wake authority is no longer current' };
+      return readyTarget(projectId, chatSessionId, row, row.node_id, row.agent_session_id);
+    }
     const guarded = await runSideEffectGuard();
     if (guarded) return { kind: 'guarded', result: guarded };
     // The durable inbox retry also repairs a lost activation signal without a browser
     // or a second human prompt. The DO validates the exact committed fence again.
-    if (
-      !(await signalSessionWakeReadyBestEffort(env, {
-        projectId,
-        chatSessionId,
-        workspaceId: row.workspace_id,
-        agentSessionId: row.agent_session_id,
-        fence: {
-          runtime: 'vm',
-          taskId: row.snapshot_recovery_task_id,
-          recoveryAttemptId: row.snapshot_recovery_attempt_id,
-        },
-      }))
-    )
+    if (!(await signalSessionWakeReadyBestEffort(env, readiness)))
       return { kind: 'retry', reason: 'Committed wake activation is pending' };
   }
 
