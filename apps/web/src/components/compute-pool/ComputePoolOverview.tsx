@@ -13,6 +13,7 @@ import {
   POOL_STATE_WARNINGS,
   WORKSPACE_STRATEGY_COPY,
 } from '../../lib/compute-pool-copy';
+import { defaultWorkspaceFitWarning } from '../../lib/compute-pool-default-fit';
 import {
   type MachineGroup,
   type MachineTypeRow,
@@ -178,7 +179,9 @@ export function ComputePoolOverview({
   const allowedCount = allowedGroups.reduce((total, { rows }) => total + rows.length, 0);
   const warning =
     (summary.effectiveState ? POOL_STATE_WARNINGS[summary.effectiveState] : undefined) ??
-    (allowedCount === 0 ? POOL_STATE_WARNINGS['configured-empty'] : undefined);
+    (allowedCount === 0 ? POOL_STATE_WARNINGS['configured-empty'] : undefined) ??
+    defaultWorkspaceFitWarning(groups) ??
+    undefined;
   const sentence = allowedMachinesSentence(groups);
   const strategy = WORKSPACE_STRATEGY_COPY[pool.strategy];
   const exhaustion = EXHAUSTION_POLICY_COPY[pool.exhaustionPolicy];
