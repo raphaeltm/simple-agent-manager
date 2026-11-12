@@ -1,4 +1,4 @@
-import { REQUEST_SECRET_TOOL } from '@simple-agent-manager/shared';
+import type { TypedChatCardTool } from '@simple-agent-manager/shared';
 import { expectJsonRecord, maybeJsonRecord } from '@simple-agent-manager/worker-core';
 import * as v from 'valibot';
 
@@ -90,27 +90,6 @@ export function parseChatMessageRowCompact(
  * Preserves all other metadata fields (toolCallId, title, kind, status, locations).
  */
 const textEncoder = new TextEncoder();
-const DOCUMENT_CARD_TOOLS = new Set([
-  'upload_to_library',
-  'replace_library_file',
-  'display_from_library',
-]);
-/**
- * Operations approval request tool. Its chat card needs only the approval ID: the card
- * reads action, target, reason and status from the server record, never from chat text.
- */
-const APPROVAL_CARD_TOOL = 'ops_request_action';
-/**
- * Agent question tool. Its chat card needs only the attention marker and session IDs: the
- * card reads the question, options and answer state from the server marker.
- */
-const HUMAN_INPUT_CARD_TOOL = 'request_human_input';
-/**
- * Agent secret request tool. Its chat card needs only the request ID: the card reads name,
- * reason and status from the server record. Keep in sync with SECRET_REQUEST_CARD_TOOL in
- * apps/web (secret-request-card-data.ts).
- */
-const SECRET_REQUEST_CARD_TOOL = REQUEST_SECRET_TOOL;
 const TOOL_NAME_SEPARATORS = /__|\/|\.|:/;
 
 type CardPayloadMatcher = (payload: Record<string, unknown>) => Record<string, unknown> | undefined;
@@ -162,15 +141,25 @@ function secretRequestPayload(
   return typeof id === 'string' && id ? { secretRequest: { id } } : undefined;
 }
 
+/**
+ * How to recognise each typed chat card's result payload. Keyed by the shared
+ * TYPED_CHAT_CARD_TOOLS list, so adding a card tool there fails to compile until it has a matcher
+ * here. Each card needs only IDs: it re-reads everything it shows from the server record.
+ */
+const CARD_PAYLOAD_MATCHERS: Record<TypedChatCardTool, CardPayloadMatcher> = {
+  upload_to_library: documentPayload,
+  replace_library_file: documentPayload,
+  display_from_library: documentPayload,
+  ops_request_action: approvalPayload,
+  request_human_input: humanInputPayload,
+  request_secret: secretRequestPayload,
+};
+
 /** Which typed chat card a tool renders as, and how to recognise its result payload. */
 function cardPayloadMatcher(meta: Record<string, unknown>): CardPayloadMatcher | undefined {
   const base = normalizeToolName(meta.toolName) ?? normalizeToolName(meta.title);
-  if (!base) return undefined;
-  if (DOCUMENT_CARD_TOOLS.has(base)) return documentPayload;
-  if (base === APPROVAL_CARD_TOOL) return approvalPayload;
-  if (base === HUMAN_INPUT_CARD_TOOL) return humanInputPayload;
-  if (base === SECRET_REQUEST_CARD_TOOL) return secretRequestPayload;
-  return undefined;
+  if (!base || !Object.hasOwn(CARD_PAYLOAD_MATCHERS, base)) return undefined;
+  return CARD_PAYLOAD_MATCHERS[base as TypedChatCardTool];
 }
 
 function parsePayloadCandidate(
