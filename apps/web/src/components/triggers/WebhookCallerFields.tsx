@@ -101,9 +101,13 @@ export function WebhookCallerFields({
                   aria-label="Event ID location"
                   className={`${INPUT_CLASS} sm:!w-44`}
                   value={value.eventIdSource}
-                  onChange={(event) =>
-                    onChange({ eventIdSource: event.target.value === 'path' ? 'path' : 'header' })
-                  }
+                  onChange={(event) => {
+                    const eventIdSource = event.target.value === 'path' ? 'path' : 'header';
+                    // A header name is not a body path and vice versa: a key kept across the
+                    // switch would pass validation and then never find the ID.
+                    if (eventIdSource !== value.eventIdSource)
+                      onChange({ eventIdSource, eventIdKey: '' });
+                  }}
                 >
                   <option value="header">In a header</option>
                   <option value="path">In the body</option>

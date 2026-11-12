@@ -112,7 +112,11 @@ function SigningSecretField({
   const input = useRef<HTMLInputElement>(null);
   const savedRow = useRef<HTMLDivElement>(null);
   // Where focus goes after the field and the saved line swap places.
-  const focusNext = useRef<'input' | 'replace' | null>(focusOnMount ? 'input' : null);
+  // Opened from the secret link: the field when no secret is saved yet, otherwise the button
+  // that opens it, so keyboard focus lands on the control that is actually on the page.
+  const focusNext = useRef<'input' | 'replace' | null>(
+    focusOnMount ? (secretSet ? 'replace' : 'input') : null
+  );
   const inputId = useId();
   const helpId = useId();
   const errorId = useId();
@@ -207,6 +211,9 @@ function SigningSecretField({
             <Button
               variant="ghost"
               className="flex-1 sm:flex-none"
+              // A save in flight keeps running after reset(); cancelling then saving another
+              // value could let the first one land last. Wait for it to settle.
+              disabled={save.isPending}
               onClick={() => {
                 focusNext.current = 'replace';
                 save.reset();

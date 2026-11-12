@@ -48,7 +48,7 @@ The request must use `Content-Type: application/json`, and the top-level value m
 
 Successful admission returns HTTP `202`. The response indicates whether the delivery created an execution, was filtered, was a duplicate, or was skipped by trigger policy. Invalid credentials return a uniform `404`; overload protection can return `429`, and a durable submission failure returns `503`.
 
-A call that reaches the automation is also recorded as a project event (source `webhook`, with the trigger ID as its subject), so agents can wait for it the same way they wait for GitHub events. Types include `webhook.accepted`, `webhook.filtered`, `webhook.still_running`, `webhook.inactive` for a paused automation, and `webhook.internal_error` when the run couldn't be submitted. Signed triggers also record `webhook.challenge` when the provider checks the address and `webhook.rejected` when a correctly signed call is refused (a stale timestamp, a body that is not a JSON object, or a missing event ID; at most one of each per minute, with the reason and no request content). Refusals anyone can cause by knowing the address, a wrong signature or no saved secret, appear in the call log and the setup status but are not project events, so forged calls cannot wake agents; for them `webhook.accepted` means the event was verified and recorded, which can be before its run starts. Calls SAM refuses before that aren't recorded: an invalid token, a malformed or oversized body, a missing agent profile, or the rate limit. Duplicates aren't recorded either, so check the HTTP response rather than count on an event for every call. The event carries the delivery ID, the outcome, the trigger's name and source label, and the run it started, plus a summary of the request's shape: how many headers SAM kept, and how many keys and values the JSON body has. It doesn't include the body or header values; those reach the run's instructions through the [template context](#template-context).
+A call that reaches the automation is also recorded as a project event (source `webhook`, with the trigger ID as its subject), so agents can wait for it the same way they wait for GitHub events. Types include `webhook.accepted`, `webhook.filtered`, `webhook.still_running`, `webhook.inactive` for a paused automation, and `webhook.internal_error` when the run couldn't be submitted. Signed triggers also record `webhook.challenge` when the provider checks the address and `webhook.rejected` when a current, correctly signed call is refused (a body that is not a JSON object, or a missing event ID; at most one of each per minute, with the reason and no request content). Refusals anyone can cause without the secret appear in the call log and the setup status but are not project events, so they cannot wake agents: a wrong signature, no saved secret, a stale timestamp (a captured request keeps its valid signature after it ages out), and a signed body repeated under a new header ID; for them `webhook.accepted` means the event was verified and recorded, which can be before its run starts. Calls SAM refuses before that aren't recorded: an invalid token, a malformed or oversized body, a missing agent profile, or the rate limit. Duplicates aren't recorded either, so check the HTTP response rather than count on an event for every call. The event carries the delivery ID, the outcome, the trigger's name and source label, and the run it started, plus a summary of the request's shape: how many headers SAM kept, and how many keys and values the JSON body has. It doesn't include the body or header values; those reach the run's instructions through the [template context](#template-context).
 
 ## Signed webhooks (Slack and HMAC)
 
@@ -113,15 +113,22 @@ Then save the service's secret on the trigger's page and give the service the tr
 This scheme signs the body only, with no timestamp. SAM refuses a replayed request by its event ID
 for as long as it keeps the call log (seven days by default, and at least as long as an event can
 wait); after that, a captured request replayed byte for byte would be taken as new. When the event
-ID comes from a header, which the signature does not cover, SAM also refuses a body it has already
-taken under another ID, so two different events must not have byte-identical bodies. Prefer an ID
-inside the body when the service offers one.
+ID comes from a header, which the signature does not cover, SAM cannot tell a replay of a captured
+request under a fresh ID from a new event with the same body. So a signed body it has already taken
+under another ID starts nothing: SAM answers `202` with `ignored: "repeated_body"` and records
+**Refused: same body as an earlier event, under a new ID**. Identical bodies for different events
+are not supported with a header ID; read the ID from the body when the service puts one there.
+
+SAM uses the secret exactly as saved, except that leading and trailing spaces and line breaks are
+removed, because pasting often adds them. A sender whose secret really starts or ends with a space
+cannot be verified.
 
 ### The event ID
 
 Every signed trigger says where the sender's own event ID is, because providers retry. A retry
 with the same ID starts nothing and is recorded as **Ignored: already received**. An event without
-a readable ID (missing, empty, an object or array, or longer than 200 bytes) starts nothing
+a readable ID (missing, empty, an object or array, a number that is not an exact integer below
+2^53, or longer than 200 bytes) starts nothing
 either: SAM answers `202` so the provider does not switch the subscription off, records
 **Refused: the event had no ID**, and the status line says so. SAM never falls back to skipping the
 duplicate check.
@@ -150,30 +157,35 @@ Both limits are installation settings; see [Runtime Configuration](#runtime-conf
 
 ### What a signed sender sees
 
-| Response                      | Meaning                                                                                                                                              |
-| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `202`                         | Accepted: waiting or started, a duplicate, ignored by the conditions, ignored for a missing event ID, or the trigger is paused. The body says which. |
-| `200` with the challenge text | Slack's address check (`url_verification`)                                                                                                           |
-| `401`                         | The signature is missing or wrong, or Slack's timestamp is outside the window                                                                        |
-| `503`                         | No signing secret is saved yet, or SAM could not record the event; retry                                                                             |
-| `429`                         | Too many calls, or too many events already waiting                                                                                                   |
-| `413`, `400`                  | The body is larger than 64 KiB, or is not a JSON object                                                                                              |
-| `404`                         | No signed trigger has this address                                                                                                                   |
+| Response                      | Meaning                                                                                                                                                                                                                  |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `202`                         | Answered, not necessarily queued: only `queued: true` means the event was recorded for a run. Otherwise the body says why (`duplicate`, `filtered`, `inactive`, or `ignored` with `missing_event_id` / `repeated_body`). |
+| `200` with the challenge text | Slack's address check (`url_verification`)                                                                                                                                                                               |
+| `401`                         | The signature is missing or wrong, or Slack's timestamp is outside the window                                                                                                                                            |
+| `503`                         | No signing secret is saved yet, the saved conditions cannot be read, or SAM could not record the event; retry                                                                                                            |
+| `429`                         | Too many calls, or too many events already waiting                                                                                                                                                                       |
+| `413`, `400`                  | The body is larger than 64 KiB, or is not a JSON object                                                                                                                                                                  |
+| `404`                         | No signed trigger has this address                                                                                                                                                                                       |
+
+Error responses have the body `{ "accepted": false, "error": "<CODE>", "message": "…" }`, with
+codes such as `UNAUTHORIZED`, `TOO_MANY_REQUESTS` and `SERVICE_UNAVAILABLE`.
 
 Refused calls appear under **Calls received** with the reason. Repeated refusals for the same
 reason within a minute share one row, so a flood of forged calls cannot fill the log.
 
 ### When nothing happens
 
-| What you see                                                | Likely cause                                                                  | What to do                                                                  |
-| ----------------------------------------------------------- | ----------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| Slack says the Request URL could not be verified            | No signing secret saved, or the wrong one                                     | Save the app's Signing Secret (not a bot token), then use Slack's **Retry** |
-| **Requests are being refused: the signature doesn’t match** | The saved secret is not the sender's current one, or a proxy changes the body | Select **Replace secret** and paste the current one                         |
-| **Requests are being refused: the requests are too old**    | The sender is replaying old requests or its clock is wrong                    | Check the sender; the window is five minutes                                |
-| Calls show **Ignored: did not match the filters**           | The event is not a mention, or it came from a bot                             | Edit the conditions on the trigger                                          |
-| Calls show **Refused: the event had no ID**                 | The event ID location is wrong for this sender                                | Edit the trigger and correct it                                             |
-| Calls show **Waiting for a free run** for a long time       | Earlier runs are still going                                                  | Raise **Most runs at once**, or stop a run that is stuck                    |
-| Nothing under **Calls received**                            | The sender is not calling this address                                        | Check the URL in the sender's settings, and that the app is in the channel  |
+| What you see                                                          | Likely cause                                                                  | What to do                                                                  |
+| --------------------------------------------------------------------- | ----------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Slack says the Request URL could not be verified                      | No signing secret saved, or the wrong one                                     | Save the app's Signing Secret (not a bot token), then use Slack's **Retry** |
+| **Requests are being refused: the signature doesn’t match**           | The saved secret is not the sender's current one, or a proxy changes the body | Select **Replace secret** and paste the current one                         |
+| **Requests are being refused: the requests are too old**              | The sender is replaying old requests or its clock is wrong                    | Check the sender; the window is five minutes                                |
+| Calls show **Ignored: did not match the filters**                     | The event is not a mention, or it came from a bot                             | Edit the conditions on the trigger                                          |
+| Calls show **Refused: the event had no ID**                           | The event ID location is wrong for this sender                                | Edit the trigger and correct it                                             |
+| Calls show **Refused: same body as an earlier event, under a new ID** | A replayed request, or a sender that reuses bodies with a header ID           | Read the event ID from the body if the sender puts one there                |
+| Calls show **Failed: the saved conditions could not be read**         | The stored conditions are damaged                                             | Open **Edit**, set the conditions and save                                  |
+| Calls show **Waiting for a free run** for a long time                 | Earlier runs are still going                                                  | Raise **Most runs at once**, or stop a run that is stuck                    |
+| Nothing under **Calls received**                                      | The sender is not calling this address                                        | Check the URL in the sender's settings, and that the app is in the channel  |
 
 ## Template Context
 
@@ -236,7 +248,7 @@ A webhook trigger's `webhookConfig` reports `verification` (the scheme), `eventI
 
 ## Creating Webhooks through MCP
 
-An agent can set up either kind. For a signed webhook, call `create_trigger` with `sourceType: "webhook"`, an `agentProfileId`, and `webhookConfig: { "verification": { "scheme": "slack_v0" } }` (or the `hmac_sha256_body` form above). The result has no credential and no claim. It carries `webhookConfig.endpointUrl`, the address to give the sender, and `webhookConfig.setup.secretEntryUrl`, a link to the trigger's page. The agent gives you that link and you save the signing secret there; `create_trigger` refuses a secret passed to it, so the secret never enters a transcript. The agent then calls `get_trigger`, or waits on the trigger's `webhook.challenge`, `webhook.accepted` and `webhook.rejected` project events, to see that the address was confirmed, that the first event arrived, or why calls are refused. `get_trigger` returns the configuration, the setup state and recent calls without bodies, so a different agent can pick up an interrupted setup.
+An agent can set up either kind. For a signed webhook, call `create_trigger` with `sourceType: "webhook"`, an `agentProfileId`, and `webhookConfig: { "verification": { "scheme": "slack_v0" } }` (or the `hmac_sha256_body` form above). The result has no credential and no claim. It carries `webhookConfig.endpointUrl`, the address to give the sender, and `webhookConfig.setup.secretEntryUrl`, a link to the trigger's page. The agent gives you that link and you save the signing secret there, on the trigger's page. Never paste a signing secret into a chat or into tool arguments: once it is there it is in the transcript, and `create_trigger` refusing a secret argument does not remove it. The agent then calls `get_trigger`, or waits on the trigger's `webhook.challenge`, `webhook.accepted` and `webhook.rejected` project events, to see that the address was confirmed, that the first event arrived, or why calls are refused. `get_trigger` returns the configuration, the setup state and recent calls without bodies, so a different agent can pick up an interrupted setup.
 
 The rest of this section is about token webhooks.
 

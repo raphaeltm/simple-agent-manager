@@ -12,7 +12,7 @@ import { act, cleanup, render, screen, waitFor, within } from '@testing-library/
 import userEvent from '@testing-library/user-event';
 import { type ReactNode, useState } from 'react';
 import { MemoryRouter, Outlet, Route, Routes, useLocation } from 'react-router';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 
 const api = vi.hoisted(() => ({
   listWorkflowRuns: vi.fn(),
@@ -1204,6 +1204,13 @@ describe('signed webhook automation', { timeout: 20_000 }, () => {
     expect(screen.getByText(/Enter the header that carries the event ID/)).toBeVisible();
     await user.type(screen.getByLabelText('Signature header'), 'X-Hub-Signature-256');
     await user.type(screen.getByLabelText('Where is the event ID?'), 'X-GitHub-Delivery');
+    // A header name is not a body path: switching the location clears the key, both ways.
+    await user.selectOptions(screen.getByLabelText('Event ID location'), 'path');
+    expect(screen.getByLabelText('Where is the event ID?')).toHaveValue('');
+    await user.type(screen.getByLabelText('Where is the event ID?'), 'event.id');
+    await user.selectOptions(screen.getByLabelText('Event ID location'), 'header');
+    expect(screen.getByLabelText('Where is the event ID?')).toHaveValue('');
+    await user.type(screen.getByLabelText('Where is the event ID?'), 'X-GitHub-Delivery');
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await user.selectOptions(screen.getByLabelText('Agent'), 'prof-1');
     await user.type(screen.getByLabelText('What should it do?'), 'Triage it');
@@ -1325,6 +1332,56 @@ describe('signed webhook automation', { timeout: 20_000 }, () => {
     expect(sections().indexOf('Webhook connection')).toBeGreaterThan(
       sections().indexOf('Calls received')
     );
+  });
+
+  it('opens the secret link onto the Replace button when a secret is already saved', async () => {
+    const scroll = vi.fn();
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = scroll;
+    onTestFinished(() => {
+      Element.prototype.scrollIntoView = original;
+    });
+    api.getTrigger.mockResolvedValue(
+      signedTrigger(
+        { state: 'waiting_for_first_request' },
+        { signingSecret: { set: true, setAt: new Date(NOW - HOUR).toISOString(), setBy: 'owner' } }
+      )
+    );
+    window.history.replaceState(null, '', '/#signing-secret');
+    renderAt('/projects/p1/automation/trigger/trg-slack');
+    const replace = await screen.findByRole('button', { name: 'Replace secret' }, CHAINED_LOAD);
+    await waitFor(() => expect(replace).toHaveFocus());
+    expect(scroll).toHaveBeenCalled();
+    // The fragment is used once.
+    expect(window.location.hash).toBe('');
+  });
+
+  it('keeps Cancel disabled until a secret save settles', async () => {
+    const user = userEvent.setup();
+    let finish!: () => void;
+    api.setWebhookSigningSecret.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = () =>
+            resolve({
+              signingSecret: { set: true, setAt: new Date().toISOString(), setBy: 'owner' },
+            });
+        })
+    );
+    api.getTrigger.mockResolvedValue(
+      signedTrigger(
+        { state: 'receiving' },
+        { signingSecret: { set: true, setAt: new Date(NOW - HOUR).toISOString(), setBy: 'owner' } }
+      )
+    );
+    renderAt('/projects/p1/automation/trigger/trg-slack');
+    await user.click(await screen.findByRole('button', { name: 'Replace secret' }, CHAINED_LOAD));
+    await user.type(screen.getByLabelText('Signing secret'), SECRET);
+    await user.click(screen.getByRole('button', { name: 'Save secret' }));
+    // While the first save is in flight, Cancel cannot open the way to a second one.
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    finish();
+    expect(await screen.findByTestId('signing-secret-saved')).toHaveTextContent(/hidden/);
   });
 
   it('lets a viewer see the connection but not the secret field', async () => {
