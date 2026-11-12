@@ -5,6 +5,7 @@
  */
 import {
   DEFAULT_WEBHOOK_DELIVERY_RETENTION_DAYS,
+  isWebhookSignedScheme,
   type TriggerPreviewResponse,
   type TriggerResponse,
   type WebhookCredential,
@@ -23,7 +24,7 @@ import { API_URL } from '../../lib/api/client';
 import { webhookDeliveriesQueryOptions } from '../../lib/query-options';
 import { formatTimeFromNow } from '../../lib/time-utils';
 import { useProjectContext } from '../ProjectContext';
-import { deliveryText } from './describe';
+import { deliveryReasonExplained, deliveryText, webhookScheme } from './describe';
 import { useAutomationAction } from './detail-parts';
 import { errorText } from './errors';
 import { LoadError, Loading } from './page';
@@ -34,6 +35,11 @@ import { CopyButton, OutcomeIcon, Panel, SectionTitle } from './ui';
 export const WEBHOOK_INGEST_URL = `${API_URL.replace(/\/$/, '')}/api/webhooks/ingest`;
 
 const DEFAULT_SAMPLE = '{\n  "event": { "action": "created" }\n}';
+
+/** A signed automation (Slack, HMAC) connects differently: see trigger-webhook-signed.tsx. */
+export function isSignedWebhook(trigger: TriggerResponse): boolean {
+  return isWebhookSignedScheme(webhookScheme(trigger.webhookConfig));
+}
 
 export function ConnectWebhook({
   trigger,
@@ -217,6 +223,8 @@ export function TryWebhook({ trigger }: { trigger: TriggerResponse }) {
 /** What a call's linked run is: the run it started, or the record of the run it skipped. */
 function deliveryRunText(outcome: WebhookDelivery['outcome']) {
   if (outcome === 'accepted') return 'Started a run';
+  if (outcome === 'queued') return 'Waiting to start';
+  if (outcome === 'dropped') return 'Never started';
   if (outcome === 'still_running' || outcome === 'concurrent_limit')
     return 'Recorded as a skipped run';
   return 'Linked to a run';
@@ -260,7 +268,7 @@ export function WebhookDeliveries({ trigger }: { trigger: TriggerResponse }) {
           ) : (
             <ul className="m-0 list-none p-0">
               {list.map((delivery) => {
-                const [outcome, text] = deliveryText(delivery.outcome);
+                const [outcome, text] = deliveryText(delivery.outcome, delivery.errorCode);
                 const received = Date.parse(delivery.receivedAt);
                 return (
                   <li
@@ -274,16 +282,18 @@ export function WebhookDeliveries({ trigger }: { trigger: TriggerResponse }) {
                       <span className="text-sm font-semibold text-fg-primary">{text}</span>
                       <span className="text-xs text-fg-muted" title={fullDate(received)}>
                         {formatTimeFromNow(received)} ·{' '}
+                        {/* Not answered yet: the stored status is a placeholder until it is. */}
                         {delivery.outcome === 'processing'
                           ? 'in progress'
                           : `HTTP ${delivery.httpStatus}`}{' '}
                         · {delivery.bodyBytes} bytes
                       </span>
-                      {delivery.errorCode && (
-                        <span className="text-xs text-danger-fg [overflow-wrap:anywhere]">
-                          Error code <code>{delivery.errorCode}</code>
-                        </span>
-                      )}
+                      {delivery.errorCode &&
+                        !deliveryReasonExplained(delivery.outcome, delivery.errorCode) && (
+                          <span className="text-xs text-fg-muted [overflow-wrap:anywhere]">
+                            Code <code>{delivery.errorCode}</code>
+                          </span>
+                        )}
                       {delivery.executionId && (
                         <span
                           className="text-xs text-fg-muted"

@@ -60,14 +60,28 @@ const SOURCE_TYPES = {
 } as const;
 
 const trimmed = (value: string) => value.trim();
+/** HTTP header name characters, as the API accepts them. */
+const HEADER_NAME = /^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/;
 const optional = (value: string) => value.trim() || undefined;
 
 function webhookConfig(state: EditorState): WebhookTriggerConfigInput {
+  const webhook = state.webhook;
+  const config: WebhookTriggerConfigInput = {
+    sourceLabel: optional(webhook.sourceLabel),
+    includedHeaders: splitList(webhook.includedHeaders),
+    filterMode: webhook.filterMode,
+    filters: webhook.filters,
+  };
+  // My own script: SAM's token, and no event-ID rule (it uses the Idempotency-Key header).
+  if (webhook.caller === 'script') return config;
+  const key = webhook.eventIdKey.trim();
   return {
-    sourceLabel: optional(state.webhook.sourceLabel),
-    includedHeaders: splitList(state.webhook.includedHeaders),
-    filterMode: state.webhook.filterMode,
-    filters: state.webhook.filters,
+    ...config,
+    verification:
+      webhook.caller === 'slack'
+        ? { scheme: 'slack_v0' }
+        : { scheme: 'hmac_sha256_body', header: webhook.signatureHeader.trim().toLowerCase() },
+    eventId: webhook.eventIdSource === 'path' ? { path: key } : { header: key.toLowerCase() },
   };
 }
 
@@ -336,6 +350,19 @@ export function validateStep(
     }
     if (state.start === 'webhook' && state.webhook.filters.some((filter) => !filter.path.trim()))
       errors.webhook = 'Every filter needs a path, like event.action.';
+    if (state.start === 'webhook' && state.webhook.caller === 'signed') {
+      if (!HEADER_NAME.test(state.webhook.signatureHeader.trim()))
+        errors.webhookSignature =
+          'Enter the header that carries the signature, like x-hub-signature-256.';
+    }
+    if (state.start === 'webhook' && state.webhook.caller !== 'script') {
+      const key = state.webhook.eventIdKey.trim();
+      if (!key || (state.webhook.eventIdSource === 'header' && !HEADER_NAME.test(key)))
+        errors.webhookEventId =
+          state.webhook.eventIdSource === 'header'
+            ? 'Enter the header that carries the event ID, like x-github-delivery.'
+            : 'Enter where the event ID is in the body, such as event.id.';
+    }
     if (state.start === 'email') {
       const senders = splitEmailList(state.email.allowedSenders);
       if (!senders) errors.email = 'Add at least one allowed sender.';
