@@ -1,3 +1,6 @@
+import {
+  inheritedCredentialAttributionForCaller,
+} from '@simple-agent-manager/scheduler-core';
 import type { CredentialProvider, CredentialSource } from '@simple-agent-manager/shared';
 import { ACP_SESSION_DEFAULTS } from '@simple-agent-manager/shared';
 import { DEFAULT_TASK_TITLE_MAX_LENGTH } from '@simple-agent-manager/shared';
@@ -14,9 +17,6 @@ import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectCapability } from '../middleware/project-auth';
 import { requireOpenIdeaForWorkStart } from '../operations/start-work-core';
-import {
-  inheritedCredentialAttributionForCaller,
-} from '../scheduler-core';
 import { jsonValidator, StartChatSessionSchema } from '../schemas';
 import { resolveTaskAgentOverrides } from '../services/agent-profiles';
 import { acceptInstantSession, continueInstantSessionLaunch } from '../services/instant-session';

@@ -8,13 +8,13 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
-
-import { DEFAULT_RATE_LIMITS } from '../../../src/middleware/rate-limit';
 import {
   evaluateWorkspaceReservationCapacity,
   resolveWorkspaceAdmissionPolicy,
-} from '../../../src/scheduler-core';
+} from '@simple-agent-manager/scheduler-core';
+import { describe, expect, it } from 'vitest';
+
+import { DEFAULT_RATE_LIMITS } from '../../../src/middleware/rate-limit';
 import { getRuntimeLimits } from '../../../src/services/limits';
 
 // =============================================================================

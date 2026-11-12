@@ -15,12 +15,13 @@
  * (`resolveStartupBacklogGuard`). Those replan freshly without spending the rejection budget,
  * and after a bounded number the next reservation drops only the backlog guard.
  */
-import { log } from '../../lib/logger';
 import {
   evaluateWorkspaceReservationCapacity,
   type PlacementAdmissionPolicy,
   type WorkspaceResourceNode,
-} from '../../scheduler-core';
+} from '@simple-agent-manager/scheduler-core';
+
+import { log } from '../../lib/logger';
 import { resolveAdminSetting } from '../../services/admin-settings-resolution';
 import {
   isNodePastLifetimeAdmissionCutoff,

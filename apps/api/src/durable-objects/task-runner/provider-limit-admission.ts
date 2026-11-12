@@ -1,13 +1,13 @@
+import {
+  newProviderLimitWait,
+  parseProviderLimitWait,
+  PROVIDER_LIMIT_POLICY,
+} from '@simple-agent-manager/scheduler-core';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
 import { getCredentialEncryptionKey } from '../../lib/secrets';
 import { getSelectedAgentCredentialReference } from '../../routes/credentials';
-import {
-  newProviderLimitWait,
-  parseProviderLimitWait,
-  PROVIDER_LIMIT_POLICY,
-} from '../../scheduler-core';
 import { resolveProfileCredentialContext } from '../../services/composable-credentials/profile-context';
 import { credentialLimitReferenceKey } from '../../services/credential-limit-events/values';
 import * as projectData from '../../services/project-data';

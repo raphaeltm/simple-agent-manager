@@ -1,8 +1,9 @@
-import type { Env } from '../env';
-import { errors } from '../middleware/error';
 import {
   parseProviderLimitWait,
-} from '../scheduler-core';
+} from '@simple-agent-manager/scheduler-core';
+
+import type { Env } from '../env';
+import { errors } from '../middleware/error';
 import { credentialLimitReferenceKey } from './credential-limit-events/values';
 import {
   sameWorkspaceCallbackIdentity,

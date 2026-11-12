@@ -1,3 +1,7 @@
+import {
+  isEditorVisibleCapacityCandidateRole,
+  PRIMARY_CAPACITY_WORKLOAD_ROLE,
+} from '@simple-agent-manager/scheduler-core';
 import type {
   CapacityPoolCandidate as CapacityPoolCandidateDto,
   CapacityPoolConfigurationState,
@@ -7,10 +11,6 @@ import type {
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 
 import * as schema from '../db/schema';
-import {
-  isEditorVisibleCapacityCandidateRole,
-  PRIMARY_CAPACITY_WORKLOAD_ROLE,
-} from '../scheduler-core';
 import { nextCapacityPoolTimestamp } from './capacity-pool-clock';
 import {
   parseCapacityPoolExcludedSources,

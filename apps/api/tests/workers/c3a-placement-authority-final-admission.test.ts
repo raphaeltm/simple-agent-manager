@@ -1,13 +1,13 @@
 import type {
+  WorkspaceAdmissionPolicy,
+} from '@simple-agent-manager/scheduler-core';
+import type {
   CapacityPlacementSnapshot,
   ResolvedResourceReservation,
 } from '@simple-agent-manager/shared';
 import { env } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 
-import type {
-  WorkspaceAdmissionPolicy,
-} from '../../src/scheduler-core';
 import {
   reserveWorkspacePlacement,
   type WorkspacePlacementInput,

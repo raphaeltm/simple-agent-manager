@@ -525,7 +525,7 @@ with node state, ownership, and compute-pool scope, so concurrent placements can
 the last capacity.
 
 `hasWorkspaceReservationCapacity()` in
-`apps/api/src/scheduler-core/workspace-resource-capacity.ts` makes legacy capacity intentionally
+`packages/scheduler-core/src/workspace-resource-capacity.ts` makes legacy capacity intentionally
 conservative: both empty and occupied nodes require verified observed CPU, memory, and disk
 capacity. An occupied node also requires valid active reservations and fresh resource telemetry.
 Admission keeps the full declared memory budget and separately charges a host overhead of

@@ -24,6 +24,9 @@
  * defaults, whatever the workspace's age), and by `nodes.usageMaxChunksPerWorkspace` rows.
  * Every cap that drops something is disclosed in the response.
  */
+import {
+  parseStoredResolvedReservationJson,
+} from '@simple-agent-manager/scheduler-core';
 import type {
   NodeResourceReservation,
   NodeResourceUsageResponse,
@@ -33,9 +36,6 @@ import type {
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import {
-  parseStoredResolvedReservationJson,
-} from '../scheduler-core';
 import {
   DEFAULT_NODE_USAGE_CHUNK_LOOKBACK_MINUTES,
   DEFAULT_NODE_USAGE_MAX_CHUNKS_PER_WORKSPACE,

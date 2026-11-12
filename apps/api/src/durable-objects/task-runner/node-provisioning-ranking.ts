@@ -1,7 +1,8 @@
 import {
   buildPlacementLocationInventory,
   type PlacementLocationInventory,
-} from '../../scheduler-core';
+} from '@simple-agent-manager/scheduler-core';
+
 import type { TaskStartCapacityCandidate } from '../../services/placement-resolver';
 import { rankCapacityCandidatesForRuntime } from '../../services/placement-resolver';
 import { getTaskReservation } from './node-selection';

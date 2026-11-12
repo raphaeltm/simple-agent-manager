@@ -1,13 +1,13 @@
 import type { Provider } from '@simple-agent-manager/providers';
+import {
+  timestampVersion,
+} from '@simple-agent-manager/scheduler-core';
 import type { CredentialProvider, CredentialSource } from '@simple-agent-manager/shared';
 import { and, eq, isNull } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
-import {
-  timestampVersion,
-} from '../scheduler-core';
 import { decrypt } from './encryption';
 import { extractCloudProviderToken } from './provider-credential-codecs';
 

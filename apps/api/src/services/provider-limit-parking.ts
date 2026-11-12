@@ -1,10 +1,3 @@
-import { eq } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/d1';
-import * as v from 'valibot';
-
-import * as schema from '../db/schema';
-import type { Env } from '../env';
-import { parsePositiveInt } from '../lib/route-helpers';
 import {
   newProviderLimitWait,
   parseProviderLimitWait,
@@ -12,7 +5,14 @@ import {
   PROVIDER_LIMIT_POLICY,
   providerLimitNeedsImmediateSleep,
   type ProviderLimitWait,
-} from '../scheduler-core';
+} from '@simple-agent-manager/scheduler-core';
+import { eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
+import * as v from 'valibot';
+
+import * as schema from '../db/schema';
+import type { Env } from '../env';
+import { parsePositiveInt } from '../lib/route-helpers';
 import { recordCredentialLimitObservation } from './credential-limit-events';
 import { credentialLimitReferenceKey } from './credential-limit-events/values';
 import * as projectData from './project-data';

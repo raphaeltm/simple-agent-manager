@@ -1,13 +1,13 @@
+import {
+  CAPACITY_POOL_MATERIALIZED_WORKLOAD_ROLES,
+  capacityCandidateIdForRole,
+  PRIMARY_CAPACITY_WORKLOAD_ROLE,
+} from '@simple-agent-manager/scheduler-core';
 import type { CredentialProvider, ProviderInstanceOffering } from '@simple-agent-manager/shared';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 
 import * as schema from '../db/schema';
 import { D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
-import {
-  CAPACITY_POOL_MATERIALIZED_WORKLOAD_ROLES,
-  capacityCandidateIdForRole,
-  PRIMARY_CAPACITY_WORKLOAD_ROLE,
-} from '../scheduler-core';
 import { nextCapacityPoolTimestamp } from './capacity-pool-clock';
 import { providerInstanceOfferingDbValues } from './default-capacity-pool-candidate-values';
 import {

@@ -1,12 +1,12 @@
+import {
+  capacityPlacementAuthorityGeneration,
+} from '@simple-agent-manager/scheduler-core';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
-import {
-  capacityPlacementAuthorityGeneration,
-} from '../../src/scheduler-core';
 import { resolveCapacityPoolPlacementSettings } from '../../src/services/capacity-pool-placement-settings';
 import { assertNodeAllocationPlanCurrent } from '../../src/services/nodes';
 import { createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';

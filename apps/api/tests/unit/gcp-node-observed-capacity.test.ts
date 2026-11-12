@@ -6,11 +6,11 @@
  * capacity". Only Google's Compute API is faked, at the fetch boundary.
  */
 import { GcpProvider } from '@simple-agent-manager/providers';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-
 import {
   resolveTrustedWorkspaceNodeCapacity,
-} from '../../src/scheduler-core';
+} from '@simple-agent-manager/scheduler-core';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
 import { observedHardwareDbValues } from '../../src/services/runtime-allocation';
 
 const API = 'https://compute.googleapis.com/compute/v1/projects/sam-gcp';

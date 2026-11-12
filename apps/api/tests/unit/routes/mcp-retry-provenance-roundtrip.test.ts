@@ -7,6 +7,9 @@
  * translation audit trail from the row and from the TaskRunner payload.
  */
 import {
+  createPersistedTaskResourcePlanJson,
+} from '@simple-agent-manager/scheduler-core';
+import {
   type ResolvedResourceReservation,
   resolveResourceReservation,
 } from '@simple-agent-manager/shared';
@@ -17,9 +20,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import type { McpTokenData } from '../../../src/routes/mcp/_helpers';
-import {
-  createPersistedTaskResourcePlanJson,
-} from '../../../src/scheduler-core';
 import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../../src/services/default-capacity-pools';
 import { pickStarterMachines } from '../../helpers/capacity-pool-picks';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';

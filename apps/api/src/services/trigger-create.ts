@@ -1,5 +1,9 @@
 /** Canonical trigger creation shared by authenticated REST and project-scoped MCP. */
 import {
+  ResourceRequirementsValidationError,
+  serializeResourceRequirementsInput,
+} from '@simple-agent-manager/scheduler-core';
+import {
   DEFAULT_CRON_MIN_INTERVAL_MINUTES,
   DEFAULT_CRON_TEMPLATE_MAX_LENGTH,
   DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING,
@@ -17,10 +21,6 @@ import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { ulid } from '../lib/ulid';
 import { errors } from '../middleware/error';
-import {
-  ResourceRequirementsValidationError,
-  serializeResourceRequirementsInput,
-} from '../scheduler-core';
 import type { CreateTriggerSchema } from '../schemas/triggers';
 import { generateAddressKey } from './agent-email/address';
 import { requireAgentEmailOn, resolveAllowedSenders } from './agent-email/trigger-config';

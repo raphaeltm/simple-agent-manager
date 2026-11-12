@@ -1,3 +1,6 @@
+import {
+  legacyNodeVcpuEstimate,
+} from '@simple-agent-manager/scheduler-core';
 import type {
   ActiveComputeSession,
   AdminUserUsageSummary,
@@ -11,9 +14,6 @@ import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
-import {
-  legacyNodeVcpuEstimate,
-} from '../scheduler-core';
 
 // =============================================================================
 // Start / Stop Tracking

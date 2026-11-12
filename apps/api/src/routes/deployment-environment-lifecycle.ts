@@ -7,6 +7,10 @@
  * `deployment-environment-stop.ts`.
  */
 
+import {
+  parseStoredResolvedReservationJson,
+  ResourceRequirementsValidationError,
+} from '@simple-agent-manager/scheduler-core';
 import type { CredentialProvider } from '@simple-agent-manager/shared';
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -19,10 +23,6 @@ import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectCapability } from '../middleware/project-auth';
 import { resolveCleanupConfig } from '../scheduled/node-cleanup/config';
-import {
-  parseStoredResolvedReservationJson,
-  ResourceRequirementsValidationError,
-} from '../scheduler-core';
 import { buildDeploymentEnvironmentResponse } from '../services/deployment-environment-summary';
 import { cleanupDeploymentNode } from '../services/deployment-node-cleanup';
 import { provisionDeploymentNode } from '../services/deployment-provisioning';

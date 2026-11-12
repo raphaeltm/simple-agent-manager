@@ -3,10 +3,11 @@
  * `node-selection.ts` (rule 18), which re-exports it.
  */
 
-import { log } from '../../lib/logger';
 import {
   normalizePlacementHostSignals,
-} from '../../scheduler-core';
+} from '@simple-agent-manager/scheduler-core';
+
+import { log } from '../../lib/logger';
 import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
 import {
   lifetimeAdmissionCutoffSql,

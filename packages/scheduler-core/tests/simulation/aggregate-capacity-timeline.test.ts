@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB as HOST_RESERVE_MB,
-} from '../../src/scheduler-core';
+} from '../../src';
 import {
   ACCEPT_STALE_HEARTBEAT_POLICY,
   AggregateCapacityTimeline,

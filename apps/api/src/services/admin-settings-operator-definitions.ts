@@ -1,6 +1,7 @@
 import {
   PROVIDER_LIMIT_POLICY,
-} from '../scheduler-core';
+} from '@simple-agent-manager/scheduler-core';
+
 import {
   type AdminSettingDefinition,
   choiceDefinition,

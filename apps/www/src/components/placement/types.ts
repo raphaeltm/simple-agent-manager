@@ -8,7 +8,7 @@
 import type { CatalogOffering, ProviderCatalog, Tier } from './catalog';
 
 /** Real default: `DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB`
- * (apps/api/src/scheduler-core/workspace-admission-policy.ts). Memory the host keeps for itself. */
+ * (packages/scheduler-core/src/workspace-admission-policy.ts). Memory the host keeps for itself. */
 export const HOST_MEMORY_RESERVE_MB = 1024;
 
 /** Illustrative step counts. Real equivalents are wall-clock and configurable. */
@@ -59,7 +59,7 @@ export const HOST_ORDERING: Record<Strategy, string> = {
 };
 
 /** How each strategy orders brand-new hardware. Mirrors `compareCapacityCandidates`
- * (apps/api/src/scheduler-core/placement-capacity-ranking.ts). */
+ * (packages/scheduler-core/src/placement-capacity-ranking.ts). */
 export const OFFERING_ORDERING: Record<Strategy, string> = {
   pack: 'largest offering first',
   // NOT "cheapest first". The real default weights are `fit: 1_000_000` against `price: 1`

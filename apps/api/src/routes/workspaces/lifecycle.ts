@@ -1,3 +1,7 @@
+import {
+  parseResolvedResourceReservation,
+  resolveWorkspaceAdmissionPolicy,
+} from '@simple-agent-manager/scheduler-core';
 import type { CapacityPlacementSnapshot } from '@simple-agent-manager/shared';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -9,10 +13,6 @@ import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
 import { getUserId, requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
-import {
-  parseResolvedResourceReservation,
-  resolveWorkspaceAdmissionPolicy,
-} from '../../scheduler-core';
 import {
   parseOptionalBody,
   WorkspaceErrorSchema,

@@ -1,3 +1,6 @@
+import {
+  PlacementResolutionError,
+} from '@simple-agent-manager/scheduler-core';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -5,9 +8,6 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
-import {
-  PlacementResolutionError,
-} from '../scheduler-core';
 import {
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS,
   capacityPlacementSnapshotSqlValues,

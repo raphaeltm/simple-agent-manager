@@ -8,6 +8,9 @@
  */
 import { ProviderError } from '@simple-agent-manager/providers';
 import type {
+  WorkspaceAdmissionPolicy,
+} from '@simple-agent-manager/scheduler-core';
+import type {
   CapacityPlacementSnapshot,
   ResolvedResourceReservation,
 } from '@simple-agent-manager/shared';
@@ -19,9 +22,6 @@ import type {
   TaskRunnerContext,
   TaskRunnerState,
 } from '../../src/durable-objects/task-runner/types';
-import type {
-  WorkspaceAdmissionPolicy,
-} from '../../src/scheduler-core';
 import type { TaskStartCapacityPoolSelection } from '../../src/services/placement-resolver';
 import {
   assertVmProvisioningLease,

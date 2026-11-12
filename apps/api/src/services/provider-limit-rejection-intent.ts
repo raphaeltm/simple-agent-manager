@@ -1,9 +1,10 @@
+import type {
+  ProviderLimitWait,
+} from '@simple-agent-manager/scheduler-core';
+
 import type { Task } from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import type {
-  ProviderLimitWait,
-} from '../scheduler-core';
 import { recordCredentialLimitObservation } from './credential-limit-events';
 import { credentialLimitReferenceKey } from './credential-limit-events/values';
 

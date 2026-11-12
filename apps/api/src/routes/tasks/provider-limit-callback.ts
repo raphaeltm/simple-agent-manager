@@ -1,10 +1,10 @@
+import {
+  parseProviderLimitWait,
+} from '@simple-agent-manager/scheduler-core';
 import type * as v from 'valibot';
 
 import type { Task } from '../../db/schema';
 import type { Env } from '../../env';
-import {
-  parseProviderLimitWait,
-} from '../../scheduler-core';
 import { type UpdateTaskStatusSchema } from '../../schemas';
 import {
   clearProviderLimitWaitAfterSuccess,

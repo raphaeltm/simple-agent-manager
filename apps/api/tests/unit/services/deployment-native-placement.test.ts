@@ -1,4 +1,7 @@
 import {
+  DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB,
+} from '@simple-agent-manager/scheduler-core';
+import {
   D1_MAX_BOUND_PARAMETERS,
   resolveDeploymentManifestReservation,
 } from '@simple-agent-manager/shared';
@@ -9,9 +12,6 @@ import { afterEach, describe, expect, it } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { insertDeploymentReleaseWhilePlacementUnlocked } from '../../../src/routes/deployment-release-submission';
-import {
-  DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB,
-} from '../../../src/scheduler-core';
 import {
   claimDeploymentEnvironmentRelocation,
   completeDeploymentEnvironmentRelocation,

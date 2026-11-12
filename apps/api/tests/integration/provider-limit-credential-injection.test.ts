@@ -1,3 +1,6 @@
+import {
+  newProviderLimitWait,
+} from '@simple-agent-manager/scheduler-core';
 import Database from 'better-sqlite3';
 import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -6,9 +9,6 @@ import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { AppError } from '../../src/middleware/error';
 import { runtimeRoutes } from '../../src/routes/workspaces/runtime';
-import {
-  newProviderLimitWait,
-} from '../../src/scheduler-core';
 import { createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
 const key = vi.hoisted(() => ({

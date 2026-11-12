@@ -18,7 +18,7 @@ import {
   parseWorkspaceAdmissionMetrics,
   resolveWorkspaceAdmissionPolicy,
   type WorkspaceAdmissionPolicy,
-} from '../../../src/scheduler-core';
+} from '../../src';
 
 function reservation(
   overrides: Partial<ResolvedResourceReservation> = {}

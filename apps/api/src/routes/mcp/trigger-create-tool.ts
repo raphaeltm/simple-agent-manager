@@ -1,3 +1,8 @@
+import {
+  ResourceRequirementsValidationError,
+  serializeModernResourceRequirementsInput,
+  serializeResourceRequirementsInput,
+} from '@simple-agent-manager/scheduler-core';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import * as v from 'valibot';
@@ -6,11 +11,6 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { AppError } from '../../middleware/error';
-import {
-  ResourceRequirementsValidationError,
-  serializeModernResourceRequirementsInput,
-  serializeResourceRequirementsInput,
-} from '../../scheduler-core';
 import { CreateTriggerSchema } from '../../schemas/triggers';
 import { cronToHumanReadable } from '../../services/cron-utils';
 import { readGitHubTriggerConfig } from '../../services/github-trigger-config';

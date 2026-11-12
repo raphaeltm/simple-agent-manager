@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   inheritedCredentialAttributionForCaller,
-} from '../../../src/scheduler-core';
+} from '../../src';
 
 /**
  * Gap G5 (idea 01M59MYE4GY91BWTE8TZF1ZB5D): a task that names a parent task inherits the

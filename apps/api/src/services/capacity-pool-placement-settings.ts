@@ -1,3 +1,4 @@
+import { DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS } from '@simple-agent-manager/scheduler-core';
 import type {
   CapacityPoolPlacementSettings,
   CapacityPoolSelectionWeights,
@@ -16,7 +17,6 @@ import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
-import { DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS } from '../scheduler-core';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 

@@ -1,3 +1,10 @@
+import {
+  aggregateWorkspaceReservationRows,
+  evaluateWorkspaceReservationCapacity,
+  resolveTrustedWorkspaceNodeCapacity,
+  resolveWorkspaceAdmissionPolicy,
+  type WorkspaceResourceNode,
+} from '@simple-agent-manager/scheduler-core';
 import type {
   CapacityPlacementSnapshot,
   ResolvedResourceReservation,
@@ -9,13 +16,6 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
 import { parsePositiveInt } from '../lib/route-helpers';
-import {
-  aggregateWorkspaceReservationRows,
-  evaluateWorkspaceReservationCapacity,
-  resolveTrustedWorkspaceNodeCapacity,
-  resolveWorkspaceAdmissionPolicy,
-  type WorkspaceResourceNode,
-} from '../scheduler-core';
 import {
   DEPLOYMENT_RELOCATION_CLAIM_FIELD,
   NO_DEPLOYMENT_RELOCATION_CLAIM_SQL,

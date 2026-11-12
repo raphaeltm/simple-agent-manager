@@ -9,6 +9,18 @@
  *
  * See: specs/022-simplified-chat-ux/contracts/task-submit.md
  */
+import {
+  inheritedCredentialAttributionForCaller,
+} from '@simple-agent-manager/scheduler-core';
+import {
+  collectStoredResourceRequirementLayers,
+  createPersistedTaskResourcePlanJson,
+  firstResourceRequirementLayer,
+  firstResourceRequirementLayerJson,
+  mergeResourceRequirementLayers,
+  normalizeResourceRequirementsInput,
+  ResourceRequirementsValidationError,
+} from '@simple-agent-manager/scheduler-core';
 import type { SubmitTaskResponse, VMSize } from '@simple-agent-manager/shared';
 import {
   ACP_SESSION_DEFAULTS,
@@ -32,18 +44,6 @@ import {
   requireOpenIdeaForWorkStart,
 } from '../operations/start-work-core';
 import { requireRepositoryAccess } from '../routes/projects/_helpers';
-import {
-  inheritedCredentialAttributionForCaller,
-} from '../scheduler-core';
-import {
-  collectStoredResourceRequirementLayers,
-  createPersistedTaskResourcePlanJson,
-  firstResourceRequirementLayer,
-  firstResourceRequirementLayerJson,
-  mergeResourceRequirementLayers,
-  normalizeResourceRequirementsInput,
-  ResourceRequirementsValidationError,
-} from '../scheduler-core';
 import { type SubmitTaskSchema } from '../schemas';
 import { resolveTaskAgentOverrides } from '../services/agent-profiles';
 import { generateBranchName } from '../services/branch-name';

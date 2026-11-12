@@ -1,11 +1,11 @@
+import {
+  capacityPlacementAuthorityGeneration,
+} from '@simple-agent-manager/scheduler-core';
 import { type CapacityWorkloadRole } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
-import {
-  capacityPlacementAuthorityGeneration,
-} from '../scheduler-core';
 import { resolveCapacityPoolPlacementSettings } from './capacity-pool-placement-settings';
 import {
   buildPlacementAuthoritySqlPredicate,

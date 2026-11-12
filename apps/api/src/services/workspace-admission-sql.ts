@@ -3,11 +3,11 @@
  * the node scope, the requested and active reservations, and the eligibility predicate.
  * Split out of `workspace-placement.ts` (`.claude/rules/18-file-size-limits.md`).
  */
-import { resolveResourceReservation } from '@simple-agent-manager/shared';
-
 import {
   type WorkspaceAdmissionPolicy,
-} from '../scheduler-core';
+} from '@simple-agent-manager/scheduler-core';
+import { resolveResourceReservation } from '@simple-agent-manager/shared';
+
 import { lifetimeAdmissionCutoffSql } from './node-lifetime-admission';
 import { buildPlacementAuthoritySqlPredicate } from './placement-authority';
 import type { WorkspacePlacementInput } from './workspace-placement';
@@ -208,7 +208,7 @@ export function workspaceAdmissionEligibilitySql(): string {
 }
 
 /**
- * SQL twin of `measuredHostOverheadMb` (`scheduler-core/workspace-resource-capacity.ts`): the host reserve, or the
+ * SQL twin of `measuredHostOverheadMb` (`packages/scheduler-core/src/workspace-resource-capacity.ts`): the host reserve, or the
  * measured use no workspace observation explains when that is larger. Charging measured use on top
  * of the reserve counted host overhead twice; see the evaluator for the condition this encodes.
  */

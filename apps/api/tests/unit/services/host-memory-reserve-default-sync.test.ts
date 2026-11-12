@@ -1,12 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
-
 import {
   DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB,
   resolveEffectiveNodeHostMemoryReserveMb,
-} from '../../../src/scheduler-core';
+} from '@simple-agent-manager/scheduler-core';
+import { describe, expect, it } from 'vitest';
 
 /**
  * One host reserve drives offering selection, admission and the cloud-init workload-slice cap

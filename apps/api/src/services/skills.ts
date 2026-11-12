@@ -1,3 +1,8 @@
+import {
+  parseStoredResourceRequirementsJson,
+  ResourceRequirementsValidationError,
+  serializeResourceRequirementsInput,
+} from '@simple-agent-manager/scheduler-core';
 import type {
   AgentEffort,
   AgentSkill,
@@ -19,11 +24,6 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { ulid } from '../lib/ulid';
 import { errors } from '../middleware/error';
-import {
-  parseStoredResourceRequirementsJson,
-  ResourceRequirementsValidationError,
-  serializeResourceRequirementsInput,
-} from '../scheduler-core';
 import { resolveAgentProfile } from './agent-profiles';
 import {
   applyBaseProfileUpdates,

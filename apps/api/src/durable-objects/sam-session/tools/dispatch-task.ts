@@ -6,6 +6,15 @@
  * are set so the UI groups it as a subtask (same semantics as the
  * workspace-MCP dispatch path in `routes/mcp/dispatch-tool.ts`).
  */
+import {
+  collectStoredResourceRequirementLayers,
+  createPersistedTaskResourcePlanJson,
+  firstResourceRequirementLayer,
+  firstResourceRequirementLayerJson,
+  mergeResourceRequirementLayers,
+  normalizeResourceRequirementsInput,
+  ResourceRequirementsValidationError,
+} from '@simple-agent-manager/scheduler-core';
 import type {
   ResourceRequirements,
   TaskMode,
@@ -23,15 +32,6 @@ import { ulid } from '../../../lib/ulid';
 import { AppError } from '../../../middleware/error';
 import { requireProjectCapability } from '../../../middleware/project-auth';
 import { requireRepositoryOwnerAccess } from '../../../routes/projects/_helpers';
-import {
-  collectStoredResourceRequirementLayers,
-  createPersistedTaskResourcePlanJson,
-  firstResourceRequirementLayer,
-  firstResourceRequirementLayerJson,
-  mergeResourceRequirementLayers,
-  normalizeResourceRequirementsInput,
-  ResourceRequirementsValidationError,
-} from '../../../scheduler-core';
 import { samAssistantAttribution } from '../../../services/agent-authorship';
 import { generateBranchName } from '../../../services/branch-name';
 import {

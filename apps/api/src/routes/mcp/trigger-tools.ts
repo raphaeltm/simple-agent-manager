@@ -3,6 +3,11 @@
  * Create/delete live in focused modules and are re-exported for compatibility.
  */
 import {
+  ResourceRequirementsValidationError,
+  serializeModernResourceRequirementsInput,
+  serializeResourceRequirementsInput,
+} from '@simple-agent-manager/scheduler-core';
+import {
   DEFAULT_CRON_MIN_INTERVAL_MINUTES,
   DEFAULT_CRON_TEMPLATE_MAX_LENGTH,
   DEFAULT_TRIGGER_MAX_CONCURRENT_LIMIT,
@@ -15,11 +20,6 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
 import { AppError } from '../../middleware/error';
-import {
-  ResourceRequirementsValidationError,
-  serializeModernResourceRequirementsInput,
-  serializeResourceRequirementsInput,
-} from '../../scheduler-core';
 import {
   cronToHumanReadable,
   cronToNextFire,

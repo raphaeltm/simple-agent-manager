@@ -1,4 +1,9 @@
 /** Resolving a pool edit's candidate status changes and catalog additions against D1. */
+import {
+  CAPACITY_POOL_MATERIALIZED_WORKLOAD_ROLES,
+  capacityCandidateBaseId,
+  capacityCandidateIdForRole,
+} from '@simple-agent-manager/scheduler-core';
 import type {
   CapacityPoolStatus,
   DefaultCapacityPoolCandidateCatalogAddition,
@@ -8,11 +13,6 @@ import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import { D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
-import {
-  CAPACITY_POOL_MATERIALIZED_WORKLOAD_ROLES,
-  capacityCandidateBaseId,
-  capacityCandidateIdForRole,
-} from '../scheduler-core';
 import type { DefaultPoolScopeIdentity } from './default-capacity-pool-helpers';
 import { defaultCandidateId } from './default-capacity-pool-helpers';
 

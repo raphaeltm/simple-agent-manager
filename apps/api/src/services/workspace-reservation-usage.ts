@@ -3,14 +3,15 @@
  * and the loader that reads declared reservations and running-container memory observations for
  * a set of nodes. The usage shape and its parsers are pure and live in `scheduler-core`.
  */
-import { D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
 import {
   type ActiveWorkspaceReservationUsage,
   addReservationUsage,
   emptyUsage,
   parseResolvedResourceReservation,
   parseTimestampMs,
-} from '../scheduler-core';
+} from '@simple-agent-manager/scheduler-core';
+
+import { D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
 
 export const ACTIVE_WORKSPACE_RESERVATION_STATUSES = ['running', 'creating', 'recovery'] as const;
 export const ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL = ACTIVE_WORKSPACE_RESERVATION_STATUSES.map(

@@ -1,4 +1,12 @@
 /** Dispatch a project task using explicit → profile → project → platform configuration. */
+import {
+  collectStoredResourceRequirementLayers,
+  createPersistedTaskResourcePlanJson,
+  firstResourceRequirementLayer,
+  firstResourceRequirementLayerJson,
+  mergeResourceRequirementLayers,
+  ResourceRequirementsValidationError,
+} from '@simple-agent-manager/scheduler-core';
 import type {
   CapacityPlacementSnapshot,
   CredentialProvider,
@@ -12,14 +20,6 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
-import {
-  collectStoredResourceRequirementLayers,
-  createPersistedTaskResourcePlanJson,
-  firstResourceRequirementLayer,
-  firstResourceRequirementLayerJson,
-  mergeResourceRequirementLayers,
-  ResourceRequirementsValidationError,
-} from '../../scheduler-core';
 import { generateBranchName } from '../../services/branch-name';
 import {
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS,

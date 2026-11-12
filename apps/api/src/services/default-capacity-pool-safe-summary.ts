@@ -3,6 +3,9 @@
  * machine types it can place, with no credential or source detail. Split out of
  * default-capacity-pool-summaries.ts, which builds the full editor summaries.
  */
+import {
+  PRIMARY_CAPACITY_WORKLOAD_ROLE,
+} from '@simple-agent-manager/scheduler-core';
 import type {
   DefaultCapacityPoolEffectiveState,
   SafeEffectiveCapacityPoolReason,
@@ -10,9 +13,6 @@ import type {
 } from '@simple-agent-manager/shared';
 import { isCapacitySourceExcluded, isValidProvider } from '@simple-agent-manager/shared';
 
-import {
-  PRIMARY_CAPACITY_WORKLOAD_ROLE,
-} from '../scheduler-core';
 import { ACTIVE_STATUS, SOURCE_KIND_CLOUD_PROVIDER } from './default-capacity-pool-storage';
 import type { CapacityPoolSummary } from './default-capacity-pool-types';
 

@@ -1,9 +1,9 @@
+import { decideWorkspaceRuntime, type WorkspaceRuntimeDecision } from '@simple-agent-manager/scheduler-core';
 import type { AgentProfileRuntime, CredentialProvider } from '@simple-agent-manager/shared';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import type * as schema from '../db/schema';
 import type { Env } from '../env';
-import { decideWorkspaceRuntime, type WorkspaceRuntimeDecision } from '../scheduler-core';
 import { resolveCredentialSource } from './provider-credentials';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;

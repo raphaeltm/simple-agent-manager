@@ -1,3 +1,10 @@
+import {
+  capacityCandidateSatisfiesWorkloadRole,
+} from '@simple-agent-manager/scheduler-core';
+import {
+  type ConcreteCapacitySnapshot,
+  normalizeConcreteSnapshot,
+} from '@simple-agent-manager/scheduler-core';
 import type {
   CapacityPlacementSnapshot,
   CapacityPoolScope,
@@ -8,13 +15,6 @@ import {
   type ProjectCapability,
   projectMemberRolesWithCapability,
 } from '../middleware/project-auth';
-import {
-  capacityCandidateSatisfiesWorkloadRole,
-} from '../scheduler-core';
-import {
-  type ConcreteCapacitySnapshot,
-  normalizeConcreteSnapshot,
-} from '../scheduler-core';
 import {
   buildAnyDefaultCapacityPoolExclusionSql,
   buildHigherPrecedenceDefaultCapacityPoolExclusionSql,

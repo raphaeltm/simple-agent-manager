@@ -1,3 +1,7 @@
+import {
+  ResourceRequirementsValidationError,
+  serializeResourceRequirementsInput,
+} from '@simple-agent-manager/scheduler-core';
 import type {
   AgentEffort,
   AgentProfile,
@@ -20,10 +24,6 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { ulid } from '../lib/ulid';
 import { errors } from '../middleware/error';
-import {
-  ResourceRequirementsValidationError,
-  serializeResourceRequirementsInput,
-} from '../scheduler-core';
 import { parseGitHubCliPolicyJson } from './github-cli-policy';
 import {
   applyBaseProfileUpdates,

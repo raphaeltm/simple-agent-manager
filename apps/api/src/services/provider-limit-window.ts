@@ -1,10 +1,10 @@
-import * as v from 'valibot';
-
-import type { Env } from '../env';
 import {
   parseProviderLimitWait,
   PROVIDER_LIMIT_POLICY,
-} from '../scheduler-core';
+} from '@simple-agent-manager/scheduler-core';
+import * as v from 'valibot';
+
+import type { Env } from '../env';
 import { credentialLimitReferenceKey } from './credential-limit-events/values';
 
 const WindowSchema = v.object({

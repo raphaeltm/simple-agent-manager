@@ -7,6 +7,9 @@
  * between. These tests start a run at node_selection and fire its real alarms:
  * selection → reservation → (conflict → reselection) → placement.
  */
+import {
+  DEFAULT_WORKSPACE_PLACEMENT_BACKLOG_CONFLICT_RETRIES,
+} from '@simple-agent-manager/scheduler-core';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
@@ -17,9 +20,6 @@ import type {
 } from '../../src/durable-objects/task-runner';
 import { STARTUP_BACKLOG_CONFLICT_REASON } from '../../src/durable-objects/task-runner/workspace-placement-rejection';
 import type { Env } from '../../src/env';
-import {
-  DEFAULT_WORKSPACE_PLACEMENT_BACKLOG_CONFLICT_RETRIES,
-} from '../../src/scheduler-core';
 import {
   seedInstallation,
   seedNode,

@@ -21,7 +21,7 @@ import {
   createPersistedTaskResourcePlanJson,
   readPersistedTaskResourcePlan,
   ResourceRequirementsValidationError,
-} from '../../../src/scheduler-core';
+} from '../../src';
 
 const BASE = {
   taskId: 'task-1',

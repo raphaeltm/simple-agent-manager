@@ -8,7 +8,7 @@
 >
 > - **Shipped:** the HIGH Scaleway item. Placement falls back to the provider's default location
 >   before `DEFAULT_VM_LOCATION` (`getDefaultLocationForProvider` in
->   `apps/api/src/scheduler-core/placement-field-resolution.ts:112-126`).
+>   `packages/scheduler-core/src/placement-field-resolution.ts:112-126`).
 > - **Still open:**
 >   - `HETZNER_DATACENTER` is not in `Env` and not read by `buildProviderConfig`
 >     (`apps/api/src/services/provider-credential-codecs.ts:140-165`, which wires the other

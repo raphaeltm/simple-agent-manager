@@ -1,4 +1,7 @@
 import { getProviderInstanceOfferings } from '@simple-agent-manager/providers';
+import {
+  capacityCandidateAuthorityGeneration,
+} from '@simple-agent-manager/scheduler-core';
 import type {
   CapacityPoolStatus,
   CapacityWorkloadRole,
@@ -9,9 +12,6 @@ import type {
 import { isCapacityPoolStatus, providerLocationRegion } from '@simple-agent-manager/shared';
 
 import type * as schema from '../db/schema';
-import {
-  capacityCandidateAuthorityGeneration,
-} from '../scheduler-core';
 import { type providerInstanceOfferingDbValues } from './default-capacity-pool-candidate-values';
 import {
   ACTIVE_STATUS,

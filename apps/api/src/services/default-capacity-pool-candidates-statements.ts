@@ -1,10 +1,10 @@
-import { sql } from 'drizzle-orm';
-
-import * as schema from '../db/schema';
 import {
   capacityCandidateBaseId,
   PRIMARY_CAPACITY_WORKLOAD_ROLE,
-} from '../scheduler-core';
+} from '@simple-agent-manager/scheduler-core';
+import { sql } from 'drizzle-orm';
+
+import * as schema from '../db/schema';
 import {
   ACTIVE_STATUS,
   type Db,

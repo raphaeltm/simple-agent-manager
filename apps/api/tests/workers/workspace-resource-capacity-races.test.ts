@@ -1,3 +1,8 @@
+import {
+  aggregateWorkspaceReservationRows,
+  resolveWorkspaceAdmissionPolicy,
+  type WorkspaceAdmissionPolicy,
+} from '@simple-agent-manager/scheduler-core';
 import type {
   CapacityPlacementSnapshot,
   ResolvedResourceReservation,
@@ -10,11 +15,6 @@ import type {
   TaskRunnerContext,
   TaskRunnerState,
 } from '../../src/durable-objects/task-runner/types';
-import {
-  aggregateWorkspaceReservationRows,
-  resolveWorkspaceAdmissionPolicy,
-  type WorkspaceAdmissionPolicy,
-} from '../../src/scheduler-core';
 import {
   reserveWorkspacePlacement,
   type WorkspacePlacementInput,

@@ -2,6 +2,20 @@ import { Buffer } from 'node:buffer';
 
 import { getProviderInstanceOfferings } from '@simple-agent-manager/providers';
 import {
+  capacityCandidateBaseId,
+  capacityCandidateIdForRole,
+  capacityCandidateRoleFromId,
+  capacityCandidateSatisfiesWorkloadRole,
+} from '@simple-agent-manager/scheduler-core';
+import {
+  buildCapacityPoolSelection,
+} from '@simple-agent-manager/scheduler-core';
+import {
+  emptyUsage,
+  evaluateWorkspaceReservationCapacity,
+  resolveWorkspaceAdmissionPolicy,
+} from '@simple-agent-manager/scheduler-core';
+import {
   getDefaultLocationForProvider,
   getLocationsForProvider,
   type ProviderInstanceOffering,
@@ -14,20 +28,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { runScheduledCapacityPoolReconciliation } from '../../../src/scheduled/capacity-pool-reconciliation';
-import {
-  capacityCandidateBaseId,
-  capacityCandidateIdForRole,
-  capacityCandidateRoleFromId,
-  capacityCandidateSatisfiesWorkloadRole,
-} from '../../../src/scheduler-core';
-import {
-  buildCapacityPoolSelection,
-} from '../../../src/scheduler-core';
-import {
-  emptyUsage,
-  evaluateWorkspaceReservationCapacity,
-  resolveWorkspaceAdmissionPolicy,
-} from '../../../src/scheduler-core';
 import { reconcileCapacityPoolsForCredentialMutation } from '../../../src/services/capacity-pool-credential-lifecycle';
 import { resolveCapacityPoolPlacementSettings } from '../../../src/services/capacity-pool-placement-settings';
 import { initialStatusForProviderOffering } from '../../../src/services/default-capacity-pool-candidates';

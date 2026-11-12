@@ -9,6 +9,12 @@
  *
  * Everything runs against a real SQLite engine through the D1 adapter (rule 28).
  */
+import {
+  noEligibleCapacityCandidateMessage,
+} from '@simple-agent-manager/scheduler-core';
+import {
+  buildCapacityPoolSelection,
+} from '@simple-agent-manager/scheduler-core';
 import type { ProviderInstanceOffering } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
@@ -16,12 +22,6 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
-import {
-  noEligibleCapacityCandidateMessage,
-} from '../../../src/scheduler-core';
-import {
-  buildCapacityPoolSelection,
-} from '../../../src/scheduler-core';
 import { attachCapacitySourceLabels } from '../../../src/services/default-capacity-pool-source-labels';
 import {
   publishSourceSettingsOnly,

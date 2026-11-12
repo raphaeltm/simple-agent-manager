@@ -1,10 +1,10 @@
+import {
+  timestampVersion,
+} from '@simple-agent-manager/scheduler-core';
 import { isValidProvider } from '@simple-agent-manager/shared';
 import { and, eq, isNotNull, isNull, or } from 'drizzle-orm';
 
 import * as schema from '../db/schema';
-import {
-  timestampVersion,
-} from '../scheduler-core';
 import {
   composableAttachmentReference,
   composableCredentialReference,

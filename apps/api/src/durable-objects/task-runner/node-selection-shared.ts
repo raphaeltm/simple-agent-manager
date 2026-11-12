@@ -3,18 +3,18 @@
  * reusable-node selection (`node-selection.ts`). Split out per rule 18.
  */
 import {
-  type CapacityPlacementSnapshot,
-  type ResolvedResourceReservation,
-  resolveResourceReservation,
-} from '@simple-agent-manager/shared';
-
-import {
   hasWorkspaceReservationCapacity,
   isResolvedResourceReservation,
   parseWorkspaceAdmissionMetrics,
   resolveTrustedWorkspaceNodeCapacity,
   resolveWorkspaceAdmissionPolicy,
-} from '../../scheduler-core';
+} from '@simple-agent-manager/scheduler-core';
+import {
+  type CapacityPlacementSnapshot,
+  type ResolvedResourceReservation,
+  resolveResourceReservation,
+} from '@simple-agent-manager/shared';
+
 import {
   type CapacityAwareNodePlacementRow,
   resolveReusableNodeCapacitySnapshot,

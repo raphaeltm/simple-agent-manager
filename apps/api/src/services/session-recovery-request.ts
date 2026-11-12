@@ -1,4 +1,10 @@
 import {
+  parseLegacyVmSize,
+  type PersistedTaskResourcePlanReadResult,
+  readPersistedTaskResourcePlan,
+  ResourceRequirementsValidationError,
+} from '@simple-agent-manager/scheduler-core';
+import {
   type AgentProfileRuntime,
   type CredentialSource,
   DEFAULT_VM_SIZE,
@@ -13,12 +19,6 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { expectJsonRecord } from '../lib/runtime-validation';
-import {
-  parseLegacyVmSize,
-  type PersistedTaskResourcePlanReadResult,
-  readPersistedTaskResourcePlan,
-  ResourceRequirementsValidationError,
-} from '../scheduler-core';
 import type {
   TaskStartPlacementInput,
   TaskStartPlacementWithCredential,

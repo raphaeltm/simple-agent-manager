@@ -5,10 +5,11 @@
  * `node_agent_ready` in `./node-agent-ready-step`; both are re-exported here so
  * the DO's step table keeps one import site. See rule 18.
  */
-import { log } from '../../lib/logger';
 import {
   resolveEffectiveNodeHostMemoryReserveMb,
-} from '../../scheduler-core';
+} from '@simple-agent-manager/scheduler-core';
+
+import { log } from '../../lib/logger';
 import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
 import {
   type CapacityAwareNodePlacementRow,

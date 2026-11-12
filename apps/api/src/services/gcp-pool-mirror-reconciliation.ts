@@ -1,11 +1,11 @@
+import {
+  capacityCandidateAuthorityGeneration,
+  capacitySourceAuthorityGeneration,
+} from '@simple-agent-manager/scheduler-core';
 import { and, eq, getTableColumns, type SQL,sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/sqlite-core';
 
 import * as schema from '../db/schema';
-import {
-  capacityCandidateAuthorityGeneration,
-  capacitySourceAuthorityGeneration,
-} from '../scheduler-core';
 import { nextCapacityPoolTimestamp } from './capacity-pool-clock';
 import { DEFAULT_CAPACITY_POOL_CANDIDATE_PUBLISH_BATCH_SIZE } from './default-capacity-pool-candidates-common';
 import {

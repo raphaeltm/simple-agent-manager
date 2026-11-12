@@ -4,7 +4,7 @@ import {
   newProviderLimitWait,
   parseProviderLimitWait,
   PROVIDER_LIMIT_POLICY,
-} from '../../src/scheduler-core';
+} from '../../src';
 
 const now = Date.parse('2026-10-12T09:30:00Z');
 function next(previous = null as ReturnType<typeof newProviderLimitWait> | null, overrides = {}) {

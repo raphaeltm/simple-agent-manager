@@ -8,11 +8,12 @@
  * logging for admin visibility of provisioning timeout recoveries.
  */
 
-import type { Env } from '../env';
-import { log } from '../lib/logger';
 import {
   DEFAULT_WORKSPACE_BUILD_QUEUE_TIMEOUT_MINUTES,
-} from '../scheduler-core';
+} from '@simple-agent-manager/scheduler-core';
+
+import type { Env } from '../env';
+import { log } from '../lib/logger';
 import { persistError } from './observability';
 import {
   claimWorkspaceCreatingExpiry,

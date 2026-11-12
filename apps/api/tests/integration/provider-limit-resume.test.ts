@@ -1,4 +1,7 @@
 /** Owner HTTP action -> real D1 recovery claim -> retained TaskRunner start. */
+import {
+  newProviderLimitWait,
+} from '@simple-agent-manager/scheduler-core';
 import Database from 'better-sqlite3';
 import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -15,9 +18,6 @@ import { sleepSession } from '../../src/durable-objects/project-data/sessions';
 import type { Env } from '../../src/env';
 import { AppError } from '../../src/middleware/error';
 import { providerLimitResumeRoutes } from '../../src/routes/tasks/provider-limit-resume';
-import {
-  newProviderLimitWait,
-} from '../../src/scheduler-core';
 import { presentBlockedProviderLimitWait } from '../../src/services/provider-limit-recovery';
 import { createAllSchemaTables } from '../helpers/sqlite-d1';
 import {

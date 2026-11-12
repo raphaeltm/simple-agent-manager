@@ -1,5 +1,8 @@
 import { readFileSync } from 'node:fs';
 
+import {
+  newProviderLimitWait,
+} from '@simple-agent-manager/scheduler-core';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -10,9 +13,6 @@ import type { TaskRunnerState } from '../../src/durable-objects/task-runner/type
 import type { Env } from '../../src/env';
 import { getSelectedAgentCredentialReference } from '../../src/routes/credentials';
 import { recoverStuckTasks } from '../../src/scheduled/stuck-tasks';
-import {
-  newProviderLimitWait,
-} from '../../src/scheduler-core';
 import {
   __resetAdminSettingsCacheForTest,
   updateAdminSettings,

@@ -1,4 +1,54 @@
 import type {
+  PlacementCredentialAttribution,
+  PlacementCredentialLookup,
+  PlacementCredentialSourceResult,
+  PlacementProfileDefaults,
+  PlacementRuntimeResolution,
+  TaskStartCapacityCandidate,
+  TaskStartCapacityPoolSelection,
+  TaskStartPlacement,
+  TaskStartPlacementInput,
+  TaskStartPlacementWithCredential,
+} from '@simple-agent-manager/scheduler-core';
+import type {
+  WorkspaceRuntimeDecision,
+} from '@simple-agent-manager/scheduler-core';
+import {
+  preferCapacityCandidatesInLocation,
+} from '@simple-agent-manager/scheduler-core';
+import {
+  normalizeCredentialAttribution,
+  resolveCredentialLookup,
+  resolveDevcontainerConfigName,
+  resolvePreferredVmLocation,
+  resolveProvider,
+  resolveTaskMode,
+  resolveVmLocation,
+  resolveVmSize,
+  resolveVmSizeSource,
+  resolveWorkloadRole,
+  resolveWorkspaceProfile,
+  validateResolvedLocation,
+} from '@simple-agent-manager/scheduler-core';
+import {
+  noEligibleCapacityCandidateMessage,
+  PlacementResolutionError,
+} from '@simple-agent-manager/scheduler-core';
+import {
+  buildCapacityPoolSelection,
+  capacityPlacementSnapshotForTaskStart,
+  directPlacementAuditSnapshot,
+  hasNoCapacityPoolCandidates,
+} from '@simple-agent-manager/scheduler-core';
+import {
+  collectStoredResourceRequirementLayers,
+  mergeResourceRequirementLayers,
+  ResourceRequirementsValidationError,
+} from '@simple-agent-manager/scheduler-core';
+import {
+  resolveEffectiveNodeHostMemoryReserveMb,
+} from '@simple-agent-manager/scheduler-core';
+import type {
   AgentProfileRuntime,
   CredentialSource,
   ResourceRequirementsSource,
@@ -13,63 +63,13 @@ import { type drizzle } from 'drizzle-orm/d1';
 import type * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import type {
-  PlacementCredentialAttribution,
-  PlacementCredentialLookup,
-  PlacementCredentialSourceResult,
-  PlacementProfileDefaults,
-  PlacementRuntimeResolution,
-  TaskStartCapacityCandidate,
-  TaskStartCapacityPoolSelection,
-  TaskStartPlacement,
-  TaskStartPlacementInput,
-  TaskStartPlacementWithCredential,
-} from '../scheduler-core';
-import type {
-  WorkspaceRuntimeDecision,
-} from '../scheduler-core';
-import {
-  preferCapacityCandidatesInLocation,
-} from '../scheduler-core';
-import {
-  normalizeCredentialAttribution,
-  resolveCredentialLookup,
-  resolveDevcontainerConfigName,
-  resolvePreferredVmLocation,
-  resolveProvider,
-  resolveTaskMode,
-  resolveVmLocation,
-  resolveVmSize,
-  resolveVmSizeSource,
-  resolveWorkloadRole,
-  resolveWorkspaceProfile,
-  validateResolvedLocation,
-} from '../scheduler-core';
-import {
-  noEligibleCapacityCandidateMessage,
-  PlacementResolutionError,
-} from '../scheduler-core';
-import {
-  buildCapacityPoolSelection,
-  capacityPlacementSnapshotForTaskStart,
-  directPlacementAuditSnapshot,
-  hasNoCapacityPoolCandidates,
-} from '../scheduler-core';
-import {
-  collectStoredResourceRequirementLayers,
-  mergeResourceRequirementLayers,
-  ResourceRequirementsValidationError,
-} from '../scheduler-core';
-import {
-  resolveEffectiveNodeHostMemoryReserveMb,
-} from '../scheduler-core';
 import { resolveCapacityPoolPlacementSettings } from './capacity-pool-placement-settings';
 import { resolveEffectiveDefaultCapacityPoolSummary } from './default-capacity-pools';
 import { resolveCredentialSource } from './provider-credentials';
 
 export type {
   RankCapacityCandidatesInput,
-} from '../scheduler-core';
+} from '@simple-agent-manager/scheduler-core';
 export type {
   CapacityAwareNodePlacementRow,
   PlacementCredentialAttribution,
@@ -90,7 +90,7 @@ export type {
   TaskStartPlacement,
   TaskStartPlacementInput,
   TaskStartPlacementWithCredential,
-} from '../scheduler-core';
+} from '@simple-agent-manager/scheduler-core';
 export {
   capacityPlacementSnapshotForCandidate,
   capacityPlacementSnapshotForTaskStart,
@@ -101,13 +101,13 @@ export {
   hasNoCapacityPoolCandidates,
   rankCapacityCandidatesForRuntime,
   resolveReusableNodeCapacitySnapshot,
-} from '../scheduler-core';
+} from '@simple-agent-manager/scheduler-core';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
 export {
   PlacementResolutionError,
-} from '../scheduler-core';
+} from '@simple-agent-manager/scheduler-core';
 
 export function resolvePlacementRuntimePreference(input: {
   explicitRuntime?: AgentProfileRuntime | null;

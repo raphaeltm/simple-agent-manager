@@ -40,11 +40,11 @@
  * as before. Within one rank value only the first source is used: same-rank
  * sources do not fall back to each other.
  */
-import type { VMSize } from '@simple-agent-manager/shared';
-
 import {
   DEFAULT_PROVISIONING_ATTEMPTS_PER_PROVIDER_TIER,
-} from '../../scheduler-core';
+} from '@simple-agent-manager/scheduler-core';
+import type { VMSize } from '@simple-agent-manager/shared';
+
 import type { TaskStartCapacityCandidate } from '../../services/placement-resolver';
 import type { TaskRunnerState } from './types';
 

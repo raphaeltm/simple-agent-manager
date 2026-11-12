@@ -1,3 +1,8 @@
+import {
+  isResolvedResourceReservation,
+  type PlacementAdmissionPolicy,
+  type WorkspaceAdmissionPolicy,
+} from '@simple-agent-manager/scheduler-core';
 import type {
   CapacityPlacementSnapshot,
   ResolvedResourceReservation,
@@ -6,11 +11,6 @@ import type {
   WorkspaceProfile,
 } from '@simple-agent-manager/shared';
 
-import {
-  isResolvedResourceReservation,
-  type PlacementAdmissionPolicy,
-  type WorkspaceAdmissionPolicy,
-} from '../scheduler-core';
 import {
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS,
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS,

@@ -6,6 +6,9 @@
  * sibling modules and are re-exported here so the DO's step table keeps one import site.
  */
 import {
+  isResolvedResourceReservation,
+} from '@simple-agent-manager/scheduler-core';
+import {
   type CredentialSource,
   DEFAULT_WORKSPACE_PROFILE,
   type ResolvedResourceReservation,
@@ -13,9 +16,6 @@ import {
 } from '@simple-agent-manager/shared';
 
 import { log } from '../../lib/logger';
-import {
-  isResolvedResourceReservation,
-} from '../../scheduler-core';
 import { resolvePlacementAdmissionPolicy } from '../../services/node-lifetime-admission';
 import { markVmAdmissionPlaced } from '../../services/vm-admission-control';
 import { reserveWorkspacePlacement } from '../../services/workspace-placement';

@@ -1,3 +1,6 @@
+import {
+  newProviderLimitWait,
+} from '@simple-agent-manager/scheduler-core';
 import { AI_PROXY_BILLING_MODE_KV_KEY } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
@@ -13,9 +16,6 @@ import { aiProxyPassthroughRoutes } from '../../src/routes/ai-proxy-passthrough'
 import { getSelectedAgentCredentialReference } from '../../src/routes/credentials';
 import { taskCallbackRoute } from '../../src/routes/tasks/callback';
 import { runtimeRoutes } from '../../src/routes/workspaces/runtime';
-import {
-  newProviderLimitWait,
-} from '../../src/scheduler-core';
 import { resolveUpstreamAuth } from '../../src/services/ai-billing';
 import { encrypt } from '../../src/services/encryption';
 import { rejectedProviderWindow } from '../../src/services/provider-limit-window';

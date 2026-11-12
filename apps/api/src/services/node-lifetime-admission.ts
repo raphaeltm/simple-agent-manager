@@ -13,16 +13,16 @@
  * task runner's candidate queries (`task-runner/node-selection.ts`), per rule 69.
  */
 import {
+  type PlacementAdmissionPolicy,
+  resolveWorkspaceAdmissionPolicy,
+} from '@simple-agent-manager/scheduler-core';
+import {
   DEFAULT_NODE_ABSOLUTE_MAX_LIFETIME_MS,
   DEFAULT_NODE_LIFETIME_ADMISSION_CUTOFF_PERCENT,
 } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
-import {
-  type PlacementAdmissionPolicy,
-  resolveWorkspaceAdmissionPolicy,
-} from '../scheduler-core';
 import { resolveAdminSetting } from './admin-settings-resolution';
 
 /**

@@ -1,3 +1,8 @@
+import {
+  evaluateWorkspaceReservationCapacity,
+  type PlacementAdmissionPolicy,
+  resolveWorkspaceAdmissionPolicy,
+} from '@simple-agent-manager/scheduler-core';
 import type {
   CapacityPlacementSnapshot,
   ResolvedResourceReservation,
@@ -6,11 +11,6 @@ import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
-import {
-  evaluateWorkspaceReservationCapacity,
-  type PlacementAdmissionPolicy,
-  resolveWorkspaceAdmissionPolicy,
-} from '../../../src/scheduler-core';
 import { isNodePastLifetimeAdmissionCutoff } from '../../../src/services/node-lifetime-admission';
 import {
   attachPrecreatedWorkspacePlacement,

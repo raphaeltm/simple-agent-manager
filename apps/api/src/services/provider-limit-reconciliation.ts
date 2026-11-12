@@ -1,4 +1,7 @@
 import {
+  parseProviderLimitWait,
+} from '@simple-agent-manager/scheduler-core';
+import {
   DEFAULT_TASK_RUN_ABSOLUTE_CEILING_MS,
   DEFAULT_TASK_RUN_ABSOLUTE_CEILING_SLEEP_GRACE_MS,
 } from '@simple-agent-manager/shared';
@@ -9,9 +12,6 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { evaluateRunawayCostCeiling } from '../scheduled/stuck-task-ceiling';
-import {
-  parseProviderLimitWait,
-} from '../scheduler-core';
 import { repairProviderLimitIntents } from './provider-limit-parking';
 import { presentBlockedProviderLimitWait } from './provider-limit-recovery';
 

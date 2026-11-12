@@ -1,13 +1,13 @@
-import { DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS } from '@simple-agent-manager/shared';
-import { describe, expect, it } from 'vitest';
-
 import {
   preferCapacityCandidatesInLocation,
   rankCapacityCandidatesForRuntime,
-} from '../../../src/scheduler-core';
+} from '@simple-agent-manager/scheduler-core';
 import {
   buildCapacityPlacementExplanation,
-} from '../../../src/scheduler-core';
+} from '@simple-agent-manager/scheduler-core';
+import { DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS } from '@simple-agent-manager/shared';
+import { describe, expect, it } from 'vitest';
+
 import type {
   PlacementProfileDefaults,
   PlacementProjectDefaults,

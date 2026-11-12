@@ -6,7 +6,7 @@ import { pathStartsWithAny } from './source-files';
  * deciding capacity, eligibility or metering.
  *
  * `legacyReusableNodeMatches` is deliberately absent: it is the sanctioned export
- * of `scheduler-core/legacy-node-pool-compatibility.ts`, i.e. the one boundary legacy
+ * of `packages/scheduler-core/src/legacy-node-pool-compatibility.ts`, i.e. the one boundary legacy
  * reuse semantics are allowed to cross.
  */
 export const LEGACY_AUTHORITY_SYMBOLS = new Set([
@@ -79,7 +79,7 @@ export function isNativeOrAccountingField(name: string): boolean {
  * tier tables or translate legacy tiers at one reviewed boundary.
  */
 export const COMPATIBILITY_MODULES = new Set([
-  'apps/api/src/scheduler-core/legacy-node-pool-compatibility.ts',
+  'packages/scheduler-core/src/legacy-node-pool-compatibility.ts',
   'packages/shared/src/constants/vm-sizes.ts',
   'packages/shared/src/constants/resource-defaults.ts',
   'packages/providers/src/instance-offerings.ts',
@@ -100,7 +100,7 @@ const LEGACY_AUTHORITY_SCOPE_DIRECTORIES = [
  */
 const LEGACY_AUTHORITY_FAMILY_ROOTS = [
   'apps/api/src/services/',
-  'apps/api/src/scheduler-core/',
+  'packages/scheduler-core/src/',
   'apps/api/src/durable-objects/',
   'apps/api/src/scheduled/',
   'packages/providers/src/',
@@ -131,7 +131,7 @@ const LEGACY_AUTHORITY_FAMILY_TOKENS = new Set([
 /** Explicitly classified modules that carry no family token. */
 const LEGACY_AUTHORITY_CLASSIFIED_PATHS = new Set([
   'apps/api/src/services/runtime-allocation.ts',
-  'apps/api/src/scheduler-core/workspace-resource-capacity.ts',
+  'packages/scheduler-core/src/workspace-resource-capacity.ts',
   'apps/api/src/services/instant-session.ts',
 ]);
 

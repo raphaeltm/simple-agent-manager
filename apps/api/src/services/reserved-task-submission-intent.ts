@@ -1,3 +1,10 @@
+import {
+  collectStoredResourceRequirementLayers,
+  createPersistedTaskResourcePlanJson,
+  firstResourceRequirementLayer,
+  firstResourceRequirementLayerJson,
+  ResourceRequirementsValidationError,
+} from '@simple-agent-manager/scheduler-core';
 import type { VMSize } from '@simple-agent-manager/shared';
 import {
   DEFAULT_RESERVED_TASK_BRANCH_NAME_SEED_MAX_LENGTH,
@@ -13,13 +20,6 @@ import { type drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { canonicalJson } from '../lib/canonical-json';
-import {
-  collectStoredResourceRequirementLayers,
-  createPersistedTaskResourcePlanJson,
-  firstResourceRequirementLayer,
-  firstResourceRequirementLayerJson,
-  ResourceRequirementsValidationError,
-} from '../scheduler-core';
 import { generateBranchName } from './branch-name';
 import {
   PlacementResolutionError,

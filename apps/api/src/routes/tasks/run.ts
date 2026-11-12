@@ -10,6 +10,17 @@
  * 3. Returns immediately with 202 Accepted
  * 4. Async: selects/creates node, creates workspace, runs agent, creates PR, cleans up
  */
+import {
+  collectStoredResourceRequirementLayers,
+  createPersistedTaskResourcePlanJson,
+  firstResourceRequirementLayer,
+  mergeResourceRequirementLayers,
+  normalizeResourceRequirementsInput,
+  parseLegacyVmSize,
+  parseResourceRequirementsSource,
+  readPersistedTaskResourcePlan,
+  ResourceRequirementsValidationError,
+} from '@simple-agent-manager/scheduler-core';
 import type { RunTaskResponse, TaskStatus, VMSize } from '@simple-agent-manager/shared';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -24,17 +35,6 @@ import { ulid } from '../../lib/ulid';
 import { getAuth, requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireProjectCapability } from '../../middleware/project-auth';
-import {
-  collectStoredResourceRequirementLayers,
-  createPersistedTaskResourcePlanJson,
-  firstResourceRequirementLayer,
-  mergeResourceRequirementLayers,
-  normalizeResourceRequirementsInput,
-  parseLegacyVmSize,
-  parseResourceRequirementsSource,
-  readPersistedTaskResourcePlan,
-  ResourceRequirementsValidationError,
-} from '../../scheduler-core';
 import { formatIssues, RunTaskSchema } from '../../schemas';
 import {
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS,

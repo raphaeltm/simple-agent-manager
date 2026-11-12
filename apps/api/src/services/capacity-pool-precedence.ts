@@ -1,11 +1,10 @@
-import type { CapacityPoolScope } from '@simple-agent-manager/shared';
-
 import {
   type EffectiveDefaultCapacityPoolScope,
   effectiveDefaultCapacityPoolScopeChain,
   type EffectiveDefaultCapacityPoolScopeInput,
   higherPrecedenceDefaultCapacityPoolScopes,
-} from '../scheduler-core';
+} from '@simple-agent-manager/scheduler-core';
+import type { CapacityPoolScope } from '@simple-agent-manager/shared';
 
 /**
  * SQL form of the default capacity pool precedence in `scheduler-core`

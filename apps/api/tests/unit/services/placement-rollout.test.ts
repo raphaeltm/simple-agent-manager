@@ -1,16 +1,16 @@
+import {
+  comparePlacementRolloutHosts,
+  resolvePlacementRollout,
+} from '@simple-agent-manager/scheduler-core';
+import {
+  comparePlacementHostsByStrategy,
+  type PlacementHostSignals,
+} from '@simple-agent-manager/scheduler-core';
 import { describe, expect, it } from 'vitest';
 
 import { taskPlacementStrategy } from '../../../src/durable-objects/task-runner/node-selection';
 import { compareReusableHosts } from '../../../src/durable-objects/task-runner/task-placement-strategy';
 import type { TaskRunnerState } from '../../../src/durable-objects/task-runner/types';
-import {
-  comparePlacementRolloutHosts,
-  resolvePlacementRollout,
-} from '../../../src/scheduler-core';
-import {
-  comparePlacementHostsByStrategy,
-  type PlacementHostSignals,
-} from '../../../src/scheduler-core';
 
 const input = { userId: 'user', poolId: 'pool', strategy: 'pack' as const };
 function state(percent: number): TaskRunnerState {

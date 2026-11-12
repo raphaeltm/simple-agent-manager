@@ -1,10 +1,11 @@
-import { log } from '../../lib/logger';
 import type {
   PlacementHostDiagnosticInput,
-} from '../../scheduler-core';
+} from '@simple-agent-manager/scheduler-core';
 import {
   comparePlacementRolloutHosts,
-} from '../../scheduler-core';
+} from '@simple-agent-manager/scheduler-core';
+
+import { log } from '../../lib/logger';
 import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
 import {
   pastLifetimeAdmissionCutoffColumnSql,

@@ -1,3 +1,6 @@
+import {
+  resolveWorkspaceAdmissionPolicy,
+} from '@simple-agent-manager/scheduler-core';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -10,9 +13,6 @@ import type {
   TaskRunnerState,
 } from '../../src/durable-objects/task-runner';
 import type { Env } from '../../src/env';
-import {
-  resolveWorkspaceAdmissionPolicy,
-} from '../../src/scheduler-core';
 import { fetchNodeAgent } from '../../src/services/node-agent';
 import { resolveTaskStartPlacementCredentialAttribution } from '../../src/services/placement-resolver';
 import * as projectDataService from '../../src/services/project-data';

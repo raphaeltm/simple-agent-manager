@@ -1,7 +1,8 @@
 /** Caller holds the DO concurrency gate across the authoritative read and local write. */
 import {
   parseProviderLimitWait,
-} from '../../scheduler-core';
+} from '@simple-agent-manager/scheduler-core';
+
 import {
   createAttentionMarker,
   listActiveAttentionMarkers,
