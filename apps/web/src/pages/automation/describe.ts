@@ -16,6 +16,8 @@ import {
   type ProjectEventSubscriptionRecord,
   type TriggerExecution,
   type WebhookDeliveryOutcome,
+  type WebhookTriggerConfig,
+  type WebhookVerificationScheme,
 } from '@simple-agent-manager/shared';
 
 const one = (value: string | string[] | undefined): string | undefined =>
@@ -135,8 +137,22 @@ export function githubTriggerWhen(
   return githubTriggerClauses(eventType, filters).join(' · ');
 }
 
-export function webhookTriggerWhen(sourceLabel: string | null | undefined): string {
-  return sourceLabel ? `When ${sourceLabel} calls its webhook` : 'When its webhook is called';
+/**
+ * The verification scheme of a webhook configuration. A response cached from before signed
+ * webhooks existed has no `verification`; those automations all use SAM's token.
+ */
+export function webhookScheme(
+  config: Pick<WebhookTriggerConfig, 'verification'> | null | undefined
+): WebhookVerificationScheme {
+  return config?.verification?.scheme ?? 'sam_bearer';
+}
+
+export function webhookTriggerWhen(
+  sourceLabel: string | null | undefined,
+  scheme?: WebhookVerificationScheme
+): string {
+  if (sourceLabel) return `When ${sourceLabel} calls its webhook`;
+  return scheme === 'slack_v0' ? 'When Slack sends an event' : 'When its webhook is called';
 }
 
 /** Before save there is no address yet; after save, name it so the automation reads concretely. */
@@ -396,8 +412,63 @@ const DELIVERY_TEXT: Record<WebhookDeliveryOutcome, [Outcome, string]> = {
   concurrent_limit: ['skipped', 'Skipped: too many runs were already going'],
   configuration_error: ['failed', 'Failed: the automation is misconfigured'],
   internal_error: ['failed', 'Failed: SAM had an internal error'],
+  queued: ['waiting', 'Waiting for a free run'],
+  challenge: ['ok', 'The service checked this address'],
+  rejected: ['failed', 'Refused'],
+  queue_full: ['skipped', 'Refused: too many events were already waiting'],
+  dropped: ['failed', 'Dropped before it started'],
 };
 
-export function deliveryText(outcome: WebhookDeliveryOutcome): [Outcome, string] {
-  return DELIVERY_TEXT[outcome] ?? ['unknown', outcome.replaceAll('_', ' ')];
+/** Why a signed call was refused or dropped, in words a person can act on. */
+const DELIVERY_REASON_TEXT: Record<string, [Outcome, string]> = {
+  'rejected:invalid_signature': ['failed', 'Refused: the signature did not match'],
+  'rejected:stale_timestamp': ['failed', 'Refused: the request was too old'],
+  'rejected:not_configured': ['failed', 'Refused: no signing secret is saved yet'],
+  'rejected:invalid_body': ['failed', 'Refused: the body was not a JSON object'],
+  'rejected:missing_event_id': ['failed', 'Refused: the event had no ID'],
+  'rejected:repeated_body': ['failed', 'Refused: same body as an earlier event, under a new ID'],
+  'configuration_error:invalid_filters': [
+    'failed',
+    'Failed: the saved conditions could not be read; save them again',
+  ],
+  'queue_full:queue_full': ['skipped', 'Refused: too many events were already waiting'],
+  'dropped:queue_expired': ['failed', 'Dropped: waited too long for a free run'],
+};
+
+/** True when the call's stored code already has its own sentence, so the code adds nothing. */
+export function deliveryReasonExplained(
+  outcome: WebhookDeliveryOutcome,
+  errorCode?: string | null
+): boolean {
+  return Boolean(errorCode && DELIVERY_REASON_TEXT[`${outcome}:${errorCode}`]);
+}
+
+export function deliveryText(
+  outcome: WebhookDeliveryOutcome,
+  errorCode?: string | null
+): [Outcome, string] {
+  return (
+    (errorCode ? DELIVERY_REASON_TEXT[`${outcome}:${errorCode}`] : undefined) ??
+    DELIVERY_TEXT[outcome] ?? ['unknown', outcome.replaceAll('_', ' ')]
+  );
+}
+
+/** A short phrase for the status line: "Requests are being refused: <this>". */
+export function webhookRejectionPhrase(reason: string): string {
+  switch (reason) {
+    case 'invalid_signature':
+      return 'the signature doesn’t match';
+    case 'stale_timestamp':
+      return 'the requests are too old';
+    case 'not_configured':
+      return 'no signing secret is saved';
+    case 'invalid_body':
+      return 'the body is not a JSON object';
+    case 'missing_event_id':
+      return 'events are arriving without an ID';
+    case 'repeated_body':
+      return 'a body already received is arriving under new IDs';
+    default:
+      return reason.replaceAll('_', ' ');
+  }
 }

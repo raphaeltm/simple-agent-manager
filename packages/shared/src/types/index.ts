@@ -701,7 +701,6 @@ export type {
   GitHubTriggerRoutingConfig,
   ListTriggerExecutionsResponse,
   ListTriggersResponse,
-  ListWebhookDeliveriesResponse,
   RunTriggerRequest,
   Trigger,
   TriggeredBy,
@@ -715,16 +714,6 @@ export type {
   TriggerSourceType,
   TriggerStatus,
   UpdateTriggerRequest,
-  WebhookCredential,
-  WebhookDelivery,
-  WebhookDeliveryOutcome,
-  WebhookFilterMode,
-  WebhookFilterOperator,
-  WebhookFilterResult,
-  WebhookTemplateContext,
-  WebhookTriggerConfig,
-  WebhookTriggerConfigInput,
-  WebhookTriggerFilter,
 } from './trigger';
 export {
   GITHUB_TRIGGER_EVENT_TYPES,
@@ -733,10 +722,44 @@ export {
   TRIGGER_SOURCE_TYPES,
   TRIGGER_STATUSES,
   TRIGGERED_BY_VALUES,
+} from './trigger';
+export type {
+  ListWebhookDeliveriesResponse,
+  SetWebhookSigningSecretRequest,
+  SetWebhookSigningSecretResponse,
+  WebhookCredential,
+  WebhookDelivery,
+  WebhookDeliveryOutcome,
+  WebhookEventIdLocation,
+  WebhookFilterMode,
+  WebhookFilterOperator,
+  WebhookFilterResult,
+  WebhookRejectionReason,
+  WebhookSetupState,
+  WebhookSetupStatus,
+  WebhookSignedVerificationScheme,
+  WebhookSigningSecretStatus,
+  WebhookTemplateContext,
+  WebhookTriggerConfig,
+  WebhookTriggerConfigInput,
+  WebhookTriggerFilter,
+  WebhookVerificationConfig,
+  WebhookVerificationScheme,
+} from './trigger-webhook';
+export {
+  isWebhookFilterPresenceOperator,
+  isWebhookSignedScheme,
+  SLACK_WEBHOOK_DEFAULTS,
   WEBHOOK_DELIVERY_OUTCOMES,
   WEBHOOK_FILTER_MODES,
   WEBHOOK_FILTER_OPERATORS,
-} from './trigger';
+  WEBHOOK_FILTER_PRESENCE_OPERATORS,
+  WEBHOOK_REJECTION_REASONS,
+  WEBHOOK_SETUP_STATES,
+  WEBHOOK_SIGNED_VERIFICATION_SCHEMES,
+  WEBHOOK_SIGNING_SECRET_ANCHOR,
+  WEBHOOK_VERIFICATION_SCHEMES,
+} from './trigger-webhook';
 
 // Compute Usage
 export type {

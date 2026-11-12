@@ -1,7 +1,7 @@
 // Public entry point of @simple-agent-manager/worker-core.
 // The D1 schema has its own entry point: '@simple-agent-manager/worker-core/schema'.
 export { readBoundedRequestBody, RequestBodyTooLargeError } from './bounded-request-body';
-export { redactCredentialTokens } from './credential-token-redaction';
+export { redactCredentialTokens, startsWithCredentialToken } from './credential-token-redaction';
 export {
   d1CauseCode,
   type D1ErrorCategory,

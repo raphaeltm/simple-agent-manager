@@ -16,7 +16,6 @@ import {
   type ProjectEventFilterV1,
   type ProjectStandingWatch,
   type TriggerResponse,
-  type WebhookTriggerFilter,
 } from '@simple-agent-manager/shared';
 
 import {
@@ -30,6 +29,7 @@ import type { AutomationStart } from '../../../lib/automation-routes';
 import { type OnceTime, onceTimeFrom } from '../schedule-time';
 import { viewerZone } from '../time';
 import { canonicalCron, type ScheduleChoice, type SchedulePreset, toCron } from './cron';
+import { DEFAULT_WEBHOOK, type WebhookState, webhookStateFrom } from './webhook-state';
 
 export interface GitHubState {
   subjectAffinity: boolean;
@@ -50,13 +50,6 @@ export interface GitHubState {
   commentContains: string;
   isPullRequest: string;
   reviewStates: string;
-}
-
-export interface WebhookState {
-  sourceLabel: string;
-  includedHeaders: string;
-  filterMode: 'all' | 'any';
-  filters: WebhookTriggerFilter[];
 }
 
 export interface EmailState {
@@ -205,7 +198,7 @@ export function newEditorState(
     scheduleTouched: false,
     once: onceTimeFrom(defaultOnceDue(now), zone),
     github: { ...DEFAULT_GITHUB },
-    webhook: { sourceLabel: '', includedHeaders: '', filterMode: 'all', filters: [] },
+    webhook: { ...DEFAULT_WEBHOOK },
     email: { allowedSenders: '' },
     watch: {
       preset: 'issue-opened',
@@ -311,14 +304,7 @@ export function editorStateFromTrigger(trigger: TriggerResponse): EditorState {
           reviewStates: joinList(github.filters.reviewStates),
         }
       : base.github,
-    webhook: trigger.webhookConfig
-      ? {
-          sourceLabel: trigger.webhookConfig.sourceLabel ?? '',
-          includedHeaders: joinList(trigger.webhookConfig.includedHeaders),
-          filterMode: trigger.webhookConfig.filterMode,
-          filters: trigger.webhookConfig.filters,
-        }
-      : base.webhook,
+    webhook: trigger.webhookConfig ? webhookStateFrom(trigger.webhookConfig) : base.webhook,
     email: trigger.emailConfig
       ? { allowedSenders: joinEmailList(trigger.emailConfig.allowedSenders) }
       : base.email,
@@ -444,3 +430,5 @@ export function withEmailDefaults(state: EditorState, viewerEmail?: string | nul
     : state.action;
   return email === state.email && action === state.action ? state : { ...state, email, action };
 }
+
+export { type WebhookCaller, type WebhookState, withWebhookCaller } from './webhook-state';

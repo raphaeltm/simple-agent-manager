@@ -80,8 +80,9 @@ change, so expect the start-up time and cost of a VM.
      agent to update the trigger, or delete it and create it again.
      :::
 
-   - **When another service calls SAM** ("Which calls should start it?"): optionally a **Source
-     label**, **Included headers**,
+   - **When another service calls SAM** ("Which calls should start it?"): first **Who is calling?**
+     (**Slack**, **Another service that signs its requests**, or **My own script or service**),
+     then optionally a **Source label**, **Included headers**,
      and **Payload filters** on the JSON the service sends. See
      [Webhook Triggers](/docs/guides/webhook-triggers/).
 
@@ -95,15 +96,21 @@ change, so expect the start-up time and cost of a VM.
    - **Chat type**: **Task: finishes on its own** (the default), or **Conversation: stays open** for
      runs you want to steer.
    - **Machine**: what each run asks for.
-   - For a schedule or webhook, **Skip a run if the last one is still going**, and **Most runs at
-     once** when that's off.
+   - For a schedule or a token webhook, **Skip a run if the last one is still going**, and **Most
+     runs at once** when that's off.
+   - For Slack or another signed webhook, **One run at a time** ("Other events wait their turn"),
+     or **Most runs at once** when that's off: see
+     [Waiting while the trigger is busy](/docs/guides/webhook-triggers/#waiting-while-the-trigger-is-busy).
    - For GitHub, **One run at a time** ("Other GitHub events wait their turn"), or **Most runs at
      once** when that's off, and **When GitHub events overlap**: see
      [When a GitHub trigger is busy](#when-a-github-trigger-is-busy).
 
    Select **Create automation**. On a desktop, the preview beside the form shows what you're about
-   to save; nothing is saved before that. For a webhook trigger, SAM shows its endpoint and bearer
-   token once: copy them into the service that will send the webhooks, not into a chat.
+   to save; nothing is saved before that. For a token webhook, SAM shows its endpoint and bearer
+   token once: copy them into the service that will send the webhooks, not into a chat. For Slack
+   or another signed webhook there is no SAM token: its page shows its address and a field for the
+   sender's signing secret (see
+   [Signed webhooks](/docs/guides/webhook-triggers/#signed-webhooks-slack-and-hmac)).
 
 Editing goes through the same steps, except the first: a schedule can't become a GitHub or webhook
 trigger, or the other way round. Within its kind you can change its details, what it does and its
@@ -162,9 +169,11 @@ Replacing the token also cancels the agent's unused link.
 
 - **Each run starts a chat** in the project's session list, labelled **Task** or **Chat** by the
   trigger's task mode (see [Chat or Task](/docs/guides/chat-features/#chat-or-task)).
-- **One run at a time, by default.** A schedule or webhook skips a run while the previous one is
-  still going; a GitHub event waits its turn instead (see
-  [When a GitHub trigger is busy](#when-a-github-trigger-is-busy)). A run that has finished its turn
+- **One run at a time, by default.** A schedule or token webhook skips a run while the previous one
+  is still going; a GitHub event waits its turn instead (see
+  [When a GitHub trigger is busy](#when-a-github-trigger-is-busy)), and so does an event for Slack
+  or another signed webhook (see
+  [Waiting while the trigger is busy](/docs/guides/webhook-triggers/#waiting-while-the-trigger-is-busy)). A run that has finished its turn
   but is still awake counts as going. A run that has gone to sleep doesn't, so a quiet chat doesn't
   block the next run for long.
 - **The chat says which automation started it.** Expand the chat header to see **Triggered by**
@@ -357,7 +366,13 @@ at a time: busy events wait instead of being skipped.
 - **Webhook** (`"webhook"`): an `agentProfileId` from the current project and a `webhookConfig`
   (`{}` accepts every payload). The result has a `webhookClaim` with the claim URL; see
   [Creating Webhooks through MCP](/docs/guides/webhook-triggers/#creating-webhooks-through-mcp) for
-  how to redeem it safely.
+  how to redeem it safely. For Slack or another service that signs its requests, pass
+  `webhookConfig.verification` (for example `{ "scheme": "slack_v0" }`): the result then has the
+  address to give the sender and a link where a person saves the signing secret, and no claim.
+
+`get_trigger` reads one trigger back: its configuration and instructions, and for a webhook its
+address, setup state, the last refusal and recent calls. It never returns a token, a signing secret
+or a request body.
 
 `agentProfileId` is optional for schedule and GitHub triggers, which then use the project default.
 Webhook and email triggers must keep one: `update_trigger` refuses to clear it. Agents can list,

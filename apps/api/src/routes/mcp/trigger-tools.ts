@@ -413,4 +413,5 @@ export async function handleUpdateTrigger(
 
 export { handleCreateTrigger } from './trigger-create-tool';
 export { handleDeleteTrigger } from './trigger-delete-tool';
+export { handleGetTrigger } from './trigger-get-tool';
 export { handleListTriggers } from './trigger-list-tool';

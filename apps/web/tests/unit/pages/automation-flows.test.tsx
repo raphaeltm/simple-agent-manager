@@ -12,7 +12,7 @@ import { act, cleanup, render, screen, waitFor, within } from '@testing-library/
 import userEvent from '@testing-library/user-event';
 import { type ReactNode, useState } from 'react';
 import { MemoryRouter, Outlet, Route, Routes, useLocation } from 'react-router';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 
 const api = vi.hoisted(() => ({
   listWorkflowRuns: vi.fn(),
@@ -26,6 +26,7 @@ const api = vi.hoisted(() => ({
   runTrigger: vi.fn(),
   previewWebhookTrigger: vi.fn(),
   rotateWebhookTriggerToken: vi.fn(),
+  setWebhookSigningSecret: vi.fn(),
   getProjectMembers: vi.fn(),
   listChatSessions: vi.fn(),
   listAgentProfiles: vi.fn(),
@@ -310,6 +311,8 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  // A test that froze the clock must not leave it frozen for the next one.
+  vi.useRealTimers();
 });
 
 // Some sections render only after two requests in a row: the overview's attention card needs the
@@ -1098,5 +1101,355 @@ describe('behind the scenes', () => {
     await waitFor(() =>
       expect(events.cancelEventSubscription).toHaveBeenCalledWith('p1', 'sub-ci', undefined)
     );
+  });
+});
+
+describe('signed webhook automation', { timeout: 20_000 }, () => {
+  const SECRET = 'signing-secret-value-0123456789';
+  const signedTrigger = (
+    setup: Record<string, unknown>,
+    config: Record<string, unknown> = {}
+  ): TriggerResponse =>
+    trigger({
+      id: 'trg-slack',
+      name: 'Slack mentions',
+      status: 'active',
+      sourceType: 'webhook',
+      cronExpression: null,
+      webhookConfig: {
+        sourceLabel: null,
+        filterMode: 'all',
+        filters: [
+          { path: 'event.type', operator: 'equals', value: 'app_mention' },
+          { path: 'event.bot_id', operator: 'notExists' },
+        ],
+        includedHeaders: [],
+        verification: { scheme: 'slack_v0' },
+        eventId: { path: 'event_id' },
+        endpointUrl: 'https://api.example.test/api/webhooks/in/trg-slack',
+        tokenLastFour: null,
+        tokenCreatedAt: null,
+        tokenRotatedAt: null,
+        signingSecret: { set: false, setAt: null, setBy: null },
+        setup: {
+          state: 'needs_secret',
+          secretEntryUrl: 'https://app.example.test/projects/p1/automation/trigger/trg-slack',
+          lastEventAt: null,
+          waiting: 0,
+          lastRejection: null,
+          ...setup,
+        },
+        ...config,
+      },
+    });
+
+  it('creates a Slack automation from the caller choice, with no token step', async () => {
+    const user = userEvent.setup();
+    api.createTrigger.mockResolvedValue(signedTrigger({}));
+    api.getTrigger.mockResolvedValue(signedTrigger({}));
+    renderAt('/projects/p1/automation/new');
+    await user.click(await screen.findByRole('radio', { name: /When another service calls SAM/ }));
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.click(screen.getByRole('radio', { name: /^Slack/ }));
+    // Picking Slack fills in the conditions that ignore the app's own messages.
+    expect(screen.getByLabelText('Filter 2 operator')).toHaveValue('notExists');
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.selectOptions(screen.getByLabelText('Agent'), 'prof-1');
+    // The starting instructions are filled in too, and say the message is untrusted.
+    expect((screen.getByLabelText('What should it do?') as HTMLTextAreaElement).value).toContain(
+      'untrusted input from Slack'
+    );
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.clear(screen.getByLabelText('Name'));
+    await user.type(screen.getByLabelText('Name'), 'Slack mentions');
+    await user.click(screen.getByText('Advanced options'));
+    expect(screen.getByRole('checkbox', { name: /One run at a time/ })).toBeChecked();
+    expect(screen.getByText('Other events wait their turn.')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Create automation' }));
+    await waitFor(() =>
+      expect(api.createTrigger).toHaveBeenCalledWith(
+        'p1',
+        expect.objectContaining({
+          name: 'Slack mentions',
+          sourceType: 'webhook',
+          agentProfileId: 'prof-1',
+          webhookConfig: expect.objectContaining({
+            verification: { scheme: 'slack_v0' },
+            eventId: { path: 'event_id' },
+            filters: [
+              { path: 'event.type', operator: 'equals', value: 'app_mention' },
+              { path: 'event.bot_id', operator: 'notExists' },
+            ],
+          }),
+        })
+      )
+    );
+    // Straight to its page: there is no SAM token to show.
+    await waitFor(() =>
+      expect(screen.getByTestId('location')).toHaveTextContent(
+        '/projects/p1/automation/trigger/trg-slack'
+      )
+    );
+    expect(screen.queryByText('Save your webhook credential')).not.toBeInTheDocument();
+  });
+
+  it('creates a signed webhook with its signature header and event ID location', async () => {
+    const user = userEvent.setup();
+    api.createTrigger.mockResolvedValue(signedTrigger({}));
+    api.getTrigger.mockResolvedValue(signedTrigger({}));
+    renderAt('/projects/p1/automation/new?start=webhook');
+    await user.click(await screen.findByRole('radio', { name: /Another service that signs/ }));
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    expect(await screen.findByText(/Enter the header that carries the signature/)).toBeVisible();
+    expect(screen.getByText(/Enter the header that carries the event ID/)).toBeVisible();
+    await user.type(screen.getByLabelText('Signature header'), 'X-Hub-Signature-256');
+    await user.type(screen.getByLabelText('Where is the event ID?'), 'X-GitHub-Delivery');
+    // A header name is not a body path: switching the location clears the key, both ways.
+    await user.selectOptions(screen.getByLabelText('Event ID location'), 'path');
+    expect(screen.getByLabelText('Where is the event ID?')).toHaveValue('');
+    await user.type(screen.getByLabelText('Where is the event ID?'), 'event.id');
+    await user.selectOptions(screen.getByLabelText('Event ID location'), 'header');
+    expect(screen.getByLabelText('Where is the event ID?')).toHaveValue('');
+    await user.type(screen.getByLabelText('Where is the event ID?'), 'X-GitHub-Delivery');
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.selectOptions(screen.getByLabelText('Agent'), 'prof-1');
+    await user.type(screen.getByLabelText('What should it do?'), 'Triage it');
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.clear(screen.getByLabelText('Name'));
+    await user.type(screen.getByLabelText('Name'), 'Repo');
+    await user.click(screen.getByRole('button', { name: 'Create automation' }));
+    await waitFor(() =>
+      expect(api.createTrigger).toHaveBeenCalledWith(
+        'p1',
+        expect.objectContaining({
+          webhookConfig: expect.objectContaining({
+            verification: { scheme: 'hmac_sha256_body', header: 'x-hub-signature-256' },
+            eventId: { header: 'x-github-delivery' },
+          }),
+        })
+      )
+    );
+  });
+
+  it('saves the signing secret from its page and never shows it again', async () => {
+    const user = userEvent.setup();
+    api.getTrigger.mockResolvedValue(signedTrigger({}));
+    api.setWebhookSigningSecret.mockImplementation(async () => {
+      // The page reloads the automation after saving.
+      api.getTrigger.mockResolvedValue(
+        signedTrigger(
+          { state: 'waiting_for_first_request' },
+          { signingSecret: { set: true, setAt: new Date().toISOString(), setBy: 'owner' } }
+        )
+      );
+      return { signingSecret: { set: true, setAt: new Date().toISOString(), setBy: 'owner' } };
+    });
+    renderAt('/projects/p1/automation/trigger/trg-slack');
+    const status = await screen.findByTestId('webhook-setup-status', undefined, CHAINED_LOAD);
+    expect(status).toHaveTextContent('Paste the signing secret to continue');
+    expect(screen.getByTestId('webhook-url')).toHaveTextContent(
+      'https://api.example.test/api/webhooks/in/trg-slack'
+    );
+    // Nothing about a SAM token on a signed automation.
+    expect(screen.queryByText('Get a new token')).not.toBeInTheDocument();
+    expect(screen.getByText(/subscribe to the\s+bot event/)).toBeInTheDocument();
+    // The Slack app page opens from the steps, in a new tab.
+    expect(
+      screen.getByRole('link', { name: /^Open api\.slack\.com\/apps\s*\(opens in a new tab\)$/ })
+    ).toHaveAttribute('href', 'https://api.slack.com/apps');
+
+    const input = screen.getByLabelText('Signing secret');
+    expect(input).toHaveAttribute('type', 'password');
+    expect(screen.getByRole('button', { name: 'Save secret' })).toBeDisabled();
+    // Whitespace alone cannot be saved.
+    await user.type(input, '   ');
+    expect(screen.getByRole('button', { name: 'Save secret' })).toBeDisabled();
+    await user.clear(input);
+    // The secret is an HMAC key: it is sent exactly as typed, surrounding spaces included.
+    await user.type(input, `  ${SECRET}  `);
+    await user.click(screen.getByRole('button', { name: 'Save secret' }));
+    await waitFor(() =>
+      expect(api.setWebhookSigningSecret).toHaveBeenCalledWith('p1', 'trg-slack', `  ${SECRET}  `)
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('webhook-setup-status')).toHaveTextContent(
+        'Waiting for the first request'
+      )
+    );
+    expect(await screen.findByTestId('signing-secret-saved')).toHaveTextContent(/Saved .* hidden/);
+    expect(screen.queryByLabelText('Signing secret')).not.toBeInTheDocument();
+    expect(document.body.innerHTML).not.toContain(SECRET);
+
+    // Replacing opens an empty field again and can be cancelled.
+    await user.click(screen.getByRole('button', { name: 'Replace secret' }));
+    expect(screen.getByLabelText('Signing secret')).toHaveValue('');
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByLabelText('Signing secret')).not.toBeInTheDocument();
+  });
+
+  it('says why requests are refused, and moves the panel aside once events arrive', async () => {
+    // The status line prints relative times ("2 min ago") against the fixtures' NOW, which is
+    // taken when the file loads. Freeze only the clock at NOW so the age cannot drift while the
+    // full suite runs; timers stay real so the page's async loading still runs.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(NOW);
+    api.getTrigger.mockResolvedValue(
+      signedTrigger(
+        {
+          state: 'rejecting',
+          lastRejection: {
+            reason: 'invalid_signature',
+            at: new Date(NOW - 60_000).toISOString(),
+            hint: 'The signature did not match. Check that the saved signing secret is current.',
+          },
+        },
+        { signingSecret: { set: true, setAt: new Date(NOW - HOUR).toISOString(), setBy: 'owner' } }
+      )
+    );
+    const first = renderAt('/projects/p1/automation/trigger/trg-slack');
+    const status = await screen.findByTestId('webhook-setup-status', undefined, CHAINED_LOAD);
+    expect(status).toHaveAttribute('data-state', 'rejecting');
+    expect(status).toHaveTextContent('Requests are being refused: the signature doesn’t match');
+    expect(status).toHaveTextContent('Check that the saved signing secret is current');
+    // While setup needs attention the panel is the first thing on the page.
+    await screen.findByRole('region', { name: 'Calls received' }, CHAINED_LOAD);
+    const sections = () =>
+      screen.getAllByRole('region').map((region) => region.getAttribute('aria-label'));
+    expect(sections().indexOf('Webhook connection')).toBeLessThan(
+      sections().indexOf('Calls received')
+    );
+    first.unmount();
+
+    api.getTrigger.mockResolvedValue(
+      signedTrigger(
+        { state: 'receiving', lastEventAt: new Date(NOW - 2 * 60_000).toISOString(), waiting: 3 },
+        { signingSecret: { set: true, setAt: new Date(NOW - HOUR).toISOString(), setBy: 'owner' } }
+      )
+    );
+    renderAt('/projects/p1/automation/trigger/trg-slack');
+    const receiving = await screen.findByTestId('webhook-setup-status', undefined, CHAINED_LOAD);
+    expect(receiving).toHaveTextContent(/Receiving · last event 2 min/);
+    expect(receiving).toHaveTextContent('3 waiting for a free run');
+    // Once it works, the setup steps are gone; the address and secret stay.
+    expect(screen.queryByText(/subscribe to the\s+bot event/)).not.toBeInTheDocument();
+    expect(screen.getByTestId('webhook-url')).toBeInTheDocument();
+    await screen.findByRole('region', { name: 'Calls received' }, CHAINED_LOAD);
+    expect(sections().indexOf('Webhook connection')).toBeGreaterThan(
+      sections().indexOf('Calls received')
+    );
+  });
+
+  it('opens the secret link onto the Replace button when a secret is already saved', async () => {
+    const scroll = vi.fn();
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = scroll;
+    onTestFinished(() => {
+      Element.prototype.scrollIntoView = original;
+    });
+    api.getTrigger.mockResolvedValue(
+      signedTrigger(
+        { state: 'waiting_for_first_request' },
+        { signingSecret: { set: true, setAt: new Date(NOW - HOUR).toISOString(), setBy: 'owner' } }
+      )
+    );
+    window.history.replaceState(null, '', '/#signing-secret');
+    renderAt('/projects/p1/automation/trigger/trg-slack');
+    const replace = await screen.findByRole('button', { name: 'Replace secret' }, CHAINED_LOAD);
+    await waitFor(() => expect(replace).toHaveFocus());
+    expect(scroll).toHaveBeenCalled();
+    // The fragment is used once.
+    expect(window.location.hash).toBe('');
+  });
+
+  it('keeps Cancel disabled until a secret save settles', async () => {
+    const user = userEvent.setup();
+    let finish!: () => void;
+    api.setWebhookSigningSecret.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = () =>
+            resolve({
+              signingSecret: { set: true, setAt: new Date().toISOString(), setBy: 'owner' },
+            });
+        })
+    );
+    api.getTrigger.mockResolvedValue(
+      signedTrigger(
+        { state: 'receiving' },
+        { signingSecret: { set: true, setAt: new Date(NOW - HOUR).toISOString(), setBy: 'owner' } }
+      )
+    );
+    renderAt('/projects/p1/automation/trigger/trg-slack');
+    await user.click(await screen.findByRole('button', { name: 'Replace secret' }, CHAINED_LOAD));
+    await user.type(screen.getByLabelText('Signing secret'), SECRET);
+    await user.click(screen.getByRole('button', { name: 'Save secret' }));
+    // While the first save is in flight, Cancel cannot open the way to a second one.
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    finish();
+    expect(await screen.findByTestId('signing-secret-saved')).toHaveTextContent(/hidden/);
+  });
+
+  it('lets a viewer see the connection but not the secret field', async () => {
+    scope.userId = 'viewer';
+    api.getTrigger.mockResolvedValue(signedTrigger({}));
+    renderAt('/projects/p1/automation/trigger/trg-slack');
+    expect(
+      await screen.findByText(
+        /Someone who can edit this automation has to save it/,
+        undefined,
+        CHAINED_LOAD
+      )
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText('Signing secret')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save secret' })).not.toBeInTheDocument();
+    // The status line does not tell a viewer to do what they cannot.
+    expect(screen.getByTestId('webhook-setup-status')).toHaveTextContent(
+      'Waiting for someone who can edit to save the signing secret'
+    );
+  });
+
+  it('puts each kind of signed call into words', async () => {
+    api.getTrigger.mockResolvedValue(signedTrigger({ state: 'receiving' }));
+    const call = (id: string, outcome: string, errorCode: string | null, executionId?: string) => ({
+      id,
+      triggerId: 'trg-slack',
+      outcome,
+      httpStatus: 202,
+      bodyBytes: 300,
+      executionId: executionId ?? null,
+      errorCode,
+      receivedAt: new Date(NOW - HOUR).toISOString(),
+      processedAt: new Date(NOW - HOUR).toISOString(),
+    });
+    api.listWebhookDeliveries.mockResolvedValue({
+      deliveries: [
+        call('d1', 'queued', null, 'exec-waiting'),
+        call('d2', 'challenge', null),
+        call('d3', 'rejected', 'invalid_signature'),
+        call('d4', 'rejected', 'missing_event_id'),
+        call('d5', 'queue_full', 'queue_full'),
+        call('d6', 'dropped', 'queue_expired', 'exec-dropped'),
+        call('d7', 'rejected', 'stale_timestamp'),
+      ],
+      nextCursor: null,
+    });
+    renderAt('/projects/p1/automation/trigger/trg-slack');
+    const calls = await screen.findByRole('region', { name: 'Calls received' }, CHAINED_LOAD);
+    for (const text of [
+      'Waiting for a free run',
+      'The service checked this address',
+      'Refused: the signature did not match',
+      'Refused: the event had no ID',
+      'Refused: too many events were already waiting',
+      'Dropped: waited too long for a free run',
+      'Refused: the request was too old',
+    ]) {
+      expect(await within(calls).findByText(text)).toBeInTheDocument();
+    }
+    expect(within(calls).getByText('Waiting to start, listed under Recent runs')).toHaveAttribute(
+      'title',
+      'Run ID exec-waiting'
+    );
+    expect(within(calls).getByText('Never started, listed under Recent runs')).toBeInTheDocument();
   });
 });

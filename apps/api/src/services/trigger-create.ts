@@ -11,6 +11,7 @@ import {
   DEFAULT_TRIGGER_DEFAULT_MAX_CONCURRENT,
   DEFAULT_TRIGGER_MAX_CONCURRENT_LIMIT,
   DEFAULT_TRIGGER_NAME_MAX_LENGTH,
+  isWebhookSignedScheme,
 } from '@simple-agent-manager/shared';
 import { and, count, eq } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
@@ -30,8 +31,13 @@ import type { McpTokenData } from './mcp-token';
 import { clearTriggerPageCaches } from './trigger-cache';
 import { resolveMaxTriggersPerProject } from './trigger-limits';
 import { prepareWebhookClaim } from './webhook-credential-claim';
-import { getWebhookTriggerLimits, validateWebhookTriggerConfig } from './webhook-trigger-config';
-import { createWebhookTokenMaterial, webhookConfigValues } from './webhook-trigger-store';
+import {
+  applyWebhookSchemeDefaults,
+  getWebhookTriggerLimits,
+  validateWebhookTriggerConfig,
+} from './webhook-trigger-config';
+import { webhookConfigValues } from './webhook-trigger-config-rows';
+import { createWebhookTokenMaterial } from './webhook-trigger-store';
 type Database = ReturnType<typeof drizzle<typeof schema>>;
 function triggerResourceRequirementsJson(body: {
   resourceRequirements?: unknown;
@@ -183,6 +189,14 @@ export async function createTrigger(
   claimIdentity?: McpTokenData
 ) {
   const projectId = project.id;
+  if (body.sourceType === 'webhook' && body.webhookConfig) {
+    body = { ...body, webhookConfig: applyWebhookSchemeDefaults(body.webhookConfig) };
+  }
+  // A signed automation is verified with the sender's own secret, which a person saves on its
+  // page. It has no SAM token to return, and nothing for an agent to claim.
+  const signedWebhook = isWebhookSignedScheme(
+    body.webhookConfig?.verification?.scheme ?? 'sam_bearer'
+  );
   const { name, promptTemplate } = validateTriggerCreation(env, body);
   const githubConfig =
     body.sourceType === 'github'
@@ -266,7 +280,7 @@ export async function createTrigger(
   };
 
   const claim =
-    body.sourceType === 'webhook' && claimIdentity
+    body.sourceType === 'webhook' && claimIdentity && !signedWebhook
       ? prepareWebhookClaim(env, claimIdentity)
       : undefined;
   let webhookToken: Awaited<ReturnType<typeof createWebhookTokenMaterial>> | undefined;
@@ -311,5 +325,9 @@ export async function createTrigger(
   const created = await db.select().from(schema.triggers).where(eq(schema.triggers.id, id)).get();
   if (!created) throw errors.internal('Created trigger not found');
   clearTriggerPageCaches(projectId);
-  return { created, webhookToken: claim ? undefined : webhookToken, webhookClaim: claim?.response };
+  return {
+    created,
+    webhookToken: claim || signedWebhook ? undefined : webhookToken,
+    webhookClaim: claim?.response,
+  };
 }

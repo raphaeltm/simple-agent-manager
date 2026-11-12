@@ -4,10 +4,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
-import {
-  acceptGitHubTriggerExecution,
-  drainGitHubTriggerQueue,
-} from '../../../src/services/github-trigger-queue';
+import { acceptGitHubTriggerExecution } from '../../../src/services/github-trigger-queue';
+import { drainTriggerQueue } from '../../../src/services/trigger-queue-drain';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const databases: Database.Database[] = [];
@@ -167,9 +165,9 @@ describe('durable GitHub trigger queue', () => {
     sqlite
       .prepare("UPDATE trigger_executions SET status='completed' WHERE task_id IS NOT NULL")
       .run();
-    await drainGitHubTriggerQueue(env, submit);
+    await drainTriggerQueue(env, submit);
     expect(submit).toHaveBeenCalledTimes(2);
-    await drainGitHubTriggerQueue(env, submit);
+    await drainTriggerQueue(env, submit);
     expect(submit).toHaveBeenCalledTimes(2);
   });
   it('expires waiting events visibly without starting an agent', async () => {
@@ -178,7 +176,7 @@ describe('durable GitHub trigger queue', () => {
     await acceptGitHubTriggerExecution(env, input('one', 'repo:1'), submit);
     await acceptGitHubTriggerExecution(env, input('two', 'repo:2', { queueTtlSeconds: 1 }), submit);
     vi.advanceTimersByTime(1001);
-    await drainGitHubTriggerQueue(env, submit);
+    await drainTriggerQueue(env, submit);
     expect(
       sqlite
         .prepare("SELECT status,skip_reason FROM trigger_executions WHERE github_delivery_id='two'")
@@ -304,7 +302,7 @@ describe('durable GitHub trigger queue', () => {
     expect(second.outcome).toBe('waiting');
     release();
     await first;
-    await drainGitHubTriggerQueue(env, submit);
+    await drainTriggerQueue(env, submit);
     expect(submit).toHaveBeenCalledTimes(1);
     expect(mailbox.size).toBe(1);
   });
@@ -319,7 +317,7 @@ describe('durable GitHub trigger queue', () => {
     ).rejects.toThrow('pending');
     await acceptGitHubTriggerExecution(env, input('two', 'repo:2'), submit);
     vi.advanceTimersByTime(1001);
-    await drainGitHubTriggerQueue(env, submit);
+    await drainTriggerQueue(env, submit);
     expect(
       sqlite
         .prepare("SELECT status,skip_reason FROM trigger_executions WHERE github_delivery_id='one'")
@@ -357,16 +355,16 @@ describe('durable GitHub trigger queue', () => {
           )
           .get();
       const target = read() as Record<string, unknown>;
-      await drainGitHubTriggerQueue(env, submit);
+      await drainTriggerQueue(env, submit);
       expect(read()).toEqual(target);
       expect(target.status).toBe('routing');
       if (failure === 'getSession')
         stub.getSession.mockRejectedValue(new Error('Session unavailable'));
       vi.advanceTimersByTime(1001);
-      await drainGitHubTriggerQueue(env, submit);
+      await drainTriggerQueue(env, submit);
       expect(read()).toEqual({ ...target, status: 'dropped', skip_reason: 'delivery_uncertain' });
       const attempts = stub.getMailboxMessage.mock.calls.length;
-      await drainGitHubTriggerQueue(env, submit);
+      await drainTriggerQueue(env, submit);
       expect(stub.getMailboxMessage).toHaveBeenCalledTimes(attempts);
       expect(submit).toHaveBeenCalledTimes(1);
     }
@@ -388,7 +386,7 @@ describe('durable GitHub trigger queue', () => {
       )
     ).rejects.toThrow();
     sqlite.prepare('DELETE FROM tasks').run();
-    await drainGitHubTriggerQueue(env, submit);
+    await drainTriggerQueue(env, submit);
     expect(
       sqlite.prepare("SELECT status FROM trigger_executions WHERE github_delivery_id='two'").get()
     ).toEqual({ status: 'routed' });
@@ -431,7 +429,7 @@ describe('durable GitHub trigger queue', () => {
       .get();
     sqlite.prepare('DELETE FROM tasks').run();
     vi.setSystemTime(Date.now() + 2000);
-    await drainGitHubTriggerQueue(env, submit);
+    await drainTriggerQueue(env, submit);
     expect(
       sqlite
         .prepare("SELECT status,skip_reason FROM trigger_executions WHERE github_delivery_id='two'")
@@ -442,7 +440,7 @@ describe('durable GitHub trigger queue', () => {
     if (!lateAccept) throw new Error('Acceptance never started');
     await lateAccept();
     await pending;
-    await drainGitHubTriggerQueue(env, submit);
+    await drainTriggerQueue(env, submit);
     expect(
       sqlite
         .prepare(
@@ -482,7 +480,7 @@ describe('durable GitHub trigger queue', () => {
       message.deliveryState = state;
       message.terminalReason = state === 'failed' ? 'terminal_target' : 'lost_response';
       message.runtimeIdentity = state === 'failed' ? 'possibly-submitted-runtime' : null;
-      await drainGitHubTriggerQueue(env, submit);
+      await drainTriggerQueue(env, submit);
       expect(
         sqlite
           .prepare(
@@ -520,11 +518,11 @@ describe('durable GitHub trigger queue', () => {
     sqlite
       .prepare("UPDATE trigger_executions SET status='completed' WHERE task_id IS NOT NULL")
       .run();
-    await drainGitHubTriggerQueue(env, submit);
+    await drainTriggerQueue(env, submit);
     expect(
       sqlite.prepare("SELECT status FROM trigger_executions WHERE github_delivery_id='two'").get()
     ).toEqual({ status: 'waiting' });
-    await drainGitHubTriggerQueue(env, submit);
+    await drainTriggerQueue(env, submit);
     expect(submit).toHaveBeenCalledTimes(2);
     expect(
       sqlite.prepare("SELECT status FROM trigger_executions WHERE github_delivery_id='two'").get()
