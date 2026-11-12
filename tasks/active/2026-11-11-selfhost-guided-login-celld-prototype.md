@@ -72,3 +72,13 @@ Goal: make guided login safe enough for the real test box. Close the security-au
 - [x] Cancel destroys the container; interrupted teardown does not block a retry; leftovers are reaped
 - [x] Missing runtime says "unavailable" within seconds (1.5 s)
 - [x] Egress fence results unchanged; `pnpm selfhost:verify-fence` passes
+
+## B4b (task 01M76S19MX6VSM9PY0M0CCTXWZ, 2026-11-12): merge, re-prove the boundary, close auditor HIGHs
+
+- [x] Merged latest `sam/selfhost-pass-2` (README both sides; env.ts / platform-capabilities both vars)
+- [x] docker-proxy uid 7102 -> 7103 (sam-mx owns 7102); deploy refuses a clash or root; one-shot socket-volume chown (an existing volume kept uid 7102 and the proxy could not bind)
+- [x] Independent attack run on the VM as uid 7101 with only the proxy socket: 65 refused, celld's exact shape allowed, no side effects; raw socket unreachable from inside celld
+- [x] security-auditor: H1 (sandbox fence depended on celld) -> SAM egress-fence `sandbox_input`/`sandbox_forward`, proven live (celld table deleted: metadata/host/VPC unreachable; control without both: reachable); H2 (no aggregate bound) -> proxy cap `SAM_DOCKER_PROXY_MAX_CONTAINERS` (serialized), bounded LogConfig, `v=true` removal; live cap test red when disabled
+- [x] VM re-run on final commit: Claude/Codex to sign-in step, cancel cleanup 1-4 s, retry after cancel, missing runsc -> `sandbox_runtime_unavailable` in 3.2 s, verify-fence passes
+- [x] PR body "How to enable and test on the box"
+- [x] Prototype VM and network deleted
