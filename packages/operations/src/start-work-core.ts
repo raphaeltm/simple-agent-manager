@@ -9,8 +9,7 @@
  */
 import type { TaskMode } from '@simple-agent-manager/shared';
 import { workStartRelationFor } from '@simple-agent-manager/shared';
-import { log } from '@simple-agent-manager/worker-core';
-import { errors } from '@simple-agent-manager/worker-core';
+import { errors, log } from '@simple-agent-manager/worker-core';
 
 import type { OperationsEnv } from './env';
 import { ideaTaskPredicateSql } from './idea-identity';

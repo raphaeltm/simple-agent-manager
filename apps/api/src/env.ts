@@ -25,12 +25,10 @@ export interface Env
   CONNECTOR_CLIENT_NAME_MAX_LENGTH?: string;
   CONNECTOR_REDIRECT_URI_MAX_COUNT?: string;
   CONNECTOR_LIST_PAGE_SIZE?: string;
-  CONNECTOR_INBOX_SESSION_LIMIT?: string;
   CONNECTOR_OAUTH_REQUEST_MAX_BYTES?: string;
   CONNECTOR_REGISTRATION_PER_IP_PER_HOUR?: string;
   CONNECTOR_REGISTRATION_GLOBAL_PER_HOUR?: string;
   CONNECTOR_CLIENT_IDLE_TTL_SECONDS?: string;
-  CONNECTOR_RESPONSE_MAX_BYTES?: string;
   CONNECTOR_ENABLED?: string;
   CONNECTOR_WRITE_ENABLED?: string;
   CONNECTOR_CLIENT_REGISTRATION?: string;
@@ -808,12 +806,6 @@ export interface Env
   PROJECT_DATA_SEARCH_FTS_SCAN_LIMIT?: string;
   /** Newest raw messages the keyword search fallback scans (default 50000). */
   PROJECT_DATA_SEARCH_KEYWORD_SCAN_ROW_LIMIT?: string;
-  /** Max UTF-8 bytes retained from idea/task/knowledge/message search input (default 4096, min 4). */
-  SEARCH_QUERY_MAX_LENGTH?: string;
-  /** Max LIKE-safe UTF-8 bytes retained per search term (default 48, min 4). */
-  SEARCH_QUERY_MAX_TERM_LENGTH?: string;
-  /** Max whitespace-delimited terms retained from search input (default 40; higher values clamp). */
-  SEARCH_QUERY_MAX_TERMS?: string;
   /** Run only due ProjectData alarm sections per tick (default true; false runs every section). */
   PROJECT_DATA_ALARM_SECTION_GATING_ENABLED?: string;
   /** Max interval between ProjectData alarm ticks that run every section (default 900000). */
@@ -1065,8 +1057,6 @@ export interface Env
   ACP_LONG_TURN_CHECKPOINT_MS?: string;
   ACP_CHECKPOINT_PREEMPT_GRACE_MS?: string;
   // MCP list/read limits (shared platform operation limits live on OperationsEnv)
-  MCP_ARCHIVED_TOOL_PAYLOAD_LIST_LIMIT?: string; // Default archived payloads per get_archived_tool_payloads (default: 10)
-  MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX?: string; // Max archived payloads per get_archived_tool_payloads (default: 50)
   MCP_COMMENT_LIST_LIMIT?: string; // Default message-comment threads per request (default: 10)
   MCP_COMMENT_LIST_MAX?: string; // Max message-comment threads per request (default: 25)
   MCP_COMMENT_BODY_MAX_LENGTH?: string; // Max comment/reply body characters accepted via MCP (default: 4000)
@@ -1098,7 +1088,6 @@ export interface Env
   // Knowledge graph limits
   KNOWLEDGE_MAX_ENTITIES_PER_PROJECT?: string; // Max knowledge entities per project (default: 500)
   KNOWLEDGE_MAX_OBSERVATIONS_PER_ENTITY?: string; // Max observations per entity (default: 100)
-  KNOWLEDGE_SEARCH_LIMIT?: string; // Max search results (default: 20)
   KNOWLEDGE_AUTO_RETRIEVE_LIMIT?: string; // Max auto-retrieved observations on session start (default: 20)
   KNOWLEDGE_AUTO_RETRIEVE_MIN_CONFIDENCE?: string; // Min confidence for auto-retrieved observations (default: 0.8)
   KNOWLEDGE_AUTO_RETRIEVE_HIGH_CONFIDENCE_LIMIT?: string; // Max high-confidence observations to retrieve (default: 50)
@@ -1111,11 +1100,8 @@ export interface Env
   KNOWLEDGE_LIST_MAX_PAGE_SIZE?: string; // Max page size for entity list (default: 200)
   KNOWLEDGE_SEARCH_MAX_LIMIT?: string; // Max search results cap (default: 100)
   // Mission orchestration limits
-  MISSION_MAX_PER_PROJECT?: string; // Max missions per project (default: 50)
   MISSION_MAX_STATE_ENTRIES?: string; // Max state entries per mission (default: 200)
   MISSION_MAX_HANDOFFS?: string; // Max handoff packets per mission (default: 100)
-  MISSION_TITLE_MAX_LENGTH?: string; // Max mission title length (default: 200)
-  MISSION_DESCRIPTION_MAX_LENGTH?: string; // Max mission description length (default: 5000)
   MISSION_STATE_TITLE_MAX_LENGTH?: string; // Max state entry title length (default: 200)
   MISSION_STATE_CONTENT_MAX_LENGTH?: string; // Max state entry content length (default: 2000)
   HANDOFF_SUMMARY_MAX_LENGTH?: string; // Max handoff summary length (default: 5000)
@@ -1372,7 +1358,6 @@ export interface Env
   MAX_TRIGGERS_PER_PROJECT?: string; // Max triggers per project (default: 10)
   CRON_MIN_INTERVAL_MINUTES?: string; // Min cron interval in minutes (default: 15)
   CRON_MAX_FIRE_PER_SWEEP?: string; // Max triggers to fire per 5-min sweep (default: 5)
-  CRON_TEMPLATE_MAX_LENGTH?: string; // Max prompt template length (default: 8000)
   CRON_TEMPLATE_MAX_FIELD_LENGTH?: string; // Max per-field interpolated value length (default: 2000)
   GITHUB_TRIGGER_RECOVERY_MAX_WALL_TIME_MS?: string;
   GITHUB_TRIGGER_RECOVERY_LEASE_MS?: string;

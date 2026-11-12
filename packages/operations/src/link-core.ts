@@ -7,15 +7,14 @@ import type {
   LinkedPullRequest,
   LinkedSession,
   LinkKind,
-  LinkRelation,
   PullRequestRef,
   SessionContext,
 } from '@simple-agent-manager/shared';
 import { canonicalProjectPullRequestUrl, isStrongLinkRelation } from '@simple-agent-manager/shared';
-import { log } from '@simple-agent-manager/worker-core';
-import { errors } from '@simple-agent-manager/worker-core';
+import { errors, log } from '@simple-agent-manager/worker-core';
 
 import { ideaTaskPredicateSql } from './idea-identity';
+import { capped, linkFor, mergeRelations, sorted, unique } from './link-lists';
 import { limits, validateEntity } from './link-write';
 import type { ResourceLink } from './port-types';
 import { getPullRequestStates } from './pull-request-core';
@@ -75,58 +74,6 @@ type FileRow = { id: string; filename: string; directory: string };
 type PrRow = { chatSessionId: string | null; outputPrUrl: string | null };
 type AssociationRow = { chatSessionId: string | null; prUrl: string };
 type ProjectRow = { repository: string };
-
-function capped<T>(
-  items: T[],
-  cap: number,
-  total = items.length,
-  incomplete = false
-): CappedList<T> {
-  const count = Math.max(items.length, total);
-  return {
-    items: items.slice(0, cap),
-    total: count,
-    truncated: incomplete || count > cap,
-    totalIsLowerBound: incomplete,
-  };
-}
-function linkFor(links: ResourceLink[], kind: LinkKind, id: string) {
-  return links.filter(
-    (l) =>
-      (l.sourceKind === kind && l.sourceId === id) || (l.targetKind === kind && l.targetId === id)
-  );
-}
-function sorted(links: ResourceLink[]) {
-  return [...links].sort(
-    (a, b) =>
-      Number(isStrongLinkRelation(b.relation)) - Number(isStrongLinkRelation(a.relation)) ||
-      b.lastAt - a.lastAt
-  );
-}
-function unique<T>(items: T[], key: (item: T) => string): T[] {
-  const seen = new Set<string>();
-  return items.filter((item) => {
-    const id = key(item);
-    if (seen.has(id)) return false;
-    seen.add(id);
-    return true;
-  });
-}
-function mergeRelations<T extends { relations: LinkRelation[] }>(
-  items: T[],
-  key: (item: T) => string
-): T[] {
-  const map = new Map<string, T>();
-  for (const item of items) {
-    const id = key(item);
-    const current = map.get(id);
-    if (current) {
-      for (const relation of item.relations)
-        if (!current.relations.includes(relation)) current.relations.push(relation);
-    } else map.set(id, item);
-  }
-  return [...map.values()];
-}
 
 /** One DO RPC, then one batch of all display and PR-reference reads. */
 async function contextData(deps: OperationDeps, projectId: string, kind: LinkKind, id: string) {

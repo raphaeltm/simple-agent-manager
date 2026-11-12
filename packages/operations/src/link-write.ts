@@ -1,7 +1,6 @@
 import type { LinkKind, LinkRelation } from '@simple-agent-manager/shared';
 import { canonicalProjectPullRequestUrl } from '@simple-agent-manager/shared';
-import { log } from '@simple-agent-manager/worker-core';
-import { errors } from '@simple-agent-manager/worker-core';
+import { errors, log } from '@simple-agent-manager/worker-core';
 
 import { ideaTaskPredicateSql } from './idea-identity';
 import type { LinkLimits, LinkRemove, LinkWrite } from './port-types';

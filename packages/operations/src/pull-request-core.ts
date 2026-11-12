@@ -3,8 +3,7 @@ import {
   type PullRequestRef,
   type PullRequestState,
 } from '@simple-agent-manager/shared';
-import { log } from '@simple-agent-manager/worker-core';
-import { ulid } from '@simple-agent-manager/worker-core';
+import { log, ulid } from '@simple-agent-manager/worker-core';
 
 import type { OperationsEnv } from './env';
 import type { OperationContext, OperationDeps } from './types';

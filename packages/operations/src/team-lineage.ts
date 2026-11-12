@@ -8,8 +8,7 @@
  * live work before finished work, then most recently updated. Rows past the cap are disclosed,
  * not silently dropped.
  */
-import { log } from '@simple-agent-manager/worker-core';
-import { parseRowsSkippingInvalid } from '@simple-agent-manager/worker-core';
+import { log, parseRowsSkippingInvalid } from '@simple-agent-manager/worker-core';
 import * as v from 'valibot';
 
 import type { OperationsEnv } from './env';

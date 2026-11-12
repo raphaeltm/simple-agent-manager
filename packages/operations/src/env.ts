@@ -3,8 +3,8 @@
  *
  * Bindings and variables owned by other areas are not here: operations reach those through
  * `OperationPorts` (`./ports.ts`). Keep this list to what operations code itself reads.
- * Fields shared with the rest of the worker (`DATABASE`, search, mission and connector
- * limits) are also declared on the worker `Env`, with the same types.
+ * The worker `Env` gets these fields from here; `DATABASE` is also declared there because the
+ * whole worker uses it.
  */
 export interface OperationsEnv {
   DATABASE: D1Database;

@@ -16,8 +16,7 @@ import {
   MAX_HUMAN_INPUT_OPTION_LENGTH,
   MAX_HUMAN_INPUT_OPTIONS_COUNT,
 } from '@simple-agent-manager/shared';
-import { log } from '@simple-agent-manager/worker-core';
-import { maybeJsonRecord } from '@simple-agent-manager/worker-core';
+import { log, maybeJsonRecord } from '@simple-agent-manager/worker-core';
 
 import type { OperationProjectDataPort } from './ports';
 import type { OperationDeps } from './types';
