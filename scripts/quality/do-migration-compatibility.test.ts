@@ -63,11 +63,11 @@ describe('resolveDurableObjectMigrations', () => {
 
     const resolved = resolveDurableObjectMigrations(history, null);
 
-    expect(history).toHaveLength(22);
+    expect(history).toHaveLength(23);
     expect(legacyCreateCount).toBe(7);
     expect(resolved).toHaveLength(history.length);
     expect(resolved.every((migration) => migration.new_classes === undefined)).toBe(true);
-    expect(resolved.flatMap((migration) => migration.new_sqlite_classes ?? [])).toHaveLength(23);
+    expect(resolved.flatMap((migration) => migration.new_sqlite_classes ?? [])).toHaveLength(24);
     expect(loadCheckedInMigrations()).toEqual(history);
   });
 
@@ -120,7 +120,7 @@ describe('resolveDurableObjectMigrations', () => {
     const latestTag = history.at(-1)?.tag;
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
 
-    expect(latestTag).toBe('v22');
+    expect(latestTag).toBe('v23');
     const resolved = resolveDurableObjectMigrations(history, latestTag ?? null);
     const envConfig = generateApiWorkerEnv(
       { migrations: history },
@@ -141,12 +141,19 @@ describe('resolveDurableObjectMigrations', () => {
     const resolved = resolveDurableObjectMigrations(history, 'v21');
     expect(resolved.slice(0, 21)).toEqual(history.slice(0, 21));
     resolved.slice(0, 21).forEach((entry, index) => expect(entry).toBe(history[index]));
-    expect(resolved.slice(21)).toEqual([
+    expect(resolved.slice(21, 22)).toEqual([
       { tag: 'v22', new_sqlite_classes: ['McpRateCounter', 'WorkspaceBootLog'] },
     ]);
     const clean = resolveDurableObjectMigrations(history, null);
     expect(clean.at(-1)).toEqual(resolved.at(-1));
     expect(loadCheckedInMigrations()).toEqual(history);
+  });
+
+  it('appends the HostedGitRepo SQLite class after an unchanged deployed v22 prefix', () => {
+    const history = loadCheckedInMigrations();
+    const resolved = resolveDurableObjectMigrations(history, 'v22');
+    expect(resolved.slice(0, 22)).toEqual(history.slice(0, 22));
+    expect(resolved.slice(22)).toEqual([{ tag: 'v23', new_sqlite_classes: ['HostedGitRepo'] }]);
   });
 
   it('preserves an applied prefix and converts only pending legacy creates', () => {
