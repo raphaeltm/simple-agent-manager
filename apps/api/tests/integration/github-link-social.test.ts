@@ -260,6 +260,51 @@ describe('Connect GitHub for an email-signed account (vertical slice)', () => {
     expect(response.status).toBe(400);
   });
 
+  /**
+   * Agent sign-in sessions (main #2649) carry `sessions.hard_expires_at`, and `routes/auth.ts`
+   * refuses every BetterAuth endpoint but get-session and sign-out for them. That arrives on this
+   * branch with the merge of main into `sam/selfhost-pass-2`; until the column exists these two
+   * cases are skipped, and from then on they run. Both passed on a trial merge of main.
+   */
+  function hasAgentSessionCap(): boolean {
+    const columns = sqlite.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
+    return columns.some((column) => column.name === 'hard_expires_at');
+  }
+
+  it('refuses to link from an agent sign-in session (it may only read its session or sign out)', async (ctx) => {
+    if (!hasAgentSessionCap()) ctx.skip();
+    const { sessionCookie } = await createSessionCookieForUser(env, 'email-user');
+    sqlite.prepare('UPDATE sessions SET hard_expires_at = ?').run(Date.now() + 3_600_000);
+    const response = await startLink(sessionCookie);
+    expect(response.status).toBe(403);
+    expect(githubLinks()).toEqual([]);
+
+    // Control: the same session without the cap may start the link.
+    sqlite.prepare('UPDATE sessions SET hard_expires_at = NULL').run();
+    expect((await startLink(sessionCookie)).status).toBe(200);
+  });
+
+  it('refuses the GitHub callback when it arrives with an agent sign-in session', async (ctx) => {
+    if (!hasAgentSessionCap()) ctx.skip();
+    const { sessionCookie } = await createSessionCookieForUser(env, 'email-user');
+    const start = await startLink(sessionCookie);
+    expect(start.status).toBe(200);
+    const { url } = (await start.json()) as { url: string };
+    const authorizeUrl = new URL(url);
+    const callback = new URL(GITHUB_REDIRECT_URI);
+    callback.searchParams.set('code', github.approve(authorizeUrl));
+    callback.searchParams.set('state', authorizeUrl.searchParams.get('state') ?? '');
+    // The session becomes an agent session between the start and the callback.
+    sqlite.prepare('UPDATE sessions SET hard_expires_at = ?').run(Date.now() + 3_600_000);
+    const response = await app.request(
+      callback.toString(),
+      { headers: { cookie: [sessionCookie, cookieHeader(start)].join('; ') } },
+      env
+    );
+    expect(response.status).toBe(403);
+    expect(githubLinks()).toEqual([]);
+  });
+
   it('refuses to start a link without a signed-in session', async () => {
     const response = await startLink('');
     expect(response.status).toBe(401);
