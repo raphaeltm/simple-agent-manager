@@ -234,7 +234,19 @@ export function runBackup(
 
   const precopyStart = ctx.now();
   ctx.log(`live pre-copy of ${ctx.box.CELLD_BUCKET} (celld keeps running)`);
-  pullBucket(ctx, bucketDir);
+  // Best effort: a running node rewrites its lease, waker and capacity objects every few seconds,
+  // so `gcloud storage rsync` meets generations that vanished mid-copy (404) and exits non-zero.
+  // The pre-copy only shortens the downtime; the delta copy below, with celld stopped, is the one
+  // that must succeed, and it fails loudly if the store itself is unreachable.
+  try {
+    pullBucket(ctx, bucketDir);
+  } catch (err) {
+    ctx.log(
+      `live pre-copy incomplete, the delta copy with celld stopped will finish it: ${
+        err instanceof Error ? err.message.split('\n')[0]?.slice(0, 200) : String(err)
+      }`
+    );
+  }
   const precopyMs = ctx.now() - precopyStart;
 
   ctx.log('stopping celld for the delta copy');
