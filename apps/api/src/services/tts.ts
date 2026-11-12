@@ -37,6 +37,17 @@ import {
 
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
+import { type SpeechEndpoint, synthesizeWithEndpoint } from './speech-endpoints';
+
+/**
+ * Where audio comes from: the Workers AI binding, or an admin-configured OpenAI-compatible speech
+ * endpoint (`speech.synthesis.*`) on an installation without it (overnight B3 A5).
+ */
+export type SpeechAudioSource = Ai | SpeechEndpoint;
+
+function isSpeechEndpoint(source: SpeechAudioSource): source is SpeechEndpoint {
+  return (source as SpeechEndpoint).kind === 'synthesis';
+}
 
 // ─── Configuration ───────────────────────────────────────────────────────────
 
@@ -416,9 +427,18 @@ export function splitTextIntoChunks(text: string, maxChunkSize: number): string[
  */
 export async function generateSpeechAudioChunk(
   text: string,
-  ai: Ai,
+  ai: SpeechAudioSource,
   config: TTSConfig = {}
 ): Promise<ArrayBuffer> {
+  if (isSpeechEndpoint(ai)) {
+    const encoding = config.encoding ?? DEFAULT_TTS_ENCODING;
+    return retryWithBackoff(
+      () => synthesizeWithEndpoint(ai, text, encoding),
+      config.retryAttempts ?? DEFAULT_TTS_RETRY_ATTEMPTS,
+      config.retryBaseDelayMs ?? DEFAULT_TTS_RETRY_BASE_DELAY_MS,
+      'tts_endpoint_chunk'
+    );
+  }
   const model = config.model ?? DEFAULT_TTS_MODEL;
   const speaker = config.speaker ?? DEFAULT_TTS_SPEAKER;
   const encoding = config.encoding ?? DEFAULT_TTS_ENCODING;
@@ -491,7 +511,7 @@ export async function generateSpeechAudioChunk(
  */
 export async function generateSpeechAudio(
   text: string,
-  ai: Ai,
+  ai: SpeechAudioSource,
   config: TTSConfig = {},
   r2?: R2Bucket,
   storageId?: string,
@@ -723,7 +743,7 @@ export interface SynthesizeResult {
 export async function synthesizeSpeech(
   text: string,
   storageId: string,
-  ai: Ai,
+  ai: SpeechAudioSource,
   r2: R2Bucket,
   config: TTSConfig = {},
   userId: string = 'anonymous',
@@ -762,6 +782,21 @@ export async function synthesizeSpeech(
   const summarized = effectiveMode === 'summary';
 
   let processedText: string;
+
+  if (isSpeechEndpoint(ai)) {
+    // No Workers AI model to clean up or summarize with: strip markdown with the regex fallback
+    // and keep the text within the chunk limit instead of summarizing.
+    const chunkSize = config.chunkSize ?? DEFAULT_TTS_CHUNK_SIZE;
+    const maxChunks = config.maxChunks ?? DEFAULT_TTS_MAX_CHUNKS;
+    processedText = fallbackStripMarkdown(inputText).slice(
+      0,
+      chunkSize * Math.max(1, maxChunks - 1)
+    );
+    const audio = await generateSpeechAudio(processedText, ai, config, r2, storageId, userId);
+    if (audio.byteLength === 0) throw new Error('TTS model returned empty audio');
+    await storeAudioInR2(r2, storageId, userId, audio, config);
+    return { audioBody: audio, contentType, cached: false, summarized: false };
+  }
 
   if (summarized) {
     // Summarize long text via LLM

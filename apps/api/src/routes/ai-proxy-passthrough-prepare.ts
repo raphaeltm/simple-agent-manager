@@ -22,6 +22,7 @@ import {
   createRateLimitKey,
   getCurrentWindowStart,
 } from '../middleware/rate-limit';
+import { isAiProxyEnabled } from '../services/ai-proxy-availability';
 import { AIProxyAuthError, verifyAIProxyAuth } from '../services/ai-proxy-shared';
 import { checkAiUsageGate } from '../services/ai-token-budget';
 import { resolveOutboundMaxRedirects } from '../services/outbound-fetch-settings';
@@ -186,7 +187,7 @@ export async function prepareProxyRequest(
   c: ProxyContext,
   options: PrepareProxyOptions
 ): Promise<PreparedProxyResult> {
-  if (c.env.AI_PROXY_ENABLED === 'false') {
+  if (!(await isAiProxyEnabled(c.env))) {
     return { ok: false, response: options.disabledResponse() };
   }
 

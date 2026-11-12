@@ -16,6 +16,7 @@ import { hasUnexpiredHumanInput } from '../services/acp-interaction-store';
 import { resolveAdminSetting } from '../services/admin-settings';
 import { getWorkersAiBindingOrNull } from '../services/platform-capabilities';
 import * as projectDataService from '../services/project-data';
+import { classifyLoopWithLlmEndpoint } from '../services/stalled-task-classifier-endpoint';
 import type { TaskRuntimeLiveness } from '../services/task-runtime-liveness';
 
 type StallDecision = 'stalled' | 'still_working' | 'uncertain';
@@ -349,9 +350,17 @@ export async function classifyReconciliationLoop(
     await resolveAdminSetting(env, 'operations.stalledTaskClassifierEnabled')
   );
   if (!config.enabled) return null;
-  // Same as classifyLongRunningTaskStall: no Workers AI, no advisory verdict.
   const ai = getWorkersAiBindingOrNull(env);
-  if (!ai) return null;
+  if (!ai) {
+    // No Clef here. This verdict is advisory text on an already-paused loop, so an admin may
+    // opt in to the LLM endpoint for it (off by default). The long-turn path stays Clef-only.
+    return classifyLoopWithLlmEndpoint(env, {
+      transcript: formatTranscript(messages, config.transcriptMaxChars),
+      reasons: ['repeated_error', 'external_operation_pending', 'insufficient_evidence'],
+      timeoutMs: config.timeoutMs,
+      threshold: config.confidenceThreshold,
+    });
+  }
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const timeout = new Promise<never>((_, reject) => {

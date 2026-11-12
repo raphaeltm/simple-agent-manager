@@ -20,6 +20,20 @@ import { rejectedProviderWindow } from '../../src/services/provider-limit-window
 import { queueWorkspaceSessionSleep } from '../../src/services/session-sleep';
 import { createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
+// Platform-key billing with no AI Gateway is the self-hosted box configuration: the proxy runs
+// there only once an admin turns on `aiProxy.directUpstreamEnabled` (ai-proxy-availability.ts).
+vi.mock('../../src/services/admin-settings-resolution', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../src/services/admin-settings-resolution')>();
+  return {
+    ...actual,
+    resolveAdminSetting: async (env: never, name: string) =>
+      name === 'aiProxy.directUpstreamEnabled'
+        ? true
+        : actual.resolveAdminSetting(env, name as never),
+  };
+});
+
 vi.mock('../../src/services/jwt', () => ({
   verifyCallbackToken: vi.fn(async () => ({ workspace: 'workspace-1', scope: 'workspace' })),
   signCallbackToken: vi.fn(),

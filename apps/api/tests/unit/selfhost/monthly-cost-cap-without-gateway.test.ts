@@ -1,11 +1,13 @@
 /**
- * The monthly AI dollar cap is priced only from Cloudflare AI Gateway logs (the hourly
- * `runMonthlyCostAggregation` cron fills the KV cost cache the gate reads). Without an
- * addressable gateway that cache is never written, so a cap used to be accepted and then
- * silently never enforced. Now the cap is explicitly unavailable there: the budget API refuses
- * to set one and reports `monthlyCostCapAvailable: false`, the gate reports `enforced: false`
- * without reading the cost cache, and the admin AI proxy config and the public capabilities say
- * so. A Cloudflare deployment with the gateway is unchanged (the control in every block).
+ * Where the monthly AI dollar cap's spend figure comes from.
+ *
+ * - With an addressable AI Gateway: gateway logs (the hourly `runMonthlyCostAggregation` cron
+ *   fills the KV cost cache the gate reads). Unchanged; the control in every block.
+ * - A gateway whose logs cannot be read (no API token): the cap is explicitly unavailable, so it
+ *   is refused, reported `monthlyCostCapAvailable: false` and never silently unenforced.
+ * - No addressable gateway (a self-hosted box, overnight B3 A2): SAM prices platform-billed calls
+ *   itself (`hasLocalAiCostMetering`), so the cap can be set, is enforced from that local total
+ *   and never reads the gateway cron's KV cache.
  *
  * Configurations: `cloudflare` (gateway id + account), `selfHosted` (the wrangler.toml default
  * gateway id, no account), `partialCloudflare` (account and token present, AI_GATEWAY_ID unset).
@@ -30,6 +32,7 @@ import {
   buildMonthlyCostCacheKey,
   checkAiUsageGate,
   checkMonthlyCostCap,
+  incrementProviderUsage,
 } from '../../../src/services/ai-token-budget';
 import {
   publicPlatformCapabilities,
@@ -47,7 +50,8 @@ const CONFIG_VARS: Record<Config, Partial<Env>> = {
   // The gateway is addressable but its logs cannot be read (the cost cron needs the token).
   gatewayWithoutToken: { AI_GATEWAY_ID: 'sam', CF_ACCOUNT_ID: 'account-1' },
 };
-const WITHOUT_GATEWAY: Config[] = ['selfHosted', 'partialCloudflare', 'gatewayWithoutToken'];
+/** No addressable gateway: SAM meters spend itself. */
+const LOCAL_METERING: Config[] = ['selfHosted', 'partialCloudflare'];
 
 let fetchMock: ReturnType<typeof vi.fn>;
 
@@ -107,7 +111,16 @@ describe('PUT /api/usage/ai/budget monthly cap', () => {
     });
   });
 
-  it.each(WITHOUT_GATEWAY)(
+  it.each(LOCAL_METERING)('saves a monthly cap in the %s configuration', async (config) => {
+    const env = makeEnv(config);
+    const res = await putBudget(env, { monthlyCostCapUsd: 10 });
+    expect(res.status).toBe(200);
+    expect(await env.KV.get(buildBudgetSettingsKey(USER), 'json')).toMatchObject({
+      monthlyCostCapUsd: 10,
+    });
+  });
+
+  it.each(['gatewayWithoutToken'] as const)(
     'refuses a monthly cap in the %s configuration and stores nothing',
     async (config) => {
       const env = makeEnv(config);
@@ -121,7 +134,7 @@ describe('PUT /api/usage/ai/budget monthly cap', () => {
     }
   );
 
-  it.each(WITHOUT_GATEWAY)(
+  it.each([...LOCAL_METERING, 'gatewayWithoutToken'] as Config[])(
     'still saves daily limits with no monthly cap in the %s configuration (liveness)',
     async (config) => {
       const env = makeEnv(config);
@@ -149,7 +162,27 @@ describe('GET /api/usage/ai/budget monthly cap availability', () => {
     expect(body.utilization.monthlyCostPercent).toBe(0);
   });
 
-  it.each(WITHOUT_GATEWAY)(
+  it.each(LOCAL_METERING)(
+    'reports the cap available in the %s configuration from local metering, ignoring the gateway cache',
+    async (config) => {
+      const env = makeEnv(config);
+      await seedCapOverspent(env);
+      const res = await app().request('/api/usage/ai/budget', {}, env);
+      const body = (await res.json()) as {
+        monthlyCostCapAvailable: boolean;
+        monthCostUsd: number;
+        utilization: { monthlyCostPercent: number | null };
+      };
+      expect(res.status).toBe(200);
+      expect(body.monthlyCostCapAvailable).toBe(true);
+      // Nothing metered yet; the seeded gateway-cron figure ($9) is not this installation's.
+      expect(body.monthCostUsd).toBe(0);
+      expect(body.utilization.monthlyCostPercent).toBe(0);
+      expect(fetchMock).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(['gatewayWithoutToken'] as const)(
     'reports the cap unavailable in the %s configuration, with the saved cap and no utilization',
     async (config) => {
       const env = makeEnv(config);
@@ -166,8 +199,6 @@ describe('GET /api/usage/ai/budget monthly cap availability', () => {
       expect(body.settings.monthlyCostCapUsd).toBe(5);
       expect(body.utilization.monthlyCostPercent).toBeNull();
       expect(body.exceeded).toBe(false);
-      // Only an addressable gateway is read for the month's cost (it fails without a token).
-      if (config !== 'gatewayWithoutToken') expect(fetchMock).not.toHaveBeenCalled();
     }
   );
 });
@@ -183,7 +214,39 @@ describe('AI usage gate monthly cap', () => {
     });
   });
 
-  it.each(WITHOUT_GATEWAY)(
+  it.each(LOCAL_METERING)(
+    'enforces the cap from local metering in the %s configuration, without reading the gateway cache',
+    async (config) => {
+      const env = makeEnv(config);
+      await seedCapOverspent(env);
+      const kvGet = vi.spyOn(env.KV, 'get');
+      expect(await checkMonthlyCostCap(env.KV, USER, env)).toEqual({
+        allowed: true,
+        costUsd: 0,
+        capUsd: 5,
+        enforced: true,
+      });
+      expect(kvGet.mock.calls.map(([key]) => key)).not.toContain(buildMonthlyCostCacheKey(USER));
+
+      // $6 of priced spend this month: over the $5 cap.
+      await incrementProviderUsage(
+        env.KV,
+        USER,
+        { providerId: 'anthropic', providerName: 'Anthropic', dialect: 'anthropic' },
+        1000,
+        1000,
+        env,
+        6
+      );
+      expect(await checkAiUsageGate(env.KV, USER, env)).toMatchObject({
+        allowed: false,
+        reason: 'monthly-cost-cap',
+        monthlyCap: { costUsd: 6, capUsd: 5, enforced: true },
+      });
+    }
+  );
+
+  it.each(['gatewayWithoutToken'] as const)(
     'reports the saved cap not enforced in the %s configuration, without reading the cost cache',
     async (config) => {
       const env = makeEnv(config);
@@ -205,8 +268,8 @@ describe('AI usage gate monthly cap', () => {
 describe('where an admin and the web client learn it', () => {
   it.each([
     ['cloudflare', true],
-    ['selfHosted', false],
-    ['partialCloudflare', false],
+    ['selfHosted', true],
+    ['partialCloudflare', true],
     ['gatewayWithoutToken', false],
   ] as const)(
     '%s: capabilities and admin AI proxy config say monthlyCostCap=%s',

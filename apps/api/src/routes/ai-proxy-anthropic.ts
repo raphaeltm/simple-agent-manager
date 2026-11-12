@@ -32,6 +32,10 @@ import {
 } from '../middleware/rate-limit';
 import { resolveUpstreamAuth } from '../services/ai-billing';
 import {
+  aiProxyDisabledMessage,
+  resolveAiProxyAvailability,
+} from '../services/ai-proxy-availability';
+import {
   AIProxyAuthError,
   buildAIGatewayMetadata,
   buildAnthropicCountTokensUrl,
@@ -66,9 +70,10 @@ const aiProxyAnthropicRoutes = new Hono<{ Bindings: Env }>();
 // =============================================================================
 
 aiProxyAnthropicRoutes.post('/messages', async (c) => {
-  // Kill switch
-  if (c.env.AI_PROXY_ENABLED === 'false') {
-    return anthropicError('AI proxy is disabled', 'api_error', 503);
+  // Kill switch, or no AI Gateway and the admin has not enabled the direct upstream.
+  const availability = await resolveAiProxyAvailability(c.env);
+  if (!availability.enabled) {
+    return anthropicError(aiProxyDisabledMessage(availability), 'api_error', 503);
   }
 
   // --- Auth: extract token from x-api-key or Authorization: Bearer ---
@@ -277,6 +282,7 @@ aiProxyAnthropicRoutes.post('/messages', async (c) => {
       fallbackInputTokens: estimateInputTokensFromMessages(body.messages),
       executionCtx: optionalExecutionContext(() => c.executionCtx),
       headers: responseHeaders,
+      costModelId: modelId,
     });
   } catch (err) {
     log.error('ai_proxy_anthropic.fetch_error', {
@@ -294,9 +300,10 @@ aiProxyAnthropicRoutes.post('/messages', async (c) => {
 // =============================================================================
 
 aiProxyAnthropicRoutes.post('/messages/count_tokens', async (c) => {
-  // Kill switch
-  if (c.env.AI_PROXY_ENABLED === 'false') {
-    return anthropicError('AI proxy is disabled', 'api_error', 503);
+  // Kill switch, or no AI Gateway and the admin has not enabled the direct upstream.
+  const availability = await resolveAiProxyAvailability(c.env);
+  if (!availability.enabled) {
+    return anthropicError(aiProxyDisabledMessage(availability), 'api_error', 503);
   }
 
   // --- Auth ---

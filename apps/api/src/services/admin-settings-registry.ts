@@ -8,7 +8,10 @@ import { NODE_TUNNEL_SETTINGS } from './admin-settings-node-tunnel-definitions';
 import { OPERATIONS_TELEMETRY_SETTINGS } from './admin-settings-operations-telemetry-definitions';
 import { OPERATOR_SETTINGS } from './admin-settings-operator-definitions';
 import { OUTBOUND_SETTINGS } from './admin-settings-outbound-definitions';
+import { AI_PROXY_SETTINGS } from './ai-proxy-settings';
 import { llmEndpointSettingDefinitions } from './llm-endpoint-settings';
+import { SPEECH_ENDPOINT_SETTINGS } from './speech-endpoint-settings';
+import { STALLED_CLASSIFIER_ENDPOINT_SETTINGS } from './stalled-task-classifier-endpoint-settings';
 export {
   type AdminSettingDefinition,
   type AdminSettingName,
@@ -35,6 +38,9 @@ const definitions = [
   ...OPERATIONS_TELEMETRY_SETTINGS,
   ...OUTBOUND_SETTINGS,
   ...llmEndpointSettingDefinitions(),
+  ...AI_PROXY_SETTINGS,
+  ...SPEECH_ENDPOINT_SETTINGS,
+  ...STALLED_CLASSIFIER_ENDPOINT_SETTINGS,
 ];
 
 export const ADMIN_SETTINGS_REGISTRY: readonly AdminSettingDefinition[] = Object.freeze(

@@ -362,16 +362,26 @@ fleet bucket like every other Durable Object, so the bucket backup covers them.
 ## Known gaps in this pass
 
 - Off on purpose: Instant sessions and guided credential login (Cloudflare Containers), Analytics
-  Engine, AI Gateway, Workers AI features (TTS, task titles, stalled-task classifier). Agent email
+  Engine, AI Gateway, the Workers AI model catalog and the
+  stalled-task classifier (Clef; an admin may opt the advisory verdict on paused check-in loops
+  into the LLM endpoint with `operations.stalledTaskClassifierEndpointAdvisory`). Agent email
   needs the `mail-in` profile (see Inbound agent email); the admin agent-email setup and loopback
-  test remain Cloudflare-only. Projects can use a SAM-hosted repository (no GitHub or GitLab
-  needed, see SAM-hosted repositories), a GitHub App or GitLab.
-- Without Cloudflare, voice transcription, server read-aloud and the Workers AI model catalog
-  answer `404 FEATURE_UNAVAILABLE`, and the web UI hides the mic and server read-aloud. The SAM
-  agent, project agents, task titles and the diagnosis runner need an OpenAI-compatible endpoint:
-  set it in Admin settings (`llm.openAICompatible.baseUrl`, `apiKey`, `model`, plus optional
-  per-purpose models). The key is stored encrypted. Without an endpoint those features report that
-  no model is available, and task titles fall back to the truncated prompt.
+  test remain Cloudflare-only. Projects can use a SAM-hosted repository (no GitHub
+  or GitLab needed, see SAM-hosted repositories), a GitHub App or GitLab.
+- The SAM agent, project agents, task titles and the diagnosis runner use an OpenAI-compatible
+  endpoint: set it in Admin settings (`llm.openAICompatible.baseUrl`, `apiKey`, `model`, plus
+  optional per-purpose models). The key is stored encrypted. Without an endpoint those features
+  report that no model is available, and task titles fall back to the truncated prompt.
+- The SAM AI proxy (`sam` provider mode for Claude Code / Codex, and server-side custom-endpoint
+  keys) is off until an admin turns on `aiProxy.directUpstreamEnabled` and adds a Claude Code
+  (and/or Codex) platform credential in Admin. Calls then go straight to api.anthropic.com /
+  api.openai.com; rate limits, daily token budgets, the model allowlist and the tier gate apply as
+  on Cloudflare, and SAM prices each call from its model price table so a user's monthly cost cap
+  is enforced. Set a spend limit on the provider account too: SAM's figure is a list-price
+  estimate.
+- Voice transcription and server read-aloud answer `404 FEATURE_UNAVAILABLE` and the web UI hides
+  the mic and server read-aloud, unless an admin sets `speech.transcription.*` /
+  `speech.synthesis.*` to an OpenAI-compatible speech endpoint.
 - `www.SAM_DOMAIN` answers 503 and the apex is not served; only the subdomains above are used.
 - `VM_AGENT_TRANSPORT=reverse-tunnel` is set for the box: nodes run a pinned frpc that dials
   `wss://api.SAM_DOMAIN/~!frp` and is exposed on a leased loopback port (20000-29999 by default);

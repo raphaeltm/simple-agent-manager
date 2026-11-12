@@ -71,6 +71,9 @@ beforeEach(async () => {
     ENCRYPTION_KEY,
     BASE_DOMAIN: 'sammy.party',
     KV: { get: vi.fn(async () => null), put: vi.fn(async () => {}) },
+    // Cloudflare: an addressable AI Gateway keeps the proxy on with no admin setting read.
+    AI_GATEWAY_ID: 'sam',
+    CF_ACCOUNT_ID: 'account-1',
   } as unknown as Env;
 
   sqlite.exec(`

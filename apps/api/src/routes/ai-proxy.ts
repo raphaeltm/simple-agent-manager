@@ -219,6 +219,8 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
 
     return accountingResponse(c, response, prepared.userId, estimatedInputTokens, {
       estimateMissingUsage,
+      // An admin's OpenAI-compatible endpoint serves its own model, which has no catalog price.
+      costModelId: estimateMissingUsage ? undefined : modelId,
     });
   } catch (err) {
     log.error('ai_proxy.fetch_error', {
@@ -333,7 +335,9 @@ aiProxyRoutes.post('/responses', async (c) => {
       source: 'ai-proxy.openai.responses',
     });
 
-    return accountingResponse(c, response, prepared.userId, estimatedInputTokens);
+    return accountingResponse(c, response, prepared.userId, estimatedInputTokens, {
+      costModelId: modelId,
+    });
   } catch (err) {
     log.error('ai_proxy.responses.fetch_error', {
       userId: prepared.userId,

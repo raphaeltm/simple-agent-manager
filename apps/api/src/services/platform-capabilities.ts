@@ -108,21 +108,35 @@ export function resolveAiGatewayId(
 }
 
 /**
- * Whether a monthly AI dollar cap can be enforced here. The month's spend comes only from AI
- * Gateway logs, read by `runMonthlyCostAggregation` through the account API (gateway id, account
- * id and API token all required); SAM's own records carry no price for an operator's model on
- * their own endpoint. Without that, the cap is reported as unavailable everywhere (budget API,
- * settings UI, admin AI proxy page) rather than accepted and silently never enforced. Daily token
- * budgets apply either way.
+ * Whether SAM prices AI calls itself (catalog list price x reported usage) and stores the result
+ * in the per-user `AiTokenBudgetCounter`. True exactly when there is no addressable AI Gateway:
+ * there the gateway's logs are the spend record (`runMonthlyCostAggregation`), and a second,
+ * co-equal record would disagree with it (rule 74). Without one SAM's own record is the only one.
+ */
+export function hasLocalAiCostMetering(env: Pick<Env, 'AI_GATEWAY_ID' | 'CF_ACCOUNT_ID'>): boolean {
+  return resolveAiGatewayId(env) === null;
+}
+
+/**
+ * Whether a monthly AI dollar cap can be enforced here.
+ *
+ * - With an AI Gateway the month's spend comes from gateway logs, read by
+ *   `runMonthlyCostAggregation` through the account API (gateway id, account id and API token all
+ *   required). A gateway without the account API cannot be priced, so the cap is reported
+ *   unavailable there rather than accepted and silently never enforced.
+ * - Without a gateway SAM meters platform-billed proxy calls and SAM agent calls itself
+ *   (`hasLocalAiCostMetering`) and the cap reads that total (`getLocalMonthlyAiCostUsd`). Calls to
+ *   a model with no catalog price (an operator's own endpoint model) count $0.
  *
  * Calls served by an admin-configured OpenAI-compatible endpoint never reach gateway logs, so on
  * an installation with both, the cap counts only gateway-routed spend (documented in
- * reference/configuration.md). This predicate reads env only and cannot see that D1 setting.
+ * reference/configuration.md). Daily token budgets apply either way.
  */
 export function isMonthlyCostCapAvailable(
   env: Pick<Env, 'AI_GATEWAY_ID' | 'CF_ACCOUNT_ID' | 'CF_API_TOKEN'>
 ): boolean {
-  return resolveAiGatewayId(env) !== null && hasCloudflareAccountApi(env);
+  if (hasLocalAiCostMetering(env)) return true;
+  return hasCloudflareAccountApi(env);
 }
 
 /**
@@ -227,11 +241,27 @@ export interface PublicPlatformCapabilities {
   monthlyCostCap: boolean;
 }
 
-export function publicPlatformCapabilities(env: CapabilityEnv): PublicPlatformCapabilities {
+/**
+ * Which speech services an admin pointed at an OpenAI-compatible endpoint (`speech.*` settings,
+ * read by `resolveSpeechEndpoint()` in speech-endpoints.ts). Only consulted without the Workers AI
+ * binding, so a Cloudflare deployment never reads them.
+ */
+export interface SpeechEndpointAvailability {
+  transcription: boolean;
+  synthesis: boolean;
+}
+
+const NO_SPEECH_ENDPOINTS: SpeechEndpointAvailability = { transcription: false, synthesis: false };
+
+export function publicPlatformCapabilities(
+  env: CapabilityEnv,
+  speechEndpoints: SpeechEndpointAvailability = NO_SPEECH_ENDPOINTS
+): PublicPlatformCapabilities {
   const capabilities = resolvePlatformCapabilities(env);
+  const ttsAllowed = env.TTS_ENABLED !== 'false';
   return {
-    speechToText: capabilities.speechToText,
-    textToSpeech: capabilities.textToSpeech,
+    speechToText: capabilities.speechToText || speechEndpoints.transcription,
+    textToSpeech: capabilities.textToSpeech || (ttsAllowed && speechEndpoints.synthesis),
     monthlyCostCap: capabilities.monthlyCostCap,
   };
 }

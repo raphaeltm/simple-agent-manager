@@ -24,9 +24,11 @@ import {
   type UsageByModel,
   type UsageByProvider,
 } from '../services/ai-gateway-logs';
+import { getLocalUsageBreakdown } from '../services/ai-model-usage';
 import {
   deleteUserBudgetSettings,
   getAdminAiAllowance,
+  getLocalMonthlyAiCostUsd,
   getProviderUsage,
   getTokenUsage,
   getUserBudgetSettings,
@@ -111,7 +113,19 @@ usageRoutes.get('/ai', requireAuth(), requireApproved(), async (c) => {
       totalCostUsd += entry.estimatedCostUsd;
     }
 
-    // Gateway not configured — return local proxy usage only, not an error.
+    // Gateway not configured: SAM's own records (overnight B3 A2), not an error.
+    // A failed breakdown read degrades to empty views, never a failed usage page.
+    const breakdown = await getLocalUsageBreakdown(
+      c.env,
+      userId,
+      new Date(periodBounds.startDate)
+    ).catch((err: unknown) => {
+      log.warn('usage.local_breakdown_failed', {
+        userId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return { byModel: [], byDay: [] };
+    });
     return c.json({
       totalCostUsd,
       totalRequests,
@@ -119,9 +133,9 @@ usageRoutes.get('/ai', requireAuth(), requireApproved(), async (c) => {
       totalOutputTokens,
       cachedRequests: 0,
       errorRequests: 0,
-      byModel: [],
+      byModel: breakdown.byModel,
       byProvider: Array.from(providerMap.values()).sort((a, b) => b.totalTokens - a.totalTokens),
-      byDay: [],
+      byDay: breakdown.byDay,
       period,
       periodLabel: getPeriodLabel(period),
     } satisfies UserAiUsageResponse);
@@ -269,6 +283,16 @@ usageRoutes.get('/ai/budget', requireAuth(), requireApproved(), async (c) => {
         error: err instanceof Error ? err.message : String(err),
       });
     }
+  } else {
+    // No gateway: SAM's own priced total, the same figure the cap is enforced against.
+    try {
+      monthCostUsd = await getLocalMonthlyAiCostUsd(c.env.KV, userId, c.env);
+    } catch (err) {
+      log.error('usage.budget_local_cost_error', {
+        userId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   const settings = userSettings ?? {
@@ -284,7 +308,7 @@ usageRoutes.get('/ai/budget', requireAuth(), requireApproved(), async (c) => {
   const dailyOutputPercent = effectiveLimits.dailyOutputTokenLimit > 0
     ? Math.min(100, (dailyUsage.outputTokens / effectiveLimits.dailyOutputTokenLimit) * 100)
     : 0;
-  // Without AI Gateway a cap is neither settable nor enforced, so it has no utilization.
+  // A gateway without the account API cannot price spend, so its cap has no utilization.
   const monthlyCostCapAvailable = isMonthlyCostCapAvailable(c.env);
   const monthlyCostPercent =
     monthlyCostCapAvailable && settings.monthlyCostCapUsd !== null && settings.monthlyCostCapUsd > 0

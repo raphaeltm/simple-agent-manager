@@ -5,6 +5,8 @@ import { drizzle } from 'drizzle-orm/d1';
 import type { Env } from '../../../env';
 import { log } from '../../../lib/logger';
 import { resolveUpstreamAuth } from '../../../services/ai-billing';
+import { priceModelUsageUsd } from '../../../services/ai-cost-pricing';
+import { incrementModelUsage } from '../../../services/ai-model-usage';
 import { incrementProviderUsage, incrementTokenUsage } from '../../../services/ai-token-budget';
 import { estimateTokensFromText } from '../../../services/ai-token-usage-accounting';
 import {
@@ -15,7 +17,10 @@ import {
   resolveCloudflareWorkersAiTarget,
   resolveOpenAICompatibleTarget,
 } from '../../../services/llm-chat-target';
-import { aiGatewayOnlyHeaders } from '../../../services/platform-capabilities';
+import {
+  aiGatewayOnlyHeaders,
+  hasLocalAiCostMetering,
+} from '../../../services/platform-capabilities';
 import { buildAnthropicGatewayUrl } from '../agent-loop-helpers';
 
 /** Provider ID of the OpenAI-compatible Workers AI route; also its providerOptions key. */
@@ -158,8 +163,12 @@ export async function recordOperatorStepUsage(
       output,
     });
   const cached = Math.min(input, Math.max(0, step.usage.cachedInputTokens ?? 0));
-  const cachedRate = catalogModel.costPer1kCachedInputTokens ?? catalogModel.costPer1kInputTokens;
   const anthropic = config.model.startsWith('claude-');
+  const costUsd = priceModelUsageUsd(catalogModel, {
+    inputTokens: input,
+    outputTokens: output,
+    cachedInputTokens: cached,
+  });
   await incrementTokenUsage(env.KV, userId, input, output, env);
   await incrementProviderUsage(
     env.KV,
@@ -172,9 +181,17 @@ export async function recordOperatorStepUsage(
     input,
     output,
     env,
-    ((input - cached) * catalogModel.costPer1kInputTokens +
-      cached * cachedRate +
-      output * catalogModel.costPer1kOutputTokens) /
-      1000
+    costUsd
   );
+  if (hasLocalAiCostMetering(env)) {
+    await incrementModelUsage(
+      env,
+      userId,
+      config.model,
+      anthropic ? 'anthropic' : 'workers-ai',
+      input,
+      output,
+      costUsd
+    );
+  }
 }

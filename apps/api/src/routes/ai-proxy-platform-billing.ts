@@ -141,7 +141,7 @@ export function accountingResponse(
   response: Response,
   userId: string,
   estimatedInputTokens: number,
-  options: { estimateMissingUsage?: boolean } = {}
+  options: { estimateMissingUsage?: boolean; costModelId?: string } = {}
 ): Promise<Response> {
   let executionCtx: Pick<ExecutionContext, 'waitUntil'> | undefined;
   try {
@@ -156,5 +156,6 @@ export function accountingResponse(
     fallbackInputTokens: estimatedInputTokens,
     executionCtx,
     estimateMissingUsage: options.estimateMissingUsage === true,
+    costModelId: options.costModelId,
   });
 }

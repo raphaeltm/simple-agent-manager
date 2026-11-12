@@ -32,6 +32,7 @@ import {
   jsonValidator,
   MessageBatchSchema,
 } from '../../schemas';
+import { isAiProxyEnabled } from '../../services/ai-proxy-availability';
 import { appendBootLog } from '../../services/boot-log';
 import { registerBootstrapTokenConsume } from '../../services/bootstrap';
 import { resolveSessionProfileCredentialContext } from '../../services/composable-credentials/profile-context';
@@ -840,7 +841,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
   //   forwarded via auth headers, wstoken in URL path for analytics/rate-limiting)
   // Note: platform proxy fallback requires explicit provider selection.
   // Without it, users with no credential get a 404 (agent not configured).
-  const aiProxyEnabled = (c.env.AI_PROXY_ENABLED ?? 'true') !== 'false';
+  const aiProxyEnabled = await isAiProxyEnabled(c.env);
   if (PROXY_ELIGIBLE_AGENTS.has(body.agentType) && aiProxyEnabled) {
     const baseDomain = c.env.BASE_DOMAIN;
     const isClaudeCode = body.agentType === 'claude-code';
@@ -1057,6 +1058,20 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
   }
 
   if (!credentialData) {
+    throw errors.notFound('Agent credential');
+  }
+
+  // A credential that names a custom base URL is served only through the passthrough proxy above.
+  // This response carries no base URL, so returning the key here would send it to the vendor's
+  // default endpoint (another company's API) instead of the endpoint it was issued for.
+  if (credentialData.baseUrl && PROXY_ELIGIBLE_AGENTS.has(body.agentType)) {
+    log.warn('agent_key.custom_base_url_requires_ai_proxy', {
+      workspaceId,
+      userId: workspace.userId,
+      agentType: body.agentType,
+      aiProxyEnabled,
+      action: 'rejected',
+    });
     throw errors.notFound('Agent credential');
   }
 
