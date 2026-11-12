@@ -127,10 +127,10 @@ type SetupSessionRow = {
  * Additive columns for teardown recovery. Objects created before these existed
  * get them through a guarded ALTER TABLE ADD COLUMN (no table recreation).
  */
-const CLEANUP_COLUMNS: ReadonlyArray<readonly [name: string, type: string]> = [
-  ['cleanup_pending', 'INTEGER'],
-  ['cleanup_from_status', 'TEXT'],
-  ['cleanup_attempts', 'INTEGER'],
+const CLEANUP_COLUMNS: ReadonlyArray<readonly [name: string, ddl: string]> = [
+  ['cleanup_pending', 'ALTER TABLE setup_session ADD COLUMN cleanup_pending INTEGER'],
+  ['cleanup_from_status', 'ALTER TABLE setup_session ADD COLUMN cleanup_from_status TEXT'],
+  ['cleanup_attempts', 'ALTER TABLE setup_session ADD COLUMN cleanup_attempts INTEGER'],
 ];
 
 /**
@@ -204,10 +204,8 @@ export class CredentialSetupSession extends DurableObject<Env> {
           .toArray()
           .map((column) => column.name)
       );
-      for (const [name, type] of CLEANUP_COLUMNS) {
-        if (!existingColumns.has(name)) {
-          this.sql.exec(`ALTER TABLE setup_session ADD COLUMN ${name} ${type}`);
-        }
+      for (const [name, ddl] of CLEANUP_COLUMNS) {
+        if (!existingColumns.has(name)) this.sql.exec(ddl);
       }
       this.sql.exec(
         `CREATE TABLE IF NOT EXISTS device_auth_details (
