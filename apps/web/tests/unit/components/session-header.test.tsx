@@ -438,6 +438,33 @@ describe('SessionHeader', () => {
     expect(configuration).not.toHaveTextContent('Effort');
   });
 
+  it('shows a retry when the configuration fails to load, and recovers', async () => {
+    mocks.getSessionAgentCredential.mockRejectedValue(new Error('network down'));
+    renderHeader();
+    fireEvent.click(screen.getByLabelText(DETAILS_CONTROL));
+
+    const retry = await screen.findByRole('button', { name: 'Retry' }, { timeout: 5000 });
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Couldn’t load this session’s configuration'
+    );
+
+    mocks.getSessionAgentCredential.mockResolvedValue({
+      credential: null,
+      runtime: {
+        agentType: 'claude-code',
+        model: null,
+        effort: null,
+        permissionMode: 'plan',
+        opencodeProvider: null,
+        skillName: null,
+      },
+    });
+    fireEvent.click(retry);
+    expect(await screen.findByTestId('session-run-configuration')).toHaveTextContent(
+      'PermissionsPlan Mode'
+    );
+  });
+
   it('hides the configuration section for sessions without a recorded contract', async () => {
     renderHeader();
     fireEvent.click(screen.getByLabelText(DETAILS_CONTROL));

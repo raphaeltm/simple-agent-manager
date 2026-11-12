@@ -89,7 +89,9 @@ export function registerChatAgentCredentialRoute(routes: Hono<{ Bindings: Env }>
       };
     }
 
-    // A personal (non-project) skill's name is only shown to the person who ran it.
+    // The skill's current name (a live join, not part of the frozen contract: a renamed skill
+    // shows its new name, a deleted one none). A personal (non-project) skill's name is only
+    // shown to the person who ran it.
     const skillName =
       row.skillName && (row.skillProjectId === projectId || isOwnSession) ? row.skillName : null;
     const response: SessionAgentCredentialResponse = {

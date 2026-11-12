@@ -287,7 +287,11 @@ export interface SessionAgentRuntimeConfig {
   permissionMode: string;
   /** OpenCode inference provider; null for other agents or the default provider. */
   opencodeProvider: string | null;
-  /** The skill the session runs, when the viewer may see its name. */
+  /**
+   * The current name of the skill the session runs, when the viewer may see it. Unlike the
+   * other fields this is looked up live, not frozen: a renamed skill shows its new name and
+   * a deleted one shows nothing.
+   */
   skillName: string | null;
 }
 

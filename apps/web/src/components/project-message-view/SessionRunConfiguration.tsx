@@ -29,11 +29,33 @@ export function SessionRunConfiguration({
   sessionId,
 }: Readonly<{ projectId: string; sessionId: string }>) {
   const queryScope = useQueryScope();
-  const runtime = useQuery({
+  const query = useQuery({
     ...sessionAgentCredentialQueryOptions(queryScope, projectId, sessionId),
     enabled: Boolean(queryScope),
-  }).data?.runtime;
+  });
+  const runtime = query.data?.runtime;
 
+  // A failed load is shown, so it is not mistaken for a session with no configuration.
+  if (!runtime && query.isError) {
+    return (
+      <SessionDetailSection icon={<SlidersHorizontal size={12} />} label="Configuration">
+        <div
+          role="alert"
+          className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-fg-muted"
+        >
+          <span>Couldn’t load this session’s configuration.</span>
+          <button
+            type="button"
+            onClick={() => void query.refetch()}
+            disabled={query.isFetching}
+            className="rounded-md bg-transparent px-1 font-medium text-accent hover:underline disabled:opacity-60"
+          >
+            {query.isFetching ? 'Retrying…' : 'Retry'}
+          </button>
+        </div>
+      </SessionDetailSection>
+    );
+  }
   if (!runtime) return null;
   const rows = configurationRows(runtime);
   return (
