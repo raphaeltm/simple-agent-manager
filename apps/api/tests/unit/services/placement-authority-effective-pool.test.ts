@@ -358,11 +358,14 @@ function reuseState(fixture: PoolFixture): TaskRunnerState {
 }
 
 describe('reuse selection agrees with final authority admission', () => {
-  it('never claims a stale warm node when a current warm host is available', async () => {
+  it('never claims a warm node with stale source authority when a current host is available', async () => {
     const database = createDb();
     const pool = seedPool('user');
-    seedNode(pool, { capacity_pool_revision: 3, warm_since: AUTHORITY_TIMESTAMP });
-    seedNode(pool, { id: 'node-2', warm_since: AUTHORITY_TIMESTAMP });
+    seedNode(pool, {
+      capacity_source_generation: AUTHORITY_VERSION - 1,
+      warm_since: AUTHORITY_TIMESTAMP,
+    });
+    seedNode(pool, { id: 'node-2', capacity_pool_revision: 3, warm_since: AUTHORITY_TIMESTAMP });
     const claimedIds: string[] = [];
     const context = {
       env: {
@@ -384,10 +387,10 @@ describe('reuse selection agrees with final authority admission', () => {
     expect(claimedIds).toEqual(['node-2']);
   });
 
-  it('rejects a stale preferred host before advancing to workspace creation', async () => {
+  it('rejects a preferred host with stale source authority before workspace creation', async () => {
     const database = createDb();
     const pool = seedPool('user');
-    seedNode(pool, { capacity_pool_revision: 3 });
+    seedNode(pool, { capacity_source_generation: AUTHORITY_VERSION - 1 });
     const state = reuseState(pool);
     state.config.preferredNodeId = 'node-1';
     const advanceToStep = vi.fn();
@@ -401,10 +404,10 @@ describe('reuse selection agrees with final authority admission', () => {
     expect(advanceToStep).not.toHaveBeenCalled();
   });
 
-  it('skips a stale pool revision and selects the current host instead of retrying the same host', async () => {
+  it('skips stale source authority and selects the current host instead of retrying the same host', async () => {
     const database = createDb();
     const pool = seedPool('user');
-    seedNode(pool, { capacity_pool_revision: 3 });
+    seedNode(pool, { capacity_source_generation: AUTHORITY_VERSION - 1 });
     seedNode(pool, { id: 'node-2' });
 
     expect(await reserveWorkspacePlacement(database, placementInput(pool), ADMISSION_POLICY)).toBe(
@@ -423,6 +426,36 @@ describe('reuse selection agrees with final authority admission', () => {
     ).toBe(true);
   });
 
+  it('reuses an established node across pool revisions and revalidates again at final admission', async () => {
+    const database = createDb();
+    const pool = seedPool('user');
+    seedNode(pool, { capacity_pool_revision: 3 });
+
+    const selected = await findNodeWithCapacity(reuseState(pool), {
+      env: envFor(database),
+    } as TaskRunnerContext);
+    expect(selected?.nodeId).toBe('node-1');
+    expect(selected?.capacityPlacementSnapshot?.capacityPoolRevision).toBe(4);
+
+    // A second harmless refresh wins after selection. Admission checks current
+    // authority in its INSERT instead of requiring the historical node revision.
+    db().exec("UPDATE capacity_pools SET revision = 5 WHERE id = 'pool-user'");
+    expect(
+      await reserveWorkspacePlacement(
+        database,
+        placementInput(pool, { capacityPlacementSnapshot: selected?.capacityPlacementSnapshot }),
+        ADMISSION_POLICY
+      )
+    ).toBe(true);
+    expect(db().prepare('SELECT capacity_pool_revision FROM nodes').get()).toEqual({
+      capacity_pool_revision: 3,
+    });
+    expect(db().prepare('SELECT node_id, status FROM workspaces').get()).toEqual({
+      node_id: 'node-1',
+      status: 'creating',
+    });
+  });
+
   it('returns no reusable node when only a grandfathered host exists under a current user pool', async () => {
     const database = createDb();
     const pool = seedPool('user');
@@ -434,20 +467,64 @@ describe('reuse selection agrees with final authority admission', () => {
     ).toBeNull();
   });
 
-  it.each([
-    "UPDATE credentials SET is_active = 0 WHERE id = 'user-cloud'",
-    "UPDATE project_members SET status = 'removed' WHERE project_id = 'project-1'",
-    "UPDATE capacity_pools SET is_default = 0 WHERE id = 'pool-user'",
-  ])('does not offer a node whose authority was revoked: %s', async (sql) => {
+  it('does not reuse an unallocated managed node record despite otherwise current authority', async () => {
     const database = createDb();
     const pool = seedPool('user');
-    seedNode(pool);
+    seedNode(pool, { capacity_pool_revision: 3, provider_instance_id: null });
+
+    expect(
+      await filterReusableNodesByCurrentAuthority(database, {
+        userId: USER_ID,
+        projectId: PROJECT_ID,
+        selections: [{ nodeId: 'node-1', capacityPlacementSnapshot: snapshotFor(pool) }],
+      })
+    ).toEqual(new Set());
+    expect(
+      await findNodeWithCapacity(reuseState(pool), {
+        env: envFor(database),
+      } as TaskRunnerContext)
+    ).toBeNull();
+    expect(await reserveWorkspacePlacement(database, placementInput(pool), ADMISSION_POLICY)).toBe(
+      false
+    );
+    expect(db().prepare('SELECT COUNT(*) AS count FROM workspaces').get()).toEqual({ count: 0 });
+  });
+
+  it.each([
+    "UPDATE credentials SET is_active = 0 WHERE id = 'user-cloud'",
+    "UPDATE credentials SET updated_at = '2026-11-12T00:00:00.000Z' WHERE id = 'user-cloud'",
+    "UPDATE project_members SET status = 'removed' WHERE project_id = 'project-1'",
+    "UPDATE project_members SET role = 'viewer' WHERE project_id = 'project-1'",
+    "UPDATE capacity_pools SET is_default = 0 WHERE id = 'pool-user'",
+    "UPDATE capacity_pools SET excluded_source_ids_json = '[\"source-user\"]' WHERE id = 'pool-user'",
+    "UPDATE capacity_sources SET status = 'disabled' WHERE id = 'source-user'",
+    "UPDATE capacity_sources SET authority_generation = 123 WHERE id = 'source-user'",
+    "UPDATE capacity_pool_candidates SET status = 'disabled' WHERE id = 'candidate-user'",
+    "UPDATE capacity_pool_candidates SET catalog_availability = 'last-known-unavailable' WHERE id = 'candidate-user'",
+    "UPDATE capacity_pool_candidates SET provider_instance_memory_mb = 32768 WHERE id = 'candidate-user'",
+    "UPDATE nodes SET user_id = 'user-2' WHERE id = 'node-1'",
+  ])('rechecks revoked authority after revision-tolerant selection: %s', async (sql) => {
+    const database = createDb();
+    const pool = seedPool('user');
+    seedNode(pool, { capacity_pool_revision: 3 });
+    const selected = await findNodeWithCapacity(reuseState(pool), {
+      env: envFor(database),
+    } as TaskRunnerContext);
+    expect(selected?.nodeId).toBe('node-1');
     db().exec(sql);
     expect(
       await findNodeWithCapacity(reuseState(pool), {
         env: envFor(database),
       } as TaskRunnerContext)
     ).toBeNull();
+    expect(
+      await reserveWorkspacePlacement(
+        database,
+        placementInput(pool, { capacityPlacementSnapshot: selected?.capacityPlacementSnapshot }),
+        ADMISSION_POLICY
+      )
+    ).toBe(false);
+    expect(db().prepare('SELECT COUNT(*) AS count FROM workspaces').get()).toEqual({ count: 0 });
   });
 
   it('keeps a running node reusable after the pool provider order changes', async () => {
@@ -479,14 +556,14 @@ describe('reuse selection agrees with final authority admission', () => {
       reserveWorkspacePlacement(database, placementInput(pool), ADMISSION_POLICY)
     ).resolves.toBe(true);
 
-    // Control: a policy edit bumps the revision, and the same node stops being reusable. Without
-    // this, the assertions above would also pass if reuse ignored the revision entirely.
+    // A policy revision does not revoke the running node's still-current offering.
+    // Paid new allocations keep their independent strict plan-generation fence.
     await update({
       ownerUserId: USER_ID,
       ownerProjectId: null,
       policy: { exhaustionPolicy: 'fallback-chain' },
     });
-    expect(await reusable()).toEqual(new Set());
+    expect(await reusable()).toEqual(new Set(['node-1']));
   });
 
   it('stops reuse and admission on an account switched off, and restores both when it is back on', async () => {
@@ -677,7 +754,14 @@ describe('current effective pool authority at final admission', () => {
   it('rejects a user-pool node once a configured-empty project default pool outranks it', async () => {
     const database = createDb();
     const pool = seedPool('user');
-    seedNode(pool);
+    seedNode(pool, { capacity_pool_revision: 3 });
+    expect(
+      (
+        await findNodeWithCapacity(reuseState(pool), {
+          env: envFor(database),
+        } as TaskRunnerContext)
+      )?.nodeId
+    ).toBe('node-1');
     // Introduced AFTER the plan was resolved — the exact race the guard exists for.
     seedConfiguredEmptyProjectDefaultPool();
 
@@ -789,6 +873,20 @@ describe('current effective pool authority at final admission', () => {
 });
 
 describe('current effective pool authority at the paid provider boundary', () => {
+  it.each(['creating', 'running'])(
+    'rejects a stale pool revision for a %s allocation even though existing-node reuse allows it',
+    async (status) => {
+      const database = createDb();
+      const pool = seedPool('user');
+      seedNode(pool, { capacity_pool_revision: 3, status });
+
+      await expect(
+        assertNodeAllocationPlanCurrent(envFor(database), 'node-1', USER_ID, PROJECT_ID)
+      ).rejects.toThrow('Node allocation plan is no longer current');
+      expect(db().prepare('SELECT COUNT(*) AS count FROM workspaces').get()).toEqual({ count: 0 });
+    }
+  );
+
   it('accepts an explicitly selected node while its pool is still effective', async () => {
     const database = createDb();
     const pool = seedPool('user');

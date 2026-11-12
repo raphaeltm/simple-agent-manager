@@ -40,6 +40,7 @@ export async function filterReusableNodesByCurrentAuthority(
       nodeRole: 'workspace',
       workloadRole: 'workspace',
       capacityPlacementSnapshot: first.capacityPlacementSnapshot,
+      authorityMode: 'existing-node',
     });
     const chunkSize = D1_MAX_BOUND_PARAMETERS - predicate.binds.length;
     if (chunkSize <= 0) throw new Error('Placement authority exceeds D1 parameter limit');
