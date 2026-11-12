@@ -201,6 +201,30 @@ chat fails with "No eligible compute-pool offering is available in the installat
 for this task's requirements (2 vCPU, 4096 MB memory, 15 GB disk)". On Google Cloud add
 `e2-standard-2` (2 vCPU, 8 GB); keep `e2-medium` for smaller work if you like.
 
+## Backup, restore and upgrade
+
+```bash
+pnpm selfhost:backup                         # -> deploy/selfhost/backups/<UTC time>/ (mode 0700)
+pnpm selfhost:restore --from <backup dir>    # into an EMPTY bucket and .state/ only
+```
+
+A backup is the fleet bucket (celld's only durable state), `.state/` and `.env`: a live copy,
+then celld stopped for the delta copy only, then restarted; the downtime is printed and kept in
+`backup-manifest.json`. gs:// buckets copy with `gcloud storage rsync`; s3:// buckets (the
+bundled store too) with `mc mirror` from the pinned objectstore image. A backup holds every
+Worker secret in plaintext: keep it where only you can read it. Restore refuses a bucket that
+holds objects or a `.state/` with platform keys, and leaves celld stopped: start it with the same
+SAM checkout the backup recorded (`samCommit` in the manifest), never an older one. There is no
+point-in-time recovery: a backup is the recovery point. Code: `scripts/selfhost/backup-lib.ts`.
+
+`pnpm selfhost:upgrade --to <tag|branch|commit>` backs up (skip with `--skip-backup`), checks the
+ref out, runs `pnpm selfhost:deploy --init`, restarts the stack only when a compose input changed
+(a non-README file in this directory or a generated `.state/` file), runs `pnpm selfhost:deploy`
+(D1 and Durable Object migrations, Worker), checks `/health` and prints the rollback: redeploy
+the previous ref when no D1 migration ran, otherwise restore the pre-upgrade backup into an
+empty bucket. Code: `scripts/selfhost/upgrade-lib.ts`. Use `--box-env` (not `--env-file`, which
+Node takes) to point these commands at another `.env`.
+
 ## Logs
 
 Caddy writes one JSON access-log line per request, for every SAM host (`app.`, `api.`, `ws-*`,
