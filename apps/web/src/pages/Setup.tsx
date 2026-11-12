@@ -154,7 +154,7 @@ export function Setup() {
       <SetupShell>
         <DoneStep
           title="SAM is set up"
-          message="Setup is already finished for this instance."
+          message="Setup is already finished for this instance. An administrator adds sign-in providers and the GitHub App in Admin → Integrations."
           onSignIn={signIn}
         />
       </SetupShell>
