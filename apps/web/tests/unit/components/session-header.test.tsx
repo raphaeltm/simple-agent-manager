@@ -249,7 +249,7 @@ describe('SessionHeader', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.updateProjectTaskStatus.mockResolvedValue({});
-    mocks.getSessionAgentCredential.mockResolvedValue({ credential: null });
+    mocks.getSessionAgentCredential.mockResolvedValue({ credential: null, runtime: null });
     mocks.deleteWorkspace.mockResolvedValue({});
     mocks.listChatMessages.mockResolvedValue({ messages: [], hasMore: false });
     mocks.updateWorkspacePortsPublic.mockResolvedValue(makeWorkspace({ portsPublicEnabled: true }));
@@ -360,6 +360,7 @@ describe('SessionHeader', () => {
         accountName: 'Claude Max (personal)',
         isOwnSession: true,
       },
+      runtime: null,
     });
     renderHeader();
     fireEvent.click(screen.getByLabelText(DETAILS_CONTROL));
@@ -368,6 +369,110 @@ describe('SessionHeader', () => {
       'Claude Max (personal) · chosen for this profile'
     );
     expect(mocks.getSessionAgentCredential).toHaveBeenCalledWith('proj-1', expect.any(String));
+  });
+
+  it('shows the configuration the session actually runs with', async () => {
+    mocks.getSessionAgentCredential.mockResolvedValue({
+      credential: null,
+      runtime: {
+        agentType: 'claude-code',
+        model: 'claude-opus-5-5',
+        effort: 'max',
+        permissionMode: 'default',
+        opencodeProvider: null,
+        skillName: 'do',
+      },
+    });
+    renderHeader();
+    fireEvent.click(screen.getByLabelText(DETAILS_CONTROL));
+
+    const configuration = await screen.findByTestId('session-run-configuration');
+    expect(configuration).toHaveTextContent('Model');
+    expect(configuration).toHaveTextContent('claude-opus-5-5');
+    expect(configuration).toHaveTextContent('EffortMax');
+    // The `default` mode id is the agent's always-ask mode, not SAM's default.
+    expect(configuration).toHaveTextContent('PermissionsManual');
+    expect(configuration).toHaveTextContent('Skilldo');
+  });
+
+  it('labels an unset model and effort as the agent defaults', async () => {
+    mocks.getSessionAgentCredential.mockResolvedValue({
+      credential: null,
+      runtime: {
+        agentType: 'openai-codex',
+        model: null,
+        effort: null,
+        permissionMode: 'default',
+        opencodeProvider: null,
+        skillName: null,
+      },
+    });
+    renderHeader();
+    fireEvent.click(screen.getByLabelText(DETAILS_CONTROL));
+
+    const configuration = await screen.findByTestId('session-run-configuration');
+    expect(configuration).toHaveTextContent('ModelAgent default');
+    expect(configuration).toHaveTextContent('EffortAuto');
+    // Codex always runs with approvals off, whatever mode was stored.
+    expect(configuration).toHaveTextContent('PermissionsFull access (Codex never asks)');
+    expect(configuration).not.toHaveTextContent('Skill');
+  });
+
+  it('shows the OpenCode provider and omits effort the agent cannot use', async () => {
+    mocks.getSessionAgentCredential.mockResolvedValue({
+      credential: null,
+      runtime: {
+        agentType: 'opencode',
+        model: 'opencode-go/glm-5.2',
+        effort: null,
+        permissionMode: 'acceptEdits',
+        opencodeProvider: 'opencode-go',
+        skillName: null,
+      },
+    });
+    renderHeader();
+    fireEvent.click(screen.getByLabelText(DETAILS_CONTROL));
+
+    const configuration = await screen.findByTestId('session-run-configuration');
+    expect(configuration).toHaveTextContent('ProviderOpenCode Go');
+    expect(configuration).not.toHaveTextContent('Effort');
+  });
+
+  it('shows a retry when the configuration fails to load, and recovers', async () => {
+    mocks.getSessionAgentCredential.mockRejectedValue(new Error('network down'));
+    renderHeader();
+    fireEvent.click(screen.getByLabelText(DETAILS_CONTROL));
+
+    const retry = await screen.findByRole('button', { name: 'Retry' }, { timeout: 5000 });
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Couldn’t load this session’s configuration'
+    );
+
+    mocks.getSessionAgentCredential.mockResolvedValue({
+      credential: null,
+      runtime: {
+        agentType: 'claude-code',
+        model: null,
+        effort: null,
+        permissionMode: 'plan',
+        opencodeProvider: null,
+        skillName: null,
+      },
+    });
+    fireEvent.click(retry);
+    expect(await screen.findByTestId('session-run-configuration')).toHaveTextContent(
+      'PermissionsPlan Mode'
+    );
+  });
+
+  it('hides the configuration section for sessions without a recorded contract', async () => {
+    renderHeader();
+    fireEvent.click(screen.getByLabelText(DETAILS_CONTROL));
+
+    // Liveness: the details panel itself rendered.
+    expect(await screen.findByTestId('session-header-details')).toBeInTheDocument();
+    await waitFor(() => expect(mocks.getSessionAgentCredential).toHaveBeenCalled());
+    expect(screen.queryByTestId('session-run-configuration')).not.toBeInTheDocument();
   });
 
   it('shows the full title and fallback initial prompt in expanded details', () => {
