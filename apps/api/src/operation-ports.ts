@@ -9,13 +9,24 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from './db/schema';
 import type { NotificationService } from './durable-objects/notification';
+import { isAgentMessageChannelName } from './durable-objects/project-data/agent-message-notice';
 import { channelName } from './durable-objects/project-data/project-event-channels-config';
 import { scheduleLimits } from './durable-objects/project-data/project-event-schedules-config';
+import {
+  ProjectEventCursorError,
+  ProjectEventIdempotencyConflictError,
+  ProjectEventLimitExceededError,
+  ProjectEventNotFoundError,
+  ProjectEventValidationError,
+} from './durable-objects/project-data/project-events-contracts';
 import { resolveProjectEventLimits } from './durable-objects/project-data/project-events-limits';
+import { normalizeNullableText } from './durable-objects/project-data/project-events-values';
 import { resolveStorageSafetyConfig } from './durable-objects/project-data/storage-safety';
 import type { Env } from './env';
+import { parsePositiveInt } from './lib/route-helpers';
+import { getTrustedApiOrigin } from './lib/trusted-origins';
 import { requireProjectAccess, requireProjectCapability } from './middleware/project-auth';
-import type { OperationPorts } from './operations/ports';
+import type { OperationPorts, ProjectEventErrorKind } from './operations/ports';
 import type { OperationContext, OperationDeps } from './operations/types';
 import { attachWakeState } from './routes/chat/wake-state';
 import { answerAgentInteraction } from './routes/chat-acp-interactions';
@@ -34,6 +45,7 @@ import {
   resolveEffectiveLimits,
 } from './services/ai-token-budget';
 import { cancelTask } from './services/cancel-task';
+import { operationReceiptId } from './services/cli-operation-receipts';
 import {
   connectorPendingInteractions,
   prepareConnectorAgentAnswer,
@@ -41,17 +53,36 @@ import {
 import { auditConnectorWrite, executeConnectorWrite } from './services/connector-execution';
 import { getConnectorReadLimits } from './services/connector-read-settings';
 import { listProjectCredentialLimits } from './services/credential-limit-events/read';
+import { cronToHumanReadable } from './services/cron-utils';
 import { getInstallationToken } from './services/github-app';
 import * as projectData from './services/project-data';
+import { describeRootSearchCoverage } from './services/project-data-search-coverage';
 import { startOrchestration } from './services/project-orchestrator';
 import { authorizeSendChat, sendChat, validateSendChatContent } from './services/send-chat';
 import { requireSessionWriter } from './services/session-access';
-import { parseHarnessWorkConfig } from './services/session-idleness';
+import {
+  classifySessionIdleness,
+  getFreshHarnessWorkLeaseExpiry,
+  parseHarnessWorkConfig,
+} from './services/session-idleness';
+import { DEFAULT_SESSION_SLEEP_AFTER_MS } from './services/session-snapshots';
 import { submitTask } from './services/submit-task';
 import { getRecentAssistantMessagesForTask } from './services/task-final-assistant-message';
 import { clearTriggerPageCaches } from './services/trigger-cache';
 import { createTrigger, validateCron } from './services/trigger-create';
+import { resolveTriggerExecutionUserId } from './services/trigger-execution-principal';
+import { triggerStatusUpdates } from './services/trigger-status';
 import { getWorkspaceResourceHistory } from './services/workspace-resource-history';
+
+/** Maps ProjectData's event/channel error classes to the kinds operations translate. */
+function classifyProjectEventError(error: unknown): ProjectEventErrorKind | null {
+  if (error instanceof ProjectEventNotFoundError) return 'not_found';
+  if (error instanceof ProjectEventCursorError) return 'cursor';
+  if (error instanceof ProjectEventValidationError) return 'validation';
+  if (error instanceof ProjectEventLimitExceededError) return 'limit_exceeded';
+  if (error instanceof ProjectEventIdempotencyConflictError) return 'idempotency_conflict';
+  return null;
+}
 
 export function createOperationPorts(env: Env): OperationPorts {
   const db = () => drizzle(env.DATABASE, { schema });
@@ -61,7 +92,7 @@ export function createOperationPorts(env: Env): OperationPorts {
       projectEventLimits: () => resolveProjectEventLimits(env),
       storageSafety: () => resolveStorageSafetyConfig(env),
       channelName: (value) => channelName(value, env),
-      harnessWork: () => parseHarnessWorkConfig(env),
+      apiOrigin: () => getTrustedApiOrigin(env),
     },
     projectData: {
       getSession: (...a) => projectData.getSession(env, ...a),
@@ -97,6 +128,10 @@ export function createOperationPorts(env: Env): OperationPorts {
       listProjectSchedules: (...a) => projectData.listProjectSchedules(env, ...a),
       createProjectSchedule: (...a) => projectData.createProjectSchedule(env, ...a),
       mutateProjectSchedule: (...a) => projectData.mutateProjectSchedule(env, ...a),
+      isAgentMessageChannelName,
+      normalizeNullableText,
+      classifyEventError: classifyProjectEventError,
+      describeRootSearchCoverage,
     },
     settings: {
       resolve: (...a) => resolveAdminSetting(env, ...a),
@@ -114,6 +149,7 @@ export function createOperationPorts(env: Env): OperationPorts {
       auditWrite: (ctx, ...a) => auditConnectorWrite({ ...ctx, env }, ...a),
       pendingInteractions: (...a) => connectorPendingInteractions(env, ...a),
       prepareAgentAnswer: (...a) => prepareConnectorAgentAnswer(env, ...a),
+      receiptId: operationReceiptId,
     },
     chat: {
       authorizeSend: (...a) => authorizeSendChat(env, ...a),
@@ -126,6 +162,28 @@ export function createOperationPorts(env: Env): OperationPorts {
       snapshotInteractions: (...a) => snapshotInteractions(env, ...a),
       resolveAgentState: (...a) => resolveChatAgentState(env, ...a),
       attachWakeState: (...a) => attachWakeState(db(), ...a),
+      classifyTurnIdleness: ({ state, reportedState, taskStatus, taskCompletedAt, now }) => {
+        const harnessWorkConfig = parseHarnessWorkConfig(env);
+        const freshWork = getFreshHarnessWorkLeaseExpiry(
+          state,
+          now,
+          harnessWorkConfig.leaseMs,
+          harnessWorkConfig.maxDurationMs
+        );
+        const classificationState =
+          reportedState ??
+          (freshWork ? { ...state, activity: undefined, activityAt: undefined } : null);
+        // A wake placeholder is not runtime activity evidence. Classify only the original observation.
+        return classifySessionIdleness({
+          taskStatus,
+          taskCompletedAt,
+          state: classificationState,
+          now,
+          idleAfterMs: parsePositiveInt(env.SESSION_SLEEP_AFTER_MS, DEFAULT_SESSION_SLEEP_AFTER_MS),
+          harnessWorkConfig,
+          policy: 'prompt-turn-ended',
+        });
+      },
     },
     tasks: {
       submit: (...a) => submitTask(env, ...a),
@@ -139,6 +197,9 @@ export function createOperationPorts(env: Env): OperationPorts {
       validateCron: (...a) => validateCron(env, ...a),
       clearPageCaches: clearTriggerPageCaches,
       rethrowScheduleError,
+      cronToHumanReadable,
+      executionUserId: resolveTriggerExecutionUserId,
+      statusUpdates: triggerStatusUpdates,
     },
     account: {
       listProfiles: (projectId, userId) => listProfiles(db(), projectId, userId, env),
@@ -162,6 +223,9 @@ export function createOperationPorts(env: Env): OperationPorts {
     },
   };
 }
+
+/** An operation context built by the worker, which still holds the full worker env. */
+export type WorkerOperationContext = OperationContext & { env: Env };
 
 /** Env plus ports, for worker code that calls operations helpers outside an `OperationContext`. */
 export function operationDeps(env: Env): OperationDeps {

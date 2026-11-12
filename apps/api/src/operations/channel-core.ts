@@ -24,18 +24,10 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
-import { isAgentMessageChannelName } from '../durable-objects/project-data/agent-message-notice';
-import {
-  ProjectEventCursorError,
-  ProjectEventIdempotencyConflictError,
-  ProjectEventLimitExceededError,
-  ProjectEventNotFoundError,
-  ProjectEventValidationError,
-} from '../durable-objects/project-data/project-events-contracts';
 import { log } from '../lib/logger';
 import { operationLink } from './connector-read-core';
 import { OperationError } from './errors';
-import type { OperationContext } from './types';
+import type { OperationContext, OperationDeps } from './types';
 import { untrustedTextBlock } from './untrusted-text';
 
 /** Stated with every channel read so an app never mistakes a post or a wake for a decision. */
@@ -49,8 +41,12 @@ export const ACKNOWLEDGMENT_NOTE =
   'it is not agreement; check the agent’s own chat for its response.';
 
 /** Inside the hidden range, a catalog page could hold nothing but hidden channels. */
-export function skipsDirectRange(name: string | null | undefined): boolean {
-  return Boolean(name && isAgentMessageChannelName(name) && name < DIRECT_CHANNEL_RANGE_END);
+export function skipsDirectRange(deps: OperationDeps, name: string | null | undefined): boolean {
+  return Boolean(
+    name &&
+    deps.ports.projectData.isAgentMessageChannelName(name) &&
+    name < DIRECT_CHANNEL_RANGE_END
+  );
 }
 
 /**
@@ -58,25 +54,27 @@ export function skipsDirectRange(name: string | null | undefined): boolean {
  * only `AppError`) would surface them as an opaque failure. Anything else is rethrown untouched
  * so a genuine fault still reads as unavailable.
  */
-export function rethrowChannelError(error: unknown, resource: string): never {
-  if (error instanceof ProjectEventNotFoundError)
-    throw new OperationError('not_found', `${resource} not found`);
-  if (error instanceof ProjectEventCursorError)
-    throw new OperationError('invalid_input', error.message, 'Start again without a cursor.');
-  if (error instanceof ProjectEventValidationError)
-    throw new OperationError('invalid_input', error.message);
-  if (error instanceof ProjectEventLimitExceededError)
-    throw new OperationError('rate_limited', error.message);
-  if (error instanceof ProjectEventIdempotencyConflictError)
-    throw new OperationError('conflict', error.message);
+export function rethrowChannelError(deps: OperationDeps, error: unknown, resource: string): never {
+  const kind = deps.ports.projectData.classifyEventError(error);
+  const message = error instanceof Error ? error.message : String(error);
+  if (kind === 'not_found') throw new OperationError('not_found', `${resource} not found`);
+  if (kind === 'cursor')
+    throw new OperationError('invalid_input', message, 'Start again without a cursor.');
+  if (kind === 'validation') throw new OperationError('invalid_input', message);
+  if (kind === 'limit_exceeded') throw new OperationError('rate_limited', message);
+  if (kind === 'idempotency_conflict') throw new OperationError('conflict', message);
   throw error;
 }
 
-export async function channelCall<T>(resource: string, call: () => Promise<T>): Promise<T> {
+export async function channelCall<T>(
+  deps: OperationDeps,
+  resource: string,
+  call: () => Promise<T>
+): Promise<T> {
   try {
     return await call();
   } catch (error) {
-    rethrowChannelError(error, resource);
+    rethrowChannelError(deps, error, resource);
   }
 }
 
@@ -90,9 +88,9 @@ export function requireChannelName(
   try {
     name = ctx.ports.config.channelName(value);
   } catch (error) {
-    rethrowChannelError(error, 'Channel');
+    rethrowChannelError(ctx, error, 'Channel');
   }
-  if (!includeDirect && isAgentMessageChannelName(name))
+  if (!includeDirect && ctx.ports.projectData.isAgentMessageChannelName(name))
     throw new OperationError(
       'invalid_input',
       `${AGENT_MESSAGE_CHANNEL_PREFIX}* channels are private agent-to-agent threads`,
@@ -119,7 +117,9 @@ export function channelSummary(
 ) {
   return {
     name: channel.name,
-    kind: isAgentMessageChannelName(channel.name) ? ('direct' as const) : ('coordination' as const),
+    kind: ctx.ports.projectData.isAgentMessageChannelName(channel.name)
+      ? ('direct' as const)
+      : ('coordination' as const),
     messageCount: channel.lifetimeCount,
     lastPublishedAt: isoTime(channel.lastPublishedAt),
     link: channelsPageLink(ctx, projectId),

@@ -15,6 +15,7 @@
 import type { NotificationService } from '../durable-objects/notification';
 import type * as projectEventSchedulesConfig from '../durable-objects/project-data/project-event-schedules-config';
 import type * as projectEventsLimits from '../durable-objects/project-data/project-events-limits';
+import type * as projectEventsValues from '../durable-objects/project-data/project-events-values';
 import type * as storageSafety from '../durable-objects/project-data/storage-safety';
 import type * as chatWakeState from '../routes/chat/wake-state';
 import type * as chatAcpInteractions from '../routes/chat-acp-interactions';
@@ -29,17 +30,22 @@ import type * as agentActivity from '../services/agent-activity';
 import type * as agentProfiles from '../services/agent-profiles';
 import type * as aiTokenBudget from '../services/ai-token-budget';
 import type * as cancelTaskService from '../services/cancel-task';
+import type * as cliOperationReceipts from '../services/cli-operation-receipts';
 import type * as connectorAgentAnswer from '../services/connector-agent-answer';
 import type * as connectorReadSettings from '../services/connector-read-settings';
 import type * as credentialLimits from '../services/credential-limit-events/read';
+import type * as cronUtils from '../services/cron-utils';
 import type * as githubApp from '../services/github-app';
 import type * as projectData from '../services/project-data';
+import type * as searchCoverage from '../services/project-data-search-coverage';
 import type * as sendChat from '../services/send-chat';
 import type * as sessionAccess from '../services/session-access';
 import type * as sessionIdleness from '../services/session-idleness';
 import type * as submitTaskService from '../services/submit-task';
 import type * as taskFinalAssistantMessage from '../services/task-final-assistant-message';
 import type * as triggerCreate from '../services/trigger-create';
+import type * as triggerExecutionPrincipal from '../services/trigger-execution-principal';
+import type * as triggerStatus from '../services/trigger-status';
 import type * as workspaceResourceHistory from '../services/workspace-resource-history';
 import type { OperationContext } from './types';
 
@@ -79,7 +85,16 @@ export interface OperationProjectDataPort {
   listProjectSchedules: Bound<typeof projectData.listProjectSchedules>;
   createProjectSchedule: Bound<typeof projectData.createProjectSchedule>;
   mutateProjectSchedule: Bound<typeof projectData.mutateProjectSchedule>;
+  /** True for `agent-dm.*` pair channels, which are private agent-to-agent threads. */
+  isAgentMessageChannelName(name: string): boolean;
+  normalizeNullableText: typeof projectEventsValues.normalizeNullableText;
+  /** Classifies a ProjectData event/channel error; null for anything that is not one. */
+  classifyEventError(error: unknown): ProjectEventErrorKind | null;
+  describeRootSearchCoverage: typeof searchCoverage.describeRootSearchCoverage;
 }
+
+export type ProjectEventErrorKind =
+  'not_found' | 'cursor' | 'validation' | 'limit_exceeded' | 'idempotency_conflict';
 
 /** Admin-panel runtime settings. */
 export interface OperationSettingsPort {
@@ -118,6 +133,8 @@ export interface OperationConnectorPort {
   ): Promise<T>;
   pendingInteractions: Bound<typeof connectorAgentAnswer.connectorPendingInteractions>;
   prepareAgentAnswer: Bound<typeof connectorAgentAnswer.prepareConnectorAgentAnswer>;
+  /** Deterministic id of a write receipt (shared with the CLI receipt store). */
+  receiptId: typeof cliOperationReceipts.operationReceiptId;
 }
 
 /** Live chat-session control and state. */
@@ -131,6 +148,18 @@ export interface OperationChatPort {
   answerAgentInteraction: Bound<typeof chatAcpInteractions.answerAgentInteraction>;
   snapshotInteractions: Bound<typeof acpInteractionStore.snapshotInteractions>;
   resolveAgentState: Bound<typeof chatAgentState.resolveChatAgentState>;
+  /**
+   * Whether a chat's agent turn has ended, by the same session-sleep policy the sleep sweep uses
+   * (`prompt-turn-ended`).
+   */
+  classifyTurnIdleness(input: {
+    state: Parameters<typeof sessionIdleness.getFreshHarnessWorkLeaseExpiry>[0];
+    /** The state when it carries an attributed activity observation, else null. */
+    reportedState: Parameters<typeof sessionIdleness.getFreshHarnessWorkLeaseExpiry>[0];
+    taskStatus: string | null;
+    taskCompletedAt?: string | null;
+    now: Date;
+  }): ReturnType<typeof sessionIdleness.classifySessionIdleness>;
   attachWakeState(
     ...args: Parameters<typeof chatWakeState.attachWakeState> extends [unknown, ...infer A]
       ? A
@@ -163,6 +192,10 @@ export interface OperationTriggerPort {
   validateCron: Bound<typeof triggerCreate.validateCron>;
   clearPageCaches(projectId: string): void;
   rethrowScheduleError: typeof schedulesRoute.rethrowScheduleError;
+  cronToHumanReadable: typeof cronUtils.cronToHumanReadable;
+  /** The user a recurring trigger runs as. */
+  executionUserId: typeof triggerExecutionPrincipal.resolveTriggerExecutionUserId;
+  statusUpdates: typeof triggerStatus.triggerStatusUpdates;
 }
 
 /** Agent profiles, AI usage budgets and GitHub App tokens. */
@@ -187,7 +220,8 @@ export interface OperationConfigPort {
   storageSafety(): ReturnType<typeof storageSafety.resolveStorageSafetyConfig>;
   /** Validates and normalizes a channel name against the deployment's channel limits. */
   channelName(value: string): string;
-  harnessWork(): ReturnType<typeof sessionIdleness.parseHarnessWorkConfig>;
+  /** The API origin derived from the deployment's base domain (`https://api.<domain>`). */
+  apiOrigin(): string;
 }
 
 /** Workspace runtime observations. */

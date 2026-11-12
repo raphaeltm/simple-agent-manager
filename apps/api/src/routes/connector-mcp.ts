@@ -8,10 +8,10 @@ import * as v from 'valibot';
 import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { AppError } from '../middleware/error';
-import { createOperationPorts } from '../operation-ports';
+import { createOperationPorts, type WorkerOperationContext } from '../operation-ports';
 import { OperationError, operationErrorHttpStatus } from '../operations/errors';
 import { operations } from '../operations/registry';
-import type { Operation, OperationContext } from '../operations/types';
+import type { Operation } from '../operations/types';
 import { auditConnectorWrite, consumeConnectorBudget } from '../services/connector-execution';
 import {
   DEFAULT_CONNECTOR_REQUEST_MAX_BYTES,
@@ -71,7 +71,10 @@ const outputSchema = v.object({
 });
 
 /** Input parsing and protocol formatting only; authority and side effects live in operations. */
-export function createConnectorServer(ctx: OperationContext, writeEnabled: boolean): McpServer {
+export function createConnectorServer(
+  ctx: WorkerOperationContext,
+  writeEnabled: boolean
+): McpServer {
   const server = new McpServer(
     { name: 'SAM Connector', version: '1.0.0' },
     { instructions: CONNECTOR_INSTRUCTIONS }
@@ -334,7 +337,7 @@ connectorMcpRoutes.all('/', async (c) => {
       }
     }
   }
-  const ctx: OperationContext = {
+  const ctx: WorkerOperationContext = {
     env: c.env,
     ports: createOperationPorts(c.env),
     actor,

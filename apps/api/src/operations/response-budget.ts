@@ -6,12 +6,12 @@
  * therefore measured the way that check counts them, never by characters alone.
  */
 import { parsePositiveInt } from '../lib/route-helpers';
-import { utf8ByteLength } from '../lib/utf8';
 import {
   DEFAULT_CONNECTOR_RESPONSE_MAX_BYTES,
   MIN_CONNECTOR_RESPONSE_MAX_BYTES,
-} from '../services/connector-limits';
+} from './connector-limits';
 import type { OperationsEnv } from './env';
+import { utf8ByteLength } from './utf8';
 
 /** Share of the response cap a result may use; the rest is the adapter's own framing. */
 const RESULT_SHARE_OF_RESPONSE_CAP = 0.9;

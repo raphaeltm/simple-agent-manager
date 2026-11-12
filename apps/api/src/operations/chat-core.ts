@@ -4,19 +4,18 @@ import {
   parseMessageCursor,
 } from '@simple-agent-manager/shared';
 
-import { type MessageRole, VALID_MESSAGE_ROLES, validateRoles } from '../lib/message-roles';
 import { AppError } from '../middleware/error';
-import { groupTokensIntoMessages } from '../services/message-groups';
-import { describeRootSearchCoverage } from '../services/project-data-search-coverage';
 import { pendingAttention } from './attention-core';
 import { readChatMessages, searchExcerpts } from './chat-transcript';
 import { operationLink } from './connector-read-core';
 import { OperationError } from './errors';
 import { clampOperationNumber, getPlatformOperationLimits } from './limits';
+import { groupTokensIntoMessages } from './message-groups';
+import { type MessageRole, VALID_MESSAGE_ROLES, validateRoles } from './message-roles';
 import { responseBytes, resultByteBudget } from './response-budget';
 import type { OperationContext } from './types';
 
-export { groupTokensIntoMessages, type TokenRow } from '../services/message-groups';
+export { groupTokensIntoMessages, type TokenRow } from './message-groups';
 
 function rolesOrThrow(input: unknown, defaults?: MessageRole[]) {
   const result = validateRoles(input, defaults);
@@ -267,7 +266,7 @@ export async function searchChats(
     ...search.query,
     archiveSearch: search.archiveSearch,
     rootSearch: search.rootSearch,
-    coverageNotes: describeRootSearchCoverage(search.rootSearch),
+    coverageNotes: ctx.ports.projectData.describeRootSearchCoverage(search.rootSearch),
     ...(context && excerpts
       ? {
           excerptCoverage: {

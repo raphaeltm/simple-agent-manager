@@ -10,9 +10,6 @@ import {
 } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
-import { isAgentMessageChannelName } from '../durable-objects/project-data/agent-message-notice';
-import { ProjectEventNotFoundError } from '../durable-objects/project-data/project-events-contracts';
-import { normalizeNullableText } from '../durable-objects/project-data/project-events-values';
 import { authorizeProjectOperation } from './authorization';
 import {
   ACKNOWLEDGMENT_NOTE,
@@ -62,8 +59,8 @@ export const samChannelsList = defineOperation({
     const showDirect = input.includeDirect === true;
     // A cursor inside the hidden range (from an earlier includeDirect page) would page through it.
     const after =
-      !showDirect && skipsDirectRange(input.cursor) ? DIRECT_CHANNEL_RANGE_END : input.cursor;
-    const page = await channelCall('Channel', () =>
+      !showDirect && skipsDirectRange(ctx, input.cursor) ? DIRECT_CHANNEL_RANGE_END : input.cursor;
+    const page = await channelCall(ctx, 'Channel', () =>
       ctx.ports.projectData.listProjectEventChannels(input.projectId, {
         after,
         limit: operationPageLimit(ctx, input.limit),
@@ -71,14 +68,16 @@ export const samChannelsList = defineOperation({
     );
     const channels = showDirect
       ? page.channels
-      : page.channels.filter((channel) => !isAgentMessageChannelName(channel.name));
+      : page.channels.filter(
+          (channel) => !ctx.ports.projectData.isAgentMessageChannelName(channel.name)
+        );
     const hidden = page.channels.length - channels.length;
     const last = page.channels.at(-1)?.name;
     return {
       channels: channels.map((channel) => channelSummary(ctx, input.projectId, channel)),
       // Every pair channel sorts below the range end, so one jump skips all of them at once.
       nextCursor:
-        page.nextCursor && !showDirect && skipsDirectRange(last)
+        page.nextCursor && !showDirect && skipsDirectRange(ctx, last)
           ? DIRECT_CHANNEL_RANGE_END
           : page.nextCursor,
       includeDirect: showDirect,
@@ -107,7 +106,7 @@ export const samChannelHistory = defineOperation({
     await authorizeProjectOperation(ctx, input.projectId);
     const channel = requireChannelName(ctx, input.channel, input.includeDirect === true);
     const limits = await ctx.ports.settings.connectorReadLimits();
-    const history = await channelCall('Channel', () =>
+    const history = await channelCall(ctx, 'Channel', () =>
       ctx.ports.projectData.getProjectEventChannelHistory(input.projectId, {
         channel,
         cursor: input.cursor,
@@ -155,8 +154,8 @@ async function channelMetadata(ctx: OperationContext, projectId: string, channel
     });
     return history.channel;
   } catch (error) {
-    if (error instanceof ProjectEventNotFoundError) return null;
-    rethrowChannelError(error, 'Channel');
+    if (ctx.ports.projectData.classifyEventError(error) === 'not_found') return null;
+    rethrowChannelError(ctx, error, 'Channel');
   }
 }
 
@@ -187,7 +186,7 @@ export const samChannelGet = defineOperation({
         limits.teamMaxTasks,
         getPlatformOperationLimits(ctx.env).ideaTitleMaxLength
       ),
-      channelCall('Channel', () =>
+      channelCall(ctx, 'Channel', () =>
         ctx.ports.projectData.listProjectEventChannelSubscribers(input.projectId, {
           channel,
           state: input.subscriberState ?? 'active',
@@ -238,15 +237,15 @@ export const samChannelSubscriptionCancel = defineOperation({
     let reason: string | null;
     try {
       // The same bound ProjectData applies, checked before a receipt can be reserved.
-      reason = normalizeNullableText(
+      reason = ctx.ports.projectData.normalizeNullableText(
         input.reason ?? 'Cancelled by user through Connector',
         'reason',
         ctx.ports.config.projectEventLimits().maxReasonBytes
       );
     } catch (error) {
-      rethrowChannelError(error, 'Event subscription');
+      rethrowChannelError(ctx, error, 'Event subscription');
     }
-    const subscription = await channelCall('Event subscription', () =>
+    const subscription = await channelCall(ctx, 'Event subscription', () =>
       ctx.ports.projectData.getProjectEventSubscription(input.projectId, {
         subscriptionId: input.subscriptionId,
       })
@@ -278,7 +277,7 @@ export const samChannelSubscriptionCancel = defineOperation({
         // history without changing behavior.
         if (effectiveSubscriptionState(subscription) !== 'active')
           return outcome(subscription, false);
-        const result = await channelCall('Event subscription', () =>
+        const result = await channelCall(ctx, 'Event subscription', () =>
           ctx.ports.projectData.cancelProjectEventSubscription(input.projectId, {
             subscriptionId: subscription.id,
             cancelledBy: { type: 'human', id: ctx.actor.userId },

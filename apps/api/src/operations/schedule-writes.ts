@@ -18,14 +18,13 @@ import type * as v from 'valibot';
 
 import * as schema from '../db/schema';
 import type { ScheduleCreator } from '../durable-objects/project-data/project-event-schedules-authority';
-import { markRejectedBeforeEffects } from '../lib/operation-effect-boundary';
-import { sanitizeUserInput } from '../lib/sanitize-user-input';
 import { AppError } from '../middleware/error';
 import type { CreateTriggerSchema } from '../schemas/triggers';
-import { triggerStatusUpdates } from '../services/trigger-status';
 import { authorizeProjectOperation } from './authorization';
 import { OperationError } from './errors';
+import { markRejectedBeforeEffects } from './operation-effect-boundary';
 import type { OperationProjectDataPort } from './ports';
+import { sanitizeUserInput } from './sanitize-user-input';
 import {
   findRecurringTrigger,
   findSchedule,
@@ -367,7 +366,11 @@ function prepareRecurringUpdate(
       .set({
         updatedAt: now.toISOString(),
         ...(scheduleChange ? { cronExpression, cronTimezone } : {}),
-        ...triggerStatusUpdates({ ...trigger, cronExpression, cronTimezone }, status, now),
+        ...ctx.ports.triggers.statusUpdates(
+          { ...trigger, cronExpression, cronTimezone },
+          status,
+          now
+        ),
       })
       .where(
         and(

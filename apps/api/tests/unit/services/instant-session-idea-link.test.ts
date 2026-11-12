@@ -164,7 +164,7 @@ describe('acceptInstantSession records the idea link before the agent starts', (
       launchInput({ sourceIdeaId: 'idea-1', taskMode: 'task' })
     );
 
-    expect(mocks.recordLink).toHaveBeenCalledWith(env, 'project-1', {
+    expect(mocks.recordLink).toHaveBeenCalledWith(expect.objectContaining({ env }), 'project-1', {
       sourceKind: 'session',
       sourceId: 'chat-session-1',
       targetKind: 'idea',

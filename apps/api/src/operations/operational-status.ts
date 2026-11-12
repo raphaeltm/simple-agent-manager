@@ -2,13 +2,7 @@ import { and, desc, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
-import { parsePositiveInt } from '../lib/route-helpers';
 import { expectJsonRecord } from '../lib/runtime-validation';
-import {
-  classifySessionIdleness,
-  getFreshHarnessWorkLeaseExpiry,
-} from '../services/session-idleness';
-import { DEFAULT_SESSION_SLEEP_AFTER_MS } from '../services/session-snapshots';
 import { authorizeProjectOperation } from './authorization';
 import { diagnostic } from './operational-projections';
 import type { OperationContext } from './types';
@@ -84,26 +78,12 @@ export async function chatStatus(ctx: OperationContext, projectId: string, sessi
   // Plan persistence can create a raw session_state row with idle/default activity.
   // Only an attributed activity observation is evidence of a prompt transition.
   const reportedState = resolved.state?.activitySource ? resolved.state : null;
-  const now = new Date();
-  const harnessWorkConfig = ctx.ports.config.harnessWork();
-  const freshWork = getFreshHarnessWorkLeaseExpiry(
-    resolved.state,
-    now,
-    harnessWorkConfig.leaseMs,
-    harnessWorkConfig.maxDurationMs
-  );
-  const classificationState =
-    reportedState ??
-    (freshWork ? { ...resolved.state, activity: undefined, activityAt: undefined } : null);
-  // A wake placeholder is not runtime activity evidence. Classify only the original observation.
-  const idleness = classifySessionIdleness({
+  const idleness = ctx.ports.chat.classifyTurnIdleness({
+    state: resolved.state,
+    reportedState,
     taskStatus: task?.status ?? null,
     taskCompletedAt: task?.completedAt,
-    state: classificationState,
-    now,
-    idleAfterMs: parsePositiveInt(ctx.env.SESSION_SLEEP_AFTER_MS, DEFAULT_SESSION_SLEEP_AFTER_MS),
-    harnessWorkConfig,
-    policy: 'prompt-turn-ended',
+    now: new Date(),
   });
   let reservation: Record<string, unknown> | null = null;
   try {

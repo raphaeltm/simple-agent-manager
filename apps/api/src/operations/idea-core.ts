@@ -1,7 +1,6 @@
 import type { IdeaUpdateNote } from '@simple-agent-manager/shared';
 
 import { log } from '../lib/logger';
-import { sanitizeUserInput } from '../lib/sanitize-user-input';
 import { getSearchQueryLikePatterns, normalizeSearchQuery } from '../lib/search-query-limits';
 import { ulid } from '../lib/ulid';
 import { getAgentLinkedContext } from './agent-linked-context';
@@ -11,6 +10,7 @@ import { OperationError } from './errors';
 import { ideaTaskPredicateSql, isIdeaRow } from './idea-identity';
 import { isIdeaStatus, validateIdeaStatusTransition } from './idea-transitions';
 import { addIdeaUpdate, validateIdeaUpdateNote } from './idea-update-core';
+import { sanitizeUserInput } from './sanitize-user-input';
 import { UNTRUSTED_TEXT_GUIDANCE, untrustedTextBlock } from './untrusted-text';
 export { ideaTaskPredicateSql, isIdeaRow } from './idea-identity';
 import { clampOperationNumber, getPlatformOperationLimits } from './limits';

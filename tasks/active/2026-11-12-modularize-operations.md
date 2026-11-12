@@ -22,7 +22,7 @@ SAM task `01M77GDY92WVEJAYW63F4TSC50`, branch `sam/w3-operations-turn-shared-4ts
 
 - [x] Step 1a: narrow `OperationsEnv`; `OperationContext.env` uses it
 - [x] Step 1b: ports interface (`OperationPorts`) for worker-owned services; worker wiring in one place (`apps/api/src/operation-ports.ts`)
-- [ ] Step 1c: operations import nothing from `routes/`, `durable-objects/`, `services/` except through ports
+- [x] Step 1c: operations import nothing from `routes/`, `durable-objects/`, `services/` except through ports (type-only imports in `ports.ts` remain until step 2)
 - [x] Step 1d: move clearest sam-session / MCP duplicates onto shared functions (see below)
 - [ ] Step 2: lift into `packages/operations` once W0 is ready (channel "W0 ready")
 - [ ] Test counts before/after recorded; local gates; CI via `gh workflow run ci.yml`
@@ -52,3 +52,12 @@ SAM task `01M77GDY92WVEJAYW63F4TSC50`, branch `sam/w3-operations-turn-shared-4ts
   (role handling differs), add_knowledge/get_project_knowledge, list/add_policy, get_task_details/search_tasks,
   get_mission summary, stop_subtask cancel+finalize, retry_subtask/dispatch_task pipelines, list_ideas/find_related_ideas
   (/sam list_ideas lacks the is_idea filter: behaviour differs, must be decided before sharing).
+- 2026-11-12: step 1c pushed. Operations-owned helpers moved into `operations/` with re-exports at the old paths:
+  sanitize-user-input, utf8, message-roles, idea-content-limit, operation-effect-boundary, connector-limits,
+  connector-read-settings-definition, message-groups; `ConnectorAnswerFields` -> `operations/connector-answer-input.ts`.
+  Domain-owned functions now come through ports: config.apiOrigin, projectData.{isAgentMessageChannelName,
+  normalizeNullableText, classifyEventError, describeRootSearchCoverage}, connector.receiptId,
+  chat.classifyTurnIdleness, triggers.{cronToHumanReadable, executionUserId, statusUpdates}.
+  Still imported directly: worker-core kernel (logger, schema, ulid, runtime-validation, d1-limits, errors,
+  route-helpers, search-query-limits) and `services/task-status` (asked coordinator: worker-core or port).
+  Full unit suite: 16,026 cases, 0 failures.

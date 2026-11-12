@@ -1,9 +1,9 @@
 import { DEFAULT_IDEA_TITLE_MAX_LENGTH } from '@simple-agent-manager/shared';
 
-import { DEFAULT_IDEA_CONTENT_MAX_LENGTH } from '../lib/idea-content-limit';
 import { parsePositiveInt } from '../lib/route-helpers';
 import type { OperationsEnv } from './env';
 import { OperationError } from './errors';
+import { DEFAULT_IDEA_CONTENT_MAX_LENGTH } from './idea-content-limit';
 
 export function clampOperationNumber(
   value: number,

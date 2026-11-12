@@ -45,6 +45,7 @@ vi.mock('../../../src/services/project-data', async (importOriginal) => ({
   recordActivityEvent: vi.fn().mockResolvedValue(undefined),
 }));
 
+import { createOperationPorts } from '../../../src/operation-ports';
 import { updateIdea } from '../../../src/operations/idea-core';
 import type { OperationContext } from '../../../src/operations/types';
 import { ideaRoutes } from '../../../src/routes/ideas';
@@ -123,6 +124,7 @@ describe('every surface that moves an idea agrees', () => {
     env = { DATABASE: createSqliteD1(sqlite), BASE_DOMAIN: 'example.test' } as Env;
     ctx = {
       env,
+      ports: createOperationPorts(env),
       requestId: 'test',
       actor: { userId: 'u1', via: 'web', scopes: new Set(['sam.read', 'sam.write']) },
     } as OperationContext;

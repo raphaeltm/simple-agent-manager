@@ -1,5 +1,4 @@
 import { expectJsonRecord } from '../lib/runtime-validation';
-import { operationReceiptId } from '../services/cli-operation-receipts';
 import { authorizeProjectOperation } from './authorization';
 import { OperationError } from './errors';
 import type { OperationContext } from './types';
@@ -50,7 +49,7 @@ export async function readOperation(
       'invalid_input',
       'Operation has no inspectable Connector write receipt'
     );
-  const receiptId = await operationReceiptId(
+  const receiptId = await ctx.ports.connector.receiptId(
     input.projectId,
     ctx.actor.userId,
     'CONNECTOR',

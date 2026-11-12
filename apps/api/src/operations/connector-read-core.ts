@@ -5,7 +5,6 @@ import * as v from 'valibot';
 import * as schema from '../db/schema';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { maybeJsonRecord } from '../lib/runtime-validation';
-import { getTrustedApiOrigin } from '../lib/trusted-origins';
 import { questionMetadata } from './attention-core';
 import { authorizeProjectOperation } from './authorization';
 import { OperationError } from './errors';
@@ -18,7 +17,7 @@ export function requireReadScope(ctx: OperationContext): void {
     throw new OperationError('forbidden', 'Missing sam.read scope');
 }
 export function operationLink(ctx: OperationContext, projectId?: string, sessionId?: string) {
-  const origin = new URL(getTrustedApiOrigin(ctx.env));
+  const origin = new URL(ctx.ports.config.apiOrigin());
   if (origin.hostname.startsWith('api.')) origin.hostname = `app.${origin.hostname.slice(4)}`;
   const base = origin.origin;
   return projectId

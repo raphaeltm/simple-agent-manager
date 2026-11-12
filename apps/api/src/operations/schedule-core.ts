@@ -21,8 +21,6 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import { parsePositiveInt } from '../lib/route-helpers';
-import { cronToHumanReadable } from '../services/cron-utils';
-import { resolveTriggerExecutionUserId } from '../services/trigger-execution-principal';
 import { operationLink } from './connector-read-core';
 import { OperationError } from './errors';
 import { getPlatformOperationLimits } from './limits';
@@ -232,7 +230,7 @@ export function recurringProjection(
     cron: trigger.cronExpression,
     timezone,
     humanReadable: trigger.cronExpression
-      ? cronToHumanReadable(trigger.cronExpression, timezone)
+      ? ctx.ports.triggers.cronToHumanReadable(trigger.cronExpression, timezone)
       : null,
     nextRunAt: nextRun === null ? null : iso(nextRun),
     localNextRunAt: shown?.localTime ?? null,
@@ -261,7 +259,7 @@ export function recurringProjection(
         })
       : null,
     creator: { userId: trigger.userId, isYou: trigger.userId === ctx.actor.userId },
-    runsAsUserId: resolveTriggerExecutionUserId(trigger),
+    runsAsUserId: ctx.ports.triggers.executionUserId(trigger),
     expiresAt: null,
     createdAt: trigger.createdAt,
     updatedAt: trigger.updatedAt,

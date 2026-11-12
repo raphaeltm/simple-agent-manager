@@ -2,25 +2,14 @@ import type {
   AcpInteractionAnswerDecision,
   AcpInteractionBrowserAnswer,
 } from '@simple-agent-manager/shared';
-import * as v from 'valibot';
 
 import { validFormAnswerDecision } from '../durable-objects/interaction-store-form';
 import { sha256 } from '../durable-objects/interaction-store-model';
 import type { Env } from '../env';
+import type { ConnectorAnswerChoice } from '../operations/connector-answer-input';
 import { OperationError } from '../operations/errors';
 import { getAcpInteractionConfig } from './acp-interaction-config';
 import { getInteractionDetail, getPendingInteractionDetails } from './acp-interaction-store';
-
-export const ConnectorAnswerFields = {
-  optionId: v.optional(v.pipe(v.string(), v.minLength(1))),
-  decline: v.optional(v.literal(true)),
-  formContent: v.optional(v.record(v.string(), v.unknown())),
-};
-export interface ConnectorAnswerChoice {
-  optionId?: string;
-  decline?: true;
-  formContent?: Record<string, unknown>;
-}
 
 /** Same receipt hashes as the browser cards; clients never manufacture crypto metadata. */
 export async function prepareConnectorAgentAnswer(

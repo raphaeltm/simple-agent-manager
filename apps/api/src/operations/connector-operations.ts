@@ -4,9 +4,9 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as v from 'valibot';
 
 import * as schema from '../db/schema';
-import { ConnectorAnswerFields } from '../services/connector-agent-answer';
 import { canTransitionTaskStatus, isTaskStatus } from '../services/task-status';
 import { authorizeProjectOperation } from './authorization';
+import { ConnectorAnswerFields } from './connector-answer-input';
 import {
   chatsList,
   inboxGet,

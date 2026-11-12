@@ -1,9 +1,9 @@
-import { sanitizeUserInput } from '../lib/sanitize-user-input';
 import { ulid } from '../lib/ulid';
 import { formatOperationCursor, readOperationCursor } from './cursors';
 import { OperationError } from './errors';
 import { ideaTaskPredicateSql } from './idea-identity';
 import type { OperationSettingsPort } from './ports';
+import { sanitizeUserInput } from './sanitize-user-input';
 import type { OperationContext } from './types';
 
 async function requireIdea(ctx: OperationContext, projectId: string, ideaId: string) {

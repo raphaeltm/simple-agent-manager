@@ -3,12 +3,11 @@
  *
  * Bindings and variables owned by other areas are not here: operations reach those through
  * `OperationPorts` (`./ports.ts`). Keep this list to what operations code itself reads.
- * Fields shared with the rest of the worker (`DATABASE`, `BASE_DOMAIN`, search and connector
+ * Fields shared with the rest of the worker (`DATABASE`, search, mission and connector
  * limits) are also declared on the worker `Env`, with the same types.
  */
 export interface OperationsEnv {
   DATABASE: D1Database;
-  BASE_DOMAIN: string;
   // Shared platform operation limits (`getPlatformOperationLimits`)
   MCP_TASK_LIST_LIMIT?: string; // Default task list page size (default: 10)
   MCP_TASK_LIST_MAX?: string; // Max task list page size (default: 50)
@@ -37,7 +36,6 @@ export interface OperationsEnv {
   SEARCH_QUERY_MAX_TERMS?: string;
   CONNECTOR_INBOX_SESSION_LIMIT?: string;
   CONNECTOR_RESPONSE_MAX_BYTES?: string;
-  SESSION_SLEEP_AFTER_MS?: string; // Idle duration before verified snapshot teardown (default: 900000)
   CRON_TEMPLATE_MAX_LENGTH?: string; // Max prompt template length (default: 8000)
   MCP_ARCHIVED_TOOL_PAYLOAD_LIST_LIMIT?: string; // Default archived payloads per get_archived_tool_payloads (default: 10)
   MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX?: string; // Max archived payloads per get_archived_tool_payloads (default: 50)
