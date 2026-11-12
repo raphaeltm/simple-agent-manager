@@ -36,7 +36,13 @@ Staying in the worker, with reasons:
 - Kernel helpers from worker-core; D1 tables from `@simple-agent-manager/worker-core/schema`.
 - `services/cache-config.ts` (11 lines, domain-free TTL parsing, used by repo-hosting and three
   worker files): proposed for worker-core (flagged to the coordinator).
-- Old worker paths keep named re-exports.
+- Old worker paths keep named re-exports (`services/github-*.ts`, `services/gitlab.ts`,
+  `services/repo-browse/index.ts`), limited to the names the worker imports.
+- Tests that stay in the worker, because they need worker code: `github-user-access-token` and
+  `gitlab-user-access-token` (token-lock DO helpers, Better Auth mocks), `ensure-branch-exists`
+  (admin-settings SQLite helper and real platform config), `github-installations` and
+  `repo-browse-routes` (routes), `auth-github-refresh` (Better Auth), `github-installation-upserts`
+  (worker SQLite helper).
 
 ## Checklist
 
@@ -63,6 +69,7 @@ Staying in the worker, with reasons:
     coordinator, since worker-core additions need two package users (repo-hosting + worker).
   - Gitleaks: three reviewed PEM delimiter literals in `github-app-tokens.ts` re-recorded at the
     new path.
+- 2026-11-12: task-completion validator PASS (no CRITICAL/HIGH; LOW notes recorded above).
 - 2026-11-12: review fixes. Security review: PASS (3 LOW, left as is to keep the move behavior-free:
   unconfigured auth port reads as "token unavailable" like the code it replaced; registry is not
   write-once, same as W1). Architecture review addressed: public index trimmed to the names the worker
