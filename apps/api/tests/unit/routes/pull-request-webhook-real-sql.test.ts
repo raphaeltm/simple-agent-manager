@@ -5,6 +5,7 @@ import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
+import { createOperationPorts } from '../../../src/operation-ports';
 import { getPullRequestStates } from '../../../src/operations/pull-request-core';
 import type { OperationContext } from '../../../src/operations/types';
 import { handleGitHubWebhook } from '../../../src/routes/github-webhook';
@@ -168,6 +169,7 @@ describe('verified GitHub PR webhooks', () => {
     const state = await getPullRequestStates(
       {
         env,
+        ports: createOperationPorts(env),
         actor: { userId: 'user', via: 'web', scopes: new Set(['sam.read']) },
         requestId: 'test',
       } satisfies OperationContext,

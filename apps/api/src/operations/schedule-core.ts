@@ -20,18 +20,15 @@ import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
-import { scheduleLimits } from '../durable-objects/project-data/project-event-schedules-config';
 import { parsePositiveInt } from '../lib/route-helpers';
-import { rethrowScheduleError } from '../routes/project-schedules';
 import { cronToHumanReadable } from '../services/cron-utils';
-import * as projectData from '../services/project-data';
 import { resolveTriggerExecutionUserId } from '../services/trigger-execution-principal';
 import { operationLink } from './connector-read-core';
 import { OperationError } from './errors';
 import { getPlatformOperationLimits } from './limits';
 import { diagnostic } from './operational-projections';
 import { zonedTime } from './schedule-time';
-import type { OperationContext } from './types';
+import type { OperationContext, OperationDeps } from './types';
 import { untrustedTextBlock } from './untrusted-text';
 
 /** Lists carry short text previews; a single read carries the whole stored text. */
@@ -42,19 +39,19 @@ export type ScheduleTarget =
   | { kind: 'recurring'; trigger: schema.TriggerRow };
 
 /** Maps a ProjectData schedule failure to the HTTP error `routes/project-schedules.ts` returns. */
-export function scheduleFailure(error: unknown): unknown {
+export function scheduleFailure(ctx: OperationDeps, error: unknown): unknown {
   try {
-    rethrowScheduleError(error);
+    ctx.ports.triggers.rethrowScheduleError(error);
   } catch (mapped) {
     return mapped;
   }
 }
 
-export async function scheduleRead<T>(call: Promise<T>): Promise<T> {
+export async function scheduleRead<T>(ctx: OperationDeps, call: Promise<T>): Promise<T> {
   try {
     return await call;
   } catch (error) {
-    throw scheduleFailure(error);
+    throw scheduleFailure(ctx, error);
   }
 }
 
@@ -74,7 +71,7 @@ export function code(value: string | null | undefined): string | null {
 function textCap(ctx: OperationContext, detail: Detail, kind: 'one_off' | 'recurring'): number {
   if (detail === 'preview') return getPlatformOperationLimits(ctx.env).taskDescriptionSnippetLength;
   return kind === 'one_off'
-    ? scheduleLimits(ctx.env).promptBytes
+    ? ctx.ports.config.scheduleLimits().promptBytes
     : parsePositiveInt(ctx.env.CRON_TEMPLATE_MAX_LENGTH, DEFAULT_CRON_TEMPLATE_MAX_LENGTH);
 }
 
@@ -300,7 +297,8 @@ export async function findSchedule(
   scheduleId: string
 ): Promise<ScheduleTarget> {
   const schedule = await scheduleRead(
-    projectData.getProjectSchedule(ctx.env, projectId, {
+    ctx,
+    ctx.ports.projectData.getProjectSchedule(projectId, {
       userId: ctx.actor.userId,
       id: scheduleId,
     })

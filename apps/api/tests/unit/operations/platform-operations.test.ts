@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
+import { createOperationPorts } from '../../../src/operation-ports';
 import { OperationError, operationErrorHttpStatus } from '../../../src/operations/errors';
 import { getPlatformOperationLimits } from '../../../src/operations/limits';
 import {
@@ -23,8 +24,8 @@ import {
   UNTRUSTED_TEXT_GUIDANCE,
   untrustedTextBlock,
 } from '../../../src/operations/untrusted-text';
-import { runWorkspaceOperation } from '../../../src/operations/workspace-adapter';
 import { getMcpLimits } from '../../../src/routes/mcp/_helpers';
+import { runWorkspaceOperation } from '../../../src/routes/mcp/workspace-operation-adapter';
 import { handleGetPeerAgentOutput } from '../../../src/routes/mcp/workspace-tools-direct';
 import type { McpTokenData } from '../../../src/services/mcp-token';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
@@ -83,7 +84,12 @@ describe('shared platform operation authorization on real SQLite', () => {
   let requestId = 0;
 
   function ctx(userId = ownerId, workspaceProjectId = projectId): OperationContext {
-    return { env, actor: actor(userId, workspaceProjectId), requestId: String(++requestId) };
+    return {
+      env,
+      ports: createOperationPorts(env),
+      actor: actor(userId, workspaceProjectId),
+      requestId: String(++requestId),
+    };
   }
 
   beforeEach(() => {

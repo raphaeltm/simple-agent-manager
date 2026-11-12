@@ -8,9 +8,9 @@ import { requireRouteParam } from '../lib/route-helpers';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { AppError } from '../middleware/error';
 import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
+import { webOperationContext } from '../operation-ports';
 import { OperationError, operationErrorHttpStatus } from '../operations/errors';
 import { addIdeaUpdate, deleteIdeaUpdate, listIdeaUpdates } from '../operations/idea-update-core';
-import { webOperationContext } from '../operations/types';
 import { jsonValidator } from '../schemas';
 
 const ideaUpdateRoutes = new Hono<{ Bindings: Env }>();

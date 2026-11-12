@@ -17,10 +17,9 @@ import type {
   LogicalMessage,
 } from '../durable-objects/project-data/logical-transcript';
 import { log } from '../lib/logger';
-import { getConnectorReadLimits } from '../services/connector-read-settings';
-import * as projectDataService from '../services/project-data';
 import { OperationError } from './errors';
 import { clampOperationNumber, getPlatformOperationLimits } from './limits';
+import type { OperationProjectDataPort } from './ports';
 import {
   fitText,
   responseBytes,
@@ -120,7 +119,7 @@ export interface ChatMessagesInput {
 
 /** One page of whole messages, newest first, sized to fit one Connector response. */
 export async function readChatMessages(ctx: OperationContext, input: ChatMessagesInput) {
-  const limits = await getConnectorReadLimits(ctx.env);
+  const limits = await ctx.ports.settings.connectorReadLimits();
   const platform = getPlatformOperationLimits(ctx.env);
   const limit = clampOperationNumber(
     input.limit ?? limits.transcriptPageMessages,
@@ -129,8 +128,7 @@ export async function readChatMessages(ctx: OperationContext, input: ChatMessage
     'limit'
   );
   const messageChars = input.detailed ? limits.transcriptPageChars : limits.transcriptMessageChars;
-  const page = await projectDataService.getLogicalTranscriptPage(
-    ctx.env,
+  const page = await ctx.ports.projectData.getLogicalTranscriptPage(
     input.projectId,
     input.sessionId,
     {
@@ -227,7 +225,7 @@ export async function readChatMessage(
     includeToolPayloads?: boolean;
   }
 ) {
-  const limits = await getConnectorReadLimits(ctx.env);
+  const limits = await ctx.ports.settings.connectorReadLimits();
   const maxChars = clampOperationNumber(
     input.maxChars ?? limits.transcriptPageChars,
     1,
@@ -235,20 +233,15 @@ export async function readChatMessage(
     'maxChars'
   );
   const offset = clampOperationNumber(input.offset ?? 0, 0, Number.MAX_SAFE_INTEGER, 'offset');
-  const result = await projectDataService.getLogicalMessage(
-    ctx.env,
-    input.projectId,
-    input.sessionId,
-    {
-      messageId: input.messageId,
-      maxRows: limits.transcriptScanRows,
-      offset,
-      maxChars,
-      focus: null,
-      includeThinking: input.includeThinking === true,
-      includeToolTitles: input.includeToolPayloads === true,
-    }
-  );
+  const result = await ctx.ports.projectData.getLogicalMessage(input.projectId, input.sessionId, {
+    messageId: input.messageId,
+    maxRows: limits.transcriptScanRows,
+    offset,
+    maxChars,
+    focus: null,
+    includeThinking: input.includeThinking === true,
+    includeToolTitles: input.includeToolPayloads === true,
+  });
   if (!result.found) throw new OperationError('not_found', 'Message not found in this chat');
   const budget = resultByteBudget(ctx.env);
   return {
@@ -283,14 +276,14 @@ export async function searchExcerpts(
   query: string,
   hits: readonly SearchHit[]
 ) {
-  const limits = await getConnectorReadLimits(ctx.env);
+  const limits = await ctx.ports.settings.connectorReadLimits();
   const terms = query.split(/\s+/).filter((term) => term.length > 0);
   // Hits often share a chat; look up who owns each chat's transcript once.
-  const owners = new Map<string, ReturnType<typeof projectDataService.resolveTranscriptOwner>>();
+  const owners = new Map<string, ReturnType<OperationProjectDataPort['resolveTranscriptOwner']>>();
   const ownerOf = (sessionId: string) => {
     let owner = owners.get(sessionId);
     if (!owner) {
-      owner = projectDataService.resolveTranscriptOwner(ctx.env, projectId, sessionId);
+      owner = ctx.ports.projectData.resolveTranscriptOwner(projectId, sessionId);
       owners.set(sessionId, owner);
     }
     return owner;
@@ -298,8 +291,7 @@ export async function searchExcerpts(
   const excerpts = await Promise.all(
     hits.slice(0, limits.searchContextResults).map(async (hit) => {
       try {
-        const result = await projectDataService.getLogicalMessage(
-          ctx.env,
+        const result = await ctx.ports.projectData.getLogicalMessage(
           projectId,
           hit.sessionId,
           {

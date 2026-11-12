@@ -4,13 +4,9 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { expectJsonRecord } from '../lib/runtime-validation';
-import { attachWakeState } from '../routes/chat/wake-state';
-import { resolveChatAgentState } from '../routes/chat-agent-state';
-import { requireSessionWriter } from '../services/session-access';
 import {
   classifySessionIdleness,
   getFreshHarnessWorkLeaseExpiry,
-  parseHarnessWorkConfig,
 } from '../services/session-idleness';
 import { DEFAULT_SESSION_SLEEP_AFTER_MS } from '../services/session-snapshots';
 import { authorizeProjectOperation } from './authorization';
@@ -23,7 +19,7 @@ export async function operationalSession(
   sessionId: string
 ) {
   await authorizeProjectOperation(ctx, projectId);
-  return requireSessionWriter(ctx.env, projectId, sessionId, ctx.actor.userId, {
+  return ctx.ports.access.requireSessionWriter(projectId, sessionId, ctx.actor.userId, {
     action: 'inspect operational evidence for this session',
   });
 }
@@ -73,14 +69,14 @@ export async function chatStatus(ctx: OperationContext, projectId: string, sessi
     )
     .orderBy(desc(schema.workspaces.createdAt), desc(schema.workspaces.id))
     .limit(1);
-  const resolved = await resolveChatAgentState(ctx.env, {
+  const resolved = await ctx.ports.chat.resolveAgentState({
     projectId,
     sessionId,
     lookupFailureEvent: 'connector.status_runtime_lookup_failed',
     stateFailureEvent: 'connector.status_state_failed',
     includePlan: false,
   });
-  const state = await attachWakeState(db, resolved.state, {
+  const state = await ctx.ports.chat.attachWakeState(resolved.state, {
     projectId,
     sessionId,
     sessionStatus: writer.session.status,
@@ -89,7 +85,7 @@ export async function chatStatus(ctx: OperationContext, projectId: string, sessi
   // Only an attributed activity observation is evidence of a prompt transition.
   const reportedState = resolved.state?.activitySource ? resolved.state : null;
   const now = new Date();
-  const harnessWorkConfig = parseHarnessWorkConfig(ctx.env);
+  const harnessWorkConfig = ctx.ports.config.harnessWork();
   const freshWork = getFreshHarnessWorkLeaseExpiry(
     resolved.state,
     now,

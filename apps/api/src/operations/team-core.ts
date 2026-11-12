@@ -17,11 +17,7 @@ import * as v from 'valibot';
 import { chunk, D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
 import { log } from '../lib/logger';
 import { parseRowsSkippingInvalid } from '../lib/runtime-validation';
-import { listAgentActivityTasks } from '../services/agent-activity';
-import { getConnectorReadLimits } from '../services/connector-read-settings';
 import { TEAM_TEXT_CHARS_MIN } from '../services/connector-read-settings-definition';
-import { listProjectCredentialLimits } from '../services/credential-limit-events/read';
-import * as projectDataService from '../services/project-data';
 import { authorizeProjectOperation } from './authorization';
 import { operationLink } from './connector-read-core';
 import { diagnostic } from './operational-projections';
@@ -122,11 +118,7 @@ async function readSessions(ctx: OperationContext, projectId: string, taskIds: s
   // The ProjectData lookup binds one parameter per task id and nothing else; Cloudflare's SQL
   // surfaces (D1 and Durable Object storage alike) reject the statement past that limit.
   for (const taskChunk of chunk(taskIds, D1_MAX_BOUND_PARAMETERS)) {
-    for (const session of await projectDataService.getSessionsByTaskIds(
-      ctx.env,
-      projectId,
-      taskChunk
-    )) {
+    for (const session of await ctx.ports.projectData.getSessionsByTaskIds(projectId, taskChunk)) {
       const taskId = typeof session.taskId === 'string' ? session.taskId : null;
       if (taskId && !byTask.has(taskId)) byTask.set(taskId, session);
     }
@@ -385,7 +377,7 @@ export async function teamStatus(
   input: { projectId: string; scope: TeamScope }
 ) {
   await authorizeProjectOperation(ctx, input.projectId);
-  const limits = await getConnectorReadLimits(ctx.env);
+  const limits = await ctx.ports.settings.connectorReadLimits();
   const team = await readTeamTasks(ctx.env, input.projectId, input.scope, {
     maxTasks: limits.teamMaxTasks,
     maxDepth: limits.teamMaxDepth,
@@ -395,14 +387,14 @@ export async function teamStatus(
   const now = new Date();
   const [activity, sessions, prStates, agents, compute, quotas] = await Promise.all([
     settle('agent_activity', () =>
-      listAgentActivityTasks(ctx.env, { projectId: input.projectId, activeOnly: false, taskIds })
+      ctx.ports.tasks.listAgentActivity({ projectId: input.projectId, activeOnly: false, taskIds })
     ),
     settle('sessions', () => readSessions(ctx, input.projectId, taskIds)),
     settle('pull_requests', () => readPullRequests(ctx, input.projectId, team.rows)),
     settle('agent_sessions', () => readAgentSessions(ctx, workspaceIds)),
     settle('compute_usage', () => readCompute(ctx, workspaceIds, now.toISOString())),
     settle('credential_limits', () =>
-      listProjectCredentialLimits(ctx.env, {
+      ctx.ports.tasks.listCredentialLimits({
         projectId: input.projectId,
         userId: ctx.actor.userId,
       })

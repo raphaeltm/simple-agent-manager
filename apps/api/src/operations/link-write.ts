@@ -2,13 +2,10 @@ import type { LinkKind, LinkRelation } from '@simple-agent-manager/shared';
 import { canonicalProjectPullRequestUrl } from '@simple-agent-manager/shared';
 
 import type { LinkLimits, LinkRemove, LinkWrite } from '../durable-objects/project-data/links';
-import { resolveStorageSafetyConfig } from '../durable-objects/project-data/storage-safety';
-import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { errors } from '../middleware/error';
-import { resolveAdminSettingDetailsMany } from '../services/admin-settings';
-import * as projectData from '../services/project-data';
 import { ideaTaskPredicateSql } from './idea-identity';
+import type { OperationDeps } from './types';
 
 const PAIRS: Record<string, readonly LinkRelation[]> = {
   'session:idea': ['created', 'edited', 'read', 'works_on', 'discusses', 'linked'],
@@ -27,8 +24,8 @@ const SETTING_NAMES = [
   'operations.resourceLinkContextMaxLength',
 ] as const;
 
-export async function limits(env: Env) {
-  const settings = await resolveAdminSettingDetailsMany(env, [...SETTING_NAMES]);
+export async function limits(deps: OperationDeps) {
+  const settings = await deps.ports.settings.resolveDetailsMany([...SETTING_NAMES]);
   const values = settings.map((s) => Number(s.value));
   const [
     touchIntervalMs,
@@ -55,7 +52,7 @@ export async function limits(env: Env) {
     ].some((v) => !Number.isFinite(v))
   )
     throw errors.internal('Resource link settings unavailable');
-  const storage = resolveStorageSafetyConfig(env);
+  const storage = deps.ports.config.storageSafety();
   return {
     write: {
       touchIntervalMs,
@@ -70,20 +67,21 @@ export async function limits(env: Env) {
 }
 
 export async function validateEntity(
-  env: Env,
+  deps: OperationDeps,
   projectId: string,
   kind: LinkKind,
   id: string
 ): Promise<string> {
   if (!id.trim()) throw errors.badRequest('Resource id is required');
   if (kind === 'session') {
-    if (!(await projectData.getSession(env, projectId, id))) throw errors.notFound('Resource');
+    if (!(await deps.ports.projectData.getSession(projectId, id)))
+      throw errors.notFound('Resource');
     return id;
   }
   if (kind === 'idea' || kind === 'file') {
     const table = kind === 'idea' ? 'tasks' : 'project_files';
     const ideaPredicate = kind === 'idea' ? ` AND ${ideaTaskPredicateSql('tasks')}` : '';
-    const found = await env.DATABASE.prepare(
+    const found = await deps.env.DATABASE.prepare(
       `SELECT id FROM ${table} WHERE id=? AND project_id=?${ideaPredicate}`
     )
       .bind(id, projectId)
@@ -91,7 +89,7 @@ export async function validateEntity(
     if (!found) throw errors.notFound('Resource');
     return id;
   }
-  const project = await env.DATABASE.prepare('SELECT repository FROM projects WHERE id=?')
+  const project = await deps.env.DATABASE.prepare('SELECT repository FROM projects WHERE id=?')
     .bind(projectId)
     .first<{ repository: string | null }>();
   const canonical = project?.repository
@@ -101,16 +99,19 @@ export async function validateEntity(
   return canonical;
 }
 
-export async function recordLink(env: Env, projectId: string, input: LinkWrite): Promise<void> {
+export async function recordLink(
+  deps: OperationDeps,
+  projectId: string,
+  input: LinkWrite
+): Promise<void> {
   if (!PAIRS[`${input.sourceKind}:${input.targetKind}`]?.includes(input.relation))
     throw errors.badRequest('Invalid relationship');
   const [sourceId, targetId] = await Promise.all([
-    validateEntity(env, projectId, input.sourceKind, input.sourceId),
-    validateEntity(env, projectId, input.targetKind, input.targetId),
+    validateEntity(deps, projectId, input.sourceKind, input.sourceId),
+    validateEntity(deps, projectId, input.targetKind, input.targetId),
   ]);
-  const config = await limits(env);
-  await projectData.recordResourceLink(
-    env,
+  const config = await limits(deps);
+  await deps.ports.projectData.recordResourceLink(
     projectId,
     {
       ...input,
@@ -132,14 +133,17 @@ export async function recordLink(env: Env, projectId: string, input: LinkWrite):
 }
 
 /** Call from waitUntil after the original tool succeeds. Failure is observable, not user-facing. */
-export async function recordAutoLink(env: Env, projectId: string, input: LinkWrite): Promise<void> {
+export async function recordAutoLink(
+  deps: OperationDeps,
+  projectId: string,
+  input: LinkWrite
+): Promise<void> {
   try {
     if (!input.sourceId) return;
     if (!PAIRS[`${input.sourceKind}:${input.targetKind}`]?.includes(input.relation)) return;
-    const targetId = await validateEntity(env, projectId, input.targetKind, input.targetId);
-    const config = await limits(env);
-    const result = await projectData.recordResourceLink(
-      env,
+    const targetId = await validateEntity(deps, projectId, input.targetKind, input.targetId);
+    const config = await limits(deps);
+    const result = await deps.ports.projectData.recordResourceLink(
       projectId,
       { ...input, targetId, origin: 'auto', context: null },
       config.write
@@ -161,10 +165,14 @@ export async function recordAutoLink(env: Env, projectId: string, input: LinkWri
   }
 }
 
-export async function removeLink(env: Env, projectId: string, input: LinkRemove): Promise<void> {
+export async function removeLink(
+  deps: OperationDeps,
+  projectId: string,
+  input: LinkRemove
+): Promise<void> {
   const [sourceId, targetId] = await Promise.all([
-    validateEntity(env, projectId, input.sourceKind, input.sourceId),
-    validateEntity(env, projectId, input.targetKind, input.targetId),
+    validateEntity(deps, projectId, input.sourceKind, input.sourceId),
+    validateEntity(deps, projectId, input.targetKind, input.targetId),
   ]);
-  await projectData.removeResourceLink(env, projectId, { ...input, sourceId, targetId });
+  await deps.ports.projectData.removeResourceLink(projectId, { ...input, sourceId, targetId });
 }

@@ -12,11 +12,7 @@ import * as v from 'valibot';
 
 import { isAgentMessageChannelName } from '../durable-objects/project-data/agent-message-notice';
 import { ProjectEventNotFoundError } from '../durable-objects/project-data/project-events-contracts';
-import { resolveProjectEventLimits } from '../durable-objects/project-data/project-events-limits';
 import { normalizeNullableText } from '../durable-objects/project-data/project-events-values';
-import { executeConnectorWrite } from '../services/connector-execution';
-import { getConnectorReadLimits } from '../services/connector-read-settings';
-import * as projectData from '../services/project-data';
 import { authorizeProjectOperation } from './authorization';
 import {
   ACKNOWLEDGMENT_NOTE,
@@ -68,7 +64,7 @@ export const samChannelsList = defineOperation({
     const after =
       !showDirect && skipsDirectRange(input.cursor) ? DIRECT_CHANNEL_RANGE_END : input.cursor;
     const page = await channelCall('Channel', () =>
-      projectData.listProjectEventChannels(ctx.env, input.projectId, {
+      ctx.ports.projectData.listProjectEventChannels(input.projectId, {
         after,
         limit: operationPageLimit(ctx, input.limit),
       })
@@ -110,9 +106,9 @@ export const samChannelHistory = defineOperation({
   async run(ctx, input) {
     await authorizeProjectOperation(ctx, input.projectId);
     const channel = requireChannelName(ctx, input.channel, input.includeDirect === true);
-    const limits = await getConnectorReadLimits(ctx.env);
+    const limits = await ctx.ports.settings.connectorReadLimits();
     const history = await channelCall('Channel', () =>
-      projectData.getProjectEventChannelHistory(ctx.env, input.projectId, {
+      ctx.ports.projectData.getProjectEventChannelHistory(input.projectId, {
         channel,
         cursor: input.cursor,
         limit: operationPageLimit(ctx, input.limit ?? limits.channelHistoryPageSize),
@@ -153,7 +149,7 @@ export const samChannelHistory = defineOperation({
 /** Catalog metadata for one channel, or null when nobody has posted or its posts expired. */
 async function channelMetadata(ctx: OperationContext, projectId: string, channel: string) {
   try {
-    const history = await projectData.getProjectEventChannelHistory(ctx.env, projectId, {
+    const history = await ctx.ports.projectData.getProjectEventChannelHistory(projectId, {
       channel,
       limit: 1,
     });
@@ -181,7 +177,7 @@ export const samChannelGet = defineOperation({
   async run(ctx, input) {
     await authorizeProjectOperation(ctx, input.projectId);
     const channel = requireChannelName(ctx, input.channel, input.includeDirect === true);
-    const limits = await getConnectorReadLimits(ctx.env);
+    const limits = await ctx.ports.settings.connectorReadLimits();
     const [catalog, roster, subscribers] = await Promise.all([
       channelMetadata(ctx, input.projectId, channel),
       channelRoster(
@@ -192,7 +188,7 @@ export const samChannelGet = defineOperation({
         getPlatformOperationLimits(ctx.env).ideaTitleMaxLength
       ),
       channelCall('Channel', () =>
-        projectData.listProjectEventChannelSubscribers(ctx.env, input.projectId, {
+        ctx.ports.projectData.listProjectEventChannelSubscribers(input.projectId, {
           channel,
           state: input.subscriberState ?? 'active',
           cursor: input.subscriberCursor,
@@ -245,13 +241,13 @@ export const samChannelSubscriptionCancel = defineOperation({
       reason = normalizeNullableText(
         input.reason ?? 'Cancelled by user through Connector',
         'reason',
-        resolveProjectEventLimits(ctx.env).maxReasonBytes
+        ctx.ports.config.projectEventLimits().maxReasonBytes
       );
     } catch (error) {
       rethrowChannelError(error, 'Event subscription');
     }
     const subscription = await channelCall('Event subscription', () =>
-      projectData.getProjectEventSubscription(ctx.env, input.projectId, {
+      ctx.ports.projectData.getProjectEventSubscription(input.projectId, {
         subscriptionId: input.subscriptionId,
       })
     );
@@ -273,7 +269,7 @@ export const samChannelSubscriptionCancel = defineOperation({
         ? operationLink(ctx, input.projectId, ownerChatSessionId)
         : channelsPageLink(ctx, input.projectId),
     });
-    return executeConnectorWrite(
+    return ctx.ports.connector.executeWrite(
       { ...ctx, idempotencyKey: ctx.idempotencyKey ?? input.requestKey },
       'sam_channel_subscription_cancel',
       input,
@@ -283,7 +279,7 @@ export const samChannelSubscriptionCancel = defineOperation({
         if (effectiveSubscriptionState(subscription) !== 'active')
           return outcome(subscription, false);
         const result = await channelCall('Event subscription', () =>
-          projectData.cancelProjectEventSubscription(ctx.env, input.projectId, {
+          ctx.ports.projectData.cancelProjectEventSubscription(input.projectId, {
             subscriptionId: subscription.id,
             cancelledBy: { type: 'human', id: ctx.actor.userId },
             reason,

@@ -214,7 +214,7 @@ describe('POST /tasks/submit with sourceIdeaId', () => {
         sourceIdeaId: 'idea-open',
       });
       expect(response.status).toBe(202);
-      expect(mocks.recordLink).toHaveBeenCalledWith(env, 'project-1', {
+      expect(mocks.recordLink).toHaveBeenCalledWith(expect.objectContaining({ env }), 'project-1', {
         sourceKind: 'session',
         sourceId: 'session-1',
         targetKind: 'idea',

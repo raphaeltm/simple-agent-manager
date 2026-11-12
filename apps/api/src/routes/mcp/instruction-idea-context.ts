@@ -15,6 +15,7 @@ import type { LinkRelation } from '@simple-agent-manager/shared';
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { operationDeps } from '../../operation-ports';
 import { listLinks } from '../../operations/link-core';
 import {
   neutralizeUntrustedText,
@@ -55,7 +56,7 @@ export async function resolveInstructionIdeaContext(
   projectId: string,
   chatSessionId: string
 ): Promise<InstructionIdeaContext | null> {
-  const links = (await listLinks(env, projectId, 'session', chatSessionId)).filter(
+  const links = (await listLinks(operationDeps(env), projectId, 'session', chatSessionId)).filter(
     (link) =>
       link.sourceKind === 'session' &&
       link.sourceId === chatSessionId &&

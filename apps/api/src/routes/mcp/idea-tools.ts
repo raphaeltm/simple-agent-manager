@@ -4,9 +4,9 @@
  * list_ideas, search_ideas).
  */
 import type { Env } from '../../env';
+import { operationDeps } from '../../operation-ports';
 import { ideaTaskPredicateSql } from '../../operations/idea-identity';
 import { listLinks, recordLink, removeLink } from '../../operations/link-core';
-import { runWorkspaceOperation } from '../../operations/workspace-adapter';
 import {
   getMcpLimits,
   INVALID_PARAMS,
@@ -17,6 +17,7 @@ import {
   resolveSessionId,
   sanitizeUserInput,
 } from './_helpers';
+import { runWorkspaceOperation } from './workspace-operation-adapter';
 
 export async function handleLinkIdea(
   requestId: string | number | null,
@@ -56,7 +57,7 @@ export async function handleLinkIdea(
     return jsonRpcError(requestId, INVALID_PARAMS, `Idea not found in this project: ${taskId}`);
   }
 
-  await recordLink(env, tokenData.projectId, {
+  await recordLink(operationDeps(env), tokenData.projectId, {
     sourceKind: 'session',
     sourceId: sessionId,
     targetKind: 'idea',
@@ -106,7 +107,7 @@ export async function handleUnlinkIdea(
     );
   }
 
-  await removeLink(env, tokenData.projectId, {
+  await removeLink(operationDeps(env), tokenData.projectId, {
     sourceKind: 'session',
     sourceId: sessionId,
     targetKind: 'idea',
@@ -139,7 +140,7 @@ export async function handleListLinkedIdeas(
     );
   }
 
-  const links = (await listLinks(env, tokenData.projectId, 'session', sessionId))
+  const links = (await listLinks(operationDeps(env), tokenData.projectId, 'session', sessionId))
     .filter((l) => l.sourceKind === 'session' && l.targetKind === 'idea')
     .filter(
       (link, index, all) =>

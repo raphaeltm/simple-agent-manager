@@ -5,6 +5,7 @@ import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
+import { createOperationPorts } from '../../../src/operation-ports';
 import {
   ensurePullRequest,
   getPullRequestStates,
@@ -25,6 +26,7 @@ describe('pull request state refresh', () => {
   const url = (number: number) => `https://github.com/${repo}/pull/${number}`;
   const context = (jobs?: Promise<void>[]): OperationContext => ({
     env,
+    ports: createOperationPorts(env),
     actor: { userId: 'user', via: 'web', scopes: new Set(['sam.read']) },
     requestId: 'test',
     ...(jobs

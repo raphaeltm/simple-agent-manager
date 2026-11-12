@@ -1,8 +1,8 @@
 import { DEFAULT_IDEA_TITLE_MAX_LENGTH } from '@simple-agent-manager/shared';
 
-import type { Env } from '../env';
 import { DEFAULT_IDEA_CONTENT_MAX_LENGTH } from '../lib/idea-content-limit';
 import { parsePositiveInt } from '../lib/route-helpers';
+import type { OperationsEnv } from './env';
 import { OperationError } from './errors';
 
 export function clampOperationNumber(
@@ -17,7 +17,7 @@ export function clampOperationNumber(
 }
 
 /** Limits shared by the operations and their workspace adapter. */
-export function getPlatformOperationLimits(env: Env) {
+export function getPlatformOperationLimits(env: OperationsEnv) {
   return {
     taskListLimit: parsePositiveInt(env.MCP_TASK_LIST_LIMIT, 10),
     taskListMax: parsePositiveInt(env.MCP_TASK_LIST_MAX, 50),

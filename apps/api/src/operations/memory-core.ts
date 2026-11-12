@@ -1,10 +1,6 @@
 import { KNOWLEDGE_ENTITY_TYPES, type KnowledgeEntityType } from '@simple-agent-manager/shared';
-import { drizzle } from 'drizzle-orm/d1';
 
-import * as schema from '../db/schema';
 import { normalizeSearchQuery } from '../lib/search-query-limits';
-import * as agentProfileService from '../services/agent-profiles';
-import * as projectDataService from '../services/project-data';
 import { operationLink, operationPageLimit } from './connector-read-core';
 import { OperationError } from './errors';
 import { getPlatformOperationLimits } from './limits';
@@ -59,8 +55,7 @@ export async function searchKnowledge(
     limit = Math.min(Math.max(1, Math.round(input.limit)), limits.knowledgeSearchLimit);
   }
   try {
-    const results = await projectDataService.searchKnowledgeObservations(
-      ctx.env,
+    const results = await ctx.ports.projectData.searchKnowledgeObservations(
       input.projectId,
       normalizedQuery.query,
       entityType,
@@ -81,10 +76,9 @@ export async function listProfiles(
   projectId: string,
   input: { limit?: number; cursor?: string; query?: string } = {}
 ) {
-  const db = drizzle(ctx.env.DATABASE, { schema });
   let profiles;
   try {
-    profiles = await agentProfileService.listProfiles(db, projectId, ctx.actor.userId, ctx.env);
+    profiles = await ctx.ports.account.listProfiles(projectId, ctx.actor.userId);
   } catch (error) {
     const status = (error as { statusCode?: number }).statusCode;
     if (status === 400 || status === 403 || status === 409) {

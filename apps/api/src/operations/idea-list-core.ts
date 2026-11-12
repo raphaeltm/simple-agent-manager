@@ -35,7 +35,6 @@ import type { LinkRelation } from '@simple-agent-manager/shared';
 
 import type { IdeaWorkSnapshot } from '../durable-objects/project-data/idea-work';
 import { log } from '../lib/logger';
-import * as projectDataService from '../services/project-data';
 import { OperationError } from './errors';
 import {
   DEFAULT_IDEA_LIST_CLOSED_LIMIT,
@@ -163,12 +162,11 @@ async function collectEvidence(
   if (rows.length === 0) return { evidence, snapshots: {} };
 
   const [caps, repository] = await Promise.all([
-    resolveResourceLinkBatchCaps(ctx.env),
+    resolveResourceLinkBatchCaps(ctx),
     readProjectRepository(ctx, projectId),
   ]);
 
-  const snapshots = await projectDataService.getIdeaWorkSnapshots(
-    ctx.env,
+  const snapshots = await ctx.ports.projectData.getIdeaWorkSnapshots(
     projectId,
     rows.map((row) => row.id),
     caps

@@ -4,18 +4,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as v from 'valibot';
 
 import * as schema from '../db/schema';
-import { answerAgentInteraction } from '../routes/chat-acp-interactions';
-import { answerAttention } from '../routes/chat-attention';
-import { stopChat } from '../routes/chat-stop';
-import { cancelTask } from '../services/cancel-task';
-import {
-  ConnectorAnswerFields,
-  prepareConnectorAgentAnswer,
-} from '../services/connector-agent-answer';
-import { executeConnectorWrite } from '../services/connector-execution';
-import { authorizeSendChat, sendChat, validateSendChatContent } from '../services/send-chat';
-import { requireSessionWriter } from '../services/session-access';
-import { submitTask } from '../services/submit-task';
+import { ConnectorAnswerFields } from '../services/connector-agent-answer';
 import { canTransitionTaskStatus, isTaskStatus } from '../services/task-status';
 import { authorizeProjectOperation } from './authorization';
 import {
@@ -26,6 +15,7 @@ import {
   projectsList,
 } from './connector-read-core';
 import { OperationError } from './errors';
+import type { OperationConnectorPort } from './ports';
 import { defineOperation } from './types';
 
 const id = v.pipe(v.string(), v.minLength(1));
@@ -101,9 +91,8 @@ export const samChatStart = defineOperation({
     if (!user) throw new OperationError('not_found', 'User not found');
     const execCtx = ctx.execCtx;
     if (!execCtx) throw new OperationError('unavailable', 'Task execution context is required');
-    return executeConnectorWrite(ctx, 'sam_chat_start', input, async () => {
-      const result = await submitTask(
-        ctx.env,
+    return ctx.ports.connector.executeWrite(ctx, 'sam_chat_start', input, async () => {
+      const result = await ctx.ports.tasks.submit(
         { ...user, name: user.name ?? '', email: user.email ?? '' },
         input.projectId,
         input,
@@ -127,19 +116,17 @@ export const samChatSend = defineOperation({
   input: v.object({ ...session, content: v.pipe(v.string(), v.minLength(1)), requestKey }),
   async run(ctx, input) {
     await authorizeProjectOperation(ctx, input.projectId, 'task:write');
-    const authorized = await authorizeSendChat(
-      ctx.env,
+    const authorized = await ctx.ports.chat.authorizeSend(
       ctx.actor.userId,
       input.projectId,
       input.sessionId
     );
-    return executeConnectorWrite(
+    return ctx.ports.connector.executeWrite(
       ctx,
       'sam_chat_send',
       input,
       async () => ({
-        ...(await sendChat(
-          ctx.env,
+        ...(await ctx.ports.chat.send(
           ctx.actor.userId,
           input.projectId,
           input.sessionId,
@@ -150,7 +137,7 @@ export const samChatSend = defineOperation({
         link: operationLink(ctx, input.projectId, input.sessionId),
       }),
       async () => {
-        validateSendChatContent({ content: input.content });
+        ctx.ports.chat.validateSendContent({ content: input.content });
       }
     );
   },
@@ -171,9 +158,14 @@ export const samAgentAnswer = defineOperation({
   }),
   async run(ctx, input) {
     await authorizeProjectOperation(ctx, input.projectId, 'task:write');
-    await requireSessionWriter(ctx.env, input.projectId, input.sessionId, ctx.actor.userId, {
-      action: 'answer the agent in this session',
-    });
+    await ctx.ports.access.requireSessionWriter(
+      input.projectId,
+      input.sessionId,
+      ctx.actor.userId,
+      {
+        action: 'answer the agent in this session',
+      }
+    );
     if (!!input.interactionId === !!input.markerId)
       throw new OperationError('invalid_input', 'Supply exactly one interactionId or markerId');
     if (
@@ -187,15 +179,14 @@ export const samAgentAnswer = defineOperation({
         'invalid_input',
         'An attention request requires answer and no interaction choice'
       );
-    let prepared: Awaited<ReturnType<typeof prepareConnectorAgentAnswer>> | undefined;
-    return executeConnectorWrite(
+    let prepared: Awaited<ReturnType<OperationConnectorPort['prepareAgentAnswer']>> | undefined;
+    return ctx.ports.connector.executeWrite(
       ctx,
       'sam_agent_answer',
       input,
       async () => {
         if (input.interactionId && prepared)
-          return answerAgentInteraction(
-            ctx.env,
+          return ctx.ports.chat.answerAgentInteraction(
             ctx.actor.userId,
             input.projectId,
             input.sessionId,
@@ -203,8 +194,7 @@ export const samAgentAnswer = defineOperation({
             prepared
           );
         if (input.markerId && input.answer)
-          return answerAttention(
-            ctx.env,
+          return ctx.ports.chat.answerAttention(
             ctx.actor.userId,
             input.projectId,
             input.sessionId,
@@ -218,8 +208,7 @@ export const samAgentAnswer = defineOperation({
       },
       async () => {
         if (input.interactionId)
-          prepared = await prepareConnectorAgentAnswer(
-            ctx.env,
+          prepared = await ctx.ports.connector.prepareAgentAnswer(
             input.projectId,
             input.sessionId,
             input.interactionId,
@@ -262,8 +251,8 @@ export const samWorkStop = defineOperation({
           task.status === 'completed' || task.status === 'cancelled' || task.status === 'failed';
         if (!terminal && !canTransitionTaskStatus(task.status, 'cancelled'))
           throw new OperationError('conflict', 'Task cannot be cancelled in its current state');
-        return executeConnectorWrite(ctx, 'sam_work_stop', input, async () => {
-          const updated = await cancelTask(ctx.env, db, task, ctx.actor.userId, {
+        return ctx.ports.connector.executeWrite(ctx, 'sam_work_stop', input, async () => {
+          const updated = await ctx.ports.tasks.cancel(task, ctx.actor.userId, {
             reason: 'Stopped by user through Connector',
             source: 'connector.work_stop',
             requireStopAcknowledgement: ctx.actor.via === 'sam',
@@ -285,12 +274,12 @@ export const samWorkStop = defineOperation({
       }
     }
     if (!sessionId) throw new OperationError('not_found', 'Task chat session not found');
-    await requireSessionWriter(ctx.env, input.projectId, sessionId, ctx.actor.userId, {
+    await ctx.ports.access.requireSessionWriter(input.projectId, sessionId, ctx.actor.userId, {
       action: 'stop work in this session',
     });
     const target = sessionId;
-    return executeConnectorWrite(ctx, 'sam_work_stop', input, () =>
-      stopChat(ctx.env, ctx.actor.userId, input.projectId, target, ctx.assertEffectAllowed, {
+    return ctx.ports.connector.executeWrite(ctx, 'sam_work_stop', input, () =>
+      ctx.ports.chat.stop(ctx.actor.userId, input.projectId, target, ctx.assertEffectAllowed, {
         requireStopAcknowledgement: ctx.actor.via === 'sam',
       })
     );

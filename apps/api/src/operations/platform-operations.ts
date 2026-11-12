@@ -1,6 +1,5 @@
 import * as v from 'valibot';
 
-import { executeConnectorWrite } from '../services/connector-execution';
 import { getAgentLinkedContext } from './agent-linked-context';
 import { authorizeProjectOperation } from './authorization';
 import { readChat, searchChats } from './chat-core';
@@ -181,7 +180,7 @@ export const samIdeaCreate = defineOperation({
   async run(ctx, input) {
     await authorizeProjectOperation(ctx, input.projectId, 'task:write');
     let apply!: ReturnType<typeof prepareIdeaCreate>;
-    return executeConnectorWrite(
+    return ctx.ports.connector.executeWrite(
       ctx,
       'sam_idea_create',
       input,
@@ -213,7 +212,7 @@ export const samIdeaUpdate = defineOperation({
   async run(ctx, input) {
     await authorizeProjectOperation(ctx, input.projectId, 'task:write');
     let apply!: Awaited<ReturnType<typeof prepareIdeaUpdate>>;
-    return executeConnectorWrite(
+    return ctx.ports.connector.executeWrite(
       ctx,
       'sam_idea_update',
       input,

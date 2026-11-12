@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
+import { createOperationPorts } from '../../../src/operation-ports';
 import { OperationError } from '../../../src/operations/errors';
 import { updateIdea } from '../../../src/operations/idea-core';
 import {
@@ -118,9 +119,11 @@ describe('applyIdeaStatusTransition', () => {
   beforeEach(() => {
     sqlite = new Database(':memory:');
     createAllSchemaTables(sqlite, schema);
+    // `update_idea` builds a link back to the idea, so it needs the app's domain.
+    const env = { DATABASE: createSqliteD1(sqlite), BASE_DOMAIN: 'example.test' } as unknown as Env;
     ctx = {
-      // `update_idea` builds a link back to the idea, so it needs the app's domain.
-      env: { DATABASE: createSqliteD1(sqlite), BASE_DOMAIN: 'example.test' } as unknown as Env,
+      env,
+      ports: createOperationPorts(env),
       requestId: 'test',
       actor: { userId: USER, via: 'web', scopes: new Set(['sam.read', 'sam.write']) },
     };

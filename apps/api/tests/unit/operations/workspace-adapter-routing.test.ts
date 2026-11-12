@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Env } from '../../../src/env';
 import { OperationError } from '../../../src/operations/errors';
 import * as platform from '../../../src/operations/platform-operations';
-import { runWorkspaceOperation } from '../../../src/operations/workspace-adapter';
+import { runWorkspaceOperation } from '../../../src/routes/mcp/workspace-operation-adapter';
 import type { McpTokenData } from '../../../src/services/mcp-token';
 
 // Catalog order is not part of the workspace tool contract.

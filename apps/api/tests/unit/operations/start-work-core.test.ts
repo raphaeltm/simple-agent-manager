@@ -13,6 +13,7 @@ vi.mock('../../../src/operations/link-core', () => ({ recordLink: recordLinkMock
 
 import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
+import { operationDeps } from '../../../src/operation-ports';
 import { ideaTaskPredicateSql } from '../../../src/operations/idea-identity';
 import {
   classifyWorkStartIdea,
@@ -127,9 +128,7 @@ describe('requireOpenIdeaForWorkStart', () => {
         expect(await statusOf(requireOpenIdeaForWorkStart(env, 'own', id))).toBe(404);
         // The 409 wording must not be reachable from a non-idea at all, not merely a 404 that
         // happens to carry it.
-        await expect(requireOpenIdeaForWorkStart(env, 'own', id)).rejects.not.toThrow(
-          /Reopen it/i
-        );
+        await expect(requireOpenIdeaForWorkStart(env, 'own', id)).rejects.not.toThrow(/Reopen it/i);
       }
       /*
        * The owner controls. A real done idea still gets its actionable 409, and an open idea
@@ -252,12 +251,12 @@ describe('recordWorkStartIdeaLink', () => {
   });
 
   it('records works_on for task work', async () => {
-    await recordWorkStartIdeaLink(env, 'own', {
+    await recordWorkStartIdeaLink(operationDeps(env), 'own', {
       ideaId: 'idea-open',
       sessionId: 'sess-1',
       taskMode: 'task',
     });
-    expect(recordLinkMock).toHaveBeenCalledWith(env, 'own', {
+    expect(recordLinkMock).toHaveBeenCalledWith(expect.objectContaining({ env }), 'own', {
       sourceKind: 'session',
       sourceId: 'sess-1',
       targetKind: 'idea',
@@ -269,7 +268,7 @@ describe('recordWorkStartIdeaLink', () => {
   });
 
   it('records discusses for a conversation', async () => {
-    await recordWorkStartIdeaLink(env, 'own', {
+    await recordWorkStartIdeaLink(operationDeps(env), 'own', {
       ideaId: 'idea-open',
       sessionId: 'sess-1',
       taskMode: 'conversation',
@@ -282,7 +281,7 @@ describe('recordWorkStartIdeaLink', () => {
   it('throws a clear error when the link write fails', async () => {
     recordLinkMock.mockImplementation(() => Promise.reject(new Error('DO unavailable')));
     await expect(
-      recordWorkStartIdeaLink(env, 'own', {
+      recordWorkStartIdeaLink(operationDeps(env), 'own', {
         ideaId: 'idea-open',
         sessionId: 'sess-1',
         taskMode: 'task',

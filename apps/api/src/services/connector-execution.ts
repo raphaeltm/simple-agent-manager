@@ -6,6 +6,9 @@ import { AppError } from '../middleware/error';
 import { OperationError } from '../operations/errors';
 import { scheduleCreateStartsWork } from '../operations/schedule-inputs';
 import type { OperationContext } from '../operations/types';
+
+/** The parts of an operation context a connector write reads, with the full worker env. */
+export type ConnectorWriteContext = Omit<OperationContext, 'env' | 'ports'> & { env: Env };
 import { operationReceiptId } from './cli-operation-receipts';
 import { getConnectorSettings } from './connector-settings';
 import { recordActivityEvent } from './project-data';
@@ -63,7 +66,7 @@ function safeId(value: unknown): string | null {
 /** Called inside an operation, after its current resource/capability checks.
  * An uncertain write stays reserved forever rather than provisioning twice. */
 export async function executeConnectorWrite<T>(
-  ctx: OperationContext,
+  ctx: ConnectorWriteContext,
   operation: string,
   input: Record<string, unknown>,
   run: () => Promise<T>,
@@ -267,7 +270,7 @@ function auditResourceId(value: unknown): string | null {
 /** Every write invocation, including denied requests and receipt replays, is audited.
  * Called by defineOperation before authority checks; no input values are retained. */
 export async function auditConnectorWrite<T>(
-  ctx: OperationContext,
+  ctx: ConnectorWriteContext,
   operation: string,
   rawInput: unknown,
   run: () => Promise<T>

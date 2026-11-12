@@ -18,6 +18,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
+import { operationDeps } from '../operation-ports';
 import { ideaTaskPredicateSql } from '../operations/idea-core';
 import { listLinksForTargets } from '../operations/link-core';
 import { resolveAdminSettingDetailsMany } from '../services/admin-settings';
@@ -284,7 +285,7 @@ accountMapRoutes.get('/', async (c) => {
     [...ideasByProject].map(async ([projectId, ideas]) => ({
       projectId,
       links: await listLinksForTargets(
-        c.env,
+        operationDeps(c.env),
         projectId,
         'idea',
         ideas.map((idea) => idea.id)

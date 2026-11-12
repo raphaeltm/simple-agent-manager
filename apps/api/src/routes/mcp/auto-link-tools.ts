@@ -1,6 +1,7 @@
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { expectJsonRecord } from '../../lib/runtime-validation';
+import { operationDeps } from '../../operation-ports';
 import { recordAutoLink } from '../../operations/link-core';
 import { type JsonRpcResponse, type McpTokenData, resolveSessionId } from './_helpers';
 
@@ -56,7 +57,7 @@ export function scheduleToolAutoLink(
       try {
         const sessionId = await resolveSessionId(env, token.workspaceId);
         if (!sessionId) return;
-        await recordAutoLink(env, token.projectId, {
+        await recordAutoLink(operationDeps(env), token.projectId, {
           sourceKind: 'session',
           sourceId: sessionId,
           targetKind: target[0],

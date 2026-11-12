@@ -7,6 +7,7 @@ import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { markRejectedBeforeEffects } from '../../../src/lib/operation-effect-boundary';
 import { AppError } from '../../../src/middleware/error';
+import { createOperationPorts } from '../../../src/operation-ports';
 import {
   samAgentAnswer,
   samChatSend,
@@ -92,6 +93,7 @@ describe('connector operations current membership and creator authority', () => 
   function ctx(userId = 'owner'): OperationContext {
     return {
       env,
+      ports: createOperationPorts(env),
       actor: {
         userId,
         via: 'connector',

@@ -24,6 +24,7 @@ vi.mock('../../../src/services/admin-settings', () => ({
 import { MIGRATIONS } from '../../../src/durable-objects/migrations';
 import { getLinkSnapshot, recordLink } from '../../../src/durable-objects/project-data/links';
 import type { Env } from '../../../src/env';
+import { operationDeps } from '../../../src/operation-ports';
 import { getIdeaContext, getSessionContext } from '../../../src/operations/link-core';
 import { resolveAdminSettingDetailsMany } from '../../../src/services/admin-settings';
 import { createSqlStorage } from '../durable-objects/sql-storage-test-utils';
@@ -66,7 +67,7 @@ describe('idea linked context', () => {
         totals: { sessions: 0, strongSessions: 0, ideas: 0, files: 0, prs: 0 },
       });
       await expect(
-        getIdeaContext({ DATABASE: d1Database(db) } as Env, 'p', 'ordinary')
+        getIdeaContext(operationDeps({ DATABASE: d1Database(db) } as Env), 'p', 'ordinary')
       ).rejects.toThrow('Resource');
     } finally {
       db.close();
@@ -102,15 +103,15 @@ describe('idea linked context', () => {
       snapshot.mockResolvedValue(emptySnapshot);
 
       await expect(
-        getIdeaContext({ DATABASE: d1Database(db) } as Env, 'p', 'ordinary-draft')
+        getIdeaContext(operationDeps({ DATABASE: d1Database(db) } as Env), 'p', 'ordinary-draft')
       ).rejects.toThrow('Resource');
       // Owner controls: a draft idea and a FINISHED idea both still read. The finished one is
       // `completed`, which is otherwise an ordinary done task, so only the flag identifies it.
       await expect(
-        getIdeaContext({ DATABASE: d1Database(db) } as Env, 'p', 'real-idea')
+        getIdeaContext(operationDeps({ DATABASE: d1Database(db) } as Env), 'p', 'real-idea')
       ).resolves.toMatchObject({ sessions: { items: [] } });
       await expect(
-        getIdeaContext({ DATABASE: d1Database(db) } as Env, 'p', 'done-idea')
+        getIdeaContext(operationDeps({ DATABASE: d1Database(db) } as Env), 'p', 'done-idea')
       ).resolves.toMatchObject({ sessions: { items: [] } });
     } finally {
       snapshot.mockReset();
@@ -173,7 +174,11 @@ describe('idea linked context', () => {
           getLinkSnapshot(sql, kind, id, cap)
       );
 
-      const context = await getSessionContext({ DATABASE: d1Database(db) } as Env, 'p', 's1');
+      const context = await getSessionContext(
+        operationDeps({ DATABASE: d1Database(db) } as Env),
+        'p',
+        's1'
+      );
       expect(context.ideas.items.map((idea) => idea.ideaId)).toEqual(['shipped-idea']);
       expect(context.ideas.items[0]?.status).toBe('completed');
     } finally {
@@ -221,7 +226,11 @@ describe('idea linked context', () => {
         { value: 150 },
         { value: 500 },
       ] as never);
-      const context = await getIdeaContext({ DATABASE: d1Database(db) } as Env, 'p', 'idea1');
+      const context = await getIdeaContext(
+        operationDeps({ DATABASE: d1Database(db) } as Env),
+        'p',
+        'idea1'
+      );
       expect(context.files.items).toHaveLength(120);
       expect(context.files.total).toBe(120);
     } finally {
@@ -324,7 +333,11 @@ describe('idea linked context', () => {
         stale: false,
       };
       prStates.mockResolvedValue({ 'https://github.com/o/r/pull/1': prState });
-      const context = await getIdeaContext({ DATABASE: d1Database(db) } as Env, 'p', 'idea1');
+      const context = await getIdeaContext(
+        operationDeps({ DATABASE: d1Database(db) } as Env),
+        'p',
+        'idea1'
+      );
       expect(context.sessions.total).toBe(2);
       expect(context.sessions.truncated).toBe(true);
       expect(context.files.total).toBe(2);
@@ -338,13 +351,17 @@ describe('idea linked context', () => {
         [expect.objectContaining({ url: 'https://github.com/o/r/pull/1' })]
       );
       const sessionContext = await getSessionContext(
-        { DATABASE: d1Database(db) } as Env,
+        operationDeps({ DATABASE: d1Database(db) } as Env),
         'p',
         's1'
       );
       expect(sessionContext.pullRequests.items[0]?.state).toEqual(prState);
       prStates.mockRejectedValueOnce(new Error('D1 unavailable'));
-      const degraded = await getIdeaContext({ DATABASE: d1Database(db) } as Env, 'p', 'idea1');
+      const degraded = await getIdeaContext(
+        operationDeps({ DATABASE: d1Database(db) } as Env),
+        'p',
+        'idea1'
+      );
       expect(degraded.pullRequests.items[0]?.state).toBeNull();
       expect(context.pullRequests.total).toBe(1);
       expect(context.pullRequests.totalIsLowerBound).toBe(false);
@@ -360,7 +377,7 @@ describe('idea linked context', () => {
         { value: 500 },
       ] as never);
       const allRelatedRows = await getIdeaContext(
-        { DATABASE: d1Database(db) } as Env,
+        operationDeps({ DATABASE: d1Database(db) } as Env),
         'p',
         'idea1'
       );
@@ -371,7 +388,11 @@ describe('idea linked context', () => {
       db.exec(`INSERT INTO tasks VALUES
         ('t3','p','Task 3','in_progress',0,'s3','https://github.com/o/r/pull/3')`);
       add('session', 's3', 'idea', 'idea1', 'works_on', 1);
-      const incomplete = await getIdeaContext({ DATABASE: d1Database(db) } as Env, 'p', 'idea1');
+      const incomplete = await getIdeaContext(
+        operationDeps({ DATABASE: d1Database(db) } as Env),
+        'p',
+        'idea1'
+      );
       expect(incomplete.pullRequests.totalIsLowerBound).toBe(true);
       expect(incomplete.pullRequests.truncated).toBe(true);
       expect(incomplete.pullRequests.total).toBe(1);

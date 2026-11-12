@@ -6,6 +6,7 @@ import * as v from 'valibot';
 
 import type { Env } from '../../../env';
 import { requireProjectCapability } from '../../../middleware/project-auth';
+import { createOperationPorts } from '../../../operation-ports';
 import { authorizeProjectOperation } from '../../../operations/authorization';
 import { operations } from '../../../operations/registry';
 import type { OperationContext } from '../../../operations/types';
@@ -164,6 +165,7 @@ export async function operatorTools(options: {
               assertCurrent();
               const context: OperationContext = {
                 env,
+                ports: createOperationPorts(env),
                 actor: { userId, via: 'sam', scopes: new Set(['sam.read', 'sam.write']) },
                 requestId: actionId,
                 idempotencyKey: actionId,

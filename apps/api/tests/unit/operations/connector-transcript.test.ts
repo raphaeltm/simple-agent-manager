@@ -6,6 +6,7 @@ import { readLogicalTranscriptPage } from '../../../src/durable-objects/project-
 import type { MessageContextReader } from '../../../src/durable-objects/project-data/message-context';
 import { formatMessageRows, getMessages } from '../../../src/durable-objects/project-data/messages';
 import type { Env } from '../../../src/env';
+import { createOperationPorts } from '../../../src/operation-ports';
 import { readChat, searchChats } from '../../../src/operations/chat-core';
 import { readChatMessage } from '../../../src/operations/chat-transcript';
 import { responseBytes, resultByteBudget } from '../../../src/operations/response-budget';
@@ -41,9 +42,14 @@ vi.mock('../../../src/services/connector-read-settings', async (importOriginal) 
 
 let db: Database.Database;
 const env = { BASE_DOMAIN: 'example.test' } as Env;
-const ctx = { env, actor: { via: 'connector', userId: 'owner' } } as OperationContext;
+const ctx = {
+  env,
+  ports: createOperationPorts(env),
+  actor: { via: 'connector', userId: 'owner' },
+} as OperationContext;
 const agentCtx = {
   env,
+  ports: createOperationPorts(env),
   actor: { via: 'workspace-agent', userId: 'owner' },
 } as OperationContext;
 
@@ -324,7 +330,11 @@ describe('Connector transcript against actual SQLite message ordering', () => {
       ]);
       // A quarter of the result budget goes to each latest message that is not on the page.
       const small = { ...env, CONNECTOR_RESPONSE_MAX_BYTES: '8000' } as Env;
-      const smallCtx = { ...ctx, env: small } as OperationContext;
+      const smallCtx = {
+        ...ctx,
+        env: small,
+        ports: createOperationPorts(small),
+      } as OperationContext;
 
       const result = await readChat(smallCtx, {
         projectId: 'project',
@@ -364,7 +374,11 @@ describe('Connector transcript against actual SQLite message ordering', () => {
         const replies = Array.from({ length: count }, (_, index) => reply(index));
         seed(replies.map((text): [string, string] => ['user', text]));
         const small = { ...env, CONNECTOR_RESPONSE_MAX_BYTES: String(cap) } as Env;
-        const smallCtx = { ...ctx, env: small } as OperationContext;
+        const smallCtx = {
+          ...ctx,
+          env: small,
+          ports: createOperationPorts(small),
+        } as OperationContext;
         const seen: string[] = [];
         let cursor: string | undefined;
         let trimmedOnce = false;
@@ -460,10 +474,13 @@ describe('Connector transcript against actual SQLite message ordering', () => {
       } as never);
       const small = { ...env, CONNECTOR_RESPONSE_MAX_BYTES: '30000' } as Env;
 
-      const result = await searchChats({ ...ctx, env: small } as OperationContext, {
-        projectId: 'project',
-        query: 'audit',
-      });
+      const result = await searchChats(
+        { ...ctx, env: small, ports: createOperationPorts(small) } as OperationContext,
+        {
+          projectId: 'project',
+          query: 'audit',
+        }
+      );
 
       expect(envelopeBytes(result)).toBeLessThanOrEqual(30_000);
       const kept = result.results.filter((row) => 'excerpt' in row).length;

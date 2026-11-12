@@ -5,13 +5,13 @@
  * JSON escaped once more, where a quote or backslash costs 4 bytes instead of 2. Results are
  * therefore measured the way that check counts them, never by characters alone.
  */
-import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { utf8ByteLength } from '../lib/utf8';
 import {
   DEFAULT_CONNECTOR_RESPONSE_MAX_BYTES,
   MIN_CONNECTOR_RESPONSE_MAX_BYTES,
 } from '../services/connector-limits';
+import type { OperationsEnv } from './env';
 
 /** Share of the response cap a result may use; the rest is the adapter's own framing. */
 const RESULT_SHARE_OF_RESPONSE_CAP = 0.9;
@@ -26,7 +26,7 @@ export function responseBytes(value: unknown): number {
 }
 
 /** Response bytes one result may use. */
-export function resultByteBudget(env: Env): number {
+export function resultByteBudget(env: OperationsEnv): number {
   const cap = Math.max(
     MIN_CONNECTOR_RESPONSE_MAX_BYTES,
     parsePositiveInt(env.CONNECTOR_RESPONSE_MAX_BYTES, DEFAULT_CONNECTOR_RESPONSE_MAX_BYTES)

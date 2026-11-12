@@ -8,6 +8,7 @@ import * as v from 'valibot';
 import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { AppError } from '../middleware/error';
+import { createOperationPorts } from '../operation-ports';
 import { OperationError, operationErrorHttpStatus } from '../operations/errors';
 import { operations } from '../operations/registry';
 import type { Operation, OperationContext } from '../operations/types';
@@ -335,6 +336,7 @@ connectorMcpRoutes.all('/', async (c) => {
   }
   const ctx: OperationContext = {
     env: c.env,
+    ports: createOperationPorts(c.env),
     actor,
     connectorSettings: settings,
     requestId: crypto.randomUUID(),

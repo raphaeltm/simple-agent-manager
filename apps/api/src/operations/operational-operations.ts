@@ -1,11 +1,5 @@
 import * as v from 'valibot';
 
-import { interruptChat } from '../routes/chat-cancel';
-import { snapshotInteractions } from '../services/acp-interaction-store';
-import { connectorPendingInteractions } from '../services/connector-agent-answer';
-import { executeConnectorWrite } from '../services/connector-execution';
-import * as projectData from '../services/project-data';
-import { requireSessionWriter } from '../services/session-access';
 import { pendingAttention } from './attention-core';
 import { authorizeProjectOperation } from './authorization';
 import { OperationError } from './errors';
@@ -33,16 +27,20 @@ export const samChatInterrupt = defineOperation({
   async run(ctx, input) {
     await authorizeProjectOperation(ctx, input.projectId, 'task:write');
     // Check current writer authority even on a receipt replay.
-    await requireSessionWriter(ctx.env, input.projectId, input.sessionId, ctx.actor.userId, {
-      action: 'interrupt this session',
-    });
-    return executeConnectorWrite(
+    await ctx.ports.access.requireSessionWriter(
+      input.projectId,
+      input.sessionId,
+      ctx.actor.userId,
+      {
+        action: 'interrupt this session',
+      }
+    );
+    return ctx.ports.connector.executeWrite(
       { ...ctx, idempotencyKey: ctx.idempotencyKey ?? input.requestKey },
       'sam_chat_interrupt',
       input,
       () =>
-        interruptChat(
-          ctx.env,
+        ctx.ports.chat.interrupt(
           ctx.actor.userId,
           input.projectId,
           input.sessionId,
@@ -70,7 +68,7 @@ export const samChatDeliveryGet = defineOperation({
   input: v.object({ ...session, deliveryId: id }),
   async run(ctx, input) {
     await operationalSession(ctx, input.projectId, input.sessionId);
-    const m = await projectData.getMailboxMessage(ctx.env, input.projectId, input.deliveryId);
+    const m = await ctx.ports.projectData.getMailboxMessage(input.projectId, input.deliveryId);
     if (!m || m.targetSessionId !== input.sessionId)
       throw new OperationError('not_found', 'Delivery not found in this session');
     return deliveryProjection({ ...m });
@@ -86,9 +84,9 @@ export const samChatInteractions = defineOperation({
   async run(ctx, input) {
     await operationalSession(ctx, input.projectId, input.sessionId);
     const [snapshot, pending, attention] = await Promise.all([
-      snapshotInteractions(ctx.env, input.projectId, input.sessionId, input.cursor ?? null),
-      connectorPendingInteractions(ctx.env, input.projectId, input.sessionId),
-      pendingAttention(ctx.env, input.projectId, input.sessionId),
+      ctx.ports.chat.snapshotInteractions(input.projectId, input.sessionId, input.cursor ?? null),
+      ctx.ports.connector.pendingInteractions(input.projectId, input.sessionId),
+      pendingAttention(ctx, input.projectId, input.sessionId),
     ]);
     return {
       pending,
@@ -117,8 +115,8 @@ export const samWorkChanges = defineOperation({
   async run(ctx, input) {
     const status = await chatStatus(ctx, input.projectId, input.sessionId);
     const [interactions, attention] = await Promise.all([
-      snapshotInteractions(ctx.env, input.projectId, input.sessionId),
-      pendingAttention(ctx.env, input.projectId, input.sessionId),
+      ctx.ports.chat.snapshotInteractions(input.projectId, input.sessionId),
+      pendingAttention(ctx, input.projectId, input.sessionId),
     ]);
     const summary = {
       ...status,

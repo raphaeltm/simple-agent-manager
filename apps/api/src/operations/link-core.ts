@@ -14,21 +14,24 @@ import type {
 import { canonicalProjectPullRequestUrl, isStrongLinkRelation } from '@simple-agent-manager/shared';
 
 import type { ResourceLink } from '../durable-objects/project-data/links';
-import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { errors } from '../middleware/error';
-import { resolveAdminSettingDetailsMany } from '../services/admin-settings';
-import * as projectData from '../services/project-data';
 import { ideaTaskPredicateSql } from './idea-identity';
 import { limits, validateEntity } from './link-write';
 import { getPullRequestStates } from './pull-request-core';
+import type { OperationDeps } from './types';
 
 export { recordAutoLink, recordLink, removeLink } from './link-write';
 
-export async function listLinks(env: Env, projectId: string, kind: LinkKind, id: string) {
-  await validateEntity(env, projectId, kind, id);
-  const config = await limits(env);
-  return projectData.listResourceLinks(env, projectId, kind, id, config.listCap);
+export async function listLinks(
+  deps: OperationDeps,
+  projectId: string,
+  kind: LinkKind,
+  id: string
+) {
+  await validateEntity(deps, projectId, kind, id);
+  const config = await limits(deps);
+  return deps.ports.projectData.listResourceLinks(projectId, kind, id, config.listCap);
 }
 
 /**
@@ -42,8 +45,10 @@ export interface ResourceLinkBatchCaps {
   perTargetCap: number;
 }
 
-export async function resolveResourceLinkBatchCaps(env: Env): Promise<ResourceLinkBatchCaps> {
-  const [targetLimit, perTargetCap] = await resolveAdminSettingDetailsMany(env, [
+export async function resolveResourceLinkBatchCaps(
+  deps: OperationDeps
+): Promise<ResourceLinkBatchCaps> {
+  const [targetLimit, perTargetCap] = await deps.ports.settings.resolveDetailsMany([
     'operations.resourceLinkBatchTargetLimit',
     'operations.resourceLinkBatchPerTargetCap',
   ]);
@@ -56,13 +61,13 @@ export async function resolveResourceLinkBatchCaps(env: Env): Promise<ResourceLi
 
 /** Internal list-page seam: the caller supplies IDs already selected from this project. */
 export async function listLinksForTargets(
-  env: Env,
+  deps: OperationDeps,
   projectId: string,
   kind: LinkKind,
   ids: string[]
 ) {
-  const { maxTargets, perTargetCap } = await resolveResourceLinkBatchCaps(env);
-  return projectData.listLinksForTargets(env, projectId, kind, ids, perTargetCap, maxTargets);
+  const { maxTargets, perTargetCap } = await resolveResourceLinkBatchCaps(deps);
+  return deps.ports.projectData.listLinksForTargets(projectId, kind, ids, perTargetCap, maxTargets);
 }
 
 type IdeaRow = { id: string; title: string; status: string };
@@ -124,10 +129,9 @@ function mergeRelations<T extends { relations: LinkRelation[] }>(
 }
 
 /** One DO RPC, then one batch of all display and PR-reference reads. */
-async function contextData(env: Env, projectId: string, kind: LinkKind, id: string) {
-  const config = await limits(env);
-  const snapshot = await projectData.getResourceLinkSnapshot(
-    env,
+async function contextData(deps: OperationDeps, projectId: string, kind: LinkKind, id: string) {
+  const config = await limits(deps);
+  const snapshot = await deps.ports.projectData.getResourceLinkSnapshot(
     projectId,
     kind,
     id,
@@ -160,7 +164,7 @@ async function contextData(env: Env, projectId: string, kind: LinkKind, id: stri
   const groups: Array<'ideas' | 'files' | 'outputs' | 'associations' | 'projects'> = [];
   const add = (group: (typeof groups)[number], prefix: string, ids: string[], suffix = '') => {
     statements.push(
-      env.DATABASE.prepare(`${prefix} (SELECT value FROM json_each(?)) ${suffix}`).bind(
+      deps.env.DATABASE.prepare(`${prefix} (SELECT value FROM json_each(?)) ${suffix}`).bind(
         projectId,
         JSON.stringify(ids)
       )
@@ -190,10 +194,10 @@ async function contextData(env: Env, projectId: string, kind: LinkKind, id: stri
     sessionIds
   );
   statements.push(
-    env.DATABASE.prepare('SELECT repository FROM projects WHERE id=?').bind(projectId)
+    deps.env.DATABASE.prepare('SELECT repository FROM projects WHERE id=?').bind(projectId)
   );
   groups.push('projects');
-  const results = await env.DATABASE.batch(statements);
+  const results = await deps.env.DATABASE.batch(statements);
   const collected = {
     ideas: [] as IdeaRow[],
     files: [] as FileRow[],
@@ -356,13 +360,13 @@ function toPrs(
 }
 
 async function withPullRequestStates(
-  env: Env,
+  deps: OperationDeps,
   projectId: string,
   refs: LinkedPullRequest[]
 ): Promise<LinkedPullRequest[]> {
   if (refs.length === 0) return refs;
   try {
-    const states = await getPullRequestStates({ env }, projectId, refs);
+    const states = await getPullRequestStates(deps, projectId, refs);
     return refs.map((ref) => ({ ...ref, state: states[ref.url] ?? null }));
   } catch (error) {
     log.warn('linked_work.pr_state_failed', { projectId, error: String(error) });
@@ -398,11 +402,11 @@ function relatedIdeaLinks(links: ResourceLink[], ideaId: string): ResourceLink[]
 }
 
 export async function getIdeaContext(
-  env: Env,
+  deps: OperationDeps,
   projectId: string,
   ideaId: string
 ): Promise<IdeaContext> {
-  const data = await contextData(env, projectId, 'idea', ideaId);
+  const data = await contextData(deps, projectId, 'idea', ideaId);
   const direct = linkFor(data.links, 'idea', ideaId);
   const strongIds = strongIdeaSessionIds(direct, ideaId);
   const strongIdSet = new Set(strongIds);
@@ -411,7 +415,7 @@ export async function getIdeaContext(
       (l.sourceKind === 'idea' && l.sourceId === ideaId) ||
       (l.sourceKind === 'session' && strongIdSet.has(l.sourceId))
   );
-  const prs = await withPullRequestStates(env, projectId, toPrs(data, assetLinks, strongIds));
+  const prs = await withPullRequestStates(deps, projectId, toPrs(data, assetLinks, strongIds));
   const storedPrCount = new Set(
     assetLinks.filter((l) => l.targetKind === 'pr').map((l) => l.targetId)
   ).size;
@@ -426,12 +430,12 @@ export async function getIdeaContext(
   };
 }
 export async function getSessionContext(
-  env: Env,
+  deps: OperationDeps,
   projectId: string,
   sessionId: string
 ): Promise<SessionContext> {
-  const data = await contextData(env, projectId, 'session', sessionId);
-  const prs = await withPullRequestStates(env, projectId, toPrs(data, data.links, [sessionId]));
+  const data = await contextData(deps, projectId, 'session', sessionId);
+  const prs = await withPullRequestStates(deps, projectId, toPrs(data, data.links, [sessionId]));
   const storedPrCount = new Set(
     data.links.filter((l) => l.targetKind === 'pr').map((l) => l.targetId)
   ).size;
@@ -442,11 +446,11 @@ export async function getSessionContext(
   };
 }
 export async function getFileContext(
-  env: Env,
+  deps: OperationDeps,
   projectId: string,
   fileId: string
 ): Promise<FileContext> {
-  const data = await contextData(env, projectId, 'file', fileId);
+  const data = await contextData(deps, projectId, 'file', fileId);
   const strongSessionIds = new Set(
     data.links
       .filter(
@@ -473,11 +477,10 @@ export async function getFileContext(
 }
 
 /** Compatibility shape for the existing Ideas Conversations endpoint. */
-export async function getIdeaSessionLinks(env: Env, projectId: string, ideaId: string) {
-  await validateEntity(env, projectId, 'idea', ideaId);
-  const config = await limits(env);
-  const snapshot = await projectData.getResourceLinkSnapshot(
-    env,
+export async function getIdeaSessionLinks(deps: OperationDeps, projectId: string, ideaId: string) {
+  await validateEntity(deps, projectId, 'idea', ideaId);
+  const config = await limits(deps);
+  const snapshot = await deps.ports.projectData.getResourceLinkSnapshot(
     projectId,
     'idea',
     ideaId,

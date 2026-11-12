@@ -1,6 +1,7 @@
 import * as v from 'valibot';
 
 import type { Env } from '../../../env';
+import { createOperationPorts } from '../../../operation-ports';
 import { operations } from '../../../operations/registry';
 import { assertOperatorExecution, assertOperatorResource } from './operations';
 import { actionProjection } from './projection';
@@ -60,6 +61,7 @@ async function reconcileAction(
     const result = await operation.run(
       {
         env,
+        ports: createOperationPorts(env),
         actor: { userId, via: 'sam', scopes: new Set(['sam.read', 'sam.write']) },
         requestId: action.id,
         idempotencyKey: action.id,
@@ -138,6 +140,7 @@ async function confirmAction(
     const result = await operation.run(
       {
         env,
+        ports: createOperationPorts(env),
         actor: { userId, via: 'sam', scopes: new Set(['sam.read', 'sam.write']) },
         requestId: action.id,
         idempotencyKey: action.id,

@@ -4,12 +4,10 @@ import {
   type PullRequestState,
 } from '@simple-agent-manager/shared';
 
-import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
-import { resolveAdminSetting } from '../services/admin-settings';
-import { getInstallationToken } from '../services/github-app';
-import type { OperationContext } from './types';
+import type { OperationsEnv } from './env';
+import type { OperationContext, OperationDeps } from './types';
 
 export interface ParsedPullRequestUrl {
   repository: string;
@@ -51,7 +49,7 @@ function refreshedState(pr: Record<string, unknown>): PullRequestState['state'] 
 
 /** A URL-only writer creates a placeholder; it cannot overwrite webhook state. */
 export async function ensurePullRequest(
-  env: Env,
+  env: OperationsEnv,
   projectId: string,
   projectRepository: string,
   value: string
@@ -71,7 +69,7 @@ export async function ensurePullRequest(
 
 /** The GitHub updated_at clock prevents late delivery from reopening a merged PR. */
 export async function upsertPullRequestSnapshot(
-  env: Env,
+  env: OperationsEnv,
   projectId: string,
   pr: PullRequestSnapshot
 ): Promise<void> {
@@ -173,13 +171,13 @@ export async function upsertPullRequestSnapshot(
 
 export type PullRequestStates = Record<string, PullRequestState | null>;
 
-async function refreshSettings(env: Env) {
+async function refreshSettings(deps: OperationDeps) {
   const [cap, ttlSeconds, budgetPerHour, backoffSeconds, timeoutMs] = await Promise.all([
-    resolveAdminSetting(env, 'operations.pullRequestRefreshCap'),
-    resolveAdminSetting(env, 'operations.pullRequestRefreshTtlSeconds'),
-    resolveAdminSetting(env, 'operations.pullRequestRefreshBudgetPerHour'),
-    resolveAdminSetting(env, 'operations.pullRequestRefreshBackoffSeconds'),
-    resolveAdminSetting(env, 'operations.pullRequestRefreshTimeoutMs'),
+    deps.ports.settings.resolve('operations.pullRequestRefreshCap'),
+    deps.ports.settings.resolve('operations.pullRequestRefreshTtlSeconds'),
+    deps.ports.settings.resolve('operations.pullRequestRefreshBudgetPerHour'),
+    deps.ports.settings.resolve('operations.pullRequestRefreshBackoffSeconds'),
+    deps.ports.settings.resolve('operations.pullRequestRefreshTimeoutMs'),
   ]);
   return {
     cap: Number(cap),
@@ -191,18 +189,18 @@ async function refreshSettings(env: Env) {
 }
 
 async function claimRefreshBudget(
-  env: Env,
+  deps: OperationDeps,
   installationId: string,
   budgetPerHour: number
 ): Promise<boolean> {
   const now = Date.now();
   const windowStart = Math.floor(now / 3_600_000) * 3_600_000;
-  await env.DATABASE.prepare(
+  await deps.env.DATABASE.prepare(
     'INSERT OR IGNORE INTO pull_request_refresh_budget (installation_id, window_start, used) VALUES (?, ?, 0)'
   )
     .bind(installationId, windowStart)
     .run();
-  const result = await env.DATABASE.prepare(
+  const result = await deps.env.DATABASE.prepare(
     `UPDATE pull_request_refresh_budget SET
        used = CASE WHEN window_start = ? THEN used + 1 ELSE 1 END,
        window_start = ?
@@ -215,12 +213,12 @@ async function claimRefreshBudget(
 }
 
 async function refreshOne(
-  env: Env,
+  deps: OperationDeps,
   projectId: string,
   ref: ParsedPullRequestUrl,
   settings: Awaited<ReturnType<typeof refreshSettings>>
 ): Promise<void> {
-  const project = await env.DATABASE.prepare(
+  const project = await deps.env.DATABASE.prepare(
     `SELECT gi.external_installation_id AS external_id, gi.installation_id AS stored_id
      FROM projects p JOIN github_installations gi ON gi.id = p.installation_id
      WHERE p.id = ? AND lower(p.repository) = ? AND p.repo_provider = 'github'`
@@ -229,8 +227,8 @@ async function refreshOne(
     .first<{ external_id: string | null; stored_id: string }>();
   if (!project) return;
   const installationId = project.external_id || project.stored_id;
-  if (!(await claimRefreshBudget(env, installationId, settings.budgetPerHour))) return;
-  const { token } = await getInstallationToken(installationId, env);
+  if (!(await claimRefreshBudget(deps, installationId, settings.budgetPerHour))) return;
+  const { token } = await deps.ports.account.githubInstallationToken(installationId);
   const response = await fetch(
     `https://api.github.com/repos/${ref.repository.split('/').map(encodeURIComponent).join('/')}/pulls/${ref.number}`,
     {
@@ -250,7 +248,7 @@ async function refreshOne(
     const retry = Number(response.headers.get('retry-after'));
     const until =
       Date.now() + (Number.isFinite(retry) && retry > 0 ? retry : settings.backoffSeconds) * 1000;
-    await env.DATABASE.prepare(
+    await deps.env.DATABASE.prepare(
       'UPDATE pull_request_refresh_budget SET blocked_until = max(blocked_until, ?) WHERE installation_id = ?'
     )
       .bind(until, installationId)
@@ -280,7 +278,7 @@ async function refreshOne(
     !updatedAt
   )
     return;
-  await upsertPullRequestSnapshot(env, projectId, {
+  await upsertPullRequestSnapshot(deps.env, projectId, {
     ...ref,
     title: str(pr.title),
     state: refreshedState(pr),
@@ -295,7 +293,7 @@ async function refreshOne(
     updatedAt,
   });
   // An unchanged GitHub snapshot still completes the freshness check.
-  await env.DATABASE.prepare(
+  await deps.env.DATABASE.prepare(
     `UPDATE pull_requests SET last_synced_at = ?
      WHERE project_id = ? AND repository = ? AND number = ? AND updated_at >= ?`
   )
@@ -305,12 +303,12 @@ async function refreshOne(
 
 /** Read stored state only; single-context callers may schedule refresh separately. */
 export async function getPullRequestStates(
-  ctx: Pick<OperationContext, 'env' | 'execCtx'>,
+  ctx: OperationDeps & Pick<OperationContext, 'execCtx'>,
   projectId: string,
   refs: readonly Pick<PullRequestRef, 'url'>[],
   options: { refresh?: 'single'; repository?: string } = {}
 ): Promise<PullRequestStates> {
-  const env = ctx.env;
+  const deps: OperationDeps = ctx;
   const result: PullRequestStates = {};
   if (refs.length === 0) return result;
   // A caller that already holds the project's repository passes it, rather than paying for
@@ -319,16 +317,16 @@ export async function getPullRequestStates(
   const repository =
     options.repository ??
     (
-      await env.DATABASE.prepare('SELECT repository FROM projects WHERE id = ?')
+      await deps.env.DATABASE.prepare('SELECT repository FROM projects WHERE id = ?')
         .bind(projectId)
         .first<{ repository: string }>()
     )?.repository;
   if (repository === undefined) return result;
   const project = { repository };
   const ttlSeconds = Number(
-    await resolveAdminSetting(env, 'operations.pullRequestRefreshTtlSeconds')
+    await deps.ports.settings.resolve('operations.pullRequestRefreshTtlSeconds')
   );
-  const settings = options.refresh === 'single' && ctx.execCtx ? await refreshSettings(env) : null;
+  const settings = options.refresh === 'single' && ctx.execCtx ? await refreshSettings(deps) : null;
   const parsedRefs = [
     ...new Map(
       refs
@@ -338,7 +336,7 @@ export async function getPullRequestStates(
     ).values(),
   ];
   if (parsedRefs.length === 0) return result;
-  const rows = await env.DATABASE.prepare(
+  const rows = await deps.env.DATABASE.prepare(
     `SELECT url, state, is_draft, title, checks_state, merged_at, updated_at, last_synced_at,
             head_sha, checks_updated_at
      FROM pull_requests WHERE project_id = ? AND url IN (SELECT value FROM json_each(?))`
@@ -379,7 +377,7 @@ export async function getPullRequestStates(
     if (settings && stale && ctx.execCtx && scheduled < settings.cap) {
       scheduled++;
       ctx.execCtx.waitUntil(
-        refreshOne(env, projectId, parsed, settings).catch((error) => {
+        refreshOne(deps, projectId, parsed, settings).catch((error) => {
           log.warn('github.pr_refresh_failed', { projectId, error: String(error) });
         })
       );

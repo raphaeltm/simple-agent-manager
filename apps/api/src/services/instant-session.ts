@@ -11,6 +11,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
+import { operationDeps } from '../operation-ports';
 import { recordWorkStartIdeaLink } from '../operations/start-work-core';
 import { startSamAwareAgentSession } from './agent-session-bootstrap';
 import { explicitRuntimeAdapterSnapshot } from './canonical-vm-allocation';
@@ -372,7 +373,7 @@ export async function acceptInstantSession(
 
   if (input.sourceIdeaId) {
     try {
-      await recordWorkStartIdeaLink(env, input.project.id, {
+      await recordWorkStartIdeaLink(operationDeps(env), input.project.id, {
         ideaId: input.sourceIdeaId,
         sessionId: chatSessionId,
         taskMode: input.taskMode ?? 'conversation',

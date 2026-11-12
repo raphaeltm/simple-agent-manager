@@ -4,7 +4,6 @@ import { log } from '../lib/logger';
 import { sanitizeUserInput } from '../lib/sanitize-user-input';
 import { getSearchQueryLikePatterns, normalizeSearchQuery } from '../lib/search-query-limits';
 import { ulid } from '../lib/ulid';
-import { resolveAdminSetting } from '../services/admin-settings';
 import { getAgentLinkedContext } from './agent-linked-context';
 import { operationLink } from './connector-read-core';
 import { formatOperationCursor, readOperationCursor } from './cursors';
@@ -218,7 +217,7 @@ export async function getIdea(
   )
     throw new OperationError('invalid_input', 'Invalid idea content offset');
   const contentPageLength = Number(
-    await resolveAdminSetting(ctx.env, 'operations.agentIdeaContentPageLength')
+    await ctx.ports.settings.resolve('operations.agentIdeaContentPageLength')
   );
   if (!Number.isInteger(contentPageLength) || contentPageLength < 1)
     throw new OperationError('unavailable', 'Idea content page setting is unavailable');

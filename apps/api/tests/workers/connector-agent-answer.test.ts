@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { InteractionStore } from '../../src/durable-objects/interaction-store';
 import type { Env } from '../../src/env';
+import { createOperationPorts } from '../../src/operation-ports';
 import { samAgentAnswer } from '../../src/operations/connector-operations';
 import { samChatRead } from '../../src/operations/platform-operations';
 import type { OperationContext } from '../../src/operations/types';
@@ -74,6 +75,7 @@ async function fixture(kind: 'permission' | 'form' | 'url') {
   expect(created.status).toBe('created');
   const ctx: OperationContext = {
     env: envWithFeatures,
+    ports: createOperationPorts(envWithFeatures),
     actor: {
       userId,
       via: 'connector',

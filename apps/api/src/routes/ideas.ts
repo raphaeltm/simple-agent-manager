@@ -20,6 +20,7 @@ import { log } from '../lib/logger';
 import { parsePositiveInt, requireRouteParam } from '../lib/route-helpers';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
+import { webOperationContext } from '../operation-ports';
 import { toOperationHttpError } from '../operations/errors';
 import { createIdea } from '../operations/idea-core';
 import {
@@ -28,7 +29,6 @@ import {
   listIdeasWithDerivedStatus,
 } from '../operations/idea-list-core';
 import { acknowledgeIdeaMerge, applyIdeaStatusTransition } from '../operations/idea-transitions';
-import { webOperationContext } from '../operations/types';
 import { jsonValidator } from '../schemas';
 
 export const ideaRoutes = new Hono<{ Bindings: Env }>();

@@ -4,7 +4,6 @@
  * Also exports TokenRow and groupTokensIntoMessages for use by tests and other modules.
  */
 import type { Env } from '../../env';
-import { runWorkspaceOperation } from '../../operations/workspace-adapter';
 import * as projectDataService from '../../services/project-data';
 import { getWorkspaceResourceHistory } from '../../services/workspace-resource-history';
 import {
@@ -17,6 +16,7 @@ import {
   resolveSessionId,
   sanitizeUserInput,
 } from './_helpers';
+import { runWorkspaceOperation } from './workspace-operation-adapter';
 
 export async function handleListSessions(
   requestId: string | number | null,

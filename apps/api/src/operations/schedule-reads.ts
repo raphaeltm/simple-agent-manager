@@ -8,7 +8,6 @@ import * as v from 'valibot';
 
 import * as schema from '../db/schema';
 import { log } from '../lib/logger';
-import * as projectData from '../services/project-data';
 import { operationPageLimit } from './connector-read-core';
 import { OperationError } from './errors';
 import { getPlatformOperationLimits } from './limits';
@@ -190,7 +189,8 @@ export async function listSchedules(ctx: OperationContext, input: ScheduleListIn
   const [oneOffPage, recurring] = await Promise.all([
     listOneOff && cursor?.oneOff !== null
       ? scheduleRead(
-          projectData.listProjectSchedules(ctx.env, input.projectId, {
+          ctx,
+          ctx.ports.projectData.listProjectSchedules(input.projectId, {
             userId: ctx.actor.userId,
             limit,
             ...(cursor?.oneOff ? { cursor: cursor.oneOff } : {}),

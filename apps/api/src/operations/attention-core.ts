@@ -17,13 +17,13 @@ import {
   MAX_HUMAN_INPUT_OPTIONS_COUNT,
 } from '@simple-agent-manager/shared';
 
-import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { maybeJsonRecord } from '../lib/runtime-validation';
-import * as projectDataService from '../services/project-data';
+import type { OperationProjectDataPort } from './ports';
+import type { OperationDeps } from './types';
 import { untrustedTextBlock } from './untrusted-text';
 
-type Marker = Awaited<ReturnType<typeof projectDataService.listActiveAttentionMarkers>>[number];
+type Marker = Awaited<ReturnType<OperationProjectDataPort['listActiveAttentionMarkers']>>[number];
 
 function iso(value: number | null): string | null {
   return value === null || !Number.isFinite(value) ? null : new Date(value).toISOString();
@@ -112,12 +112,12 @@ export type PendingAttentionItem = ReturnType<typeof projectAttentionMarker>;
  * caller's whole read, and says so: an empty list must mean "nothing open".
  */
 export async function pendingAttention(
-  env: Env,
+  deps: OperationDeps,
   projectId: string,
   sessionId: string
 ): Promise<{ items: PendingAttentionItem[]; available: boolean }> {
   try {
-    const markers = await projectDataService.listActiveAttentionMarkers(env, projectId, sessionId);
+    const markers = await deps.ports.projectData.listActiveAttentionMarkers(projectId, sessionId);
     return { items: markers.map(projectAttentionMarker), available: true };
   } catch (error) {
     log.warn('connector.pending_attention_unavailable', {

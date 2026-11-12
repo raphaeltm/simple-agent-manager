@@ -17,6 +17,7 @@ vi.mock('../../../src/services/admin-settings', () => ({
 }));
 
 import type { Env } from '../../../src/env';
+import { operationDeps } from '../../../src/operation-ports';
 import { recordLink } from '../../../src/operations/link-core';
 
 function fixture() {
@@ -59,10 +60,14 @@ describe('resource links enforce final project predicate in real SQL', () => {
         origin: 'explicit' as const,
         context: null,
       };
-      await recordLink(env, 'own', input);
+      await recordLink(operationDeps(env), 'own', input);
       expect(writes).toHaveBeenCalledTimes(1);
-      await expect(recordLink(env, 'own', { ...input, targetId: 'file-other' })).rejects.toThrow();
-      await expect(recordLink(env, 'own', { ...input, sourceId: 'idea-other' })).rejects.toThrow();
+      await expect(
+        recordLink(operationDeps(env), 'own', { ...input, targetId: 'file-other' })
+      ).rejects.toThrow();
+      await expect(
+        recordLink(operationDeps(env), 'own', { ...input, sourceId: 'idea-other' })
+      ).rejects.toThrow();
       expect(writes).toHaveBeenCalledTimes(1);
     } finally {
       db.close();
@@ -83,11 +88,11 @@ describe('resource links enforce final project predicate in real SQL', () => {
         origin: 'explicit' as const,
         context: null,
       };
-      await expect(recordLink(env, 'own', input)).rejects.toThrow('Resource');
+      await expect(recordLink(operationDeps(env), 'own', input)).rejects.toThrow('Resource');
       expect(writes).not.toHaveBeenCalled();
       // Owner control: a real idea in the same project still links, so the rejection above
       // cannot pass by the write path being broken.
-      await recordLink(env, 'own', { ...input, sourceId: 'idea-own' });
+      await recordLink(operationDeps(env), 'own', { ...input, sourceId: 'idea-own' });
       expect(writes).toHaveBeenCalledTimes(1);
     } finally {
       db.close();
@@ -98,7 +103,7 @@ describe('resource links enforce final project predicate in real SQL', () => {
     // finished task, so only `is_idea` keeps it linkable.
     const { db, env } = fixture();
     try {
-      await recordLink(env, 'own', {
+      await recordLink(operationDeps(env), 'own', {
         sourceKind: 'idea',
         sourceId: 'idea-done',
         targetKind: 'file',
@@ -124,9 +129,9 @@ describe('resource links enforce final project predicate in real SQL', () => {
         origin: 'explicit' as const,
         context: null,
       };
-      await expect(recordLink(env, 'own', input)).rejects.toThrow('Resource');
+      await expect(recordLink(operationDeps(env), 'own', input)).rejects.toThrow('Resource');
       await expect(
-        recordLink(env, 'own', {
+        recordLink(operationDeps(env), 'own', {
           ...input,
           sourceId: 'idea-own',
           targetKind: 'idea',
@@ -135,7 +140,7 @@ describe('resource links enforce final project predicate in real SQL', () => {
         })
       ).rejects.toThrow('Resource');
       expect(writes).not.toHaveBeenCalled();
-      await recordLink(env, 'own', { ...input, sourceId: 'idea-own' });
+      await recordLink(operationDeps(env), 'own', { ...input, sourceId: 'idea-own' });
       expect(writes).toHaveBeenCalledTimes(1);
     } finally {
       db.close();
@@ -153,13 +158,16 @@ describe('resource links enforce final project predicate in real SQL', () => {
         origin: 'explicit' as const,
         context: null,
       };
-      await recordLink(env, 'own', input);
+      await recordLink(operationDeps(env), 'own', input);
       await expect(
-        recordLink(env, 'own', { ...input, targetId: 'https://github.com/else/repo/pull/42' })
+        recordLink(operationDeps(env), 'own', {
+          ...input,
+          targetId: 'https://github.com/else/repo/pull/42',
+        })
       ).rejects.toThrow();
-      await expect(recordLink(env, 'empty', { ...input, sourceId: 'idea-empty' })).rejects.toThrow(
-        'Resource'
-      );
+      await expect(
+        recordLink(operationDeps(env), 'empty', { ...input, sourceId: 'idea-empty' })
+      ).rejects.toThrow('Resource');
       expect(writes).toHaveBeenCalledTimes(1);
     } finally {
       db.close();

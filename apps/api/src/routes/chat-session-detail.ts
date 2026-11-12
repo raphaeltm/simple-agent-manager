@@ -18,6 +18,7 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { expectJsonRecord } from '../lib/runtime-validation';
 import { errors } from '../middleware/error';
+import { operationDeps } from '../operation-ports';
 import { getPullRequestStates } from '../operations/pull-request-core';
 import type { OperationContext } from '../operations/types';
 import { resolveTaskAgentProfileHint } from '../services/agent-profile-display';
@@ -142,7 +143,7 @@ export function registerChatSessionDetailRoute(chatRoutes: Hono<{ Bindings: Env 
             try {
               const states = await getPullRequestStates(
                 {
-                  env: c.env,
+                  ...operationDeps(c.env),
                   execCtx: c.executionCtx as OperationContext['execCtx'],
                 },
                 projectId,

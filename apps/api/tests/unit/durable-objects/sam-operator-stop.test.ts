@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import { OperatorController } from '../../../src/durable-objects/sam-session/operator/controller';
 import type { Env } from '../../../src/env';
+import { createOperationPorts } from '../../../src/operation-ports';
 import { samWorkStop } from '../../../src/operations/connector-operations';
 import * as nodeAgent from '../../../src/services/node-agent';
 import { cleanupTerminalTaskResources } from '../../../src/services/task-terminal-cleanup';
@@ -228,6 +229,7 @@ describe('SAM confirmed stop acknowledgement through real cleanup and SQLite', (
           samWorkStop.run(
             {
               env: f.env,
+              ports: createOperationPorts(f.env),
               requestId: 'legacy-stop',
               actor: { userId: 'owner', via: 'web', scopes: new Set(['sam.read', 'sam.write']) },
             },
@@ -243,6 +245,7 @@ describe('SAM confirmed stop acknowledgement through real cleanup and SQLite', (
       const result = await samWorkStop.run(
         {
           env: f.env,
+          ports: createOperationPorts(f.env),
           requestId: 'legacy-stop',
           actor: { userId: 'owner', via: 'web', scopes: new Set(['sam.read', 'sam.write']) },
         },

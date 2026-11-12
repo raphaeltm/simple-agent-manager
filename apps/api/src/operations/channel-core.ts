@@ -25,7 +25,6 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import { isAgentMessageChannelName } from '../durable-objects/project-data/agent-message-notice';
-import { channelName } from '../durable-objects/project-data/project-event-channels-config';
 import {
   ProjectEventCursorError,
   ProjectEventIdempotencyConflictError,
@@ -34,7 +33,6 @@ import {
   ProjectEventValidationError,
 } from '../durable-objects/project-data/project-events-contracts';
 import { log } from '../lib/logger';
-import { requireSessionWriter } from '../services/session-access';
 import { operationLink } from './connector-read-core';
 import { OperationError } from './errors';
 import type { OperationContext } from './types';
@@ -90,7 +88,7 @@ export function requireChannelName(
 ): string {
   let name: string;
   try {
-    name = channelName(value, ctx.env);
+    name = ctx.ports.config.channelName(value);
   } catch (error) {
     rethrowChannelError(error, 'Channel');
   }
@@ -380,7 +378,7 @@ export async function requireSubscriptionCanceller(
     );
   }
   for (const chat of chats)
-    await requireSessionWriter(ctx.env, projectId, chat, ctx.actor.userId, {
+    await ctx.ports.access.requireSessionWriter(projectId, chat, ctx.actor.userId, {
       action: 'cancel this chat’s channel subscription',
     });
 }

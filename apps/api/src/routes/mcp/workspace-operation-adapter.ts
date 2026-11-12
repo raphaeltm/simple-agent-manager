@@ -1,6 +1,6 @@
-import type { Env } from '../env';
-import { type JsonRpcResponse, jsonRpcSuccess, type McpTokenData } from '../routes/mcp/_helpers';
-import { OperationError, operationErrorToWorkspaceJsonRpc } from './errors';
+import type { Env } from '../../env';
+import { createOperationPorts } from '../../operation-ports';
+import { OperationError } from '../../operations/errors';
 import {
   type platformOperations,
   samChatRead,
@@ -15,9 +15,18 @@ import {
   samProfilesList,
   samTaskGet,
   samTasksList,
-} from './platform-operations';
-import type { OperationContext } from './types';
+} from '../../operations/platform-operations';
+import type { OperationContext } from '../../operations/types';
+import {
+  INTERNAL_ERROR,
+  INVALID_PARAMS,
+  jsonRpcError,
+  type JsonRpcResponse,
+  jsonRpcSuccess,
+  type McpTokenData,
+} from './_helpers';
 
+/** Workspace `sam-mcp` adapter: maps workspace tool names onto shared operations. */
 const workspaceOperations: Record<string, (typeof platformOperations)[number]> = {
   get_task_details: samTaskGet,
   list_tasks: samTasksList,
@@ -52,6 +61,7 @@ export async function runWorkspaceOperation(
   }
   const ctx: OperationContext = {
     env,
+    ports: createOperationPorts(env),
     requestId: String(requestId ?? ''),
     actor: {
       userId: token.userId,
@@ -84,4 +94,16 @@ export async function runWorkspaceOperation(
     if (error instanceof OperationError) return operationErrorToWorkspaceJsonRpc(requestId, error);
     throw error;
   }
+}
+
+/** The workspace protocol has historically used INVALID_PARAMS for tool-level failures. */
+function operationErrorToWorkspaceJsonRpc(
+  requestId: string | number | null,
+  error: OperationError
+): JsonRpcResponse {
+  return jsonRpcError(
+    requestId,
+    error.code === 'unavailable' ? INTERNAL_ERROR : INVALID_PARAMS,
+    error.message
+  );
 }

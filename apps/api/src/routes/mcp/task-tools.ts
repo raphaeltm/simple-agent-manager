@@ -18,7 +18,6 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
 import { ensurePullRequest } from '../../operations/pull-request-core';
-import { runWorkspaceOperation } from '../../operations/workspace-adapter';
 import * as notificationService from '../../services/notification';
 import * as orchestratorService from '../../services/project-orchestrator';
 import { recomputeMissionSchedulerStates } from '../../services/scheduler-state-sync';
@@ -40,6 +39,7 @@ import {
   type McpTokenData,
 } from './_helpers';
 import { recordMcpActivityEvent } from './activity-events';
+import { runWorkspaceOperation } from './workspace-operation-adapter';
 
 export async function handleUpdateTaskStatus(
   requestId: string | number | null,

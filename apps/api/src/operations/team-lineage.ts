@@ -10,9 +10,9 @@
  */
 import * as v from 'valibot';
 
-import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parseRowsSkippingInvalid } from '../lib/runtime-validation';
+import type { OperationsEnv } from './env';
 import { OperationError } from './errors';
 
 export type TeamScope =
@@ -86,7 +86,7 @@ const READER_ORDER = `CASE WHEN t.status IN ('queued','delegated','in_progress',
   THEN 0 ELSE 1 END, t.updated_at DESC, t.id ASC`;
 
 async function rootTaskId(
-  env: Env,
+  env: OperationsEnv,
   projectId: string,
   scope: Exclude<TeamScope, { kind: 'channel' }>
 ): Promise<string> {
@@ -102,7 +102,7 @@ async function rootTaskId(
 
 /** The team's tasks, at most `maxTasks`, and whether more exist. */
 export async function readTeamTasks(
-  env: Env,
+  env: OperationsEnv,
   projectId: string,
   scope: TeamScope,
   caps: { maxTasks: number; maxDepth: number }

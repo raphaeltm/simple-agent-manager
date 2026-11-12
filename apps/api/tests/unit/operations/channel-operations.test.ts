@@ -35,6 +35,7 @@ import {
   ProjectEventValidationError,
 } from '../../../src/durable-objects/project-data/project-events-contracts';
 import type { Env } from '../../../src/env';
+import { createOperationPorts } from '../../../src/operation-ports';
 import { sharedTextCap } from '../../../src/operations/channel-core';
 import {
   channelOperations,
@@ -150,6 +151,7 @@ describe('Connector channel operations', () => {
   ): OperationContext {
     return {
       env,
+      ports: createOperationPorts(env),
       requestId: 'test',
       actor: { userId, via: 'connector', clientName: 'Claude', scopes: new Set(scopes) },
     };

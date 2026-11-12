@@ -27,6 +27,7 @@ import { markTaskSubmitOperation, type TaskSubmitOperation } from '../lib/task-s
 import { ulid } from '../lib/ulid';
 import { errors } from '../middleware/error';
 import { requireProjectCapability } from '../middleware/project-auth';
+import { operationDeps } from '../operation-ports';
 import {
   recordWorkStartIdeaLink,
   requireOpenIdeaForWorkStart,
@@ -620,7 +621,7 @@ export async function submitTaskImplementation(
   if (sourceIdea) {
     setOperation('source_idea_link');
     try {
-      await recordWorkStartIdeaLink(env, projectId, {
+      await recordWorkStartIdeaLink(operationDeps(env), projectId, {
         ideaId: sourceIdea.ideaId,
         sessionId,
         taskMode,

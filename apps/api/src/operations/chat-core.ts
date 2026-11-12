@@ -6,11 +6,8 @@ import {
 
 import { type MessageRole, VALID_MESSAGE_ROLES, validateRoles } from '../lib/message-roles';
 import { AppError } from '../middleware/error';
-import { connectorPendingInteractions } from '../services/connector-agent-answer';
 import { groupTokensIntoMessages } from '../services/message-groups';
-import * as projectDataService from '../services/project-data';
 import { describeRootSearchCoverage } from '../services/project-data-search-coverage';
-import { requireSessionWriter } from '../services/session-access';
 import { pendingAttention } from './attention-core';
 import { readChatMessages, searchExcerpts } from './chat-transcript';
 import { operationLink } from './connector-read-core';
@@ -59,7 +56,7 @@ async function writerPendingRequests(
   let writer = createdByUserId === ctx.actor.userId;
   if (!writer) {
     try {
-      await requireSessionWriter(ctx.env, projectId, sessionId, ctx.actor.userId, {
+      await ctx.ports.access.requireSessionWriter(projectId, sessionId, ctx.actor.userId, {
         action: 'read pending agent requests',
       });
       writer = true;
@@ -69,8 +66,8 @@ async function writerPendingRequests(
   }
   if (!writer) return {};
   const [pendingInteractions, attention] = await Promise.all([
-    connectorPendingInteractions(ctx.env, projectId, sessionId),
-    pendingAttention(ctx.env, projectId, sessionId),
+    ctx.ports.connector.pendingInteractions(projectId, sessionId),
+    pendingAttention(ctx, projectId, sessionId),
   ]);
   return {
     pendingInteractions,
@@ -96,8 +93,7 @@ async function readStoredRows(
     input.roles ?? (input.includeToolPayloads ? [...VALID_MESSAGE_ROLES] : undefined)
   );
   const connector = ctx.actor.via !== 'workspace-agent';
-  const page = await projectDataService.getMessages(
-    ctx.env,
+  const page = await ctx.ports.projectData.getMessages(
     input.projectId,
     sessionId,
     connector ? limit + 1 : limit,
@@ -170,7 +166,7 @@ export async function readChat(ctx: OperationContext, input: ReadChatInput) {
   if (!sessionId) throw new OperationError('invalid_input', 'sessionId is required');
   const before = input.cursor ? parseMessageCursor(input.cursor) : null;
   if (input.cursor && !before) throw new OperationError('invalid_input', 'Invalid message cursor');
-  const session = await projectDataService.getSession(ctx.env, input.projectId, sessionId);
+  const session = await ctx.ports.projectData.getSession(input.projectId, sessionId);
   if (!session) throw new OperationError('not_found', 'Session not found in this project');
   if (ctx.actor.via === 'workspace-agent') {
     return {
@@ -233,8 +229,7 @@ export async function searchChats(
       : null;
   if (sessionId && continuation)
     throw new OperationError('invalid_input', 'continuation cannot be combined with sessionId');
-  const search = await projectDataService.searchMessagesWithArchiveMetadata(
-    ctx.env,
+  const search = await ctx.ports.projectData.searchMessagesWithArchiveMetadata(
     input.projectId,
     query,
     sessionId,

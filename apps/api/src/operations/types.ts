@@ -1,11 +1,11 @@
 import type * as v from 'valibot';
 
-import type { Env } from '../env';
 import { AppError } from '../middleware/error';
-import { auditConnectorWrite } from '../services/connector-execution';
 import type { ConnectorSettings } from '../services/connector-settings';
 import type { SamDispatchReservation } from '../services/sam-dispatch-reservation';
+import type { OperationsEnv } from './env';
 import { OperationError } from './errors';
+import type { OperationPorts } from './ports';
 
 export type OperationKind = 'read' | 'write' | 'destructive';
 export type OperationScope = 'sam.read' | 'sam.write';
@@ -19,8 +19,13 @@ export interface Actor {
   workspace?: { workspaceId: string; taskId?: string; projectId: string; agentSessionId?: string };
 }
 
-export interface OperationContext {
-  env: Env;
+/** What every operation helper needs: the narrow environment and the worker's ports. */
+export interface OperationDeps {
+  env: OperationsEnv;
+  ports: OperationPorts;
+}
+
+export interface OperationContext extends OperationDeps {
   actor: Actor;
   requestId: string;
   idempotencyKey?: string;
@@ -52,7 +57,9 @@ export function defineOperation<I, O>(operation: Operation<I, O>): Operation<I, 
       try {
         return await (operation.kind === 'read'
           ? operation.run(ctx, input)
-          : auditConnectorWrite(ctx, operation.name, input, () => operation.run(ctx, input)));
+          : ctx.ports.connector.auditWrite(ctx, operation.name, input, () =>
+              operation.run(ctx, input)
+            ));
       } catch (error) {
         if (!(error instanceof AppError)) throw error;
         const code =
@@ -73,38 +80,5 @@ export function defineOperation<I, O>(operation: Operation<I, O>): Operation<I, 
         );
       }
     },
-  };
-}
-
-/**
- * The operation context for a request a person made in the browser.
- *
- * One definition, because two call sites writing the same actor literal is how the second one
- * quietly loses something — the first copy of this in `routes/tasks/crud.ts` dropped
- * `execCtx`, which is what lets an operation schedule bounded background work.
- *
- * `c.executionCtx` is a getter that throws when there is no execution context, which a
- * unit-test Hono app has; `lib/wait-until.ts` guards it for the same reason. The cast
- * reconciles Hono's `ExecutionContext` type, which omits the runtime's newer tracing field.
- */
-export function webOperationContext(
-  c: {
-    env: Env;
-    req: { header(name: string): string | undefined };
-    executionCtx: { waitUntil(promise: Promise<unknown>): void };
-  },
-  userId: string
-): OperationContext {
-  let execCtx: ExecutionContext | undefined;
-  try {
-    execCtx = c.executionCtx as unknown as ExecutionContext;
-  } catch {
-    execCtx = undefined;
-  }
-  return {
-    env: c.env,
-    requestId: c.req.header('cf-ray') ?? '',
-    actor: { userId, via: 'web', scopes: new Set(['sam.read', 'sam.write']) },
-    execCtx,
   };
 }

@@ -18,18 +18,14 @@ import type * as v from 'valibot';
 
 import * as schema from '../db/schema';
 import type { ScheduleCreator } from '../durable-objects/project-data/project-event-schedules-authority';
-import { scheduleLimits } from '../durable-objects/project-data/project-event-schedules-config';
 import { markRejectedBeforeEffects } from '../lib/operation-effect-boundary';
 import { sanitizeUserInput } from '../lib/sanitize-user-input';
 import { AppError } from '../middleware/error';
 import type { CreateTriggerSchema } from '../schemas/triggers';
-import { executeConnectorWrite } from '../services/connector-execution';
-import * as projectData from '../services/project-data';
-import { clearTriggerPageCaches } from '../services/trigger-cache';
-import { createTrigger, validateCron } from '../services/trigger-create';
 import { triggerStatusUpdates } from '../services/trigger-status';
 import { authorizeProjectOperation } from './authorization';
 import { OperationError } from './errors';
+import type { OperationProjectDataPort } from './ports';
 import {
   findRecurringTrigger,
   findSchedule,
@@ -39,7 +35,7 @@ import {
 } from './schedule-core';
 import type { ScheduleCancel, ScheduleCreate, ScheduleUpdate } from './schedule-inputs';
 import { canonicalTimezone, type ResolvedScheduleTime, resolveScheduleTime } from './schedule-time';
-import type { OperationContext } from './types';
+import type { OperationContext, OperationDeps } from './types';
 
 type OneOffView = ReturnType<typeof oneOffProjection>;
 type RecurringView = ReturnType<typeof recurringProjection>;
@@ -83,11 +79,11 @@ function schedulePromptAuthor(ctx: OperationContext): SchedulePromptAuthor {
  * `createTrigger` validates before it inserts. Marking those frees the requestKey for a
  * corrected retry; any other failure may follow a write and stays uncertain.
  */
-async function settleWrite<T>(call: Promise<T>): Promise<T> {
+async function settleWrite<T>(ctx: OperationDeps, call: Promise<T>): Promise<T> {
   try {
     return await call;
   } catch (error) {
-    const mapped = scheduleFailure(error);
+    const mapped = scheduleFailure(ctx, error);
     if (mapped instanceof AppError && mapped.statusCode < 500) markRejectedBeforeEffects(mapped);
     throw mapped;
   }
@@ -109,7 +105,7 @@ function schedulableTime(
     disambiguation: input.disambiguation,
   });
   const now = Date.now();
-  const latest = now + scheduleLimits(ctx.env).maxHorizonMs;
+  const latest = now + ctx.ports.config.scheduleLimits().maxHorizonMs;
   if (time.dueAt <= now) {
     throw invalid(
       `runAt resolves to ${time.dueAtIso}, which is not in the future. Use sam_chat_start to start work now.`
@@ -180,7 +176,8 @@ function prepareOneOffCreate(
   };
   return async () => {
     const result = await settleWrite(
-      projectData.createProjectSchedule(ctx.env, input.projectId, {
+      ctx,
+      ctx.ports.projectData.createProjectSchedule(input.projectId, {
         userId: ctx.actor.userId,
         creatorChatSessionId: null,
         creator: scheduleCreator(ctx),
@@ -223,7 +220,7 @@ async function prepareRecurringCreate(
   if (!name) throw invalid('A recurring schedule needs a name that is unique in the project');
   const cronTimezone = canonicalTimezone(input.timezone ?? 'UTC');
   const cronExpression = cron.trim();
-  validateCron(ctx.env, cronExpression, cronTimezone);
+  ctx.ports.triggers.validateCron(cronExpression, cronTimezone);
   const db = drizzle(ctx.env.DATABASE, { schema });
   const project = await db
     .select({ id: schema.projects.id, maxTriggers: schema.projects.maxTriggers })
@@ -244,7 +241,8 @@ async function prepareRecurringCreate(
   };
   return async () => {
     const { created } = await settleWrite(
-      createTrigger(db, ctx.env, project, ctx.actor.userId, body)
+      ctx,
+      ctx.ports.triggers.create(project, ctx.actor.userId, body)
     );
     return {
       ...recurringProjection(ctx, created, 'preview'),
@@ -257,7 +255,7 @@ export async function createSchedule(ctx: OperationContext, input: ScheduleCreat
   await authorizeProjectOperation(ctx, input.projectId, 'task:write');
   const writeCtx = keyed(ctx, input);
   let apply!: () => Promise<Created>;
-  return executeConnectorWrite(
+  return ctx.ports.connector.executeWrite(
     writeCtx,
     'sam_schedule_create',
     input,
@@ -308,7 +306,8 @@ function prepareReschedule(
   };
   return async () => {
     const result = await settleWrite(
-      projectData.mutateProjectSchedule(ctx.env, input.projectId, {
+      ctx,
+      ctx.ports.projectData.mutateProjectSchedule(input.projectId, {
         userId: ctx.actor.userId,
         id: current.id,
         operation: 'reschedule',
@@ -350,7 +349,7 @@ function prepareRecurringUpdate(
     input.timezone === undefined
       ? (trigger.cronTimezone ?? 'UTC')
       : canonicalTimezone(input.timezone);
-  if (scheduleChange) validateCron(ctx.env, cronExpression, cronTimezone);
+  if (scheduleChange) ctx.ports.triggers.validateCron(cronExpression, cronTimezone);
   const status: TriggerStatus =
     input.paused === undefined ? current : input.paused ? 'paused' : 'active';
   const changed =
@@ -388,7 +387,7 @@ function prepareRecurringUpdate(
         )
       );
     }
-    clearTriggerPageCaches(input.projectId);
+    ctx.ports.triggers.clearPageCaches(input.projectId);
     return { ...recurringProjection(ctx, updated, 'preview'), receipt: { changed: true } };
   };
 }
@@ -397,7 +396,7 @@ export async function updateSchedule(ctx: OperationContext, input: ScheduleUpdat
   await authorizeProjectOperation(ctx, input.projectId, 'task:write');
   const writeCtx = keyed(ctx, input);
   let apply!: () => Promise<Updated>;
-  return executeConnectorWrite(
+  return ctx.ports.connector.executeWrite(
     writeCtx,
     'sam_schedule_update',
     input,
@@ -415,11 +414,12 @@ export async function updateSchedule(ctx: OperationContext, input: ScheduleUpdat
 export async function cancelSchedule(ctx: OperationContext, input: ScheduleCancel) {
   await authorizeProjectOperation(ctx, input.projectId, 'task:write');
   const writeCtx = keyed(ctx, input);
-  return executeConnectorWrite(writeCtx, 'sam_schedule_cancel', input, async () => {
-    let result: Awaited<ReturnType<typeof projectData.mutateProjectSchedule>>;
+  return ctx.ports.connector.executeWrite(writeCtx, 'sam_schedule_cancel', input, async () => {
+    let result: Awaited<ReturnType<OperationProjectDataPort['mutateProjectSchedule']>>;
     try {
       result = await settleWrite(
-        projectData.mutateProjectSchedule(writeCtx.env, input.projectId, {
+        ctx,
+        writeCtx.ports.projectData.mutateProjectSchedule(input.projectId, {
           userId: writeCtx.actor.userId,
           id: input.scheduleId,
           operation: 'cancel',

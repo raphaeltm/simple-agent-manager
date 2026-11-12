@@ -55,6 +55,7 @@ import * as schema from '../../../src/db/schema';
 import { MIGRATIONS } from '../../../src/durable-objects/migrations';
 import { recordLink as recordDoLink } from '../../../src/durable-objects/project-data/links';
 import type { Env } from '../../../src/env';
+import { operationDeps } from '../../../src/operation-ports';
 import { recordAutoLink } from '../../../src/operations/link-core';
 import {
   createJsonKv,
@@ -262,7 +263,7 @@ describe('automatic links from real workspace MCP triggers', () => {
         expect.anything()
       );
       const beforeForeignRead = writes.mock.calls.length;
-      await recordAutoLink(env, 'project1', {
+      await recordAutoLink(operationDeps(env), 'project1', {
         sourceKind: 'session',
         sourceId: 'session1',
         targetKind: 'idea',
@@ -359,7 +360,7 @@ describe('automatic links from real workspace MCP triggers', () => {
       expect(writes).toHaveBeenCalledTimes(explicitBefore);
 
       // The same row, through the automatic link path.
-      await recordAutoLink(env, 'project1', {
+      await recordAutoLink(operationDeps(env), 'project1', {
         sourceKind: 'session',
         sourceId: 'session1',
         targetKind: 'idea',
@@ -371,7 +372,7 @@ describe('automatic links from real workspace MCP triggers', () => {
       expect(writes).toHaveBeenCalledTimes(explicitBefore);
       // Owner control for the automatic path: a real idea in the same project is still
       // recorded, so the two assertions above cannot pass by auto-linking being broken.
-      await recordAutoLink(env, 'project1', {
+      await recordAutoLink(operationDeps(env), 'project1', {
         sourceKind: 'session',
         sourceId: 'session1',
         targetKind: 'idea',

@@ -8,11 +8,6 @@
 import type { CredentialLimitsResponse } from '@simple-agent-manager/shared';
 
 import { log } from '../lib/logger';
-import {
-  getTokenUsage,
-  getUserBudgetSettings,
-  resolveEffectiveLimits,
-} from '../services/ai-token-budget';
 import type { TeamTask } from './team-core';
 import type { OperationContext } from './types';
 
@@ -42,10 +37,10 @@ export async function usageSection(
   if (samMetered > 0) {
     const daily = await settle('sam_ai_budget', async () => {
       const [usage, settings] = await Promise.all([
-        getTokenUsage(ctx.env.KV, ctx.actor.userId, ctx.env),
-        getUserBudgetSettings(ctx.env.KV, ctx.actor.userId),
+        ctx.ports.account.tokenUsage(ctx.actor.userId),
+        ctx.ports.account.budgetSettings(ctx.actor.userId),
       ]);
-      return { usage, limits: resolveEffectiveLimits(settings, ctx.env) };
+      return { usage, limits: ctx.ports.account.effectiveBudgetLimits(settings) };
     });
     samDaily = daily.ok
       ? {

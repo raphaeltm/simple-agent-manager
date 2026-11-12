@@ -5,7 +5,6 @@ import type {
   SessionContext,
 } from '@simple-agent-manager/shared';
 
-import { resolveAdminSettingDetailsMany } from '../services/admin-settings';
 import { OperationError } from './errors';
 import { listIdeaUpdates } from './idea-update-core';
 import { getFileContext, getIdeaContext, getSessionContext } from './link-core';
@@ -15,7 +14,7 @@ import { UNTRUSTED_TEXT_GUIDANCE, untrustedTextBlock } from './untrusted-text';
 type SourceContext = IdeaContext | SessionContext | FileContext;
 
 async function settings(ctx: OperationContext) {
-  const rows = await resolveAdminSettingDetailsMany(ctx.env, [
+  const rows = await ctx.ports.settings.resolveDetailsMany([
     'operations.agentLinkedListCap',
     'operations.agentLinkedUpdatesCap',
     'operations.agentLinkedTextMaxLength',
@@ -149,13 +148,13 @@ export async function getAgentLinkedContext(
   let kind: 'idea' | 'session' | 'file';
   if (input.ideaId) {
     kind = 'idea';
-    source = await getIdeaContext(ctx.env, input.projectId, input.ideaId);
+    source = await getIdeaContext(ctx, input.projectId, input.ideaId);
   } else if (sessionId) {
     kind = 'session';
-    source = await getSessionContext(ctx.env, input.projectId, sessionId);
+    source = await getSessionContext(ctx, input.projectId, sessionId);
   } else {
     kind = 'file';
-    source = await getFileContext(ctx.env, input.projectId, resourceId);
+    source = await getFileContext(ctx, input.projectId, resourceId);
   }
   const context = frameContext(source, limits.list, limits.text);
   const updates = input.ideaId

@@ -13,6 +13,7 @@ import { ProjectScheduleNotFoundError } from '../../../src/durable-objects/proje
 import { ProjectEventValidationError } from '../../../src/durable-objects/project-data/project-events-contracts';
 import type { Env } from '../../../src/env';
 import { log } from '../../../src/lib/logger';
+import { createOperationPorts } from '../../../src/operation-ports';
 import { OperationError } from '../../../src/operations/errors';
 import { operationInputJsonSchema } from '../../../src/operations/registry';
 import {
@@ -103,6 +104,7 @@ describe('connector schedule operations', () => {
   function ctx(userId = 'owner', overrides: Partial<OperationContext> = {}): OperationContext {
     return {
       env,
+      ports: createOperationPorts(env),
       requestId: 'test',
       connectorSettings: CONNECTOR_DEFAULTS,
       actor: {

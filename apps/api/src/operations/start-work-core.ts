@@ -10,11 +10,12 @@
 import type { TaskMode } from '@simple-agent-manager/shared';
 import { workStartRelationFor } from '@simple-agent-manager/shared';
 
-import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { errors } from '../middleware/error';
+import type { OperationsEnv } from './env';
 import { ideaTaskPredicateSql } from './idea-identity';
 import { recordLink } from './link-core';
+import type { OperationDeps } from './types';
 
 /** The status an open idea holds. Start work is only offered for an open idea. */
 const OPEN_IDEA_STATUS = 'draft';
@@ -74,7 +75,7 @@ export interface WorkStartIdea {
  * 409 the person can act on; see `classifyWorkStartIdea` for why that order matters.
  */
 export async function requireOpenIdeaForWorkStart(
-  env: Env,
+  env: OperationsEnv,
   projectId: string,
   ideaId: string
 ): Promise<WorkStartIdea> {
@@ -113,13 +114,13 @@ export interface WorkStartLinkInput {
  * of adding a second one.
  */
 export async function recordWorkStartIdeaLink(
-  env: Env,
+  deps: OperationDeps,
   projectId: string,
   input: WorkStartLinkInput
 ): Promise<void> {
   const relation = workStartRelationFor(input.taskMode);
   try {
-    await recordLink(env, projectId, {
+    await recordLink(deps, projectId, {
       sourceKind: 'session',
       sourceId: input.sessionId,
       targetKind: 'idea',

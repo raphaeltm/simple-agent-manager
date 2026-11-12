@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
+import { createOperationPorts } from '../../../src/operation-ports';
 import { responseBytes, resultByteBudget } from '../../../src/operations/response-budget';
 import { samTeamStatus } from '../../../src/operations/team-operations';
 import type { OperationContext } from '../../../src/operations/types';
@@ -47,6 +48,7 @@ describe('sam_team_status', () => {
   function ctx(userId = 'owner'): OperationContext {
     return {
       env,
+      ports: createOperationPorts(env),
       requestId: 'test',
       actor: { userId, via: 'connector', scopes: new Set(['sam.read']) },
     };

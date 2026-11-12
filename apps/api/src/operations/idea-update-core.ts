@@ -1,10 +1,9 @@
 import { sanitizeUserInput } from '../lib/sanitize-user-input';
 import { ulid } from '../lib/ulid';
-import { resolveAdminSetting } from '../services/admin-settings';
-import * as projectData from '../services/project-data';
 import { formatOperationCursor, readOperationCursor } from './cursors';
 import { OperationError } from './errors';
 import { ideaTaskPredicateSql } from './idea-identity';
+import type { OperationSettingsPort } from './ports';
 import type { OperationContext } from './types';
 
 async function requireIdea(ctx: OperationContext, projectId: string, ideaId: string) {
@@ -16,8 +15,11 @@ async function requireIdea(ctx: OperationContext, projectId: string, ideaId: str
   if (!row) throw new OperationError('not_found', 'Idea not found in this project');
 }
 
-async function setting(ctx: OperationContext, name: Parameters<typeof resolveAdminSetting>[1]) {
-  return Number(await resolveAdminSetting(ctx.env, name));
+async function setting(
+  ctx: OperationContext,
+  name: Parameters<OperationSettingsPort['resolve']>[0]
+) {
+  return Number(await ctx.ports.settings.resolve(name));
 }
 
 export async function validateIdeaUpdateNote(
@@ -74,7 +76,7 @@ export async function addIdeaUpdate(
           .first<{ name: string | null }>()
       : null;
     authorName = agent?.name ?? 'Agent';
-    const session = await projectData.getSession(ctx.env, input.projectId, sessionId);
+    const session = await ctx.ports.projectData.getSession(input.projectId, sessionId);
     sessionTopic = typeof session?.topic === 'string' ? session.topic : null;
   }
   const update = {
@@ -92,7 +94,7 @@ export async function addIdeaUpdate(
   };
   try {
     return {
-      update: await projectData.addIdeaUpdate(ctx.env, input.projectId, update, interval * 1000),
+      update: await ctx.ports.projectData.addIdeaUpdate(input.projectId, update, interval * 1000),
     };
   } catch (error) {
     if (error instanceof Error && error.message === 'Agent note rate limit exceeded')
@@ -113,8 +115,7 @@ export async function listIdeaUpdates(
   const pageSize = await setting(ctx, 'collaboration.ideaUpdatePageSize');
   // The optional override is internal and comes from the typed agent-context setting.
   const limit = input.limit ?? pageSize;
-  const page = await projectData.listIdeaUpdates(
-    ctx.env,
+  const page = await ctx.ports.projectData.listIdeaUpdates(
     input.projectId,
     input.ideaId,
     cursor ? { createdAt: cursor.updatedAt, id: cursor.id } : null,
@@ -141,8 +142,7 @@ export async function deleteIdeaUpdate(
     .bind(input.projectId, ctx.actor.userId)
     .first<{ role: string }>();
   if (!member) throw new OperationError('forbidden', 'Project membership required');
-  const deleted = await projectData.deleteIdeaUpdate(
-    ctx.env,
+  const deleted = await ctx.ports.projectData.deleteIdeaUpdate(
     input.projectId,
     input.ideaId,
     input.updateId,

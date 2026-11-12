@@ -10,6 +10,7 @@ import {
   updateCurrentPlan,
 } from '../../../src/durable-objects/project-data/session-state';
 import type { Env } from '../../../src/env';
+import { createOperationPorts } from '../../../src/operation-ports';
 import {
   samChatDeliveryGet,
   samChatInteractions,
@@ -74,6 +75,7 @@ describe('operational MCP evidence with real SQLite authorization and persistenc
   function ctx(userId = 'owner', scopes = ['sam.read', 'sam.write']): OperationContext {
     return {
       env,
+      ports: createOperationPorts(env),
       requestId: 'test',
       actor: { userId, via: 'connector', scopes: new Set(scopes as ('sam.read' | 'sam.write')[]) },
     };

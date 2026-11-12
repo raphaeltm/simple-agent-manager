@@ -4,7 +4,6 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import { getSearchQueryLikePatterns, normalizeSearchQuery } from '../lib/search-query-limits';
-import { getRecentAssistantMessagesForTask } from '../services/task-final-assistant-message';
 import { membershipCondition, operationLink } from './connector-read-core';
 import { formatOperationCursor, readOperationCursor } from './cursors';
 import { OperationError } from './errors';
@@ -83,8 +82,7 @@ export async function getTask(ctx: OperationContext, projectId: string, taskId: 
   const task = rows[0];
   if (!task) throw new OperationError('not_found', 'Task not found in this project');
   // One whole-message read serves both fields: the newest reply is the final message.
-  const recent = await getRecentAssistantMessagesForTask(
-    ctx.env,
+  const recent = await ctx.ports.tasks.recentAssistantMessages(
     projectId,
     task.chatSessionId,
     getPlatformOperationLimits(ctx.env).taskDetailRecentMessageLimit

@@ -2,10 +2,11 @@
 import type { Sandbox } from '@cloudflare/sandbox';
 
 import type { VmAgentContainer } from './durable-objects/vm-agent-container';
+import type { OperationsEnv } from './operations/env';
 import type { TaskRecoveryEnv } from './task-recovery-env';
 import type { WebhookTriggerEnv } from './webhook-trigger-env';
 
-export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
+export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv, OperationsEnv {
   CLI_RECEIPT_REQUEST_MAX_BYTES?: string; // default 262144
   CLI_RECEIPT_RESPONSE_MAX_BYTES?: string; // default 65536
   // D1 Database.
@@ -1022,7 +1023,6 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   MCP_DISPATCH_DESCRIPTION_MAX_LENGTH?: string; // Max description length for dispatched tasks (default: 32000)
   MCP_DISPATCH_MAX_REFERENCES?: string; // Max reference URLs per dispatch (default: 20)
   MCP_DISPATCH_MAX_REFERENCE_LENGTH?: string; // Max length per reference string (default: 500)
-  MCP_DISPATCH_MAX_PRIORITY?: string; // Max priority for agent-dispatched tasks (default: 100)
   // Orchestration tools (retry, dependency, remove, send_message, stop)
   ORCHESTRATOR_MAX_RETRIES_PER_TASK?: string; // Max retry attempts per task (default: 3)
   ORCHESTRATOR_DEPENDENCY_MAX_EDGES?: string; // Max dependency edges per project (default: 50)
@@ -1069,17 +1069,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   ACP_LONG_TURN_SUPERVISOR_ENABLED?: string;
   ACP_LONG_TURN_CHECKPOINT_MS?: string;
   ACP_CHECKPOINT_PREEMPT_GRACE_MS?: string;
-  // Shared platform operation and MCP list/read limits
-  MCP_TASK_LIST_LIMIT?: string; // Default task list page size (default: 10)
-  MCP_TASK_LIST_MAX?: string; // Max task list page size (default: 50)
-  MCP_TASK_SEARCH_LIMIT?: string; // Default task search page size (default: 10)
-  MCP_TASK_SEARCH_MAX?: string; // Max task search page size (default: 20)
-  MCP_TASK_DETAIL_RECENT_MESSAGE_LIMIT?: string; // Recent assistant messages in task detail (default: 5)
-  MCP_TASK_DETAIL_MESSAGE_SNIPPET_LENGTH?: string; // Task detail assistant message snippet (default: 2000)
-  MCP_MESSAGE_LIST_LIMIT?: string; // Default raw tokens per request (default: 50)
-  MCP_MESSAGE_LIST_MAX?: string; // Max raw tokens per request (default: 200)
-  MCP_MESSAGE_SEARCH_LIMIT?: string; // Default search_messages page size (default: 10)
-  MCP_MESSAGE_SEARCH_MAX?: string; // Max search results for search_messages (default: 20)
+  // MCP list/read limits (shared platform operation limits live on OperationsEnv)
   MCP_ARCHIVED_TOOL_PAYLOAD_LIST_LIMIT?: string; // Default archived payloads per get_archived_tool_payloads (default: 10)
   MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX?: string; // Max archived payloads per get_archived_tool_payloads (default: 50)
   MCP_COMMENT_LIST_LIMIT?: string; // Default message-comment threads per request (default: 10)
@@ -1108,14 +1098,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   MAX_MESSAGES_PAYLOAD_BYTES?: string;
   MAX_AGENT_SESSION_LABEL_LENGTH?: string;
   MAX_AGENT_CREDENTIAL_SYNC_BYTES?: string;
-  MCP_TASK_DESCRIPTION_SNIPPET_LENGTH?: string;
   MCP_IDEA_CONTEXT_MAX_LENGTH?: string; // Max length for idea link context string (default: 500)
-  MCP_IDEA_CONTENT_MAX_LENGTH?: string; // Max length for idea content/description (default: 65536)
-  MCP_IDEA_LIST_LIMIT?: string; // Default page size for list_ideas (default: 20)
-  MCP_IDEA_LIST_MAX?: string; // Max page size for list_ideas (default: 100)
-  MCP_IDEA_SEARCH_MAX?: string; // Max results for search_ideas (default: 20)
-  MCP_RELATED_IDEA_SEARCH_LIMIT?: string; // Default results for find_related_ideas (default: 10)
-  MCP_IDEA_TITLE_MAX_LENGTH?: string; // Max length for idea title (default: 200)
   MCP_SESSION_TOPIC_MAX_LENGTH?: string; // Max length for session topic (default: 200)
   // Knowledge graph limits
   KNOWLEDGE_MAX_ENTITIES_PER_PROJECT?: string; // Max knowledge entities per project (default: 500)

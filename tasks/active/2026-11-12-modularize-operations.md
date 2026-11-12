@@ -20,8 +20,8 @@ SAM task `01M77GDY92WVEJAYW63F4TSC50`, branch `sam/w3-operations-turn-shared-4ts
 
 ## Plan
 
-- [ ] Step 1a: narrow `OperationsEnv`; `OperationContext.env` uses it
-- [ ] Step 1b: ports interface (`OperationPorts`) for worker-owned services; worker wiring in one place
+- [x] Step 1a: narrow `OperationsEnv`; `OperationContext.env` uses it
+- [x] Step 1b: ports interface (`OperationPorts`) for worker-owned services; worker wiring in one place (`apps/api/src/operation-ports.ts`)
 - [ ] Step 1c: operations import nothing from `routes/`, `durable-objects/`, `services/` except through ports
 - [ ] Step 1d: move clearest sam-session / MCP duplicates onto shared functions
 - [ ] Step 2: lift into `packages/operations` once W0 is ready (channel "W0 ready")
@@ -31,3 +31,10 @@ SAM task `01M77GDY92WVEJAYW63F4TSC50`, branch `sam/w3-operations-turn-shared-4ts
 ## Progress log
 
 - 2026-11-12: branch created from core `bbb1c82ca`; baseline counts recorded.
+- 2026-11-12: step 1a/1b pushed. `OperationContext` = `OperationDeps` (`env: OperationsEnv`, `ports: OperationPorts`) + actor.
+  Worker builds ports with `createOperationPorts(env)`; `operationDeps(env)` for helper calls outside a context;
+  `webOperationContext` moved to `operation-ports.ts`; workspace JSON-RPC adapter moved to
+  `routes/mcp/workspace-operation-adapter.ts`. Port signatures are still derived from worker modules via type-only
+  imports (step 2 replaces them with declared types). Remaining runtime imports from the worker are pure helpers
+  (route-helpers, sanitize, search-query-limits, utf8, message-roles, task-status, session-idleness, trigger-status,
+  cron-utils, project-events error classes, agent-message-notice, ConnectorAnswerFields) -> step 2.

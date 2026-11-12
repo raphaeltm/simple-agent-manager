@@ -17,6 +17,7 @@ import { log } from '../../../src/lib/logger';
 import { getTaskSubmitOperation } from '../../../src/lib/task-submit-diagnostics';
 import { handleAppError } from '../../../src/middleware/app-error-handler';
 import { AppError } from '../../../src/middleware/error';
+import { createOperationPorts } from '../../../src/operation-ports';
 import { agentProfileRoutes } from '../../../src/routes/agent-profiles';
 import { cliProjectMetadataRoutes } from '../../../src/routes/cli-project-metadata';
 import { skillRoutes } from '../../../src/routes/skills';
@@ -1057,6 +1058,7 @@ describe('task submit capacity-pool placement', () => {
         const { samChatStart } = await import('../../../src/operations/connector-operations');
         const context = {
           env,
+          ports: createOperationPorts(env),
           actor: {
             userId: 'user-1',
             via: 'connector' as const,
@@ -1129,6 +1131,7 @@ describe('task submit capacity-pool placement', () => {
         const { samTaskGet } = await import('../../../src/operations/platform-operations');
         const context = {
           env,
+          ports: createOperationPorts(env),
           actor: {
             userId: 'user-1',
             via: 'connector' as const,

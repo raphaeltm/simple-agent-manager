@@ -2,6 +2,7 @@ import { env, SELF } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import type { Env } from '../../src/env';
+import { createOperationPorts, operationDeps } from '../../src/operation-ports';
 import { addIdeaUpdate } from '../../src/operations/idea-update-core';
 import { getPlatformOperationLimits } from '../../src/operations/limits';
 import { recordLink } from '../../src/operations/link-write';
@@ -37,6 +38,7 @@ const pr2 = 'https://github.com/test-org/agent-context/pull/22';
 
 const connector: OperationContext = {
   env: testEnv,
+  ports: createOperationPorts(testEnv),
   requestId: 'connector-test',
   actor: { userId: user, via: 'connector', scopes: new Set(['sam.read', 'sam.write']) },
 };
@@ -127,7 +129,7 @@ beforeAll(async () => {
     targetId: string,
     relation: 'works_on' | 'read' | 'uploaded'
   ) =>
-    recordLink(testEnv, project, {
+    recordLink(operationDeps(testEnv), project, {
       sourceKind: 'session',
       sourceId,
       targetKind,
@@ -277,7 +279,7 @@ describe('agent linked context through real MCP handlers and SQL', () => {
       )
         .bind(id, project, `file-${n}-${'x'.repeat(100)}.txt`, user, id)
         .run();
-      await recordLink(testEnv, project, {
+      await recordLink(operationDeps(testEnv), project, {
         sourceKind: 'idea',
         sourceId: idea,
         targetKind: 'file',

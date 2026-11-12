@@ -3,11 +3,9 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as v from 'valibot';
 
 import * as schema from '../db/schema';
-import type { NotificationService } from '../durable-objects/notification';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { maybeJsonRecord } from '../lib/runtime-validation';
 import { getTrustedApiOrigin } from '../lib/trusted-origins';
-import { connectorPendingInteractions } from '../services/connector-agent-answer';
 import { questionMetadata } from './attention-core';
 import { authorizeProjectOperation } from './authorization';
 import { OperationError } from './errors';
@@ -286,7 +284,7 @@ export async function inboxGet(ctx: OperationContext, input: { limit?: number; c
         // item is indistinguishable from one that is months old.
         updatedAt: isoFromEpochMs(row.updatedAt),
         attention,
-        interactions: await connectorPendingInteractions(ctx.env, row.projectId, row.id),
+        interactions: await ctx.ports.connector.pendingInteractions(row.projectId, row.id),
         link: operationLink(ctx, row.projectId, row.id),
       };
     })
@@ -317,13 +315,10 @@ export async function inboxGet(ctx: OperationContext, input: { limit?: number; c
     )
     .orderBy(desc(schema.tasks.updatedAt), desc(schema.tasks.id))
     .limit(limit + 1);
-  const notificationStub = ctx.env.NOTIFICATION.get(
-    ctx.env.NOTIFICATION.idFromName(ctx.actor.userId)
-  ) as unknown as Pick<NotificationService, 'listNotifications'>;
   const notifications =
     cursor?.notifications === null
       ? { notifications: [], nextCursor: null }
-      : await notificationStub.listNotifications(ctx.actor.userId, {
+      : await ctx.ports.account.listNotifications(ctx.actor.userId, {
           filter: 'unread',
           cursor: cursor?.notifications ?? undefined,
           limit,
