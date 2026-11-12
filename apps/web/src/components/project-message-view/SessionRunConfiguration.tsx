@@ -89,12 +89,7 @@ function configurationRows(runtime: SessionAgentRuntimeConfig): ConfigurationRow
         : EFFORT_LABELS.auto,
     });
   }
-  rows.push({
-    label: 'Permissions',
-    value:
-      AGENT_PERMISSION_MODE_LABELS[runtime.permissionMode as AgentPermissionMode] ??
-      runtime.permissionMode,
-  });
+  rows.push({ label: 'Permissions', value: permissionsLabel(runtime) });
   if (runtime.opencodeProvider) {
     rows.push({
       label: 'Provider',
@@ -109,4 +104,18 @@ function configurationRows(runtime: SessionAgentRuntimeConfig): ConfigurationRow
 
 function isExplicitEffort(runtime: SessionAgentRuntimeConfig): boolean {
   return Boolean(runtime.effort && runtime.effort !== 'auto');
+}
+
+/**
+ * Codex ignores the permission mode: the VM agent always starts it with
+ * `approval_policy = "never"` and full sandbox access (`codex_config.go`,
+ * `buildCodexACPManagedConfigEnv`) and skips `SetSessionMode` for it. Showing the stored
+ * mode there would misstate what is running.
+ */
+function permissionsLabel(runtime: SessionAgentRuntimeConfig): string {
+  if (runtime.agentType === 'openai-codex') return 'Full access (Codex never asks)';
+  return (
+    AGENT_PERMISSION_MODE_LABELS[runtime.permissionMode as AgentPermissionMode] ??
+    runtime.permissionMode
+  );
 }

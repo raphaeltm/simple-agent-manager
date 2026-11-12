@@ -402,7 +402,7 @@ describe('SessionHeader', () => {
         agentType: 'openai-codex',
         model: null,
         effort: null,
-        permissionMode: 'bypassPermissions',
+        permissionMode: 'default',
         opencodeProvider: null,
         skillName: null,
       },
@@ -413,7 +413,8 @@ describe('SessionHeader', () => {
     const configuration = await screen.findByTestId('session-run-configuration');
     expect(configuration).toHaveTextContent('ModelAgent default');
     expect(configuration).toHaveTextContent('EffortAuto');
-    expect(configuration).toHaveTextContent('PermissionsBypass Permissions');
+    // Codex always runs with approvals off, whatever mode was stored.
+    expect(configuration).toHaveTextContent('PermissionsFull access (Codex never asks)');
     expect(configuration).not.toHaveTextContent('Skill');
   });
 
