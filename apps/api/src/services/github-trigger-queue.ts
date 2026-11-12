@@ -1,12 +1,20 @@
-/** Durable admission intents. The existing GitHub recovery sweep drains these records. */
+/**
+ * Durable admission intents: `trigger_executions` rows that wait for a run slot.
+ *
+ * Two sources put events in the queue. GitHub events enter through
+ * `acceptGitHubTriggerExecution` here; signed webhooks through `acceptWebhookTriggerExecution`
+ * (webhook-trigger-queue.ts). Promotion, submission, retry and expiry are the same for both
+ * (`processQueuedTriggerExecution`, `drainTriggerQueue`): a waiting row carries its rendered
+ * prompt and admission snapshot, so nothing source-specific is needed to start it. Subject
+ * routing into an existing session applies only to rows with a `subject_key`, which only GitHub
+ * sets. The operations cron drains the queue.
+ */
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
-import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
-import { githubTriggerRecoveryConfig } from './github-trigger-recovery-config';
 import * as projectData from './project-data';
 import { githubTriggerNotice, safeNotice } from './sam-notice-builders';
 import { TERMINAL_STATUS_VALUES } from './task-status';
@@ -21,6 +29,7 @@ import {
   EXECUTION_HOLDS_RUN_SLOT_SQL,
   TRIGGER_RUN_TASK_ID_SQL,
 } from './trigger-run-slots';
+import { settleWebhookQueueRecord } from './webhook-signed-store';
 
 export interface GitHubQueueInput extends TriggerAdmissionInput {
   githubDeliveryId: string;
@@ -118,7 +127,7 @@ export async function acceptGitHubTriggerExecution(
       row.id
     )
     .run();
-  return processGitHubTriggerExecution(env, row.id, submitter, input.githubProcessingToken);
+  return processQueuedTriggerExecution(env, row.id, submitter, input.githubProcessingToken);
 }
 
 const terminalPlaceholders = TERMINAL_STATUS_VALUES.map(() => '?').join(',');
@@ -128,7 +137,8 @@ const liveTarget = `SELECT e.id FROM trigger_executions e JOIN tasks t ON t.id=$
     AND e.id!=q.id AND (q.routed_execution_id IS NULL OR e.id!=q.routed_execution_id) AND t.project_id=q.project_id AND t.status NOT IN (${terminalPlaceholders})
     AND t.chat_session_id IS NOT NULL ORDER BY e.sequence_number LIMIT 1`;
 
-export async function processGitHubTriggerExecution(
+/** Promotes one waiting event if a run slot is free and it is next in line, then submits it. */
+export async function processQueuedTriggerExecution(
   env: Env,
   executionId: string,
   submitter?: TriggerTaskSubmitter,
@@ -184,7 +194,7 @@ export async function processGitHubTriggerExecution(
     .from(schema.triggerExecutions)
     .where(eq(schema.triggerExecutions.id, executionId))
     .get();
-  if (!row) throw new Error('GitHub execution removed');
+  if (!row) throw new Error('Queued trigger execution removed');
   if (row.status === 'routing') {
     try {
       return await routeToSession(env, row);
@@ -222,15 +232,15 @@ export async function processGitHubTriggerExecution(
     .from(schema.triggers)
     .where(eq(schema.triggers.id, row.triggerId))
     .get();
-  if (!trigger) throw new Error('GitHub trigger removed');
+  if (!trigger) throw new Error('Queued trigger removed');
   const result = await admitAndSubmitTriggerExecution(
     env,
     {
       trigger,
       executionId,
       githubDeliveryId: row.githubDeliveryId ?? undefined,
-      eventType: row.eventType ?? 'github',
-      triggeredBy: 'github',
+      eventType: row.eventType ?? trigger.sourceType,
+      triggeredBy: trigger.sourceType === 'webhook' ? 'webhook' : 'github',
       scheduledAt: row.scheduledAt ?? undefined,
       queueManaged: true,
       githubProcessingToken: processingToken,
@@ -249,7 +259,7 @@ export async function processGitHubTriggerExecution(
       .run();
   }
   if (result.outcome === 'failed' || result.outcome === 'pending')
-    throw new Error('GitHub queue submission pending');
+    throw new Error('Trigger queue submission pending');
   if (result.outcome === 'submitted')
     await updateQueueAudit(
       env,
@@ -384,7 +394,13 @@ async function updateQueueAudit(
   _decision: string,
   _reason: string
 ) {
-  await syncGitHubExecutionAudit(env, row.id);
+  // Each source keeps its own record of the call; whichever one this execution has is updated.
+  // A failure here leaves the run started; the cron drain's repair finishes a webhook record.
+  if (row.githubDeliveryId) {
+    await syncGitHubExecutionAudit(env, row.id);
+    return;
+  }
+  await settleWebhookQueueRecord(env, row.id);
 }
 
 /** Missing target authority cannot renew an expired intent or prove a prior RPC failed. */
@@ -413,36 +429,4 @@ export async function syncGitHubExecutionAudit(env: Env, executionId: string) {
   )
     .bind(executionId, executionId, executionId)
     .run();
-}
-
-/** Bounded serial recovery on the existing operations cadence; waiting does not consume retries. */
-export async function drainGitHubTriggerQueue(env: Env, submitter?: TriggerTaskSubmitter) {
-  const config = githubTriggerRecoveryConfig(env);
-  const now = new Date().toISOString();
-  await env.DATABASE.prepare(
-    `UPDATE trigger_executions SET status='dropped',skip_reason='queue_expired',completed_at=?
-    WHERE id IN (SELECT id FROM trigger_executions WHERE status IN ('waiting','queued') AND queue_expires_at<=? AND NOT EXISTS (SELECT 1 FROM tasks WHERE tasks.trigger_execution_id=trigger_executions.id) ORDER BY created_at LIMIT ?)`
-  )
-    .bind(now, now, config.batchSize)
-    .run();
-  await env.DATABASE.prepare(
-    `UPDATE github_webhook_deliveries SET decision='dropped',decision_reason='queue_expired' WHERE id IN (SELECT github_delivery_id || ':' || trigger_id FROM trigger_executions WHERE status='dropped' AND skip_reason='queue_expired' AND completed_at=?)`
-  )
-    .bind(now)
-    .run();
-  const rows = await env.DATABASE.prepare(
-    `SELECT id FROM trigger_executions WHERE queue_expires_at IS NOT NULL AND rendered_prompt IS NOT NULL
-    AND status IN ('waiting','routing','queued') ORDER BY COALESCE(queue_attempted_at,created_at),sequence_number LIMIT ?`
-  )
-    .bind(config.batchSize)
-    .all<{ id: string }>();
-  const started = Date.now();
-  for (const row of rows.results) {
-    if (Date.now() - started >= config.maxWallTimeMs) break;
-    try {
-      await processGitHubTriggerExecution(env, row.id, submitter);
-    } catch {
-      log.warn('github_trigger_queue.retry', { executionId: row.id });
-    }
-  }
 }

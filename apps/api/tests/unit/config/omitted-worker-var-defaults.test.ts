@@ -334,7 +334,7 @@ const READ_PATHS: readonly ReadPath[] = [
   {
     label: 'search query limits',
     sources: [
-      `${API}/lib/search-query-limits.ts`,
+      'packages/worker-core/src/search-query-limits.ts',
       `${API}/durable-objects/project-data/message-search.ts`,
     ],
     read: (env) => [resolveSearchQueryLimits(env), resolveMessageSearchBounds(env)],

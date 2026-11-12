@@ -6,7 +6,7 @@ Use the current Valibot helpers for API JSON and external service responses:
 
 - `jsonValidator(schema)` in `apps/api/src/schemas/_validator.ts` for required Hono request bodies, followed by `c.req.valid('json')`.
 - `parseOptionalBody(req, schema, fallback)` for optional request bodies where every schema field is optional.
-- `parseWithSchema(schema, value, context)`, `expectJsonRecord`, `maybeJsonRecord`, `parseJsonRecord`, `readRequestJsonRecord`, and `readResponseJson` in `apps/api/src/lib/runtime-validation.ts` for non-Hono runtime JSON boundaries.
+- `parseWithSchema(schema, value, context)`, `expectJsonRecord`, `maybeJsonRecord`, `parseJsonRecord`, `readRequestJsonRecord`, and `readResponseJson` in `packages/worker-core/src/runtime-validation.ts` for non-Hono runtime JSON boundaries.
 
 ## Valibot error messages must never carry secrets or cross-tenant data
 
