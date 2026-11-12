@@ -230,6 +230,12 @@ export function EmailCodeSignIn({
         <Mail className="h-5 w-5" aria-hidden="true" />
         Email me a sign-in code
       </Button>
+      {!primary && (
+        <p className="text-xs text-fg-muted" data-testid="email-sign-in-provider-hint">
+          Made your account with GitHub (or another button above)? Sign in with that button. If
+          GitHub never confirmed your email to SAM, we email you a reminder instead of a code.
+        </p>
+      )}
     </form>
   );
 }

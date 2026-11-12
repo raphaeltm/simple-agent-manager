@@ -46,7 +46,9 @@ const {
   mockTeardownAuthBroadcastListener: vi.fn(),
 }));
 
+const mockConnectProvider = vi.hoisted(() => vi.fn());
 vi.mock('../../../src/lib/auth', () => ({
+  connectProvider: (provider: string) => mockConnectProvider(provider),
   signOut: () => mockSignOut(),
   useSession: () => mockUseSession(),
 }));
@@ -578,6 +580,34 @@ describe('AuthProvider', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Sign out and reconnect' }));
 
     expect(mockSignOut).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers Connect GitHub, not sign-out, when the account has no GitHub link', async () => {
+    mockUseSession.mockReturnValue({
+      data: validSession,
+      isPending: false,
+      error: null,
+      isRefetching: false,
+    });
+    mockSignOut.mockClear();
+    mockConnectProvider.mockReset().mockResolvedValue(undefined);
+    renderWithAuth();
+
+    fireEvent(
+      window,
+      new CustomEvent(GITHUB_REAUTH_REQUIRED_EVENT, {
+        detail: {
+          code: 'GITHUB_NOT_CONNECTED',
+          message: 'Your SAM account is not connected to GitHub.',
+        },
+      })
+    );
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Connect GitHub to continue');
+    expect(screen.queryByRole('button', { name: 'Sign out and reconnect' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Connect GitHub' }));
+    await waitFor(() => expect(mockConnectProvider).toHaveBeenCalledWith('github'));
+    expect(mockSignOut).not.toHaveBeenCalled();
   });
 
   describe('persisted query cache', () => {

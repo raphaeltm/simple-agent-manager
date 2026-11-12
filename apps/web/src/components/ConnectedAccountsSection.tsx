@@ -24,7 +24,7 @@ export function ConnectedAccountsSection() {
   const [connectError, setConnectError] = useState<string | null>(null);
   const [connecting, setConnecting] = useState<LinkableProvider | null>(null);
   const connected = useQuery({
-    queryKey: ['connected-providers', queryScope],
+    queryKey: ['auth', queryScope, 'account', 'connected-providers'],
     queryFn: listConnectedProviders,
     enabled: Boolean(queryScope),
   });
