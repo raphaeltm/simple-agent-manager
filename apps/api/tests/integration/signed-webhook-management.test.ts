@@ -267,6 +267,9 @@ describe('signed webhook setup through REST and MCP', () => {
       ['a SAM webhook token', `${['sam', 'wh'].join('_')}_${'a'.repeat(43)}`, /SAM webhook token/],
       ['a GitHub token', `${'ghp'}_${'a'.repeat(36)}`, /access token or API key/],
       ['a provider API key', `${'sk'}-proj-${'a'.repeat(40)}`, /access token or API key/],
+      // Padding does not carry a pasted token or a blank value past the checks.
+      ['a padded GitHub token', `  ${'ghp'}_${'a'.repeat(36)}  `, /access token or API key/],
+      ['only spaces', ' '.repeat(12), /at least 8/],
       ['a URL', ['https:', '', 'example.test', 'services', 'T000', 'B000'].join('/'), /URL/],
       ['too short', 'short', /at least 8/],
       ['too long', 'x'.repeat(513), /at most 512/],
@@ -282,6 +285,33 @@ describe('signed webhook setup through REST and MCP', () => {
       expect(text).toMatch(message);
       if (typeof value === 'string') expect(text).not.toContain(value);
       expect(storedSecretColumns(created.id).ciphertext).toBeNull();
+    });
+
+    it('saves the secret exactly as sent through the route, surrounding spaces included', async () => {
+      const created = await (
+        await createViaRest({ name: 'Slack', webhookConfig: slackConfig })
+      ).json<{ id: string }>();
+      const padded = ` ${SLACK_SECRET} `;
+      expect((await putSecret(created.id, { secret: padded })).status).toBe(200);
+      const event = (id: string) => ({
+        type: 'event_callback',
+        event_id: id,
+        event: { type: 'app_mention', text: 'hi', user: 'U1' },
+      });
+      // The trimmed key is not the saved key.
+      const trimmed = await app.request(
+        slackEvent(created.id, event('Ev-t'), SLACK_SECRET),
+        undefined,
+        env
+      );
+      expect(trimmed.status).toBe(401);
+      // The exact bytes verify.
+      const exact = await app.request(
+        slackEvent(created.id, event('Ev-e'), padded),
+        undefined,
+        env
+      );
+      expect(exact.status).toBe(202);
     });
 
     it('lets a viewer read but not save the secret, and hides the automation from another project', async () => {

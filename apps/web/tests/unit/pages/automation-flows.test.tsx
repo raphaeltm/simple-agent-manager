@@ -1261,10 +1261,15 @@ describe('signed webhook automation', { timeout: 20_000 }, () => {
     const input = screen.getByLabelText('Signing secret');
     expect(input).toHaveAttribute('type', 'password');
     expect(screen.getByRole('button', { name: 'Save secret' })).toBeDisabled();
+    // Whitespace alone cannot be saved.
+    await user.type(input, '   ');
+    expect(screen.getByRole('button', { name: 'Save secret' })).toBeDisabled();
+    await user.clear(input);
+    // The secret is an HMAC key: it is sent exactly as typed, surrounding spaces included.
     await user.type(input, `  ${SECRET}  `);
     await user.click(screen.getByRole('button', { name: 'Save secret' }));
     await waitFor(() =>
-      expect(api.setWebhookSigningSecret).toHaveBeenCalledWith('p1', 'trg-slack', SECRET)
+      expect(api.setWebhookSigningSecret).toHaveBeenCalledWith('p1', 'trg-slack', `  ${SECRET}  `)
     );
     await waitFor(() =>
       expect(screen.getByTestId('webhook-setup-status')).toHaveTextContent(

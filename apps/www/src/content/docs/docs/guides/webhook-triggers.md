@@ -119,9 +119,8 @@ under another ID starts nothing: SAM answers `202` with `ignored: "repeated_body
 **Refused: same body as an earlier event, under a new ID**. Identical bodies for different events
 are not supported with a header ID; read the ID from the body when the service puts one there.
 
-SAM uses the secret exactly as saved, except that leading and trailing spaces and line breaks are
-removed, because pasting often adds them. A sender whose secret really starts or ends with a space
-cannot be verified.
+SAM uses the secret exactly as you paste it, including any leading or trailing spaces, because
+the secret's bytes are the HMAC key. Check that you copied only the secret.
 
 ### The event ID
 

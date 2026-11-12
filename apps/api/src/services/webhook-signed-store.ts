@@ -107,24 +107,28 @@ const WRONG_SECRET_KINDS: Array<{ matches: (secret: string) => boolean; message:
 /**
  * Checks a pasted signing secret. Messages are fixed strings: the value is never echoed, logged
  * or included in an error.
+ *
+ * The secret is kept exactly as given: it is an HMAC key, so its bytes are the key, and a sender
+ * whose secret starts or ends with whitespace must still verify. The checks read a trimmed view,
+ * so padding cannot make an empty value pass, or let a pasted access token or URL through.
  */
 export function validateWebhookSigningSecret(
   value: unknown
 ): { ok: true; secret: string } | { ok: false; message: string } {
   if (typeof value !== 'string') return { ok: false, message: 'secret must be a string' };
-  const secret = value.trim();
-  if (secret.length < WEBHOOK_SIGNING_SECRET_MIN_LENGTH)
+  const visible = value.trim();
+  if (visible.length < WEBHOOK_SIGNING_SECRET_MIN_LENGTH)
     return {
       ok: false,
       message: `The signing secret must be at least ${WEBHOOK_SIGNING_SECRET_MIN_LENGTH} characters`,
     };
-  if (secret.length > WEBHOOK_SIGNING_SECRET_MAX_LENGTH)
+  if (value.length > WEBHOOK_SIGNING_SECRET_MAX_LENGTH)
     return {
       ok: false,
       message: `The signing secret must be at most ${WEBHOOK_SIGNING_SECRET_MAX_LENGTH} characters`,
     };
-  const wrong = WRONG_SECRET_KINDS.find((kind) => kind.matches(secret));
-  return wrong ? { ok: false, message: wrong.message } : { ok: true, secret };
+  const wrong = WRONG_SECRET_KINDS.find((kind) => kind.matches(visible));
+  return wrong ? { ok: false, message: wrong.message } : { ok: true, secret: value };
 }
 
 /**

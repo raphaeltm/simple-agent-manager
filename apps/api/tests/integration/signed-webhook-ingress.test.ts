@@ -31,7 +31,10 @@ import {
   drainTriggerQueue,
   drainTriggerQueueForTrigger,
 } from '../../src/services/trigger-queue-drain';
-import { setWebhookSigningSecret } from '../../src/services/webhook-signed-store';
+import {
+  setWebhookSigningSecret,
+  validateWebhookSigningSecret,
+} from '../../src/services/webhook-signed-store';
 import {
   fingerprintWebhookRequest,
   generateWebhookToken,
@@ -735,6 +738,23 @@ describe('signed webhook ingress vertical slice', () => {
       expect(slackSigned.status).toBe(401);
     });
 
+    it('verifies with the secret exactly as saved, surrounding spaces included', async () => {
+      const padded = ` ${GITHUB_SECRET} `;
+      // The same check the secret route runs keeps the value whole.
+      const checked = validateWebhookSigningSecret(padded);
+      expect(checked).toEqual({ ok: true, secret: padded });
+      if (!checked.ok) throw new Error('unreachable');
+      await saveSecret(githubTriggerId, checked.secret);
+      const body = { action: 'opened', issue: { title: 'Padded key' } };
+      const sign = (key: string) =>
+        `sha256=${createHmac('sha256', key).update(JSON.stringify(body)).digest('hex')}`;
+      // Signed with the trimmed key: not the saved key, refused.
+      expect((await send(githubRequest(body, 'pad-1', sign(GITHUB_SECRET)))).status).toBe(401);
+      // Signed with the exact bytes the sender holds: accepted.
+      expect((await send(githubRequest(body, 'pad-2', sign(padded)))).status).toBe(202);
+      expect(submitter).toHaveBeenCalledTimes(1);
+    });
+
     it('does not start a second run when a captured request is replayed under a fresh ID', async () => {
       // The delivery header is outside what the sender signed, so anyone holding one signed
       // request could otherwise resend its body under a new ID for ever.
@@ -1229,6 +1249,39 @@ describe('signed webhook ingress vertical slice', () => {
         'Slack said: message 2 (Ev-2)',
         'Slack said: message 3 (Ev-3)',
         'Slack said: message 4 (Ev-4)',
+      ]);
+    });
+
+    it('counts a start that throws against the tick budget', async () => {
+      const other = await createSigned('Second Slack app', {
+        verification: { scheme: 'slack_v0' },
+      });
+      await saveSecret(other.created.id, SLACK_SECRET);
+      // Line A: three waiting behind a finished run, now allowed three at once.
+      for (const n of [1, 2, 3, 4]) await send(slackRequest(mention(`Ev-a${n}`)));
+      await finishRun(executions()[0]!.id);
+      sqlite
+        .prepare('UPDATE triggers SET skip_if_running = 0, max_concurrent = 3 WHERE id = ?')
+        .run(slackTriggerId);
+      // Line B: one waiting behind a finished run.
+      for (const n of [1, 2])
+        await send(slackRequest(mention(`Ev-b${n}`), { triggerId: other.created.id }));
+      await finishRun(executions(other.created.id)[0]!.id);
+
+      // Budget of two attempts. A's head starts, A's next start throws: that is both.
+      env.GITHUB_TRIGGER_RECOVERY_BATCH_SIZE = '2';
+      const ok = submitter.getMockImplementation()!;
+      submitter.mockClear();
+      submitter.mockImplementation(async () => {
+        throw new Error('submission failed');
+      });
+      submitter.mockImplementationOnce(ok);
+      await drainTriggerQueue(env, submitter);
+      expect(submitter).toHaveBeenCalledTimes(2);
+      // B's head was not tried in this tick.
+      expect(executions(other.created.id).map((row) => row.status)).toEqual([
+        'completed',
+        'waiting',
       ]);
     });
 

@@ -147,7 +147,8 @@ function SigningSecretField({
   }, [editing]);
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    if (value.trim()) save.mutate(value.trim());
+    // Sent exactly as typed: the secret is an HMAC key, so surrounding spaces are part of it.
+    if (value.trim()) save.mutate(value);
   };
   if (!editing) {
     return (

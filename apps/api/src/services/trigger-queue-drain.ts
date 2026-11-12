@@ -112,12 +112,14 @@ export async function drainTriggerQueue(
     .bind(now, ...queueSourceBindings(options), now, config.batchSize)
     .all<{ id: string; triggerId: string; status: string; subjectless: number }>();
   const deadline = Date.now() + config.maxWallTimeMs;
+  // Every attempt counts against the tick's budget, including one that throws, so failing
+  // starts cannot stretch a tick past `batchSize` attempts.
   let processed = 0;
   for (const row of rows.results) {
     if (Date.now() >= deadline || processed >= config.batchSize) break;
+    processed += 1;
     try {
       const result = await processQueuedTriggerExecution(env, row.id, submitter);
-      processed += 1;
       // Only the head of each line was selected. When it starts, the next event may fit a
       // further free run slot of the same automation, so keep filling that line now instead of
       // one event per tick. Subject events are already tried anywhere in their line.
@@ -146,7 +148,7 @@ export async function drainTriggerQueue(
  * Tries the events at the head of one automation's line, oldest first, until one cannot start.
  * Called after a webhook event is committed so a free slot is used at once instead of at the
  * next cron tick, and by the cron drain after a head starts, to fill the automation's other free
- * slots. Returns how many events it tried.
+ * slots. Returns how many events it tried, including one that threw.
  */
 export async function drainTriggerQueueForTrigger(
   env: Env,
@@ -162,12 +164,12 @@ export async function drainTriggerQueueForTrigger(
   )
     .bind(triggerId, new Date().toISOString(), limit)
     .all<{ id: string }>();
-  let processed = 0;
+  let attempted = 0;
   for (const row of rows.results) {
     if (Date.now() >= deadline) break;
+    attempted += 1;
     try {
       const result = await processQueuedTriggerExecution(env, row.id, submitter);
-      processed += 1;
       // Later events are behind this one in line; if it could not start, neither can they.
       if (result.outcome !== 'submitted') break;
     } catch {
@@ -175,5 +177,5 @@ export async function drainTriggerQueueForTrigger(
       break;
     }
   }
-  return processed;
+  return attempted;
 }
