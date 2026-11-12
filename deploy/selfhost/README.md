@@ -167,6 +167,24 @@ because redeeming a code would disconnect it from GitHub.
 Code: `scripts/selfhost/mail-settings.ts` (SMTP settings, collector), `caddy/mail-collector/` and
 `caddy/start.sh` (collector route), `scripts/selfhost/create-account.ts` (account command).
 
+## Agent sign-in (test boxes)
+
+A test box can let trusted SAM agents sign in as chosen accounts with a workload identity token
+instead of an email code (public guide: `apps/www/src/content/docs/docs/guides/agent-sign-in.md`).
+Put the trust on one line in `.state/secrets.env` and deploy:
+
+```bash
+AGENT_SIGN_IN_TRUST='{"issuer":"https://api.example.com/oidc","allowedSources":[{"projectId":"…","userId":"…"}],"allowedTargets":["<account id>"]}'
+```
+
+The deploy passes every `secrets.env` line to the Worker and rebuilds the whole Worker
+configuration each time, so removing the line and deploying again switches it off. It applies the
+`0234_agent_sign_ins` migration with the others. The key fetch to the issuer goes through the
+guarded outbound fetch (public HTTPS only, no redirects), and the egress fence already allows the
+public internet, so a public issuer needs no fence entry. Agents request the audience
+`https://api.SAM_DOMAIN/api/auth/workload-identity-login`. The box needs an administrator account
+first. Choose targets that are not administrators and not linked to real GitHub organizations.
+
 ## Machines for workspaces
 
 Nodes come from a compute pool. A box with a platform cloud credential (for example the GCP

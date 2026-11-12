@@ -40,6 +40,7 @@ Uses `GH_*` prefix because GitHub Actions secret names cannot start with `GITHUB
 | Secret   | `GH_APP_PRIVATE_KEY`                               | Yes                                                                |
 | Secret   | `GH_APP_SLUG`                                      | Yes                                                                |
 | Secret   | `GH_WEBHOOK_SECRET`                                | Yes when GitHub App webhooks are active                            |
+| Secret   | `AGENT_SIGN_IN_TRUST`                              | No (test instances only: JSON trust config for agent sign-in through workload identity; unset => off and the Worker secret is deleted on deploy; see `apps/www/src/content/docs/docs/guides/agent-sign-in.md`) |
 | Secret   | `ENCRYPTION_KEY`                                   | No (auto-generated)                                                |
 | Secret   | `JWT_PRIVATE_KEY`                                  | No (auto-generated)                                                |
 | Secret   | `JWT_PUBLIC_KEY`                                   | No (auto-generated)                                                |

@@ -47,6 +47,17 @@ test.describe('brand guide', () => {
     await expect(share).toHaveClass(/is-in/);
   });
 
+  test('imagery shows the current app captures, and they load', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto(PATH);
+    const desk = page.locator('.bg-collage-desk img:visible');
+    await desk.scrollIntoViewIfNeeded();
+    await expect(desk).toHaveAttribute('src', /\/images\/brand\/app-desktop/);
+    await expect.poll(() => desk.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1600);
+    const phone = page.locator('.bg-collage-phone img:visible');
+    await expect.poll(() => phone.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(780);
+  });
+
   test('copies a colour value from its swatch', async ({ page, context, browserName }) => {
     // Both projects run Chromium; the guard documents that clipboard permissions are Chromium-only.
     test.skip(browserName !== 'chromium', 'clipboard permissions are Chromium-only');
@@ -116,15 +127,20 @@ test.describe('brand guide', () => {
     await expect(page.locator('[data-pin]')).toHaveAttribute('data-pinned', '');
     const last = page.getByRole('button', { name: 'Copy Forest Ink hex #11271d' });
     await last.focus();
-    // The focus handler scrolls the page; wait until the window has moved before measuring.
-    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
-    await expect.poll(async () => (await last.boundingBox())?.x ?? -1).toBeGreaterThanOrEqual(0);
-    const box = await last.boundingBox();
+    // The focus handler scrolls the page and the track's transform follows a frame later,
+    // so poll until the whole button sits inside the viewport.
     const viewport = page.viewportSize()!;
-    expect(box).not.toBeNull();
-    expect(box!.x).toBeGreaterThanOrEqual(0);
-    expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width);
-    expect(box!.y).toBeGreaterThanOrEqual(0);
-    expect(box!.y + box!.height).toBeLessThanOrEqual(viewport.height);
+    await expect
+      .poll(async () => {
+        const box = await last.boundingBox();
+        if (!box) return 'missing';
+        const inside =
+          box.x >= 0 &&
+          box.y >= 0 &&
+          box.x + box.width <= viewport.width &&
+          box.y + box.height <= viewport.height;
+        return inside ? 'inside' : `outside at ${Math.round(box.x)},${Math.round(box.y)}`;
+      })
+      .toBe('inside');
   });
 });

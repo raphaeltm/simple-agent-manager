@@ -1,4 +1,4 @@
-import { expect, type Page, test } from './fixtures';
+import { expect, expectNoOverflowOrSeriousAxeViolations, type Page, test } from './fixtures';
 
 /**
  * Homepage (src/components/factory/): real SAM screens in both themes, stages that play once and
@@ -50,7 +50,8 @@ test.describe('homepage', () => {
       });
       await page.goto('/');
       await scrollThrough(page);
-      await expect.poll(() => requested.length).toBeGreaterThan(5);
+      // The hero's home screen is the one screenshot; every other screen is HTML.
+      await expect.poll(() => requested.length).toBeGreaterThan(0);
       const wrongTheme = requested.filter((path) => path.endsWith('-light.webp') !== (theme === 'light'));
       expect(wrongTheme).toEqual([]);
     });
@@ -92,21 +93,63 @@ test.describe('homepage', () => {
     expect(await runningAnimations(page)).toBe(0);
   });
 
-  test('phones get phone-width captures, desktops the full screens', async ({ page }) => {
+  test('pausing during the intro settles the stack without animating it', async ({ page }) => {
+    await page.goto('/');
+    const hero = page.locator('[data-fh-hero]');
+    // Record every pose the hero takes from the moment the visitor presses Pause.
+    await page.getByRole('button', { name: 'Pause animation' }).click();
+    await hero.evaluate((el) => {
+      const seen: string[] = [];
+      (window as unknown as { __poses: string[] }).__poses = seen;
+      new MutationObserver(() => seen.push(el.dataset.motion ?? '')).observe(el, {
+        attributes: true,
+        attributeFilter: ['data-motion'],
+      });
+    });
+    await page.locator('[data-fh-stage]').evaluate((el) => el.scrollIntoView({ block: 'center' }));
+    await expect(hero).toHaveAttribute('data-motion', 'live', { timeout: 10_000 });
+    await page.waitForTimeout(3500);
+    const poses = await page.evaluate(() => (window as unknown as { __poses: string[] }).__poses);
+    expect(poses).not.toContain('assembling');
+    await expect(hero).toHaveAttribute('data-paused', '');
+  });
+
+  test('stage screens are real UI; phones drop the inset', async ({ page }) => {
     await page.goto('/');
     const phone = (page.viewportSize()?.width ?? 1280) < 768;
     const figure = page.locator('#stage-shape .stage-figure');
     await figure.scrollIntoViewIfNeeded();
-    await expect(figure.locator('.stage-phone')).toBeVisible({ visible: phone });
-    await expect(figure.locator('.stage-desk')).toBeVisible({ visible: !phone });
+    // The screen is HTML (not a capture), presented to screen readers as one labelled image.
+    await expect(figure.getByRole('img', { name: /Send to agent/ })).toBeVisible();
+    await expect(figure.getByText('Send to agent', { exact: true })).toBeVisible();
     await expect(figure.locator('.stage-inset')).toBeVisible({ visible: !phone });
+  });
+
+  test('the hero assembles once on screen, and the pause control stops it', async ({ page }) => {
+    await page.goto('/');
+    const hero = page.locator('[data-fh-hero]');
+    await page.locator('[data-fh-stage]').evaluate((el) => el.scrollIntoView({ block: 'center' }));
+    await expect(hero).toHaveAttribute('data-motion', 'live', { timeout: 10_000 });
+    await expect(hero.locator('[data-fh-field] canvas')).toHaveCount(2);
+    await page.getByRole('button', { name: 'Pause animation' }).click();
+    await expect(hero).toHaveAttribute('data-paused', '');
+    await expect(page.getByRole('button', { name: 'Pause animation' })).toHaveAttribute('aria-pressed', 'true');
+    const heroRunning = () =>
+      page.evaluate(() => {
+        const root = document.querySelector('[data-fh-hero]');
+        return document.getAnimations().filter((a) => {
+          const target = (a.effect as KeyframeEffect | null)?.target;
+          return a.playState === 'running' && Boolean(root && target && root.contains(target));
+        }).length;
+      });
+    await expect.poll(heroRunning, { timeout: 4_000 }).toBe(0);
   });
 
   test('every stage picture fits the viewport', async ({ page }) => {
     await page.goto('/');
     const overflow = await page.evaluate(() => {
       const width = document.documentElement.clientWidth;
-      return [...document.querySelectorAll('.stage-frame, .floor-frame, .fh-screen')]
+      return [...document.querySelectorAll('.stage-frame, .floor-frame')]
         .map((el) => el.getBoundingClientRect())
         .filter((box) => box.left < -1 || box.right > width + 1).length;
     });
@@ -124,6 +167,14 @@ test.describe('homepage', () => {
         .filter((box) => box.left < -0.5 || box.right > window.innerWidth + 0.5).length,
     );
     expect(outside).toBe(0);
+  });
+
+  test('dark theme has no serious axe violations', async ({ page }) => {
+    // marketing-pages.spec.ts covers the light theme; the HTML screens have their own dark palette.
+    await useTheme(page, 'dark');
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto('/');
+    await expectNoOverflowOrSeriousAxeViolations(page);
   });
 
   test('the homepage stays under 1,000 elements', async ({ page }) => {

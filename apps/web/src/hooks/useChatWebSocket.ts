@@ -19,6 +19,17 @@ import { maybeJsonRecord } from '../lib/runtime-validation';
 
 export type ChatConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
 
+/** Fields a `session.updated` push may change on the open session. */
+export type SessionUpdatedFields = Partial<
+  Pick<ChatSessionResponse, 'topic' | 'workspaceId' | 'agentSessionId' | 'status'>
+>;
+
+/**
+ * The statuses the DO pushes in `session.updated` (`applySessionSleep`, `wakeSession`).
+ * Stopped and failed arrive as their own events, which also clear the agent's activity.
+ */
+const PUSHED_SESSION_STATUSES: readonly string[] = ['active', 'sleeping'];
+
 const BASE_RECONNECT_DELAY = 1000;
 const MAX_RECONNECT_DELAY = 30000;
 const MAX_RETRIES = 10;
@@ -58,10 +69,8 @@ interface UseChatWebSocketOptions {
     /** Whether the agent's adapter can steer; absent when the server has no report yet. */
     steeringSupported?: boolean
   ) => void;
-  /** Called when the session metadata changes server-side. */
-  onSessionUpdated?: (
-    updates: Partial<Pick<ChatSessionResponse, 'topic' | 'workspaceId' | 'agentSessionId'>>
-  ) => void;
+  /** Called when the session metadata or lifecycle status changes server-side. */
+  onSessionUpdated?: (updates: SessionUpdatedFields) => void;
   /**
    * Called when the replacement TaskRunner waking this sleeping session advances a
    * phase. Pushed so the wake banner updates without waiting for the fallback poll.
@@ -77,6 +86,8 @@ interface UseChatWebSocketOptions {
 export interface WakeProgressUpdate {
   recoveryStatus: 'waking' | 'restored' | 'failed';
   wakePhase: TaskExecutionStep | null;
+  /** The wake claim the push belongs to; null or absent from a server that predates it. */
+  wakeAttemptId?: string | null;
 }
 
 export interface UseChatWebSocketReturn {
@@ -264,9 +275,14 @@ export function useChatWebSocket({
           } else if (data.type === 'session.updated') {
             const p = payload;
             if (p.sessionId !== sessionId) return;
-            const updates: Partial<
-              Pick<ChatSessionResponse, 'topic' | 'workspaceId' | 'agentSessionId'>
-            > = {};
+            const updates: SessionUpdatedFields = {};
+            // The DO pushes the sleep/wake transition here (`applySessionSleep`,
+            // `wakeSession`). A connected active tab does not poll, so dropping it
+            // left an open tab showing an active composer after the server slept the
+            // session, and the next message went out as a prompt, not a wake.
+            if (typeof p.status === 'string' && PUSHED_SESSION_STATUSES.includes(p.status)) {
+              updates.status = p.status;
+            }
             if (typeof p.topic === 'string' || p.topic === null) {
               updates.topic = p.topic;
             }
@@ -312,6 +328,7 @@ export function useChatWebSocket({
                 // An unknown/absent step is normal early in a wake — the runner has
                 // been claimed but has not written its first execution step yet.
                 wakePhase: isTaskExecutionStep(p.wakePhase) ? p.wakePhase : null,
+                wakeAttemptId: typeof p.wakeAttemptId === 'string' ? p.wakeAttemptId : null,
               });
             }
           } else if (data.type === 'session.access.changed') {

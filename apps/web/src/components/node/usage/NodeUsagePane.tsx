@@ -44,6 +44,8 @@ const STATUS_CHIP: Record<NodeStatus, { label: string; tone: ChipTone; dot?: boo
   sleeping: { label: 'Sleeping', tone: 'muted' },
   stopping: { label: 'Stopping', tone: 'muted' },
   stopped: { label: 'Stopped', tone: 'muted' },
+  destroying: { label: 'Deleting', tone: 'muted', dot: true },
+  deleting: { label: 'Deleting', tone: 'muted', dot: true },
   deleted: { label: 'Deleted', tone: 'muted' },
   error: { label: 'Error', tone: 'danger' },
 };

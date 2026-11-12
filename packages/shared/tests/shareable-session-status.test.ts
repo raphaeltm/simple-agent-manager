@@ -11,7 +11,7 @@ const SHAREABLE: Record<ChatSessionStatus, boolean> = {
   // Asleep is still a live conversation: the next message wakes it.
   sleeping: true,
   stopped: false,
-  error: false,
+  failed: false,
 };
 
 describe('isShareableChatSessionStatus', () => {

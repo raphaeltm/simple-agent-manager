@@ -258,6 +258,10 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   MAX_API_TOKENS_PER_USER?: string; // Max active tokens per user (default: 10)
   MAX_API_TOKEN_NAME_LENGTH?: string; // Max token name length (default: 100)
   API_TOKEN_SESSION_DURATION_SECONDS?: string; // Session lifetime for token login (default: 604800 = 7 days)
+  // Agent sign-in through workload identity (services/agent-sign-in/config.ts). JSON trust
+  // configuration, deploy-time Worker secret only: absent, empty or malformed => feature off.
+  // Never an admin setting, so a compromised admin account cannot open this door.
+  AGENT_SIGN_IN_TRUST?: string;
   PROJECT_INVITE_TOKEN_BYTES?: string; // Random bytes for project invite links (default: 32)
   PROJECT_INVITE_DEFAULT_EXPIRY_DAYS?: string; // Default invite-link lifetime (default: 7)
   PROJECT_INVITE_MAX_EXPIRY_DAYS?: string; // Maximum invite-link lifetime (default: 30)
