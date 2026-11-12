@@ -52,6 +52,7 @@ import {
 import { listTriggerRows, toTriggerResponse } from '../../services/trigger-read';
 import { triggerStatusUpdates } from '../../services/trigger-status';
 import {
+  assertWebhookSchemeUnchanged,
   getWebhookTriggerLimits,
   validateWebhookTriggerConfig,
 } from '../../services/webhook-trigger-config';
@@ -59,7 +60,8 @@ import {
   mergeWebhookConfig,
   toWebhookTriggerConfig,
   webhookConfigUpdateValues,
-} from '../../services/webhook-trigger-store';
+} from '../../services/webhook-trigger-config-rows';
+import { readWebhookTriggerConfig } from '../../services/webhook-trigger-setup';
 import { requireProjectTaskRead, requireProjectTaskWrite } from '../task-project-auth';
 import { buildWebhookCredential } from './webhooks';
 
@@ -151,12 +153,8 @@ async function enrichTrigger(
     }
   }
   if (row.sourceType === 'webhook') {
-    const config = await db
-      .select()
-      .from(schema.webhookTriggerConfigs)
-      .where(eq(schema.webhookTriggerConfigs.triggerId, row.id))
-      .get();
-    if (config) response.webhookConfig = toWebhookTriggerConfig(config);
+    const config = await readWebhookTriggerConfig(env, row);
+    if (config) response.webhookConfig = config;
   }
   if (row.sourceType === 'email') {
     response.emailConfig = await loadEmailTriggerConfig(db, env, row.id);
@@ -239,7 +237,7 @@ crudRoutes.get('/', async (c) => {
       };
     }
     const webhook = webhookById.get(row.id);
-    if (webhook) response.webhookConfig = toWebhookTriggerConfig(webhook);
+    if (webhook) response.webhookConfig = toWebhookTriggerConfig(webhook, c.env);
     const email = emailById.get(row.id);
     if (email) response.emailConfig = toEmailTriggerConfig(email, c.env.BASE_DOMAIN);
     return response;
@@ -387,10 +385,9 @@ crudRoutes.patch('/:triggerId', jsonValidator(UpdateTriggerSchema), async (c) =>
       .where(eq(schema.webhookTriggerConfigs.triggerId, triggerId))
       .get();
     if (!current) throw errors.notFound('Webhook trigger');
-    effectiveWebhookConfig = mergeWebhookConfig(
-      toWebhookTriggerConfig(current),
-      body.webhookConfig
-    );
+    const stored = toWebhookTriggerConfig(current, c.env);
+    assertWebhookSchemeUnchanged(stored.verification, body.webhookConfig.verification);
+    effectiveWebhookConfig = mergeWebhookConfig(stored, body.webhookConfig);
     const configError = validateWebhookTriggerConfig(
       effectiveWebhookConfig,
       getWebhookTriggerLimits(c.env)

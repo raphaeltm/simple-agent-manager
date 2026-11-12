@@ -833,6 +833,8 @@ Set these through GitHub Environment variables named `GH_TRIGGER_RECOVERY_*` (fo
 
 Webhook tokens use the existing `ENCRYPTION_KEY` as keyed-hash material and do not require a separate deployment secret. See [Webhook Triggers](/docs/guides/webhook-triggers/) for request, credential, filtering, and audit behavior.
 
+Signed webhooks (Slack and HMAC) add three limits that are [admin settings](/docs/guides/admin-settings/), not environment variables: `operations.webhookQueueMaxPending` (50 events waiting per trigger), `operations.webhookQueueTtlSeconds` (86400, how long an event waits for a free run) and `operations.webhookSignatureToleranceSeconds` (300, the allowed clock difference for a signed timestamp). A signing secret is encrypted with `CREDENTIAL_ENCRYPTION_KEY` when it is set, otherwise `ENCRYPTION_KEY`; no extra deployment secret is needed.
+
 Webhook damping uses Cloudflare KV's eventually consistent read-update-write behavior. It reduces accidental bursts and abuse but is not a strict distributed quota.
 
 ## Agent Requests in Chat

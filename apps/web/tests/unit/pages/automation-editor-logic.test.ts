@@ -1,6 +1,7 @@
 import {
   DEFAULT_CRON_TEMPLATE_MAX_LENGTH,
   type ProjectStandingWatch,
+  SLACK_WEBHOOK_DEFAULTS,
   type TriggerResponse,
 } from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
@@ -36,6 +37,7 @@ import {
   newEditorState,
   scheduleFromCron,
   withEmailDefaults,
+  withWebhookCaller,
 } from '../../../src/pages/automation/editor/state';
 import { templateById } from '../../../src/pages/automation/editor/templates';
 import { GIVE_UP_OPTIONS } from '../../../src/pages/automation/schedule-time';
@@ -163,10 +165,12 @@ describe('creating triggers', () => {
         ignoreActors: ['dependabot[bot]'],
       },
     });
+    const webhookBase = newEditorState({ start: 'webhook' }, NOW);
     const webhook = withPrompt({
-      ...newEditorState({ start: 'webhook' }, NOW),
+      ...webhookBase,
       name: 'Alerts',
       webhook: {
+        ...webhookBase.webhook,
         sourceLabel: ' PagerDuty ',
         includedHeaders: 'x-request-id, x-event',
         filterMode: 'any',
@@ -179,6 +183,125 @@ describe('creating triggers', () => {
       filterMode: 'any',
       filters: [{ path: 'event.severity', operator: 'equals', value: 'critical' }],
     });
+  });
+
+  it('builds a Slack webhook from the caller choice, with its defaults filled in once', () => {
+    const base = newEditorState({ start: 'webhook' }, NOW);
+    const slack = withWebhookCaller(base, 'slack');
+    // Picking Slack seeds the conditions and the starting instructions the person has not typed.
+    expect(slack.webhook.filters).toEqual(SLACK_WEBHOOK_DEFAULTS.filters);
+    expect(slack.action.prompt).toBe(SLACK_WEBHOOK_DEFAULTS.promptTemplate);
+    expect(triggerCreateRequest({ ...slack, name: 'Slack' }).webhookConfig).toEqual({
+      sourceLabel: undefined,
+      includedHeaders: undefined,
+      filterMode: 'all',
+      filters: [
+        { path: 'event.type', operator: 'equals', value: 'app_mention' },
+        { path: 'event.bot_id', operator: 'notExists' },
+      ],
+      verification: { scheme: 'slack_v0' },
+      eventId: { path: 'event_id' },
+    });
+
+    // Going back to "my own script" removes only what was filled in and left untouched.
+    const back = withWebhookCaller(slack, 'script');
+    expect(back.webhook.filters).toEqual([]);
+    expect(back.action.prompt).toBe('');
+    expect(triggerCreateRequest(withPrompt({ ...back, name: 'Script' })).webhookConfig).toEqual({
+      sourceLabel: undefined,
+      includedHeaders: undefined,
+      filterMode: 'all',
+      filters: [],
+    });
+  });
+
+  it('keeps what the person typed when they pick or leave Slack', () => {
+    const typed = withPrompt(
+      {
+        ...newEditorState({ start: 'webhook' }, NOW),
+        webhook: {
+          ...newEditorState({ start: 'webhook' }, NOW).webhook,
+          filters: [{ path: 'event.type', operator: 'equals', value: 'message' }],
+        },
+      },
+      'My own instructions'
+    );
+    const slack = withWebhookCaller(typed, 'slack');
+    expect(slack.webhook.filters).toEqual(typed.webhook.filters);
+    expect(slack.action.prompt).toBe('My own instructions');
+    const back = withWebhookCaller(slack, 'signed');
+    expect(back.webhook.filters).toEqual(typed.webhook.filters);
+    expect(back.action.prompt).toBe('My own instructions');
+    // The Slack event-ID path does not follow the person to another kind of sender.
+    expect(back.webhook).toMatchObject({ eventIdSource: 'header', eventIdKey: '' });
+  });
+
+  it('builds a signed webhook with lowercased header names and requires both of them', () => {
+    const base = withWebhookCaller(newEditorState({ start: 'webhook' }, NOW), 'signed');
+    expect(validateStep(base, 'when', CAN)).toMatchObject({
+      webhookSignature: expect.stringContaining('signature'),
+      webhookEventId: expect.stringContaining('event ID'),
+    });
+    const filled = withPrompt({
+      ...base,
+      name: 'Repo',
+      webhook: {
+        ...base.webhook,
+        signatureHeader: ' X-Hub-Signature-256 ',
+        eventIdSource: 'header',
+        eventIdKey: 'X-GitHub-Delivery',
+      },
+    });
+    expect(validateStep(filled, 'when', CAN)).toEqual({});
+    expect(triggerCreateRequest(filled).webhookConfig).toMatchObject({
+      verification: { scheme: 'hmac_sha256_body', header: 'x-hub-signature-256' },
+      eventId: { header: 'x-github-delivery' },
+    });
+    const byPath = {
+      ...filled,
+      webhook: { ...filled.webhook, eventIdSource: 'path' as const, eventIdKey: ' event.id ' },
+    };
+    expect(triggerCreateRequest(byPath).webhookConfig?.eventId).toEqual({ path: 'event.id' });
+    expect(
+      validateStep(
+        { ...filled, webhook: { ...filled.webhook, signatureHeader: 'bad header' } },
+        'when',
+        CAN
+      )
+    ).toHaveProperty('webhookSignature');
+    // A token webhook has neither rule.
+    expect(validateStep(newEditorState({ start: 'webhook' }, NOW), 'when', CAN)).toEqual({});
+  });
+
+  it('reads the caller back from a stored configuration, including one cached before schemes existed', () => {
+    const stored = (webhookConfig: Record<string, unknown>) =>
+      editorStateFromTrigger(
+        trigger({
+          sourceType: 'webhook',
+          webhookConfig: {
+            sourceLabel: null,
+            filterMode: 'all',
+            filters: [],
+            includedHeaders: [],
+            ...webhookConfig,
+          } as unknown as TriggerResponse['webhookConfig'],
+        })
+      ).webhook;
+    expect(
+      stored({ verification: { scheme: 'slack_v0' }, eventId: { path: 'event_id' } })
+    ).toMatchObject({ caller: 'slack', eventIdSource: 'path', eventIdKey: 'event_id' });
+    expect(
+      stored({
+        verification: { scheme: 'hmac_sha256_body', header: 'x-sig' },
+        eventId: { header: 'x-id' },
+      })
+    ).toMatchObject({
+      caller: 'signed',
+      signatureHeader: 'x-sig',
+      eventIdSource: 'header',
+      eventIdKey: 'x-id',
+    });
+    expect(stored({})).toMatchObject({ caller: 'script', eventIdKey: '' });
   });
 
   it('refuses to build a trigger for one-time or event starts', () => {

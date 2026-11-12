@@ -169,6 +169,7 @@ import { terminalRoutes } from './routes/terminal';
 import { transcribeRoutes } from './routes/transcribe';
 import { trialRoutes } from './routes/trial';
 import { triggerWebhookRoutes } from './routes/trigger-webhooks';
+import { signedTriggerWebhookRoutes } from './routes/trigger-webhooks-signed';
 import { triggersRoutes } from './routes/triggers';
 import { ttsRoutes } from './routes/tts';
 import { uiGovernanceRoutes } from './routes/ui-governance';
@@ -883,6 +884,8 @@ app.route('/api/cli', cliRoutes);
 app.route('/api/chats', chatsRoutes);
 app.route('/api/t', analyticsIngestRoutes);
 app.route('/api/webhooks', triggerWebhookRoutes);
+// Signed senders (Slack, HMAC) cannot present SAM's token: POST /api/webhooks/in/:triggerId.
+app.route('/api/webhooks', signedTriggerWebhookRoutes);
 // ORDERING IS CRITICAL: Routes using callback JWT auth MUST be mounted before
 // projectsRoutes. projectsRoutes has use('/*', requireAuth()) which leaks to
 // all siblings at the same base path — mounting these routes first causes them

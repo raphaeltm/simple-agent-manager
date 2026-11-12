@@ -295,6 +295,50 @@ Library files, repository files, workspace files, and chat messages can all be w
 
 Mermaid lays a diagram out in the live page before it is sanitized, so a remote image named in diagram syntax can still be fetched once while the diagram renders. Markdown images (`![](…)`) are also shown as written. A platform-wide policy for remote resources in agent content, including scripts inside previewed PDFs, is tracked separately.
 
+## Signed Webhook Triggers
+
+A signed webhook trigger (Slack, or a service that sends an HMAC-SHA256 of its body) is reached at
+a public address that names the trigger, `POST /api/webhooks/in/:triggerId`
+(`handleSignedWebhook` in `apps/api/src/routes/trigger-webhooks-signed.ts`). The address is not a
+credential. Trust comes from the signature:
+
+- **The check is code, over raw bytes.** `verifyWebhookSignature` in
+  `apps/api/src/services/webhook-signature.ts` holds one function per scheme and compares with
+  `crypto.subtle.verify`, which is constant-time. It runs on the request body exactly as received,
+  before the body is decoded or parsed. Nothing in the body is read, and nothing counts against the
+  trigger's rate limit, until it passes. Slack's timestamp must be within
+  `operations.webhookSignatureToleranceSeconds` (300 by default); the age is checked only after the
+  MAC matches, so only a holder of the secret can learn that a request was stale.
+- **The signing secret is write-only.** A project member with write access saves it through
+  `PUT /api/projects/:projectId/triggers/:triggerId/webhook/signing-secret`
+  (`setWebhookSigningSecret` in `apps/api/src/services/webhook-signed-store.ts`), which checks the
+  project and the scheme inside the write. It is stored with AES-GCM under the credential
+  encryption key. No API or MCP tool returns it, error messages for a refused value are fixed
+  strings, and MCP `create_trigger` refuses a secret passed to it
+  (`apps/api/src/routes/mcp/trigger-create-tool.ts`).
+- **The provider's event ID is the duplicate key.** `readWebhookEventId` in
+  `apps/api/src/services/webhook-trigger-payload.ts` accepts only a bounded string or number. An
+  event without one starts nothing; SAM does not fall back to skipping the duplicate check.
+- **A verified sender is still untrusted.** A valid signature proves which provider sent the event,
+  not that its author may act for the project. The run uses the trigger's stored agent profile,
+  instructions and execution user; the event content reaches the agent only as text in those
+  instructions.
+- **What is kept.** The call log holds an outcome, a reason code, sizes and times, never a body, a
+  signature or an event ID (the ID is stored as a keyed hash). While a verified event waits for a
+  free run, its rendered instructions are held on the waiting execution
+  (`acceptWebhookTriggerExecution` in `apps/api/src/services/webhook-trigger-queue.ts`), and
+  removed once the run's start is recorded (`settleWebhookQueueRecord`, with
+  `repairWebhookQueueRecords` finishing it from the cron if that write failed, both in
+  `apps/api/src/services/webhook-signed-store.ts`) or the event is dropped (`drainTriggerQueue`
+  in `apps/api/src/services/trigger-queue-drain.ts`). The run's task and chat
+  keep whatever the instructions copied from the event.
+- **Refusals cannot flood the log.** `recordWebhookSignedNotice` keeps one row per trigger, reason
+  and rate-limit window, and at most one project event for it.
+
+The token address `POST /api/webhooks/ingest` does not serve signed triggers
+(`findWebhookTriggerByToken` filters on the scheme), and the signed address does not serve token
+triggers (`findSignedWebhookTrigger`).
+
 ## Secret Redaction in Logs and Diagnostics
 
 Credential tokens are stripped before text reaches a log line or a stored diagnostic: OpenAI and Anthropic `sk-...` keys (including `sk-proj-...` and `sk-ant-...`), OpenCode `oc_sk_...` keys, GitHub tokens (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_`), and SAM personal access and webhook tokens. Every API redactor takes these token shapes from one definition, `redactCredentialTokens` in `packages/worker-core/src/credential-token-redaction.ts`: structured Worker logs (`packages/worker-core/src/logger.ts`), stored VM agent error reports and debug-agent evidence (`redactSensitiveData`), comment directives delivered to agents, deployment publish and apply events, Report Issue text, and agent sign-in helper diagnostics. `Bearer ...` and `Basic ...` values are matched by each redactor's own rule, because those are also ordinary words and a log line can afford to over-redact where text shown to a user cannot. Redaction is pattern-based and best-effort - a safety net, not a reason to paste secrets anywhere.

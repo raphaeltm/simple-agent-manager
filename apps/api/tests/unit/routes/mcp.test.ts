@@ -830,6 +830,7 @@ describe('MCP Routes', () => {
           'get_mission_state',
           'get_orchestrator_status',
           'get_scheduling_queue',
+          'get_trigger',
           'list_pull_request_associations',
           'override_task_state',
           'pause_mission',

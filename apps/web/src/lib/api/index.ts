@@ -600,6 +600,7 @@ export {
   previewWebhookTrigger,
   rotateWebhookTriggerToken,
   runTrigger,
+  setWebhookSigningSecret,
   testTrigger,
   updateTrigger,
 } from './triggers';
