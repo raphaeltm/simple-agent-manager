@@ -16,7 +16,10 @@ export type RuntimeSecretRequestStatus = (typeof RUNTIME_SECRET_REQUEST_STATUSES
 /** The tool an agent calls; the chat renders its result as the request card. */
 export const REQUEST_SECRET_TOOL = 'request_secret';
 
-/** Longest reason an agent may give, in characters. */
+/**
+ * Longest reason an agent may give, in characters. A fixed input bound shared by the tool schema,
+ * the API and the card, like the other agent-text bounds in this package, not a deployment policy.
+ */
 export const RUNTIME_SECRET_REQUEST_REASON_MAX_LENGTH = 1_000;
 
 /** Metadata about one request. Never carries the secret value. */

@@ -18,14 +18,14 @@ import { and, count, eq, gt } from 'drizzle-orm';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
-import { log } from '../lib/logger';
+import { log, serializeError } from '../lib/logger';
 import { sanitizeUserInput } from '../lib/sanitize-user-input';
 import { ulid } from '../lib/ulid';
 import { errors } from '../middleware/error';
 import {
   assertProjectRuntimeEnvKey,
   findProjectRuntimeEnvVar,
-  upsertProjectRuntimeEnvVar,
+  prepareProjectRuntimeEnvWrite,
 } from './project-runtime-env';
 import {
   deliverRuntimeSecretRequestOutcome,
@@ -67,8 +67,10 @@ export interface CreatedRuntimeSecretRequest {
   notificationSent: boolean;
 }
 
-function parseTtl(value: unknown, min: number, max: number): number | null {
+function parseTtl(value: unknown, configuredMin: number, max: number): number | null {
   if (value === undefined || value === null) return null;
+  // An admin can set the minimum above the maximum; the maximum wins rather than refusing all.
+  const min = Math.min(configuredMin, max);
   if (typeof value !== 'number' || !Number.isInteger(value) || value < min || value > max) {
     throw errors.badRequest(`ttlSeconds must be an integer from ${min} to ${max}`);
   }
@@ -238,6 +240,7 @@ export async function createRuntimeSecretRequest(
     resolvedAt: null,
     secretExpiresAt: null,
     replacedExisting: false,
+    notifiedAt: null,
     createdAt: now,
     updatedAt: now,
   };
@@ -304,6 +307,36 @@ async function claimPendingRequest(
   return claimed.length === 1;
 }
 
+/**
+ * Queue the agent's outcome notice and record that it was queued. A notice that could not be
+ * queued keeps `notified_at` NULL, and the five-minute sweep retries it for a bounded window
+ * (`retryRuntimeSecretRequestNotices`), so a transient failure does not leave the agent waiting.
+ */
+export async function notifyAgent(
+  env: Env,
+  db: Db,
+  row: schema.RuntimeSecretRequestRow,
+  outcome: 'fulfilled' | 'declined' | 'expired',
+  resolvedByName: string | null
+): Promise<boolean> {
+  const queued = await deliverRuntimeSecretRequestOutcome(env, row, outcome, resolvedByName);
+  if (queued) {
+    try {
+      await db
+        .update(schema.runtimeSecretRequests)
+        .set({ notifiedAt: Date.now() })
+        .where(eq(schema.runtimeSecretRequests.id, row.id));
+    } catch (error) {
+      // The notice is queued; a missed marker only means one idempotent retry (same delivery id).
+      log.warn('runtime_secret_request.notified_mark_failed', {
+        requestId: row.id,
+        ...serializeError(error),
+      });
+    }
+  }
+  return queued;
+}
+
 function assertStillPending(row: schema.RuntimeSecretRequestRow, now: number): void {
   const status = effectiveRequestStatus(row, now);
   if (status === 'expired') throw errors.gone('This secret request has expired');
@@ -319,6 +352,70 @@ export interface FulfillRuntimeSecretRequestInput {
   replaceExisting: boolean;
 }
 
+/**
+ * Claims the request and writes the value in ONE D1 batch (a transaction). The value row is
+ * inserted only if this batch's claim landed (`WHERE EXISTS` on the exact claim it just made),
+ * so there is no state where the request reads `fulfilled` without its value, or a value is
+ * written for a request someone else answered.
+ */
+async function claimAndStoreValue(
+  env: Env,
+  row: schema.RuntimeSecretRequestRow,
+  input: FulfillRuntimeSecretRequestInput,
+  stored: { ciphertext: string; iv: string | null },
+  resolution: { resolvedAt: number; secretExpiresAt: number | null; replacedExisting: boolean }
+): Promise<boolean> {
+  const { resolvedAt, secretExpiresAt, replacedExisting } = resolution;
+  const nowIso = new Date(resolvedAt).toISOString();
+  const [claim] = await env.DATABASE.batch([
+    env.DATABASE.prepare(
+      `UPDATE runtime_secret_requests
+          SET status = 'fulfilled', resolved_by = ?, resolved_at = ?, secret_expires_at = ?,
+              replaced_existing = ?, updated_at = ?
+        WHERE id = ? AND project_id = ? AND status = 'pending' AND expires_at > ?`
+    ).bind(
+      input.actorUserId,
+      resolvedAt,
+      secretExpiresAt,
+      replacedExisting ? 1 : 0,
+      resolvedAt,
+      row.id,
+      row.projectId,
+      resolvedAt
+    ),
+    env.DATABASE.prepare(
+      `INSERT INTO project_runtime_env_vars
+         (id, project_id, user_id, env_key, stored_value, value_iv, is_secret, expires_at,
+          secret_request_id, created_at, updated_at)
+       SELECT ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?
+        WHERE EXISTS (
+          SELECT 1 FROM runtime_secret_requests
+           WHERE id = ? AND project_id = ? AND status = 'fulfilled'
+             AND resolved_by = ? AND resolved_at = ?)
+       ON CONFLICT (project_id, env_key) DO UPDATE SET
+         stored_value = excluded.stored_value, value_iv = excluded.value_iv, is_secret = 1,
+         expires_at = excluded.expires_at, secret_request_id = excluded.secret_request_id,
+         updated_at = excluded.updated_at`
+    ).bind(
+      ulid(),
+      row.projectId,
+      input.actorUserId,
+      row.envKey,
+      stored.ciphertext,
+      stored.iv,
+      secretExpiresAt,
+      row.id,
+      nowIso,
+      nowIso,
+      row.id,
+      row.projectId,
+      input.actorUserId,
+      resolvedAt
+    ),
+  ]);
+  return (claim?.meta?.changes ?? 0) === 1;
+}
+
 /** Caller has verified `secret:write` on the project. */
 export async function fulfillRuntimeSecretRequest(
   env: Env,
@@ -329,75 +426,43 @@ export async function fulfillRuntimeSecretRequest(
   const { row } = await getRuntimeSecretRequest(db, input.projectId, input.requestId);
   const now = Date.now();
   assertStillPending(row, now);
-  const existing = await findProjectRuntimeEnvVar(db, row.projectId, row.envKey);
-  if (existing && !input.replaceExisting) {
+  // Same validation, limits and encryption as a manual write, before anything is claimed.
+  const prepared = await prepareProjectRuntimeEnvWrite(db, env, {
+    projectId: row.projectId,
+    envKey: row.envKey,
+    value: input.value,
+    isSecret: true,
+  });
+  if (prepared.existing && !input.replaceExisting) {
     throw errors.conflict(
       `${row.envKey} already exists in this project. Confirm that the new value should replace it.`
     );
   }
-  const secretExpiresAt = row.ttlSeconds ? now + row.ttlSeconds * 1_000 : null;
   const resolution = {
+    resolvedAt: now,
+    secretExpiresAt: row.ttlSeconds ? now + row.ttlSeconds * 1_000 : null,
+    replacedExisting: Boolean(prepared.existing),
+  };
+  if (!(await claimAndStoreValue(env, row, input, prepared.stored, resolution))) {
+    throw errors.conflict('This secret request was already answered or has expired');
+  }
+  const resolved: schema.RuntimeSecretRequestRow = {
+    ...row,
     status: 'fulfilled',
     resolvedBy: input.actorUserId,
     resolvedAt: now,
-    secretExpiresAt,
-    replacedExisting: Boolean(existing),
-  } as const;
-  if (!(await claimPendingRequest(db, row, resolution, now))) {
-    throw errors.conflict('This secret request was already answered or has expired');
-  }
-  try {
-    await upsertProjectRuntimeEnvVar(db, env, {
-      projectId: row.projectId,
-      actorUserId: input.actorUserId,
-      envKey: row.envKey,
-      value: input.value,
-      isSecret: true,
-      expiresAt: secretExpiresAt,
-      secretRequestId: row.id,
-    });
-  } catch (error) {
-    // Release the claim so the request can be answered again; only the claim we made.
-    await db
-      .update(schema.runtimeSecretRequests)
-      .set({
-        status: 'pending',
-        resolvedBy: null,
-        resolvedAt: null,
-        secretExpiresAt: null,
-        replacedExisting: false,
-        updatedAt: Date.now(),
-      })
-      .where(
-        and(
-          eq(schema.runtimeSecretRequests.id, row.id),
-          eq(schema.runtimeSecretRequests.status, 'fulfilled'),
-          eq(schema.runtimeSecretRequests.resolvedAt, now)
-        )
-      );
-    log.error('runtime_secret_request.store_failed', {
-      requestId: row.id,
-      projectId: row.projectId,
-      // The message comes from validation or D1, never from the value.
-      error: error instanceof Error ? error.message : 'unknown',
-      action: 'claim_released',
-    });
-    throw error;
-  }
-  const resolved = { ...row, ...resolution, updatedAt: now };
-  const agentNotified = await deliverRuntimeSecretRequestOutcome(
-    env,
-    resolved,
-    'fulfilled',
-    input.actorName
-  );
+    secretExpiresAt: resolution.secretExpiresAt,
+    replacedExisting: resolution.replacedExisting,
+    updatedAt: now,
+  };
+  const agentNotified = await notifyAgent(env, db, resolved, 'fulfilled', input.actorName);
   log.info('runtime_secret_request.fulfilled', {
     requestId: row.id,
     projectId: row.projectId,
     envKey: row.envKey,
     actorUserId: input.actorUserId,
     replacedExisting: resolution.replacedExisting,
-    secretExpiresAt,
+    secretExpiresAt: resolution.secretExpiresAt,
     agentNotified,
   });
   return { request: toRuntimeSecretRequest(resolved, input.actorName, now), agentNotified };
@@ -421,12 +486,7 @@ export async function declineRuntimeSecretRequest(
     throw errors.conflict('This secret request was already answered or has expired');
   }
   const resolved = { ...row, ...resolution, updatedAt: now };
-  const agentNotified = await deliverRuntimeSecretRequestOutcome(
-    env,
-    resolved,
-    'declined',
-    input.actorName
-  );
+  const agentNotified = await notifyAgent(env, db, resolved, 'declined', input.actorName);
   log.info('runtime_secret_request.declined', {
     requestId: row.id,
     projectId: row.projectId,

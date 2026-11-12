@@ -747,6 +747,8 @@ export const runtimeSecretRequests = sqliteTable(
     /** Epoch ms the stored value expires, set when fulfilled with a TTL. */
     secretExpiresAt: integer('secret_expires_at'),
     replacedExisting: integer('replaced_existing', { mode: 'boolean' }).notNull().default(false),
+    /** Epoch ms the agent's outcome notice was queued; NULL = not yet (the sweep retries). */
+    notifiedAt: integer('notified_at'),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull(),
   },
@@ -759,11 +761,10 @@ export const runtimeSecretRequests = sqliteTable(
       table.requestingChatSessionId,
       table.status
     ),
-    projectKeyIdx: index('idx_runtime_secret_requests_project_key').on(
-      table.projectId,
-      table.envKey
-    ),
     resolvedIdx: index('idx_runtime_secret_requests_resolved').on(table.resolvedAt),
+    unnotifiedIdx: index('idx_runtime_secret_requests_unnotified')
+      .on(table.resolvedAt)
+      .where(sql`notified_at IS NULL AND status != 'pending'`),
   })
 );
 
@@ -802,6 +803,9 @@ export const projectRuntimeEnvVars = sqliteTable(
     expiresIdx: index('idx_project_runtime_env_expires')
       .on(table.expiresAt)
       .where(sql`expires_at IS NOT NULL`),
+    secretRequestIdx: index('idx_project_runtime_env_secret_request')
+      .on(table.secretRequestId)
+      .where(sql`secret_request_id IS NOT NULL`),
     projectKeyUnique: uniqueIndex('idx_project_runtime_env_project_key').on(
       table.projectId,
       table.envKey

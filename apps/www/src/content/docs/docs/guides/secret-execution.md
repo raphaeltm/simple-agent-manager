@@ -68,6 +68,8 @@ What to know:
 - **Where it came from.** In **Settings → Runtime**, values supplied this way carry a **collected**
   badge with who supplied them, when, the agent's reason, and a link to the chat. Delete or replace
   them there like any other variable; replacing one by hand makes it an ordinary, non-expiring value.
+- **If saving says the agent wasn't confirmed to be told**, SAM keeps retrying for an hour; you can
+  also tell the agent in the chat that the name is ready.
 - **Names a profile or skill already sets** can't be requested: the profile or skill value would win,
   so the agent is told to use that one or pick another name.
 
@@ -171,7 +173,9 @@ requests. It needs a task-backed session.
 `list_runtime_env` (also `workspace_read` with `method: "runtime_env"`) lists the variable names this
 session can use, without values: for each, whether it is a Secret, where it is set (`project`,
 `profile` or `skill`), which lower scopes it overrides, when it expires, and, for values supplied
-through a request, who supplied them and why. Expired values are left out.
+through a request, who supplied them and a short excerpt of the requesting agent's reason (written by
+an agent, so treat it as untrusted). Expired values are left out. A `reason` is limited to 1,000
+characters.
 
 ## Use a short-lived identity instead of a stored key
 

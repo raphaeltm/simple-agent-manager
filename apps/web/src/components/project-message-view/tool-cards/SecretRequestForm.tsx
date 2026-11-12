@@ -85,8 +85,8 @@ export const SecretRequestForm: FC<SecretRequestFormProps> = ({
       onSubmit={(event) => void save(event)}
       autoComplete="off"
     >
-      <label htmlFor={inputId} className="min-w-0 text-xs text-fg-muted [overflow-wrap:anywhere]">
-        Value for <span className="font-semibold text-fg-primary">{request.envKey}</span>
+      <label htmlFor={inputId} className="text-xs text-fg-muted">
+        Value<span className="sr-only"> for {request.envKey}</span>
       </label>
       <div className="flex min-w-0 gap-2">
         <input
@@ -109,7 +109,6 @@ export const SecretRequestForm: FC<SecretRequestFormProps> = ({
           variant="ghost"
           size="sm"
           onClick={() => setReveal((shown) => !shown)}
-          aria-pressed={reveal}
           aria-controls={inputId}
         >
           {reveal ? 'Hide' : 'Show'}
@@ -152,10 +151,6 @@ export const SecretRequestForm: FC<SecretRequestFormProps> = ({
           Decline
         </Button>
       </div>
-      <p className="m-0 text-xs text-fg-muted [overflow-wrap:anywhere]">
-        The value goes straight to SAM and is stored encrypted. It is never shown to the agent or
-        added to this chat.
-      </p>
     </form>
   );
 };

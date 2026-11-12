@@ -41,9 +41,29 @@ export const RUNTIME_SECRET_REQUEST_SETTINGS = [
     name: 'secrets.sweepBatchSize',
     defaultValue: 50,
     description:
-      'Most expired secret requests or expired collected values one maintenance pass processes.',
+      'Expired collected values or old request records one daily purge statement deletes. The purge repeats batches until done or out of time.',
     // Deletes bind one id per row plus one reserved bind; D1 caps a statement at 100 binds.
     range: { min: 1, max: 90 },
+  },
+  {
+    name: 'secrets.purgeBudgetSeconds',
+    defaultValue: 20,
+    description: 'Seconds the daily purge of expired secret values and old requests may run.',
+    range: { min: 1, max: 120 },
+  },
+  {
+    name: 'secrets.expirySweepBatchSize',
+    defaultValue: 10,
+    description:
+      'Expired or unnotified secret requests one five-minute sweep handles. Each one tells its agent, so this bounds the work per sweep.',
+    range: { min: 1, max: 25 },
+  },
+  {
+    name: 'secrets.notifyRetryMinutes',
+    defaultValue: 60,
+    description:
+      'Minutes after a request is answered or expires during which the sweep retries telling the agent if the first notice could not be queued.',
+    range: { min: 5, max: 1_440 },
   },
 ] as const;
 

@@ -20,6 +20,9 @@ import {
   type RuntimeAssetContextInput,
 } from './workspace-runtime-assets';
 
+/** Display bound for the agent-written reason in agent listings, not a policy limit. */
+const LISTED_REASON_MAX_CHARS = 200;
+
 interface ScopedRow {
   name: string;
   isSecret: boolean;
@@ -47,12 +50,22 @@ async function projectRows(db: Db, projectId: string): Promise<ScopedRow[]> {
     .where(
       and(eq(schema.projectRuntimeEnvVars.projectId, projectId), projectRuntimeEnvUnexpired())
     );
-  return rows.map((row) => ({
-    name: row.name,
-    isSecret: row.isSecret,
-    expiresAt: row.expiresAt ?? null,
-    collected: toCollectedProvenance(row),
-  }));
+  return rows.map((row) => {
+    const collected = toCollectedProvenance(row);
+    return {
+      name: row.name,
+      isSecret: row.isSecret,
+      expiresAt: row.expiresAt ?? null,
+      // The reason was written by an agent; other agents read this listing, so pass only a short,
+      // single-line excerpt (the full text stays in the human UI).
+      collected: collected
+        ? {
+            ...collected,
+            reason: collected.reason.replace(/\s+/g, ' ').slice(0, LISTED_REASON_MAX_CHARS),
+          }
+        : null,
+    };
+  });
 }
 
 export async function listEffectiveRuntimeEnv(

@@ -572,7 +572,11 @@ test.describe('Project settings sub-pages', () => {
     await expect(rows.nth(1).getByText(/agents can no longer use it/)).toBeVisible();
     await expect(rows.nth(3).getByText('collected')).toHaveCount(0);
     await assertNoOverflow(page);
+    // Bring the rows themselves into view: on a phone the form above them fills the screen.
+    await rows.nth(0).scrollIntoViewIfNeeded();
     await screenshot(page, 'project-settings-runtime-collected-secrets');
+    await rows.nth(1).scrollIntoViewIfNeeded();
+    await screenshot(page, 'project-settings-runtime-collected-secrets-expired');
   });
 
   test('default route redirects to General and tab shell remains compact', async ({ page }) => {

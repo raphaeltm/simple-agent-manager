@@ -17,17 +17,18 @@ function claim(sourceKind: string): PromptDeliveryClaim {
       sourceTaskId: 'task-1',
       sourceKind,
       runtimeIdentity: null,
-      metadata: { secretRequestId: 'req-1' },
+      metadata: { secretRequestId: 'req-1', creatorUserId: 'user-1' },
     },
   } as unknown as PromptDeliveryClaim;
 }
 
 describe('sourceTaskGuardForClaim — secret_request', () => {
-  it('guards the wake on the requesting task', () => {
+  it('guards the wake on the requesting task and an active requester membership', () => {
     expect(sourceTaskGuardForClaim(claim('secret_request'), 'proj-1')).toEqual({
       taskId: 'task-1',
       projectId: 'proj-1',
       chatSessionId: 'chat-1',
+      requiredProjectMemberId: 'user-1',
     });
   });
 

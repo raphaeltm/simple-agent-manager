@@ -11,6 +11,7 @@ import { type FC, useMemo, useState } from 'react';
 import { useQueryScope } from '../../../hooks/useQueryScope';
 import { getSecretRequest } from '../../../lib/api';
 import { projectQueryKeys } from '../../../lib/query-options/projects';
+import { formatDateTime } from '../../../lib/time-utils';
 import { extractSecretRequestId } from './secret-request-card-data';
 import { SecretRequestForm } from './SecretRequestForm';
 
@@ -52,13 +53,6 @@ const BADGE_CLASS: Record<Tone, string> = {
   muted: 'bg-surface text-fg-muted',
 };
 
-function formatTime(iso: string): string {
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime())
-    ? iso
-    : date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-}
-
 function formatDuration(seconds: number): string {
   if (seconds % 86_400 === 0) return `${seconds / 86_400} day${seconds === 86_400 ? '' : 's'}`;
   if (seconds % 3_600 === 0) return `${seconds / 3_600} hour${seconds === 3_600 ? '' : 's'}`;
@@ -67,7 +61,7 @@ function formatDuration(seconds: number): string {
 }
 
 function lifetimeText(request: RuntimeSecretRequest): string {
-  if (request.secretExpiresAt) return `Expires ${formatTime(request.secretExpiresAt)}.`;
+  if (request.secretExpiresAt) return `Expires ${formatDateTime(request.secretExpiresAt)}.`;
   return request.ttlSeconds
     ? `Expires ${formatDuration(request.ttlSeconds)} after it is saved.`
     : 'Kept until someone deletes it.';
@@ -75,7 +69,7 @@ function lifetimeText(request: RuntimeSecretRequest): string {
 
 function outcomeText(request: RuntimeSecretRequest): string {
   const by = request.resolvedByName ? ` by ${request.resolvedByName}` : '';
-  const when = request.resolvedAt ? ` on ${formatTime(request.resolvedAt)}` : '';
+  const when = request.resolvedAt ? ` on ${formatDateTime(request.resolvedAt)}` : '';
   switch (request.status) {
     case 'fulfilled':
       return `Supplied${by}${when}. The agent was told the name, never the value, and can use it now.`;
@@ -177,8 +171,10 @@ export const SecretRequestCard: FC<SecretRequestCardProps> = ({ item, projectId 
         </p>
         {(request.status === 'pending' || request.status === 'fulfilled') && (
           <p className="m-0 text-xs text-fg-muted">
-            {request.status === 'pending' ? 'Saved' : 'Stored'} as an encrypted project secret that
-            every project member&apos;s agent sessions can use. {lifetimeText(request)}
+            {request.status === 'pending'
+              ? 'Saved encrypted as a project secret, never shown to the agent or this chat. '
+              : 'Stored encrypted as a project secret. '}
+            Every project member&apos;s agent sessions can use it. {lifetimeText(request)}
           </p>
         )}
       </div>
@@ -203,7 +199,7 @@ export const SecretRequestCard: FC<SecretRequestCardProps> = ({ item, projectId 
         ) : (
           <p role="status" className="m-0 text-sm text-fg-muted [overflow-wrap:anywhere]">
             {outcomeText(request)}
-            {request.status === 'pending' && ` Open until ${formatTime(request.expiresAt)}.`}
+            {request.status === 'pending' && ` Open until ${formatDateTime(request.expiresAt)}.`}
           </p>
         )}
         {notConfirmed && (

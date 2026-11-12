@@ -15,8 +15,8 @@ import {
 import { runNodeTunnelCleanupSweep } from '../services/node-tunnel-cleanup';
 import { isOperationalLoopEnabled } from '../services/operational-kill-switch';
 import {
-  expireRuntimeSecretRequests,
   purgeRuntimeSecretMaterial,
+  runRuntimeSecretRequestSweep,
 } from '../services/runtime-secret-request-maintenance';
 import { checkProvisioningTimeouts } from '../services/timeout';
 import { migrateOrphanedWorkspaces } from '../services/workspace-migration';
@@ -184,9 +184,9 @@ export async function scheduled(
   const triggerCleanup = await sweeps.isolate('trigger_execution_cleanup', () =>
     runTriggerExecutionCleanup(env)
   );
-  // One indexed read per tick; rows are only selected once a request is past its deadline.
-  const secretRequestExpiry = await sweeps.isolate('runtime_secret_request_expiry', () =>
-    expireRuntimeSecretRequests(env)
+  // Two indexed reads per idle tick; work is capped by secrets.expirySweepBatchSize.
+  const secretRequestSweep = await sweeps.isolate('runtime_secret_request_sweep', () =>
+    runRuntimeSecretRequestSweep(env)
   );
   const sessionTaskRepair = await sweeps.isolate('session_task_reconciliation', () =>
     runSessionTaskReconciliation(env)
@@ -358,8 +358,9 @@ export async function scheduled(
     projectEventSourceOutboxAdmitted: triggerCleanup?.projectEventSourceOutboxAdmitted,
     credentialLimitWindowsPurged: triggerCleanup?.credentialLimitWindowsPurged,
     triggerExecCleanupErrors: triggerCleanup?.errors,
-    secretRequestsExpired: secretRequestExpiry?.expired,
-    secretRequestAgentsNotified: secretRequestExpiry?.agentsNotified,
+    secretRequestsExpired: secretRequestSweep?.expired,
+    secretRequestAgentsNotified: secretRequestSweep?.agentsNotified,
+    secretRequestNoticesRetried: secretRequestSweep?.noticesRetried,
     sessionTaskRepairScanned: sessionTaskRepair?.scanned,
     sessionTaskRepairRepaired: sessionTaskRepair?.repaired,
     sessionTaskRepairReused: sessionTaskRepair?.reused,

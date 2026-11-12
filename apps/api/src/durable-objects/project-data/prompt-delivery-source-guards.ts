@@ -208,7 +208,9 @@ export function sourceTaskGuardForClaim(
     ...(projectEventWake ? { projectEventWake } : {}),
     ...(claim.message.sourceKind === 'github_trigger' ? { requireSourceProjectMember: true } : {}),
     ...((claim.message.sourceKind === 'scheduled_action' ||
-      claim.message.sourceKind === 'github_trigger') &&
+      claim.message.sourceKind === 'github_trigger' ||
+      // A secret request outcome only wakes a requester who is still an active project member.
+      claim.message.sourceKind === 'secret_request') &&
     typeof metadata.creatorUserId === 'string'
       ? { requiredProjectMemberId: metadata.creatorUserId }
       : {}),

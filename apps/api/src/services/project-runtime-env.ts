@@ -61,12 +61,22 @@ export async function findProjectRuntimeEnvVar(db: Db, projectId: string, envKey
   return rows[0] ?? null;
 }
 
-/** Writes one variable; returns whether an existing value was replaced. Never logs the value. */
-export async function upsertProjectRuntimeEnvVar(
+export interface PreparedProjectRuntimeEnvWrite {
+  envKey: string;
+  stored: { ciphertext: string; iv: string | null };
+  existing: Awaited<ReturnType<typeof findProjectRuntimeEnvVar>>;
+}
+
+/**
+ * Validates one write against the key pattern and the size and count limits, then encrypts the
+ * value when it is a secret. Every writer calls this before writing, so the manual route and
+ * request fulfilment apply identical rules. Never logs the value.
+ */
+export async function prepareProjectRuntimeEnvWrite(
   db: Db,
   env: Env,
-  input: UpsertProjectRuntimeEnvVarInput
-): Promise<{ replaced: boolean }> {
+  input: Pick<UpsertProjectRuntimeEnvVarInput, 'projectId' | 'envKey' | 'value' | 'isSecret'>
+): Promise<PreparedProjectRuntimeEnvWrite> {
   const envKey = assertProjectRuntimeEnvKey(input.envKey);
   const limits = getRuntimeLimits(env);
   if (byteLength(input.value) > limits.maxProjectRuntimeEnvValueBytes) {
@@ -91,6 +101,16 @@ export async function upsertProjectRuntimeEnvVar(
   const stored = input.isSecret
     ? await encrypt(input.value, getCredentialEncryptionKey(env))
     : { ciphertext: input.value, iv: null };
+  return { envKey, stored, existing };
+}
+
+/** Writes one variable; returns whether an existing value was replaced. Never logs the value. */
+export async function upsertProjectRuntimeEnvVar(
+  db: Db,
+  env: Env,
+  input: UpsertProjectRuntimeEnvVarInput
+): Promise<{ replaced: boolean }> {
+  const { envKey, stored, existing } = await prepareProjectRuntimeEnvWrite(db, env, input);
   const now = new Date().toISOString();
   // Every field is written on update, including the two provenance columns: a manual write
   // clears an earlier request's expiry and provenance (`.claude/rules/73`).
@@ -102,20 +122,8 @@ export async function upsertProjectRuntimeEnvVar(
     secretRequestId: input.secretRequestId,
     updatedAt: now,
   };
-  if (existing) {
-    await db
-      .update(schema.projectRuntimeEnvVars)
-      .set(values)
-      .where(
-        and(
-          eq(schema.projectRuntimeEnvVars.id, existing.id),
-          eq(schema.projectRuntimeEnvVars.projectId, input.projectId)
-        )
-      );
-    return { replaced: true };
-  }
-  // A concurrent writer may insert the same key between the read and this write; converge on
-  // the unique (project, key) index instead of failing.
+  // One upsert on the unique (project, key) index covers both cases, including a row inserted or
+  // deleted by someone else between the read above and this write.
   await db
     .insert(schema.projectRuntimeEnvVars)
     .values({
@@ -130,5 +138,5 @@ export async function upsertProjectRuntimeEnvVar(
       target: [schema.projectRuntimeEnvVars.projectId, schema.projectRuntimeEnvVars.envKey],
       set: values,
     });
-  return { replaced: false };
+  return { replaced: Boolean(existing) };
 }

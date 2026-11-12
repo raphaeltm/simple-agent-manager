@@ -9,7 +9,7 @@ import { buildSamNotice, type SamNotice } from '@simple-agent-manager/shared';
 import type * as schema from '../db/schema';
 import { resolveDurableExecutionConfig } from '../durable-objects/project-data/durable-execution-config';
 import type { Env } from '../env';
-import { log } from '../lib/logger';
+import { log, serializeError } from '../lib/logger';
 import { buildActionUrl, sendNotification } from './notification';
 import * as projectDataService from './project-data';
 import { isoOrNull } from './runtime-secret-request-records';
@@ -104,7 +104,13 @@ export async function deliverRuntimeSecretRequestOutcome(
       messageClass: 'deliver',
       sourceKind: 'secret_request',
       ttlMs: config.ttlMs,
-      metadata: { secretRequestId: row.id, envKey: row.envKey, outcome },
+      metadata: {
+        secretRequestId: row.id,
+        envKey: row.envKey,
+        outcome,
+        // The requester must still be an active project member when the wake is claimed.
+        creatorUserId: row.requesterUserId,
+      },
       notice: safeNotice(() => secretRequestNotice(row, outcome, resolvedByName), {
         secretRequestId: row.id,
       }),
@@ -116,7 +122,7 @@ export async function deliverRuntimeSecretRequestOutcome(
       projectId: row.projectId,
       sessionId: row.requestingChatSessionId,
       outcome,
-      error: error instanceof Error ? error.message : String(error),
+      ...serializeError(error),
     });
     return false;
   }
@@ -144,7 +150,7 @@ export async function notifyRuntimeSecretRequested(
   } catch (error) {
     log.warn('runtime_secret_request.notify_failed', {
       requestId: row.id,
-      error: error instanceof Error ? error.message : String(error),
+      ...serializeError(error),
     });
     return false;
   }

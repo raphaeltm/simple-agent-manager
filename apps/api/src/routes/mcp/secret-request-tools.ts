@@ -7,7 +7,7 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
-import { log } from '../../lib/logger';
+import { log, serializeError } from '../../lib/logger';
 import { AppError } from '../../middleware/error';
 import { listEffectiveRuntimeEnv } from '../../services/runtime-env-listing';
 import { createRuntimeSecretRequest } from '../../services/runtime-secret-requests';
@@ -39,7 +39,7 @@ function errorResult(
   log.error(event, {
     projectId: tokenData.projectId,
     taskId: tokenData.taskId,
-    error: error instanceof Error ? error.message : String(error),
+    ...serializeError(error),
   });
   return jsonRpcError(requestId, INTERNAL_ERROR, 'The secret request could not be recorded');
 }
@@ -121,7 +121,7 @@ export async function handleListRuntimeEnv(
     log.error('mcp.list_runtime_env.failed', {
       projectId: tokenData.projectId,
       workspaceId: tokenData.workspaceId,
-      error: error instanceof Error ? error.message : String(error),
+      ...serializeError(error),
     });
     return jsonRpcError(requestId, INTERNAL_ERROR, 'Runtime env could not be listed');
   }

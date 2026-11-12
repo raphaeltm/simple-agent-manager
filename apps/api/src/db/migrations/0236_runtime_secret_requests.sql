@@ -6,8 +6,10 @@
 --
 -- runtime_secret_requests: one row per request. Holds metadata only (name, reason, requested
 -- TTL, who asked, who answered, outcome). Pending rows expire at expires_at (epoch ms); a cron
--- sweep marks them expired and tells the agent. Resolved rows are deleted after the admin
--- retention window by the daily purge.
+-- sweep marks them expired and tells the agent. notified_at records that the agent's notice was
+-- queued, so the sweep can retry a lost notice for a bounded window. Resolved rows are deleted
+-- after the admin retention window by the daily purge, unless a value they supplied still exists.
+-- status is validated in the application (no CHECK), so a later status needs no table rebuild.
 --
 -- project_runtime_env_vars.expires_at: epoch ms after which the value must not be used. NULL
 -- means no expiry, which is what every existing row keeps (unchanged behaviour). Readers
@@ -25,8 +27,7 @@ CREATE TABLE runtime_secret_requests (
   env_key TEXT NOT NULL,
   reason TEXT NOT NULL,
   ttl_seconds INTEGER,
-  status TEXT NOT NULL DEFAULT 'pending'
-    CHECK (status IN ('pending', 'fulfilled', 'declined', 'expired')),
+  status TEXT NOT NULL DEFAULT 'pending',
   requester_user_id TEXT NOT NULL,
   requesting_task_id TEXT NOT NULL,
   requesting_authority_task_id TEXT NOT NULL,
@@ -38,6 +39,7 @@ CREATE TABLE runtime_secret_requests (
   resolved_at INTEGER,
   secret_expires_at INTEGER,
   replaced_existing INTEGER NOT NULL DEFAULT 0,
+  notified_at INTEGER,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -46,10 +48,10 @@ CREATE INDEX idx_runtime_secret_requests_status_expires
   ON runtime_secret_requests (status, expires_at);
 CREATE INDEX idx_runtime_secret_requests_session
   ON runtime_secret_requests (requesting_chat_session_id, status);
-CREATE INDEX idx_runtime_secret_requests_project_key
-  ON runtime_secret_requests (project_id, env_key);
 CREATE INDEX idx_runtime_secret_requests_resolved
   ON runtime_secret_requests (resolved_at);
+CREATE INDEX idx_runtime_secret_requests_unnotified
+  ON runtime_secret_requests (resolved_at) WHERE notified_at IS NULL AND status != 'pending';
 
 ALTER TABLE project_runtime_env_vars ADD COLUMN expires_at INTEGER;
 ALTER TABLE project_runtime_env_vars ADD COLUMN secret_request_id TEXT
@@ -57,3 +59,7 @@ ALTER TABLE project_runtime_env_vars ADD COLUMN secret_request_id TEXT
 
 CREATE INDEX idx_project_runtime_env_expires
   ON project_runtime_env_vars (expires_at) WHERE expires_at IS NOT NULL;
+-- Purge's "is this request still some value's provenance?" probe and the FK's SET NULL both look
+-- rows up by secret_request_id.
+CREATE INDEX idx_project_runtime_env_secret_request
+  ON project_runtime_env_vars (secret_request_id) WHERE secret_request_id IS NOT NULL;
