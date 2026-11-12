@@ -21,18 +21,12 @@ export {
   getPeriodLabel,
   iterateGatewayLogs,
   parseGatewayPeriod,
-  resolveGatewayPagination,
   type UsageByDay,
   type UsageByModel,
   type UsageByProvider,
 } from './ai-gateway-logs';
 export { checkModelTierAllowance, describeModelTierDenial } from './ai-model-tier-gate';
-export {
-  MAX_MONTHLY_COST_CACHE_TTL_SECONDS,
-  type MonthlyCostCronResult,
-  resolveMonthlyCostCacheTtlSeconds,
-  runMonthlyCostAggregation,
-} from './ai-monthly-cost-cron';
+export { type MonthlyCostCronResult, runMonthlyCostAggregation } from './ai-monthly-cost-cron';
 export {
   buildAIGatewayMetadata,
   buildAnthropicCountTokensUrl,
@@ -45,14 +39,7 @@ export {
 } from './ai-proxy-shared';
 export {
   type AiProviderUsageAttribution,
-  buildBudgetKey,
-  buildBudgetSettingsKey,
-  buildFeatureBudgetKey,
-  buildMonthlyCostCacheKey,
-  buildProviderUsageKey,
   checkAiUsageGate,
-  checkMonthlyCostCap,
-  checkTokenBudget,
   consumeFeatureTokenBudget,
   deleteUserBudgetSettings,
   getAdminAiAllowance,
@@ -73,10 +60,8 @@ export { AiTokenBudgetCounter } from './ai-token-budget-counter';
 export {
   attachTokenUsageAccounting,
   attachUpstreamTokenUsageAccounting,
-  collectStreamTokenUsage,
   estimateInputTokensFromMessages,
-  extractJsonTokenUsage,
   optionalExecutionContext,
 } from './ai-token-usage-accounting';
 export { type AiProxyEnv } from './env';
-export { type AiProxyPorts, type PlatformAgentKey } from './ports';
+export { type AiProxyPorts } from './ports';

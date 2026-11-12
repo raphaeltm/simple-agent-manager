@@ -2,6 +2,14 @@
 // worker's existing importers are unchanged. Request auth stays in the worker
 // (./ai-proxy-auth) and is re-exported here as before.
 export {
+  AIProxyAuthError,
+  type AIProxyAuthResult,
+  type AIProxyCredentialAttribution,
+  extractCallbackToken,
+  updateAIProxyAgentCredentialAttribution,
+  verifyAIProxyAuth,
+} from './ai-proxy-auth';
+export {
   buildAIGatewayMetadata,
   buildAnthropicCountTokensUrl,
   buildAnthropicGatewayUrl,
@@ -11,12 +19,3 @@ export {
   readSafeGatewayErrorDiagnostic,
   WorkersAIGatewayError,
 } from '@simple-agent-manager/ai-proxy';
-
-export {
-  AIProxyAuthError,
-  type AIProxyAuthResult,
-  type AIProxyCredentialAttribution,
-  extractCallbackToken,
-  updateAIProxyAgentCredentialAttribution,
-  verifyAIProxyAuth,
-} from './ai-proxy-auth';

@@ -14,7 +14,6 @@ export {
   getGatewayPeriodBounds,
   getPeriodLabel,
   parseGatewayPeriod,
-  resolveGatewayPagination,
   type UsageByDay,
   type UsageByModel,
   type UsageByProvider,

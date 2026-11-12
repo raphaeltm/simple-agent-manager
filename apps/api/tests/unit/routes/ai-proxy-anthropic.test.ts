@@ -28,10 +28,6 @@ describe('extractCallbackToken', () => {
   });
 });
 
-// =============================================================================
-// buildAnthropicGatewayUrl
-// =============================================================================
-
 describe('AIProxyAuthError', () => {
   it('has correct name and statusCode', () => {
     const err = new AIProxyAuthError('forbidden', 403);
@@ -40,7 +36,3 @@ describe('AIProxyAuthError', () => {
     expect(err.message).toBe('forbidden');
   });
 });
-
-// =============================================================================
-// Model validation (isAnthropicModel logic)
-// =============================================================================

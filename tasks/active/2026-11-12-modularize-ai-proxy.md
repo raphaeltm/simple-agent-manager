@@ -67,6 +67,7 @@ Baseline on core `79e5e1b71`: every test file importing an in-scope module, 25 f
 (all unit pool; no Workers-pool file).
 
 After: package 9 files / 140 cases; apps/api 17 files / 288 cases. 140 + 288 = 428, none deleted.
+Plus the new worker port test (`tests/unit/services/ai-proxy-ports.test.ts`, 3 cases): 431 in total.
 `routes/ai-proxy-anthropic.test.ts` was split: shared-helper cases moved to the package, the 6
 request-auth cases stay in the worker. Two route tests (`ai-proxy-accounting`,
 `ai-proxy-passthrough`) now mock `@simple-agent-manager/ai-proxy/internal/ai-token-budget`, because
@@ -79,5 +80,5 @@ the token accounting calls `incrementTokenUsage` inside the package (13 cases fa
 - [x] Step 1 + 2: package with narrow `AiProxyEnv`, ports, public entry; old paths re-export; tests moved
 - [x] Worker port adapter test (`aiProxyPorts`, 3 cases, proven red with the wrong encryption key), package AGENTS.md, public entry trimmed to used names
 - [x] Registrations: ci.yml + e2e-smoke filters, runtime-boundary, AST scope, build order, api-reference skill path (dependency evidence and runtime-tunables pass unchanged)
-- [ ] Local gates, specialist reviews
+- [x] Local gates; reviews: architecture PASS (MEDIUM dead re-exports and LOW banners fixed), task-completion WARN -> fixed (lint export order in `ai-proxy-shared.ts`)
 - [ ] CI via `gh workflow run ci.yml --ref sam/w5-ai-proxy`; send PR URL, SHA and run ID to coordinator
