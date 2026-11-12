@@ -19,6 +19,7 @@ export function GitHubAppSection() {
   const [installUrl, setInstallUrl] = useState<string | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
   const [notConnected, setNotConnected] = useState(false);
+  const [installUnavailable, setInstallUnavailable] = useState<string | null>(null);
 
   const loadInstallations = useCallback(async () => {
     try {
@@ -53,6 +54,11 @@ export function GitHubAppSection() {
       const { url } = await getGitHubInstallUrl();
       setInstallUrl(url);
     } catch (err) {
+      // No GitHub App on this installation yet: the API says who can fix it and where.
+      if (err instanceof ApiClientError && err.code === 'GITHUB_APP_NOT_CONFIGURED') {
+        setInstallUnavailable(err.message);
+        return;
+      }
       console.error('Failed to get install URL:', err);
     }
   }, []);
@@ -120,6 +126,7 @@ export function GitHubAppSection() {
         <p className="text-fg-muted">
           Install the GitHub App to access your repositories for workspace creation.
         </p>
+        {installUnavailable && <Alert variant="warning">{installUnavailable}</Alert>}
         <div>
           <Button onClick={handleInstallClick} disabled={!installUrl}>
             <svg className="h-5 w-5 mr-2" fill="currentColor" viewBox="0 0 24 24">
