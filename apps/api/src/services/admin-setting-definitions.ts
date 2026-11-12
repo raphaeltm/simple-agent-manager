@@ -79,6 +79,7 @@ export type AdminSettingName =
   | 'operations.nodeCleanupOwnershipAlertIntervalMs'
   | 'operations.evictionRecoveryRetryBatchSize'
   | 'operations.evictionRecoveryRetryWallMs'
+  | 'operations.nodeProvisioningAttemptDeadlineMs'
   | 'operations.evictionRecoveryRetryDelayMs'
   | 'operations.capacityPoolPublishBudgetMs'
   | 'operations.deadWakeReconcileBatchSize'

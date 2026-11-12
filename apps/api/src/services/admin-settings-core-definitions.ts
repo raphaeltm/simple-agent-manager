@@ -10,6 +10,7 @@ import {
   MAX_WORKLOAD_IDENTITY_TOKEN_TTL_SECONDS,
 } from '@simple-agent-manager/shared';
 
+import { DEFAULT_NODE_PROVISIONING_ATTEMPT_DEADLINE_MS } from '../durable-objects/node-lifecycle-provisioning-deadline';
 import { DEFAULT_IDEA_CONTENT_MAX_LENGTH } from '../lib/idea-content-limit';
 import {
   type AdminSettingDefinition,
@@ -72,6 +73,13 @@ export const CORE_SETTINGS: AdminSettingDefinition[] = [
     { min: 0, max: 99 }
   ),
 
+  integerDefinition(
+    'operations.nodeProvisioningAttemptDeadlineMs',
+    DEFAULT_NODE_PROVISIONING_ATTEMPT_DEADLINE_MS,
+    'Operations',
+    'Milliseconds one durable node-provisioning attempt may run (provider create, its operation wait, and the node DNS record) before it is cut and resumed on the next attempt. A cut create is adopted, never repeated.',
+    { min: 1000, max: 600000 }
+  ),
   integerDefinition(
     'operations.evictionRecoveryRetryBatchSize',
     5,
