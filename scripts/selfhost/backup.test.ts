@@ -105,7 +105,7 @@ function ctx(bucket: string, stateDir: string): BoxContext {
     },
     envFile: join(root, 'box.env'),
     stateDir,
-    composeFile: '/x/docker-compose.yml',
+    composeFiles: ['/x/docker-compose.yml'],
     run: fakeRun,
     now: () => clock,
     log: () => undefined,

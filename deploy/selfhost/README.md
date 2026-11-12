@@ -34,7 +34,7 @@ cp deploy/selfhost/.env.example deploy/selfhost/.env && chmod 600 deploy/selfhos
 $EDITOR deploy/selfhost/.env           # SAM_DOMAIN, TLS mode, bucket
 pnpm install
 pnpm selfhost:deploy --init            # key provider, sealed platform keys, gateway.env, fence files
-docker compose -f deploy/selfhost/docker-compose.yml up -d
+(cd deploy/selfhost && docker compose up -d)   # reads .env there, including COMPOSE_FILE
 pnpm selfhost:deploy                   # build web, migrate, deploy; re-run to upgrade
 pnpm selfhost:verify-fence             # the egress fence is in effect (see below)
 ```
@@ -303,7 +303,7 @@ az keyvault delete --name "$VAULT" --resource-group "$RG"   # only a vault creat
 `.state/key-agent/`. A box cannot go back to plaintext deploy vars once `platform-keys.json` is
 gone: `SAM_KEY_PROVIDER=legacy-plaintext` then refuses, because it would generate new platform
 keys and every stored credential would become unreadable. To decommission a box:
-`docker compose -f deploy/selfhost/docker-compose.yml down`, then `rm -r .state/key-agent` removes
+`(cd deploy/selfhost && docker compose down)`, then `rm -r .state/key-agent` removes
 the bundles, the file key and the recorded choice. Without a copy of the key (the file key kept
 off the box, or the cloud key), the install's platform keys and every backup are gone with it.
 
@@ -341,7 +341,7 @@ message on loopback and shows it at `https://mail.SAM_DOMAIN` behind basic auth.
 # .env: add the profile (it is off by default)
 COMPOSE_PROFILES=tunnel,mail-collector
 pnpm selfhost:deploy --init            # generates the UI password and .state/mail-collector*.env
-docker compose -f deploy/selfhost/docker-compose.yml up -d
+(cd deploy/selfhost && docker compose up -d)
 pnpm selfhost:deploy                   # points the Worker at the collector
 cat deploy/selfhost/.state/mail-collector-ui-password   # user: collector
 ```
@@ -565,8 +565,15 @@ sudo apt-get install runsc && sudo runsc install && sudo systemctl restart docke
 SAM_GUIDED_LOGIN=on
 DOCKER_SOCKET_GID=<stat -c %g /var/run/docker.sock>
 COMPOSE_FILE=docker-compose.yml:docker-compose.guided-login.yml
-pnpm selfhost:deploy --init && docker compose up -d && pnpm selfhost:deploy
+pnpm selfhost:deploy --init && (cd deploy/selfhost && docker compose up -d) && pnpm selfhost:deploy
 ```
+
+- Run compose from `deploy/selfhost` without `-f`. An explicit `-f docker-compose.yml` replaces
+  `COMPOSE_FILE`, so a container recreated that way loses the override and celld its
+  `DOCKER_HOST`: every guided login then fails at once with `sandbox_provision_failed`
+  (celld logs `no container engine`). `selfhost:upgrade`, `selfhost:backup`, `selfhost:secrets`
+  and `selfhost:verify-fence` pass every file `COMPOSE_FILE` lists (`composeFilesFor`,
+  `scripts/selfhost/backup-lib.ts`).
 
 - The deploy emits a `containers` entry for `SandboxDO` only, with `runtime` gVisor (`runsc`;
   `SAM_GUIDED_LOGIN_RUNTIME`) and instance type `basic` (1 GiB, 1/4 vCPU;
@@ -667,7 +674,7 @@ MIT), an SMTP receiver on port 25:
 # .env: add the profile (off by default) next to an SMTP relay or the mail collector
 COMPOSE_PROFILES=tunnel,mail-in
 pnpm selfhost:deploy                      # sets AGENT_EMAIL_INBOUND_SMTP=true for the Worker
-docker compose -f deploy/selfhost/docker-compose.yml up -d --build sam-mx
+(cd deploy/selfhost && docker compose up -d --build sam-mx)
 ```
 
 The deploy refuses `mail-in` without an SMTP transport for replies. For real mail the box also

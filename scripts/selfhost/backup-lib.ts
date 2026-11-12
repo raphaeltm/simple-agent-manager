@@ -35,7 +35,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 
 import { KEY_SERVICE_BACKUP_EXCLUDES } from './key-service';
 import { ensurePrivateDir } from './secret-files';
@@ -89,7 +89,8 @@ export interface BoxContext {
   box: Readonly<Record<string, string>>;
   envFile: string;
   stateDir: string;
-  composeFile: string;
+  /** Every compose file the box runs with, in order (composeFilesFor). */
+  composeFiles: string[];
   run: Runner;
   now: () => number;
   log: (message: string) => void;
@@ -234,11 +235,44 @@ export function bucketIsEmpty(ctx: BoxContext): boolean {
   return result.stdout.trim() === '';
 }
 
-function compose(ctx: BoxContext, args: string[]): void {
-  check(
-    ctx.run('docker', ['compose', '-f', ctx.composeFile, '--env-file', ctx.envFile, ...args]),
-    `docker compose ${args.join(' ')}`
+/**
+ * The compose files a box runs with. `COMPOSE_FILE` in .env adds files to the stack (the README's
+ * way to turn on guided login with docker-compose.guided-login.yml), and docker compose reads it
+ * only when no `-f` is given: an explicit `-f docker-compose.yml` silently drops every other file,
+ * so a recreate loses what they add (celld's DOCKER_HOST). Scripted compose calls must therefore
+ * pass this whole list. Split on COMPOSE_PATH_SEPARATOR (default `:`, as compose does on Linux);
+ * relative entries are resolved against `composeDir`, the directory holding the compose files.
+ */
+export function composeFilesFor(
+  box: Readonly<Record<string, string>>,
+  composeDir: string
+): string[] {
+  const separator = box.COMPOSE_PATH_SEPARATOR || ':';
+  const listed = (box.COMPOSE_FILE ?? '')
+    .split(separator)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  return (listed.length > 0 ? listed : ['docker-compose.yml']).map((entry) =>
+    isAbsolute(entry) ? entry : resolve(composeDir, entry)
   );
+}
+
+/** `docker compose` arguments for this box: every compose file, then its .env, then `args`. */
+export function composeArgs(
+  ctx: Pick<BoxContext, 'composeFiles' | 'envFile'>,
+  args: string[]
+): string[] {
+  return [
+    'compose',
+    ...ctx.composeFiles.flatMap((file) => ['-f', file]),
+    '--env-file',
+    ctx.envFile,
+    ...args,
+  ];
+}
+
+function compose(ctx: BoxContext, args: string[]): void {
+  check(ctx.run('docker', composeArgs(ctx, args)), `docker compose ${args.join(' ')}`);
 }
 
 export interface BackupManifest {

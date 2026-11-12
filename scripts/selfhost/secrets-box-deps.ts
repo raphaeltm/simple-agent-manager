@@ -5,7 +5,7 @@
 import { spawnSync } from 'node:child_process';
 
 import { REPO_ROOT } from './backup-cli';
-import type { BoxContext } from './backup-lib';
+import { type BoxContext, composeArgs } from './backup-lib';
 import { detectKeyCandidates } from './key-platforms';
 import { keyAgentPort } from './key-service';
 import { knownSecrets, scanDeployVersions } from './plaintext-scan';
@@ -48,17 +48,7 @@ export function boxSwitchDeps(ctx: BoxContext): SwitchDeps {
     log: ctx.log,
     detect: detectKeyCandidates,
     restartAgent: async () => {
-      visible('docker', [
-        'compose',
-        '-f',
-        ctx.composeFile,
-        '--env-file',
-        ctx.envFile,
-        'up',
-        '-d',
-        '--force-recreate',
-        'key-agent',
-      ]);
+      visible('docker', composeArgs(ctx, ['up', '-d', '--force-recreate', 'key-agent']));
       await waitForSealedAgent(keyAgentPort(ctx.box));
     },
     deploy: async () => migrate.deploy(false),
@@ -74,16 +64,7 @@ export function boxMigrateDeps(ctx: BoxContext): MigrateDeps {
     init: async () => visible('pnpm', [...deployArgs, '--init']),
     preflight: preflightSealedSecrets,
     startStack: async () => {
-      visible('docker', [
-        'compose',
-        '-f',
-        ctx.composeFile,
-        '--env-file',
-        envFile,
-        'up',
-        '-d',
-        '--build',
-      ]);
+      visible('docker', composeArgs(ctx, ['up', '-d', '--build']));
       await waitForSealedAgent(keyAgentPort(box));
     },
     deploy: async (legacy) =>

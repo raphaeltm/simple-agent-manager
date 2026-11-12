@@ -68,7 +68,7 @@ function ctx(): BoxContext {
     box: box(),
     envFile,
     stateDir: state,
-    composeFile: '',
+    composeFiles: [],
     run: runCommand,
     now: () => Date.now(),
     log: () => undefined,

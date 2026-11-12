@@ -71,7 +71,7 @@ const ctx = (): BoxContext => ({
   box: { CELLD_BUCKET: ROOT },
   envFile: '',
   stateDir: '',
-  composeFile: '',
+  composeFiles: [],
   run,
   now: () => 0,
   log: () => undefined,

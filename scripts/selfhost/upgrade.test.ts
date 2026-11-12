@@ -10,7 +10,8 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import type { BoxContext, RunResult } from './backup-lib';
+import { loadBox, SELFHOST_DIR } from './backup-cli';
+import { type BoxContext, composeFilesFor, type RunResult } from './backup-lib';
 import { runUpgrade } from './upgrade-lib';
 
 const FROM = 'a'.repeat(40);
@@ -55,7 +56,7 @@ function ctx(): BoxContext {
     box: { CELLD_BUCKET: 'gs://fleet/celld', SAM_DOMAIN: 'box.example' },
     envFile: join(root, 'box.env'),
     stateDir: join(root, 'state'),
-    composeFile: 'compose.yml',
+    composeFiles: ['compose.yml'],
     run,
     now: () => 0,
     log: (m) => logs.push(m),
@@ -186,5 +187,65 @@ describe('runUpgrade', () => {
     dirty = true;
     await expect(upgrade()).rejects.toThrow(/uncommitted/);
     expect(steps).toEqual([]);
+  });
+});
+
+// sam-box, 2026-11-12 (R4): .env had COMPOSE_FILE=docker-compose.yml:docker-compose.guided-login.yml
+// (the README's way to turn on guided login). The upgrade's `docker compose -f docker-compose.yml
+// up -d --build` replaced that list, recreated celld without the override's DOCKER_HOST, and every
+// guided login then failed at once with sandbox_provision_failed ("no container engine").
+describe('runUpgrade with the box .env COMPOSE_FILE', () => {
+  const boxFromEnv = (lines: string[]): BoxContext => {
+    const envFile = join(root, 'real.env');
+    writeFileSync(envFile, [`CELLD_BUCKET=gs://fleet/celld`, ...lines, ''].join('\n'), {
+      mode: 0o600,
+    });
+    // The real loader reads the .env; only the commands are answered by the fake runner.
+    return { ...loadBox(envFile, join(root, 'state')), run, log: (m) => logs.push(m) };
+  };
+  const restartCommand = () =>
+    steps.find((s) => s.startsWith('docker compose') && s.includes(' up '));
+
+  it('restarts the stack with every file COMPOSE_FILE lists, in order', async () => {
+    diff = ['deploy/selfhost/docker-compose.yml'];
+    const ctx = boxFromEnv(['COMPOSE_FILE=docker-compose.yml:docker-compose.guided-login.yml']);
+    await runUpgrade(ctx, { to: 'v1', backupDir: null, checkHealth: async () => true });
+    expect(restartCommand()).toBe(
+      `docker compose -f ${join(SELFHOST_DIR, 'docker-compose.yml')} ` +
+        `-f ${join(SELFHOST_DIR, 'docker-compose.guided-login.yml')} ` +
+        `--env-file <root>//real.env up -d --build`
+    );
+  });
+
+  it('uses docker-compose.yml alone when COMPOSE_FILE is unset (control)', async () => {
+    diff = ['deploy/selfhost/docker-compose.yml'];
+    const ctx = boxFromEnv([]);
+    await runUpgrade(ctx, { to: 'v1', backupDir: null, checkHealth: async () => true });
+    expect(restartCommand()).toBe(
+      `docker compose -f ${join(SELFHOST_DIR, 'docker-compose.yml')} --env-file <root>//real.env up -d --build`
+    );
+  });
+
+  it('prints rollback compose steps that read .env in deploy/selfhost instead of naming one file', async () => {
+    diff = ['deploy/selfhost/docker-compose.yml'];
+    const result = await runUpgrade(boxFromEnv([]), {
+      to: 'v1',
+      backupDir: null,
+      checkHealth: async () => true,
+    });
+    const composeSteps = result.rollback.filter((step) => step.includes('docker compose'));
+    expect(composeSteps).toEqual(['(cd deploy/selfhost && docker compose up -d --build)']);
+  });
+});
+
+describe('composeFilesFor', () => {
+  it('splits on COMPOSE_PATH_SEPARATOR and keeps absolute entries', () => {
+    expect(
+      composeFilesFor({ COMPOSE_FILE: 'a.yml; /abs/b.yml', COMPOSE_PATH_SEPARATOR: ';' }, '/box')
+    ).toEqual(['/box/a.yml', '/abs/b.yml']);
+  });
+
+  it('falls back to docker-compose.yml for an empty list', () => {
+    expect(composeFilesFor({ COMPOSE_FILE: ' : ' }, '/box')).toEqual(['/box/docker-compose.yml']);
   });
 });
