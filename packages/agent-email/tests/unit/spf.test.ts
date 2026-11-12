@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { planRoutingSpf } from '../../../src/services/agent-email/setup-spf';
-import { verifySpfLookupBudget } from '../../../src/services/agent-email/setup-spf-lookups';
+import { planRoutingSpf } from '../../src';
+import { verifySpfLookupBudget } from '../../src';
 
 describe('SPF setup safety', () => {
   it('verifies the real Google and Cloudflare include names', async () => {

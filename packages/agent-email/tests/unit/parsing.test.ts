@@ -5,7 +5,7 @@ import {
   generateAddressKey,
   normalizeMailbox,
   parseAgentEmailRecipient,
-} from '../../../src/services/agent-email/address';
+} from '../../src';
 import {
   MAX_HEADER_VALUE_BYTES,
   MAX_REFERENCES,
@@ -14,8 +14,8 @@ import {
   replyReferences,
   replySubject,
   sanitizeDisplayName,
-} from '../../../src/services/agent-email/headers';
-import { parseInboundEmail } from '../../../src/services/agent-email/inbound-message';
+} from '../../src';
+import { parseInboundEmail } from '../../src';
 
 const BASE = 'Fixture.Example';
 const SAMPLE_ID = 'k3j2h7m9q2xw4n8p';

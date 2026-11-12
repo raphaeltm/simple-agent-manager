@@ -15,11 +15,11 @@ import type {
   AgentEmailZoneChange,
   MailDnsRecord,
 } from '@simple-agent-manager/shared';
+import { log } from '@simple-agent-manager/worker-core';
+import { getTimeoutMs } from '@simple-agent-manager/worker-core';
 
-import type { Env } from '../../env';
-import { log } from '../../lib/logger';
-import { DEFAULT_CF_API_TIMEOUT_MS } from '../dns-core';
-import { getTimeoutMs } from '../fetch-timeout';
+import type { AgentEmailEnv } from './env';
+import type { AgentEmailPorts } from './ports';
 import { allowedAdditions, toMailRecord } from './setup-changes';
 import { AgentEmailSetupRefusedError } from './setup-errors';
 import {
@@ -34,8 +34,8 @@ import {
  * while one write is outstanding. Every exit releases it, so it lapses on its own only if the
  * Worker died mid-run.
  */
-function setupLeaseMs(env: Env): number {
-  return 20 * getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
+function setupLeaseMs(env: AgentEmailEnv, ports: AgentEmailPorts): number {
+  return 20 * getTimeoutMs(env.CF_API_TIMEOUT_MS, ports.cloudflareApi.defaultTimeoutMs);
 }
 
 function leaseHeld(attempt: AgentEmailSetupAttempt, now: number): boolean {
@@ -70,7 +70,8 @@ function approvedRecords(claim: SetupClaim) {
 
 export class SetupLease {
   private constructor(
-    private readonly env: Env,
+    private readonly env: AgentEmailEnv,
+    private readonly ports: AgentEmailPorts,
     private owned: StoredSetupAttempt
   ) {}
 
@@ -88,11 +89,15 @@ export class SetupLease {
    * keeps the baseline this run read; one left by an earlier run keeps its own, unless the
    * admin allowed the records as they are now (`changed`). Refuses while another run holds it.
    */
-  static async claim(env: Env, claim: SetupClaim): Promise<SetupLease> {
+  static async claim(
+    env: AgentEmailEnv,
+    ports: AgentEmailPorts,
+    claim: SetupClaim
+  ): Promise<SetupLease> {
     const now = Date.now();
     const lease = {
       owner: crypto.randomUUID(),
-      leaseUntil: new Date(now + setupLeaseMs(env)).toISOString(),
+      leaseUntil: new Date(now + setupLeaseMs(env, ports)).toISOString(),
     };
     const acceptedZoneChanges = claim.zoneChanges.map((change) => change.setting);
     if (!claim.existing) {
@@ -105,13 +110,13 @@ export class SetupLease {
         zoneChanges: acceptedZoneChanges,
         ...lease,
       };
-      const stored = await claimSetupAttempt(env, attempt);
+      const stored = await claimSetupAttempt(env, ports, attempt);
       if (stored.attempt.owner !== lease.owner) {
         throw new AgentEmailSetupRefusedError(
           'Another agent email setup run started at the same time. Check again.'
         );
       }
-      return new SetupLease(env, stored);
+      return new SetupLease(env, ports, stored);
     }
     const previous = claim.existing.attempt;
     if (leaseHeld(previous, now)) {
@@ -138,7 +143,7 @@ export class SetupLease {
         'Another agent email setup run changed the setup at the same time. Check again.'
       );
     }
-    return new SetupLease(env, { attempt: next, stored: JSON.stringify(next) });
+    return new SetupLease(env, ports, { attempt: next, stored: JSON.stringify(next) });
   }
 
   /** Call right before every Cloudflare write: extends the lease, or stops the run. */
@@ -149,7 +154,7 @@ export class SetupLease {
         'This agent email setup run outlasted its lease, so another run may have started. Check again.'
       );
     }
-    const leaseMs = setupLeaseMs(this.env);
+    const leaseMs = setupLeaseMs(this.env, this.ports);
     const next = { ...this.owned.attempt, leaseUntil: new Date(now + leaseMs).toISOString() };
     if (!(await replaceSetupAttempt(this.env, this.owned, next))) {
       throw new AgentEmailSetupRefusedError(
