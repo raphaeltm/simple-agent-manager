@@ -9,11 +9,7 @@ import type { TaskRecoveryEnv } from './task-recovery-env';
 import type { WebhookTriggerEnv } from './webhook-trigger-env';
 
 export interface Env
-  extends WebhookTriggerEnv,
-    TaskRecoveryEnv,
-    WorkspaceAdmissionEnv,
-    ProjectDataEnv,
-    AgentEmailEnv {
+  extends WebhookTriggerEnv, TaskRecoveryEnv, WorkspaceAdmissionEnv, ProjectDataEnv, AgentEmailEnv {
   CLI_RECEIPT_REQUEST_MAX_BYTES?: string; // default 262144
   CLI_RECEIPT_RESPONSE_MAX_BYTES?: string; // default 65536
   // D1 Database.
