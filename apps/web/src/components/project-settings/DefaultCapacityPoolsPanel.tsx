@@ -237,6 +237,13 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
         </div>
       </div>
 
+      {shown?.diagnostics?.includes('catalog-refresh-failed') && (
+        <Alert variant="warning">
+          Machine list refresh failed. Check the connected cloud accounts, then select Refresh to
+          retry.
+        </Alert>
+      )}
+
       {query.isLoading && !query.data ? (
         <p className="m-0 text-sm text-fg-muted" role="status">
           Loading compute pool…
