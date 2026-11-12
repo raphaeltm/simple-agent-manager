@@ -311,6 +311,8 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  // A test that froze the clock must not leave it frozen for the next one.
+  vi.useRealTimers();
 });
 
 // Some sections render only after two requests in a row: the overview's attention card needs the
@@ -1274,6 +1276,11 @@ describe('signed webhook automation', { timeout: 20_000 }, () => {
   });
 
   it('says why requests are refused, and moves the panel aside once events arrive', async () => {
+    // The status line prints relative times ("2 min ago") against the fixtures' NOW, which is
+    // taken when the file loads. Freeze only the clock at NOW so the age cannot drift while the
+    // full suite runs; timers stay real so the page's async loading still runs.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(NOW);
     api.getTrigger.mockResolvedValue(
       signedTrigger(
         {
