@@ -33,6 +33,8 @@ export const DEFAULT_CACHE_SECONDS = 300;
 const MAX_REQUEST_BYTES = 1024;
 /** The bundle entry holding the agent's Ed25519 signing key (PKCS#8 DER, base64); never served. */
 export const SIGNING_KEY_NAME = 'SAM_KEY_AGENT_SIGNING_KEY';
+/** A platform key sealed in the bundle that the Worker gets as a var, never from the agent. */
+const INSTALLATION_ID_NAME = 'SAM_INSTALLATION_ID';
 export const SIGNATURE_HEADER = 'x-sam-key-agent-signature';
 const NONCE = /^[0-9a-f]{32}$/;
 
@@ -42,9 +44,21 @@ interface Opened {
   signingKey: KeyObject;
 }
 
-/** Splits the signing key off the secrets; a bundle without one is refused (fail closed). */
+/**
+ * Splits the signing key off the secrets; a bundle without one is refused (fail closed).
+ *
+ * The bundle also holds the platform key SAM_INSTALLATION_ID (the deploy reads it back from the
+ * bundle once platform-keys.json is gone). It reaches the Worker as a deploy var, not a secret,
+ * and the Worker refuses any answer that names it (runtime-secrets.ts PROTECTED_NAMES), so it is
+ * never part of the answer.
+ */
 function toOpened(installationId: string, all: Secrets): Opened {
-  const { [SIGNING_KEY_NAME]: der, ...secrets } = all;
+  const {
+    [SIGNING_KEY_NAME]: der,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- dropped on purpose (see above)
+    [INSTALLATION_ID_NAME]: _installationIdVar,
+    ...secrets
+  } = all;
   if (!der) throw new KeyProviderError('invalid', 'bundle has no agent signing key');
   let signingKey: KeyObject;
   try {
