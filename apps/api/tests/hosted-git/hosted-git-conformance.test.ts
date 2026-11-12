@@ -277,7 +277,8 @@ describe('SAM-hosted repositories with a real git client', () => {
     await gitOk(['commit', '-m', 'big'], work);
     const refused = await git(['push', 'origin', 'HEAD:refs/heads/too-big'], work);
     expect(refused.code).not.toBe(0);
-    expect(refused.stderr).toMatch(/push refused|larger than|413/);
+    expect(refused.stderr).toContain('SAM: push refused');
+    expect(refused.stderr).toContain('MiB limit for one push');
 
     const check = await freshDir('after-big');
     await gitOk(['clone', localRemote(project.repository, token), check]);

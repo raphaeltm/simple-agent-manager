@@ -42,6 +42,25 @@ const INGEST_CACHE_BYTES = 32 * 1024 * 1024;
 const GC_DELAY_MS = 5 * 60 * 1000;
 const PACK_HEADER_BYTES = 12;
 
+/** Discard up to `maxBytes` of a request body, then cancel whatever is left. */
+async function drainBounded(
+  reader: ReadableStreamDefaultReader<Uint8Array> | null,
+  maxBytes: number
+): Promise<void> {
+  if (!reader) return;
+  let drained = 0;
+  try {
+    while (drained <= maxBytes) {
+      const { done, value } = await reader.read();
+      if (done) return;
+      drained += value?.byteLength ?? 0;
+    }
+    await reader.cancel();
+  } catch {
+    // The client may already be gone.
+  }
+}
+
 export class HostedGitRepo extends DurableObject {
   private store: GitStore;
   /** Pushes are serialized: concurrent ingests would race pack-id allocation. */
@@ -275,7 +294,10 @@ export class HostedGitRepo extends DurableObject {
       if (unpackError) {
         console.warn('hosted_git.push_refused', { reason: unpackError });
         progress(`${unpackError}\n`);
-        await reader?.cancel().catch(() => undefined);
+        // Read (and discard) the rest of the upload before answering: a response sent while the
+        // client is still uploading resets the connection, and git then shows "remote end hung up"
+        // instead of the reason. Bounded, so a refused client cannot keep the cell busy forever.
+        await drainBounded(reader, limits.maxPushBytes * 2);
       }
     }
 
