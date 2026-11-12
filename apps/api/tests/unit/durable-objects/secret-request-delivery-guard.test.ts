@@ -2,10 +2,10 @@
  * A secret request outcome is delivered only while the requesting task (or its own recovery
  * successor) is live, like an Operations decision: the guard must exist for the new source kind.
  */
+import { sourceTaskGuardForClaim } from '@simple-agent-manager/project-data/internal/do/prompt-delivery-source-guards';
 import { describe, expect, it } from 'vitest';
 
 import type { PromptDeliveryClaim } from '../../../src/durable-objects/project-data/prompt-delivery';
-import { sourceTaskGuardForClaim } from '../../../src/durable-objects/project-data/prompt-delivery-source-guards';
 
 function claim(sourceKind: string): PromptDeliveryClaim {
   return {
@@ -40,7 +40,7 @@ describe('sourceTaskGuardForClaim — secret_request', () => {
 describe('invalidProjectEventWakeSourceTaskResult — secret_request', () => {
   it('fails closed when the notice carries no requester', async () => {
     const { invalidProjectEventWakeSourceTaskResult } =
-      await import('../../../src/durable-objects/project-data/prompt-delivery-source-guards');
+      await import('@simple-agent-manager/project-data/internal/do/prompt-delivery-source-guards');
     const noRequester = claim('secret_request');
     noRequester.message.metadata = { secretRequestId: 'req-1' };
     const result = await invalidProjectEventWakeSourceTaskResult(
