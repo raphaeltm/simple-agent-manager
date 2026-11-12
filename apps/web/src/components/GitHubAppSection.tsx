@@ -4,6 +4,7 @@ import { useCallback,useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router';
 
 import { getGitHubInstallUrl, listGitHubInstallations, listRepositories } from '../lib/api';
+import { ApiClientError } from '../lib/api/client';
 
 /**
  * GitHub App section for settings page.
@@ -17,6 +18,7 @@ export function GitHubAppSection() {
   const [error, setError] = useState<string | null>(null);
   const [installUrl, setInstallUrl] = useState<string | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [notConnected, setNotConnected] = useState(false);
 
   const loadInstallations = useCallback(async () => {
     try {
@@ -35,7 +37,12 @@ export function GitHubAppSection() {
         }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load installations');
+      // An email-signed account has no GitHub link yet; the section above offers to connect it.
+      if (err instanceof ApiClientError && err.code === 'GITHUB_NOT_CONNECTED') {
+        setNotConnected(true);
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to load installations');
+      }
     } finally {
       setLoading(false);
     }
@@ -89,6 +96,17 @@ export function GitHubAppSection() {
 
   if (error) {
     return <Alert variant="error">{error}</Alert>;
+  }
+
+  if (notConnected) {
+    return (
+      <div className="glass-surface rounded-lg p-4">
+        <p className="m-0 text-sm text-fg-muted">
+          Connect GitHub above, then install the GitHub App on the accounts whose repositories SAM
+          should use.
+        </p>
+      </div>
+    );
   }
 
   if (installations.length === 0) {

@@ -29,6 +29,7 @@ import {
 import { clearCredentialAttributionHealthCache } from '../../services/credential-attribution-health';
 import { getUserInstallationRepositories } from '../../services/github-app';
 import { getExternalInstallationId } from '../../services/github-installation-ids';
+import { githubUserTokenUnavailableError } from '../../services/github-token-errors';
 import {
   getGitHubUserAccessTokenForOwner,
   getGitHubUserAccessTokenWithHeaders,
@@ -211,11 +212,14 @@ async function evaluateRequesterGithubAccess(input: {
           'project-invite-approval'
         );
   if (!accessToken) {
+    const unavailable = await githubUserTokenUnavailableError(input.env, input.requesterUserId);
     return {
       status: 'missing-token',
       checkedAt,
       message:
-        'Requester must reauthenticate with GitHub before repository access can be verified.',
+        unavailable.error === 'GITHUB_NOT_CONNECTED'
+          ? 'Requester has not connected GitHub to their SAM account. They can join, but cannot run work in this project until they connect GitHub in Settings → GitHub.'
+          : 'Requester must reauthenticate with GitHub before repository access can be verified.',
     };
   }
 

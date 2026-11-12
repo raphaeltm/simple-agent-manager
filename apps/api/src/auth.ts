@@ -445,6 +445,14 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
       accountLinking: {
         enabled: true,
         trustedProviders,
+        // "Connect GitHub" / "Connect GitLab" in Settings: an account that signed in by email
+        // links a provider through BetterAuth's own `/link-social` flow. The provider account's
+        // email usually differs from the SAM one (a GitHub-created account may only expose its
+        // noreply address). better-auth 1.7 reads this flag only on that explicit, signed-in
+        // path (`oauth2/link-account.mjs`, `/link-social` idToken branch); implicit linking at
+        // sign-in still matches on the email alone. Agent sign-in sessions cannot reach
+        // `/link-social`: `routes/auth.ts` refuses every BetterAuth write for them.
+        allowDifferentEmails: true,
       },
     },
   });

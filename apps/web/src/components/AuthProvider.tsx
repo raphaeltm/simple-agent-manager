@@ -17,7 +17,7 @@ import {
 } from '../hooks/useQueryCachePersistence';
 import { setUserId } from '../lib/analytics';
 import { GITHUB_REAUTH_REQUIRED_EVENT } from '../lib/api/client';
-import { signOut, useSession } from '../lib/auth';
+import { connectProvider, signOut, useSession } from '../lib/auth';
 import {
   buildLibraryCacheNamespace,
   clearLegacyLibraryCache,
@@ -90,6 +90,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
   else if (!sessionRequestPending && !error) confirmedSignedOutRef.current = true;
   const isPending = sessionRequestPending && !confirmedSignedOutRef.current;
   const [githubReauthMessage, setGitHubReauthMessage] = useState<string | null>(null);
+  // True when the account has no GitHub link at all: signing out cannot fix that, connecting can.
+  const [githubNotConnected, setGitHubNotConnected] = useState(false);
   const [activeCacheNamespace, setActiveCacheNamespace] = useState<string | null | undefined>(
     undefined
   );
@@ -194,7 +196,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   useEffect(() => {
     const onGitHubReauthRequired = (event: Event) => {
-      const detail = event instanceof CustomEvent ? (event.detail as { message?: unknown }) : null;
+      const detail =
+        event instanceof CustomEvent
+          ? (event.detail as { message?: unknown; code?: unknown })
+          : null;
+      setGitHubNotConnected(detail?.code === 'GITHUB_NOT_CONNECTED');
       setGitHubReauthMessage(
         typeof detail?.message === 'string' && detail.message.length > 0
           ? detail.message
@@ -207,6 +213,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, []);
 
   const handleGitHubReauth = async () => {
+    if (githubNotConnected) {
+      try {
+        await connectProvider('github');
+      } catch (err) {
+        setGitHubReauthMessage(err instanceof Error ? err.message : 'Could not connect GitHub');
+      }
+      return;
+    }
     await signOut();
   };
 
@@ -263,7 +277,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
           className="fixed inset-x-4 bottom-4 z-50 mx-auto max-w-md rounded-lg border border-border bg-surface-elevated p-4 shadow-lg"
           role="alert"
         >
-          <p className="text-sm font-medium text-fg-primary">GitHub sign-in required</p>
+          <p className="text-sm font-medium text-fg-primary">
+            {githubNotConnected ? 'Connect GitHub to continue' : 'GitHub sign-in required'}
+          </p>
           <p className="mt-1 text-sm text-fg-secondary">{githubReauthMessage}</p>
           <div className="mt-3 flex justify-end gap-2">
             <button
@@ -278,7 +294,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
               className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-fg-on-accent hover:opacity-90"
               onClick={() => void handleGitHubReauth()}
             >
-              Sign out and reconnect
+              {githubNotConnected ? 'Connect GitHub' : 'Sign out and reconnect'}
             </button>
           </div>
         </div>
