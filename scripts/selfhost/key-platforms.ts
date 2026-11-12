@@ -68,7 +68,18 @@ export function candidatesFor(facts: PlatformFacts, box: Box): PlatformCandidate
       ],
     };
   }
-  return { platform, candidates: [], note: 'no AWS KMS provider is available yet' };
+  const keyId = value(box, 'SAM_AWS_KMS_KEY_ID') ?? `alias/${keyName}`;
+  const region = value(box, 'SAM_AWS_KMS_REGION') ?? facts.region;
+  return {
+    platform,
+    candidates: [
+      {
+        provider: 'aws-kms',
+        settings: { SAM_AWS_KMS_KEY_ID: keyId, SAM_AWS_KMS_REGION: region },
+        label: `AWS KMS key ${keyId} in ${region}`,
+      },
+    ],
+  };
 }
 
 /** Production detection for key-choice.ts: probe the metadata services, then derive candidates. */

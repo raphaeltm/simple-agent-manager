@@ -49,6 +49,7 @@ const CONTAINER_DIR = '/etc/sam/key-agent';
 const CREDENTIAL_FILES: Readonly<Record<string, string>> = {
   SAM_TRANSIT_TOKEN_FILE: 'transit-token',
   SAM_TRANSIT_SECRET_ID_FILE: 'transit-secret-id',
+  SAM_AWS_CREDENTIALS_FILE: 'aws-credentials',
 };
 /** Non-secret provider settings copied from `.env` into the agent's environment. */
 const PROVIDER_SETTINGS = [
@@ -64,6 +65,10 @@ const PROVIDER_SETTINGS = [
   'SAM_AZURE_KEY_NAME',
   'SAM_AZURE_CLIENT_ID',
   'SAM_AZURE_IMDS_HOST',
+  'SAM_AWS_KMS_KEY_ID',
+  'SAM_AWS_KMS_REGION',
+  'SAM_AWS_KMS_ENDPOINT',
+  'SAM_AWS_IMDS_HOST',
 ] as const;
 /** Box files that can unlock the bundle; backups leave them out (backup-lib.ts). */
 export const KEY_SERVICE_BACKUP_EXCLUDES = [`${KEY_AGENT_DIR}/kek`, `${KEY_AGENT_DIR}/credentials`];

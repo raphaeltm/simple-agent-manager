@@ -15,6 +15,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { FAKE_AWS_REGION, type FakeAws, startFakeAws } from './aws-kms-fake.js';
 import { CLOSED_HOST, runDeploy, writeBox } from './deploy-harness.js';
 import { installKeyName } from './key-platforms.js';
 import { type FakeKeyService, startFakeKeyServices } from './key-provider-fakes.js';
@@ -25,6 +26,7 @@ const GCP_KEY = `projects/${PROJECT}/locations/global/keyRings/sam-selfhost/cryp
 
 let dir: string;
 let fake: FakeKeyService | undefined;
+let aws: FakeAws | undefined;
 const extras: Server[] = [];
 
 beforeEach(() => {
@@ -33,6 +35,8 @@ beforeEach(() => {
 afterEach(async () => {
   await fake?.close();
   fake = undefined;
+  await aws?.close();
+  aws = undefined;
   for (const server of extras.splice(0)) server.close();
   rmSync(dir, { recursive: true, force: true });
 });
@@ -127,6 +131,50 @@ describe('Google Cloud', () => {
     const init = await runDeploy(envFile, ['--init']);
     expect(init.status, init.out).toBe(0);
     expect(init.out).toMatch(/key provider: file \(on Google Cloud .* is not usable \(denied:/);
+    expect(bundleProviders()).toEqual(['file']);
+  });
+});
+
+describe('AWS', () => {
+  async function awsInit(existingKeys?: string[], denied = false) {
+    aws = await startFakeAws({ existingKeys });
+    aws.setDenied(denied);
+    const envFile = writeBox(dir, [
+      ...elsewhere('aws'),
+      `SAM_AWS_IMDS_HOST=${aws.host}`,
+      `SAM_AWS_KMS_ENDPOINT=http://${aws.host}/`,
+    ]);
+    return await runDeploy(envFile, ['--init']);
+  }
+
+  it('selects the setup-created KMS alias in the instance region, signed with the instance role', async () => {
+    const init = await awsInit([`alias/${KEY_NAME}`]);
+    expect(init.status, init.out).toBe(0);
+    expect(choice()).toMatchObject({
+      provider: 'aws-kms',
+      settings: { SAM_AWS_KMS_KEY_ID: `alias/${KEY_NAME}`, SAM_AWS_KMS_REGION: FAKE_AWS_REGION },
+    });
+    expect(bundleProviders()).toEqual(['aws-kms']);
+    expect(aws?.calls).toEqual(
+      expect.arrayContaining(['TrentService.Encrypt', 'TrentService.Decrypt'])
+    );
+    for (const secret of aws?.secrets() ?? []) expect(init.out).not.toContain(secret);
+  });
+
+  it('on AWS with no key set up: file key, NotFoundException named in the reason', async () => {
+    const init = await awsInit([]);
+    expect(init.status, init.out).toBe(0);
+    expect(init.out).toContain(
+      `key provider: file (on AWS (${FAKE_AWS_REGION}), but AWS KMS key alias/${KEY_NAME}`
+    );
+    expect(init.out).toContain('(config: aws-kms');
+    expect(bundleProviders()).toEqual(['file']);
+  });
+
+  it('key exists but the role may not use it: file key (denied)', async () => {
+    const init = await awsInit([`alias/${KEY_NAME}`], true);
+    expect(init.status, init.out).toBe(0);
+    expect(init.out).toContain('(denied: aws-kms');
     expect(bundleProviders()).toEqual(['file']);
   });
 });
