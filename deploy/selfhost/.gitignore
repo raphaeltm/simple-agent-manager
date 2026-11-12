@@ -1,3 +1,4 @@
 # Operator configuration and box state: never commit.
 .env
 .state/
+backups/

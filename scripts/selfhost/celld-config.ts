@@ -34,9 +34,13 @@ export const SELFHOST_VAR_OVERRIDES: Readonly<Record<string, string>> = {
   // the `speech.synthesis.*` settings (platform-capabilities.ts). The stalled-task classifier
   // runs the Workers AI Clef model only.
   STALLED_TASK_CLASSIFIER_ENABLED: 'false',
-  // Analytics Engine and the AI Gateway cost reports.
-  ANALYTICS_ENABLED: 'false',
-  ANALYTICS_INGEST_ENABLED: 'false',
+  // No Analytics Engine here: product analytics go to the D1 sink in OBSERVABILITY_DATABASE
+  // (apps/api/src/services/analytics-d1-sink.ts), bounded by its retention and row cap.
+  ANALYTICS_SINK: 'd1',
+  // No tail worker on celld, so nothing feeds Admin → Stream; the page says to read logs on
+  // the box instead (platform-capabilities.ts hasLiveLogStream).
+  LOG_TAIL_AVAILABLE: 'false',
+  // AI Gateway cost reports.
   COST_MONITORING_ENABLED: 'false',
   // wrangler.toml ships AI_GATEWAY_ID="sam". Empty makes every gateway consumer take its
   // no-gateway branch (direct Anthropic/OpenAI URLs, no AI Gateway log or cost queries).
@@ -283,7 +287,7 @@ const RULES: Readonly<Record<string, Rule>> = {
   },
   analytics_engine_datasets: {
     kind: 'drop',
-    reason: 'Analytics Engine binding; ANALYTICS_ENABLED=false',
+    reason: 'Analytics Engine binding; ANALYTICS_SINK=d1 records analytics in D1 instead',
   },
   ai: { kind: 'drop', reason: 'Workers AI binding' },
   containers: {
