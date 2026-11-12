@@ -46,6 +46,8 @@ const REJECTION_HINTS: Record<WebhookRejectionReason, string> = {
   invalid_body: 'The request body was not a JSON object.',
   missing_event_id:
     'Events are arriving without a readable ID at the configured location, so SAM cannot tell retries apart and starts nothing.',
+  repeated_body:
+    'A signed body SAM already took arrived again under a different event ID. The signature does not cover a header ID, so SAM starts nothing: it may be a replay. If the service sends identical bodies for different events, read the event ID from the body instead.',
 };
 
 export function webhookRejectionHint(reason: string): string {

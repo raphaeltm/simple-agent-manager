@@ -98,12 +98,30 @@ function logRateLimitUnavailable(prefix: string, error: unknown): void {
   });
 }
 
+/** The same codes `errors` in middleware/error.ts uses for each status. */
+const PUBLIC_ERROR_CODES = {
+  400: 'BAD_REQUEST',
+  401: 'UNAUTHORIZED',
+  404: 'NOT_FOUND',
+  413: 'PAYLOAD_TOO_LARGE',
+  415: 'UNSUPPORTED_MEDIA_TYPE',
+  429: 'TOO_MANY_REQUESTS',
+  503: 'SERVICE_UNAVAILABLE',
+} as const;
+
+/**
+ * The webhook ingress error body: the API's `{ error, message }` shape, plus `accepted: false`
+ * for senders that already read it.
+ */
 export function publicError(
-  status: 400 | 401 | 404 | 413 | 415 | 429 | 503,
+  status: keyof typeof PUBLIC_ERROR_CODES,
   message: string,
   headers?: Record<string, string>
 ): Response {
-  return Response.json({ accepted: false, message }, { status, headers });
+  return Response.json(
+    { accepted: false, error: PUBLIC_ERROR_CODES[status], message },
+    { status, headers }
+  );
 }
 
 /** One uniform answer for an unknown token or address, counted per caller. */

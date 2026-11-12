@@ -12,10 +12,13 @@ import {
   type WebhookVerificationConfig,
   type WebhookVerificationScheme,
 } from '@simple-agent-manager/shared';
+import * as v from 'valibot';
 
 import type * as schema from '../db/schema';
 import type { Env } from '../env';
+import { log } from '../lib/logger';
 import { buildTrustedApiUrl } from '../lib/trusted-origins';
+import { StoredWebhookFiltersSchema } from '../schemas/triggers';
 import { normalizeIncludedHeaders } from './webhook-trigger-payload';
 import type { WebhookTokenMaterial } from './webhook-trigger-store';
 
@@ -26,13 +29,25 @@ export function signedWebhookIngestPath(triggerId: string): string {
   return `/api/webhooks/in/${encodeURIComponent(triggerId)}`;
 }
 
-function parseFilters(value: string): WebhookTriggerFilter[] {
+/**
+ * Stored conditions, or null when they cannot be read. An empty list would mean "no
+ * conditions", which starts a run for every event, so unreadable conditions must not become
+ * one: callers that start runs refuse the call instead.
+ */
+function parseFilters(row: schema.WebhookTriggerConfigRow): WebhookTriggerFilter[] | null {
+  let parsed: unknown;
   try {
-    const parsed: unknown = JSON.parse(value);
-    return Array.isArray(parsed) ? (parsed as WebhookTriggerFilter[]) : [];
+    parsed = JSON.parse(row.filtersJson);
   } catch {
-    return [];
+    parsed = undefined;
   }
+  const result = v.safeParse(StoredWebhookFiltersSchema, parsed);
+  if (result.success) return result.output;
+  log.warn('webhook_trigger.stored_filters_unreadable', {
+    triggerId: row.triggerId,
+    reason: parsed === undefined ? 'invalid_json' : 'invalid_shape',
+  });
+  return null;
 }
 
 function parseHeaders(value: string): string[] {
@@ -70,17 +85,20 @@ export function webhookRowEventId(
   return null;
 }
 
-/** What handling a call needs. Unlike the API shape it builds no URL, so it needs no domain. */
+/**
+ * What handling a call needs. Unlike the API shape it builds no URL, so it needs no domain.
+ * `filters` is null when the stored conditions cannot be read; no run may start then.
+ */
 export type WebhookRuntimeConfig = Pick<
   WebhookTriggerConfig,
-  'sourceLabel' | 'filterMode' | 'filters' | 'includedHeaders'
->;
+  'sourceLabel' | 'filterMode' | 'includedHeaders'
+> & { filters: WebhookTriggerFilter[] | null };
 
 export function toWebhookRuntimeConfig(row: schema.WebhookTriggerConfigRow): WebhookRuntimeConfig {
   return {
     sourceLabel: row.sourceLabel,
     filterMode: row.filterMode === 'any' ? 'any' : 'all',
-    filters: parseFilters(row.filtersJson),
+    filters: parseFilters(row),
     includedHeaders: parseHeaders(row.includedHeadersJson),
   };
 }
@@ -90,8 +108,12 @@ export function toWebhookTriggerConfig(
   env: Pick<Env, 'BASE_DOMAIN'>
 ): WebhookTriggerConfig {
   const signed = isWebhookSignedScheme(webhookRowScheme(row));
+  const runtime = toWebhookRuntimeConfig(row);
   return {
-    ...toWebhookRuntimeConfig(row),
+    ...runtime,
+    // Settings still render with unreadable conditions (logged above); calls are refused until
+    // the conditions are saved again.
+    filters: runtime.filters ?? [],
     verification: rowVerification(row),
     eventId: webhookRowEventId(row),
     endpointUrl: buildTrustedApiUrl(

@@ -103,20 +103,33 @@ export async function drainTriggerQueue(
     });
   }
   const rows = await env.DATABASE.prepare(
-    `SELECT q.id FROM trigger_executions q WHERE q.queue_expires_at IS NOT NULL AND q.rendered_prompt IS NOT NULL
+    `SELECT q.id, q.trigger_id AS triggerId, q.status, q.subject_key IS NULL AS subjectless
+    FROM trigger_executions q WHERE q.queue_expires_at IS NOT NULL AND q.rendered_prompt IS NOT NULL
     AND q.status IN ('waiting','routing','queued') AND (q.status <> 'waiting' OR q.queue_expires_at > ?)
     AND ${QUEUE_SOURCE_SQL} AND ${QUEUE_CANDIDATE_SQL}
     ORDER BY COALESCE(q.queue_attempted_at,q.created_at),q.sequence_number LIMIT ?`
   )
     .bind(now, ...queueSourceBindings(options), now, config.batchSize)
-    .all<{ id: string }>();
-  const started = Date.now();
+    .all<{ id: string; triggerId: string; status: string; subjectless: number }>();
+  const deadline = Date.now() + config.maxWallTimeMs;
   let processed = 0;
   for (const row of rows.results) {
-    if (Date.now() - started >= config.maxWallTimeMs) break;
+    if (Date.now() >= deadline || processed >= config.batchSize) break;
     try {
-      await processQueuedTriggerExecution(env, row.id, submitter);
+      const result = await processQueuedTriggerExecution(env, row.id, submitter);
       processed += 1;
+      // Only the head of each line was selected. When it starts, the next event may fit a
+      // further free run slot of the same automation, so keep filling that line now instead of
+      // one event per tick. Subject events are already tried anywhere in their line.
+      if (row.status === 'waiting' && row.subjectless && result.outcome === 'submitted') {
+        processed += await drainTriggerQueueForTrigger(
+          env,
+          row.triggerId,
+          config.batchSize - processed,
+          submitter,
+          deadline
+        );
+      }
     } catch {
       log.warn('trigger_queue.retry', { executionId: row.id });
     }
@@ -130,30 +143,37 @@ export async function drainTriggerQueue(
 }
 
 /**
- * Tries the events at the head of one automation's line, oldest first. Called after a webhook
- * event is committed so a free slot is used at once instead of at the next cron tick; the cron
- * drain remains the recovery path when this never runs.
+ * Tries the events at the head of one automation's line, oldest first, until one cannot start.
+ * Called after a webhook event is committed so a free slot is used at once instead of at the
+ * next cron tick, and by the cron drain after a head starts, to fill the automation's other free
+ * slots. Returns how many events it tried.
  */
 export async function drainTriggerQueueForTrigger(
   env: Env,
   triggerId: string,
   limit: number,
-  submitter?: TriggerTaskSubmitter
-): Promise<void> {
+  submitter?: TriggerTaskSubmitter,
+  deadline = Number.POSITIVE_INFINITY
+): Promise<number> {
+  if (limit <= 0) return 0;
   const rows = await env.DATABASE.prepare(
     `SELECT id FROM trigger_executions WHERE trigger_id=? AND status='waiting' AND queue_expires_at>?
       AND rendered_prompt IS NOT NULL ORDER BY sequence_number LIMIT ?`
   )
     .bind(triggerId, new Date().toISOString(), limit)
     .all<{ id: string }>();
+  let processed = 0;
   for (const row of rows.results) {
+    if (Date.now() >= deadline) break;
     try {
       const result = await processQueuedTriggerExecution(env, row.id, submitter);
+      processed += 1;
       // Later events are behind this one in line; if it could not start, neither can they.
-      if (result.outcome === 'waiting') break;
+      if (result.outcome !== 'submitted') break;
     } catch {
       log.warn('trigger_queue.retry', { executionId: row.id, triggerId });
       break;
     }
   }
+  return processed;
 }

@@ -84,6 +84,12 @@ export const WEBHOOK_REJECTION_REASONS = [
   'stale_timestamp',
   'invalid_body',
   'missing_event_id',
+  /**
+   * The event ID came from a header, which the signature does not cover, and the signed body
+   * was already taken under another ID: either a replay of a captured request or a sender that
+   * sends byte-identical bodies for different events. Not supported; nothing starts.
+   */
+  'repeated_body',
 ] as const;
 export type WebhookRejectionReason = (typeof WEBHOOK_REJECTION_REASONS)[number];
 

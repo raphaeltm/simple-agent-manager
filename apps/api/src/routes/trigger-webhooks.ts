@@ -80,12 +80,14 @@ async function handleWebhookIngress(
 
   const receivedAt = new Date().toISOString();
   const rejectionWindow = getCurrentWindowStart(limits.rateLimitWindowSeconds);
-  if (!resolved.trigger.agentProfileId) {
+  // Unreadable stored conditions must not start a run for every event.
+  const filters = resolved.config.filters;
+  if (!resolved.trigger.agentProfileId || filters === null) {
     await recordRejected(c.env, {
       triggerId: resolved.trigger.id,
       outcome: 'configuration_error',
       httpStatus: 503,
-      errorCode: 'missing_agent_profile',
+      errorCode: !resolved.trigger.agentProfileId ? 'missing_agent_profile' : 'invalid_filters',
       windowStart: rejectionWindow,
       receivedAt,
     });
@@ -149,6 +151,8 @@ async function handleWebhookIngress(
     bodyBytes: bodyBytes.byteLength,
     receivedAt,
   });
+  // `body_reused` only answers a signed request whose ID is in a header; token calls never ask.
+  if (delivery.disposition === 'body_reused') throw new Error('Unexpected body reuse refusal');
   if (delivery.disposition !== 'reserved') return webhookDeliveryDispositionResponse(delivery);
 
   const finalize = async (
@@ -173,7 +177,7 @@ async function handleWebhookIngress(
   try {
     const filterResult = evaluateWebhookFilters(
       body,
-      resolved.config.filters,
+      filters,
       resolved.config.filterMode,
       limits.maxFilterPathDepth
     );

@@ -426,6 +426,11 @@ const DELIVERY_REASON_TEXT: Record<string, [Outcome, string]> = {
   'rejected:not_configured': ['failed', 'Refused: no signing secret is saved yet'],
   'rejected:invalid_body': ['failed', 'Refused: the body was not a JSON object'],
   'rejected:missing_event_id': ['failed', 'Refused: the event had no ID'],
+  'rejected:repeated_body': ['failed', 'Refused: same body as an earlier event, under a new ID'],
+  'configuration_error:invalid_filters': [
+    'failed',
+    'Failed: the saved conditions could not be read; save them again',
+  ],
   'queue_full:queue_full': ['skipped', 'Refused: too many events were already waiting'],
   'dropped:queue_expired': ['failed', 'Dropped: waited too long for a free run'],
 };
@@ -461,6 +466,8 @@ export function webhookRejectionPhrase(reason: string): string {
       return 'the body is not a JSON object';
     case 'missing_event_id':
       return 'events are arriving without an ID';
+    case 'repeated_body':
+      return 'a body already received is arriving under new IDs';
     default:
       return reason.replaceAll('_', ' ');
   }

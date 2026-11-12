@@ -498,7 +498,11 @@ From that information, I'd like you to derive something interesting to append to
     );
 
     expect(response.status).toBe(404);
-    expect(await response.json()).toEqual({ accepted: false, message: 'Not found' });
+    expect(await response.json()).toEqual({
+      accepted: false,
+      error: 'NOT_FOUND',
+      message: 'Not found',
+    });
     expect(submitter).not.toHaveBeenCalled();
     expect(sqlite.prepare('SELECT COUNT(*) AS count FROM webhook_deliveries').get()).toEqual({
       count: 0,
@@ -574,6 +578,7 @@ From that information, I'd like you to derive something interesting to append to
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({
       accepted: false,
+      error: 'SERVICE_UNAVAILABLE',
       message: 'Webhook could not be processed',
     });
     expect(submitter).not.toHaveBeenCalled();
@@ -595,6 +600,7 @@ From that information, I'd like you to derive something interesting to append to
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({
       accepted: false,
+      error: 'SERVICE_UNAVAILABLE',
       message: 'Webhook trigger is not configured',
     });
     expect(submitter).not.toHaveBeenCalled();
@@ -643,7 +649,11 @@ From that information, I'd like you to derive something interesting to append to
 
     expect(accepted.status).toBe(202);
     expect(limited.status).toBe(429);
-    expect(await limited.json()).toEqual({ accepted: false, message: 'Too many requests' });
+    expect(await limited.json()).toEqual({
+      accepted: false,
+      error: 'TOO_MANY_REQUESTS',
+      message: 'Too many requests',
+    });
     expect(submitter).toHaveBeenCalledOnce();
     expect(
       rows<{ outcome: string; error_code: string | null }>(
@@ -821,6 +831,7 @@ From that information, I'd like you to derive something interesting to append to
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({
       accepted: false,
+      error: 'SERVICE_UNAVAILABLE',
       message: 'Webhook could not be processed',
     });
     expect(

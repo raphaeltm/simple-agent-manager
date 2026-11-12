@@ -92,9 +92,12 @@ interface RefusalInput {
  * Records a refusal once per window and, for the first one in the window, tells the project.
  * No request content is recorded: the call was not verified, or could not be read as an event.
  */
-/** Refusals that happen after the signature verified. */
+/**
+ * Refusals that only the secret's holder can cause, so they may become project events.
+ * `stale_timestamp` is not one: a request captured once keeps its valid signature after its
+ * timestamp ages out, so anyone holding a copy could replay it to wake subscribed agents.
+ */
 const SIGNED_REFUSALS: ReadonlySet<WebhookRejectionReason> = new Set([
-  'stale_timestamp',
   'invalid_body',
   'missing_event_id',
 ]);
@@ -269,12 +272,14 @@ async function handleSignedWebhook(c: SignedContext, submitter?: TriggerTaskSubm
   }
 
   // The sender is verified from here on.
-  if (!trigger.agentProfileId) {
+  // Unreadable stored conditions must not start a run for every event.
+  const filters = resolved.config.filters;
+  if (!trigger.agentProfileId || filters === null) {
     await recordRejected(c.env, {
       triggerId: trigger.id,
       outcome: 'configuration_error',
       httpStatus: 503,
-      errorCode: 'missing_agent_profile',
+      errorCode: !trigger.agentProfileId ? 'missing_agent_profile' : 'invalid_filters',
       windowStart,
       receivedAt,
     });
@@ -352,6 +357,12 @@ async function handleSignedWebhook(c: SignedContext, submitter?: TriggerTaskSubm
     // captured request could replay its body under a fresh ID each time.
     requireNewBody: Boolean(resolved.eventId && 'header' in resolved.eventId),
   });
+  if (delivery.disposition === 'body_reused') {
+    // Visible in the call log and the status, but never a project event: anyone holding a copy
+    // of a signed request can send it again under a fresh header ID.
+    await refuse('repeated_body', 202);
+    return c.json({ accepted: true, ignored: 'repeated_body' }, 202);
+  }
   if (delivery.disposition !== 'reserved') return webhookDeliveryDispositionResponse(delivery);
 
   const finalize = (
@@ -390,7 +401,7 @@ async function handleSignedWebhook(c: SignedContext, submitter?: TriggerTaskSubm
   try {
     const filterResult = evaluateWebhookFilters(
       body,
-      resolved.config.filters,
+      filters,
       resolved.config.filterMode,
       limits.maxFilterPathDepth
     );

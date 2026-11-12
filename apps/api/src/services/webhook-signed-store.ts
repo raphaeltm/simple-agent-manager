@@ -309,19 +309,21 @@ export async function repairWebhookQueueRecords(
   limit: number,
   now: string
 ): Promise<WebhookQueueRepairCounts> {
-  // A run that started but whose task boundary was never written on the execution: the
-  // admission records it best effort, in one batch with the automation's run count and time,
-  // so a failed write lost all three. Its task names the execution, so the boundary is restored
-  // from there, together with the count and time, exactly once: the count is taken while
-  // task_id is still NULL, and the next statement sets it, so a later tick cannot count it
-  // again and the admission's own write (guarded by submission_recorded_at IS NULL) cannot
-  // either. Queued rows are left to the drain: their start may still be in flight. ORDER BY
-  // makes both statements pick the same rows.
+  // A run that started but whose start was never recorded on the execution. The admission
+  // records it best effort, in one batch with the automation's run count and time, so a failed
+  // write lost all three. The task itself usually is linked already (task submission writes
+  // task_id), and otherwise names the execution, so the boundary is restored from it together
+  // with the count and time, exactly once: rows are selected by submission_recorded_at IS NULL,
+  // the count is taken first and the next statement sets it, so a later tick cannot count the
+  // run again and the admission's own write (guarded by the same IS NULL) cannot either. Queued
+  // rows are left to the drain: their start may still be in flight. ORDER BY makes both
+  // statements pick the same rows.
   const unlinkedRuns = `SELECT id FROM trigger_executions
       WHERE ${HELD_WEBHOOK_PROMPT_SQL}
-        AND status IN ('running', 'completed', 'failed') AND task_id IS NULL
+        AND status IN ('running', 'completed', 'failed') AND submission_recorded_at IS NULL
         AND EXISTS (SELECT 1 FROM tasks t
-                     WHERE t.trigger_execution_id = trigger_executions.id
+                     WHERE (t.id = trigger_executions.task_id
+                            OR t.trigger_execution_id = trigger_executions.id)
                        AND t.project_id = trigger_executions.project_id)
       ORDER BY id LIMIT ?`;
   const startedOfUnlinked = `(SELECT MAX(e.started_at) FROM trigger_executions e
@@ -339,10 +341,10 @@ export async function repairWebhookQueueRecords(
     ).bind(limit, limit, limit, now, limit),
     env.DATABASE.prepare(
       `UPDATE trigger_executions
-          SET task_id = (SELECT t.id FROM tasks t
+          SET task_id = COALESCE(task_id, (SELECT t.id FROM tasks t
                           WHERE t.trigger_execution_id = trigger_executions.id
                             AND t.project_id = trigger_executions.project_id
-                          ORDER BY t.created_at LIMIT 1),
+                          ORDER BY t.created_at LIMIT 1)),
               submission_recorded_at = COALESCE(submission_recorded_at, ?)
         WHERE id IN (${unlinkedRuns})`
     ).bind(now, limit),

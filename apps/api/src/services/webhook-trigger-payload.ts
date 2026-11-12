@@ -182,7 +182,9 @@ export function readWebhookEventId(
   const value =
     typeof raw === 'string'
       ? raw.trim()
-      : typeof raw === 'number' && Number.isFinite(raw)
+      : // A number past 2^53 has already lost digits in JSON.parse, so two different IDs could
+        // read as one and the second event would be taken as a retry. Only exact integers count.
+        typeof raw === 'number' && Number.isSafeInteger(raw)
         ? String(raw)
         : '';
   if (!value || new TextEncoder().encode(value).byteLength > WEBHOOK_EVENT_ID_MAX_BYTES)

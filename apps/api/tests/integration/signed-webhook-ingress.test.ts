@@ -222,6 +222,13 @@ describe('signed webhook ingress vertical slice', () => {
            VALUES (?, 'project', 'user', 'in_progress', ?, ?)`
         )
         .run(taskId, `session-${taskId}`, input.triggerExecutionId);
+      // Task submission links the execution to its task, as reserved-task-submission-storage
+      // does in production, before the admission records the boundary.
+      sqlite
+        .prepare(
+          'UPDATE trigger_executions SET task_id = ? WHERE id = ? AND (task_id IS NULL OR task_id = ?)'
+        )
+        .run(taskId, input.triggerExecutionId, taskId);
       return { taskId, sessionId: `session-${taskId}`, branchName: 'sam/slack' };
     });
     const created = await createSigned('Slack mentions', { verification: { scheme: 'slack_v0' } });
@@ -296,7 +303,11 @@ describe('signed webhook ingress vertical slice', () => {
       for (let attempt = 0; attempt < 5; attempt++) {
         const forged = await send(slackRequest(event, { secret: 'not-the-secret' }));
         expect(forged.status).toBe(401);
-        expect(await forged.json()).toEqual({ accepted: false, message: 'Invalid signature' });
+        expect(await forged.json()).toEqual({
+          accepted: false,
+          error: 'UNAUTHORIZED',
+          message: 'Invalid signature',
+        });
       }
       expect((await send(slackRequest(event, { signature: null }))).status).toBe(401);
       const stale = await send(
@@ -305,6 +316,7 @@ describe('signed webhook ingress vertical slice', () => {
       expect(stale.status).toBe(401);
       expect(await stale.json()).toEqual({
         accepted: false,
+        error: 'UNAUTHORIZED',
         message: 'Request timestamp is outside the allowed window',
       });
 
@@ -464,6 +476,65 @@ describe('signed webhook ingress vertical slice', () => {
       expect(submitter).not.toHaveBeenCalled();
     });
 
+    it.each([
+      ['not JSON', 'not json'],
+      ['a null condition', '[null]'],
+      ['an unknown operator', '[{"path":"event.type","operator":"matches","value":"x"}]'],
+    ])(
+      'refuses every call while the stored conditions are %s, at both addresses',
+      async (_label, stored) => {
+        const bearer = await createSigned('Token webhook', {});
+        sqlite.prepare('UPDATE webhook_trigger_configs SET filters_json = ?').run(stored);
+        // Signed address: verified, then refused as misconfigured; nothing starts.
+        const signed = await send(slackRequest(mention('Ev-bad-filters')));
+        expect(signed.status).toBe(503);
+        expect(deliveries().at(-1)).toMatchObject({
+          outcome: 'configuration_error',
+          error_code: 'invalid_filters',
+        });
+        // Token address, same rule.
+        const token = await send(
+          new Request('https://api.example.test/api/webhooks/ingest', {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${bearer.webhookToken!.token}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ event: { text: 'x' } }),
+          })
+        );
+        expect(token.status).toBe(503);
+        expect(deliveries(bearer.created.id).at(-1)).toMatchObject({
+          outcome: 'configuration_error',
+          error_code: 'invalid_filters',
+        });
+        expect(executions()).toEqual([]);
+        expect(executions(bearer.created.id)).toEqual([]);
+        expect(submitter).not.toHaveBeenCalled();
+        // The settings still read, so the conditions can be saved again.
+        const config = await readWebhookTriggerConfig(env, {
+          id: slackTriggerId,
+          projectId: 'project',
+        });
+        expect(config?.filters).toEqual([]);
+      }
+    );
+
+    it('takes a numeric event ID only when it is an exact integer', async () => {
+      const raw = (id: string, text: string) =>
+        `{"type":"event_callback","event_id":${id},"event":{"type":"app_mention","text":"${text}"}}`;
+      // 2^53 and 2^53 + 1 parse to the same number; neither may stand in for the other.
+      for (const id of ['9007199254740992', '9007199254740993', '1.5']) {
+        const response = await send(slackRequest(raw(id, id)));
+        expect(await response.json()).toEqual({ accepted: true, ignored: 'missing_event_id' });
+      }
+      expect(executions()).toEqual([]);
+      // Control: an ordinary integer ID is accepted.
+      const ok = await send(slackRequest(raw('12345', 'ok')));
+      expect(await ok.json()).toMatchObject({ queued: true });
+      expect(executions()).toHaveLength(1);
+    });
+
     it('starts one run when the same event arrives twice at the same moment', async () => {
       const hono = app();
       const responses = await Promise.all(
@@ -531,12 +602,18 @@ describe('signed webhook ingress vertical slice', () => {
       // subscribed agent: it is in the call log and the status line only.
       expect(rejectedEvents()).toEqual({ n: 0 });
 
-      // A refusal of a correctly signed call comes from whoever holds the secret: one project
-      // event for the window, not one per call.
+      // A stale timestamp is no proof of holding the secret: a captured request keeps its valid
+      // signature after it ages out, so replaying it must not wake agents either.
       vi.setSystemTime(new Date('2026-11-11T12:00:30Z'));
       const stale = Math.floor(Date.now() / 1000) - 3600;
-      await send(slackRequest(mention('Ev-s1'), { timestamp: stale }));
-      await send(slackRequest(mention('Ev-s2'), { timestamp: stale }));
+      expect((await send(slackRequest(mention('Ev-s1'), { timestamp: stale }))).status).toBe(401);
+      expect(rejectedEvents()).toEqual({ n: 0 });
+
+      // A current, correctly signed call that is refused comes from whoever holds the secret:
+      // one project event for the window, not one per call.
+      const withoutId = { type: 'event_callback', event: { type: 'app_mention' } };
+      await send(slackRequest(withoutId));
+      await send(slackRequest(withoutId));
       expect(rejectedEvents()).toEqual({ n: 1 });
     });
 
@@ -668,11 +745,32 @@ describe('signed webhook ingress vertical slice', () => {
       for (const forgedId of ['delivery-2', 'delivery-3']) {
         const replay = await send(githubRequest(captured, forgedId));
         expect(replay.status).toBe(202);
-        expect(await replay.json()).toMatchObject({ accepted: true, duplicate: true });
+        // Not reported as a duplicate of this event: it is a different ID, and SAM cannot tell
+        // a replay from a sender that reuses bodies. It is refused visibly instead.
+        expect(await replay.json()).toEqual({ accepted: true, ignored: 'repeated_body' });
       }
       expect(executions(githubTriggerId)).toHaveLength(1);
       expect(submitter).toHaveBeenCalledTimes(1);
-      expect(outcomes(githubTriggerId)).toEqual(['accepted', 'duplicate', 'duplicate']);
+      // One refusal row for the window, as for every refusal.
+      expect(outcomes(githubTriggerId)).toEqual(['accepted', 'rejected']);
+      expect(deliveries(githubTriggerId).at(-1)).toMatchObject({
+        outcome: 'rejected',
+        error_code: 'repeated_body',
+      });
+      // Anyone holding the captured request can cause this, so it wakes no agent.
+      expect(
+        sqlite
+          .prepare(
+            `SELECT COUNT(*) AS n FROM project_event_source_outbox WHERE event_type = 'webhook.rejected'`
+          )
+          .get()
+      ).toEqual({ n: 0 });
+      // The sender's own retry of the first event is still an ordinary duplicate.
+      expect(await (await send(githubRequest(captured, 'delivery-1'))).json()).toMatchObject({
+        accepted: true,
+        duplicate: true,
+      });
+      expect(submitter).toHaveBeenCalledTimes(1);
 
       // Control: a different event under a different ID is still an event.
       const next = await send(
@@ -1105,6 +1203,35 @@ describe('signed webhook ingress vertical slice', () => {
       expect(executions().map((row) => row.status)).toEqual(['completed', 'running', 'waiting']);
     });
 
+    it('fills every free run slot of an automation in one cron tick', async () => {
+      for (const n of [1, 2, 3, 4]) await send(slackRequest(mention(`Ev-${n}`, `message ${n}`)));
+      expect(executions().map((row) => row.status)).toEqual([
+        'running',
+        'waiting',
+        'waiting',
+        'waiting',
+      ]);
+      // The first run ends and the automation may now run three at once.
+      await finishRun(executions()[0]!.id);
+      sqlite
+        .prepare('UPDATE triggers SET skip_if_running = 0, max_concurrent = 3 WHERE id = ?')
+        .run(slackTriggerId);
+
+      await drainTriggerQueue(env, submitter);
+      // All three waiting events started in this tick, in order, not one per tick.
+      expect(executions().map((row) => row.status)).toEqual([
+        'completed',
+        'running',
+        'running',
+        'running',
+      ]);
+      expect(submitter.mock.calls.slice(1).map((call) => call[1].renderedPrompt)).toEqual([
+        'Slack said: message 2 (Ev-2)',
+        'Slack said: message 3 (Ev-3)',
+        'Slack said: message 4 (Ev-4)',
+      ]);
+    });
+
     it('tries only the head of a waiting line, from the cron and from the per-automation kick', async () => {
       for (const n of [1, 2, 3, 4]) await send(slackRequest(mention(`Ev-${n}`)));
       sqlite.prepare('UPDATE trigger_executions SET queue_attempted_at = NULL').run();
@@ -1198,7 +1325,7 @@ describe('signed webhook ingress vertical slice', () => {
         'idx_trigger_queue_waiting'
       );
       // The cron repair reads only rows that need it.
-      expect(plan('SET task_id = (SELECT t.id FROM tasks t')).toContain(
+      expect(plan('SET task_id = COALESCE(task_id, (SELECT t.id FROM tasks t')).toContain(
         'idx_trigger_queue_webhook_prompts'
       );
       expect(plan("UPDATE github_webhook_deliveries SET decision='dropped'")).toContain(
@@ -1558,49 +1685,74 @@ describe('signed webhook ingress vertical slice', () => {
       expect(submitter).toHaveBeenCalledTimes(1);
     });
 
-    it('links a run whose task boundary was never written on the execution, then finishes its record', async () => {
-      const runCount = () =>
-        sqlite
-          .prepare('SELECT trigger_count, last_triggered_at FROM triggers WHERE id = ?')
-          .get(slackTriggerId) as { trigger_count: number; last_triggered_at: string | null };
-      const fault = failOnce('SET task_id = COALESCE(task_id, ?)');
-      await send(slackRequest(mention('Ev-1', 'started')));
-      expect(fault.fired).toBe(true);
-      const [started] = executions();
-      expect(started).toMatchObject({ status: 'running', task_id: null });
-      expect(outcomes()).toEqual(['queued']);
-      // The failed boundary write took the run's count and time with it.
-      expect(runCount()).toEqual({ trigger_count: 0, last_triggered_at: null });
-
-      await drainTriggerQueue(env, submitter);
-      expect(executions()[0]).toMatchObject({
-        status: 'running',
-        task_id: `task-${started!.id}`,
-        rendered_prompt: null,
-      });
-      expect(outcomes()).toEqual(['accepted']);
-      expect(submitter).toHaveBeenCalledTimes(1);
-      const startedAt = (
-        sqlite
-          .prepare('SELECT started_at FROM trigger_executions WHERE id = ?')
-          .get(started!.id) as {
-          started_at: string;
+    it.each([
+      ['linked to its task by the submission', true],
+      ['named only by its task', false],
+    ])(
+      'records a started run whose boundary write failed (%s): count once, then finish its record',
+      async (_label, linkedBySubmission) => {
+        if (!linkedBySubmission) {
+          const submit = submitter.getMockImplementation()!;
+          submitter.mockImplementation(async (environment, input) => {
+            const result = await submit(environment, input);
+            sqlite
+              .prepare('UPDATE trigger_executions SET task_id = NULL WHERE id = ?')
+              .run(input.triggerExecutionId);
+            return result;
+          });
         }
-      ).started_at;
-      expect(runCount()).toEqual({ trigger_count: 1, last_triggered_at: startedAt });
-      // Another tick does not count the run again.
-      await drainTriggerQueue(env, submitter);
-      expect(runCount().trigger_count).toBe(1);
+        const runCount = () =>
+          sqlite
+            .prepare('SELECT trigger_count, last_triggered_at FROM triggers WHERE id = ?')
+            .get(slackTriggerId) as { trigger_count: number; last_triggered_at: string | null };
+        const recorded = (id: string) =>
+          sqlite
+            .prepare('SELECT submission_recorded_at AS at FROM trigger_executions WHERE id = ?')
+            .get(id) as { at: string | null };
+        const fault = failOnce('SET task_id = COALESCE(task_id, ?)');
+        await send(slackRequest(mention('Ev-1', 'started')));
+        expect(fault.fired).toBe(true);
+        const [started] = executions();
+        expect(started).toMatchObject({
+          status: 'running',
+          task_id: linkedBySubmission ? `task-${started!.id}` : null,
+          rendered_prompt: 'Slack said: started (Ev-1)',
+        });
+        expect(recorded(started!.id).at).toBeNull();
+        // The failed boundary write took the run's count and time with it.
+        expect(runCount()).toEqual({ trigger_count: 0, last_triggered_at: null });
 
-      // A second event still waits behind the run, which still holds its slot.
-      await send(slackRequest(mention('Ev-2', 'next')));
-      expect(executions()[1]).toMatchObject({ status: 'waiting' });
-      await finishRun(started!.id);
-      await drainTriggerQueue(env, submitter);
-      expect(submitter).toHaveBeenCalledTimes(2);
-      // The second run went through the normal boundary write: counted once more, not twice.
-      expect(runCount().trigger_count).toBe(2);
-    });
+        await drainTriggerQueue(env, submitter);
+        expect(executions()[0]).toMatchObject({
+          status: 'running',
+          task_id: `task-${started!.id}`,
+          rendered_prompt: null,
+        });
+        expect(recorded(started!.id).at).not.toBeNull();
+        expect(outcomes()).toEqual(['accepted']);
+        expect(submitter).toHaveBeenCalledTimes(1);
+        const startedAt = (
+          sqlite
+            .prepare('SELECT started_at FROM trigger_executions WHERE id = ?')
+            .get(started!.id) as {
+            started_at: string;
+          }
+        ).started_at;
+        expect(runCount()).toEqual({ trigger_count: 1, last_triggered_at: startedAt });
+        // Another tick does not count the run again.
+        await drainTriggerQueue(env, submitter);
+        expect(runCount().trigger_count).toBe(1);
+
+        // A second event still waits behind the run, which still holds its slot.
+        await send(slackRequest(mention('Ev-2', 'next')));
+        expect(executions()[1]).toMatchObject({ status: 'waiting' });
+        await finishRun(started!.id);
+        await drainTriggerQueue(env, submitter);
+        expect(submitter).toHaveBeenCalledTimes(2);
+        // The second run went through the normal boundary write: counted once more, not twice.
+        expect(runCount().trigger_count).toBe(2);
+      }
+    );
 
     it('keeps a token webhook run’s prompt: only queued rows are repaired', async () => {
       const bearer = await createSigned('Token webhook', {});

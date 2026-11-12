@@ -117,7 +117,9 @@ export type WebhookDeliveryReservation =
   | { disposition: 'reserved'; id: string; processingToken: string; retry: boolean }
   | { disposition: 'duplicate'; id: string; executionId?: string }
   | { disposition: 'failed'; id: string; executionId: string }
-  | { disposition: 'in_flight'; id: string };
+  | { disposition: 'in_flight'; id: string }
+  /** `requireNewBody`: the body was already taken under a different event ID. Nothing recorded. */
+  | { disposition: 'body_reused' };
 
 interface ProcessingDelivery {
   id: string;
@@ -324,11 +326,15 @@ export async function createWebhookDelivery(
       processingToken: string | null;
       processingHeartbeatAt: string | null;
     }>();
-  // No row under this key: with `requireNewBody` the body was already taken under another key,
-  // which is a repeat. Without it nothing explains the ignored insert.
-  if (!duplicate && !input.requireNewBody) throw new Error('Webhook delivery deduplication failed');
+  // No row under this key: with `requireNewBody` the body was already taken under another key.
+  // That is not a retry of this event, so it is not reported as a duplicate; the caller refuses
+  // it visibly. Without `requireNewBody` nothing explains the ignored insert.
+  if (!duplicate) {
+    if (input.requireNewBody) return { disposition: 'body_reused' };
+    throw new Error('Webhook delivery deduplication failed');
+  }
 
-  if (duplicate && duplicate.request_fingerprint === input.requestFingerprint) {
+  if (duplicate.request_fingerprint === input.requestFingerprint) {
     // A full waiting line refused the event without starting anything, so the sender's retry
     // of the same event may be taken once there is room, exactly like a failed attempt.
     if (duplicate.outcome === 'internal_error' || duplicate.outcome === 'queue_full') {

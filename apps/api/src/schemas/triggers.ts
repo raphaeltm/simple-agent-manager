@@ -87,6 +87,9 @@ const WebhookFilterSchema = v.pipe(
   )
 );
 
+/** Stored filters are read back through the same rules they were written with. */
+export const StoredWebhookFiltersSchema = v.array(WebhookFilterSchema);
+
 /** A header SAM reads itself (signature or event ID), so credential-like names are allowed. */
 const WebhookHeaderNameSchema = v.pipe(
   v.string(),
