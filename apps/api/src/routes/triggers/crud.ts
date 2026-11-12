@@ -14,12 +14,13 @@ import {
 import { and, desc, eq, inArray, type sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
+import type * as v from 'valibot';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { parsePositiveInt, requireRouteParam } from '../../lib/route-helpers';
-import { getAuth } from '../../middleware/auth';
+import { assertNotAgentSignInSession, getAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { CreateTriggerSchema, jsonValidator, UpdateTriggerSchema } from '../../schemas';
 import {
@@ -167,8 +168,12 @@ crudRoutes.post('/', jsonValidator(CreateTriggerSchema), async (c) => {
   const projectId = requireRouteParam(c, 'projectId');
   const db = drizzle(c.env.DATABASE, { schema });
   const userId = getAuth(c).user.id;
-  const project = await requireProjectTaskWrite(db, projectId, userId);
   const body = c.req.valid('json');
+  // Every trigger starts work after the session that created it has ended: on a schedule (cron),
+  // on mail from its allowed senders (email), on repository events (github) or with the
+  // credential it returns (webhook). An agent sign-in session must not leave one behind.
+  assertNotAgentSignInSession(c);
+  const project = await requireProjectTaskWrite(db, projectId, userId);
   const { created, webhookToken } = await createTrigger(db, c.env, project, userId, body);
   const id = created.id;
   clearTriggerPageCaches(projectId);
@@ -267,9 +272,26 @@ crudRoutes.get('/:triggerId', async (c) => {
   });
 });
 
+/**
+ * Whether an update only stands a trigger down (pause or disable, nothing else). That is the one
+ * change an agent sign-in session may make: any other field (resuming it, its schedule, prompt,
+ * profile, email senders, webhook or GitHub filters) decides what the trigger does after the
+ * session has ended.
+ */
+function onlyStandsDown(body: v.InferOutput<typeof UpdateTriggerSchema>): boolean {
+  const fields = Object.entries(body).filter(([, value]) => value !== undefined);
+  return (
+    fields.length === 1 &&
+    fields[0]?.[0] === 'status' &&
+    body.status !== undefined &&
+    body.status !== 'active'
+  );
+}
+
 crudRoutes.patch('/:triggerId', jsonValidator(UpdateTriggerSchema), async (c) => {
   const projectId = requireRouteParam(c, 'projectId');
   const triggerId = requireRouteParam(c, 'triggerId');
+  if (!onlyStandsDown(c.req.valid('json'))) assertNotAgentSignInSession(c);
   const db = drizzle(c.env.DATABASE, { schema });
   const project = await requireProjectTaskWrite(db, projectId, getAuth(c).user.id);
   const trigger = await db

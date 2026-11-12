@@ -21,6 +21,8 @@ vi.mock('../../../src/middleware/auth', () => ({
   requireAuth: () => vi.fn((_c: any, next: any) => next()),
   requireApproved: () => vi.fn((_c: any, next: any) => next()),
   getUserId: () => 'user-123',
+  // An ordinary session: the agent sign-in refusal passes through.
+  rejectAgentSignInSession: () => vi.fn((_c: any, next: any) => next()),
 }));
 
 function buildApp() {

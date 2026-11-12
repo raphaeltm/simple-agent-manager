@@ -11,6 +11,10 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../../../src/middleware/auth', () => ({
+  // Agent sign-in session guards: inert for these ordinary-session route tests.
+  rejectAgentSignInSession: () => async (_c: unknown, next: () => Promise<void>) => next(),
+  assertNotAgentSignInSession: () => undefined,
+
   requireAuth: () => vi.fn((c: any, next: any) => next()),
   requireApproved: () => vi.fn((c: any, next: any) => next()),
   getUserId: () => 'member-user',

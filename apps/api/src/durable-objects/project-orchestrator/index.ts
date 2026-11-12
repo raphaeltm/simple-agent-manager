@@ -7,7 +7,7 @@
  * Coordinates agent work within a project:
  * - Watches missions and manages their lifecycle
  * - Routes handoff packets between tasks via durable messages
- * - Detects stalled tasks and sends interrupt messages
+ * - Detects stalled tasks and sends them a non-cancelling status nudge
  * - Logs all scheduling decisions for auditability
  *
  * Alarm-driven: wakes on a configurable interval (default 30s) to run

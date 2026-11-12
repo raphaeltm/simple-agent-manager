@@ -1,6 +1,8 @@
 import { CheckCircle2, Copy } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+
+const COPIED_FEEDBACK_MS = 1500;
 
 /** Copyable reference ID pill: click to copy the full value, shows truncated display. */
 export function CopyableId({
@@ -13,12 +15,26 @@ export function CopyableId({
   icon?: ReactNode;
 }) {
   const [copied, setCopied] = useState(false);
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
   const handleCopy = useCallback(() => {
     void navigator.clipboard.writeText(value).then(() => {
+      // The write can resolve after unmount; arming the timer then would leak it.
+      if (!mountedRef.current) return;
       setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+      copiedTimerRef.current = setTimeout(() => setCopied(false), COPIED_FEEDBACK_MS);
     });
   }, [value]);
+  // The feedback timer must not outlive the pill: a state update after unmount (or after a
+  // test environment is torn down) is wasted work and, in jsdom, throws `window is not defined`.
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+    };
+  }, []);
 
   return (
     <button

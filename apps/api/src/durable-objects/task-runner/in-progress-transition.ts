@@ -129,6 +129,7 @@ export async function transitionToInProgress(
           chatSessionId: recoveryChatSessionId,
           status: 'restored',
           readiness,
+          attemptId: state.config.recoveryAttemptId,
         })
       );
       recordRunnerPhase(state, 'success');
@@ -151,6 +152,7 @@ export async function transitionToInProgress(
             projectId: state.projectId,
             chatSessionId: recoveryChatSessionId,
             status: 'failed',
+            attemptId: state.config.recoveryAttemptId,
           })
         );
       }
@@ -173,6 +175,7 @@ export async function transitionToInProgress(
       chatSessionId: recoveryChatSessionId,
       status: 'restored',
       readiness,
+      attemptId: state.config.recoveryAttemptId,
     })
   );
 

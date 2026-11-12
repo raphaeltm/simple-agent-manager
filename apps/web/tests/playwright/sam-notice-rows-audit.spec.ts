@@ -191,6 +191,26 @@ function noticeRow(page: Page, type: string) {
   return page.locator(`[data-testid="sam-notice-row"][data-notice-type="${type}"]`).first();
 }
 
+/**
+ * Scroll the conversation down, as a reader would, until a notice row is mounted, then expand
+ * it. The log is virtualized: expanding an earlier row pushes later rows out of the rendered
+ * window, and the list may re-measure and remount a row between locating and clicking it, so
+ * scroll and click are retried together until the row reports itself expanded.
+ */
+async function expandNoticeBelow(page: Page, type: string) {
+  const row = noticeRow(page, type);
+  const toggle = row.locator('> button');
+  const scroller = page.getByRole('log', { name: 'Conversation' }).getByTestId('virtuoso-scroller');
+  await expect(async () => {
+    if ((await row.count()) === 0) await scroller.evaluate((el) => el.scrollBy(0, 240));
+    if ((await toggle.getAttribute('aria-expanded', { timeout: 250 })) !== 'true') {
+      await toggle.click({ timeout: 1_000 });
+    }
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true', { timeout: 500 });
+  }).toPass({ timeout: 10_000 });
+  return row;
+}
+
 /** Every card and quote stays inside the conversation log, measured in page coordinates. */
 async function assertInsideLog(page: Page, selector: string) {
   const log = await page.getByRole('log', { name: 'Conversation' }).boundingBox();
@@ -263,8 +283,7 @@ for (const viewport of [
       // Special characters render as text, never as markup.
       await expect(agent.locator('blockquote')).toContainText('<b>&amp;</b> 🚀');
       await expect(agent.locator('blockquote b')).toHaveCount(0);
-      const many = noticeRow(page, 'subtask.failed');
-      await many.locator('> button').click();
+      const many = await expandNoticeBelow(page, 'subtask.failed');
       await expect(many.getByTestId('sam-notice-ref')).toHaveCount(8);
       // The expanded headline wraps; the icon, time and chevron must stay beside its first
       // line, not drift to the middle of the block.

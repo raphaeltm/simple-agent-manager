@@ -33,6 +33,8 @@ export interface LoginProvidersResponse {
   google: boolean;
   gitlab: boolean;
   email: boolean;
+  /** This is a test instance that lets trusted agents sign in through workload identity. */
+  agentSignIn?: boolean;
 }
 
 /** Public: which login providers are configured (Google = the login client). */

@@ -110,7 +110,7 @@ function workState(session: Session | undefined, task: Task | undefined): WorkSt
   if (session?.attention) return 'needs-you';
   // A superseded task was replaced by a newer one; its old failure is history, not a problem.
   if (task?.agentActivityState === 'superseded') return 'done';
-  if (task?.status === 'failed' || session?.status === 'error') return 'failed';
+  if (task?.status === 'failed' || session?.status === 'failed') return 'failed';
   if (task && DONE_TASK_STATUSES.has(task.status)) return 'done';
   if (task?.agentActivityState === 'working') return 'working';
   if (task?.agentActivityState === 'sleeping' || session?.status === 'sleeping') return 'asleep';

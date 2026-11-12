@@ -83,6 +83,7 @@ These are Cloudflare Worker secrets, set during deployment. Pulumi auto-generate
 | `GITLAB_HOST`                              | Optional fallback GitLab OAuth host, such as `https://gitlab.com`; runtime admin config takes precedence                                                                                                                     |
 | `GITLAB_CLIENT_ID`                         | Optional fallback GitLab OAuth application ID; runtime admin config takes precedence                                                                                                                                         |
 | `GITLAB_CLIENT_SECRET`                     | Optional fallback GitLab OAuth secret; runtime admin config takes precedence                                                                                                                                                 |
+| `AGENT_SIGN_IN_TRUST`                      | Optional, test instances only. JSON trust configuration that lets agents on a trusted SAM installation sign in here through workload identity. Unset, empty or invalid: off. Deploy-time only; removing the GitHub secret and redeploying deletes it. See [Let agents sign in to a test instance](/docs/guides/agent-sign-in/). |
 
 ## Worker Variables
 
