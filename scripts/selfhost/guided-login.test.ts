@@ -33,13 +33,13 @@ describe('guidedLoginSettings', () => {
     });
   });
 
-  it('accepts an explicit runtime, and "default" for the daemon default', () => {
+  it('accepts an explicit runtime, and refuses "default" (the socket proxy pins a named one)', () => {
     expect(
       guidedLoginSettings({ SAM_GUIDED_LOGIN: 'on', SAM_GUIDED_LOGIN_RUNTIME: 'kata' })?.runtime
     ).toBe('kata');
-    expect(
-      guidedLoginSettings({ SAM_GUIDED_LOGIN: 'on', SAM_GUIDED_LOGIN_RUNTIME: 'default' })?.runtime
-    ).toBeNull();
+    expect(() =>
+      guidedLoginSettings({ SAM_GUIDED_LOGIN: 'on', SAM_GUIDED_LOGIN_RUNTIME: 'default' })
+    ).toThrow(/name the runtime/);
   });
 
   it('refuses malformed values', () => {
@@ -123,14 +123,5 @@ describe('assertContainerEngineReady', () => {
     expect(() =>
       assertContainerEngineReady(runsc, { ok: false, error: 'Cannot connect to the Docker daemon' })
     ).toThrow(/needs a Docker daemon/);
-  });
-
-  it('needs only the daemon for the default runtime', () => {
-    expect(() =>
-      assertContainerEngineReady(
-        { runtime: null, instanceType: 'basic' },
-        { ok: true, runtimesJson: runtimes(['runc']) }
-      )
-    ).not.toThrow();
   });
 });

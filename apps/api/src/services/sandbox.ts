@@ -39,7 +39,8 @@ export async function getSandboxInstance(env: Env, sandboxId: string) {
   }
 }
 
-async function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+/** Reject with `message` if `promise` has not settled within `ms`. The loser is abandoned, not cancelled. */
+export async function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([

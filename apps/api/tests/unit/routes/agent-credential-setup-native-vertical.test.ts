@@ -122,6 +122,13 @@ function createDoContext() {
         details = { verification_url: args[0], user_code: args[1] };
       } else if (normalized.includes('delete from device_auth_details')) {
         details = undefined;
+      } else if (normalized.includes('set cleanup_pending = 1') && row) {
+        // Teardown-cleanup bookkeeping (CredentialSetupSession teardown/runCleanup).
+        row = { ...row, cleanup_pending: 1, cleanup_from_status: args[0], cleanup_attempts: 0 };
+      } else if (normalized.includes('set cleanup_pending = 0') && row) {
+        row = { ...row, cleanup_pending: 0 };
+      } else if (normalized.includes('set cleanup_attempts = ?') && row) {
+        row = { ...row, cleanup_attempts: args[0] };
       } else if (normalized.includes('update setup_session') && row) {
         row = {
           ...row,

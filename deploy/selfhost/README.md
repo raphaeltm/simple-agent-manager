@@ -18,6 +18,7 @@ through an SMTP relay or, on a test install, the bundled mail collector (see Ema
 | `gce-metadata-proxy` | host    | `127.0.0.1:7180`                | profile `gce`; access tokens for a gs:// bucket          |
 | `frps`               | host    | `127.0.0.1:7000`                | profile `tunnel`; nodes arrive as frp over wss via Caddy |
 | `objectstore`        | host    | `127.0.0.1:9000`                | profile `local-store`; otherwise use a GCS/S3 bucket     |
+| `docker-proxy`       | none    | a unix socket shared with celld | guided login only: filters celld's Docker API calls      |
 
 Profile `mail-collector` (off by default, test installs only) adds `mail-collector`: Mailpit on
 `127.0.0.1:1025` (SMTP) and `127.0.0.1:8025` (UI, published at `mail.SAM_DOMAIN`). See Email sign-in.
@@ -249,11 +250,34 @@ pnpm selfhost:deploy --init && docker compose up -d && pnpm selfhost:deploy
   `SAM_GUIDED_LOGIN_INSTANCE_TYPE`), and builds the 2.3 GB image into the fleet bucket. It refuses
   to deploy when Docker or the runtime is missing (`assertContainerEngineReady`): without them
   every session fails only after about 2.5 minutes.
-- The compose override hands celld the Docker socket and binds `/var/lib/celld` at the same path
-  (celld bind-mounts the containers' `resolv.conf` from it). The Docker socket is root on this
-  host: a compromise of the celld process is now a compromise of the box. Worker code has no
-  socket or filesystem API. Concurrent sessions are capped by `MAX_CONCURRENT_SETUP_SESSIONS`
-  (default 2), so the sandboxes commit at most 2 GiB by default.
+- celld never holds the Docker socket, which is root on this host. The compose override adds
+  `docker-proxy` (no network, read-only, no capabilities, its own uid in the docker group) and
+  gives celld only the proxy's socket. The proxy allows exactly the Engine API calls celld 0.6.3
+  makes for its containers, in their exact shapes, and forwards a body rebuilt from the checked
+  fields (`docker-proxy/policy.ts`). Its policy, `.state/docker-proxy/policy.json`, is written by
+  `pnpm selfhost:deploy`: the sandbox and fence images by content reference (the deploy builds
+  both, then checks `celld deploy` tagged the same ones), the runtime, the instance type's memory
+  and CPU, and the hash of celld's fence rules. Refusals are logged by `docker compose logs
+docker-proxy` (method, path, reason; never a body).
+- What a compromised celld can still do through the proxy: start, exec into and remove sandbox
+  containers of the deployed image under `runsc` (no capabilities, celld's fenced bridges,
+  bounded memory, CPU and PIDs); run celld's own fence container (host network and `NET_ADMIN`,
+  but only the pinned image, command and ruleset); create or remove celld's two bridges. What it
+  cannot do (each tested against a real daemon in `scripts/selfhost/live/docker-proxy.live.test.ts`):
+  start a privileged container, bind or mount any host path, use host networking, a capability, a
+  device or a host namespace, use another image or runtime, read, exec into, stop or remove any
+  container that is not one of its sandboxes, load, pull, build, tag or commit an image, or reach
+  any other endpoint. The sandbox resolver file is bound from `.state/docker-proxy/`, not from
+  celld's data dir, so a symlink there cannot expose a host file. The deploy builds the images
+  on the box, so celld never loads one: if `docker image prune -a` removes them, sign-in fails at
+  once with `sandbox_runtime_unavailable` until the next `pnpm selfhost:deploy`.
+- A container start that can never succeed (runtime not registered, proxy refusal, image gone)
+  fails the session within seconds as `sandbox_runtime_unavailable`
+  (`apps/api/src/services/sandbox-startup-errors.ts`) instead of after the SDK's ~2.5 minutes of
+  start retries. A cancelled, expired or failed session marks its D1 row terminal before any
+  sandbox call, so a retry is never blocked by a session whose teardown was interrupted.
+- Concurrent sessions are capped by `MAX_CONCURRENT_SETUP_SESSIONS` (default 2), so the
+  sandboxes commit at most 2 GiB by default.
 - celld's own fence lets the container reach the Internet and nothing on the box, the VPC,
   private ranges or metadata. It does not stop the box's own public address: the container reaches
   SAM's public HTTPS like any Internet client. SAM's egress fence lets celld (uid 7101) reach the
@@ -263,9 +287,13 @@ pnpm selfhost:deploy --init && docker compose up -d && pnpm selfhost:deploy
   between that CLI and the host kernel. Use it only where the people who can sign in are trusted
   with the box (single trust domain).
 
-Code: `scripts/selfhost/guided-login.ts`, `docker-compose.guided-login.yml`, the `containers`
-rule in `celld-config.ts`, `hasSandboxContainerRuntime` in
-`apps/api/src/services/platform-capabilities.ts`.
+Turning it off: remove `docker-compose.guided-login.yml` from `COMPOSE_FILE`, set
+`SAM_GUIDED_LOGIN=off`, run `docker compose up -d --remove-orphans` (celld restarts without
+the proxy socket) and `pnpm selfhost:deploy` (the Worker stops offering guided login).
+
+Code: `scripts/selfhost/guided-login.ts`, `scripts/selfhost/docker-proxy-policy.ts`,
+`docker-compose.guided-login.yml`, `docker-proxy/`, the `containers` rule in `celld-config.ts`,
+`hasSandboxContainerRuntime` in `apps/api/src/services/platform-capabilities.ts`.
 
 ## Known gaps in this pass
 

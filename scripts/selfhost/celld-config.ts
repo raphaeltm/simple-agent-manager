@@ -320,10 +320,10 @@ function translateContainers(value: unknown, ctx: TranslateContext): void {
       instance_type: guided.instanceType,
     };
     if (typeof entry.max_instances === 'number') container.max_instances = entry.max_instances;
-    if (guided.runtime) container.runtime = guided.runtime;
+    container.runtime = guided.runtime;
     out.push(container);
     ctx.plan.report.push(
-      `container ${className}: runtime ${guided.runtime ?? 'daemon default'}, ` +
+      `container ${className}: runtime ${guided.runtime}, ` +
         `instance_type ${guided.instanceType} (wrangler.toml ${String(entry.instance_type)})`
     );
   }

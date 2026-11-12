@@ -26,9 +26,9 @@ export { TaskRunner } from './durable-objects/task-runner';
 // Inert tombstones: wrangler migrations v7-v9 created these classes for the retired
 // anonymous-trial product, so they must stay exported (see durable-objects/retired-trial.ts).
 export { TrialCounter, TrialEventBus, TrialOrchestrator } from './durable-objects/retired-trial';
+export { SandboxDO } from './durable-objects/sandbox-do';
 export { VmAgentContainer } from './durable-objects/vm-agent-container';
 export type { Env } from './env';
-export { Sandbox as SandboxDO } from '@cloudflare/sandbox';
 
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';

@@ -1,0 +1,401 @@
+/**
+ * The Docker socket proxy celld uses on a self-hosted box (guided credential login).
+ *
+ * celld connects to SAM_DOCKER_PROXY_LISTEN (a unix socket in a volume only celld and this proxy
+ * mount) instead of the Docker socket. Every request is decided by `policy.ts`; an allowed one is
+ * forwarded to the real daemon with a body rebuilt from the checked fields, and everything else
+ * is answered 403 here and never reaches the daemon. The container runs with no network, no
+ * capabilities and a read-only root, so the only things it can talk to are those two sockets.
+ *
+ * Run with Node's type stripping: `node server.ts`.
+ */
+import { chmodSync, readFileSync, statSync, unlinkSync } from 'node:fs';
+import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:http';
+import { createServer, request as httpRequest } from 'node:http';
+import type { Duplex } from 'node:stream';
+
+import {
+  type ContainerFacts,
+  decide,
+  type Decision,
+  isRecord,
+  parsePolicy,
+  type ProxyPolicy,
+} from './policy.ts';
+
+const LISTEN = process.env.SAM_DOCKER_PROXY_LISTEN ?? '/run/sam-docker-proxy/docker.sock';
+const UPSTREAM = process.env.SAM_DOCKER_PROXY_UPSTREAM ?? '/var/run/docker.sock';
+const POLICY_PATH = process.env.SAM_DOCKER_PROXY_POLICY ?? '/etc/sam/docker-proxy/policy.json';
+const SOCKET_MODE = Number.parseInt(process.env.SAM_DOCKER_PROXY_SOCKET_MODE ?? '660', 8);
+const MAX_BODY_BYTES = Number.parseInt(process.env.SAM_DOCKER_PROXY_MAX_BODY_BYTES ?? '262144', 10);
+/** Exec ids this proxy created, oldest first; bounded so a long-lived proxy does not grow. */
+const MAX_TRACKED_EXECS = Number.parseInt(process.env.SAM_DOCKER_PROXY_MAX_EXECS ?? '4096', 10);
+
+const HOP_BY_HOP = new Set([
+  'connection',
+  'keep-alive',
+  'transfer-encoding',
+  'upgrade',
+  'proxy-connection',
+  'te',
+  'trailer',
+]);
+
+function logEvent(event: string, fields: Record<string, unknown>): void {
+  // Method, route, path and reason only: never a body (sandbox env can hold provider settings).
+  console.log(JSON.stringify({ ts: new Date().toISOString(), event, ...fields }));
+}
+
+let cachedPolicy: { mtimeMs: number; size: number; policy: ProxyPolicy } | null = null;
+
+/** The current policy, re-read when the deploy rewrites the file. Null fails every request. */
+function currentPolicy(): ProxyPolicy | null {
+  try {
+    const stat = statSync(POLICY_PATH);
+    if (cachedPolicy && cachedPolicy.mtimeMs === stat.mtimeMs && cachedPolicy.size === stat.size) {
+      return cachedPolicy.policy;
+    }
+    const policy = parsePolicy(readFileSync(POLICY_PATH, 'utf8'));
+    cachedPolicy = { mtimeMs: stat.mtimeMs, size: stat.size, policy };
+    logEvent('policy_loaded', { runtime: policy.runtime, images: policy.sandboxImages.length });
+    return policy;
+  } catch (error) {
+    logEvent('policy_unavailable', { path: POLICY_PATH, error: String(error) });
+    cachedPolicy = null;
+    return null;
+  }
+}
+
+const execs = new Set<string>();
+
+function recordExec(id: string): void {
+  execs.add(id);
+  while (execs.size > MAX_TRACKED_EXECS) {
+    const oldest = execs.values().next().value;
+    if (oldest === undefined) break;
+    execs.delete(oldest);
+  }
+}
+
+/** One request to the daemon with the whole answer buffered (small JSON answers only). */
+function upstreamJson(method: string, path: string): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const req = httpRequest(
+      { socketPath: UPSTREAM, method, path, headers: { Host: 'docker' } },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => chunks.push(chunk));
+        res.on('end', () =>
+          resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf8') })
+        );
+        res.on('error', reject);
+      }
+    );
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+async function inspectContainer(ref: string): Promise<ContainerFacts | null> {
+  const reply = await upstreamJson('GET', `/containers/${encodeURIComponent(ref)}/json`);
+  if (reply.status === 404) return null;
+  if (reply.status !== 200) throw new Error(`inspect answered ${reply.status}`);
+  const info: unknown = JSON.parse(reply.body);
+  const record = (value: unknown): Record<string, unknown> => (isRecord(value) ? value : {});
+  const top = record(info);
+  const config = record(top.Config);
+  const host = record(top.HostConfig);
+  const id = top.Id;
+  if (typeof id !== 'string' || !/^[0-9a-f]{64}$/.test(id)) {
+    throw new Error('inspect answered without an id');
+  }
+  const labels: Record<string, string> = {};
+  for (const [key, value] of Object.entries(record(config.Labels))) {
+    if (typeof value === 'string') labels[key] = value;
+  }
+  return {
+    id,
+    labels,
+    runtime: typeof host.Runtime === 'string' ? host.Runtime : '',
+    networkMode: typeof host.NetworkMode === 'string' ? host.NetworkMode : '',
+    privileged: host.Privileged === true,
+  };
+}
+
+async function decideRequest(
+  method: string,
+  url: string,
+  raw: Buffer,
+  upgrade: boolean
+): Promise<Decision> {
+  const policy = currentPolicy();
+  if (!policy) {
+    // Liveness only: compose starts the proxy before the first deploy writes the policy.
+    const path = url.split('?')[0];
+    if ((method === 'GET' || method === 'HEAD') && path === '/_ping' && raw.length === 0) {
+      return {
+        allow: true,
+        method,
+        route: 'ping',
+        target: '/_ping',
+        body: null,
+        upgrade: false,
+        recordsExec: false,
+      };
+    }
+    return {
+      allow: false,
+      status: 503,
+      reason: 'the proxy has no valid policy (run pnpm selfhost:deploy)',
+    };
+  }
+  let body: unknown;
+  if (raw.length > 0) {
+    try {
+      body = JSON.parse(raw.toString('utf8'));
+    } catch {
+      return { allow: false, status: 400, reason: 'request body is not JSON' };
+    }
+  }
+  return decide(
+    { method, url, body, upgrade },
+    { policy, inspectContainer, ownsExec: (id) => execs.has(id) }
+  );
+}
+
+function refusalBody(decision: Extract<Decision, { allow: false }>): string {
+  return JSON.stringify({ message: `sam-docker-proxy refused: ${decision.reason}` });
+}
+
+function logDecision(method: string, url: string, decision: Decision): void {
+  if (decision.allow) {
+    // Reads are frequent (celld polls inspect); log the calls that change something.
+    if (decision.method !== 'GET' && decision.method !== 'HEAD') {
+      logEvent('allowed', { method: decision.method, route: decision.route });
+    }
+  } else {
+    logEvent('refused', {
+      method,
+      path: url.split('?')[0],
+      status: decision.status,
+      reason: decision.reason,
+    });
+  }
+}
+
+function forwardHeaders(headers: IncomingHttpHeaders): Record<string, string | string[]> {
+  const out: Record<string, string | string[]> = {};
+  for (const [key, value] of Object.entries(headers)) {
+    if (value !== undefined && !HOP_BY_HOP.has(key.toLowerCase())) out[key] = value;
+  }
+  return out;
+}
+
+function upstreamOptions(decision: Extract<Decision, { allow: true }>, upgrade: boolean) {
+  const headers: Record<string, string | number> = { Host: 'docker' };
+  if (decision.body !== null) {
+    headers['Content-Type'] = 'application/json';
+    headers['Content-Length'] = Buffer.byteLength(decision.body);
+  }
+  if (upgrade) {
+    headers.Connection = 'Upgrade';
+    headers.Upgrade = 'tcp';
+  }
+  return { socketPath: UPSTREAM, method: decision.method, path: decision.target, headers };
+}
+
+function readBody(req: IncomingMessage): Promise<Buffer | null> {
+  return new Promise((resolve, reject) => {
+    const declared = Number(req.headers['content-length'] ?? 0);
+    if (declared > MAX_BODY_BYTES) return resolve(null);
+    const chunks: Buffer[] = [];
+    let size = 0;
+    req.on('data', (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > MAX_BODY_BYTES) {
+        resolve(null);
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
+async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const method = req.method ?? 'GET';
+  const url = req.url ?? '/';
+  const raw = await readBody(req);
+  const decision: Decision =
+    raw === null
+      ? { allow: false, status: 413, reason: 'request body is too large' }
+      : await decideRequest(method, url, raw, false);
+  logDecision(method, url, decision);
+  if (!decision.allow) {
+    res.writeHead(decision.status, { 'Content-Type': 'application/json', Connection: 'close' });
+    res.end(refusalBody(decision));
+    return;
+  }
+  const upstream = httpRequest(upstreamOptions(decision, false), (reply) => {
+    if (decision.recordsExec) {
+      const chunks: Buffer[] = [];
+      reply.on('data', (chunk: Buffer) => chunks.push(chunk));
+      reply.on('end', () => {
+        const text = Buffer.concat(chunks);
+        if (reply.statusCode === 201) {
+          try {
+            const answer: unknown = JSON.parse(text.toString('utf8'));
+            const id = isRecord(answer) ? answer.Id : undefined;
+            if (typeof id === 'string' && /^[0-9a-f]{64}$/.test(id)) recordExec(id);
+          } catch {
+            // The daemon's answer goes back unchanged; an unparseable one records nothing.
+          }
+        }
+        const headers = forwardHeaders(reply.headers);
+        headers['content-length'] = String(text.length);
+        res.writeHead(reply.statusCode ?? 502, headers);
+        res.end(text);
+      });
+      return;
+    }
+    res.writeHead(reply.statusCode ?? 502, forwardHeaders(reply.headers));
+    reply.pipe(res);
+  });
+  upstream.on('error', (error) => {
+    logEvent('upstream_error', { route: decision.route, error: String(error) });
+    if (!res.headersSent) res.writeHead(502, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ message: 'sam-docker-proxy: the container engine did not answer' }));
+  });
+  // A long-polled wait whose caller went away must not hold the daemon connection.
+  res.on('close', () => {
+    if (!res.writableFinished) upstream.destroy();
+  });
+  upstream.end(decision.body ?? undefined);
+}
+
+/** The request body of an upgrade request: whatever arrived with the head, then the socket. */
+function readUpgradeBody(
+  req: IncomingMessage,
+  socket: Duplex,
+  head: Buffer
+): Promise<{ body: Buffer; rest: Buffer } | null> {
+  const length = Number(req.headers['content-length'] ?? 0);
+  if (!Number.isSafeInteger(length) || length < 0 || length > MAX_BODY_BYTES)
+    return Promise.resolve(null);
+  return new Promise((resolve) => {
+    let buffered = head;
+    const done = (): boolean => {
+      if (buffered.length < length) return false;
+      socket.off('data', onData);
+      socket.pause();
+      resolve({ body: buffered.subarray(0, length), rest: buffered.subarray(length) });
+      return true;
+    };
+    const onData = (chunk: Buffer): void => {
+      buffered = Buffer.concat([buffered, chunk]);
+      if (buffered.length > MAX_BODY_BYTES + 65536) {
+        socket.off('data', onData);
+        resolve(null);
+        return;
+      }
+      done();
+    };
+    if (!done()) socket.on('data', onData);
+  });
+}
+
+function rawResponse(socket: Duplex, status: number, reason: string, body: string): void {
+  socket.end(
+    `HTTP/1.1 ${status} ${reason}\r\nContent-Type: application/json\r\n` +
+      `Content-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`
+  );
+}
+
+async function handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
+  const method = req.method ?? 'POST';
+  const url = req.url ?? '/';
+  const read = await readUpgradeBody(req, socket, head);
+  const decision: Decision = read
+    ? await decideRequest(method, url, read.body, true)
+    : { allow: false, status: 413, reason: 'request body is too large' };
+  logDecision(method, url, decision);
+  if (!decision.allow) {
+    rawResponse(socket, decision.status, 'Refused', refusalBody(decision));
+    return;
+  }
+  const upstream = httpRequest(upstreamOptions(decision, true));
+  upstream.on('upgrade', (reply, upstreamSocket, upstreamHead) => {
+    const lines = [`HTTP/1.1 101 UPGRADED`];
+    for (let i = 0; i < reply.rawHeaders.length; i += 2) {
+      lines.push(`${reply.rawHeaders[i]}: ${reply.rawHeaders[i + 1]}`);
+    }
+    socket.write(`${lines.join('\r\n')}\r\n\r\n`);
+    if (upstreamHead.length > 0) socket.write(upstreamHead);
+    if (read && read.rest.length > 0) upstreamSocket.write(read.rest);
+    socket.on('error', () => upstreamSocket.destroy());
+    upstreamSocket.on('error', () => socket.destroy());
+    // stdin EOF is a half-close from celld; it reaches the daemon the same way.
+    socket.pipe(upstreamSocket);
+    upstreamSocket.pipe(socket);
+    socket.resume();
+  });
+  upstream.on('response', (reply) => {
+    const chunks: Buffer[] = [];
+    reply.on('data', (chunk: Buffer) => chunks.push(chunk));
+    reply.on('end', () =>
+      rawResponse(
+        socket,
+        reply.statusCode ?? 502,
+        reply.statusMessage ?? 'Error',
+        Buffer.concat(chunks).toString('utf8')
+      )
+    );
+  });
+  upstream.on('error', (error) => {
+    logEvent('upstream_error', { route: decision.route, error: String(error) });
+    rawResponse(
+      socket,
+      502,
+      'Bad Gateway',
+      JSON.stringify({ message: 'sam-docker-proxy: the container engine did not answer' })
+    );
+  });
+  upstream.end(decision.body ?? undefined);
+}
+
+const server = createServer((req, res) => {
+  handle(req, res).catch((error: unknown) => {
+    logEvent('handler_error', { error: String(error) });
+    if (!res.headersSent) res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ message: 'sam-docker-proxy: internal error' }));
+  });
+});
+server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+  handleUpgrade(req, socket, head).catch((error: unknown) => {
+    logEvent('handler_error', { error: String(error) });
+    socket.destroy();
+  });
+});
+// A container wait is a long poll; the daemon, not this proxy, decides when it ends.
+server.requestTimeout = 0;
+server.timeout = 0;
+
+try {
+  unlinkSync(LISTEN);
+} catch {
+  // No stale socket from a previous run.
+}
+server.listen(LISTEN, () => {
+  chmodSync(LISTEN, SOCKET_MODE);
+  logEvent('listening', { socket: LISTEN, upstream: UPSTREAM, policy: POLICY_PATH });
+  currentPolicy();
+});
+
+for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+  process.once(signal, () => {
+    server.close();
+    process.exit(0);
+  });
+}

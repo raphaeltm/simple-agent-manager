@@ -1,6 +1,10 @@
 {
   "$schema": "https://json.schemastore.org/tsconfig",
   "extends": "../deploy/tsconfig.json",
-  "include": ["**/*.ts"],
+  "compilerOptions": {
+    // deploy/selfhost/docker-proxy runs under Node's type stripping, which needs .ts specifiers.
+    "allowImportingTsExtensions": true
+  },
+  "include": ["**/*.ts", "../../deploy/selfhost/docker-proxy/*.ts"],
   "exclude": ["node_modules", "dist"]
 }

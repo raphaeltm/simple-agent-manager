@@ -52,6 +52,12 @@ import {
   type CelldWranglerConfig,
 } from './celld-config.js';
 import { ASSETS_DIR, prepareCelldProject, SOURCE_LINK, writeCelldConfig } from './celld-project.js';
+import {
+  assertCelldTaggedImages,
+  ensureDockerProxyDir,
+  hostDocker,
+  prepareDockerProxyPolicy,
+} from './docker-proxy-policy.js';
 import { writeFenceFiles } from './fence-state.js';
 import {
   assertContainerEngineReady,
@@ -331,6 +337,8 @@ async function main(): Promise<void> {
   for (const path of writeMailCollectorFiles(stateDir, box, collectorPassword)) {
     log(`wrote ${path}; restart the stack so it applies: docker compose up -d`);
   }
+  // The docker-proxy bind source must exist before `docker compose up` (guided login only).
+  if (guidedLoginSettings(box)) ensureDockerProxyDir(stateDir);
   if (values.init) return;
   const operatorSecrets = readSecretsFile(secretsPath);
   // VM_AGENT_REQUIRED_VERSION must name the release this deploy published (or stay unset).
@@ -379,6 +387,11 @@ async function main(): Promise<void> {
   const webDist = values['web-dist'] ? resolve(values['web-dist']) : buildWeb(baseDomain);
   buildApiDependencies();
   prepareCelldProject({ apiDir: API_DIR, projectDir, plan, webDist });
+  // celld reaches Docker only through the socket proxy, which allows exactly these images.
+  const proxyPolicy = guidedLogin
+    ? prepareDockerProxyPolicy({ docker: hostDocker, stateDir, projectDir, settings: guidedLogin })
+    : null;
+  if (proxyPolicy) log(`docker-proxy policy: sandbox ${proxyPolicy.sandboxImages[0]}`);
 
   const celld = await ensureCelldBinary(join(stateDir, 'bin'));
   const env = celldChildEnv(process.env, box, resolveEsbuild(API_DIR));
@@ -437,6 +450,7 @@ async function main(): Promise<void> {
     log(`celld deploy ${plan.config.name}`);
     const result = run(celld, ['deploy', projectDir, '--bucket', bucketOf(env)], env);
     if (result.status !== 0) throw new Error(`celld deploy failed (exit ${result.status})`);
+    if (proxyPolicy) assertCelldTaggedImages(hostDocker, proxyPolicy);
   } finally {
     writeCelldConfig(projectDir, plan.config);
     for (const signal of signals) process.off(signal, scrub);

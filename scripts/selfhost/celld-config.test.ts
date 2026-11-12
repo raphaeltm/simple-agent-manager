@@ -240,12 +240,12 @@ describe('buildCelldConfig with guided login on', () => {
     expect(plan.config.vars.CF_CONTAINER_ENABLED).toBe('false');
   });
 
-  it('omits runtime for the daemon default', () => {
-    const daemon = buildCelldConfig(source, {
+  it('always names the runtime (the Docker socket proxy pins it)', () => {
+    const runc = buildCelldConfig(source, {
       ...options,
-      guidedLogin: { runtime: null, instanceType: 'basic' },
+      guidedLogin: { runtime: 'runc', instanceType: 'basic' },
     });
-    expect(daemon.config.containers?.[0]).not.toHaveProperty('runtime');
+    expect(runc.config.containers?.[0]?.runtime).toBe('runc');
   });
 
   it('refuses the sandbox declaration from caller vars', () => {

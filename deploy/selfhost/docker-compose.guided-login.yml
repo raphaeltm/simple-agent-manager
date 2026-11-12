@@ -2,22 +2,50 @@
 #   COMPOSE_FILE=docker-compose.yml:docker-compose.guided-login.yml
 # (paths relative to deploy/selfhost; README "Guided credential login").
 #
-# celld starts the sign-in sandbox through the host's Docker daemon. That gives the celld process
-# the Docker socket, which is root-equivalent on this host (README, security). Worker JavaScript
-# cannot reach it: it has no filesystem, no process and no socket API (celld docs/security).
+# celld starts the sign-in sandbox through Docker, but it never holds the Docker socket: that
+# socket is root on this host. It talks to `docker-proxy` instead, which allows only the calls
+# celld's container support makes, in their exact shapes (one sandbox image, the gVisor runtime,
+# no capabilities, celld's fenced bridges, its one-shot fence container) and refuses the rest
+# (docker-proxy/policy.ts; what a compromised celld can and cannot do is in the README).
 services:
-  celld:
-    # The socket's group, so uid 7101 can use it without becoming root.
+  docker-proxy:
+    build:
+      context: ./docker-proxy
+      args:
+        PROXY_UID: ${SAM_DOCKER_PROXY_UID:-7102}
+        CELLD_GID: ${CELLD_UID:-7101}
+    image: sam-selfhost-docker-proxy:local
+    # Unix sockets only: the host's Docker socket in, the proxy socket out.
+    network_mode: none
+    user: '${SAM_DOCKER_PROXY_UID:-7102}:${CELLD_UID:-7101}'
+    # The socket's group, so the proxy uid can reach the daemon without being root.
     group_add: ['${DOCKER_SOCKET_GID:?set DOCKER_SOCKET_GID (stat -c %g /var/run/docker.sock)}']
-    environment:
-      DOCKER_HOST: unix:///var/run/docker.sock
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    read_only: true
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      # celld writes the containers' resolv.conf into its data dir and asks the daemon to
-      # bind-mount it by that path, so the data dir must have the same path on the host
-      # (replaces the celld-data volume; the bucket stays the durable copy).
-      - /var/lib/celld:/var/lib/celld
+      - docker-proxy-socket:/run/sam-docker-proxy
+      # policy.json and the sandbox resolv.conf, written by `pnpm selfhost:deploy`.
+      - ${SAM_SELFHOST_STATE_DIR:-./.state}/docker-proxy:/etc/sam/docker-proxy:ro
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('http').get({socketPath:'/run/sam-docker-proxy/docker.sock',path:'/_ping'},r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+      interval: 5s
+      retries: 12
+    restart: unless-stopped
 
-  celld-data-owner:
+  celld:
+    depends_on:
+      docker-proxy:
+        condition: service_healthy
+    environment:
+      DOCKER_HOST: unix:///run/sam-docker-proxy/docker.sock
     volumes:
-      - /var/lib/celld:/var/lib/celld
+      - docker-proxy-socket:/run/sam-docker-proxy:ro
+
+volumes:
+  docker-proxy-socket:

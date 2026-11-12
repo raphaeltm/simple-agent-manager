@@ -18,12 +18,26 @@
  *
  * SECURITY: the captured credential is read server-side and never transits this
  * DO's SQLite, the D1 row, logs, or the browser. Only non-secret lifecycle
- * metadata is persisted. Every terminal state runs teardown (release pool lease,
- * delete credential files, destroy sandbox, mark D1) so a vanished browser leaves
- * no orphan (rules 43/47).
+ * metadata is persisted. Every terminal state runs teardown so a vanished browser
+ * leaves no orphan (rules 43/47).
+ *
+ * Teardown order (`teardown()` then `runCleanup()`):
+ *   1. Synchronously claim the terminal status in DO SQLite, mark cleanup pending
+ *      (with the pre-claim status), and arm a recovery alarm.
+ *   2. Mark the D1 row terminal BEFORE any sandbox I/O, so a process that dies
+ *      mid-teardown never leaves D1 active (the create route's one-active lookup
+ *      would otherwise keep returning the dead session until the cron sweep).
+ *   3. Scrub the setup dir (skipped when teardown starts from `provisioning`: no
+ *      driver ran, and an exec would restart a never-started container), destroy
+ *      the sandbox, release the pool slot, re-check D1, then clear the pending
+ *      marker and the alarm.
+ * If the isolate dies during step 3, `alarm()` sees a terminal row with
+ * `cleanup_pending = 1` and resumes the cleanup, at most
+ * MAX_CLEANUP_RECOVERY_ATTEMPTS times.
  *
  * Storage: embedded SQLite (wrangler `new_sqlite_classes`). DDL is inlined in
- * the constructor (CREATE TABLE IF NOT EXISTS) — no separate DO migration file.
+ * the constructor (CREATE TABLE IF NOT EXISTS plus guarded additive
+ * ALTER TABLE ADD COLUMN for existing objects) — no separate DO migration file.
  */
 import type { AgentType, CredentialKind } from '@simple-agent-manager/shared';
 import { DurableObject } from 'cloudflare:workers';
@@ -38,6 +52,7 @@ import {
 } from '../../middleware/project-auth';
 import { saveAgentCredentialForUser } from '../../services/agent-credential-save';
 import {
+  ACTIVE_SETUP_STATUSES,
   getClaudeOauthTokenMaxLength,
   getClaudeVerificationCodeMaxLength,
   isTerminalSetupStatus,
@@ -49,7 +64,9 @@ import {
   getSandboxConfig,
   getSandboxInstance,
   shellQuote,
+  withTimeout,
 } from '../../services/sandbox';
+import { PERMANENT_STARTUP_MESSAGE } from '../../services/sandbox-startup-errors';
 import { releaseSetupSlot } from '../../services/setup-session-pool';
 import { CredentialValidator } from '../../services/validation';
 import { type DeviceAuthState, DeviceAuthStateSchema, driverFailure } from './driver-state';
@@ -98,7 +115,30 @@ type SetupSessionRow = {
   error_code: string | null;
   error_message: string | null;
   completed_at: number | null;
+  /** 1 while teardown's sandbox cleanup has not finished; NULL/0 otherwise. */
+  cleanup_pending: number | null;
+  /** Status the session had when teardown claimed it (decides whether to scrub). */
+  cleanup_from_status: string | null;
+  /** Number of alarm-driven recoveries of an interrupted cleanup. */
+  cleanup_attempts: number | null;
 };
+
+/**
+ * Additive columns for teardown recovery. Objects created before these existed
+ * get them through a guarded ALTER TABLE ADD COLUMN (no table recreation).
+ */
+const CLEANUP_COLUMNS: ReadonlyArray<readonly [name: string, type: string]> = [
+  ['cleanup_pending', 'INTEGER'],
+  ['cleanup_from_status', 'TEXT'],
+  ['cleanup_attempts', 'INTEGER'],
+];
+
+/**
+ * Alarm-driven re-runs of an interrupted cleanup before giving up. Every cleanup
+ * step is best-effort and catches its own errors, so a run only fails to finish
+ * when the isolate dies; three consecutive deaths means retrying is not helping.
+ */
+const MAX_CLEANUP_RECOVERY_ATTEMPTS = 3;
 
 type DeviceAuthDetailsRow = {
   verification_url: string;
@@ -126,6 +166,13 @@ function credentialFileName(agentType: string): string {
 
 export class CredentialSetupSession extends DurableObject<Env> {
   private readonly sql: SqlStorage;
+  /**
+   * The cleanup this isolate is running, if any. A recovery alarm that fires
+   * while the inline cleanup is still awaiting sandbox I/O joins it instead of
+   * starting a second one. It is in memory on purpose: after an isolate death it
+   * is gone, and the alarm then runs the cleanup itself.
+   */
+  private cleanupInFlight: Promise<void> | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -151,6 +198,17 @@ export class CredentialSetupSession extends DurableObject<Env> {
           completed_at    INTEGER
         )`
       );
+      const existingColumns = new Set(
+        this.sql
+          .exec<{ name: string }>('PRAGMA table_info(setup_session)')
+          .toArray()
+          .map((column) => column.name)
+      );
+      for (const [name, type] of CLEANUP_COLUMNS) {
+        if (!existingColumns.has(name)) {
+          this.sql.exec(`ALTER TABLE setup_session ADD COLUMN ${name} ${type}`);
+        }
+      }
       this.sql.exec(
         `CREATE TABLE IF NOT EXISTS device_auth_details (
           singleton        INTEGER PRIMARY KEY NOT NULL CHECK (singleton = 1),
@@ -250,7 +308,7 @@ export class CredentialSetupSession extends DurableObject<Env> {
         }
       );
     if (!isTerminalSetupStatus(row.status)) {
-      await this.teardown(row, 'cancelled');
+      await this.teardown('cancelled');
     }
     const after = this.readRow();
     return {
@@ -306,12 +364,16 @@ export class CredentialSetupSession extends DurableObject<Env> {
 
     const row = this.readRow();
     if (!row) return; // torn down / never created — nothing to do
-    if (isTerminalSetupStatus(row.status)) return;
+    if (isTerminalSetupStatus(row.status)) {
+      // A terminal row only needs work when its teardown cleanup never finished
+      // (the isolate died mid-teardown). Otherwise terminal is a fixed point.
+      if (row.cleanup_pending === 1) await this.resumeCleanup(row);
+      return;
+    }
 
     // TTL guard — fail closed to expired.
     if (Date.now() >= row.expires_at) {
       await this.teardown(
-        row,
         'expired',
         'setup_session_expired',
         'Setup session timed out before sign-in completed'
@@ -342,7 +404,7 @@ export class CredentialSetupSession extends DurableObject<Env> {
           errorCode: failure.code,
           diagnostics: driverState.diagnostics ?? {},
         });
-        await this.teardown(row, 'failed', failure.code, failure.message);
+        await this.teardown('failed', failure.code, failure.message);
         return;
       }
       await this.attemptCapture(row);
@@ -386,16 +448,23 @@ export class CredentialSetupSession extends DurableObject<Env> {
         timeout: getSandboxConfig(this.env).execTimeoutMs,
       });
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // SandboxDO reports a container engine that can never start the sandbox (runtime not
+      // installed, socket proxy refusal, image gone) as the SDK's permanent startup error, so it
+      // arrives here in seconds instead of after the SDK's start retries (durable-objects/sandbox-do.ts).
+      const runtimeUnavailable = message.includes(PERMANENT_STARTUP_MESSAGE);
       log.error('credential_setup.provision_failed', {
         sessionId: row.id,
         agentType: row.agent_type,
-        error: err instanceof Error ? err.message : String(err),
+        runtimeUnavailable,
+        error: message,
       });
       await this.teardown(
-        row,
         'failed',
-        'sandbox_provision_failed',
-        `Failed to prepare ${displayName} sign-in`
+        runtimeUnavailable ? 'sandbox_runtime_unavailable' : 'sandbox_provision_failed',
+        runtimeUnavailable
+          ? `${displayName} sign-in is unavailable on this server: the sign-in sandbox could not start`
+          : `Failed to prepare ${displayName} sign-in`
       );
       return;
     }
@@ -471,7 +540,7 @@ export class CredentialSetupSession extends DurableObject<Env> {
         errorCode: failure.code,
         diagnostics: state.diagnostics ?? {},
       });
-      await this.teardown(current, 'failed', failure.code, failure.message);
+      await this.teardown('failed', failure.code, failure.message);
       return;
     }
     if (
@@ -597,7 +666,6 @@ export class CredentialSetupSession extends DurableObject<Env> {
         error: err instanceof Error ? err.message : String(err),
       });
       await this.teardown(
-        row,
         'failed',
         'capture_save_failed',
         'Failed to save the captured credential'
@@ -605,7 +673,7 @@ export class CredentialSetupSession extends DurableObject<Env> {
       return;
     }
 
-    await this.teardown(row, 'completed');
+    await this.teardown('completed');
   }
 
   // ---------------------------------------------------------------------------
@@ -613,7 +681,6 @@ export class CredentialSetupSession extends DurableObject<Env> {
   // ---------------------------------------------------------------------------
 
   private async teardown(
-    row: SetupSessionRow,
     finalStatus: 'completed' | 'failed' | 'cancelled' | 'expired',
     errorCode?: string,
     errorMessage?: string
@@ -625,23 +692,108 @@ export class CredentialSetupSession extends DurableObject<Env> {
     const current = this.readRow();
     if (!current || isTerminalSetupStatus(current.status)) return;
     this.setStatus(current.id, finalStatus, { errorCode, errorMessage, completed: true });
+    // Same synchronous step as the claim: record that cleanup is owed, and from
+    // which status, so a dead isolate's cleanup can be resumed by the alarm.
+    this.sql.exec(
+      `UPDATE setup_session
+       SET cleanup_pending = 1, cleanup_from_status = ?, cleanup_attempts = 0
+       WHERE id = ?`,
+      current.status,
+      current.id
+    );
     this.sql.exec(`DELETE FROM device_auth_details WHERE singleton = 1`);
+    const claimed = this.readRow();
+    if (!claimed) return;
 
-    // 1. Delete captured credential file + scrub the setup dir.
-    try {
-      const sandbox = await getSandboxInstance(this.env, row.id);
-      // Variable (not inline) — same SQL-injection-AST-false-positive avoidance.
-      const scrubCmd = `rm -rf ${shellQuote(row.codex_home)}`;
-      await sandbox.exec(scrubCmd, {
-        timeout: getSandboxConfig(this.env).execTimeoutMs,
-      });
-    } catch (err) {
-      log.warn('credential_setup.scrub_failed', {
-        sessionId: row.id,
-        error: err instanceof Error ? err.message : String(err),
-      });
+    // Arm the recovery alarm before any I/O (replaces any pending poll alarm).
+    // runCleanup deletes it on completion.
+    await this.ctx.storage.setAlarm(Date.now() + claimed.capture_poll_ms);
+    // D1 terminal FIRST: the create route's one-active lookup reads D1, so a
+    // process death during sandbox I/O must not leave this row active.
+    await this.updateD1Status(claimed.id, finalStatus, {
+      errorCode,
+      errorMessage,
+      completed: true,
+    });
+    await this.startCleanup(claimed);
+  }
+
+  /** Alarm path: resume a cleanup an earlier isolate claimed but never finished. */
+  private async resumeCleanup(row: SetupSessionRow): Promise<void> {
+    if (this.cleanupInFlight) {
+      // The inline cleanup in this isolate is still running — join it.
+      await this.cleanupInFlight;
+      return;
     }
-    // 2. Destroy the sandbox container.
+    const attempts = (row.cleanup_attempts ?? 0) + 1;
+    if (attempts > MAX_CLEANUP_RECOVERY_ATTEMPTS) {
+      log.error('credential_setup.cleanup_abandoned', {
+        sessionId: row.id,
+        status: row.status,
+        cleanupFromStatus: row.cleanup_from_status,
+        attempts: row.cleanup_attempts,
+      });
+      this.sql.exec(`UPDATE setup_session SET cleanup_pending = 0 WHERE id = ?`, row.id);
+      await this.deleteAlarmBestEffort();
+      return;
+    }
+    this.sql.exec(`UPDATE setup_session SET cleanup_attempts = ? WHERE id = ?`, attempts, row.id);
+    log.warn('credential_setup.cleanup_resumed', {
+      sessionId: row.id,
+      status: row.status,
+      cleanupFromStatus: row.cleanup_from_status,
+      attempt: attempts,
+    });
+    // Re-arm before I/O so a death during this run is retried as well.
+    await this.ctx.storage.setAlarm(Date.now() + row.capture_poll_ms);
+    await this.startCleanup(row);
+  }
+
+  private startCleanup(row: SetupSessionRow): Promise<void> {
+    const run = this.runCleanup(row).finally(() => {
+      this.cleanupInFlight = null;
+    });
+    this.cleanupInFlight = run;
+    return run;
+  }
+
+  /**
+   * Sandbox + pool cleanup for a row whose terminal status is already claimed.
+   * Every step is best-effort (logged, never thrown), and every step is safe to
+   * repeat, because an alarm may re-run it after an isolate death.
+   */
+  private async runCleanup(row: SetupSessionRow): Promise<void> {
+    const execTimeoutMs = getSandboxConfig(this.env).execTimeoutMs;
+    // 1. Delete captured credential file + scrub the setup dir. Skipped when the
+    //    session never left `provisioning`: no driver ran and no sign-in URL was
+    //    shown, so no credential can exist, and an exec would (re)start a
+    //    container that never started — waiting out the SDK's start retries.
+    //    Destroy (step 2) removes the container's filesystem either way.
+    if (row.cleanup_from_status === 'provisioning') {
+      log.info('credential_setup.scrub_skipped', {
+        sessionId: row.id,
+        reason: 'never_left_provisioning',
+      });
+    } else {
+      try {
+        const sandbox = await getSandboxInstance(this.env, row.id);
+        // Variable (not inline) — same SQL-injection-AST-false-positive avoidance.
+        const scrubCmd = `rm -rf ${shellQuote(row.codex_home)}`;
+        // Bounded here too: the exec's own timeout covers the command, not the
+        // container start the SDK may perform before it.
+        await withTimeout(
+          sandbox.exec(scrubCmd, { timeout: execTimeoutMs }),
+          execTimeoutMs,
+          `Setup dir scrub timed out after ${execTimeoutMs}ms`
+        );
+      } catch (err) {
+        log.warn('credential_setup.scrub_failed', {
+          sessionId: row.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    // 2. Destroy the sandbox container (bounded inside destroySandboxInstance).
     try {
       await destroySandboxInstance(this.env, row.id, { sandboxId: row.id });
     } catch (err) {
@@ -659,14 +811,31 @@ export class CredentialSetupSession extends DurableObject<Env> {
         error: err instanceof Error ? err.message : String(err),
       });
     }
-    // 4. Mark D1 terminal (DO status already claimed atomically above), disarm alarm.
-    await this.updateD1Status(row.id, finalStatus, { errorCode, errorMessage, completed: true });
+    // 4. Repair D1 only if the terminal write in teardown() did not land (it
+    //    logs and continues on failure). A no-op when D1 is already terminal.
+    await this.updateD1Status(row.id, row.status as SetupSessionStatus, {
+      errorCode: row.error_code ?? undefined,
+      errorMessage: row.error_message ?? undefined,
+      completed: true,
+      onlyIfActive: true,
+    });
+    // 5. Cleanup is done: clear the marker and the recovery alarm.
+    this.sql.exec(`UPDATE setup_session SET cleanup_pending = 0 WHERE id = ?`, row.id);
+    await this.deleteAlarmBestEffort();
+    log.info('credential_setup.torn_down', {
+      sessionId: row.id,
+      finalStatus: row.status,
+      errorCode: row.error_code,
+      cleanupFromStatus: row.cleanup_from_status,
+    });
+  }
+
+  private async deleteAlarmBestEffort(): Promise<void> {
     try {
       await this.ctx.storage.deleteAlarm();
     } catch {
       // no alarm armed — fine
     }
-    log.info('credential_setup.torn_down', { sessionId: row.id, finalStatus, errorCode });
   }
 
   // ---------------------------------------------------------------------------
@@ -715,7 +884,14 @@ export class CredentialSetupSession extends DurableObject<Env> {
   private async updateD1Status(
     id: string,
     status: SetupSessionStatus,
-    extra?: { errorCode?: string; errorMessage?: string; completed?: boolean; started?: boolean }
+    extra?: {
+      errorCode?: string;
+      errorMessage?: string;
+      completed?: boolean;
+      started?: boolean;
+      /** Only write while the D1 row is still active (repair, never overwrite). */
+      onlyIfActive?: boolean;
+    }
   ): Promise<void> {
     const now = new Date().toISOString();
     const set = ['status = ?', 'updated_at = ?'];
@@ -737,9 +913,14 @@ export class CredentialSetupSession extends DurableObject<Env> {
       binds.push(extra.errorMessage);
     }
     binds.push(id);
+    let where = 'id = ?';
+    if (extra?.onlyIfActive) {
+      where += ` AND status IN (${ACTIVE_SETUP_STATUSES.map(() => '?').join(', ')})`;
+      binds.push(...ACTIVE_SETUP_STATUSES);
+    }
     try {
       await this.env.DATABASE.prepare(
-        `UPDATE agent_credential_setup_sessions SET ${set.join(', ')} WHERE id = ?`
+        `UPDATE agent_credential_setup_sessions SET ${set.join(', ')} WHERE ${where}`
       )
         .bind(...binds)
         .run();

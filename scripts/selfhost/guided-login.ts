@@ -42,8 +42,11 @@ const INSTANCE_TYPES = new Set([
 ]);
 
 export interface GuidedLoginSettings {
-  /** OCI runtime celld starts the container under; `null` uses the daemon default (runc). */
-  runtime: string | null;
+  /**
+   * OCI runtime celld starts the container under. Always named: the Docker socket proxy refuses
+   * any sandbox that does not name exactly this runtime (`docker-proxy/policy.ts`).
+   */
+  runtime: string;
   instanceType: string;
 }
 
@@ -70,8 +73,15 @@ export function guidedLoginSettings(
       `SAM_GUIDED_LOGIN_INSTANCE_TYPE "${instanceType}" is not a celld instance type`
     );
   }
-  // `runc` (or `default`) shares the host kernel with the encryption key and the database.
-  return { runtime: runtime === 'default' ? null : runtime, instanceType };
+  // `runc` shares the host kernel with the encryption key and the database; it must be asked for
+  // by name. "default" (whatever the daemon defaults to) cannot be pinned by the socket proxy.
+  if (runtime === 'default') {
+    throw new Error(
+      'SAM_GUIDED_LOGIN_RUNTIME=default is not supported: name the runtime (runsc, or runc to ' +
+        'accept a shared host kernel)'
+    );
+  }
+  return { runtime, instanceType };
 }
 
 /** Sources of every `COPY <src> <dest>` line, relative to the Dockerfile's directory. */
@@ -146,7 +156,6 @@ export function assertContainerEngineReady(
       `SAM_GUIDED_LOGIN=on needs a Docker daemon on this box (docker info failed: ${probe.error})`
     );
   }
-  if (!settings.runtime) return;
   let runtimes: unknown;
   try {
     runtimes = JSON.parse(probe.runtimesJson);
