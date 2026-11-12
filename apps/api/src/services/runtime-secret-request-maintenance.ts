@@ -24,6 +24,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { agentSafeDisplayName } from './runtime-secret-request-records';
 import { getRuntimeSecretRequestLimits } from './runtime-secret-request-settings';
 import { notifyAgent } from './runtime-secret-requests';
 
@@ -105,7 +106,9 @@ export async function runRuntimeSecretRequestSweep(
       const outcome = outcomeOf(request.status);
       if (!outcome) continue;
       // Same delivery id as the first attempt, so a notice that did land is not duplicated.
-      if (await notifyAgent(env, db, request, outcome, resolverName ?? null)) noticesRetried += 1;
+      if (await notifyAgent(env, db, request, outcome, agentSafeDisplayName(resolverName))) {
+        noticesRetried += 1;
+      }
     }
   }
 

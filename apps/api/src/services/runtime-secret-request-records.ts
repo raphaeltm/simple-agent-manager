@@ -12,6 +12,26 @@ import { and, eq } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
+import { sanitizeUserInput } from '../lib/sanitize-user-input';
+
+/** Longest display name passed to an agent. A display bound, not a policy limit. */
+const AGENT_DISPLAY_NAME_MAX_CHARS = 64;
+/** Invisible code points `sanitizeUserInput` keeps: tag characters, soft hyphen, word joiners. */
+const INVISIBLE_CHARS = /[\u{E0000}-\u{E007F}\u00AD\u180E\u2060-\u2064\u061C]/gu;
+
+/**
+ * A person's display name as agents see it (outcome notices, `list_runtime_env`). It is
+ * user-controlled and reaches agent prompts, so control and invisible characters are removed,
+ * whitespace collapsed to single spaces, and the length capped. Never falls back to an email.
+ */
+export function agentSafeDisplayName(name: string | null | undefined): string | null {
+  const cleaned = sanitizeUserInput(name ?? '')
+    .replace(INVISIBLE_CHARS, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, AGENT_DISPLAY_NAME_MAX_CHARS);
+  return cleaned || null;
+}
 
 export type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -73,7 +93,7 @@ export async function loadRuntimeSecretRequest(
   const found = rows[0];
   // Defence in depth: the predicate already binds the project (`.claude/rules/11`).
   if (!found || found.request.projectId !== projectId) return null;
-  return { row: found.request, resolvedByName: found.resolverName ?? null };
+  return { row: found.request, resolvedByName: agentSafeDisplayName(found.resolverName) };
 }
 
 /** Provenance columns selected alongside a project runtime env row (LEFT JOINs, no bind list). */
@@ -106,7 +126,7 @@ export function toCollectedProvenance(
     reason: row.requestReason ?? '',
     requestingTaskId: row.requestTaskId ?? '',
     requestingChatSessionId: row.requestChatSessionId ?? '',
-    suppliedByName: row.requestResolverName ?? null,
+    suppliedByName: agentSafeDisplayName(row.requestResolverName),
     suppliedAt: isoOrNull(row.requestResolvedAt),
   };
 }

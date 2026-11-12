@@ -36,3 +36,22 @@ describe('sourceTaskGuardForClaim — secret_request', () => {
     expect(sourceTaskGuardForClaim(claim('agent_mailbox'), 'proj-1')).toBeUndefined();
   });
 });
+
+describe('invalidProjectEventWakeSourceTaskResult — secret_request', () => {
+  it('fails closed when the notice carries no requester', async () => {
+    const { invalidProjectEventWakeSourceTaskResult } =
+      await import('../../../src/durable-objects/project-data/prompt-delivery-source-guards');
+    const noRequester = claim('secret_request');
+    noRequester.message.metadata = { secretRequestId: 'req-1' };
+    const result = await invalidProjectEventWakeSourceTaskResult(
+      {} as never,
+      'proj-1',
+      noRequester
+    );
+    expect(result).toMatchObject({ kind: 'failed', reason: 'terminal_target' });
+    // Control: with the requester present this check passes it on to the guard.
+    expect(
+      await invalidProjectEventWakeSourceTaskResult({} as never, 'proj-1', claim('secret_request'))
+    ).toBeNull();
+  });
+});

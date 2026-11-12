@@ -372,7 +372,11 @@ async function claimAndStoreValue(
       `UPDATE runtime_secret_requests
           SET status = 'fulfilled', resolved_by = ?, resolved_at = ?, secret_expires_at = ?,
               replaced_existing = ?, updated_at = ?
-        WHERE id = ? AND project_id = ? AND status = 'pending' AND expires_at > ?`
+        WHERE id = ? AND project_id = ? AND status = 'pending' AND expires_at > ?
+          -- Without the person's confirmation, a value created since the card was read must not
+          -- be replaced silently: the claim fails and the card asks again.
+          AND (? = 1 OR NOT EXISTS (
+            SELECT 1 FROM project_runtime_env_vars WHERE project_id = ? AND env_key = ?))`
     ).bind(
       input.actorUserId,
       resolvedAt,
@@ -381,7 +385,10 @@ async function claimAndStoreValue(
       resolvedAt,
       row.id,
       row.projectId,
-      resolvedAt
+      resolvedAt,
+      input.replaceExisting ? 1 : 0,
+      row.projectId,
+      row.envKey
     ),
     env.DATABASE.prepare(
       `INSERT INTO project_runtime_env_vars
@@ -444,6 +451,12 @@ export async function fulfillRuntimeSecretRequest(
     replacedExisting: Boolean(prepared.existing),
   };
   if (!(await claimAndStoreValue(env, row, input, prepared.stored, resolution))) {
+    const current = await loadRuntimeSecretRequest(db, row.projectId, row.id);
+    if (current && effectiveRequestStatus(current.row) === 'pending' && !input.replaceExisting) {
+      throw errors.conflict(
+        `${row.envKey} was created in this project in the meantime. Confirm that the new value should replace it.`
+      );
+    }
     throw errors.conflict('This secret request was already answered or has expired');
   }
   const resolved: schema.RuntimeSecretRequestRow = {

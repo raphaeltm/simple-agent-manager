@@ -223,6 +223,19 @@ export async function invalidProjectEventWakeSourceTaskResult(
   claim: PromptDeliveryClaim
 ): Promise<PromptDeliveryResult | null> {
   if (
+    claim.message.sourceKind === 'secret_request' &&
+    typeof claim.message.metadata?.creatorUserId !== 'string'
+  ) {
+    // Without the requester the membership guard cannot be built; refuse rather than wake.
+    return {
+      kind: 'failed',
+      reason: 'terminal_target',
+      error: 'Secret request notice has no requester',
+      runtimeIdentity: claim.message.runtimeIdentity,
+      capabilities: null,
+    };
+  }
+  if (
     claim.message.sourceKind !== 'project_event_wake' &&
     claim.message.sourceKind !== 'github_trigger'
   )

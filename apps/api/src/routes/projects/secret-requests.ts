@@ -17,13 +17,16 @@ import { type Hono } from 'hono';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { readBoundedRequestBody, RequestBodyTooLargeError } from '../../lib/bounded-request-body';
+import { requireExactBrowserOrigin } from '../../lib/browser-write-origin';
 import { requireRouteParam } from '../../lib/route-helpers';
-import { sanitizeUserInput } from '../../lib/sanitize-user-input';
 import { getUserId } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { hasProjectCapability, requireProjectCapability } from '../../middleware/project-auth';
 import { getRuntimeLimits } from '../../services/limits';
-import { toRuntimeSecretRequest } from '../../services/runtime-secret-request-records';
+import {
+  agentSafeDisplayName,
+  toRuntimeSecretRequest,
+} from '../../services/runtime-secret-request-records';
 import {
   declineRuntimeSecretRequest,
   describeExistingValue,
@@ -68,35 +71,34 @@ async function readFulfilBody(
   return { value: record.value, replaceExisting: record.replaceExisting === true };
 }
 
-/** Longest display name passed to the agent's notice. A display bound, not a policy limit. */
-const ACTOR_NAME_MAX_CHARS = 64;
-
-/**
- * The person's display name for the agent's notice and the card. It reaches an agent prompt, so
- * control characters and newlines are stripped and it is capped; the email is never used.
- */
 async function actorName(db: Db, userId: string): Promise<string | null> {
   const rows = await db
     .select({ name: schema.users.name })
     .from(schema.users)
     .where(eq(schema.users.id, userId))
     .limit(1);
-  const name = sanitizeUserInput(rows[0]?.name ?? '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, ACTOR_NAME_MAX_CHARS);
-  return name || null;
+  return agentSafeDisplayName(rows[0]?.name);
 }
 
 /**
  * Both actions change state on a session cookie. Requiring a JSON content type makes any
  * cross-origin call a preflighted request, which the credentialed CORS allowlist refuses, so a
  * page on another origin (including a workspace port on the same site) cannot submit or decline
- * a request on someone's behalf with a "simple" form or text/plain POST.
+ * a request on someone's behalf with a "simple" form or text/plain POST. The exact-origin check
+ * above covers the allowlisted non-app hosts too.
  */
+function assertBrowserJsonWrite(c: {
+  req: { raw: Request; header: (name: string) => string | undefined };
+  env: Env;
+}): void {
+  // Only the app's own pages may answer a request; see `lib/browser-write-origin.ts`.
+  requireExactBrowserOrigin(c, 'secret request');
+  assertJsonRequest(c.req.raw);
+}
+
 function assertJsonRequest(request: Request): void {
   const contentType = request.headers.get('content-type') ?? '';
-  if (!/^application\/json\b/i.test(contentType.trim())) {
+  if (!/^application\/json\s*(;|$)/i.test(contentType.trim())) {
     throw errors.unsupportedMediaType('Content-Type must be application/json');
   }
 }
@@ -129,7 +131,7 @@ export function registerProjectSecretRequestRoutes(crudRoutes: Hono<{ Bindings: 
     const requestId = requireRouteParam(c, 'requestId');
     const db = drizzle(c.env.DATABASE, { schema });
     await requireProjectCapability(db, projectId, userId, 'secret:write');
-    assertJsonRequest(c.req.raw);
+    assertBrowserJsonWrite(c);
     const body = await readFulfilBody(
       c.req.raw,
       getRuntimeLimits(c.env).maxProjectRuntimeEnvValueBytes
@@ -151,7 +153,7 @@ export function registerProjectSecretRequestRoutes(crudRoutes: Hono<{ Bindings: 
     const requestId = requireRouteParam(c, 'requestId');
     const db = drizzle(c.env.DATABASE, { schema });
     await requireProjectCapability(db, projectId, userId, 'secret:write');
-    assertJsonRequest(c.req.raw);
+    assertBrowserJsonWrite(c);
     const result = await declineRuntimeSecretRequest(c.env, db, {
       projectId,
       requestId,
