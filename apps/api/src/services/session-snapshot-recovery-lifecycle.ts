@@ -5,7 +5,10 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import type { SessionRecoverySourceTaskGuard } from './session-recovery-authority';
 import { reconcileSessionRecoveryBindingFailure } from './session-recovery-binding-failure';
-import { isRestorableSnapshot, type SessionSnapshotRecoveryClaim } from './session-snapshot-artifacts';
+import {
+  isRestorableSnapshot,
+  type SessionSnapshotRecoveryClaim,
+} from './session-snapshot-artifacts';
 import {
   sessionRecoveryAttemptDecayMs,
   sessionRecoveryAttemptsAfterClaim,
@@ -213,7 +216,8 @@ async function claimOnce(
           and(
             eq(schema.sessionSnapshots.chatSessionId, input.chatSessionId),
             eq(schema.sessionSnapshots.recoveryStatus, 'waking'),
-            eq(schema.sessionSnapshots.recoveryTaskId, snapshot.recoveryTaskId)
+            eq(schema.sessionSnapshots.recoveryTaskId, snapshot.recoveryTaskId),
+            sourceTaskGuardCondition(db, input.sourceTaskGuard)
           )
         );
       return { status: 'waking', taskId: snapshot.recoveryTaskId };

@@ -9,6 +9,7 @@
  */
 import type { Env } from '../../env';
 import { parseProviderLimitWait } from '../../services/provider-limit-policy';
+import { providerLimitRecoveryApprovalIsCurrent } from '../../services/provider-limit-recovery-approval';
 import { assertReplacementDeletionConfirmed } from '../../services/replacement-deletion-fence';
 import {
   findSessionRecoveryTaskAndEventAuthorityFailure,
@@ -85,6 +86,18 @@ export async function findRecoveryAuthorityFailure(
   input: StartTaskInput | TaskRunnerState
 ): Promise<SessionRecoveryAuthorityCheck | null> {
   const attemptFailure = await findRecoveryAttemptFailure(env, ctx, input);
+  const approval = input.config.providerLimitRecoveryApproval;
+  if (
+    approval &&
+    !(await providerLimitRecoveryApprovalIsCurrent(
+      env,
+      input.taskId,
+      input.projectId,
+      approval,
+      true
+    ))
+  )
+    return 'recovery_task_authority';
   if (attemptFailure) return attemptFailure;
   // Owner force-resume can approve a previously unguarded human-message wake.
   // Keep its existing claim, while making that approval revocable at every

@@ -106,7 +106,14 @@ describe('callback provider hold owner force resume', () => {
     expect(boundary.nudge).toHaveBeenCalledExactlyOnceWith(
       env,
       'task-1',
-      'Owner resumed despite provider limit'
+      'Owner resumed despite provider limit',
+      {
+        receipt: task().provider_limit_wait_json,
+        ownerUserId: 'user-1',
+        snapshotId: 'snapshot-1',
+        expiresAt: held.deadlineAt,
+        sourceCredentialReference: 'cc_credentials:account-1',
+      }
     );
     expect(boundary.start).not.toHaveBeenCalled();
     expect(claim()).toEqual(before);
@@ -199,6 +206,13 @@ describe('callback provider hold owner force resume', () => {
     expect(boundary.start.mock.calls[0]?.[1]).toMatchObject({
       taskId: 'task-1',
       resumeSnapshotChatSessionId: 'chat-1',
+      providerLimitRecoveryApproval: {
+        receipt: task().provider_limit_wait_json,
+        ownerUserId: 'user-1',
+        snapshotId: 'snapshot-1',
+        expiresAt: wait().deadlineAt,
+        sourceCredentialReference: 'cc_credentials:account-1',
+      },
     });
     expect(claim()).toMatchObject({
       id: 'snapshot-1',

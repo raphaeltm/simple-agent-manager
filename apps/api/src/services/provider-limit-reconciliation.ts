@@ -1,4 +1,5 @@
 import {
+  DEFAULT_PROMPT_DELIVERY_BACKGROUND_TIMEOUT_MS,
   DEFAULT_TASK_RUN_ABSOLUTE_CEILING_MS,
   DEFAULT_TASK_RUN_ABSOLUTE_CEILING_SLEEP_GRACE_MS,
 } from '@simple-agent-manager/shared';
@@ -11,7 +12,10 @@ import { parsePositiveInt } from '../lib/route-helpers';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { evaluateRunawayCostCeiling } from '../scheduled/stuck-task-ceiling';
 import { getSelectedAgentCredentialReference } from './agent-key-resolution';
-import { resolveProfileCredentialContext } from './composable-credentials/profile-context';
+import {
+  type ProfileCredentialContext,
+  resolveProfileCredentialContext,
+} from './composable-credentials/profile-context';
 import { credentialLimitReferenceKey } from './credential-limit-events/values';
 import * as projectData from './project-data';
 import {
@@ -22,9 +26,20 @@ import { acknowledgeProviderLimitRecovery } from './provider-limit-force-resume'
 import { repairProviderLimitIntents } from './provider-limit-parking';
 import { parseProviderLimitWait, type ProviderLimitWait } from './provider-limit-policy';
 import { presentBlockedProviderLimitWait } from './provider-limit-recovery';
+import {
+  type ProviderLimitRecoveryApproval,
+  providerLimitRecoveryApprovalIsCurrent,
+} from './provider-limit-recovery-approval';
 import { requireSessionWriter } from './session-access';
 import { ensureSessionRecovery } from './session-recovery';
 import { nudgeTaskRunnerDO } from './task-runner-do';
+
+export function resolveProviderLimitRecoveryRpcTimeoutMs(env: Env): number {
+  return parsePositiveInt(
+    env.PROMPT_DELIVERY_BACKGROUND_TIMEOUT_MS,
+    DEFAULT_PROMPT_DELIVERY_BACKGROUND_TIMEOUT_MS
+  );
+}
 
 /** The bounded wait deadline, not queued/delegated timeout, owns admission.
  * A blocked task with no runtime is deliberately held for human action. A live
@@ -39,6 +54,13 @@ export async function preserveProviderLimitWait(
   const wait = parseProviderLimitWait(task?.providerLimitWaitJson);
   if (!task || !wait) return false;
   if (wait.phase === 'released') {
+    if (
+      task.admissionState === 'provider_limit_recovery_pending' &&
+      task.status === 'in_progress'
+    ) {
+      await acknowledgeProviderLimitRecovery(env, task.id, task.providerLimitWaitJson ?? '', true);
+      return false; // ACK only; the ordinary sweep still owns the live compute ceiling.
+    }
     if (
       task.admissionState !== 'provider_limit_recovery_pending' ||
       !['sleeping', 'queued', 'delegated'].includes(task.status)
@@ -179,7 +201,7 @@ async function repairOwnerApprovedRecovery(
       profile
     );
     valid &&=
-      (profileId === null || Boolean(profile)) &&
+      profileMatchesApproval(profile, profileId, approval) &&
       (await credentialLimitReferenceKey(reference)) === wait.credentialKey;
   }
   if (
@@ -192,7 +214,7 @@ async function repairOwnerApprovedRecovery(
     await blockRevokedOwnerApproval(env, task, wait, receipt);
     return;
   }
-  await dispatchOwnerApprovedRecovery(env, task, snapshot, receipt, task.chatSessionId);
+  await dispatchOwnerApprovedRecovery(env, task, wait, snapshot, receipt, task.chatSessionId);
 }
 
 type SavedProviderLimitSnapshot = NonNullable<ReturnType<typeof parseProviderLimitSnapshotRow>>;
@@ -321,24 +343,42 @@ async function blockRevokedOwnerApproval(
 async function dispatchOwnerApprovedRecovery(
   env: Env,
   task: schema.Task,
+  wait: ProviderLimitWait,
   snapshot: SavedProviderLimitSnapshot,
   receipt: string,
   chatSessionId: string
 ): Promise<void> {
-  // Neither path releases or replaces the snapshot claim or creates a new prompt.
-  // Failed/ambiguous acknowledgements retain this exact approval for the next sweep.
-  if (snapshot.recovery_status === 'waking') {
-    if (!(await nudgeTaskRunnerDO(env, task.id, 'Retry owner-approved provider limit recovery')))
-      return;
-  } else {
+  const approval: ProviderLimitRecoveryApproval = {
+    receipt,
+    ownerUserId: task.userId,
+    snapshotId: snapshot.id,
+    expiresAt: wait.deadlineAt,
+    sourceCredentialReference: snapshot.agent_credential_reference,
+  };
+  // The timeout bounds only this sweep's wait. The same durable approval guards
+  // any late claim/start, while acknowledgement stays exclusively in this caller.
+  const accepted = await withinRecoveryRpcBudget(env, async () => {
+    if (snapshot.recovery_status === 'waking')
+      return nudgeTaskRunnerDO(
+        env,
+        task.id,
+        'Retry owner-approved provider limit recovery',
+        approval
+      );
     const result = await ensureSessionRecovery(env, task.projectId, chatSessionId, {
       taskId: task.id,
       projectId: task.projectId,
       chatSessionId,
       requiredProjectMemberId: task.userId,
+      providerLimitApproval: approval,
     });
-    if (result.status !== 'waking') return;
-  }
+    return result.status === 'waking';
+  });
+  if (
+    !accepted ||
+    !(await providerLimitRecoveryApprovalIsCurrent(env, task.id, task.projectId, approval))
+  )
+    return;
   await acknowledgeProviderLimitRecovery(env, task.id, receipt);
 }
 
@@ -364,4 +404,33 @@ function pendingApprovalMatchesTask(
     wait.sourceAgentSessionId &&
     Number.isSafeInteger(wait.sourceCredentialGeneration)
   );
+}
+
+function profileMatchesApproval(
+  profile: ProfileCredentialContext | null,
+  profileId: string | null | undefined,
+  approval: ProviderLimitWait['ownerOverride']
+): boolean {
+  return (
+    (profileId === null || profile !== null) &&
+    (profile === null || profile.agentType === approval?.agentType)
+  );
+}
+
+/** Timing out neither releases a claim nor revokes the owner's durable consent. */
+async function withinRecoveryRpcBudget(
+  env: Env,
+  operation: () => Promise<boolean>
+): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation(),
+      new Promise<false>((resolve) => {
+        timer = setTimeout(() => resolve(false), resolveProviderLimitRecoveryRpcTimeoutMs(env));
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }

@@ -1,5 +1,9 @@
 import type { Env } from '../env';
 import {
+  type ProviderLimitRecoveryApproval,
+  providerLimitRecoveryApprovalD1Fence,
+} from './provider-limit-recovery-approval';
+import {
   sessionRecoveryAuthorityRevoked,
   type SessionRecoveryAuthorityRevokedError,
 } from './session-recovery-authority-revocation';
@@ -28,6 +32,7 @@ export interface SessionRecoverySourceTaskGuard {
   /** Pre-materialization event guard; after admission projectEventWake supplies this requirement. */
   requireSourceProjectMember?: boolean;
   requiredProjectMemberId?: string | null;
+  providerLimitApproval?: ProviderLimitRecoveryApproval | null;
 }
 
 /** Event subscriptions retain source task identity, never a caller-supplied user identity. */
@@ -54,6 +59,7 @@ export async function isSessionRecoverySourceTaskGuardValid(
   database: D1Database,
   guard: SessionRecoverySourceTaskGuard
 ): Promise<boolean> {
+  const approvalFence = providerLimitRecoveryApprovalD1Fence('source', guard.providerLimitApproval);
   const row = await database
     .prepare(
       `SELECT source.id
@@ -103,6 +109,7 @@ export async function isSessionRecoverySourceTaskGuardValid(
           )`
               : ''
           }
+          ${approvalFence.sql}
         LIMIT 1`
     )
     .bind(
@@ -111,7 +118,8 @@ export async function isSessionRecoverySourceTaskGuardValid(
       guard.chatSessionId,
       guard.chatSessionId,
       guard.chatSessionId,
-      ...(guard.requiredProjectMemberId ? [guard.requiredProjectMemberId] : [])
+      ...(guard.requiredProjectMemberId ? [guard.requiredProjectMemberId] : []),
+      ...approvalFence.params
     )
     .first<{ id: string }>();
   return Boolean(row);

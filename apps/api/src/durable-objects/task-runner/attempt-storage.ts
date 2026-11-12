@@ -1,3 +1,4 @@
+import type { ProviderLimitRecoveryApproval } from '../../services/provider-limit-recovery-approval';
 import { revokeRecoveryAuthority } from './recovery-revocation';
 import type { TaskRunnerState } from './types';
 
@@ -82,5 +83,34 @@ export function taskRunnerAttemptContext(
       const value = Reflect.get(target, property, target);
       return typeof value === 'function' ? value.bind(target) : value;
     },
+  });
+}
+
+/** Merge consent into the current attempt, never persist the pre-RPC state. */
+export async function persistProviderLimitRecoveryNudge(
+  storage: DurableObjectStorage,
+  observed: TaskRunnerState,
+  approval: ProviderLimitRecoveryApproval
+): Promise<boolean> {
+  return storage.transaction(async (transaction) => {
+    const current = await transaction.get<TaskRunnerState>('state');
+    if (
+      !current ||
+      current.completed ||
+      current.currentStep === 'running' ||
+      current.currentStep === 'awaiting_followup'
+    )
+      return false;
+    if (
+      current.taskId !== observed.taskId ||
+      current.projectId !== observed.projectId ||
+      current.userId !== approval.ownerUserId ||
+      attemptOf(current) !== attemptOf(observed)
+    )
+      return false;
+    current.config.providerLimitRecoveryApproval = approval;
+    await transaction.put('state', current);
+    await transaction.setAlarm(Date.now());
+    return true;
   });
 }

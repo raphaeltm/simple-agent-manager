@@ -26,6 +26,7 @@ import type {
   TaskStartCapacityCandidate,
   TaskStartCapacityPoolSelection,
 } from './placement-resolver';
+import type { ProviderLimitRecoveryApproval } from './provider-limit-recovery-approval';
 import { assertReplacementDeletionConfirmed } from './replacement-deletion-fence';
 import type { ProjectEventWakeRecoveryGuard } from './session-recovery-authority';
 import type { TaskRunnerStartGuard } from './task-runner-start-guard';
@@ -270,6 +271,7 @@ export async function startTaskRunnerDO(
     projectEventWakeGuard?: ProjectEventWakeRecoveryGuard | null;
     /** Member whose continued write permission authorizes a scheduled wake. */
     recoveryRequiredProjectMemberId?: string | null;
+    providerLimitRecoveryApproval?: ProviderLimitRecoveryApproval | null;
   },
   options: { reactivate?: boolean } = {}
 ): Promise<void> {
@@ -348,6 +350,9 @@ export async function startTaskRunnerDO(
       startGuard: input.startGuard ?? null,
       projectEventWakeGuard: input.projectEventWakeGuard ?? null,
       recoveryRequiredProjectMemberId: input.recoveryRequiredProjectMemberId ?? null,
+      ...(input.providerLimitRecoveryApproval
+        ? { providerLimitRecoveryApproval: input.providerLimitRecoveryApproval }
+        : {}),
     },
   };
 
@@ -435,8 +440,9 @@ export async function ensureTaskRunnerStarted(
 export async function nudgeTaskRunnerDO(
   env: Env,
   taskId: string,
-  reason?: string
+  reason?: string,
+  approval?: ProviderLimitRecoveryApproval
 ): Promise<boolean> {
   const stub = getStub(env, taskId);
-  return stub.nudge(reason);
+  return approval ? stub.nudge(reason, approval) : stub.nudge(reason);
 }

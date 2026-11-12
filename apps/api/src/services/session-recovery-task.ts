@@ -222,6 +222,9 @@ export async function startRecoveryTask(
       retrySourceTaskId: null,
       projectEventWakeGuard: sourceTaskGuard?.projectEventWake ?? null,
       recoveryRequiredProjectMemberId: sourceTaskGuard?.requiredProjectMemberId ?? null,
+      ...(sourceTaskGuard?.providerLimitApproval
+        ? { providerLimitRecoveryApproval: sourceTaskGuard.providerLimitApproval }
+        : {}),
     },
     { reactivate: true }
   );

@@ -14,6 +14,7 @@ import {
   resolveTaskStartPlacement,
   resolveTaskStartPlacementCredentialAttributionFromPlacement,
 } from './placement-resolver';
+import { providerLimitRecoveryApprovalD1Fence } from './provider-limit-recovery-approval';
 import {
   assertReplacementDeletionConfirmed,
   WorkspaceDeletionUnconfirmedError,
@@ -71,6 +72,14 @@ async function reactivateSleepingTask(
 
   const now = new Date().toISOString();
   const capacityPlacementSnapshot = placementResolution.capacityPlacementSnapshot;
+  const approvalFence = providerLimitRecoveryApprovalD1Fence(
+    'tasks',
+    sourceTaskGuard?.providerLimitApproval
+  );
+  const dependentApprovalFence = providerLimitRecoveryApprovalD1Fence(
+    'task',
+    sourceTaskGuard?.providerLimitApproval
+  );
   {
     // D1 batches are transactional. The task update is the parent-state
     // compare-and-set: if an automated wake has terminalized or no longer owns this
@@ -97,6 +106,7 @@ async function reactivateSleepingTask(
             WHERE id = ?
               AND project_id = ?
               AND (? = 0 OR status NOT IN ('completed', 'failed', 'cancelled'))
+              ${approvalFence.sql}
               AND EXISTS (
                 SELECT 1 FROM session_snapshots snapshot
                  WHERE snapshot.chat_session_id = ?
@@ -119,6 +129,7 @@ async function reactivateSleepingTask(
           taskId,
           context.project.id,
           sourceTaskGuard ? 1 : 0,
+          ...approvalFence.params,
           chatSessionId,
           recoveryAttemptId,
           chatSessionId,
@@ -146,6 +157,7 @@ async function reactivateSleepingTask(
                 SELECT 1 FROM tasks task
                  WHERE task.id = ?
                    AND task.status = 'queued'
+                   ${dependentApprovalFence.sql}
                    AND EXISTS (SELECT 1 FROM session_snapshots snapshot
                      WHERE snapshot.chat_session_id = ? AND snapshot.recovery_task_id = task.id
                        AND snapshot.recovery_attempt_id = ? AND snapshot.recovery_status = 'waking')
@@ -158,6 +170,7 @@ async function reactivateSleepingTask(
           context.snapshot.userId,
           context.snapshot.workspaceId,
           taskId,
+          ...dependentApprovalFence.params,
           chatSessionId,
           recoveryAttemptId
         ),
@@ -170,11 +183,20 @@ async function reactivateSleepingTask(
              FROM tasks task
             WHERE task.id = ?
               AND task.status = 'queued'
+                   ${dependentApprovalFence.sql}
                    AND EXISTS (SELECT 1 FROM session_snapshots snapshot
                      WHERE snapshot.chat_session_id = ? AND snapshot.recovery_task_id = task.id
                        AND snapshot.recovery_attempt_id = ? AND snapshot.recovery_status = 'waking')`
         )
-        .bind(ulid(), existing.status, now, taskId, chatSessionId, recoveryAttemptId),
+        .bind(
+          ulid(),
+          existing.status,
+          now,
+          taskId,
+          ...dependentApprovalFence.params,
+          chatSessionId,
+          recoveryAttemptId
+        ),
     ]);
     if ((results[0]?.meta.changes ?? 0) === 0) throw new SourceTaskNotWakeableError();
   }
@@ -239,8 +261,15 @@ export async function ensureSessionRecovery(
   options: SessionRecoveryOptions = {}
 ): Promise<SessionRecoveryResult> {
   const db = drizzle(env.DATABASE, { schema });
-  const refuse = (reason: string, detail?: string | null) =>
-    recordSessionRecoveryRefusal(db, env, chatSessionId, reason, detail);
+  const refuse = (reason: string, detail?: string | null): Promise<SessionRecoveryResult> => {
+    // A timed-out background wake may finish after new consent replaced it.
+    // Its refusal must not rewrite the newer snapshot's diagnostics/fence.
+    if (sourceTaskGuard?.providerLimitApproval) {
+      log.warn('session_recovery.provider_limit_refused', { projectId, chatSessionId, reason });
+      return Promise.resolve({ status: 'unavailable', reason });
+    }
+    return recordSessionRecoveryRefusal(db, env, chatSessionId, reason, detail);
+  };
   const context = await loadRecoveryContext(db, projectId, chatSessionId);
   if (!context) return refuse('sleeping_snapshot_missing');
   if (options.evictionFence && !(await evictionRecoveryFenceMatches(env, options.evictionFence))) {
