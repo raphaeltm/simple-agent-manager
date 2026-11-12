@@ -12,7 +12,7 @@
  * - the agent refuses a peer uid it does not allow, on real loopback sockets.
  */
 import { spawnSync } from 'node:child_process';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, generateKeyPairSync, randomBytes } from 'node:crypto';
 import {
   mkdirSync,
   mkdtempSync,
@@ -22,6 +22,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
+import { createServer, type Server } from 'node:http';
 import { join } from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -70,6 +71,7 @@ let ports: { store: number; celld: number; internal: number; agent: number };
 let binary = '';
 let canary = '';
 let bundleId = '';
+let verifyKey = '';
 const storeEnv = () => ({
   AWS_ACCESS_KEY_ID: KEY,
   AWS_SECRET_ACCESS_KEY: SECRET,
@@ -176,8 +178,14 @@ describe.skipIf(!hasDocker && !process.env.CI)('sealed secrets on celld', () => 
     // Seal a canary the way the deploy does (scripts/selfhost/key-service.ts), file provider.
     writeFileSync(join(root, 'state/kek'), generateFileKek(), { mode: 0o600 });
     canary = `live-canary-${randomBytes(16).toString('hex')}`;
+    const agentKey = generateKeyPairSync('ed25519');
+    verifyKey = Buffer.from(
+      String(agentKey.publicKey.export({ format: 'jwk' }).x),
+      'base64url'
+    ).toString('base64');
+    const signing = agentKey.privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64');
     const bundle = await sealSecrets(
-      { LIVE_SECRET: canary },
+      { LIVE_SECRET: canary, SAM_KEY_AGENT_SIGNING_KEY: signing },
       createFileProvider({ SAM_KEY_FILE: join(root, 'state/kek') }),
       { installationId: 'c'.repeat(32) }
     );
@@ -200,6 +208,8 @@ describe.skipIf(!hasDocker && !process.env.CI)('sealed secrets on celld', () => 
         vars: {
           SAM_KEY_AGENT_URL: `http://127.0.0.1:${ports.agent}/v1/secrets`,
           SAM_SECRET_BUNDLE_ID: bundleId,
+          SAM_KEY_AGENT_VERIFY_KEY: verifyKey,
+          SAM_INSTALLATION_ID: 'c'.repeat(32),
           PLAIN_VAR_CONTROL: 'plain-var-control-value',
         },
       })
@@ -308,6 +318,33 @@ describe.skipIf(!hasDocker && !process.env.CI)('sealed secrets on celld', () => 
     const back = await get('/');
     expect(back.status).toBe(200);
     expect(back.body.secretSha256).toBe(sha256(canary));
+  }, 90_000);
+
+  it('refuses an impostor that took the agent port while the agent was down', async () => {
+    await agent?.stop();
+    const impostor: Server = createServer((_req, res) => {
+      res.writeHead(200, {
+        'content-type': 'application/json',
+        'x-sam-key-agent-signature': 'AAAA',
+      });
+      res.end(JSON.stringify({ bundleId, secrets: { LIVE_SECRET: 'forged' } }));
+    });
+    await new Promise<void>((done) => impostor.listen(ports.agent, '127.0.0.1', done));
+    try {
+      await sleep(40_000); // a fresh isolate, no cached copy
+      const res = await get('/');
+      expect(res.status).toBe(503);
+      expect(res.body).toMatchObject({ code: 'KEY_AGENT_UNVERIFIED' });
+    } finally {
+      await new Promise<void>((done) => impostor.close(() => done()));
+      agent = startAgent(process.getuid?.() ?? 0);
+      await waitFor(
+        'the agent',
+        async () => (await fetch(`http://127.0.0.1:${ports.agent}/healthz`).catch(() => null))?.ok
+      );
+    }
+    // Control: the real agent's signed answer verifies on celld (Ed25519 WebCrypto).
+    expect((await get('/')).body.secretSha256).toBe(sha256(canary));
   }, 90_000);
 
   it('refuses a caller whose uid it does not allow, on real loopback sockets', async () => {

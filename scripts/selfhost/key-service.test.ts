@@ -28,6 +28,7 @@ import { buildCelldConfig } from './celld-config.js';
 import { renderRuntimeSecretsMain } from './celld-project.js';
 import { buildFencePlan } from './egress-fence.js';
 import {
+  agentVerifyKey,
   celldDeployConfig,
   ensureKeyServiceFiles,
   keyAgentUrl,
@@ -137,7 +138,7 @@ describe('resolveSealedSecrets', () => {
       platformKeysFile: legacy,
       operatorSecrets: OPERATOR,
     });
-    expect(first.generated).toEqual([]);
+    expect(first.generated).toEqual(['SAM_KEY_AGENT_SIGNING_KEY']);
     for (const name of PLATFORM_KEY_NAMES) expect(first.secrets[name]).toBe(legacy[name]);
     expect(first.secrets.GITHUB_CLIENT_SECRET).toBe(OPERATOR.GITHUB_CLIENT_SECRET);
     // Same inputs again: the same bundle, no reseal (no key-service call to wrap).
@@ -219,6 +220,26 @@ describe('resolveSealedSecrets', () => {
   });
 });
 
+describe('agent signing key', () => {
+  it('is generated once into the bundle; the Worker gets only its public half', async () => {
+    const r = await resolveSealedSecrets({
+      settings: settings(),
+      platformKeysFile: null,
+      operatorSecrets: {},
+    });
+    const signing = r.secrets.SAM_KEY_AGENT_SIGNING_KEY ?? '';
+    const verify = agentVerifyKey(r.secrets);
+    expect(Buffer.from(verify, 'base64')).toHaveLength(32);
+    expect(signing).not.toContain(verify);
+    const again = await resolveSealedSecrets({
+      settings: settings(),
+      platformKeysFile: null,
+      operatorSecrets: {},
+    });
+    expect(again.secrets.SAM_KEY_AGENT_SIGNING_KEY).toBe(signing);
+  });
+});
+
 describe('copies that leave the box contain no secret', () => {
   const source = () =>
     TOML.parse(
@@ -234,7 +255,11 @@ describe('copies that leave the box contain no secret', () => {
     const plan = buildCelldConfig(source(), {
       main: 'celld-main.ts',
       baseDomain: 'sam.example.com',
-      vars: { SAM_KEY_AGENT_URL: keyAgentUrl(settings()), SAM_SECRET_BUNDLE_ID: r.bundleId },
+      vars: {
+        SAM_KEY_AGENT_URL: keyAgentUrl(settings()),
+        SAM_SECRET_BUNDLE_ID: r.bundleId,
+        SAM_KEY_AGENT_VERIFY_KEY: agentVerifyKey(r.secrets),
+      },
     });
     const sealedJson = JSON.stringify(celldDeployConfig(plan.config, r.secrets, true));
     expect(leaks(sealedJson, r.secrets)).toEqual([]);
@@ -381,5 +406,8 @@ describe('the celld entry and the egress fence', () => {
     expect(() =>
       buildFencePlan(input({ SAM_KEY_PROVIDER: 'file', SAM_KEY_AGENT_PORT: '7001' }))
     ).toThrow();
+    expect(() =>
+      buildFencePlan(input({ SAM_KEY_PROVIDER: 'file', SAM_KEY_AGENT_PORT: '20010' }))
+    ).toThrow(/lease port range/);
   });
 });

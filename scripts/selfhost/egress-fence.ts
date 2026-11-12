@@ -284,7 +284,14 @@ export function buildFencePlan({
   if (metadataProxyEnabled(box)) loopbackPorts.push(metadataProxyPort(box));
   // The key agent (key-service.ts): the one new loopback port, and only with SAM_KEY_PROVIDER set.
   // The agent itself refuses every peer uid but celld's, so opening it here lets in nothing else.
-  if (keyServiceEnabled(box)) loopbackPorts.push(keyAgentPort(box));
+  if (keyServiceEnabled(box)) {
+    const port = keyAgentPort(box);
+    // A node's frpc can lease a port in the range: it must never be able to answer as the agent.
+    if (inRange(port, leaseRange)) {
+      throw new Error(`SAM_KEY_AGENT_PORT ${port} is inside the node lease port range`);
+    }
+    loopbackPorts.push(port);
+  }
   const dnsServers = parseNameservers(resolvConf);
   if (dnsServers.length === 0) throw new Error('no nameserver in resolv.conf; celld needs DNS');
   const plan: EgressFencePlan = {

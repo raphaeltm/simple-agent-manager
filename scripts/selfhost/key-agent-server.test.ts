@@ -3,6 +3,7 @@
  * (peer.ts): who may ask, what the request must look like, and what the cache does when the key
  * service is down or refuses. Real-socket version: live/key-agent-celld.live.test.ts.
  */
+import { generateKeyPairSync, type KeyObject, verify } from 'node:crypto';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -17,7 +18,10 @@ import {
   createFileProvider,
   generateFileKek,
 } from '../../deploy/selfhost/key-agent/provider-file.ts';
-import { createKeyAgent } from '../../deploy/selfhost/key-agent/server.ts';
+import { createKeyAgent, SIGNATURE_HEADER } from '../../deploy/selfhost/key-agent/server.ts';
+
+const INSTALL = 'e'.repeat(32);
+const NONCE = '1'.repeat(32);
 
 const servers: Array<{ close: () => void }> = [];
 afterEach(() => {
@@ -25,14 +29,21 @@ afterEach(() => {
 });
 
 async function setup(
-  options: { uid?: number | null; wrap?: (p: KeyProvider) => KeyProvider; cacheMs?: number } = {}
+  options: {
+    uid?: number | null;
+    wrap?: (p: KeyProvider) => KeyProvider;
+    cacheMs?: number;
+    noSigningKey?: boolean;
+  } = {}
 ) {
+  const pair = generateKeyPairSync('ed25519');
+  const signing = pair.privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64');
   const dir = mkdtempSync(join(tmpdir(), 'sam-agent-'));
   writeFileSync(join(dir, 'kek'), generateFileKek(), { mode: 0o600 });
   const real = createFileProvider({ SAM_KEY_FILE: join(dir, 'kek') });
-  const bundle = await sealSecrets({ ENCRYPTION_KEY: 'sealed-value-123456' }, real, {
-    installationId: 'e'.repeat(32),
-  });
+  const sealed: Record<string, string> = { ENCRYPTION_KEY: 'sealed-value-123456' };
+  if (!options.noSigningKey) sealed.SAM_KEY_AGENT_SIGNING_KEY = signing;
+  const bundle = await sealSecrets(sealed, real, { installationId: INSTALL });
   writeFileSync(join(dir, `${bundle.bundleId}.json`), JSON.stringify(bundle), { mode: 0o600 });
   let now = 0;
   const logs: Array<Record<string, unknown>> = [];
@@ -51,6 +62,8 @@ async function setup(
   const ask = (
     init: {
       bundleId?: string;
+      installationId?: string;
+      nonce?: string;
       headers?: Record<string, string>;
       method?: string;
       path?: string;
@@ -62,21 +75,50 @@ async function setup(
       body:
         (init.method ?? 'POST') === 'GET'
           ? undefined
-          : JSON.stringify({ bundleId: init.bundleId ?? bundle.bundleId }),
+          : JSON.stringify({
+              bundleId: init.bundleId ?? bundle.bundleId,
+              nonce: init.nonce ?? NONCE,
+              installationId: init.installationId ?? INSTALL,
+            }),
     });
-  return { ask, bundle, logs, advance: (ms: number) => (now += ms) };
+  return { ask, bundle, logs, publicKey: pair.publicKey, advance: (ms: number) => (now += ms) };
 }
 
 describe('who may ask', () => {
-  it('serves celld uid', async () => {
-    const { ask, bundle } = await setup();
+  it('serves celld uid a signed answer bound to its nonce, without the signing key', async () => {
+    const { ask, bundle, publicKey } = await setup();
     const res = await ask();
     expect(res.status).toBe(200);
     expect(res.headers.get('cache-control')).toBe('no-store');
-    expect(await res.json()).toEqual({
+    const text = await res.text();
+    expect(JSON.parse(text)).toEqual({
       bundleId: bundle.bundleId,
+      nonce: NONCE,
       secrets: { ENCRYPTION_KEY: 'sealed-value-123456' },
     });
+    const signature = Buffer.from(res.headers.get(SIGNATURE_HEADER) ?? '', 'base64');
+    expect(verify(null, Buffer.from(text), publicKey as KeyObject, signature)).toBe(true);
+    // Control: the signature does not verify for another body.
+    expect(
+      verify(null, Buffer.from(text.replace(NONCE, '2'.repeat(32))), publicKey, signature)
+    ).toBe(false);
+  });
+
+  it('refuses a bundle sealed for another installation', async () => {
+    const { ask, logs } = await setup();
+    const res = await ask({ installationId: 'f'.repeat(32) });
+    expect(res.status).toBe(409);
+    expect(await res.text()).not.toContain('sealed-value');
+    expect(logs).toContainEqual(
+      expect.objectContaining({ event: 'key_agent.installation_mismatch' })
+    );
+  });
+
+  it('refuses to serve a bundle that carries no signing key (fail closed)', async () => {
+    const { ask } = await setup({ noSigningKey: true });
+    const res = await ask();
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: 'key_service_invalid' });
   });
 
   it.each([[0], [1000], [null]])('refuses uid %s, before reading the request', async (uid) => {
@@ -95,6 +137,7 @@ describe('who may ask', () => {
       { headers: { 'content-type': 'application/x-www-form-urlencoded', 'x-sam-key-agent': '1' } },
     ],
     ['a path traversal id', { bundleId: '../kek' }],
+    ['no nonce', { nonce: '' }],
   ])('refuses %s (the fixed request shape is the SSRF guard)', async (_label, init) => {
     const { ask } = await setup();
     const res = await ask(init);

@@ -72,6 +72,7 @@ import {
 } from './guided-login.js';
 import { inboundMailWorkerVars } from './inbound-mail-settings.js';
 import {
+  agentVerifyKey,
   assertKeyAgentUp,
   celldDeployConfig,
   keyAgentUrl,
@@ -351,7 +352,11 @@ async function main(): Promise<void> {
       ...smtpVars,
       ...inboundMailWorkerVars(box, smtpVars),
       ...(sealed && keyService
-        ? { SAM_KEY_AGENT_URL: keyAgentUrl(keyService), SAM_SECRET_BUNDLE_ID: sealed.bundleId }
+        ? {
+            SAM_KEY_AGENT_URL: keyAgentUrl(keyService),
+            SAM_SECRET_BUNDLE_ID: sealed.bundleId,
+            SAM_KEY_AGENT_VERIFY_KEY: agentVerifyKey(sealed.secrets),
+          }
         : {}),
     },
   });

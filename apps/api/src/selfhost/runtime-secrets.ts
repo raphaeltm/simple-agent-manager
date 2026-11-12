@@ -29,8 +29,22 @@ export interface KeyAgentEnv {
   SAM_KEY_AGENT_URL?: string;
   /** The sealed bundle this deployment was built with; a content-free random id. */
   SAM_SECRET_BUNDLE_ID?: string;
+  /** Raw Ed25519 public key (base64) the agent's answers must verify under. Not a secret. */
+  SAM_KEY_AGENT_VERIFY_KEY?: string;
+  /** Bound into the request: the agent refuses a bundle sealed for another install. */
+  SAM_INSTALLATION_ID?: string;
   SAM_KEY_AGENT_TIMEOUT_MS?: string;
 }
+
+export const SIGNATURE_HEADER = 'x-sam-key-agent-signature';
+/** Names the agent's answer may never set: the channel's own settings. */
+const PROTECTED_NAMES = new Set([
+  'SAM_KEY_AGENT_URL',
+  'SAM_SECRET_BUNDLE_ID',
+  'SAM_KEY_AGENT_VERIFY_KEY',
+  'SAM_KEY_AGENT_TIMEOUT_MS',
+  'SAM_INSTALLATION_ID',
+]);
 
 export type RuntimeSecrets = Readonly<Record<string, string>>;
 
@@ -52,22 +66,65 @@ export function resetRuntimeSecretsForTests(): void {
   inflight = null;
 }
 
-function settings(env: KeyAgentEnv): { url: string; bundleId: string; timeoutMs: number } {
+interface AgentSettings {
+  url: string;
+  bundleId: string;
+  verifyKey: Uint8Array;
+  installationId: string;
+  timeoutMs: number;
+}
+
+function settings(env: KeyAgentEnv): AgentSettings {
   const url = env.SAM_KEY_AGENT_URL ?? '';
   const bundleId = env.SAM_SECRET_BUNDLE_ID ?? '';
-  if (!AGENT_URL.test(url) || !BUNDLE_ID.test(bundleId)) {
+  let verifyKey = new Uint8Array();
+  try {
+    verifyKey = Uint8Array.from(atob(env.SAM_KEY_AGENT_VERIFY_KEY ?? ''), (c) => c.charCodeAt(0));
+  } catch {
+    // reported below
+  }
+  if (!AGENT_URL.test(url) || !BUNDLE_ID.test(bundleId) || verifyKey.length !== 32) {
     throw new RuntimeSecretsUnavailableError(
       'SECRETS_MISCONFIGURED',
-      'SAM_KEY_AGENT_URL must be http://127.0.0.1:<port>/v1/secrets and SAM_SECRET_BUNDLE_ID a bundle id'
+      'SAM_KEY_AGENT_URL must be http://127.0.0.1:<port>/v1/secrets, SAM_SECRET_BUNDLE_ID a bundle id ' +
+        'and SAM_KEY_AGENT_VERIFY_KEY an Ed25519 public key'
     );
   }
   const timeout = Number.parseInt(env.SAM_KEY_AGENT_TIMEOUT_MS ?? '', 10);
   return {
     url,
     bundleId,
+    verifyKey,
+    installationId: env.SAM_INSTALLATION_ID ?? '',
     timeoutMs:
       Number.isSafeInteger(timeout) && timeout > 0 ? timeout : DEFAULT_KEY_AGENT_TIMEOUT_MS,
   };
+}
+
+function hex(bytes: Uint8Array): string {
+  return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function verifySignature(
+  key: Uint8Array,
+  signature: string | null,
+  body: string
+): Promise<boolean> {
+  if (!signature) return false;
+  try {
+    const sig = Uint8Array.from(atob(signature), (c) => c.charCodeAt(0));
+    const publicKey = await crypto.subtle.importKey('raw', key, { name: 'Ed25519' }, false, [
+      'verify',
+    ]);
+    return await crypto.subtle.verify(
+      { name: 'Ed25519' },
+      publicKey,
+      sig,
+      new TextEncoder().encode(body)
+    );
+  } catch {
+    return false;
+  }
 }
 
 /** This isolate's secrets if already loaded for the deployment's bundle, else null. */
@@ -75,20 +132,21 @@ export function cachedRuntimeSecrets(env: KeyAgentEnv): RuntimeSecrets | null {
   return cached && cached.bundleId === env.SAM_SECRET_BUNDLE_ID ? cached.secrets : null;
 }
 
-async function fetchSecrets(
-  url: string,
-  bundleId: string,
-  timeoutMs: number
-): Promise<RuntimeSecrets> {
+async function fetchSecrets(agent: AgentSettings): Promise<RuntimeSecrets> {
   const started = Date.now();
+  const nonce = hex(crypto.getRandomValues(new Uint8Array(16)));
   let response: Response;
   try {
-    response = await fetch(url, {
+    response = await fetch(agent.url, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-sam-key-agent': '1' },
-      body: JSON.stringify({ bundleId }),
+      body: JSON.stringify({
+        bundleId: agent.bundleId,
+        nonce,
+        installationId: agent.installationId,
+      }),
       redirect: 'manual',
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: AbortSignal.timeout(agent.timeoutMs),
     });
   } catch (error) {
     throw new RuntimeSecretsUnavailableError(
@@ -96,28 +154,48 @@ async function fetchSecrets(
       `key agent unreachable (${error instanceof Error ? error.name : 'error'})`
     );
   }
-  let body: unknown;
-  try {
-    body = await response.json();
-  } catch {
-    body = null;
-  }
-  const error =
-    typeof body === 'object' && body !== null ? (body as { error?: unknown }).error : undefined;
+  const text = await response.text().catch(() => '');
   if (response.status !== 200) {
+    let error: unknown;
+    try {
+      const parsed = JSON.parse(text) as unknown;
+      error =
+        typeof parsed === 'object' && parsed !== null
+          ? (parsed as Record<string, unknown>).error
+          : undefined;
+    } catch {
+      error = undefined;
+    }
     throw new RuntimeSecretsUnavailableError(
       'KEY_AGENT_REFUSED',
       `key agent answered ${response.status}${typeof error === 'string' ? ` ${error}` : ''}`
     );
   }
-  const record = (body ?? {}) as { bundleId?: unknown; secrets?: unknown };
+  // Whoever answers on the agent's port must prove it opened the bundle: a process that took the
+  // port while the agent was down cannot sign this nonce.
+  if (!(await verifySignature(agent.verifyKey, response.headers.get(SIGNATURE_HEADER), text))) {
+    throw new RuntimeSecretsUnavailableError(
+      'KEY_AGENT_UNVERIFIED',
+      "key agent answer is not signed by this deployment's agent key"
+    );
+  }
+  let record: { bundleId?: unknown; nonce?: unknown; secrets?: unknown } = {};
+  try {
+    const parsed: unknown = JSON.parse(text) as unknown;
+    if (typeof parsed === 'object' && parsed !== null) record = parsed as typeof record;
+  } catch {
+    record = {};
+  }
   const secrets = record.secrets;
   if (
-    record.bundleId !== bundleId ||
+    record.bundleId !== agent.bundleId ||
+    record.nonce !== nonce ||
     typeof secrets !== 'object' ||
     secrets === null ||
     Array.isArray(secrets) ||
-    Object.entries(secrets).some(([k, v]) => !SECRET_NAME.test(k) || typeof v !== 'string')
+    Object.entries(secrets).some(
+      ([k, v]) => !SECRET_NAME.test(k) || PROTECTED_NAMES.has(k) || typeof v !== 'string'
+    )
   ) {
     throw new RuntimeSecretsUnavailableError(
       'KEY_AGENT_BAD_RESPONSE',
@@ -125,7 +203,7 @@ async function fetchSecrets(
     );
   }
   log.info('runtime_secrets.loaded', {
-    bundleId,
+    bundle: agent.bundleId.slice(0, 8),
     count: Object.keys(secrets).length,
     ms: Date.now() - started,
   });
@@ -140,9 +218,10 @@ async function fetchSecrets(
 export async function loadRuntimeSecrets(env: KeyAgentEnv): Promise<RuntimeSecrets> {
   const hit = cachedRuntimeSecrets(env);
   if (hit) return hit;
-  const { url, bundleId, timeoutMs } = settings(env);
+  const agent = settings(env);
+  const { bundleId } = agent;
   if (!inflight || inflight.bundleId !== bundleId) {
-    const promise = fetchSecrets(url, bundleId, timeoutMs).then(
+    const promise = fetchSecrets(agent).then(
       (secrets) => {
         cached = { bundleId, secrets };
         return secrets;
@@ -165,9 +244,17 @@ export async function loadRuntimeSecrets(env: KeyAgentEnv): Promise<RuntimeSecre
   return await inflight.promise;
 }
 
-/** `env` with the secrets laid over it: a new object, the runtime's env is never mutated. */
+/**
+ * `env` with the secrets laid over it: a new object, the runtime's env is never mutated. A secret
+ * may replace a string var (as a secrets.env override did before), never a binding.
+ */
 export function withRuntimeSecrets<E extends object>(env: E, secrets: RuntimeSecrets): E {
-  return { ...env, ...secrets };
+  const merged: Record<string, unknown> = { ...(env as Record<string, unknown>) };
+  for (const [name, value] of Object.entries(secrets)) {
+    const existing = merged[name];
+    if (existing === undefined || typeof existing === 'string') merged[name] = value;
+  }
+  return merged as E;
 }
 
 function unavailableResponse(error: unknown): Response {
@@ -250,7 +337,7 @@ export function wrapDurableObject<C extends DurableObjectClass>(Base: C): C {
       super(ctx, merged, ...args.slice(2));
       if (!hit) {
         void ctx.blockConcurrencyWhile(async () => {
-          Object.assign(merged, await loadRuntimeSecrets(env));
+          Object.assign(merged, withRuntimeSecrets(env, await loadRuntimeSecrets(env)));
         });
       }
     }

@@ -10,6 +10,7 @@
  * The deploy calls the provider itself (it runs on the box as the operator, with the same
  * credential the agent uses). It never needs the agent to be up to seal.
  */
+import { createPrivateKey, createPublicKey, generateKeyPairSync } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -23,6 +24,7 @@ import {
 import type { KeyProvider } from '../../deploy/selfhost/key-agent/provider.ts';
 import { generateFileKek } from '../../deploy/selfhost/key-agent/provider-file.ts';
 import { createKeyProvider, KEY_PROVIDERS } from '../../deploy/selfhost/key-agent/providers.ts';
+import { SIGNING_KEY_NAME } from '../../deploy/selfhost/key-agent/server.ts';
 import { completePlatformKeys, ensurePlatformKeys, PLATFORM_KEY_NAMES } from './platform-keys.js';
 import {
   ensurePrivateDir,
@@ -250,8 +252,15 @@ export async function resolveSealedSecrets(input: ResolveSecretsInput): Promise<
       );
     }
   }
-  const { keys, generated } = completePlatformKeys({ ...current, ...fromFile });
+  const completed = completePlatformKeys({ ...current, ...fromFile });
+  const keys = completed.keys;
+  const generated: string[] = [...completed.generated];
   const secrets: Secrets = { ...current, ...keys, ...input.operatorSecrets };
+  // The agent signs every answer with this key (server.ts); the Worker holds the public half.
+  if (!secrets[SIGNING_KEY_NAME]) {
+    secrets[SIGNING_KEY_NAME] = generateAgentSigningKey();
+    generated.push(SIGNING_KEY_NAME);
+  }
   if (latest && sameSecrets(secrets, current)) {
     return { bundleId: latest.bundleId, secrets, sealed: false, generated };
   }
@@ -283,6 +292,21 @@ export function celldDeployConfig<C extends { vars: Record<string, string> }>(
   sealed: boolean
 ): C {
   return sealed ? config : { ...config, vars: { ...config.vars, ...secrets } };
+}
+
+function generateAgentSigningKey(): string {
+  const { privateKey } = generateKeyPairSync('ed25519');
+  return privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64');
+}
+
+/** The Worker's verify key for the agent's answers: the raw Ed25519 public key, base64. */
+export function agentVerifyKey(secrets: Readonly<Record<string, string>>): string {
+  const der = secrets[SIGNING_KEY_NAME];
+  if (!der) throw new Error(`${SIGNING_KEY_NAME} is missing from the sealed secrets`);
+  const jwk = createPublicKey(
+    createPrivateKey({ key: Buffer.from(der, 'base64'), format: 'der', type: 'pkcs8' })
+  ).export({ format: 'jwk' });
+  return Buffer.from(String(jwk.x), 'base64url').toString('base64');
 }
 
 /** The key-agent compose profile and SAM_KEY_PROVIDER must agree, like the gce profile. */

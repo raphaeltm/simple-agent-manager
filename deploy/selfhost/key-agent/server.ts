@@ -18,6 +18,7 @@
  *
  * Run with Node's type stripping: `node server.ts`.
  */
+import { createPrivateKey, type KeyObject, sign } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { join } from 'node:path';
@@ -30,6 +31,36 @@ import { createKeyProvider } from './providers.ts';
 export const DEFAULT_KEY_AGENT_PORT = 7190;
 export const DEFAULT_CACHE_SECONDS = 300;
 const MAX_REQUEST_BYTES = 1024;
+/** The bundle entry holding the agent's Ed25519 signing key (PKCS#8 DER, base64); never served. */
+export const SIGNING_KEY_NAME = 'SAM_KEY_AGENT_SIGNING_KEY';
+export const SIGNATURE_HEADER = 'x-sam-key-agent-signature';
+const NONCE = /^[0-9a-f]{32}$/;
+
+interface Opened {
+  installationId: string;
+  secrets: Secrets;
+  signingKey: KeyObject;
+}
+
+/** Splits the signing key off the secrets; a bundle without one is refused (fail closed). */
+function toOpened(installationId: string, all: Secrets): Opened {
+  const { [SIGNING_KEY_NAME]: der, ...secrets } = all;
+  if (!der) throw new KeyProviderError('invalid', 'bundle has no agent signing key');
+  let signingKey: KeyObject;
+  try {
+    signingKey = createPrivateKey({
+      key: Buffer.from(der, 'base64'),
+      format: 'der',
+      type: 'pkcs8',
+    });
+  } catch {
+    throw new KeyProviderError('invalid', 'bundle agent signing key is malformed');
+  }
+  if (signingKey.asymmetricKeyType !== 'ed25519') {
+    throw new KeyProviderError('invalid', 'bundle agent signing key is not Ed25519');
+  }
+  return { installationId, secrets, signingKey };
+}
 
 export interface AgentOptions {
   provider: KeyProvider;
@@ -80,12 +111,12 @@ export function createKeyAgent(options: AgentOptions): Server {
   const now = options.now ?? Date.now;
   const log = options.log ?? ((event) => console.log(JSON.stringify(event)));
   const peerUid = options.peerUid ?? defaultPeerUid;
-  const cache = new Map<string, { secrets: Secrets; openedAt: number }>();
-  const opening = new Map<string, Promise<Secrets>>();
+  const cache = new Map<string, { opened: Opened; openedAt: number }>();
+  const opening = new Map<string, Promise<Opened>>();
 
-  async function open(bundleId: string): Promise<Secrets> {
+  async function open(bundleId: string): Promise<Opened> {
     const cached = cache.get(bundleId);
-    if (cached && now() - cached.openedAt < options.cacheMs) return cached.secrets;
+    if (cached && now() - cached.openedAt < options.cacheMs) return cached.opened;
     const pending = opening.get(bundleId);
     if (pending) return await pending;
     const attempt = (async () => {
@@ -97,19 +128,20 @@ export function createKeyAgent(options: AgentOptions): Server {
       }
       const started = now();
       try {
-        const secrets = await openBundle(parseBundle(text), options.provider);
-        cache.set(bundleId, { secrets, openedAt: now() });
+        const bundle = parseBundle(text);
+        const opened = toOpened(bundle.installationId, await openBundle(bundle, options.provider));
+        cache.set(bundleId, { opened, openedAt: now() });
         log({
           event: 'key_agent.bundle_opened',
           bundleId,
           provider: options.provider.name,
           ms: now() - started,
         });
-        return secrets;
+        return opened;
       } catch (error) {
         if (cached && error instanceof KeyProviderError && error.kind === 'unavailable') {
           log({ event: 'key_agent.serving_stale', bundleId, reason: error.message });
-          return cached.secrets;
+          return cached.opened;
         }
         cache.delete(bundleId);
         throw error;
@@ -148,23 +180,44 @@ export function createKeyAgent(options: AgentOptions): Server {
       return;
     }
     const body = await readBody(request);
-    let bundleId: unknown;
+    let fields: Record<string, unknown> = {};
     try {
       const parsed: unknown = body === null ? undefined : (JSON.parse(body) as unknown);
-      bundleId =
-        typeof parsed === 'object' && parsed !== null
-          ? (parsed as Record<string, unknown>).bundleId
-          : undefined;
+      if (typeof parsed === 'object' && parsed !== null) fields = parsed as Record<string, unknown>;
     } catch {
-      bundleId = undefined;
+      fields = {};
     }
-    if (typeof bundleId !== 'string' || !BUNDLE_ID.test(bundleId)) {
+    const { bundleId, nonce, installationId } = fields;
+    if (
+      typeof bundleId !== 'string' ||
+      !BUNDLE_ID.test(bundleId) ||
+      typeof nonce !== 'string' ||
+      !NONCE.test(nonce) ||
+      typeof installationId !== 'string'
+    ) {
       reply(response, 400, { error: 'bad_request' });
       return;
     }
     try {
-      const secrets = await open(bundleId);
-      reply(response, 200, { bundleId, secrets });
+      const opened = await open(bundleId);
+      // A bundle from another install (same key service, copied file) is not this Worker's.
+      if (opened.installationId !== installationId) {
+        log({ event: 'key_agent.installation_mismatch', bundleId, action: 'rejected' });
+        reply(response, 409, { error: 'installation_mismatch' });
+        return;
+      }
+      // Signed over the exact body, which carries the caller's nonce: a process that took this
+      // port while the agent was down cannot produce it without opening the bundle itself.
+      const text = JSON.stringify({ bundleId, nonce, secrets: opened.secrets });
+      response.writeHead(200, {
+        'content-type': 'application/json',
+        'cache-control': 'no-store',
+        'content-length': Buffer.byteLength(text),
+        [SIGNATURE_HEADER]: sign(null, Buffer.from(text, 'utf8'), opened.signingKey).toString(
+          'base64'
+        ),
+      });
+      response.end(text);
     } catch (error) {
       const kind = error instanceof KeyProviderError ? error.kind : 'unavailable';
       const code =
