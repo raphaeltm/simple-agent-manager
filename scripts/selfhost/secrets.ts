@@ -10,7 +10,7 @@
  *   switch --to <provider|auto> [--dry-run]
  *                             seal again with another key provider and move the box over
  *   reseal                    seal again with the same provider (new data key, current KEK)
- *   plaintext [--backups DIR|gs://...|s3://... ...] [--purge --confirm <CELLD_BUCKET>]
+ *   plaintext [--backups DIR|gs://...|s3://... ...] [--purge --confirm <CELLD_BUCKET> [--min-age-hours N]]
  *                             old deploy versions and backups holding plaintext secrets, what to
  *                             rotate; with --purge, delete the versions celld no longer reads
  *
@@ -44,6 +44,7 @@ const { values, positionals } = parseArgs({
     backups: { type: 'string', multiple: true },
     purge: { type: 'boolean', default: false },
     confirm: { type: 'string' },
+    'min-age-hours': { type: 'string' },
     'key-copy': { type: 'string' },
     to: { type: 'string' },
     'dry-run': { type: 'boolean', default: false },
@@ -119,7 +120,14 @@ try {
           : scanBackups(resolve(process.env.INIT_CWD ?? process.cwd(), location), secrets)
       );
       if (values.purge) {
-        const result = purgeVersions(ctx, secrets, values.confirm);
+        const hours =
+          values['min-age-hours'] === undefined ? undefined : Number(values['min-age-hours']);
+        if (hours !== undefined && !(Number.isFinite(hours) && hours >= 0)) {
+          throw new Error('--min-age-hours must be a number of hours (0 or more)');
+        }
+        const result = purgeVersions(ctx, secrets, values.confirm, {
+          minAgeMs: hours === undefined ? undefined : hours * 3600_000,
+        });
         for (const prefix of result.deleted) console.log(`deleted ${prefix}`);
         for (const line of result.skipped) console.log(`kept ${line}`);
       }

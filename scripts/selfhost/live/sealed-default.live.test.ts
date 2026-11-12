@@ -412,7 +412,7 @@ describe.skipIf(!hasDocker && !process.env.CI)('sealed secrets by default on cel
     expect(secrets.values).toContain(keys.ENCRYPTION_KEY);
     const before = scanDeployVersions(ctx(), secrets);
     expect(before.filter((v) => v.secretNames.length > 0).length).toBeGreaterThanOrEqual(1);
-    const result = purgeVersions(ctx(), secrets, 's3://fleet/celld');
+    const result = purgeVersions(ctx(), secrets, 's3://fleet/celld', { minAgeMs: 0 });
     expect(result.deleted.length).toBeGreaterThanOrEqual(1);
     expect(scanDeployVersions(ctx(), secrets).every((v) => v.secretNames.length === 0)).toBe(true);
     expect((await finishing.adoptAndCheck()).healthy).toBe(true);

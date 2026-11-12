@@ -34,7 +34,10 @@ export function createAzureKeyVaultProvider(
   if (!KEY_NAME.test(keyName))
     throw new KeyProviderError('config', 'SAM_AZURE_KEY_NAME is invalid');
   const vaultUrl = new URL(vault);
-  const allowHttp = env.SAM_AZURE_ALLOW_HTTP_FOR_TESTS === '1';
+  // Plain HTTP only for a loopback test fake, and only when explicitly asked for.
+  const allowHttp =
+    env.SAM_AZURE_ALLOW_HTTP_FOR_TESTS === '1' &&
+    ['127.0.0.1', 'localhost', '[::1]'].includes(vaultUrl.hostname);
   if (vaultUrl.protocol !== 'https:' && !allowHttp) {
     throw new KeyProviderError('config', 'SAM_AZURE_KEY_VAULT_URL must be https://');
   }

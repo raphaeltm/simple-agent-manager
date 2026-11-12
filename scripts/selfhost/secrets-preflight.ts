@@ -5,7 +5,8 @@
  * provider, and read by the Worker's real loader with the vars the deploy renders.
  *
  * The box's running agent answers celld's uid only, so the check runs its own agent, in this
- * process, on an ephemeral loopback port, over the same bundle directory and provider. It proves
+ * process, on an ephemeral loopback port, over the same bundle directory and provider, answering
+ * this process's uid only (the same kernel peer check as the real agent). It proves
  * the Worker will accept the answer and get every secret the plaintext files hold, before any
  * Worker depends on it. A mismatch names the secrets, never their values.
  */
@@ -25,7 +26,6 @@ interface WorkerLoader {
 }
 
 const LOADER = new URL('../../apps/api/src/selfhost/runtime-secrets.ts', import.meta.url);
-const PREFLIGHT_UID = 1;
 
 /** Imported at run time: its Worker types are not part of this package's type check. */
 async function workerLoader(): Promise<WorkerLoader> {
@@ -47,12 +47,15 @@ export async function preflightSealedSecrets(input: {
   const bundle = listBundles(settings.bundleDir)[0];
   if (!bundle) throw new Error(`no sealed bundle in ${settings.bundleDir}: run --init first`);
   const sealed = await openBundle(bundle, provider);
+  // The real peer check (/proc/net/tcp), allowing only this process's uid: the Worker loader
+  // below runs in this process, so nothing else on the box can read the answer meanwhile.
+  const self = process.getuid?.();
+  if (self === undefined) throw new Error('the contract check needs a POSIX uid (Linux)');
   const agent = createKeyAgent({
     provider,
     bundleDir: settings.bundleDir,
-    allowedUids: new Set([PREFLIGHT_UID]),
+    allowedUids: new Set([self]),
     cacheMs: 0,
-    peerUid: () => PREFLIGHT_UID,
     log: () => undefined,
   });
   await new Promise<void>((done) => agent.listen(0, '127.0.0.1', done));

@@ -90,6 +90,11 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# grep checks below are line by line: refuse any value with a newline before they run.
+for value in "$PROJECT" "$API_URL" "$POOL_ID" "$PROVIDER_ID" "$SA_ID" "$BOX_SA" "$BOX_INSTANCE" \
+  "$BOX_ZONE" "$KMS_LOCATION" "$KEY_RING" "$KEY_ID" "$DESTROY_KEY" "$STATE_DIR"; do
+  case "$value" in *$'\n'*|*$'\r'*) die "arguments must not contain line breaks" ;; esac
+done
 [ -n "$PROJECT" ] || die "--project is required"
 [ -n "$API_URL" ] || die "--api-url is required (https://api.<your SAM domain>)"
 ISSUER="${API_URL%/}"
@@ -188,6 +193,11 @@ if [ "$KMS" -eq 1 ]; then
   [ -n "$BOX_SA" ] || die "--kms needs the box VM's identity: --box-service-account <email> or --box-instance <name> --box-zone <zone>"
   printf '%s' "$BOX_SA" | grep -Eq '^[a-z0-9-]+@[a-z0-9.-]+\.gserviceaccount\.com$' \
     || die "invalid box service account: $BOX_SA"
+  case "$BOX_SA" in
+    *-compute@developer.gserviceaccount.com)
+      echo "WARNING: ${BOX_SA} is the project's default Compute Engine account: every VM that runs" \
+        "as it could use this key. Give the box VM its own service account." >&2 ;;
+  esac
 fi
 
 PROJECT_NUMBER="$(gcloud projects describe "$PROJECT" --format='value(projectNumber)' 2>/dev/null)" \
@@ -271,22 +281,25 @@ if [ "$KMS" -eq 1 ]; then
     change kms keyrings create "$KEY_RING" --location="$KMS_LOCATION" --project="$PROJECT"
     record kms-key-ring "$RING_NAME" created
   fi
+  key_action=reused
   if exists kms keys describe "$KEY_ID" "${KEY_FLAGS[@]}"; then
     owner="$(gcloud kms keys describe "$KEY_ID" "${KEY_FLAGS[@]}" --format='value(labels.sam-install)')"
     [ "$owner" = "$INSTALL_HASH" ] \
       || die "key ${KEY_NAME} exists but is not labelled sam-install=${INSTALL_HASH}; refusing to use another install's key. Pick --key."
     echo "key ${KEY_ID}: exists"
-    created kms-key "$KEY_NAME" || record kms-key "$KEY_NAME" reused
+    if created kms-key "$KEY_NAME"; then key_action=created; else record kms-key "$KEY_NAME" reused; fi
   else
     # Labelled with this install, so --teardown can prove the key is this install's.
     change kms keys create "$KEY_ID" "${KEY_FLAGS[@]}" --purpose=encryption \
       --labels="sam-install=${INSTALL_HASH}"
     record kms-key "$KEY_NAME" created
+    key_action=created
   fi
   # On the key only, never the ring or the project.
   change_retry kms keys add-iam-policy-binding "$KEY_ID" "${KEY_FLAGS[@]}" \
     --member="serviceAccount:${BOX_SA}" --role="$KMS_ROLE" --format=none
-  record iam-binding "${KEY_NAME}#${KMS_ROLE}#serviceAccount:${BOX_SA}" created \
+  # Ours to remove only on a key this bootstrap created: a grant on someone's key may predate us.
+  record iam-binding "${KEY_NAME}#${KMS_ROLE}#serviceAccount:${BOX_SA}" "$key_action" \
     "resource=${KEY_NAME}" "role=${KMS_ROLE}" "member=serviceAccount:${BOX_SA}"
 fi
 

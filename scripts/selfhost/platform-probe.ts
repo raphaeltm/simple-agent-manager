@@ -10,10 +10,16 @@
  * - Azure: `GET /metadata/instance/compute?api-version=2021-02-01` with `Metadata: true`; the
  *   answer must name a VM id and a subscription.
  *
- * Other clouds' metadata services (and anything else on 169.254.169.254) fail those markers. A
- * wrong guess would still be harmless: the key choice only selects a cloud key after a real wrap
- * and unwrap round trip (key-choice.ts).
+ * Other clouds' metadata services (and anything else on 169.254.169.254) fail those markers.
+ *
+ * A metadata answer alone is not trusted: on a host outside the cloud, anything on the local
+ * network can answer 169.254.169.254 with a project or account it controls, and a round trip
+ * against its own key would pass, sealing the box's secrets to that key. So the machine's own
+ * firmware identity (DMI, /sys/class/dmi/id, which the network cannot forge) must name the same
+ * platform; a metadata answer it does not back is ignored and reported.
  */
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 /** Per-probe bound; detection never delays `--init` by more than this. */
 export const DEFAULT_METADATA_PROBE_TIMEOUT_MS = 1500;
@@ -163,6 +169,36 @@ async function probeAzure(box: Box, timeoutMs: number): Promise<PlatformFacts> {
   return { platform: 'azure', location, subscriptionId };
 }
 
+/** Azure's documented fixed chassis asset tag for its VMs. */
+const AZURE_ASSET_TAG = '7783-7084-3265-9085-8269-3286-77';
+
+/** The platform the machine's DMI identity names, or null. `SAM_DMI_DIR` exists for tests. */
+export function dmiPlatform(box: Box): PlatformFacts['platform'] | null {
+  const dir = box.SAM_DMI_DIR?.trim() || '/sys/class/dmi/id';
+  const read = (name: string) => {
+    try {
+      return readFileSync(join(dir, name), 'utf8').trim();
+    } catch {
+      return '';
+    }
+  };
+  if (read('product_name') === 'Google Compute Engine' || read('sys_vendor') === 'Google') {
+    return 'gcp';
+  }
+  const amazon = ['sys_vendor', 'bios_vendor', 'product_version', 'bios_version']
+    .map(read)
+    .join(' ')
+    .toLowerCase();
+  if (amazon.includes('amazon')) return 'aws';
+  if (
+    read('sys_vendor') === 'Microsoft Corporation' &&
+    read('chassis_asset_tag') === AZURE_ASSET_TAG
+  ) {
+    return 'azure';
+  }
+  return null;
+}
+
 /** Probes Google, AWS and Azure at once; at most one answers as itself. */
 export async function probePlatform(box: Box): Promise<ProbeResult> {
   const timeoutMs = probeTimeout(box);
@@ -174,10 +210,18 @@ export async function probePlatform(box: Box): Promise<ProbeResult> {
   const settled = await Promise.allSettled(probes.map(([, probe]) => probe(box, timeoutMs)));
   const misses: string[] = [];
   let facts: PlatformFacts | null = null;
+  const machine = dmiPlatform(box);
   settled.forEach((outcome, index) => {
     const name = probes[index]?.[0] ?? '';
-    if (outcome.status === 'fulfilled') facts ??= outcome.value;
-    else misses.push(`${name}: ${reason(outcome.reason)}`);
+    if (outcome.status !== 'fulfilled') {
+      misses.push(`${name}: ${reason(outcome.reason)}`);
+    } else if (outcome.value.platform !== machine) {
+      misses.push(
+        `${name}: a metadata answer this machine's firmware (DMI) does not back; ignored`
+      );
+    } else {
+      facts ??= outcome.value;
+    }
   });
   return { facts, misses };
 }

@@ -19,6 +19,8 @@ import {
 const KEY_NAME =
   /^projects\/[a-z][a-z0-9-]{4,28}[a-z0-9]\/locations\/[a-z0-9-]+\/keyRings\/[A-Za-z0-9_-]{1,63}\/cryptoKeys\/[A-Za-z0-9_-]{1,63}$/;
 const TOKEN_REFRESH_MARGIN_MS = 60_000;
+const LOOPBACK = ['127.0.0.1', 'localhost', '[::1]'];
+const HOST = /^[A-Za-z0-9.-]+(:\d{1,5})?$/;
 
 export function createGcpKmsProvider(
   env: Readonly<Record<string, string | undefined>>
@@ -34,7 +36,19 @@ export function createGcpKmsProvider(
     /\/+$/,
     ''
   );
-  const metadataHost = env.SAM_GCE_METADATA_HOST?.trim() || 'metadata.google.internal';
+  // The data key and the bearer token travel in this request: TLS, unless a loopback test fake.
+  const endpointUrl = new URL(endpoint);
+  if (endpointUrl.protocol !== 'https:' && !LOOPBACK.includes(endpointUrl.hostname)) {
+    throw new KeyProviderError(
+      'config',
+      'SAM_GCP_KMS_ENDPOINT must be https:// unless on loopback'
+    );
+  }
+  // The link-local address, not the DNS name: a resolver cannot redirect it.
+  const metadataHost = env.SAM_GCE_METADATA_HOST?.trim() || '169.254.169.254';
+  if (!HOST.test(metadataHost)) {
+    throw new KeyProviderError('config', 'SAM_GCE_METADATA_HOST must be a host or host:port');
+  }
   const service = `gcp-kms ${key}`;
   let token: { value: string; expiresAt: number } | null = null;
 

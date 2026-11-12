@@ -212,14 +212,14 @@ describe.skipIf(!hasDocker && !process.env.CI)(
     });
 
     it('refuses without the confirmation, then deletes exactly the unreferenced plaintext versions', async () => {
-      expect(() => purgeVersions(ctx(), secrets(), undefined)).toThrow(
+      expect(() => purgeVersions(ctx(), secrets(), undefined, { minAgeMs: 0 })).toThrow(
         /--confirm s3:\/\/fleet\/celld/
       );
       const before = listObjects(ctx(), 'deploy/').map((o) => o.key);
       const pointers = ['deploy/current.json', 'deploy/workspaces-api/current.json'].map((k) =>
         readObject(ctx(), k)
       );
-      const result = purgeVersions(ctx(), secrets(), 's3://fleet/celld');
+      const result = purgeVersions(ctx(), secrets(), 's3://fleet/celld', { minAgeMs: 0 });
       expect(result.deleted).toHaveLength(2);
       const after = listObjects(ctx(), 'deploy/').map((o) => o.key);
       for (const prefix of result.deleted) {
@@ -256,7 +256,7 @@ describe.skipIf(!hasDocker && !process.env.CI)(
         async () => (await served()) === 'legacy-again',
         120_000
       );
-      expect(() => purgeVersions(ctx(), secrets(), 's3://fleet/celld')).toThrow(
+      expect(() => purgeVersions(ctx(), secrets(), 's3://fleet/celld', { minAgeMs: 0 })).toThrow(
         /current deploy version still holds plaintext/
       );
     }, 180_000);

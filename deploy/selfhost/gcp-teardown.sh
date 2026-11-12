@@ -15,7 +15,17 @@
 # the versions needs --destroy-key-versions <key id>; a later --teardown deletes the destroyed
 # versions, then the key, then the ring. Key names cannot be reused once deleted.
 
-declare -a REMOVED=() LEFT=()
+declare -a REMOVED=() LEFT=() KF=()
+
+# Sets KF to the gcloud flags of the key or ring a recorded name points at, so a teardown run with
+# other --key-ring/--kms-location flags still acts on exactly the recorded resource.
+kms_flags_for() { # <projects/P/locations/L/keyRings/R[/cryptoKeys/K]>
+  local rest="${1#projects/}" project location ring
+  project="${rest%%/*}"; rest="${rest#*/locations/}"
+  location="${rest%%/*}"; rest="${rest#*/keyRings/}"
+  ring="${rest%%/*}"
+  KF=(--keyring="$ring" --location="$location" --project="$project")
+}
 
 removed() { # <kind> <name> <what>
   REMOVED+=("$3")
@@ -27,11 +37,12 @@ teardown_binding() { # <name: resource#role#member>
   IFS='#' read -r resource role member <<<"$name"
   if [ "${resource#projects/*/locations/*/keyRings/*/cryptoKeys/}" != "$resource" ]; then
     key="${resource##*/}"
-    if ! exists kms keys describe "$key" "${KEY_FLAGS[@]}"; then
+    kms_flags_for "$resource"
+    if ! exists kms keys describe "$key" "${KF[@]}"; then
       removed iam-binding "$name" "grant ${role} to ${member} on ${resource} (key already gone)"
       return
     fi
-    change kms keys remove-iam-policy-binding "$key" "${KEY_FLAGS[@]}" --member="$member" \
+    change kms keys remove-iam-policy-binding "$key" "${KF[@]}" --member="$member" \
       --role="$role" --format=none
   else
     change projects remove-iam-policy-binding "$PROJECT" --member="$member" --role="$role" \
@@ -42,16 +53,17 @@ teardown_binding() { # <name: resource#role#member>
 
 teardown_key() { # <key resource name>
   local name="$1" key="${1##*/}" owner versions active=0 destroyed=0 pending=0 version state
-  if ! exists kms keys describe "$key" "${KEY_FLAGS[@]}"; then
+  kms_flags_for "$name"
+  if ! exists kms keys describe "$key" "${KF[@]}"; then
     removed kms-key "$name" "key ${name} (already gone)"
     return
   fi
-  owner="$(gcloud kms keys describe "$key" "${KEY_FLAGS[@]}" --format='value(labels.sam-install)')"
+  owner="$(gcloud kms keys describe "$key" "${KF[@]}" --format='value(labels.sam-install)')"
   if [ "$owner" != "$INSTALL_HASH" ]; then
     LEFT+=("key ${name}: not labelled sam-install=${INSTALL_HASH}; refused")
     return
   fi
-  versions="$(gcloud kms keys versions list --key="$key" "${KEY_FLAGS[@]}" --format='value(name,state)')"
+  versions="$(gcloud kms keys versions list --key="$key" "${KF[@]}" --format='value(name,state)')"
   # Read from fd 3: gcloud inside the loop may read stdin.
   while IFS=$'\t' read -r version state <&3; do
     [ -n "$version" ] || continue
@@ -59,35 +71,36 @@ teardown_key() { # <key resource name>
     case "$state" in
       ENABLED|DISABLED)
         if [ "$DESTROY_KEY" = "$key" ]; then
-          change kms keys versions destroy "$version" --key="$key" "${KEY_FLAGS[@]}"
+          change kms keys versions destroy "$version" --key="$key" "${KF[@]}"
           pending=$((pending + 1))
         else
           active=$((active + 1))
         fi ;;
       DESTROY_SCHEDULED) pending=$((pending + 1)) ;;
       DESTROYED|IMPORT_FAILED|GENERATION_FAILED)
-        change kms keys versions delete "$version" --key="$key" "${KEY_FLAGS[@]}" --quiet
+        change kms keys versions delete "$version" --key="$key" "${KF[@]}" --quiet
         destroyed=$((destroyed + 1)) ;;
     esac
   done 3<<<"$versions"
   if [ "$active" -gt 0 ]; then
     LEFT+=("key ${name}: ${active} usable version(s), billed while they exist. Every sealed bundle and every backup of this box needs this key: destroying it makes them unrecoverable. To destroy: --teardown --destroy-key-versions ${key}")
   elif [ "$pending" -gt 0 ]; then
-    LEFT+=("key ${name}: ${pending} version(s) scheduled for destruction (30 days by default; billed until destroyed; undo with: gcloud kms keys versions restore <version> --key=${key} --keyring=${KEY_RING} --location=${KMS_LOCATION} --project=${PROJECT}). Run --teardown again after that to delete the key and its key ring")
+    LEFT+=("key ${name}: ${pending} version(s) scheduled for destruction (30 days by default; billed until destroyed; undo with: gcloud kms keys versions restore <version> --key=${key} ${KF[*]}). Run --teardown again after that to delete the key and its key ring")
   else
-    change kms keys delete "$key" "${KEY_FLAGS[@]}" --quiet
+    change kms keys delete "$key" "${KF[@]}" --quiet
     removed kms-key "$name" "key ${name} (${destroyed} destroyed version(s) deleted; its name cannot be reused)"
   fi
 }
 
 teardown_ring() { # <ring resource name>
   local name="$1" ring="${1##*/}"
-  if ! exists kms keyrings describe "$ring" --location="$KMS_LOCATION" --project="$PROJECT"; then
+  kms_flags_for "$name"
+  if ! exists kms keyrings describe "$ring" "${KF[@]:1}"; then
     removed kms-key-ring "$name" "key ring ${name} (already gone)"
-  elif [ -n "$(gcloud kms keys list --keyring="$ring" --location="$KMS_LOCATION" --project="$PROJECT" --format='value(name)' 2>/dev/null)" ]; then
+  elif [ -n "$(gcloud kms keys list --keyring="$ring" "${KF[@]:1}" --format='value(name)' 2>/dev/null)" ]; then
     LEFT+=("key ring ${name}: still holds keys (rings are free; deleted by a later --teardown once its keys are)")
   else
-    change kms keyrings delete "$ring" --location="$KMS_LOCATION" --project="$PROJECT" --quiet
+    change kms keyrings delete "$ring" "${KF[@]:1}" --quiet
     removed kms-key-ring "$name" "key ring ${name}"
   fi
 }
@@ -150,6 +163,11 @@ run_teardown() {
   for wanted in iam-binding kms-key kms-key-ring workload-identity-provider workload-identity-pool service-account; do
     while IFS=$'\t' read -r kind name action removed_at <&3; do
       [ "$kind" = "$wanted" ] && [ -z "$removed_at" ] || continue
+      # Only what was recorded for this --project: the record may hold several projects' entries.
+      case "$name" in
+        "projects/${PROJECT}/"*|"projects/${PROJECT}#"*|*"@${PROJECT}.iam.gserviceaccount.com") ;;
+        *) continue ;;
+      esac
       if [ "$action" != "created" ]; then
         LEFT+=("${kind} ${name}: existed before the bootstrap; kept")
         continue

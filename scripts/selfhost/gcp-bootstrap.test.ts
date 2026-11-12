@@ -3,7 +3,7 @@
  * Google Cloud state as files, so a second run sees what the first created.
  */
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -416,5 +416,46 @@ describe('--teardown', () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain('removes only what it recorded creating');
     expect(result.calls.filter((c) => MUTATING.test(c))).toEqual([]);
+  });
+
+  it('acts on the recorded key ring and project, whatever --key-ring/--kms-location say', () => {
+    expect(
+      run([...kmsArgs, '--key-ring', 'custom-ring', '--kms-location', 'europe-west1']).status
+    ).toBe(0);
+    const result = run([
+      '--project',
+      'sam-vm-test',
+      '--api-url',
+      ISSUER,
+      '--teardown',
+      '--key-ring',
+      'some-other-ring',
+      '--kms-location',
+      'global',
+    ]);
+    expect(result.status, result.stderr).toBe(0);
+    // The grant on the recorded key (custom-ring) is gone; nothing was looked up in other rings.
+    expect(gcp().bindings.filter((b) => b.startsWith('key:'))).toEqual([]);
+    expect(result.calls.filter((c) => c.includes('some-other-ring'))).toEqual([]);
+  });
+
+  it('records a grant on a key it did not create as reused, so teardown leaves it', () => {
+    expect(run(kmsArgs).status).toBe(0);
+    const key = keyName();
+    // Pretend the key predates this bootstrap: a fresh record, the key already labelled.
+    rmSync(join(state, 'box-state'), { recursive: true });
+    setGcp((db) => {
+      db.pools = {};
+      db.providers = {};
+      db.accounts = {};
+    });
+    expect(run(kmsArgs).status).toBe(0);
+    const grant = record().resources.find(
+      (r) => r.kind === 'iam-binding' && String(r.name).includes('cryptoKeys')
+    );
+    expect(grant?.action).toBe('reused');
+    const result = run(['--project', 'sam-vm-test', '--api-url', ISSUER, '--teardown']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(gcp().bindings.filter((b) => b.startsWith(`key:sam-selfhost/${key}`))).toHaveLength(1);
   });
 });

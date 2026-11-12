@@ -7,7 +7,7 @@
  * slow or absent metadata all fall back to the file key with the reason in one line; the choice
  * is recorded and no key material is printed.
  */
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -42,6 +42,25 @@ afterEach(async () => {
   for (const server of extras.splice(0)) server.close();
   rmSync(dir, { recursive: true, force: true });
 });
+
+/** A fake /sys/class/dmi/id naming the platform (or none), as the cloud's firmware does. */
+function dmi(platform: 'gcp' | 'aws' | 'azure' | 'none'): string {
+  const path = join(dir, `dmi-${platform}`);
+  mkdirSync(path, { recursive: true });
+  const files: Record<string, string> =
+    platform === 'gcp'
+      ? { sys_vendor: 'Google', product_name: 'Google Compute Engine' }
+      : platform === 'aws'
+        ? { sys_vendor: 'Amazon EC2', product_name: 'm6i.large' }
+        : platform === 'azure'
+          ? {
+              sys_vendor: 'Microsoft Corporation',
+              chassis_asset_tag: '7783-7084-3265-9085-8269-3286-77',
+            }
+          : { sys_vendor: 'Hetzner', product_name: 'vServer' };
+  for (const [name, value] of Object.entries(files)) writeFileSync(join(path, name), `${value}\n`);
+  return `SAM_DMI_DIR=${path}`;
+}
 
 function choice(): Record<string, unknown> {
   return JSON.parse(readFileSync(join(dir, '.state/key-agent/choice.json'), 'utf8')) as Record<
@@ -79,6 +98,7 @@ async function gcpInit(existingKeys?: string[], extra: string[] = []) {
     ...elsewhere('gce'),
     `SAM_GCE_METADATA_HOST=${fake.host}`,
     `SAM_GCP_KMS_ENDPOINT=http://${fake.host}`,
+    dmi('gcp'),
     ...extra,
   ]);
   return await runDeploy(envFile, ['--init']);
@@ -129,6 +149,7 @@ describe('Google Cloud', () => {
       ...elsewhere('gce'),
       `SAM_GCE_METADATA_HOST=${fake.host}`,
       `SAM_GCP_KMS_ENDPOINT=http://${fake.host}`,
+      dmi('gcp'),
     ]);
     const init = await runDeploy(envFile, ['--init']);
     expect(init.status, init.out).toBe(0);
@@ -145,6 +166,7 @@ describe('AWS', () => {
       ...elsewhere('aws'),
       `SAM_AWS_IMDS_HOST=${aws.host}`,
       `SAM_AWS_KMS_ENDPOINT=http://${aws.host}/`,
+      dmi('aws'),
     ]);
     return await runDeploy(envFile, ['--init']);
   }
@@ -181,6 +203,16 @@ describe('AWS', () => {
   });
 });
 
+describe('a cloud key service that does not answer', () => {
+  it('stops --init instead of recording the file key for good', async () => {
+    const init = await gcpInit([GCP_KEY], [`SAM_GCP_KMS_ENDPOINT=http://${CLOSED_HOST}`]);
+    expect(init.status).not.toBe(0);
+    expect(init.out).toContain('could not be reached (unavailable:');
+    expect(init.out).toContain('SAM_KEY_PROVIDER=file');
+    expect(() => choice()).toThrow();
+  });
+});
+
 describe('Azure', () => {
   it('selects the configured Key Vault key after a round trip with the managed identity', async () => {
     fake = await startFakeKeyServices({ existingKeys: [KEY_NAME] });
@@ -189,6 +221,7 @@ describe('Azure', () => {
       `SAM_AZURE_IMDS_HOST=${fake.host}`,
       `SAM_AZURE_KEY_VAULT_URL=http://${fake.host}`,
       'SAM_AZURE_ALLOW_HTTP_FOR_TESTS=1',
+      dmi('azure'),
     ]);
     const init = await runDeploy(envFile, ['--init']);
     expect(init.status, init.out).toBe(0);
@@ -205,12 +238,30 @@ describe('Azure', () => {
 
   it('on Azure with no vault configured: file key, and the line names the missing setting', async () => {
     fake = await startFakeKeyServices();
-    const envFile = writeBox(dir, [...elsewhere('azure'), `SAM_AZURE_IMDS_HOST=${fake.host}`]);
+    const envFile = writeBox(dir, [
+      ...elsewhere('azure'),
+      `SAM_AZURE_IMDS_HOST=${fake.host}`,
+      dmi('azure'),
+    ]);
     const init = await runDeploy(envFile, ['--init']);
     expect(init.status, init.out).toBe(0);
     expect(init.out).toContain(
       'key provider: file (on Azure (westeurope), but SAM_AZURE_KEY_VAULT_URL is not set'
     );
+  });
+});
+
+describe('a metadata answer the machine does not back', () => {
+  it('a Google-looking answer on a non-Google machine is ignored, even with a working key', async () => {
+    // Someone on a VPS's local network answers 169.254.169.254 as Google with their own project
+    // and a key that works: without the DMI check the box would seal to the attacker's key.
+    const init = await gcpInit([GCP_KEY], [dmi('none')]);
+    expect(init.status, init.out).toBe(0);
+    expect(init.out).toContain(
+      "Google Cloud: a metadata answer this machine's firmware (DMI) does not back; ignored"
+    );
+    expect(choice()).toMatchObject({ provider: 'file' });
+    expect(bundleProviders()).toEqual(['file']);
   });
 });
 

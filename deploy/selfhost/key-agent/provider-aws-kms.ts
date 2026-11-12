@@ -51,7 +51,8 @@ const ERROR_KINDS: Readonly<Record<string, KeyProviderErrorKind>> = {
   SerializationException: 'invalid',
   NotFoundException: 'config',
   InvalidKeyUsageException: 'config',
-  InvalidSignatureException: 'config',
+  // Usually clock skew ("Signature expired"): a cached copy may keep serving meanwhile.
+  InvalidSignatureException: 'unavailable',
   IncompleteSignature: 'config',
   KMSInternalException: 'unavailable',
   DependencyTimeoutException: 'unavailable',
@@ -82,9 +83,23 @@ function regionOf(keyId: string, configured: string | undefined): string {
   return region;
 }
 
+/** Reads at most MAX_RESPONSE_BYTES; a longer answer is cut off and treated as empty. */
 async function readBounded(response: Response): Promise<string> {
-  const text = await response.text();
-  return text.length > MAX_RESPONSE_BYTES ? '' : text;
+  const reader = response.body?.getReader();
+  if (!reader) return '';
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.length;
+    if (size > MAX_RESPONSE_BYTES) {
+      await reader.cancel();
+      return '';
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString('utf8');
 }
 
 export function createAwsKmsProvider(
@@ -110,7 +125,11 @@ export function createAwsKmsProvider(
       'SAM_AWS_KMS_ENDPOINT must be https:// unless on loopback'
     );
   }
-  const imds = `http://${env.SAM_AWS_IMDS_HOST?.trim() || '169.254.169.254'}`;
+  const imdsHost = env.SAM_AWS_IMDS_HOST?.trim() || '169.254.169.254';
+  if (!/^[A-Za-z0-9.-]+(:\d{1,5})?$/.test(imdsHost)) {
+    throw new KeyProviderError('config', 'SAM_AWS_IMDS_HOST must be a host or host:port');
+  }
+  const imds = `http://${imdsHost}`;
   const credentialsFile = env.SAM_AWS_CREDENTIALS_FILE?.trim();
   const keyRef = keyId.startsWith('arn:') ? keyId : `${region}/${keyId}`;
   const service = `aws-kms ${keyRef}`;

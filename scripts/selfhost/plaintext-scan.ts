@@ -94,7 +94,13 @@ const RESERVED_SCRIPTS = new Set(['queues', 'images']);
 /** Plain-text vars of a manifest: celld keeps them as `raw_metadata.bindings` of type plain_text. */
 export function manifestVars(text: string): Record<string, string> {
   const vars: Record<string, string> = {};
-  const parsed = JSON.parse(text) as unknown;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text) as unknown;
+  } catch {
+    // Never let a parse error echo a piece of a secret-bearing file; the content check still runs.
+    return vars;
+  }
   const meta = (parsed as { raw_metadata?: unknown } | null)?.raw_metadata;
   if (typeof meta !== 'object' || meta === null) return vars;
   const record = meta as Record<string, unknown>;
@@ -124,31 +130,66 @@ function secretsIn(text: string, secrets: KnownSecrets): string[] {
 }
 
 /** Every version prefix that a pointer or queue attachment names, with who names it. */
+/** A pointer or queue attachment file under deploy/ (the files celld reads to find versions). */
+function isHolder(key: string): boolean {
+  return (
+    key === 'deploy/current.json' ||
+    /^deploy\/[^/]+\/current\.json$/.test(key) ||
+    /^deploy\/queues\/[^/]+\/consumer\.json$/.test(key)
+  );
+}
+
+export interface References {
+  /** Version prefix -> the holder files that name it. */
+  byPrefix: Map<string, string[]>;
+  /** Holder files in which no known version could be recognised (the purge refuses then). */
+  unrecognised: string[];
+}
+
+/**
+ * Which versions a pointer or queue attachment names. Fails toward "referenced": a version counts
+ * as named when its full prefix appears in a holder, or merely its version id does, so a holder
+ * format this code does not know cannot make a live version look unused.
+ */
 export function referencedPrefixes(
   ctx: BoxContext,
-  keys: readonly string[]
-): Map<string, string[]> {
-  const refs = new Map<string, string[]>();
-  const holders = keys.filter(
-    (key) =>
-      key === 'deploy/current.json' ||
-      /^deploy\/[^/]+\/current\.json$/.test(key) ||
-      /^deploy\/queues\/[^/]+\/consumer\.json$/.test(key)
-  );
-  for (const key of holders) {
-    // Every string in the file that looks like a version prefix counts: a reference is a reference.
-    for (const match of readObject(ctx, key).matchAll(/"(deploy\/[^"/]+\/[^"/]+)\/?"/g)) {
-      const prefix = match[1] ?? '';
-      refs.set(prefix, [...(refs.get(prefix) ?? []), key]);
+  keys: readonly string[],
+  prefixes: readonly string[]
+): References {
+  const byPrefix = new Map<string, string[]>();
+  const unrecognised: string[] = [];
+  for (const key of keys.filter(isHolder)) {
+    const text = readObject(ctx, key);
+    let found = false;
+    for (const prefix of prefixes) {
+      const version = prefix.split('/').pop() ?? prefix;
+      if (text.includes(prefix) || text.includes(version)) {
+        byPrefix.set(prefix, [...(byPrefix.get(prefix) ?? []), key]);
+        found = true;
+      }
+    }
+    if (!found) unrecognised.push(key);
+  }
+  return { byPrefix, unrecognised };
+}
+
+/** Every `deploy/<script>/<version>` prefix among the keys. */
+function versionPrefixes(keys: readonly string[]): string[] {
+  const prefixes = new Set<string>();
+  for (const key of keys) {
+    const match = VERSION_KEY.exec(key);
+    if (match && !RESERVED_SCRIPTS.has(match[1] ?? '') && match[2] !== 'current.json') {
+      prefixes.add(`deploy/${match[1]}/${match[2]}`);
     }
   }
-  return refs;
+  return [...prefixes];
 }
 
 export function scanDeployVersions(ctx: BoxContext, secrets: KnownSecrets): DeployVersion[] {
   const objects = listObjects(ctx, 'deploy/');
   const keys = objects.map((o) => o.key);
-  const refs = referencedPrefixes(ctx, keys);
+  const prefixes = versionPrefixes(keys);
+  const refs = referencedPrefixes(ctx, keys, prefixes).byPrefix;
   const versions = new Map<string, DeployVersion>();
   for (const object of objects) {
     const match = VERSION_KEY.exec(object.key);
@@ -292,10 +333,20 @@ export interface PurgeResult {
 }
 
 /** Deletes old versions that hold plaintext and that nothing references (module comment). */
+/** Versions younger than this are never purged: a deploy may still be writing them. */
+export const DEFAULT_PURGE_MIN_AGE_MS = 24 * 3600_000;
+
+export interface PurgeOptions {
+  /** Default DEFAULT_PURGE_MIN_AGE_MS; `--min-age-hours` sets it. */
+  minAgeMs?: number;
+  now?: number;
+}
+
 export function purgeVersions(
   ctx: BoxContext,
   secrets: KnownSecrets,
-  confirm: string | undefined
+  confirm: string | undefined,
+  options: PurgeOptions = {}
 ): PurgeResult {
   if (confirm !== ctx.box.CELLD_BUCKET) {
     throw new Error(
@@ -307,6 +358,8 @@ export function purgeVersions(
       `the purge rule was verified against celld ${PURGE_VERIFIED_CELLD_VERSION}; this box pins ${CELLD_VERSION}. Re-check celld's readers of deploy/ before purging`
     );
   }
+  const minAgeMs = options.minAgeMs ?? DEFAULT_PURGE_MIN_AGE_MS;
+  const now = options.now ?? Date.now();
   const versions = scanDeployVersions(ctx, secrets);
   const current = versions.find((v) => v.referencedBy.includes('deploy/current.json'));
   if (!current)
@@ -319,13 +372,37 @@ export function purgeVersions(
   const result: PurgeResult = { deleted: [], skipped: [] };
   for (const version of versions) {
     if (version.secretNames.length === 0) continue;
-    // Re-read every pointer and attachment right before deleting: a deploy may have moved one.
-    const fresh = referencedPrefixes(
-      ctx,
-      listObjects(ctx, 'deploy/').map((o) => o.key)
-    );
-    if (version.referencedBy.length > 0 || fresh.has(version.prefix)) {
+    if (version.referencedBy.length > 0) {
       result.skipped.push(`${version.prefix} (still referenced)`);
+      continue;
+    }
+    const written = Date.parse(version.lastModified);
+    if (!Number.isFinite(written) || now - written < minAgeMs) {
+      result.skipped.push(
+        `${version.prefix} (written less than ${Math.round(minAgeMs / 3600_000)} h ago)`
+      );
+      continue;
+    }
+    // Shell-style wildcards in a key would make `gcloud storage rm` match siblings: leave it.
+    if (version.keys.some((key) => /[*?[\]]/.test(key))) {
+      result.skipped.push(`${version.prefix} (a key with wildcard characters)`);
+      continue;
+    }
+    // Re-read right before deleting: a deploy may have moved a pointer, or be writing here.
+    const objects = listObjects(ctx, 'deploy/');
+    const keysListed = objects.map((o) => o.key);
+    const fresh = referencedPrefixes(ctx, keysListed, versionPrefixes(keysListed));
+    if (fresh.unrecognised.length > 0) {
+      throw new Error(
+        `refusing to purge: no known deploy version is named in ${fresh.unrecognised.join(', ')}`
+      );
+    }
+    const keysNow = keysListed.filter((key) => key.startsWith(`${version.prefix}/`)).sort();
+    if (
+      fresh.byPrefix.has(version.prefix) ||
+      keysNow.join('\n') !== [...version.keys].sort().join('\n')
+    ) {
+      result.skipped.push(`${version.prefix} (changed since the scan)`);
       continue;
     }
     deleteObjects(ctx, version.keys);
@@ -375,7 +452,9 @@ export function formatPlaintextReport(
   if (dirty.some((v) => v.referencedBy.length === 0)) {
     lines.push(
       `To delete the purgeable versions: pnpm selfhost:secrets plaintext --purge --confirm ${bucket}` +
-        ' (read the README first: celld documents deploy/ as not to be deleted by operators)'
+        ' (read the README first: celld documents deploy/ as not to be deleted by operators). ' +
+        'A bucket with soft delete or object versioning keeps deleted objects for its retention ' +
+        'period: rotation, not deletion, is what makes the old copies worthless.'
     );
   }
   return lines;

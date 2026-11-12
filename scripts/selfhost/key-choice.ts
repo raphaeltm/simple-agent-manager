@@ -216,6 +216,13 @@ export async function chooseKeyProvider(input: ChooseInput): Promise<KeyChoice> 
         chosenAt,
       };
     }
+    // Unreachable is not an answer: recording the file key now would keep it for good.
+    if (failure.startsWith('unavailable')) {
+      throw new Error(
+        `${found.platform}: ${candidate.label} could not be reached (${failure}). Run ` +
+          '`pnpm selfhost:deploy --init` again, or set SAM_KEY_PROVIDER=file in .env to use a key file'
+      );
+    }
     failures.push(`${candidate.label} is not usable (${failure})`);
   }
   const why =
