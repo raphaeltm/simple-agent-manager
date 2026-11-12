@@ -10,6 +10,7 @@ import { desc, eq } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 import type { ExecutionContext } from 'hono';
 
+import { createDeploymentProviderPort } from '../app-deployment-ports/providers';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
@@ -241,12 +242,17 @@ async function prepareManifestVolumes(params: {
     return { success: true, placement };
   }
 
-  await createMissingManifestVolumes(params.db, params.env, params.userId, {
-    environmentId: params.envId,
-    manifest: params.manifest,
-    location: placement.location,
-    targetProvider: placement.provider,
-  });
+  await createMissingManifestVolumes(
+    params.db,
+    createDeploymentProviderPort(params.env),
+    params.userId,
+    {
+      environmentId: params.envId,
+      manifest: params.manifest,
+      location: placement.location,
+      targetProvider: placement.provider,
+    }
+  );
 
   return { success: true, placement };
 }

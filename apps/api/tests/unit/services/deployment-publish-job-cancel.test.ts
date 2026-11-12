@@ -1,18 +1,19 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 
-import type { Env } from '../../../src/env';
+import type { DeploymentPublishJobPorts } from '../../../src/app-deployment';
 
 const cancel = vi.hoisted(() => vi.fn());
 const info = vi.hoisted(() => vi.fn());
 const warn = vi.hoisted(() => vi.fn());
-vi.mock('../../../src/routes/mcp/workspace-tools', () => ({ cancelBuildPublishJobOnVm: cancel }));
-vi.mock('../../../src/services/deployment-publish-job-settings', () => ({
-  getDeploymentPublishJobSettings: async () => ({ cancelTimeoutMs: 1000 }),
-}));
 vi.mock('../../../src/lib/logger', () => ({ log: { info, warn } }));
 const { cancelDeploymentPublishJobOnVmBestEffort } =
   await import('../../../src/services/deployment-publish-job-cancel');
 const job = { id: 'job', workspaceId: 'workspace', nodeId: 'node', requestedBy: 'owner' };
+const resolveSetting = vi.fn(async () => 1000);
+const ports: Pick<DeploymentPublishJobPorts, 'settings' | 'vm'> = {
+  settings: { resolveSetting },
+  vm: { cancelPublishJob: cancel },
+};
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -21,16 +22,11 @@ it.each([404, 500])(
   async (statusCode) => {
     cancel.mockRejectedValue(new Error(`VM agent returned ${statusCode}: private command output`));
     await expect(
-      cancelDeploymentPublishJobOnVmBestEffort({} as Env, job, 123)
+      cancelDeploymentPublishJobOnVmBestEffort(ports, job, 123)
     ).resolves.toBeUndefined();
-    expect(cancel).toHaveBeenCalledWith(
-      expect.anything(),
-      'workspace',
-      'owner',
-      'node',
-      'job',
-      123
-    );
+    expect(cancel).toHaveBeenCalledWith('workspace', 'owner', 'node', 'job', 123);
+    // An explicit timeout override skips the admin-settings read.
+    expect(resolveSetting).not.toHaveBeenCalled();
     const logger = statusCode === 404 ? info : warn;
     expect(logger).toHaveBeenCalledWith(expect.any(String), {
       publishJobId: 'job',
@@ -43,3 +39,11 @@ it.each([404, 500])(
     );
   }
 );
+it('uses the admin cancel timeout when no override is given', async () => {
+  cancel.mockResolvedValue(undefined);
+  resolveSetting.mockImplementation(async (name: string) =>
+    name === 'deployments.publishJobCancelTimeoutMs' ? 4321 : 1
+  );
+  await cancelDeploymentPublishJobOnVmBestEffort(ports, job);
+  expect(cancel).toHaveBeenCalledWith('workspace', 'owner', 'node', 'job', 4321);
+});

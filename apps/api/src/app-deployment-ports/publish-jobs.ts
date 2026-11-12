@@ -1,0 +1,20 @@
+/** Worker implementation of the app-deployment `DeploymentPublishJobPorts`. */
+import type { DeploymentPublishJobPorts } from '../app-deployment';
+import type { Env } from '../env';
+import { cancelBuildPublishJobOnVm } from '../routes/mcp/workspace-tools';
+import { resolveAdminSetting } from '../services/admin-settings';
+import { recordDeploymentPublishJobLifecycleEventBestEffort } from '../services/project-lifecycle-events';
+
+export function createDeploymentPublishJobPorts(env: Env): DeploymentPublishJobPorts {
+  return {
+    settings: { resolveSetting: (name) => resolveAdminSetting(env, name) },
+    vm: {
+      cancelPublishJob: (workspaceId, userId, nodeId, publishJobId, timeoutMs) =>
+        cancelBuildPublishJobOnVm(env, workspaceId, userId, nodeId, publishJobId, timeoutMs),
+    },
+    lifecycle: {
+      recordPublishJobLifecycleEventBestEffort: (event) =>
+        recordDeploymentPublishJobLifecycleEventBestEffort(env, event),
+    },
+  };
+}

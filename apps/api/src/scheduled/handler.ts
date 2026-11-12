@@ -1,5 +1,6 @@
 import { drizzle } from 'drizzle-orm/d1';
 
+import { createDeploymentPublishJobPorts } from '../app-deployment-ports/publish-jobs';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
@@ -109,7 +110,7 @@ export async function scheduled(
   // Every sweep is isolated so one failure cannot suppress later recovery work.
   const sweeps = createSweepIsolator(env);
   await sweeps.isolate('deployment_publish_jobs', () =>
-    runDeploymentPublishJobSweep(env, ctx.waitUntil.bind(ctx))
+    runDeploymentPublishJobSweep(env, createDeploymentPublishJobPorts(env), ctx.waitUntil.bind(ctx))
   );
   const githubTriggerRecovery = await sweeps.isolate('github_trigger_recovery', () =>
     runGitHubTriggerRecovery(env, ctx.waitUntil.bind(ctx))

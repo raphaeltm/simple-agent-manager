@@ -12,6 +12,7 @@ import { and, desc, eq, isNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type { Hono } from 'hono';
 
+import { createDeploymentProviderPort } from '../app-deployment-ports/providers';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
@@ -162,7 +163,13 @@ async function cleanupFailedEnvironmentStart(params: {
 
   for (const serverId of serverIds) {
     try {
-      await detachEnvironmentVolumes(db, env, userId, envId, serverId);
+      await detachEnvironmentVolumes(
+        db,
+        createDeploymentProviderPort(env),
+        userId,
+        envId,
+        serverId
+      );
     } catch (detachErr) {
       log.warn('deployment_environment.start_failed_volume_detach_failed', {
         envId,
@@ -200,7 +207,12 @@ async function finishEnvironmentStart(
     }
 
     if (shouldAttachVolumes) {
-      await attachEnvironmentVolumesToLinkedNode(db, env, userId, envId);
+      await attachEnvironmentVolumesToLinkedNode(
+        db,
+        createDeploymentProviderPort(env),
+        userId,
+        envId
+      );
     }
   } catch (err) {
     log.error('deployment_environment.start_failed', {

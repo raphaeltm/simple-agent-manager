@@ -13,6 +13,7 @@ import type { InferOutput } from 'valibot';
 import * as v from 'valibot';
 import { parse as parseYaml } from 'yaml';
 
+import { createDeploymentProviderPort } from '../../app-deployment-ports/providers';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log, serializeError } from '../../lib/logger';
@@ -386,7 +387,7 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
     // Provisioning can still race cancellation. Volumes belong to the environment;
     // createMissingDeclaredVolumes reuses existing names on the next release.
     // The later atomic release fence remains authoritative after provider I/O.
-    await createMissingDeclaredVolumes(db, c.env, userId, {
+    await createMissingDeclaredVolumes(db, createDeploymentProviderPort(c.env), userId, {
       environmentId,
       volumes: volumeDeclarations,
       location: placement.location,
