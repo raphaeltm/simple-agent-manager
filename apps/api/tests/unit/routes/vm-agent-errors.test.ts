@@ -54,7 +54,10 @@ vi.mock('drizzle-orm', async (importOriginal) => ({
 }));
 
 // Mock schema
-vi.mock('@simple-agent-manager/worker-core/schema', () => ({
+// Keep the real schema underneath: packages loaded through the route graph (agent-email) read
+// other tables at module load.
+vi.mock('@simple-agent-manager/worker-core/schema', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@simple-agent-manager/worker-core/schema')>()),
   nodes: { id: 'id', userId: 'userId', status: 'status', createdAt: 'createdAt' },
   workspaces: { id: 'id', userId: 'userId', nodeId: 'nodeId', status: 'status' },
   agentSessions: { workspaceId: 'workspaceId' },
