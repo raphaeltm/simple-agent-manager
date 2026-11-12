@@ -1,6 +1,14 @@
-/** Scheduling hint from a committed wake; delivery admission remains authoritative. */
+/** Exact committed wake activation and delivery scheduling; prompt admission remains authoritative. */
+import type { AdmitProjectEventInput } from '@simple-agent-manager/shared';
+
 import type { Env } from '../../env';
+import { log } from '../../lib/logger';
+import { buildSessionLifecycleEventInput } from '../../services/project-lifecycle-event-inputs';
 import { nudgePromptDeliveriesForTarget } from './prompt-delivery';
+import {
+  beginSessionWakeActivation,
+  commitSessionWakeActivation,
+} from './session-wake-activation-guard';
 
 export interface SessionWakeReadyInput {
   projectId: string;
@@ -23,7 +31,7 @@ export async function isSessionWakeReadyCurrent(
     JOIN nodes n ON n.id = w.node_id
     JOIN agent_sessions a ON a.workspace_id = w.id
     WHERE w.id = ? AND w.project_id = ? AND w.chat_session_id = ?
-      AND a.id = ? AND a.status = 'running' AND w.status = 'running'
+      AND a.id = ? AND a.user_id = w.user_id AND a.status = 'running' AND w.status = 'running'
       AND n.status = 'running' AND w.runtime_deletion_confirmed_at IS NULL`;
   const values = [input.workspaceId, input.projectId, input.chatSessionId, input.agentSessionId];
   const fence = input.fence;
@@ -43,6 +51,59 @@ export async function isSessionWakeReadyCurrent(
         AND n.id = ? AND n.runtime_incarnation_id = ?`
         ).bind(...values, fence.nodeId, fence.runtimeIncarnationId);
   return (await query.first<{ ready: number }>())?.ready === 1;
+}
+
+/** Capture before D1 I/O: a concurrent stop, relink or later sleep must win. */
+export function captureSessionWakeActivation(
+  sql: SqlStorage,
+  input: SessionWakeReadyInput
+): string | null {
+  if (input.fence.runtime !== 'vm') return null;
+  return beginSessionWakeActivation(
+    sql,
+    input.chatSessionId,
+    input.workspaceId,
+    JSON.stringify(input.fence)
+  );
+}
+
+/** Exact D1 handoff already checked; the local lifecycle still has to match its capture. */
+export function activateSessionWakeReady(
+  sql: SqlStorage,
+  input: SessionWakeReadyInput,
+  guard: string | null,
+  now: number
+): boolean {
+  return commitSessionWakeActivation(sql, input.chatSessionId, input.workspaceId, guard, now);
+}
+
+/** Preserve the existing lifecycle event at activation rather than workspace linkage. */
+export async function recordSessionWakeActivation(
+  input: SessionWakeReadyInput,
+  now: number,
+  admit: (event: AdmitProjectEventInput) => unknown
+): Promise<void> {
+  try {
+    admit(
+      await buildSessionLifecycleEventInput({
+        projectId: input.projectId,
+        sessionId: input.chatSessionId,
+        lifecycle: 'woke',
+        status: 'active',
+        taskId: input.fence.runtime === 'vm' ? input.fence.taskId : null,
+        workspaceId: input.workspaceId,
+        source: 'project_data.snapshot_recovery_wake_session',
+        occurredAt: now,
+      })
+    );
+  } catch (error) {
+    log.warn('project_data.session_lifecycle_event_failed', {
+      projectId: input.projectId,
+      sessionId: input.chatSessionId,
+      lifecycle: 'woke',
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 /** Synchronous after authority read: dedup + attempt marker + deadline update share one transaction. */

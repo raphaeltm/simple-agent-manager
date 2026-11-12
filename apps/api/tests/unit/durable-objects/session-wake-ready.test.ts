@@ -11,10 +11,13 @@ import {
   markPromptDeliverySubmitting,
 } from '../../../src/durable-objects/project-data/prompt-delivery';
 import {
+  activateSessionWakeReady,
   applySessionWakeReady,
+  captureSessionWakeActivation,
   isSessionWakeReadyCurrent,
   type SessionWakeReadyInput,
 } from '../../../src/durable-objects/project-data/session-wake-ready';
+import { sleepSession, wakeSession } from '../../../src/durable-objects/project-data/sessions';
 import type { Env } from '../../../src/env';
 import { versionedPromptCapabilities } from '../../helpers/vm-prompt-delivery-fixtures';
 import { createSqlStorage } from './sql-storage-test-utils';
@@ -51,7 +54,10 @@ describe('wake-ready scheduling with saturated backoff', () => {
       now
     );
   });
-  afterEach(() => db.close());
+  afterEach(() => {
+    vi.restoreAllMocks();
+    db.close();
+  });
   function enqueue(id: string, createdAt = now) {
     acceptPromptDelivery(
       sql,
@@ -194,6 +200,25 @@ describe('wake-ready scheduling with saturated backoff', () => {
     expect(applySessionWakeReady(sql, input, now + 10)).toBe(0);
     expect(claimDuePromptDeliveries(sql, config, now + 10)).toEqual([]);
   });
+  it('activates only the captured sleeping lifecycle and never reactivates a later sleep with the same fence', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(now);
+    expect(sleepSession(sql, 'chat')).toBe(true);
+    const guard = captureSessionWakeActivation(sql, input);
+    expect(guard).not.toBeNull();
+    expect(wakeSession(sql, 'chat', 'workspace', 'task')).toBe(true);
+    expect(sleepSession(sql, 'chat')).toBe(true);
+    // Same status/workspace/timestamp after real lifecycle writers: a clock CAS would accept it.
+    expect(
+      sql.exec("SELECT updated_at FROM chat_sessions WHERE id = 'chat'").toArray()[0]?.updated_at
+    ).toBe(now);
+    expect(activateSessionWakeReady(sql, input, guard, now + 4)).toBe(false);
+    const current = captureSessionWakeActivation(sql, input);
+    expect(activateSessionWakeReady(sql, input, current, now + 5)).toBe(true);
+    applySessionWakeReady(sql, input, now + 5);
+    expect(sleepSession(sql, 'chat')).toBe(true);
+    expect(captureSessionWakeActivation(sql, input)).toBeNull();
+    expect(activateSessionWakeReady(sql, input, null, now + 7)).toBe(false);
+  });
   it('rejects obsolete workspace bindings and never retries expired/accepted/ambiguous deliveries', () => {
     enqueue('expired', now - config.ttlMs);
     enqueue('accepted');
@@ -242,12 +267,13 @@ describe('readiness against actual SQL authority', () => {
       const db = new Database(':memory:');
       try {
         db.exec(`CREATE TABLE nodes (id TEXT, runtime TEXT, status TEXT, runtime_incarnation_id TEXT);
-        CREATE TABLE workspaces (id TEXT, node_id TEXT, project_id TEXT, chat_session_id TEXT, status TEXT, runtime_deletion_confirmed_at TEXT);
-        CREATE TABLE agent_sessions (id TEXT, workspace_id TEXT, status TEXT);
+        CREATE TABLE workspaces (id TEXT, node_id TEXT, project_id TEXT, chat_session_id TEXT, status TEXT, runtime_deletion_confirmed_at TEXT, user_id TEXT);
+        CREATE TABLE agent_sessions (id TEXT, workspace_id TEXT, status TEXT, user_id TEXT);
         CREATE TABLE session_snapshots (chat_session_id TEXT, project_id TEXT, recovery_status TEXT, recovery_workspace_id TEXT, recovery_task_id TEXT, recovery_attempt_id TEXT);
         CREATE TABLE tasks (id TEXT, project_id TEXT, chat_session_id TEXT, status TEXT);
-        INSERT INTO workspaces VALUES ('workspace','node','project','chat','running',NULL);
-        INSERT INTO agent_sessions VALUES ('agent','workspace','running');
+        INSERT INTO workspaces VALUES ('workspace','node','project','chat','running',NULL,'owner');
+        INSERT INTO agent_sessions VALUES ('agent','workspace','running','owner');
+        INSERT INTO agent_sessions VALUES ('foreign-agent','workspace','running','other-user');
         INSERT INTO session_snapshots VALUES ('chat','project','restored','workspace','task','wake-1');
         INSERT INTO tasks VALUES ('task','project','chat','in_progress');`);
         db.prepare('INSERT INTO nodes VALUES (?, ?, ?, ?)').run(
@@ -275,6 +301,9 @@ describe('readiness against actual SQL authority', () => {
         );
         expect(
           await isSessionWakeReadyCurrent(env, { ...ready, agentSessionId: 'replaced-agent' })
+        ).toBe(false);
+        expect(
+          await isSessionWakeReadyCurrent(env, { ...ready, agentSessionId: 'foreign-agent' })
         ).toBe(false);
         if (runtime === 'vm')
           db.exec("UPDATE session_snapshots SET recovery_attempt_id = 'new-wake'");

@@ -62,8 +62,8 @@ export async function scheduled(
 ): Promise<void> {
   if (controller.cron === CAPACITY_POOL_CONTINUATION_CRON) {
     if (!(await isOperationalLoopEnabled(env, 'cron'))) return;
-    const sweeps = createSweepIsolator(env);
-    await sweeps.isolate('capacity_pool_continuation', () =>
+    const continuationSweeps = createSweepIsolator(env);
+    await continuationSweeps.isolate('capacity_pool_continuation', () =>
       runScheduledCapacityPoolContinuations(env)
     );
     return;

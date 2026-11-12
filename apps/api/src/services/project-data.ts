@@ -762,7 +762,8 @@ export async function wakeSessionForSnapshotRecovery(
   projectId: string,
   sessionId: string,
   workspaceId: string,
-  taskId: string
+  taskId: string,
+  options: { deferActivation?: boolean; recoveryAttemptId?: string | null } = {}
 ): Promise<boolean> {
   await assertExactWriteAllowedIfArchiveEnabled(
     env,
@@ -775,12 +776,17 @@ export async function wakeSessionForSnapshotRecovery(
     chatSessionId: sessionId,
     workspaceId,
     taskId,
+    recoveryAttemptId: options.recoveryAttemptId,
+    allowRestored: options.deferActivation === true,
   });
   if (!allowStopped) return false;
   const stub = await getStub(env, projectId);
   const previousStatus = sessionStatus(await stub.getSession(sessionId));
-  const woke = await stub.wakeSession(sessionId, workspaceId, taskId, { allowStopped });
-  if (woke && previousStatus !== 'active') {
+  const woke = await stub.wakeSession(sessionId, workspaceId, taskId, {
+    allowStopped,
+    deferActivation: options.deferActivation,
+  });
+  if (woke && previousStatus !== 'active' && !options.deferActivation) {
     await recordSessionLifecycleEventBestEffort(env, {
       projectId,
       sessionId,

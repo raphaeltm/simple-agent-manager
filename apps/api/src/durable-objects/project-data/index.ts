@@ -632,7 +632,12 @@ export class ProjectData extends DurableObject<Env> {
       this.scheduleSummarySync();
       this.broadcastEvent(
         'session.updated',
-        { sessionId, workspaceId, taskId, status: 'active' },
+        {
+          sessionId,
+          workspaceId,
+          taskId,
+          status: sessionReads.getSession(this.sql, sessionId)?.status,
+        },
         sessionId
       );
     }
@@ -664,11 +669,39 @@ export class ProjectData extends DurableObject<Env> {
     // cannot overwrite a newer fence and make its duplicate appear novel.
     const run = this.wakeReadyLock.then(async () => {
       this.ensureProjectId(input.projectId);
+      const activationGuard = sessionWakeReady.captureSessionWakeActivation(this.sql, input);
       if (!(await sessionWakeReady.isSessionWakeReadyCurrent(this.env, input))) return 0;
       const now = Date.now();
-      const released = this.ctx.storage.transactionSync(() =>
-        sessionWakeReady.applySessionWakeReady(this.sql, input, now)
-      );
+      const { activated, released } = this.ctx.storage.transactionSync(() => {
+        const activated = sessionWakeReady.activateSessionWakeReady(
+          this.sql,
+          input,
+          activationGuard,
+          now
+        );
+        return {
+          activated,
+          released: sessionWakeReady.applySessionWakeReady(this.sql, input, now),
+        };
+      });
+      if (activated) {
+        this.ctx.waitUntil(
+          sessionWakeReady.recordSessionWakeActivation(input, now, (event) =>
+            this.admitProjectEvent(event)
+          )
+        );
+        this.scheduleSummarySync();
+        this.broadcastEvent(
+          'session.updated',
+          {
+            sessionId: input.chatSessionId,
+            workspaceId: input.workspaceId,
+            taskId: input.fence.runtime === 'vm' ? input.fence.taskId : undefined,
+            status: 'active',
+          },
+          input.chatSessionId
+        );
+      }
       // Re-arm even on duplicate: a previous RPC may have committed SQLite before alarm I/O failed.
       await this.recalculateAlarm();
       return released;
