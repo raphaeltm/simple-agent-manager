@@ -5,7 +5,7 @@ import type {
   WorkspaceProfile,
 } from '@simple-agent-manager/shared';
 import { DEFAULT_WORKSPACE_PROFILE, hasByocComputeCredential } from '@simple-agent-manager/shared';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 
@@ -35,7 +35,10 @@ import {
 import { CHAT_SESSION_LIST_LIMIT } from '../../lib/chat-query-config';
 import { getSessionState } from '../../lib/chat-session-utils';
 import { readInitialSessionList } from '../../lib/project-route-prefetch';
-import { applyMessageCommentRealtimeEventToQueryCache } from '../../lib/query-options';
+import {
+  applyMessageCommentRealtimeEventToQueryCache,
+  instantRuntimeEnabledQueryOptions,
+} from '../../lib/query-options';
 import { stripMarkdown } from '../../lib/text-utils';
 import { useProjectContext } from '../ProjectContext';
 import { buildForkMessage } from './profileWizardHelpers';
@@ -141,6 +144,11 @@ export function useProjectChatState() {
     setSelectedAgentType((current) => current ?? firstAgent.id);
   }, [configuredAgents]);
 
+  // Whether Instant can run here decides the runtime of an automatically created first profile.
+  const instantRuntimeQuery = useQuery({
+    ...instantRuntimeEnabledQueryOptions(queryScope),
+    enabled: Boolean(queryScope),
+  });
   // Profiles, the person's picker state and pre-selection, the picker sheet and the
   // inline create-profile wizard.
   const profileChoice = useProfileChoice({
@@ -148,6 +156,7 @@ export function useProjectChatState() {
     queryScope,
     configuredAgents,
     selectedAgentType,
+    instantEnabled: instantRuntimeQuery.data === true,
   });
   const {
     agentProfiles,
@@ -414,7 +423,6 @@ export function useProjectChatState() {
       const fallback = profilePickerInput.status === 'ready' ? profilePickerInput : null;
       return selectProfileId(null, agentProfiles, fallback ?? { status: 'unavailable' });
     }
-
     openProfileWizard();
     setSubmitError('Create a profile before sending your first message.');
     return null;
@@ -698,6 +706,7 @@ export function useProjectChatState() {
     closeProfileWizard: profileChoice.closeProfileWizard,
     updateProfileWizard: profileChoice.updateProfileWizard,
     createProfileFromWizard: profileChoice.createProfileFromWizard,
+    createDefaultChatProfile: profileChoice.createDefaultChatProfile,
     suggestProfileName: profileChoice.suggestProfileName,
     handleUpdateProfile: profileChoice.handleUpdateProfile,
     slashCommands,

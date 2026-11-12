@@ -186,4 +186,11 @@ describe('publicPlatformCapabilities', () => {
     expect(Object.values(view).every((value) => typeof value === 'boolean')).toBe(true);
     expect(JSON.stringify(view)).not.toMatch(/token|secret|account-1|key/i);
   });
+
+  it('reports agent model calls only where the Workers AI binding exists', () => {
+    expect(publicPlatformCapabilities(cloudflareEnv()).agentModelCalls).toBe(true);
+    expect(publicPlatformCapabilities({ ...cloudflareEnv(), AI: undefined }).agentModelCalls).toBe(
+      false
+    );
+  });
 });

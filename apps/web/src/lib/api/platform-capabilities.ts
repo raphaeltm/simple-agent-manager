@@ -12,6 +12,8 @@ export interface PlatformCapabilities {
   liveLogStream: boolean;
   /** Whether app deployments can run here (needs Cloudflare DNS for node and app routes). */
   appDeployments: boolean;
+  /** Whether agents can call Cloudflare-hosted models (needs Workers AI). False on self-host. */
+  agentModelCalls: boolean;
 }
 
 /**
@@ -26,6 +28,7 @@ export const ASSUMED_PLATFORM_CAPABILITIES: PlatformCapabilities = Object.freeze
   logSearch: true,
   liveLogStream: true,
   appDeployments: true,
+  agentModelCalls: true,
 });
 
 /**

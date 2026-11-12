@@ -83,6 +83,8 @@ type ChatInputProps = Readonly<{
   onCloseProfileWizard: () => void;
   onUpdateProfileWizard: (patch: Partial<ProfileWizardState>) => void;
   onCreateProfileFromWizard: () => Promise<AgentProfile | null>;
+  /** One click for a project with one agent: create its default chat profile (no wizard). */
+  onCreateDefaultChatProfile?: () => Promise<AgentProfile | null>;
   suggestProfileName: (agentType: string | null, workType: TaskMode | null) => string;
   slashCommands?: SlashCommand[];
   attachments?: ChatAttachmentDisplay[];
@@ -146,6 +148,7 @@ export function ChatInput({
   onCloseProfileWizard,
   onUpdateProfileWizard,
   onCreateProfileFromWizard,
+  onCreateDefaultChatProfile,
   suggestProfileName,
   slashCommands,
   attachments,
@@ -224,7 +227,18 @@ export function ChatInput({
       {noAgents && <NoAgentsNotice projectId={projectId} />}
 
       {needsProfileBeforeSubmit && !profileWizard.open && (
-        <NoProfilesGate onStartWizard={onOpenProfileWizard} />
+        <NoProfilesGate
+          onStartWizard={onOpenProfileWizard}
+          quickStart={
+            agents.length === 1 && onCreateDefaultChatProfile
+              ? {
+                  label: `Start chatting with ${agents[0]?.name ?? 'the agent'}`,
+                  profileName: suggestProfileName(agents[0]?.id ?? null, 'conversation'),
+                  onCreate: onCreateDefaultChatProfile,
+                }
+              : undefined
+          }
+        />
       )}
 
       {profileWizard.open && (
