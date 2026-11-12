@@ -92,6 +92,28 @@ export class ProjectDataTestDouble extends ProjectData {
     this.copyBackMarkFailuresForTest = 1;
   }
 
+  async archiveSourceReclaimPageCapturedForTest(
+    input: archiveSharding.ArchiveSourceReclaimPageInput
+  ): Promise<CapturedExpectedError> {
+    try {
+      await super.archiveSourceReclaimPage(input);
+      return { threw: false };
+    } catch (error) {
+      return capture(error);
+    }
+  }
+
+  async createCommentThreadCapturedForTest(
+    input: Parameters<ProjectData['createCommentThread']>[0]
+  ): Promise<CapturedExpectedError> {
+    try {
+      await this.createCommentThread(input);
+      return { threw: false };
+    } catch (error) {
+      return capture(error);
+    }
+  }
+
   override async archiveSourceReclaimPage(
     input: archiveSharding.ArchiveSourceReclaimPageInput
   ): Promise<archiveSharding.ArchiveSourceReclaimPageResult> {

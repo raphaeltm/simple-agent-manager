@@ -115,7 +115,10 @@ PR A design (decided):
   then grouped + FTS markers, then tool payload archives). Coordinator reclaims after each flip
   and in a reclaim pass at the start of each tick, under the tick deadline.
 - Root exact reads for a `source_deleted` intent already fail closed; routing already points
-  at the shard. Copy-back must refuse while reclaim is outstanding.
+  at the shard. Copy-back (as shipped): the coordinator drains reclaim first, the root refuses a
+  first restore chunk while leftovers remain, and a `do_meta` fence keeps reclaim off rows a
+  copy-back is restoring. This replaces the earlier "copy-back requires `published`" idea: the
+  journal reaches `published` at the flip, so that gate would not have protected anything.
 - Audit (item 7): tool-payload cleanup, grouped FTS cleanup, materialization, storage
   measurement, breaker alerts, root search dedupe.
 
@@ -127,7 +130,7 @@ PR A progress (branch `sam/archive-flip-reclaim`, worktree `/workspaces/sam-arch
 - [x] Comment guard checks the `source_deleted` intent before the row (comments.ts).
 - [x] Copy-back fence: `do_meta` key `archive_copy_back_in_progress:<session>` set by the first
       restore chunk, cleared by `markSourceCopyBackRestored`; reclaim refuses / listing skips.
-- [x] Tests `tests/workers/project-data-archive-flip-reclaim.test.ts` (4) + updated sharding,
+- [x] Tests `tests/workers/project-data-archive-flip-reclaim.test.ts` (7) + updated sharding,
       compact, throughput suites; test-double failure injection in `support/expected-error-doubles.ts`.
       Discriminating: comment guard, copy-back fence, pending pass each redden one test.
 - Audit note (2026-11-12 22:18Z): tool-payload cleanup (`tool-payload-cleanup-candidates.ts`) scans
@@ -136,6 +139,15 @@ PR A progress (branch `sam/archive-flip-reclaim`, worktree `/workspaces/sam-arch
   interrupted reclaim and the next tick's pending pass (≤ one 18-min cadence), and cleanup runs
   only under an approved plan. Not changed: that scan feeds manifest-checked emergency plans
   (rule 69), where altering candidate selection changes approved row counts.
+- Reclaim throughput (rule 81): pages of `PROJECT_DATA_ARCHIVE_CHUNK_ROWS` (500) rows, clamped at
+  2,000. Production delete cost was 0.7-5.5 s per 4.4k-9k-message session (~0.1-0.6 ms/row), so a
+  100k-message session is ~10-60 s of reclaim, run as ~200 pages of 0.05-0.3 s each across at most
+  two 60 s ticks (post-flip, then the next tick's pending pass).
+- Deferred to PR B (tracked here): a deterministic test of the deadline exit in
+  `reclaimFlippedSession` / `reclaimPendingSources` (the tick checks the deadline before
+  journaling, so a tiny wall time cannot flip first); an operator signal for reclaim that stays
+  pending across ticks (today: `reclaimPending` in sweep stats + per-session warn logs); reclaimed
+  bytes in the reclaim log (today only the intent's `source_database_size_after`).
 - [ ] Remaining audit (item 7): tool-payload cleanup / materialization / grouped-FTS cleanup on
       leftover rows (convergent by design: messages deleted first), breaker alerts, storage
       measurement; docs (configuration.md archive section, self-hosting copy-back notes).

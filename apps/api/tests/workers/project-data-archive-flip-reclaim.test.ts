@@ -127,7 +127,21 @@ describe('archive flip then paged reclaim', () => {
       // Reads route to the shard: the full transcript, in order.
       const page = await projectDataService.getMessages(testEnv, projectId, sessionId, 100);
       expect(page.messages.map((row) => String(row.id))).toEqual(messageIds);
-      // Project-wide search sees the root leftovers AND the shard copy; each message once.
+      // The root still indexes the leftovers, so the project-wide search below sees each message
+      // from the root AND from the shard; the assertion is that it returns each one once.
+      const rootHits = await runInDurableObject(source, async (_instance, state) =>
+        Number(
+          state.storage.sql
+            .exec(
+              `SELECT COUNT(*) AS n FROM chat_messages_grouped_fts f
+               JOIN chat_messages_grouped g ON g.rowid = f.rowid
+               WHERE chat_messages_grouped_fts MATCH 'reclaimprobe' AND g.session_id = ?`,
+              sessionId
+            )
+            .toArray()[0]?.n ?? 0
+        )
+      );
+      expect(rootHits).toBeGreaterThan(0);
       const { results } = await projectDataService.searchMessagesWithArchiveMetadata(
         testEnv,
         projectId,
@@ -141,14 +155,16 @@ describe('archive flip then paged reclaim', () => {
       expect(new Set(ids).size).toBe(ids.length);
     });
     // A comment on a leftover row would be cascade-deleted by reclaim, so it is refused.
-    await expect(
-      source.createCommentThread({
-        sessionId,
-        messageId: messageIds[0]!,
-        body: 'late comment',
-        actor: { kind: 'agent', id: 'reclaim-test', name: 'Reclaim Test' },
-      })
-    ).rejects.toThrow(/moved to a ProjectData archive shard/);
+    // Captured inside the DO: an exception escaping a DO method is reported by the workers pool
+    // as an unhandled error even when the caller awaits the rejection.
+    const comment = await source.createCommentThreadCapturedForTest({
+      sessionId,
+      messageId: messageIds[0]!,
+      body: 'late comment',
+      actor: { kind: 'agent', id: 'reclaim-test', name: 'Reclaim Test' },
+    });
+    expect(comment).toMatchObject({ threw: true });
+    expect(comment.message).toMatch(/moved to a ProjectData archive shard/);
 
     const second = await withArchiveEnv(sweepEnv(), () =>
       runProjectDataArchiveSharding(testEnv, new Date(Date.now() + 120_000))
@@ -267,16 +283,50 @@ describe('archive flip then paged reclaim', () => {
     expect((await rootRowCounts(source, sessionId)).messages).toBe(MESSAGES);
   });
 
+  it('caps one reclaim page at 2,000 rows whatever the caller asks for', async () => {
+    const { projectId, sessionId, source } = await seedArchivedCandidate('reclaim-cap');
+    // Grow the session past one capped page before archiving it.
+    const extra = seedMessages(2_100).map((message) => ({
+      ...message,
+      messageId: `cap-${message.messageId}`,
+      timestamp: new Date(9_000_000 + message.sequence * 1_000).toISOString(),
+      sequence: message.sequence + MESSAGES,
+    }));
+    await source.failNextArchiveReclaimPagesForTest(1);
+    await runInDurableObject(source, async (_instance, state) => {
+      state.storage.sql.exec("UPDATE chat_sessions SET status = 'active' WHERE id = ?", sessionId);
+    });
+    for (let offset = 0; offset < extra.length; offset += 250) {
+      await source.persistMessageBatch(sessionId, extra.slice(offset, offset + 250));
+    }
+    await source.stopSession(sessionId);
+    await source.runSummarySyncForTest();
+    await isolateSweepFixture(projectId, { clearCadence: true });
+    await withArchiveEnv(sweepEnv({ PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET: '10000' }), () =>
+      runProjectDataArchiveSharding(testEnv, new Date(Date.now() + 60_000))
+    );
+    const migrationId = await publishedMigrationId(projectId, sessionId);
+
+    const page = await source.archiveSourceReclaimPage({
+      projectId,
+      sessionId,
+      migrationId,
+      maxRows: 1_000_000,
+    });
+    expect(page.messagesDeleted).toBe(2_000);
+    expect(page.remaining).toBe(true);
+  });
+
   it('refuses to reclaim a session whose flip has not committed', async () => {
     const { projectId, sessionId, source } = await seedArchivedCandidate('reclaim-early');
-    await expect(
-      source.archiveSourceReclaimPage({
-        projectId,
-        sessionId,
-        migrationId: 'not-a-migration',
-        maxRows: 10,
-      })
-    ).rejects.toThrow(/only after this migration flipped the session/);
+    const refused = await source.archiveSourceReclaimPageCapturedForTest({
+      projectId,
+      sessionId,
+      migrationId: 'not-a-migration',
+      maxRows: 10,
+    });
+    expect(refused).toMatchObject({ threw: true });
+    expect(refused.message).toMatch(/only after this migration flipped the session/);
     expect((await rootRowCounts(source, sessionId)).messages).toBe(MESSAGES);
   });
 });

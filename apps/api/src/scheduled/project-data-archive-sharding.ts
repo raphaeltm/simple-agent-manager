@@ -3858,6 +3858,12 @@ export async function copyBackProjectDataArchiveMigration(
     });
     // A retried copy-back finds its own fence: the rows are restored ones, keep them.
     if (!page.remaining || page.copyBackInProgress) break;
+    const deleted = page.messagesDeleted + page.groupedRowsDeleted + page.toolArchiveRowsDeleted;
+    if (deleted === 0) {
+      // Rows remain but none can be deleted: stop rather than spin; the root refuses the first
+      // restore chunk over leftovers, so the copy-back fails closed.
+      break;
+    }
   }
 
   let chunksCopied = 0;
