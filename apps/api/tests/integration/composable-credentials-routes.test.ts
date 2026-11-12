@@ -22,7 +22,7 @@ const routeFile = [
 ]
   .map((file) => readFileSync(resolve(process.cwd(), file), 'utf8'))
   .join('\n');
-const schemaFile = readFileSync(resolve(process.cwd(), 'src/db/schema.ts'), 'utf8');
+const schemaFile = readFileSync(resolve(process.cwd(), '../../packages/worker-core/src/schema.ts'), 'utf8');
 const resolveFile = readFileSync(
   resolve(process.cwd(), 'src/services/composable-credentials/resolve.ts'),
   'utf8'

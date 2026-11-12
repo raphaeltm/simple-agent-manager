@@ -297,7 +297,7 @@ Mermaid lays a diagram out in the live page before it is sanitized, so a remote 
 
 ## Secret Redaction in Logs and Diagnostics
 
-Credential tokens are stripped before text reaches a log line or a stored diagnostic: OpenAI and Anthropic `sk-...` keys (including `sk-proj-...` and `sk-ant-...`), OpenCode `oc_sk_...` keys, GitHub tokens (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_`), and SAM personal access and webhook tokens. Every API redactor takes these token shapes from one definition, `redactCredentialTokens` in `apps/api/src/lib/credential-token-redaction.ts`: structured Worker logs (`apps/api/src/lib/logger.ts`), stored VM agent error reports and debug-agent evidence (`redactSensitiveData`), comment directives delivered to agents, deployment publish and apply events, Report Issue text, and agent sign-in helper diagnostics. `Bearer ...` and `Basic ...` values are matched by each redactor's own rule, because those are also ordinary words and a log line can afford to over-redact where text shown to a user cannot. Redaction is pattern-based and best-effort - a safety net, not a reason to paste secrets anywhere.
+Credential tokens are stripped before text reaches a log line or a stored diagnostic: OpenAI and Anthropic `sk-...` keys (including `sk-proj-...` and `sk-ant-...`), OpenCode `oc_sk_...` keys, GitHub tokens (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_`), and SAM personal access and webhook tokens. Every API redactor takes these token shapes from one definition, `redactCredentialTokens` in `packages/worker-core/src/credential-token-redaction.ts`: structured Worker logs (`packages/worker-core/src/logger.ts`), stored VM agent error reports and debug-agent evidence (`redactSensitiveData`), comment directives delivered to agents, deployment publish and apply events, Report Issue text, and agent sign-in helper diagnostics. `Bearer ...` and `Basic ...` values are matched by each redactor's own rule, because those are also ordinary words and a log line can afford to over-redact where text shown to a user cannot. Redaction is pattern-based and best-effort - a safety net, not a reason to paste secrets anywhere.
 
 ## Shared Chat Sessions
 
@@ -358,7 +358,7 @@ Instant workspaces run in Cloudflare Containers and do not use repository devcon
 
 ### One node belongs to one user
 
-- Every node has a required owner (`nodes.user_id` in `apps/api/src/db/schema.ts`).
+- Every node has a required owner (`nodes.user_id` in `packages/worker-core/src/schema.ts`).
 - The task runner reuses only the requesting user's own running or warm nodes (`apps/api/src/durable-objects/task-runner/node-selection.ts`). Creating a workspace on a specific node requires owning that node (`getOwnedNode` in `apps/api/src/routes/workspaces/_helpers.ts`).
 - SAM is self-hosted. A person or an organization runs each installation, and nodes live in a cloud account that belongs to the user, the project or the installation operator (see the Cloud Credential Model above). SAM does not mix unrelated customers on shared hosts.
 - Nodes hold no cloud-account credentials. The provider API token stays in the control plane, GCP VMs are created without a service account (`packages/providers/src/gcp.ts`), and cloud-init blocks containers from reaching the cloud metadata endpoint (`packages/cloud-init/src/template.ts`).
