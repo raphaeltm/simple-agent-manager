@@ -97,7 +97,9 @@ vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => createMockDb(),
 }));
 
-vi.mock('drizzle-orm', () => ({
+vi.mock('drizzle-orm', async (importOriginal) => ({
+  // Spread the real module: the operations package's entry loads the D1 schema, which calls `sql`.
+  ...(await importOriginal<typeof import('drizzle-orm')>()),
   and: (...args: unknown[]) => args,
   eq: (a: unknown, b: unknown) => [a, b],
   desc: (col: unknown) => col,

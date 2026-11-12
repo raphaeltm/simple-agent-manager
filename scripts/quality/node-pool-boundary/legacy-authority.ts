@@ -38,6 +38,7 @@ const AUTHORITY_SINK_ROOTS = [
   'apps/api/src',
   'packages/providers/src',
   'packages/scheduler-core/src',
+  'packages/operations/src',
 ] as const;
 
 const COMPARISON_OPERATORS = new Set<ts.SyntaxKind>([
