@@ -183,6 +183,22 @@ chat fails with "No eligible compute-pool offering is available in the installat
 for this task's requirements (2 vCPU, 4096 MB memory, 15 GB disk)". On Google Cloud add
 `e2-standard-2` (2 vCPU, 8 GB); keep `e2-medium` for smaller work if you like.
 
+## Backup, restore and upgrade
+
+```bash
+pnpm selfhost:backup                         # -> deploy/selfhost/backups/<UTC time>/ (mode 0700)
+pnpm selfhost:restore --from <backup dir>    # into an EMPTY bucket and .state/ only
+```
+
+A backup is the fleet bucket (celld's only durable state), `.state/` and `.env`: a live copy,
+then celld stopped for the delta copy only, then restarted; the downtime is printed and kept in
+`backup-manifest.json`. gs:// buckets copy with `gcloud storage rsync`; s3:// buckets (the
+bundled store too) with `mc mirror` from the pinned objectstore image. A backup holds every
+Worker secret in plaintext: keep it where only you can read it. Restore refuses a bucket that
+holds objects or a `.state/` with platform keys, and leaves celld stopped: start it with the same
+SAM checkout the backup recorded (`samCommit` in the manifest), never an older one. There is no
+point-in-time recovery: a backup is the recovery point. Code: `scripts/selfhost/backup-lib.ts`.
+
 ## Logs
 
 Caddy writes one JSON access-log line per request, for every SAM host (`app.`, `api.`, `ws-*`,

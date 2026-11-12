@@ -41,6 +41,8 @@
     "selfhost:test": "vitest run --config scripts/selfhost/vitest.config.ts",
     "selfhost:live-test": "vitest run --config scripts/selfhost/live/vitest.config.ts",
     "selfhost:verify-fence": "tsx scripts/selfhost/verify-fence.ts",
+    "selfhost:backup": "tsx scripts/selfhost/backup.ts",
+    "selfhost:restore": "tsx scripts/selfhost/restore.ts",
     "quality:preflight": "tsx scripts/quality/check-preflight-evidence.ts",
     "test:acp-c2-remote-service": "node tests/fixtures/acp-c2-remote-service.test.mjs",
     "quality:wrangler-bindings": "tsx scripts/quality/check-wrangler-bindings.ts",
