@@ -10,10 +10,7 @@
  */
 import git from 'isomorphic-git';
 
-import {
-  guardedFetch,
-  OutboundRequestRefusedError,
-} from '../../lib/network-hosts/guarded-fetch';
+import { guardedFetch, OutboundRequestRefusedError } from '../../lib/network-hosts/guarded-fetch';
 import { errors } from '../../middleware/error';
 import { createFetchHttpClient } from '../repo-browse/fetch-http-client';
 import { MemoryFS } from '../repo-browse/memory-fs';
