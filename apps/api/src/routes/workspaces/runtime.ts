@@ -151,7 +151,11 @@ async function callbackJsonWithJit<T extends Record<string, unknown>>(
       body.credentialReference,
       expected,
       undefined,
-      agentSessionId
+      agentSessionId,
+      {
+        credentialGeneration:
+          typeof body.credentialGeneration === 'number' ? body.credentialGeneration : undefined,
+      }
     );
   return c.json(body);
 }

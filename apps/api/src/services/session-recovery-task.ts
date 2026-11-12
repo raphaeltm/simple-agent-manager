@@ -205,6 +205,7 @@ export async function startRecoveryTask(
       opencodeBaseUrl: contract?.opencodeBaseUrl ?? null,
       systemPromptAppend: profile?.systemPromptAppend ?? null,
       agentProfileHint: task.agentProfileHint,
+      skillId: task.skillId,
       projectScaling: {
         taskExecutionTimeoutMs: context.project.taskExecutionTimeoutMs,
         nodeCpuThresholdPercent: context.project.nodeCpuThresholdPercent,
@@ -222,6 +223,9 @@ export async function startRecoveryTask(
       retrySourceTaskId: null,
       projectEventWakeGuard: sourceTaskGuard?.projectEventWake ?? null,
       recoveryRequiredProjectMemberId: sourceTaskGuard?.requiredProjectMemberId ?? null,
+      ...(sourceTaskGuard?.providerLimitApproval
+        ? { providerLimitRecoveryApproval: sourceTaskGuard.providerLimitApproval }
+        : {}),
     },
     { reactivate: true }
   );

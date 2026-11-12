@@ -9,6 +9,10 @@
  */
 import type { Env } from '../../env';
 import { parseProviderLimitWait } from '../../services/provider-limit-policy';
+import {
+  loadProviderLimitRecoveryApproval,
+  providerLimitRecoveryApprovalIsCurrent,
+} from '../../services/provider-limit-recovery-approval';
 import { assertReplacementDeletionConfirmed } from '../../services/replacement-deletion-fence';
 import {
   findSessionRecoveryTaskAndEventAuthorityFailure,
@@ -36,13 +40,20 @@ type RecoveryAttemptFailure = Extract<
 async function findRecoveryAttemptFailure(
   env: Env,
   ctx: DurableObjectState,
-  input: StartTaskInput | TaskRunnerState
+  input: StartTaskInput | TaskRunnerState,
+  persistedState?: TaskRunnerState | null
 ): Promise<RecoveryAttemptFailure | null> {
   if ('stepResults' in input) {
-    const persisted = await ctx.storage.get<TaskRunnerState>('state');
+    const persisted =
+      persistedState === undefined
+        ? await ctx.storage.get<TaskRunnerState>('state')
+        : persistedState;
     if (
       persisted &&
-      (persisted.config.recoveryAttemptId ?? null) !== (input.config.recoveryAttemptId ?? null)
+      (persisted.taskId !== input.taskId ||
+        persisted.projectId !== input.projectId ||
+        persisted.userId !== input.userId ||
+        (persisted.config.recoveryAttemptId ?? null) !== (input.config.recoveryAttemptId ?? null))
     )
       return 'runner_attempt_superseded';
   }
@@ -84,8 +95,24 @@ export async function findRecoveryAuthorityFailure(
   ctx: DurableObjectState,
   input: StartTaskInput | TaskRunnerState
 ): Promise<SessionRecoveryAuthorityCheck | null> {
-  const attemptFailure = await findRecoveryAttemptFailure(env, ctx, input);
+  const persisted = 'stepResults' in input ? await ctx.storage.get<TaskRunnerState>('state') : null;
+  const attemptFailure = await findRecoveryAttemptFailure(env, ctx, input, persisted ?? null);
   if (attemptFailure) return attemptFailure;
+  // A nudge can install consent while this step is awaiting an external call.
+  // The captured input must not erase or bypass the same-attempt stored guard.
+  const approval =
+    persisted?.config.providerLimitRecoveryApproval ?? input.config.providerLimitRecoveryApproval;
+  if (
+    approval &&
+    !(await providerLimitRecoveryApprovalIsCurrent(
+      env,
+      input.taskId,
+      input.projectId,
+      approval,
+      true
+    ))
+  )
+    return 'recovery_task_authority';
   // Owner force-resume can approve a previously unguarded human-message wake.
   // Keep its existing claim, while making that approval revocable at every
   // external runner boundary rather than only when the owner clicked.
@@ -106,6 +133,32 @@ export async function findRecoveryAuthorityFailure(
     parseProviderLimitWait(ownerApproval.provider_limit_wait_json)?.ownerOverride
   )
     return 'recovery_task_authority';
+  // The same live state is used by bootstrap and its legacy skill fallback.
+  if (approval) input.config.providerLimitRecoveryApproval = approval;
+  // The owner CAS may commit before the nudge reaches this runner. Reconstruct
+  // that live scoped guard rather than treating an old unguarded state as consent.
+  if (!approval && ownerApproval) {
+    const wait = parseProviderLimitWait(ownerApproval.provider_limit_wait_json);
+    if (wait?.ownerOverride?.ownerUserId && wait.ownerOverride.snapshotId) {
+      const liveApproval = await loadProviderLimitRecoveryApproval(
+        env,
+        input.taskId,
+        ownerApproval.provider_limit_wait_json
+      );
+      if (
+        !liveApproval ||
+        !(await providerLimitRecoveryApprovalIsCurrent(
+          env,
+          input.taskId,
+          input.projectId,
+          liveApproval,
+          true
+        ))
+      )
+        return 'recovery_task_authority';
+      input.config.providerLimitRecoveryApproval = liveApproval;
+    }
+  }
   const sourceTaskId = input.config.recoverySourceTaskId ?? null;
   const chatSessionId = input.config.resumeSnapshotChatSessionId ?? null;
   // A human follow-up may recover a completed conversation without a live

@@ -216,7 +216,8 @@ async function claimOnce(
           and(
             eq(schema.sessionSnapshots.chatSessionId, input.chatSessionId),
             eq(schema.sessionSnapshots.recoveryStatus, 'waking'),
-            eq(schema.sessionSnapshots.recoveryTaskId, snapshot.recoveryTaskId)
+            eq(schema.sessionSnapshots.recoveryTaskId, snapshot.recoveryTaskId),
+            sourceTaskGuardCondition(db, input.sourceTaskGuard)
           )
         );
       return { status: 'waking', taskId: snapshot.recoveryTaskId };

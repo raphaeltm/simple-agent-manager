@@ -15,9 +15,17 @@ import {
   resolveProviderLimitProfileId,
 } from './provider-limit-approval-context';
 import type { ProviderLimitWait } from './provider-limit-policy';
+import {
+  loadProviderLimitRecoveryApproval,
+  providerLimitRecoveryApprovalD1Fence,
+} from './provider-limit-recovery-approval';
 import { requireSessionWriter } from './session-access';
-import { ensureSessionRecovery, type SessionRecoveryResult } from './session-recovery';
-import { nudgeTaskRunnerDO } from './task-runner-do';
+import {
+  canRepairSessionRecoveryRunner,
+  ensureSessionRecovery,
+  type SessionRecoveryResult,
+} from './session-recovery';
+import { getTaskRunnerStatus, nudgeTaskRunnerDO } from './task-runner-do';
 
 export function canResumeProviderLimitTaskAnyway(
   task: Pick<schema.Task, 'status' | 'admissionState'>,
@@ -46,13 +54,7 @@ export async function forceResumeSavedProviderLimitTask(
   const writer = await requireSessionWriter(env, task.projectId, task.chatSessionId, ownerUserId, {
     action: 'resume despite the provider limit',
   });
-  if (
-    writer.role !== 'owner' ||
-    writer.ownerUserId !== ownerUserId ||
-    writer.session.taskId !== task.id ||
-    writer.session.status !== 'sleeping'
-  )
-    throw errors.conflict('The saved session authority changed; refresh before resuming');
+  assertSavedSessionAuthority(writer, task, ownerUserId);
 
   const now = Date.now();
   const nowIso = new Date(now).toISOString();
@@ -164,18 +166,30 @@ export async function forceResumeSavedProviderLimitTask(
   if (!changed.meta.changes)
     throw errors.conflict('Task changed while resuming; refresh and try again');
 
+  const recoveryApproval = {
+    receipt: overridden,
+    ownerUserId,
+    snapshotId: snapshot.id,
+    expiresAt: wait.deadlineAt,
+    sourceCredentialReference: snapshot.agent_credential_reference,
+  };
+
   // Never clear a claim, even when an RPC response is lost. The normal runner's
   // authority checks and alarms own restoration and receipt reconciliation.
   if (snapshot.recovery_status === 'waking') {
     let nudged: boolean;
     try {
-      nudged = await nudgeTaskRunnerDO(env, task.id, 'Owner resumed despite provider limit');
+      nudged = await nudgeTaskRunnerDO(
+        env,
+        task.id,
+        'Owner resumed despite provider limit',
+        recoveryApproval
+      );
     } catch {
       throw errors.conflict('Resume accepted, but the runner did not confirm; refresh shortly');
     }
     if (!nudged) {
-      await restoreHold();
-      throw errors.conflict('The existing recovery runner is unavailable; try again shortly');
+      await handleRefusedRecoveryNudge(env, task, snapshot.recovery_attempt_id, restoreHold);
     }
   } else {
     let result: SessionRecoveryResult;
@@ -185,6 +199,7 @@ export async function forceResumeSavedProviderLimitTask(
         projectId: task.projectId,
         chatSessionId: task.chatSessionId,
         requiredProjectMemberId: ownerUserId,
+        providerLimitApproval: recoveryApproval,
       });
     } catch {
       // A lookup can fail before recovery acquires any claim. Restore only if
@@ -198,7 +213,13 @@ export async function forceResumeSavedProviderLimitTask(
       throw errors.conflict(`Unable to resume the saved task: ${result.reason}`);
     }
   }
-  await acknowledgeProviderLimitRecovery(env, task.id, overridden);
+  await acknowledgeProviderLimitRecovery(
+    env,
+    task.id,
+    overridden,
+    false,
+    snapshot.recovery_status === 'waking' ? snapshot.recovery_attempt_id : undefined
+  );
   await projectData
     .syncProviderLimitAttention(env, task.projectId, task.id, task.chatSessionId)
     .catch(() =>
@@ -233,13 +254,62 @@ export async function forceResumeSavedProviderLimitTask(
   }
 }
 
+async function handleRefusedRecoveryNudge(
+  env: Env,
+  task: Pick<schema.Task, 'id' | 'projectId' | 'userId' | 'chatSessionId'>,
+  recoveryAttemptId: string | null,
+  restoreHold: () => Promise<void>
+): Promise<never> {
+  let status;
+  try {
+    status = await getTaskRunnerStatus(env, task.id);
+  } catch {
+    throw errors.conflict('Resume accepted, but the runner did not confirm; refresh shortly');
+  }
+  // Claim-before-runner crashes need the pending receipt for bounded repair.
+  if (
+    canRepairSessionRecoveryRunner(status, {
+      taskId: task.id,
+      projectId: task.projectId,
+      userId: task.userId,
+      chatSessionId: task.chatSessionId ?? '',
+      recoveryAttemptId: recoveryAttemptId ?? '',
+    })
+  )
+    throw errors.conflict('Resume accepted; the recovery runner will be repaired shortly');
+  await restoreHold();
+  throw errors.conflict('The existing recovery runner is unavailable; try again shortly');
+}
+
 /** Exact approval CAS: a newer rejection/approval must retain its own intent. */
-export async function acknowledgeProviderLimitRecovery(env: Env, taskId: string, receipt: string) {
+export async function acknowledgeProviderLimitRecovery(
+  env: Env,
+  taskId: string,
+  receipt: string,
+  requireCommittedRun = false,
+  expectedRecoveryAttemptId?: string | null
+) {
+  const approval = await loadProviderLimitRecoveryApproval(env, taskId, receipt);
+  if (!approval) return;
+  const fence = providerLimitRecoveryApprovalD1Fence('tasks', approval, true, requireCommittedRun);
+  // A claim can advance after the DO's authority read but before its ACK.
+  // Clear only the attempt that this caller actually nudged.
+  const claimFence =
+    expectedRecoveryAttemptId === undefined
+      ? { sql: '', params: [] }
+      : {
+          sql: `AND EXISTS (SELECT 1 FROM session_snapshots acknowledged_snapshot
+      WHERE acknowledged_snapshot.id=? AND acknowledged_snapshot.project_id=tasks.project_id
+        AND acknowledged_snapshot.chat_session_id=tasks.chat_session_id
+        AND acknowledged_snapshot.user_id=tasks.user_id
+        AND acknowledged_snapshot.recovery_attempt_id IS ?)`,
+          params: [approval.snapshotId, expectedRecoveryAttemptId],
+        };
   await env.DATABASE.prepare(
     `UPDATE tasks SET admission_state=NULL,admission_reason=NULL,admission_next_retry_at=NULL
-     WHERE id=? AND admission_state='provider_limit_recovery_pending' AND provider_limit_wait_json IS ?`
+     WHERE id=? AND admission_state='provider_limit_recovery_pending' ${fence.sql} ${claimFence.sql}`
   )
-    .bind(taskId, receipt)
+    .bind(taskId, ...fence.params, ...claimFence.params)
     .run();
 }
 
@@ -282,4 +352,18 @@ async function resolveSavedProviderLimitSelection(
     );
 
   return profileId;
+}
+
+function assertSavedSessionAuthority(
+  writer: Awaited<ReturnType<typeof requireSessionWriter>>,
+  task: schema.Task,
+  ownerUserId: string
+): void {
+  if (
+    writer.role !== 'owner' ||
+    writer.ownerUserId !== ownerUserId ||
+    writer.session.taskId !== task.id ||
+    writer.session.status !== 'sleeping'
+  )
+    throw errors.conflict('The saved session authority changed; refresh before resuming');
 }

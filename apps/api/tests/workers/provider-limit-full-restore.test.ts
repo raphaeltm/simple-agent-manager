@@ -11,6 +11,7 @@ import {
   parseProviderLimitWait,
   PROVIDER_LIMIT_CONTINUATION,
 } from '../../src/services/provider-limit-policy';
+import { preserveProviderLimitWait } from '../../src/services/provider-limit-reconciliation';
 import { ensureSessionRecovery } from '../../src/services/session-recovery';
 import { buildSessionSnapshotR2Key } from '../../src/services/session-snapshots';
 import {
@@ -44,7 +45,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-async function snapshot(f: Fixture, token: string) {
+async function snapshot(f: Fixture, token: string, agentSessionId = `a-${f.id}`) {
   const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
   const base = `https://api.test.example.com/api/workspaces/${f.workspaceId}/session-snapshot`;
   const prepared = await SELF.fetch(`${base}/prepare`, {
@@ -52,7 +53,7 @@ async function snapshot(f: Fixture, token: string) {
     headers,
     body: JSON.stringify({
       chatSessionId: f.chatSessionId,
-      agentSessionId: `a-${f.id}`,
+      agentSessionId,
       runtime: 'vm',
     }),
   });
@@ -72,7 +73,7 @@ async function snapshot(f: Fixture, token: string) {
     body: JSON.stringify({
       chatSessionId: f.chatSessionId,
       generation,
-      agentSessionId: `a-${f.id}`,
+      agentSessionId,
       runtime: 'vm',
       status: 'available',
       degradation: 'none',
@@ -80,7 +81,7 @@ async function snapshot(f: Fixture, token: string) {
         version: 1,
         chatSessionId: f.chatSessionId,
         workspaceId: f.workspaceId,
-        agentSessionId: `a-${f.id}`,
+        agentSessionId,
         acpSessionId: 'saved-harness',
         agentType: f.agentType,
         status: 'available',
@@ -92,9 +93,22 @@ async function snapshot(f: Fixture, token: string) {
     }),
   });
   expect(completed.status, await completed.text()).toBe(200);
+  return generation;
 }
 
-function vmPeer(f: Fixture, replacementNode: string, restoreFailure: boolean) {
+type RestoreInjection = { workspaceId: string; agentSessionId: string; token: string };
+type RestoreInjectionHooks = {
+  before?: (injection: RestoreInjection) => Promise<void>;
+  observe?: (response: Response, injection: RestoreInjection) => Promise<void>;
+  expectedStatus?: number;
+};
+
+function vmPeer(
+  f: Fixture,
+  replacementNode: string,
+  restoreFailure: boolean,
+  injectionHooks: RestoreInjectionHooks = {}
+) {
   const original = getNodeBackendBaseUrl(f.nodeId, testEnv);
   const replacement = getNodeBackendBaseUrl(replacementNode, testEnv);
   const tokens = new Map<string, string>();
@@ -146,6 +160,12 @@ function vmPeer(f: Fixture, replacementNode: string, restoreFailure: boolean) {
       });
       // A real VM resolves/injects the selected account when it loads the saved
       // harness too. Model that callback, not only the fresh /start branch.
+      const injection = {
+        workspaceId,
+        agentSessionId: path.split('/')[4]!,
+        token: tokens.get(workspaceId)!,
+      };
+      await injectionHooks.before?.(injection);
       const injected = await SELF.fetch(
         `https://api.test.example.com/api/workspaces/${workspaceId}/agent-key`,
         {
@@ -157,8 +177,29 @@ function vmPeer(f: Fixture, replacementNode: string, restoreFailure: boolean) {
           body: JSON.stringify({ agentType: f.agentType, agentSessionId: path.split('/')[4] }),
         }
       );
-      expect(injected.status, await injected.clone().text()).toBe(200);
-      return Response.json({ status: restoreFailure ? 'failed' : 'restored' });
+      expect(injected.status, await injected.clone().text()).toBe(
+        injectionHooks.expectedStatus ?? 200
+      );
+      if (injected.status === 200) {
+        expect(await injected.clone().json()).toMatchObject({
+          apiKey: 'test-only-agent-token',
+          credentialReference: f.credentialReference,
+        });
+        expect(
+          await env.DATABASE.prepare(
+            'SELECT agent_credential_reference,agent_profile_id FROM agent_sessions WHERE id=?'
+          )
+            .bind(injection.agentSessionId)
+            .first()
+        ).toEqual({
+          agent_credential_reference: f.credentialReference,
+          agent_profile_id: f.profileId,
+        });
+      }
+      await injectionHooks.observe?.(injected, injection);
+      return Response.json({
+        status: restoreFailure || injected.status !== 200 ? 'failed' : 'restored',
+      });
     }
     if (path.endsWith('/start')) {
       const workspaceId = path.split('/')[2]!;
@@ -364,8 +405,11 @@ describe('owner force-resume before the recorded reset through public HTTP', () 
   it.each([false, true])(
     'retains the original delivery and snapshot (claimed=%s)',
     async (claimed) => {
+      const currentTime = Date.now();
+      const recordedResetOffset =
+        Number(callbackCases[0]!.callback.providerLimitResetsAt) - Date.parse(recorded.now);
       vi.useFakeTimers({ toFake: ['Date'] });
-      vi.setSystemTime(new Date(recorded.now));
+      vi.setSystemTime(currentTime);
       const f = await agentOnVm('task');
       const calls = vmPeer(f, `replacement-${f.id}`, false);
       const token = await signCallbackToken(f.workspaceId, testEnv, { callbackGeneration: null });
@@ -376,6 +420,7 @@ describe('owner force-resume before the recorded reset through public HTTP', () 
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
             ...callbackCases[0]!.callback,
+            providerLimitResetsAt: currentTime + recordedResetOffset,
             providerLimitAgentSessionId: `a-${f.id}`,
           }),
         }
@@ -517,6 +562,545 @@ describe('owner force-resume before the recorded reset through public HTTP', () 
       const freshWait = parseProviderLimitWait(parkedAgain!.provider_limit_wait_json)!;
       expect(freshWait.ownerOverride).toBeUndefined();
       expect(freshWait.scheduleKey).not.toBe(waitBefore.scheduleKey);
+    },
+    30_000
+  );
+});
+
+/** Keep recovery and injection real; fault only the TaskRunner RPC acknowledgement. */
+describe('owner consent survives credential release and placed recovery', () => {
+  async function approvedFixture(hooks: RestoreInjectionHooks = {}, withSkill = false) {
+    // Capture wall time before installing Date doubles: SQLite's atomic consent
+    // fence uses julianday('now') and does not share Vitest's fake clock.
+    const currentTime = Date.now();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(currentTime);
+    const f = await agentOnVm('task');
+    const skillId = withSkill ? `retained-skill-${f.id}` : null;
+    if (skillId) {
+      await env.DATABASE.prepare(
+        `INSERT INTO skills(id,project_id,user_id,name,agent_type) VALUES (?,?,?,'Retained task skill',NULL)`
+      )
+        .bind(skillId, f.projectId, f.userId)
+        .run();
+      await env.DATABASE.batch([
+        env.DATABASE.prepare('UPDATE tasks SET skill_id=? WHERE id=?').bind(skillId, f.taskId),
+        env.DATABASE.prepare('UPDATE agent_sessions SET skill_id=? WHERE id=?').bind(
+          skillId,
+          `a-${f.id}`
+        ),
+      ]);
+    }
+    const calls = vmPeer(f, `replacement-${f.id}`, false, hooks);
+    const token = await signCallbackToken(f.workspaceId, testEnv, { callbackGeneration: null });
+    const rejected = await SELF.fetch(
+      `https://api.test.example.com/api/projects/${f.projectId}/tasks/${f.taskId}/status/callback`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...callbackCases[0]!.callback,
+          providerLimitAgentSessionId: `a-${f.id}`,
+        }),
+      }
+    );
+    expect(rejected.status, await rejected.text()).toBe(200);
+    await runSessionSleepSweep(testEnv);
+    await deleteSleptWorkspace(f.nodeId, f.taskId);
+    await readyReplacementNode(f);
+    const deliveryId = `pending-original-${f.id}`;
+    const accepted = await f.stub.acceptPromptDelivery({
+      deliveryId,
+      targetSessionId: f.chatSessionId,
+      sourceTaskId: f.taskId,
+      senderType: 'human',
+      senderId: f.userId,
+      sourceKind: 'user_followup',
+      messageClass: 'deliver',
+      displayContent: 'Continue this original message exactly once.',
+      deliveryContent: 'Continue this original message exactly once.',
+      ttlMs: 60 * 60_000,
+    });
+    expect(await ensureSessionRecovery(testEnv, f.projectId, f.chatSessionId)).toMatchObject({
+      status: 'waking',
+      taskId: f.taskId,
+    });
+    await runInDurableObject(taskRunner(f.taskId), (instance) => instance.alarm());
+    const cookie = await seedSignedInUser(f.userId);
+    const act = () =>
+      SELF.fetch(
+        `https://api.test.example.com/api/projects/${f.projectId}/tasks/${f.taskId}/provider-limit/start-anyway`,
+        { method: 'POST', headers: { Cookie: cookie, Origin: 'https://app.test.example.com' } }
+      );
+    return {
+      f,
+      calls,
+      act,
+      deliveryId,
+      skillId,
+      promptMessageId: accepted.message.promptMessageId,
+    };
+  }
+
+  async function intent(f: Fixture) {
+    const row = await env.DATABASE.prepare(
+      'SELECT status,admission_state,provider_limit_wait_json FROM tasks WHERE id=?'
+    )
+      .bind(f.taskId)
+      .first<{
+        status: string;
+        admission_state: string | null;
+        provider_limit_wait_json: string;
+      }>();
+    return { ...row!, wait: parseProviderLimitWait(row!.provider_limit_wait_json)! };
+  }
+
+  it.each(['missing runner state', 'superseded runner attempt'] as const)(
+    'repairs %s through the real owner action without changing the current snapshot claim',
+    async (gap) => {
+      const prepared = await approvedFixture();
+      const { f } = prepared;
+      const originalRunner = await taskRunner(f.taskId).getStatus();
+      expect(originalRunner).toMatchObject({
+        taskId: f.taskId,
+        currentStep: 'node_selection',
+        completed: false,
+      });
+      const originalAttempt = originalRunner!.config.recoveryAttemptId;
+      expect(originalAttempt).toBeDefined();
+      let currentAttempt = originalAttempt!;
+      if (gap === 'missing runner state') {
+        await runInDurableObject(taskRunner(f.taskId), async (_instance, ctx) => {
+          expect(await ctx.storage.delete('state')).toBe(true);
+        });
+        expect(await taskRunner(f.taskId).getStatus()).toBeNull();
+      } else {
+        currentAttempt = crypto.randomUUID();
+        await env.DATABASE.prepare(
+          'UPDATE session_snapshots SET recovery_attempt_id=? WHERE chat_session_id=?'
+        )
+          .bind(currentAttempt, f.chatSessionId)
+          .run();
+        expect((await taskRunner(f.taskId).getStatus())?.config.recoveryAttemptId).toBe(
+          originalAttempt
+        );
+        expect(await taskRunner(f.taskId).ensureStarted(currentAttempt)).toBe(false);
+      }
+      const claimBefore = await env.DATABASE.prepare(
+        'SELECT id,recovery_task_id,recovery_attempt_id,manifest_r2_key FROM session_snapshots WHERE chat_session_id=?'
+      )
+        .bind(f.chatSessionId)
+        .first();
+      expect(claimBefore).toMatchObject({
+        recovery_task_id: f.taskId,
+        recovery_attempt_id: currentAttempt,
+      });
+      expect(
+        await env.DATABASE.prepare('SELECT status,workspace_id FROM tasks WHERE id=?')
+          .bind(f.taskId)
+          .first()
+      ).toEqual({ status: 'queued', workspace_id: null });
+      const response = await prepared.act();
+      expect(response.status, await response.clone().text()).toBe(409);
+      expect(await response.json()).toMatchObject({ error: 'CONFLICT' });
+      const pending = await intent(f);
+      expect(pending.admission_state).toBe('provider_limit_recovery_pending');
+      expect(pending.wait).toMatchObject({
+        phase: 'released',
+        ownerOverride: { recoveryPending: true, ownerUserId: f.userId },
+      });
+      // The absent/obsolete DO did not acknowledge the new consent or replace
+      // the current durable claim. Repair must positively initialize its owner.
+      const refusedRunner = await taskRunner(f.taskId).getStatus();
+      if (gap === 'missing runner state') expect(refusedRunner).toBeNull();
+      else {
+        expect(refusedRunner?.config.recoveryAttemptId).toBe(originalAttempt);
+        expect(refusedRunner?.config.providerLimitRecoveryApproval).toBeUndefined();
+      }
+      expect(await preserveProviderLimitWait(testEnv, f.taskId, Date.now())).toBe(true);
+      const repairedRunner = await taskRunner(f.taskId).getStatus();
+      expect(repairedRunner).toMatchObject({
+        taskId: f.taskId,
+        projectId: f.projectId,
+        userId: f.userId,
+        config: {
+          recoveryAttemptId: currentAttempt,
+          providerLimitRecoveryApproval: { receipt: pending.provider_limit_wait_json },
+        },
+      });
+      expect((await intent(f)).admission_state).toBeNull();
+      expect(
+        await env.DATABASE.prepare(
+          'SELECT id,recovery_task_id,recovery_attempt_id,manifest_r2_key FROM session_snapshots WHERE chat_session_id=?'
+        )
+          .bind(f.chatSessionId)
+          .first()
+      ).toEqual(claimBefore);
+      expect(
+        await env.DATABASE.prepare('SELECT id FROM tasks WHERE project_id=?')
+          .bind(f.projectId)
+          .all()
+      ).toMatchObject({ results: [{ id: f.taskId }] });
+      await driveMove(f);
+      expect((await taskRunner(f.taskId).getStatus())?.config.recoveryAttemptId).toBe(
+        currentAttempt
+      );
+      expect((await taskRow(f.taskId))?.status).toBe('in_progress');
+      await waitForWakeReadiness(f);
+      for (let pass = 0; pass < 3; pass++) await runDueDelivery(f, Date.now() + pass * 60_000);
+      expect(prepared.calls.filter((call) => call.path.endsWith('/restore'))).toHaveLength(1);
+      expect(
+        prepared.calls.filter(
+          (call) => call.path.endsWith('/prompt') && call.body.deliveryId === prepared.deliveryId
+        )
+      ).toHaveLength(1);
+      expect(
+        await sqlRows(
+          f.stub,
+          'SELECT id,prompt_message_id,delivery_state FROM session_inbox WHERE id=?',
+          prepared.deliveryId
+        )
+      ).toEqual([
+        {
+          id: prepared.deliveryId,
+          prompt_message_id: prepared.promptMessageId,
+          delivery_state: 'acked',
+        },
+      ]);
+      expect(
+        await env.DATABASE.prepare(
+          'SELECT recovery_attempt_id FROM session_snapshots WHERE chat_session_id=?'
+        )
+          .bind(f.chatSessionId)
+          .first()
+      ).toEqual({ recovery_attempt_id: currentAttempt });
+    },
+    30_000
+  );
+
+  it('restores the approved non-null skill through real replacement-session creation', async () => {
+    let replacementSession: string | undefined;
+    const prepared = await approvedFixture(
+      {
+        observe: async (_response, injection) => {
+          replacementSession = injection.agentSessionId;
+          const current = await intent(prepared.f);
+          expect(current.wait.ownerOverride?.skillId).toBe(prepared.skillId);
+          expect(
+            await env.DATABASE.prepare(
+              'SELECT workspace_id,agent_profile_id,skill_id,agent_credential_reference FROM agent_sessions WHERE id=?'
+            )
+              .bind(injection.agentSessionId)
+              .first()
+          ).toEqual({
+            workspace_id: injection.workspaceId,
+            agent_profile_id: prepared.f.profileId,
+            skill_id: prepared.skillId,
+            agent_credential_reference: prepared.f.credentialReference,
+          });
+        },
+      },
+      true
+    );
+    expect(prepared.skillId).not.toBeNull();
+    const response = await prepared.act();
+    expect(response.status, await response.clone().text()).toBe(202);
+    expect((await intent(prepared.f)).wait.ownerOverride?.skillId).toBe(prepared.skillId);
+    await driveMove(prepared.f);
+    expect(replacementSession).toBeDefined();
+    expect(replacementSession).not.toBe(`a-${prepared.f.id}`);
+    expect((await taskRow(prepared.f.taskId))?.status).toBe('in_progress');
+    await waitForWakeReadiness(prepared.f);
+    for (let pass = 0; pass < 3; pass++)
+      await runDueDelivery(prepared.f, Date.now() + pass * 60_000);
+    expect(prepared.calls.filter((call) => call.path.endsWith('/restore'))).toHaveLength(1);
+    expect(
+      prepared.calls.filter(
+        (call) => call.path.endsWith('/prompt') && call.body.deliveryId === prepared.deliveryId
+      )
+    ).toHaveLength(1);
+    expect(
+      await sqlRows(
+        prepared.f.stub,
+        'SELECT id,prompt_message_id,delivery_state FROM session_inbox WHERE id=?',
+        prepared.deliveryId
+      )
+    ).toEqual([
+      {
+        id: prepared.deliveryId,
+        prompt_message_id: prepared.promptMessageId,
+        delivery_state: 'acked',
+      },
+    ]);
+  }, 30_000);
+
+  it('keeps restored owner consent valid when a real checkpoint replaces the snapshot before final authority', async () => {
+    let injection: RestoreInjection | undefined;
+    const prepared = await approvedFixture({
+      observe: async (_response, current) => {
+        injection = current;
+      },
+    });
+    let checkpointGeneration: string | undefined;
+    let restoredGeneration: string | null | undefined;
+    prepared.f.runnerWrites.before = async (state) => {
+      if (
+        checkpointGeneration !== undefined ||
+        state.currentStep !== 'agent_session' ||
+        state.stepResults.restoredSnapshotGeneration === undefined
+      )
+        return;
+      expect(injection).toBeDefined();
+      expect((await taskRow(prepared.f.taskId))?.status).toBe('delegated');
+      expect(
+        await env.DATABASE.prepare(
+          'SELECT recovery_status,sleeping_at FROM session_snapshots WHERE chat_session_id=?'
+        )
+          .bind(prepared.f.chatSessionId)
+          .first()
+      ).toEqual({ recovery_status: 'restored', sleeping_at: null });
+      restoredGeneration = state.stepResults.restoredSnapshotGeneration;
+      checkpointGeneration = await snapshot(
+        { ...prepared.f, workspaceId: injection!.workspaceId },
+        injection!.token,
+        injection!.agentSessionId
+      );
+      expect(checkpointGeneration).not.toBe(restoredGeneration);
+      expect(
+        await env.DATABASE.prepare(
+          'SELECT workspace_id,agent_session_id,snapshot_generation,status FROM session_snapshots WHERE chat_session_id=?'
+        )
+          .bind(prepared.f.chatSessionId)
+          .first()
+      ).toEqual({
+        workspace_id: injection!.workspaceId,
+        agent_session_id: injection!.agentSessionId,
+        snapshot_generation: checkpointGeneration,
+        status: 'available',
+      });
+      // The source account proof belongs to the retired source agent, even now
+      // that the mutable snapshot row points at this replacement checkpoint.
+      expect(
+        await env.DATABASE.prepare(
+          'SELECT workspace_id,agent_credential_reference FROM agent_sessions WHERE id=?'
+        )
+          .bind(`a-${prepared.f.id}`)
+          .first()
+      ).toEqual({
+        workspace_id: prepared.f.workspaceId,
+        agent_credential_reference: prepared.f.credentialReference,
+      });
+    };
+    const response = await prepared.act();
+    expect(response.status, await response.clone().text()).toBe(202);
+    await driveMove(prepared.f);
+    expect(checkpointGeneration).toBeDefined();
+    expect(restoredGeneration).toBeDefined();
+    expect((await taskRow(prepared.f.taskId))?.status).toBe('in_progress');
+    expect((await intent(prepared.f)).wait.ownerOverride?.firstInjection?.agentSessionId).toBe(
+      injection!.agentSessionId
+    );
+    await waitForWakeReadiness(prepared.f);
+    for (let pass = 0; pass < 3; pass++)
+      await runDueDelivery(prepared.f, Date.now() + pass * 60_000);
+    expect(prepared.calls.filter((call) => call.path.endsWith('/restore'))).toHaveLength(1);
+    expect(
+      prepared.calls.filter(
+        (call) => call.path.endsWith('/prompt') && call.body.deliveryId === prepared.deliveryId
+      )
+    ).toHaveLength(1);
+    expect(
+      await sqlRows(
+        prepared.f.stub,
+        'SELECT id,prompt_message_id,delivery_state FROM session_inbox WHERE id=?',
+        prepared.deliveryId
+      )
+    ).toEqual([
+      {
+        id: prepared.deliveryId,
+        prompt_message_id: prepared.promptMessageId,
+        delivery_state: 'acked',
+      },
+    ]);
+  }, 30_000);
+
+  it.each(['acknowledged', 'timeout then late completion'] as const)(
+    'preserves marker consent through placed recovery with %s acknowledgement',
+    async (outcome) => {
+      let observedFirstInjection = false;
+      const prepared = await approvedFixture({
+        observe: async (_response, injection) => {
+          const current = await intent(prepared.f);
+          expect(current.admission_state).toBe('placed');
+          expect(current.wait.ownerOverride?.recoveryPending).toBe(true);
+          expect(current.wait.ownerOverride?.firstInjection).toMatchObject({
+            workspaceId: injection.workspaceId,
+            agentSessionId: injection.agentSessionId,
+            authorizedAt: expect.any(Number),
+            credentialGeneration: expect.any(Number),
+          });
+          observedFirstInjection = true;
+        },
+      });
+      const { f, calls } = prepared;
+      const snapshotBefore = await env.DATABASE.prepare(
+        'SELECT id,recovery_attempt_id,manifest_r2_key FROM session_snapshots WHERE chat_session_id=?'
+      )
+        .bind(f.chatSessionId)
+        .first();
+      let repairNudgeEntered = false;
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let repairNudgeCompleted = false;
+      let restoreSpy = () => {};
+      await runInDurableObject(taskRunner(f.taskId), async (instance) => {
+        // Workers RPC exposes prototype methods, not instance-owned functions.
+        const prototype: Pick<typeof instance, 'nudge'> = Object.getPrototypeOf(instance);
+        const nudge = prototype.nudge;
+        const spy = vi.spyOn(prototype, 'nudge').mockImplementation(async function (
+          this: typeof instance,
+          ...args
+        ) {
+          const accepted = await nudge.apply(this, args);
+          if (this !== instance) return accepted;
+          const [reason] = args;
+          if (reason === 'Owner resumed despite provider limit')
+            throw new Error('test peer lost the public action acknowledgement');
+          if (reason === 'Retry owner-approved provider limit recovery') {
+            repairNudgeEntered = true;
+            await gate;
+            repairNudgeCompleted = true;
+          }
+          return accepted;
+        });
+        restoreSpy = () => spy.mockRestore();
+      });
+      try {
+        const response = await prepared.act();
+        expect(response.status, await response.clone().text()).toBe(409);
+        const pending = await intent(f);
+        expect(pending.admission_state).toBe('provider_limit_recovery_pending');
+        expect(pending.wait.ownerOverride?.firstInjection).toBeUndefined();
+        const repairEnv = {
+          ...testEnv,
+          PROMPT_DELIVERY_BACKGROUND_TIMEOUT_MS: outcome === 'acknowledged' ? '30000' : '1',
+        };
+        const repair = preserveProviderLimitWait(repairEnv, f.taskId, Date.now());
+        // Poll from the test's I/O context instead of resolving a test promise
+        // inside the TaskRunner DO. A tiny caller budget may settle before RPC
+        // transit reaches nudge; the late operation must still reach this gate.
+        let repairFailure: unknown;
+        let repairFailed = false;
+        void repair.catch((error) => {
+          repairFailure = error;
+          repairFailed = true;
+        });
+        await vi.waitFor(
+          () => {
+            if (repairFailed) throw repairFailure;
+            expect(repairNudgeEntered).toBe(true);
+          },
+          { timeout: 5_000, interval: 10 }
+        );
+        if (outcome !== 'acknowledged') await repair;
+        // The real restore invokes the public agent-key callback and changes only
+        // firstInjection while repair still owns the older consent JSON receipt.
+        await driveMove(f);
+        expect(observedFirstInjection).toBe(true);
+        expect((await taskRow(f.taskId))?.status).toBe('in_progress');
+        const afterInjection = await intent(f);
+        expect(afterInjection.wait.ownerOverride?.firstInjection).toBeDefined();
+        expect(afterInjection.admission_state).toBe('placed');
+        expect(afterInjection.wait.ownerOverride?.recoveryPending).toBe(true);
+        release();
+        await repair;
+        await vi.waitFor(() => expect(repairNudgeCompleted).toBe(true));
+        // Placement has legitimately replaced the pending admission mirror.
+        // An ACK for the older receipt must never overwrite that real progress.
+        expect(await intent(f)).toEqual(afterInjection);
+        if (outcome !== 'acknowledged') {
+          expect(await preserveProviderLimitWait(testEnv, f.taskId, Date.now())).toBe(false);
+          expect(await intent(f)).toEqual(afterInjection);
+        }
+        expect((await intent(f)).admission_state).toBe('placed');
+        expect((await intent(f)).wait.ownerOverride?.firstInjection).toEqual(
+          afterInjection.wait.ownerOverride?.firstInjection
+        );
+        expect(
+          await env.DATABASE.prepare(
+            'SELECT id,recovery_attempt_id,manifest_r2_key FROM session_snapshots WHERE chat_session_id=?'
+          )
+            .bind(f.chatSessionId)
+            .first()
+        ).toEqual(snapshotBefore);
+        await waitForWakeReadiness(f);
+        for (let pass = 0; pass < 3; pass++) await runDueDelivery(f, Date.now() + pass * 60_000);
+        expect(calls.filter((call) => call.path.endsWith('/restore'))).toHaveLength(1);
+        expect(
+          calls.filter(
+            (call) => call.path.endsWith('/prompt') && call.body.deliveryId === prepared.deliveryId
+          )
+        ).toHaveLength(1);
+        expect(
+          await sqlRows(
+            f.stub,
+            'SELECT id,prompt_message_id,delivery_state FROM session_inbox WHERE id=?',
+            prepared.deliveryId
+          )
+        ).toEqual([
+          {
+            id: prepared.deliveryId,
+            prompt_message_id: prepared.promptMessageId,
+            delivery_state: 'acked',
+          },
+        ]);
+      } finally {
+        release();
+        restoreSpy();
+      }
+    },
+    30_000
+  );
+
+  it.each(['expired', 'membership revoked'] as const)(
+    'withholds the first restore credential when approval is %s',
+    async (change) => {
+      let denied = false;
+      const prepared = await approvedFixture({
+        expectedStatus: 409,
+        before: async () => {
+          const current = await intent(prepared.f);
+          expect(current.wait.ownerOverride?.firstInjection).toBeUndefined();
+          if (change === 'expired') vi.setSystemTime(current.wait.ownerOverride!.expiresAt! + 1);
+          else
+            await env.DATABASE.prepare(
+              "UPDATE project_members SET role='viewer' WHERE project_id=? AND user_id=?"
+            )
+              .bind(prepared.f.projectId, prepared.f.userId)
+              .run();
+        },
+        observe: async (response) => {
+          expect(await response.clone().text()).not.toContain('test-only-agent-token');
+          const current = await intent(prepared.f);
+          expect(current.admission_state).toBe('provider_limit_blocked');
+          expect(current.wait.ownerOverride).toBeUndefined();
+          denied = true;
+        },
+      });
+      const response = await prepared.act();
+      expect(response.status, await response.clone().text()).toBe(202);
+      for (let step = 0; step < 25 && !denied; step++)
+        await runInDurableObject(taskRunner(prepared.f.taskId), (instance) => instance.alarm());
+      expect(denied).toBe(true);
+      expect(prepared.calls.filter((call) => call.path.endsWith('/prompt'))).toHaveLength(0);
+      const [delivery] = await sqlRows<{ delivery_state: string }>(
+        prepared.f.stub,
+        'SELECT delivery_state FROM session_inbox WHERE id=?',
+        prepared.deliveryId
+      );
+      expect(delivery?.delivery_state).not.toBe('acked');
     },
     30_000
   );

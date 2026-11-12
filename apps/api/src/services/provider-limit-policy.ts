@@ -50,6 +50,16 @@ export const ProviderLimitWaitSchema = v.object({
       recoveryPending: v.optional(v.boolean()),
       ownerUserId: v.optional(v.string()),
       snapshotId: v.optional(v.string()),
+      /** First final credential release authorization; not proof of network delivery. */
+      firstInjection: v.optional(
+        v.object({
+          authorizedAt: timestamp,
+          workspaceId: v.string(),
+          callbackGeneration: v.nullable(v.string()),
+          agentSessionId: v.string(),
+          credentialGeneration: v.pipe(v.number(), v.integer(), v.minValue(1)),
+        })
+      ),
     })
   ),
 });

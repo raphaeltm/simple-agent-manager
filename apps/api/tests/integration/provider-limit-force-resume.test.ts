@@ -106,7 +106,14 @@ describe('callback provider hold owner force resume', () => {
     expect(boundary.nudge).toHaveBeenCalledExactlyOnceWith(
       env,
       'task-1',
-      'Owner resumed despite provider limit'
+      'Owner resumed despite provider limit',
+      {
+        receipt: task().provider_limit_wait_json,
+        ownerUserId: 'user-1',
+        snapshotId: 'snapshot-1',
+        expiresAt: held.deadlineAt,
+        sourceCredentialReference: 'cc_credentials:account-1',
+      }
     );
     expect(boundary.start).not.toHaveBeenCalled();
     expect(claim()).toEqual(before);
@@ -148,6 +155,44 @@ describe('callback provider hold owner force resume', () => {
     expect(boundary.nudge).toHaveBeenCalledOnce();
     expect(boundary.start).not.toHaveBeenCalled();
     expect(claim()).toEqual(before);
+  });
+
+  it('retains accepted consent when the claimed recovery has no runner yet', async () => {
+    const retainedClaim = claim();
+    boundary.nudge.mockResolvedValueOnce(false);
+    boundary.status.mockResolvedValueOnce(null);
+    expect((await resume()).status).toBe(409);
+    expect(wait().phase).toBe('released');
+    expect(wait().ownerOverride?.recoveryPending).toBe(true);
+    expect(task().admission_state).toBe('provider_limit_recovery_pending');
+    expect(claim()).toEqual(retainedClaim);
+  });
+
+  it('retains accepted consent when runner presence cannot be confirmed', async () => {
+    const retainedClaim = claim();
+    boundary.nudge.mockResolvedValueOnce(false);
+    boundary.status.mockRejectedValueOnce(new Error('ambiguous runner status'));
+    expect((await resume()).status).toBe(409);
+    expect(wait().phase).toBe('released');
+    expect(task().admission_state).toBe('provider_limit_recovery_pending');
+    expect(claim()).toEqual(retainedClaim);
+  });
+
+  it('retains accepted consent when the same runner still has the preceding claim', async () => {
+    const retainedClaim = claim();
+    boundary.nudge.mockResolvedValueOnce(false);
+    boundary.status.mockResolvedValueOnce({
+      taskId: 'task-1',
+      projectId: 'project-1',
+      userId: 'user-1',
+      completed: false,
+      currentStep: 'node_selection',
+      config: { resumeSnapshotChatSessionId: 'chat-1', recoveryAttemptId: 'preceding-claim' },
+    });
+    expect((await resume()).status).toBe(409);
+    expect(wait().phase).toBe('released');
+    expect(task().admission_state).toBe('provider_limit_recovery_pending');
+    expect(claim()).toEqual(retainedClaim);
   });
 
   it('restores the original hold after a definitive nudge refusal without releasing its claim', async () => {
@@ -199,6 +244,13 @@ describe('callback provider hold owner force resume', () => {
     expect(boundary.start.mock.calls[0]?.[1]).toMatchObject({
       taskId: 'task-1',
       resumeSnapshotChatSessionId: 'chat-1',
+      providerLimitRecoveryApproval: {
+        receipt: task().provider_limit_wait_json,
+        ownerUserId: 'user-1',
+        snapshotId: 'snapshot-1',
+        expiresAt: wait().deadlineAt,
+        sourceCredentialReference: 'cc_credentials:account-1',
+      },
     });
     expect(claim()).toMatchObject({
       id: 'snapshot-1',

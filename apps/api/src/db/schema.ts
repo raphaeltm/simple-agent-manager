@@ -1208,6 +1208,11 @@ export const tasks = sqliteTable(
     activeUpdatedIdIdx: index('idx_tasks_active_updated_id')
       .on(table.updatedAt, table.id)
       .where(sql`status IN ('queued', 'delegated', 'in_progress')`),
+    recoveryScanUpdatedIdIdx: index('idx_tasks_recovery_scan_updated_id').on(
+      table.updatedAt,
+      table.id
+    ).where(sql`status IN ('queued', 'delegated', 'in_progress')
+        OR (status='sleeping' AND admission_state='provider_limit_recovery_pending')`),
     projectChatSessionIdx: index('idx_tasks_project_chat_session')
       .on(table.projectId, table.chatSessionId)
       .where(sql`chat_session_id IS NOT NULL`),
