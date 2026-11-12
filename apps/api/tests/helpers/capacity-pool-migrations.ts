@@ -49,7 +49,7 @@ export const capacityPoolExcludedSourcesMigrationSql = readDbMigration(
   '0230_capacity_pool_excluded_sources.sql'
 );
 export const catalogPublicationMigrationSql = readDbMigration(
-  '0236_capacity_catalog_publication.sql'
+  '0237_capacity_catalog_publication.sql'
 );
 export const deploymentPoolStrategyMigrationSql = readDbMigration(
   '0170_deployment_pool_strategy_reservations.sql'

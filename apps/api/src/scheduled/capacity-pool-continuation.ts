@@ -10,6 +10,7 @@ import {
 } from '../services/capacity-pool-refresh-settings';
 import { finishCapacityPoolRefresh } from '../services/capacity-pool-refresh-work';
 import { defaultPoolId } from '../services/default-capacity-pool-helpers';
+import { resolveBackfillScopeBatchSize } from '../services/default-capacity-pool-storage';
 import {
   ensureInstallationDefaultPool,
   ensureProjectDefaultPool,
@@ -26,12 +27,16 @@ export async function continueCapacityPoolPublications(
   deadlineAt: number
 ): Promise<number> {
   const now = Date.now();
+  if (now >= deadlineAt) return 0;
   // Adopt legacy unfinished pools at upgrade. They cannot prove a pre-upgrade atomic catalog,
   // so keep bootstrap gated while resuming them promptly rather than waiting a day.
   await db.run(sql`INSERT INTO capacity_pool_refreshes
     (pool_id, scope, owner_user_id, owner_project_id, state, generation, attempts, started_at, deadline_at, next_attempt_at)
     SELECT id, scope, owner_user_id, owner_project_id, 'pending', 0, 0, ${now}, ${now + settings.deadlineMs}, ${now}
-    FROM capacity_pools WHERE is_default = 1 AND migration_state = 'pending'
+    FROM capacity_pools
+    WHERE is_default = 1 AND migration_state = 'pending'
+      AND NOT EXISTS (SELECT 1 FROM capacity_pool_refreshes WHERE pool_id = capacity_pools.id)
+    ORDER BY id LIMIT ${resolveBackfillScopeBatchSize({ env })}
     ON CONFLICT(pool_id) DO NOTHING`);
   let resumed = 0;
   while (Date.now() < deadlineAt) {

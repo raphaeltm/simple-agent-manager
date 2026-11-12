@@ -13,9 +13,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
+import { continueCapacityPoolPublications } from '../../../src/scheduled/capacity-pool-continuation';
 import { runScheduledCapacityPoolReconciliation } from '../../../src/scheduled/capacity-pool-reconciliation';
 import { reconcileCapacityPoolsForCredentialMutation } from '../../../src/services/capacity-pool-credential-lifecycle';
 import { resolveCapacityPoolPlacementSettings } from '../../../src/services/capacity-pool-placement-settings';
+import { capacityPoolRefreshSettings } from '../../../src/services/capacity-pool-refresh-settings';
 import {
   capacityCandidateBaseId,
   capacityCandidateIdForRole,
@@ -7431,6 +7433,38 @@ describe('durable catalog refresh continuation', () => {
     ).toEqual({ migration_state: 'complete' });
   });
 
+  it('propagates the aggregate pass deadline through real credential preparation and a stalled provider', async () => {
+    const { env } = await interruptedCatalog();
+    clearCapacityCatalogCache();
+    let signal: AbortSignal | null | undefined;
+    const stalled = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      signal = init?.signal;
+      return new Promise<Response>(() => {});
+    });
+    globalThis.fetch = stalled as typeof fetch;
+    const deadlineAt = Date.now() + 200;
+    const operation = ensureDefaultCapacityPoolsForExistingCredentials(poolDb() as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      env,
+      reconciliationDeadlineAt: deadlineAt,
+    });
+    await vi.waitFor(() => expect(stalled).toHaveBeenCalledTimes(1), { interval: 1 });
+    await vi.advanceTimersByTimeAsync(deadlineAt - Date.now());
+    const result = await operation;
+    expect(Date.now()).toBe(deadlineAt);
+    expect(signal?.aborted).toBe(true);
+    expect(stalled).toHaveBeenCalledTimes(1);
+    expect(result.user?.effectiveState).toBe('migration-pending');
+    expect(getCount('capacity_pool_candidates')).toBe(0);
+    expect(getCount('capacity_pool_candidate_staging')).toBe(2);
+    expect(
+      getRows<{ state: string; next_attempt_at: number }>(
+        "SELECT state,next_attempt_at FROM capacity_pool_refreshes WHERE scope='user'"
+      )[0]
+    ).toMatchObject({ state: 'pending', next_attempt_at: expect.any(Number) });
+  });
+
   it('recovers a lost claimed continuation after its lease and fences duplicate cron claims', async () => {
     const { env } = await interruptedCatalog();
     sqlite!.exec(
@@ -7591,6 +7625,67 @@ describe('durable catalog refresh continuation', () => {
 });
 
 describe('catalog publication upgrade adoption', () => {
+  it('bounds upgrade adoption across interrupted passes without failed-known rows starving later scopes', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2031-01-01T00:00:00Z'));
+    createDb();
+    for (let index = 0; index < 90; index++) {
+      const id = `legacy-${index.toString().padStart(3, '0')}`;
+      sqlite!.prepare('INSERT INTO users(id) VALUES (?)').run(id);
+      sqlite!
+        .prepare(
+          `INSERT INTO capacity_pools
+        (id,scope,owner_user_id,name,is_default,status,configuration_state,migration_state,created_at,updated_at)
+        VALUES (?, 'user', ?, 'Legacy', 1, 'active', 'configured-ready', 'pending', '2030-01-01', '2030-01-01')`
+        )
+        .run(`cap-pool-default:user:${id}`, id);
+      if (index < 30)
+        sqlite!
+          .prepare(
+            `INSERT INTO capacity_pool_refreshes
+        (pool_id,scope,owner_user_id,state,generation,attempts,started_at,deadline_at,next_attempt_at,last_error)
+        VALUES (?, 'user', ?, 'failed', 4, 8, 1, 2, 2, 'Retained actionable failure')`
+          )
+          .run(`cap-pool-default:user:${id}`, id);
+    }
+    const env = {
+      ...catalogEnv(createSqliteD1WithBindLimit(sqlite!, 100)),
+      CAPACITY_POOL_BACKFILL_SCOPE_BATCH_SIZE: '20',
+    } as Env;
+    const settings = await capacityPoolRefreshSettings();
+    for (let pass = 0; pass < 3; pass++) {
+      const db = poolDb();
+      const run = db.run.bind(db);
+      // A process loses its execution budget immediately after saving the adoption page.
+      vi.spyOn(db, 'run').mockImplementation(async (query) => {
+        const result = await run(query);
+        vi.setSystemTime(Date.now() + 1);
+        return result;
+      });
+      await continueCapacityPoolPublications(db as never, env, settings, Date.now() + 1);
+      expect(getCount('capacity_pool_refreshes')).toBe(30 + (pass + 1) * 20);
+      expect(
+        getRows<{ state: string; generation: number; last_error: string }>(
+          "SELECT state,generation,last_error FROM capacity_pool_refreshes WHERE state='failed'"
+        )
+      ).toEqual(
+        Array.from({ length: 30 }, () => ({
+          state: 'failed',
+          generation: 4,
+          last_error: 'Retained actionable failure',
+        }))
+      );
+    }
+    expect(
+      getRows<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM capacity_pool_refreshes WHERE state='pending'"
+      )[0]?.count
+    ).toBe(60);
+    // An already-expired invocation cannot even begin another adoption page.
+    await continueCapacityPoolPublications(poolDb() as never, env, settings, Date.now());
+    expect(getCount('capacity_pool_refreshes')).toBe(90);
+  });
+
   it('backfills only committed pre-upgrade proof and automatically adopts unfinished legacy work', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2031-01-01T00:00:00Z'));
@@ -7623,29 +7718,27 @@ describe('catalog publication upgrade adoption', () => {
         new Date().toISOString(),
         new Date().toISOString()
       );
-    globalThis.fetch = vi
-      .fn()
-      .mockImplementation(
-        async () =>
-          new Response(
-            JSON.stringify({
-              server_types: [
-                hetznerServerType({
-                  id: 1,
-                  name: 'cx23',
-                  description: 'CX23',
-                  cores: 2,
-                  memory: 4,
-                  disk: 40,
-                  hourlyGross: '0.0048',
-                  monthlyGross: '3.99',
-                }),
-              ],
-              meta: { pagination: { next_page: null } },
-            }),
-            { status: 200 }
-          )
-      ) as typeof fetch;
+    globalThis.fetch = vi.fn().mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify({
+            server_types: [
+              hetznerServerType({
+                id: 1,
+                name: 'cx23',
+                description: 'CX23',
+                cores: 2,
+                memory: 4,
+                disk: 40,
+                hourlyGross: '0.0048',
+                monthlyGross: '3.99',
+              }),
+            ],
+            meta: { pagination: { next_page: null } },
+          }),
+          { status: 200 }
+        )
+    ) as typeof fetch;
     const result = await runScheduledCapacityPoolReconciliation(
       catalogEnv(createSqliteD1WithBindLimit(sqlite!, 100))
     );

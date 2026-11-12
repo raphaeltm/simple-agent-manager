@@ -11,7 +11,7 @@ DRAFT PR only pending coordinator review of full final SHA. Do not disturb origi
 
 ## Preflight / research
 
-Classes: cross-component-change, business-logic-change, security-sensitive-change, docs-sync-change.
+Classes: cross-component-change, business-logic-change, security-sensitive-change, docs-sync-change, ui-change.
 Data flow: scheduled/capacity-pool-reconciliation -> default-capacity-pools-read/ensure -> fenced D1 source/candidate publication -> summary -> placement resolver/authority -> session-recovery -> snapshot claim/TaskRunner -> ProjectData durable prompt delivery -> ready handoff.
 Existing cursor persists every batch, fences obsolete source generations; current publication mutates live candidates before completion. Daily gate claims before work and cannot resume unfinished refresh promptly. Current refusal classification already supports transient retries; preserve these mechanisms and delivery TTLs.
 No new external API/dependency/framework planned. D1 additive migration, real SQLite tests, existing D1 batching. Existing interruption/fencing tests retained. Source/credential/current membership remains live authority. New allocations retain strict revision fences; existing-node reuse must revalidate against current authority.
@@ -43,8 +43,11 @@ to at most 60 seconds, a 180-second crash lease, a 20-second shared wall budget 
 20-second per-source publication budget, and a 120-minute absolute refresh deadline. All work
 budgets/backoffs/deadlines/leases are admin-editable; the lease is clamped to at least the shared
 pass budget. Eligibility is not delivery: work runs on a subsequent cron tick, and a crashed
-claim waits for lease expiry. Provider requests already in flight can overrun a pass budget;
-later sources/scopes defer durably. Ordinary daily catalog discovery remains separately gated.
+claim waits for lease expiry. Credential preparation, live provider requests and fallback share
+the remaining pass deadline; later sources/scopes defer durably. An already-started atomic D1
+batch must finish, so the deadline bounds starting further work rather than aborting a transaction.
+Legacy upgrade adoption queues at most the configured scope batch size (25 by default) per pass,
+skipping already-tracked scopes including exhausted failures. Ordinary daily discovery stays gated.
 
 At the outer probable catalog size of 7,200 materialized candidate rows per source and the default
 200-row batch, replacement needs `ceil(7200 / 200) = 36` staging batches, approximately 36 durable
@@ -77,11 +80,12 @@ staging evidence; revise estimates if those measurements differ materially.
 
 ## Implementation evidence before full release gates
 
-- Catalog publication/continuation ownership suite:202 focused tests passed, plus actual0236 upgrade/adoption regression passed after seeding pre-upgrade complete/pending pools.
-- Wake event chain:25 real Workers +63 unit tests passed, including held restore/handoff and original accepted identity; human user_followup variant in progress.
+- Catalog publication/continuation ownership suite:202 focused tests passed, plus actual0237 upgrade/adoption regression passed after seeding pre-upgrade complete/pending pools.
+- Wake event/human chain:26 real Workers +63 unit tests passed, including real human prompt acceptance, held restore/handoff, process replacement, automatic cron continuation and original accepted identity.
 - Existing-node current-authority fix:176 focused unit +3 Workers admission tests passed, pushed83757a984.
 - Cron/uncertain allocation/Instant compatibility:93 tests passed (45 Node +48 Workers).
 - Full repository lint14/14 and typecheck20/20 passed before final audit additions; final full test/build and repeat affected checks pending.
 - Local review findings fixed in catalog: atomic pool revision+candidate promotion, failed/partial API gating with distinct trusted-static validation, exact claimed generation handoff, disabled authority preservation, malformed scope failure, discovery cursor after durable queue, and finite visible exhaustion.
 - Completion audit identified remaining visible UI error notice and premature public chat activation before handoff. Both are being fixed with focused tests/visual audit; no archive or readiness claim until those pass.
-- Staging ownership cleared by secret-collection task; deploy/lifecycle/cleanup pending. PR must remain draft for coordinator exact-SHA review.
+- Coordinator budget review: bounded upgrade adoption/failed-known anti-starvation and shared live/fallback provider deadline fixed; six focused tests pass, including real ensure with stalled provider and three interrupted adoption pages. Migration safety/order pass. Unapplied catalog migration reserved0237 because0236_runtime_secret_requests.sql already applied by concurrent PR2688.
+- Staging temporarily reclaimed by secret-collection task12:21 for CodeRabbit changes; explicit handoff coordinated, deploy/lifecycle/cleanup pending. PR must remain draft for coordinator exact-SHA review.

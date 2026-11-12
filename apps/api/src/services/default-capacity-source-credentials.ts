@@ -278,6 +278,7 @@ export async function resolveOfferingsForSeed(
     try {
       const catalog = await buildProviderCatalogForCredential({
         env: options.env,
+        deadlineAt: options.reconciliationDeadlineAt,
         seed: {
           id: seed.id,
           provider: seed.provider,

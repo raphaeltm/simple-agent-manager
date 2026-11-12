@@ -353,11 +353,15 @@ your decisions:
   every minute, independently of the daily catalog discovery. Work becomes eligible after a
   backoff that starts at 15 seconds and rises to 60 seconds by default; the next check picks it up.
   A claimed pass that crashes can be retried after its lease expires (3 minutes by default).
+  Upgrade adoption queues at most the configured scope batch size (25 by default) per pass;
+  previously tracked failures do not prevent later scopes from being adopted.
 - By default, SAM spends up to 20 seconds per source publishing a changed catalog, within a shared
   20-second budget across sources and scopes for each pass. An unfinished refresh has a two-hour
   recovery deadline. If it runs out, the pool summary reports an error with a recovery action;
   its last committed catalog is retained. Check the cloud account, then use **Refresh** to retry.
   Superadmins can adjust these [refresh settings](/docs/guides/admin-settings/#compute-pool-refresh).
+  Live provider lookup and its fallback share the remaining pass deadline, including credential
+  preparation; a slow fallback cannot start a fresh timeout after that deadline.
 - Switching an account off, revoking a credential, removing a machine or losing project access
   takes effect immediately, even while an older catalog is retained.
 - A running machine can still be reused after a harmless catalog revision. SAM checks today's
