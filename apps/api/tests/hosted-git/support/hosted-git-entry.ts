@@ -50,6 +50,8 @@ app.post('/__test/hosted-git-token', async (c) => {
     scope: HostedGitScope;
     ttlSeconds?: number;
     workspaceId?: string;
+    userId?: string;
+    callbackGeneration?: string | null;
   }>();
   return c.json(await mintHostedGitToken(c.env, body));
 });

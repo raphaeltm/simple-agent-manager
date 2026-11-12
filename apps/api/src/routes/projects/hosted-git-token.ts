@@ -38,7 +38,11 @@ hostedGitTokenRoutes.post('/:id/hosted-git/token', async (c) => {
   ) {
     throw errors.notFound('SAM-hosted repository');
   }
-  const minted = await mintHostedGitToken(c.env, { repo: project.artifactsRepoId, scope });
+  const minted = await mintHostedGitToken(c.env, {
+    repo: project.artifactsRepoId,
+    scope,
+    userId,
+  });
   return c.json({
     cloneUrl: project.repository,
     host: hostedGitHost(c.env),

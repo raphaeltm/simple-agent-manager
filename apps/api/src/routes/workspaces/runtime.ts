@@ -1300,6 +1300,8 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
           scope: requestedScope,
           ttlSeconds: ttl,
           workspaceId: workspace.workspaceId,
+          callbackGeneration: workspace.callbackGeneration ?? null,
+          userId: workspace.userId,
         }).then((minted) => ({
           plaintext: minted.token,
           expiresAt: minted.expiresAt,

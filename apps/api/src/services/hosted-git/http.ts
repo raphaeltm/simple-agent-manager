@@ -5,8 +5,10 @@
  * 1. HTTP Basic, password = a SAM hosted-git token (`tokens.ts`); the username is ignored.
  * 2. The token names exactly this repository, and a push (receive-pack, including its
  *    `info/refs?service=git-receive-pack` discovery) needs the `write` scope.
- * 3. D1: the repository still belongs to an `artifacts` project. A token minted for a workspace
- *    additionally needs that workspace to be active, on a live node, in that same project.
+ * 3. D1: the repository still belongs to an `artifacts` project and the token's user is still an
+ *    active member of it. A token minted for a workspace additionally needs that workspace to be
+ *    active, owned by that user, in that project, on its current runtime (callback generation)
+ *    and on a live node.
  * Any failure answers 401 with a Basic challenge (git then reports "Authentication failed"),
  * without saying which check failed.
  */
@@ -14,7 +16,7 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { nodeStatusTerminatesCallbacks } from '../node-callback-auth';
 import { WORKSPACE_CALLBACK_ACTIVE_STATUSES } from '../workspace-callback-identity';
-import { isHostedGitRepoName, verifyHostedGitToken } from './tokens';
+import { type HostedGitTokenClaims, isHostedGitRepoName, verifyHostedGitToken } from './tokens';
 
 export const HOSTED_GIT_PATH_PREFIX = '/git/';
 
@@ -69,21 +71,31 @@ function basicPassword(request: Request): string | null {
 
 interface BindingRow {
   project_id: string;
+  member_active: number | null;
   workspace_status: string | null;
   workspace_project_id: string | null;
+  workspace_user_id: string | null;
+  workspace_generation: string | null;
   node_id: string | null;
   node_status: string | null;
 }
 
-/** One D1 round trip: the repository's project and, when bound, the token's workspace. */
+/**
+ * One D1 round trip: the repository's project, whether the token's user is an active member of
+ * it, and, for a workspace-bound token, that workspace and its node.
+ */
 async function loadBinding(
   env: Pick<Env, 'DATABASE'>,
   repo: string,
-  workspaceId: string | undefined
+  claims: HostedGitTokenClaims
 ): Promise<BindingRow | null> {
   return env.DATABASE.prepare(
     `SELECT p.id AS project_id,
+            (SELECT 1 FROM project_members pm
+              WHERE pm.project_id = p.id AND pm.user_id = ?3 AND pm.status = 'active'
+              LIMIT 1) AS member_active,
             w.status AS workspace_status, w.project_id AS workspace_project_id,
+            w.user_id AS workspace_user_id, w.callback_generation AS workspace_generation,
             w.node_id AS node_id, n.status AS node_status
        FROM projects p
        LEFT JOIN workspaces w ON w.id = ?2
@@ -91,16 +103,27 @@ async function loadBinding(
       WHERE p.artifacts_repo_id = ?1 AND p.repo_provider = 'artifacts'
       LIMIT 1`
   )
-    .bind(repo, workspaceId ?? null)
+    .bind(repo, claims.workspaceId ?? null, claims.userId ?? null)
     .first<BindingRow>();
 }
 
-function workspaceBindingAllows(row: BindingRow): boolean {
+/** Why a token's binding is no longer valid, or null when it is. */
+function bindingRefusal(row: BindingRow, claims: HostedGitTokenClaims): string | null {
+  if (!claims.userId) return 'no_principal';
+  if (row.member_active !== 1) return 'not_a_member';
+  if (!claims.workspaceId) return null;
   if (!row.workspace_status || !WORKSPACE_CALLBACK_ACTIVE_STATUSES.has(row.workspace_status)) {
-    return false;
+    return 'workspace_inactive';
   }
-  if (row.workspace_project_id !== row.project_id) return false;
-  return !!row.node_id && !!row.node_status && !nodeStatusTerminatesCallbacks(row.node_status);
+  if (row.workspace_project_id !== row.project_id) return 'workspace_project_mismatch';
+  if (row.workspace_user_id !== claims.userId) return 'workspace_user_mismatch';
+  if ((row.workspace_generation ?? null) !== (claims.callbackGeneration ?? null)) {
+    return 'workspace_generation_retired';
+  }
+  if (!row.node_id || !row.node_status || nodeStatusTerminatesCallbacks(row.node_status)) {
+    return 'workspace_node_gone';
+  }
+  return null;
 }
 
 export interface HostedGitHttpEnv {
@@ -140,12 +163,13 @@ export async function handleHostedGitRequest(
   if (claims.repo !== parsed.repo) return reject('repo_mismatch');
   if (operation.write && claims.scope !== 'write') return reject('scope');
 
-  if (!options.trustedInternalCaller || claims.workspaceId) {
-    const binding = await loadBinding(env, parsed.repo, claims.workspaceId);
+  // External requests always need a person behind the token (a member, or a workspace owner).
+  // Tokens with neither are minted only for SAM's own in-process seeding and browsing.
+  if (!options.trustedInternalCaller || claims.userId || claims.workspaceId) {
+    const binding = await loadBinding(env, parsed.repo, claims);
     if (!binding) return reject('repo_not_bound');
-    if (claims.workspaceId && !workspaceBindingAllows(binding)) {
-      return reject('workspace_inactive');
-    }
+    const refusal = bindingRefusal(binding, claims);
+    if (refusal) return reject(refusal);
   }
 
   const doUrl = new URL(request.url);

@@ -111,8 +111,8 @@ export function StepConnect(props: Readonly<StepConnectProps>) {
     if (isArtifacts) {
       return (
         <Callout variant="info">
-          SAM will host this repository on Cloudflare Artifacts and seed it with a README that
-          orients your agents. No GitHub account or app installation is required.
+          SAM will host this repository and seed it with a README that orients your agents. No
+          GitHub account or app installation is required.
         </Callout>
       );
     }
@@ -264,9 +264,10 @@ export function StepConnect(props: Readonly<StepConnectProps>) {
       {isArtifacts ? (
         <WhyDetails question="Where does the code live, and how do agents push?">
           <p>
-            SAM provisions a private Git repository on Cloudflare Artifacts and stores its remote on
-            the project. Each agent run mints a short-lived, repository-scoped token to clone and
-            push — the token can only touch this one repo.
+            SAM provisions a private Git repository (Cloudflare Artifacts, or this
+            installation&apos;s own git server when self-hosted) and stores its remote on the
+            project. Each agent run mints a short-lived, repository-scoped token to clone and push —
+            the token can only touch this one repo.
           </p>
           <p>
             There are no pull requests on a SAM-hosted repo: agents push their branch straight to

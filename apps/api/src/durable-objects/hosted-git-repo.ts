@@ -42,6 +42,46 @@ const MAX_ACTIVE_UPLOADS = 4;
 const INGEST_CACHE_BYTES = 32 * 1024 * 1024;
 const GC_DELAY_MS = 5 * 60 * 1000;
 const PACK_HEADER_BYTES = 12;
+/** The pkt-line command section of a push (ref updates + capabilities) before the pack. */
+const MAX_COMMAND_SECTION_BYTES = 1024 * 1024;
+const PKT_LENGTH = /^[0-9a-f]{4}$/i;
+
+class RequestTooLargeError extends Error {
+  constructor() {
+    super('request body exceeds maximum size');
+  }
+}
+
+/**
+ * A pkt-line length: exactly four hex digits. 0 is a flush packet; 1-3 are invalid. `parseInt`
+ * alone would accept "-004" and walk the parser backwards forever (security review, HIGH).
+ */
+function pktLength(bytes: Uint8Array): number {
+  const text = td.decode(bytes);
+  if (!PKT_LENGTH.test(text)) throw new Error('bad pkt-line in push request');
+  const len = parseInt(text, 16);
+  if (len !== 0 && len < 4) throw new Error('bad pkt-line in push request');
+  return len;
+}
+
+/** Read a whole request body, refusing (without buffering further) past `maxBytes`. */
+async function readBodyBounded(req: Request, maxBytes: number): Promise<Uint8Array> {
+  if (!req.body) return new Uint8Array(0);
+  const reader = req.body.getReader();
+  const parts: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      throw new RequestTooLargeError();
+    }
+    parts.push(value);
+  }
+  return concat(parts);
+}
 
 /** Discard up to `maxBytes` of a request body, then cancel whatever is left. */
 async function drainBounded(
@@ -128,7 +168,9 @@ export class HostedGitRepo extends DurableObject {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       log.error('hosted_git.request_failed', { path, method: req.method, error: msg });
-      return new Response(`error: ${msg}\n`, { status: 500 });
+      return new Response('error: the repository could not process this request\n', {
+        status: 500,
+      });
     }
   }
 
@@ -163,15 +205,17 @@ export class HostedGitRepo extends DurableObject {
       this.activeUploads--;
     };
     try {
-      let body: Uint8Array = new Uint8Array(await req.arrayBuffer());
-      if (body.length > MAX_UPLOAD_PACK_BYTES) throw new Error('request body exceeds maximum size');
+      let body = await readBodyBounded(req, MAX_UPLOAD_PACK_BYTES);
       if (req.headers.get('content-encoding')?.includes('gzip')) {
         body = gunzipLimited(body, MAX_UPLOAD_PACK_BYTES);
       }
       return await uploadPack(this.store, body, release);
     } catch (err) {
       release();
-      if (err instanceof Error && err.message.includes('exceeds maximum size')) {
+      if (
+        err instanceof RequestTooLargeError ||
+        (err instanceof Error && err.message.includes('exceeds maximum size'))
+      ) {
         return new Response('error: fetch request too large\n', { status: 413 });
       }
       throw err;
@@ -202,7 +246,19 @@ export class HostedGitRepo extends DurableObject {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       log.error('hosted_git.receive_failed', { error: msg });
-      return new Response(`error: ${msg}\n`, { status: 500 });
+      if (err instanceof RequestTooLargeError) {
+        return new Response(`error: ${hostedGitPushTooLargeMessage(limits.maxPushBytes)}\n`, {
+          status: 413,
+        });
+      }
+      // Malformed requests are the client's fault; keep the detail out of the response.
+      const status = /pkt-line|push request|command section/.test(msg) ? 400 : 500;
+      return new Response(
+        status === 400
+          ? 'error: malformed push request\n'
+          : 'error: the push could not be processed\n',
+        { status }
+      );
     }
     return new Response(concat(chunks), {
       headers: {
@@ -219,7 +275,7 @@ export class HostedGitRepo extends DurableObject {
     let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
     let buf: Uint8Array;
     if (req.headers.get('content-encoding')?.includes('gzip')) {
-      buf = gunzipLimited(new Uint8Array(await req.arrayBuffer()), limits.maxPushBytes);
+      buf = gunzipLimited(await readBodyBounded(req, limits.maxPushBytes), limits.maxPushBytes);
     } else {
       reader = req.body?.getReader() ?? null;
       buf = new Uint8Array(0);
@@ -238,12 +294,12 @@ export class HostedGitRepo extends DurableObject {
     };
     for (;;) {
       if (!(await need(4))) break;
-      const len = parseInt(td.decode(buf.subarray(pos, pos + 4)), 16);
-      if (Number.isNaN(len)) throw new Error('bad pkt-line in push request');
+      const len = pktLength(buf.subarray(pos, pos + 4));
       if (len === 0) {
         pos += 4;
         break;
       }
+      if (pos + len > MAX_COMMAND_SECTION_BYTES) throw new Error('push command section too large');
       if (!(await need(len))) throw new Error('truncated push request');
       pos += len;
     }

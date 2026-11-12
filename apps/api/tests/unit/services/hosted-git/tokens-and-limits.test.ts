@@ -37,6 +37,7 @@ describe('hosted git tokens', () => {
       scope: 'write',
       exp: now / 1000 + 600,
       workspaceId: 'ws-1',
+      callbackGeneration: null,
     });
   });
 

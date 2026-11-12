@@ -100,13 +100,18 @@ function localRemote(remote: string, token?: string): string {
 }
 
 async function mintToken(
-  repo: string,
+  project: { artifactsRepoId: string; ownerId: string },
   scope: 'read' | 'write',
-  extra: { ttlSeconds?: number; workspaceId?: string } = {}
+  extra: { ttlSeconds?: number; workspaceId?: string; userId?: string } = {}
 ): Promise<string> {
   const res = await runtime.fetch('/__test/hosted-git-token', {
     method: 'POST',
-    body: JSON.stringify({ repo, scope, ...extra }),
+    body: JSON.stringify({
+      repo: project.artifactsRepoId,
+      scope,
+      userId: project.ownerId,
+      ...extra,
+    }),
   });
   expect(res.status).toBe(200);
   return ((await res.json()) as { token: string }).token;
@@ -127,6 +132,7 @@ async function createEmailOnlyUser(): Promise<string> {
 
 interface CreatedProject {
   id: string;
+  ownerId: string;
   repository: string;
   artifactsRepoId: string;
   defaultBranch: string;
@@ -147,7 +153,7 @@ async function createHostedProject(userId: string, name: string): Promise<Create
     .bind(body.id)
     .first<CreatedProject>();
   expect(row).not.toBeNull();
-  return row!;
+  return { ...row!, ownerId: userId };
 }
 
 async function freshDir(name: string): Promise<string> {
@@ -179,7 +185,7 @@ describe('SAM-hosted repositories with a real git client', () => {
     expect(project.repository).toBe(
       `https://api.${HOSTED_GIT_TEST_BASE_DOMAIN}/git/${project.artifactsRepoId}.git`
     );
-    const token = await mintToken(project.artifactsRepoId, 'read');
+    const token = await mintToken(project, 'read');
     const dir = await freshDir('clone');
     await gitOk(['clone', localRemote(project.repository, token), dir]);
     const readme = await readFile(join(dir, 'README.md'), 'utf8');
@@ -191,7 +197,7 @@ describe('SAM-hosted repositories with a real git client', () => {
   });
 
   it('pushes a branch, then shallow-clones and fetches it', async () => {
-    const token = await mintToken(project.artifactsRepoId, 'write');
+    const token = await mintToken(project, 'write');
     const work = await freshDir('work');
     await gitOk(['clone', localRemote(project.repository, token), work]);
     await gitOk(['checkout', '-b', 'feature/one'], work);
@@ -244,7 +250,7 @@ describe('SAM-hosted repositories with a real git client', () => {
   });
 
   it('refuses a push with a read-scoped token, and accepts the same push with write scope', async () => {
-    const read = await mintToken(project.artifactsRepoId, 'read');
+    const read = await mintToken(project, 'read');
     const work = await freshDir('readonly');
     await gitOk(['clone', localRemote(project.repository, read), work]);
     await writeFile(join(work, 'nope.txt'), 'nope\n');
@@ -253,14 +259,14 @@ describe('SAM-hosted repositories with a real git client', () => {
     const refused = await git(['push', 'origin', 'HEAD:refs/heads/read-only'], work);
     expect(refused.code).not.toBe(0);
 
-    const write = await mintToken(project.artifactsRepoId, 'write');
+    const write = await mintToken(project, 'write');
     await gitOk(['remote', 'set-url', 'origin', localRemote(project.repository, write)], work);
     await gitOk(['push', 'origin', 'HEAD:refs/heads/read-only'], work);
   });
 
   it("refuses another project's token, with an owner control", async () => {
     const other = await createHostedProject(await createEmailOnlyUser(), 'Other Tenant');
-    const otherToken = await mintToken(other.artifactsRepoId, 'write');
+    const otherToken = await mintToken(other, 'write');
     const attack = await freshDir('attack');
     const refused = await git(['clone', localRemote(project.repository, otherToken), attack]);
     expect(refused.code).not.toBe(0);
@@ -272,7 +278,7 @@ describe('SAM-hosted repositories with a real git client', () => {
   });
 
   it('refuses an expired or tampered token', async () => {
-    const token = await mintToken(project.artifactsRepoId, 'read');
+    const token = await mintToken(project, 'read');
     const [prefix, payload, signature] = token.split('.');
     const forged = JSON.parse(Buffer.from(payload!, 'base64url').toString());
     forged.repo = 'someone-else';
@@ -290,7 +296,7 @@ describe('SAM-hosted repositories with a real git client', () => {
   });
 
   it('refuses a push over the push-size cap with a clear message, and keeps the repository intact', async () => {
-    const token = await mintToken(project.artifactsRepoId, 'write');
+    const token = await mintToken(project, 'write');
     const work = await freshDir('big');
     await gitOk(['clone', localRemote(project.repository, token), work]);
     // Incompressible content just over the cap.
@@ -312,7 +318,7 @@ describe('SAM-hosted repositories with a real git client', () => {
   });
 
   it('refuses a push that would exceed the object cap, naming the limit', async () => {
-    const token = await mintToken(project.artifactsRepoId, 'write');
+    const token = await mintToken(project, 'write');
     const work = await freshDir('many');
     await gitOk(['clone', localRemote(project.repository, token), work]);
     const dir = join(work, 'many');
@@ -326,6 +332,89 @@ describe('SAM-hosted repositories with a real git client', () => {
     const refused = await git(['push', 'origin', 'HEAD:refs/heads/too-many'], work);
     expect(refused.code).not.toBe(0);
     expect(refused.stderr).toContain(`${DEFAULT_HOSTED_GIT_MAX_REPO_OBJECTS}-object limit`);
+  });
+});
+
+describe('hosted git hardening (security review findings)', () => {
+  let project: CreatedProject;
+
+  beforeAll(async () => {
+    project = await createHostedProject(await createEmailOnlyUser(), 'Hardening');
+  });
+
+  function infoRefs(token: string): Promise<Response> {
+    return runtime.fetch(`/git/${project.artifactsRepoId}.git/info/refs?service=git-upload-pack`, {
+      headers: { authorization: `Basic ${btoa(`x:${token}`)}` },
+    });
+  }
+
+  it('answers a negative pkt-line length promptly with 400 and keeps serving the repository', async () => {
+    const token = await mintToken(project, 'write');
+    for (const body of ['0004-004', '-001', '0002', '00zz']) {
+      const started = Date.now();
+      const res = await runtime.fetch(`/git/${project.artifactsRepoId}.git/git-receive-pack`, {
+        method: 'POST',
+        headers: {
+          authorization: `Basic ${btoa(`x:${token}`)}`,
+          'content-type': 'application/x-git-receive-pack-request',
+        },
+        body,
+      });
+      expect(res.status, body).toBe(400);
+      expect(Date.now() - started).toBeLessThan(5_000);
+    }
+    // Liveness: the same repository still answers.
+    expect((await infoRefs(token)).status).toBe(200);
+  });
+
+  it('refuses a chunked upload-pack body over the cap without buffering it', async () => {
+    const token = await mintToken(project, 'read');
+    const chunk = new Uint8Array(1024 * 1024);
+    let sent = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (sent >= 20) return controller.close();
+        sent++;
+        controller.enqueue(chunk);
+      },
+    });
+    const res = await runtime.fetch(`/git/${project.artifactsRepoId}.git/git-upload-pack`, {
+      method: 'POST',
+      headers: { authorization: `Basic ${btoa(`x:${token}`)}` },
+      body,
+      duplex: 'half',
+    } as RequestInit);
+    expect(res.status).toBe(413);
+    expect((await infoRefs(token)).status).toBe(200);
+  });
+
+  it('refuses a token with no person behind it (internal seeding tokens stay internal)', async () => {
+    const res = await runtime.fetch('/__test/hosted-git-token', {
+      method: 'POST',
+      body: JSON.stringify({ repo: project.artifactsRepoId, scope: 'read' }),
+    });
+    const { token } = (await res.json()) as { token: string };
+    expect((await infoRefs(token)).status).toBe(401);
+    expect((await infoRefs(await mintToken(project, 'read'))).status).toBe(200);
+  });
+
+  it("refuses a removed member's token, with an active-member control", async () => {
+    const member = await createEmailOnlyUser();
+    const now = new Date().toISOString();
+    await runtime.DATABASE.prepare(
+      `INSERT INTO project_members (project_id, user_id, role, status, created_at, updated_at)
+       VALUES (?, ?, 'maintainer', 'active', ?, ?)`
+    )
+      .bind(project.id, member, now, now)
+      .run();
+    const token = await mintToken(project, 'read', { userId: member });
+    expect((await infoRefs(token)).status).toBe(200);
+    await runtime.DATABASE.prepare(
+      `UPDATE project_members SET status = 'removed', removed_at = ? WHERE project_id = ? AND user_id = ?`
+    )
+      .bind(now, project.id, member)
+      .run();
+    expect((await infoRefs(token)).status).toBe(401);
   });
 });
 
@@ -422,7 +511,7 @@ describe('vertical: project creation to a workspace clone and push', () => {
     await gitOk(['push', 'origin', 'sam/agent-work'], work);
 
     // The pushed branch is visible to a fresh reader.
-    const reader = await mintToken(project.artifactsRepoId, 'read');
+    const reader = await mintToken(project, 'read');
     const check = await freshDir('verify');
     await gitOk([
       'clone',
@@ -432,6 +521,34 @@ describe('vertical: project creation to a workspace clone and push', () => {
       check,
     ]);
     expect(await readFile(join(check, 'agent.txt'), 'utf8')).toBe('agent output\n');
+
+    // Generation fence: a restarted runtime (rotated callback generation) retires the token.
+    await runtime.DATABASE.prepare(
+      `UPDATE workspaces SET callback_generation = 'rotated' WHERE id = ?`
+    )
+      .bind(workspaceId)
+      .run();
+    const retired = await git(['push', 'origin', 'sam/agent-work:refs/heads/after-rotate'], work);
+    expect(retired.code).not.toBe(0);
+    const fresh = (await (
+      await runtime.fetch(`/api/workspaces/${workspaceId}/git-token`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${
+            (
+              (await (
+                await runtime.fetch('/__test/workspace-callback-token', {
+                  method: 'POST',
+                  body: JSON.stringify({ workspaceId }),
+                })
+              ).json()) as { token: string }
+            ).token
+          }`,
+        },
+      })
+    ).json()) as { token: string };
+    await gitOk(['remote', 'set-url', 'origin', localRemote(body.cloneUrl, fresh.token)], work);
+    await gitOk(['push', 'origin', 'sam/agent-work:refs/heads/after-rotate'], work);
 
     // Lifecycle fence: once the workspace stops, its token is refused.
     await runtime.DATABASE.prepare(`UPDATE workspaces SET status = 'stopped' WHERE id = ?`)
