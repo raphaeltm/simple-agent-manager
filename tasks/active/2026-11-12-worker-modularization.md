@@ -191,16 +191,16 @@ The small kernel every other package needs, so they do not each invent one.
 
 ## Coordinator checklist
 
-- [ ] Core draft PR open
-- [ ] W0 merged into core
-- [ ] W1 merged into core
-- [ ] W2 merged into core
-- [ ] W3 merged into core
-- [ ] W4 merged into core
-- [ ] W5 merged into core
-- [ ] W6 merged into core
-- [ ] W7 merged into core
-- [ ] Root `CLAUDE.md` structure and build order updated; architecture docs synced
+- [x] Core draft PR open (#2681)
+- [x] W0 merged into core (#2684)
+- [x] W1 merged into core (#2683)
+- [x] W2 merged into core (#2682)
+- [x] W3 merged into core (#2685)
+- [x] W4 merged into core (#2686)
+- [x] W5 merged into core (#2699)
+- [x] W6 merged into core (#2690)
+- [x] W7 merged into core (#2694)
+- [x] Root `CLAUDE.md` structure and build order updated; architecture docs synced
 - [ ] `main` merged into core, CI green on the core PR
 - [ ] One staging deploy of the core branch, full regression of core flows
 - [ ] CodeRabbit requested on the core PR
@@ -291,3 +291,18 @@ ESLint needs no per-package config: the root `eslint.config.mjs` applies.
     thresholds). Add them when a package's test surface settles. Package tests are not
     type-checked (`tsconfig.json` excludes `tests`, as in `packages/providers`); Vitest still runs
     them through esbuild.
+
+## Deferred follow-ups
+
+Recorded on idea `01M77GBTAM775FAKY72RT4HMDV`. None changes behavior.
+
+- **Env field dedupe.** Package env types repeat fields that `apps/api/src/env.ts` still declares
+  (393 in total, 313 of them in `ProjectDataEnv`). `Env extends` each package type, so the compiler
+  rejects any divergence. Removing the copies from `env.ts` needs their comments moved to the package
+  types and a check of `pnpm quality:runtime-tunables`, which reads inherited Env scalars.
+- **Tests-only `./internal/*` entries** in `project-data`, `operations` and `ai-proxy`: move the
+  `apps/api` tests that use them into the packages over time.
+- **CI time.** The Test job limit went from 30 to 45 minutes. Test only affected packages on pull
+  requests and add a turbo cache.
+- **Remaining duplicated MCP and /sam tools** listed in PR #2685.
+- **VM agent, web and scheduler D1 half**: not part of this round.
