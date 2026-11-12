@@ -3,13 +3,15 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { errors } from '../middleware/error';
-import { resolveSessionProfileCredentialContext } from './composable-credentials/profile-context';
+import { resolveProfileCredentialContext } from './composable-credentials/profile-context';
 import { credentialLimitReferenceKey } from './credential-limit-events/values';
+import { resolveProviderLimitProfileId } from './provider-limit-approval-context';
 import { parseProviderLimitWait } from './provider-limit-policy';
 import {
   sameWorkspaceCallbackIdentity,
   type WorkspaceCallbackIdentitySnapshot,
 } from './workspace-callback-identity';
+import { resolveWorkspaceRuntimeIds } from './workspace-runtime-assets';
 
 /** Run at the existing attribution/injection choke point for every agent-key
  * response. It never chooses an alternate credential or changes authentication. */
@@ -18,11 +20,13 @@ export async function assertProviderLimitCredentialPin(
   workspaceId: string,
   reference: string,
   expectedWorkspace?: WorkspaceCallbackIdentitySnapshot,
-  requestedAgentType?: string
+  requestedAgentType?: string,
+  requestedAgentSessionId?: string | null
 ): Promise<void> {
   const key = await credentialLimitReferenceKey(reference);
   const tasks = await env.DATABASE.prepare(
     `SELECT t.id, t.admission_state, t.provider_limit_wait_json,t.agent_profile_hint,t.skill_id,
+      t.status AS taskStatus, t.started_at AS taskStartedAt,
       w.id AS workspaceId, w.user_id AS userId, w.project_id AS projectId,
       w.chat_session_id AS chatSessionId, w.status, w.node_id AS nodeId, n.status AS nodeStatus,
       w.callback_generation AS callbackGeneration
@@ -35,6 +39,8 @@ export async function assertProviderLimitCredentialPin(
     .all<
       WorkspaceCallbackIdentitySnapshot & {
         id: string | null;
+        taskStatus: string | null;
+        taskStartedAt: string | null;
         agent_profile_hint: string | null;
         skill_id: string | null;
         admission_state: string | null;
@@ -55,17 +61,53 @@ export async function assertProviderLimitCredentialPin(
     )
       continue;
     const approval = wait?.ownerOverride;
-    const profile =
+    const db = drizzle(env.DATABASE, { schema });
+    const taskProfileId =
       approval?.expiresAt !== undefined
-        ? await resolveSessionProfileCredentialContext(drizzle(env.DATABASE, { schema }), {
+        ? task.projectId
+          ? await resolveProviderLimitProfileId(db, env, {
+              projectId: task.projectId,
+              userId: task.userId,
+              agentProfileHint: task.agent_profile_hint,
+            })
+          : undefined
+        : task.agent_profile_hint;
+    const runtime =
+      approval?.expiresAt !== undefined
+        ? await resolveWorkspaceRuntimeIds(db, {
             workspaceId,
+            agentSessionId: requestedAgentSessionId,
           })
         : null;
+    const runtimeProfileId = runtime?.workspace.projectId
+      ? await resolveProviderLimitProfileId(db, env, {
+          projectId: runtime.workspace.projectId,
+          userId: runtime.workspace.userId,
+          agentProfileHint: runtime.profileId,
+        })
+      : null;
+    const profile = runtime
+      ? await resolveProfileCredentialContext(db, {
+          userId: runtime.workspace.userId,
+          projectId: runtime.workspace.projectId,
+          profileId: runtimeProfileId,
+          skillId: runtime.skillId,
+        })
+      : null;
+    // The deadline bounds starting recovery, not refreshing the same committed run.
+    // A pre-sleep started_at or a bootstrap agent row cannot prove that handoff.
+    const committedRun =
+      task.taskStatus === 'in_progress' &&
+      task.taskStartedAt !== null &&
+      approval !== undefined &&
+      Date.parse(task.taskStartedAt) >= approval.grantedAt;
     const approvalInvalid =
       approval?.expiresAt !== undefined &&
-      (approval.expiresAt <= Date.now() ||
+      ((approval.expiresAt <= Date.now() && !committedRun) ||
         (requestedAgentType !== undefined && requestedAgentType !== approval.agentType) ||
-        task.agent_profile_hint !== approval.profileId ||
+        taskProfileId !== approval.profileId ||
+        runtimeProfileId === undefined ||
+        runtime?.skillId !== approval.skillId ||
         task.skill_id !== approval.skillId ||
         (profile?.profileId ?? null) !== approval.profileId ||
         (profile !== null && profile.agentType !== approval.agentType));

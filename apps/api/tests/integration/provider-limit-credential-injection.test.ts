@@ -159,6 +159,135 @@ describe('provider wait credential pin at the authenticated secret injection rou
       );
     });
 
+    function expiredScopedApproval() {
+      const approved = JSON.parse(scopedApproval());
+      approved.ownerOverride.grantedAt = Date.now() - 2_000;
+      approved.ownerOverride.expiresAt = Date.now() - 1_000;
+      sqlite.prepare('UPDATE tasks SET provider_limit_wait_json=?').run(JSON.stringify(approved));
+      return approved;
+    }
+
+    it('refreshes the approved credential after expiry for the committed resumed run', async () => {
+      const approved = expiredScopedApproval();
+      // Handoff can commit after the deadline when initial injection preceded it.
+      sqlite
+        .prepare("UPDATE tasks SET status='in_progress',started_at=?")
+        .run(new Date(approved.ownerOverride.expiresAt + 1).toISOString());
+      const before = sqlite.prepare('SELECT * FROM credential_limit_windows').all();
+      const response = await inject();
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect(await response.json()).toMatchObject({ apiKey: key.secret });
+      expect(sqlite.prepare('SELECT * FROM credential_limit_windows').all()).toEqual(before);
+      expect(sqlite.prepare('SELECT provider_limit_wait_json AS value FROM tasks').get()).toEqual({
+        value: JSON.stringify(approved),
+      });
+    });
+
+    it.each([
+      ['delegated', 'current'],
+      ['sleeping', 'current'],
+      ['in_progress', 'missing'],
+      ['in_progress', 'invalid'],
+      ['in_progress', 'stale'],
+    ])('denies expired approval for %s with a %s start marker', async (status, marker) => {
+      const approved = expiredScopedApproval();
+      const startedAt =
+        marker === 'missing'
+          ? null
+          : marker === 'invalid'
+            ? 'not-a-timestamp'
+            : new Date(
+                approved.ownerOverride.grantedAt + (marker === 'stale' ? -1 : 1)
+              ).toISOString();
+      sqlite.prepare('UPDATE tasks SET status=?,started_at=?').run(status, startedAt);
+      const response = await inject();
+      expect(response.status, await response.clone().text()).toBe(409);
+      expect(await response.text()).not.toContain(key.secret);
+      const saved = sqlite.prepare('SELECT provider_limit_wait_json AS value FROM tasks').get() as {
+        value: string;
+      };
+      expect(JSON.parse(saved.value).ownerOverride).toBeUndefined();
+      expect(sqlite.prepare('SELECT agent_credential_reference FROM agent_sessions').get()).toEqual(
+        {
+          agent_credential_reference: null,
+        }
+      );
+    });
+
+    it.each([
+      ['changed task profile', 'UPDATE tasks SET agent_profile_hint=NULL'],
+      ['changed task skill', 'UPDATE tasks SET skill_id=NULL'],
+      ['changed profile agent', "UPDATE agent_profiles SET agent_type='claude-code'"],
+      ['changed skill agent', "UPDATE skills SET agent_type='claude-code'"],
+      ['invalid profile ownership', "UPDATE agent_profiles SET project_id='other-project'"],
+      ['changed account', null],
+    ])('keeps the %s fence after committed-run expiry', async (change, sql) => {
+      const approved = expiredScopedApproval();
+      sqlite
+        .prepare("UPDATE tasks SET status='in_progress',started_at=?")
+        .run(new Date(approved.ownerOverride.grantedAt).toISOString());
+      if (sql) sqlite.exec(sql);
+      if (change === 'changed account') key.reference = 'cc_credentials:other';
+      const response = await inject();
+      expect(response.status, await response.clone().text()).toBe(409);
+      expect(await response.text()).not.toContain(key.secret);
+      const saved = sqlite.prepare('SELECT provider_limit_wait_json AS value FROM tasks').get() as {
+        value: string;
+      };
+      expect(JSON.parse(saved.value).ownerOverride).toBeUndefined();
+      expect(sqlite.prepare('SELECT agent_credential_reference FROM agent_sessions').get()).toEqual(
+        {
+          agent_credential_reference: null,
+        }
+      );
+    });
+
+    it('accepts the same canonical profile selected by its scoped name hint', async () => {
+      scopedApproval();
+      sqlite.exec("UPDATE tasks SET agent_profile_hint='Approved'");
+      const response = await inject();
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect(await response.json()).toMatchObject({ apiKey: key.secret });
+    });
+
+    it.each([null, 'replacement-skill'])(
+      'withholds approval when only the runtime session skill changes to %s',
+      async (skillId) => {
+        scopedApproval();
+        sqlite.exec(
+          "INSERT INTO skills(id,user_id,project_id,name,agent_type) VALUES ('replacement-skill','user-1','project-1','Replacement',NULL)"
+        );
+        sqlite.prepare('UPDATE agent_sessions SET skill_id=?').run(skillId);
+        const response = await inject();
+        expect(response.status).toBe(409);
+        expect(await response.text()).not.toContain(key.secret);
+      }
+    );
+
+    it('rechecks the exact runtime skill after attribution before releasing the secret', async () => {
+      scopedApproval();
+      const prepare = env.DATABASE.prepare.bind(env.DATABASE);
+      env.DATABASE.prepare = ((query: string) => {
+        const statement = prepare(query);
+        if (!/UPDATE agent_sessions/i.test(query)) return statement;
+        const bind = statement.bind.bind(statement);
+        statement.bind = ((...values: unknown[]) => {
+          const bound = bind(...values);
+          const first = bound.first.bind(bound);
+          bound.first = (async () => {
+            const result = await first();
+            sqlite.exec('UPDATE agent_sessions SET skill_id=NULL');
+            return result;
+          }) as typeof bound.first;
+          return bound;
+        }) as typeof statement.bind;
+        return statement;
+      }) as typeof env.DATABASE.prepare;
+      const response = await inject();
+      expect(response.status).toBe(409);
+      expect(await response.text()).not.toContain(key.secret);
+    });
+
     it('rechecks approval after attribution so a profile mutation cannot leak the secret', async () => {
       scopedApproval();
       const prepare = env.DATABASE.prepare.bind(env.DATABASE);

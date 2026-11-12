@@ -85,13 +85,27 @@ describe('callback provider hold owner force resume', () => {
     const db = drizzle(env.DATABASE, { schema });
     // External catalog fixture; pool publication, owner picks and placement stay real.
     await ensureDefaultCapacityPoolsForExistingCredentials(db, {
-      userId: 'user-1', projectId: 'project-1', includeInstallation: true, env,
-      offeringResolver: async () => [{
-        provider: 'hetzner', location: 'nbg1', providerInstanceType: 'cx23',
-        providerInstanceSku: null, displayName: 'Test VM', vcpu: 2, memoryMb: 4096,
-        diskGb: 40, currency: 'EUR', priceMonthly: 10, catalogSource: 'api',
-        catalogLastSeenAt: new Date().toISOString(), available: true,
-      }],
+      userId: 'user-1',
+      projectId: 'project-1',
+      includeInstallation: true,
+      env,
+      offeringResolver: async () => [
+        {
+          provider: 'hetzner',
+          location: 'nbg1',
+          providerInstanceType: 'cx23',
+          providerInstanceSku: null,
+          displayName: 'Test VM',
+          vcpu: 2,
+          memoryMb: 4096,
+          diskGb: 40,
+          currency: 'EUR',
+          priceMonthly: 10,
+          catalogSource: 'api',
+          catalogLastSeenAt: new Date().toISOString(),
+          available: true,
+        },
+      ],
     });
     await pickStarterMachines(db);
     local = new Database(':memory:');
@@ -168,6 +182,39 @@ describe('callback provider hold owner force resume', () => {
     expect(boundary.nudge).not.toHaveBeenCalled();
     expect(boundary.start).not.toHaveBeenCalled();
   }
+
+  it('resolves a scoped profile name to the same saved profile before granting consent', async () => {
+    d1.exec("UPDATE tasks SET agent_profile_hint='Claude'");
+    const response = await resume();
+    expect(response.status, await response.clone().text()).toBe(202);
+    expect(wait().ownerOverride?.profileId).toBe('profile-1');
+    expect(task().agent_profile_hint).toBe('profile-1');
+  });
+
+  it.each(['agent_credential_generation', 'agent_type', 'updated_at'])(
+    'rejects a malformed snapshot authority row field %s',
+    async (field) => {
+      const prepare = env.DATABASE.prepare.bind(env.DATABASE);
+      env.DATABASE.prepare = ((query: string) => {
+        const statement = prepare(query);
+        if (
+          !query.includes('a.agent_credential_generation') ||
+          !query.includes('FROM session_snapshots s')
+        )
+          return statement;
+        const bind = statement.bind.bind(statement);
+        statement.bind = ((...values: unknown[]) => {
+          const bound = bind(...values);
+          const first = bound.first.bind(bound);
+          bound.first = (async () => ({ ...(await first()), [field]: {} })) as typeof bound.first;
+          return bound;
+        }) as typeof statement.bind;
+        return statement;
+      }) as typeof env.DATABASE.prepare;
+      await expectRefused(409);
+      expect(boundary.selected).not.toHaveBeenCalled();
+    }
+  );
 
   it('overrides a future timer while preserving the exact snapshot and already-owned recovery claim', async () => {
     const before = claim();
@@ -247,7 +294,7 @@ describe('callback provider hold owner force resume', () => {
     const before = claim();
     boundary.nudge.mockRejectedValueOnce(new Error('RPC response lost'));
     expect((await resume()).status).toBe(409);
-    expect(task().admission_state).toBeNull();
+    expect(task().admission_state).toBe('provider_limit_recovery_pending');
     expect(wait()).toMatchObject({
       phase: 'released',
       ownerOverride: { credentialKey: 'cc_credentials:account-1' },
@@ -264,7 +311,7 @@ describe('callback provider hold owner force resume', () => {
     });
     expect((await resume()).status).toBe(409);
     expect(claim().recovery_attempt_id).toBe('new-claim');
-    expect(task().admission_state).toBeNull();
+    expect(task().admission_state).toBe('provider_limit_recovery_pending');
     expect(wait().phase).toBe('released');
   });
 

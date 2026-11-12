@@ -130,7 +130,33 @@ describe('live steer delivery adapter', () => {
       prompt: 'use tabs, not spaces',
     });
     expect(input.beforeSubmit).toHaveBeenCalledTimes(1);
+    expect(mocks.nodeAgentRequest.mock.calls[0]?.[3]).toMatchObject({
+      noWakeContainer: true,
+      recoverContainerOnTimeout: false,
+    });
   });
+
+  it.each(['submit', 'reconcile'] as const)(
+    'never wakes a stopped runtime for a steer %s capability probe',
+    async (mode) => {
+      mocks.nodeAgentRequest.mockRejectedValue(
+        new mocks.NodeAgentHttpError(410, 'RUNTIME_STOPPED')
+      );
+      const result =
+        mode === 'submit'
+          ? await submitSteerDelivery(envWithTarget(runningRow), steerInput(mode))
+          : await reconcileSteerDelivery(envWithTarget(runningRow), steerInput(mode));
+      expect(result.kind).toBe(mode === 'submit' ? 'steer_fallback' : 'ambiguous');
+      expect(mocks.nodeAgentRequest).toHaveBeenCalledExactlyOnceWith(
+        'node-1',
+        expect.anything(),
+        '/workspaces/workspace-01/agent-capabilities',
+        expect.objectContaining({ noWakeContainer: true, recoverContainerOnTimeout: false })
+      );
+      expect(steerCalls()).toHaveLength(0);
+      expect(mocks.ensureSessionRecovery).not.toHaveBeenCalled();
+    }
+  );
 
   it('falls back to the queue when the runtime did not take the steer', async () => {
     vm({ steer: () => fixture.notConsumedSteer });

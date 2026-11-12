@@ -10,6 +10,10 @@ import { getSelectedAgentCredentialReference } from './agent-key-resolution';
 import { resolveProfileCredentialContext } from './composable-credentials/profile-context';
 import { credentialLimitReferenceKey } from './credential-limit-events/values';
 import * as projectData from './project-data';
+import {
+  parseProviderLimitSnapshotRow,
+  resolveProviderLimitProfileId,
+} from './provider-limit-approval-context';
 import type { ProviderLimitWait } from './provider-limit-policy';
 import { requireSessionWriter } from './session-access';
 import { ensureSessionRecovery, type SessionRecoveryResult } from './session-recovery';
@@ -52,7 +56,7 @@ export async function forceResumeSavedProviderLimitTask(
 
   const now = Date.now();
   const nowIso = new Date(now).toISOString();
-  const snapshot = await env.DATABASE.prepare(
+  const snapshotRow = await env.DATABASE.prepare(
     `SELECT s.id,s.recovery_status,s.recovery_task_id,s.recovery_attempt_id,s.updated_at,
       a.agent_type,a.agent_profile_id,a.agent_credential_reference,a.agent_credential_generation
      FROM session_snapshots s JOIN workspaces w ON w.id=s.workspace_id
@@ -78,24 +82,16 @@ export async function forceResumeSavedProviderLimitTask(
       task.id,
       task.workspaceId
     )
-    .first<{
-      id: string;
-      recovery_status: string | null;
-      recovery_task_id: string | null;
-      recovery_attempt_id: string | null;
-      updated_at: string;
-      agent_type: string;
-      agent_profile_id: string | null;
-      agent_credential_reference: string | null;
-      agent_credential_generation: number;
-    }>();
+    .first();
+  const snapshot = parseProviderLimitSnapshotRow(snapshotRow);
   if (!snapshot)
     throw errors.conflict('The saved snapshot is unavailable, expired, or already restoring');
   const db = drizzle(env.DATABASE, { schema });
+  const profileId = await resolveProviderLimitProfileId(db, env, task);
   const profile = await resolveProfileCredentialContext(db, {
     userId: ownerUserId,
     projectId: task.projectId,
-    profileId: task.agentProfileHint,
+    profileId,
     skillId: task.skillId,
   });
   const reference = await getSelectedAgentCredentialReference(
@@ -108,7 +104,8 @@ export async function forceResumeSavedProviderLimitTask(
   );
   if (
     snapshot.agent_credential_generation !== wait.sourceCredentialGeneration ||
-    snapshot.agent_profile_id !== task.agentProfileHint ||
+    snapshot.agent_profile_id !== profileId ||
+    profileId === undefined ||
     (task.agentProfileHint !== null && !profile) ||
     (profile && profile.agentType !== snapshot.agent_type) ||
     (await credentialLimitReferenceKey(snapshot.agent_credential_reference)) !==
@@ -130,16 +127,19 @@ export async function forceResumeSavedProviderLimitTask(
     ownerOverride: {
       credentialKey: wait.credentialKey,
       grantedAt: grantNow,
-      profileId: task.agentProfileHint,
+      profileId,
       skillId: task.skillId,
       agentType: snapshot.agent_type,
       expiresAt: wait.deadlineAt,
+      recoveryPending: true,
+      ownerUserId,
+      snapshotId: snapshot.id,
     },
     // Existing scheduled deliveries are fenced by this key immediately before submit.
     scheduleKey: `provider-limit:${task.id}:override:${crypto.randomUUID()}`,
   } satisfies ProviderLimitWait);
   const changed = await env.DATABASE.prepare(
-    `UPDATE tasks SET provider_limit_wait_json=?,admission_state=NULL,admission_reason=NULL,
+    `UPDATE tasks SET agent_profile_hint=?,provider_limit_wait_json=?,admission_state='provider_limit_recovery_pending',admission_reason=NULL,
        admission_next_retry_at=NULL,updated_at=?
      WHERE id=? AND project_id=? AND user_id=? AND chat_session_id=?
        AND status=? AND workspace_id IS ? AND agent_profile_hint IS ? AND skill_id IS ?
@@ -158,6 +158,7 @@ export async function forceResumeSavedProviderLimitTask(
          AND a.agent_type=? AND a.agent_profile_id IS ?)`
   )
     .bind(
+      profileId,
       overridden,
       nowIso,
       task.id,
@@ -179,7 +180,7 @@ export async function forceResumeSavedProviderLimitTask(
       wait.sourceCredentialGeneration,
       snapshot.agent_credential_reference,
       snapshot.agent_type,
-      task.agentProfileHint
+      profileId
     )
     .run();
   if (!changed.meta.changes)
@@ -219,6 +220,7 @@ export async function forceResumeSavedProviderLimitTask(
       throw errors.conflict(`Unable to resume the saved task: ${result.reason}`);
     }
   }
+  await acknowledgeProviderLimitRecovery(env, task.id, overridden);
   await projectData
     .syncProviderLimitAttention(env, task.projectId, task.id, task.chatSessionId)
     .catch(() =>
@@ -251,4 +253,14 @@ export async function forceResumeSavedProviderLimitTask(
       )
       .run();
   }
+}
+
+/** Exact approval CAS: a newer rejection/approval must retain its own intent. */
+export async function acknowledgeProviderLimitRecovery(env: Env, taskId: string, receipt: string) {
+  await env.DATABASE.prepare(
+    `UPDATE tasks SET admission_state=NULL,admission_reason=NULL,admission_next_retry_at=NULL
+     WHERE id=? AND admission_state='provider_limit_recovery_pending' AND provider_limit_wait_json IS ?`
+  )
+    .bind(taskId, receipt)
+    .run();
 }
