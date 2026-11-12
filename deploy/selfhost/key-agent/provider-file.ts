@@ -17,10 +17,7 @@ function readKek(path: string): Buffer {
   try {
     const stat = statSync(path);
     if ((stat.mode & 0o077) !== 0) {
-      throw new KeyProviderError(
-        'config',
-        `${path} is readable by group or others; chmod 600 it`
-      );
+      throw new KeyProviderError('config', `${path} is readable by group or others; chmod 600 it`);
     }
     text = readFileSync(path, 'utf8').trim();
   } catch (error) {

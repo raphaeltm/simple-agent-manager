@@ -13,13 +13,24 @@
  */
 import { spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { sealSecrets } from '../../../deploy/selfhost/key-agent/bundle.ts';
-import { createFileProvider, generateFileKek } from '../../../deploy/selfhost/key-agent/provider-file.ts';
+import {
+  createFileProvider,
+  generateFileKek,
+} from '../../../deploy/selfhost/key-agent/provider-file.ts';
 import { OBJECTSTORE_IMAGE } from '../backup-lib';
 import { ensureCelldBinary, resolveEsbuild } from '../celld-binary.js';
 import { freePort, LIVE_TMP, REPO_ROOT, type Running, sleep, start, waitFor } from './harness';
@@ -59,8 +70,17 @@ let ports: { store: number; celld: number; internal: number; agent: number };
 let binary = '';
 let canary = '';
 let bundleId = '';
-const storeEnv = () => ({ AWS_ACCESS_KEY_ID: KEY, AWS_SECRET_ACCESS_KEY: SECRET, AWS_REGION: 'us-east-1' });
-const bucketArgs = () => ['--bucket', 's3://fleet', '--endpoint', `http://127.0.0.1:${ports.store}`];
+const storeEnv = () => ({
+  AWS_ACCESS_KEY_ID: KEY,
+  AWS_SECRET_ACCESS_KEY: SECRET,
+  AWS_REGION: 'us-east-1',
+});
+const bucketArgs = () => [
+  '--bucket',
+  's3://fleet',
+  '--endpoint',
+  `http://127.0.0.1:${ports.store}`,
+];
 
 function startAgent(allowedUid: number, port = ports.agent): Running {
   return start('node', [AGENT], {
@@ -90,48 +110,129 @@ function filesUnder(dir: string): string[] {
 
 describe.skipIf(!hasDocker && !process.env.CI)('sealed secrets on celld', () => {
   beforeAll(async () => {
-    ports = { store: await freePort(), celld: await freePort(), internal: await freePort(), agent: await freePort() };
+    ports = {
+      store: await freePort(),
+      celld: await freePort(),
+      internal: await freePort(),
+      agent: await freePort(),
+    };
     mkdirSync(LIVE_TMP, { recursive: true });
     root = mkdtempSync(join(LIVE_TMP, 'key-agent-'));
     mkdirSync(join(root, 'state/bundles'), { recursive: true, mode: 0o700 });
     const consolePort = await freePort();
-    const run = spawnSync('docker', ['run', '-d', '--rm', '--network', 'host', '-e', `MINIO_ROOT_USER=${KEY}`, '-e', `MINIO_ROOT_PASSWORD=${SECRET}`, '--entrypoint', 'minio', OBJECTSTORE_IMAGE, 'server', '/data', '--address', `127.0.0.1:${ports.store}`, '--console-address', `127.0.0.1:${consolePort}`], { encoding: 'utf8' });
+    const run = spawnSync(
+      'docker',
+      [
+        'run',
+        '-d',
+        '--rm',
+        '--network',
+        'host',
+        '-e',
+        `MINIO_ROOT_USER=${KEY}`,
+        '-e',
+        `MINIO_ROOT_PASSWORD=${SECRET}`,
+        '--entrypoint',
+        'minio',
+        OBJECTSTORE_IMAGE,
+        'server',
+        '/data',
+        '--address',
+        `127.0.0.1:${ports.store}`,
+        '--console-address',
+        `127.0.0.1:${consolePort}`,
+      ],
+      { encoding: 'utf8' }
+    );
     expect(run.status, run.stderr).toBe(0);
     container = run.stdout.trim();
-    await waitFor('object store', async () => (await fetch(`http://127.0.0.1:${ports.store}/minio/health/live`).catch(() => null))?.ok);
+    await waitFor(
+      'object store',
+      async () =>
+        (await fetch(`http://127.0.0.1:${ports.store}/minio/health/live`).catch(() => null))?.ok
+    );
     const mc = (args: string[], extra: string[] = []) =>
-      spawnSync('docker', ['run', '--rm', '--network', 'host', ...extra, '-e', `MC_HOST_src=http://${KEY}:${SECRET}@127.0.0.1:${ports.store}`, '-e', 'MC_CONFIG_DIR=/tmp/mc', '--entrypoint', 'mc', OBJECTSTORE_IMAGE, ...args], { encoding: 'utf8' });
+      spawnSync(
+        'docker',
+        [
+          'run',
+          '--rm',
+          '--network',
+          'host',
+          ...extra,
+          '-e',
+          `MC_HOST_src=http://${KEY}:${SECRET}@127.0.0.1:${ports.store}`,
+          '-e',
+          'MC_CONFIG_DIR=/tmp/mc',
+          '--entrypoint',
+          'mc',
+          OBJECTSTORE_IMAGE,
+          ...args,
+        ],
+        { encoding: 'utf8' }
+      );
     expect(mc(['mb', 'src/fleet']).status).toBe(0);
 
     // Seal a canary the way the deploy does (scripts/selfhost/key-service.ts), file provider.
     writeFileSync(join(root, 'state/kek'), generateFileKek(), { mode: 0o600 });
     canary = `live-canary-${randomBytes(16).toString('hex')}`;
-    const bundle = await sealSecrets({ LIVE_SECRET: canary }, createFileProvider({ SAM_KEY_FILE: join(root, 'state/kek') }), { installationId: 'c'.repeat(32) });
+    const bundle = await sealSecrets(
+      { LIVE_SECRET: canary },
+      createFileProvider({ SAM_KEY_FILE: join(root, 'state/kek') }),
+      { installationId: 'c'.repeat(32) }
+    );
     bundleId = bundle.bundleId;
-    writeFileSync(join(root, 'state/bundles', `${bundleId}.json`), JSON.stringify(bundle), { mode: 0o600 });
+    writeFileSync(join(root, 'state/bundles', `${bundleId}.json`), JSON.stringify(bundle), {
+      mode: 0o600,
+    });
 
     const project = join(root, 'project');
     mkdirSync(project);
     writeFileSync(join(project, 'worker.js'), WORKER);
-    writeFileSync(join(project, 'wrangler.json'), JSON.stringify({
-      name: 'key-agent-probe', main: 'worker.js', compatibility_date: '2026-01-01',
-      durable_objects: { bindings: [{ name: 'PROBE_DO', class_name: 'ProbeDO' }] },
-      migrations: [{ tag: 'v1', new_sqlite_classes: ['ProbeDO'] }],
-      vars: {
-        SAM_KEY_AGENT_URL: `http://127.0.0.1:${ports.agent}/v1/secrets`,
-        SAM_SECRET_BUNDLE_ID: bundleId,
-        PLAIN_VAR_CONTROL: 'plain-var-control-value',
-      },
-    }));
+    writeFileSync(
+      join(project, 'wrangler.json'),
+      JSON.stringify({
+        name: 'key-agent-probe',
+        main: 'worker.js',
+        compatibility_date: '2026-01-01',
+        durable_objects: { bindings: [{ name: 'PROBE_DO', class_name: 'ProbeDO' }] },
+        migrations: [{ tag: 'v1', new_sqlite_classes: ['ProbeDO'] }],
+        vars: {
+          SAM_KEY_AGENT_URL: `http://127.0.0.1:${ports.agent}/v1/secrets`,
+          SAM_SECRET_BUNDLE_ID: bundleId,
+          PLAIN_VAR_CONTROL: 'plain-var-control-value',
+        },
+      })
+    );
     agent = startAgent(process.getuid?.() ?? 0);
     binary = await ensureCelldBinary(join(LIVE_TMP, 'celld-bin'));
-    celld = start(binary, [...bucketArgs(), '--listen', `127.0.0.1:${ports.celld}`, '--internal-listen', `127.0.0.1:${ports.internal}`], storeEnv());
+    celld = start(
+      binary,
+      [
+        ...bucketArgs(),
+        '--listen',
+        `127.0.0.1:${ports.celld}`,
+        '--internal-listen',
+        `127.0.0.1:${ports.internal}`,
+      ],
+      storeEnv()
+    );
     const deployed = spawnSync(binary, ['deploy', project, ...bucketArgs()], {
       encoding: 'utf8',
-      env: { ...process.env, ...storeEnv(), CELLD_ESBUILD: resolveEsbuild(join(REPO_ROOT, 'apps/api')) },
+      env: {
+        ...process.env,
+        ...storeEnv(),
+        CELLD_ESBUILD: resolveEsbuild(join(REPO_ROOT, 'apps/api')),
+      },
     });
     expect(deployed.status, deployed.stderr + deployed.stdout).toBe(0);
-    await waitFor('celld to serve the Worker', async () => (await fetch(`http://127.0.0.1:${ports.celld}/`).catch(() => null))?.status === 200, 120_000, () => celld?.output() ?? '');
+    await waitFor(
+      'celld to serve the Worker',
+      async () =>
+        (await fetch(`http://127.0.0.1:${ports.celld}/`).catch(() => null))?.status === 200,
+      120_000,
+      () => celld?.output() ?? ''
+    );
   }, 300_000);
 
   afterAll(async () => {
@@ -152,7 +253,31 @@ describe.skipIf(!hasDocker && !process.env.CI)('sealed secrets on celld', () => 
   it('leaves no secret in the fleet bucket, while a plain var is stored there in plaintext', () => {
     const copy = join(root, 'bucket-copy');
     mkdirSync(copy);
-    const mirrored = spawnSync('docker', ['run', '--rm', '--network', 'host', '-u', `${process.getuid?.()}:${process.getgid?.()}`, '-v', `${copy}:/out`, '-e', `MC_HOST_src=http://${KEY}:${SECRET}@127.0.0.1:${ports.store}`, '-e', 'MC_CONFIG_DIR=/tmp/mc', '--entrypoint', 'mc', OBJECTSTORE_IMAGE, 'mirror', '--quiet', 'src/fleet', '/out'], { encoding: 'utf8' });
+    const mirrored = spawnSync(
+      'docker',
+      [
+        'run',
+        '--rm',
+        '--network',
+        'host',
+        '-u',
+        `${process.getuid?.()}:${process.getgid?.()}`,
+        '-v',
+        `${copy}:/out`,
+        '-e',
+        `MC_HOST_src=http://${KEY}:${SECRET}@127.0.0.1:${ports.store}`,
+        '-e',
+        'MC_CONFIG_DIR=/tmp/mc',
+        '--entrypoint',
+        'mc',
+        OBJECTSTORE_IMAGE,
+        'mirror',
+        '--quiet',
+        'src/fleet',
+        '/out',
+      ],
+      { encoding: 'utf8' }
+    );
     expect(mirrored.status, mirrored.stderr).toBe(0);
     const files = filesUnder(copy);
     expect(files.length).toBeGreaterThan(3);
@@ -170,10 +295,16 @@ describe.skipIf(!hasDocker && !process.env.CI)('sealed secrets on celld', () => 
     await sleep(40_000);
     const down = await get('/');
     expect(down.status).toBe(503);
-    expect(down.body).toMatchObject({ error: 'SECRETS_UNAVAILABLE', code: 'KEY_AGENT_UNREACHABLE' });
+    expect(down.body).toMatchObject({
+      error: 'SECRETS_UNAVAILABLE',
+      code: 'KEY_AGENT_UNREACHABLE',
+    });
     expect(JSON.stringify(down.body)).not.toContain(canary);
     agent = startAgent(process.getuid?.() ?? 0);
-    await waitFor('the agent', async () => (await fetch(`http://127.0.0.1:${ports.agent}/healthz`).catch(() => null))?.ok);
+    await waitFor(
+      'the agent',
+      async () => (await fetch(`http://127.0.0.1:${ports.agent}/healthz`).catch(() => null))?.ok
+    );
     const back = await get('/');
     expect(back.status).toBe(200);
     expect(back.body.secretSha256).toBe(sha256(canary));
@@ -183,7 +314,10 @@ describe.skipIf(!hasDocker && !process.env.CI)('sealed secrets on celld', () => 
     const port = await freePort();
     const strict = startAgent((process.getuid?.() ?? 0) + 1, port);
     try {
-      await waitFor('strict agent', async () => (await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => null))?.ok);
+      await waitFor(
+        'strict agent',
+        async () => (await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => null))?.ok
+      );
       const refused = await fetch(`http://127.0.0.1:${port}/v1/secrets`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-sam-key-agent': '1' },

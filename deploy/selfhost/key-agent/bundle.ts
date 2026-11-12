@@ -38,7 +38,12 @@ export interface SealedBundle {
 export type Secrets = Record<string, string>;
 
 /** The authenticated header: everything but the key material, in a fixed order. */
-export function headerBytes(b: Pick<SealedBundle, 'format' | 'bundleId' | 'installationId' | 'createdAt' | 'provider' | 'keyRef'>): Uint8Array {
+export function headerBytes(
+  b: Pick<
+    SealedBundle,
+    'format' | 'bundleId' | 'installationId' | 'createdAt' | 'provider' | 'keyRef'
+  >
+): Uint8Array {
   return new Uint8Array(
     Buffer.from(
       JSON.stringify([b.format, b.bundleId, b.installationId, b.createdAt, b.provider, b.keyRef]),
@@ -53,7 +58,10 @@ function assertSecrets(secrets: unknown): asserts secrets is Secrets {
   }
   for (const [name, value] of Object.entries(secrets)) {
     if (!SECRET_NAME.test(name) || typeof value !== 'string') {
-      throw new KeyProviderError('invalid', 'bundle secrets must map UPPER_SNAKE_CASE names to strings');
+      throw new KeyProviderError(
+        'invalid',
+        'bundle secrets must map UPPER_SNAKE_CASE names to strings'
+      );
     }
   }
 }
@@ -152,7 +160,8 @@ export async function openBundle(bundle: SealedBundle, provider: KeyProvider): P
   const aad = headerBytes(bundle);
   const dataKey = Buffer.from(await provider.unwrap(unb64(bundle.wrappedKey, 'wrappedKey'), aad));
   try {
-    if (dataKey.length !== 32) throw new KeyProviderError('invalid', 'unwrapped data key has the wrong size');
+    if (dataKey.length !== 32)
+      throw new KeyProviderError('invalid', 'unwrapped data key has the wrong size');
     const iv = Buffer.from(unb64(bundle.iv, 'iv'));
     const body = Buffer.from(unb64(bundle.ciphertext, 'ciphertext'));
     if (iv.length !== IV_BYTES || body.length < TAG_BYTES) {
@@ -163,12 +172,19 @@ export async function openBundle(bundle: SealedBundle, provider: KeyProvider): P
       const decipher = createDecipheriv('aes-256-gcm', dataKey, iv);
       decipher.setAAD(aad);
       decipher.setAuthTag(body.subarray(body.length - TAG_BYTES));
-      plaintext = Buffer.concat([decipher.update(body.subarray(0, body.length - TAG_BYTES)), decipher.final()]);
+      plaintext = Buffer.concat([
+        decipher.update(body.subarray(0, body.length - TAG_BYTES)),
+        decipher.final(),
+      ]);
     } catch {
-      throw new KeyProviderError('invalid', 'bundle does not verify (tampered, or another data key)');
+      throw new KeyProviderError(
+        'invalid',
+        'bundle does not verify (tampered, or another data key)'
+      );
     }
     try {
-      if (plaintext.length > MAX_SECRETS_BYTES) throw new KeyProviderError('invalid', 'bundle is too large');
+      if (plaintext.length > MAX_SECRETS_BYTES)
+        throw new KeyProviderError('invalid', 'bundle is too large');
       const secrets = JSON.parse(plaintext.toString('utf8')) as unknown;
       assertSecrets(secrets);
       return secrets;

@@ -42,7 +42,8 @@ export function createTransitProvider(
   const mount = env.SAM_TRANSIT_MOUNT?.trim() || 'transit';
   const key = requireSetting(env, 'SAM_TRANSIT_KEY');
   if (!MOUNT.test(mount)) throw new KeyProviderError('config', 'SAM_TRANSIT_MOUNT is not a path');
-  if (!KEY_NAME.test(key)) throw new KeyProviderError('config', 'SAM_TRANSIT_KEY is not a key name');
+  if (!KEY_NAME.test(key))
+    throw new KeyProviderError('config', 'SAM_TRANSIT_KEY is not a key name');
   const url = new URL(addr);
   // Plain HTTP only to this machine (a sidecar); anything else must be TLS.
   if (url.protocol !== 'https:' && !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)) {
@@ -76,7 +77,8 @@ export function createTransitProvider(
     }
     token = {
       value,
-      expiresAt: Date.now() + Math.max(0, (Number.isFinite(ttl) ? ttl : 0) * 1000 - TOKEN_REFRESH_MARGIN_MS),
+      expiresAt:
+        Date.now() + Math.max(0, (Number.isFinite(ttl) ? ttl : 0) * 1000 - TOKEN_REFRESH_MARGIN_MS),
     };
     return value;
   }
@@ -111,7 +113,10 @@ export function createTransitProvider(
     async unwrap(wrapped, context) {
       const ciphertext = Buffer.from(wrapped).toString('utf8');
       if (!/^vault:v\d+:[A-Za-z0-9+/=]+$/.test(ciphertext)) {
-        throw new KeyProviderError('invalid', `${service}: wrapped key is not a transit ciphertext`);
+        throw new KeyProviderError(
+          'invalid',
+          `${service}: wrapped key is not a transit ciphertext`
+        );
       }
       const result = await call('decrypt', { ciphertext, associated_data: b64(context) });
       return unb64(field(result, 'data', 'plaintext'), `${service}: plaintext`);

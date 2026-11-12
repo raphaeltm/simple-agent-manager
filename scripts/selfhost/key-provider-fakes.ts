@@ -30,7 +30,8 @@ async function body(request: IncomingMessage): Promise<Record<string, unknown>> 
   const chunks: Buffer[] = [];
   for await (const chunk of request) chunks.push(chunk as Buffer);
   try {
-    return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}') as Record<string, unknown>;
+    const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}') as unknown;
+    return typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : {};
   } catch {
     return {};
   }
@@ -90,15 +91,24 @@ export async function startFakeKeyServices(): Promise<FakeKeyService> {
           const iv = randomBytes(12);
           const cipher = createCipheriv('aes-256-gcm', key, iv);
           cipher.setAAD(aad);
-          const ct = Buffer.concat([cipher.update(Buffer.from(String(input.plaintext), 'base64')), cipher.final()]);
-          return send(200, { name, ciphertext: Buffer.concat([iv, ct, cipher.getAuthTag()]).toString('base64') });
+          const ct = Buffer.concat([
+            cipher.update(Buffer.from(String(input.plaintext), 'base64')),
+            cipher.final(),
+          ]);
+          return send(200, {
+            name,
+            ciphertext: Buffer.concat([iv, ct, cipher.getAuthTag()]).toString('base64'),
+          });
         }
         try {
           const blob = Buffer.from(String(input.ciphertext), 'base64');
           const decipher = createDecipheriv('aes-256-gcm', key, blob.subarray(0, 12));
           decipher.setAAD(aad);
           decipher.setAuthTag(blob.subarray(blob.length - 16));
-          const pt = Buffer.concat([decipher.update(blob.subarray(12, blob.length - 16)), decipher.final()]);
+          const pt = Buffer.concat([
+            decipher.update(blob.subarray(12, blob.length - 16)),
+            decipher.final(),
+          ]);
           return send(200, { plaintext: pt.toString('base64') });
         } catch {
           return send(400, { error: { status: 'INVALID_ARGUMENT', message: 'Decryption failed' } });
@@ -106,7 +116,9 @@ export async function startFakeKeyServices(): Promise<FakeKeyService> {
       }
 
       // Key Vault: POST /keys/{name}/wrapkey, POST /keys/{name}/{version}/unwrapkey
-      const az = /^\/keys\/([A-Za-z0-9-]+)(?:\/([0-9a-f]+))?\/(wrapkey|unwrapkey)$/.exec(url.pathname);
+      const az = /^\/keys\/([A-Za-z0-9-]+)(?:\/([0-9a-f]+))?\/(wrapkey|unwrapkey)$/.exec(
+        url.pathname
+      );
       if (az && url.searchParams.get('api-version') === '7.4' && input.alg === 'RSA-OAEP-256') {
         const [, name = '', version, op] = az;
         const resolved = azureVersion(name, version);

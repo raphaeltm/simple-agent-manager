@@ -11,7 +11,8 @@ import { readFileSync } from 'node:fs';
 /** `127.0.0.1:port` as /proc/net/tcp writes it: little-endian address word, big-endian port. */
 function procAddress(ipv4: string, port: number): string | null {
   const octets = ipv4.split('.').map((part) => Number(part));
-  if (octets.length !== 4 || octets.some((o) => !Number.isInteger(o) || o < 0 || o > 255)) return null;
+  if (octets.length !== 4 || octets.some((o) => !Number.isInteger(o) || o < 0 || o > 255))
+    return null;
   const word = octets
     .reverse()
     .map((o) => o.toString(16).padStart(2, '0'))
@@ -26,12 +27,23 @@ function procAddress(ipv4: string, port: number): string | null {
  * Callers must treat null as "refuse".
  */
 export function loopbackPeerUid(
-  connection: { clientAddress: string; clientPort: number; serverAddress: string; serverPort: number },
+  connection: {
+    clientAddress: string;
+    clientPort: number;
+    serverAddress: string;
+    serverPort: number;
+  },
   procNetTcp = '/proc/net/tcp',
   read: (path: string) => string = (path) => readFileSync(path, 'utf8')
 ): number | null {
-  const client = procAddress(connection.clientAddress.replace(/^::ffff:/, ''), connection.clientPort);
-  const server = procAddress(connection.serverAddress.replace(/^::ffff:/, ''), connection.serverPort);
+  const client = procAddress(
+    connection.clientAddress.replace(/^::ffff:/, ''),
+    connection.clientPort
+  );
+  const server = procAddress(
+    connection.serverAddress.replace(/^::ffff:/, ''),
+    connection.serverPort
+  );
   if (!client || !server) return null;
   let table: string;
   try {
@@ -45,7 +57,12 @@ export function loopbackPeerUid(
     // sl local_address rem_address st tx:rx tr:when retrnsmt uid ...
     // Only ESTABLISHED (01): a TIME_WAIT entry from an earlier connection on the same client port
     // is listed with uid 0 and must not decide.
-    if (columns.length < 8 || columns[1] !== client || columns[2] !== server || columns[3] !== '01') {
+    if (
+      columns.length < 8 ||
+      columns[1] !== client ||
+      columns[2] !== server ||
+      columns[3] !== '01'
+    ) {
       continue;
     }
     const uid = Number(columns[7]);

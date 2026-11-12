@@ -17,6 +17,8 @@
  * refuses its events. Nothing runs without its secrets.
  */
 
+import { log } from '../lib/logger';
+
 export const DEFAULT_KEY_AGENT_TIMEOUT_MS = 3000;
 const AGENT_URL = /^http:\/\/127\.0\.0\.1:\d{1,5}\/v1\/secrets$/;
 const BUNDLE_ID = /^[0-9a-f]{32}$/;
@@ -63,7 +65,8 @@ function settings(env: KeyAgentEnv): { url: string; bundleId: string; timeoutMs:
   return {
     url,
     bundleId,
-    timeoutMs: Number.isSafeInteger(timeout) && timeout > 0 ? timeout : DEFAULT_KEY_AGENT_TIMEOUT_MS,
+    timeoutMs:
+      Number.isSafeInteger(timeout) && timeout > 0 ? timeout : DEFAULT_KEY_AGENT_TIMEOUT_MS,
   };
 }
 
@@ -72,7 +75,11 @@ export function cachedRuntimeSecrets(env: KeyAgentEnv): RuntimeSecrets | null {
   return cached && cached.bundleId === env.SAM_SECRET_BUNDLE_ID ? cached.secrets : null;
 }
 
-async function fetchSecrets(url: string, bundleId: string, timeoutMs: number): Promise<RuntimeSecrets> {
+async function fetchSecrets(
+  url: string,
+  bundleId: string,
+  timeoutMs: number
+): Promise<RuntimeSecrets> {
   const started = Date.now();
   let response: Response;
   try {
@@ -95,7 +102,8 @@ async function fetchSecrets(url: string, bundleId: string, timeoutMs: number): P
   } catch {
     body = null;
   }
-  const error = typeof body === 'object' && body !== null ? (body as { error?: unknown }).error : undefined;
+  const error =
+    typeof body === 'object' && body !== null ? (body as { error?: unknown }).error : undefined;
   if (response.status !== 200) {
     throw new RuntimeSecretsUnavailableError(
       'KEY_AGENT_REFUSED',
@@ -111,16 +119,16 @@ async function fetchSecrets(url: string, bundleId: string, timeoutMs: number): P
     Array.isArray(secrets) ||
     Object.entries(secrets).some(([k, v]) => !SECRET_NAME.test(k) || typeof v !== 'string')
   ) {
-    throw new RuntimeSecretsUnavailableError('KEY_AGENT_BAD_RESPONSE', 'key agent response is malformed');
+    throw new RuntimeSecretsUnavailableError(
+      'KEY_AGENT_BAD_RESPONSE',
+      'key agent response is malformed'
+    );
   }
-  console.log(
-    JSON.stringify({
-      event: 'runtime_secrets.loaded',
-      bundleId,
-      count: Object.keys(secrets).length,
-      ms: Date.now() - started,
-    })
-  );
+  log.info('runtime_secrets.loaded', {
+    bundleId,
+    count: Object.keys(secrets).length,
+    ms: Date.now() - started,
+  });
   return Object.freeze({ ...(secrets as Record<string, string>) });
 }
 
@@ -145,12 +153,14 @@ export async function loadRuntimeSecrets(env: KeyAgentEnv): Promise<RuntimeSecre
     );
     const entry = { bundleId, promise };
     inflight = entry;
-    promise.then(
-      () => undefined,
-      () => undefined
-    ).finally(() => {
-      if (inflight === entry) inflight = null;
-    });
+    promise
+      .then(
+        () => undefined,
+        () => undefined
+      )
+      .finally(() => {
+        if (inflight === entry) inflight = null;
+      });
   }
   return await inflight.promise;
 }
@@ -162,14 +172,11 @@ export function withRuntimeSecrets<E extends object>(env: E, secrets: RuntimeSec
 
 function unavailableResponse(error: unknown): Response {
   const code = error instanceof RuntimeSecretsUnavailableError ? error.code : 'SECRETS_UNAVAILABLE';
-  console.error(
-    JSON.stringify({
-      event: 'runtime_secrets.unavailable',
-      code,
-      message: error instanceof Error ? error.message : String(error),
-      action: 'rejected',
-    })
-  );
+  log.error('runtime_secrets.unavailable', {
+    code,
+    message: error instanceof Error ? error.message : String(error),
+    action: 'rejected',
+  });
   return Response.json(
     {
       error: 'SECRETS_UNAVAILABLE',
@@ -182,7 +189,11 @@ function unavailableResponse(error: unknown): Response {
 
 interface WorkerHandlers<E> {
   fetch?: (request: Request, env: E, ctx: ExecutionContext) => Response | Promise<Response>;
-  scheduled?: (controller: ScheduledController, env: E, ctx: ExecutionContext) => void | Promise<void>;
+  scheduled?: (
+    controller: ScheduledController,
+    env: E,
+    ctx: ExecutionContext
+  ) => void | Promise<void>;
   email?: (message: ForwardableEmailMessage, env: E, ctx: ExecutionContext) => void | Promise<void>;
 }
 

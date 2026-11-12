@@ -48,7 +48,12 @@ export function describeKeyProviderConformance(name: string, subject: Conformanc
       const provider = subject.provider();
       const key = randomBytes(32);
       const wrapped = Buffer.from(await provider.wrap(new Uint8Array(key), context('a')));
-      for (const form of [key, Buffer.from(key.toString('base64')), Buffer.from(key.toString('base64url')), Buffer.from(key.toString('hex'))]) {
+      for (const form of [
+        key,
+        Buffer.from(key.toString('base64')),
+        Buffer.from(key.toString('base64url')),
+        Buffer.from(key.toString('hex')),
+      ]) {
         expect(wrapped.includes(form)).toBe(false);
       }
     });
@@ -63,7 +68,9 @@ export function describeKeyProviderConformance(name: string, subject: Conformanc
 
     it('refuses a tampered blob as invalid', async () => {
       const provider = subject.provider();
-      const wrapped = Buffer.from(await provider.wrap(new Uint8Array(randomBytes(32)), context('a')));
+      const wrapped = Buffer.from(
+        await provider.wrap(new Uint8Array(randomBytes(32)), context('a'))
+      );
       // Flip a byte in the middle: inside the ciphertext for every layout in this repo.
       const i = Math.floor(wrapped.length / 2);
       wrapped[i] = (wrapped[i] ?? 0) ^ 0x01;
@@ -72,7 +79,11 @@ export function describeKeyProviderConformance(name: string, subject: Conformanc
 
     it('refuses a blob made by another key', async () => {
       const wrapped = await subject.otherKey().wrap(new Uint8Array(randomBytes(32)), context('a'));
-      await expectKind(subject.provider().unwrap(wrapped, context('a')), ['invalid', 'denied', 'config']);
+      await expectKind(subject.provider().unwrap(wrapped, context('a')), [
+        'invalid',
+        'denied',
+        'config',
+      ]);
     });
 
     it('binds the context when it says it does', async () => {
@@ -88,10 +99,15 @@ export function describeKeyProviderConformance(name: string, subject: Conformanc
 
     it('seals and opens a bundle; a bundle with an edited header does not open', async () => {
       const provider = subject.provider();
-      const secrets = { ENCRYPTION_KEY: randomBytes(32).toString('base64'), GITHUB_CLIENT_SECRET: 'x'.repeat(40) };
+      const secrets = {
+        ENCRYPTION_KEY: randomBytes(32).toString('base64'),
+        GITHUB_CLIENT_SECRET: 'x'.repeat(40),
+      };
       const bundle = await sealSecrets(secrets, provider, { installationId: 'a'.repeat(32) });
       expect(await openBundle(bundle, provider)).toEqual(secrets);
-      await expectKind(openBundle({ ...bundle, installationId: 'b'.repeat(32) }, provider), ['invalid']);
+      await expectKind(openBundle({ ...bundle, installationId: 'b'.repeat(32) }, provider), [
+        'invalid',
+      ]);
     });
 
     it('names its key without any credential', () => {
@@ -102,24 +118,34 @@ export function describeKeyProviderConformance(name: string, subject: Conformanc
       expect(provider.keyRef.length).toBeGreaterThan(0);
     });
 
-    it.runIf(Boolean(subject.unreachable))('reports an unreachable service as unavailable', async () => {
-      const provider = subject.unreachable?.();
-      if (!provider) return;
-      const started = Date.now();
-      await expectKind(provider.wrap(new Uint8Array(randomBytes(32)), context('a')), ['unavailable']);
-      expect(Date.now() - started).toBeLessThan(6000);
-    });
-
-    it.runIf(Boolean(subject.denied))('reports a refused identity as denied, not unavailable', async () => {
-      const good = await subject.provider().wrap(new Uint8Array(randomBytes(32)), context('a'));
-      const denied = subject.denied?.();
-      if (!denied) return;
-      try {
-        await expectKind(denied.provider.unwrap(good, context('a')), ['denied']);
-        await expectKind(denied.provider.wrap(new Uint8Array(randomBytes(32)), context('a')), ['denied']);
-      } finally {
-        denied.restore();
+    it.runIf(Boolean(subject.unreachable))(
+      'reports an unreachable service as unavailable',
+      async () => {
+        const provider = subject.unreachable?.();
+        if (!provider) return;
+        const started = Date.now();
+        await expectKind(provider.wrap(new Uint8Array(randomBytes(32)), context('a')), [
+          'unavailable',
+        ]);
+        expect(Date.now() - started).toBeLessThan(6000);
       }
-    });
+    );
+
+    it.runIf(Boolean(subject.denied))(
+      'reports a refused identity as denied, not unavailable',
+      async () => {
+        const good = await subject.provider().wrap(new Uint8Array(randomBytes(32)), context('a'));
+        const denied = subject.denied?.();
+        if (!denied) return;
+        try {
+          await expectKind(denied.provider.unwrap(good, context('a')), ['denied']);
+          await expectKind(denied.provider.wrap(new Uint8Array(randomBytes(32)), context('a')), [
+            'denied',
+          ]);
+        } finally {
+          denied.restore();
+        }
+      }
+    );
   });
 }

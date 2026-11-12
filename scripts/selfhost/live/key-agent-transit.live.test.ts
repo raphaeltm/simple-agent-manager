@@ -52,24 +52,53 @@ describe.skipIf(!hasDocker && !process.env.CI)('transit provider on OpenBao', ()
     port = await freePort();
     mkdirSync(LIVE_TMP, { recursive: true });
     dir = mkdtempSync(join(LIVE_TMP, 'openbao-'));
-    const run = spawnSync('docker', ['run', '-d', '--rm', '--network', 'host', '-e', `BAO_DEV_ROOT_TOKEN_ID=${ROOT_TOKEN}`, '-e', `BAO_DEV_LISTEN_ADDRESS=127.0.0.1:${port}`, OPENBAO_IMAGE, 'server', '-dev'], { encoding: 'utf8' });
+    const run = spawnSync(
+      'docker',
+      [
+        'run',
+        '-d',
+        '--rm',
+        '--network',
+        'host',
+        '-e',
+        `BAO_DEV_ROOT_TOKEN_ID=${ROOT_TOKEN}`,
+        '-e',
+        `BAO_DEV_LISTEN_ADDRESS=127.0.0.1:${port}`,
+        OPENBAO_IMAGE,
+        'server',
+        '-dev',
+      ],
+      { encoding: 'utf8' }
+    );
     expect(run.status, run.stderr).toBe(0);
     container = run.stdout.trim();
-    await waitFor('openbao', async () => (await fetch(`http://127.0.0.1:${port}/v1/sys/health`).catch(() => null))?.ok, 60_000);
+    await waitFor(
+      'openbao',
+      async () => (await fetch(`http://127.0.0.1:${port}/v1/sys/health`).catch(() => null))?.ok,
+      60_000
+    );
     await bao('sys/mounts/transit', { type: 'transit' });
     for (const key of ['sam-box', 'other-box']) await bao(`transit/keys/${key}`);
     // The box's whole authority: encrypt and decrypt with its own key. No read, no export.
     await bao('sys/policies/acl/sam-box', {
-      policy: 'path "transit/encrypt/sam-box" { capabilities = ["update"] }\npath "transit/decrypt/sam-box" { capabilities = ["update"] }',
+      policy:
+        'path "transit/encrypt/sam-box" { capabilities = ["update"] }\npath "transit/decrypt/sam-box" { capabilities = ["update"] }',
     });
     await bao('sys/auth/approle', { type: 'approle' });
-    await bao('auth/approle/role/sam-box', { token_policies: ['sam-box'], token_ttl: '20m', secret_id_ttl: '0' });
-    roleId = (await bao('auth/approle/role/sam-box/role-id', undefined, 'GET')).data.role_id as string;
-    const secretId = (await bao('auth/approle/role/sam-box/secret-id', {})).data.secret_id as string;
+    await bao('auth/approle/role/sam-box', {
+      token_policies: ['sam-box'],
+      token_ttl: '20m',
+      secret_id_ttl: '0',
+    });
+    roleId = (await bao('auth/approle/role/sam-box/role-id', undefined, 'GET')).data
+      .role_id as string;
+    const secretId = (await bao('auth/approle/role/sam-box/secret-id', {})).data
+      .secret_id as string;
     writeFileSync(join(dir, 'secret-id'), secretId, { mode: 0o600 });
     // A second role that may use only the other key, for the cross-key case.
     await bao('sys/policies/acl/other-box', {
-      policy: 'path "transit/encrypt/other-box" { capabilities = ["update"] }\npath "transit/decrypt/other-box" { capabilities = ["update"] }',
+      policy:
+        'path "transit/encrypt/other-box" { capabilities = ["update"] }\npath "transit/decrypt/other-box" { capabilities = ["update"] }',
     });
   }, 180_000);
 
@@ -83,13 +112,26 @@ describe.skipIf(!hasDocker && !process.env.CI)('transit provider on OpenBao', ()
     // Root can use the other key; a sam-box blob must still not decrypt there, nor vice versa.
     otherKey: () => {
       writeFileSync(join(dir, 'root-token'), ROOT_TOKEN, { mode: 0o600 });
-      return createTransitProvider({ SAM_TRANSIT_ADDR: `http://127.0.0.1:${port}`, SAM_TRANSIT_KEY: 'other-box', SAM_TRANSIT_TOKEN_FILE: join(dir, 'root-token') });
+      return createTransitProvider({
+        SAM_TRANSIT_ADDR: `http://127.0.0.1:${port}`,
+        SAM_TRANSIT_KEY: 'other-box',
+        SAM_TRANSIT_TOKEN_FILE: join(dir, 'root-token'),
+      });
     },
-    unreachable: () => createTransitProvider({ SAM_TRANSIT_ADDR: 'http://127.0.0.1:9', SAM_TRANSIT_KEY: 'sam-box', SAM_TRANSIT_TOKEN_FILE: join(dir, 'secret-id') }),
+    unreachable: () =>
+      createTransitProvider({
+        SAM_TRANSIT_ADDR: 'http://127.0.0.1:9',
+        SAM_TRANSIT_KEY: 'sam-box',
+        SAM_TRANSIT_TOKEN_FILE: join(dir, 'secret-id'),
+      }),
     denied: () => {
       writeFileSync(join(dir, 'bad-token'), 's.not-a-token', { mode: 0o600 });
       return {
-        provider: createTransitProvider({ SAM_TRANSIT_ADDR: `http://127.0.0.1:${port}`, SAM_TRANSIT_KEY: 'sam-box', SAM_TRANSIT_TOKEN_FILE: join(dir, 'bad-token') }),
+        provider: createTransitProvider({
+          SAM_TRANSIT_ADDR: `http://127.0.0.1:${port}`,
+          SAM_TRANSIT_KEY: 'sam-box',
+          SAM_TRANSIT_TOKEN_FILE: join(dir, 'bad-token'),
+        }),
         restore: () => undefined,
       };
     },
@@ -98,14 +140,21 @@ describe.skipIf(!hasDocker && !process.env.CI)('transit provider on OpenBao', ()
 
   it("the box's AppRole cannot use another install's key, read keys, or export them", async () => {
     const provider = transit('other-box');
-    await expect(provider.wrap(new Uint8Array(randomBytes(32)), new Uint8Array(1))).rejects.toMatchObject({ kind: 'denied' });
+    await expect(
+      provider.wrap(new Uint8Array(randomBytes(32)), new Uint8Array(1))
+    ).rejects.toMatchObject({ kind: 'denied' });
     const login = await fetch(`http://127.0.0.1:${port}/v1/auth/approle/login`, {
       method: 'POST',
-      body: JSON.stringify({ role_id: roleId, secret_id: (await import('node:fs')).readFileSync(join(dir, 'secret-id'), 'utf8') }),
+      body: JSON.stringify({
+        role_id: roleId,
+        secret_id: (await import('node:fs')).readFileSync(join(dir, 'secret-id'), 'utf8'),
+      }),
     });
     const token = ((await login.json()) as { auth: { client_token: string } }).auth.client_token;
     for (const path of ['transit/keys/sam-box', 'transit/export/encryption-key/sam-box']) {
-      const response = await fetch(`http://127.0.0.1:${port}/v1/${path}`, { headers: { 'X-Vault-Token': token } });
+      const response = await fetch(`http://127.0.0.1:${port}/v1/${path}`, {
+        headers: { 'X-Vault-Token': token },
+      });
       expect(response.status, path).toBe(403);
     }
   });

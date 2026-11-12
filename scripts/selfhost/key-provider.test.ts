@@ -10,10 +10,13 @@ import { join } from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { createAzureKeyVaultProvider } from '../../deploy/selfhost/key-agent/provider-azure-kv.ts';
-import { createFileProvider, generateFileKek } from '../../deploy/selfhost/key-agent/provider-file.ts';
-import { createGcpKmsProvider } from '../../deploy/selfhost/key-agent/provider-gcp-kms.ts';
 import { KeyProviderError } from '../../deploy/selfhost/key-agent/provider.ts';
+import { createAzureKeyVaultProvider } from '../../deploy/selfhost/key-agent/provider-azure-kv.ts';
+import {
+  createFileProvider,
+  generateFileKek,
+} from '../../deploy/selfhost/key-agent/provider-file.ts';
+import { createGcpKmsProvider } from '../../deploy/selfhost/key-agent/provider-gcp-kms.ts';
 import { createKeyProvider } from '../../deploy/selfhost/key-agent/providers.ts';
 import { describeKeyProviderConformance } from './key-provider-conformance';
 import { type FakeKeyService, startFakeKeyServices } from './key-provider-fakes';
@@ -42,13 +45,16 @@ afterAll(async () => {
   await fake.close();
 });
 
-const gcpKey = (k: string) => `projects/sam-test-project/locations/global/keyRings/sam/cryptoKeys/${k}`;
-const gcp = (key: string, host = () => fake.host) => () =>
-  createGcpKmsProvider({
-    SAM_GCP_KMS_KEY: gcpKey(key),
-    SAM_GCP_KMS_ENDPOINT: `http://${host()}`,
-    SAM_GCE_METADATA_HOST: host(),
-  });
+const gcpKey = (k: string) =>
+  `projects/sam-test-project/locations/global/keyRings/sam/cryptoKeys/${k}`;
+const gcp =
+  (key: string, host = () => fake.host) =>
+  () =>
+    createGcpKmsProvider({
+      SAM_GCP_KMS_KEY: gcpKey(key),
+      SAM_GCP_KMS_ENDPOINT: `http://${host()}`,
+      SAM_GCE_METADATA_HOST: host(),
+    });
 
 describeKeyProviderConformance('gcp-kms (fake Cloud KMS + metadata server)', {
   provider: gcp('box'),
@@ -61,13 +67,15 @@ describeKeyProviderConformance('gcp-kms (fake Cloud KMS + metadata server)', {
   credentials: () => [fake.token],
 });
 
-const azure = (key: string, host = () => fake.host) => () =>
-  createAzureKeyVaultProvider({
-    SAM_AZURE_KEY_VAULT_URL: `http://${host()}`,
-    SAM_AZURE_KEY_NAME: key,
-    SAM_AZURE_IMDS_HOST: host(),
-    SAM_AZURE_ALLOW_HTTP_FOR_TESTS: '1',
-  });
+const azure =
+  (key: string, host = () => fake.host) =>
+  () =>
+    createAzureKeyVaultProvider({
+      SAM_AZURE_KEY_VAULT_URL: `http://${host()}`,
+      SAM_AZURE_KEY_NAME: key,
+      SAM_AZURE_IMDS_HOST: host(),
+      SAM_AZURE_ALLOW_HTTP_FOR_TESTS: '1',
+    });
 
 describeKeyProviderConformance('azure-kv (fake Key Vault + IMDS)', {
   provider: azure('box'),
@@ -82,7 +90,9 @@ describeKeyProviderConformance('azure-kv (fake Key Vault + IMDS)', {
 
 describe('provider selection and configuration', () => {
   it('refuses an unknown provider name and lists the known ones', () => {
-    expect(() => createKeyProvider({ SAM_KEY_PROVIDER: 'aws-kms' })).toThrow(/file, transit, gcp-kms, azure-kv/);
+    expect(() => createKeyProvider({ SAM_KEY_PROVIDER: 'aws-kms' })).toThrow(
+      /file, transit, gcp-kms, azure-kv/
+    );
     expect(() => createKeyProvider({ SAM_KEY_PROVIDER: 'constructor' })).toThrow(KeyProviderError);
   });
 
@@ -97,10 +107,19 @@ describe('provider selection and configuration', () => {
 
   it('transit: refuses plain HTTP to anything but loopback, and a missing credential', () => {
     expect(() =>
-      createKeyProvider({ SAM_KEY_PROVIDER: 'transit', SAM_TRANSIT_ADDR: 'http://vault.example', SAM_TRANSIT_KEY: 'k', SAM_TRANSIT_TOKEN_FILE: '/x' })
+      createKeyProvider({
+        SAM_KEY_PROVIDER: 'transit',
+        SAM_TRANSIT_ADDR: 'http://vault.example',
+        SAM_TRANSIT_KEY: 'k',
+        SAM_TRANSIT_TOKEN_FILE: '/x',
+      })
     ).toThrow(/https/);
     expect(() =>
-      createKeyProvider({ SAM_KEY_PROVIDER: 'transit', SAM_TRANSIT_ADDR: 'https://vault.example', SAM_TRANSIT_KEY: 'k' })
+      createKeyProvider({
+        SAM_KEY_PROVIDER: 'transit',
+        SAM_TRANSIT_ADDR: 'https://vault.example',
+        SAM_TRANSIT_KEY: 'k',
+      })
     ).toThrow(/ROLE_ID|TOKEN_FILE/);
   });
 

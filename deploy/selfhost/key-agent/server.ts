@@ -99,7 +99,12 @@ export function createKeyAgent(options: AgentOptions): Server {
       try {
         const secrets = await openBundle(parseBundle(text), options.provider);
         cache.set(bundleId, { secrets, openedAt: now() });
-        log({ event: 'key_agent.bundle_opened', bundleId, provider: options.provider.name, ms: now() - started });
+        log({
+          event: 'key_agent.bundle_opened',
+          bundleId,
+          provider: options.provider.name,
+          ms: now() - started,
+        });
         return secrets;
       } catch (error) {
         if (cached && error instanceof KeyProviderError && error.kind === 'unavailable') {
@@ -145,7 +150,11 @@ export function createKeyAgent(options: AgentOptions): Server {
     const body = await readBody(request);
     let bundleId: unknown;
     try {
-      bundleId = body === null ? undefined : (JSON.parse(body) as { bundleId?: unknown }).bundleId;
+      const parsed: unknown = body === null ? undefined : (JSON.parse(body) as unknown);
+      bundleId =
+        typeof parsed === 'object' && parsed !== null
+          ? (parsed as Record<string, unknown>).bundleId
+          : undefined;
     } catch {
       bundleId = undefined;
     }
@@ -158,9 +167,10 @@ export function createKeyAgent(options: AgentOptions): Server {
       reply(response, 200, { bundleId, secrets });
     } catch (error) {
       const kind = error instanceof KeyProviderError ? error.kind : 'unavailable';
-      const code = error instanceof KeyProviderError && error.message === 'bundle_not_found'
-        ? 'bundle_not_found'
-        : `key_service_${kind}`;
+      const code =
+        error instanceof KeyProviderError && error.message === 'bundle_not_found'
+          ? 'bundle_not_found'
+          : `key_service_${kind}`;
       log({
         event: 'key_agent.open_failed',
         bundleId,
@@ -199,7 +209,9 @@ function main(): void {
     cacheMs: Math.max(0, cacheSeconds) * 1000,
   });
   server.listen(port, '127.0.0.1', () => {
-    console.log(JSON.stringify({ event: 'key_agent.listening', port, provider: env.SAM_KEY_PROVIDER }));
+    console.log(
+      JSON.stringify({ event: 'key_agent.listening', port, provider: env.SAM_KEY_PROVIDER })
+    );
   });
 }
 

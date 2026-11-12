@@ -51,7 +51,9 @@ export function createGcpKmsProvider(
     }
     token = {
       value,
-      expiresAt: Date.now() + Math.max(0, (Number.isFinite(expiresIn) ? expiresIn : 0) * 1000 - TOKEN_REFRESH_MARGIN_MS),
+      expiresAt:
+        Date.now() +
+        Math.max(0, (Number.isFinite(expiresIn) ? expiresIn : 0) * 1000 - TOKEN_REFRESH_MARGIN_MS),
     };
     return value;
   }

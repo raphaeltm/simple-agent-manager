@@ -23,8 +23,13 @@ import {
 import type { KeyProvider } from '../../deploy/selfhost/key-agent/provider.ts';
 import { generateFileKek } from '../../deploy/selfhost/key-agent/provider-file.ts';
 import { createKeyProvider, KEY_PROVIDERS } from '../../deploy/selfhost/key-agent/providers.ts';
-import { completePlatformKeys, PLATFORM_KEY_NAMES } from './platform-keys.js';
-import { ensurePrivateDir, writePrivateFile } from './secret-files.js';
+import { completePlatformKeys, ensurePlatformKeys, PLATFORM_KEY_NAMES } from './platform-keys.js';
+import {
+  ensurePrivateDir,
+  readPrivateJson,
+  readSecretsFile,
+  writePrivateFile,
+} from './secret-files.js';
 
 export const KEY_AGENT_DIR = 'key-agent';
 export const KEY_AGENT_PROFILE = 'key-agent';
@@ -88,7 +93,9 @@ export function keyServiceSettings(box: Box, stateDir: string): KeyServiceSettin
   if (!keyServiceEnabled(box)) return null;
   const provider = (box.SAM_KEY_PROVIDER ?? '').trim();
   if (!Object.hasOwn(KEY_PROVIDERS, provider)) {
-    throw new Error(`SAM_KEY_PROVIDER must be off or one of ${Object.keys(KEY_PROVIDERS).join(', ')}`);
+    throw new Error(
+      `SAM_KEY_PROVIDER must be off or one of ${Object.keys(KEY_PROVIDERS).join(', ')}`
+    );
   }
   const uid = process.getuid?.();
   if (uid !== undefined && box.SAM_KEY_AGENT_UID?.trim() !== String(uid)) {
@@ -117,7 +124,14 @@ export function keyServiceSettings(box: Box, stateDir: string): KeyServiceSettin
       containerEnv[name] = `${CONTAINER_DIR}/credentials/${file}`;
     }
   }
-  return { provider, port: keyAgentPort(box), dir, bundleDir: join(dir, 'bundles'), hostEnv, containerEnv };
+  return {
+    provider,
+    port: keyAgentPort(box),
+    dir,
+    bundleDir: join(dir, 'bundles'),
+    hostEnv,
+    containerEnv,
+  };
 }
 
 /** The Worker's view of the agent; a loopback URL only celld's uid may use. */
@@ -154,7 +168,10 @@ export function ensureKeyServiceFiles(settings: KeyServiceSettings): string[] {
 }
 
 /** Bundles in the directory, newest first; unreadable files are reported and skipped. */
-export function listBundles(bundleDir: string, warn: (message: string) => void = console.warn): SealedBundle[] {
+export function listBundles(
+  bundleDir: string,
+  warn: (message: string) => void = console.warn
+): SealedBundle[] {
   if (!existsSync(bundleDir)) return [];
   const bundles: SealedBundle[] = [];
   for (const name of readdirSync(bundleDir)) {
@@ -164,10 +181,14 @@ export function listBundles(bundleDir: string, warn: (message: string) => void =
       if (`${bundle.bundleId}.json` !== name) throw new Error('file name does not match its id');
       bundles.push(bundle);
     } catch (error) {
-      warn(`[selfhost] skipping ${name}: ${error instanceof Error ? error.message : String(error)}`);
+      warn(
+        `[selfhost] skipping ${name}: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
   }
-  return bundles.sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
+  return bundles.sort((a, b) =>
+    a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0
+  );
 }
 
 export function pruneBundles(bundleDir: string, keepIds: readonly string[]): string[] {
@@ -182,7 +203,9 @@ export function pruneBundles(bundleDir: string, keepIds: readonly string[]): str
 
 function sameSecrets(a: Secrets, b: Secrets): boolean {
   const keys = Object.keys(a);
-  return keys.length === Object.keys(b).length && keys.every((k) => Object.hasOwn(b, k) && a[k] === b[k]);
+  return (
+    keys.length === Object.keys(b).length && keys.every((k) => Object.hasOwn(b, k) && a[k] === b[k])
+  );
 }
 
 export interface ResolveSecretsInput {
@@ -236,13 +259,30 @@ export async function resolveSealedSecrets(input: ResolveSecretsInput): Promise<
   if (!/^[0-9a-f]{32}$/.test(installationId)) throw new Error('SAM_INSTALLATION_ID is missing');
   ensurePrivateDir(settings.bundleDir);
   const bundle = await sealSecrets(secrets, provider, { installationId });
-  writePrivateFile(join(settings.bundleDir, `${bundle.bundleId}.json`), `${JSON.stringify(bundle, null, 2)}\n`);
-  log(`sealed ${Object.keys(secrets).length} secrets into bundle ${bundle.bundleId} (${provider.name} ${provider.keyRef})`);
+  writePrivateFile(
+    join(settings.bundleDir, `${bundle.bundleId}.json`),
+    `${JSON.stringify(bundle, null, 2)}\n`
+  );
+  log(
+    `sealed ${Object.keys(secrets).length} secrets into bundle ${bundle.bundleId} (${provider.name} ${provider.keyRef})`
+  );
   const keepIds = listBundles(settings.bundleDir)
     .slice(0, input.keep ?? DEFAULT_KEPT_BUNDLES)
     .map((b) => b.bundleId);
   for (const id of pruneBundles(settings.bundleDir, keepIds)) log(`removed old bundle ${id}`);
   return { bundleId: bundle.bundleId, secrets, sealed: true, generated };
+}
+
+/**
+ * The config handed to `celld deploy`, which celld stores in the fleet bucket for this version.
+ * Sealed: exactly the secrets-free config. Otherwise the secrets ride along as vars (today's path).
+ */
+export function celldDeployConfig<C extends { vars: Record<string, string> }>(
+  config: C,
+  secrets: Readonly<Record<string, string>>,
+  sealed: boolean
+): C {
+  return sealed ? config : { ...config, vars: { ...config.vars, ...secrets } };
 }
 
 /** The key-agent compose profile and SAM_KEY_PROVIDER must agree, like the gce profile. */
@@ -254,5 +294,64 @@ export function assertKeyAgentProfile(box: Box): void {
   }
   if (!wanted && profiles.includes(KEY_AGENT_PROFILE)) {
     throw new Error('COMPOSE_PROFILES has `key-agent` but SAM_KEY_PROVIDER is off; remove it');
+  }
+}
+
+type PlatformKeys = Record<(typeof PLATFORM_KEY_NAMES)[number], string>;
+
+/**
+ * The deploy's platform keys, and with sealed secrets the bundle that holds every secret. Off:
+ * the plain `platform-keys.json` path, unchanged.
+ */
+export async function resolveDeployKeys(input: {
+  box: Box;
+  stateDir: string;
+  secretsPath: string;
+  log: (message: string) => void;
+}): Promise<{
+  keyService: KeyServiceSettings | null;
+  keys: PlatformKeys;
+  sealed: ResolvedSecrets | null;
+}> {
+  const { box, stateDir, log } = input;
+  assertKeyAgentProfile(box);
+  const keyService = keyServiceSettings(box, stateDir);
+  const platformKeysPath = join(stateDir, 'platform-keys.json');
+  if (!keyService) {
+    const ensured = ensurePlatformKeys(platformKeysPath);
+    if (ensured.generated.length > 0) {
+      log(`generated platform keys: ${ensured.generated.join(', ')} (back up ${stateDir})`);
+    }
+    return { keyService, keys: ensured.keys, sealed: null };
+  }
+  for (const path of ensureKeyServiceFiles(keyService)) log(`wrote ${path}`);
+  const sealed = await resolveSealedSecrets({
+    settings: keyService,
+    platformKeysFile: existsSync(platformKeysPath) ? readPrivateJson(platformKeysPath) : null,
+    operatorSecrets: readSecretsFile(input.secretsPath),
+    log,
+  });
+  if (sealed.generated.length > 0) {
+    log(`generated platform keys into the sealed bundle: ${sealed.generated.join(', ')}`);
+  }
+  const keys = Object.fromEntries(
+    PLATFORM_KEY_NAMES.map((name) => [name, sealed.secrets[name] ?? ''])
+  ) as PlatformKeys;
+  return { keyService, keys, sealed };
+}
+
+/** A Worker without its key agent answers 503 to everything; say why before deploying. */
+export async function assertKeyAgentUp(port: number): Promise<void> {
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/healthz`, {
+      signal: AbortSignal.timeout(3000),
+    });
+    if (response.ok) return;
+    throw new Error(`HTTP ${response.status}`);
+  } catch (error) {
+    throw new Error(
+      `the key agent is not answering on 127.0.0.1:${port} ` +
+        `(${error instanceof Error ? error.message : String(error)}); start it first: docker compose up -d key-agent`
+    );
   }
 }

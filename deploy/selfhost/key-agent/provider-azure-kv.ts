@@ -9,13 +9,7 @@
  *
  * Tested against a fake only (scripts/selfhost/key-provider-fakes.ts), never the real service.
  */
-import {
-  field,
-  jsonCall,
-  type KeyProvider,
-  KeyProviderError,
-  requireSetting,
-} from './provider.ts';
+import { field, jsonCall, type KeyProvider, KeyProviderError, requireSetting } from './provider.ts';
 
 const API_VERSION = '7.4';
 const KEY_NAME = /^[A-Za-z0-9-]{1,127}$/;
@@ -37,7 +31,8 @@ export function createAzureKeyVaultProvider(
 ): KeyProvider {
   const vault = requireSetting(env, 'SAM_AZURE_KEY_VAULT_URL').replace(/\/+$/, '');
   const keyName = requireSetting(env, 'SAM_AZURE_KEY_NAME');
-  if (!KEY_NAME.test(keyName)) throw new KeyProviderError('config', 'SAM_AZURE_KEY_NAME is invalid');
+  if (!KEY_NAME.test(keyName))
+    throw new KeyProviderError('config', 'SAM_AZURE_KEY_NAME is invalid');
   const vaultUrl = new URL(vault);
   const allowHttp = env.SAM_AZURE_ALLOW_HTTP_FOR_TESTS === '1';
   if (vaultUrl.protocol !== 'https:' && !allowHttp) {
@@ -69,7 +64,9 @@ export function createAzureKeyVaultProvider(
     }
     token = {
       value,
-      expiresAt: Date.now() + Math.max(0, (Number.isFinite(expiresIn) ? expiresIn : 0) * 1000 - TOKEN_REFRESH_MARGIN_MS),
+      expiresAt:
+        Date.now() +
+        Math.max(0, (Number.isFinite(expiresIn) ? expiresIn : 0) * 1000 - TOKEN_REFRESH_MARGIN_MS),
     };
     return value;
   }
@@ -113,11 +110,18 @@ export function createAzureKeyVaultProvider(
       }
       const kid = field(parsed, 'kid');
       const value = field(parsed, 'value');
-      if (typeof kid !== 'string' || !kid.startsWith(keyPrefix) || !/^[A-Za-z0-9]+$/.test(kid.slice(keyPrefix.length))) {
+      if (
+        typeof kid !== 'string' ||
+        !kid.startsWith(keyPrefix) ||
+        !/^[A-Za-z0-9]+$/.test(kid.slice(keyPrefix.length))
+      ) {
         throw new KeyProviderError('invalid', `${service}: wrapped key names another key`);
       }
       unb64url(value, `${service}: wrapped value`);
-      const result = await call(`${kid}/unwrapkey`, { alg: 'RSA-OAEP-256', value: value as string });
+      const result = await call(`${kid}/unwrapkey`, {
+        alg: 'RSA-OAEP-256',
+        value: value as string,
+      });
       return unb64url(field(result, 'value'), `${service}: unwrapped value`);
     },
   };
