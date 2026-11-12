@@ -23,8 +23,11 @@ import {
   createRateLimitKey,
   getCurrentWindowStart,
 } from '../middleware/rate-limit';
-import { aiProxyDisabledMessage, resolveAiProxyAvailability } from '../services/ai-proxy-availability';
 import { checkModelTierAllowance, describeModelTierDenial } from '../services/ai-model-tier-gate';
+import {
+  aiProxyDisabledMessage,
+  resolveAiProxyAvailability,
+} from '../services/ai-proxy-availability';
 import {
   AIProxyAuthError,
   extractCallbackToken,

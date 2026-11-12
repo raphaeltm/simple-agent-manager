@@ -21,4 +21,3 @@ export const AI_PROXY_SETTINGS: readonly AdminSettingDefinition[] = [
     validate: (value) => typeof value === 'boolean',
   },
 ];
-

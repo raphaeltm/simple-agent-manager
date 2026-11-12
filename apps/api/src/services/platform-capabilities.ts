@@ -230,11 +230,27 @@ export interface PublicPlatformCapabilities {
   monthlyCostCap: boolean;
 }
 
-export function publicPlatformCapabilities(env: CapabilityEnv): PublicPlatformCapabilities {
+/**
+ * Which speech services an admin pointed at an OpenAI-compatible endpoint (`speech.*` settings,
+ * read by `resolveSpeechEndpoint()` in speech-endpoints.ts). Only consulted without the Workers AI
+ * binding, so a Cloudflare deployment never reads them.
+ */
+export interface SpeechEndpointAvailability {
+  transcription: boolean;
+  synthesis: boolean;
+}
+
+const NO_SPEECH_ENDPOINTS: SpeechEndpointAvailability = { transcription: false, synthesis: false };
+
+export function publicPlatformCapabilities(
+  env: CapabilityEnv,
+  speechEndpoints: SpeechEndpointAvailability = NO_SPEECH_ENDPOINTS
+): PublicPlatformCapabilities {
   const capabilities = resolvePlatformCapabilities(env);
+  const ttsAllowed = env.TTS_ENABLED !== 'false';
   return {
-    speechToText: capabilities.speechToText,
-    textToSpeech: capabilities.textToSpeech,
+    speechToText: capabilities.speechToText || speechEndpoints.transcription,
+    textToSpeech: capabilities.textToSpeech || (ttsAllowed && speechEndpoints.synthesis),
     monthlyCostCap: capabilities.monthlyCostCap,
   };
 }

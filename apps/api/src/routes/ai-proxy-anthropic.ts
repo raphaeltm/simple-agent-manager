@@ -30,8 +30,11 @@ import {
   createRateLimitKey,
   getCurrentWindowStart,
 } from '../middleware/rate-limit';
-import { aiProxyDisabledMessage, resolveAiProxyAvailability } from '../services/ai-proxy-availability';
 import { resolveUpstreamAuth } from '../services/ai-billing';
+import {
+  aiProxyDisabledMessage,
+  resolveAiProxyAvailability,
+} from '../services/ai-proxy-availability';
 import {
   AIProxyAuthError,
   buildAIGatewayMetadata,

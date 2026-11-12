@@ -237,7 +237,8 @@ async function incrementExtractedUsage(
   await incrementTokenUsage(options.env.KV, options.userId, inputTokens, outputTokens, options.env);
   const priced = localCost(usage, inputTokens, outputTokens, options);
   const provider = options.provider ?? priced?.provider;
-  if (provider) {
+  if (!provider) return;
+  if (priced) {
     await incrementProviderUsage(
       options.env.KV,
       options.userId,
@@ -245,9 +246,18 @@ async function incrementExtractedUsage(
       inputTokens,
       outputTokens,
       options.env,
-      priced?.costUsd ?? 0
+      priced.costUsd
     );
+    return;
   }
+  await incrementProviderUsage(
+    options.env.KV,
+    options.userId,
+    provider,
+    inputTokens,
+    outputTokens,
+    options.env
+  );
 }
 
 const PRICED_PROVIDER: Readonly<Record<TokenUsageFormat, AiProviderUsageAttribution>> = {

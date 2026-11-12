@@ -412,9 +412,7 @@ describe('OpenAI-compatible AI proxy token accounting', () => {
     await res.text();
     const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('https://gateway.ai.cloudflare.com/v1/acct/sam/openai/v1/responses');
-    expect(init.body).toBe(
-      JSON.stringify({ model: 'gpt-6.1-sol', input: 'Use a tool', tools })
-    );
+    expect(init.body).toBe(JSON.stringify({ model: 'gpt-6.1-sol', input: 'Use a tool', tools }));
     expectUsageIncrement(6, 2);
   });
 

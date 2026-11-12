@@ -45,7 +45,9 @@ vi.mock('../../../src/services/admin-settings-resolution', async (importOriginal
   return {
     ...actual,
     resolveAdminSetting: async (env: never, name: string) =>
-      name === 'aiProxy.directUpstreamEnabled' ? true : actual.resolveAdminSetting(env, name as never),
+      name === 'aiProxy.directUpstreamEnabled'
+        ? true
+        : actual.resolveAdminSetting(env, name as never),
   };
 });
 vi.mock('../../../src/middleware/rate-limit', () => ({

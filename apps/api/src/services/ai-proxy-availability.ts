@@ -17,8 +17,7 @@ import { AI_PROXY_DIRECT_UPSTREAM_SETTING } from './ai-proxy-settings';
 import { resolveAiGatewayId } from './platform-capabilities';
 
 export type AiProxyAvailability =
-  | { enabled: true }
-  | { enabled: false; reason: 'kill-switch' | 'direct-upstream-not-enabled' };
+  { enabled: true } | { enabled: false; reason: 'kill-switch' | 'direct-upstream-not-enabled' };
 
 export async function resolveAiProxyAvailability(env: Env): Promise<AiProxyAvailability> {
   if (env.AI_PROXY_ENABLED === 'false') return { enabled: false, reason: 'kill-switch' };

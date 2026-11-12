@@ -150,10 +150,11 @@ describe('Phase 1 settings registry', () => {
 
   it('publishes secret classification without secret values or credential implementation', () => {
     const secrets = ADMIN_SETTINGS_REGISTRY.filter((setting) => setting.secret);
-    // GitHub, Google, Google infrastructure and GitLab OAuth secrets, plus the
-    // OpenAI-compatible LLM endpoint key (llm.openAICompatible.apiKey).
-    expect(secrets).toHaveLength(5);
-    expect(new Set(secrets.map((setting) => setting.credential?.provider)).size).toBe(5);
+    // GitHub, Google, Google infrastructure and GitLab OAuth secrets, the OpenAI-compatible LLM
+    // endpoint key (llm.openAICompatible.apiKey) and the two speech endpoint keys
+    // (speech.transcription.apiKey, speech.synthesis.apiKey).
+    expect(secrets).toHaveLength(7);
+    expect(new Set(secrets.map((setting) => setting.credential?.provider)).size).toBe(7);
     for (const secret of secrets) {
       expect(secret.defaultValue).toBeNull();
       const metadata = publicAdminSettingDefinition(secret);

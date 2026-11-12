@@ -51,8 +51,8 @@ vi.mock('../../../src/middleware/auth', () => ({
 import type { Env } from '../../../src/env';
 import { aiProxyAnthropicRoutes } from '../../../src/routes/ai-proxy-anthropic';
 import { usageRoutes } from '../../../src/routes/usage';
-import { __resetAdminSettingsCacheForTest } from '../../../src/services/admin-settings-resolution';
 import { updateAdminSettings } from '../../../src/services/admin-settings-mutations';
+import { __resetAdminSettingsCacheForTest } from '../../../src/services/admin-settings-resolution';
 import { priceModelUsageUsd } from '../../../src/services/ai-cost-pricing';
 import {
   buildMonthlyCostCacheKey,
@@ -62,7 +62,9 @@ import { createAdminSettingsEnv } from '../../helpers/admin-settings-env';
 
 const USER = 'selfhost-user-1';
 const PLATFORM_KEY = 'sk-ant-platform-key-for-tests-0000';
-const MODEL = PLATFORM_AI_MODELS.find((m) => m.provider === 'anthropic' && m.id.startsWith('claude-'))!;
+const MODEL = PLATFORM_AI_MODELS.find(
+  (m) => m.provider === 'anthropic' && m.id.startsWith('claude-')
+)!;
 const OTHER_MODEL = PLATFORM_AI_MODELS.find(
   (m) => m.provider === 'anthropic' && m.id.startsWith('claude-') && m.id !== MODEL.id
 )!;
@@ -73,7 +75,8 @@ const USAGE = {
   cache_creation_input_tokens: 10_000,
 };
 const COST_PER_CALL = priceModelUsageUsd(MODEL, {
-  inputTokens: USAGE.input_tokens + USAGE.cache_read_input_tokens + USAGE.cache_creation_input_tokens,
+  inputTokens:
+    USAGE.input_tokens + USAGE.cache_read_input_tokens + USAGE.cache_creation_input_tokens,
   outputTokens: USAGE.output_tokens,
   cachedInputTokens: USAGE.cache_read_input_tokens,
   cacheWriteInputTokens: USAGE.cache_creation_input_tokens,

@@ -10,6 +10,7 @@ import { OPERATOR_SETTINGS } from './admin-settings-operator-definitions';
 import { OUTBOUND_SETTINGS } from './admin-settings-outbound-definitions';
 import { AI_PROXY_SETTINGS } from './ai-proxy-settings';
 import { llmEndpointSettingDefinitions } from './llm-endpoint-settings';
+import { SPEECH_ENDPOINT_SETTINGS } from './speech-endpoint-settings';
 export {
   type AdminSettingDefinition,
   type AdminSettingName,
@@ -37,6 +38,7 @@ const definitions = [
   ...OUTBOUND_SETTINGS,
   ...llmEndpointSettingDefinitions(),
   ...AI_PROXY_SETTINGS,
+  ...SPEECH_ENDPOINT_SETTINGS,
 ];
 
 export const ADMIN_SETTINGS_REGISTRY: readonly AdminSettingDefinition[] = Object.freeze(

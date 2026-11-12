@@ -2,11 +2,12 @@ import { Hono } from 'hono';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { getAuth, requireApproved,requireAuth } from '../middleware/auth';
+import { getAuth, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { parseOptionalBody, TtsRequestSchema } from '../schemas';
 import { getWorkersAiBindingOrNull } from '../services/platform-capabilities';
-import { getAudioFromR2, getTTSConfig,synthesizeSpeech } from '../services/tts';
+import { resolveSpeechEndpoint } from '../services/speech-endpoints';
+import { getAudioFromR2, getTTSConfig, synthesizeSpeech } from '../services/tts';
 
 const ttsRoutes = new Hono<{ Bindings: Env }>();
 
@@ -33,8 +34,9 @@ ttsRoutes.post('/synthesize', async (c) => {
   if (!config.enabled) {
     throw errors.badRequest('Text-to-speech is disabled');
   }
-  // Synthesis runs on Workers AI. Without the binding, say so instead of retrying into a 500.
-  const ai = getWorkersAiBindingOrNull(c.env);
+  // Synthesis runs on Workers AI, or without the binding on an admin-configured OpenAI-compatible
+  // speech endpoint (`speech.synthesis.*`). With neither, say so instead of retrying into a 500.
+  const ai = getWorkersAiBindingOrNull(c.env) ?? (await resolveSpeechEndpoint(c.env, 'synthesis'));
   if (!ai) {
     throw errors.featureUnavailable(
       'textToSpeech',

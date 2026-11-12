@@ -82,10 +82,12 @@ describe('resolvePlatformCapabilities', () => {
   });
 
   it('needs both the flag and the binding for Artifacts', () => {
-    expect(resolvePlatformCapabilities(cloudflareEnv({ ARTIFACTS_ENABLED: 'false' })).artifacts).toBe(
+    expect(
+      resolvePlatformCapabilities(cloudflareEnv({ ARTIFACTS_ENABLED: 'false' })).artifacts
+    ).toBe(false);
+    expect(resolvePlatformCapabilities(cloudflareEnv({ ARTIFACTS: undefined })).artifacts).toBe(
       false
     );
-    expect(resolvePlatformCapabilities(cloudflareEnv({ ARTIFACTS: undefined })).artifacts).toBe(false);
   });
 });
 
@@ -95,7 +97,9 @@ describe('resolveAiGatewayId', () => {
   });
 
   it('ignores the wrangler.toml default gateway id when there is no Cloudflare account', () => {
-    expect(resolveAiGatewayId({ AI_GATEWAY_ID: 'sam', CF_ACCOUNT_ID: undefined as never })).toBeNull();
+    expect(
+      resolveAiGatewayId({ AI_GATEWAY_ID: 'sam', CF_ACCOUNT_ID: undefined as never })
+    ).toBeNull();
   });
 
   it('is null without a gateway id even with an account', () => {
