@@ -785,10 +785,19 @@ describe('compact archive concurrent mutation fencing', () => {
       })
     ).toEqual({ messages: 3, intentState: 'recovery_manifest_persisted', archiveState: null });
 
+    // The flip deletes nothing; the rows are reclaimed afterwards in bounded pages.
     expect(await source.archiveSourceFinalizeDelete(finalizeInput)).toMatchObject({
       idempotent: false,
-      messagesDeleted: 3,
+      messagesDeleted: 0,
     });
+    expect(
+      await source.archiveSourceReclaimPage({
+        projectId,
+        sessionId,
+        migrationId: base.migrationId,
+        maxRows: 500,
+      })
+    ).toMatchObject({ messagesDeleted: 3, remaining: false });
     expect(
       await runInDurableObject(source, async (_instance, state) => ({
         messages: state.storage.sql

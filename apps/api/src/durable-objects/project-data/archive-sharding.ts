@@ -3110,6 +3110,14 @@ export async function restoreSourceArchiveChunk(
       'ProjectData archive source can only be restored after source deletion proof exists'
     );
   }
+  if (state === 'source_deleted') {
+    // Fence reclaim before the first restored row lands (`isCopyBackInProgress`).
+    sql.exec(
+      'INSERT OR REPLACE INTO do_meta (key, value) VALUES (?, ?)',
+      COPY_BACK_IN_PROGRESS_META_PREFIX + input.sessionId,
+      input.migrationId
+    );
+  }
   const spec = validateTableName(input.tableName);
   const suppliedHash = await canonicalRowsSha256(spec.columns, input.rows);
   if (suppliedHash !== input.sha256) {
@@ -3202,6 +3210,11 @@ export async function markSourceCopyBackRestored(
          updated_at = updated_at
      WHERE id = ?`,
     input.sessionId
+  );
+  // The intent is now `rehome_exported`, which reclaim already refuses, so the fence can go.
+  sql.exec(
+    'DELETE FROM do_meta WHERE key = ?',
+    COPY_BACK_IN_PROGRESS_META_PREFIX + input.sessionId
   );
   return (result.rowsWritten ?? 0) > 0;
 }
@@ -3493,40 +3506,15 @@ export async function finalizeSourceDelete(
     );
   }
 
-  // All destructive rows and the source-deleted routing anchor commit in one
-  // SQLite transaction. A reset can occur before or after this callback, never
-  // between a partial transcript delete and its durable state transition.
+  // The flip: the routing anchors and the `source_deleted` intent commit in one SQLite
+  // transaction, and NO transcript rows are deleted here. Deleting a whole session in this
+  // transaction held the root object for up to ~5.5 s at 9k messages in production
+  // (2026-11-12) and would be ~60 s at the 100k-message cap. The rows are reclaimed afterwards
+  // in bounded pages by `reclaimArchiveSourcePage`. Until then they are unreachable: exact reads
+  // fail closed on the `source_deleted` intent, routing points at the shard, and project search
+  // dedupes by (sessionId, id).
   return transactionSync(() => {
     const databaseSizeBeforeBytes = databaseSize(sql);
-    let ftsRowsDeleted = 0;
-    let groupedRowsDeleted = 0;
-    forEachGroupedRowPaged(sql, input.sessionId, hashPageRows, (row) => {
-      try {
-        sql.exec(
-          `INSERT INTO chat_messages_grouped_fts(chat_messages_grouped_fts, rowid, content)
-           VALUES('delete', ?, ?)`,
-          row.rowid,
-          row.content
-        );
-        ftsRowsDeleted++;
-      } catch (error) {
-        log.warn('archive_source_fts_delete_marker_failed', {
-          sessionId: input.sessionId,
-          rowid: row.rowid,
-          ...serializeError(error),
-        });
-      }
-      const deleteGrouped = sql.exec(
-        'DELETE FROM chat_messages_grouped WHERE rowid = ?',
-        row.rowid
-      );
-      groupedRowsDeleted += deleteGrouped.rowsWritten ?? 0;
-    });
-    const toolArchiveRowsDeleted =
-      sql.exec('DELETE FROM tool_payload_archives WHERE session_id = ?', input.sessionId)
-        .rowsWritten ?? 0;
-    const messagesDeleted =
-      sql.exec('DELETE FROM chat_messages WHERE session_id = ?', input.sessionId).rowsWritten ?? 0;
     sql.exec(
       `UPDATE chat_sessions
        SET archive_last_message_at = ?,
@@ -3542,7 +3530,6 @@ export async function finalizeSourceDelete(
       input.migrationId,
       input.sessionId
     );
-    const databaseSizeAfterBytes = databaseSize(sql);
     sql.exec(
       `UPDATE project_data_archive_source_intents
        SET state = 'source_deleted',
@@ -3557,7 +3544,7 @@ export async function finalizeSourceDelete(
       input.r2ManifestKey,
       input.now,
       databaseSizeBeforeBytes,
-      databaseSizeAfterBytes,
+      databaseSizeBeforeBytes,
       input.now,
       input.sessionId,
       input.migrationId,
@@ -3566,14 +3553,205 @@ export async function finalizeSourceDelete(
     return {
       idempotent: false,
       lastMessageAt: terminalVersion.lastMessageAt,
+      messagesDeleted: 0,
+      groupedRowsDeleted: 0,
+      ftsRowsDeleted: 0,
+      toolArchiveRowsDeleted: 0,
+      databaseSizeBeforeBytes,
+      databaseSizeAfterBytes: databaseSizeBeforeBytes,
+    };
+  });
+}
+
+export type ArchiveSourceReclaimPageInput = {
+  projectId: string;
+  sessionId: string;
+  migrationId: string;
+  /** Most rows this call deletes across all transcript tables. */
+  maxRows: number;
+};
+
+export type ArchiveSourceReclaimPageResult = {
+  messagesDeleted: number;
+  groupedRowsDeleted: number;
+  ftsRowsDeleted: number;
+  toolArchiveRowsDeleted: number;
+  /** True when this session still owns transcript rows in the root after this page. */
+  remaining: boolean;
+};
+
+/**
+ * Set by the first copy-back restore chunk and cleared when the copy-back is marked restored.
+ * While it is present the session's root rows are being RESTORED, not left over, so reclaim
+ * must not touch them. Kept in `do_meta` so no table migration is needed.
+ */
+const COPY_BACK_IN_PROGRESS_META_PREFIX = 'archive_copy_back_in_progress:';
+
+function isCopyBackInProgress(sql: SqlStorage, sessionId: string): boolean {
+  return (
+    sql
+      .exec(
+        'SELECT 1 AS present FROM do_meta WHERE key = ?',
+        COPY_BACK_IN_PROGRESS_META_PREFIX + sessionId
+      )
+      .toArray().length > 0
+  );
+}
+
+const RECLAIM_PENDING_ROWS_SQL = `EXISTS (SELECT 1 FROM chat_messages m WHERE m.session_id = i.session_id)
+  OR EXISTS (SELECT 1 FROM chat_messages_grouped g WHERE g.session_id = i.session_id)
+  OR EXISTS (SELECT 1 FROM tool_payload_archives t WHERE t.session_id = i.session_id)`;
+
+function sourceStillOwnsRows(sql: SqlStorage, sessionId: string): boolean {
+  return (
+    sql
+      .exec(
+        `SELECT 1 AS present FROM project_data_archive_source_intents i
+         WHERE i.session_id = ? AND (${RECLAIM_PENDING_ROWS_SQL})`,
+        sessionId
+      )
+      .toArray().length > 0
+  );
+}
+
+/**
+ * Sessions whose archive flip has committed (`source_deleted` intent) but whose transcript rows
+ * have not all been reclaimed yet. Derived from the rows themselves rather than from journal
+ * state, so a reclaim interrupted by a crash, a deadline, or a coordinator that predates
+ * paged reclaim is still found.
+ */
+export function listArchiveSourceReclaimPending(
+  sql: SqlStorage,
+  input: { projectId: string; limit: number }
+): Array<{ sessionId: string; migrationId: string }> {
+  return sql
+    .exec(
+      `SELECT i.session_id, i.migration_id
+       FROM project_data_archive_source_intents i
+       WHERE i.project_id = ? AND i.state = 'source_deleted' AND (${RECLAIM_PENDING_ROWS_SQL})
+         AND NOT EXISTS (SELECT 1 FROM do_meta meta WHERE meta.key = ? || i.session_id)
+       ORDER BY i.source_deleted_at ASC, i.session_id ASC
+       LIMIT ?`,
+      input.projectId,
+      COPY_BACK_IN_PROGRESS_META_PREFIX,
+      Math.max(1, Math.floor(input.limit))
+    )
+    .toArray()
+    .map((row) => ({
+      sessionId: strictString(row.session_id, 'source_intent.session_id'),
+      migrationId: strictString(row.migration_id, 'source_intent.migration_id'),
+    }));
+}
+
+/**
+ * Delete at most `maxRows` transcript rows of a session whose archive flip has committed.
+ *
+ * Messages go first: materialization builds grouped rows from messages, so removing messages
+ * first means nothing can regenerate what a later page deletes. Grouped rows go with their FTS
+ * delete markers, then tool-payload archive rows. Each call is one transaction, so a reset
+ * leaves whole pages, and the next call continues from whatever is left.
+ */
+export function reclaimArchiveSourcePage(
+  sql: SqlStorage,
+  input: ArchiveSourceReclaimPageInput,
+  transactionSync: <T>(callback: () => T) => T = (callback) => callback()
+): ArchiveSourceReclaimPageResult {
+  const intent = readSourceIntent(sql, input.sessionId);
+  if (
+    !intent ||
+    intent.project_id !== input.projectId ||
+    intent.migration_id !== input.migrationId ||
+    intent.state !== 'source_deleted'
+  ) {
+    throw new ProjectDataArchiveInvariantError(
+      'source_reclaim_not_flipped',
+      'ProjectData archive source rows may be reclaimed only after this migration flipped the session'
+    );
+  }
+  if (isCopyBackInProgress(sql, input.sessionId)) {
+    throw new ProjectDataArchiveInvariantError(
+      'source_reclaim_copy_back_in_progress',
+      'ProjectData archive source rows are being restored by a copy-back and must not be reclaimed'
+    );
+  }
+  const maxRows = Math.max(1, Math.floor(input.maxRows));
+  return transactionSync(() => {
+    let budget = maxRows;
+    const messagesDeleted =
+      sql.exec(
+        `DELETE FROM chat_messages WHERE rowid IN (
+           SELECT rowid FROM chat_messages WHERE session_id = ? LIMIT ?)`,
+        input.sessionId,
+        budget
+      ).rowsWritten ?? 0;
+    budget -= messagesDeleted;
+    let groupedRowsDeleted = 0;
+    let ftsRowsDeleted = 0;
+    if (budget > 0) {
+      const rows = sql
+        .exec(
+          'SELECT rowid, content FROM chat_messages_grouped WHERE session_id = ? LIMIT ?',
+          input.sessionId,
+          budget
+        )
+        .toArray();
+      for (const row of rows) {
+        try {
+          sql.exec(
+            `INSERT INTO chat_messages_grouped_fts(chat_messages_grouped_fts, rowid, content)
+             VALUES('delete', ?, ?)`,
+            row.rowid,
+            row.content
+          );
+          ftsRowsDeleted++;
+        } catch (error) {
+          log.warn('archive_source_fts_delete_marker_failed', {
+            sessionId: input.sessionId,
+            rowid: row.rowid,
+            ...serializeError(error),
+          });
+        }
+        groupedRowsDeleted +=
+          sql.exec('DELETE FROM chat_messages_grouped WHERE rowid = ?', row.rowid).rowsWritten ?? 0;
+      }
+      budget -= rows.length;
+    }
+    let toolArchiveRowsDeleted = 0;
+    if (budget > 0) {
+      toolArchiveRowsDeleted =
+        sql.exec(
+          `DELETE FROM tool_payload_archives WHERE rowid IN (
+             SELECT rowid FROM tool_payload_archives WHERE session_id = ? LIMIT ?)`,
+          input.sessionId,
+          budget
+        ).rowsWritten ?? 0;
+    }
+    const remaining = sourceStillOwnsRows(sql, input.sessionId);
+    if (!remaining) {
+      // The reclaim evidence the flip recorded as "nothing freed yet" becomes the real
+      // post-reclaim size once the last row is gone.
+      sql.exec(
+        `UPDATE project_data_archive_source_intents
+         SET source_database_size_after = ?
+         WHERE session_id = ? AND migration_id = ? AND state = 'source_deleted'`,
+        databaseSize(sql),
+        input.sessionId,
+        input.migrationId
+      );
+    }
+    return {
       messagesDeleted,
       groupedRowsDeleted,
       ftsRowsDeleted,
       toolArchiveRowsDeleted,
-      databaseSizeBeforeBytes,
-      databaseSizeAfterBytes,
+      remaining,
     };
   });
+}
+
+/** True when a flipped session still has transcript rows waiting to be reclaimed. */
+export function archiveSourceReclaimOutstanding(sql: SqlStorage, sessionId: string): boolean {
+  return sourceStillOwnsRows(sql, sessionId);
 }
 
 export function markSourceRecoveryManifestPersisted(

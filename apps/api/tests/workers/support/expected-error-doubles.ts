@@ -77,6 +77,42 @@ type ProjectDataExpectedErrorOperation =
  */
 export class ProjectDataTestDouble extends ProjectData {
   /**
+   * Remaining injected failures for `archiveSourceReclaimPage` and
+   * `archiveSourceMarkCopyBackRestored`. They stand in for a reset or a lost RPC after the
+   * archive flip committed, which is the state paged reclaim must recover from.
+   */
+  private reclaimFailuresForTest = 0;
+  private copyBackMarkFailuresForTest = 0;
+
+  failNextArchiveReclaimPagesForTest(count: number): void {
+    this.reclaimFailuresForTest = count;
+  }
+
+  failNextCopyBackMarkForTest(): void {
+    this.copyBackMarkFailuresForTest = 1;
+  }
+
+  override async archiveSourceReclaimPage(
+    input: archiveSharding.ArchiveSourceReclaimPageInput
+  ): Promise<archiveSharding.ArchiveSourceReclaimPageResult> {
+    if (this.reclaimFailuresForTest > 0) {
+      this.reclaimFailuresForTest--;
+      throw new Error('injected archive reclaim failure');
+    }
+    return super.archiveSourceReclaimPage(input);
+  }
+
+  override async archiveSourceMarkCopyBackRestored(
+    input: Parameters<ProjectData['archiveSourceMarkCopyBackRestored']>[0]
+  ): Promise<boolean> {
+    if (this.copyBackMarkFailuresForTest > 0) {
+      this.copyBackMarkFailuresForTest--;
+      throw new Error('injected copy-back mark failure');
+    }
+    return super.archiveSourceMarkCopyBackRestored(input);
+  }
+
+  /**
    * Test convenience over the production `searchMessagesWithCoverage` RPC: the same bounded
    * search, results only. Production callers must use the coverage variant and disclose it.
    */
@@ -149,8 +185,14 @@ export class ProjectDataTestDouble extends ProjectData {
 
   /** Inject a rollback inside the DO realm so the workers pool does not report
    * a test-realm thrown exception as an unhandled RPC rejection. */
-  async runAlarmWithGroupedCleanupFailureForTest(failurePoint: 'candidate' | 'second_delete' = 'candidate', failRecording = false): Promise<{
-    injected: boolean; laterCleanup: boolean; markerCommitted: boolean; rolledBack: boolean;
+  async runAlarmWithGroupedCleanupFailureForTest(
+    failurePoint: 'candidate' | 'second_delete' = 'candidate',
+    failRecording = false
+  ): Promise<{
+    injected: boolean;
+    laterCleanup: boolean;
+    markerCommitted: boolean;
+    rolledBack: boolean;
   }> {
     const storage = this.ctx.storage;
     const sql = storage.sql;
@@ -167,9 +209,10 @@ export class ProjectDataTestDouble extends ProjectData {
       if (markerWritten) markerCommitted = true;
     };
     sql.exec = ((query: string, ...bindings: SqlStorageValue[]) => {
-      if (/INSERT INTO chat_messages_grouped_fts/.test(query) && /VALUES\('delete'/.test(query)) deletes++;
-      const shouldFail = failurePoint === 'candidate'
-        ? /SELECT id FROM chat_sessions/.test(query) : deletes === 2;
+      if (/INSERT INTO chat_messages_grouped_fts/.test(query) && /VALUES\('delete'/.test(query))
+        deletes++;
+      const shouldFail =
+        failurePoint === 'candidate' ? /SELECT id FROM chat_sessions/.test(query) : deletes === 2;
       if (!injected && shouldFail) {
         injected = true;
         markerCommittedBeforeFailure = markerCommitted;
@@ -178,7 +221,12 @@ export class ProjectDataTestDouble extends ProjectData {
           throw new Error('out of memory: SQLITE_NOMEM');
         });
       }
-      if (injected && failRecording && bindings[0] === 'storageSafetyLastError' && /INSERT/.test(query)) {
+      if (
+        injected &&
+        failRecording &&
+        bindings[0] === 'storageSafetyLastError' &&
+        /INSERT/.test(query)
+      ) {
         throw new Error('injected diagnostic write failure');
       }
       if (bindings[0] === 'storageSafetyLastAlertAt' && /INSERT/.test(query)) markerWritten = true;
@@ -187,8 +235,12 @@ export class ProjectDataTestDouble extends ProjectData {
     }) as typeof sql.exec;
     try {
       await this.alarm();
-      return { injected, laterCleanup, markerCommitted: markerCommittedBeforeFailure,
-        rolledBack: exec('SELECT count(*) n FROM nomem_rollback_probe WHERE id = 2').one().n === 0 };
+      return {
+        injected,
+        laterCleanup,
+        markerCommitted: markerCommittedBeforeFailure,
+        rolledBack: exec('SELECT count(*) n FROM nomem_rollback_probe WHERE id = 2').one().n === 0,
+      };
     } finally {
       sql.exec = exec;
       storage.sync = sync;

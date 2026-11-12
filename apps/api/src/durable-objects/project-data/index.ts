@@ -1068,6 +1068,27 @@ export class ProjectData extends DurableObject<Env> {
     );
   }
 
+  async archiveSourceReclaimPage(
+    input: archiveSharding.ArchiveSourceReclaimPageInput
+  ): Promise<archiveSharding.ArchiveSourceReclaimPageResult> {
+    return this.withArchiveTranscriptLock(() =>
+      measureArchiveSql(this.sql, input.sessionId, 'source_reclaim', async (sql) =>
+        archiveSharding.reclaimArchiveSourcePage(
+          sql,
+          input,
+          this.ctx.storage.transactionSync.bind(this.ctx.storage)
+        )
+      )
+    );
+  }
+
+  archiveSourceListReclaimPending(input: {
+    projectId: string;
+    limit: number;
+  }): Array<{ sessionId: string; migrationId: string }> {
+    return archiveSharding.listArchiveSourceReclaimPending(this.sql, input);
+  }
+
   async archiveSourceFinalizeDelete(
     input: archiveSharding.ArchiveSourceFinalizeDeleteInput
   ): Promise<archiveSharding.ArchiveSourceFinalizeDeleteResult> {

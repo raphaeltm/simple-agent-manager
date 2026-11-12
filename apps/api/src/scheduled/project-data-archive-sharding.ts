@@ -131,6 +131,11 @@ const JOURNAL_PHASE_RANK: Record<ProjectDataArchiveJournalState, number> = {
 
 type ArchiveCoordinatorConfig = {
   writeReservation?: ArchiveWriteReservation;
+  /**
+   * Epoch ms after which this tick starts no new reclaim page. Set per tick by
+   * `processArchiveMigrationBatch`; absent means "reclaim one page and stop".
+   */
+  deadlineAt?: number;
   enabled: boolean;
   globalSweepIntervalMs: number;
   shardCount: number;
@@ -313,6 +318,10 @@ export type ProjectDataArchiveShardingStats = {
   poisoned: number;
   chunksCopied: number;
   rowsCopied: number;
+  /** Root transcript rows deleted after a flip, by this tick's post-flip and pending reclaim. */
+  reclaimedRows?: number;
+  /** Flipped sessions that still owned root rows when this tick stopped reclaiming. */
+  reclaimPending?: number;
 };
 
 export type ProjectDataArchiveManualCanaryCandidate = {
@@ -2908,21 +2917,113 @@ async function finalizeSourceAndPublish(
   };
 }
 
+/**
+ * Delete a flipped session's remaining root transcript rows, one bounded page per RPC, until
+ * none are left or the tick's deadline passes. Always runs at least one page, so a tick that
+ * reaches a session makes progress on it. A page that deletes nothing while rows remain
+ * stops the loop instead of spinning; the next tick's pending pass retries.
+ */
+type MigrateCandidateResult = {
+  migrated: boolean;
+  /** True when the source object refused before any copy and the fence was unwound. */
+  refused?: boolean;
+  recoveredCrashGap: boolean;
+  chunksCopied: number;
+  rowsCopied: number;
+  /** Root rows deleted after this migration's flip, within this tick. */
+  reclaimedRows?: number;
+  /** True when the flip committed but root rows remain for a later tick to reclaim. */
+  reclaimPending?: boolean;
+};
+
+async function reclaimFlippedSession(
+  source: DurableObjectStub<ProjectData>,
+  input: { projectId: string; sessionId: string; migrationId: string },
+  pageRows: number,
+  deadlineAt: number | undefined
+): Promise<{ rowsDeleted: number; remaining: boolean }> {
+  let rowsDeleted = 0;
+  for (;;) {
+    const page = await source.archiveSourceReclaimPage({ ...input, maxRows: pageRows });
+    const deleted = page.messagesDeleted + page.groupedRowsDeleted + page.toolArchiveRowsDeleted;
+    rowsDeleted += deleted;
+    if (!page.remaining) return { rowsDeleted, remaining: false };
+    if (deleted === 0 || deadlineAt === undefined || Date.now() >= deadlineAt) {
+      return { rowsDeleted, remaining: true };
+    }
+  }
+}
+
+/**
+ * Finish reclaims a previous tick did not complete: a deadline, a reset, or a coordinator from
+ * before paged reclaim publishing the journal straight to `published`. Pending work is read
+ * from each root object's own intents and rows, never from journal state, so none of those
+ * paths can strand rows. Projects are those with the most recent publishes, because leftovers
+ * come from recent flips.
+ */
+async function reclaimPendingSources(
+  env: Env,
+  config: ArchiveCoordinatorConfig,
+  stats: ProjectDataArchiveShardingStats,
+  deadlineAt: number,
+  scope?: ArchiveCoordinatorScope
+): Promise<void> {
+  const projects = scope
+    ? [scope.projectId]
+    : (
+        (
+          await env.DATABASE.prepare(
+            `SELECT project_id FROM project_data_archive_migrations
+             WHERE state IN ('source_deleted', 'published')
+             GROUP BY project_id
+             ORDER BY MAX(COALESCE(published_at, source_deleted_at, updated_at)) DESC, project_id ASC
+             LIMIT ?`
+          )
+            .bind(config.sweepProjects)
+            .all<{ project_id: string }>()
+        ).results ?? []
+      ).map((row) => row.project_id);
+  for (const projectId of projects) {
+    if (Date.now() >= deadlineAt) return;
+    try {
+      const source = await ensureOwnerStub(env, projectId, projectId);
+      const pending = await source.archiveSourceListReclaimPending({
+        projectId,
+        limit: config.sweepSessions,
+      });
+      for (const item of pending) {
+        if (scope?.sessionId && item.sessionId !== scope.sessionId) continue;
+        if (Date.now() >= deadlineAt) {
+          stats.reclaimPending = (stats.reclaimPending ?? 0) + 1;
+          continue;
+        }
+        const result = await reclaimFlippedSession(
+          source,
+          { projectId, sessionId: item.sessionId, migrationId: item.migrationId },
+          config.chunkRows,
+          deadlineAt
+        );
+        stats.reclaimedRows = (stats.reclaimedRows ?? 0) + result.rowsDeleted;
+        if (result.remaining) stats.reclaimPending = (stats.reclaimPending ?? 0) + 1;
+      }
+    } catch (error) {
+      // Reclaim only frees storage; the sessions are already published and readable from
+      // their shard. A failure here is retried by the next tick and must not fail this one.
+      log.warn('project_data_archive_reclaim_pending_failed', {
+        projectId,
+        ...serializeError(error),
+      });
+    }
+  }
+}
+
 async function migrateCandidate(
   env: Env,
   config: ArchiveCoordinatorConfig,
   r2: R2Bucket,
   selected: MigrationRow,
   now: number
-): Promise<{
-  migrated: boolean;
-  leaseNotAcquired?: boolean;
-  /** True when the source object refused before any copy and the fence was unwound. */
-  refused?: boolean;
-  recoveredCrashGap: boolean;
-  chunksCopied: number;
-  rowsCopied: number;
-}> {
+): Promise<MigrateCandidateResult & { leaseNotAcquired?: boolean }> {
   const claimedRow = await claimMigrationLease(env, selected, now, config.leaseMs);
   if (!claimedRow) {
     return {
@@ -2949,13 +3050,7 @@ async function migrateClaimedCandidate(
   r2: R2Bucket,
   claimedRow: ClaimedMigrationRow,
   now: number
-): Promise<{
-  migrated: boolean;
-  refused?: boolean;
-  recoveredCrashGap: boolean;
-  chunksCopied: number;
-  rowsCopied: number;
-}> {
+): Promise<MigrateCandidateResult> {
   let migration = claimedRow;
   const source = await ensureOwnerStub(env, migration.source_owner_name, migration.project_id);
   const target = await ensureOwnerStub(env, migration.target_owner_name, migration.project_id);
@@ -3043,6 +3138,27 @@ async function migrateClaimedCandidate(
     const finalized = await finalizeSourceAndPublish(env, config, source, migration, now);
     markPhase('finalize');
     migration = finalized.migration as ClaimedMigrationRow;
+    // The flip committed and the shard is authoritative, so reclaim failures cannot fail this
+    // migration: rows still in the root are found again by `reclaimPendingSources`.
+    const reclaim = await reclaimFlippedSession(
+      source,
+      {
+        projectId: migration.project_id,
+        sessionId: migration.session_id,
+        migrationId: migration.migration_id,
+      },
+      config.chunkRows,
+      config.deadlineAt
+    ).catch((error: unknown) => {
+      log.warn('project_data_archive_reclaim_failed', {
+        migrationId: migration.migration_id,
+        projectId: migration.project_id,
+        sessionId: migration.session_id,
+        ...serializeError(error),
+      });
+      return { rowsDeleted: 0, remaining: true };
+    });
+    markPhase('reclaim');
     log.info('project_data_archive_candidate_migrated', {
       migrationId: migration.migration_id,
       projectId: migration.project_id,
@@ -3052,6 +3168,7 @@ async function migrateClaimedCandidate(
       chunksCopied,
       rowsCopied,
       sourceFinalization: finalized.sourceFinalization,
+      reclaim,
       totalMs: Date.now() - phaseStartedAt,
       phaseDurationsMs,
     });
@@ -3060,6 +3177,8 @@ async function migrateClaimedCandidate(
       recoveredCrashGap: finalized.recoveredCrashGap,
       chunksCopied,
       rowsCopied,
+      reclaimedRows: reclaim.rowsDeleted,
+      reclaimPending: reclaim.remaining,
     };
   }
 
@@ -3917,7 +4036,11 @@ async function processArchiveMigrationBatch(input: {
     try {
       const result = await migrateCandidate(
         input.env,
-        { ...input.config, writeReservation },
+        {
+          ...input.config,
+          writeReservation,
+          deadlineAt: input.startedAt + input.config.wallTimeMs,
+        },
         input.archiveR2,
         migration,
         input.now
@@ -3931,6 +4054,9 @@ async function processArchiveMigrationBatch(input: {
       if (result.recoveredCrashGap) input.stats.recoveredCrashGaps++;
       input.stats.chunksCopied += result.chunksCopied;
       input.stats.rowsCopied += result.rowsCopied;
+      if (result.reclaimedRows)
+        input.stats.reclaimedRows = (input.stats.reclaimedRows ?? 0) + result.reclaimedRows;
+      if (result.reclaimPending) input.stats.reclaimPending = (input.stats.reclaimPending ?? 0) + 1;
       return result.refused === true;
     } catch (caught) {
       const error = caught instanceof ClaimedMigrationFailure ? caught.cause : caught;
@@ -4025,6 +4151,7 @@ export async function runProjectDataArchiveSharding(
     const crashGapRecovery = await recoverCrashGaps(env, config, now);
     stats.recoveredCrashGaps = crashGapRecovery.recovered;
     stats.failed += crashGapRecovery.failed;
+    await reclaimPendingSources(env, config, stats, startedAt + config.wallTimeMs);
     const work = await selectMigrationWork(env, config, nowDate, now);
     // Only what the tick could actually journal. The fall-through padding exists to be
     // skipped past, so counting it would inflate the figure `budgetStallLastError` reports.
@@ -4136,6 +4263,7 @@ export async function runScopedProjectDataArchiveCanary(
   const crashGapRecovery = await recoverCrashGaps(env, config, now, scope);
   stats.recoveredCrashGaps = crashGapRecovery.recovered;
   stats.failed += crashGapRecovery.failed;
+  await reclaimPendingSources(env, config, stats, startedAt + config.wallTimeMs, scope);
   await processArchiveMigrationBatch({
     env,
     config,

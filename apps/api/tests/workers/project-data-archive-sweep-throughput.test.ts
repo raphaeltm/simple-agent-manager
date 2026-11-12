@@ -78,8 +78,22 @@ type SeededMessage = {
  * entropy in the range gzip actually sees.
  */
 const VOCAB = [
-  'workspace', 'session', 'archive', 'chunk', 'migration', 'durable', 'object', 'storage',
-  'reclaim', 'ceiling', 'budget', 'candidate', 'transcript', 'sweep', 'shard', 'manifest',
+  'workspace',
+  'session',
+  'archive',
+  'chunk',
+  'migration',
+  'durable',
+  'object',
+  'storage',
+  'reclaim',
+  'ceiling',
+  'budget',
+  'candidate',
+  'transcript',
+  'sweep',
+  'shard',
+  'manifest',
 ];
 
 function variedBody(seed: number, approxBytes: number): string {
@@ -123,7 +137,12 @@ function messagesFor(prefix: string, count: number): SeededMessage[] {
         content: `${prefix} tool call ${index}`,
         toolMetadata: JSON.stringify({
           title: `Read file ${index}`,
-          content: [{ type: 'text', text: `${prefix} tool result ${index} ${variedBody(index * 7 + 1, 400)}` }],
+          content: [
+            {
+              type: 'text',
+              text: `${prefix} tool result ${index} ${variedBody(index * 7 + 1, 400)}`,
+            },
+          ],
         }),
         timestamp: tiedTimestamp(index),
         sequence: index + 1,
@@ -155,9 +174,7 @@ async function seedTerminalSession(
   }
   await source.stopSession(sessionId);
   await source.runSummarySyncForTest();
-  const row = await env.DATABASE.prepare(
-    'SELECT message_count FROM session_summaries WHERE id = ?'
-  )
+  const row = await env.DATABASE.prepare('SELECT message_count FROM session_summaries WHERE id = ?')
     .bind(sessionId)
     .first<{ message_count: number }>();
   if (!row) throw new Error(`No session_summaries row for ${prefix}`);
@@ -212,7 +229,9 @@ async function countTargetRawChunks(ownerName: string, sessionId: string): Promi
  */
 async function databaseSizeBytes(ownerName: string): Promise<number> {
   const stub = projectDataStub(ownerName);
-  return runInDurableObject(stub, async (_instance, state) => Number(state.storage.sql.databaseSize));
+  return runInDurableObject(stub, async (_instance, state) =>
+    Number(state.storage.sql.databaseSize)
+  );
 }
 
 /**
@@ -410,10 +429,19 @@ async function runCeilingCase(prefix: string, ceiling: number) {
       await countTargetRawChunks(resolved?.owner_name ?? '', band.sessionId)
     ).toBeGreaterThanOrEqual(ceiling / 500);
 
-    // The rows left the source object...
-    expect(await source.getMessageCount(band.sessionId)).toBe(0);
-    // ...and the conversation is intact on the other side, read the way the app reads it.
+    // The conversation is intact on the other side, read the way the app reads it, even
+    // before every source row is reclaimed: the flip published the shard first.
     await expectTranscriptPreserved(projectId, band.sessionId, band.seeded);
+    // Reclaim of a session this large can run past the tick that flipped it; the next tick's
+    // pending pass finishes it without re-copying anything.
+    const reclaimTick = await runProjectDataArchiveSharding(
+      testEnv,
+      new Date(Date.now() + 240_000)
+    );
+    expect(reclaimTick.reclaimPending ?? 0).toBe(0);
+    expect(reclaimTick.chunksCopied).toBe(0);
+    // The rows left the source object.
+    expect(await source.getMessageCount(band.sessionId)).toBe(0);
     // ...and the small session archived in tick 1 was not disturbed.
     expect(await readLocation(projectId, small.sessionId)).toMatchObject({
       location_state: 'archive_shard',
@@ -432,18 +460,14 @@ async function runCeilingCase(prefix: string, ceiling: number) {
 }
 
 describe('archive sweep message budget as a selection ceiling', () => {
-  it(
-    'hides a session above the previous budget and archives it intact at the shipped ceiling',
-    async () => {
-      const result = await runCeilingCase('shipped', SHIPPED_SWEEP_MESSAGE_BUDGET);
+  it('hides a session above the previous budget and archives it intact at the shipped ceiling', async () => {
+    const result = await runCeilingCase('shipped', SHIPPED_SWEEP_MESSAGE_BUDGET);
 
-      // Physical reclaim, not just row deletion. `getMessageCount === 0` is satisfied by a
-      // delete that never returned pages; `databaseSize` subtracts the freelist, so this
-      // asserts the root object actually shrank — the property production is buying.
-      expect(result.sizeAfter).toBeLessThan(result.sizeBefore);
-    },
-    180_000
-  );
+    // Physical reclaim, not just row deletion. `getMessageCount === 0` is satisfied by a
+    // delete that never returned pages; `databaseSize` subtracts the freelist, so this
+    // asserts the root object actually shrank — the property production is buying.
+    expect(result.sizeAfter).toBeLessThan(result.sizeBefore);
+  }, 180_000);
 
   /**
    * EXPERIMENT, not a claim about shipped config.
@@ -457,21 +481,17 @@ describe('archive sweep message budget as a selection ceiling', () => {
    * CPU accounting and no real R2 latency, so this says nothing about the deployed tick's
    * `cpu_ms` or wall clock. Those have to come from a real compact-path run.
    */
-  it(
-    'keeps a 20000-message session correct end to end (experiment, above the shipped ceiling)',
-    async () => {
-      expect(SWEEP_CEILING_EXPERIMENT).toBeGreaterThan(SHIPPED_SWEEP_MESSAGE_BUDGET);
+  it('keeps a 20000-message session correct end to end (experiment, above the shipped ceiling)', async () => {
+    expect(SWEEP_CEILING_EXPERIMENT).toBeGreaterThan(SHIPPED_SWEEP_MESSAGE_BUDGET);
 
-      const result = await runCeilingCase('experiment', SWEEP_CEILING_EXPERIMENT);
+    const result = await runCeilingCase('experiment', SWEEP_CEILING_EXPERIMENT);
 
-      expect(result.sizeAfter).toBeLessThan(result.sizeBefore);
-      // Recorded for the rollout evidence, not asserted as a production bound: Miniflare
-      // timings are not Cloudflare timings.
-      console.log(
-        `[archive-throughput] ${SWEEP_CEILING_EXPERIMENT}-message migration: ` +
-          `${result.elapsedMs} ms local, root databaseSize ${result.sizeBefore} -> ${result.sizeAfter} bytes`
-      );
-    },
-    300_000
-  );
+    expect(result.sizeAfter).toBeLessThan(result.sizeBefore);
+    // Recorded for the rollout evidence, not asserted as a production bound: Miniflare
+    // timings are not Cloudflare timings.
+    console.log(
+      `[archive-throughput] ${SWEEP_CEILING_EXPERIMENT}-message migration: ` +
+        `${result.elapsedMs} ms local, root databaseSize ${result.sizeBefore} -> ${result.sizeAfter} bytes`
+    );
+  }, 300_000);
 });

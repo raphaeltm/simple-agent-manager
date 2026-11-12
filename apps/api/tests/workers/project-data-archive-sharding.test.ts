@@ -320,16 +320,12 @@ describe('ProjectData archive-sharding bridge in the Workers runtime', () => {
           sourceProof.intent.source_database_size_before
         );
         expect(sourceProof.rootMessages).toBe(0);
-        // `source_database_size_after` is captured before the final intent-row UPDATE. In the
-        // real workerd SQLite runtime that metadata write can allocate pages, so the live
-        // `sql.databaseSize` observed here may be larger than the recorded post-delete proof.
-        // The invariant is that both measurements remain below the pre-delete size and the
-        // recorded proof captured actual reclaim after source transcript rows were deleted.
+        // `source_database_size_after` is recorded by the reclaim page that deletes the last
+        // transcript row (the flip itself frees nothing). The live size can move either way
+        // afterwards as SQLite reuses or releases pages, so the invariant is that both
+        // measurements are below the pre-flip size.
         expect(sourceProof.databaseSize).toBeLessThan(
           sourceProof.intent.source_database_size_before
-        );
-        expect(sourceProof.databaseSize).toBeGreaterThanOrEqual(
-          sourceProof.intent.source_database_size_after
         );
 
         const target = projectDataStub(location!.owner_name);

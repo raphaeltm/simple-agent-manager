@@ -74,15 +74,8 @@ function ensureSession(sql: SqlStorage, sessionId: string): void {
 }
 
 function ensureMessageAnchor(sql: SqlStorage, sessionId: string, messageId: string): void {
-  const row = sql
-    .exec(
-      'SELECT id FROM chat_messages WHERE id = ? AND session_id = ? LIMIT 1',
-      messageId,
-      sessionId
-    )
-    .toArray()[0];
-  if (row) return;
-
+  // Checked before the message row: after an archive flip the root keeps the session's rows
+  // until reclaim deletes them in pages, and a comment on such a row would be deleted with it.
   const archiveRow = sql
     .exec(
       `SELECT state
@@ -97,6 +90,14 @@ function ensureMessageAnchor(sql: SqlStorage, sessionId: string, messageId: stri
       'Cannot create message comments on a session whose transcript has been moved to a ProjectData archive shard'
     );
   }
+  const row = sql
+    .exec(
+      'SELECT id FROM chat_messages WHERE id = ? AND session_id = ? LIMIT 1',
+      messageId,
+      sessionId
+    )
+    .toArray()[0];
+  if (row) return;
   throw new CommentNotFoundError('Message');
 }
 
