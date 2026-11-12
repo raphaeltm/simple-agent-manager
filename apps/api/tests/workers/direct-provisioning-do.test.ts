@@ -751,6 +751,70 @@ describe('durable direct workspace allocation', () => {
   });
 });
 
+describe('a provider create slower than the per-request timeout', () => {
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  // The self-host box measured a GCP create (insert + operation poll) at 9-12 s against a 5 s
+  // attempt deadline. Here the per-request timeout is 3 s and the fake provider answers after
+  // 3.5 s, through the real POST -> NodeLifecycle alarm -> provisionNode path.
+  async function slowCreate(attemptDeadlineMs?: number) {
+    const f = await setup(false);
+    if (attemptDeadlineMs !== undefined) {
+      await updateAdminSettings(f.testEnv, {
+        actorUserId: f.userId,
+        changes: [
+          { name: 'operations.nodeProvisioningAttemptDeadlineMs', value: attemptDeadlineMs },
+        ],
+      });
+    }
+    if ((await f.intent())?.attempts === 0) await f.tick();
+    await vi.waitFor(() => expect(f.creates).toHaveLength(1));
+    await sleep(3500);
+    f.release();
+    return f;
+  }
+  async function nodeRow(f: Awaited<ReturnType<typeof setup>>) {
+    const nodeId = (await f.intent())?.input.nodeId;
+    return env.DATABASE.prepare('SELECT provider_instance_id,status FROM nodes WHERE id=?')
+      .bind(nodeId)
+      .first();
+  }
+
+  it('completes in its first attempt under the default attempt deadline', async () => {
+    const f = await slowCreate();
+    await vi.waitFor(async () => expect((await f.intent())?.status).toBe('complete'), {
+      timeout: 8000,
+    });
+    const intent = (await f.intent())!;
+    expect(intent.attempts).toBe(1);
+    expect(intent.lastError).toBeNull();
+    expect(f.creates).toHaveLength(1);
+    expect(f.dispatches).toHaveLength(1);
+    expect(await nodeRow(f)).toEqual({ provider_instance_id: '9876', status: 'running' });
+  }, 20_000);
+
+  it('control: an attempt deadline shorter than the create is cut, and the next attempt adopts the VM instead of creating another', async () => {
+    // Equivalent to the pre-fix behaviour: the attempt budget was the request timeout.
+    const f = await slowCreate(1000);
+    await vi.waitFor(
+      async () => expect((await f.intent())?.lastError).toMatch(/deadline elapsed/),
+      { timeout: 8000 }
+    );
+    // The create itself was not cut: the VM identity is recorded before the attempt failed.
+    expect(await nodeRow(f)).toMatchObject({ provider_instance_id: '9876' });
+    await runInDurableObject(f.stub, async (instance) => {
+      (instance as unknown as { provisioningController: unknown }).provisioningController =
+        undefined;
+    });
+    await f.tick();
+    await vi.waitFor(async () => expect((await f.intent())?.status).toBe('complete'), {
+      timeout: 8000,
+    });
+    expect((await f.intent())!.attempts).toBe(2);
+    expect(f.creates).toHaveLength(1);
+    expect(await nodeRow(f)).toEqual({ provider_instance_id: '9876', status: 'running' });
+  }, 30_000);
+});
+
 describe('durable direct allocation on Cloudflare Tunnel transport', () => {
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -764,7 +828,11 @@ describe('durable direct allocation on Cloudflare Tunnel transport', () => {
     const f = await setup(false, false, true, cf);
     await updateAdminSettings(f.testEnv, {
       actorUserId: f.userId,
-      changes: [{ name: 'vmTunnels.provisioningBudgetMs', value: 1 }],
+      // The attempt budget never drops below the request timeout, so 1000 here means 3 s.
+      changes: [
+        { name: 'vmTunnels.provisioningBudgetMs', value: 1 },
+        { name: 'operations.nodeProvisioningAttemptDeadlineMs', value: 1000 },
+      ],
     });
     f.release();
     cf.inject('tunnel.list', { kind: 'hook', run: () => sleep(1000) });

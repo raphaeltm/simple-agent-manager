@@ -109,6 +109,20 @@ function sameProviderInventoryIdentity(current: VMInstance, discovered: VMInstan
 }
 
 /**
+ * Providers whose filtered inventory read is complete or fails closed. Hetzner: fully paginated,
+ * fail-closed list. GCP: fully paginated aggregated list that throws when any zone is
+ * unreachable (`listGcpInstances` in packages/providers/src/gcp-instance-lookup.ts). A GCP node
+ * whose create response was cut can reach `destroying` without `provider_instance_id`
+ * (self-host box, 2026-11-11); its VM is found here by its exact ownership labels.
+ */
+const COMPLETE_INVENTORY_PROVIDERS = new Set(['hetzner', 'gcp']);
+
+/** The owner-attested escape for a node SAM cannot prove gone (`services/node-manual-deletion.ts`). */
+const MANUAL_DELETION_HINT = (nodeId: string) =>
+  `If the server no longer exists at the provider, the owner can remove the node with ` +
+  `"I already deleted this server" on the node page (POST /api/nodes/${nodeId}/manual-deletion).`;
+
+/**
  * Resolve a stale providerless destroy claim against the exact provider inventory.
  *
  * This path is deliberately narrower than ordinary strict deletion: the row must
@@ -116,9 +130,10 @@ function sameProviderInventoryIdentity(current: VMInstance, discovered: VMInstan
  * resolve the exact credential generation used for allocation. Provider filtering is
  * never trusted by itself; every returned server must repeat the node, incarnation,
  * environment, installation, role, and managed labels locally. A discovered server is
- * re-read immediately before deletion. Only Hetzner's fail-closed, fully paginated
- * inventory is accepted here. Empty inventory cannot prove allocation finality;
- * retain the unresolved record so a late resource remains discoverable.
+ * re-read immediately before deletion. Only inventories that are complete or fail closed
+ * are accepted here (`COMPLETE_INVENTORY_PROVIDERS`). Empty inventory cannot prove
+ * allocation finality; retain the unresolved record so a late resource remains
+ * discoverable, and name the owner-attested escape (`node-manual-deletion.ts`).
  */
 async function reconcileStrictProviderlessVm(
   db: NodeDb,
@@ -140,14 +155,19 @@ async function reconcileStrictProviderlessVm(
     !Number.isFinite(Date.parse(node.createdAt)) ||
     Date.now() - Date.parse(node.createdAt) < getProvisioningTimeoutMs(env)
   ) {
-    throw new Error('Node allocation is still within its provisioning recovery window');
-  }
-  // Only Hetzner currently guarantees that a successful filtered inventory read is
-  // complete. Other adapters may deliberately return partial multi-region inventory,
-  // so an empty generic list cannot prove provider-side absence.
-  if (node.cloudProvider !== 'hetzner') {
+    const retryAt = new Date(Date.parse(node.createdAt) + getProvisioningTimeoutMs(env));
     throw new Error(
-      `Cannot reconcile providerless VM ${node.id}: provider inventory completeness is not guaranteed`
+      `Node allocation is still within its provisioning recovery window; ` +
+        `SAM can look the VM up by its labels after ${Number.isFinite(retryAt.getTime()) ? retryAt.toISOString() : 'the window ends'}`
+    );
+  }
+  // Only providers whose filtered inventory is complete may answer "which VM is this node's".
+  // Other adapters may deliberately return partial multi-region inventory, which could hide a
+  // duplicate exact match.
+  if (!COMPLETE_INVENTORY_PROVIDERS.has(node.cloudProvider ?? '')) {
+    throw new Error(
+      `Cannot reconcile providerless VM ${node.id}: ${node.cloudProvider ?? 'unknown'} inventory completeness is not guaranteed. ` +
+        MANUAL_DELETION_HINT(node.id)
     );
   }
   const installationId = resolveInstallationId(env);
@@ -189,7 +209,8 @@ async function reconcileStrictProviderlessVm(
   const discovered = servers[0];
   if (!discovered) {
     throw new Error(
-      `Cannot reconcile providerless VM ${node.id}: allocation remains unresolved despite empty inventory`
+      `Cannot reconcile providerless VM ${node.id}: allocation remains unresolved despite empty inventory. ` +
+        MANUAL_DELETION_HINT(node.id)
     );
   }
   const createdAt = Date.parse(discovered.createdAt);

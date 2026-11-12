@@ -137,6 +137,9 @@ beforeEach(() => {
     DATABASE: createSqliteD1(sqlite),
     ENVIRONMENT: 'production',
     SAM_INSTALLATION_ID: '0123456789abcdef0123456789abcdef',
+    // A Cloudflare installation: app deployments need Cloudflare DNS (platform-capabilities.ts).
+    CF_API_TOKEN: 'cf-token',
+    CF_ZONE_ID: 'zone-1',
   } as Env;
   vi.clearAllMocks();
   provider.deleteVM.mockResolvedValue(undefined);

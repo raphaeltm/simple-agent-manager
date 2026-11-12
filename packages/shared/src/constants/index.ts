@@ -720,6 +720,7 @@ export * from './project-event-schedules';
 export type { VmCapacity } from './resource-defaults';
 export {
   DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS,
+  DEFAULT_NODE_HOST_MEMORY_RESERVE_MB,
   DEFAULT_VM_CAPACITY,
   LEGACY_VM_SIZE_WORKLOAD_ADAPTER,
   LEGACY_VM_SIZE_WORKLOAD_ADAPTER_VERSION,

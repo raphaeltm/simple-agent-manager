@@ -10,6 +10,8 @@ export interface PlatformCapabilities {
   logSearch: boolean;
   /** Admin → Stream (tail worker). False on a self-hosted install. */
   liveLogStream: boolean;
+  /** Whether app deployments can run here (needs Cloudflare DNS for node and app routes). */
+  appDeployments: boolean;
 }
 
 /**
@@ -23,6 +25,7 @@ export const ASSUMED_PLATFORM_CAPABILITIES: PlatformCapabilities = Object.freeze
   monthlyCostCap: true,
   logSearch: true,
   liveLogStream: true,
+  appDeployments: true,
 });
 
 /**

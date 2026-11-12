@@ -283,7 +283,12 @@ function createApp() {
 }
 
 function request(path: string, init: RequestInit = {}) {
-  return createApp().request(path, init, { DATABASE: {} } as Env);
+  // A Cloudflare installation: app deployments need Cloudflare DNS (platform-capabilities.ts).
+  return createApp().request(path, init, {
+    DATABASE: {},
+    CF_API_TOKEN: 'cf-token',
+    CF_ZONE_ID: 'zone-1',
+  } as unknown as Env);
 }
 
 describe('deployment route membership authorization', () => {
@@ -362,6 +367,27 @@ describe('deployment route membership authorization', () => {
       createdByUserId: 'admin-user',
       creationSource: 'user',
     });
+  });
+
+  it('refuses to create an environment on an installation without Cloudflare DNS, writing nothing', async () => {
+    const before = environmentRows.length;
+    const response = await createApp().request(
+      '/api/projects/proj-1/environments',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'staging' }),
+      },
+      { DATABASE: {} } as unknown as Env
+    );
+    const body = await response.json();
+
+    expect(response.status, JSON.stringify(body)).toBe(404);
+    expect(body).toMatchObject({
+      error: 'FEATURE_UNAVAILABLE',
+      message: expect.stringContaining('App deployments are not available on this installation'),
+    });
+    expect(environmentRows).toHaveLength(before);
   });
 
   it('allows an active admin member to read logs from an owner-created deployment node', async () => {

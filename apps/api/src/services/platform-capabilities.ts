@@ -13,6 +13,7 @@
  * capability to true, so its behaviour does not change.
  */
 import type { Env } from '../env';
+import { errors } from '../middleware/error';
 import { emailTransportKind } from './agent-email/provider';
 import { hasInboundAgentEmail } from './agent-email/self-host-inbound';
 import { isAnalyticsD1SinkEnabled } from './analytics-d1-sink';
@@ -33,6 +34,7 @@ export type PlatformCapability =
   | 'emailSending'
   | 'inboundAgentEmail'
   | 'cloudflareDns'
+  | 'appDeployments'
   | 'workersObservability'
   | 'r2Presign'
   | 'speechToText'
@@ -221,6 +223,7 @@ export function isArtifactsAvailable(
 export function resolvePlatformCapabilities(env: CapabilityEnv): PlatformCapabilities {
   const workersAi = getWorkersAiBindingOrNull(env) !== null;
   const cloudflareAccountApi = hasCloudflareAccountApi(env);
+  const cloudflareDns = present(env.CF_API_TOKEN) && present(env.CF_ZONE_ID);
   return {
     workersAi,
     aiGateway: resolveAiGatewayId(env) !== null,
@@ -237,7 +240,12 @@ export function resolvePlatformCapabilities(env: CapabilityEnv): PlatformCapabil
     // Agent email can arrive here: Cloudflare Email Routing (the binding; an admin still has to
     // run the setup) or the self-hosted sam-mx receiver (agent-email/self-host-inbound.ts).
     inboundAgentEmail: hasInboundAgentEmail(env),
-    cloudflareDns: present(env.CF_API_TOKEN) && present(env.CF_ZONE_ID),
+    cloudflareDns,
+    // Deployment nodes keep public-IP transport even on a reverse-tunnel box
+    // (resolveManagedNodeTransport), so they need what that transport needs: a Cloudflare DNS
+    // record per node, an Origin CA certificate and *.apps route records, all through the
+    // Cloudflare API with CF_API_TOKEN and CF_ZONE_ID.
+    appDeployments: cloudflareDns,
     workersObservability: cloudflareAccountApi,
     r2Presign: resolveR2PresignConfig(env) !== null,
     speechToText: workersAi,
@@ -260,6 +268,8 @@ export interface PublicPlatformCapabilities {
   logSearch: boolean;
   /** Admin → Stream (tail worker). Off on self-host. */
   liveLogStream: boolean;
+  /** Whether app deployments can run here (the Deployments page reads it). */
+  appDeployments: boolean;
 }
 
 /**
@@ -286,5 +296,18 @@ export function publicPlatformCapabilities(
     monthlyCostCap: capabilities.monthlyCostCap,
     logSearch: capabilities.workersObservability,
     liveLogStream: capabilities.liveLogStream,
+    appDeployments: capabilities.appDeployments,
   };
+}
+
+export const APP_DEPLOYMENTS_UNAVAILABLE_MESSAGE =
+  'App deployments are not available on this installation. Deployment nodes need Cloudflare DNS ' +
+  '(CF_API_TOKEN and CF_ZONE_ID): each one gets a public DNS record, an Origin CA certificate and ' +
+  '*.apps routes through the Cloudflare API, and this installation has none configured.';
+
+/** Refuse before any deployment state is written when app deployments cannot work here. */
+export function assertAppDeploymentsAvailable(env: CapabilityEnv): void {
+  if (!resolvePlatformCapabilities(env).appDeployments) {
+    throw errors.featureUnavailable('appDeployments', APP_DEPLOYMENTS_UNAVAILABLE_MESSAGE);
+  }
 }

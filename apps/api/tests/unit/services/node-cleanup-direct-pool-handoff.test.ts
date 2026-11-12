@@ -437,7 +437,7 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
       .prepare(
         `UPDATE nodes
             SET status = 'destroying', provider_instance_id = NULL,
-                runtime_incarnation_id = 'incarnation-host', cloud_provider = 'gcp',
+                runtime_incarnation_id = 'incarnation-host', cloud_provider = 'scaleway',
                 runtime_termination_confirmed_at = NULL, cleanup_backoff_until = NULL
           WHERE id = 'host'`
       )

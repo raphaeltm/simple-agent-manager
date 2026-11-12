@@ -40,6 +40,14 @@ export const PLATFORM_RESOURCE_DEFAULTS: Required<ResourceRequirements> = {
 };
 
 /**
+ * Default memory a node keeps for its host (OS, Docker, the VM agent) before placing any
+ * workspace. Placement subtracts it from a machine's memory, so a 4 GB machine cannot hold a
+ * workspace that asks for the 4 GB default. The API admission policy reads this
+ * (`DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB`); installations can override it there.
+ */
+export const DEFAULT_NODE_HOST_MEMORY_RESERVE_MB = 1024;
+
+/**
  * Compatibility defaults for deprecated small/medium/large values.
  *
  * These are workload slices, not historical whole-VM shapes. Deployments can

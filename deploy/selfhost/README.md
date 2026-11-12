@@ -192,6 +192,21 @@ service account in Admin → Integrations) gives every account the installation 
 a cloud account of their own. Connecting the credential adds no machines: open
 **Admin → Infrastructure** and add machine types and regions to the installation pool.
 
+To create that credential's Google Cloud side in one step, run as a project owner with `gcloud`
+logged in:
+
+```bash
+pnpm selfhost:gcp-bootstrap -- --project <gcp-project-id> --api-url https://api.<SAM_DOMAIN> --dry-run
+pnpm selfhost:gcp-bootstrap -- --project <gcp-project-id> --api-url https://api.<SAM_DOMAIN>
+```
+
+It creates or reuses a workload identity pool for this install alone, an OIDC provider that admits
+only tokens whose issuer is this install's API origin, and a `sam-nodes` service account with
+`roles/compute.instanceAdmin.v1` and `roles/compute.securityAdmin` that the pool may impersonate.
+It prints the five values for **Admin → Integrations → Google Cloud**. Re-running it changes
+nothing; it refuses to retarget a provider that trusts another install
+(`deploy/selfhost/gcp-bootstrap.sh`).
+
 Include at least one machine with 8 GB of memory. A default task asks for 2 vCPU, 4 GB of memory
 and 15 GB of disk (`PLATFORM_RESOURCE_DEFAULTS` in
 `packages/shared/src/constants/resource-defaults.ts`), and placement first subtracts a 1 GiB host
