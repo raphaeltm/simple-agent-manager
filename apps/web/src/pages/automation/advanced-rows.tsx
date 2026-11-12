@@ -11,7 +11,12 @@ import {
   DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING,
   DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS,
 } from '@simple-agent-manager/shared';
-import { isGitHubCommentEvent, isGitHubPullRequestEvent } from '@simple-agent-manager/shared';
+import {
+  isGitHubCommentEvent,
+  isGitHubPullRequestEvent,
+  isWebhookFilterPresenceOperator,
+  type WebhookTriggerConfig,
+} from '@simple-agent-manager/shared';
 import type { ReactNode } from 'react';
 
 import {
@@ -28,6 +33,39 @@ type Rows = Array<[string, ReactNode]>;
 const mono = (value: string) => <span className="font-mono text-[12.5px]">{value}</span>;
 const listOr = (values: string[] | undefined, empty: string) =>
   values?.length ? values.join(', ') : empty;
+
+/** How calls are verified: SAM's token, or the sender's signing secret and event-ID rule. */
+function webhookCredentialRows(config: WebhookTriggerConfig): Rows {
+  const verification = config.verification ?? { scheme: 'sam_bearer' };
+  if (verification.scheme === 'sam_bearer') {
+    const created = config.tokenRotatedAt ?? config.tokenCreatedAt;
+    return [
+      ['Token', mono(`••••${config.tokenLastFour ?? '????'}`)],
+      ['Token created', created ? fullDate(Date.parse(created)) : 'Unknown'],
+    ];
+  }
+  const eventId = config.eventId;
+  return [
+    [
+      'Verification',
+      verification.scheme === 'slack_v0'
+        ? 'Slack signing secret (slack_v0)'
+        : `HMAC-SHA256 of the body in ${verification.header}`,
+    ],
+    [
+      'Event ID',
+      eventId
+        ? mono('path' in eventId ? `body: ${eventId.path}` : `header: ${eventId.header}`)
+        : 'Not set',
+    ],
+    [
+      'Signing secret',
+      config.signingSecret?.setAt
+        ? `Saved ${fullDate(Date.parse(config.signingSecret.setAt))}`
+        : 'Not saved yet',
+    ],
+  ];
+}
 
 /** "At least 4 vCPU · 8 GB · its own machine", the legacy size, or the profile default. */
 export function describeMachine(trigger: TriggerResponse): string {
@@ -113,7 +151,7 @@ function sourceRows(trigger: TriggerResponse): Rows {
       if (!config) return [['Webhook', 'Not configured']];
       const filters = config.filters.map(
         (filter) =>
-          `${filter.path} ${filter.operator}${filter.operator === 'exists' ? '' : ` ${JSON.stringify(filter.value ?? null)}`}`
+          `${filter.path} ${filter.operator}${isWebhookFilterPresenceOperator(filter.operator) ? '' : ` ${JSON.stringify(filter.value ?? null)}`}`
       );
       return [
         ['Source label', config.sourceLabel || 'None'],
@@ -124,8 +162,7 @@ function sourceRows(trigger: TriggerResponse): Rows {
             : 'None: every call starts a run',
         ],
         ['Headers passed to the prompt', listOr(config.includedHeaders, 'None')],
-        ['Token', mono(`••••${config.tokenLastFour}`)],
-        ['Token created', fullDate(Date.parse(config.tokenRotatedAt ?? config.tokenCreatedAt))],
+        ...webhookCredentialRows(config),
       ];
     }
     case 'email': {

@@ -3259,6 +3259,17 @@ export const triggerExecutions = sqliteTable(
       .on(table.triggerId, table.status)
       .where(sql`status IN ('queued', 'running')`),
     triggerIdIdx: index('idx_trigger_executions_trigger_id').on(table.triggerId),
+    queueExpiryIdx: index('idx_trigger_queue_expiry')
+      .on(table.queueExpiresAt)
+      .where(sql`status IN ('waiting','queued')`),
+    queueWaitingIdx: index('idx_trigger_queue_waiting')
+      .on(table.triggerId, table.sequenceNumber)
+      .where(sql`status = 'waiting'`),
+    queueWebhookPromptsIdx: index('idx_trigger_queue_webhook_prompts')
+      .on(table.status)
+      .where(
+        sql`event_type = 'webhook' AND queue_expires_at IS NOT NULL AND rendered_prompt IS NOT NULL`
+      ),
     githubDeliveryUnique: uniqueIndex('idx_trigger_execution_github_delivery')
       .on(table.githubDeliveryId, table.triggerId)
       .where(sql`github_delivery_id IS NOT NULL`),
@@ -3369,6 +3380,18 @@ export const webhookTriggerConfigs = sqliteTable(
     filterMode: text('filter_mode').notNull().default('all'),
     filtersJson: text('filters_json').notNull().default('[]'),
     includedHeadersJson: text('included_headers_json').notNull().default('[]'),
+    /** 'sam_bearer' (SAM token on /ingest) or a signed scheme with its own address. Fixed at creation. */
+    verificationScheme: text('verification_scheme').notNull().default('sam_bearer'),
+    /** Lowercase header carrying the HMAC for `hmac_sha256_body`. */
+    signatureHeader: text('signature_header'),
+    /** 'path' or 'header': where the sender's event ID is. Required for signed schemes. */
+    eventIdSource: text('event_id_source'),
+    eventIdKey: text('event_id_key'),
+    /** AES-GCM ciphertext and nonce of the provider signing secret. Never returned by any API. */
+    signingSecretEncrypted: text('signing_secret_encrypted'),
+    signingSecretIv: text('signing_secret_iv'),
+    signingSecretSetAt: text('signing_secret_set_at'),
+    signingSecretSetBy: text('signing_secret_set_by'),
     createdAt: text('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),
@@ -3421,9 +3444,16 @@ export const webhookDeliveries = sqliteTable(
       .where(sql`idempotency_key_hash IS NOT NULL`),
     expiresIdx: index('idx_webhook_deliveries_expires').on(table.expiresAt),
     executionIdx: index('idx_webhook_deliveries_execution').on(table.executionId),
+    triggerFingerprintIdx: index('idx_webhook_deliveries_trigger_fingerprint').on(
+      table.triggerId,
+      table.requestFingerprint
+    ),
     processingHeartbeatIdx: index('idx_webhook_deliveries_processing_heartbeat')
       .on(table.processingHeartbeatAt, table.id)
       .where(sql`outcome = 'processing' AND processing_token IS NOT NULL`),
+    queuedIdx: index('idx_webhook_deliveries_queued')
+      .on(table.executionId)
+      .where(sql`outcome = 'queued'`),
   })
 );
 

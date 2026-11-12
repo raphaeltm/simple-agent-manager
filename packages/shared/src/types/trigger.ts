@@ -2,6 +2,12 @@ import type { EmailTriggerConfig, EmailTriggerConfigInput } from './agent-email'
 import type { CredentialAttributionCheck } from './project';
 import type { ResourceRequirements } from './resource';
 import type { TaskMode } from './task';
+import type {
+  WebhookCredential,
+  WebhookFilterResult,
+  WebhookTriggerConfig,
+  WebhookTriggerConfigInput,
+} from './trigger-webhook';
 
 // =============================================================================
 // Trigger Types (Event-Driven Agent Triggers)
@@ -382,112 +388,6 @@ export interface GitHubTemplateContext {
     id: string;
     sequenceNumber: string;
   };
-}
-
-// =============================================================================
-// Generic Webhook Trigger Configuration
-// =============================================================================
-
-export const WEBHOOK_FILTER_OPERATORS = ['exists', 'equals', 'contains'] as const;
-export type WebhookFilterOperator = (typeof WEBHOOK_FILTER_OPERATORS)[number];
-
-export const WEBHOOK_FILTER_MODES = ['all', 'any'] as const;
-export type WebhookFilterMode = (typeof WEBHOOK_FILTER_MODES)[number];
-
-export interface WebhookTriggerFilter {
-  path: string;
-  operator: WebhookFilterOperator;
-  value?: string | number | boolean | null;
-}
-
-export interface WebhookTriggerConfigInput {
-  sourceLabel?: string;
-  filterMode?: WebhookFilterMode;
-  filters?: WebhookTriggerFilter[];
-  /** Lowercase header names that may be copied into template context. */
-  includedHeaders?: string[];
-}
-
-/** Safe configuration returned by management APIs. Token material is never included. */
-export interface WebhookTriggerConfig {
-  sourceLabel: string | null;
-  filterMode: WebhookFilterMode;
-  filters: WebhookTriggerFilter[];
-  includedHeaders: string[];
-  tokenLastFour: string;
-  tokenCreatedAt: string;
-  tokenRotatedAt: string | null;
-}
-
-/** One-time credential returned only when a webhook token is created or rotated. */
-export interface WebhookCredential {
-  endpointUrl: string;
-  token: string;
-  headerName: 'Authorization';
-}
-
-export interface WebhookTemplateContext {
-  webhook: {
-    receivedAt: string;
-    deliveryId: string;
-    sourceLabel: string;
-    /** Canonical compact JSON representation of body. */
-    payload: string;
-    body: Record<string, unknown>;
-    headers: Record<string, string>;
-  };
-  trigger: {
-    id: string;
-    name: string;
-    description: string;
-    fireCount: string;
-  };
-  project: {
-    id: string;
-    name: string;
-  };
-  execution: {
-    id: string;
-    sequenceNumber: string;
-  };
-}
-
-export interface WebhookFilterResult {
-  matched: boolean;
-  reason?: string;
-  matchedFilters: number;
-  totalFilters: number;
-}
-
-export const WEBHOOK_DELIVERY_OUTCOMES = [
-  'processing',
-  'accepted',
-  'duplicate',
-  'filtered',
-  'inactive',
-  'rate_limited',
-  'still_running',
-  'concurrent_limit',
-  'configuration_error',
-  'internal_error',
-] as const;
-export type WebhookDeliveryOutcome = (typeof WEBHOOK_DELIVERY_OUTCOMES)[number];
-
-export interface WebhookDelivery {
-  id: string;
-  triggerId: string;
-  outcome: WebhookDeliveryOutcome;
-  httpStatus: number;
-  bodyBytes: number;
-  executionId: string | null;
-  errorCode: string | null;
-  receivedAt: string;
-  processedAt: string | null;
-}
-
-export interface ListWebhookDeliveriesResponse {
-  deliveries: WebhookDelivery[];
-  nextCursor: string | null;
 }
 
 // =============================================================================

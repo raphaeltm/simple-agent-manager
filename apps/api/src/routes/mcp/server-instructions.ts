@@ -14,6 +14,6 @@ export const MCP_SERVER_INSTRUCTIONS = [
   'Project library files: list_library_files, download_library_file, upload_to_library, replace_library_file, display_from_library.',
   'Task lifecycle: update_task_status, complete_task, request_human_input, associate_pull_request, update_session_topic.',
   'Delegation and messaging: dispatch_task, wait_for_subtasks, send_durable_message, send_message_to_subtask, stop_subtask,',
-  'retry_subtask, project event subscriptions and channels. Recurring automation: list_triggers, create_trigger, update_trigger.',
+  'retry_subtask, project event subscriptions and channels. Recurring automation: list_triggers, get_trigger, create_trigger, update_trigger.',
   'Older documents may name a per-operation tool such as search_ideas or add_knowledge: each group description lists the tools it replaces.',
 ].join(' ');
