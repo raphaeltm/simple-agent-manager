@@ -46,10 +46,25 @@ import {
   tunnelWorkerVars,
 } from './box-settings.js';
 import { ensureCelldBinary, resolveEsbuild } from './celld-binary.js';
-import { buildCelldConfig, type CelldWranglerConfig } from './celld-config.js';
+import {
+  assertOperatorSecretsAllowed,
+  buildCelldConfig,
+  type CelldWranglerConfig,
+} from './celld-config.js';
 import { ASSETS_DIR, prepareCelldProject, SOURCE_LINK, writeCelldConfig } from './celld-project.js';
+import {
+  assertCelldTaggedImages,
+  ensureDockerProxyDir,
+  hostDocker,
+  prepareDockerProxyPolicy,
+} from './docker-proxy-policy.js';
 import { writeFenceFiles } from './fence-state.js';
 import { inboundMailWorkerVars } from './inbound-mail-settings.js';
+import {
+  assertContainerEngineReady,
+  type EngineProbe,
+  guidedLoginSettings,
+} from './guided-login.js';
 import {
   ensureMailCollectorPassword,
   MAIL_COLLECTOR_PASSWORD_FILE,
@@ -140,11 +155,21 @@ function buildWeb(baseDomain: string): string {
   return join(WEB_DIR, 'dist');
 }
 
+function probeDockerRuntimes(): EngineProbe {
+  const result = spawnSync('docker', ['info', '--format', '{{json .Runtimes}}'], {
+    encoding: 'utf8',
+  });
+  if (result.error) return { ok: false, error: result.error.message };
+  if (result.status !== 0) return { ok: false, error: (result.stderr ?? '').trim().slice(0, 300) };
+  return { ok: true, runtimesJson: (result.stdout ?? '').trim() };
+}
+
 /**
  * celld bundles `apps/api/src` with its own esbuild, which resolves the workspace packages
  * (`shared`, `providers`, `cloud-init`) through their built `dist/` entry points. A fresh
  * checkout has none, so build the API's dependencies (not the API itself) first.
  */
+
 function buildApiDependencies(): void {
   log("building the API Worker's workspace dependencies");
   const result = spawnSync(
@@ -313,12 +338,12 @@ async function main(): Promise<void> {
   for (const path of writeMailCollectorFiles(stateDir, box, collectorPassword)) {
     log(`wrote ${path}; restart the stack so it applies: docker compose up -d`);
   }
+  // The docker-proxy bind source must exist before `docker compose up` (guided login only).
+  if (guidedLoginSettings(box)) ensureDockerProxyDir(stateDir);
   if (values.init) return;
   const operatorSecrets = readSecretsFile(secretsPath);
   // VM_AGENT_REQUIRED_VERSION must name the release this deploy published (or stay unset).
-  for (const name of ['BASE_DOMAIN', 'R2_BUCKET_NAME', 'VM_AGENT_REQUIRED_VERSION']) {
-    if (name in operatorSecrets) throw new Error(`${secretsPath}: ${name} is generated; remove it`);
-  }
+  assertOperatorSecretsAllowed(operatorSecrets, secretsPath);
   assertPresignCredentialIsScoped(box, operatorSecrets);
   const { SAM_INSTALLATION_ID, ...platformSecrets } = keys;
   const secrets: Record<string, string> = { ...platformSecrets, ...operatorSecrets };
@@ -326,10 +351,12 @@ async function main(): Promise<void> {
 
   const smtpVars = smtpWorkerVars(box, operatorSecrets, baseDomain);
   const source = TOML.parse(readFileSync(join(API_DIR, 'wrangler.toml'), 'utf8')) as WranglerToml;
+  const guidedLogin = guidedLoginSettings(box);
   const plan = buildCelldConfig(source, {
     main: `${SOURCE_LINK}/index.ts`,
     baseDomain,
     assetsDirectory: ASSETS_DIR,
+    guidedLogin,
     vars: {
       SAM_INSTALLATION_ID,
       VAPID_SUBJECT: `https://app.${baseDomain}`,
@@ -354,6 +381,7 @@ async function main(): Promise<void> {
   }
 
   // First, so a box without a working Docker fails before minutes of other builds.
+  if (guidedLogin) assertContainerEngineReady(guidedLogin, probeDockerRuntimes());
   let vmAgentBinDir: string | null = null;
   if (vmAgentRelease) {
     log(`building vm-agent release ${vmAgentRelease.release}`);
@@ -362,6 +390,11 @@ async function main(): Promise<void> {
   const webDist = values['web-dist'] ? resolve(values['web-dist']) : buildWeb(baseDomain);
   buildApiDependencies();
   prepareCelldProject({ apiDir: API_DIR, projectDir, plan, webDist });
+  // celld reaches Docker only through the socket proxy, which allows exactly these images.
+  const proxyPolicy = guidedLogin
+    ? prepareDockerProxyPolicy({ docker: hostDocker, stateDir, projectDir, settings: guidedLogin })
+    : null;
+  if (proxyPolicy) log(`docker-proxy policy: sandbox ${proxyPolicy.sandboxImages[0]}`);
 
   const celld = await ensureCelldBinary(join(stateDir, 'bin'));
   const env = celldChildEnv(process.env, box, resolveEsbuild(API_DIR));
@@ -420,6 +453,7 @@ async function main(): Promise<void> {
     log(`celld deploy ${plan.config.name}`);
     const result = run(celld, ['deploy', projectDir, '--bucket', bucketOf(env)], env);
     if (result.status !== 0) throw new Error(`celld deploy failed (exit ${result.status})`);
+    if (proxyPolicy) assertCelldTaggedImages(hostDocker, proxyPolicy);
   } finally {
     writeCelldConfig(projectDir, plan.config);
     for (const signal of signals) process.off(signal, scrub);

@@ -1,12 +1,12 @@
 import type { Env } from '../env';
 import { errors } from '../middleware/error';
 import { runCloudflareRuntimePhase } from './cloudflare-runtime-phase';
-import { hasContainerRuntime } from './platform-capabilities';
+import { hasSandboxContainerRuntime } from './platform-capabilities';
 
 export function getSandboxConfig(env: Env) {
   return {
     // The legacy prototype also needs a container runtime behind the SANDBOX binding.
-    enabled: env.SANDBOX_ENABLED === 'true' && hasContainerRuntime(env),
+    enabled: env.SANDBOX_ENABLED === 'true' && hasSandboxContainerRuntime(env),
     execTimeoutMs: Number.parseInt(env.SANDBOX_EXEC_TIMEOUT_MS || '30000', 10),
     gitTimeoutMs: Number.parseInt(env.SANDBOX_GIT_TIMEOUT_MS || '120000', 10),
     sleepAfter: env.SANDBOX_SLEEP_AFTER || '10m',
@@ -39,7 +39,8 @@ export async function getSandboxInstance(env: Env, sandboxId: string) {
   }
 }
 
-async function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+/** Reject with `message` if `promise` has not settled within `ms`. The loser is abandoned, not cancelled. */
+export async function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([

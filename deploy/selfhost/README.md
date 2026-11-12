@@ -4,9 +4,10 @@ Status: integration branch work (self-host pass 2). Not a supported install path
 
 The SAM API Worker and web UI run on [celld](https://celld.dev) behind Caddy on one machine,
 with no Cloudflare account. Nodes reach the box through frps (the reverse-tunnel transport).
-Instant sessions, Workers AI features and Analytics Engine are off. SAM-hosted git repositories
-are served by the Worker itself (see SAM-hosted repositories below). Email sign-in works through an
-SMTP relay or, on a test install, the bundled mail collector (see Email sign-in below).
+Instant sessions, Workers AI features and Analytics Engine are off; guided credential login is
+opt-in (see Guided credential login). SAM-hosted git repositories are served by the Worker itself
+(see SAM-hosted repositories below). Email sign-in works through an SMTP relay or, on a test
+install, the bundled mail collector (see Email sign-in below).
 
 ## What runs
 
@@ -18,6 +19,7 @@ SMTP relay or, on a test install, the bundled mail collector (see Email sign-in 
 | `gce-metadata-proxy` | host    | `127.0.0.1:7180`                | profile `gce`; access tokens for a gs:// bucket          |
 | `frps`               | host    | `127.0.0.1:7000`                | profile `tunnel`; nodes arrive as frp over wss via Caddy |
 | `objectstore`        | host    | `127.0.0.1:9000`                | profile `local-store`; otherwise use a GCS/S3 bucket     |
+| `docker-proxy`       | none    | a unix socket shared with celld | guided login only: filters celld's Docker API calls      |
 
 Profile `mail-collector` (off by default, test installs only) adds `mail-collector`: Mailpit on
 `127.0.0.1:1025` (SMTP) and `127.0.0.1:8025` (UI, published at `mail.SAM_DOMAIN`). See Email sign-in.
@@ -302,6 +304,85 @@ anyone is using the box. Set `SAM_KEEP_WARM=off` in `.env` and run `docker compo
 to turn it off. The upstream fix (celld keeping a warm stateless isolate, or a retirement
 setting) is tracked in `tasks/backlog/2026-11-11-selfhost-celld-isolate-cold-start-slow-page-loads.md`.
 
+## Guided credential login (opt-in, experimental)
+
+The "sign in with your Claude / ChatGPT subscription" button runs the provider's CLI in a Sandbox
+SDK container (`SandboxDO`, `apps/api/Dockerfile.sandbox`). celld's experimental container support
+runs it on this box. Off by default; pasting `claude setup-token` output or `auth.json` works
+either way. Instant sessions stay off: their vm-agent must call the API on this box, and the
+deployment declares `CONTAINER_RUNTIME_AVAILABLE=false` for them whatever the switches say.
+
+```bash
+sudo apt-get install runsc && sudo runsc install && sudo systemctl restart docker   # gVisor
+# .env:
+SAM_GUIDED_LOGIN=on
+DOCKER_SOCKET_GID=<stat -c %g /var/run/docker.sock>
+COMPOSE_FILE=docker-compose.yml:docker-compose.guided-login.yml
+pnpm selfhost:deploy --init && docker compose up -d && pnpm selfhost:deploy
+```
+
+- The deploy emits a `containers` entry for `SandboxDO` only, with `runtime` gVisor (`runsc`;
+  `SAM_GUIDED_LOGIN_RUNTIME`) and instance type `basic` (1 GiB, 1/4 vCPU;
+  `SAM_GUIDED_LOGIN_INSTANCE_TYPE`), and builds the 2.3 GB image into the fleet bucket. It refuses
+  to deploy when Docker or the runtime is missing (`assertContainerEngineReady`): without them
+  every session fails only after about 2.5 minutes.
+- celld never holds the Docker socket, which is root on this host. The compose override adds
+  `docker-proxy` (no network, read-only, no capabilities, its own uid in the docker group) and
+  gives celld only the proxy's socket. The proxy allows exactly the Engine API calls celld 0.6.3
+  makes for its containers, in their exact shapes, and forwards a body rebuilt from the checked
+  fields (`docker-proxy/policy.ts`). Its policy, `.state/docker-proxy/policy.json`, is written by
+  `pnpm selfhost:deploy`: the sandbox and fence images by content reference (the deploy builds
+  both, then checks `celld deploy` tagged the same ones), the runtime, the instance type's memory
+  and CPU, and the hash of celld's fence rules. Refusals are logged by `docker compose logs
+docker-proxy` (method, path, reason; never a body).
+- What a compromised celld can still do through the proxy: start, exec into and remove sandbox
+  containers of the deployed image under `runsc` (no capabilities, celld's fenced bridges,
+  bounded memory, CPU and PIDs); run celld's own fence container (host network and `NET_ADMIN`,
+  but only the pinned image, command and ruleset); create or remove celld's two bridges. What it
+  cannot do (each tested against a real daemon in `scripts/selfhost/live/docker-proxy.live.test.ts`):
+  start a privileged container, bind or mount any host path, use host networking, a capability, a
+  device or a host namespace, use another image or runtime, read, exec into, stop or remove any
+  container that is not one of its sandboxes, load, pull, build, tag or commit an image, or reach
+  any other endpoint. The sandbox resolver file is bound from `.state/docker-proxy/`, not from
+  celld's data dir, so a symlink there cannot expose a host file. The deploy builds the images
+  on the box, so celld never loads one: if `docker image prune -a` removes them, sign-in fails at
+  once with `sandbox_runtime_unavailable` until the next `pnpm selfhost:deploy`.
+- Leftover sandboxes: celld gets a new node id each time it starts and reaps only its own, so the
+  proxy removes every other celld sandbox when celld reaps; and every minute it removes sandboxes
+  older than `SAM_DOCKER_PROXY_MAX_SANDBOX_AGE_SECONDS` (default 1800; a setup session lives at
+  most 15 minutes, so raise both together). A celld restart ends any sign-in in progress: cancel
+  it in the UI and start again.
+- A container start that can never succeed (runtime not registered, proxy refusal, image gone)
+  fails the session within seconds as `sandbox_runtime_unavailable` (1.5 s measured with `runsc`
+  unregistered, previously 137 s)
+  (`apps/api/src/services/sandbox-startup-errors.ts`) instead of after the SDK's ~2.5 minutes of
+  start retries. A cancelled, expired or failed session marks its D1 row terminal before any
+  sandbox call, so a retry is never blocked by a session whose teardown was interrupted.
+- Concurrent sessions are capped by `MAX_CONCURRENT_SETUP_SESSIONS` (default 2), so the
+  sandboxes commit at most 2 GiB by default. That cap lives in the Worker; the proxy holds its own
+  (`SAM_DOCKER_PROXY_MAX_CONTAINERS`, default 4 celld containers at once, counted and created one
+  at a time), gives every celld container a 1 MB log, and removes anonymous volumes with the
+  container, so a compromised celld cannot exhaust memory or disk through sandboxes either.
+- Sandboxes reach the Internet and nothing on the box, the VPC, private ranges or metadata.
+  celld installs rules for that with its fence container, but nothing makes celld run it, so SAM's
+  `egress-fence` service (root, re-applied every 5 s) holds the same boundary itself: chains
+  `sandbox_input` and `sandbox_forward` on `celld0`/`celld1` in `.state/egress-fence.nft`
+  (`renderSandboxChains` in `scripts/selfhost/egress-fence.ts`). It does not stop the box's own public address: the container reaches
+  SAM's public HTTPS like any Internet client. SAM's egress fence lets celld (uid 7101) reach the
+  container bridge `celld0` (TCP only) and nothing else in 172.16/12.
+- The container runs a pinned vendor CLI and holds the fresh credential until the DO reads and
+  stores it encrypted, on the same host as `ENCRYPTION_KEY`. gVisor puts a user-space kernel
+  between that CLI and the host kernel. Use it only where the people who can sign in are trusted
+  with the box (single trust domain).
+
+Turning it off: remove `docker-compose.guided-login.yml` from `COMPOSE_FILE`, set
+`SAM_GUIDED_LOGIN=off`, run `docker compose up -d --remove-orphans` (celld restarts without
+the proxy socket) and `pnpm selfhost:deploy` (the Worker stops offering guided login).
+
+Code: `scripts/selfhost/guided-login.ts`, `scripts/selfhost/docker-proxy-policy.ts`,
+`docker-compose.guided-login.yml`, `docker-proxy/`, the `containers` rule in `celld-config.ts`,
+`hasSandboxContainerRuntime` in `apps/api/src/services/platform-capabilities.ts`.
+
 ## Inbound agent email
 
 Agent email gives each email trigger its own address, `agent+<key>@agents.SAM_DOMAIN`. Mail from
@@ -400,8 +481,8 @@ fleet bucket like every other Durable Object, so the bucket backup covers them.
 
 ## Known gaps in this pass
 
-- Off on purpose: Instant sessions and guided credential login (Cloudflare Containers), Analytics
-  Engine, AI Gateway, the Workers AI model catalog and the
+- Off on purpose: Instant sessions (Cloudflare Containers; never on a box), guided credential login
+  unless turned on (see Guided credential login), Analytics Engine, AI Gateway, the Workers AI model catalog and the
   stalled-task classifier (Clef; an admin may opt the advisory verdict on paused check-in loops
   into the LLM endpoint with `operations.stalledTaskClassifierEndpointAdvisory`). Agent email
   needs the `mail-in` profile (see Inbound agent email); the admin agent-email setup and loopback

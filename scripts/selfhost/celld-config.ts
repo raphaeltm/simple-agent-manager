@@ -14,6 +14,11 @@
 
 import { resolveDurableObjectMigrations } from '../deploy/durable-object-migrations.js';
 import type { MigrationEntry, WranglerToml } from '../deploy/types.js';
+import {
+  GUIDED_LOGIN_CONTAINER_CLASS,
+  type GuidedLoginSettings,
+  SANDBOX_IMAGE_DIR,
+} from './guided-login.js';
 
 /** Worker vars set for every celld deployment, overriding wrangler.toml [vars]. */
 export const SELFHOST_VAR_OVERRIDES: Readonly<Record<string, string>> = {
@@ -46,8 +51,10 @@ export const SELFHOST_VAR_OVERRIDES: Readonly<Record<string, string>> = {
   // no-gateway branch (direct Anthropic/OpenAI URLs, no AI Gateway log or cost queries).
   AI_GATEWAY_ID: '',
   // The container DO classes stay bound (index.ts exports them) but celld runs no container
-  // runtime here; this hides Instant and guided credential setup (sibling task T3).
+  // behind VmAgentContainer: Instant is never available on a box. The sandbox class has its own
+  // declaration (SANDBOX_CONTAINER_RUNTIME_AVAILABLE), set below only when guided login is on.
   CONTAINER_RUNTIME_AVAILABLE: 'false',
+  SANDBOX_CONTAINER_RUNTIME_AVAILABLE: 'false',
   // Nodes reach the box through frps on loopback instead of per-node Cloudflare DNS/tunnels
   // (reverse-tunnel transport, sibling task T2 on sam/selfhost-pass-2).
   VM_AGENT_TRANSPORT: 'reverse-tunnel',
@@ -59,8 +66,36 @@ export const SELFHOST_VAR_OVERRIDES: Readonly<Record<string, string>> = {
   ENVIRONMENT: 'selfhost',
 };
 
+/**
+ * Vars the deployment writes and an operator's secrets.env may not override (deploy.ts merges
+ * secrets.env last). The container declarations state what celld runs; an override would
+ * advertise guided login with no container behind it, or Instant, whose vm-agent cannot reach
+ * this box.
+ */
+export const OPERATOR_FORBIDDEN_VARS = [
+  'BASE_DOMAIN',
+  'R2_BUCKET_NAME',
+  'VM_AGENT_REQUIRED_VERSION',
+  'CONTAINER_RUNTIME_AVAILABLE',
+  'SANDBOX_CONTAINER_RUNTIME_AVAILABLE',
+] as const;
+
+/** Throws when secrets.env sets a var the deployment writes (`OPERATOR_FORBIDDEN_VARS`). */
+export function assertOperatorSecretsAllowed(
+  secrets: Readonly<Record<string, string>>,
+  secretsPath: string
+): void {
+  for (const name of OPERATOR_FORBIDDEN_VARS) {
+    if (name in secrets) throw new Error(`${secretsPath}: ${name} is generated; remove it`);
+  }
+}
+
 /** Keys the generator owns. Values a caller passes for these are rejected. */
-const GENERATED_VAR_KEYS = ['BASE_DOMAIN', 'R2_BUCKET_NAME'] as const;
+const GENERATED_VAR_KEYS = [
+  'BASE_DOMAIN',
+  'R2_BUCKET_NAME',
+  'SANDBOX_CONTAINER_RUNTIME_AVAILABLE',
+] as const;
 
 export interface CelldD1Database {
   binding: string;
@@ -89,6 +124,16 @@ export interface CelldWranglerConfig {
   migrations: Array<{ tag: string; new_sqlite_classes: string[] }>;
   triggers: { crons: string[] };
   assets?: CelldAssets;
+  containers?: CelldContainer[];
+}
+
+/** celld accepts class_name, image, name, instance_type, max_instances and runtime. */
+export interface CelldContainer {
+  class_name: string;
+  image: string;
+  instance_type: string;
+  max_instances?: number;
+  runtime?: string;
 }
 
 /** One flat migrations directory to materialise inside the project dir. */
@@ -115,6 +160,8 @@ export interface CelldConfigOptions {
   assetsDirectory?: string;
   /** Extra plain vars (installation id, operator settings). Secrets are merged later. */
   vars?: Record<string, string>;
+  /** Guided credential login (scripts/selfhost/guided-login.ts); omit to run no container. */
+  guidedLogin?: GuidedLoginSettings | null;
 }
 
 /** Name used for the per-database flat migration directories inside the project dir. */
@@ -255,6 +302,44 @@ function translateR2(value: unknown, ctx: TranslateContext): void {
   });
 }
 
+/**
+ * Cloudflare Containers. With guided login on, only the sign-in sandbox class runs, under the
+ * configured runtime; every other class (VmAgentContainer, Instant) stays a plain DO. The image
+ * is built from the minimal context `materialiseSandboxImageContext` writes into the project.
+ */
+function translateContainers(value: unknown, ctx: TranslateContext): void {
+  const guided = ctx.options.guidedLogin;
+  const out: CelldContainer[] = [];
+  for (const [index, raw] of asArray(value, 'containers').entries()) {
+    const entry = asRecord(raw, `containers[${index}]`);
+    const className = asString(entry.class_name, `containers[${index}].class_name`);
+    if (!guided || className !== GUIDED_LOGIN_CONTAINER_CLASS) {
+      ctx.plan.report.push(`drop container ${className}: stays bound as a plain DO`);
+      continue;
+    }
+    const unknown = Object.keys(entry).filter(
+      (key) => !['class_name', 'image', 'instance_type', 'max_instances'].includes(key)
+    );
+    if (unknown.length > 0)
+      fail(`containers ${className} has untranslated keys: ${unknown.join(', ')}`);
+    const container: CelldContainer = {
+      class_name: className,
+      image: `${SANDBOX_IMAGE_DIR}/Dockerfile`,
+      instance_type: guided.instanceType,
+    };
+    if (typeof entry.max_instances === 'number') container.max_instances = entry.max_instances;
+    container.runtime = guided.runtime;
+    out.push(container);
+    ctx.plan.report.push(
+      `container ${className}: runtime ${guided.runtime}, ` +
+        `instance_type ${guided.instanceType} (wrangler.toml ${String(entry.instance_type)})`
+    );
+  }
+  if (guided && out.length === 0)
+    fail(`guided login needs a ${GUIDED_LOGIN_CONTAINER_CLASS} container`);
+  if (out.length > 0) ctx.out.containers = out;
+}
+
 const RULES: Readonly<Record<string, Rule>> = {
   name: { kind: 'translate', apply: (v, ctx) => (ctx.out.name = asString(v, 'name')) },
   main: { kind: 'translate', apply: (_v, ctx) => (ctx.out.main = ctx.options.main) },
@@ -283,17 +368,15 @@ const RULES: Readonly<Record<string, Rule>> = {
   },
   artifacts: {
     kind: 'drop',
-    reason: 'Cloudflare Artifacts binding; the HostedGitRepo Durable Object serves SAM-native repos',
+    reason:
+      'Cloudflare Artifacts binding; the HostedGitRepo Durable Object serves SAM-native repos',
   },
   analytics_engine_datasets: {
     kind: 'drop',
     reason: 'Analytics Engine binding; ANALYTICS_SINK=d1 records analytics in D1 instead',
   },
   ai: { kind: 'drop', reason: 'Workers AI binding' },
-  containers: {
-    kind: 'drop',
-    reason: 'Cloudflare Containers; container DO classes stay bound as plain DOs',
-  },
+  containers: { kind: 'translate', apply: translateContainers },
   d1_databases: { kind: 'translate', apply: translateD1 },
   kv_namespaces: {
     kind: 'translate',
@@ -387,6 +470,7 @@ export function buildCelldConfig(
     ...out.vars,
     ...SELFHOST_VAR_OVERRIDES,
     ...(options.vars ?? {}),
+    ...(out.containers ? { SANDBOX_CONTAINER_RUNTIME_AVAILABLE: 'true' } : {}),
     BASE_DOMAIN: options.baseDomain,
     ...(r2 ? { R2_BUCKET_NAME: r2.bucket_name } : {}),
   };

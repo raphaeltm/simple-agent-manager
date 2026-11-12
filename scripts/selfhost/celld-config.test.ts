@@ -5,7 +5,11 @@ import * as TOML from '@iarna/toml';
 import { describe, expect, it } from 'vitest';
 
 import type { WranglerToml } from '../deploy/types.js';
-import { buildCelldConfig, SELFHOST_VAR_OVERRIDES } from './celld-config.js';
+import {
+  assertOperatorSecretsAllowed,
+  buildCelldConfig,
+  SELFHOST_VAR_OVERRIDES,
+} from './celld-config.js';
 
 const WRANGLER_TOML = resolve(import.meta.dirname, '../../apps/api/wrangler.toml');
 
@@ -49,18 +53,19 @@ describe('buildCelldConfig against the real apps/api/wrangler.toml', () => {
   });
 
   it('drops every Cloudflare-only key and reports why', () => {
-    for (const key of [
-      'port',
-      'limits',
-      'alias',
-      'artifacts',
-      'analytics_engine_datasets',
-      'ai',
-      'containers',
-    ]) {
+    for (const key of ['port', 'limits', 'alias', 'artifacts', 'analytics_engine_datasets', 'ai']) {
       expect(config).not.toHaveProperty(key);
       expect(plan.report.some((line) => line.startsWith(`drop [${key}]`))).toBe(true);
     }
+  });
+
+  it('runs no container by default and declares neither class backed', () => {
+    expect(config).not.toHaveProperty('containers');
+    for (const className of ['SandboxDO', 'VmAgentContainer']) {
+      expect(plan.report).toContain(`drop container ${className}: stays bound as a plain DO`);
+    }
+    expect(config.vars.CONTAINER_RUNTIME_AVAILABLE).toBe('false');
+    expect(config.vars.SANDBOX_CONTAINER_RUNTIME_AVAILABLE).toBe('false');
   });
 
   it('folds every legacy new_classes create into new_sqlite_classes, keeping tag order', () => {
@@ -219,5 +224,65 @@ describe('buildCelldConfig failure modes', () => {
 
   it('omits assets when no web build is given', () => {
     expect(buildCelldConfig(base(), options).config).not.toHaveProperty('assets');
+  });
+});
+
+describe('buildCelldConfig with guided login on', () => {
+  const source = loadToml();
+  const plan = buildCelldConfig(source, {
+    ...options,
+    guidedLogin: { runtime: 'runsc', instanceType: 'basic' },
+  });
+
+  it('emits only the sign-in sandbox, under gVisor and the basic type', () => {
+    expect(plan.config.containers).toEqual([
+      {
+        class_name: 'SandboxDO',
+        image: 'containers/sandbox/Dockerfile',
+        instance_type: 'basic',
+        max_instances: 6,
+        runtime: 'runsc',
+      },
+    ]);
+    expect(plan.report).toContain('drop container VmAgentContainer: stays bound as a plain DO');
+  });
+
+  it('declares the sandbox backed and Instant not', () => {
+    expect(plan.config.vars.SANDBOX_CONTAINER_RUNTIME_AVAILABLE).toBe('true');
+    expect(plan.config.vars.CONTAINER_RUNTIME_AVAILABLE).toBe('false');
+    expect(plan.config.vars.CF_CONTAINER_ENABLED).toBe('false');
+  });
+
+  it('always names the runtime (the Docker socket proxy pins it)', () => {
+    const runc = buildCelldConfig(source, {
+      ...options,
+      guidedLogin: { runtime: 'runc', instanceType: 'basic' },
+    });
+    expect(runc.config.containers?.[0]?.runtime).toBe('runc');
+  });
+
+  it('refuses the sandbox declaration from caller vars', () => {
+    expect(() =>
+      buildCelldConfig(source, {
+        ...options,
+        vars: { SANDBOX_CONTAINER_RUNTIME_AVAILABLE: 'true' },
+      })
+    ).toThrow(/generated/);
+  });
+});
+
+describe('operator overrides', () => {
+  it('refuses the container runtime declarations in secrets.env', () => {
+    for (const name of ['CONTAINER_RUNTIME_AVAILABLE', 'SANDBOX_CONTAINER_RUNTIME_AVAILABLE']) {
+      expect(() => assertOperatorSecretsAllowed({ [name]: 'true' }, 'secrets.env')).toThrow(
+        new RegExp(`${name} is generated`)
+      );
+    }
+  });
+
+  it('still accepts ordinary switches (turning a self-host switch back on)', () => {
+    expect(() =>
+      assertOperatorSecretsAllowed({ TTS_ENABLED: 'true', CF_CONTAINER_ENABLED: 'true' }, 'x')
+    ).not.toThrow();
   });
 });

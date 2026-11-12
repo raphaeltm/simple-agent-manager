@@ -21,6 +21,7 @@ import {
 import { dirname, join, resolve } from 'node:path';
 
 import type { CelldConfigPlan, CelldWranglerConfig } from './celld-config.js';
+import { materialiseSandboxImageContext } from './guided-login.js';
 import { writePrivateFile } from './secret-files.js';
 
 export const CONFIG_FILE = 'wrangler.json';
@@ -79,6 +80,9 @@ export function prepareCelldProject(options: PrepareProjectOptions): void {
     mkdirSync(target, { recursive: true });
     for (const file of files) symlinkSync(join(source, file), join(target, file));
   }
+
+  // The guided-login sandbox image (celld builds from the Dockerfile's own directory).
+  if (plan.config.containers?.length) materialiseSandboxImageContext(apiDir, projectDir);
 
   if (options.webDist) {
     if (!existsSync(join(options.webDist, 'index.html'))) {
