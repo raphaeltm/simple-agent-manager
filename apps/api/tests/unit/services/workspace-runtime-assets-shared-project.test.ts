@@ -47,7 +47,9 @@ describe('workspace runtime assets shared project access', () => {
         env_key TEXT NOT NULL,
         stored_value TEXT NOT NULL,
         value_iv TEXT,
-        is_secret INTEGER NOT NULL DEFAULT 0
+        is_secret INTEGER NOT NULL DEFAULT 0,
+        expires_at INTEGER,
+        secret_request_id TEXT
       );
 
       CREATE TABLE project_runtime_files (

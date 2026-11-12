@@ -16,3 +16,9 @@ export {
 } from './human-input-card-data';
 export { HumanInputCard, type HumanInputCardProps } from './HumanInputCard';
 export { matchToolCard, type ToolCardProps } from './registry';
+export {
+  extractSecretRequestId,
+  isSecretRequestCardTool,
+  SECRET_REQUEST_CARD_TOOL,
+} from './secret-request-card-data';
+export { SecretRequestCard, type SecretRequestCardProps } from './SecretRequestCard';

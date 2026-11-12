@@ -60,3 +60,44 @@ export const SECRET_EXEC_TOOLS = [
     inputSchema: jobSchema,
   },
 ];
+
+export const SECRET_REQUEST_TOOLS = [
+  {
+    name: 'request_secret',
+    description:
+      "Ask a person to supply a secret value (API key, token, password) without it ever entering this conversation. Creates a request and shows a secure input card in the chat; a project owner or admin types the value there and SAM stores it encrypted as a project runtime secret named `name`. You never see the value: when it is supplied, declined or the request expires you get a short notice, then use it with exec_with_secrets and secretNames [name]. No restart is needed. Never ask for secret values in chat text or tool arguments; use this instead. Asking again for the same name in this chat returns the open request. Project secrets are shared: every project member's agent sessions can use them. Optional ttlSeconds makes the stored value expire (exec refuses it afterwards). Use list_runtime_env (workspace_read method runtime_env) first to see which names already exist.",
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        name: {
+          type: 'string',
+          description:
+            'Environment variable name to store the value under, e.g. STRIPE_API_KEY ([A-Za-z_][A-Za-z0-9_]*).',
+        },
+        reason: {
+          type: 'string',
+          description:
+            'Shown on the card: what the value is for and where the person can find it. Never include secret values.',
+        },
+        ttlSeconds: {
+          type: 'integer',
+          minimum: 1,
+          description:
+            'Optional lifetime of the stored value after it is supplied. Omit to keep it until someone deletes it.',
+        },
+      },
+      required: ['name', 'reason'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'list_runtime_env',
+    description:
+      'List the managed runtime environment names this session can use, without values: project, agent profile and skill variables after precedence (skill over profile over project), whether each is a secret, its expiry, and for agent-collected secrets who supplied it and why. Secret names listed here are the ones exec_with_secrets accepts; expired values are omitted.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {},
+      additionalProperties: false,
+    },
+  },
+];

@@ -40,6 +40,9 @@ export const errors = {
 
   conflict: (message: string) => new AppError(409, 'CONFLICT', message),
 
+  unsupportedMediaType: (message = 'Unsupported media type') =>
+    new AppError(415, 'UNSUPPORTED_MEDIA_TYPE', message),
+
   unprocessable: (message: string, details?: Record<string, unknown>) =>
     new AppError(422, 'UNPROCESSABLE_ENTITY', message, details),
 
