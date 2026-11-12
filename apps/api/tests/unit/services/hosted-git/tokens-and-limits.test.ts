@@ -6,6 +6,7 @@ import {
   resolveArtifactsBackend,
 } from '../../../../src/services/hosted-git/backend';
 import { parseHostedGitPath } from '../../../../src/services/hosted-git/http';
+import { parseHostedGitImportUrl } from '../../../../src/services/hosted-git/import';
 import {
   DEFAULT_HOSTED_GIT_LIMITS,
   hostedGitPushByteBudget,
@@ -158,5 +159,31 @@ describe('backend resolution', () => {
     expect(isLocalHostedGitActive(selfhost)).toBe(true);
     expect(resolveArtifactsBackend(selfhost)).not.toBeNull();
     expect(typeof createDurableObjectArtifactsBackend(selfhost).get).toBe('function');
+  });
+});
+
+describe('import URL allowlist', () => {
+  it('accepts public forge https URLs and normalizes the host', () => {
+    expect(parseHostedGitImportUrl('https://GitHub.com/owner/repo.git')).toBe(
+      'https://github.com/owner/repo.git'
+    );
+    expect(parseHostedGitImportUrl('https://codeberg.org/owner/repo')).toBe(
+      'https://codeberg.org/owner/repo'
+    );
+  });
+
+  it.each([
+    'http://github.com/o/r.git',
+    'https://127.0.0.1/o/r.git',
+    'https://[::1]/o/r.git',
+    'https://169.254.169.254/latest/meta-data',
+    'https://metadata.google.internal/x',
+    'https://github.com:22/o/r.git',
+    'https://u:p@github.com/o/r.git',
+    'https://github.com.evil.example/o/r.git',
+    'https://github.com/o/r.git?x=1',
+    'not a url',
+  ])('rejects %s', (url) => {
+    expect(() => parseHostedGitImportUrl(url)).toThrow();
   });
 });

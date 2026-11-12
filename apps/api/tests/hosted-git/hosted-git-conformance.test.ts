@@ -30,6 +30,8 @@ const execFileAsync = promisify(execFile);
 
 let runtime: HostedGitRuntime;
 let scratch: string;
+/** Fake public forge: https://github.com/sam-test/<name>.git is served from a hosted repo. */
+const fakeForge = new Map<string, { repo: string; token: string }>();
 
 interface GitResult {
   code: number;
@@ -164,7 +166,19 @@ async function freshDir(name: string): Promise<string> {
 
 beforeAll(async () => {
   scratch = await mkdtemp(join(tmpdir(), 'sam-hosted-git-client-'));
-  runtime = await startHostedGitRuntime();
+  runtime = await startHostedGitRuntime(async (request) => {
+    const url = new URL(request.url);
+    const match = /^\/sam-test\/([^/]+?)(?:\.git)?(\/.*)$/.exec(url.pathname);
+    const source = url.hostname === 'github.com' && match ? fakeForge.get(match[1]!) : undefined;
+    if (!source) return new Response('not found', { status: 404 });
+    const headers = new Headers(request.headers);
+    headers.set('authorization', `Basic ${btoa(`x:${source.token}`)}`);
+    return fetch(`${runtime.origin}/git/${source.repo}.git${match![2]}${url.search}`, {
+      method: request.method,
+      headers,
+      body: request.method === 'GET' ? undefined : await request.arrayBuffer(),
+    });
+  });
 });
 
 afterAll(async () => {
@@ -430,6 +444,74 @@ describe('hosted git hardening (security review findings)', () => {
       .bind(now, project.id, member)
       .run();
     expect((await infoRefs(token)).status).toBe(401);
+  });
+});
+
+describe('import from a public git URL', () => {
+  it('imports the source default branch and history into a new hosted project', async () => {
+    const owner = await createEmailOnlyUser();
+    const source = await createHostedProject(owner, 'Import Source');
+    const token = await mintToken(source, 'write');
+    const work = await freshDir('import-src');
+    await gitOk(['clone', localRemote(source.repository, token), work]);
+    await writeFile(join(work, 'imported.txt'), 'from the source\n');
+    await gitOk(['add', '.'], work);
+    await gitOk(['commit', '-m', 'source commit'], work);
+    await gitOk(['push', 'origin', 'HEAD'], work);
+    const sourceHead = (await gitOk(['rev-parse', 'HEAD'], work)).stdout.trim();
+    fakeForge.set('source', {
+      repo: source.artifactsRepoId,
+      token: await mintToken(source, 'read'),
+    });
+
+    const res = await runtime.fetch('/api/projects', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-test-user-id': owner },
+      body: JSON.stringify({
+        name: 'Imported',
+        repoProvider: 'artifacts',
+        importUrl: 'https://github.com/sam-test/source.git',
+      }),
+    });
+    const body = (await res.json()) as { id: string };
+    expect(res.status, JSON.stringify(body)).toBe(201);
+    const imported = await runtime.DATABASE.prepare(
+      `SELECT repository, artifacts_repo_id AS artifactsRepoId FROM projects WHERE id = ?`
+    )
+      .bind(body.id)
+      .first<{ repository: string; artifactsRepoId: string }>();
+    const check = await freshDir('imported');
+    await gitOk([
+      'clone',
+      localRemote(
+        imported!.repository,
+        await mintToken({ artifactsRepoId: imported!.artifactsRepoId, ownerId: owner }, 'read')
+      ),
+      check,
+    ]);
+    expect((await gitOk(['rev-parse', 'HEAD'], check)).stdout.trim()).toBe(sourceHead);
+    expect(await readFile(join(check, 'imported.txt'), 'utf8')).toBe('from the source\n');
+  });
+
+  it('refuses import URLs outside the public-forge allowlist without fetching them', async () => {
+    const owner = await createEmailOnlyUser();
+    for (const importUrl of [
+      'http://github.com/sam-test/source.git',
+      'https://127.0.0.1:7001/x.git',
+      'https://user:pw@github.com/sam-test/source.git',
+      'https://example.com/x.git',
+    ]) {
+      const res = await runtime.fetch('/api/projects', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-test-user-id': owner },
+        body: JSON.stringify({
+          name: `bad-${Math.random()}`,
+          repoProvider: 'artifacts',
+          importUrl,
+        }),
+      });
+      expect(res.status, importUrl).toBe(400);
+    }
   });
 });
 

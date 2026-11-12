@@ -31,7 +31,12 @@ export interface HostedGitRuntime {
   close(): Promise<void>;
 }
 
-export async function startHostedGitRuntime(): Promise<HostedGitRuntime> {
+/** Handles the Worker's outbound fetches (e.g. an import from a fake public forge). */
+export type OutboundHandler = (request: Request) => Promise<Response>;
+
+export async function startHostedGitRuntime(
+  outbound: OutboundHandler = async () => new Response('no outbound in tests', { status: 502 })
+): Promise<HostedGitRuntime> {
   const directory = await mkdtemp(resolve(tmpdir(), 'sam-hosted-git-'));
   const root = resolve(import.meta.dirname, '../../..');
   const bundleDirectory = resolve(directory, 'bundle');
@@ -73,6 +78,7 @@ export async function startHostedGitRuntime(): Promise<HostedGitRuntime> {
     durableObjects: { HOSTED_GIT: { className: 'HostedGitRepo', useSQLite: true } },
     d1Databases: ['DATABASE', 'OBSERVABILITY_DATABASE'],
     kvNamespaces: ['KV'],
+    outboundService: (request: Request) => outbound(request),
     bindings: {
       BASE_DOMAIN: HOSTED_GIT_TEST_BASE_DOMAIN,
       ENCRYPTION_KEY: 'SK4ihJazAK3GIWUQcM6nZ1odR6KQHrqRAVSp6HdPxrg=',

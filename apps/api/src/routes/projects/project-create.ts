@@ -10,7 +10,7 @@ import { log } from '../../lib/logger';
 import { toProjectResponse } from '../../lib/mappers';
 import { ulid } from '../../lib/ulid';
 import { getUserId } from '../../middleware/auth';
-import { errors } from '../../middleware/error';
+import { AppError, errors } from '../../middleware/error';
 import { createOwnerProjectMembership } from '../../middleware/project-auth';
 import { CreateProjectSchema, jsonValidator } from '../../schemas';
 import { seedArtifactsReadme } from '../../services/artifacts/seed-readme';
@@ -20,7 +20,16 @@ import {
   requireGitLabUserAccessToken,
   verifyGitLabProjectAccess,
 } from '../../services/gitlab';
-import { artifactsRemoteFetch, resolveArtifactsBackend } from '../../services/hosted-git/backend';
+import {
+  artifactsRemoteFetch,
+  isLocalHostedGitActive,
+  resolveArtifactsBackend,
+} from '../../services/hosted-git/backend';
+import {
+  importIntoHostedRepository,
+  parseHostedGitImportUrl,
+  resolveImportDefaultBranch,
+} from '../../services/hosted-git/import';
 import { getRuntimeLimits } from '../../services/limits';
 import {
   assertRepositoryAccess,
@@ -107,7 +116,20 @@ export function registerProjectCreateRoute(crudRoutes: Hono<{ Bindings: Env }>):
         throw errors.badRequest(`Maximum ${maxRepos} Artifacts-backed projects allowed`);
       }
 
+      // Import from a public repository: only on this install's own git server (self-host).
+      const importUrl = body.importUrl?.trim() ? parseHostedGitImportUrl(body.importUrl) : null;
+      if (importUrl && !isLocalHostedGitActive(c.env)) {
+        throw errors.badRequest(
+          'importUrl is only supported for SAM-hosted repositories on a self-hosted install'
+        );
+      }
+      const importBranch = importUrl ? await resolveImportDefaultBranch(importUrl) : null;
+      if (importUrl && !importBranch) {
+        throw errors.badRequest('Could not read the default branch of the repository at importUrl');
+      }
+
       const defaultBranch =
+        importBranch ||
         body.defaultBranch?.trim() ||
         c.env.ARTIFACTS_DEFAULT_BRANCH ||
         ARTIFACTS_DEFAULTS.DEFAULT_BRANCH;
@@ -137,14 +159,24 @@ export function registerProjectCreateRoute(crudRoutes: Hono<{ Bindings: Env }>):
       // also orients agents (project name, description, SAM MCP tools). If seeding
       // fails the repo is unusable, so we abort creation and log the orphan.
       try {
-        await seedArtifactsReadme({
-          remote: created.remote,
-          token: created.token,
-          branch: defaultBranch,
-          projectName: name,
-          description,
-          fetchImpl: artifactsRemoteFetch(c.env),
-        });
+        if (importUrl) {
+          await importIntoHostedRepository({
+            sourceUrl: importUrl,
+            branch: defaultBranch,
+            remote: created.remote,
+            token: created.token,
+            remoteFetch: artifactsRemoteFetch(c.env),
+          });
+        } else {
+          await seedArtifactsReadme({
+            remote: created.remote,
+            token: created.token,
+            branch: defaultBranch,
+            projectName: name,
+            description,
+            fetchImpl: artifactsRemoteFetch(c.env),
+          });
+        }
       } catch (seedError) {
         log.error('project_create.artifacts_seed_failed', {
           projectId,
@@ -164,6 +196,8 @@ export function registerProjectCreateRoute(crudRoutes: Hono<{ Bindings: Env }>):
             action: 'orphaned_artifacts_repo_cleanup_failed',
           });
         }
+        // An import refusal (too large, unreadable, over a cap) is the caller's to fix.
+        if (importUrl && seedError instanceof AppError) throw seedError;
         throw errors.internal('Failed to initialize Artifacts repository');
       }
 
