@@ -222,6 +222,51 @@ export function scanBackups(root: string, secrets: KnownSecrets): BackupFinding[
   return findings;
 }
 
+/**
+ * Backups kept in another bucket (gs:// or s3://, read with the box's own credentials): grouped by
+ * the first path segment under the URL. Deploy manifests are read and checked; plaintext state
+ * files are named; archives (`.tgz`, `.tar*`) are reported as unopened.
+ */
+export function scanRemoteBackups(
+  ctx: BoxContext,
+  url: string,
+  secrets: KnownSecrets
+): BackupFinding[] {
+  const remote: BoxContext = { ...ctx, box: { ...ctx.box, CELLD_BUCKET: url } };
+  const groups = new Map<string, { latest: string; holds: Set<string>; exposed: Set<string> }>();
+  for (const object of listObjects(remote, '')) {
+    const [top = '', ...rest] = object.key.split('/');
+    const group = rest.length > 0 ? top : '(top level)';
+    const entry = groups.get(group) ?? {
+      latest: '',
+      holds: new Set<string>(),
+      exposed: new Set<string>(),
+    };
+    if (object.lastModified > entry.latest) entry.latest = object.lastModified;
+    const name = object.key.split('/').pop() ?? '';
+    if (/(^|\/)deploy\/[^/]+\/[^/]+\/manifest\.json$/.test(object.key)) {
+      for (const n of secretsIn(readObject(remote, object.key), secrets)) entry.exposed.add(n);
+    } else if (name === 'platform-keys.json' || name === 'secrets.env' || name === 'kek') {
+      entry.holds.add(name);
+    } else if (/\.(tgz|tar|tar\.gz|tar\.zst)$/.test(name)) {
+      entry.holds.add(
+        `archive ${name} (not opened; a .state archive holds plaintext keys if taken before sealing)`
+      );
+    }
+    groups.set(group, entry);
+  }
+  return [...groups.entries()].sort().map(([group, entry]) => ({
+    dir: `${url.replace(/\/+$/, '')}/${group}`,
+    createdAt: entry.latest,
+    holds: [
+      ...[...entry.holds].sort(),
+      ...(entry.exposed.size > 0
+        ? [`deploy versions with ${[...entry.exposed].sort().join(', ')}`]
+        : []),
+    ],
+  }));
+}
+
 /** How to rotate each kind of secret the listing names. */
 export function rotationAdvice(name: string): string {
   if (name === 'ENCRYPTION_KEY' || name.startsWith('ENCRYPTION_KEY_')) {

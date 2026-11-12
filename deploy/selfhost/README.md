@@ -157,14 +157,16 @@ itself and then tells you to run `migrate` to finish. Code: `scripts/selfhost/se
 Sealing stops new plaintext. What older deploys and backups already hold stays:
 
 ```bash
-pnpm selfhost:secrets plaintext [--backups <dir>]     # read-only listing
+pnpm selfhost:secrets plaintext [--backups <dir or gs://|s3:// url> ...]   # read-only listing
 ```
 
 It lists every deploy version under `deploy/<script>/<version>/` in the fleet bucket that holds
 secret vars (names only), which versions celld still reads, the local backups (default
-`deploy/selfhost/backups/`) holding `platform-keys.json`, `secrets.env`, the key file or plaintext
-deploy versions, and how to rotate each exposed secret. Backups copied anywhere else are not
-visible to it: treat every backup taken before the box was sealed as holding every secret.
+`deploy/selfhost/backups/`; repeat `--backups` for more, including a backup bucket, grouped by
+folder) holding `platform-keys.json`, `secrets.env`, the key file or plaintext deploy versions
+(archives are named, not opened), and how to rotate each exposed secret. Copies it is not pointed
+at are not visible to it: treat every backup taken before the box was sealed as holding every
+secret.
 
 Rotating is the fix that does not depend on deleting anything: a rotated secret's old copies are
 worthless. `ENCRYPTION_KEY` and the generated platform keys cannot be rotated by a SAM command yet;

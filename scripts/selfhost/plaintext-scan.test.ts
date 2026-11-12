@@ -18,6 +18,7 @@ import {
   purgeVersions,
   scanBackups,
   scanDeployVersions,
+  scanRemoteBackups,
 } from './plaintext-scan';
 
 const ROOT = 'gs://fleet/celld';
@@ -34,8 +35,9 @@ function manifest(vars: Record<string, string>): string {
   });
 }
 
+/** Objects by full URL; `put` takes a key under the fleet bucket or a full gs:// URL. */
 function put(key: string, body: string): void {
-  objects.set(key, body);
+  objects.set(key.startsWith('gs://') ? key : `${ROOT}/${key}`, body);
 }
 
 function run(command: string, args: string[]): RunResult {
@@ -43,22 +45,22 @@ function run(command: string, args: string[]): RunResult {
   if (command !== 'gcloud' || args[0] !== 'storage')
     return { status: 2, stdout: '', stderr: 'unexpected' };
   if (args[1] === 'ls') {
-    const prefix = (args.at(-1) ?? '').replace(/\*\*$/, '').slice(ROOT.length + 1);
+    const prefix = (args.at(-1) ?? '').replace(/\*\*$/, '');
     const lines = [...objects.keys()]
       .filter((k) => k.startsWith(prefix))
       .map(
         (k) =>
-          `       ${objects.get(k)?.length ?? 0}  2026-11-1${k.length % 9}T10:00:00Z  ${ROOT}/${k}`
+          `       ${objects.get(k)?.length ?? 0}  2026-11-1${k.length % 9}T10:00:00Z  ${k}`
       );
     if (lines.length === 0)
       return { status: 1, stdout: '', stderr: 'ERROR: One or more URLs matched no objects.' };
     return ok(`${lines.join('\n')}\nTOTAL: ${lines.length} objects\n`);
   }
-  if (args[1] === 'cat') return ok(objects.get((args[2] ?? '').slice(ROOT.length + 1)) ?? '');
+  if (args[1] === 'cat') return ok(objects.get(args[2] ?? '') ?? '');
   if (args[1] === 'rm') {
     for (const url of args.slice(2)) {
       deleted.push(url.slice(ROOT.length + 1));
-      objects.delete(url.slice(ROOT.length + 1));
+      objects.delete(url);
     }
     return ok();
   }
@@ -154,6 +156,28 @@ describe('plaintext listing', () => {
   });
 });
 
+describe('backups in another bucket', () => {
+  it('groups by folder, checks deploy manifests, names state files and unopened archives', () => {
+    const backup = 'gs://box-backups';
+    put(
+      `${backup}/r1/fleet/deploy/workspaces-api/v1/manifest.json`,
+      manifest({ ENCRYPTION_KEY: SECRET_VALUE })
+    );
+    put(`${backup}/r1/state/platform-keys.json`, '{}');
+    put(`${backup}/r2/box-state/state-and-env.tgz`, 'tar');
+    put(`${backup}/clean/fleet/deploy/workspaces-api/v3/manifest.json`, manifest({ PLAIN: 'x' }));
+    const findings = scanRemoteBackups(ctx(), backup, secrets);
+    expect(findings.map((f) => [f.dir, f.holds])).toEqual([
+      [`${backup}/clean`, []],
+      [
+        `${backup}/r1`,
+        ['platform-keys.json', 'deploy versions with (a known secret value), ENCRYPTION_KEY'],
+      ],
+      [`${backup}/r2`, [expect.stringContaining('archive state-and-env.tgz (not opened')]],
+    ]);
+  });
+});
+
 describe('purge', () => {
   it('deletes the unreferenced plaintext versions only, object by object', () => {
     const result = purgeVersions(ctx(), secrets, ROOT);
@@ -164,7 +188,7 @@ describe('purge', () => {
       'deploy/workspaces-api/v2/manifest.json',
       'deploy/workspaces-api/v2/worker.js',
     ]);
-    expect(objects.has('deploy/images/abc.tar')).toBe(true);
+    expect(objects.has(`${ROOT}/deploy/images/abc.tar`)).toBe(true);
   });
 
   it('never deletes a plaintext version a queue attachment still names', () => {
@@ -181,7 +205,7 @@ describe('purge', () => {
     const result = purgeVersions(ctx(), secrets, ROOT);
     expect(result.deleted).toEqual(['deploy/workspaces-api/v2']);
     expect(result.skipped).toEqual(['deploy/workspaces-api/v1 (still referenced)']);
-    expect(objects.has('deploy/workspaces-api/v1/manifest.json')).toBe(true);
+    expect(objects.has(`${ROOT}/deploy/workspaces-api/v1/manifest.json`)).toBe(true);
   });
 
   it('refuses without the exact bucket confirmation, and while the current version holds plaintext', () => {

@@ -7,7 +7,7 @@
  *   migrate [--key-copy <path>]
  *                             move a plaintext install to sealed secrets (secrets-migrate.ts),
  *                             rolling back on failure; removes the plaintext files at the end
- *   plaintext [--backups DIR] [--purge --confirm <CELLD_BUCKET>]
+ *   plaintext [--backups DIR|gs://...|s3://... ...] [--purge --confirm <CELLD_BUCKET>]
  *                             old deploy versions and backups holding plaintext secrets, what to
  *                             rotate; with --purge, delete the versions celld no longer reads
  *
@@ -24,6 +24,7 @@ import {
   purgeVersions,
   scanBackups,
   scanDeployVersions,
+  scanRemoteBackups,
 } from './plaintext-scan';
 import { assertPrivateFile, parseDotenv } from './secret-files';
 import { boxMigrateDeps } from './secrets-box-deps';
@@ -36,7 +37,7 @@ const { values, positionals } = parseArgs({
   options: {
     'box-env': { type: 'string' },
     'state-dir': { type: 'string' },
-    backups: { type: 'string' },
+    backups: { type: 'string', multiple: true },
     purge: { type: 'boolean', default: false },
     confirm: { type: 'string' },
     'key-copy': { type: 'string' },
@@ -86,9 +87,11 @@ try {
     case 'plaintext': {
       const ctx = loadBox(envFile, values['state-dir']);
       const secrets = await knownSecrets(box, stateDir);
-      const backupsRoot = resolve(
-        process.env.INIT_CWD ?? process.cwd(),
-        values.backups ?? join(SELFHOST_DIR, 'backups')
+      const locations = values.backups?.length ? values.backups : [join(SELFHOST_DIR, 'backups')];
+      const backups = locations.flatMap((location) =>
+        /^(gs|s3):\/\//.test(location)
+          ? scanRemoteBackups(ctx, location, secrets)
+          : scanBackups(resolve(process.env.INIT_CWD ?? process.cwd(), location), secrets)
       );
       if (values.purge) {
         const result = purgeVersions(ctx, secrets, values.confirm);
@@ -98,8 +101,8 @@ try {
       const lines = formatPlaintextReport(
         box.CELLD_BUCKET ?? '',
         scanDeployVersions(ctx, secrets),
-        scanBackups(backupsRoot, secrets),
-        backupsRoot
+        backups,
+        locations.join(', ')
       );
       for (const line of lines) console.log(line);
       break;
