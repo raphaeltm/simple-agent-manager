@@ -38,14 +38,14 @@ One draft PR per workstream, each targeting the core branch.
 
 | ID  | Package                               | Branch                        | Wave |
 | --- | ------------------------------------- | ----------------------------- | ---- |
-| W0  | `@simple-agent-manager/worker-core`   | `sam/modularize-worker-core`  | 1    |
-| W1  | `@simple-agent-manager/project-data`  | `sam/modularize-project-data` | 1    |
-| W2  | `@simple-agent-manager/scheduler-core`| `sam/modularize-scheduler`    | 1    |
-| W3  | `@simple-agent-manager/operations`    | `sam/modularize-operations`   | 1    |
-| W4  | `@simple-agent-manager/app-deployment`| `sam/modularize-deployment`   | 1    |
-| W5  | `@simple-agent-manager/ai-proxy`      | `sam/modularize-ai-proxy`     | 2    |
-| W6  | `@simple-agent-manager/agent-email`   | `sam/modularize-agent-email`  | 2    |
-| W7  | `@simple-agent-manager/repo-hosting`  | `sam/modularize-repo-hosting` | 2    |
+| W0  | `@simple-agent-manager/worker-core`   | `sam/w0-worker-core-create-ervkbr`     | 1    |
+| W1  | `@simple-agent-manager/project-data`  | `sam/w1-project-data-extract-f1wa0b`   | 1    |
+| W2  | `@simple-agent-manager/scheduler-core`| `sam/w2-scheduler-core-extract-38pbbf` | 1    |
+| W3  | `@simple-agent-manager/operations`    | `sam/w3-operations-turn-shared-4tsc50` | 1    |
+| W4  | `@simple-agent-manager/app-deployment`| `sam/w4-app-deployment-extract-ngd1ke` | 1    |
+| W5  | `@simple-agent-manager/ai-proxy`      | assigned at dispatch                   | 2    |
+| W6  | `@simple-agent-manager/agent-email`   | assigned at dispatch                   | 2    |
+| W7  | `@simple-agent-manager/repo-hosting`  | assigned at dispatch                   | 2    |
 
 Wave 2 starts when W0 is merged into the core branch, so those three can use
 the finished package template.
@@ -170,14 +170,15 @@ The small kernel every other package needs, so they do not each invent one.
   imports of unrelated areas, define the public surface. This needs nothing
   from W0 and starts immediately. Step 2, lift into the package: starts when
   W0 is on the core branch (announced on the channel).
-- **Branch** from the core branch. **PR base** is the core branch. Open the PR
-  as a **draft** early and keep it a draft.
+- **Branch.** Work on the output branch SAM assigned to your task (see the
+  table above), created from the core branch. **PR base** is the core branch.
+  Open the PR as a **draft** early and keep it a draft.
 - **Push after every meaningful step** and keep a short progress note in
   `tasks/active/2026-11-12-modularize-<slug>.md` on your branch. Provider
   usage limits are tight this week, so another agent may have to take over
   from your last push.
 - **CI.** Pull-request CI only runs for PRs into `main`. Run it yourself with
-  `gh workflow run ci.yml --ref <your-branch>` and get it green.
+  `gh workflow run ci.yml --ref <your-output-branch>` and get it green.
 - **Staging.** Do not deploy to staging. The coordinator runs one staging
   verification on the integrated core branch.
 - **CodeRabbit.** Skip it on your PR. It runs on the core PR.
