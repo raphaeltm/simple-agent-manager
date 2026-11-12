@@ -57,7 +57,9 @@ export async function invalidScheduledDeliveryTarget(
   projectId: string | null,
   claim: PromptDeliveryClaim
 ): Promise<PromptDeliveryResult | null> {
-  if (claim.message.sourceKind !== 'scheduled_action') return null;
+  if (claim.message.sourceKind !== 'scheduled_action' || claim.mode === 'reconcile') return null;
+  // Reconciliation only reads the prior runtime receipt. Current schedule, task
+  // or membership changes revoke future submits, never erase an issued prompt.
   const scheduleId = claim.message.metadata?.scheduleId;
   const invalid = (): PromptDeliveryResult => ({
     kind: 'failed',
@@ -113,15 +115,6 @@ export async function invalidScheduledDeliveryTarget(
     return local() ? accessEnded() : invalid();
   } catch (error) {
     if (error instanceof ProjectEventValidationError) return invalid();
-    if (claim.mode === 'reconcile')
-      return {
-        kind: 'ambiguous',
-        reason: 'receipt_unavailable',
-        error: 'Scheduled action authority check unavailable during reconciliation',
-        receipt: null,
-        runtimeIdentity: claim.message.runtimeIdentity,
-        capabilities: null,
-      };
     return {
       kind: 'retry',
       reason: 'not_ready',

@@ -22,6 +22,7 @@ export interface ChatSessionTaskEmbed {
   /** True while a never-started task waits at admission on a provider limit, so its owner
    * may start it anyway (for example to spend extra credits the limit does not show). */
   providerLimitCanStartAnyway?: boolean;
+  providerLimitCanResumeAnyway?: boolean;
   triggeredBy?: string;
   connectorClientName?: string | null;
   id: string;

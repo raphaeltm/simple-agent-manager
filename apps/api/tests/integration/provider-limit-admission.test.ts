@@ -446,6 +446,108 @@ describe('provider admission through the TaskRunner alarm', () => {
       fixture.sqlite.prepare("SELECT admission_state FROM tasks WHERE id='task-1'").get()
     ).toEqual({ admission_state: 'provider_limit_blocked' });
   });
+  describe('saved callback owner approval scope', () => {
+    function approveCallback() {
+      fixture.sqlite.exec(`UPDATE users SET status='active' WHERE id='user-1';
+        UPDATE project_members SET role='owner',status='active' WHERE project_id='project-1' AND user_id='user-1';
+        INSERT INTO agent_profiles(id,user_id,project_id,name,agent_type) VALUES ('approved-profile','user-1','project-1','Approved','opencode');
+        INSERT INTO skills(id,user_id,project_id,name,agent_type) VALUES ('approved-skill','user-1','project-1','Approved',NULL);
+        UPDATE tasks SET agent_profile_hint='approved-profile',skill_id='approved-skill' WHERE id='task-1'`);
+      fixture.state.config.agentProfileHint = 'approved-profile';
+      fixture.state.config.agentType = 'opencode';
+      const now = Date.now();
+      const approved = {
+        ...newProviderLimitWait({
+          taskId: 'task-1',
+          origin: 'callback',
+          incidentId: 'saved-rejection',
+          credentialKey: 'cc_credentials:quota-key',
+          previous: null,
+          now,
+          resetsAt: now + 8 * 60 * 60_000,
+        }),
+        phase: 'released',
+        scheduleKey: 'provider-limit:task-1:override:approved',
+        ownerOverride: {
+          credentialKey: 'cc_credentials:quota-key',
+          grantedAt: now,
+          profileId: 'approved-profile',
+          skillId: 'approved-skill',
+          agentType: 'opencode',
+          expiresAt: now + 60_000,
+        },
+      };
+      fixture.sqlite
+        .prepare(
+          "UPDATE tasks SET provider_limit_wait_json=?,admission_state=NULL WHERE id='task-1'"
+        )
+        .run(JSON.stringify(approved));
+      rejected(now + 8 * 60 * 60_000);
+      return JSON.stringify(approved);
+    }
+    function savedApproval() {
+      return fixture.sqlite
+        .prepare("SELECT admission_state,provider_limit_wait_json FROM tasks WHERE id='task-1'")
+        .get() as { admission_state: string | null; provider_limit_wait_json: string };
+    }
+
+    it.each(['node_selection', 'agent_session'] as const)(
+      'honours a scoped callback override at %s without changing live rejection evidence',
+      async (step) => {
+        const approved = approveCallback();
+        const before = fixture.sqlite.prepare('SELECT * FROM credential_limit_windows').all();
+        const run = runner(step);
+        await run.runner.alarm();
+        expect(savedApproval()).toEqual({
+          admission_state: null,
+          provider_limit_wait_json: approved,
+        });
+        expect(fixture.sqlite.prepare('SELECT * FROM credential_limit_windows').all()).toEqual(
+          before
+        );
+        expect(run.state().currentStep).not.toBe(step);
+        if (step === 'agent_session') expect(startSamAwareAgentSession).toHaveBeenCalledOnce();
+      }
+    );
+
+    it.each([
+      ['expired', null],
+      ['changed profile', "UPDATE tasks SET agent_profile_hint=NULL WHERE id='task-1'"],
+      ['changed skill', "UPDATE tasks SET skill_id=NULL WHERE id='task-1'"],
+      ['changed profile agent', "UPDATE agent_profiles SET agent_type='claude-code'"],
+      ['changed skill agent', "UPDATE skills SET agent_type='claude-code'"],
+      ['invalid profile', "UPDATE agent_profiles SET project_id='other-project'"],
+      ['changed runner agent', null],
+      ['changed account', null],
+    ])('blocks a %s approval and clears it before any initial prompt', async (change, sql) => {
+      approveCallback();
+      const before = fixture.sqlite.prepare('SELECT * FROM credential_limit_windows').all();
+      if (sql) fixture.sqlite.exec(sql);
+      if (change === 'expired') vi.advanceTimersByTime(60_000);
+      if (change === 'changed runner agent') fixture.state.config.agentType = 'claude-code';
+      if (change === 'changed account')
+        vi.mocked(getSelectedAgentCredentialReference).mockResolvedValueOnce(
+          'cc_credentials:other'
+        );
+      const run = runner();
+      await run.runner.alarm();
+      expect(run.state().currentStep).toBe('node_selection');
+      expect(run.state().stepResults.nodeId).toBeNull();
+      expect(run.alarm()).toBeNull();
+      expect(startSamAwareAgentSession).not.toHaveBeenCalled();
+      const saved = savedApproval();
+      expect(saved.admission_state).toBe('provider_limit_blocked');
+      expect(JSON.parse(saved.provider_limit_wait_json)).toMatchObject({
+        phase: 'blocked',
+        credentialKey: 'cc_credentials:quota-key',
+      });
+      expect(JSON.parse(saved.provider_limit_wait_json).ownerOverride).toBeUndefined();
+      expect(fixture.sqlite.prepare('SELECT * FROM credential_limit_windows').all()).toEqual(
+        before
+      );
+    });
+  });
+
   describe('owner controls on a held, never-started task', () => {
     async function heldTask() {
       const db = drizzle(fixture.rc.env.DATABASE, { schema });

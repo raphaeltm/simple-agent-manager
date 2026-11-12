@@ -8,6 +8,7 @@
  * the check that failed and logs it with the snapshot claim (`recovery-revocation.ts`).
  */
 import type { Env } from '../../env';
+import { parseProviderLimitWait } from '../../services/provider-limit-policy';
 import { assertReplacementDeletionConfirmed } from '../../services/replacement-deletion-fence';
 import {
   findSessionRecoveryTaskAndEventAuthorityFailure,
@@ -85,6 +86,26 @@ export async function findRecoveryAuthorityFailure(
 ): Promise<SessionRecoveryAuthorityCheck | null> {
   const attemptFailure = await findRecoveryAttemptFailure(env, ctx, input);
   if (attemptFailure) return attemptFailure;
+  // Owner force-resume can approve a previously unguarded human-message wake.
+  // Keep its existing claim, while making that approval revocable at every
+  // external runner boundary rather than only when the owner clicked.
+  const ownerApproval = await env.DATABASE.prepare(
+    `SELECT t.provider_limit_wait_json,
+      EXISTS (SELECT 1 FROM project_members m JOIN users u ON u.id=m.user_id
+        WHERE m.project_id=t.project_id AND m.user_id=t.user_id AND m.status='active'
+        AND m.role IN ('owner','admin','maintainer') AND u.status='active') AS member_active
+     FROM tasks t WHERE t.id=? AND t.project_id=? AND t.user_id=?
+       AND json_valid(t.provider_limit_wait_json)
+       AND json_type(t.provider_limit_wait_json,'$.ownerOverride.expiresAt')='integer'`
+  )
+    .bind(input.taskId, input.projectId, input.userId)
+    .first<{ provider_limit_wait_json: string; member_active: number }>();
+  if (
+    ownerApproval &&
+    !ownerApproval.member_active &&
+    parseProviderLimitWait(ownerApproval.provider_limit_wait_json)?.ownerOverride
+  )
+    return 'recovery_task_authority';
   const sourceTaskId = input.config.recoverySourceTaskId ?? null;
   const chatSessionId = input.config.resumeSnapshotChatSessionId ?? null;
   // A human follow-up may recover a completed conversation without a live

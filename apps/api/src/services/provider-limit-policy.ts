@@ -39,7 +39,14 @@ export const ProviderLimitWaitSchema = v.object({
   /** The owner chose to start despite this hold (for example to spend extra credits the
    * subscription window does not reflect). Honoured only for the credential it names. */
   ownerOverride: v.optional(
-    v.object({ credentialKey: v.nullable(v.string()), grantedAt: timestamp })
+    v.object({
+      credentialKey: v.nullable(v.string()),
+      grantedAt: timestamp,
+      profileId: v.optional(v.nullable(v.string())),
+      skillId: v.optional(v.nullable(v.string())),
+      agentType: v.optional(v.string()),
+      expiresAt: v.optional(timestamp),
+    })
   ),
 });
 export type ProviderLimitWait = v.InferOutput<typeof ProviderLimitWaitSchema>;

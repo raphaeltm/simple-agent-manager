@@ -31,7 +31,8 @@ const WAITING = 'Waiting for provider limit reset at 06:58 UTC (2026-11-11).';
 const BLOCKED =
   'Blocked: provider limit wait budget exhausted. Review the provider limit before resuming.';
 
-type Variant = 'waiting' | 'stress' | 'blocked';
+type Variant =
+  'waiting' | 'stress' | 'blocked' | 'callback' | 'callback-stress' | 'callback-reader';
 
 function session(variant: Variant) {
   return {
@@ -39,10 +40,10 @@ function session(variant: Variant) {
     projectId: 'proj-test-1',
     taskId: 'task-1',
     topic:
-      variant === 'stress'
+      variant === 'stress' || variant === 'callback-stress'
         ? 'Run SAM PR Shepherd for raphaeltm/simple-agent-manager '.repeat(4)
         : 'Run SAM PR Shepherd for raphaeltm/simple-agent-manager',
-    status: 'active',
+    status: variant.startsWith('callback') ? 'sleeping' : 'active',
     workspaceId: null,
     nodeId: null,
     branch: 'sam/pr-shepherd-steady-state-43258a',
@@ -51,8 +52,8 @@ function session(variant: Variant) {
     createdAt: Date.parse('2026-11-10T12:00:00Z'),
     updatedAt: Date.parse('2026-11-10T12:01:00Z'),
     stoppedAt: null,
-    viewerAccess: 'owner',
-    isMine: true,
+    viewerAccess: variant === 'callback-reader' ? 'reader' : 'owner',
+    isMine: variant !== 'callback-reader',
     task: {
       id: 'task-1',
       status: 'queued',
@@ -60,11 +61,12 @@ function session(variant: Variant) {
       providerLimitReason:
         variant === 'blocked'
           ? BLOCKED
-          : variant === 'stress'
+          : variant === 'stress' || variant === 'callback-stress'
             ? `${WAITING} ${'unbroken'.repeat(30)}`
             : WAITING,
       providerLimitVersion: 'wait-1',
-      providerLimitCanStartAnyway: variant !== 'blocked',
+      providerLimitCanStartAnyway: variant !== 'blocked' && !variant.startsWith('callback'),
+      providerLimitCanResumeAnyway: variant.startsWith('callback') && variant !== 'callback-reader',
     },
   };
 }
@@ -134,6 +136,7 @@ async function openHeldChat(page: Page, variant: Variant) {
 }
 
 for (const viewport of [
+  { name: 'narrow', width: 320, height: 667, isMobile: true },
   { name: 'mobile', width: 375, height: 667, isMobile: true },
   { name: 'desktop', width: 1280, height: 800, isMobile: false },
 ]) {
@@ -141,6 +144,63 @@ for (const viewport of [
     test.use({
       viewport: { width: viewport.width, height: viewport.height },
       isMobile: viewport.isMobile,
+    });
+
+    test('light theme saved session has a readable action and error', async ({ page }) => {
+      await page.addInitScript(() => window.localStorage.setItem('sam-theme', 'light'));
+      await openHeldChat(page, 'callback');
+      await expect(page.locator('html')).toHaveAttribute('data-ui-theme', 'sam-light');
+      const notice = page.getByTestId('provider-limit-notice');
+      await expect(notice.getByRole('button', { name: 'Resume anyway' })).toBeVisible();
+      await assertNoOverflow(page);
+      await screenshot(page, `provider-force-resume-light-${viewport.name}`);
+    });
+
+    test('saved waiting session exposes Resume anyway and retains the pending state', async ({
+      page,
+    }) => {
+      const calls = await openHeldChat(page, 'callback');
+      const notice = page.getByTestId('provider-limit-notice');
+      await expect(notice).toContainText('same account');
+      const button = notice.getByRole('button', { name: 'Resume anyway' });
+      await expect(button).toBeVisible();
+      await assertNoOverflow(page);
+      await screenshot(page, `provider-force-resume-waiting-${viewport.name}`);
+      await button.click();
+      await expect(notice.getByRole('button', { name: 'Waking…' })).toBeDisabled();
+      expect(calls.startAnyway).toBe(1);
+      await screenshot(page, `provider-force-resume-pending-${viewport.name}`);
+    });
+
+    test('saved session error remains readable with long text and permits retry', async ({
+      page,
+    }) => {
+      await openHeldChat(page, 'callback-stress');
+      await page.route('**/api/projects/*/tasks/task-1/provider-limit/start-anyway', (route) =>
+        route.fulfill({
+          status: 409,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            error: 'CONFLICT',
+            message: 'The selected account changed; refresh and review before resuming.',
+          }),
+        })
+      );
+      const notice = page.getByTestId('provider-limit-notice');
+      await notice.getByRole('button', { name: 'Resume anyway' }).click();
+      await expect(notice.getByRole('alert')).toContainText('selected account changed');
+      await expect(notice.getByRole('button', { name: 'Resume anyway' })).toBeEnabled();
+      await assertNoOverflow(page);
+      await screenshot(page, `provider-force-resume-error-stress-${viewport.name}`);
+    });
+
+    test('reader sees the saved provider hold without an owner override', async ({ page }) => {
+      await openHeldChat(page, 'callback-reader');
+      const notice = page.getByTestId('provider-limit-notice');
+      await expect(notice.getByRole('button', { name: 'Resume anyway' })).toHaveCount(0);
+      await expect(notice).toContainText('Waiting for provider limit reset');
+      await assertNoOverflow(page);
+      await screenshot(page, `provider-force-resume-reader-${viewport.name}`);
     });
 
     test('waiting hold offers Start anyway on the notice and Cancel task in the rail', async ({

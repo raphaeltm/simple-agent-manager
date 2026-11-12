@@ -44,7 +44,9 @@ export async function persistAgentCredentialAttribution(
     await assertProviderLimitCredentialPin(
       env,
       input.workspaceId,
-      input.attribution.credentialReference
+      input.attribution.credentialReference,
+      workspace,
+      input.agentType
     );
 
   const now = new Date().toISOString();

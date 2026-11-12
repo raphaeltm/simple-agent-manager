@@ -12,6 +12,13 @@ const ACTIONS = {
     done: 'Waking…',
     failed: 'Unable to resume task. Try again.',
   },
+  'resume-anyway': {
+    run: startProviderLimitTaskAnyway,
+    idle: 'Resume anyway',
+    pending: 'Resuming…',
+    done: 'Waking…',
+    failed: 'Unable to resume this session. Try again.',
+  },
   'start-anyway': {
     run: startProviderLimitTaskAnyway,
     idle: 'Start anyway',
@@ -23,7 +30,7 @@ const ACTIONS = {
 
 /**
  * One explicit owner action on a provider-limit hold: resume a blocked wait, or start a
- * never-started task now despite the limit. Accepted actions stay disabled until fresh
+ * never-started task or resume a saved waiting session despite the limit. Accepted actions stay disabled until fresh
  * server state arrives.
  */
 export function ProviderLimitResume({
@@ -54,7 +61,7 @@ export function ProviderLimitResume({
   }
 
   return (
-    <div className="min-w-0">
+    <div className="min-w-0 sm:max-w-64">
       <Button
         variant="accent"
         size="sm"

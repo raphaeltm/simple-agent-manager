@@ -11,6 +11,7 @@ import {
   parseProviderLimitWait,
   PROVIDER_LIMIT_CONTINUATION,
 } from '../../src/services/provider-limit-policy';
+import { ensureSessionRecovery } from '../../src/services/session-recovery';
 import { buildSessionSnapshotR2Key } from '../../src/services/session-snapshots';
 import {
   acceptedPromptResponse,
@@ -28,6 +29,7 @@ import {
   taskRunner,
   waitForWakeReadiness,
 } from './helpers/provider-limit-restore';
+import { seedSignedInUser } from './helpers/seed-d1';
 
 declare const __PROVIDER_LIMIT_CALLBACKS__: Array<{
   name: string;
@@ -142,6 +144,20 @@ function vmPeer(f: Fixture, replacementNode: string, restoreFailure: boolean) {
         available: true,
         manifest: { acpSessionId: 'saved-harness', agentType: f.agentType },
       });
+      // A real VM resolves/injects the selected account when it loads the saved
+      // harness too. Model that callback, not only the fresh /start branch.
+      const injected = await SELF.fetch(
+        `https://api.test.example.com/api/workspaces/${workspaceId}/agent-key`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${tokens.get(workspaceId)}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ agentType: f.agentType, agentSessionId: path.split('/')[4] }),
+        }
+      );
+      expect(injected.status, await injected.clone().text()).toBe(200);
       return Response.json({ status: restoreFailure ? 'failed' : 'restored' });
     }
     if (path.endsWith('/start')) {
@@ -339,6 +355,168 @@ describe('provider limit -> canonical sleep -> full restored continuation', () =
       } finally {
         clock.mockRestore();
       }
+    },
+    30_000
+  );
+});
+
+describe('owner force-resume before the recorded reset through public HTTP', () => {
+  it.each([false, true])(
+    'retains the original delivery and snapshot (claimed=%s)',
+    async (claimed) => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date(recorded.now));
+      const f = await agentOnVm('task');
+      const calls = vmPeer(f, `replacement-${f.id}`, false);
+      const token = await signCallbackToken(f.workspaceId, testEnv, { callbackGeneration: null });
+      const callback = await SELF.fetch(
+        `https://api.test.example.com/api/projects/${f.projectId}/tasks/${f.taskId}/status/callback`,
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...callbackCases[0]!.callback,
+            providerLimitAgentSessionId: `a-${f.id}`,
+          }),
+        }
+      );
+      expect(callback.status, await callback.text()).toBe(200);
+      await runSessionSleepSweep(testEnv);
+      await deleteSleptWorkspace(f.nodeId, f.taskId);
+      await readyReplacementNode(f);
+      const deliveryId = `original-human-message-${f.id}`;
+      const accepted = await f.stub.acceptPromptDelivery({
+        deliveryId,
+        targetSessionId: f.chatSessionId,
+        sourceTaskId: f.taskId,
+        senderType: 'human',
+        senderId: f.userId,
+        sourceKind: 'user_followup',
+        messageClass: 'deliver',
+        displayContent: 'Please continue my existing work now.',
+        deliveryContent: 'Please continue my existing work now.',
+        ttlMs: 60 * 60_000,
+      });
+      const waitBefore = parseProviderLimitWait(
+        (await env.DATABASE.prepare('SELECT * FROM tasks WHERE id=?')
+          .bind(f.taskId)
+          .first<Record<string, unknown>>())!.provider_limit_wait_json as string
+      )!;
+      expect(waitBefore.nextRetryAt).toBeGreaterThan(Date.now());
+      if (claimed) {
+        expect(await ensureSessionRecovery(testEnv, f.projectId, f.chatSessionId)).toMatchObject({
+          status: 'waking',
+          taskId: f.taskId,
+        });
+        // The existing runner really holds on the old future timer.
+        await runInDurableObject(taskRunner(f.taskId), (instance) => instance.alarm());
+        expect(
+          (
+            await env.DATABASE.prepare('SELECT * FROM tasks WHERE id=?')
+              .bind(f.taskId)
+              .first<Record<string, unknown>>()
+          )?.admission_state
+        ).toBe('provider_limit_waiting');
+      }
+      const snapshotBefore = await env.DATABASE.prepare(
+        'SELECT * FROM session_snapshots WHERE chat_session_id=?'
+      )
+        .bind(f.chatSessionId)
+        .first();
+      const cookie = await seedSignedInUser(f.userId);
+      const act = () =>
+        SELF.fetch(
+          `https://api.test.example.com/api/projects/${f.projectId}/tasks/${f.taskId}/provider-limit/start-anyway`,
+          {
+            method: 'POST',
+            headers: { Cookie: cookie, Origin: 'https://app.test.example.com' },
+          }
+        );
+      const response = await act();
+      expect(response.status, await response.clone().text()).toBe(202);
+      expect(await response.json()).toMatchObject({ status: 'waking', taskId: f.taskId });
+      expect((await act()).status).toBe(409);
+      const snapshotAfter = await env.DATABASE.prepare(
+        'SELECT * FROM session_snapshots WHERE chat_session_id=?'
+      )
+        .bind(f.chatSessionId)
+        .first();
+      expect(snapshotAfter).toMatchObject({
+        id: snapshotBefore!.id,
+        manifest_r2_key: snapshotBefore!.manifest_r2_key,
+      });
+      if (claimed)
+        expect(snapshotAfter!.recovery_attempt_id).toBe(snapshotBefore!.recovery_attempt_id);
+      await driveMove(f);
+      await waitForWakeReadiness(f);
+      for (let pass = 0; pass < 4; pass++) await runDueDelivery(f, Date.now() + pass * 60_000);
+      const prompts = calls.filter(
+        (c) => c.path.endsWith('/prompt') && c.body.deliveryId === deliveryId
+      );
+      expect(prompts).toHaveLength(1);
+      expect(prompts[0]!.body.prompt).toBe('Please continue my existing work now.');
+      expect(
+        await sqlRows(
+          f.stub,
+          'SELECT id,prompt_message_id,delivery_state FROM session_inbox WHERE id=?',
+          deliveryId
+        )
+      ).toEqual([
+        {
+          id: deliveryId,
+          prompt_message_id: accepted.message.promptMessageId,
+          delivery_state: 'acked',
+        },
+      ]);
+      // Late old scheduled continuations cannot cause an extra provider prompt.
+      vi.setSystemTime(waitBefore.nextRetryAt + 1);
+      await fireSchedule(f);
+      for (let pass = 0; pass < 3; pass++) await runDueDelivery(f, Date.now() + pass * 60_000);
+      expect(
+        calls.filter(
+          (c) =>
+            c.path.endsWith('/prompt') &&
+            String(c.body.prompt).includes(PROVIDER_LIMIT_CONTINUATION)
+        )
+      ).toHaveLength(0);
+      const running = await env.DATABASE.prepare(
+        `SELECT a.id,a.agent_credential_generation,w.id AS workspace_id,w.callback_generation
+         FROM tasks t JOIN workspaces w ON w.id=t.workspace_id
+         JOIN agent_sessions a ON a.workspace_id=w.id AND a.status='running' WHERE t.id=?`
+      )
+        .bind(f.taskId)
+        .first<{
+          id: string;
+          agent_credential_generation: number;
+          workspace_id: string;
+          callback_generation: string | null;
+        }>();
+      const nextToken = await signCallbackToken(running!.workspace_id, testEnv, {
+        callbackGeneration: running!.callback_generation,
+      });
+      const rejectedAgain = await SELF.fetch(
+        `https://api.test.example.com/api/projects/${f.projectId}/tasks/${f.taskId}/status/callback`,
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${nextToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...callbackCases[0]!.callback,
+            providerLimitAgentSessionId: running!.id,
+            providerLimitCredentialGeneration: running!.agent_credential_generation,
+            providerLimitPromptAttemptId: 99,
+          }),
+        }
+      );
+      expect(rejectedAgain.status, await rejectedAgain.text()).toBe(200);
+      const parkedAgain = await env.DATABASE.prepare(
+        'SELECT admission_state,provider_limit_wait_json FROM tasks WHERE id=?'
+      )
+        .bind(f.taskId)
+        .first<{ admission_state: string; provider_limit_wait_json: string }>();
+      expect(parkedAgain!.admission_state).toBe('provider_limit_waiting');
+      const freshWait = parseProviderLimitWait(parkedAgain!.provider_limit_wait_json)!;
+      expect(freshWait.ownerOverride).toBeUndefined();
+      expect(freshWait.scheduleKey).not.toBe(waitBefore.scheduleKey);
     },
     30_000
   );

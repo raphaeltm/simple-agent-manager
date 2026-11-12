@@ -1217,3 +1217,28 @@ describe('attachment delivery ordering', () => {
     expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
   });
 });
+
+describe('issued prompt receipt reconciliation never wakes a runtime', () => {
+  beforeEach(() => vi.clearAllMocks());
+  it.each([
+    ['sleeping VM', { ...targetRow, workspace_status: 'sleeping' }],
+    ['deleted VM', { ...targetRow, workspace_status: 'deleted' }],
+    ['sleeping Instant', sleptContainerRow],
+    ['missing workspace', null],
+  ])('keeps %s ambiguous without replay, recovery, or provisioning', async (_label, row) => {
+    mocks.ensureSessionRecovery.mockResolvedValue({ status: 'waking', taskId: 'task-1' });
+    const request = input(false);
+    request.claim.mode = 'reconcile';
+    request.claim.message.sourceKind = 'scheduled_action';
+    request.claim.message.runtimeIdentity = 'issued-runtime-1';
+    // The schedule was cancelled after issue; the source guard allows only a
+    // receipt lookup. Target resolution itself must not provision a new runtime.
+    request.beforeSideEffect = async () => null;
+    const result = await new DefaultVmPromptDeliveryAdapter(envWithTarget(row)).reconcile(request);
+    expect(result.kind).toBe('ambiguous');
+    expect(mocks.ensureSessionRecovery).not.toHaveBeenCalled();
+    expect(mocks.wakeSession).not.toHaveBeenCalled();
+    expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+    expect(mocks.nodeAgentRequest).not.toHaveBeenCalled();
+  });
+});

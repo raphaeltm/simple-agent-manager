@@ -183,6 +183,13 @@ never switches to another model, profile, or credential to get around a limit.
   before it starts, it stops at **Needs you** instead. If the provider really does refuse the
   prompt, SAM pauses the task the usual way.
 
+**Already started, then went to sleep at the limit?** The owner can choose **Resume anyway**
+on the waiting notice after resetting the same account's limit or enabling extra usage. SAM
+restores the saved session and delivers its queued message using the same account and profile.
+Your choice applies to the current wait only and can use extra credits. If the account or profile
+changed, review the selection first. If the provider rejects again, SAM pauses again. An expired
+or unavailable saved workspace cannot be forced to restore.
+
 **Needs you**, with a reason starting **Blocked:**, means SAM stopped waiting. The task won't carry on by itself, and a reply in
 the chat doesn't restart it:
 

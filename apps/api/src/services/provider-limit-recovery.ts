@@ -4,6 +4,10 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { errors } from '../middleware/error';
 import * as projectData from './project-data';
+import {
+  canResumeProviderLimitTaskAnyway,
+  forceResumeSavedProviderLimitTask,
+} from './provider-limit-force-resume';
 import { parseProviderLimitWait, type ProviderLimitWait } from './provider-limit-policy';
 import { ensureSessionRecovery } from './session-recovery';
 import { nudgeTaskRunnerDO } from './task-runner-do';
@@ -216,6 +220,8 @@ export async function startProviderLimitTaskAnyway(
     throw errors.forbidden('Only the task owner can start this task anyway');
   }
   const wait = parseProviderLimitWait(task.providerLimitWaitJson);
+  if (wait && canResumeProviderLimitTaskAnyway(task, wait))
+    return forceResumeSavedProviderLimitTask(env, task, ownerUserId, wait);
   const observed = wait; // un-narrowed copy for the rejection log
   if (!canStartProviderLimitTaskAnyway(task, wait)) {
     log.warn('provider_limit.start_anyway_rejected', {
