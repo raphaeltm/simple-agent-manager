@@ -72,7 +72,7 @@ core branch `sam/help-identify-parts-worker-embcza`.
 - [x] Remove `WorkerEnv` casts from scope (DO liveness adapter moved to
       `services/task-runtime-liveness-local.ts`, the port implementation)
 - [x] Typecheck clean
-- [ ] Lint, tests green; push
+- [x] Lint clean; unit pool green (1,087 files / 16,016 tests, 0 failed); pushed `ea0089160`
 
 ### Step 2 — lift into `packages/project-data` (after "W0 ready")
 - [ ] Package scaffold from W0 template
@@ -83,8 +83,9 @@ core branch `sam/help-identify-parts-worker-embcza`.
 
 ## Test counts
 
-- Before (b4ef3fba9 / bbb1c82ca): TBD
-- After: TBD
+- Before (bbb1c82ca): unit pool 1,087 files / 16,016 tests; Workers pool 180 files (+3 sam-runtime).
+- After step 1: unit pool 1,087 files / 16,016 tests, all passing.
+- After step 2: TBD
 
 ## Progress notes
 
@@ -94,3 +95,11 @@ core branch `sam/help-identify-parts-worker-embcza`.
   `operations.alertArchiveBreakerOpened`. W2 confirmed `parseProviderLimitWait` is exported by
   scheduler-core. Baseline unit pool: 1,087 files / 16,016 tests (one failure seen was caused by
   edits during the run; passes on a clean tree).
+- 2026-11-12: worker port wiring split into `src/project-data-ports/<port>.ts` (one module per
+  port) after a single wiring module broke 36 test files' partial `vi.mock`s; test setup installs
+  ports one at a time. Port modules import statically wherever ProjectData did (an extra
+  `await import()` hop changed async ordering a reconciliation test pins).
+- Step 2 plan: layout `packages/project-data/src/{do,client,archive,scheduled}`; entries `.`
+  (client + types + ports), `./durable-object`, `./scheduled`. Old worker paths of the 39
+  externally imported modules keep named re-exports. ~66 unit tests that touch only ProjectData
+  move into the package with fake ports; tests that mix worker modules stay in apps/api.
