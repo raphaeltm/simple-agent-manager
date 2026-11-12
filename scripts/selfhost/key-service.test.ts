@@ -328,7 +328,7 @@ describe('copies that leave the box contain no secret', () => {
       },
       envFile,
       stateDir: state,
-      composeFile: '/unused',
+      composeFiles: ['/unused'],
       run,
       now: () => 0,
       log: () => undefined,

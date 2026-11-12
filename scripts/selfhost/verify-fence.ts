@@ -14,9 +14,10 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { networkInterfaces } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
+import { composeArgs, composeFilesFor } from './backup-lib.js';
 import { resolveTunnelPortRange } from './box-settings.js';
 import { EGRESS_FENCE_TABLE, parseNameservers } from './egress-fence.js';
 import { buildProbeScript, parseProbeOutput, type ProbeOutcome } from './fence-probes.js';
@@ -32,7 +33,7 @@ import {
 import { parseDotenv } from './secret-files.js';
 
 const REPO_ROOT = resolve(import.meta.dirname, '../..');
-const COMPOSE_FILE = join(REPO_ROOT, 'deploy/selfhost/docker-compose.yml');
+const SELFHOST_DIR = join(REPO_ROOT, 'deploy/selfhost');
 const DEFAULT_PUBLIC_PROBE = '1.1.1.1:443';
 const DEFAULT_PUBLIC_NAME = 'example.com';
 /** uid for the control probe: any uid but celld's. */
@@ -49,12 +50,17 @@ interface Run {
 }
 
 function run(command: string, args: string[]): Run {
-  const result = spawnSync(command, args, { encoding: 'utf8', cwd: dirname(COMPOSE_FILE) });
+  const result = spawnSync(command, args, { encoding: 'utf8', cwd: SELFHOST_DIR });
   return { status: result.status ?? 1, output: `${result.stdout ?? ''}${result.stderr ?? ''}` };
 }
 
+/** Compose with every file the box runs with (its COMPOSE_FILE), as the stack was started. */
 function compose(envFile: string, args: string[]): Run {
-  return run('docker', ['compose', '-f', COMPOSE_FILE, '--env-file', envFile, ...args]);
+  const box = parseDotenv(readFileSync(envFile, 'utf8'), envFile);
+  return run(
+    'docker',
+    composeArgs({ composeFiles: composeFilesFor(box, SELFHOST_DIR), envFile }, args)
+  );
 }
 
 /** A sleeping container of the celld service to run probes in; removed by the caller. */

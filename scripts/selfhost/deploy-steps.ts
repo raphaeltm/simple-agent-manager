@@ -56,6 +56,12 @@ export const DEFAULT_PREDEPLOY_MIGRATION_ATTEMPTS = 2;
 const DEFAULT_MIGRATION_RETRY_DELAY_MS = 3000;
 const DEFAULT_HEALTH_TIMEOUT_MS = 120_000;
 const DEFAULT_HEALTH_POLL_INTERVAL_MS = 2000;
+/**
+ * One health request's limit. Without it a request that celld dispatches to a stuck fresh isolate
+ * waits out celld's 300 s handler budget, so a single probe outlives the whole deadline and the
+ * deploy fails on a box that answered every other request (sam-box, 2026-11-12).
+ */
+const DEFAULT_HEALTH_REQUEST_TIMEOUT_MS = 10_000;
 
 export function intEnv(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -120,11 +126,16 @@ export async function applyAllMigrations(
 
 export async function waitForHealth(port: string, baseDomain: string): Promise<void> {
   const deadline = Date.now() + intEnv('SELFHOST_HEALTH_TIMEOUT_MS', DEFAULT_HEALTH_TIMEOUT_MS);
+  const requestTimeout = intEnv(
+    'SELFHOST_HEALTH_REQUEST_TIMEOUT_MS',
+    DEFAULT_HEALTH_REQUEST_TIMEOUT_MS
+  );
   let last = 'no response';
   while (Date.now() < deadline) {
     try {
       const response = await fetch(`http://127.0.0.1:${port}/health`, {
         headers: { host: `api.${baseDomain}`, 'x-forwarded-proto': 'https' },
+        signal: AbortSignal.timeout(Math.max(1, Math.min(requestTimeout, deadline - Date.now()))),
       });
       if (response.ok) return;
       last = `HTTP ${response.status}`;

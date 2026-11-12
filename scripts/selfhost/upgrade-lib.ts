@@ -23,7 +23,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { type BoxContext, runBackup, type RunResult } from './backup-lib';
+import { type BoxContext, composeArgs, runBackup, type RunResult } from './backup-lib';
 
 /** Files under .state/ that docker compose services read (env_file, mounts). */
 const GENERATED_STATE_FILE = /\.(env|nft|caddy|toml|json)$/;
@@ -86,6 +86,12 @@ export function holdOnPlaintext(ctx: Pick<BoxContext, 'box' | 'stateDir'>): bool
   );
 }
 
+/**
+ * Rollback steps run compose from deploy/selfhost with no `-f`, so it reads .env there and honours
+ * its COMPOSE_FILE (an explicit `-f docker-compose.yml` would drop docker-compose.guided-login.yml).
+ */
+const composeInBoxDir = (args: string) => `(cd deploy/selfhost && docker compose ${args})`;
+
 export function rollbackSteps(
   from: string,
   migrationsChanged: boolean,
@@ -96,18 +102,13 @@ export function rollbackSteps(
     return [
       `git checkout ${from}`,
       'pnpm install --frozen-lockfile',
-      ...(composeChanged
-        ? [
-            'pnpm selfhost:deploy --init',
-            'docker compose -f deploy/selfhost/docker-compose.yml up -d --build',
-          ]
-        : []),
+      ...(composeChanged ? ['pnpm selfhost:deploy --init', composeInBoxDir('up -d --build')] : []),
       'pnpm selfhost:deploy',
     ];
   }
   return [
     '# This upgrade applied D1 migrations: do NOT redeploy the old Worker over the migrated fleet.',
-    'docker compose -f deploy/selfhost/docker-compose.yml down',
+    composeInBoxDir('down'),
     '# Point CELLD_BUCKET in deploy/selfhost/.env at a new, empty bucket (or empty the old one),',
     '# move deploy/selfhost/.state aside, then:',
     `git checkout ${from}`,
@@ -115,7 +116,7 @@ export function rollbackSteps(
     backupDir
       ? `pnpm selfhost:restore --from ${backupDir}`
       : '# no backup was taken (--skip-backup): restore your most recent pnpm selfhost:backup',
-    'docker compose -f deploy/selfhost/docker-compose.yml up -d',
+    composeInBoxDir('up -d'),
   ];
 }
 
@@ -182,16 +183,7 @@ export async function runUpgrade(ctx: BoxContext, opts: UpgradeOptions): Promise
         `restarting the stack (${composeFilesChanged ? 'compose files' : 'generated state'} changed)`
       );
       check(
-        ctx.run('docker', [
-          'compose',
-          '-f',
-          ctx.composeFile,
-          '--env-file',
-          ctx.envFile,
-          'up',
-          '-d',
-          '--build',
-        ]),
+        ctx.run('docker', composeArgs(ctx, ['up', '-d', '--build'])),
         'docker compose up -d --build'
       );
       composeRestarted = true;

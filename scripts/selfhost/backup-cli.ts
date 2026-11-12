@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
-import type { BoxContext, RunResult } from './backup-lib';
+import { type BoxContext, composeFilesFor, type RunResult } from './backup-lib';
 import { assertPrivateFile, parseDotenv } from './secret-files';
 
 export const REPO_ROOT = resolve(import.meta.dirname, '../..');
@@ -45,7 +45,7 @@ export function loadBox(envFile: string, stateDirOverride?: string): BoxContext 
     envFile,
     // Same default and base directory docker compose and deploy.ts use.
     stateDir: resolve(dirname(envFile), stateDirOverride ?? box.SAM_SELFHOST_STATE_DIR ?? '.state'),
-    composeFile: join(SELFHOST_DIR, 'docker-compose.yml'),
+    composeFiles: composeFilesFor(box, SELFHOST_DIR),
     run: runCommand,
     now: () => Date.now(),
     log,
