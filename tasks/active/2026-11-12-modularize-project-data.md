@@ -161,3 +161,13 @@ Why the remaining ProjectData tests stay in apps/api:
   `write-budget-shipped-factor` read `apps/api/wrangler.toml`.
 - They import or mock worker modules (services, routes, scheduled jobs, D1 schema helpers):
   the remaining ~90 files, which exercise ProjectData together with the worker.
+
+### After merging core 2052fb4b4 (W2 scheduler-core), head `03a9291a7`
+
+- apps/api unit pool 1,029 files / 15,398 tests, all pass (the 8 files / 119 tests fewer than
+  before the merge are W2's tests moving to packages/scheduler-core). packages/project-data
+  50 / 528, all pass. Gitleaks current-tree and pr-range: 0 new findings.
+- ProjectData now imports `parseProviderLimitWait` from `@simple-agent-manager/scheduler-core`
+  (allowed by brief rule 4 now that W2 is a package), so the credentials port no longer carries
+  it and the hand-written `ProviderLimitWait` view in `ports.ts` is gone (architecture review
+  HIGH 1 / MEDIUM "pure functions behind ports", for this function).
