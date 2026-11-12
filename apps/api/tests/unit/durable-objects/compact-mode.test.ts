@@ -532,3 +532,35 @@ describe('compact vs full mode payload size comparison', () => {
     expect(reduction).toBeGreaterThan(0.8);
   });
 });
+
+describe('stripToolMetadataContent — secret request card', () => {
+  // The text handleRequestSecret returns for request_secret. Names only; never a value.
+  const resultText = JSON.stringify({
+    message: 'Secret request recorded.',
+    secretRequest: { id: 'req-1', sessionId: 'session-1', name: 'STRIPE_API_KEY' },
+  });
+
+  it('keeps only the request ID for the Claude and Codex tool names', () => {
+    for (const title of ['mcp__sam-mcp__request_secret', 'sam-mcp/request_secret']) {
+      const result = stripToolMetadataContent({
+        toolCallId: 'tc-secret',
+        title,
+        status: 'completed',
+        content: [{ type: 'content', text: resultText }],
+      }) as Record<string, unknown>;
+      expect(JSON.parse((result.rawOutput as Array<{ text: string }>)[0]!.text)).toEqual({
+        secretRequest: { id: 'req-1' },
+      });
+    }
+  });
+
+  it('keeps nothing for a failed request', () => {
+    const failed = stripToolMetadataContent({
+      toolCallId: 'tc-secret',
+      title: 'mcp__sam-mcp__request_secret',
+      status: 'failed',
+      content: [{ type: 'content', text: 'reason is required' }],
+    }) as Record<string, unknown>;
+    expect(failed.rawOutput).toBeUndefined();
+  });
+});

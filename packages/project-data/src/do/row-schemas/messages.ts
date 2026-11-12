@@ -1,3 +1,4 @@
+import { REQUEST_SECRET_TOOL } from '@simple-agent-manager/shared';
 import { expectJsonRecord, maybeJsonRecord } from '@simple-agent-manager/worker-core';
 import * as v from 'valibot';
 
@@ -104,6 +105,12 @@ const APPROVAL_CARD_TOOL = 'ops_request_action';
  * card reads the question, options and answer state from the server marker.
  */
 const HUMAN_INPUT_CARD_TOOL = 'request_human_input';
+/**
+ * Agent secret request tool. Its chat card needs only the request ID: the card reads name,
+ * reason and status from the server record. Keep in sync with SECRET_REQUEST_CARD_TOOL in
+ * apps/web (secret-request-card-data.ts).
+ */
+const SECRET_REQUEST_CARD_TOOL = REQUEST_SECRET_TOOL;
 const TOOL_NAME_SEPARATORS = /__|\/|\.|:/;
 
 type CardPayloadMatcher = (payload: Record<string, unknown>) => Record<string, unknown> | undefined;
@@ -146,6 +153,15 @@ function humanInputPayload(payload: Record<string, unknown>): Record<string, unk
     : undefined;
 }
 
+/** Keeps only the secret request ID; the card re-reads everything else from the server. */
+function secretRequestPayload(
+  payload: Record<string, unknown>
+): Record<string, unknown> | undefined {
+  const request = maybeJsonRecord(payload.secretRequest);
+  const id = request?.id;
+  return typeof id === 'string' && id ? { secretRequest: { id } } : undefined;
+}
+
 /** Which typed chat card a tool renders as, and how to recognise its result payload. */
 function cardPayloadMatcher(meta: Record<string, unknown>): CardPayloadMatcher | undefined {
   const base = normalizeToolName(meta.toolName) ?? normalizeToolName(meta.title);
@@ -153,6 +169,7 @@ function cardPayloadMatcher(meta: Record<string, unknown>): CardPayloadMatcher |
   if (DOCUMENT_CARD_TOOLS.has(base)) return documentPayload;
   if (base === APPROVAL_CARD_TOOL) return approvalPayload;
   if (base === HUMAN_INPUT_CARD_TOOL) return humanInputPayload;
+  if (base === SECRET_REQUEST_CARD_TOOL) return secretRequestPayload;
   return undefined;
 }
 
