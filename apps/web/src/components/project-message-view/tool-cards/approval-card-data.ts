@@ -5,9 +5,8 @@ import { normalizeToolName, parseResultPayload } from './document-card-data';
 
 /**
  * The Operations tool (base name, separator-agnostic) whose result renders as an
- * ApprovalCard. Keep in sync with APPROVAL_CARD_TOOL in
- * apps/api/src/durable-objects/project-data/row-schemas/messages.ts, which keeps the
- * approval ID when chat history is loaded in compact mode.
+ * ApprovalCard. Listed in the shared TYPED_CHAT_CARD_TOOLS, which also types the API matcher
+ * that keeps the approval ID when chat history is loaded in compact mode.
  */
 export const APPROVAL_CARD_TOOL = 'ops_request_action';
 

@@ -21,10 +21,14 @@ import { describe, expect, it } from 'vitest';
 
 import { chatMessagesToConversationItems } from '../../../src/components/project-message-view';
 import { groupToolCallItems } from '../../../src/components/project-message-view/tool-call-groups';
+import { APPROVAL_CARD_TOOL } from '../../../src/components/project-message-view/tool-cards/approval-card-data';
 import { ApprovalCard } from '../../../src/components/project-message-view/tool-cards/ApprovalCard';
+import { DOCUMENT_CARD_TOOLS } from '../../../src/components/project-message-view/tool-cards/document-card-data';
 import { DocumentCard } from '../../../src/components/project-message-view/tool-cards/DocumentCard';
+import { HUMAN_INPUT_CARD_TOOL } from '../../../src/components/project-message-view/tool-cards/human-input-card-data';
 import { HumanInputCard } from '../../../src/components/project-message-view/tool-cards/HumanInputCard';
 import { matchToolCard } from '../../../src/components/project-message-view/tool-cards/registry';
+import { SECRET_REQUEST_CARD_TOOL } from '../../../src/components/project-message-view/tool-cards/secret-request-card-data';
 import { SecretRequestCard } from '../../../src/components/project-message-view/tool-cards/SecretRequestCard';
 import { TYPED_CARD_TOOLS } from '../../../src/components/project-message-view/tool-cards/typed-card-tools';
 import type { ChatMessageResponse } from '../../../src/lib/api';
@@ -235,6 +239,39 @@ describe('Codex request_secret renders the secure card (production regression)',
     expect(groupedToolCallIds(items)).toEqual(['call_bad', 'call_no_id']);
   });
 
+  it('switches from the generic group to the card only when the result row arrives', () => {
+    // Rows reach the client one at a time (WebSocket `message.new`); every prefix is converted.
+    const rows = [
+      ...genericCodexCall('call_git'),
+      ...codexSparseCall('call_live', 'request_secret', SECRET_RESULT),
+    ];
+    const verdicts = rows.slice(2).map((_, i) => {
+      const items = chatMessagesToConversationItems(rows.slice(0, 3 + i));
+      const live = toolCalls(items).find((item) => item.toolCallId === 'call_live')!;
+      return {
+        card: matchToolCard(live),
+        grouped: groupedToolCallIds(items).includes('call_live'),
+      };
+    });
+    expect(verdicts).toEqual([
+      { card: null, grouped: true }, // initial call row
+      { card: null, grouped: true }, // status-only update
+      { card: SecretRequestCard, grouped: false }, // result row
+    ]);
+  });
+
+  it('renders the card for a deduplicated request (the existing open request)', () => {
+    const deduplicated = JSON.stringify({
+      message:
+        'An open request for SAM_CHAT_SECRET_TEST already exists in this chat; the person can answer it on the existing card.',
+      secretRequest: { id: '01M781STQK6N3SY47G641QTS2X', deduplicated: true, status: 'pending' },
+    });
+    const items = chatMessagesToConversationItems(
+      codexSparseCall('call_dedup', 'request_secret', deduplicated)
+    );
+    expect(matchToolCard(toolCalls(items)[0]!)).toBe(SecretRequestCard);
+  });
+
   it('still renders the card for the Claude Code shape (toolName on every row)', () => {
     const items = chatMessagesToConversationItems([
       row('c-start', '(tool call)', {
@@ -302,13 +339,55 @@ const TYPED_CARD_FIXTURES: Record<string, { result: string; card: unknown }> = {
   request_secret: { result: SECRET_RESULT, card: SecretRequestCard },
 };
 
-describe('every typed card renders for the Codex sparse shape', () => {
+/** Claude Code's rows: toolName on both, the compact card payload as rawOutput on the result. */
+function claudeCall(callId: string, tool: string, result: string): ChatMessageResponse[] {
+  const toolName = `mcp__sam-mcp__${tool}`;
+  return [
+    row(`${callId}-start`, '(tool call)', {
+      toolCallId: callId,
+      title: toolName,
+      toolName,
+      kind: 'other',
+      status: 'pending',
+    }),
+    row(`${callId}-done`, '(tool update)', {
+      toolCallId: callId,
+      toolName,
+      status: 'completed',
+      rawOutput: [{ type: 'text', text: result }],
+      contentSize: result.length,
+    }),
+  ];
+}
+
+describe('every typed card renders for every harness', () => {
   it('has a fixture for every typed-card tool', () => {
     expect(Object.keys(TYPED_CARD_FIXTURES).sort()).toEqual([...TYPED_CARD_TOOLS].sort());
   });
 
+  it('lists exactly the tools the card modules recognise', () => {
+    const fromCardModules = [
+      ...DOCUMENT_CARD_TOOLS,
+      APPROVAL_CARD_TOOL,
+      HUMAN_INPUT_CARD_TOOL,
+      SECRET_REQUEST_CARD_TOOL,
+    ];
+    expect(fromCardModules.sort()).toEqual([...TYPED_CARD_TOOLS].sort());
+  });
+
   for (const [tool, { result, card }] of Object.entries(TYPED_CARD_FIXTURES)) {
-    it(`${tool}: renders its card outside the generic group`, () => {
+    it(`${tool}: renders its card for the Claude Code shape`, () => {
+      const items = chatMessagesToConversationItems([
+        ...genericCodexCall('call_before'),
+        ...claudeCall(`toolu_${tool}`, tool, result),
+      ]);
+      expect(matchToolCard(toolCalls(items)[1]!)).toBe(card);
+      expect(standaloneToolCallIds(items)).toEqual([`toolu_${tool}`]);
+    });
+  }
+
+  for (const [tool, { result, card }] of Object.entries(TYPED_CARD_FIXTURES)) {
+    it(`${tool}: renders its card for Codex sparse rows`, () => {
       const items = chatMessagesToConversationItems([
         ...genericCodexCall('call_before'),
         ...codexSparseCall(`call_${tool}`, tool, result),

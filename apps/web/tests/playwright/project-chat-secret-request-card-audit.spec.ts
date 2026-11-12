@@ -560,6 +560,11 @@ async function auditCodexFailed(page: Page, name: string) {
   await expect(page.getByTestId('secret-request-card')).toHaveCount(0);
   await screenshot(page, `${name}-codex-failed`, SCREENSHOT_OPTIONS);
   await assertNoOverflow(page);
+  // Expanded, the failed call is listed under its tool name.
+  await group.getByRole('button', { expanded: false }).first().click();
+  await expect(group.getByText('mcp.sam-mcp.request_secret')).toBeVisible();
+  await screenshot(page, `${name}-codex-failed-expanded`, SCREENSHOT_OPTIONS);
+  await assertNoOverflow(page);
 }
 
 async function auditMissing(page: Page, name: string) {
@@ -587,7 +592,7 @@ test.describe('Project chat secret request cards — Mobile', () => {
   test('an expired supplied value and an unconfirmed decline', async ({ page }) => {
     await auditValueExpiredAndUnconfirmedDecline(page, 'project-chat-secret-request-mobile');
   });
-  test('Codex sparse transcript renders the card, live and after reload', async ({ page }) => {
+  test('Codex sparse transcript renders the card on load and after reload', async ({ page }) => {
     await auditCodex(page, 'project-chat-secret-request-mobile');
   });
   test('a failed Codex request stays a generic tool call', async ({ page }) => {
@@ -613,7 +618,7 @@ test.describe('Project chat secret request cards — Desktop', () => {
   test('an expired supplied value and an unconfirmed decline', async ({ page }) => {
     await auditValueExpiredAndUnconfirmedDecline(page, 'project-chat-secret-request-desktop');
   });
-  test('Codex sparse transcript renders the card, live and after reload', async ({ page }) => {
+  test('Codex sparse transcript renders the card on load and after reload', async ({ page }) => {
     await auditCodex(page, 'project-chat-secret-request-desktop');
   });
   test('a failed Codex request stays a generic tool call', async ({ page }) => {

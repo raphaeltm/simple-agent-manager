@@ -21,12 +21,12 @@ runtimes, not harnesses. Library cards had broken for Codex the same way twice o
 
 ## Hard Requirements
 
-1. **One list.** A new card tool goes in `TYPED_CARD_TOOLS` (`tool-cards/typed-card-tools.ts`).
-   The registry refuses any tool not on it, and the converter uses it for sparse-row recovery. Keep
-   the API compact-history list (`cardPayloadMatcher` in
-   `apps/api/src/durable-objects/project-data/row-schemas/messages.ts`) in sync.
+1. **One list.** A new card tool goes in the shared `TYPED_CHAT_CARD_TOOLS`
+   (`packages/shared/src/typed-chat-cards.ts`). The web registry refuses any tool not on it, the
+   web converter uses it for sparse-row recovery, and the API's compact-history matchers
+   (`CARD_PAYLOAD_MATCHERS`) are typed against it, so a missing matcher fails to compile.
 2. **Add the card to the cross-harness contract test**
    (`apps/web/tests/unit/components/typed-card-cross-harness.test.ts`). It fails until the new
-   tool has a fixture, and then checks that Codex's sparse rows render the card outside a generic group.
+   tool has a fixture, then checks both Codex sparse rows and Claude Code rows render the card.
 3. **Staging proof names harnesses.** Verify a real Claude Code session and a real Codex session,
    live and after a reload. A runtime matrix (VM, Instant) does not count as harness coverage.

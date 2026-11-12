@@ -46,24 +46,36 @@ The real production request stays pending for the user's retest after deployment
 
 ## Implementation checklist
 
-- [ ] Failing regression: exact Codex dotted/sparse `request_secret` sequence through
+- [x] Failing regression: exact Codex dotted/sparse `request_secret` sequence through
       `chatMessagesToConversationItems` → `matchToolCard` → `groupToolCallItems` renders
       `SecretRequestCard` outside any generic group (fails on pre-fix code).
-- [ ] One canonical typed-card tool set in `tool-cards/` consumed by both the registry and the
+- [x] One canonical typed-card tool set in `tool-cards/` consumed by both the registry and the
       message converter, so a card cannot be registered without the converter recovering it.
-- [ ] Cover: title-only/empty toolName inference, compact/reloaded history (content-only result),
+- [x] Cover: title-only/empty toolName inference, compact/reloaded history (content-only result),
       malformed result and failed call stay generic, live in-progress stays generic.
-- [ ] Contract test over every typed-card tool in the Codex sparse shape (and Claude shape), so a
+- [x] Contract test over every typed-card tool in the Codex sparse shape (and Claude shape), so a
       future card without harness coverage fails.
-- [ ] Existing Claude / library / approval / human-input tests stay green.
-- [ ] Concise scoped rule in `apps/web/.claude/rules/` for cross-harness typed cards.
-- [ ] Local Playwright audit of the full conversation path (mobile + desktop), screenshots viewed.
-- [ ] Lint, typecheck, test, build.
-- [ ] Local specialists: task-completion-validator, ui-ux-specialist, test-engineer.
+- [x] Existing Claude / library / approval / human-input tests stay green.
+- [x] Concise scoped rule in `apps/web/.claude/rules/` for cross-harness typed cards.
+- [x] Local Playwright audit of the full conversation path (mobile + desktop), screenshots viewed.
+- [x] Lint, typecheck, test, build.
+- [x] Local specialists: task-completion-validator, ui-ux-specialist, test-engineer.
 - [ ] Staging: real Codex `request_secret` → visible card → browser save → metadata-only notice →
       `exec_with_secrets` use; live and after reload/compact. Real Claude control. Fixtures cleaned.
 - [ ] Draft PR with evidence; coordinator approves exact SHA; CodeRabbit best effort; merge;
       main CI → production deploy → health/static smoke.
+
+## Implementation notes
+
+- Review follow-ups (all reviewers 0 CRITICAL/HIGH): the tool list moved to shared
+  `TYPED_CHAT_CARD_TOOLS`; the API's `CARD_PAYLOAD_MATCHERS` is a `Record` over it (compile-time
+  parity); an API compact test pins the nameless Codex result row; web tests loop both harness
+  shapes over every card, cover incremental row arrival and a deduplicated request; the Playwright
+  failed case expands the group.
+- PR #2688's compact test assumed Codex result rows carry a `sam-mcp/request_secret` title. Real
+  Codex result rows carry no title, which is why the fixture-only proof missed this.
+- Discrimination: with only `types.ts` reverted to `d3204f34d`, 6/16 original cross-harness
+  tests, the rendered Codex test and both Playwright Codex audits go red.
 
 ## Acceptance criteria
 
