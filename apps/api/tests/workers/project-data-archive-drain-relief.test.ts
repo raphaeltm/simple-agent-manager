@@ -464,6 +464,50 @@ describe('archive drain relief: expired degraded sleepers', () => {
     });
   });
 
+  it('leaves a sleeper alone while its archive fence is unverified, and expires it once it unwinds', async () => {
+    const sleeper = await seedDegradedSleeper('fenced', '2026-02-03T00:00:00.000Z', ['completed']);
+    // The fence `createCandidateJournal` writes before the root has checked eligibility. The
+    // migration id is left NULL so the fixture needs no journal row; routing parses a
+    // `migrating` location without one, and the location state is what this case is about.
+    await env.DATABASE.prepare(
+      `INSERT INTO project_data_session_locations (
+         project_id, session_id, location_state, owner_kind, owner_name, generation,
+         migration_id, source_owner_name, target_owner_name, routing_schema_version, updated_at
+       ) VALUES (?, ?, 'migrating', 'archive_shard', ?, 1, NULL, ?, ?, 1, ?)`
+    )
+      .bind(
+        sleeper.projectId,
+        sleeper.sessionId,
+        `${sleeper.projectId}:archive:g1:s0`,
+        sleeper.projectId,
+        `${sleeper.projectId}:archive:g1:s0`,
+        Date.now()
+      )
+      .run();
+    const purge = () =>
+      withArchiveEnv(
+        { SESSION_SNAPSHOT_PURGE_ENABLED: 'true', PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true' },
+        () => runSessionSnapshotPurge(testEnv, new Date())
+      );
+
+    await purge();
+    expect(await snapshotStatus(sleeper.snapshotId)).toBe('degraded');
+    expect(await sessionStatus(sleeper.projectId, sleeper.sessionId)).toBe('sleeping');
+
+    // The root refused the candidate and the fence unwound to `root`.
+    await env.DATABASE.prepare(
+      `UPDATE project_data_session_locations
+       SET location_state = 'root', owner_kind = 'root', owner_name = ?, generation = 0,
+           migration_id = NULL
+       WHERE project_id = ? AND session_id = ?`
+    )
+      .bind(sleeper.projectId, sleeper.projectId, sleeper.sessionId)
+      .run();
+    await purge();
+    expect(await snapshotStatus(sleeper.snapshotId)).toBe('expired');
+    expect(await sessionStatus(sleeper.projectId, sleeper.sessionId)).toBe('stopped');
+  });
+
   it('control: an unexpired degraded sleeper is left asleep', async () => {
     const sleeper = await seedDegradedSleeper('unexpired', '2099-01-01T00:00:00.000Z', [
       'completed',

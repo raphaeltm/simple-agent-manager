@@ -48,12 +48,15 @@ export async function expireSleepingConversation(
     });
     if (outcome !== 'transitioned' && outcome !== 'already_terminal') return false;
   }
-  // A session whose transcript has moved off the root object (archived, or mid-migration) was
-  // terminal before the archive could select it, so there is nothing left to stop, and
-  // `stopSession` would be refused by the archive write fence. Without this branch such a
-  // snapshot failed every sweep and sat at the head of the batch (staging, 2026-11-12).
+  // A PUBLISHED archive location proves the session was terminal and its transcript moved, so
+  // there is nothing left to stop, and `stopSession` would be refused by the archive write
+  // fence. Without this branch such a snapshot failed every sweep (staging, 2026-11-12).
+  // `migrating` and `frozen` prove nothing: `createCandidateJournal` fences the location
+  // before the root has checked eligibility, and a refusal unwinds it to `root`. Leave those
+  // for a later sweep rather than expire a snapshot on an unverified archive.
   const location = await resolveProjectDataSessionLocation(env, projectId, sessionId);
-  if (location.state !== 'root') return true;
+  if (location.state === 'archive_shard') return true;
+  if (location.state !== 'root') return false;
   // Retried independently of task CAS: a failed DO write must leave metadata for retry.
   await projectDataService.stopSession(env, projectId, sessionId);
   return true;

@@ -3975,7 +3975,7 @@ async function processArchiveMigrationBatch(input: {
   // `pendingSlots` (sessions copied or still in flight), and the daily write budget. There is
   // deliberately no cumulative message budget here any more. It charged refused candidates
   // for rows they never moved, and with largest-first selection one refusal used most of it,
-  // so production published exactly one session per tick (2026-11-12: 70 a day, ~45k
+  // so production published exactly one session per tick (2026-11-12: 70 a day, 84,629
   // messages, against ~85k ingested). The per-candidate size ceiling still applies in
   // `projectDataArchiveCandidateSql`. A candidate the write budget or the root refuses moved
   // nothing, so it consumes no slot and the loop falls through to the next one.
