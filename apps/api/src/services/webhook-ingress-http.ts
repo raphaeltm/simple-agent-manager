@@ -84,14 +84,18 @@ export async function takeRateLimit(
     };
   } catch (error) {
     // KV refuses rapid writes to one key, and a burst from one sender writes the same counter.
-    // A counter that cannot be updated must not turn a sender's event into a 503 (GitHub does not
-    // redeliver): fail open. Signature checks and the queue's own bounds still apply.
-    log.warn('webhook_trigger.rate_limit_unavailable', {
-      prefix,
-      errorType: error instanceof Error ? error.name : 'UnknownError',
-    });
+    // A counter that cannot be read or updated must not turn a sender's event into a 503 (GitHub
+    // does not redeliver): fail open. Signature checks and the queue's own bounds still apply.
+    logRateLimitUnavailable(prefix, error);
     return { limited: false, windowStart };
   }
+}
+
+function logRateLimitUnavailable(prefix: string, error: unknown): void {
+  log.warn('webhook_trigger.rate_limit_unavailable', {
+    prefix,
+    errorType: error instanceof Error ? error.name : 'UnknownError',
+  });
 }
 
 export function publicError(
@@ -124,12 +128,18 @@ export async function invalidTokenLimitReached(
   limits: ReturnType<typeof getWebhookTriggerLimits>
 ): Promise<boolean> {
   const windowStart = getCurrentWindowStart(limits.rateLimitWindowSeconds);
-  return isRateLimitReached(
-    env.KV,
-    createRateLimitKey('webhook-invalid', ipKey, windowStart),
-    limits.invalidTokenRateLimit,
-    windowStart
-  );
+  try {
+    return await isRateLimitReached(
+      env.KV,
+      createRateLimitKey('webhook-invalid', ipKey, windowStart),
+      limits.invalidTokenRateLimit,
+      windowStart
+    );
+  } catch (error) {
+    // Same policy as takeRateLimit: a counter that cannot be read must not refuse a sender.
+    logRateLimitUnavailable('webhook-invalid', error);
+    return false;
+  }
 }
 
 /** Audit only: a failure to record a refusal must not change the answer the sender gets. */

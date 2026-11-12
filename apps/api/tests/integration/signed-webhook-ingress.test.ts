@@ -1267,6 +1267,33 @@ describe('signed webhook ingress vertical slice', () => {
       expect(executions()).toHaveLength(2);
     });
 
+    it('takes a signed event when the rate-limit counters cannot be read, and still refuses forgeries', async () => {
+      const kv = env.KV;
+      const get = vi.fn(async () => {
+        throw new Error('KV GET failed');
+      });
+      env.KV = { ...kv, get } as unknown as KVNamespace;
+      const valid = await send(slackRequest(mention('Ev-kv', 'counter down')));
+      expect(valid.status).toBe(202);
+      expect(await valid.json()).toMatchObject({ queued: true });
+      expect(executions()).toHaveLength(1);
+      expect(submitter).toHaveBeenCalledTimes(1);
+      const forged = await send(slackRequest(mention('Ev-kv-f'), { secret: 'wrong-secret' }));
+      expect(forged.status).toBe(401);
+      expect(executions()).toHaveLength(1);
+      // Every limiter on the path was actually consulted and failed.
+      expect(get).toHaveBeenCalled();
+
+      // Control: with healthy counters the per-caller limit still refuses.
+      env.KV = kv;
+      env.WEBHOOK_INGRESS_RATE_LIMIT_PER_MINUTE = '2';
+      const statuses = [];
+      for (const n of [1, 2, 3]) {
+        statuses.push((await send(slackRequest(mention(`Ev-limit-${n}`)))).status);
+      }
+      expect(statuses).toEqual([202, 202, 429]);
+    });
+
     it('damps a flood of calls to addresses that do not exist', async () => {
       env.WEBHOOK_INVALID_TOKEN_RATE_LIMIT_PER_MINUTE = '3';
       const unknown = () =>

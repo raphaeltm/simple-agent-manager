@@ -67,11 +67,13 @@ extra field mapping and per-automation limits stay out of scope.
 - **Schemes**: `sam_bearer` (unchanged), `slack_v0`, `hmac_sha256_body` (header name only; hex or
   base64, optional `sha256=` prefix). A closed map of tested functions; adding a scheme is one
   function, its tests, one enum value and a docs row.
-- **Durable accept** (`acceptWebhookTriggerExecution`): one D1 batch inserts the `waiting`
-  execution with its rendered prompt and admission snapshot, allocates the sequence, and marks the
-  delivery `queued` with its execution link. It applies only while the automation is active, the
-  queue has room, the sequence read for rendering is unchanged, and the request still holds the
-  delivery lease. The 202 is sent after that commit; starting the run happens after the response
+- **Durable accept** (`acceptWebhookTriggerExecution`): a sequence number is taken first
+  (`UPDATE ... RETURNING`, only while the automation is active and its line has room), the prompt
+  is rendered with it, then one D1 batch inserts the `waiting` execution with its rendered prompt
+  and admission snapshot and marks the delivery `queued` with its execution link (and keeps the
+  record until the queue deadline plus retention). The batch repeats the active, room and
+  delivery-lease conditions. Ordering contract for overlapping accepts: see the comment in
+  `webhook-trigger-queue.ts`. The 202 is sent after that commit; starting the run happens after the response
   and again from the cron drain, so a disconnect or restart cannot lose the event.
 - **Backpressure**: `max_concurrent` (or one at a time with skip-if-running) bounds runs; the queue
   holds at most `operations.webhookQueueMaxPending` live events per automation (default 50). A
@@ -147,7 +149,7 @@ extra field mapping and per-automation limits stay out of scope.
 - [x] Ordering contract documented and proven with a concurrent-accept test.
 - [x] Agent sign-in sessions cannot set a signing secret; OpenAPI lists `setup`.
 - [x] Rejection project events only for refusals of signed calls; IPv6 rate limited per /64;
-      KV limiter fails open.
+      KV limiters (per-caller, per-automation, unknown-address preflight) fail open on KV errors.
 - [x] UI: viewer status line, Slack link (own line, new-tab cue), outcome wording/icons.
 
 ### Staging verification (shared staging, coordinated slot)
@@ -197,9 +199,11 @@ extra field mapping and per-automation limits stay out of scope.
   (`processQueuedTriggerExecution`); draining moved to `trigger-queue-drain.ts`
   (`drainTriggerQueue`, `drainTriggerQueueForTrigger`). Callers: `runGitHubTriggerRecovery`
   (cron), the signed route (after a commit), `acceptGitHubTriggerExecution`. GitHub rows behave
-  as before; webhook rows are told apart by `github_delivery_id IS NULL`.
+  as before; webhook queue rows are told apart by `WEBHOOK_QUEUE_ROW_SQL`
+  (`event_type = 'webhook' AND queue_expires_at IS NOT NULL`; token webhook runs share the event
+  type but have no queue deadline).
 - Coordinator review at df23f942b raised two findings, both fixed: the queue's copy of a webhook
-  prompt is cleared once the run's task boundary is recorded (`clearDispatchedWebhookPrompt`),
+  prompt is cleared once the run's task boundary is recorded (now `settleWebhookQueueRecord`, with `repairWebhookQueueRecords` from the cron),
   and a repeated refusal in one window refreshes the row's time so the setup status reads
   `rejecting` (`recordWebhookSignedNotice`).
 - Token (`sam_bearer`) webhooks keep inline admission and their response shapes; only signed
