@@ -14,26 +14,40 @@
  *
  * The runtime in the policy here is `runc`, because CI has no gVisor; the proxy enforces
  * equality with whatever the policy names, which on a box is `runsc`.
+ *
+ * Never on a live install. The proxy only lets celld use its two fixed networks (`celld`,
+ * `celld-internal`, bridges `celld0`/`celld1`, CELLD_NETWORKS in shapes.ts), so this suite has to
+ * create networks with those exact names; they cannot be run-scoped without changing what the
+ * proxy allows. Instead `refuseIfNotThrowaway()` refuses to start when any of them, or any other
+ * name this run is about to use, already exists, and cleanup removes only the objects this run
+ * created, by the id the daemon returned. Everything else (containers, image tags, the socket and
+ * policy directory) carries this run's id.
  */
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { request } from 'node:http';
 import { connect } from 'node:net';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { LIVE_TMP, REPO_ROOT, sleep, waitFor } from './harness';
+import { CELLD_NETWORKS } from '../../../deploy/selfhost/docker-proxy/shapes.ts';
+import { REPO_ROOT, sleep, waitFor } from './harness';
 
 const RUN = randomBytes(4).toString('hex');
-const IMAGE = 'sam-selfhost-docker-proxy:live-test';
+const IMAGE = `sam-selfhost-docker-proxy:live-${RUN}`;
 const BASE = 'alpine:3.22@sha256:49340b346798875b5592e5d420241f2f9cfba5f47e62ebb1446a1b34734e898f';
 const SANDBOX_IMAGE = `celld-image:${createHash('sha256').update(`sandbox-${RUN}`).digest('hex')}`;
 const FENCE_IMAGE = `celld-image:${createHash('sha256').update(`fence-${RUN}`).digest('hex')}`;
 const NODE = `live-${RUN}`;
-const DIR = join(LIVE_TMP, `docker-proxy-${RUN}`);
+// Under the system temp dir, not the repo: a Unix socket path holds at most 107 bytes, and on a
+// CI runner `<checkout>/.tmp/selfhost-live/docker-proxy-<run>/sock/docker.sock` is 117, so the
+// proxy listened inside its container while every connect from here failed (run 43154456748).
+const DIR = join(tmpdir(), `sam-dp-${RUN}`);
 const SOCKET = join(DIR, 'sock', 'docker.sock');
+const SOCKET_PATH_MAX = 107;
 const RESOLV_HOST = join(DIR, 'policy', 'container-resolv.conf');
 const CELLD_RESOLV_BIND = '/var/lib/celld/container-resolv.conf:/etc/resolv.conf:ro';
 // celld 0.6.3 FENCE_RULES, verbatim (crates/celld/container.rs).
@@ -54,7 +68,14 @@ table inet celld {
 `;
 const PROXY = `sam-docker-proxy-live-${RUN}`;
 const OUTSIDER = `sam-outsider-live-${RUN}`;
+const SWEEPER = `${PROXY}-age`;
+const CAPPED = `${PROXY}-cap`;
+/** Container ids this run created; cleanup removes these and nothing else. */
 const created = new Set<string>();
+/** Network ids this run created (only a 201 from the create adds one). */
+const createdNetworks = new Set<string>();
+/** Set once the throwaway check passed; cleanup does nothing before that. */
+let owned = false;
 
 function docker(...args: string[]): string {
   return execFileSync('docker', args, { encoding: 'utf8' }).trim();
@@ -182,8 +203,72 @@ function inspectDirect(ref: string): any {
 
 const dockerAvailable = spawnSync('docker', ['info'], { stdio: 'ignore' }).status === 0;
 
+function exists(...args: string[]): boolean {
+  return spawnSync('docker', args, { stdio: 'ignore' }).status === 0;
+}
+
+/**
+ * Refuses to start unless every name this run is about to use is free. celld's networks and
+ * bridges existing means this daemon runs (or ran) a self-hosted stack: this suite would create
+ * sandboxes on them and its cleanup used to delete them, which broke guided login on a real box.
+ */
+function refuseIfNotThrowaway(): void {
+  const taken: string[] = [];
+  for (const [name, { bridge }] of CELLD_NETWORKS) {
+    if (exists('network', 'inspect', name)) taken.push(`Docker network ${name}`);
+    if (existsSync(`/sys/class/net/${bridge}`)) taken.push(`host interface ${bridge}`);
+  }
+  for (const name of [PROXY, OUTSIDER, SWEEPER, CAPPED])
+    if (exists('container', 'inspect', name)) taken.push(`container ${name}`);
+  for (const image of [IMAGE, SANDBOX_IMAGE, FENCE_IMAGE])
+    if (exists('image', 'inspect', image)) taken.push(`image ${image}`);
+  if (existsSync(DIR)) taken.push(`directory ${DIR}`);
+  if (taken.length > 0) {
+    throw new Error(
+      `refusing to run: ${taken.join(', ')} already exist on this host. This suite creates ` +
+        "celld's networks under their real names and must only run on a throwaway Docker host, " +
+        'never on a self-hosted install. Do not delete them to make it run.'
+    );
+  }
+  for (const path of [
+    SOCKET,
+    join(DIR, 'sock-age', 'docker.sock'),
+    join(DIR, 'sock-cap', 'docker.sock'),
+  ]) {
+    if (Buffer.byteLength(path) > SOCKET_PATH_MAX) {
+      throw new Error(
+        `cannot run here: the proxy socket path ${path} is ${Buffer.byteLength(path)} bytes, over ` +
+          `the ${SOCKET_PATH_MAX}-byte Unix socket limit (set TMPDIR to a shorter directory)`
+      );
+    }
+  }
+}
+
+/** Polls the proxy's /_ping; on timeout the error names the last connect failure. */
+async function waitForPing(what: string, socketPath: string, container: string): Promise<void> {
+  let last = 'no attempt';
+  await waitFor(
+    what,
+    async () => {
+      const reply = await call('GET', '/_ping', undefined, undefined, socketPath).catch(
+        (error: Error) => {
+          last = error.message;
+          return null;
+        }
+      );
+      if (reply) last = `HTTP ${reply.status} ${JSON.stringify(reply.json).slice(0, 200)}`;
+      return reply?.status === 200;
+    },
+    30_000,
+    () => `last attempt on ${socketPath}: ${last}\n${docker('logs', container)}`
+  );
+}
+
 describe.skipIf(!dockerAvailable)('docker socket proxy (live, real daemon)', () => {
   beforeAll(async () => {
+    refuseIfNotThrowaway();
+    owned = true;
+    mkdirSync(DIR); // not recursive: fails rather than reuse a directory this run did not make
     mkdirSync(join(DIR, 'sock'), { recursive: true });
     mkdirSync(join(DIR, 'policy'), { recursive: true });
     chmodSync(join(DIR, 'sock'), 0o777); // the proxy runs as uid 7103
@@ -208,7 +293,7 @@ describe.skipIf(!dockerAvailable)('docker socket proxy (live, real daemon)', () 
     docker('tag', BASE, SANDBOX_IMAGE);
     docker('tag', BASE, FENCE_IMAGE);
     // Not celld's: a container the box runs for something else (the stack's own services).
-    docker(
+    const outsider = docker(
       'run',
       '-d',
       '--name',
@@ -219,6 +304,7 @@ describe.skipIf(!dockerAvailable)('docker socket proxy (live, real daemon)', () 
       'sleep',
       '300'
     );
+    created.add(outsider);
     const socketGid = docker(
       'run',
       '--rm',
@@ -230,7 +316,7 @@ describe.skipIf(!dockerAvailable)('docker socket proxy (live, real daemon)', () 
       '%g',
       '/s'
     );
-    docker(
+    const proxy = docker(
       'run',
       '-d',
       '--name',
@@ -257,24 +343,22 @@ describe.skipIf(!dockerAvailable)('docker socket proxy (live, real daemon)', () 
       `${join(DIR, 'policy')}:/etc/sam/docker-proxy:ro`,
       IMAGE
     );
-    await waitFor(
-      'the proxy socket',
-      async () => (await call('GET', '/_ping').catch(() => null))?.status === 200,
-      30_000,
-      () => docker('logs', PROXY)
-    );
+    created.add(proxy);
+    await waitForPing('the proxy socket', SOCKET, PROXY);
   });
 
   afterAll(() => {
+    if (!owned) return; // refused to start: nothing here is this run's
     for (const id of created) spawnSync('docker', ['rm', '-f', id], { stdio: 'ignore' });
-    spawnSync('docker', ['rm', '-f', PROXY, OUTSIDER], { stdio: 'ignore' });
-    spawnSync('docker', ['rmi', SANDBOX_IMAGE, FENCE_IMAGE], { stdio: 'ignore' });
-    spawnSync('docker', ['network', 'rm', 'celld', 'celld-internal'], { stdio: 'ignore' });
+    for (const id of createdNetworks)
+      spawnSync('docker', ['network', 'rm', id], { stdio: 'ignore' });
+    spawnSync('docker', ['rmi', SANDBOX_IMAGE, FENCE_IMAGE, IMAGE], { stdio: 'ignore' });
     rmSync(DIR, { recursive: true, force: true });
   });
 
   it("runs celld's own sequence end to end (control)", async () => {
-    // networks(): create both bridges exactly as celld does (409 when they exist is fine).
+    // networks(): create both bridges exactly as celld does. The throwaway check proved they
+    // did not exist, so each must be created here (and is removed by id in afterAll).
     for (const [name, internal, bridge] of [
       ['celld', false, 'celld0'],
       ['celld-internal', true, 'celld1'],
@@ -288,7 +372,9 @@ describe.skipIf(!dockerAvailable)('docker socket proxy (live, real daemon)', () 
           'com.docker.network.bridge.name': bridge,
         },
       });
-      expect([201, 409]).toContain(reply.status);
+      expect(reply.status).toBe(201);
+      expect(typeof reply.json.Id).toBe('string');
+      createdNetworks.add(reply.json.Id as string);
       expect((await call('GET', `/networks/${name}`)).status).toBe(200);
     }
     expect((await call('GET', `/images/${SANDBOX_IMAGE}/json`)).status).toBe(200);
@@ -646,7 +732,7 @@ describe.skipIf(!dockerAvailable)('docker socket proxy (live, real daemon)', () 
 
   it('removes sandboxes older than the maximum session age, and nothing else', async () => {
     // A second proxy with a 3 s age limit and a 1 s sweep, on its own socket.
-    const sweeper = `${PROXY}-age`;
+    const sweeper = SWEEPER;
     const dir = join(DIR, 'sock-age');
     mkdirSync(dir, { recursive: true });
     chmodSync(dir, 0o777);
@@ -675,7 +761,7 @@ describe.skipIf(!dockerAvailable)('docker socket proxy (live, real daemon)', () 
       '300'
     );
     created.add(lookalike);
-    docker(
+    const sweeperId = docker(
       'run',
       '-d',
       '--name',
@@ -699,7 +785,7 @@ describe.skipIf(!dockerAvailable)('docker socket proxy (live, real daemon)', () 
       `${join(DIR, 'policy')}:/etc/sam/docker-proxy:ro`,
       IMAGE
     );
-    created.add(sweeper);
+    created.add(sweeperId);
     try {
       await waitFor(
         'the over-age sandbox to be removed',
@@ -710,13 +796,13 @@ describe.skipIf(!dockerAvailable)('docker socket proxy (live, real daemon)', () 
       expect(inspectDirect(lookalike).State.Running).toBe(true);
       expect(docker('logs', sweeper)).toContain('"reason":"over_max_age"');
     } finally {
-      spawnSync('docker', ['rm', '-f', sweeper], { stdio: 'ignore' });
+      spawnSync('docker', ['rm', '-f', sweeperId], { stdio: 'ignore' });
     }
   });
 
   it('caps how many containers celld can have, even when it asks in parallel', async () => {
     // A second proxy whose cap leaves room for exactly two more celld containers on this daemon.
-    const capped = `${PROXY}-cap`;
+    const capped = CAPPED;
     const dir = join(DIR, 'sock-cap');
     mkdirSync(dir, { recursive: true });
     chmodSync(dir, 0o777);
@@ -734,7 +820,7 @@ describe.skipIf(!dockerAvailable)('docker socket proxy (live, real daemon)', () 
     const live = docker('ps', '-aq', '--filter', 'label=celld.node')
       .split('\n')
       .filter(Boolean).length;
-    docker(
+    const cappedId = docker(
       'run',
       '-d',
       '--name',
@@ -758,17 +844,10 @@ describe.skipIf(!dockerAvailable)('docker socket proxy (live, real daemon)', () 
       `${join(DIR, 'policy')}:/etc/sam/docker-proxy:ro`,
       IMAGE
     );
-    created.add(capped);
+    created.add(cappedId);
     const socket = join(dir, 'docker.sock');
     try {
-      await waitFor(
-        'the capped proxy socket',
-        async () =>
-          (await call('GET', '/_ping', undefined, undefined, socket).catch(() => null))?.status ===
-          200,
-        30_000,
-        () => docker('logs', capped)
-      );
+      await waitForPing('the capped proxy socket', socket, capped);
       const replies = await Promise.all(
         Array.from({ length: 6 }, (_, i) =>
           call(
@@ -786,7 +865,7 @@ describe.skipIf(!dockerAvailable)('docker socket proxy (live, real daemon)', () 
       expect(replies.map((r) => r.status).sort()).toEqual([201, 201, 429, 429, 429, 429]);
       expect(docker('logs', capped)).toContain(`limit ${live + 2}`);
     } finally {
-      spawnSync('docker', ['rm', '-f', capped], { stdio: 'ignore' });
+      spawnSync('docker', ['rm', '-f', cappedId], { stdio: 'ignore' });
     }
   });
 
