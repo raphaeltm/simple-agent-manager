@@ -115,13 +115,10 @@ export function archiveAffordableMessageCeiling(
  *   a defect in the estimator or its inputs.
  */
 export type ArchiveWriteRefusalReason =
-  | 'invalid_estimate'
-  | 'exceeds_allowance'
-  | 'window_exhausted';
+  'invalid_estimate' | 'exceeds_allowance' | 'window_exhausted';
 
 export type ArchiveWriteReservationOutcome =
-  | { reserved: true }
-  | { reserved: false; reason: ArchiveWriteRefusalReason };
+  { reserved: true } | { reserved: false; reason: ArchiveWriteRefusalReason };
 
 /** Indexed, session-scoped, capped inventory. Includes FTS text size as well as row count.
  * This is a conservative scheduling estimate, NOT a Cloudflare invoice ceiling.
@@ -196,8 +193,10 @@ export async function reserveArchiveWrites(
   return row !== null ? { reserved: true } : { reserved: false, reason: 'window_exhausted' };
 }
 
-/** Call ONLY after a definite journal/lease loss, before any archive RPC began.
- * A failed/ambiguous archive attempt is never eligible. Atomic receipts prevent a
+/** Call ONLY when the attempt definitely wrote no archive rows: a lost journal or lease
+ * race before any archive RPC began, or a pre-copy refusal (`prepareArchiveSourceIntentOrRefuse`
+ * returns `refused` only before it writes a source intent). A failed or ambiguous archive
+ * attempt is never eligible. Atomic receipts prevent a
  * duplicated release from subtracting somebody else's allowance; rollover cannot
  * subtract an old reservation from the new day's pool.
  */

@@ -139,3 +139,6 @@ export {
 } from './do/terminal-session-reconciliation';
 export { ProjectDataManualToolPayloadCleanupStateError } from './do/tool-payload-cleanup-types';
 export { type ProjectDataEnv } from './do/types';
+// Resolves where a session's rows live (root object or an archive shard). Worker services that
+// must not mistake an archived session for a missing one use it (services/session-expiry.ts).
+export { resolveProjectDataSessionLocation } from './client/project-data-archive-routing';
