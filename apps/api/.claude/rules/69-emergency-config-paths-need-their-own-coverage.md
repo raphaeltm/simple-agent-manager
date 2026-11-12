@@ -199,7 +199,7 @@ Every fixture had at most a hundred rows, so the same statement ran in milliseco
 - Implementation: `packages/project-data/src/do/tool-payload-cleanup.ts`
   (`createToolPayloadCleanupPlan`, `scanApprovedToolPayloadCleanupBatch`),
   `packages/project-data/src/do/tool-payload-cleanup-manifest.ts`
-- Tests: `apps/api/tests/unit/durable-objects/tool-payload-cleanup-manifest.test.ts`,
+- Tests: `packages/project-data/tests/unit/tool-payload-cleanup-manifest.test.ts`,
   the manifest-scope group in
   `apps/api/tests/workers/project-data-tool-payload-archive.test.ts`
 - `.claude/rules/28-credential-resolution-fallback-tests.md` — every attack case needs an owner control
