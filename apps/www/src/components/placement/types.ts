@@ -8,7 +8,7 @@
 import type { CatalogOffering, ProviderCatalog, Tier } from './catalog';
 
 /** Real default: `DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB`
- * (apps/api/src/services/workspace-admission-policy.ts). Memory the host keeps for itself. */
+ * (apps/api/src/scheduler-core/workspace-admission-policy.ts). Memory the host keeps for itself. */
 export const HOST_MEMORY_RESERVE_MB = 1024;
 
 /** Illustrative step counts. Real equivalents are wall-clock and configurable. */
@@ -59,11 +59,11 @@ export const HOST_ORDERING: Record<Strategy, string> = {
 };
 
 /** How each strategy orders brand-new hardware. Mirrors `compareCapacityCandidates`
- * (apps/api/src/services/placement-capacity-ranking.ts). */
+ * (apps/api/src/scheduler-core/placement-capacity-ranking.ts). */
 export const OFFERING_ORDERING: Record<Strategy, string> = {
   pack: 'largest offering first',
   // NOT "cheapest first". The real default weights are `fit: 1_000_000` against `price: 1`
-  // (`DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS`, capacity-pool-placement-settings.ts), so fit
+  // (`DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS`, scheduler-core capacity-pool-selection-defaults.ts), so fit
   // dominates the weighted score by six orders of magnitude and price is only ever a tie-break.
   balanced: 'tightest fit first, then cheapest',
   spread: 'tightest fit first, then cheapest',
