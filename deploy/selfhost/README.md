@@ -4,8 +4,9 @@ Status: integration branch work (self-host pass 2). Not a supported install path
 
 The SAM API Worker and web UI run on [celld](https://celld.dev) behind Caddy on one machine,
 with no Cloudflare account. Nodes reach the box through frps (the reverse-tunnel transport).
-Instant sessions, Workers AI features, Analytics Engine and Artifacts are off. Email sign-in works
-through an SMTP relay or, on a test install, the bundled mail collector (see Email sign-in below).
+Instant sessions, Workers AI features and Analytics Engine are off. SAM-hosted git repositories
+are served by the Worker itself (see SAM-hosted repositories below). Email sign-in works through an
+SMTP relay or, on a test install, the bundled mail collector (see Email sign-in below).
 
 ## What runs
 
@@ -319,13 +320,34 @@ Code: `deploy/selfhost/sam-mx/` (receiver and its tests),
 `apps/api/src/services/agent-email/self-host-inbound.ts` (on-switch, SMTP reply sender),
 `scripts/selfhost/inbound-mail-settings.ts` (deploy wiring).
 
+## SAM-hosted repositories
+
+Cloudflare Artifacts does not exist off Cloudflare, so the box serves SAM-native repositories from
+its own git server: one `HostedGitRepo` Durable Object per repository, running the vendored dgit
+core (`apps/api/src/vendor/dgit/`). The deploy turns it on (`ARTIFACTS_ENABLED=true`,
+`HOSTED_GIT_BACKEND=durable-object` in `scripts/selfhost/celld-config.ts`); repositories live in the
+fleet bucket like every other Durable Object, so the bucket backup covers them.
+
+- Remote: `https://api.SAM_DOMAIN/git/<repo>.git`, served by the existing catch-all route (no Caddy
+  fragment). Every request needs a SAM repository token as the HTTP Basic password (any username).
+- Workspaces get a token bound to their workspace from `POST /api/workspaces/:id/git-token`; it stops
+  working when the workspace stops. Only nodes created after this deploy attach it (VM agent change).
+- People get a token from `POST /api/projects/:id/hosted-git/token` (`?scope=write` to push; project
+  members only), then `git clone https://x:<token>@api.SAM_DOMAIN/git/<repo>.git`.
+- Caps (code defaults in `apps/api/src/services/hosted-git/limits.ts`, chosen so each request fits
+  celld's 300 s handler budget): 64 MiB per push, 30,000 objects and 256 MiB of storage per
+  repository. A refused push says why in git's output (`remote: SAM: push refused: ...`). Importing a
+  large existing history is not supported.
+- No pull requests: agents push branches; review in SAM's repository browser and compare view.
+- Smoke test: `scripts/selfhost/hosted-git-smoke.sh` (needs `SAM_DOMAIN` and an API token).
+
 ## Known gaps in this pass
 
-- Off on purpose: Instant sessions and guided credential login (Cloudflare Containers), Artifacts
-  (SAM-native repos), Analytics Engine, AI Gateway, Workers AI features (TTS, task titles,
-  stalled-task classifier). Agent email needs the `mail-in` profile (see Inbound agent email); the
-  admin agent-email setup and loopback test remain Cloudflare-only.
-  Project creation needs a GitHub App or GitLab.
+- Off on purpose: Instant sessions and guided credential login (Cloudflare Containers), Analytics
+  Engine, AI Gateway, Workers AI features (TTS, task titles, stalled-task classifier). Agent email
+  needs the `mail-in` profile (see Inbound agent email); the admin agent-email setup and loopback
+  test remain Cloudflare-only. Projects can use a SAM-hosted repository (no GitHub or GitLab
+  needed, see SAM-hosted repositories), a GitHub App or GitLab.
 - Without Cloudflare, voice transcription, server read-aloud and the Workers AI model catalog
   answer `404 FEATURE_UNAVAILABLE`, and the web UI hides the mic and server read-aloud. The SAM
   agent, project agents, task titles and the diagnosis runner need an OpenAI-compatible endpoint:

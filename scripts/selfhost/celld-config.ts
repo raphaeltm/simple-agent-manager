@@ -21,8 +21,11 @@ export const SELFHOST_VAR_OVERRIDES: Readonly<Record<string, string>> = {
   // blocks container -> host traffic on a one-box install (idea 01M72M9AEB933ZY8269D376DKC).
   CF_CONTAINER_ENABLED: 'false',
   SANDBOX_ENABLED: 'false',
-  // Cloudflare Artifacts (SAM-native git repos); the binding is dropped below.
-  ARTIFACTS_ENABLED: 'false',
+  // SAM-native git repos: the Cloudflare Artifacts binding is dropped below, and the local
+  // Durable Object git server (HostedGitRepo, apps/api/src/services/hosted-git/) serves them
+  // at https://api.<SAM_DOMAIN>/git/<repo>.git instead.
+  ARTIFACTS_ENABLED: 'true',
+  HOSTED_GIT_BACKEND: 'durable-object',
   // Managed devcontainer cache uses the Cloudflare container registry API.
   DEVCONTAINER_CACHE_ENABLED: 'false',
   // AI proxy and the control plane's own LLM features go through AI Gateway / Workers AI.
@@ -273,7 +276,10 @@ const RULES: Readonly<Record<string, Rule>> = {
       );
     },
   },
-  artifacts: { kind: 'drop', reason: 'Cloudflare Artifacts binding; ARTIFACTS_ENABLED=false' },
+  artifacts: {
+    kind: 'drop',
+    reason: 'Cloudflare Artifacts binding; the HostedGitRepo Durable Object serves SAM-native repos',
+  },
   analytics_engine_datasets: {
     kind: 'drop',
     reason: 'Analytics Engine binding; ANALYTICS_ENABLED=false',

@@ -470,6 +470,16 @@ class_name = "WorkspaceBootLog"
 tag = "v22"
 new_sqlite_classes = ["McpRateCounter", "WorkspaceBootLog"]
 
+# SAM-hosted git repositories: one SQLite Durable Object per repository (vendored dgit core).
+# Used only when HOSTED_GIT_BACKEND="durable-object" (self-host); idle elsewhere.
+[[durable_objects.bindings]]
+name = "HOSTED_GIT"
+class_name = "HostedGitRepo"
+
+[[migrations]]
+tag = "v23"
+new_sqlite_classes = ["HostedGitRepo"]
+
 # Analytics Engine for usage tracking (Phase 1 — server-side analytics)
 [[analytics_engine_datasets]]
 binding = "ANALYTICS"

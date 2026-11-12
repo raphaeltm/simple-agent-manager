@@ -15,6 +15,7 @@
 import type { Env } from '../env';
 import { emailTransportKind } from './agent-email/provider';
 import { hasInboundAgentEmail } from './agent-email/self-host-inbound';
+import { resolveArtifactsBackend } from './hosted-git/backend';
 import { resolveR2PresignConfig } from './r2-presign-config';
 
 /** One platform service. The name is also the `feature` field of a FEATURE_UNAVAILABLE error. */
@@ -48,6 +49,8 @@ type CapabilityEnv = Pick<
   | 'ANALYTICS'
   | 'ARTIFACTS'
   | 'ARTIFACTS_ENABLED'
+  | 'HOSTED_GIT'
+  | 'HOSTED_GIT_BACKEND'
   | 'CONTAINER_RUNTIME_AVAILABLE'
   | 'SANDBOX'
   | 'CREDENTIAL_SETUP_SESSION'
@@ -172,9 +175,17 @@ export function isGuidedCredentialSetupAvailable(
   );
 }
 
-/** Cloudflare Artifacts (SAM-native Git repositories). */
-export function isArtifactsAvailable(env: Pick<Env, 'ARTIFACTS' | 'ARTIFACTS_ENABLED'>): boolean {
-  return env.ARTIFACTS_ENABLED === 'true' && !!env.ARTIFACTS;
+/**
+ * SAM-native Git repositories: Cloudflare Artifacts, or on self-host the local Durable Object git
+ * server (`services/hosted-git/backend.ts`, the one resolver for both).
+ */
+export function isArtifactsAvailable(
+  env: Pick<
+    Env,
+    'ARTIFACTS' | 'ARTIFACTS_ENABLED' | 'HOSTED_GIT' | 'HOSTED_GIT_BACKEND' | 'BASE_DOMAIN'
+  >
+): boolean {
+  return resolveArtifactsBackend(env) !== null;
 }
 
 /** Resolve every capability from bindings and settings. Pure and synchronous. */

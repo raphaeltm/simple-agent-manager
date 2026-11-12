@@ -8,10 +8,16 @@ import type {
 } from '@simple-agent-manager/shared';
 import { createPatch } from 'diff';
 import git from 'isomorphic-git';
-import http from 'isomorphic-git/http/web';
+import webHttp from 'isomorphic-git/http/web';
 
 import type { Env } from '../../env';
 import { errors } from '../../middleware/error';
+import {
+  artifactsRemoteFetch,
+  isLocalHostedGitActive,
+  resolveArtifactsBackend,
+} from '../hosted-git/backend';
+import { createFetchHttpClient } from './fetch-http-client';
 import { MemoryFS } from './memory-fs';
 import type { RepoBrowser } from './types';
 import { basename, guessContentType, isBinaryBytes, maxCompareFiles, maxInlineBytes } from './util';
@@ -23,9 +29,12 @@ const DIR = '/repo';
 type IsoFs = Parameters<typeof git.clone>[0]['fs'];
 type OnAuth = Parameters<typeof git.clone>[0]['onAuth'];
 
+type HttpClient = Parameters<typeof git.clone>[0]['http'];
+
 interface ArtifactsRepoInfo {
   remote: string;
   onAuth: OnAuth;
+  http: HttpClient;
 }
 
 function countPatchLines(patch: string): { additions: number; deletions: number } {
@@ -163,7 +172,7 @@ export class ArtifactsRepoBrowser implements RepoBrowser {
   private async info(): Promise<ArtifactsRepoInfo> {
     if (!this.infoPromise) {
       this.infoPromise = (async () => {
-        const binding = this.env.ARTIFACTS;
+        const binding = this.env.ARTIFACTS ?? resolveArtifactsBackend(this.env);
         if (!binding) throw errors.badRequest('Artifacts is not enabled on this deployment');
         const repo = await binding.get(this.repoId);
         const ttl =
@@ -175,7 +184,11 @@ export class ArtifactsRepoBrowser implements RepoBrowser {
         if (!remote) {
           throw errors.badRequest('Artifacts repository has no resolvable clone URL');
         }
-        return { remote, onAuth };
+        // SAM-hosted repositories are read in-process, not through the public ingress.
+        const http = isLocalHostedGitActive(this.env)
+          ? createFetchHttpClient(artifactsRemoteFetch(this.env))
+          : webHttp;
+        return { remote, onAuth, http };
       })();
     }
     return this.infoPromise;
@@ -183,7 +196,7 @@ export class ArtifactsRepoBrowser implements RepoBrowser {
 
   /** Shallow single-branch clone of `ref` into a fresh in-memory fs. */
   private async cloneRef(ref: string): Promise<IsoFs> {
-    const { remote, onAuth } = await this.info();
+    const { remote, onAuth, http } = await this.info();
     const fs = new MemoryFS() as unknown as IsoFs;
     // noCheckout: we read objects via walk/readBlob, never the working tree — this
     // avoids writing a second copy of every blob into the in-memory fs.
@@ -202,7 +215,7 @@ export class ArtifactsRepoBrowser implements RepoBrowser {
   }
 
   async listBranches(): Promise<RepoBranchesResponse> {
-    const { remote, onAuth } = await this.info();
+    const { remote, onAuth, http } = await this.info();
     const refs = await git.listServerRefs({
       http,
       url: remote,
@@ -260,7 +273,7 @@ export class ArtifactsRepoBrowser implements RepoBrowser {
   }
 
   async compare(base: string, head: string): Promise<RepoCompareResponse> {
-    const { remote, onAuth } = await this.info();
+    const { remote, onAuth, http } = await this.info();
     const fs = new MemoryFS() as unknown as IsoFs;
     await git.clone({
       fs,

@@ -1,0 +1,7 @@
+{
+  "name": "hosted-git-celld",
+  "main": "entry.ts",
+  "compatibility_date": "2026-01-01",
+  "durable_objects": { "bindings": [{ "name": "HOSTED_GIT", "class_name": "HostedGitRepo" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["HostedGitRepo"] }]
+}

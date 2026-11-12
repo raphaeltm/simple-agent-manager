@@ -1,6 +1,7 @@
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { errors } from '../../middleware/error';
+import { resolveArtifactsBackend } from '../hosted-git/backend';
 import { GitHubRepoBrowser } from './github';
 import type { RepoBrowser } from './types';
 
@@ -37,7 +38,7 @@ export async function resolveRepoBrowser(opts: {
   }
 
   if (provider === 'artifacts') {
-    if (env.ARTIFACTS_ENABLED !== 'true' || !env.ARTIFACTS) {
+    if (!resolveArtifactsBackend(env)) {
       throw errors.badRequest('Artifacts is not enabled on this deployment');
     }
     if (!project.artifactsRepoId) {

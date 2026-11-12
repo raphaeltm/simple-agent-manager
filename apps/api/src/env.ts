@@ -98,6 +98,11 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
       }>;
     }>;
   };
+  // SAM-hosted git repositories (self-host): the Durable Object git server behind the local
+  // ARTIFACTS backend (services/hosted-git/backend.ts). Used only when HOSTED_GIT_BACKEND is
+  // "durable-object" and no Cloudflare Artifacts binding exists.
+  HOSTED_GIT?: DurableObjectNamespace;
+  HOSTED_GIT_BACKEND?: string;
   // Analytics Engine for usage tracking (optional — binding absent in local dev / Miniflare)
   ANALYTICS?: AnalyticsEngineDataset;
   // Observability D1 (error storage — spec 023)
