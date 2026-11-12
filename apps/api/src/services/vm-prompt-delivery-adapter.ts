@@ -374,7 +374,8 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
       this.env,
       target,
       input.requestTimeoutMs,
-      input.sourceTaskGuard
+      input.sourceTaskGuard,
+      true
     );
     if (!capabilities) {
       return {

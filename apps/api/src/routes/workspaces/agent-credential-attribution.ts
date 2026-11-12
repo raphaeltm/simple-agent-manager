@@ -29,6 +29,20 @@ type PersistedAgentCredentialAttribution = {
   credentialGeneration: number;
 };
 
+function parsePersistedAttribution(
+  row: Record<string, unknown> | null
+): PersistedAgentCredentialAttribution | null {
+  if (
+    !row ||
+    typeof row.id !== 'string' ||
+    typeof row.credentialGeneration !== 'number' ||
+    !Number.isSafeInteger(row.credentialGeneration) ||
+    row.credentialGeneration < 1
+  )
+    return null;
+  return { agentSessionId: row.id, credentialGeneration: row.credentialGeneration };
+}
+
 export async function persistAgentCredentialAttribution(
   env: Env,
   workspace: WorkspaceCallbackIdentitySnapshot,
@@ -46,7 +60,8 @@ export async function persistAgentCredentialAttribution(
       input.workspaceId,
       input.attribution.credentialReference,
       workspace,
-      input.agentType
+      input.agentType,
+      input.agentSessionId
     );
 
   const now = new Date().toISOString();
@@ -78,12 +93,13 @@ export async function persistAgentCredentialAttribution(
         workspace.userId,
         input.agentType
       )
-      .first<PersistedAgentCredentialAttribution>();
+      .first();
 
-    if (!update) {
+    const attribution = parsePersistedAttribution(update);
+    if (!attribution) {
       throw errors.forbidden('Agent session does not match workspace callback identity');
     }
-    return update;
+    return attribution;
   }
 
   const target = await env.DATABASE.prepare(
@@ -129,8 +145,8 @@ export async function persistAgentCredentialAttribution(
       now,
       target.id
     )
-    .first<PersistedAgentCredentialAttribution>();
-  return update;
+    .first();
+  return parsePersistedAttribution(update);
 }
 
 export function credentialAttributionFromData(
