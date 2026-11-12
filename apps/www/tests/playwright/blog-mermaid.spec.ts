@@ -101,6 +101,11 @@ const mermaidPosts = [
     path: '/blog/sams-journal-vms-with-no-open-ports/',
     screenshotName: 'vm-tunnel',
   },
+  {
+    name: 'the secret request journal',
+    path: '/blog/sams-journal-asking-for-a-secret/',
+    screenshotName: 'secret-request',
+  },
 ];
 
 for (const post of mermaidPosts) {
