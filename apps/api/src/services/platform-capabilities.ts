@@ -36,7 +36,8 @@ export type PlatformCapability =
   | 'workersObservability'
   | 'r2Presign'
   | 'speechToText'
-  | 'textToSpeech';
+  | 'textToSpeech'
+  | 'liveLogStream';
 
 export type PlatformCapabilities = Readonly<Record<PlatformCapability, boolean>>;
 
@@ -55,6 +56,7 @@ type CapabilityEnv = Pick<
   | 'HOSTED_GIT'
   | 'HOSTED_GIT_BACKEND'
   | 'CONTAINER_RUNTIME_AVAILABLE'
+  | 'LOG_TAIL_AVAILABLE'
   | 'SANDBOX'
   | 'CREDENTIAL_SETUP_SESSION'
   | 'SETUP_SESSION_POOL'
@@ -163,6 +165,16 @@ export function isContainerWorkspaceRuntimeEnabled(
   return (env.CF_CONTAINER_ENABLED ?? env.SANDBOX_ENABLED) === 'true' && hasContainerRuntime(env);
 }
 
+/**
+ * Whether Admin → Stream can receive anything. The stream is fed by the tail worker (a Cloudflare
+ * `tail_consumers` attachment), which the Worker cannot see from inside, so the deployment
+ * declares its absence: `LOG_TAIL_AVAILABLE="false"` (scripts/selfhost/celld-config.ts). Unset
+ * means available, which keeps Cloudflare deployments unchanged.
+ */
+export function hasLiveLogStream(env: Pick<Env, 'LOG_TAIL_AVAILABLE'>): boolean {
+  return env.LOG_TAIL_AVAILABLE?.trim().toLowerCase() !== 'false';
+}
+
 /** Guided credential setup runs the Sandbox SDK and two coordination Durable Objects. */
 export function isGuidedCredentialSetupAvailable(
   env: Pick<
@@ -216,6 +228,7 @@ export function resolvePlatformCapabilities(env: CapabilityEnv): PlatformCapabil
     r2Presign: resolveR2PresignConfig(env) !== null,
     speechToText: workersAi,
     textToSpeech: workersAi && env.TTS_ENABLED !== 'false',
+    liveLogStream: hasLiveLogStream(env),
   };
 }
 
@@ -229,6 +242,10 @@ export interface PublicPlatformCapabilities {
   textToSpeech: boolean;
   /** Whether a monthly AI dollar cap can be set (onboarding's SAM-managed AI step reads it). */
   monthlyCostCap: boolean;
+  /** Admin → Logs search (Workers Observability). Off on self-host: logs are read on the box. */
+  logSearch: boolean;
+  /** Admin → Stream (tail worker). Off on self-host. */
+  liveLogStream: boolean;
 }
 
 export function publicPlatformCapabilities(env: CapabilityEnv): PublicPlatformCapabilities {
@@ -237,5 +254,7 @@ export function publicPlatformCapabilities(env: CapabilityEnv): PublicPlatformCa
     speechToText: capabilities.speechToText,
     textToSpeech: capabilities.textToSpeech,
     monthlyCostCap: capabilities.monthlyCostCap,
+    logSearch: capabilities.workersObservability,
+    liveLogStream: capabilities.liveLogStream,
   };
 }

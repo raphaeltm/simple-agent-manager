@@ -36,6 +36,9 @@ export const SELFHOST_VAR_OVERRIDES: Readonly<Record<string, string>> = {
   // No Analytics Engine here: product analytics go to the D1 sink in OBSERVABILITY_DATABASE
   // (apps/api/src/services/analytics-d1-sink.ts), bounded by its retention and row cap.
   ANALYTICS_SINK: 'd1',
+  // No tail worker on celld, so nothing feeds Admin → Stream; the page says to read logs on
+  // the box instead (platform-capabilities.ts hasLiveLogStream).
+  LOG_TAIL_AVAILABLE: 'false',
   // AI Gateway cost reports.
   COST_MONITORING_ENABLED: 'false',
   // wrangler.toml ships AI_GATEWAY_ID="sam". Empty makes every gateway consumer take its

@@ -45,6 +45,8 @@ function selfHostEnv(overrides: Partial<Env> = {}): Env {
     CREDENTIAL_SETUP_SESSION: binding,
     SETUP_SESSION_POOL: binding,
     CONTAINER_RUNTIME_AVAILABLE: 'false',
+    // scripts/selfhost/celld-config.ts declares no tail worker.
+    LOG_TAIL_AVAILABLE: 'false',
     BASE_DOMAIN: 'example.com',
     ...overrides,
   } as unknown as Env;
