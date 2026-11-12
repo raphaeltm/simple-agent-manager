@@ -11,8 +11,11 @@
  *
  * `containerFetch` is the SDK's documented override point (the SDK itself overrides Container's).
  * This class lets the SDK decide first and only rewrites a 503 startup answer whose underlying
- * error names one of those engine failures into the SDK's own permanent-failure answer (500,
- * `INTERNAL_ERROR`), so the client stops retrying and the caller fails within seconds. On
+ * engine error names one of those failures into the SDK's own permanent-failure answer (500,
+ * `INTERNAL_ERROR`), so the client stops retrying and the caller fails within seconds. celld
+ * reports the engine error through the container's exit result (`ctx.container.monitor()`), not
+ * in the SDK's 503 (which by then says "the container is not running"), so that is read too,
+ * bounded to `DEFAULT_ENGINE_EXIT_PROBE_MS`. On
  * Cloudflare those messages never occur and every answer passes through unchanged.
  */
 import { Sandbox } from '@cloudflare/sandbox';
@@ -24,6 +27,6 @@ export class SandboxDO extends Sandbox<Env> {
   override async containerFetch(
     ...args: Parameters<Sandbox<Env>['containerFetch']>
   ): Promise<Response> {
-    return failFastOnPermanentStartup(await super.containerFetch(...args));
+    return failFastOnPermanentStartup(await super.containerFetch(...args), this.ctx.container);
   }
 }

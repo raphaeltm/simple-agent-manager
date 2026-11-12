@@ -10,9 +10,11 @@
 import { describe, expect, it, vi } from 'vitest';
 
 let baseAnswer: Response = new Response('ok');
+let monitor: () => Promise<unknown> = () => new Promise(() => undefined);
 
 vi.mock('@cloudflare/sandbox', () => ({
   Sandbox: class {
+    ctx = { container: { monitor: () => monitor() } };
     async containerFetch(): Promise<Response> {
       return baseAnswer;
     }
@@ -20,7 +22,7 @@ vi.mock('@cloudflare/sandbox', () => ({
 }));
 
 const { SandboxDO } = await import('../../../src/durable-objects/sandbox-do');
-const { PERMANENT_STARTUP_MESSAGE, permanentEngineStartError } =
+const { DEFAULT_ENGINE_EXIT_PROBE_MS, PERMANENT_STARTUP_MESSAGE, permanentEngineStartError } =
   await import('../../../src/services/sandbox-startup-errors');
 
 /** The SDK's 503 for a startup error it does not recognise. */
@@ -37,8 +39,12 @@ function sdkStartup503(error: string): Response {
   );
 }
 
-async function fetchThroughSubclass(answer: Response): Promise<Response> {
+async function fetchThroughSubclass(
+  answer: Response,
+  exit: () => Promise<unknown> = () => new Promise(() => undefined)
+): Promise<Response> {
   baseAnswer = answer;
+  monitor = exit;
   const instance = new (
     SandboxDO as unknown as new () => {
       containerFetch(url: string): Promise<Response>;
@@ -85,6 +91,46 @@ describe('SandboxDO permanent container start failures', () => {
     expect((await fetchThroughSubclass(unavailable)).status).toBe(503);
     const notJson = new Response('busy', { status: 503 });
     expect((await fetchThroughSubclass(notJson)).status).toBe(503);
+  });
+
+  // What celld 0.6.3 actually produces (seen on the prototype box): the SDK's 503 carries a
+  // generic "the container is not running", and celld's real reason is the container's exit
+  // result, read through ctx.container.monitor().
+  it.each([
+    'Create container failed with [403] sam-docker-proxy refused: HostConfig: Runtime must be runsc',
+    'Create container failed with [400] Error response from daemon: unknown or invalid runtime name: runsc',
+  ])('answers 500 when the container exit result is permanent: "%s"', async (exitError) => {
+    const response = await fetchThroughSubclass(sdkStartup503('the container is not running'), () =>
+      Promise.reject(exitError)
+    );
+    expect(response.status).toBe(500);
+    const body = (await response.json()) as { message: string; context: { error: string } };
+    expect(body.message).toBe(PERMANENT_STARTUP_MESSAGE);
+    expect(body.context.error).toBe(exitError);
+  });
+
+  it('stays retryable while the container is still starting (no exit result within the probe)', async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = fetchThroughSubclass(sdkStartup503('the container is not running'));
+      await vi.advanceTimersByTimeAsync(DEFAULT_ENGINE_EXIT_PROBE_MS);
+      expect((await pending).status).toBe(503);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stays retryable for an exit that is not a permanent engine failure', async () => {
+    expect(
+      (
+        await fetchThroughSubclass(sdkStartup503('the container is not running'), () =>
+          Promise.reject(new Error('container exited with code 1'))
+        )
+      ).status
+    ).toBe(503);
+    expect(
+      (await fetchThroughSubclass(sdkStartup503('x'), () => Promise.resolve(undefined))).status
+    ).toBe(503);
   });
 
   it('only reads startup-phase errors', () => {

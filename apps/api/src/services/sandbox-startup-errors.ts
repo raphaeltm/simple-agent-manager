@@ -10,8 +10,11 @@
  *
  * `containerFetch` is the SDK's documented override point (the SDK itself overrides Container's).
  * This class lets the SDK decide first and only rewrites a 503 startup answer whose underlying
- * error names one of those engine failures into the SDK's own permanent-failure answer (500,
- * `INTERNAL_ERROR`), so the client stops retrying and the caller fails within seconds. On
+ * engine error names one of those failures into the SDK's own permanent-failure answer (500,
+ * `INTERNAL_ERROR`), so the client stops retrying and the caller fails within seconds. celld
+ * reports the engine error through the container's exit result (`ctx.container.monitor()`), not
+ * in the SDK's 503 (which by then says "the container is not running"), so that is read too,
+ * bounded to `DEFAULT_ENGINE_EXIT_PROBE_MS`. On
  * Cloudflare those messages never occur and every answer passes through unchanged.
  */
 import { log } from '../lib/logger';
@@ -44,19 +47,66 @@ interface StartupErrorBody {
   context?: { phase?: unknown; error?: unknown } | null;
 }
 
+function matchesPermanent(error: string): boolean {
+  const lower = error.toLowerCase();
+  return PERMANENT_ENGINE_START_ERRORS.some((fragment) => lower.includes(fragment));
+}
+
 /** The engine error inside a 503 startup answer, when it is one a retry cannot fix. */
 export function permanentEngineStartError(body: unknown): string | null {
   if (typeof body !== 'object' || body === null) return null;
   const { context } = body as StartupErrorBody;
   if (!context || context.phase !== 'startup' || typeof context.error !== 'string') return null;
-  const error = context.error.toLowerCase();
-  return PERMANENT_ENGINE_START_ERRORS.some((fragment) => error.includes(fragment))
-    ? context.error
-    : null;
+  return matchesPermanent(context.error) ? context.error : null;
 }
 
-/** Rewrites a retryable 503 startup answer that is really permanent; anything else unchanged. */
-export async function failFastOnPermanentStartup(response: Response): Promise<Response> {
+/** Default wait for a stopped container's exit result; celld answers at once for a failed start. */
+export const DEFAULT_ENGINE_EXIT_PROBE_MS = 250;
+
+/**
+ * The container's own exit result, when it already holds a permanent start failure. celld
+ * reports why a start failed (`Create container failed with [403] sam-docker-proxy refused: …`)
+ * only through `ctx.container.monitor()`; by the time the SDK classifies the failure the message
+ * has become a generic "the container is not running". Bounded: a container that is merely
+ * starting has no exit result yet, and the probe gives up after `waitMs`.
+ */
+export async function permanentEngineExitError(
+  container: { monitor(): Promise<unknown> } | undefined,
+  waitMs = DEFAULT_ENGINE_EXIT_PROBE_MS
+): Promise<string | null> {
+  if (!container) return null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const outcome = await Promise.race([
+      container.monitor().then(
+        () => null,
+        (error: unknown) => (error instanceof Error ? error.message : String(error))
+      ),
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), waitMs);
+      }),
+    ]);
+    return outcome !== null && matchesPermanent(outcome) ? outcome : null;
+  } catch {
+    return null;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+function startupStatus(body: unknown): boolean {
+  if (typeof body !== 'object' || body === null) return false;
+  return (body as StartupErrorBody).context?.phase === 'startup';
+}
+
+/**
+ * Rewrites a retryable 503 startup answer that is really permanent; anything else unchanged.
+ * The engine error is read from the answer itself, or else from the container's exit result.
+ */
+export async function failFastOnPermanentStartup(
+  response: Response,
+  container?: { monitor(): Promise<unknown> }
+): Promise<Response> {
   if (response.status !== 503) return response;
   let body: unknown;
   try {
@@ -64,7 +114,9 @@ export async function failFastOnPermanentStartup(response: Response): Promise<Re
   } catch {
     return response;
   }
-  const engineError = permanentEngineStartError(body);
+  if (!startupStatus(body)) return response;
+  const engineError =
+    permanentEngineStartError(body) ?? (await permanentEngineExitError(container));
   if (!engineError) return response;
   log.error('sandbox.container_start_permanent_failure', { error: engineError.slice(0, 500) });
   return new Response(
