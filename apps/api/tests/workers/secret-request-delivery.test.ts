@@ -3,11 +3,11 @@
  * kind `secret_request`. Runs against the real ProjectData Durable Object (workerd SQLite,
  * migrations) so the new kind is proven through the stored row, not a mocked RPC.
  */
+import { expireDuePromptDeliveries } from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 import { resolveDurableExecutionConfig } from '../../src/durable-objects/project-data/durable-execution-config';
-import { expireDuePromptDeliveries } from '../../src/durable-objects/project-data/prompt-delivery';
 import type { ProjectDataTestDouble } from './support/expected-error-doubles';
 
 function getStub(projectId: string): DurableObjectStub<ProjectDataTestDouble> {
