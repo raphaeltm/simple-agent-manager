@@ -43,6 +43,7 @@
     "selfhost:verify-fence": "tsx scripts/selfhost/verify-fence.ts",
     "selfhost:backup": "tsx scripts/selfhost/backup.ts",
     "selfhost:restore": "tsx scripts/selfhost/restore.ts",
+    "selfhost:upgrade": "tsx scripts/selfhost/upgrade.ts",
     "quality:preflight": "tsx scripts/quality/check-preflight-evidence.ts",
     "test:acp-c2-remote-service": "node tests/fixtures/acp-c2-remote-service.test.mjs",
     "quality:wrangler-bindings": "tsx scripts/quality/check-wrangler-bindings.ts",

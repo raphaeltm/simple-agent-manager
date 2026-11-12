@@ -1,5 +1,5 @@
 /**
- * `pnpm selfhost:restore --from <backup dir> [--env-file <path>] [--state-dir <path>]`
+ * `pnpm selfhost:restore --from <backup dir> [--box-env <path>] [--state-dir <path>]`
  *
  * Restores a `pnpm selfhost:backup` into an EMPTY install (backup-lib.ts runRestore): the
  * CELLD_BUCKET in the target .env must hold no objects and the target .state/ no platform keys.
@@ -15,13 +15,13 @@ import { ENV_FILE, runRestore } from './backup-lib';
 const { values } = parseArgs({
   options: {
     from: { type: 'string' },
-    'env-file': { type: 'string' },
+    'box-env': { type: 'string' },
     'state-dir': { type: 'string' },
   },
 });
 if (!values.from) throw new Error('--from <backup directory> is required');
 const from = resolve(values.from);
-const envFile = resolve(values['env-file'] ?? join(SELFHOST_DIR, '.env'));
+const envFile = resolve(values['box-env'] ?? join(SELFHOST_DIR, '.env'));
 if (!existsSync(envFile)) {
   copyFileSync(join(from, ENV_FILE), envFile);
   log(`installed ${envFile} from the backup`);

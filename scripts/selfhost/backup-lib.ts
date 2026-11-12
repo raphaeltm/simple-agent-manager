@@ -79,7 +79,9 @@ export function parseBucketUrl(url: string): BucketUrl {
 function check(result: RunResult, what: string): RunResult {
   if (result.status !== 0) {
     // stderr of gcloud/mc/docker carries no secret (credentials travel in the environment).
-    throw new Error(`${what} failed (exit ${result.status}): ${result.stderr.trim().slice(0, 500)}`);
+    throw new Error(
+      `${what} failed (exit ${result.status}): ${result.stderr.trim().slice(0, 500)}`
+    );
   }
   return result;
 }
@@ -139,14 +141,11 @@ export function pullBucket(ctx: BoxContext, dir: string): void {
   check(
     ctx.run(
       'docker',
-      mcArgs(ctx, [`${resolve(dir)}:/backup`], [
-        'mirror',
-        '--overwrite',
-        '--remove',
-        '--quiet',
-        `src/${bucketPath(url)}`,
-        '/backup',
-      ]),
+      mcArgs(
+        ctx,
+        [`${resolve(dir)}:/backup`],
+        ['mirror', '--overwrite', '--remove', '--quiet', `src/${bucketPath(url)}`, '/backup']
+      ),
       mcEnv(ctx)
     ),
     'mc mirror (bucket -> backup)'
@@ -166,12 +165,11 @@ export function pushBucket(ctx: BoxContext, dir: string): void {
   check(
     ctx.run(
       'docker',
-      mcArgs(ctx, [`${resolve(dir)}:/backup:ro`], [
-        'mirror',
-        '--quiet',
-        '/backup',
-        `src/${bucketPath(url)}`,
-      ]),
+      mcArgs(
+        ctx,
+        [`${resolve(dir)}:/backup:ro`],
+        ['mirror', '--quiet', '/backup', `src/${bucketPath(url)}`]
+      ),
       mcEnv(ctx)
     ),
     'mc mirror (backup -> bucket)'

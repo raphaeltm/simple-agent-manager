@@ -42,7 +42,9 @@ let fetchMock: ReturnType<typeof vi.fn>;
 let pending: Promise<unknown>[];
 
 function applyObservabilityMigrations(db: Database.Database) {
-  for (const file of readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql')).sort()) {
+  for (const file of readdirSync(MIGRATIONS)
+    .filter((f) => f.endsWith('.sql'))
+    .sort()) {
     db.exec(readFileSync(new URL(file, MIGRATIONS), 'utf8'));
   }
 }
@@ -99,9 +101,10 @@ afterEach(() => {
   obsDb.close();
 });
 
-const rows = () => obsDb.prepare('SELECT * FROM analytics_events ORDER BY id').all() as Array<
-  Record<string, string | number>
->;
+const rows = () =>
+  obsDb.prepare('SELECT * FROM analytics_events ORDER BY id').all() as Array<
+    Record<string, string | number>
+  >;
 
 describe('D1 analytics sink (self-host)', () => {
   it('advertises analyticsIngest and analyticsQuery only when the sink is switched on', () => {
@@ -110,9 +113,9 @@ describe('D1 analytics sink (self-host)', () => {
       analyticsQuery: true,
       cloudflareAccountApi: false,
     });
-    expect(
-      resolvePlatformCapabilities({ ...env, ANALYTICS_SINK: undefined } as Env)
-    ).toMatchObject({ analyticsIngest: false, analyticsQuery: false });
+    expect(resolvePlatformCapabilities({ ...env, ANALYTICS_SINK: undefined } as Env)).toMatchObject(
+      { analyticsIngest: false, analyticsQuery: false }
+    );
   });
 
   it('records API requests and /api/t events, then every admin analytics route reads them back', async () => {

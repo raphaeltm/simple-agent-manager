@@ -121,7 +121,9 @@ describe('runBackup', () => {
     const manifest = runBackup(ctx('s3://fleet/celld', join(root, 'state')), dest, 'abc123');
 
     const sequence = calls.map((c) =>
-      c.args[0] === 'compose' ? `compose ${c.args.slice(-2).join(' ')}` : `${c.command} ${c.args[0]}`
+      c.args[0] === 'compose'
+        ? `compose ${c.args.slice(-2).join(' ')}`
+        : `${c.command} ${c.args[0]}`
     );
     expect(sequence).toEqual([
       'docker run', // live pre-copy
@@ -131,7 +133,10 @@ describe('runBackup', () => {
     ]);
     // stop at t+2s, delta done t+3s, start at t+4s: 2 s of downtime on the fake clock.
     expect(manifest).toMatchObject({ downtimeMs: 2000, deltaCopyMs: 1000, objectCount: 2 });
-    expect(tree(join(dest, 'bucket'))).toEqual({ 'd1/main.ltx': 'rows', 'current.json': '{"v":3}' });
+    expect(tree(join(dest, 'bucket'))).toEqual({
+      'd1/main.ltx': 'rows',
+      'current.json': '{"v":3}',
+    });
     expect(tree(join(dest, 'state'))).toEqual({ 'platform-keys.json': '{"k":"v"}' });
     expect(statSync(dest).mode & 0o777).toBe(0o700);
 
@@ -152,9 +157,9 @@ describe('runBackup', () => {
   it('refuses a non-empty destination', () => {
     mkdirSync(join(root, 'used'));
     writeFileSync(join(root, 'used/x'), '1');
-    expect(() => runBackup(ctx('s3://fleet/celld', join(root, 'state')), join(root, 'used'))).toThrow(
-      /not empty/
-    );
+    expect(() =>
+      runBackup(ctx('s3://fleet/celld', join(root, 'state')), join(root, 'used'))
+    ).toThrow(/not empty/);
     expect(calls).toHaveLength(0);
   });
 

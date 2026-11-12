@@ -62,7 +62,14 @@ describe('admin log pages on a self-hosted install', () => {
 
   it('Cloudflare installs keep the viewer and the stream', async () => {
     const fetchMock = serveCapabilities(ASSUMED_PLATFORM_CAPABILITIES);
-    render(withQuery(<><AdminLogs /><AdminStream /></>));
+    render(
+      withQuery(
+        <>
+          <AdminLogs />
+          <AdminStream />
+        </>
+      )
+    );
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     expect(screen.getByTestId('log-viewer')).toBeInTheDocument();
     expect(screen.getByTestId('log-stream')).toBeInTheDocument();

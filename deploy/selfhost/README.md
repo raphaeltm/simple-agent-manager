@@ -199,6 +199,14 @@ holds objects or a `.state/` with platform keys, and leaves celld stopped: start
 SAM checkout the backup recorded (`samCommit` in the manifest), never an older one. There is no
 point-in-time recovery: a backup is the recovery point. Code: `scripts/selfhost/backup-lib.ts`.
 
+`pnpm selfhost:upgrade --to <tag|branch|commit>` backs up (skip with `--skip-backup`), checks the
+ref out, runs `pnpm selfhost:deploy --init`, restarts the stack only when a compose input changed
+(a non-README file in this directory or a generated `.state/` file), runs `pnpm selfhost:deploy`
+(D1 and Durable Object migrations, Worker), checks `/health` and prints the rollback: redeploy
+the previous ref when no D1 migration ran, otherwise restore the pre-upgrade backup into an
+empty bucket. Code: `scripts/selfhost/upgrade-lib.ts`. Use `--box-env` (not `--env-file`, which
+Node takes) to point these commands at another `.env`.
+
 ## Logs
 
 Caddy writes one JSON access-log line per request, for every SAM host (`app.`, `api.`, `ws-*`,

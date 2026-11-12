@@ -44,7 +44,9 @@ beforeEach(() => {
     'CREATE TABLE IF NOT EXISTS diagnostic_incidents (id TEXT PRIMARY KEY, platform_error_id TEXT, node_id TEXT, workspace_id TEXT, status TEXT, occurrence_count INTEGER, last_seen_at INTEGER, artifact_count INTEGER, total_bytes INTEGER, manifest_json TEXT, preview_json TEXT, failure_reason TEXT, expires_at INTEGER, created_at INTEGER, updated_at INTEGER)'
   );
   obsDb = new Database(':memory:');
-  for (const file of readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql')).sort()) {
+  for (const file of readdirSync(MIGRATIONS)
+    .filter((f) => f.endsWith('.sql'))
+    .sort()) {
     obsDb.exec(readFileSync(new URL(file, MIGRATIONS), 'utf8'));
   }
   env = {
