@@ -5,14 +5,16 @@
  */
 import { resolveResourceReservation } from '@simple-agent-manager/shared';
 
+import {
+  type WorkspaceAdmissionPolicy,
+} from '../scheduler-core';
 import { lifetimeAdmissionCutoffSql } from './node-lifetime-admission';
 import { buildPlacementAuthoritySqlPredicate } from './placement-authority';
 import type { WorkspacePlacementInput } from './workspace-placement';
 import {
   ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL,
   RESOURCE_REQUIREMENTS_SOURCE_SQL,
-  type WorkspaceAdmissionPolicy,
-} from './workspace-resource-capacity';
+} from './workspace-reservation-usage';
 
 /** Shared admission reads and parameter ordering for both atomic workspace mutations. */
 export function buildWorkspaceAdmissionSql(
@@ -334,4 +336,40 @@ function finalMeasuredPressurePredicateSql(): string {
         < policy.disk_pressure_threshold_percent
     )
   )`;
+}
+
+/**
+ * The exact node columns `resolveTrustedWorkspaceNodeCapacity` reads, as an
+ * aliased SQL projection. Every node query whose rows feed capacity evaluation
+ * or legacy-adoption evaluation must include this fragment: a projection that
+ * omits it makes `providerInstanceId`/`observedHardwareSource` undefined, so
+ * every node resolves to "no trusted observed hardware" and is silently rejected
+ * — advisory selection then disagrees with the final admission SQL, which reads
+ * the same columns directly off the row.
+ */
+export function trustedWorkspaceNodeCapacityColumnsSql(alias = ''): string {
+  if (alias && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(alias)) {
+    throw new Error(`Unsafe SQL alias: ${alias}`);
+  }
+  const prefix = alias ? `${alias}.` : '';
+  return `${prefix}node_class AS nodeClass,
+       ${prefix}node_role AS nodeRole,
+       ${prefix}provider_instance_id AS providerInstanceId,
+       ${prefix}observed_provider_instance_type AS observedProviderInstanceType,
+       ${prefix}observed_provider_instance_vcpu_count AS observedProviderInstanceVcpuCount,
+       ${prefix}observed_provider_instance_memory_mb AS observedProviderInstanceMemoryMb,
+       ${prefix}observed_provider_instance_disk_gb AS observedProviderInstanceDiskGb,
+       ${prefix}observed_hardware_source AS observedHardwareSource`;
+}
+
+/** Row shape produced by `trustedWorkspaceNodeCapacityColumnsSql`. */
+export interface TrustedWorkspaceNodeCapacityRow {
+  nodeRole?: string | null;
+  nodeClass: string | null;
+  providerInstanceId: string | null;
+  observedProviderInstanceType: string | null;
+  observedProviderInstanceVcpuCount: number | null;
+  observedProviderInstanceMemoryMb: number | null;
+  observedProviderInstanceDiskGb: number | null;
+  observedHardwareSource: string | null;
 }

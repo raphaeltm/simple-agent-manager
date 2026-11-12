@@ -12,6 +12,12 @@ import {
 
 import { DEFAULT_IDEA_CONTENT_MAX_LENGTH } from '../lib/idea-content-limit';
 import {
+  DEFAULT_PROVISIONING_ATTEMPTS_PER_PROVIDER_TIER,
+  DEFAULT_WORKSPACE_BUILD_QUEUE_TIMEOUT_MINUTES,
+  DEFAULT_WORKSPACE_PLACEMENT_BACKLOG_CONFLICT_RETRIES,
+  DEFAULT_WORKSPACE_PLACEMENT_MAX_REJECTIONS,
+} from '../scheduler-core';
+import {
   type AdminSettingDefinition,
   connectorDefinition,
   integerDefinition,
@@ -21,12 +27,6 @@ import { agentModelSettingDefinitions } from './agent-models/settings-definition
 import { CONNECTOR_DEFAULTS, type ConnectorSettingKey } from './connector-settings-definition';
 import { DEFAULT_CAPACITY_POOL_CANDIDATE_PUBLISH_BUDGET_MS } from './default-capacity-pool-candidates-common';
 import { ENV_KEYS, SECRET_KINDS, SETTING_KEYS } from './platform-config-store';
-import {
-  DEFAULT_PROVISIONING_ATTEMPTS_PER_PROVIDER_TIER,
-  DEFAULT_WORKSPACE_BUILD_QUEUE_TIMEOUT_MINUTES,
-  DEFAULT_WORKSPACE_PLACEMENT_BACKLOG_CONFLICT_RETRIES,
-  DEFAULT_WORKSPACE_PLACEMENT_MAX_REJECTIONS,
-} from './provisioning-attempt-limits';
 import { DEFAULT_SESSION_STALE_TURN_NO_WORK_MINUTES } from './session-idleness';
 export const CORE_SETTINGS: AdminSettingDefinition[] = [
   integerDefinition(

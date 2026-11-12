@@ -19,6 +19,10 @@ import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectCapability } from '../middleware/project-auth';
 import { resolveCleanupConfig } from '../scheduled/node-cleanup/config';
+import {
+  parseStoredResolvedReservationJson,
+  ResourceRequirementsValidationError,
+} from '../scheduler-core';
 import { buildDeploymentEnvironmentResponse } from '../services/deployment-environment-summary';
 import { cleanupDeploymentNode } from '../services/deployment-node-cleanup';
 import { provisionDeploymentNode } from '../services/deployment-provisioning';
@@ -28,10 +32,6 @@ import {
   listEnvironmentVolumes,
 } from '../services/deployment-volumes';
 import { recordDeploymentEnvironmentLifecycleEventBestEffort } from '../services/project-lifecycle-events';
-import {
-  parseStoredResolvedReservationJson,
-  ResourceRequirementsValidationError,
-} from '../services/resource-requirements-input';
 import {
   collectAttachedServerIds,
   type DeploymentDb,

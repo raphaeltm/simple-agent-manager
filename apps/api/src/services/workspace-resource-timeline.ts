@@ -15,7 +15,9 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { errors } from '../middleware/error';
-import { parseStoredResolvedReservationJson } from './resource-requirements-input';
+import {
+  parseStoredResolvedReservationJson,
+} from '../scheduler-core';
 import { readChunkPayload } from './workspace-resource-history';
 import {
   parseWorkspaceResourceRollup,

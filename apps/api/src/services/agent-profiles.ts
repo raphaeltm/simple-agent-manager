@@ -20,16 +20,16 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { ulid } from '../lib/ulid';
 import { errors } from '../middleware/error';
+import {
+  ResourceRequirementsValidationError,
+  serializeResourceRequirementsInput,
+} from '../scheduler-core';
 import { parseGitHubCliPolicyJson } from './github-cli-policy';
 import {
   applyBaseProfileUpdates,
   baseProfileInsertValues,
   toBaseProfileFields,
 } from './profile-fields';
-import {
-  ResourceRequirementsValidationError,
-  serializeResourceRequirementsInput,
-} from './resource-requirements-input';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 

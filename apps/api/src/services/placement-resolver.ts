@@ -13,9 +13,24 @@ import { type drizzle } from 'drizzle-orm/d1';
 import type * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { resolveCapacityPoolPlacementSettings } from './capacity-pool-placement-settings';
-import { resolveEffectiveDefaultCapacityPoolSummary } from './default-capacity-pools';
-import { preferCapacityCandidatesInLocation } from './placement-capacity-ranking';
+import type {
+  PlacementCredentialAttribution,
+  PlacementCredentialLookup,
+  PlacementCredentialSourceResult,
+  PlacementProfileDefaults,
+  PlacementRuntimeResolution,
+  TaskStartCapacityCandidate,
+  TaskStartCapacityPoolSelection,
+  TaskStartPlacement,
+  TaskStartPlacementInput,
+  TaskStartPlacementWithCredential,
+} from '../scheduler-core';
+import type {
+  WorkspaceRuntimeDecision,
+} from '../scheduler-core';
+import {
+  preferCapacityCandidatesInLocation,
+} from '../scheduler-core';
 import {
   normalizeCredentialAttribution,
   resolveCredentialLookup,
@@ -29,50 +44,32 @@ import {
   resolveWorkloadRole,
   resolveWorkspaceProfile,
   validateResolvedLocation,
-} from './placement-field-resolution';
+} from '../scheduler-core';
 import {
   noEligibleCapacityCandidateMessage,
   PlacementResolutionError,
-} from './placement-resolution-error';
+} from '../scheduler-core';
 import {
   buildCapacityPoolSelection,
   capacityPlacementSnapshotForTaskStart,
   directPlacementAuditSnapshot,
   hasNoCapacityPoolCandidates,
-} from './placement-resolver-capacity';
-import type {
-  PlacementCredentialAttribution,
-  PlacementCredentialLookup,
-  PlacementCredentialSourceResult,
-  PlacementProfileDefaults,
-  PlacementRuntimeResolution,
-  TaskStartCapacityCandidate,
-  TaskStartCapacityPoolSelection,
-  TaskStartPlacement,
-  TaskStartPlacementInput,
-  TaskStartPlacementWithCredential,
-} from './placement-resolver-types';
-import { resolveCredentialSource } from './provider-credentials';
+} from '../scheduler-core';
 import {
   collectStoredResourceRequirementLayers,
   mergeResourceRequirementLayers,
   ResourceRequirementsValidationError,
-} from './resource-requirements-input';
-import { resolveEffectiveNodeHostMemoryReserveMb } from './workspace-resource-capacity';
-import type { WorkspaceRuntimeDecision } from './workspace-runtime';
+} from '../scheduler-core';
+import {
+  resolveEffectiveNodeHostMemoryReserveMb,
+} from '../scheduler-core';
+import { resolveCapacityPoolPlacementSettings } from './capacity-pool-placement-settings';
+import { resolveEffectiveDefaultCapacityPoolSummary } from './default-capacity-pools';
+import { resolveCredentialSource } from './provider-credentials';
 
-export type { RankCapacityCandidatesInput } from './placement-resolver-capacity';
-export {
-  capacityPlacementSnapshotForCandidate,
-  capacityPlacementSnapshotForTaskStart,
-  capacityPoolNoCandidatesError,
-  capacityPoolNoCandidatesMessage,
-  capacityPoolSnapshotForPool,
-  directPlacementAuditSnapshot,
-  hasNoCapacityPoolCandidates,
-  rankCapacityCandidatesForRuntime,
-  resolveReusableNodeCapacitySnapshot,
-} from './placement-resolver-capacity';
+export type {
+  RankCapacityCandidatesInput,
+} from '../scheduler-core';
 export type {
   CapacityAwareNodePlacementRow,
   PlacementCredentialAttribution,
@@ -93,11 +90,24 @@ export type {
   TaskStartPlacement,
   TaskStartPlacementInput,
   TaskStartPlacementWithCredential,
-} from './placement-resolver-types';
+} from '../scheduler-core';
+export {
+  capacityPlacementSnapshotForCandidate,
+  capacityPlacementSnapshotForTaskStart,
+  capacityPoolNoCandidatesError,
+  capacityPoolNoCandidatesMessage,
+  capacityPoolSnapshotForPool,
+  directPlacementAuditSnapshot,
+  hasNoCapacityPoolCandidates,
+  rankCapacityCandidatesForRuntime,
+  resolveReusableNodeCapacitySnapshot,
+} from '../scheduler-core';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
-export { PlacementResolutionError } from './placement-resolution-error';
+export {
+  PlacementResolutionError,
+} from '../scheduler-core';
 
 export function resolvePlacementRuntimePreference(input: {
   explicitRuntime?: AgentProfileRuntime | null;

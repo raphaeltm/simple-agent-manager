@@ -31,6 +31,9 @@ import type {
   TaskRunnerState,
 } from '../../../src/durable-objects/task-runner/types';
 import type { Env } from '../../../src/env';
+import {
+  resolveWorkspaceAdmissionPolicy,
+} from '../../../src/scheduler-core';
 import { disableCapacitySourceAvailability } from '../../../src/services/default-capacity-pool-sources';
 import { updateDefaultCapacityPool } from '../../../src/services/default-capacity-pool-updates';
 import { assertNodeAllocationPlanCurrent } from '../../../src/services/nodes';
@@ -38,7 +41,6 @@ import type { TaskStartCapacityPoolSelection } from '../../../src/services/place
 import { filterReusableNodesByCurrentAuthority } from '../../../src/services/reusable-node-authority';
 import type { WorkspacePlacementInput } from '../../../src/services/workspace-placement';
 import { reserveWorkspacePlacement } from '../../../src/services/workspace-placement';
-import { resolveWorkspaceAdmissionPolicy } from '../../../src/services/workspace-resource-capacity';
 import {
   createAllSchemaTables,
   createSqliteD1,

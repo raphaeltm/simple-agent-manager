@@ -16,6 +16,11 @@ import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
 import { AppError } from '../../middleware/error';
 import {
+  ResourceRequirementsValidationError,
+  serializeModernResourceRequirementsInput,
+  serializeResourceRequirementsInput,
+} from '../../scheduler-core';
+import {
   cronToHumanReadable,
   cronToNextFire,
   validateCronExpression,
@@ -25,11 +30,6 @@ import {
   readGitHubTriggerConfig,
   validateGitHubTriggerQueueConfig,
 } from '../../services/github-trigger-config';
-import {
-  ResourceRequirementsValidationError,
-  serializeModernResourceRequirementsInput,
-  serializeResourceRequirementsInput,
-} from '../../services/resource-requirements-input';
 import { clearTriggerPageCaches } from '../../services/trigger-cache';
 import {
   assertKeepsAgentProfile,

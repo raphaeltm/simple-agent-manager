@@ -1,9 +1,9 @@
-import type { TaskStartCapacityCandidate } from '../../services/placement-resolver';
-import { rankCapacityCandidatesForRuntime } from '../../services/placement-resolver';
 import {
   buildPlacementLocationInventory,
   type PlacementLocationInventory,
-} from '../../services/placement-strategy';
+} from '../../scheduler-core';
+import type { TaskStartCapacityCandidate } from '../../services/placement-resolver';
+import { rankCapacityCandidatesForRuntime } from '../../services/placement-resolver';
 import { getTaskReservation } from './node-selection';
 import { taskPlacementStrategy } from './task-placement-strategy';
 import type { TaskRunnerContext, TaskRunnerState } from './types';

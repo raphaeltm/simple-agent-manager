@@ -21,13 +21,13 @@ import {
   normalizePlacementHostSignals,
   type PlacementHostSignals,
   placementLocationKey,
-} from '../../../src/services/placement-strategy';
+} from '../../../src/scheduler-core';
 import {
   type ActiveWorkspaceReservationUsage,
   emptyUsage,
   resolveWorkspaceAdmissionPolicy,
   type WorkspaceAdmissionPolicy,
-} from '../../../src/services/workspace-resource-capacity';
+} from '../../../src/scheduler-core';
 
 const POLICY: WorkspaceAdmissionPolicy = resolveWorkspaceAdmissionPolicy(
   {} as Parameters<typeof resolveWorkspaceAdmissionPolicy>[0],

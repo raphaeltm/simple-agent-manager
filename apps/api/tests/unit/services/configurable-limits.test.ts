@@ -11,11 +11,11 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { DEFAULT_RATE_LIMITS } from '../../../src/middleware/rate-limit';
-import { getRuntimeLimits } from '../../../src/services/limits';
 import {
   evaluateWorkspaceReservationCapacity,
   resolveWorkspaceAdmissionPolicy,
-} from '../../../src/services/workspace-resource-capacity';
+} from '../../../src/scheduler-core';
+import { getRuntimeLimits } from '../../../src/services/limits';
 
 // =============================================================================
 // getRuntimeLimits — behavioral tests for all 15 configurable limits

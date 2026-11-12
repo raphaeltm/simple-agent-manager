@@ -9,7 +9,9 @@ import type {
 import { isCapacityPoolStatus, providerLocationRegion } from '@simple-agent-manager/shared';
 
 import type * as schema from '../db/schema';
-import { capacityCandidateAuthorityGeneration } from './capacity-pool-authority';
+import {
+  capacityCandidateAuthorityGeneration,
+} from '../scheduler-core';
 import { type providerInstanceOfferingDbValues } from './default-capacity-pool-candidate-values';
 import {
   ACTIVE_STATUS,

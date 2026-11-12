@@ -7,6 +7,11 @@ import type {
 } from '@simple-agent-manager/shared';
 
 import {
+  isResolvedResourceReservation,
+  type PlacementAdmissionPolicy,
+  type WorkspaceAdmissionPolicy,
+} from '../scheduler-core';
+import {
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS,
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS,
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS,
@@ -17,11 +22,6 @@ import {
   buildWorkspaceAdmissionSql,
   workspaceAdmissionEligibilitySql,
 } from './workspace-admission-sql';
-import {
-  isResolvedResourceReservation,
-  type PlacementAdmissionPolicy,
-  type WorkspaceAdmissionPolicy,
-} from './workspace-resource-capacity';
 
 export interface WorkspacePlacementInput {
   id: string;

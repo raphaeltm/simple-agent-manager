@@ -6,11 +6,11 @@ import type { TaskRunnerState } from '../../../src/durable-objects/task-runner/t
 import {
   comparePlacementRolloutHosts,
   resolvePlacementRollout,
-} from '../../../src/services/placement-rollout';
+} from '../../../src/scheduler-core';
 import {
   comparePlacementHostsByStrategy,
   type PlacementHostSignals,
-} from '../../../src/services/placement-strategy';
+} from '../../../src/scheduler-core';
 
 const input = { userId: 'user', poolId: 'pool', strategy: 'pack' as const };
 function state(percent: number): TaskRunnerState {

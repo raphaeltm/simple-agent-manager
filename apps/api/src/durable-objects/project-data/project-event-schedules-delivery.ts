@@ -1,4 +1,6 @@
-import { parseProviderLimitWait } from '../../services/provider-limit-policy';
+import {
+  parseProviderLimitWait,
+} from '../../scheduler-core';
 import { isSessionRecoverySourceTaskGuardValid } from '../../services/session-recovery-authority';
 import { requireScheduleMember } from './project-event-schedules-authority';
 import { getSchedule, scheduleSharedAccessGrantId } from './project-event-schedules-storage';

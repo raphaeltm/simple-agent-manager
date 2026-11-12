@@ -12,7 +12,7 @@ import {
   CAPACITY_POOL_MATERIALIZED_WORKLOAD_ROLES,
   capacityCandidateBaseId,
   capacityCandidateIdForRole,
-} from './capacity-pool-workload-roles';
+} from '../scheduler-core';
 import type { DefaultPoolScopeIdentity } from './default-capacity-pool-helpers';
 import { defaultCandidateId } from './default-capacity-pool-helpers';
 

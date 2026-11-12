@@ -10,6 +10,13 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
+import {
+  createPersistedTaskResourcePlanJson,
+  firstResourceRequirementLayer,
+  firstResourceRequirementLayerJson,
+  readPersistedTaskResourcePlan,
+  ResourceRequirementsValidationError,
+} from '../../scheduler-core';
 import { parentAgentAttribution, withoutAuthorAttribution } from '../../services/agent-authorship';
 import { generateBranchName } from '../../services/branch-name';
 import { capacityPlacementSnapshotDbValues } from '../../services/capacity-placement-snapshot';
@@ -23,13 +30,6 @@ import {
   assertReplacementDeletionConfirmed,
   WorkspaceDeletionUnconfirmedError,
 } from '../../services/replacement-deletion-fence';
-import {
-  createPersistedTaskResourcePlanJson,
-  firstResourceRequirementLayer,
-  firstResourceRequirementLayerJson,
-  readPersistedTaskResourcePlan,
-  ResourceRequirementsValidationError,
-} from '../../services/resource-requirements-input';
 import { markTaskFailedIfNonTerminal } from '../../services/task-failure';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../../services/task-title';

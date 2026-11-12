@@ -6,10 +6,12 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import {
+  PlacementResolutionError,
+} from '../scheduler-core';
+import {
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS,
   capacityPlacementSnapshotSqlValues,
 } from './capacity-placement-snapshot';
-import { PlacementResolutionError } from './placement-resolution-error';
 import {
   resolveTaskStartPlacement,
   resolveTaskStartPlacementCredentialAttributionFromPlacement,

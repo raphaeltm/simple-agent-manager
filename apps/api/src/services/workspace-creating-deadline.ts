@@ -23,8 +23,10 @@
  * node before the last one times out. Ranking spreads a burst across nodes first.
  */
 import type { Env } from '../env';
+import {
+  DEFAULT_WORKSPACE_BUILD_QUEUE_TIMEOUT_MINUTES,
+} from '../scheduler-core';
 import { resolveAdminSetting } from './admin-settings-resolution';
-import { DEFAULT_WORKSPACE_BUILD_QUEUE_TIMEOUT_MINUTES } from './provisioning-attempt-limits';
 
 export interface WorkspaceCreatingClock {
   createdAt: string;

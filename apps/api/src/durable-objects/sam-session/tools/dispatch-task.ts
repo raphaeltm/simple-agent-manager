@@ -23,6 +23,15 @@ import { ulid } from '../../../lib/ulid';
 import { AppError } from '../../../middleware/error';
 import { requireProjectCapability } from '../../../middleware/project-auth';
 import { requireRepositoryOwnerAccess } from '../../../routes/projects/_helpers';
+import {
+  collectStoredResourceRequirementLayers,
+  createPersistedTaskResourcePlanJson,
+  firstResourceRequirementLayer,
+  firstResourceRequirementLayerJson,
+  mergeResourceRequirementLayers,
+  normalizeResourceRequirementsInput,
+  ResourceRequirementsValidationError,
+} from '../../../scheduler-core';
 import { samAssistantAttribution } from '../../../services/agent-authorship';
 import { generateBranchName } from '../../../services/branch-name';
 import {
@@ -33,15 +42,6 @@ import {
 import { resolveTaskStartPlacementCredentialAttribution } from '../../../services/placement-resolver';
 import { resolveProjectAgentDefault } from '../../../services/project-agent-defaults';
 import * as projectDataService from '../../../services/project-data';
-import {
-  collectStoredResourceRequirementLayers,
-  createPersistedTaskResourcePlanJson,
-  firstResourceRequirementLayer,
-  firstResourceRequirementLayerJson,
-  mergeResourceRequirementLayers,
-  normalizeResourceRequirementsInput,
-  ResourceRequirementsValidationError,
-} from '../../../services/resource-requirements-input';
 import { resolveSkillProfile } from '../../../services/skills';
 import { markTaskFailedIfNonTerminal } from '../../../services/task-failure';
 import { startTaskRunnerDO } from '../../../services/task-runner-do';

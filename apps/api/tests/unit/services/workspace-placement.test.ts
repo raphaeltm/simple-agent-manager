@@ -6,6 +6,11 @@ import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
+import {
+  evaluateWorkspaceReservationCapacity,
+  type PlacementAdmissionPolicy,
+  resolveWorkspaceAdmissionPolicy,
+} from '../../../src/scheduler-core';
 import { isNodePastLifetimeAdmissionCutoff } from '../../../src/services/node-lifetime-admission';
 import {
   attachPrecreatedWorkspacePlacement,
@@ -13,11 +18,8 @@ import {
   reserveWorkspaceRestart,
 } from '../../../src/services/workspace-placement';
 import {
-  evaluateWorkspaceReservationCapacity,
   loadActiveWorkspaceReservationUsage,
-  type PlacementAdmissionPolicy,
-  resolveWorkspaceAdmissionPolicy,
-} from '../../../src/services/workspace-resource-capacity';
+} from '../../../src/services/workspace-reservation-usage';
 import {
   createAllSchemaTables,
   createSqliteD1,

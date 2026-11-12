@@ -20,13 +20,15 @@ import type {
 } from '../../../src/durable-objects/task-runner/types';
 import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
+import {
+  resolveWorkspaceAdmissionPolicy,
+} from '../../../src/scheduler-core';
 import { capacityPlacementSnapshotDbValues } from '../../../src/services/capacity-placement-snapshot';
 import {
   capacityPlacementSnapshotForCandidate,
   type TaskStartCapacityCandidate,
 } from '../../../src/services/placement-resolver';
 import { reserveWorkspacePlacement } from '../../../src/services/workspace-placement';
-import { resolveWorkspaceAdmissionPolicy } from '../../../src/services/workspace-resource-capacity';
 import { ensurePoolsWithStarterMachines } from '../../helpers/capacity-pool-picks';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 import {

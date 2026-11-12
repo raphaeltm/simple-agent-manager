@@ -11,7 +11,9 @@ import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
-import { legacyNodeVcpuEstimate } from './legacy-node-pool-compatibility';
+import {
+  legacyNodeVcpuEstimate,
+} from '../scheduler-core';
 
 // =============================================================================
 // Start / Stop Tracking

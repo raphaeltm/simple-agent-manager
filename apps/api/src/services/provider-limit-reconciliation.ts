@@ -9,8 +9,10 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { evaluateRunawayCostCeiling } from '../scheduled/stuck-task-ceiling';
+import {
+  parseProviderLimitWait,
+} from '../scheduler-core';
 import { repairProviderLimitIntents } from './provider-limit-parking';
-import { parseProviderLimitWait } from './provider-limit-policy';
 import { presentBlockedProviderLimitWait } from './provider-limit-recovery';
 
 /** The bounded wait deadline, not queued/delegated timeout, owns admission.

@@ -1,14 +1,13 @@
 /**
  * Workspace admission policy resolution: the tunables both advisory node selection and the atomic
- * placement SQL evaluate against. Split out of `workspace-resource-capacity.ts` (rule 18), which
- * re-exports everything here.
+ * placement SQL evaluate against. Split out of `workspace-resource-capacity.ts` (rule 18).
  */
 import {
   DEFAULT_NODE_CPU_THRESHOLD_PERCENT,
   DEFAULT_NODE_MEMORY_THRESHOLD_PERCENT,
 } from '@simple-agent-manager/shared';
 
-import type { Env } from '../env';
+import type { WorkspaceAdmissionEnv } from './env';
 
 export const DEFAULT_WORKSPACE_ADMISSION_CPU_SHARE_BUDGET_PERCENT = 100;
 /**
@@ -46,18 +45,7 @@ export type PlacementAdmissionPolicy = WorkspaceAdmissionPolicy & {
 };
 
 export function resolveWorkspaceAdmissionPolicy(
-  env: Pick<
-    Env,
-    | 'TASK_RUN_NODE_CPU_THRESHOLD_PERCENT'
-    | 'TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT'
-    | 'TASK_RUN_NODE_CPU_SHARE_BUDGET_PERCENT'
-    | 'TASK_RUN_NODE_HOST_MEMORY_RESERVE_MB'
-    | 'VM_AGENT_MEMORY_RESERVE_MB'
-    | 'TASK_RUN_NODE_DISK_PRESSURE_THRESHOLD_PERCENT'
-    | 'TASK_RUN_NODE_METRICS_TTL_MS'
-    | 'TASK_RUN_NODE_CPU_SCORE_WEIGHT_PERCENT'
-    | 'TASK_RUN_NODE_MEMORY_SCORE_WEIGHT_PERCENT'
-  >,
+  env: WorkspaceAdmissionEnv,
   scaling?: {
     nodeCpuThresholdPercent?: number | null;
     nodeMemoryThresholdPercent?: number | null;
@@ -136,7 +124,7 @@ export function resolveWorkspaceAdmissionPolicy(
 }
 
 export function resolveEffectiveNodeHostMemoryReserveMb(
-  env: Pick<Env, 'TASK_RUN_NODE_HOST_MEMORY_RESERVE_MB' | 'VM_AGENT_MEMORY_RESERVE_MB'>,
+  env: Pick<WorkspaceAdmissionEnv, 'TASK_RUN_NODE_HOST_MEMORY_RESERVE_MB' | 'VM_AGENT_MEMORY_RESERVE_MB'>,
   scaling?: { nodeHostMemoryReserveMb?: number | null } | null
 ): number {
   return nonNegativeInt(

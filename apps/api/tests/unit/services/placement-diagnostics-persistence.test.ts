@@ -7,7 +7,9 @@ import type {
   TaskRunnerContext,
   TaskRunnerState,
 } from '../../../src/durable-objects/task-runner/types';
-import { buildPlacementDecisionDiagnostics } from '../../../src/services/placement-diagnostics';
+import {
+  buildPlacementDecisionDiagnostics,
+} from '../../../src/scheduler-core';
 import { publicPlacementExplanationJson } from '../../../src/services/public-placement-explanation';
 import { createSqliteD1 } from '../../helpers/sqlite-d1';
 

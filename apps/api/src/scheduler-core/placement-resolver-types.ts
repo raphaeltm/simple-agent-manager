@@ -20,7 +20,7 @@ import type {
   WorkspaceProfile,
 } from '@simple-agent-manager/shared';
 
-import type { WorkspaceRuntimeDecision } from './workspace-runtime';
+import type { WorkspaceRuntimeDecision } from './workspace-runtime-decision';
 
 export type PlacementEntryPoint =
   | 'task-submit'

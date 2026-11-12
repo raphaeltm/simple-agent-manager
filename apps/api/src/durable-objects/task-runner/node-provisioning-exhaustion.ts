@@ -42,8 +42,10 @@
  */
 import type { VMSize } from '@simple-agent-manager/shared';
 
+import {
+  DEFAULT_PROVISIONING_ATTEMPTS_PER_PROVIDER_TIER,
+} from '../../scheduler-core';
 import type { TaskStartCapacityCandidate } from '../../services/placement-resolver';
-import { DEFAULT_PROVISIONING_ATTEMPTS_PER_PROVIDER_TIER } from '../../services/provisioning-attempt-limits';
 import type { TaskRunnerState } from './types';
 
 /** One provisioning attempt: a concrete offering, or a legacy size-only run. */

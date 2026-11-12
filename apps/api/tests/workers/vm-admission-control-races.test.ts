@@ -19,6 +19,9 @@ import type {
   TaskRunnerContext,
   TaskRunnerState,
 } from '../../src/durable-objects/task-runner/types';
+import type {
+  WorkspaceAdmissionPolicy,
+} from '../../src/scheduler-core';
 import type { TaskStartCapacityPoolSelection } from '../../src/services/placement-resolver';
 import {
   assertVmProvisioningLease,
@@ -33,7 +36,6 @@ import {
   reserveWorkspacePlacement,
   type WorkspacePlacementInput,
 } from '../../src/services/workspace-placement';
-import type { WorkspaceAdmissionPolicy } from '../../src/services/workspace-resource-capacity';
 import {
   seedInstallation,
   seedNode,

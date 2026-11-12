@@ -10,7 +10,9 @@ import type {
 } from '@simple-agent-manager/shared';
 import { isCapacitySourceExcluded, isValidProvider } from '@simple-agent-manager/shared';
 
-import { PRIMARY_CAPACITY_WORKLOAD_ROLE } from './capacity-pool-workload-roles';
+import {
+  PRIMARY_CAPACITY_WORKLOAD_ROLE,
+} from '../scheduler-core';
 import { ACTIVE_STATUS, SOURCE_KIND_CLOUD_PROVIDER } from './default-capacity-pool-storage';
 import type { CapacityPoolSummary } from './default-capacity-pool-types';
 

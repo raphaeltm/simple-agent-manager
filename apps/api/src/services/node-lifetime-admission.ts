@@ -19,11 +19,11 @@ import {
 
 import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
-import { resolveAdminSetting } from './admin-settings-resolution';
 import {
   type PlacementAdmissionPolicy,
   resolveWorkspaceAdmissionPolicy,
-} from './workspace-resource-capacity';
+} from '../scheduler-core';
+import { resolveAdminSetting } from './admin-settings-resolution';
 
 /**
  * The node age at which new placements stop, or null when the cutoff is disabled (0 percent).

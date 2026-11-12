@@ -14,7 +14,9 @@ import { type drizzle } from 'drizzle-orm/d1';
 
 import type * as schema from '../db/schema';
 import type { Env } from '../env';
-import { emptyCapacityPoolMessage } from './placement-resolution-error';
+import {
+  emptyCapacityPoolMessage,
+} from '../scheduler-core';
 import {
   capacityPlacementSnapshotForCandidate,
   directPlacementAuditSnapshot,

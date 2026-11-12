@@ -10,6 +10,9 @@ import type {
   TaskRunnerState,
 } from '../../src/durable-objects/task-runner';
 import type { Env } from '../../src/env';
+import {
+  resolveWorkspaceAdmissionPolicy,
+} from '../../src/scheduler-core';
 import { fetchNodeAgent } from '../../src/services/node-agent';
 import { resolveTaskStartPlacementCredentialAttribution } from '../../src/services/placement-resolver';
 import * as projectDataService from '../../src/services/project-data';
@@ -28,7 +31,6 @@ import {
   type TaskRunnerReservedSubmissionGuard,
 } from '../../src/services/task-runner-start-guard';
 import { reserveWorkspacePlacement } from '../../src/services/workspace-placement';
-import { resolveWorkspaceAdmissionPolicy } from '../../src/services/workspace-resource-capacity';
 import { ensurePoolsWithStarterMachines } from '../helpers/capacity-pool-picks';
 import { seedReadyNode } from './helpers/ready-node';
 import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';

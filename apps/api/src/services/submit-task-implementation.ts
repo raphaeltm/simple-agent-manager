@@ -32,19 +32,9 @@ import {
   requireOpenIdeaForWorkStart,
 } from '../operations/start-work-core';
 import { requireRepositoryAccess } from '../routes/projects/_helpers';
-import { type SubmitTaskSchema } from '../schemas';
-import { resolveTaskAgentOverrides } from '../services/agent-profiles';
-import { generateBranchName } from '../services/branch-name';
-import { capacityPlacementSnapshotDbValues } from '../services/capacity-placement-snapshot';
-import { enrichMessageWithMentions } from '../services/mention-enrichment';
-import { inheritedCredentialAttributionForCaller } from '../services/placement-field-resolution';
 import {
-  PlacementResolutionError,
-  resolveTaskStartPlacement,
-  resolveTaskStartPlacementCredentialAttributionFromPlacement,
-} from '../services/placement-resolver';
-import { resolveProjectAgentDefault } from '../services/project-agent-defaults';
-import * as projectDataService from '../services/project-data';
+  inheritedCredentialAttributionForCaller,
+} from '../scheduler-core';
 import {
   collectStoredResourceRequirementLayers,
   createPersistedTaskResourcePlanJson,
@@ -53,7 +43,19 @@ import {
   mergeResourceRequirementLayers,
   normalizeResourceRequirementsInput,
   ResourceRequirementsValidationError,
-} from '../services/resource-requirements-input';
+} from '../scheduler-core';
+import { type SubmitTaskSchema } from '../schemas';
+import { resolveTaskAgentOverrides } from '../services/agent-profiles';
+import { generateBranchName } from '../services/branch-name';
+import { capacityPlacementSnapshotDbValues } from '../services/capacity-placement-snapshot';
+import { enrichMessageWithMentions } from '../services/mention-enrichment';
+import {
+  PlacementResolutionError,
+  resolveTaskStartPlacement,
+  resolveTaskStartPlacementCredentialAttributionFromPlacement,
+} from '../services/placement-resolver';
+import { resolveProjectAgentDefault } from '../services/project-agent-defaults';
+import * as projectDataService from '../services/project-data';
 import { resolveSkillProfile } from '../services/skills';
 import { submitInstantTask } from '../services/submit-instant-task';
 import { validateSubmitContextAndAttachments } from '../services/submit-task-input-validation';

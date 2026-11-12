@@ -9,14 +9,16 @@ import {
   projectMemberRolesWithCapability,
 } from '../middleware/project-auth';
 import {
-  buildAnyDefaultCapacityPoolExclusionSql,
-  buildHigherPrecedenceDefaultCapacityPoolExclusionSql,
-} from './capacity-pool-precedence';
-import { capacityCandidateSatisfiesWorkloadRole } from './capacity-pool-workload-roles';
+  capacityCandidateSatisfiesWorkloadRole,
+} from '../scheduler-core';
 import {
   type ConcreteCapacitySnapshot,
   normalizeConcreteSnapshot,
-} from './placement-authority-snapshot';
+} from '../scheduler-core';
+import {
+  buildAnyDefaultCapacityPoolExclusionSql,
+  buildHigherPrecedenceDefaultCapacityPoolExclusionSql,
+} from './capacity-pool-precedence';
 
 export type PlacementSqlBind = string | number | null;
 export type PlacementAuthorityNodeClass = 'managed' | 'user-owned';

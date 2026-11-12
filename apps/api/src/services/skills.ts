@@ -19,17 +19,17 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { ulid } from '../lib/ulid';
 import { errors } from '../middleware/error';
+import {
+  parseStoredResourceRequirementsJson,
+  ResourceRequirementsValidationError,
+  serializeResourceRequirementsInput,
+} from '../scheduler-core';
 import { resolveAgentProfile } from './agent-profiles';
 import {
   applyBaseProfileUpdates,
   baseProfileInsertValues,
   toBaseProfileFields,
 } from './profile-fields';
-import {
-  parseStoredResourceRequirementsJson,
-  ResourceRequirementsValidationError,
-  serializeResourceRequirementsInput,
-} from './resource-requirements-input';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 

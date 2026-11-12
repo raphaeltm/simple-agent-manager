@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB,
   resolveEffectiveNodeHostMemoryReserveMb,
-} from '../../../src/services/workspace-resource-capacity';
+} from '../../../src/scheduler-core';
 
 /**
  * One host reserve drives offering selection, admission and the cloud-init workload-slice cap

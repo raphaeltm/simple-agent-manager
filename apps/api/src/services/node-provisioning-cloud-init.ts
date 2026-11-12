@@ -6,10 +6,12 @@ import { type CloudInitVariables, generateCloudInit } from '@simple-agent-manage
 import { type TaskMode } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
+import {
+  resolveEffectiveNodeHostMemoryReserveMb,
+} from '../scheduler-core';
 import { nodeTunnelBootVariables } from './node-tunnel-config';
 import type { NodeTunnelProvisioning } from './node-tunnel-provisioning';
 import { errorReportCloudInitVariables } from './vm-error-report-config';
-import { resolveEffectiveNodeHostMemoryReserveMb } from './workspace-resource-capacity';
 
 export interface NodeCloudInitInput {
   env: Env;

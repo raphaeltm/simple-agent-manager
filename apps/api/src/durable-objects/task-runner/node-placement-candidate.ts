@@ -1,11 +1,12 @@
 import { type ResolvedResourceReservation } from '@simple-agent-manager/shared';
 
-import { LIFETIME_ADMISSION_CUTOFF_REASON } from '../../services/node-lifetime-admission';
-import type { PlacementHostDiagnosticInput } from '../../services/placement-diagnostics';
+import type {
+  PlacementHostDiagnosticInput,
+} from '../../scheduler-core';
 import {
   normalizePlacementHostSignals,
   type PlacementHostSignals,
-} from '../../services/placement-strategy';
+} from '../../scheduler-core';
 import {
   type ActiveWorkspaceReservationUsage,
   cpuBudgetMillis,
@@ -14,7 +15,8 @@ import {
   resolveTrustedWorkspaceNodeCapacity,
   usableMemoryMb,
   type WorkspaceAdmissionPolicy,
-} from '../../services/workspace-resource-capacity';
+} from '../../scheduler-core';
+import { LIFETIME_ADMISSION_CUTOFF_REASON } from '../../services/node-lifetime-admission';
 import type { NodePlacementFields, ReusableNodeSelection } from './node-selection-shared';
 
 export type RankedReusableNode = {

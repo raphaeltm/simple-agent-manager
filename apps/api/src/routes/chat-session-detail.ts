@@ -20,9 +20,11 @@ import { expectJsonRecord } from '../lib/runtime-validation';
 import { errors } from '../middleware/error';
 import { getPullRequestStates } from '../operations/pull-request-core';
 import type { OperationContext } from '../operations/types';
+import {
+  parseProviderLimitWait,
+} from '../scheduler-core';
 import { resolveTaskAgentProfileHint } from '../services/agent-profile-display';
 import * as projectDataService from '../services/project-data';
-import { parseProviderLimitWait } from '../services/provider-limit-policy';
 import { canStartProviderLimitTaskAnyway } from '../services/provider-limit-recovery';
 import { publicPlacementExplanationJson } from '../services/public-placement-explanation';
 import { isTaskStatus } from '../services/task-status';

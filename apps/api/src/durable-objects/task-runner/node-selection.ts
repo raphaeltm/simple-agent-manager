@@ -1,15 +1,21 @@
 import { log } from '../../lib/logger';
+import type {
+  PlacementHostDiagnosticInput,
+} from '../../scheduler-core';
+import {
+  comparePlacementRolloutHosts,
+} from '../../scheduler-core';
 import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
 import {
   pastLifetimeAdmissionCutoffColumnSql,
   resolvePlacementAdmissionPolicy,
 } from '../../services/node-lifetime-admission';
-import type { PlacementHostDiagnosticInput } from '../../services/placement-diagnostics';
-import { comparePlacementRolloutHosts } from '../../services/placement-rollout';
+import {
+  trustedWorkspaceNodeCapacityColumnsSql,
+} from '../../services/workspace-admission-sql';
 import {
   loadActiveWorkspaceReservationUsage,
-  trustedWorkspaceNodeCapacityColumnsSql,
-} from '../../services/workspace-resource-capacity';
+} from '../../services/workspace-reservation-usage';
 import { evaluateReusableNodeCandidate, type RankedReusableNode } from './node-placement-candidate';
 import {
   currentReusableNodeIds,

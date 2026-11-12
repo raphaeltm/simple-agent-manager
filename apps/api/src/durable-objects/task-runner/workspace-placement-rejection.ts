@@ -16,6 +16,11 @@
  * and after a bounded number the next reservation drops only the backlog guard.
  */
 import { log } from '../../lib/logger';
+import {
+  evaluateWorkspaceReservationCapacity,
+  type PlacementAdmissionPolicy,
+  type WorkspaceResourceNode,
+} from '../../scheduler-core';
 import { resolveAdminSetting } from '../../services/admin-settings-resolution';
 import {
   isNodePastLifetimeAdmissionCutoff,
@@ -23,12 +28,11 @@ import {
 } from '../../services/node-lifetime-admission';
 import { releaseVmProvisioningLease } from '../../services/vm-admission-control';
 import {
-  evaluateWorkspaceReservationCapacity,
-  loadActiveWorkspaceReservationUsage,
-  type PlacementAdmissionPolicy,
   trustedWorkspaceNodeCapacityColumnsSql,
-  type WorkspaceResourceNode,
-} from '../../services/workspace-resource-capacity';
+} from '../../services/workspace-admission-sql';
+import {
+  loadActiveWorkspaceReservationUsage,
+} from '../../services/workspace-reservation-usage';
 import { getTaskReservation } from './node-selection-shared';
 import { persistPlacementDiagnostics } from './placement-diagnostics';
 import type { TaskRunnerContext, TaskRunnerState } from './types';

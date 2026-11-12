@@ -15,7 +15,7 @@ import type { ProjectEventChannelEnv } from '../../durable-objects/project-data/
 import {
   normalizeResourceRequirementsInput,
   ResourceRequirementsValidationError,
-} from '../../services/resource-requirements-input';
+} from '../../scheduler-core';
 import { INVALID_PARAMS, jsonRpcError, type JsonRpcResponse } from './_helpers';
 import { parseCoordinationChannelParam } from './dispatch-coordination-channel';
 import { parseDispatchRuntime } from './dispatch-instant';

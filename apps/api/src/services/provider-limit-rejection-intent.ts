@@ -1,9 +1,11 @@
 import type { Task } from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import type {
+  ProviderLimitWait,
+} from '../scheduler-core';
 import { recordCredentialLimitObservation } from './credential-limit-events';
 import { credentialLimitReferenceKey } from './credential-limit-events/values';
-import type { ProviderLimitWait } from './provider-limit-policy';
 
 /** A task wait is the durable outbox intent; admission reads it if this optional
  * observation is delayed or capacity-bound. Never refresh its source time. */

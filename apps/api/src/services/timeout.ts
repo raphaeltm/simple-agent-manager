@@ -10,8 +10,10 @@
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import {
+  DEFAULT_WORKSPACE_BUILD_QUEUE_TIMEOUT_MINUTES,
+} from '../scheduler-core';
 import { persistError } from './observability';
-import { DEFAULT_WORKSPACE_BUILD_QUEUE_TIMEOUT_MINUTES } from './provisioning-attempt-limits';
 import {
   claimWorkspaceCreatingExpiry,
   resolveWorkspaceBuildQueueWaitMs,

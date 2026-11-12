@@ -17,16 +17,16 @@ import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { ulid } from '../lib/ulid';
 import { errors } from '../middleware/error';
+import {
+  ResourceRequirementsValidationError,
+  serializeResourceRequirementsInput,
+} from '../scheduler-core';
 import type { CreateTriggerSchema } from '../schemas/triggers';
 import { generateAddressKey } from './agent-email/address';
 import { requireAgentEmailOn, resolveAllowedSenders } from './agent-email/trigger-config';
 import { cronToNextFire, validateCronExpression } from './cron-utils';
 import { validateGitHubTriggerQueueConfig } from './github-trigger-config';
 import type { McpTokenData } from './mcp-token';
-import {
-  ResourceRequirementsValidationError,
-  serializeResourceRequirementsInput,
-} from './resource-requirements-input';
 import { clearTriggerPageCaches } from './trigger-cache';
 import { resolveMaxTriggersPerProject } from './trigger-limits';
 import { prepareWebhookClaim } from './webhook-credential-claim';

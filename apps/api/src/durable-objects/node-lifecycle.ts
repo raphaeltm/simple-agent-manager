@@ -55,7 +55,9 @@ import {
   type WorkspaceEvictionIdentity,
   type WorkspaceStopIdentity,
 } from '../services/workspace-eviction-lifecycle';
-import { ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL } from '../services/workspace-resource-capacity';
+import {
+  ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL,
+} from '../services/workspace-reservation-usage';
 import {
   hasActiveWorkspace,
   hasRecentPlacementClaim,

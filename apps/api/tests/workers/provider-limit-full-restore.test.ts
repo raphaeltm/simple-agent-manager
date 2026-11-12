@@ -5,12 +5,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import recorded from '../../../../tests/fixtures/provider-limit-rejections.json';
 import { runSessionSleepSweep } from '../../src/scheduled/session-sleep';
-import { signCallbackToken } from '../../src/services/jwt';
-import { getNodeBackendBaseUrl } from '../../src/services/node-agent-readiness';
 import {
   parseProviderLimitWait,
   PROVIDER_LIMIT_CONTINUATION,
-} from '../../src/services/provider-limit-policy';
+} from '../../src/scheduler-core';
+import { signCallbackToken } from '../../src/services/jwt';
+import { getNodeBackendBaseUrl } from '../../src/services/node-agent-readiness';
 import { buildSessionSnapshotR2Key } from '../../src/services/session-snapshots';
 import {
   acceptedPromptResponse,

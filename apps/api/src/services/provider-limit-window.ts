@@ -1,8 +1,11 @@
 import * as v from 'valibot';
 
 import type { Env } from '../env';
+import {
+  parseProviderLimitWait,
+  PROVIDER_LIMIT_POLICY,
+} from '../scheduler-core';
 import { credentialLimitReferenceKey } from './credential-limit-events/values';
-import { parseProviderLimitWait, PROVIDER_LIMIT_POLICY } from './provider-limit-policy';
 
 const WindowSchema = v.object({
   status: v.string(),

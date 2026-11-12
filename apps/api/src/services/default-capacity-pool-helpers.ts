@@ -77,9 +77,3 @@ export function composableCredentialReference(credentialId: string): string {
 export function composableAttachmentReference(attachmentId: string): string {
   return `cc_attachments:${attachmentId}`;
 }
-
-export function timestampVersion(timestamp: string | null | undefined): number | null {
-  if (!timestamp) return null;
-  const parsed = Date.parse(timestamp);
-  return Number.isFinite(parsed) ? parsed : null;
-}

@@ -10,6 +10,10 @@ import { ulid } from '../../lib/ulid';
 import { getUserId, requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import {
+  parseResolvedResourceReservation,
+  resolveWorkspaceAdmissionPolicy,
+} from '../../scheduler-core';
+import {
   parseOptionalBody,
   WorkspaceErrorSchema,
   WorkspaceStatusUpdateSchema,
@@ -25,10 +29,6 @@ import {
   describeReprovisionDispatchError,
   signReprovisionCallbackToken,
 } from '../../services/workspace-reprovision-credential';
-import {
-  parseResolvedResourceReservation,
-  resolveWorkspaceAdmissionPolicy,
-} from '../../services/workspace-resource-capacity';
 import { requireRepositoryOwnerAccess } from '../projects/_helpers';
 import {
   assertNodeOperational,

@@ -8,8 +8,10 @@
 import { GcpProvider } from '@simple-agent-manager/providers';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import {
+  resolveTrustedWorkspaceNodeCapacity,
+} from '../../src/scheduler-core';
 import { observedHardwareDbValues } from '../../src/services/runtime-allocation';
-import { resolveTrustedWorkspaceNodeCapacity } from '../../src/services/workspace-resource-capacity';
 
 const API = 'https://compute.googleapis.com/compute/v1/projects/sam-gcp';
 const ZONE = 'europe-west1-b';

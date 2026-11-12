@@ -4,22 +4,26 @@
  */
 
 import { log } from '../../lib/logger';
+import {
+  normalizePlacementHostSignals,
+} from '../../scheduler-core';
 import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
 import {
   lifetimeAdmissionCutoffSql,
   pastLifetimeAdmissionCutoffColumnSql,
   resolvePlacementAdmissionPolicy,
 } from '../../services/node-lifetime-admission';
-import { normalizePlacementHostSignals } from '../../services/placement-strategy';
 import { filterReusableNodesByCurrentAuthority } from '../../services/reusable-node-authority';
 import {
   SessionRecoveryAuthorityRevokedError,
   type SessionRecoverySourceTaskGuard,
 } from '../../services/session-recovery-authority';
 import {
-  loadActiveWorkspaceReservationUsage,
   trustedWorkspaceNodeCapacityColumnsSql,
-} from '../../services/workspace-resource-capacity';
+} from '../../services/workspace-admission-sql';
+import {
+  loadActiveWorkspaceReservationUsage,
+} from '../../services/workspace-reservation-usage';
 import type { NodeLifecycle } from '../node-lifecycle';
 import {
   currentReusableNodeIds,

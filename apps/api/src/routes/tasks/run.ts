@@ -24,6 +24,17 @@ import { ulid } from '../../lib/ulid';
 import { getAuth, requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireProjectCapability } from '../../middleware/project-auth';
+import {
+  collectStoredResourceRequirementLayers,
+  createPersistedTaskResourcePlanJson,
+  firstResourceRequirementLayer,
+  mergeResourceRequirementLayers,
+  normalizeResourceRequirementsInput,
+  parseLegacyVmSize,
+  parseResourceRequirementsSource,
+  readPersistedTaskResourcePlan,
+  ResourceRequirementsValidationError,
+} from '../../scheduler-core';
 import { formatIssues, RunTaskSchema } from '../../schemas';
 import {
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS,
@@ -36,17 +47,6 @@ import {
 } from '../../services/placement-resolver';
 import * as projectDataService from '../../services/project-data';
 import { cleanupRequestedTaskRun } from '../../services/requested-task-run-cleanup';
-import {
-  collectStoredResourceRequirementLayers,
-  createPersistedTaskResourcePlanJson,
-  firstResourceRequirementLayer,
-  mergeResourceRequirementLayers,
-  normalizeResourceRequirementsInput,
-  parseLegacyVmSize,
-  parseResourceRequirementsSource,
-  readPersistedTaskResourcePlan,
-  ResourceRequirementsValidationError,
-} from '../../services/resource-requirements-input';
 import { markTaskFailedIfNonTerminal } from '../../services/task-failure';
 import { isTaskBlocked } from '../../services/task-graph';
 import { startTaskRunnerDO } from '../../services/task-runner-do';

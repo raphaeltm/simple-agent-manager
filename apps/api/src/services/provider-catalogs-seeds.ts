@@ -3,11 +3,13 @@ import { and, eq, isNotNull, isNull, or } from 'drizzle-orm';
 
 import * as schema from '../db/schema';
 import {
+  timestampVersion,
+} from '../scheduler-core';
+import {
   composableAttachmentReference,
   composableCredentialReference,
   legacyCredentialReference,
   platformCredentialReference,
-  timestampVersion,
 } from './default-capacity-pool-helpers';
 import {
   listManagedGcpCredentialMirrors,

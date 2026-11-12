@@ -1,7 +1,9 @@
 import type { ResolvedResourceReservation } from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
 
-import { DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB as HOST_RESERVE_MB } from '../../src/services/workspace-resource-capacity';
+import {
+  DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB as HOST_RESERVE_MB,
+} from '../../src/scheduler-core';
 import {
   ACCEPT_STALE_HEARTBEAT_POLICY,
   AggregateCapacityTimeline,

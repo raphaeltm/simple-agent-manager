@@ -41,7 +41,7 @@ Moves as the pure half of a split file: `workspace-resource-capacity` (evaluatio
 
 ## Plan
 
-- [ ] Step 1: decouple in place. Collect the pure code under `apps/api/src/scheduler-core/`
+- [x] Step 1: decouple in place. Collect the pure code under `apps/api/src/scheduler-core/`
       with an `index.ts` public surface; split mixed files; worker imports go through the index.
 - [ ] Step 2 (after "W0 ready"): `git mv` that directory to `packages/scheduler-core/src`,
       apply the W0 template, switch imports to `@simple-agent-manager/scheduler-core`,
@@ -52,3 +52,12 @@ Moves as the pure half of a split file: `workspace-resource-capacity` (evaluatio
 ## Progress log
 
 - 2026-11-12: branch created from core `bbb1c82ca`; boundary decided (above).
+- 2026-11-12: Step 1 done. Pure code is in `apps/api/src/scheduler-core/` (no imports
+  outside `@simple-agent-manager/shared` and `valibot`); `index.ts` exports the 129 symbols
+  the worker and tests use. A codemod rewrote 122 importers. `Env` now extends
+  `WorkspaceAdmissionEnv` (the eight `TASK_RUN_NODE_*` admission tunables moved there).
+  `trustedWorkspaceNodeCapacityColumnsSql` moved to `services/workspace-admission-sql.ts`;
+  `timestampVersion` moved to `scheduler-core/capacity-pool-authority.ts`;
+  `placement-resolver-capacity` takes the shared `DefaultCapacityPoolSummary`.
+  `tsc` clean, eslint clean on changed files, 31 affected test files / 708 tests pass.
+  Next: full suites, then wait for "W0 ready" to lift into `packages/scheduler-core`.

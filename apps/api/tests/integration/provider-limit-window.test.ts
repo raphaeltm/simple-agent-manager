@@ -3,8 +3,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
+import {
+  newProviderLimitWait,
+} from '../../src/scheduler-core';
 import { credentialLimitReferenceKey } from '../../src/services/credential-limit-events/values';
-import { newProviderLimitWait } from '../../src/services/provider-limit-policy';
 import { rejectedProviderWindow } from '../../src/services/provider-limit-window';
 import { createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 

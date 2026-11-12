@@ -5,11 +5,13 @@ import type {
 import { env } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 
+import type {
+  WorkspaceAdmissionPolicy,
+} from '../../src/scheduler-core';
 import {
   reserveWorkspacePlacement,
   type WorkspacePlacementInput,
 } from '../../src/services/workspace-placement';
-import type { WorkspaceAdmissionPolicy } from '../../src/services/workspace-resource-capacity';
 import { seedInstallation, seedNode, seedProject, seedUser } from './helpers/seed-d1';
 
 const USER_ID = 'user-c3a-final-admission';

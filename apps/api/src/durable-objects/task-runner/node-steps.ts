@@ -6,6 +6,9 @@
  * the DO's step table keeps one import site. See rule 18.
  */
 import { log } from '../../lib/logger';
+import {
+  resolveEffectiveNodeHostMemoryReserveMb,
+} from '../../scheduler-core';
 import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
 import {
   type CapacityAwareNodePlacementRow,
@@ -15,9 +18,8 @@ import {
 } from '../../services/placement-resolver';
 import { filterReusableNodesByCurrentAuthority } from '../../services/reusable-node-authority';
 import {
-  resolveEffectiveNodeHostMemoryReserveMb,
   trustedWorkspaceNodeCapacityColumnsSql,
-} from '../../services/workspace-resource-capacity';
+} from '../../services/workspace-admission-sql';
 import { shouldProvisionSpreadNode } from './capacity-pool-node-limit';
 import {
   findNodeWithCapacity,

@@ -4,7 +4,7 @@ import { evaluateReusableNodeCandidate } from '../../src/durable-objects/task-ru
 import {
   DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB,
   resolveWorkspaceAdmissionPolicy,
-} from '../../src/services/workspace-resource-capacity';
+} from '../../src/scheduler-core';
 
 function evaluate(memoryMb: number) {
   return evaluateReusableNodeCandidate({

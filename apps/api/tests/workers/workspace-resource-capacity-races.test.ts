@@ -11,14 +11,14 @@ import type {
   TaskRunnerState,
 } from '../../src/durable-objects/task-runner/types';
 import {
-  reserveWorkspacePlacement,
-  type WorkspacePlacementInput,
-} from '../../src/services/workspace-placement';
-import {
   aggregateWorkspaceReservationRows,
   resolveWorkspaceAdmissionPolicy,
   type WorkspaceAdmissionPolicy,
-} from '../../src/services/workspace-resource-capacity';
+} from '../../src/scheduler-core';
+import {
+  reserveWorkspacePlacement,
+  type WorkspacePlacementInput,
+} from '../../src/services/workspace-placement';
 import {
   seedInstallation,
   seedNode,

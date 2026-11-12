@@ -3,14 +3,14 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../../db/schema';
 import { getCredentialEncryptionKey } from '../../lib/secrets';
 import { getSelectedAgentCredentialReference } from '../../routes/credentials';
-import { resolveProfileCredentialContext } from '../../services/composable-credentials/profile-context';
-import { credentialLimitReferenceKey } from '../../services/credential-limit-events/values';
-import * as projectData from '../../services/project-data';
 import {
   newProviderLimitWait,
   parseProviderLimitWait,
   PROVIDER_LIMIT_POLICY,
-} from '../../services/provider-limit-policy';
+} from '../../scheduler-core';
+import { resolveProfileCredentialContext } from '../../services/composable-credentials/profile-context';
+import { credentialLimitReferenceKey } from '../../services/credential-limit-events/values';
+import * as projectData from '../../services/project-data';
 import { presentBlockedProviderLimitWait } from '../../services/provider-limit-recovery';
 import { resolveProviderLimitResetWindowTolerance } from '../../services/provider-limit-settings';
 import { rejectedProviderWindow } from '../../services/provider-limit-window';

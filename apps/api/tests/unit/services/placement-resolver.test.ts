@@ -4,7 +4,10 @@ import { describe, expect, it } from 'vitest';
 import {
   preferCapacityCandidatesInLocation,
   rankCapacityCandidatesForRuntime,
-} from '../../../src/services/placement-capacity-ranking';
+} from '../../../src/scheduler-core';
+import {
+  buildCapacityPlacementExplanation,
+} from '../../../src/scheduler-core';
 import type {
   PlacementProfileDefaults,
   PlacementProjectDefaults,
@@ -19,7 +22,6 @@ import {
   resolveReusableNodeCapacitySnapshot,
   resolveTaskStartPlacement,
 } from '../../../src/services/placement-resolver';
-import { buildCapacityPlacementExplanation } from '../../../src/services/placement-resolver-capacity-snapshot';
 
 function reservation(
   overrides: Partial<ReturnType<typeof resolveTaskStartPlacement>['resolvedReservation']> = {}

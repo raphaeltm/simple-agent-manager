@@ -1,4 +1,7 @@
 import {
+  PROVIDER_LIMIT_POLICY,
+} from '../scheduler-core';
+import {
   type AdminSettingDefinition,
   choiceDefinition,
   integerDefinition,
@@ -6,7 +9,6 @@ import {
   OPERATOR_DEFAULTS,
 } from './admin-setting-definitions';
 import { FLEET_OPS_SETTINGS } from './fleet-ops/settings-definitions';
-import { PROVIDER_LIMIT_POLICY } from './provider-limit-policy';
 /** Operations-project debugger tools dial (idea 01M6GGY1QPGG4D40HG0PVGQS3R, policy a35180d5). */
 export const OPERATIONS_TOOLS_MODES = ['off', 'read', 'read_ask', 'read_auto_safe'] as const;
 export const DEFAULT_OPERATIONS_AUDIT_RETENTION_DAYS = 90;

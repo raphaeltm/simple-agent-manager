@@ -3,7 +3,9 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
-import { capacityPlacementAuthorityGeneration } from './capacity-pool-authority';
+import {
+  capacityPlacementAuthorityGeneration,
+} from '../scheduler-core';
 import { resolveCapacityPoolPlacementSettings } from './capacity-pool-placement-settings';
 import {
   buildPlacementAuthoritySqlPredicate,

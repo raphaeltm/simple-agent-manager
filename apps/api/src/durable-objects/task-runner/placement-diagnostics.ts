@@ -4,8 +4,10 @@ import { resolveResourceReservation } from '@simple-agent-manager/shared';
 import {
   buildPlacementDecisionDiagnostics,
   type BuildPlacementDiagnosticsInput,
-} from '../../services/placement-diagnostics';
-import { isResolvedResourceReservation } from '../../services/workspace-resource-capacity';
+} from '../../scheduler-core';
+import {
+  isResolvedResourceReservation,
+} from '../../scheduler-core';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
 type DecisionUpdate = Omit<

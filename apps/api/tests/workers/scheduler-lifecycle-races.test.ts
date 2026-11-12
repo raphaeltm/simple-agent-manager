@@ -15,10 +15,12 @@ import type {
 import type { Env } from '../../src/env';
 import { claimNodeForCleanup } from '../../src/scheduled/node-cleanup/shared';
 import {
+  resolveWorkspaceAdmissionPolicy,
+} from '../../src/scheduler-core';
+import {
   reserveWorkspacePlacement,
   type WorkspacePlacementInput,
 } from '../../src/services/workspace-placement';
-import { resolveWorkspaceAdmissionPolicy } from '../../src/services/workspace-resource-capacity';
 import {
   seedInstallation,
   seedNode,

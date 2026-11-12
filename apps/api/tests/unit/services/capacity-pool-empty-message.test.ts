@@ -15,18 +15,20 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
+import type {
+  TaskStartCapacityPoolSelection,
+} from '../../../src/scheduler-core';
+import {
+  emptyCapacityPoolMessage,
+  noEligibleCapacityCandidateMessage,
+} from '../../../src/scheduler-core';
 import { resolveCanonicalVmAllocationPlan } from '../../../src/services/canonical-vm-allocation';
 import { updateDefaultCapacityPool } from '../../../src/services/default-capacity-pool-updates';
 import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../../src/services/default-capacity-pools';
 import {
-  emptyCapacityPoolMessage,
-  noEligibleCapacityCandidateMessage,
-} from '../../../src/services/placement-resolution-error';
-import {
   resolveTaskStartCapacityPoolSelection,
   resolveTaskStartPlacement,
 } from '../../../src/services/placement-resolver';
-import type { TaskStartCapacityPoolSelection } from '../../../src/services/placement-resolver-types';
 import { offering } from '../../helpers/capacity-pool-offerings';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 import {

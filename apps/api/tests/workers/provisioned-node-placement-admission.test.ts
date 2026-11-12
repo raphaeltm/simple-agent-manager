@@ -24,16 +24,16 @@ import {
   WORKSPACE_PLACEMENT_REFUSED_NOTE_PREFIX,
 } from '../../src/durable-objects/task-runner/workspace-placement-rejection';
 import type { Env } from '../../src/env';
-import { invalidateAdminSettings } from '../../src/services/admin-settings-resolution';
 import {
   DEFAULT_WORKSPACE_PLACEMENT_BACKLOG_CONFLICT_RETRIES,
   DEFAULT_WORKSPACE_PLACEMENT_MAX_REJECTIONS,
-} from '../../src/services/provisioning-attempt-limits';
+} from '../../src/scheduler-core';
 import {
   DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB,
   MEASURED_MEMORY_OVERRUN_REASON,
   resolveWorkspaceAdmissionPolicy,
-} from '../../src/services/workspace-resource-capacity';
+} from '../../src/scheduler-core';
+import { invalidateAdminSettings } from '../../src/services/admin-settings-resolution';
 import {
   seedInstallation,
   seedNode,

@@ -5,7 +5,9 @@ import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
-import { timestampVersion } from './default-capacity-pool-helpers';
+import {
+  timestampVersion,
+} from '../scheduler-core';
 import { decrypt } from './encryption';
 import { extractCloudProviderToken } from './provider-credential-codecs';
 

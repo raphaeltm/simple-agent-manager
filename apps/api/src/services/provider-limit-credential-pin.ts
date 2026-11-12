@@ -1,7 +1,9 @@
 import type { Env } from '../env';
 import { errors } from '../middleware/error';
+import {
+  parseProviderLimitWait,
+} from '../scheduler-core';
 import { credentialLimitReferenceKey } from './credential-limit-events/values';
-import { parseProviderLimitWait } from './provider-limit-policy';
 import {
   sameWorkspaceCallbackIdentity,
   type WorkspaceCallbackIdentitySnapshot,

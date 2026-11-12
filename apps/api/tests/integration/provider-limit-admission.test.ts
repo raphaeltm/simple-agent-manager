@@ -11,13 +11,15 @@ import type { Env } from '../../src/env';
 import { getSelectedAgentCredentialReference } from '../../src/routes/credentials';
 import { recoverStuckTasks } from '../../src/scheduled/stuck-tasks';
 import {
+  newProviderLimitWait,
+} from '../../src/scheduler-core';
+import {
   __resetAdminSettingsCacheForTest,
   updateAdminSettings,
 } from '../../src/services/admin-settings';
 import { startSamAwareAgentSession } from '../../src/services/agent-session-bootstrap';
 import { cancelTask } from '../../src/services/cancel-task';
 import { assertProviderLimitCredentialPin } from '../../src/services/provider-limit-credential-pin';
-import { newProviderLimitWait } from '../../src/services/provider-limit-policy';
 import {
   canStartProviderLimitTaskAnyway,
   resumeProviderLimitTask,

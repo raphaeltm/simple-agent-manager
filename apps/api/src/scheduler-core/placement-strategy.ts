@@ -35,16 +35,15 @@ import type {
   CapacityPoolStrategy,
 } from '@simple-agent-manager/shared';
 
+import type { WorkspaceAdmissionPolicy } from './workspace-admission-policy';
+import { type ActiveWorkspaceReservationUsage, emptyUsage } from './workspace-reservation-usage';
 import {
-  type ActiveWorkspaceReservationUsage,
   cpuBudgetMillis,
-  emptyUsage,
   parseWorkspaceAdmissionMetrics,
   resolveTrustedWorkspaceNodeCapacity,
   scoreWorkspaceAdmissionMetrics,
   usableMemoryMb,
   type WorkspaceAdmissionMetrics,
-  type WorkspaceAdmissionPolicy,
   type WorkspaceResourceNode,
 } from './workspace-resource-capacity';
 

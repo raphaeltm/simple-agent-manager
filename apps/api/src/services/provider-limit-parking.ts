@@ -5,9 +5,6 @@ import * as v from 'valibot';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
-import { recordCredentialLimitObservation } from './credential-limit-events';
-import { credentialLimitReferenceKey } from './credential-limit-events/values';
-import * as projectData from './project-data';
 import {
   newProviderLimitWait,
   parseProviderLimitWait,
@@ -15,7 +12,10 @@ import {
   PROVIDER_LIMIT_POLICY,
   providerLimitNeedsImmediateSleep,
   type ProviderLimitWait,
-} from './provider-limit-policy';
+} from '../scheduler-core';
+import { recordCredentialLimitObservation } from './credential-limit-events';
+import { credentialLimitReferenceKey } from './credential-limit-events/values';
+import * as projectData from './project-data';
 import { repairProviderLimitRejectionObservation } from './provider-limit-rejection-intent';
 import { resolveProviderLimitResetWindowTolerance } from './provider-limit-settings';
 import { rejectedProviderWindow } from './provider-limit-window';

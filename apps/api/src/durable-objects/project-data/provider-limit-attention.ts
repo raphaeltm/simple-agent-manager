@@ -1,5 +1,7 @@
 /** Caller holds the DO concurrency gate across the authoritative read and local write. */
-import { parseProviderLimitWait } from '../../services/provider-limit-policy';
+import {
+  parseProviderLimitWait,
+} from '../../scheduler-core';
 import {
   createAttentionMarker,
   listActiveAttentionMarkers,

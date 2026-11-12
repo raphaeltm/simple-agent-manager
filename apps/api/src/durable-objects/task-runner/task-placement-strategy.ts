@@ -3,11 +3,11 @@ import type { CapacityPoolStrategy } from '@simple-agent-manager/shared';
 import {
   PLACEMENT_ROLLOUT_BASELINE_STRATEGY,
   resolvePlacementRollout,
-} from '../../services/placement-rollout';
+} from '../../scheduler-core';
 import {
   comparePlacementHostsByStrategy,
   type PlacementHostSignals,
-} from '../../services/placement-strategy';
+} from '../../scheduler-core';
 import type { TaskRunnerState } from './types';
 
 /**

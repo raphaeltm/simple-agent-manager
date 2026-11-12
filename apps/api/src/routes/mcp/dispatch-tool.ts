@@ -12,6 +12,14 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
+import {
+  collectStoredResourceRequirementLayers,
+  createPersistedTaskResourcePlanJson,
+  firstResourceRequirementLayer,
+  firstResourceRequirementLayerJson,
+  mergeResourceRequirementLayers,
+  ResourceRequirementsValidationError,
+} from '../../scheduler-core';
 import { generateBranchName } from '../../services/branch-name';
 import {
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS,
@@ -28,14 +36,6 @@ import {
 } from '../../services/placement-resolver';
 import { resolveProjectAgentDefault } from '../../services/project-agent-defaults';
 import * as projectDataService from '../../services/project-data';
-import {
-  collectStoredResourceRequirementLayers,
-  createPersistedTaskResourcePlanJson,
-  firstResourceRequirementLayer,
-  firstResourceRequirementLayerJson,
-  mergeResourceRequirementLayers,
-  ResourceRequirementsValidationError,
-} from '../../services/resource-requirements-input';
 import { resolveSkillProfile } from '../../services/skills';
 import { markTaskFailedIfNonTerminal } from '../../services/task-failure';
 import { startTaskRunnerDO } from '../../services/task-runner-do';

@@ -25,12 +25,12 @@ import { toProjectResponse } from '../../lib/mappers';
 import { getUserId } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireProjectCapability } from '../../middleware/project-auth';
-import { jsonValidator, UpdateProjectSchema } from '../../schemas';
-import { getExternalInstallationId } from '../../services/github-installation-ids';
 import {
   ResourceRequirementsValidationError,
   serializeResourceRequirementsInput,
-} from '../../services/resource-requirements-input';
+} from '../../scheduler-core';
+import { jsonValidator, UpdateProjectSchema } from '../../schemas';
+import { getExternalInstallationId } from '../../services/github-installation-ids';
 import {
   assertRepositoryAccess,
   normalizeProjectName,

@@ -22,6 +22,10 @@ import { log } from '../../lib/logger';
 import { parsePositiveInt, requireRouteParam } from '../../lib/route-helpers';
 import { assertNotAgentSignInSession, getAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
+import {
+  ResourceRequirementsValidationError,
+  serializeResourceRequirementsInput,
+} from '../../scheduler-core';
 import { CreateTriggerSchema, jsonValidator, UpdateTriggerSchema } from '../../schemas';
 import {
   loadEmailTriggerConfig,
@@ -37,10 +41,6 @@ import {
 } from '../../services/github-trigger-config';
 import { parseGitHubTriggerFiltersJson } from '../../services/github-trigger-filter';
 import { getProjectMultiplayerState } from '../../services/project-multiplayer';
-import {
-  ResourceRequirementsValidationError,
-  serializeResourceRequirementsInput,
-} from '../../services/resource-requirements-input';
 import { clearTriggerPageCaches } from '../../services/trigger-cache';
 import {
   assertKeepsAgentProfile,

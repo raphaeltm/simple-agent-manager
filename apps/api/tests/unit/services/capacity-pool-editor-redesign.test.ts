@@ -16,6 +16,12 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
+import {
+  noEligibleCapacityCandidateMessage,
+} from '../../../src/scheduler-core';
+import {
+  buildCapacityPoolSelection,
+} from '../../../src/scheduler-core';
 import { attachCapacitySourceLabels } from '../../../src/services/default-capacity-pool-source-labels';
 import {
   publishSourceSettingsOnly,
@@ -26,9 +32,7 @@ import {
   ensureDefaultCapacityPoolsForExistingCredentials,
   readDefaultCapacityPoolSummaries,
 } from '../../../src/services/default-capacity-pools';
-import { noEligibleCapacityCandidateMessage } from '../../../src/services/placement-resolution-error';
 import { resolveTaskStartPlacement } from '../../../src/services/placement-resolver';
-import { buildCapacityPoolSelection } from '../../../src/services/placement-resolver-capacity';
 import { offering } from '../../helpers/capacity-pool-offerings';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 import { seedCloudCredential, seedUser } from '../routes/capacity-pool-test-seeds';

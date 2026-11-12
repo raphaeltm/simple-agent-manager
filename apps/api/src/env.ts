@@ -2,10 +2,11 @@
 import type { Sandbox } from '@cloudflare/sandbox';
 
 import type { VmAgentContainer } from './durable-objects/vm-agent-container';
+import type { WorkspaceAdmissionEnv } from './scheduler-core';
 import type { TaskRecoveryEnv } from './task-recovery-env';
 import type { WebhookTriggerEnv } from './webhook-trigger-env';
 
-export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
+export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv, WorkspaceAdmissionEnv {
   CLI_RECEIPT_REQUEST_MAX_BYTES?: string; // default 262144
   CLI_RECEIPT_RESPONSE_MAX_BYTES?: string; // default 65536
   // D1 Database.
@@ -428,15 +429,8 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   NODE_AGENT_READY_TIMEOUT_MS?: string;
   NODE_AGENT_READY_POLL_INTERVAL_MS?: string;
   VM_AGENT_REQUIRED_VERSION?: string; // VM-agent release (last commit changing packages/vm-agent build inputs, NOT the deployment commit) required for reusable VM nodes; unset disables rollout gating for local/manual dev
-  // Task run configuration (autonomous execution)
-  TASK_RUN_NODE_CPU_THRESHOLD_PERCENT?: string;
-  TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT?: string;
-  TASK_RUN_NODE_CPU_SHARE_BUDGET_PERCENT?: string;
-  TASK_RUN_NODE_HOST_MEMORY_RESERVE_MB?: string;
-  TASK_RUN_NODE_DISK_PRESSURE_THRESHOLD_PERCENT?: string;
-  TASK_RUN_NODE_METRICS_TTL_MS?: string;
-  TASK_RUN_NODE_CPU_SCORE_WEIGHT_PERCENT?: string;
-  TASK_RUN_NODE_MEMORY_SCORE_WEIGHT_PERCENT?: string;
+  // Task run configuration (autonomous execution). Node admission tunables
+  // (TASK_RUN_NODE_*) are declared in scheduler-core's WorkspaceAdmissionEnv.
   TASK_RUN_CLEANUP_DELAY_MS?: string;
   // Warm node pooling configuration
   NODE_PROVISIONING_REQUEST_TIMEOUT_MS?: string;

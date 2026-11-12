@@ -15,7 +15,9 @@ import { sleepSession } from '../../src/durable-objects/project-data/sessions';
 import type { Env } from '../../src/env';
 import { AppError } from '../../src/middleware/error';
 import { providerLimitResumeRoutes } from '../../src/routes/tasks/provider-limit-resume';
-import { newProviderLimitWait } from '../../src/services/provider-limit-policy';
+import {
+  newProviderLimitWait,
+} from '../../src/scheduler-core';
 import { presentBlockedProviderLimitWait } from '../../src/services/provider-limit-recovery';
 import { createAllSchemaTables } from '../helpers/sqlite-d1';
 import {

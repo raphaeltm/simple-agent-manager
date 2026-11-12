@@ -4,7 +4,7 @@ import * as schema from '../db/schema';
 import {
   capacityCandidateBaseId,
   PRIMARY_CAPACITY_WORKLOAD_ROLE,
-} from './capacity-pool-workload-roles';
+} from '../scheduler-core';
 import {
   ACTIVE_STATUS,
   type Db,

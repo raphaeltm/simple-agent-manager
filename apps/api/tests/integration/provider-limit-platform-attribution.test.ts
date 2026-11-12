@@ -13,9 +13,11 @@ import { aiProxyPassthroughRoutes } from '../../src/routes/ai-proxy-passthrough'
 import { getSelectedAgentCredentialReference } from '../../src/routes/credentials';
 import { taskCallbackRoute } from '../../src/routes/tasks/callback';
 import { runtimeRoutes } from '../../src/routes/workspaces/runtime';
+import {
+  newProviderLimitWait,
+} from '../../src/scheduler-core';
 import { resolveUpstreamAuth } from '../../src/services/ai-billing';
 import { encrypt } from '../../src/services/encryption';
-import { newProviderLimitWait } from '../../src/services/provider-limit-policy';
 import { rejectedProviderWindow } from '../../src/services/provider-limit-window';
 import { queueWorkspaceSessionSleep } from '../../src/services/session-sleep';
 import { createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';

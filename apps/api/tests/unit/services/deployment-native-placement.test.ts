@@ -10,6 +10,9 @@ import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { insertDeploymentReleaseWhilePlacementUnlocked } from '../../../src/routes/deployment-release-submission';
 import {
+  DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB,
+} from '../../../src/scheduler-core';
+import {
   claimDeploymentEnvironmentRelocation,
   completeDeploymentEnvironmentRelocation,
   findDeploymentNodeWithCapacity,
@@ -17,7 +20,6 @@ import {
   restoreDeploymentEnvironmentRelocation,
 } from '../../../src/services/deployment-provisioning';
 import { assertDeploymentProvisioningAuthority } from '../../../src/services/provisioning-authority';
-import { DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB } from '../../../src/services/workspace-resource-capacity';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 
 const databases: Database.Database[] = [];

@@ -13,6 +13,13 @@ import { type drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { canonicalJson } from '../lib/canonical-json';
+import {
+  collectStoredResourceRequirementLayers,
+  createPersistedTaskResourcePlanJson,
+  firstResourceRequirementLayer,
+  firstResourceRequirementLayerJson,
+  ResourceRequirementsValidationError,
+} from '../scheduler-core';
 import { generateBranchName } from './branch-name';
 import {
   PlacementResolutionError,
@@ -33,13 +40,6 @@ import type {
   ReservedTaskSubmissionResult,
   ResolvedReservedTaskSubmissionDependencies,
 } from './reserved-task-submission-contracts';
-import {
-  collectStoredResourceRequirementLayers,
-  createPersistedTaskResourcePlanJson,
-  firstResourceRequirementLayer,
-  firstResourceRequirementLayerJson,
-  ResourceRequirementsValidationError,
-} from './resource-requirements-input';
 import { resolveSkillProfile } from './skills';
 import { type startTaskRunnerDO } from './task-runner-do';
 import {

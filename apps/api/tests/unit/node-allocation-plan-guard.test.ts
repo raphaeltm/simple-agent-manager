@@ -4,7 +4,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
-import { capacityPlacementAuthorityGeneration } from '../../src/services/capacity-pool-authority';
+import {
+  capacityPlacementAuthorityGeneration,
+} from '../../src/scheduler-core';
 import { resolveCapacityPoolPlacementSettings } from '../../src/services/capacity-pool-placement-settings';
 import { assertNodeAllocationPlanCurrent } from '../../src/services/nodes';
 import { createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';

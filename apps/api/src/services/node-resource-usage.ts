@@ -34,6 +34,9 @@ import type {
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import {
+  parseStoredResolvedReservationJson,
+} from '../scheduler-core';
+import {
   DEFAULT_NODE_USAGE_CHUNK_LOOKBACK_MINUTES,
   DEFAULT_NODE_USAGE_MAX_CHUNKS_PER_WORKSPACE,
   DEFAULT_NODE_USAGE_MAX_HISTORY_WORKSPACES,
@@ -47,8 +50,9 @@ import {
   readChunkRows,
   SeriesBuilder,
 } from './node-resource-usage-history';
-import { parseStoredResolvedReservationJson } from './resource-requirements-input';
-import { ACTIVE_WORKSPACE_RESERVATION_STATUSES } from './workspace-resource-capacity';
+import {
+  ACTIVE_WORKSPACE_RESERVATION_STATUSES,
+} from './workspace-reservation-usage';
 import { getRollupConfig } from './workspace-resource-rollup';
 
 const MINUTE_MS = 60_000;

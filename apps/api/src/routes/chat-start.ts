@@ -14,11 +14,13 @@ import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectCapability } from '../middleware/project-auth';
 import { requireOpenIdeaForWorkStart } from '../operations/start-work-core';
+import {
+  inheritedCredentialAttributionForCaller,
+} from '../scheduler-core';
 import { jsonValidator, StartChatSessionSchema } from '../schemas';
 import { resolveTaskAgentOverrides } from '../services/agent-profiles';
 import { acceptInstantSession, continueInstantSessionLaunch } from '../services/instant-session';
 import { enrichMessageWithMentions } from '../services/mention-enrichment';
-import { inheritedCredentialAttributionForCaller } from '../services/placement-field-resolution';
 import { resolveSkillProfile } from '../services/skills';
 import { markTaskFailedIfNonTerminal } from '../services/task-failure';
 import { truncateTitle } from '../services/task-title';

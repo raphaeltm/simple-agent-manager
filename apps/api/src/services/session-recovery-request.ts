@@ -13,16 +13,16 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { expectJsonRecord } from '../lib/runtime-validation';
-import type {
-  TaskStartPlacementInput,
-  TaskStartPlacementWithCredential,
-} from './placement-resolver';
 import {
   parseLegacyVmSize,
   type PersistedTaskResourcePlanReadResult,
   readPersistedTaskResourcePlan,
   ResourceRequirementsValidationError,
-} from './resource-requirements-input';
+} from '../scheduler-core';
+import type {
+  TaskStartPlacementInput,
+  TaskStartPlacementWithCredential,
+} from './placement-resolver';
 import type { RecoveryContext } from './session-recovery-context';
 import type { SessionRecoveryOptions } from './session-recovery-eviction';
 import { resolveRecoveryLocationIntent } from './session-recovery-location';

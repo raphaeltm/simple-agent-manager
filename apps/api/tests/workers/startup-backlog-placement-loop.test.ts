@@ -17,7 +17,9 @@ import type {
 } from '../../src/durable-objects/task-runner';
 import { STARTUP_BACKLOG_CONFLICT_REASON } from '../../src/durable-objects/task-runner/workspace-placement-rejection';
 import type { Env } from '../../src/env';
-import { DEFAULT_WORKSPACE_PLACEMENT_BACKLOG_CONFLICT_RETRIES } from '../../src/services/provisioning-attempt-limits';
+import {
+  DEFAULT_WORKSPACE_PLACEMENT_BACKLOG_CONFLICT_RETRIES,
+} from '../../src/scheduler-core';
 import {
   seedInstallation,
   seedNode,

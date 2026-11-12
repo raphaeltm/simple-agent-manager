@@ -5,7 +5,7 @@ import * as schema from '../db/schema';
 import {
   capacityCandidateAuthorityGeneration,
   capacitySourceAuthorityGeneration,
-} from './capacity-pool-authority';
+} from '../scheduler-core';
 import { nextCapacityPoolTimestamp } from './capacity-pool-clock';
 import { DEFAULT_CAPACITY_POOL_CANDIDATE_PUBLISH_BATCH_SIZE } from './default-capacity-pool-candidates-common';
 import {

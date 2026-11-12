@@ -2,8 +2,10 @@ import { runInDurableObject } from 'cloudflare:test';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { nudgePromptDeliveriesForTarget } from '../../src/durable-objects/project-data/prompt-delivery';
+import {
+  newProviderLimitWait,
+} from '../../src/scheduler-core';
 import * as svc from '../../src/services/project-data';
-import { newProviderLimitWait } from '../../src/services/provider-limit-policy';
 import { DefaultVmPromptDeliveryAdapter } from '../../src/services/vm-prompt-delivery-adapter';
 import {
   okBody,

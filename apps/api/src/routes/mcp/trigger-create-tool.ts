@@ -6,14 +6,14 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { AppError } from '../../middleware/error';
-import { CreateTriggerSchema } from '../../schemas/triggers';
-import { cronToHumanReadable } from '../../services/cron-utils';
-import { readGitHubTriggerConfig } from '../../services/github-trigger-config';
 import {
   ResourceRequirementsValidationError,
   serializeModernResourceRequirementsInput,
   serializeResourceRequirementsInput,
-} from '../../services/resource-requirements-input';
+} from '../../scheduler-core';
+import { CreateTriggerSchema } from '../../schemas/triggers';
+import { cronToHumanReadable } from '../../services/cron-utils';
+import { readGitHubTriggerConfig } from '../../services/github-trigger-config';
 import { createTrigger } from '../../services/trigger-create';
 import { areWebhookTriggersEnabled } from '../../services/webhook-trigger-config';
 import { requireProjectTaskWrite } from '../task-project-auth';

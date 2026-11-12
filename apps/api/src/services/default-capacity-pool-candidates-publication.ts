@@ -3,12 +3,12 @@ import { and, eq, inArray, sql } from 'drizzle-orm';
 
 import * as schema from '../db/schema';
 import { D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
-import { nextCapacityPoolTimestamp } from './capacity-pool-clock';
 import {
   CAPACITY_POOL_MATERIALIZED_WORKLOAD_ROLES,
   capacityCandidateIdForRole,
   PRIMARY_CAPACITY_WORKLOAD_ROLE,
-} from './capacity-pool-workload-roles';
+} from '../scheduler-core';
+import { nextCapacityPoolTimestamp } from './capacity-pool-clock';
 import { providerInstanceOfferingDbValues } from './default-capacity-pool-candidate-values';
 import {
   ACTIVE_STATUS,
