@@ -78,6 +78,12 @@ function toOpened(installationId: string, all: Secrets): Opened {
 
 export interface AgentOptions {
   provider: KeyProvider;
+  /**
+   * During `pnpm selfhost:secrets switch`: the provider the box used before, so the Worker version
+   * still running keeps getting its (old) bundle until the new version is deployed. Chosen by the
+   * bundle header, never tried as a fallback.
+   */
+  previousProvider?: KeyProvider;
   bundleDir: string;
   allowedUids: ReadonlySet<number>;
   cacheMs: number;
@@ -143,12 +149,17 @@ export function createKeyAgent(options: AgentOptions): Server {
       const started = now();
       try {
         const bundle = parseBundle(text);
-        const opened = toOpened(bundle.installationId, await openBundle(bundle, options.provider));
+        const previous = options.previousProvider;
+        const provider =
+          previous && bundle.provider === previous.name && bundle.keyRef === previous.keyRef
+            ? previous
+            : options.provider;
+        const opened = toOpened(bundle.installationId, await openBundle(bundle, provider));
         cache.set(bundleId, { opened, openedAt: now() });
         log({
           event: 'key_agent.bundle_opened',
           bundleId,
-          provider: options.provider.name,
+          provider: provider.name,
           ms: now() - started,
         });
         return opened;
@@ -298,6 +309,25 @@ export function createLegacyAgent(): Server {
   });
 }
 
+/** Name of the file `selfhost:secrets switch` writes while it moves the box to another provider. */
+export const PREVIOUS_PROVIDER_ENV = 'previous.env';
+
+/** The previous provider's settings (`NAME=value` lines), if a switch is in progress. */
+export function previousProvider(stateDir: string): KeyProvider | undefined {
+  let text: string;
+  try {
+    text = readFileSync(join(stateDir, PREVIOUS_PROVIDER_ENV), 'utf8');
+  } catch {
+    return undefined;
+  }
+  const env: Record<string, string> = {};
+  for (const line of text.split('\n')) {
+    const match = /^([A-Z][A-Z0-9_]*)=(.*)$/.exec(line.trim());
+    if (match?.[1]) env[match[1]] = match[2] ?? '';
+  }
+  return createKeyProvider(env);
+}
+
 function main(): void {
   const env = process.env;
   const dropped = dropToOwnerOf(env.SAM_KEY_AGENT_STATE_DIR ?? '/etc/sam/key-agent');
@@ -312,6 +342,7 @@ function main(): void {
   const cacheSeconds = Number(env.SAM_KEY_AGENT_CACHE_SECONDS ?? DEFAULT_CACHE_SECONDS);
   const server = createKeyAgent({
     provider: createKeyProvider(env),
+    previousProvider: previousProvider(env.SAM_KEY_AGENT_STATE_DIR ?? '/etc/sam/key-agent'),
     bundleDir: env.SAM_KEY_AGENT_BUNDLE_DIR ?? '/etc/sam/key-agent/bundles',
     allowedUids: parseUids(env.SAM_KEY_AGENT_ALLOWED_UIDS),
     cacheMs: Math.max(0, cacheSeconds) * 1000,

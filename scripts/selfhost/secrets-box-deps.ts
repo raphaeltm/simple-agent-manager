@@ -6,10 +6,12 @@ import { spawnSync } from 'node:child_process';
 
 import { REPO_ROOT } from './backup-cli';
 import type { BoxContext } from './backup-lib';
+import { detectKeyCandidates } from './key-platforms';
 import { keyAgentPort } from './key-service';
 import { knownSecrets, scanDeployVersions } from './plaintext-scan';
 import type { MigrateDeps } from './secrets-migrate';
 import { preflightSealedSecrets } from './secrets-preflight';
+import type { SwitchDeps } from './secrets-switch';
 
 const DEFAULT_AGENT_WAIT_MS = 90_000;
 const POLL_MS = 1000;
@@ -22,6 +24,46 @@ function visible(command: string, args: string[]): void {
   if (result.error) throw result.error;
   if (result.status !== 0)
     throw new Error(`${command} ${args.join(' ')} failed (exit ${result.status})`);
+}
+
+async function waitForSealedAgent(port: number): Promise<void> {
+  const deadline = Date.now() + DEFAULT_AGENT_WAIT_MS;
+  for (;;) {
+    const response = await fetch(`http://127.0.0.1:${port}/healthz`, {
+      signal: AbortSignal.timeout(3000),
+    }).catch(() => null);
+    const body = response?.ok ? ((await response.json()) as { sealed?: unknown }) : null;
+    // The agent of a sealed box; a legacy one answers `sealed: false`.
+    if (body && body.sealed !== false) return;
+    if (Date.now() > deadline)
+      throw new Error(`the key agent did not come up on 127.0.0.1:${port}`);
+    await sleep(POLL_MS);
+  }
+}
+
+/** The switch's box steps: the migration's deploy and checks, plus an agent restart. */
+export function boxSwitchDeps(ctx: BoxContext): SwitchDeps {
+  const migrate = boxMigrateDeps(ctx);
+  return {
+    log: ctx.log,
+    detect: detectKeyCandidates,
+    restartAgent: async () => {
+      visible('docker', [
+        'compose',
+        '-f',
+        ctx.composeFile,
+        '--env-file',
+        ctx.envFile,
+        'up',
+        '-d',
+        '--force-recreate',
+        'key-agent',
+      ]);
+      await waitForSealedAgent(keyAgentPort(ctx.box));
+    },
+    deploy: async () => migrate.deploy(false),
+    adoptAndCheck: migrate.adoptAndCheck,
+  };
 }
 
 export function boxMigrateDeps(ctx: BoxContext): MigrateDeps {
@@ -42,19 +84,7 @@ export function boxMigrateDeps(ctx: BoxContext): MigrateDeps {
         '-d',
         '--build',
       ]);
-      const port = keyAgentPort(box);
-      const deadline = Date.now() + DEFAULT_AGENT_WAIT_MS;
-      for (;;) {
-        const response = await fetch(`http://127.0.0.1:${port}/healthz`, {
-          signal: AbortSignal.timeout(3000),
-        }).catch(() => null);
-        const body = response?.ok ? ((await response.json()) as { sealed?: unknown }) : null;
-        // The agent of a sealed box; a legacy one answers `sealed: false`.
-        if (body && body.sealed !== false) return;
-        if (Date.now() > deadline)
-          throw new Error(`the key agent did not come up on 127.0.0.1:${port}`);
-        await sleep(POLL_MS);
-      }
+      await waitForSealedAgent(keyAgentPort(box));
     },
     deploy: async (legacy) =>
       visible('pnpm', [...deployArgs, ...(legacy ? ['--key-provider', 'legacy-plaintext'] : [])]),

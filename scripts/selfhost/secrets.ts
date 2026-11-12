@@ -7,6 +7,9 @@
  *   migrate [--key-copy <path>]
  *                             move a plaintext install to sealed secrets (secrets-migrate.ts),
  *                             rolling back on failure; removes the plaintext files at the end
+ *   switch --to <provider|auto> [--dry-run]
+ *                             seal again with another key provider and move the box over
+ *   reseal                    seal again with the same provider (new data key, current KEK)
  *   plaintext [--backups DIR|gs://...|s3://... ...] [--purge --confirm <CELLD_BUCKET>]
  *                             old deploy versions and backups holding plaintext secrets, what to
  *                             rotate; with --purge, delete the versions celld no longer reads
@@ -27,10 +30,11 @@ import {
   scanRemoteBackups,
 } from './plaintext-scan';
 import { assertPrivateFile, parseDotenv } from './secret-files';
-import { boxMigrateDeps } from './secrets-box-deps';
+import { boxMigrateDeps, boxSwitchDeps } from './secrets-box-deps';
 import { describeKeyFile, verifyKeyCopy } from './secrets-keyfile';
 import { runMigration } from './secrets-migrate';
 import { describeKeyStatus } from './secrets-status';
+import { runSwitch } from './secrets-switch';
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -41,6 +45,8 @@ const { values, positionals } = parseArgs({
     purge: { type: 'boolean', default: false },
     confirm: { type: 'string' },
     'key-copy': { type: 'string' },
+    to: { type: 'string' },
+    'dry-run': { type: 'boolean', default: false },
   },
 });
 const envFile = resolve(values['box-env'] ?? join(SELFHOST_DIR, '.env'));
@@ -84,6 +90,25 @@ try {
       );
       break;
     }
+    case 'switch':
+    case 'reseal': {
+      if (command === 'switch' && !values.to) {
+        throw new Error(
+          'usage: pnpm selfhost:secrets switch --to <file|gcp-kms|aws-kms|azure-kv|transit|auto>'
+        );
+      }
+      const ctx = loadBox(envFile, values['state-dir']);
+      await runSwitch(
+        {
+          box,
+          stateDir,
+          to: command === 'reseal' ? null : (values.to ?? null),
+          dryRun: values['dry-run'],
+        },
+        boxSwitchDeps(ctx)
+      );
+      break;
+    }
     case 'plaintext': {
       const ctx = loadBox(envFile, values['state-dir']);
       const secrets = await knownSecrets(box, stateDir);
@@ -109,7 +134,7 @@ try {
     }
     default:
       throw new Error(
-        'usage: pnpm selfhost:secrets status|key-file|verify-key-copy <path>|migrate|plaintext [--box-env PATH] [--state-dir DIR]'
+        'usage: pnpm selfhost:secrets status|key-file|verify-key-copy <path>|migrate|switch|reseal|plaintext [--box-env PATH] [--state-dir DIR]'
       );
   }
 } catch (error) {

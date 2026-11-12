@@ -104,8 +104,22 @@ The automatic choice:
    example `key provider: file (on Google Cloud (project p), but Cloud KMS key projects/p/... is
 not usable (denied: ...); using a key file on this box)`.
 
-Moving to another provider later (for example after setting up a cloud key) is
-`pnpm selfhost:secrets switch` (below), never a silent change at a deploy.
+Moving to another provider later (for example after setting up a cloud key) is never a silent
+change at a deploy:
+
+```bash
+pnpm selfhost:secrets switch --to auto --dry-run    # or --to gcp-kms|aws-kms|azure-kv|transit|file
+pnpm selfhost:secrets switch --to auto
+pnpm selfhost:secrets reseal                        # same provider: new data key, current KEK version
+```
+
+`switch` opens the secrets with the current provider, checks the target with a wrap and unwrap
+round trip, seals them with it, and moves the running install over without a gap: while the new
+Worker version deploys, the agent opens each bundle with the provider its header names (the old one
+from `.state/key-agent/previous.env`, removed afterwards). If the first request to the new version
+is not healthy it restores the previous provider and redeploys. Remove a `SAM_KEY_PROVIDER` line
+from `.env` first; it would override the switch. Keep the old key while older bundles and backups
+sealed with it exist. Code: `scripts/selfhost/secrets-switch.ts`.
 
 | `SAM_KEY_PROVIDER` | Key                                                                                                                                                                                                                         | Settings                                                                                                                                    |
 | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |

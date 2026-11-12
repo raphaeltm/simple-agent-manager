@@ -22,6 +22,7 @@ import {
   createKeyAgent,
   createLegacyAgent,
   dropToOwnerOf,
+  previousProvider,
   SIGNATURE_HEADER,
 } from '../../deploy/selfhost/key-agent/server.ts';
 
@@ -200,6 +201,76 @@ describe('cache and key-service failures', () => {
     expect(await res.json()).toEqual({ error: 'key_service_denied' });
     state.fail = new KeyProviderError('unavailable', 'kms down');
     expect((await ask()).status).toBe(503); // nothing stale left to serve
+  });
+});
+
+describe('during a provider switch (previous.env)', () => {
+  async function twoKeys() {
+    const dir = mkdtempSync(join(tmpdir(), 'sam-agent-switch-'));
+    writeFileSync(join(dir, 'old-kek'), generateFileKek(), { mode: 0o600 });
+    writeFileSync(join(dir, 'new-kek'), generateFileKek(), { mode: 0o600 });
+    writeFileSync(
+      join(dir, 'previous.env'),
+      `SAM_KEY_PROVIDER=file\nSAM_KEY_FILE=${join(dir, 'old-kek')}\n`,
+      {
+        mode: 0o600,
+      }
+    );
+    const signing = generateKeyPairSync('ed25519')
+      .privateKey.export({ type: 'pkcs8', format: 'der' })
+      .toString('base64');
+    const oldKey = createFileProvider({ SAM_KEY_FILE: join(dir, 'old-kek') });
+    const newKey = createFileProvider({ SAM_KEY_FILE: join(dir, 'new-kek') });
+    const ids: string[] = [];
+    for (const provider of [oldKey, newKey]) {
+      const bundle = await sealSecrets(
+        { ENCRYPTION_KEY: 'v-0123456789', SAM_KEY_AGENT_SIGNING_KEY: signing },
+        provider,
+        {
+          installationId: INSTALL,
+        }
+      );
+      writeFileSync(join(dir, `${bundle.bundleId}.json`), JSON.stringify(bundle), { mode: 0o600 });
+      ids.push(bundle.bundleId);
+    }
+    return { dir, newKey, oldId: ids[0] ?? '', newId: ids[1] ?? '' };
+  }
+
+  async function ask(
+    previous: boolean,
+    bundleId: string,
+    setup: Awaited<ReturnType<typeof twoKeys>>
+  ) {
+    const server = createKeyAgent({
+      provider: setup.newKey,
+      previousProvider: previous ? previousProvider(setup.dir) : undefined,
+      bundleDir: setup.dir,
+      allowedUids: new Set([7101]),
+      cacheMs: 0,
+      peerUid: () => 7101,
+      log: () => undefined,
+    });
+    await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+    servers.push(server);
+    return await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/v1/secrets`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-sam-key-agent': '1' },
+      body: JSON.stringify({ bundleId, nonce: NONCE, installationId: INSTALL }),
+    });
+  }
+
+  it("opens the running version's old bundle with the previous provider and the new one with the new", async () => {
+    const setup = await twoKeys();
+    expect((await ask(true, setup.oldId, setup)).status).toBe(200);
+    expect((await ask(true, setup.newId, setup)).status).toBe(200);
+  });
+
+  it('control: without previous.env the old bundle is refused (the switch window is what serves it)', async () => {
+    const setup = await twoKeys();
+    const refused = await ask(false, setup.oldId, setup);
+    expect(refused.status).toBe(503);
+    expect(await refused.json()).toEqual({ error: 'key_service_config' });
+    expect((await ask(false, setup.newId, setup)).status).toBe(200);
   });
 });
 
