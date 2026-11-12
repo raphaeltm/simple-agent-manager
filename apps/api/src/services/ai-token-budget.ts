@@ -34,6 +34,7 @@ export {
   buildMonthlyCostCacheKey,
   checkMonthlyCostCap,
   getCachedMonthlyCost,
+  getLocalMonthlyAiCostUsd,
   type MonthlyCostCapCheck,
 } from './ai-monthly-cost-cap';
 

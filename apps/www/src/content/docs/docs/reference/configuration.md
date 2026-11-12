@@ -137,8 +137,9 @@ an AI Gateway counts only when both the gateway id and the account id are set
 | Unified Billing            | Unavailable. `resolveUnifiedBillingToken()` (`services/ai-billing.ts`) returns nothing, so `auto` billing uses the Claude Code / Codex platform credentials, and the admin cannot select `unified` (`PATCH /api/admin/ai-proxy/config` answers 400). Before, the Cloudflare token was sent to OpenAI or Anthropic as `cf-aig-authorization` and those calls failed.                                                                                                                                                                     |
 | OpenAI and Anthropic calls | Go straight to `api.openai.com` / `api.anthropic.com` with the platform key, without `cf-aig-metadata` (the user and workspace ids are for the gateway only; `aiGatewayOnlyHeaders()`).                                                                                                                                                                                                                                                                                                                                                 |
 | Workers AI calls           | Use the account's Workers AI REST API, as before.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| Monthly cost cap           | **Unavailable.** Spend is priced only from AI Gateway logs, read with `CF_API_TOKEN` (`runMonthlyCostAggregation()`, `services/ai-monthly-cost-cron.ts`, which skips with `monthlyCostSkipReason: ai_gateway_unavailable`), so the cap also needs the token (`isMonthlyCostCapAvailable()`). `PUT /api/usage/ai/budget` refuses a monthly cap (400), `GET /api/usage/ai/budget` returns `monthlyCostCapAvailable: false`, a cap saved earlier is not enforced (`checkMonthlyCostCap()` reports `enforced: false`), and the settings page, onboarding and the admin AI proxy page say so. Daily token budgets still limit `/ai/v1`. |
-| AI usage pages             | `/api/usage/ai`, the budget page and admin costs show SAM's own token counts and no gateway cost.                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| SAM AI proxy               | **Off until an admin turns it on.** Without a gateway, proxied calls go straight to the provider and SAM's own metering is the only spend record, so `/ai/v1`, `/ai/anthropic/v1` and the custom-endpoint passthrough answer 503 until `aiProxy.directUpstreamEnabled` is on (Admin → Settings → AI models; `resolveAiProxyAvailability()`, `services/ai-proxy-availability.ts`). `AI_PROXY_ENABLED=false` still turns it off everywhere. While it is off, agent-key refuses a Claude Code or Codex credential that names a custom base URL instead of returning the key without its URL. |
+| Monthly cost cap           | **Metered by SAM.** With no gateway logs to read, SAM prices every platform-billed proxy call and SAM agent call from its model price table (`PLATFORM_AI_MODELS`, list prices x reported usage including prompt-cache reads and writes; `priceModelUsageUsd()`, `services/ai-cost-pricing.ts`) and stores it in the per-user `AiTokenBudgetCounter` (`hasLocalAiCostMetering()`). The cap is enforced from that month total (`getLocalMonthlyAiCostUsd()`, `checkMonthlyCostCap()`), refusing with 429 `monthly-cost-cap`. Calls to a model with no catalog price (an operator endpoint's own model) and BYO passthrough calls count $0. A gateway whose logs cannot be read (no `CF_API_TOKEN`) still reports the cap unavailable. |
+| AI usage pages             | `/api/usage/ai` and the budget page show SAM's own token counts and priced cost per provider, per model and per day (`getLocalUsageBreakdown()`, `services/ai-model-usage.ts`). Admin cost pages still read gateway logs only. |
 
 With an admin-configured OpenAI-compatible endpoint (Admin → Settings → AI models), SAM asks the
 endpoint for its usage on streamed calls (`stream_options.include_usage`) and, when a response
@@ -147,6 +148,23 @@ still reports none, charges an estimate from the response's own output to the da
 endpoint log the HTTP status and a short sanitized reason, never the response body. Calls that
 endpoint serves never reach AI Gateway logs, so on an installation with both, a monthly cap counts
 only the spend that went through the gateway.
+
+### Speech without Workers AI
+
+Without the Workers AI binding, an admin can point voice input and server read-aloud at
+OpenAI-compatible speech endpoints (Admin → Settings → AI models), such as OpenAI, Groq, or a
+speaches or Kokoro-FastAPI server on the same machine. `speech.transcription.baseUrl` and
+`speech.transcription.model` serve `POST /api/transcribe` (`<baseUrl>/audio/transcriptions`);
+`speech.synthesis.baseUrl`, `.model` and optional `.voice` serve `POST /api/tts/synthesize`
+(`<baseUrl>/audio/speech`, MP3). Each has an optional encrypted `apiKey` and an
+`allowPrivateNetwork` opt-in for a loopback or private host; `speech.endpointTimeoutMs` bounds each
+request. Calls go through the guarded outbound fetch (`services/speech-endpoints.ts`). Once a base
+URL and a model are set, `GET /api/config/platform-capabilities` reports `speechToText` /
+`textToSpeech` true and the web UI shows the microphone and server read-aloud
+(`resolvePublicPlatformCapabilities()`). Read-aloud strips markdown with a regex instead of the
+Workers AI cleanup model and does not summarize long replies, and each user may synthesize
+`RATE_LIMIT_TTS_SYNTHESIZE` (default 120) replies per hour through the endpoint. With the binding
+present these settings are never read.
 
 ### Status codes for services this installation does not have
 
@@ -158,7 +176,7 @@ server error, so retries and alerts treat it as configuration rather than an out
 | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------- | ------------------------ | --- |
 | Admin analytics queries (`/api/admin/analytics/*`)                         | `CF_ACCOUNT_ID` or `CF_API_TOKEN`                                               | 500                      | 404 |
 | Admin worker log search                                                    | `CF_ACCOUNT_ID` or `CF_API_TOKEN`                                               | 400                      | 404 |
-| Speech-to-text (`/api/transcribe`), server text-to-speech (`/api/tts/*`)   | Workers AI binding (`AI`)                                                       | 500                      | 404 |
+| Speech-to-text (`/api/transcribe`), server text-to-speech (`/api/tts/*`)   | Workers AI binding (`AI`) and a `speech.transcription.*` / `speech.synthesis.*` endpoint | 500                      | 404 |
 | Agent model catalog (`GET /api/agent-models/catalog`); agent model runs answer `not_available` instead of `catalog_unavailable` | Workers AI binding | 503 | 404 |
 | Creating a SAM-native Git (Artifacts) project, workspace git token for one | `ARTIFACTS` binding while `ARTIFACTS_ENABLED=true`                              | 500                      | 404 |
 | `/ai/v1` Workers AI models                                                 | AI Gateway, account API and an OpenAI-compatible endpoint                       | upstream error           | 404 |

@@ -58,7 +58,10 @@ describe('resolvePlatformCapabilities', () => {
 
   it('reports every Cloudflare-only service absent on a self-hosted runtime', () => {
     const capabilities = resolvePlatformCapabilities(selfHostEnv());
-    expect(Object.entries(capabilities).filter(([, value]) => value)).toEqual([]);
+    // The monthly cap is the one SAM provides itself without a gateway (local metering).
+    expect(Object.entries(capabilities).filter(([, value]) => value)).toEqual([
+      ['monthlyCostCap', true],
+    ]);
   });
 
   it('keeps TTS off when the binding exists but TTS_ENABLED is "false"', () => {
@@ -79,10 +82,12 @@ describe('resolvePlatformCapabilities', () => {
   });
 
   it('needs both the flag and the binding for Artifacts', () => {
-    expect(resolvePlatformCapabilities(cloudflareEnv({ ARTIFACTS_ENABLED: 'false' })).artifacts).toBe(
+    expect(
+      resolvePlatformCapabilities(cloudflareEnv({ ARTIFACTS_ENABLED: 'false' })).artifacts
+    ).toBe(false);
+    expect(resolvePlatformCapabilities(cloudflareEnv({ ARTIFACTS: undefined })).artifacts).toBe(
       false
     );
-    expect(resolvePlatformCapabilities(cloudflareEnv({ ARTIFACTS: undefined })).artifacts).toBe(false);
   });
 });
 
@@ -92,7 +97,9 @@ describe('resolveAiGatewayId', () => {
   });
 
   it('ignores the wrangler.toml default gateway id when there is no Cloudflare account', () => {
-    expect(resolveAiGatewayId({ AI_GATEWAY_ID: 'sam', CF_ACCOUNT_ID: undefined as never })).toBeNull();
+    expect(
+      resolveAiGatewayId({ AI_GATEWAY_ID: 'sam', CF_ACCOUNT_ID: undefined as never })
+    ).toBeNull();
   });
 
   it('is null without a gateway id even with an account', () => {

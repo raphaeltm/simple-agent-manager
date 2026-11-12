@@ -10,7 +10,7 @@ import * as v from 'valibot';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { readResponseJson } from '../lib/runtime-validation';
+import { maybeJsonRecord, readResponseJson } from '../lib/runtime-validation';
 import {
   createAnthropicToOpenAIStream,
   translateRequestToAnthropic,
@@ -28,7 +28,11 @@ import {
   resolveWorkersAiChatTarget,
   withStreamUsageRequested,
 } from '../services/llm-chat-target';
-import { aiGatewayOnlyHeaders, resolveAiGatewayId } from '../services/platform-capabilities';
+import {
+  aiGatewayOnlyHeaders,
+  hasLocalAiCostMetering,
+  resolveAiGatewayId,
+} from '../services/platform-capabilities';
 
 const anthropicContentBlockSchema = v.variant('type', [
   v.object({ type: v.literal('text'), text: v.string() }),
@@ -252,6 +256,18 @@ export async function forwardToAnthropic(
 }
 
 /** Forward request to OpenAI via AI Gateway (OpenAI-native format, no translation needed). */
+/**
+ * Without AI Gateway, SAM's own metering is the only spend record (`hasLocalAiCostMetering`), and
+ * OpenAI reports a stream's usage only when asked (`stream_options.include_usage`). Ask on every
+ * direct streamed call so a client that omits it cannot stream unmetered output. Gateway calls are
+ * sent byte for byte as before.
+ */
+function withDirectStreamUsage(env: Env, body: Record<string, unknown>): Record<string, unknown> {
+  if (!hasLocalAiCostMetering(env) || body.stream !== true) return body;
+  const streamOptions = maybeJsonRecord(body.stream_options) ?? {};
+  return { ...body, stream_options: { ...streamOptions, include_usage: true } };
+}
+
 export async function forwardToOpenAI(
   env: Env,
   body: Record<string, unknown>,
@@ -260,7 +276,7 @@ export async function forwardToOpenAI(
   openaiApiKey: string
 ): Promise<Response> {
   const gatewayUrl = buildOpenAIUrl(env);
-  const gatewayBody = { ...body, model: modelId };
+  const gatewayBody = withDirectStreamUsage(env, { ...body, model: modelId });
 
   // Use cf-aig-authorization for Unified Billing when available, otherwise standard Bearer
   const cfToken = resolveUnifiedBillingToken(env);

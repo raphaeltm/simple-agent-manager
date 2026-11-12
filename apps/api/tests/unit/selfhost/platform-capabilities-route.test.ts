@@ -82,7 +82,8 @@ describe('GET /api/config/platform-capabilities', () => {
     const { res, body } = await getCapabilities(selfHostedEnv());
 
     expect(res.status).toBe(200);
-    expect(body).toEqual({ speechToText: false, textToSpeech: false, monthlyCostCap: false });
+    // The cap is SAM-metered without a gateway (overnight B3 A2).
+    expect(body).toEqual({ speechToText: false, textToSpeech: false, monthlyCostCap: true });
   });
 
   it('turns text-to-speech off with TTS_ENABLED=false while speech-to-text stays on', async () => {

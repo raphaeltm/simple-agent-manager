@@ -7,6 +7,7 @@ import { Hono } from 'hono';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
+import { isAiProxyEnabled } from '../services/ai-proxy-availability';
 
 const agentsCatalogRoutes = new Hono<{ Bindings: Env }>();
 type AgentFallbackCredentialSource = 'platform-sam' | null;
@@ -53,7 +54,7 @@ agentsCatalogRoutes.get('/', async (c) => {
     agentProviderSettings.map((s) => [s.agentType, s.providerMode as AgentProviderMode | null])
   );
 
-  const aiProxyEnabled = (c.env.AI_PROXY_ENABLED ?? 'true') !== 'false';
+  const aiProxyEnabled = await isAiProxyEnabled(c.env);
 
   const agents: AgentInfo[] = AGENT_CATALOG.map((agent) => {
     const hasDedicatedKey = configuredAgents.has(agent.id);

@@ -121,15 +121,19 @@ describe('capabilities', () => {
     });
   });
 
-  it.each(PARTIAL)('%s: no gateway and no monthly cap; the account API stays', (shape) => {
-    expect(resolvePlatformCapabilities(makeEnv(shape))).toMatchObject({
-      aiGateway: false,
-      monthlyCostCap: false,
-      cloudflareAccountApi: true,
-      analyticsQuery: true,
-      workersObservability: true,
-    });
-  });
+  it.each(PARTIAL)(
+    '%s: no gateway, SAM meters the monthly cap itself; the account API stays',
+    (shape) => {
+      expect(resolvePlatformCapabilities(makeEnv(shape))).toMatchObject({
+        aiGateway: false,
+        // No gateway logs to read, so SAM prices calls itself (hasLocalAiCostMetering).
+        monthlyCostCap: true,
+        cloudflareAccountApi: true,
+        analyticsQuery: true,
+        workersObservability: true,
+      });
+    }
+  );
 });
 
 describe('billing mode and upstream auth', () => {

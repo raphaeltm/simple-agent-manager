@@ -176,7 +176,8 @@ import { agentEmailConfig } from './services/agent-email/setup-state';
 import { isAgentSignInEnabled } from './services/agent-sign-in/config';
 import { isLocalHostedGitActive } from './services/hosted-git/backend';
 import { handleHostedGitRequest, HOSTED_GIT_PATH_PREFIX } from './services/hosted-git/http';
-import { isArtifactsAvailable, publicPlatformCapabilities } from './services/platform-capabilities';
+import { isArtifactsAvailable } from './services/platform-capabilities';
+import { resolvePublicPlatformCapabilities } from './services/speech-endpoints';
 import { isInstantRuntimeAvailable } from './services/vm-agent-container';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -287,9 +288,9 @@ app.get('/api/config/artifacts-enabled', (c) => {
 
 // Public config — which platform services this installation has, so the UI can hide entry
 // points that cannot work here (services/platform-capabilities.ts). Booleans only.
-app.get('/api/config/platform-capabilities', (c) => {
+app.get('/api/config/platform-capabilities', async (c) => {
   applyCacheHeaders(c, 'public-config');
-  return c.json(publicPlatformCapabilities(c.env));
+  return c.json(await resolvePublicPlatformCapabilities(c.env));
 });
 
 // Public config — whether agents can run on Instant (Cloudflare Containers) with no cloud account.
