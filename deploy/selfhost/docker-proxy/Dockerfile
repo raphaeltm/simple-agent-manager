@@ -8,6 +8,6 @@ ARG PROXY_UID=7102
 ARG CELLD_GID=7101
 RUN mkdir -p /run/sam-docker-proxy && chown "${PROXY_UID}:${CELLD_GID}" /run/sam-docker-proxy \
   && chmod 0750 /run/sam-docker-proxy
-COPY policy.ts shapes.ts server.ts /opt/sam-docker-proxy/
+COPY policy.ts shapes.ts engine.ts server.ts /opt/sam-docker-proxy/
 USER ${PROXY_UID}:${CELLD_GID}
 ENTRYPOINT ["node", "/opt/sam-docker-proxy/server.ts"]

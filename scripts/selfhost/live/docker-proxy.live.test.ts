@@ -601,6 +601,40 @@ describe.skipIf(!dockerAvailable)('docker socket proxy (live, real daemon)', () 
     });
   });
 
+  it('reaps sandboxes a previous celld session left behind when celld reaps for its new node', async () => {
+    const stale = await createSandbox(
+      'stale-node',
+      sandboxBody({
+        Labels: { 'celld.node': `old-${NODE}`, 'celld.cell': 'c', 'celld.class': 'SandboxDO' },
+      })
+    );
+    const current = await createSandbox('current-node');
+    expect([stale.status, current.status]).toEqual([201, 201]);
+    // Same labels as a stale sandbox, but not a sandbox shape (default runtime, default bridge):
+    // the reaper must not touch it.
+    const lookalike = docker(
+      'run',
+      '-d',
+      '--label',
+      `celld.node=old-${NODE}`,
+      '--label',
+      'celld.class=SandboxDO',
+      BASE,
+      'sleep',
+      '300'
+    );
+    created.add(lookalike);
+    const filters = encodeURIComponent(JSON.stringify({ label: [`celld.node=${NODE}`] }));
+    expect((await call('GET', `/containers/json?all=true&filters=${filters}`)).status).toBe(200);
+    await waitFor(
+      'the stale sandbox to be reaped',
+      () => spawnSync('docker', ['inspect', stale.json.Id], { stdio: 'ignore' }).status !== 0
+    );
+    expect(inspectDirect(current.json.Id).Id).toBe(current.json.Id);
+    expect(inspectDirect(lookalike).State.Running).toBe(true);
+    expect(docker('logs', PROXY)).toContain('"event":"reaped_stale_sandbox"');
+  });
+
   it('logs refusals without request bodies', async () => {
     await sleep(200);
     const logs = docker('logs', PROXY);

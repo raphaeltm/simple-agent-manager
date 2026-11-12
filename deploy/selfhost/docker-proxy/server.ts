@@ -15,16 +15,16 @@ import { createServer, request as httpRequest } from 'node:http';
 import type { Duplex } from 'node:stream';
 
 import {
-  type ContainerFacts,
-  decide,
-  type Decision,
-  isRecord,
-  parsePolicy,
-  type ProxyPolicy,
-} from './policy.ts';
+  inspectContainer,
+  logEvent,
+  reapingNode,
+  reapStaleSandboxes,
+  RESPONSE_FILTERS,
+  UPSTREAM,
+} from './engine.ts';
+import { decide, type Decision, isRecord, parsePolicy, type ProxyPolicy } from './policy.ts';
 
 const LISTEN = process.env.SAM_DOCKER_PROXY_LISTEN ?? '/run/sam-docker-proxy/docker.sock';
-const UPSTREAM = process.env.SAM_DOCKER_PROXY_UPSTREAM ?? '/var/run/docker.sock';
 const POLICY_PATH = process.env.SAM_DOCKER_PROXY_POLICY ?? '/etc/sam/docker-proxy/policy.json';
 const SOCKET_MODE = Number.parseInt(process.env.SAM_DOCKER_PROXY_SOCKET_MODE ?? '660', 8);
 const MAX_BODY_BYTES = Number.parseInt(process.env.SAM_DOCKER_PROXY_MAX_BODY_BYTES ?? '262144', 10);
@@ -40,11 +40,6 @@ const HOP_BY_HOP = new Set([
   'te',
   'trailer',
 ]);
-
-function logEvent(event: string, fields: Record<string, unknown>): void {
-  // Method, route, path and reason only: never a body (sandbox env can hold provider settings).
-  console.log(JSON.stringify({ ts: new Date().toISOString(), event, ...fields }));
-}
 
 let cachedPolicy: { mtimeMs: number; size: number; policy: ProxyPolicy } | null = null;
 let policyUnavailableLogged = false;
@@ -80,51 +75,6 @@ function recordExec(id: string): void {
     if (oldest === undefined) break;
     execs.delete(oldest);
   }
-}
-
-/** One request to the daemon with the whole answer buffered (small JSON answers only). */
-function upstreamJson(method: string, path: string): Promise<{ status: number; body: string }> {
-  return new Promise((resolve, reject) => {
-    const req = httpRequest(
-      { socketPath: UPSTREAM, method, path, headers: { Host: 'docker' } },
-      (res) => {
-        const chunks: Buffer[] = [];
-        res.on('data', (chunk: Buffer) => chunks.push(chunk));
-        res.on('end', () =>
-          resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf8') })
-        );
-        res.on('error', reject);
-      }
-    );
-    req.on('error', reject);
-    req.end();
-  });
-}
-
-async function inspectContainer(ref: string): Promise<ContainerFacts | null> {
-  const reply = await upstreamJson('GET', `/containers/${encodeURIComponent(ref)}/json`);
-  if (reply.status === 404) return null;
-  if (reply.status !== 200) throw new Error(`inspect answered ${reply.status}`);
-  const info: unknown = JSON.parse(reply.body);
-  const record = (value: unknown): Record<string, unknown> => (isRecord(value) ? value : {});
-  const top = record(info);
-  const config = record(top.Config);
-  const host = record(top.HostConfig);
-  const id = top.Id;
-  if (typeof id !== 'string' || !/^[0-9a-f]{64}$/.test(id)) {
-    throw new Error('inspect answered without an id');
-  }
-  const labels: Record<string, string> = {};
-  for (const [key, value] of Object.entries(record(config.Labels))) {
-    if (typeof value === 'string') labels[key] = value;
-  }
-  return {
-    id,
-    labels,
-    runtime: typeof host.Runtime === 'string' ? host.Runtime : '',
-    networkMode: typeof host.NetworkMode === 'string' ? host.NetworkMode : '',
-    privileged: host.Privileged === true,
-  };
 }
 
 async function decideRequest(
@@ -231,36 +181,6 @@ function readBody(req: IncomingMessage): Promise<Buffer | null> {
   });
 }
 
-function pick(value: unknown, keys: readonly string[]): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  if (!isRecord(value)) return out;
-  for (const key of keys) if (Object.hasOwn(value, key)) out[key] = value[key];
-  return out;
-}
-
-/**
- * Inspect answers carry host layout (bind sources, overlay paths, log paths, PIDs of other
- * namespaces). celld reads only these fields (container.rs `inspect_running`, `address_of`,
- * `exec`, `ExecProcess::wait`, `ensure_image`), so only these go back.
- */
-const RESPONSE_FILTERS: Record<string, (answer: unknown) => unknown> = {
-  'containers.json': (answer) => {
-    const top = isRecord(answer) ? answer : {};
-    const networks: Record<string, unknown> = {};
-    const settings = isRecord(top.NetworkSettings) ? top.NetworkSettings : {};
-    const raw = isRecord(settings.Networks) ? settings.Networks : {};
-    for (const [name, network] of Object.entries(raw))
-      networks[name] = pick(network, ['IPAddress']);
-    return {
-      ...pick(top, ['Id', 'Name']),
-      State: pick(top.State, ['Running', 'Status', 'ExitCode']),
-      NetworkSettings: { Networks: networks },
-    };
-  },
-  'exec.inspect': (answer) => pick(answer, ['ID', 'Running', 'ExitCode', 'Pid']),
-  'images.inspect': (answer) => pick(answer, ['Id']),
-};
-
 async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const method = req.method ?? 'GET';
   const url = req.url ?? '/';
@@ -274,6 +194,13 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     res.writeHead(decision.status, { 'Content-Type': 'application/json', Connection: 'close' });
     res.end(refusalBody(decision));
     return;
+  }
+  const node = decision.route === 'containers.list' ? reapingNode(url) : null;
+  const policy = node ? currentPolicy() : null;
+  if (node && policy) {
+    reapStaleSandboxes(node, policy).catch((error: unknown) =>
+      logEvent('reap_failed', { error: String(error).slice(0, 300) })
+    );
   }
   const upstream = httpRequest(upstreamOptions(decision, false), (reply) => {
     const filter = Object.hasOwn(RESPONSE_FILTERS, decision.route)

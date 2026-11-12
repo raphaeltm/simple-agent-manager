@@ -746,11 +746,11 @@ export class CredentialSetupSession extends DurableObject<Env> {
     });
     // Re-arm before I/O so a death during this run is retried as well.
     await this.ctx.storage.setAlarm(Date.now() + row.capture_poll_ms);
-    await this.startCleanup(row);
+    await this.startCleanup(row, true);
   }
 
-  private startCleanup(row: SetupSessionRow): Promise<void> {
-    const run = this.runCleanup(row).finally(() => {
+  private startCleanup(row: SetupSessionRow, resumed = false): Promise<void> {
+    const run = this.runCleanup(row, resumed).finally(() => {
       this.cleanupInFlight = null;
     });
     this.cleanupInFlight = run;
@@ -762,18 +762,25 @@ export class CredentialSetupSession extends DurableObject<Env> {
    * Every step is best-effort (logged, never thrown), and every step is safe to
    * repeat, because an alarm may re-run it after an isolate death.
    */
-  private async runCleanup(row: SetupSessionRow): Promise<void> {
+  private async runCleanup(row: SetupSessionRow, resumed: boolean): Promise<void> {
     const execTimeoutMs = getSandboxConfig(this.env).execTimeoutMs;
+    const skipScrub =
+      row.cleanup_from_status === 'provisioning'
+        ? 'never_left_provisioning'
+        : // A resumed cleanup runs after the isolate (on a box, possibly the whole runtime) died:
+          // whether the container survived is unknown, and an exec would start a fresh, empty
+          // one only to scrub it (observed on celld). Destroy (step 2) still removes the
+          // container's filesystem if it did survive.
+          resumed
+          ? 'resumed_after_interruption'
+          : null;
     // 1. Delete captured credential file + scrub the setup dir. Skipped when the
     //    session never left `provisioning`: no driver ran and no sign-in URL was
     //    shown, so no credential can exist, and an exec would (re)start a
     //    container that never started — waiting out the SDK's start retries.
     //    Destroy (step 2) removes the container's filesystem either way.
-    if (row.cleanup_from_status === 'provisioning') {
-      log.info('credential_setup.scrub_skipped', {
-        sessionId: row.id,
-        reason: 'never_left_provisioning',
-      });
+    if (skipScrub) {
+      log.info('credential_setup.scrub_skipped', { sessionId: row.id, reason: skipScrub });
     } else {
       try {
         const sandbox = await getSandboxInstance(this.env, row.id);

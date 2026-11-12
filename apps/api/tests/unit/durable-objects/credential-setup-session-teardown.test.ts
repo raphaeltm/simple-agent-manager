@@ -322,7 +322,9 @@ describe('CredentialSetupSession teardown — recovery alarm', () => {
     const restarted = createInstance(fixture.doDb, fixture.env);
     await restarted.instance.alarm();
 
-    expect(scrubCalls(fixture.sandbox)).toHaveLength(1); // a driver ran, so scrub again
+    // No scrub on a resumed cleanup: on celld the exec started a fresh empty container just to
+    // scrub it. Destroy still removes the container if it survived.
+    expect(scrubCalls(fixture.sandbox)).toHaveLength(0);
     expect(destroySandboxInstance).toHaveBeenCalledWith(expect.anything(), SESSION_ID, {
       sandboxId: SESSION_ID,
     });

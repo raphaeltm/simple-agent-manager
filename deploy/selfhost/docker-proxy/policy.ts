@@ -119,7 +119,10 @@ function allow(
   };
 }
 /** A container is celld's when it has its node label and one of the two allowed shapes. */
-function isCelldContainer(facts: ContainerFacts, policy: ProxyPolicy): 'sandbox' | 'fence' | null {
+export function isCelldContainer(
+  facts: ContainerFacts,
+  policy: ProxyPolicy
+): 'sandbox' | 'fence' | null {
   if (!facts.labels['celld.node'] || facts.privileged) return null;
   if (facts.labels['celld.fence'] === '1') return facts.networkMode === 'host' ? 'fence' : null;
   if (facts.runtime === policy.runtime && celldNetwork(facts.networkMode)) return 'sandbox';
