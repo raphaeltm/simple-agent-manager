@@ -47,6 +47,8 @@ function selfHostEnv(overrides: Partial<Env> = {}): Env {
     CREDENTIAL_SETUP_SESSION: binding,
     SETUP_SESSION_POOL: binding,
     CONTAINER_RUNTIME_AVAILABLE: 'false',
+    // scripts/selfhost/celld-config.ts declares no tail worker.
+    LOG_TAIL_AVAILABLE: 'false',
     BASE_DOMAIN: 'example.com',
     ...overrides,
   } as unknown as Env;
@@ -60,7 +62,10 @@ describe('resolvePlatformCapabilities', () => {
 
   it('reports every Cloudflare-only service absent on a self-hosted runtime', () => {
     const capabilities = resolvePlatformCapabilities(selfHostEnv());
-    expect(Object.entries(capabilities).filter(([, value]) => value)).toEqual([]);
+    // The monthly cap is the one SAM provides itself without a gateway (local metering).
+    expect(Object.entries(capabilities).filter(([, value]) => value)).toEqual([
+      ['monthlyCostCap', true],
+    ]);
   });
 
   it('keeps TTS off when the binding exists but TTS_ENABLED is "false"', () => {

@@ -205,6 +205,15 @@ These **Operations** settings bound automatic retries after an eviction wake fai
 | `operations.evictionRecoveryRetryWallMs`    | 10,000  | 1–30,000     | Milliseconds before starting another retry; an in-flight durable wake may finish afterward                                          |
 | `operations.evictionRecoveryRetryDelayMs`   | 60,000  | 1–86,400,000 | Minimum interval after failure or preclaim deferral; deferrals rotate fairly without resetting the failure anchor or attempt budget |
 
+## Node provisioning
+
+This **Operations** setting bounds one durable node-provisioning attempt
+(`resolveNodeProvisioningAttemptDeadlineMs()`, read by `NodeLifecycleProvisioning.run()`).
+
+| Setting                                        | Default | Range         | What it controls                                                                                                                                                                                         |
+| ---------------------------------------------- | ------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `operations.nodeProvisioningAttemptDeadlineMs` | 45,000  | 1,000–600,000 | Milliseconds one attempt may run before it is cut and resumed. A Google Cloud create takes 9–12 s. A create that outlives the attempt is adopted by its labels on the next attempt, never created twice. |
+
 ## Compute pool refresh
 
 This **Operations** setting bounds how long one refresh spends writing a changed compute pool

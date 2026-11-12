@@ -10,7 +10,7 @@ import { log } from '../../lib/logger';
 import { toProjectResponse } from '../../lib/mappers';
 import { ulid } from '../../lib/ulid';
 import { getUserId } from '../../middleware/auth';
-import { errors } from '../../middleware/error';
+import { AppError, errors } from '../../middleware/error';
 import { createOwnerProjectMembership } from '../../middleware/project-auth';
 import { CreateProjectSchema, jsonValidator } from '../../schemas';
 import { seedArtifactsReadme } from '../../services/artifacts/seed-readme';
@@ -20,8 +20,17 @@ import {
   requireGitLabUserAccessToken,
   verifyGitLabProjectAccess,
 } from '../../services/gitlab';
+import {
+  artifactsRemoteFetch,
+  isLocalHostedGitActive,
+  resolveArtifactsBackend,
+} from '../../services/hosted-git/backend';
+import {
+  importIntoHostedRepository,
+  parseHostedGitImportUrl,
+  resolveImportDefaultBranch,
+} from '../../services/hosted-git/import';
 import { getRuntimeLimits } from '../../services/limits';
-import { isArtifactsAvailable } from '../../services/platform-capabilities';
 import {
   assertRepositoryAccess,
   isValidRepositoryFormat,
@@ -85,7 +94,8 @@ export function registerProjectCreateRoute(crudRoutes: Hono<{ Bindings: Env }>):
         throw errors.badRequest('Artifacts repo provider is not enabled');
       }
       // Enabled but no binding: this runtime has no Cloudflare Artifacts (not a server fault).
-      if (!isArtifactsAvailable(c.env) || !c.env.ARTIFACTS) {
+      const artifacts = resolveArtifactsBackend(c.env);
+      if (!artifacts) {
         throw errors.featureUnavailable(
           'artifacts',
           'SAM-native Git repositories are not available on this installation'
@@ -106,7 +116,20 @@ export function registerProjectCreateRoute(crudRoutes: Hono<{ Bindings: Env }>):
         throw errors.badRequest(`Maximum ${maxRepos} Artifacts-backed projects allowed`);
       }
 
+      // Import from a public repository: only on this install's own git server (self-host).
+      const importUrl = body.importUrl?.trim() ? parseHostedGitImportUrl(body.importUrl) : null;
+      if (importUrl && !isLocalHostedGitActive(c.env)) {
+        throw errors.badRequest(
+          'importUrl is only supported for SAM-hosted repositories on a self-hosted install'
+        );
+      }
+      const importBranch = importUrl ? await resolveImportDefaultBranch(importUrl) : null;
+      if (importUrl && !importBranch) {
+        throw errors.badRequest('Could not read the default branch of the repository at importUrl');
+      }
+
       const defaultBranch =
+        importBranch ||
         body.defaultBranch?.trim() ||
         c.env.ARTIFACTS_DEFAULT_BRANCH ||
         ARTIFACTS_DEFAULTS.DEFAULT_BRANCH;
@@ -124,7 +147,7 @@ export function registerProjectCreateRoute(crudRoutes: Hono<{ Bindings: Env }>):
       // Must be sanitized: Artifacts rejects uppercase/spaces (the ULID projectId
       // is uppercase and normalizedName preserves spaces).
       const repoName = toArtifactsRepoName(normalizedName, projectId);
-      const created = await c.env.ARTIFACTS.create(repoName, {
+      const created = await artifacts.create(repoName, {
         description: description || undefined,
         setDefaultBranch: defaultBranch,
       });
@@ -136,13 +159,24 @@ export function registerProjectCreateRoute(crudRoutes: Hono<{ Bindings: Env }>):
       // also orients agents (project name, description, SAM MCP tools). If seeding
       // fails the repo is unusable, so we abort creation and log the orphan.
       try {
-        await seedArtifactsReadme({
-          remote: created.remote,
-          token: created.token,
-          branch: defaultBranch,
-          projectName: name,
-          description,
-        });
+        if (importUrl) {
+          await importIntoHostedRepository({
+            sourceUrl: importUrl,
+            branch: defaultBranch,
+            remote: created.remote,
+            token: created.token,
+            remoteFetch: artifactsRemoteFetch(c.env),
+          });
+        } else {
+          await seedArtifactsReadme({
+            remote: created.remote,
+            token: created.token,
+            branch: defaultBranch,
+            projectName: name,
+            description,
+            fetchImpl: artifactsRemoteFetch(c.env),
+          });
+        }
       } catch (seedError) {
         log.error('project_create.artifacts_seed_failed', {
           projectId,
@@ -153,7 +187,7 @@ export function registerProjectCreateRoute(crudRoutes: Hono<{ Bindings: Env }>):
         // Best-effort cleanup: the repo exists but has no usable content, and no
         // project row will reference it. Delete it so it does not leak quota.
         try {
-          await c.env.ARTIFACTS.delete(created.name);
+          await artifacts.delete(created.name);
         } catch (cleanupError) {
           log.error('project_create.artifacts_seed_cleanup_failed', {
             projectId,
@@ -162,6 +196,8 @@ export function registerProjectCreateRoute(crudRoutes: Hono<{ Bindings: Env }>):
             action: 'orphaned_artifacts_repo_cleanup_failed',
           });
         }
+        // An import refusal (too large, unreadable, over a cap) is the caller's to fix.
+        if (importUrl && seedError instanceof AppError) throw seedError;
         throw errors.internal('Failed to initialize Artifacts repository');
       }
 

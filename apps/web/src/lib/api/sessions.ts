@@ -144,6 +144,8 @@ export interface SessionStateSnapshot {
   /** Whether the session's agent adapter can steer; null until the VM agent reports it. */
   steeringSupported?: boolean | null;
   recoveryStatus?: 'waking' | 'restored' | 'failed' | null;
+  /** The wake attempt `recoveryStatus` describes (mirrors the shared snapshot). */
+  wakeAttemptId?: string | null;
   /**
    * Execution step of the replacement TaskRunner waking this session. Drives
    * phase-level wake progress; null when no wake is in flight.

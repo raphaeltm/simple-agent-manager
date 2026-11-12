@@ -32,6 +32,7 @@ import {
   jsonValidator,
   MessageBatchSchema,
 } from '../../schemas';
+import { isAiProxyEnabled } from '../../services/ai-proxy-availability';
 import { appendBootLog } from '../../services/boot-log';
 import { registerBootstrapTokenConsume } from '../../services/bootstrap';
 import { resolveSessionProfileCredentialContext } from '../../services/composable-credentials/profile-context';
@@ -48,6 +49,12 @@ import {
   requireGitLabUserAccessTokenResultForOwner,
   verifyGitLabProjectAccess,
 } from '../../services/gitlab';
+import {
+  hostedGitHost,
+  isLocalHostedGitActive,
+  resolveArtifactsBackend,
+} from '../../services/hosted-git/backend';
+import { mintHostedGitToken } from '../../services/hosted-git/tokens';
 import { nodeStatusTerminatesCallbacks } from '../../services/node-callback-auth';
 import { persistError } from '../../services/observability';
 import { resolveProjectAgentDefault } from '../../services/project-agent-defaults';
@@ -834,7 +841,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
   //   forwarded via auth headers, wstoken in URL path for analytics/rate-limiting)
   // Note: platform proxy fallback requires explicit provider selection.
   // Without it, users with no credential get a 404 (agent not configured).
-  const aiProxyEnabled = (c.env.AI_PROXY_ENABLED ?? 'true') !== 'false';
+  const aiProxyEnabled = await isAiProxyEnabled(c.env);
   if (PROXY_ELIGIBLE_AGENTS.has(body.agentType) && aiProxyEnabled) {
     const baseDomain = c.env.BASE_DOMAIN;
     const isClaudeCode = body.agentType === 'claude-code';
@@ -1054,6 +1061,20 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     throw errors.notFound('Agent credential');
   }
 
+  // A credential that names a custom base URL is served only through the passthrough proxy above.
+  // This response carries no base URL, so returning the key here would send it to the vendor's
+  // default endpoint (another company's API) instead of the endpoint it was issued for.
+  if (credentialData.baseUrl && PROXY_ELIGIBLE_AGENTS.has(body.agentType)) {
+    log.warn('agent_key.custom_base_url_requires_ai_proxy', {
+      workspaceId,
+      userId: workspace.userId,
+      agentType: body.agentType,
+      aiProxyEnabled,
+      action: 'rejected',
+    });
+    throw errors.notFound('Agent credential');
+  }
+
   // Track credential source on associated task if applicable
   if (credentialData.credentialSource === 'platform') {
     const taskRows = await db
@@ -1265,7 +1286,8 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
     if (c.env.ARTIFACTS_ENABLED !== 'true') {
       throw errors.forbidden('Artifacts provider is not enabled');
     }
-    if (!c.env.ARTIFACTS) {
+    const artifacts = resolveArtifactsBackend(c.env);
+    if (!artifacts) {
       throw errors.featureUnavailable(
         'artifacts',
         'SAM-native Git repositories are not available on this installation'
@@ -1282,9 +1304,25 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
     const ttl = Number.isFinite(rawTtl) && rawTtl > 0 && rawTtl <= 86400 ? rawTtl : 3600;
     // Use requested scope or default to 'write' (agents need push access)
     const requestedScope = c.req.query('scope') === 'read' ? ('read' as const) : ('write' as const);
-    const repo = await c.env.ARTIFACTS.get(artifactsRepoId);
+    const repo = await artifacts.get(artifactsRepoId);
     await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'git_token');
-    const tokenResult = await repo.createToken(requestedScope, ttl);
+    // SAM-hosted repositories (self-host): the token is bound to this workspace, so the git
+    // server refuses it once the workspace stops (services/hosted-git/http.ts).
+    const localHostedGit = isLocalHostedGitActive(c.env);
+    const tokenResult = localHostedGit
+      ? await mintHostedGitToken(c.env, {
+          repo: artifactsRepoId,
+          scope: requestedScope,
+          ttlSeconds: ttl,
+          workspaceId: workspace.workspaceId,
+          callbackGeneration: workspace.callbackGeneration ?? null,
+          userId: workspace.userId,
+        }).then((minted) => ({
+          plaintext: minted.token,
+          expiresAt: minted.expiresAt,
+          expires_at: undefined,
+        }))
+      : await repo.createToken(requestedScope, ttl);
 
     // Strip ?expires= suffix from token for git credential use
     const tokenSecret = tokenResult.plaintext.split('?expires=')[0] || tokenResult.plaintext;
@@ -1319,6 +1357,9 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
       token: tokenSecret,
       expiresAt: tokenResult.expiresAt ?? tokenResult.expires_at,
       cloneUrl,
+      // The VM agent's credential helper answers for this host with this username; a hosted
+      // repository's host (api.<BASE_DOMAIN>) is not one it recognizes by name.
+      ...(localHostedGit ? { host: hostedGitHost(c.env), username: 'x' } : {}),
     });
   }
 

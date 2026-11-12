@@ -115,7 +115,7 @@ describe('CI Playwright visual audit wiring', () => {
     const runStep = stepBlock(job, 'Run Playwright visual audit tests');
 
     expect(job).toContain(
-      "if: github.event_name == 'pull_request' && needs.changes.outputs.web-ui == 'true'"
+      "if: github.event_name == 'pull_request' && (needs.changes.outputs.web-ui == 'true' || needs.changes.outputs.browser-install == 'true')"
     );
     expect(selectionStep).toContain(
       'pnpm exec tsx scripts/quality/select-playwright-visual-audits.ts'

@@ -5,7 +5,7 @@
  * - Task completes → orchestrator notified → handoff routed → dependent auto-dispatched
  * - Non-mission tasks are unaffected
  * - Concurrency limits respected
- * - Stall detection sends interrupts
+ * - Stall detection sends a non-cancelling status nudge
  */
 import { resolveOrchestratorConfig } from '@simple-agent-manager/shared';
 import { describe, expect, it, vi } from 'vitest';
@@ -116,6 +116,8 @@ interface MockSessionRow {
   id: string;
   taskId: string;
   status: string;
+  /** Epoch ms of the newest message, as `getSessionsByTaskIds` reports it. */
+  lastMessageAt?: number;
 }
 
 interface MockProjectDataMessage {
@@ -489,26 +491,101 @@ describe('Scheduling Cycle — Auto-Dispatch', () => {
 });
 
 describe('Scheduling Cycle — Stall Detection', () => {
-  it('enqueues stalled task interrupt to the task chat session id', async () => {
-    const stallConfig = resolveOrchestratorConfig({
-      ORCHESTRATOR_STALL_TIMEOUT_MS: '1000', // 1 second for test
-    });
+  const stallConfig = resolveOrchestratorConfig({
+    ORCHESTRATOR_STALL_TIMEOUT_MS: '1000', // 1 second for test
+  });
 
+  function stallScenario(options: {
+    status: string;
+    sessionLastMessageAgoMs?: number;
+    withSession?: boolean;
+  }) {
     const sql = makeSqlStorage({
       orchestrator_missions: [
         { mission_id: 'mission-1', status: 'active', registered_at: Date.now() },
       ],
     });
-
     const stalledTime = new Date(Date.now() - 5000).toISOString(); // 5s ago
-
     const { env, mailboxMessages } = makeMockEnv({
       tasks: [
         makeTask({
           id: 'stalled-task',
-          status: 'running',
+          status: options.status,
           scheduler_state: 'running',
           updated_at: stalledTime,
+        }),
+      ],
+      sessions:
+        options.withSession === false
+          ? []
+          : [
+              {
+                id: 'session-stalled-task',
+                taskId: 'stalled-task',
+                status: 'active',
+                lastMessageAt: Date.now() - (options.sessionLastMessageAgoMs ?? 5000),
+              },
+            ],
+    });
+    return { sql, env, mailboxMessages };
+  }
+
+  // `in_progress` is the status of a working mission task. The detector used to filter on
+  // `running`, which is not a TaskStatus, so it never checked one (state-machine audit D1).
+  it.each(['in_progress', 'delegated'])(
+    'nudges a stalled %s task through its chat session without cancelling the turn',
+    async (status) => {
+      const { sql, env, mailboxMessages } = stallScenario({ status });
+
+      await runSchedulingCycle(sql, env, 'proj-1', stallConfig);
+
+      expect(mailboxMessages).toHaveLength(1);
+      expect(mailboxMessages[0]).toMatchObject({
+        targetSessionId: 'session-stalled-task',
+        sourceTaskId: null,
+        senderType: 'orchestrator',
+        // `interrupt` would cancel the agent's in-flight turn; a nudge must not.
+        messageClass: 'deliver',
+        metadata: {
+          reason: 'stall_detection',
+        },
+      });
+      expect(mailboxMessages[0]?.targetSessionId).not.toBe('stalled-task');
+
+      const stallDecision = getDecisionInserts(sql).find((call: unknown[]) =>
+        call.includes('stall_detected')
+      );
+      expect(stallDecision).toBeDefined();
+      expect(stallDecision).toContain('Task stalled for 0min — status nudge sent');
+    }
+  );
+
+  // Status-gate control: the same stale fixture in a status that holds no running
+  // agent must not be nudged, so the in_progress case above is the gate's doing.
+  it.each(['queued', 'sleeping', 'completed', 'failed'])(
+    'does not nudge a stale %s task',
+    async (status) => {
+      const { sql, env, mailboxMessages } = stallScenario({ status });
+
+      await runSchedulingCycle(sql, env, 'proj-1', stallConfig);
+
+      expect(mailboxMessages).toHaveLength(0);
+    }
+  );
+
+  it('does not nudge a task with no usable progress time', async () => {
+    const sql = makeSqlStorage({
+      orchestrator_missions: [
+        { mission_id: 'mission-1', status: 'active', registered_at: Date.now() },
+      ],
+    });
+    const { env, mailboxMessages } = makeMockEnv({
+      tasks: [
+        makeTask({
+          id: 'stalled-task',
+          status: 'in_progress',
+          scheduler_state: 'running',
+          updated_at: 'not-a-timestamp',
         }),
       ],
       sessions: [{ id: 'session-stalled-task', taskId: 'stalled-task', status: 'active' }],
@@ -516,51 +593,35 @@ describe('Scheduling Cycle — Stall Detection', () => {
 
     await runSchedulingCycle(sql, env, 'proj-1', stallConfig);
 
-    expect(mailboxMessages).toHaveLength(1);
-    expect(mailboxMessages[0]).toMatchObject({
-      targetSessionId: 'session-stalled-task',
-      sourceTaskId: null,
-      senderType: 'orchestrator',
-      messageClass: 'interrupt',
-      metadata: {
-        reason: 'stall_detection',
-      },
-    });
-    expect(mailboxMessages[0]?.targetSessionId).not.toBe('stalled-task');
-
-    const stallDecision = getDecisionInserts(sql).find((call: unknown[]) =>
-      call.includes('stall_detected')
-    );
-    expect(stallDecision).toBeDefined();
-    expect(stallDecision).toContain('Task stalled for 0min — interrupt sent');
+    expect(mailboxMessages).toHaveLength(0);
   });
 
-  it('logs and skips stalled task interrupt when no active session exists', async () => {
-    const stallConfig = resolveOrchestratorConfig({
-      ORCHESTRATOR_STALL_TIMEOUT_MS: '1000',
+  it('does not nudge a task whose session produced output recently', async () => {
+    // The task row is old, but the agent wrote a message 100ms ago: it is working.
+    const { sql, env, mailboxMessages } = stallScenario({
+      status: 'in_progress',
+      sessionLastMessageAgoMs: 100,
     });
-    const sql = makeSqlStorage({
-      orchestrator_missions: [
-        { mission_id: 'mission-1', status: 'active', registered_at: Date.now() },
-      ],
-    });
-    const stalledTime = new Date(Date.now() - 5000).toISOString();
-    const { env, mailboxMessages } = makeMockEnv({
-      tasks: [
-        makeTask({
-          id: 'stalled-task',
-          status: 'running',
-          scheduler_state: 'running',
-          updated_at: stalledTime,
-        }),
-      ],
+
+    await runSchedulingCycle(sql, env, 'proj-1', stallConfig);
+
+    expect(mailboxMessages).toHaveLength(0);
+    expect(
+      getDecisionInserts(sql).find((call: unknown[]) => call.includes('stall_detected'))
+    ).toBeUndefined();
+  });
+
+  it('logs and skips the nudge when no active session exists', async () => {
+    const { sql, env, mailboxMessages } = stallScenario({
+      status: 'in_progress',
+      withSession: false,
     });
 
     await runSchedulingCycle(sql, env, 'proj-1', stallConfig);
 
     expect(mailboxMessages).toHaveLength(0);
     const missingSessionDecision = getDecisionInserts(sql).find((call: unknown[]) =>
-      call.includes('No active chat session found for stalled task; interrupt not enqueued')
+      call.includes('No active chat session found for stalled task; nudge not enqueued')
     );
     expect(missingSessionDecision).toBeDefined();
   });

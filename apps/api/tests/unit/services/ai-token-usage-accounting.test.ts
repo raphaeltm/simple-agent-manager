@@ -42,6 +42,39 @@ describe('ai token usage accounting helpers', () => {
     expect(usage).toEqual({ inputTokens: 11, outputTokens: 5 });
   });
 
+  it('collects OpenAI Responses API streaming usage from the response.completed event', async () => {
+    const usage = await collectStreamTokenUsage(streamFromText([
+      'event: response.created',
+      'data: {"type":"response.created","response":{"id":"resp_1","usage":null}}',
+      '',
+      'event: response.output_text.delta',
+      'data: {"type":"response.output_text.delta","delta":"hi"}',
+      '',
+      'event: response.completed',
+      'data: {"type":"response.completed","response":{"id":"resp_1","usage":{"input_tokens":40,"output_tokens":9,"input_tokens_details":{"cached_tokens":30}}}}',
+      '',
+      '',
+    ].join('\n')), 'openai');
+
+    expect(usage).toEqual({ inputTokens: 40, outputTokens: 9, cachedInputTokens: 30 });
+  });
+
+  it('extracts Anthropic prompt-cache reads and writes for pricing', () => {
+    expect(extractJsonTokenUsage({
+      usage: {
+        input_tokens: 20,
+        output_tokens: 9,
+        cache_read_input_tokens: 100,
+        cache_creation_input_tokens: 10,
+      },
+    }, 'anthropic')).toEqual({
+      inputTokens: 20,
+      outputTokens: 9,
+      cachedInputTokens: 100,
+      cacheWriteInputTokens: 10,
+    });
+  });
+
   it('collects Anthropic streaming usage across message_start and message_delta', async () => {
     const usage = await collectStreamTokenUsage(streamFromText([
       'event: message_start',

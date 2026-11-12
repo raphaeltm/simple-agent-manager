@@ -29,6 +29,7 @@ import {
   summarizeAccessibleInstallations,
   summarizeInstallationRows,
 } from '../services/github-route-helpers';
+import { githubUserTokenUnavailableError } from '../services/github-token-errors';
 import { getGitHubUserAccessToken } from '../services/github-user-access-token';
 
 type VerifiedInstallations = [AuthenticatedGitHubUser, UserAccessibleInstallation[]];
@@ -56,6 +57,9 @@ export async function getRequiredGitHubUserAccessToken(
     tokenPresent: Boolean(accessToken),
   });
   if (!accessToken) {
+    // Never linked (an email-signed account): say what fixes it. Otherwise keep the 403.
+    const unavailable = await githubUserTokenUnavailableError(c.env, userId);
+    if (unavailable.error === 'GITHUB_NOT_CONNECTED') throw unavailable;
     throw errors.forbidden('GitHub user token unavailable');
   }
   return accessToken;

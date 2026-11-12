@@ -1,6 +1,6 @@
 import { expect, type Page, type Route, test } from '@playwright/test';
 
-import { assertNoOverflow } from './audit-helpers';
+import { assertNoOverflow, seedTheme } from './audit-helpers';
 
 // ---------------------------------------------------------------------------
 // API Mock — unauthenticated user (no session)
@@ -177,6 +177,42 @@ for (const viewport of [
       await screenshot(page, `landing-all-providers-${viewport.name}`);
     });
 
+    test('a test instance says it accepts agent sign-in', async ({ page }) => {
+      await setupApiMocks(page, { ...ALL_PROVIDERS, agentSignIn: true });
+      await page.goto('/');
+      const notice = page.getByRole('note');
+      await expect(notice).toBeVisible();
+      await expect(notice).toContainText('Agents from a trusted SAM installation');
+      await expect(page.getByText('Sign in with GitHub')).toBeVisible();
+      // The notice sits inside the card, not past its edges.
+      const card = await page.locator('.sam-glass').first().boundingBox();
+      const box = await notice.boundingBox();
+      expect(box && card).toBeTruthy();
+      expect(box!.x).toBeGreaterThanOrEqual(card!.x);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(card!.x + card!.width + 1);
+      // Above the sign-in buttons, so it is read before anyone signs in.
+      const github = await page.getByText('Sign in with GitHub').boundingBox();
+      expect(box!.y + box!.height).toBeLessThanOrEqual(github!.y);
+      await assertNoOverflow(page);
+      await screenshot(page, `landing-agent-sign-in-${viewport.name}`);
+    });
+
+    test('the agent sign-in notice in the light theme', async ({ page }) => {
+      await seedTheme(page, 'light');
+      await setupApiMocks(page, { ...ALL_PROVIDERS, agentSignIn: true });
+      await page.goto('/');
+      await expect(page.getByRole('note')).toBeVisible();
+      await assertNoOverflow(page);
+      await screenshot(page, `landing-agent-sign-in-light-${viewport.name}`);
+    });
+
+    test('an ordinary instance shows no agent sign-in notice', async ({ page }) => {
+      await setupApiMocks(page, { ...ALL_PROVIDERS, agentSignIn: false });
+      await page.goto('/');
+      await expect(page.getByText('Sign in with GitHub')).toBeVisible();
+      await expect(page.getByRole('note')).toHaveCount(0);
+    });
+
     test('a remembered answer shows at once while the lookup hangs', async ({ page }) => {
       await setupApiMocks(page, 'hang');
       await page.addInitScript((value) => {
@@ -187,6 +223,25 @@ for (const viewport of [
       await expect(page.getByRole('status', { name: 'Loading sign-in options' })).toHaveCount(0);
       await assertNoOverflow(page);
       await screenshot(page, `landing-remembered-${viewport.name}`);
+    });
+
+    test('a failed lookup on a remembered "off" says it could not check agent sign-in', async ({
+      page,
+    }) => {
+      await setupApiMocks(page, 'error');
+      await page.addInitScript((value) => {
+        window.localStorage.setItem('sam:login-providers', value);
+      }, JSON.stringify({ ...ALL_PROVIDERS, agentSignIn: false }));
+      await page.goto('/');
+      // The hook retries three times with backoff (~7s) before giving up.
+      const notice = page.getByRole('note');
+      await expect(notice).toContainText('check whether agents can sign in', { timeout: 20_000 });
+      await expect(page.getByText('Sign in with GitHub')).toBeVisible();
+      const github = await page.getByText('Sign in with GitHub').boundingBox();
+      const box = await notice.boundingBox();
+      expect(box!.y + box!.height).toBeLessThanOrEqual(github!.y);
+      await assertNoOverflow(page);
+      await screenshot(page, `landing-agent-sign-in-unknown-${viewport.name}`);
     });
 
     test('a failed lookup with nothing remembered offers a retry', async ({ page }) => {

@@ -59,6 +59,7 @@ import {
   prepareDockerProxyPolicy,
 } from './docker-proxy-policy.js';
 import { writeFenceFiles } from './fence-state.js';
+import { inboundMailWorkerVars } from './inbound-mail-settings.js';
 import {
   assertContainerEngineReady,
   type EngineProbe,
@@ -348,6 +349,7 @@ async function main(): Promise<void> {
   const secrets: Record<string, string> = { ...platformSecrets, ...operatorSecrets };
   knownSecrets = Object.values(secrets);
 
+  const smtpVars = smtpWorkerVars(box, operatorSecrets, baseDomain);
   const source = TOML.parse(readFileSync(join(API_DIR, 'wrangler.toml'), 'utf8')) as WranglerToml;
   const guidedLogin = guidedLoginSettings(box);
   const plan = buildCelldConfig(source, {
@@ -359,7 +361,8 @@ async function main(): Promise<void> {
       SAM_INSTALLATION_ID,
       VAPID_SUBJECT: `https://app.${baseDomain}`,
       ...tunnelWorkerVars(tunnelSettings),
-      ...smtpWorkerVars(box, operatorSecrets, baseDomain),
+      ...smtpVars,
+      ...inboundMailWorkerVars(box, smtpVars),
     },
   });
   const vmAgentRelease = values['skip-vm-agent'] ? null : resolveVmAgentRelease(REPO_ROOT);

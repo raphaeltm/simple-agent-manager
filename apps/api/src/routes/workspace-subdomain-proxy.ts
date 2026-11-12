@@ -18,6 +18,7 @@ import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
 import { stripPreviewAuthCookies } from '../lib/preview-cookies';
 import { parseWorkspaceSubdomain } from '../lib/workspace-subdomain';
+import { isPastHardExpiry } from '../services/agent-sign-in/session-cap';
 import { signTerminalToken, verifyTerminalToken } from '../services/jwt';
 import { getNodeBackendBaseUrl } from '../services/node-agent-readiness';
 import {
@@ -95,7 +96,8 @@ export async function workspaceSubdomainProxy(
       headers: c.req.raw.headers,
       query: { disableCookieCache: true },
     });
-    if (session?.user) {
+    // An agent sign-in session past its hard expiry is no session (agent-sign-in/session-cap.ts).
+    if (session?.user && !isPastHardExpiry(session.session)) {
       await assertSessionUserApproved(c.env, session.user);
       userId = session.user.id;
     }

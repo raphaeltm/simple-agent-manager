@@ -52,6 +52,15 @@ export const OUTBOUND_FETCH_ALLOWLIST: readonly AllowlistEntry[] = [
     reason: 'api.github.com; path from repository/project data only',
   },
   {
+    // Added with the GitHub App manifest flow on sam/selfhost-pass-2 (f1ea4b4ec); listed here so
+    // the inventory stays green after the rebase (overnight B3).
+    file: 'services/github-app-manifest.ts',
+    fn: 'completeGitHubAppManifest',
+    call: 'fetch',
+    controller: 'constant',
+    reason: 'api.github.com; the manifest code is path-encoded with encodeURIComponent',
+  },
+  {
     file: 'durable-objects/sam-session/tools/search-code.ts',
     fn: 'searchCode',
     call: 'fetch',

@@ -14,6 +14,8 @@
 import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join, normalize } from 'node:path';
 
+import { DEFAULT_CELLD_UID } from './egress-fence.js';
+
 /** The one container class a box runs. VmAgentContainer (Instant) is never emitted. */
 export const GUIDED_LOGIN_CONTAINER_CLASS = 'SandboxDO';
 
@@ -31,6 +33,14 @@ export const DEFAULT_GUIDED_LOGIN_RUNTIME = 'runsc';
  * concurrent setup session; the two CLIs fit in `basic` (measured on the prototype box).
  */
 export const DEFAULT_GUIDED_LOGIN_INSTANCE_TYPE = 'basic';
+
+/**
+ * Compose defaults for the uids that must stay distinct (`docker-compose*.yml`). The proxy's uid is
+ * in the Docker socket's group; sharing it with celld (the egress fence's uid) or sam-mx would put
+ * that process on the far side of the boundary the proxy exists to enforce.
+ */
+export const DEFAULT_DOCKER_PROXY_UID = 7103;
+const DEFAULT_SAM_MX_UID = 7102;
 
 const INSTANCE_TYPES = new Set([
   'lite',
@@ -81,7 +91,29 @@ export function guidedLoginSettings(
         'accept a shared host kernel)'
     );
   }
+  assertDistinctProxyUid(box);
   return { runtime, instanceType };
+}
+
+function uidSetting(box: Readonly<Record<string, string>>, name: string, fallback: number): number {
+  const raw = (box[name] ?? '').trim();
+  if (raw === '') return fallback;
+  if (!/^[0-9]+$/.test(raw)) throw new Error(`${name} must be a numeric uid`);
+  return Number(raw);
+}
+
+function assertDistinctProxyUid(box: Readonly<Record<string, string>>): void {
+  const proxy = uidSetting(box, 'SAM_DOCKER_PROXY_UID', DEFAULT_DOCKER_PROXY_UID);
+  if (proxy === 0) throw new Error('SAM_DOCKER_PROXY_UID must not be root');
+  const others: Array<[string, number]> = [
+    ['CELLD_UID', uidSetting(box, 'CELLD_UID', DEFAULT_CELLD_UID)],
+    ['SAM_MX_UID', uidSetting(box, 'SAM_MX_UID', DEFAULT_SAM_MX_UID)],
+  ];
+  for (const [name, uid] of others) {
+    if (uid === proxy) {
+      throw new Error(`SAM_DOCKER_PROXY_UID (${proxy}) must differ from ${name} (${uid})`);
+    }
+  }
 }
 
 /** Sources of every `COPY <src> <dest>` line, relative to the Dockerfile's directory. */

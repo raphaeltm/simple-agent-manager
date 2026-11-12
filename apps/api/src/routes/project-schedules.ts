@@ -12,7 +12,7 @@ import {
 import type { Env } from '../env';
 import { readBoundedRequestBody, RequestBodyTooLargeError } from '../lib/bounded-request-body';
 import { requireRouteParam } from '../lib/route-helpers';
-import { getUserId } from '../middleware/auth';
+import { assertNotAgentSignInSession, getUserId } from '../middleware/auth';
 import { AppError, errors } from '../middleware/error';
 import { requireProjectCapability } from '../middleware/project-auth';
 import * as projectData from '../services/project-data';
@@ -106,8 +106,12 @@ projectScheduleRoutes.get('/:id', async (c) => {
   return c.json({ schedule });
 });
 
-projectScheduleRoutes.post('/', async (c) =>
-  c.json(
+// A schedule posts a message as the person later, after an agent sign-in session that set it
+// has ended; such a session may cancel schedules but not create or re-arm them
+// (services/agent-sign-in/session-cap.ts).
+projectScheduleRoutes.post('/', async (c) => {
+  assertNotAgentSignInSession(c);
+  return c.json(
     await projectData.createProjectSchedule(c.env, requireRouteParam(c, 'projectId'), {
       userId: getUserId(c),
       creatorChatSessionId: null,
@@ -117,28 +121,30 @@ projectScheduleRoutes.post('/', async (c) =>
       request: await scheduleRequestBody(c.req.raw, c.env),
     }),
     201
-  )
-);
+  );
+});
 
 for (const operation of ['reschedule', 'cancel'] as const) {
-  projectScheduleRoutes.post(`/:id/${operation}`, async (c) =>
-    c.json(
+  projectScheduleRoutes.post(`/:id/${operation}`, async (c) => {
+    if (operation === 'reschedule') assertNotAgentSignInSession(c);
+    return c.json(
       await projectData.mutateProjectSchedule(c.env, requireRouteParam(c, 'projectId'), {
         userId: getUserId(c),
         id: requireRouteParam(c, 'id'),
         operation,
         request: await scheduleRequestBody(c.req.raw, c.env),
       })
-    )
-  );
+    );
+  });
 }
 
-projectScheduleRoutes.post('/:id/reconcile', async (c) =>
-  c.json(
+projectScheduleRoutes.post('/:id/reconcile', async (c) => {
+  assertNotAgentSignInSession(c);
+  return c.json(
     await projectData.reconcileProjectSchedule(c.env, requireRouteParam(c, 'projectId'), {
       userId: getUserId(c),
       id: requireRouteParam(c, 'id'),
       request: await scheduleRequestBody(c.req.raw, c.env),
     })
-  )
-);
+  );
+});

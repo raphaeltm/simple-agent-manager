@@ -13,6 +13,7 @@ import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
 import { errors } from '../../middleware/error';
 import { getBlockedTaskIds, isTaskBlocked } from '../../services/task-graph';
+import { triggerExecutionSyncableWhere } from '../../services/trigger-execution-sync';
 import {
   assertWorkspaceCallbackIdentityCurrent,
   type WorkspaceCallbackIdentitySnapshot,
@@ -338,7 +339,10 @@ export async function setTaskStatus(
         completedAt: now,
         errorMessage: toStatus === 'failed' ? options.errorMessage?.trim() || 'Task failed' : null,
       })
-      .where(eq(schema.triggerExecutions.id, updatedTask.triggerExecutionId))
+      // Same guard as syncTriggerExecutionStatus: only a running (or hard-max
+      // backstop-failed) execution follows its task. A skipped/dropped/routed or
+      // already-final execution must not be overwritten.
+      .where(triggerExecutionSyncableWhere(updatedTask.triggerExecutionId))
       .catch((err: unknown) => {
         // Best-effort — don't fail the task status update if execution sync fails
         log.error('trigger_execution_sync_failed', {

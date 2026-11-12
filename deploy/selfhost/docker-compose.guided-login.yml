@@ -12,12 +12,12 @@ services:
     build:
       context: ./docker-proxy
       args:
-        PROXY_UID: ${SAM_DOCKER_PROXY_UID:-7102}
+        PROXY_UID: ${SAM_DOCKER_PROXY_UID:-7103}
         CELLD_GID: ${CELLD_UID:-7101}
     image: sam-selfhost-docker-proxy:local
     # Unix sockets only: the host's Docker socket in, the proxy socket out.
     network_mode: none
-    user: '${SAM_DOCKER_PROXY_UID:-7102}:${CELLD_UID:-7101}'
+    user: '${SAM_DOCKER_PROXY_UID:-7103}:${CELLD_UID:-7101}'
     # The socket's group, so the proxy uid can reach the daemon without being root.
     group_add: ['${DOCKER_SOCKET_GID:?set DOCKER_SOCKET_GID (stat -c %g /var/run/docker.sock)}']
     cap_drop: [ALL]

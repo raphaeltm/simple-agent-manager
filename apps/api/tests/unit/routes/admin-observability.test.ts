@@ -12,6 +12,10 @@ import { createSqliteD1 } from '../../helpers/sqlite-d1';
 // Mock auth middleware
 const mockGetUserId = vi.fn().mockReturnValue('user-superadmin');
 vi.mock('../../../src/middleware/auth', () => ({
+  // Agent sign-in session guards: inert for these ordinary-session route tests.
+  rejectAgentSignInSession: () => async (_c: unknown, next: () => Promise<void>) => next(),
+  assertNotAgentSignInSession: () => undefined,
+
   requireAuth: () => vi.fn((_c: any, next: any) => next()),
   requireApproved: () => vi.fn((_c: any, next: any) => next()),
   requireSuperadmin: () =>

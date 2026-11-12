@@ -51,6 +51,18 @@ describe('guidedLoginSettings', () => {
       guidedLoginSettings({ SAM_GUIDED_LOGIN: 'on', SAM_GUIDED_LOGIN_INSTANCE_TYPE: 'huge' })
     ).toThrow(/instance type/);
   });
+
+  it('keeps the proxy uid (in the Docker socket group) apart from celld and sam-mx', () => {
+    const on = { SAM_GUIDED_LOGIN: 'on' };
+    // Compose defaults: celld 7101, sam-mx 7102, proxy 7103.
+    expect(guidedLoginSettings(on)).not.toBeNull();
+    expect(() => guidedLoginSettings({ ...on, SAM_DOCKER_PROXY_UID: '7102' })).toThrow(/SAM_MX_UID/);
+    expect(() => guidedLoginSettings({ ...on, SAM_DOCKER_PROXY_UID: '7101' })).toThrow(/CELLD_UID/);
+    expect(() => guidedLoginSettings({ ...on, CELLD_UID: '7103' })).toThrow(/CELLD_UID/);
+    expect(() => guidedLoginSettings({ ...on, SAM_DOCKER_PROXY_UID: '0' })).toThrow(/root/);
+    expect(() => guidedLoginSettings({ ...on, SAM_DOCKER_PROXY_UID: 'x' })).toThrow(/numeric/);
+    expect(guidedLoginSettings({ ...on, SAM_DOCKER_PROXY_UID: '7200' })).not.toBeNull();
+  });
 });
 
 describe('sandbox image build context', () => {

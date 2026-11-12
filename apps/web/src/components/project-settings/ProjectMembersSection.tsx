@@ -246,6 +246,12 @@ function RequestRow({
           {request.githubAccessMessage}
         </p>
       )}
+      {request.githubAccessStatus === 'missing-token' && (
+        <p role="note" className="m-0 text-[0.75rem] text-warning break-words">
+          You can approve, but this person cannot start chats or tasks in this GitHub project until
+          they connect GitHub to their SAM account (Settings → GitHub).
+        </p>
+      )}
       <div className="flex flex-wrap gap-2 justify-end">
         <Button size="sm" variant="secondary" disabled={disabled} onClick={() => onDeny(request)}>
           <X size={14} />

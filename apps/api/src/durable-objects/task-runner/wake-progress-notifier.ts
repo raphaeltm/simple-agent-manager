@@ -70,6 +70,8 @@ export interface NotifyWakeProgressArgs {
   /** Null for a normal task run — the discriminator that keeps this a no-op. */
   chatSessionId: string | null | undefined;
   step: TaskExecutionStep;
+  /** The recovery attempt this runner serves (`config.recoveryAttemptId`). */
+  attemptId: string | null | undefined;
 }
 
 /**
@@ -82,6 +84,7 @@ export async function notifyWakeProgress(args: NotifyWakeProgressArgs): Promise<
   return emitWakeProgress(env, projectId, chatSessionId, {
     recoveryStatus: recoveryStatusForStep(step),
     wakePhase: step,
+    wakeAttemptId: args.attemptId ?? null,
   });
 }
 
@@ -92,6 +95,8 @@ export interface NotifyWakeSettledArgs {
   chatSessionId: string | null | undefined;
   status: 'restored' | 'failed';
   readiness?: SessionWakeReadyInput;
+  /** The recovery attempt this runner serves (`config.recoveryAttemptId`). */
+  attemptId: string | null | undefined;
 }
 
 /**
@@ -119,6 +124,7 @@ export async function notifyWakeSettled(args: NotifyWakeSettledArgs): Promise<bo
     recoveryStatus: status,
     // The wake is over; a phase here would render as stale progress.
     wakePhase: null,
+    wakeAttemptId: args.attemptId ?? null,
   });
 }
 
@@ -126,7 +132,7 @@ async function emitWakeProgress(
   env: Env,
   projectId: string,
   chatSessionId: string | null | undefined,
-  payload: Pick<SessionWakeProgressInput, 'recoveryStatus' | 'wakePhase'>
+  payload: Pick<SessionWakeProgressInput, 'recoveryStatus' | 'wakePhase' | 'wakeAttemptId'>
 ): Promise<boolean> {
   if (!chatSessionId) return false;
 

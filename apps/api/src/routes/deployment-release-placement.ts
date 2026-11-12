@@ -29,6 +29,10 @@ import {
   markDeploymentReleaseVolumeAttachFailed,
 } from '../services/deployment-volumes';
 import { teardownDeploymentEnvironmentOnNode } from '../services/node-agent';
+import {
+  APP_DEPLOYMENTS_UNAVAILABLE_MESSAGE,
+  resolvePlatformCapabilities,
+} from '../services/platform-capabilities';
 
 type DeploymentReleaseDb = ReturnType<typeof drizzle>;
 type ReleasePlacement = DeploymentPlacement;
@@ -458,6 +462,17 @@ async function provisionNodeForRelease(params: {
   beforeExternalMutation?: () => Promise<void>;
 }): Promise<string | null> {
   await params.beforeExternalMutation?.();
+  if (!resolvePlatformCapabilities(params.env).appDeployments) {
+    // Record the real reason rather than letting provisioning fail later on a missing DNS zone.
+    await markDeploymentReleasePlacementFailed(
+      params.db,
+      params.env,
+      params.envId,
+      params.releaseId,
+      APP_DEPLOYMENTS_UNAVAILABLE_MESSAGE
+    );
+    return null;
+  }
   try {
     const result = await provisionDeploymentNode(
       params.envId,

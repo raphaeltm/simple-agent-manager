@@ -24,9 +24,9 @@ const SRC = resolve(import.meta.dirname, '../../../src');
  * the same change; the failure message lists exactly which sites moved.
  */
 const EXPECTED_COUNTS: Record<CallCategory | 'total', number> = {
-  total: 138,
-  guarded: 13,
-  outbound: 100,
+  total: 142,
+  guarded: 16,
+  outbound: 101,
   binding: 25,
 };
 
@@ -45,6 +45,13 @@ const MUST_BE_GUARDED = [
   'services/gitlab.ts › gitlabFetch › guardedFetch',
   'services/gitlab-login-provider.ts › fetchGitLabUserInfo › guardedFetch',
   'routes/mcp/check-dns-status.ts › handleCheckDnsStatus › guardedFetch',
+  // Operator-chosen issuer (AGENT_SIGN_IN_TRUST); on self-host the Worker shares a host with
+  // loopback services and the metadata server.
+  'services/agent-sign-in/verify.ts › fetchIssuerKeys › guardedFetch',
+  // Admin-chosen speech endpoint (speech.transcription.* / speech.synthesis.*).
+  'services/speech-endpoints.ts › send › guardedFetch',
+  // Advisory stalled-loop verdict on the admin's LLM endpoint.
+  'services/stalled-task-classifier-endpoint.ts › classifyLoopWithLlmEndpoint › fetchChatTarget',
 ];
 
 const keyOf = (site: Pick<CallSite, 'file' | 'fn' | 'call'>): string =>

@@ -4,9 +4,10 @@ Status: integration branch work (self-host pass 2). Not a supported install path
 
 The SAM API Worker and web UI run on [celld](https://celld.dev) behind Caddy on one machine,
 with no Cloudflare account. Nodes reach the box through frps (the reverse-tunnel transport).
-Instant sessions, Workers AI features, Analytics Engine and Artifacts are off; guided
-credential login is opt-in (see Guided credential login). Email sign-in works
-through an SMTP relay or, on a test install, the bundled mail collector (see Email sign-in below).
+Instant sessions, Workers AI features and Analytics Engine are off; guided credential login is
+opt-in (see Guided credential login). SAM-hosted git repositories are served by the Worker itself
+(see SAM-hosted repositories below). Email sign-in works through an SMTP relay or, on a test
+install, the bundled mail collector (see Email sign-in below).
 
 ## What runs
 
@@ -147,8 +148,44 @@ address); it then signs in by requesting a code. Pass `--env-file` as for the de
 `--dry-run` to print the SQL without running it. While `BOOTSTRAP_OWNER_EMAIL` is set and that
 owner has never signed in, SAM admits only the owner.
 
+**First run after the owner exists.** A box has no `SETUP_TOKEN` (only the Cloudflare installer
+generates one), so `/setup` closes itself once an active superadmin exists and says SAM is set up
+(`closeSetupWithoutToken`, `apps/api/src/routes/setup.ts`). Then, as that administrator:
+
+1. **Admin → Integrations → Create GitHub App.** SAM posts a GitHub App manifest (callback, setup
+   and webhook URLs for this domain, the usual permissions including **Email addresses: read**),
+   you confirm on GitHub, and GitHub returns you to the page; SAM stores the App id, slug, client
+   id and secret, private key and webhook secret itself (`services/github-app-manifest.ts`).
+   Leave the organization empty for a personal account. Creating a new App replaces an existing
+   one, so people who signed in with the old one sign in with GitHub again.
+2. **Settings → GitHub → Your account → Connect GitHub.** An account that signs in by email code
+   links its GitHub account here (any GitHub email), then installs the App. SAM needs each user's
+   own GitHub authorization to start work on a GitHub project.
+
+An account that GitHub sign-in created with an unconfirmed email (GitHub's emails API refused,
+usually an App without Email addresses: read) is mailed "sign in with GitHub" instead of a code,
+because redeeming a code would disconnect it from GitHub.
+
 Code: `scripts/selfhost/mail-settings.ts` (SMTP settings, collector), `caddy/mail-collector/` and
 `caddy/start.sh` (collector route), `scripts/selfhost/create-account.ts` (account command).
+
+## Agent sign-in (test boxes)
+
+A test box can let trusted SAM agents sign in as chosen accounts with a workload identity token
+instead of an email code (public guide: `apps/www/src/content/docs/docs/guides/agent-sign-in.md`).
+Put the trust on one line in `.state/secrets.env` and deploy:
+
+```bash
+AGENT_SIGN_IN_TRUST='{"issuer":"https://api.example.com/oidc","allowedSources":[{"projectId":"…","userId":"…"}],"allowedTargets":["<account id>"]}'
+```
+
+The deploy passes every `secrets.env` line to the Worker and rebuilds the whole Worker
+configuration each time, so removing the line and deploying again switches it off. It applies the
+`0234_agent_sign_ins` migration with the others. The key fetch to the issuer goes through the
+guarded outbound fetch (public HTTPS only, no redirects), and the egress fence already allows the
+public internet, so a public issuer needs no fence entry. Agents request the audience
+`https://api.SAM_DOMAIN/api/auth/workload-identity-login`. The box needs an administrator account
+first. Choose targets that are not administrators and not linked to real GitHub organizations.
 
 ## Machines for workspaces
 
@@ -156,6 +193,21 @@ Nodes come from a compute pool. A box with a platform cloud credential (for exam
 service account in Admin → Integrations) gives every account the installation pool; nobody needs
 a cloud account of their own. Connecting the credential adds no machines: open
 **Admin → Infrastructure** and add machine types and regions to the installation pool.
+
+To create that credential's Google Cloud side in one step, run as a project owner with `gcloud`
+logged in:
+
+```bash
+pnpm selfhost:gcp-bootstrap -- --project <gcp-project-id> --api-url https://api.<SAM_DOMAIN> --dry-run
+pnpm selfhost:gcp-bootstrap -- --project <gcp-project-id> --api-url https://api.<SAM_DOMAIN>
+```
+
+It creates or reuses a workload identity pool for this install alone, an OIDC provider that admits
+only tokens whose issuer is this install's API origin, and a `sam-nodes` service account with
+`roles/compute.instanceAdmin.v1` and `roles/compute.securityAdmin` that the pool may impersonate.
+It prints the five values for **Admin → Integrations → Google Cloud**. Re-running it changes
+nothing; it refuses to retarget a provider that trusts another install
+(`deploy/selfhost/gcp-bootstrap.sh`).
 
 Include at least one machine with 8 GB of memory. A default task asks for 2 vCPU, 4 GB of memory
 and 15 GB of disk (`PLATFORM_RESOURCE_DEFAULTS` in
@@ -165,6 +217,30 @@ Google Cloud `e2-medium` cannot hold one. With only `e2-medium` in the pool, eve
 chat fails with "No eligible compute-pool offering is available in the installation default pool
 for this task's requirements (2 vCPU, 4096 MB memory, 15 GB disk)". On Google Cloud add
 `e2-standard-2` (2 vCPU, 8 GB); keep `e2-medium` for smaller work if you like.
+
+## Backup, restore and upgrade
+
+```bash
+pnpm selfhost:backup                         # -> deploy/selfhost/backups/<UTC time>/ (mode 0700)
+pnpm selfhost:restore --from <backup dir>    # into an EMPTY bucket and .state/ only
+```
+
+A backup is the fleet bucket (celld's only durable state), `.state/` and `.env`: a live copy,
+then celld stopped for the delta copy only, then restarted; the downtime is printed and kept in
+`backup-manifest.json`. gs:// buckets copy with `gcloud storage rsync`; s3:// buckets (the
+bundled store too) with `mc mirror` from the pinned objectstore image. A backup holds every
+Worker secret in plaintext: keep it where only you can read it. Restore refuses a bucket that
+holds objects or a `.state/` with platform keys, and leaves celld stopped: start it with the same
+SAM checkout the backup recorded (`samCommit` in the manifest), never an older one. There is no
+point-in-time recovery: a backup is the recovery point. Code: `scripts/selfhost/backup-lib.ts`.
+
+`pnpm selfhost:upgrade --to <tag|branch|commit>` backs up (skip with `--skip-backup`), checks the
+ref out, runs `pnpm selfhost:deploy --init`, restarts the stack only when a compose input changed
+(a non-README file in this directory or a generated `.state/` file), runs `pnpm selfhost:deploy`
+(D1 and Durable Object migrations, Worker), checks `/health` and prints the rollback: redeploy
+the previous ref when no D1 migration ran, otherwise restore the pre-upgrade backup into an
+empty bucket. Code: `scripts/selfhost/upgrade-lib.ts`. Use `--box-env` (not `--env-file`, which
+Node takes) to point these commands at another `.env`.
 
 ## Logs
 
@@ -301,19 +377,125 @@ Code: `scripts/selfhost/guided-login.ts`, `scripts/selfhost/docker-proxy-policy.
 `docker-compose.guided-login.yml`, `docker-proxy/`, the `containers` rule in `celld-config.ts`,
 `hasSandboxContainerRuntime` in `apps/api/src/services/platform-capabilities.ts`.
 
+## Inbound agent email
+
+Agent email gives each email trigger its own address, `agent+<key>@agents.SAM_DOMAIN`. Mail from
+an allowed sender starts (or continues) work, and the agent answers with `reply_to_email`. On
+Cloudflare that runs on Email Routing; on a box the `mail-in` profile runs **sam-mx**
+(`deploy/selfhost/sam-mx`, Go, `emersion/go-smtp` + `go-msgauth` + `blitiri.com.ar/go/spf`, all
+MIT), an SMTP receiver on port 25:
+
+- It accepts `RCPT TO` only for agent addresses on `agents.SAM_DOMAIN` (it can never relay), one
+  recipient per message, up to `SAM_MX_MAX_MESSAGE_BYTES` (5 MiB by default).
+- It requires the From domain to be authenticated: SPF for the envelope sender or a DKIM
+  signature, **aligned** with the From domain (DMARC pass). This is stricter than Cloudflare,
+  which enforces only the policy a domain publishes, because the trigger's allowed-sender list
+  compares From addresses.
+- It hands each message, during the SMTP session, to the Worker on loopback
+  (`POST /api/self-host/gateway/inbound-email`, authenticated with the gateway secret from
+  `.state/gateway.env`; Caddy answers 404 for that path from the internet). The Worker runs the
+  same handler as on Cloudflare and requires the From it parses to have the domain sam-mx
+  authenticated. Its verdict becomes the SMTP reply: 250, 550 (unknown address, sender not
+  allowed, too large, failed authentication) or 451 (SAM unreachable; the sender retries).
+  Nothing is ever bounced, so a forged sender gets no backscatter.
+- Limits: `SAM_MX_MAX_CONNECTIONS` (20), `SAM_MX_MAX_CONNECTIONS_PER_IP` (3, an IPv6 client counts
+  as its /64), `SAM_MX_CONNECTIONS_PER_IP_PER_MINUTE` (30), `SAM_MX_MESSAGES_PER_CONNECTION` (10),
+  `SAM_MX_MAX_SESSION` (15m), a 512 MB container memory limit, plus the Worker's own per-trigger
+  hourly limit. Header blocks two parsers could read differently (`From :`, a repeated `From`,
+  `Subject` or `Message-ID`, bare LF) are refused, a DKIM signature counts only if it signs
+  `Subject` and `Message-ID`, and the Worker requires the From it parses to be exactly the address
+  sam-mx authenticated.
+- It runs as its own uid (`SAM_MX_UID`, 7102) with every capability dropped except binding port 25. It never sends mail: replies go through the Worker's SMTP relay (`SMTP_*`, or the mail
+  collector on a test install), From `SMTP_FROM` with `Reply-To` set to the trigger's agent
+  address and `In-Reply-To` and `References` set, so the sender's answer returns to the same
+  trigger.
+
+```bash
+# .env: add the profile (off by default) next to an SMTP relay or the mail collector
+COMPOSE_PROFILES=tunnel,mail-in
+pnpm selfhost:deploy                      # sets AGENT_EMAIL_INBOUND_SMTP=true for the Worker
+docker compose -f deploy/selfhost/docker-compose.yml up -d --build sam-mx
+```
+
+The deploy refuses `mail-in` without an SMTP transport for replies. For real mail the box also
+needs:
+
+- **DNS**: `agents.SAM_DOMAIN. MX 10 mx.SAM_DOMAIN.` The wildcard `*.SAM_DOMAIN` A record already
+  points `mx.` at the box. No PTR record is needed to receive.
+- **Firewall**: inbound tcp/25 to the box (GCP: a VPC ingress rule, for example
+  `gcloud compute firewall-rules create sam-smtp-in --allow tcp:25 --target-tags <box tag>`).
+  Outbound 25 is never used; GCP and Hetzner block it anyway.
+- **Optional STARTTLS**: mount a certificate and key and set `SAM_MX_TLS_CERT` and
+  `SAM_MX_TLS_KEY`. Without them senders deliver in plaintext.
+
+Then create an email trigger in the app (Automation); its address and allowed senders show there.
+
+**Smoke test without DNS** (from the box itself): add `SAM_MX_TRUSTED_NETWORKS=127.0.0.1/32` to
+`.env` and `docker compose up -d sam-mx`. Mail from that network skips SPF/DKIM/DMARC (only
+loopback networks are accepted there), so you can inject as an allowed sender:
+
+```bash
+swaks --server 127.0.0.1:25 --to 'agent+<key>@agents.SAM_DOMAIN' \
+  --from you@example.com --header 'Subject: smoke test' --body 'Say hello by email.'
+# 250 = SAM stored it and started the trigger; watch the task appear in the project.
+# A sender outside the trigger's allowed list gets "550 5.7.1 Sender not allowed".
+```
+
+With the `mail-collector` profile on, the agent's `reply_to_email` lands in the collector at
+`https://mail.SAM_DOMAIN`. Remove `SAM_MX_TRUSTED_NETWORKS` afterwards.
+
+The celld egress fence needs no change: it matches celld's uid only, sam-mx calls celld (not the
+other way round), and the fence still refuses the Worker any connection to port 25.
+
+Code: `deploy/selfhost/sam-mx/` (receiver and its tests),
+`apps/api/src/routes/self-host-gateway-inbound-email.ts` (gateway route),
+`apps/api/src/services/agent-email/self-host-inbound.ts` (on-switch, SMTP reply sender),
+`scripts/selfhost/inbound-mail-settings.ts` (deploy wiring).
+
+## SAM-hosted repositories
+
+Cloudflare Artifacts does not exist off Cloudflare, so the box serves SAM-native repositories from
+its own git server: one `HostedGitRepo` Durable Object per repository, running the vendored dgit
+core (`apps/api/src/vendor/dgit/`). The deploy turns it on (`ARTIFACTS_ENABLED=true`,
+`HOSTED_GIT_BACKEND=durable-object` in `scripts/selfhost/celld-config.ts`); repositories live in the
+fleet bucket like every other Durable Object, so the bucket backup covers them.
+
+- Remote: `https://api.SAM_DOMAIN/git/<repo>.git`, served by the existing catch-all route (no Caddy
+  fragment). Every request needs a SAM repository token as the HTTP Basic password (any username).
+- Workspaces get a token bound to their workspace from `POST /api/workspaces/:id/git-token`; it stops
+  working when the workspace stops. Only nodes created after this deploy attach it (VM agent change).
+- People get a token from `POST /api/projects/:id/hosted-git/token` (`?scope=write` to push; project
+  members only), then `git clone https://x:<token>@api.SAM_DOMAIN/git/<repo>.git`.
+- Caps (code defaults in `apps/api/src/services/hosted-git/limits.ts`, chosen so each request fits
+  celld's 300 s handler budget): 64 MiB per push, 30,000 objects and 256 MiB of storage per
+  repository. A refused push says why in git's output (`remote: SAM: push refused: ...`). Importing a
+  large existing history is not supported.
+- No pull requests: agents push branches; review in SAM's repository browser and compare view.
+- Smoke test: `scripts/selfhost/hosted-git-smoke.sh` (needs `SAM_DOMAIN` and an API token).
+
 ## Known gaps in this pass
 
 - Off on purpose: Instant sessions (Cloudflare Containers; never on a box), guided credential login
-  unless turned on (see Guided credential login), Artifacts
-  (SAM-native repos), Analytics Engine, AI Gateway, Workers AI features (TTS, task titles,
-  stalled-task classifier), agent email (inbound mail and replies; sign-in codes work over SMTP).
-  Project creation needs a GitHub App or GitLab.
-- Without Cloudflare, voice transcription, server read-aloud and the Workers AI model catalog
-  answer `404 FEATURE_UNAVAILABLE`, and the web UI hides the mic and server read-aloud. The SAM
-  agent, project agents, task titles and the diagnosis runner need an OpenAI-compatible endpoint:
-  set it in Admin settings (`llm.openAICompatible.baseUrl`, `apiKey`, `model`, plus optional
-  per-purpose models). The key is stored encrypted. Without an endpoint those features report that
-  no model is available, and task titles fall back to the truncated prompt.
+  unless turned on (see Guided credential login), Analytics Engine, AI Gateway, the Workers AI model catalog and the
+  stalled-task classifier (Clef; an admin may opt the advisory verdict on paused check-in loops
+  into the LLM endpoint with `operations.stalledTaskClassifierEndpointAdvisory`). Agent email
+  needs the `mail-in` profile (see Inbound agent email); the admin agent-email setup and loopback
+  test remain Cloudflare-only. Projects can use a SAM-hosted repository (no GitHub
+  or GitLab needed, see SAM-hosted repositories), a GitHub App or GitLab.
+- The SAM agent, project agents, task titles and the diagnosis runner use an OpenAI-compatible
+  endpoint: set it in Admin settings (`llm.openAICompatible.baseUrl`, `apiKey`, `model`, plus
+  optional per-purpose models). The key is stored encrypted. Without an endpoint those features
+  report that no model is available, and task titles fall back to the truncated prompt.
+- The SAM AI proxy (`sam` provider mode for Claude Code / Codex, and server-side custom-endpoint
+  keys) is off until an admin turns on `aiProxy.directUpstreamEnabled` and adds a Claude Code
+  (and/or Codex) platform credential in Admin. Calls then go straight to api.anthropic.com /
+  api.openai.com; rate limits, daily token budgets, the model allowlist and the tier gate apply as
+  on Cloudflare, and SAM prices each call from its model price table so a user's monthly cost cap
+  is enforced. Set a spend limit on the provider account too: SAM's figure is a list-price
+  estimate.
+- Voice transcription and server read-aloud answer `404 FEATURE_UNAVAILABLE` and the web UI hides
+  the mic and server read-aloud, unless an admin sets `speech.transcription.*` /
+  `speech.synthesis.*` to an OpenAI-compatible speech endpoint.
 - `www.SAM_DOMAIN` answers 503 and the apex is not served; only the subdomains above are used.
 - `VM_AGENT_TRANSPORT=reverse-tunnel` is set for the box: nodes run a pinned frpc that dials
   `wss://api.SAM_DOMAIN/~!frp` and is exposed on a leased loopback port (20000-29999 by default);

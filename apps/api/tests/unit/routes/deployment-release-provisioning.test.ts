@@ -69,6 +69,20 @@ vi.mock('../../../src/services/deployment-provisioning', () => ({
   restoreDeploymentEnvironmentRelocation: (...args: unknown[]) =>
     mockRestoreDeploymentEnvironmentRelocation(...args),
 }));
+const placementFailed = vi.hoisted(() => ({ reasons: [] as string[] }));
+vi.mock('../../../src/services/deployment-release-failure', async (load) => {
+  const actual = await load<typeof import('../../../src/services/deployment-release-failure')>();
+  return {
+    ...actual,
+    markDeploymentReleasePlacementFailed: (
+      ...args: Parameters<typeof actual.markDeploymentReleasePlacementFailed>
+    ) => {
+      placementFailed.reasons.push(String(args[4]));
+      return actual.markDeploymentReleasePlacementFailed(...args);
+    },
+  };
+});
+
 vi.mock('../../../src/services/project-lifecycle-events', () => ({
   recordDeploymentReleaseLifecycleEventBestEffort,
 }));
@@ -286,6 +300,9 @@ const mockEnv = {
   KV: { get: vi.fn(), put: vi.fn(), delete: vi.fn() } as any,
   BASE_DOMAIN: 'example.com',
   ENCRYPTION_KEY: 'test-key',
+  // A Cloudflare installation: app deployments need Cloudflare DNS (platform-capabilities.ts).
+  CF_API_TOKEN: 'cf-token',
+  CF_ZONE_ID: 'zone-1',
 } as unknown as Env;
 
 function validManifest() {
@@ -705,6 +722,28 @@ describe('POST /:projectId/environments/:envId/releases — provisioning trigger
     const body = await res.json();
     expect(body.nodeId).toBeNull();
     expect(mockProvisionDeploymentNode).not.toHaveBeenCalled();
+  });
+
+  it('without Cloudflare DNS (self-hosted box), records the real reason and provisions nothing', async () => {
+    placementFailed.reasons.length = 0;
+    const app = await createTestApp();
+    const selfHosted = { ...mockEnv, CF_API_TOKEN: undefined, CF_ZONE_ID: undefined };
+    const res = await app.request(
+      '/api/projects/proj-1/environments/env-1/releases',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(validManifest()),
+      },
+      selfHosted as unknown as Env
+    );
+
+    expect(res.status).toBe(201);
+    expect((await res.json()).nodeId).toBeNull();
+    expect(mockProvisionDeploymentNode).not.toHaveBeenCalled();
+    expect(placementFailed.reasons).toEqual([
+      expect.stringContaining('App deployments are not available on this installation'),
+    ]);
   });
 
   it('provisionDeploymentNode returning null still returns 201 with nodeId:null', async () => {

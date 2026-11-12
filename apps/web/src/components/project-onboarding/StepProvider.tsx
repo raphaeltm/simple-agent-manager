@@ -41,7 +41,7 @@ const OPTIONS: ProviderOption[] = [
     title: 'Let SAM host the repository',
     tagline: 'Start fresh — no GitHub account needed.',
     bullets: [
-      'SAM creates and hosts a Git repo for you on Cloudflare Artifacts.',
+      'SAM creates and hosts a Git repo for you.',
       'Agents push directly to branches on the SAM-hosted remote (no pull requests).',
       'Best for greenfield projects or trying SAM without connecting GitHub.',
     ],
@@ -152,10 +152,10 @@ export function StepProvider({
           your current GitLab authorization.
         </p>
         <p>
-          <strong className="text-fg-secondary">SAM-hosted (Cloudflare Artifacts)</strong> is the
-          fastest way to start from nothing: SAM provisions a private Git repo, seeds it with a
-          README, and agents push straight to it. There’s no GitHub App to install and no pull
-          requests — you review changes as branches on the SAM-hosted remote.
+          <strong className="text-fg-secondary">SAM-hosted</strong> is the fastest way to start from
+          nothing: SAM provisions a private Git repo, seeds it with a README, and agents push
+          straight to it. There’s no GitHub App to install and no pull requests — you review changes
+          as branches on the SAM-hosted remote.
         </p>
         <p>
           The repository backing a project is fixed once it’s created, so pick the one that fits

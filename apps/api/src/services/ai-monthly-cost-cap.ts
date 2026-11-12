@@ -6,7 +6,10 @@ import { AI_MONTHLY_COST_CACHE_KV_PREFIX } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
 import { getUserBudgetSettings } from './ai-budget-settings';
-import { isMonthlyCostCapAvailable } from './platform-capabilities';
+// Cycle with ai-token-budget.ts (it re-exports this module); both sides use the other's functions
+// only inside function bodies, so evaluation order does not matter.
+import { getProviderUsage } from './ai-token-budget';
+import { hasLocalAiCostMetering, isMonthlyCostCapAvailable } from './platform-capabilities';
 
 // =============================================================================
 // Monthly Cost Cap Enforcement (KV-cached, written by cron)
@@ -39,21 +42,42 @@ export interface MonthlyCostCapCheck {
   enforced: boolean;
 }
 
+/** First instant of the current UTC month. */
+function currentUtcMonthStart(now = new Date()): Date {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+}
+
+/**
+ * This UTC month's AI spend that SAM priced itself (`hasLocalAiCostMetering`): the sum of the
+ * per-day `estimated_cost_usd` rows in the user's `AiTokenBudgetCounter` (KV fallback without the
+ * Durable Object). Only meaningful on an installation without AI Gateway.
+ */
+export async function getLocalMonthlyAiCostUsd(
+  kv: KVNamespace,
+  userId: string,
+  env: Env
+): Promise<number> {
+  const entries = await getProviderUsage(kv, userId, currentUtcMonthStart(), env);
+  return entries.reduce((sum, entry) => sum + (entry.estimatedCostUsd || 0), 0);
+}
+
 /**
  * Check whether a user is within their monthly cost cap.
  *
- * Reads from KV cache (written by hourly cron). If no cache exists,
- * the check passes (fail-open) — the cron will populate it next run.
+ * With AI Gateway: reads the KV cache written by the hourly gateway-log cron. With no cache yet
+ * the check passes (fail-open); the cron fills it within the hour, and the daily token budget
+ * still applies.
  *
- * Without an addressable AI Gateway no cost is ever cached, so the cap is unavailable rather
- * than failing open forever in silence: new caps are refused (`validateBudgetUpdate`), the budget
- * API and settings UI say so, and a cap stored while a gateway existed is reported
- * `enforced: false` without a KV read. Daily token budgets still apply.
+ * Without AI Gateway: reads SAM's own priced total for the month (`getLocalMonthlyAiCostUsd`),
+ * which every platform-billed proxy call and SAM agent call adds to after its response. A failed
+ * read refuses the call (fail closed): there is no cron to correct it later.
+ *
+ * A gateway without the account API cannot be priced: `enforced: false`, no KV read.
  */
 export async function checkMonthlyCostCap(
   kv: KVNamespace,
   userId: string,
-  env: Pick<Env, 'AI_GATEWAY_ID' | 'CF_ACCOUNT_ID' | 'CF_API_TOKEN'>
+  env: Env
 ): Promise<MonthlyCostCapCheck> {
   const userSettings = await getUserBudgetSettings(kv, userId);
   const capUsd = userSettings?.monthlyCostCapUsd ?? null;
@@ -65,6 +89,16 @@ export async function checkMonthlyCostCap(
 
   if (!isMonthlyCostCapAvailable(env)) {
     return { allowed: true, costUsd: 0, capUsd, enforced: false };
+  }
+
+  if (hasLocalAiCostMetering(env)) {
+    let costUsd: number;
+    try {
+      costUsd = await getLocalMonthlyAiCostUsd(kv, userId, env);
+    } catch {
+      return { allowed: false, costUsd: 0, capUsd, enforced: true };
+    }
+    return { allowed: costUsd < capUsd, costUsd, capUsd, enforced: true };
   }
 
   const costUsd = await getCachedMonthlyCost(kv, userId);

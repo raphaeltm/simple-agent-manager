@@ -14,6 +14,7 @@ export { CredentialSetupSession } from './durable-objects/credential-setup-sessi
 export { DiagnosisRunner } from './durable-objects/diagnosis-runner';
 export { GitHubUserAccessTokenLock } from './durable-objects/github-user-access-token-lock';
 export { GitLabUserAccessTokenLock } from './durable-objects/gitlab-user-access-token-lock';
+export { HostedGitRepo } from './durable-objects/hosted-git-repo';
 export { InteractionStore } from './durable-objects/interaction-store';
 export { NodeLifecycle } from './durable-objects/node-lifecycle';
 export { NotificationService } from './durable-objects/notification';
@@ -67,6 +68,7 @@ import { agentCredentialSetupSessionsRoutes } from './routes/agent-credential-se
 import { agentModelCatalogRoutes, projectAgentModelRoutes } from './routes/agent-models';
 import { agentProfileRoutes } from './routes/agent-profiles';
 import { agentSettingsRoutes } from './routes/agent-settings';
+import { agentSignInRoutes } from './routes/agent-sign-in';
 import { agentsCatalogRoutes } from './routes/agents-catalog';
 import { aiProxyRoutes } from './routes/ai-proxy';
 import { aiProxyAnthropicRoutes } from './routes/ai-proxy-anthropic';
@@ -171,7 +173,11 @@ import { workspacesRoutes } from './routes/workspaces';
 import { scheduled } from './scheduled/handler';
 import { handleInboundAgentEmail } from './services/agent-email/inbound';
 import { agentEmailConfig } from './services/agent-email/setup-state';
-import { isArtifactsAvailable, publicPlatformCapabilities } from './services/platform-capabilities';
+import { isAgentSignInEnabled } from './services/agent-sign-in/config';
+import { isLocalHostedGitActive } from './services/hosted-git/backend';
+import { handleHostedGitRequest, HOSTED_GIT_PATH_PREFIX } from './services/hosted-git/http';
+import { isArtifactsAvailable } from './services/platform-capabilities';
+import { resolvePublicPlatformCapabilities } from './services/speech-endpoints';
 import { isInstantRuntimeAvailable } from './services/vm-agent-container';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -245,6 +251,15 @@ app.use('*', analyticsMiddleware());
 
 app.use('*', apiCors);
 
+// Git smart HTTP for SAM-hosted repositories (self-host). Authenticated per request with a
+// repository token, not a session cookie, so it sits before every session-auth router. Inactive
+// (falls through to 404) unless this install uses the local hosted git backend.
+app.all(`${HOSTED_GIT_PATH_PREFIX}*`, async (c, next) => {
+  if (!isLocalHostedGitActive(c.env)) return next();
+  const response = await handleHostedGitRequest(c.req.raw, c.env);
+  return response ?? next();
+});
+
 // Health check — public endpoint returns minimal info only
 app.get('/health', (c) => {
   // Check critical bindings to determine status, but don't expose details
@@ -273,9 +288,9 @@ app.get('/api/config/artifacts-enabled', (c) => {
 
 // Public config — which platform services this installation has, so the UI can hide entry
 // points that cannot work here (services/platform-capabilities.ts). Booleans only.
-app.get('/api/config/platform-capabilities', (c) => {
+app.get('/api/config/platform-capabilities', async (c) => {
   applyCacheHeaders(c, 'public-config');
-  return c.json(publicPlatformCapabilities(c.env));
+  return c.json(await resolvePublicPlatformCapabilities(c.env));
 });
 
 // Public config — whether agents can run on Instant (Cloudflare Containers) with no cloud account.
@@ -317,6 +332,9 @@ app.get('/api/config/login-providers', async (c) => {
     google: google !== null,
     gitlab: gitlab !== null,
     email: emailSignInAvailable(c.env),
+    // Shown on the sign-in page so anyone using the instance can tell it accepts agent
+    // sign-in. A boolean only: the trusted issuer and allowlists are not published.
+    agentSignIn: isAgentSignInEnabled(c.env),
   });
 });
 
@@ -359,6 +377,9 @@ app.get('/oidc/.well-known/jwks.json', async (c) => {
 // Both must be mounted before authRoutes to avoid BetterAuth's wildcard catch-all.
 app.route('/api/auth', codexRefreshRoutes);
 app.route('/api/auth', apiTokenRoutes);
+// Agent sign-in through workload identity. Steps aside (falls through) when AGENT_SIGN_IN_TRUST
+// is not configured, so the path then answers exactly as an unknown /api/auth route.
+app.route('/api/auth', agentSignInRoutes);
 app.route('/api/auth', deviceFlowRoutes);
 app.route('/api/auth', authRoutes);
 app.route('/api/setup', setupRoutes);

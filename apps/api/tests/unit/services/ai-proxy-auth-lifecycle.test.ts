@@ -36,6 +36,9 @@ beforeEach(() => {
     JWT_PRIVATE_KEY: keys.privateKey,
     JWT_PUBLIC_KEY: keys.publicKey,
     BASE_DOMAIN: 'example.test',
+    // Cloudflare: an addressable AI Gateway keeps the proxy on with no admin setting read.
+    AI_GATEWAY_ID: 'sam',
+    CF_ACCOUNT_ID: 'account-1',
   } as unknown as Env;
 });
 

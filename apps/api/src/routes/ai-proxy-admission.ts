@@ -25,6 +25,10 @@ import {
 } from '../middleware/rate-limit';
 import { checkModelTierAllowance, describeModelTierDenial } from '../services/ai-model-tier-gate';
 import {
+  aiProxyDisabledMessage,
+  resolveAiProxyAvailability,
+} from '../services/ai-proxy-availability';
+import {
   AIProxyAuthError,
   extractCallbackToken,
   verifyAIProxyAuth,
@@ -71,8 +75,9 @@ export function aiProxyBodyParseError(c: AIProxyContext, error: unknown): Respon
 export async function prepareAIProxyRequest(
   c: AIProxyContext
 ): Promise<Response | AIProxyRequestContext> {
-  if (c.env.AI_PROXY_ENABLED === 'false') {
-    return proxyJsonError(c, 'AI proxy is disabled', 'service_unavailable', 503);
+  const availability = await resolveAiProxyAvailability(c.env);
+  if (!availability.enabled) {
+    return proxyJsonError(c, aiProxyDisabledMessage(availability), 'service_unavailable', 503);
   }
 
   const token = extractCallbackToken(c.req.header('Authorization'), undefined);

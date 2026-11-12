@@ -53,6 +53,7 @@ function selfHostedEnv(): Env {
   return {
     AI_GATEWAY_ID: 'sam',
     CONTAINER_RUNTIME_AVAILABLE: 'false',
+    LOG_TAIL_AVAILABLE: 'false',
     // Plain Durable Object bindings still exist on celld; the container runtime behind them does not.
     SANDBOX: stubBinding(),
     CREDENTIAL_SETUP_SESSION: stubBinding(),
@@ -75,14 +76,30 @@ describe('GET /api/config/platform-capabilities', () => {
 
     expect(res.status).toBe(200);
     // Booleans the UI reads, and nothing else (no configuration fingerprint beyond them).
-    expect(body).toEqual({ speechToText: true, textToSpeech: true, monthlyCostCap: true });
+    expect(body).toEqual({
+      speechToText: true,
+      textToSpeech: true,
+      monthlyCostCap: true,
+      logSearch: true,
+      liveLogStream: true,
+      appDeployments: true,
+    });
   });
 
   it('reports the Cloudflare-only capabilities absent on a runtime without them', async () => {
     const { res, body } = await getCapabilities(selfHostedEnv());
 
     expect(res.status).toBe(200);
-    expect(body).toEqual({ speechToText: false, textToSpeech: false, monthlyCostCap: false });
+    // The cap is SAM-metered without a gateway (overnight B3 A2); log search and the live
+    // stream are off on the box (overnight B6).
+    expect(body).toEqual({
+      speechToText: false,
+      textToSpeech: false,
+      monthlyCostCap: true,
+      logSearch: false,
+      liveLogStream: false,
+      appDeployments: false,
+    });
   });
 
   it('turns text-to-speech off with TTS_ENABLED=false while speech-to-text stays on', async () => {

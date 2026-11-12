@@ -1036,10 +1036,11 @@ test('sam-hero-live-session', async ({ page }) => {
   ).toBeVisible();
   await expect(page.getByText("I'll add idempotency protection in four steps", { exact: false })).toBeVisible();
   await expect(page.getByText('Bash: pytest tests/webhooks/test_refund_idempotency.py -q')).toBeVisible();
-  await expect(page.getByText('Read payments/webhooks/refund_handler.py')).toBeVisible();
+  // Finished and running tool calls collapse into one group row.
+  await expect(page.getByRole('button', { name: /^3 tool calls · running Bash/ })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Plan' })).toBeVisible();
-  // Two open review comments drive the header's "2" discovery chip.
-  await expect(page.getByRole('button', { name: /2 unresolved comments?/ })).toBeVisible();
+  // The open review comment shows as a count on the agent's message.
+  await expect(page.getByRole('button', { name: /1 comment on this message, 1 unresolved/ })).toBeVisible();
 
   // Verify the session header's expandable infra/task-status panel renders
   // correctly, then collapse it again. Left open, its absolutely-positioned
@@ -1056,8 +1057,8 @@ test('sam-hero-live-session', async ({ page }) => {
   // The composer stays empty with its normal placeholder — the conversation
   // itself (plan + tool cards) is the subject of this shot, not the mention
   // palette, which would hide the bottom third of the chat.
-  await expect(page.getByPlaceholder(/Agent is working|Send a message/)).toBeVisible();
-  await expect(page.getByPlaceholder(/Agent is working|Send a message/)).toHaveValue('');
+  await expect(page.getByPlaceholder(/Steer the agent|Agent is working|Send a message/)).toBeVisible();
+  await expect(page.getByPlaceholder(/Steer the agent|Agent is working|Send a message/)).toHaveValue('');
 
   // The CompletionDock's floating "bump" (the red Interrupt button) is
   // deliberately positioned to poke up over the bottom of the scrollable

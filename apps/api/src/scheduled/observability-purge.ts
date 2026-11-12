@@ -8,6 +8,8 @@
  * See: specs/023-admin-observability/tasks.md (T023-T024)
  */
 import type { Env } from '../env';
+import { log } from '../lib/logger';
+import { purgeAnalyticsEvents } from '../services/analytics-d1-sink';
 import { purgeExpiredErrors, type PurgeResult } from '../services/observability';
 
 export async function runObservabilityPurge(env: Env): Promise<PurgeResult> {
@@ -15,5 +17,15 @@ export async function runObservabilityPurge(env: Env): Promise<PurgeResult> {
     return { deletedByAge: 0, deletedByCount: 0 };
   }
 
-  return purgeExpiredErrors(env.OBSERVABILITY_DATABASE, env);
+  const result = await purgeExpiredErrors(env.OBSERVABILITY_DATABASE, env);
+  // Self-host D1 analytics sink: age and row-cap bound. No D1 call unless ANALYTICS_SINK="d1".
+  // Isolated so an analytics purge failure cannot hide the error purge result.
+  try {
+    await purgeAnalyticsEvents(env);
+  } catch (err) {
+    log.error('analytics.d1_purge_failed', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+  return result;
 }

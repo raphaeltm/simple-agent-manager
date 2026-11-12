@@ -13,7 +13,11 @@
  * capability to true, so its behaviour does not change.
  */
 import type { Env } from '../env';
+import { errors } from '../middleware/error';
 import { emailTransportKind } from './agent-email/provider';
+import { hasInboundAgentEmail } from './agent-email/self-host-inbound';
+import { isAnalyticsD1SinkEnabled } from './analytics-d1-sink';
+import { resolveArtifactsBackend } from './hosted-git/backend';
 import { resolveR2PresignConfig } from './r2-presign-config';
 
 /** One platform service. The name is also the `feature` field of a FEATURE_UNAVAILABLE error. */
@@ -28,11 +32,14 @@ export type PlatformCapability =
   | 'containerRuntime'
   | 'guidedCredentialSetup'
   | 'emailSending'
+  | 'inboundAgentEmail'
   | 'cloudflareDns'
+  | 'appDeployments'
   | 'workersObservability'
   | 'r2Presign'
   | 'speechToText'
-  | 'textToSpeech';
+  | 'textToSpeech'
+  | 'liveLogStream';
 
 export type PlatformCapabilities = Readonly<Record<PlatformCapability, boolean>>;
 
@@ -44,10 +51,15 @@ type CapabilityEnv = Pick<
   | 'CF_API_TOKEN'
   | 'CF_ZONE_ID'
   | 'ANALYTICS'
+  | 'ANALYTICS_SINK'
+  | 'OBSERVABILITY_DATABASE'
   | 'ARTIFACTS'
   | 'ARTIFACTS_ENABLED'
+  | 'HOSTED_GIT'
+  | 'HOSTED_GIT_BACKEND'
   | 'CONTAINER_RUNTIME_AVAILABLE'
   | 'SANDBOX_CONTAINER_RUNTIME_AVAILABLE'
+  | 'LOG_TAIL_AVAILABLE'
   | 'SANDBOX'
   | 'CREDENTIAL_SETUP_SESSION'
   | 'SETUP_SESSION_POOL'
@@ -59,6 +71,8 @@ type CapabilityEnv = Pick<
   | 'SMTP_USERNAME'
   | 'SMTP_PASSWORD'
   | 'SMTP_FROM'
+  | 'AGENT_EMAIL_INBOUND_SMTP'
+  | 'REVERSE_TUNNEL_GATEWAY_SECRET'
   | 'TTS_ENABLED'
   | 'R2_ACCESS_KEY_ID'
   | 'R2_SECRET_ACCESS_KEY'
@@ -102,21 +116,35 @@ export function resolveAiGatewayId(
 }
 
 /**
- * Whether a monthly AI dollar cap can be enforced here. The month's spend comes only from AI
- * Gateway logs, read by `runMonthlyCostAggregation` through the account API (gateway id, account
- * id and API token all required); SAM's own records carry no price for an operator's model on
- * their own endpoint. Without that, the cap is reported as unavailable everywhere (budget API,
- * settings UI, admin AI proxy page) rather than accepted and silently never enforced. Daily token
- * budgets apply either way.
+ * Whether SAM prices AI calls itself (catalog list price x reported usage) and stores the result
+ * in the per-user `AiTokenBudgetCounter`. True exactly when there is no addressable AI Gateway:
+ * there the gateway's logs are the spend record (`runMonthlyCostAggregation`), and a second,
+ * co-equal record would disagree with it (rule 74). Without one SAM's own record is the only one.
+ */
+export function hasLocalAiCostMetering(env: Pick<Env, 'AI_GATEWAY_ID' | 'CF_ACCOUNT_ID'>): boolean {
+  return resolveAiGatewayId(env) === null;
+}
+
+/**
+ * Whether a monthly AI dollar cap can be enforced here.
+ *
+ * - With an AI Gateway the month's spend comes from gateway logs, read by
+ *   `runMonthlyCostAggregation` through the account API (gateway id, account id and API token all
+ *   required). A gateway without the account API cannot be priced, so the cap is reported
+ *   unavailable there rather than accepted and silently never enforced.
+ * - Without a gateway SAM meters platform-billed proxy calls and SAM agent calls itself
+ *   (`hasLocalAiCostMetering`) and the cap reads that total (`getLocalMonthlyAiCostUsd`). Calls to
+ *   a model with no catalog price (an operator's own endpoint model) count $0.
  *
  * Calls served by an admin-configured OpenAI-compatible endpoint never reach gateway logs, so on
  * an installation with both, the cap counts only gateway-routed spend (documented in
- * reference/configuration.md). This predicate reads env only and cannot see that D1 setting.
+ * reference/configuration.md). Daily token budgets apply either way.
  */
 export function isMonthlyCostCapAvailable(
   env: Pick<Env, 'AI_GATEWAY_ID' | 'CF_ACCOUNT_ID' | 'CF_API_TOKEN'>
 ): boolean {
-  return resolveAiGatewayId(env) !== null && hasCloudflareAccountApi(env);
+  if (hasLocalAiCostMetering(env)) return true;
+  return hasCloudflareAccountApi(env);
 }
 
 /**
@@ -171,6 +199,16 @@ export function isContainerWorkspaceRuntimeEnabled(
   return (env.CF_CONTAINER_ENABLED ?? env.SANDBOX_ENABLED) === 'true' && hasContainerRuntime(env);
 }
 
+/**
+ * Whether Admin → Stream can receive anything. The stream is fed by the tail worker (a Cloudflare
+ * `tail_consumers` attachment), which the Worker cannot see from inside, so the deployment
+ * declares its absence: `LOG_TAIL_AVAILABLE="false"` (scripts/selfhost/celld-config.ts). Unset
+ * means available, which keeps Cloudflare deployments unchanged.
+ */
+export function hasLiveLogStream(env: Pick<Env, 'LOG_TAIL_AVAILABLE'>): boolean {
+  return env.LOG_TAIL_AVAILABLE?.trim().toLowerCase() !== 'false';
+}
+
 /** Guided credential setup runs the Sandbox SDK and two coordination Durable Objects. */
 export function isGuidedCredentialSetupAvailable(
   env: Pick<
@@ -190,33 +228,51 @@ export function isGuidedCredentialSetupAvailable(
   );
 }
 
-/** Cloudflare Artifacts (SAM-native Git repositories). */
-export function isArtifactsAvailable(env: Pick<Env, 'ARTIFACTS' | 'ARTIFACTS_ENABLED'>): boolean {
-  return env.ARTIFACTS_ENABLED === 'true' && !!env.ARTIFACTS;
+/**
+ * SAM-native Git repositories: Cloudflare Artifacts, or on self-host the local Durable Object git
+ * server (`services/hosted-git/backend.ts`, the one resolver for both).
+ */
+export function isArtifactsAvailable(
+  env: Pick<
+    Env,
+    'ARTIFACTS' | 'ARTIFACTS_ENABLED' | 'HOSTED_GIT' | 'HOSTED_GIT_BACKEND' | 'BASE_DOMAIN'
+  >
+): boolean {
+  return resolveArtifactsBackend(env) !== null;
 }
 
 /** Resolve every capability from bindings and settings. Pure and synchronous. */
 export function resolvePlatformCapabilities(env: CapabilityEnv): PlatformCapabilities {
   const workersAi = getWorkersAiBindingOrNull(env) !== null;
   const cloudflareAccountApi = hasCloudflareAccountApi(env);
+  const cloudflareDns = present(env.CF_API_TOKEN) && present(env.CF_ZONE_ID);
   return {
     workersAi,
     aiGateway: resolveAiGatewayId(env) !== null,
     monthlyCostCap: isMonthlyCostCapAvailable(env),
     cloudflareAccountApi,
-    analyticsIngest: !!env.ANALYTICS,
-    analyticsQuery: cloudflareAccountApi,
+    // Self-host: ANALYTICS_SINK="d1" records and reads analytics in D1 (analytics-d1-sink.ts).
+    analyticsIngest: !!env.ANALYTICS || isAnalyticsD1SinkEnabled(env),
+    analyticsQuery: cloudflareAccountApi || isAnalyticsD1SinkEnabled(env),
     artifacts: isArtifactsAvailable(env),
     containerRuntime: hasContainerRuntime(env),
     guidedCredentialSetup: isGuidedCredentialSetupAvailable(env),
-    // SAM can send its own email (sign-in codes): Cloudflare Email Sending or SMTP. Agent email
-    // (inbound mail, replies) still needs the Cloudflare binding (agent-email/setup-state.ts).
+    // SAM can send its own email (sign-in codes): Cloudflare Email Sending or SMTP.
     emailSending: emailTransportKind(env) !== null,
-    cloudflareDns: present(env.CF_API_TOKEN) && present(env.CF_ZONE_ID),
+    // Agent email can arrive here: Cloudflare Email Routing (the binding; an admin still has to
+    // run the setup) or the self-hosted sam-mx receiver (agent-email/self-host-inbound.ts).
+    inboundAgentEmail: hasInboundAgentEmail(env),
+    cloudflareDns,
+    // Deployment nodes keep public-IP transport even on a reverse-tunnel box
+    // (resolveManagedNodeTransport), so they need what that transport needs: a Cloudflare DNS
+    // record per node, an Origin CA certificate and *.apps route records, all through the
+    // Cloudflare API with CF_API_TOKEN and CF_ZONE_ID.
+    appDeployments: cloudflareDns,
     workersObservability: cloudflareAccountApi,
     r2Presign: resolveR2PresignConfig(env) !== null,
     speechToText: workersAi,
     textToSpeech: workersAi && env.TTS_ENABLED !== 'false',
+    liveLogStream: hasLiveLogStream(env),
   };
 }
 
@@ -230,13 +286,50 @@ export interface PublicPlatformCapabilities {
   textToSpeech: boolean;
   /** Whether a monthly AI dollar cap can be set (onboarding's SAM-managed AI step reads it). */
   monthlyCostCap: boolean;
+  /** Admin → Logs search (Workers Observability). Off on self-host: logs are read on the box. */
+  logSearch: boolean;
+  /** Admin → Stream (tail worker). Off on self-host. */
+  liveLogStream: boolean;
+  /** Whether app deployments can run here (the Deployments page reads it). */
+  appDeployments: boolean;
 }
 
-export function publicPlatformCapabilities(env: CapabilityEnv): PublicPlatformCapabilities {
+/**
+ * Which speech services an admin pointed at an OpenAI-compatible endpoint (`speech.*` settings,
+ * read by `resolveSpeechEndpoint()` in speech-endpoints.ts). Only consulted without the Workers AI
+ * binding, so a Cloudflare deployment never reads them.
+ */
+export interface SpeechEndpointAvailability {
+  transcription: boolean;
+  synthesis: boolean;
+}
+
+const NO_SPEECH_ENDPOINTS: SpeechEndpointAvailability = { transcription: false, synthesis: false };
+
+export function publicPlatformCapabilities(
+  env: CapabilityEnv,
+  speechEndpoints: SpeechEndpointAvailability = NO_SPEECH_ENDPOINTS
+): PublicPlatformCapabilities {
   const capabilities = resolvePlatformCapabilities(env);
+  const ttsAllowed = env.TTS_ENABLED !== 'false';
   return {
-    speechToText: capabilities.speechToText,
-    textToSpeech: capabilities.textToSpeech,
+    speechToText: capabilities.speechToText || speechEndpoints.transcription,
+    textToSpeech: capabilities.textToSpeech || (ttsAllowed && speechEndpoints.synthesis),
     monthlyCostCap: capabilities.monthlyCostCap,
+    logSearch: capabilities.workersObservability,
+    liveLogStream: capabilities.liveLogStream,
+    appDeployments: capabilities.appDeployments,
   };
+}
+
+export const APP_DEPLOYMENTS_UNAVAILABLE_MESSAGE =
+  'App deployments are not available on this installation. Deployment nodes need Cloudflare DNS ' +
+  '(CF_API_TOKEN and CF_ZONE_ID): each one gets a public DNS record, an Origin CA certificate and ' +
+  '*.apps routes through the Cloudflare API, and this installation has none configured.';
+
+/** Refuse before any deployment state is written when app deployments cannot work here. */
+export function assertAppDeploymentsAvailable(env: CapabilityEnv): void {
+  if (!resolvePlatformCapabilities(env).appDeployments) {
+    throw errors.featureUnavailable('appDeployments', APP_DEPLOYMENTS_UNAVAILABLE_MESSAGE);
+  }
 }

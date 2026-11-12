@@ -64,6 +64,10 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   SMTP_USERNAME?: string;
   SMTP_PASSWORD?: string; // secret
   SMTP_FROM?: string; // address sign-in codes come from, e.g. sign-in@<BASE_DOMAIN>
+  // 'true' when the self-host deploy installed the sam-mx SMTP receiver (compose profile mail-in):
+  // agent email then runs without AGENT_EMAIL, inbound through the loopback gateway route and
+  // replies over SMTP (services/agent-email/self-host-inbound.ts). Ignored when AGENT_EMAIL exists.
+  AGENT_EMAIL_INBOUND_SMTP?: string;
   // Cloudflare Artifacts for SAM-native Git repos (optional — absent when ARTIFACTS_ENABLED is falsy)
   ARTIFACTS?: {
     create(
@@ -94,6 +98,11 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
       }>;
     }>;
   };
+  // SAM-hosted git repositories (self-host): the Durable Object git server behind the local
+  // ARTIFACTS backend (services/hosted-git/backend.ts). Used only when HOSTED_GIT_BACKEND is
+  // "durable-object" and no Cloudflare Artifacts binding exists.
+  HOSTED_GIT?: DurableObjectNamespace;
+  HOSTED_GIT_BACKEND?: string;
   // Analytics Engine for usage tracking (optional — binding absent in local dev / Miniflare)
   ANALYTICS?: AnalyticsEngineDataset;
   // Observability D1 (error storage — spec 023)
@@ -249,6 +258,10 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   MAX_API_TOKENS_PER_USER?: string; // Max active tokens per user (default: 10)
   MAX_API_TOKEN_NAME_LENGTH?: string; // Max token name length (default: 100)
   API_TOKEN_SESSION_DURATION_SECONDS?: string; // Session lifetime for token login (default: 604800 = 7 days)
+  // Agent sign-in through workload identity (services/agent-sign-in/config.ts). JSON trust
+  // configuration, deploy-time Worker secret only: absent, empty or malformed => feature off.
+  // Never an admin setting, so a compromised admin account cannot open this door.
+  AGENT_SIGN_IN_TRUST?: string;
   PROJECT_INVITE_TOKEN_BYTES?: string; // Random bytes for project invite links (default: 32)
   PROJECT_INVITE_DEFAULT_EXPIRY_DAYS?: string; // Default invite-link lifetime (default: 7)
   PROJECT_INVITE_MAX_EXPIRY_DAYS?: string; // Maximum invite-link lifetime (default: 30)
@@ -1336,6 +1349,10 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   ANALYTICS_WEBSITE_TRAFFIC_TOP_PAGES_LIMIT?: string; // Max top pages per section in website traffic (default: 20)
   // Analytics ingest endpoint (Phase 2 — client-side events)
   ANALYTICS_INGEST_ENABLED?: string; // "true" (default) or "false"
+  /** "d1" records and reads product analytics in OBSERVABILITY_DATABASE (self-host; services/analytics-d1-sink.ts). Unset: Analytics Engine. */
+  ANALYTICS_SINK?: string;
+  ANALYTICS_D1_RETENTION_DAYS?: string; // default 90
+  ANALYTICS_D1_MAX_ROWS?: string; // default 500000
   RATE_LIMIT_ANALYTICS_INGEST?: string; // Rate limit per IP per hour (default: 500)
   MAX_ANALYTICS_INGEST_BATCH_SIZE?: string; // Max events per batch (default: 25)
   MAX_ANALYTICS_INGEST_BODY_BYTES?: string; // Max request body bytes (default: 65536)
@@ -1566,6 +1583,8 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   // back one container class and not the other (celld runs the sandbox, never Instant). Unset
   // falls back to CONTAINER_RUNTIME_AVAILABLE. See services/platform-capabilities.ts.
   SANDBOX_CONTAINER_RUNTIME_AVAILABLE?: string;
+  /** "false" when no tail consumer feeds the AdminLogs DO (self-host: celld has no tail handler). Unset: available. */
+  LOG_TAIL_AVAILABLE?: string;
   // Legacy Sandbox SDK prototype (admin-only)
   SANDBOX_ENABLED?: string; // Legacy/fallback kill switch for sandbox routes and older staging config (default: false)
   SANDBOX_EXEC_TIMEOUT_MS?: string; // Default exec timeout in ms (default: 30000)

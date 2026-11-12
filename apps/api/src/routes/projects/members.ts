@@ -18,7 +18,7 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
-import { getUserId } from '../../middleware/auth';
+import { getUserId, rejectAgentSignInSession } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireProjectAccess, requireProjectCapability } from '../../middleware/project-auth';
 import {
@@ -29,6 +29,7 @@ import {
 import { clearCredentialAttributionHealthCache } from '../../services/credential-attribution-health';
 import { getUserInstallationRepositories } from '../../services/github-app';
 import { getExternalInstallationId } from '../../services/github-installation-ids';
+import { githubUserTokenUnavailableError } from '../../services/github-token-errors';
 import {
   getGitHubUserAccessTokenForOwner,
   getGitHubUserAccessTokenWithHeaders,
@@ -211,11 +212,14 @@ async function evaluateRequesterGithubAccess(input: {
           'project-invite-approval'
         );
   if (!accessToken) {
+    const unavailable = await githubUserTokenUnavailableError(input.env, input.requesterUserId);
     return {
       status: 'missing-token',
       checkedAt,
       message:
-        'Requester must reauthenticate with GitHub before repository access can be verified.',
+        unavailable.error === 'GITHUB_NOT_CONNECTED'
+          ? 'Requester has not connected GitHub to their SAM account. They can join, but cannot run work in this project until they connect GitHub in Settings → GitHub.'
+          : 'Requester must reauthenticate with GitHub before repository access can be verified.',
     };
   }
 
@@ -393,6 +397,8 @@ projectMembersRoutes.get('/:id/members', async (c) => {
 
 projectMembersRoutes.post(
   '/:id/invite-links',
+  // An invite grants lasting access to whoever redeems it.
+  rejectAgentSignInSession(),
   jsonValidator(CreateProjectInviteSchema),
   async (c) => {
     const userId = getUserId(c);
@@ -638,6 +644,7 @@ projectMembersRoutes.post('/invite-links/:token/request', async (c) => {
 
 projectMembersRoutes.post(
   '/:id/access-requests/:requestId/approve',
+  rejectAgentSignInSession(),
   jsonValidator(DecideProjectAccessRequestSchema),
   async (c) => {
     const approverId = getUserId(c);

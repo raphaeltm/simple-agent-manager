@@ -21,6 +21,7 @@ import { persistError } from '../services/observability';
 import { taskStatusIsNonTerminalSql, TERMINAL_STATUS_VALUES } from '../services/task-status';
 import { confirmUnassignedWorkspaceAbsence } from '../services/unassigned-workspace-deletion';
 import type { WorkspaceDeletionIdentity } from '../services/workspace-deletion';
+import { resolveNodeProvisioningAttemptDeadlineMs } from './node-lifecycle-provisioning-deadline';
 
 export const DIRECT_PROVISIONING_KEY = 'direct-provisioning:v1';
 export const DEFAULT_NODE_PROVISIONING_REQUEST_TIMEOUT_MS = 5_000;
@@ -217,8 +218,12 @@ export class NodeLifecycleProvisioning {
       // the attempt as a whole also gets the tunnel-setup budget when this incarnation uses
       // tunnel transport, because tunnel setup is about six sequential Cloudflare calls before
       // createVM. Setup is resumable, so an attempt that still runs out continues next time.
+      // The attempt budget is separate from the per-request timeout: a GCP create plus its
+      // operation wait takes 9-12 s, so a 5 s attempt cut every GCP node after its create
+      // (see node-lifecycle-provisioning-deadline.ts for the arithmetic).
       const attemptDeadlineMs =
-        timeout + (await durableAttemptTunnelBudgetMs(this.env, node, intent.incarnationId));
+        (await resolveNodeProvisioningAttemptDeadlineMs(this.env, timeout)) +
+        (await durableAttemptTunnelBudgetMs(this.env, node, intent.incarnationId));
       timer = setTimeout(
         () =>
           controller.abort(

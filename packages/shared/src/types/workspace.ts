@@ -11,6 +11,10 @@ export type NodeStatus =
   | 'sleeping'
   | 'stopping'
   | 'stopped'
+  /** Claimed by the node cleanup sweep or manual deletion while the VM is torn down. */
+  | 'destroying'
+  /** A deployment node whose last environment was deleted; moves to `deleted` or `error`. */
+  | 'deleting'
   | 'deleted'
   | 'error';
 

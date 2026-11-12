@@ -3229,14 +3229,15 @@ func withGitToken(repoURL, token string, cfg *config.Config) (string, error) {
 	isGitLabHost := cfg != nil &&
 		strings.EqualFold(strings.TrimSpace(cfg.RepoProvider), "gitlab") &&
 		strings.EqualFold(strings.TrimSpace(cfg.RepositoryHost), host)
-	if !gitrepo.IsKnownGitHost(host) && !isGitLabHost {
+	hostedArtifactsHost := isBoundHostedArtifactsHost(cfg, host)
+	if !gitrepo.IsKnownGitHost(host) && !isGitLabHost && !hostedArtifactsHost {
 		return repoURL, nil
 	}
 
-	// For GitHub repos use "x-access-token"; for Artifacts use "x"; for
-	// GitLab OAuth use the conventional "oauth2" username.
+	// For GitHub repos use "x-access-token"; for Artifacts (Cloudflare or a
+	// self-hosted SAM git server) use "x"; for GitLab OAuth use "oauth2".
 	username := "x-access-token"
-	if gitrepo.IsArtifactsHost(host) {
+	if gitrepo.IsArtifactsHost(host) || hostedArtifactsHost {
 		username = "x"
 	} else if isGitLabHost {
 		username = "oauth2"
@@ -3269,11 +3270,26 @@ func needsCredentialHelper(repo string) bool {
 	return gitrepo.IsKnownGitHost(host)
 }
 
+// isBoundHostedArtifactsHost reports whether host is the repository host the
+// control plane bound to an artifacts-provider workspace. Cloudflare Artifacts
+// hosts are recognized by name; a self-hosted SAM install serves its own
+// repositories at api.<domain>, which the control plane passes as RepositoryHost.
+func isBoundHostedArtifactsHost(cfg *config.Config, host string) bool {
+	if cfg == nil || !strings.EqualFold(strings.TrimSpace(cfg.RepoProvider), "artifacts") {
+		return false
+	}
+	bound := strings.TrimSpace(cfg.RepositoryHost)
+	return bound != "" && strings.EqualFold(bound, strings.TrimSpace(host))
+}
+
 func needsCredentialHelperForConfig(cfg *config.Config) bool {
 	if cfg == nil {
 		return false
 	}
 	if strings.TrimSpace(cfg.RepositoryHost) != "" && strings.EqualFold(strings.TrimSpace(cfg.RepoProvider), "gitlab") {
+		return true
+	}
+	if strings.TrimSpace(cfg.RepositoryHost) != "" && strings.EqualFold(strings.TrimSpace(cfg.RepoProvider), "artifacts") {
 		return true
 	}
 	return needsCredentialHelper(firstNonEmptyString(cfg.CloneURL, cfg.Repository))

@@ -169,6 +169,8 @@ export async function runAgentLoop(
         format: tokenUsageFormat,
         executionCtx,
         estimateMissingUsage: endpoint !== null,
+        // An operator endpoint serves its own model, which has no catalog price.
+        costModelId: endpoint === null ? config.model : undefined,
       });
     } catch (fetchErr) {
       // No model on this installation (no endpoint configured, no Cloudflare route): retrying

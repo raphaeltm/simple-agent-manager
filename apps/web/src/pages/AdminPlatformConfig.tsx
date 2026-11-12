@@ -1,12 +1,13 @@
 import { Alert, Spinner } from '@simple-agent-manager/ui';
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 
 import { AdminAgentEmailPanel } from '../components/AdminAgentEmailPanel';
 import { AdminConnectorPanel } from '../components/AdminConnectorPanel';
+import { GitHubAppManifestPanel } from '../components/GitHubAppManifestPanel';
 import { PlatformIntegrationConfigForm } from '../components/PlatformIntegrationConfigForm';
 import { useQueryScope } from '../hooks/useQueryScope';
-import type { PlatformIntegrationConfigInput } from '../lib/api';
+import type { PlatformConfigStatusResponse, PlatformIntegrationConfigInput } from '../lib/api';
 import { fetchAdminPlatformConfig, listProjects, updateAdminPlatformConfig } from '../lib/api';
 import { PROJECT_LIST_LIMIT } from '../lib/project-query-config';
 
@@ -32,6 +33,15 @@ export function AdminPlatformConfig() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Stable identity: GitHubAppManifestPanel's completion effect lists it as a dependency.
+  const handleManifestStored = useCallback(
+    (response: PlatformConfigStatusResponse) => {
+      client.setQueryData(['auth', scope, 'admin', 'platform-config'], response);
+      setMessage('GitHub App created and saved.');
+    },
+    [client, scope]
+  );
 
   const handleSave = async (config: PlatformIntegrationConfigInput) => {
     setSaving(true);
@@ -72,6 +82,12 @@ export function AdminPlatformConfig() {
         <Alert variant="success" onDismiss={() => setMessage(null)}>
           {message}
         </Alert>
+      )}
+      {status && (
+        <GitHubAppManifestPanel
+          appConfigured={status.integrations.githubApp.configured}
+          onStored={handleManifestStored}
+        />
       )}
       {status && (
         <PlatformIntegrationConfigForm

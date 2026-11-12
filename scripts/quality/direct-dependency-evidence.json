@@ -71,6 +71,10 @@
       "registryUrl": "https://www.npmjs.com/package/@tanstack/query-persist-client-core",
       "necessity": "Persists an allowlisted slice of the TanStack Query cache so a reload paints from cache instead of an empty state. Loaded via dynamic import for signed-in sessions only."
     },
+    "@types/pako": {
+      "registryUrl": "https://www.npmjs.com/package/@types/pako",
+      "necessity": "Type declarations for pako, used by the vendored dgit git core."
+    },
     "@typescript-eslint/eslint-plugin": {
       "registryUrl": "https://www.npmjs.com/package/@typescript-eslint/eslint-plugin",
       "necessity": "Hosts supported TypeScript lint rules."
@@ -122,6 +126,11 @@
     "oxlint": {
       "registryUrl": "https://www.npmjs.com/package/oxlint",
       "necessity": "Measures native lint findings in shadow mode."
+    },
+    "pako": {
+      "registryUrl": "https://www.npmjs.com/package/pako",
+      "homepageUrl": "https://github.com/nodeca/pako",
+      "necessity": "zlib inflate/deflate for the vendored dgit git core behind SAM-hosted repositories (apps/api/src/vendor/dgit); git packs and loose objects are zlib streams and Workers have no synchronous zlib."
     },
     "postal-mime": {
       "registryUrl": "https://www.npmjs.com/package/postal-mime",

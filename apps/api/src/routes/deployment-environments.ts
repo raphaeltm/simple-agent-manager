@@ -37,6 +37,7 @@ import {
 } from '../services/deployment-volumes';
 import { cleanupAppRouteDNSRecords } from '../services/dns';
 import { deleteNodeResources, retireDeletedDeploymentNodeRecord } from '../services/nodes';
+import { assertAppDeploymentsAvailable } from '../services/platform-capabilities';
 import { registerDeploymentEnvironmentLifecycleRoutes } from './deployment-environment-lifecycle';
 import { registerDeploymentEnvironmentObservabilityRoutes } from './deployment-environment-observability';
 
@@ -108,6 +109,7 @@ deploymentEnvironmentRoutes.post(
     const userId = getUserId(c);
     const db = drizzle(c.env.DATABASE, { schema });
     await requireProjectCapability(db, projectId, userId, 'deployment:manage');
+    assertAppDeploymentsAvailable(c.env);
 
     const { name } = c.req.valid('json');
     const now = new Date().toISOString();

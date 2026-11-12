@@ -8,7 +8,7 @@ import type { Env } from '../../env';
 import { clientIpFromHeaders } from '../../lib/client-ip';
 import { log, serializeError } from '../../lib/logger';
 import { expectJsonRecord } from '../../lib/runtime-validation';
-import { getUserId, requireApproved, requireAuth } from '../../middleware/auth';
+import { credentialNotAfter, getUserId, requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { signLocalForwardToken, verifyLocalForwardToken } from '../../services/jwt';
 import { fetchNodeAgent, getNodeAgentRequestTimeoutMs } from '../../services/node-agent';
@@ -164,7 +164,8 @@ localForwardRoutes.post('/:id/forwards', requireAuth(), requireApproved(), async
       mode: 'http',
       localAuthority,
     },
-    c.env
+    c.env,
+    { notAfter: credentialNotAfter(c) }
   );
 
   return c.json({

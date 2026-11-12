@@ -34,6 +34,8 @@ export const CreateProjectSchema = v.object({
   gitlabProjectId: v.optional(v.number()),
   defaultBranch: v.optional(v.string()),
   repoProvider: v.optional(v.picklist(['github', 'artifacts', 'gitlab'])),
+  /** SAM-hosted repositories on a self-hosted install: import this public repository. */
+  importUrl: v.optional(v.pipe(v.string(), v.maxLength(2048))),
 });
 
 export const UpdateProjectSchema = v.object({

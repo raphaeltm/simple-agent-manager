@@ -180,7 +180,7 @@ describe.skipIf(!dockerAvailable)('docker socket proxy (live, real daemon)', () 
   beforeAll(async () => {
     mkdirSync(join(DIR, 'sock'), { recursive: true });
     mkdirSync(join(DIR, 'policy'), { recursive: true });
-    chmodSync(join(DIR, 'sock'), 0o777); // the proxy runs as uid 7102
+    chmodSync(join(DIR, 'sock'), 0o777); // the proxy runs as uid 7103
     writeFileSync(RESOLV_HOST, 'nameserver 1.1.1.1\n', { mode: 0o644 });
     writeFileSync(
       join(DIR, 'policy', 'policy.json'),

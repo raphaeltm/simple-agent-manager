@@ -21,6 +21,7 @@ import { guardedFetch } from '../lib/network-hosts';
 import { readResponseJson } from '../lib/runtime-validation';
 import { getTimeoutMs } from './fetch-timeout';
 import { DEFAULT_GITLAB_API_TIMEOUT_MS, gitLabHostVerdict } from './gitlab-host-policy';
+import { keepLinkedAccountEmail } from './linked-account-identity';
 import { resolveOutboundMaxRedirects } from './outbound-fetch-settings';
 import type { GitLabOAuthConfig } from './platform-config-oauth';
 
@@ -72,12 +73,17 @@ export async function fetchGitLabUserInfo(
   }
   const profile = await readResponseJson(response, gitlabUserSchema, 'gitlab.user');
   if (profile.state !== 'active' || profile.locked) return null;
+  // A linked account keeps its own verified SAM email (`keepLinkedAccountEmail`).
+  const identity = await keepLinkedAccountEmail(env, 'gitlab', String(profile.id), {
+    email: profile.email,
+    emailVerified: profile.email_verified ?? false,
+  });
   return {
     user: {
       name: profile.name ?? profile.username ?? '',
-      email: profile.email ?? undefined,
+      email: identity.email ?? undefined,
       image: profile.avatar_url ?? undefined,
-      emailVerified: profile.email_verified ?? false,
+      emailVerified: identity.emailVerified,
     },
     // better-auth keys the account on `data.id` (`accountSubject: ({ profile }) => profile.id`).
     // Only the fields gitlabUserSchema validates exist; nothing in SAM reads the others.

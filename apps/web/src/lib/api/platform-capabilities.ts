@@ -6,6 +6,12 @@ export interface PlatformCapabilities {
   textToSpeech: boolean;
   /** Whether a monthly AI dollar cap can be set (needs Cloudflare AI Gateway). */
   monthlyCostCap: boolean;
+  /** Admin → Logs search (Workers Observability). False on a self-hosted install. */
+  logSearch: boolean;
+  /** Admin → Stream (tail worker). False on a self-hosted install. */
+  liveLogStream: boolean;
+  /** Whether app deployments can run here (needs Cloudflare DNS for node and app routes). */
+  appDeployments: boolean;
 }
 
 /**
@@ -17,6 +23,9 @@ export const ASSUMED_PLATFORM_CAPABILITIES: PlatformCapabilities = Object.freeze
   speechToText: true,
   textToSpeech: true,
   monthlyCostCap: true,
+  logSearch: true,
+  liveLogStream: true,
+  appDeployments: true,
 });
 
 /**
