@@ -84,6 +84,9 @@ catalogs:
     globals:
       specifier: 17.9.0
       version: 17.9.0
+    jose:
+      specifier: 6.2.3
+      version: 6.2.3
     jsdom:
       specifier: 29.1.1
       version: 29.1.1
@@ -279,6 +282,9 @@ importers:
       '@simple-agent-manager/providers':
         specifier: workspace:*
         version: link:../../packages/providers
+      '@simple-agent-manager/repo-hosting':
+        specifier: workspace:*
+        version: link:../../packages/repo-hosting
       '@simple-agent-manager/scheduler-core':
         specifier: workspace:*
         version: link:../../packages/scheduler-core
@@ -300,20 +306,14 @@ importers:
       better-auth-cloudflare:
         specifier: 0.3.1
         version: 0.3.1(@better-auth/drizzle-adapter@1.7.14(@better-auth/core@1.7.14(@better-auth/utils@0.5.1)(@better-fetch/fetch@1.3.3)(@opentelemetry/api@1.10.0)(better-call@1.4.4(zod@4.5.4))(jose@6.2.3)(kysely@0.28.17)(nanostores@1.3.0))(@better-auth/utils@0.5.1)(drizzle-orm@0.45.2(@cloudflare/workers-types@5.20260707.1)(@opentelemetry/api@1.10.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(kysely@0.28.17)))(@cloudflare/workers-types@5.20260707.1)(@opentelemetry/api@1.10.0)(@types/better-sqlite3@7.6.13)(better-auth@1.7.14(@opentelemetry/api@1.10.0)(drizzle-kit@0.26.2)(drizzle-orm@0.45.2(@cloudflare/workers-types@5.20260707.1)(@opentelemetry/api@1.10.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(kysely@0.28.17))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(vitest@4.1.5))(better-sqlite3@12.11.1)(kysely@0.28.17)
-      diff:
-        specifier: ^9.0.0
-        version: 9.0.0
       drizzle-orm:
         specifier: 'catalog:'
         version: 0.45.2(@cloudflare/workers-types@5.20260707.1)(@opentelemetry/api@1.10.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(kysely@0.28.17)
       hono:
         specifier: 4.13.4
         version: 4.13.4
-      isomorphic-git:
-        specifier: ^1.38.7
-        version: 1.38.7
       jose:
-        specifier: 6.2.3
+        specifier: 'catalog:'
         version: 6.2.3
       tsx:
         specifier: 'catalog:'
@@ -949,6 +949,52 @@ importers:
         specifier: 'catalog:'
         version: 9.6.1
     devDependencies:
+      '@typescript-eslint/eslint-plugin':
+        specifier: 'catalog:'
+        version: 8.72.0(@typescript-eslint/parser@8.72.0(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3))(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)
+      '@typescript-eslint/parser':
+        specifier: 'catalog:'
+        version: 8.72.0(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)
+      '@vitest/coverage-v8':
+        specifier: 'catalog:'
+        version: 4.1.7(vitest@4.1.5)
+      eslint:
+        specifier: 'catalog:'
+        version: 9.39.5(jiti@2.7.0)
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@4.1.7)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
+
+  packages/repo-hosting:
+    dependencies:
+      '@simple-agent-manager/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@simple-agent-manager/worker-core':
+        specifier: workspace:*
+        version: link:../worker-core
+      diff:
+        specifier: ^9.0.0
+        version: 9.0.0
+      drizzle-orm:
+        specifier: 'catalog:'
+        version: 0.45.2(@cloudflare/workers-types@5.20260707.1)(@opentelemetry/api@1.10.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(kysely@0.28.17)
+      isomorphic-git:
+        specifier: ^1.38.7
+        version: 1.38.7
+      jose:
+        specifier: 'catalog:'
+        version: 6.2.3
+      valibot:
+        specifier: 'catalog:'
+        version: 1.5.0(typescript@5.9.3)
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: 'catalog:'
+        version: 5.20260707.1
       '@typescript-eslint/eslint-plugin':
         specifier: 'catalog:'
         version: 8.72.0(@typescript-eslint/parser@8.72.0(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3))(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)
@@ -10324,7 +10370,7 @@ snapshots:
     dependencies:
       '@astrojs/compiler': 2.13.1
       '@astrojs/yaml2ts': 0.2.4
-      '@jridgewell/sourcemap-codec': 1.5.5
+      '@jridgewell/sourcemap-codec': 1.6.0
       '@volar/kit': 2.4.28(typescript@5.9.3)
       '@volar/language-core': 2.4.28
       '@volar/language-server': 2.4.28
@@ -15265,7 +15311,7 @@ snapshots:
       has-property-descriptors: 1.0.2
       has-proto: 1.2.0
       has-symbols: 1.1.0
-      hasown: 2.0.2
+      hasown: 2.0.4
       internal-slot: 1.1.0
       is-array-buffer: 3.0.5
       is-callable: 1.2.7
@@ -15334,11 +15380,11 @@ snapshots:
       es-errors: 1.3.0
       get-intrinsic: 1.3.0
       has-tostringtag: 1.0.2
-      hasown: 2.0.2
+      hasown: 2.0.4
 
   es-shim-unscopables@1.1.0:
     dependencies:
-      hasown: 2.0.2
+      hasown: 2.0.4
 
   es-to-primitive@1.3.0:
     dependencies:
@@ -15926,7 +15972,7 @@ snapshots:
       call-bound: 1.0.4
       define-properties: 1.2.1
       functions-have-names: 1.2.3
-      hasown: 2.0.2
+      hasown: 2.0.4
       is-callable: 1.2.7
 
   functions-have-names@1.2.3: {}
@@ -15949,7 +15995,7 @@ snapshots:
       get-proto: 1.0.1
       gopd: 1.2.0
       has-symbols: 1.1.0
-      hasown: 2.0.2
+      hasown: 2.0.4
       math-intrinsics: 1.1.0
 
   get-proto@1.0.1:
@@ -16406,7 +16452,7 @@ snapshots:
   internal-slot@1.1.0:
     dependencies:
       es-errors: 1.3.0
-      hasown: 2.0.2
+      hasown: 2.0.4
       side-channel: 1.1.0
 
   internmap@1.0.1: {}
@@ -16457,7 +16503,7 @@ snapshots:
 
   is-core-module@2.16.1:
     dependencies:
-      hasown: 2.0.2
+      hasown: 2.0.4
 
   is-core-module@2.17.0:
     dependencies:
@@ -16530,7 +16576,7 @@ snapshots:
       call-bound: 1.0.4
       gopd: 1.2.0
       has-tostringtag: 1.0.2
-      hasown: 2.0.2
+      hasown: 2.0.4
 
   is-set@2.0.3: {}
 

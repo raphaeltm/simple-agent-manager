@@ -4,6 +4,7 @@ import type { AgentEmailEnv } from '@simple-agent-manager/agent-email';
 import type { AppDeploymentEnv } from '@simple-agent-manager/app-deployment';
 import type { OperationsEnv } from '@simple-agent-manager/operations';
 import type { ProjectDataEnv } from '@simple-agent-manager/project-data';
+import type { ArtifactsBinding, RepoHostingEnv } from '@simple-agent-manager/repo-hosting';
 import type { WorkspaceAdmissionEnv } from '@simple-agent-manager/scheduler-core';
 
 import type { VmAgentContainer } from './durable-objects/vm-agent-container';
@@ -20,7 +21,8 @@ export interface Env
     ProjectDataEnv,
     AgentEmailEnv,
     AppDeploymentEnv,
-    OperationsEnv {
+    OperationsEnv,
+    RepoHostingEnv {
   CLI_RECEIPT_REQUEST_MAX_BYTES?: string; // default 262144
   CLI_RECEIPT_RESPONSE_MAX_BYTES?: string; // default 65536
   // D1 Database.
@@ -60,35 +62,7 @@ export interface Env
   // Agent email (preview): AGENT_EMAIL and AGENT_EMAIL_WORKER_NAME are declared in
   // @simple-agent-manager/agent-email's AgentEmailEnv.
   // Cloudflare Artifacts for SAM-native Git repos (optional — absent when ARTIFACTS_ENABLED is falsy)
-  ARTIFACTS?: {
-    create(
-      name: string,
-      opts?: { description?: string; setDefaultBranch?: string }
-    ): Promise<{
-      id: string;
-      name: string;
-      remote: string;
-      token: string;
-      default_branch: string;
-    }>;
-    delete(name: string): Promise<boolean>;
-    get(name: string): Promise<{
-      id: string;
-      name: string;
-      remote: string;
-      defaultBranch: string;
-      createToken(
-        scope?: 'read' | 'write',
-        ttl?: number
-      ): Promise<{
-        id: string;
-        plaintext: string;
-        scope: string;
-        expiresAt?: string;
-        expires_at?: string;
-      }>;
-    }>;
-  };
+  ARTIFACTS?: ArtifactsBinding;
   // Analytics Engine for usage tracking (optional — binding absent in local dev / Miniflare)
   ANALYTICS?: AnalyticsEngineDataset;
   // Observability D1 (error storage — spec 023)

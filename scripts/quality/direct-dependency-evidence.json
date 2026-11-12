@@ -106,6 +106,10 @@
       "registryUrl": "https://www.npmjs.com/package/better-sqlite3",
       "necessity": "Real SQLite engine for project-data unit tests of Durable Object SQL; already the API worker's test engine at the same version."
     },
+    "diff": {
+      "registryUrl": "https://www.npmjs.com/package/diff",
+      "necessity": "Builds unified diffs for Artifacts repository compare views in repo-hosting; moved from the API worker at the same version."
+    },
     "drizzle-orm": {
       "registryUrl": "https://www.npmjs.com/package/drizzle-orm",
       "necessity": "Defines the D1 schema in worker-core; already the API worker ORM at the same pinned version."
@@ -141,6 +145,14 @@
     "idb-keyval": {
       "registryUrl": "https://www.npmjs.com/package/idb-keyval",
       "necessity": "IndexedDB backing store for the persisted query cache. Chosen over localStorage so it cannot evict the library-cache index, which already needs its own LRU within the ~5 MB localStorage budget."
+    },
+    "isomorphic-git": {
+      "registryUrl": "https://www.npmjs.com/package/isomorphic-git",
+      "necessity": "Reads Artifacts-backed Git repositories in memory for repo-hosting's repository browser; moved from the API worker at the same version."
+    },
+    "jose": {
+      "registryUrl": "https://www.npmjs.com/package/jose",
+      "necessity": "Signs GitHub App JWTs in repo-hosting; the API worker uses the same catalog version for its own JWTs."
     },
     "oxlint": {
       "registryUrl": "https://www.npmjs.com/package/oxlint",

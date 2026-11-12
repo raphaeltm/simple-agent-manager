@@ -53,13 +53,21 @@ vi.mock('drizzle-orm', async (importOriginal) => ({
   inArray: vi.fn(),
 }));
 
-// Mock schema. Spread the real module: extracted packages import other tables from the same
-// entry (agent-email reads triggerEmailMessages), so a bare mock would break their load.
-vi.mock('@simple-agent-manager/worker-core/schema', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@simple-agent-manager/worker-core/schema')>()),
+// Mock schema. Extracted packages reached through the routes read tables from worker-core
+// directly, so both entries get the same stub. Spread the real module underneath: packages also
+// import tables this test does not stub (agent-email reads triggerEmailMessages).
+const schemaMock = vi.hoisted(() => ({
   nodes: { id: 'id', userId: 'userId', status: 'status', createdAt: 'createdAt' },
   workspaces: { id: 'id', userId: 'userId', nodeId: 'nodeId', status: 'status' },
   agentSessions: { workspaceId: 'workspaceId' },
+}));
+vi.mock('../../../src/db/schema', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/db/schema')>()),
+  ...schemaMock,
+}));
+vi.mock('@simple-agent-manager/worker-core/schema', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@simple-agent-manager/worker-core/schema')>()),
+  ...schemaMock,
 }));
 
 // Mock services

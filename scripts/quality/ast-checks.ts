@@ -384,6 +384,7 @@ function main() {
       resolve(ROOT, 'packages/agent-email/src/**/*.ts'),
       resolve(ROOT, 'packages/app-deployment/src/**/*.ts'),
       resolve(ROOT, 'packages/operations/src/**/*.ts'),
+      resolve(ROOT, 'packages/repo-hosting/src/**/*.ts'),
     ]);
   }
 

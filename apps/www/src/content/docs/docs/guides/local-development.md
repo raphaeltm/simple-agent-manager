@@ -100,6 +100,7 @@ pnpm --filter @simple-agent-manager/scheduler-core build
 pnpm --filter @simple-agent-manager/project-data build
 pnpm --filter @simple-agent-manager/agent-email build
 pnpm --filter @simple-agent-manager/operations build
+pnpm --filter @simple-agent-manager/repo-hosting build
 pnpm --filter @simple-agent-manager/api build
 ```
 

@@ -1,3 +1,6 @@
+// Configure @simple-agent-manager/repo-hosting's ports before any route or Durable Object can use it.
+import './repo-hosting-wiring';
+
 export { McpRateCounter } from './durable-objects/mcp-rate-counter';
 export { WorkspaceBootLog } from './durable-objects/workspace-boot-log';
 import { adminAgentEmailRoutes } from './routes/admin-agent-email';
