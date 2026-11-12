@@ -56,6 +56,10 @@ and sweep tests inject fake ports (they now exercise the real cancel module); vo
 through the worker provider port; deploy-release callback test verifies the cipher is bound
 to the server key; environment config workers test uses the cipher.
 
+Full apps/api unit suite after step 1: 1087 files (1084 passed, 3 skipped), 16017 cases (16013 passed, 4 skipped).
+
+Coordinator decision (channel): `lib/route-helpers.ts` goes into worker-core, so no port is needed for `parsePositiveInt`.
+
 ## PR #2605 overlap
 
 #2605 edits `scheduled/compose-image-artifact-cleanup.ts`, `scheduled/deployment-publish-jobs.ts`,
