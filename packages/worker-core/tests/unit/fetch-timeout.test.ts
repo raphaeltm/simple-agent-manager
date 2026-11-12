@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { fetchWithTimeout, getTimeoutMs } from '../../../src/services/fetch-timeout';
+import { fetchWithTimeout, getTimeoutMs } from '../../src/fetch-timeout';
 
 describe('getTimeoutMs', () => {
   it('returns default when env value is undefined', () => {

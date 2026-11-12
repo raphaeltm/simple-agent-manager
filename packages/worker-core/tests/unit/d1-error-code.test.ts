@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { d1CauseCode, d1ErrorCategory } from '../../../src/lib/d1-error-code';
-import { serializeError } from '../../../src/lib/logger';
+import { d1CauseCode, d1ErrorCategory } from '../../src/d1-error-code';
+import { serializeError } from '../../src/logger';
 
 describe('allowlisted D1 cause diagnostics', () => {
   it.each(['SQLITE_CONSTRAINT', 'SQLITE_NOMEM', 'SQLITE_BUSY', 'SQLITE_CONSTRAINT_FOREIGNKEY'])(
