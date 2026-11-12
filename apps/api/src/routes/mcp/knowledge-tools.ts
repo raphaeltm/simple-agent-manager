@@ -11,7 +11,6 @@ import {
 } from '@simple-agent-manager/shared';
 
 import type { Env } from '../../env';
-import { runWorkspaceOperation } from './workspace-operation-adapter';
 import * as projectDataService from '../../services/project-data';
 import {
   getMcpLimits,
@@ -23,6 +22,7 @@ import {
   type McpTokenData,
   sanitizeUserInput,
 } from './_helpers';
+import { runWorkspaceOperation } from './workspace-operation-adapter';
 
 // ─── Helper: resolve session ID from workspace ─────────────────────────────
 
