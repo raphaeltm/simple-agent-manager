@@ -1,4 +1,4 @@
-import type { DeploymentPublishJobPorts } from '@simple-agent-manager/app-deployment';
+import type { DeploymentPublishJobPorts } from '../../src/ports';
 import { beforeEach, expect, it, vi } from 'vitest';
 
 const cancel = vi.hoisted(() => vi.fn());
@@ -18,6 +18,7 @@ const ports: Pick<DeploymentPublishJobPorts, 'settings' | 'vm'> = {
 };
 beforeEach(() => {
   vi.clearAllMocks();
+  resolveSetting.mockImplementation(async () => 1000);
 });
 it.each([404, 500])(
   'records bounded cancel failure status %s without response output',

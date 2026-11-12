@@ -51,7 +51,7 @@ vi.mock('drizzle-orm', () => ({
 }));
 
 // Mock schema
-vi.mock('../../../src/db/schema', () => ({
+vi.mock('@simple-agent-manager/worker-core/schema', () => ({
   nodes: { id: 'id', userId: 'userId', status: 'status', createdAt: 'createdAt' },
   workspaces: { id: 'id', userId: 'userId', nodeId: 'nodeId', status: 'status' },
   agentSessions: { workspaceId: 'workspaceId' },
