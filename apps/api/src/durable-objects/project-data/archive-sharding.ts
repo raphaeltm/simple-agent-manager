@@ -786,20 +786,21 @@ function assertEligibleTerminalSource(
       'ProjectData archive refuses sessions with active idle-cleanup schedule rows'
     );
   }
-  // A marker blocks archiving only while it is live by its own contract: an expiring marker
-  // until it expires, a non-expiring one (`idle_cleanup_failed`, `wake_failed`) for the session
-  // grace after it was raised. Neither kind is resolved when the session stops or fails, so the
-  // old unconditional check froze 35 production sessions (2026-11-12) behind markers nothing
-  // would ever resolve. Markers stay in the root object either way; archiving does not move them.
+  // An unresolved marker blocks archiving until the session grace has passed since its last
+  // deadline: its expiry for an expiring marker, its creation for a non-expiring one
+  // (`idle_cleanup_failed`, `wake_failed`). Neither kind is resolved when the session stops or
+  // fails, so the old unconditional check froze 35 production sessions (2026-11-12) behind
+  // markers nothing would ever resolve. Measuring from the expiry, not "is it expired", keeps a
+  // marker the expiry alarm has not processed yet from racing an archive (the alarm can still
+  // call `failSession`). Markers stay in the root object either way; archiving does not move them.
   if (
     countRows(
       sql,
       `SELECT COUNT(*) AS count FROM session_attention_markers
        WHERE session_id = ?
          AND resolved_at IS NULL
-         AND (expires_at > ? OR (expires_at IS NULL AND created_at > ?))`,
+         AND COALESCE(expires_at, created_at) > ?`,
       sessionId,
-      now,
       now - minTerminalAgeMs
     ) > 0
   ) {

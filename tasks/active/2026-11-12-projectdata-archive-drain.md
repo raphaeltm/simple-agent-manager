@@ -46,8 +46,8 @@ The SAM root ProjectData DO is at 9.08 GB of a 10e9 limit (2026-11-12 12:20Z ale
       and configuration docs. Throughput at the outer limit stated in PR (rule 81).
 - [x] 1b `assertEligibleTerminalSource`: drop `'error'` from the activity refusal; keep
       prompting/recovering and runtime_work_state active/settling.
-- [x] 1b attention refusal only for markers that are unresolved, unexpired, and created within
-      the session grace.
+- [x] 1b attention refusal only while `COALESCE(expires_at, created_at)` is within the session
+      grace (an unprocessed expiry cannot race the expiry alarm's `failSession`).
 - [x] 1b Refusal retry window default 7 d → 1 d (refusals are now cheap: released reservation,
       no slot). Permanent, so no expiry knob is needed; document it.
 - [x] 1c `expireDegradedSleepingConversations`: remove the open-task EXISTS; exclude sessions
@@ -57,11 +57,18 @@ The SAM root ProjectData DO is at 9.08 GB of a 10e9 limit (2026-11-12 12:20Z ale
       accepted, with prompting / fresh-marker controls; snapshot-purge trigger terminalizes a
       degraded no-fallback sleeper with a completed task; zombie (queued task) row ahead of valid
       rows does not block them.
-- [ ] Staging: real scheduled ticks; measure tick wall, coordinator CPU, publishes per tick.
+- [ ] Staging: real scheduled ticks; measure tick wall, full `cron.completed` duration on archive
+      ticks, coordinator CPU, publishes per tick; verify deployed `WALL_TIME_MS=60000`,
+      `SWEEP_SESSIONS=50` and the 1-day refusal retry (rule 70); sleeper expiry on real rows.
+- Not changed in PR 1, by design: `message_comments_present` stays a refusal (archiving would
+  cascade-delete the comments; 13 sessions), and `tool_payload_cleanup_incomplete` clears when the
+  cleanup retry succeeds (1 session). Legacy (non-compact) admission is now bounded only by wall
+  time and slots; production runs compact.
 
 ### PR A: flip, publish, then reclaim (bounded finalize)
 
 Research (2026-11-12, current main):
+
 - Coordinator phases (`scheduled/project-data-archive-sharding.ts`): `migrateClaimedCandidate` →
   ensureSourcePrepared → ensureTargetPrepared → `copySourceChunks` → `sealTargetAndSource`
   (target `archiveTargetSeal` + source `archiveSourceMarkTargetSealed`) → `persistRecoveryManifest`
@@ -98,7 +105,10 @@ Research (2026-11-12, current main):
   sessions behind a refused largest candidate" and "releases the write reservation"; reverting
   `durable-objects/project-data/archive-sharding.ts` reddens exactly the failSession case and the
   two stale-marker cases (controls stay green); reverting `services/session-expiry.ts` reddens
-  exactly the completed-task sleeper and the queued-zombie cases. New allowance test
+  exactly the completed-task sleeper and the queued-zombie cases. Review follow-ups: the slot case
+  ("a refused candidate does not take one of the tick's session slots") goes red when `journaled++`
+  is unconditional; the expiry-race marker control goes red against the previous
+  `expires_at > now OR ...` predicate. New allowance test
   (`write-budget-shipped-factor.test.ts`) goes red at a 1,900,000 allowance (694 < 720).
 - PR 1 test imports of ProjectData internals: none beyond existing public RPCs on the DO stub.
   New file: `apps/api/tests/workers/project-data-archive-drain-relief.test.ts`. No DO or D1

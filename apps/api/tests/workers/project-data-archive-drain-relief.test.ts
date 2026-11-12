@@ -143,6 +143,24 @@ describe('archive drain relief: fill the tick', () => {
     });
   });
 
+  it("a refused candidate does not take one of the tick's session slots", async () => {
+    const { projectId, source } = await seedArchiveProject('drain-slots');
+    const refusedId = await seedSession(source, 'refused-slot', 60);
+    await source.reportActivity(refusedId, 'prompting', { promptStartedAt: Date.now() });
+    await seedSession(source, 'slot-a', 20);
+    await seedSession(source, 'slot-b', 19);
+    await seedSession(source, 'slot-c', 18);
+    await source.runSummarySyncForTest();
+    await isolateSweepFixture(projectId, { clearCadence: true });
+
+    // Two slots. If the refusal took one, the tick would copy a single session.
+    const stats = await withArchiveEnv(sweepEnv({ PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '2' }), () =>
+      runTick(60_000)
+    );
+
+    expect(stats).toMatchObject({ refused: 1, migrated: 2, failed: 0 });
+  });
+
   it('releases the write reservation of a candidate the root refuses before copying', async () => {
     const { projectId, source } = await seedArchiveProject('drain-release');
     const refusedId = await seedSession(source, 'refused-only', 40);
@@ -220,9 +238,9 @@ describe('archive drain relief: refusals that describe no live work', () => {
       refused: false,
     },
     {
-      name: 'an expiring marker that has expired',
-      createdAgeMs: 3 * DAY_MS,
-      expiresInMs: -DAY_MS,
+      name: 'an expiring marker that expired before the session grace',
+      createdAgeMs: 5 * DAY_MS,
+      expiresInMs: -2 * DAY_MS,
       refused: false,
     },
     {
@@ -235,6 +253,12 @@ describe('archive drain relief: refusals that describe no live work', () => {
       name: 'control: an old marker that has not expired yet',
       createdAgeMs: 3 * DAY_MS,
       expiresInMs: DAY_MS,
+      refused: true,
+    },
+    {
+      name: 'control: a marker that expired inside the grace, before the expiry alarm ran',
+      createdAgeMs: 3 * DAY_MS,
+      expiresInMs: -60_000,
       refused: true,
     },
   ])('attention: $name', async ({ createdAgeMs, expiresInMs, refused }) => {

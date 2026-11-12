@@ -1557,9 +1557,9 @@ async function selectMigrationWork(
   const reclaimable = await selectReclaimableMigrations(env, config, config.sweepSessions, now);
   const remaining = config.sweepSessions - reclaimable.length;
   if (remaining <= 0) return { migrations: reclaimable, pending: [], pendingSlots: 0 };
-  // Not pre-packed by `sweepMessageBudget`: that budget bounds bytes MOVED, and applying it
-  // here would discard the very candidates a refusal needs to fall through to. The
-  // journaling loop applies it to the candidates it actually fences.
+  // Not packed by a cumulative message budget: the unscoped tick is bounded by wall time, the
+  // slots below and the daily write budget, and the extra rows are what a refusal falls
+  // through to (`processArchiveMigrationBatch`).
   const pending = await selectCandidates(env, config, nowDate, remaining);
   return { migrations: reclaimable, pending, pendingSlots: remaining };
 }
@@ -1589,9 +1589,9 @@ async function selectScopedMigrationWork(
   const remaining = config.sweepSessions - reclaimable.length;
   if (remaining <= 0) return { migrations: reclaimable, pending: [], pendingSlots: 0, selected };
 
-  // The scoped canary reports `selected` up front, so it packs here rather than reading
-  // spare fall-through candidates. Re-packing the same list inside the journaling loop is
-  // idempotent (a packed list never overflows its own budget), so the two agree.
+  // The scoped canary reports `selected` up front, so it packs by the cumulative message
+  // budget here rather than reading spare fall-through candidates. The journaling loop takes
+  // the packed list as is, so what it discloses is what it may journal.
   const candidates = applyMessageBudget(
     await selectScopedCandidates(env, config, nowDate, scope, remaining),
     config.sweepMessageBudget,
