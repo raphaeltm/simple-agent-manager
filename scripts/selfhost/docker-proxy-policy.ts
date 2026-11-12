@@ -97,16 +97,32 @@ export function buildFenceImageReference(docker: DockerCli): string {
   }
 }
 
+/** Whether the Docker daemon holds `reference` (celld tags every image it builds). */
+export function imageTagged(docker: DockerCli, reference: string): boolean {
+  try {
+    docker(['image', 'inspect', '--format', '{{.Id}}', reference]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * The sandbox image the previous deploy allowed, if any: kept for one deploy so a node still on
  * the previous version (until celld swaps generations) can start its sandbox.
+ *
+ * With `docker`, an image the daemon does not hold is dropped. When a deploy's predicted image
+ * and celld's own build disagree (the deploy then fails in assertCelldTaggedImages), the predicted
+ * image was never tagged; carrying it forward would fail the next deploy too, although no node
+ * can be running it.
  */
-export function previousSandboxImages(stateDir: string): string[] {
+export function previousSandboxImages(stateDir: string, docker?: DockerCli): string[] {
   try {
     const previous = parsePolicy(
       readFileSync(join(stateDir, DOCKER_PROXY_DIR, 'policy.json'), 'utf8')
     );
-    return previous.sandboxImages.slice(0, 1);
+    const kept = previous.sandboxImages.slice(0, 1);
+    return docker ? kept.filter((reference) => imageTagged(docker, reference)) : kept;
   } catch {
     return [];
   }
@@ -176,9 +192,7 @@ export function writeDockerProxyFiles(stateDir: string, policy: ProxyPolicy): st
 /** After `celld deploy`: celld must have tagged exactly the references the policy allows. */
 export function assertCelldTaggedImages(docker: DockerCli, policy: ProxyPolicy): void {
   for (const reference of [...policy.sandboxImages, policy.fenceImage]) {
-    try {
-      docker(['image', 'inspect', '--format', '{{.Id}}', reference]);
-    } catch {
+    if (!imageTagged(docker, reference)) {
       throw new Error(
         `celld deploy did not tag ${reference}, which the Docker socket proxy policy allows: ` +
           'celld computed a different image reference (did the base image move between builds?). ' +
@@ -215,7 +229,7 @@ export function prepareDockerProxyPolicy(input: {
     sandboxImage: buildImageReference(input.docker, join(context, 'Dockerfile'), context),
     fenceImage: buildFenceImageReference(input.docker),
     stateDir: input.stateDir,
-    previousSandboxImages: previousSandboxImages(input.stateDir),
+    previousSandboxImages: previousSandboxImages(input.stateDir, input.docker),
   });
   writeDockerProxyFiles(input.stateDir, policy);
   return policy;

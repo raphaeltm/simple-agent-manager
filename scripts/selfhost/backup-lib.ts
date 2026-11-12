@@ -50,6 +50,18 @@ export function isKeyServiceSecretPath(stateDir: string, src: string): boolean {
   return KEY_SERVICE_BACKUP_EXCLUDES.some((path) => rel === path || rel.startsWith(`${path}/`));
 }
 
+/**
+ * Rebuildable caches under the state dir, left out of every backup. `go-cache` is the vm-agent
+ * build cache (`pnpm selfhost:deploy` refills it); on the test box it was 1.6 GB of a 3.6 GB backup,
+ * and the state copy runs while celld is stopped, so it also lengthened every backup's downtime.
+ */
+export const STATE_CACHE_EXCLUDES = ['go-cache'];
+
+export function isRebuildableCachePath(stateDir: string, src: string): boolean {
+  const rel = relative(stateDir, src);
+  return STATE_CACHE_EXCLUDES.some((path) => rel === path || rel.startsWith(`${path}/`));
+}
+
 export const OBJECTSTORE_IMAGE =
   'pgsty/minio@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372';
 export const MANIFEST_NAME = 'backup-manifest.json';
@@ -330,7 +342,8 @@ export function runBackup(
     cpSync(ctx.stateDir, join(dest, STATE_DIR), {
       recursive: true,
       preserveTimestamps: true,
-      filter: (src) => !isKeyServiceSecretPath(ctx.stateDir, src),
+      filter: (src) =>
+        !isKeyServiceSecretPath(ctx.stateDir, src) && !isRebuildableCachePath(ctx.stateDir, src),
     });
     cpSync(ctx.envFile, join(dest, ENV_FILE), { preserveTimestamps: true });
   } finally {
