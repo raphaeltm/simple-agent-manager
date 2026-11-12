@@ -12,9 +12,9 @@ export { AiTokenBudgetCounter } from './durable-objects/ai-token-budget-counter'
 export { CodexRefreshLock } from './durable-objects/codex-refresh-lock';
 export { CredentialSetupSession } from './durable-objects/credential-setup-session';
 export { DiagnosisRunner } from './durable-objects/diagnosis-runner';
-export { HostedGitRepo } from './durable-objects/hosted-git-repo';
 export { GitHubUserAccessTokenLock } from './durable-objects/github-user-access-token-lock';
 export { GitLabUserAccessTokenLock } from './durable-objects/gitlab-user-access-token-lock';
+export { HostedGitRepo } from './durable-objects/hosted-git-repo';
 export { InteractionStore } from './durable-objects/interaction-store';
 export { NodeLifecycle } from './durable-objects/node-lifecycle';
 export { NotificationService } from './durable-objects/notification';

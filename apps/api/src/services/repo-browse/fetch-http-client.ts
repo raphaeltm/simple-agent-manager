@@ -23,7 +23,9 @@ async function collect(body: AsyncIterableIterator<Uint8Array> | undefined): Pro
   return out;
 }
 
-async function* streamChunks(stream: ReadableStream<Uint8Array> | null): AsyncGenerator<Uint8Array> {
+async function* streamChunks(
+  stream: ReadableStream<Uint8Array> | null
+): AsyncGenerator<Uint8Array> {
   if (!stream) return;
   const reader = stream.getReader();
   try {

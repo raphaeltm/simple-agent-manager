@@ -51,7 +51,10 @@ async function resolveArtifactsGitSource(
   db: Db,
   project: WorkspaceGitSourceProject
 ): Promise<WorkspaceGitSource> {
-  const artifactsSource: WorkspaceGitSource = { ...DEFAULT_GITHUB_SOURCE, repoProvider: 'artifacts' };
+  const artifactsSource: WorkspaceGitSource = {
+    ...DEFAULT_GITHUB_SOURCE,
+    repoProvider: 'artifacts',
+  };
   let repository = project.repository;
   if (repository === undefined) {
     const rows = await db

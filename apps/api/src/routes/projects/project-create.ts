@@ -20,8 +20,8 @@ import {
   requireGitLabUserAccessToken,
   verifyGitLabProjectAccess,
 } from '../../services/gitlab';
-import { getRuntimeLimits } from '../../services/limits';
 import { artifactsRemoteFetch, resolveArtifactsBackend } from '../../services/hosted-git/backend';
+import { getRuntimeLimits } from '../../services/limits';
 import {
   assertRepositoryAccess,
   isValidRepositoryFormat,

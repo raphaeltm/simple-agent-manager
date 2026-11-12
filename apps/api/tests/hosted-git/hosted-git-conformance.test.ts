@@ -42,7 +42,17 @@ async function git(args: string[], cwd?: string): Promise<GitResult> {
   try {
     const { stdout, stderr } = await execFileAsync(
       'git',
-      ['-c', 'credential.helper=', '-c', 'protocol.version=2', ...args],
+      [
+        '-c',
+        'credential.helper=',
+        '-c',
+        'protocol.version=2',
+        '-c',
+        'gc.auto=0',
+        '-c',
+        'maintenance.auto=false',
+        ...args,
+      ],
       {
         cwd,
         maxBuffer: 64 * 1024 * 1024,
@@ -61,7 +71,11 @@ async function git(args: string[], cwd?: string): Promise<GitResult> {
     return { code: 0, stdout, stderr };
   } catch (error) {
     const e = error as { code?: number; stdout?: string; stderr?: string };
-    return { code: typeof e.code === 'number' ? e.code : 1, stdout: e.stdout ?? '', stderr: e.stderr ?? '' };
+    return {
+      code: typeof e.code === 'number' ? e.code : 1,
+      stdout: e.stdout ?? '',
+      stderr: e.stderr ?? '',
+    };
   }
 }
 
@@ -149,7 +163,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await runtime?.close();
-  if (scratch) await rm(scratch, { recursive: true, force: true });
+  if (scratch) await rm(scratch, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 });
 
 describe('SAM-hosted repositories with a real git client', () => {
@@ -191,7 +205,15 @@ describe('SAM-hosted repositories with a real git client', () => {
 
     const shallow = await freshDir('shallow');
     await gitOk(
-      ['clone', '--depth', '1', '--branch', 'feature/one', localRemote(project.repository, token), shallow],
+      [
+        'clone',
+        '--depth',
+        '1',
+        '--branch',
+        'feature/one',
+        localRemote(project.repository, token),
+        shallow,
+      ],
       undefined
     );
     expect((await gitOk(['rev-parse', 'HEAD'], shallow)).stdout.trim()).toBe(head);
@@ -272,7 +294,10 @@ describe('SAM-hosted repositories with a real git client', () => {
     const work = await freshDir('big');
     await gitOk(['clone', localRemote(project.repository, token), work]);
     // Incompressible content just over the cap.
-    await writeFile(join(work, 'big.bin'), randomBytes(DEFAULT_HOSTED_GIT_MAX_PUSH_BYTES + 1024 * 1024));
+    await writeFile(
+      join(work, 'big.bin'),
+      randomBytes(DEFAULT_HOSTED_GIT_MAX_PUSH_BYTES + 1024 * 1024)
+    );
     await gitOk(['add', '.'], work);
     await gitOk(['commit', '-m', 'big'], work);
     const refused = await git(['push', 'origin', 'HEAD:refs/heads/too-big'], work);
@@ -304,6 +329,33 @@ describe('SAM-hosted repositories with a real git client', () => {
   });
 });
 
+describe('member clone credentials (POST /api/projects/:id/hosted-git/token)', () => {
+  it('lets the owner clone and push, and refuses a non-member', async () => {
+    const owner = await createEmailOnlyUser();
+    const project = await createHostedProject(owner, 'Member Token');
+    const res = await runtime.fetch(`/api/projects/${project.id}/hosted-git/token?scope=write`, {
+      method: 'POST',
+      headers: { 'x-test-user-id': owner },
+    });
+    const body = (await res.json()) as { token: string; cloneUrl: string; host: string };
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    expect(body.cloneUrl).toBe(project.repository);
+    const work = await freshDir('member');
+    await gitOk(['clone', localRemote(body.cloneUrl, body.token), work]);
+    await writeFile(join(work, 'human.txt'), 'from a laptop\n');
+    await gitOk(['add', '.'], work);
+    await gitOk(['commit', '-m', 'human'], work);
+    await gitOk(['push', 'origin', 'HEAD'], work);
+
+    const stranger = await createEmailOnlyUser();
+    const denied = await runtime.fetch(`/api/projects/${project.id}/hosted-git/token`, {
+      method: 'POST',
+      headers: { 'x-test-user-id': stranger },
+    });
+    expect([403, 404]).toContain(denied.status);
+  });
+});
+
 describe('vertical: project creation to a workspace clone and push', () => {
   it('a workspace gets a token from git-token, clones, pushes, and is refused once stopped', async () => {
     const userId = await createEmailOnlyUser();
@@ -321,7 +373,16 @@ describe('vertical: project creation to a workspace clone and push', () => {
       `INSERT INTO workspaces (id, node_id, project_id, user_id, name, repository, branch, status, vm_size, vm_location, created_at, updated_at)
        VALUES (?, ?, ?, ?, 'ws', ?, ?, 'running', 'small', 'local', ?, ?)`
     )
-      .bind(workspaceId, nodeId, project.id, userId, project.repository, project.defaultBranch, now, now)
+      .bind(
+        workspaceId,
+        nodeId,
+        project.id,
+        userId,
+        project.repository,
+        project.defaultBranch,
+        now,
+        now
+      )
       .run();
 
     const callback = (await (
@@ -347,7 +408,13 @@ describe('vertical: project creation to a workspace clone and push', () => {
     expect(body.username).toBe('x');
 
     const work = await freshDir('workspace');
-    await gitOk(['clone', '--branch', project.defaultBranch, localRemote(body.cloneUrl, body.token), work]);
+    await gitOk([
+      'clone',
+      '--branch',
+      project.defaultBranch,
+      localRemote(body.cloneUrl, body.token),
+      work,
+    ]);
     await gitOk(['checkout', '-b', 'sam/agent-work'], work);
     await writeFile(join(work, 'agent.txt'), 'agent output\n');
     await gitOk(['add', '.'], work);
@@ -357,7 +424,13 @@ describe('vertical: project creation to a workspace clone and push', () => {
     // The pushed branch is visible to a fresh reader.
     const reader = await mintToken(project.artifactsRepoId, 'read');
     const check = await freshDir('verify');
-    await gitOk(['clone', '--branch', 'sam/agent-work', localRemote(project.repository, reader), check]);
+    await gitOk([
+      'clone',
+      '--branch',
+      'sam/agent-work',
+      localRemote(project.repository, reader),
+      check,
+    ]);
     expect(await readFile(join(check, 'agent.txt'), 'utf8')).toBe('agent output\n');
 
     // Lifecycle fence: once the workspace stops, its token is refused.

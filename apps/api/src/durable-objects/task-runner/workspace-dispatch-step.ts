@@ -18,7 +18,9 @@ async function loadTaskRunnerProjectRepo(
   state: TaskRunnerState,
   rc: TaskRunnerContext
 ): Promise<TaskRunnerProjectRepo | null> {
-  return rc.env.DATABASE.prepare(`SELECT repo_provider AS repoProvider, repository FROM projects WHERE id = ?`)
+  return rc.env.DATABASE.prepare(
+    `SELECT repo_provider AS repoProvider, repository FROM projects WHERE id = ?`
+  )
     .bind(state.projectId)
     .first<TaskRunnerProjectRepo>();
 }

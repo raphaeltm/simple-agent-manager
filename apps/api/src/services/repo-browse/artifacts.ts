@@ -12,7 +12,11 @@ import webHttp from 'isomorphic-git/http/web';
 
 import type { Env } from '../../env';
 import { errors } from '../../middleware/error';
-import { artifactsRemoteFetch, isLocalHostedGitActive, resolveArtifactsBackend } from '../hosted-git/backend';
+import {
+  artifactsRemoteFetch,
+  isLocalHostedGitActive,
+  resolveArtifactsBackend,
+} from '../hosted-git/backend';
 import { createFetchHttpClient } from './fetch-http-client';
 import { MemoryFS } from './memory-fs';
 import type { RepoBrowser } from './types';
@@ -168,7 +172,7 @@ export class ArtifactsRepoBrowser implements RepoBrowser {
   private async info(): Promise<ArtifactsRepoInfo> {
     if (!this.infoPromise) {
       this.infoPromise = (async () => {
-        const binding = resolveArtifactsBackend(this.env);
+        const binding = this.env.ARTIFACTS ?? resolveArtifactsBackend(this.env);
         if (!binding) throw errors.badRequest('Artifacts is not enabled on this deployment');
         const repo = await binding.get(this.repoId);
         const ttl =

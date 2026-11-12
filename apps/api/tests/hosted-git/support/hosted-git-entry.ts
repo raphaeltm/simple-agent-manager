@@ -9,10 +9,14 @@ import { Hono } from 'hono';
 
 import type { Env } from '../../../src/env';
 import { handleAppError } from '../../../src/middleware/app-error-handler';
+import { hostedGitTokenRoutes } from '../../../src/routes/projects/hosted-git-token';
 import { registerProjectCreateRoute } from '../../../src/routes/projects/project-create';
 import { runtimeRoutes } from '../../../src/routes/workspaces/runtime';
 import { isLocalHostedGitActive } from '../../../src/services/hosted-git/backend';
-import { handleHostedGitRequest, HOSTED_GIT_PATH_PREFIX } from '../../../src/services/hosted-git/http';
+import {
+  handleHostedGitRequest,
+  HOSTED_GIT_PATH_PREFIX,
+} from '../../../src/services/hosted-git/http';
 import { type HostedGitScope, mintHostedGitToken } from '../../../src/services/hosted-git/tokens';
 import { signCurrentWorkspaceCallbackToken } from '../../../src/services/jwt';
 
@@ -36,6 +40,7 @@ projects.use('*', async (c, next) => {
   await next();
 });
 registerProjectCreateRoute(projects);
+projects.route('/', hostedGitTokenRoutes);
 app.route('/api/projects', projects);
 app.route('/api/workspaces', runtimeRoutes);
 

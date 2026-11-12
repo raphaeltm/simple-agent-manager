@@ -49,7 +49,8 @@ function repoStub(env: BackendEnv, name: string): DurableObjectStub {
 }
 
 function requireEncryptionKey(env: BackendEnv): Pick<Env, 'ENCRYPTION_KEY'> {
-  if (!env.ENCRYPTION_KEY) throw new Error('ENCRYPTION_KEY is required for SAM-hosted repositories');
+  if (!env.ENCRYPTION_KEY)
+    throw new Error('ENCRYPTION_KEY is required for SAM-hosted repositories');
   return { ENCRYPTION_KEY: env.ENCRYPTION_KEY };
 }
 

@@ -12,6 +12,7 @@
  */
 import { DurableObject } from 'cloudflare:workers';
 
+import { log } from '../lib/logger';
 import {
   DEFAULT_HOSTED_GIT_LIMITS,
   hostedGitPushByteBudget,
@@ -126,7 +127,7 @@ export class HostedGitRepo extends DurableObject {
       return new Response('not found\n', { status: 404 });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error('hosted_git.request_failed', { path, method: req.method, error: msg });
+      log.error('hosted_git.request_failed', { path, method: req.method, error: msg });
       return new Response(`error: ${msg}\n`, { status: 500 });
     }
   }
@@ -200,7 +201,7 @@ export class HostedGitRepo extends DurableObject {
       await run;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error('hosted_git.receive_failed', { error: msg });
+      log.error('hosted_git.receive_failed', { error: msg });
       return new Response(`error: ${msg}\n`, { status: 500 });
     }
     return new Response(concat(chunks), {
@@ -292,7 +293,7 @@ export class HostedGitRepo extends DurableObject {
         }
       }
       if (unpackError) {
-        console.warn('hosted_git.push_refused', { reason: unpackError });
+        log.warn('hosted_git.push_refused', { reason: unpackError });
         progress(`${unpackError}\n`);
         // Read (and discard) the rest of the upload before answering: a response sent while the
         // client is still uploading resets the connection, and git then shows "remote end hung up"

@@ -180,7 +180,10 @@ export function isGuidedCredentialSetupAvailable(
  * server (`services/hosted-git/backend.ts`, the one resolver for both).
  */
 export function isArtifactsAvailable(
-  env: Pick<Env, 'ARTIFACTS' | 'ARTIFACTS_ENABLED' | 'HOSTED_GIT' | 'HOSTED_GIT_BACKEND' | 'BASE_DOMAIN'>
+  env: Pick<
+    Env,
+    'ARTIFACTS' | 'ARTIFACTS_ENABLED' | 'HOSTED_GIT' | 'HOSTED_GIT_BACKEND' | 'BASE_DOMAIN'
+  >
 ): boolean {
   return resolveArtifactsBackend(env) !== null;
 }

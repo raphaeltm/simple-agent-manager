@@ -97,7 +97,11 @@ export async function mintHostedGitToken(
   if (input.workspaceId) claims.workspaceId = input.workspaceId;
   const payload = base64UrlEncode(encoder.encode(JSON.stringify(claims)));
   const unsigned = `${TOKEN_PREFIX}.${payload}`;
-  const signature = await crypto.subtle.sign('HMAC', await signingKey(env), encoder.encode(unsigned));
+  const signature = await crypto.subtle.sign(
+    'HMAC',
+    await signingKey(env),
+    encoder.encode(unsigned)
+  );
   return {
     token: `${unsigned}.${base64UrlEncode(new Uint8Array(signature))}`,
     expiresAt: new Date(exp * 1000).toISOString(),

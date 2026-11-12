@@ -24,8 +24,6 @@ import { parsePositiveInt } from '../../lib/route-helpers';
 import { getCredentialEncryptionKey } from '../../lib/secrets';
 import { ulid } from '../../lib/ulid';
 import { requireApproved, requireAuth } from '../../middleware/auth';
-import { hostedGitHost, isLocalHostedGitActive, resolveArtifactsBackend } from '../../services/hosted-git/backend';
-import { mintHostedGitToken } from '../../services/hosted-git/tokens';
 import { errors } from '../../middleware/error';
 import {
   AgentTypeBodySchema,
@@ -50,6 +48,12 @@ import {
   requireGitLabUserAccessTokenResultForOwner,
   verifyGitLabProjectAccess,
 } from '../../services/gitlab';
+import {
+  hostedGitHost,
+  isLocalHostedGitActive,
+  resolveArtifactsBackend,
+} from '../../services/hosted-git/backend';
+import { mintHostedGitToken } from '../../services/hosted-git/tokens';
 import { nodeStatusTerminatesCallbacks } from '../../services/node-callback-auth';
 import { persistError } from '../../services/observability';
 import { resolveProjectAgentDefault } from '../../services/project-agent-defaults';
@@ -1296,7 +1300,11 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
           scope: requestedScope,
           ttlSeconds: ttl,
           workspaceId: workspace.workspaceId,
-        }).then((minted) => ({ plaintext: minted.token, expiresAt: minted.expiresAt, expires_at: undefined }))
+        }).then((minted) => ({
+          plaintext: minted.token,
+          expiresAt: minted.expiresAt,
+          expires_at: undefined,
+        }))
       : await repo.createToken(requestedScope, ttl);
 
     // Strip ?expires= suffix from token for git credential use
