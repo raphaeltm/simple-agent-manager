@@ -447,6 +447,59 @@ describe('hosted git hardening (security review findings)', () => {
   });
 });
 
+describe('browsing a hosted repository through the repo-browse API', () => {
+  it('lists branches, the tree and a file, and compares two branches', async () => {
+    const owner = await createEmailOnlyUser();
+    const project = await createHostedProject(owner, 'Browse Me');
+    const token = await mintToken(project, 'write');
+    const work = await freshDir('browse');
+    await gitOk(['clone', localRemote(project.repository, token), work]);
+    await gitOk(['checkout', '-b', 'feature/browse'], work);
+    await mkdir(join(work, 'src'));
+    await writeFile(join(work, 'src', 'app.ts'), 'export const answer = 42;\n');
+    await gitOk(['add', '.'], work);
+    await gitOk(['commit', '-m', 'add app'], work);
+    await gitOk(['push', 'origin', 'feature/browse'], work);
+
+    const get = async (path: string) => {
+      const res = await runtime.fetch(`/api/projects/${project.id}${path}`, {
+        headers: { 'x-test-user-id': owner },
+      });
+      const body = (await res.json()) as Record<string, unknown>;
+      expect(res.status, `${path} ${JSON.stringify(body)}`).toBe(200);
+      return body;
+    };
+    const branches = (await get('/repo/branches')) as {
+      branches: Array<{ name: string; isDefault: boolean }>;
+    };
+    expect(branches.branches[0]).toEqual({ name: project.defaultBranch, isDefault: true });
+    expect(branches.branches.map((b) => b.name)).toContain('feature/browse');
+
+    const tree = (await get('/repo/tree?ref=feature/browse')) as {
+      entries: Array<{ path: string }>;
+    };
+    const paths = tree.entries.map((e) => e.path);
+    expect(paths).toContain('README.md');
+    expect(paths).toContain('src/app.ts');
+
+    const file = (await get('/repo/file?ref=feature/browse&path=src/app.ts')) as {
+      content?: string;
+    };
+    expect(file.content).toBe('export const answer = 42;\n');
+
+    const compare = (await get(
+      `/repo/compare?base=${project.defaultBranch}&head=feature/browse`
+    )) as { files: Array<{ path: string; status: string }> };
+    expect(compare.files.map((f) => f.path)).toEqual(['src/app.ts']);
+
+    const stranger = await createEmailOnlyUser();
+    const denied = await runtime.fetch(`/api/projects/${project.id}/repo/branches`, {
+      headers: { 'x-test-user-id': stranger },
+    });
+    expect([403, 404]).toContain(denied.status);
+  });
+});
+
 describe('import from a public git URL', () => {
   it('imports the source default branch and history into a new hosted project', async () => {
     const owner = await createEmailOnlyUser();

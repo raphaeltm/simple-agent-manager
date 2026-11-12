@@ -11,6 +11,7 @@ import type { Env } from '../../../src/env';
 import { handleAppError } from '../../../src/middleware/app-error-handler';
 import { hostedGitTokenRoutes } from '../../../src/routes/projects/hosted-git-token';
 import { registerProjectCreateRoute } from '../../../src/routes/projects/project-create';
+import { repoBrowseRoutes } from '../../../src/routes/projects/repo-browse';
 import { runtimeRoutes } from '../../../src/routes/workspaces/runtime';
 import { isLocalHostedGitActive } from '../../../src/services/hosted-git/backend';
 import {
@@ -41,6 +42,7 @@ projects.use('*', async (c, next) => {
 });
 registerProjectCreateRoute(projects);
 projects.route('/', hostedGitTokenRoutes);
+projects.route('/', repoBrowseRoutes);
 app.route('/api/projects', projects);
 app.route('/api/workspaces', runtimeRoutes);
 
