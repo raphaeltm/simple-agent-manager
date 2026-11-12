@@ -251,6 +251,9 @@ describe('readiness RPC interleaving', () => {
     const { stub, input } = await fixture('vm');
     await stub.sleepSession(input.chatSessionId);
     const activation = vi.fn();
+    const sideEffectGuard = vi.fn(async () => {
+      throw new Error('read-only steering cannot authorize recovery side effects');
+    });
     const readOnlyBindings = {
       ...bindings,
       PROJECT_DATA: { idFromName: activation, get: activation },
@@ -261,7 +264,7 @@ describe('readiness RPC interleaving', () => {
         input.projectId,
         input.chatSessionId,
         undefined,
-        async () => null,
+        sideEffectGuard,
         { allowWake: false }
       );
     expect(await resolve()).toMatchObject({ kind: 'ready' });
@@ -271,6 +274,7 @@ describe('readiness RPC interleaving', () => {
       .run();
     expect(await resolve()).toMatchObject({ kind: 'retry' });
     expect(activation).not.toHaveBeenCalled();
+    expect(sideEffectGuard).not.toHaveBeenCalled();
     await runInDurableObject(stub, (_instance, state) => {
       expect(state.storage.sql.exec('SELECT * FROM session_wake_readiness').toArray()).toEqual([]);
       expect(
