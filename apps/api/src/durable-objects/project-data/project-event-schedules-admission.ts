@@ -6,11 +6,7 @@
 import type { ProjectSchedule } from '@simple-agent-manager/shared';
 
 import { ulid } from '../../lib/ulid';
-import { safeNotice, scheduledMessageNotice } from '../../services/sam-notice-builders';
-import {
-  buildSharedSessionSpeakerLine,
-  type SharedSessionNames,
-} from '../../services/shared-session-names';
+import { projectDataPorts } from './ports';
 import {
   assertScheduleWriterStillActive,
   requireScheduleTarget,
@@ -24,6 +20,10 @@ import {
   type AcceptPromptDeliveryInput,
   acceptPromptDeliveryInTransaction,
 } from './prompt-delivery';
+import {
+  buildSharedSessionSpeakerLine,
+  type SharedSessionNames,
+} from './shared-session-names';
 import type { Env } from './types';
 
 /** A teammate's scheduled message: who sent it, as the runner resolved it before admission. */
@@ -121,9 +121,9 @@ export function admitScheduleClaim(
       // agent without a chat (the SAM assistant, a workspace agent) records no creator chat.
       notice:
         schedule.promptAuthor !== 'human' && (agentNote || schedule.creatorChatSessionId)
-          ? safeNotice(
+          ? projectDataPorts().notices.safe(
               () =>
-                scheduledMessageNotice({
+                projectDataPorts().notices.scheduledMessage({
                   scheduleId: schedule.id,
                   prompt,
                   reason: schedule.reason,

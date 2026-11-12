@@ -2,19 +2,18 @@ import type { ProjectSchedule } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
 import { ulid } from '../../lib/ulid';
-import type { ReservedTaskSubmissionInput } from '../../services/reserved-task-submission';
-import { submitReservedTask } from '../../services/reserved-task-submission';
-import { loadSharedSessionNames } from '../../services/shared-session-names';
 import {
   type DurabilityFoundationHooks,
   finalizeAcceptedPromptDelivery,
 } from './durability-foundation';
+import { projectDataPorts, type ReservedTaskSubmissionInput } from './ports';
 import { admitScheduleClaim, scheduledTaskPrompt } from './project-event-schedules-admission';
 import { requireScheduleAction, scheduleSharedAccess } from './project-event-schedules-authority';
 import { boundedScheduleTaskLabel, scheduleLimits } from './project-event-schedules-config';
 import { getSchedule, scheduleSharedAccessGrantId } from './project-event-schedules-storage';
 import { ProjectEventValidationError } from './project-events-contracts';
 import { stableStringify } from './project-events-values';
+import { loadSharedSessionNames } from './shared-session-names';
 import type { Env } from './types';
 
 const reservationSchema = v.object({
@@ -219,7 +218,7 @@ async function submitAdmittedSchedule(sql: SqlStorage, env: Env, projectId: stri
       submitToken
     );
   try {
-    const result = await submitReservedTask(env as unknown as import('../../env').Env, input);
+    const result = await projectDataPorts().tasks.submitReservedTask(env, input);
     if (result.outcome === 'admitted')
       settle('admitted', Date.now() + limits.retryBaseMs, null, true);
     else if (result.outcome === 'terminal')

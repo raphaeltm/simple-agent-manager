@@ -5,7 +5,7 @@
 import type { PolicyCategory, PolicyScope, PolicySource } from '@simple-agent-manager/shared';
 
 import type { ProjectData } from '../durable-objects/project-data';
-import type { Env } from '../env';
+import type { ProjectDataEnv as Env } from '../durable-objects/project-data/types';
 
 async function getStub(env: Env, projectId: string): Promise<DurableObjectStub<ProjectData>> {
   const id = env.PROJECT_DATA.idFromName(projectId);

@@ -1,6 +1,6 @@
 /** Scheduling hint from a committed wake; delivery admission remains authoritative. */
-import type { Env } from '../../env';
 import { nudgePromptDeliveriesForTarget } from './prompt-delivery';
+import type { Env } from './types';
 
 export interface SessionWakeReadyInput {
   projectId: string;

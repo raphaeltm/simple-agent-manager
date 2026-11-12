@@ -13,7 +13,7 @@
  */
 import { beforeEach,describe, expect, it } from 'vitest';
 
-import { runMigrations } from '../../src/durable-objects/migrations';
+import { runMigrations } from '../../src/durable-objects/project-data/migrations';
 
 /**
  * Minimal in-memory SQL storage mock for ProjectData DO operations.

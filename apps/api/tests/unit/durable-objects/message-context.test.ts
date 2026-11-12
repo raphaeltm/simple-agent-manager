@@ -11,11 +11,11 @@
 import Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { runMigrations } from '../../../src/durable-objects/migrations';
 import {
   type MessageContextRequest,
   readSourceMessageContext,
 } from '../../../src/durable-objects/project-data/message-context';
+import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
 import type { Env } from '../../../src/durable-objects/project-data/types';
 import { createSqlStorage } from './sql-storage-test-utils';
 

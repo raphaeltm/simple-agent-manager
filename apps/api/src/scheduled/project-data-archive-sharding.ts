@@ -8,8 +8,10 @@ import type {
   ArchiveTargetAbandonResult,
   ArchiveTargetInspectResult,
 } from '../durable-objects/project-data/archive-sharding';
-import type { Env } from '../env';
+import { projectDataPorts } from '../durable-objects/project-data/ports';
+import type { ProjectDataEnv } from '../durable-objects/project-data/types';
 import { createModuleLogger, serializeError } from '../lib/logger';
+import { breakerWasClosedBeforeOpening } from '../project-data-archive/breaker-opening';
 import {
   COMPACT_ARCHIVE_CHUNK_BYTES,
   COMPACT_ARCHIVE_FORMAT,
@@ -68,10 +70,9 @@ import {
   isProjectDataArchiveExactRoutingEnabled,
   rootProjectDataOwner,
 } from '../services/project-data-archive-routing';
-import {
-  alertProjectDataArchiveBreakerOpened,
-  breakerWasClosedBeforeOpening,
-} from './project-data-archive-breaker-alerts';
+
+/** The Worker cron runs this job; the deployed Worker always binds the archive bucket. */
+type Env = ProjectDataEnv & { PROJECT_DATA_ARCHIVE_R2: R2Bucket };
 
 const log = createModuleLogger('scheduled.project_data_archive_sharding');
 const PROJECT_DATA_ARCHIVE_DEFAULT_POISON_AFTER_ATTEMPTS = 3;
@@ -3283,7 +3284,7 @@ export async function poisonProjectDataArchiveMigration(
     ).bind(input.projectId, input.reason, now, now),
   ]);
   if (breakerWasClosedBeforeOpening(breakerBefore)) {
-    await alertProjectDataArchiveBreakerOpened(env, {
+    await projectDataPorts().operations.alertArchiveBreakerOpened(env, {
       projectId: input.projectId,
       migrationId: input.migrationId,
       reason: input.reason,

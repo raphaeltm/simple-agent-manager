@@ -2,7 +2,6 @@ import { TASK_TERMINAL_STATUSES } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
 import { createModuleLogger, serializeError } from '../../lib/logger';
-import { parseRowOrNull } from '../row-validation';
 import { readProjectEventWakeLeaseUntil } from './project-events-wake-delivery';
 import {
   CANDIDATE_GATE_META_PREFIX,
@@ -25,6 +24,7 @@ import {
   reconciliationIdleMs,
   reconciliationProbeMaxAttempts,
 } from './reconciliation-thresholds';
+import { parseRowOrNull } from './row-schemas';
 import { freshRuntimeWorkProgressAt } from './runtime-work-progress';
 import type { Env } from './types';
 

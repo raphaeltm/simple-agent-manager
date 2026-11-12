@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { runMigrations } from '../../../src/durable-objects/migrations';
+import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
 import { processTaskWaits } from '../../../src/durable-objects/project-data/task-wait-supervisor';
 import {
   computeTaskWaitAlarmTime,

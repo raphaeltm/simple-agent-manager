@@ -61,12 +61,18 @@ core branch `sam/help-identify-parts-worker-embcza`.
 ## Checklist
 
 ### Step 1 — decouple in place
-- [ ] `ProjectDataEnv` + ports interface + registry inside the DO directory
-- [ ] Worker port implementation + configure at worker entry + test setup
-- [ ] Replace every outside import in scope with ports / moved modules
-- [ ] Move ProjectData-owned helpers into scope (re-export at old paths)
-- [ ] Remove `WorkerEnv` casts from scope
-- [ ] Typecheck, lint, tests green; push
+- [x] `ProjectDataEnv` (`durable-objects/project-data/types.ts`) + `ports.ts` registry
+- [x] Worker port implementation `src/project-data-ports.ts`; `src/project-data-wiring.ts`
+      configures it and re-exports the class; unit tests configure in `tests/setup/project-data-ports.ts`
+- [x] Replace every outside import in scope with ports / moved modules (remaining: W0 kernel
+      candidates route-helpers, search-query-limits, fts5, durable-object-retry; W2's
+      provider-limit-policy → scheduler-core)
+- [x] Move ProjectData-owned helpers into scope (agent-wake-policy, shared-session-names,
+      lifecycle event inputs, session revocations, migrations.ts, mapRows/parseRowOrNull)
+- [x] Remove `WorkerEnv` casts from scope (DO liveness adapter moved to
+      `services/task-runtime-liveness-local.ts`, the port implementation)
+- [x] Typecheck clean
+- [ ] Lint, tests green; push
 
 ### Step 2 — lift into `packages/project-data` (after "W0 ready")
 - [ ] Package scaffold from W0 template
@@ -83,3 +89,8 @@ core branch `sam/help-identify-parts-worker-embcza`.
 ## Progress notes
 
 - 2026-11-12: research done, plan recorded, W0 asked for route-helpers + durable-object-retry.
+- 2026-11-12: step 1 code done; `scheduled/project-data-archive-breaker-alerts.ts` stays in the
+  worker (operator notifications); the sharding job reaches it through
+  `operations.alertArchiveBreakerOpened`. W2 confirmed `parseProviderLimitWait` is exported by
+  scheduler-core. Baseline unit pool: 1,087 files / 16,016 tests (one failure seen was caused by
+  edits during the run; passes on a clean tree).

@@ -9,10 +9,7 @@ import {
   TASK_TERMINAL_STATUSES,
 } from '@simple-agent-manager/shared';
 
-import {
-  isSessionRecoverySourceTaskGuardValid,
-  type SessionRecoverySourceTaskGuard,
-} from '../../services/session-recovery-authority';
+import { projectDataPorts, type SessionRecoverySourceTaskGuard } from './ports';
 import type { PromptDeliveryClaim, PromptDeliveryResult } from './prompt-delivery';
 import { labelUndeliveredPrompt, senderLacksSessionAccess } from './session-access';
 import type { Env } from './types';
@@ -245,7 +242,7 @@ export async function invalidProjectEventWakeSourceTaskResult(
       capabilities: null,
     };
   }
-  const valid = await isSessionRecoverySourceTaskGuardValid(env.DATABASE, {
+  const valid = await projectDataPorts().sessions.isSourceTaskGuardValid(env, {
     requireSourceProjectMember: true,
     taskId: claim.message.sourceTaskId,
     projectId,

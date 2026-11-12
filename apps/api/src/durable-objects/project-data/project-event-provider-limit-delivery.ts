@@ -1,7 +1,7 @@
 import { SAM_NOTICE_METADATA_KEY } from '@simple-agent-manager/shared';
 
-import { credentialLimitReferenceKey } from '../../services/credential-limit-events/values';
 import { parseProviderLimitWait } from '../../services/provider-limit-policy';
+import { projectDataPorts } from './ports';
 import { resolveProjectEventLimits } from './project-events-limits';
 import { readEvents, readSubscription } from './project-events-materialization-storage';
 import { buildWakePromptInput } from './project-events-wake-prompt';
@@ -34,7 +34,7 @@ export async function providerLimitEventDeliveryGuard(
   // Retain the parked identity as well: queued self-notices must not revive after credential changes.
   const keys = [
     ...new Set(
-      [await credentialLimitReferenceKey(task?.credential_reference), wait?.credentialKey].filter(
+      [await projectDataPorts().credentials.limitReferenceKey(task?.credential_reference), wait?.credentialKey].filter(
         (key): key is string => Boolean(key)
       )
     ),

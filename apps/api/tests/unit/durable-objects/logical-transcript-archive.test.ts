@@ -8,7 +8,6 @@
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { runMigrations } from '../../../src/durable-objects/migrations';
 import * as archive from '../../../src/durable-objects/project-data/archive-sharding';
 import {
   readSourceLogicalMessage,
@@ -24,6 +23,7 @@ import {
   readTargetMessageContext,
   targetTranscriptReader,
 } from '../../../src/durable-objects/project-data/message-context';
+import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
 import type { Env } from '../../../src/durable-objects/project-data/types';
 import { writeCompactChunk } from '../../../src/project-data-archive/compact-r2';
 import { PROJECT_DATA_ARCHIVE_TABLES } from '../../../src/project-data-archive/contract';

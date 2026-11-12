@@ -1,7 +1,6 @@
-import type { Env as WorkerEnv } from '../../env';
 import { createModuleLogger } from '../../lib/logger';
-import { transitionTaskToTerminal } from '../../services/task-terminal-transition';
 import { recordActivityEventInternal } from './activity';
+import { projectDataPorts } from './ports';
 import { terminalizeChatSessionActivity } from './session-state';
 import * as sessions from './sessions';
 import type { Env as DOEnv } from './types';
@@ -55,7 +54,7 @@ export async function terminallyFailDeadTarget(
   const errorMessage = `Agent workspace unavailable during reconciliation (${targetResult.reason})`;
   const projectId = hooks.projectId ?? targetResult.projectId ?? null;
 
-  const transitionOutcome = await transitionTaskToTerminal(env as unknown as WorkerEnv, {
+  const transitionOutcome = await projectDataPorts().tasks.transitionToTerminal(env, {
     taskId: candidate.taskId,
     projectId,
     status: 'failed',
@@ -124,9 +123,7 @@ export async function terminallyFailDeadTarget(
 
 async function cleanupTaskRun(env: DOEnv, workspaceId: string, taskId: string): Promise<void> {
   try {
-    const workerEnv = env as unknown as WorkerEnv;
-    const { cleanupTaskRun: cleanup } = await import('../../services/task-runner');
-    await cleanup(taskId, workerEnv);
+    await projectDataPorts().tasks.cleanupTaskRun(env, taskId);
   } catch (err) {
     log.error('reconciliation.cleanup_task_run_failed', {
       workspaceId,

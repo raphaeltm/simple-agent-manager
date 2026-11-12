@@ -33,7 +33,7 @@ export {
   parseCheckpointEpisodeRow,
   parseCheckpointProgressEnvelope,
 } from './row-schemas/checkpoints';
-export { parseRow, safeParseJson } from './row-schemas/core';
+export { mapRows, parseRow, parseRowOrNull, safeParseJson } from './row-schemas/core';
 export {
   parseKnowledgeEntityBasicRow,
   parseKnowledgeEntityIndexRow,

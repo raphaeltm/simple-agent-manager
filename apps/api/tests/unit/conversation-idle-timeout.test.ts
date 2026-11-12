@@ -19,7 +19,6 @@ vi.mock('../../src/lib/logger', async (importOriginal) => ({
   createModuleLogger: () => loggerMocks,
 }));
 
-import { runMigrations } from '../../src/durable-objects/migrations';
 import { updateMessageActivity } from '../../src/durable-objects/project-data/activity';
 import {
   computeProjectDataAlarmSectionTimes,
@@ -27,16 +26,15 @@ import {
 } from '../../src/durable-objects/project-data/alarm-schedule';
 import { processExpiredCleanups } from '../../src/durable-objects/project-data/idle-cleanup';
 import { terminalizeIdleTaskInD1 } from '../../src/durable-objects/project-data/idle-cleanup-terminalization';
+import { runMigrations } from '../../src/durable-objects/project-data/migrations';
 import {
   sleepSession,
   stopSessionInternal,
   updateSessionTopic,
   wakeSession,
 } from '../../src/durable-objects/project-data/sessions';
-import {
-  getLocalTaskRuntimeLiveness,
-  readTaskAcpLivenessSignals,
-} from '../../src/durable-objects/project-data/task-runtime-liveness';
+import { readTaskAcpLivenessSignals } from '../../src/durable-objects/project-data/task-acp-liveness-signals';
+import { getLocalTaskRuntimeLiveness } from '../../src/services/task-runtime-liveness-local';
 import type { Env as ProjectDataEnv } from '../../src/durable-objects/project-data/types';
 import { checkWorkspaceIdleTimeouts } from '../../src/durable-objects/project-data/workspace-idle-timeouts';
 import type { Env } from '../../src/env';

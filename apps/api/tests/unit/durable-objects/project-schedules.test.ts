@@ -8,8 +8,8 @@ vi.mock('../../../src/services/reserved-task-submission', () => ({
 }));
 
 import * as schema from '../../../src/db/schema';
-import { runMigrations } from '../../../src/durable-objects/migrations';
 import type { DurabilityFoundationHooks } from '../../../src/durable-objects/project-data/durability-foundation';
+import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
 import type { ProjectEventScheduleEnv } from '../../../src/durable-objects/project-data/project-event-schedules-config';
 import {
   computeScheduleAlarmTime,

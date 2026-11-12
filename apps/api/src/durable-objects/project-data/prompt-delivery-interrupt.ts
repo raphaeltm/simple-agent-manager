@@ -14,9 +14,8 @@
 import type { SqlStorage } from '@cloudflare/workers-types';
 
 import { createModuleLogger } from '../../lib/logger';
-import { cancelAgentSessionOnNode } from '../../services/node-agent';
-import type { VmPromptDeliveryTarget } from '../../services/vm-prompt-delivery-adapter';
 import * as activity from './activity';
+import { projectDataPorts, type VmPromptDeliveryTarget } from './ports';
 import type { PromptDeliveryClaim } from './prompt-delivery';
 import { publishTurnEnd } from './session-activity-reconciliation';
 import * as sessionState from './session-state';
@@ -64,16 +63,15 @@ export async function stopBusyTurnForUrgentDelivery(
 
   let stopSignalReachedVm = false;
   try {
-    const result = await cancelAgentSessionOnNode(
-      target.nodeId,
-      target.workspaceId,
-      target.agentSessionId,
-      env as unknown as import('../../env').Env,
-      target.userId,
+    const result = await projectDataPorts().runtime.cancelAgentSession(env, {
+      nodeId: target.nodeId,
+      workspaceId: target.workspaceId,
+      agentSessionId: target.agentSessionId,
+      userId: target.userId,
       // Background tier: this runs inside the DO alarm's waitUntil context, so
       // a hung node must not hold it for the interactive 30s default.
-      options.requestTimeoutMs ? { requestTimeoutMs: options.requestTimeoutMs } : {}
-    );
+      ...(options.requestTimeoutMs ? { requestTimeoutMs: options.requestTimeoutMs } : {}),
+    });
     if (result.success) {
       stopSignalReachedVm = true;
     } else if (result.status === 409) {

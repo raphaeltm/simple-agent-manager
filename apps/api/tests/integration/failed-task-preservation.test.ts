@@ -15,7 +15,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
-import { runMigrations } from '../../src/durable-objects/migrations';
+import { runMigrations } from '../../src/durable-objects/project-data/migrations';
 import {
   getSessionState as readProjectDataSessionState,
   upsertActivityState,

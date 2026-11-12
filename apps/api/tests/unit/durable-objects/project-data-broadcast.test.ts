@@ -27,7 +27,7 @@ vi.mock('cloudflare:workers', () => ({
 }));
 
 // Mock the migrations module
-vi.mock('../../../src/durable-objects/migrations', () => ({
+vi.mock('../../../src/durable-objects/project-data/migrations', () => ({
   runMigrations: vi.fn(),
 }));
 

@@ -10,9 +10,9 @@ import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
-import { runMigrations } from '../../../src/durable-objects/migrations';
 import { invalidCheckpointContinuationTarget } from '../../../src/durable-objects/project-data/checkpoint-continuation-delivery';
 import { getMessage } from '../../../src/durable-objects/project-data/mailbox';
+import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
 import {
   acceptPromptDelivery,
   type PromptDeliveryClaim,

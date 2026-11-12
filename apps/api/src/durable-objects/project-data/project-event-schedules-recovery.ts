@@ -1,10 +1,11 @@
-import type {
-  ProjectSchedule,
-  ProjectScheduleExecution,
-  ProjectScheduleMutationResult,
+import {
+  type ProjectSchedule,
+  type ProjectScheduleExecution,
+  type ProjectScheduleMutationResult,
+  TASK_TERMINAL_STATUSES,
 } from '@simple-agent-manager/shared';
 
-import { TERMINAL_STATUS_VALUES, WAKEABLE_TASK_STATUSES } from '../../services/task-status';
+import { projectDataPorts } from './ports';
 import { requireScheduleAction, scheduleSharedAccess } from './project-event-schedules-authority';
 import { scheduleLimits } from './project-event-schedules-config';
 import {
@@ -264,8 +265,8 @@ export async function reconcileSchedule(
   const started =
     schedule.action.kind === 'start_session' &&
     [
-      ...WAKEABLE_TASK_STATUSES.filter((status) => status !== 'queued'),
-      ...TERMINAL_STATUS_VALUES,
+      ...projectDataPorts().tasks.wakeableStatuses.filter((status) => status !== 'queued'),
+      ...TASK_TERMINAL_STATUSES,
     ].includes(execution.status);
   const known = !['unavailable', 'not_started', 'ambiguous'].includes(execution.status);
   const outcome = retry

@@ -1,7 +1,6 @@
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 
-import { runMigrations } from '../../../src/durable-objects/migrations';
 import {
   abandonArchiveSourceIntent,
   abandonArchiveTargetSession,
@@ -28,6 +27,7 @@ import {
   PROJECT_DATA_TRANSCRIPT_WRITE_FENCED,
   RPC_SIZE_BUDGET_BYTES,
 } from '../../../src/durable-objects/project-data/messages';
+import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
 import { D1_MAX_BOUND_PARAMETERS } from '../../../src/lib/d1-limits';
 import {
   isProjectDataArchiveSourcePrepareRefusal,

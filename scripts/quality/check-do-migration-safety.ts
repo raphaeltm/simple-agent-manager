@@ -32,7 +32,7 @@ import { resolve } from 'node:path';
 const DO_MIGRATION_FILES = [
   resolve(
     import.meta.dirname,
-    '../../apps/api/src/durable-objects/migrations.ts'
+    '../../apps/api/src/durable-objects/project-data/migrations.ts'
   ),
   resolve(
     import.meta.dirname,

@@ -22,10 +22,10 @@ import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
-import { runMigrations } from '../../src/durable-objects/migrations';
 import * as attention from '../../src/durable-objects/project-data/attention';
 import { processPromptDeliveryAlarm } from '../../src/durable-objects/project-data/durability-foundation';
 import * as mailbox from '../../src/durable-objects/project-data/mailbox';
+import { runMigrations } from '../../src/durable-objects/project-data/migrations';
 import {
   acceptPromptDelivery,
   nudgePromptDeliveriesForTarget,

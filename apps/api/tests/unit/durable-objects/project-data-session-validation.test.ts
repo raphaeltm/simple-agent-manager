@@ -19,7 +19,7 @@ vi.mock('cloudflare:workers', () => ({
   },
 }));
 
-vi.mock('../../../src/durable-objects/migrations', () => ({
+vi.mock('../../../src/durable-objects/project-data/migrations', () => ({
   runMigrations: vi.fn(),
 }));
 

@@ -2,8 +2,8 @@
 import Database from 'better-sqlite3';
 import { expect, vi } from 'vitest';
 
-import { runMigrations } from '../../src/durable-objects/migrations';
 import type { DurabilityFoundationHooks } from '../../src/durable-objects/project-data/durability-foundation';
+import { runMigrations } from '../../src/durable-objects/project-data/migrations';
 import { sleepSession as sleepChatSession } from '../../src/durable-objects/project-data/sessions';
 import type { Env } from '../../src/env';
 import { createSqlStorage } from '../unit/durable-objects/sql-storage-test-utils';

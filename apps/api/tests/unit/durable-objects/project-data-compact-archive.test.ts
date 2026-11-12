@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import { describe, expect, it, vi } from 'vitest';
 
-import { runMigrations } from '../../../src/durable-objects/migrations';
+import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
 import {
   ARCHIVE_IMMUTABLE_JSON_MAX_OBJECT_BYTES,
   COMPACT_ARCHIVE_MAX_OBJECT_BYTES,

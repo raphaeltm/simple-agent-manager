@@ -7,20 +7,16 @@
  */
 import type { SessionStateSnapshot } from '@simple-agent-manager/shared';
 
-import {
-  getFreshHarnessWorkLeaseExpiry,
-  type HarnessWorkConfig,
-  parseHarnessWorkConfig,
-} from '../../services/session-idleness';
+import { listAcpSessions } from './acp-sessions';
+import { projectDataPorts } from './ports';
+import { parseActivityStaleThreshold, WORKING_ACTIVITIES } from './session-state';
 import type {
   RuntimeAcpSessionSnapshot,
   RuntimeSessionWorkSnapshot,
   RuntimeWorkEvidenceSnapshot,
   RuntimeWorkState,
   TaskAcpLivenessSignals,
-} from '../../services/task-runtime-liveness';
-import { listAcpSessions } from './acp-sessions';
-import { parseActivityStaleThreshold, WORKING_ACTIVITIES } from './session-state';
+} from './task-acp-liveness-types';
 import type { Env } from './types';
 
 /**
@@ -60,7 +56,7 @@ interface WorkClassificationContext {
   /** Working-activity evidence older than this (ms epoch) is unproven. */
   activityFloor: number;
   now: Date;
-  harnessWorkConfig: HarnessWorkConfig;
+  env: Env;
 }
 
 /**
@@ -84,16 +80,15 @@ function classifySessionWorkRow(
   ) {
     state = 'prompt_turn_active';
   } else if (
-    getFreshHarnessWorkLeaseExpiry(
+    projectDataPorts().sessions.hasFreshHarnessWorkLease(
+      context.env,
       {
         runtimeWorkState:
           typeof row.runtime_work_state === 'string' ? row.runtime_work_state : null,
         runtimeWorkUpdatedAt: numberOrNull(row.runtime_work_updated_at),
         runtimeWorkProgressAt: numberOrNull(row.runtime_work_progress_at),
       },
-      context.now,
-      context.harnessWorkConfig.leaseMs,
-      context.harnessWorkConfig.maxDurationMs
+      context.now
     )
   ) {
     state = 'runtime_work_active';
@@ -147,7 +142,7 @@ function readTaskSessionWorkEvidence(
     activityFloor:
       opts.nowMs - parseActivityStaleThreshold(env.SESSION_ACTIVITY_STALE_THRESHOLD_MS),
     now: new Date(opts.nowMs),
-    harnessWorkConfig: parseHarnessWorkConfig(env),
+    env,
   };
   return rows
     .map((row) => classifySessionWorkRow(row, context))

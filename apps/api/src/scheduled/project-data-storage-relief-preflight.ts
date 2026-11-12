@@ -13,9 +13,12 @@ import {
   writeToolPayloadCleanupManifestBatch,
   writeToolPayloadCleanupManifestRoot,
 } from '../durable-objects/project-data/tool-payload-cleanup-manifest';
-import type { Env } from '../env';
+import type { ProjectDataEnv } from '../durable-objects/project-data/types';
 import { createModuleLogger, serializeError } from '../lib/logger';
 import { measureProjectDataStorageRelief } from '../services/project-data';
+
+/** The Worker cron runs this job; the deployed Worker always binds the archive bucket. */
+type Env = ProjectDataEnv & { PROJECT_DATA_ARCHIVE_R2: R2Bucket };
 
 const log = createModuleLogger('project_data.storage_relief_preflight');
 

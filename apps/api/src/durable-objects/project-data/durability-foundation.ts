@@ -4,14 +4,13 @@ import type {
 } from '@simple-agent-manager/shared';
 
 import { createModuleLogger, serializeError } from '../../lib/logger';
-import { recordDurableExecutionMetric } from '../../services/telemetry';
-import { DefaultVmPromptDeliveryAdapter } from '../../services/vm-prompt-delivery-adapter';
 import * as activityEvents from './activity';
 import * as attention from './attention';
 import * as checkpoints from './checkpoint-episodes';
 import { resolveDurableExecutionConfig } from './durable-execution-config';
 import * as idleCleanup from './idle-cleanup';
 import * as mailbox from './mailbox';
+import { projectDataPorts } from './ports';
 import * as delivery from './prompt-delivery';
 import { runPromptDeliveryClaim } from './prompt-delivery-runner';
 import { resetReconciliationEpisode } from './reconciliation-episode';
@@ -206,17 +205,14 @@ export function createCheckpointEpisode(
 ) {
   const result = hooks.transactionSync(() => checkpoints.createCheckpointEpisode(sql, input));
   if (!result.created) return result;
-  recordDurableExecutionMetric(
-    {
+  projectDataPorts().observability.recordDurableExecutionMetric(env, {
       metric: 'checkpoint_episode_transition',
       projectId: hooks.getProjectId(),
       sessionId: input.sessionId,
       checkpointEpisodeId: result.episode.id,
       attemptCount: result.episode.attemptCount,
       reason: 'planned',
-    },
-    env as unknown as import('../../env').Env
-  );
+  });
   activityEvents.recordActivityEventInternal(
     sql,
     'checkpoint_episode.planned',
@@ -256,17 +252,14 @@ export function transitionCheckpointEpisode(
     checkpoints.transitionCheckpointEpisode(sql, episodeId, input)
   );
   if (!episode || !before || episode.state === before.state) return episode;
-  recordDurableExecutionMetric(
-    {
+  projectDataPorts().observability.recordDurableExecutionMetric(env, {
       metric: 'checkpoint_episode_transition',
       projectId: hooks.getProjectId(),
       sessionId: episode.sessionId,
       checkpointEpisodeId: episode.id,
       attemptCount: episode.attemptCount,
       reason: `${before.state}->${episode.state}`,
-    },
-    env as unknown as import('../../env').Env
-  );
+  });
   activityEvents.recordActivityEventInternal(
     sql,
     `checkpoint_episode.${episode.state}`,
@@ -346,7 +339,7 @@ export function processPromptDeliveryAlarm(
       hooks.scheduleSummarySync();
     }
     const claims = hooks.transactionSync(() => delivery.claimDuePromptDeliveries(sql, config));
-    const adapter = new DefaultVmPromptDeliveryAdapter(env as unknown as import('../../env').Env);
+    const adapter = projectDataPorts().runtime.createPromptDeliveryAdapter(env);
     for (const claim of claims) {
       hooks.waitUntil(
         runPromptDeliveryClaim(sql, env, config, claim, adapter, {

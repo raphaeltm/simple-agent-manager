@@ -75,9 +75,9 @@ vi.mock('../../src/services/project-data', async () => {
   };
 });
 
-import { runMigrations } from '../../src/durable-objects/migrations';
 import * as comments from '../../src/durable-objects/project-data/comments';
 import * as fileComments from '../../src/durable-objects/project-data/library-file-comments';
+import { runMigrations } from '../../src/durable-objects/project-data/migrations';
 import { projectCommentRoutes } from '../../src/routes/project-comments';
 
 const HUMAN = { kind: 'human' as const, id: 'user-1', name: 'Ada' };

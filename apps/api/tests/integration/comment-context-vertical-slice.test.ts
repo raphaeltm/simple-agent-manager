@@ -95,8 +95,8 @@ vi.mock('../../src/services/project-data', async () => {
   };
 });
 
-import { runMigrations } from '../../src/durable-objects/migrations';
 import * as comments from '../../src/durable-objects/project-data/comments';
+import { runMigrations } from '../../src/durable-objects/project-data/migrations';
 import { chatCommentRoutes } from '../../src/routes/chat-comments';
 
 const HUMAN = { kind: 'human' as const, id: 'user-2', name: 'Grace' };

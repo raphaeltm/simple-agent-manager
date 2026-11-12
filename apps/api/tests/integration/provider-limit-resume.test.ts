@@ -4,12 +4,12 @@ import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
-import { runMigrations } from '../../src/durable-objects/migrations';
 import {
   createAttentionMarker,
   listActiveAttentionMarkers,
   resolveAttentionMarkers,
 } from '../../src/durable-objects/project-data/attention';
+import { runMigrations } from '../../src/durable-objects/project-data/migrations';
 import { syncProviderLimitAttention } from '../../src/durable-objects/project-data/provider-limit-attention';
 import { sleepSession } from '../../src/durable-objects/project-data/sessions';
 import type { Env } from '../../src/env';

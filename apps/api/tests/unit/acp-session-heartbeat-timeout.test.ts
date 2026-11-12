@@ -1,11 +1,11 @@
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { runMigrations } from '../../src/durable-objects/migrations';
 import {
   checkHeartbeatTimeouts,
   computeHeartbeatAlarmTime,
 } from '../../src/durable-objects/project-data/acp-sessions';
+import { runMigrations } from '../../src/durable-objects/project-data/migrations';
 import { shouldDeferRuntimeHeartbeatTimeout } from '../../src/durable-objects/project-data/runtime-heartbeat-policy';
 import type { Env } from '../../src/durable-objects/project-data/types';
 import { createSqlStorage } from './durable-objects/sql-storage-test-utils';

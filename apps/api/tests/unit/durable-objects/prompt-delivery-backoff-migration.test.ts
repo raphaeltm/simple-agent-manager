@@ -1,8 +1,8 @@
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 
-import { MIGRATIONS, runMigrations } from '../../../src/durable-objects/migrations';
 import { resolveDurableExecutionConfig } from '../../../src/durable-objects/project-data/durable-execution-config';
+import { MIGRATIONS, runMigrations } from '../../../src/durable-objects/project-data/migrations';
 import {
   applyPromptDeliveryResult,
   claimDuePromptDeliveries,

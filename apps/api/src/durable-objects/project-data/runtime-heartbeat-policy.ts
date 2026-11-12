@@ -1,8 +1,7 @@
 import { DEFAULT_TASK_LIVENESS_PROBE_TIMEOUT_MS } from '@simple-agent-manager/shared';
 
-import type { VmAgentContainer } from '../vm-agent-container';
-import { isVmAgentContainerLifecycleTerminal } from '../vm-agent-container-lifecycle';
 import { checkHeartbeatTimeouts } from './acp-sessions';
+import { projectDataPorts } from './ports';
 import type { Env } from './types';
 
 interface HeartbeatTimeoutCandidate {
@@ -64,13 +63,11 @@ export async function shouldDeferRuntimeHeartbeatTimeout(
     return { defer: true, reason: 'cf_container_lifecycle_binding_unavailable' };
   }
 
-  const id = env.VM_AGENT_CONTAINER.idFromName(candidate.nodeId.toLowerCase());
-  const stub = env.VM_AGENT_CONTAINER.get(id) as DurableObjectStub<VmAgentContainer>;
   const timeoutMs = probeTimeoutMs(env);
   const timeout = Symbol('container_lifecycle_probe_timeout');
   let timer: ReturnType<typeof setTimeout> | undefined;
   const lifecycle = await Promise.race([
-    stub.inspectLifecycle(),
+    projectDataPorts().runtime.inspectContainerLifecycle(env, candidate.nodeId),
     new Promise<typeof timeout>((resolve) => {
       timer = setTimeout(() => resolve(timeout), timeoutMs);
     }),
@@ -81,7 +78,7 @@ export async function shouldDeferRuntimeHeartbeatTimeout(
     return { defer: true, reason: 'cf_container_lifecycle_timeout' };
   }
   return {
-    defer: !isVmAgentContainerLifecycleTerminal(lifecycle.status),
+    defer: !lifecycle.terminal,
     reason: `cf_container_${lifecycle.status ?? 'unknown'}`,
   };
 }

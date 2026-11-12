@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { runMigrations } from '../../src/durable-objects/migrations';
+import { runMigrations } from '../../src/durable-objects/project-data/migrations';
 import {
   admitProjectEvent as admitProjectDataEvent,
   createProjectEventSubscription,

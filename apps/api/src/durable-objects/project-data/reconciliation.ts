@@ -14,15 +14,11 @@
  */
 import { SAM_NOTICE_METADATA_KEY } from '@simple-agent-manager/shared';
 
-import type { Env as WorkerEnv } from '../../env';
 import { createModuleLogger, serializeError } from '../../lib/logger';
-import { cancelAgentSessionOnNode } from '../../services/node-agent';
-import { safeNotice, stallCheckinNotice } from '../../services/sam-notice-builders';
-import { classifyTaskRuntimeDelivery } from '../../services/task-runtime-liveness';
-import { DefaultVmPromptDeliveryAdapter } from '../../services/vm-prompt-delivery-adapter';
 import { recordActivityEventInternal } from './activity';
 import { createAttentionMarker } from './attention';
 import { persistMessage } from './messages';
+import { projectDataPorts, type VmPromptDeliveryAdapter } from './ports';
 import { readProjectEventWakeLeaseUntil } from './project-events-wake-delivery';
 import type { PromptDeliveryClaim } from './prompt-delivery';
 import {
@@ -54,7 +50,6 @@ import {
   reconciliationNodeCallTimeoutMs,
 } from './reconciliation-thresholds';
 import { upsertActivityState } from './session-state';
-import { getLocalTaskRuntimeLiveness } from './task-runtime-liveness';
 import type { Env as DOEnv } from './types';
 
 const log = createModuleLogger('reconciliation');
@@ -89,7 +84,7 @@ interface CandidateProcessingContext {
   broadcastEvent: (type: string, payload: Record<string, unknown>, sessionId?: string) => void;
   hooks: ReconciliationProcessingHooks;
   deadlineMs: number;
-  promptDeliveryAdapter: DefaultVmPromptDeliveryAdapter;
+  promptDeliveryAdapter: VmPromptDeliveryAdapter;
 }
 
 function resolveCandidateProject(
@@ -152,14 +147,14 @@ async function processSingleCandidate(
     return 0;
   }
 
-  const liveness = await getLocalTaskRuntimeLiveness(sql, env, {
+  const liveness = await projectDataPorts().taskLiveness.getLocalTaskRuntimeVerdict(sql, env, {
     taskId: candidate.taskId,
     projectId,
     workspaceId: candidate.workspaceId,
     chatSessionId: candidate.sessionId,
     acpSessionId: candidate.acpSessionId,
   });
-  const delivery = classifyTaskRuntimeDelivery(liveness);
+  const delivery = liveness.delivery;
 
   if (delivery.kind === 'terminal') {
     return handleTerminalDelivery(sql, env, candidate, delivery, projectId, hooks);
@@ -299,7 +294,8 @@ async function handleCheckinDelivery(
     );
   }
 
-  const notice = safeNotice(() => stallCheckinNotice(candidate.idleDurationMs), {
+  const { notices } = projectDataPorts();
+  const notice = notices.safe(() => notices.stallCheckin(candidate.idleDurationMs), {
     sessionId: candidate.sessionId,
   });
   const metadata = {
@@ -402,7 +398,7 @@ export async function processReconciliationCandidates(
   if (candidates.length === 0) return 0;
 
   const deadlineMs = reconciliationDeadlineMs(env);
-  const promptDeliveryAdapter = new DefaultVmPromptDeliveryAdapter(env as unknown as WorkerEnv);
+  const promptDeliveryAdapter = projectDataPorts().runtime.createPromptDeliveryAdapter(env);
   let localObservations = 0;
 
   for (const candidate of candidates) {
@@ -507,16 +503,13 @@ async function cancelStalledPrompt(
   target: WorkspaceDeliveryTarget,
   broadcastEvent: (type: string, payload: Record<string, unknown>, sessionId?: string) => void
 ): Promise<boolean> {
-  const workerEnv = env as unknown as WorkerEnv;
-
-  const result = await cancelAgentSessionOnNode(
-    target.nodeId,
-    candidate.workspaceId,
-    candidate.acpSessionId,
-    workerEnv,
-    target.userId,
-    { requestTimeoutMs: reconciliationNodeCallTimeoutMs(env) }
-  );
+  const result = await projectDataPorts().runtime.cancelAgentSession(env, {
+    nodeId: target.nodeId,
+    workspaceId: candidate.workspaceId,
+    agentSessionId: candidate.acpSessionId,
+    userId: target.userId,
+    requestTimeoutMs: reconciliationNodeCallTimeoutMs(env),
+  });
 
   if (!result.success && result.status === 409) {
     // The VM no longer has a prompt in flight; repair the stale mirror so the
@@ -581,7 +574,7 @@ async function sendCheckinToAgent(
   candidate: ReconciliationCandidate,
   target: WorkspaceDeliveryTarget,
   intent: ReconciliationCheckinIntent,
-  adapter: DefaultVmPromptDeliveryAdapter
+  adapter: VmPromptDeliveryAdapter
 ) {
   const claim: PromptDeliveryClaim = {
     attemptId: intent.deliveryId,

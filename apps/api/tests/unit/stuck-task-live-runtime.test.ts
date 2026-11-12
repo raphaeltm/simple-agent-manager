@@ -25,13 +25,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as observabilitySchema from '../../src/db/observability-schema';
 import * as schema from '../../src/db/schema';
-import { runMigrations } from '../../src/durable-objects/migrations';
 import {
   createAttentionMarker,
   hasPendingHumanInput,
 } from '../../src/durable-objects/project-data/attention';
+import { runMigrations } from '../../src/durable-objects/project-data/migrations';
 import { upsertActivityState } from '../../src/durable-objects/project-data/session-state';
-import { readTaskAcpLivenessSignals } from '../../src/durable-objects/project-data/task-runtime-liveness';
+import { readTaskAcpLivenessSignals } from '../../src/durable-objects/project-data/task-acp-liveness-signals';
 import type { Env as ProjectDataEnv } from '../../src/durable-objects/project-data/types';
 import type { Env } from '../../src/env';
 import { recoverStuckTasks } from '../../src/scheduled/stuck-tasks';

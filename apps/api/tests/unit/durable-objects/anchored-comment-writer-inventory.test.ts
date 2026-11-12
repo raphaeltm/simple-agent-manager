@@ -22,7 +22,7 @@ const LEGACY_TABLES = [
   'library_file_comment_status_mutations',
 ];
 const ALLOWED_FILES = new Set([
-  'durable-objects/migrations.ts',
+  'durable-objects/project-data/migrations.ts',
   'durable-objects/project-data/anchored-comments-migration.ts',
 ]);
 

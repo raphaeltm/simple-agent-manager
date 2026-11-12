@@ -6,8 +6,8 @@
 import Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { runMigrations } from '../../../src/durable-objects/migrations';
 import { readSourceLogicalTranscript } from '../../../src/durable-objects/project-data/logical-transcript';
+import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
 import type { Env as ProjectDataEnv } from '../../../src/durable-objects/project-data/types';
 import { log } from '../../../src/lib/logger';
 import {

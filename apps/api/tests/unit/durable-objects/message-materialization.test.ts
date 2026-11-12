@@ -12,12 +12,12 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { MIGRATIONS } from '../../../src/durable-objects/migrations';
 import {
   DEFAULT_MATERIALIZATION_SWEEP_LIMIT,
   DEFAULT_MATERIALIZATION_SWEEP_SCAN_LIMIT,
   resolveMaterializationSweepConfig,
 } from '../../../src/durable-objects/project-data/materialization';
+import { MIGRATIONS } from '../../../src/durable-objects/project-data/migrations';
 import { buildSafeFtsQuery } from '../../../src/lib/fts5';
 
 // ── Grouping logic (mirrors ProjectData.materializeSession and mcp.ts groupTokensIntoMessages) ──

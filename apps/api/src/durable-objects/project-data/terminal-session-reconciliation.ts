@@ -10,11 +10,8 @@
  */
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
-import {
-  findRestorableOrInFlightSleepSnapshot,
-  type SleepLifecyclePredicateResult,
-} from '../../services/session-snapshot-sleep-predicate';
 import { isCompletingSessionProtected } from './completion-drain';
+import { projectDataPorts, type SleepSnapshotLifecycle } from './ports';
 import type { Env } from './types';
 
 const log = createModuleLogger('terminal_session_reconciliation');
@@ -43,7 +40,7 @@ interface D1TaskRow {
   completed_at: string | null;
 }
 
-type RestorableSnapshotRow = SleepLifecyclePredicateResult;
+type RestorableSnapshotRow = SleepSnapshotLifecycle;
 
 export interface TerminalSessionReconciliationStats {
   selected: number;
@@ -233,7 +230,7 @@ async function findRestorableSleepingSnapshot(
   sessionId: string,
   now: Date
 ): Promise<RestorableSnapshotRow | null> {
-  return findRestorableOrInFlightSleepSnapshot(env.DATABASE, env, {
+  return projectDataPorts().sessions.findRestorableOrInFlightSleepSnapshot(env, {
     projectId,
     chatSessionId: sessionId,
     now,

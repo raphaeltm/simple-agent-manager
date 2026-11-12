@@ -4,13 +4,14 @@ import {
   DEFAULT_TASK_LIVENESS_PROBE_TIMEOUT_MS,
 } from '@simple-agent-manager/shared';
 
-import type { Env as WorkerEnv } from '../../env';
-import { createModuleLogger } from '../../lib/logger';
+import { readTaskAcpLivenessSignals } from '../durable-objects/project-data/task-acp-liveness-signals';
+import type { Env } from '../env';
+import { createModuleLogger } from '../lib/logger';
 import {
   sessionRecoveryAttemptDecayMs,
   sessionRecoveryMaxAttempts,
-} from '../../services/session-snapshot-recovery-budget';
-import { inspectTaskAgentHost } from '../../services/task-agent-host-probe';
+} from './session-snapshot-recovery-budget';
+import { inspectTaskAgentHost } from './task-agent-host-probe';
 import {
   classifyTaskRuntimeLiveness,
   isSessionResumable,
@@ -24,13 +25,9 @@ import {
   probeNodeHealthForTaskLiveness,
   type TaskRuntimeLiveness,
   type TaskRuntimeLivenessSignals,
-} from '../../services/task-runtime-liveness';
-import { loadTaskSleepPreservation } from '../../services/task-sleep-preservation';
-import { inspectVmAgentContainerLifecycle } from '../../services/vm-agent-container';
-import { readTaskAcpLivenessSignals } from './task-acp-liveness-signals';
-import type { Env } from './types';
-
-export { readTaskAcpLivenessSignals } from './task-acp-liveness-signals';
+} from './task-runtime-liveness';
+import { loadTaskSleepPreservation } from './task-sleep-preservation';
+import { inspectVmAgentContainerLifecycle } from './vm-agent-container';
 
 const log = createModuleLogger('idle_cleanup_liveness');
 
@@ -40,8 +37,10 @@ function positiveInt(value: string | undefined, fallback: number): number {
 }
 
 /**
- * ProjectData-side adapter for the shared task runtime classifier. ACP state is
- * read directly from this DO's SQLite storage, never through self-RPC.
+ * ProjectData-side adapter for the shared task runtime classifier, run inside the
+ * ProjectData Durable Object through its task-liveness port
+ * (`project-data-ports.ts`). ACP state is read directly from that object's SQLite
+ * storage through `sql`, never through self-RPC.
  */
 
 /**
@@ -283,7 +282,7 @@ async function classifyLocalTaskRuntime(
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const probe = await Promise.race([
-        inspectVmAgentContainerLifecycle(env as unknown as WorkerEnv, workspace.nodeId),
+        inspectVmAgentContainerLifecycle(env, workspace.nodeId),
         new Promise<typeof timeout>((resolve) => {
           timer = setTimeout(() => resolve(timeout), probeTimeoutMs);
         }),
@@ -333,7 +332,7 @@ async function classifyLocalTaskRuntime(
       nowMs,
     });
     return finish(
-      await inspectTaskAgentHost(env as unknown as WorkerEnv, {
+      await inspectTaskAgentHost(env, {
         ...livenessSignals,
         acpProbeOutcome: 'ok',
         acpSessions: probe.sessions,

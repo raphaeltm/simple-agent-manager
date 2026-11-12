@@ -18,11 +18,11 @@ export { InteractionStore } from './durable-objects/interaction-store';
 export { NodeLifecycle } from './durable-objects/node-lifecycle';
 export { NotificationService } from './durable-objects/notification';
 export { ProjectAgent } from './durable-objects/project-agent';
-export { ProjectData } from './durable-objects/project-data';
 export { ProjectOrchestrator } from './durable-objects/project-orchestrator';
 export { SamSession } from './durable-objects/sam-session';
 export { SetupSessionPool } from './durable-objects/setup-session-pool';
 export { TaskRunner } from './durable-objects/task-runner';
+export { ProjectData } from './project-data-wiring';
 // Inert tombstones: wrangler migrations v7-v9 created these classes for the retired
 // anonymous-trial product, so they must stay exported (see durable-objects/retired-trial.ts).
 export { TrialCounter, TrialEventBus, TrialOrchestrator } from './durable-objects/retired-trial';

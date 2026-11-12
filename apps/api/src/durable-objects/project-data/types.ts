@@ -2,15 +2,43 @@
  * Shared types and utilities for ProjectData DO modules.
  */
 
-import type { VmAgentContainer } from '../vm-agent-container';
-
-export type Env = {
+/**
+ * Every binding and variable ProjectData reads: the Durable Object, its client,
+ * the archive and the ProjectData scheduled jobs. The worker `Env` extends it, so
+ * the compiler proves the deployed Worker provides each one. Calls into other
+ * areas go through `ProjectDataPorts`, never through wider env fields.
+ */
+export interface ProjectDataEnv {
   DATABASE: D1Database;
+  /** The ProjectData Durable Object namespace (client side). */
+  PROJECT_DATA: DurableObjectNamespace;
+  /** Keys the archive search continuation cursor (client side). */
+  ENCRYPTION_KEY: string;
+  PROJECT_DATA_ENSURE_MEMO_MAX_ENTRIES?: string;
+  PROJECT_DATA_ARCHIVE_BUDGET_STALL_ALERT_SWEEPS?: string;
+  PROJECT_DATA_ARCHIVE_SWEEP_FALLTHROUGH_DEPTH?: string;
+  PROJECT_DATA_ARCHIVE_SWEEP_UNIT_OVERHEAD_PERCENT?: string;
+  /** Client RPC retry policy (`services/durable-object-retry.ts`). */
+  DO_RETRY_MAX_ATTEMPTS?: string;
+  DO_RETRY_BASE_DELAY_MS?: string;
+  DO_RETRY_MAX_DELAY_MS?: string;
+  DO_RETRY_CONNECTION_LOST_MAX_ATTEMPTS?: string;
+  /** Mission state and handoff limits the client resolves before the RPC. */
+  MISSION_MAX_STATE_ENTRIES?: string;
+  MISSION_STATE_TITLE_MAX_LENGTH?: string;
+  MISSION_STATE_CONTENT_MAX_LENGTH?: string;
+  MISSION_MAX_HANDOFFS?: string;
+  HANDOFF_SUMMARY_MAX_LENGTH?: string;
+  HANDOFF_MAX_FACTS?: string;
+  HANDOFF_MAX_OPEN_QUESTIONS?: string;
+  HANDOFF_MAX_ARTIFACT_REFS?: string;
+  HANDOFF_MAX_SUGGESTED_ACTIONS?: string;
   NOTIFICATION?: DurableObjectNamespace;
   KV: KVNamespace;
   /** Private R2 binding for archived ProjectData tool payload JSON. */
   PROJECT_DATA_ARCHIVE_R2?: R2Bucket;
-  VM_AGENT_CONTAINER?: DurableObjectNamespace<VmAgentContainer>;
+  /** Presence gates cf-container lifecycle probes; calls go through `RuntimePort`. */
+  VM_AGENT_CONTAINER?: object;
   NODE_HEARTBEAT_STALE_SECONDS?: string;
   TASK_LIVENESS_MAX_ACP_SESSIONS?: string;
   /** Existing automatic idle interval also bounds completion-response draining. */
@@ -324,7 +352,10 @@ export type Env = {
   ORCHESTRATOR_WAIT_MAX_DURATION_MS?: string;
   ORCHESTRATOR_WAIT_MAX_CANDIDATES_PER_ALARM?: string;
   OBSERVABILITY_DATABASE?: D1Database;
-};
+}
+
+/** Short alias used throughout the ProjectData modules. */
+export type Env = ProjectDataEnv;
 
 export interface SummaryData {
   lastActivityAt: string;

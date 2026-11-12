@@ -6,8 +6,8 @@
  * undelivered prompts and marks the expiry handled. The fence refuses any queued prompt whose
  * sender no longer controls the session, whichever way their access ended.
  */
-import { decideAgentWake, isHumanPromptDeliveryTrigger } from '../../lib/agent-wake-policy';
 import { createModuleLogger } from '../../lib/logger';
+import { decideAgentWake, isHumanPromptDeliveryTrigger } from './agent-wake-policy';
 import {
   cancelUndeliveredSenderPrompts,
   DUE_EXPIRED_GRANTS_SQL,
@@ -139,7 +139,7 @@ export interface SenderAccessDenial {
 
 /**
  * Delivery-time fence for prompts a human originated. Asks the agent-wake policy
- * (`lib/agent-wake-policy.ts`) again at server time `now`, so a prompt queued while the sender
+ * (`agent-wake-policy.ts`) again at server time `now`, so a prompt queued while the sender
  * could wake the agent is refused if they no longer can, before any side effect. Returns why.
  * Other prompt sources are unaffected.
  */

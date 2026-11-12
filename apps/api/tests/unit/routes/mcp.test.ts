@@ -4,11 +4,11 @@ import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
-import { runMigrations } from '../../../src/durable-objects/migrations';
 import {
   type LogicalTranscriptRequest,
   readSourceLogicalTranscript,
 } from '../../../src/durable-objects/project-data/logical-transcript';
+import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
 import type { Env as ProjectDataEnv } from '../../../src/durable-objects/project-data/types';
 import type { ProjectDataArchiveExactReadInput } from '../../../src/project-data-archive/contract';
 import { groupTokensIntoMessages } from '../../../src/routes/mcp';

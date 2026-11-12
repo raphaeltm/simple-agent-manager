@@ -1,9 +1,5 @@
-import type { Env as WorkerEnv } from '../../env';
-import {
-  classifyReconciliationLoop,
-  getStalledTaskClassifierConfig,
-} from '../../scheduled/stalled-task-classifier';
 import { recordActivityEventInternal } from './activity';
+import { projectDataPorts } from './ports';
 import type { ReconciliationCandidate } from './reconciliation-candidates';
 import {
   ensureReconciliationEpisode,
@@ -26,7 +22,7 @@ export async function guardReconciliationLoop(
 ): Promise<boolean> {
   const episode = ensureReconciliationEpisode(sql, candidate.sessionId);
   if (episode.paused) return false;
-  const config = getStalledTaskClassifierConfig(env as unknown as WorkerEnv);
+  const config = projectDataPorts().operations.stalledTaskClassifierConfig(env);
   const messages = sql
     .exec(
       `SELECT role, substr(content, 1, ?) AS content, created_at FROM chat_messages
@@ -63,7 +59,7 @@ export async function guardReconciliationLoop(
     !pauseReconciliationEpisode(sql, env, candidate.sessionId, episode, 'attempt_limit', broadcast)
   )
     return false;
-  const result = await classifyReconciliationLoop(env as unknown as WorkerEnv, messages);
+  const result = await projectDataPorts().operations.classifyReconciliationLoop(env, messages);
   const current = readReconciliationEpisode(sql, candidate.sessionId);
   if (current?.generation !== episode.generation || !current.paused) return false;
   const decision = result?.decision ?? 'unavailable';

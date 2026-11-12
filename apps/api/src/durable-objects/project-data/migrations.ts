@@ -10,11 +10,11 @@
  */
 import { MAILBOX_DEFAULTS } from '@simple-agent-manager/shared';
 
-import { log } from '../lib/logger';
-import { migrateAnchoredComments } from './project-data/anchored-comments-migration';
-import { migrateProjectSchedules } from './project-data/project-event-schedules-schema';
-import { migrateResourceLinks } from './project-data/resource-links-migration';
-import { parseMigrationName } from './project-data/row-schemas';
+import { log } from '../../lib/logger';
+import { migrateAnchoredComments } from './anchored-comments-migration';
+import { migrateProjectSchedules } from './project-event-schedules-schema';
+import { migrateResourceLinks } from './resource-links-migration';
+import { parseMigrationName } from './row-schemas';
 
 export interface Migration {
   name: string;

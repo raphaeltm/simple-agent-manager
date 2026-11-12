@@ -12,7 +12,7 @@
  */
 import { beforeEach,describe, expect, it } from 'vitest';
 
-import { runMigrations } from '../../src/durable-objects/migrations';
+import { runMigrations } from '../../src/durable-objects/project-data/migrations';
 
 /**
  * In-memory SQL database mock that supports the subset of SQL operations

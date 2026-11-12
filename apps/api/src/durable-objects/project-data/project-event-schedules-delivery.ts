@@ -1,5 +1,5 @@
 import { parseProviderLimitWait } from '../../services/provider-limit-policy';
-import { isSessionRecoverySourceTaskGuardValid } from '../../services/session-recovery-authority';
+import { projectDataPorts } from './ports';
 import { requireScheduleMember } from './project-event-schedules-authority';
 import { getSchedule, scheduleSharedAccessGrantId } from './project-event-schedules-storage';
 import { ProjectEventValidationError } from './project-events-contracts';
@@ -102,7 +102,7 @@ export async function invalidScheduledDeliveryTarget(
     }
 
     if (
-      !(await isSessionRecoverySourceTaskGuardValid(env.DATABASE, {
+      !(await projectDataPorts().sessions.isSourceTaskGuardValid(env, {
         projectId,
         taskId: claim.message.sourceTaskId,
         chatSessionId: claim.message.targetSessionId,

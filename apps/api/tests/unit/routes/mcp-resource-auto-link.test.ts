@@ -52,8 +52,8 @@ vi.mock('../../../src/services/workspace-file-transfer', async (original) => ({
 }));
 
 import * as schema from '../../../src/db/schema';
-import { MIGRATIONS } from '../../../src/durable-objects/migrations';
 import { recordLink as recordDoLink } from '../../../src/durable-objects/project-data/links';
+import { MIGRATIONS } from '../../../src/durable-objects/project-data/migrations';
 import type { Env } from '../../../src/env';
 import { recordAutoLink } from '../../../src/operations/link-core';
 import {

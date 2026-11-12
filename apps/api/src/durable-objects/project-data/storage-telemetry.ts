@@ -1,7 +1,7 @@
 import { isJsonRecord } from '@simple-agent-manager/shared';
 
 import { createModuleLogger, serializeError } from '../../lib/logger';
-import { persistError } from '../../services/observability';
+import { projectDataPorts } from './ports';
 import {
   measureProjectDataStorageCategories,
   type ProjectDataStorageCategoryBreakdown,
@@ -390,9 +390,7 @@ export async function maybePersistProjectDataStorageAlert(
 
   if (!env.OBSERVABILITY_DATABASE) return;
 
-  await persistError(
-    env.OBSERVABILITY_DATABASE,
-    {
+  await projectDataPorts().observability.persistPlatformError(env, {
       source: 'api',
       level,
       message,
@@ -409,9 +407,7 @@ export async function maybePersistProjectDataStorageAlert(
         reclaimableBytes: telemetry.reclaimableBytes,
         categoryBreakdown: telemetry.categoryBreakdown,
       },
-    },
-    undefined
-  );
+  });
 
   // Record the throttle as soon as the alert row exists. The D1 bookkeeping below can fail, and
   // a throttle written after it would then be skipped, re-raising the alert on every measurement.

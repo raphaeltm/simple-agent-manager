@@ -2,11 +2,11 @@ import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
-import { runMigrations } from '../../../src/durable-objects/migrations';
 import {
   createAttentionMarker,
   resolveAttentionMarkerById,
 } from '../../../src/durable-objects/project-data/attention';
+import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
 import {
   SESSION_SUMMARY_DELTA_SQL,
   syncSessionSummariesToD1,

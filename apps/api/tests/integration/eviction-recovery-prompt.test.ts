@@ -9,11 +9,11 @@ import type { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
-import { runMigrations } from '../../src/durable-objects/migrations';
 import {
   type DurabilityFoundationHooks,
   processPromptDeliveryAlarm,
 } from '../../src/durable-objects/project-data/durability-foundation';
+import { runMigrations } from '../../src/durable-objects/project-data/migrations';
 import { acceptPromptDelivery } from '../../src/durable-objects/project-data/prompt-delivery';
 import type { Env } from '../../src/env';
 import { buildAcpInteractionRuntimeConfig } from '../../src/services/acp-interaction-runtime-config';

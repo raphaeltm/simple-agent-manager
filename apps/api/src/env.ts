@@ -1,11 +1,12 @@
 // FILE SIZE EXCEPTION: Single flat Worker environment contract (one Env interface) — splitting fields across extends-chain fragments mid-hotfix creates import/review churn without behavior benefit. Tracked split: tasks/backlog/2026-07-19-split-env-interface.md. See .claude/rules/18-file-size-limits.md
 import type { Sandbox } from '@cloudflare/sandbox';
 
+import type { ProjectDataEnv } from './durable-objects/project-data/types';
 import type { VmAgentContainer } from './durable-objects/vm-agent-container';
 import type { TaskRecoveryEnv } from './task-recovery-env';
 import type { WebhookTriggerEnv } from './webhook-trigger-env';
 
-export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
+export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv, ProjectDataEnv {
   CLI_RECEIPT_REQUEST_MAX_BYTES?: string; // default 262144
   CLI_RECEIPT_RESPONSE_MAX_BYTES?: string; // default 65536
   // D1 Database.

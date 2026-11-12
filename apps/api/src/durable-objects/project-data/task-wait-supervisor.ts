@@ -1,8 +1,8 @@
 import { TASK_TERMINAL_STATUSES } from '@simple-agent-manager/shared';
 
 import { createModuleLogger, serializeError } from '../../lib/logger';
-import { parentWakeNotice, safeNotice } from '../../services/sam-notice-builders';
 import { promptDeliveryBackoffMs, resolveDurableExecutionConfig } from './durable-execution-config';
+import { projectDataPorts } from './ports';
 import type { AcceptedPromptDelivery, AcceptPromptDeliveryInput } from './prompt-delivery';
 import { failParentWakeDeliveries } from './prompt-delivery';
 import { resolveTaskWaitConfig } from './task-wait-config';
@@ -317,9 +317,9 @@ export async function processTaskWaits(
           childTaskIds: prepared.children.map((child) => child.childTaskId),
           resolutionReason: prepared.resolutionReason,
         },
-        notice: safeNotice(
+        notice: projectDataPorts().notices.safe(
           () =>
-            parentWakeNotice(
+            projectDataPorts().notices.parentWake(
               prepared.children.map((child) => {
                 const observation = observations.get(child.childTaskId);
                 return {

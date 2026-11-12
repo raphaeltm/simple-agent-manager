@@ -123,7 +123,7 @@ vi.mock('../../src/services/project-data', async () => {
   };
 });
 
-import { runMigrations } from '../../src/durable-objects/migrations';
+import { runMigrations } from '../../src/durable-objects/project-data/migrations';
 import { libraryCommentRoutes } from '../../src/routes/library-comments';
 
 let databases: Database.Database[] = [];

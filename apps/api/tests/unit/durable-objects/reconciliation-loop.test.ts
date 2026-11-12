@@ -1,11 +1,11 @@
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { runMigrations } from '../../../src/durable-objects/migrations';
 import {
   persistMessageBatchWithSideEffects,
   persistMessageWithSideEffects,
 } from '../../../src/durable-objects/project-data/message-persistence';
+import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
 import {
   computeReconciliationAlarmTime,
   getReconciliationCandidates,
@@ -29,7 +29,7 @@ vi.mock('../../../src/services/node-agent', async (original) => ({
   nodeAgentRequest: vi.fn(async () => versionedPromptCapabilities('runtime-1')),
   sendPromptToAgentOnNode: boundary.send,
 }));
-vi.mock('../../../src/durable-objects/project-data/task-runtime-liveness', () => ({
+vi.mock('../../../src/services/task-runtime-liveness-local', () => ({
   getLocalTaskRuntimeLiveness: vi.fn(async () => ({
     live: true,
     conclusive: true,

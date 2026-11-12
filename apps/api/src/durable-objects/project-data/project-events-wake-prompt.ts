@@ -9,11 +9,11 @@ import type {
   ProjectEventSubscriptionRecord,
 } from '@simple-agent-manager/shared';
 
-import { projectEventWakeNotice, safeNotice } from '../../services/sam-notice-builders';
 import {
   agentMessageChannelForSubscription,
   agentMessageWakeContent,
 } from './agent-message-notice';
+import { projectDataPorts } from './ports';
 import type { ProjectEventWakeSourceTaskGuard } from './project-events-materialization';
 import type { AcceptPromptDeliveryInput } from './prompt-delivery';
 
@@ -95,7 +95,7 @@ export function buildWakePromptInput(
       ...(urgentAgentClass ? { agentMessageClass: urgentAgentClass } : {}),
       ...(agentMessageChannel ? { agentMessageChannel } : {}),
     },
-    notice: safeNotice(() => projectEventWakeNotice(options.events ?? []), {
+    notice: projectDataPorts().notices.safe(() => projectDataPorts().notices.projectEventWake(options.events ?? []), {
       batchId: options.batchId,
       subscriptionId: options.subscription.id,
     }),

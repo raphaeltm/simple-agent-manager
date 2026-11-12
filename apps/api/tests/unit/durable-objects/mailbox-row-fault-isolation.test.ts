@@ -5,8 +5,8 @@
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { runMigrations } from '../../../src/durable-objects/migrations';
 import * as mailbox from '../../../src/durable-objects/project-data/mailbox';
+import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
 import { createSqlStorage } from './sql-storage-test-utils';
 
 describe('mailbox reads tolerate one malformed row', () => {

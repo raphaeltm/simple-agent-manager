@@ -1,11 +1,9 @@
-import type { Env as WorkerEnv } from '../../env';
 import { createModuleLogger } from '../../lib/logger';
-import { transitionTaskToTerminal } from '../../services/task-terminal-transition';
-import type { NotificationService } from '../notification';
 import * as activity from './activity';
 import * as attention from './attention';
 import { assessCheckinActivity, loadLatestActiveAcpActivity } from './checkin-activity';
 import { checkinFailureReason } from './checkin-failure-reason';
+import { projectDataPorts } from './ports';
 import { readProjectEventWakeLeaseUntil } from './project-events-wake-delivery';
 import { activeWorkHardStallMs, reconciliationDeadlineMs } from './reconciliation-thresholds';
 import type { Env } from './types';
@@ -179,24 +177,16 @@ async function processExpiredNeedsInputMarker(
   await failExpiredTaskMarker(sql, env, marker, failSession, hooks);
 }
 
-function notificationStub(env: Env, userId: string): DurableObjectStub<NotificationService> | null {
-  if (!env.NOTIFICATION) return null;
-  return env.NOTIFICATION.get(
-    env.NOTIFICATION.idFromName(userId)
-  ) as DurableObjectStub<NotificationService>;
-}
-
 async function hasConfirmedPushDelivery(
   env: Env,
   marker: ExpiredAttentionMarker
 ): Promise<boolean> {
   if (!marker.notificationUserId || !marker.sourceNotificationId) return false;
   try {
-    return (
-      (await notificationStub(env, marker.notificationUserId)?.hasConfirmedPushDelivery(
-        marker.notificationUserId,
-        marker.sourceNotificationId
-      )) ?? false
+    return await projectDataPorts().notifications.hasConfirmedPushDelivery(
+      env,
+      marker.notificationUserId,
+      marker.sourceNotificationId
     );
   } catch (err) {
     log.warn('attention_marker.delivery_receipt_check_failed', {
@@ -210,7 +200,8 @@ async function hasConfirmedPushDelivery(
 async function resendNeedsInputPush(env: Env, marker: ExpiredAttentionMarker): Promise<void> {
   if (!marker.notificationUserId || !marker.sourceNotificationId) return;
   try {
-    await notificationStub(env, marker.notificationUserId)?.resendPushNotification(
+    await projectDataPorts().notifications.resendPush(
+      env,
       marker.notificationUserId,
       marker.sourceNotificationId
     );
@@ -240,7 +231,8 @@ async function failExpiredTaskMarker(
 
   const projectId = hooks.projectId ?? null;
   const source = `project_data.attention_expiry.${marker.kind}`;
-  const transitionOutcome = await transitionTaskToTerminal(env as unknown as WorkerEnv, {
+  const ports = projectDataPorts();
+  const transitionOutcome = await ports.tasks.transitionToTerminal(env, {
     taskId: marker.taskId,
     projectId,
     status: 'failed',
@@ -282,22 +274,18 @@ async function failExpiredTaskMarker(
   // end: a sleep would wait on it, and every capture would race its re-reports.
   // That runtime is released now. A turn that reported nothing since the check-in
   // is unproven, not stalled, and is preserved like any other failure.
-  const workerEnv = env as unknown as WorkerEnv;
-  const preservationService = await import('../../services/failed-task-preservation');
-  const unresponsiveMidTurn =
-    marker.kind === 'reconciliation_checkin' &&
-    assessCheckinActivity(env, marker, loadLatestActiveAcpActivity(sql, marker), Date.now())
-      .stalledPastCeiling;
-  const preservation = unresponsiveMidTurn
-    ? ({ outcome: 'not_preservable', gap: 'agent_unresponsive' } as const)
-    : await preservationService.preserveFailedTaskWork(workerEnv, {
-        taskId: marker.taskId,
-        projectId,
-        workspaceId: marker.workspaceId,
-        chatSessionId: marker.sessionId,
-        source,
-      });
-  if (preservationService.withholdsFailedTaskTeardown(preservation)) {
+  const preservation = await ports.tasks.preserveFailedWorkOrSurfaceLoss(env, {
+    taskId: marker.taskId,
+    projectId,
+    workspaceId: marker.workspaceId,
+    chatSessionId: marker.sessionId,
+    source,
+    agentUnresponsive:
+      marker.kind === 'reconciliation_checkin' &&
+      assessCheckinActivity(env, marker, loadLatestActiveAcpActivity(sql, marker), Date.now())
+        .stalledPastCeiling,
+  });
+  if (preservation.preserved) {
     log.info('attention_marker.expired_work_preserved', {
       markerId: marker.id,
       sessionId: marker.sessionId,
@@ -308,13 +296,6 @@ async function failExpiredTaskMarker(
     return;
   }
 
-  await preservationService.surfaceFailedTaskWorkLoss(workerEnv, {
-    taskId: marker.taskId,
-    projectId,
-    chatSessionId: marker.sessionId,
-    reason: preservation.gap,
-    source,
-  });
   await failSession(marker.sessionId, errorMessage);
   hooks.scheduleSummarySync?.();
   // Off the alarm's critical path (`.claude/rules/47`). The object stays alive
@@ -337,9 +318,7 @@ async function failExpiredTaskMarker(
 
 async function cleanupExpiredTaskRun(env: Env, workspaceId: string, taskId: string): Promise<void> {
   try {
-    const workerEnv = env as unknown as import('../../env').Env;
-    const { cleanupTaskRun } = await import('../../services/task-runner');
-    await cleanupTaskRun(taskId, workerEnv);
+    await projectDataPorts().tasks.cleanupTaskRun(env, taskId);
   } catch (err) {
     log.error('reconciliation.cleanup_task_run_failed', {
       workspaceId,

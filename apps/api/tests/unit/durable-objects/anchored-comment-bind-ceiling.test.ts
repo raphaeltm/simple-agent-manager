@@ -11,8 +11,8 @@
 import Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { runMigrations } from '../../../src/durable-objects/migrations';
 import * as comments from '../../../src/durable-objects/project-data/comments';
+import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
 import { listProjectCommentInbox } from '../../../src/durable-objects/project-data/project-comment-inbox';
 import type { Env } from '../../../src/durable-objects/project-data/types';
 import { createSqlStorage } from './sql-storage-test-utils';

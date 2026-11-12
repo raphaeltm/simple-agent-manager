@@ -9,11 +9,11 @@ import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
-import { runMigrations } from '../../../src/durable-objects/migrations';
 import {
   prepareAgentChannelMessage,
   sendAgentChannelMessage,
 } from '../../../src/durable-objects/project-data/agent-message-channels';
+import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
 import { listChannelSubscribers } from '../../../src/durable-objects/project-data/project-event-channel-subscribers';
 import {
   prepareChannelPublish,

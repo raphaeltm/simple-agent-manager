@@ -1,4 +1,4 @@
-import type { Env } from '../env';
+import type { ProjectDataEnv as Env } from '../durable-objects/project-data/types';
 
 export type ReservedTaskSessionRevocationReason = 'session_stopped' | 'session_failed';
 

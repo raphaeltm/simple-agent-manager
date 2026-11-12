@@ -4,15 +4,15 @@ import {
 } from '@simple-agent-manager/shared';
 
 import { createModuleLogger } from '../../lib/logger';
-import { recordDurableExecutionMetric } from '../../services/telemetry';
-import type {
-  VmPromptDeliveryAdapter,
-  VmPromptDeliveryAdapterInput,
-  VmPromptDeliveryTarget,
-} from '../../services/vm-prompt-delivery-adapter';
 import * as activity from './activity';
 import { invalidCheckpointContinuationTarget } from './checkpoint-continuation-delivery';
 import type { DurableExecutionConfig } from './durable-execution-config';
+import {
+  projectDataPorts,
+  type VmPromptDeliveryAdapter,
+  type VmPromptDeliveryAdapterInput,
+  type VmPromptDeliveryTarget,
+} from './ports';
 import { providerLimitEventDeliveryGuard } from './project-event-provider-limit-delivery';
 import {
   invalidScheduledDeliveryTarget,
@@ -131,16 +131,13 @@ export async function runPromptDeliveryClaim(
   hooks: PromptDeliveryRunnerHooks
 ): Promise<PromptDeliveryResult> {
   const startedAt = Date.now();
-  recordDurableExecutionMetric(
-    {
+  projectDataPorts().observability.recordDurableExecutionMetric(env, {
       metric: 'prompt_delivery_attempt',
       projectId: hooks.projectId,
       sessionId: claim.message.targetSessionId,
       deliveryId: claim.message.id,
       attemptCount: claim.message.deliveryAttempts,
-    },
-    env as unknown as import('../../env').Env
-  );
+  });
 
   let result: PromptDeliveryResult;
   // Stop-and-deliver outcome captured by the onBusyTurn hook below; read after
@@ -315,8 +312,7 @@ export async function runPromptDeliveryClaim(
       steer_pending: 'prompt_delivery_steer_pending',
     } as const
   )[result.kind];
-  recordDurableExecutionMetric(
-    {
+  projectDataPorts().observability.recordDurableExecutionMetric(env, {
       metric,
       projectId: hooks.projectId,
       sessionId: claim.message.targetSessionId,
@@ -324,9 +320,7 @@ export async function runPromptDeliveryClaim(
       attemptCount: claim.message.deliveryAttempts,
       durationMs: Date.now() - startedAt,
       reason: 'reason' in result ? result.reason : null,
-    },
-    env as unknown as import('../../env').Env
-  );
+  });
 
   if (applied) {
     activity.recordActivityEventInternal(

@@ -11,8 +11,8 @@
  */
 import * as v from 'valibot';
 
-import { HUMAN_PROMPT_DELIVERY_TRIGGERS } from '../../lib/agent-wake-policy';
 import { createModuleLogger } from '../../lib/logger';
+import { HUMAN_PROMPT_DELIVERY_TRIGGERS } from './agent-wake-policy';
 import { cancelCreatorSchedulesForSession } from './project-event-schedules-storage';
 import { parseRow } from './row-schemas';
 

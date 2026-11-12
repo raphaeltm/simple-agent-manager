@@ -8,8 +8,8 @@
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { runMigrations } from '../../../src/durable-objects/migrations';
 import { persistMessageWithSideEffects } from '../../../src/durable-objects/project-data/message-persistence';
+import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
 import * as sessionState from '../../../src/durable-objects/project-data/session-state';
 import { createSqlStorage } from './sql-storage-test-utils';
 

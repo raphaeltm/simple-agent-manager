@@ -2,9 +2,9 @@ import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
-import { runMigrations } from '../../../src/durable-objects/migrations';
 import { createAttentionMarker } from '../../../src/durable-objects/project-data/attention';
 import { processExpiredAttentionMarkers } from '../../../src/durable-objects/project-data/attention-expiry';
+import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
 import type { Env } from '../../../src/durable-objects/project-data/types';
 import {
   failedTaskIncompleteSnapshotMessage,

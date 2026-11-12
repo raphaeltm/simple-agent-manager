@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
-import { runMigrations } from '../../../src/durable-objects/migrations';
+import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
 import {
   reconcileSchedule,
   withScheduleExecution,

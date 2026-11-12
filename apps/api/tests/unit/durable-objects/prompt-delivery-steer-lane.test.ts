@@ -7,13 +7,13 @@ import type { VmPromptDeliveryCapabilities } from '@simple-agent-manager/shared'
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { runMigrations } from '../../../src/durable-objects/migrations';
 import {
   acceptPromptDelivery,
   type DurabilityFoundationHooks,
   processPromptDeliveryAlarm,
 } from '../../../src/durable-objects/project-data/durability-foundation';
 import { resolveDurableExecutionConfig } from '../../../src/durable-objects/project-data/durable-execution-config';
+import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
 import {
   computePromptDeliveryAlarmTime,
   nudgePromptDeliveriesForTarget,

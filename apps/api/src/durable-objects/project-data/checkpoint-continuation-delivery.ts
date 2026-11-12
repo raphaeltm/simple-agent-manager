@@ -1,4 +1,4 @@
-import { isSessionRecoverySourceTaskGuardValid } from '../../services/session-recovery-authority';
+import { projectDataPorts } from './ports';
 import type { PromptDeliveryClaim, PromptDeliveryResult } from './prompt-delivery';
 import { sourceValidationReadFailure } from './prompt-delivery-source-guards';
 import type { Env } from './types';
@@ -58,7 +58,7 @@ export async function invalidCheckpointContinuationTarget(
     return invalid('Checkpoint continuation was superseded by a later wake');
   }
   try {
-    const live = await isSessionRecoverySourceTaskGuardValid(env.DATABASE, {
+    const live = await projectDataPorts().sessions.isSourceTaskGuardValid(env, {
       taskId: claim.message.sourceTaskId,
       projectId,
       chatSessionId: claim.message.targetSessionId,

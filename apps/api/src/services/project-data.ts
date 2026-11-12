@@ -159,6 +159,7 @@ export {
   ProjectEventNotFoundError,
   ProjectEventValidationError,
 } from '../durable-objects/project-data/project-events-contracts';
+import { projectDataPorts } from '../durable-objects/project-data/ports';
 import type { ValidateProjectEventWakeRecoveryAuthorityInput } from '../durable-objects/project-data/project-events-wake-delivery';
 import type {
   AcceptedPromptDelivery,
@@ -170,8 +171,9 @@ import type {
   CreateReservedTaskSessionWithInitialMessageResult,
   SessionIdentityGuard as ProjectDataSessionIdentityGuard,
 } from '../durable-objects/project-data/sessions';
+import type { TaskAcpLivenessSignals } from '../durable-objects/project-data/task-acp-liveness-types';
 import type { RegisterTaskWaitInput } from '../durable-objects/project-data/task-waits';
-import type { Env } from '../env';
+import type { ProjectDataEnv as Env } from '../durable-objects/project-data/types';
 import { log } from '../lib/logger';
 import { type NormalizedSearchQuery, normalizeSearchQuery } from '../lib/search-query-limits';
 import {
@@ -190,16 +192,14 @@ import {
   resolveExactReadOwner,
 } from './project-data-archive-routing';
 import { ensureOncePerIsolate, forgetEnsuredProjectData } from './project-data-ensure-memo';
-import { type ProjectDataRpcRetryPolicy, retryProjectDataRpc } from './project-data-rpc-retry';
-import type { ProjectDataRootSearchCoverage } from './project-data-search-coverage';
-import { toProjectDataStorageFullError } from './project-data-storage-errors';
 import {
   buildSessionLifecycleEventInput,
   type SessionLifecycleEventInput,
-} from './project-lifecycle-event-inputs';
-import { recordReservedTaskSessionRevocation } from './reserved-task-session-revocations';
-import { hasAuthorizedRestorableSnapshotWakeClaim } from './session-snapshots';
-import type { TaskAcpLivenessSignals } from './task-runtime-liveness';
+} from './project-data-lifecycle-event-inputs';
+import { type ProjectDataRpcRetryPolicy, retryProjectDataRpc } from './project-data-rpc-retry';
+import type { ProjectDataRootSearchCoverage } from './project-data-search-coverage';
+import { recordReservedTaskSessionRevocation } from './project-data-session-revocations';
+import { toProjectDataStorageFullError } from './project-data-storage-errors';
 
 export type { ProjectDataSessionIdentityGuard };
 
@@ -770,7 +770,7 @@ export async function wakeSessionForSnapshotRecovery(
     sessionId,
     'wakeSessionForSnapshotRecovery'
   );
-  const allowStopped = await hasAuthorizedRestorableSnapshotWakeClaim(env.DATABASE, {
+  const allowStopped = await projectDataPorts().sessions.hasAuthorizedRestorableSnapshotWakeClaim(env, {
     projectId,
     chatSessionId: sessionId,
     workspaceId,

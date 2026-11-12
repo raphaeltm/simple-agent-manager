@@ -11,7 +11,7 @@
 import Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { runMigrations } from '../../../src/durable-objects/migrations';
+import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
 import { upsertActivityState } from '../../../src/durable-objects/project-data/session-state';
 import { readTaskAcpLivenessSignals } from '../../../src/durable-objects/project-data/task-acp-liveness-signals';
 import type { Env } from '../../../src/durable-objects/project-data/types';

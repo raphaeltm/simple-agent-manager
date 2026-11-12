@@ -5,12 +5,9 @@
  * the request would wake it. Split out of `session-activity-reconciliation.ts`, which
  * keeps the SQL state machine (`.claude/rules/18-file-size-limits.md`).
  */
-import type { Env as WorkerEnv } from '../../env';
 import { createModuleLogger, serializeError } from '../../lib/logger';
-import { listAgentSessionsOnNode } from '../../services/node-agent';
-import { isSleepingContainerRuntime } from '../../services/sleeping-container-runtime';
-import { recordAcpActivityCallbackMetric } from '../../services/telemetry';
 import { recordActivityEventInternal } from './activity';
+import { projectDataPorts } from './ports';
 import {
   sessionActivityProbeMaxAttempts,
   sessionActivityProbeMaxCandidates,
@@ -35,7 +32,7 @@ const log = createModuleLogger('session_activity_reconciliation');
  * contact (the ACP session's `node_id`), not necessarily the workspace's current node.
  */
 async function resolveProbeTarget(
-  env: WorkerEnv,
+  env: DOEnv,
   candidate: StaleActivityCandidate,
   projectId: string | null
 ): Promise<{ userId: string; runtimeAsleep: boolean } | null> {
@@ -70,7 +67,7 @@ async function resolveProbeTarget(
   }
   return {
     userId: row.user_id,
-    runtimeAsleep: isSleepingContainerRuntime({
+    runtimeAsleep: projectDataPorts().runtime.isSleepingContainerRuntime({
       nodeRuntime: row.node_runtime ?? null,
       nodeStatus: row.node_status ?? null,
     }),
@@ -102,13 +99,12 @@ export async function probeStaleSessionActivity(
   });
   if (candidates.length === 0) return { probed: 0, reconciled: 0 };
 
-  const workerEnv = env as unknown as WorkerEnv;
   let reconciled = 0;
 
   for (const candidate of candidates) {
     let outcome: ProbeOutcome;
     try {
-      const target = await resolveProbeTarget(workerEnv, candidate, options.projectId);
+      const target = await resolveProbeTarget(env, candidate, options.projectId);
       if (!target) {
         outcome = { kind: 'unreachable', error: 'workspace_owner_unresolved' };
       } else if (target.runtimeAsleep) {
@@ -116,13 +112,12 @@ export async function probeStaleSessionActivity(
         // restore it from its snapshot just to hear that.
         outcome = { kind: 'not_working', hostStatus: null };
       } else {
-        const payload = await listAgentSessionsOnNode(
-          candidate.nodeId,
-          candidate.workspaceId,
-          workerEnv,
-          target.userId,
-          { requestTimeoutMs }
-        );
+        const payload = await projectDataPorts().runtime.listAgentSessions(env, {
+          nodeId: candidate.nodeId,
+          workspaceId: candidate.workspaceId,
+          userId: target.userId,
+          requestTimeoutMs,
+        });
         outcome = classifyProbeResponse(payload, candidate.acpSessionId, candidate.workspaceId);
       }
     } catch (err) {
@@ -142,8 +137,7 @@ export async function probeStaleSessionActivity(
 
     if (!changed) continue;
     reconciled += 1;
-    recordAcpActivityCallbackMetric(
-      {
+    projectDataPorts().observability.recordAcpActivityMetric(env, {
         metric: 'acp_activity_callback',
         outcome: 'healed',
         projectId: options.projectId,
@@ -152,10 +146,8 @@ export async function probeStaleSessionActivity(
         workspaceId: candidate.workspaceId,
         activity: 'idle',
         reason: 'probe_reconciled',
-        source: 'reconciliation_probe',
-      },
-      workerEnv
-    );
+      source: 'reconciliation_probe',
+    });
     recordActivityEventInternal(
       sql,
       'session.activity_reconciled',

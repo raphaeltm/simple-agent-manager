@@ -1,11 +1,11 @@
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { runMigrations } from '../../../src/durable-objects/migrations';
 import {
   type DurabilityFoundationHooks,
   reportActivity,
 } from '../../../src/durable-objects/project-data/durability-foundation';
+import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
 import { getSessionState } from '../../../src/durable-objects/project-data/session-state-read';
 import { createSqlStorage } from './sql-storage-test-utils';
 

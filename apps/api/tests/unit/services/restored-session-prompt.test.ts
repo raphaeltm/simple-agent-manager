@@ -7,12 +7,12 @@
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { runMigrations } from '../../../src/durable-objects/migrations';
 import {
   acceptPromptDelivery,
   type DurabilityFoundationHooks,
 } from '../../../src/durable-objects/project-data/durability-foundation';
 import { persistMessage } from '../../../src/durable-objects/project-data/messages';
+import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
 import type { Env } from '../../../src/env';
 import {
   queueRestoredSessionPrompt,

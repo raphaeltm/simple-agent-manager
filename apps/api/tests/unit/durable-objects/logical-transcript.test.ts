@@ -12,7 +12,6 @@ import { formatMessageCursor, type MessagePosition } from '@simple-agent-manager
 import Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { runMigrations } from '../../../src/durable-objects/migrations';
 import { readSourceLogicalMessage } from '../../../src/durable-objects/project-data/logical-message';
 import {
   type LogicalEntry,
@@ -23,6 +22,7 @@ import {
   assembleMessage,
   type Run,
 } from '../../../src/durable-objects/project-data/logical-transcript-model';
+import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
 import type { Env } from '../../../src/durable-objects/project-data/types';
 import { createSqlStorage } from './sql-storage-test-utils';
 

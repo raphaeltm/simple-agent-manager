@@ -10,7 +10,6 @@ import { VM_PROMPT_DELIVERY_PROTOCOL_VERSION } from '@simple-agent-manager/share
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { runMigrations } from '../../src/durable-objects/migrations';
 import { updateMessageActivity } from '../../src/durable-objects/project-data/activity';
 import {
   createAttentionMarker,
@@ -25,6 +24,7 @@ import {
   stopWorkspaceInD1,
 } from '../../src/durable-objects/project-data/idle-cleanup';
 import { persistMessage } from '../../src/durable-objects/project-data/messages';
+import { runMigrations } from '../../src/durable-objects/project-data/migrations';
 import {
   getReconciliationCandidates,
   processReconciliationCandidates,

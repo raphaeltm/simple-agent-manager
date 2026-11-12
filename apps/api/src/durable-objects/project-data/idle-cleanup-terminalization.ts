@@ -1,13 +1,6 @@
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
-import { stoppingTaskSleepOwnsCleanup } from '../../services/session-sleep-task-convergence';
-import {
-  isSupersededTerminalReason,
-  livenessEvidenceLogFields,
-  type TaskRuntimeLiveness,
-} from '../../services/task-runtime-liveness';
-import { syncTriggerExecutionStatus } from '../../services/trigger-execution-sync';
-import { getLocalTaskRuntimeLiveness } from './task-runtime-liveness';
+import { type LocalTaskRuntimeVerdict, projectDataPorts } from './ports';
 import type { Env } from './types';
 
 const log = createModuleLogger('idle_cleanup_terminalization');
@@ -34,7 +27,7 @@ export interface IdleTaskReporter {
 export interface IdleTaskTerminalizationResult {
   outcome: 'failed' | 'preserved' | 'rejected' | 'not_active' | 'not_found' | 'superseded';
   taskId: string;
-  liveness: TaskRuntimeLiveness | null;
+  liveness: LocalTaskRuntimeVerdict | null;
   errorMessage: string | null;
 }
 
@@ -157,7 +150,7 @@ async function scopeMismatch(
   return null;
 }
 
-function diagnosticMessage(reporter: IdleTaskReporter, liveness: TaskRuntimeLiveness): string {
+function diagnosticMessage(reporter: IdleTaskReporter, liveness: LocalTaskRuntimeVerdict): string {
   return (
     `Idle cleanup ${reporter.sweep} failed the task after ${reporter.idleDurationMs}ms idle ` +
     `(configured timeout ${reporter.timeoutMs}ms): runtime conclusively dead (${liveness.reason}).`
@@ -202,7 +195,7 @@ export async function terminalizeIdleTaskInD1(
   // A claimed sleep has its own bounded converger. Retire this obsolete cleanup
   // schedule instead of racing it to fail the task or holding a self-RPC open.
   if (
-    await stoppingTaskSleepOwnsCleanup(env.DATABASE, {
+    await projectDataPorts().sessions.stoppingTaskSleepOwnsCleanup(env, {
       projectId: reporter.projectId,
       chatSessionId: reporter.sessionId,
       workspaceId: reporter.workspaceId,
@@ -211,7 +204,7 @@ export async function terminalizeIdleTaskInD1(
     return { outcome: 'not_active', taskId: task.id, liveness: null, errorMessage: null };
   }
 
-  const liveness = await getLocalTaskRuntimeLiveness(sql, env, {
+  const liveness = await projectDataPorts().taskLiveness.getLocalTaskRuntimeVerdict(sql, env, {
     taskId: task.id,
     projectId: reporter.projectId,
     workspaceId: reporter.workspaceId,
@@ -231,7 +224,7 @@ export async function terminalizeIdleTaskInD1(
       conclusive: liveness.conclusive,
       reason: liveness.reason,
       // Live is not working: an idle agent waiting for its user is live too.
-      ...livenessEvidenceLogFields(liveness),
+      ...liveness.evidenceLogFields,
       action: 'preserved',
     });
     return { outcome: 'preserved', taskId: task.id, liveness, errorMessage: null };
@@ -241,7 +234,7 @@ export async function terminalizeIdleTaskInD1(
   // lifecycle outcome, not a runtime failure — the same distinction the cron sweep
   // makes, kept in lockstep here so the two terminalization runtimes cannot
   // disagree about what a supersession means (`.claude/rules/61`, `.claude/rules/66`).
-  const supersededTermination = isSupersededTerminalReason(liveness.reason);
+  const supersededTermination = liveness.supersededTermination;
   const terminalStatus: 'failed' | 'cancelled' = supersededTermination ? 'cancelled' : 'failed';
   // The reason always lands on the status event so the timeline stays complete.
   const statusEventReason = supersededTermination
@@ -314,6 +307,11 @@ export async function terminalizeIdleTaskInD1(
     throw err;
   }
 
-  await syncTriggerExecutionStatus(env.DATABASE, task.id, terminalStatus, statusEventReason);
+  await projectDataPorts().tasks.syncTriggerExecutionStatus(
+    env,
+    task.id,
+    terminalStatus,
+    statusEventReason
+  );
   return { outcome: 'failed', taskId: task.id, liveness, errorMessage: statusEventReason };
 }

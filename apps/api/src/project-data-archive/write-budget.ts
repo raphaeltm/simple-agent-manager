@@ -1,4 +1,4 @@
-import type { Env } from '../env';
+import type { ProjectDataEnv as Env } from '../durable-objects/project-data/types';
 
 export const ARCHIVE_BUDGET_WINDOW_MS = 24 * 60 * 60 * 1000;
 export const ARCHIVE_DEFAULT_DAILY_WRITE_BUDGET = 250_000;

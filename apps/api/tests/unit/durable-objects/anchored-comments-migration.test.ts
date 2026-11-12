@@ -9,13 +9,13 @@
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { MIGRATIONS, runMigrations } from '../../../src/durable-objects/migrations';
 import {
   checkLegacyCommentParity,
   copyLegacyCommentRows,
 } from '../../../src/durable-objects/project-data/anchored-comments-migration';
 import * as comments from '../../../src/durable-objects/project-data/comments';
 import * as fileComments from '../../../src/durable-objects/project-data/library-file-comments';
+import { MIGRATIONS, runMigrations } from '../../../src/durable-objects/project-data/migrations';
 import { listProjectCommentInbox } from '../../../src/durable-objects/project-data/project-comment-inbox';
 import type { Env } from '../../../src/durable-objects/project-data/types';
 import { createSqlStorage } from './sql-storage-test-utils';

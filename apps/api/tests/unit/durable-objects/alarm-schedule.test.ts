@@ -1,8 +1,8 @@
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { runMigrations } from '../../../src/durable-objects/migrations';
 import { computeProjectDataAlarmTime } from '../../../src/durable-objects/project-data/alarm-schedule';
+import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
 import { createSqlStorage } from './sql-storage-test-utils';
 
 describe('ProjectData shared alarm deadlines', () => {

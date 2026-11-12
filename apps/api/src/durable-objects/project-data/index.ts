@@ -30,10 +30,6 @@ import { expectJsonRecord } from '../../lib/runtime-validation';
 import { normalizeSearchQuery } from '../../lib/search-query-limits';
 import { measureArchiveSql } from '../../project-data-archive/sql-metrics';
 import { estimateArchiveWrites } from '../../project-data-archive/write-budget';
-import { deferAlarmWhenDisabled } from '../../services/operational-kill-switch';
-import { isSessionRecoverySourceTaskGuardValid } from '../../services/session-recovery-authority';
-import { hasAuthorizedRestorableSnapshotWakeClaim } from '../../services/session-snapshot-recovery-lifecycle';
-import { runMigrations } from '../migrations';
 import * as acpSessions from './acp-sessions';
 import * as activity from './activity';
 import * as agentMessageChannels from './agent-message-channels';
@@ -73,8 +69,10 @@ import * as materialization from './materialization';
 import * as messageContext from './message-context';
 import * as messagePersistence from './message-persistence';
 import * as messages from './messages';
+import { runMigrations } from './migrations';
 import * as missionState from './missions';
 import * as policies from './policies';
+import { projectDataPorts } from './ports';
 import * as projectCommentInbox from './project-comment-inbox';
 import * as eventChannels from './project-event-channels';
 import {
@@ -126,7 +124,7 @@ import * as sessions from './sessions';
 import * as storageReliefMeasurement from './storage-relief-measurement';
 import * as storageSafety from './storage-safety';
 import { readStorageSafetyMeta, writeStorageSafetyMeta } from './storage-safety-meta';
-import { readTaskAcpLivenessSignals } from './task-runtime-liveness';
+import { readTaskAcpLivenessSignals } from './task-acp-liveness-signals';
 import { resolveTaskWaitConfig } from './task-wait-config';
 import { processTaskWaits } from './task-wait-supervisor';
 import * as taskWaits from './task-waits';
@@ -540,7 +538,7 @@ export class ProjectData extends DurableObject<Env> {
         )
           return { ok: true as const, value: false };
         if (
-          !(await hasAuthorizedRestorableSnapshotWakeClaim(this.env.DATABASE, {
+          !(await projectDataPorts().sessions.hasAuthorizedRestorableSnapshotWakeClaim(this.env, {
             projectId,
             chatSessionId: sessionId,
             ...input,
@@ -2997,8 +2995,8 @@ export class ProjectData extends DurableObject<Env> {
     }
     let deferredUntil: number | null = null;
     for (const candidate of candidates) {
-      const sourceAuthorized = await isSessionRecoverySourceTaskGuardValid(
-        this.env.DATABASE,
+      const sourceAuthorized = await projectDataPorts().sessions.isSourceTaskGuardValid(
+        this.env,
         candidate.sourceTaskGuard
       );
       if (!sourceAuthorized) {
@@ -3073,7 +3071,14 @@ export class ProjectData extends DurableObject<Env> {
   // --- DO Alarm Handler ---
 
   async alarm(): Promise<void> {
-    if (await deferAlarmWhenDisabled(this.env, this.ctx.storage, 'ProjectData')) return;
+    if (
+      await projectDataPorts().operations.deferAlarmWhenDisabled(
+        this.env,
+        this.ctx.storage,
+        'ProjectData'
+      )
+    )
+      return;
     const gating = resolveProjectDataAlarmGatingConfig(this.env);
     let scheduleRefreshed = true;
     try {
@@ -3248,18 +3253,17 @@ export class ProjectData extends DurableObject<Env> {
   ): Promise<void> {
     await idleCleanup.stopWorkspaceInD1(this.env.DATABASE, workspaceId, projectId);
     try {
-      const workerEnv = this.env as unknown as import('../../env').Env;
-      const wsRow = await workerEnv.DATABASE.prepare(
+      const wsRow = await this.env.DATABASE.prepare(
         'SELECT node_id, user_id FROM workspaces WHERE id = ? AND project_id = ?'
       )
         .bind(workspaceId, projectId)
         .first<{ node_id: string | null; user_id: string }>();
       if (wsRow?.node_id) {
-        const doId = workerEnv.NODE_LIFECYCLE.idFromName(wsRow.node_id);
-        const stub = workerEnv.NODE_LIFECYCLE.get(doId);
-        await (
-          stub as unknown as import('../node-lifecycle').NodeLifecycle
-        ).scheduleWorkspaceDeletion(wsRow.node_id, workspaceId, wsRow.user_id);
+        await projectDataPorts().runtime.scheduleWorkspaceDeletion(this.env, {
+          nodeId: wsRow.node_id,
+          workspaceId,
+          userId: wsRow.user_id,
+        });
       }
     } catch {
       // Best-effort — cron safety-net will catch it

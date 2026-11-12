@@ -15,7 +15,7 @@ import {
 } from '@simple-agent-manager/shared';
 import { describe, expect, it, vi } from 'vitest';
 
-import { MIGRATIONS } from '../../../src/durable-objects/migrations';
+import { MIGRATIONS } from '../../../src/durable-objects/project-data/migrations';
 
 describe('Mailbox Types and Constants', () => {
   it('defines 5 message classes in escalating order', () => {

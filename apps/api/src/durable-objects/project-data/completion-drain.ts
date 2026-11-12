@@ -1,9 +1,7 @@
 import { DEFAULT_TASK_LIVENESS_MAX_ACP_SESSIONS } from '@simple-agent-manager/shared';
 
 import { parsePositiveInt } from '../../lib/route-helpers';
-import { classifySessionIdleness, parseHarnessWorkConfig } from '../../services/session-idleness';
-import { DEFAULT_SESSION_SLEEP_AFTER_MS } from '../../services/session-snapshot-artifacts';
-import { isSleepPreservedTerminalTaskStatus } from '../../services/sleep-preserved-task-status';
+import { projectDataPorts } from './ports';
 import { getSessionState } from './session-state';
 import type { Env } from './types';
 
@@ -22,8 +20,9 @@ export function isCompletingSessionProtected(
   task: { status: string; completed_at: string | null; updated_at: string | null },
   now: Date
 ): boolean {
-  if (!isSleepPreservedTerminalTaskStatus(task.status)) return false;
-  const idleAfterMs = parsePositiveInt(env.SESSION_SLEEP_AFTER_MS, DEFAULT_SESSION_SLEEP_AFTER_MS);
+  const lifecycle = projectDataPorts().sessions;
+  if (!lifecycle.isSleepPreservedTerminalTaskStatus(task.status)) return false;
+  const idleAfterMs = parsePositiveInt(env.SESSION_SLEEP_AFTER_MS, lifecycle.defaultSleepAfterMs);
   const completedAt = Date.parse(task.completed_at ?? task.updated_at ?? '');
   // Completion happens inside the prompt. Its activity transition can predate
   // completion by hours, or the activity mirror may not have arrived yet. Give
@@ -45,13 +44,12 @@ export function isCompletingSessionProtected(
   for (const acp of sessions) {
     const state = getSessionState(sql, acp.id);
     if (!state) continue;
-    const idleness = classifySessionIdleness({
+    const idleness = lifecycle.classifyIdleness(env, {
       taskStatus: task.status,
       taskCompletedAt: task.completed_at ?? task.updated_at,
       state,
       now,
       idleAfterMs,
-      harnessWorkConfig: parseHarnessWorkConfig(env),
       policy: 'prompt-turn-ended',
     });
     // Unknown/absent state cannot pin an old completed task forever. Recent

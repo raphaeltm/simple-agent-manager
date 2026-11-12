@@ -7,7 +7,6 @@
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { runMigrations } from '../../../src/durable-objects/migrations';
 import { computeProjectDataAlarmTime } from '../../../src/durable-objects/project-data/alarm-schedule';
 import {
   createAttentionMarker,
@@ -15,6 +14,7 @@ import {
   resolveAttentionMarkerById,
   resolveAttentionMarkers,
 } from '../../../src/durable-objects/project-data/attention';
+import { runMigrations } from '../../../src/durable-objects/project-data/migrations';
 import {
   computeReconciliationAlarmTime,
   getReconciliationCandidates,

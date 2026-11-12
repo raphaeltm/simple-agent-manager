@@ -1,4 +1,4 @@
-import type { Env } from '../env';
+import type { ProjectDataEnv as Env } from '../durable-objects/project-data/types';
 import {
   PROJECT_DATA_ARCHIVE_JOURNAL_STATES,
   PROJECT_DATA_ARCHIVE_LOCATION_STATES,

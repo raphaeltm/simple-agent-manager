@@ -120,7 +120,7 @@ Per-project data (chat sessions, messages, activity events, and canonical `proje
 - **Access**: `env.PROJECT_DATA.idFromName(projectId)` → deterministic DO stub
 - **Service layer**: `apps/api/src/services/project-data.ts` — typed wrapper for all DO RPC calls
 - **DO class**: `apps/api/src/durable-objects/project-data/` — Durable Object implementation split by concern; constructor/migrations are under this directory
-- **Migrations**: `apps/api/src/durable-objects/migrations.ts` — append-only, tracked in `migrations` table
+- **Migrations**: `apps/api/src/durable-objects/project-data/migrations.ts` — append-only, tracked in `migrations` table
 - **WebSocket**: Hibernatable WebSockets for real-time event streaming
 - **D1 sync**: `scheduleSummarySync()` debounces summary updates to D1
 - **Architecture docs**: `apps/www/src/content/docs/docs/architecture/overview.md`
