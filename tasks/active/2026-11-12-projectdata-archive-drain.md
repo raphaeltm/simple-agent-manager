@@ -137,6 +137,10 @@ PR A design (decided):
   is unconditional; the expiry-race marker control goes red against the previous
   `expires_at > now OR ...` predicate. New allowance test
   (`write-budget-shipped-factor.test.ts`) goes red at a 1,900,000 allowance (694 < 720).
+- Staging found (2026-11-12 18:30Z): 8 expired degraded sleepers whose sessions were already
+  archived failed every purge sweep (`stopSession` fenced by `archive_shard`). Fixed:
+  `expireSleepingConversation` skips the stop for a non-root location. Test "expires the snapshot of
+  a sleeper whose transcript the archive already moved" goes red without the fix (with routing on).
 - PR 1 test imports of ProjectData internals: none beyond existing public RPCs on the DO stub.
   New file: `apps/api/tests/workers/project-data-archive-drain-relief.test.ts`. No DO or D1
   migrations.

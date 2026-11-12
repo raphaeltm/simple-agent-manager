@@ -3,6 +3,7 @@ import { SNAPSHOT_EXPIRED_REASON } from '@simple-agent-manager/shared';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import * as projectDataService from './project-data';
+import { resolveProjectDataSessionLocation } from './project-data-archive-routing';
 import { transitionTaskToTerminal } from './task-terminal-transition';
 
 /** Point lookup used by the sweep before a legacy sleep can be mistaken for death. */
@@ -47,6 +48,12 @@ export async function expireSleepingConversation(
     });
     if (outcome !== 'transitioned' && outcome !== 'already_terminal') return false;
   }
+  // A session whose transcript has moved off the root object (archived, or mid-migration) was
+  // terminal before the archive could select it, so there is nothing left to stop, and
+  // `stopSession` would be refused by the archive write fence. Without this branch such a
+  // snapshot failed every sweep and sat at the head of the batch (staging, 2026-11-12).
+  const location = await resolveProjectDataSessionLocation(env, projectId, sessionId);
+  if (location.state !== 'root') return true;
   // Retried independently of task CAS: a failed DO write must leave metadata for retry.
   await projectDataService.stopSession(env, projectId, sessionId);
   return true;

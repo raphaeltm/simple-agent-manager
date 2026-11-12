@@ -409,6 +409,61 @@ describe('archive drain relief: expired degraded sleepers', () => {
     expect(await sessionStatus(zombie.projectId, zombie.sessionId)).toBe('sleeping');
   });
 
+  it('expires the snapshot of a sleeper whose transcript the archive already moved', async () => {
+    // Staging, 2026-11-12: 8 expired degraded sleepers whose sessions had been archived failed
+    // every sweep, because `stopSession` is refused by the archive write fence.
+    const { projectId, source } = await seedArchiveProject('sleeper-archived');
+    const sessionId = await seedSession(source, 'archived', 12);
+    await source.runSummarySyncForTest();
+    await isolateSweepFixture(projectId, { clearCadence: true });
+    await withArchiveEnv(sweepEnv(), () => runTick(60_000));
+    expect(await readLocation(projectId, sessionId)).toMatchObject({
+      location_state: 'archive_shard',
+    });
+    const userId = (
+      await env.DATABASE.prepare('SELECT user_id FROM projects WHERE id = ?')
+        .bind(projectId)
+        .first<{ user_id: string }>()
+    )?.user_id as string;
+    await seedTask(`${projectId}-task`, projectId, userId, {
+      status: 'failed',
+      chatSessionId: sessionId,
+    });
+    const nodeId = `${projectId}-node`;
+    await seedNode(nodeId, userId, { status: 'deleted' });
+    await seedWorkspace(`${projectId}-ws`, nodeId, userId, { projectId, status: 'deleted' });
+    const snapshotId = `${projectId}-snap`;
+    await env.DATABASE.prepare(
+      `INSERT INTO session_snapshots (id, project_id, workspace_id, node_id, user_id,
+         chat_session_id, runtime, status, degradation, manifest_r2_key, expires_at,
+         sleep_status, sleeping_at, recovery_status)
+       VALUES (?, ?, ?, ?, ?, ?, 'vm', 'degraded', 'partial', ?, '2026-02-01T00:00:00.000Z',
+         'sleeping', '2026-01-01T00:00:00.000Z', 'failed')`
+    )
+      .bind(
+        snapshotId,
+        projectId,
+        `${projectId}-ws`,
+        nodeId,
+        userId,
+        sessionId,
+        `snapshots/${projectId}/manifest.json`
+      )
+      .run();
+
+    // Exact archive routing on, as in production: that is what fences `stopSession`.
+    await withArchiveEnv(
+      { SESSION_SNAPSHOT_PURGE_ENABLED: 'true', PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true' },
+      () => runSessionSnapshotPurge(testEnv, new Date())
+    );
+
+    expect(await snapshotStatus(snapshotId)).toBe('expired');
+    // The archive location is untouched.
+    expect(await readLocation(projectId, sessionId)).toMatchObject({
+      location_state: 'archive_shard',
+    });
+  });
+
   it('control: an unexpired degraded sleeper is left asleep', async () => {
     const sleeper = await seedDegradedSleeper('unexpired', '2099-01-01T00:00:00.000Z', [
       'completed',
