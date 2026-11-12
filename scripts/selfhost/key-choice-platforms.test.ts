@@ -13,10 +13,12 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FAKE_AWS_REGION, type FakeAws, startFakeAws } from './aws-kms-fake.js';
-import { CLOSED_HOST, runDeploy, writeBox } from './deploy-harness.js';
+import { CHILD_TEST_TIMEOUT_MS, CLOSED_HOST, runDeploy, writeBox } from './deploy-harness.js';
+
+vi.setConfig({ testTimeout: CHILD_TEST_TIMEOUT_MS });
 import { installKeyName } from './key-platforms.js';
 import { type FakeKeyService, startFakeKeyServices } from './key-provider-fakes.js';
 

@@ -7,7 +7,10 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+// Every case runs bash and a node-based fake gcloud many times.
+vi.setConfig({ testTimeout: 60_000 });
 
 const SCRIPT = resolve(import.meta.dirname, '../../deploy/selfhost/gcp-bootstrap.sh');
 const ISSUER = 'https://api.vmtest.example.org';

@@ -17,11 +17,19 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { openBundle, parseBundle } from '../../deploy/selfhost/key-agent/bundle.ts';
 import { createFileProvider } from '../../deploy/selfhost/key-agent/provider-file.ts';
-import { CLOSED_HOST, runDeploy, runTsx, writeBox as write } from './deploy-harness.js';
+import {
+  CHILD_TEST_TIMEOUT_MS,
+  CLOSED_HOST,
+  runDeploy,
+  runTsx,
+  writeBox as write,
+} from './deploy-harness.js';
+
+vi.setConfig({ testTimeout: CHILD_TEST_TIMEOUT_MS });
 import { ensurePlatformKeys } from './platform-keys.js';
 
 let dir: string;
