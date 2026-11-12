@@ -15,7 +15,7 @@ export const STALLED_CLASSIFIER_ENDPOINT_SETTINGS: readonly AdminSettingDefiniti
     defaultValue: false,
     category: 'Operations',
     description:
-      'Without Cloudflare Workers AI, ask the OpenAI-compatible endpoint (llm.openAICompatible.*, diagnosis model) for the advisory verdict shown on a paused agent check-in loop. Advisory text only: it never stops or fails a task. Needs operations.stalledTaskClassifierEnabled too.',
+      'Without Cloudflare Workers AI, ask the OpenAI-compatible endpoint (llm.openAICompatible.*, diagnosis model) for the advisory verdict shown on a paused agent check-in loop. Advisory text only: it never stops or fails a task. Sends the session transcript (credentials and emails redacted) to that endpoint. Needs operations.stalledTaskClassifierEnabled too.',
     secret: false,
     risky: true,
     validate: (value) => typeof value === 'boolean',

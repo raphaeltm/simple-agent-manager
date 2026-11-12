@@ -114,7 +114,18 @@ usageRoutes.get('/ai', requireAuth(), requireApproved(), async (c) => {
     }
 
     // Gateway not configured: SAM's own records (overnight B3 A2), not an error.
-    const breakdown = await getLocalUsageBreakdown(c.env, userId, new Date(periodBounds.startDate));
+    // A failed breakdown read degrades to empty views, never a failed usage page.
+    const breakdown = await getLocalUsageBreakdown(
+      c.env,
+      userId,
+      new Date(periodBounds.startDate)
+    ).catch((err: unknown) => {
+      log.warn('usage.local_breakdown_failed', {
+        userId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return { byModel: [], byDay: [] };
+    });
     return c.json({
       totalCostUsd,
       totalRequests,
