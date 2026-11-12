@@ -47,6 +47,9 @@ export const DEFAULT_RATE_LIMITS = {
   // Voice transcription runs Workers AI Whisper on every request. Per MINUTE, not per hour
   // (`DEFAULT_TRANSCRIBE_WINDOW_SECONDS`): dictation is bursty, and the budget is for abuse.
   TRANSCRIBE: 30,
+  // Server read-aloud through an admin's paid speech endpoint (`speech.synthesis.*`), per user
+  // per hour. The Workers AI path is not limited here (unchanged on Cloudflare).
+  TTS_SYNTHESIZE: 120,
   // Workspace callback-token renewal, per workspace. A healthy VM agent asks about once
   // per half token lifetime, so this only bounds a holder of both proofs replaying them
   // (`services/workspace-callback-token-renewal-rate-limit.ts`).

@@ -213,6 +213,24 @@ describe('server read-aloud through an OpenAI-compatible endpoint (A5)', () => {
     expect((await resolvePublicPlatformCapabilities(env)).textToSpeech).toBe(true);
   });
 
+  it('rate-limits endpoint synthesis per user and hides endpoint errors from the client', async () => {
+    const { env } = boxEnv({ RATE_LIMIT_TTS_SYNTHESIZE: '1' } as Partial<Env>);
+    await configure(env, {
+      'speech.synthesis.baseUrl': 'https://tts.example.com/v1',
+      'speech.synthesis.model': 'kokoro',
+    });
+    fetchMock.mockResolvedValue(
+      new Response('upstream says: tts.example.com quota', { status: 400 })
+    );
+
+    const failed = await postSynthesize(env);
+    expect(failed.status).toBe(503);
+    expect(await failed.text()).not.toContain('tts.example.com');
+
+    const limited = await postSynthesize(env);
+    expect(limited.status).toBe(429);
+  });
+
   it('TTS_ENABLED=false still turns read-aloud off even with an endpoint', async () => {
     const { env } = boxEnv({ TTS_ENABLED: 'false' });
     await configure(env, {

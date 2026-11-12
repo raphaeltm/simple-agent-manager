@@ -2,6 +2,7 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { maybeJsonRecord } from '../lib/runtime-validation';
 import { findPricedModel, priceModelUsageUsd } from './ai-cost-pricing';
+import { incrementModelUsage } from './ai-model-usage';
 import {
   type AiProviderUsageAttribution,
   incrementProviderUsage,
@@ -248,6 +249,15 @@ async function incrementExtractedUsage(
       options.env,
       priced.costUsd
     );
+    await incrementModelUsage(
+      options.env,
+      options.userId,
+      priced.modelId,
+      provider.providerId,
+      inputTokens,
+      outputTokens,
+      priced.costUsd
+    );
     return;
   }
   await incrementProviderUsage(
@@ -276,7 +286,7 @@ function localCost(
   inputTokens: number,
   outputTokens: number,
   options: TokenUsageAccountingOptions
-): { costUsd: number; provider: AiProviderUsageAttribution } | null {
+): { costUsd: number; provider: AiProviderUsageAttribution; modelId: string } | null {
   if (!options.costModelId || !hasLocalAiCostMetering(options.env)) return null;
   const model = findPricedModel(options.costModelId);
   if (!model) return null;
@@ -291,6 +301,7 @@ function localCost(
       cacheWriteInputTokens: anthropic ? cacheWrite : 0,
     }),
     provider: PRICED_PROVIDER[options.format],
+    modelId: model.id,
   };
 }
 
@@ -359,7 +370,12 @@ function applyStreamUsage(
     return;
   }
 
-  const jsonUsage = extractJsonTokenUsage(record, 'openai');
+  // Chat completions put `usage` on the final chunk; the Responses API puts it on the
+  // `response.completed` event's `response` object.
+  const jsonUsage = extractJsonTokenUsage(
+    maybeJsonRecord(record.usage) ? record : (maybeJsonRecord(record.response) ?? record),
+    'openai'
+  );
   usage.inputTokens = jsonUsage.inputTokens ?? usage.inputTokens;
   usage.outputTokens = jsonUsage.outputTokens ?? usage.outputTokens;
   usage.cachedInputTokens = jsonUsage.cachedInputTokens ?? usage.cachedInputTokens;

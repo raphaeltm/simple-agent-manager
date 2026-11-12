@@ -24,6 +24,7 @@ import {
   type UsageByModel,
   type UsageByProvider,
 } from '../services/ai-gateway-logs';
+import { getLocalUsageBreakdown } from '../services/ai-model-usage';
 import {
   deleteUserBudgetSettings,
   getAdminAiAllowance,
@@ -112,7 +113,8 @@ usageRoutes.get('/ai', requireAuth(), requireApproved(), async (c) => {
       totalCostUsd += entry.estimatedCostUsd;
     }
 
-    // Gateway not configured — return local proxy usage only, not an error.
+    // Gateway not configured: SAM's own records (overnight B3 A2), not an error.
+    const breakdown = await getLocalUsageBreakdown(c.env, userId, new Date(periodBounds.startDate));
     return c.json({
       totalCostUsd,
       totalRequests,
@@ -120,9 +122,9 @@ usageRoutes.get('/ai', requireAuth(), requireApproved(), async (c) => {
       totalOutputTokens,
       cachedRequests: 0,
       errorRequests: 0,
-      byModel: [],
+      byModel: breakdown.byModel,
       byProvider: Array.from(providerMap.values()).sort((a, b) => b.totalTokens - a.totalTokens),
-      byDay: [],
+      byDay: breakdown.byDay,
       period,
       periodLabel: getPeriodLabel(period),
     } satisfies UserAiUsageResponse);

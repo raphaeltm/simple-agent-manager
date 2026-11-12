@@ -4,6 +4,14 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { getAuth, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
+import {
+  checkRateLimit,
+  createRateLimitKey,
+  DEFAULT_WINDOW_SECONDS,
+  getCurrentWindowStart,
+  getRateLimit,
+  RateLimitError,
+} from '../middleware/rate-limit';
 import { parseOptionalBody, TtsRequestSchema } from '../schemas';
 import { getWorkersAiBindingOrNull } from '../services/platform-capabilities';
 import { resolveSpeechEndpoint } from '../services/speech-endpoints';
@@ -36,12 +44,27 @@ ttsRoutes.post('/synthesize', async (c) => {
   }
   // Synthesis runs on Workers AI, or without the binding on an admin-configured OpenAI-compatible
   // speech endpoint (`speech.synthesis.*`). With neither, say so instead of retrying into a 500.
-  const ai = getWorkersAiBindingOrNull(c.env) ?? (await resolveSpeechEndpoint(c.env, 'synthesis'));
+  const binding = getWorkersAiBindingOrNull(c.env);
+  const ai = binding ?? (await resolveSpeechEndpoint(c.env, 'synthesis'));
   if (!ai) {
     throw errors.featureUnavailable(
       'textToSpeech',
       'Text-to-speech is not available on this installation'
     );
+  }
+  if (!binding) {
+    // Every miss spends the admin's speech endpoint: bound it per user (KV, per hour).
+    const limit = getRateLimit(c.env, 'TTS_SYNTHESIZE');
+    const window = getCurrentWindowStart(DEFAULT_WINDOW_SECONDS);
+    const result = await checkRateLimit(
+      c.env.KV,
+      createRateLimitKey('tts-synthesize', userId, window),
+      limit,
+      DEFAULT_WINDOW_SECONDS
+    );
+    if (!result.allowed) {
+      throw new RateLimitError(Math.max(1, result.resetAt - Math.floor(Date.now() / 1000)));
+    }
   }
 
   const body = await parseOptionalBody(c.req.raw, TtsRequestSchema, {});
@@ -76,6 +99,8 @@ ttsRoutes.post('/synthesize', async (c) => {
       textLength: text.length,
       mode,
     });
+    // An endpoint error can name the admin's host or the provider's status; keep it in the log.
+    if (!binding) throw errors.serviceUnavailable('Text-to-speech failed. Try again shortly.');
     const errorMessage = err instanceof Error ? err.message : String(err);
     throw errors.internal(`TTS synthesis failed: ${errorMessage}`);
   }

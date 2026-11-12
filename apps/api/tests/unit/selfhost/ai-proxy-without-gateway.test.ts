@@ -300,9 +300,21 @@ describe('AI cost without AI Gateway: SAM meters spend and enforces the monthly 
     await sendMessage(env);
 
     const res = await app().request('/api/usage/ai?period=current-month', {}, env);
-    const body = (await res.json()) as { totalCostUsd: number; totalRequests: number };
+    const body = (await res.json()) as {
+      totalCostUsd: number;
+      totalRequests: number;
+      byModel: { model: string; requests: number; costUsd: number }[];
+      byDay: { date: string; requests: number; costUsd: number }[];
+    };
     expect(body.totalRequests).toBe(1);
     expect(body.totalCostUsd).toBeCloseTo(COST_PER_CALL, 6);
+    // Per-model and per-day views from SAM's own records (no gateway logs here).
+    expect(body.byModel).toHaveLength(1);
+    expect(body.byModel[0]).toMatchObject({ model: MODEL.id, requests: 1 });
+    expect(body.byModel[0]?.costUsd).toBeCloseTo(COST_PER_CALL, 6);
+    expect(body.byDay).toEqual([
+      expect.objectContaining({ date: new Date().toISOString().slice(0, 10), requests: 1 }),
+    ]);
   });
 });
 
