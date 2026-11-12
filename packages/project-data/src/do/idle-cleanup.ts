@@ -1,0 +1,456 @@
+/**
+ * Session idle cleanup: the per-session cleanup schedule and the alarm section that retires a
+ * session whose idle cleanup deadline passed. Workspace idle timeouts live in
+ * `workspace-idle-timeouts.ts`.
+ */
+import {
+  DEFAULT_IDLE_CLEANUP_MAX_CANDIDATES_PER_SWEEP,
+  DEFAULT_IDLE_CLEANUP_MAX_RESIDENCE_MS,
+  DEFAULT_IDLE_CLEANUP_MAX_RETRIES,
+  DEFAULT_IDLE_CLEANUP_RETRY_DELAY_MS,
+  DEFAULT_SESSION_IDLE_TIMEOUT_MINUTES,
+} from '@simple-agent-manager/shared';
+
+import { createModuleLogger, serializeError } from '@simple-agent-manager/worker-core';
+import { parsePositiveInt } from '@simple-agent-manager/worker-core';
+import { recordActivityEventInternal } from './activity';
+import { createAttentionMarker } from './attention';
+import { terminalizeIdleTaskInD1 } from './idle-cleanup-terminalization';
+import { materializeSession, resolveMaterializationPassConfig } from './materialization';
+import { persistSystemMessage } from './messages';
+import { parseCleanupAt, parseIdleCleanupSchedule, parseMinEarliest } from './row-schemas';
+import { upsertActivityState } from './session-state';
+import { stopSessionInternal } from './sessions';
+import type { Env } from './types';
+
+export { deleteWorkspaceInD1, stopWorkspaceInD1 } from './idle-cleanup-workspace';
+
+const log = createModuleLogger('idle_cleanup');
+const IDLE_CLEANUP_ATTENTION_KIND = 'idle_cleanup_failed';
+const IDLE_CLEANUP_RETRY_EXHAUSTED_MESSAGE =
+  'Idle cleanup failed after retries. Your work has been preserved — please check the workspace manually.';
+const IDLE_CLEANUP_MAX_RESIDENCE_MESSAGE =
+  'Idle cleanup could not complete within its maximum residence time. Your work has been preserved — please check the workspace manually.';
+
+type IdleCleanupEntry = ReturnType<typeof parseIdleCleanupSchedule>;
+
+function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+function maxResidenceExceeded(
+  entry: IdleCleanupEntry,
+  now: number,
+  maxResidenceMs: number
+): boolean {
+  return now - entry.createdAt >= maxResidenceMs;
+}
+
+function markIdleCleanupAttentionRequired(
+  sql: SqlStorage,
+  entry: IdleCleanupEntry,
+  terminalState: string,
+  reason: string,
+  message: string,
+  broadcastEvent: (type: string, payload: Record<string, unknown>, sessionId?: string) => void
+): void {
+  const now = Date.now();
+  let attentionMarkerId = entry.attentionMarkerId;
+  if (!attentionMarkerId) {
+    try {
+      attentionMarkerId = createAttentionMarker(sql, {
+        sessionId: entry.sessionId,
+        taskId: entry.taskId,
+        workspaceId: entry.workspaceId,
+        kind: IDLE_CLEANUP_ATTENTION_KIND,
+        source: 'idle_cleanup',
+        reason,
+        metadata: JSON.stringify({ terminalState }),
+      }).id;
+    } catch (err) {
+      log.error('attention_marker_create_failed', {
+        sessionId: entry.sessionId,
+        workspaceId: entry.workspaceId,
+        taskId: entry.taskId,
+        terminalState,
+        ...serializeError(err),
+      });
+    }
+  }
+
+  const shouldNotify = entry.failureNotifiedAt === null;
+  let messageId: string | null = null;
+  let messageCreatedAt: number | null = null;
+  let messageSequence: number | null = null;
+  if (shouldNotify) {
+    const msgResult = persistSystemMessage(sql, entry.sessionId, message);
+    if (msgResult) {
+      messageId = msgResult.id;
+      messageCreatedAt = msgResult.now;
+      messageSequence = msgResult.sequence;
+    }
+  }
+
+  sql.exec(
+    `UPDATE idle_cleanup_schedule
+     SET terminal_state = ?,
+         terminal_reason = ?,
+         terminal_at = ?,
+         cleanup_at = ?,
+         last_error = ?,
+         failure_notified_at = COALESCE(failure_notified_at, ?),
+         attention_marker_id = COALESCE(attention_marker_id, ?)
+     WHERE session_id = ? AND terminal_state IS NULL`,
+    terminalState,
+    reason,
+    now,
+    now,
+    reason,
+    shouldNotify ? now : null,
+    attentionMarkerId,
+    entry.sessionId
+  );
+
+  recordActivityEventInternal(
+    sql,
+    'session.idle_cleanup_attention_required',
+    'system',
+    null,
+    entry.workspaceId,
+    entry.sessionId,
+    entry.taskId,
+    JSON.stringify({
+      terminalState,
+      reason,
+      retryCount: entry.retryCount,
+      attentionMarkerId,
+      notified: messageId !== null,
+    })
+  );
+
+  broadcastEvent(
+    'session.idle_cleanup_attention_required',
+    {
+      sessionId: entry.sessionId,
+      workspaceId: entry.workspaceId,
+      taskId: entry.taskId,
+      terminalState,
+      reason,
+      attentionMarkerId,
+      notified: messageId !== null,
+    },
+    entry.sessionId
+  );
+
+  if (messageId && messageCreatedAt !== null && messageSequence !== null) {
+    broadcastEvent(
+      'message.new',
+      {
+        sessionId: entry.sessionId,
+        messageId,
+        role: 'system',
+        content: message,
+        toolMetadata: null,
+        createdAt: messageCreatedAt,
+        sequence: messageSequence,
+      },
+      entry.sessionId
+    );
+  }
+}
+
+export function scheduleIdleCleanup(
+  sql: SqlStorage,
+  env: Env,
+  sessionId: string,
+  workspaceId: string,
+  taskId: string | null
+): { cleanupAt: number } {
+  const timeoutMinutes = parsePositiveInt(
+    env.SESSION_IDLE_TIMEOUT_MINUTES,
+    DEFAULT_SESSION_IDLE_TIMEOUT_MINUTES
+  );
+  const cleanupAt = Date.now() + timeoutMinutes * 60 * 1000;
+
+  sql.exec(
+    `INSERT OR REPLACE INTO idle_cleanup_schedule (session_id, workspace_id, task_id, cleanup_at, created_at, retry_count)
+     VALUES (?, ?, ?, ?, ?, 0)`,
+    sessionId,
+    workspaceId,
+    taskId,
+    cleanupAt,
+    Date.now()
+  );
+
+  return { cleanupAt };
+}
+
+export function cancelIdleCleanup(sql: SqlStorage, sessionId: string): void {
+  sql.exec('DELETE FROM idle_cleanup_schedule WHERE session_id = ?', sessionId);
+}
+
+export function resetIdleCleanup(
+  sql: SqlStorage,
+  env: Env,
+  sessionId: string
+): { cleanupAt: number } {
+  const timeoutMinutes = parsePositiveInt(
+    env.SESSION_IDLE_TIMEOUT_MINUTES,
+    DEFAULT_SESSION_IDLE_TIMEOUT_MINUTES
+  );
+  const cleanupAt = Date.now() + timeoutMinutes * 60 * 1000;
+
+  const existing = sql
+    .exec(
+      'SELECT session_id FROM idle_cleanup_schedule WHERE session_id = ? AND terminal_state IS NULL',
+      sessionId
+    )
+    .toArray();
+
+  if (existing.length === 0) {
+    return { cleanupAt: 0 };
+  }
+
+  sql.exec(
+    `UPDATE idle_cleanup_schedule
+     SET cleanup_at = ?, retry_count = 0, last_error = NULL
+     WHERE session_id = ? AND terminal_state IS NULL`,
+    cleanupAt,
+    sessionId
+  );
+
+  return { cleanupAt };
+}
+
+export function getCleanupAt(sql: SqlStorage, sessionId: string): number | null {
+  const row = sql
+    .exec(
+      'SELECT cleanup_at FROM idle_cleanup_schedule WHERE session_id = ? AND terminal_state IS NULL',
+      sessionId
+    )
+    .toArray()[0];
+  return row ? parseCleanupAt(row, 'idle_cleanup.get_cleanup_at') : null;
+}
+
+/**
+ * Process expired idle cleanup rows. Returns list of processed entries for broadcasting.
+ */
+export async function processExpiredCleanups(
+  sql: SqlStorage,
+  env: Env,
+  projectId: string | null,
+  stopWorkspaceInD1: (workspaceId: string, projectId: string) => Promise<void>,
+  broadcastEvent: (type: string, payload: Record<string, unknown>, sessionId?: string) => void,
+  scheduleSummarySync: () => void
+): Promise<void> {
+  const now = Date.now();
+  const maxRetries = parsePositiveInt(
+    env.IDLE_CLEANUP_MAX_RETRIES,
+    DEFAULT_IDLE_CLEANUP_MAX_RETRIES
+  );
+  const maxResidenceMs = parsePositiveInt(
+    env.IDLE_CLEANUP_MAX_RESIDENCE_MS,
+    DEFAULT_IDLE_CLEANUP_MAX_RESIDENCE_MS
+  );
+  const retryDelay = parsePositiveInt(
+    env.IDLE_CLEANUP_RETRY_DELAY_MS,
+    DEFAULT_IDLE_CLEANUP_RETRY_DELAY_MS
+  );
+  const timeoutMs =
+    parsePositiveInt(env.SESSION_IDLE_TIMEOUT_MINUTES, DEFAULT_SESSION_IDLE_TIMEOUT_MINUTES) *
+    60 *
+    1000;
+  const candidateLimit = parsePositiveInt(
+    env.IDLE_CLEANUP_MAX_CANDIDATES_PER_SWEEP,
+    DEFAULT_IDLE_CLEANUP_MAX_CANDIDATES_PER_SWEEP
+  );
+
+  const expired = sql
+    .exec(
+      `SELECT session_id, workspace_id, task_id, cleanup_at, created_at, retry_count,
+              terminal_state, terminal_reason, terminal_at, last_error,
+              failure_notified_at, attention_marker_id
+       FROM idle_cleanup_schedule
+       WHERE cleanup_at <= ? AND terminal_state IS NULL
+       ORDER BY cleanup_at ASC, session_id ASC
+       LIMIT ?`,
+      now,
+      candidateLimit
+    )
+    .toArray()
+    .map((row) => parseIdleCleanupSchedule(row));
+
+  for (const entry of expired) {
+    try {
+      if (!projectId || !entry.taskId) {
+        log.warn('reporter_identity_incomplete', {
+          projectId,
+          sessionId: entry.sessionId,
+          workspaceId: entry.workspaceId,
+          taskId: entry.taskId,
+          action: 'preserved',
+        });
+        if (maxResidenceExceeded(entry, now, maxResidenceMs)) {
+          markIdleCleanupAttentionRequired(
+            sql,
+            entry,
+            'reporter_identity_incomplete',
+            'Idle cleanup reporter identity stayed incomplete until max residence.',
+            IDLE_CLEANUP_MAX_RESIDENCE_MESSAGE,
+            broadcastEvent
+          );
+          continue;
+        }
+        sql.exec(
+          `UPDATE idle_cleanup_schedule
+           SET cleanup_at = ?,
+               last_error = ?
+           WHERE session_id = ? AND terminal_state IS NULL`,
+          now + retryDelay,
+          'reporter_identity_incomplete',
+          entry.sessionId
+        );
+        continue;
+      }
+
+      const transition = await terminalizeIdleTaskInD1(sql, env, {
+        sweep: 'session_idle_cleanup',
+        projectId,
+        taskId: entry.taskId,
+        workspaceId: entry.workspaceId,
+        sessionId: entry.sessionId,
+        idleDurationMs: Math.max(0, now - (entry.cleanupAt - timeoutMs)),
+        timeoutMs,
+      });
+      if (transition.outcome === 'preserved') {
+        if (maxResidenceExceeded(entry, now, maxResidenceMs)) {
+          markIdleCleanupAttentionRequired(
+            sql,
+            entry,
+            'preserved_max_residence_exceeded',
+            transition.liveness?.reason ??
+              'Idle cleanup runtime liveness stayed inconclusive until max residence.',
+            IDLE_CLEANUP_MAX_RESIDENCE_MESSAGE,
+            broadcastEvent
+          );
+          continue;
+        }
+        sql.exec(
+          `UPDATE idle_cleanup_schedule
+           SET cleanup_at = ?,
+               last_error = ?
+           WHERE session_id = ? AND terminal_state IS NULL`,
+          now + retryDelay,
+          transition.liveness?.reason ?? 'preserved',
+          entry.sessionId
+        );
+        continue;
+      }
+      if (
+        transition.outcome === 'not_active' ||
+        transition.outcome === 'not_found' ||
+        transition.outcome === 'superseded'
+      ) {
+        sql.exec('DELETE FROM idle_cleanup_schedule WHERE session_id = ?', entry.sessionId);
+        continue;
+      }
+      if (transition.outcome === 'rejected') {
+        throw new Error('Idle cleanup reporter scope did not match the task');
+      }
+
+      // Stop the session in DO SQLite
+      stopSessionInternal(sql, entry.sessionId);
+
+      // Clear activity state so the browser status bar reflects idle
+      upsertActivityState(sql, entry.sessionId, { activity: 'idle' });
+
+      // Materialize grouped messages (best-effort)
+      try {
+        materializeSession(sql, entry.sessionId, resolveMaterializationPassConfig(env));
+      } catch (e) {
+        log.error('materialize_session_failed', {
+          sessionId: entry.sessionId,
+          error: String(e),
+        });
+      }
+
+      // Stop workspace only after the same task-scoped liveness result proved
+      // the runtime conclusively dead and the scoped task transition committed.
+      await stopWorkspaceInD1(entry.workspaceId, projectId);
+
+      // Clean up workspace activity tracking
+      sql.exec('DELETE FROM workspace_activity WHERE workspace_id = ?', entry.workspaceId);
+
+      // Remove from schedule
+      sql.exec('DELETE FROM idle_cleanup_schedule WHERE session_id = ?', entry.sessionId);
+
+      // Record activity
+      recordActivityEventInternal(
+        sql,
+        'session.idle_cleanup',
+        'system',
+        null,
+        entry.workspaceId,
+        entry.sessionId,
+        entry.taskId,
+        JSON.stringify({ retryCount: entry.retryCount })
+      );
+      broadcastEvent(
+        'session.idle_cleanup',
+        { sessionId: entry.sessionId, workspaceId: entry.workspaceId, taskId: entry.taskId },
+        entry.sessionId
+      );
+      scheduleSummarySync();
+    } catch (err) {
+      log.error('cleanup_failed', { sessionId: entry.sessionId, ...serializeError(err) });
+
+      if (entry.retryCount >= maxRetries) {
+        recordActivityEventInternal(
+          sql,
+          'session.idle_cleanup_failed',
+          'system',
+          null,
+          entry.workspaceId,
+          entry.sessionId,
+          entry.taskId,
+          JSON.stringify({
+            error: errorText(err),
+            retryCount: entry.retryCount,
+          })
+        );
+        markIdleCleanupAttentionRequired(
+          sql,
+          entry,
+          'retry_exhausted',
+          errorText(err),
+          IDLE_CLEANUP_RETRY_EXHAUSTED_MESSAGE,
+          broadcastEvent
+        );
+      } else {
+        sql.exec(
+          `UPDATE idle_cleanup_schedule
+           SET cleanup_at = ?,
+               retry_count = ?,
+               last_error = ?
+           WHERE session_id = ? AND terminal_state IS NULL`,
+          now + retryDelay,
+          entry.retryCount + 1,
+          errorText(err),
+          entry.sessionId
+        );
+      }
+    }
+  }
+}
+
+/**
+ * Compute the alarm time for expired session idle cleanups.
+ */
+export function computeIdleCleanupAlarmTime(sql: SqlStorage): number | null {
+  const row = sql
+    .exec(
+      'SELECT MIN(cleanup_at) as earliest FROM idle_cleanup_schedule WHERE terminal_state IS NULL'
+    )
+    .toArray()[0];
+  return row ? parseMinEarliest(row, 'idle_cleanup.min_cleanup_at') : null;
+}
