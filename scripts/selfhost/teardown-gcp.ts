@@ -23,15 +23,20 @@ import {
   SAM_MANAGED_LABEL_VALUE,
   SAM_NODE_LABEL_KEY,
 } from '../../apps/api/src/services/node-provider-labels';
-import {
-  SAM_AGENT_FIREWALL_RULE_NAME,
-  SAM_APP_ROUTE_FIREWALL_RULE_NAME,
-} from '../../packages/providers/src/gcp-metadata';
 import { check } from './backup-lib';
 import { SELFHOST_ENVIRONMENT } from './install-record';
 import type { TeardownContext } from './teardown-box';
 import { BOOTSTRAP, bootstrapItems, gcloud } from './teardown-gcp-bootstrap';
 import { both, type Item, STEPS } from './teardown-model';
+
+/**
+ * The firewall rule names SAM's GCP provider ensures (SAM_AGENT_FIREWALL_RULE_NAME and
+ * SAM_APP_ROUTE_FIREWALL_RULE_NAME in packages/providers/src/gcp-metadata.ts). Not imported: that
+ * module needs @simple-agent-manager/shared built, and selfhost scripts typecheck and run without
+ * it. teardown-gcp-constants.test.ts pins them to the provider's values.
+ */
+export const SAM_AGENT_FIREWALL_RULE_NAME = 'sam-allow-agent';
+export const SAM_APP_ROUTE_FIREWALL_RULE_NAME = 'sam-allow-app-routes';
 
 /** Compute Engine resource names (RFC 1035); never starts with `-`, so never read as a flag. */
 const GCE_NAME = /^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$/;
