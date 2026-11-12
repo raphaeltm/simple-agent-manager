@@ -382,6 +382,51 @@ describe('the policy file', () => {
     expect(next.sandboxImages).toEqual([`celld-image:${'b'.repeat(64)}`, SANDBOX]);
   });
 
+  it('does not carry forward a previous sandbox image celld never tagged (box, 2026-11-12)', () => {
+    // A deploy whose predicted image disagreed with celld's build failed in
+    // assertCelldTaggedImages, but its policy.json already allowed the untagged prediction. The
+    // next deploy kept that as "previous" and failed on it again, though no node could run it.
+    const stateDir = mkdtempSync(join(tmpdir(), 'sam-proxy-'));
+    const untagged = `celld-image:${'c'.repeat(64)}`;
+    const current = `celld-image:${'d'.repeat(64)}`;
+    const render = (previous: string[]) =>
+      renderProxyPolicy({
+        runtime: 'runsc',
+        instanceType: 'basic',
+        sandboxImage: current,
+        fenceImage: FENCE,
+        stateDir,
+        previousSandboxImages: previous,
+      });
+    writeDockerProxyFiles(
+      stateDir,
+      renderProxyPolicy({
+        runtime: 'runsc',
+        instanceType: 'basic',
+        sandboxImage: untagged,
+        fenceImage: FENCE,
+        stateDir,
+      })
+    );
+    const daemon =
+      (tagged: Set<string>): DockerCli =>
+      (args) => {
+        const reference = args[args.length - 1] ?? '';
+        if (!tagged.has(reference)) throw new Error('No such image');
+        return 'sha256:ok';
+      };
+    const withoutUntagged = daemon(new Set([current, FENCE]));
+    const policy = render(previousSandboxImages(stateDir, withoutUntagged));
+    expect(policy.sandboxImages).toEqual([current]);
+    expect(() => assertCelldTaggedImages(withoutUntagged, policy)).not.toThrow();
+    // Control: a previous image the daemon does hold is still kept for nodes on the old version.
+    const withPrevious = daemon(new Set([current, FENCE, untagged]));
+    expect(render(previousSandboxImages(stateDir, withPrevious)).sandboxImages).toEqual([
+      current,
+      untagged,
+    ]);
+  });
+
   it("computes celld's content reference from the image inspect output", () => {
     const content = '["sha256:x"]{"Cmd":["sh"]}';
     const docker: DockerCli = (args) => {
