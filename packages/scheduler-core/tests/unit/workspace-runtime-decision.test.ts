@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { decideWorkspaceRuntime } from '../../../src/services/workspace-runtime';
+import {
+  decideWorkspaceRuntime,
+} from '../../src';
 
 describe('decideWorkspaceRuntime', () => {
   it('forces vm when the container kill switch is disabled', () => {

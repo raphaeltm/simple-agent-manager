@@ -6,7 +6,7 @@
  * WHAT THIS MODULE IS NOT
  * -----------------------
  * It does not re-implement any hard constraint.
- * `evaluateWorkspaceReservationCapacity` (services/workspace-resource-capacity.ts)
+ * `evaluateWorkspaceReservationCapacity` (scheduler-core/workspace-resource-capacity.ts)
  * remains the single admission gate for finite CPU/memory/storage budgets,
  * exclusivity, the disk-pressure veto, and the
  * fail-closed handling of untrusted/stale capacity. This module only ORDERS
@@ -35,16 +35,15 @@ import type {
   CapacityPoolStrategy,
 } from '@simple-agent-manager/shared';
 
+import type { WorkspaceAdmissionPolicy } from './workspace-admission-policy';
+import { type ActiveWorkspaceReservationUsage, emptyUsage } from './workspace-reservation-usage';
 import {
-  type ActiveWorkspaceReservationUsage,
   cpuBudgetMillis,
-  emptyUsage,
   parseWorkspaceAdmissionMetrics,
   resolveTrustedWorkspaceNodeCapacity,
   scoreWorkspaceAdmissionMetrics,
   usableMemoryMb,
   type WorkspaceAdmissionMetrics,
-  type WorkspaceAdmissionPolicy,
   type WorkspaceResourceNode,
 } from './workspace-resource-capacity';
 

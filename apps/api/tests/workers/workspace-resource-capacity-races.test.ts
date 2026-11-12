@@ -1,3 +1,8 @@
+import {
+  aggregateWorkspaceReservationRows,
+  resolveWorkspaceAdmissionPolicy,
+  type WorkspaceAdmissionPolicy,
+} from '@simple-agent-manager/scheduler-core';
 import type {
   CapacityPlacementSnapshot,
   ResolvedResourceReservation,
@@ -14,11 +19,6 @@ import {
   reserveWorkspacePlacement,
   type WorkspacePlacementInput,
 } from '../../src/services/workspace-placement';
-import {
-  aggregateWorkspaceReservationRows,
-  resolveWorkspaceAdmissionPolicy,
-  type WorkspaceAdmissionPolicy,
-} from '../../src/services/workspace-resource-capacity';
 import {
   seedInstallation,
   seedNode,

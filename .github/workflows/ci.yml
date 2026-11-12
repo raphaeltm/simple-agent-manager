@@ -60,6 +60,7 @@ jobs:
               - 'packages/shared/**'
               - 'packages/worker-core/**'
               - 'packages/app-deployment/**'
+              - 'packages/scheduler-core/**'
               - 'packages/task-runner/**'
               - 'packages/config/**'
               - 'scripts/quality/*migration*.ts'
@@ -81,6 +82,7 @@ jobs:
               - 'packages/shared/src/**'
               - 'packages/worker-core/src/**'
               - 'packages/app-deployment/src/**'
+              - 'packages/scheduler-core/src/**'
               - 'sonar-project.properties'
               - '.claude/rules/36-cli-quality.md'
             devcontainer:

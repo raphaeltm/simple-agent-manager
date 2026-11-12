@@ -7,6 +7,10 @@
  * `deployment-environment-stop.ts`.
  */
 
+import {
+  parseStoredResolvedReservationJson,
+  ResourceRequirementsValidationError,
+} from '@simple-agent-manager/scheduler-core';
 import type { CredentialProvider } from '@simple-agent-manager/shared';
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -29,10 +33,6 @@ import {
   listEnvironmentVolumes,
 } from '../services/deployment-volumes';
 import { recordDeploymentEnvironmentLifecycleEventBestEffort } from '../services/project-lifecycle-events';
-import {
-  parseStoredResolvedReservationJson,
-  ResourceRequirementsValidationError,
-} from '../services/resource-requirements-input';
 import {
   collectAttachedServerIds,
   type DeploymentDb,

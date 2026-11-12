@@ -1,5 +1,9 @@
 /** Canonical trigger creation shared by authenticated REST and project-scoped MCP. */
 import {
+  ResourceRequirementsValidationError,
+  serializeResourceRequirementsInput,
+} from '@simple-agent-manager/scheduler-core';
+import {
   DEFAULT_CRON_MIN_INTERVAL_MINUTES,
   DEFAULT_CRON_TEMPLATE_MAX_LENGTH,
   DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING,
@@ -24,10 +28,6 @@ import { requireAgentEmailOn, resolveAllowedSenders } from './agent-email/trigge
 import { cronToNextFire, validateCronExpression } from './cron-utils';
 import { validateGitHubTriggerQueueConfig } from './github-trigger-config';
 import type { McpTokenData } from './mcp-token';
-import {
-  ResourceRequirementsValidationError,
-  serializeResourceRequirementsInput,
-} from './resource-requirements-input';
 import { clearTriggerPageCaches } from './trigger-cache';
 import { resolveMaxTriggersPerProject } from './trigger-limits';
 import { prepareWebhookClaim } from './webhook-credential-claim';

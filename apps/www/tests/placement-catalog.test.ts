@@ -194,7 +194,7 @@ describe('real SAM default mirrored by the explorer', () => {
 
   it('HOST_MEMORY_RESERVE_MB matches DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB', () => {
     const upstream = readNumericConst(
-      'apps/api/src/services/workspace-admission-policy.ts',
+      'packages/scheduler-core/src/workspace-admission-policy.ts',
       'DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB'
     );
     expect(upstream).toBeGreaterThan(0);

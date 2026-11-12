@@ -29,7 +29,9 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { handOffEmptyWorkspaceNode } from '../../services/node-warm-handoff';
 import { persistError } from '../../services/observability';
-import { ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL } from '../../services/workspace-resource-capacity';
+import {
+  ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL,
+} from '../../services/workspace-reservation-usage';
 import {
   boundedWarmPlacementClaimGuardSql,
   type CleanupConfig,

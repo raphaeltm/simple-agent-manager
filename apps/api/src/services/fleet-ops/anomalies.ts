@@ -20,7 +20,9 @@ import { log } from '../../lib/logger';
 import { neutralizeUntrustedText } from '../../operations/untrusted-text';
 import { resolveCleanupConfig } from '../../scheduled/node-cleanup/config';
 import { deriveNodeHealth } from '../node-health';
-import { ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL } from '../workspace-resource-capacity';
+import {
+  ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL,
+} from '../workspace-reservation-usage';
 import { snapshotFailures, stalledWakes } from './anomalies-sessions';
 import {
   ANOMALY_CLASSES,

@@ -2,6 +2,16 @@ import { Buffer } from 'node:buffer';
 
 import { getProviderInstanceOfferings } from '@simple-agent-manager/providers';
 import {
+  buildCapacityPoolSelection,
+  capacityCandidateBaseId,
+  capacityCandidateIdForRole,
+  capacityCandidateRoleFromId,
+  capacityCandidateSatisfiesWorkloadRole,
+  emptyUsage,
+  evaluateWorkspaceReservationCapacity,
+  resolveWorkspaceAdmissionPolicy,
+} from '@simple-agent-manager/scheduler-core';
+import {
   getDefaultLocationForProvider,
   getLocationsForProvider,
   type ProviderInstanceOffering,
@@ -16,12 +26,6 @@ import type { Env } from '../../../src/env';
 import { runScheduledCapacityPoolReconciliation } from '../../../src/scheduled/capacity-pool-reconciliation';
 import { reconcileCapacityPoolsForCredentialMutation } from '../../../src/services/capacity-pool-credential-lifecycle';
 import { resolveCapacityPoolPlacementSettings } from '../../../src/services/capacity-pool-placement-settings';
-import {
-  capacityCandidateBaseId,
-  capacityCandidateIdForRole,
-  capacityCandidateRoleFromId,
-  capacityCandidateSatisfiesWorkloadRole,
-} from '../../../src/services/capacity-pool-workload-roles';
 import { initialStatusForProviderOffering } from '../../../src/services/default-capacity-pool-candidates';
 import { externalCapacitySourceCredentialId } from '../../../src/services/default-capacity-pool-helpers';
 import { updateDefaultCapacityPool } from '../../../src/services/default-capacity-pool-updates';
@@ -47,13 +51,7 @@ import {
   resolveTaskStartCapacityPoolSelection,
   resolveTaskStartPlacement,
 } from '../../../src/services/placement-resolver';
-import { buildCapacityPoolSelection } from '../../../src/services/placement-resolver-capacity';
 import { listUserProviderCatalogSeeds } from '../../../src/services/provider-catalogs';
-import {
-  emptyUsage,
-  evaluateWorkspaceReservationCapacity,
-  resolveWorkspaceAdmissionPolicy,
-} from '../../../src/services/workspace-resource-capacity';
 import { applyCapacityPoolSchemaMigrations } from '../../helpers/capacity-pool-migrations';
 import { pickStarterMachines } from '../../helpers/capacity-pool-picks';
 import { createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';

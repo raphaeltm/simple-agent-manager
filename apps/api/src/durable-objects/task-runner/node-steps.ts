@@ -5,6 +5,10 @@
  * `node_agent_ready` in `./node-agent-ready-step`; both are re-exported here so
  * the DO's step table keeps one import site. See rule 18.
  */
+import {
+  resolveEffectiveNodeHostMemoryReserveMb,
+} from '@simple-agent-manager/scheduler-core';
+
 import { log } from '../../lib/logger';
 import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
 import {
@@ -15,9 +19,8 @@ import {
 } from '../../services/placement-resolver';
 import { filterReusableNodesByCurrentAuthority } from '../../services/reusable-node-authority';
 import {
-  resolveEffectiveNodeHostMemoryReserveMb,
   trustedWorkspaceNodeCapacityColumnsSql,
-} from '../../services/workspace-resource-capacity';
+} from '../../services/workspace-admission-sql';
 import { shouldProvisionSpreadNode } from './capacity-pool-node-limit';
 import {
   findNodeWithCapacity,

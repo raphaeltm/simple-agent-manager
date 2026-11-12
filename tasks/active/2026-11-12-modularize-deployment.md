@@ -102,5 +102,6 @@ except the two tests).
 - [x] CI filters (`api`, `cli`), runtime-boundary scan, AST checks scope, catalog entries (`@aws-sdk/*`, `yaml`), dependency evidence
 - [x] Local gates (check:fast, runtime-boundary, AST, dependency evidence, runtime-tunables, format ratchet, quality scripts)
 - [x] Specialist reviews: security PASS, cloudflare PASS, test-engineer ADDRESSED, architecture ADDRESSED, task-completion PASS
-- [ ] CI via `gh workflow run ci.yml --ref sam/w4-app-deployment-extract-ngd1ke`
-- [ ] Merge core branch, publish PR URL + head SHA on channel, notify coordinator
+- [x] CI via `gh workflow run ci.yml --ref sam/w4-app-deployment-extract-ngd1ke`: run 43202697278 green on 6f75a77e8
+- [x] Merge core branch, publish PR URL + head SHA on channel, notify coordinator (6f75a77e8; coordinator approved content)
+- [ ] Merge core 2052fb4b4 (W2 scheduler-core landed): conflicts in ci.yml, env.ts, local-development.md, package.json, ast-checks.ts resolved keeping both sides; no W4 code imports W2-moved files. Local: typecheck clean, package 12 files / 173 cases, apps/api 1063 files passed + 3 skipped / 15751 cases passed + 4 skipped, AST, runtime-boundary, dependency-evidence and node-pool-boundary gates pass. Next: CI on the new head, send SHA + run ID to coordinator, then wait for W5 (ai-proxy) confirmation

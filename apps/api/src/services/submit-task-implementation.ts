@@ -9,6 +9,16 @@
  *
  * See: specs/022-simplified-chat-ux/contracts/task-submit.md
  */
+import {
+  collectStoredResourceRequirementLayers,
+  createPersistedTaskResourcePlanJson,
+  firstResourceRequirementLayer,
+  firstResourceRequirementLayerJson,
+  inheritedCredentialAttributionForCaller,
+  mergeResourceRequirementLayers,
+  normalizeResourceRequirementsInput,
+  ResourceRequirementsValidationError,
+} from '@simple-agent-manager/scheduler-core';
 import type { SubmitTaskResponse, VMSize } from '@simple-agent-manager/shared';
 import {
   ACP_SESSION_DEFAULTS,
@@ -37,7 +47,6 @@ import { resolveTaskAgentOverrides } from '../services/agent-profiles';
 import { generateBranchName } from '../services/branch-name';
 import { capacityPlacementSnapshotDbValues } from '../services/capacity-placement-snapshot';
 import { enrichMessageWithMentions } from '../services/mention-enrichment';
-import { inheritedCredentialAttributionForCaller } from '../services/placement-field-resolution';
 import {
   PlacementResolutionError,
   resolveTaskStartPlacement,
@@ -45,15 +54,6 @@ import {
 } from '../services/placement-resolver';
 import { resolveProjectAgentDefault } from '../services/project-agent-defaults';
 import * as projectDataService from '../services/project-data';
-import {
-  collectStoredResourceRequirementLayers,
-  createPersistedTaskResourcePlanJson,
-  firstResourceRequirementLayer,
-  firstResourceRequirementLayerJson,
-  mergeResourceRequirementLayers,
-  normalizeResourceRequirementsInput,
-  ResourceRequirementsValidationError,
-} from '../services/resource-requirements-input';
 import { resolveSkillProfile } from '../services/skills';
 import { submitInstantTask } from '../services/submit-instant-task';
 import { validateSubmitContextAndAttachments } from '../services/submit-task-input-validation';

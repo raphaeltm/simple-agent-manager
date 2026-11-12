@@ -370,9 +370,10 @@ function main() {
       project.addSourceFileAtPath(f);
     }
   } else {
-    // Worker modules lifted into packages keep the API checks (worker modularization).
     project.addSourceFilesAtPaths([
       resolve(ROOT, 'apps/api/src/**/*.ts'),
+      // Worker modules lifted into packages keep the API checks (worker modularization).
+      resolve(ROOT, 'packages/scheduler-core/src/**/*.ts'),
       resolve(ROOT, 'packages/app-deployment/src/**/*.ts'),
     ]);
   }
