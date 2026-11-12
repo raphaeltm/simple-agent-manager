@@ -108,6 +108,11 @@ Where to set the value:
   to the API Worker. Write the JSON on one line: GitHub masks multi-line secrets line by line.
   The GitHub secret is the only source: a value set by hand on the Worker is removed by the next
   deployment. It cannot be set from the admin settings page or the API.
+- **Self-hosted box (celld, `deploy/selfhost/`):** add it to `deploy/selfhost/.state/secrets.env`
+  as one line of JSON in single quotes, `AGENT_SIGN_IN_TRUST='{"issuer":"…",…}'`, then run
+  `pnpm selfhost:deploy`. Every deploy publishes the Worker's whole configuration from that file
+  (`scripts/selfhost/deploy.ts`), so deleting the line and deploying again turns the feature off.
+  The deploy also applies the `agent_sign_ins` migration.
 - **Local development:** add it to `apps/api/.dev.vars`.
 
 The test instance must have an administrator account before agents can sign in.
@@ -246,3 +251,8 @@ Anyone using the test instance can tell it accepts agent sign-in: its sign-in pa
 | `403 Agent sign-in sessions cannot create …`       | The agent session tried to mint a credential or grant access (see How it works). Not allowed.                       |
 | `429`                                              | Too many sign-ins for this source in the last hour, or too many attempts from this address; wait for `Retry-After`. |
 | `503 ISSUER_KEYS_UNAVAILABLE`                      | The test instance could not fetch the issuer's public keys. Check that the issuer is reachable.                     |
+
+The test instance fetches the issuer's keys through its guarded outbound fetch
+(`fetchIssuerKeys()` in `apps/api/src/services/agent-sign-in/verify.ts`): HTTPS to a public host
+only, and no redirects. An issuer on a loopback, private or metadata address, or a key document
+that redirects, also answers `503` and logs `agent_sign_in.issuer_keys_refused` with the reason.

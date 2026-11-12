@@ -8,9 +8,17 @@
  * the token before it returns.
  */
 import { MAX_WORKLOAD_IDENTITY_TOKEN_TTL_SECONDS } from '@simple-agent-manager/shared';
-import { createRemoteJWKSet, decodeProtectedHeader, errors as joseErrors, jwtVerify } from 'jose';
+import {
+  createRemoteJWKSet,
+  customFetch,
+  decodeProtectedHeader,
+  errors as joseErrors,
+  jwtVerify,
+} from 'jose';
 import * as v from 'valibot';
 
+import { log } from '../../lib/logger';
+import { guardedFetch, OutboundRequestRefusedError } from '../../lib/network-hosts';
 import { AppError } from '../../middleware/error';
 import { agentSignInJwksUrl, type AgentSignInTrust } from './config';
 
@@ -25,6 +33,18 @@ const MAX_TOKEN_LENGTH = 16_384;
 type RemoteJwks = ReturnType<typeof createRemoteJWKSet>;
 const jwksByIssuer = new Map<string, { settings: string; jwks: RemoteJwks }>();
 
+/**
+ * The key fetch goes through the guarded outbound fetch: the issuer host is classified before
+ * the request (public HTTPS only; loopback, private ranges and the metadata address are refused)
+ * and no redirect is followed. An operator writes the issuer into the trust, but the URL is
+ * still fetched by the Worker, and on a self-hosted runtime the Worker sits next to services a
+ * public host must never be able to reach. SAM's key document never redirects, so
+ * `maxRedirects: 0` costs nothing. jose's timeout signal arrives as `init.signal` and still
+ * bounds the request.
+ */
+const fetchIssuerKeys = (url: string, init: RequestInit): Promise<Response> =>
+  guardedFetch(url, init, { maxRedirects: 0 });
+
 /** Per-isolate key cache for the trusted issuer. Rebuilt when its cache or timeout settings change. */
 function issuerKeys(trust: AgentSignInTrust): RemoteJwks {
   const settings = `${trust.jwksCacheSeconds}:${trust.jwksTimeoutSeconds}`;
@@ -34,6 +54,7 @@ function issuerKeys(trust: AgentSignInTrust): RemoteJwks {
     cacheMaxAge: trust.jwksCacheSeconds * 1000,
     cooldownDuration: DEFAULT_AGENT_SIGN_IN_JWKS_COOLDOWN_MS,
     timeoutDuration: trust.jwksTimeoutSeconds * 1000,
+    [customFetch]: fetchIssuerKeys,
   });
   jwksByIssuer.set(trust.issuer, { settings, jwks });
   return jwks;
@@ -141,6 +162,15 @@ export async function verifyAgentSignInToken(
   } catch (err) {
     const reason = rejectionFor(err);
     if (reason) throw new AgentSignInTokenError(reason);
+    if (err instanceof OutboundRequestRefusedError) {
+      // The operator's issuer URL (or its redirect) is not a host this Worker may fetch.
+      log.error('agent_sign_in.issuer_keys_refused', {
+        issuer: trust.issuer,
+        host: err.host,
+        reason: err.reason,
+        action: 'rejected',
+      });
+    }
     throw new AppError(
       503,
       'ISSUER_KEYS_UNAVAILABLE',

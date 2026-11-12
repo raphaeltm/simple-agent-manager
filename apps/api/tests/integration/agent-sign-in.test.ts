@@ -1235,4 +1235,47 @@ describe('agent sign-in through workload identity (vertical slice)', () => {
       expect((await exchange(await issuer.sign())).status).toBe(200);
     });
   });
+
+  describe('issuer key fetch goes through the guarded outbound fetch', () => {
+    /** Every outbound request, recorded; the JWKS URL answers as `jwks` says. */
+    function recordOutbound(jwks: (url: string) => Promise<Response>): string[] {
+      const seen: string[] = [];
+      vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = new Request(input, init);
+        seen.push(request.url);
+        return jwks(request.url);
+      });
+      return seen;
+    }
+
+    it.each([
+      ['loopback', 'https://127.0.0.1/oidc'],
+      ['a private range', 'https://10.0.0.5/oidc'],
+      ['the metadata address', 'https://169.254.169.254/oidc'],
+      ['localhost', 'https://localhost/oidc'],
+    ])('refuses an issuer on %s without sending a request', async (_label, privateIssuer) => {
+      env.AGENT_SIGN_IN_TRUST = trustJson({ issuer: privateIssuer });
+      const seen = recordOutbound(async () => Response.json(await getWorkloadJWKS(issuer.env)));
+      await expectRejected(await exchange(await issuer.sign()), 503, /signing keys/);
+      expect(seen).toEqual([]);
+    });
+
+    it('does not follow a redirect from the issuer key document', async () => {
+      const seen = recordOutbound(
+        async () =>
+          new Response(null, {
+            status: 302,
+            headers: { location: 'http://169.254.169.254/computeMetadata/v1/' },
+          })
+      );
+      await expectRejected(await exchange(await issuer.sign()), 503, /signing keys/);
+      expect(seen).toEqual([JWKS_URL]);
+    });
+
+    it('fetches a public issuer through the same path (control)', async () => {
+      const seen = recordOutbound(async () => Response.json(await getWorkloadJWKS(issuer.env)));
+      expect((await exchange(await issuer.sign())).status).toBe(200);
+      expect(seen).toEqual([JWKS_URL]);
+    });
+  });
 });
