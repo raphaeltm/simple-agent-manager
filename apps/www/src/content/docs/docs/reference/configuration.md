@@ -138,7 +138,7 @@ an AI Gateway counts only when both the gateway id and the account id are set
 | Workers AI calls           | Use the account's Workers AI REST API, as before.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | SAM AI proxy               | **Off until an admin turns it on.** Without a gateway, proxied calls go straight to the provider and SAM's own metering is the only spend record, so `/ai/v1`, `/ai/anthropic/v1` and the custom-endpoint passthrough answer 503 until `aiProxy.directUpstreamEnabled` is on (Admin → Settings → AI models; `resolveAiProxyAvailability()`, `services/ai-proxy-availability.ts`). `AI_PROXY_ENABLED=false` still turns it off everywhere. While it is off, agent-key refuses a Claude Code or Codex credential that names a custom base URL instead of returning the key without its URL. |
 | Monthly cost cap           | **Metered by SAM.** With no gateway logs to read, SAM prices every platform-billed proxy call and SAM agent call from its model price table (`PLATFORM_AI_MODELS`, list prices x reported usage including prompt-cache reads and writes; `priceModelUsageUsd()`, `services/ai-cost-pricing.ts`) and stores it in the per-user `AiTokenBudgetCounter` (`hasLocalAiCostMetering()`). The cap is enforced from that month total (`getLocalMonthlyAiCostUsd()`, `checkMonthlyCostCap()`), refusing with 429 `monthly-cost-cap`. Calls to a model with no catalog price (an operator endpoint's own model) and BYO passthrough calls count $0. A gateway whose logs cannot be read (no `CF_API_TOKEN`) still reports the cap unavailable. |
-| AI usage pages             | `/api/usage/ai` and the budget page show SAM's own token counts and its priced cost per provider; per-model and per-day breakdowns need the gateway. |
+| AI usage pages             | `/api/usage/ai` and the budget page show SAM's own token counts and priced cost per provider, per model and per day (`getLocalUsageBreakdown()`, `services/ai-model-usage.ts`). Admin cost pages still read gateway logs only. |
 
 With an admin-configured OpenAI-compatible endpoint (Admin → Settings → AI models), SAM asks the
 endpoint for its usage on streamed calls (`stream_options.include_usage`) and, when a response
@@ -161,8 +161,9 @@ request. Calls go through the guarded outbound fetch (`services/speech-endpoints
 URL and a model are set, `GET /api/config/platform-capabilities` reports `speechToText` /
 `textToSpeech` true and the web UI shows the microphone and server read-aloud
 (`resolvePublicPlatformCapabilities()`). Read-aloud strips markdown with a regex instead of the
-Workers AI cleanup model and does not summarize long replies. With the binding present these
-settings are never read.
+Workers AI cleanup model and does not summarize long replies, and each user may synthesize
+`RATE_LIMIT_TTS_SYNTHESIZE` (default 120) replies per hour through the endpoint. With the binding
+present these settings are never read.
 
 ### Status codes for services this installation does not have
 
