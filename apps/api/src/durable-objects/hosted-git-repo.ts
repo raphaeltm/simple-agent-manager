@@ -246,7 +246,7 @@ export class HostedGitRepo extends DurableObject {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       log.error('hosted_git.receive_failed', { error: msg });
-      if (err instanceof RequestTooLargeError) {
+      if (err instanceof RequestTooLargeError || msg.includes('exceeds maximum size')) {
         return new Response(`error: ${hostedGitPushTooLargeMessage(limits.maxPushBytes)}\n`, {
           status: 413,
         });

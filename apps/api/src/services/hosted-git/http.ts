@@ -14,6 +14,7 @@
  */
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { projectRoleHasCapability } from '../../middleware/project-auth';
 import { nodeStatusTerminatesCallbacks } from '../node-callback-auth';
 import { WORKSPACE_CALLBACK_ACTIVE_STATUSES } from '../workspace-callback-identity';
 import { type HostedGitTokenClaims, isHostedGitRepoName, verifyHostedGitToken } from './tokens';
@@ -71,7 +72,8 @@ function basicPassword(request: Request): string | null {
 
 interface BindingRow {
   project_id: string;
-  member_active: number | null;
+  /** The token user's role when they are an active member, else null. */
+  member_role: string | null;
   workspace_status: string | null;
   workspace_project_id: string | null;
   workspace_user_id: string | null;
@@ -91,9 +93,9 @@ async function loadBinding(
 ): Promise<BindingRow | null> {
   return env.DATABASE.prepare(
     `SELECT p.id AS project_id,
-            (SELECT 1 FROM project_members pm
+            (SELECT pm.role FROM project_members pm
               WHERE pm.project_id = p.id AND pm.user_id = ?3 AND pm.status = 'active'
-              LIMIT 1) AS member_active,
+              LIMIT 1) AS member_role,
             w.status AS workspace_status, w.project_id AS workspace_project_id,
             w.user_id AS workspace_user_id, w.callback_generation AS workspace_generation,
             w.node_id AS node_id, n.status AS node_status
@@ -108,9 +110,17 @@ async function loadBinding(
 }
 
 /** Why a token's binding is no longer valid, or null when it is. */
-function bindingRefusal(row: BindingRow, claims: HostedGitTokenClaims): string | null {
+function bindingRefusal(
+  row: BindingRow,
+  claims: HostedGitTokenClaims,
+  write: boolean
+): string | null {
   if (!claims.userId) return 'no_principal';
-  if (row.member_active !== 1) return 'not_a_member';
+  if (!row.member_role) return 'not_a_member';
+  // Scope is fixed at mint time; the role is current, so a downgrade takes effect at once.
+  if (write && !projectRoleHasCapability(row.member_role, 'workspace:write')) {
+    return 'role_cannot_write';
+  }
   if (!claims.workspaceId) return null;
   if (!row.workspace_status || !WORKSPACE_CALLBACK_ACTIVE_STATUSES.has(row.workspace_status)) {
     return 'workspace_inactive';
@@ -168,7 +178,7 @@ export async function handleHostedGitRequest(
   if (!options.trustedInternalCaller || claims.userId || claims.workspaceId) {
     const binding = await loadBinding(env, parsed.repo, claims);
     if (!binding) return reject('repo_not_bound');
-    const refusal = bindingRefusal(binding, claims);
+    const refusal = bindingRefusal(binding, claims, operation.write);
     if (refusal) return reject(refusal);
   }
 

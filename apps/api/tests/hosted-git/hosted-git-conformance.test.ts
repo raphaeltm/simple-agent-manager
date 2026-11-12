@@ -409,6 +409,21 @@ describe('hosted git hardening (security review findings)', () => {
       .run();
     const token = await mintToken(project, 'read', { userId: member });
     expect((await infoRefs(token)).status).toBe(200);
+    // A write token stops pushing as soon as the member's role loses write access.
+    const write = await mintToken(project, 'write', { userId: member });
+    const receiveRefs = (t: string) =>
+      runtime.fetch(`/git/${project.artifactsRepoId}.git/info/refs?service=git-receive-pack`, {
+        headers: { authorization: `Basic ${btoa(`x:${t}`)}` },
+      });
+    expect((await receiveRefs(write)).status).toBe(200);
+    await runtime.DATABASE.prepare(
+      `UPDATE project_members SET role = 'viewer' WHERE project_id = ? AND user_id = ?`
+    )
+      .bind(project.id, member)
+      .run();
+    expect((await receiveRefs(write)).status).toBe(401);
+    expect((await infoRefs(token)).status).toBe(200);
+
     await runtime.DATABASE.prepare(
       `UPDATE project_members SET status = 'removed', removed_at = ? WHERE project_id = ? AND user_id = ?`
     )
