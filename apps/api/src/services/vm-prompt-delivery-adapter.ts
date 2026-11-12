@@ -1,3 +1,7 @@
+import type {
+  VmPromptDeliveryAdapter,
+  VmPromptDeliveryAdapterInput,
+} from '@simple-agent-manager/project-data';
 import {
   isUrgentMessageClass,
   VM_PROMPT_DELIVERY_PROTOCOL_VERSION,
@@ -6,10 +10,7 @@ import {
 } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
-import type {
-  PromptDeliveryClaim,
-  PromptDeliveryResult,
-} from '../durable-objects/project-data/prompt-delivery';
+import type { PromptDeliveryResult } from '../durable-objects/project-data/prompt-delivery';
 import type { Env } from '../env';
 import { createModuleLogger } from '../lib/logger';
 import { commitContainerWake } from './container-wake-commit';
@@ -37,44 +38,10 @@ import {
 import { reconcileSteerDelivery, submitSteerDelivery } from './vm-steer-delivery-adapter';
 
 export type { VmPromptDeliverySourceTaskGuard, VmPromptDeliveryTarget };
+/** The adapter contract is ProjectData's (its delivery runner calls it); this is the worker's implementation. */
+export type { VmPromptDeliveryAdapter, VmPromptDeliveryAdapterInput };
 
 const log = createModuleLogger('vm_prompt_delivery_adapter');
-
-export interface VmPromptDeliveryAdapterInput {
-  projectId: string;
-  claim: PromptDeliveryClaim;
-  allowLegacyVm: boolean;
-  requestTimeoutMs: number;
-  /**
-   * Authoritative target already resolved by a shared runtime-liveness adapter.
-   * This is used by reconciliation so a suspect D1 health mirror cannot undo
-   * the probe-backed delivery verdict by being interpreted a second time here.
-   */
-  resolvedTarget?: VmPromptDeliveryTarget;
-  /** Revalidates a parent wake immediately before recovery/container/VM mutations. */
-  beforeSideEffect?: () => Promise<PromptDeliveryResult | null>;
-  /** Synchronous durable claim fence after preparation, immediately before possible prompt submission. */
-  beforeSubmit?: (capabilities: VmPromptDeliveryCapabilities) => boolean;
-  /** Makes snapshot recovery's D1 claim conditional on the source parent. */
-  sourceTaskGuard?: VmPromptDeliverySourceTaskGuard;
-  /**
-   * Stop-and-deliver hook, invoked (best-effort) when the target rejects the
-   * submit because a prompt turn is already in flight AND the claim's message
-   * class is urgent (`interrupt` or above). The adapter supplies the resolved
-   * target; the caller owns the cancel + turn-end bookkeeping. A hook failure
-   * never changes the busy retry result — it only degrades to parking in
-   * `retry_wait` behind the busy turn, which is today's behaviour.
-   */
-  onBusyTurn?: (target: VmPromptDeliveryTarget) => Promise<void>;
-}
-
-export interface VmPromptDeliveryAdapter {
-  submit(input: VmPromptDeliveryAdapterInput): Promise<PromptDeliveryResult>;
-  reconcile(input: VmPromptDeliveryAdapterInput): Promise<PromptDeliveryResult>;
-  /** Live steer into the running turn; adapters without it deliver steers as queued prompts. */
-  steer?(input: VmPromptDeliveryAdapterInput): Promise<PromptDeliveryResult>;
-  reconcileSteer?(input: VmPromptDeliveryAdapterInput): Promise<PromptDeliveryResult>;
-}
 
 function isMissingActiveAgentSession(error: unknown): boolean {
   return (

@@ -1,17 +1,17 @@
+import {
+  createAttentionMarker,
+  resolveAttentionMarkerById,
+} from '@simple-agent-manager/project-data/internal/do/attention';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import {
+  SESSION_SUMMARY_DELTA_SQL,
+  syncSessionSummariesToD1,
+} from '@simple-agent-manager/project-data/internal/do/session-summary-sync';
+import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
-import { runMigrations } from '../../../src/durable-objects/migrations';
-import {
-  createAttentionMarker,
-  resolveAttentionMarkerById,
-} from '../../../src/durable-objects/project-data/attention';
-import {
-  SESSION_SUMMARY_DELTA_SQL,
-  syncSessionSummariesToD1,
-} from '../../../src/durable-objects/project-data/session-summary-sync';
-import type { Env } from '../../../src/durable-objects/project-data/types';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 import { createSqlStorage } from './sql-storage-test-utils';
 

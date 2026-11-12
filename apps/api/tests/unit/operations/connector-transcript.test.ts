@@ -1,10 +1,13 @@
+import { readLogicalMessage } from '@simple-agent-manager/project-data/internal/do/logical-message';
+import { readLogicalTranscriptPage } from '@simple-agent-manager/project-data/internal/do/logical-transcript';
+import type { MessageContextReader } from '@simple-agent-manager/project-data/internal/do/message-context';
+import {
+  formatMessageRows,
+  getMessages,
+} from '@simple-agent-manager/project-data/internal/do/messages';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { readLogicalMessage } from '../../../src/durable-objects/project-data/logical-message';
-import { readLogicalTranscriptPage } from '../../../src/durable-objects/project-data/logical-transcript';
-import type { MessageContextReader } from '../../../src/durable-objects/project-data/message-context';
-import { formatMessageRows, getMessages } from '../../../src/durable-objects/project-data/messages';
 import type { Env } from '../../../src/env';
 import { readChat, searchChats } from '../../../src/operations/chat-core';
 import { readChatMessage } from '../../../src/operations/chat-transcript';

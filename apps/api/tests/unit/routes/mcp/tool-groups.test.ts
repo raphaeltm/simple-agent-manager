@@ -233,6 +233,7 @@ describe('every hidden task-only tool rejects a task-less token', () => {
     },
     publish_channel_event: { channel: 'feature.groups', message: 'hello', idempotencyKey: 'k-2' },
     reply_to_email: { body: 'hello' },
+    request_secret: { name: 'API_TOKEN', reason: 'test' },
     send_durable_message: { targetTaskId: 'task-self', message: 'hello' },
     send_message_to_subtask: { taskId: 'task-self', message: 'hello' },
     stop_subtask: { taskId: 'task-self' },

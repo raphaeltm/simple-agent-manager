@@ -6,12 +6,12 @@
  * identically with the join deleted (rule 28).
  */
 
+import { publishSessionWakeProgress } from '@simple-agent-manager/project-data/internal/do/session-wake-progress';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
-import { publishSessionWakeProgress } from '../../src/durable-objects/project-data/session-wake-progress';
 import {
   DEFAULT_WAKE_PROGRESS_BROADCAST_TIMEOUT_MS,
   getWakeProgressBroadcastTimeoutMs,

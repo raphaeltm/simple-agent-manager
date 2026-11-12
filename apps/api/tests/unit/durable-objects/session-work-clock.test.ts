@@ -4,18 +4,18 @@
  * Production 2026-11-03: re-reports kept `activity_at` fresh for 13 h on a completed
  * task, so its workspace never slept and pinned node 01M6EHBZ85GDPDQS5JSAYCKF4Z.
  */
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-
-import { runMigrations } from '../../../src/durable-objects/migrations';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import {
   getSessionState,
   markPromptAccepted,
   recordTurnEnd,
   refreshWorkingActivityForChatSession,
   upsertActivityState,
-} from '../../../src/durable-objects/project-data/session-state';
-import { isSameTurnRereport } from '../../../src/durable-objects/project-data/session-work-clock';
+} from '@simple-agent-manager/project-data/internal/do/session-state';
+import { isSameTurnRereport } from '@simple-agent-manager/project-data/internal/do/session-work-clock';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
 import { sessionWorkAnchor } from '../../../src/services/session-idleness';
 import { idlenessStateChanged } from '../../../src/services/session-sleep-eligibility';
 import { createSqlStorage } from './sql-storage-test-utils';

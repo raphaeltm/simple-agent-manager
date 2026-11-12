@@ -9,17 +9,17 @@
  * the SHAPE that prevents it — SQLite rows read by one search — and the coverage disclosure a
  * consumer relies on to know the result is partial.
  */
-import { env, runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
-
-import { createRowMeteredSqlStorage } from '../../src/durable-objects/project-data/alarm-sections';
-import { materializeSession } from '../../src/durable-objects/project-data/materialization';
+import { createRowMeteredSqlStorage } from '@simple-agent-manager/project-data/internal/do/alarm-sections';
+import { materializeSession } from '@simple-agent-manager/project-data/internal/do/materialization';
 import {
   DEFAULT_PROJECT_DATA_SEARCH_FTS_CANDIDATE_LIMIT,
   DEFAULT_PROJECT_DATA_SEARCH_KEYWORD_SCAN_ROW_LIMIT,
   type MessageSearchBounds,
   searchMessagesWithCoverage,
-} from '../../src/durable-objects/project-data/message-search';
+} from '@simple-agent-manager/project-data/internal/do/message-search';
+import { env, runInDurableObject } from 'cloudflare:test';
+import { describe, expect, it } from 'vitest';
+
 import type { ProjectDataTestDouble } from './support/expected-error-doubles';
 
 const WIDE: MessageSearchBounds = {

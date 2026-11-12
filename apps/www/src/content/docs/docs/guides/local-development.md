@@ -97,6 +97,7 @@ pnpm --filter @simple-agent-manager/providers build
 pnpm --filter @simple-agent-manager/worker-core build
 pnpm --filter @simple-agent-manager/app-deployment build
 pnpm --filter @simple-agent-manager/scheduler-core build
+pnpm --filter @simple-agent-manager/project-data build
 pnpm --filter @simple-agent-manager/api build
 ```
 

@@ -1,6 +1,6 @@
 ---
 title: Run commands with secrets
-description: Why a variable you marked Secret shows up as a placeholder in your agent's workspace, and how the agent runs commands that need it with exec_with_secrets.
+description: Why a variable you marked Secret shows up as a placeholder in your agent's workspace, how the agent runs commands that need it with exec_with_secrets, and how an agent can ask you for a secret without it entering the chat.
 ---
 
 A variable you mark **Secret** is kept out of the agent's environment, so the agent can't print,
@@ -36,6 +36,49 @@ a new chat, or one that wakes from sleep, gets placeholders.
 
 If the same name is set in more than one place, the skill's value wins over the profile's, and the
 profile's over the project's. A name only counts as Secret if the value that wins is marked Secret.
+
+## Let the agent ask you for a secret
+
+When an agent needs a key you haven't stored yet, it can ask for it with the `request_secret` tool
+instead of asking you to paste it into the chat. A **Secret requested** card appears in the
+conversation with the variable name, the agent's reason, and how long the value will be kept. You
+also get a **Secret requested** notification (as do the project's owners and admins when your role
+can't supply secrets). Notifications are best-effort: if one doesn't arrive, the card is still
+waiting in the chat until the request expires.
+
+1. Type or paste the value into the card and select **Save secret**. If the name already exists in
+   the project, tick **Replace the existing value** first. The tick applies to the value you were
+   shown: if someone changes it before you save, the card asks you to confirm again.
+2. SAM stores it encrypted as a project **Secret** variable and tells the agent, by name only, that
+   it's ready. The agent can use it with `exec_with_secrets` straight away, without restarting.
+3. Or select **Decline**, and the agent is told not to wait for it.
+
+The value goes from the card to SAM directly. It is never sent to the agent, written into the chat,
+or included in the agent's tool results or notices.
+
+What to know:
+
+- **Who can answer.** Project owners and admins (the people who can edit project secrets). A
+  maintainer sees the card and its status but not the input.
+- **Who can use it.** It is a project secret, so every project member's agent sessions can use it,
+  like one you add in **Settings → Runtime**.
+- **Expiry.** The agent can ask for the value to expire, for example after an hour. After that,
+  `exec_with_secrets` refuses it and agents no longer see it; it shows as **expired** in
+  **Settings → Runtime** until a daily cleanup deletes it. Expiry can't take back a value a command
+  already received while it was valid.
+- **Open requests expire too.** A request nobody answers closes after a day by default, and the agent
+  is told. Asking again for the same name in the same chat shows the open card rather than a new one.
+- **Where it came from.** In **Settings → Runtime**, values supplied this way carry a **collected**
+  badge with who supplied them, when, the agent's reason, and a link to the chat. Delete or replace
+  them there like any other variable; replacing one by hand makes it an ordinary, non-expiring value.
+- **If saving says the agent wasn't confirmed to be told**, SAM keeps retrying for an hour; you can
+  also tell the agent in the chat that the name is ready.
+- **Names a profile or skill already sets** can't be requested: the profile or skill value would win,
+  so the agent is told to use that one or pick another name.
+
+An administrator can change how long requests stay open, the shortest and longest expiry an agent can
+ask for, how many open requests one chat may have, and how long finished requests are kept, in
+**Admin → Settings** under **Chat** (see [Admin settings](/docs/guides/admin-settings/#chat)).
 
 ## Ask the agent to run the command
 
@@ -119,6 +162,23 @@ after a crash) and are never re-run automatically.
 Starting or restarting an agent fetches its environment from SAM each time. If that request fails,
 the start fails and can be retried, rather than falling back to cached values that might hold real
 secrets.
+
+### Requesting and listing secrets
+
+`request_secret` takes a `name` (`[A-Za-z_][A-Za-z0-9_]*`), a `reason` shown on the card, and an
+optional `ttlSeconds` for the stored value. It returns at once with the request's ID, status and
+deadline; it never returns or accepts a value. End the turn or keep working: when the request is
+supplied, declined, or expires, the agent's chat gets a notice naming the request and the variable,
+and the agent then runs `exec_with_secrets` with that name. The call fails for a reserved name, a name
+the session's profile or skill already sets, or when the chat already has the maximum number of open
+requests. It needs a task-backed session.
+
+`list_runtime_env` (also `workspace_read` with `method: "runtime_env"`) lists the variable names this
+session can use, without values: for each, whether it is a Secret, where it is set (`project`,
+`profile` or `skill`), which lower scopes it overrides, when it expires, and, for values supplied
+through a request, who supplied them and a short excerpt of the requesting agent's reason (written by
+an agent, so treat it as untrusted). Expired values are left out. A `reason` is limited to 1,000
+characters.
 
 ## Use a short-lived identity instead of a stored key
 

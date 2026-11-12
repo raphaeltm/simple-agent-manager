@@ -1,13 +1,12 @@
-import { env, runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
-
-import type { ProjectData } from '../../src/durable-objects/project-data';
-import { resolveDurableExecutionConfig } from '../../src/durable-objects/project-data/durable-execution-config';
+import { resolveDurableExecutionConfig } from '@simple-agent-manager/project-data/internal/do/durable-execution-config';
+import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
 import {
   applyPromptDeliveryResult,
   claimDuePromptDeliveries,
   computePromptDeliveryAlarmTime,
-} from '../../src/durable-objects/project-data/prompt-delivery';
+} from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
+import { env, runInDurableObject } from 'cloudflare:test';
+import { describe, expect, it } from 'vitest';
 
 const config = resolveDurableExecutionConfig({});
 

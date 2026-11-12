@@ -120,6 +120,7 @@ import {
   handleUpdateAgentProfile,
 } from './profile-tools';
 import { handleAckEventDelivery, handleGetEvent } from './project-event-tools';
+import { handleListRuntimeEnv, handleRequestSecret } from './secret-request-tools';
 import {
   handleGetResourceHistory,
   handleGetSessionMessages,
@@ -198,6 +199,8 @@ export const MCP_TOOL_HANDLERS: ReadonlyMap<string, McpToolHandler> = new Map<
   ['run_ai_model', handleRunAiModel],
   ['update_task_status', handleUpdateTaskStatus],
   ['request_human_input', handleRequestHumanInput],
+  ['request_secret', handleRequestSecret],
+  ['list_runtime_env', handleListRuntimeEnv],
   ['wait_for_subtasks', handleWaitForSubtasks],
   ['get_event', handleGetEvent],
   ['ack_event_delivery', handleAckEventDelivery],

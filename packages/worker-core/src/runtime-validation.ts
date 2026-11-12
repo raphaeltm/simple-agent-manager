@@ -76,7 +76,7 @@ export function optionalJsonRecord(value: unknown, context: string): JsonRecord 
  * instead of `null` — `expectJsonRecord`/`parseJsonRecord` explicitly reject
  * arrays first and throw instead. Known call sites rely on this array
  * acceptance today (see the comment in
- * `apps/api/src/durable-objects/project-data/row-schemas/messages.ts` next to
+ * `packages/project-data/src/do/row-schemas/messages.ts` next to
  * its `maybeJsonRecord` calls). If array-rejection is load-bearing for a new
  * call site, use `expectJsonRecord`/`optionalJsonRecord`/`parseJsonRecord`
  * instead of this function. Pinned by

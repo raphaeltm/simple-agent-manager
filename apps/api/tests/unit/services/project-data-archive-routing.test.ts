@@ -1,11 +1,11 @@
-import { describe, expect, it, vi } from 'vitest';
-
-import type { Env } from '../../../src/env';
 import {
   assertArchiveJournalTransition,
   assertExactWriteAllowed,
   resolveExactReadOwner,
-} from '../../../src/services/project-data-archive-routing';
+} from '@simple-agent-manager/project-data/internal/client/project-data-archive-routing';
+import { describe, expect, it, vi } from 'vitest';
+
+import type { Env } from '../../../src/env';
 
 function envWithLocation(row: Record<string, unknown> | null): Env {
   const first = vi.fn(async () => row);
