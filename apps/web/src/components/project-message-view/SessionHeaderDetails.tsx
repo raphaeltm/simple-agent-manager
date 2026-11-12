@@ -14,6 +14,7 @@ import { SessionDetailSection } from './SessionDetailSection';
 import { formatDuration, formatExecutionStep, formatTime } from './SessionHeaderFormatters';
 import { SessionHeaderInfrastructure } from './SessionHeaderInfrastructure';
 import { SessionHeaderPullRequestRow } from './SessionHeaderPullRequestRow';
+import { SessionRunConfiguration } from './SessionRunConfiguration';
 import { SessionRunDetails } from './SessionRunDetails';
 import { SessionSourceContextRow } from './SessionSourceContextRow';
 import { SessionTriggerOrigin } from './SessionTriggerOrigin';
@@ -34,7 +35,7 @@ function formatTaskStatus(status: string): string {
 
 /**
  * The session header's expanded details: title, initial prompt, references, run details,
- * timing, the pull request, trigger origin, lineage and infrastructure. Reference material
+ * the effective configuration (model, effort, permissions, skill), timing, the pull request, trigger origin, lineage and infrastructure. Reference material
  * only; the session's actions live in `SessionToolRail`. Split out of `SessionHeader` to keep
  * that file under the size limit (rule 18); the header owns the fetched state it shows.
  */
@@ -189,6 +190,8 @@ export function SessionHeaderDetails({
           )}
         </div>
       </SessionDetailSection>
+
+      <SessionRunConfiguration projectId={projectId} sessionId={session.id} />
 
       <WorkloadIdentityDetails key={session.id} projectId={projectId} sessionId={session.id} />
 
