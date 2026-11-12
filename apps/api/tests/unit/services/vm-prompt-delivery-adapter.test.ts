@@ -1,12 +1,15 @@
 import { readFileSync } from 'node:fs';
 
+import Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import {
   DefaultVmPromptDeliveryAdapter,
   type VmPromptDeliveryAdapterInput,
 } from '../../../src/services/vm-prompt-delivery-adapter';
+import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const mocks = vi.hoisted(() => ({
   nodeAgentRequest: vi.fn(),
@@ -183,37 +186,52 @@ describe('VM prompt delivery adapter', () => {
   it.each([null, 0])(
     'committed wake authority result %s controls submission independently of transport success',
     async (released) => {
-      const row = {
-        ...targetRow,
-        snapshot_recovery_status: 'restored',
-        snapshot_recovery_task_id: 'wake-task',
-        snapshot_recovery_workspace_id: 'workspace-1',
-        snapshot_recovery_attempt_id: 'wake-attempt',
-        wake_task_status: 'in_progress',
-      };
-      const env = envWithTarget(row);
-      const signalSessionWakeReady = vi.fn().mockResolvedValue(released);
-      env.PROJECT_DATA = {
-        idFromName: vi.fn(),
-        get: vi.fn(() => ({ signalSessionWakeReady })),
-      } as unknown as Env['PROJECT_DATA'];
-      mocks.nodeAgentRequest.mockResolvedValue(protocolFixture.capabilities);
-      mocks.sendPromptToAgentOnNode.mockResolvedValue({
-        ...protocolFixture.newPrompt,
-        sessionId: 'acp-1',
-        receipt: {
-          ...(protocolFixture.newPrompt.receipt as Record<string, unknown>),
-          deliveryId: 'delivery-1',
-        },
-      });
-      const result = await new DefaultVmPromptDeliveryAdapter(env).submit(input(false));
-      expect(signalSessionWakeReady).toHaveBeenCalledOnce();
-      expect(result).toMatchObject({ kind: released === null ? 'retry' : 'accepted' });
-      if (released === null) {
-        expect(mocks.nodeAgentRequest).not.toHaveBeenCalled();
-        expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
-      } else {
-        expect(mocks.sendPromptToAgentOnNode).toHaveBeenCalledOnce();
+      const sqlite = new Database(':memory:');
+      try {
+        createSchemaTables(sqlite, [
+          schema.nodes,
+          schema.workspaces,
+          schema.agentSessions,
+          schema.tasks,
+          schema.sessionSnapshots,
+        ]);
+        sqlite.exec(`INSERT INTO nodes (id,user_id,runtime,status,health_status,agent_version)
+        VALUES ('node-1','user-1','vm','running','healthy','v1');
+        INSERT INTO workspaces (id,node_id,project_id,user_id,chat_session_id,status)
+        VALUES ('workspace-1','node-1','project-1','user-1','chat-1','running');
+        INSERT INTO agent_sessions (id,workspace_id,user_id,status)
+        VALUES ('acp-1','workspace-1','user-1','running');
+        INSERT INTO tasks (id,project_id,user_id,chat_session_id,workspace_id,status)
+        VALUES ('wake-task','project-1','user-1','chat-1','workspace-1','in_progress');
+        INSERT INTO session_snapshots (id,project_id,user_id,chat_session_id,runtime,recovery_status,
+          recovery_task_id,recovery_workspace_id,recovery_attempt_id)
+        VALUES ('snapshot','project-1','user-1','chat-1','vm','restored','wake-task','workspace-1','wake-attempt');`);
+        const env = { DATABASE: createSqliteD1(sqlite) } as Env;
+        const signalSessionWakeReady = vi.fn().mockResolvedValue(released);
+        env.PROJECT_DATA = {
+          idFromName: vi.fn(),
+          get: vi.fn(() => ({ signalSessionWakeReady })),
+        } as unknown as Env['PROJECT_DATA'];
+        mocks.nodeAgentRequest.mockResolvedValue(protocolFixture.capabilities);
+        mocks.sendPromptToAgentOnNode.mockResolvedValue({
+          ...protocolFixture.newPrompt,
+          sessionId: 'acp-1',
+          receipt: {
+            ...(protocolFixture.newPrompt.receipt as Record<string, unknown>),
+            deliveryId: 'delivery-1',
+          },
+        });
+        const result = await new DefaultVmPromptDeliveryAdapter(env).submit(input(false));
+        expect(signalSessionWakeReady).toHaveBeenCalledOnce();
+        expect(result).toMatchObject({ kind: released === null ? 'retry' : 'accepted' });
+        if (released === null) {
+          expect(mocks.nodeAgentRequest).not.toHaveBeenCalled();
+          expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+        } else {
+          expect(mocks.sendPromptToAgentOnNode).toHaveBeenCalledOnce();
+        }
+      } finally {
+        sqlite.close();
       }
     }
   );

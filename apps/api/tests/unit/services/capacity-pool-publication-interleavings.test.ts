@@ -1112,6 +1112,85 @@ describe('atomic replacement publication', () => {
     });
   });
 
+  it.each([
+    'missing batch entry',
+    'missing returned row',
+    'missing revision',
+    'missing timestamp',
+    'missing status',
+    'wrong revision',
+    'wrong timestamp',
+    'wrong status',
+    'string revision',
+  ])('does not adopt a promotion acknowledgement with %s', async (fault) => {
+    const { db, database, sqlite } = fixture();
+    await publish(db, [offering('cx23', 10)]);
+    const before = sqlite.prepare("SELECT revision FROM capacity_pools WHERE id='pool'").get();
+    const batch = database.batch.bind(database);
+    let tampered = false;
+    const malformed = {
+      ...database,
+      batch: async (...args: Parameters<D1Database['batch']>) => {
+        const result = await batch(...args);
+        const first = result[0];
+        const raw = first?.results?.[0];
+        if (
+          !tampered &&
+          first &&
+          raw &&
+          typeof raw === 'object' &&
+          'revision' in raw &&
+          'updatedAt' in raw &&
+          'status' in raw
+        ) {
+          // The actual atomic SQLite promotion committed. Only its external acknowledgement
+          // is damaged; rejecting it cannot rely on rolling back or re-reading a later edit.
+          tampered = true;
+          const acknowledgement: Record<string, unknown> = { ...raw };
+          if (fault === 'missing batch entry') result.shift();
+          else if (fault === 'missing returned row') first.results = [];
+          else {
+            if (fault === 'missing revision') delete acknowledgement.revision;
+            if (fault === 'missing timestamp') delete acknowledgement.updatedAt;
+            if (fault === 'missing status') delete acknowledgement.status;
+            if (fault === 'wrong revision')
+              acknowledgement.revision = Number(acknowledgement.revision) + 1;
+            if (fault === 'wrong timestamp')
+              acknowledgement.updatedAt = `${String(acknowledgement.updatedAt)}-other-publication`;
+            if (fault === 'wrong status') acknowledgement.status = 'disabled';
+            if (fault === 'string revision')
+              acknowledgement.revision = String(acknowledgement.revision);
+            first.results = [acknowledgement];
+          }
+        }
+        return result;
+      },
+    };
+    const store = cursorStore();
+    const result = await publish(drizzle(malformed, { schema }), [offering('cx23', 11)], {
+      cursorStore: store,
+    });
+    expect(tampered).toBe(true);
+    expect(result.publicationComplete).toBe(false);
+    expect(result.poolPublicationGuard).toBeUndefined();
+    expect([...store.values.values()].map((value) => JSON.parse(value).complete)).toEqual([false]);
+    const committed = sqlite.prepare("SELECT revision FROM capacity_pools WHERE id='pool'").get();
+    expect(committed).not.toEqual(before);
+    expect(
+      sqlite
+        .prepare(
+          'SELECT DISTINCT provider_instance_price_monthly_cents price FROM capacity_pool_candidates'
+        )
+        .all()
+    ).toEqual([{ price: 1100 }]);
+    const recovered = await publish(db, [offering('cx23', 11)], { cursorStore: store });
+    expect(recovered.publicationComplete).toBe(true);
+    expect(recovered.poolPublicationGuard).toBeDefined();
+    expect(sqlite.prepare("SELECT revision FROM capacity_pools WHERE id='pool'").get()).toEqual(
+      committed
+    );
+  });
+
   it('restarts after promotion committed but cursor persistence was interrupted without rebumping', async () => {
     const { db, sqlite } = fixture();
     const store = cursorStore();

@@ -266,7 +266,7 @@ describe('readiness against actual SQL authority', () => {
     async (runtime) => {
       const db = new Database(':memory:');
       try {
-        db.exec(`CREATE TABLE nodes (id TEXT, runtime TEXT, status TEXT, runtime_incarnation_id TEXT);
+        db.exec(`CREATE TABLE nodes (id TEXT, runtime TEXT, status TEXT, runtime_incarnation_id TEXT, user_id TEXT);
         CREATE TABLE workspaces (id TEXT, node_id TEXT, project_id TEXT, chat_session_id TEXT, status TEXT, runtime_deletion_confirmed_at TEXT, user_id TEXT);
         CREATE TABLE agent_sessions (id TEXT, workspace_id TEXT, status TEXT, user_id TEXT);
         CREATE TABLE session_snapshots (chat_session_id TEXT, project_id TEXT, recovery_status TEXT, recovery_workspace_id TEXT, recovery_task_id TEXT, recovery_attempt_id TEXT, user_id TEXT);
@@ -276,11 +276,12 @@ describe('readiness against actual SQL authority', () => {
         INSERT INTO agent_sessions VALUES ('foreign-agent','workspace','running','other-user');
         INSERT INTO session_snapshots VALUES ('chat','project','restored','workspace','task','wake-1','owner');
         INSERT INTO tasks VALUES ('task','project','chat','in_progress','workspace','owner');`);
-        db.prepare('INSERT INTO nodes VALUES (?, ?, ?, ?)').run(
+        db.prepare('INSERT INTO nodes VALUES (?, ?, ?, ?, ?)').run(
           'node',
           runtime,
           'running',
-          'incarnation'
+          'incarnation',
+          'owner'
         );
         const env = {
           DATABASE: {
@@ -295,6 +296,10 @@ describe('readiness against actual SQL authority', () => {
           runtime === 'vm'
             ? input
             : { ...input, fence: { runtime, nodeId: 'node', runtimeIncarnationId: 'incarnation' } };
+        expect(await isSessionWakeReadyCurrent(env, ready)).toBe(true);
+        db.exec("UPDATE nodes SET user_id = 'foreign-owner'");
+        expect(await isSessionWakeReadyCurrent(env, ready)).toBe(false);
+        db.exec("UPDATE nodes SET user_id = 'owner'");
         expect(await isSessionWakeReadyCurrent(env, ready)).toBe(true);
         expect(await isSessionWakeReadyCurrent(env, { ...ready, projectId: 'other-project' })).toBe(
           false
