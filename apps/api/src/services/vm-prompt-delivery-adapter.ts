@@ -29,8 +29,8 @@ import {
   runSideEffectGuard,
 } from './vm-prompt-delivery-runtime-queries';
 import {
-  resolveVmPromptDeliveryTarget,
   type ResolveTargetOptions,
+  resolveVmPromptDeliveryTarget,
   type TargetResolution,
   type VmPromptDeliverySourceTaskGuard,
   type VmPromptDeliveryTarget,
