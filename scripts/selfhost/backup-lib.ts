@@ -79,8 +79,14 @@ export function parseBucketUrl(url: string): BucketUrl {
 function check(result: RunResult, what: string): RunResult {
   if (result.status !== 0) {
     // stderr of gcloud/mc/docker carries no secret (credentials travel in the environment).
+    // gcloud prints progress first; its ERROR lines are the part worth reporting.
+    const errorLines = result.stderr
+      .split('\n')
+      .filter((line) => /^ERROR\b/.test(line.trim()))
+      .slice(0, 5)
+      .join('\n');
     throw new Error(
-      `${what} failed (exit ${result.status}): ${result.stderr.trim().slice(0, 500)}`
+      `${what} failed (exit ${result.status}): ${(errorLines || result.stderr.trim()).slice(0, 800)}`
     );
   }
   return result;
