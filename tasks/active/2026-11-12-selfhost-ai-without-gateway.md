@@ -31,20 +31,20 @@ PR into it, never merge; no deploys; local tests only; self-host behaviour behin
 
 ## Checklist
 
-- [ ] A3a: drop the title override; README; test (endpoint title + truncation fallback, celld config)
-- [ ] A1: admin setting `aiProxy.directUpstreamEnabled` (default off); one shared resolver for every
+- [x] A3a: drop the title override; README; test (endpoint title + truncation fallback, celld config)
+- [x] A1: admin setting `aiProxy.directUpstreamEnabled` (default off); one shared resolver for every
       proxy gate; drop `AI_PROXY_ENABLED` override; agent-key custom-base-URL fail-closed with proxy off
-- [ ] A1 tests: proxy route with gateway unset (setting on → direct upstream; off → refused);
+- [x] A1 tests: proxy route with gateway unset (setting on → direct upstream; off → refused);
       Cloudflare control; budgets/allowlist/RPM still apply; agent-key base-URL test
-- [ ] A2: local cost metering (catalog price × usage) when no gateway; cap reads local month total;
+- [x] A2: local cost metering (catalog price × usage) when no gateway; cap reads local month total;
       capability `monthlyCostCap` true without gateway; tests (cap reached → 429; Cloudflare control)
-- [ ] A2b: per-model/per-day views (if time)
-- [ ] A4: speech-to-text endpoint settings + route + capability; tests
-- [ ] A5: text-to-speech endpoint settings + route + capability; tests
-- [ ] A3b: classifier on LLM endpoint (only if time)
-- [ ] Docs: deploy/selfhost/README.md, public docs where behaviour changed
-- [ ] security-auditor on proxy + settings; fix CRITICAL/HIGH
-- [ ] Draft PR with "How to enable and test on the box"
+- [x] A2b: per-model/per-day views (if time)
+- [x] A4: speech-to-text endpoint settings + route + capability; tests
+- [x] A5: text-to-speech endpoint settings + route + capability; tests
+- [x] A3b (advisory loop verdict only): classifier on LLM endpoint (only if time)
+- [x] Docs: deploy/selfhost/README.md, public docs where behaviour changed
+- [x] security-auditor on proxy + settings; fix CRITICAL/HIGH
+- [x] Draft PR (#2671) with "How to enable and test on the box"
 
 ## Acceptance criteria
 
@@ -53,3 +53,9 @@ PR into it, never merge; no deploys; local tests only; self-host behaviour behin
   admission checks; with it off the proxy refuses; Cloudflare unchanged.
 - Without a gateway the monthly cap is enforced from SAM's own metering; 429 `monthly-cost-cap`.
 - With speech endpoints set, capabilities resolve true and the routes round-trip through them.
+
+## Notes
+
+- Draft PR #2671 into sam/selfhost-pass-2. Node disk fills up repeatedly (other workspaces); installs filtered to api/web/root.
+- security-auditor: no CRITICAL/HIGH; M1, M2, M4, L1 fixed in 4b2418c3a; M3, L3, L4, L5 deferred under "Before main" in the PR.
+- Admin cost pages (`/admin/costs`) still read gateway logs only.
