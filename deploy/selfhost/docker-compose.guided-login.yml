@@ -8,6 +8,26 @@
 # no capabilities, celld's fenced bridges, its one-shot fence container) and refuses the rest
 # (docker-proxy/policy.ts; what a compromised celld can and cannot do is in the README).
 services:
+  # Gives the socket volume to the proxy uid. A fresh volume takes the image's ownership, but an
+  # existing one keeps the uid it was created with, so changing SAM_DOCKER_PROXY_UID would leave
+  # the proxy unable to bind its socket. One-shot; root only for chown/chmod of one directory.
+  docker-proxy-socket-owner:
+    image: sam-selfhost-docker-proxy:local
+    pull_policy: never # built by the docker-proxy service
+    network_mode: none
+    user: '0:0'
+    cap_drop: [ALL]
+    cap_add: [CHOWN, FOWNER]
+    entrypoint:
+      - /bin/sh
+      - -c
+      - 'chown "$$0:$$1" /run/sam-docker-proxy && chmod 0750 /run/sam-docker-proxy'
+      - '${SAM_DOCKER_PROXY_UID:-7103}'
+      - '${CELLD_UID:-7101}'
+    volumes:
+      - docker-proxy-socket:/run/sam-docker-proxy
+    restart: 'no'
+
   docker-proxy:
     build:
       context: ./docker-proxy
@@ -15,6 +35,9 @@ services:
         PROXY_UID: ${SAM_DOCKER_PROXY_UID:-7103}
         CELLD_GID: ${CELLD_UID:-7101}
     image: sam-selfhost-docker-proxy:local
+    depends_on:
+      docker-proxy-socket-owner:
+        condition: service_completed_successfully
     # Unix sockets only: the host's Docker socket in, the proxy socket out.
     network_mode: none
     user: '${SAM_DOCKER_PROXY_UID:-7103}:${CELLD_UID:-7101}'
