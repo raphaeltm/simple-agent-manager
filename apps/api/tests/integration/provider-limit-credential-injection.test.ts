@@ -12,6 +12,7 @@ import { createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 const key = vi.hoisted(() => ({
   reference: 'cc_credentials:pinned',
   secret: 'test-only-secret-canary',
+  callbackGeneration: null as string | null,
 }));
 vi.mock('../../src/routes/credentials', () => ({
   getDecryptedAgentKey: vi.fn(async () => ({
@@ -24,7 +25,12 @@ vi.mock('../../src/routes/credentials', () => ({
   getDecryptedCredentialRecord: vi.fn(async () => null),
 }));
 vi.mock('../../src/services/jwt', () => ({
-  verifyCallbackToken: vi.fn(async () => ({ workspace: 'workspace-1', scope: 'workspace' })),
+  verifyCallbackToken: vi.fn(async () => ({
+    workspace: 'workspace-1',
+    type: 'callback',
+    scope: 'workspace',
+    callbackGeneration: key.callbackGeneration,
+  })),
   signCallbackToken: vi.fn(),
   signCurrentWorkspaceCallbackToken: vi.fn(),
 }));
@@ -40,6 +46,7 @@ describe('provider wait credential pin at the authenticated secret injection rou
       `INSERT INTO nodes(id,user_id,status)VALUES('node-1','user-1','running');INSERT INTO workspaces(id,user_id,node_id,project_id,status)VALUES('workspace-1','user-1','node-1','project-1','running');INSERT INTO tasks(id,project_id,user_id,workspace_id,status)VALUES('task-1','project-1','user-1','workspace-1','delegated');INSERT INTO agent_sessions(id,user_id,workspace_id,status,agent_credential_generation)VALUES('agent-1','user-1','workspace-1','running',0);`
     );
     key.reference = 'cc_credentials:pinned';
+    key.callbackGeneration = null;
   });
   afterEach(() => sqlite.close());
   function pin(credentialKey: string | null) {
@@ -181,15 +188,20 @@ describe('provider wait credential pin at the authenticated secret injection rou
     });
   });
 
-  it('matching pin can receive its selected credential', async () => {
-    pin('cc_credentials:pinned');
-    const response = await inject();
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({
-      apiKey: key.secret,
-      credentialReference: key.reference,
-    });
-  });
+  it.each([null, 'current-runtime-generation'])(
+    'matching pin can receive its selected credential with callback generation %s',
+    async (generation) => {
+      key.callbackGeneration = generation;
+      sqlite.prepare('UPDATE workspaces SET callback_generation=?').run(generation);
+      pin('cc_credentials:pinned');
+      const response = await inject();
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        apiKey: key.secret,
+        credentialReference: key.reference,
+      });
+    }
+  );
   it('an ordinary competing task cannot shadow the workspace recovery pin', async () => {
     sqlite.exec(
       "INSERT INTO tasks(id,project_id,user_id,workspace_id,status)VALUES('task-0','project-1','user-1','workspace-1','delegated')"
@@ -254,33 +266,40 @@ describe('provider wait credential pin at the authenticated secret injection rou
       admission_reason: 'Blocked: provider wait budget exhausted.',
     });
   });
-  it('a workspace changed at the final pin read cannot receive a credential', async () => {
-    pin('cc_credentials:pinned');
-    const prepare = env.DATABASE.prepare.bind(env.DATABASE);
-    let pinReads = 0;
-    env.DATABASE.prepare = ((query: string) => {
-      const statement = prepare(query);
-      if (!/SELECT/i.test(query) || !query.includes('provider_limit_wait_json')) return statement;
-      const bind = statement.bind.bind(statement);
-      statement.bind = ((...values: unknown[]) => {
-        const bound = bind(...values);
-        const all = bound.all.bind(bound);
-        bound.all = (async () => {
-          if (++pinReads === 2)
-            sqlite.exec("UPDATE workspaces SET status='stopping' WHERE id='workspace-1'");
-          return all();
-        }) as typeof bound.all;
-        return bound;
-      }) as typeof statement.bind;
-      return statement;
-    }) as typeof env.DATABASE.prepare;
-    const response = await inject();
-    expect(sqlite.prepare("SELECT status FROM workspaces WHERE id='workspace-1'").get()).toEqual({
-      status: 'stopping',
-    });
-    expect(response.status).toBe(410);
-    expect(await response.text()).not.toContain(key.secret);
-  });
+  it.each([
+    ['status', "status='stopping'"],
+    ['callback generation', "callback_generation='replacement-runtime-generation'"],
+    ['owner', "user_id='replacement-owner'"],
+  ])(
+    'a workspace %s changed at the final pin read cannot receive a credential',
+    async (_change, mutation) => {
+      key.callbackGeneration = 'current-runtime-generation';
+      sqlite.prepare('UPDATE workspaces SET callback_generation=?').run(key.callbackGeneration);
+      pin('cc_credentials:pinned');
+      const prepare = env.DATABASE.prepare.bind(env.DATABASE);
+      let pinReads = 0;
+      env.DATABASE.prepare = ((query: string) => {
+        const statement = prepare(query);
+        if (!/SELECT/i.test(query) || !query.includes('provider_limit_wait_json')) return statement;
+        const bind = statement.bind.bind(statement);
+        statement.bind = ((...values: unknown[]) => {
+          const bound = bind(...values);
+          const all = bound.all.bind(bound);
+          bound.all = (async () => {
+            if (++pinReads === 2)
+              sqlite.exec(`UPDATE workspaces SET ${mutation} WHERE id='workspace-1'`);
+            return all();
+          }) as typeof bound.all;
+          return bound;
+        }) as typeof statement.bind;
+        return statement;
+      }) as typeof env.DATABASE.prepare;
+      const response = await inject();
+      expect(pinReads).toBe(2);
+      expect(response.status).toBe(410);
+      expect(await response.text()).not.toContain(key.secret);
+    }
+  );
   it('terminal task metadata cannot veto a preserved workspace credential', async () => {
     pin('cc_credentials:pinned');
     sqlite.exec("UPDATE tasks SET status='completed',admission_state='provider_limit_blocked'");
