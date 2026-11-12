@@ -29,6 +29,10 @@ import {
 } from '../../services/deployment-routing';
 import { getRuntimeLimits } from '../../services/limits';
 import { getNodeLogsFromNode } from '../../services/node-agent-diagnostics';
+import {
+  APP_DEPLOYMENTS_UNAVAILABLE_MESSAGE,
+  resolvePlatformCapabilities,
+} from '../../services/platform-capabilities';
 import { byteLength, PROJECT_ENV_KEY_PATTERN } from '../projects/_helpers';
 import {
   INTERNAL_ERROR,
@@ -347,6 +351,9 @@ export async function handleCreateDeploymentEnvironment(
   const name = trimmedString(toolArgs.name);
   if (!name) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'A deployment environment name is required.');
+  }
+  if (!resolvePlatformCapabilities(env).appDeployments) {
+    return jsonRpcError(requestId, INVALID_PARAMS, APP_DEPLOYMENTS_UNAVAILABLE_MESSAGE);
   }
 
   const db = drizzle(env.DATABASE, { schema });

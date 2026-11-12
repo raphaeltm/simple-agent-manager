@@ -27,6 +27,7 @@ import {
   detachEnvironmentVolumes,
   listEnvironmentVolumes,
 } from '../services/deployment-volumes';
+import { assertAppDeploymentsAvailable } from '../services/platform-capabilities';
 import { recordDeploymentEnvironmentLifecycleEventBestEffort } from '../services/project-lifecycle-events';
 import {
   parseStoredResolvedReservationJson,
@@ -442,6 +443,7 @@ async function startDeploymentEnvironment(params: {
 }) {
   const { db, env, userId, projectId, envId } = params;
   const environment = await requireDeploymentEnvironment(db, projectId, envId);
+  assertAppDeploymentsAvailable(env);
   if (environment.status === 'active' || environment.status === 'starting') {
     return {
       environment: await buildDeploymentEnvironmentResponse(db, env, environment),

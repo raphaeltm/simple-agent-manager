@@ -82,6 +82,7 @@ describe('GET /api/config/platform-capabilities', () => {
       monthlyCostCap: true,
       logSearch: true,
       liveLogStream: true,
+      appDeployments: true,
     });
   });
 
@@ -97,6 +98,7 @@ describe('GET /api/config/platform-capabilities', () => {
       monthlyCostCap: true,
       logSearch: false,
       liveLogStream: false,
+      appDeployments: false,
     });
   });
 

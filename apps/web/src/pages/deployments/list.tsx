@@ -16,6 +16,7 @@ import { Link, useNavigate } from 'react-router';
 
 import { LoadError, Loading, PageHeader } from '../../components/page-kit/page';
 import { Panel, SectionTitle } from '../../components/page-kit/ui';
+import { usePlatformCapabilities } from '../../hooks/usePlatformCapabilities';
 import type { DeploymentEnvironment } from '../../lib/api';
 import { PUBLIC_WEBSITE_URL } from '../../lib/public-website';
 import { useProjectContext } from '../ProjectContext';
@@ -151,6 +152,20 @@ function EnvRow({
   );
 }
 
+function DeploymentsUnavailable() {
+  return (
+    <Panel className="flex flex-col gap-2 px-6 py-6" label="Deployments unavailable">
+      <h2 className="m-0 text-[17px] font-semibold text-fg-primary">
+        Deployments aren’t available on this installation
+      </h2>
+      <p className="m-0 text-[15px] text-fg-muted">
+        Deployment servers need Cloudflare DNS for their addresses and certificates, and this
+        installation doesn’t have it configured. Workspaces and chats are unaffected.
+      </p>
+    </Panel>
+  );
+}
+
 function EmptyList({ onCreate }: { onCreate: () => void }) {
   return (
     <Panel
@@ -189,6 +204,8 @@ export function DeploymentsList() {
   const envs = useMemo(() => sortForAttention(environments.data ?? []), [environments.data]);
   const profiles = useProfiles(projectId);
   const [creating, setCreating] = useState(false);
+  // Self-hosted installs without Cloudflare DNS cannot run deployments (API refuses too).
+  const { appDeployments } = usePlatformCapabilities();
 
   return (
     <Column>
@@ -196,13 +213,14 @@ export function DeploymentsList() {
         title="Deployments"
         subtitle="Your app, live on the internet. Agents ship it; you decide where."
         action={
-          envs.length > 0 ? (
+          appDeployments && envs.length > 0 ? (
             <Button variant="secondary" onClick={() => setCreating(true)} className="shrink-0">
               <Plus size={18} aria-hidden /> New
             </Button>
           ) : undefined
         }
       />
+      {!appDeployments && <DeploymentsUnavailable />}
       {environments.isError ? (
         <LoadError
           what="deployments"
@@ -212,7 +230,9 @@ export function DeploymentsList() {
       ) : environments.isPending ? (
         <Loading label="Loading deployments…" />
       ) : envs.length === 0 ? (
-        <EmptyList onCreate={() => setCreating(true)} />
+        appDeployments ? (
+          <EmptyList onCreate={() => setCreating(true)} />
+        ) : null
       ) : (
         <>
           {GROUPS.map((group) => {

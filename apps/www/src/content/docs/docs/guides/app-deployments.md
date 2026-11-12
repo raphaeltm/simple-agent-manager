@@ -26,6 +26,8 @@ Owners and admins create environments, choose who can deploy, and pause, start o
 Everyone in the project sees the same buttons, but for other members SAM refuses those changes with
 "Project capability is required".
 
+Deployments need Cloudflare DNS on the installation (`CF_API_TOKEN` and `CF_ZONE_ID`): each deployment server gets a public DNS record, an Origin CA certificate and `*.apps` routes through the Cloudflare API. A self-hosted install without them reports the `appDeployments` capability as unavailable (`resolvePlatformCapabilities()`), the Deployments page says so, and the API refuses to create or start environments with a `FEATURE_UNAVAILABLE` error (`assertAppDeploymentsAvailable()`).
+
 ## The Deployments page
 
 A project's **Deployments** page lists its environments grouped by what they need from you: **Needs your attention**, **Running**, and **Not running**. Each row shows the address people visit (your own domain when one is working) and who shipped the newest version, with **Open** for an app that's up or **Ask an agent** for a problem an agent can fix.

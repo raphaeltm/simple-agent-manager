@@ -175,7 +175,8 @@ function mockSelectRows(...rows: unknown[][]) {
 }
 
 function createEnv(): Env {
-  return { DATABASE: {} } as Env;
+  // A Cloudflare installation: app deployments need Cloudflare DNS (platform-capabilities.ts).
+  return { DATABASE: {}, CF_API_TOKEN: 'cf-token', CF_ZONE_ID: 'zone-1' } as unknown as Env;
 }
 
 function createEnvWithRawD1Claim(changes = 1): Env {
@@ -187,6 +188,8 @@ function createEnvWithRawD1Claim(changes = 1): Env {
         })),
       })),
     },
+    CF_API_TOKEN: 'cf-token',
+    CF_ZONE_ID: 'zone-1',
   } as unknown as Env;
 }
 
