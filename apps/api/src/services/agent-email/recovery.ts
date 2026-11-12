@@ -5,8 +5,6 @@ import * as pkg from '@simple-agent-manager/agent-email';
 import type { Env } from '../../env';
 import { type AgentEmailPortOverrides, agentEmailPorts } from './ports';
 
-export { type AgentEmailRecoveryStats } from '@simple-agent-manager/agent-email';
-
 export function runAgentEmailRecovery(
   env: Env,
   waitUntil?: (work: Promise<unknown>) => void,

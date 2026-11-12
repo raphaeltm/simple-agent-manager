@@ -21,7 +21,7 @@ export function createAgentEmailTables(sqlite: Database.Database): void {
 }
 
 /**
- * Writes the record a successful admin setup leaves (`services/agent-email/setup.ts`), so a test
+ * Writes the record a successful admin setup leaves (`packages/agent-email/src/setup.ts`), so a test
  * env with the `AGENT_EMAIL` binding behaves like a deployment an admin has turned agent email on
  * for. Without it the binding alone leaves agent email off.
  */

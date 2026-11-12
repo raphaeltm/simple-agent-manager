@@ -7,13 +7,10 @@ import { agentEmailPorts } from './ports';
 
 export {
   AGENT_EMAIL_SETUP_KEY,
-  type AgentEmailMailRecord,
   type AgentEmailSetupAttempt,
-  type AgentEmailSetupRecord,
   completeAgentEmailSetup,
   hasAgentEmailBinding,
   replaceSetupAttempt,
-  type StoredSetupAttempt,
 } from '@simple-agent-manager/agent-email';
 
 export function readAgentEmailSetup(env: Env) {

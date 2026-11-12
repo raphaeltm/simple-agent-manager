@@ -5,11 +5,7 @@ import * as pkg from '@simple-agent-manager/agent-email';
 import type { Env } from '../../env';
 import { agentEmailPorts } from './ports';
 
-export {
-  loadEmailTriggerConfig,
-  parseAllowedSenders,
-  toEmailTriggerConfig,
-} from '@simple-agent-manager/agent-email';
+export { loadEmailTriggerConfig, toEmailTriggerConfig } from '@simple-agent-manager/agent-email';
 
 export function requireAgentEmailOn(env: Env) {
   return pkg.requireAgentEmailOn(env, agentEmailPorts(env));

@@ -1,7 +1,7 @@
 /**
- * What agent email needs from the rest of the worker. The worker builds one `AgentEmailPorts`
- * per request, bound to its environment (`apps/api/src/agent-email-ports.ts`), and passes it in;
- * the package never imports worker modules.
+ * What agent email needs from the rest of the worker. The worker builds an `AgentEmailPorts`
+ * bound to its environment for each call and passes it in; the package never imports worker
+ * modules.
  */
 import type { TriggerRow } from '@simple-agent-manager/worker-core/schema';
 

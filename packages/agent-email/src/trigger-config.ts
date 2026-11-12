@@ -1,7 +1,6 @@
 /** Email trigger configuration persistence (trigger_email_configs). */
 import type { EmailTriggerConfig } from '@simple-agent-manager/shared';
-import { log } from '@simple-agent-manager/worker-core';
-import { errors } from '@simple-agent-manager/worker-core';
+import { errors, log } from '@simple-agent-manager/worker-core';
 import * as schema from '@simple-agent-manager/worker-core/schema';
 import { eq } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';

@@ -129,7 +129,7 @@
     "postal-mime": {
       "registryUrl": "https://www.npmjs.com/package/postal-mime",
       "homepageUrl": "https://github.com/postalsys/postal-mime",
-      "necessity": "Parses inbound RFC 5322/MIME email in the API Worker email() handler for agent email triggers; zero dependencies and the parser Cloudflare documents for Email Workers."
+      "necessity": "Parses inbound RFC 5322/MIME email for agent email triggers (packages/agent-email, reached from the API Worker email() handler); zero dependencies and the parser Cloudflare documents for Email Workers."
     },
     "sharp": {
       "registryUrl": "https://www.npmjs.com/package/sharp",

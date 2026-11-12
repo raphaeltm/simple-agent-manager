@@ -37,8 +37,7 @@ import {
   isSpfRecord,
   mailRecordSignature,
 } from '@simple-agent-manager/shared';
-import { log } from '@simple-agent-manager/worker-core';
-import { IoTimeoutError, withDeadline } from '@simple-agent-manager/worker-core';
+import { IoTimeoutError, log, withDeadline } from '@simple-agent-manager/worker-core';
 
 import { agentEmailDomain } from './address';
 import {

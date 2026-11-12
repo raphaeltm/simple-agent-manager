@@ -20,9 +20,17 @@ Cloudflare API base URL, default timeout and error reader. Functions that need a
 `ports` explicitly.
 
 The worker implements the ports in `apps/api/src/services/agent-email/ports.ts`
-(`agentEmailPorts(env, overrides)`). The files beside it keep the old import paths: named
-re-exports, plus wrappers with the original signatures that bind the ports. Routes, the worker's
-`email()` handler and the cron sweep import those adapters, so they did not change.
+(`agentEmailPorts(env, overrides)`). The files beside it keep the old import paths for the names
+the worker still imports: named re-exports, plus wrappers with the original signatures that bind
+the ports. Routes, the worker's `email()` handler and the cron sweep import those adapters, so they
+did not change.
+
+## Entry points
+
+| Import                                          | Contents                                                                                                                                                                          |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@simple-agent-manager/agent-email`             | Everything (`src/index.ts`)                                                                                                                                                       |
+| `@simple-agent-manager/agent-email/definitions` | Pure modules only: settings definitions, addresses, provider, setup errors and changes, template context (`src/definitions.ts`). For worker code that must not load D1 or drizzle |
 
 ## Key Files
 

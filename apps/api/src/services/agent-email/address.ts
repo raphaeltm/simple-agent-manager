@@ -3,10 +3,6 @@
 export {
   agentEmailAddress,
   agentEmailDomain,
-  type AgentEmailRecipient,
   generateAddressKey,
-  LOOPBACK_DETAIL,
-  loopbackAddress,
-  normalizeMailbox,
   parseAgentEmailRecipient,
-} from '@simple-agent-manager/agent-email';
+} from '@simple-agent-manager/agent-email/definitions';

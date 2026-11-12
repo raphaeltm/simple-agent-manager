@@ -15,8 +15,7 @@ import type {
   AgentEmailZoneChange,
   MailDnsRecord,
 } from '@simple-agent-manager/shared';
-import { log } from '@simple-agent-manager/worker-core';
-import { getTimeoutMs } from '@simple-agent-manager/worker-core';
+import { getTimeoutMs, log } from '@simple-agent-manager/worker-core';
 
 import type { AgentEmailEnv } from './env';
 import type { AgentEmailPorts } from './ports';

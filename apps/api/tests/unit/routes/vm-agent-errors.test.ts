@@ -42,8 +42,11 @@ vi.mock('drizzle-orm/d1', () => ({
   }),
 }));
 
-// Mock drizzle-orm operators
-vi.mock('drizzle-orm', () => ({
+// Mock drizzle-orm operators. Keep the real module underneath: packages (agent-email) load the
+// D1 schema from @simple-agent-manager/worker-core/schema, which the src/db/schema mock below
+// does not cover, and the schema needs drizzle's real `sql`.
+vi.mock('drizzle-orm', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('drizzle-orm')>()),
   eq: vi.fn(),
   and: vi.fn(),
   desc: vi.fn(),

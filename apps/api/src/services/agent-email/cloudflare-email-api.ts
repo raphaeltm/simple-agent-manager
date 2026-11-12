@@ -5,22 +5,7 @@ import * as pkg from '@simple-agent-manager/agent-email';
 import type { Env } from '../../env';
 import { agentEmailPorts } from './ports';
 
-export {
-  CloudflareEmailApiError,
-  createRoutingRule,
-  type DnsRecordView,
-  type EmailReadOptions,
-  enableSubaddressing,
-  enableSubdomainRouting,
-  getRoutingSettings,
-  getZoneName,
-  listDnsRecords,
-  listRoutingRules,
-  type RoutingRuleInput,
-  type RoutingRuleView,
-  updateRoutingRule,
-  writeRoutingSpf,
-} from '@simple-agent-manager/agent-email';
+export { CloudflareEmailApiError } from '@simple-agent-manager/agent-email';
 
 export function listSendingSubdomains(env: Env, options?: pkg.EmailReadOptions) {
   return pkg.listSendingSubdomains(env, agentEmailPorts(env), options);

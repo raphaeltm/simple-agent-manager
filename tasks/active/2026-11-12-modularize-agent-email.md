@@ -30,4 +30,29 @@ core branch `sam/help-identify-parts-worker-embcza`.
 
 - 2026-11-12: package created, ports threaded, adapters generated. `tsc` clean for both.
   Agent-email tests: 14 files / 250 tests before; after: 12 / 230 in the worker + 2 / 20 in the
-  package (parsing, SPF). Next: CI/doc/scanner wiring, full suites, review.
+  package (parsing, SPF).
+- 2026-11-12: wiring done (`31a7e695f`): ci.yml and e2e-smoke filters, ast-checks,
+  runtime-boundary semantic scan, build order, comments repointed, package AGENTS.md.
+- 2026-11-12: reviews (architecture, task-completion): no CRITICAL/HIGH. Fixed: adapters now
+  export only the names the worker imports (none re-exports a function whose signature changed);
+  a light `./definitions` entry for the pure modules, so the admin settings registry and other
+  definition-only importers do not load D1 code; a unit test for `agentEmailPorts`; stale comment
+  paths; duplicate imports. The full suite found one test (`vm-agent-errors`) whose hand-written
+  `drizzle-orm` mock lacked `sql`: the package loads the schema from worker-core, which that test's
+  `src/db/schema` mock does not cover. Its `drizzle-orm` mock now keeps the real module underneath.
+
+## Test counts
+
+| Suite                                | Core `2052fb4b4`                         | After W6                                                                   |
+| ------------------------------------ | ---------------------------------------- | -------------------------------------------------------------------------- |
+| Agent-email tests                    | 14 files / 250 tests (all in `apps/api`) | 12 / 230 in `apps/api` + 2 / 20 in the package, + 1 new port test file (5) |
+| Static `it`/`test` count, whole repo | 24,580                                   | 24,580 + 5 new                                                             |
+
+None deleted.
+
+## Open items
+
+- The Cloudflare API helpers (`CLOUDFLARE_API_BASE`, `DEFAULT_CF_API_TIMEOUT_MS`,
+  `readCloudflareErrorDetail`, in `services/dns-core.ts`) reach the package through
+  `ports.cloudflareApi`. When the DNS code is extracted, move them into worker-core (they would
+  then have two package consumers) and drop that port.

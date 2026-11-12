@@ -1,6 +1,9 @@
 import { comparableDnsContent } from '@simple-agent-manager/shared';
-import { readResponseJson } from '@simple-agent-manager/worker-core';
-import { fetchWithTimeout, getTimeoutMs } from '@simple-agent-manager/worker-core';
+import {
+  fetchWithTimeout,
+  getTimeoutMs,
+  readResponseJson,
+} from '@simple-agent-manager/worker-core';
 import * as v from 'valibot';
 
 import type { EmailReadOptions } from './cloudflare-email-api';

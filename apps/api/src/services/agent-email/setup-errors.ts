@@ -3,4 +3,4 @@
 export {
   AgentEmailMainDomainChangedError,
   AgentEmailSetupRefusedError,
-} from '@simple-agent-manager/agent-email';
+} from '@simple-agent-manager/agent-email/definitions';

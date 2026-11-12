@@ -3,8 +3,11 @@
  * the Worker's own `CF_API_TOKEN` (the same token the deploy uses). Responses are validated at
  * this boundary; errors keep Cloudflare's numeric code.
  */
-import { readResponseJson } from '@simple-agent-manager/worker-core';
-import { fetchWithTimeout, getTimeoutMs } from '@simple-agent-manager/worker-core';
+import {
+  fetchWithTimeout,
+  getTimeoutMs,
+  readResponseJson,
+} from '@simple-agent-manager/worker-core';
 import * as v from 'valibot';
 
 import type { AgentEmailEnv } from './env';

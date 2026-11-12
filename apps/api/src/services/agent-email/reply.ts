@@ -5,12 +5,7 @@ import * as pkg from '@simple-agent-manager/agent-email';
 import type { Env } from '../../env';
 import { agentEmailPorts } from './ports';
 
-export {
-  AgentEmailReplyError,
-  type AgentEmailReplyErrorCode,
-  type AgentEmailReplyInput,
-  type AgentEmailReplyResult,
-} from '@simple-agent-manager/agent-email';
+export { AgentEmailReplyError } from '@simple-agent-manager/agent-email';
 
 export function replyToTriggerEmail(
   env: Env,

@@ -5,8 +5,6 @@ import * as pkg from '@simple-agent-manager/agent-email';
 import type { Env } from '../../env';
 import { agentEmailPorts } from './ports';
 
-export { type AgentEmailLimits } from '@simple-agent-manager/agent-email';
-
 export function getAgentEmailLimits(env: Env) {
   return pkg.getAgentEmailLimits(agentEmailPorts(env));
 }

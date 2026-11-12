@@ -5,12 +5,6 @@ import * as pkg from '@simple-agent-manager/agent-email';
 import type { Env } from '../../env';
 import { type AgentEmailPortOverrides, agentEmailPorts } from './ports';
 
-export {
-  type AttemptOptions,
-  type DeliveryContext,
-  type DeliveryOutcome,
-} from '@simple-agent-manager/agent-email';
-
 export function attemptDelivery(
   env: Env,
   context: pkg.DeliveryContext,
