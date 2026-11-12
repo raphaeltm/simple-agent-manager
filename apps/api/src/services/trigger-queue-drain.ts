@@ -70,7 +70,7 @@ export async function drainTriggerQueue(
   const now = new Date().toISOString();
   let expiredWebhookEvents = 0;
   try {
-    const [, expired] = await env.DATABASE.batch([
+    const [, expired] = await env.DATABASE.batch<{ isWebhook: number }>([
       // Before the expiry, so the selection still sees the rows as waiting.
       env.DATABASE.prepare(
         `UPDATE github_webhook_deliveries SET decision='dropped',decision_reason='queue_expired'
@@ -85,8 +85,7 @@ export async function drainTriggerQueue(
         RETURNING id, (${WEBHOOK_QUEUE_ROW_SQL}) AS isWebhook`
       ).bind(now, now, config.batchSize),
     ]);
-    const expiredRows = (expired?.results ?? []) as Array<{ isWebhook: number }>;
-    expiredWebhookEvents = expiredRows.filter((row) => row.isWebhook).length;
+    expiredWebhookEvents = (expired?.results ?? []).filter((row) => row.isWebhook).length;
   } catch (error) {
     // Nothing of it was committed, so the next tick retries it. Starting waiting events below
     // does not depend on it: an expired event is never promoted or counted as waiting.
