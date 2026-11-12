@@ -43,6 +43,7 @@ import {
 import type {
   PlacementCredentialAttribution,
   PlacementCredentialLookup,
+  PlacementCredentialResolutionFailure,
   PlacementCredentialSourceResult,
   PlacementProfileDefaults,
   PlacementRuntimeResolution,
@@ -79,6 +80,7 @@ export type {
   PlacementCredentialAttributionInput,
   PlacementCredentialLookup,
   PlacementCredentialProjectPolicy,
+  PlacementCredentialResolutionFailure,
   PlacementCredentialSourceResult,
   PlacementEntryPoint,
   PlacementExplicitOverrides,
@@ -412,9 +414,7 @@ export async function resolveTaskStartPlacementCredentialAttribution(
   db: Db,
   input: TaskStartPlacementInput,
   options?: { capacityPoolEnsure?: boolean; credentialsRequiredMessage?: string; env?: Env }
-): Promise<
-  TaskStartPlacementWithCredential | { error: string; errorKind: 'placement' | 'credentials' }
-> {
+): Promise<TaskStartPlacementWithCredential | PlacementCredentialResolutionFailure> {
   let placement: TaskStartPlacement;
   try {
     const settings = options?.env
@@ -429,7 +429,7 @@ export async function resolveTaskStartPlacementCredentialAttribution(
     });
   } catch (err) {
     if (err instanceof PlacementResolutionError) {
-      return { error: err.message, errorKind: 'placement' };
+      return { error: err.message, errorKind: 'placement', placementErrorCode: err.code };
     }
     throw err;
   }
@@ -441,10 +441,8 @@ export async function resolveTaskStartPlacementCredentialAttributionFromPlacemen
   db: Db,
   placement: TaskStartPlacement,
   options?: { capacityPoolEnsure?: boolean; credentialsRequiredMessage?: string; env?: Env }
-): Promise<
-  TaskStartPlacementWithCredential | { error: string; errorKind: 'placement' | 'credentials' }
-> {
-  let capacityPoolSelection: TaskStartCapacityPoolSelection | null;
+): Promise<TaskStartPlacementWithCredential | PlacementCredentialResolutionFailure> {
+  let capacityPoolSelection: TaskStartCapacityPoolSelection | null = null;
   let credentialLookup: PlacementCredentialLookup;
   try {
     capacityPoolSelection = await resolveTaskStartCapacityPoolSelection(db, placement, {
@@ -455,7 +453,12 @@ export async function resolveTaskStartPlacementCredentialAttributionFromPlacemen
     credentialLookup = resolveCapacityAwareCredentialLookup(placement, capacityPoolSelection);
   } catch (err) {
     if (err instanceof PlacementResolutionError) {
-      return { error: err.message, errorKind: 'placement' };
+      return {
+        error: err.message,
+        errorKind: 'placement',
+        placementErrorCode: err.code,
+        capacityPoolEffectiveState: capacityPoolSelection?.effectiveState,
+      };
     }
     throw err;
   }

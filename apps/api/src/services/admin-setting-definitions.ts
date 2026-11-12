@@ -71,6 +71,11 @@ export type AdminSettingName =
   | 'operations.evictionRecoveryRetryWallMs'
   | 'operations.evictionRecoveryRetryDelayMs'
   | 'operations.capacityPoolPublishBudgetMs'
+  | 'operations.capacityPoolRefreshPassBudgetMs'
+  | 'operations.capacityPoolRefreshRetryBaseMs'
+  | 'operations.capacityPoolRefreshRetryMaxMs'
+  | 'operations.capacityPoolRefreshDeadlineMs'
+  | 'operations.capacityPoolRefreshLeaseMs'
   | 'operations.deadWakeReconcileBatchSize'
   | 'operations.resourceLinkTouchIntervalMs'
   | 'operations.resourceLinkWeakPerTarget'
@@ -127,13 +132,7 @@ export interface AdminSettingDefinition {
   readonly type: AdminSettingType;
   readonly defaultValue: AdminSettingValue;
   readonly category:
-    | 'OAuth'
-    | 'Connector'
-    | 'Operations'
-    | 'Collaboration'
-    | 'Chat'
-    | 'AI models'
-    | 'Email';
+    'OAuth' | 'Connector' | 'Operations' | 'Collaboration' | 'Chat' | 'AI models' | 'Email';
   readonly description: string;
   readonly secret: boolean;
   readonly risky: boolean;

@@ -4,7 +4,9 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { nextCapacityPoolTimestamp } from '../services/capacity-pool-clock';
+import { capacityPoolRefreshSettings } from '../services/capacity-pool-refresh-settings';
 import { backfillDefaultCapacityPoolsForExistingCredentials } from '../services/default-capacity-pools';
+import { continueCapacityPoolPublications } from './capacity-pool-continuation';
 
 export interface ScheduledCapacityPoolReconciliationResult {
   installationEnsured: boolean;
@@ -24,14 +26,23 @@ export async function runScheduledCapacityPoolReconciliation(
   env: Env
 ): Promise<ScheduledCapacityPoolReconciliationResult> {
   const db = drizzle(env.DATABASE, { schema });
-  const gate = await claimScheduledReconciliationRun(db, env);
+  const settings = await capacityPoolRefreshSettings(env);
+  const deadlineAt = Date.now() + settings.passBudgetMs;
+  const resumed = await continueCapacityPoolPublications(db, env, settings, deadlineAt);
+  const gate =
+    Date.now() >= deadlineAt
+      ? {
+          claimed: false,
+          nextEligibleAt: new Date(Date.now() + settings.retryBaseMs).toISOString(),
+        }
+      : await claimScheduledReconciliationRun(db, env, settings.leaseMs);
   if (!gate.claimed) {
     return {
       installationEnsured: false,
       usersEnsured: 0,
       projectsEnsured: 0,
-      skipped: true,
-      skipReason: 'recently-ran',
+      skipped: resumed === 0,
+      skipReason: resumed === 0 ? 'recently-ran' : null,
       nextEligibleAt: gate.nextEligibleAt,
     };
   }
@@ -39,7 +50,22 @@ export async function runScheduledCapacityPoolReconciliation(
   const result = await backfillDefaultCapacityPoolsForExistingCredentials(db, {
     includeInstallation: true,
     env,
+    refreshSettings: settings,
+    refreshContinuation: true,
+    reconciliationDeadlineAt: deadlineAt,
   });
+  await db
+    .insert(schema.platformSettings)
+    .values({
+      key: SCHEDULED_RECONCILIATION_LAST_RUN_KEY,
+      value: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      updatedBy: null,
+    })
+    .onConflictDoUpdate({
+      target: schema.platformSettings.key,
+      set: { value: new Date().toISOString(), updatedAt: new Date().toISOString() },
+    });
 
   return {
     installationEnsured: result.installation !== null,
@@ -53,30 +79,38 @@ export async function runScheduledCapacityPoolReconciliation(
 
 async function claimScheduledReconciliationRun(
   db: Db,
-  env: Env
+  env: Env,
+  leaseMs: number
 ): Promise<{ claimed: boolean; nextEligibleAt: string | null }> {
   const intervalMs = resolveScheduledReconciliationIntervalMs(env);
   if (intervalMs <= 0) return { claimed: true, nextEligibleAt: null };
 
   const nowMs = Date.now();
   const nowIso = nextCapacityPoolTimestamp();
-  const thresholdIso = new Date(nowMs - intervalMs).toISOString();
+  const [lastSuccess] = await db
+    .select({ value: schema.platformSettings.value })
+    .from(schema.platformSettings)
+    .where(eq(schema.platformSettings.key, SCHEDULED_RECONCILIATION_LAST_RUN_KEY))
+    .limit(1);
+  const lastSuccessMs = parseStoredTimestampMs(lastSuccess?.value);
+  if (lastSuccessMs !== null && lastSuccessMs + intervalMs > nowMs)
+    return {
+      claimed: false,
+      nextEligibleAt: new Date(lastSuccessMs + intervalMs).toISOString(),
+    };
+  const leaseKey = 'capacityPools.scheduledReconciliation.claim.v1';
   const [claimed] = await db
     .insert(schema.platformSettings)
     .values({
-      key: SCHEDULED_RECONCILIATION_LAST_RUN_KEY,
+      key: leaseKey,
       value: nowIso,
       updatedAt: nowIso,
       updatedBy: null,
     })
     .onConflictDoUpdate({
       target: schema.platformSettings.key,
-      set: {
-        value: nowIso,
-        updatedAt: nowIso,
-        updatedBy: sql`NULL`,
-      },
-      where: sql`${schema.platformSettings.value} <= ${thresholdIso}`,
+      set: { value: nowIso, updatedAt: nowIso, updatedBy: sql`NULL` },
+      where: sql`${schema.platformSettings.value} <= ${new Date(nowMs - leaseMs).toISOString()}`,
     })
     .returning({ value: schema.platformSettings.value });
 
@@ -90,12 +124,12 @@ async function claimScheduledReconciliationRun(
   const [row] = await db
     .select({ value: schema.platformSettings.value })
     .from(schema.platformSettings)
-    .where(eq(schema.platformSettings.key, SCHEDULED_RECONCILIATION_LAST_RUN_KEY))
+    .where(eq(schema.platformSettings.key, leaseKey))
     .limit(1);
   const lastRunMs = parseStoredTimestampMs(row?.value) ?? nowMs;
   return {
     claimed: false,
-    nextEligibleAt: new Date(lastRunMs + intervalMs).toISOString(),
+    nextEligibleAt: new Date(lastRunMs + leaseMs).toISOString(),
   };
 }
 

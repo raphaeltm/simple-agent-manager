@@ -297,11 +297,11 @@ export async function resolveOfferingsForSeed(
         },
       });
       const refreshStatus = catalog.refreshStatus;
-      const resolution: DefaultCapacityPoolOfferingResolution = {
+      const resolution = normalizeOfferingResolution({
         offerings: catalog.offerings ?? [],
         refreshSucceeded: refreshStatus?.succeeded ?? true,
         catalogComplete: refreshStatus?.complete ?? true,
-      };
+      });
       writeCachedCatalog(cacheKey, resolution, ttlMs, now);
       return resolution;
     } catch (error) {
@@ -323,6 +323,7 @@ export async function resolveOfferingsForSeed(
     offerings: getStaticProviderCatalogOfferings(seed.provider),
     refreshSucceeded: true,
     catalogComplete: false,
+    catalogValidated: true, // Bundled static reference metadata, not a failed API fallback.
   };
 }
 
@@ -330,7 +331,20 @@ function normalizeOfferingResolution(
   value: ProviderInstanceOffering[] | DefaultCapacityPoolOfferingResolution
 ): DefaultCapacityPoolOfferingResolution {
   if (Array.isArray(value)) {
-    return { offerings: value, refreshSucceeded: true, catalogComplete: true };
+    return {
+      offerings: value,
+      refreshSucceeded: true,
+      catalogComplete: true,
+      catalogValidated: true,
+    };
   }
-  return value;
+  return {
+    ...value,
+    catalogValidated:
+      value.catalogValidated !== false &&
+      value.refreshSucceeded &&
+      (value.catalogComplete !== false ||
+        (value.offerings.length > 0 &&
+          value.offerings.every((offering) => offering.catalogSource === 'static'))),
+  };
 }

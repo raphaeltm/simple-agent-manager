@@ -2,6 +2,7 @@ import type { CapacityPoolStatus } from '@simple-agent-manager/shared';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import type * as schema from '../db/schema';
+import type { PoolPublicationGuard } from './default-capacity-pool-types';
 
 export type Db = ReturnType<typeof drizzle>;
 
@@ -50,8 +51,12 @@ export interface CapacityCandidatePublicationCursorStore {
 }
 
 export interface EnsureCandidatesForSourceOptions {
+  /** Pool state owned by the enclosing refresh; never adopt a concurrent editor's revision. */
+  poolPublicationGuard?: PoolPublicationGuard;
   sourceGeneration?: number;
   sourceAuthorityGeneration?: number;
+  /** Whether returned metadata is trusted for placement, independent of exhaustive enumeration. */
+  catalogValidated?: boolean;
   catalogComplete?: boolean;
   /** Max candidate rows written per D1 batch. Defaults to the module constant. */
   publishBatchSize?: number;
@@ -67,6 +72,8 @@ export interface EnsureCandidatesForSourceOptions {
 }
 
 export interface EnsureCandidatesForSourceResult {
+  /** Own atomic promotion's resulting pool state; absent when its CAS did not commit. */
+  poolPublicationGuard?: PoolPublicationGuard;
   /** Total candidate rows this catalog resolves to (offerings x materialized roles). */
   totalCandidates: number;
   /** Rows written by this invocation. */

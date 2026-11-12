@@ -215,12 +215,29 @@ async function resolveRecoveryPlacement(
     }
   );
   if ('error' in resolved) {
+    // A catalog that cannot yet answer placement is a readiness wait, not proof
+    // the stored request is impossible. No claim/runtime is allocated until a
+    // later durable delivery retry can resolve an eligible committed offering.
+    let reason = 'placement_unsatisfiable';
+    if (resolved.errorKind === 'credentials') {
+      reason = 'placement_credentials_missing';
+    } else if (resolved.placementErrorCode === 'no-eligible-capacity-candidate') {
+      switch (resolved.capacityPoolEffectiveState) {
+        case 'migration-pending':
+        case 'catalog-unavailable':
+          reason = 'session_recovery_placement_transient';
+          break;
+        case 'source-disabled':
+          reason = 'placement_sources_disabled';
+          break;
+        case 'configured-empty':
+          reason = 'placement_pool_empty';
+          break;
+      }
+    }
     return {
       error: resolved.error,
-      reason:
-        resolved.errorKind === 'credentials'
-          ? 'placement_credentials_missing'
-          : 'placement_unsatisfiable',
+      reason,
     };
   }
   return resolved;

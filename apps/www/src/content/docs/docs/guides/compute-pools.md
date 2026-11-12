@@ -342,16 +342,39 @@ your decisions:
   machine that fits.
 - A provider API failure during refresh is reported as a refresh error; SAM does not invent
   availability it could not confirm.
-- When a source's catalog changed, SAM writes the whole new catalog during that refresh, in batches,
-  for up to `operations.capacityPoolPublishBudgetMs` (20 seconds by default). Until it finishes the
-  pool shows as pending and cannot place new machines. A catalog too large for one refresh carries on
-  from where it stopped on the next one (`ensureCandidatesForSource()`).
-- **Starting work never refreshes the catalog.** Placement reads the pool as it stands, so a
-  submission is never delayed by a provider API call and a deliberately emptied pool is never
-  quietly repopulated. Refreshing happens when you press **Refresh** or change a credential — not
-  as a side effect of running a task. (The one exception is an installation upgraded from the old size presets, whose
-  pool gets its native offerings listed once. Like any new row they start out of the pool, so a pool
-  whose only machines were size presets is empty until you add machines.)
+- A pool with a previously validated, published catalog keeps using that catalog while a replacement
+  is unfinished, interrupted or failing. Each source's replacement is published together after it
+  is validated and fully written. A new pool stays pending until its first validated catalog is
+  published. A successful, explicitly validated bundled catalog can supply known offerings even
+  without a complete live inventory. Failed fallbacks and partial provider responses stay private;
+  they cannot start VMs. Missing machines are marked unavailable only after a complete provider
+  inventory has been published.
+- Interrupted refreshes resume automatically, including after a restart. A dedicated check runs
+  every minute, independently of the daily catalog discovery. Work becomes eligible after a
+  backoff that starts at 15 seconds and rises to 60 seconds by default; the next check picks it up.
+  A claimed pass that crashes can be retried after its lease expires (3 minutes by default).
+- By default, SAM spends up to 20 seconds per source publishing a changed catalog, within a shared
+  20-second budget across sources and scopes for each pass. An unfinished refresh has a two-hour
+  recovery deadline. If it runs out, the pool summary reports an error with a recovery action;
+  its last committed catalog is retained. Check the cloud account, then use **Refresh** to retry.
+  Superadmins can adjust these [refresh settings](/docs/guides/admin-settings/#compute-pool-refresh).
+- Switching an account off, revoking a credential, removing a machine or losing project access
+  takes effect immediately, even while an older catalog is retained.
+- A running machine can still be reused after a harmless catalog revision. SAM checks today's
+  permissions, allowed offering, credentials, agent compatibility and free resources before adding
+  work. A plan to rent a new machine must still match the current catalog and settings.
+- **Starting work uses an established pool without refreshing its catalog.** Placement reads the
+  pool as it stands, so a submission avoids provider catalog calls and a deliberately emptied pool is never
+  quietly repopulated. Refreshing happens in the background, when you press **Refresh**, or when
+  you change a credential. Initial setup can list offerings once for a missing pool or one upgraded
+  from the old size presets. Like any new row they start out of the pool, so a pool whose only
+  machines were size presets is empty until you add machines.
+
+A sleeping session whose accepted wake is waiting for a temporary catalog problem resumes
+automatically when placement becomes available. The original message or event remains the request;
+you do not need to send **Continue** again. Cancellation, archive, lost permissions and the existing
+request and snapshot expirations still stop recovery. Missing credentials, an empty pool or
+requirements no allowed machine can meet remain actionable failures.
 
 :::note
 Adding a machine adds it for **both** workspace machines and

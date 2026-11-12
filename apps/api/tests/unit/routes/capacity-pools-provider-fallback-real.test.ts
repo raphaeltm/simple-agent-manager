@@ -46,6 +46,8 @@ function createEnv() {
     schema.capacitySources,
     schema.capacityPools,
     schema.capacityPoolCandidates,
+    schema.capacityPoolCandidateStaging,
+    schema.capacityPoolRefreshes,
   ]);
   return {
     sqlite,
