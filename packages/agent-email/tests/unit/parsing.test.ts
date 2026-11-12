@@ -3,19 +3,17 @@ import { describe, expect, it } from 'vitest';
 import {
   agentEmailAddress,
   generateAddressKey,
-  normalizeMailbox,
-  parseAgentEmailRecipient,
-} from '../../../src/services/agent-email/address';
-import {
   MAX_HEADER_VALUE_BYTES,
   MAX_REFERENCES,
+  normalizeMailbox,
+  parseAgentEmailRecipient,
+  parseInboundEmail,
   parseMessageIdList,
   parseSingleMessageId,
   replyReferences,
   replySubject,
   sanitizeDisplayName,
-} from '../../../src/services/agent-email/headers';
-import { parseInboundEmail } from '../../../src/services/agent-email/inbound-message';
+} from '../../src';
 
 const BASE = 'Fixture.Example';
 const SAMPLE_ID = 'k3j2h7m9q2xw4n8p';

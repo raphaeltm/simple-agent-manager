@@ -62,6 +62,7 @@ jobs:
               - 'packages/project-data/**'
               - 'packages/repo-hosting/**'
               - 'packages/scheduler-core/**'
+              - 'packages/agent-email/**'
               - 'packages/task-runner/**'
               - 'packages/config/**'
               - 'scripts/quality/*migration*.ts'
@@ -85,6 +86,7 @@ jobs:
               - 'packages/project-data/src/**'
               - 'packages/repo-hosting/src/**'
               - 'packages/scheduler-core/src/**'
+              - 'packages/agent-email/src/**'
               - 'sonar-project.properties'
               - '.claude/rules/36-cli-quality.md'
             devcontainer:
