@@ -1,9 +1,10 @@
-/** Re-export: this module moved to `src/app-deployment/deployment-custom-domains.ts`. */
+// Moved to @simple-agent-manager/app-deployment (worker modularization W4).
+// Re-exported here so existing importers and vi.mock paths stay unchanged.
 export type {
   CustomDomainDesiredState,
   CustomDomainLifecycleEventInput,
   CustomDomainRoutingStatus,
-} from '../app-deployment';
+} from '@simple-agent-manager/app-deployment';
 export {
   buildVerifiedCustomRouteTargets,
   customDomainExpectedTargetChanged,
@@ -13,4 +14,4 @@ export {
   recordCustomDomainEvent,
   requestRoutingRevision,
   routeTargetOptions,
-} from '../app-deployment';
+} from '@simple-agent-manager/app-deployment';

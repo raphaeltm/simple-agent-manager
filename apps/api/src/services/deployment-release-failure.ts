@@ -1,5 +1,6 @@
-/** Re-export: this module moved to `src/app-deployment/deployment-release-failure.ts`. */
+// Moved to @simple-agent-manager/app-deployment (worker modularization W4).
+// Re-exported here so existing importers and vi.mock paths stay unchanged.
 export {
   markDeploymentReleasePlacementFailed,
   recordStrandedDeploymentReleasePlacement,
-} from '../app-deployment';
+} from '@simple-agent-manager/app-deployment';

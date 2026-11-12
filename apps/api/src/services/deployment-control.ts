@@ -1,4 +1,5 @@
-/** Re-export: this module moved to `src/app-deployment/deployment-control.ts`. */
+// Moved to @simple-agent-manager/app-deployment (worker modularization W4).
+// Re-exported here so existing importers and vi.mock paths stay unchanged.
 export type {
   CreateAgentDeploymentEnvironmentResult,
   DeploymentAgentPolicy,
@@ -6,7 +7,7 @@ export type {
   DeploymentMcpCaller,
   DeploymentReleaseStatusTransition,
   ObservedDeploymentState,
-} from '../app-deployment';
+} from '@simple-agent-manager/app-deployment';
 export {
   AGENT_DEPLOYABLE_ENVIRONMENT_STATUSES,
   assertAgentDeploymentAllowed,
@@ -24,4 +25,4 @@ export {
   toObservedDeploymentState,
   uniqueDeployProfileIds,
   validateAllowedDeployProfiles,
-} from '../app-deployment';
+} from '@simple-agent-manager/app-deployment';

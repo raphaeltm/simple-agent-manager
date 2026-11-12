@@ -1,5 +1,6 @@
-/** Re-export: this module moved to `src/app-deployment/deployment-environment-config.ts`. */
-export type { DeploymentInterpolationEnv } from '../app-deployment';
+// Moved to @simple-agent-manager/app-deployment (worker modularization W4).
+// Re-exported here so existing importers and vi.mock paths stay unchanged.
+export type { DeploymentInterpolationEnv } from '@simple-agent-manager/app-deployment';
 export {
   buildDeploymentEnvironmentConfigResponse,
   deleteDeploymentEnvironmentConfigVar,
@@ -8,4 +9,4 @@ export {
   loadDeploymentInterpolationEnv,
   touchDeploymentConfigUpdatedAt,
   upsertDeploymentEnvironmentConfigVar,
-} from '../app-deployment';
+} from '@simple-agent-manager/app-deployment';

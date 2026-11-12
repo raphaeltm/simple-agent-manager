@@ -1,4 +1,5 @@
-/** Re-export: this module moved to `src/app-deployment/deployment-publish-job-defaults.ts`. */
+// Moved to @simple-agent-manager/app-deployment (worker modularization W4).
+// Re-exported here so existing importers and vi.mock paths stay unchanged.
 export {
   DEFAULT_DEPLOY_PUBLISH_CALLBACK_GRACE_MS,
   DEFAULT_DEPLOY_PUBLISH_HEARTBEAT_INTERVAL_MS,
@@ -8,4 +9,4 @@ export {
   DEFAULT_DEPLOY_PUBLISH_JOB_STALL_MS,
   DEFAULT_DEPLOY_PUBLISH_JOB_SWEEP_LIMIT,
   MIN_DEPLOY_PUBLISH_JOB_STALL_MS,
-} from '../app-deployment';
+} from '@simple-agent-manager/app-deployment';

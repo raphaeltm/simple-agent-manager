@@ -1,5 +1,6 @@
-/** Re-export: this module moved to `src/app-deployment/image-resolver-outbound.ts`. */
-export type { ResolverRuntimeOptions } from '../app-deployment';
+// Moved to @simple-agent-manager/app-deployment (worker modularization W4).
+// Re-exported here so existing importers and vi.mock paths stay unchanged.
+export type { ResolverRuntimeOptions } from '@simple-agent-manager/app-deployment';
 export {
   authAppliesToRegistry,
   configFromOptions,
@@ -16,4 +17,4 @@ export {
   manifestUrl,
   parseBearerChallenge,
   registryBaseUrl,
-} from '../app-deployment';
+} from '@simple-agent-manager/app-deployment';

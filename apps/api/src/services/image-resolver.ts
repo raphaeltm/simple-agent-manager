@@ -1,11 +1,12 @@
-/** Re-export: this module moved to `src/app-deployment/image-resolver.ts`. */
+// Moved to @simple-agent-manager/app-deployment (worker modularization W4).
+// Re-exported here so existing importers and vi.mock paths stay unchanged.
 export type {
   ImageResolver,
   ImageResolverConfig,
   ImageResolverEnv,
   ImageResolverOptions,
   RegistryAuth,
-} from '../app-deployment';
+} from '@simple-agent-manager/app-deployment';
 export {
   createImageResolver,
   DEFAULT_IMAGE_RESOLVE_MAX_CONCURRENT_FETCHES,
@@ -17,4 +18,4 @@ export {
   DEFAULT_IMAGE_RESOLVE_TOTAL_TIMEOUT_MS,
   getImageResolverConfig,
   ImageResolveError,
-} from '../app-deployment';
+} from '@simple-agent-manager/app-deployment';

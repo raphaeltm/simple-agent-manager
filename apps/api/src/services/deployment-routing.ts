@@ -1,4 +1,5 @@
-/** Re-export: this module moved to `src/app-deployment/deployment-routing.ts`. */
+// Moved to @simple-agent-manager/app-deployment (worker modularization W4).
+// Re-exported here so existing importers and vi.mock paths stay unchanged.
 export type {
   DeploymentRouteDiscovery,
   DeploymentRouteInternalDiscovery,
@@ -6,7 +7,7 @@ export type {
   DeploymentRouteTarget,
   DeploymentRouteTargetOptions,
   PublicRouteInput,
-} from '../app-deployment';
+} from '@simple-agent-manager/app-deployment';
 export {
   assignRouteTargets,
   buildComposePublishRouteDiscovery,
@@ -22,4 +23,4 @@ export {
   DEFAULT_DEPLOYMENT_ROUTE_PORT_SPAN,
   environmentPortOffset,
   extractComposeRouteHints,
-} from '../app-deployment';
+} from '@simple-agent-manager/app-deployment';

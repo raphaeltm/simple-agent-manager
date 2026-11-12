@@ -118,7 +118,7 @@ const composePublishSubmittedBySchema = v.object({
  * inject a foreign top-level field (notably `routes` — a real
  * DeploymentManifest field this submission has no legitimate reason to
  * carry) that `buildReleaseRouteDiscovery`
- * (services/deployment-routing.ts) would otherwise treat as an authoritative
+ * (`@simple-agent-manager/app-deployment` deployment-routing) would otherwise treat as an authoritative
  * build-on-node manifest. See .claude/rules/11-fail-fast-patterns.md and
  * .claude/rules/51-runtime-boundary-validation.md.
  */

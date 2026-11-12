@@ -370,7 +370,11 @@ function main() {
       project.addSourceFileAtPath(f);
     }
   } else {
-    project.addSourceFilesAtPaths([resolve(ROOT, 'apps/api/src/**/*.ts')]);
+    // Worker modules lifted into packages keep the API checks (worker modularization).
+    project.addSourceFilesAtPaths([
+      resolve(ROOT, 'apps/api/src/**/*.ts'),
+      resolve(ROOT, 'packages/app-deployment/src/**/*.ts'),
+    ]);
   }
 
   const allFindings: Finding[] = [];

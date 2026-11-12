@@ -60,6 +60,13 @@ Full apps/api unit suite after step 1: 1087 files (1084 passed, 3 skipped), 1601
 
 Coordinator decision (channel): `lib/route-helpers.ts` goes into worker-core, so no port is needed for `parsePositiveInt`.
 
+After step 2 (package): `packages/app-deployment/tests/unit` 12 files / 173 cases (all moved
+from apps/api, imports repointed); apps/api keeps 28 of the affected files / 400 cases (399
+passed, 1 skipped). 173 + 400 = 573, unchanged from step 1. Worker tests that mocked
+`src/db/schema` or spied on `src/lib/logger` now mock `@simple-agent-manager/worker-core/schema`
+or `@simple-agent-manager/worker-core` (with `importOriginal`), because package code imports those
+directly and the worker paths re-export them.
+
 ## PR #2605 overlap
 
 #2605 edits `scheduled/compose-image-artifact-cleanup.ts`, `scheduled/deployment-publish-jobs.ts`,
@@ -74,8 +81,9 @@ must then come through a port or move into the package.
 ## Progress
 
 - [x] Step 1: decouple in place under `apps/api/src/app-deployment/` (narrow env, ports, entries, re-exports)
-- [ ] Step 2: lift into `packages/app-deployment` once W0 is ready (template, worker-core imports)
-- [ ] Docs: update path references (`architecture/overview.md:221`, `reference/configuration.md:358`) to the final package path in step 2
-- [ ] Move package-only tests into the package
+- [x] Step 2: lift into `packages/app-deployment` (prepared on W0's branch; pushed once W0 is on core)
+- [x] Docs and comments: path references updated; build order in `guides/local-development.md`
+- [x] Move package-only tests into the package
+- [x] CI filters (`api`, `cli`), runtime-boundary scan, AST checks scope, catalog entries (`@aws-sdk/*`, `yaml`), dependency evidence
 - [ ] Local gates, specialist reviews, CI via `gh workflow run ci.yml --ref sam/w4-app-deployment-extract-ngd1ke`
 - [ ] Merge core branch, publish PR URL + head SHA on channel, notify coordinator

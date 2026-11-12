@@ -218,7 +218,7 @@ only provably stale `created`/`applying` compose releases to terminal `failed` u
 D1-observed deployment-node state and recent release-event activity as the lease. It
 does not call the deployment node or inspect R2. Terminal release retention then prunes
 old releases outside the observed-applied/newest rollback window, and
-`apps/api/src/scheduled/compose-image-artifact-cleanup.ts:runComposeImageArtifactCleanup()`
+`packages/app-deployment/src/scheduled/compose-image-artifact-cleanup.ts:runComposeImageArtifactCleanup()`
 deletes only old compose artifacts that are no longer referenced by any remaining valid
 release manifest.
 

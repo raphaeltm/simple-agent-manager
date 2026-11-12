@@ -1,2 +1,3 @@
-/** Re-export: this module moved to `src/app-deployment/deployment-publish-job-settings.ts`. */
-export { getDeploymentPublishJobSettings } from '../app-deployment';
+// Moved to @simple-agent-manager/app-deployment (worker modularization W4).
+// Re-exported here so existing importers and vi.mock paths stay unchanged.
+export { getDeploymentPublishJobSettings } from '@simple-agent-manager/app-deployment';

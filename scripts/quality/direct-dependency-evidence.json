@@ -5,6 +5,14 @@
       "registryUrl": "https://www.npmjs.com/package/@astrojs/check",
       "necessity": "Validates Astro templates and embedded TypeScript."
     },
+    "@aws-sdk/client-s3": {
+      "registryUrl": "https://www.npmjs.com/package/@aws-sdk/client-s3",
+      "necessity": "R2 S3-compatible client for compose image artifact presigned uploads and cleanup in app-deployment; already the API worker's R2 client at the same catalog version."
+    },
+    "@aws-sdk/s3-request-presigner": {
+      "registryUrl": "https://www.npmjs.com/package/@aws-sdk/s3-request-presigner",
+      "necessity": "Presigns R2 upload and download URLs for compose image artifacts in app-deployment; already used by the API worker at the same catalog version."
+    },
     "@axe-core/playwright": {
       "registryUrl": "https://www.npmjs.com/package/@axe-core/playwright",
       "necessity": "Runs accessibility assertions in browser evidence tests."
@@ -174,7 +182,7 @@
     },
     "yaml": {
       "registryUrl": "https://www.npmjs.com/package/yaml",
-      "necessity": "Structurally parses GitHub workflow contracts in security regression tests."
+      "necessity": "Parses and renders Docker Compose documents in app-deployment and the API worker, and structurally parses GitHub workflow contracts in security regression tests."
     }
   },
   "go": {

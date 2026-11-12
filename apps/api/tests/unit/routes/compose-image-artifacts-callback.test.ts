@@ -58,7 +58,7 @@ vi.mock('drizzle-orm', () => ({
   eq: (col: unknown, val: unknown) => ({ op: 'eq', col, val }),
 }));
 
-vi.mock('../../../src/db/schema', () => ({
+vi.mock('@simple-agent-manager/worker-core/schema', () => ({
   workspaces: WORKSPACES,
   nodes: NODES,
 }));

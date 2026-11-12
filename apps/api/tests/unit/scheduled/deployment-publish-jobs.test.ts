@@ -1,7 +1,7 @@
+import type { DeploymentPublishJobPorts } from '@simple-agent-manager/app-deployment';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
-import type { DeploymentPublishJobPorts } from '../../../src/app-deployment';
 import * as schema from '../../../src/db/schema';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 

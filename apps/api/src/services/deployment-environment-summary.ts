@@ -1,8 +1,9 @@
-/** Re-export: this module moved to `src/app-deployment/deployment-environment-summary.ts`. */
-export type { DeploymentReleaseSubmittedBy } from '../app-deployment';
+// Moved to @simple-agent-manager/app-deployment (worker modularization W4).
+// Re-exported here so existing importers and vi.mock paths stay unchanged.
+export type { DeploymentReleaseSubmittedBy } from '@simple-agent-manager/app-deployment';
 export {
   buildDeploymentEnvironmentResponse,
   listRoutedCustomDomainHostnames,
   parseReleaseSubmittedByJson,
   toReleaseSubmittedBy,
-} from '../app-deployment';
+} from '@simple-agent-manager/app-deployment';

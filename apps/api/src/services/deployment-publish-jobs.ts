@@ -1,8 +1,9 @@
-/** Re-export: this module moved to `src/app-deployment/deployment-publish-jobs.ts`. */
+// Moved to @simple-agent-manager/app-deployment (worker modularization W4).
+// Re-exported here so existing importers and vi.mock paths stay unchanged.
 export type {
   AppendDeploymentPublishJobEventInput,
   CreateDeploymentPublishJobInput,
-} from '../app-deployment';
+} from '@simple-agent-manager/app-deployment';
 export {
   appendDeploymentPublishJobEvent,
   cancelDeploymentPublishJob,
@@ -11,4 +12,4 @@ export {
   getDeploymentPublishJobForMcp,
   PUBLISH_JOB_TERMINAL_STATUSES,
   sanitizePublishEventText,
-} from '../app-deployment';
+} from '@simple-agent-manager/app-deployment';

@@ -1,11 +1,12 @@
-/** Re-export: this module moved to `src/app-deployment/compose-image-artifacts.ts`. */
+// Moved to @simple-agent-manager/app-deployment (worker modularization W4).
+// Re-exported here so existing importers and vi.mock paths stay unchanged.
 export type {
   ComposeImageArtifactDescriptor,
   ComposeImageArtifactDownload,
   ComposeImageArtifactPlatform,
   ComposeImageArtifactRequest,
   ComposeImageArtifactUpload,
-} from '../app-deployment';
+} from '@simple-agent-manager/app-deployment';
 export {
   buildComposeImageArtifactKey,
   buildLocalImageRef,
@@ -17,4 +18,4 @@ export {
   getComposeImageArtifactMaxBytes,
   validateCompletedComposeImageArtifacts,
   validateComposeImageArtifactDescriptor,
-} from '../app-deployment';
+} from '@simple-agent-manager/app-deployment';

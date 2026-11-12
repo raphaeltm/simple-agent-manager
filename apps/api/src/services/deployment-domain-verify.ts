@@ -1,7 +1,8 @@
-/** Re-export: this module moved to `src/app-deployment/deployment-domain-verify.ts`. */
-export type { ResolvedHostnameTarget } from '../app-deployment';
+// Moved to @simple-agent-manager/app-deployment (worker modularization W4).
+// Re-exported here so existing importers and vi.mock paths stay unchanged.
+export type { ResolvedHostnameTarget } from '@simple-agent-manager/app-deployment';
 export {
   matchesCustomDomainTarget,
   resolveHostnameTarget,
   verifyCustomDomainTarget,
-} from '../app-deployment';
+} from '@simple-agent-manager/app-deployment';
