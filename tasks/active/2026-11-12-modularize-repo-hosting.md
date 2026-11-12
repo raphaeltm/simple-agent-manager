@@ -40,13 +40,26 @@ Staying in the worker, with reasons:
 
 ## Checklist
 
-- [ ] Package scaffold (W0 template), entries
-- [ ] Move files; ports; narrow env; re-exports at old paths
-- [ ] Tests that do not need the worker pool move with the code; counts before/after
-- [ ] Wiring: ci.yml filters, runtime-boundary scan, ast-checks roots, dependency evidence,
+- [x] Package scaffold (W0 template), entries
+- [x] Move files; ports; narrow env; re-exports at old paths
+- [x] Tests that do not need the worker pool move with the code; counts before/after
+- [x] Wiring: ci.yml filters, runtime-boundary scan, ast-checks roots, dependency evidence,
       build order, source scanners, docs/rules paths
 - [ ] Lint, typecheck, tests, quality scripts; reviews; CI green; report to coordinator
 
 ## Progress notes
 
 - 2026-11-12: scope measured, plan recorded.
+- 2026-11-12: move and rewiring pushed (2ed9f2977 pure `git mv`, 519f91b8a rewiring).
+  - Ports: `platformConfig` and `auth`, one worker module each in `apps/api/src/repo-hosting-ports/`,
+    installed by `apps/api/src/repo-hosting-wiring.ts` (first import of the entry). Unit tests
+    install them per port in `tests/setup/repo-hosting-ports.ts`; the workerd pool in
+    `tests/workers/setup-repo-hosting-ports.ts`. `tests/unit/repo-hosting-wiring.test.ts` fails
+    when the entry import is removed (checked).
+  - Tests: 13 files / 139 tests moved into `packages/repo-hosting/tests/unit/`. Three worker tests
+    that assert log calls (github-installations, gitlab-user-access-token, ensure-branch-exists)
+    now mock worker-core's logger, which the moved code imports.
+  - `cache-config` TTL parsing moved to worker-core (old path re-exports) — flagged to the
+    coordinator, since worker-core additions need two package users (repo-hosting + worker).
+  - Gitleaks: three reviewed PEM delimiter literals in `github-app-tokens.ts` re-recorded at the
+    new path.
