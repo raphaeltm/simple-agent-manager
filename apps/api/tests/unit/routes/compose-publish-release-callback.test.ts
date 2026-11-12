@@ -237,7 +237,8 @@ function request(app: Hono, projectId: string, body: unknown, env: Record<string
       headers: { Authorization: 'Bearer cb-token', 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     },
-    { DATABASE: {}, ...env },
+    // A Cloudflare installation: app deployments need Cloudflare DNS (platform-capabilities.ts).
+    { DATABASE: {}, CF_API_TOKEN: 'cf-token', CF_ZONE_ID: 'zone-1', ...env },
     { waitUntil: waitUntilMock, passThroughOnException: vi.fn() }
   );
 }
@@ -333,7 +334,7 @@ describe('compose-publish-release callback (vertical slice)', () => {
       },
     });
     expect(recordDeploymentReleaseLifecycleEventBestEffort).toHaveBeenCalledWith(
-      { DATABASE: {} },
+      expect.objectContaining({ DATABASE: {} }),
       expect.objectContaining({
         projectId: 'proj-1',
         releaseId: 'release-ulid-1',
