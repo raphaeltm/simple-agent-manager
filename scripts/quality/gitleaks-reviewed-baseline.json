@@ -130,8 +130,8 @@
       "classification": "code-identifier",
       "reason": "Re-reviewed 2026-11-12 after expiry: the single finding is apps/www/src/components/GitHubAppSetup.astro line 689, a display row mapping GH_APP_PRIVATE_KEY to a truncated variable expression (code identifier, no key material). Digest unchanged against current tree.",
       "owner": "security",
-      "reviewedAt": "2026-11-12T09:00:00.000Z",
-      "expiresAt": "2026-12-12T09:00:00.000Z",
+      "reviewedAt": "2026-11-12T08:20:00.000Z",
+      "expiresAt": "2026-12-12T08:20:00.000Z",
       "digests": ["15613fa56910bf18e53abb4161fda7fda6689b25010a23bd1e30d254ccc8ade5"]
     },
     {
