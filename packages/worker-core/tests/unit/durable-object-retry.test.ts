@@ -13,7 +13,7 @@ import {
   isDurableObjectStorageFullError,
   isRetryableForIdempotentDurableObjectOperation,
   isTransientDurableObjectError,
-} from '../../../src/services/durable-object-retry';
+} from '../../src/durable-object-retry';
 
 const CPU_LIMIT_RESET = 'Durable Object exceeded its CPU time limit and was reset.';
 const CONNECTION_LOST = 'Network connection lost.';

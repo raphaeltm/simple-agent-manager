@@ -31,6 +31,13 @@ describe('worker-core entry points', () => {
       'parseWithSchema',
       'RuntimeValidationError',
       'ulid',
+      'parsePositiveInt',
+      'requireRouteParam',
+      'classifyDurableObjectError',
+      'getDurableObjectRetryConfig',
+      'resolveSearchQueryLimits',
+      'normalizeSearchQuery',
+      'buildSafeFtsQuery',
     ]) {
       expect(core, name).toHaveProperty(name);
     }

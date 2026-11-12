@@ -29,6 +29,10 @@ worker owns, it declares a port (see `LoggedErrorSink`) and the worker passes th
 | `src/fetch-timeout.ts`              | `fetchWithTimeout`, `withDeadline`, `getTimeoutMs`                             |
 | `src/d1-limits.ts`                  | `D1_MAX_BOUND_PARAMETERS`, `chunk`                                             |
 | `src/ulid.ts`                       | ULID generation                                                                |
+| `src/route-helpers.ts`              | `parsePositiveInt` (env/number parsing), `requireRouteParam`                   |
+| `src/durable-object-retry.ts`       | Durable Object RPC error classification and retry config                       |
+| `src/search-query-limits.ts`        | Search input normalization and limits (`SearchQueryLimitEnv`)                  |
+| `src/fts5.ts`                       | `buildSafeFtsQuery` for SQLite FTS5                                            |
 | `src/schema.ts`                     | D1 schema. Migrations stay in `apps/api/src/db/migrations/`                    |
 
 The worker keeps a re-export file at each old path (`apps/api/src/lib/logger.ts`,
@@ -46,6 +50,9 @@ pnpm --filter @simple-agent-manager/worker-core lint        # ESLint
 ```
 
 ## Conventions
+
+- Admission rule (coordinator, 2026-11-12): a helper joins worker-core only if it has no domain
+  knowledge and at least two packages need it. Otherwise it belongs to a domain package.
 
 - Depends only on `@simple-agent-manager/shared` and third-party libraries.
 - No function accepts the worker `Env`. Take explicit values or a narrow interface.
