@@ -389,6 +389,33 @@ describe('archive drain relief: expired degraded sleepers', () => {
     expect(await snapshotStatus(sleeper.snapshotId)).toBe('expired');
   });
 
+  it('a snapshot whose project was deleted does not block valid rows behind it', async () => {
+    const valid = await seedDegradedSleeper('orphan-behind', '2026-01-21T00:00:00.000Z', [
+      'completed',
+    ]);
+    // `session_snapshots.project_id` is SET NULL when its project is deleted. Copy the valid
+    // row's runtime references so only the project and the expiry differ; this one expires first.
+    const orphanId = `${valid.snapshotId}-orphan`;
+    await env.DATABASE.prepare(
+      `INSERT INTO session_snapshots (id, project_id, workspace_id, node_id, user_id,
+         chat_session_id, runtime, status, degradation, manifest_r2_key, expires_at,
+         sleep_status, sleeping_at)
+       SELECT ?, NULL, workspace_id, node_id, user_id, ?, runtime, status, degradation,
+              manifest_r2_key, '2026-01-20T00:00:00.000Z', sleep_status, sleeping_at
+       FROM session_snapshots WHERE id = ?`
+    )
+      .bind(orphanId, `${valid.sessionId}-orphan`, valid.snapshotId)
+      .run();
+
+    await withArchiveEnv(
+      { SESSION_SNAPSHOT_PURGE_ENABLED: 'true', SESSION_SNAPSHOT_PURGE_BATCH_SIZE: '1' },
+      () => runSessionSnapshotPurge(testEnv, new Date())
+    );
+
+    expect(await snapshotStatus(valid.snapshotId)).toBe('expired');
+    expect(await sessionStatus(valid.projectId, valid.sessionId)).toBe('stopped');
+  });
+
   it('a sleeper with a queued task neither moves nor blocks valid rows behind it', async () => {
     // The queued sleeper expires first, so expiry order puts it at the head of a one-row batch.
     const zombie = await seedDegradedSleeper('queued', '2026-01-15T00:00:00.000Z', [

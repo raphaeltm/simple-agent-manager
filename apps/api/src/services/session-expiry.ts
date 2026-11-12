@@ -71,6 +71,9 @@ export async function expireSleepingConversation(
  * drain. `expireSleepingConversation` cancels any open task and then stops the session, and
  * with no open task it just stops it.
  *
+ * A row whose project was deleted (`project_id` is set NULL on delete) has no conversation to
+ * stop and is skipped by the loop, so it is excluded before the LIMIT as well.
+ *
  * The states it declines are excluded here too: a queued or delegated task, and an archive
  * fence that is not yet published (`migrating`, `frozen`). Otherwise those rows would come back
  * every sweep and, ordered by expiry, fill the batch ahead of rows that can make progress
@@ -85,6 +88,7 @@ export async function expireDegradedSleepingConversations(
     `SELECT id, project_id, chat_session_id FROM session_snapshots
      WHERE expires_at <= ? AND sleeping_at IS NOT NULL AND sleep_status = 'sleeping'
        AND status = 'degraded' AND sleep_fallback_json IS NULL
+       AND project_id IS NOT NULL
        AND NOT EXISTS (SELECT 1 FROM tasks t
          WHERE t.project_id = session_snapshots.project_id
            AND t.chat_session_id = session_snapshots.chat_session_id
