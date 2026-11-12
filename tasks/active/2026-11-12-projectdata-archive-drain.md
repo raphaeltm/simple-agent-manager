@@ -162,6 +162,12 @@ a 1,284-write receipt, ProjectData DO p99 unchanged.
 
 ## Notes
 
+- 2026-11-12 23:15Z: #2700 approved by the coordinator at f07300c34. On that head every
+  required check passed (20 pass, 10 skipped) except Specialist Review Evidence. CI run
+  43323575946 was created at 22:50:25Z, 56 s before the `needs-human-review` label was
+  removed (22:51:21Z), and the check takes the union of payload and live labels, so it cannot
+  pass on a rerun. This task-file-only commit provides a fresh `pull_request` event.
+
 - PR 1 discrimination (2026-11-12, `tests/workers/project-data-archive-drain-relief.test.ts`):
   reverting `scheduled/project-data-archive-sharding.ts` reddens exactly "publishes the smaller
   sessions behind a refused largest candidate" and "releases the write reservation"; reverting
