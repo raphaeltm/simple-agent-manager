@@ -138,6 +138,17 @@ describe('runUpgrade', () => {
     expect((await upgrade()).composeRestarted).toBe(true);
   });
 
+  it('tells a box upgraded from plaintext to finish with selfhost:secrets migrate', async () => {
+    writeFileSync(join(root, 'state/platform-keys.json'), '{}');
+    await upgrade();
+    expect(logs.join('\n')).toContain('pnpm selfhost:secrets migrate');
+    logs = [];
+    rmSync(join(root, 'state/platform-keys.json'));
+    rmSync(join(root, 'bk'), { recursive: true, force: true });
+    await upgrade();
+    expect(logs.join('\n')).not.toContain('pnpm selfhost:secrets migrate');
+  });
+
   it('does not restart for a README-only change under deploy/selfhost', async () => {
     diff = ['deploy/selfhost/README.md'];
     expect((await upgrade()).composeRestarted).toBe(false);

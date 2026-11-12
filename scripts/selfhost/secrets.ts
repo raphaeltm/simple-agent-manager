@@ -4,6 +4,9 @@
  *   status                    which key provider seals the Worker secrets, why, and the bundles
  *   key-file                  where the file key is, its fingerprint and mode
  *   verify-key-copy <path>    whether a copy of the file key matches the box's (exit 1 if not)
+ *   migrate [--key-copy <path>]
+ *                             move a plaintext install to sealed secrets (secrets-migrate.ts),
+ *                             rolling back on failure; removes the plaintext files at the end
  *   plaintext [--backups DIR] [--purge --confirm <CELLD_BUCKET>]
  *                             old deploy versions and backups holding plaintext secrets, what to
  *                             rotate; with --purge, delete the versions celld no longer reads
@@ -23,7 +26,9 @@ import {
   scanDeployVersions,
 } from './plaintext-scan';
 import { assertPrivateFile, parseDotenv } from './secret-files';
+import { boxMigrateDeps } from './secrets-box-deps';
 import { describeKeyFile, verifyKeyCopy } from './secrets-keyfile';
+import { runMigration } from './secrets-migrate';
 import { describeKeyStatus } from './secrets-status';
 
 const { values, positionals } = parseArgs({
@@ -34,6 +39,7 @@ const { values, positionals } = parseArgs({
     backups: { type: 'string' },
     purge: { type: 'boolean', default: false },
     confirm: { type: 'string' },
+    'key-copy': { type: 'string' },
   },
 });
 const envFile = resolve(values['box-env'] ?? join(SELFHOST_DIR, '.env'));
@@ -64,6 +70,19 @@ try {
       if (!result.ok) process.exitCode = 1;
       break;
     }
+    case 'migrate': {
+      const ctx = loadBox(envFile, values['state-dir']);
+      const keyCopy = values['key-copy'];
+      await runMigration(
+        {
+          box,
+          stateDir,
+          keyCopy: keyCopy ? resolve(process.env.INIT_CWD ?? process.cwd(), keyCopy) : undefined,
+        },
+        boxMigrateDeps(ctx)
+      );
+      break;
+    }
     case 'plaintext': {
       const ctx = loadBox(envFile, values['state-dir']);
       const secrets = await knownSecrets(box, stateDir);
@@ -87,7 +106,7 @@ try {
     }
     default:
       throw new Error(
-        'usage: pnpm selfhost:secrets status|key-file|verify-key-copy <path>|plaintext [--box-env PATH] [--state-dir DIR]'
+        'usage: pnpm selfhost:secrets status|key-file|verify-key-copy <path>|migrate|plaintext [--box-env PATH] [--state-dir DIR]'
       );
   }
 } catch (error) {

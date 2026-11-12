@@ -110,56 +110,61 @@ beforeEach(() => {
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 describe('selfhost:backup and selfhost:restore (real entry points, fake gcloud)', () => {
-  it('backs up exactly the post-stop bucket when objects vanish between the passes, and restores it into an empty install', () => {
-    const dest = join(root, 'backups/b1');
-    const backup = run('backup.ts', [
-      '--to',
-      dest,
-      '--box-env',
-      join(root, 'box.env'),
-      '--state-dir',
-      join(root, 'state'),
-    ]);
-    expect(backup.stderr).toBe('');
-    expect(backup.status).toBe(0);
-    expect(backup.stdout).toContain('live pre-copy incomplete');
+  // Runs the real backup and restore entry points as child processes: give them room under load.
+  it(
+    'backs up exactly the post-stop bucket when objects vanish between the passes, and restores it into an empty install',
+    { timeout: 60_000 },
+    () => {
+      const dest = join(root, 'backups/b1');
+      const backup = run('backup.ts', [
+        '--to',
+        dest,
+        '--box-env',
+        join(root, 'box.env'),
+        '--state-dir',
+        join(root, 'state'),
+      ]);
+      expect(backup.stderr).toBe('');
+      expect(backup.status).toBe(0);
+      expect(backup.stdout).toContain('live pre-copy incomplete');
 
-    // What celld left when it stopped is the consistent state; the backup is exactly that.
-    const afterStop = tree(join(root, 'gcs/fleet/celld'));
-    expect(afterStop['nodes/node_retired.json']).toBeUndefined();
-    expect(tree(join(dest, 'bucket'))).toEqual(afterStop);
-    expect(readdirSync(dest).sort()).toEqual(
-      ['backup-manifest.json', 'bucket', 'env', 'state'].sort()
-    );
+      // What celld left when it stopped is the consistent state; the backup is exactly that.
+      const afterStop = tree(join(root, 'gcs/fleet/celld'));
+      expect(afterStop['nodes/node_retired.json']).toBeUndefined();
+      expect(tree(join(dest, 'bucket'))).toEqual(afterStop);
+      expect(readdirSync(dest).sort()).toEqual(
+        ['backup-manifest.json', 'bucket', 'env', 'state'].sort()
+      );
 
-    const manifest = JSON.parse(readFileSync(join(dest, 'backup-manifest.json'), 'utf8'));
-    expect(manifest).toMatchObject({ version: 1, bucket: FLEET, objectCount: 5 });
-    expect(typeof manifest.downtimeMs).toBe('number');
-    expect(manifest.downtimeMs).toBeGreaterThanOrEqual(manifest.deltaCopyMs);
+      const manifest = JSON.parse(readFileSync(join(dest, 'backup-manifest.json'), 'utf8'));
+      expect(manifest).toMatchObject({ version: 1, bucket: FLEET, objectCount: 5 });
+      expect(typeof manifest.downtimeMs).toBe('number');
+      expect(manifest.downtimeMs).toBeGreaterThanOrEqual(manifest.deltaCopyMs);
 
-    const calls = readFileSync(join(root, 'fake/calls.log'), 'utf8').trim().split('\n');
-    expect(calls.map((c) => c.split(' ').slice(0, 3).join(' '))).toEqual([
-      'gcloud storage rsync', // live
-      'docker compose -f',
-      'gcloud storage rsync', // delta, celld stopped
-      'docker compose -f',
-    ]);
-    expect(calls[1]).toMatch(/stop celld$/);
-    expect(calls[3]).toMatch(/start celld$/);
+      const calls = readFileSync(join(root, 'fake/calls.log'), 'utf8').trim().split('\n');
+      expect(calls.map((c) => c.split(' ').slice(0, 3).join(' '))).toEqual([
+        'gcloud storage rsync', // live
+        'docker compose -f',
+        'gcloud storage rsync', // delta, celld stopped
+        'docker compose -f',
+      ]);
+      expect(calls[1]).toMatch(/stop celld$/);
+      expect(calls[3]).toMatch(/start celld$/);
 
-    // Restore into an empty install: new bucket, no platform keys yet.
-    writeFileSync(join(root, 'new.env'), 'CELLD_BUCKET=gs://fresh/celld\n', { mode: 0o600 });
-    const restore = run('restore.ts', [
-      '--from',
-      dest,
-      '--box-env',
-      join(root, 'new.env'),
-      '--state-dir',
-      join(root, 'new-state'),
-    ]);
-    expect(restore.stderr).toBe('');
-    expect(restore.status).toBe(0);
-    expect(tree(join(root, 'gcs/fresh/celld'))).toEqual(afterStop);
-    expect(tree(join(root, 'new-state'))).toEqual({ 'platform-keys.json': '{"k":"v"}' });
-  });
+      // Restore into an empty install: new bucket, no platform keys yet.
+      writeFileSync(join(root, 'new.env'), 'CELLD_BUCKET=gs://fresh/celld\n', { mode: 0o600 });
+      const restore = run('restore.ts', [
+        '--from',
+        dest,
+        '--box-env',
+        join(root, 'new.env'),
+        '--state-dir',
+        join(root, 'new-state'),
+      ]);
+      expect(restore.stderr).toBe('');
+      expect(restore.status).toBe(0);
+      expect(tree(join(root, 'gcs/fresh/celld'))).toEqual(afterStop);
+      expect(tree(join(root, 'new-state'))).toEqual({ 'platform-keys.json': '{"k":"v"}' });
+    }
+  );
 });

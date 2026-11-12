@@ -131,6 +131,59 @@ bundle. A `platform-keys.json` that disagrees with the bundle stops the deploy. 
 `scripts/selfhost/key-service.ts`, `scripts/selfhost/key-choice.ts`, `deploy/selfhost/key-agent/`,
 `apps/api/src/selfhost/runtime-secrets.ts`.
 
+#### Moving an existing install to sealed secrets
+
+A box installed before sealed secrets were the default keeps its secrets in `.state/platform-keys.json`
+and `secrets.env`, and its Worker gets them as deploy vars. One command moves it:
+
+```bash
+pnpm selfhost:secrets migrate                          # seal, check, switch, verify
+pnpm selfhost:secrets migrate --key-copy <path>        # file key: removes the plaintext files
+```
+
+It seals the existing files unchanged (`--init` chooses the provider), proves the chain end to end
+before anything switches (the agent's code answers the Worker's real loader with every secret the
+files hold), starts the key agent and the updated fence, deploys the Worker without secret vars,
+makes celld adopt it at once (`POST /reload` on its internal listener) and requires the first
+request to the new version to be healthy and the current deploy version in the bucket to hold no
+secret. Any failure after the switch redeploys the previous behaviour
+(`pnpm selfhost:deploy --key-provider legacy-plaintext`) and removes nothing. The plaintext files go
+last, and with the file key only once `--key-copy` proves a matching copy exists: until then they
+are the only other copy of the platform keys. `pnpm selfhost:upgrade` seals an upgraded box by
+itself and then tells you to run `migrate` to finish. Code: `scripts/selfhost/secrets-migrate.ts`.
+
+#### Old plaintext copies: bucket deploy versions and backups
+
+Sealing stops new plaintext. What older deploys and backups already hold stays:
+
+```bash
+pnpm selfhost:secrets plaintext [--backups <dir>]     # read-only listing
+```
+
+It lists every deploy version under `deploy/<script>/<version>/` in the fleet bucket that holds
+secret vars (names only), which versions celld still reads, the local backups (default
+`deploy/selfhost/backups/`) holding `platform-keys.json`, `secrets.env`, the key file or plaintext
+deploy versions, and how to rotate each exposed secret. Backups copied anywhere else are not
+visible to it: treat every backup taken before the box was sealed as holding every secret.
+
+Rotating is the fix that does not depend on deleting anything: a rotated secret's old copies are
+worthless. `ENCRYPTION_KEY` and the generated platform keys cannot be rotated by a SAM command yet;
+the listing says what that exposure means.
+
+Deleting old versions: celld (v0.6.3, from its source) reads only the version
+`deploy/current.json` names, the ones `deploy/<script>/current.json` name, and the ones a queue
+attachment (`deploy/queues/<queue>/consumer.json`) names; it never deletes old versions. But
+celld's documentation says operators must not delete objects under `deploy/`. So deletion is
+opt-in and narrow:
+
+```bash
+pnpm selfhost:secrets plaintext --purge --confirm <CELLD_BUCKET>
+```
+
+It runs only with the pinned celld 0.6.3, deletes only versions that hold secret vars and that no
+pointer or attachment names (re-read before each deletion), and refuses while the current
+version still holds plaintext. Code: `scripts/selfhost/plaintext-scan.ts`.
+
 #### Cloud key, one-time setup
 
 On Google Cloud, AWS or Azure the box can seal with a cloud key through its own VM identity, so no
