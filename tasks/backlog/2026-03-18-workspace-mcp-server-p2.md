@@ -9,7 +9,7 @@
 
 > **Reconciliation 2026-10-12:** None of the 17 tools shipped. New overlap for
 > `get_project_context`: #2294 (`a95b46191`) added the Connector operation `sam_project_get`
-> (`apps/api/src/operations/connector-operations.ts:54-62`, `connector-read-core.ts:146-186`):
+> (`packages/operations/src/connector-operations.ts:54-62`, `connector-read-core.ts:146-186`):
 > project summary, recent tasks and chats, idea and trigger counts. Workspace agents cannot call it
 > (the #2293 adapter map, `routes/mcp/workspace-operation-adapter.ts`, omits it). Extend and map that
 > operation rather than writing a second implementation.

@@ -2,7 +2,7 @@
 
 Workstream W3 of `tasks/active/2026-11-12-worker-modularization.md` (core branch
 `sam/help-identify-parts-worker-embcza`, coordinator task `01M77BJHHNW5714E98DEEMBCZA`).
-SAM task `01M77GDY92WVEJAYW63F4TSC50`, branch `sam/w3-operations-turn-shared-4tsc50`.
+SAM task `01M77GDY92WVEJAYW63F4TSC50`, branch `sam/w3-operations-turn-shared-4tsc50`, draft PR #2685.
 
 ## Goal
 
@@ -13,51 +13,60 @@ SAM task `01M77GDY92WVEJAYW63F4TSC50`, branch `sam/w3-operations-turn-shared-4ts
    moves onto shared operations so both surfaces call one function. Tool names,
    inputs, outputs, authorization and limits do not change.
 
-## Baseline (core `bbb1c82ca`)
+## Status
 
-- `apps/api` `vitest list`: 16,012 cases in 1,084 files.
-- `apps/api/tests/unit/operations`: 318 cases in 17 files.
+- [x] Narrow `OperationsEnv` (`packages/operations/src/env.ts`); the worker `Env` extends it and no
+      longer redeclares its fields (except `DATABASE`, which the whole worker uses).
+- [x] Ports: `ports.ts`, `project-data-port.ts`, value shapes in `port-types.ts` (each mirrors the
+      worker type it names). Implemented once by the worker in `apps/api/src/operation-ports.ts`
+      (`createOperationPorts(env)`, `operationDeps(env)`, `webOperationContext`). Groups: config,
+      projectData, settings, access, connector, chat, tasks, triggers, account, workspaces, missions.
+- [x] Operations import nothing from the worker; only `@simple-agent-manager/shared`,
+      `@simple-agent-manager/worker-core`, drizzle-orm, valibot, `@valibot/to-json-schema`.
+- [x] Shared tool cores (both the workspace `sam-mcp` handler and the /sam tool call them; the
+      project agent reuses the /sam tools). Surface-specific authorization, parsing, wording and
+      output stay in the adapters:
+  - `workspace-history.ts`: `readArchivedToolPayloads` (get_archived_tool_payloads),
+    `readResourceHistory` (get_resource_history).
+  - `session-list.ts`: `listSessionSummaries` (list_sessions).
+  - `missions.ts`: `missionTextLimits`, `createMissionRecord` (create_mission).
+  - Parity test: `apps/api/tests/unit/operations/shared-tool-cores.test.ts` (10 cases, drives both
+    real handlers, discriminating).
+- [x] Lifted into `packages/operations` following the W0 template; public entry `src/index.ts`;
+      test-only `./internal/*` entry for apps/api tests that mock one operations module (generic
+      lint rule `packageInternalPath` in `eslint.config.mjs`, proven in
+      `scripts/quality/worker-module-boundaries.test.ts`).
+- [x] Wiring: apps/api dependency, `@valibot/to-json-schema` in the pnpm catalog, CI (`api`, `cli`)
+      and e2e-smoke path filters, runtime-boundary scan, AST checks, node-pool boundary scanner
+      roots and inventory, build order in `local-development.md`, path references in backlog tasks
+      and a blog link.
+- [x] Worker-owned glue moved out of the package: workspace JSON-RPC adapter
+      (`apps/api/src/routes/mcp/workspace-operation-adapter.ts`), `webOperationContext`.
+- [x] Helpers only operations need moved into the package with re-export files at the old paths
+      (template decision 1): sanitize-user-input, utf8, message-roles, idea-content-limit,
+      operation-effect-boundary, connector-limits, connector-read-settings-definition,
+      message-groups; `ConnectorAnswerFields` became `connector-answer-input.ts`.
+- [x] Reviews: architecture (no CRITICAL/HIGH; MEDIUMs addressed), security (no CRITICAL/HIGH/MEDIUM),
+      task-completion (no CRITICAL/HIGH; this note was its MEDIUM).
 
-## Plan
+## Remaining duplicates (not moved in this PR)
 
-- [x] Step 1a: narrow `OperationsEnv`; `OperationContext.env` uses it
-- [x] Step 1b: ports interface (`OperationPorts`) for worker-owned services; worker wiring in one place (`apps/api/src/operation-ports.ts`)
-- [x] Step 1c: operations import nothing from `routes/`, `durable-objects/`, `services/` except through ports (type-only imports in `ports.ts` remain until step 2)
-- [x] Step 1d: move clearest sam-session / MCP duplicates onto shared functions (see below)
-- [ ] Step 2: lift into `packages/operations` once W0 is ready (channel "W0 ready")
-- [ ] Test counts before/after recorded; local gates; CI via `gh workflow run ci.yml`
-- [ ] Specialist reviews; publish PR URL + head SHA on channel and to coordinator
+- get_session_messages / search_task_messages vs `readChat` / `searchChats` (role handling differs).
+- add_knowledge / get_project_knowledge, list_policies / add_policy.
+- get_task_details / search_tasks (scope: owner join vs token project).
+- get_mission summary; pause/resume/cancel_mission (thin).
+- stop_subtask cancel-and-finalize step; retry_subtask / dispatch_task pipelines.
+- list_ideas / find_related_ideas: /sam `list_ideas` has no `is_idea` filter and
+  `find_related_ideas` searches every status, so sharing them changes one surface. Needs a decision.
 
-## Progress log
+## Known nuances
 
-- 2026-11-12: branch created from core `bbb1c82ca`; baseline counts recorded.
-- 2026-11-12: step 1a/1b pushed. `OperationContext` = `OperationDeps` (`env: OperationsEnv`, `ports: OperationPorts`) + actor.
-  Worker builds ports with `createOperationPorts(env)`; `operationDeps(env)` for helper calls outside a context;
-  `webOperationContext` moved to `operation-ports.ts`; workspace JSON-RPC adapter moved to
-  `routes/mcp/workspace-operation-adapter.ts`. Port signatures are still derived from worker modules via type-only
-  imports (step 2 replaces them with declared types). Remaining runtime imports from the worker are pure helpers
-  (route-helpers, sanitize, search-query-limits, utf8, message-roles, task-status, session-idleness, trigger-status,
-  cron-utils, project-events error classes, agent-message-notice, ConnectorAnswerFields) -> step 2.
-- 2026-11-12: step 1d pushed. Shared cores, each called by both the workspace `sam-mcp` handler and the /sam tool
-  (the project agent reuses the /sam tools):
-  - `operations/workspace-history.ts` `readArchivedToolPayloads` (get_archived_tool_payloads) and
-    `readResourceHistory` (get_resource_history, one notes list).
-  - `operations/session-list.ts` `listSessionSummaries` (list_sessions).
-  - `operations/missions.ts` `missionTextLimits` + `createMissionRecord` (create_mission: quota, insert, orchestrator).
-  Each surface keeps its own authorization, input parsing, wording and output shape. Parity test:
-  `tests/unit/operations/shared-tool-cores.test.ts` (10 cases, discriminating). Known nuance: /sam archived-payload limits
-  now parse env with `parsePositiveInt` (same as MCP) instead of a local `isSafeInteger` variant; identical for any
-  sane value. `getMcpLimits().archivedToolPayloadList*` removed (dead after the move).
-  Remaining duplicates (not moved, for follow-up): get_session_messages/search_task_messages vs readChat/searchChats
-  (role handling differs), add_knowledge/get_project_knowledge, list/add_policy, get_task_details/search_tasks,
-  get_mission summary, stop_subtask cancel+finalize, retry_subtask/dispatch_task pipelines, list_ideas/find_related_ideas
-  (/sam list_ideas lacks the is_idea filter: behaviour differs, must be decided before sharing).
-- 2026-11-12: step 1c pushed. Operations-owned helpers moved into `operations/` with re-exports at the old paths:
-  sanitize-user-input, utf8, message-roles, idea-content-limit, operation-effect-boundary, connector-limits,
-  connector-read-settings-definition, message-groups; `ConnectorAnswerFields` -> `operations/connector-answer-input.ts`.
-  Domain-owned functions now come through ports: config.apiOrigin, projectData.{isAgentMessageChannelName,
-  normalizeNullableText, classifyEventError, describeRootSearchCoverage}, connector.receiptId,
-  chat.classifyTurnIdleness, triggers.{cronToHumanReadable, executionUserId, statusUpdates}.
-  Still imported directly: worker-core kernel (logger, schema, ulid, runtime-validation, d1-limits, errors,
-  route-helpers, search-query-limits) and `services/task-status` (asked coordinator: worker-core or port).
-  Full unit suite: 16,026 cases, 0 failures.
+- /sam archived-payload limits now parse their env vars with `parsePositiveInt` (as MCP did) instead
+  of a local `isSafeInteger` variant; identical for any sane value.
+- Importing `operation-ports.ts` loads every port's worker module, so a test that imports a module
+  depending on it pays that cost (test-only; the deployed Worker is one bundle).
+
+## Test counts
+
+- Baseline (core `bbb1c82ca`): apps/api 16,012 cases / 1,084 files; `tests/unit/operations` 318 / 17.
+- After: see the PR body (filled from the final full run).
