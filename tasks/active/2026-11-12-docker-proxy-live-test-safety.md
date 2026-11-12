@@ -33,4 +33,7 @@
 - [x] Cleanup removes only container ids and network ids this run created, and the run's image tags;
       does nothing if the guard refused
 - [x] Proxy image tag run-scoped and removed
-- [ ] CI Validate Deploy Scripts green on the branch
+- [x] CI Validate Deploy Scripts green on the branch: run 43162098084, job 130995590551, all 35
+      docker-proxy live cases ran and passed (12.6 s)
+- [x] Adjacent fix: `apps/api/tests/unit/selfhost/platform-capabilities-route.test.ts` did not
+      expect `agentModelCalls` (added to the payload in 0d677860f / #2678); Test job failed on it
