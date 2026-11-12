@@ -38,6 +38,11 @@ import { isIP } from 'node:net';
 import type { PortRange } from './box-settings.js';
 import { assertOpenable } from './fence-addresses.js';
 import { formatProbes, startCheckProbes } from './fence-probes.js';
+import {
+  CELLD_CONTAINER_BRIDGE,
+  CELLD_SANDBOX_BRIDGES,
+  guidedLoginSettings,
+} from './guided-login.js';
 
 /** nftables table name; the start check and the verify command look for it. */
 export const EGRESS_FENCE_TABLE = 'sam_celld_egress';
@@ -148,6 +153,18 @@ export interface EgressFencePlan {
   forbiddenLoopbackPorts: Record<string, number>;
   /** This host's own addresses: an endpoint on one of them is checked like a loopback one. */
   localAddresses: string[];
+  /**
+   * celld's container bridge interfaces celld may connect into (guided login). celld reaches the
+   * sandbox at its bridge address in 172.16/12; celld's own fence keeps the container off the box.
+   */
+  containerBridges: string[];
+  /**
+   * Interfaces of celld's sandbox bridges (guided login). Traffic arriving on them may answer
+   * connections the host opened and may be forwarded to the Internet, nothing else. celld installs
+   * equivalent rules through its fence container, but the proxy cannot make celld run that
+   * container first, so the operator-owned fence holds the boundary on its own.
+   */
+  sandboxBridges: string[];
 }
 
 function intSetting(raw: string | undefined, fallback: number, name: string, min = 1): number {
@@ -280,6 +297,8 @@ export function buildFencePlan({
       OBJECTSTORE_CONSOLE_PORT: composePort(box, 'OBJECTSTORE_CONSOLE_PORT'),
     },
     localAddresses: localAddresses ?? [],
+    containerBridges: guidedLoginSettings(box) ? [CELLD_CONTAINER_BRIDGE] : [],
+    sandboxBridges: guidedLoginSettings(box) ? [...CELLD_SANDBOX_BRIDGES] : [],
   };
   assertFencePlan(plan);
   return plan;
@@ -357,6 +376,12 @@ export function renderFenceRuleset(plan: EgressFencePlan): string {
     // interface (a public IP on the NIC, or a LAN install). Loopback is not that path.
     `ip daddr != 127.0.0.0/8 fib daddr type local tcp dport ${caddy} accept comment "Caddy on this host's own addresses"`,
     `ip6 daddr != ::1 fib daddr type local tcp dport ${caddy} accept comment "Caddy on this host's own addresses"`,
+    // Matched on the egress interface, so only a route into celld's own bridge qualifies; the
+    // same private range anywhere else (another Docker network, the VPC) is still refused.
+    ...plan.containerBridges.map(
+      (bridge) =>
+        `oifname "${bridge}" ip daddr 172.16.0.0/12 meta l4proto tcp accept comment "celld containers (guided login)"`
+    ),
   ];
   const body = [
     'ct state established,related accept',
@@ -383,9 +408,32 @@ export function renderFenceRuleset(plan: EgressFencePlan): string {
     '  chain celld {',
     ...body.map((line) => `    ${line}`),
     '  }',
+    ...renderSandboxChains(plan.sandboxBridges),
     '}',
     '',
   ].join('\n');
+}
+
+/**
+ * Sandbox containers (guided login): to this host only replies to connections the host opened
+ * (celld driving the sandbox); forwarded only to addresses outside the forbidden ranges. Base
+ * chains in every table must accept a packet, so these hold whatever celld's own table says.
+ */
+export function renderSandboxChains(bridges: readonly string[]): string[] {
+  if (bridges.length === 0) return [];
+  const from = `iifname ${nftSet(bridges.map((bridge) => `"${bridge}"`))}`;
+  return [
+    '  chain sandbox_input {',
+    '    type filter hook input priority filter; policy accept;',
+    `    ${from} ct state established,related accept`,
+    `    ${from} ${REFUSE} comment "celld sandboxes: nothing on this host"`,
+    '  }',
+    '  chain sandbox_forward {',
+    '    type filter hook forward priority filter; policy accept;',
+    `    ${from} ip daddr ${nftSet(FORBIDDEN_IPV4)} ${REFUSE} comment "celld sandboxes: private, link-local, metadata, reserved"`,
+    `    ${from} ip6 daddr ${nftSet(FORBIDDEN_IPV6)} ${REFUSE} comment "celld sandboxes: private, link-local, transition, reserved"`,
+    '  }',
+  ];
 }
 
 /** celld.env: the start check's canary and, on a gs:// bucket, the metadata token proxy. */

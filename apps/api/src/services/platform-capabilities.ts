@@ -58,6 +58,7 @@ type CapabilityEnv = Pick<
   | 'HOSTED_GIT'
   | 'HOSTED_GIT_BACKEND'
   | 'CONTAINER_RUNTIME_AVAILABLE'
+  | 'SANDBOX_CONTAINER_RUNTIME_AVAILABLE'
   | 'LOG_TAIL_AVAILABLE'
   | 'SANDBOX'
   | 'CREDENTIAL_SETUP_SESSION'
@@ -159,7 +160,9 @@ export function aiGatewayOnlyHeaders(
 }
 
 /**
- * Whether the container bindings are backed by a container runtime.
+ * Whether the container bindings, and in particular VM_AGENT_CONTAINER (Instant), are backed by
+ * a container runtime. The SANDBOX binding has its own declaration that falls back to this one:
+ * see `hasSandboxContainerRuntime`.
  *
  * On Cloudflare the container Durable Object bindings always are. Other runtimes may bind the
  * same classes as plain Durable Objects with no container behind them, and a binding cannot
@@ -168,6 +171,21 @@ export function aiGatewayOnlyHeaders(
  */
 export function hasContainerRuntime(env: Pick<Env, 'CONTAINER_RUNTIME_AVAILABLE'>): boolean {
   return env.CONTAINER_RUNTIME_AVAILABLE?.trim().toLowerCase() !== 'false';
+}
+
+/**
+ * Whether the SANDBOX binding (the Sandbox SDK container that guided credential setup runs) is
+ * backed by a container runtime. Declared per class because a runtime can back one container
+ * class and not another: celld runs the sign-in sandbox but never Instant, whose vm-agent must
+ * call back into the box (scripts/selfhost/celld-config.ts). Unset falls back to the shared
+ * declaration, so Cloudflare deployments, which back every class, are unchanged.
+ */
+export function hasSandboxContainerRuntime(
+  env: Pick<Env, 'CONTAINER_RUNTIME_AVAILABLE' | 'SANDBOX_CONTAINER_RUNTIME_AVAILABLE'>
+): boolean {
+  const declared = env.SANDBOX_CONTAINER_RUNTIME_AVAILABLE?.trim();
+  if (declared) return declared.toLowerCase() !== 'false';
+  return hasContainerRuntime(env);
 }
 
 /**
@@ -195,11 +213,15 @@ export function hasLiveLogStream(env: Pick<Env, 'LOG_TAIL_AVAILABLE'>): boolean 
 export function isGuidedCredentialSetupAvailable(
   env: Pick<
     Env,
-    'CONTAINER_RUNTIME_AVAILABLE' | 'SANDBOX' | 'CREDENTIAL_SETUP_SESSION' | 'SETUP_SESSION_POOL'
+    | 'CONTAINER_RUNTIME_AVAILABLE'
+    | 'SANDBOX_CONTAINER_RUNTIME_AVAILABLE'
+    | 'SANDBOX'
+    | 'CREDENTIAL_SETUP_SESSION'
+    | 'SETUP_SESSION_POOL'
   >
 ): boolean {
   return (
-    hasContainerRuntime(env) &&
+    hasSandboxContainerRuntime(env) &&
     !!env.SANDBOX &&
     !!env.CREDENTIAL_SETUP_SESSION &&
     !!env.SETUP_SESSION_POOL

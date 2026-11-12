@@ -32,6 +32,50 @@ function plan(
   return buildFencePlan({ box, leaseRange: RANGE, resolvConf: RESOLV, objectStore });
 }
 
+describe('egress fence with guided login (celld containers)', () => {
+  const BRIDGE_RULE =
+    'oifname "celld0" ip daddr 172.16.0.0/12 meta l4proto tcp accept comment "celld containers (guided login)"';
+
+  it('lets celld reach its own container bridge only when guided login is on', () => {
+    expect(renderFenceRuleset(plan())).not.toContain('oifname');
+    const rules = renderFenceRuleset(plan({ SAM_GUIDED_LOGIN: 'on' }));
+    expect(rules).toContain(BRIDGE_RULE);
+    // Before the refusals, which would otherwise reject 172.16/12.
+    expect(rules.indexOf(BRIDGE_RULE)).toBeLessThan(rules.indexOf('ip daddr { 0.0.0.0/8'));
+  });
+
+  it('still refuses the same private range on any other interface', () => {
+    const rules = renderFenceRuleset(plan({ SAM_GUIDED_LOGIN: 'on' }));
+    expect(rules).toMatch(/ip daddr \{[^}]*172\.16\.0\.0\/12[^}]*\} counter reject/);
+    expect(rules).not.toMatch(/^\s*ip daddr 172\.16\.0\.0\/12[^\n]*accept/m);
+  });
+});
+
+describe('egress fence: celld sandboxes (guided login)', () => {
+  it('keeps sandboxes off the host and private ranges without relying on celld’s fence', () => {
+    expect(renderFenceRuleset(plan())).not.toContain('sandbox_');
+    const rules = renderFenceRuleset(plan({ SAM_GUIDED_LOGIN: 'on' }));
+    const from = 'iifname { "celld0", "celld1" }';
+    // Replies to connections the host opened (celld driving the sandbox), then nothing else.
+    expect(rules).toContain('type filter hook input priority filter; policy accept;');
+    expect(rules).toContain(`${from} ct state established,related accept`);
+    expect(rules).toMatch(
+      /iifname \{ "celld0", "celld1" \} counter reject[^\n]*nothing on this host/
+    );
+    expect(rules.indexOf(`${from} ct state established`)).toBeLessThan(
+      rules.indexOf('nothing on this host')
+    );
+    // Forwarded traffic: the same forbidden ranges as celld's own uid, metadata included.
+    expect(rules).toContain('type filter hook forward priority filter; policy accept;');
+    expect(rules).toMatch(
+      /iifname \{ "celld0", "celld1" \} ip daddr \{[^}]*169\.254\.0\.0\/16[^}]*172\.16\.0\.0\/12[^}]*\} counter reject/
+    );
+    expect(rules).toMatch(
+      /iifname \{ "celld0", "celld1" \} ip6 daddr \{[^}]*fc00::\/7[^}]*\} counter reject/
+    );
+  });
+});
+
 describe('egress fence ruleset', () => {
   it('fences only the celld uid and lets established traffic (Caddy -> celld replies) through', () => {
     const rules = renderFenceRuleset(plan());

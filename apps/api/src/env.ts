@@ -1579,6 +1579,10 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   // "false" when the container Durable Object bindings have no container runtime behind them
   // (non-Cloudflare runtimes). Unset means available. See services/platform-capabilities.ts.
   CONTAINER_RUNTIME_AVAILABLE?: string;
+  // The same declaration for the SANDBOX binding alone (guided credential setup). A runtime can
+  // back one container class and not the other (celld runs the sandbox, never Instant). Unset
+  // falls back to CONTAINER_RUNTIME_AVAILABLE. See services/platform-capabilities.ts.
+  SANDBOX_CONTAINER_RUNTIME_AVAILABLE?: string;
   /** "false" when no tail consumer feeds the AdminLogs DO (self-host: celld has no tail handler). Unset: available. */
   LOG_TAIL_AVAILABLE?: string;
   // Legacy Sandbox SDK prototype (admin-only)
