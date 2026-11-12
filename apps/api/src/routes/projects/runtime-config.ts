@@ -17,6 +17,10 @@ import {
 import { encrypt } from '../../services/encryption';
 import { getRuntimeLimits } from '../../services/limits';
 import {
+  assertProjectRuntimeEnvKey,
+  upsertProjectRuntimeEnvVar,
+} from '../../services/project-runtime-env';
+import {
   buildProjectRuntimeConfigResponse,
   byteLength,
   normalizeProjectFilePath,
@@ -42,77 +46,21 @@ export function registerProjectRuntimeConfigRoutes(crudRoutes: Hono<{ Bindings: 
       const projectId = c.req.param('id');
       const db = drizzle(c.env.DATABASE, { schema });
       const body = c.req.valid('json');
-      const limits = getRuntimeLimits(c.env);
 
       const project = await requireProjectCapability(db, projectId, userId, 'secret:write');
-      const envKey = body.key?.trim();
-      if (!envKey || !PROJECT_ENV_KEY_PATTERN.test(envKey)) {
-        throw errors.badRequest('key must match [A-Za-z_][A-Za-z0-9_]*');
-      }
-
+      const envKey = assertProjectRuntimeEnvKey(body.key);
       if (typeof body.value !== 'string') {
         throw errors.badRequest('value is required');
       }
-      if (byteLength(body.value) > limits.maxProjectRuntimeEnvValueBytes) {
-        throw errors.badRequest(
-          `value exceeds max size of ${limits.maxProjectRuntimeEnvValueBytes} bytes`
-        );
-      }
-
-      const isSecret = Boolean(body.isSecret);
-      const [existingRows, countRows] = await Promise.all([
-        db
-          .select({ id: schema.projectRuntimeEnvVars.id })
-          .from(schema.projectRuntimeEnvVars)
-          .where(
-            and(
-              eq(schema.projectRuntimeEnvVars.projectId, project.id),
-              eq(schema.projectRuntimeEnvVars.envKey, envKey)
-            )
-          )
-          .limit(1),
-        db
-          .select({ count: count() })
-          .from(schema.projectRuntimeEnvVars)
-          .where(and(eq(schema.projectRuntimeEnvVars.projectId, project.id))),
-      ]);
-
-      if (!existingRows[0]) {
-        if ((countRows[0]?.count ?? 0) >= limits.maxProjectRuntimeEnvVarsPerProject) {
-          throw errors.badRequest(
-            `Maximum ${limits.maxProjectRuntimeEnvVarsPerProject} runtime env vars allowed per project`
-          );
-        }
-      }
-
-      const stored = isSecret
-        ? await encrypt(body.value, getCredentialEncryptionKey(c.env))
-        : { ciphertext: body.value, iv: null };
-
-      const now = new Date().toISOString();
-      if (existingRows[0]) {
-        await db
-          .update(schema.projectRuntimeEnvVars)
-          .set({
-            storedValue: stored.ciphertext,
-            valueIv: stored.iv,
-            isSecret,
-            updatedAt: now,
-          })
-          .where(eq(schema.projectRuntimeEnvVars.id, existingRows[0].id));
-      } else {
-        await db.insert(schema.projectRuntimeEnvVars).values({
-          id: ulid(),
-          projectId: project.id,
-          userId,
-          envKey,
-          storedValue: stored.ciphertext,
-          valueIv: stored.iv,
-          isSecret,
-          createdAt: now,
-          updatedAt: now,
-        });
-      }
+      await upsertProjectRuntimeEnvVar(db, c.env, {
+        projectId: project.id,
+        actorUserId: userId,
+        envKey,
+        value: body.value,
+        isSecret: Boolean(body.isSecret),
+        expiresAt: null,
+        secretRequestId: null,
+      });
 
       const response = await buildProjectRuntimeConfigResponse(db, project);
       return c.json(response);

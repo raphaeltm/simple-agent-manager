@@ -1,8 +1,13 @@
 import type { ProjectRuntimeConfigResponse } from '@simple-agent-manager/shared';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
+import {
+  collectedProvenanceColumns,
+  isoOrNull,
+  toCollectedProvenance,
+} from '../../services/runtime-secret-request-records';
 
 export async function buildProjectRuntimeConfigResponse(
   db: ReturnType<typeof drizzle<typeof schema>>,
@@ -18,8 +23,18 @@ export async function buildProjectRuntimeConfigResponse(
         isSecret: schema.projectRuntimeEnvVars.isSecret,
         createdAt: schema.projectRuntimeEnvVars.createdAt,
         updatedAt: schema.projectRuntimeEnvVars.updatedAt,
+        expiresAt: schema.projectRuntimeEnvVars.expiresAt,
+        ...collectedProvenanceColumns,
       })
       .from(schema.projectRuntimeEnvVars)
+      .leftJoin(
+        schema.runtimeSecretRequests,
+        and(
+          eq(schema.runtimeSecretRequests.id, schema.projectRuntimeEnvVars.secretRequestId),
+          eq(schema.runtimeSecretRequests.projectId, schema.projectRuntimeEnvVars.projectId)
+        )
+      )
+      .leftJoin(schema.users, eq(schema.users.id, schema.runtimeSecretRequests.resolvedBy))
       .where(eq(schema.projectRuntimeEnvVars.projectId, project.id))
       .orderBy(schema.projectRuntimeEnvVars.envKey),
     db
@@ -37,6 +52,7 @@ export async function buildProjectRuntimeConfigResponse(
       .orderBy(schema.projectRuntimeFiles.filePath),
   ]);
 
+  const now = Date.now();
   const envVars: ProjectRuntimeConfigResponse['envVars'] = [];
   for (const row of envRows) {
     let value: string | null = row.storedValue;
@@ -50,6 +66,9 @@ export async function buildProjectRuntimeConfigResponse(
       hasValue: true,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
+      expiresAt: isoOrNull(row.expiresAt),
+      expired: row.expiresAt !== null && row.expiresAt <= now,
+      collected: toCollectedProvenance(row),
     });
   }
 

@@ -14,6 +14,10 @@ import {
 } from '../services/lifecycle-latency';
 import { runNodeTunnelCleanupSweep } from '../services/node-tunnel-cleanup';
 import { isOperationalLoopEnabled } from '../services/operational-kill-switch';
+import {
+  expireRuntimeSecretRequests,
+  purgeRuntimeSecretMaterial,
+} from '../services/runtime-secret-request-maintenance';
 import { checkProvisioningTimeouts } from '../services/timeout';
 import { migrateOrphanedWorkspaces } from '../services/workspace-migration';
 import { runWorkspaceResourceHistoryCleanup } from '../services/workspace-resource-history';
@@ -90,6 +94,14 @@ export async function scheduled(
     ctx.waitUntil(runOperationsAuditPurge(env, controller.cron));
     ctx.waitUntil(runDebugPackagePurge(env, controller.cron));
     ctx.waitUntil(runOperationsTelemetryRetention(env, controller.cron));
+    // Expired collected secret values are already refused at read time; this deletes them.
+    ctx.waitUntil(
+      purgeRuntimeSecretMaterial(env).catch((err) => {
+        log.error('cron.runtime_secret_purge_failed', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      })
+    );
     // Separate promise again, so none of the jobs above can suppress the latency check.
     ctx.waitUntil(
       runLifecycleLatencyDailyEvaluation(env).catch((err) => {
@@ -171,6 +183,10 @@ export async function scheduled(
   );
   const triggerCleanup = await sweeps.isolate('trigger_execution_cleanup', () =>
     runTriggerExecutionCleanup(env)
+  );
+  // One indexed read per tick; rows are only selected once a request is past its deadline.
+  const secretRequestExpiry = await sweeps.isolate('runtime_secret_request_expiry', () =>
+    expireRuntimeSecretRequests(env)
   );
   const sessionTaskRepair = await sweeps.isolate('session_task_reconciliation', () =>
     runSessionTaskReconciliation(env)
@@ -342,6 +358,8 @@ export async function scheduled(
     projectEventSourceOutboxAdmitted: triggerCleanup?.projectEventSourceOutboxAdmitted,
     credentialLimitWindowsPurged: triggerCleanup?.credentialLimitWindowsPurged,
     triggerExecCleanupErrors: triggerCleanup?.errors,
+    secretRequestsExpired: secretRequestExpiry?.expired,
+    secretRequestAgentsNotified: secretRequestExpiry?.agentsNotified,
     sessionTaskRepairScanned: sessionTaskRepair?.scanned,
     sessionTaskRepairRepaired: sessionTaskRepair?.repaired,
     sessionTaskRepairReused: sessionTaskRepair?.reused,

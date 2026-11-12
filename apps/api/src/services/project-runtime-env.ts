@@ -1,0 +1,134 @@
+/**
+ * The one write path for project runtime environment variables. The manual project settings
+ * route and agent secret-request fulfilment (`runtime-secret-requests.ts`) both call it, so key
+ * validation, size and count limits, encryption and provenance are applied the same way.
+ */
+import { and, count, eq } from 'drizzle-orm';
+import type { drizzle } from 'drizzle-orm/d1';
+
+import * as schema from '../db/schema';
+import type { Env } from '../env';
+import { getCredentialEncryptionKey } from '../lib/secrets';
+import { ulid } from '../lib/ulid';
+import { errors } from '../middleware/error';
+import { byteLength, PROJECT_ENV_KEY_PATTERN } from '../routes/projects/_helpers';
+import { encrypt } from './encryption';
+import { getRuntimeLimits } from './limits';
+
+type Db = ReturnType<typeof drizzle<typeof schema>>;
+
+export interface UpsertProjectRuntimeEnvVarInput {
+  projectId: string;
+  actorUserId: string;
+  envKey: string;
+  value: string;
+  isSecret: boolean;
+  /**
+   * Epoch ms after which the value must not be used. Manual writes pass null: a person setting a
+   * value by hand makes it a permanent, manually managed value again.
+   */
+  expiresAt: number | null;
+  /** The request that supplied this value, or null for a manual write. */
+  secretRequestId: string | null;
+}
+
+export function assertProjectRuntimeEnvKey(envKey: string | undefined): string {
+  const key = envKey?.trim();
+  if (!key || !PROJECT_ENV_KEY_PATTERN.test(key)) {
+    throw errors.badRequest('key must match [A-Za-z_][A-Za-z0-9_]*');
+  }
+  return key;
+}
+
+/** The existing row for a key, or null. */
+export async function findProjectRuntimeEnvVar(db: Db, projectId: string, envKey: string) {
+  const rows = await db
+    .select({
+      id: schema.projectRuntimeEnvVars.id,
+      isSecret: schema.projectRuntimeEnvVars.isSecret,
+      expiresAt: schema.projectRuntimeEnvVars.expiresAt,
+      secretRequestId: schema.projectRuntimeEnvVars.secretRequestId,
+      updatedAt: schema.projectRuntimeEnvVars.updatedAt,
+    })
+    .from(schema.projectRuntimeEnvVars)
+    .where(
+      and(
+        eq(schema.projectRuntimeEnvVars.projectId, projectId),
+        eq(schema.projectRuntimeEnvVars.envKey, envKey)
+      )
+    )
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+/** Writes one variable; returns whether an existing value was replaced. Never logs the value. */
+export async function upsertProjectRuntimeEnvVar(
+  db: Db,
+  env: Env,
+  input: UpsertProjectRuntimeEnvVarInput
+): Promise<{ replaced: boolean }> {
+  const envKey = assertProjectRuntimeEnvKey(input.envKey);
+  const limits = getRuntimeLimits(env);
+  if (byteLength(input.value) > limits.maxProjectRuntimeEnvValueBytes) {
+    throw errors.badRequest(
+      `value exceeds max size of ${limits.maxProjectRuntimeEnvValueBytes} bytes`
+    );
+  }
+
+  const [existing, countRows] = await Promise.all([
+    findProjectRuntimeEnvVar(db, input.projectId, envKey),
+    db
+      .select({ count: count() })
+      .from(schema.projectRuntimeEnvVars)
+      .where(eq(schema.projectRuntimeEnvVars.projectId, input.projectId)),
+  ]);
+  if (!existing && (countRows[0]?.count ?? 0) >= limits.maxProjectRuntimeEnvVarsPerProject) {
+    throw errors.badRequest(
+      `Maximum ${limits.maxProjectRuntimeEnvVarsPerProject} runtime env vars allowed per project`
+    );
+  }
+
+  const stored = input.isSecret
+    ? await encrypt(input.value, getCredentialEncryptionKey(env))
+    : { ciphertext: input.value, iv: null };
+  const now = new Date().toISOString();
+  // Every field is written on update, including the two provenance columns: a manual write
+  // clears an earlier request's expiry and provenance (`.claude/rules/73`).
+  const values = {
+    storedValue: stored.ciphertext,
+    valueIv: stored.iv,
+    isSecret: input.isSecret,
+    expiresAt: input.expiresAt,
+    secretRequestId: input.secretRequestId,
+    updatedAt: now,
+  };
+  if (existing) {
+    await db
+      .update(schema.projectRuntimeEnvVars)
+      .set(values)
+      .where(
+        and(
+          eq(schema.projectRuntimeEnvVars.id, existing.id),
+          eq(schema.projectRuntimeEnvVars.projectId, input.projectId)
+        )
+      );
+    return { replaced: true };
+  }
+  // A concurrent writer may insert the same key between the read and this write; converge on
+  // the unique (project, key) index instead of failing.
+  await db
+    .insert(schema.projectRuntimeEnvVars)
+    .values({
+      id: ulid(),
+      projectId: input.projectId,
+      userId: input.actorUserId,
+      envKey,
+      createdAt: now,
+      ...values,
+    })
+    .onConflictDoUpdate({
+      target: [schema.projectRuntimeEnvVars.projectId, schema.projectRuntimeEnvVars.envKey],
+      set: values,
+    });
+  return { replaced: false };
+}

@@ -1,0 +1,151 @@
+/**
+ * Tells the agent that asked for a secret what happened to its request, as a durable prompt
+ * (source kind `secret_request`). The prompt is metadata only: the secret value is never in it.
+ * Delivery is guarded on the requesting task's stable authority, so it wakes the session only
+ * while that task, or its own session-recovery successor, is live (`sourceTaskGuardForClaim`).
+ */
+import { buildSamNotice, type SamNotice } from '@simple-agent-manager/shared';
+
+import type * as schema from '../db/schema';
+import { resolveDurableExecutionConfig } from '../durable-objects/project-data/durable-execution-config';
+import type { Env } from '../env';
+import { log } from '../lib/logger';
+import { buildActionUrl, sendNotification } from './notification';
+import * as projectDataService from './project-data';
+import { isoOrNull } from './runtime-secret-request-records';
+import { safeNotice } from './sam-notice-builders';
+
+type Outcome = 'fulfilled' | 'declined' | 'expired';
+
+export function runtimeSecretRequestDeliveryId(requestId: string): string {
+  return `secret-request:${requestId}`;
+}
+
+function expiryText(secretExpiresAt: number | null): string {
+  const iso = isoOrNull(secretExpiresAt);
+  return iso
+    ? `It expires at ${iso}; after that exec_with_secrets refuses it.`
+    : 'It has no expiry.';
+}
+
+/** The agent-facing text. Names and IDs only; never the value. */
+export function buildRuntimeSecretRequestPrompt(
+  row: schema.RuntimeSecretRequestRow,
+  outcome: Outcome,
+  resolvedByName: string | null
+): string {
+  const who = resolvedByName ? ` by ${resolvedByName}` : '';
+  switch (outcome) {
+    case 'fulfilled':
+      return [
+        `Secret request ${row.id} was fulfilled${who}: ${row.envKey} is now a project runtime secret.`,
+        `Use it with exec_with_secrets and secretNames ["${row.envKey}"]. The value is not shown to you; do not ask for it in chat. ${expiryText(row.secretExpiresAt)}`,
+        `Project secrets are shared: every project member's agent sessions can use ${row.envKey}.`,
+      ].join('\n');
+    case 'declined':
+      return `Secret request ${row.id} for ${row.envKey} was declined${who}. Do not wait for it; continue without it or explain what you need.`;
+    case 'expired':
+      return `Secret request ${row.id} for ${row.envKey} expired before anyone supplied a value. Do not wait for it; ask again with request_secret only if you still need it.`;
+  }
+}
+
+function secretRequestNotice(
+  row: schema.RuntimeSecretRequestRow,
+  outcome: Outcome,
+  resolvedByName: string | null
+): SamNotice {
+  const headline =
+    outcome === 'fulfilled'
+      ? `Secret ${row.envKey} supplied`
+      : outcome === 'declined'
+        ? `Secret request for ${row.envKey} declined`
+        : `Secret request for ${row.envKey} expired`;
+  const detail =
+    outcome === 'fulfilled'
+      ? [
+          resolvedByName ? `Supplied by ${resolvedByName}.` : null,
+          'The agent was told the name only, never the value.',
+          isoOrNull(row.secretExpiresAt) ? `Expires ${isoOrNull(row.secretExpiresAt)}.` : null,
+        ]
+          .filter(Boolean)
+          .join(' ')
+      : 'The agent was told not to wait for it.';
+  return buildSamNotice({
+    type: `secret_request.${outcome}`,
+    headline,
+    detail,
+    severity: outcome === 'fulfilled' ? 'success' : 'info',
+    refs: [{ kind: 'task', id: row.requestingTaskId, label: null }],
+  });
+}
+
+/** Best-effort; returns whether the prompt was queued. Never throws. */
+export async function deliverRuntimeSecretRequestOutcome(
+  env: Env,
+  row: schema.RuntimeSecretRequestRow,
+  outcome: Outcome,
+  resolvedByName: string | null
+): Promise<boolean> {
+  const config = resolveDurableExecutionConfig(env);
+  if (!config.deliveryEnabled) {
+    log.warn('runtime_secret_request.delivery_disabled', { requestId: row.id });
+    return false;
+  }
+  const content = buildRuntimeSecretRequestPrompt(row, outcome, resolvedByName);
+  try {
+    await projectDataService.acceptPromptDelivery(env, row.projectId, {
+      deliveryId: runtimeSecretRequestDeliveryId(row.id),
+      targetSessionId: row.requestingChatSessionId,
+      displayContent: content,
+      deliveryContent: content,
+      sourceTaskId: row.requestingAuthorityTaskId,
+      senderType: 'system',
+      senderId: row.resolvedBy,
+      messageClass: 'deliver',
+      sourceKind: 'secret_request',
+      ttlMs: config.ttlMs,
+      metadata: { secretRequestId: row.id, envKey: row.envKey, outcome },
+      notice: safeNotice(() => secretRequestNotice(row, outcome, resolvedByName), {
+        secretRequestId: row.id,
+      }),
+    });
+    return true;
+  } catch (error) {
+    log.error('runtime_secret_request.delivery_failed', {
+      requestId: row.id,
+      projectId: row.projectId,
+      sessionId: row.requestingChatSessionId,
+      outcome,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
+}
+
+/** Tell the session owner a value is wanted. Best-effort: the card in the chat is the record. */
+export async function notifyRuntimeSecretRequested(
+  env: Env,
+  row: schema.RuntimeSecretRequestRow
+): Promise<boolean> {
+  if (!env.NOTIFICATION) return false;
+  try {
+    const sent = await sendNotification(env, row.requesterUserId, {
+      type: 'secret_request',
+      urgency: 'high',
+      title: `Secret requested: ${row.envKey}`,
+      body: row.reason.slice(0, 500),
+      projectId: row.projectId,
+      taskId: row.requestingTaskId,
+      sessionId: row.requestingChatSessionId,
+      actionUrl: buildActionUrl(row.projectId, row.requestingChatSessionId),
+      metadata: { secretRequestId: row.id, envKey: row.envKey },
+    });
+    return sent.id !== 'suppressed';
+  } catch (error) {
+    log.warn('runtime_secret_request.notify_failed', {
+      requestId: row.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
+}
