@@ -42,14 +42,31 @@ async function seed() {
     .run();
 }
 
-function attempt(ciphertext: string, replaceExisting = false) {
+const MANUAL_ROW = {
+  updatedAt: '2026-11-12T00:00:00Z',
+  valueIv: null,
+  storedValue: 'manual-value',
+};
+
+/** `replaceTarget` is the exact existing row the server read before the write (null: none). */
+function attempt(ciphertext: string, replaceTarget: typeof MANUAL_ROW | null = null) {
   return claimAndStoreValueStatements(
     env.DATABASE,
     { id: REQUEST, projectId: PROJECT, envKey: KEY },
-    { actorUserId: USER, replaceExisting },
+    { actorUserId: USER, replaceTarget },
     { ciphertext, iv: `iv-${ciphertext}` },
-    { resolvedAt: NOW, secretExpiresAt: null, replacedExisting: replaceExisting }
+    { resolvedAt: NOW, secretExpiresAt: null, replacedExisting: replaceTarget !== null }
   );
+}
+
+async function seedManual(storedValue = 'manual-value') {
+  await env.DATABASE.prepare(
+    `INSERT INTO project_runtime_env_vars
+       (id, project_id, user_id, env_key, stored_value, value_iv, is_secret, created_at, updated_at)
+     VALUES ('manual', ?, ?, ?, ?, NULL, 0, '2026-11-12T00:00:00Z', '2026-11-12T00:00:00Z')`
+  )
+    .bind(PROJECT, USER, KEY, storedValue)
+    .run();
 }
 
 async function stored() {
@@ -92,13 +109,7 @@ describe('secret request claim on real D1', () => {
   });
 
   it('without confirmation, an existing value is neither replaced nor claimed', async () => {
-    await env.DATABASE.prepare(
-      `INSERT INTO project_runtime_env_vars
-         (id, project_id, user_id, env_key, stored_value, value_iv, is_secret, created_at, updated_at)
-       VALUES ('manual', ?, ?, ?, 'manual-value', NULL, 0, '2026-11-12T00:00:00Z', '2026-11-12T00:00:00Z')`
-    )
-      .bind(PROJECT, USER, KEY)
-      .run();
+    await seedManual();
     const [insert, claim] = await env.DATABASE.batch(attempt('cipher-A'));
     expect(insert.meta.changes).toBe(0);
     expect(claim.meta.changes).toBe(0);
@@ -107,16 +118,20 @@ describe('secret request claim on real D1', () => {
   });
 
   it('with confirmation, the existing value is replaced and the request claimed (owner control)', async () => {
-    await env.DATABASE.prepare(
-      `INSERT INTO project_runtime_env_vars
-         (id, project_id, user_id, env_key, stored_value, value_iv, is_secret, created_at, updated_at)
-       VALUES ('manual', ?, ?, ?, 'manual-value', NULL, 0, '2026-11-12T00:00:00Z', '2026-11-12T00:00:00Z')`
-    )
-      .bind(PROJECT, USER, KEY)
-      .run();
-    const [, claim] = await env.DATABASE.batch(attempt('cipher-A', true));
+    await seedManual();
+    const [, claim] = await env.DATABASE.batch(attempt('cipher-A', MANUAL_ROW));
     expect(claim.meta.changes).toBe(1);
     expect(await stored()).toEqual({ stored_value: 'cipher-A', secret_request_id: REQUEST });
     expect(await requestStatus()).toBe('fulfilled');
+  });
+
+  it('a confirmed replace of a row that changed since it was read writes nothing', async () => {
+    // Same timestamp, different bytes: the row the server read is no longer the stored one.
+    await seedManual('changed-in-between');
+    const [insert, claim] = await env.DATABASE.batch(attempt('cipher-A', MANUAL_ROW));
+    expect(insert.meta.changes).toBe(0);
+    expect(claim.meta.changes).toBe(0);
+    expect(await stored()).toEqual({ stored_value: 'changed-in-between', secret_request_id: null });
+    expect(await requestStatus()).toBe('pending');
   });
 });

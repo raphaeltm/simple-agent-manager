@@ -63,7 +63,8 @@ export const RUNTIME_SECRET_REQUEST_SETTINGS = [
     defaultValue: 60,
     description:
       'Minutes after a request is answered or expires during which the sweep retries telling the agent if the first notice could not be queued.',
-    range: { min: 5, max: 1_440 },
+    // At least three five-minute sweeps, so a failure just before a sweep still gets a retry.
+    range: { min: 15, max: 1_440 },
   },
 ] as const;
 

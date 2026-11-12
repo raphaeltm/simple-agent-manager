@@ -10,7 +10,7 @@ import type {
   RuntimeSecretRequest,
   RuntimeSecretRequestResponse,
 } from '@simple-agent-manager/shared';
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ChatMessageResponse } from '../../../src/lib/api';
@@ -151,6 +151,7 @@ describe('secret request card in chat', () => {
           expiresAt: null,
           expired: false,
           updatedAt: '2026-11-01T00:00:00Z',
+          version: '2026-11-01T00:00:00Z#iv-1',
         },
       })
     );
@@ -172,6 +173,7 @@ describe('secret request card in chat', () => {
       expect(fulfillSecretRequest).toHaveBeenCalledWith(PROJECT_ID, REQUEST_ID, {
         value: SENTINEL,
         replaceExisting: true,
+        expectedExistingVersion: '2026-11-01T00:00:00Z#iv-1',
       })
     );
   });
@@ -253,28 +255,131 @@ describe('secret request card in chat', () => {
   });
 
   it('an open card flips a supplied value to expired when its TTL passes', async () => {
-    getSecretRequest.mockResolvedValue(
-      response(
-        { canResolve: false },
-        {
-          status: 'fulfilled',
-          resolvedByName: 'Raph',
-          resolvedAt: '2026-11-12T10:01:00.000Z',
-          secretExpiresAt: new Date(Date.now() + 500).toISOString(),
-        }
-      )
-    );
+    // Controlled clock: the card is asserted live first, then time moves past the deadline.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'], shouldAdvanceTime: true });
+    try {
+      getSecretRequest.mockResolvedValue(
+        response(
+          { canResolve: false },
+          {
+            status: 'fulfilled',
+            resolvedByName: 'Raph',
+            resolvedAt: '2026-11-12T10:01:00.000Z',
+            secretExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+          }
+        )
+      );
+      renderCard();
+      await screen.findByTestId('secret-request-card');
+      // Live before the deadline (control: the card is not simply always "expired").
+      expect(screen.getByText('Supplied')).toBeInTheDocument();
+      expect(screen.getByRole('status')).toHaveTextContent(/can use it until it expires/);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(61_000);
+      });
+      expect(screen.getByText('Value expired')).toBeInTheDocument();
+      expect(screen.getByRole('status')).toHaveTextContent(/can no longer use it/);
+      // No refetch was needed: the clock alone moved the card.
+      expect(getSecretRequest).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('after an unconfirmed save the outcome text does not claim the agent was told', async () => {
+    getSecretRequest.mockResolvedValue(response());
+    fulfillSecretRequest.mockResolvedValue({
+      request: record({ status: 'fulfilled', resolvedByName: 'Raph' }),
+      agentNotified: false,
+    });
     renderCard();
     await screen.findByTestId('secret-request-card');
-    // Live before the deadline (control: the card is not simply always "expired").
-    expect(screen.getByText('Supplied')).toBeInTheDocument();
-    expect(screen.getByRole('status')).toHaveTextContent(/can use it until it expires/);
-    await waitFor(() => expect(screen.getByText('Value expired')).toBeInTheDocument(), {
-      timeout: 3_000,
+    fireEvent.change(valueInput(), { target: { value: SENTINEL } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save secret' }));
+    await screen.findByRole('alert');
+    const status = screen.getByRole('status');
+    expect(status).toHaveTextContent(/Supplied by Raph/);
+    expect(status).not.toHaveTextContent(/agent was told/);
+  });
+
+  it('sends the version of the existing value the person confirmed replacing', async () => {
+    getSecretRequest.mockResolvedValue(
+      response({
+        existing: {
+          isSecret: true,
+          collected: false,
+          expiresAt: null,
+          expired: false,
+          updatedAt: '2026-11-12T09:00:00.000Z',
+          version: '2026-11-12T09:00:00.000Z#iv-seen',
+        },
+      })
+    );
+    fulfillSecretRequest.mockResolvedValue({
+      request: record({ status: 'fulfilled' }),
+      agentNotified: true,
     });
-    expect(screen.getByRole('status')).toHaveTextContent(/can no longer use it/);
-    // No refetch was needed: the clock alone moved the card.
-    expect(getSecretRequest).toHaveBeenCalledTimes(1);
+    renderCard();
+    await screen.findByTestId('secret-request-card');
+    fireEvent.change(valueInput(), { target: { value: SENTINEL } });
+    fireEvent.click(screen.getByLabelText('Replace the existing value'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save secret' }));
+    await waitFor(() =>
+      expect(fulfillSecretRequest).toHaveBeenCalledWith(PROJECT_ID, REQUEST_ID, {
+        value: SENTINEL,
+        replaceExisting: true,
+        expectedExistingVersion: '2026-11-12T09:00:00.000Z#iv-seen',
+      })
+    );
+  });
+
+  it('a different existing value arriving after the tick needs a fresh confirmation', async () => {
+    const { SecretRequestForm } =
+      await import('../../../src/components/project-message-view/tool-cards/SecretRequestForm');
+    const seen = {
+      isSecret: true,
+      collected: false,
+      expiresAt: null,
+      expired: false,
+      updatedAt: '2026-11-12T09:00:00.000Z',
+      version: 'version-seen',
+    };
+    fulfillSecretRequest.mockResolvedValue({
+      request: record({ status: 'fulfilled' }),
+      agentNotified: true,
+    });
+    const props = { projectId: PROJECT_ID, request: record(), onResolved: vi.fn() };
+    const view = render(<SecretRequestForm {...props} existing={seen} />);
+    fireEvent.change(valueInput(), { target: { value: SENTINEL } });
+    fireEvent.click(screen.getByLabelText('Replace the existing value'));
+    expect(screen.getByRole('button', { name: 'Save secret' })).toBeEnabled();
+    // A refetch brings a value someone wrote since, with the same timestamp but another version.
+    view.rerender(
+      <SecretRequestForm {...props} existing={{ ...seen, version: 'version-newer' }} />
+    );
+    expect(screen.getByLabelText('Replace the existing value')).not.toBeChecked();
+    expect(screen.getByRole('button', { name: 'Save secret' })).toBeDisabled();
+    fireEvent.click(screen.getByLabelText('Replace the existing value'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save secret' }));
+    await waitFor(() =>
+      expect(fulfillSecretRequest).toHaveBeenCalledWith(PROJECT_ID, REQUEST_ID, {
+        value: SENTINEL,
+        replaceExisting: true,
+        expectedExistingVersion: 'version-newer',
+      })
+    );
+  });
+
+  it('clears a save error once the value is edited', async () => {
+    getSecretRequest.mockResolvedValue(response());
+    fulfillSecretRequest.mockRejectedValue(new Error('value exceeds max size of 65536 bytes'));
+    renderCard();
+    await screen.findByTestId('secret-request-card');
+    fireEvent.change(valueInput(), { target: { value: 'x'.repeat(10) } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save secret' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/exceeds max size/);
+    fireEvent.change(valueInput(), { target: { value: 'x' } });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('shows status without an input to someone who cannot supply it', async () => {

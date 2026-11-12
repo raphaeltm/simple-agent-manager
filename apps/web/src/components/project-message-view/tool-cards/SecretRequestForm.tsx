@@ -39,11 +39,14 @@ export const SecretRequestForm: FC<SecretRequestFormProps> = ({
   const replaceId = useId();
   const [value, setValue] = useState('');
   const [reveal, setReveal] = useState(false);
-  const [replace, setReplace] = useState(false);
+  // Consent is bound to the exact existing value shown when the box was ticked. If a refetch
+  // brings a different version, the box reads unticked again and saving needs a fresh tick.
+  const [confirmedVersion, setConfirmedVersion] = useState<string | null>(null);
   const [busy, setBusy] = useState<'save' | 'decline' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const needsReplace = existing !== null;
+  const replace = existing !== null && confirmedVersion === existing.version;
   const canSave = value.length > 0 && (!needsReplace || replace) && busy === null;
 
   async function save(event: FormEvent) {
@@ -54,7 +57,9 @@ export const SecretRequestForm: FC<SecretRequestFormProps> = ({
     try {
       const resolution = await fulfillSecretRequest(projectId, request.id, {
         value,
-        ...(needsReplace ? { replaceExisting: true } : {}),
+        ...(existing && confirmedVersion
+          ? { replaceExisting: true, expectedExistingVersion: confirmedVersion }
+          : {}),
       });
       setValue('');
       onResolved(resolution);
@@ -93,7 +98,11 @@ export const SecretRequestForm: FC<SecretRequestFormProps> = ({
           id={inputId}
           type={reveal ? 'text' : 'password'}
           value={value}
-          onChange={(event) => setValue(event.currentTarget.value)}
+          onChange={(event) => {
+            setValue(event.currentTarget.value);
+            // A corrected value should not keep showing the previous submission's error.
+            setError(null);
+          }}
           autoComplete="off"
           autoCapitalize="off"
           autoCorrect="off"
@@ -125,7 +134,10 @@ export const SecretRequestForm: FC<SecretRequestFormProps> = ({
               id={replaceId}
               type="checkbox"
               checked={replace}
-              onChange={(event) => setReplace(event.currentTarget.checked)}
+              onChange={(event) => {
+                setConfirmedVersion(event.currentTarget.checked ? existing.version : null);
+                setError(null);
+              }}
             />
             Replace the existing value
           </label>

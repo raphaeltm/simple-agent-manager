@@ -26,8 +26,12 @@ import {
   assertProjectRuntimeEnvKey,
   findProjectRuntimeEnvVar,
   prepareProjectRuntimeEnvWrite,
+  runtimeEnvValueVersion,
 } from './project-runtime-env';
-import { claimAndStoreValueStatements } from './runtime-secret-request-claim';
+import {
+  claimAndStoreValue,
+  insertPendingRuntimeSecretRequest,
+} from './runtime-secret-request-claim';
 import {
   deliverRuntimeSecretRequestOutcome,
   notifyRuntimeSecretRequested,
@@ -245,8 +249,34 @@ export async function createRuntimeSecretRequest(
     createdAt: now,
     updatedAt: now,
   };
-  await db.insert(schema.runtimeSecretRequests).values(row);
-  const notificationSent = await notifyRuntimeSecretRequested(env, row);
+  if (
+    (await insertPendingRuntimeSecretRequest(env.DATABASE, row, limits.maxPendingPerSession)) === 0
+  ) {
+    // An overlapping call won: return its open request for this name, or refuse at the cap.
+    const [winner] = await db
+      .select()
+      .from(schema.runtimeSecretRequests)
+      .where(
+        and(
+          openForSession,
+          eq(schema.runtimeSecretRequests.projectId, identity.projectId),
+          eq(schema.runtimeSecretRequests.envKey, envKey)
+        )
+      )
+      .limit(1);
+    if (winner) {
+      return {
+        request: toRuntimeSecretRequest(winner, null, now),
+        deduplicated: true,
+        replacesExisting: Boolean(existing),
+        notificationSent: false,
+      };
+    }
+    throw errors.tooManyRequests(
+      `This chat already has ${limits.maxPendingPerSession} open secret requests; wait for them to be answered or expire`
+    );
+  }
+  const notificationSent = await notifyRuntimeSecretRequested(env, db, row);
   log.info('runtime_secret_request.created', {
     requestId: row.id,
     projectId: row.projectId,
@@ -277,6 +307,7 @@ export async function describeExistingValue(
     expiresAt: isoOrNull(existing.expiresAt),
     expired: existing.expiresAt !== null && existing.expiresAt <= now,
     updatedAt: existing.updatedAt,
+    version: await runtimeEnvValueVersion(existing),
   };
 }
 
@@ -351,19 +382,8 @@ export interface FulfillRuntimeSecretRequestInput {
   actorName: string | null;
   value: string;
   replaceExisting: boolean;
-}
-
-async function claimAndStoreValue(
-  env: Env,
-  row: schema.RuntimeSecretRequestRow,
-  input: FulfillRuntimeSecretRequestInput,
-  stored: { ciphertext: string; iv: string | null },
-  resolution: { resolvedAt: number; secretExpiresAt: number | null; replacedExisting: boolean }
-): Promise<boolean> {
-  const [, claim] = await env.DATABASE.batch(
-    claimAndStoreValueStatements(env.DATABASE, row, input, stored, resolution)
-  );
-  return (claim?.meta?.changes ?? 0) === 1;
+  /** Version of the existing value the person confirmed replacing; null = not given. */
+  expectedExistingVersion?: string | null;
 }
 
 /** Caller has verified `secret:write` on the project. */
@@ -388,16 +408,40 @@ export async function fulfillRuntimeSecretRequest(
       `${row.envKey} already exists in this project. Confirm that the new value should replace it.`
     );
   }
+  if (
+    prepared.existing &&
+    input.expectedExistingVersion &&
+    (await runtimeEnvValueVersion(prepared.existing)) !== input.expectedExistingVersion
+  ) {
+    throw errors.conflict(
+      `${row.envKey} changed since you confirmed replacing it. Reload and confirm again.`
+    );
+  }
+  // The claim compares expiry against, and the TTL starts from, the moment of the write, not
+  // the earlier pre-check (encryption and validation take time).
+  const claimedAt = Date.now();
   const resolution = {
-    resolvedAt: now,
-    secretExpiresAt: row.ttlSeconds ? now + row.ttlSeconds * 1_000 : null,
+    resolvedAt: claimedAt,
+    secretExpiresAt: row.ttlSeconds ? claimedAt + row.ttlSeconds * 1_000 : null,
     replacedExisting: Boolean(prepared.existing),
   };
-  if (!(await claimAndStoreValue(env, row, input, prepared.stored, resolution))) {
+  // The write may replace only the exact row read above (and confirmed, when a version was
+  // sent): a value written in between leaves the request open and the card asks again.
+  const replaceTarget = input.replaceExisting ? prepared.existing : null;
+  if (
+    !(await claimAndStoreValue(
+      env.DATABASE,
+      row,
+      replaceTarget,
+      prepared.stored,
+      resolution,
+      input.actorUserId
+    ))
+  ) {
     const current = await loadRuntimeSecretRequest(db, row.projectId, row.id);
-    if (current && effectiveRequestStatus(current.row) === 'pending' && !input.replaceExisting) {
+    if (current && effectiveRequestStatus(current.row) === 'pending') {
       throw errors.conflict(
-        `${row.envKey} was created in this project in the meantime. Confirm that the new value should replace it.`
+        `${row.envKey} was created or changed in this project in the meantime. Reload and confirm that the new value should replace it.`
       );
     }
     throw errors.conflict('This secret request was already answered or has expired');
@@ -406,10 +450,10 @@ export async function fulfillRuntimeSecretRequest(
     ...row,
     status: 'fulfilled',
     resolvedBy: input.actorUserId,
-    resolvedAt: now,
+    resolvedAt: claimedAt,
     secretExpiresAt: resolution.secretExpiresAt,
     replacedExisting: resolution.replacedExisting,
-    updatedAt: now,
+    updatedAt: claimedAt,
   };
   const agentNotified = await notifyAgent(env, db, resolved, 'fulfilled', input.actorName);
   log.info('runtime_secret_request.fulfilled', {
@@ -421,7 +465,7 @@ export async function fulfillRuntimeSecretRequest(
     secretExpiresAt: resolution.secretExpiresAt,
     agentNotified,
   });
-  return { request: toRuntimeSecretRequest(resolved, input.actorName, now), agentNotified };
+  return { request: toRuntimeSecretRequest(resolved, input.actorName, claimedAt), agentNotified };
 }
 
 /** Caller has verified `secret:write` on the project. */

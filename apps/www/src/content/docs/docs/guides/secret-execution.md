@@ -42,10 +42,13 @@ profile's over the project's. A name only counts as Secret if the value that win
 When an agent needs a key you haven't stored yet, it can ask for it with the `request_secret` tool
 instead of asking you to paste it into the chat. A **Secret requested** card appears in the
 conversation with the variable name, the agent's reason, and how long the value will be kept. You
-also get a **Secret requested** notification.
+also get a **Secret requested** notification (as do the project's owners and admins when your role
+can't supply secrets). Notifications are best-effort: if one doesn't arrive, the card is still
+waiting in the chat until the request expires.
 
 1. Type or paste the value into the card and select **Save secret**. If the name already exists in
-   the project, tick **Replace the existing value** first.
+   the project, tick **Replace the existing value** first. The tick applies to the value you were
+   shown: if someone changes it before you save, the card asks you to confirm again.
 2. SAM stores it encrypted as a project **Secret** variable and tells the agent, by name only, that
    it's ready. The agent can use it with `exec_with_secrets` straight away, without restarting.
 3. Or select **Decline**, and the agent is told not to wait for it.

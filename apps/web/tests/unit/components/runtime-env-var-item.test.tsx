@@ -2,7 +2,7 @@
  * Project settings row for one runtime env var: agent-collected values are told apart from
  * manually set ones, with who supplied them, why, from which chat, and when they expire.
  */
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -29,7 +29,8 @@ describe('RuntimeEnvVarItem', () => {
   it('marks a collected secret with its provenance, chat link and expiry', () => {
     renderItem({
       ...base,
-      expiresAt: '2026-11-12T11:00:00Z',
+      // Far future: a fixed near date would read as expired once the clock passes it.
+      expiresAt: '2099-01-01T00:00:00Z',
       expired: false,
       collected: {
         requestId: 'req-1',
@@ -67,6 +68,27 @@ describe('RuntimeEnvVarItem', () => {
     });
     expect(screen.getByText('expired')).toBeInTheDocument();
     expect(screen.getByText(/agents can no longer use it/)).toBeInTheDocument();
+  });
+
+  it('marks a value expired when its deadline passes while the page stays open', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      renderItem({
+        ...base,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        expired: false,
+        collected: null,
+      });
+      expect(screen.queryByText('expired')).not.toBeInTheDocument();
+      expect(screen.getByText(/Expires /)).toBeInTheDocument();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(61_000);
+      });
+      expect(screen.getByText('expired')).toBeInTheDocument();
+      expect(screen.getByText(/agents can no longer use it/)).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('shows a manual secret without provenance (control)', () => {

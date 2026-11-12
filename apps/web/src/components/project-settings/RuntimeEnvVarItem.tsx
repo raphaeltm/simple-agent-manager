@@ -1,6 +1,7 @@
 import type { ProjectRuntimeConfigResponse } from '@simple-agent-manager/shared';
 import { Link } from 'react-router';
 
+import { useDeadlinePassed } from '../../hooks/useDeadlinePassed';
 import { formatDateTime } from '../../lib/time-utils';
 
 type RuntimeEnvVar = ProjectRuntimeConfigResponse['envVars'][number];
@@ -28,6 +29,8 @@ export function RuntimeEnvVarItem({
   onDelete,
 }: RuntimeEnvVarItemProps) {
   const collected = item.collected ?? null;
+  // The server's `expired` is as of the last read; the deadline flips it while the page stays open.
+  const expired = useDeadlinePassed(item.expiresAt ?? null) || item.expired;
   return (
     <div
       className={`grid gap-1 px-2 py-1.5 text-[0.8125rem] ${isLast ? '' : 'border-b border-border-default'}`}
@@ -45,7 +48,7 @@ export function RuntimeEnvVarItem({
           </span>
         )}
         {collected && <span className={`${BADGE} bg-info-tint text-info-fg`}>collected</span>}
-        {item.expired && <span className={`${BADGE} bg-danger-tint text-danger-fg`}>expired</span>}
+        {expired && <span className={`${BADGE} bg-danger-tint text-danger-fg`}>expired</span>}
         {item.isSecret && <span className={`${BADGE} bg-inset text-fg-muted`}>secret</span>}
         <button
           onClick={onDelete}
@@ -96,7 +99,7 @@ export function RuntimeEnvVarItem({
           )}
           {item.expiresAt && (
             <span>
-              {item.expired
+              {expired
                 ? `Expired ${formatDateTime(item.expiresAt)}; agents can no longer use it.`
                 : `Expires ${formatDateTime(item.expiresAt)}.`}
             </span>

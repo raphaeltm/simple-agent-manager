@@ -6,8 +6,9 @@ import type {
 import { Button, Spinner } from '@simple-agent-manager/ui';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { KeyRound } from 'lucide-react';
-import { type FC, useEffect, useMemo, useState } from 'react';
+import { type FC, useMemo, useState } from 'react';
 
+import { useDeadlinePassed } from '../../../hooks/useDeadlinePassed';
 import { useQueryScope } from '../../../hooks/useQueryScope';
 import { getSecretRequest } from '../../../lib/api';
 import { projectQueryKeys } from '../../../lib/query-options/projects';
@@ -66,33 +67,6 @@ function formatDuration(seconds: number): string {
   return `${seconds} seconds`;
 }
 
-/** Longest delay `setTimeout` accepts; a later deadline is re-checked when this one fires. */
-const MAX_TIMER_DELAY_MS = 2_147_483_647;
-
-/**
- * True once `deadline` (ISO) has passed, and flips on time while the card stays open, so a
- * supplied value's TTL is shown as expired without waiting for a reload or a refetch.
- */
-function useDeadlinePassed(deadline: string | null): boolean {
-  const deadlineMs = deadline ? Date.parse(deadline) : Number.NaN;
-  const [passed, setPassed] = useState(() => deadlineMs <= Date.now());
-  useEffect(() => {
-    if (!Number.isFinite(deadlineMs)) {
-      setPassed(false);
-      return undefined;
-    }
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const check = () => {
-      const remaining = deadlineMs - Date.now();
-      setPassed(remaining <= 0);
-      if (remaining > 0) timer = setTimeout(check, Math.min(remaining, MAX_TIMER_DELAY_MS));
-    };
-    check();
-    return () => clearTimeout(timer);
-  }, [deadlineMs]);
-  return passed;
-}
-
 function lifetimeText(request: RuntimeSecretRequest, valueExpired: boolean): string {
   if (request.secretExpiresAt) {
     return valueExpired
@@ -104,16 +78,29 @@ function lifetimeText(request: RuntimeSecretRequest, valueExpired: boolean): str
     : 'Kept until someone deletes it.';
 }
 
-function outcomeText(request: RuntimeSecretRequest, valueExpired: boolean): string {
+/**
+ * `agentNotified` is false only right after this person's own save or decline failed to queue
+ * the agent's notice; the text then states the outcome without claiming the agent was told.
+ */
+function outcomeText(
+  request: RuntimeSecretRequest,
+  valueExpired: boolean,
+  agentNotified: boolean
+): string {
   const by = request.resolvedByName ? ` by ${request.resolvedByName}` : '';
   const when = request.resolvedAt ? ` on ${formatDateTime(request.resolvedAt)}` : '';
   switch (request.status) {
     case 'fulfilled':
-      return valueExpired
-        ? `Supplied${by}${when}. The value has expired, so the agent can no longer use it. Ask the agent to request it again if it is still needed.`
-        : `Supplied${by}${when}. The agent was told the name, never the value, and can use it until it expires or is deleted.`;
+      if (valueExpired) {
+        return `Supplied${by}${when}. The value has expired, so the agent can no longer use it. Ask the agent to request it again if it is still needed.`;
+      }
+      return agentNotified
+        ? `Supplied${by}${when}. The agent was told the name, never the value, and can use it until it expires or is deleted.`
+        : `Supplied${by}${when}. The agent can use it until it expires or is deleted.`;
     case 'declined':
-      return `Declined${by}${when}. The agent was told not to wait for it.`;
+      return agentNotified
+        ? `Declined${by}${when}. The agent was told not to wait for it.`
+        : `Declined${by}${when}.`;
     case 'expired':
       return 'Nobody supplied a value in time. The agent was told not to wait for it.';
     case 'pending':
@@ -251,7 +238,7 @@ export const SecretRequestCard: FC<SecretRequestCardProps> = ({ item, projectId 
           />
         ) : (
           <p role="status" className="m-0 text-sm text-fg-muted [overflow-wrap:anywhere]">
-            {outcomeText(request, valueExpired)}
+            {outcomeText(request, valueExpired, unconfirmedOutcome === null)}
             {request.status === 'pending' && ` Open until ${formatDateTime(request.expiresAt)}.`}
           </p>
         )}

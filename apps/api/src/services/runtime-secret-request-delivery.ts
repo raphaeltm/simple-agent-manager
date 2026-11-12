@@ -5,14 +5,17 @@
  * while that task, or its own session-recovery successor, is live (`sourceTaskGuardForClaim`).
  */
 import { buildSamNotice, type SamNotice } from '@simple-agent-manager/shared';
+import { and, eq, inArray } from 'drizzle-orm';
 
 import type * as schema from '../db/schema';
+import { projectMembers } from '../db/schema';
 import { resolveDurableExecutionConfig } from '../durable-objects/project-data/durable-execution-config';
 import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
+import { projectMemberRolesWithCapability } from '../middleware/project-auth';
 import { buildActionUrl, sendNotification } from './notification';
 import * as projectDataService from './project-data';
-import { isoOrNull } from './runtime-secret-request-records';
+import { type Db, isoOrNull } from './runtime-secret-request-records';
 import { safeNotice } from './sam-notice-builders';
 
 type Outcome = 'fulfilled' | 'declined' | 'expired';
@@ -128,30 +131,71 @@ export async function deliverRuntimeSecretRequestOutcome(
   }
 }
 
-/** Tell the session owner a value is wanted. Best-effort: the card in the chat is the record. */
+/**
+ * Who is told a value is wanted: the person whose agent asked (they own the chat and see the
+ * card first). If that person cannot supply it (no `secret:write`, e.g. a maintainer), every
+ * active member who can is told too, so the request never waits on nobody. Bounded by the
+ * project's membership. A failed lookup falls back to the requester alone.
+ */
+async function secretRequestRecipients(
+  db: Db,
+  row: schema.RuntimeSecretRequestRow
+): Promise<string[]> {
+  try {
+    const writers = await db
+      .select({ userId: projectMembers.userId })
+      .from(projectMembers)
+      .where(
+        and(
+          eq(projectMembers.projectId, row.projectId),
+          eq(projectMembers.status, 'active'),
+          inArray(projectMembers.role, projectMemberRolesWithCapability('secret:write'))
+        )
+      );
+    const writerIds = writers.map((writer) => writer.userId);
+    if (writerIds.includes(row.requesterUserId)) return [row.requesterUserId];
+    return [row.requesterUserId, ...writerIds];
+  } catch (error) {
+    log.warn('runtime_secret_request.recipients_failed', {
+      requestId: row.id,
+      projectId: row.projectId,
+      ...serializeError(error),
+    });
+    return [row.requesterUserId];
+  }
+}
+
+/** Tell people a value is wanted. Best-effort: the card in the chat is the record. */
 export async function notifyRuntimeSecretRequested(
   env: Env,
+  db: Db,
   row: schema.RuntimeSecretRequestRow
 ): Promise<boolean> {
   if (!env.NOTIFICATION) return false;
-  try {
-    const sent = await sendNotification(env, row.requesterUserId, {
-      type: 'secret_request',
-      urgency: 'high',
-      title: `Secret requested: ${row.envKey}`,
-      body: row.reason.slice(0, 500),
-      projectId: row.projectId,
-      taskId: row.requestingTaskId,
-      sessionId: row.requestingChatSessionId,
-      actionUrl: buildActionUrl(row.projectId, row.requestingChatSessionId),
-      metadata: { secretRequestId: row.id, envKey: row.envKey },
-    });
-    return sent.id !== 'suppressed';
-  } catch (error) {
-    log.warn('runtime_secret_request.notify_failed', {
-      requestId: row.id,
-      ...serializeError(error),
-    });
-    return false;
+  const recipients = await secretRequestRecipients(db, row);
+  const results = await Promise.allSettled(
+    recipients.map((userId) =>
+      sendNotification(env, userId, {
+        type: 'secret_request',
+        urgency: 'high',
+        title: `Secret requested: ${row.envKey}`,
+        body: row.reason.slice(0, 500),
+        projectId: row.projectId,
+        taskId: row.requestingTaskId,
+        sessionId: row.requestingChatSessionId,
+        actionUrl: buildActionUrl(row.projectId, row.requestingChatSessionId),
+        metadata: { secretRequestId: row.id, envKey: row.envKey },
+      })
+    )
+  );
+  let sent = false;
+  for (const result of results) {
+    if (result.status === 'fulfilled') sent ||= result.value.id !== 'suppressed';
+    else
+      log.warn('runtime_secret_request.notify_failed', {
+        requestId: row.id,
+        ...serializeError(result.reason),
+      });
   }
+  return sent;
 }

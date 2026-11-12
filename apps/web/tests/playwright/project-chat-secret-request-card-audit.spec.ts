@@ -21,6 +21,12 @@ const LONG_REASON =
   'with Zone:DNS:Edit on sammy.party only. <script>alert(1)</script> 🚀 ' +
   'It only needs to live for the length of this task, so I asked for a one-hour expiry. '.repeat(2);
 
+/**
+ * The Desktop suite pins 1280x800 under every Playwright project, so file names carry the project
+ * name or parallel projects overwrite each other's evidence.
+ */
+const SCREENSHOT_OPTIONS = { scopeToProject: true };
+
 const IDS = {
   open: 'req-open',
   fulfilled: 'req-fulfilled',
@@ -273,6 +279,7 @@ async function setupMocks(
                   expiresAt: null,
                   expired: true,
                   updatedAt: '2026-11-01T00:00:00Z',
+                  version: '2026-11-01T00:00:00Z#iv-1',
                 }
               : null,
           canResolve: record.status === 'pending',
@@ -321,7 +328,7 @@ async function auditOpen(page: Page, name: string) {
   await expect(card.getByText(/Expires 1 hour after it is saved/)).toBeVisible();
   await expect(card.getByText(/already exists in this project/)).toBeVisible();
   await expect(page.getByText('mcp__sam-mcp__request_secret')).toHaveCount(0);
-  await screenshot(page, `${name}-open`);
+  await screenshot(page, `${name}-open`, SCREENSHOT_OPTIONS);
   await assertNoOverflow(page);
   await assertCardsFitColumn(page);
 
@@ -331,7 +338,7 @@ async function auditOpen(page: Page, name: string) {
   const save = card.getByRole('button', { name: 'Save secret' });
   await expect(save).toBeDisabled();
   await card.getByLabel('Replace the existing value').check();
-  await screenshot(page, `${name}-filled`);
+  await screenshot(page, `${name}-filled`, SCREENSHOT_OPTIONS);
   await assertNoOverflow(page);
   await assertCardsFitColumn(page);
   await save.click();
@@ -339,11 +346,17 @@ async function auditOpen(page: Page, name: string) {
   await expect(card.getByText('Supplied', { exact: true })).toBeVisible();
   await expect(card.getByText(/Supplied by Owner/)).toBeVisible();
   await expect(card.getByLabel(/Value for/)).toHaveCount(0);
-  expect(captured.fulfilBodies).toEqual([{ value: SENTINEL, replaceExisting: true }]);
+  expect(captured.fulfilBodies).toEqual([
+    {
+      value: SENTINEL,
+      replaceExisting: true,
+      expectedExistingVersion: '2026-11-01T00:00:00Z#iv-1',
+    },
+  ]);
   // The value went only to the fulfil call: not to any other request, nor into the page.
   expect(captured.otherBodies.join('\n')).not.toContain(SENTINEL);
   expect(await page.content()).not.toContain(SENTINEL);
-  await screenshot(page, `${name}-supplied`);
+  await screenshot(page, `${name}-supplied`, SCREENSHOT_OPTIONS);
   await assertNoOverflow(page);
 }
 
@@ -355,7 +368,7 @@ async function auditSaveError(page: Page, name: string) {
   await card.getByLabel('Replace the existing value').check();
   await card.getByRole('button', { name: 'Save secret' }).click();
   await expect(card.getByRole('alert')).toHaveText(/already fulfilled/);
-  await screenshot(page, `${name}-save-error`);
+  await screenshot(page, `${name}-save-error`, SCREENSHOT_OPTIONS);
   await assertNoOverflow(page);
 }
 
@@ -371,7 +384,7 @@ async function auditStates(page: Page, name: string) {
   await page.mouse.wheel(0, -3000);
   await expect(cards.filter({ hasText: 'OPENAI_API_KEY' }).getByText('Expired')).toBeVisible();
   await expect(page.getByText(/Declined by Owner/)).toBeVisible();
-  await screenshot(page, `${name}-states`);
+  await screenshot(page, `${name}-states`, SCREENSHOT_OPTIONS);
   await assertNoOverflow(page);
   await assertCardsFitColumn(page);
 }
@@ -396,7 +409,7 @@ async function auditValueExpiredAndUnconfirmedDecline(page: Page, name: string) 
   await expect(warning).toHaveText(/Declined, but SAM could not confirm the agent was told/);
   await expect(warning).toHaveText(/not to wait for/);
   await expect(warning).not.toHaveText(/Saved|is ready/);
-  await screenshot(page, `${name}-value-expired-decline-unconfirmed`);
+  await screenshot(page, `${name}-value-expired-decline-unconfirmed`, SCREENSHOT_OPTIONS);
   await assertNoOverflow(page);
   await assertCardsFitColumn(page);
 }
@@ -406,7 +419,7 @@ async function auditMissing(page: Page, name: string) {
   await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`);
   await expect(page.getByText(/Couldn't load this secret request/)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
-  await screenshot(page, `${name}-missing`);
+  await screenshot(page, `${name}-missing`, SCREENSHOT_OPTIONS);
   await assertNoOverflow(page);
 }
 

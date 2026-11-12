@@ -61,7 +61,7 @@ const TYPE_LABELS: Record<NotificationType, { label: string; description: string
   },
   secret_request: {
     label: 'Secret requests',
-    description: 'When an agent asks you to supply a secret value for this project',
+    description: 'When an agent in any of your projects asks for a secret value',
   },
 };
 

@@ -40,6 +40,24 @@ export function assertProjectRuntimeEnvKey(envKey: string | undefined): string {
   return key;
 }
 
+/**
+ * Opaque identity of one stored value: a SHA-256 over its write time, IV and stored bytes. Two
+ * writes in the same millisecond still differ (different IV or bytes), and the digest reveals
+ * neither the ciphertext nor a plaintext value. Shown to the card so a replace confirms exactly
+ * the value the person saw.
+ */
+export async function runtimeEnvValueVersion(row: {
+  updatedAt: string;
+  valueIv: string | null;
+  storedValue: string;
+}): Promise<string> {
+  const input = new TextEncoder().encode(
+    `${row.updatedAt}\u0000${row.valueIv ?? ''}\u0000${row.storedValue}`
+  );
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', input));
+  return Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
 /** The existing row for a key, or null. */
 export async function findProjectRuntimeEnvVar(db: Db, projectId: string, envKey: string) {
   const rows = await db
@@ -49,6 +67,9 @@ export async function findProjectRuntimeEnvVar(db: Db, projectId: string, envKey
       expiresAt: schema.projectRuntimeEnvVars.expiresAt,
       secretRequestId: schema.projectRuntimeEnvVars.secretRequestId,
       updatedAt: schema.projectRuntimeEnvVars.updatedAt,
+      valueIv: schema.projectRuntimeEnvVars.valueIv,
+      // Server-side only (version fingerprint and the replace guard); never put in a response.
+      storedValue: schema.projectRuntimeEnvVars.storedValue,
     })
     .from(schema.projectRuntimeEnvVars)
     .where(

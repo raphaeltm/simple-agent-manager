@@ -42,7 +42,7 @@ const FULFIL_BODY_OVERHEAD_BYTES = 1_024;
 async function readFulfilBody(
   request: Request,
   maxValueBytes: number
-): Promise<{ value: string; replaceExisting: boolean }> {
+): Promise<{ value: string; replaceExisting: boolean; expectedExistingVersion: string | null }> {
   let parsed: unknown;
   try {
     // Escaping can make the JSON up to six times the value's byte length (\uXXXX).
@@ -68,7 +68,18 @@ async function readFulfilBody(
   if (record.replaceExisting !== undefined && typeof record.replaceExisting !== 'boolean') {
     throw errors.badRequest('replaceExisting must be a boolean');
   }
-  return { value: record.value, replaceExisting: record.replaceExisting === true };
+  const expected = record.expectedExistingVersion;
+  if (
+    expected !== undefined &&
+    (typeof expected !== 'string' || expected.length === 0 || expected.length > 64)
+  ) {
+    throw errors.badRequest('expectedExistingVersion must be a timestamp string');
+  }
+  return {
+    value: record.value,
+    replaceExisting: record.replaceExisting === true,
+    expectedExistingVersion: typeof expected === 'string' ? expected : null,
+  };
 }
 
 async function actorName(db: Db, userId: string): Promise<string | null> {
@@ -143,6 +154,7 @@ export function registerProjectSecretRequestRoutes(crudRoutes: Hono<{ Bindings: 
       actorName: await actorName(db, userId),
       value: body.value,
       replaceExisting: body.replaceExisting,
+      expectedExistingVersion: body.expectedExistingVersion,
     });
     return c.json(result);
   });

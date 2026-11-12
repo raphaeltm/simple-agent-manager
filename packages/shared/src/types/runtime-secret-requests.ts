@@ -57,6 +57,11 @@ export interface RuntimeSecretRequestExistingValue {
   expiresAt: string | null;
   expired: boolean;
   updatedAt: string;
+  /**
+   * Opaque identity of this exact stored value (write time plus the value's random IV), echoed
+   * back as `expectedExistingVersion` so a replace confirms this value and no later one.
+   */
+  version: string;
 }
 
 export interface RuntimeSecretRequestResponse {
@@ -70,6 +75,11 @@ export interface FulfillRuntimeSecretRequestBody {
   value: string;
   /** Required when a project variable with this name already exists. */
   replaceExisting?: boolean;
+  /**
+   * `version` of the existing value the person confirmed replacing. If the value has changed
+   * since, the save is refused and the card asks again.
+   */
+  expectedExistingVersion?: string;
 }
 
 export interface RuntimeSecretRequestResolution {
