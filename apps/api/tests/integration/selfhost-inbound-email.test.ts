@@ -22,6 +22,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { handleAppError } from '../../src/middleware/app-error-handler';
+import { adminAgentEmailRoutes } from '../../src/routes/admin-agent-email';
 import { mcpRoutes } from '../../src/routes/mcp';
 import { createSelfHostGatewayRoutes } from '../../src/routes/self-host-gateway';
 import { __resetAdminSettingsCacheForTest } from '../../src/services/admin-settings';
@@ -344,6 +345,50 @@ describe('self-hosted inbound agent email', () => {
     expect(longer.status).toBe(200);
     expect(await longer.json()).toMatchObject({ outcome: 'rejected' });
     expect(submitter).not.toHaveBeenCalled();
+  });
+
+  it('requires a Content-Length and refuses one above the gateway cap', async () => {
+    const raw = rawEmail();
+    const missing = await gatewayRequest(raw, { 'Content-Length': 'abc' });
+    expect(missing.status).toBe(411);
+    const tooLarge = await gatewayRequest(raw, { 'Content-Length': String(26 * 1024 * 1024) });
+    expect(tooLarge.status).toBe(413);
+    expect(submitter).not.toHaveBeenCalled();
+  });
+
+  it('refuses the Cloudflare-only admin loopback test on a box, and sends nothing', async () => {
+    const admin = new Hono<{ Bindings: Env }>();
+    admin.onError(handleAppError);
+    admin.use('*', async (c, next) => {
+      c.set('auth', {
+        user: {
+          id: 'superadmin-1',
+          email: 'superadmin@example.com',
+          name: 'Admin',
+          avatarUrl: null,
+          role: 'superadmin',
+          status: 'active',
+        },
+        session: { id: 'session-1', token: 'token-1', expiresAt: new Date(Date.now() + 3_600_000) },
+      });
+      c.set('signupApprovalRequired', false);
+      await next();
+    });
+    admin.route('/api/admin/agent-email', adminAgentEmailRoutes);
+    const status = await admin.request('/api/admin/agent-email', {}, env);
+    expect(status.status).toBe(200);
+    expect(await status.json()).toMatchObject({ enabled: true, domain: `agents.${BASE_DOMAIN}` });
+    const loopback = await admin.request(
+      '/api/admin/agent-email/loopback',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to: ADDRESS }),
+      },
+      env
+    );
+    expect(loopback.status).toBe(409);
+    expect(smtp.messages).toHaveLength(0);
   });
 
   it('turns agent email and the inbound capability on only when the receiver is configured', async () => {

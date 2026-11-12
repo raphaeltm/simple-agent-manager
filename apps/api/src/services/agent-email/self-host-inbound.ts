@@ -35,7 +35,7 @@ export type SelfHostInboundEnv = EmailTransportEnv &
 
 /** Agent email runs on this install through sam-mx and SMTP (and not through Cloudflare). */
 export function isSelfHostInboundEmailConfigured(env: SelfHostInboundEnv): boolean {
-  if (env.AGENT_EMAIL) return false;
+  if (env.AGENT_EMAIL || !env.BASE_DOMAIN?.trim()) return false;
   if (env.AGENT_EMAIL_INBOUND_SMTP?.trim().toLowerCase() !== 'true') return false;
   if (!getReverseTunnelGatewaySecret(env)) return false;
   return emailTransportKind(env) === 'smtp';
