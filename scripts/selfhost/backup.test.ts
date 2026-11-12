@@ -160,6 +160,22 @@ describe('runBackup', () => {
     expect(readFileSync(join(dest, MANIFEST_NAME), 'utf8')).not.toContain(SECRET);
   });
 
+  it('leaves the rebuildable vm-agent build cache out of the state copy', () => {
+    mkdirSync(join(root, 'state/go-cache/ab'), { recursive: true });
+    writeFileSync(join(root, 'state/go-cache/ab/obj-d'), 'compiled');
+    mkdirSync(join(root, 'state/project'), { recursive: true });
+    writeFileSync(join(root, 'state/project/wrangler.json'), '{}');
+    // A file whose name only starts like the cache is not the cache.
+    writeFileSync(join(root, 'state/go-cache-notes'), 'kept');
+    const dest = join(root, 'backups/b-cache');
+    runBackup(ctx('s3://fleet/celld', join(root, 'state')), dest, 'abc123');
+    expect(tree(join(dest, 'state'))).toEqual({
+      'platform-keys.json': '{"k":"v"}',
+      'project/wrangler.json': '{}',
+      'go-cache-notes': 'kept',
+    });
+  });
+
   it('finishes the backup when the live pre-copy fails because objects changed mid-copy', () => {
     failLiveCopy = true;
     const logs: string[] = [];

@@ -390,7 +390,8 @@ pnpm selfhost:backup                         # -> deploy/selfhost/backups/<UTC t
 pnpm selfhost:restore --from <backup dir>    # into an EMPTY bucket and .state/ only
 ```
 
-A backup is the fleet bucket (celld's only durable state), `.state/` and `.env`: a live copy,
+A backup is the fleet bucket (celld's only durable state), `.state/` (without the rebuildable
+vm-agent build cache `.state/go-cache`) and `.env`: a live copy,
 then celld stopped for the delta copy only, then restarted; the downtime is printed and kept in
 `backup-manifest.json`. The live copy may fail on objects celld rewrites while it runs; that is
 logged and the delta copy finishes it. The backup is exactly the bucket as celld left it when it
@@ -399,9 +400,12 @@ did, so state an aborted `gcloud` pass left behind cannot break it; if the delta
 fails, the whole bucket is copied again into a fresh directory before celld restarts (longer
 downtime, still recorded). gs:// buckets copy with `gcloud storage rsync`; s3:// buckets (the
 bundled store too) with `mc mirror` from the pinned objectstore image. A backup of a sealed box
-holds the sealed bundles but not the key file or key-service credentials, so it cannot be opened
-without the key kept apart. A backup of a `legacy-plaintext` box, or one taken before the box was
-sealed, holds every Worker secret in plaintext: keep it where only you can read it. Restore refuses a bucket that
+holds the sealed bundles but not the key file or key-service credentials, so their secrets cannot
+be opened without the key kept apart. It still holds `.env`, `.state/gateway.env` and the
+metadata-proxy and mail-collector secrets in plaintext, and the bucket's older deploy versions keep
+whatever they were deployed with (`pnpm selfhost:secrets plaintext`). A backup of a
+`legacy-plaintext` box, or one taken before the box was sealed, holds every Worker secret in
+plaintext. Keep backups where only you can read them. Restore refuses a bucket that
 holds objects or a `.state/` with platform keys, and leaves celld stopped: start it with the same
 SAM checkout the backup recorded (`samCommit` in the manifest), never an older one. There is no
 point-in-time recovery: a backup is the recovery point. Code: `scripts/selfhost/backup-lib.ts`.
