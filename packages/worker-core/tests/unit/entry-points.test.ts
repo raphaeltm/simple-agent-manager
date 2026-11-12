@@ -16,6 +16,7 @@ describe('worker-core entry points', () => {
       'createErrorSinkLogger',
       'serializeError',
       'redactCredentialTokens',
+      'startsWithCredentialToken',
       'd1CauseCode',
       'd1ErrorCategory',
       'isFailedQueryError',
