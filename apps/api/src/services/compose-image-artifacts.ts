@@ -1,5 +1,6 @@
 // Moved to @simple-agent-manager/app-deployment (worker modularization W4).
-// Re-exported here so existing importers and vi.mock paths stay unchanged.
+// Re-exported so existing importers keep working. A vi.mock of this path does not reach
+// imports made inside the package (see packages/app-deployment/AGENTS.md).
 export type {
   ComposeImageArtifactDescriptor,
   ComposeImageArtifactDownload,
@@ -8,13 +9,8 @@ export type {
   ComposeImageArtifactUpload,
 } from '@simple-agent-manager/app-deployment';
 export {
-  buildComposeImageArtifactKey,
-  buildLocalImageRef,
-  COMPOSE_IMAGE_ARTIFACT_ARCHIVE_TYPE,
-  COMPOSE_IMAGE_ARTIFACT_MEDIA_TYPE,
   createComposeImageArtifactDownloads,
   createComposeImageArtifactUploads,
-  DEFAULT_COMPOSE_IMAGE_ARTIFACT_MAX_BYTES,
   getComposeImageArtifactMaxBytes,
   validateCompletedComposeImageArtifacts,
   validateComposeImageArtifactDescriptor,

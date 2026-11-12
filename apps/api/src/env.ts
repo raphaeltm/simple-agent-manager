@@ -6,6 +6,8 @@ import type { VmAgentContainer } from './durable-objects/vm-agent-container';
 import type { TaskRecoveryEnv } from './task-recovery-env';
 import type { WebhookTriggerEnv } from './webhook-trigger-env';
 
+// App-deployment tunables (compose artifacts, image resolution, route ports) are declared in
+// AppDeploymentEnv (packages/app-deployment/src/env.ts).
 export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv, AppDeploymentEnv {
   CLI_RECEIPT_REQUEST_MAX_BYTES?: string; // default 262144
   CLI_RECEIPT_RESPONSE_MAX_BYTES?: string; // default 65536
@@ -261,8 +263,6 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv, AppDeploymentEn
   DOH_RESOLVER_URL?: string; // Cloudflare DoH resolver base for custom-domain and email SPF verification (default: https://cloudflare-dns.com/dns-query)
   DOH_TIMEOUT_MS?: string; // Timeout for DoH custom-domain and email SPF lookups in ms (default: 10000)
   DEPLOY_PAYLOAD_EXPIRY_SECONDS?: string;
-  DEPLOYMENT_ROUTE_PORT_BASE?: string;
-  DEPLOYMENT_ROUTE_PORT_SPAN?: string;
   AGENT_DEPLOYMENT_RESERVED_ENVIRONMENT_NAMES?: string; // Comma-separated names agents cannot create via MCP (default: prod,production)
   MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE?: string;
   DEPLOYMENT_DEFAULT_VM_SIZE?: string; // Default VM size for deployment nodes (default: small)
@@ -273,14 +273,6 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv, AppDeploymentEn
   DEPLOYMENT_LOG_MAX_SIZE?: string; // Default json-file log max-size for compose-publish applies (default: 10m)
   DEPLOYMENT_LOG_MAX_FILE?: string; // Default json-file log max-file for compose-publish applies (default: 3)
   MCP_DEPLOYMENT_COMPOSE_PREVIEW_MAX_BYTES?: string; // Max composeYaml bytes accepted by deployment route preview MCP tool
-  COMPOSE_IMAGE_ARTIFACT_MAX_BYTES?: string; // Max single docker-save archive size for R2 compose-publish MVP
-  COMPOSE_IMAGE_ARTIFACT_UPLOAD_URL_TTL_SECONDS?: string; // Presigned upload URL TTL for compose image artifacts
-  COMPOSE_IMAGE_ARTIFACT_DOWNLOAD_URL_TTL_SECONDS?: string; // Presigned download URL TTL for compose image artifacts
-  COMPOSE_IMAGE_ARTIFACT_CLEANUP_ENABLED?: string; // Kill switch: "false" disables abandoned artifact cleanup (default: enabled)
-  COMPOSE_IMAGE_ARTIFACT_ABANDONED_RETENTION_HOURS?: string; // Hours to keep unreferenced uploaded artifacts before cleanup (default: 48)
-  COMPOSE_IMAGE_ARTIFACT_CLEANUP_BATCH_SIZE?: string; // Max abandoned compose artifacts to delete per cleanup run (default: 250)
-  COMPOSE_IMAGE_ARTIFACT_CLEANUP_INTERVAL_HOURS?: string; // Minimum hours between R2 cleanup scans from cron (default: 24)
-  COMPOSE_IMAGE_ARTIFACT_CLEANUP_LAST_RUN_KV_KEY?: string; // KV key for cleanup interval gating
   DEPLOYMENT_RELEASE_RETENTION_ENABLED?: string; // Kill switch: "false" disables terminal release pruning (default: enabled)
   DEPLOYMENT_RELEASE_RETENTION_COUNT?: string; // Releases protected per environment by newest version (default: 3)
   DEPLOYMENT_RELEASE_RETENTION_BATCH_SIZE?: string; // Max terminal releases deleted per run (default: 250)
@@ -1213,13 +1205,6 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv, AppDeploymentEn
   REGISTRY_HOST?: string; // Registry host override (default: registry.cloudflare.com)
   REGISTRY_CREDENTIAL_RATE_LIMIT?: string; // Max credential mints per project per window (default: 10)
   REGISTRY_CREDENTIAL_RATE_WINDOW_SECONDS?: string; // Rate limit window in seconds (default: 300)
-  DEPLOYMENT_IMAGE_RESOLVE_REQUEST_TIMEOUT_MS?: string; // Per-registry request timeout (default: 10000)
-  DEPLOYMENT_IMAGE_RESOLVE_TOTAL_TIMEOUT_MS?: string; // Total tag-resolution budget per submission (default: 60000)
-  DEPLOYMENT_IMAGE_RESOLVE_MAX_FETCH_ATTEMPTS?: string; // Max resolver outbound fetches per submission (default: 200)
-  DEPLOYMENT_IMAGE_RESOLVE_MAX_REDIRECTS?: string; // Max manual redirects per outbound registry/token request (default: 2)
-  DEPLOYMENT_IMAGE_RESOLVE_TOKEN_RESPONSE_MAX_BYTES?: string; // Max bearer token response body size (default: 65536)
-  DEPLOYMENT_IMAGE_RESOLVE_MAX_CONCURRENT_FETCHES?: string; // Max concurrent resolver outbound fetches (default: 4)
-  DEPLOYMENT_IMAGE_RESOLVE_MAX_SERVICES?: string; // Max tag-based images resolved per submission (default: 50)
   // Workspace tool proxy configuration (unified from workspace-mcp)
   WORKSPACE_TOOL_TIMEOUT_MS?: string; // Timeout for VM agent proxy calls (default: 15000)
   BUILD_PUBLISH_TOOL_TIMEOUT_MS?: string; // Legacy timeout for synchronous build_and_publish VM agent proxy (default: 1260000)

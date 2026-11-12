@@ -84,13 +84,13 @@ export interface ImageResolverConfig {
 }
 
 export interface ImageResolverEnv {
-  DEPLOYMENT_IMAGE_RESOLVE_REQUEST_TIMEOUT_MS?: string;
-  DEPLOYMENT_IMAGE_RESOLVE_TOTAL_TIMEOUT_MS?: string;
-  DEPLOYMENT_IMAGE_RESOLVE_MAX_FETCH_ATTEMPTS?: string;
-  DEPLOYMENT_IMAGE_RESOLVE_MAX_REDIRECTS?: string;
-  DEPLOYMENT_IMAGE_RESOLVE_TOKEN_RESPONSE_MAX_BYTES?: string;
-  DEPLOYMENT_IMAGE_RESOLVE_MAX_CONCURRENT_FETCHES?: string;
-  DEPLOYMENT_IMAGE_RESOLVE_MAX_SERVICES?: string;
+  DEPLOYMENT_IMAGE_RESOLVE_REQUEST_TIMEOUT_MS?: string; // Per-registry request timeout (default: 10000)
+  DEPLOYMENT_IMAGE_RESOLVE_TOTAL_TIMEOUT_MS?: string; // Total tag-resolution budget per submission (default: 60000)
+  DEPLOYMENT_IMAGE_RESOLVE_MAX_FETCH_ATTEMPTS?: string; // Max resolver outbound fetches per submission (default: 200)
+  DEPLOYMENT_IMAGE_RESOLVE_MAX_REDIRECTS?: string; // Max manual redirects per outbound registry/token request (default: 2)
+  DEPLOYMENT_IMAGE_RESOLVE_TOKEN_RESPONSE_MAX_BYTES?: string; // Max bearer token response body size (default: 65536)
+  DEPLOYMENT_IMAGE_RESOLVE_MAX_CONCURRENT_FETCHES?: string; // Max concurrent resolver outbound fetches (default: 4)
+  DEPLOYMENT_IMAGE_RESOLVE_MAX_SERVICES?: string; // Max tag-based images resolved per submission (default: 50)
 }
 
 export class ImageResolveError extends Error {

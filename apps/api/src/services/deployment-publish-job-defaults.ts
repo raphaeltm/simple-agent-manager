@@ -1,8 +1,7 @@
 // Moved to @simple-agent-manager/app-deployment (worker modularization W4).
-// Re-exported here so existing importers and vi.mock paths stay unchanged.
+// Re-exported so existing importers keep working. A vi.mock of this path does not reach
+// imports made inside the package (see packages/app-deployment/AGENTS.md).
 export {
-  DEFAULT_DEPLOY_PUBLISH_CALLBACK_GRACE_MS,
-  DEFAULT_DEPLOY_PUBLISH_HEARTBEAT_INTERVAL_MS,
   DEFAULT_DEPLOY_PUBLISH_JOB_CANCEL_TIMEOUT_MS,
   DEFAULT_DEPLOY_PUBLISH_JOB_DEADLINE_MARGIN_MS,
   DEFAULT_DEPLOY_PUBLISH_JOB_DEADLINE_MS,

@@ -1,5 +1,6 @@
 // Moved to @simple-agent-manager/app-deployment (worker modularization W4).
-// Re-exported here so existing importers and vi.mock paths stay unchanged.
+// Re-exported so existing importers keep working. A vi.mock of this path does not reach
+// imports made inside the package (see packages/app-deployment/AGENTS.md).
 export type {
   ImageResolver,
   ImageResolverConfig,
@@ -9,13 +10,6 @@ export type {
 } from '@simple-agent-manager/app-deployment';
 export {
   createImageResolver,
-  DEFAULT_IMAGE_RESOLVE_MAX_CONCURRENT_FETCHES,
-  DEFAULT_IMAGE_RESOLVE_MAX_FETCH_ATTEMPTS,
-  DEFAULT_IMAGE_RESOLVE_MAX_REDIRECTS,
-  DEFAULT_IMAGE_RESOLVE_MAX_SERVICES,
-  DEFAULT_IMAGE_RESOLVE_REQUEST_TIMEOUT_MS,
-  DEFAULT_IMAGE_RESOLVE_TOKEN_RESPONSE_MAX_BYTES,
-  DEFAULT_IMAGE_RESOLVE_TOTAL_TIMEOUT_MS,
   getImageResolverConfig,
   ImageResolveError,
 } from '@simple-agent-manager/app-deployment';

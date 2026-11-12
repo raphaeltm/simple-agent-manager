@@ -4,7 +4,8 @@
  * publish jobs and image tag resolution. Scheduled sweeps are exported from
  * `./scheduled` so importing the services does not load them.
  *
- * The worker (apps/api) wires the ports in `src/app-deployment-ports/` and keeps
+ * Values are exported only when the worker uses them; all types are exported. The
+ * worker (apps/api) wires the ports in `src/app-deployment-ports/` and keeps
  * re-export files at the old `services/` and `scheduled/` paths.
  */
 export type {
@@ -15,13 +16,8 @@ export type {
   ComposeImageArtifactUpload,
 } from './compose-image-artifacts';
 export {
-  buildComposeImageArtifactKey,
-  buildLocalImageRef,
-  COMPOSE_IMAGE_ARTIFACT_ARCHIVE_TYPE,
-  COMPOSE_IMAGE_ARTIFACT_MEDIA_TYPE,
   createComposeImageArtifactDownloads,
   createComposeImageArtifactUploads,
-  DEFAULT_COMPOSE_IMAGE_ARTIFACT_MAX_BYTES,
   getComposeImageArtifactMaxBytes,
   validateCompletedComposeImageArtifacts,
   validateComposeImageArtifactDescriptor,
@@ -60,7 +56,6 @@ export {
   getTaskAgentProfileId,
   isDeploymentPolicyAllowedForProfile,
   parseAllowedDeployProfileIds,
-  parseJsonField,
   reconcileDeploymentReleaseStatuses,
   toDeploymentAgentPolicy,
   toObservedDeploymentState,
@@ -83,11 +78,7 @@ export {
   routeTargetOptions,
 } from './deployment-custom-domains';
 export type { ResolvedHostnameTarget } from './deployment-domain-verify';
-export {
-  matchesCustomDomainTarget,
-  resolveHostnameTarget,
-  verifyCustomDomainTarget,
-} from './deployment-domain-verify';
+export { verifyCustomDomainTarget } from './deployment-domain-verify';
 export type { DeploymentInterpolationEnv } from './deployment-environment-config';
 export {
   buildDeploymentEnvironmentConfigResponse,
@@ -95,7 +86,6 @@ export {
   loadDeploymentBuildInterpolationEnv,
   loadDeploymentEnvironmentConfigRows,
   loadDeploymentInterpolationEnv,
-  touchDeploymentConfigUpdatedAt,
   upsertDeploymentEnvironmentConfigVar,
 } from './deployment-environment-config';
 export {
@@ -108,12 +98,9 @@ export {
   buildDeploymentEnvironmentResponse,
   listRoutedCustomDomainHostnames,
   parseReleaseSubmittedByJson,
-  toReleaseSubmittedBy,
 } from './deployment-environment-summary';
 export { cancelDeploymentPublishJobOnVmBestEffort } from './deployment-publish-job-cancel';
 export {
-  DEFAULT_DEPLOY_PUBLISH_CALLBACK_GRACE_MS,
-  DEFAULT_DEPLOY_PUBLISH_HEARTBEAT_INTERVAL_MS,
   DEFAULT_DEPLOY_PUBLISH_JOB_CANCEL_TIMEOUT_MS,
   DEFAULT_DEPLOY_PUBLISH_JOB_DEADLINE_MARGIN_MS,
   DEFAULT_DEPLOY_PUBLISH_JOB_DEADLINE_MS,
@@ -157,18 +144,10 @@ export type {
   PublicRouteInput,
 } from './deployment-routing';
 export {
-  assignRouteTargets,
   buildComposePublishRouteDiscovery,
-  buildComposePublishRouteTargets,
-  buildDeploymentRouteDiscovery,
   buildDeploymentRouteTargets,
   buildReleaseRouteDiscovery,
-  buildReleaseRouteTargets,
-  buildRouteHostname,
-  buildRouteHostnamePattern,
   collectEnvironmentRouteHostnames,
-  DEFAULT_DEPLOYMENT_ROUTE_PORT_BASE,
-  DEFAULT_DEPLOYMENT_ROUTE_PORT_SPAN,
   environmentPortOffset,
   extractComposeRouteHints,
 } from './deployment-routing';
@@ -189,7 +168,6 @@ export {
   detachEnvironmentVolumesFromLinkedNode,
   listEnvironmentVolumes,
   markDeploymentReleaseVolumeAttachFailed,
-  NAMED_VOLUME_BIND_DATA_DIR,
   resolveLinkedDeploymentNodeVolumeTarget,
   resolveNamedVolumeBindSource,
   resolveNamedVolumeMountRoot,
@@ -203,25 +181,9 @@ export type {
   ImageResolverOptions,
   RegistryAuth,
 } from './image-resolver';
-export { createImageResolver, ImageResolveError } from './image-resolver';
+export { createImageResolver,ImageResolveError } from './image-resolver';
 export type { ResolverRuntimeOptions } from './image-resolver-outbound';
-export {
-  authAppliesToRegistry,
-  configFromOptions,
-  DEFAULT_IMAGE_RESOLVE_MAX_CONCURRENT_FETCHES,
-  DEFAULT_IMAGE_RESOLVE_MAX_FETCH_ATTEMPTS,
-  DEFAULT_IMAGE_RESOLVE_MAX_REDIRECTS,
-  DEFAULT_IMAGE_RESOLVE_MAX_SERVICES,
-  DEFAULT_IMAGE_RESOLVE_REQUEST_TIMEOUT_MS,
-  DEFAULT_IMAGE_RESOLVE_TOKEN_RESPONSE_MAX_BYTES,
-  DEFAULT_IMAGE_RESOLVE_TOTAL_TIMEOUT_MS,
-  fetchBearerToken,
-  fetchValidated,
-  getImageResolverConfig,
-  manifestUrl,
-  parseBearerChallenge,
-  registryBaseUrl,
-} from './image-resolver-outbound';
+export { getImageResolverConfig } from './image-resolver-outbound';
 export type {
   DeploymentLifecyclePort,
   DeploymentProviderPort,

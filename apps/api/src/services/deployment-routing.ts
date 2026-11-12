@@ -1,5 +1,6 @@
 // Moved to @simple-agent-manager/app-deployment (worker modularization W4).
-// Re-exported here so existing importers and vi.mock paths stay unchanged.
+// Re-exported so existing importers keep working. A vi.mock of this path does not reach
+// imports made inside the package (see packages/app-deployment/AGENTS.md).
 export type {
   DeploymentRouteDiscovery,
   DeploymentRouteInternalDiscovery,
@@ -9,18 +10,10 @@ export type {
   PublicRouteInput,
 } from '@simple-agent-manager/app-deployment';
 export {
-  assignRouteTargets,
   buildComposePublishRouteDiscovery,
-  buildComposePublishRouteTargets,
-  buildDeploymentRouteDiscovery,
   buildDeploymentRouteTargets,
   buildReleaseRouteDiscovery,
-  buildReleaseRouteTargets,
-  buildRouteHostname,
-  buildRouteHostnamePattern,
   collectEnvironmentRouteHostnames,
-  DEFAULT_DEPLOYMENT_ROUTE_PORT_BASE,
-  DEFAULT_DEPLOYMENT_ROUTE_PORT_SPAN,
   environmentPortOffset,
   extractComposeRouteHints,
 } from '@simple-agent-manager/app-deployment';
