@@ -1,5 +1,6 @@
-import type { DeploymentPublishJobPorts } from '../../src/ports';
 import { beforeEach, expect, it, vi } from 'vitest';
+
+import type { DeploymentPublishJobPorts } from '../../src/ports';
 
 const cancel = vi.hoisted(() => vi.fn());
 const info = vi.hoisted(() => vi.fn());
