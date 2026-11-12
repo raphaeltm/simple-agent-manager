@@ -37,10 +37,11 @@ export function RuntimeEnvVarItem({
       data-testid="runtime-env-var"
     >
       <div className="flex min-w-0 items-center gap-2">
-        <code className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[0.8125rem] font-semibold text-fg-primary">
+        {/* The name is the row's primary content: wrap it rather than truncate (rule 56). */}
+        <code className="min-w-0 flex-1 text-[0.8125rem] font-semibold text-fg-primary [overflow-wrap:anywhere]">
           {item.key}
         </code>
-        <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-fg-muted">
+        <span className="min-w-0 max-w-[40%] shrink overflow-hidden text-ellipsis whitespace-nowrap text-fg-muted">
           {item.isSecret ? '••••••' : `= ${item.value}`}
         </span>
         {collected && (

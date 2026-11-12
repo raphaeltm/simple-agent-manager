@@ -377,6 +377,7 @@ function capacityDefaults(effective: ProjectSettingsCapacitySummary | null) {
   };
 }
 
+let runtimeConfigBody: unknown = { envVars: [], files: [] };
 let capacityDefaultsStatus = 200;
 let capacityDefaultsBody: unknown = capacityDefaults(capacitySummary());
 
@@ -429,7 +430,7 @@ async function setupMocks(page: Page) {
       if (subPath === '/credential-attribution-health') {
         return respond(200, emptyCredentialHealth);
       }
-      if (subPath === '/runtime-config') return respond(200, { envVars: [], files: [] });
+      if (subPath === '/runtime-config') return respond(200, runtimeConfigBody);
       if (
         subPath === '/capacity-pools/defaults' ||
         subPath === '/capacity-pools/defaults/reconcile'
@@ -465,6 +466,7 @@ async function expectCompactTabs(page: Page) {
 
 test.describe('Project settings sub-pages', () => {
   test.beforeEach(async ({ page }) => {
+    runtimeConfigBody = { envVars: [], files: [] };
     capacityDefaultsStatus = 200;
     capacityDefaultsBody = capacityDefaults(capacitySummary());
     await setupMocks(page);
@@ -489,6 +491,88 @@ test.describe('Project settings sub-pages', () => {
     await expect(page.getByText('Failed to load MCP servers', { exact: false })).toHaveCount(0);
     await screenshot(page, 'project-settings-runtime-performance');
     expect(errors).toEqual([]);
+  });
+
+  test('Runtime tells agent-collected secrets apart, with provenance and expiry', async ({
+    page,
+  }) => {
+    await page.routeWebSocket('**/api/notifications/ws', () => undefined);
+    await page.route(`**/api/projects/${PROJECT_ID}/mcp-connections`, (route) =>
+      route.fulfill({ json: { items: [] } })
+    );
+    const collected = (overrides: Record<string, unknown>) => ({
+      requestId: 'req-1',
+      reason:
+        'Create the DNS records for the preview environment at https://dash.cloudflare.com/profile/api-tokens/a/very/long/path/that/does/not/break <script>alert(1)</script>',
+      requestingTaskId: 'task-1',
+      requestingChatSessionId: 'sess-1',
+      suppliedByName: 'Raphaël',
+      suppliedAt: '2026-11-12T10:00:00.000Z',
+      ...overrides,
+    });
+    runtimeConfigBody = {
+      envVars: [
+        {
+          key: 'CLOUDFLARE_PREVIEW_DNS_EDIT_TOKEN_WITH_A_VERY_LONG_NAME_FOR_THE_EU_WEST_REGION',
+          value: null,
+          isSecret: true,
+          hasValue: true,
+          createdAt: '2026-11-12T10:00:00.000Z',
+          updatedAt: '2026-11-12T10:00:00.000Z',
+          expiresAt: '2099-11-12T11:00:00.000Z',
+          expired: false,
+          collected: collected({}),
+        },
+        {
+          key: 'OPENAI_API_KEY',
+          value: null,
+          isSecret: true,
+          hasValue: true,
+          createdAt: '2026-11-10T10:00:00.000Z',
+          updatedAt: '2026-11-10T10:00:00.000Z',
+          expiresAt: '2026-11-10T11:00:00.000Z',
+          expired: true,
+          collected: collected({ requestId: 'req-2', reason: 'Run the eval suite.' }),
+        },
+        {
+          key: 'NODE_ENV',
+          value: 'production',
+          isSecret: false,
+          hasValue: true,
+          createdAt: '2026-11-01T00:00:00.000Z',
+          updatedAt: '2026-11-01T00:00:00.000Z',
+          expiresAt: null,
+          expired: false,
+          collected: null,
+        },
+        {
+          key: 'MANUAL_TOKEN',
+          value: null,
+          isSecret: true,
+          hasValue: true,
+          createdAt: '2026-11-01T00:00:00.000Z',
+          updatedAt: '2026-11-01T00:00:00.000Z',
+          expiresAt: null,
+          expired: false,
+          collected: null,
+        },
+      ],
+      files: [],
+    };
+    await page.goto(`/projects/${PROJECT_ID}/settings/runtime`);
+    const rows = page.getByTestId('runtime-env-var');
+    await expect(rows).toHaveCount(4);
+    await expect(rows.nth(0).getByText('collected')).toBeVisible();
+    await expect(rows.nth(0).getByText(/supplied by Raphaël/)).toBeVisible();
+    await expect(rows.nth(0).getByRole('link', { name: 'open chat' })).toHaveAttribute(
+      'href',
+      `/projects/${PROJECT_ID}/chat/sess-1`
+    );
+    await expect(rows.nth(1).getByText('expired', { exact: true })).toBeVisible();
+    await expect(rows.nth(1).getByText(/agents can no longer use it/)).toBeVisible();
+    await expect(rows.nth(3).getByText('collected')).toHaveCount(0);
+    await assertNoOverflow(page);
+    await screenshot(page, 'project-settings-runtime-collected-secrets');
   });
 
   test('default route redirects to General and tab shell remains compact', async ({ page }) => {

@@ -151,7 +151,7 @@ export const SecretRequestCard: FC<SecretRequestCardProps> = ({ item, projectId 
   const status = STATUS[request.status];
 
   return (
-    <div className={CARD_CLASS} data-testid="secret-request-card">
+    <div className={`${CARD_CLASS} min-w-0`} data-testid="secret-request-card">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border-default px-4 py-2">
         <span className="flex min-w-0 items-center gap-2 text-sm font-semibold text-fg-primary">
           <KeyRound
@@ -167,7 +167,7 @@ export const SecretRequestCard: FC<SecretRequestCardProps> = ({ item, projectId 
           {status.label}
         </span>
       </div>
-      <div className="grid gap-2 px-4 py-3">
+      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2 px-4 py-3">
         <code className="w-fit max-w-full rounded-sm bg-inset px-1.5 py-0.5 text-[0.8125rem] font-semibold text-fg-primary [overflow-wrap:anywhere]">
           {request.envKey}
         </code>
@@ -175,12 +175,14 @@ export const SecretRequestCard: FC<SecretRequestCardProps> = ({ item, projectId 
         <p className="m-0 whitespace-pre-wrap text-sm text-fg-primary [overflow-wrap:anywhere]">
           {request.reason}
         </p>
-        <p className="m-0 text-xs text-fg-muted">
-          Saved as an encrypted project secret that every project member&apos;s agent sessions can
-          use. {lifetimeText(request)}
-        </p>
+        {(request.status === 'pending' || request.status === 'fulfilled') && (
+          <p className="m-0 text-xs text-fg-muted">
+            {request.status === 'pending' ? 'Saved' : 'Stored'} as an encrypted project secret
+            that every project member&apos;s agent sessions can use. {lifetimeText(request)}
+          </p>
+        )}
       </div>
-      <div className="border-t border-border-default px-4 py-3">
+      <div className="min-w-0 border-t border-border-default px-4 py-3">
         {data.canResolve ? (
           <SecretRequestForm
             projectId={projectId}

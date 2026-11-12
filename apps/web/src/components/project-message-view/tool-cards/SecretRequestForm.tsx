@@ -80,8 +80,8 @@ export const SecretRequestForm: FC<SecretRequestFormProps> = ({
   }
 
   return (
-    <form className="grid gap-2" onSubmit={(event) => void save(event)} autoComplete="off">
-      <label htmlFor={inputId} className="text-xs text-fg-muted">
+    <form className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2" onSubmit={(event) => void save(event)} autoComplete="off">
+      <label htmlFor={inputId} className="min-w-0 text-xs text-fg-muted [overflow-wrap:anywhere]">
         Value for <span className="font-semibold text-fg-primary">{request.envKey}</span>
       </label>
       <div className="flex min-w-0 gap-2">
@@ -112,7 +112,7 @@ export const SecretRequestForm: FC<SecretRequestFormProps> = ({
         </Button>
       </div>
       {needsReplace && existing && (
-        <div className="grid gap-1 rounded-sm border border-warning/40 bg-warning-tint px-3 py-2">
+        <div className="grid min-w-0 gap-1 rounded-sm border border-warning/40 bg-warning-tint px-3 py-2">
           <p className="m-0 text-xs text-warning-fg [overflow-wrap:anywhere]">
             {existingText(request.envKey, existing)} Saving replaces it for every agent in this
             project.
@@ -148,7 +148,7 @@ export const SecretRequestForm: FC<SecretRequestFormProps> = ({
           Decline
         </Button>
       </div>
-      <p className="m-0 text-xs text-fg-muted">
+      <p className="m-0 text-xs text-fg-muted [overflow-wrap:anywhere]">
         The value goes straight to SAM and is stored encrypted. It is never shown to the agent or
         added to this chat.
       </p>
