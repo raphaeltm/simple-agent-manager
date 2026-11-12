@@ -1,5 +1,6 @@
 /** Owner HTTP action -> native D1 CAS + ProjectData session authority -> retained runner. */
 import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -17,14 +18,15 @@ import type { StartTaskInput } from '../../src/durable-objects/task-runner/types
 import type { Env } from '../../src/env';
 import { AppError } from '../../src/middleware/error';
 import { providerLimitResumeRoutes } from '../../src/routes/tasks/provider-limit-resume';
+import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../src/services/default-capacity-pools';
 import {
   newProviderLimitWait,
   type ProviderLimitWait,
 } from '../../src/services/provider-limit-policy';
+import { pickStarterMachines } from '../helpers/capacity-pool-picks';
 import { createAllSchemaTables } from '../helpers/sqlite-d1';
 import {
   createEvictionEnv,
-  pickEvictionPools,
   seedEvictionOwnerAndNode,
 } from '../helpers/workspace-eviction-route-harness';
 import { createSqlStorage } from '../unit/durable-objects/sql-storage-test-utils';
@@ -80,7 +82,18 @@ describe('callback provider hold owner force resume', () => {
     createAllSchemaTables(d1, schema);
     env = createEvictionEnv(d1, { ENCRYPTION_KEY: 'test-key' });
     seedEvictionOwnerAndNode(d1);
-    await pickEvictionPools(env);
+    const db = drizzle(env.DATABASE, { schema });
+    // External catalog fixture; pool publication, owner picks and placement stay real.
+    await ensureDefaultCapacityPoolsForExistingCredentials(db, {
+      userId: 'user-1', projectId: 'project-1', includeInstallation: true, env,
+      offeringResolver: async () => [{
+        provider: 'hetzner', location: 'nbg1', providerInstanceType: 'cx23',
+        providerInstanceSku: null, displayName: 'Test VM', vcpu: 2, memoryMb: 4096,
+        diskGb: 40, currency: 'EUR', priceMonthly: 10, catalogSource: 'api',
+        catalogLastSeenAt: new Date().toISOString(), available: true,
+      }],
+    });
+    await pickStarterMachines(db);
     local = new Database(':memory:');
     boundary.sql = createSqlStorage(local);
     runMigrations(boundary.sql);

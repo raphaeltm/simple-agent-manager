@@ -21,8 +21,8 @@ Raphaël reports externally resetting his selected Claude account and cannot fin
 - [x] Add thin HTTP adapter and owner-only session notice action with pending/error state.
 - [x] Exercise public action in Workers through live rejected windows, claimed/unclaimed recovery and original delivery once.
 - [x] Cover double click, non-owner/access revocation, expired/degraded snapshot, cancellation, mutation/races and fresh rejection.
-- [ ] Run API/UI quality checks and desktop/mobile screenshot audit.
-- [ ] Update API/user docs; specialist reviews and task-completion review.
+- [x] Run API/UI lint/typecheck and desktop/mobile screenshot audit (full repository tests/build still pending).
+- [x] Update API/user docs; specialist reviews and implementation completion review (release gates remain pending).
 - [ ] Coordinate bounded real staging validation and cleanup.
 - [ ] Draft PR, CI, CodeRabbit, full-head evidence to coordinator.
 
@@ -36,4 +36,10 @@ Keep PR draft until coordinator 01M77NV1B621TKTV79272F7YX3 independently approve
 
 ## Local validation and review
 
-API focused191 tests pass; real Workers full snapshot restoration5 pass, including both claim variants and a fresh rejection. Browser14 mobile/desktop checks and refined6 after desktop action-width fix pass;320/light follow-up in progress. Security/Cloudflare review issues fixed: claimed-runner ongoing membership, retry restoration after definitive fresh-claim failure, and receipt reconciliation no-wake. Four receipt tests verified red before correction; all64 adapter tests pass. UI/doc, constitution/completion and broad quality checks still running. Staging, draft PR and review/release gates remain outstanding.
+Repository lint/typecheck34/34 passed. Focused API191 passed; latest owner51 passed. Real Workers restore5 passed with claimed/unclaimed owner recovery, original delivery once and fresh rejection. UI12 passed; browser375/1280 normal/admission/blocked actions14 passed; refined6 and320/light6 passed; final12 screenshot recapture passed. Eight mobile/desktop normal/pending/error/reader images are in the SAM Library under `/design/provider-limit-force-resume/` and were independently reviewed. Security/Cloudflare, test engineer, UI/docs and implementation completion/constitution reviewers completed; all implementation findings addressed. Full repository build/native tests and merged integration checks remain running.
+
+The integration-only branch merges this output with Sol6511b14d. Its owner fixture now supplies an explicit API-origin catalog offering through the existing resolver, while exercising real pool publication, owner selection and placement. The previous dummy cloud credential depended on a static-catalog fallback that Sol's stronger completeness checks correctly reject. No production behavior was changed for this fixture adaptation.
+
+## Staging coordination
+
+The coordinator assigned bounded cleanup of two old empty staging GCP test nodes after confirming their provider identities. Both ordinary authenticated DELETE requests returned409 because runtime termination could not be confirmed. Read-only D1 reports provenance quarantine and no termination proof; logs redact the underlying error, so a precise credential mismatch is unproven. Coordinator is arranging human cleanup. No new VM, staging deployment, production mutation or replay has been performed by this task. One disposable2vCPU/4GB VM is planned for sequential combined catalog/recovery and owner-force validation after the shared resource ceiling clears.
