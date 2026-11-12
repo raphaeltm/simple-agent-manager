@@ -11,6 +11,7 @@ on:
       - 'packages/scheduler-core/**'
       - 'packages/agent-email/**'
       - 'packages/operations/**'
+      - 'packages/ai-proxy/**'
       - 'scripts/e2e/**'
       - 'scripts/deploy/configure-docker-mirror.mjs'
       - 'package.json'
