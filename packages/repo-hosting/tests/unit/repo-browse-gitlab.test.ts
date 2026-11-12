@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Env } from '../../../src/env';
-import type { GitLabRepositoryMetadata } from '../../../src/services/gitlab';
-import { GitLabRepoBrowser } from '../../../src/services/repo-browse/gitlab';
+import type { Env } from '../../src/env';
+import type { GitLabRepositoryMetadata } from '../../src/gitlab';
+import { GitLabRepoBrowser } from '../../src/repo-browse/gitlab';
 
 const gitlab = vi.hoisted(() => ({
   compareGitLabRefs: vi.fn(),
@@ -13,7 +13,7 @@ const gitlab = vi.hoisted(() => ({
   requireGitLabUserAccessTokenForOwner: vi.fn(),
 }));
 
-vi.mock('../../../src/services/gitlab', () => gitlab);
+vi.mock('../../src/gitlab', () => gitlab);
 
 const metadata: GitLabRepositoryMetadata = {
   host: 'gitlab.com',

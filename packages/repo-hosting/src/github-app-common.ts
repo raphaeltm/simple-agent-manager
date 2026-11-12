@@ -1,7 +1,5 @@
+import { AppError, readResponseJson } from '@simple-agent-manager/worker-core';
 import * as v from 'valibot';
-
-import { readResponseJson } from '../lib/runtime-validation';
-import { AppError } from '../middleware/error';
 
 export const githubErrorSchema = v.object({
   message: v.optional(v.string()),

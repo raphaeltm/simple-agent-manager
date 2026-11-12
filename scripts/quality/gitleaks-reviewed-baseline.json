@@ -188,6 +188,18 @@
       "reviewedAt": "2026-11-10T09:21:52.185Z",
       "expiresAt": "2026-12-10T09:21:52.185Z",
       "digests": ["753cf5e5f0b0593379205af9e29a8f277d5e70a4cb78aec374dc3b006eec7de2"]
+    },
+    {
+      "classification": "code-identifier",
+      "reason": "Reviewed 2026-11-12 for worker modularization W7: the PEM header/footer string literals in convertPkcs1ToPkcs8() moved unchanged from apps/api/src/services/github-app-tokens.ts to packages/repo-hosting/src/github-app-tokens.ts. Delimiter references only, no key body. Exact current rule/path/line/bytes only.",
+      "owner": "security",
+      "reviewedAt": "2026-11-12T13:58:35.588Z",
+      "expiresAt": "2026-12-12T13:58:35.588Z",
+      "digests": [
+        "b050c606ef9d5554f41019a04b6037b9e7222d429a3e5a6c21c03a7414f7a740",
+        "e29d9f39d5d508901ff20c3a7d881fb4a7e1e47fb2d68a4b7afcb424b48c105c",
+        "ec04d32901800dd03b4c2dfae3064a8c5889b9cfd76f0b75e1d717d14034bf32"
+      ]
     }
   ]
 }

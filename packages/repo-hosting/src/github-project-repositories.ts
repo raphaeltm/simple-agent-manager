@@ -1,8 +1,8 @@
+import * as schema from '@simple-agent-manager/worker-core/schema';
 import { eq, or, type SQL } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
-import * as schema from '../db/schema';
-import type { Env } from '../env';
+import type { Env } from './env';
 
 export type GitHubProjectCandidate = {
   id: string;

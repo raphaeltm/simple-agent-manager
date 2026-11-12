@@ -8,7 +8,7 @@ import {
   parseGitmodules,
   verifyUserInstallationAccess,
   verifyWebhookSignature,
-} from '../../../src/services/github-app';
+} from '../../src/github-app';
 
 const mocks = vi.hoisted(() => ({
   log: {
@@ -19,8 +19,8 @@ const mocks = vi.hoisted(() => ({
   },
 }));
 
-vi.mock('../../../src/lib/logger', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../../src/lib/logger')>()),
+vi.mock('@simple-agent-manager/worker-core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@simple-agent-manager/worker-core')>()),
   log: mocks.log,
 }));
 

@@ -11,18 +11,22 @@ const mocks = vi.hoisted(() => ({
   },
 }));
 
-vi.mock('../../../src/lib/logger', () => ({ log: mocks.log }));
-vi.mock('../../../src/services/github-app', () => ({
+vi.mock('@simple-agent-manager/worker-core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@simple-agent-manager/worker-core')>()),
+  log: mocks.log,
+}));
+vi.mock('../../src/github-app', () => ({
   getRepositoryMetadata: mocks.getRepositoryMetadata,
   getInstallationToken: mocks.getInstallationToken,
 }));
 
-import * as schema from '../../../src/db/schema';
-import type { Env } from '../../../src/env';
+import * as schema from '@simple-agent-manager/worker-core/schema';
+
+import type { Env } from '../../src/env';
 import {
   backfillProjectGithubRepoId,
   bulkBackfillGithubRepoIds,
-} from '../../../src/services/github-repo-id-backfill';
+} from '../../src/github-repo-id-backfill';
 
 const env = {} as Env;
 

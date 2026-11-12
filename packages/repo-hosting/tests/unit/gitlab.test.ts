@@ -1,13 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Env } from '../../../src/env';
-import { verifyGitLabProjectAccess } from '../../../src/services/gitlab';
+import type { Env } from '../../src/env';
+import { verifyGitLabProjectAccess } from '../../src/gitlab';
+import { configureRepoHostingPort } from '../../src/ports';
 
-const platformConfig = vi.hoisted(() => ({
+const platformConfig = {
   getGitLabOAuthConfig: vi.fn(),
-}));
+};
 
-vi.mock('../../../src/services/platform-config', () => platformConfig);
+// The worker resolves GitLab OAuth settings through its platform-config port.
+configureRepoHostingPort('platformConfig', {
+  githubApp: vi.fn(),
+  githubOAuth: vi.fn(),
+  gitlabOAuth: (env) => platformConfig.getGitLabOAuthConfig(env),
+});
 
 const originalFetch = globalThis.fetch;
 

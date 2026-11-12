@@ -24,16 +24,20 @@ vi.mock('jose', () => ({
   },
 }));
 
-vi.mock('../../../src/services/platform-config', () => ({
-  getGitHubAppConfig: vi.fn().mockResolvedValue({
+import type { Env } from '../../src/env';
+import { getInstallationToken } from '../../src/github-app';
+import { configureRepoHostingPort } from '../../src/ports';
+
+// The worker resolves GitHub App settings through its platform-config port.
+configureRepoHostingPort('platformConfig', {
+  githubApp: vi.fn().mockResolvedValue({
     appId: '123',
     privateKey: '-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----',
     slug: 'sam',
   }),
-}));
-
-import type { Env } from '../../../src/env';
-import { getInstallationToken } from '../../../src/services/github-app';
+  githubOAuth: vi.fn(),
+  gitlabOAuth: vi.fn(),
+});
 
 function makeEnv(cached?: unknown): Partial<Env> {
   return {

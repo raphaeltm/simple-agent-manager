@@ -1,11 +1,8 @@
+import { readResponseJson } from '@simple-agent-manager/worker-core';
 import * as v from 'valibot';
 
-import { createAuth } from '../auth';
-import type { Env } from '../env';
-import { readResponseJson } from '../lib/runtime-validation';
-import { getBetterAuthAccountIdForProvider } from './better-auth-account';
+import type { Env } from './env';
 
-type OAuthProviderId = 'github' | 'gitlab';
 type UserAccessTokenLockBinding = NonNullable<
   Env['GITHUB_USER_ACCESS_TOKEN_LOCK'] | Env['GITLAB_USER_ACCESS_TOKEN_LOCK']
 >;
@@ -44,24 +41,6 @@ export function availableUserAccessToken(
   }
 
   return token.accessToken;
-}
-
-export async function getBetterAuthAccessTokenForProvider(
-  env: Env,
-  headers: Headers | undefined,
-  userId: string,
-  providerId: OAuthProviderId
-) {
-  const accountId = await getBetterAuthAccountIdForProvider(env, userId, providerId);
-  if (!accountId) {
-    return null;
-  }
-
-  const auth = await createAuth(env);
-  return auth.api.getAccessToken({
-    ...(headers ? { headers } : {}),
-    body: { accountId, userId },
-  });
 }
 
 export async function requestLockedUserAccessToken(

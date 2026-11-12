@@ -1,7 +1,6 @@
+import * as schema from '@simple-agent-manager/worker-core/schema';
 import { sql } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
-
-import * as schema from '../db/schema';
 
 export type GitHubDb = ReturnType<typeof drizzle<typeof schema>>;
 export type GitHubInstallationAccountRow = typeof schema.githubInstallationAccounts.$inferSelect;

@@ -28,12 +28,12 @@
  * destroying project data. Deletes are scoped `DELETE ... WHERE id = ? AND
  * user_id = ?` — never `DROP TABLE`.
  */
+import { log } from '@simple-agent-manager/worker-core';
+import * as schema from '@simple-agent-manager/worker-core/schema';
 import { and, eq, gt } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 
-import * as schema from '../db/schema';
-import type { Env } from '../env';
-import { log } from '../lib/logger';
+import type { Env } from './env';
 import { generateAppJWT, getInstallationAccount } from './github-app';
 import { getExternalInstallationId } from './github-installation-ids';
 

@@ -5,7 +5,7 @@ import {
   GITHUB_REPOSITORY_MAX_PAGE,
   GITHUB_REPOSITORY_PAGE_SIZE,
   GITHUB_REPOSITORY_SCAN_LIMIT,
-} from '../../../src/services/github-app';
+} from '../../src/github-app';
 
 afterEach(() => vi.unstubAllGlobals());
 

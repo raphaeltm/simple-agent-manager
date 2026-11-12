@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Env } from '../../../src/env';
-import { ArtifactsRepoBrowser } from '../../../src/services/repo-browse/artifacts';
+import type { Env } from '../../src/env';
+import { ArtifactsRepoBrowser } from '../../src/repo-browse/artifacts';
 
 // Mock isomorphic-git (the git mechanics themselves are proven by the workerd
 // spike, idea §10). The real `diff` lib is used so patch generation is exercised.

@@ -16,12 +16,12 @@
  * The UPDATE is idempotent: it only touches rows where `github_repo_id IS NULL`,
  * so it is safe to run concurrently and repeatedly.
  */
+import { log } from '@simple-agent-manager/worker-core';
+import * as schema from '@simple-agent-manager/worker-core/schema';
 import { and, eq, isNull } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 
-import * as schema from '../db/schema';
-import type { Env } from '../env';
-import { log } from '../lib/logger';
+import type { Env } from './env';
 import { getInstallationToken, getRepositoryMetadata } from './github-app';
 
 /**

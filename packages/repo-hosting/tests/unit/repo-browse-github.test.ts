@@ -1,14 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Env } from '../../../src/env';
-import { GitHubRepoBrowser } from '../../../src/services/repo-browse/github';
+import type { Env } from '../../src/env';
+import { GitHubRepoBrowser } from '../../src/repo-browse/github';
 
 const githubApp = vi.hoisted(() => ({
   getInstallationToken: vi.fn(),
   getRepositoryBranches: vi.fn(),
 }));
 
-vi.mock('../../../src/services/github-app', () => githubApp);
+vi.mock('../../src/github-app', () => githubApp);
 
 function makeBrowser(env: Partial<Env> = {}): GitHubRepoBrowser {
   return new GitHubRepoBrowser('octo', 'repo', 'main', 'inst-1', env as Env);

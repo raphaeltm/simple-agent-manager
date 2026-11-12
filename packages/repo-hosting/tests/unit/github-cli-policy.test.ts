@@ -6,7 +6,7 @@ import {
   parseGitHubCliPolicyJson,
   resolveWorkspaceGitHubTokenOptions,
   toInstallationTokenOptions,
-} from '../../../src/services/github-cli-policy';
+} from '../../src/github-cli-policy';
 
 function makePolicy(overrides: Partial<GitHubCliPolicy> = {}): GitHubCliPolicy {
   return {

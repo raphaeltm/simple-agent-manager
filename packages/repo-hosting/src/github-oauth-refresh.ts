@@ -2,11 +2,11 @@
  * GitHub OAuth user-token refresh, used when a stored user access token expires.
  * Re-exported from `../auth` for existing callers.
  */
+import { createModuleLogger } from '@simple-agent-manager/worker-core';
 import * as v from 'valibot';
 
-import type { Env } from '../env';
-import { createModuleLogger } from '../lib/logger';
-import { getGitHubOAuthConfig } from './platform-config';
+import type { Env } from './env';
+import { repoHostingPorts } from './ports';
 
 const log = createModuleLogger('auth');
 
@@ -35,7 +35,7 @@ function expiresAtFromSeconds(seconds: number | undefined): Date | undefined {
 }
 
 export async function refreshGitHubAccessToken(env: Env, refreshToken: string) {
-  const githubOAuth = await getGitHubOAuthConfig(env);
+  const githubOAuth = await repoHostingPorts().platformConfig.githubOAuth(env);
   if (!githubOAuth) {
     throw new Error('GitHub OAuth is not configured');
   }

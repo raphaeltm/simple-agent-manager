@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { MemoryFS } from '../../../src/services/repo-browse/memory-fs';
+import { MemoryFS } from '../../src/repo-browse/memory-fs';
 
 describe('MemoryFS', () => {
   it('exposes a promises property pointing at itself (isomorphic-git contract)', () => {

@@ -1,4 +1,4 @@
-import type { Env } from '../../env';
+import type { Env } from '../env';
 
 /** Default cap for inlining text file content; larger files stream via rawUrl. */
 export const DEFAULT_REPO_BROWSE_MAX_INLINE_BYTES = 1_000_000;

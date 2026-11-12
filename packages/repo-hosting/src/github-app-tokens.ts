@@ -1,10 +1,12 @@
+import {
+  AppError,
+  fetchWithTimeout,
+  parseCacheTtlSeconds,
+  readResponseJson,
+} from '@simple-agent-manager/worker-core';
 import { importPKCS8, SignJWT } from 'jose';
 
-import type { Env } from '../env';
-import { readResponseJson } from '../lib/runtime-validation';
-import { AppError } from '../middleware/error';
-import { parseCacheTtlSeconds } from './cache-config';
-import { fetchWithTimeout } from './fetch-timeout';
+import type { Env } from './env';
 import {
   DEFAULT_GITHUB_INSTALLATION_TOKEN_CACHE_TTL_SECONDS,
   DEFAULT_GITHUB_INSTALLATION_TOKEN_REFRESH_MARGIN_SECONDS,
@@ -12,7 +14,7 @@ import {
   MAX_GITHUB_INSTALLATION_TOKEN_REFRESH_MARGIN_SECONDS,
   readGitHubError,
 } from './github-app-common';
-import { getGitHubAppConfig } from './platform-config';
+import { repoHostingPorts } from './ports';
 
 export async function installationTokenCacheKey(
   installationId: string,
@@ -169,7 +171,7 @@ export function cachedInstallationTokenIsFresh(
  * This JWT is used to authenticate as the GitHub App.
  */
 export async function generateAppJWT(env: Env): Promise<string> {
-  const config = await getGitHubAppConfig(env);
+  const config = await repoHostingPorts().platformConfig.githubApp(env);
   if (!config) {
     throw new AppError(
       500,

@@ -7,9 +7,9 @@ import type {
   RepoTreeEntry,
   RepoTreeResponse,
 } from '@simple-agent-manager/shared';
+import { parseCacheTtlSeconds } from '@simple-agent-manager/worker-core';
 
-import type { Env } from '../../env';
-import { parseCacheTtlSeconds } from '../cache-config';
+import type { Env } from '../env';
 import { getInstallationToken, getRepositoryBranches } from '../github-app';
 import type { RepoBrowser } from './types';
 import { basename, isBinaryBytes, maxInlineBytes } from './util';

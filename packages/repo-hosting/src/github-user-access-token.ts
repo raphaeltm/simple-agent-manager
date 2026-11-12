@@ -1,11 +1,10 @@
-import { type Context } from 'hono';
+import { log } from '@simple-agent-manager/worker-core';
 
-import type { Env } from '../env';
-import { log } from '../lib/logger';
+import type { Env, RepoHostingRequestContext } from './env';
 import { getTokenType } from './github-route-helpers';
+import { repoHostingPorts } from './ports';
 import {
   availableUserAccessToken,
-  getBetterAuthAccessTokenForProvider,
   requestLockedUserAccessToken,
   type UserAccessTokenResult,
 } from './user-access-token';
@@ -32,7 +31,7 @@ async function getDirectGitHubUserAccessTokenWithHeaders(
   flow: string
 ): Promise<string | null> {
   try {
-    const token = await getBetterAuthAccessTokenForProvider(env, headers, userId, 'github');
+    const token = await repoHostingPorts().auth.getAccessToken(env, headers, userId, 'github');
     if (!token) {
       log.warn('github.user_access_token_account_missing', {
         flow,
@@ -114,7 +113,7 @@ export async function getGitHubUserAccessTokenWithHeaders(
  * encrypted accounts table directly.
  */
 export async function getGitHubUserAccessToken(
-  c: Context<{ Bindings: Env }>,
+  c: RepoHostingRequestContext,
   userId: string
 ): Promise<string | null> {
   return getGitHubUserAccessTokenWithHeaders(c.env, c.req.raw.headers, userId, 'request');

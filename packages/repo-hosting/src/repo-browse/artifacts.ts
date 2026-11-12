@@ -6,12 +6,12 @@ import type {
   RepoTreeEntry,
   RepoTreeResponse,
 } from '@simple-agent-manager/shared';
+import { errors } from '@simple-agent-manager/worker-core';
 import { createPatch } from 'diff';
 import git from 'isomorphic-git';
 import http from 'isomorphic-git/http/web';
 
-import type { Env } from '../../env';
-import { errors } from '../../middleware/error';
+import type { Env } from '../env';
 import { MemoryFS } from './memory-fs';
 import type { RepoBrowser } from './types';
 import { basename, guessContentType, isBinaryBytes, maxCompareFiles, maxInlineBytes } from './util';

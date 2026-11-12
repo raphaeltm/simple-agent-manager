@@ -12,15 +12,19 @@ const mocks = vi.hoisted(() => ({
   },
 }));
 
-vi.mock('../../../src/lib/logger', () => ({ log: mocks.log }));
-vi.mock('../../../src/services/github-app', () => ({
+vi.mock('@simple-agent-manager/worker-core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@simple-agent-manager/worker-core')>()),
+  log: mocks.log,
+}));
+vi.mock('../../src/github-app', () => ({
   getInstallationAccount: mocks.getInstallationAccount,
   generateAppJWT: mocks.generateAppJWT,
 }));
 
-import * as schema from '../../../src/db/schema';
-import type { Env } from '../../../src/env';
-import { bulkSweepMismatchedPersonalInstallations } from '../../../src/services/github-installation-leak-sweep';
+import * as schema from '@simple-agent-manager/worker-core/schema';
+
+import type { Env } from '../../src/env';
+import { bulkSweepMismatchedPersonalInstallations } from '../../src/github-installation-leak-sweep';
 
 const env = {} as Env;
 

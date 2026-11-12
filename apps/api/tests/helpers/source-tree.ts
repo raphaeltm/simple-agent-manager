@@ -14,6 +14,10 @@ export const WORKER_PACKAGE_SOURCE_ROOTS: readonly string[] = [
     path.dirname(fileURLToPath(import.meta.url)),
     '../../../../packages/project-data/src'
   ),
+  path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    '../../../../packages/repo-hosting/src'
+  ),
 ];
 
 const SKIP_DIRECTORIES = new Set(['node_modules', 'dist', '.wrangler']);

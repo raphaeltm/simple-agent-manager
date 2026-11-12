@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   availableUserAccessToken,
   userAccessTokenExpiryIso,
-} from '../../../src/services/user-access-token';
+} from '../../src/user-access-token';
 
 describe('user access-token expiry handling', () => {
   it.each([undefined, null])('keeps a token with %s expiry metadata', (accessTokenExpiresAt) => {

@@ -1,10 +1,9 @@
 import type { GitHubCliPermissionLevel, GitHubCliPolicy } from '@simple-agent-manager/shared';
+import { log } from '@simple-agent-manager/worker-core';
+import * as schema from '@simple-agent-manager/worker-core/schema';
 import { and, eq, isNull, or } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 import * as v from 'valibot';
-
-import * as schema from '../db/schema';
-import { log } from '../lib/logger';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 

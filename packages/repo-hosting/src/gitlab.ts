@@ -1,19 +1,21 @@
 import type { GitLabProject } from '@simple-agent-manager/shared';
+import {
+  AppError,
+  errors,
+  fetchWithTimeout,
+  getTimeoutMs,
+  log,
+  readResponseJson,
+} from '@simple-agent-manager/worker-core';
+import * as schema from '@simple-agent-manager/worker-core/schema';
 import { eq } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
-import { type Context } from 'hono';
 import * as v from 'valibot';
 
-import * as schema from '../db/schema';
-import type { Env } from '../env';
-import { log } from '../lib/logger';
-import { readResponseJson } from '../lib/runtime-validation';
-import { AppError, errors } from '../middleware/error';
-import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
-import { getGitLabOAuthConfig } from './platform-config';
+import type { Env, RepoHostingRequestContext } from './env';
+import { repoHostingPorts } from './ports';
 import {
   availableUserAccessToken,
-  getBetterAuthAccessTokenForProvider,
   requestLockedUserAccessToken,
   userAccessTokenExpiryIso,
   type UserAccessTokenResult,
@@ -134,7 +136,7 @@ async function getDirectGitLabUserAccessTokenResultWithHeaders(
   flow: string
 ): Promise<GitLabAccessTokenResult | null> {
   try {
-    const token = await getBetterAuthAccessTokenForProvider(env, headers, userId, 'gitlab');
+    const token = await repoHostingPorts().auth.getAccessToken(env, headers, userId, 'gitlab');
     if (!token) {
       log.warn('gitlab.user_access_token_account_missing', {
         flow,
@@ -234,7 +236,7 @@ export async function getGitLabUserAccessTokenWithHeaders(
 }
 
 export async function getGitLabUserAccessToken(
-  c: Context<{ Bindings: Env }>,
+  c: RepoHostingRequestContext,
   userId: string
 ): Promise<string | null> {
   return getGitLabUserAccessTokenWithHeaders(c.env, c.req.raw.headers, userId, 'request');
@@ -249,7 +251,7 @@ export async function getGitLabUserAccessTokenForOwner(
 }
 
 export async function requireGitLabUserAccessToken(
-  c: Context<{ Bindings: Env }>,
+  c: RepoHostingRequestContext,
   userId: string
 ): Promise<string> {
   const accessToken = await getGitLabUserAccessToken(c, userId);
@@ -289,7 +291,7 @@ export async function requireGitLabUserAccessTokenResultForOwner(
 }
 
 async function getGitLabApiBase(env: Env): Promise<{ host: string; apiBaseUrl: string }> {
-  const config = await getGitLabOAuthConfig(env);
+  const config = await repoHostingPorts().platformConfig.gitlabOAuth(env);
   if (!config) {
     throw errors.badRequest('GitLab is not configured on this deployment');
   }

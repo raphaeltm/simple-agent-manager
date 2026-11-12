@@ -8,7 +8,7 @@ import type {
   RepoTreeResponse,
 } from '@simple-agent-manager/shared';
 
-import type { Env } from '../../env';
+import type { Env } from '../env';
 import type { GitLabRepositoryMetadata } from '../gitlab';
 import {
   compareGitLabRefs,
