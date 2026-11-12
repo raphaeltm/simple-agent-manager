@@ -240,15 +240,33 @@ for (const viewport of [
 
     test('collapsed notices are one line each, between real messages', async ({ page }) => {
       await openChat(page);
-      // Liveness: the agent's reply renders normally between the notices. (The list is
-      // virtualized and opens at the bottom, so assert on rows near the end.)
+      // Position the reader at the last row for this presentation audit. Initial
+      // scroll anchoring is separate; the virtualizer can mount an earlier window.
+      const scroller = page
+        .getByRole('log', { name: 'Conversation' })
+        .getByTestId('virtuoso-scroller');
+      await expect(async () => {
+        await scroller.evaluate((el) => el.scrollTo(0, el.scrollHeight));
+        await expect(noticeRow(page, 'system.message')).toBeVisible({ timeout: 500 });
+      }).toPass({ timeout: 10_000 });
+      // Liveness: the agent's reply renders normally between the notices.
       await expect(page.getByText('The redirect fix is in #2551.')).toBeVisible();
       await expect(noticeRow(page, 'checkin.stalled')).toBeVisible();
       await expect(noticeRow(page, 'system.message')).toBeVisible();
-      for (const toggle of await page.locator('[data-testid="sam-notice-row"] > button').all()) {
-        await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-        const box = await toggle.boundingBox();
-        expect(box!.height).toBeLessThanOrEqual(40);
+      // Read one mounted window atomically: virtualization can remove a row between
+      // enumerating dynamic nth locators and checking their state or geometry.
+      const toggles = await page
+        .locator('[data-testid="sam-notice-row"] > button')
+        .evaluateAll((buttons) =>
+          buttons.map((button) => ({
+            expanded: button.getAttribute('aria-expanded'),
+            height: button.getBoundingClientRect().height,
+          }))
+        );
+      expect(toggles.length).toBeGreaterThan(0);
+      for (const toggle of toggles) {
+        expect(toggle.expanded).toBe('false');
+        expect(toggle.height).toBeLessThanOrEqual(40);
       }
       // The ID-heavy agent text stays hidden.
       await expect(page.getByText(/wait_for_subtasks/)).toHaveCount(0);
@@ -328,8 +346,10 @@ for (const viewport of [
 
     test('a system row and a no-card notice expand cleanly', async ({ page }) => {
       await openChat(page);
-      const system = noticeRow(page, 'system.message');
-      await system.getByRole('button', { name: /Workspace build failed/ }).click();
+      // The last row can start below the virtualized window. Scroll it into the log
+      // before expanding, as with the other notices below the initial viewport.
+      const system = await expandNoticeBelow(page, 'system.message');
+      await expect(system.locator('> button')).toHaveAccessibleName(/Workspace build failed/);
       await system.getByText('Show full message').click();
       await expect(system.locator('pre')).toContainText('npm ERR! code ERESOLVE');
       const checkin = noticeRow(page, 'checkin.stalled');
