@@ -27,17 +27,17 @@ and `activeAgentEmailSender()` returns the Cloudflare sender only.
 
 ## Checklist
 
-- [ ] Go receiver `deploy/selfhost/sam-mx` (go-smtp, go-msgauth DKIM/DMARC, blitiri SPF): domain-only RCPT,
+- [x] Go receiver `deploy/selfhost/sam-mx` (go-smtp, go-msgauth DKIM/DMARC, blitiri SPF): domain-only RCPT,
       one recipient per transaction, size cap, per-IP connection rate limit, concurrency cap,
       aligned-auth policy, trusted networks for loopback injection, gateway call, 250/550/451 mapping
-- [ ] Go tests with real SMTP sessions against a fake gateway (allowed, refused 5xx, DMARC fail, oversize, unknown rcpt)
-- [ ] Worker: on-switch for self-host (`AGENT_EMAIL_INBOUND_SMTP` + gateway secret + SMTP transport),
+- [x] Go tests with real SMTP sessions against a fake gateway (allowed, refused 5xx, DMARC fail, oversize, unknown rcpt)
+- [x] Worker: on-switch for self-host (`AGENT_EMAIL_INBOUND_SMTP` + gateway secret + SMTP transport),
       `inboundAgentEmail` capability, SMTP agent sender with Reply-To
-- [ ] Gateway route `POST /api/self-host/gateway/inbound-email` + sender-auth binding in the handler
-- [ ] Route tests: no secret 404, wrong secret 401, switch off 404, auth header missing refused, lying length
-- [ ] Vertical test: real receiver binary -> route -> task -> reply_to_email over SMTP with threading headers
-- [ ] Compose service `sam-mx` (profile `mail-in`), Dockerfile, deploy.ts var wiring + validation
-- [ ] Docs: deploy/selfhost/README.md email section, self-hosting docs mention
+- [x] Gateway route `POST /api/self-host/gateway/inbound-email` + sender-auth binding in the handler
+- [x] Route tests: no secret 404, wrong secret 401, switch off 404, auth header missing refused, lying length
+- [x] Vertical test: real receiver binary -> route -> task -> reply_to_email over SMTP with threading headers
+- [x] Compose service `sam-mx` (profile `mail-in`), Dockerfile, deploy.ts var wiring + validation
+- [x] Docs: deploy/selfhost/README.md email section, self-hosting docs mention
 - [ ] security-auditor on receiver + route; fix CRITICAL/HIGH
 
 ## Acceptance criteria
@@ -45,3 +45,9 @@ and `activeAgentEmailSender()` returns the Cloudflare sender only.
 - Allowed sender over SMTP starts a task; a reply goes out over SMTP with In-Reply-To/References.
 - Disallowed sender, failing DMARC, oversized message: refused with 5xx during the session.
 - Route refuses requests without the gateway secret; Cloudflare installs unchanged.
+
+## Notes
+
+- Draft PR #2668. Bare LF/CR refused in DATA (parser-differential defence); go-smtp ends DATA only on CRLF.CRLF.
+- `no-new-privileges` + `cap_add: NET_BIND_SERVICE` + file capability binds :25 as uid 7102 (verified with docker run).
+- Not done: admin MX status line, self-host admin panel, STARTTLS cert sharing with Caddy, CI step for `go test`.
