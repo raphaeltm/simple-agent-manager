@@ -3,6 +3,7 @@ import { type GcpCatalogSettingName } from './admin-settings-gcp-catalog-definit
 import type { NodeTunnelSettingName } from './admin-settings-node-tunnel-definitions';
 import { type OutboundSettingName } from './admin-settings-outbound-definitions';
 import { type AgentEmailSettingName } from './agent-email/setting-definitions';
+import { type AiProxySettingName } from './ai-proxy-settings';
 import { type AgentModelSettingKey } from './agent-models/settings-definition';
 import { type ConnectorReadSettingName } from './connector-read-settings-definition';
 import {
@@ -31,6 +32,7 @@ export type AdminSettingName =
   | FleetOpsSettingName
   | NodeTunnelSettingName
   | LlmEndpointSettingName
+  | AiProxySettingName
   | GcpCatalogSettingName
   | OperationsTelemetrySettingName
   | OutboundSettingName

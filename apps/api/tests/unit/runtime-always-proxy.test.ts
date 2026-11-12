@@ -239,6 +239,9 @@ const mockEnv = {
   DATABASE: {} as D1Database,
   KV: { get: (...args: unknown[]) => mockKvGet(...args), put: vi.fn() },
   AI_PROXY_ENABLED: 'true',
+  // A Cloudflare deployment: the gateway is addressable, so the proxy needs no admin opt-in.
+  AI_GATEWAY_ID: 'sam',
+  CF_ACCOUNT_ID: 'account-1',
   BASE_DOMAIN: 'example.com',
   JWT_PUBLIC_KEY: 'key',
   ENCRYPTION_KEY: 'test-key',

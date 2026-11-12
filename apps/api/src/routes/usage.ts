@@ -27,6 +27,7 @@ import {
 import {
   deleteUserBudgetSettings,
   getAdminAiAllowance,
+  getLocalMonthlyAiCostUsd,
   getProviderUsage,
   getTokenUsage,
   getUserBudgetSettings,
@@ -269,6 +270,16 @@ usageRoutes.get('/ai/budget', requireAuth(), requireApproved(), async (c) => {
         error: err instanceof Error ? err.message : String(err),
       });
     }
+  } else {
+    // No gateway: SAM's own priced total, the same figure the cap is enforced against.
+    try {
+      monthCostUsd = await getLocalMonthlyAiCostUsd(c.env.KV, userId, c.env);
+    } catch (err) {
+      log.error('usage.budget_local_cost_error', {
+        userId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   const settings = userSettings ?? {
@@ -284,7 +295,7 @@ usageRoutes.get('/ai/budget', requireAuth(), requireApproved(), async (c) => {
   const dailyOutputPercent = effectiveLimits.dailyOutputTokenLimit > 0
     ? Math.min(100, (dailyUsage.outputTokens / effectiveLimits.dailyOutputTokenLimit) * 100)
     : 0;
-  // Without AI Gateway a cap is neither settable nor enforced, so it has no utilization.
+  // A gateway without the account API cannot price spend, so its cap has no utilization.
   const monthlyCostCapAvailable = isMonthlyCostCapAvailable(c.env);
   const monthlyCostPercent =
     monthlyCostCapAvailable && settings.monthlyCostCapUsd !== null && settings.monthlyCostCapUsd > 0

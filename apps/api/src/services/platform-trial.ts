@@ -2,6 +2,7 @@ import type { drizzle } from 'drizzle-orm/d1';
 
 import type { Env } from '../env';
 import { getCredentialEncryptionKey } from '../lib/secrets';
+import { isAiProxyEnabled } from './ai-proxy-availability';
 import { getTokenUsage, resolvePlatformDailyTokenLimits } from './ai-token-budget';
 import { getPlatformCloudCredential } from './platform-credentials';
 
@@ -28,7 +29,7 @@ export async function getPlatformOpencodeAvailability(
   db: ReturnType<typeof drizzle>,
   env: Env
 ): Promise<PlatformOpencodeAvailability> {
-  const aiProxyEnabled = (env.AI_PROXY_ENABLED ?? 'true') !== 'false';
+  const aiProxyEnabled = await isAiProxyEnabled(env);
 
   // This is a user-facing capability signal, so credential decryption failures
   // fail closed instead of advertising platform infrastructure as available.

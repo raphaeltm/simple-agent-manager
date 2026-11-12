@@ -1,11 +1,13 @@
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { maybeJsonRecord } from '../lib/runtime-validation';
+import { findPricedModel, priceModelUsageUsd } from './ai-cost-pricing';
 import {
   type AiProviderUsageAttribution,
   incrementProviderUsage,
   incrementTokenUsage,
 } from './ai-token-budget';
+import { hasLocalAiCostMetering } from './platform-capabilities';
 
 export type TokenUsageFormat = 'openai' | 'anthropic';
 
@@ -14,6 +16,13 @@ export interface ExtractedTokenUsage {
   outputTokens?: number;
   /** UTF-8 bytes of generated output seen, collected only when usage may need estimating. */
   outputBytes?: number;
+  /**
+   * Prompt tokens served from the provider's cache. Anthropic reports them apart from
+   * `input_tokens`; OpenAI includes them in `prompt_tokens`. Priced only, never budgeted.
+   */
+  cachedInputTokens?: number;
+  /** Anthropic prompt-cache writes, reported apart from `input_tokens`. Priced only. */
+  cacheWriteInputTokens?: number;
 }
 
 export interface TokenUsageAccountingOptions {
@@ -29,6 +38,12 @@ export interface TokenUsageAccountingOptions {
    * first-party provider routes keep their reported-only accounting unchanged.
    */
   estimateMissingUsage?: boolean;
+  /**
+   * The catalog model a platform-billed call was sent to. Without an AI Gateway
+   * (`hasLocalAiCostMetering`) SAM prices the call from it and records the cost for the monthly
+   * cap. Set only by platform-billed routes; BYO passthrough calls are the user's own spend.
+   */
+  costModelId?: string;
 }
 
 /** UTF-8 bytes/3 over-counts typical English token density, so an estimate errs toward the budget. */
@@ -156,12 +171,17 @@ export function extractJsonTokenUsage(
     return {
       inputTokens: numberValue(usage.input_tokens),
       outputTokens: numberValue(usage.output_tokens),
+      cachedInputTokens: numberValue(usage.cache_read_input_tokens),
+      cacheWriteInputTokens: numberValue(usage.cache_creation_input_tokens),
     };
   }
 
+  const details =
+    maybeJsonRecord(usage.prompt_tokens_details) ?? maybeJsonRecord(usage.input_tokens_details);
   return {
     inputTokens: numberValue(usage.prompt_tokens) ?? numberValue(usage.input_tokens),
     outputTokens: numberValue(usage.completion_tokens) ?? numberValue(usage.output_tokens),
+    cachedInputTokens: numberValue(details?.cached_tokens),
   };
 }
 
@@ -215,16 +235,53 @@ async function incrementExtractedUsage(
   if (inputTokens <= 0 && outputTokens <= 0) return;
 
   await incrementTokenUsage(options.env.KV, options.userId, inputTokens, outputTokens, options.env);
-  if (options.provider) {
+  const priced = localCost(usage, inputTokens, outputTokens, options);
+  const provider = options.provider ?? priced?.provider;
+  if (provider) {
     await incrementProviderUsage(
       options.env.KV,
       options.userId,
-      options.provider,
+      provider,
       inputTokens,
       outputTokens,
-      options.env
+      options.env,
+      priced?.costUsd ?? 0
     );
   }
+}
+
+const PRICED_PROVIDER: Readonly<Record<TokenUsageFormat, AiProviderUsageAttribution>> = {
+  anthropic: { providerId: 'anthropic', providerName: 'Anthropic', dialect: 'anthropic' },
+  openai: { providerId: 'openai', providerName: 'OpenAI', dialect: 'openai' },
+};
+
+/**
+ * SAM's own price for a platform-billed call on an installation without AI Gateway, or null where
+ * the gateway's logs are the spend record, the route is not platform-billed, or the model has no
+ * catalog price. Anthropic reports cached and cache-write tokens apart from `input_tokens`, so
+ * they are added to the priced prompt; OpenAI's `prompt_tokens` already includes cached tokens.
+ */
+function localCost(
+  usage: ExtractedTokenUsage,
+  inputTokens: number,
+  outputTokens: number,
+  options: TokenUsageAccountingOptions
+): { costUsd: number; provider: AiProviderUsageAttribution } | null {
+  if (!options.costModelId || !hasLocalAiCostMetering(options.env)) return null;
+  const model = findPricedModel(options.costModelId);
+  if (!model) return null;
+  const cached = usage.cachedInputTokens ?? 0;
+  const cacheWrite = usage.cacheWriteInputTokens ?? 0;
+  const anthropic = options.format === 'anthropic';
+  return {
+    costUsd: priceModelUsageUsd(model, {
+      inputTokens: anthropic ? inputTokens + cached + cacheWrite : inputTokens,
+      outputTokens,
+      cachedInputTokens: cached,
+      cacheWriteInputTokens: anthropic ? cacheWrite : 0,
+    }),
+    provider: PRICED_PROVIDER[options.format],
+  };
 }
 
 /** Output tokens for a response that reported none: estimated where allowed, else none. */
@@ -285,12 +342,17 @@ function applyStreamUsage(
     const deltaUsage = maybeJsonRecord(record.usage);
     usage.inputTokens = numberValue(startUsage?.input_tokens) ?? usage.inputTokens;
     usage.outputTokens = numberValue(deltaUsage?.output_tokens) ?? usage.outputTokens;
+    usage.cachedInputTokens =
+      numberValue(startUsage?.cache_read_input_tokens) ?? usage.cachedInputTokens;
+    usage.cacheWriteInputTokens =
+      numberValue(startUsage?.cache_creation_input_tokens) ?? usage.cacheWriteInputTokens;
     return;
   }
 
   const jsonUsage = extractJsonTokenUsage(record, 'openai');
   usage.inputTokens = jsonUsage.inputTokens ?? usage.inputTokens;
   usage.outputTokens = jsonUsage.outputTokens ?? usage.outputTokens;
+  usage.cachedInputTokens = jsonUsage.cachedInputTokens ?? usage.cachedInputTokens;
   if (usage.outputBytes !== undefined) {
     usage.outputBytes += choicesOutputByteLength(record.choices, 'delta');
   }

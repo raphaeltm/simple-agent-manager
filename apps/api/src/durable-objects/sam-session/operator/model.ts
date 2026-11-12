@@ -5,6 +5,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import type { Env } from '../../../env';
 import { log } from '../../../lib/logger';
 import { resolveUpstreamAuth } from '../../../services/ai-billing';
+import { priceModelUsageUsd } from '../../../services/ai-cost-pricing';
 import { incrementProviderUsage, incrementTokenUsage } from '../../../services/ai-token-budget';
 import { estimateTokensFromText } from '../../../services/ai-token-usage-accounting';
 import {
@@ -158,7 +159,6 @@ export async function recordOperatorStepUsage(
       output,
     });
   const cached = Math.min(input, Math.max(0, step.usage.cachedInputTokens ?? 0));
-  const cachedRate = catalogModel.costPer1kCachedInputTokens ?? catalogModel.costPer1kInputTokens;
   const anthropic = config.model.startsWith('claude-');
   await incrementTokenUsage(env.KV, userId, input, output, env);
   await incrementProviderUsage(
@@ -172,9 +172,10 @@ export async function recordOperatorStepUsage(
     input,
     output,
     env,
-    ((input - cached) * catalogModel.costPer1kInputTokens +
-      cached * cachedRate +
-      output * catalogModel.costPer1kOutputTokens) /
-      1000
+    priceModelUsageUsd(catalogModel, {
+      inputTokens: input,
+      outputTokens: output,
+      cachedInputTokens: cached,
+    })
   );
 }
