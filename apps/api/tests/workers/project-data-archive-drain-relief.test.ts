@@ -464,8 +464,12 @@ describe('archive drain relief: expired degraded sleepers', () => {
     });
   });
 
-  it('leaves a sleeper alone while its archive fence is unverified, and expires it once it unwinds', async () => {
-    const sleeper = await seedDegradedSleeper('fenced', '2026-02-03T00:00:00.000Z', ['completed']);
+  it('leaves a sleeper alone while its archive fence is unverified, without blocking rows behind it, and expires it once it unwinds', async () => {
+    // The fenced sleeper expires first, so a one-row batch ordered by expiry would pick it first.
+    const sleeper = await seedDegradedSleeper('fenced', '2026-01-10T00:00:00.000Z', ['completed']);
+    const valid = await seedDegradedSleeper('behind-fence', '2026-01-11T00:00:00.000Z', [
+      'completed',
+    ]);
     // The fence `createCandidateJournal` writes before the root has checked eligibility. The
     // migration id is left NULL so the fixture needs no journal row; routing parses a
     // `migrating` location without one, and the location state is what this case is about.
@@ -486,13 +490,19 @@ describe('archive drain relief: expired degraded sleepers', () => {
       .run();
     const purge = () =>
       withArchiveEnv(
-        { SESSION_SNAPSHOT_PURGE_ENABLED: 'true', PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true' },
+        {
+          SESSION_SNAPSHOT_PURGE_ENABLED: 'true',
+          PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+          SESSION_SNAPSHOT_PURGE_BATCH_SIZE: '1',
+        },
         () => runSessionSnapshotPurge(testEnv, new Date())
       );
 
     await purge();
     expect(await snapshotStatus(sleeper.snapshotId)).toBe('degraded');
     expect(await sessionStatus(sleeper.projectId, sleeper.sessionId)).toBe('sleeping');
+    // The fenced row did not take the only slot.
+    expect(await snapshotStatus(valid.snapshotId)).toBe('expired');
 
     // The root refused the candidate and the fence unwound to `root`.
     await env.DATABASE.prepare(

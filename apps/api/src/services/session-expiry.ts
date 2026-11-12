@@ -71,9 +71,10 @@ export async function expireSleepingConversation(
  * drain. `expireSleepingConversation` cancels any open task and then stops the session, and
  * with no open task it just stops it.
  *
- * The one state it declines, a queued or delegated task, is excluded here too. Otherwise those
- * rows would come back every sweep and, ordered by expiry, fill the batch ahead of rows that
- * can make progress (`.claude/rules/47`).
+ * The states it declines are excluded here too: a queued or delegated task, and an archive
+ * fence that is not yet published (`migrating`, `frozen`). Otherwise those rows would come back
+ * every sweep and, ordered by expiry, fill the batch ahead of rows that can make progress
+ * (`.claude/rules/47`).
  */
 export async function expireDegradedSleepingConversations(
   env: Env,
@@ -88,6 +89,10 @@ export async function expireDegradedSleepingConversations(
          WHERE t.project_id = session_snapshots.project_id
            AND t.chat_session_id = session_snapshots.chat_session_id
            AND t.status IN ('queued', 'delegated'))
+       AND NOT EXISTS (SELECT 1 FROM project_data_session_locations loc
+         WHERE loc.project_id = session_snapshots.project_id
+           AND loc.session_id = session_snapshots.chat_session_id
+           AND loc.location_state IN ('migrating', 'frozen'))
        AND (recovery_status IS NULL OR recovery_status != 'waking')
      ORDER BY expires_at, id LIMIT ?`
   )
