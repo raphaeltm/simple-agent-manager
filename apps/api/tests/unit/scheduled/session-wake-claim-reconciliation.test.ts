@@ -155,7 +155,13 @@ describe('dead wake claim sweep', () => {
       recovery_error: DEAD_WAKE_CLAIM_ERROR,
     });
     expect(notifyWakeSettled).toHaveBeenCalledWith(
-      expect.objectContaining({ projectId: 'project', chatSessionId: 'chat-a', status: 'failed' })
+      expect.objectContaining({
+        projectId: 'project',
+        chatSessionId: 'chat-a',
+        status: 'failed',
+        // The released claim's own attempt, so the client's latch settles that wake only.
+        attemptId: 'attempt-a',
+      })
     );
     // The reported end anchors the budget decay, so the user's next prompt wakes the chat.
     expect(await userWake('a')).toEqual({ status: 'claimed', taskId: 'task-a' });

@@ -19,7 +19,7 @@ import { DEFAULT_ATTACHMENT_MESSAGE } from '../../pages/project-chat/useAttachme
 import { optimisticUserMessage, refreshIdleCleanupAfterSend } from './send-follow-up-helpers';
 import { useSessionDraft } from './session-drafts';
 import type { FilePanelState } from './session-lifecycle-helpers';
-import { parsePlanContent } from './session-lifecycle-helpers';
+import { parsePlanContent, useSessionStatusPush } from './session-lifecycle-helpers';
 import { ownedWorkspaceId, resolveSessionViewerCapabilities } from './session-viewer-access';
 import type { AgentActivityState } from './types';
 import { deriveSessionState, IDLE_TIMEOUT_MS, isWorkingActivity } from './types';
@@ -102,6 +102,12 @@ export function useSessionLifecycle(
   });
 
   const wake = useWakeProgress(sessionId);
+  const { onSessionUpdated, invalidateStatus } = useSessionStatusPush(
+    projectId,
+    sessionId,
+    mergeRecentWindow,
+    setSession
+  );
   const { hydrateWakeProgress } = wake;
 
   const hydrateState = useCallback(
@@ -176,12 +182,13 @@ export function useSessionLifecycle(
       [appendMessages, startVerifyDecayTimer]
     ),
     onSessionStopped: useCallback(() => {
+      invalidateStatus();
       setSession((prev) => (prev ? { ...prev, status: 'stopped' } : prev));
       setAgentActivity('idle');
       setPromptStartedAt(null);
       // Stop any pending verify timer so it can't re-arm and flash the bar back on.
       stopVerifyDecayTimer();
-    }, [stopVerifyDecayTimer]),
+    }, [invalidateStatus, stopVerifyDecayTimer]),
     onSessionAccessChanged,
     onCatchUp: useCallback(
       (
@@ -248,12 +255,7 @@ export function useSessionLifecycle(
       },
       [startVerifyDecayTimer, stopVerifyDecayTimer]
     ),
-    onSessionUpdated: useCallback(
-      (updates: Partial<Pick<ChatSessionResponse, 'topic' | 'workspaceId' | 'agentSessionId'>>) => {
-        setSession((prev) => (prev ? { ...prev, ...updates } : prev));
-      },
-      []
-    ),
+    onSessionUpdated,
     // Pushed wake phase — arrives well ahead of the fallback poll, so the banner
     // tracks the actual wake instead of lagging a poll interval behind it.
     onWakeProgress: useCallback(

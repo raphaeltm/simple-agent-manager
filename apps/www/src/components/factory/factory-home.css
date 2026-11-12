@@ -106,6 +106,43 @@
   vertical-align: 2px;
 }
 
+/*
+ * Highlight ring on the real control a picture is about (an HTML screen marks it with data-ring).
+ * It pulses once when the picture scrolls into view, then rests faintly.
+ */
+.fh [data-ring] {
+  position: relative;
+}
+
+.fh [data-play].is-in [data-ring] {
+  animation: fh-ring 2.8s ease-in-out 0.9s both;
+}
+
+@keyframes fh-ring {
+  0% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+  25%,
+  70% {
+    box-shadow:
+      0 0 0 2px var(--fh-ring),
+      0 0 26px -4px var(--fh-ring);
+  }
+  100% {
+    box-shadow:
+      0 0 0 2px color-mix(in srgb, var(--fh-ring) 45%, transparent),
+      0 0 0 0 transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fh [data-play].is-in [data-ring],
+  .fh [data-ring] {
+    animation: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--fh-ring) 45%, transparent);
+  }
+}
+
 /* Scroll reveal: elements rise into place once (FactoryHome's script adds .is-in). */
 .fh [data-reveal] {
   opacity: 0;

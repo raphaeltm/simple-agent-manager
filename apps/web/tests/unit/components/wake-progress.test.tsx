@@ -168,6 +168,185 @@ describe('useWakeProgress', () => {
     expect(result.current.isWaking).toBe(true);
   });
 
+  // The same chat can wake, go back to sleep and wake again while the tab stays open.
+  // The settled latch used to clear only on a session switch, so every update of the
+  // second wake was dropped (state-machine audit D8). It is now per wake attempt.
+  it('shows a second wake of the same chat (a new wake attempt)', () => {
+    const { result } = renderHook(() => useWakeProgress('s1'));
+
+    act(() => {
+      result.current.hydrateWakeProgress(
+        snapshot({ recoveryStatus: 'waking', wakePhase: 'agent_session', wakeAttemptId: 'A' })
+      );
+    });
+    act(() => {
+      result.current.applyWakeProgress({ recoveryStatus: 'restored', wakePhase: null });
+    });
+    expect(result.current.isWaking).toBe(false);
+
+    act(() => {
+      result.current.hydrateWakeProgress(
+        snapshot({ recoveryStatus: 'waking', wakePhase: 'node_selection', wakeAttemptId: 'B' })
+      );
+    });
+
+    expect(result.current.isWaking).toBe(true);
+    // The new wake starts its own phase sequence; the old wake's later phase does not
+    // hold it back.
+    expect(result.current.wakePhase).toBe('node_selection');
+  });
+
+  it('keeps the latch for a stale snapshot of the wake that already settled', () => {
+    // Control for the re-arm: same attempt id as the settled wake → stale, dropped.
+    const { result } = renderHook(() => useWakeProgress('s1'));
+
+    act(() => {
+      result.current.hydrateWakeProgress(
+        snapshot({ recoveryStatus: 'waking', wakePhase: 'agent_session', wakeAttemptId: 'A' })
+      );
+    });
+    act(() => {
+      result.current.applyWakeProgress({ recoveryStatus: 'restored', wakePhase: null });
+    });
+    act(() => {
+      result.current.hydrateWakeProgress(
+        snapshot({ recoveryStatus: 'waking', wakePhase: 'workspace_ready', wakeAttemptId: 'A' })
+      );
+    });
+
+    expect(result.current.isWaking).toBe(false);
+  });
+
+  it('re-arms for the next wake when only pushes named the settled attempt', () => {
+    // A tab that saw the first wake only over the socket: no snapshot ever named its
+    // attempt, so the push must, or the latch holds an unknown attempt forever.
+    const { result } = renderHook(() => useWakeProgress('s1'));
+
+    act(() => {
+      result.current.applyWakeProgress({
+        recoveryStatus: 'waking',
+        wakePhase: 'agent_session',
+        wakeAttemptId: '01A',
+      });
+    });
+    expect(result.current.isWaking).toBe(true);
+    act(() => {
+      result.current.applyWakeProgress({
+        recoveryStatus: 'restored',
+        wakePhase: null,
+        wakeAttemptId: '01A',
+      });
+    });
+    expect(result.current.isWaking).toBe(false);
+
+    act(() => {
+      result.current.hydrateWakeProgress(
+        snapshot({ recoveryStatus: 'waking', wakePhase: 'node_selection', wakeAttemptId: '01B' })
+      );
+    });
+
+    expect(result.current.isWaking).toBe(true);
+    expect(result.current.wakePhase).toBe('node_selection');
+  });
+
+  it('keeps the latch for a stale snapshot of a wake that settled by push', () => {
+    // Control for the case above: the same attempt, still reported waking, is stale.
+    const { result } = renderHook(() => useWakeProgress('s1'));
+
+    act(() => {
+      result.current.applyWakeProgress({
+        recoveryStatus: 'restored',
+        wakePhase: null,
+        wakeAttemptId: '01A',
+      });
+    });
+    act(() => {
+      result.current.hydrateWakeProgress(
+        snapshot({ recoveryStatus: 'waking', wakePhase: 'workspace_ready', wakeAttemptId: '01A' })
+      );
+    });
+
+    expect(result.current.isWaking).toBe(false);
+  });
+
+  it('starts a newer attempt from its own phase when the older one never settled', () => {
+    // The older wake's restore was never seen, so no latch is set; its later phase must
+    // not make the newer wake's earlier phases look like they go backwards.
+    const { result } = renderHook(() => useWakeProgress('s1'));
+
+    act(() => {
+      result.current.hydrateWakeProgress(
+        snapshot({ recoveryStatus: 'waking', wakePhase: 'agent_session', wakeAttemptId: '01A' })
+      );
+    });
+    act(() => {
+      result.current.hydrateWakeProgress(
+        snapshot({ recoveryStatus: 'waking', wakePhase: 'node_selection', wakeAttemptId: '01B' })
+      );
+    });
+
+    expect(result.current.isWaking).toBe(true);
+    expect(result.current.wakePhase).toBe('node_selection');
+  });
+
+  it('ignores a late terminal snapshot of an older attempt during the next wake', () => {
+    const { result } = renderHook(() => useWakeProgress('s1'));
+
+    act(() => {
+      result.current.hydrateWakeProgress(
+        snapshot({ recoveryStatus: 'waking', wakePhase: 'node_selection', wakeAttemptId: '01B' })
+      );
+    });
+    act(() => {
+      result.current.hydrateWakeProgress(
+        snapshot({ recoveryStatus: 'restored', wakePhase: null, wakeAttemptId: '01A' })
+      );
+    });
+
+    expect(result.current.isWaking).toBe(true);
+    expect(result.current.wakePhase).toBe('node_selection');
+  });
+
+  it('does not let a stale snapshot relabel the current wake', () => {
+    const { result } = renderHook(() => useWakeProgress('s1'));
+
+    act(() => {
+      result.current.hydrateWakeProgress(
+        snapshot({
+          recoveryStatus: 'waking',
+          wakePhase: 'waiting_for_node_capacity',
+          wakeAttemptId: '01B',
+          waitReason: 'provider_transient_capacity',
+          waitRetryAt: null,
+        })
+      );
+    });
+    act(() => {
+      result.current.hydrateWakeProgress(
+        snapshot({ recoveryStatus: 'waking', wakePhase: 'node_selection', wakeAttemptId: '01A' })
+      );
+    });
+
+    expect(result.current.wakeWait?.reason).toBe('provider_transient_capacity');
+  });
+
+  it('keeps the latch when the settled wake had no attempt id', () => {
+    // Without an id on the settled side nothing proves the next snapshot is a new wake;
+    // a stale banner is worse than a missing one, so the latch holds.
+    const { result } = renderHook(() => useWakeProgress('s1'));
+
+    act(() => {
+      result.current.applyWakeProgress({ recoveryStatus: 'restored', wakePhase: null });
+    });
+    act(() => {
+      result.current.hydrateWakeProgress(
+        snapshot({ recoveryStatus: 'waking', wakePhase: 'workspace_ready', wakeAttemptId: 'X' })
+      );
+    });
+
+    expect(result.current.isWaking).toBe(false);
+  });
+
   it('does not carry a wake across a session switch', () => {
     // Discriminating: without the sessionId reset effect, switching conversations
     // paints the previous one's banner over the new one.

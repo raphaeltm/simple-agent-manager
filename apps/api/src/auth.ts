@@ -12,6 +12,7 @@ import { CLIENT_IP_HEADER } from './lib/client-ip';
 import { createModuleLogger } from './lib/logger';
 import { readResponseJson } from './lib/runtime-validation';
 import { getBetterAuthSecret } from './lib/secrets';
+import { clampSessionRefresh, HARD_EXPIRES_AT_FIELD } from './services/agent-sign-in/session-cap';
 import {
   bootstrapOwnerEmail,
   bootstrapSessionAllowed,
@@ -318,6 +319,14 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
         enabled: true,
         maxAge: 5 * 60, // 5 minutes
       },
+      additionalFields: {
+        // Hard lifetime of an agent sign-in session (migration 0234). Server-only.
+        [HARD_EXPIRES_AT_FIELD]: {
+          type: 'date',
+          required: false,
+          input: false,
+        },
+      },
     },
     socialProviders,
     plugins: emailSignInPlugins(env),
@@ -444,6 +453,12 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
               });
             }
           },
+        },
+        update: {
+          // Agent sign-in sessions carry a hard expiry (services/agent-sign-in/session-cap.ts).
+          // Lower a refresh's new expiry to it inside BetterAuth's own UPDATE. No-op for every
+          // session without a cap.
+          before: async (data, ctx) => clampSessionRefresh(data, ctx),
         },
       },
     },

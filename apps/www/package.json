@@ -19,7 +19,8 @@
     "check:links": "python3 scripts/check-doc-links.py",
     "optimize:features": "tsx scripts/optimize-feature-images.ts",
     "compress:screenshots": "tsx scripts/compress-screenshots.ts",
-    "build:brand-lockups": "tsx scripts/build-brand-lockups.ts"
+    "build:brand-lockups": "tsx scripts/build-brand-lockups.ts",
+    "build:brand-captures": "tsx scripts/build-brand-captures.ts"
   },
   "dependencies": {
     "@astrojs/sitemap": "3.7.4",

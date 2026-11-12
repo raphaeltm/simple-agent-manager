@@ -117,6 +117,8 @@ Create the narrowly scoped `agent-readonly` policy first. Inside `exec_with_secr
 - **Google Cloud:** configure a Workload Identity Federation provider trusting this issuer, map the subject and required ID claims, and set an attribute condition. Request the configured audience, then use Google's STS exchange. This generic issuer is separate from SAM's existing GCP provisioning integration; existing GCP trust settings remain unchanged. See [Google Workload Identity Federation](https://cloud.google.com/iam/docs/workload-identity-federation-with-other-providers).
 - **Your own service:** fetch discovery/JWKS and validate the RS256 signature, exact issuer, exact audience, expiration and subject/required claims with a JWT library. Decoding a token is not verification. Reject absent required claims.
 
+- **Another SAM installation:** a test instance can let your agents sign in to it as chosen test users. See [Let agents sign in to a test instance](/docs/guides/agent-sign-in/).
+
 Provider-specific exchange credentials can outlive the SAM token. Configure their lifetime and permissions independently. Stopping a chat does not immediately revoke a previously issued JWT or exchanged credential.
 
 ## Operator configuration and limitations

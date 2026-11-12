@@ -36,6 +36,12 @@ type Claims struct {
 	// rotation existed and for workspaces never rotated. It is unrelated to the
 	// agent's eviction generation, which fences restart against eviction.
 	CallbackGeneration string `json:"cgen,omitempty"`
+	// SessionNotAfter (unix seconds) is set on terminal tokens minted by a control-plane session
+	// that has a hard lifetime (agent sign-in through workload identity). A VM agent session
+	// created from such a token must end by then, so the browser session it backs cannot outlive
+	// the control-plane session. Absent (zero) on every other token: the session keeps the
+	// configured SESSION_TTL.
+	SessionNotAfter int64 `json:"sessionNotAfter,omitempty"`
 }
 
 // JWTValidator validates JWTs using a remote JWKS endpoint.

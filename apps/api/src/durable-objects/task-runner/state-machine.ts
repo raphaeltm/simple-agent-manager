@@ -117,6 +117,7 @@ export async function failTask(
         projectId: state.projectId,
         chatSessionId: state.config.resumeSnapshotChatSessionId,
         status: 'failed',
+        attemptId: state.config.recoveryAttemptId,
       })
     );
     state.completed = true;

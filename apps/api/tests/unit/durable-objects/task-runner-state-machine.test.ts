@@ -401,6 +401,7 @@ describe('transitionToInProgress', () => {
       config: {
         ...makeState().config,
         resumeSnapshotChatSessionId: 'chat-session-1',
+        recoveryAttemptId: '01WAKEATTEMPT',
       },
     });
 
@@ -413,6 +414,8 @@ describe('transitionToInProgress', () => {
       recoveryStatus: 'restored',
       // No phase on a settled wake — a step here would render as stale progress.
       wakePhase: null,
+      // The client's settled latch keys on the attempt; a push-only tab learns it here.
+      wakeAttemptId: '01WAKEATTEMPT',
     });
   });
 

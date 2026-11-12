@@ -68,6 +68,7 @@ import { agentCredentialSetupSessionsRoutes } from './routes/agent-credential-se
 import { agentModelCatalogRoutes, projectAgentModelRoutes } from './routes/agent-models';
 import { agentProfileRoutes } from './routes/agent-profiles';
 import { agentSettingsRoutes } from './routes/agent-settings';
+import { agentSignInRoutes } from './routes/agent-sign-in';
 import { agentsCatalogRoutes } from './routes/agents-catalog';
 import { aiProxyRoutes } from './routes/ai-proxy';
 import { aiProxyAnthropicRoutes } from './routes/ai-proxy-anthropic';
@@ -172,6 +173,7 @@ import { workspacesRoutes } from './routes/workspaces';
 import { scheduled } from './scheduled/handler';
 import { handleInboundAgentEmail } from './services/agent-email/inbound';
 import { agentEmailConfig } from './services/agent-email/setup-state';
+import { isAgentSignInEnabled } from './services/agent-sign-in/config';
 import { isLocalHostedGitActive } from './services/hosted-git/backend';
 import { handleHostedGitRequest, HOSTED_GIT_PATH_PREFIX } from './services/hosted-git/http';
 import { isArtifactsAvailable, publicPlatformCapabilities } from './services/platform-capabilities';
@@ -329,6 +331,9 @@ app.get('/api/config/login-providers', async (c) => {
     google: google !== null,
     gitlab: gitlab !== null,
     email: emailSignInAvailable(c.env),
+    // Shown on the sign-in page so anyone using the instance can tell it accepts agent
+    // sign-in. A boolean only: the trusted issuer and allowlists are not published.
+    agentSignIn: isAgentSignInEnabled(c.env),
   });
 });
 
@@ -371,6 +376,9 @@ app.get('/oidc/.well-known/jwks.json', async (c) => {
 // Both must be mounted before authRoutes to avoid BetterAuth's wildcard catch-all.
 app.route('/api/auth', codexRefreshRoutes);
 app.route('/api/auth', apiTokenRoutes);
+// Agent sign-in through workload identity. Steps aside (falls through) when AGENT_SIGN_IN_TRUST
+// is not configured, so the path then answers exactly as an unknown /api/auth route.
+app.route('/api/auth', agentSignInRoutes);
 app.route('/api/auth', deviceFlowRoutes);
 app.route('/api/auth', authRoutes);
 app.route('/api/setup', setupRoutes);
