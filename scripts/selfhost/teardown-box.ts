@@ -4,7 +4,8 @@
  * speaks gs:// and s3://. Cloud resources are teardown-gcp.ts's (and any later adapter's).
  */
 import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { homedir } from 'node:os';
+import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 
 import type { CreatedResource } from '../../deploy/selfhost/created-resources.mjs';
 import { type BoxContext, check, MANIFEST_NAME, parseBucketUrl } from './backup-lib';
@@ -230,6 +231,7 @@ function stateItems(ctx: TeardownContext): Item[] {
 
 /** Everything in .state except the record, and the keys when they are kept. */
 function clearState(ctx: TeardownContext, keepKey: boolean): void {
+  assertStateDir(ctx);
   for (const entry of readdirSync(ctx.stateDir)) {
     if (entry === RECORD_FILE || (keepKey && entry === LEGACY_KEYS)) continue;
     const path = join(ctx.stateDir, entry);
@@ -241,6 +243,58 @@ function clearState(ctx: TeardownContext, keepKey: boolean): void {
       continue;
     }
     rmSync(path, { recursive: true, force: true });
+  }
+}
+
+/** True for `/`, the home directory, and any directory that contains the checkout. */
+function isProtectedDir(path: string, selfhostDir: string): boolean {
+  const target = resolve(path);
+  if (target === '/' || target === resolve(homedir())) return true;
+  const rel = relative(target, resolve(selfhostDir));
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+}
+
+/**
+ * The state directory comes from .env or --state-dir, so prove it is SAM's before emptying it
+ * (security review M1): not a protected directory, and either recorded as this state dir or
+ * holding the key agent's files.
+ */
+function assertStateDir(ctx: TeardownContext): void {
+  if (isProtectedDir(ctx.stateDir, ctx.selfhostDir)) {
+    throw new Error(`refused: ${ctx.stateDir} is /, your home or contains the checkout`);
+  }
+  const recordedHere = ctx.record.some(
+    (r) => r.cloud === 'box' && r.kind === 'state-dir' && resolve(r.name) === resolve(ctx.stateDir)
+  );
+  if (
+    !recordedHere &&
+    !existsSync(join(ctx.stateDir, 'key-agent')) &&
+    !existsSync(join(ctx.stateDir, LEGACY_KEYS))
+  ) {
+    throw new Error(
+      `refused: ${ctx.stateDir} is neither recorded as this install's state nor holds its keys`
+    );
+  }
+}
+
+/** A backup runBackup wrote: an absolute, unprotected directory with a version-1 manifest. */
+function isBackupDir(path: string, ctx: TeardownContext): boolean {
+  if (!isAbsolute(path) || isProtectedDir(path, ctx.selfhostDir)) return false;
+  if (resolve(path) === resolve(ctx.stateDir)) return false;
+  try {
+    const manifest = JSON.parse(readFileSync(join(path, MANIFEST_NAME), 'utf8')) as unknown;
+    return (manifest as { version?: unknown }).version === 1;
+  } catch {
+    return false;
+  }
+}
+
+function endpointHost(endpoint: string | undefined): string {
+  if (!endpoint) return 'your S3 endpoint';
+  try {
+    return new URL(endpoint).host; // never userinfo
+  } catch {
+    return 'your S3 endpoint';
   }
 }
 
@@ -258,7 +312,7 @@ function backupItems(ctx: TeardownContext): Item[] {
   for (const [path, entry] of paths) {
     if (entry?.removedAt && !existsSync(path)) continue;
     // Proof it is a backup: the manifest runBackup writes. A recorded path without one is refused.
-    const isBackup = existsSync(join(path, MANIFEST_NAME));
+    const isBackup = isBackupDir(path, ctx);
     const gone = !existsSync(path);
     items.push({
       id: `box:backup:${path}`,
@@ -270,7 +324,10 @@ function backupItems(ctx: TeardownContext): Item[] {
       plan: gone
         ? both({ act: 'keep', why: 'no longer on disk' })
         : !isBackup
-          ? both({ act: 'refused', why: `no ${MANIFEST_NAME} in it, so not proven a backup` })
+          ? both({
+              act: 'refused',
+              why: `not proven a backup (needs an absolute path, a version-1 ${MANIFEST_NAME}, and not /, home or the checkout)`,
+            })
           : {
               'keep-data': { act: 'keep', why: 'keep my data keeps backups' },
               'remove-everything': ctx.options.deleteBackups
@@ -326,11 +383,22 @@ export function bucketItems(ctx: TeardownContext): Item[] {
       place: 'in the object store',
       what: `every object under ${url} (celld state, deploy versions, vm-agent releases, hosted git)`,
       provenance: entry ? 'recorded' : 'discovered, not recorded',
-      how: `list, then delete in batches of ${BUCKET_DELETE_BATCH} (${parsed.scheme === 'gs' ? 'gcloud storage rm' : 'mc rm'}); only under this prefix`,
+      how:
+        parsed.prefix || entry?.action === 'created'
+          ? `list, then delete in batches of ${BUCKET_DELETE_BATCH} (${parsed.scheme === 'gs' ? 'gcloud storage rm' : 'mc rm'}); only under this prefix`
+          : `if the bucket holds only SAM's objects: ${parsed.scheme === 'gs' ? `gcloud storage rm --recursive 'gs://${parsed.bucket}/**'` : `mc rm --recursive --force <alias>/${parsed.bucket}`}`,
       step: STEPS.bucket,
       plan: {
         'keep-data': { act: 'keep', why: 'keep my data keeps the bucket' },
-        'remove-everything': { act: 'remove' },
+        // A bucket you brought with no prefix of SAM's own may hold anything else: teardown
+        // empties only a prefix, or a bucket the install created (security review H1).
+        'remove-everything':
+          parsed.prefix || entry?.action === 'created'
+            ? { act: 'remove' }
+            : {
+                act: 'operator',
+                why: 'your bucket has no SAM prefix, so teardown cannot tell SAM objects from anything else in it',
+              },
       },
       forGood:
         'every project, chat, setting and hosted repository of this install (backups excepted)',
@@ -348,7 +416,7 @@ export function bucketItems(ctx: TeardownContext): Item[] {
       how:
         parsed.scheme === 'gs'
           ? `gcloud storage buckets delete gs://${parsed.bucket} (only if nothing else uses it)`
-          : `delete bucket ${parsed.bucket} at ${ctx.box.S3_ENDPOINT ?? 'your S3 endpoint'} in your provider's console`,
+          : `delete bucket ${parsed.bucket} at ${endpointHost(ctx.box.S3_ENDPOINT)} in your provider's console`,
       step: STEPS.outside,
       plan: {
         'keep-data': { act: 'keep', why: 'keep my data keeps the bucket' },
@@ -377,103 +445,4 @@ export function emptyBucket(ctx: BoxContext, url: string): void {
   }
   const left = listObjects(ctx, '').length;
   if (left > 0) throw new Error(`${left} objects are still under ${url} (written while deleting?)`);
-}
-
-export function outsideItems(ctx: TeardownContext): Item[] {
-  const domain = ctx.domain || '<your SAM domain>';
-  const keep = { act: 'keep' as const, why: 'needed to bring the install back' };
-  const operator = (why: string) => ({
-    'keep-data': keep,
-    'remove-everything': { act: 'operator' as const, why },
-  });
-  const items: Item[] = [
-    {
-      id: 'outside:github-app',
-      place: 'outside SAM',
-      what: 'the GitHub App created through Admin → Integrations (manifest flow), if you made one',
-      provenance: 'from the setup steps',
-      how: `github.com → Settings → Developer settings → GitHub Apps (for an organization: its Settings → Developer settings → GitHub Apps) → the App whose URL is https://app.${domain} → Advanced → Delete GitHub App. Its installations go with it`,
-      step: STEPS.outside,
-      plan: operator('GitHub deletes Apps only in its own settings'),
-    },
-    {
-      id: 'outside:dns',
-      place: 'outside SAM',
-      what: `DNS: the wildcard record *.${domain} you pointed at the box`,
-      provenance: 'from the setup steps',
-      how: `remove it at your DNS host (Google Cloud DNS: gcloud dns record-sets delete '*.${domain}.' --type=A --zone=<zone>)`,
-      step: STEPS.outside,
-      plan: operator('teardown has no access to your DNS host'),
-    },
-    {
-      id: 'outside:box',
-      place: 'outside SAM',
-      what: 'the machine itself, and on a cloud its service account and the bucket grant you gave it',
-      provenance: 'from the setup steps',
-      how: 'delete them in your cloud console (Google Cloud: gcloud compute instances delete <box> --zone <zone>; gcloud iam service-accounts delete <box account>), and this checkout with rm -r',
-      step: STEPS.outside,
-      plan: operator('you created them; teardown runs on the box'),
-    },
-    {
-      id: 'outside:accounts',
-      place: 'outside SAM',
-      what: 'OAuth clients and SMTP relay credentials you registered for this install',
-      provenance: 'from the setup steps',
-      how: 'delete or revoke them in each service (GitHub OAuth Apps, Google Cloud OAuth clients, your SMTP provider)',
-      step: STEPS.outside,
-      plan: operator('teardown has no access to those services'),
-    },
-    {
-      id: 'outside:other-clouds',
-      place: 'in your cloud, made by SAM at runtime',
-      what: 'node VMs on any provider other than Google Cloud (Hetzner, Scaleway, AWS, ...)',
-      provenance: 'from the setup steps',
-      how: `before teardown, delete every node in Admin → Nodes while SAM runs; or in the provider's console delete servers labelled managed=simple-agent-manager and installation=${ctx.installationId ?? '<installation id>'}`,
-      step: STEPS.compute,
-      plan: both({ act: 'operator', why: 'only the Google Cloud adapter exists so far' }),
-    },
-  ];
-  const profiles = (ctx.box.COMPOSE_PROFILES ?? '').split(',').map((p) => p.trim());
-  if (profiles.includes('mail-in')) {
-    items.push({
-      id: 'outside:mail',
-      place: 'outside SAM',
-      what: `inbound mail: the MX record agents.${domain} and the port 25 firewall rule you opened`,
-      provenance: 'from the setup steps',
-      how: `remove the MX record at your DNS host; Google Cloud: gcloud compute firewall-rules delete sam-smtp-in --project <project>`,
-      step: STEPS.outside,
-      plan: operator('you created them by hand (README, Inbound agent email)'),
-    });
-  }
-  const provider = keyProvider(ctx.stateDir);
-  if (provider === 'aws-kms' || provider === 'azure-kv') {
-    items.push({
-      id: `outside:${provider}`,
-      place: 'outside SAM',
-      what: `the ${provider === 'aws-kms' ? 'AWS KMS' : 'Azure Key Vault'} key that seals this box`,
-      provenance: 'from the setup steps',
-      how: 'README, Removing what setup created: the AWS or Azure commands',
-      step: STEPS.outside,
-      plan: {
-        'keep-data': { act: 'keep', why: 'keep my data keeps the key' },
-        'remove-everything': ctx.options.destroyKey
-          ? { act: 'operator', why: 'you created it; no bootstrap for this cloud yet' }
-          : { act: 'keep', why: 'pass --destroy-key to be told how to delete it' },
-      },
-      forGood: 'every sealed bundle and every backup sealed with it becomes unrecoverable',
-    });
-  }
-  return items;
-}
-
-function keyProvider(stateDir: string): string | null {
-  try {
-    const choice = JSON.parse(
-      readFileSync(join(stateDir, 'key-agent', 'choice.json'), 'utf8')
-    ) as unknown;
-    const provider = (choice as { provider?: unknown }).provider;
-    return typeof provider === 'string' ? provider : null;
-  } catch {
-    return null;
-  }
 }

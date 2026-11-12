@@ -166,7 +166,7 @@ function discoverBootstrap(ctx: TeardownContext, project: string, issuer: string
     '--location=global',
     '--format=value(description)',
   ]);
-  if (poolDescription?.includes(issuer)) {
+  if (poolDescription?.endsWith(issuer)) {
     const providerIssuer = value([
       'iam',
       'workload-identity-pools',
@@ -200,7 +200,7 @@ function discoverBootstrap(ctx: TeardownContext, project: string, issuer: string
     `--project=${project}`,
     '--format=value(description)',
   ]);
-  if (saDescription?.includes(issuer)) {
+  if (saDescription?.endsWith(issuer)) {
     for (const role of ['roles/compute.instanceAdmin.v1', 'roles/compute.securityAdmin']) {
       found.push({
         kind: 'iam-binding',

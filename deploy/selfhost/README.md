@@ -520,6 +520,13 @@ before the record, run `pnpm selfhost:deploy --init` once (it changes nothing el
 installation id is recorded, and pass `--adopt-discovered` to remove bootstrap resources found by
 name (each still proven by its issuer description or `sam-install` label).
 
+**Proofs before a delete** (security review): the bucket is emptied only under its prefix, or when
+the install created it; a bucket you brought with no SAM prefix is left for you with the command.
+`.state/` is emptied only when it is recorded as this install's state or holds its keys, and never
+when it is `/`, your home or contains the checkout. A backup is deleted only at an absolute path
+holding a version-1 `backup-manifest.json`. Node VMs are touched only when the record names exactly
+one installation id, for this `.env`'s domain.
+
 **Order** (`teardown-model.ts`): 1. stop the stack (`docker compose stop`), so SAM starts no new
 work or VMs; 2. node VMs; 3. cloud identity and keys (the bootstrap's own `--teardown`); 4. bucket
 contents; 5. the box. If an item fails, later steps are not attempted (the identity that could still
@@ -546,7 +553,8 @@ Destructive flags, each only with `--remove-everything`:
 days and its id cannot be reused until then, so within that window either undelete it
 (`gcloud iam workload-identity-pools undelete sam-<hash> --location=global --project <id>`) or pass
 a new `--pool-id` and enter the new values in Admin → Integrations. The app still lists the deleted
-nodes: delete them in Admin → Nodes once it is up (the provider treats a VM that is already gone as deleted: `deleteVM` in `packages/providers/src/gcp.ts`).
+nodes: delete them in Admin → Nodes once it is up (the provider treats a VM that is already gone
+as deleted: `deleteVM` in `packages/providers/src/gcp.ts`).
 
 **Node VMs and their ownership proof** (`teardown-gcp.ts`): a VM is this install's only when its
 labels `managed=simple-agent-manager`, `installation=<this install's id>` and `env=selfhost` all

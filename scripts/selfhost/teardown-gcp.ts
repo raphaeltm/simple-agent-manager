@@ -33,6 +33,9 @@ import type { TeardownContext } from './teardown-box';
 import { BOOTSTRAP, bootstrapItems, gcloud } from './teardown-gcp-bootstrap';
 import { both, type Item, STEPS } from './teardown-model';
 
+/** Compute Engine resource names (RFC 1035); never starts with `-`, so never read as a flag. */
+const GCE_NAME = /^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$/;
+
 interface GcpInstance {
   id: string;
   name: string;
@@ -114,6 +117,7 @@ function parseInstance(value: unknown): GcpInstance {
         .filter((d) => typeof d?.source === 'string')
         .map((d) => ({ source: d.source as string, autoDelete: d.autoDelete === true }))
     : [];
+  if (!GCE_NAME.test(v.name)) throw new Error(`unexpected instance name ${JSON.stringify(v.name)}`);
   return { id: v.id, name: v.name, zone: v.zone.split('/').pop() ?? v.zone, labels, disks };
 }
 
@@ -218,6 +222,8 @@ function deleteInstance(ctx: TeardownContext, project: string, listed: GcpInstan
   );
   for (const disk of current.disks.filter((d) => !d.autoDelete)) {
     const name = disk.source.split('/').pop() ?? '';
+    if (!GCE_NAME.test(name))
+      throw new Error(`refused: unexpected disk name ${JSON.stringify(name)}`);
     const zone = disk.source.match(/\/zones\/([^/]+)\//)?.[1] ?? listed.zone;
     const users = gcloud(ctx, [
       'compute',
@@ -228,7 +234,10 @@ function deleteInstance(ctx: TeardownContext, project: string, listed: GcpInstan
       `--project=${project}`,
       '--format=value(users)',
     ]);
-    if (users.status !== 0) continue; // gone already
+    if (users.status !== 0) {
+      if (/not found|was not found|404/i.test(users.stderr)) continue; // gone with the VM
+      check(users, `gcloud compute disks describe ${name}`);
+    }
     if (users.stdout.trim())
       throw new Error(`refused: disk ${name} is attached to ${users.stdout.trim()}`);
     check(

@@ -60,6 +60,9 @@ export function recordInstall(
   if (box.CELLD_BUCKET) {
     // The bundled store's bucket is made by objectstore/init.sh; any other bucket is the operator's.
     add('bucket', box.CELLD_BUCKET, usesBundledStore(box) ? 'created' : 'reused');
+    // What lives in it is the install's; re-recorded on every deploy so a reinstall after a
+    // teardown is not read as already emptied.
+    add('bucket-contents', box.CELLD_BUCKET, 'created');
   }
 }
 

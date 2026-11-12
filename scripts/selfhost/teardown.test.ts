@@ -484,4 +484,62 @@ exec node ${JSON.stringify(resolve(import.meta.dirname, 'testdata/fake-gcloud-ia
     expect(Object.keys(gcp().accounts)).toEqual([]);
     expect(Object.keys(gcp().keys)).toHaveLength(1); // keep my data keeps the key
   });
+
+  it('leaves an un-prefixed bucket you brought to you instead of emptying it (security review H1)', async () => {
+    writeFileSync(
+      envFile,
+      readFileSync(envFile, 'utf8').replace(
+        'CELLD_BUCKET=gs://fleet/celld',
+        'CELLD_BUCKET=gs://fleet'
+      ),
+      { mode: 0o600 }
+    );
+    await install();
+    const result = await teardown(['--remove-everything', '--confirm', DOMAIN]);
+    expect(result.status, result.out).toBe(0);
+    expect(Object.keys(gcp().objects)).toHaveLength(4);
+    expect(result.out).toMatch(
+      /Left for you:[\s\S]*every object under gs:\/\/fleet[^\n]*no SAM prefix/
+    );
+    expect(lines('calls').filter((c) => c.startsWith('storage rm'))).toEqual([]);
+  });
+
+  it('refuses every VM when the record names two installation ids (security review M2)', async () => {
+    await install();
+    const added = spawnSync(
+      'node',
+      [
+        resolve(import.meta.dirname, '../../deploy/selfhost/created-resources.mjs'),
+        'add',
+        join(state, 'created-resources.json'),
+        'box',
+        'installation',
+        OTHER_INSTALL,
+        'created',
+        'deploy',
+        `domain=${DOMAIN}`,
+      ],
+      { encoding: 'utf8' }
+    );
+    expect(added.status, added.stderr).toBe(0);
+    const result = await teardown(['--keep-data', '--confirm', DOMAIN]);
+    expect(result.status, result.out).toBe(0);
+    expect(result.out).toContain(
+      'node VMs will not be touched: the record names 2 installation ids'
+    );
+    expect(gcp().instances).toHaveLength(3);
+  });
+
+  it('refuses a recorded backup path whose manifest is not a backup manifest (security review M3)', async () => {
+    await install();
+    const odd = join(dir, 'not-a-backup');
+    mkdirSync(odd);
+    writeFileSync(join(odd, 'backup-manifest.json'), '{}');
+    recordBackup(state, odd);
+    const result = await teardown(['--remove-everything', '--delete-backups', '--confirm', DOMAIN]);
+    expect(result.status, result.out).toBe(0);
+    expect(existsSync(odd)).toBe(true);
+    expect(existsSync(join(dir, 'backups', '2026-11-12T00-00-00Z'))).toBe(false);
+    expect(result.out).toMatch(/Refused \(ownership not proven\):[\s\S]*not-a-backup/);
+  });
 });

@@ -24,11 +24,11 @@ import { createInterface } from 'node:readline/promises';
 import { parseArgs } from 'node:util';
 
 import { normalizeInstallationId } from '../../apps/api/src/services/node-provider-labels';
-import { readRecord } from '../../deploy/selfhost/created-resources.mjs';
+import { type CreatedResource, readRecord } from '../../deploy/selfhost/created-resources.mjs';
 import { log, runCommand, SELFHOST_DIR } from './backup-cli';
 import { recordPath } from './install-record';
 import { assertPrivateFile, parseDotenv } from './secret-files';
-import { boxItems, bucketItems, outsideItems, type TeardownContext } from './teardown-box';
+import { boxItems, bucketItems, type TeardownContext } from './teardown-box';
 import { gcpItems } from './teardown-gcp';
 import {
   execute,
@@ -38,6 +38,7 @@ import {
   renderPlan,
   renderSummary,
 } from './teardown-model';
+import { outsideItems } from './teardown-outside';
 
 function parse() {
   const { values } = parseArgs({
@@ -78,6 +79,48 @@ function installationFromLegacyKeys(stateDir: string): string | null {
   }
 }
 
+/**
+ * The installation id that proves node VM ownership. Only an unambiguous one counts (security
+ * review M2): exactly one recorded id, for this .env's domain, agreeing with platform-keys.json
+ * when that file exists. Anything else leaves the id unknown, so every VM is refused.
+ */
+function resolveInstallation(
+  record: CreatedResource[],
+  domain: string | undefined,
+  legacyId: string | null
+): { entry?: CreatedResource; recordedId: string | null; id: string | null; problem?: string } {
+  const entries = record.filter((r) => r.cloud === 'box' && r.kind === 'installation');
+  const ids = [...new Set(entries.map((r) => normalizeInstallationId(r.name)))];
+  const entry = entries.at(-1);
+  if (entries.length === 0) return { recordedId: null, id: legacyId };
+  if (ids.length !== 1 || !ids[0]) {
+    return {
+      entry,
+      recordedId: null,
+      id: null,
+      problem: `the record names ${ids.length} installation ids`,
+    };
+  }
+  const id = ids[0];
+  if (domain && entries.some((r) => r.attributes?.domain !== domain)) {
+    return {
+      entry,
+      recordedId: null,
+      id: null,
+      problem: `the record is for another domain than ${domain}`,
+    };
+  }
+  if (legacyId && legacyId !== id) {
+    return {
+      entry,
+      recordedId: null,
+      id: null,
+      problem: 'platform-keys.json names another installation id',
+    };
+  }
+  return { entry, recordedId: id, id };
+}
+
 async function confirm(expected: string, given: string | undefined): Promise<boolean> {
   if (given !== undefined) return given === expected;
   if (!process.stdin.isTTY) return false;
@@ -108,10 +151,16 @@ async function main(): Promise<number> {
   if (!existsSync(envFile) && record.length === 0) {
     throw new Error(`neither ${envFile} nor ${recordFile} exists: nothing to inventory`);
   }
-  const install = record.find((r) => r.cloud === 'box' && r.kind === 'installation');
-  const recordedId = install ? normalizeInstallationId(install.name) : null;
-  const installationId = recordedId ?? installationFromLegacyKeys(stateDir);
+  const resolved = resolveInstallation(
+    record,
+    box.SAM_DOMAIN,
+    installationFromLegacyKeys(stateDir)
+  );
+  const install = resolved.entry;
+  const recordedId = resolved.recordedId;
+  const installationId = resolved.id;
   const domain = box.SAM_DOMAIN ?? install?.attributes?.domain ?? '';
+  if (resolved.problem) log(`node VMs will not be touched: ${resolved.problem}`);
   const uid = process.getuid?.();
   const gid = process.getgid?.();
   const ctx: TeardownContext = {
