@@ -13,9 +13,7 @@ import {
   systemRowNoticeForMessage,
   withSamNotice,
 } from './sam-notice/notice-items';
-import { APPROVAL_CARD_TOOL } from './tool-cards/approval-card-data';
-import { DOCUMENT_CARD_TOOLS, normalizeToolName } from './tool-cards/document-card-data';
-import { HUMAN_INPUT_CARD_TOOL } from './tool-cards/human-input-card-data';
+import { isTypedCardToolName } from './tool-cards/typed-card-tools';
 
 /** Default idle timeout in ms — matches the server-side default (NODE_WARM_TIMEOUT_MS). */
 export const DEFAULT_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
@@ -133,18 +131,9 @@ function applyToolContentPointer(
  */
 function inferToolNameFromTitle(title: string): string | undefined {
   if (!title) return undefined;
-  if (isTypedCardTool(title)) return title;
+  if (isTypedCardToolName(title)) return title;
   if (title.startsWith('mcp__') && title.split('__').length >= 3) return title;
   return undefined;
-}
-
-/** Tools that render a typed card (library documents, approval requests, agent questions). */
-function isTypedCardTool(toolName: string | undefined): boolean {
-  const base = normalizeToolName(toolName);
-  return Boolean(
-    base &&
-    (DOCUMENT_CARD_TOOLS.has(base) || base === APPROVAL_CARD_TOOL || base === HUMAN_INPUT_CARD_TOOL)
-  );
 }
 
 function parseJsonRecordFromToolContent(content: string): Record<string, unknown> | undefined {
@@ -175,7 +164,7 @@ function parseJsonRecordFromToolContent(content: string): Record<string, unknown
  * recover it for typed-card tools so the card renders from the correlated tool call.
  */
 function legacyCardRawOutput(toolName: string | undefined, content: string): unknown {
-  if (!isTypedCardTool(toolName)) return undefined;
+  if (!isTypedCardToolName(toolName)) return undefined;
   const payload = parseJsonRecordFromToolContent(content);
   return payload ? [{ type: 'text', text: JSON.stringify(payload) }] : undefined;
 }

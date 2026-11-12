@@ -554,6 +554,31 @@ describe('stripToolMetadataContent — secret request card', () => {
     }
   });
 
+  it('keeps the Codex result row content when the row names no tool', () => {
+    // Codex's completed update carries only toolCallId + status; the result JSON is the row's own
+    // content. Compact mode cannot match a card payload without a tool name, so the web recovers
+    // the request ID from `content` by toolCallId (typed-card-cross-harness.test.ts). This pins
+    // that compact history keeps that content column.
+    const row = parseChatMessageRowCompact({
+      id: 'msg-codex-result',
+      session_id: 'session-1',
+      role: 'tool',
+      content: resultText,
+      tool_metadata: JSON.stringify({
+        toolCallId: 'call_codex',
+        status: 'completed',
+        content: [{ type: 'content', content: { type: 'text', text: resultText } }],
+      }),
+      created_at: 1_794_492_918_886,
+      sequence: 3,
+    });
+    const meta = row.toolMetadata as Record<string, unknown>;
+    expect(meta.rawOutput).toBeUndefined();
+    expect(meta.content).toBeUndefined();
+    expect(meta.contentSize).toBeGreaterThan(0);
+    expect(JSON.parse(row.content)).toMatchObject({ secretRequest: { id: 'req-1' } });
+  });
+
   it('keeps nothing for a failed request', () => {
     const failed = stripToolMetadataContent({
       toolCallId: 'tc-secret',
