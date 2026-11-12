@@ -10,6 +10,10 @@
  * See: specs/022-simplified-chat-ux/contracts/task-submit.md
  */
 import {
+  recordWorkStartIdeaLink,
+  requireOpenIdeaForWorkStart,
+} from '@simple-agent-manager/operations';
+import {
   collectStoredResourceRequirementLayers,
   createPersistedTaskResourcePlanJson,
   firstResourceRequirementLayer,
@@ -37,10 +41,7 @@ import { markTaskSubmitOperation, type TaskSubmitOperation } from '../lib/task-s
 import { ulid } from '../lib/ulid';
 import { errors } from '../middleware/error';
 import { requireProjectCapability } from '../middleware/project-auth';
-import {
-  recordWorkStartIdeaLink,
-  requireOpenIdeaForWorkStart,
-} from '../operations/start-work-core';
+import { operationDeps } from '../operation-ports';
 import { requireRepositoryAccess } from '../routes/projects/_helpers';
 import { type SubmitTaskSchema } from '../schemas';
 import { resolveTaskAgentOverrides } from '../services/agent-profiles';
@@ -620,7 +621,7 @@ export async function submitTaskImplementation(
   if (sourceIdea) {
     setOperation('source_idea_link');
     try {
-      await recordWorkStartIdeaLink(env, projectId, {
+      await recordWorkStartIdeaLink(operationDeps(env), projectId, {
         ideaId: sourceIdea.ideaId,
         sessionId,
         taskMode,

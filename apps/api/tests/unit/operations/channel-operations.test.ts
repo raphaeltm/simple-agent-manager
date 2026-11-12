@@ -1,3 +1,13 @@
+import type { OperationContext } from '@simple-agent-manager/operations';
+import { sharedTextCap } from '@simple-agent-manager/operations';
+import {
+  channelOperations,
+  samChannelGet,
+  samChannelHistory,
+  samChannelsList,
+  samChannelSubscriptionCancel,
+} from '@simple-agent-manager/operations';
+import { OperationError } from '@simple-agent-manager/operations';
 import {
   prepareAgentChannelMessage,
   sendAgentChannelMessage,
@@ -35,16 +45,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
-import { sharedTextCap } from '../../../src/operations/channel-core';
-import {
-  channelOperations,
-  samChannelGet,
-  samChannelHistory,
-  samChannelsList,
-  samChannelSubscriptionCancel,
-} from '../../../src/operations/channel-operations';
-import { OperationError } from '../../../src/operations/errors';
-import type { OperationContext } from '../../../src/operations/types';
+import { createOperationPorts } from '../../../src/operation-ports';
 import { applySqliteMigration, createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 import { createSqlStorage } from '../durable-objects/sql-storage-test-utils';
 
@@ -150,6 +151,7 @@ describe('Connector channel operations', () => {
   ): OperationContext {
     return {
       env,
+      ports: createOperationPorts(env),
       requestId: 'test',
       actor: { userId, via: 'connector', clientName: 'Claude', scopes: new Set(scopes) },
     };

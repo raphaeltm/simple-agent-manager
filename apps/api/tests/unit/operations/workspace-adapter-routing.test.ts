@@ -1,15 +1,17 @@
+import { OperationError } from '@simple-agent-manager/operations';
+import * as platform from '@simple-agent-manager/operations/internal/platform-operations';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
-import { OperationError } from '../../../src/operations/errors';
-import * as platform from '../../../src/operations/platform-operations';
-import { runWorkspaceOperation } from '../../../src/operations/workspace-adapter';
+import { runWorkspaceOperation } from '../../../src/routes/mcp/workspace-operation-adapter';
 import type { McpTokenData } from '../../../src/services/mcp-token';
 
 // Catalog order is not part of the workspace tool contract.
-vi.mock('../../../src/operations/platform-operations', async (importOriginal) => {
+vi.mock('@simple-agent-manager/operations/internal/platform-operations', async (importOriginal) => {
   const original =
-    await importOriginal<typeof import('../../../src/operations/platform-operations')>();
+    await importOriginal<
+      typeof import('@simple-agent-manager/operations/internal/platform-operations')
+    >();
   return { ...original, platformOperations: [...original.platformOperations].reverse() };
 });
 

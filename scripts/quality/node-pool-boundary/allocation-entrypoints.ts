@@ -39,7 +39,7 @@ export interface AllocationEntrypointCallsite {
   snippet: string;
 }
 
-export const ALLOCATION_ENTRYPOINT_ROOTS = ['apps/api/src'] as const;
+export const ALLOCATION_ENTRYPOINT_ROOTS = ['apps/api/src', 'packages/operations/src'] as const;
 
 export function scanAllocationEntrypoints(
   files: readonly SourceFileInput[]

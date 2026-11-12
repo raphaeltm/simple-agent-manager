@@ -383,6 +383,7 @@ function main() {
       resolve(ROOT, 'packages/project-data/src/**/*.ts'),
       resolve(ROOT, 'packages/agent-email/src/**/*.ts'),
       resolve(ROOT, 'packages/app-deployment/src/**/*.ts'),
+      resolve(ROOT, 'packages/operations/src/**/*.ts'),
     ]);
   }
 

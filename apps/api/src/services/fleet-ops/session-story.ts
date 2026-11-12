@@ -10,9 +10,10 @@
  * related platform errors (1 observability D1), and the primary chat session's sleep/wake step
  * traces (1 D1).
  */
+import { untrustedTextBlock } from '@simple-agent-manager/operations';
+
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
-import { untrustedTextBlock } from '../../operations/untrusted-text';
 import { getBootLogs } from '../boot-log';
 import { getWorkspaceDeletionAttemptState } from '../node-lifecycle';
 import { getSession, getSessionState, listAcpSessions } from '../project-data';

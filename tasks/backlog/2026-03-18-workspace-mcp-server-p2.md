@@ -4,14 +4,14 @@
 > (#2332, `faaf861ba`; `apps/api/src/routes/mcp/tool-definitions-secret-exec.ts:11`) runs a
 > command with selected managed secrets and never returns their values, a different answer to the
 > need behind `get_project_secret`. Pointers: `projectGet` is now `connector-read-core.ts:152-194`,
-> and the workspace adapter map (`operations/workspace-adapter.ts:21-37`) still omits
+> and the workspace adapter map (`routes/mcp/workspace-operation-adapter.ts`) still omits
 > `sam_project_get`.
 
 > **Reconciliation 2026-10-12:** None of the 17 tools shipped. New overlap for
 > `get_project_context`: #2294 (`a95b46191`) added the Connector operation `sam_project_get`
-> (`apps/api/src/operations/connector-operations.ts:54-62`, `connector-read-core.ts:146-186`):
+> (`packages/operations/src/connector-operations.ts:54-62`, `connector-read-core.ts:146-186`):
 > project summary, recent tasks and chats, idea and trigger counts. Workspace agents cannot call it
-> (the #2293 adapter map, `operations/workspace-adapter.ts:19-33`, omits it). Extend and map that
+> (the #2293 adapter map, `routes/mcp/workspace-operation-adapter.ts`, omits it). Extend and map that
 > operation rather than writing a second implementation.
 
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**

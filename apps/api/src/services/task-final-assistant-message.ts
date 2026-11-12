@@ -1,9 +1,9 @@
+import { getPlatformOperationLimits } from '@simple-agent-manager/operations';
 import type { TaskFinalAssistantMessage } from '@simple-agent-manager/shared';
 
 import type { LogicalMessage } from '../durable-objects/project-data/logical-transcript-model';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { getPlatformOperationLimits } from '../operations/limits';
 import { getConnectorReadLimits } from './connector-read-settings';
 import * as projectDataService from './project-data';
 

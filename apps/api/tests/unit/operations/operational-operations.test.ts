@@ -1,5 +1,16 @@
 import { readFileSync } from 'node:fs';
 
+import type { OperationContext } from '@simple-agent-manager/operations';
+import {
+  samChatDeliveryGet,
+  samChatInteractions,
+  samChatInterrupt,
+  samChatJobs,
+  samChatStatus,
+  samOperationGet,
+  samWorkChanges,
+} from '@simple-agent-manager/operations';
+import { samChatRead } from '@simple-agent-manager/operations';
 import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import {
   getSessionState,
@@ -10,17 +21,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
-import {
-  samChatDeliveryGet,
-  samChatInteractions,
-  samChatInterrupt,
-  samChatJobs,
-  samChatStatus,
-  samOperationGet,
-  samWorkChanges,
-} from '../../../src/operations/operational-operations';
-import { samChatRead } from '../../../src/operations/platform-operations';
-import type { OperationContext } from '../../../src/operations/types';
+import { createOperationPorts } from '../../../src/operation-ports';
 import { operationReceiptId } from '../../../src/services/cli-operation-receipts';
 import { recordOperationalJob } from '../../../src/services/operational-job-observations';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
@@ -74,6 +75,7 @@ describe('operational MCP evidence with real SQLite authorization and persistenc
   function ctx(userId = 'owner', scopes = ['sam.read', 'sam.write']): OperationContext {
     return {
       env,
+      ports: createOperationPorts(env),
       requestId: 'test',
       actor: { userId, via: 'connector', scopes: new Set(scopes as ('sam.read' | 'sam.write')[]) },
     };

@@ -1,6 +1,8 @@
+import { recordLink, removeLink } from '@simple-agent-manager/operations';
+
 import type { Env } from '../../env';
 import { AppError } from '../../middleware/error';
-import { recordLink, removeLink } from '../../operations/link-core';
+import { operationDeps } from '../../operation-ports';
 import {
   INVALID_PARAMS,
   jsonRpcError,
@@ -31,7 +33,7 @@ async function handle(
   const relation = kind === 'idea' ? 'related' : 'linked';
   try {
     if (unlink)
-      await removeLink(env, token.projectId, {
+      await removeLink(operationDeps(env), token.projectId, {
         sourceKind: 'idea',
         sourceId: ideaId,
         targetKind: kind,
@@ -39,7 +41,7 @@ async function handle(
         relation,
       });
     else
-      await recordLink(env, token.projectId, {
+      await recordLink(operationDeps(env), token.projectId, {
         sourceKind: 'idea',
         sourceId: ideaId,
         targetKind: kind,

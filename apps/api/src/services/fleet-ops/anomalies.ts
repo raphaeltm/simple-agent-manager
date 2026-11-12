@@ -13,16 +13,15 @@
  *
  * Each class is isolated: one failing query reports an error for that class only.
  */
+import { neutralizeUntrustedText } from '@simple-agent-manager/operations';
+
 import { WORKSPACE_DELETION_QUARANTINE_MESSAGE } from '../../durable-objects/node-lifecycle-workspace-deletion';
 import type { Env } from '../../env';
 import { chunk, D1_MAX_BOUND_PARAMETERS } from '../../lib/d1-limits';
 import { log } from '../../lib/logger';
-import { neutralizeUntrustedText } from '../../operations/untrusted-text';
 import { resolveCleanupConfig } from '../../scheduled/node-cleanup/config';
 import { deriveNodeHealth } from '../node-health';
-import {
-  ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL,
-} from '../workspace-reservation-usage';
+import { ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL } from '../workspace-reservation-usage';
 import { snapshotFailures, stalledWakes } from './anomalies-sessions';
 import {
   ANOMALY_CLASSES,

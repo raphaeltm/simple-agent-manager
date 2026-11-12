@@ -1,3 +1,4 @@
+import { ensurePullRequest } from '@simple-agent-manager/operations';
 import { and, asc, eq, gt, or } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import * as v from 'valibot';
@@ -6,7 +7,6 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { AppError, errors } from '../../middleware/error';
 import { requireProjectCapability } from '../../middleware/project-auth';
-import { ensurePullRequest } from '../../operations/pull-request-core';
 import { AGENT_ACTIVITY_ACTIVE_TASK_STATUSES } from '../../services/agent-activity';
 import { resolveProjectPullRequestHeadBranch } from '../../services/github-pull-request-branch';
 import {

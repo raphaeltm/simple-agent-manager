@@ -27,7 +27,7 @@ const page = await readChat({
 // A long message provides nextOffset for the remaining text.
 ```
 
-The actual reader also applies permission checks, response limits, and cursor validation. Its implementation lives in [`chat-transcript.ts`](https://github.com/raphaeltm/simple-agent-manager/blob/main/apps/api/src/operations/chat-transcript.ts); message assembly is handled by the ProjectData transcript code.
+The actual reader also applies permission checks, response limits, and cursor validation. Its implementation lives in [`chat-transcript.ts`](https://github.com/raphaeltm/simple-agent-manager/blob/main/packages/operations/src/chat-transcript.ts); message assembly is handled by the ProjectData transcript code.
 
 ## Questions need to stay visible
 

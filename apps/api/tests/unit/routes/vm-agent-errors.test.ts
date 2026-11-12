@@ -53,8 +53,10 @@ vi.mock('drizzle-orm', async (importOriginal) => ({
   inArray: vi.fn(),
 }));
 
-// Mock schema
-vi.mock('@simple-agent-manager/worker-core/schema', () => ({
+// Mock schema. Spread the real module: extracted packages import other tables from the same
+// entry (agent-email reads triggerEmailMessages), so a bare mock would break their load.
+vi.mock('@simple-agent-manager/worker-core/schema', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@simple-agent-manager/worker-core/schema')>()),
   nodes: { id: 'id', userId: 'userId', status: 'status', createdAt: 'createdAt' },
   workspaces: { id: 'id', userId: 'userId', nodeId: 'nodeId', status: 'status' },
   agentSessions: { workspaceId: 'workspaceId' },

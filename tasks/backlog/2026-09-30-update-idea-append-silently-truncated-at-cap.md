@@ -9,11 +9,11 @@
 > tool is now at `platform-operations.ts:197`; criteria 1, 2, 4 and 5 are open.
 
 > **Reconciliation 2026-10-12:** Not fixed; the code moved and now serves a second surface. #2293
-> (`6973ceb77`) moved `create_idea` / `update_idea` into `apps/api/src/operations/idea-core.ts`:
+> (`6973ceb77`) moved `create_idea` / `update_idea` into `packages/operations/src/idea-core.ts`:
 > the create slice is now `:202`, the replace slice `:323` and the append SQL `:326-328`, with the
-> cap from `apps/api/src/operations/limits.ts:33`. The `idea-tools.ts:247,394,398` lines below no
+> cap from `packages/operations/src/limits.ts:33`. The `idea-tools.ts:247,394,398` lines below no
 > longer exist. #2294 (`a95b46191`) exposes the same operation to the SAM Connector as
-> `sam_idea_update` (`apps/api/src/operations/platform-operations.ts:153,228`, served by
+> `sam_idea_update` (`packages/operations/src/platform-operations.ts:153,228`, served by
 > `apps/api/src/routes/connector-mcp.ts`). It still returns `updated: true` with no truncation
 > notice (`idea-core.ts:381`). Still open: every acceptance criterion, for both surfaces. Both
 > routes call the same operation, but the regression criterion below names only the MCP route.

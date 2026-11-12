@@ -10,9 +10,10 @@
  * 4. The result is marked untrusted: it carries installation-wide data, logs and event text
  *    that users, agents and node processes wrote.
  */
+import { UNTRUSTED_TEXT_GUIDANCE } from '@simple-agent-manager/operations';
+
 import type { Env } from '../../env';
 import { AppError } from '../../middleware/error';
-import { UNTRUSTED_TEXT_GUIDANCE } from '../../operations/untrusted-text';
 import { type FleetOpsSettings, resolveFleetOpsSettings } from '../../services/fleet-ops/settings';
 import {
   type OperationsAccessContext,

@@ -3,6 +3,7 @@
  * and Worker logs. Each is a thin adapter over a `services/fleet-ops/*` operation and runs
  * through `runOpsReadTool` (gate + audit + untrusted envelope).
  */
+import { untrustedTextBlock } from '@simple-agent-manager/operations';
 import type { PlatformErrorLevel, PlatformErrorSource } from '@simple-agent-manager/shared';
 
 import type { Env } from '../../env';
@@ -11,7 +12,6 @@ import {
   createRateLimitKey,
   getCurrentWindowStart,
 } from '../../middleware/rate-limit';
-import { untrustedTextBlock } from '../../operations/untrusted-text';
 import {
   ANOMALY_CLASSES,
   type AnomalyClass,
