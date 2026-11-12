@@ -28,8 +28,13 @@ vi.mock('@cloudflare/sandbox', () => ({
 }));
 
 const { SandboxDO } = await import('../../../src/durable-objects/sandbox-do');
-const { DEFAULT_ENGINE_EXIT_PROBE_MS, PERMANENT_STARTUP_MESSAGE, permanentEngineStartError } =
-  await import('../../../src/services/sandbox-startup-errors');
+const {
+  DEFAULT_ENGINE_EXIT_PROBE_MS,
+  PERMANENT_STARTUP_MESSAGE,
+  permanentEngineExitError,
+  permanentEngineStartError,
+  teeContainerMonitor,
+} = await import('../../../src/services/sandbox-startup-errors');
 
 /** The SDK's 503 for a startup error it does not recognise. */
 function sdkStartup503(error: string): Response {
@@ -141,6 +146,31 @@ describe('SandboxDO permanent container start failures', () => {
     expect(
       (await fetchThroughSubclass(sdkStartup503('x'), () => Promise.resolve(undefined))).status
     ).toBe(503);
+  });
+
+  it('observes a run celld opens only after monitor() was called (cell not yet attached)', async () => {
+    let running = false;
+    const exitError =
+      'Create container failed with [400] Error response from daemon: unknown or invalid runtime name: runsc';
+    const container = {
+      get running() {
+        return running;
+      },
+      monitor: () =>
+        running
+          ? Promise.reject(exitError)
+          : Promise.reject(
+              new Error('monitor() cannot be called on a container that is not running.')
+            ),
+    };
+    let last: Promise<unknown> | null = null;
+    teeContainerMonitor(container, (exit) => {
+      last = exit;
+    });
+    void container.monitor().catch(() => undefined); // the library's call, too early
+    expect(await permanentEngineExitError(last)).toBeNull();
+    running = true; // celld opens the run
+    await vi.waitFor(async () => expect(await permanentEngineExitError(last)).toBe(exitError));
   });
 
   it('only reads startup-phase errors', () => {

@@ -62,6 +62,9 @@ export function permanentEngineStartError(body: unknown): string | null {
 
 /** Default wait for the last run's exit result; celld settles it at once for a failed start. */
 export const DEFAULT_ENGINE_EXIT_PROBE_MS = 250;
+/** How often, and for how long, to look for a run celld opened after monitor() was called. */
+export const DEFAULT_MONITOR_RETRY_MS = 20;
+export const DEFAULT_MONITOR_RETRY_WINDOW_MS = 2_000;
 
 /**
  * Keeps the promise of the latest `container.monitor()` call. celld reports why a start failed
@@ -73,18 +76,37 @@ export const DEFAULT_ENGINE_EXIT_PROBE_MS = 250;
  * changes.
  */
 export function teeContainerMonitor(
-  container: { monitor(): Promise<unknown> } | undefined,
-  record: (exit: Promise<unknown>) => void
+  container: { monitor(): Promise<unknown>; readonly running?: boolean } | undefined,
+  record: (exit: Promise<unknown>) => void,
+  retryMs = DEFAULT_MONITOR_RETRY_MS,
+  retryWindowMs = DEFAULT_MONITOR_RETRY_WINDOW_MS
 ): void {
   if (!container) return;
   try {
     const original = container.monitor.bind(container);
-    container.monitor = () => {
+    const observe = (): Promise<unknown> => {
       const exit = original();
       record(exit);
-      // The library awaits this promise; this only keeps a stored copy from reporting as unhandled.
+      // The library awaits its own copy; this keeps the stored one from reporting as unhandled.
       exit.catch(() => undefined);
       return exit;
+    };
+    container.monitor = () => {
+      // celld opens a run asynchronously until the sandbox cell is attached, so the library's
+      // monitor() right after start() can land before the run exists and answer "not running".
+      // Watch for the run to open and observe its exit then (bounded).
+      if (container.running === false) {
+        const deadline = Date.now() + retryWindowMs;
+        const retry = (): void => {
+          if (container.running) {
+            observe();
+          } else if (Date.now() < deadline) {
+            setTimeout(retry, retryMs);
+          }
+        };
+        setTimeout(retry, retryMs);
+      }
+      return observe();
     };
   } catch {
     // A non-writable platform object: keep the SDK's own behaviour.
