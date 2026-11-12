@@ -144,6 +144,7 @@ import { handleWaitForSubtasks } from './task-wait-tools';
 import {
   handleCreateTrigger,
   handleDeleteTrigger,
+  handleGetTrigger,
   handleListTriggers,
   handleUpdateTrigger,
 } from './trigger-tools';
@@ -245,6 +246,7 @@ export const MCP_TOOL_HANDLERS: ReadonlyMap<string, McpToolHandler> = new Map<
   ['replace_library_file', handleReplaceLibraryFile],
   ['display_from_library', handleDisplayFromLibrary],
   ['list_triggers', handleListTriggers],
+  ['get_trigger', handleGetTrigger],
   ['create_trigger', handleCreateTrigger],
   ['update_trigger', handleUpdateTrigger],
   ['delete_trigger', handleDeleteTrigger],

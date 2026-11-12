@@ -31,7 +31,8 @@ import { fromTrigger } from './model';
 import { Loading, Notice } from './page';
 import { ConnectEmail } from './trigger-email';
 import { TriggerRuns, useTriggerRuns } from './trigger-runs';
-import { ConnectWebhook, TryWebhook, WebhookDeliveries } from './trigger-webhook';
+import { ConnectWebhook, isSignedWebhook, TryWebhook, WebhookDeliveries } from './trigger-webhook';
+import { ConnectSignedWebhook, useSignedSetupPlacement } from './trigger-webhook-signed';
 import { ButtonLink, Disclosure, KeyValues } from './ui';
 
 export function TriggerDetail({
@@ -85,6 +86,7 @@ export function TriggerDetail({
   );
 
   const trigger = query.data;
+  const signedPlacement = useSignedSetupPlacement(trigger);
   if (!trigger) {
     if (query.isPending) return <Loading />;
     return <DetailUnavailable what="automation" error={query.error} />;
@@ -152,6 +154,12 @@ export function TriggerDetail({
     <Notice>You can look, but only people who can edit this project can change automation.</Notice>
   );
 
+  const signed = trigger.sourceType === 'webhook' && isSignedWebhook(trigger);
+  // Until events are arriving, finishing the connection is the main thing on the page, so it
+  // comes first (on a phone the side column sits below everything else). Once it works it moves
+  // to the side with the other connection details.
+  const signedSetupFirst = signedPlacement === 'main';
+
   const main = (
     <>
       {item.attention && (
@@ -184,6 +192,7 @@ export function TriggerDetail({
           hand. You can still change who may use it, pause it or delete it.
         </Notice>
       )}
+      {signedSetupFirst && <ConnectSignedWebhook trigger={trigger} canWrite={access.canWrite} />}
       <WhenAndThen item={item} lookups={lookups} />
       <TriggerRuns trigger={trigger} canWrite={access.canWrite} runs={runs} />
       {trigger.sourceType === 'webhook' && (
@@ -197,8 +206,11 @@ export function TriggerDetail({
 
   const side = (
     <>
-      {trigger.sourceType === 'webhook' && (
+      {trigger.sourceType === 'webhook' && !signed && (
         <ConnectWebhook trigger={trigger} canWrite={access.canWrite} />
+      )}
+      {signedPlacement === 'side' && (
+        <ConnectSignedWebhook trigger={trigger} canWrite={access.canWrite} />
       )}
       {isEmail && <ConnectEmail trigger={trigger} />}
       <Disclosure

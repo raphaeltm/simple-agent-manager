@@ -6,6 +6,9 @@ import {
   DEFAULT_NODE_CLEANUP_BLOCKED_RETIREMENT_MS,
   DEFAULT_NODE_LIFETIME_ADMISSION_CUTOFF_PERCENT,
   DEFAULT_NODE_LIFETIME_FORCE_SLEEP_AFTER_MS,
+  DEFAULT_WEBHOOK_QUEUE_MAX_PENDING,
+  DEFAULT_WEBHOOK_QUEUE_TTL_SECONDS,
+  DEFAULT_WEBHOOK_SIGNATURE_TOLERANCE_SECONDS,
   DEFAULT_WORKLOAD_IDENTITY_TOKEN_TTL_SECONDS,
   MAX_WORKLOAD_IDENTITY_TOKEN_TTL_SECONDS,
 } from '@simple-agent-manager/shared';
@@ -120,6 +123,27 @@ export const CORE_SETTINGS: AdminSettingDefinition[] = [
     'Operations',
     `Longest wait allowed for a GitHub trigger, in seconds (default: ${DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS_LIMIT / 86400} days). Applies when someone creates a GitHub trigger or changes its maximum wait. Saved automations and waiting events keep their settings.`,
     { min: 1, max: Number.MAX_SAFE_INTEGER }
+  ),
+  integerDefinition(
+    'operations.webhookQueueMaxPending',
+    DEFAULT_WEBHOOK_QUEUE_MAX_PENDING,
+    'Operations',
+    'Most events a signed webhook automation (Slack, HMAC) can hold while its runs are busy. A call that arrives when the line is full is refused with 429 so the sender can retry.',
+    { min: 1, max: 1000 }
+  ),
+  integerDefinition(
+    'operations.webhookQueueTtlSeconds',
+    DEFAULT_WEBHOOK_QUEUE_TTL_SECONDS,
+    'Operations',
+    `Longest a signed webhook event waits for a free run before it is dropped, in seconds (default: ${DEFAULT_WEBHOOK_QUEUE_TTL_SECONDS / 3600} hours). Applies to events received after the change.`,
+    { min: 60, max: 30 * 86400 }
+  ),
+  integerDefinition(
+    'operations.webhookSignatureToleranceSeconds',
+    DEFAULT_WEBHOOK_SIGNATURE_TOLERANCE_SECONDS,
+    'Operations',
+    "How far a signed webhook timestamp may differ from SAM's clock before the call is refused as stale, in seconds. Slack recommends 300.",
+    { min: 30, max: 3600 }
   ),
   integerDefinition(
     'operations.resourceLinkTouchIntervalMs',

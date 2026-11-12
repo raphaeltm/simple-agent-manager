@@ -10,9 +10,10 @@ import {
   handleGitHubEventForTriggers,
   type HandleGitHubEventInput,
 } from './github-trigger-handler';
-import { drainGitHubTriggerQueue } from './github-trigger-queue';
 import { githubTriggerRecoveryConfig } from './github-trigger-recovery-config';
 import { areGitHubTriggersConfigured } from './platform-config';
+import { drainTriggerQueue } from './trigger-queue-drain';
+import { areWebhookTriggersEnabled } from './webhook-trigger-config';
 
 const SUPPORTED_EVENTS = new Set<string>(GITHUB_TRIGGER_EVENT_TYPES);
 interface InboxRow {
@@ -240,7 +241,28 @@ export async function runGitHubTriggerRecovery(
         log.warn('github_triggers.recovery_storage_error', { deliveryId: row.id });
       }
     }
-    if (await areGitHubTriggersConfigured(env)) await drainGitHubTriggerQueue(env);
+    // Signed webhook events wait in the same queue and must drain whether or not GitHub
+    // triggers are configured.
+    // A failure to read the GitHub configuration, or in the drain itself, is logged here:
+    // this runs after the sweep has reported, so nothing else would surface it.
+    try {
+      const includeGitHub = await areGitHubTriggersConfigured(env).catch((error: unknown) => {
+        // GitHub events wait this tick; webhook events still drain.
+        log.warn('trigger_queue.github_config_unreadable', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return false;
+      });
+      const queue = await drainTriggerQueue(env, undefined, {
+        includeGitHub,
+        includeWebhooks: areWebhookTriggersEnabled(env),
+      });
+      log.info('trigger_queue.drain', queue);
+    } catch (error) {
+      log.error('trigger_queue.drain_failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
     log.info('github_triggers.recovery_sweep', stats);
     return stats;
   };

@@ -4,6 +4,7 @@ import type {
   ListTriggerExecutionsResponse,
   ListTriggersResponse,
   ListWebhookDeliveriesResponse,
+  SetWebhookSigningSecretResponse,
   TriggerExecutionStatus,
   TriggerPreviewRequest,
   TriggerPreviewResponse,
@@ -40,6 +41,18 @@ export async function rotateWebhookTriggerToken(
   return request<{ webhookCredential: WebhookCredential }>(
     `/api/projects/${projectId}/triggers/${triggerId}/webhook/rotate`,
     { method: 'POST' }
+  );
+}
+
+/** Write-only: the response reports that a secret is saved, never the value. */
+export async function setWebhookSigningSecret(
+  projectId: string,
+  triggerId: string,
+  secret: string
+): Promise<SetWebhookSigningSecretResponse> {
+  return request<SetWebhookSigningSecretResponse>(
+    `/api/projects/${projectId}/triggers/${triggerId}/webhook/signing-secret`,
+    { method: 'PUT', body: JSON.stringify({ secret }) }
   );
 }
 
