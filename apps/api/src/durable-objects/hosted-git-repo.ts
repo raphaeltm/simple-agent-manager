@@ -13,6 +13,7 @@
 import { DurableObject } from 'cloudflare:workers';
 
 import { log } from '../lib/logger';
+import { maybeJsonRecord } from '../lib/runtime-validation';
 import {
   DEFAULT_HOSTED_GIT_LIMITS,
   hostedGitPushByteBudget,
@@ -141,8 +142,8 @@ export class HostedGitRepo extends DurableObject {
         return await this.receive(req);
       }
       if (path === '/init' && req.method === 'PUT') {
-        const body = (await req.json().catch(() => ({}))) as { defaultBranch?: unknown };
-        const branch = typeof body.defaultBranch === 'string' ? body.defaultBranch : 'main';
+        const body = maybeJsonRecord(await req.json().catch(() => null));
+        const branch = typeof body?.defaultBranch === 'string' ? body.defaultBranch : 'main';
         this.store.setHead(`refs/heads/${branch}`);
         this.store.setMeta('created', '1');
         return Response.json({ ok: true });

@@ -17,6 +17,7 @@ import * as v from 'valibot';
 
 import type { Env } from '../env';
 import { createModuleLogger } from '../lib/logger';
+import { maybeJsonRecord } from '../lib/runtime-validation';
 import { AppError, errors } from '../middleware/error';
 import type { PlatformIntegrationInput } from './platform-config-types';
 
@@ -163,13 +164,12 @@ export async function completeGitHubAppManifest(
   if (stored) await env.KV.delete(key);
   let record: ManifestState | null = null;
   try {
-    const parsed: unknown = stored ? JSON.parse(stored) : null;
-    if (
-      parsed &&
-      typeof parsed === 'object' &&
-      typeof (parsed as ManifestState).userId === 'string'
-    ) {
-      record = parsed as ManifestState;
+    const parsed = stored ? maybeJsonRecord(JSON.parse(stored)) : null;
+    if (parsed && typeof parsed.userId === 'string') {
+      record = {
+        userId: parsed.userId,
+        createdAt: typeof parsed.createdAt === 'number' ? parsed.createdAt : 0,
+      };
     }
   } catch {
     record = null;
