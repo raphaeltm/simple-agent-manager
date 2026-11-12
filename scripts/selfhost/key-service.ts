@@ -37,6 +37,7 @@ import {
   readSecretsFile,
   writePrivateFile,
 } from './secret-files.js';
+import { keyFileNotice } from './secrets-keyfile.js';
 
 export { LEGACY_KEY_PROVIDER };
 export const KEY_AGENT_DIR = 'key-agent';
@@ -384,7 +385,11 @@ export async function resolveDeployKeys(input: {
     }
     return { keyService, keys: ensured.keys, sealed: null };
   }
-  for (const path of ensureKeyServiceFiles(keyService)) log(`wrote ${path}`);
+  for (const path of ensureKeyServiceFiles(keyService)) {
+    log(`wrote ${path}`);
+    // Once, when the file key is created: the operator must keep a copy off the box.
+    if (path === keyService.hostEnv.SAM_KEY_FILE) for (const line of keyFileNotice(path)) log(line);
+  }
   const sealed = await resolveSealedSecrets({
     settings: keyService,
     platformKeysFile: existsSync(platformKeysPath) ? readPrivateJson(platformKeysPath) : null,

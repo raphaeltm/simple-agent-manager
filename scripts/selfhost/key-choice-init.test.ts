@@ -4,6 +4,7 @@
  * them. Covers the default (no SAM_KEY_PROVIDER), the explicit legacy override, a plain deploy
  * with no recorded choice, and a legacy box whose plaintext files get sealed unchanged.
  */
+import { spawnSync } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -195,5 +196,56 @@ describe('pnpm selfhost:deploy --init (sealed secrets by default)', () => {
     expect(choice()).toMatchObject({ provider: 'file', source: 'auto' });
     writeBox(dir);
     expect((await runDeploy(envFile, ['--init'])).status).toBe(0);
+  });
+
+  it('tells the operator once, at the first seal, to keep the key file off the box', async () => {
+    const envFile = writeBox(dir);
+    const first = await runDeploy(envFile, ['--init']);
+    expect(first.out).toContain(`KEY FILE CREATED: ${join(state, 'key-agent/kek')}`);
+    expect(first.out).toContain('cannot be recovered from a backup');
+    const second = await runDeploy(envFile, ['--init']);
+    expect(second.out).not.toContain('KEY FILE CREATED');
+    const kek = readFileSync(join(state, 'key-agent/kek'), 'utf8').trim();
+    expect(first.out).not.toContain(kek);
+  });
+
+  it('key-file and verify-key-copy: say where the key is, check a copy, never print it', async () => {
+    const envFile = writeBox(dir);
+    expect((await runDeploy(envFile, ['--init'])).status).toBe(0);
+    const secrets = join(import.meta.dirname, 'secrets.ts');
+    const kek = readFileSync(join(state, 'key-agent/kek'), 'utf8').trim();
+    const where = await runTsx(secrets, ['key-file', '--box-env', envFile]);
+    expect(where.status, where.out).toBe(0);
+    expect(where.out).toContain(`key file:    ${join(state, 'key-agent/kek')}`);
+    expect(where.out).toMatch(/fingerprint: sha256:[0-9a-f]{32}/);
+    expect(where.out).toContain('mode:        600');
+
+    const good = join(dir, 'copy-good');
+    writeFileSync(good, `${kek}\n`, { mode: 0o600 });
+    const bad = join(dir, 'copy-bad');
+    writeFileSync(bad, Buffer.alloc(32, 7).toString('base64'), { mode: 0o600 });
+    const matches = await runTsx(secrets, ['verify-key-copy', good, '--box-env', envFile]);
+    expect(matches.status, matches.out).toBe(0);
+    expect(matches.out).toContain('matches the box');
+    const differs = await runTsx(secrets, ['verify-key-copy', bad, '--box-env', envFile]);
+    expect(differs.status).toBe(1);
+    expect(differs.out).toContain('does NOT match');
+    // A relative path is taken from where the operator ran pnpm (INIT_CWD), not the repo root.
+    const relative = spawnSync(
+      'pnpm',
+      [
+        '--dir',
+        join(import.meta.dirname, '../..'),
+        'selfhost:secrets',
+        'verify-key-copy',
+        'copy-good',
+        '--box-env',
+        envFile,
+      ],
+      { cwd: dir, encoding: 'utf8' }
+    );
+    expect(relative.status, `${relative.stdout}${relative.stderr}`).toBe(0);
+    expect(relative.stdout).toContain('matches the box');
+    for (const out of [where.out, matches.out, differs.out]) expect(out).not.toContain(kek);
   });
 });

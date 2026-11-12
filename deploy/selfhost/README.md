@@ -120,8 +120,12 @@ Moving to another provider later (for example after setting up a cloud key) is
 The agent container starts as root only to become the owner of `.state/key-agent` (it keeps no
 capability after that); set `SAM_KEY_AGENT_UID` to pin the uid instead.
 
-Backups leave out `.state/key-agent/kek` and `.state/key-agent/credentials/`: keep the file key
-somewhere else, offline. Once a deploy has run from the bundle, `platform-keys.json` and
+Backups leave out `.state/key-agent/kek` and `.state/key-agent/credentials/`. **With the file
+key, store a copy off the box** (a password manager or offline media): without it the install
+cannot be recovered from a backup alone, because its platform keys (`ENCRYPTION_KEY` protects every
+stored credential) and `secrets.env` values are sealed with it. The deploy says so once, when it
+creates the key. `pnpm selfhost:secrets key-file` prints where the key is and its fingerprint;
+`pnpm selfhost:secrets verify-key-copy <path>` checks a copy matches (neither prints the key). Once a deploy has run from the bundle, `platform-keys.json` and
 `secrets.env` can be deleted; later edits go in a fresh `secrets.env` and are merged into a new
 bundle. A `platform-keys.json` that disagrees with the bundle stops the deploy. Code:
 `scripts/selfhost/key-service.ts`, `scripts/selfhost/key-choice.ts`, `deploy/selfhost/key-agent/`,
