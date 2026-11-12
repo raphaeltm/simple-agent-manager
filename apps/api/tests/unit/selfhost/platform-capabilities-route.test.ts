@@ -83,6 +83,7 @@ describe('GET /api/config/platform-capabilities', () => {
       logSearch: true,
       liveLogStream: true,
       appDeployments: true,
+      agentModelCalls: true,
     });
   });
 
@@ -99,6 +100,7 @@ describe('GET /api/config/platform-capabilities', () => {
       logSearch: false,
       liveLogStream: false,
       appDeployments: false,
+      agentModelCalls: false,
     });
   });
 
