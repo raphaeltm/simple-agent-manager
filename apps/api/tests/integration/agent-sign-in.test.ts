@@ -25,6 +25,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
+import { log } from '../../src/lib/logger';
 import { handleAppError } from '../../src/middleware/app-error-handler';
 import { adminRoutes } from '../../src/routes/admin';
 import { agentSignInRoutes } from '../../src/routes/agent-sign-in';
@@ -1237,6 +1238,14 @@ describe('agent sign-in through workload identity (vertical slice)', () => {
   });
 
   describe('issuer key fetch goes through the guarded outbound fetch', () => {
+    let logged: ReturnType<typeof vi.spyOn<typeof log, 'error'>>;
+    beforeEach(() => {
+      logged = vi.spyOn(log, 'error');
+    });
+    afterEach(() => {
+      logged.mockRestore();
+    });
+
     /** Every outbound request, recorded; the JWKS URL answers as `jwks` says. */
     function recordOutbound(jwks: (url: string) => Promise<Response>): string[] {
       const seen: string[] = [];
@@ -1258,9 +1267,15 @@ describe('agent sign-in through workload identity (vertical slice)', () => {
       const seen = recordOutbound(async () => Response.json(await getWorkloadJWKS(issuer.env)));
       await expectRejected(await exchange(await issuer.sign()), 503, /signing keys/);
       expect(seen).toEqual([]);
+      expect(logged).toHaveBeenCalledWith(
+        'agent_sign_in.issuer_keys_refused',
+        expect.objectContaining({ host: new URL(privateIssuer).hostname, reason: 'host' })
+      );
     });
 
     it('does not follow a redirect from the issuer key document', async () => {
+      // jose already sends redirect: 'manual', so the request count alone would pass without the
+      // guard; the refusal log is what only the guarded fetch produces.
       const seen = recordOutbound(
         async () =>
           new Response(null, {
@@ -1270,6 +1285,10 @@ describe('agent sign-in through workload identity (vertical slice)', () => {
       );
       await expectRejected(await exchange(await issuer.sign()), 503, /signing keys/);
       expect(seen).toEqual([JWKS_URL]);
+      expect(logged).toHaveBeenCalledWith(
+        'agent_sign_in.issuer_keys_refused',
+        expect.objectContaining({ host: `api.${ISSUER_DOMAIN}`, reason: 'redirect_limit' })
+      );
     });
 
     it('fetches a public issuer through the same path (control)', async () => {
