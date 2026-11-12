@@ -27,7 +27,7 @@ vi.mock('cloudflare:workers', () => ({
 }));
 
 // Mock the migrations module
-vi.mock('@simple-agent-manager/project-data/internal/do/migrations', () => ({
+vi.mock('../../src/do/migrations', () => ({
   runMigrations: vi.fn(),
 }));
 
@@ -45,7 +45,7 @@ vi.mock('@simple-agent-manager/shared', async (importOriginal) => ({
   PROVIDER_LOCATIONS: {},
 }));
 
-const { ProjectData } = await import('@simple-agent-manager/project-data/internal/do/index');
+const { ProjectData } = await import('../../src/do/index');
 
 interface MockWebSocket {
   send: ReturnType<typeof vi.fn>;

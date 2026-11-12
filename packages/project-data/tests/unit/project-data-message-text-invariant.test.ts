@@ -15,7 +15,7 @@ import { describe, expect, it } from 'vitest';
  * source-contract tests for structural verification) so a NEW writer cannot be added
  * without tripping it.
  */
-const MODULE_DIR = new URL('../../../../../packages/project-data/src/do/', import.meta.url)
+const MODULE_DIR = new URL('../../src/do/', import.meta.url)
   .pathname;
 
 function sourceFiles(): string[] {

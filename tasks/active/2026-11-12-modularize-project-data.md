@@ -142,11 +142,22 @@ core branch `sam/help-identify-parts-worker-embcza`.
 
 | Suite | Before W1 (bbb1c82ca) | Before test move (537bcc5e7, core bb071a00c) | Now |
 | ----- | --------------------- | -------------------------------------------- | --- |
-| apps/api unit pool | 1,087 files / 16,016 tests | 1,085 / 16,041 | 1,041 / 15,535 |
-| packages/project-data | n/a | n/a | 46 / 510 |
+| apps/api unit pool | 1,087 files / 16,016 tests | 1,085 / 16,041 | 1,037 / 15,517 |
+| packages/project-data | n/a | n/a | 50 / 528 |
 | packages/worker-core (W0) | n/a | 9 / 98 | 9 / 98 |
 
-45 files / 507 tests moved from apps/api into the package (16,041 - 507 + 1 new wiring test =
-15,535). The package adds 3 entry-point tests (507 + 3 = 510). The 1,087 -> 1,085 change is W0
+49 files / 525 tests moved from apps/api into the package (16,041 - 525 + 1 new wiring test =
+15,517). The package adds 3 entry-point tests (525 + 3 = 528). The 1,087 -> 1,085 change is W0
 moving kernel tests to worker-core plus tests main added via the core merge. No test deleted.
-Workers pool: unchanged file set; covered by CI's three Durable Object shards.
+Workers pool: 181 files, the same set as the core branch (180 on bbb1c82ca; main's
+signed-webhook-ingress test arrived with the core merge); covered by CI's three DO shards.
+
+Why the remaining ProjectData tests stay in apps/api:
+- Workers pool (`tests/workers/`): they need workerd and the real DO bindings.
+- They reach worker ports through `tests/setup/project-data-ports.ts` (the package has no worker
+  ports): `project-events-wake-prompt-steer`, `task-wait-supervisor`, `task-acp-liveness-signals`
+  (verified: they fail in the package with "port is not configured").
+- They read worker data: `project-data-archive/sweep-message-budget-shipped` and
+  `write-budget-shipped-factor` read `apps/api/wrangler.toml`.
+- They import or mock worker modules (services, routes, scheduled jobs, D1 schema helpers):
+  the remaining ~90 files, which exercise ProjectData together with the worker.

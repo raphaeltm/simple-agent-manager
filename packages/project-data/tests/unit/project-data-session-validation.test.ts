@@ -19,7 +19,7 @@ vi.mock('cloudflare:workers', () => ({
   },
 }));
 
-vi.mock('@simple-agent-manager/project-data/internal/do/migrations', () => ({
+vi.mock('../../src/do/migrations', () => ({
   runMigrations: vi.fn(),
 }));
 
@@ -38,7 +38,7 @@ vi.mock('@simple-agent-manager/shared', async (importOriginal) => ({
   WORKSPACE_IDLE_CHECK_INTERVAL_MS: 60 * 1000,
 }));
 
-const { ProjectData } = await import('@simple-agent-manager/project-data/internal/do/index');
+const { ProjectData } = await import('../../src/do/index');
 
 type SqlResult = {
   toArray: () => Record<string, unknown>[];

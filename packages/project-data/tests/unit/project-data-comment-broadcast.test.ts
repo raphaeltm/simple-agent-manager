@@ -18,7 +18,7 @@ vi.mock('cloudflare:workers', () => ({
   },
 }));
 
-vi.mock('@simple-agent-manager/project-data/internal/do/migrations', () => ({
+vi.mock('../../src/do/migrations', () => ({
   runMigrations: vi.fn(),
 }));
 
@@ -35,15 +35,15 @@ vi.mock('@simple-agent-manager/shared', async (importOriginal) => ({
   PROVIDER_LOCATIONS: {},
 }));
 
-vi.mock('@simple-agent-manager/project-data/internal/do/comments', () => ({
+vi.mock('../../src/do/comments', () => ({
   createCommentThread: vi.fn(),
   createCommentReply: vi.fn(),
   listCommentThreads: vi.fn(),
   updateCommentThreadStatus: vi.fn(),
 }));
 
-const commentStorage = await import('@simple-agent-manager/project-data/internal/do/comments');
-const { ProjectData } = await import('@simple-agent-manager/project-data/internal/do/index');
+const commentStorage = await import('../../src/do/comments');
+const { ProjectData } = await import('../../src/do/index');
 
 interface MockWebSocket {
   send: ReturnType<typeof vi.fn>;
