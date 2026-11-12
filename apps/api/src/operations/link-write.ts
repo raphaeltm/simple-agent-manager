@@ -1,10 +1,10 @@
 import type { LinkKind, LinkRelation } from '@simple-agent-manager/shared';
 import { canonicalProjectPullRequestUrl } from '@simple-agent-manager/shared';
 
-import type { LinkLimits, LinkRemove, LinkWrite } from '../durable-objects/project-data/links';
 import { log } from '../lib/logger';
 import { errors } from '../middleware/error';
 import { ideaTaskPredicateSql } from './idea-identity';
+import type { LinkLimits, LinkRemove, LinkWrite } from './port-types';
 import type { OperationDeps } from './types';
 
 const PAIRS: Record<string, readonly LinkRelation[]> = {

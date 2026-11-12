@@ -125,12 +125,8 @@ export const samChatSend = defineOperation({
       'sam_chat_send',
       input,
       async () => ({
-        ...(await ctx.ports.chat.send(
-          ctx.actor.userId,
-          input.projectId,
-          input.sessionId,
+        ...(await authorized.send(
           { content: input.content },
-          authorized,
           ...(ctx.assertEffectAllowed ? ([ctx.assertEffectAllowed] as const) : ([] as const))
         )),
         link: operationLink(ctx, input.projectId, input.sessionId),

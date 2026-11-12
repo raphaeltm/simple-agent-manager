@@ -11,14 +11,10 @@
  */
 import { formatMessageCursor, type MessageCursor } from '@simple-agent-manager/shared';
 
-import type {
-  LogicalActivity,
-  LogicalEntry,
-  LogicalMessage,
-} from '../durable-objects/project-data/logical-transcript';
 import { log } from '../lib/logger';
 import { OperationError } from './errors';
 import { clampOperationNumber, getPlatformOperationLimits } from './limits';
+import type { LogicalActivity, LogicalEntry, LogicalMessage } from './port-types';
 import type { OperationProjectDataPort } from './ports';
 import {
   fitText,

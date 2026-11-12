@@ -8,100 +8,125 @@
  * `apps/api/src/operation-ports.ts` (`createOperationPorts`). Every method is already bound
  * to the worker environment, so no port call passes `env`.
  *
- * Step 1 of the operations package extraction derives the signatures from the worker
- * modules (type-only imports). Step 2 replaces them with declared structural types so the
- * package has no import from `apps/*`.
+ * Signatures are declared here (with value types in `./port-types.ts`), never derived from
+ * worker modules, so the operations package does not depend on the worker. The worker's
+ * implementation is checked against them structurally.
  */
-import type { NotificationService } from '../durable-objects/notification';
-import type * as projectEventSchedulesConfig from '../durable-objects/project-data/project-event-schedules-config';
-import type * as projectEventsLimits from '../durable-objects/project-data/project-events-limits';
-import type * as projectEventsValues from '../durable-objects/project-data/project-events-values';
-import type * as storageSafety from '../durable-objects/project-data/storage-safety';
-import type * as chatWakeState from '../routes/chat/wake-state';
-import type * as chatAcpInteractions from '../routes/chat-acp-interactions';
-import type * as chatAgentState from '../routes/chat-agent-state';
-import type * as chatAttention from '../routes/chat-attention';
-import type * as chatCancel from '../routes/chat-cancel';
-import type * as chatStop from '../routes/chat-stop';
-import type * as schedulesRoute from '../routes/project-schedules';
-import type * as acpInteractionStore from '../services/acp-interaction-store';
-import type * as adminSettings from '../services/admin-settings';
-import type * as agentActivity from '../services/agent-activity';
-import type * as agentProfiles from '../services/agent-profiles';
-import type * as aiTokenBudget from '../services/ai-token-budget';
-import type * as cancelTaskService from '../services/cancel-task';
-import type * as cliOperationReceipts from '../services/cli-operation-receipts';
-import type * as connectorAgentAnswer from '../services/connector-agent-answer';
-import type * as connectorReadSettings from '../services/connector-read-settings';
-import type * as credentialLimits from '../services/credential-limit-events/read';
-import type * as cronUtils from '../services/cron-utils';
-import type * as githubApp from '../services/github-app';
-import type * as projectData from '../services/project-data';
-import type * as searchCoverage from '../services/project-data-search-coverage';
-import type * as sendChat from '../services/send-chat';
-import type * as sessionAccess from '../services/session-access';
-import type * as sessionIdleness from '../services/session-idleness';
-import type * as submitTaskService from '../services/submit-task';
-import type * as taskFinalAssistantMessage from '../services/task-final-assistant-message';
-import type * as taskStatus from '../services/task-status';
-import type * as triggerCreate from '../services/trigger-create';
-import type * as triggerExecutionPrincipal from '../services/trigger-execution-principal';
-import type * as triggerStatus from '../services/trigger-status';
-import type * as workspaceResourceHistory from '../services/workspace-resource-history';
+import type {
+  AcpInteractionBrowserAnswer,
+  AcpInteractionSafeSummary,
+  AcpInteractionState,
+  AgentProfile,
+  CredentialLimitsResponse,
+  NotificationResponse,
+  NotificationType,
+  SessionStateSnapshot,
+  SubmitTaskResponse,
+  TaskStatus,
+  TriggerStatus,
+  UserAiBudgetSettings,
+} from '@simple-agent-manager/shared';
+
+import type * as schema from '../db/schema';
+import type { ConnectorAnswerChoice } from './connector-answer-input';
+import type { ConnectorReadSettingName } from './connector-read-settings-definition';
+import type {
+  AgentActivityTask,
+  LimitKey,
+  ListAgentActivityTasksOptions,
+  ReconciledSamDispatch,
+  ResolveChatAgentStateInput,
+  SamDispatchReservation,
+  SessionIdlenessClassification,
+  TaskAssistantMessage,
+  TokenBudget,
+  TriggerStatusUpdates,
+} from './port-types';
+import type { OperationProjectDataPort } from './project-data-port';
 import type { OperationContext } from './types';
 
-/** A worker function with its leading `env` parameter already bound. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- matches any leading env type
-type Bound<F> = F extends (env: any, ...args: infer A) => infer R ? (...args: A) => R : never;
+export type {
+  AttentionMarker,
+  IdeaUpdate,
+  KnowledgeSearchHit,
+  OperationProjectDataPort,
+  ProjectEventErrorKind,
+  ResourceLinkSnapshot,
+} from './project-data-port';
 
-/** ProjectData Durable Object reads and writes the operations use (workstream W1 boundary). */
-export interface OperationProjectDataPort {
-  getSession: Bound<typeof projectData.getSession>;
-  getSessionsByTaskIds: Bound<typeof projectData.getSessionsByTaskIds>;
-  listSessions: Bound<typeof projectData.listSessions>;
-  getArchivedToolPayloads: Bound<typeof projectData.getArchivedToolPayloads>;
-  getMessages: Bound<typeof projectData.getMessages>;
-  searchMessagesWithArchiveMetadata: Bound<typeof projectData.searchMessagesWithArchiveMetadata>;
-  getLogicalTranscriptPage: Bound<typeof projectData.getLogicalTranscriptPage>;
-  getLogicalMessage: Bound<typeof projectData.getLogicalMessage>;
-  resolveTranscriptOwner: Bound<typeof projectData.resolveTranscriptOwner>;
-  getMailboxMessage: Bound<typeof projectData.getMailboxMessage>;
-  listActiveAttentionMarkers: Bound<typeof projectData.listActiveAttentionMarkers>;
-  searchKnowledgeObservations: Bound<typeof projectData.searchKnowledgeObservations>;
-  getIdeaWorkSnapshots: Bound<typeof projectData.getIdeaWorkSnapshots>;
-  addIdeaUpdate: Bound<typeof projectData.addIdeaUpdate>;
-  listIdeaUpdates: Bound<typeof projectData.listIdeaUpdates>;
-  deleteIdeaUpdate: Bound<typeof projectData.deleteIdeaUpdate>;
-  recordResourceLink: Bound<typeof projectData.recordResourceLink>;
-  removeResourceLink: Bound<typeof projectData.removeResourceLink>;
-  listResourceLinks: Bound<typeof projectData.listResourceLinks>;
-  listLinksForTargets: Bound<typeof projectData.listLinksForTargets>;
-  getResourceLinkSnapshot: Bound<typeof projectData.getResourceLinkSnapshot>;
-  listProjectEventChannels: Bound<typeof projectData.listProjectEventChannels>;
-  getProjectEventChannelHistory: Bound<typeof projectData.getProjectEventChannelHistory>;
-  listProjectEventChannelSubscribers: Bound<typeof projectData.listProjectEventChannelSubscribers>;
-  getProjectEventSubscription: Bound<typeof projectData.getProjectEventSubscription>;
-  cancelProjectEventSubscription: Bound<typeof projectData.cancelProjectEventSubscription>;
-  getProjectSchedule: Bound<typeof projectData.getProjectSchedule>;
-  listProjectSchedules: Bound<typeof projectData.listProjectSchedules>;
-  createProjectSchedule: Bound<typeof projectData.createProjectSchedule>;
-  mutateProjectSchedule: Bound<typeof projectData.mutateProjectSchedule>;
-  /** True for `agent-dm.*` pair channels, which are private agent-to-agent threads. */
-  isAgentMessageChannelName(name: string): boolean;
-  normalizeNullableText: typeof projectEventsValues.normalizeNullableText;
-  /** Classifies a ProjectData event/channel error; null for anything that is not one. */
-  classifyEventError(error: unknown): ProjectEventErrorKind | null;
-  describeRootSearchCoverage: typeof searchCoverage.describeRootSearchCoverage;
+/** Admin settings the operations read (`apps/api/src/services/admin-setting-definitions.ts`). */
+export type OperationSettingName =
+  | 'operations.agentIdeaContentPageLength'
+  | 'operations.agentLinkedListCap'
+  | 'operations.agentLinkedUpdatesCap'
+  | 'operations.agentLinkedTextMaxLength'
+  | 'operations.agentLinkedMaxBytes'
+  | 'operations.pullRequestRefreshCap'
+  | 'operations.pullRequestRefreshTtlSeconds'
+  | 'operations.pullRequestRefreshBudgetPerHour'
+  | 'operations.pullRequestRefreshBackoffSeconds'
+  | 'operations.pullRequestRefreshTimeoutMs'
+  | 'operations.resourceLinkTouchIntervalMs'
+  | 'operations.resourceLinkWeakPerTarget'
+  | 'operations.resourceLinkWeakCleanupBatchSize'
+  | 'operations.resourceLinkProjectCap'
+  | 'operations.resourceLinkListCap'
+  | 'operations.resourceLinkContextMaxLength'
+  | 'operations.resourceLinkBatchTargetLimit'
+  | 'operations.resourceLinkBatchPerTargetCap'
+  | 'collaboration.ideaUpdateBodyMaxLength'
+  | 'collaboration.ideaUpdateQuoteMaxLength'
+  | 'collaboration.ideaAgentNoteMinIntervalSeconds'
+  | 'collaboration.ideaUpdatePageSize';
+
+export type OperationSettingValue = boolean | number | string | readonly string[] | null;
+
+/** Connector read limits, one number per setting (`services/connector-read-settings.ts`). */
+export type ConnectorReadLimits = Record<LimitKey<ConnectorReadSettingName>, number>;
+
+/** A pending agent interaction as the Connector shows it. */
+export type ConnectorPendingInteraction = AcpInteractionSafeSummary & {
+  untrustedContent: boolean;
+  canDecline: boolean;
+  answerOptions?: unknown[];
+  formSchema?: unknown;
+  detail: Record<string, unknown> | null;
+};
+
+/** A session the caller may write to; operations read the owner and the session row. */
+export interface SessionWriter {
+  session: Record<string, unknown>;
+  ownerUserId: string;
 }
 
-export type ProjectEventErrorKind =
-  'not_found' | 'cursor' | 'validation' | 'limit_exceeded' | 'idempotency_conflict';
+/** A chat send that has passed authorization; `send` delivers with that authorization. */
+export interface AuthorizedChatSend {
+  send(
+    body: { content: string },
+    assertEffectAllowed?: () => Promise<void>
+  ): Promise<Record<string, unknown>>;
+}
+
+/** The recurring-trigger body a cron schedule creates. */
+export interface CronTriggerCreateBody {
+  name: string;
+  sourceType: 'cron';
+  cronExpression: string;
+  cronTimezone: string;
+  promptTemplate: string;
+  description?: string;
+  agentProfileId?: string;
+  skillId?: string;
+  taskMode?: 'task' | 'conversation';
+}
 
 /** Admin-panel runtime settings. */
 export interface OperationSettingsPort {
-  resolve: Bound<typeof adminSettings.resolveAdminSetting>;
-  resolveDetailsMany: Bound<typeof adminSettings.resolveAdminSettingDetailsMany>;
-  connectorReadLimits: Bound<typeof connectorReadSettings.getConnectorReadLimits>;
+  resolve(name: OperationSettingName): Promise<OperationSettingValue>;
+  resolveDetailsMany(
+    names: OperationSettingName[]
+  ): Promise<{ value: OperationSettingValue; configured: boolean; source: string }[]>;
+  connectorReadLimits(): Promise<ConnectorReadLimits>;
 }
 
 /** Project membership, capability and session-writer checks. Each throws the worker's `AppError`. */
@@ -112,7 +137,12 @@ export interface OperationAccessPort {
     userId: string,
     capability: 'task:write'
   ): Promise<unknown>;
-  requireSessionWriter: Bound<typeof sessionAccess.requireSessionWriter>;
+  requireSessionWriter(
+    projectId: string,
+    sessionId: string,
+    actorUserId: string,
+    options?: { action?: string }
+  ): Promise<SessionWriter>;
 }
 
 /** Connector (OAuth/PAT) write receipts, audit, and agent-answer preparation. */
@@ -132,57 +162,128 @@ export interface OperationConnectorPort {
     rawInput: unknown,
     run: () => Promise<T>
   ): Promise<T>;
-  pendingInteractions: Bound<typeof connectorAgentAnswer.connectorPendingInteractions>;
-  prepareAgentAnswer: Bound<typeof connectorAgentAnswer.prepareConnectorAgentAnswer>;
+  pendingInteractions(projectId: string, sessionId: string): Promise<ConnectorPendingInteraction[]>;
+  prepareAgentAnswer(
+    projectId: string,
+    sessionId: string,
+    interactionId: string,
+    input: ConnectorAnswerChoice
+  ): Promise<AcpInteractionBrowserAnswer>;
   /** Deterministic id of a write receipt (shared with the CLI receipt store). */
-  receiptId: typeof cliOperationReceipts.operationReceiptId;
+  receiptId(
+    projectId: string,
+    userId: string,
+    method: string,
+    path: string,
+    key: string
+  ): Promise<string>;
 }
 
 /** Live chat-session control and state. */
 export interface OperationChatPort {
-  authorizeSend: Bound<typeof sendChat.authorizeSendChat>;
-  send: Bound<typeof sendChat.sendChat>;
-  validateSendContent: typeof sendChat.validateSendChatContent;
-  stop: Bound<typeof chatStop.stopChat>;
-  interrupt: Bound<typeof chatCancel.interruptChat>;
-  answerAttention: Bound<typeof chatAttention.answerAttention>;
-  answerAgentInteraction: Bound<typeof chatAcpInteractions.answerAgentInteraction>;
-  snapshotInteractions: Bound<typeof acpInteractionStore.snapshotInteractions>;
-  resolveAgentState: Bound<typeof chatAgentState.resolveChatAgentState>;
+  /** Authorizes a send now; the returned `send` delivers under that authorization. */
+  authorizeSend(userId: string, projectId: string, sessionId: string): Promise<AuthorizedChatSend>;
+  /** Validates message content before a receipt is reserved; returns the trimmed content. */
+  validateSendContent(body: { content?: string }): string;
+  stop(
+    userId: string,
+    projectId: string,
+    sessionId: string,
+    assertEffectAllowed?: () => Promise<void>,
+    options?: { requireStopAcknowledgement?: boolean }
+  ): Promise<{ status: string; workspaceStopped?: boolean; workspaceDeleted?: boolean }>;
+  interrupt(
+    userId: string,
+    projectId: string,
+    sessionId: string,
+    expectedAgentSessionId?: string,
+    expectedPromptStartedAt?: number
+  ): Promise<{ status: string; message: string }>;
+  answerAttention(
+    userId: string,
+    projectId: string,
+    sessionId: string,
+    markerId: string,
+    answer: string
+  ): Promise<{ resolved: boolean; alreadyResolved: boolean; answer: string; inFlight?: boolean }>;
+  answerAgentInteraction(
+    userId: string,
+    projectId: string,
+    sessionId: string,
+    interactionId: string,
+    body: AcpInteractionBrowserAnswer
+  ): Promise<{ accepted: boolean; state: AcpInteractionState }>;
+  snapshotInteractions(
+    projectId: string,
+    chatSessionId: string,
+    cursor?: string | null
+  ): Promise<{
+    pending: AcpInteractionSafeSummary[];
+    settled: AcpInteractionSafeSummary[];
+    cursor: string | null;
+  }>;
+  resolveAgentState(input: ResolveChatAgentStateInput): Promise<{
+    agentSessionId: string | null;
+    agentType: string | null;
+    state: SessionStateSnapshot | null;
+  }>;
   /**
    * Whether a chat's agent turn has ended, by the same session-sleep policy the sleep sweep uses
    * (`prompt-turn-ended`).
    */
   classifyTurnIdleness(input: {
-    state: Parameters<typeof sessionIdleness.getFreshHarnessWorkLeaseExpiry>[0];
+    state: SessionStateSnapshot | null;
     /** The state when it carries an attributed activity observation, else null. */
-    reportedState: Parameters<typeof sessionIdleness.getFreshHarnessWorkLeaseExpiry>[0];
+    reportedState: SessionStateSnapshot | null;
     taskStatus: string | null;
     taskCompletedAt?: string | null;
     now: Date;
-  }): ReturnType<typeof sessionIdleness.classifySessionIdleness>;
+  }): SessionIdlenessClassification;
   attachWakeState(
-    ...args: Parameters<typeof chatWakeState.attachWakeState> extends [unknown, ...infer A]
-      ? A
-      : never
-  ): ReturnType<typeof chatWakeState.attachWakeState>;
+    state: SessionStateSnapshot | null,
+    args: { projectId: string; sessionId: string; sessionStatus: unknown }
+  ): Promise<SessionStateSnapshot | null>;
+}
+
+/** The fields of a project work request that `sam_chat_start` submits. */
+export interface TaskSubmitBody {
+  message: string;
+  taskMode?: 'conversation' | 'task';
+  agentProfileId?: string;
+  skillId?: string;
 }
 
 /** Task lifecycle and task-derived reads. */
 export interface OperationTaskPort {
-  submit: Bound<typeof submitTaskService.submitTask>;
+  submit(
+    user: { id: string; name: string | null; email: string },
+    projectId: string,
+    body: TaskSubmitBody,
+    waitUntil: (promise: Promise<unknown>) => void,
+    via?: string,
+    clientName?: string,
+    repositoryAccess?: (project: schema.Project) => Promise<unknown>,
+    samReservation?: SamDispatchReservation,
+    assertEffectAllowed?: () => Promise<void>
+  ): Promise<SubmitTaskResponse | ReconciledSamDispatch>;
   cancel(
-    ...args: Parameters<typeof cancelTaskService.cancelTask> extends [unknown, unknown, ...infer A]
-      ? A
-      : never
-  ): ReturnType<typeof cancelTaskService.cancelTask>;
-  recentAssistantMessages: Bound<
-    typeof taskFinalAssistantMessage.getRecentAssistantMessagesForTask
-  >;
-  listAgentActivity: Bound<typeof agentActivity.listAgentActivityTasks>;
-  listCredentialLimits: Bound<typeof credentialLimits.listProjectCredentialLimits>;
-  isStatus: typeof taskStatus.isTaskStatus;
-  canTransition: typeof taskStatus.canTransitionTaskStatus;
+    task: schema.Task,
+    userId: string,
+    options?: { reason?: string; source?: string; requireStopAcknowledgement?: boolean }
+  ): Promise<{ status: string }>;
+  recentAssistantMessages(
+    projectId: string,
+    sessionId: string | null,
+    count: number
+  ): Promise<TaskAssistantMessage[]>;
+  listAgentActivity(options: ListAgentActivityTasksOptions): Promise<AgentActivityTask[]>;
+  listCredentialLimits(input: {
+    projectId: string;
+    userId: string;
+    credentialReference?: string | null;
+  }): Promise<CredentialLimitsResponse>;
+  isStatus(value: unknown): value is TaskStatus;
+  canTransition(from: TaskStatus, to: TaskStatus): boolean;
   /** Live plus sleeping task statuses: a task that still holds or can reclaim a runtime. */
   wakeableStatuses: ReadonlySet<string>;
 }
@@ -190,39 +291,56 @@ export interface OperationTaskPort {
 /** Recurring trigger (cron) persistence and validation. */
 export interface OperationTriggerPort {
   create(
-    ...args: Parameters<typeof triggerCreate.createTrigger> extends [unknown, unknown, ...infer A]
-      ? A
-      : never
-  ): ReturnType<typeof triggerCreate.createTrigger>;
-  validateCron: Bound<typeof triggerCreate.validateCron>;
+    project: Pick<schema.Project, 'id' | 'maxTriggers'>,
+    userId: string,
+    body: CronTriggerCreateBody
+  ): Promise<{ created: schema.TriggerRow }>;
+  validateCron(expression: string | undefined, timezone: string | undefined): void;
   clearPageCaches(projectId: string): void;
-  rethrowScheduleError: typeof schedulesRoute.rethrowScheduleError;
-  cronToHumanReadable: typeof cronUtils.cronToHumanReadable;
+  rethrowScheduleError(error: unknown): never;
+  cronToHumanReadable(expression: string, timezone?: string): string;
   /** The user a recurring trigger runs as. */
-  executionUserId: typeof triggerExecutionPrincipal.resolveTriggerExecutionUserId;
-  statusUpdates: typeof triggerStatus.triggerStatusUpdates;
+  executionUserId(trigger: Pick<schema.TriggerRow, 'executionUserId' | 'userId'>): string;
+  statusUpdates(
+    trigger: Pick<schema.TriggerRow, 'status' | 'sourceType' | 'cronExpression' | 'cronTimezone'>,
+    status: TriggerStatus,
+    now?: Date
+  ): TriggerStatusUpdates;
 }
 
-/** Agent profiles, AI usage budgets and GitHub App tokens. */
+/** Agent profiles, AI usage budgets, notifications and GitHub App tokens. */
 export interface OperationAccountPort {
-  listProfiles(projectId: string, userId: string): ReturnType<typeof agentProfiles.listProfiles>;
-  tokenUsage(userId: string): ReturnType<typeof aiTokenBudget.getTokenUsage>;
-  budgetSettings(userId: string): ReturnType<typeof aiTokenBudget.getUserBudgetSettings>;
-  effectiveBudgetLimits(
-    settings: Parameters<typeof aiTokenBudget.resolveEffectiveLimits>[0]
-  ): ReturnType<typeof aiTokenBudget.resolveEffectiveLimits>;
-  githubInstallationToken(
-    installationId: string
-  ): ReturnType<typeof githubApp.getInstallationToken>;
+  listProfiles(projectId: string, userId: string): Promise<AgentProfile[]>;
+  tokenUsage(userId: string): Promise<TokenBudget>;
+  budgetSettings(userId: string): Promise<UserAiBudgetSettings | null>;
+  effectiveBudgetLimits(settings: UserAiBudgetSettings | null): {
+    dailyInputTokenLimit: number;
+    dailyOutputTokenLimit: number;
+  };
+  githubInstallationToken(installationId: string): Promise<{ token: string }>;
   /** The user's notification inbox (Notification Durable Object, keyed by user). */
-  listNotifications: NotificationService['listNotifications'];
+  listNotifications(
+    userId: string,
+    options?: {
+      cursor?: string;
+      limit?: number;
+      filter?: 'all' | 'unread';
+      type?: NotificationType;
+      projectId?: string;
+      sessionId?: string;
+    }
+  ): Promise<{
+    notifications: NotificationResponse[];
+    unreadCount: number;
+    nextCursor: string | null;
+  }>;
 }
 
 /** Environment-derived limits owned by other areas, resolved by the worker. */
 export interface OperationConfigPort {
-  scheduleLimits(): ReturnType<typeof projectEventSchedulesConfig.scheduleLimits>;
-  projectEventLimits(): ReturnType<typeof projectEventsLimits.resolveProjectEventLimits>;
-  storageSafety(): ReturnType<typeof storageSafety.resolveStorageSafetyConfig>;
+  scheduleLimits(): { promptBytes: number; maxHorizonMs: number };
+  projectEventLimits(): { maxReasonBytes: number };
+  storageSafety(): { limitBytes: number; warningRatio: number };
   /** Validates and normalizes a channel name against the deployment's channel limits. */
   channelName(value: string): string;
   /** The API origin derived from the deployment's base domain (`https://api.<domain>`). */
@@ -231,7 +349,13 @@ export interface OperationConfigPort {
 
 /** Workspace runtime observations. */
 export interface OperationWorkspacePort {
-  resourceHistory: Bound<typeof workspaceResourceHistory.getWorkspaceResourceHistory>;
+  resourceHistory(input: {
+    projectId: string;
+    sessionId?: string | null;
+    taskId?: string | null;
+    workspaceId?: string | null;
+    detailChunkId?: string | null;
+  }): Promise<object>;
 }
 
 /** Mission scheduling (ProjectOrchestrator Durable Object). */

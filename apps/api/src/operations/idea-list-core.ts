@@ -33,7 +33,6 @@ import type {
 } from '@simple-agent-manager/shared';
 import type { LinkRelation } from '@simple-agent-manager/shared';
 
-import type { IdeaWorkSnapshot } from '../durable-objects/project-data/idea-work';
 import { log } from '../lib/logger';
 import { OperationError } from './errors';
 import {
@@ -57,6 +56,7 @@ import {
 import { deriveIdeaStatus, type IdeaStatusLinkedSession } from './idea-status';
 import { clampOperationNumber, getPlatformOperationLimits } from './limits';
 import { canonicalPullRequestRefs, resolveResourceLinkBatchCaps } from './link-core';
+import type { IdeaWorkSnapshot } from './port-types';
 import { getPullRequestStates } from './pull-request-core';
 import type { OperationContext } from './types';
 

@@ -13,11 +13,11 @@ import type {
 } from '@simple-agent-manager/shared';
 import { canonicalProjectPullRequestUrl, isStrongLinkRelation } from '@simple-agent-manager/shared';
 
-import type { ResourceLink } from '../durable-objects/project-data/links';
 import { log } from '../lib/logger';
 import { errors } from '../middleware/error';
 import { ideaTaskPredicateSql } from './idea-identity';
 import { limits, validateEntity } from './link-write';
+import type { ResourceLink } from './port-types';
 import { getPullRequestStates } from './pull-request-core';
 import type { OperationDeps } from './types';
 

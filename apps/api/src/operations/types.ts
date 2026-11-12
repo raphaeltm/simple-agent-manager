@@ -1,10 +1,9 @@
 import type * as v from 'valibot';
 
 import { AppError } from '../middleware/error';
-import type { ConnectorSettings } from '../services/connector-settings';
-import type { SamDispatchReservation } from '../services/sam-dispatch-reservation';
 import type { OperationsEnv } from './env';
 import { OperationError } from './errors';
+import type { ConnectorSettings, SamDispatchReservation } from './port-types';
 import type { OperationPorts } from './ports';
 
 export type OperationKind = 'read' | 'write' | 'destructive';

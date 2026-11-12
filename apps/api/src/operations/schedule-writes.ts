@@ -14,16 +14,14 @@ import {
 } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import type * as v from 'valibot';
 
 import * as schema from '../db/schema';
-import type { ScheduleCreator } from '../durable-objects/project-data/project-event-schedules-authority';
 import { AppError } from '../middleware/error';
-import type { CreateTriggerSchema } from '../schemas/triggers';
 import { authorizeProjectOperation } from './authorization';
 import { OperationError } from './errors';
 import { markRejectedBeforeEffects } from './operation-effect-boundary';
-import type { OperationProjectDataPort } from './ports';
+import type { ScheduleCreator } from './port-types';
+import type { CronTriggerCreateBody, OperationProjectDataPort } from './ports';
 import { sanitizeUserInput } from './sanitize-user-input';
 import {
   findRecurringTrigger,
@@ -227,7 +225,7 @@ async function prepareRecurringCreate(
     .where(eq(schema.projects.id, input.projectId))
     .get();
   if (!project) throw new OperationError('not_found', 'Project not found');
-  const body: v.InferOutput<typeof CreateTriggerSchema> = {
+  const body: CronTriggerCreateBody = {
     name,
     sourceType: 'cron',
     cronExpression,
