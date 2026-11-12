@@ -466,7 +466,20 @@ export interface NotificationsPort {
   resendPush(env: Env, userId: string, notificationId: string): Promise<void>;
 }
 
+/** A task's provider usage-limit hold, as ProjectData's delivery gates read it. */
+export interface ProviderLimitWait {
+  phase: 'waiting' | 'blocked' | 'released';
+  credentialKey: string | null;
+  nextRetryAt: number;
+  scheduleKey: string;
+  sourceAgentSessionId?: string;
+  sourceCredentialGeneration?: number;
+  reason: string;
+}
+
 export interface CredentialsPort {
+  /** Parse a task's stored provider-limit hold; malformed or absent JSON yields null. */
+  parseProviderLimitWait(json: string | null | undefined): ProviderLimitWait | null;
   /** Collision-free key for a credential reference, as provider-limit events store it. */
   limitReferenceKey(reference: string | null | undefined): Promise<string | null>;
 }
