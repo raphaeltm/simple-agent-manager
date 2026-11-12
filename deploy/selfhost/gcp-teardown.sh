@@ -169,6 +169,11 @@ run_teardown() {
         "projects/${PROJECT}/"*|"projects/${PROJECT}#"*|*"@${PROJECT}.iam.gserviceaccount.com") ;;
         *) continue ;;
       esac
+      if [ "$KEEP_KMS" -eq 1 ] && { [ "$kind" = kms-key ] || [ "$kind" = kms-key-ring ] ||
+        { [ "$kind" = iam-binding ] && [ "${name#*/cryptoKeys/}" != "$name" ]; }; }; then
+        LEFT+=("${kind} ${name}: kept (--keep-kms)")
+        continue
+      fi
       if [ "$action" != "created" ]; then
         LEFT+=("${kind} ${name}: existed before the bootstrap; kept")
         continue

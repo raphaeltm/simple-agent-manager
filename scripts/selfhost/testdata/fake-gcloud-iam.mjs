@@ -14,6 +14,11 @@ const file = join(STATE, 'gcp.json');
 const db = existsSync(file)
   ? JSON.parse(readFileSync(file, 'utf8'))
   : { pools: {}, providers: {}, accounts: {}, bindings: [], rings: {}, keys: {} };
+// Compute and Cloud Storage for teardown.test.ts: instances, disks, firewall rules, objects.
+db.instances ??= [];
+db.disks ??= {};
+db.firewalls ??= {};
+db.objects ??= {};
 const save = () => writeFileSync(file, JSON.stringify(db, null, 2));
 const flag = (name) => {
   const hit = args.find((a) => a.startsWith(`--${name}=`));
@@ -32,6 +37,14 @@ const fail = (message) => {
 };
 const out = (text) => process.stdout.write(`${text}\n`);
 const format = flag('format') ?? '';
+// $STATE/fail-once holds one operation that fails the first time it is attempted (resume tests).
+function failOnce(operation) {
+  const marker = join(STATE, 'fail-once');
+  if (existsSync(marker) && readFileSync(marker, 'utf8').trim() === operation) {
+    writeFileSync(marker, '');
+    fail(`injected failure: ${operation}`);
+  }
+}
 const keyPath = (key) => `${flag('keyring')}/${key ?? flag('key')}`;
 
 function binding(add) {
@@ -88,7 +101,47 @@ else if (cmd.startsWith('iam service-accounts')) {
   } else fail(`unexpected ${cmd}`);
 } else if (cmd.startsWith('projects add-iam-policy-binding')) binding(true);
 else if (cmd.startsWith('projects remove-iam-policy-binding')) binding(false);
-else if (cmd.startsWith('compute instances describe')) {
+else if (cmd.startsWith('compute instances list')) {
+  out(JSON.stringify(db.instances.filter((i) => i.labels?.managed === 'simple-agent-manager')));
+} else if (cmd.startsWith('compute instances describe') && format === 'json') {
+  const hit = db.instances.find((i) => i.name === words[3] && i.zone.endsWith(`/${flag('zone')}`));
+  if (!hit) fail(`The resource '${words[3]}' was not found`);
+  out(JSON.stringify(hit));
+} else if (cmd.startsWith('compute instances delete')) {
+  failOnce(`instances delete ${words[3]}`);
+  const hit = db.instances.find((i) => i.name === words[3]);
+  if (!hit) fail(`The resource '${words[3]}' was not found`);
+  for (const d of hit.disks ?? []) if (d.autoDelete) delete db.disks[d.source.split('/').pop()];
+  for (const d of hit.disks ?? []) {
+    const disk = db.disks[d.source.split('/').pop()];
+    if (disk) disk.users = [];
+  }
+  db.instances = db.instances.filter((i) => i !== hit);
+  save();
+} else if (cmd.startsWith('compute disks describe')) {
+  const disk = db.disks[words[3]];
+  if (!disk) fail('not found');
+  out((disk.users ?? []).join(';'));
+} else if (cmd.startsWith('compute disks delete')) {
+  if (!db.disks[words[3]]) fail('not found');
+  delete db.disks[words[3]];
+  save();
+} else if (cmd.startsWith('compute firewall-rules describe')) {
+  if (!db.firewalls[words[3]]) fail('not found');
+  out(words[3]);
+} else if (cmd.startsWith('compute firewall-rules delete')) {
+  delete db.firewalls[words[3]];
+  save();
+} else if (cmd.startsWith('storage ls')) {
+  const prefix = (args.find((a) => a.startsWith('gs://')) ?? '').replace(/\*\*$/, '');
+  const hits = Object.keys(db.objects).filter((k) => k.startsWith(prefix));
+  if (hits.length === 0) fail('(gcloud.storage.ls) One or more URLs matched no objects.');
+  for (const k of hits) out(`${String(db.objects[k]).padStart(10)}  2026-11-12T00:00:00Z  ${k}`);
+} else if (cmd.startsWith('storage rm')) {
+  failOnce('storage rm');
+  for (const url of args.filter((a) => a.startsWith('gs://'))) delete db.objects[url];
+  save();
+} else if (cmd.startsWith('compute instances describe')) {
   if (format.includes('email')) out(process.env.FAKE_BOX_SA ?? '');
   else out(process.env.FAKE_BOX_SCOPES ?? 'https://www.googleapis.com/auth/cloud-platform');
 } else if (cmd.startsWith('kms keyrings')) {

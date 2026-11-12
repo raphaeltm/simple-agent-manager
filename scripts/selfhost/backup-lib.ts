@@ -38,6 +38,7 @@ import {
 import { join, relative, resolve } from 'node:path';
 
 import { KEY_SERVICE_BACKUP_EXCLUDES } from './key-service';
+import { recordBackup } from './install-record';
 import { ensurePrivateDir } from './secret-files';
 
 /** The objectstore image docker-compose.yml pins; `mc` ships in it. */
@@ -365,6 +366,8 @@ export function runBackup(
   writeFileSync(join(dest, MANIFEST_NAME), `${JSON.stringify(manifest, null, 2)}\n`, {
     mode: 0o600,
   });
+  // Listed for `pnpm selfhost:teardown`, which deletes a backup only with --delete-backups.
+  recordBackup(ctx.stateDir, dest);
   ctx.log(
     `backup complete: ${manifest.objectCount} objects, celld down ${(manifest.downtimeMs / 1000).toFixed(1)} s -> ${dest}`
   );
