@@ -116,6 +116,20 @@ vi.mock('../../src/middleware/error', async (importOriginal) => ({
   },
 }));
 
+// `aiProxy.directUpstreamEnabled` as an admin would set it; every other setting reads for real.
+let directUpstreamSetting = false;
+vi.mock('../../src/services/admin-settings-resolution', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../src/services/admin-settings-resolution')>();
+  return {
+    ...actual,
+    resolveAdminSetting: async (env: never, name: string) =>
+      name === 'aiProxy.directUpstreamEnabled'
+        ? directUpstreamSetting
+        : actual.resolveAdminSetting(env, name as never),
+  };
+});
+
 const mockGetDecryptedAgentKey = vi.fn();
 vi.mock('../../src/routes/credentials', () => ({
   getDecryptedAgentKey: (...args: unknown[]) => mockGetDecryptedAgentKey(...args),
@@ -684,6 +698,76 @@ describe('runtime.ts always-proxy', () => {
     };
     expect(json.apiKey).toBe('sk-ant-user-key');
     expect(json.inferenceConfig).toBeUndefined();
+  });
+
+  // Overnight B3 open question: with the proxy off, agent-key used to fall through and return a
+  // custom-base-URL key with no base URL, so the agent sent it to the vendor's default endpoint.
+  describe('custom base URL credential when the proxy cannot serve it', () => {
+    const customAnthropicKey = {
+      credential: 'sk-custom-endpoint-user-key',
+      credentialKind: 'api-key',
+      credentialSource: 'user',
+      baseUrl: 'https://anthropic-alt.example/anthropic',
+      providerDialect: 'anthropic',
+    };
+
+    afterEach(() => {
+      directUpstreamSetting = false;
+    });
+
+    it('refuses instead of returning the key without its base URL (kill switch)', async () => {
+      mockWorkspaceOnly();
+      mockGetDecryptedAgentKey.mockResolvedValueOnce(customAnthropicKey);
+
+      const res = await postAgentKey('claude-code', { AI_PROXY_ENABLED: 'false' } as Partial<Env>);
+
+      expect(res.status).toBe(404);
+      expect(await res.text()).not.toContain('sk-custom-endpoint-user-key');
+    });
+
+    it('refuses on a box with no AI Gateway while the admin setting is off', async () => {
+      mockWorkspaceOnly();
+      mockGetDecryptedAgentKey.mockResolvedValueOnce(customAnthropicKey);
+
+      const res = await postAgentKey('claude-code', { CF_ACCOUNT_ID: '' } as Partial<Env>);
+
+      expect(res.status).toBe(404);
+      expect(await res.text()).not.toContain('sk-custom-endpoint-user-key');
+    });
+
+    it('serves it through the passthrough proxy once the admin turns the setting on', async () => {
+      directUpstreamSetting = true;
+      mockDbLimit.mockImplementation(() => {
+        queryCount++;
+        if (queryCount === 1) return [{ userId: 'user1', projectId: 'proj1' }]; // workspace
+        return [];
+      });
+      mockGetDecryptedAgentKey.mockResolvedValueOnce(customAnthropicKey);
+
+      const res = await postAgentKey('claude-code', { CF_ACCOUNT_ID: '' } as Partial<Env>);
+
+      expect(res.status).toBe(200);
+      const json = (await res.json()) as {
+        apiKey: string;
+        inferenceConfig: { provider: string };
+      };
+      expect(json.apiKey).toBe('__sam_proxy__');
+      expect(json.inferenceConfig.provider).toBe('anthropic-passthrough');
+    });
+
+    it('a key with no base URL is still returned directly with the proxy off (control)', async () => {
+      mockWorkspaceOnly();
+      mockGetDecryptedAgentKey.mockResolvedValueOnce({
+        credential: 'sk-ant-user-key',
+        credentialKind: 'api-key',
+        credentialSource: 'user',
+      });
+
+      const res = await postAgentKey('claude-code', { CF_ACCOUNT_ID: '' } as Partial<Env>);
+
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { apiKey: string }).apiKey).toBe('sk-ant-user-key');
+    });
   });
 
   it('returns direct Amp credential without AI proxy config', async () => {

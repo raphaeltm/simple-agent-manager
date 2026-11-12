@@ -37,6 +37,17 @@ vi.mock('../../../src/services/ai-proxy-shared', () => ({
     statusCode = 401;
   },
 }));
+// A self-hosted box (no AI Gateway) where an admin turned on `aiProxy.directUpstreamEnabled`:
+// the configuration in which this passthrough is reachable on a box (ai-proxy-availability.ts).
+vi.mock('../../../src/services/admin-settings-resolution', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../../src/services/admin-settings-resolution')>();
+  return {
+    ...actual,
+    resolveAdminSetting: async (env: never, name: string) =>
+      name === 'aiProxy.directUpstreamEnabled' ? true : actual.resolveAdminSetting(env, name as never),
+  };
+});
 vi.mock('../../../src/middleware/rate-limit', () => ({
   checkRateLimit: vi.fn(async () => ({ allowed: true, remaining: 10, resetAt: 9999 })),
   createRateLimitKey: () => 'k',
