@@ -2,7 +2,7 @@
 import type { CapacityPlacementSnapshot } from '@simple-agent-manager/shared';
 
 import { capacityPlacementAuthorityGeneration } from './capacity-pool-authority';
-import { DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS } from './capacity-pool-placement-settings';
+import { DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS } from './capacity-pool-selection-defaults';
 import type {
   TaskStartCapacityCandidate,
   TaskStartCapacityPoolSelection,

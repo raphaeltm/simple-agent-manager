@@ -7,6 +7,7 @@ import {
 import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import { syncProviderLimitAttention } from '@simple-agent-manager/project-data/internal/do/provider-limit-attention';
 import { sleepSession } from '@simple-agent-manager/project-data/internal/do/sessions';
+import { newProviderLimitWait } from '@simple-agent-manager/scheduler-core';
 import Database from 'better-sqlite3';
 import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -15,7 +16,6 @@ import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { AppError } from '../../src/middleware/error';
 import { providerLimitResumeRoutes } from '../../src/routes/tasks/provider-limit-resume';
-import { newProviderLimitWait } from '../../src/services/provider-limit-policy';
 import { presentBlockedProviderLimitWait } from '../../src/services/provider-limit-recovery';
 import { createAllSchemaTables } from '../helpers/sqlite-d1';
 import {

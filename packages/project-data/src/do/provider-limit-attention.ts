@@ -1,10 +1,11 @@
+import { parseProviderLimitWait } from '@simple-agent-manager/scheduler-core';
+
 /** Caller holds the DO concurrency gate across the authoritative read and local write. */
 import {
   createAttentionMarker,
   listActiveAttentionMarkers,
   resolveAttentionMarkersByKind,
 } from './attention';
-import { projectDataPorts } from './ports';
 import { sleepSession } from './sessions';
 
 export interface ProviderLimitAttentionResult {
@@ -29,9 +30,7 @@ export async function syncProviderLimitAttention(
       workspace_id: string | null;
       provider_limit_wait_json: string | null;
     }>();
-  const wait = projectDataPorts().credentials.parseProviderLimitWait(
-    task?.provider_limit_wait_json
-  );
+  const wait = parseProviderLimitWait(task?.provider_limit_wait_json);
   const blocked =
     !!task &&
     !['completed', 'failed', 'cancelled'].includes(task.status) &&

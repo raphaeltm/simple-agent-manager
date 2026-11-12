@@ -1,5 +1,9 @@
 /** Full limit recovery with real callback auth, D1, DOs, R2 and every TaskRunner step.
  * The only fault peer is this test's VM HTTP double; release builds have no switch. */
+import {
+  parseProviderLimitWait,
+  PROVIDER_LIMIT_CONTINUATION,
+} from '@simple-agent-manager/scheduler-core';
 import { env, runInDurableObject, SELF } from 'cloudflare:test';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -7,10 +11,6 @@ import recorded from '../../../../tests/fixtures/provider-limit-rejections.json'
 import { runSessionSleepSweep } from '../../src/scheduled/session-sleep';
 import { signCallbackToken } from '../../src/services/jwt';
 import { getNodeBackendBaseUrl } from '../../src/services/node-agent-readiness';
-import {
-  parseProviderLimitWait,
-  PROVIDER_LIMIT_CONTINUATION,
-} from '../../src/services/provider-limit-policy';
 import { buildSessionSnapshotR2Key } from '../../src/services/session-snapshots';
 import {
   acceptedPromptResponse,

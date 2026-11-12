@@ -1,10 +1,10 @@
-import { describe, expect, it } from 'vitest';
-
-import { evaluateReusableNodeCandidate } from '../../src/durable-objects/task-runner/node-placement-candidate';
 import {
   DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB,
   resolveWorkspaceAdmissionPolicy,
-} from '../../src/services/workspace-resource-capacity';
+} from '@simple-agent-manager/scheduler-core';
+import { describe, expect, it } from 'vitest';
+
+import { evaluateReusableNodeCandidate } from '../../src/durable-objects/task-runner/node-placement-candidate';
 
 function evaluate(memoryMb: number) {
   return evaluateReusableNodeCandidate({

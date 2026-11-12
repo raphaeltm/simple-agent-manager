@@ -9,6 +9,10 @@
  *
  * Everything runs against a real SQLite engine through the D1 adapter (rule 28).
  */
+import {
+  buildCapacityPoolSelection,
+  noEligibleCapacityCandidateMessage,
+} from '@simple-agent-manager/scheduler-core';
 import type { ProviderInstanceOffering } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
@@ -26,9 +30,7 @@ import {
   ensureDefaultCapacityPoolsForExistingCredentials,
   readDefaultCapacityPoolSummaries,
 } from '../../../src/services/default-capacity-pools';
-import { noEligibleCapacityCandidateMessage } from '../../../src/services/placement-resolution-error';
 import { resolveTaskStartPlacement } from '../../../src/services/placement-resolver';
-import { buildCapacityPoolSelection } from '../../../src/services/placement-resolver-capacity';
 import { offering } from '../../helpers/capacity-pool-offerings';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 import { seedCloudCredential, seedUser } from '../routes/capacity-pool-test-seeds';

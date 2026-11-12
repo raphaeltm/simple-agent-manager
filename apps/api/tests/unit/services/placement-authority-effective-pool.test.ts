@@ -14,6 +14,9 @@
  * adapter: the guard IS a SQL predicate, so a mock whose `.where()` ignores its
  * arguments would pass with the predicate deleted (rule 28).
  */
+import {
+  resolveWorkspaceAdmissionPolicy,
+} from '@simple-agent-manager/scheduler-core';
 import type { CapacityPlacementSnapshot } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { eq } from 'drizzle-orm';
@@ -38,7 +41,6 @@ import type { TaskStartCapacityPoolSelection } from '../../../src/services/place
 import { filterReusableNodesByCurrentAuthority } from '../../../src/services/reusable-node-authority';
 import type { WorkspacePlacementInput } from '../../../src/services/workspace-placement';
 import { reserveWorkspacePlacement } from '../../../src/services/workspace-placement';
-import { resolveWorkspaceAdmissionPolicy } from '../../../src/services/workspace-resource-capacity';
 import {
   createAllSchemaTables,
   createSqliteD1,

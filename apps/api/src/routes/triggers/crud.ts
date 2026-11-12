@@ -1,4 +1,8 @@
 /** Authenticated trigger CRUD. Execution actions live in actions.ts. */
+import {
+  ResourceRequirementsValidationError,
+  serializeResourceRequirementsInput,
+} from '@simple-agent-manager/scheduler-core';
 import type {
   CreateTriggerResponse,
   GitHubTriggerEventType,
@@ -37,10 +41,6 @@ import {
 } from '../../services/github-trigger-config';
 import { parseGitHubTriggerFiltersJson } from '../../services/github-trigger-filter';
 import { getProjectMultiplayerState } from '../../services/project-multiplayer';
-import {
-  ResourceRequirementsValidationError,
-  serializeResourceRequirementsInput,
-} from '../../services/resource-requirements-input';
 import { clearTriggerPageCaches } from '../../services/trigger-cache';
 import {
   assertKeepsAgentProfile,

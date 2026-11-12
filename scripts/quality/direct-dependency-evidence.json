@@ -122,6 +122,10 @@
       "registryUrl": "https://www.npmjs.com/package/fake-indexeddb",
       "necessity": "In-memory IndexedDB for tests of the query-cache persister; jsdom provides no IndexedDB implementation."
     },
+    "fast-check": {
+      "registryUrl": "https://www.npmjs.com/package/fast-check",
+      "necessity": "Property-based generator for the scheduler lifecycle simulation in scheduler-core; already the API worker's test dependency at the same pinned version."
+    },
     "globals": {
       "registryUrl": "https://www.npmjs.com/package/globals",
       "necessity": "Defines explicit flat-config runtime globals."
@@ -170,7 +174,7 @@
     },
     "valibot": {
       "registryUrl": "https://www.npmjs.com/package/valibot",
-      "necessity": "Runtime JSON boundary validation in worker-core; already used by shared and the API worker at the same catalog version."
+      "necessity": "Runtime JSON boundary validation in worker-core and scheduler-core; already used by shared and the API worker at the same catalog version."
     },
     "vite": {
       "registryUrl": "https://www.npmjs.com/package/vite",

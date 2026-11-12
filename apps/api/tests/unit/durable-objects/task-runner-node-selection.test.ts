@@ -96,7 +96,7 @@ type PlacementMetadataFields = {
   provider_instance_price_monthly_cents?: number | null;
   provider_instance_price_hourly_micros?: number | null;
   // Trusted-capacity projection. Production node selection reads these columns
-  // (services/workspace-resource-capacity.ts trustedWorkspaceNodeCapacityColumnsSql);
+  // (services/workspace-admission-sql.ts trustedWorkspaceNodeCapacityColumnsSql);
   // a fixture that omits them models a node with no verified hardware, which the
   // real selector rejects.
   node_class?: string | null;

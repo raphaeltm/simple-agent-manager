@@ -352,7 +352,7 @@ describe('Project default provider — mapper', () => {
 
 describe('Project default provider — task submit', () => {
   const submit = apiSrc('services/submit-task-implementation.ts');
-  const placementResolver = apiSrc('services/placement-field-resolution.ts');
+  const placementResolver = apiSrc('../../../packages/scheduler-core/src/placement-field-resolution.ts');
 
   it('reads provider from body and project default with fallback', () => {
     expect(submit).toContain('body.provider');
@@ -373,7 +373,7 @@ describe('Project default provider — task submit', () => {
 
 describe('Project default provider — task runs route', () => {
   const run = apiSrc('routes/tasks/run.ts');
-  const placementResolver = apiSrc('services/placement-field-resolution.ts');
+  const placementResolver = apiSrc('../../../packages/scheduler-core/src/placement-field-resolution.ts');
 
   it('hands the resolved placement provider to startTaskRunnerDO', () => {
     expect(run).toContain('resolveTaskStartPlacement');

@@ -1,3 +1,4 @@
+import { parseProviderLimitWait } from '@simple-agent-manager/scheduler-core';
 import { SAM_NOTICE_METADATA_KEY } from '@simple-agent-manager/shared';
 
 import { projectDataPorts } from './ports';
@@ -29,9 +30,7 @@ export async function providerLimitEventDeliveryGuard(
   )
     .bind(projectId, claim.message.targetSessionId)
     .first<{ provider_limit_wait_json: string | null; credential_reference: string | null }>();
-  const wait = projectDataPorts().credentials.parseProviderLimitWait(
-    task?.provider_limit_wait_json
-  );
+  const wait = parseProviderLimitWait(task?.provider_limit_wait_json);
   // Retain the parked identity as well: queued self-notices must not revive after credential changes.
   const keys = [
     ...new Set(

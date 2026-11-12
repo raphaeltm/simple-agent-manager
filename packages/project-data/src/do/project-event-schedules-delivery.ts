@@ -1,3 +1,5 @@
+import { parseProviderLimitWait } from '@simple-agent-manager/scheduler-core';
+
 import { projectDataPorts } from './ports';
 import { requireScheduleMember } from './project-event-schedules-authority';
 import { getSchedule, scheduleSharedAccessGrantId } from './project-event-schedules-storage';
@@ -95,9 +97,7 @@ export async function invalidScheduledDeliveryTarget(
       )
         .bind(claim.message.sourceTaskId, projectId)
         .first<{ provider_limit_wait_json: string | null }>();
-      const wait = projectDataPorts().credentials.parseProviderLimitWait(
-        task?.provider_limit_wait_json
-      );
+      const wait = parseProviderLimitWait(task?.provider_limit_wait_json);
       if (!wait || wait.phase === 'blocked' || wait.scheduleKey !== schedule.idempotencyKey)
         return invalid();
     }
@@ -167,9 +167,7 @@ export async function releaseAcceptedProviderLimitSchedule(
   )
     .bind(claim.message.sourceTaskId, projectId, claim.message.targetSessionId)
     .first<{ workspace_id: string | null; provider_limit_wait_json: string | null }>();
-  const wait = projectDataPorts().credentials.parseProviderLimitWait(
-    task?.provider_limit_wait_json
-  );
+  const wait = parseProviderLimitWait(task?.provider_limit_wait_json);
   if (
     !task?.workspace_id ||
     !wait ||
@@ -204,9 +202,7 @@ export async function releaseAcceptedProviderLimitSchedule(
     )
       .bind(claim.message.sourceTaskId, projectId)
       .first<{ provider_limit_wait_json: string | null }>();
-    const remaining = projectDataPorts().credentials.parseProviderLimitWait(
-      current?.provider_limit_wait_json
-    );
+    const remaining = parseProviderLimitWait(current?.provider_limit_wait_json);
     if (remaining?.phase === 'waiting' && remaining.scheduleKey === wait.scheduleKey)
       throw new Error('Provider continuation acceptance checkpoint requires retry');
   }

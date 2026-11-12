@@ -5,7 +5,7 @@ import type {
 } from '@simple-agent-manager/shared';
 import { resolveApproximateBillingMonthHours } from '@simple-agent-manager/shared';
 
-import { DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS } from './capacity-pool-placement-settings';
+import { DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS } from './capacity-pool-selection-defaults';
 import type { TaskStartCapacityCandidate } from './placement-resolver-types';
 import {
   comparePlacementLocationsByStrategy,
