@@ -8,7 +8,7 @@
  *   X-SAM-Mail-From               envelope sender (MAIL FROM; empty for a null sender)
  *   X-SAM-Rcpt-To                 envelope recipient (RCPT TO)
  *   X-SAM-Mail-Auth               `pass` (aligned SPF or DKIM) or `trusted` (box loopback)
- *   X-SAM-Mail-Auth-From-Domain   the From domain the receiver authenticated
+ *   X-SAM-Mail-Auth-From          the From address whose domain the receiver authenticated
  * Response: 200 `{outcome: accepted|queued|duplicate|loopback}` or
  * `{outcome: 'rejected', reason}`, which the receiver turns into 250 or 550. Anything else
  * (401, 404, 5xx, a timeout) is a 451 there, so the sender retries and nothing is bounced.
@@ -16,7 +16,7 @@
  * Trust: only box processes reach this route (Caddy answers 404 for the gateway prefix on its
  * public listener, sam.d/frp.caddy), and the shared secret authenticates the receiver. The
  * receiver is the sender-authentication authority, as Cloudflare Email Routing is on Cloudflare;
- * the handler binds its verdict to the From it parses (`authenticatedFromDomain`).
+ * the handler binds its verdict to the From it parses (`authenticatedFrom`).
  *
  * Fails closed: 404 without the gateway secret (every Cloudflare deployment) or while the
  * self-host inbound switch is off (services/agent-email/self-host-inbound.ts).
@@ -26,6 +26,7 @@ import type { Context } from 'hono';
 import type { Env } from '../env';
 import { constantTimeEqual } from '../lib/constant-time';
 import { log } from '../lib/logger';
+import { normalizeMailbox } from '../services/agent-email/address';
 import {
   handleInboundAgentEmail,
   type InboundDeps,
@@ -39,14 +40,13 @@ export const INBOUND_EMAIL_HEADER = {
   mailFrom: 'X-SAM-Mail-From',
   rcptTo: 'X-SAM-Rcpt-To',
   auth: 'X-SAM-Mail-Auth',
-  authFromDomain: 'X-SAM-Mail-Auth-From-Domain',
+  authFrom: 'X-SAM-Mail-Auth-From',
 } as const;
 
 /** Above the largest `agentEmail.maxInboundBytes` an admin can set (25 MiB). */
 export const INBOUND_EMAIL_GATEWAY_MAX_BYTES = 25 * 1024 * 1024;
 
 const AUTH_RESULTS = new Set(['pass', 'trusted']);
-const DOMAIN = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}$/;
 
 function json(body: Record<string, unknown>, status = 200): Response {
   return Response.json(body, { status });
@@ -95,10 +95,8 @@ export async function handleInboundEmailGateway(
   }
 
   const auth = (c.req.header(INBOUND_EMAIL_HEADER.auth) ?? '').trim().toLowerCase();
-  const authFromDomain = (c.req.header(INBOUND_EMAIL_HEADER.authFromDomain) ?? '')
-    .trim()
-    .toLowerCase();
-  if (!AUTH_RESULTS.has(auth) || !DOMAIN.test(authFromDomain)) {
+  const authFrom = normalizeMailbox(c.req.header(INBOUND_EMAIL_HEADER.authFrom));
+  if (!AUTH_RESULTS.has(auth) || !authFrom) {
     log.warn('self_host_gateway.inbound_email_unauthenticated_sender', { action: 'rejected' });
     return badRequest('Sender authentication results are missing');
   }
@@ -122,7 +120,7 @@ export async function handleInboundEmailGateway(
     setReject: (reason) => {
       rejectReason = reason;
     },
-    authenticatedFromDomain: authFromDomain,
+    authenticatedFrom: authFrom,
   };
   const outcome = await handleInboundAgentEmail(message, c.env, deps);
   log.info('self_host_gateway.inbound_email', { outcome: outcome.kind, auth, rawSize });

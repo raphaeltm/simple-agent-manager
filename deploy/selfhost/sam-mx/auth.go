@@ -23,11 +23,13 @@ type AuthVerdict struct {
 	// "pass": SPF or DKIM passed and is aligned with the From domain (DMARC pass).
 	// "trusted": the client is in SAM_MX_TRUSTED_NETWORKS (box loopback); no checks ran.
 	Result string
-	// The domain of the message's single From address, lower case. The Worker requires the From
-	// it parses to have this domain, so the two parsers cannot disagree about who sent it.
-	FromDomain string
-	SPF        string
-	DKIM       string
+	// The message's single From address, lower case, and its domain. The Worker requires the
+	// From it parses to be exactly this address, so the two parsers cannot disagree about who
+	// sent it.
+	FromAddress string
+	FromDomain  string
+	SPF         string
+	DKIM        string
 }
 
 // AuthError is a refusal: Temporary means 451 (retry later), otherwise 550.
@@ -41,21 +43,85 @@ func (e *AuthError) Error() string { return e.Reason }
 func permFail(reason string) error { return &AuthError{Reason: reason} }
 func tempFail(reason string) error { return &AuthError{Temporary: true, Reason: reason} }
 
-// FromDomain parses the header block and returns the domain of the single From address.
-func FromDomain(raw []byte) (string, error) {
+// Headers that must appear at most once: every one of them feeds a decision (sender identity,
+// threading, dedupe, loop guards), and a second copy is where two parsers disagree.
+var singleHeaders = map[string]bool{
+	"from": true, "sender": true, "reply-to": true, "subject": true, "message-id": true,
+	"in-reply-to": true, "references": true, "auto-submitted": true, "precedence": true,
+	"list-id": true,
+}
+
+// checkHeaderBlock refuses header blocks two parsers could read differently: a field name that
+// is not a plain token directly followed by ':' ("From :" is a From header to some parsers and
+// not to others), a leading continuation line, or a repeated decision header.
+func checkHeaderBlock(raw []byte) error {
+	seen := map[string]bool{}
+	first := true
+	for len(raw) > 0 {
+		end := bytes.Index(raw, []byte("\r\n"))
+		if end < 0 {
+			end = len(raw)
+		}
+		line := raw[:end]
+		if end+2 <= len(raw) {
+			raw = raw[end+2:]
+		} else {
+			raw = nil
+		}
+		if len(line) == 0 {
+			return nil // end of the header block
+		}
+		if line[0] == ' ' || line[0] == '\t' {
+			if first {
+				return permFail("the message header starts with a continuation line")
+			}
+			continue
+		}
+		first = false
+		colon := bytes.IndexByte(line, ':')
+		if colon <= 0 {
+			return permFail("malformed header line")
+		}
+		for _, c := range line[:colon] {
+			if c < 33 || c > 126 {
+				return permFail("malformed header field name")
+			}
+		}
+		name := strings.ToLower(string(line[:colon]))
+		if singleHeaders[name] {
+			if seen[name] {
+				return permFail(fmt.Sprintf("duplicate %s header", name))
+			}
+			seen[name] = true
+		}
+	}
+	return nil
+}
+
+// ParseFrom checks the header block and returns the single From address (lower case) and its
+// domain.
+func ParseFrom(raw []byte) (address, domain string, err error) {
+	if err := checkHeaderBlock(raw); err != nil {
+		return "", "", err
+	}
 	msg, err := mail.ReadMessage(bytes.NewReader(raw))
 	if err != nil {
-		return "", permFail("the message header could not be read")
+		return "", "", permFail("the message header could not be read")
 	}
 	fromHeaders := msg.Header["From"]
 	if len(fromHeaders) != 1 {
-		return "", permFail("exactly one From header is required")
+		return "", "", permFail("exactly one From header is required")
 	}
 	addrs, err := mail.ParseAddressList(fromHeaders[0])
 	if err != nil || len(addrs) != 1 {
-		return "", permFail("exactly one From address is required")
+		return "", "", permFail("exactly one From address is required")
 	}
-	return domainOf(addrs[0].Address)
+	address = strings.ToLower(addrs[0].Address)
+	if strings.Count(address, "@") != 1 {
+		return "", "", permFail("the From address is not a plain mailbox")
+	}
+	domain, err = domainOf(address)
+	return address, domain, err
 }
 
 func domainOf(addr string) (string, error) {
@@ -113,15 +179,15 @@ func lookupDMARC(ctx context.Context, r Resolver, fromDomain string) (*dmarc.Rec
 // sender. Cloudflare Email Routing, which the Worker relied on before, enforces published DMARC
 // policies; this is stricter on purpose.
 func Authenticate(ctx context.Context, r Resolver, ip net.IP, helo, envelopeFrom string, raw []byte, trusted bool) (*AuthVerdict, error) {
-	fromDomain, err := FromDomain(raw)
+	fromAddress, fromDomain, err := ParseFrom(raw)
 	if err != nil {
 		return nil, err
 	}
 	if trusted {
-		return &AuthVerdict{Result: "trusted", FromDomain: fromDomain, SPF: "none", DKIM: "none"}, nil
+		return &AuthVerdict{Result: "trusted", FromAddress: fromAddress, FromDomain: fromDomain, SPF: "none", DKIM: "none"}, nil
 	}
 
-	verdict := &AuthVerdict{FromDomain: fromDomain, SPF: "none", DKIM: "none"}
+	verdict := &AuthVerdict{FromAddress: fromAddress, FromDomain: fromDomain, SPF: "none", DKIM: "none"}
 	temporary := false
 
 	// SPF for the envelope sender; for a null sender, the HELO identity (RFC 7208 2.3).
@@ -146,7 +212,9 @@ func Authenticate(ctx context.Context, r Resolver, ip net.IP, helo, envelopeFrom
 	}
 	for _, v := range verifications {
 		switch {
-		case v.Err == nil:
+		case v.Err == nil && signsHeaders(v.HeaderKeys, "subject", "message-id"):
+			// A signature that leaves Subject or Message-ID unsigned would let a replayed
+			// message carry an attacker's subject (the prompt) or dedupe key.
 			dkimPassDomains = append(dkimPassDomains, v.Domain)
 			verdict.DKIM = "pass"
 		case dkim.IsTempFail(v.Err):
@@ -189,4 +257,17 @@ func Authenticate(ctx context.Context, r Resolver, ip net.IP, helo, envelopeFrom
 		return nil, tempFail("sender authentication could not be completed; try again later")
 	}
 	return nil, permFail(fmt.Sprintf("sender authentication failed for %s (no aligned SPF or DKIM pass)", fromDomain))
+}
+
+func signsHeaders(keys []string, required ...string) bool {
+	signed := map[string]bool{}
+	for _, k := range keys {
+		signed[strings.ToLower(strings.TrimSpace(k))] = true
+	}
+	for _, r := range required {
+		if !signed[r] {
+			return false
+		}
+	}
+	return true
 }

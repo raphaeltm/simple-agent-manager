@@ -43,12 +43,12 @@ export interface InboundEmailMessage {
   readonly rawSize: number;
   setReject(reason: string): void;
   /**
-   * Set only by the self-hosted gateway route: the From domain the box's sam-mx receiver
-   * authenticated (aligned SPF or DKIM). The From this handler parses must have that domain, so
-   * the receiver's parser and this one cannot disagree about who sent the mail. Absent on
-   * Cloudflare, where Email Routing authenticated the sender.
+   * Set only by the self-hosted gateway route: the From address (lower case) whose domain the
+   * box's sam-mx receiver authenticated (aligned SPF or DKIM). The From this handler parses must
+   * be exactly that address, so the receiver's parser and this one cannot disagree about who sent
+   * the mail. Absent on Cloudflare, where Email Routing authenticated the sender.
    */
-  readonly authenticatedFromDomain?: string;
+  readonly authenticatedFrom?: string;
 }
 
 export type InboundOutcome =
@@ -109,10 +109,8 @@ function automaticMailReason(email: InboundAgentEmail): string | null {
 
 /** The receiver authenticated a different From than the one this handler parsed. */
 function senderAuthMismatch(message: InboundEmailMessage, email: InboundAgentEmail): boolean {
-  if (message.authenticatedFromDomain === undefined) return false;
-  const from = email.from ?? '';
-  const domain = from.slice(from.lastIndexOf('@') + 1).toLowerCase();
-  return !from.includes('@') || domain !== message.authenticatedFromDomain.toLowerCase();
+  if (message.authenticatedFrom === undefined) return false;
+  return !email.from || email.from !== message.authenticatedFrom.toLowerCase();
 }
 
 const SENDER_AUTH_FAILED = 'Sender authentication failed';

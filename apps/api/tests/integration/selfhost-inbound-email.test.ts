@@ -102,7 +102,7 @@ describe('self-hosted inbound agent email', () => {
       'X-SAM-Mail-From': 'alice@example.com',
       'X-SAM-Rcpt-To': ADDRESS,
       'X-SAM-Mail-Auth': 'pass',
-      'X-SAM-Mail-Auth-From-Domain': 'example.com',
+      'X-SAM-Mail-Auth-From': 'alice@example.com',
       'Content-Type': 'message/rfc822',
       'Content-Length': String(Buffer.byteLength(raw)),
       ...headers,
@@ -271,23 +271,28 @@ describe('self-hosted inbound agent email', () => {
 
   it('refuses a sender outside the allowlist, so the receiver answers 550', async () => {
     const raw = rawEmail({ from: 'Mallory <mallory@example.com>' });
-    const response = await gatewayRequest(raw, { 'X-SAM-Mail-From': 'mallory@example.com' });
+    const response = await gatewayRequest(raw, {
+      'X-SAM-Mail-From': 'mallory@example.com',
+      'X-SAM-Mail-Auth-From': 'mallory@example.com',
+    });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ outcome: 'rejected', reason: 'Sender not allowed' });
     expect(submitter).not.toHaveBeenCalled();
     expect(taskCount()).toBe(0);
   });
 
-  it('refuses a From whose domain is not the one the receiver authenticated', async () => {
-    // The receiver authenticated attacker.example; the From the Worker parses claims an allowed
-    // sender. Must not start anything.
-    const response = await gatewayRequest(rawEmail(), {
-      'X-SAM-Mail-Auth-From-Domain': 'attacker.example',
-    });
-    expect(await response.json()).toEqual({
-      outcome: 'rejected',
-      reason: 'Sender authentication failed',
-    });
+  it('refuses a From that is not exactly the one the receiver authenticated', async () => {
+    // The receiver authenticated a different From than the one the Worker parses (another
+    // domain, or another local part on the same domain). Must not start anything.
+    for (const authenticated of ['alice@attacker.example', 'mallory@example.com']) {
+      const response = await gatewayRequest(rawEmail(), {
+        'X-SAM-Mail-Auth-From': authenticated,
+      });
+      expect(await response.json()).toEqual({
+        outcome: 'rejected',
+        reason: 'Sender authentication failed',
+      });
+    }
     expect(submitter).not.toHaveBeenCalled();
     // Control: the same mail with the matching domain is accepted.
     const control = await gatewayRequest(rawEmail({ messageId: '<m2@example.com>' }));
@@ -298,8 +303,8 @@ describe('self-hosted inbound agent email', () => {
     for (const headers of [
       { 'X-SAM-Mail-Auth': null },
       { 'X-SAM-Mail-Auth': 'fail' },
-      { 'X-SAM-Mail-Auth-From-Domain': null },
-      { 'X-SAM-Mail-Auth-From-Domain': 'not a domain' },
+      { 'X-SAM-Mail-Auth-From': null },
+      { 'X-SAM-Mail-Auth-From': 'not an address' },
     ]) {
       const response = await gatewayRequest(rawEmail(), headers);
       expect(response.status).toBe(400);

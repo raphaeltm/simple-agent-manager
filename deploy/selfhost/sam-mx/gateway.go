@@ -19,7 +19,7 @@ const (
 	headerMailFrom      = "X-SAM-Mail-From"
 	headerRcptTo        = "X-SAM-Rcpt-To"
 	headerMailAuth      = "X-SAM-Mail-Auth"
-	headerMailAuthFrom  = "X-SAM-Mail-Auth-From-Domain"
+	headerMailAuthFrom  = "X-SAM-Mail-Auth-From"
 )
 
 // maxGatewayResponseBytes bounds the verdict body the receiver reads back.
@@ -71,7 +71,7 @@ func (g *Gateway) Deliver(ctx context.Context, d Delivery) (*GatewayVerdict, err
 	req.Header.Set(headerMailFrom, d.MailFrom)
 	req.Header.Set(headerRcptTo, d.RcptTo)
 	req.Header.Set(headerMailAuth, d.Auth.Result)
-	req.Header.Set(headerMailAuthFrom, d.Auth.FromDomain)
+	req.Header.Set(headerMailAuthFrom, d.Auth.FromAddress)
 
 	resp, err := g.client.Do(req)
 	if err != nil {

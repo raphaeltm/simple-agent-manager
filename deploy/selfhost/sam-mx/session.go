@@ -58,7 +58,12 @@ func (s *Session) Mail(from string, _ *smtp.MailOptions) error {
 	if s.messages >= s.backend.cfg.MessagesPerConn {
 		return smtpErr(421, smtp.EnhancedCode{4, 7, 0}, "Too many messages on this connection, reconnect")
 	}
-	s.mailFrom, s.hasMail = strings.TrimSpace(from), true
+	from = strings.TrimSpace(from)
+	if strings.Count(from, "@") > 1 {
+		// SPF and alignment would extract different domains from it (first vs last '@').
+		return smtpErr(553, smtp.EnhancedCode{5, 1, 7}, "Malformed sender address")
+	}
+	s.mailFrom, s.hasMail = from, true
 	return nil
 }
 

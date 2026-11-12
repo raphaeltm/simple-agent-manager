@@ -291,6 +291,11 @@ services:
     cap_add: [NET_BIND_SERVICE]
     security_opt: ['no-new-privileges:true']
     read_only: true
+    # Parses untrusted mail before authentication: bound its memory and processes so a flood
+    # cannot push celld or Caddy into the OOM killer. SAM_MX_MAX_CONNECTIONS (20) x 5 MiB
+    # messages, plus the copies the checks make, fits well inside this.
+    mem_limit: ${SAM_MX_MEM_LIMIT:-512m}
+    pids_limit: 128
     depends_on: [celld]
     # REVERSE_TUNNEL_GATEWAY_SECRET, the gateway route's shared secret. Written by
     # `pnpm selfhost:deploy --init`.
@@ -304,6 +309,10 @@ services:
       SAM_MX_HOSTNAME: ${SAM_MX_HOSTNAME:-}
       SAM_MX_MAX_MESSAGE_BYTES: ${SAM_MX_MAX_MESSAGE_BYTES:-}
       SAM_MX_MAX_CONNECTIONS: ${SAM_MX_MAX_CONNECTIONS:-}
+      SAM_MX_MAX_CONNECTIONS_PER_IP: ${SAM_MX_MAX_CONNECTIONS_PER_IP:-}
+      SAM_MX_MAX_SESSION: ${SAM_MX_MAX_SESSION:-}
+      # The Go runtime collects harder as it nears this, below mem_limit.
+      GOMEMLIMIT: ${SAM_MX_GOMEMLIMIT:-400MiB}
       SAM_MX_CONNECTIONS_PER_IP_PER_MINUTE: ${SAM_MX_CONNECTIONS_PER_IP_PER_MINUTE:-}
       SAM_MX_MESSAGES_PER_CONNECTION: ${SAM_MX_MESSAGES_PER_CONNECTION:-}
       SAM_MX_GATEWAY_TIMEOUT: ${SAM_MX_GATEWAY_TIMEOUT:-}

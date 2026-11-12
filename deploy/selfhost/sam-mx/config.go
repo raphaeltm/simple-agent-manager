@@ -17,7 +17,10 @@ const (
 	// packages/shared/src/constants/agent-email.ts). The Worker re-checks its own (admin-editable)
 	// limit, so this is the receiver's memory bound, not the policy.
 	DefaultMaxMessageBytes = 5 * 1024 * 1024
-	DefaultMaxConnections  = 50
+	// 20 x 5 MiB messages in flight stays well inside the container's memory limit
+	// (docker-compose.yml mem_limit), with room for the copies the checks make.
+	DefaultMaxConnections      = 20
+	DefaultMaxConnectionsPerIP = 3
 	// New connections per client address per minute.
 	DefaultConnectionsPerIPPerMinute = 30
 	// Distinct client addresses tracked per minute; beyond it new addresses are refused (421)
@@ -32,6 +35,8 @@ const (
 	// so the gateway call gets most of that window; a timeout answers 451 and the sender retries.
 	DefaultGatewayTimeout = 540 * time.Second
 	DefaultMaxLineLength  = 2000
+	// Absolute bound on one connection: above DATA, DNS and the gateway timeout together.
+	DefaultMaxSessionDuration = 15 * time.Minute
 )
 
 // Agent address shape, mirroring apps/api/src/services/agent-email/address.ts and the shared
@@ -45,24 +50,26 @@ const (
 )
 
 type Config struct {
-	ListenAddr      string
-	Hostname        string
-	Domain          string
-	GatewayURL      *url.URL
-	APIHost         string
-	GatewaySecret   string
-	MaxMessageBytes int64
-	MaxConnections  int
-	ConnPerIPPerMin int
-	MaxTrackedIPs   int
-	MessagesPerConn int
-	ReadTimeout     time.Duration
-	WriteTimeout    time.Duration
-	DNSTimeout      time.Duration
-	GatewayTimeout  time.Duration
-	TrustedNetworks []*net.IPNet
-	TLSCertFile     string
-	TLSKeyFile      string
+	ListenAddr          string
+	Hostname            string
+	Domain              string
+	GatewayURL          *url.URL
+	APIHost             string
+	GatewaySecret       string
+	MaxMessageBytes     int64
+	MaxConnections      int
+	MaxConnectionsPerIP int
+	MaxSessionDuration  time.Duration
+	ConnPerIPPerMin     int
+	MaxTrackedIPs       int
+	MessagesPerConn     int
+	ReadTimeout         time.Duration
+	WriteTimeout        time.Duration
+	DNSTimeout          time.Duration
+	GatewayTimeout      time.Duration
+	TrustedNetworks     []*net.IPNet
+	TLSCertFile         string
+	TLSKeyFile          string
 }
 
 // minGatewaySecretLength matches the Worker's floor (node-reverse-tunnel-config.ts): a shorter
@@ -162,6 +169,12 @@ func LoadConfig(get func(string) string) (*Config, error) {
 	}
 	cfg.MaxMessageBytes = int64(maxBytes)
 	if cfg.MaxConnections, err = positiveInt(get, "SAM_MX_MAX_CONNECTIONS", DefaultMaxConnections); err != nil {
+		return nil, err
+	}
+	if cfg.MaxConnectionsPerIP, err = positiveInt(get, "SAM_MX_MAX_CONNECTIONS_PER_IP", DefaultMaxConnectionsPerIP); err != nil {
+		return nil, err
+	}
+	if cfg.MaxSessionDuration, err = positiveDuration(get, "SAM_MX_MAX_SESSION", DefaultMaxSessionDuration); err != nil {
 		return nil, err
 	}
 	if cfg.ConnPerIPPerMin, err = positiveInt(get, "SAM_MX_CONNECTIONS_PER_IP_PER_MINUTE", DefaultConnectionsPerIPPerMinute); err != nil {

@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/emersion/go-msgauth/dkim"
 	"github.com/emersion/go-smtp"
@@ -237,7 +238,7 @@ func TestAllowedSenderWithAlignedDKIMIsDeliveredToTheGateway(t *testing.T) {
 		headerMailFrom:      "bounce@other.example",
 		headerRcptTo:        agentRcpt,
 		headerMailAuth:      "pass",
-		headerMailAuthFrom:  "sender.example",
+		headerMailAuthFrom:  allowedFrom,
 		"X-Forwarded-Host":  "api." + testDomain,
 		"Content-Type":      "message/rfc822",
 	} {
@@ -259,7 +260,7 @@ func TestAlignedSPFPassIsEnough(t *testing.T) {
 	if err := h.send("bob@spf.example", []string{agentRcpt}, message("bob@spf.example", "spf")); err != nil {
 		t.Fatalf("delivery failed: %v", err)
 	}
-	if got := h.gateway.calls[0].header.Get(headerMailAuthFrom); got != "spf.example" {
+	if got := h.gateway.calls[0].header.Get(headerMailAuthFrom); got != "bob@spf.example" {
 		t.Fatalf("auth domain = %q", got)
 	}
 }
@@ -384,7 +385,7 @@ func TestTrustedLoopbackSkipsAuthenticationAndSaysSo(t *testing.T) {
 		t.Fatalf("delivery failed: %v", err)
 	}
 	call := h.gateway.calls[0]
-	if call.header.Get(headerMailAuth) != "trusted" || call.header.Get(headerMailAuthFrom) != "sender.example" {
+	if call.header.Get(headerMailAuth) != "trusted" || call.header.Get(headerMailAuthFrom) != allowedFrom {
 		t.Fatalf("auth headers = %q/%q", call.header.Get(headerMailAuth), call.header.Get(headerMailAuthFrom))
 	}
 }
@@ -452,5 +453,111 @@ func TestBareLineFeedsAreRefused(t *testing.T) {
 	}
 	if h.gateway.count() != 0 {
 		t.Fatal("must not reach the Worker")
+	}
+}
+
+func TestHeaderBlocksParsersCouldReadDifferentlyAreRefused(t *testing.T) {
+	h := newHarness(t, func(env map[string]string) { env["SAM_MX_TRUSTED_NETWORKS"] = "127.0.0.1/32" })
+	rest := "To: " + agentRcpt + "\r\nSubject: x\r\nMessage-ID: <h@sender.example>\r\n\r\nbody\r\n"
+	for name, head := range map[string]string{
+		// postal-mime reads "From :" as a From header; Go's net/mail does not.
+		"space before colon": "From : victim@sender.example\r\nFrom: alice@sender.example\r\n",
+		"tab before colon":   "From\t: victim@sender.example\r\nFrom: alice@sender.example\r\n",
+		"duplicate subject":  "From: alice@sender.example\r\nSubject: injected\r\n",
+		"duplicate sender":   "From: alice@sender.example\r\nSender: a@x.example\r\nSender: b@y.example\r\n",
+		"leading fold":       " folded\r\nFrom: alice@sender.example\r\n",
+		"two at signs":       "From: <a@b@sender.example>\r\n",
+	} {
+		if code := smtpCode(t, h.send(allowedFrom, []string{agentRcpt}, []byte(head+rest))); code != 550 {
+			t.Errorf("%s: want 550, got %d", name, code)
+		}
+	}
+	if h.gateway.count() != 0 {
+		t.Fatal("must not reach the Worker")
+	}
+	// Control: the same message with a clean header block is delivered.
+	if err := h.send(allowedFrom, []string{agentRcpt}, []byte("From: alice@sender.example\r\n"+rest)); err != nil {
+		t.Fatalf("control: %v", err)
+	}
+}
+
+func TestDKIMSignatureMustCoverSubjectAndMessageID(t *testing.T) {
+	h := newHarness(t, nil)
+	var out bytes.Buffer
+	raw := message(allowedFrom, "partial")
+	if err := dkim.Sign(&out, bytes.NewReader(raw), &dkim.SignOptions{
+		Domain: "sender.example", Selector: "sel", Signer: h.key,
+		HeaderKeys: []string{"From", "To"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	err := h.send("x@nospf.example", []string{agentRcpt}, out.Bytes())
+	if smtpCode(t, err) != 550 {
+		t.Fatalf("want 550 for a signature leaving Subject/Message-ID unsigned, got %v", err)
+	}
+}
+
+func TestEnvelopeSenderWithTwoAtSignsIsRefused(t *testing.T) {
+	h := newHarness(t, nil)
+	err := h.send("a@b@sender.example", []string{agentRcpt}, nil)
+	if smtpCode(t, err) != 553 {
+		t.Fatalf("want 553, got %v", err)
+	}
+}
+
+func TestPerAddressConcurrencyCap(t *testing.T) {
+	h := newHarness(t, func(env map[string]string) { env["SAM_MX_MAX_CONNECTIONS_PER_IP"] = "1" })
+	first, err := smtp.Dial(h.addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	if err := first.Hello("client.example"); err != nil {
+		t.Fatal(err)
+	}
+	if code := smtpCode(t, h.send(allowedFrom, []string{agentRcpt}, nil)); code != 421 {
+		t.Fatalf("want 421 for a second concurrent connection, got %d", code)
+	}
+}
+
+func TestSessionLifetimeClosesIdleConnections(t *testing.T) {
+	h := newHarness(t, func(env map[string]string) { env["SAM_MX_MAX_SESSION"] = "200ms" })
+	c, err := smtp.Dial(h.addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	time.Sleep(400 * time.Millisecond)
+	if err := c.Hello("client.example"); err == nil {
+		t.Fatal("the connection outlived SAM_MX_MAX_SESSION")
+	}
+}
+
+func TestClientKeyGroupsIPv6By64(t *testing.T) {
+	a := clientKey(&net.TCPAddr{IP: net.ParseIP("2001:db8:1:2::1"), Port: 1})
+	b := clientKey(&net.TCPAddr{IP: net.ParseIP("2001:db8:1:2:ffff::9"), Port: 2})
+	c := clientKey(&net.TCPAddr{IP: net.ParseIP("2001:db8:1:3::1"), Port: 3})
+	if a != b || a == c {
+		t.Fatalf("keys: %s %s %s", a, b, c)
+	}
+}
+
+func TestOverflowBucketInsteadOfLockout(t *testing.T) {
+	cfg := &Config{MaxConnections: 100, MaxConnectionsPerIP: 10, ConnPerIPPerMin: 2, MaxTrackedIPs: 2}
+	l := &limitedListener{cfg: cfg, now: time.Now, activeBy: map[string]int{}, perIP: map[string]int{}}
+	for _, k := range []string{"a", "b"} {
+		if _, refusal := l.admit(k); refusal != "" {
+			t.Fatalf("%s refused", k)
+		}
+	}
+	// New addresses past the table size share one bucket rather than being refused outright.
+	if _, refusal := l.admit("c"); refusal != "" {
+		t.Fatal("first overflow address refused")
+	}
+	if _, refusal := l.admit("d"); refusal != "" {
+		t.Fatal("second overflow address refused")
+	}
+	if _, refusal := l.admit("e"); refusal == "" {
+		t.Fatal("the shared overflow bucket is still rate-limited")
 	}
 }

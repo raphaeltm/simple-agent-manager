@@ -247,8 +247,13 @@ MIT), an SMTP receiver on port 25:
   authenticated. Its verdict becomes the SMTP reply: 250, 550 (unknown address, sender not
   allowed, too large, failed authentication) or 451 (SAM unreachable; the sender retries).
   Nothing is ever bounced, so a forged sender gets no backscatter.
-- Limits: `SAM_MX_MAX_CONNECTIONS` (50), `SAM_MX_CONNECTIONS_PER_IP_PER_MINUTE` (30),
-  `SAM_MX_MESSAGES_PER_CONNECTION` (10), plus the Worker's own per-trigger hourly limit.
+- Limits: `SAM_MX_MAX_CONNECTIONS` (20), `SAM_MX_MAX_CONNECTIONS_PER_IP` (3, an IPv6 client counts
+  as its /64), `SAM_MX_CONNECTIONS_PER_IP_PER_MINUTE` (30), `SAM_MX_MESSAGES_PER_CONNECTION` (10),
+  `SAM_MX_MAX_SESSION` (15m), a 512 MB container memory limit, plus the Worker's own per-trigger
+  hourly limit. Header blocks two parsers could read differently (`From :`, a repeated `From`,
+  `Subject` or `Message-ID`, bare LF) are refused, a DKIM signature counts only if it signs
+  `Subject` and `Message-ID`, and the Worker requires the From it parses to be exactly the address
+  sam-mx authenticated.
 - It runs as its own uid (`SAM_MX_UID`, 7102) with every capability dropped except binding port 25. It never sends mail: replies go through the Worker's SMTP relay (`SMTP_*`, or the mail
   collector on a test install), From `SMTP_FROM` with `Reply-To` set to the trigger's agent
   address and `In-Reply-To` and `References` set, so the sender's answer returns to the same
