@@ -31,12 +31,12 @@ const taskRunnerDoSource = [
   .map((f) => readFileSync(resolve(process.cwd(), 'src/durable-objects/task-runner', f), 'utf8'))
   .join('\n');
 const projectDataDoSource = [
-  readFileSync(resolve(process.cwd(), 'src/durable-objects/project-data/sessions.ts'), 'utf8'),
-  readFileSync(resolve(process.cwd(), 'src/durable-objects/project-data/messages.ts'), 'utf8'),
-  readFileSync(resolve(process.cwd(), 'src/durable-objects/project-data/index.ts'), 'utf8'),
+  readFileSync(resolve(process.cwd(), '../../packages/project-data/src/do/sessions.ts'), 'utf8'),
+  readFileSync(resolve(process.cwd(), '../../packages/project-data/src/do/messages.ts'), 'utf8'),
+  readFileSync(resolve(process.cwd(), '../../packages/project-data/src/do/index.ts'), 'utf8'),
 ].join('\n');
 const projectDataServiceSource = readFileSync(
-  resolve(process.cwd(), 'src/services/project-data.ts'),
+  resolve(process.cwd(), '../../packages/project-data/src/client/project-data.ts'),
   'utf8'
 );
 const taskRunnerDoServiceSource = readFileSync(

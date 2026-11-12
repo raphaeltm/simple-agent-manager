@@ -15,6 +15,7 @@ import {
   projectQueryKeys,
   projectRuntimeConfigQueryOptions,
 } from '../../lib/query-options/projects';
+import { RuntimeEnvVarItem } from './RuntimeEnvVarItem';
 
 interface ProjectRuntimeConfigSectionProps {
   projectId: string;
@@ -138,6 +139,7 @@ export function ProjectRuntimeConfigSection({ projectId }: ProjectRuntimeConfigS
       ) : (
         <div className="grid gap-4">
           <RuntimeEnvVars
+            projectId={projectId}
             envVars={runtimeConfig.envVars}
             envKeyInput={envKeyInput}
             envValueInput={envValueInput}
@@ -171,6 +173,7 @@ type RuntimeEnvVar = ProjectRuntimeConfigResponse['envVars'][number];
 type RuntimeFile = ProjectRuntimeConfigResponse['files'][number];
 
 interface RuntimeEnvVarsProps {
+  projectId: string;
   envVars: RuntimeEnvVar[];
   envKeyInput: string;
   envValueInput: string;
@@ -184,6 +187,7 @@ interface RuntimeEnvVarsProps {
 }
 
 function RuntimeEnvVars({
+  projectId,
   envVars,
   envKeyInput,
   envValueInput,
@@ -256,11 +260,10 @@ function RuntimeEnvVars({
       ) : (
         <div className="border border-border-default rounded-sm overflow-hidden">
           {envVars.map((item, index) => (
-            <RuntimeConfigRow
+            <RuntimeEnvVarItem
               key={item.key}
-              label={item.key}
-              value={item.isSecret ? '••••••' : `= ${item.value}`}
-              isSecret={item.isSecret}
+              projectId={projectId}
+              item={item}
               isLast={index === envVars.length - 1}
               saving={saving}
               onDelete={() => onDelete(item.key)}

@@ -32,6 +32,7 @@
     "@modelcontextprotocol/server": "2.3.1",
     "@simple-agent-manager/agent-email": "workspace:*",
     "@simple-agent-manager/cloud-init": "workspace:*",
+    "@simple-agent-manager/project-data": "workspace:*",
     "@simple-agent-manager/providers": "workspace:*",
     "@simple-agent-manager/scheduler-core": "workspace:*",
     "@simple-agent-manager/shared": "workspace:*",

@@ -84,6 +84,7 @@ function builtKeyPrefix(node: ts.Node): string | undefined {
 export function valueReferences(names: ReadonlySet<string>): Map<string, Set<string>> {
   const roots = [
     'apps/api/src',
+    'packages/project-data/src',
     'apps/tail-worker/src',
     'packages/shared/src',
     'packages/providers/src',

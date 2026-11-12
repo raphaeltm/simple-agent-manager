@@ -11,6 +11,13 @@ function injectedMigrations(key: string): D1Migration[] {
 }
 
 beforeAll(async () => {
+  // Tests that call ProjectData modules directly (not through the Durable Object) need the
+  // worker's ports even before the entry module, which also configures them, is evaluated.
+  const [{ configureProjectDataPorts }, { workerProjectDataPorts }] = await Promise.all([
+    import('@simple-agent-manager/project-data/internal/do/ports'),
+    import('../../src/project-data-ports/index'),
+  ]);
+  configureProjectDataPorts(workerProjectDataPorts);
   await applyD1Migrations(env.DATABASE, injectedMigrations('D1_MIGRATIONS_JSON'));
   await applyD1Migrations(
     env.OBSERVABILITY_DATABASE,

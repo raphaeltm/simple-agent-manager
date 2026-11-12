@@ -9,14 +9,14 @@
  * - contentSize accurately reflects UTF-8 byte count
  * - parseChatMessageRowCompact produces compact output
  */
-import { describe, expect, it } from 'vitest';
-
-import { getMessageToolContent } from '../../../src/durable-objects/project-data/messages';
+import { getMessageToolContent } from '@simple-agent-manager/project-data/internal/do/messages';
 import {
   parseChatMessageRow,
   parseChatMessageRowCompact,
   stripToolMetadataContent,
-} from '../../../src/durable-objects/project-data/row-schemas';
+} from '@simple-agent-manager/project-data/internal/do/row-schemas';
+import { describe, expect, it } from 'vitest';
+
 import { UNTRUSTED_TEXT_GUIDANCE } from '../../../src/operations/untrusted-text';
 
 describe('stripToolMetadataContent', () => {
@@ -530,5 +530,37 @@ describe('compact vs full mode payload size comparison', () => {
     // Compact mode should be at least 80% smaller for content-heavy rows
     const reduction = 1 - compactSize / fullSize;
     expect(reduction).toBeGreaterThan(0.8);
+  });
+});
+
+describe('stripToolMetadataContent — secret request card', () => {
+  // The text handleRequestSecret returns for request_secret. Names only; never a value.
+  const resultText = JSON.stringify({
+    message: 'Secret request recorded.',
+    secretRequest: { id: 'req-1', sessionId: 'session-1', name: 'STRIPE_API_KEY' },
+  });
+
+  it('keeps only the request ID for the Claude and Codex tool names', () => {
+    for (const title of ['mcp__sam-mcp__request_secret', 'sam-mcp/request_secret']) {
+      const result = stripToolMetadataContent({
+        toolCallId: 'tc-secret',
+        title,
+        status: 'completed',
+        content: [{ type: 'content', text: resultText }],
+      }) as Record<string, unknown>;
+      expect(JSON.parse((result.rawOutput as Array<{ text: string }>)[0]!.text)).toEqual({
+        secretRequest: { id: 'req-1' },
+      });
+    }
+  });
+
+  it('keeps nothing for a failed request', () => {
+    const failed = stripToolMetadataContent({
+      toolCallId: 'tc-secret',
+      title: 'mcp__sam-mcp__request_secret',
+      status: 'failed',
+      content: [{ type: 'content', text: 'reason is required' }],
+    }) as Record<string, unknown>;
+    expect(failed.rawOutput).toBeUndefined();
   });
 });
