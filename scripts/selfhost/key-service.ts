@@ -125,6 +125,8 @@ export function keyServiceSettings(box: Box, stateDir: string): KeyServiceSettin
       containerEnv[name] = value;
     }
   }
+  // Test-only switch (plain-HTTP fake Key Vault): honoured by the deploy, never given to the agent.
+  if (box.SAM_AZURE_ALLOW_HTTP_FOR_TESTS === '1') hostEnv.SAM_AZURE_ALLOW_HTTP_FOR_TESTS = '1';
   if (provider === 'file') {
     hostEnv.SAM_KEY_FILE = join(dir, 'kek');
     containerEnv.SAM_KEY_FILE = `${CONTAINER_DIR}/kek`;

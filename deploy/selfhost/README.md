@@ -87,10 +87,25 @@ only `SAM_KEY_AGENT_URL`, the bundle id and the agent's public verify key, so th
 `SECRETS_UNAVAILABLE` (`docker compose ps key-agent`). Each fresh Worker isolate pays one loopback
 request (about 4 ms); the agent keeps an opened bundle for 300 s.
 
-**Which key provider.** `pnpm selfhost:deploy --init` chooses once and records the choice and why
-in `.state/key-agent/choice.json`; every deploy prints it (`key provider: file (...)`). Without
-a recorded choice a plain `pnpm selfhost:deploy` stops and asks for `--init`. To override, set
-`SAM_KEY_PROVIDER` in `.env`:
+**Which key provider.** `pnpm selfhost:deploy --init` chooses once, records the choice and why
+in `.state/key-agent/choice.json`, and every deploy prints it (`key provider: file (...)`);
+`pnpm selfhost:secrets status` shows it later with the key reference and the bundles (never key
+material). Without a recorded choice a plain `pnpm selfhost:deploy` stops and asks for `--init`.
+The automatic choice:
+
+1. Bundles already on the box decide: only their provider can open them.
+2. Otherwise `--init` asks the instance metadata services which cloud this VM is on (Google,
+   AWS IMDSv2 and Azure IMDS in parallel, `SAM_METADATA_PROBE_TIMEOUT_MS`, default 1500 ms each;
+   an answer counts only with that platform's own marker, never from host names).
+3. On a cloud, it tries the key for this install through the VM's own identity: the key set in
+   `.env`, else the one the one-time setup below creates (named `sam-<8 hex>` from your domain,
+   like the bootstrap's pool id). It is chosen only if a real wrap and unwrap round trip succeeds.
+4. Otherwise, and on any other host, the file key. The printed line says why in plain words, for
+   example `key provider: file (on Google Cloud (project p), but Cloud KMS key projects/p/... is
+not usable (denied: ...); using a key file on this box)`.
+
+Moving to another provider later (for example after setting up a cloud key) is
+`pnpm selfhost:secrets switch` (below), never a silent change at a deploy.
 
 | `SAM_KEY_PROVIDER` | Key                                                                                                                                           | Settings                                                                                                                                    |
 | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |

@@ -222,7 +222,7 @@ export async function chooseKeyProvider(input: ChooseInput): Promise<KeyChoice> 
       ? `on ${found.platform}, but ${failures.join('; ')}`
       : found.platform
         ? `on ${found.platform}, but ${found.note ?? 'no cloud key is configured'}`
-        : 'no cloud instance identity was detected';
+        : `no cloud instance identity was detected${found.note ? ` (${found.note})` : ''}`;
   return {
     format: KEY_CHOICE_FORMAT,
     provider: 'file',

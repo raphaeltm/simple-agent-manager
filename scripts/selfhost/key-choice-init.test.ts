@@ -4,7 +4,6 @@
  * them. Covers the default (no SAM_KEY_PROVIDER), the explicit legacy override, a plain deploy
  * with no recorded choice, and a legacy box whose plaintext files get sealed unchanged.
  */
-import { spawnSync } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -15,46 +14,24 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { openBundle, parseBundle } from '../../deploy/selfhost/key-agent/bundle.ts';
 import { createFileProvider } from '../../deploy/selfhost/key-agent/provider-file.ts';
+import { CLOSED_HOST, runDeploy, runTsx, writeBox as write } from './deploy-harness.js';
 import { ensurePlatformKeys } from './platform-keys.js';
-
-const DEPLOY = resolve(import.meta.dirname, 'deploy.ts');
-const BASE_ENV = [
-  'SAM_DOMAIN=sam.example.com',
-  'SAM_TLS_MODE=internal',
-  'COMPOSE_PROFILES=tunnel,local-store',
-  'CELLD_BUCKET=s3://fleet/celld',
-  'S3_ENDPOINT=http://127.0.0.1:9000',
-  'AWS_ACCESS_KEY_ID=fleet-key',
-  'AWS_SECRET_ACCESS_KEY=fleet-secret-0123456789',
-];
 
 let dir: string;
 let state: string;
 
-export function writeBox(target: string, extra: string[] = []): string {
-  const envFile = join(target, '.env');
-  writeFileSync(envFile, `${[...BASE_ENV, ...extra].join('\n')}\n`, { mode: 0o600 });
-  return envFile;
-}
-
-export function runDeploy(
-  envFile: string,
-  args: string[],
-  env: NodeJS.ProcessEnv = {}
-): { status: number; out: string } {
-  const result = spawnSync('npx', ['tsx', DEPLOY, '--env-file', envFile, ...args], {
-    encoding: 'utf8',
-    env: { ...process.env, ...env },
-    timeout: 60_000,
-  });
-  return { status: result.status ?? 1, out: `${result.stdout}${result.stderr}` };
-}
+const NO_CLOUD = [
+  `SAM_GCE_METADATA_HOST=${CLOSED_HOST}`,
+  `SAM_AWS_IMDS_HOST=${CLOSED_HOST}`,
+  `SAM_AZURE_IMDS_HOST=${CLOSED_HOST}`,
+];
+const writeBox = (target: string, extra: string[] = []) => write(target, [...NO_CLOUD, ...extra]);
 
 function bundles(): string[] {
   const path = join(state, 'key-agent/bundles');
@@ -77,10 +54,10 @@ async function sealedSecrets(): Promise<Record<string, string>> {
   );
 }
 
-function dryRunVars(envFile: string): Record<string, string> {
-  const run = runDeploy(envFile, ['--dry-run', '--skip-vm-agent']);
-  expect(run.status, run.out).toBe(0);
-  const json = run.out.slice(run.out.indexOf('{\n'));
+async function dryRunVars(envFile: string): Promise<Record<string, string>> {
+  const result = await runDeploy(envFile, ['--dry-run', '--skip-vm-agent']);
+  expect(result.status, result.out).toBe(0);
+  const json = result.out.slice(result.out.indexOf('{\n'));
   return (JSON.parse(json) as { vars: Record<string, string> }).vars;
 }
 
@@ -93,7 +70,7 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }));
 describe('pnpm selfhost:deploy --init (sealed secrets by default)', () => {
   it('seals a new install without any setting, and says which provider and why', async () => {
     const envFile = writeBox(dir);
-    const init = runDeploy(envFile, ['--init']);
+    const init = await runDeploy(envFile, ['--init']);
     expect(init.status, init.out).toBe(0);
     expect(init.out).toMatch(/key provider: file \(no cloud instance identity was detected/);
     expect(choice()).toMatchObject({ provider: 'file', source: 'auto' });
@@ -108,7 +85,7 @@ describe('pnpm selfhost:deploy --init (sealed secrets by default)', () => {
     // The fence opens the agent's port to celld (egress-fence.ts).
     expect(readFileSync(join(state, 'egress-fence.nft'), 'utf8')).toContain('7190');
 
-    const vars = dryRunVars(envFile);
+    const vars = await dryRunVars(envFile);
     expect(vars.SAM_KEY_AGENT_URL).toBe('http://127.0.0.1:7190/v1/secrets');
     const rendered = JSON.stringify(vars);
     for (const [name, value] of Object.entries(secrets)) {
@@ -117,29 +94,29 @@ describe('pnpm selfhost:deploy --init (sealed secrets by default)', () => {
     }
   });
 
-  it('keeps the recorded choice on a second --init, and prints it on every deploy', () => {
+  it('keeps the recorded choice on a second --init, and prints it on every deploy', async () => {
     const envFile = writeBox(dir);
-    expect(runDeploy(envFile, ['--init']).status).toBe(0);
+    expect((await runDeploy(envFile, ['--init'])).status).toBe(0);
     const first = choice();
-    const again = runDeploy(envFile, ['--init']);
+    const again = await runDeploy(envFile, ['--init']);
     expect(again.status, again.out).toBe(0);
     expect(choice()).toEqual(first);
     expect(bundles()).toHaveLength(1);
-    expect(runDeploy(envFile, ['--dry-run', '--skip-vm-agent']).out).toContain(
+    expect((await runDeploy(envFile, ['--dry-run', '--skip-vm-agent'])).out).toContain(
       'key provider: file'
     );
   });
 
-  it('refuses a plain deploy when no provider was ever chosen', () => {
-    const run = runDeploy(writeBox(dir), ['--dry-run', '--skip-vm-agent']);
-    expect(run.status).not.toBe(0);
-    expect(run.out).toContain('pnpm selfhost:deploy --init');
+  it('refuses a plain deploy when no provider was ever chosen', async () => {
+    const result = await runDeploy(writeBox(dir), ['--dry-run', '--skip-vm-agent']);
+    expect(result.status).not.toBe(0);
+    expect(result.out).toContain('pnpm selfhost:deploy --init');
     expect(existsSync(join(state, 'key-agent/choice.json'))).toBe(false);
   });
 
-  it('legacy-plaintext keeps the old behaviour: plaintext keys file, secrets as deploy vars', () => {
+  it('legacy-plaintext keeps the old behaviour: plaintext keys file, secrets as deploy vars', async () => {
     const envFile = writeBox(dir, ['SAM_KEY_PROVIDER=legacy-plaintext']);
-    const init = runDeploy(envFile, ['--init']);
+    const init = await runDeploy(envFile, ['--init']);
     expect(init.status, init.out).toBe(0);
     expect(init.out).toContain('stored in plaintext in the fleet bucket');
     expect(bundles()).toEqual([]);
@@ -148,15 +125,15 @@ describe('pnpm selfhost:deploy --init (sealed secrets by default)', () => {
       'SAM_KEY_PROVIDER=legacy-plaintext'
     );
     expect(readFileSync(join(state, 'egress-fence.nft'), 'utf8')).not.toContain('7190');
-    const vars = dryRunVars(envFile);
+    const vars = await dryRunVars(envFile);
     expect(vars.ENCRYPTION_KEY).toBe('<redacted>');
     expect(vars.SAM_KEY_AGENT_URL).toBeUndefined();
   });
 
-  it('refuses the spike-era `off` with the new name', () => {
-    const run = runDeploy(writeBox(dir, ['SAM_KEY_PROVIDER=off']), ['--init']);
-    expect(run.status).not.toBe(0);
-    expect(run.out).toContain('legacy-plaintext');
+  it('refuses the spike-era `off` with the new name', async () => {
+    const result = await runDeploy(writeBox(dir, ['SAM_KEY_PROVIDER=off']), ['--init']);
+    expect(result.status).not.toBe(0);
+    expect(result.out).toContain('legacy-plaintext');
   });
 
   it('seals an existing plaintext install unchanged (its keys and secrets.env)', async () => {
@@ -166,7 +143,7 @@ describe('pnpm selfhost:deploy --init (sealed secrets by default)', () => {
     writeFileSync(join(state, 'secrets.env'), 'GITHUB_CLIENT_SECRET=gh-secret-0123456789\n', {
       mode: 0o600,
     });
-    const init = runDeploy(envFile, ['--init']);
+    const init = await runDeploy(envFile, ['--init']);
     expect(init.status, init.out).toBe(0);
     const secrets = await sealedSecrets();
     expect(secrets.ENCRYPTION_KEY).toBe(legacy.ENCRYPTION_KEY);
@@ -174,13 +151,33 @@ describe('pnpm selfhost:deploy --init (sealed secrets by default)', () => {
     expect(secrets.GITHUB_CLIENT_SECRET).toBe('gh-secret-0123456789');
   });
 
-  it('a box whose bundles exist but whose choice record is gone keeps their provider', () => {
+  it('a box whose bundles exist but whose choice record is gone keeps their provider', async () => {
     const envFile = writeBox(dir);
-    expect(runDeploy(envFile, ['--init']).status).toBe(0);
+    expect((await runDeploy(envFile, ['--init'])).status).toBe(0);
     rmSync(join(state, 'key-agent/choice.json'));
-    const init = runDeploy(envFile, ['--init']);
+    const init = await runDeploy(envFile, ['--init']);
     expect(init.status, init.out).toBe(0);
     expect(choice()).toMatchObject({ provider: 'file', source: 'existing-bundle' });
     expect(bundles()).toHaveLength(1);
+  });
+
+  it('selfhost:secrets status shows the provider, why, the key file and bundles, no key material', async () => {
+    const envFile = writeBox(dir);
+    expect((await runDeploy(envFile, ['--init'])).status).toBe(0);
+    const status = await runTsx(join(import.meta.dirname, 'secrets.ts'), [
+      'status',
+      '--box-env',
+      envFile,
+    ]);
+    expect(status.status, status.out).toBe(0);
+    expect(status.out).toContain('key provider: file');
+    expect(status.out).toContain('why:        no cloud instance identity was detected');
+    expect(status.out).toContain(`key file:   ${join(state, 'key-agent/kek')}`);
+    expect(status.out).toMatch(/bundles: 1\n {2}[0-9a-f]{32} /);
+    const kek = readFileSync(join(state, 'key-agent/kek'), 'utf8').trim();
+    expect(status.out).not.toContain(kek);
+    for (const value of Object.values(await sealedSecrets())) {
+      if (value.length >= 16) expect(status.out).not.toContain(value);
+    }
   });
 });
