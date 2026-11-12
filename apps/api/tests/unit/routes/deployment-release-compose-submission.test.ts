@@ -192,6 +192,9 @@ const mockEnv = {
   KV: { get: vi.fn(), put: vi.fn(), delete: vi.fn() },
   BASE_DOMAIN: 'example.com',
   ENCRYPTION_KEY: 'test-key',
+  // A Cloudflare installation: app deployments need Cloudflare DNS (platform-capabilities.ts).
+  CF_API_TOKEN: 'cf-token',
+  CF_ZONE_ID: 'zone-1',
 } as Env;
 
 function composeYaml(overrides: { extraService?: string; secretName?: string } = {}) {
