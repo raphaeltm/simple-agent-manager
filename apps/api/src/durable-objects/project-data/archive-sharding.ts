@@ -3110,6 +3110,17 @@ export async function restoreSourceArchiveChunk(
       'ProjectData archive source can only be restored after source deletion proof exists'
     );
   }
+  if (state === 'source_deleted' && !isCopyBackInProgress(sql, input.sessionId)) {
+    // A copy-back over leftover rows would re-index grouped rows the FTS already holds, and
+    // duplicate FTS5 postings corrupt the project's search index. The coordinator drains
+    // reclaim first (`copyBackProjectDataArchiveMigration`); this refuses if it did not.
+    if (sourceStillOwnsRows(sql, input.sessionId)) {
+      throw new ProjectDataArchiveInvariantError(
+        'copy_back_reclaim_outstanding',
+        'ProjectData archive copy-back cannot start while the flipped session still has rows to reclaim'
+      );
+    }
+  }
   if (state === 'source_deleted') {
     // Fence reclaim before the first restored row lands (`isCopyBackInProgress`).
     sql.exec(
@@ -3578,6 +3589,11 @@ export type ArchiveSourceReclaimPageResult = {
   toolArchiveRowsDeleted: number;
   /** True when this session still owns transcript rows in the root after this page. */
   remaining: boolean;
+  /**
+   * True when a copy-back is restoring this session: nothing was deleted, because the rows in
+   * the root are being restored rather than left over.
+   */
+  copyBackInProgress?: boolean;
 };
 
 /**
@@ -3669,10 +3685,14 @@ export function reclaimArchiveSourcePage(
     );
   }
   if (isCopyBackInProgress(sql, input.sessionId)) {
-    throw new ProjectDataArchiveInvariantError(
-      'source_reclaim_copy_back_in_progress',
-      'ProjectData archive source rows are being restored by a copy-back and must not be reclaimed'
-    );
+    return {
+      messagesDeleted: 0,
+      groupedRowsDeleted: 0,
+      ftsRowsDeleted: 0,
+      toolArchiveRowsDeleted: 0,
+      remaining: true,
+      copyBackInProgress: true,
+    };
   }
   const maxRows = Math.max(1, Math.floor(input.maxRows));
   return transactionSync(() => {

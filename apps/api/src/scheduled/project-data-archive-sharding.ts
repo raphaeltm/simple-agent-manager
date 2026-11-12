@@ -2968,15 +2968,21 @@ async function reclaimPendingSources(
   deadlineAt: number,
   scope?: ArchiveCoordinatorScope
 ): Promise<void> {
+  // Projects whose breaker is not closed are skipped: an operator who opened it may be holding
+  // the leftover root rows as the only copy besides the recovery manifest.
   const projects = scope
     ? [scope.projectId]
     : (
         (
           await env.DATABASE.prepare(
-            `SELECT project_id FROM project_data_archive_migrations
-             WHERE state IN ('source_deleted', 'published')
-             GROUP BY project_id
-             ORDER BY MAX(COALESCE(published_at, source_deleted_at, updated_at)) DESC, project_id ASC
+            `SELECT m.project_id FROM project_data_archive_migrations m
+             LEFT JOIN project_data_archive_circuit_breakers breaker
+               ON breaker.project_id = m.project_id
+             WHERE m.state IN ('source_deleted', 'published')
+               AND COALESCE(breaker.state, 'closed') = 'closed'
+             GROUP BY m.project_id
+             ORDER BY MAX(COALESCE(m.published_at, m.source_deleted_at, m.updated_at)) DESC,
+                      m.project_id ASC
              LIMIT ?`
           )
             .bind(config.sweepProjects)
@@ -2985,15 +2991,39 @@ async function reclaimPendingSources(
       ).map((row) => row.project_id);
   for (const projectId of projects) {
     if (Date.now() >= deadlineAt) return;
+    let pending: Array<{ sessionId: string; migrationId: string }>;
+    let source: DurableObjectStub<ProjectData>;
     try {
-      const source = await ensureOwnerStub(env, projectId, projectId);
-      const pending = await source.archiveSourceListReclaimPending({
+      source = await ensureOwnerStub(env, projectId, projectId);
+      pending = await source.archiveSourceListReclaimPending({
         projectId,
         limit: config.sweepSessions,
       });
-      for (const item of pending) {
-        if (scope?.sessionId && item.sessionId !== scope.sessionId) continue;
-        if (Date.now() >= deadlineAt) {
+    } catch (error) {
+      // Reclaim only frees storage; the sessions are already published and readable from
+      // their shard. A failure here is retried by the next tick and must not fail this one.
+      log.warn('project_data_archive_reclaim_pending_failed', {
+        projectId,
+        ...serializeError(error),
+      });
+      continue;
+    }
+    for (const item of pending) {
+      if (scope?.sessionId && item.sessionId !== scope.sessionId) continue;
+      if (Date.now() >= deadlineAt) {
+        stats.reclaimPending = (stats.reclaimPending ?? 0) + 1;
+        continue;
+      }
+      // One session at a time, each isolated, so a session that keeps failing cannot hide
+      // the ones behind it (`.claude/rules/53`).
+      try {
+        const journal = await env.DATABASE.prepare(
+          'SELECT state FROM project_data_archive_migrations WHERE migration_id = ?'
+        )
+          .bind(item.migrationId)
+          .first<{ state: string }>();
+        // An operator freeze (or a poisoned journal) keeps the root rows as they are.
+        if (journal && journal.state !== 'published' && journal.state !== 'source_deleted') {
           stats.reclaimPending = (stats.reclaimPending ?? 0) + 1;
           continue;
         }
@@ -3005,14 +3035,15 @@ async function reclaimPendingSources(
         );
         stats.reclaimedRows = (stats.reclaimedRows ?? 0) + result.rowsDeleted;
         if (result.remaining) stats.reclaimPending = (stats.reclaimPending ?? 0) + 1;
+      } catch (error) {
+        stats.reclaimPending = (stats.reclaimPending ?? 0) + 1;
+        log.warn('project_data_archive_reclaim_session_failed', {
+          projectId,
+          sessionId: item.sessionId,
+          migrationId: item.migrationId,
+          ...serializeError(error),
+        });
       }
-    } catch (error) {
-      // Reclaim only frees storage; the sessions are already published and readable from
-      // their shard. A failure here is retried by the next tick and must not fail this one.
-      log.warn('project_data_archive_reclaim_pending_failed', {
-        projectId,
-        ...serializeError(error),
-      });
     }
   }
 }
@@ -3802,6 +3833,20 @@ export async function copyBackProjectDataArchiveMigration(
       'copy_back_target_not_sealed',
       `ProjectData archive migration ${migration.migration_id} target is missing aggregate proof`
     );
+  }
+
+  // Finish reclaiming the flipped session before restoring. Restoring over leftover rows would
+  // re-index grouped rows the root's FTS already holds, and duplicate FTS5 postings corrupt the
+  // project-wide search index. The root refuses a first restore chunk while leftovers remain.
+  for (;;) {
+    const page = await source.archiveSourceReclaimPage({
+      projectId: migration.project_id,
+      sessionId: migration.session_id,
+      migrationId: migration.migration_id,
+      maxRows: config.chunkRows,
+    });
+    // A retried copy-back finds its own fence: the rows are restored ones, keep them.
+    if (!page.remaining || page.copyBackInProgress) break;
   }
 
   let chunksCopied = 0;

@@ -214,6 +214,59 @@ describe('archive flip then paged reclaim', () => {
     expect((await rootRowCounts(source, sessionId)).messages).toBe(MESSAGES);
   });
 
+  it('copy-back over leftover rows reclaims them first and leaves the search index intact', async () => {
+    const { projectId, sessionId, source } = await seedArchivedCandidate('reclaim-copyback-left');
+    await source.failNextArchiveReclaimPagesForTest(1);
+    await withArchiveEnv(sweepEnv(), () =>
+      runProjectDataArchiveSharding(testEnv, new Date(Date.now() + 60_000))
+    );
+    const left = await rootRowCounts(source, sessionId);
+    expect(left.messages).toBe(MESSAGES);
+    expect(left.grouped).toBeGreaterThan(0);
+    const migrationId = await publishedMigrationId(projectId, sessionId);
+
+    await withArchiveEnv(sweepEnv(), () =>
+      copyBackProjectDataArchiveMigration(testEnv, {
+        migrationId,
+        projectId,
+        reason: 'copy-back over leftovers',
+      })
+    );
+
+    expect(await readLocation(projectId, sessionId)).toMatchObject({ location_state: 'root' });
+    expect((await rootRowCounts(source, sessionId)).messages).toBe(MESSAGES);
+    // Re-indexing grouped rows the FTS already held would leave duplicate postings, which an
+    // FTS5 integrity check reports as a malformed index.
+    await runInDurableObject(source, async (_instance, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO chat_messages_grouped_fts(chat_messages_grouped_fts, rank) VALUES('integrity-check', 1)"
+      );
+    });
+  });
+
+  it('leaves leftover rows alone while the project breaker is open', async () => {
+    const { projectId, sessionId, source } = await seedArchivedCandidate('reclaim-breaker');
+    await source.failNextArchiveReclaimPagesForTest(1);
+    await withArchiveEnv(sweepEnv(), () =>
+      runProjectDataArchiveSharding(testEnv, new Date(Date.now() + 60_000))
+    );
+    expect((await rootRowCounts(source, sessionId)).messages).toBe(MESSAGES);
+    // An operator opened the breaker, for example because the shard is suspect.
+    await env.DATABASE.prepare(
+      `INSERT INTO project_data_archive_circuit_breakers (project_id, state, reason, opened_at, updated_at)
+       VALUES (?, 'open', 'suspect shard', ?, ?)
+       ON CONFLICT(project_id) DO UPDATE SET state = 'open'`
+    )
+      .bind(projectId, Date.now(), Date.now())
+      .run();
+
+    const tick = await withArchiveEnv(sweepEnv(), () =>
+      runProjectDataArchiveSharding(testEnv, new Date(Date.now() + 120_000))
+    );
+    expect(tick.reclaimedRows ?? 0).toBe(0);
+    expect((await rootRowCounts(source, sessionId)).messages).toBe(MESSAGES);
+  });
+
   it('refuses to reclaim a session whose flip has not committed', async () => {
     const { projectId, sessionId, source } = await seedArchivedCandidate('reclaim-early');
     await expect(
