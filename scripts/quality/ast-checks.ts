@@ -382,6 +382,7 @@ function main() {
       // Worker modules extracted into packages still run in this Worker (worker modularization).
       resolve(ROOT, 'packages/project-data/src/**/*.ts'),
       resolve(ROOT, 'packages/agent-email/src/**/*.ts'),
+      resolve(ROOT, 'packages/ai-proxy/src/**/*.ts'),
       resolve(ROOT, 'packages/app-deployment/src/**/*.ts'),
     ]);
   }

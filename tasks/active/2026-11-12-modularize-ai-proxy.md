@@ -77,7 +77,7 @@ the token accounting calls `incrementTokenUsage` inside the package (13 cases fa
 - [x] Scope inventory and port plan
 - [x] Draft PR into core (#2699)
 - [x] Step 1 + 2: package with narrow `AiProxyEnv`, ports, public entry; old paths re-export; tests moved
-- [ ] Worker port adapter test (`aiProxyPorts`), package AGENTS.md, trim public entry to used names
-- [ ] Registrations: CI filters, runtime-boundary, AST scope, dependency evidence, docs paths
+- [x] Worker port adapter test (`aiProxyPorts`, 3 cases, proven red with the wrong encryption key), package AGENTS.md, public entry trimmed to used names
+- [x] Registrations: ci.yml + e2e-smoke filters, runtime-boundary, AST scope, build order, api-reference skill path (dependency evidence and runtime-tunables pass unchanged)
 - [ ] Local gates, specialist reviews
 - [ ] CI via `gh workflow run ci.yml --ref sam/w5-ai-proxy`; send PR URL, SHA and run ID to coordinator

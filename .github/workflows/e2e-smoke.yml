@@ -10,6 +10,7 @@ on:
       - 'packages/task-runner/**'
       - 'packages/scheduler-core/**'
       - 'packages/agent-email/**'
+      - 'packages/ai-proxy/**'
       - 'scripts/e2e/**'
       - 'scripts/deploy/configure-docker-mirror.mjs'
       - 'package.json'

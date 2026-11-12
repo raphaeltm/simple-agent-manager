@@ -1,4 +1,4 @@
-// Public entry of @simple-agent-manager/ai-proxy. Named re-exports only.
+// Public entry of @simple-agent-manager/ai-proxy. Named re-exports of what the worker uses.
 export {
   createAnthropicToOpenAIStream,
   translateRequestToAnthropic,
@@ -15,9 +15,6 @@ export {
   aggregateByModel,
   aggregateByProvider,
   type AIGatewayLogEntry,
-  type AIGatewayLogsResponse,
-  fetchGatewayLogs,
-  type GatewayLogsPorts,
   type GatewayPaginationOptions,
   type GatewayPeriod,
   getGatewayPeriodBounds,
@@ -29,12 +26,7 @@ export {
   type UsageByModel,
   type UsageByProvider,
 } from './ai-gateway-logs';
-export {
-  checkModelTierAllowance,
-  describeModelTierDenial,
-  type ModelTierDecision,
-  type ModelTierDenial,
-} from './ai-model-tier-gate';
+export { checkModelTierAllowance, describeModelTierDenial } from './ai-model-tier-gate';
 export {
   MAX_MONTHLY_COST_CACHE_TTL_SECONDS,
   type MonthlyCostCronResult,
@@ -49,15 +41,10 @@ export {
   fetchWorkersAIChatCompletion,
   isAnthropicModel,
   readSafeGatewayErrorDiagnostic,
-  type WorkersAIChatCompletionOptions,
-  type WorkersAIChatMessage,
   WorkersAIGatewayError,
 } from './ai-proxy-shared';
 export {
-  type AiBudgetLimits,
   type AiProviderUsageAttribution,
-  type AiProviderUsageEntry,
-  type AiUsageGateResult,
   buildBudgetKey,
   buildBudgetSettingsKey,
   buildFeatureBudgetKey,
@@ -68,38 +55,28 @@ export {
   checkTokenBudget,
   consumeFeatureTokenBudget,
   deleteUserBudgetSettings,
-  type FeatureTokenBudgetResult,
   getAdminAiAllowance,
   getAiBudgetLimits,
-  getCachedMonthlyCost,
   getFeatureTokenBudget,
   getProviderUsage,
   getTokenUsage,
   getUserBudgetSettings,
   incrementProviderUsage,
   incrementTokenUsage,
-  type PlatformDailyTokenLimits,
   releaseFeatureTokenBudget,
   resolveEffectiveLimits,
   resolvePlatformDailyTokenLimits,
   saveUserBudgetSettings,
-  type TokenBudget,
   validateBudgetUpdate,
 } from './ai-token-budget';
 export { AiTokenBudgetCounter } from './ai-token-budget-counter';
 export {
-  accountTokenUsageFromJson,
-  accountTokenUsageFromStream,
   attachTokenUsageAccounting,
   attachUpstreamTokenUsageAccounting,
   collectStreamTokenUsage,
   estimateInputTokensFromMessages,
-  type ExtractedTokenUsage,
   extractJsonTokenUsage,
   optionalExecutionContext,
-  type TokenUsageAccountingOptions,
-  type TokenUsageFormat,
-  type UpstreamTokenUsageAccountingOptions,
 } from './ai-token-usage-accounting';
 export { type AiProxyEnv } from './env';
 export { type AiProxyPorts, type PlatformAgentKey } from './ports';
