@@ -82,6 +82,7 @@ import {
   guidedLoginSettings,
 } from './guided-login.js';
 import { inboundMailWorkerVars } from './inbound-mail-settings.js';
+import { recordInstall } from './install-record.js';
 import { resolveKeyProviderBox } from './key-choice.js';
 import { detectKeyCandidates } from './key-platforms.js';
 import {
@@ -91,7 +92,6 @@ import {
   keyAgentUrl,
   resolveDeployKeys,
 } from './key-service.js';
-import { recordInstall } from './install-record.js';
 import {
   ensureMailCollectorPassword,
   MAIL_COLLECTOR_PASSWORD_FILE,

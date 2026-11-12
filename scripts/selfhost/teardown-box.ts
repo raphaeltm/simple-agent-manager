@@ -79,7 +79,9 @@ export function boxItems(ctx: TeardownContext): Item[] {
     runKey: 'compose-down',
     run: () =>
       compose(ctx, ['down', '--remove-orphans', ...(everything ? ['-v', '--rmi', 'local'] : [])]),
-    record: everything ? { cloud: 'box', kind: 'compose-project', name: COMPOSE_PROJECT } : undefined,
+    record: everything
+      ? { cloud: 'box', kind: 'compose-project', name: COMPOSE_PROJECT }
+      : undefined,
   });
   const keepVolumes = { act: 'keep' as const, why: 'keep my data keeps volumes' };
   for (const volume of composeVolumes(ctx)) {
@@ -92,7 +94,9 @@ export function boxItems(ctx: TeardownContext): Item[] {
       how: 'docker compose down -v',
       step: STEPS.box,
       plan: { 'keep-data': keepVolumes, 'remove-everything': { act: 'remove' } },
-      forGood: store ? 'every project, chat, setting and hosted repository of this install' : undefined,
+      forGood: store
+        ? 'every project, chat, setting and hosted repository of this install'
+        : undefined,
       removedAt: composeGone,
       runKey: 'compose-down',
       record: { cloud: 'box', kind: 'volume', name: volume, createdBy: 'compose' },
@@ -105,7 +109,10 @@ export function boxItems(ctx: TeardownContext): Item[] {
     provenance: 'discovered, not recorded',
     how: 'docker compose down --rmi local',
     step: STEPS.box,
-    plan: { 'keep-data': { act: 'keep', why: 'rebuilt or reused on start' }, 'remove-everything': { act: 'remove' } },
+    plan: {
+      'keep-data': { act: 'keep', why: 'rebuilt or reused on start' },
+      'remove-everything': { act: 'remove' },
+    },
     removedAt: composeGone,
     runKey: 'compose-down',
   });
@@ -118,7 +125,10 @@ export function boxItems(ctx: TeardownContext): Item[] {
     provenance: env ? 'recorded' : 'discovered, not recorded',
     how: `rm ${ctx.envFile} (last, so a failed run can be resumed)`,
     step: STEPS.box,
-    plan: { 'keep-data': { act: 'keep', why: 'needed to start the install again' }, 'remove-everything': { act: 'remove' } },
+    plan: {
+      'keep-data': { act: 'keep', why: 'needed to start the install again' },
+      'remove-everything': { act: 'remove' },
+    },
     removedAt: env?.removedAt ?? (existsSync(ctx.envFile) ? undefined : 'already gone'),
     run: () => rmSync(ctx.envFile, { force: true }),
     record: { cloud: 'box', kind: 'env-file', name: ctx.envFile },
@@ -136,7 +146,10 @@ function composeVolumes(ctx: TeardownContext): string[] {
     '{{.Name}}',
   ]);
   if (result.status !== 0) return [];
-  return result.stdout.split('\n').map((v) => v.trim()).filter(Boolean);
+  return result.stdout
+    .split('\n')
+    .map((v) => v.trim())
+    .filter(Boolean);
 }
 
 function stateItems(ctx: TeardownContext): Item[] {
@@ -195,7 +208,13 @@ function stateItems(ctx: TeardownContext): Item[] {
     removedAt: state?.removedAt,
     runKey: 'state',
     run: () => clearState(ctx, keepKey),
-    record: { cloud: 'box', kind: 'state-dir', name: ctx.stateDir, createdBy: 'deploy' },
+    record: [
+      { cloud: 'box', kind: 'state-dir', name: ctx.stateDir, createdBy: 'deploy' },
+      // The install itself is gone with its state; the id stays readable for a resumed run.
+      ...ctx.record
+        .filter((r) => r.cloud === 'box' && r.kind === 'installation')
+        .map((r) => ({ cloud: 'box', kind: 'installation', name: r.name })),
+    ],
   });
   items.push({
     id: 'box:record',
@@ -216,7 +235,8 @@ function clearState(ctx: TeardownContext, keepKey: boolean): void {
     const path = join(ctx.stateDir, entry);
     if (entry === 'key-agent' && keepKey) {
       for (const inner of readdirSync(path)) {
-        if (inner !== basename(KEY_FILE)) rmSync(join(path, inner), { recursive: true, force: true });
+        if (inner !== basename(KEY_FILE))
+          rmSync(join(path, inner), { recursive: true, force: true });
       }
       continue;
     }
@@ -312,7 +332,8 @@ export function bucketItems(ctx: TeardownContext): Item[] {
         'keep-data': { act: 'keep', why: 'keep my data keeps the bucket' },
         'remove-everything': { act: 'remove' },
       },
-      forGood: 'every project, chat, setting and hosted repository of this install (backups excepted)',
+      forGood:
+        'every project, chat, setting and hosted repository of this install (backups excepted)',
       removedAt: contents?.removedAt,
       run: () => emptyBucket(ctx, url),
       record: { cloud: 'box', kind: 'bucket-contents', name: url, createdBy: 'deploy' },
@@ -331,7 +352,10 @@ export function bucketItems(ctx: TeardownContext): Item[] {
       step: STEPS.outside,
       plan: {
         'keep-data': { act: 'keep', why: 'keep my data keeps the bucket' },
-        'remove-everything': { act: 'operator', why: 'it existed before SAM; teardown empties it only' },
+        'remove-everything': {
+          act: 'operator',
+          why: 'it existed before SAM; teardown empties it only',
+        },
       },
     });
   }
@@ -358,7 +382,10 @@ export function emptyBucket(ctx: BoxContext, url: string): void {
 export function outsideItems(ctx: TeardownContext): Item[] {
   const domain = ctx.domain || '<your SAM domain>';
   const keep = { act: 'keep' as const, why: 'needed to bring the install back' };
-  const operator = (why: string) => ({ 'keep-data': keep, 'remove-everything': { act: 'operator' as const, why } });
+  const operator = (why: string) => ({
+    'keep-data': keep,
+    'remove-everything': { act: 'operator' as const, why },
+  });
   const items: Item[] = [
     {
       id: 'outside:github-app',
@@ -441,7 +468,9 @@ export function outsideItems(ctx: TeardownContext): Item[] {
 
 function keyProvider(stateDir: string): string | null {
   try {
-    const choice = JSON.parse(readFileSync(join(stateDir, 'key-agent', 'choice.json'), 'utf8')) as unknown;
+    const choice = JSON.parse(
+      readFileSync(join(stateDir, 'key-agent', 'choice.json'), 'utf8')
+    ) as unknown;
     const provider = (choice as { provider?: unknown }).provider;
     return typeof provider === 'string' ? provider : null;
   } catch {

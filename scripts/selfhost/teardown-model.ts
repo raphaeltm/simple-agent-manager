@@ -79,14 +79,15 @@ export interface Item {
   /** After the action: did it go? (default: yes when run() returned). */
   settle?: () => { removed: boolean; why?: string };
   /** Marked removed in the record once gone (added first when not recorded yet). */
-  record?: RecordRef;
+  record?: RecordRef | RecordRef[];
   /** Already removed by an earlier run (the record's removedAt). */
   removedAt?: string;
 }
 
 export interface Outcome {
   item: Item;
-  status: 'removed' | 'kept' | 'operator' | 'refused' | 'failed' | 'not attempted' | 'already removed';
+  status:
+    'removed' | 'kept' | 'operator' | 'refused' | 'failed' | 'not attempted' | 'already removed';
   why?: string;
 }
 
@@ -141,7 +142,7 @@ export function execute(items: Item[], mode: Mode, recordFile: string): Outcome[
         outcomes.push({ item, status: 'kept', why: settled.why });
         continue;
       }
-      if (item.record) markInRecord(recordFile, item.record);
+      for (const ref of [item.record ?? []].flat()) markInRecord(recordFile, ref);
       outcomes.push({ item, status: 'removed' });
     }
     if (outcomes.some((o) => o.status === 'failed' && o.item.step === step)) failedStep = step;
@@ -225,7 +226,9 @@ export function renderSummary(outcomes: Outcome[]): string {
     lines.push(`${title}:`);
     for (const { item, status, why } of hits) {
       const extra = status === 'operator' ? `\n      ${item.how}` : '';
-      lines.push(`  - ${item.what}${why ? ` (${status === 'already removed' ? 'earlier, ' : ''}${why})` : ''}${extra}`);
+      lines.push(
+        `  - ${item.what}${why ? ` (${status === 'already removed' ? 'earlier, ' : ''}${why})` : ''}${extra}`
+      );
     }
   }
   return lines.join('\n');

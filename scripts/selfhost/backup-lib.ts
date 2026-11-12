@@ -37,8 +37,8 @@ import {
 } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 
-import { KEY_SERVICE_BACKUP_EXCLUDES } from './key-service';
 import { recordBackup } from './install-record';
+import { KEY_SERVICE_BACKUP_EXCLUDES } from './key-service';
 import { ensurePrivateDir } from './secret-files';
 
 /** The objectstore image docker-compose.yml pins; `mc` ships in it. */

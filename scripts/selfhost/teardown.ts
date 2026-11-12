@@ -23,8 +23,8 @@ import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { parseArgs } from 'node:util';
 
-import { readRecord } from '../../deploy/selfhost/created-resources.mjs';
 import { normalizeInstallationId } from '../../apps/api/src/services/node-provider-labels';
+import { readRecord } from '../../deploy/selfhost/created-resources.mjs';
 import { log, runCommand, SELFHOST_DIR } from './backup-cli';
 import { recordPath } from './install-record';
 import { assertPrivateFile, parseDotenv } from './secret-files';
@@ -83,7 +83,9 @@ async function confirm(expected: string, given: string | undefined): Promise<boo
   if (!process.stdin.isTTY) return false;
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
-    return (await rl.question(`Type the install's name (${expected}) to continue: `)).trim() === expected;
+    return (
+      (await rl.question(`Type the install's name (${expected}) to continue: `)).trim() === expected
+    );
   } finally {
     rl.close();
   }
@@ -97,7 +99,10 @@ async function main(): Promise<number> {
     assertPrivateFile(envFile);
     box = parseDotenv(readFileSync(envFile, 'utf8'), envFile);
   }
-  const stateDir = resolve(dirname(envFile), values['state-dir'] ?? box.SAM_SELFHOST_STATE_DIR ?? '.state');
+  const stateDir = resolve(
+    dirname(envFile),
+    values['state-dir'] ?? box.SAM_SELFHOST_STATE_DIR ?? '.state'
+  );
   const recordFile = recordPath(stateDir);
   const record = readRecord(recordFile).resources;
   if (!existsSync(envFile) && record.length === 0) {
@@ -131,24 +136,44 @@ async function main(): Promise<number> {
     installationId,
     selfhostDir: SELFHOST_DIR,
   };
-  const idSource = recordedId ? 'recorded' : installationId ? 'discovered, not recorded: platform-keys.json' : 'unknown';
-  log(`install ${domain || '(domain unknown)'}, installation ${installationId ?? '?'} (${idSource})`);
+  const idSource = recordedId
+    ? 'recorded'
+    : installationId
+      ? 'discovered, not recorded: platform-keys.json'
+      : 'unknown';
+  log(
+    `install ${domain || '(domain unknown)'}, installation ${installationId ?? '?'} (${idSource})`
+  );
   log(`record ${recordFile}${existsSync(recordFile) ? '' : ' (none yet)'}`);
-  const items: Item[] = [...boxItems(ctx), ...bucketItems(ctx), ...gcpItems(ctx), ...outsideItems(ctx)];
+  const items: Item[] = [
+    ...boxItems(ctx),
+    ...bucketItems(ctx),
+    ...gcpItems(ctx),
+    ...outsideItems(ctx),
+  ];
 
   if (!mode) {
-    process.stdout.write(`${renderInventory(items)}\n\nRead only: nothing was changed. Remove with --keep-data or --remove-everything (add --dry-run first).\n`);
+    process.stdout.write(
+      `${renderInventory(items)}\n\nRead only: nothing was changed. Remove with --keep-data or --remove-everything (add --dry-run first).\n`
+    );
     return 0;
   }
-  process.stdout.write(`\nPlan (${mode === 'keep-data' ? 'keep my data' : 'remove everything'}):\n${renderPlan(items, mode)}\n`);
+  process.stdout.write(
+    `\nPlan (${mode === 'keep-data' ? 'keep my data' : 'remove everything'}):\n${renderPlan(items, mode)}\n`
+  );
   if (values['dry-run']) {
     process.stdout.write('\nDry run: nothing was changed.\n');
     return 0;
   }
   const name = domain || installationId;
-  if (!name) throw new Error('cannot name this install (no SAM_DOMAIN, no record): refusing to remove anything');
+  if (!name)
+    throw new Error(
+      'cannot name this install (no SAM_DOMAIN, no record): refusing to remove anything'
+    );
   if (!(await confirm(name, values.confirm))) {
-    throw new Error(`confirmation did not match: pass --confirm ${name} to remove what the plan lists`);
+    throw new Error(
+      `confirmation did not match: pass --confirm ${name} to remove what the plan lists`
+    );
   }
   const outcomes = execute(items, mode, recordFile);
   process.stdout.write(`${renderSummary(outcomes)}\n`);
