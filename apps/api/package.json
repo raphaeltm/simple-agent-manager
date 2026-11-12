@@ -31,6 +31,7 @@
     "@mastra/core": "1.81.0",
     "@modelcontextprotocol/server": "2.3.1",
     "@simple-agent-manager/agent-email": "workspace:*",
+    "@simple-agent-manager/ai-proxy": "workspace:*",
     "@simple-agent-manager/app-deployment": "workspace:*",
     "@simple-agent-manager/cloud-init": "workspace:*",
     "@simple-agent-manager/project-data": "workspace:*",

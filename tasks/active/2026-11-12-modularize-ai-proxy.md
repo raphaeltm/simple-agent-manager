@@ -9,11 +9,11 @@ Taken by the W4 agent in the same workspace. Provider weekly usage was 84% at st
 
 ## Scope inventory (core 79e5e1b71)
 
-| Area | Files | Lines |
-| ---- | ----- | ----- |
-| `services/ai-*` | 9 | 2,794 |
-| `routes/ai-proxy*` | 11 | 2,874 |
-| `durable-objects/ai-token-budget-counter.ts` | 1 | 199 |
+| Area                                         | Files | Lines |
+| -------------------------------------------- | ----- | ----- |
+| `services/ai-*`                              | 9     | 2,794 |
+| `routes/ai-proxy*`                           | 11    | 2,874 |
+| `durable-objects/ai-token-budget-counter.ts` | 1     | 199   |
 
 Outside importers: the worker entry (`index.ts`: the DO class and 3 route modules),
 `sam-session` (agent-loop, operator model/agent), `diagnosis-runner`, `debug-agent-*`,
@@ -23,16 +23,16 @@ admin routes (`admin-ai-proxy`, `admin-ai-usage`, `admin-ai-allowance`, `admin-c
 
 ### Package candidates (services + DO)
 
-| Module | Worker dependencies to cut |
-| ------ | -------------------------- |
-| `ai-anthropic-translate` | none (worker-core runtime-validation) |
-| `ai-model-tier-gate` | none |
-| `ai-proxy-shared` | `Env` only (AI_GATEWAY_ID, CF_ACCOUNT_ID, CF_API_TOKEN) |
-| `ai-token-budget` | `Env` only (limits, AI_TOKEN_BUDGET_COUNTER) |
-| `ai-token-usage-accounting` | `Env` only (KV) |
-| `ai-monthly-cost-cron` | `Env` only (KV, AI_GATEWAY_ID, page and TTL tunables) |
-| `ai-gateway-logs` | `resolveAdminSetting` (admin settings): port |
-| `ai-billing` | `getPlatformAgentCredential` + `getCredentialEncryptionKey`: credentials port |
+| Module                         | Worker dependencies to cut                                                      |
+| ------------------------------ | ------------------------------------------------------------------------------- |
+| `ai-anthropic-translate`       | none (worker-core runtime-validation)                                           |
+| `ai-model-tier-gate`           | none                                                                            |
+| `ai-proxy-shared`              | `Env` only (AI_GATEWAY_ID, CF_ACCOUNT_ID, CF_API_TOKEN)                         |
+| `ai-token-budget`              | `Env` only (limits, AI_TOKEN_BUDGET_COUNTER)                                    |
+| `ai-token-usage-accounting`    | `Env` only (KV)                                                                 |
+| `ai-monthly-cost-cron`         | `Env` only (KV, AI_GATEWAY_ID, page and TTL tunables)                           |
+| `ai-gateway-logs`              | `resolveAdminSetting` (admin settings): port                                    |
+| `ai-billing`                   | `getPlatformAgentCredential` + `getCredentialEncryptionKey`: credentials port   |
 | `ai-token-budget-counter` (DO) | `Env` generic only; class moves, worker entry re-exports it under the same name |
 
 ### Stays in the worker
@@ -48,16 +48,36 @@ admin routes (`admin-ai-proxy`, `admin-ai-usage`, `admin-ai-allowance`, `admin-c
   (the route-side callers stay in the worker and keep their direct imports).
 - `adminSettings`: `resolveAdminSetting` for `ai-gateway-logs`.
 
+## What moved (step 1 and 2 done together: W0 is on core)
+
+- `packages/ai-proxy/src`: the 8 services and the `AiTokenBudgetCounter` class, `env.ts`
+  (`AiProxyEnv`, the worker `Env` extends it and lost the 15 fields it now declares), `ports.ts`
+  (`getPlatformAnthropicKey`, `externalReadTimeoutMs`), `index.ts` (named re-exports), and a
+  test-only `./internal/*` entry.
+- Worker: `services/ai-proxy-ports.ts` (`aiProxyPorts(env, db?)`). Old paths are named re-exports;
+  `ai-billing`, `ai-gateway-logs` and `ai-monthly-cost-cron` keep wrappers with their original
+  signatures that bind the ports. `durable-objects/ai-token-budget-counter.ts` re-exports the class,
+  so `index.ts` and `wrangler.toml` are unchanged.
+- `ai-proxy-shared` in the package no longer re-exports the auth helpers; the worker adapter does.
+- Lint: took W3's generic `packageInternalPath` rule unchanged (identical hunk, so it merges cleanly).
+
 ## Tests
 
-Baseline (to record before moving): every test file importing a module above.
+Baseline on core `79e5e1b71`: every test file importing an in-scope module, 25 files / 428 cases
+(all unit pool; no Workers-pool file).
+
+After: package 9 files / 140 cases; apps/api 17 files / 288 cases. 140 + 288 = 428, none deleted.
+`routes/ai-proxy-anthropic.test.ts` was split: shared-helper cases moved to the package, the 6
+request-auth cases stay in the worker. Two route tests (`ai-proxy-accounting`,
+`ai-proxy-passthrough`) now mock `@simple-agent-manager/ai-proxy/internal/ai-token-budget`, because
+the token accounting calls `incrementTokenUsage` inside the package (13 cases failed before that).
 
 ## Progress
 
 - [x] Scope inventory and port plan
-- [ ] Draft PR into core
-- [ ] Step 1: decouple in place (narrow `AiProxyEnv`, ports, public surface)
-- [ ] Step 2: lift into `packages/ai-proxy`, old paths re-export, tests move
+- [x] Draft PR into core (#2699)
+- [x] Step 1 + 2: package with narrow `AiProxyEnv`, ports, public entry; old paths re-export; tests moved
+- [ ] Worker port adapter test (`aiProxyPorts`), package AGENTS.md, trim public entry to used names
 - [ ] Registrations: CI filters, runtime-boundary, AST scope, dependency evidence, docs paths
 - [ ] Local gates, specialist reviews
 - [ ] CI via `gh workflow run ci.yml --ref sam/w5-ai-proxy`; send PR URL, SHA and run ID to coordinator

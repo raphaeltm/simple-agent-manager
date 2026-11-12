@@ -117,6 +117,25 @@ describe('boundary 2: the worker imports packages only through public entry poin
     expect((await restrictedImportMessages(WORKER_FILE, code)).length).toBeGreaterThan(0);
   });
 
+  it("keeps a package's ./internal/* entry to worker tests", async () => {
+    const imports = [
+      "import { recordLink } from '@simple-agent-manager/operations/internal/link-core';",
+      "vi.mock('@simple-agent-manager/operations/internal/link-core');\nconst m = await import('@simple-agent-manager/operations/internal/link-core');",
+    ];
+    for (const code of imports) {
+      expect(await restrictedImportMessages(WORKER_TEST_FILE, code)).toEqual([]);
+      expect((await restrictedImportMessages(WORKER_FILE, code)).length).toBeGreaterThan(0);
+    }
+    expect(
+      (
+        await restrictedImportMessages(
+          PACKAGE_FILE,
+          "import { x } from '@simple-agent-manager/operations/internal/link-core';"
+        )
+      ).length
+    ).toBeGreaterThan(0);
+  });
+
   it.each([
     "import { x } from '@simple-agent-manager/worker-core';",
     "export * from '@simple-agent-manager/worker-core/schema';",

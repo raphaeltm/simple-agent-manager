@@ -1,24 +1,10 @@
 /**
- * Unit tests for the Anthropic-native AI proxy route.
- *
- * Tests auth (x-api-key), header forwarding, model validation,
- * rate limiting, token budget, streaming/non-streaming pass-through,
- * and error handling.
+ * Request-auth helpers of the AI proxy (worker side; the other shared helpers are tested in
+ * packages/ai-proxy/tests/unit/ai-proxy-anthropic.test.ts).
  */
 import { describe, expect, it } from 'vitest';
 
-import {
-  AIProxyAuthError,
-  buildAIGatewayMetadata,
-  buildAnthropicCountTokensUrl,
-  buildAnthropicGatewayUrl,
-  extractCallbackToken,
-  isAnthropicModel,
-} from '../../../src/services/ai-proxy-shared';
-
-// =============================================================================
-// extractCallbackToken
-// =============================================================================
+import { AIProxyAuthError, extractCallbackToken } from '../../../src/services/ai-proxy-shared';
 
 describe('extractCallbackToken', () => {
   it('extracts from Authorization: Bearer header', () => {
@@ -46,85 +32,6 @@ describe('extractCallbackToken', () => {
 // buildAnthropicGatewayUrl
 // =============================================================================
 
-describe('buildAnthropicGatewayUrl', () => {
-  it('builds AI Gateway URL when gateway ID is set', () => {
-    const env = { AI_GATEWAY_ID: 'my-gw', CF_ACCOUNT_ID: 'acc-123' } as Parameters<typeof buildAnthropicGatewayUrl>[0];
-    expect(buildAnthropicGatewayUrl(env)).toBe(
-      'https://gateway.ai.cloudflare.com/v1/acc-123/my-gw/anthropic/v1/messages',
-    );
-  });
-
-  it('falls back to direct Anthropic API when no gateway ID', () => {
-    const env = { CF_ACCOUNT_ID: 'acc-123' } as Parameters<typeof buildAnthropicGatewayUrl>[0];
-    expect(buildAnthropicGatewayUrl(env)).toBe('https://api.anthropic.com/v1/messages');
-  });
-});
-
-// =============================================================================
-// buildAnthropicCountTokensUrl
-// =============================================================================
-
-describe('buildAnthropicCountTokensUrl', () => {
-  it('builds AI Gateway URL for count_tokens', () => {
-    const env = { AI_GATEWAY_ID: 'my-gw', CF_ACCOUNT_ID: 'acc-123' } as Parameters<typeof buildAnthropicCountTokensUrl>[0];
-    expect(buildAnthropicCountTokensUrl(env)).toBe(
-      'https://gateway.ai.cloudflare.com/v1/acc-123/my-gw/anthropic/v1/messages/count_tokens',
-    );
-  });
-
-  it('falls back to direct Anthropic API', () => {
-    const env = { CF_ACCOUNT_ID: 'acc-123' } as Parameters<typeof buildAnthropicCountTokensUrl>[0];
-    expect(buildAnthropicCountTokensUrl(env)).toBe('https://api.anthropic.com/v1/messages/count_tokens');
-  });
-});
-
-// =============================================================================
-// buildAIGatewayMetadata
-// =============================================================================
-
-describe('buildAIGatewayMetadata', () => {
-  it('includes all fields', () => {
-    const meta = JSON.parse(buildAIGatewayMetadata({
-      userId: 'u1',
-      workspaceId: 'ws1',
-      projectId: 'p1',
-      modelId: 'claude-sonnet-5',
-      stream: true,
-      hasTools: true,
-      providerId: 'deepseek-anthropic',
-      providerName: 'DeepSeek Anthropic API',
-      providerDialect: 'anthropic',
-    }));
-    expect(meta).toEqual({
-      userId: 'u1',
-      workspaceId: 'ws1',
-      projectId: 'p1',
-      modelId: 'claude-sonnet-5',
-      stream: true,
-      hasTools: true,
-      providerId: 'deepseek-anthropic',
-      providerName: 'DeepSeek Anthropic API',
-      providerDialect: 'anthropic',
-    });
-  });
-
-  it('omits null projectId and never emits a trialId', () => {
-    const meta = JSON.parse(buildAIGatewayMetadata({
-      userId: 'u1',
-      workspaceId: 'ws1',
-      projectId: null,
-      modelId: 'claude-sonnet-5',
-      stream: false,
-    }));
-    expect(meta.projectId).toBeUndefined();
-    expect(meta.trialId).toBeUndefined();
-  });
-});
-
-// =============================================================================
-// AIProxyAuthError
-// =============================================================================
-
 describe('AIProxyAuthError', () => {
   it('has correct name and statusCode', () => {
     const err = new AIProxyAuthError('forbidden', 403);
@@ -137,17 +44,3 @@ describe('AIProxyAuthError', () => {
 // =============================================================================
 // Model validation (isAnthropicModel logic)
 // =============================================================================
-
-describe('Anthropic model validation', () => {
-  it('accepts claude-* models', () => {
-    expect(isAnthropicModel('claude-sonnet-5')).toBe(true);
-    expect(isAnthropicModel('claude-haiku-4-5-20251001')).toBe(true);
-    expect(isAnthropicModel('claude-opus-4-6')).toBe(true);
-  });
-
-  it('rejects non-Anthropic models', () => {
-    expect(isAnthropicModel('@cf/meta/llama-4-scout-17b-16e-instruct')).toBe(false);
-    expect(isAnthropicModel('gpt-4')).toBe(false);
-    expect(isAnthropicModel('@cf/qwen/qwen3-30b-a3b-fp8')).toBe(false);
-  });
-});

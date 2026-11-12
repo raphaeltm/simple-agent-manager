@@ -3,7 +3,6 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 
-import type { Env } from '../../../src/env';
 import {
   buildBudgetKey,
   buildBudgetSettingsKey,
@@ -21,7 +20,8 @@ import {
   resolveEffectiveLimits,
   saveUserBudgetSettings,
   validateBudgetUpdate,
-} from '../../../src/services/ai-token-budget';
+} from '../../src/ai-token-budget';
+import type { AiProxyEnv as Env } from '../../src/env';
 
 /** Create a mock KV namespace with in-memory storage. */
 function createMockKV(): KVNamespace & { _store: Map<string, string> } {
