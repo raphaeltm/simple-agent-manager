@@ -154,6 +154,105 @@ const VALUE_EXPIRED_MESSAGES = [requestRow(IDS.valueExpired, 1), requestRow(IDS.
 
 const MISSING_MESSAGES = [requestRow(IDS.missing, 1)];
 
+/**
+ * The rows Codex persists (production regression, 2026-11-12): a generic shell call, then the
+ * `request_secret` call with a dotted title and no toolName, a status-only update, and a result
+ * row naming no tool with the JSON only in `content`. Before the fix this rendered as raw JSON
+ * inside a "2 tool calls" group.
+ */
+function codexRows(id: string, start: number, finalStatus: 'completed' | 'failed' = 'completed') {
+  const at = (offset: number) => Date.now() - 40_000 + (start + offset) * 1000;
+  const tool = (rowId: string, content: string, meta: Record<string, unknown>, offset: number) => ({
+    id: rowId,
+    sessionId: SESSION_ID,
+    role: 'tool',
+    content,
+    toolMetadata: meta,
+    createdAt: at(offset),
+    sequence: start + offset,
+  });
+  const result =
+    finalStatus === 'completed'
+      ? JSON.stringify({
+          message: `Secret request recorded. A project owner or admin can supply ${LONG_NAME} on the card in this chat.`,
+          secretRequest: { id, name: LONG_NAME, status: 'pending', ttlSeconds: 3_600 },
+        })
+      : 'Error: an open request for this name already exists';
+  return [
+    tool(
+      `codex-git-${id}`,
+      '(tool call)',
+      {
+        toolCallId: `call_git_${id}`,
+        title: 'Run git status',
+        kind: 'execute',
+        status: 'in_progress',
+      },
+      0
+    ),
+    tool(
+      `codex-git-done-${id}`,
+      'On branch main',
+      { toolCallId: `call_git_${id}`, status: 'completed' },
+      1
+    ),
+    tool(
+      `codex-secret-${id}`,
+      '(tool call)',
+      {
+        toolCallId: `call_secret_${id}`,
+        title: 'mcp.sam-mcp.request_secret',
+        kind: 'execute',
+        status: 'in_progress',
+      },
+      2
+    ),
+    tool(
+      `codex-secret-progress-${id}`,
+      '(tool update)',
+      {
+        toolCallId: `call_secret_${id}`,
+        status: 'in_progress',
+      },
+      3
+    ),
+    tool(
+      `codex-secret-done-${id}`,
+      result,
+      {
+        toolCallId: `call_secret_${id}`,
+        status: finalStatus,
+        contentSize: result.length,
+      },
+      4
+    ),
+  ];
+}
+
+const CODEX_MESSAGES = [
+  {
+    id: 'msg-user-codex',
+    sessionId: SESSION_ID,
+    role: 'user',
+    content: 'Try request_secret here.',
+    toolMetadata: null,
+    createdAt: Date.now() - 50_000,
+    sequence: 0,
+  },
+  ...codexRows(IDS.open, 1),
+  {
+    id: 'msg-assistant-codex',
+    sessionId: SESSION_ID,
+    role: 'assistant',
+    content: "I've asked for the value on a secure card.",
+    toolMetadata: null,
+    createdAt: Date.now() - 20_000,
+    sequence: 10,
+  },
+];
+
+const CODEX_FAILED_MESSAGES = codexRows(IDS.open, 1, 'failed');
+
 interface Captured {
   fulfilBodies: unknown[];
   otherBodies: string[];
@@ -162,7 +261,7 @@ interface Captured {
 async function setupMocks(
   page: Page,
   messages: unknown[],
-  options: { failSave?: boolean; declineUnconfirmed?: boolean } = {}
+  options: { failSave?: boolean; declineUnconfirmed?: boolean; agentType?: string } = {}
 ): Promise<Captured> {
   const captured: Captured = { fulfilBodies: [], otherBodies: [] };
   const records = new Map<string, MockRequest>([
@@ -218,7 +317,7 @@ async function setupMocks(
   await setupProjectChatMocks(page, {
     projectId: PROJECT_ID,
     project: MOCK_PROJECT,
-    session: MOCK_SESSION,
+    session: options.agentType ? { ...MOCK_SESSION, agentType: options.agentType } : MOCK_SESSION,
     messages,
     user: USER,
   });
@@ -416,6 +515,53 @@ async function auditValueExpiredAndUnconfirmedDecline(page: Page, name: string) 
   await assertCardsFitColumn(page);
 }
 
+async function auditCodex(page: Page, name: string) {
+  const captured = await setupMocks(page, CODEX_MESSAGES, { agentType: 'openai-codex' });
+  await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`);
+
+  const card = page.getByTestId('secret-request-card');
+  await expect(card).toHaveCount(1);
+  await expect(card.getByText('Waiting for a value')).toBeVisible();
+  await screenshot(page, `${name}-codex-open`, SCREENSHOT_OPTIONS);
+  await assertNoOverflow(page);
+  await assertCardsFitColumn(page);
+  // The shell call stays in a generic group of ONE; the secret call is the card, not a group member.
+  // The log opens at the newest row, so scroll up to the group above the card.
+  await page.getByRole('log', { name: 'Conversation' }).hover();
+  await page.mouse.wheel(0, -3000);
+  const group = page.getByTestId('tool-call-group');
+  await expect(group).toHaveCount(1);
+  await expect(group).toContainText('1 tool call');
+  await expect(page.getByText('mcp.sam-mcp.request_secret')).toHaveCount(0);
+  await expect(page.getByText(/"secretRequest"/)).toHaveCount(0);
+  await screenshot(page, `${name}-codex-group`, SCREENSHOT_OPTIONS);
+
+  // A reload rebuilds the transcript from the same persisted rows.
+  await page.reload();
+  await expect(page.getByTestId('secret-request-card')).toHaveCount(1);
+  const reloaded = page.getByTestId('secret-request-card');
+  await reloaded.getByLabel(/Value for/).fill(SENTINEL);
+  await reloaded.getByLabel('Replace the existing value').check();
+  await reloaded.getByRole('button', { name: 'Save secret' }).click();
+  await expect(reloaded.getByText(/Supplied by Owner/)).toBeVisible();
+  expect(captured.fulfilBodies).toHaveLength(1);
+  expect(captured.otherBodies.join('\n')).not.toContain(SENTINEL);
+  expect(await page.content()).not.toContain(SENTINEL);
+  await screenshot(page, `${name}-codex-supplied`, SCREENSHOT_OPTIONS);
+  await assertNoOverflow(page);
+}
+
+async function auditCodexFailed(page: Page, name: string) {
+  await setupMocks(page, CODEX_FAILED_MESSAGES, { agentType: 'openai-codex' });
+  await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`);
+  // A failed call keeps the generic card (inside the group) so its error stays readable.
+  const group = page.getByTestId('tool-call-group');
+  await expect(group).toContainText('2 tool calls');
+  await expect(page.getByTestId('secret-request-card')).toHaveCount(0);
+  await screenshot(page, `${name}-codex-failed`, SCREENSHOT_OPTIONS);
+  await assertNoOverflow(page);
+}
+
 async function auditMissing(page: Page, name: string) {
   await setupMocks(page, MISSING_MESSAGES);
   await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`);
@@ -441,6 +587,12 @@ test.describe('Project chat secret request cards — Mobile', () => {
   test('an expired supplied value and an unconfirmed decline', async ({ page }) => {
     await auditValueExpiredAndUnconfirmedDecline(page, 'project-chat-secret-request-mobile');
   });
+  test('Codex sparse transcript renders the card, live and after reload', async ({ page }) => {
+    await auditCodex(page, 'project-chat-secret-request-mobile');
+  });
+  test('a failed Codex request stays a generic tool call', async ({ page }) => {
+    await auditCodexFailed(page, 'project-chat-secret-request-mobile');
+  });
 });
 
 test.describe('Project chat secret request cards — Desktop', () => {
@@ -460,5 +612,11 @@ test.describe('Project chat secret request cards — Desktop', () => {
   });
   test('an expired supplied value and an unconfirmed decline', async ({ page }) => {
     await auditValueExpiredAndUnconfirmedDecline(page, 'project-chat-secret-request-desktop');
+  });
+  test('Codex sparse transcript renders the card, live and after reload', async ({ page }) => {
+    await auditCodex(page, 'project-chat-secret-request-desktop');
+  });
+  test('a failed Codex request stays a generic tool call', async ({ page }) => {
+    await auditCodexFailed(page, 'project-chat-secret-request-desktop');
   });
 });
