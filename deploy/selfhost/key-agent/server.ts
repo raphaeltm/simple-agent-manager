@@ -19,14 +19,14 @@
  * Run with Node's type stripping: `node server.ts`.
  */
 import { createPrivateKey, type KeyObject, sign } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { join } from 'node:path';
 
 import { BUNDLE_ID, openBundle, parseBundle, type Secrets } from './bundle.ts';
 import { loopbackPeerUid } from './peer.ts';
 import { type KeyProvider, KeyProviderError } from './provider.ts';
-import { createKeyProvider } from './providers.ts';
+import { createKeyProvider, LEGACY_KEY_PROVIDER } from './providers.ts';
 
 export const DEFAULT_KEY_AGENT_PORT = 7190;
 export const DEFAULT_CACHE_SECONDS = 300;
@@ -251,9 +251,50 @@ function parseUids(raw: string | undefined): Set<number> {
   return new Set(uids);
 }
 
+/**
+ * Started as root (docker-compose.yml: no SAM_KEY_AGENT_UID), the agent becomes the owner of its
+ * state directory before it reads anything or opens a socket: the bundles and the key file are
+ * that user's mode-0600 files. The container holds only CAP_SETUID and CAP_SETGID for this, and
+ * both are gone once the uid is no longer 0. A root-owned directory leaves it root, without any
+ * other capability.
+ */
+export function dropToOwnerOf(dir: string): { uid: number; gid: number } | null {
+  if (process.getuid?.() !== 0 || !process.setuid || !process.setgid || !process.setgroups) {
+    return null;
+  }
+  const { uid, gid } = statSync(dir);
+  if (uid === 0) return null;
+  process.setgroups([gid]);
+  process.setgid(gid);
+  process.setuid(uid);
+  if (process.getuid() !== uid || process.getgid?.() !== gid) {
+    throw new Error(`could not become ${uid}:${gid}`);
+  }
+  return { uid, gid };
+}
+
+/** A box with sealing off (`legacy-plaintext`): healthy for compose, no secrets for anyone. */
+export function createLegacyAgent(): Server {
+  return createServer((request, response) => {
+    if (request.method === 'GET' && request.url === '/healthz') {
+      reply(response, 200, { ok: true, sealed: false });
+      return;
+    }
+    reply(response, 503, { error: 'sealed_secrets_off' });
+  });
+}
+
 function main(): void {
   const env = process.env;
+  const dropped = dropToOwnerOf(env.SAM_KEY_AGENT_STATE_DIR ?? '/etc/sam/key-agent');
+  if (dropped) console.log(JSON.stringify({ event: 'key_agent.dropped_root', ...dropped }));
   const port = Number(env.SAM_KEY_AGENT_PORT ?? DEFAULT_KEY_AGENT_PORT);
+  if (env.SAM_KEY_PROVIDER?.trim() === LEGACY_KEY_PROVIDER) {
+    createLegacyAgent().listen(port, '127.0.0.1', () => {
+      console.log(JSON.stringify({ event: 'key_agent.legacy_plaintext', port }));
+    });
+    return;
+  }
   const cacheSeconds = Number(env.SAM_KEY_AGENT_CACHE_SECONDS ?? DEFAULT_CACHE_SECONDS);
   const server = createKeyAgent({
     provider: createKeyProvider(env),

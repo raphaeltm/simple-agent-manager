@@ -18,7 +18,12 @@ import {
   createFileProvider,
   generateFileKek,
 } from '../../deploy/selfhost/key-agent/provider-file.ts';
-import { createKeyAgent, SIGNATURE_HEADER } from '../../deploy/selfhost/key-agent/server.ts';
+import {
+  createKeyAgent,
+  createLegacyAgent,
+  dropToOwnerOf,
+  SIGNATURE_HEADER,
+} from '../../deploy/selfhost/key-agent/server.ts';
 
 const INSTALL = 'e'.repeat(32);
 const NONCE = '1'.repeat(32);
@@ -195,6 +200,30 @@ describe('cache and key-service failures', () => {
     expect(await res.json()).toEqual({ error: 'key_service_denied' });
     state.fail = new KeyProviderError('unavailable', 'kms down');
     expect((await ask()).status).toBe(503); // nothing stale left to serve
+  });
+});
+
+describe('legacy-plaintext box and start-up', () => {
+  it('stays healthy for compose but refuses every secrets request', async () => {
+    const server = createLegacyAgent();
+    await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+    servers.push(server);
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const health = await fetch(`${url}/healthz`);
+    expect(health.status).toBe(200);
+    expect(await health.json()).toEqual({ ok: true, sealed: false });
+    const asked = await fetch(`${url}/v1/secrets`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-sam-key-agent': '1' },
+      body: JSON.stringify({ bundleId: 'a'.repeat(32), nonce: NONCE, installationId: INSTALL }),
+    });
+    expect(asked.status).toBe(503);
+    expect(await asked.json()).toEqual({ error: 'sealed_secrets_off' });
+  });
+
+  it('does not change uid unless it runs as root', () => {
+    if (process.getuid?.() === 0) return; // the root path is exercised by the compose live test
+    expect(dropToOwnerOf(tmpdir())).toBeNull();
   });
 });
 

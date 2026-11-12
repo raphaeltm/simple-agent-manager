@@ -15,6 +15,13 @@ import { createTransitProvider } from './provider-transit.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 
+/**
+ * `SAM_KEY_PROVIDER` value that keeps the pre-sealing behaviour: every Worker secret is a deploy
+ * var, stored in plaintext in the fleet bucket for every deployed version. Temporary. The agent
+ * still runs (compose starts it on every box) and refuses every secrets request.
+ */
+export const LEGACY_KEY_PROVIDER = 'legacy-plaintext';
+
 export const KEY_PROVIDERS: Readonly<Record<string, (env: Env) => KeyProvider>> = {
   file: createFileProvider,
   transit: createTransitProvider,

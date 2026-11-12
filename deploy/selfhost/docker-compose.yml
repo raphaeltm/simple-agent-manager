@@ -45,7 +45,6 @@ services:
         required: false # only with the gce profile
       key-agent:
         condition: service_healthy
-        required: false # only with the key-agent profile (SAM_KEY_PROVIDER)
     # SAM_EGRESS_FENCE_PROBES, and on a gs:// bucket GCE_METADATA_HOST/IP pointing at the token
     # proxy. Written by `pnpm selfhost:deploy --init`.
     env_file:
@@ -148,22 +147,22 @@ services:
       - celld-data:/var/lib/celld
     restart: 'no'
 
-  # Token proxy for celld's gs:// bucket on GCE (deploy/selfhost/metadata-proxy/Caddyfile): the
-  # fence blocks the metadata server, so celld fetches its access token here instead.
-  # Sealed Worker secrets (SAM_KEY_PROVIDER; scripts/selfhost/key-service.ts). Holds the key
-  # provider and opens the sealed bundle for celld's Worker over 127.0.0.1, refusing every peer
-  # uid but celld's (key-agent/peer.ts). Its own uid, no capabilities, read-only root; the egress
-  # fence does not apply to it (it matches celld's uid), so it can reach the key service.
+  # Sealed Worker secrets (scripts/selfhost/key-service.ts, on by default). Holds the key provider
+  # `pnpm selfhost:deploy --init` chose (key-choice.ts) and opens the sealed bundle for celld's
+  # Worker over 127.0.0.1, refusing every peer uid but celld's (key-agent/peer.ts). No
+  # capabilities after start, read-only root; the egress fence does not apply to it (it matches
+  # celld's uid), so it can reach a key service. On a `legacy-plaintext` box it only answers its
+  # health check, and the fence gives celld no route to it.
   key-agent:
-    profiles: [key-agent]
     build: ./key-agent
     image: sam-selfhost-key-agent:local
     network_mode: host
-    # The uid that owns .state (the deploy checks SAM_KEY_AGENT_UID): the bundles and the KEK are
-    # mode 0600 files of the operator, and with no capabilities nobody else can read them. Unset,
-    # it runs as nobody and fails closed (cannot read the key file).
-    user: '${SAM_KEY_AGENT_UID:-65534}'
+    # Starts as root only to become the owner of .state/key-agent (server.ts dropToOwnerOf): the
+    # bundles and the key file are that user's mode 0600 files. SETUID/SETGID are lost with the
+    # switch. SAM_KEY_AGENT_UID pins the uid instead (the deploy checks it is the state owner).
+    user: '${SAM_KEY_AGENT_UID:-0}'
     cap_drop: [ALL]
+    cap_add: [SETUID, SETGID]
     security_opt: ['no-new-privileges:true']
     read_only: true
     env_file:
@@ -171,6 +170,7 @@ services:
         required: true
     environment:
       SAM_KEY_AGENT_ALLOWED_UIDS: ${CELLD_UID:-7101}
+      SAM_KEY_AGENT_STATE_DIR: /etc/sam/key-agent
     volumes:
       - ${SAM_SELFHOST_STATE_DIR:-./.state}/key-agent:/etc/sam/key-agent:ro
     healthcheck:
@@ -180,6 +180,8 @@ services:
       retries: 12
     restart: unless-stopped
 
+  # Token proxy for celld's gs:// bucket on GCE (deploy/selfhost/metadata-proxy/Caddyfile): the
+  # fence blocks the metadata server, so celld fetches its access token here instead.
   gce-metadata-proxy:
     profiles: [gce]
     image: sam-selfhost-caddy:local

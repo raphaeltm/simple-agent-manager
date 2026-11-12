@@ -27,6 +27,8 @@ import { type BoxContext, runBackup, type RunResult } from './backup-lib';
 
 /** Files under .state/ that docker compose services read (env_file, mounts). */
 const GENERATED_STATE_FILE = /\.(env|nft|caddy|toml|json)$/;
+/** Generated files in subdirectories of .state/ that a compose service reads. */
+const GENERATED_NESTED_FILES = ['key-agent/agent.env'];
 const MIGRATIONS_DIR = 'apps/api/src/db/migrations/';
 
 export interface UpgradeOptions {
@@ -64,6 +66,10 @@ function stateFingerprint(stateDir: string): string {
     } catch {
       // a directory or unreadable entry is not a compose input
     }
+  }
+  for (const name of GENERATED_NESTED_FILES) {
+    const path = join(stateDir, name);
+    if (existsSync(path)) hash.update(name).update(readFileSync(path));
   }
   return hash.digest('hex');
 }

@@ -20,6 +20,7 @@ install, the bundled mail collector (see Email sign-in below).
 | `frps`               | host    | `127.0.0.1:7000`                | profile `tunnel`; nodes arrive as frp over wss via Caddy |
 | `objectstore`        | host    | `127.0.0.1:9000`                | profile `local-store`; otherwise use a GCS/S3 bucket     |
 | `docker-proxy`       | none    | a unix socket shared with celld | guided login only: filters celld's Docker API calls      |
+| `key-agent`          | host    | `127.0.0.1:7190`                | opens the sealed Worker secrets for celld only           |
 
 Profile `mail-collector` (off by default, test installs only) adds `mail-collector`: Mailpit on
 `127.0.0.1:1025` (SMTP) and `127.0.0.1:8025` (UI, published at `mail.SAM_DOMAIN`). See Email sign-in.
@@ -32,7 +33,7 @@ Needs Docker with Compose v2.20+, Node 22+ and pnpm, and a checkout of this repo
 cp deploy/selfhost/.env.example deploy/selfhost/.env && chmod 600 deploy/selfhost/.env
 $EDITOR deploy/selfhost/.env           # SAM_DOMAIN, TLS mode, bucket
 pnpm install
-pnpm selfhost:deploy --init            # platform keys, gateway.env, egress fence files
+pnpm selfhost:deploy --init            # key provider, sealed platform keys, gateway.env, fence files
 docker compose -f deploy/selfhost/docker-compose.yml up -d
 pnpm selfhost:deploy                   # build web, migrate, deploy; re-run to upgrade
 pnpm selfhost:verify-fence             # the egress fence is in effect (see below)
@@ -52,19 +53,19 @@ uses (`agents/releases/<release>/vm-agent-linux-<arch>`, immutable), then pins t
 history, so the checkout must be a full clone (not `--depth 1`).
 
 Worker secrets that are yours to supply (GitHub App, OAuth clients) go in
-`deploy/selfhost/.state/secrets.env` (`NAME=value`, mode 600). Platform keys are generated into
-`.state/platform-keys.json` and never regenerated: back up `.state/` and the bucket.
+`deploy/selfhost/.state/secrets.env` (`NAME=value`, mode 600). The deploy seals them, with the
+platform keys it generates once, into a bundle only the box's key agent can open (Sealed secrets,
+below). Back up `.state/` and the bucket, and keep the key apart from both.
 
-celld has no secrets store for real nodes. Unless sealed secrets are on (below), `pnpm selfhost:deploy` renders secrets into the
-Worker's `vars` for `celld deploy` only and leaves a secrets-free `wrangler.json` behind, but
-celld keeps every deployed version's vars in plaintext under `deploy/` in the fleet bucket. The
-bucket credential is therefore the root secret of the install.
+celld has no secrets store for real nodes, and it keeps every deployed version's vars in plaintext
+under `deploy/` in the fleet bucket. So the Worker gets its secrets at runtime from the key agent
+and the deploy vars carry none. Only `SAM_KEY_PROVIDER=legacy-plaintext` (below) still renders
+secrets into `vars`, and then the bucket credential is the root secret of the install.
 
-Plaintext copies of the Worker secrets live in: the bucket's `deploy/` manifests (every
-deployed version), the `celld-data` volume cache, the celld process, and `.state/` on the box.
-`REVERSE_TUNNEL_GATEWAY_SECRET` is also in `.state/gateway.env` and the Caddy and frps container
-environments (`docker inspect` shows it). Keep the operator out of the `docker` group unless they
-are trusted with all of it.
+Plaintext copies of the Worker secrets live in the celld process (the Worker's memory) and, for its
+300 s cache, the key agent's memory. `REVERSE_TUNNEL_GATEWAY_SECRET` is also in `.state/gateway.env`
+and the Caddy and frps container environments (`docker inspect` shows it). Keep the operator out
+of the `docker` group unless they are trusted with all of it.
 
 Presigned browser uploads go straight to the fleet bucket. Set `R2_S3_ENDPOINT` in `.env` and a
 credential scoped to `<bucket>/<prefix>/r2/<R2 bucket>/*` as `R2_ACCESS_KEY_ID` /
@@ -75,26 +76,39 @@ Plain Worker var overrides (for example turning one of the self-host switches ba
 `secrets.env`; it is merged last. `--dry-run` prints the rendered config with those values
 redacted.
 
-### Sealed secrets (opt-in, spike)
+### Sealed secrets (on by default)
 
-With `SAM_KEY_PROVIDER` set in `.env` (and `key-agent` in `COMPOSE_PROFILES`, and
-`SAM_KEY_AGENT_UID` set to the uid that owns `.state/`), the deploy passes no secret to celld.
-It seals the platform keys and `secrets.env` into `.state/key-agent/bundles/<id>.json` (AES-256-GCM
-under a random data key; the data key is wrapped by the key service), and the Worker gets them at
-runtime from the `key-agent` service on `127.0.0.1:SAM_KEY_AGENT_PORT` (7190), which answers only
-celld's uid. The deployed vars carry only `SAM_KEY_AGENT_URL` and the bundle id, so the bucket's
-`deploy/` manifests and the celld-data cache hold no secret. If the agent is down the API answers
-503 `SECRETS_UNAVAILABLE` (`docker compose ps key-agent`).
+The deploy passes no secret to celld. It seals the platform keys and `secrets.env` into
+`.state/key-agent/bundles/<id>.json` (AES-256-GCM under a random data key; the data key is wrapped
+by a key provider), and the Worker gets them at runtime from the `key-agent` service on
+`127.0.0.1:SAM_KEY_AGENT_PORT` (7190), which answers only celld's uid. The deployed vars carry
+only `SAM_KEY_AGENT_URL`, the bundle id and the agent's public verify key, so the bucket's
+`deploy/` manifests hold no secret. If the agent is down the API answers 503
+`SECRETS_UNAVAILABLE` (`docker compose ps key-agent`). Each fresh Worker isolate pays one loopback
+request (about 4 ms); the agent keeps an opened bundle for 300 s.
 
-Providers: `file` (a 32-byte key in `.state/key-agent/kek`, the baseline for a box with no key
-service), `transit` (Vault or OpenBao: `SAM_TRANSIT_ADDR`, `SAM_TRANSIT_KEY`, AppRole
-`SAM_TRANSIT_ROLE_ID` with the secret id in `.state/key-agent/credentials/transit-secret-id`),
-`gcp-kms` (`SAM_GCP_KMS_KEY`, the VM's service account), `azure-kv` (`SAM_AZURE_KEY_VAULT_URL`,
-`SAM_AZURE_KEY_NAME`, the VM's managed identity). Backups leave out `.state/key-agent/kek` and
-`.state/key-agent/credentials/`: keep the file key somewhere else, offline. Once a deploy has run
-from the bundle, `platform-keys.json` and `secrets.env` can be deleted; later edits go in a fresh
-`secrets.env` and are merged into a new bundle. A `platform-keys.json` that disagrees with the
-bundle stops the deploy. Code: `scripts/selfhost/key-service.ts`, `deploy/selfhost/key-agent/`,
+**Which key provider.** `pnpm selfhost:deploy --init` chooses once and records the choice and why
+in `.state/key-agent/choice.json`; every deploy prints it (`key provider: file (...)`). Without
+a recorded choice a plain `pnpm selfhost:deploy` stops and asks for `--init`. To override, set
+`SAM_KEY_PROVIDER` in `.env`:
+
+| `SAM_KEY_PROVIDER` | Key                                                                                                                                           | Settings                                                                                                                                    |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| unset (default)    | chosen by `--init`                                                                                                                            |                                                                                                                                             |
+| `file`             | 32 bytes in `.state/key-agent/kek`, created at the first seal                                                                                 |                                                                                                                                             |
+| `transit`          | Vault or OpenBao transit key, off the box                                                                                                     | `SAM_TRANSIT_ADDR`, `SAM_TRANSIT_KEY`, AppRole `SAM_TRANSIT_ROLE_ID` with the secret id in `.state/key-agent/credentials/transit-secret-id` |
+| `gcp-kms`          | Cloud KMS key, the VM's service account                                                                                                       | `SAM_GCP_KMS_KEY`                                                                                                                           |
+| `azure-kv`         | Key Vault key, the VM's managed identity                                                                                                      | `SAM_AZURE_KEY_VAULT_URL`, `SAM_AZURE_KEY_NAME`                                                                                             |
+| `legacy-plaintext` | **none: LEGACY.** Every Worker secret is a deploy var, stored in plaintext in the fleet bucket for every deployed version and in every backup |                                                                                                                                             |
+
+The agent container starts as root only to become the owner of `.state/key-agent` (it keeps no
+capability after that); set `SAM_KEY_AGENT_UID` to pin the uid instead.
+
+Backups leave out `.state/key-agent/kek` and `.state/key-agent/credentials/`: keep the file key
+somewhere else, offline. Once a deploy has run from the bundle, `platform-keys.json` and
+`secrets.env` can be deleted; later edits go in a fresh `secrets.env` and are merged into a new
+bundle. A `platform-keys.json` that disagrees with the bundle stops the deploy. Code:
+`scripts/selfhost/key-service.ts`, `scripts/selfhost/key-choice.ts`, `deploy/selfhost/key-agent/`,
 `apps/api/src/selfhost/runtime-secrets.ts`.
 
 ## Email sign-in
@@ -255,8 +269,10 @@ stopped, deletions included. The delta copy writes into a different directory th
 did, so state an aborted `gcloud` pass left behind cannot break it; if the delta copy still
 fails, the whole bucket is copied again into a fresh directory before celld restarts (longer
 downtime, still recorded). gs:// buckets copy with `gcloud storage rsync`; s3:// buckets (the
-bundled store too) with `mc mirror` from the pinned objectstore image. A backup holds every
-Worker secret in plaintext: keep it where only you can read it. Restore refuses a bucket that
+bundled store too) with `mc mirror` from the pinned objectstore image. A backup of a sealed box
+holds the sealed bundles but not the key file or key-service credentials, so it cannot be opened
+without the key kept apart. A backup of a `legacy-plaintext` box, or one taken before the box was
+sealed, holds every Worker secret in plaintext: keep it where only you can read it. Restore refuses a bucket that
 holds objects or a `.state/` with platform keys, and leaves celld stopped: start it with the same
 SAM checkout the backup recorded (`samCommit` in the manifest), never an older one. There is no
 point-in-time recovery: a backup is the recovery point. Code: `scripts/selfhost/backup-lib.ts`.

@@ -88,16 +88,18 @@ beforeEach(() => {
 });
 
 describe('settings', () => {
-  it('is off without SAM_KEY_PROVIDER, and refuses an unknown provider', () => {
+  it('is off only for legacy-plaintext (or no provider at all), and refuses an unknown one', () => {
     expect(keyServiceSettings({}, state)).toBeNull();
-    expect(keyServiceSettings({ SAM_KEY_PROVIDER: 'off' }, state)).toBeNull();
+    expect(keyServiceSettings({ SAM_KEY_PROVIDER: 'legacy-plaintext' }, state)).toBeNull();
+    expect(() => keyServiceSettings(box({ SAM_KEY_PROVIDER: 'off' }), state)).toThrow(/one of/);
     expect(() => keyServiceSettings(box({ SAM_KEY_PROVIDER: 'aws' }), state)).toThrow(/one of/);
   });
 
-  it('requires the agent to run as the uid that owns the state', () => {
-    expect(() => keyServiceSettings({ SAM_KEY_PROVIDER: 'file' }, state)).toThrow(
-      /SAM_KEY_AGENT_UID/
-    );
+  it('accepts no SAM_KEY_AGENT_UID (the agent drops to the state owner), refuses a wrong one', () => {
+    expect(keyServiceSettings({ SAM_KEY_PROVIDER: 'file' }, state)?.provider).toBe('file');
+    expect(() =>
+      keyServiceSettings({ SAM_KEY_PROVIDER: 'file', SAM_KEY_AGENT_UID: `${uid}1` }, state)
+    ).toThrow(/SAM_KEY_AGENT_UID/);
   });
 
   it('writes the agent env with container paths and no secret, and the KEK once (0600)', () => {

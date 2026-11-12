@@ -22,6 +22,7 @@ let diff: string[];
 let dirty: boolean;
 let failDeploy: boolean;
 let initRewritesState: boolean;
+let initRewritesAgentEnv: boolean;
 
 function run(command: string, args: string[]): RunResult {
   const ok = (stdout = '') => ({ status: 0, stdout, stderr: '' });
@@ -37,6 +38,11 @@ function run(command: string, args: string[]): RunResult {
   steps.push(line.replace(join(root, ''), '<root>/'));
   if (command === 'pnpm' && args.join(' ') === 'selfhost:deploy --init' && initRewritesState) {
     writeFileSync(join(root, 'state/gateway.env'), 'FRPS_PORT_RANGE=21000-21999\n');
+  }
+  if (command === 'pnpm' && args.join(' ') === 'selfhost:deploy --init' && initRewritesAgentEnv) {
+    // A legacy box upgraded to sealed-by-default: --init chose a provider for the key agent.
+    mkdirSync(join(root, 'state/key-agent'), { recursive: true });
+    writeFileSync(join(root, 'state/key-agent/agent.env'), 'SAM_KEY_PROVIDER=file\n');
   }
   if (command === 'pnpm' && args.join(' ') === 'selfhost:deploy' && failDeploy) {
     return { status: 1, stdout: '', stderr: 'migration 0219 failed' };
@@ -74,6 +80,7 @@ beforeEach(() => {
   dirty = false;
   failDeploy = false;
   initRewritesState = false;
+  initRewritesAgentEnv = false;
 });
 
 afterEach(() => rmSync(root, { recursive: true, force: true }));
@@ -123,6 +130,12 @@ describe('runUpgrade', () => {
     initRewritesState = true;
     const result = await upgrade();
     expect(result.composeRestarted).toBe(true);
+  });
+
+  it('restarts the stack when --init rewrote the key agent env (key-agent/agent.env)', async () => {
+    initRewritesAgentEnv = true;
+    diff = ['apps/api/src/routes/projects.ts'];
+    expect((await upgrade()).composeRestarted).toBe(true);
   });
 
   it('does not restart for a README-only change under deploy/selfhost', async () => {

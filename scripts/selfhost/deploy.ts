@@ -4,16 +4,18 @@
  *
  *   pnpm selfhost:deploy [--env-file deploy/selfhost/.env] [--state-dir <env dir>/.state]
  *                        [--secrets <state-dir>/secrets.env] [--web-dist DIR] [--dry-run] [--init]
- *                        [--skip-vm-agent]
+ *                        [--skip-vm-agent] [--key-provider NAME]
  *
- * `--init` only generates the platform keys, `<state-dir>/gateway.env` (the shared secret
- * docker compose hands to frps and Caddy), and the celld egress fence files
- * (`egress-fence.nft`, `celld.env`); run it once before the first `docker compose up`.
+ * `--init` chooses the key provider that seals the Worker secrets when none is recorded
+ * (key-choice.ts), seals the platform keys, and writes `<state-dir>/gateway.env` (the shared
+ * secret docker compose hands to frps and Caddy), the key agent's `agent.env` and the celld egress
+ * fence files (`egress-fence.nft`, `celld.env`); run it once before the first `docker compose up`.
  *
  * Re-runnable: platform keys are generated once and kept, the project directory is rebuilt,
  * D1 migrations are applied idempotently, and `celld deploy` publishes a new version that the
- * node adopts in place. celld has no secrets store for real nodes, so secrets are rendered
- * into `vars` for the deploy only; the config left on disk afterwards carries none.
+ * node adopts in place. celld has no secrets store for real nodes: the Worker gets its secrets
+ * at runtime from the box's key agent, and only on a `legacy-plaintext` box are they rendered
+ * into `vars` (which celld keeps in the fleet bucket).
  *
  * Nodes download the vm-agent from this install, so the deploy builds it (pinned Go image) and
  * publishes it into the fleet bucket the way the Cloudflare pipeline does, then pins
@@ -57,7 +59,16 @@ import {
   SOURCE_LINK,
   writeCelldConfig,
 } from './celld-project.js';
-import { redact, syncGatewayEnv } from './deploy-steps.js';
+import {
+  applyAllMigrations,
+  bucketOf,
+  DEFAULT_MIGRATION_ATTEMPTS,
+  DEFAULT_PREDEPLOY_MIGRATION_ATTEMPTS,
+  intEnv,
+  redact,
+  syncGatewayEnv,
+  waitForHealth,
+} from './deploy-steps.js';
 import {
   assertCelldTaggedImages,
   ensureDockerProxyDir,
@@ -71,6 +82,8 @@ import {
   guidedLoginSettings,
 } from './guided-login.js';
 import { inboundMailWorkerVars } from './inbound-mail-settings.js';
+import { resolveKeyProviderBox } from './key-choice.js';
+import { detectKeyCandidates } from './key-platforms.js';
 import {
   agentVerifyKey,
   assertKeyAgentUp,
@@ -103,29 +116,12 @@ const REPO_ROOT = resolve(import.meta.dirname, '../..');
 const API_DIR = join(REPO_ROOT, 'apps/api');
 const WEB_DIR = join(REPO_ROOT, 'apps/web');
 
-/** Attempts while the freshly deployed node takes its leases. */
-const DEFAULT_MIGRATION_ATTEMPTS = 20;
-/** Attempts before the deploy; an upgraded fleet answers at once, a fresh one never does. */
-const DEFAULT_PREDEPLOY_MIGRATION_ATTEMPTS = 2;
-const DEFAULT_MIGRATION_RETRY_DELAY_MS = 3000;
-const DEFAULT_HEALTH_TIMEOUT_MS = 120_000;
-const DEFAULT_HEALTH_POLL_INTERVAL_MS = 2000;
 /** Upper bound on captured celld output (bundle reports are a few KiB). */
 const CHILD_OUTPUT_MAX_BYTES = 64 * 1024 * 1024;
 const DEFAULT_CELLD_PORT = '8080';
 
 function log(message: string): void {
   console.log(`[selfhost] ${message}`);
-}
-
-function intEnv(name: string, fallback: number): number {
-  const raw = process.env[name];
-  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((done) => setTimeout(done, ms));
 }
 
 interface RunResult {
@@ -191,75 +187,6 @@ function buildApiDependencies(): void {
   if (result.status !== 0) throw new Error('building the API Worker dependencies failed');
 }
 
-const NO_LEASES = /no node leases/i;
-
-function bucketOf(env: NodeJS.ProcessEnv): string {
-  const bucket = env.CELLD_BUCKET;
-  if (!bucket) throw new Error('CELLD_BUCKET is not set');
-  return bucket;
-}
-
-/**
- * Applies one database's migrations. `celld d1` talks to a node holding a lease, and a node
- * takes leases only once a Worker is deployed, so on a fresh fleet this reports `no-leases`
- * instead of failing; the caller deploys and retries. Other failures throw.
- */
-async function applyMigrations(
-  celld: string,
-  databaseName: string,
-  projectDir: string,
-  env: NodeJS.ProcessEnv,
-  attempts: number
-): Promise<'applied' | 'no-leases'> {
-  const delay = intEnv('SELFHOST_MIGRATION_RETRY_DELAY_MS', DEFAULT_MIGRATION_RETRY_DELAY_MS);
-  for (let attempt = 1; ; attempt += 1) {
-    log(`applying D1 migrations: ${databaseName} (attempt ${attempt}/${attempts})`);
-    const result = run(
-      celld,
-      ['d1', 'migrations', 'apply', databaseName, projectDir, '--bucket', bucketOf(env)],
-      env
-    );
-    if (result.status === 0) return 'applied';
-    if (!NO_LEASES.test(result.output)) {
-      throw new Error(`celld d1 migrations apply ${databaseName} failed (exit ${result.status})`);
-    }
-    if (attempt >= attempts) return 'no-leases';
-    await sleep(delay);
-  }
-}
-
-async function applyAllMigrations(
-  celld: string,
-  databases: readonly string[],
-  projectDir: string,
-  env: NodeJS.ProcessEnv,
-  attempts: number
-): Promise<'applied' | 'no-leases'> {
-  for (const name of databases) {
-    if ((await applyMigrations(celld, name, projectDir, env, attempts)) === 'no-leases')
-      return 'no-leases';
-  }
-  return 'applied';
-}
-
-async function waitForHealth(port: string, baseDomain: string): Promise<void> {
-  const deadline = Date.now() + intEnv('SELFHOST_HEALTH_TIMEOUT_MS', DEFAULT_HEALTH_TIMEOUT_MS);
-  let last = 'no response';
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(`http://127.0.0.1:${port}/health`, {
-        headers: { host: `api.${baseDomain}`, 'x-forwarded-proto': 'https' },
-      });
-      if (response.ok) return;
-      last = `HTTP ${response.status}`;
-    } catch (error) {
-      last = error instanceof Error ? error.message : String(error);
-    }
-    await sleep(intEnv('SELFHOST_HEALTH_POLL_INTERVAL_MS', DEFAULT_HEALTH_POLL_INTERVAL_MS));
-  }
-  throw new Error(`API Worker did not become healthy on 127.0.0.1:${port}: ${last}`);
-}
-
 async function main(): Promise<void> {
   const { values } = parseArgs({
     options: {
@@ -270,18 +197,29 @@ async function main(): Promise<void> {
       'dry-run': { type: 'boolean', default: false },
       init: { type: 'boolean', default: false },
       'skip-vm-agent': { type: 'boolean', default: false },
+      'key-provider': { type: 'string' },
     },
   });
   const envFile = resolve(values['env-file'] ?? join(REPO_ROOT, 'deploy/selfhost/.env'));
   // The .env holds the bucket credential, which can read every deployed secret.
   assertPrivateFile(envFile);
-  const box = parseDotenv(readFileSync(envFile, 'utf8'), envFile);
+  const envBox = parseDotenv(readFileSync(envFile, 'utf8'), envFile);
+  // `--key-provider` overrides SAM_KEY_PROVIDER for this run only (secrets migrate's rollback).
+  if (values['key-provider']) envBox.SAM_KEY_PROVIDER = values['key-provider'];
   // Same default and base directory docker compose uses for SAM_SELFHOST_STATE_DIR.
   const stateDir = resolve(
     dirname(envFile),
-    values['state-dir'] ?? box.SAM_SELFHOST_STATE_DIR ?? '.state'
+    values['state-dir'] ?? envBox.SAM_SELFHOST_STATE_DIR ?? '.state'
   );
   ensurePrivateDir(stateDir);
+  // Which key provider seals the secrets (key-choice.ts): `--init` chooses when none is recorded.
+  const { box } = await resolveKeyProviderBox({
+    box: envBox,
+    stateDir,
+    init: values.init ?? false,
+    detect: detectKeyCandidates,
+    log,
+  });
   const secretsPath = resolve(values.secrets ?? join(stateDir, 'secrets.env'));
   const projectDir = join(stateDir, 'project');
   const baseDomain = box.SAM_DOMAIN;
@@ -423,6 +361,7 @@ async function main(): Promise<void> {
   writeCelldConfig(projectDir, plan.config);
   const databases = plan.config.d1_databases.map((db) => db.database_name);
   const preDeploy = await applyAllMigrations(
+    run,
     celld,
     databases,
     projectDir,
@@ -461,6 +400,7 @@ async function main(): Promise<void> {
 
   if (preDeploy === 'no-leases') {
     const migrated = await applyAllMigrations(
+      run,
       celld,
       databases,
       projectDir,
