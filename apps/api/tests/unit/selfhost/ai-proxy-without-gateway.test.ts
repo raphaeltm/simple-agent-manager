@@ -185,6 +185,31 @@ describe('AI proxy without AI Gateway: admin switch (A1)', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('an unauthenticated caller still gets 401 while the setting is off', async () => {
+    const { env } = boxEnv();
+    for (const path of ['/ai/anthropic/v1/messages', '/ai/anthropic/v1/messages/count_tokens']) {
+      const res = await app().request(
+        path,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: MODEL.id, messages: [] }),
+        },
+        env
+      );
+      expect(res.status, path).toBe(401);
+    }
+    const openai = await app().request(
+      '/ai/v1/chat/completions',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' },
+      env
+    );
+    expect(openai.status).toBe(401);
+    // Liveness: the same box, authenticated, is refused by the setting (503), not by auth.
+    expect((await sendMessage(env)).status).toBe(503);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('when an admin turns it on, calls Anthropic directly with the platform key', async () => {
     const { env } = boxEnv();
     await enableDirectUpstream(env);

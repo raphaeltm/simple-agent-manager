@@ -180,4 +180,32 @@ export const BINDING_FETCH_ALLOWLIST: readonly AllowlistEntry[] = [
     controller: 'binding',
     reason: 'VmAgentContainer Durable Object / container stub (platform runtime)',
   },
+  {
+    file: 'services/hosted-git/backend.ts',
+    fn: 'create',
+    call: 'repoStub(env,name).fetch',
+    controller: 'binding',
+    reason: 'HOSTED_GIT Durable Object stub (repository create)',
+  },
+  {
+    file: 'services/hosted-git/backend.ts',
+    fn: 'delete',
+    call: 'repoStub(env,name).fetch',
+    controller: 'binding',
+    reason: 'HOSTED_GIT Durable Object stub (repository delete)',
+  },
+  {
+    file: 'services/hosted-git/backend.ts',
+    fn: 'get',
+    call: 'repoStub(env,name).fetch',
+    controller: 'binding',
+    reason: 'HOSTED_GIT Durable Object stub (repository read)',
+  },
+  {
+    file: 'services/hosted-git/http.ts',
+    fn: 'handleHostedGitRequest',
+    call: 'stub.fetch',
+    controller: 'binding',
+    reason: 'HOSTED_GIT Durable Object stub (git smart-HTTP for a hosted repository)',
+  },
 ];

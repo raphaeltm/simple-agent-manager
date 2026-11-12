@@ -52,6 +52,23 @@ export const OUTBOUND_FETCH_ALLOWLIST: readonly AllowlistEntry[] = [
     reason: 'api.github.com; path from repository/project data only',
   },
   {
+    // SAM-hosted git (#2669): the in-process hosted-git hop, else the global fetch.
+    file: 'services/hosted-git/backend.ts',
+    fn: 'artifactsRemoteFetch',
+    call: 'fetch',
+    controller: 'platform',
+    reason:
+      'a hosted repository remote the platform created (Artifacts remote URL); local hosted-git remotes are served in-process',
+  },
+  {
+    file: 'services/repo-browse/fetch-http-client.ts',
+    fn: 'request',
+    call: 'fetchImpl',
+    controller: 'helper',
+    reason:
+      'isomorphic-git client over an injected fetch; callers pass artifactsRemoteFetch or the guarded import fetch (services/hosted-git/import.ts › cappedFetch)',
+  },
+  {
     // Added with the GitHub App manifest flow on sam/selfhost-pass-2 (f1ea4b4ec); listed here so
     // the inventory stays green after the rebase (overnight B3).
     file: 'services/github-app-manifest.ts',

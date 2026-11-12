@@ -184,7 +184,9 @@ describe('placement catalog snapshot matches packages/providers', () => {
 describe('real SAM default mirrored by the explorer', () => {
   function readNumericConst(relativePath: string, symbol: string): number {
     const source = readFileSync(join(REPO_ROOT, relativePath), 'utf8');
-    const match = new RegExp(`export const ${symbol}\\s*(?::\\s*\\w+\\s*)?=\\s*([\\d_]+)`).exec(source);
+    const match = new RegExp(`export const ${symbol}\\s*(?::\\s*\\w+\\s*)?=\\s*([\\d_]+)`).exec(
+      source
+    );
     expect(
       match,
       `${symbol} not found in ${relativePath} — moved, renamed, or no longer a plain numeric literal`
@@ -193,12 +195,19 @@ describe('real SAM default mirrored by the explorer', () => {
   }
 
   it('HOST_MEMORY_RESERVE_MB matches DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB', () => {
+    // The admission default is an alias of the shared node reserve; read the literal there.
+    const admission = readFileSync(
+      join(REPO_ROOT, 'apps/api/src/services/workspace-admission-policy.ts'),
+      'utf8'
+    );
+    expect(admission).toMatch(
+      /export const DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB\s*=\s*DEFAULT_NODE_HOST_MEMORY_RESERVE_MB;/
+    );
     const upstream = readNumericConst(
-      'apps/api/src/services/workspace-admission-policy.ts',
-      'DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB'
+      'packages/shared/src/constants/resource-defaults.ts',
+      'DEFAULT_NODE_HOST_MEMORY_RESERVE_MB'
     );
     expect(upstream).toBeGreaterThan(0);
     expect(HOST_MEMORY_RESERVE_MB).toBe(upstream);
   });
-
 });

@@ -9,6 +9,7 @@
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { classifyHost, guardedFetch } from '../lib/network-hosts';
+import { maybeJsonRecord } from '../lib/runtime-validation';
 import { resolveAdminSettingDetailsMany } from './admin-settings-resolution';
 import { outboundMaxRedirectsValue } from './outbound-fetch-settings';
 import {
@@ -158,13 +159,8 @@ export async function transcribeWithEndpoint(
     method: 'POST',
     body: form,
   });
-  const payload: unknown = await response.json().catch(() => null);
-  const text =
-    payload &&
-    typeof payload === 'object' &&
-    typeof (payload as { text?: unknown }).text === 'string'
-      ? (payload as { text: string }).text
-      : null;
+  const payload = maybeJsonRecord(await response.json().catch(() => null));
+  const text = typeof payload?.text === 'string' ? payload.text : null;
   if (text === null) {
     throw new SpeechEndpointError(
       'transcription',

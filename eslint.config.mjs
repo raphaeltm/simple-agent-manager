@@ -415,6 +415,16 @@ export default defineConfig([
     },
   },
   {
+    // Vendored dgit git core (durable-git v0.0.8, upstream commit
+    // d5eba04eda584b855a1bde1f86a836b751c378c0, see apps/api/src/vendor/dgit/UPSTREAM.md).
+    // Each file starts `// @ts-nocheck` then `/* eslint-disable */`; the disable comment cannot
+    // cover the line above it, so allow the ts-nocheck header here instead of editing upstream.
+    files: ['apps/api/src/vendor/dgit/**/*.ts'],
+    rules: {
+      '@typescript-eslint/ban-ts-comment': 'off',
+    },
+  },
+  {
     // Test-double typing is idiomatic (mocks/fixtures routinely need `any`
     // and non-null assertions), and the sam/* runtime-boundary trio targets
     // production request/row-narrowing patterns that don't apply to test

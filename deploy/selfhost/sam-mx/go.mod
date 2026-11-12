@@ -1,6 +1,6 @@
 module github.com/raphaeltm/simple-agent-manager/deploy/selfhost/sam-mx
 
-go 1.26.10
+go 1.26.11
 
 require (
 	blitiri.com.ar/go/spf v1.6.0

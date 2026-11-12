@@ -13,8 +13,9 @@
  * at most ~1.3 KB (blob lengths are capped below). On celld a D1 write is one object-store
  * round trip (p50 70-98 ms on GCS), so this costs one store write per recorded request.
  * Growth bound: `purgeAnalyticsEvents()` runs in the 5-minute observability purge and deletes
- * rows older than ANALYTICS_D1_RETENTION_DAYS (default 90, the longest admin period) and the
- * oldest rows above ANALYTICS_D1_MAX_ROWS (default 500,000; ~650 MB worst case).
+ * rows older than the admin setting operations.analyticsD1RetentionDays (default 90, the longest
+ * admin period) and the oldest rows above operations.analyticsD1MaxRows (default 500,000; ~650 MB
+ * worst case).
  *
  * No secrets: rows hold the fields Analytics Engine receives, minus URL detail: the page is stored
  * without query string or fragment, and the referrer as its origin only, so tokens in links
@@ -22,10 +23,9 @@
  */
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { resolveOperationsTelemetrySetting } from './operations-telemetry-settings';
 
 export const ANALYTICS_EVENTS_TABLE = 'analytics_events';
-export const DEFAULT_ANALYTICS_D1_RETENTION_DAYS = 90;
-export const DEFAULT_ANALYTICS_D1_MAX_ROWS = 500_000;
 /** Longest stored blob; Analytics Engine caps the whole point at 16 KB, we keep rows small. */
 export const ANALYTICS_D1_MAX_BLOB_LENGTH = 256;
 /** 1 index + 11 blobs + 3 doubles = 15 binds per row: one statement per row, under D1's 100. */
@@ -160,30 +160,19 @@ export async function queryAnalyticsD1(db: D1Database, sql: string): Promise<unk
   return result.results ?? [];
 }
 
-function positiveInt(value: string | undefined, fallback: number): number {
-  const parsed = Number.parseInt(value ?? '', 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
 export interface AnalyticsPurgeResult {
   deletedByAge: number;
   deletedByCount: number;
 }
 
 /** Retention and row cap for the D1 sink. A no-op (no D1 call) unless the sink is enabled. */
-export async function purgeAnalyticsEvents(
-  env: Pick<
-    Env,
-    | 'ANALYTICS_SINK'
-    | 'OBSERVABILITY_DATABASE'
-    | 'ANALYTICS_D1_RETENTION_DAYS'
-    | 'ANALYTICS_D1_MAX_ROWS'
-  >
-): Promise<AnalyticsPurgeResult | null> {
+export async function purgeAnalyticsEvents(env: Env): Promise<AnalyticsPurgeResult | null> {
   if (!isAnalyticsD1SinkEnabled(env)) return null;
   const db = env.OBSERVABILITY_DATABASE;
-  const days = positiveInt(env.ANALYTICS_D1_RETENTION_DAYS, DEFAULT_ANALYTICS_D1_RETENTION_DAYS);
-  const maxRows = positiveInt(env.ANALYTICS_D1_MAX_ROWS, DEFAULT_ANALYTICS_D1_MAX_ROWS);
+  const [days, maxRows] = await Promise.all([
+    resolveOperationsTelemetrySetting(env, 'analyticsD1RetentionDays'),
+    resolveOperationsTelemetrySetting(env, 'analyticsD1MaxRows'),
+  ]);
 
   const byAge = await db
     .prepare(`DELETE FROM ${ANALYTICS_EVENTS_TABLE} WHERE timestamp < datetime('now', ?)`)

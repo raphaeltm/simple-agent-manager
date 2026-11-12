@@ -369,7 +369,12 @@ function fixture(seed: EnvironmentSeed) {
       SEEDED_AT
     );
 
-  const env = { DATABASE: createSqliteD1(sqlite) } as unknown as Env;
+  // A Cloudflare installation: app deployments need Cloudflare DNS (platform-capabilities.ts).
+  const env = {
+    DATABASE: createSqliteD1(sqlite),
+    CF_API_TOKEN: 'cf-token',
+    CF_ZONE_ID: 'zone-1',
+  } as unknown as Env;
   const db = drizzle(env.DATABASE, { schema });
   const pending: Promise<unknown>[] = [];
   const executionCtx = {
@@ -940,6 +945,7 @@ describe('recordStrandedDeploymentReleasePlacement', () => {
     f.insertRelease('release-v1', 1, 'created');
     const before = f.environment();
     const failingEnv = {
+      ...f.env,
       DATABASE: {
         ...f.env.DATABASE,
         batch: async () => {

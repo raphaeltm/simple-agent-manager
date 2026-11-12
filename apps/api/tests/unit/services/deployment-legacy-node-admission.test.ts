@@ -81,6 +81,9 @@ let sqlite: Database.Database;
 function makeEnv(overrides: Partial<Env> = {}): Env {
   return {
     DATABASE: createSqliteD1(sqlite),
+    // A Cloudflare installation: app deployments need Cloudflare DNS (platform-capabilities.ts).
+    CF_API_TOKEN: 'cf-token',
+    CF_ZONE_ID: 'zone-1',
     ...overrides,
   } as Env;
 }

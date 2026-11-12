@@ -17,6 +17,7 @@ import { handleAppError } from '../../../src/middleware/app-error-handler';
 import { adminAnalyticsRoutes } from '../../../src/routes/admin-analytics';
 import { analyticsIngestRoutes } from '../../../src/routes/analytics-ingest';
 import { runObservabilityPurge } from '../../../src/scheduled/observability-purge';
+import { updateAdminSettings } from '../../../src/services/admin-settings-mutations';
 import { translateAnalyticsSql } from '../../../src/services/analytics-d1-sink';
 import { resolvePlatformCapabilities } from '../../../src/services/platform-capabilities';
 import { createAdminSettingsEnv } from '../../helpers/admin-settings-env';
@@ -188,7 +189,11 @@ describe('D1 analytics sink (self-host)', () => {
     insert.run('-100 days');
     for (let i = 0; i < 5; i += 1) insert.run(`-${i} hours`);
 
-    await runObservabilityPurge({ ...env, ANALYTICS_D1_MAX_ROWS: '3' } as Env);
+    await updateAdminSettings(env, {
+      changes: [{ name: 'operations.analyticsD1MaxRows', value: 3 }],
+      actorUserId: 'admin-1',
+    });
+    await runObservabilityPurge(env);
 
     const left = rows();
     expect(left).toHaveLength(3);

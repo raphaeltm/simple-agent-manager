@@ -19,8 +19,17 @@ import { resolveAiGatewayId } from './platform-capabilities';
 export type AiProxyAvailability =
   { enabled: true } | { enabled: false; reason: 'kill-switch' | 'direct-upstream-not-enabled' };
 
+/**
+ * The operator kill switch alone. Proxy routes check this before authenticating (an operator brake
+ * answers every caller, as it always has) and the full `resolveAiProxyAvailability` only after
+ * authenticating, so an unauthenticated caller still gets 401 and no admin setting is read for it.
+ */
+export function isAiProxyKillSwitchEngaged(env: Pick<Env, 'AI_PROXY_ENABLED'>): boolean {
+  return env.AI_PROXY_ENABLED === 'false';
+}
+
 export async function resolveAiProxyAvailability(env: Env): Promise<AiProxyAvailability> {
-  if (env.AI_PROXY_ENABLED === 'false') return { enabled: false, reason: 'kill-switch' };
+  if (isAiProxyKillSwitchEngaged(env)) return { enabled: false, reason: 'kill-switch' };
   if (resolveAiGatewayId(env) !== null) return { enabled: true };
   const enabled = (await resolveAdminSetting(env, AI_PROXY_DIRECT_UPSTREAM_SETTING)) === true;
   return enabled ? { enabled: true } : { enabled: false, reason: 'direct-upstream-not-enabled' };

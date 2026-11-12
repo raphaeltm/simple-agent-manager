@@ -192,6 +192,26 @@
       "registryUrl": "https://pkg.go.dev/golang.org/x/sys",
       "homepageUrl": "https://go.googlesource.com/sys",
       "necessity": "Uses unix.Openat and unix.Mkdirat for pinned-directory workspace ownership initialization without symlink traversal on Linux and Darwin. Promotes the existing pinned v0.48.0 indirect module to direct use; no version or resolved module change."
+    },
+    "blitiri.com.ar/go/spf": {
+      "registryUrl": "https://pkg.go.dev/blitiri.com.ar/go/spf",
+      "homepageUrl": "https://blitiri.com.ar/git/r/spf",
+      "necessity": "sam-mx (self-host inbound agent email) checks the sending host SPF record before accepting mail for an agent address (auth.go)."
+    },
+    "github.com/emersion/go-msgauth": {
+      "registryUrl": "https://pkg.go.dev/github.com/emersion/go-msgauth",
+      "homepageUrl": "https://github.com/emersion/go-msgauth",
+      "necessity": "sam-mx verifies DKIM signatures and evaluates the sender DMARC policy before relaying inbound agent email to the Worker (auth.go)."
+    },
+    "github.com/emersion/go-smtp": {
+      "registryUrl": "https://pkg.go.dev/github.com/emersion/go-smtp",
+      "homepageUrl": "https://github.com/emersion/go-smtp",
+      "necessity": "sam-mx is an SMTP server; go-smtp provides the protocol server and session handling for inbound agent email (main.go, session.go)."
+    },
+    "golang.org/x/net": {
+      "registryUrl": "https://pkg.go.dev/golang.org/x/net",
+      "homepageUrl": "https://go.googlesource.com/net",
+      "necessity": "sam-mx uses publicsuffix.EffectiveTLDPlusOne to find the organizational domain for DMARC alignment (auth.go)."
     }
   }
 }

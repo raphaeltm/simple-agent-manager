@@ -34,6 +34,11 @@ updates:
     directory: '/scripts/quality/govulncheck-tool'
     schedule:
       interval: weekly
+  # Self-hosted inbound SMTP receiver for agent email (compose profile `mail-in`).
+  - package-ecosystem: 'gomod'
+    directory: '/deploy/selfhost/sam-mx'
+    schedule:
+      interval: weekly
   - package-ecosystem: 'docker'
     directory: '/apps/api'
     schedule:
@@ -51,5 +56,15 @@ updates:
   # Self-hosted celld egress fence (alpine + nftables).
   - package-ecosystem: 'docker'
     directory: '/deploy/selfhost/egress-fence'
+    schedule:
+      interval: weekly
+  # Self-hosted guided-login Docker API proxy (node, pinned by digest).
+  - package-ecosystem: 'docker'
+    directory: '/deploy/selfhost/docker-proxy'
+    schedule:
+      interval: weekly
+  # Self-hosted sam-mx build (golang + alpine, both pinned by digest).
+  - package-ecosystem: 'docker'
+    directory: '/deploy/selfhost/sam-mx'
     schedule:
       interval: weekly

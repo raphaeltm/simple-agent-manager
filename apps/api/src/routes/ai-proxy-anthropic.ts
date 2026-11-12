@@ -33,6 +33,7 @@ import {
 import { resolveUpstreamAuth } from '../services/ai-billing';
 import {
   aiProxyDisabledMessage,
+  isAiProxyKillSwitchEngaged,
   resolveAiProxyAvailability,
 } from '../services/ai-proxy-availability';
 import {
@@ -70,10 +71,9 @@ const aiProxyAnthropicRoutes = new Hono<{ Bindings: Env }>();
 // =============================================================================
 
 aiProxyAnthropicRoutes.post('/messages', async (c) => {
-  // Kill switch, or no AI Gateway and the admin has not enabled the direct upstream.
-  const availability = await resolveAiProxyAvailability(c.env);
-  if (!availability.enabled) {
-    return anthropicError(aiProxyDisabledMessage(availability), 'api_error', 503);
+  // Kill switch first; the no-gateway gate runs after auth (resolveAiProxyAvailability).
+  if (isAiProxyKillSwitchEngaged(c.env)) {
+    return anthropicError('AI proxy is disabled', 'api_error', 503);
   }
 
   // --- Auth: extract token from x-api-key or Authorization: Bearer ---
@@ -96,6 +96,12 @@ aiProxyAnthropicRoutes.post('/messages', async (c) => {
       return anthropicError(err.message, errType, err.statusCode);
     }
     return anthropicError('Invalid or expired API key', 'authentication_error', 401);
+  }
+
+  // No AI Gateway and the admin has not enabled the direct upstream.
+  const availability = await resolveAiProxyAvailability(c.env);
+  if (!availability.enabled) {
+    return anthropicError(aiProxyDisabledMessage(availability), 'api_error', 503);
   }
 
   const { userId, workspaceId, projectId, chatSessionId } = auth;
@@ -300,10 +306,9 @@ aiProxyAnthropicRoutes.post('/messages', async (c) => {
 // =============================================================================
 
 aiProxyAnthropicRoutes.post('/messages/count_tokens', async (c) => {
-  // Kill switch, or no AI Gateway and the admin has not enabled the direct upstream.
-  const availability = await resolveAiProxyAvailability(c.env);
-  if (!availability.enabled) {
-    return anthropicError(aiProxyDisabledMessage(availability), 'api_error', 503);
+  // Kill switch first; the no-gateway gate runs after auth (resolveAiProxyAvailability).
+  if (isAiProxyKillSwitchEngaged(c.env)) {
+    return anthropicError('AI proxy is disabled', 'api_error', 503);
   }
 
   // --- Auth ---
@@ -326,6 +331,12 @@ aiProxyAnthropicRoutes.post('/messages/count_tokens', async (c) => {
       return anthropicError(err.message, errType, err.statusCode);
     }
     return anthropicError('Invalid or expired API key', 'authentication_error', 401);
+  }
+
+  // No AI Gateway and the admin has not enabled the direct upstream.
+  const availability = await resolveAiProxyAvailability(c.env);
+  if (!availability.enabled) {
+    return anthropicError(aiProxyDisabledMessage(availability), 'api_error', 503);
   }
 
   const { userId, workspaceId, projectId, chatSessionId } = auth;

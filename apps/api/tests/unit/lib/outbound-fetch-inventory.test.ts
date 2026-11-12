@@ -24,10 +24,10 @@ const SRC = resolve(import.meta.dirname, '../../../src');
  * the same change; the failure message lists exactly which sites moved.
  */
 const EXPECTED_COUNTS: Record<CallCategory | 'total', number> = {
-  total: 142,
-  guarded: 16,
-  outbound: 101,
-  binding: 25,
+  total: 149,
+  guarded: 17,
+  outbound: 103,
+  binding: 29,
 };
 
 /** User- and admin-chosen URL sites that must stay on the guard (rule 61 enumeration). */
@@ -52,6 +52,8 @@ const MUST_BE_GUARDED = [
   'services/speech-endpoints.ts › send › guardedFetch',
   // Advisory stalled-loop verdict on the admin's LLM endpoint.
   'services/stalled-task-classifier-endpoint.ts › classifyLoopWithLlmEndpoint › fetchChatTarget',
+  // User-chosen importUrl for a SAM-hosted repository (forge allowlist on every request).
+  'services/hosted-git/import.ts › cappedFetch › guardedFetch',
 ];
 
 const keyOf = (site: Pick<CallSite, 'file' | 'fn' | 'call'>): string =>

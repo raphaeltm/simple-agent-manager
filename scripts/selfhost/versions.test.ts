@@ -23,6 +23,7 @@ describe('pinned versions', () => {
     const local: Record<string, string> = {
       'sam-selfhost-caddy:local': 'caddy/Dockerfile',
       'sam-selfhost-egress-fence:local': 'egress-fence/Dockerfile',
+      'sam-selfhost-sam-mx:local': 'sam-mx/Dockerfile',
     };
     const pulled = images.filter((image) => !(image in local));
     expect(pulled.length).toBeGreaterThanOrEqual(4);

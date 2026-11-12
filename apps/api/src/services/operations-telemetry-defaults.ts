@@ -14,6 +14,8 @@ export const OPERATIONS_TELEMETRY_DEFAULTS = {
   snapshotTraceRetentionDays: 30,
   actionApprovalTtlMs: 60 * 60 * 1000,
   actionApprovalRetentionDays: 90,
+  analyticsD1RetentionDays: 90,
+  analyticsD1MaxRows: 500_000,
 } as const;
 
 export type OperationsTelemetrySettingKey = keyof typeof OPERATIONS_TELEMETRY_DEFAULTS;
@@ -34,6 +36,8 @@ export const OPERATIONS_TELEMETRY_RANGES: Record<
   snapshotTraceRetentionDays: { min: 1, max: 365 },
   actionApprovalTtlMs: { min: 60_000, max: 7 * 24 * 60 * 60 * 1000 },
   actionApprovalRetentionDays: { min: 1, max: 365 },
+  analyticsD1RetentionDays: { min: 1, max: 365 },
+  analyticsD1MaxRows: { min: 1, max: 10_000_000 },
 };
 
 export const OPERATIONS_TELEMETRY_DESCRIPTIONS: Record<OperationsTelemetrySettingKey, string> = {
@@ -55,4 +59,8 @@ export const OPERATIONS_TELEMETRY_DESCRIPTIONS: Record<OperationsTelemetrySettin
     'Milliseconds an Operations action request waits for a decision, and an approval then stays executable.',
   actionApprovalRetentionDays:
     'Days to keep decided, expired and executed Operations action approval records.',
+  analyticsD1RetentionDays:
+    'Self-host D1 analytics sink: days of product analytics events kept (the longest admin analytics period is 90).',
+  analyticsD1MaxRows:
+    'Self-host D1 analytics sink: most analytics event rows kept; the oldest above this are deleted (500,000 is about 650 MB worst case).',
 };

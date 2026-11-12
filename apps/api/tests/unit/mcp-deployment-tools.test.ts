@@ -86,6 +86,9 @@ function env(overrides: Partial<Env> = {}): Env {
     BASE_DOMAIN: 'sammy.party',
     DATABASE: {},
     ENCRYPTION_KEY,
+    // A Cloudflare installation: app deployments need Cloudflare DNS (platform-capabilities.ts).
+    CF_API_TOKEN: 'cf-token',
+    CF_ZONE_ID: 'zone-1',
     ...overrides,
   } as Env;
 }
