@@ -24,8 +24,8 @@ const SRC = resolve(import.meta.dirname, '../../../src');
  * the same change; the failure message lists exactly which sites moved.
  */
 const EXPECTED_COUNTS: Record<CallCategory | 'total', number> = {
-  total: 139,
-  guarded: 14,
+  total: 140,
+  guarded: 15,
   outbound: 100,
   binding: 25,
 };
@@ -47,6 +47,8 @@ const MUST_BE_GUARDED = [
   'routes/mcp/check-dns-status.ts › handleCheckDnsStatus › guardedFetch',
   // Admin-chosen speech endpoint (speech.transcription.* / speech.synthesis.*).
   'services/speech-endpoints.ts › send › guardedFetch',
+  // Advisory stalled-loop verdict on the admin's LLM endpoint.
+  'services/stalled-task-classifier-endpoint.ts › classifyLoopWithLlmEndpoint › fetchChatTarget',
 ];
 
 const keyOf = (site: Pick<CallSite, 'file' | 'fn' | 'call'>): string =>
