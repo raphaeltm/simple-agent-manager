@@ -11,10 +11,9 @@
  * same D1 transaction that opens the breaker. One opening therefore alerts once, however many
  * migrations it poisons and however long the breaker stays open.
  */
-import { isJsonRecord } from '@simple-agent-manager/shared';
-
 import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
+import type { ProjectDataArchiveBreakerOpening } from '../project-data-archive/breaker-opening';
 import { getProjectName } from '../services/notification';
 import { persistError } from '../services/observability';
 import {
@@ -27,25 +26,10 @@ export const PROJECT_DATA_ARCHIVE_BREAKER_OPENED_ALERT = 'project_data_archive_b
 /** Admin → Storage, where the breaker is closed and poisoned migrations are abandoned. */
 const BREAKER_CONTROLS_PATH = '/admin/storage';
 
-export interface ProjectDataArchiveBreakerOpening {
-  projectId: string;
-  /** The migration whose poisoning opened the breaker; it identifies this opening. */
-  migrationId: string;
-  reason: string;
-  message: string | null;
-  openedAt: number;
-}
-
-/**
- * Whether the breaker was closed, or had no row, before the write that opened it. `result` is the
- * `SELECT state` that runs just before the breaker upsert in the same D1 batch. An unreadable
- * result counts as closed: a duplicate alert costs less than a breaker that opened silently.
- */
-export function breakerWasClosedBeforeOpening(result: D1Result | undefined): boolean {
-  const row = result?.results?.[0];
-  if (row === undefined) return true;
-  return !isJsonRecord(row) || typeof row.state !== 'string' || row.state === 'closed';
-}
+export {
+  breakerWasClosedBeforeOpening,
+  type ProjectDataArchiveBreakerOpening,
+} from '../project-data-archive/breaker-opening';
 
 /**
  * Record the opening in `/admin/errors` and notify every operator once. Never throws: the sweep

@@ -42,6 +42,7 @@ export {
   serializeError,
 } from './logger';
 export { parsePositiveInt, requireRouteParam } from './route-helpers';
+export { mapRows, parseRow, parseRowOrNull } from './row-parsing';
 export {
   contentFreeIssues,
   expectJsonRecord,

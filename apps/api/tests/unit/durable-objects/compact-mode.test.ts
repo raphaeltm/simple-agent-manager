@@ -9,14 +9,14 @@
  * - contentSize accurately reflects UTF-8 byte count
  * - parseChatMessageRowCompact produces compact output
  */
-import { describe, expect, it } from 'vitest';
-
-import { getMessageToolContent } from '../../../src/durable-objects/project-data/messages';
+import { getMessageToolContent } from '@simple-agent-manager/project-data/internal/do/messages';
 import {
   parseChatMessageRow,
   parseChatMessageRowCompact,
   stripToolMetadataContent,
-} from '../../../src/durable-objects/project-data/row-schemas';
+} from '@simple-agent-manager/project-data/internal/do/row-schemas';
+import { describe, expect, it } from 'vitest';
+
 import { UNTRUSTED_TEXT_GUIDANCE } from '../../../src/operations/untrusted-text';
 
 describe('stripToolMetadataContent', () => {

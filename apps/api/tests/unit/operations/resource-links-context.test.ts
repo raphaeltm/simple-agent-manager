@@ -21,8 +21,9 @@ vi.mock('../../../src/services/admin-settings', () => ({
     ]),
 }));
 
-import { MIGRATIONS } from '../../../src/durable-objects/migrations';
-import { getLinkSnapshot, recordLink } from '../../../src/durable-objects/project-data/links';
+import { getLinkSnapshot, recordLink } from '@simple-agent-manager/project-data/internal/do/links';
+import { MIGRATIONS } from '@simple-agent-manager/project-data/internal/do/migrations';
+
 import type { Env } from '../../../src/env';
 import { getIdeaContext, getSessionContext } from '../../../src/operations/link-core';
 import { resolveAdminSettingDetailsMany } from '../../../src/services/admin-settings';

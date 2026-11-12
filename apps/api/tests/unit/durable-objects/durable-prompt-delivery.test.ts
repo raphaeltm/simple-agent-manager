@@ -1,16 +1,12 @@
-import type { PromptDeliverySource } from '@simple-agent-manager/shared';
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-import { runMigrations } from '../../../src/durable-objects/migrations';
-import { processPromptDeliveryAlarm } from '../../../src/durable-objects/project-data/durability-foundation';
-import type { DurableExecutionConfig } from '../../../src/durable-objects/project-data/durable-execution-config';
-import * as mailbox from '../../../src/durable-objects/project-data/mailbox';
-import { admitProjectEvent } from '../../../src/durable-objects/project-data/project-events';
+import { processPromptDeliveryAlarm } from '@simple-agent-manager/project-data/internal/do/durability-foundation';
+import type { DurableExecutionConfig } from '@simple-agent-manager/project-data/internal/do/durable-execution-config';
+import * as mailbox from '@simple-agent-manager/project-data/internal/do/mailbox';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import { admitProjectEvent } from '@simple-agent-manager/project-data/internal/do/project-events';
 import {
   insertMatchIfAbsent,
   readSubscriptionById,
-} from '../../../src/durable-objects/project-data/project-events-storage-helpers';
+} from '@simple-agent-manager/project-data/internal/do/project-events-storage-helpers';
 import {
   acceptPromptDelivery,
   applyPromptDeliveryResult,
@@ -18,9 +14,13 @@ import {
   expireDuePromptDeliveries,
   markPromptDeliverySubmitting,
   nudgePromptDeliveriesForTarget,
-} from '../../../src/durable-objects/project-data/prompt-delivery';
-import { runPromptDeliveryClaim } from '../../../src/durable-objects/project-data/prompt-delivery-runner';
-import * as sessionState from '../../../src/durable-objects/project-data/session-state';
+} from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
+import { runPromptDeliveryClaim } from '@simple-agent-manager/project-data/internal/do/prompt-delivery-runner';
+import * as sessionState from '@simple-agent-manager/project-data/internal/do/session-state';
+import type { PromptDeliverySource } from '@simple-agent-manager/shared';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { NodeAgentHttpError } from '../../../src/services/node-agent';
 import {
   DefaultVmPromptDeliveryAdapter,

@@ -1,8 +1,8 @@
+import { runProjectDataStorageReliefPreflight } from '@simple-agent-manager/project-data/internal/scheduled/project-data-storage-relief-preflight';
 import Database from 'better-sqlite3';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
-import { runProjectDataStorageReliefPreflight } from '../../../src/scheduled/project-data-storage-relief-preflight';
 import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const PROJECT_ID = 'project-preflight';

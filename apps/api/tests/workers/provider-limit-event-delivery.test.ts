@@ -1,10 +1,8 @@
-import {
-  newProviderLimitWait,
-} from '@simple-agent-manager/scheduler-core';
+import { nudgePromptDeliveriesForTarget } from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
+import { newProviderLimitWait } from '@simple-agent-manager/scheduler-core';
 import { runInDurableObject } from 'cloudflare:test';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { nudgePromptDeliveriesForTarget } from '../../src/durable-objects/project-data/prompt-delivery';
 import * as svc from '../../src/services/project-data';
 import { DefaultVmPromptDeliveryAdapter } from '../../src/services/vm-prompt-delivery-adapter';
 import {

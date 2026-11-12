@@ -32,7 +32,7 @@ import { resolve } from 'node:path';
 const DO_MIGRATION_FILES = [
   resolve(
     import.meta.dirname,
-    '../../apps/api/src/durable-objects/migrations.ts'
+    '../../packages/project-data/src/do/migrations.ts'
   ),
   resolve(
     import.meta.dirname,
@@ -42,7 +42,7 @@ const DO_MIGRATION_FILES = [
   // from migrations.ts); scan it like the ledger itself.
   resolve(
     import.meta.dirname,
-    '../../apps/api/src/durable-objects/project-data/anchored-comments-migration.ts'
+    '../../packages/project-data/src/do/anchored-comments-migration.ts'
   ),
   // setup-session-pool uses inline constructor DDL (pure DO-SQLite) — scan it.
   // NOTE: credential-setup-session is intentionally NOT scanned here: it mixes DO

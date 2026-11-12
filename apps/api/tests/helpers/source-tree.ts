@@ -5,6 +5,17 @@ import { fileURLToPath } from 'node:url';
 /** Absolute path to `apps/api/src`. */
 export const SRC_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../src');
 
+/**
+ * Worker modules extracted into packages but still bundled into this Worker. Enumeration tests
+ * must keep covering their code, or a guard silently stops seeing it after a move.
+ */
+export const WORKER_PACKAGE_SOURCE_ROOTS: readonly string[] = [
+  path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    '../../../../packages/project-data/src'
+  ),
+];
+
 const SKIP_DIRECTORIES = new Set(['node_modules', 'dist', '.wrangler']);
 
 /**
@@ -17,7 +28,7 @@ const SKIP_DIRECTORIES = new Set(['node_modules', 'dist', '.wrangler']);
  * assert a non-trivial expected minimum — see
  * `.claude/rules/02-quality-gates.md` ("a green test count is not a green suite").
  */
-export function collectSourceFiles(root: string = SRC_ROOT): string[] {
+export function collectSourceFiles(root?: string): string[] {
   const files: string[] = [];
 
   const walk = (dir: string): void => {
@@ -32,6 +43,7 @@ export function collectSourceFiles(root: string = SRC_ROOT): string[] {
     }
   };
 
-  walk(root);
+  // No root: the whole Worker, including the packages it bundles.
+  for (const dir of root ? [root] : [SRC_ROOT, ...WORKER_PACKAGE_SOURCE_ROOTS]) walk(dir);
   return files;
 }

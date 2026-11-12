@@ -1,16 +1,16 @@
+import type { ProjectDataArchiveExactReadInput } from '@simple-agent-manager/project-data/internal/archive/contract';
+import {
+  type LogicalTranscriptRequest,
+  readSourceLogicalTranscript,
+} from '@simple-agent-manager/project-data/internal/do/logical-transcript';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import type { Env as ProjectDataEnv } from '@simple-agent-manager/project-data/internal/do/types';
 import Database from 'better-sqlite3';
 import { getTableColumns } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
-import { runMigrations } from '../../../src/durable-objects/migrations';
-import {
-  type LogicalTranscriptRequest,
-  readSourceLogicalTranscript,
-} from '../../../src/durable-objects/project-data/logical-transcript';
-import type { Env as ProjectDataEnv } from '../../../src/durable-objects/project-data/types';
-import type { ProjectDataArchiveExactReadInput } from '../../../src/project-data-archive/contract';
 import { groupTokensIntoMessages } from '../../../src/routes/mcp';
 import { MCP_TOOLS } from '../../../src/routes/mcp/tool-definitions';
 import * as projectHelpers from '../../../src/routes/projects/_helpers';

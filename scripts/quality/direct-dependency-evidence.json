@@ -66,6 +66,14 @@
       "registryUrl": "https://www.npmjs.com/package/@tanstack/query-persist-client-core",
       "necessity": "Persists an allowlisted slice of the TanStack Query cache so a reload paints from cache instead of an empty state. Loaded via dynamic import for signed-in sessions only."
     },
+    "@types/better-sqlite3": {
+      "registryUrl": "https://www.npmjs.com/package/@types/better-sqlite3",
+      "necessity": "Types for the project-data test SQLite engine; same version the API worker tests use."
+    },
+    "@types/node": {
+      "registryUrl": "https://www.npmjs.com/package/@types/node",
+      "necessity": "Types for node:crypto, which project-data's archive hashing uses under the Worker's nodejs_compat; same catalog version as the root."
+    },
     "@typescript-eslint/eslint-plugin": {
       "registryUrl": "https://www.npmjs.com/package/@typescript-eslint/eslint-plugin",
       "necessity": "Hosts supported TypeScript lint rules."
@@ -85,6 +93,10 @@
     "astro": {
       "registryUrl": "https://www.npmjs.com/package/astro",
       "necessity": "Compiles the shared brand Astro components (packages/ui/src/brand) into the installer's static pages and checks them; same pinned version the marketing site already uses."
+    },
+    "better-sqlite3": {
+      "registryUrl": "https://www.npmjs.com/package/better-sqlite3",
+      "necessity": "Real SQLite engine for project-data unit tests of Durable Object SQL; already the API worker's test engine at the same version."
     },
     "drizzle-orm": {
       "registryUrl": "https://www.npmjs.com/package/drizzle-orm",

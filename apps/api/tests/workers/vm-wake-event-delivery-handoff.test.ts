@@ -18,18 +18,18 @@
  * steps write; it plays no part in the race. One case replaces step 4 with the woken agent
  * reading its own subscription through MCP, the consumer that no delivery hold covers.
  */
+import { resolveDurableExecutionConfig } from '@simple-agent-manager/project-data/internal/do/durable-execution-config';
+import {
+  claimDuePromptDeliveries,
+  type PromptDeliveryResult,
+} from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
+import { runPromptDeliveryClaim } from '@simple-agent-manager/project-data/internal/do/prompt-delivery-runner';
 import { buildVmPromptDeliveryCapabilitiesPath } from '@simple-agent-manager/shared';
 import { env, runInDurableObject, SELF } from 'cloudflare:test';
 import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
-import { resolveDurableExecutionConfig } from '../../src/durable-objects/project-data/durable-execution-config';
-import {
-  claimDuePromptDeliveries,
-  type PromptDeliveryResult,
-} from '../../src/durable-objects/project-data/prompt-delivery';
-import { runPromptDeliveryClaim } from '../../src/durable-objects/project-data/prompt-delivery-runner';
 import type { TaskRunner, TaskRunnerState } from '../../src/durable-objects/task-runner';
 import type { Env } from '../../src/env';
 import { encrypt } from '../../src/services/encryption';
