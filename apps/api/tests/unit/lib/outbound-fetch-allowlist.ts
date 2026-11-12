@@ -61,6 +61,14 @@ export const OUTBOUND_FETCH_ALLOWLIST: readonly AllowlistEntry[] = [
       'a hosted repository remote the platform created (Artifacts remote URL); local hosted-git remotes are served in-process',
   },
   {
+    file: 'selfhost/runtime-secrets.ts',
+    fn: 'fetchSecrets',
+    call: 'fetch',
+    controller: 'operator',
+    reason:
+      "self-host key agent: SAM_KEY_AGENT_URL deploy var, refused unless http://127.0.0.1:<port>/v1/secrets (AGENT_URL); the answer must carry the agent's Ed25519 signature over the request nonce",
+  },
+  {
     file: 'services/repo-browse/fetch-http-client.ts',
     fn: 'request',
     call: 'fetchImpl',

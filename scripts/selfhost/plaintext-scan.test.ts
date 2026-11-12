@@ -4,6 +4,7 @@
  * (live/plaintext-purge.live.test.ts); this covers the references that suite cannot easily
  * produce: a queue attachment and a named pointer naming an old plaintext version.
  */
+import { randomBytes } from 'node:crypto';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -22,7 +23,7 @@ import {
 } from './plaintext-scan';
 
 const ROOT = 'gs://fleet/celld';
-const SECRET_VALUE = 'encryption-key-value-0123456789';
+const SECRET_VALUE = randomBytes(16).toString('hex');
 let objects: Map<string, string>;
 let deleted: string[];
 
@@ -49,8 +50,7 @@ function run(command: string, args: string[]): RunResult {
     const lines = [...objects.keys()]
       .filter((k) => k.startsWith(prefix))
       .map(
-        (k) =>
-          `       ${objects.get(k)?.length ?? 0}  2026-11-1${k.length % 9}T10:00:00Z  ${k}`
+        (k) => `       ${objects.get(k)?.length ?? 0}  2026-11-1${k.length % 9}T10:00:00Z  ${k}`
       );
     if (lines.length === 0)
       return { status: 1, stdout: '', stderr: 'ERROR: One or more URLs matched no objects.' };
@@ -91,7 +91,7 @@ beforeEach(() => {
   put('deploy/workspaces-api/v1/worker.js', 'code');
   put(
     'deploy/workspaces-api/v2/manifest.json',
-    manifest({ GITHUB_CLIENT_SECRET: 'gh-0123456789abcdef' })
+    manifest({ GITHUB_CLIENT_SECRET: randomBytes(16).toString('hex') })
   );
   put('deploy/workspaces-api/v2/worker.js', 'code');
   put(

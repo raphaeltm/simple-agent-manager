@@ -4,6 +4,7 @@
  * Worker's real loader). The steps that need a running box (compose, the deploy, celld's reload
  * and the bucket) are recorded fakes, so each failure point can be driven.
  */
+import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -23,7 +24,8 @@ const NO_CLOUD = [
   `SAM_AWS_IMDS_HOST=${CLOSED_HOST}`,
   `SAM_AZURE_IMDS_HOST=${CLOSED_HOST}`,
 ];
-const OPERATOR = 'GITHUB_CLIENT_SECRET=gh-client-secret-0123456789\n';
+/** Generated per run: no secret-looking literal in the source. */
+const OPERATOR = `GITHUB_CLIENT_SECRET=${randomBytes(16).toString('hex')}\n`;
 
 let dir: string;
 let state: string;

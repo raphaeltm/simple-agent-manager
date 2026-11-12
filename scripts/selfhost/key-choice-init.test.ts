@@ -5,6 +5,7 @@
  * with no recorded choice, and a legacy box whose plaintext files get sealed unchanged.
  */
 import { spawnSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
@@ -32,6 +33,8 @@ import {
 vi.setConfig({ testTimeout: CHILD_TEST_TIMEOUT_MS });
 import { ensurePlatformKeys } from './platform-keys.js';
 
+/** Generated per run: no secret-looking literal in the source. */
+const OPERATOR_SECRET = randomBytes(16).toString('hex');
 let dir: string;
 let state: string;
 
@@ -149,7 +152,7 @@ describe('pnpm selfhost:deploy --init (sealed secrets by default)', () => {
     const envFile = writeBox(dir);
     mkdirSync(state, { mode: 0o700 });
     const legacy = ensurePlatformKeys(join(state, 'platform-keys.json')).keys;
-    writeFileSync(join(state, 'secrets.env'), 'GITHUB_CLIENT_SECRET=gh-secret-0123456789\n', {
+    writeFileSync(join(state, 'secrets.env'), `GITHUB_CLIENT_SECRET=${OPERATOR_SECRET}\n`, {
       mode: 0o600,
     });
     const init = await runDeploy(envFile, ['--init']);
@@ -157,7 +160,7 @@ describe('pnpm selfhost:deploy --init (sealed secrets by default)', () => {
     const secrets = await sealedSecrets();
     expect(secrets.ENCRYPTION_KEY).toBe(legacy.ENCRYPTION_KEY);
     expect(secrets.JWT_PRIVATE_KEY).toBe(legacy.JWT_PRIVATE_KEY);
-    expect(secrets.GITHUB_CLIENT_SECRET).toBe('gh-secret-0123456789');
+    expect(secrets.GITHUB_CLIENT_SECRET).toBe(OPERATOR_SECRET);
   });
 
   it('a box whose bundles exist but whose choice record is gone keeps their provider', async () => {

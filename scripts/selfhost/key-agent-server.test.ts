@@ -224,7 +224,7 @@ describe('during a provider switch (previous.env)', () => {
     const ids: string[] = [];
     for (const provider of [oldKey, newKey]) {
       const bundle = await sealSecrets(
-        { ENCRYPTION_KEY: 'v-0123456789', SAM_KEY_AGENT_SIGNING_KEY: signing },
+        { ENCRYPTION_KEY: randomBytes(16).toString('hex'), SAM_KEY_AGENT_SIGNING_KEY: signing },
         provider,
         {
           installationId: INSTALL,

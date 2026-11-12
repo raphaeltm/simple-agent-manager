@@ -127,14 +127,6 @@
       "digests": ["9677b1effbe286eaf5f4a5217b92e8956d54f96d8550b6956ebda0446285d24b"]
     },
     {
-      "classification": "code-identifier",
-      "reason": "Exact previously reviewed non-secret bytes moved by eventing integration; compared with main and existing reviewed digest.",
-      "owner": "security",
-      "reviewedAt": "2026-10-13T06:21:19.000Z",
-      "expiresAt": "2026-11-12T06:21:19.000Z",
-      "digests": ["15613fa56910bf18e53abb4161fda7fda6689b25010a23bd1e30d254ccc8ade5"]
-    },
-    {
       "classification": "synthetic-test-fixture",
       "reason": "Intermediate PR-range bytes only: commit 334588f93 wrapped the non-secret test marker env-github-app-key-canary-91c2 in a fake RSA PEM header in apps/api/tests/unit/routes/setup.test.ts; commit 749f5a945 replaced it with a plain multi-line value, so the bytes are absent from the tree. Exact finding only.",
       "owner": "security",
@@ -206,6 +198,38 @@
       "digests": [
         "3ea24e85ceb78d673fcb02e42f5d44dfabe7a97fa680f090d0fcf1e79c0eff74",
         "e2345bc2c8f9744b9067ec77eebb1d7baa52999404834bfb429fb63579062263"
+      ]
+    },
+    {
+      "classification": "code-identifier",
+      "reason": "Fresh current-tree re-review (self-host sealed secrets, K1): apps/www GitHubAppSetup.astro builds the GH_* secret table from variables (clientSecret, privateKeyB64, webhookSecret); the detector matches variable names, no value. Same bytes as the expired eventing-integration entry it replaces. Exact current finding only.",
+      "owner": "security",
+      "reviewedAt": "2026-11-12T13:30:00.000Z",
+      "expiresAt": "2026-12-12T13:30:00.000Z",
+      "digests": ["15613fa56910bf18e53abb4161fda7fda6689b25010a23bd1e30d254ccc8ade5"]
+    },
+    {
+      "classification": "documented-example",
+      "reason": "Self-host AWS KMS provider (K1): scripts/selfhost/testdata/aws-sigv4/get-vanilla-with-session-token holds AWS's published SigV4 test-suite example session token (awslabs/aws-c-auth, AKIDEXAMPLE credentials), copied byte-exact so the signer is checked against AWS's own vectors. Not a credential. Exact current findings only.",
+      "owner": "security",
+      "reviewedAt": "2026-11-12T13:30:00.000Z",
+      "expiresAt": "2026-12-12T13:30:00.000Z",
+      "digests": [
+        "2f680fbf092613edf6d693f56b9f6935342a3210f0d3bc2f14c5c4a6f68aefb2",
+        "89e46bd75a609cb349a30aa5488628928ae95c50aa7f3c8f1161f1857f539762"
+      ]
+    },
+    {
+      "classification": "synthetic-test-fixture",
+      "reason": "Intermediate PR-range bytes only (K1 sealed secrets branch): synthetic GitHub client secret / encryption key placeholder strings in self-host test files (key-agent-server, key-choice-init, plaintext-scan, sealed-default live test); the tip generates these values with randomBytes at test time. No credential. Exact rule/path/line/bytes only.",
+      "owner": "security",
+      "reviewedAt": "2026-11-12T13:30:00.000Z",
+      "expiresAt": "2026-12-12T13:30:00.000Z",
+      "digests": [
+        "1320c9b7c015e0661f8c8305f88753e9d6796d3fa53bc269e6ee29188c25e0a2",
+        "06fd4fe297f12a45113f00a61e8874af712602cd924bf83de8e08de3dd221544",
+        "2a6ca68208db99987af7a2c24e9958b1cca104e1585580d87ba0bc3722f7784a",
+        "c44802cc0c13d6fe3ed9675276e563633f113943dc740cf65c5059bdbeee7644"
       ]
     }
   ]

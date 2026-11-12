@@ -16,7 +16,7 @@
  * proven, then removes them; the old plaintext version is then listed and purged.
  */
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -261,9 +261,13 @@ describe.skipIf(!hasDocker && !process.env.CI)('sealed secrets by default on cel
     // A box from before sealed secrets: plaintext platform keys and operator secrets.
     mkdirSync(state, { mode: 0o700 });
     ensurePlatformKeys(join(state, 'platform-keys.json'));
-    writeFileSync(join(state, 'secrets.env'), 'GITHUB_CLIENT_SECRET=gh-live-0123456789abcdef\n', {
-      mode: 0o600,
-    });
+    writeFileSync(
+      join(state, 'secrets.env'),
+      `GITHUB_CLIENT_SECRET=${randomBytes(16).toString('hex')}\n`,
+      {
+        mode: 0o600,
+      }
+    );
 
     const build = spawnSync(
       'docker',
