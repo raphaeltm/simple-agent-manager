@@ -119,6 +119,22 @@ PR A design (decided):
 - Audit (item 7): tool-payload cleanup, grouped FTS cleanup, materialization, storage
   measurement, breaker alerts, root search dedupe.
 
+PR A progress (branch `sam/archive-flip-reclaim`, worktree `/workspaces/sam-archive-pra`, commit
+665c77c79, based on PR 1 head 348695314 — rebase onto main after #2700 merges):
+- [x] Flip without deletes (`finalizeSourceDelete`), `reclaimArchiveSourcePage`,
+      `listArchiveSourceReclaimPending`, RPCs `archiveSourceReclaimPage` /
+      `archiveSourceListReclaimPending`, post-flip reclaim + tick-start `reclaimPendingSources`.
+- [x] Comment guard checks the `source_deleted` intent before the row (comments.ts).
+- [x] Copy-back fence: `do_meta` key `archive_copy_back_in_progress:<session>` set by the first
+      restore chunk, cleared by `markSourceCopyBackRestored`; reclaim refuses / listing skips.
+- [x] Tests `tests/workers/project-data-archive-flip-reclaim.test.ts` (4) + updated sharding,
+      compact, throughput suites; test-double failure injection in `support/expected-error-doubles.ts`.
+      Discriminating: comment guard, copy-back fence, pending pass each redden one test.
+- [ ] Remaining audit (item 7): tool-payload cleanup / materialization / grouped-FTS cleanup on
+      leftover rows (convergent by design: messages deleted first), breaker alerts, storage
+      measurement; docs (configuration.md archive section, self-hosting copy-back notes).
+- [ ] PR body, reviews, staging (ask modularization coordinator before deploying).
+
 ### PR B: resumable cursor for every size
 
 - [ ] Deadline threaded into chunk loop/phase boundaries/reclaim; yield releases lease and resets
