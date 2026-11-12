@@ -36,12 +36,16 @@ The real production request stays pending for the user's retest after deployment
 - Claude Code worked because claude-agent-acp puts `_meta.claudeCode.toolName` on every update row,
   and the API compact path (`row-schemas/messages.ts:cardPayloadMatcher`, which already lists
   `request_secret`) keeps `secretRequest.id` as rawOutput.
-- The API keeps the row `content` column in compact mode, so the web-only fix also recovers
-  already-stored production rows after a reload. No VM-agent change or rollout is needed.
+- The API keeps the row `content` column in compact mode, so the web converter fix also recovers
+  already-stored production rows after a reload. No VM-agent change or rollout is needed. The
+  final scope is shared (`TYPED_CHAT_CARD_TOOLS`), web (converter and registry derive from it) and
+  API (`CARD_PAYLOAD_MATCHERS` typed against it for compile-time parity); the API change is a
+  parity refactor, not part of the user-visible fix.
 - Two lists of typed-card tools (registry predicates and `isTypedCardTool`) is what let a new card
   ship registered in one and missing from the other. This is the third Codex card incident
-  (2026-08-03 twice for library cards). There is no standing guidance on cross-harness card
-  rendering.
+  (2026-08-03 twice for library cards). Project knowledge (`ShippingVerification`) already said
+  runtime tests are not harness coverage, but no repository rule required one shared card list or
+  a cross-harness test; this PR adds `apps/web/.claude/rules/82-typed-cards-every-harness.md`.
 - PR #2688's VM and Instant staging proof used Claude only. VM/Instant are runtimes, not harnesses.
 
 ## Implementation checklist
