@@ -482,4 +482,25 @@ describe('callback provider hold owner force resume', () => {
       restoreClock?.();
     }
   });
+  it('retains the owner retry if recovery lookup throws before taking a claim', async () => {
+    d1.exec(
+      "UPDATE tasks SET status='sleeping',workspace_id='workspace-1'; UPDATE session_snapshots SET recovery_status=NULL,recovery_task_id=NULL,recovery_attempt_id=NULL"
+    );
+    const original = task().provider_limit_wait_json;
+    const originalClaim = claim();
+    const prepare = env.DATABASE.prepare.bind(env.DATABASE);
+    boundary.selected.mockImplementationOnce(async () => {
+      env.DATABASE.prepare = (sql: string) => {
+        if (sql.includes('from "session_snapshots"')) throw new Error('transient context lookup');
+        return prepare(sql);
+      };
+      return 'cc_credentials:account-1';
+    });
+    const response = await resume();
+    expect(response.status, await response.clone().text()).toBe(409);
+    expect(task().provider_limit_wait_json).toBe(original);
+    expect(task().admission_state).toBe('provider_limit_waiting');
+    expect(claim()).toEqual(originalClaim);
+    expect(boundary.start).not.toHaveBeenCalled();
+  });
 });

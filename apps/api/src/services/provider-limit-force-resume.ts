@@ -12,7 +12,7 @@ import { credentialLimitReferenceKey } from './credential-limit-events/values';
 import * as projectData from './project-data';
 import type { ProviderLimitWait } from './provider-limit-policy';
 import { requireSessionWriter } from './session-access';
-import { ensureSessionRecovery } from './session-recovery';
+import { ensureSessionRecovery, type SessionRecoveryResult } from './session-recovery';
 import { nudgeTaskRunnerDO } from './task-runner-do';
 
 export function canResumeProviderLimitTaskAnyway(
@@ -199,12 +199,21 @@ export async function forceResumeSavedProviderLimitTask(
       throw errors.conflict('The existing recovery runner is unavailable; try again shortly');
     }
   } else {
-    const result = await ensureSessionRecovery(env, task.projectId, task.chatSessionId, {
-      taskId: task.id,
-      projectId: task.projectId,
-      chatSessionId: task.chatSessionId,
-      requiredProjectMemberId: ownerUserId,
-    });
+    let result: SessionRecoveryResult;
+    try {
+      result = await ensureSessionRecovery(env, task.projectId, task.chatSessionId, {
+        taskId: task.id,
+        projectId: task.projectId,
+        chatSessionId: task.chatSessionId,
+        requiredProjectMemberId: ownerUserId,
+      });
+    } catch {
+      // A lookup can fail before recovery acquires any claim. Restore only if
+      // the original claim is still ours (or this wake definitively failed);
+      // an advanced/ambiguous claim keeps its accepted override.
+      await restoreHold();
+      throw errors.conflict('Recovery did not confirm; refresh and try again shortly');
+    }
     if (result.status !== 'waking') {
       await restoreHold();
       throw errors.conflict(`Unable to resume the saved task: ${result.reason}`);
