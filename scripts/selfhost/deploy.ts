@@ -28,7 +28,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
@@ -38,7 +38,6 @@ import type { WranglerToml } from '../deploy/types.js';
 import {
   assertPresignCredentialIsScoped,
   celldChildEnv,
-  gatewayEnvAction,
   presignVars,
   redactSecrets,
   renderGatewayEnv,
@@ -51,7 +50,14 @@ import {
   buildCelldConfig,
   type CelldWranglerConfig,
 } from './celld-config.js';
-import { ASSETS_DIR, prepareCelldProject, SOURCE_LINK, writeCelldConfig } from './celld-project.js';
+import {
+  ASSETS_DIR,
+  prepareCelldProject,
+  RUNTIME_SECRETS_MAIN,
+  SOURCE_LINK,
+  writeCelldConfig,
+} from './celld-project.js';
+import { redact, syncGatewayEnv } from './deploy-steps.js';
 import {
   assertCelldTaggedImages,
   ensureDockerProxyDir,
@@ -59,12 +65,19 @@ import {
   prepareDockerProxyPolicy,
 } from './docker-proxy-policy.js';
 import { writeFenceFiles } from './fence-state.js';
-import { inboundMailWorkerVars } from './inbound-mail-settings.js';
 import {
   assertContainerEngineReady,
   type EngineProbe,
   guidedLoginSettings,
 } from './guided-login.js';
+import { inboundMailWorkerVars } from './inbound-mail-settings.js';
+import {
+  agentVerifyKey,
+  assertKeyAgentUp,
+  celldDeployConfig,
+  keyAgentUrl,
+  resolveDeployKeys,
+} from './key-service.js';
 import {
   ensureMailCollectorPassword,
   MAIL_COLLECTOR_PASSWORD_FILE,
@@ -73,13 +86,11 @@ import {
   smtpWorkerVars,
   writeMailCollectorFiles,
 } from './mail-settings.js';
-import { ensurePlatformKeys } from './platform-keys.js';
 import {
   assertPrivateFile,
   ensurePrivateDir,
   parseDotenv,
   readSecretsFile,
-  writePrivateFile,
 } from './secret-files.js';
 import {
   buildVmAgentBinaries,
@@ -249,35 +260,6 @@ async function waitForHealth(port: string, baseDomain: string): Promise<void> {
   throw new Error(`API Worker did not become healthy on 127.0.0.1:${port}: ${last}`);
 }
 
-function redact(config: CelldWranglerConfig, secretNames: Set<string>): CelldWranglerConfig {
-  const vars = Object.fromEntries(
-    Object.entries(config.vars).map(([key, value]) => [
-      key,
-      secretNames.has(key) ? '<redacted>' : value,
-    ])
-  );
-  return { ...config, vars };
-}
-
-/**
- * Write gateway.env (frps and Caddy read it via env_file) when it changed. Outside `--init` a
- * change stops the deploy before the Worker is updated: frps reads the file only when it starts,
- * so the Worker must not assume a heartbeat timeout or range the running frps is not enforcing.
- */
-function syncGatewayEnv(path: string, content: string, init: boolean): void {
-  const existing = existsSync(path) ? readFileSync(path, 'utf8') : null;
-  const action = gatewayEnvAction(existing, content, init);
-  if (action === 'unchanged') return;
-  writePrivateFile(path, content);
-  log(`wrote ${path}; (re)start the stack: docker compose up -d`);
-  if (action === 'write-then-restart') {
-    throw new Error(
-      `${path} changed. Restart frps and Caddy so they run it (docker compose up -d), ` +
-        'then run pnpm selfhost:deploy again; the Worker is not updated before they agree.'
-    );
-  }
-}
-
 async function main(): Promise<void> {
   const { values } = parseArgs({
     options: {
@@ -306,9 +288,9 @@ async function main(): Promise<void> {
   if (!baseDomain) throw new Error(`${envFile}: SAM_DOMAIN is required`);
   if (!box.CELLD_BUCKET) throw new Error(`${envFile}: CELLD_BUCKET is required`);
 
-  const { keys, generated } = ensurePlatformKeys(join(stateDir, 'platform-keys.json'));
-  if (generated.length > 0)
-    log(`generated platform keys: ${generated.join(', ')} (back up ${stateDir})`);
+  // Sealed secrets (key-service.ts): the platform keys and secrets.env go into a bundle only the
+  // key agent can open, and no secret is passed to celld. Off: every secret is a Worker var.
+  const { keyService, keys, sealed } = await resolveDeployKeys({ box, stateDir, secretsPath, log });
   // docker compose passes this file to frps and Caddy (env_file); rewritten only on change.
   // The port range and heartbeat timeout go to the Worker from the same resolved values
   // (below). Resolution fails the deploy on a range overlapping a box listener or too large.
@@ -344,16 +326,22 @@ async function main(): Promise<void> {
   const operatorSecrets = readSecretsFile(secretsPath);
   // VM_AGENT_REQUIRED_VERSION must name the release this deploy published (or stay unset).
   assertOperatorSecretsAllowed(operatorSecrets, secretsPath);
-  assertPresignCredentialIsScoped(box, operatorSecrets);
+  assertPresignCredentialIsScoped(box, sealed ? sealed.secrets : operatorSecrets);
   const { SAM_INSTALLATION_ID, ...platformSecrets } = keys;
-  const secrets: Record<string, string> = { ...platformSecrets, ...operatorSecrets };
+  // What the Worker will run with. With sealed secrets these reach it from the key agent and
+  // are only checked here; otherwise they are rendered into `vars` below.
+  const secrets: Record<string, string> = sealed
+    ? Object.fromEntries(
+        Object.entries(sealed.secrets).filter(([name]) => name !== 'SAM_INSTALLATION_ID')
+      )
+    : { ...platformSecrets, ...operatorSecrets };
   knownSecrets = Object.values(secrets);
 
-  const smtpVars = smtpWorkerVars(box, operatorSecrets, baseDomain);
+  const smtpVars = smtpWorkerVars(box, secrets, baseDomain);
   const source = TOML.parse(readFileSync(join(API_DIR, 'wrangler.toml'), 'utf8')) as WranglerToml;
   const guidedLogin = guidedLoginSettings(box);
   const plan = buildCelldConfig(source, {
-    main: `${SOURCE_LINK}/index.ts`,
+    main: sealed ? RUNTIME_SECRETS_MAIN : `${SOURCE_LINK}/index.ts`,
     baseDomain,
     assetsDirectory: ASSETS_DIR,
     guidedLogin,
@@ -363,6 +351,13 @@ async function main(): Promise<void> {
       ...tunnelWorkerVars(tunnelSettings),
       ...smtpVars,
       ...inboundMailWorkerVars(box, smtpVars),
+      ...(sealed && keyService
+        ? {
+            SAM_KEY_AGENT_URL: keyAgentUrl(keyService),
+            SAM_SECRET_BUNDLE_ID: sealed.bundleId,
+            SAM_KEY_AGENT_VERIFY_KEY: agentVerifyKey(sealed.secrets),
+          }
+        : {}),
     },
   });
   const vmAgentRelease = values['skip-vm-agent'] ? null : resolveVmAgentRelease(REPO_ROOT);
@@ -370,10 +365,7 @@ async function main(): Promise<void> {
   // Needs the R2 binding's final bucket name, so it is applied after translation.
   Object.assign(plan.config.vars, presignVars(box, plan.config.vars.R2_BUCKET_NAME ?? ''));
   for (const line of plan.report) log(line);
-  const withSecrets: CelldWranglerConfig = {
-    ...plan.config,
-    vars: { ...plan.config.vars, ...secrets },
-  };
+  const withSecrets: CelldWranglerConfig = celldDeployConfig(plan.config, secrets, Boolean(sealed));
 
   if (values['dry-run']) {
     console.log(JSON.stringify(redact(withSecrets, new Set(Object.keys(secrets))), null, 2));
@@ -389,7 +381,13 @@ async function main(): Promise<void> {
   }
   const webDist = values['web-dist'] ? resolve(values['web-dist']) : buildWeb(baseDomain);
   buildApiDependencies();
-  prepareCelldProject({ apiDir: API_DIR, projectDir, plan, webDist });
+  prepareCelldProject({
+    apiDir: API_DIR,
+    projectDir,
+    plan,
+    webDist,
+    runtimeSecrets: Boolean(sealed),
+  });
   // celld reaches Docker only through the socket proxy, which allows exactly these images.
   const proxyPolicy = guidedLogin
     ? prepareDockerProxyPolicy({ docker: hostDocker, stateDir, projectDir, settings: guidedLogin })
@@ -448,6 +446,8 @@ async function main(): Promise<void> {
     process.exit(130);
   };
   for (const signal of signals) process.once(signal, scrub);
+  // A Worker without its key agent answers 503 to everything; say why before deploying.
+  if (keyService) await assertKeyAgentUp(keyService.port);
   writeCelldConfig(projectDir, withSecrets);
   try {
     log(`celld deploy ${plan.config.name}`);

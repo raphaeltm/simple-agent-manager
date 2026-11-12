@@ -97,20 +97,35 @@ export interface PlatformKeysResult {
  */
 export function ensurePlatformKeys(path: string): PlatformKeysResult {
   const existing = existsSync(path) ? readPrivateJson(path) : {};
-  const keys: Record<string, string> = { ...existing };
+  const result = completePlatformKeys(existing, path);
+  // Any other value already in the file is kept, as before.
+  const keys = { ...existing, ...result.keys } as Record<PlatformKeyName, string>;
+  if (result.generated.length > 0) writePrivateFile(path, `${JSON.stringify(keys, null, 2)}\n`);
+  return { keys, generated: result.generated };
+}
+
+/**
+ * `existing` with every missing platform key generated, without writing anything. Used directly
+ * by the sealed-secrets path (key-service.ts), where the keys live in the bundle, not a file.
+ */
+export function completePlatformKeys(
+  existing: Readonly<Record<string, string>>,
+  source = 'the sealed secrets'
+): PlatformKeysResult {
+  const keys: Record<string, string> = {};
+  for (const name of PLATFORM_KEY_NAMES) if (existing[name]) keys[name] = existing[name];
   const generated: PlatformKeyName[] = [];
   for (const group of GENERATORS) {
     const present = group.names.filter((name) => keys[name]);
     if (present.length === group.names.length) continue;
     if (present.length > 0) {
       throw new Error(
-        `${path} has ${present.join(', ')} but not ${group.names.filter((n) => !keys[n]).join(', ')}; ` +
+        `${source} has ${present.join(', ')} but not ${group.names.filter((n) => !keys[n]).join(', ')}; ` +
           'restore the missing value from a backup instead of regenerating the pair'
       );
     }
     Object.assign(keys, group.generate());
     generated.push(...group.names);
   }
-  if (generated.length > 0) writePrivateFile(path, `${JSON.stringify(keys, null, 2)}\n`);
   return { keys: keys as Record<PlatformKeyName, string>, generated };
 }

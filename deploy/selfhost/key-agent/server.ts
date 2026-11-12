@@ -1,0 +1,271 @@
+/**
+ * Box-local key agent. Holds the key provider (and its credential, if any), opens sealed
+ * bundles, and hands the secrets to the API Worker on celld. Nothing else talks to it.
+ *
+ * Channel (who may ask):
+ * - Listens on 127.0.0.1 only (host network; containers in their own network namespace cannot
+ *   reach it).
+ * - The client socket must belong to an allowed uid (celld's, 7101), checked in /proc/net/tcp
+ *   (peer.ts). Root and every other local user are refused, whatever the firewall says.
+ * - The request shape is fixed: `POST /v1/secrets`, `content-type: application/json`, and the
+ *   header `x-sam-key-agent: 1`. No URL a user or admin can configure in SAM produces that
+ *   request, so the Worker cannot be steered into fetching it for someone (SSRF).
+ *
+ * Cache: an opened bundle stays in memory for SAM_KEY_AGENT_CACHE_SECONDS. After that the next
+ * request opens it again. If the key service is merely unreachable the stale copy is served (an
+ * outage does not take SAM down); if it refuses (`denied`) the copy is dropped, so revoking the
+ * box's access stops new Worker isolates within that window.
+ *
+ * Run with Node's type stripping: `node server.ts`.
+ */
+import { createPrivateKey, type KeyObject, sign } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { join } from 'node:path';
+
+import { BUNDLE_ID, openBundle, parseBundle, type Secrets } from './bundle.ts';
+import { loopbackPeerUid } from './peer.ts';
+import { type KeyProvider, KeyProviderError } from './provider.ts';
+import { createKeyProvider } from './providers.ts';
+
+export const DEFAULT_KEY_AGENT_PORT = 7190;
+export const DEFAULT_CACHE_SECONDS = 300;
+const MAX_REQUEST_BYTES = 1024;
+/** The bundle entry holding the agent's Ed25519 signing key (PKCS#8 DER, base64); never served. */
+export const SIGNING_KEY_NAME = 'SAM_KEY_AGENT_SIGNING_KEY';
+export const SIGNATURE_HEADER = 'x-sam-key-agent-signature';
+const NONCE = /^[0-9a-f]{32}$/;
+
+interface Opened {
+  installationId: string;
+  secrets: Secrets;
+  signingKey: KeyObject;
+}
+
+/** Splits the signing key off the secrets; a bundle without one is refused (fail closed). */
+function toOpened(installationId: string, all: Secrets): Opened {
+  const { [SIGNING_KEY_NAME]: der, ...secrets } = all;
+  if (!der) throw new KeyProviderError('invalid', 'bundle has no agent signing key');
+  let signingKey: KeyObject;
+  try {
+    signingKey = createPrivateKey({
+      key: Buffer.from(der, 'base64'),
+      format: 'der',
+      type: 'pkcs8',
+    });
+  } catch {
+    throw new KeyProviderError('invalid', 'bundle agent signing key is malformed');
+  }
+  if (signingKey.asymmetricKeyType !== 'ed25519') {
+    throw new KeyProviderError('invalid', 'bundle agent signing key is not Ed25519');
+  }
+  return { installationId, secrets, signingKey };
+}
+
+export interface AgentOptions {
+  provider: KeyProvider;
+  bundleDir: string;
+  allowedUids: ReadonlySet<number>;
+  cacheMs: number;
+  /** Peer lookup; tests replace it, production reads /proc/net/tcp. */
+  peerUid?: (request: IncomingMessage) => number | null;
+  now?: () => number;
+  log?: (event: Record<string, unknown>) => void;
+}
+
+function defaultPeerUid(request: IncomingMessage): number | null {
+  const socket = request.socket;
+  if (!socket.remoteAddress || !socket.remotePort || !socket.localAddress || !socket.localPort) {
+    return null;
+  }
+  return loopbackPeerUid({
+    clientAddress: socket.remoteAddress,
+    clientPort: socket.remotePort,
+    serverAddress: socket.localAddress,
+    serverPort: socket.localPort,
+  });
+}
+
+function reply(response: ServerResponse, status: number, body: unknown): void {
+  const text = JSON.stringify(body);
+  response.writeHead(status, {
+    'content-type': 'application/json',
+    'cache-control': 'no-store',
+    'content-length': Buffer.byteLength(text),
+  });
+  response.end(text);
+}
+
+async function readBody(request: IncomingMessage): Promise<string | null> {
+  let size = 0;
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) {
+    size += (chunk as Buffer).length;
+    if (size > MAX_REQUEST_BYTES) return null;
+    chunks.push(chunk as Buffer);
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+export function createKeyAgent(options: AgentOptions): Server {
+  const now = options.now ?? Date.now;
+  const log = options.log ?? ((event) => console.log(JSON.stringify(event)));
+  const peerUid = options.peerUid ?? defaultPeerUid;
+  const cache = new Map<string, { opened: Opened; openedAt: number }>();
+  const opening = new Map<string, Promise<Opened>>();
+
+  async function open(bundleId: string): Promise<Opened> {
+    const cached = cache.get(bundleId);
+    if (cached && now() - cached.openedAt < options.cacheMs) return cached.opened;
+    const pending = opening.get(bundleId);
+    if (pending) return await pending;
+    const attempt = (async () => {
+      let text: string;
+      try {
+        text = readFileSync(join(options.bundleDir, `${bundleId}.json`), 'utf8');
+      } catch {
+        throw new KeyProviderError('config', 'bundle_not_found');
+      }
+      const started = now();
+      try {
+        const bundle = parseBundle(text);
+        const opened = toOpened(bundle.installationId, await openBundle(bundle, options.provider));
+        cache.set(bundleId, { opened, openedAt: now() });
+        log({
+          event: 'key_agent.bundle_opened',
+          bundleId,
+          provider: options.provider.name,
+          ms: now() - started,
+        });
+        return opened;
+      } catch (error) {
+        if (cached && error instanceof KeyProviderError && error.kind === 'unavailable') {
+          log({ event: 'key_agent.serving_stale', bundleId, reason: error.message });
+          return cached.opened;
+        }
+        cache.delete(bundleId);
+        throw error;
+      }
+    })();
+    opening.set(bundleId, attempt);
+    try {
+      return await attempt;
+    } finally {
+      opening.delete(bundleId);
+    }
+  }
+
+  async function handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    const url = request.url ?? '';
+    if (request.method === 'GET' && url === '/healthz') {
+      reply(response, 200, { ok: true });
+      return;
+    }
+    if (url !== '/v1/secrets') {
+      reply(response, 404, { error: 'not_found' });
+      return;
+    }
+    const uid = peerUid(request);
+    if (uid === null || !options.allowedUids.has(uid)) {
+      log({ event: 'key_agent.peer_refused', uid, action: 'rejected' });
+      reply(response, 403, { error: 'peer_refused' });
+      return;
+    }
+    if (
+      request.method !== 'POST' ||
+      request.headers['x-sam-key-agent'] !== '1' ||
+      !(request.headers['content-type'] ?? '').startsWith('application/json')
+    ) {
+      reply(response, 400, { error: 'bad_request' });
+      return;
+    }
+    const body = await readBody(request);
+    let fields: Record<string, unknown> = {};
+    try {
+      const parsed: unknown = body === null ? undefined : (JSON.parse(body) as unknown);
+      if (typeof parsed === 'object' && parsed !== null) fields = parsed as Record<string, unknown>;
+    } catch {
+      fields = {};
+    }
+    const { bundleId, nonce, installationId } = fields;
+    if (
+      typeof bundleId !== 'string' ||
+      !BUNDLE_ID.test(bundleId) ||
+      typeof nonce !== 'string' ||
+      !NONCE.test(nonce) ||
+      typeof installationId !== 'string'
+    ) {
+      reply(response, 400, { error: 'bad_request' });
+      return;
+    }
+    try {
+      const opened = await open(bundleId);
+      // A bundle from another install (same key service, copied file) is not this Worker's.
+      if (opened.installationId !== installationId) {
+        log({ event: 'key_agent.installation_mismatch', bundleId, action: 'rejected' });
+        reply(response, 409, { error: 'installation_mismatch' });
+        return;
+      }
+      // Signed over the exact body, which carries the caller's nonce: a process that took this
+      // port while the agent was down cannot produce it without opening the bundle itself.
+      const text = JSON.stringify({ bundleId, nonce, secrets: opened.secrets });
+      response.writeHead(200, {
+        'content-type': 'application/json',
+        'cache-control': 'no-store',
+        'content-length': Buffer.byteLength(text),
+        [SIGNATURE_HEADER]: sign(null, Buffer.from(text, 'utf8'), opened.signingKey).toString(
+          'base64'
+        ),
+      });
+      response.end(text);
+    } catch (error) {
+      const kind = error instanceof KeyProviderError ? error.kind : 'unavailable';
+      const code =
+        error instanceof KeyProviderError && error.message === 'bundle_not_found'
+          ? 'bundle_not_found'
+          : `key_service_${kind}`;
+      log({
+        event: 'key_agent.open_failed',
+        bundleId,
+        code,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+      reply(response, code === 'bundle_not_found' ? 404 : 503, { error: code });
+    }
+  }
+
+  return createServer((request, response) => {
+    handle(request, response).catch(() => {
+      if (!response.headersSent) reply(response, 500, { error: 'internal' });
+      else response.destroy();
+    });
+  });
+}
+
+function parseUids(raw: string | undefined): Set<number> {
+  const uids = (raw ?? '7101')
+    .split(',')
+    .map((part) => Number(part.trim()))
+    .filter((uid) => Number.isInteger(uid) && uid > 0);
+  if (uids.length === 0) throw new Error('SAM_KEY_AGENT_ALLOWED_UIDS names no uid');
+  return new Set(uids);
+}
+
+function main(): void {
+  const env = process.env;
+  const port = Number(env.SAM_KEY_AGENT_PORT ?? DEFAULT_KEY_AGENT_PORT);
+  const cacheSeconds = Number(env.SAM_KEY_AGENT_CACHE_SECONDS ?? DEFAULT_CACHE_SECONDS);
+  const server = createKeyAgent({
+    provider: createKeyProvider(env),
+    bundleDir: env.SAM_KEY_AGENT_BUNDLE_DIR ?? '/etc/sam/key-agent/bundles',
+    allowedUids: parseUids(env.SAM_KEY_AGENT_ALLOWED_UIDS),
+    cacheMs: Math.max(0, cacheSeconds) * 1000,
+  });
+  server.listen(port, '127.0.0.1', () => {
+    console.log(
+      JSON.stringify({ event: 'key_agent.listening', port, provider: env.SAM_KEY_PROVIDER })
+    );
+  });
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) main();

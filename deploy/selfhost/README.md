@@ -55,7 +55,7 @@ Worker secrets that are yours to supply (GitHub App, OAuth clients) go in
 `deploy/selfhost/.state/secrets.env` (`NAME=value`, mode 600). Platform keys are generated into
 `.state/platform-keys.json` and never regenerated: back up `.state/` and the bucket.
 
-celld has no secrets store for real nodes. `pnpm selfhost:deploy` renders secrets into the
+celld has no secrets store for real nodes. Unless sealed secrets are on (below), `pnpm selfhost:deploy` renders secrets into the
 Worker's `vars` for `celld deploy` only and leaves a secrets-free `wrangler.json` behind, but
 celld keeps every deployed version's vars in plaintext under `deploy/` in the fleet bucket. The
 bucket credential is therefore the root secret of the install.
@@ -74,6 +74,28 @@ bucket and key prefix. The bundled store has no public `s3.` route yet, so leave
 Plain Worker var overrides (for example turning one of the self-host switches back on) also go in
 `secrets.env`; it is merged last. `--dry-run` prints the rendered config with those values
 redacted.
+
+### Sealed secrets (opt-in, spike)
+
+With `SAM_KEY_PROVIDER` set in `.env` (and `key-agent` in `COMPOSE_PROFILES`, and
+`SAM_KEY_AGENT_UID` set to the uid that owns `.state/`), the deploy passes no secret to celld.
+It seals the platform keys and `secrets.env` into `.state/key-agent/bundles/<id>.json` (AES-256-GCM
+under a random data key; the data key is wrapped by the key service), and the Worker gets them at
+runtime from the `key-agent` service on `127.0.0.1:SAM_KEY_AGENT_PORT` (7190), which answers only
+celld's uid. The deployed vars carry only `SAM_KEY_AGENT_URL` and the bundle id, so the bucket's
+`deploy/` manifests and the celld-data cache hold no secret. If the agent is down the API answers
+503 `SECRETS_UNAVAILABLE` (`docker compose ps key-agent`).
+
+Providers: `file` (a 32-byte key in `.state/key-agent/kek`, the baseline for a box with no key
+service), `transit` (Vault or OpenBao: `SAM_TRANSIT_ADDR`, `SAM_TRANSIT_KEY`, AppRole
+`SAM_TRANSIT_ROLE_ID` with the secret id in `.state/key-agent/credentials/transit-secret-id`),
+`gcp-kms` (`SAM_GCP_KMS_KEY`, the VM's service account), `azure-kv` (`SAM_AZURE_KEY_VAULT_URL`,
+`SAM_AZURE_KEY_NAME`, the VM's managed identity). Backups leave out `.state/key-agent/kek` and
+`.state/key-agent/credentials/`: keep the file key somewhere else, offline. Once a deploy has run
+from the bundle, `platform-keys.json` and `secrets.env` can be deleted; later edits go in a fresh
+`secrets.env` and are merged into a new bundle. A `platform-keys.json` that disagrees with the
+bundle stops the deploy. Code: `scripts/selfhost/key-service.ts`, `deploy/selfhost/key-agent/`,
+`apps/api/src/selfhost/runtime-secrets.ts`.
 
 ## Email sign-in
 
