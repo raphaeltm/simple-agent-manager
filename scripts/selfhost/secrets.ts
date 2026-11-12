@@ -4,6 +4,9 @@
  *   status                    which key provider seals the Worker secrets, why, and the bundles
  *   key-file                  where the file key is, its fingerprint and mode
  *   verify-key-copy <path>    whether a copy of the file key matches the box's (exit 1 if not)
+ *   plaintext [--backups DIR] [--purge --confirm <CELLD_BUCKET>]
+ *                             old deploy versions and backups holding plaintext secrets, what to
+ *                             rotate; with --purge, delete the versions celld no longer reads
  *
  * Every command prints names, paths, fingerprints and ids only: never a key or a secret value.
  */
@@ -11,7 +14,14 @@ import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
-import { SELFHOST_DIR } from './backup-cli';
+import { loadBox, SELFHOST_DIR } from './backup-cli';
+import {
+  formatPlaintextReport,
+  knownSecrets,
+  purgeVersions,
+  scanBackups,
+  scanDeployVersions,
+} from './plaintext-scan';
 import { assertPrivateFile, parseDotenv } from './secret-files';
 import { describeKeyFile, verifyKeyCopy } from './secrets-keyfile';
 import { describeKeyStatus } from './secrets-status';
@@ -21,6 +31,9 @@ const { values, positionals } = parseArgs({
   options: {
     'box-env': { type: 'string' },
     'state-dir': { type: 'string' },
+    backups: { type: 'string' },
+    purge: { type: 'boolean', default: false },
+    confirm: { type: 'string' },
   },
 });
 const envFile = resolve(values['box-env'] ?? join(SELFHOST_DIR, '.env'));
@@ -51,9 +64,30 @@ try {
       if (!result.ok) process.exitCode = 1;
       break;
     }
+    case 'plaintext': {
+      const ctx = loadBox(envFile, values['state-dir']);
+      const secrets = await knownSecrets(box, stateDir);
+      const backupsRoot = resolve(
+        process.env.INIT_CWD ?? process.cwd(),
+        values.backups ?? join(SELFHOST_DIR, 'backups')
+      );
+      if (values.purge) {
+        const result = purgeVersions(ctx, secrets, values.confirm);
+        for (const prefix of result.deleted) console.log(`deleted ${prefix}`);
+        for (const line of result.skipped) console.log(`kept ${line}`);
+      }
+      const lines = formatPlaintextReport(
+        box.CELLD_BUCKET ?? '',
+        scanDeployVersions(ctx, secrets),
+        scanBackups(backupsRoot, secrets),
+        backupsRoot
+      );
+      for (const line of lines) console.log(line);
+      break;
+    }
     default:
       throw new Error(
-        'usage: pnpm selfhost:secrets status|key-file|verify-key-copy <path> [--box-env PATH] [--state-dir DIR]'
+        'usage: pnpm selfhost:secrets status|key-file|verify-key-copy <path>|plaintext [--box-env PATH] [--state-dir DIR]'
       );
   }
 } catch (error) {
