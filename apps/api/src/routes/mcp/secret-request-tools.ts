@@ -98,14 +98,19 @@ export async function handleListRuntimeEnv(
   tokenData: McpTokenData,
   env: Env
 ): Promise<JsonRpcResponse> {
-  if (!tokenData.workspaceId) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'A running workspace is required');
+  // Same precondition as exec_with_secrets: list only names this token could actually use.
+  if (!tokenData.workspaceId || !tokenData.agentSessionId) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'A running workspace and agent session are required'
+    );
   }
   try {
     const db = drizzle(env.DATABASE, { schema });
     const listing = await listEffectiveRuntimeEnv(
       db,
-      { workspaceId: tokenData.workspaceId, agentSessionId: tokenData.agentSessionId ?? null },
+      { workspaceId: tokenData.workspaceId, agentSessionId: tokenData.agentSessionId },
       { userId: tokenData.userId, projectId: tokenData.projectId }
     );
     return textResult(requestId, {

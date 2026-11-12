@@ -1059,6 +1059,21 @@ describe('review hardening (CodeRabbit on 52c64358)', () => {
     expect(recipients).toEqual(['admin2', 'maint', 'owner']);
   });
 
+  it('list_runtime_env refuses a token without an agent session, as exec_with_secrets does', async () => {
+    await storeToken('tok-no-session', {
+      taskId: 'task-1',
+      projectId: P1,
+      userId: 'owner',
+      workspaceId: 'ws-1',
+      chatSessionId: 'chat-1',
+    });
+    const refused = await callMcpTool(mcp, env, 'tok-no-session', 'list_runtime_env', {});
+    expect(JSON.stringify(refused)).toMatch(/agent session are required/);
+    // Control: the full token still lists.
+    const listed = await callMcpTool(mcp, env, 'tok-1', 'list_runtime_env', {});
+    expect(JSON.stringify(listed)).toMatch(/entries/);
+  });
+
   it('an owner’s request notifies only the owner (control)', async () => {
     edges.sendNotification.mockResolvedValue({ id: 'n-1' });
     await createRequest();
