@@ -6,6 +6,15 @@ import { useLoginProviders } from '../hooks/useLoginProviders';
 import { useQueryScope } from '../hooks/useQueryScope';
 import { connectProvider, type LinkableProvider, listConnectedProviders } from '../lib/auth';
 
+/** One cache entry for "which providers this account has connected", shared by every reader. */
+export function connectedProvidersQueryOptions(queryScope: string) {
+  return {
+    queryKey: ['auth', queryScope, 'account', 'connected-providers'] as const,
+    queryFn: listConnectedProviders,
+    enabled: Boolean(queryScope),
+  };
+}
+
 const PROVIDER_LABELS: Record<LinkableProvider, string> = {
   github: 'GitHub',
   gitlab: 'GitLab',
@@ -23,11 +32,7 @@ export function ConnectedAccountsSection() {
   const { providers } = useLoginProviders();
   const [connectError, setConnectError] = useState<string | null>(null);
   const [connecting, setConnecting] = useState<LinkableProvider | null>(null);
-  const connected = useQuery({
-    queryKey: ['auth', queryScope, 'account', 'connected-providers'],
-    queryFn: listConnectedProviders,
-    enabled: Boolean(queryScope),
-  });
+  const connected = useQuery(connectedProvidersQueryOptions(queryScope));
 
   const offered = (['github', 'gitlab'] as const).filter((provider) => providers?.[provider]);
   if (offered.length === 0) return null;

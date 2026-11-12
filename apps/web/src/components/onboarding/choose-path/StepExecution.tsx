@@ -20,6 +20,7 @@ import {
 } from '../../../lib/query-options';
 import { CloudProviderConnectFlow } from '../../CloudProviderConnectFlow';
 import { AgentStep } from './AgentStep';
+import { GitHubConnectGate } from './GitHubConnectGate';
 import { FieldLabel, SamSays, StepRail, WELL_INPUT_CLASS } from './OnboardingParts';
 import type { GeneratedStep } from './path-generator';
 import { ProjectSelector } from './ProjectSelector';
@@ -276,23 +277,25 @@ export function StepExecution({
       {step.id === 'cloud' && <CloudProviderConnectFlow onConnected={() => next()} />}
 
       {step.id === 'github' && (
-        <div>
-          <Button
-            variant="accent"
-            size="lg"
-            className="w-full sm:w-auto"
-            onClick={() => void installGitHub()}
-            loading={loading}
-          >
-            <Github className="h-4 w-4" aria-hidden="true" />
-            Install the GitHub app
-          </Button>
-          {loading && (
-            <p role="status" className="mb-0 mt-3 text-sm text-fg-muted">
-              Finish in the new tab. I&apos;ll notice when it&apos;s done.
-            </p>
-          )}
-        </div>
+        <GitHubConnectGate>
+          <div>
+            <Button
+              variant="accent"
+              size="lg"
+              className="w-full sm:w-auto"
+              onClick={() => void installGitHub()}
+              loading={loading}
+            >
+              <Github className="h-4 w-4" aria-hidden="true" />
+              Install the GitHub app
+            </Button>
+            {loading && (
+              <p role="status" className="mb-0 mt-3 text-sm text-fg-muted">
+                Finish in the new tab. I&apos;ll notice when it&apos;s done.
+              </p>
+            )}
+          </div>
+        </GitHubConnectGate>
       )}
 
       {step.id === 'project' && hostedRepo && (
