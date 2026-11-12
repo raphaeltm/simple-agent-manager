@@ -130,6 +130,12 @@ PR A progress (branch `sam/archive-flip-reclaim`, worktree `/workspaces/sam-arch
 - [x] Tests `tests/workers/project-data-archive-flip-reclaim.test.ts` (4) + updated sharding,
       compact, throughput suites; test-double failure injection in `support/expected-error-doubles.ts`.
       Discriminating: comment guard, copy-back fence, pending pass each redden one test.
+- Audit note (2026-11-12 22:18Z): tool-payload cleanup (`tool-payload-cleanup-candidates.ts`) scans
+  `chat_messages` by rowid project-wide, so during a reclaim window it can strip a leftover row's
+  payload and write an R2 object no shard row references. Bounded: leftovers exist only between an
+  interrupted reclaim and the next tick's pending pass (≤ one 18-min cadence), and cleanup runs
+  only under an approved plan. Not changed: that scan feeds manifest-checked emergency plans
+  (rule 69), where altering candidate selection changes approved row counts.
 - [ ] Remaining audit (item 7): tool-payload cleanup / materialization / grouped-FTS cleanup on
       leftover rows (convergent by design: messages deleted first), breaker alerts, storage
       measurement; docs (configuration.md archive section, self-hosting copy-back notes).
