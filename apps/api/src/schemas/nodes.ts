@@ -36,4 +36,6 @@ export const PatchNodeSchema = v.object({
 /** The owner's explicit statement that they deleted the server at their provider. */
 export const ConfirmManualNodeDeletionSchema = v.object({
   confirmed: v.literal(true),
+  /** The node name a superadmin typed to retire a SAM-capacity node the provider cannot see. */
+  confirmNodeName: v.optional(v.pipe(v.string(), v.maxLength(256))),
 });

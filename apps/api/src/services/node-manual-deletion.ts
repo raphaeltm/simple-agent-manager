@@ -8,6 +8,7 @@ import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { errors } from '../middleware/error';
+import { type OperatorAbsenceProof, proveOperatorRetirement } from './node-operator-retirement';
 import { releaseNodeTunnels } from './node-tunnel-cleanup';
 import {
   createProviderForUser,
@@ -24,6 +25,15 @@ const MANUAL_DELETION_NODE_STATUSES = ['destroying', 'deleting', 'error'];
 export interface ManualNodeDeletionProof {
   node: NodeRow;
   runtimeTerminationConfirmedAt: string;
+  /** Set when a superadmin retired a SAM-capacity node (`node-operator-retirement.ts`). */
+  operatorProof?: OperatorAbsenceProof;
+}
+
+export interface ManualNodeDeletionOptions {
+  /** The caller's server-verified role; only a superadmin may take the operator path. */
+  actorIsSuperadmin?: boolean;
+  /** The node name the operator typed, needed only when the provider cannot be asked. */
+  confirmNodeName?: string;
 }
 
 /**
@@ -116,7 +126,8 @@ export async function recordManualNodeDeletion(
   db: NodeDb,
   env: Env,
   nodeId: string,
-  userId: string
+  userId: string,
+  options: ManualNodeDeletionOptions = {}
 ): Promise<ManualNodeDeletionProof> {
   const [node] = await db
     .select()
@@ -137,11 +148,16 @@ export async function recordManualNodeDeletion(
     // the provider check below cannot see it (Instant nodes have no instance id).
     throw errors.forbidden('Only a cloud server can be removed this way; contact an operator');
   }
+  let operatorProof: OperatorAbsenceProof | undefined;
   if (isOnSamCapacity(node)) {
-    // The server lives in SAM's own cloud account, so the owner cannot have removed it.
-    throw errors.forbidden('This server runs on SAM-managed capacity; contact an operator');
-  }
-  if (await providerStillHasServer(db, env, node)) {
+    // The server lives in SAM's own cloud account, so the owner cannot have removed it. A
+    // superadmin is the operator: they may retire the row once SAM shows the server is gone
+    // (or, when the provider cannot be asked, after typing the node's name).
+    if (!options.actorIsSuperadmin) {
+      throw errors.forbidden('This server runs on SAM-managed capacity; contact an operator');
+    }
+    operatorProof = await proveOperatorRetirement(db, env, node, options.confirmNodeName);
+  } else if (await providerStillHasServer(db, env, node)) {
     throw errors.conflict(
       `Server ${node.providerInstanceId} still exists at ${node.cloudProvider}. ` +
         'Delete it there first, then try again.'
@@ -160,6 +176,7 @@ export async function recordManualNodeDeletion(
     previousStatus: node.status,
     provider: node.cloudProvider,
     providerInstanceId: node.providerInstanceId,
+    operatorProof: operatorProof?.kind ?? null,
   });
-  return { node, runtimeTerminationConfirmedAt };
+  return { node, runtimeTerminationConfirmedAt, operatorProof };
 }

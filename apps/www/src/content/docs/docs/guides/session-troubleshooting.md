@@ -688,6 +688,15 @@ environment it hosts.
 **I already deleted this server** isn't offered for machines you enrolled yourself (use **Delete** for those). On a machine that runs on SAM's own cloud account, SAM refuses
 with **This server runs on SAM-managed capacity; contact an operator**, so ask your administrator.
 
+A superadmin is that operator (on a self-hosted install, the only one). For a superadmin the
+button reads **Server is gone: remove node**. On SAM-managed capacity SAM first asks the provider,
+with the node's own provisioning credential, for any server carrying the node's exact ownership
+labels or its recorded instance id, and refuses while one exists. It never deletes anything at the
+provider. If the provider cannot be asked at all (the credential binding is missing or rejected),
+SAM asks the superadmin to type the node name instead. Either way the removal is recorded in the
+operations audit log with who did it and which proof was used
+(`apps/api/src/services/node-operator-retirement.ts`).
+
 ## The session has ended
 
 There is nothing left to wake: the chat was archived, its saved workspace

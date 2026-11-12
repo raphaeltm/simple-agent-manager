@@ -6,6 +6,7 @@ import { Rocket } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 
+import { useAuth } from '../components/AuthProvider';
 import { DockerSection } from '../components/node/DockerSection';
 import { LogsSection } from '../components/node/LogsSection';
 import { NodeEventsSection } from '../components/node/NodeEventsSection';
@@ -19,6 +20,7 @@ import { useQueryScope } from '../hooks/useQueryScope';
 import { useToast } from '../hooks/useToast';
 import { useVisibilityAwarePoll } from '../hooks/useVisibilityAwarePoll';
 import {
+  ApiClientError,
   confirmNodeManualDeletion,
   deleteNode,
   deleteWorkspace,
@@ -38,6 +40,9 @@ export function Node() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const toast = useToast();
+  // A superadmin is SAM's operator: the API lets them remove a stuck node on SAM-managed
+  // capacity too, once SAM shows its server is gone (node-operator-retirement.ts).
+  const { isSuperadmin } = useAuth();
 
   const queryScope = useQueryScope();
   const { catalogs } = useProviderCatalog(queryScope);
@@ -178,13 +183,30 @@ export function Node() {
     const deploymentImpact = isDeploymentNode
       ? `\n\nThis is a deployment node hosting ${deploymentEnvSummary}. Removing it affects ALL hosted environments and does not perform each environment's volume teardown; use Destroy on the project Deployments page for that.`
       : '';
+    const operatorNote = isSuperadmin
+      ? "\n\nIf this node runs on SAM-managed capacity, SAM first asks the provider and refuses while the server still exists. If the provider can't be asked, you'll be asked to type the node name."
+      : '';
     const confirmed = window.confirm(
-      `SAM could not delete ${server}. Only continue if you have already deleted it yourself in your cloud provider's console.\n\nSAM will stop tracking this node. It will not delete anything at your provider.${deploymentImpact}\n\nContinue and stop tracking it?`
+      `SAM could not delete ${server}. ${isSuperadmin ? 'Only continue if it no longer exists at the provider.' : "Only continue if you have already deleted it yourself in your cloud provider's console."}\n\nSAM will stop tracking this node. It will not delete anything at your provider.${operatorNote}${deploymentImpact}\n\nContinue and stop tracking it?`
     );
     if (!confirmed) return;
     try {
       setDeleting(true);
-      await confirmNodeManualDeletion(id);
+      try {
+        await confirmNodeManualDeletion(id);
+      } catch (err) {
+        // SAM-managed capacity, superadmin only: SAM could not ask the provider whether the
+        // server is gone, so the operator types the node name to take responsibility.
+        if (!(err instanceof ApiClientError) || err.code !== 'OPERATOR_CONFIRMATION_REQUIRED') {
+          throw err;
+        }
+        const typed = window.prompt(`${err.message}\n\nNode name:`);
+        if (typed === null) {
+          setDeleting(false);
+          return;
+        }
+        await confirmNodeManualDeletion(id, typed);
+      }
       toast.success('Node removed');
       navigate('/nodes');
     } catch (err) {
@@ -294,7 +316,7 @@ export function Node() {
             onClick={() => void handleConfirmManualDeletion()}
             disabled={stopping || deleting}
           >
-            I already deleted this server
+            {isSuperadmin ? 'Server is gone: remove node' : 'I already deleted this server'}
           </Button>
         )}
       </div>

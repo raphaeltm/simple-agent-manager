@@ -35,8 +35,12 @@ let confirmSpy: ReturnType<typeof vi.spyOn>;
 
 // `useQueryScope()` reads the authenticated identity, and every migrated query
 // is keyed by it. Without a provider `useAuth` throws, so supply a stable identity.
+const auth = vi.hoisted(() => ({ isSuperadmin: false }));
 vi.mock('../../../src/components/AuthProvider', () => ({
-  useAuth: () => ({ user: { id: 'user-1', email: 'user@example.com', name: 'Test User' } }),
+  useAuth: () => ({
+    user: { id: 'user-1', email: 'user@example.com', name: 'Test User' },
+    isSuperadmin: auth.isSuperadmin,
+  }),
 }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
@@ -232,6 +236,38 @@ describe('Node page', () => {
       expect(mocks.confirmNodeManualDeletion).toHaveBeenCalledWith('node-1');
     });
     expect(await screen.findByTestId('nodes-list-page')).toBeInTheDocument();
+  });
+
+  it('lets a superadmin retire a SAM-capacity node by typing its name when the provider cannot be asked', async () => {
+    auth.isSuperadmin = true;
+    const { ApiClientError } = await import('../../../src/lib/api');
+    mocks.getNode.mockResolvedValue({
+      ...(await mocks.getNode()),
+      status: 'destroying',
+      healthStatus: 'stale',
+      cloudProvider: 'gcp',
+    });
+    mocks.confirmNodeManualDeletion.mockRejectedValueOnce(
+      new ApiClientError(
+        'OPERATOR_CONFIRMATION_REQUIRED',
+        'SAM cannot ask the provider whether this server still exists. Type the node name "t4-node-probe" to remove it.',
+        409
+      )
+    );
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('t4-node-probe');
+    try {
+      renderNode('/nodes/node-1');
+      fireEvent.click(await screen.findByRole('button', { name: /server is gone: remove node/i }));
+      await waitFor(() => {
+        expect(mocks.confirmNodeManualDeletion).toHaveBeenLastCalledWith('node-1', 't4-node-probe');
+      });
+      expect(mocks.confirmNodeManualDeletion).toHaveBeenNthCalledWith(1, 'node-1');
+      expect(promptSpy).toHaveBeenCalledWith(expect.stringContaining('t4-node-probe'));
+      expect(await screen.findByTestId('nodes-list-page')).toBeInTheDocument();
+    } finally {
+      promptSpy.mockRestore();
+      auth.isSuperadmin = false;
+    }
   });
 
   it('warns a deployment node owner about hosted environments before manual removal', async () => {

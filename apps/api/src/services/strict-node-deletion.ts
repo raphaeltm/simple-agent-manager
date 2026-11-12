@@ -1,8 +1,4 @@
-import {
-  hasAmbiguousLabel,
-  type ProviderRequestContext,
-  type VMInstance,
-} from '@simple-agent-manager/providers';
+import { type ProviderRequestContext, type VMInstance } from '@simple-agent-manager/providers';
 import { isUserOwnedNodeClass } from '@simple-agent-manager/shared';
 import { and, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -24,10 +20,12 @@ import {
 } from './node-workspace-retirement-guard';
 import type { PreservedVmRetirement } from './preserved-vm-retirement';
 import {
+  COMPLETE_INVENTORY_PROVIDERS,
   exactNodeIncarnationPredicate,
   hasManagedVmPlacementProof,
   type NodeDb,
   type NodeRow,
+  providerInventoryMatchesLabels,
   requireSameNodeIncarnation,
   requireStrictNode,
   requireStrictNodeProvider,
@@ -90,15 +88,6 @@ async function deleteStrictProviderInstance(
   return 'deleted';
 }
 
-function providerInventoryMatchesLabels(
-  server: VMInstance,
-  labels: Record<string, string>
-): boolean {
-  return Object.entries(labels).every(
-    ([key, value]) => !hasAmbiguousLabel(server.labels, key) && server.labels[key] === value
-  );
-}
-
 function sameProviderInventoryIdentity(current: VMInstance, discovered: VMInstance): boolean {
   return (
     current.id === discovered.id &&
@@ -108,19 +97,11 @@ function sameProviderInventoryIdentity(current: VMInstance, discovered: VMInstan
   );
 }
 
-/**
- * Providers whose filtered inventory read is complete or fails closed. Hetzner: fully paginated,
- * fail-closed list. GCP: fully paginated aggregated list that throws when any zone is
- * unreachable (`listGcpInstances` in packages/providers/src/gcp-instance-lookup.ts). A GCP node
- * whose create response was cut can reach `destroying` without `provider_instance_id`
- * (self-host box, 2026-11-11); its VM is found here by its exact ownership labels.
- */
-const COMPLETE_INVENTORY_PROVIDERS = new Set(['hetzner', 'gcp']);
-
 /** The owner-attested escape for a node SAM cannot prove gone (`services/node-manual-deletion.ts`). */
 const MANUAL_DELETION_HINT = (nodeId: string) =>
   `If the server no longer exists at the provider, the owner can remove the node with ` +
-  `"I already deleted this server" on the node page (POST /api/nodes/${nodeId}/manual-deletion).`;
+  `"I already deleted this server" on the node page (POST /api/nodes/${nodeId}/manual-deletion); ` +
+  `on SAM-managed capacity a superadmin can, once SAM shows the server is gone.`;
 
 /**
  * Resolve a stale providerless destroy claim against the exact provider inventory.
