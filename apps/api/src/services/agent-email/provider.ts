@@ -22,6 +22,8 @@ export interface OutboundAgentEmail {
   subject: string;
   text: string;
   headers: Record<string, string>;
+  /** Where answers go when it is not `from` (SMTP replies on a self-hosted box; never Cloudflare). */
+  replyTo?: string;
 }
 
 export interface AgentEmailSender {

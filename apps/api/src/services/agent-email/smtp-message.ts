@@ -114,6 +114,7 @@ export function buildSmtpMessage(
   const headers = [
     `From: ${from}`,
     `To: ${to}`,
+    ...(message.replyTo ? [`Reply-To: ${address(message.replyTo, 'replyTo')}`] : []),
     `Subject: ${headerText(message.subject, 'subject')}`,
     `Date: ${options.now.toUTCString().replace(/GMT$/, '+0000')}`,
     `Message-ID: <${options.messageId}>`,

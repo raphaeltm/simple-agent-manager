@@ -64,6 +64,10 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   SMTP_USERNAME?: string;
   SMTP_PASSWORD?: string; // secret
   SMTP_FROM?: string; // address sign-in codes come from, e.g. sign-in@<BASE_DOMAIN>
+  // 'true' when the self-host deploy installed the sam-mx SMTP receiver (compose profile mail-in):
+  // agent email then runs without AGENT_EMAIL, inbound through the loopback gateway route and
+  // replies over SMTP (services/agent-email/self-host-inbound.ts). Ignored when AGENT_EMAIL exists.
+  AGENT_EMAIL_INBOUND_SMTP?: string;
   // Cloudflare Artifacts for SAM-native Git repos (optional — absent when ARTIFACTS_ENABLED is falsy)
   ARTIFACTS?: {
     create(

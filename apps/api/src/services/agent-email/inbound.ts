@@ -42,6 +42,13 @@ export interface InboundEmailMessage {
   readonly raw: ReadableStream<Uint8Array>;
   readonly rawSize: number;
   setReject(reason: string): void;
+  /**
+   * Set only by the self-hosted gateway route: the From domain the box's sam-mx receiver
+   * authenticated (aligned SPF or DKIM). The From this handler parses must have that domain, so
+   * the receiver's parser and this one cannot disagree about who sent the mail. Absent on
+   * Cloudflare, where Email Routing authenticated the sender.
+   */
+  readonly authenticatedFromDomain?: string;
 }
 
 export type InboundOutcome =
@@ -100,6 +107,16 @@ function automaticMailReason(email: InboundAgentEmail): string | null {
   return null;
 }
 
+/** The receiver authenticated a different From than the one this handler parsed. */
+function senderAuthMismatch(message: InboundEmailMessage, email: InboundAgentEmail): boolean {
+  if (message.authenticatedFromDomain === undefined) return false;
+  const from = email.from ?? '';
+  const domain = from.slice(from.lastIndexOf('@') + 1).toLowerCase();
+  return !from.includes('@') || domain !== message.authenticatedFromDomain.toLowerCase();
+}
+
+const SENDER_AUTH_FAILED = 'Sender authentication failed';
+
 /**
  * Loopback replies come from one of this deployment's agent addresses. Anything else, or a
  * burst, is refused before it can overwrite the admin-visible loopback status.
@@ -117,6 +134,7 @@ async function receiveLoopback(
   }
   const email = await readEmail(message, limits, { recipient: 'loopback' });
   if (!email) return reject(message, UNREADABLE);
+  if (senderAuthMismatch(message, email)) return reject(message, SENDER_AUTH_FAILED);
   const sender = email.from ? parseAgentEmailRecipient(email.from, env.BASE_DOMAIN) : null;
   if (!email.from || sender?.kind !== 'trigger') return reject(message, 'Unknown address');
   await recordLoopbackReceipt(env, {
@@ -182,6 +200,10 @@ export async function handleInboundAgentEmail(
   if (automatic) {
     log.info('agent_email.inbound_rejected', { ...logContext, reason: automatic });
     return reject(message, automatic);
+  }
+  if (senderAuthMismatch(message, email)) {
+    log.warn('agent_email.inbound_rejected', { ...logContext, reason: 'sender_auth_mismatch' });
+    return reject(message, SENDER_AUTH_FAILED);
   }
   if (!email.from || !parseAllowedSenders(found.allowedSendersJson).includes(email.from)) {
     log.warn('agent_email.inbound_rejected', { ...logContext, reason: 'sender_not_allowed' });

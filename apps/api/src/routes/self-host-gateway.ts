@@ -11,7 +11,10 @@
  *   port-token redirect, 403, 503, ...) for Caddy to send to the client, or a decision naming
  *   the loopback upstream and the headers Caddy must forward.
  *
- * Both are unreachable from the internet: frps and Caddy call celld directly on loopback, and
+ * - `POST /inbound-email` — the box's sam-mx SMTP receiver hands over one inbound agent email
+ *   (routes/self-host-gateway-inbound-email.ts). Same secret header, plus its own on-switch.
+ *
+ * All are unreachable from the internet: frps and Caddy call celld directly on loopback, and
  * the box's Caddy answers 404 for this path prefix on its public listener. Both also fail
  * closed here: with no (or a too-short) REVERSE_TUNNEL_GATEWAY_SECRET they answer 404, which
  * is every Cloudflare deployment, and a wrong secret is 401. These routes do not use session
@@ -24,6 +27,7 @@ import { constantTimeEqual } from '../lib/constant-time';
 import { log } from '../lib/logger';
 import { readRequestJsonRecord, RequestBodyTooLargeError } from '../lib/runtime-validation';
 import { parseWorkspaceSubdomain } from '../lib/workspace-subdomain';
+import type { InboundDeps } from '../services/agent-email/inbound';
 import { authorizeFrpsPluginRequest } from '../services/node-reverse-tunnel-authz';
 import { getReverseTunnelGatewaySecret } from '../services/node-reverse-tunnel-config';
 import {
@@ -31,6 +35,7 @@ import {
   isGatewayDecisionFor,
   markGatewayAuthorizationRequest,
 } from '../services/node-websocket-gateway';
+import { handleInboundEmailGateway } from './self-host-gateway-inbound-email';
 
 /** frps plugin bodies are a few hundred bytes; bound them well above that. */
 export const FRPS_PLUGIN_MAX_BODY_BYTES = 16 * 1024;
@@ -171,8 +176,13 @@ function toForwardAuthResponse(inner: Request, response: Response, host: string)
   });
 }
 
-export function createSelfHostGatewayRoutes(dispatch: GatewayDispatch) {
+export function createSelfHostGatewayRoutes(
+  dispatch: GatewayDispatch,
+  options: { inboundEmailDeps?: InboundDeps } = {}
+) {
   const routes = new Hono<{ Bindings: Env }>();
+
+  routes.post('/inbound-email', (c) => handleInboundEmailGateway(c, options.inboundEmailDeps));
 
   routes.post('/frps-plugin', async (c) => {
     const secret = getReverseTunnelGatewaySecret(c.env);
