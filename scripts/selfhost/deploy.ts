@@ -49,6 +49,7 @@ import { ensureCelldBinary, resolveEsbuild } from './celld-binary.js';
 import { buildCelldConfig, type CelldWranglerConfig } from './celld-config.js';
 import { ASSETS_DIR, prepareCelldProject, SOURCE_LINK, writeCelldConfig } from './celld-project.js';
 import { writeFenceFiles } from './fence-state.js';
+import { inboundMailWorkerVars } from './inbound-mail-settings.js';
 import {
   ensureMailCollectorPassword,
   MAIL_COLLECTOR_PASSWORD_FILE,
@@ -323,6 +324,7 @@ async function main(): Promise<void> {
   const secrets: Record<string, string> = { ...platformSecrets, ...operatorSecrets };
   knownSecrets = Object.values(secrets);
 
+  const smtpVars = smtpWorkerVars(box, operatorSecrets, baseDomain);
   const source = TOML.parse(readFileSync(join(API_DIR, 'wrangler.toml'), 'utf8')) as WranglerToml;
   const plan = buildCelldConfig(source, {
     main: `${SOURCE_LINK}/index.ts`,
@@ -332,7 +334,8 @@ async function main(): Promise<void> {
       SAM_INSTALLATION_ID,
       VAPID_SUBJECT: `https://app.${baseDomain}`,
       ...tunnelWorkerVars(tunnelSettings),
-      ...smtpWorkerVars(box, operatorSecrets, baseDomain),
+      ...smtpVars,
+      ...inboundMailWorkerVars(box, smtpVars),
     },
   });
   const vmAgentRelease = values['skip-vm-agent'] ? null : resolveVmAgentRelease(REPO_ROOT);

@@ -269,6 +269,57 @@ services:
       - --block-remote-css-and-fonts
     restart: unless-stopped
 
+  # Inbound agent email (profile `mail-in`, off by default): sam-mx (./sam-mx) accepts SMTP on
+  # port 25 for agent+<key>@agents.SAM_DOMAIN only, requires aligned SPF or DKIM (DMARC pass) for
+  # the From domain, and hands each message during the SMTP session to the Worker's loopback
+  # gateway route (POST /api/self-host/gateway/inbound-email, which Caddy hides from the internet).
+  # Refusals are SMTP replies (550/552/451): it never relays, bounces, or sends mail. Replies to
+  # senders go out through the Worker's SMTP relay (SMTP_* or the mail-collector profile), which
+  # the deploy requires when this profile is on. Needs the MX record and an inbound tcp/25
+  # firewall rule (README "Inbound agent email").
+  sam-mx:
+    profiles: [mail-in]
+    build: ./sam-mx
+    image: sam-selfhost-sam-mx:local
+    # Host network: it calls celld on 127.0.0.1, and the sender's address must be the real one for
+    # SPF and the per-address limits. Its own uid, not celld's: the egress fence (which matches
+    # celld's uid) does not apply to it, and celld's fence does not let the Worker reach port 25.
+    network_mode: host
+    user: '${SAM_MX_UID:-7102}:${SAM_MX_UID:-7102}'
+    # The binary's file capability binds port 25; every other capability is dropped.
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ['no-new-privileges:true']
+    read_only: true
+    depends_on: [celld]
+    # REVERSE_TUNNEL_GATEWAY_SECRET, the gateway route's shared secret. Written by
+    # `pnpm selfhost:deploy --init`.
+    env_file:
+      - path: ${SAM_SELFHOST_STATE_DIR:-./.state}/gateway.env
+        required: true
+    environment:
+      SAM_DOMAIN: ${SAM_DOMAIN:?set SAM_DOMAIN in .env}
+      CELLD_PORT: ${CELLD_PORT:-8080}
+      SAM_MX_LISTEN: ${SAM_MX_LISTEN:-:25}
+      SAM_MX_HOSTNAME: ${SAM_MX_HOSTNAME:-}
+      SAM_MX_MAX_MESSAGE_BYTES: ${SAM_MX_MAX_MESSAGE_BYTES:-}
+      SAM_MX_MAX_CONNECTIONS: ${SAM_MX_MAX_CONNECTIONS:-}
+      SAM_MX_CONNECTIONS_PER_IP_PER_MINUTE: ${SAM_MX_CONNECTIONS_PER_IP_PER_MINUTE:-}
+      SAM_MX_MESSAGES_PER_CONNECTION: ${SAM_MX_MESSAGES_PER_CONNECTION:-}
+      SAM_MX_GATEWAY_TIMEOUT: ${SAM_MX_GATEWAY_TIMEOUT:-}
+      # Loopback CIDRs whose mail skips SPF/DKIM/DMARC (smoke tests from the box itself). Empty
+      # by default; the receiver refuses any non-loopback network here.
+      SAM_MX_TRUSTED_NETWORKS: ${SAM_MX_TRUSTED_NETWORKS:-}
+      # Optional STARTTLS certificate and key, mounted read-only by an override file.
+      SAM_MX_TLS_CERT: ${SAM_MX_TLS_CERT:-}
+      SAM_MX_TLS_KEY: ${SAM_MX_TLS_KEY:-}
+    logging:
+      driver: json-file
+      options:
+        max-size: ${SAM_MX_LOG_MAX_SIZE:-20m}
+        max-file: '${SAM_MX_LOG_MAX_FILES:-3}'
+    restart: unless-stopped
+
   # Bundled object store for boxes without an external bucket. celld does not qualify it for
   # production (MinIO community fork; it passes celld's storage test). Prefer GCS/S3/R2/Azure.
   objectstore:
