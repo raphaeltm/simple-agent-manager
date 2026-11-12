@@ -166,7 +166,7 @@ Every fixture had at most a hundred rows, so the same statement ran in milliseco
    run validated nothing and must not be reported as a pass.
 
 5. **When a shared constant for the limit already exists, the absence of an import is the bug.**
-   `apps/api/src/lib/d1-limits.ts` had exported `D1_MAX_BOUND_PARAMETERS` with seven consumers for
+   `packages/worker-core/src/d1-limits.ts` had exported `D1_MAX_BOUND_PARAMETERS` with seven consumers for
    months. Nothing structurally connects "builds a dynamic bind list" to "must consult that
    constant", so prefer a scanner or lint rule over reviewer diligence — this class has already
    evaded review once.
@@ -208,7 +208,7 @@ Every fixture had at most a hundred rows, so the same statement ran in milliseco
 - `.claude/rules/11-fail-fast-patterns.md` — fail closed at boundaries
 - Harness-ceiling incident: `tasks/archive/2026-09-04-archive-sharding-bind-variable-limit.md`;
   implementation `apps/api/src/durable-objects/project-data/archive-sharding.ts`
-  (`readCommittedRowsForChunk`); shared constant `apps/api/src/lib/d1-limits.ts`
+  (`readCommittedRowsForChunk`); shared constant `packages/worker-core/src/d1-limits.ts`
 - Memory-ceiling incident: `tasks/archive/2026-09-05-archive-sharding-streaming-hash-abandon-and-size-budget.md`;
   implementation `tableAggregateSha256` / `forEachGroupedRowPaged` in the same module, hasher
   `apps/api/src/project-data-archive/hashing.ts` (`createCanonicalRowsHasher`); page-shape test

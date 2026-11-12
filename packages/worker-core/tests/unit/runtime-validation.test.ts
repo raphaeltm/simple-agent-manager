@@ -9,7 +9,7 @@ import {
   readResponseJson,
   RequestBodyTooLargeError,
   RuntimeValidationError,
-} from '../../src/lib/runtime-validation';
+} from '../../src/runtime-validation';
 
 describe('runtime-validation helpers', () => {
   it('rejects non-object JSON records', () => {

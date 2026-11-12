@@ -58,6 +58,7 @@ jobs:
             api:
               - 'apps/api/**'
               - 'packages/shared/**'
+              - 'packages/worker-core/**'
               - 'packages/task-runner/**'
               - 'packages/config/**'
               - 'scripts/quality/*migration*.ts'
@@ -77,6 +78,7 @@ jobs:
               - 'packages/vm-agent/internal/config/**'
               - 'apps/api/src/**'
               - 'packages/shared/src/**'
+              - 'packages/worker-core/src/**'
               - 'sonar-project.properties'
               - '.claude/rules/36-cli-quality.md'
             devcontainer:

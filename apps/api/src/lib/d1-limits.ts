@@ -1,12 +1,3 @@
-/** Cloudflare D1/SQLite protocol ceiling for bound parameters in one statement. */
-export const D1_MAX_BOUND_PARAMETERS = 100;
-
-/** Split values into runs of at most `size`, e.g. to keep an `IN (...)` list under the limit. */
-export function chunk<T>(values: readonly T[], size: number): T[][] {
-  const step = Math.max(1, Math.floor(size));
-  const chunks: T[][] = [];
-  for (let index = 0; index < values.length; index += step) {
-    chunks.push(values.slice(index, index + step));
-  }
-  return chunks;
-}
+// Moved to @simple-agent-manager/worker-core (worker modularization W0). This re-export keeps
+// existing importers unchanged; new code imports from the package entry point directly.
+export { chunk, D1_MAX_BOUND_PARAMETERS } from '@simple-agent-manager/worker-core';

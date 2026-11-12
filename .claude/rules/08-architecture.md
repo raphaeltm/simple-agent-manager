@@ -13,14 +13,14 @@ No database is required for the MVP.
 ```
 @simple-agent-manager/shared
     ^
-@simple-agent-manager/providers
-    ^
+@simple-agent-manager/providers   @simple-agent-manager/worker-core
+    ^                                 ^
 @simple-agent-manager/api
     ^
 @simple-agent-manager/web
 ```
 
-Build order matters: shared -> providers -> api/web
+Build order matters: shared -> providers / worker-core -> api/web
 
 ### Adding New Features
 1. Check if types need to be added to `packages/shared`
@@ -69,7 +69,7 @@ Before making ANY changes related to features, workflows, state machines, valida
 1. Research relevant feature specifications:
    - `specs/` — Feature specs with user stories, requirements, acceptance criteria
    - `specs/*/data-model.md` — State machines, entity relationships, constraints
-   - `apps/api/src/db/schema.ts` — Current database schema and constraints
+   - `packages/worker-core/src/schema.ts` — Current database schema and constraints
    - `apps/api/src/routes/` — Existing API behavior and validation
 
 2. Use sequential thinking to:

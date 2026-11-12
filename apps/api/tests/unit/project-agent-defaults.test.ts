@@ -140,7 +140,7 @@ describe('resolveProjectAgentDefault', () => {
 });
 
 describe('Project agent defaults — schema', () => {
-  const schema = apiSrc('db/schema.ts');
+  const schema = apiSrc('../../../packages/worker-core/src/schema.ts');
 
   it('projects table has agent_defaults column', () => {
     expect(schema).toContain("agentDefaults: text('agent_defaults')");

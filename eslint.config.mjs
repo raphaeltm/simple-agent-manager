@@ -47,6 +47,60 @@ const onboardingAdvisoryFiles = [
 // tasks/archive/2026-08-10-ai-slop-debt-burndown.md.
 const testFileGlobs = ['**/tests/**', '**/*.test.{ts,tsx,mts,cts}', '**/*.spec.{ts,tsx,mts,cts}'];
 
+// Module boundaries for the worker modularization (tasks/active/2026-11-12-worker-modularization.md).
+// Blocking (`error`) in source and tests alike: a test reaching across a boundary couples the same
+// way production code does. Each pattern is enforced on static imports/exports
+// (`no-restricted-imports`) and on dynamic `import()` and `require()` (`no-restricted-syntax`).
+// `vi.mock` paths are not checked; they only resolve a module the test file could import anyway.
+const workspacePackageFiles = ['packages/**/*.{ts,tsx,mts,cts,js,mjs,cjs}'];
+const workerFiles = ['apps/api/**/*.{ts,tsx,mts,cts,js,mjs,cjs}'];
+const workerTestFiles = ['apps/api/tests/**/*.{ts,tsx,mts,cts,js,mjs,cjs}'];
+// Every apps/*/package.json name; scripts/quality/worker-module-boundaries.test.ts keeps it complete.
+export const appPackageNames = ['api', 'installer', 'tail-worker', 'web', 'www'];
+const appsMessage =
+  'Packages must not import from apps. Declare a port and let the app pass it in.';
+const deepPackagePath = {
+  regex: '^@simple-agent-manager/[^/]+/(src|dist|tests)(/|$)',
+  message: "Import the package's public entry point (its package.json exports), not a deep path.",
+};
+const relativePackagePath = {
+  regex: '^\\.{1,2}/(.*/)?packages/',
+  message: 'Import the package by name through its public entry point, not by relative path.',
+};
+const packageBoundaryPatterns = [
+  { regex: `^@simple-agent-manager/(${appPackageNames.join('|')})(/|$)`, message: appsMessage },
+  { regex: '^\\.{1,2}/(.*/)?apps/', message: appsMessage },
+  // Package-to-package edges go through public entry points too.
+  deepPackagePath,
+  relativePackagePath,
+];
+const workerBoundaryPatterns = [deepPackagePath, relativePackagePath];
+const workerTestBoundaryPatterns = [
+  deepPackagePath,
+  {
+    // Worker tests may share a package's tests/fixtures/ (no `..` back out of it).
+    regex: '^\\.{1,2}/(.*/)?packages/(?![^/]+/tests/fixtures/(?!.*\\.\\.))',
+    message:
+      "Import the package by name through its public entry point. Worker tests may share only a package's tests/fixtures/.",
+  },
+];
+function boundaryRules(patterns) {
+  const selectorRegex = (regex) => regex.replaceAll('/', '\\/');
+  return {
+    'no-restricted-imports': ['error', { patterns }],
+    'no-restricted-syntax': [
+      'error',
+      ...patterns.flatMap(({ regex, message }) => [
+        { selector: `ImportExpression[source.value=/${selectorRegex(regex)}/]`, message },
+        {
+          selector: `CallExpression[callee.name='require'][arguments.0.value=/${selectorRegex(regex)}/]`,
+          message,
+        },
+      ]),
+    ],
+  };
+}
+
 const upstreamNoUnusedVars = tseslint.plugin.rules['no-unused-vars'];
 const noUnusedVarsEslint8Compat = {
   ...upstreamNoUnusedVars,
@@ -386,10 +440,28 @@ export default defineConfig([
   },
   {
     files: ['apps/api/src/**/*.ts'],
-    ignores: ['apps/api/src/lib/logger.ts'],
     rules: {
       'no-console': 'error',
     },
+  },
+  {
+    // Worker modularization boundary 1: a package never imports from an app, by relative path or
+    // by package name, and reaches other packages only through their public entry points.
+    files: workspacePackageFiles,
+    rules: boundaryRules(packageBoundaryPatterns),
+  },
+  {
+    // Worker modularization boundary 2: the worker imports a package only through the public
+    // entry points its package.json `exports` declares, never a deep src/dist path. Undeclared
+    // subpaths already fail type resolution; this catches the paths resolution would accept.
+    files: workerFiles,
+    rules: boundaryRules(workerBoundaryPatterns),
+  },
+  {
+    // Worker tests may also share a package's test fixtures (`packages/<pkg>/tests/fixtures/`),
+    // e.g. provider HTTP mocks. Everything else in boundary 2 still applies.
+    files: workerTestFiles,
+    rules: boundaryRules(workerTestBoundaryPatterns),
   },
   {
     // These five workspaces had no lint path before this rollout. Preserve all
