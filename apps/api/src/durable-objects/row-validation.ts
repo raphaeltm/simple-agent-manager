@@ -8,11 +8,11 @@
  * NULL constraint) must never throw the whole read — see
  * .claude/rules/50-list-read-row-fault-isolation.md.
  *
- * The throwing single-row validator (`parseRow`) already exists in
- * `project-data/row-schemas/core.ts` and is fully generic (no project-data
- * coupling). This module reuses it — matching the existing cross-DO
- * precedent in `notification-row-schemas.ts` — and adds the two
- * fault-isolated wrappers DOs outside project-data need:
+ * The throwing single-row validator (`parseRow`) and its two fault-isolated
+ * wrappers live in `project-data/row-schemas/core.ts` (fully generic, no
+ * project-data coupling; ProjectData uses them too). This module re-exports them
+ * for the other DOs — matching the existing cross-DO precedent in
+ * `notification-row-schemas.ts`:
  *
  *  - `mapRows`: validate a LIST of rows, skipping (and warn-logging) any row
  *    that fails validation instead of throwing the whole read.
