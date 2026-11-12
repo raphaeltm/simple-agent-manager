@@ -60,25 +60,50 @@ export function permanentEngineStartError(body: unknown): string | null {
   return matchesPermanent(context.error) ? context.error : null;
 }
 
-/** Default wait for a stopped container's exit result; celld answers at once for a failed start. */
+/** Default wait for the last run's exit result; celld settles it at once for a failed start. */
 export const DEFAULT_ENGINE_EXIT_PROBE_MS = 250;
 
 /**
- * The container's own exit result, when it already holds a permanent start failure. celld
- * reports why a start failed (`Create container failed with [403] sam-docker-proxy refused: …`)
- * only through `ctx.container.monitor()`; by the time the SDK classifies the failure the message
- * has become a generic "the container is not running". Bounded: a container that is merely
- * starting has no exit result yet, and the probe gives up after `waitMs`.
+ * Keeps the promise of the latest `container.monitor()` call. celld reports why a start failed
+ * (`Create container failed with [403] sam-docker-proxy refused: …`) only as the rejection of the
+ * monitor promise of that run, and refuses a new `monitor()` call once the container is not
+ * running; by the time the SDK classifies the failure its message is a generic "the container
+ * is not running". The library keeps the promise in a private field, so it is teed here through
+ * the public `Container` API instead. Where the platform object cannot be wrapped, nothing
+ * changes.
+ */
+export function teeContainerMonitor(
+  container: { monitor(): Promise<unknown> } | undefined,
+  record: (exit: Promise<unknown>) => void
+): void {
+  if (!container) return;
+  try {
+    const original = container.monitor.bind(container);
+    container.monitor = () => {
+      const exit = original();
+      record(exit);
+      // The library awaits this promise; this only keeps a stored copy from reporting as unhandled.
+      exit.catch(() => undefined);
+      return exit;
+    };
+  } catch {
+    // A non-writable platform object: keep the SDK's own behaviour.
+  }
+}
+
+/**
+ * The last run's exit result, when it is a permanent engine start failure. Bounded: a container
+ * that is merely starting has no exit result yet, and the probe gives up after `waitMs`.
  */
 export async function permanentEngineExitError(
-  container: { monitor(): Promise<unknown> } | undefined,
+  lastExit: Promise<unknown> | null | undefined,
   waitMs = DEFAULT_ENGINE_EXIT_PROBE_MS
 ): Promise<string | null> {
-  if (!container) return null;
+  if (!lastExit) return null;
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const outcome = await Promise.race([
-      container.monitor().then(
+      lastExit.then(
         () => null,
         (error: unknown) => (error instanceof Error ? error.message : String(error))
       ),
@@ -87,8 +112,6 @@ export async function permanentEngineExitError(
       }),
     ]);
     return outcome !== null && matchesPermanent(outcome) ? outcome : null;
-  } catch {
-    return null;
   } finally {
     if (timer) clearTimeout(timer);
   }
@@ -105,7 +128,7 @@ function startupStatus(body: unknown): boolean {
  */
 export async function failFastOnPermanentStartup(
   response: Response,
-  container?: { monitor(): Promise<unknown> }
+  lastExit?: Promise<unknown> | null
 ): Promise<Response> {
   if (response.status !== 503) return response;
   let body: unknown;
@@ -115,8 +138,7 @@ export async function failFastOnPermanentStartup(
     return response;
   }
   if (!startupStatus(body)) return response;
-  const engineError =
-    permanentEngineStartError(body) ?? (await permanentEngineExitError(container));
+  const engineError = permanentEngineStartError(body) ?? (await permanentEngineExitError(lastExit));
   if (!engineError) return response;
   log.error('sandbox.container_start_permanent_failure', { error: engineError.slice(0, 500) });
   return new Response(

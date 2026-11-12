@@ -14,8 +14,14 @@ let monitor: () => Promise<unknown> = () => new Promise(() => undefined);
 
 vi.mock('@cloudflare/sandbox', () => ({
   Sandbox: class {
-    ctx = { container: { monitor: () => monitor() } };
+    ctx: { container: { monitor(): Promise<unknown> } };
+    constructor(ctx: { container: { monitor(): Promise<unknown> } }) {
+      this.ctx = ctx;
+    }
+    // As @cloudflare/containers does on every start: call monitor() right after start(), then
+    // answer the SDK's startup 503 once the port check finds the container not running.
     async containerFetch(): Promise<Response> {
+      void this.ctx.container.monitor().catch(() => undefined);
       return baseAnswer;
     }
   },
@@ -45,11 +51,15 @@ async function fetchThroughSubclass(
 ): Promise<Response> {
   baseAnswer = answer;
   monitor = exit;
+  const ctx = { container: { monitor: () => monitor() } };
   const instance = new (
-    SandboxDO as unknown as new () => {
+    SandboxDO as unknown as new (
+      ctx: unknown,
+      env: unknown
+    ) => {
       containerFetch(url: string): Promise<Response>;
     }
-  )();
+  )(ctx, {});
   return instance.containerFetch('http://container/api/execute');
 }
 
@@ -94,8 +104,8 @@ describe('SandboxDO permanent container start failures', () => {
   });
 
   // What celld 0.6.3 actually produces (seen on the prototype box): the SDK's 503 carries a
-  // generic "the container is not running", and celld's real reason is the container's exit
-  // result, read through ctx.container.monitor().
+  // generic "the container is not running", and celld's real reason is only the rejection of
+  // that run's ctx.container.monitor() promise (a later monitor() call is refused).
   it.each([
     'Create container failed with [403] sam-docker-proxy refused: HostConfig: Runtime must be runsc',
     'Create container failed with [400] Error response from daemon: unknown or invalid runtime name: runsc',
