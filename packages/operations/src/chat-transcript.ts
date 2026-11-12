@@ -3,7 +3,7 @@
  * one message read by offset, and search excerpts taken from the whole message around a hit.
  *
  * The Durable Object assembles streamed chunks into messages and summarizes tool activity from
- * metadata (`durable-objects/project-data/logical-transcript.ts`, `logical-message.ts`). This
+ * metadata (`packages/project-data/src/do/logical-transcript.ts`, `logical-message.ts`). This
  * module projects those entries and keeps each result inside the Connector response cap: the MCP
  * envelope carries a result twice and text can be multi-byte, so character budgets alone cannot
  * guarantee the fit. When a page is still too large it is cut at an entry boundary and its cursor

@@ -196,10 +196,10 @@ Every fixture had at most a hundred rows, so the same statement ran in milliseco
 ## References
 
 - Task: `tasks/archive/2026-09-03-projectdata-production-capacity-emergency.md`; PR #2014
-- Implementation: `apps/api/src/durable-objects/project-data/tool-payload-cleanup.ts`
+- Implementation: `packages/project-data/src/do/tool-payload-cleanup.ts`
   (`createToolPayloadCleanupPlan`, `scanApprovedToolPayloadCleanupBatch`),
-  `apps/api/src/durable-objects/project-data/tool-payload-cleanup-manifest.ts`
-- Tests: `apps/api/tests/unit/durable-objects/tool-payload-cleanup-manifest.test.ts`,
+  `packages/project-data/src/do/tool-payload-cleanup-manifest.ts`
+- Tests: `packages/project-data/tests/unit/tool-payload-cleanup-manifest.test.ts`,
   the manifest-scope group in
   `apps/api/tests/workers/project-data-tool-payload-archive.test.ts`
 - `.claude/rules/28-credential-resolution-fallback-tests.md` — every attack case needs an owner control
@@ -207,11 +207,11 @@ Every fixture had at most a hundred rows, so the same statement ran in milliseco
 - `.claude/rules/62-tests-must-observe-the-real-trigger.md` — prove the guard discriminating
 - `.claude/rules/11-fail-fast-patterns.md` — fail closed at boundaries
 - Harness-ceiling incident: `tasks/archive/2026-09-04-archive-sharding-bind-variable-limit.md`;
-  implementation `apps/api/src/durable-objects/project-data/archive-sharding.ts`
+  implementation `packages/project-data/src/do/archive-sharding.ts`
   (`readCommittedRowsForChunk`); shared constant `packages/worker-core/src/d1-limits.ts`
 - Memory-ceiling incident: `tasks/archive/2026-09-05-archive-sharding-streaming-hash-abandon-and-size-budget.md`;
   implementation `tableAggregateSha256` / `forEachGroupedRowPaged` in the same module, hasher
-  `apps/api/src/project-data-archive/hashing.ts` (`createCanonicalRowsHasher`); page-shape test
+  `packages/project-data/src/archive/hashing.ts` (`createCanonicalRowsHasher`); page-shape test
   `apps/api/tests/unit/durable-objects/project-data-archive-sharding.test.ts`
 - `.claude/rules/28-credential-resolution-fallback-tests.md` — a mock that ignores the predicate
   proves nothing; the harness-ceiling case is its runtime-level twin

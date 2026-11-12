@@ -1,12 +1,12 @@
+import type { PromptDeliveryClaim } from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
+import {
+  invalidProjectEventWakeSourceTaskResult,
+  sourceTaskGuardForClaim,
+} from '@simple-agent-manager/project-data/internal/do/prompt-delivery-source-guards';
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
-import type { PromptDeliveryClaim } from '../../../src/durable-objects/project-data/prompt-delivery';
-import {
-  invalidProjectEventWakeSourceTaskResult,
-  sourceTaskGuardForClaim,
-} from '../../../src/durable-objects/project-data/prompt-delivery-source-guards';
 import type { Env } from '../../../src/env';
 import {
   isSessionRecoverySourceTaskGuardValid,

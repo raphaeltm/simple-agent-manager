@@ -16,13 +16,13 @@ import {
   scheduleCreateStartsWork,
   scheduleOperations,
 } from '@simple-agent-manager/operations';
+import { ProjectScheduleNotFoundError } from '@simple-agent-manager/project-data/internal/do/project-event-schedules-storage';
+import { ProjectEventValidationError } from '@simple-agent-manager/project-data/internal/do/project-events-contracts';
 import type { ProjectSchedule, ProjectScheduleMutationResult } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
-import { ProjectScheduleNotFoundError } from '../../../src/durable-objects/project-data/project-event-schedules-storage';
-import { ProjectEventValidationError } from '../../../src/durable-objects/project-data/project-events-contracts';
 import type { Env } from '../../../src/env';
 import { log } from '../../../src/lib/logger';
 import { createOperationPorts } from '../../../src/operation-ports';

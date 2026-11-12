@@ -6,7 +6,7 @@ import { normalizeToolName, parseResultPayload } from './document-card-data';
 /**
  * The agent question tool (base name, separator-agnostic) whose result renders as a
  * HumanInputCard. Keep in sync with HUMAN_INPUT_CARD_TOOL in
- * apps/api/src/durable-objects/project-data/row-schemas/messages.ts, which keeps the marker
+ * packages/project-data/src/do/row-schemas/messages.ts, which keeps the marker
  * reference when chat history is loaded in compact mode.
  */
 export const HUMAN_INPUT_CARD_TOOL = 'request_human_input';

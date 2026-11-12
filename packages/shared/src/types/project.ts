@@ -1,6 +1,7 @@
 import type { AgentType } from '../agents';
 import type { ActivityEvent } from './activity';
 import type { AgentPermissionMode } from './agent-settings';
+import type { ProjectRuntimeEnvVarProvenance } from './runtime-secret-requests';
 import type { ChatSession } from './session';
 import type { TaskStatus } from './task';
 import type { CredentialProvider } from './user';
@@ -151,7 +152,7 @@ export interface UpdateProjectRequest {
   maxTriggers?: number | null;
 }
 
-export interface ProjectRuntimeEnvVarResponse {
+export interface ProjectRuntimeEnvVarResponse extends Partial<ProjectRuntimeEnvVarProvenance> {
   key: string;
   value: string | null;
   isSecret: boolean;

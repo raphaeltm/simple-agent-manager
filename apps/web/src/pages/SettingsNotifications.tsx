@@ -59,6 +59,10 @@ const TYPE_LABELS: Record<NotificationType, { label: string; description: string
     label: 'Operations approvals',
     description: 'When an Operations-project agent asks you to approve an action',
   },
+  secret_request: {
+    label: 'Secret requests',
+    description: 'When an agent in any of your projects asks for a secret value',
+  },
 };
 
 /** A global preference is one not scoped to any project (`projectId === null`). */

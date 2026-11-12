@@ -1,6 +1,6 @@
+import type { SessionAccessResolution } from '@simple-agent-manager/project-data/internal/do/session-access';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { SessionAccessResolution } from '../../../src/durable-objects/project-data/session-access';
 import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
 

@@ -9,6 +9,31 @@ import {
 } from '@simple-agent-manager/operations';
 import { OperationError } from '@simple-agent-manager/operations';
 import {
+  prepareAgentChannelMessage,
+  sendAgentChannelMessage,
+} from '@simple-agent-manager/project-data/internal/do/agent-message-channels';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import { listChannelSubscribers } from '@simple-agent-manager/project-data/internal/do/project-event-channel-subscribers';
+import {
+  prepareChannelPublish,
+  publishChannel,
+} from '@simple-agent-manager/project-data/internal/do/project-event-channels-publish';
+import {
+  channelHistory,
+  listChannels,
+} from '@simple-agent-manager/project-data/internal/do/project-event-channels-storage';
+import {
+  cancelProjectEventSubscription,
+  createProjectEventSubscription,
+  getProjectEventSubscription,
+} from '@simple-agent-manager/project-data/internal/do/project-events';
+import {
+  ProjectEventCursorError,
+  ProjectEventLimitExceededError,
+  ProjectEventNotFoundError,
+  ProjectEventValidationError,
+} from '@simple-agent-manager/project-data/internal/do/project-events-contracts';
+import {
   DIRECT_CHANNEL_RANGE_END,
   PROJECT_EVENT_CHANNEL_SOURCE,
   PROJECT_EVENT_CHANNEL_TYPE,
@@ -19,31 +44,6 @@ import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
-import { runMigrations } from '../../../src/durable-objects/migrations';
-import {
-  prepareAgentChannelMessage,
-  sendAgentChannelMessage,
-} from '../../../src/durable-objects/project-data/agent-message-channels';
-import { listChannelSubscribers } from '../../../src/durable-objects/project-data/project-event-channel-subscribers';
-import {
-  prepareChannelPublish,
-  publishChannel,
-} from '../../../src/durable-objects/project-data/project-event-channels-publish';
-import {
-  channelHistory,
-  listChannels,
-} from '../../../src/durable-objects/project-data/project-event-channels-storage';
-import {
-  cancelProjectEventSubscription,
-  createProjectEventSubscription,
-  getProjectEventSubscription,
-} from '../../../src/durable-objects/project-data/project-events';
-import {
-  ProjectEventCursorError,
-  ProjectEventLimitExceededError,
-  ProjectEventNotFoundError,
-  ProjectEventValidationError,
-} from '../../../src/durable-objects/project-data/project-events-contracts';
 import type { Env } from '../../../src/env';
 import { createOperationPorts } from '../../../src/operation-ports';
 import { applySqliteMigration, createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';

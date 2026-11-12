@@ -1,10 +1,10 @@
+import type { ProjectData as ProjectDataDO } from '@simple-agent-manager/project-data/durable-object';
 import type { UserRole, UserStatus } from '@simple-agent-manager/shared';
 import { desc, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
-import type { ProjectData as ProjectDataDO } from '../durable-objects/project-data';
 import type { Env } from '../env';
 import {
   getUserId,

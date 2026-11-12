@@ -1,16 +1,16 @@
 /** Real Workers restoration fixture; only external VM HTTP is doubled. */
+import { resolveDurableExecutionConfig } from '@simple-agent-manager/project-data/internal/do/durable-execution-config';
+import {
+  claimDuePromptDeliveries,
+  type PromptDeliveryResult,
+} from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
+import { runPromptDeliveryClaim } from '@simple-agent-manager/project-data/internal/do/prompt-delivery-runner';
 import { env, runInDurableObject, SELF } from 'cloudflare:test';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { expect, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
-import { resolveDurableExecutionConfig } from '../../../src/durable-objects/project-data/durable-execution-config';
-import {
-  claimDuePromptDeliveries,
-  type PromptDeliveryResult,
-} from '../../../src/durable-objects/project-data/prompt-delivery';
-import { runPromptDeliveryClaim } from '../../../src/durable-objects/project-data/prompt-delivery-runner';
 import type { TaskRunner } from '../../../src/durable-objects/task-runner';
 import type { Env } from '../../../src/env';
 import { getSelectedAgentCredentialReference } from '../../../src/routes/credentials';

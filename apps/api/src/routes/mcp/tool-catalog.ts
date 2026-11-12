@@ -43,6 +43,7 @@ export const TASK_REQUIRED_TOOLS: ReadonlySet<string> = new Set([
   'override_task_state',
   'publish_channel_event',
   'reply_to_email',
+  'request_secret',
   'send_durable_message',
   'send_message_to_subtask',
   'stop_subtask',

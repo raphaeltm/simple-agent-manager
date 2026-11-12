@@ -52,10 +52,10 @@ vi.mock('../../../src/services/workspace-file-transfer', async (original) => ({
 }));
 
 import { recordAutoLink } from '@simple-agent-manager/operations';
+import { recordLink as recordDoLink } from '@simple-agent-manager/project-data/internal/do/links';
+import { MIGRATIONS } from '@simple-agent-manager/project-data/internal/do/migrations';
 
 import * as schema from '../../../src/db/schema';
-import { MIGRATIONS } from '../../../src/durable-objects/migrations';
-import { recordLink as recordDoLink } from '../../../src/durable-objects/project-data/links';
 import type { Env } from '../../../src/env';
 import { operationDeps } from '../../../src/operation-ports';
 import {

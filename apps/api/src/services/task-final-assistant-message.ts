@@ -29,7 +29,7 @@ function toTaskAssistantMessage(message: LogicalMessage, cap: number): TaskAssis
  * The newest `count` assistant replies in a chat, newest first (a reply with no text is left
  * out), each assembled from its streamed
  * chunks inside the object that owns the transcript
- * (`durable-objects/project-data/logical-transcript.ts`) and capped at
+ * (`packages/project-data/src/do/logical-transcript.ts`) and capped at
  * `taskDetailMessageSnippetLength`. The scan is bounded by `connector.transcriptScanRows`: a reply
  * whose start lies beyond it is marked `partialBefore`, and replies beyond it are not returned.
  * Returns an empty list when the transcript cannot be read.
