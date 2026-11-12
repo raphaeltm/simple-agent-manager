@@ -53,7 +53,8 @@ export interface TaskObservation {
 }
 
 export type TaskWaitDecision =
-  { action: 'pending' } | { action: 'wake'; reason: 'condition_met' | 'deadline_reached' };
+  | { action: 'pending' }
+  | { action: 'wake'; reason: 'condition_met' | 'deadline_reached' };
 
 function asString(value: unknown, field: string): string {
   if (typeof value !== 'string') throw new Error(`Invalid task wait ${field}`);

@@ -121,7 +121,9 @@ function cleanupHadFailure(
   return (
     (cleanup !== null && (cleanup.rowsFailed > 0 || cleanup.terminationReason === 'error')) ||
     (groupedFtsCleanup !== null &&
-      ['circuit_breaker', 'error', 'weak_reclaim'].includes(groupedFtsCleanup.terminationReason)) ||
+      ['circuit_breaker', 'error', 'weak_reclaim'].includes(
+        groupedFtsCleanup.terminationReason
+      )) ||
     (eventLogCleanup !== null && eventLogCleanup.terminationReason === 'error')
   );
 }
@@ -264,6 +266,7 @@ export async function runProjectDataStorageSafetyAlarmCore(
     let result: T | null = null;
     try {
       result = await operation();
+
     } catch (error) {
       failedSteps.push(name);
       errors.push(error);
@@ -272,11 +275,7 @@ export async function runProjectDataStorageSafetyAlarmCore(
       try {
         recordStorageSafetyError(sql, `${name}: ${String(error)}`);
       } catch (recordError) {
-        log.warn('step_failure_record_failed', {
-          projectId,
-          step: name,
-          ...serializeError(recordError),
-        });
+        log.warn('step_failure_record_failed', { projectId, step: name, ...serializeError(recordError) });
       }
     }
     // Do not continue if durability itself fails: later operations cannot be
@@ -317,8 +316,7 @@ export async function runProjectDataStorageSafetyAlarmCore(
           transactionSync: callbacks.transactionSync,
           allowStart: measurement !== null || cleanup !== null,
           now,
-          classifyStatus: (databaseSizeBytes) =>
-            callbacks.classifyStatus(databaseSizeBytes, config),
+          classifyStatus: (databaseSizeBytes) => callbacks.classifyStatus(databaseSizeBytes, config),
         })
       : null
   );
@@ -338,29 +336,13 @@ export async function runProjectDataStorageSafetyAlarmCore(
   // A failed cleanup is not an exhausted candidate set. Preserve the failure
   // instead of publishing a misleading target_unreachable alert.
   if (failedSteps.length > 0) {
-    log.warn('step_skipped', {
-      projectId,
-      step: 'cleanup_health',
-      reason: 'cleanup_failed',
-      failedSteps,
-    });
+    log.warn('step_skipped', { projectId, step: 'cleanup_health', reason: 'cleanup_failed', failedSteps });
   }
-  const cleanupHealth =
-    failedSteps.length > 0
-      ? null
-      : await runStep('cleanup_health', () =>
-          persistCleanupHealthTelemetryAndAlerts(
-            sql,
-            env,
-            projectId,
-            config,
-            callbacks,
-            measurement,
-            cleanup,
-            groupedFtsCleanup,
-            eventLogCleanup
-          )
-        );
+  const cleanupHealth = failedSteps.length > 0 ? null : await runStep('cleanup_health', () =>
+    persistCleanupHealthTelemetryAndAlerts(
+      sql, env, projectId, config, callbacks, measurement, cleanup, groupedFtsCleanup, eventLogCleanup
+    )
+  );
   const durationMs = Date.now() - startedAt;
   log.info('completed', {
     projectId,

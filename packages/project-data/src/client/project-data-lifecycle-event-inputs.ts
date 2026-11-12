@@ -23,12 +23,23 @@ const DISPLAY_LABEL_MAX_COUNT = PRODUCER_LIMITS.maxDisplayLabels;
 const TRUNCATION_SUFFIX = '...[truncated]';
 
 type LifecycleSubjectType =
-  'task' | 'session' | 'deployment_environment' | 'deployment_publish_job' | 'deployment_release';
+  | 'task'
+  | 'session'
+  | 'deployment_environment'
+  | 'deployment_publish_job'
+  | 'deployment_release';
 
 type LifecycleTaskStatus = Extract<TaskStatus, 'in_progress' | TaskTerminalStatus>;
 type DeploymentReleaseLifecycleStatus = 'created' | 'applying' | 'applied' | 'failed';
 type DeploymentEnvironmentLifecycleKind =
-  'created' | 'starting' | 'active' | 'stopping' | 'stopped' | 'error' | 'deleted' | 'observed';
+  | 'created'
+  | 'starting'
+  | 'active'
+  | 'stopping'
+  | 'stopped'
+  | 'error'
+  | 'deleted'
+  | 'observed';
 type SessionLifecycleKind = 'started' | 'sleeping' | 'woke' | 'archived' | 'failed';
 
 type LifecycleDisplayInput = {

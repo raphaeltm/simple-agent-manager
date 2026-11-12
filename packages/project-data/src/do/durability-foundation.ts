@@ -206,12 +206,12 @@ export function createCheckpointEpisode(
   const result = hooks.transactionSync(() => checkpoints.createCheckpointEpisode(sql, input));
   if (!result.created) return result;
   projectDataPorts().observability.recordDurableExecutionMetric(env, {
-    metric: 'checkpoint_episode_transition',
-    projectId: hooks.getProjectId(),
-    sessionId: input.sessionId,
-    checkpointEpisodeId: result.episode.id,
-    attemptCount: result.episode.attemptCount,
-    reason: 'planned',
+      metric: 'checkpoint_episode_transition',
+      projectId: hooks.getProjectId(),
+      sessionId: input.sessionId,
+      checkpointEpisodeId: result.episode.id,
+      attemptCount: result.episode.attemptCount,
+      reason: 'planned',
   });
   activityEvents.recordActivityEventInternal(
     sql,
@@ -253,12 +253,12 @@ export function transitionCheckpointEpisode(
   );
   if (!episode || !before || episode.state === before.state) return episode;
   projectDataPorts().observability.recordDurableExecutionMetric(env, {
-    metric: 'checkpoint_episode_transition',
-    projectId: hooks.getProjectId(),
-    sessionId: episode.sessionId,
-    checkpointEpisodeId: episode.id,
-    attemptCount: episode.attemptCount,
-    reason: `${before.state}->${episode.state}`,
+      metric: 'checkpoint_episode_transition',
+      projectId: hooks.getProjectId(),
+      sessionId: episode.sessionId,
+      checkpointEpisodeId: episode.id,
+      attemptCount: episode.attemptCount,
+      reason: `${before.state}->${episode.state}`,
   });
   activityEvents.recordActivityEventInternal(
     sql,

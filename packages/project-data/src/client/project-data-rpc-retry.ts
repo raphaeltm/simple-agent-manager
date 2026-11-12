@@ -102,7 +102,7 @@ export async function retryProjectDataRpc<T, S>(input: {
       firstErrorClass ??= errorClass;
       if (!retryable(err)) throw err;
       const attemptBudget =
-        errorClass === 'connection_lost' || errorClass === 'sqlite_nomem'
+        (errorClass === 'connection_lost' || errorClass === 'sqlite_nomem')
           ? retryConfig.connectionLostMaxAttempts
           : retryConfig.maxAttempts;
       if (attempt >= attemptBudget) {
@@ -113,11 +113,7 @@ export async function retryProjectDataRpc<T, S>(input: {
           attempts: attempt,
           errorClass,
         });
-        if (
-          errorClass === 'cpu_limit_reset' ||
-          errorClass === 'connection_lost' ||
-          errorClass === 'sqlite_nomem'
-        ) {
+        if (errorClass === 'cpu_limit_reset' || errorClass === 'connection_lost' || errorClass === 'sqlite_nomem') {
           throw new ProjectDataUnavailableError(projectId, operation, errorClass);
         }
         throw err;

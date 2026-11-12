@@ -15,27 +15,14 @@ async function getStub(env: Env, projectId: string): Promise<DurableObjectStub<P
 }
 
 export async function createPolicy(
-  env: Env,
-  projectId: string,
-  category: PolicyCategory,
-  title: string,
-  content: string,
-  source: PolicySource,
-  sourceSessionId: string | null,
-  confidence: number,
-  scope: PolicyScope = 'always',
-  expiresAt: number | null = null
+  env: Env, projectId: string,
+  category: PolicyCategory, title: string, content: string,
+  source: PolicySource, sourceSessionId: string | null, confidence: number,
+  scope: PolicyScope = 'always', expiresAt: number | null = null,
 ) {
   const stub = await getStub(env, projectId);
   return stub.createPolicy(
-    category,
-    title,
-    content,
-    source,
-    sourceSessionId,
-    confidence,
-    scope,
-    expiresAt
+    category, title, content, source, sourceSessionId, confidence, scope, expiresAt,
   );
 }
 
@@ -45,30 +32,18 @@ export async function getPolicy(env: Env, projectId: string, policyId: string) {
 }
 
 export async function listPolicies(
-  env: Env,
-  projectId: string,
-  category: string | null,
-  activeOnly: boolean,
-  limit: number,
-  offset: number
+  env: Env, projectId: string, category: string | null, activeOnly: boolean, limit: number, offset: number,
 ) {
   const stub = await getStub(env, projectId);
   return stub.listPolicies(category, activeOnly, limit, offset);
 }
 
 export async function updatePolicy(
-  env: Env,
-  projectId: string,
-  policyId: string,
+  env: Env, projectId: string, policyId: string,
   updates: {
-    title?: string;
-    content?: string;
-    category?: PolicyCategory;
-    active?: boolean;
-    confidence?: number;
-    scope?: PolicyScope;
-    expiresAt?: number | null;
-  }
+    title?: string; content?: string; category?: PolicyCategory; active?: boolean;
+    confidence?: number; scope?: PolicyScope; expiresAt?: number | null;
+  },
 ) {
   const stub = await getStub(env, projectId);
   return stub.updatePolicy(policyId, updates);

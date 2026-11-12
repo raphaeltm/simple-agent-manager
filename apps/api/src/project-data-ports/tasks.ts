@@ -10,22 +10,9 @@ export const tasksPort: TaskLifecyclePort = {
   transitionToTerminal: (env, request) => transitionTaskToTerminal(workerEnv(env), request),
   async preserveFailedWorkOrSurfaceLoss(env, input) {
     // Lazy, as ProjectData always loaded it: only the rare attention-expiry path needs it.
-    const preservation = await import('../services/failed-task-preservation');
-    const { agentUnresponsive, ...target } = input;
-    const outcome = agentUnresponsive
-      ? ({ outcome: 'not_preservable', gap: 'agent_unresponsive' } as const)
-      : await preservation.preserveFailedTaskWork(workerEnv(env), target);
-    if (preservation.withholdsFailedTaskTeardown(outcome)) {
-      return { preserved: true, outcome: outcome.outcome };
-    }
-    await preservation.surfaceFailedTaskWorkLoss(workerEnv(env), {
-      taskId: input.taskId,
-      projectId: input.projectId,
-      chatSessionId: input.chatSessionId,
-      reason: outcome.gap,
-      source: input.source,
-    });
-    return { preserved: false };
+    const { preserveFailedTaskWorkOrSurfaceLoss } =
+      await import('../services/failed-task-work-outcome');
+    return preserveFailedTaskWorkOrSurfaceLoss(workerEnv(env), input);
   },
   async releaseTaskRun(env, taskId) {
     // Lazy, as ProjectData always loaded it: the task runner is a large module graph.

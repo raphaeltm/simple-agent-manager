@@ -59,7 +59,10 @@ export interface ProjectDataToolPayloadCleanupOptions {
 export const PROJECT_DATA_MANUAL_TOOL_PAYLOAD_CLEANUP_RESULT_VERSION = 1 as const;
 
 export type ProjectDataManualToolPayloadCleanupSkipReason =
-  'cooldown' | 'idempotency_in_progress' | 'missing_project_id' | 'not_needed';
+  | 'cooldown'
+  | 'idempotency_in_progress'
+  | 'missing_project_id'
+  | 'not_needed';
 
 export type ProjectDataManualToolPayloadCleanupTerminationReason =
   | ProjectDataToolPayloadCleanupResult['terminationReason']

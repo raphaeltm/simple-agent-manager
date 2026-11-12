@@ -33,12 +33,13 @@ const PORT_MODULES = {
 const PORT_SETUP_TIMEOUT_MS = 120_000;
 
 beforeAll(async () => {
-  const { configureProjectDataPorts } =
+  const { configureProjectDataPort } =
     await import('@simple-agent-manager/project-data/internal/do/ports');
   await Promise.all(
     Object.entries(PORT_MODULES).map(async ([name, load]) => {
       try {
-        configureProjectDataPorts({ [name]: await load() });
+        const port = await load();
+        configureProjectDataPort(name as keyof typeof PORT_MODULES, port as never);
       } catch {
         // This test file's mocks cannot load this port's worker modules; it never
         // reaches the port, or it fails naming the unconfigured port.

@@ -9,10 +9,9 @@
  * .claude/rules/50-list-read-row-fault-isolation.md.
  *
  * The throwing single-row validator (`parseRow`) and its two fault-isolated
- * wrappers live in `project-data/row-schemas/core.ts` (fully generic, no
- * project-data coupling; ProjectData uses them too). This module re-exports them
- * for the other DOs — matching the existing cross-DO precedent in
- * `notification-row-schemas.ts`:
+ * wrappers live in `@simple-agent-manager/worker-core` (`row-parsing.ts`; fully
+ * generic, and ProjectData uses them too). This module re-exports them for the
+ * worker's other DOs:
  *
  *  - `mapRows`: validate a LIST of rows, skipping (and warn-logging) any row
  *    that fails validation instead of throwing the whole read.
@@ -26,11 +25,10 @@
  * no `type` column at all, so `type` is optional here to cover both DOs'
  * SELECTs with one schema.
  */
+import { mapRows, parseRow, parseRowOrNull } from '@simple-agent-manager/worker-core';
 import * as v from 'valibot';
 
-import { mapRows, parseRow, parseRowOrNull } from './project-data/row-schemas';
-
-/** Generic DO row helpers live with ProjectData's row schemas; re-exported for other DOs. */
+/** Generic DO row parsers live in worker-core; re-exported for the worker's Durable Objects. */
 export { mapRows, parseRow, parseRowOrNull };
 
 /** Best-effort row identifier for skip-log diagnostics; `idKey` defaults to `id`. */

@@ -95,13 +95,10 @@ export function buildWakePromptInput(
       ...(urgentAgentClass ? { agentMessageClass: urgentAgentClass } : {}),
       ...(agentMessageChannel ? { agentMessageChannel } : {}),
     },
-    notice: projectDataPorts().notices.safe(
-      () => projectDataPorts().notices.projectEventWake(options.events ?? []),
-      {
-        batchId: options.batchId,
-        subscriptionId: options.subscription.id,
-      }
-    ),
+    notice: projectDataPorts().notices.safe(() => projectDataPorts().notices.projectEventWake(options.events ?? []), {
+      batchId: options.batchId,
+      subscriptionId: options.subscription.id,
+    }),
     ttlMs: options.ttlMs,
     maxMessages: options.maxMessages,
   };

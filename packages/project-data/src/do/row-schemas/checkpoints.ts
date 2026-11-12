@@ -7,7 +7,12 @@ import * as v from 'valibot';
 
 import { parseRow, safeParseJson } from './core';
 
-const ProgressScalarSchema = v.union([v.string(), v.number(), v.boolean(), v.null()]);
+const ProgressScalarSchema = v.union([
+  v.string(),
+  v.number(),
+  v.boolean(),
+  v.null(),
+]);
 
 const CheckpointProgressEnvelopeSchema = v.object({
   messageSequence: v.nullable(v.number()),

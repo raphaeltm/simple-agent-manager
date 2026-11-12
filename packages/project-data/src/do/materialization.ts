@@ -480,7 +480,10 @@ function writePage(
 
   if (head && GROUPABLE_ROLES.has(head.role)) {
     if (trailing === undefined) trailing = readTrailingGroup(sql, sessionId);
-    if (trailing?.role === head.role && trailing.content.length < input.config.maxGroupChars) {
+    if (
+      trailing?.role === head.role &&
+      trailing.content.length < input.config.maxGroupChars
+    ) {
       trailing = extendTrailingGroup(sql, trailing, head);
       index = 1;
       // Checkpoint immediately. Unlike `insertGroup`, extension is a plain
@@ -523,7 +526,8 @@ export function materializeSession(
   let watermark = initialWatermark;
   // Read once per pass, then carried forward: a same-role run spanning several
   // pages would otherwise re-read and rewrite its whole (growing) content per page.
-  let trailing: TrailingGroup | null | undefined = initialWatermark === null ? null : undefined;
+  let trailing: TrailingGroup | null | undefined =
+    initialWatermark === null ? null : undefined;
   let processed = 0;
   let drained = false;
 

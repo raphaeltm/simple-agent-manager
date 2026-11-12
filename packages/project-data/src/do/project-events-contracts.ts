@@ -56,7 +56,11 @@ export class ProjectEventNotFoundError extends Error {
 
   constructor(
     readonly resource:
-      'Project event' | 'Event subscription' | 'Event match' | 'Delivery batch' | 'Delivery attempt'
+      | 'Project event'
+      | 'Event subscription'
+      | 'Event match'
+      | 'Delivery batch'
+      | 'Delivery attempt'
   ) {
     super(`${resource} not found`);
     this.name = 'ProjectEventNotFoundError';

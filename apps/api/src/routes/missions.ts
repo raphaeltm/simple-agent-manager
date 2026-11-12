@@ -32,9 +32,11 @@ missionRoutes.get('/', async (c) => {
   await requireProjectTaskRead(db, projectId, auth.user.id);
 
   const pageSize = Number(c.env.MISSION_LIST_PAGE_SIZE) || DEFAULT_MISSION_LIST_PAGE_SIZE;
-  const maxPageSize =
-    Number(c.env.MISSION_LIST_MAX_PAGE_SIZE) || DEFAULT_MISSION_LIST_MAX_PAGE_SIZE;
-  const limit = Math.min(parseInt(c.req.query('limit') ?? '', 10) || pageSize, maxPageSize);
+  const maxPageSize = Number(c.env.MISSION_LIST_MAX_PAGE_SIZE) || DEFAULT_MISSION_LIST_MAX_PAGE_SIZE;
+  const limit = Math.min(
+    parseInt(c.req.query('limit') ?? '', 10) || pageSize,
+    maxPageSize,
+  );
   const offset = Math.max(parseInt(c.req.query('offset') ?? '', 10) || 0, 0);
   const status = c.req.query('status');
 
@@ -78,18 +80,14 @@ missionRoutes.get('/:missionId', async (c) => {
   await requireProjectTaskRead(db, projectId, auth.user.id);
 
   const mission = await c.env.DATABASE.prepare(
-    'SELECT * FROM missions WHERE id = ? AND project_id = ?'
-  )
-    .bind(missionId, projectId)
-    .first();
+    'SELECT * FROM missions WHERE id = ? AND project_id = ?',
+  ).bind(missionId, projectId).first();
   if (!mission) throw errors.notFound('Mission not found');
 
   // Get task summary
   const taskSummary = await c.env.DATABASE.prepare(
-    `SELECT status, COUNT(*) as cnt FROM tasks WHERE mission_id = ? GROUP BY status`
-  )
-    .bind(missionId)
-    .all();
+    `SELECT status, COUNT(*) as cnt FROM tasks WHERE mission_id = ? GROUP BY status`,
+  ).bind(missionId).all();
 
   const tasks: Record<string, number> = {};
   for (const row of taskSummary.results ?? []) {
@@ -124,19 +122,12 @@ missionRoutes.get('/:missionId/state', async (c) => {
 
   // Verify mission belongs to project
   const mission = await c.env.DATABASE.prepare(
-    'SELECT id FROM missions WHERE id = ? AND project_id = ?'
-  )
-    .bind(missionId, projectId)
-    .first();
+    'SELECT id FROM missions WHERE id = ? AND project_id = ?',
+  ).bind(missionId, projectId).first();
   if (!mission) throw errors.notFound('Mission not found');
 
   const entryType = c.req.query('entryType') ?? null;
-  const entries = await projectDataService.getMissionStateEntries(
-    c.env,
-    projectId,
-    missionId,
-    entryType
-  );
+  const entries = await projectDataService.getMissionStateEntries(c.env, projectId, missionId, entryType);
 
   return c.json({ entries });
 });
@@ -153,10 +144,8 @@ missionRoutes.get('/:missionId/handoffs', async (c) => {
 
   // Verify mission belongs to project
   const mission = await c.env.DATABASE.prepare(
-    'SELECT id FROM missions WHERE id = ? AND project_id = ?'
-  )
-    .bind(missionId, projectId)
-    .first();
+    'SELECT id FROM missions WHERE id = ? AND project_id = ?',
+  ).bind(missionId, projectId).first();
   if (!mission) throw errors.notFound('Mission not found');
 
   const handoffs = await projectDataService.getHandoffPackets(c.env, projectId, missionId);

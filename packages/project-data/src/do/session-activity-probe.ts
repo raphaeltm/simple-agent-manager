@@ -139,14 +139,14 @@ export async function probeStaleSessionActivity(
     if (!changed) continue;
     reconciled += 1;
     projectDataPorts().observability.recordAcpActivityMetric(env, {
-      metric: 'acp_activity_callback',
-      outcome: 'healed',
-      projectId: options.projectId,
-      sessionId: candidate.acpSessionId,
-      nodeId: candidate.nodeId,
-      workspaceId: candidate.workspaceId,
-      activity: 'idle',
-      reason: 'probe_reconciled',
+        metric: 'acp_activity_callback',
+        outcome: 'healed',
+        projectId: options.projectId,
+        sessionId: candidate.acpSessionId,
+        nodeId: candidate.nodeId,
+        workspaceId: candidate.workspaceId,
+        activity: 'idle',
+        reason: 'probe_reconciled',
       source: 'reconciliation_probe',
     });
     recordActivityEventInternal(

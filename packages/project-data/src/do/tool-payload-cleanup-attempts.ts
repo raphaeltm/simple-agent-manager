@@ -13,7 +13,8 @@ export type ToolPayloadCleanupTerminalStatus =
   (typeof TOOL_PAYLOAD_CLEANUP_TERMINAL_STATUSES)[number];
 
 export type ToolPayloadCleanupAttemptStatus =
-  ToolPayloadCleanupTerminalStatus | typeof TOOL_PAYLOAD_CLEANUP_RETRYABLE_STATUS;
+  | ToolPayloadCleanupTerminalStatus
+  | typeof TOOL_PAYLOAD_CLEANUP_RETRYABLE_STATUS;
 
 function truncateAttemptError(value: string | null): string | null {
   if (value === null) return null;
@@ -74,7 +75,10 @@ export function clearToolPayloadCleanupAttempt(sql: SqlStorage, messageId: strin
   sql.exec('DELETE FROM tool_payload_cleanup_attempts WHERE message_id = ?', messageId);
 }
 
-export function readNextToolPayloadCleanupRetryAt(sql: SqlStorage, afterMs: number): number | null {
+export function readNextToolPayloadCleanupRetryAt(
+  sql: SqlStorage,
+  afterMs: number
+): number | null {
   const rows = sql
     .exec(
       `SELECT MIN(next_attempt_at) AS next_attempt_at

@@ -39,7 +39,7 @@ function positiveInt(value: string | undefined, fallback: number): number {
 /**
  * ProjectData-side adapter for the shared task runtime classifier, run inside the
  * ProjectData Durable Object through its task-liveness port
- * (`project-data-ports.ts`). ACP state is read directly from that object's SQLite
+ * (`project-data-ports/task-liveness.ts`). ACP state is read directly from that object's SQLite
  * storage through `sql`, never through self-RPC.
  */
 

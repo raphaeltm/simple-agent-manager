@@ -64,6 +64,7 @@ export { type LinkLimits, type LinkRemove, type LinkWrite, type ResourceLink } f
 export { type LogicalActivity, type LogicalEntry } from './do/logical-transcript';
 export { type LogicalMessage } from './do/logical-transcript-model';
 export {
+  configureProjectDataPort,
   configureProjectDataPorts,
   type CredentialsPort,
   type NoticesPort,
@@ -71,10 +72,16 @@ export {
   type ObservabilityPort,
   type OperationsPort,
   type ProjectDataPorts,
+  type SessionRecoverySourceTaskGuard as ProjectDataSourceTaskGuard,
+  type ProjectEventWakeRecoveryGuard,
   type RuntimePort,
   type SessionLifecyclePort,
   type TaskLifecyclePort,
   type TaskRuntimeLivenessPort,
+  type VmPromptDeliveryAdapter,
+  type VmPromptDeliveryAdapterInput,
+  type VmPromptDeliverySourceTaskGuard,
+  type VmPromptDeliveryTarget,
 } from './do/ports';
 export {
   channelLimits,
@@ -104,14 +111,8 @@ export {
   type PromptDeliveryClaim,
   type PromptDeliveryResult,
 } from './do/prompt-delivery';
-export {
-  mapRows,
-  parseCountCnt,
-  parseEnabled,
-  parseMigrationName,
-  parseRow,
-  parseRowOrNull,
-} from './do/row-schemas';
+// Shared with the worker's Notification Durable Object, which already read them from here.
+export { parseCountCnt, parseEnabled, parseMigrationName } from './do/row-schemas';
 export { type SessionAccessGrantRecord, type SessionAccessResolution } from './do/session-access';
 export { type SessionWakeProgressInput } from './do/session-wake-progress';
 export { type SessionWakeReadyInput } from './do/session-wake-ready';

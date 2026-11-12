@@ -1,7 +1,10 @@
 import { createModuleLogger, serializeError } from '@simple-agent-manager/worker-core';
 import { isDurableObjectSqliteNoMemError } from '@simple-agent-manager/worker-core';
 
-import { SEARCH_INDEX_STATE_COMPLETE, SEARCH_INDEX_STATE_PRUNED } from './materialization';
+import {
+  SEARCH_INDEX_STATE_COMPLETE,
+  SEARCH_INDEX_STATE_PRUNED,
+} from './materialization';
 import type { ProjectDataStorageStatus, StorageSafetyConfig } from './storage-safety';
 import {
   META_LAST_ERROR,
@@ -151,20 +154,18 @@ function readCandidates(
   const cutoff = now - config.groupedFtsCleanupMinSessionAgeMs;
   // Page session IDs before touching content. LIMIT after GROUP BY still lets
   // SQLite aggregate the entire joined content table before applying the limit.
-  const sessions = sql
-    .exec<{ id: string }>(
-      `SELECT id FROM chat_sessions
+  const sessions = sql.exec<{ id: string }>(
+    `SELECT id FROM chat_sessions
      WHERE id > ? AND status IN ('stopped', 'failed')
        AND updated_at <= ? AND materialized_at IS NOT NULL
        AND COALESCE(search_index_state, ?) != ?
      ORDER BY id ASC LIMIT ?`,
-      cursorSessionId ?? '',
-      cutoff,
-      SEARCH_INDEX_STATE_COMPLETE,
-      SEARCH_INDEX_STATE_PRUNED,
-      config.groupedFtsCleanupBatchSessions + 1
-    )
-    .toArray();
+    cursorSessionId ?? '',
+    cutoff,
+    SEARCH_INDEX_STATE_COMPLETE,
+    SEARCH_INDEX_STATE_PRUNED,
+    config.groupedFtsCleanupBatchSessions + 1
+  ).toArray();
 
   const candidates: SessionCandidate[] = [];
   for (const { id: sessionId } of sessions) {

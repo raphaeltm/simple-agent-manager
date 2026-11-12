@@ -30,7 +30,8 @@ export const STORAGE_ALERT_REASON_THRESHOLD = 'threshold_exceeded';
 export const STORAGE_ALERT_REASON_CLEANUP_TARGET_UNREACHABLE = 'cleanup_target_unreachable';
 
 export type ProjectDataStorageAlertReason =
-  typeof STORAGE_ALERT_REASON_THRESHOLD | typeof STORAGE_ALERT_REASON_CLEANUP_TARGET_UNREACHABLE;
+  | typeof STORAGE_ALERT_REASON_THRESHOLD
+  | typeof STORAGE_ALERT_REASON_CLEANUP_TARGET_UNREACHABLE;
 
 type ProjectDataStorageTrendSource = {
   measuredAt: number;
@@ -156,12 +157,7 @@ export async function enrichProjectDataStorageTelemetry(
     ? (telemetry.categoryBreakdown ??
       measureProjectDataStorageCategories(sql, config, telemetry.measuredAt))
     : telemetry.categoryBreakdown;
-  const source = await readGrowthTrendSource(
-    env,
-    telemetry.projectId,
-    telemetry.measuredAt,
-    config
-  );
+  const source = await readGrowthTrendSource(env, telemetry.projectId, telemetry.measuredAt, config);
   const forecast = computeGrowthForecast(telemetry, source);
 
   return {
@@ -395,22 +391,22 @@ export async function maybePersistProjectDataStorageAlert(
   if (!env.OBSERVABILITY_DATABASE) return;
 
   await projectDataPorts().observability.persistPlatformError(env, {
-    source: 'api',
-    level,
-    message,
-    context: {
-      projectId: telemetry.projectId,
-      databaseSizeBytes: telemetry.databaseSizeBytes,
-      limitBytes: telemetry.limitBytes,
-      usageRatio: telemetry.usageRatio,
-      status: telemetry.status,
-      alertReason: reason,
-      growthRateBytesPerDay: telemetry.growthRateBytesPerDay,
-      estimatedDaysToLimit: telemetry.estimatedDaysToLimit,
-      cleanupHealth: telemetry.cleanupHealth,
-      reclaimableBytes: telemetry.reclaimableBytes,
-      categoryBreakdown: telemetry.categoryBreakdown,
-    },
+      source: 'api',
+      level,
+      message,
+      context: {
+        projectId: telemetry.projectId,
+        databaseSizeBytes: telemetry.databaseSizeBytes,
+        limitBytes: telemetry.limitBytes,
+        usageRatio: telemetry.usageRatio,
+        status: telemetry.status,
+        alertReason: reason,
+        growthRateBytesPerDay: telemetry.growthRateBytesPerDay,
+        estimatedDaysToLimit: telemetry.estimatedDaysToLimit,
+        cleanupHealth: telemetry.cleanupHealth,
+        reclaimableBytes: telemetry.reclaimableBytes,
+        categoryBreakdown: telemetry.categoryBreakdown,
+      },
   });
 
   // Record the throttle as soon as the alert row exists. The D1 bookkeeping below can fail, and

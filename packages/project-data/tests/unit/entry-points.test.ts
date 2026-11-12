@@ -19,8 +19,7 @@ describe('project-data entry points', () => {
       'decideAgentWake',
       'loadSharedSessionNames',
       'buildSessionLifecycleEventInput',
-      'mapRows',
-      'parseRowOrNull',
+      'parseCountCnt',
       'breakerWasClosedBeforeOpening',
     ]) {
       expect(main, name).toHaveProperty(name);

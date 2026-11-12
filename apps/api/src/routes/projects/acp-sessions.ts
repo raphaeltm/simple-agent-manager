@@ -1,4 +1,6 @@
-import type { AcpSessionStatus } from '@simple-agent-manager/shared';
+import type {
+  AcpSessionStatus,
+} from '@simple-agent-manager/shared';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -10,14 +12,7 @@ import { parsePositiveInt } from '../../lib/route-helpers';
 import { getUserId } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireProjectAccess, requireProjectCapability } from '../../middleware/project-auth';
-import {
-  AcpSessionAssignSchema,
-  AcpSessionForkSchema,
-  AcpSessionHeartbeatSchema,
-  AcpSessionStatusReportSchema,
-  CreateAcpSessionSchema,
-  jsonValidator,
-} from '../../schemas';
+import { AcpSessionAssignSchema, AcpSessionForkSchema,AcpSessionHeartbeatSchema, AcpSessionStatusReportSchema, CreateAcpSessionSchema, jsonValidator } from '../../schemas';
 import * as projectDataService from '../../services/project-data';
 import { markVmAgentContainerActiveWorkEndedBestEffort } from '../../services/vm-agent-container';
 
@@ -38,7 +33,7 @@ async function verifySessionNode(
   sessionId: string,
   nodeId: string,
   userId: string,
-  logTag: string
+  logTag: string,
 ) {
   const existing = await projectDataService.getAcpSession(env, projectId, sessionId);
   if (!existing) {
@@ -68,9 +63,7 @@ acpSessionRoutes.post('/:id/acp-sessions', jsonValidator(CreateAcpSessionSchema)
   const body = c.req.valid('json');
   const chatSessionId = body.chatSessionId ?? '';
   if (body.agentProfileId) {
-    throw errors.badRequest(
-      'agentProfileId is not supported by direct ACP session creation; use task or chat submit so profile model and effort are applied'
-    );
+    throw errors.badRequest('agentProfileId is not supported by direct ACP session creation; use task or chat submit so profile model and effort are applied');
   }
 
   // Validate initialPrompt length (256 KB default, configurable via MAX_ACP_PROMPT_BYTES)
@@ -129,48 +122,44 @@ acpSessionRoutes.get('/:id/acp-sessions/:sessionId', async (c) => {
 });
 
 /** POST /:id/acp-sessions/:sessionId/assign — Assign workspace + node to session */
-acpSessionRoutes.post(
-  '/:id/acp-sessions/:sessionId/assign',
-  jsonValidator(AcpSessionAssignSchema),
-  async (c) => {
-    const userId = getUserId(c);
-    const projectId = c.req.param('id');
-    const sessionId = c.req.param('sessionId');
-    const db = drizzle(c.env.DATABASE, { schema });
-    await requireProjectCapability(db, projectId, userId, 'workspace:write');
+acpSessionRoutes.post('/:id/acp-sessions/:sessionId/assign', jsonValidator(AcpSessionAssignSchema), async (c) => {
+  const userId = getUserId(c);
+  const projectId = c.req.param('id');
+  const sessionId = c.req.param('sessionId');
+  const db = drizzle(c.env.DATABASE, { schema });
+  await requireProjectCapability(db, projectId, userId, 'workspace:write');
 
-    const body = c.req.valid('json');
+  const body = c.req.valid('json');
 
-    // US3: Validate workspace belongs to this project
-    const workspace = await db.query.workspaces.findFirst({
-      where: eq(schema.workspaces.id, body.workspaceId),
-    });
-    if (!workspace) {
-      throw errors.notFound('Workspace not found');
-    }
-    if (workspace.projectId !== projectId) {
-      throw errors.badRequest(
-        `Workspace ${body.workspaceId} belongs to project ${workspace.projectId ?? 'none'}, not ${projectId}`
-      );
-    }
-
-    const session = await projectDataService.transitionAcpSession(
-      c.env,
-      projectId,
-      sessionId,
-      'assigned',
-      {
-        actorType: 'system',
-        actorId: userId,
-        reason: 'Workspace assigned',
-        workspaceId: body.workspaceId,
-        nodeId: body.nodeId,
-      }
-    );
-
-    return c.json(session);
+  // US3: Validate workspace belongs to this project
+  const workspace = await db.query.workspaces.findFirst({
+    where: eq(schema.workspaces.id, body.workspaceId),
+  });
+  if (!workspace) {
+    throw errors.notFound('Workspace not found');
   }
-);
+  if (workspace.projectId !== projectId) {
+    throw errors.badRequest(
+      `Workspace ${body.workspaceId} belongs to project ${workspace.projectId ?? 'none'}, not ${projectId}`
+    );
+  }
+
+  const session = await projectDataService.transitionAcpSession(
+    c.env,
+    projectId,
+    sessionId,
+    'assigned',
+    {
+      actorType: 'system',
+      actorId: userId,
+      reason: 'Workspace assigned',
+      workspaceId: body.workspaceId,
+      nodeId: body.nodeId,
+    }
+  );
+
+  return c.json(session);
+});
 
 /**
  * POST /:id/acp-sessions/:sessionId/status — VM agent reports status change.
@@ -182,84 +171,69 @@ acpSessionRoutes.post(
  * workspace owner, not necessarily the project owner, and the nodeId check
  * provides identity verification at the session level.
  */
-acpSessionRoutes.post(
-  '/:id/acp-sessions/:sessionId/status',
-  jsonValidator(AcpSessionStatusReportSchema),
-  async (c) => {
-    const userId = getUserId(c);
-    const projectId = c.req.param('id');
-    const sessionId = c.req.param('sessionId');
+acpSessionRoutes.post('/:id/acp-sessions/:sessionId/status', jsonValidator(AcpSessionStatusReportSchema), async (c) => {
+  const userId = getUserId(c);
+  const projectId = c.req.param('id');
+  const sessionId = c.req.param('sessionId');
 
-    const body = c.req.valid('json');
+  const body = c.req.valid('json');
 
-    // Runtime allowlist — VM agents can only report these statuses
-    const ALLOWED_REPORTED_STATUSES = ['running', 'completed', 'failed'] as const;
-    if (!(ALLOWED_REPORTED_STATUSES as readonly string[]).includes(body.status)) {
-      throw errors.badRequest('status must be running, completed, or failed');
-    }
-
-    if (body.status === 'running' && !body.acpSdkSessionId) {
-      throw errors.badRequest('acpSdkSessionId is required when reporting running status');
-    }
-
-    // Validate node matches assigned node
-    const existing = await verifySessionNode(
-      c.env,
-      projectId,
-      sessionId,
-      body.nodeId,
-      userId,
-      'status'
-    );
-
-    const session = await projectDataService.transitionAcpSession(
-      c.env,
-      projectId,
-      sessionId,
-      body.status,
-      {
-        actorType: 'vm-agent',
-        actorId: body.nodeId,
-        reason: body.status === 'failed' ? body.errorMessage : undefined,
-        acpSdkSessionId: body.acpSdkSessionId,
-        errorMessage: body.errorMessage,
-      }
-    );
-
-    if (body.status === 'completed' || body.status === 'failed') {
-      await markVmAgentContainerActiveWorkEndedBestEffort(
-        c.env,
-        existing.nodeId,
-        `acp_status_${body.status}`
-      );
-    }
-
-    return c.json(session);
+  // Runtime allowlist — VM agents can only report these statuses
+  const ALLOWED_REPORTED_STATUSES = ['running', 'completed', 'failed'] as const;
+  if (!(ALLOWED_REPORTED_STATUSES as readonly string[]).includes(body.status)) {
+    throw errors.badRequest('status must be running, completed, or failed');
   }
-);
+
+  if (body.status === 'running' && !body.acpSdkSessionId) {
+    throw errors.badRequest('acpSdkSessionId is required when reporting running status');
+  }
+
+  // Validate node matches assigned node
+  const existing = await verifySessionNode(c.env, projectId, sessionId, body.nodeId, userId, 'status');
+
+  const session = await projectDataService.transitionAcpSession(
+    c.env,
+    projectId,
+    sessionId,
+    body.status,
+    {
+      actorType: 'vm-agent',
+      actorId: body.nodeId,
+      reason: body.status === 'failed' ? body.errorMessage : undefined,
+      acpSdkSessionId: body.acpSdkSessionId,
+      errorMessage: body.errorMessage,
+    }
+  );
+
+  if (body.status === 'completed' || body.status === 'failed') {
+    await markVmAgentContainerActiveWorkEndedBestEffort(
+      c.env,
+      existing.nodeId,
+      `acp_status_${body.status}`
+    );
+  }
+
+  return c.json(session);
+});
 
 /**
  * POST /:id/acp-sessions/:sessionId/heartbeat — Per-session ACP heartbeat.
  * Auth: BetterAuth session cookie via requireAuth() + nodeId verification (same model as /status above).
  */
-acpSessionRoutes.post(
-  '/:id/acp-sessions/:sessionId/heartbeat',
-  jsonValidator(AcpSessionHeartbeatSchema),
-  async (c) => {
-    const userId = getUserId(c); // Ensure authenticated (session cookie validated by requireAuth middleware)
-    const projectId = c.req.param('id');
-    const sessionId = c.req.param('sessionId');
+acpSessionRoutes.post('/:id/acp-sessions/:sessionId/heartbeat', jsonValidator(AcpSessionHeartbeatSchema), async (c) => {
+  const userId = getUserId(c); // Ensure authenticated (session cookie validated by requireAuth middleware)
+  const projectId = c.req.param('id');
+  const sessionId = c.req.param('sessionId');
 
-    const body = c.req.valid('json');
+  const body = c.req.valid('json');
 
-    // Validate node matches assigned node — prevents cross-user session manipulation.
-    // See AUTH-VULN-05 in Shannon security assessment.
-    await verifySessionNode(c.env, projectId, sessionId, body.nodeId, userId, 'heartbeat');
+  // Validate node matches assigned node — prevents cross-user session manipulation.
+  // See AUTH-VULN-05 in Shannon security assessment.
+  await verifySessionNode(c.env, projectId, sessionId, body.nodeId, userId, 'heartbeat');
 
-    await projectDataService.updateAcpSessionHeartbeat(c.env, projectId, sessionId, body.nodeId);
-    return c.body(null, 204);
-  }
-);
+  await projectDataService.updateAcpSessionHeartbeat(c.env, projectId, sessionId, body.nodeId);
+  return c.body(null, 204);
+});
 
 /**
  * POST /:id/acp-sessions/:sessionId/activity — MOVED to agent-activity-callback.ts
@@ -270,37 +244,30 @@ acpSessionRoutes.post(
  */
 
 /** POST /:id/acp-sessions/:sessionId/fork — Fork a completed/interrupted session */
-acpSessionRoutes.post(
-  '/:id/acp-sessions/:sessionId/fork',
-  jsonValidator(AcpSessionForkSchema),
-  async (c) => {
-    const userId = getUserId(c);
-    const projectId = c.req.param('id');
-    const sessionId = c.req.param('sessionId');
-    const db = drizzle(c.env.DATABASE, { schema });
-    await requireProjectCapability(db, projectId, userId, 'task:write');
+acpSessionRoutes.post('/:id/acp-sessions/:sessionId/fork', jsonValidator(AcpSessionForkSchema), async (c) => {
+  const userId = getUserId(c);
+  const projectId = c.req.param('id');
+  const sessionId = c.req.param('sessionId');
+  const db = drizzle(c.env.DATABASE, { schema });
+  await requireProjectCapability(db, projectId, userId, 'task:write');
 
-    const body = c.req.valid('json');
+  const body = c.req.valid('json');
 
-    // Validate contextSummary length (256 KB default, configurable via MAX_ACP_CONTEXT_BYTES)
-    const maxContextBytes = parsePositiveInt(
-      c.env.MAX_ACP_CONTEXT_BYTES as string,
-      DEFAULT_MAX_ACP_CONTEXT_BYTES
-    );
-    if (new TextEncoder().encode(body.contextSummary).length > maxContextBytes) {
-      throw errors.badRequest(`contextSummary exceeds maximum size of ${maxContextBytes} bytes`);
-    }
-
-    const forked = await projectDataService.forkAcpSession(
-      c.env,
-      projectId,
-      sessionId,
-      body.contextSummary
-    );
-
-    return c.json(forked, 201);
+  // Validate contextSummary length (256 KB default, configurable via MAX_ACP_CONTEXT_BYTES)
+  const maxContextBytes = parsePositiveInt(c.env.MAX_ACP_CONTEXT_BYTES as string, DEFAULT_MAX_ACP_CONTEXT_BYTES);
+  if (new TextEncoder().encode(body.contextSummary).length > maxContextBytes) {
+    throw errors.badRequest(`contextSummary exceeds maximum size of ${maxContextBytes} bytes`);
   }
-);
+
+  const forked = await projectDataService.forkAcpSession(
+    c.env,
+    projectId,
+    sessionId,
+    body.contextSummary
+  );
+
+  return c.json(forked, 201);
+});
 
 /** GET /:id/acp-sessions/:sessionId/lineage — Get fork lineage tree */
 acpSessionRoutes.get('/:id/acp-sessions/:sessionId/lineage', async (c) => {

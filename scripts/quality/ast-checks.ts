@@ -141,7 +141,12 @@ const rules: Rule[] = [
     check(ctx) {
       // Only check DO files — these are the most critical for structured logging
       // since DOs are the source of truth and hardest to debug in production
-      if (!ctx.relPath.includes('durable-objects/')) return;
+      // Durable Object code: the worker's DOs, and ProjectData's (packages/project-data/src/do/).
+      if (
+        !ctx.relPath.includes('durable-objects/') &&
+        !ctx.relPath.includes('project-data/src/do/')
+      )
+        return;
 
       const throwStatements = ctx.sourceFile.getDescendantsOfKind(SyntaxKind.ThrowStatement);
       for (const throwStmt of throwStatements) {
@@ -370,7 +375,11 @@ function main() {
       project.addSourceFileAtPath(f);
     }
   } else {
-    project.addSourceFilesAtPaths([resolve(ROOT, 'apps/api/src/**/*.ts')]);
+    project.addSourceFilesAtPaths([
+      resolve(ROOT, 'apps/api/src/**/*.ts'),
+      // Worker modules extracted into packages still run in this Worker (worker modularization).
+      resolve(ROOT, 'packages/project-data/src/**/*.ts'),
+    ]);
   }
 
   const allFindings: Finding[] = [];

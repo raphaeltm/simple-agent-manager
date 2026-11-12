@@ -83,16 +83,28 @@ import type {
   UpdateCommentStatusInput,
   UpdateFileCommentStatusInput,
 } from '../do/comment-contracts';
-import { CommentNotFoundError, CommentValidationError } from '../do/comment-contracts';
+import {
+  CommentNotFoundError,
+  CommentValidationError,
+} from '../do/comment-contracts';
 import type { ProjectDataGroupedFtsCleanupResult } from '../do/grouped-fts-cleanup';
 import type {
   GroupedFtsWallRecoveryRequest,
   GroupedFtsWallRecoveryResult,
 } from '../do/grouped-fts-wall-recovery';
 import type { IdeaWorkLinkCaps, IdeaWorkSnapshot } from '../do/idea-work';
-import type { LogicalMessageRequest, LogicalMessageResult } from '../do/logical-message';
-import type { LogicalTranscriptRequest, LogicalTranscriptResult } from '../do/logical-transcript';
-import type { MessageContextRequest, MessageContextResult } from '../do/message-context';
+import type {
+  LogicalMessageRequest,
+  LogicalMessageResult,
+} from '../do/logical-message';
+import type {
+  LogicalTranscriptRequest,
+  LogicalTranscriptResult,
+} from '../do/logical-transcript';
+import type {
+  MessageContextRequest,
+  MessageContextResult,
+} from '../do/message-context';
 import type { SearchResult } from '../do/message-search';
 import {
   AgentMessageRecipientUnavailableError,
@@ -148,10 +160,7 @@ export {
   ProjectEventValidationError,
 } from '../do/project-events-contracts';
 import { log } from '@simple-agent-manager/worker-core';
-import {
-  type NormalizedSearchQuery,
-  normalizeSearchQuery,
-} from '@simple-agent-manager/worker-core';
+import { type NormalizedSearchQuery, normalizeSearchQuery } from '@simple-agent-manager/worker-core';
 import { isDurableObjectStorageFullError } from '@simple-agent-manager/worker-core';
 
 import {
@@ -165,7 +174,10 @@ import {
 } from '../archive/contract';
 import { projectDataPorts } from '../do/ports';
 import type { ValidateProjectEventWakeRecoveryAuthorityInput } from '../do/project-events-wake-delivery';
-import type { AcceptedPromptDelivery, AcceptPromptDeliveryInput } from '../do/prompt-delivery';
+import type {
+  AcceptedPromptDelivery,
+  AcceptPromptDeliveryInput,
+} from '../do/prompt-delivery';
 import type { ActivityReportOutcome } from '../do/session-work-clock';
 import type {
   CreateReservedTaskSessionWithInitialMessageInput,
@@ -668,7 +680,10 @@ export async function sleepSession(
   env: Env,
   projectId: string,
   sessionId: string,
-  options?: Omit<import('../do/sessions').SleepSessionOptions, 'stoppedOnly'> & {
+  options?: Omit<
+    import('../do/sessions').SleepSessionOptions,
+    'stoppedOnly'
+  > & {
     runtimeGuard?: import('../do/session-sleep-runtime-guard').SessionSleepRuntimeGuard;
   }
 ): Promise<boolean> {
@@ -756,15 +771,12 @@ export async function wakeSessionForSnapshotRecovery(
     sessionId,
     'wakeSessionForSnapshotRecovery'
   );
-  const allowStopped = await projectDataPorts().sessions.hasAuthorizedRestorableSnapshotWakeClaim(
-    env,
-    {
-      projectId,
-      chatSessionId: sessionId,
-      workspaceId,
-      taskId,
-    }
-  );
+  const allowStopped = await projectDataPorts().sessions.hasAuthorizedRestorableSnapshotWakeClaim(env, {
+    projectId,
+    chatSessionId: sessionId,
+    workspaceId,
+    taskId,
+  });
   if (!allowStopped) return false;
   const stub = await getStub(env, projectId);
   const previousStatus = sessionStatus(await stub.getSession(sessionId));
@@ -1040,7 +1052,7 @@ export async function getMessages(
 /**
  * The stored messages around one message, read from whichever object owns the transcript
  * (the project root, or an archive shard after the session was archived). For reading a
- * comment in its conversation; see `durable-objects/project-data/message-context.ts`.
+ * comment in its conversation; see `do/message-context.ts`.
  */
 export async function getMessageContextWindow(
   env: Env,
@@ -1064,7 +1076,7 @@ export async function getMessageContextWindow(
 
 /**
  * A transcript page counted in whole messages, from whichever object owns the transcript. See
- * `durable-objects/project-data/logical-transcript.ts`.
+ * `do/logical-transcript.ts`.
  */
 export async function getLogicalTranscriptPage(
   env: Env,
@@ -1097,7 +1109,7 @@ export function resolveTranscriptOwner(
 
 /**
  * One whole message by any of its stored rows, from whichever object owns the transcript. See
- * `durable-objects/project-data/logical-message.ts`. Pass `owner` from `resolveTranscriptOwner`
+ * `do/logical-message.ts`. Pass `owner` from `resolveTranscriptOwner`
  * when reading several messages of one chat.
  */
 export async function getLogicalMessage(

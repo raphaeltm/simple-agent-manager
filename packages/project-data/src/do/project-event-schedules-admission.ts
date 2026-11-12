@@ -20,7 +20,10 @@ import {
   type AcceptPromptDeliveryInput,
   acceptPromptDeliveryInTransaction,
 } from './prompt-delivery';
-import { buildSharedSessionSpeakerLine, type SharedSessionNames } from './shared-session-names';
+import {
+  buildSharedSessionSpeakerLine,
+  type SharedSessionNames,
+} from './shared-session-names';
 import type { Env } from './types';
 
 /** A teammate's scheduled message: who sent it, as the runner resolved it before admission. */

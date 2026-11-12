@@ -132,11 +132,11 @@ export async function runPromptDeliveryClaim(
 ): Promise<PromptDeliveryResult> {
   const startedAt = Date.now();
   projectDataPorts().observability.recordDurableExecutionMetric(env, {
-    metric: 'prompt_delivery_attempt',
-    projectId: hooks.projectId,
-    sessionId: claim.message.targetSessionId,
-    deliveryId: claim.message.id,
-    attemptCount: claim.message.deliveryAttempts,
+      metric: 'prompt_delivery_attempt',
+      projectId: hooks.projectId,
+      sessionId: claim.message.targetSessionId,
+      deliveryId: claim.message.id,
+      attemptCount: claim.message.deliveryAttempts,
   });
 
   let result: PromptDeliveryResult;
@@ -313,13 +313,13 @@ export async function runPromptDeliveryClaim(
     } as const
   )[result.kind];
   projectDataPorts().observability.recordDurableExecutionMetric(env, {
-    metric,
-    projectId: hooks.projectId,
-    sessionId: claim.message.targetSessionId,
-    deliveryId: claim.message.id,
-    attemptCount: claim.message.deliveryAttempts,
-    durationMs: Date.now() - startedAt,
-    reason: 'reason' in result ? result.reason : null,
+      metric,
+      projectId: hooks.projectId,
+      sessionId: claim.message.targetSessionId,
+      deliveryId: claim.message.id,
+      attemptCount: claim.message.deliveryAttempts,
+      durationMs: Date.now() - startedAt,
+      reason: 'reason' in result ? result.reason : null,
   });
 
   if (applied) {

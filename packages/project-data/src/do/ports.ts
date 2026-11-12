@@ -5,7 +5,8 @@
  * runtime liveness, session recovery, node agent calls, prompt transport, notices
  * and telemetry belong to other areas, so this module declares the small typed
  * interface ProjectData calls and the worker supplies the implementation
- * (`apps/api/src/project-data-ports.ts`) once, at module load, through
+ * (one module per port in `apps/api/src/project-data-ports/`), installed once at
+ * module load by `apps/api/src/project-data-wiring.ts` through
  * `configureProjectDataPorts()`.
  *
  * Every method takes the caller's narrow ProjectData env. At runtime a Durable
@@ -284,13 +285,10 @@ export interface VmPromptDeliveryTarget {
 }
 
 /** Source-task authority carried by a delivery; a wake it causes must honor it. */
-export interface VmPromptDeliverySourceTaskGuard {
-  taskId: string;
-  projectId: string;
-  chatSessionId: string;
-  projectEventWake?: ProjectEventWakeRecoveryGuard | null;
-  requiredProjectMemberId?: string | null;
-}
+export type VmPromptDeliverySourceTaskGuard = Pick<
+  SessionRecoverySourceTaskGuard,
+  'taskId' | 'projectId' | 'chatSessionId' | 'projectEventWake' | 'requiredProjectMemberId'
+>;
 
 export interface VmPromptDeliveryAdapterInput {
   projectId: string;
@@ -466,7 +464,11 @@ export interface NotificationsPort {
   resendPush(env: Env, userId: string, notificationId: string): Promise<void>;
 }
 
-/** A task's provider usage-limit hold, as ProjectData's delivery gates read it. */
+/**
+ * A task's provider usage-limit hold, as ProjectData's delivery gates read it: a deliberate
+ * subset of the worker's valibot-derived record (`services/provider-limit-policy.ts`), whose
+ * port implementation proves the two stay compatible.
+ */
 export interface ProviderLimitWait {
   phase: 'waiting' | 'blocked' | 'released';
   credentialKey: string | null;
@@ -502,30 +504,26 @@ export interface ProjectDataPorts {
  * Held on `globalThis`, not in a module variable, so a module-registry reset (a
  * test's `vi.resetModules()`, or a bundler duplicating this module) cannot leave a
  * second, unconfigured copy behind.
+ *
+ * Contract: the worker entry must evaluate `apps/api/src/project-data-wiring.ts`
+ * (it exports the `ProjectData` class from there) before any ProjectData client,
+ * cron job or Durable Object code runs. `apps/api/tests/unit/project-data-wiring.test.ts`
+ * proves the entry does so.
  */
 const PORTS_KEY = Symbol.for('sam.project-data.ports');
 
+interface PortsRegistry {
+  ports: Partial<ProjectDataPorts>;
+  /** Built once per install, not per call: alarm sweeps read ports per candidate. */
+  view: ProjectDataPorts;
+}
+
 interface PortsHolder {
-  [PORTS_KEY]?: Partial<ProjectDataPorts>;
+  [PORTS_KEY]?: PortsRegistry;
 }
 
-/**
- * Install port implementations. The worker entry installs every port once at
- * module load (`project-data-wiring.ts`); test setup may install them one port at
- * a time. Later calls replace the ports they name and keep the rest.
- */
-export function configureProjectDataPorts(ports: Partial<ProjectDataPorts>): void {
-  const holder = globalThis as PortsHolder;
-  holder[PORTS_KEY] = { ...holder[PORTS_KEY], ...ports };
-}
-
-/**
- * The configured ports. Reading a port the worker never installed throws, naming
- * it: that is a wiring bug, never a runtime condition to tolerate.
- */
-export function projectDataPorts(): ProjectDataPorts {
-  const configured = (globalThis as PortsHolder)[PORTS_KEY] ?? {};
-  return new Proxy(configured, {
+function install(ports: Partial<ProjectDataPorts>): void {
+  const view = new Proxy(ports, {
     get(target, name: string | symbol) {
       const port = Reflect.get(target, name);
       if (port === undefined && typeof name === 'string') {
@@ -536,4 +534,46 @@ export function projectDataPorts(): ProjectDataPorts {
       return port;
     },
   }) as ProjectDataPorts;
+  (globalThis as PortsHolder)[PORTS_KEY] = { ports, view };
+}
+
+/** Install every port. The worker entry calls this once at module load. */
+export function configureProjectDataPorts(ports: ProjectDataPorts): void {
+  install({ ...ports });
+}
+
+/**
+ * Install or replace a single port, keeping the others. For test setup, which loads
+ * each port's worker modules separately so one test's partial mocks cannot break
+ * the ports it never uses.
+ */
+export function configureProjectDataPort<K extends keyof ProjectDataPorts>(
+  name: K,
+  port: ProjectDataPorts[K]
+): void {
+  const current = (globalThis as PortsHolder)[PORTS_KEY]?.ports ?? {};
+  install({ ...current, [name]: port });
+}
+
+const UNCONFIGURED: PortsRegistry = (() => {
+  const ports: Partial<ProjectDataPorts> = {};
+  return {
+    ports,
+    view: new Proxy(ports, {
+      get(_target, name: string | symbol) {
+        if (typeof name !== 'string') return undefined;
+        throw new Error(
+          `ProjectData port "${name}" is not configured: call configureProjectDataPorts() from the worker entry`
+        );
+      },
+    }) as ProjectDataPorts,
+  };
+})();
+
+/**
+ * The configured ports. Reading a port the worker never installed throws, naming
+ * it: that is a wiring bug, never a runtime condition to tolerate.
+ */
+export function projectDataPorts(): ProjectDataPorts {
+  return ((globalThis as PortsHolder)[PORTS_KEY] ?? UNCONFIGURED).view;
 }

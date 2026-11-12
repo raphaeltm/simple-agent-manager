@@ -1,4 +1,3 @@
-import { SESSION_WRITER_PROMPT_SOURCES } from '@simple-agent-manager/project-data/internal/do/session-access-store';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -7,7 +6,8 @@ import {
   DEFAULT_AGENT_WAKE_POLICY_MODE,
   HUMAN_AGENT_WAKE_TRIGGERS,
   HUMAN_PROMPT_DELIVERY_TRIGGERS,
-} from '../../../src/lib/agent-wake-policy';
+} from '../../src/do/agent-wake-policy';
+import { SESSION_WRITER_PROMPT_SOURCES } from '../../src/do/session-access-store';
 
 const base = { sessionId: 'session-1', trigger: 'comment_directive' as const };
 

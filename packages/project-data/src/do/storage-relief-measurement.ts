@@ -1,4 +1,7 @@
-import { SEARCH_INDEX_STATE_COMPLETE, SEARCH_INDEX_STATE_PRUNED } from './materialization';
+import {
+  SEARCH_INDEX_STATE_COMPLETE,
+  SEARCH_INDEX_STATE_PRUNED,
+} from './materialization';
 import type { StorageSafetyConfig } from './storage-safety';
 import { projectToolPayloadArchiveRelief } from './tool-payload-archive';
 import type { Env } from './types';

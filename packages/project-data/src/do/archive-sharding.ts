@@ -37,7 +37,10 @@ import {
   createCanonicalRowsHasher,
   sha256Hex,
 } from '../archive/hashing';
-import { type ArchiveWriteReservation, estimateArchiveWrites } from '../archive/write-budget';
+import {
+  type ArchiveWriteReservation,
+  estimateArchiveWrites,
+} from '../archive/write-budget';
 import {
   MESSAGE_COMMENT_REPLY_COUNT_SQL,
   MESSAGE_COMMENT_THREAD_COUNT_SQL,

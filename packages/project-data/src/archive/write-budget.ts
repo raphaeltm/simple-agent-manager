@@ -115,10 +115,13 @@ export function archiveAffordableMessageCeiling(
  *   a defect in the estimator or its inputs.
  */
 export type ArchiveWriteRefusalReason =
-  'invalid_estimate' | 'exceeds_allowance' | 'window_exhausted';
+  | 'invalid_estimate'
+  | 'exceeds_allowance'
+  | 'window_exhausted';
 
 export type ArchiveWriteReservationOutcome =
-  { reserved: true } | { reserved: false; reason: ArchiveWriteRefusalReason };
+  | { reserved: true }
+  | { reserved: false; reason: ArchiveWriteRefusalReason };
 
 /** Indexed, session-scoped, capped inventory. Includes FTS text size as well as row count.
  * This is a conservative scheduling estimate, NOT a Cloudflare invoice ceiling.

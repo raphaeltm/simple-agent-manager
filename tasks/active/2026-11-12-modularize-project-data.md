@@ -44,8 +44,8 @@ core branch `sam/help-identify-parts-worker-embcza`.
 ## Design decisions
 
 - **Port registry.** The package exports `ProjectDataPorts` and `configureProjectDataPorts()`.
-  The worker entry configures it once at module load with an implementation in
-  `apps/api/src/project-data-ports.ts`. Port methods take the caller's narrow env; the worker
+  The worker entry configures it once at module load with one module per port in
+  `apps/api/src/project-data-ports/`, installed by `apps/api/src/project-data-wiring.ts`. Port methods take the caller's narrow env; the worker
   implementation casts it to the worker `Env` in that one file (rule 51 sanctioned
   guard-then-cast: a DO receives the full Worker env at runtime). This relocates the 12
   existing `env as unknown as WorkerEnv` casts into one documented boundary.
@@ -62,7 +62,7 @@ core branch `sam/help-identify-parts-worker-embcza`.
 
 ### Step 1 — decouple in place
 - [x] `ProjectDataEnv` (`durable-objects/project-data/types.ts`) + `ports.ts` registry
-- [x] Worker port implementation `src/project-data-ports.ts`; `src/project-data-wiring.ts`
+- [x] Worker port implementation `src/project-data-ports/` (one module per port); `src/project-data-wiring.ts`
       configures it and re-exports the class; unit tests configure in `tests/setup/project-data-ports.ts`
 - [x] Replace every outside import in scope with ports / moved modules (remaining: W0 kernel
       candidates route-helpers, search-query-limits, fts5, durable-object-retry; W2's
@@ -112,3 +112,41 @@ core branch `sam/help-identify-parts-worker-embcza`.
   (client + types + ports), `./durable-object`, `./scheduled`. Old worker paths of the 39
   externally imported modules keep named re-exports. ~66 unit tests that touch only ProjectData
   move into the package with fake ports; tests that mix worker modules stay in apps/api.
+
+## Review outcomes (head after review fixes)
+
+- cloudflare-specialist: PASS, no CRITICAL/HIGH. Addressed: wiring test, cached port view, stale doc.
+- architecture-reviewer: 3 HIGH addressed: the package owns the prompt-delivery adapter contract and
+  the source-task guard (worker files import and re-export them; `SessionRecoverySourceTaskGuard`
+  extends the package guard); `parseRow`/`mapRows`/`parseRowOrNull` moved to worker-core
+  (`row-parsing.ts`) instead of project-data; `tests/unit/project-data-wiring.test.ts` loads the
+  worker entry with an empty registry and asserts all nine ports (red when the install is removed).
+  Also addressed: `configureProjectDataPorts` takes the full port set, tests use
+  `configureProjectDataPort`; the failed-work orchestration lives in
+  `services/failed-task-work-outcome.ts`; formatting-only churn reverted (14 worker files and all
+  moved package sources, so `knowledge.ts` is back to 747 lines); stale path comments fixed.
+  Deferred, with reasons:
+  - Removing the ~300 `Env` fields now inherited from `ProjectDataEnv`: seven workstreams edit
+    `env.ts` in parallel; dedupe belongs to the coordinator's final integration step.
+  - Pure functions behind ports (notices, provider-limit parsing): the brief names notices and
+    provider-limit-policy as W1 ports.
+  - The task-liveness port receives the DO's `SqlStorage` and the worker adapter reads ACP signals
+    through the package: behaviour-preserving; replacing it with a callback is a follow-up.
+  - `./internal/*`: decision requested from the coordinator on the channel.
+- task-completion-validator: first run FAIL on the file-size gate (fixed), `ast-checks` scope
+  (now includes `packages/project-data/src`; 725 report-only warnings vs 203 without it, i.e. the
+  ProjectData warnings the scan saw before the move), and derived counts (measured below). Two more
+  ProjectData-only tests moved into the package (agent-wake-policy, alarm order).
+
+### Measured test counts after review fixes
+
+| Suite | Before W1 (bbb1c82ca) | Before test move (537bcc5e7, core bb071a00c) | Now |
+| ----- | --------------------- | -------------------------------------------- | --- |
+| apps/api unit pool | 1,087 files / 16,016 tests | 1,085 / 16,041 | 1,041 / 15,535 |
+| packages/project-data | n/a | n/a | 46 / 510 |
+| packages/worker-core (W0) | n/a | 9 / 98 | 9 / 98 |
+
+45 files / 507 tests moved from apps/api into the package (16,041 - 507 + 1 new wiring test =
+15,535). The package adds 3 entry-point tests (507 + 3 = 510). The 1,087 -> 1,085 change is W0
+moving kernel tests to worker-core plus tests main added via the core merge. No test deleted.
+Workers pool: unchanged file set; covered by CI's three Durable Object shards.
