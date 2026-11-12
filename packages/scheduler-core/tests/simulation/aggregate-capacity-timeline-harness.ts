@@ -8,7 +8,7 @@ import {
   resolveWorkspaceAdmissionPolicy,
   type WorkspaceAdmissionPolicy,
   type WorkspaceResourceNode,
-} from '../../src/services/workspace-resource-capacity';
+} from '../../src';
 
 type TaskStatus =
   'queued' | 'provisioning' | 'reserving' | 'running' | 'retry-wait' | 'cancelled' | 'failed';

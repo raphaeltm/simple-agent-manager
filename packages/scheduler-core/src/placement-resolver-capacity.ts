@@ -5,6 +5,7 @@ import type {
   CapacitySourceIdentity,
   CapacityWorkloadRole,
   CredentialSource,
+  DefaultCapacityPoolSummary,
   VMLocation,
 } from '@simple-agent-manager/shared';
 import {
@@ -17,11 +18,10 @@ import {
 import {
   capacityPlacementAuthorityGeneration,
   normalizeCapacityAuthorityGeneration,
+  timestampVersion,
 } from './capacity-pool-authority';
-import { timestampVersion } from './default-capacity-pool-helpers';
-import type { CapacityPoolSummary } from './default-capacity-pools';
+import { capacityCandidateSatisfiesWorkloadRole } from './capacity-pool-workload-roles';
 import { normalizeLegacyPoolSize } from './legacy-node-pool-compatibility';
-import { capacityCandidateWorkloadRoleEligible } from './placement-authority';
 import {
   classifyCandidatePriceComparability,
   compareCapacityCandidates,
@@ -45,7 +45,7 @@ import type {
   TaskStartPlacement,
 } from './placement-resolver-types';
 import { resolvePlacementRollout } from './placement-rollout';
-import { DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB } from './workspace-resource-capacity';
+import { DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB } from './workspace-admission-policy';
 
 export {
   rankCapacityCandidatesForRuntime,
@@ -77,7 +77,7 @@ export function capacityPoolNoCandidatesError(
 }
 
 export function buildCapacityPoolSelection(
-  summary: CapacityPoolSummary,
+  summary: DefaultCapacityPoolSummary,
   placement: TaskStartPlacement,
   workloadRole: CapacityWorkloadRole,
   settings: CapacityPoolPlacementSettings = defaultPlacementSettings(),
@@ -167,7 +167,7 @@ function normalizeCapacityCandidate(
   hostMemoryReserveMb: number
 ): TaskStartCapacityCandidate | null {
   if (!isActiveCapacityPlacementOption(pool, source, candidate)) return null;
-  if (!capacityCandidateWorkloadRoleEligible(candidate.workloadRole, workloadRole)) return null;
+  if (!capacityCandidateSatisfiesWorkloadRole(candidate.workloadRole, workloadRole)) return null;
   if (candidate.runtime && candidate.runtime !== placement.runtime.executionRuntime) return null;
   if (source.sourceKind !== 'cloud-provider-credential') return null;
   if (!candidate.provider || !isValidProvider(candidate.provider)) return null;

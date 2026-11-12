@@ -21,7 +21,7 @@ import {
   createPersistedTaskResourcePlanJson,
   readPersistedTaskResourcePlan,
   ResourceRequirementsValidationError,
-} from '../../../src/services/resource-requirements-input';
+} from '../../src';
 
 const BASE = {
   taskId: 'task-1',

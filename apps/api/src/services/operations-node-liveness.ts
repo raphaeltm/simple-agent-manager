@@ -18,7 +18,7 @@ import {
 import {
   ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL,
   ACTIVE_WORKSPACE_RESERVATION_STATUSES,
-} from './workspace-resource-capacity';
+} from './workspace-reservation-usage';
 
 /** Workspaces listed per node; the counts cover every workspace regardless. */
 export const NODE_LIVENESS_WORKSPACE_LIST_LIMIT = 20;

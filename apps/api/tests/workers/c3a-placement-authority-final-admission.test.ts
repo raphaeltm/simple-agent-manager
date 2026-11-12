@@ -1,4 +1,7 @@
 import type {
+  WorkspaceAdmissionPolicy,
+} from '@simple-agent-manager/scheduler-core';
+import type {
   CapacityPlacementSnapshot,
   ResolvedResourceReservation,
 } from '@simple-agent-manager/shared';
@@ -9,7 +12,6 @@ import {
   reserveWorkspacePlacement,
   type WorkspacePlacementInput,
 } from '../../src/services/workspace-placement';
-import type { WorkspaceAdmissionPolicy } from '../../src/services/workspace-resource-capacity';
 import { seedInstallation, seedNode, seedProject, seedUser } from './helpers/seed-d1';
 
 const USER_ID = 'user-c3a-final-admission';

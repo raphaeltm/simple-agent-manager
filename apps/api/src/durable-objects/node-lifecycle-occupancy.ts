@@ -7,7 +7,9 @@ import {
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { boundedWarmPlacementClaimGuardSql } from '../services/warm-placement-claims';
-import { ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL } from '../services/workspace-resource-capacity';
+import {
+  ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL,
+} from '../services/workspace-reservation-usage';
 import type { NodeLifecycleEnv } from './node-lifecycle-types';
 
 /** On lookup failure retain the existing managed-node treatment; the cleanup cron is

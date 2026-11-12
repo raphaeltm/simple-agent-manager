@@ -1,10 +1,12 @@
+import {
+  newProviderLimitWait,
+} from '@simple-agent-manager/scheduler-core';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { credentialLimitReferenceKey } from '../../src/services/credential-limit-events/values';
-import { newProviderLimitWait } from '../../src/services/provider-limit-policy';
 import { rejectedProviderWindow } from '../../src/services/provider-limit-window';
 import { createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 

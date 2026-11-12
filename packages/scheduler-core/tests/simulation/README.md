@@ -7,18 +7,18 @@ observation races occur frequently.
 ## Run it
 
 ```bash
-# Pull-request profile: 200 generated schedules, also included in the normal API test suite
-pnpm --filter @simple-agent-manager/api test:scheduler
+# Pull-request profile: 200 generated schedules, also included in the normal scheduler-core test suite
+pnpm --filter @simple-agent-manager/scheduler-core test:scheduler
 
 # Deeper local/nightly profile: 2,000 schedules with longer traces and more projects/tasks
-pnpm --filter @simple-agent-manager/api test:scheduler:nightly
+pnpm --filter @simple-agent-manager/scheduler-core test:scheduler:nightly
 ```
 
 Fast-check prints the seed, shrink path, minimized counterexample, and the harness's named event
 trace on failure. Replay the exact case with:
 
 ```bash
-FC_SEED=<seed> FC_PATH='<path>' pnpm --filter @simple-agent-manager/api test:scheduler
+FC_SEED=<seed> FC_PATH='<path>' pnpm --filter @simple-agent-manager/scheduler-core test:scheduler
 ```
 
 `SCHEDULER_SIM_RUNS`, `SCHEDULER_SIM_MAX_COMMANDS`, `SCHEDULER_SIM_TASK_SLOTS`, and
