@@ -292,6 +292,12 @@ export interface PublicPlatformCapabilities {
   liveLogStream: boolean;
   /** Whether app deployments can run here (the Deployments page reads it). */
   appDeployments: boolean;
+  /**
+   * Whether agents can call Cloudflare-hosted models (`run_ai_model`, Workers AI). Profile, skill
+   * and project settings hide their model-access field when false, instead of asking for a
+   * catalog that answers FEATURE_UNAVAILABLE.
+   */
+  agentModelCalls: boolean;
 }
 
 /**
@@ -319,6 +325,7 @@ export function publicPlatformCapabilities(
     logSearch: capabilities.workersObservability,
     liveLogStream: capabilities.liveLogStream,
     appDeployments: capabilities.appDeployments,
+    agentModelCalls: capabilities.workersAi,
   };
 }
 

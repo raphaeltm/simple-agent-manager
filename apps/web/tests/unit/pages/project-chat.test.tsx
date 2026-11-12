@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   listAgents: vi.fn(),
   listAgentProfiles: vi.fn(),
+  getInstantRuntimeEnabled: vi.fn().mockResolvedValue(true),
   listSkills: vi.fn().mockResolvedValue([]),
   createAgentProfile: vi
     .fn()
@@ -85,6 +86,7 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   listAgents: mocks.listAgents,
   listAgentProfiles: mocks.listAgentProfiles,
+  getInstantRuntimeEnabled: mocks.getInstantRuntimeEnabled,
   listSkills: mocks.listSkills,
   createAgentProfile: mocks.createAgentProfile,
   getProfilePickerState: mocks.getProfilePickerState,
@@ -433,13 +435,15 @@ async function openProfilePicker() {
 }
 
 async function openProfileWizardFromGate() {
-  await waitFor(() => expect(screen.getByText('Create a profile to start')).toBeInTheDocument());
-  fireEvent.click(screen.getByRole('button', { name: /Create profile/i }));
+  await waitFor(() =>
+    expect(screen.getByText(/^(Create a profile to start|Ready to chat)$/)).toBeInTheDocument()
+  );
+  fireEvent.click(screen.getByRole('button', { name: /^(Create profile|Customize)$/i }));
 }
 
 async function expectCreateProfileGate(placeholder = 'Create a profile to start chatting...') {
   await waitFor(() => {
-    expect(screen.getByText('Create a profile to start')).toBeInTheDocument();
+    expect(screen.getByText(/^(Create a profile to start|Ready to chat)$/)).toBeInTheDocument();
   });
   expect(screen.getByPlaceholderText(placeholder)).toBeDisabled();
 }
@@ -1545,7 +1549,7 @@ describe('ProjectChat profile setup wizard', () => {
     await expectCreateProfileGate();
     expect(screen.queryByText(/Using/)).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /Create profile/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^Customize$/i }));
 
     await waitFor(() => {
       expect(screen.getByText('What kind of work?')).toBeInTheDocument();
@@ -1553,6 +1557,34 @@ describe('ProjectChat profile setup wizard', () => {
     expect(screen.queryByText('Which agent?')).not.toBeInTheDocument();
     expect(mocks.createAgentProfile).not.toHaveBeenCalled();
     expect(mocks.submitTask).not.toHaveBeenCalled();
+  });
+
+  it('offers one click that creates the default chat profile for a single agent', async () => {
+    mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
+    // A self-hosted install: no Instant runtime, so the profile must run on a Cloud VM.
+    mocks.getInstantRuntimeEnabled.mockResolvedValue(false);
+
+    renderProjectChat();
+
+    await expectCreateProfileGate();
+    expect(screen.getByText(/"Claude Code Chat" profile/)).toBeInTheDocument();
+    mocks.listAgentProfiles.mockResolvedValue([
+      makeAgentProfile({ id: 'quick-profile', name: 'Claude Code Chat', agentType: 'claude-code' }),
+    ]);
+    fireEvent.click(screen.getByRole('button', { name: /Start chatting with Claude Code/i }));
+
+    await waitFor(() => expect(mocks.createAgentProfile).toHaveBeenCalledTimes(1));
+    expect(mocks.createAgentProfile).toHaveBeenCalledWith(
+      'proj-1',
+      expect.objectContaining({
+        name: 'Claude Code Chat',
+        agentType: 'claude-code',
+        runtime: 'vm',
+        taskMode: 'conversation',
+      })
+    );
+    expect(mocks.submitTask).not.toHaveBeenCalled();
+    mocks.getInstantRuntimeEnabled.mockResolvedValue(true);
   });
 
   it('creates a single-agent profile through the shortened wizard and submits on the next send', async () => {

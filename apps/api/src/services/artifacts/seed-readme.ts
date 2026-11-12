@@ -164,8 +164,8 @@ export function buildReadmeContent(projectName: string, description?: string | n
 
   lines.push(
     'This repository is hosted by [SAM (Simple Agent Manager)](https://simple-agent-manager.org)',
-    'using Cloudflare Artifacts — a serverless Git host. It was created without a GitHub',
-    'connection, so GitHub-specific tooling (the `gh` CLI, pull requests) does not apply here.',
+    "on this installation's own Git server. It was created without a GitHub connection, so",
+    'GitHub-specific tooling (the `gh` CLI, pull requests) does not apply here.',
     '',
     '## For agents working in this repository',
     '',

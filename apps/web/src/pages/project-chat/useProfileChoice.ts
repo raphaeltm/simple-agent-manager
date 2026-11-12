@@ -35,6 +35,8 @@ export interface ProfileWizardState {
   profileName: string;
   saving: boolean;
   error: string | null;
+  /** Whether Instant can run on this installation; the runtime step offers it only then. */
+  instantAvailable: boolean;
 }
 
 /** Where the picker sheet opens: above its trigger, or centered when anchor is null. */
@@ -54,6 +56,7 @@ const CLOSED_WIZARD: ProfileWizardState = {
   profileName: '',
   saving: false,
   error: null,
+  instantAvailable: true,
 };
 
 /**
@@ -66,11 +69,14 @@ export function useProfileChoice({
   queryScope,
   configuredAgents,
   selectedAgentType,
+  instantEnabled,
 }: Readonly<{
   projectId: string;
   queryScope: string;
   configuredAgents: AgentInfo[];
   selectedAgentType: string | null;
+  /** Whether Instant (cf-container) workspaces can run on this installation. */
+  instantEnabled: boolean;
 }>) {
   const {
     profiles: agentProfiles,
@@ -125,8 +131,9 @@ export function useProfileChoice({
       open: true,
       step: soleAgent ? 'work-type' : 'agent',
       selectedAgentType: initialAgentType,
+      instantAvailable: instantEnabled,
     });
-  }, [configuredAgents, selectedAgentType]);
+  }, [configuredAgents, instantEnabled, selectedAgentType]);
 
   const closeProfileWizard = useCallback(() => {
     setProfileWizard((current) => ({ ...current, open: false, saving: false, error: null }));
@@ -147,6 +154,26 @@ export function useProfileChoice({
     [createProfileMutation]
   );
 
+  /**
+   * A project with no profiles and exactly one configured agent needs no choices, so the
+   * first message creates the chat profile the wizard would have suggested instead of
+   * stopping at "Create a profile". Instant only where this installation can run it; a
+   * self-hosted install without a container runtime gets a Cloud VM profile.
+   */
+  const createDefaultChatProfile = useCallback(async () => {
+    const soleAgent = configuredAgents.length === 1 ? configuredAgents[0] : null;
+    if (!soleAgent) return null;
+    const runtime: AgentProfileRuntime = instantEnabled ? 'cf-container' : 'vm';
+    return createProfile({
+      name: suggestProfileName(soleAgent.id, 'conversation'),
+      description: 'Chat and explore with a lightweight workspace',
+      agentType: soleAgent.id,
+      runtime,
+      workspaceProfile: resolveWizardWorkspaceProfile(runtime, 'conversation'),
+      taskMode: resolveWizardTaskMode(runtime, 'conversation'),
+    });
+  }, [configuredAgents, createProfile, instantEnabled, suggestProfileName]);
+
   const createProfileFromWizard = useCallback(async () => {
     const name = profileWizard.profileName.trim();
     if (!name) {
@@ -166,7 +193,10 @@ export function useProfileChoice({
       return null;
     }
     const workType = profileWizard.workType ?? 'conversation';
-    const runtime = resolveWizardRuntime(workType, profileWizard.runtime);
+    const runtime = resolveWizardRuntime(
+      workType,
+      profileWizard.runtime ?? (instantEnabled ? null : 'vm')
+    );
     setProfileWizard((current) => ({ ...current, saving: true, error: null }));
     try {
       const resourceJson =
@@ -199,6 +229,7 @@ export function useProfileChoice({
     agentProfiles,
     configuredAgents,
     createProfile,
+    instantEnabled,
     profileWizard.profileName,
     profileWizard.runtime,
     profileWizard.selectedAgentType,
@@ -220,6 +251,7 @@ export function useProfileChoice({
     closeProfileWizard,
     updateProfileWizard,
     createProfileFromWizard,
+    createDefaultChatProfile,
     suggestProfileName,
   };
 }
