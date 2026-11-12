@@ -227,7 +227,8 @@ describe('signed webhook intake on Workers with real D1', () => {
     expect(rows.map((row) => row.status)).toEqual(['running', 'waiting']);
     // The started run's queue copy is gone; the waiting event's is the only copy it has.
     expect(rows.map((row) => row.prompt)).toEqual([null, 'Slack said: second']);
-    expect(await readWebhookSetupStatus(testEnvironment, trigger, true)).toMatchObject({
+    // The secret predates every call in this test.
+    expect(await readWebhookSetupStatus(testEnvironment, trigger, '')).toMatchObject({
       state: 'receiving',
       waiting: 1,
       lastRejection: { reason: 'invalid_signature' },

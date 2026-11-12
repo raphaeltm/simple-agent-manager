@@ -39,7 +39,10 @@ import {
   hashWebhookToken,
 } from '../../src/services/webhook-trigger-crypto';
 import { acceptWebhookTriggerExecution } from '../../src/services/webhook-trigger-queue';
-import { readWebhookSetupStatus } from '../../src/services/webhook-trigger-setup';
+import {
+  readWebhookSetupStatus,
+  readWebhookTriggerConfig,
+} from '../../src/services/webhook-trigger-setup';
 import { createWebhookDelivery } from '../../src/services/webhook-trigger-store';
 import { SLACK_DOCS_EXAMPLE_SIGNING_VALUE } from '../helpers/slack-docs-example';
 import {
@@ -483,7 +486,12 @@ describe('signed webhook ingress vertical slice', () => {
 
     it('reads as refusing when a refusal follows an accepted event in the same window', async () => {
       const setup = () =>
-        readWebhookSetupStatus(env, { id: slackTriggerId, projectId: 'project' }, true);
+        readWebhookSetupStatus(
+          env,
+          { id: slackTriggerId, projectId: 'project' },
+          // Saved before the first call below.
+          '2026-11-11T12:00:00.000Z'
+        );
       vi.useFakeTimers({ toFake: ['Date'] });
       vi.setSystemTime(new Date('2026-11-11T12:00:01Z'));
       expect((await setup()).state).toBe('waiting_for_first_request');
@@ -530,6 +538,32 @@ describe('signed webhook ingress vertical slice', () => {
       await send(slackRequest(mention('Ev-s1'), { timestamp: stale }));
       await send(slackRequest(mention('Ev-s2'), { timestamp: stale }));
       expect(rejectedEvents()).toEqual({ n: 1 });
+    });
+
+    it('forgets refusals from before the current secret was saved', async () => {
+      const other = await createSigned('Slack, set up later', {
+        verification: { scheme: 'slack_v0' },
+      });
+      const id = other.created.id;
+      const read = async () =>
+        (await readWebhookTriggerConfig(env, { id, projectId: 'project' }))!.setup!;
+      // Slack checks the address before the secret is saved: refused, and the status says why.
+      expect((await send(slackRequest(mention('Ev-early'), { triggerId: id }))).status).toBe(503);
+      expect(await read()).toMatchObject({ state: 'needs_secret' });
+
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      await saveSecret(id, SLACK_SECRET);
+      // That refusal was about a setup that no longer exists.
+      expect(await read()).toMatchObject({
+        state: 'waiting_for_first_request',
+        lastRejection: null,
+      });
+      // A refusal after the save still counts.
+      await send(slackRequest(mention('Ev-late'), { triggerId: id, secret: 'wrong-secret' }));
+      expect(await read()).toMatchObject({
+        state: 'rejecting',
+        lastRejection: { reason: 'invalid_signature' },
+      });
     });
 
     it('records a call to a paused automation and queues nothing', async () => {

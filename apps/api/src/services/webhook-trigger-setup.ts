@@ -61,11 +61,17 @@ export function webhookSecretEntryUrl(
   return `${getAppOrigin(env)}/projects/${encodeURIComponent(projectId)}/automation/trigger/${encodeURIComponent(triggerId)}#${WEBHOOK_SIGNING_SECRET_ANCHOR}`;
 }
 
+/**
+ * Where setup stands. `secretSetAt` is when the current signing secret was saved, null when none
+ * is. Only calls received since then count: a refusal from before the secret was saved or
+ * replaced describes a setup that no longer exists, and must not keep the status at "refused".
+ */
 export async function readWebhookSetupStatus(
   env: Env,
   trigger: Pick<schema.TriggerRow, 'id' | 'projectId'>,
-  secretSet: boolean
+  secretSetAt: string | null
 ): Promise<WebhookSetupStatus> {
+  const since = secretSetAt ?? '';
   const [latest, rejection, waiting] = await env.DATABASE.batch<{
     outcome?: string;
     errorCode?: string | null;
@@ -77,12 +83,14 @@ export async function readWebhookSetupStatus(
     env.DATABASE.prepare(
       `SELECT outcome, received_at AS receivedAt FROM webhook_deliveries
         WHERE trigger_id = ? AND outcome IN (${[...EVENT_OUTCOMES, 'rejected'].map((o) => `'${o}'`).join(', ')})
+          AND received_at >= ?
         ORDER BY received_at DESC, id DESC LIMIT 1`
-    ).bind(trigger.id),
+    ).bind(trigger.id, since),
     env.DATABASE.prepare(
       `SELECT error_code AS errorCode, received_at AS receivedAt FROM webhook_deliveries
-        WHERE trigger_id = ? AND outcome = 'rejected' ORDER BY received_at DESC, id DESC LIMIT 1`
-    ).bind(trigger.id),
+        WHERE trigger_id = ? AND outcome = 'rejected' AND received_at >= ?
+        ORDER BY received_at DESC, id DESC LIMIT 1`
+    ).bind(trigger.id, since),
     env.DATABASE.prepare(
       `SELECT COUNT(*) AS count FROM trigger_executions
         WHERE trigger_id = ? AND status = 'waiting' AND queue_expires_at > ?`
@@ -91,7 +99,7 @@ export async function readWebhookSetupStatus(
   const last = latest?.results[0];
   const rejected = rejection?.results[0];
   let state: WebhookSetupState;
-  if (!secretSet) state = 'needs_secret';
+  if (secretSetAt === null) state = 'needs_secret';
   else if (!last?.outcome) state = 'waiting_for_first_request';
   else state = last.outcome === 'rejected' ? 'rejecting' : 'receiving';
   const lastEvent = state === 'receiving' ? last : undefined;
@@ -129,6 +137,10 @@ export async function readWebhookTriggerConfig(
   if (!isWebhookSignedScheme(webhookRowScheme(row))) return config;
   return {
     ...config,
-    setup: await readWebhookSetupStatus(env, trigger, Boolean(config.signingSecret?.set)),
+    setup: await readWebhookSetupStatus(
+      env,
+      trigger,
+      config.signingSecret?.set ? (config.signingSecret.setAt ?? '') : null
+    ),
   };
 }
