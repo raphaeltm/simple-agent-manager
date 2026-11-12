@@ -119,7 +119,9 @@ describe('D1 analytics sink (self-host)', () => {
   });
 
   it('records API requests and /api/t events, then every admin analytics route reads them back', async () => {
-    await call('/api/projects/proj-1', { headers: { 'x-test-user': 'user-a' } });
+    await call('/api/projects/proj-1', {
+      headers: { 'x-test-user': 'user-a', referer: 'https://app.box.example/invite/sekret-abc' },
+    });
     await call('/api/projects/proj-2', { headers: { 'x-test-user': 'user-b' } });
     const ingest = await call('/api/t', {
       method: 'POST',
@@ -133,7 +135,7 @@ describe('D1 analytics sink (self-host)', () => {
           {
             event: 'page_view',
             page: '/projects/p1?token=sekret-123',
-            referrer: 'https://mail.example/inbox#access_token=sekret-456',
+            referrer: 'https://mail.example/invite/sekret-789?x=1#access_token=sekret-456',
           },
         ],
       }),
@@ -148,7 +150,7 @@ describe('D1 analytics sink (self-host)', () => {
     expect(JSON.stringify(stored)).not.toContain('sekret');
     const pageView = stored.find((r) => r.blob1 === 'page_view')!;
     expect(pageView.blob3).toBe('/projects/p1');
-    expect(pageView.blob4).toBe('https://mail.example/inbox');
+    expect(pageView.blob4).toBe('https://mail.example');
 
     const dau = await call('/api/admin/analytics/dau');
     expect(dau.status, await dau.clone().text()).toBe(200);

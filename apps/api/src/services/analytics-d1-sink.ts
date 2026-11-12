@@ -16,8 +16,9 @@
  * rows older than ANALYTICS_D1_RETENTION_DAYS (default 90, the longest admin period) and the
  * oldest rows above ANALYTICS_D1_MAX_ROWS (default 500,000; ~650 MB worst case).
  *
- * No secrets: rows hold the same fields Analytics Engine receives. URL-shaped blobs (page,
- * referrer) are stored without query string or fragment, so tokens in links are never kept.
+ * No secrets: rows hold the fields Analytics Engine receives, minus URL detail: the page is stored
+ * without query string or fragment, and the referrer as its origin only, so tokens in links
+ * (query strings, invite paths) are never kept.
  */
 import type { Env } from '../env';
 import { log } from '../lib/logger';
@@ -66,11 +67,24 @@ function withoutQuery(value: string): string {
   return cut === -1 ? value : value.slice(0, cut);
 }
 
+function originOnly(value: string): string {
+  if (!value) return '';
+  try {
+    return new URL(value).origin;
+  } catch {
+    return '';
+  }
+}
+
 function blobAt(point: AnalyticsEngineDataPoint, index: number): string {
   const raw = point.blobs?.[index];
   let text = raw === null || raw === undefined ? '' : typeof raw === 'string' ? raw : '';
-  // blob3 (page / route) and blob4 (referrer) are URL-shaped.
-  if (index === 2 || index === 3) text = withoutQuery(text);
+  // blob3 (page / route pattern): path only. The web tracker already redacts id- and
+  // token-shaped segments (apps/web/src/lib/analytics.ts normalizeAnalyticsPath).
+  if (index === 2) text = withoutQuery(text);
+  // blob4 (referrer): origin only. For API requests it is the browser's Referer, the full app
+  // URL, whose path can carry a token (invite links); no admin query reads more than the origin.
+  if (index === 3) text = originOnly(text);
   return text.slice(0, ANALYTICS_D1_MAX_BLOB_LENGTH);
 }
 
