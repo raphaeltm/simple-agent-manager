@@ -25,10 +25,11 @@ export const SELFHOST_VAR_OVERRIDES: Readonly<Record<string, string>> = {
   ARTIFACTS_ENABLED: 'false',
   // Managed devcontainer cache uses the Cloudflare container registry API.
   DEVCONTAINER_CACHE_ENABLED: 'false',
-  // AI proxy and the control plane's own LLM features go through AI Gateway / Workers AI.
-  AI_PROXY_ENABLED: 'false',
-  TTS_ENABLED: 'false',
-  TASK_TITLE_GENERATION_ENABLED: 'false',
+  // Not forced off here (overnight B3): task titles use the admin's OpenAI-compatible endpoint
+  // and truncate without one (task-title.ts); the AI proxy without a gateway stays off until an
+  // admin turns on `aiProxy.directUpstreamEnabled` (ai-proxy-availability.ts); read-aloud follows
+  // the `speech.synthesis.*` settings (platform-capabilities.ts). The stalled-task classifier
+  // runs the Workers AI Clef model only.
   STALLED_TASK_CLASSIFIER_ENABLED: 'false',
   // Analytics Engine and the AI Gateway cost reports.
   ANALYTICS_ENABLED: 'false',

@@ -130,6 +130,19 @@ describe('buildCelldConfig against the real apps/api/wrangler.toml', () => {
     );
   });
 
+  it('leaves the AI features to admin settings instead of forcing them off', () => {
+    // Titles use the admin's OpenAI-compatible endpoint (truncation without one), the gatewayless
+    // AI proxy waits for `aiProxy.directUpstreamEnabled`, read-aloud for `speech.synthesis.*`.
+    for (const key of ['TASK_TITLE_GENERATION_ENABLED', 'AI_PROXY_ENABLED', 'TTS_ENABLED'])
+      expect(SELFHOST_VAR_OVERRIDES).not.toHaveProperty(key);
+    expect(config.vars.TASK_TITLE_GENERATION_ENABLED).not.toBe('false');
+    expect(config.vars.TTS_ENABLED).not.toBe('false');
+    // The env kill switch passes through from wrangler.toml; it no longer turns the proxy off.
+    expect(config.vars.AI_PROXY_ENABLED).toBe('true');
+    // Clef runs on Workers AI only, so the classifier stays off.
+    expect(config.vars.STALLED_TASK_CLASSIFIER_ENABLED).toBe('false');
+  });
+
   it('serves the web build through ASSETS with SPA fallback, Worker first', () => {
     expect(config.assets).toEqual({
       directory: 'web',
