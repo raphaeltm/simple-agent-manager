@@ -8,7 +8,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 
-import { log } from '../../src/lib/logger';
+import { log } from '../../src/logger';
 
 describe('structured logging via log utility', () => {
   it('log.error produces structured JSON with timestamp and level', () => {

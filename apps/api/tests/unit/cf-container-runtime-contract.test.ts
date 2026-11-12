@@ -48,7 +48,7 @@ function getPinnedAgentNpmCompanion(agentType: string): string {
 describe('cf-container runtime spike contracts', () => {
   it('adds a non-null node runtime discriminator without changing workspace node_id', () => {
     const migration = read('db/migrations/0088_node_runtime.sql');
-    const schema = read('db/schema.ts');
+    const schema = read('../../../packages/worker-core/src/schema.ts');
 
     expect(migration).toContain("ALTER TABLE nodes ADD COLUMN runtime TEXT NOT NULL DEFAULT 'vm'");
     expect(schema).toContain("runtime: text('runtime').notNull().default('vm')");
