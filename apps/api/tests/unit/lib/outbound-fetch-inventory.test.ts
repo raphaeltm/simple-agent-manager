@@ -24,9 +24,9 @@ const SRC = resolve(import.meta.dirname, '../../../src');
  * the same change; the failure message lists exactly which sites moved.
  */
 const EXPECTED_COUNTS: Record<CallCategory | 'total', number> = {
-  total: 140,
+  total: 141,
   guarded: 15,
-  outbound: 100,
+  outbound: 101,
   binding: 25,
 };
 
