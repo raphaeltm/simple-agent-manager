@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import { exportPKCS8, exportSPKI, generateKeyPair } from 'jose';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
+import { resolveNodeProvisioningAttemptDeadlineMs } from '../../../src/durable-objects/node-lifecycle-provisioning-deadline';
 import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
 import { nodeLifecycleRoutes } from '../../../src/routes/node-lifecycle';
@@ -14,6 +15,22 @@ import { encrypt } from '../../../src/services/encryption';
 import { signCallbackToken, signNodeCallbackToken } from '../../../src/services/jwt';
 import { directProvisioningHarness } from '../../helpers/direct-provisioning';
 import { type Fixture, fixture } from './node-pool-upgrade-test-helpers';
+
+vi.mock(
+  '../../../src/durable-objects/node-lifecycle-provisioning-deadline',
+  async (importOriginal) => {
+    const actual =
+      await importOriginal<
+        typeof import('../../../src/durable-objects/node-lifecycle-provisioning-deadline')
+      >();
+    return {
+      ...actual,
+      resolveNodeProvisioningAttemptDeadlineMs: vi.fn(
+        actual.resolveNodeProvisioningAttemptDeadlineMs
+      ),
+    };
+  }
+);
 
 vi.mock('../../../src/middleware/auth', () => ({
   getUserId: () => 'user-1',
@@ -115,6 +132,14 @@ async function createMeteringFixture(
     NODE_AGENT_READY_TIMEOUT_MS: '200',
     NODE_AGENT_READY_POLL_INTERVAL_MS: '200',
   });
+  if (options.hangProvider || options.hangDnsBody) {
+    // The attempt deadline is max(operations.nodeProvisioningAttemptDeadlineMs, request
+    // timeout), default 45 s (node-lifecycle-provisioning-deadline.ts). These cases are about
+    // what happens AT the deadline, so it is the 200 ms request timeout here.
+    vi.mocked(resolveNodeProvisioningAttemptDeadlineMs).mockImplementation(
+      async (_env, requestTimeoutMs) => requestTimeoutMs
+    );
+  }
   const secret = await encrypt('test-provider-token', encryptionKey);
   f.sqlite
     .prepare('UPDATE credentials SET encrypted_token = ?, iv = ? WHERE id = ?')
