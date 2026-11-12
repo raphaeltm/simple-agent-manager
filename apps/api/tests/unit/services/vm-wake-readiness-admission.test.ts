@@ -255,6 +255,78 @@ describe('committed VM wake readiness admission', () => {
       expect(signal).not.toHaveBeenCalled();
     });
 
+    it.each([true, false])(
+      'revalidates exact D1 authority after ProjectData, allowWake=%s',
+      async (allowWake) => {
+        const queries: string[] = [];
+        const database = env.DATABASE;
+        env.DATABASE = {
+          prepare(query: string) {
+            if (query.startsWith('SELECT current.id AS task_id')) queries.push(query);
+            return database.prepare(query);
+          },
+        } as D1Database;
+        expect(
+          await resolveVmPromptDeliveryTarget(env, 'project', 'chat', undefined, async () => null, {
+            allowWake,
+          })
+        ).toMatchObject({ kind: 'ready' });
+        expect(getSession).toHaveBeenCalledExactlyOnceWith('chat');
+        expect(queries).toHaveLength(2);
+        expect(queries[1]).toContain('AND current.id = ?');
+        expect(signal).not.toHaveBeenCalled();
+      }
+    );
+
+    const duringProjectDataMutations = [
+      [
+        'node assignment',
+        "UPDATE workspaces SET node_id = 'replacement-node' WHERE id = 'workspace'",
+      ],
+      [
+        'workspace generation',
+        "UPDATE workspaces SET callback_generation = 'newer' WHERE id = 'workspace'",
+      ],
+      ['snapshot attempt', "UPDATE session_snapshots SET recovery_attempt_id = 'newer'"],
+      [
+        'current task cancellation',
+        "UPDATE tasks SET status = 'cancelled' WHERE id = 'current-task'",
+      ],
+      [
+        'current task workspace',
+        "UPDATE tasks SET workspace_id = 'older-workspace' WHERE id = 'current-task'",
+      ],
+      [
+        'current task replacement',
+        `UPDATE tasks SET status = 'cancelled', chat_session_id = NULL WHERE id = 'current-task';
+        INSERT INTO tasks (id,project_id,user_id,chat_session_id,workspace_id,status)
+        VALUES ('replacement-task','project','owner','chat','workspace','in_progress')`,
+      ],
+    ];
+    it.each(
+      duringProjectDataMutations.flatMap(([name, mutation]) => [
+        { name, mutation, allowWake: true },
+        { name, mutation, allowWake: false },
+      ])
+    )(
+      'rejects $name changing during ProjectData read, allowWake=$allowWake',
+      async ({ mutation, allowWake }) => {
+        sqlite.exec(`INSERT INTO nodes (id,user_id,runtime,status,health_status)
+        VALUES ('replacement-node','owner','vm','running','healthy')`);
+        getSession.mockImplementation(async () => {
+          sqlite.exec(mutation);
+          return { id: 'chat', status: 'active', workspaceId: 'workspace', taskId: 'current-task' };
+        });
+        expect(
+          await resolveVmPromptDeliveryTarget(env, 'project', 'chat', undefined, async () => null, {
+            allowWake,
+          })
+        ).toMatchObject({ kind: 'retry' });
+        expect(getSession).toHaveBeenCalledExactlyOnceWith('chat');
+        expect(signal).not.toHaveBeenCalled();
+      }
+    );
+
     it.each([
       {
         name: 'node assignment',
