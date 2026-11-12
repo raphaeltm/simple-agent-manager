@@ -40,7 +40,7 @@ different matcher logic in workflow YAML; see `.github/workflows/ci.yml` and
 
 Boundary guidance and sanctioned Valibot patterns are in
 `.claude/rules/51-runtime-boundary-validation.md`. Current helpers live in
-`apps/api/src/lib/runtime-validation.ts` and `apps/api/src/schemas/_validator.ts`.
+`packages/worker-core/src/runtime-validation.ts` and `apps/api/src/schemas/_validator.ts`.
 
 ## Runtime workflow state
 

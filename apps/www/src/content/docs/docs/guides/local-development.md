@@ -94,6 +94,7 @@ Packages must be built in dependency order:
 ```bash
 pnpm --filter @simple-agent-manager/shared build
 pnpm --filter @simple-agent-manager/providers build
+pnpm --filter @simple-agent-manager/worker-core build
 pnpm --filter @simple-agent-manager/api build
 ```
 

@@ -217,4 +217,57 @@ The small kernel every other package needs, so they do not each invent one.
 
 ## Package template
 
-(W0 records the template and decisions here.)
+Recorded by W0 (PR #2684). Copy `packages/worker-core` exactly; it was itself copied from
+`packages/providers`.
+
+### Files
+
+| File | Contents |
+| ---- | -------- |
+| `package.json` | `"name": "@simple-agent-manager/<pkg>"`, `private`, `"type": "module"`, `main`/`types` in `dist/`, an `exports` map (`"."` plus any deliberate subpath, `types` listed before `import`), and the scripts `build: tsc`, `test: vitest run`, `test:watch`, `test:coverage`, `typecheck: tsc --noEmit`, `lint: eslint 'src/**/*.ts' 'tests/**/*.ts'`. Workspace deps use `workspace:*`; anything in the pnpm catalog uses `catalog:`. |
+| `tsconfig.json` | Extends `../../tsconfig.json`; `outDir: dist`, `rootDir: src`, `noEmit: false`; `types: ["@cloudflare/workers-types"]` (dev dependency) when the code touches Workers globals (`D1Database`, `Request`, `fetch`, ...). Excludes `tests`. |
+| `vitest.config.ts` | `globals: true`, `include: ['tests/**/*.test.ts']`, Node environment. |
+| `src/index.ts` | The public entry point. Named re-exports only (`export { a, type B } from './a'`). |
+| `tests/unit/*.test.ts` | Tests that run in Node. Tests that need workerd (`@cloudflare/vitest-pool-workers`) stay in `apps/api/tests/workers/` and import through the worker. |
+| `AGENTS.md` | Purpose, entry points, key files, commands, conventions. |
+
+ESLint needs no per-package config: the root `eslint.config.mjs` applies.
+
+### Decisions
+
+1. **Old paths keep a re-export file.** Each moved worker file becomes a named re-export from the
+   package entry point with a two-line header naming the package. Importers do not change in the
+   move PR. `export *` is allowed only where a hand-kept list would drift (`db/schema.ts`, ~270
+   exports), with the reason in the header.
+2. **Subpath entry points are allowed when they earn it.** `@simple-agent-manager/worker-core/schema`
+   exists so `import * as schema` keeps working without pulling the schema through the main barrel.
+   Declare every entry point in `exports`; anything undeclared fails type resolution.
+3. **The worker resolves packages through `dist/`.** API typecheck and both API test pools import the
+   built output. After editing package source, run `pnpm --filter @simple-agent-manager/<pkg> build`
+   before typechecking or testing `apps/api`. Turbo does this for `typecheck`/`test` via `^build`.
+4. **Ports for worker-owned behaviour.** When moved code needs something the worker owns, declare a
+   function type in the package and have the worker pass it in. Example: the logger's
+   `LoggedErrorSink`; the worker keeps `createInstrumentedLogger` in `apps/api/src/lib/logger.ts`
+   and plugs the observability D1 writer into `createErrorSinkLogger`.
+5. **Narrow environment.** Declare `XxxEnv` with only what the package reads; the worker's `Env`
+   satisfies it structurally (extend it explicitly as in `apps/api/src/webhook-trigger-env.ts`).
+   worker-core itself reads no environment.
+6. **Boundary lint is blocking.** `eslint.config.mjs` uses `no-restricted-imports` in two blocks:
+   files under `packages/**` may not import an app (`@simple-agent-manager/{api,web,www,tail-worker,installer}`
+   or a relative path into `apps/`); files under `apps/api/**` may not import a package's
+   `src`/`dist`/`tests` path or a relative path into `packages/`. Both cover tests. Proof:
+   `scripts/quality/worker-module-boundaries.test.ts` (run by `pnpm quality:scripts:test`).
+7. **Moving tests.** `git mv` the test with its module and fix the relative imports. Grep
+   `apps/api/tests` for source-reading tests (`readFileSync(... 'src/...')`, `apiSrc(...)`) that read a
+   moved file by path and repoint them. Report test file and case counts before and after.
+8. **Wiring a new package.** Add `"@simple-agent-manager/<pkg>": "workspace:*"` to
+   `apps/api/package.json` and run `pnpm install` (commit the lockfile). Add `'packages/<pkg>/**'` to
+   the `api` path filter in `.github/workflows/ci.yml` so worker CI runs when only the package
+   changes. Add the package to the build order in
+   `apps/www/src/content/docs/docs/guides/local-development.md`. Leave root `CLAUDE.md` to the
+   coordinator.
+9. **Path references.** Update rules, agents and docs that cite a moved file
+   (`grep -rn "apps/api/src/<path>"` across `.claude`, `apps/*/.claude`, `apps/www/src/content/docs`,
+   `scripts/quality/README.md`); historical `specs/` and `tasks/archive/` stay as they are.
+10. **Coverage thresholds** are not set for new packages yet (vitest runs without `coverage`
+    thresholds). Add them when a package's test surface settles.

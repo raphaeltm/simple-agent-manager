@@ -4,8 +4,6 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import agentInstallManifest from '../../../../packages/shared/src/agent-install-manifest.json';
-
 const apiPackageRoot = join(fileURLToPath(new URL('.', import.meta.url)), '../..');
 const apiRoot = join(apiPackageRoot, 'src');
 
@@ -13,12 +11,20 @@ function read(relPath: string): string {
   return readFileSync(join(apiRoot, relPath), 'utf8');
 }
 
+// Read as repository data, not imported: the worker may import packages only through their
+// public entry points (eslint.config.mjs, worker modularization boundary 2).
+function readAgentInstallManifest(): unknown {
+  return JSON.parse(
+    readFileSync(join(apiPackageRoot, '../../packages/shared/src/agent-install-manifest.json'), 'utf8')
+  );
+}
+
 function readPackage(relPath: string): string {
   return readFileSync(join(apiPackageRoot, relPath), 'utf8');
 }
 
 function getPinnedAgentPackage(agentType: string): string {
-  const manifest = agentInstallManifest as Array<{
+  const manifest = readAgentInstallManifest() as Array<{
     agentType: string;
     package: string;
     version: string;
@@ -31,7 +37,7 @@ function getPinnedAgentPackage(agentType: string): string {
 }
 
 function getPinnedAgentNpmCompanion(agentType: string): string {
-  const manifest = agentInstallManifest as Array<{
+  const manifest = readAgentInstallManifest() as Array<{
     agentType: string;
     npmCompanion?: {
       package: string;

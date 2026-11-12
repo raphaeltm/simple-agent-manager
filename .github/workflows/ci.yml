@@ -58,6 +58,7 @@ jobs:
             api:
               - 'apps/api/**'
               - 'packages/shared/**'
+              - 'packages/worker-core/**'
               - 'packages/task-runner/**'
               - 'packages/config/**'
               - 'scripts/quality/*migration*.ts'

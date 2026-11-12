@@ -47,6 +47,41 @@ const onboardingAdvisoryFiles = [
 // tasks/archive/2026-08-10-ai-slop-debt-burndown.md.
 const testFileGlobs = ['**/tests/**', '**/*.test.{ts,tsx,mts,cts}', '**/*.spec.{ts,tsx,mts,cts}'];
 
+// Module boundaries for the worker modularization. Blocking (`error`) in source and tests alike:
+// a test reaching across a boundary couples the same way production code does.
+const workspacePackageFiles = ['packages/**/*.{ts,tsx,mts,cts,js,mjs,cjs}'];
+const workerFiles = ['apps/api/**/*.{ts,tsx,mts,cts,js,mjs,cjs}'];
+const workerTestFiles = ['apps/api/tests/**/*.{ts,tsx,mts,cts,js,mjs,cjs}'];
+const appPackageNames = '(api|installer|tail-worker|web|www)';
+const packageBoundaryPatterns = [
+  {
+    regex: `^@simple-agent-manager/${appPackageNames}(/|$)`,
+    message: 'Packages must not import from apps. Declare a port and let the app pass it in.',
+  },
+  {
+    regex: '^\\.{1,2}/(.*/)?apps/',
+    message: 'Packages must not import from apps. Declare a port and let the app pass it in.',
+  },
+];
+const workerBoundaryPatterns = [
+  {
+    regex: '^@simple-agent-manager/[^/]+/(src|dist|tests)(/|$)',
+    message: "Import the package's public entry point (its package.json exports), not a deep path.",
+  },
+  {
+    regex: '^\\.{1,2}/(.*/)?packages/',
+    message: 'Import the package by name through its public entry point, not by relative path.',
+  },
+];
+const workerTestBoundaryPatterns = [
+  workerBoundaryPatterns[0],
+  {
+    regex: '^\\.{1,2}/(.*/)?packages/(?![^/]+/tests/fixtures/)',
+    message:
+      "Import the package by name through its public entry point. Worker tests may share only a package's tests/fixtures/.",
+  },
+];
+
 const upstreamNoUnusedVars = tseslint.plugin.rules['no-unused-vars'];
 const noUnusedVarsEslint8Compat = {
   ...upstreamNoUnusedVars,
@@ -386,9 +421,33 @@ export default defineConfig([
   },
   {
     files: ['apps/api/src/**/*.ts'],
-    ignores: ['apps/api/src/lib/logger.ts'],
     rules: {
       'no-console': 'error',
+    },
+  },
+  {
+    // Worker modularization boundary 1 (tasks/active/2026-11-12-worker-modularization.md):
+    // a package never imports from an app, by relative path or by package name.
+    files: workspacePackageFiles,
+    rules: {
+      'no-restricted-imports': ['error', { patterns: packageBoundaryPatterns }],
+    },
+  },
+  {
+    // Worker modularization boundary 2: the worker imports a package only through the public
+    // entry points its package.json `exports` declares, never a deep src/dist path. Undeclared
+    // subpaths already fail type resolution; this catches the paths resolution would accept.
+    files: workerFiles,
+    rules: {
+      'no-restricted-imports': ['error', { patterns: workerBoundaryPatterns }],
+    },
+  },
+  {
+    // Worker tests may also share a package's test fixtures (`packages/<pkg>/tests/fixtures/`),
+    // e.g. provider HTTP mocks. Everything else in boundary 2 still applies.
+    files: workerTestFiles,
+    rules: {
+      'no-restricted-imports': ['error', { patterns: workerTestBoundaryPatterns }],
     },
   },
   {
