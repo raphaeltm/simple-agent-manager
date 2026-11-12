@@ -40,6 +40,9 @@ vi.mock('../../src/components/AdminConnectorPanel', () => ({
     return <div>Connector panel</div>;
   },
 }));
+vi.mock('../../src/components/GitHubAppManifestPanel', () => ({
+  GitHubAppManifestPanel: () => <div>GitHub App manifest panel</div>,
+}));
 vi.mock('../../src/components/AdminAgentEmailPanel', () => ({
   AdminAgentEmailPanel: () => {
     mocks.email();
