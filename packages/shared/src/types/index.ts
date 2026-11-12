@@ -1095,3 +1095,23 @@ export {
   SAM_NOTICE_VERSION,
   SAM_RUNTIME_REPORTED_KEY,
 } from './sam-notices';
+
+// Agent-requested runtime secrets
+export type {
+  EffectiveRuntimeEnvEntry,
+  FulfillRuntimeSecretRequestBody,
+  ProjectRuntimeEnvVarProvenance,
+  RuntimeEnvCollectedProvenance,
+  RuntimeEnvScope,
+  RuntimeSecretRequest,
+  RuntimeSecretRequestExistingValue,
+  RuntimeSecretRequestResolution,
+  RuntimeSecretRequestResponse,
+  RuntimeSecretRequestStatus,
+} from './runtime-secret-requests';
+export {
+  REQUEST_SECRET_TOOL,
+  RUNTIME_ENV_SCOPES,
+  RUNTIME_SECRET_REQUEST_REASON_MAX_LENGTH,
+  RUNTIME_SECRET_REQUEST_STATUSES,
+} from './runtime-secret-requests';

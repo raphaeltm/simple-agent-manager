@@ -717,6 +717,59 @@ export const projectAccessRequests = sqliteTable(
 
 /** Per-project runtime environment variables injected into workspaces.
  *  Secret values are AES-256-GCM encrypted; non-secret values are stored in plaintext. */
+/**
+ * An agent's request for a named project runtime secret, fulfilled by a human through the
+ * in-chat card (services/runtime-secret-requests.ts, migration 0236). Metadata only: the value
+ * goes straight into project_runtime_env_vars, encrypted.
+ */
+export const runtimeSecretRequests = sqliteTable(
+  'runtime_secret_requests',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    envKey: text('env_key').notNull(),
+    reason: text('reason').notNull(),
+    /** Requested lifetime of the stored value; NULL = no expiry. */
+    ttlSeconds: integer('ttl_seconds'),
+    status: text('status').notNull().default('pending'),
+    requesterUserId: text('requester_user_id').notNull(),
+    requestingTaskId: text('requesting_task_id').notNull(),
+    requestingAuthorityTaskId: text('requesting_authority_task_id').notNull(),
+    requestingChatSessionId: text('requesting_chat_session_id').notNull(),
+    requestingAgentSessionId: text('requesting_agent_session_id'),
+    requestingWorkspaceId: text('requesting_workspace_id'),
+    /** Epoch ms after which a pending request can no longer be fulfilled. */
+    expiresAt: integer('expires_at').notNull(),
+    resolvedBy: text('resolved_by'),
+    resolvedAt: integer('resolved_at'),
+    /** Epoch ms the stored value expires, set when fulfilled with a TTL. */
+    secretExpiresAt: integer('secret_expires_at'),
+    replacedExisting: integer('replaced_existing', { mode: 'boolean' }).notNull().default(false),
+    /** Epoch ms the agent's outcome notice was queued; NULL = not yet (the sweep retries). */
+    notifiedAt: integer('notified_at'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => ({
+    statusExpiresIdx: index('idx_runtime_secret_requests_status_expires').on(
+      table.status,
+      table.expiresAt
+    ),
+    sessionIdx: index('idx_runtime_secret_requests_session').on(
+      table.requestingChatSessionId,
+      table.status
+    ),
+    resolvedIdx: index('idx_runtime_secret_requests_resolved').on(table.resolvedAt),
+    unnotifiedIdx: index('idx_runtime_secret_requests_unnotified')
+      .on(table.resolvedAt)
+      .where(sql`notified_at IS NULL AND status != 'pending'`),
+  })
+);
+
+export type RuntimeSecretRequestRow = typeof runtimeSecretRequests.$inferSelect;
+
 export const projectRuntimeEnvVars = sqliteTable(
   'project_runtime_env_vars',
   {
@@ -733,6 +786,12 @@ export const projectRuntimeEnvVars = sqliteTable(
     /** AES-256-GCM IV (base64). Null when isSecret=false (value stored in plaintext). */
     valueIv: text('value_iv'),
     isSecret: integer('is_secret', { mode: 'boolean' }).notNull().default(false),
+    /** Epoch ms after which the value must not be used; NULL = no expiry (0236). */
+    expiresAt: integer('expires_at'),
+    /** Request that supplied the current value (agent-collected); NULL = set manually (0236). */
+    secretRequestId: text('secret_request_id').references(() => runtimeSecretRequests.id, {
+      onDelete: 'set null',
+    }),
     createdAt: text('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),
@@ -741,6 +800,12 @@ export const projectRuntimeEnvVars = sqliteTable(
       .default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => ({
+    expiresIdx: index('idx_project_runtime_env_expires')
+      .on(table.expiresAt)
+      .where(sql`expires_at IS NOT NULL`),
+    secretRequestIdx: index('idx_project_runtime_env_secret_request')
+      .on(table.secretRequestId)
+      .where(sql`secret_request_id IS NOT NULL`),
     projectKeyUnique: uniqueIndex('idx_project_runtime_env_project_key').on(
       table.projectId,
       table.envKey

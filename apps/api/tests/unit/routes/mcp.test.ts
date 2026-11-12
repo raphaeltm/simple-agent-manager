@@ -838,6 +838,7 @@ describe('MCP Routes', () => {
           'publish_mission_state',
           'remove_pending_subtask',
           'request_human_input',
+          'request_secret',
           'resume_mission',
           'retry_subtask',
           'send_message_to_subtask',
