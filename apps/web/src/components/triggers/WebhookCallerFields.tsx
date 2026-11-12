@@ -90,7 +90,7 @@ export function WebhookCallerFields({
             label="Where is the event ID?"
             hint={
               value.eventIdSource === 'header'
-                ? 'Each event needs its own ID so a retry does not start a second run. GitHub sends it in the x-github-delivery header. A header is not covered by the signature, so an event with exactly the same body as an earlier one is also treated as a repeat.'
+                ? 'Each event needs its own ID so a retry does not start a second run. GitHub sends it in the x-github-delivery header. A header is not covered by the signature, so an event with exactly the same body as an earlier one is refused and starts nothing. Use an ID in the body if the service sends identical bodies.'
                 : 'Each event needs its own ID so a retry does not start a second run. Use a dot path into the JSON body, such as event.id.'
             }
             error={errors.eventId}
