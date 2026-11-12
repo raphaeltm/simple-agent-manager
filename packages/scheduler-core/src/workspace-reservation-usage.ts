@@ -1,9 +1,26 @@
 /**
  * Declared workspace reservation usage on a node, and the parsers that read persisted
- * reservation snapshots. Pure: the D1 loader that fills it lives in the worker
- * (`apps/api/src/services/workspace-reservation-usage.ts`).
+ * reservation snapshots. Pure: the worker's D1 loader fills the usage shape.
  */
-import type { ResolvedResourceReservation } from '@simple-agent-manager/shared';
+import type {
+  ResolvedResourceReservation,
+  ResourceRequirementsSource,
+} from '@simple-agent-manager/shared';
+
+/**
+ * Reservation sources a persisted snapshot may carry. The single list behind both the advisory
+ * parser below and the worker's final-admission SQL (`RESOURCE_REQUIREMENTS_SOURCE_SQL`), so the
+ * two can never accept different sources.
+ */
+export const RESOURCE_REQUIREMENTS_SOURCES = [
+  'task',
+  'trigger',
+  'skill',
+  'agent-profile',
+  'project',
+  'user',
+  'platform',
+] as const satisfies readonly ResourceRequirementsSource[];
 
 export interface ActiveWorkspaceReservationUsage {
   activeCount: number;
@@ -35,9 +52,7 @@ export function isResolvedResourceReservation(
     nonNegativeInteger(record.diskMb) !== null &&
     typeof record.exclusiveNode === 'boolean' &&
     typeof record.source === 'string' &&
-    ['task', 'trigger', 'skill', 'agent-profile', 'project', 'user', 'platform'].includes(
-      record.source
-    )
+    (RESOURCE_REQUIREMENTS_SOURCES as readonly string[]).includes(record.source)
   );
 }
 

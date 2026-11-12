@@ -10,10 +10,8 @@
  * Everything runs against a real SQLite engine through the D1 adapter (rule 28).
  */
 import {
-  noEligibleCapacityCandidateMessage,
-} from '@simple-agent-manager/scheduler-core';
-import {
   buildCapacityPoolSelection,
+  noEligibleCapacityCandidateMessage,
 } from '@simple-agent-manager/scheduler-core';
 import type { ProviderInstanceOffering } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';

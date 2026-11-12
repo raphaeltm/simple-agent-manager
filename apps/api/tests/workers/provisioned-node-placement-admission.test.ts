@@ -12,11 +12,9 @@
  * env sets no admission override.
  */
 import {
+  DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB,
   DEFAULT_WORKSPACE_PLACEMENT_BACKLOG_CONFLICT_RETRIES,
   DEFAULT_WORKSPACE_PLACEMENT_MAX_REJECTIONS,
-} from '@simple-agent-manager/scheduler-core';
-import {
-  DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB,
   MEASURED_MEMORY_OVERRUN_REASON,
   resolveWorkspaceAdmissionPolicy,
 } from '@simple-agent-manager/scheduler-core';

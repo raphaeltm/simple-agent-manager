@@ -10,13 +10,11 @@
  * See: specs/022-simplified-chat-ux/contracts/task-submit.md
  */
 import {
-  inheritedCredentialAttributionForCaller,
-} from '@simple-agent-manager/scheduler-core';
-import {
   collectStoredResourceRequirementLayers,
   createPersistedTaskResourcePlanJson,
   firstResourceRequirementLayer,
   firstResourceRequirementLayerJson,
+  inheritedCredentialAttributionForCaller,
   mergeResourceRequirementLayers,
   normalizeResourceRequirementsInput,
   ResourceRequirementsValidationError,

@@ -370,7 +370,11 @@ function main() {
       project.addSourceFileAtPath(f);
     }
   } else {
-    project.addSourceFilesAtPaths([resolve(ROOT, 'apps/api/src/**/*.ts')]);
+    project.addSourceFilesAtPaths([
+      resolve(ROOT, 'apps/api/src/**/*.ts'),
+      // Pure code lifted out of the worker keeps the same checks (worker modularization).
+      resolve(ROOT, 'packages/scheduler-core/src/**/*.ts'),
+    ]);
   }
 
   const allFindings: Finding[] = [];

@@ -1,7 +1,4 @@
 import {
-  capacityCandidateSatisfiesWorkloadRole,
-} from '@simple-agent-manager/scheduler-core';
-import {
   type ConcreteCapacitySnapshot,
   normalizeConcreteSnapshot,
 } from '@simple-agent-manager/scheduler-core';
@@ -242,13 +239,6 @@ export function buildPlacementAuthoritySqlPredicate(
   );
 
   return { sql: clauses.join('\n'), binds };
-}
-
-export function capacityCandidateWorkloadRoleEligible(
-  candidateRole: string | null | undefined,
-  requestedRole: CapacityWorkloadRole
-): boolean {
-  return capacityCandidateSatisfiesWorkloadRole(candidateRole, requestedRole);
 }
 
 export function capacityCandidateWorkloadRoleSql(

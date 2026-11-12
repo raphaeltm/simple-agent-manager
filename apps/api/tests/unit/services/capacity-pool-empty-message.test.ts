@@ -9,12 +9,10 @@
  * `canonical-vm-allocation.ts` keeps its own copy of the non-empty message; only the
  * configured-empty branch is shared (`emptyCapacityPoolMessage`).
  */
-import type {
-  TaskStartCapacityPoolSelection,
-} from '@simple-agent-manager/scheduler-core';
 import {
   emptyCapacityPoolMessage,
   noEligibleCapacityCandidateMessage,
+  type TaskStartCapacityPoolSelection,
 } from '@simple-agent-manager/scheduler-core';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';

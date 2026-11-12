@@ -73,14 +73,23 @@ Moves as the pure half of a split file: `workspace-resource-capacity` (evaluatio
   the runtime-boundary semantic scan, the node-pool-boundary roots, the build order doc and
   direct-dependency evidence (`fast-check`). The host-memory reserve sync test stays in the
   worker (it cross-checks a cloud-init source file).
+- 2026-11-12: merged core `bb071a00c` (W0 + main). Review fixes: one reservation-source list
+  (`RESOURCE_REQUIREMENTS_SOURCES` in the package) now feeds both the advisory parser and the
+  worker's final-admission `RESOURCE_REQUIREMENTS_SOURCE_SQL`, value-identical and pinned by
+  `workspace-reservation-source-parity.test.ts`; removed the dead
+  `capacityCandidateWorkloadRoleEligible`; merged duplicate package imports; `ast-checks` and the
+  e2e-smoke path filter now cover the package; two blog links that would 404 repointed.
 
 ## Test counts
 
 | Suite | Core `bbb1c82ca` | After W0 merge (W0's count) | After W2 |
 | --- | --- | --- | --- |
-| `apps/api` unit/integration/simulation (vitest.config) | 1,084 files / 16,012 tests | 1,077 / 15,924 | 1,068 / 15,803 |
+| `apps/api` unit/integration/simulation (vitest.config) | 1,084 files / 16,012 tests | 1,077 / 15,924 | 1,068 / 15,803 (+1 parity test file after review) |
 | `packages/scheduler-core` | — | — | 9 / 121 |
 | `apps/api` Workers pool (static `it`/`test` count) | 180 files / 1,744 | unchanged | 180 / 1,744 |
 
 W2 moved 9 files / 121 tests from `apps/api` into the package (15,803 + 121 = 15,924); no test
 was deleted. The 7 files / 88 tests between core and the W0 column moved into worker-core in W0.
+
+After merging core `bb071a00c` (which brought main's new tests) the full `apps/api` run is
+1,073 files / 15,916 tests passing on `f6a84b518`.

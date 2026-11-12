@@ -9,6 +9,7 @@ import {
   emptyUsage,
   parseResolvedResourceReservation,
   parseTimestampMs,
+  RESOURCE_REQUIREMENTS_SOURCES,
 } from '@simple-agent-manager/scheduler-core';
 
 import { D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
@@ -17,8 +18,9 @@ export const ACTIVE_WORKSPACE_RESERVATION_STATUSES = ['running', 'creating', 're
 export const ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL = ACTIVE_WORKSPACE_RESERVATION_STATUSES.map(
   (status) => `'${status}'`
 ).join(', ');
-export const RESOURCE_REQUIREMENTS_SOURCE_SQL =
-  "'task', 'trigger', 'skill', 'agent-profile', 'project', 'user', 'platform'";
+export const RESOURCE_REQUIREMENTS_SOURCE_SQL = RESOURCE_REQUIREMENTS_SOURCES.map(
+  (source) => `'${source}'`
+).join(', ');
 const D1_BIND_LIMIT = D1_MAX_BOUND_PARAMETERS;
 
 export async function loadActiveWorkspaceReservationUsage(
@@ -114,4 +116,3 @@ function observedWorkspaceMemoryCredit(row: {
     return null;
   }
 }
-

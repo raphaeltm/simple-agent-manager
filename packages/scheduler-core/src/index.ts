@@ -164,6 +164,7 @@ export {
   isResolvedResourceReservation,
   parseResolvedResourceReservation,
   parseTimestampMs,
+  RESOURCE_REQUIREMENTS_SOURCES,
 } from './workspace-reservation-usage';
 export {
   cpuBudgetMillis,

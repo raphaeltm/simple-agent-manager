@@ -2,8 +2,6 @@
 import {
   buildPlacementDecisionDiagnostics,
   type BuildPlacementDiagnosticsInput,
-} from '@simple-agent-manager/scheduler-core';
-import {
   isResolvedResourceReservation,
 } from '@simple-agent-manager/scheduler-core';
 import { resolveResourceReservation } from '@simple-agent-manager/shared';

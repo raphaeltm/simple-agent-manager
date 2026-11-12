@@ -2,15 +2,11 @@ import { Buffer } from 'node:buffer';
 
 import { getProviderInstanceOfferings } from '@simple-agent-manager/providers';
 import {
+  buildCapacityPoolSelection,
   capacityCandidateBaseId,
   capacityCandidateIdForRole,
   capacityCandidateRoleFromId,
   capacityCandidateSatisfiesWorkloadRole,
-} from '@simple-agent-manager/scheduler-core';
-import {
-  buildCapacityPoolSelection,
-} from '@simple-agent-manager/scheduler-core';
-import {
   emptyUsage,
   evaluateWorkspaceReservationCapacity,
   resolveWorkspaceAdmissionPolicy,

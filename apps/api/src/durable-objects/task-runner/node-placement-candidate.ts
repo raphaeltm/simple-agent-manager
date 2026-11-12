@@ -1,15 +1,11 @@
-import type {
-  PlacementHostDiagnosticInput,
-} from '@simple-agent-manager/scheduler-core';
-import {
-  normalizePlacementHostSignals,
-  type PlacementHostSignals,
-} from '@simple-agent-manager/scheduler-core';
 import {
   type ActiveWorkspaceReservationUsage,
   cpuBudgetMillis,
   evaluateWorkspaceReservationCapacity,
+  normalizePlacementHostSignals,
   parseWorkspaceAdmissionMetrics,
+  type PlacementHostDiagnosticInput,
+  type PlacementHostSignals,
   resolveTrustedWorkspaceNodeCapacity,
   usableMemoryMb,
   type WorkspaceAdmissionPolicy,

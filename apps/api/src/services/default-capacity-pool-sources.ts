@@ -1,7 +1,5 @@
 import {
   capacitySourceAuthorityGeneration,
-} from '@simple-agent-manager/scheduler-core';
-import {
   timestampVersion,
 } from '@simple-agent-manager/scheduler-core';
 import type { CapacityCredentialSource, CapacityPoolScope } from '@simple-agent-manager/shared';

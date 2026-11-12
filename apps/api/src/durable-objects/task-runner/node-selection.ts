@@ -1,8 +1,6 @@
-import type {
-  PlacementHostDiagnosticInput,
-} from '@simple-agent-manager/scheduler-core';
 import {
   comparePlacementRolloutHosts,
+  type PlacementHostDiagnosticInput,
 } from '@simple-agent-manager/scheduler-core';
 
 import { log } from '../../lib/logger';

@@ -1,10 +1,8 @@
 import {
-  comparePlacementRolloutHosts,
-  resolvePlacementRollout,
-} from '@simple-agent-manager/scheduler-core';
-import {
   comparePlacementHostsByStrategy,
+  comparePlacementRolloutHosts,
   type PlacementHostSignals,
+  resolvePlacementRollout,
 } from '@simple-agent-manager/scheduler-core';
 import { describe, expect, it } from 'vitest';
 

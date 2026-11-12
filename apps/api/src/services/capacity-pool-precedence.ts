@@ -1,3 +1,8 @@
+/**
+ * SQL form of the default capacity pool precedence in `scheduler-core`
+ * (`effectiveDefaultCapacityPoolScopeChain`). These fragments compose the final admission
+ * statement (`buildPlacementAuthoritySqlPredicate`), so they stay beside the D1 code.
+ */
 import {
   type EffectiveDefaultCapacityPoolScope,
   effectiveDefaultCapacityPoolScopeChain,
@@ -6,11 +11,6 @@ import {
 } from '@simple-agent-manager/scheduler-core';
 import type { CapacityPoolScope } from '@simple-agent-manager/shared';
 
-/**
- * SQL form of the default capacity pool precedence in `scheduler-core`
- * (`effectiveDefaultCapacityPoolScopeChain`). These fragments compose the final admission
- * statement (`buildPlacementAuthoritySqlPredicate`), so they stay beside the D1 code.
- */
 export type CapacityPoolPrecedenceBind = string | number | null;
 
 export interface CapacityPoolPrecedenceSql {
