@@ -102,7 +102,9 @@ func (l *limitedListener) Accept() (net.Conn, error) {
 		tc := &trackedConn{Conn: conn, release: func() { l.release(key) }}
 		// go-smtp resets the read deadline on every command, so a client sending one command a
 		// minute could hold a slot forever. The lifetime bound covers DATA, DNS and the gateway.
+		tc.mu.Lock()
 		tc.timer = time.AfterFunc(l.cfg.MaxSessionDuration, func() { _ = tc.Close() })
+		tc.mu.Unlock()
 		return tc, nil
 	}
 }
@@ -110,15 +112,18 @@ func (l *limitedListener) Accept() (net.Conn, error) {
 type trackedConn struct {
 	net.Conn
 	once    sync.Once
+	mu      sync.Mutex // guards timer: the timer's own callback can call Close
 	timer   *time.Timer
 	release func()
 }
 
 func (c *trackedConn) Close() error {
 	c.once.Do(func() {
+		c.mu.Lock()
 		if c.timer != nil {
 			c.timer.Stop()
 		}
+		c.mu.Unlock()
 		c.release()
 	})
 	return c.Conn.Close()

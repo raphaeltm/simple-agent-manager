@@ -117,7 +117,7 @@ func ParseFrom(raw []byte) (address, domain string, err error) {
 		return "", "", permFail("exactly one From address is required")
 	}
 	address = strings.ToLower(addrs[0].Address)
-	if strings.Count(address, "@") != 1 {
+	if !plainMailbox(address) {
 		return "", "", permFail("the From address is not a plain mailbox")
 	}
 	domain, err = domainOf(address)
@@ -266,6 +266,24 @@ func signsHeaders(keys []string, required ...string) bool {
 	}
 	for _, r := range required {
 		if !signed[r] {
+			return false
+		}
+	}
+	return true
+}
+
+// plainMailbox mirrors the Worker's normalizeMailbox (apps/api/src/services/agent-email/address.ts):
+// an address it would refuse gets a permanent 550 here instead of a 451 retry loop.
+func plainMailbox(addr string) bool {
+	if len(addr) < 3 || len(addr) > 254 || strings.Count(addr, "@") != 1 {
+		return false
+	}
+	at := strings.Index(addr, "@")
+	if at == 0 || at == len(addr)-1 {
+		return false
+	}
+	for _, r := range addr {
+		if r <= ' ' || r == 0x7f || strings.ContainsRune(`<>()[]\,;:"`, r) {
 			return false
 		}
 	}

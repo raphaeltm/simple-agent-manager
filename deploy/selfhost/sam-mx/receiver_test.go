@@ -467,6 +467,8 @@ func TestHeaderBlocksParsersCouldReadDifferentlyAreRefused(t *testing.T) {
 		"duplicate sender":   "From: alice@sender.example\r\nSender: a@x.example\r\nSender: b@y.example\r\n",
 		"leading fold":       " folded\r\nFrom: alice@sender.example\r\n",
 		"two at signs":       "From: <a@b@sender.example>\r\n",
+		"quoted local part":  "From: \"a b\"@sender.example\r\n",
+		"domain literal":     "From: a@[127.0.0.1]\r\n",
 	} {
 		if code := smtpCode(t, h.send(allowedFrom, []string{agentRcpt}, []byte(head+rest))); code != 550 {
 			t.Errorf("%s: want 550, got %d", name, code)
