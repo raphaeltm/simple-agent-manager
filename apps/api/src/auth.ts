@@ -20,6 +20,7 @@ import {
 import { emailSignInPlugins } from './services/email-sign-in';
 import { refreshGitHubAccessToken } from './services/github-oauth-refresh';
 import { gitLabLoginProvider } from './services/gitlab-login-provider';
+import { keepLinkedAccountEmail } from './services/linked-account-identity';
 import {
   resolveLoginOAuthConfig,
   selectGitHubOAuthConfig,
@@ -240,12 +241,18 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
           return null;
         }
 
+        // A linked account keeps its own verified SAM email (see the helper).
+        const identity = await keepLinkedAccountEmail(env, 'github', user.id, {
+          email,
+          emailVerified,
+        });
+
         return {
           user: {
-            email,
+            email: identity.email ?? email,
             name: (user.name || user.login || '').trim(),
             image: user.avatar_url || undefined,
-            emailVerified,
+            emailVerified: identity.emailVerified,
           },
           // better-auth keys the linked account on `data.id` (its GitHub provider declares
           // `accountSubject: ({ profile }) => profile.id`); without it every sign-in fails
@@ -448,10 +455,12 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
         // "Connect GitHub" / "Connect GitLab" in Settings: an account that signed in by email
         // links a provider through BetterAuth's own `/link-social` flow. The provider account's
         // email usually differs from the SAM one (a GitHub-created account may only expose its
-        // noreply address). better-auth 1.7 reads this flag only on that explicit, signed-in
-        // path (`oauth2/link-account.mjs`, `/link-social` idToken branch); implicit linking at
-        // sign-in still matches on the email alone. Agent sign-in sessions cannot reach
-        // `/link-social`: `routes/auth.ts` refuses every BetterAuth write for them.
+        // noreply address). better-auth 1.7 reads this flag only on the explicit, signed-in link
+        // paths (`linkOAuthAccount` in `oauth2/link-account.mjs` for the redirect callback, and
+        // the `/link-social` idToken branch); implicit linking at sign-in still requires the
+        // email to match. `routes/auth.ts` limits linking to GitHub and GitLab, whose
+        // `getUserInfo` keeps the linked account's own email (`keepLinkedAccountEmail`), and
+        // refuses every BetterAuth write for agent sign-in sessions.
         allowDifferentEmails: true,
       },
     },

@@ -64,7 +64,12 @@ export async function connectProvider(
   provider: LinkableProvider,
   returnTo: string = window.location.href
 ): Promise<void> {
-  const { error } = await authClient.linkSocial({ provider, callbackURL: returnTo });
+  // Errors come back to the same page too, not to the API's bare error page.
+  const { error } = await authClient.linkSocial({
+    provider,
+    callbackURL: returnTo,
+    errorCallbackURL: returnTo,
+  });
   if (error) throw new Error(error.message || `Could not connect ${provider}`);
 }
 

@@ -65,12 +65,18 @@ function createFakeGitHub() {
       const token = (request.headers.get('authorization') ?? '').split(' ')[1] ?? '';
       if (!issuedTokens.has(token)) return Response.json({}, { status: 401 });
       if (url.pathname === '/user') return Response.json(GITHUB_USER);
-      if (url.pathname === '/user/emails') return Response.json(GITHUB_EMAILS);
+      if (url.pathname === '/user/emails') {
+        // An App without "Email addresses: read" gets 403 here (seen on the self-hosted box).
+        return state.emailsForbidden
+          ? Response.json({ message: 'Resource not accessible by integration' }, { status: 403 })
+          : Response.json(GITHUB_EMAILS);
+      }
     }
     throw new Error(`Unexpected outbound request: ${request.method} ${request.url}`);
   }
 
-  return { approve, fetch: fetchImpl, issuedTokens };
+  const state = { emailsForbidden: false };
+  return { approve, fetch: fetchImpl, issuedTokens, state };
 }
 
 /**
@@ -192,6 +198,66 @@ describe('Connect GitHub for an email-signed account (vertical slice)', () => {
     const token = await getGitHubUserAccessTokenForOwner(env, 'email-user', 'git-token-test');
     expect(token).not.toBeNull();
     expect(github.issuedTokens.has(token ?? '')).toBe(true);
+  });
+
+  async function signInWithGitHub(): Promise<Response> {
+    const start = await app.request(
+      `${API_ORIGIN}/api/auth/sign-in/social`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: APP_ORIGIN },
+        body: JSON.stringify({ provider: 'github', callbackURL: RETURN_TO }),
+      },
+      env
+    );
+    expect(start.status).toBe(200);
+    const { url } = (await start.json()) as { url: string };
+    const authorizeUrl = new URL(url);
+    const callback = new URL(GITHUB_REDIRECT_URI);
+    callback.searchParams.set('code', github.approve(authorizeUrl));
+    callback.searchParams.set('state', authorizeUrl.searchParams.get('state') ?? '');
+    return app.request(callback.toString(), { headers: { cookie: cookieHeader(start) } }, env);
+  }
+
+  function emailUser() {
+    return sqlite
+      .prepare(`SELECT email, email_verified AS verified FROM users WHERE id = 'email-user'`)
+      .get() as { email: string; verified: number };
+  }
+
+  it.each([
+    ['GitHub reports a verified primary email', false],
+    ["GitHub's emails call is refused (App without Email addresses: read)", true],
+  ])(
+    'a later GitHub sign-in keeps the SAM email and its verification: %s',
+    async (_label, emailsForbidden) => {
+      const { sessionCookie } = await createSessionCookieForUser(env, 'email-user');
+      expect((await completeLink(sessionCookie)).status).toBe(302);
+
+      github.state.emailsForbidden = emailsForbidden;
+      const callback = await signInWithGitHub();
+      expect(callback.status).toBe(302);
+      expect(callback.headers.get('location')).toBe(RETURN_TO);
+      // The same account, still with its own verified address, so email codes keep working.
+      const sessionUsers = sqlite.prepare(`SELECT DISTINCT user_id FROM sessions`).all();
+      expect(sessionUsers).toEqual([{ user_id: 'email-user' }]);
+      expect(emailUser()).toEqual({ email: SAM_EMAIL, verified: 1 });
+      expect((sqlite.prepare(`SELECT count(*) AS n FROM users`).get() as { n: number }).n).toBe(1);
+    }
+  );
+
+  it.each(['google', 'gitlab-typo', ''])('refuses to link provider %j', async (provider) => {
+    const { sessionCookie } = await createSessionCookieForUser(env, 'email-user');
+    const response = await app.request(
+      `${API_ORIGIN}/api/auth/link-social`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: APP_ORIGIN, cookie: sessionCookie },
+        body: JSON.stringify({ provider, callbackURL: RETURN_TO }),
+      },
+      env
+    );
+    expect(response.status).toBe(400);
   });
 
   it('refuses to start a link without a signed-in session', async () => {
