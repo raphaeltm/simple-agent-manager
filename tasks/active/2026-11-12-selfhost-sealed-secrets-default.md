@@ -34,23 +34,23 @@ and Azure; file key elsewhere), portable, 300 s cache fine, no bundled OpenBao.
 
 ## Checklist
 
-- [ ] 1. Default on: auto choice in `--init`, key-agent always in compose, uid self-drop,
+- [x] 1. Default on: auto choice in `--init`, key-agent always in compose, uid self-drop,
       `SAM_KEY_PROVIDER=legacy-plaintext` override, README/.env.example
-- [ ] 2. Platform probes (GCE, IMDSv2, Azure IMDS) with timeouts; KMS only after round trip;
+- [x] 2. Platform probes (GCE, IMDSv2, Azure IMDS) with timeouts; KMS only after round trip;
       fallback file with one-line reason; choice recorded in `.state/key-agent/choice.json`;
       `pnpm selfhost:secrets status`
-- [ ] 3. AWS KMS provider (IMDSv2, SigV4, EncryptionContext, error classes), conformance vs fake,
+- [x] 3. AWS KMS provider (IMDSv2, SigV4, EncryptionContext, error classes), conformance vs fake,
       signer vs AWS vectors
-- [ ] 4. gcp-bootstrap `--kms`: key ring + key + key-level grant, dry-run, prints key ref;
+- [x] 4. gcp-bootstrap `--kms`: key ring + key + key-level grant, dry-run, prints key ref;
       `--teardown`; created-resources record; README AWS/Azure steps + removal
-- [ ] 5. File key notice at first seal; `secrets key-file` / `verify-key-copy`
-- [ ] 6. `secrets migrate` (seal, deploy, verify, remove plaintext, rollback); upgrade finishes
+- [x] 5. File key notice at first seal; `secrets key-file` / `verify-key-copy`
+- [x] 6. `secrets migrate` (seal, deploy, verify, remove plaintext, rollback); upgrade finishes
       migration; `secrets plaintext` listing + gated purge; backups listing; rotation guide
-- [ ] 7. `secrets switch --to <provider|auto>` and `reseal`, agent opens previous provider during
+- [x] 7. `secrets switch --to <provider|auto>` and `reseal`, agent opens previous provider during
       the switch
-- [ ] 8. Tests (conformance all providers; auto choice via real init entry with fake metadata;
+- [x] 8. Tests (conformance all providers; auto choice via real init entry with fake metadata;
       live default-on + migration + purge on real celld/MinIO; Cloudflare unchanged)
-- [ ] 9. Docs in same commits
+- [x] 9. Docs in same commits
 
 ## Acceptance criteria
 
@@ -60,3 +60,23 @@ and Azure; file key elsewhere), portable, 300 s cache fine, no bundled OpenBao.
 - AWS provider passes conformance against the fake and the signer matches AWS vectors.
 - Migration removes plaintext files only after verification; rollback on failure.
 - Purge never deletes a version named by a pointer or attachment; listing is read-only.
+
+## Added scope (coordinator, relaying the owner)
+
+- [x] gcp-bootstrap teardown (`--teardown`, `--dry-run`, ownership proofs, two-stage KMS removal),
+      provider-neutral created-resources record, README removal commands for AWS/Azure and box side
+- [x] Merge base 731a171d0 (R3 fixes); migration runs R3's contract chain before switching and
+      rolls back when the first request after the switch is unhealthy
+- [x] CI items inherited from the spike: outbound-fetch inventory, dependency governance,
+      secret scan (expired baseline entry + new fixtures), Validate Deploy Scripts
+
+## Notes
+
+- Google's current docs: Cloud KMS keys and key rings can be deleted once every version is
+  destroyed (correction to the brief's assumption); teardown is grant removal, scheduled version
+  destruction behind --destroy-key-versions <key>, then a later run deletes versions, key, ring.
+- celld 0.6.3: only pointers and queue attachments name versions that are read; docs forbid
+  operator deletion under deploy/; purge is opt-in, version-pinned, fail-closed.
+- Security review: 0 CRITICAL/HIGH, 3 MEDIUM + 9 LOW fixed (21d040ad1).
+- Not run against real services: aws-kms, gcp-kms, azure-kv (fakes only). Real: file, transit
+  (spike), celld + MinIO + key-agent image (live tests).
