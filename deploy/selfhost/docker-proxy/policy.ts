@@ -29,9 +29,8 @@
  * Plain TypeScript with erasable syntax only: the proxy image runs it with Node's type stripping.
  */
 
-/** The decision inputs written by `pnpm selfhost:deploy` to `.state/docker-proxy/policy.json`. */
 import {
-  CELLD_NETWORKS,
+  celldNetwork,
   CONTAINER_NAME,
   CONTAINER_REF,
   EXEC_ID,
@@ -88,7 +87,7 @@ export interface ProxyRequest {
 }
 
 export type Decision =
-  | { allow: false; status: number; reason: string }
+  | { allow: false; status: number; reason: string; detail?: string }
   | {
       allow: true;
       method: string;
@@ -123,7 +122,7 @@ function allow(
 function isCelldContainer(facts: ContainerFacts, policy: ProxyPolicy): 'sandbox' | 'fence' | null {
   if (!facts.labels['celld.node'] || facts.privileged) return null;
   if (facts.labels['celld.fence'] === '1') return facts.networkMode === 'host' ? 'fence' : null;
-  if (facts.runtime === policy.runtime && facts.networkMode in CELLD_NETWORKS) return 'sandbox';
+  if (facts.runtime === policy.runtime && celldNetwork(facts.networkMode)) return 'sandbox';
   return null;
 }
 
@@ -135,10 +134,12 @@ async function ownedContainer(
   if (!CONTAINER_REF.test(ref)) refuse('container reference is malformed');
   const facts = await context.inspectContainer(ref);
   // The same answer as the daemon's for a missing container, so celld's 404 paths still work.
-  if (!facts) refuse('No such container', 404);
+  // Missing and not-celld's get the same answer (the daemon's own 404), so the proxy is not an
+  // oracle for which other containers exist on the box; the audit log keeps the difference.
+  if (!facts) refuse(`No such container: ${ref}`, 404);
   const kind = isCelldContainer(facts, context.policy);
   if (!kind || (need === 'sandbox' && kind !== 'sandbox')) {
-    refuse('container is not one of celld’s sandboxes');
+    refuse(`No such container: ${ref}`, 404, 'container is not one of celld’s sandboxes');
   }
   return facts.id;
 }
@@ -147,8 +148,9 @@ export async function decide(request: ProxyRequest, context: DecisionContext): P
   try {
     return await route(request, context);
   } catch (error) {
-    if (error instanceof Refusal)
-      return { allow: false, status: error.status, reason: error.message };
+    if (error instanceof Refusal) {
+      return { allow: false, status: error.status, reason: error.message, detail: error.detail };
+    }
     return { allow: false, status: 403, reason: 'request could not be checked' };
   }
 }
@@ -291,7 +293,7 @@ async function route(request: ProxyRequest, context: DecisionContext): Promise<D
     noBody();
     query(url, {}, 'network');
     const name = network[1] as string;
-    if (!(name in CELLD_NETWORKS)) refuse('network is not one of celld’s');
+    if (!celldNetwork(name)) refuse('network is not one of celld’s');
     return allow(
       method,
       `networks.${method === 'GET' ? 'inspect' : 'remove'}`,

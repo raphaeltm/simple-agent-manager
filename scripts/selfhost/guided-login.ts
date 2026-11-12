@@ -164,7 +164,7 @@ export function assertContainerEngineReady(
       `could not read the Docker daemon's runtimes: ${probe.runtimesJson.slice(0, 200)}`
     );
   }
-  if (typeof runtimes !== 'object' || runtimes === null || !(settings.runtime in runtimes)) {
+  if (typeof runtimes !== 'object' || runtimes === null || !Object.hasOwn(runtimes, settings.runtime)) {
     throw new Error(
       `SAM_GUIDED_LOGIN_RUNTIME=${settings.runtime} is not registered with the Docker daemon ` +
         `(for gVisor: install runsc, run \`sudo runsc install\`, restart Docker)`

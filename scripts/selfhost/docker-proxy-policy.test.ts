@@ -182,6 +182,49 @@ describe('sandbox create', () => {
   });
 });
 
+describe('Object.prototype names', () => {
+  // Plain-object lookups (`name in {...}`) accepted these as celld networks: an unfenced bridge.
+  const names = Object.getOwnPropertyNames(Object.prototype);
+  it.each(names)(
+    'refuses %s as a network, a sandbox network and a container network',
+    async (name) => {
+      const call = (method: string, url: string, body?: unknown) =>
+        decide({ method, url, body, upgrade: false }, context);
+      expect(
+        (
+          await call('POST', '/networks/create', {
+            Name: name,
+            Driver: 'bridge',
+            Options: { 'com.docker.network.bridge.enable_icc': 'false' },
+          })
+        ).allow
+      ).toBe(false);
+      expect((await call('GET', `/networks/${name}`)).allow).toBe(false);
+      expect((await call('DELETE', `/networks/${name}`)).allow).toBe(false);
+      expect((await create(sandbox({ NetworkMode: name }))).allow).toBe(false);
+      expect((await call('DELETE', `/containers/celld-sandbox?${name}=1`)).allow).toBe(false);
+      const onPrototypeBridge: DecisionContext = {
+        ...context,
+        inspectContainer: async () => ({
+          id: SANDBOX_ID,
+          labels: { 'celld.node': 'n' },
+          runtime: 'runsc',
+          networkMode: name,
+          privileged: false,
+        }),
+      };
+      expect(
+        (
+          await decide(
+            { method: 'POST', url: '/containers/x/start', body: undefined, upgrade: false },
+            onPrototypeBridge
+          )
+        ).allow
+      ).toBe(false);
+    }
+  );
+});
+
 describe('fence create', () => {
   const fence = {
     Image: FENCE,
@@ -229,9 +272,14 @@ describe('container lifecycle', () => {
     });
   });
 
-  it('refuses containers that are not celld sandboxes, and passes the daemon 404 through', async () => {
+  it('answers 404 for containers that are not celld sandboxes, like a missing one (no oracle)', async () => {
     for (const ref of ['caddy', 'celld-runc', 'celld-privileged']) {
-      expect((await call('GET', `/containers/${ref}/json`)).allow).toBe(false);
+      expect(await call('GET', `/containers/${ref}/json`)).toMatchObject({
+        allow: false,
+        status: 404,
+        reason: `No such container: ${ref}`,
+        detail: 'container is not one of celld’s sandboxes',
+      });
     }
     expect(await call('DELETE', '/containers/missing?force=true')).toMatchObject({
       allow: false,

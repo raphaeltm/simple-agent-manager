@@ -29,11 +29,20 @@ export const CELLD_FENCE_RULES_SHA256 =
 /** celld's fence command (`ensure_fence`). */
 export const CELLD_FENCE_CMD = ['sh', '-c', `printf '%s' "$CELLD_NFT" | nft -f -`];
 
-/** celld's two bridges (`networks()`), name → [internal, host interface]. */
-export const CELLD_NETWORKS: Readonly<Record<string, { internal: boolean; bridge: string }>> = {
-  celld: { internal: false, bridge: 'celld0' },
-  'celld-internal': { internal: true, bridge: 'celld1' },
-};
+/**
+ * celld's two bridges (`networks()`), name → internal flag and host interface. A Map, never a
+ * plain object: `name in {...}` and `{...}[name]` also match `constructor`, `toString` and the
+ * rest of Object.prototype, which let a request name an unfenced bridge "constructor".
+ */
+export const CELLD_NETWORKS: ReadonlyMap<string, { internal: boolean; bridge: string }> = new Map([
+  ['celld', { internal: false, bridge: 'celld0' }],
+  ['celld-internal', { internal: true, bridge: 'celld1' }],
+]);
+
+/** celld's bridge spec for a network name, or undefined (own entries only). */
+export function celldNetwork(name: unknown): { internal: boolean; bridge: string } | undefined {
+  return typeof name === 'string' ? CELLD_NETWORKS.get(name) : undefined;
+}
 
 const ICC_OPTION = 'com.docker.network.bridge.enable_icc';
 const BRIDGE_NAME_OPTION = 'com.docker.network.bridge.name';
@@ -49,14 +58,17 @@ const MAX_STRING = 64 * 1024;
 /** The daemon's view of a container, as far as ownership needs it. */
 export class Refusal extends Error {
   readonly status: number;
-  constructor(status: number, message: string) {
+  /** What the audit log records when it differs from the answer celld gets. */
+  readonly detail: string | undefined;
+  constructor(status: number, message: string, detail?: string) {
     super(message);
     this.status = status;
+    this.detail = detail;
   }
 }
 
-export function refuse(message: string, status = 403): never {
-  throw new Refusal(status, message);
+export function refuse(message: string, status = 403, detail?: string): never {
+  throw new Refusal(status, message, detail);
 }
 // The proxy image runs this file alone (no workspace packages), so it cannot import the API's
 // runtime-validation helpers.
@@ -111,7 +123,7 @@ export function optionalBool(value: unknown, what: string): boolean | undefined 
 export function query(url: URL, allowed: Record<string, RegExp>, what: string): URLSearchParams {
   const out = new URLSearchParams();
   for (const [key, value] of url.searchParams) {
-    const pattern = allowed[key];
+    const pattern = Object.hasOwn(allowed, key) ? allowed[key] : undefined;
     if (!pattern) refuse(`${what}: query parameter ${JSON.stringify(key)} is not allowed`);
     if (!pattern.test(value)) refuse(`${what}: query parameter ${key} has a disallowed value`);
     if (out.has(key)) refuse(`${what}: query parameter ${key} is repeated`);
@@ -168,7 +180,7 @@ export function sandboxCreate(body: unknown, policy: ProxyPolicy): Record<string
     ],
     'HostConfig'
   );
-  if (typeof host.NetworkMode !== 'string' || !(host.NetworkMode in CELLD_NETWORKS)) {
+  if (!celldNetwork(host.NetworkMode)) {
     refuse('HostConfig: NetworkMode must be one of celld’s bridges');
   }
   if (host.PublishAllPorts !== undefined && host.PublishAllPorts !== false) {
@@ -277,7 +289,7 @@ export function execCreate(body: unknown): Record<string, unknown> {
 
 export function networkCreate(body: unknown): Record<string, unknown> {
   const net = onlyKeys(body, ['Name', 'Driver', 'Internal', 'Options'], 'network');
-  const spec = typeof net.Name === 'string' ? CELLD_NETWORKS[net.Name] : undefined;
+  const spec = celldNetwork(net.Name);
   if (!spec) refuse('network: only celld’s two networks may be created');
   const options = onlyKeys(net.Options, [ICC_OPTION, BRIDGE_NAME_OPTION], 'network: Options');
   if (

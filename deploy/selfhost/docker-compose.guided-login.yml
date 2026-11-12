@@ -23,6 +23,12 @@ services:
     cap_drop: [ALL]
     security_opt: ['no-new-privileges:true']
     read_only: true
+    # Bounded so a misbehaving (or compromised) celld cannot exhaust the host through it.
+    mem_limit: 256m
+    pids_limit: 64
+    logging:
+      driver: json-file
+      options: { max-size: 10m, max-file: '3' }
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - docker-proxy-socket:/run/sam-docker-proxy

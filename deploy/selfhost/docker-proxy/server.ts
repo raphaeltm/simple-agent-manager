@@ -47,6 +47,7 @@ function logEvent(event: string, fields: Record<string, unknown>): void {
 }
 
 let cachedPolicy: { mtimeMs: number; size: number; policy: ProxyPolicy } | null = null;
+let policyUnavailableLogged = false;
 
 /** The current policy, re-read when the deploy rewrites the file. Null fails every request. */
 function currentPolicy(): ProxyPolicy | null {
@@ -60,7 +61,11 @@ function currentPolicy(): ProxyPolicy | null {
     logEvent('policy_loaded', { runtime: policy.runtime, images: policy.sandboxImages.length });
     return policy;
   } catch (error) {
-    logEvent('policy_unavailable', { path: POLICY_PATH, error: String(error) });
+    // Once per transition, not per request (the healthcheck asks every few seconds).
+    if (cachedPolicy || !policyUnavailableLogged) {
+      logEvent('policy_unavailable', { path: POLICY_PATH, error: String(error).slice(0, 300) });
+    }
+    policyUnavailableLogged = true;
     cachedPolicy = null;
     return null;
   }
@@ -164,6 +169,8 @@ async function decideRequest(
 }
 
 function refusalBody(decision: Extract<Decision, { allow: false }>): string {
+  // A 404 reads exactly like the daemon's, so it says nothing about what else runs on the box.
+  if (decision.status === 404) return JSON.stringify({ message: decision.reason });
   return JSON.stringify({ message: `sam-docker-proxy refused: ${decision.reason}` });
 }
 
@@ -175,10 +182,10 @@ function logDecision(method: string, url: string, decision: Decision): void {
     }
   } else {
     logEvent('refused', {
-      method,
-      path: url.split('?')[0],
+      method: method.slice(0, 16),
+      path: (url.split('?')[0] ?? '').slice(0, 200),
       status: decision.status,
-      reason: decision.reason,
+      reason: (decision.detail ?? decision.reason).slice(0, 300),
     });
   }
 }
@@ -224,6 +231,36 @@ function readBody(req: IncomingMessage): Promise<Buffer | null> {
   });
 }
 
+function pick(value: unknown, keys: readonly string[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (!isRecord(value)) return out;
+  for (const key of keys) if (Object.hasOwn(value, key)) out[key] = value[key];
+  return out;
+}
+
+/**
+ * Inspect answers carry host layout (bind sources, overlay paths, log paths, PIDs of other
+ * namespaces). celld reads only these fields (container.rs `inspect_running`, `address_of`,
+ * `exec`, `ExecProcess::wait`, `ensure_image`), so only these go back.
+ */
+const RESPONSE_FILTERS: Record<string, (answer: unknown) => unknown> = {
+  'containers.json': (answer) => {
+    const top = isRecord(answer) ? answer : {};
+    const networks: Record<string, unknown> = {};
+    const settings = isRecord(top.NetworkSettings) ? top.NetworkSettings : {};
+    const raw = isRecord(settings.Networks) ? settings.Networks : {};
+    for (const [name, network] of Object.entries(raw))
+      networks[name] = pick(network, ['IPAddress']);
+    return {
+      ...pick(top, ['Id', 'Name']),
+      State: pick(top.State, ['Running', 'Status', 'ExitCode']),
+      NetworkSettings: { Networks: networks },
+    };
+  },
+  'exec.inspect': (answer) => pick(answer, ['ID', 'Running', 'ExitCode', 'Pid']),
+  'images.inspect': (answer) => pick(answer, ['Id']),
+};
+
 async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const method = req.method ?? 'GET';
   const url = req.url ?? '/';
@@ -239,23 +276,31 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     return;
   }
   const upstream = httpRequest(upstreamOptions(decision, false), (reply) => {
-    if (decision.recordsExec) {
+    const filter = Object.hasOwn(RESPONSE_FILTERS, decision.route)
+      ? RESPONSE_FILTERS[decision.route]
+      : undefined;
+    if (decision.recordsExec || filter) {
       const chunks: Buffer[] = [];
       reply.on('data', (chunk: Buffer) => chunks.push(chunk));
       reply.on('end', () => {
-        const text = Buffer.concat(chunks);
-        if (reply.statusCode === 201) {
+        let text = Buffer.concat(chunks);
+        const status = reply.statusCode ?? 502;
+        if (status >= 200 && status < 300) {
           try {
             const answer: unknown = JSON.parse(text.toString('utf8'));
-            const id = isRecord(answer) ? answer.Id : undefined;
-            if (typeof id === 'string' && /^[0-9a-f]{64}$/.test(id)) recordExec(id);
+            if (decision.recordsExec && status === 201) {
+              const id = isRecord(answer) ? answer.Id : undefined;
+              if (typeof id === 'string' && /^[0-9a-f]{64}$/.test(id)) recordExec(id);
+            }
+            if (filter) text = Buffer.from(JSON.stringify(filter(answer)));
           } catch {
-            // The daemon's answer goes back unchanged; an unparseable one records nothing.
+            // An unparseable success answer records nothing and is not passed on unfiltered.
+            if (filter) text = Buffer.from('{}');
           }
         }
         const headers = forwardHeaders(reply.headers);
         headers['content-length'] = String(text.length);
-        res.writeHead(reply.statusCode ?? 502, headers);
+        res.writeHead(status, headers);
         res.end(text);
       });
       return;
@@ -314,6 +359,9 @@ function rawResponse(socket: Duplex, status: number, reason: string, body: strin
 }
 
 async function handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
+  // Node removes its own error listener before 'upgrade'; without one a client that hangs up
+  // mid-request (EPIPE) would crash the proxy.
+  socket.on('error', () => socket.destroy());
   const method = req.method ?? 'POST';
   const url = req.url ?? '/';
   const read = await readUpgradeBody(req, socket, head);
@@ -377,6 +425,10 @@ server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     logEvent('handler_error', { error: String(error) });
     socket.destroy();
   });
+});
+server.on('clientError', (_error, socket) => {
+  if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n');
+  else socket.destroy();
 });
 // A container wait is a long poll; the daemon, not this proxy, decides when it ends.
 server.requestTimeout = 0;

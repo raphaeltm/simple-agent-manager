@@ -362,7 +362,7 @@ describe.skipIf(!dockerAvailable)('docker socket proxy (live, real daemon)', () 
     }
     // No exec into the fence container (it runs with host networking).
     expect((await call('POST', `/containers/${ok.json.Id}/exec`, { Cmd: ['id'] })).status).toBe(
-      403
+      404
     );
   });
 
@@ -437,9 +437,65 @@ describe.skipIf(!dockerAvailable)('docker socket proxy (live, real daemon)', () 
         ['GET', `/containers/${PROXY}/json`, undefined],
       ] as const) {
         const reply = await call(method, path, body);
-        expect(reply.status, `${method} ${path}`).toBe(403);
+        // The same answer as for a container that does not exist: no oracle for what else runs.
+        expect(reply.status, `${method} ${path}`).toBe(404);
+        expect(JSON.stringify(reply.json)).not.toContain('do-not-leak');
       }
+      const missing = await call('GET', '/containers/sam-no-such-container/json');
+      expect(missing.status).toBe(404);
       expect(inspectDirect(OUTSIDER).State.Running).toBe(true);
+    });
+
+    it('cannot create or use a bridge named after an Object.prototype key (unfenced network)', async () => {
+      for (const name of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
+        const reply = await call('POST', '/networks/create', {
+          Name: name,
+          Driver: 'bridge',
+          Options: { 'com.docker.network.bridge.enable_icc': 'false' },
+        });
+        expect(reply.status, name).toBe(403);
+        expect(
+          (await createSandbox(`proto-${name}`, sandboxBody({}, { NetworkMode: name }))).status
+        ).toBe(403);
+      }
+      expect(docker('network', 'ls', '--format', '{{.Name}}').split('\n')).not.toContain(
+        'constructor'
+      );
+    });
+
+    it('gets only the inspect fields celld reads, not host layout', async () => {
+      const sandbox = await createSandbox('inspect-trim');
+      expect(sandbox.status).toBe(201);
+      const inspected = await call('GET', `/containers/${sandbox.json.Id}/json`);
+      expect(inspected.status).toBe(200);
+      expect(Object.keys(inspected.json).sort()).toEqual([
+        'Id',
+        'Name',
+        'NetworkSettings',
+        'State',
+      ]);
+      expect(JSON.stringify(inspected.json)).not.toContain(RESOLV_HOST);
+      expect((await call('GET', `/images/${SANDBOX_IMAGE}/json`)).json).toEqual({
+        Id: expect.any(String),
+      });
+    });
+
+    it('survives a client that hangs up in the middle of an upgrade request', async () => {
+      await new Promise<void>((resolve) => {
+        const socket = connect(SOCKET, () => {
+          socket.write(
+            'POST /containers/create HTTP/1.1\r\nHost: docker\r\nConnection: Upgrade\r\n' +
+              'Upgrade: tcp\r\nContent-Length: 2\r\n\r\n{}'
+          );
+          socket.destroy();
+          resolve();
+        });
+      });
+      await sleep(300);
+      expect((await call('GET', '/_ping')).status).toBe(200);
+      expect(docker('inspect', '--format', '{{.State.Running}} {{.RestartCount}}', PROXY)).toBe(
+        'true 0'
+      );
     });
 
     it('cannot use an exec it did not create, or start one with Privileged', async () => {
