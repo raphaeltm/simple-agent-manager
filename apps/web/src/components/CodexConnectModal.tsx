@@ -454,6 +454,12 @@ export function AgentCredentialConnectModal({
             )}
             {message && phase === 'created' && <Alert variant="info">{message}</Alert>}
 
+            {isActive && status !== 'saving' && status !== 'exchanging' && (
+              <p className="m-0 text-xs text-fg-muted">
+                Closing this window keeps the sign-in open for a few minutes so you can come back to
+                it. Cancel ends it now.
+              </p>
+            )}
             <div className="flex gap-2 justify-end">
               {isActive && status !== 'saving' && status !== 'exchanging' && (
                 <Button variant="ghost" size="sm" onClick={() => void handleCancel()}>
