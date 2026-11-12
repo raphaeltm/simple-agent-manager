@@ -188,6 +188,25 @@
       "reviewedAt": "2026-11-10T09:21:52.185Z",
       "expiresAt": "2026-12-10T09:21:52.185Z",
       "digests": ["753cf5e5f0b0593379205af9e29a8f277d5e70a4cb78aec374dc3b006eec7de2"]
+    },
+    {
+      "classification": "code-identifier",
+      "reason": "Self-host inbound email (#2668): sam-mx config.go agentAddressKeyChars is the public address-key alphabet (Crockford-style base32 characters), not key material. Exact current finding only.",
+      "owner": "security",
+      "reviewedAt": "2026-11-12T03:00:00.000Z",
+      "expiresAt": "2026-12-12T03:00:00.000Z",
+      "digests": ["eab7bddde682c4104f263aefb4b6004bff8ce1ba7a01c73787b347142fa7241d"]
+    },
+    {
+      "classification": "synthetic-test-fixture",
+      "reason": "Self-host inbound email (#2668) tests: a fixed agent address key (a routing identifier embedded in a public email address) in the API integration test, and a literal gateway shared secret ending in -test used only by the sam-mx receiver test against an httptest server. Exact current findings only.",
+      "owner": "security",
+      "reviewedAt": "2026-11-12T03:00:00.000Z",
+      "expiresAt": "2026-12-12T03:00:00.000Z",
+      "digests": [
+        "3ea24e85ceb78d673fcb02e42f5d44dfabe7a97fa680f090d0fcf1e79c0eff74",
+        "e2345bc2c8f9744b9067ec77eebb1d7baa52999404834bfb429fb63579062263"
+      ]
     }
   ]
 }
