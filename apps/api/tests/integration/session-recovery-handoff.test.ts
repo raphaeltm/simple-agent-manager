@@ -170,13 +170,13 @@ async function seedStableRecoveryFixture(sqlite: Database.Database): Promise<voi
        0, '2026-08-15T00:00:00.000Z');
   `);
   // A person picks machines before work runs: nothing joins a pool on its own, and the wake
-  // places the replacement runtime on the pool.
+  // places the replacement runtime on the pool. Prepare the validated bundled catalog here;
+  // this identity/handoff fixture's synthetic credential is not encrypted for a live lookup.
   const env = { DATABASE: createSqliteD1(sqlite) } as Env;
   await ensurePoolsWithStarterMachines(drizzle(env.DATABASE, { schema }) as never, {
     userId: 'user-1',
     projectId: 'project-1',
     includeInstallation: true,
-    env,
   });
 }
 

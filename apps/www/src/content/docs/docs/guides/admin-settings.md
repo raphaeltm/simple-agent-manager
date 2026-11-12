@@ -208,14 +208,37 @@ These **Operations** settings bound automatic retries after an eviction wake fai
 
 ## Compute pool refresh
 
-This **Operations** setting bounds how long one refresh spends writing a changed compute pool
-catalog. A pool cannot place new machines until its catalog is fully written, so a refresh keeps
-writing 200-row batches until the catalog is complete or the budget is used, then resumes on the
-next refresh.
+These **Operations** settings bound catalog refresh work and recovery. A pool keeps using its last
+validated, published catalog while a replacement is prepared. Each source's validated replacement
+is published together; a new pool stays pending until its first validated publication. A successful,
+explicitly validated bundled catalog can publish known offerings without a complete live inventory;
+failed fallbacks and partial API catalogs remain private. Only a complete provider inventory can
+mark missing machines unavailable. Retaining the catalog never overrides disabled accounts,
+machines you remove or current permissions. See
+[Compute pools](/docs/guides/compute-pools/#how-refresh-treats-your-choices).
 
-| Setting                                  | Default | Range     | What it controls                                                                           |
-| ---------------------------------------- | ------- | --------- | ------------------------------------------------------------------------------------------ |
-| `operations.capacityPoolPublishBudgetMs` | 20,000  | 0–120,000 | Milliseconds per source per refresh for writing a changed catalog; 0 writes one batch only |
+| Setting                                      | Default   | Range        | What it controls                                                                                            |
+| -------------------------------------------- | --------- | ------------ | ----------------------------------------------------------------------------------------------------------- |
+| `operations.capacityPoolPublishBudgetMs`     | 20,000    | 0–120,000    | Milliseconds per source per pass for publishing a changed catalog; 0 writes one batch (200 rows by default) |
+| `operations.capacityPoolRefreshPassBudgetMs` | 20,000    | 1–120,000    | Shared milliseconds per pass across sources and scopes; SAM stops starting more work when this is spent     |
+| `operations.capacityPoolRefreshRetryBaseMs`  | 15,000    | 1–300,000    | Initial eligibility delay after incomplete publication                                                      |
+| `operations.capacityPoolRefreshRetryMaxMs`   | 60,000    | 1–900,000    | Maximum eligibility backoff; its effective value is at least the base delay                                 |
+| `operations.capacityPoolRefreshDeadlineMs`   | 7,200,000 | 1–86,400,000 | Absolute recovery budget for one refresh, in milliseconds (2 hours by default)                              |
+| `operations.capacityPoolRefreshLeaseMs`      | 180,000   | 1–900,000    | Milliseconds before a crashed claim can be retried; its effective value is at least the shared pass budget  |
+
+A dedicated continuation check runs every minute and picks up eligible saved work independently
+of the daily discovery gate. A 15-second eligibility delay therefore does not promise a retry
+within 15 seconds. Saved progress survives process restarts and missed notifications; a crashed
+claim must also wait for its lease to expire. An in-flight operation can finish after a pass's
+time budget, so these settings limit how much more work starts rather than cancelling provider
+requests already underway.
+
+If the absolute recovery budget is exhausted, the pool summary shows an actionable error and
+retains the last committed catalog. Check the compute account, then select **Refresh** in its
+Infrastructure settings to start another attempt. Increasing the deadline setting applies to
+future attempts; it does not extend a deadline already saved for an unfinished attempt. Larger
+catalogs, more accounts and slower provider or database responses can exhaust the budget; the
+deadline is a recovery limit, not a completion guarantee.
 
 ## Dead wake claims
 

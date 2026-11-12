@@ -287,3 +287,11 @@ export type PlacementResolutionErrorCode =
   | 'invalid-resource-requirements'
   | 'invalid-credential-attribution'
   | 'no-eligible-capacity-candidate';
+
+/** Preserve the placement producer's cause so wake callers can choose a recovery action. */
+export interface PlacementCredentialResolutionFailure {
+  error: string;
+  errorKind: 'placement' | 'credentials';
+  placementErrorCode?: PlacementResolutionErrorCode;
+  capacityPoolEffectiveState?: TaskStartCapacityPoolSelection['effectiveState'];
+}

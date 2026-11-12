@@ -1,7 +1,11 @@
+// FILE SIZE EXCEPTION: Shared real D1/DO wake fixture covers readiness, crash recovery and concurrency. See .claude/rules/18-file-size-limits.md
 import { buildVmPromptDeliveryCapabilitiesPath } from '@simple-agent-manager/shared';
 import { env, runInDurableObject } from 'cloudflare:test';
+import { drizzle } from 'drizzle-orm/d1';
+import { Hono } from 'hono';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import * as schema from '../../src/db/schema';
 import type { ProjectData } from '../../src/durable-objects/project-data';
 import { resolveDurableExecutionConfig } from '../../src/durable-objects/project-data/durable-execution-config';
 import {
@@ -12,9 +16,16 @@ import { runPromptDeliveryClaim } from '../../src/durable-objects/project-data/p
 import type { SessionWakeReadyInput } from '../../src/durable-objects/project-data/session-wake-ready';
 import { notifyWakeSettled } from '../../src/durable-objects/task-runner/wake-progress-notifier';
 import type { Env } from '../../src/env';
+import { handleAppError } from '../../src/middleware/app-error-handler';
+import { requireApproved, requireAuth } from '../../src/middleware/auth';
+import { chatRoutes } from '../../src/routes/chat';
+import { attachWakeState } from '../../src/routes/chat/wake-state';
 import { getNodeBackendBaseUrl } from '../../src/services/node-agent-readiness';
+import { wakeSessionForSnapshotRecovery } from '../../src/services/project-data';
+import { completeSessionSnapshotRecoveryGeneration } from '../../src/services/session-snapshots';
 import { signalSessionWakeReadyBestEffort } from '../../src/services/session-wake-ready';
 import { DefaultVmPromptDeliveryAdapter } from '../../src/services/vm-prompt-delivery-adapter';
+import { resolveVmPromptDeliveryTarget } from '../../src/services/vm-prompt-delivery-target';
 import {
   acceptedPromptResponse,
   versionedPromptCapabilities,
@@ -24,6 +35,7 @@ import {
   seedInstallation,
   seedNode,
   seedProject,
+  seedSignedInUser,
   seedTask,
   seedUser,
   seedWorkspace,
@@ -89,18 +101,17 @@ async function fixture(runtime: 'vm' | 'cf-container') {
         ? { runtime, taskId, recoveryAttemptId: 'wake-1' }
         : { runtime, nodeId, runtimeIncarnationId: 'incarnation' },
   };
-  await runInDurableObject(stub, (instance, state) => {
+  await runInDurableObject(stub, async (instance, state) => {
     const internal = instance as unknown as {
-      recalculateAlarm(): Promise<void>;
       wakeAlarmAt: number | null;
     };
-    const originalRecalculate = internal.recalculateAlarm.bind(instance);
-    internal.recalculateAlarm = async () => {
-      await originalRecalculate();
-      internal.wakeAlarmAt = await state.storage.getAlarm();
-      // Capture the real alarm write, then drive its claim runner deterministically below.
-      await state.storage.deleteAlarm();
-    };
+    await state.storage.deleteAlarm();
+    // Keep the production scheduler, capture its requested deadline, and drive the claim
+    // runner explicitly. Arming "now" and deleting after await races automatic delivery.
+    vi.spyOn(state.storage, 'setAlarm').mockImplementation(async (scheduledTime) => {
+      internal.wakeAlarmAt =
+        scheduledTime instanceof Date ? scheduledTime.getTime() : scheduledTime;
+    });
     acceptPromptDelivery(
       state.storage.sql,
       {},
@@ -133,7 +144,20 @@ async function fixture(runtime: 'vm' | 'cf-container') {
       Date.now() + config.retryMaxMs
     );
   });
-  return { stub, input, nodeId };
+  return { stub, input, nodeId, userId };
+}
+
+async function addReadinessDistractors(input: SessionWakeReadyInput, userId: string) {
+  const foreignUserId = `${input.agentSessionId}-foreign-user`;
+  await seedUser(foreignUserId);
+  await seedAgentSession(`${input.agentSessionId}-stopped`, input.workspaceId, userId, {
+    status: 'stopped',
+    createdAt: '2098-01-01T00:00:00Z',
+  });
+  await seedAgentSession(`${input.agentSessionId}-foreign`, input.workspaceId, foreignUserId, {
+    status: 'running',
+    createdAt: '2099-01-01T00:00:00Z',
+  });
 }
 
 describe('wake completion → D1 authority → DO scheduling → HTTP prompt admission', () => {
@@ -216,13 +240,312 @@ describe('wake completion → D1 authority → DO scheduling → HTTP prompt adm
               }
             : { runtime, nodeId, runtimeIncarnationId: 'obsolete' },
       } satisfies SessionWakeReadyInput;
-      expect(await stub.signalSessionWakeReady(stale)).toBe(0);
+      expect(await stub.signalSessionWakeReady(stale)).toBeNull();
       await runInDurableObject(stub, (_instance, state) => state.storage.deleteAlarm());
     }
   );
 });
 
 describe('readiness RPC interleaving', () => {
+  it('read-only steering never activates or nudges a committed wake and rejects a rebound task', async () => {
+    const { stub, input } = await fixture('vm');
+    await stub.sleepSession(input.chatSessionId);
+    const activation = vi.fn();
+    const readOnlyBindings = {
+      ...bindings,
+      PROJECT_DATA: { idFromName: activation, get: activation },
+    } as unknown as Env;
+    const resolve = () =>
+      resolveVmPromptDeliveryTarget(
+        readOnlyBindings,
+        input.projectId,
+        input.chatSessionId,
+        undefined,
+        async () => null,
+        { allowWake: false }
+      );
+    expect(await resolve()).toMatchObject({ kind: 'ready' });
+    expect(await stub.getSession(input.chatSessionId)).toMatchObject({ status: 'sleeping' });
+    await env.DATABASE.prepare('UPDATE tasks SET workspace_id = NULL WHERE id = ?')
+      .bind(input.fence.runtime === 'vm' ? input.fence.taskId : '')
+      .run();
+    expect(await resolve()).toMatchObject({ kind: 'retry' });
+    expect(activation).not.toHaveBeenCalled();
+    await runInDurableObject(stub, (_instance, state) => {
+      expect(state.storage.sql.exec('SELECT * FROM session_wake_readiness').toArray()).toEqual([]);
+      expect(
+        state.storage.sql
+          .exec('SELECT next_attempt_at FROM session_inbox WHERE id = ?', 'first')
+          .toArray()[0]?.next_attempt_at
+      ).toBeGreaterThan(Date.now());
+      return state.storage.deleteAlarm();
+    });
+  });
+
+  it('returns null for rejected local authority while a valid duplicate zero remains accepted', async () => {
+    const { stub, input } = await fixture('vm');
+    expect(await stub.signalSessionWakeReady(input)).toBeGreaterThan(0);
+    expect(await stub.signalSessionWakeReady(input)).toBe(0);
+    expect(await signalSessionWakeReadyBestEffort(bindings, input)).toBe(true);
+    await stub.stopSession(input.chatSessionId, { deferAlarm: true });
+    expect(await stub.signalSessionWakeReady(input)).toBeNull();
+    expect(await signalSessionWakeReadyBestEffort(bindings, input)).toBe(false);
+    expect(
+      await resolveVmPromptDeliveryTarget(
+        bindings,
+        input.projectId,
+        input.chatSessionId,
+        undefined,
+        async () => null
+      )
+    ).toMatchObject({ kind: 'retry' });
+    expect(await stub.getSession(input.chatSessionId)).toMatchObject({ status: 'stopped' });
+    await runInDurableObject(stub, (_instance, state) => state.storage.deleteAlarm());
+  });
+
+  it('keeps restored VM chat sleeping until handoff, then repairs a lost notification by hydration', async () => {
+    const { stub, input, userId } = await fixture('vm');
+    await addReadinessDistractors(input, userId);
+    await runInDurableObject(stub, (_instance, state) => {
+      // Hydration must converge even when there is no inbox alarm to repair it.
+      state.storage.sql.exec('DELETE FROM session_inbox');
+    });
+    await env.DATABASE.prepare(
+      "UPDATE tasks SET status = 'delegated', execution_step = 'agent_session' WHERE id = ?"
+    )
+      .bind(input.fence.runtime === 'vm' ? input.fence.taskId : '')
+      .run();
+    await env.DATABASE.prepare(
+      `UPDATE session_snapshots SET recovery_status = 'waking',
+      sleep_status = 'sleeping', sleeping_at = datetime('now') WHERE chat_session_id = ?`
+    )
+      .bind(input.chatSessionId)
+      .run();
+    expect(await stub.sleepSession(input.chatSessionId)).toBe(true);
+    // The runner links the workspace, commits the real restore writer, then crashes before handoff.
+    const taskId = input.fence.runtime === 'vm' ? input.fence.taskId : '';
+    const db = drizzle(env.DATABASE, { schema });
+    expect(
+      await wakeSessionForSnapshotRecovery(
+        bindings,
+        input.projectId,
+        input.chatSessionId,
+        input.workspaceId,
+        taskId,
+        { deferActivation: true, recoveryAttemptId: 'wake-1' }
+      )
+    ).toBe(true);
+    expect(
+      await completeSessionSnapshotRecoveryGeneration(
+        db,
+        input.chatSessionId,
+        taskId,
+        input.workspaceId,
+        undefined,
+        'wake-1'
+      )
+    ).not.toBeNull();
+    expect(
+      await env.DATABASE.prepare(
+        'SELECT sleeping_at, sleep_status FROM session_snapshots WHERE chat_session_id = ?'
+      )
+        .bind(input.chatSessionId)
+        .first()
+    ).toMatchObject({ sleeping_at: null, sleep_status: null });
+    // Replay after restart cannot require the sleeping markers that restore just cleared.
+    expect(
+      await wakeSessionForSnapshotRecovery(
+        bindings,
+        input.projectId,
+        input.chatSessionId,
+        input.workspaceId,
+        input.fence.runtime === 'vm' ? input.fence.taskId : '',
+        { deferActivation: true, recoveryAttemptId: 'wake-1' }
+      )
+    ).toBe(true);
+    expect(await stub.getSession(input.chatSessionId)).toMatchObject({
+      status: 'sleeping',
+      workspaceId: input.workspaceId,
+    });
+    const app = new Hono<{ Bindings: Env }>();
+    app.onError(handleAppError);
+    app.use('/api/projects/*', requireAuth(), requireApproved());
+    app.route('/api/projects/:projectId/sessions', chatRoutes);
+    const cookie = await seedSignedInUser(userId);
+    const readChat = async () => {
+      const response = await app.request(
+        `/api/projects/${input.projectId}/sessions/${input.chatSessionId}`,
+        { headers: { Cookie: cookie } },
+        bindings
+      );
+      expect(response.status).toBe(200);
+      return response.json() as Promise<{
+        session: { status: string };
+        state: { recoveryStatus: string };
+      }>;
+    };
+    const args = {
+      projectId: input.projectId,
+      sessionId: input.chatSessionId,
+      sessionStatus: 'sleeping',
+      env: bindings,
+    };
+    expect(await attachWakeState(db, null, args)).toMatchObject({
+      recoveryStatus: 'waking',
+      wakePhase: 'agent_session',
+    });
+    expect(await readChat()).toMatchObject({
+      session: { status: 'sleeping' },
+      state: { recoveryStatus: 'waking' },
+    });
+    expect(await stub.signalSessionWakeReady(input)).toBeNull();
+    expect(await stub.getSession(input.chatSessionId)).toMatchObject({ status: 'sleeping' });
+    await env.DATABASE.prepare(
+      "UPDATE tasks SET status = 'in_progress', execution_step = 'running' WHERE id = ?"
+    )
+      .bind(input.fence.runtime === 'vm' ? input.fence.taskId : '')
+      .run();
+    // No runner callback is replayed. The persisted committed rows repair visibility.
+    expect(await readChat()).toMatchObject({
+      session: { status: 'active' },
+      state: { recoveryStatus: 'restored' },
+    });
+    expect(await stub.getSession(input.chatSessionId)).toMatchObject({ status: 'active' });
+    expect(await stub.signalSessionWakeReady(input)).toBe(0);
+    await stub.sleepSession(input.chatSessionId);
+    expect(await stub.signalSessionWakeReady(input)).toBeNull();
+    expect(await stub.getSession(input.chatSessionId)).toMatchObject({ status: 'sleeping' });
+    await runInDurableObject(stub, (_instance, state) => state.storage.deleteAlarm());
+  });
+
+  it('durable target retries repair lost activation without a browser or another accepted message', async () => {
+    const { stub, input, userId } = await fixture('vm');
+    await addReadinessDistractors(input, userId);
+    await stub.sleepSession(input.chatSessionId);
+    const target = await resolveVmPromptDeliveryTarget(
+      bindings,
+      input.projectId,
+      input.chatSessionId,
+      undefined,
+      async () => null
+    );
+    expect(target).toMatchObject({
+      kind: 'ready',
+      target: { workspaceId: input.workspaceId, agentSessionId: input.agentSessionId },
+    });
+    expect(await stub.getSession(input.chatSessionId)).toMatchObject({ status: 'active' });
+    await runInDurableObject(stub, (_instance, state) => {
+      expect(
+        state.storage.sql
+          .exec('SELECT id FROM session_inbox ORDER BY id')
+          .toArray()
+          .map((row) => row.id)
+      ).toEqual(['first', 'second']);
+      return state.storage.deleteAlarm();
+    });
+  });
+
+  it('exact restored replay rejects stale attempts and terminal tasks without activating the chat', async () => {
+    const { stub, input } = await fixture('vm');
+    await stub.sleepSession(input.chatSessionId);
+    const taskId = input.fence.runtime === 'vm' ? input.fence.taskId : '';
+    for (const recoveryAttemptId of ['stale', undefined]) {
+      expect(
+        await wakeSessionForSnapshotRecovery(
+          bindings,
+          input.projectId,
+          input.chatSessionId,
+          input.workspaceId,
+          taskId,
+          { deferActivation: true, recoveryAttemptId }
+        )
+      ).toBe(false);
+    }
+    await env.DATABASE.prepare("UPDATE tasks SET status = 'cancelled' WHERE id = ?")
+      .bind(taskId)
+      .run();
+    expect(
+      await wakeSessionForSnapshotRecovery(
+        bindings,
+        input.projectId,
+        input.chatSessionId,
+        input.workspaceId,
+        taskId,
+        { deferActivation: true, recoveryAttemptId: 'wake-1' }
+      )
+    ).toBe(false);
+    expect(await stub.signalSessionWakeReady(input)).toBeNull();
+    expect(await stub.getSession(input.chatSessionId)).toMatchObject({ status: 'sleeping' });
+    await runInDurableObject(stub, (_instance, state) => state.storage.deleteAlarm());
+  });
+
+  it.each(['stop', 'relink-and-sleep'] as const)(
+    'a concurrent %s wins over a suspended VM readiness read',
+    async (action) => {
+      const { stub, input } = await fixture('vm');
+      await stub.sleepSession(input.chatSessionId);
+      await runInDurableObject(stub, async (instance, state) => {
+        const internal = instance as unknown as { env: Env };
+        const original = internal.env.DATABASE;
+        let release!: () => void;
+        let readStarted!: () => void;
+        const held = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        const started = new Promise<void>((resolve) => {
+          readStarted = resolve;
+        });
+        internal.env.DATABASE = {
+          prepare(query: string) {
+            const prepared = original.prepare(query);
+            if (!query.startsWith('SELECT 1 AS ready')) return prepared;
+            return {
+              bind(...values: unknown[]) {
+                const bound = prepared.bind(...values);
+                return {
+                  async first() {
+                    const result = await bound.first();
+                    readStarted();
+                    await held;
+                    return result;
+                  },
+                };
+              },
+            };
+          },
+        } as unknown as D1Database;
+        try {
+          const signal = instance.signalSessionWakeReady(input);
+          await started;
+          if (action === 'stop') {
+            expect(await instance.stopSession(input.chatSessionId, { deferAlarm: true })).toBe(
+              true
+            );
+          } else {
+            expect(
+              await instance.wakeSession(input.chatSessionId, 'new-workspace', 'new-task')
+            ).toBe(true);
+            expect(await instance.sleepSession(input.chatSessionId)).toBe(true);
+          }
+          release();
+          expect(await signal).toBeNull();
+          expect(await instance.getSession(input.chatSessionId)).toMatchObject(
+            action === 'stop'
+              ? { status: 'stopped' }
+              : { status: 'sleeping', workspaceId: 'new-workspace' }
+          );
+          expect(state.storage.sql.exec('SELECT * FROM session_wake_readiness').toArray()).toEqual(
+            []
+          );
+        } finally {
+          release();
+          internal.env.DATABASE = original;
+          await state.storage.deleteAlarm();
+        }
+      });
+    }
+  );
+
   it('serializes deferred old authority reads with new fence writes and recovers after a failed read', async () => {
     const { stub, input, nodeId } = await fixture('cf-container');
     await runInDurableObject(stub, async (instance, state) => {
@@ -240,6 +563,7 @@ describe('readiness RPC interleaving', () => {
       internal.env.DATABASE = {
         prepare(query: string) {
           const prepared = original.prepare(query);
+          if (!query.startsWith('SELECT 1 AS ready')) return prepared;
           return {
             bind(...values: unknown[]) {
               const bound = prepared.bind(...values);

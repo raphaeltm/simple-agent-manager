@@ -14,6 +14,8 @@ import {
 import type { ProjectEventWakeRecoveryGuard } from './session-recovery-authority';
 import { classifySessionRecoveryRefusal } from './session-recovery-refusals';
 import { sessionSleepClaimLeaseMs } from './session-snapshot-sleep-claim';
+import { signalSessionWakeReadyBestEffort } from './session-wake-ready';
+import { isSessionWakeReadyCurrent } from './session-wake-ready-authority';
 
 export interface VmPromptDeliveryTarget {
   projectId: string;
@@ -90,6 +92,7 @@ interface DeliveryTargetRow {
   snapshot_recovery_status: string | null;
   snapshot_recovery_task_id: string | null;
   snapshot_recovery_workspace_id: string | null;
+  snapshot_recovery_attempt_id: string | null;
   wake_task_status: string | null;
 }
 
@@ -298,14 +301,19 @@ export async function resolveVmPromptDeliveryTarget(
             s.recovery_status AS snapshot_recovery_status,
             s.recovery_task_id AS snapshot_recovery_task_id,
             s.recovery_workspace_id AS snapshot_recovery_workspace_id,
+            s.recovery_attempt_id AS snapshot_recovery_attempt_id,
             wake.status AS wake_task_status
      FROM workspaces w
      LEFT JOIN nodes n ON n.id = w.node_id
-     LEFT JOIN agent_sessions a ON a.workspace_id = w.id
+     LEFT JOIN agent_sessions a ON a.workspace_id = w.id AND a.user_id = w.user_id
      LEFT JOIN session_snapshots s ON s.chat_session_id = w.chat_session_id
      LEFT JOIN tasks wake ON wake.id = s.recovery_task_id AND wake.project_id = w.project_id
      WHERE w.project_id = ? AND w.chat_session_id = ?
-     ORDER BY w.updated_at DESC, a.created_at DESC
+     ORDER BY w.updated_at DESC,
+       CASE WHEN s.recovery_status = 'restored' AND s.recovery_workspace_id = w.id
+         AND wake.status IN ('in_progress', 'awaiting_followup')
+         AND a.status = 'running' THEN 0 ELSE 1 END,
+       a.created_at DESC
      LIMIT 1`
   )
     .bind(projectId, chatSessionId)
@@ -399,6 +407,38 @@ export async function resolveVmPromptDeliveryTarget(
       kind: 'retry',
       reason: `Session is waking (${row.snapshot_recovery_task_id}); agent handoff not committed`,
     };
+  }
+
+  if (
+    row.node_runtime === 'vm' &&
+    row.snapshot_recovery_status === 'restored' &&
+    row.snapshot_recovery_task_id &&
+    row.snapshot_recovery_attempt_id
+  ) {
+    const readiness = {
+      projectId,
+      chatSessionId,
+      workspaceId: row.workspace_id,
+      agentSessionId: row.agent_session_id,
+      fence: {
+        runtime: 'vm' as const,
+        taskId: row.snapshot_recovery_task_id,
+        recoveryAttemptId: row.snapshot_recovery_attempt_id,
+      },
+    };
+    if (!allowWake) {
+      // Steering and receipt probes can read committed authority, but cannot activate a chat,
+      // nudge its inbox or re-arm its alarm. Use the exact mutation path's D1 predicate.
+      if (!(await isSessionWakeReadyCurrent(env, readiness)))
+        return { kind: 'retry', reason: 'Committed wake authority is no longer current' };
+      return readyTarget(projectId, chatSessionId, row, row.node_id, row.agent_session_id);
+    }
+    const guarded = await runSideEffectGuard();
+    if (guarded) return { kind: 'guarded', result: guarded };
+    // The durable inbox retry also repairs a lost activation signal without a browser
+    // or a second human prompt. The DO validates the exact committed fence again.
+    if (!(await signalSessionWakeReadyBestEffort(env, readiness)))
+      return { kind: 'retry', reason: 'Committed wake activation is pending' };
   }
 
   return readyTarget(projectId, chatSessionId, row, row.node_id, row.agent_session_id);

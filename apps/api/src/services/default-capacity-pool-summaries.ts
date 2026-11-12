@@ -191,6 +191,9 @@ export async function reconcileDefaultPoolStatus(
       // plans authorized against the old ordering.
       ...(selectionChanged ? { revision: sql`${schema.capacityPools.revision} + 1` } : {}),
       migrationState: options.publicationComplete === false ? 'pending' : 'complete',
+      ...(options.publicationComplete === false
+        ? {}
+        : { catalogPublishedAt: nextCapacityPoolTimestamp() }),
       lastReconciledAt: nextCapacityPoolTimestamp(),
       updatedAt: nextCapacityPoolTimestamp(),
     })
@@ -204,7 +207,7 @@ export async function reconcileDefaultPoolStatus(
  * this covers the SET — membership, availability, source status and relative composition — so
  * a change that only reorders ranking is still detected.
  */
-function capacityPoolSelectionDigest(
+export function capacityPoolSelectionDigest(
   rows: readonly {
     candidateId: string;
     sourceStatus: string;
@@ -349,6 +352,8 @@ export async function readDefaultPoolSummary(
   }
   const effectiveState = defaultPoolEffectiveState(pool, {
     sourceCount: sourcesById.size,
+    activeSourceCount: [...sourcesById.values()].filter((source) => source.status === ACTIVE_STATUS)
+      .length,
     candidateCount: candidates.filter((candidate) =>
       isEditorVisibleCapacityCandidateRole(candidate.workloadRole)
     ).length,
@@ -356,6 +361,14 @@ export async function readDefaultPoolSummary(
     availableCandidateCount,
   });
 
+  const [refresh] = await db
+    .select({
+      state: schema.capacityPoolRefreshes.state,
+      lastError: schema.capacityPoolRefreshes.lastError,
+    })
+    .from(schema.capacityPoolRefreshes)
+    .where(eq(schema.capacityPoolRefreshes.poolId, pool.id))
+    .limit(1);
   return {
     pool: toCapacityPool(pool),
     sources: [...sourcesById.values()],
@@ -363,7 +376,15 @@ export async function readDefaultPoolSummary(
     activeCandidateCount,
     availableCandidateCount,
     effectiveState,
-    diagnostics: defaultPoolDiagnostics(effectiveState),
+    diagnostics: [
+      ...defaultPoolDiagnostics(effectiveState),
+      ...(refresh?.state === 'failed'
+        ? [
+            'catalog-refresh-failed',
+            refresh.lastError ?? 'Catalog refresh failed; use Infrastructure Refresh to retry.',
+          ]
+        : []),
+    ],
   };
 }
 
@@ -371,12 +392,14 @@ function defaultPoolEffectiveState(
   pool: schema.CapacityPool,
   counts: {
     sourceCount: number;
+    activeSourceCount: number;
     candidateCount: number;
     activeCandidateCount: number;
     availableCandidateCount: number;
   }
 ): CapacityPoolConfigurationState {
-  if (pool.migrationState !== 'complete') return 'migration-pending';
+  if (pool.migrationState !== 'complete' && !pool.catalogPublishedAt) return 'migration-pending';
+  if (counts.sourceCount > 0 && counts.activeSourceCount === 0) return 'source-disabled';
   if (pool.configurationState === 'source-disabled') return 'source-disabled';
   if (pool.configurationState === 'migration-pending') return 'migration-pending';
   if (pool.status !== ACTIVE_STATUS) return 'source-disabled';
