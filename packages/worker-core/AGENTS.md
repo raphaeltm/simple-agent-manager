@@ -11,25 +11,25 @@ worker owns, it declares a port (see `LoggedErrorSink`) and the worker passes th
 
 ## Entry points
 
-| Import                                     | Contents                                                        |
-| ------------------------------------------ | --------------------------------------------------------------- |
-| `@simple-agent-manager/worker-core`        | Everything below except the schema (`src/index.ts`)             |
-| `@simple-agent-manager/worker-core/schema` | Drizzle D1 schema (`src/schema.ts`), for `import * as schema`   |
+| Import                                     | Contents                                                      |
+| ------------------------------------------ | ------------------------------------------------------------- |
+| `@simple-agent-manager/worker-core`        | Everything below except the schema (`src/index.ts`)           |
+| `@simple-agent-manager/worker-core/schema` | Drizzle D1 schema (`src/schema.ts`), for `import * as schema` |
 
 ## Key Files
 
-| File                                | Purpose                                                                           |
-| ----------------------------------- | --------------------------------------------------------------------------------- |
-| `src/logger.ts`                     | Structured JSON logger, `serializeError`, `createErrorSinkLogger` (port-based)    |
-| `src/credential-token-redaction.ts` | The one definition of credential token shapes (`redactCredentialTokens`)          |
-| `src/d1-error-code.ts`              | D1 failure classification (`d1CauseCode`, `d1ErrorCategory`)                      |
-| `src/errors.ts`                     | `AppError` and the `errors` factory used by route handlers                        |
-| `src/runtime-validation.ts`         | Valibot helpers for runtime JSON boundaries                                       |
-| `src/bounded-request-body.ts`       | Size-bounded request body reader                                                  |
-| `src/fetch-timeout.ts`              | `fetchWithTimeout`, `withDeadline`, `getTimeoutMs`                                |
-| `src/d1-limits.ts`                  | `D1_MAX_BOUND_PARAMETERS`, `chunk`                                                |
-| `src/ulid.ts`                       | ULID generation                                                                   |
-| `src/schema.ts`                     | D1 schema. Migrations stay in `apps/api/src/db/migrations/`                       |
+| File                                | Purpose                                                                        |
+| ----------------------------------- | ------------------------------------------------------------------------------ |
+| `src/logger.ts`                     | Structured JSON logger, `serializeError`, `createErrorSinkLogger` (port-based) |
+| `src/credential-token-redaction.ts` | The one definition of credential token shapes (`redactCredentialTokens`)       |
+| `src/d1-error-code.ts`              | D1 failure classification (`d1CauseCode`, `d1ErrorCategory`)                   |
+| `src/errors.ts`                     | `AppError` and the `errors` factory used by route handlers                     |
+| `src/runtime-validation.ts`         | Valibot helpers for runtime JSON boundaries                                    |
+| `src/bounded-request-body.ts`       | Size-bounded request body reader                                               |
+| `src/fetch-timeout.ts`              | `fetchWithTimeout`, `withDeadline`, `getTimeoutMs`                             |
+| `src/d1-limits.ts`                  | `D1_MAX_BOUND_PARAMETERS`, `chunk`                                             |
+| `src/ulid.ts`                       | ULID generation                                                                |
+| `src/schema.ts`                     | D1 schema. Migrations stay in `apps/api/src/db/migrations/`                    |
 
 The worker keeps a re-export file at each old path (`apps/api/src/lib/logger.ts`,
 `apps/api/src/db/schema.ts`, ...), so existing importers are unchanged. New code imports the

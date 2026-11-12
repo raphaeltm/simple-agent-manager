@@ -26,7 +26,7 @@
   },
   "dependencies": {
     "@simple-agent-manager/shared": "workspace:*",
-    "drizzle-orm": "0.45.2",
+    "drizzle-orm": "catalog:",
     "valibot": "catalog:"
   },
   "devDependencies": {

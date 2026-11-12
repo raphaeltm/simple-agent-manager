@@ -11,16 +11,15 @@ function read(relPath: string): string {
   return readFileSync(join(apiRoot, relPath), 'utf8');
 }
 
-// Read as repository data, not imported: the worker may import packages only through their
-// public entry points (eslint.config.mjs, worker modularization boundary 2).
-function readAgentInstallManifest(): unknown {
-  return JSON.parse(
-    readFileSync(join(apiPackageRoot, '../../packages/shared/src/agent-install-manifest.json'), 'utf8')
-  );
-}
-
 function readPackage(relPath: string): string {
   return readFileSync(join(apiPackageRoot, relPath), 'utf8');
+}
+
+// The install manifest is JSON data shared with scripts and the Go agent. Read it as data rather
+// than importing it: the worker may import packages only through their public entry points
+// (eslint.config.mjs, worker modularization boundary 2).
+function readAgentInstallManifest(): unknown {
+  return JSON.parse(readPackage('../../packages/shared/src/agent-install-manifest.json'));
 }
 
 function getPinnedAgentPackage(agentType: string): string {

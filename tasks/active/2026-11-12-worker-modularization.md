@@ -252,22 +252,42 @@ ESLint needs no per-package config: the root `eslint.config.mjs` applies.
 5. **Narrow environment.** Declare `XxxEnv` with only what the package reads; the worker's `Env`
    satisfies it structurally (extend it explicitly as in `apps/api/src/webhook-trigger-env.ts`).
    worker-core itself reads no environment.
-6. **Boundary lint is blocking.** `eslint.config.mjs` uses `no-restricted-imports` in two blocks:
-   files under `packages/**` may not import an app (`@simple-agent-manager/{api,web,www,tail-worker,installer}`
-   or a relative path into `apps/`); files under `apps/api/**` may not import a package's
-   `src`/`dist`/`tests` path or a relative path into `packages/`. Both cover tests. Proof:
-   `scripts/quality/worker-module-boundaries.test.ts` (run by `pnpm quality:scripts:test`).
+6. **Boundary lint is blocking.** `eslint.config.mjs` (`boundaryRules`) enforces each pattern on
+   static imports/exports (`no-restricted-imports`) and on dynamic `import()` and `require()`
+   (`no-restricted-syntax`), in source and tests:
+   - `packages/**`: no app (`@simple-agent-manager/{api,installer,tail-worker,web,www}` or a relative
+     path into `apps/`), and other packages only through public entry points (no
+     `@simple-agent-manager/<pkg>/{src,dist,tests}` path, no relative path into `packages/`). Which
+     packages a package may use at all is its `package.json` dependency list; pnpm refuses
+     undeclared ones.
+   - `apps/api/**`: packages only through public entry points (same two patterns). Worker tests may
+     additionally import a package's `tests/fixtures/` by relative path (without `..` back out).
+   - Not covered: `vi.mock` path strings, and a relative path from one package into a sibling that
+     never names `packages/` (`../../other/src`). Review for these.
+   - Proof: `scripts/quality/worker-module-boundaries.test.ts` (run by `pnpm quality:scripts:test`),
+     which also fails if a new app is missing from `appPackageNames`.
 7. **Moving tests.** `git mv` the test with its module and fix the relative imports. Grep
-   `apps/api/tests` for source-reading tests (`readFileSync(... 'src/...')`, `apiSrc(...)`) that read a
-   moved file by path and repoint them. Report test file and case counts before and after.
+   `apps/api/tests` for source-reading tests (`readFileSync(... 'src/...')`, `apiSrc(...)`, `read(...)`)
+   that read a moved file by path and repoint them. A worker test that imported a package's internal
+   data file (JSON) reads it as data with an existing helper instead (see
+   `cf-container-runtime-contract.test.ts`); `pnpm quality:source-contract-tests` rejects a literal
+   `readFileSync(...src/...)` line. Report test file and case counts before and after.
 8. **Wiring a new package.** Add `"@simple-agent-manager/<pkg>": "workspace:*"` to
-   `apps/api/package.json` and run `pnpm install` (commit the lockfile). Add `'packages/<pkg>/**'` to
-   the `api` path filter in `.github/workflows/ci.yml` so worker CI runs when only the package
-   changes. Add the package to the build order in
-   `apps/www/src/content/docs/docs/guides/local-development.md`. Leave root `CLAUDE.md` to the
-   coordinator.
-9. **Path references.** Update rules, agents and docs that cite a moved file
-   (`grep -rn "apps/api/src/<path>"` across `.claude`, `apps/*/.claude`, `apps/www/src/content/docs`,
-   `scripts/quality/README.md`); historical `specs/` and `tasks/archive/` stay as they are.
+   `apps/api/package.json` and run `pnpm install` (commit the lockfile). A third-party dependency
+   the worker also uses must come from the pnpm catalog (`catalog:`) in both manifests, so the bundle
+   never carries two copies (`drizzle-orm`, `valibot`); add a `scripts/quality/direct-dependency-evidence.json`
+   entry for each new direct dependency. In `.github/workflows/ci.yml`, add the package to **every**
+   path filter that lists `apps/api/**` or `apps/api/src/**` (today `api` and `cli`). Add the package
+   to the build order in `apps/www/src/content/docs/docs/guides/local-development.md`. Leave root
+   `CLAUDE.md` to the coordinator.
+9. **Path references and scanners.** Update rules, agents, docs and config that cite a moved file
+   (`grep -rn "apps/api/src/<path>"` across `.claude`, `apps/*/.claude`, `apps/*/AGENTS.md`,
+   `apps/www/src/content/docs`, `scripts/quality`, `sonar-project.properties`, `.oxlintrc.json`, and
+   comments in `apps/api/src`); historical `specs/` and `tasks/archive/` stay as they are. Quality
+   scanners scoped to `apps/api/src` silently stop covering moved code: add the package to
+   `pnpm quality:runtime-boundary-semantics` (append `&& tsx scripts/quality/check-runtime-boundary-semantics.ts --scope=packages/<pkg>/src --fail-on-findings`)
+   and check `scripts/quality` for any other `apps/api/src` scope.
 10. **Coverage thresholds** are not set for new packages yet (vitest runs without `coverage`
-    thresholds). Add them when a package's test surface settles.
+    thresholds). Add them when a package's test surface settles. Package tests are not
+    type-checked (`tsconfig.json` excludes `tests`, as in `packages/providers`); Vitest still runs
+    them through esbuild.

@@ -21,5 +21,17 @@ Branch: `sam/w0-worker-core-create-ervkbr` (SAM output branch) → PR base `sam/
 
 ## Progress notes
 
-- 2026-11-12: package created, modules moved with `git mv`, shims in place. API typecheck green. Package tests: 4 files / 54 cases.
+- 2026-11-12: package created, modules moved with `git mv`, shims in place. API typecheck green. Package tests at that point: the 4 moved files / 54 cases.
 - 2026-11-12: boundary lint added (both rules proven discriminating by switching each off: 7 and 6 reject cases went red). Fixed the 5 existing worker-test violations (manifest read as data; provider fixtures allowed via `tests/fixtures/` exception for worker tests). Package template recorded. API unit suite: 1080 files / 15,958 tests passed. Package: 6 files / 64 tests.
+- 2026-11-12: review fixes. Boundary lint now also covers dynamic `import()` / `require()` and package-to-package deep paths; fixtures exception cannot `..` out; app-name list is checked against `apps/*`. `drizzle-orm` moved to the pnpm catalog. Runtime-boundary semantic scan extended to `packages/worker-core/src`. CLI CI filter, Sonar exclusion, oxlint override, and a schema path comment updated. Template decisions 6-10 revised.
+
+## Test counts (before → after)
+
+| Suite                          | Before (core branch)                                           | After                                                          |
+| ------------------------------ | -------------------------------------------------------------- | -------------------------------------------------------------- |
+| `apps/api` unit (`vitest run`) | 1087 files / 16,016 cases (derived: after + the 4 moved files) | 1083 files / 15,962 cases (15,958 passed, 4 skipped as before) |
+| `packages/worker-core`         | —                                                              | 6 files / 64 cases (54 moved + 10 new)                         |
+| `scripts/quality`              | 60 files / 876 cases                                           | 61 files (+ `worker-module-boundaries.test.ts`, 39 cases)      |
+| Total                          |                                                                | +49 cases, nothing deleted                                     |
+
+Moved, not deleted (case counts unchanged): `d1-error-code` (30), `fetch-timeout` (16), `runtime-validation` (6), `structured-logging-format` (2) = 54. Edited in place with unchanged case counts: `credential-token-redaction`, `cf-container-runtime-contract`, and the schema-path readers.

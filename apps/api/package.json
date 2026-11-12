@@ -41,7 +41,7 @@
     "better-auth": "catalog:",
     "better-auth-cloudflare": "0.3.1",
     "diff": "^9.0.0",
-    "drizzle-orm": "0.45.2",
+    "drizzle-orm": "catalog:",
     "hono": "4.13.4",
     "isomorphic-git": "^1.38.7",
     "jose": "6.2.3",

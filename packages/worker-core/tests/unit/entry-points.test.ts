@@ -45,7 +45,11 @@ describe('worker-core entry points', () => {
   it('AppError keeps its JSON contract', () => {
     const error = core.errors.badRequest('nope', { field: 'x' });
     expect(error.statusCode).toBe(400);
-    expect(error.toJSON()).toEqual({ error: 'BAD_REQUEST', message: 'nope', details: { field: 'x' } });
+    expect(error.toJSON()).toEqual({
+      error: 'BAD_REQUEST',
+      message: 'nope',
+      details: { field: 'x' },
+    });
   });
 
   it('ulid returns sortable 26-character ids', () => {

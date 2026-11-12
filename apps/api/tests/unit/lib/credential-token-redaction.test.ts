@@ -108,7 +108,8 @@ describe('credential-token shapes have exactly one definition', () => {
       .flatMap((file) => {
         const source = readFileSync(file, 'utf8');
         return TOKEN_REGEX_FRAGMENTS.filter((fragment) => source.includes(fragment)).map(
-          (fragment) => `${path.relative(path.resolve(SRC_ROOT, '../../..'), file)} contains "${fragment}"`
+          (fragment) =>
+            `${path.relative(path.resolve(SRC_ROOT, '../../..'), file)} contains "${fragment}"`
         );
       });
     expect(offenders).toEqual([]);
