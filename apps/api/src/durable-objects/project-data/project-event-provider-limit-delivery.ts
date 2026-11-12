@@ -1,7 +1,9 @@
+import {
+  parseProviderLimitWait,
+} from '@simple-agent-manager/scheduler-core';
 import { SAM_NOTICE_METADATA_KEY } from '@simple-agent-manager/shared';
 
 import { credentialLimitReferenceKey } from '../../services/credential-limit-events/values';
-import { parseProviderLimitWait } from '../../services/provider-limit-policy';
 import { resolveProjectEventLimits } from './project-events-limits';
 import { readEvents, readSubscription } from './project-events-materialization-storage';
 import { buildWakePromptInput } from './project-events-wake-prompt';

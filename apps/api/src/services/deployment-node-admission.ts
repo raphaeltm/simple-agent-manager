@@ -1,3 +1,10 @@
+import {
+  aggregateWorkspaceReservationRows,
+  evaluateWorkspaceReservationCapacity,
+  resolveTrustedWorkspaceNodeCapacity,
+  resolveWorkspaceAdmissionPolicy,
+  type WorkspaceResourceNode,
+} from '@simple-agent-manager/scheduler-core';
 import type {
   CapacityPlacementSnapshot,
   ResolvedResourceReservation,
@@ -21,14 +28,11 @@ import {
   resolveReusableNodeCapacitySnapshot,
 } from './placement-resolver';
 import {
-  aggregateWorkspaceReservationRows,
-  evaluateWorkspaceReservationCapacity,
-  resolveTrustedWorkspaceNodeCapacity,
-  resolveWorkspaceAdmissionPolicy,
-  RESOURCE_REQUIREMENTS_SOURCE_SQL,
   trustedWorkspaceNodeCapacityColumnsSql,
-  type WorkspaceResourceNode,
-} from './workspace-resource-capacity';
+} from './workspace-admission-sql';
+import {
+  RESOURCE_REQUIREMENTS_SOURCE_SQL,
+} from './workspace-reservation-usage';
 
 /** Default maximum number of deployment environments placed on one deployment node. */
 export const DEFAULT_MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE = 5;

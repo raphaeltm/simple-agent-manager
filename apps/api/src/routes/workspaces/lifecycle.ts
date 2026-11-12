@@ -1,3 +1,7 @@
+import {
+  parseResolvedResourceReservation,
+  resolveWorkspaceAdmissionPolicy,
+} from '@simple-agent-manager/scheduler-core';
 import type { CapacityPlacementSnapshot } from '@simple-agent-manager/shared';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -25,10 +29,6 @@ import {
   describeReprovisionDispatchError,
   signReprovisionCallbackToken,
 } from '../../services/workspace-reprovision-credential';
-import {
-  parseResolvedResourceReservation,
-  resolveWorkspaceAdmissionPolicy,
-} from '../../services/workspace-resource-capacity';
 import { requireRepositoryOwnerAccess } from '../projects/_helpers';
 import {
   assertNodeOperational,

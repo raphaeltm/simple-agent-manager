@@ -10,7 +10,9 @@ import { neutralizeUntrustedText } from '../../operations/untrusted-text';
 import { deriveNodeHealth } from '../node-health';
 import { getStatus as getNodeLifecycleStatus } from '../node-lifecycle';
 import { listNodeLogCaptures } from '../node-log-capture-read';
-import { ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL } from '../workspace-resource-capacity';
+import {
+  ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL,
+} from '../workspace-reservation-usage';
 
 type Row = Record<string, unknown>;
 

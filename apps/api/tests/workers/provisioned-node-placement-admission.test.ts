@@ -11,6 +11,13 @@
  * node_agent_ready → workspace_creation. Defaults come from the real resolvers; the test
  * env sets no admission override.
  */
+import {
+  DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB,
+  DEFAULT_WORKSPACE_PLACEMENT_BACKLOG_CONFLICT_RETRIES,
+  DEFAULT_WORKSPACE_PLACEMENT_MAX_REJECTIONS,
+  MEASURED_MEMORY_OVERRUN_REASON,
+  resolveWorkspaceAdmissionPolicy,
+} from '@simple-agent-manager/scheduler-core';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
@@ -25,15 +32,6 @@ import {
 } from '../../src/durable-objects/task-runner/workspace-placement-rejection';
 import type { Env } from '../../src/env';
 import { invalidateAdminSettings } from '../../src/services/admin-settings-resolution';
-import {
-  DEFAULT_WORKSPACE_PLACEMENT_BACKLOG_CONFLICT_RETRIES,
-  DEFAULT_WORKSPACE_PLACEMENT_MAX_REJECTIONS,
-} from '../../src/services/provisioning-attempt-limits';
-import {
-  DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB,
-  MEASURED_MEMORY_OVERRUN_REASON,
-  resolveWorkspaceAdmissionPolicy,
-} from '../../src/services/workspace-resource-capacity';
 import {
   seedInstallation,
   seedNode,

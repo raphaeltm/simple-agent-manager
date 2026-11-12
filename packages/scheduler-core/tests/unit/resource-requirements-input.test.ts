@@ -9,7 +9,7 @@ import {
   readPersistedTaskResourcePlan,
   serializeModernResourceRequirementsInput,
   serializeResourceRequirementsInput,
-} from '../../../src/services/resource-requirements-input';
+} from '../../src';
 
 describe('resource requirements input validation', () => {
   it('accepts current reservations and drops the retired maxCoTenants key from legacy rows', () => {

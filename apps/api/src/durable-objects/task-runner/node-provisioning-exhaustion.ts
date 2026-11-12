@@ -40,10 +40,12 @@
  * as before. Within one rank value only the first source is used: same-rank
  * sources do not fall back to each other.
  */
+import {
+  DEFAULT_PROVISIONING_ATTEMPTS_PER_PROVIDER_TIER,
+} from '@simple-agent-manager/scheduler-core';
 import type { VMSize } from '@simple-agent-manager/shared';
 
 import type { TaskStartCapacityCandidate } from '../../services/placement-resolver';
-import { DEFAULT_PROVISIONING_ATTEMPTS_PER_PROVIDER_TIER } from '../../services/provisioning-attempt-limits';
 import type { TaskRunnerState } from './types';
 
 /** One provisioning attempt: a concrete offering, or a legacy size-only run. */

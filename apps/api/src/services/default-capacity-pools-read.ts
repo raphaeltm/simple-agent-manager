@@ -1,8 +1,10 @@
+import {
+  effectiveDefaultCapacityPoolScopeChain,
+} from '@simple-agent-manager/scheduler-core';
 import type { SafeEffectiveCapacityPoolSummary } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
-import { effectiveDefaultCapacityPoolScopeChain } from './capacity-pool-precedence';
 import { toSafeEffectiveCapacityPoolSummary } from './default-capacity-pool-safe-summary';
 import { attachCapacitySourceLabels } from './default-capacity-pool-source-labels';
 import {

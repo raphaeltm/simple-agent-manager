@@ -8,6 +8,7 @@ on:
       - 'packages/vm-agent/**'
       - 'packages/shared/**'
       - 'packages/task-runner/**'
+      - 'packages/scheduler-core/**'
       - 'scripts/e2e/**'
       - 'scripts/deploy/configure-docker-mirror.mjs'
       - 'package.json'

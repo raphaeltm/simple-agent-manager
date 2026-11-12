@@ -18,7 +18,7 @@ import {
   parseWorkspaceAdmissionMetrics,
   resolveWorkspaceAdmissionPolicy,
   type WorkspaceAdmissionPolicy,
-} from '../../../src/services/workspace-resource-capacity';
+} from '../../src';
 
 function reservation(
   overrides: Partial<ResolvedResourceReservation> = {}

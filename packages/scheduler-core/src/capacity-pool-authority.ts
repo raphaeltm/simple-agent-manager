@@ -146,3 +146,10 @@ function stablePositiveHash(parts: readonly unknown[]): number {
   }
   return hash >>> 0 || 1;
 }
+
+/** Millisecond version of a stored ISO timestamp, or null when absent or unparseable. */
+export function timestampVersion(timestamp: string | null | undefined): number | null {
+  if (!timestamp) return null;
+  const parsed = Date.parse(timestamp);
+  return Number.isFinite(parsed) ? parsed : null;
+}
