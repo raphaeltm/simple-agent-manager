@@ -115,21 +115,7 @@ async function repairOwnerApprovedRecovery(
   const db = drizzle(env.DATABASE, { schema });
   const permittedStatus = ['sleeping', 'queued', 'delegated'].includes(task.status);
   if (!permittedStatus) return;
-  let valid = Boolean(
-    wait.origin === 'callback' &&
-    approval?.recoveryPending &&
-    approval.ownerUserId === task.userId &&
-    approval.snapshotId &&
-    approval.credentialKey !== null &&
-    approval.credentialKey === wait.credentialKey &&
-    approval.skillId === task.skillId &&
-    approval.agentType &&
-    approval.expiresAt === wait.deadlineAt &&
-    wait.deadlineAt > now &&
-    task.chatSessionId &&
-    wait.sourceAgentSessionId &&
-    Number.isSafeInteger(wait.sourceCredentialGeneration)
-  );
+  let valid = pendingApprovalMatchesTask(task, wait, now);
   // Resolve canonical profile IDs here too: the task's raw hint is not an ID.
   const profileId = await resolveProviderLimitProfileId(db, env, {
     projectId: task.projectId,
@@ -175,32 +161,7 @@ async function repairOwnerApprovedRecovery(
     (await credentialLimitReferenceKey(snapshot.agent_credential_reference)) === wait.credentialKey
   );
   if (valid && task.chatSessionId) {
-    const authority = await requireSessionWriter(
-      env,
-      task.projectId,
-      task.chatSessionId,
-      task.userId,
-      {
-        action: 'complete the approved provider limit recovery',
-      }
-    ).catch((error: unknown) => {
-      // Authorization refusals revoke approval; transient RPC failures retain it.
-      if (
-        error &&
-        typeof error === 'object' &&
-        'statusCode' in error &&
-        [403, 404, 409].includes(Number(error.statusCode))
-      )
-        return null;
-      throw error;
-    });
-    valid &&= Boolean(
-      authority &&
-      authority.role === 'owner' &&
-      authority.ownerUserId === approval?.ownerUserId &&
-      authority.session.taskId === task.id &&
-      authority.session.status === 'sleeping'
-    );
+    valid &&= await savedSessionAuthorityMatches(env, task, approval, task.chatSessionId);
   }
   if (valid && snapshot) {
     const profile = await resolveProfileCredentialContext(db, {
@@ -221,12 +182,62 @@ async function repairOwnerApprovedRecovery(
       (profileId === null || Boolean(profile)) &&
       (await credentialLimitReferenceKey(reference)) === wait.credentialKey;
   }
-  if (valid && snapshot) {
-    // Session authority and credential selection cross RPC/decryption awaits.
-    // Re-read every D1 scope immediately before dispatch; a stale read must not
-    // nudge a runner or acquire a claim after cancellation or source mutation.
-    const current = await env.DATABASE.prepare(
-      `SELECT 1 AS valid FROM tasks t
+  if (
+    valid &&
+    snapshot &&
+    !(await pendingRecoveryScopeIsCurrent(env, task, wait, snapshot, receipt))
+  )
+    return;
+  if (!valid || !snapshot || !task.chatSessionId) {
+    await blockRevokedOwnerApproval(env, task, wait, receipt);
+    return;
+  }
+  await dispatchOwnerApprovedRecovery(env, task, snapshot, receipt, task.chatSessionId);
+}
+
+type SavedProviderLimitSnapshot = NonNullable<ReturnType<typeof parseProviderLimitSnapshotRow>>;
+
+/** RPC refusals revoke authority; transport failures leave the accepted intent intact. */
+async function savedSessionAuthorityMatches(
+  env: Env,
+  task: schema.Task,
+  approval: ProviderLimitWait['ownerOverride'],
+  chatSessionId: string
+): Promise<boolean> {
+  const authority = await requireSessionWriter(env, task.projectId, chatSessionId, task.userId, {
+    action: 'complete the approved provider limit recovery',
+  }).catch((error: unknown) => {
+    // Authorization refusals revoke approval; transient RPC failures retain it.
+    if (
+      error &&
+      typeof error === 'object' &&
+      'statusCode' in error &&
+      [403, 404, 409].includes(Number(error.statusCode))
+    )
+      return null;
+    throw error;
+  });
+  return Boolean(
+    authority?.role === 'owner' &&
+    authority.ownerUserId === approval?.ownerUserId &&
+    authority.session.taskId === task.id &&
+    authority.session.status === 'sleeping'
+  );
+}
+
+/** Independent final fence: do not reuse the earlier eligibility read across awaits. */
+async function pendingRecoveryScopeIsCurrent(
+  env: Env,
+  task: schema.Task,
+  wait: ProviderLimitWait,
+  snapshot: SavedProviderLimitSnapshot,
+  receipt: string
+): Promise<boolean> {
+  // Session authority and credential selection cross RPC/decryption awaits.
+  // Re-read every D1 scope immediately before dispatch; a stale read must not
+  // nudge a runner or acquire a claim after cancellation or source mutation.
+  const current = await env.DATABASE.prepare(
+    `SELECT 1 AS valid FROM tasks t
        JOIN session_snapshots s ON s.id=? AND s.project_id=t.project_id
          AND s.chat_session_id=t.chat_session_id AND s.user_id=t.user_id
        JOIN agent_sessions a ON a.id=? AND a.workspace_id=s.workspace_id AND a.user_id=s.user_id
@@ -245,75 +256,112 @@ async function repairOwnerApprovedRecovery(
          AND EXISTS (SELECT 1 FROM project_members m JOIN users u ON u.id=m.user_id
            WHERE m.project_id=t.project_id AND m.user_id=t.user_id AND m.status='active'
            AND m.role IN ('owner','admin','maintainer') AND u.status='active')`
+  )
+    .bind(
+      snapshot.id,
+      wait.sourceAgentSessionId,
+      task.id,
+      task.projectId,
+      task.userId,
+      task.chatSessionId,
+      task.status,
+      task.workspaceId,
+      task.agentProfileHint,
+      task.skillId,
+      receipt,
+      snapshot.updated_at,
+      snapshot.recovery_status,
+      snapshot.recovery_task_id,
+      snapshot.recovery_attempt_id,
+      new Date(Date.now()).toISOString(),
+      wait.sourceCredentialGeneration,
+      snapshot.agent_credential_reference,
+      snapshot.agent_type,
+      snapshot.agent_profile_id
     )
-      .bind(
-        snapshot.id,
-        wait.sourceAgentSessionId,
-        task.id,
-        task.projectId,
-        task.userId,
-        task.chatSessionId,
-        task.status,
-        task.workspaceId,
-        task.agentProfileHint,
-        task.skillId,
-        receipt,
-        snapshot.updated_at,
-        snapshot.recovery_status,
-        snapshot.recovery_task_id,
-        snapshot.recovery_attempt_id,
-        new Date(Date.now()).toISOString(),
-        wait.sourceCredentialGeneration,
-        snapshot.agent_credential_reference,
-        snapshot.agent_type,
-        snapshot.agent_profile_id
-      )
-      .first();
-    if (current?.valid !== 1 || wait.deadlineAt <= Date.now()) return;
-  }
-  if (!valid || !snapshot || !task.chatSessionId) {
-    const reason =
-      'Blocked: the approved provider limit recovery expired or its authority changed.';
-    const blocked = await env.DATABASE.prepare(
-      `UPDATE tasks SET provider_limit_wait_json=?,admission_state='provider_limit_blocked',
+    .first();
+  return current?.valid === 1 && wait.deadlineAt > Date.now();
+}
+
+async function blockRevokedOwnerApproval(
+  env: Env,
+  task: schema.Task,
+  wait: ProviderLimitWait,
+  receipt: string
+): Promise<void> {
+  const reason = 'Blocked: the approved provider limit recovery expired or its authority changed.';
+  const blocked = await env.DATABASE.prepare(
+    `UPDATE tasks SET provider_limit_wait_json=?,admission_state='provider_limit_blocked',
          admission_reason=?,admission_next_retry_at=NULL
        WHERE id=? AND provider_limit_wait_json IS ? AND admission_state='provider_limit_recovery_pending'
          AND project_id=? AND user_id=? AND chat_session_id IS ?
          AND status IN ('sleeping','queued','delegated')
          AND agent_profile_hint IS ? AND skill_id IS ?`
+  )
+    .bind(
+      JSON.stringify({ ...wait, phase: 'blocked', reason, ownerOverride: undefined }),
+      reason,
+      task.id,
+      receipt,
+      task.projectId,
+      wait.ownerOverride?.ownerUserId ?? null,
+      task.chatSessionId,
+      task.agentProfileHint,
+      task.skillId
     )
-      .bind(
-        JSON.stringify({ ...wait, phase: 'blocked', reason, ownerOverride: undefined }),
-        reason,
-        task.id,
-        receipt,
-        task.projectId,
-        approval?.ownerUserId ?? null,
-        task.chatSessionId,
-        task.agentProfileHint,
-        task.skillId
-      )
-      .run();
-    if (!blocked.meta.changes) return;
-    if (task.chatSessionId)
-      await projectData
-        .syncProviderLimitAttention(env, task.projectId, task.id, task.chatSessionId)
-        .catch(() => undefined);
-    return;
-  }
+    .run();
+  if (!blocked.meta.changes) return;
+  if (task.chatSessionId)
+    await projectData
+      .syncProviderLimitAttention(env, task.projectId, task.id, task.chatSessionId)
+      .catch(() => undefined);
+}
+
+/** Retry only the approved task; an ambiguous response preserves its pending receipt. */
+async function dispatchOwnerApprovedRecovery(
+  env: Env,
+  task: schema.Task,
+  snapshot: SavedProviderLimitSnapshot,
+  receipt: string,
+  chatSessionId: string
+): Promise<void> {
   // Neither path releases or replaces the snapshot claim or creates a new prompt.
   // Failed/ambiguous acknowledgements retain this exact approval for the next sweep.
   if (snapshot.recovery_status === 'waking') {
     if (!(await nudgeTaskRunnerDO(env, task.id, 'Retry owner-approved provider limit recovery')))
       return;
   } else {
-    const result = await ensureSessionRecovery(env, task.projectId, task.chatSessionId, {
+    const result = await ensureSessionRecovery(env, task.projectId, chatSessionId, {
       taskId: task.id,
       projectId: task.projectId,
-      chatSessionId: task.chatSessionId,
+      chatSessionId,
       requiredProjectMemberId: task.userId,
     });
     if (result.status !== 'waking') return;
   }
   await acknowledgeProviderLimitRecovery(env, task.id, receipt);
+}
+
+/** Persisted consent covers only this owner, task scope and original deadline. */
+function pendingApprovalMatchesTask(
+  task: schema.Task,
+  wait: ProviderLimitWait,
+  now: number
+): boolean {
+  const approval = wait.ownerOverride;
+  return Boolean(
+    wait.origin === 'callback' &&
+    approval?.recoveryPending &&
+    approval.ownerUserId === task.userId &&
+    approval.snapshotId &&
+    approval.credentialKey !== null &&
+    approval.credentialKey === wait.credentialKey &&
+    approval.skillId === task.skillId &&
+    approval.agentType &&
+    approval.expiresAt === wait.deadlineAt &&
+    wait.deadlineAt > now &&
+    task.chatSessionId &&
+    wait.sourceAgentSessionId &&
+    Number.isSafeInteger(wait.sourceCredentialGeneration)
+  );
 }

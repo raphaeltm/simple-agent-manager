@@ -86,35 +86,13 @@ export async function forceResumeSavedProviderLimitTask(
   const snapshot = parseProviderLimitSnapshotRow(snapshotRow);
   if (!snapshot)
     throw errors.conflict('The saved snapshot is unavailable, expired, or already restoring');
-  const db = drizzle(env.DATABASE, { schema });
-  const profileId = await resolveProviderLimitProfileId(db, env, task);
-  const profile = await resolveProfileCredentialContext(db, {
-    userId: ownerUserId,
-    projectId: task.projectId,
-    profileId,
-    skillId: task.skillId,
-  });
-  const reference = await getSelectedAgentCredentialReference(
-    db,
+  const profileId = await resolveSavedProviderLimitSelection(
+    env,
+    task,
     ownerUserId,
-    snapshot.agent_type,
-    getCredentialEncryptionKey(env),
-    task.projectId,
-    profile
+    wait,
+    snapshot
   );
-  if (
-    snapshot.agent_credential_generation !== wait.sourceCredentialGeneration ||
-    snapshot.agent_profile_id !== profileId ||
-    profileId === undefined ||
-    (task.agentProfileHint !== null && !profile) ||
-    (profile && profile.agentType !== snapshot.agent_type) ||
-    (await credentialLimitReferenceKey(snapshot.agent_credential_reference)) !==
-      wait.credentialKey ||
-    (await credentialLimitReferenceKey(reference)) !== wait.credentialKey
-  )
-    throw errors.conflict(
-      'The selected account or profile changed; review the provider hold before resuming'
-    );
 
   const grantNow = Date.now();
   if (wait.deadlineAt <= grantNow)
@@ -263,4 +241,45 @@ export async function acknowledgeProviderLimitRecovery(env: Env, taskId: string,
   )
     .bind(taskId, receipt)
     .run();
+}
+
+/** Resolve and validate the exact account/profile the saved session used. */
+async function resolveSavedProviderLimitSelection(
+  env: Env,
+  task: schema.Task,
+  ownerUserId: string,
+  wait: ProviderLimitWait,
+  snapshot: NonNullable<ReturnType<typeof parseProviderLimitSnapshotRow>>
+) {
+  const db = drizzle(env.DATABASE, { schema });
+  const profileId = await resolveProviderLimitProfileId(db, env, task);
+  const profile = await resolveProfileCredentialContext(db, {
+    userId: ownerUserId,
+    projectId: task.projectId,
+    profileId,
+    skillId: task.skillId,
+  });
+  const reference = await getSelectedAgentCredentialReference(
+    db,
+    ownerUserId,
+    snapshot.agent_type,
+    getCredentialEncryptionKey(env),
+    task.projectId,
+    profile
+  );
+  if (
+    snapshot.agent_credential_generation !== wait.sourceCredentialGeneration ||
+    snapshot.agent_profile_id !== profileId ||
+    profileId === undefined ||
+    (task.agentProfileHint !== null && !profile) ||
+    (profile && profile.agentType !== snapshot.agent_type) ||
+    (await credentialLimitReferenceKey(snapshot.agent_credential_reference)) !==
+      wait.credentialKey ||
+    (await credentialLimitReferenceKey(reference)) !== wait.credentialKey
+  )
+    throw errors.conflict(
+      'The selected account or profile changed; review the provider hold before resuming'
+    );
+
+  return profileId;
 }
