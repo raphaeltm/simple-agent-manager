@@ -257,18 +257,35 @@ describe('signed webhook intake on Workers with real D1', () => {
       'rejected',
     ]);
 
+    const events = async () =>
+      (
+        await env.DATABASE.prepare(
+          `SELECT event_type AS type, event_payload_json AS payload FROM project_event_source_outbox
+            WHERE project_id = ?`
+        )
+          .bind(projectId)
+          .all<{ type: string; payload: string }>()
+      ).results;
+    // The two refusals above (no secret saved, a forged signature) can be caused by anyone who
+    // knows the address, so they are in the call log only and wake no subscribed agent.
+    expect((await events()).map((event) => event.type)).not.toContain('webhook.rejected');
+
+    // A correctly signed call that is refused (no event ID) comes from whoever holds the secret:
+    // it is recorded and published.
+    const signedRefusal = await send({ type: 'event_callback', event: { type: 'app_mention' } });
+    expect(signedRefusal.status).toBe(202);
+    expect(await signedRefusal.json()).toMatchObject({ ignored: 'missing_event_id' });
+
     // Project events were recorded without event content, signatures or the secret.
-    const events = await env.DATABASE.prepare(
-      `SELECT event_type AS type, event_payload_json AS payload FROM project_event_source_outbox
-        WHERE project_id = ?`
-    )
-      .bind(projectId)
-      .all<{ type: string; payload: string }>();
-    const types = events.results.map((event) => event.type);
+    const published = await events();
+    const types = published.map((event) => event.type);
     expect(types).toEqual(
       expect.arrayContaining(['webhook.challenge', 'webhook.rejected', 'webhook.accepted'])
     );
-    const recorded = JSON.stringify(events.results);
+    const rejectedEvents = published.filter((event) => event.type === 'webhook.rejected');
+    expect(rejectedEvents).toHaveLength(1);
+    expect(rejectedEvents[0]?.payload).toContain('missing_event_id');
+    const recorded = JSON.stringify(published);
     expect(recorded).not.toContain(CONTENT_CANARY);
     expect(recorded).not.toContain(SIGNING_SECRET);
     expect(recorded).not.toContain('v0=');
