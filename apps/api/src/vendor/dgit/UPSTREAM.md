@@ -8,7 +8,8 @@
 
 Local change to every vendored file: two header lines, `// @ts-nocheck` and
 `/* eslint-disable */`. Upstream typechecks under `strict` but not SAM's
-`noUncheckedIndexedAccess`, and follows its own lint style. Nothing else differs from upstream.
+`noUncheckedIndexedAccess`, and follows its own lint style. `protocol.ts` and `packstore.ts` also
+carry a `// FILE SIZE EXCEPTION` line. Nothing else differs from upstream.
 
 `git/` is upstream `src/git/` copied byte for byte, minus the three modules only the web UI
 used (`blame.ts`, `diff.ts`, `snapshot.ts`). Upstream's Worker router (`mod.ts`), registry

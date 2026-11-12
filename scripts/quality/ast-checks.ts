@@ -370,7 +370,13 @@ function main() {
       project.addSourceFileAtPath(f);
     }
   } else {
-    project.addSourceFilesAtPaths([resolve(ROOT, 'apps/api/src/**/*.ts')]);
+    // Vendored third-party code (apps/api/src/vendor/*/UPSTREAM.md) is kept byte-identical to
+    // upstream and is not held to SAM's AST conventions; its interpolated SQL is table names and
+    // generated `?` placeholder lists, reviewed when vendored.
+    project.addSourceFilesAtPaths([
+      resolve(ROOT, 'apps/api/src/**/*.ts'),
+      `!${resolve(ROOT, 'apps/api/src/vendor/**')}`,
+    ]);
   }
 
   const allFindings: Finding[] = [];

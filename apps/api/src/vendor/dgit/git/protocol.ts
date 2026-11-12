@@ -1,5 +1,6 @@
 // @ts-nocheck -- vendored dgit core, see ../UPSTREAM.md (upstream typechecks strict, without noUncheckedIndexedAccess)
 /* eslint-disable */
+// FILE SIZE EXCEPTION: vendored third-party code kept identical to upstream dgit (see ../UPSTREAM.md)
 import { concat, isOid, ZERO_OID, te } from "./util";
 import { pkt, FLUSH, PktParser } from "./pktline";
 import { GitStore } from "./store";

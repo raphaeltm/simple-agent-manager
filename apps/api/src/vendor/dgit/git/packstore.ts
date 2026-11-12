@@ -1,5 +1,6 @@
 // @ts-nocheck -- vendored dgit core, see ../UPSTREAM.md (upstream typechecks strict, without noUncheckedIndexedAccess)
 /* eslint-disable */
+// FILE SIZE EXCEPTION: vendored third-party code kept identical to upstream dgit (see ../UPSTREAM.md)
 import pako from "pako";
 import { td, concat, toHex, Sha1 } from "./util";
 import { Sha1Dc, Sha1CollisionError } from "./sha1";
