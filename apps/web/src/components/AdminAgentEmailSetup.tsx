@@ -3,7 +3,7 @@
  * outside the agent email subdomain, which needs the admin's consent first, and runs it.
  * Consent is bound to the plan shown: the server runs only with that plan's `consentToken`.
  * `AdminAgentEmailPanel` renders this only while agent email is off. See
- * `apps/api/src/services/agent-email/setup.ts` for the server side.
+ * `packages/agent-email/src/setup.ts` for the server side.
  */
 import type { AgentEmailMainDomainRecord, AgentEmailSetupPlan } from '@simple-agent-manager/shared';
 import { Alert, Button, Spinner } from '@simple-agent-manager/ui';

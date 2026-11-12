@@ -1,10 +1,13 @@
 import { comparableDnsContent } from '@simple-agent-manager/shared';
+import {
+  fetchWithTimeout,
+  getTimeoutMs,
+  readResponseJson,
+} from '@simple-agent-manager/worker-core';
 import * as v from 'valibot';
 
-import type { Env } from '../../env';
-import { readResponseJson } from '../../lib/runtime-validation';
-import { fetchWithTimeout, getTimeoutMs } from '../fetch-timeout';
 import type { EmailReadOptions } from './cloudflare-email-api';
+import type { AgentEmailEnv } from './env';
 
 const DEFAULT_DOH_RESOLVER_URL = 'https://cloudflare-dns.com/dns-query';
 const DEFAULT_DOH_TIMEOUT_MS = 10_000;
@@ -16,7 +19,7 @@ const answerSchema = v.object({
 });
 
 export async function readPublicSpf(
-  env: Env,
+  env: AgentEmailEnv,
   domain: string,
   options: EmailReadOptions = {}
 ): Promise<string> {
