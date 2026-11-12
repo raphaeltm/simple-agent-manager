@@ -214,6 +214,69 @@ describe('secret request card in chat', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/could not confirm the agent/);
   });
 
+  it('a decline the agent was not confirmed told never claims a value was saved', async () => {
+    getSecretRequest.mockResolvedValue(response());
+    declineSecretRequest.mockResolvedValue({
+      request: record({ status: 'declined', resolvedByName: 'Raph' }),
+      agentNotified: false,
+    });
+    renderCard();
+    await screen.findByTestId('secret-request-card');
+    fireEvent.click(screen.getByRole('button', { name: 'Decline' }));
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/Declined, but SAM could not confirm the agent was told/);
+    expect(alert).toHaveTextContent(/not to wait for STRIPE_API_KEY/);
+    expect(alert).not.toHaveTextContent(/Saved|is ready/);
+    expect(fulfillSecretRequest).not.toHaveBeenCalled();
+  });
+
+  it('a supplied value whose TTL has passed reads as expired on load', async () => {
+    getSecretRequest.mockResolvedValue(
+      response(
+        { canResolve: false },
+        {
+          status: 'fulfilled',
+          resolvedByName: 'Raph',
+          resolvedAt: '2026-11-12T10:01:00.000Z',
+          secretExpiresAt: new Date(Date.now() - 60_000).toISOString(),
+        }
+      )
+    );
+    renderCard();
+    await screen.findByTestId('secret-request-card');
+    expect(screen.getByText('Value expired')).toBeInTheDocument();
+    expect(screen.queryByText('Supplied')).not.toBeInTheDocument();
+    const status = screen.getByRole('status');
+    expect(status).toHaveTextContent(/value has expired, so the agent can no longer use it/);
+    expect(status).not.toHaveTextContent(/can use it/);
+    expect(screen.getByText(/can no longer be used/)).toBeInTheDocument();
+  });
+
+  it('an open card flips a supplied value to expired when its TTL passes', async () => {
+    getSecretRequest.mockResolvedValue(
+      response(
+        { canResolve: false },
+        {
+          status: 'fulfilled',
+          resolvedByName: 'Raph',
+          resolvedAt: '2026-11-12T10:01:00.000Z',
+          secretExpiresAt: new Date(Date.now() + 500).toISOString(),
+        }
+      )
+    );
+    renderCard();
+    await screen.findByTestId('secret-request-card');
+    // Live before the deadline (control: the card is not simply always "expired").
+    expect(screen.getByText('Supplied')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent(/can use it until it expires/);
+    await waitFor(() => expect(screen.getByText('Value expired')).toBeInTheDocument(), {
+      timeout: 3_000,
+    });
+    expect(screen.getByRole('status')).toHaveTextContent(/can no longer use it/);
+    // No refetch was needed: the clock alone moved the card.
+    expect(getSecretRequest).toHaveBeenCalledTimes(1);
+  });
+
   it('shows status without an input to someone who cannot supply it', async () => {
     getSecretRequest.mockResolvedValue(response({ canResolve: false }));
     renderCard();

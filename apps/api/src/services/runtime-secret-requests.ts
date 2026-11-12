@@ -27,6 +27,7 @@ import {
   findProjectRuntimeEnvVar,
   prepareProjectRuntimeEnvWrite,
 } from './project-runtime-env';
+import { claimAndStoreValueStatements } from './runtime-secret-request-claim';
 import {
   deliverRuntimeSecretRequestOutcome,
   notifyRuntimeSecretRequested,
@@ -38,7 +39,6 @@ import {
   loadRuntimeSecretRequest,
   toRuntimeSecretRequest,
 } from './runtime-secret-request-records';
-import { claimAndStoreValueStatements } from './runtime-secret-request-claim';
 import { getRuntimeSecretRequestLimits } from './runtime-secret-request-settings';
 import { UNSUPPORTED_SECRET_EXEC_ENV_NAMES } from './secret-exec-env-names';
 import { resolveWorkspaceRuntimeAssetContext } from './workspace-runtime-assets';

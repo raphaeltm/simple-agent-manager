@@ -26,6 +26,7 @@ const IDS = {
   fulfilled: 'req-fulfilled',
   declined: 'req-declined',
   expired: 'req-expired',
+  valueExpired: 'req-value-expired',
   missing: 'req-missing',
 };
 
@@ -142,6 +143,9 @@ const STATE_MESSAGES = [
   requestRow(IDS.fulfilled, 3),
 ];
 
+/** A value supplied with a TTL that has since passed, beside an open request to decline. */
+const VALUE_EXPIRED_MESSAGES = [requestRow(IDS.valueExpired, 1), requestRow(IDS.open, 2)];
+
 const MISSING_MESSAGES = [requestRow(IDS.missing, 1)];
 
 interface Captured {
@@ -152,7 +156,7 @@ interface Captured {
 async function setupMocks(
   page: Page,
   messages: unknown[],
-  options: { failSave?: boolean } = {}
+  options: { failSave?: boolean; declineUnconfirmed?: boolean } = {}
 ): Promise<Captured> {
   const captured: Captured = { fulfilBodies: [], otherBodies: [] };
   const records = new Map<string, MockRequest>([
@@ -179,6 +183,19 @@ async function setupMocks(
         status: 'declined',
         resolvedAt: new Date(Date.now() - 50_000).toISOString(),
         resolvedByName: 'Owner',
+      }),
+    ],
+    [
+      IDS.valueExpired,
+      request({
+        id: IDS.valueExpired,
+        envKey: 'GITHUB_DEPLOY_TOKEN_FOR_THE_PREVIEW_ENVIRONMENT_WITH_A_VERY_LONG_NAME',
+        reason: 'Push the preview build tag.',
+        ttlSeconds: 600,
+        status: 'fulfilled',
+        resolvedAt: new Date(Date.now() - 700_000).toISOString(),
+        resolvedByName: 'Raphaël',
+        secretExpiresAt: new Date(Date.now() - 100_000).toISOString(),
       }),
     ],
     [
@@ -239,7 +256,10 @@ async function setupMocks(
       if (action === 'decline') {
         const resolved: MockRequest = { ...record, status: 'declined', resolvedByName: 'Owner' };
         records.set(id, resolved);
-        return route.fulfill({ status: 200, json: { request: resolved, agentNotified: true } });
+        return route.fulfill({
+          status: 200,
+          json: { request: resolved, agentNotified: !options.declineUnconfirmed },
+        });
       }
       return route.fulfill({
         status: 200,
@@ -356,6 +376,31 @@ async function auditStates(page: Page, name: string) {
   await assertCardsFitColumn(page);
 }
 
+async function auditValueExpiredAndUnconfirmedDecline(page: Page, name: string) {
+  await setupMocks(page, VALUE_EXPIRED_MESSAGES, { declineUnconfirmed: true });
+  await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`);
+  const cards = page.getByTestId('secret-request-card');
+  const expiredCard = cards.filter({ hasText: 'GITHUB_DEPLOY_TOKEN' });
+  await expect(expiredCard.getByText('Value expired', { exact: true })).toBeVisible();
+  await expect(expiredCard.getByText(/can no longer use it/)).toBeVisible();
+  await expect(expiredCard.getByText(/can use it until/)).toHaveCount(0);
+  // Second card in the conversation; its Decline button disappears once used, so not a filter.
+  const openCard = cards.nth(1);
+  await expect(openCard.getByRole('button', { name: 'Decline' })).toBeVisible();
+  await openCard.getByRole('button', { name: 'Decline' }).click();
+  // Located on its own: the virtualized list can re-index cards once the decline re-renders.
+  const warning = page
+    .getByTestId('secret-request-card')
+    .getByRole('alert')
+    .filter({ hasText: /SAM could not confirm/ });
+  await expect(warning).toHaveText(/Declined, but SAM could not confirm the agent was told/);
+  await expect(warning).toHaveText(/not to wait for/);
+  await expect(warning).not.toHaveText(/Saved|is ready/);
+  await screenshot(page, `${name}-value-expired-decline-unconfirmed`);
+  await assertNoOverflow(page);
+  await assertCardsFitColumn(page);
+}
+
 async function auditMissing(page: Page, name: string) {
   await setupMocks(page, MISSING_MESSAGES);
   await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`);
@@ -378,6 +423,9 @@ test.describe('Project chat secret request cards — Mobile', () => {
   test('a request that no longer exists', async ({ page }) => {
     await auditMissing(page, 'project-chat-secret-request-mobile');
   });
+  test('an expired supplied value and an unconfirmed decline', async ({ page }) => {
+    await auditValueExpiredAndUnconfirmedDecline(page, 'project-chat-secret-request-mobile');
+  });
 });
 
 test.describe('Project chat secret request cards — Desktop', () => {
@@ -394,5 +442,8 @@ test.describe('Project chat secret request cards — Desktop', () => {
   });
   test('a request that no longer exists', async ({ page }) => {
     await auditMissing(page, 'project-chat-secret-request-desktop');
+  });
+  test('an expired supplied value and an unconfirmed decline', async ({ page }) => {
+    await auditValueExpiredAndUnconfirmedDecline(page, 'project-chat-secret-request-desktop');
   });
 });

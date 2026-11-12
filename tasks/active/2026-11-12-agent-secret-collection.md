@@ -105,3 +105,18 @@ metadata-only receipt and uses it immediately through `exec_with_secrets`.
   card width assertion fails on the pre-fix build (408px over).
 - Attention markers deliberately not reused: the bell's free-text answers would send text to the
   agent, so a human could paste the secret there.
+
+## Continuation (task 01M77MKRCE572TWT13S6QZX6X0, Opus 5.5) — coordinator blocker fixes
+
+- [x] Fulfilment CAS race: the claim INSERT was authorized by `resolved_by + resolved_at`, so a
+      same-actor, same-millisecond losing submit overwrote the winner's value. Now
+      `claimAndStoreValueStatements` (`services/runtime-secret-request-claim.ts`) writes the value
+      only while the request is pending and claims only if this batch's own ciphertext (random IV,
+      unique per attempt) is the stored value. Regression: frozen-clock overlapping submit in
+      `tests/integration/runtime-secret-requests.test.ts` (red on the previous SQL: the loser's
+      value was stored); a pre-check→write gap test (red with the claim's ownership guard removed);
+      real-D1 contract `tests/workers/runtime-secret-request-claim.test.ts`.
+- [x] Card warning is outcome-aware: an unconfirmed decline says "Declined … not to wait for KEY",
+      never "Saved … ready".
+- [x] A supplied value past `secretExpiresAt` shows "Value expired" and expired copy on load, and
+      an open card flips on time (`useDeadlinePassed`) without a refetch.
