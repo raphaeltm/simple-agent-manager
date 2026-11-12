@@ -267,8 +267,22 @@ export async function promoteStagedCandidates(
     compiled.map((query) => db.$client.prepare(query.sql).bind(...query.params))
   );
   // Only our CAS result is adoptable. A re-read could accidentally certify a newer publisher.
-  const ownGuard = results[0]?.results?.[0] as PoolPublicationGuard | undefined;
-  return ownGuard ? { promoted: true, poolPublicationGuard: ownGuard } : { promoted: false };
+  const ownGuard = results[0]?.results?.[0];
+  if (
+    typeof ownGuard !== 'object' ||
+    ownGuard === null ||
+    !('revision' in ownGuard) ||
+    ownGuard.revision !== revision ||
+    !('updatedAt' in ownGuard) ||
+    ownGuard.updatedAt !== now ||
+    !('status' in ownGuard) ||
+    ownGuard.status !== pool.status
+  )
+    return { promoted: false };
+  return {
+    promoted: true,
+    poolPublicationGuard: { revision, updatedAt: now, status: pool.status },
+  };
 }
 
 function catalogSourcePriority(source: string | null): number {

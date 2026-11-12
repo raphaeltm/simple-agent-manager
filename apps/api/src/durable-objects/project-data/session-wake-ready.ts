@@ -16,6 +16,8 @@ export interface SessionWakeReadyInput {
   agentSessionId: string;
   /** Producer timestamp immediately after the committed runtime-ready transition. */
   runtimeReadyAt?: number;
+  /** Resolver capture; legacy producers can validate the current committed runtime directly. */
+  expectedRuntime?: { nodeId: string; workspaceCallbackGeneration: string | null };
   fence:
     | { runtime: 'vm'; taskId: string; recoveryAttemptId: string }
     | { runtime: 'cf-container'; nodeId: string; runtimeIncarnationId: string };

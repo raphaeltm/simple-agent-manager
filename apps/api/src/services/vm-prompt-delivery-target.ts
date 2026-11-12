@@ -15,7 +15,10 @@ import type { ProjectEventWakeRecoveryGuard } from './session-recovery-authority
 import { classifySessionRecoveryRefusal } from './session-recovery-refusals';
 import { sessionSleepClaimLeaseMs } from './session-snapshot-sleep-claim';
 import { signalSessionWakeReadyBestEffort } from './session-wake-ready';
-import { isSessionWakeReadyCurrent } from './session-wake-ready-authority';
+import {
+  isSessionHistoricalWakeReceiptCurrent,
+  isSessionWakeReadyCurrent,
+} from './session-wake-ready-authority';
 
 export interface VmPromptDeliveryTarget {
   projectId: string;
@@ -78,6 +81,7 @@ interface DeliveryTargetRow {
   user_id: string;
   workspace_status: string;
   workspace_deletion_confirmed_at: string | null;
+  workspace_callback_generation: string | null;
   node_id: string | null;
   node_status: string | null;
   node_health_status: string | null;
@@ -287,6 +291,7 @@ export async function resolveVmPromptDeliveryTarget(
             w.user_id AS user_id,
             w.status AS workspace_status,
             w.runtime_deletion_confirmed_at AS workspace_deletion_confirmed_at,
+            w.callback_generation AS workspace_callback_generation,
             w.node_id AS node_id,
             n.status AS node_status,
             n.health_status AS node_health_status,
@@ -415,29 +420,44 @@ export async function resolveVmPromptDeliveryTarget(
     row.snapshot_recovery_task_id &&
     row.snapshot_recovery_attempt_id
   ) {
+    const expectedRuntime = {
+      nodeId: row.node_id,
+      workspaceCallbackGeneration: row.workspace_callback_generation,
+    };
     const readiness = {
       projectId,
       chatSessionId,
       workspaceId: row.workspace_id,
       agentSessionId: row.agent_session_id,
+      expectedRuntime,
       fence: {
         runtime: 'vm' as const,
         taskId: row.snapshot_recovery_task_id,
         recoveryAttemptId: row.snapshot_recovery_attempt_id,
       },
     };
-    if (!allowWake) {
-      // Steering and receipt probes can read committed authority, but cannot activate a chat,
-      // nudge its inbox or re-arm its alarm. Use the exact mutation path's D1 predicate.
-      if (!(await isSessionWakeReadyCurrent(env, readiness)))
-        return { kind: 'retry', reason: 'Committed wake authority is no longer current' };
+    // Preflight before any activation: a replaced runtime cannot nudge an old captured target.
+    if (!(await isSessionWakeReadyCurrent(env, readiness))) {
+      if (!(await isSessionHistoricalWakeReceiptCurrent(env, readiness, expectedRuntime)))
+        return {
+          kind: 'retry',
+          reason: allowWake
+            ? 'Committed wake activation is pending'
+            : 'Committed wake authority is no longer current',
+        };
       return readyTarget(projectId, chatSessionId, row, row.node_id, row.agent_session_id);
     }
+    // Steering and receipt probes never activate a chat, nudge its inbox or re-arm its alarm.
+    if (!allowWake)
+      return readyTarget(projectId, chatSessionId, row, row.node_id, row.agent_session_id);
     const guarded = await runSideEffectGuard();
     if (guarded) return { kind: 'guarded', result: guarded };
     // The durable inbox retry also repairs a lost activation signal without a browser
     // or a second human prompt. The DO validates the exact committed fence again.
-    if (!(await signalSessionWakeReadyBestEffort(env, readiness)))
+    if (
+      !(await signalSessionWakeReadyBestEffort(env, readiness)) ||
+      !(await isSessionWakeReadyCurrent(env, readiness))
+    )
       return { kind: 'retry', reason: 'Committed wake activation is pending' };
   }
 
