@@ -75,17 +75,26 @@ core branch `sam/help-identify-parts-worker-embcza`.
 - [x] Lint clean; unit pool green (1,087 files / 16,016 tests, 0 failed); pushed `ea0089160`
 
 ### Step 2 — lift into `packages/project-data` (after "W0 ready")
-- [ ] Package scaffold from W0 template
-- [ ] `git mv` scope into the package; worker re-exports
-- [ ] Tests that do not need the worker pool move with the code
-- [ ] Docs/rules path references updated
-- [ ] Test file and case counts before/after recorded below
+- [x] Package scaffold from W0 template (`package.json` entries `.`, `./durable-object`,
+      `./scheduled`, `./internal/*`; tsconfig; vitest config with `cloudflare:workers` alias)
+- [x] `git mv` scope into the package (207 files, `ddf1badc4`); named re-exports at the old
+      worker paths the worker imports; `services/project-data.ts` re-exports the client wholesale
+- [x] Tests that do not need the worker pool move with the code (43 files, `9694413a5`); 3 that
+      reach worker ports stay; the SqlStorage helper is a package fixture
+- [x] Docs/rules path references updated; source scanners include the package
+- [x] Template wiring: CI path filters, runtime-boundary scan, dependency evidence, build order,
+      lint rule keeping `./internal/*` out of worker source
+- [x] Test file and case counts recorded below
 
 ## Test counts
 
 - Before (bbb1c82ca): unit pool 1,087 files / 16,016 tests; Workers pool 180 files (+3 sam-runtime).
 - After step 1: unit pool 1,087 files / 16,016 tests, all passing.
-- After step 2: TBD
+- After step 2 (`9694413a5`, core at bb071a00c which also merged main #2664):
+  - apps/api unit pool: 1,085 files / 16,041 tests before the test move (green); after moving
+    43 files, the apps/api count drops by those 43 files / 496 tests.
+  - packages/project-data: 44 files / 499 tests (43 moved + 1 new entry-point test).
+  - No test deleted. The 7 kernel test files missing from apps/api moved to worker-core in W0.
 
 ## Progress notes
 
