@@ -119,7 +119,11 @@ export function fixture(scope: Scope = 'user', existingDatabase?: Database.Datab
   );
   app.route('/api/projects/:projectId/tasks', runRoutes);
   let poolsPicked = false;
-  /** A person picks machines before running work: nothing joins a pool on its own. */
+  /**
+   * A person picks machines before running work: nothing joins a pool on its own. Prepare
+   * the validated bundled catalog for synthetic credentials. Provider-boundary fixtures
+   * install an encryption key and real encrypted token before picking: retain their live lookup.
+   */
   async function pickPools() {
     if (poolsPicked) return;
     poolsPicked = true;
@@ -127,7 +131,7 @@ export function fixture(scope: Scope = 'user', existingDatabase?: Database.Datab
       userId: 'user-1',
       projectId: 'project-1',
       includeInstallation: true,
-      env,
+      env: env.ENCRYPTION_KEY ? env : undefined,
     });
   }
   async function run(body: Record<string, unknown> = {}) {

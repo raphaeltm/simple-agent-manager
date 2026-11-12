@@ -28,7 +28,7 @@ Existing backlog: 2026-11-09-capacity-pool-readiness-gate-during-republication.m
 - [x] Existing runtime safe revalidation after pool revision, through real selection and final admission; strict stale-allocation and revocation guards remain.
 - [ ] Real entry-point regression tests: bootstrap/established, changed/unchanged, multi-batch restart, failed promotion, concurrency/stale publisher, lost continuation, 24h independence, membership/revocation, wake automatic recovery/cancel/TTL/no duplicate authoritative handoff.
 - [ ] Docs synced; focused + full quality checks pass.
-- [ ] Local Cloudflare, security, test, constitution, documentation and task-completion review completed and addressed.
+- [x] Local Cloudflare, security, test, constitution, documentation and task-completion review completed and addressed; final release validation remains open.
 - [ ] Real coordinated staging VM chain verified, Instant compatibility retained, resources cleaned.
 - [ ] Draft PR/CI/best-effort CodeRabbit evidence; coordinator final diff + full-SHA gate.
 
@@ -97,3 +97,11 @@ staging evidence; revise estimates if those measurements differ materially.
 Checkpoint6511b14d407926623383f8b9e16f9cd79ef3e1fc is pushed. Read-only wake probes perform no activation/nudge; exact readiness checks task, snapshot, workspace and owners. Nullable readiness rejects stale/local authority and malformed transport replies.95focused admission/readiness tests pass; prior combined39Workers pass, latest two additional cases await final41. Existing recovery fixtures now explicitly bootstrap validated bundled catalogs;101handoff/retirement +22agent-step +2sleep-fallback tests pass.
 
 Full repository serial run remains in progress. Web completed403files with four files/five timeouts under earlier overlapping load, requiring an exclusive rerun; API full run executed some old fixtures before corrections and will require focused reruns. Final full lint/typecheck/build/quality, Workers, coordinated real staging, CI, CodeRabbit and draft PR are not yet complete. No release claim or archive.
+
+## Main merge and consolidated fixture validation
+
+Merged main d3204f34d28721ee7af2433180dec6f8d01aa574 cleanly (secret requests, including already-applied0236); catalog0237 remains additive. Full serial run completed: API1052passed/39failed/3skipped files (16020passed/156failed/4skipped tests); web399passed/4failed files (5119passed/5failed tests). It executed some tests before pending fixes landed.
+
+All four web failure files pass alone:134/134. Follow-up correct production-style catalog/agent-owner fixtures pass287unique tests across14suites; live encrypted-provider companions stay live. Existing wake mocks plus6new realSQLite lifecycle controls and adapters pass72/72. Other failed API reruns pass453/455 initially; remaining dispatch conditional-write and99-source bind-limit test assumptions corrected and3focused tests pass. The bind-limit test keeps99sources/100-bind ceiling with one validated offering/source; throughput/interruption coverage remains separate and unchanged. Two heavyweight failed suites (archive sharding and legacy-boundary scanner) still require exclusive reruns.
+
+Final security/constitution/documentation delta review and coordinator independent incremental review of6511PASS, without final SHA approval. Coordinator explicitly authorized opening a DRAFT before staging while external cleanup is pending, so CI can run. Required staging remains merge-blocking; no own VM/deployment. Final41Workers and full lint/typecheck/build/CI remain pending.
