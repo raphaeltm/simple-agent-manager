@@ -94,6 +94,11 @@ func (s *Session) Data(r io.Reader) error {
 	if s.rcptTo == "" {
 		return smtpErr(503, smtp.EnhancedCode{5, 5, 1}, "RCPT first")
 	}
+	if hasBareLineFeed(raw) {
+		// RFC 5321 2.3.8 requires CRLF. A bare LF lets two parsers (this one and the Worker's)
+		// split headers differently, so refuse it, as Postfix does by default (smtpd_forbid_bare_newline).
+		return smtpErr(550, smtp.EnhancedCode{5, 6, 0}, "Bare LF line endings are not accepted")
+	}
 	s.messages++
 	cfg := s.backend.cfg
 	logCtx := []any{"client", s.ip.String(), "recipientDomain", cfg.Domain, "bytes", len(raw)}
@@ -133,4 +138,17 @@ func (s *Session) Data(r io.Reader) error {
 		slog.Error("sam-mx: unknown gateway outcome", append(logCtx, "outcome", smtpText(result.Outcome))...)
 		return smtpErr(451, smtp.EnhancedCode{4, 3, 0}, "Temporary failure, try again later")
 	}
+}
+
+// hasBareLineFeed reports an LF not preceded by CR, or a CR not followed by LF.
+func hasBareLineFeed(raw []byte) bool {
+	for i, b := range raw {
+		if b == '\n' && (i == 0 || raw[i-1] != '\r') {
+			return true
+		}
+		if b == '\r' && (i+1 >= len(raw) || raw[i+1] != '\n') {
+			return true
+		}
+	}
+	return false
 }

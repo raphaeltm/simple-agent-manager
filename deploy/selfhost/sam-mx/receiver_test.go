@@ -437,3 +437,20 @@ func TestConfigRefusesUnsafeGateway(t *testing.T) {
 	}
 
 }
+
+func TestBareLineFeedsAreRefused(t *testing.T) {
+	h := newHarness(t, func(env map[string]string) { env["SAM_MX_TRUSTED_NETWORKS"] = "127.0.0.1/32" })
+	// A second From hidden behind a bare LF: two header parsers could disagree on it.
+	raw := []byte("From: alice@sender.example\nFrom: mallory@evil.example\r\nTo: " + agentRcpt +
+		"\r\nSubject: x\r\n\r\nbody\r\n")
+	if code := smtpCode(t, h.send(allowedFrom, []string{agentRcpt}, raw)); code != 550 {
+		t.Fatalf("want 550, got %d", code)
+	}
+	bareCR := []byte("From: alice@sender.example\r\nTo: " + agentRcpt + "\r\nSubject: x\rY\r\n\r\nbody\r\n")
+	if code := smtpCode(t, h.send(allowedFrom, []string{agentRcpt}, bareCR)); code != 550 {
+		t.Fatalf("bare CR: want 550, got %d", code)
+	}
+	if h.gateway.count() != 0 {
+		t.Fatal("must not reach the Worker")
+	}
+}
