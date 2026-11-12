@@ -145,6 +145,24 @@ address); it then signs in by requesting a code. Pass `--env-file` as for the de
 `--dry-run` to print the SQL without running it. While `BOOTSTRAP_OWNER_EMAIL` is set and that
 owner has never signed in, SAM admits only the owner.
 
+**First run after the owner exists.** A box has no `SETUP_TOKEN` (only the Cloudflare installer
+generates one), so `/setup` closes itself once an active superadmin exists and says SAM is set up
+(`closeSetupWithoutToken`, `apps/api/src/routes/setup.ts`). Then, as that administrator:
+
+1. **Admin → Integrations → Create GitHub App.** SAM posts a GitHub App manifest (callback, setup
+   and webhook URLs for this domain, the usual permissions including **Email addresses: read**),
+   you confirm on GitHub, and GitHub returns you to the page; SAM stores the App id, slug, client
+   id and secret, private key and webhook secret itself (`services/github-app-manifest.ts`).
+   Leave the organization empty for a personal account. Creating a new App replaces an existing
+   one, so people who signed in with the old one sign in with GitHub again.
+2. **Settings → GitHub → Your account → Connect GitHub.** An account that signs in by email code
+   links its GitHub account here (any GitHub email), then installs the App. SAM needs each user's
+   own GitHub authorization to start work on a GitHub project.
+
+An account that GitHub sign-in created with an unconfirmed email (GitHub's emails API refused,
+usually an App without Email addresses: read) is mailed "sign in with GitHub" instead of a code,
+because redeeming a code would disconnect it from GitHub.
+
 Code: `scripts/selfhost/mail-settings.ts` (SMTP settings, collector), `caddy/mail-collector/` and
 `caddy/start.sh` (collector route), `scripts/selfhost/create-account.ts` (account command).
 
