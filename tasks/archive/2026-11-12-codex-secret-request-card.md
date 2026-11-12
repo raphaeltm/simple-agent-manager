@@ -60,7 +60,7 @@ The real production request stays pending for the user's retest after deployment
 - [x] Local Playwright audit of the full conversation path (mobile + desktop), screenshots viewed.
 - [x] Lint, typecheck, test, build.
 - [x] Local specialists: task-completion-validator, ui-ux-specialist, test-engineer.
-- [ ] Staging: real Codex `request_secret` → visible card → browser save → metadata-only notice →
+- [x] Staging: real Codex `request_secret` → visible card → browser save → metadata-only notice →
       `exec_with_secrets` use; live and after reload/compact. Real Claude control. Fixtures cleaned.
 - [ ] Draft PR with evidence; coordinator approves exact SHA; CodeRabbit best effort; merge;
       main CI → production deploy → health/static smoke.
@@ -76,6 +76,25 @@ The real production request stays pending for the user's retest after deployment
   Codex result rows carry no title, which is why the fixture-only proof missed this.
 - Discrimination: with only `types.ts` reverted to `d3204f34d`, 6/16 original cross-harness
   tests, the rendered Codex test and both Playwright Codex audits go red.
+
+## Staging evidence (deploy run 43245984878 at 9d4b4e1e7)
+
+- Pre-fix reproduction (staging still on #2688 code): Codex on a Hetzner VM (project Potato,
+  session `ff0d98a2…`) rendered a generic "2 tool calls" group and no card, desktop and mobile.
+  Real rows: call `{title: mcp.sam-mcp.request_secret, kind: execute, status: in_progress}` with no
+  toolName; result `{toolCallId, status: completed, contentSize}` with the JSON as bare content.
+- Fixed build: the same stored rows render the card on load and after reload (desktop, mobile);
+  browser save → "Secret … supplied" metadata-only notice → slept session woke →
+  `exec_with_secrets` stdout hash equals the browser-computed hash. A follow-up request arrived over
+  the open WebSocket as a new card in ~14 s with zero console errors.
+- Claude Code control (session `c600096d…`): card renders, save → wake → matching hash; value absent
+  from page and stored transcript.
+- A first Codex attempt in the `crewai` test project failed at agent start (steerable Codex runtime
+  needs an x86_64 Node 22 devcontainer, by design); not related to this change.
+- Cleanup: two live-test requests declined, two collected secrets deleted, three sessions stopped
+  (workspaces deleted), three nodes deleted.
+- Pre-existing, unrelated: slept chats log 404s fetching their retired workspace →
+  `tasks/backlog/2026-11-12-slept-session-workspace-404-console-errors.md`.
 
 ## Acceptance criteria
 
