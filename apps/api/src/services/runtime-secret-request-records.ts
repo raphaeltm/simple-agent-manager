@@ -77,14 +77,16 @@ export async function loadRuntimeSecretRequest(
 }
 
 /** Provenance columns selected alongside a project runtime env row (LEFT JOINs, no bind list). */
-export const collectedProvenanceColumns = {
-  requestId: schema.runtimeSecretRequests.id,
-  requestReason: schema.runtimeSecretRequests.reason,
-  requestTaskId: schema.runtimeSecretRequests.requestingTaskId,
-  requestChatSessionId: schema.runtimeSecretRequests.requestingChatSessionId,
-  requestResolvedAt: schema.runtimeSecretRequests.resolvedAt,
-  requestResolverName: schema.users.name,
-};
+export function collectedProvenanceColumns() {
+  return {
+    requestId: schema.runtimeSecretRequests.id,
+    requestReason: schema.runtimeSecretRequests.reason,
+    requestTaskId: schema.runtimeSecretRequests.requestingTaskId,
+    requestChatSessionId: schema.runtimeSecretRequests.requestingChatSessionId,
+    requestResolvedAt: schema.runtimeSecretRequests.resolvedAt,
+    requestResolverName: schema.users.name,
+  };
+}
 
 export interface CollectedProvenanceRow {
   requestId: string | null;

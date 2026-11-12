@@ -40,6 +40,7 @@ describe('projects runtime config routes', () => {
 
     const queryBuilder = {
       from: vi.fn().mockReturnThis(),
+      leftJoin: vi.fn().mockReturnThis(),
       where: vi.fn().mockReturnThis(),
       limit: vi.fn(() => Promise.resolve(limitResponses.shift() ?? [])),
       orderBy: vi.fn(() => Promise.resolve(orderByResponses.shift() ?? [])),

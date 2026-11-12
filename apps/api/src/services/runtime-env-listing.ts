@@ -33,7 +33,7 @@ async function projectRows(db: Db, projectId: string): Promise<ScopedRow[]> {
       name: schema.projectRuntimeEnvVars.envKey,
       isSecret: schema.projectRuntimeEnvVars.isSecret,
       expiresAt: schema.projectRuntimeEnvVars.expiresAt,
-      ...collectedProvenanceColumns,
+      ...collectedProvenanceColumns(),
     })
     .from(schema.projectRuntimeEnvVars)
     .leftJoin(

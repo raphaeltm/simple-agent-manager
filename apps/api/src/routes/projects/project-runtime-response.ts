@@ -24,7 +24,7 @@ export async function buildProjectRuntimeConfigResponse(
         createdAt: schema.projectRuntimeEnvVars.createdAt,
         updatedAt: schema.projectRuntimeEnvVars.updatedAt,
         expiresAt: schema.projectRuntimeEnvVars.expiresAt,
-        ...collectedProvenanceColumns,
+        ...collectedProvenanceColumns(),
       })
       .from(schema.projectRuntimeEnvVars)
       .leftJoin(
