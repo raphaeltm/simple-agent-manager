@@ -38,6 +38,7 @@ import {
   loadRuntimeSecretRequest,
   toRuntimeSecretRequest,
 } from './runtime-secret-request-records';
+import { claimAndStoreValueStatements } from './runtime-secret-request-claim';
 import { getRuntimeSecretRequestLimits } from './runtime-secret-request-settings';
 import { UNSUPPORTED_SECRET_EXEC_ENV_NAMES } from './secret-exec-env-names';
 import { resolveWorkspaceRuntimeAssetContext } from './workspace-runtime-assets';
@@ -352,12 +353,6 @@ export interface FulfillRuntimeSecretRequestInput {
   replaceExisting: boolean;
 }
 
-/**
- * Claims the request and writes the value in ONE D1 batch (a transaction). The value row is
- * inserted only if this batch's claim landed (`WHERE EXISTS` on the exact claim it just made),
- * so there is no state where the request reads `fulfilled` without its value, or a value is
- * written for a request someone else answered.
- */
 async function claimAndStoreValue(
   env: Env,
   row: schema.RuntimeSecretRequestRow,
@@ -365,61 +360,9 @@ async function claimAndStoreValue(
   stored: { ciphertext: string; iv: string | null },
   resolution: { resolvedAt: number; secretExpiresAt: number | null; replacedExisting: boolean }
 ): Promise<boolean> {
-  const { resolvedAt, secretExpiresAt, replacedExisting } = resolution;
-  const nowIso = new Date(resolvedAt).toISOString();
-  const [claim] = await env.DATABASE.batch([
-    env.DATABASE.prepare(
-      `UPDATE runtime_secret_requests
-          SET status = 'fulfilled', resolved_by = ?, resolved_at = ?, secret_expires_at = ?,
-              replaced_existing = ?, updated_at = ?
-        WHERE id = ? AND project_id = ? AND status = 'pending' AND expires_at > ?
-          -- Without the person's confirmation, a value created since the card was read must not
-          -- be replaced silently: the claim fails and the card asks again.
-          AND (? = 1 OR NOT EXISTS (
-            SELECT 1 FROM project_runtime_env_vars WHERE project_id = ? AND env_key = ?))`
-    ).bind(
-      input.actorUserId,
-      resolvedAt,
-      secretExpiresAt,
-      replacedExisting ? 1 : 0,
-      resolvedAt,
-      row.id,
-      row.projectId,
-      resolvedAt,
-      input.replaceExisting ? 1 : 0,
-      row.projectId,
-      row.envKey
-    ),
-    env.DATABASE.prepare(
-      `INSERT INTO project_runtime_env_vars
-         (id, project_id, user_id, env_key, stored_value, value_iv, is_secret, expires_at,
-          secret_request_id, created_at, updated_at)
-       SELECT ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?
-        WHERE EXISTS (
-          SELECT 1 FROM runtime_secret_requests
-           WHERE id = ? AND project_id = ? AND status = 'fulfilled'
-             AND resolved_by = ? AND resolved_at = ?)
-       ON CONFLICT (project_id, env_key) DO UPDATE SET
-         stored_value = excluded.stored_value, value_iv = excluded.value_iv, is_secret = 1,
-         expires_at = excluded.expires_at, secret_request_id = excluded.secret_request_id,
-         updated_at = excluded.updated_at`
-    ).bind(
-      ulid(),
-      row.projectId,
-      input.actorUserId,
-      row.envKey,
-      stored.ciphertext,
-      stored.iv,
-      secretExpiresAt,
-      row.id,
-      nowIso,
-      nowIso,
-      row.id,
-      row.projectId,
-      input.actorUserId,
-      resolvedAt
-    ),
-  ]);
+  const [, claim] = await env.DATABASE.batch(
+    claimAndStoreValueStatements(env.DATABASE, row, input, stored, resolution)
+  );
   return (claim?.meta?.changes ?? 0) === 1;
 }
 

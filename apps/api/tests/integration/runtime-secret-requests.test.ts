@@ -719,6 +719,82 @@ describe('hardening', () => {
     expect(envRow('STRIPE_API_KEY')).toBeUndefined();
   });
 
+  it('two overlapping submits by the same person in the same millisecond: the loser writes nothing', async () => {
+    // Frozen clock: both submits resolve at the identical millisecond, as the same actor, so
+    // nothing about who or when can tell the two claims apart (the pre-fix INSERT keyed on
+    // resolved_by + resolved_at and let the loser overwrite the winner's value).
+    vi.useFakeTimers({ now: new Date('2026-11-12T10:00:00Z'), toFake: ['Date'] });
+    const request = await createRequest();
+    // Hold the first batch until the second submit has also read `pending` and reached its own
+    // batch, so both service calls pass every pre-check before either transaction runs.
+    const realBatch = env.DATABASE.batch.bind(env.DATABASE);
+    let releaseFirst!: () => void;
+    const firstHeld = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let batches = 0;
+    let firstRan: Promise<unknown> = Promise.resolve();
+    env.DATABASE.batch = (async (statements: D1PreparedStatement[]) => {
+      batches += 1;
+      if (batches === 1) {
+        firstRan = firstHeld.then(() => realBatch(statements));
+        return firstRan;
+      }
+      // Second submit: both have now passed every pre-check. Run the first transaction, then this.
+      releaseFirst();
+      await firstRan.catch(() => undefined);
+      return realBatch(statements);
+    }) as typeof env.DATABASE.batch;
+
+    const [first, second] = await Promise.all([
+      fulfill(request.id, { value: SENTINEL }),
+      fulfill(request.id, { value: OTHER_SENTINEL }),
+    ]);
+    expect(batches).toBe(2);
+    // The first batch to run claims; the second finds the request answered and writes nothing.
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(409);
+    const stored = envRow('STRIPE_API_KEY') as { stored_value: string; secret_request_id: string };
+    expect(stored.secret_request_id).toBe(request.id);
+    const { envVars } = await execEnv(['STRIPE_API_KEY']);
+    expect(envVars.find((item) => item.key === 'STRIPE_API_KEY')?.value).toBe(SENTINEL);
+    expect(requestRow(request.id)).toMatchObject({
+      status: 'fulfilled',
+      resolved_by: 'owner',
+      resolved_at: Date.parse('2026-11-12T10:00:00Z'),
+    });
+    expect(edges.acceptPromptDelivery).toHaveBeenCalledTimes(1);
+    expectNoLeak(await second.text());
+  });
+
+  it('a value created after the pre-check but before the write is neither replaced nor claimed', async () => {
+    const request = await createRequest();
+    const realBatch = env.DATABASE.batch.bind(env.DATABASE);
+    env.DATABASE.batch = (async (statements: D1PreparedStatement[]) => {
+      // Someone saves the name manually after this submit's pre-check read "no existing value".
+      insert('project_runtime_env_vars', {
+        id: 'manual-late',
+        project_id: P1,
+        user_id: 'admin2',
+        env_key: 'STRIPE_API_KEY',
+        stored_value: 'manual',
+        value_iv: null,
+        is_secret: 0,
+        created_at: '2026-11-12T00:00:00Z',
+        updated_at: '2026-11-12T00:00:00Z',
+      });
+      env.DATABASE.batch = realBatch;
+      return realBatch(statements);
+    }) as typeof env.DATABASE.batch;
+    const refused = await fulfill(request.id, { value: SENTINEL });
+    expect(refused.status).toBe(409);
+    expect(await refused.text()).toContain('Confirm');
+    // The claim is bound to this batch's own value landing: no value, no claim.
+    expect(envRow('STRIPE_API_KEY')).toMatchObject({ stored_value: 'manual' });
+    expect(requestRow(request.id).status).toBe('pending');
+    expect(edges.acceptPromptDelivery).not.toHaveBeenCalled();
+  });
+
   it('retries an outcome notice that could not be queued, within the retry window only', async () => {
     vi.useFakeTimers({ now: new Date('2026-11-12T10:00:00Z'), toFake: ['Date'] });
     const request = await createRequest();
