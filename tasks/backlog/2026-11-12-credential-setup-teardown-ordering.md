@@ -10,8 +10,18 @@ Found while prototyping guided login on celld (task 01M769WDVM4HCQ7185R8E2QGV6, 
 
 ## Acceptance Criteria
 
-- [ ] D1 is marked terminal before any sandbox I/O in teardown, or create treats a DO-terminal row as inactive.
-- [ ] A restarted alarm completes an interrupted cleanup (scrub, destroy, pool release).
-- [ ] The scrub is skipped when provisioning never reached a running container, and scrub and destroy have short env-configurable timeouts.
-- [ ] Permanent container start errors fail the session promptly with a distinguishable error code.
-- [ ] Tests: interrupted teardown (the process dies after the DO claim) followed by a new create for the same user and agent, and a never-started container being torn down without a 150 s wait.
+- [x] D1 is marked terminal before any sandbox I/O in teardown, or create treats a DO-terminal row as inactive.
+- [x] A restarted alarm completes an interrupted cleanup (scrub, destroy, pool release).
+- [x] The scrub is skipped when provisioning never reached a running container, and scrub and destroy have short env-configurable timeouts.
+- [x] Permanent container start errors fail the session promptly with a distinguishable error code (`sandbox_runtime_unavailable`; 1.5 s on the box with runsc unregistered, was 137 s).
+- [x] Tests: interrupted teardown (the process dies after the DO claim) followed by a new create for the same user and agent, and a never-started container being torn down without a 150 s wait.
+
+## Implementation Notes (teardown ordering, 2026-11-12)
+
+- `teardown()` claims the terminal status, sets `cleanup_pending = 1` and `cleanup_from_status` (the pre-claim status) in the same synchronous step, arms a recovery alarm (`capture_poll_ms`), then writes D1 terminal before any sandbox I/O. `runCleanup()` does scrub, destroy, pool release, and a D1 repair write that only touches a still-active row, then clears the marker and the alarm.
+- `alarm()` on a terminal row with `cleanup_pending = 1` resumes the cleanup (`resumeCleanup()`). An alarm that fires while the same isolate's inline cleanup is running joins it. After `MAX_CLEANUP_RECOVERY_ATTEMPTS` (3) interrupted recoveries it logs `credential_setup.cleanup_abandoned` and clears the marker.
+- New DO columns `cleanup_pending`, `cleanup_from_status` and `cleanup_attempts` are added by a guarded `ALTER TABLE ADD COLUMN` (checked against `PRAGMA table_info`). The table is not recreated.
+- The scrub is skipped when teardown starts from `provisioning`. When the scrub does run, it is bounded by `withTimeout` at `SANDBOX_EXEC_TIMEOUT_MS` (default 30 s), the same existing knob that bounds `destroySandboxInstance`. No new env var was added.
+- Tests: `apps/api/tests/unit/durable-objects/credential-setup-session-teardown.test.ts` (real SQLite for DO storage and D1, real create route). Each of the six fixes was reverted on its own, and a test went red each time.
+- Resumed (post-crash) cleanup also skips the scrub: on celld the exec started a fresh empty container just to scrub it.
+- Fourth criterion: `SandboxDO` (`apps/api/src/durable-objects/sandbox-do.ts`) overrides the SDK's public `containerFetch`. A 503 startup answer whose engine error is permanent (`services/sandbox-startup-errors.ts`, `PERMANENT_ENGINE_START_ERRORS`) becomes the SDK's own permanent 500. celld carries the real error only in the rejection of the run's `ctx.container.monitor()` promise, so the subclass tees that public API (re-probing once celld opens a late run). `provision()` maps it to `sandbox_runtime_unavailable`. Verified on the prototype box: proxy refusal 1.3-1.9 s (4 runs), unregistered runsc 1.5-1.6 s (2 runs).

@@ -271,8 +271,14 @@ docker-proxy` (method, path, reason; never a body).
   celld's data dir, so a symlink there cannot expose a host file. The deploy builds the images
   on the box, so celld never loads one: if `docker image prune -a` removes them, sign-in fails at
   once with `sandbox_runtime_unavailable` until the next `pnpm selfhost:deploy`.
+- Leftover sandboxes: celld gets a new node id each time it starts and reaps only its own, so the
+  proxy removes every other celld sandbox when celld reaps; and every minute it removes sandboxes
+  older than `SAM_DOCKER_PROXY_MAX_SANDBOX_AGE_SECONDS` (default 1800; a setup session lives at
+  most 15 minutes, so raise both together). A celld restart ends any sign-in in progress: cancel
+  it in the UI and start again.
 - A container start that can never succeed (runtime not registered, proxy refusal, image gone)
-  fails the session within seconds as `sandbox_runtime_unavailable`
+  fails the session within seconds as `sandbox_runtime_unavailable` (1.5 s measured with `runsc`
+  unregistered, previously 137 s)
   (`apps/api/src/services/sandbox-startup-errors.ts`) instead of after the SDK's ~2.5 minutes of
   start retries. A cancelled, expired or failed session marks its D1 row terminal before any
   sandbox call, so a retry is never blocked by a session whose teardown was interrupted.
