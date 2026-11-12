@@ -1085,6 +1085,7 @@ export class ProjectData extends DurableObject<Env> {
   archiveSourceListReclaimPending(input: {
     projectId: string;
     limit: number;
+    sessionId?: string | null;
   }): Array<{ sessionId: string; migrationId: string }> {
     return archiveSharding.listArchiveSourceReclaimPending(this.sql, input);
   }

@@ -41,6 +41,7 @@ import {
   type ArchiveWriteReservation,
   estimateArchiveWrites,
 } from '../../project-data-archive/write-budget';
+import { isDurableObjectSqliteNoMemError } from '../../services/durable-object-retry';
 import {
   MESSAGE_COMMENT_REPLY_COUNT_SQL,
   MESSAGE_COMMENT_THREAD_COUNT_SQL,
@@ -339,6 +340,11 @@ export type ArchiveSourceFinalizeDeleteInput = {
   hashPageRows?: number;
 };
 
+/**
+ * The flip deletes no rows, so the `*Deleted` counts are always 0 and the sizes are equal on a
+ * fresh flip. They are kept so the RPC shape and the `sourceFinalization` log stay compatible
+ * across a mixed-version deploy; reclaim reports the real counts.
+ */
 export type ArchiveSourceFinalizeDeleteResult = {
   idempotent: boolean;
   lastMessageAt: number | null;
@@ -3110,7 +3116,10 @@ export async function restoreSourceArchiveChunk(
       'ProjectData archive source can only be restored after source deletion proof exists'
     );
   }
-  if (state === 'source_deleted' && !isCopyBackInProgress(sql, input.sessionId)) {
+  if (
+    state === 'source_deleted' &&
+    !isCopyBackInProgress(sql, input.sessionId, input.migrationId)
+  ) {
     // A copy-back over leftover rows would re-index grouped rows the FTS already holds, and
     // duplicate FTS5 postings corrupt the project's search index. The coordinator drains
     // reclaim first (`copyBackProjectDataArchiveMigration`); this refuses if it did not.
@@ -3561,6 +3570,11 @@ export async function finalizeSourceDelete(
       input.migrationId,
       input.sourceIntentToken
     );
+    sql.exec(
+      'INSERT OR REPLACE INTO do_meta (key, value) VALUES (?, ?)',
+      RECLAIM_PENDING_META_PREFIX + input.sessionId,
+      input.migrationId
+    );
     return {
       idempotent: false,
       lastMessageAt: terminalVersion.lastMessageAt,
@@ -3599,56 +3613,77 @@ export type ArchiveSourceReclaimPageResult = {
 /**
  * Set by the first copy-back restore chunk and cleared when the copy-back is marked restored.
  * While it is present the session's root rows are being RESTORED, not left over, so reclaim
- * must not touch them. Kept in `do_meta` so no table migration is needed.
+ * must not touch them. The value is the migration id, and only a fence for the session's
+ * current migration counts. Kept in `do_meta` so no table migration is needed.
  */
 const COPY_BACK_IN_PROGRESS_META_PREFIX = 'archive_copy_back_in_progress:';
+/**
+ * Set by the flip (`finalizeSourceDelete`) and cleared by the reclaim page that deletes the
+ * session's last row, so listing pending reclaims costs O(pending) rather than a probe of every
+ * `source_deleted` intent the root has ever recorded. Value: the migration id.
+ */
+const RECLAIM_PENDING_META_PREFIX = 'archive_reclaim_pending:';
+/** Upper bound on one reclaim page, whatever the caller asks for, so no page holds the root long. */
+const ARCHIVE_RECLAIM_MAX_PAGE_ROWS = 2_000;
 
-function isCopyBackInProgress(sql: SqlStorage, sessionId: string): boolean {
+const COPY_BACK_IN_PROGRESS_SQL = 'SELECT 1 AS present FROM do_meta WHERE key = ? AND value = ?';
+
+function isCopyBackInProgress(sql: SqlStorage, sessionId: string, migrationId: string): boolean {
   return (
     sql
-      .exec(
-        'SELECT 1 AS present FROM do_meta WHERE key = ?',
-        COPY_BACK_IN_PROGRESS_META_PREFIX + sessionId
-      )
+      .exec(COPY_BACK_IN_PROGRESS_SQL, COPY_BACK_IN_PROGRESS_META_PREFIX + sessionId, migrationId)
       .toArray().length > 0
   );
 }
 
-const RECLAIM_PENDING_ROWS_SQL = `EXISTS (SELECT 1 FROM chat_messages m WHERE m.session_id = i.session_id)
-  OR EXISTS (SELECT 1 FROM chat_messages_grouped g WHERE g.session_id = i.session_id)
-  OR EXISTS (SELECT 1 FROM tool_payload_archives t WHERE t.session_id = i.session_id)`;
+const SOURCE_OWNS_ROWS_SQL = `SELECT (
+    EXISTS (SELECT 1 FROM chat_messages WHERE session_id = ?)
+    OR EXISTS (SELECT 1 FROM chat_messages_grouped WHERE session_id = ?)
+    OR EXISTS (SELECT 1 FROM tool_payload_archives WHERE session_id = ?)
+  ) AS present`;
 
 function sourceStillOwnsRows(sql: SqlStorage, sessionId: string): boolean {
-  return (
-    sql
-      .exec(
-        `SELECT 1 AS present FROM project_data_archive_source_intents i
-         WHERE i.session_id = ? AND (${RECLAIM_PENDING_ROWS_SQL})`,
-        sessionId
-      )
-      .toArray().length > 0
-  );
+  const row = sql.exec(SOURCE_OWNS_ROWS_SQL, sessionId, sessionId, sessionId).toArray()[0];
+  return Number(row?.present ?? 0) === 1;
 }
 
+const LIST_RECLAIM_PENDING_SQL = `SELECT i.session_id, i.migration_id
+  FROM do_meta pending
+  JOIN project_data_archive_source_intents i
+    ON i.session_id = substr(pending.key, ?)
+   AND i.migration_id = pending.value
+  WHERE pending.key >= ? AND pending.key < ?
+    AND i.project_id = ?
+    AND i.state = 'source_deleted'
+    AND (? IS NULL OR i.session_id = ?)
+    AND NOT EXISTS (
+      SELECT 1 FROM do_meta fence
+      WHERE fence.key = ? || i.session_id AND fence.value = i.migration_id
+    )
+  ORDER BY pending.key ASC
+  LIMIT ?`;
+
 /**
- * Sessions whose archive flip has committed (`source_deleted` intent) but whose transcript rows
- * have not all been reclaimed yet. Derived from the rows themselves rather than from journal
- * state, so a reclaim interrupted by a crash, a deadline, or a coordinator that predates
- * paged reclaim is still found.
+ * Sessions whose archive flip has committed (`source_deleted` intent) and whose transcript rows
+ * have not all been reclaimed. Read from the marker the flip writes, so a reclaim interrupted by
+ * a crash, a deadline, or an older coordinator that published without reclaiming is still
+ * found. Sessions fenced by an in-progress copy-back of the same migration are left out.
  */
 export function listArchiveSourceReclaimPending(
   sql: SqlStorage,
-  input: { projectId: string; limit: number }
+  input: { projectId: string; limit: number; sessionId?: string | null }
 ): Array<{ sessionId: string; migrationId: string }> {
+  const sessionId = input.sessionId ?? null;
   return sql
     .exec(
-      `SELECT i.session_id, i.migration_id
-       FROM project_data_archive_source_intents i
-       WHERE i.project_id = ? AND i.state = 'source_deleted' AND (${RECLAIM_PENDING_ROWS_SQL})
-         AND NOT EXISTS (SELECT 1 FROM do_meta meta WHERE meta.key = ? || i.session_id)
-       ORDER BY i.source_deleted_at ASC, i.session_id ASC
-       LIMIT ?`,
+      LIST_RECLAIM_PENDING_SQL,
+      RECLAIM_PENDING_META_PREFIX.length + 1,
+      RECLAIM_PENDING_META_PREFIX,
+      // The smallest string greater than every key with the prefix (':' + 1 = ';').
+      RECLAIM_PENDING_META_PREFIX.slice(0, -1) + ';',
       input.projectId,
+      sessionId,
+      sessionId,
       COPY_BACK_IN_PROGRESS_META_PREFIX,
       Math.max(1, Math.floor(input.limit))
     )
@@ -3684,7 +3719,7 @@ export function reclaimArchiveSourcePage(
       'ProjectData archive source rows may be reclaimed only after this migration flipped the session'
     );
   }
-  if (isCopyBackInProgress(sql, input.sessionId)) {
+  if (isCopyBackInProgress(sql, input.sessionId, input.migrationId)) {
     return {
       messagesDeleted: 0,
       groupedRowsDeleted: 0,
@@ -3694,7 +3729,8 @@ export function reclaimArchiveSourcePage(
       copyBackInProgress: true,
     };
   }
-  const maxRows = Math.max(1, Math.floor(input.maxRows));
+  const requested = Number.isFinite(input.maxRows) ? Math.floor(input.maxRows) : 1;
+  const maxRows = Math.min(ARCHIVE_RECLAIM_MAX_PAGE_ROWS, Math.max(1, requested));
   return transactionSync(() => {
     let budget = maxRows;
     const messagesDeleted =
@@ -3725,6 +3761,9 @@ export function reclaimArchiveSourcePage(
           );
           ftsRowsDeleted++;
         } catch (error) {
+          // Out of memory must roll the page back rather than delete the row and strand its
+          // FTS entry; the next page retries (same policy as grouped-fts-cleanup.ts).
+          if (isDurableObjectSqliteNoMemError(error)) throw error;
           log.warn('archive_source_fts_delete_marker_failed', {
             sessionId: input.sessionId,
             rowid: row.rowid,
@@ -3748,6 +3787,7 @@ export function reclaimArchiveSourcePage(
     }
     const remaining = sourceStillOwnsRows(sql, input.sessionId);
     if (!remaining) {
+      sql.exec('DELETE FROM do_meta WHERE key = ?', RECLAIM_PENDING_META_PREFIX + input.sessionId);
       // The reclaim evidence the flip recorded as "nothing freed yet" becomes the real
       // post-reclaim size once the last row is gone.
       sql.exec(

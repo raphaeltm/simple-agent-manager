@@ -2969,10 +2969,15 @@ async function reclaimPendingSources(
   scope?: ArchiveCoordinatorScope
 ): Promise<void> {
   // Projects whose breaker is not closed are skipped: an operator who opened it may be holding
-  // the leftover root rows as the only copy besides the recovery manifest.
-  const projects = scope
-    ? [scope.projectId]
-    : (
+  // the leftover root rows as the only copy besides the recovery manifest. The bound is the
+  // session slot count rather than `sweepProjects` (default 1), so one busy project cannot
+  // starve another's leftovers; per project the listing is one indexed `do_meta` range read.
+  let projects: string[];
+  if (scope) {
+    projects = [scope.projectId];
+  } else {
+    try {
+      projects = (
         (
           await env.DATABASE.prepare(
             `SELECT m.project_id FROM project_data_archive_migrations m
@@ -2985,10 +2990,16 @@ async function reclaimPendingSources(
                       m.project_id ASC
              LIMIT ?`
           )
-            .bind(config.sweepProjects)
+            .bind(Math.max(config.sweepProjects, config.sweepSessions))
             .all<{ project_id: string }>()
         ).results ?? []
       ).map((row) => row.project_id);
+    } catch (error) {
+      // Reclaim only frees storage; a failure here must not fail the tick (`.claude/rules/53`).
+      log.warn('project_data_archive_reclaim_projects_failed', { ...serializeError(error) });
+      return;
+    }
+  }
   for (const projectId of projects) {
     if (Date.now() >= deadlineAt) return;
     let pending: Array<{ sessionId: string; migrationId: string }>;
@@ -2998,6 +3009,7 @@ async function reclaimPendingSources(
       pending = await source.archiveSourceListReclaimPending({
         projectId,
         limit: config.sweepSessions,
+        sessionId: scope?.sessionId ?? null,
       });
     } catch (error) {
       // Reclaim only frees storage; the sessions are already published and readable from
@@ -3009,7 +3021,6 @@ async function reclaimPendingSources(
       continue;
     }
     for (const item of pending) {
-      if (scope?.sessionId && item.sessionId !== scope.sessionId) continue;
       if (Date.now() >= deadlineAt) {
         stats.reclaimPending = (stats.reclaimPending ?? 0) + 1;
         continue;
