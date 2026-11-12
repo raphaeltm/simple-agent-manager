@@ -1,0 +1,77 @@
+# ProjectData archive drain: fill the tick, stop false refusals, resumable large sessions
+
+SAM task `01M784YVJMQN6Z49XJRTJDVKPV` (parent `01M77TZWBDJHQ3Z87V2NYZMFK1`). Design: idea
+`01M75F3XNHX93FRAYM8TM6DVPK`. Branch base: `main` (agreed with modularization coordinator
+`01M77BJHHNW5714E98DEEMBCZA`; PR body must list new files, test imports of ProjectData internals,
+and any DO/D1 migrations, and the PR URL goes to the coordinator at open and merge).
+
+## Problem
+
+The SAM root ProjectData DO is at 9.08 GB of a 10e9 limit (2026-11-12 12:20Z alert), growing
+~250 MB/day. Ingest is ~85k messages/day; the archive drain moves ~45k/day.
+
+## Production evidence (read-only, 2026-11-12 17:10Z)
+
+- Journal: 3,632 `published`, 187 `frozen`, nothing in flight. Cadence row: run_count 3876,
+  last tick 17:06:19Z to 17:06:30Z (11.2 s), status succeeded.
+- 70 publishes in 24 h = exactly one per 18-min tick; 84,629 messages; avg 1,209, max 9,325.
+  The last 6 h were mostly ~441-message sessions.
+- `project_data_archive_candidate_migrated` phase timings (441-860 msgs): total 7.8-13.7 s;
+  prepare 0.45-0.66 s, copy 4.5-9.3 s (3-4 chunks, ~1.5-2.3 s/chunk), seal 0.38-0.59 s,
+  manifest 0.87-1.3 s, finalize 1.57-2.2 s (source delete ~1.0-1.7 s). A small session costs
+  ~8-10 s of fixed work, i.e. the 10 s `WALL_TIME_MS` admits exactly one per tick.
+- Tick 16:46Z: reserved 16,514 writes for `a26bc025` (~8k msgs), refused 3 s later
+  `active_session_state`, reservation not released; then published an 860-msg session.
+  Confirms: a refused candidate consumes the cumulative message budget AND keeps its write
+  reservation, and only one useful session fits in 10 s.
+- Eligible root backlog (stopped/failed, root): le1k 2,864 sessions / 523k msgs; 1k-10k 157 /
+  469k (+142 frozen / 568k); >10k 157 / 3.26M (+5 frozen). Sleeping in root: 579 / 2.44M.
+- Frozen refusals: 125 `active_session_state`, 35 `unresolved_attention`, 13
+  `message_comments_present`, 1 `tool_payload_cleanup_incomplete`, 13 `operator_abandoned`.
+- GitHub Environment overrides: production pins only `PROJECT_DATA_ARCHIVE_COMPACT_ENABLED`,
+  `_DAILY_WRITE_BUDGET=2400000`, `_GLOBAL_SWEEP_ENABLED`, `_SHARDING_ENABLED`. Staging pins none
+  of the archive vars. `WALL_TIME_MS`, `SWEEP_SESSIONS`, `SWEEP_MESSAGE_BUDGET`,
+  `PRECOPY_REFUSAL_RETRY_MS` take wrangler.toml / code defaults.
+- Cron: archive step already runs after every lifecycle sweep (`scheduled/handler.ts`);
+  `[limits] cpu_ms = 30000`.
+
+## Plan (staged PRs)
+
+### PR 1: relief (fill the tick, stop false refusals, end dead sleepers)
+
+- [ ] 1a `processArchiveMigrationBatch`: drop the cumulative message packer from the journaling
+      loop (per-candidate ceiling stays in SQL). A refused candidate releases its write
+      reservation and does not consume a session slot.
+- [ ] 1a wrangler.toml: `WALL_TIME_MS` 10000 → 60000, `SWEEP_SESSIONS` 8 → 50; update comments
+      and configuration docs. Throughput at the outer limit stated in PR (rule 81).
+- [ ] 1b `assertEligibleTerminalSource`: drop `'error'` from the activity refusal; keep
+      prompting/recovering and runtime_work_state active/settling.
+- [ ] 1b attention refusal only for markers that are unresolved, unexpired, and created within
+      the session grace.
+- [ ] 1b Refusal retry window default 7 d → 1 d (refusals are now cheap: released reservation,
+      no slot). Permanent, so no expiry knob is needed; document it.
+- [ ] 1c `expireDegradedSleepingConversations`: remove the open-task EXISTS; exclude sessions
+      with queued/delegated tasks in SQL so they cannot sit at the head of the batch.
+- [ ] Tests: real scheduled trigger with a refused large candidate first and many small sessions
+      after (several publish in one tick; reservation released); real failSession then prepare
+      accepted, with prompting / fresh-marker controls; snapshot-purge trigger terminalizes a
+      degraded no-fallback sleeper with a completed task; zombie (queued task) row ahead of valid
+      rows does not block them.
+- [ ] Staging: real scheduled ticks; measure tick wall, coordinator CPU, publishes per tick.
+
+### PR A: flip, publish, then reclaim (bounded finalize)
+
+- [ ] Flip transaction keeps anchors, drops whole-session deletes; `source_deleted` means
+      "flipped + published, reclaim outstanding"; bounded reclaim RPC pages; copy-back requires
+      `published`; root read fence; search dedupe verified; maintenance audit (item 7).
+
+### PR B: resumable cursor for every size
+
+- [ ] Deadline threaded into chunk loop/phase boundaries/reclaim; yield releases lease and resets
+      attempts on progress; reserve writes once; estimator cap; flip-or-unwind; remove 10k gate.
+- [ ] Seal/verification bounded and resumable (item 6); measure memory/CPU/lease.
+
+## Notes
+
+- 2026-11-12 17:06Z workspace was recycled while paused; untracked `.do-state.md` was lost.
+  Keep durable state here and push.
