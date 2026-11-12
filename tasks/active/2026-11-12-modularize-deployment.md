@@ -25,6 +25,11 @@ environment-state constants through its public entry.
 
 Routes stay in the worker (all use session or callback auth middleware).
 
+Deviation from the dispatch text, for coordinator sign-off: the dispatch said the package takes node
+placement and provisioning through injected interfaces. Because node admission, provisioning and
+teardown stay in the worker (above), the package needs no placement or provisioning port; the
+worker calls those directly and the package only exports the environment-state constants they use.
+
 ## Ports (explicit parameters, built in `apps/api/src/app-deployment-ports/`)
 
 | Port                                    | Was                                                    | Used by                             |
@@ -67,6 +72,12 @@ passed, 1 skipped). 173 + 400 = 573, unchanged from step 1. Worker tests that mo
 or `@simple-agent-manager/worker-core` (with `importOriginal`), because package code imports those
 directly and the worker paths re-export them.
 
+Review fixes: worker port adapter test (`apps/api/tests/unit/app-deployment-ports.test.ts`, 5
+cases), publish-hardening cancel timeout asserted through the settings port, `vm-agent-errors`
+schema mock. Affected set after review fixes: package 12 files / 173 cases; apps/api affected files
+plus the new adapter test and the two touched route tests all pass (474 passed, 1 skipped across 32
+files). Public entry trimmed to values the worker uses (all types exported): 150 names, was 192.
+
 ## PR #2605 overlap
 
 #2605 edits `scheduled/compose-image-artifact-cleanup.ts`, `scheduled/deployment-publish-jobs.ts`,
@@ -76,7 +87,11 @@ plus `routes/mcp/compose-publish-tools.ts`, `routes/deployment-release-submissio
 import-header edits; the sweep's lifecycle call becomes `ports.lifecycle...` (same lines #2605
 wraps in `contextShadow`). Whoever lands second rebases those hunks onto the new paths.
 #2605's new `scheduled/build-context-cleanup.ts` would be called from the package cleanup and
-must then come through a port or move into the package.
+must then come through a port or move into the package. #2605 also edits `.github/workflows/ci.yml`,
+`scripts/quality/direct-dependency-evidence.json`, `apps/www/.../reference/configuration.md`,
+`tests/unit/routes/publish-hardening-real-sqlite.test.ts` and
+`tests/unit/scheduled/deployment-publish-jobs.test.ts`, which W4 also edits (small, separate hunks
+except the two tests).
 
 ## Progress
 
@@ -85,5 +100,7 @@ must then come through a port or move into the package.
 - [x] Docs and comments: path references updated; build order in `guides/local-development.md`
 - [x] Move package-only tests into the package
 - [x] CI filters (`api`, `cli`), runtime-boundary scan, AST checks scope, catalog entries (`@aws-sdk/*`, `yaml`), dependency evidence
-- [ ] Local gates, specialist reviews, CI via `gh workflow run ci.yml --ref sam/w4-app-deployment-extract-ngd1ke`
+- [x] Local gates (check:fast, runtime-boundary, AST, dependency evidence, runtime-tunables, format ratchet, quality scripts)
+- [x] Specialist reviews: security PASS, cloudflare PASS, test-engineer ADDRESSED, architecture ADDRESSED, task-completion PASS
+- [ ] CI via `gh workflow run ci.yml --ref sam/w4-app-deployment-extract-ngd1ke`
 - [ ] Merge core branch, publish PR URL + head SHA on channel, notify coordinator
