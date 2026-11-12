@@ -3,6 +3,7 @@ import { SNAPSHOT_EXPIRED_REASON } from '@simple-agent-manager/shared';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import * as projectDataService from './project-data';
+import { resolveProjectDataSessionLocation } from './project-data-archive-routing';
 import { transitionTaskToTerminal } from './task-terminal-transition';
 
 /** Point lookup used by the sweep before a legacy sleep can be mistaken for death. */
@@ -47,12 +48,37 @@ export async function expireSleepingConversation(
     });
     if (outcome !== 'transitioned' && outcome !== 'already_terminal') return false;
   }
+  // A PUBLISHED archive location proves the session was terminal and its transcript moved, so
+  // there is nothing left to stop, and `stopSession` would be refused by the archive write
+  // fence. Without this branch such a snapshot failed every sweep (staging, 2026-11-12).
+  // `migrating` and `frozen` prove nothing: `createCandidateJournal` fences the location
+  // before the root has checked eligibility, and a refusal unwinds it to `root`. Leave those
+  // for a later sweep rather than expire a snapshot on an unverified archive.
+  const location = await resolveProjectDataSessionLocation(env, projectId, sessionId);
+  if (location.state === 'archive_shard') return true;
+  if (location.state !== 'root') return false;
   // Retried independently of task CAS: a failed DO write must leave metadata for retry.
   await projectDataService.stopSession(env, projectId, sessionId);
   return true;
 }
 
-/** Metadata-only pass: legacy degraded snapshots keep their R2 artifacts. */
+/**
+ * Metadata-only pass: legacy degraded snapshots keep their R2 artifacts.
+ *
+ * Selects every expired degraded sleeper, whatever state its task is in. A sleeper whose task
+ * already finished is the commonest case: until 2026-11-12 an open-task requirement here left
+ * 296 production conversations `sleeping` forever, which also kept them out of the archive
+ * drain. `expireSleepingConversation` cancels any open task and then stops the session, and
+ * with no open task it just stops it.
+ *
+ * A row whose project was deleted (`project_id` is set NULL on delete) has no conversation to
+ * stop and is skipped by the loop, so it is excluded before the LIMIT as well.
+ *
+ * The states it declines are excluded here too: a queued or delegated task, and an archive
+ * fence that is not yet published (`migrating`, `frozen`). Otherwise those rows would come back
+ * every sweep and, ordered by expiry, fill the batch ahead of rows that can make progress
+ * (`.claude/rules/47`).
+ */
 export async function expireDegradedSleepingConversations(
   env: Env,
   now: Date,
@@ -62,10 +88,15 @@ export async function expireDegradedSleepingConversations(
     `SELECT id, project_id, chat_session_id FROM session_snapshots
      WHERE expires_at <= ? AND sleeping_at IS NOT NULL AND sleep_status = 'sleeping'
        AND status = 'degraded' AND sleep_fallback_json IS NULL
-       AND EXISTS (SELECT 1 FROM tasks t
+       AND project_id IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM tasks t
          WHERE t.project_id = session_snapshots.project_id
            AND t.chat_session_id = session_snapshots.chat_session_id
-           AND (t.status IN ('sleeping', 'in_progress') OR t.terminal_reason = 'snapshot_expired'))
+           AND t.status IN ('queued', 'delegated'))
+       AND NOT EXISTS (SELECT 1 FROM project_data_session_locations loc
+         WHERE loc.project_id = session_snapshots.project_id
+           AND loc.session_id = session_snapshots.chat_session_id
+           AND loc.location_state IN ('migrating', 'frozen'))
        AND (recovery_status IS NULL OR recovery_status != 'waking')
      ORDER BY expires_at, id LIMIT ?`
   )

@@ -737,6 +737,11 @@ function assertEligibleTerminalSource(
       'ProjectData archive refuses sessions with active ACP runtime rows'
     );
   }
+  // `activity = 'error'` is deliberately not a refusal: `failSession` writes it as the terminal
+  // mirror of a failed session, so on a session that has been terminal for the whole grace it
+  // describes no live writer. Live work is still refused by prompting/recovering, an active or
+  // settling runtime, and the active ACP check above. Counting 'error' froze 125 production
+  // sessions (2026-11-12) that nothing could ever unfreeze.
   if (
     countRows(
       sql,
@@ -745,7 +750,7 @@ function assertEligibleTerminalSource(
        LEFT JOIN acp_sessions acp ON acp.id = ss.session_id
        WHERE (ss.session_id = ? OR acp.chat_session_id = ?)
          AND (
-           ss.activity IN ('prompting', 'recovering', 'error')
+           ss.activity IN ('prompting', 'recovering')
            OR ss.runtime_work_state IN ('active', 'settling')
          )`,
       sessionId,
@@ -781,11 +786,22 @@ function assertEligibleTerminalSource(
       'ProjectData archive refuses sessions with active idle-cleanup schedule rows'
     );
   }
+  // An unresolved marker blocks archiving until the session grace has passed since its last
+  // deadline: its expiry for an expiring marker, its creation for a non-expiring one
+  // (`idle_cleanup_failed`, `wake_failed`). Neither kind is resolved when the session stops or
+  // fails, so the old unconditional check froze 35 production sessions (2026-11-12) behind
+  // markers nothing would ever resolve. Measuring from the expiry, not "is it expired", keeps a
+  // marker the expiry alarm has not processed yet from racing an archive (the alarm can still
+  // call `failSession`). Markers stay in the root object either way; archiving does not move them.
   if (
     countRows(
       sql,
-      'SELECT COUNT(*) AS count FROM session_attention_markers WHERE session_id = ? AND resolved_at IS NULL',
-      sessionId
+      `SELECT COUNT(*) AS count FROM session_attention_markers
+       WHERE session_id = ?
+         AND resolved_at IS NULL
+         AND COALESCE(expires_at, created_at) > ?`,
+      sessionId,
+      now - minTerminalAgeMs
     ) > 0
   ) {
     throw new ProjectDataArchiveInvariantError(
