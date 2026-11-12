@@ -3,7 +3,7 @@
  * (peer.ts): who may ask, what the request must look like, and what the cache does when the key
  * service is down or refuses. Real-socket version: live/key-agent-celld.live.test.ts.
  */
-import { generateKeyPairSync, type KeyObject, verify } from 'node:crypto';
+import { generateKeyPairSync, type KeyObject, randomBytes, verify } from 'node:crypto';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
