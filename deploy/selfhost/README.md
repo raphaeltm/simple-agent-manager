@@ -323,9 +323,10 @@ Code: `deploy/selfhost/sam-mx/` (receiver and its tests),
 
 - Off on purpose: Instant sessions and guided credential login (Cloudflare Containers), Artifacts
   (SAM-native repos), Analytics Engine, AI Gateway, the Workers AI model catalog and the
-  stalled-task classifier (Clef). Agent email needs the `mail-in` profile (see Inbound agent
-  email); the admin agent-email setup and loopback test remain Cloudflare-only.
-  Project creation needs a GitHub App or GitLab.
+  stalled-task classifier (Clef; an admin may opt the advisory verdict on paused check-in loops
+  into the LLM endpoint with `operations.stalledTaskClassifierEndpointAdvisory`). Agent email
+  needs the `mail-in` profile (see Inbound agent email); the admin agent-email setup and loopback
+  test remain Cloudflare-only. Project creation needs a GitHub App or GitLab.
 - The SAM agent, project agents, task titles and the diagnosis runner use an OpenAI-compatible
   endpoint: set it in Admin settings (`llm.openAICompatible.baseUrl`, `apiKey`, `model`, plus
   optional per-purpose models). The key is stored encrypted. Without an endpoint those features

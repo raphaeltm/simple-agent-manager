@@ -16,6 +16,7 @@ import { type LifecycleLatencySettingKey } from './lifecycle-latency/defaults';
 import { type LlmEndpointSettingName } from './llm-endpoint-settings';
 import { type OperationsTelemetrySettingName } from './operations-telemetry-defaults';
 import { type SpeechEndpointSettingName } from './speech-endpoint-settings';
+import { type StalledClassifierEndpointSettingName } from './stalled-task-classifier-endpoint-settings';
 import { type WORKFLOW_DEFAULTS } from './workflow-defaults';
 
 export type AdminSettingValue = boolean | number | string | readonly string[] | null;
@@ -35,6 +36,7 @@ export type AdminSettingName =
   | LlmEndpointSettingName
   | AiProxySettingName
   | SpeechEndpointSettingName
+  | StalledClassifierEndpointSettingName
   | GcpCatalogSettingName
   | OperationsTelemetrySettingName
   | OutboundSettingName
