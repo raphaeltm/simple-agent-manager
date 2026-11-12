@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   GitPullRequest,
   HelpCircle,
+  KeyRound,
   type LucideIcon,
   MessageSquare,
   MessageSquareQuote,
@@ -36,6 +37,7 @@ export const NOTIFICATION_TYPE_CONFIG: Record<NotificationType, NotificationType
   comment: { icon: MessageSquareQuote, color: 'text-info-fg', label: 'Comment' },
   session_access: { icon: Users, color: 'text-info-fg', label: 'Shared Session' },
   operations_approval: { icon: ShieldCheck, color: 'text-warning-fg', label: 'Approval Needed' },
+  secret_request: { icon: KeyRound, color: 'text-warning-fg', label: 'Secret Requested' },
 };
 
 /**
@@ -55,7 +57,7 @@ export function notificationTypeConfig(type: string): NotificationTypeConfig {
  * Low-value updates (task_complete, progress, session_ended, pr_created, comment,
  * session_access) are accessible in the Updates tab but do not inflate the badge count.
  * A mention is addressed to you by a person, so it needs you. An Operations approval waits on
- * your tap.
+ * your tap, and so does an agent's secret request.
  */
 export const ATTENTION_TYPES: ReadonlySet<string> = new Set<NotificationType>([
   'needs_input',
@@ -63,4 +65,5 @@ export const ATTENTION_TYPES: ReadonlySet<string> = new Set<NotificationType>([
   'cron_failure',
   'mention',
   'operations_approval',
+  'secret_request',
 ]);

@@ -45,6 +45,9 @@ export const projectQueryKeys = {
     [...projectQueryKeys.all(queryScope), 'instant-runtime-enabled'] as const,
   runtimeConfig: (queryScope: string, projectId: string) =>
     [...projectQueryKeys.all(queryScope), 'runtime-config', projectId] as const,
+  /** One agent secret request (metadata only), read by the in-chat card. */
+  secretRequest: (queryScope: string, projectId: string, requestId: string) =>
+    [...projectQueryKeys.all(queryScope), 'secret-request', projectId, requestId] as const,
   credentialHealth: (queryScope: string, projectId: string) =>
     [...projectQueryKeys.all(queryScope), 'credential-health', projectId] as const,
 };

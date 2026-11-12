@@ -58,6 +58,8 @@ async function fixture() {
   sqlite
     .prepare('INSERT INTO project_runtime_env_vars VALUES(?,?,?,?,?,?)')
     .run('plain', 'project', 'PLAIN', 'nonsecret', null, 0);
+  // Agent-collected secret expiry (migration 0236); NULL keeps these rows non-expiring.
+  sqlite.exec('ALTER TABLE project_runtime_env_vars ADD COLUMN expires_at INTEGER');
   const keys = await crypto.subtle.generateKey(
     {
       name: 'RSASSA-PKCS1-v1_5',

@@ -11,7 +11,7 @@ import * as v from 'valibot';
 import * as schema from '../db/schema';
 import { interactionDecisionHash } from '../durable-objects/interaction-store-model';
 import type { Env } from '../env';
-import { getTrustedApiOrigin } from '../lib/trusted-origins';
+import { requireExactBrowserOrigin } from '../lib/browser-write-origin';
 import { getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectCapability } from '../middleware/project-auth';
@@ -35,30 +35,9 @@ type AcceptedAnswerResult = Extract<
 type ChatAcpContext = Context<{ Bindings: Env }>;
 type BrowserAnswerBody = InferOutput<typeof AcpInteractionBrowserAnswerSchema>;
 
-function exactAppOrigin(env: Pick<Env, 'BASE_DOMAIN'>): string {
-  const apiOrigin = getTrustedApiOrigin(env);
-  const url = new URL(apiOrigin);
-  if (url.hostname.startsWith('api.')) url.hostname = `app.${url.hostname.slice(4)}`;
-  return url.toString().replace(/\/$/u, '');
-}
-
 function requiredParam(value: string | undefined, name: string): string {
   if (!value) throw errors.badRequest(`${name} is required`);
   return value;
-}
-
-function requireExactBrowserOrigin(c: {
-  req: { header: (name: string) => string | undefined };
-  env: Env;
-}): void {
-  const origin = c.req.header('Origin');
-  const fetchSite = c.req.header('Sec-Fetch-Site');
-  if (fetchSite === 'cross-site') {
-    throw errors.forbidden('Cross-site interaction writes are not allowed');
-  }
-  if (!origin || origin !== exactAppOrigin(c.env)) {
-    throw errors.forbidden('Untrusted interaction write origin');
-  }
 }
 
 function requireAcceptedAnswer(answer: AnswerInteractionResult): AcceptedAnswerResult {

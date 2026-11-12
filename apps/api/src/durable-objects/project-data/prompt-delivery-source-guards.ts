@@ -184,6 +184,9 @@ export function sourceTaskGuardForClaim(
     // An Operations decision wakes the requesting agent only while its task (or that task's
     // own session-recovery successor) is live; a finished task has nothing to act on.
     claim.message.sourceKind !== 'operations_decision' &&
+    // A secret request outcome wakes the requesting agent only while its task (or that task's
+    // own session-recovery successor) is live, for the same reason.
+    claim.message.sourceKind !== 'secret_request' &&
     // A continuation re-wakes the chat only while its own task is live: unguarded, the
     // recovery claim would reactivate even a terminal task.
     claim.message.sourceKind !== 'checkpoint_continuation'
@@ -205,7 +208,9 @@ export function sourceTaskGuardForClaim(
     ...(projectEventWake ? { projectEventWake } : {}),
     ...(claim.message.sourceKind === 'github_trigger' ? { requireSourceProjectMember: true } : {}),
     ...((claim.message.sourceKind === 'scheduled_action' ||
-      claim.message.sourceKind === 'github_trigger') &&
+      claim.message.sourceKind === 'github_trigger' ||
+      // A secret request outcome only wakes a requester who is still an active project member.
+      claim.message.sourceKind === 'secret_request') &&
     typeof metadata.creatorUserId === 'string'
       ? { requiredProjectMemberId: metadata.creatorUserId }
       : {}),
@@ -217,6 +222,19 @@ export async function invalidProjectEventWakeSourceTaskResult(
   projectId: string | null,
   claim: PromptDeliveryClaim
 ): Promise<PromptDeliveryResult | null> {
+  if (
+    claim.message.sourceKind === 'secret_request' &&
+    typeof claim.message.metadata?.creatorUserId !== 'string'
+  ) {
+    // Without the requester the membership guard cannot be built; refuse rather than wake.
+    return {
+      kind: 'failed',
+      reason: 'terminal_target',
+      error: 'Secret request notice has no requester',
+      runtimeIdentity: claim.message.runtimeIdentity,
+      capabilities: null,
+    };
+  }
   if (
     claim.message.sourceKind !== 'project_event_wake' &&
     claim.message.sourceKind !== 'github_trigger'

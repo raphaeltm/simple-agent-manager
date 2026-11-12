@@ -125,6 +125,9 @@ export const PROMPT_DELIVERY_SOURCES = [
   // A superadmin's approve/deny decision on an Operations action, delivered to the requesting
   // agent's session (`services/operations-actions/decision-delivery.ts`).
   'operations_decision',
+  // A human supplied or declined an agent's secret request, or it expired; delivered to the
+  // requesting agent's session (`services/runtime-secret-requests.ts`). Metadata only.
+  'secret_request',
 ] as const;
 
 export type PromptDeliverySource = (typeof PROMPT_DELIVERY_SOURCES)[number];
