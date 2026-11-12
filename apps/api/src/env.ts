@@ -1,7 +1,7 @@
 // FILE SIZE EXCEPTION: Single flat Worker environment contract (one Env interface) — splitting fields across extends-chain fragments mid-hotfix creates import/review churn without behavior benefit. Tracked split: tasks/backlog/2026-07-19-split-env-interface.md. See .claude/rules/18-file-size-limits.md
 import type { Sandbox } from '@cloudflare/sandbox';
 import type { ProjectDataEnv } from '@simple-agent-manager/project-data';
-import type { RepoHostingEnv } from '@simple-agent-manager/repo-hosting';
+import type { ArtifactsBinding, RepoHostingEnv } from '@simple-agent-manager/repo-hosting';
 import type { WorkspaceAdmissionEnv } from '@simple-agent-manager/scheduler-core';
 
 import type { VmAgentContainer } from './durable-objects/vm-agent-container';
@@ -61,35 +61,7 @@ export interface Env
   // agent@ Email Routing rule at it.
   AGENT_EMAIL_WORKER_NAME?: string;
   // Cloudflare Artifacts for SAM-native Git repos (optional — absent when ARTIFACTS_ENABLED is falsy)
-  ARTIFACTS?: {
-    create(
-      name: string,
-      opts?: { description?: string; setDefaultBranch?: string }
-    ): Promise<{
-      id: string;
-      name: string;
-      remote: string;
-      token: string;
-      default_branch: string;
-    }>;
-    delete(name: string): Promise<boolean>;
-    get(name: string): Promise<{
-      id: string;
-      name: string;
-      remote: string;
-      defaultBranch: string;
-      createToken(
-        scope?: 'read' | 'write',
-        ttl?: number
-      ): Promise<{
-        id: string;
-        plaintext: string;
-        scope: string;
-        expiresAt?: string;
-        expires_at?: string;
-      }>;
-    }>;
-  };
+  ARTIFACTS?: ArtifactsBinding;
   // Analytics Engine for usage tracking (optional — binding absent in local dev / Miniflare)
   ANALYTICS?: AnalyticsEngineDataset;
   // Observability D1 (error storage — spec 023)

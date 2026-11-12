@@ -143,10 +143,7 @@ export default defineConfig({
       'tests/workers/sam-grounding-runtime.test.ts',
       'tests/workers/sam-live-stream.test.ts',
     ],
-    setupFiles: [
-      './tests/workers/setup-d1-migrations.ts',
-      './tests/workers/setup-repo-hosting-ports.ts',
-    ],
+    setupFiles: ['./tests/workers/setup-d1-migrations.ts'],
     provide: {
       D1_MIGRATIONS_JSON: JSON.stringify(d1Migrations),
       OBSERVABILITY_D1_MIGRATIONS_JSON: JSON.stringify(observabilityD1Migrations),

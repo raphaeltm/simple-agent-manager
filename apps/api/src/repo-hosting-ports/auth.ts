@@ -1,4 +1,4 @@
-import type { AuthPort } from '@simple-agent-manager/repo-hosting';
+import type { AuthPort } from '@simple-agent-manager/repo-hosting/ports';
 
 import type { Env } from '../env';
 import { getBetterAuthAccessTokenForProvider } from '../services/better-auth-access-token';

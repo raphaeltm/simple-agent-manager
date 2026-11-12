@@ -1,3 +1,34 @@
+/** The Cloudflare Artifacts binding (SAM-native Git repositories). */
+export type ArtifactsBinding = {
+  create(
+    name: string,
+    opts?: { description?: string; setDefaultBranch?: string }
+  ): Promise<{
+    id: string;
+    name: string;
+    remote: string;
+    token: string;
+    default_branch: string;
+  }>;
+  delete(name: string): Promise<boolean>;
+  get(name: string): Promise<{
+    id: string;
+    name: string;
+    remote: string;
+    defaultBranch: string;
+    createToken(
+      scope?: 'read' | 'write',
+      ttl?: number
+    ): Promise<{
+      id: string;
+      plaintext: string;
+      scope: string;
+      expiresAt?: string;
+      expires_at?: string;
+    }>;
+  }>;
+};
+
 /**
  * Every binding and variable repo hosting reads (GitHub App and user OAuth, GitLab, repository
  * browsing). The worker `Env` extends it, so the compiler proves the deployed Worker provides
@@ -11,36 +42,8 @@ export interface RepoHostingEnv {
   /** Per-user OAuth token refresh locks (Durable Objects); calls use `stub.fetch` only. */
   GITHUB_USER_ACCESS_TOKEN_LOCK: DurableObjectNamespace;
   GITLAB_USER_ACCESS_TOKEN_LOCK?: DurableObjectNamespace;
-  // Cloudflare Artifacts for SAM-native Git repos (optional — absent when ARTIFACTS_ENABLED is falsy)
-  ARTIFACTS?: {
-    create(
-      name: string,
-      opts?: { description?: string; setDefaultBranch?: string }
-    ): Promise<{
-      id: string;
-      name: string;
-      remote: string;
-      token: string;
-      default_branch: string;
-    }>;
-    delete(name: string): Promise<boolean>;
-    get(name: string): Promise<{
-      id: string;
-      name: string;
-      remote: string;
-      defaultBranch: string;
-      createToken(
-        scope?: 'read' | 'write',
-        ttl?: number
-      ): Promise<{
-        id: string;
-        plaintext: string;
-        scope: string;
-        expiresAt?: string;
-        expires_at?: string;
-      }>;
-    }>;
-  };
+  /** Cloudflare Artifacts for SAM-native Git repos; absent when ARTIFACTS_ENABLED is falsy. */
+  ARTIFACTS?: ArtifactsBinding;
   ARTIFACTS_ENABLED?: string;
   ARTIFACTS_TOKEN_TTL_SECONDS?: string;
   GITHUB_INSTALLATION_LEAK_SWEEP_BATCH_SIZE?: string;

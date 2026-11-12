@@ -85,6 +85,7 @@ export function valueReferences(names: ReadonlySet<string>): Map<string, Set<str
   const roots = [
     'apps/api/src',
     'packages/project-data/src',
+    'packages/repo-hosting/src',
     'apps/tail-worker/src',
     'packages/shared/src',
     'packages/providers/src',

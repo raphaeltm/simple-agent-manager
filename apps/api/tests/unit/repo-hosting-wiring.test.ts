@@ -34,7 +34,7 @@ describe('repo-hosting port wiring', () => {
   it('installs both worker ports when the worker entry loads, and they delegate to the worker', async () => {
     delete (globalThis as Record<symbol, unknown>)[PORTS_KEY];
     vi.resetModules();
-    const { repoHostingPorts } = await import('@simple-agent-manager/repo-hosting');
+    const { repoHostingPorts } = await import('@simple-agent-manager/repo-hosting/ports');
     // Liveness: the registry really is empty before the entry loads.
     expect(() => repoHostingPorts().platformConfig).toThrow(
       /port "platformConfig" is not configured/

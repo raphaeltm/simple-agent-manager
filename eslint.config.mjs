@@ -446,7 +446,9 @@ export default defineConfig([
     },
   },
   {
-    files: ['apps/api/src/**/*.ts'],
+    // Worker code logs through worker-core's structured logger, including code extracted into
+    // packages that still runs in this Worker.
+    files: ['apps/api/src/**/*.ts', 'packages/repo-hosting/src/**/*.ts'],
     rules: {
       'no-console': 'error',
     },

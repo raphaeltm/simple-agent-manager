@@ -3,7 +3,7 @@
  * implementation once at module load (`apps/api/src/repo-hosting-wiring.ts`, which the entry
  * imports). Methods take the narrow env; the worker widens it at that one boundary.
  */
-import type { Env, RepoHostingEnv } from './env';
+import type { Env } from './env';
 import type { UserAccessTokenResult } from './user-access-token';
 
 export interface GitHubAppConfig {
@@ -47,52 +47,67 @@ export interface RepoHostingPorts {
   auth: AuthPort;
 }
 
-/** Held on `globalThis` so a module-registry reset cannot leave an unconfigured copy behind. */
+/**
+ * Held on `globalThis` so a module-registry reset (`vi.resetModules()` in worker tests) cannot
+ * leave an unconfigured copy behind.
+ */
 const PORTS_KEY = Symbol.for('sam.repo-hosting.ports');
 
 interface PortsHolder {
-  [PORTS_KEY]?: Partial<RepoHostingPorts>;
+  [PORTS_KEY]?: Registry;
 }
 
-function portsHolder(): Partial<RepoHostingPorts> {
+interface Registry {
+  installed: Partial<RepoHostingPorts>;
+  /** Built once per registry: token and OAuth paths read a port on every call. */
+  view: RepoHostingPorts;
+}
+
+function createRegistry(installed: Partial<RepoHostingPorts>): Registry {
+  return {
+    installed,
+    view: {
+      get platformConfig() {
+        return requirePort(installed, 'platformConfig');
+      },
+      get auth() {
+        return requirePort(installed, 'auth');
+      },
+    },
+  };
+}
+
+function registry(): Registry {
   const holder = globalThis as PortsHolder;
-  return (holder[PORTS_KEY] ??= {});
+  return (holder[PORTS_KEY] ??= createRegistry({}));
 }
 
-/** Install the worker's implementation. The worker entry calls this once at module load. */
+/** Install the worker's implementation, replacing any earlier one. The worker entry calls this once. */
 export function configureRepoHostingPorts(ports: RepoHostingPorts): void {
-  Object.assign(portsHolder(), ports);
+  (globalThis as PortsHolder)[PORTS_KEY] = createRegistry({ ...ports });
 }
 
 /**
- * Install one port. Worker unit tests use this so a test whose mocks break one port's
- * module graph still gets the other port.
+ * Install one port. Worker unit tests use this so a test whose mocks break one port's module
+ * graph still gets the other port.
  */
 export function configureRepoHostingPort<K extends keyof RepoHostingPorts>(
   name: K,
   port: RepoHostingPorts[K]
 ): void {
-  portsHolder()[name] = port;
+  registry().installed[name] = port;
 }
 
 /** The configured ports; reading one the worker never installed throws, naming it. */
 export function repoHostingPorts(): RepoHostingPorts {
-  const ports = portsHolder();
-  return {
-    get platformConfig() {
-      return requirePort(ports, 'platformConfig');
-    },
-    get auth() {
-      return requirePort(ports, 'auth');
-    },
-  };
+  return registry().view;
 }
 
 function requirePort<K extends keyof RepoHostingPorts>(
-  ports: Partial<RepoHostingPorts>,
+  installed: Partial<RepoHostingPorts>,
   name: K
 ): RepoHostingPorts[K] {
-  const port = ports[name];
+  const port = installed[name];
   if (!port) {
     throw new Error(
       `Repo hosting port "${name}" is not configured: call configureRepoHostingPorts() from the worker entry`
@@ -100,5 +115,3 @@ function requirePort<K extends keyof RepoHostingPorts>(
   }
   return port;
 }
-
-export type { RepoHostingEnv };

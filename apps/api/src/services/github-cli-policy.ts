@@ -2,10 +2,6 @@
 // worker's existing importers are unchanged.
 export {
   GitHubCliPolicyError,
-  type GitHubCliPolicyParseResult,
-  GitHubCliPolicySchema,
-  type GitHubInstallationTokenOptions,
   parseGitHubCliPolicyJson,
   resolveWorkspaceGitHubTokenOptions,
-  toInstallationTokenOptions,
 } from '@simple-agent-manager/repo-hosting';

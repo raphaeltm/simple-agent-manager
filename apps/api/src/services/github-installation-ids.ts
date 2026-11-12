@@ -3,5 +3,4 @@
 export {
   getExternalInstallationId,
   getStoredInstallationId,
-  type GitHubInstallationReference,
 } from '@simple-agent-manager/repo-hosting';

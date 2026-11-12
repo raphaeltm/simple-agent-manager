@@ -1,4 +1,4 @@
-import type { PlatformConfigPort } from '@simple-agent-manager/repo-hosting';
+import type { PlatformConfigPort } from '@simple-agent-manager/repo-hosting/ports';
 
 import type { Env } from '../env';
 import {
