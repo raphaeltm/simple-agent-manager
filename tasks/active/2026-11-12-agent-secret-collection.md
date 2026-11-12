@@ -64,19 +64,19 @@ metadata-only receipt and uses it immediately through `exec_with_secrets`.
 
 ## Implementation checklist
 
-- [ ] Migration 0235 + drizzle schema
-- [ ] Shared types (request record, effective runtime env entry, notification type, delivery source)
-- [ ] Admin settings: request lifetime, max TTL, history retention, pending cap per session
-- [ ] Shared upsert service; manual route refactor (clears provenance/expiry)
-- [ ] Secret request service (create/get/fulfill/decline/expire/purge) + wake delivery
-- [ ] Expiry enforcement in exec env + runtime assets
-- [ ] MCP `request_secret` + `list_runtime_env` + group method + compact-mode tool name
-- [ ] REST routes (get/fulfill/decline) with capability + project checks, value-safe parsing
-- [ ] Cron: 5-min expiry sweep (isolated), daily purge
-- [ ] Notification type + web config
-- [ ] Web card + API client + registry; runtime config UI provenance/expiry
-- [ ] Docs: public docs page/section + MCP tool reference sync
-- [ ] Tests: service (real SQL), route auth/cross-project, MCP, expiry, no-leak, card, Playwright audit
+- [x] Migration 0236 (0235 taken by open PR #2664) + drizzle schema
+- [x] Shared types (request record, effective runtime env entry, notification type, delivery source)
+- [x] Admin settings: request lifetime, max TTL, history retention, pending cap per session
+- [x] Shared upsert service; manual route refactor (clears provenance/expiry)
+- [x] Secret request service (create/get/fulfill/decline/expire/purge) + wake delivery
+- [x] Expiry enforcement in exec env + runtime assets
+- [x] MCP `request_secret` + `list_runtime_env` + group method + compact-mode tool name
+- [x] REST routes (get/fulfill/decline) with capability + project checks, value-safe parsing
+- [x] Cron: 5-min expiry sweep (isolated), daily purge
+- [x] Notification type + web config
+- [x] Web card + API client + registry; runtime config UI provenance/expiry
+- [x] Docs: public docs page/section + MCP tool reference sync
+- [x] Tests: service (real SQL), route auth/cross-project, MCP, expiry, no-leak, card, Playwright audit
 
 ## Acceptance criteria
 
@@ -90,3 +90,18 @@ metadata-only receipt and uses it immediately through `exec_with_secrets`.
 - [ ] Requesting agent gets a metadata-only durable wake and can exec immediately
 - [ ] Staging: real VM agent requests, human submits via browser, agent exec_with_secrets works;
       Instant compatibility checked; desktop/mobile screenshots posted
+
+## Implementation notes
+
+- Runtimes enumerated (rule 61): VM and Instant both resolve secrets through `handleSecretExec` →
+  `getSecretExecutionEnv` and runtime assets through `getWorkspaceRuntimeAssets`; both now filter
+  expired project rows. No vm-agent change is needed: the agent receives `managedEnv` per job.
+- Readers of `project_runtime_env_vars` enumerated: `workspace-runtime-assets.ts` (filtered),
+  `project-runtime-response.ts` (shows expired flag), `runtime-env-listing.ts` (filtered),
+  `crud.ts` / `runtime-config.ts` (deletes). Writers: `project-runtime-env.ts` only (manual route +
+  fulfilment); a manual write clears `expires_at` and `secret_request_id` (rule 73).
+- Discrimination proven: removing the expiry filter in `getSecretExecutionEnv` reddens the TTL test;
+  removing the project predicate in `loadRuntimeSecretRequest` reddens the cross-project test; the
+  card width assertion fails on the pre-fix build (408px over).
+- Attention markers deliberately not reused: the bell's free-text answers would send text to the
+  agent, so a human could paste the secret there.
