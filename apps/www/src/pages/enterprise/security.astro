@@ -6,14 +6,16 @@ import ComparisonTable from '../../components/ComparisonTable.astro';
 <EnterpriseDetail
   slug="security"
   seoTitle="Isolation and Network Security | SAM Enterprise"
-  seoDescription="How SAM isolates agent workspaces: one user per VM, an ingress firewall that only admits Cloudflare, per-node TLS keys, and short-lived tokens."
+  seoDescription="How SAM isolates agent workspaces: one user per VM, a firewall that admits only Cloudflare to the agent port and drops SSH, per-node TLS keys, and short-lived tokens."
   title="The VM is the boundary"
   subtitle="Every workspace machine belongs to exactly one user. Containers inside it can be privileged so agents can run Docker, so SAM puts the hard boundary at the VM and keeps everything else scoped to it."
 >
   <h2>One user per machine</h2>
   <p>
     Every node has a required owner. Placement only ever reuses the requesting user's own running or warm
-    machines, so two users never share a VM, even when they work in the same shared project.
+    machines, so two users' workspaces never share a VM, even in the same shared project. When you share a chat
+    with a teammate, they can prompt the agent that runs on your machine, so share chats with people you would
+    trust in that workspace.
   </p>
   <p>
     One machine can host several of that user's workspaces at once. Placement packs them by the CPU and memory
@@ -45,8 +47,9 @@ import ComparisonTable from '../../components/ComparisonTable.astro';
   <h2>Short-lived machines</h2>
   <p>
     When a machine's last workspace ends, it stays warm (30 minutes by default) so the same user's next task starts
-    quickly, then SAM deletes it. Automatically created machines also have a 4-hour maximum lifetime. Durable
-    Object alarms, a scheduled sweep and that lifetime cap all guard against forgotten machines.
+    quickly, then SAM deletes it. An automatically created machine older than 4 hours with no active workspace is
+    deleted, and at 24 hours every session on it is put to sleep, stopping any turn still running 30 minutes
+    later. Durable Object alarms and a scheduled sweep enforce these limits.
   </p>
   <p>
     Two kinds of machine are long-lived on purpose: deployment nodes that host apps your agents ship, and
@@ -61,7 +64,7 @@ import ComparisonTable from '../../components/ComparisonTable.astro';
     columns={['Lifetime', 'Purpose']}
     rows={[
       { label: 'Session cookie', cells: ['7 days', 'Browser sign-in (HttpOnly, Secure, SameSite)'] },
-      { label: 'Workspace JWT', cells: ['1 hour', 'Terminal and agent WebSocket access to one workspace'] },
+      { label: 'Workspace JWT', cells: ['1 hour', 'Opens terminal and agent access to one workspace; the VM agent then issues its own session cookie (24 hours by default)'] },
       { label: 'Bootstrap token', cells: ['15 minutes, one use', 'Delivers a new machine its credentials'] },
       { label: 'Callback token', cells: ['24 hours', 'VM agent calls back to the control plane, scoped to one node or workspace'] },
     ]}

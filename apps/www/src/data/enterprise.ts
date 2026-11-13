@@ -1,7 +1,7 @@
 /**
  * Enterprise deep-dive pages, in reading order. Used by /enterprise/ and by each subpage's
  * previous/next navigation. Claims on these pages are checked against the code; see the
- * task record tasks/archive/2026-11-13-integrations-enterprise-pages-rewrite.md.
+ * task record tasks/active/2026-11-13-integrations-enterprise-pages-rewrite.md (archived on merge).
  */
 export interface EnterprisePage {
   slug: string;

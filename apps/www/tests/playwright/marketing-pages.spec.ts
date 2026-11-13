@@ -33,6 +33,17 @@ const PAGES: { path: string; slug: string; heading: string | RegExp }[] = [
   { path: '/enterprise/governance/', slug: 'enterprise-governance', heading: /Who can do what/i },
   { path: '/enterprise/cost-control/', slug: 'enterprise-cost-control', heading: /Three bills/i },
   { path: '/integrations/gitlab/', slug: 'integrations-gitlab', heading: /^GitLab$/ },
+  {
+    path: '/enterprise/scale/',
+    slug: 'enterprise-scale',
+    heading: /Many agents, few idle machines/i,
+  },
+  {
+    path: '/enterprise/agent-agnostic/',
+    slug: 'enterprise-agent-agnostic',
+    heading: /agents your teams already like/i,
+  },
+  { path: '/enterprise/open-source/', slug: 'enterprise-open-source', heading: /Read the code/i },
 ];
 
 for (const { path, slug, heading } of PAGES) {
@@ -57,5 +68,25 @@ for (const { path, slug, heading } of PAGES) {
       fullPage: true,
       animations: 'disabled',
     });
+  });
+}
+
+for (const path of ['/integrations/', '/enterprise/']) {
+  test(`${path} comparison tables stay readable at this viewport`, async ({ page }) => {
+    await page.goto(path);
+    const table = page.locator('.cmp-table').first();
+    await expect(table).toBeVisible();
+    // Every SAM-side cell must be on screen, not clipped behind a horizontal scroll.
+    const cell = table.locator('tbody td').first();
+    await expect(cell).toBeVisible();
+    const box = await cell.boundingBox();
+    const viewport = page.viewportSize();
+    expect(box && viewport && box.x + box.width <= viewport.width + 1).toBe(true);
+    // Under 720px each row becomes a card and the column header row is visually hidden.
+    const headerHeight = await table
+      .locator('thead')
+      .evaluate((el) => el.getBoundingClientRect().height);
+    if (viewport && viewport.width < 720) expect(headerHeight).toBeLessThanOrEqual(1);
+    else expect(headerHeight).toBeGreaterThan(1);
   });
 }

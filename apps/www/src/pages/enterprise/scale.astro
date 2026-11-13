@@ -34,8 +34,8 @@ import ShotFrame from '../../components/ShotFrame.astro';
   <h2>Cleanup</h2>
   <p>
     An empty machine stays warm for 30 minutes by default for the next task, then SAM deletes it. Durable Object
-    alarms, a scheduled sweep and a maximum lifetime for automatically created machines all catch machines that
-    a missed signal would otherwise leave running.
+    alarms, a scheduled sweep and age limits on automatically created machines (4 hours when idle, 24 hours
+    absolute) catch machines that a missed signal would otherwise leave running.
   </p>
 
   <h2>How far it goes</h2>

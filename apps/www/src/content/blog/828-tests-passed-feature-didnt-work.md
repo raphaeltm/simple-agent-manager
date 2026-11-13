@@ -198,4 +198,4 @@ That's the new job. Not writing the code. Not even reviewing the code. Making su
 
 SAM is [open source on GitHub](https://github.com/raphaeltm/simple-agent-manager). The incident led to stricter development rules in our [CLAUDE.md](https://github.com/raphaeltm/simple-agent-manager/blob/main/CLAUDE.md), including stronger end-to-end verification for user-facing behavior.
 
-If you've hit similar gaps managing AI agents, we'd like to hear about it — [open a discussion on GitHub](https://github.com/raphaeltm/simple-agent-manager/discussions) or try the [hosted version](https://app.simple-agent-manager.org).
+If you've hit similar gaps managing AI agents, we'd like to hear about it — [open a discussion on GitHub](https://github.com/raphaeltm/simple-agent-manager/discussions) or [run your own SAM](/self-host/).

@@ -112,9 +112,9 @@ Code requests and code redemptions are limited per IP address. Requests and rede
 
 | Token           | Lifetime             | Purpose                          | Validated By            |
 | --------------- | -------------------- | -------------------------------- | ----------------------- |
-| Session cookie  | Hours                | Browser authentication           | API Worker (BetterAuth) |
-| Workspace JWT   | Minutes              | Terminal WebSocket auth          | VM Agent (via JWKS)     |
-| Bootstrap token | 5 minutes            | One-time VM credential injection | API Worker              |
+| Session cookie  | 7 days               | Browser authentication           | API Worker (BetterAuth) |
+| Workspace JWT   | 1 hour               | Terminal WebSocket auth          | VM Agent (via JWKS)     |
+| Bootstrap token | 15 minutes (default) | One-time VM credential injection | API Worker              |
 | Callback token  | 24 hours (renewable) | VM Agent → API callbacks         | API Worker              |
 
 ### SAM Connector tokens

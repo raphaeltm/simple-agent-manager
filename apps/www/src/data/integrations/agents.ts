@@ -324,7 +324,7 @@ export const agentIntegrations: Integration[] = [
       ),
       feature(
         'Installed with uv',
-        'SAM installs Vibe with uv, the Python package manager. It needs Python 3.12 in the workspace.'
+        'SAM installs Vibe with uv, the Python package manager. uv fetches the Python 3.12 it needs itself.'
       ),
     ],
     howItWorks: [
@@ -405,7 +405,7 @@ export const agentIntegrations: Integration[] = [
     useCases: [
       feature(
         'Self-hosted models',
-        'Point the custom provider at a model server on your own network for a setup where prompts never reach a model vendor.'
+        'Point the custom provider at a model server your machines can reach for a setup where prompts never reach a model vendor.'
       ),
       feature(
         'Trying open models',

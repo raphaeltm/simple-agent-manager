@@ -20,7 +20,7 @@ const answers = [
   },
   {
     topic: 'Network',
-    answer: 'The agent port admits only Cloudflare, or a tunnel removes it. SSH and the cloud metadata endpoint are blocked. Outbound traffic is open.',
+    answer: 'The agent port admits only Cloudflare, or a tunnel removes it. SSH is dropped, and containers cannot reach the cloud metadata endpoint. Outbound traffic is open.',
     href: '/enterprise/security/',
   },
   {
