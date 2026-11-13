@@ -408,7 +408,8 @@ export async function deleteWithCurrentOwnerCredential(
       if (
         refused &&
         error instanceof NodeTeardownBlockedError &&
-        error.reason === 'teardown_instance_not_visible'
+        (error.reason === 'teardown_instance_not_visible' ||
+          error.reason === 'teardown_instance_ownership_mismatch')
       ) {
         break;
       }
@@ -441,7 +442,7 @@ export async function deleteWithCurrentOwnerCredential(
  * The provider refused this credential, so it can never answer for the instance (reads) or act on
  * it (deletes). Trust the provider's own category first. Rate limits and quotas are temporary even
  * when a provider reports them as 403 (rule 72), so a bare 401/403 counts only when no category,
- * provider code or response text says "limit", "quota" or "rate". GCP token exchange and
+ * provider code or response text names a rate limit, quota or exceeded limit. GCP token exchange and
  * service-account impersonation fail with `GcpApiError` (not `ProviderError`) and go through the
  * same test, so a revoked GCP identity gives a named verdict instead of a silent retry.
  */
@@ -462,5 +463,9 @@ function isRefusalStatus(statusCode: number | undefined): boolean {
 }
 
 function mentionsTemporaryLimit(...texts: Array<string | undefined>): boolean {
-  return texts.some((text) => !!text && /rate|quota|limit/i.test(text));
+  // Whole tokens only: a bare "rate" also matches project IDs like "corporate-prod".
+  return texts.some(
+    (text) =>
+      !!text && /rate[_ ]?limit|quota|limit[_ ]?exceeded|resource[_ ]?limit|too many requests/i.test(text)
+  );
 }

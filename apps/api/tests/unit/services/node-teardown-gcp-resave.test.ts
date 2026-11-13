@@ -449,6 +449,19 @@ describe('proveNodeInstanceOwnership: provider refusals', () => {
     }
   });
 
+  it('a permission refusal whose text merely contains "rate" is still a refusal', async () => {
+    const { GcpApiError } = await import('../../../src/services/gcp-errors');
+    const result = await prove(
+      new GcpApiError({
+        step: 'sa_impersonation',
+        message: 'Permission denied on projects/corporate-prod',
+        statusCode: 403,
+        rawBody: '{"error":{"status":"PERMISSION_DENIED","message":"generate access token denied"}}',
+      })
+    );
+    expect(result.message).toMatch(/^teardown_instance_not_visible/);
+  });
+
   it('a GCP or Hetzner limit stays an ordinary, retryable read failure', async () => {
     const { GcpApiError } = await import('../../../src/services/gcp-errors');
     const { ProviderError } = await import('@simple-agent-manager/providers');
