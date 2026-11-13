@@ -57,6 +57,7 @@ const links = [
       </section>
     ))}
   </div>
+  <h3 class="wrw-links-title">How they connect</h3>
   <ol class="wrw-links">
     {links.map((link) => <li>{link}</li>)}
   </ol>
@@ -133,8 +134,16 @@ const links = [
     background: var(--color-fg-dim);
   }
 
+  .wrw-links-title {
+    font-family: var(--font-display);
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--color-fg-primary);
+    margin: 24px 0 8px;
+  }
+
   .wrw-links {
-    margin: 18px 0 0;
+    margin: 0;
     padding-left: 20px;
     display: grid;
     gap: 6px;

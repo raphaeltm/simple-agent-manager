@@ -34,12 +34,13 @@ const icons: Record<ConnectionLink['icon'], string[]> = {
     <span class="link-name">{link.name}</span>
     <span class="link-desc">{link.description}</span>
   </span>
+  <svg class="link-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
 </a>
 
 <style>
   .link-card {
     display: grid;
-    grid-template-columns: 40px 1fr;
+    grid-template-columns: 40px 1fr 16px;
     gap: 14px;
     align-items: start;
     padding: 18px;
@@ -62,6 +63,15 @@ const icons: Record<ConnectionLink['icon'], string[]> = {
     border-radius: var(--radius-md);
     color: var(--color-accent);
     background: var(--color-accent-glow);
+  }
+
+  .link-arrow {
+    color: var(--color-fg-dim);
+    margin-top: 4px;
+  }
+
+  .link-card:hover .link-arrow {
+    color: var(--color-accent);
   }
 
   .link-name {

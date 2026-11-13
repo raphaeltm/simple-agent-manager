@@ -6,6 +6,7 @@ import ComparisonTable from '../../components/ComparisonTable.astro';
 import ShotFrame from '../../components/ShotFrame.astro';
 import IntegrationCard from '../../components/integrations/IntegrationCard.astro';
 import LinkCard from '../../components/integrations/LinkCard.astro';
+import { gridColumns } from '../../utils/grid-columns';
 import {
   agentIntegrations,
   agentMatrix,
@@ -69,7 +70,8 @@ const jsonLd = {
   <Header />
   <main>
     <section class="hub-hero">
-      <div class="container hub-hero-content">
+      <div class="container">
+        <div class="hub-hero-content">
         <span class="section-label animate-on-scroll">Integrations</span>
         <h1 class="hub-title animate-on-scroll">What SAM works with</h1>
         <p class="hub-subtitle animate-on-scroll">
@@ -80,6 +82,7 @@ const jsonLd = {
         <nav class="jump-nav animate-on-scroll" aria-label="Integration sections">
           {sections.map((s) => <a href={`#${s.id}`}>{s.question}</a>)}
         </nav>
+        </div>
       </div>
     </section>
 
@@ -90,7 +93,7 @@ const jsonLd = {
           <h2 class="section-title">{section('ai-agents').question}</h2>
           <p class="section-subtitle">{section('ai-agents').description}</p>
         </div>
-        <div class="card-grid">
+        <div class="card-grid" style={`--cols: ${gridColumns(agentIntegrations.length)}`}>
           {agentIntegrations.map((i) => <IntegrationCard integration={i} />)}
         </div>
         <ComparisonTable
@@ -111,7 +114,7 @@ const jsonLd = {
           <h2 class="section-title">{section('cloud-providers').question}</h2>
           <p class="section-subtitle">{section('cloud-providers').description}</p>
         </div>
-        <div class="card-grid">
+        <div class="card-grid" style={`--cols: ${gridColumns(cloudIntegrations.length)}`}>
           {cloudIntegrations.map((i) => <IntegrationCard integration={i} />)}
         </div>
         <ComparisonTable
@@ -124,7 +127,7 @@ const jsonLd = {
           SAM uses a project's cloud account first, then the user's, then one the installation administrator
           connected. Without any of them, work can still run on Cloudflare Containers.
         </p>
-        <div class="card-grid">
+        <div class="card-grid" style={`--cols: ${gridColumns(runtimeLinks.length)}`}>
           {runtimeLinks.map((l) => <LinkCard link={l} />)}
         </div>
       </div>
@@ -139,7 +142,7 @@ const jsonLd = {
           <h2 class="section-title">{section('model-access').question}</h2>
           <p class="section-subtitle">{section('model-access').description}</p>
         </div>
-        <div class="card-grid">
+        <div class="card-grid" style={`--cols: ${gridColumns(modelAccessIntegrations.length + modelAccessLinks.length)}`}>
           {modelAccessIntegrations.map((i) => <IntegrationCard integration={i} />)}
           {modelAccessLinks.map((l) => <LinkCard link={l} />)}
         </div>
@@ -155,7 +158,7 @@ const jsonLd = {
           <h2 class="section-title">{section('code-hosting').question}</h2>
           <p class="section-subtitle">{section('code-hosting').description}</p>
         </div>
-        <div class="card-grid">
+        <div class="card-grid" style={`--cols: ${gridColumns(codeHostingIntegrations.length)}`}>
           {codeHostingIntegrations.map((i) => <IntegrationCard integration={i} />)}
         </div>
       </div>
@@ -170,7 +173,7 @@ const jsonLd = {
           <h2 class="section-title">{section('automation').question}</h2>
           <p class="section-subtitle">{section('automation').description}</p>
         </div>
-        <div class="card-grid">
+        <div class="card-grid" style={`--cols: ${gridColumns(automationLinks.length)}`}>
           {automationLinks.map((l) => <LinkCard link={l} />)}
         </div>
         <ShotFrame
@@ -190,7 +193,7 @@ const jsonLd = {
           <h2 class="section-title">{section('connect').question}</h2>
           <p class="section-subtitle">{section('connect').description}</p>
         </div>
-        <div class="card-grid">
+        <div class="card-grid" style={`--cols: ${gridColumns(connectLinks.length)}`}>
           {connectLinks.map((l) => <LinkCard link={l} />)}
         </div>
       </div>
@@ -274,6 +277,12 @@ const jsonLd = {
     gap: 14px;
     grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
     margin-bottom: 28px;
+  }
+
+  @media (min-width: 1100px) {
+    .card-grid {
+      grid-template-columns: repeat(var(--cols, 3), 1fr);
+    }
   }
 
   .note {

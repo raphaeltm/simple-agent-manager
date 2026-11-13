@@ -6,6 +6,7 @@ import ComparisonTable from '../../components/ComparisonTable.astro';
 import ShotFrame from '../../components/ShotFrame.astro';
 import WhatRunsWhere from '../../components/enterprise/WhatRunsWhere.astro';
 import { enterprisePages, SUPPORT_EMAIL } from '../../data/enterprise';
+import { gridColumns } from '../../utils/grid-columns';
 
 const answers = [
   {
@@ -69,7 +70,8 @@ const notYet = [
   <Header />
   <main>
     <section class="ent-hero">
-      <div class="container ent-hero-content">
+      <div class="container">
+        <div class="ent-hero-content">
         <span class="section-label animate-on-scroll">Enterprise</span>
         <h1 class="ent-hero-title animate-on-scroll">Run your team's coding agents on infrastructure you own</h1>
         <p class="ent-hero-subtitle animate-on-scroll">
@@ -88,6 +90,7 @@ const notYet = [
           <div><dt>Licence</dt><dd>AGPL-3.0</dd></div>
           <div><dt>SAM fee</dt><dd>None</dd></div>
         </dl>
+        </div>
       </div>
     </section>
 
@@ -114,7 +117,7 @@ const notYet = [
           <span class="section-label">Security review</span>
           <h2 class="section-title">Short answers to the usual questions</h2>
         </div>
-        <div class="answer-grid">
+        <div class="answer-grid" style={`--cols: ${gridColumns(answers.length)}`}>
           {answers.map((a) => (
             <a href={a.href} class="answer-card animate-on-scroll">
               <h3>{a.topic}</h3>
@@ -122,6 +125,30 @@ const notYet = [
             </a>
           ))}
         </div>
+      </div>
+    </section>
+
+    <hr class="divider" />
+
+    <section class="section" id="not-yet">
+      <div class="container">
+        <div class="ent-section-header animate-on-scroll">
+          <span class="section-label">Not yet</span>
+          <h2 class="section-title">What SAM does not do yet</h2>
+          <p class="section-subtitle">
+            Better to know now than in week three of a rollout. If one of these blocks you, email
+            <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a> so it gets counted.
+          </p>
+        </div>
+        <ul class="not-yet-list" style={`--cols: ${gridColumns(notYet.length)}`}>
+          {notYet.map((n) => (
+            <li class="animate-on-scroll">
+              <span class="not-yet-tag">Not yet</span>
+              <strong>{n.item}</strong>
+              <span>{n.detail}</span>
+            </li>
+          ))}
+        </ul>
       </div>
     </section>
 
@@ -145,29 +172,6 @@ const notYet = [
             caption="Admin → Costs: proxied model spend by model and user, plus estimated compute cost."
           />
         </div>
-      </div>
-    </section>
-
-    <hr class="divider" />
-
-    <section class="section" id="not-yet">
-      <div class="container">
-        <div class="ent-section-header animate-on-scroll">
-          <span class="section-label">Not yet</span>
-          <h2 class="section-title">What SAM does not do yet</h2>
-          <p class="section-subtitle">
-            Better to know now than in week three of a rollout. If one of these blocks you, email
-            <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a> so it gets counted.
-          </p>
-        </div>
-        <ul class="not-yet-list">
-          {notYet.map((n) => (
-            <li class="animate-on-scroll">
-              <strong>{n.item}</strong>
-              <span>{n.detail}</span>
-            </li>
-          ))}
-        </ul>
       </div>
     </section>
 
@@ -207,7 +211,7 @@ const notYet = [
           <span class="section-label">Details</span>
           <h2 class="section-title">Go deeper</h2>
         </div>
-        <div class="deep-grid">
+        <div class="deep-grid" style={`--cols: ${gridColumns(enterprisePages.length)}`}>
           {enterprisePages.map((p) => (
             <a href={`/enterprise/${p.slug}/`} class="deep-card animate-on-scroll">
               <h3>{p.label}</h3>
@@ -239,6 +243,7 @@ const notYet = [
   }
 
   .ent-hero-title {
+    text-wrap: balance;
     font-family: var(--font-display);
     font-size: clamp(2rem, 5.5vw, 3.25rem);
     font-weight: 600;
@@ -260,6 +265,14 @@ const notYet = [
     flex-wrap: wrap;
     gap: 12px;
     margin-bottom: 36px;
+  }
+
+  @media (max-width: 479px) {
+    .ent-hero-actions .sam-btn {
+      flex: 1 1 100%;
+      justify-content: center;
+      text-align: center;
+    }
   }
 
   .ent-facts {
@@ -311,10 +324,19 @@ const notYet = [
   }
 
   .answer-grid,
-  .deep-grid {
+  .deep-grid,
+  .not-yet-list {
     display: grid;
     gap: 14px;
     grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+  }
+
+  @media (min-width: 1100px) {
+    .answer-grid,
+    .deep-grid,
+    .not-yet-list {
+      grid-template-columns: repeat(var(--cols, 3), 1fr);
+    }
   }
 
   .answer-card,
@@ -365,17 +387,28 @@ const notYet = [
     list-style: none;
     padding: 0;
     margin: 0;
-    display: grid;
-    gap: 10px;
-    grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
   }
 
   .not-yet-list li {
-    display: grid;
-    gap: 4px;
-    padding: 16px 18px;
-    border: 1px dashed var(--glass-border);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 18px;
+    border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
+    background: var(--glass-bg);
+  }
+
+  .not-yet-tag {
+    align-self: flex-start;
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 2px 8px;
+    border-radius: 999px;
+    color: var(--color-fg-muted);
+    border: 1px solid var(--color-border);
   }
 
   .not-yet-list strong {

@@ -28,22 +28,22 @@ const { caption, rowHeader, columns, rows, highlightColumn } = Astro.props;
 ---
 
 <div class="cmp-wrap animate-on-scroll">
-  <table class="cmp-table">
+  <table class="cmp-table" role="table">
     <caption class="cmp-caption">{caption}</caption>
-    <thead>
-      <tr>
-        <th scope="col">{rowHeader}</th>
+    <thead role="rowgroup">
+      <tr role="row">
+        <th scope="col" role="columnheader">{rowHeader}</th>
         {columns.map((col, i) => (
-          <th scope="col" class={i === highlightColumn ? 'is-highlight' : undefined}>{col}</th>
+          <th scope="col" role="columnheader" class={i === highlightColumn ? 'is-highlight' : undefined}>{col}</th>
         ))}
       </tr>
     </thead>
-    <tbody>
+    <tbody role="rowgroup">
       {rows.map((row) => (
-        <tr>
-          <th scope="row">{row.href ? <a href={row.href}>{row.label}</a> : row.label}</th>
+        <tr role="row">
+          <th scope="row" role="rowheader">{row.href ? <a href={row.href}>{row.label}</a> : row.label}</th>
           {row.cells.map((cell, i) => (
-            <td data-label={columns[i]} class={i === highlightColumn ? 'is-highlight' : undefined}>
+            <td role="cell" data-label={columns[i]} class={i === highlightColumn ? 'is-highlight' : undefined}>
               {cell === true ? (
                 <span class="mark mark--yes">Yes</span>
               ) : cell === false || cell === null ? (
@@ -196,8 +196,26 @@ const { caption, rowHeader, columns, rows, highlightColumn } = Astro.props;
       align-self: start;
     }
 
+    .cmp-table tbody th {
+      color: var(--color-fg-primary);
+    }
+
+    .cmp-table td.is-highlight {
+      margin: 2px -8px;
+      padding: 4px 8px;
+      border-left: 3px solid var(--color-accent);
+      border-radius: 4px;
+      background: var(--color-accent-glow);
+    }
+
+    .cmp-table td.is-highlight::before {
+      color: var(--color-accent);
+      font-weight: 600;
+    }
+
     .cmp-table td::before {
-      content: attr(data-label);
+      /* The empty alt text keeps screen readers from reading the label twice: the cell already has a header. */
+      content: attr(data-label) / '';
       font-weight: 500;
       color: var(--color-fg-dim);
     }

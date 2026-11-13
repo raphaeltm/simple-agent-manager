@@ -66,7 +66,8 @@ const breadcrumbJsonLd = {
     </nav>
 
     <section class="detail-hero">
-      <div class="container detail-hero-grid">
+      <div class="container">
+        <div class="detail-hero-grid">
         <div class="hero-logo animate-on-scroll">
           <img src={integration.logoPath} alt="" width="72" height="72" />
         </div>
@@ -90,6 +91,7 @@ const breadcrumbJsonLd = {
             </a>
           </div>
         </div>
+      </div>
       </div>
     </section>
 
@@ -116,7 +118,7 @@ const breadcrumbJsonLd = {
     )}
 
     <section class="section section--tight">
-      <div class="container narrow">
+      <div class="container"><div class="narrow">
         <h2 class="section-title block-title animate-on-scroll">
           Set it up in {steps.length} {steps.length === 1 ? 'step' : 'steps'}
         </h2>
@@ -131,7 +133,7 @@ const breadcrumbJsonLd = {
             </li>
           ))}
         </ol>
-      </div>
+      </div></div>
     </section>
 
     {integration.useCases.length > 0 && (
@@ -152,7 +154,7 @@ const breadcrumbJsonLd = {
 
     {integration.faq.length > 0 && (
       <section class="section section--tight">
-        <div class="container narrow">
+        <div class="container"><div class="narrow">
           <h2 class="section-title block-title animate-on-scroll">Questions</h2>
           <div class="faq-list">
             {integration.faq.map((item) => (
@@ -162,7 +164,7 @@ const breadcrumbJsonLd = {
               </details>
             ))}
           </div>
-        </div>
+        </div></div>
       </section>
     )}
 
@@ -383,10 +385,28 @@ const breadcrumbJsonLd = {
   }
 
   .faq-question {
+    list-style: none;
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
     cursor: pointer;
     padding: 16px 20px;
     font-weight: 500;
     color: var(--color-fg-primary);
+  }
+
+  .faq-question::-webkit-details-marker {
+    display: none;
+  }
+
+  .faq-question::after {
+    content: '+';
+    font-family: var(--font-mono);
+    color: var(--color-fg-dim);
+  }
+
+  .faq-item[open] .faq-question::after {
+    content: '−';
   }
 
   .faq-answer {
