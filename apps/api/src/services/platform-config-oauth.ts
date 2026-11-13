@@ -39,7 +39,7 @@ export interface GitLabOAuthConfig {
   clientSecret: string;
   /**
    * `integration.gitlab.allowPrivateNetwork`. A host on the private network is refused unless
-   * this is on (services/gitlab-host-policy.ts); it is never inferred from the host itself.
+   * this is on (packages/repo-hosting/src/gitlab-host-policy.ts); it is never inferred from the host itself.
    */
   allowPrivateNetwork: boolean;
 }

@@ -1,10 +1,10 @@
+import type { Actor } from '@simple-agent-manager/operations';
 import { and, eq, isNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { getTokenHashKey } from '../lib/secrets';
-import type { Actor } from '../operations/types';
 import { hmacToken } from '../routes/api-tokens';
 import { assertSessionUserApproved } from './signup-approval';
 

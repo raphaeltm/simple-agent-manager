@@ -109,6 +109,24 @@ function holdCapabilities(): (body: Record<string, boolean>) => void {
   return release;
 }
 
+/**
+ * The observer count once the conversation has finished mounting: two equal readings a tick
+ * apart. A reading taken the moment the last row appears can precede a reader that mounts a
+ * little later (under a loaded full suite the short render was sampled at 1, the long at 2).
+ */
+async function steadyObservers(read: () => number): Promise<number> {
+  let last = -1;
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    });
+    const now = read();
+    if (now === last) return now;
+    last = now;
+  }
+  return last;
+}
+
 function renderConversation(messageCount: number) {
   mocks.getChatSession.mockResolvedValue({
     session: {
@@ -163,7 +181,7 @@ describe('conversation capability reads', () => {
     holdCapabilities();
     const short = renderConversation(2);
     await screen.findByText('Agent reply number 1');
-    const shortObservers = short.observers();
+    const shortObservers = await steadyObservers(short.observers);
     short.view.unmount();
 
     holdCapabilities();
@@ -172,8 +190,9 @@ describe('conversation capability reads', () => {
     expect(screen.getAllByTestId(/^acp-message-/)).toHaveLength(40);
 
     // The list reads once; 38 more rows add no observer.
-    expect(long.observers()).toBe(shortObservers);
-    expect(long.observers()).toBeLessThanOrEqual(2);
+    const longObservers = await steadyObservers(long.observers);
+    expect(longObservers).toBe(shortObservers);
+    expect(longObservers).toBeLessThanOrEqual(2);
   });
 
   it('does not re-render the rows when the capabilities resolve to what was assumed', async () => {

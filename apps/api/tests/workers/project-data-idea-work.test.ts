@@ -12,17 +12,16 @@
  * not used — nothing calls it since T1, and a test that used it would pass while the feature
  * showed an empty list.
  */
-import type { IdeaUpdateNote, LinkRelation } from '@simple-agent-manager/shared';
-import { env, runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
-
-import type { ProjectData } from '../../src/durable-objects/project-data';
 import {
   getIdeaWorkSnapshots,
   IDEA_NEEDS_INPUT_MARKER_KIND,
   type IdeaWorkLinkCaps,
-} from '../../src/durable-objects/project-data/idea-work';
-import type { LinkLimits, LinkWrite } from '../../src/durable-objects/project-data/links';
+} from '@simple-agent-manager/project-data/internal/do/idea-work';
+import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
+import type { LinkLimits, LinkWrite } from '@simple-agent-manager/project-data/internal/do/links';
+import type { IdeaUpdateNote, LinkRelation } from '@simple-agent-manager/shared';
+import { env, runInDurableObject } from 'cloudflare:test';
+import { describe, expect, it } from 'vitest';
 
 /** The production defaults from the admin settings registry. */
 const CAPS: IdeaWorkLinkCaps = { perTargetCap: 50, maxTargets: 100 };

@@ -3,12 +3,12 @@
  * increments accumulate per (day, model), the date filter applies, and the provider rows the
  * monthly cap reads are unaffected. Then `getLocalUsageBreakdown` through the Durable Object path.
  */
+import { getLocalUsageBreakdown, incrementModelUsage } from '@simple-agent-manager/ai-proxy';
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 
 import { AiTokenBudgetCounter } from '../../../src/durable-objects/ai-token-budget-counter';
 import type { Env } from '../../../src/env';
-import { getLocalUsageBreakdown, incrementModelUsage } from '../../../src/services/ai-model-usage';
 import { createSqlStorage } from './sql-storage-test-utils';
 
 function counter(): AiTokenBudgetCounter {

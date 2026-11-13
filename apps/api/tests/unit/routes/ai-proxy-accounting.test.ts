@@ -51,7 +51,9 @@ vi.mock('../../../src/middleware/rate-limit', () => ({
     `${prefix}:${userId}:${window}`,
   getCurrentWindowStart: () => 1000,
 }));
-vi.mock('../../../src/services/ai-token-budget', () => ({
+// The package's accounting calls these from inside the package; mock its module, not the
+// worker re-export (worker modularization W5).
+vi.mock('@simple-agent-manager/ai-proxy/internal/ai-token-budget', () => ({
   // No admin allowance: the model-tier gate allows every tier (covered in ai-proxy-model-tiers.test.ts).
   getAdminAiAllowance: async () => null,
   checkAiUsageGate: (...args: unknown[]) => mockCheckAiUsageGate(...args),

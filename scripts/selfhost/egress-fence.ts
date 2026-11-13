@@ -4,7 +4,7 @@
  * celld runs the API Worker on the host network, so without a fence Worker code can reach every
  * loopback service on the box (celld's unauthenticated operator listener, frps's control port,
  * the object store and its console), every private address, and the cloud metadata server. The
- * API checks the URLs it is given (apps/api/src/lib/network-hosts), but a name that resolves to a
+ * API checks the URLs it is given (packages/worker-core/src/network-hosts), but a name that resolves to a
  * private address, or a code path that one day misses the check, needs a control that holds
  * anyway. The kernel is that control.
  *
@@ -115,7 +115,7 @@ export const FORBIDDEN_IPV4 = [
 ];
 
 /**
- * The same ranges apps/api/src/lib/network-hosts refuses, plus every IPv6 form that embeds an
+ * The same ranges packages/worker-core/src/network-hosts refuses, plus every IPv6 form that embeds an
  * IPv4 address or tunnels to one (6to4, Teredo), refused wholesale: the kernel would route them
  * to a relay, where the embedded address is out of the fence's sight.
  */

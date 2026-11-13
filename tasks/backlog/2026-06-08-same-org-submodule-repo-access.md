@@ -65,7 +65,7 @@ Add a **project-scoped Repository Access** model for additional same-installatio
 - **CRUD API** `apps/api/src/routes/projects/crud.ts`: runtime-config pattern (lines 412-546).
   Add list / add (with `assertRepositoryAccess` verification + repo-id capture) / remove endpoints,
   plus `.gitmodules` discovery endpoint reusing `getUserInstallationRepositories`
-  (`apps/api/src/services/github-app.ts:510`). Owner check via `requireOwnedProject`.
+  (`packages/repo-hosting/src/github-app-user.ts`). Owner check via `requireOwnedProject`.
 - **Project delete batch** `crud.ts` (lines 855-936): D1 does not enforce ALTER-added FKs — must
   add explicit `db.delete(projectGithubRepositories)` before project delete.
 - **Mint boundary** `apps/api/src/routes/workspaces/runtime.ts`:
@@ -73,7 +73,7 @@ Add a **project-scoped Repository Access** model for additional same-installatio
     primary + each active additional repo, return primary id + verified additional ids.
   - `/git-token` handler `scopedTokenOptions.repositoryIds` (line 861-866) → becomes
     `[githubRepoId, ...verifiedAdditionalRepoIds]`. Permissions in `tokenOptions` apply set-wide.
-- **Token policy** `apps/api/src/services/github-cli-policy.ts`: permissions are set-wide; adding
+- **Token policy** `packages/repo-hosting/src/github-cli-policy.ts`: permissions are set-wide; adding
   ids to `repositoryIds` is sufficient for additional repos to inherit permissions.
 - **VM agent** `packages/vm-agent/internal/bootstrap/bootstrap.go`: `ensureRepositoryReady`
   (line 767) clones then sanitizes origin (line 816). Add submodule sync/update after clone using

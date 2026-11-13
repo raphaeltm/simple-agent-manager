@@ -1,8 +1,8 @@
+import { resetProjectDataEnsureMemo } from '@simple-agent-manager/project-data/internal/client/project-data-ensure-memo';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import * as svc from '../../../src/services/project-data';
-import { resetProjectDataEnsureMemo } from '../../../src/services/project-data-ensure-memo';
 
 const doResetError = new Error('Durable Object reset because its code was updated.');
 

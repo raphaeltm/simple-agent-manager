@@ -32,7 +32,7 @@ You are a documentation synchronization validator for the Simple Agent Manager p
 | File                                  | Content                            |
 | ------------------------------------- | ---------------------------------- |
 | `apps/api/src/env.ts`                 | Env interface                      |
-| `apps/api/src/db/schema.ts`           | Database schema                    |
+| `packages/worker-core/src/schema.ts`           | Database schema                    |
 | `apps/api/src/routes/*.ts`            | API endpoints                      |
 | `scripts/deploy/types.ts`             | Deployment types, REQUIRED_SECRETS |
 | `scripts/deploy/configure-secrets.sh` | Secret configuration               |
@@ -105,14 +105,14 @@ grep -n "POST\|GET\|DELETE\|PUT\|PATCH" CLAUDE.md | grep "/api"
 
 **Compare These Sources**:
 
-- `apps/api/src/db/schema.ts` → Table definitions
+- `packages/worker-core/src/schema.ts` → Table definitions
 - `specs/*/data-model.md` → Specifications
 
 **Detection Commands**:
 
 ```bash
 # Extract table definitions from schema
-grep -n "export const.*Table\|sqliteTable" apps/api/src/db/schema.ts
+grep -n "export const.*Table\|sqliteTable" packages/worker-core/src/schema.ts
 
 # Find documented tables in specs
 grep -rn "CREATE TABLE\|sqliteTable" specs/

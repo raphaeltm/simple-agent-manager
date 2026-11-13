@@ -3,6 +3,11 @@
  * Create/delete live in focused modules and are re-exported for compatibility.
  */
 import {
+  ResourceRequirementsValidationError,
+  serializeModernResourceRequirementsInput,
+  serializeResourceRequirementsInput,
+} from '@simple-agent-manager/scheduler-core';
+import {
   DEFAULT_CRON_MIN_INTERVAL_MINUTES,
   DEFAULT_CRON_TEMPLATE_MAX_LENGTH,
   DEFAULT_TRIGGER_MAX_CONCURRENT_LIMIT,
@@ -25,11 +30,6 @@ import {
   readGitHubTriggerConfig,
   validateGitHubTriggerQueueConfig,
 } from '../../services/github-trigger-config';
-import {
-  ResourceRequirementsValidationError,
-  serializeModernResourceRequirementsInput,
-  serializeResourceRequirementsInput,
-} from '../../services/resource-requirements-input';
 import { clearTriggerPageCaches } from '../../services/trigger-cache';
 import {
   assertKeepsAgentProfile,
@@ -413,4 +413,5 @@ export async function handleUpdateTrigger(
 
 export { handleCreateTrigger } from './trigger-create-tool';
 export { handleDeleteTrigger } from './trigger-delete-tool';
+export { handleGetTrigger } from './trigger-get-tool';
 export { handleListTriggers } from './trigger-list-tool';

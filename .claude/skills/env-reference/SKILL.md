@@ -267,7 +267,7 @@ Activity coalescing and binding caches are per Worker isolate. Delayed flushes c
 - `WORKSPACE_RESOURCE_TIMELINE_MAX_CHUNKS` — Max chunks the session resource timeline lists; older ones are disclosed as omitted (default: `1000`)
 - `WORKSPACE_RESOURCE_ROLLUP_BUCKET_MS` / `WORKSPACE_RESOURCE_ROLLUP_MAX_BUCKETS` — Per-chunk rollup bucket width computed on upload, and the bucket cap that widens it (defaults: `60000` / `60`)
 - `WORKSPACE_IDLE_TIMEOUT_MS` — Installation default for how long an active chat session's workspace can go without messages or terminal activity before ProjectData retires it, once its runtime is conclusively dead; the project Workspace Idle Timeout setting overrides it (default: `7200000`)
-- `WORKSPACE_IDLE_BACKOFF_BASE_MS` — First retry delay after a ProjectData workspace-idle check finds an idle workspace it cannot retire yet: inconclusive task candidates, a live or unprovable runtime, a missing project identity, or a failed check (default: `600000`; `apps/api/src/durable-objects/project-data/workspace-idle-timeouts.ts`)
+- `WORKSPACE_IDLE_BACKOFF_BASE_MS` — First retry delay after a ProjectData workspace-idle check finds an idle workspace it cannot retire yet: inconclusive task candidates, a live or unprovable runtime, a missing project identity, or a failed check (default: `600000`; `packages/project-data/src/do/workspace-idle-timeouts.ts`)
 - `WORKSPACE_IDLE_BACKOFF_MAX_MS` — Maximum workspace-idle retry delay; the delay doubles from the base and resets on new activity or when the session wakes (default: `21600000`)
 - `DIAGNOSIS_COMPLETED_STEP_MIN_DELAY_MS` — Minimum re-arm delay for completed diagnosis steps (default: `1000`)
 - `ORCHESTRATOR_ZERO_TASK_GRACE_MS` — Grace before a zero-task mission terminalizes (default: `600000`)
@@ -342,7 +342,7 @@ Activity coalescing and binding caches are per Worker isolate. Delayed flushes c
 - `PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_ERROR_MAX_LENGTH` — Character ceiling for a persisted preflight failure diagnostic (default: `1000`)
 
 Implementation of the storage-safety, cleanup and preflight behavior documented above:
-`resolveStorageSafetyConfig()` (`apps/api/src/durable-objects/project-data/storage-safety.ts`)
+`resolveStorageSafetyConfig()` (`packages/project-data/src/do/storage-safety.ts`)
 validates every value and fails closed on a malformed one;
 `runProjectDataToolPayloadCleanup()` / `scanToolPayloadCleanupBatch()`
 (`.../tool-payload-cleanup.ts`) apply the row/byte/wall-time and approved-plan budgets;
@@ -351,7 +351,7 @@ manual slice, its fingerprint and its cooldown;
 `measureProjectDataStorageReliefSlice()` (`.../storage-relief-measurement.ts`) owns the
 read-only measurement, cursor and byte/deadline bounds; and
 `runProjectDataStorageReliefPreflight()`
-(`apps/api/src/scheduled/project-data-storage-relief-preflight.ts`) owns the lease, the
+(`packages/project-data/src/scheduled/project-data-storage-relief-preflight.ts`) owns the lease, the
 per-slice and per-run admission budgets, and the verified R2 manifest writes.
 
 - `PROJECT_DATA_MATERIALIZATION_PAGE_ROWS` — Tokens read into memory by one chat-search materialization `SELECT`, bounding Durable Object isolate memory (default: `500`)

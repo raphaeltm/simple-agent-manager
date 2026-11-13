@@ -1,16 +1,17 @@
 import { readFileSync } from 'node:fs';
 
+import type { OperationContext } from '@simple-agent-manager/operations';
+import {
+  ensurePullRequest,
+  getPullRequestStates,
+  upsertPullRequestSnapshot,
+} from '@simple-agent-manager/operations';
 import { canonicalProjectPullRequestUrl } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
-import {
-  ensurePullRequest,
-  getPullRequestStates,
-  upsertPullRequestSnapshot,
-} from '../../../src/operations/pull-request-core';
-import type { OperationContext } from '../../../src/operations/types';
+import { createOperationPorts } from '../../../src/operation-ports';
 import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const mocks = vi.hoisted(() => ({ token: vi.fn(), setting: vi.fn() }));
@@ -25,6 +26,7 @@ describe('pull request state refresh', () => {
   const url = (number: number) => `https://github.com/${repo}/pull/${number}`;
   const context = (jobs?: Promise<void>[]): OperationContext => ({
     env,
+    ports: createOperationPorts(env),
     actor: { userId: 'user', via: 'web', scopes: new Set(['sam.read']) },
     requestId: 'test',
     ...(jobs

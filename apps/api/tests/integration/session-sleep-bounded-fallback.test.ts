@@ -12,16 +12,16 @@
  * Time is injected: a fake clock moves the sweep forward five minutes per tick, so no
  * test keeps anything running for real (task brief: inject clocks/faults).
  */
+import {
+  guardedSessionSleep,
+  type SessionSleepRuntimeGuard,
+} from '@simple-agent-manager/project-data/internal/do/session-sleep-runtime-guard';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as observabilitySchema from '../../src/db/observability-schema';
 import * as schema from '../../src/db/schema';
-import {
-  guardedSessionSleep,
-  type SessionSleepRuntimeGuard,
-} from '../../src/durable-objects/project-data/session-sleep-runtime-guard';
 import type { Env } from '../../src/env';
 import { sessionSnapshotRoutes } from '../../src/routes/workspaces/session-snapshots';
 import { sweepStoppedHandoffNodes } from '../../src/scheduled/node-cleanup/node-phases';

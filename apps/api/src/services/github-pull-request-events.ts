@@ -1,10 +1,11 @@
-import type { Env } from '../env';
-import { log } from '../lib/logger';
 import {
   parseProjectPullRequestUrl,
   type PullRequestSnapshot,
   upsertPullRequestSnapshot,
-} from '../operations/pull-request-core';
+} from '@simple-agent-manager/operations';
+
+import type { Env } from '../env';
+import { log } from '../lib/logger';
 import { resolveAdminSetting } from './admin-settings';
 import {
   findProjectsForGitHubRepository,

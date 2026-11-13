@@ -1,12 +1,12 @@
 import type { MastraModelConfig } from '@mastra/core/llm';
+import { priceModelUsageUsd } from '@simple-agent-manager/ai-proxy';
+import { incrementModelUsage } from '@simple-agent-manager/ai-proxy';
 import type { PlatformAIModel, SamConfig } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 
 import type { Env } from '../../../env';
 import { log } from '../../../lib/logger';
 import { resolveUpstreamAuth } from '../../../services/ai-billing';
-import { priceModelUsageUsd } from '../../../services/ai-cost-pricing';
-import { incrementModelUsage } from '../../../services/ai-model-usage';
 import { incrementProviderUsage, incrementTokenUsage } from '../../../services/ai-token-budget';
 import { estimateTokensFromText } from '../../../services/ai-token-usage-accounting';
 import {

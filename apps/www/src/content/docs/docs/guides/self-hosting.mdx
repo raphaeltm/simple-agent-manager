@@ -546,7 +546,7 @@ Below the breakers, **Problem migrations** lists the individual session migratio
 
 What to do, by what the card shows:
 
-- **Frozen, error code `precopy_refused`**: nothing. The session was still in use when the sweep tried to copy it, so nothing was copied and it reads normally; the sweep tries it again after `PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS` (a week). The list shows these last.
+- **Frozen, error code `precopy_refused`**: nothing. The session was still in use when the sweep tried to copy it, so nothing was copied and it reads normally; the sweep tries it again after `PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS` (a day). The list shows these last.
 - **Frozen, error code `operator_abandoned`**: nothing. Someone already abandoned it, and the card stays in the list as a record. These records are never removed, and the list puts older entries first, so over time they can push newer problems past its limit (`PROJECT_DATA_ARCHIVE_ROLLOUT_LIST_LIMIT_DEFAULT`, 25). When the page says more may exist beyond the limit, open `https://api.yourdomain.com/api/admin/project-data/storage/archive-sharding/problem-migrations?limit=100&projectId=<id>` in a browser tab where you're signed in as a superadmin (100 is the default maximum; leave out `projectId` to list every project).
 - **Failed**: nothing yet. If it keeps failing it turns Poisoned.
 - **Poisoned, or Frozen with any other error code**: read the error and fix its cause first. Then clear the migration with **Abandon** (or a copy-back, if it already deleted its source — see below), and finally **Close breaker** for the project, because abandoning a migration does not close the breaker.

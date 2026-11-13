@@ -14,7 +14,6 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
-import { runWorkspaceOperation } from '../../operations/workspace-adapter';
 import { listAgentActivityTasks } from '../../services/agent-activity';
 import {
   getMcpLimits,
@@ -25,6 +24,7 @@ import {
   jsonRpcSuccess,
   type McpTokenData,
 } from './_helpers';
+import { runWorkspaceOperation } from './workspace-operation-adapter';
 
 // ─── Configurable defaults (Constitution Principle XI) ──────────────────────
 

@@ -29,6 +29,7 @@ import {
 } from './config-read-deadline';
 import { CONNECTOR_READ_SETTINGS } from './connector-read-settings-definition';
 import { ENV_KEYS, SETTING_KEYS } from './platform-config-store';
+import { RUNTIME_SECRET_REQUEST_SETTINGS } from './runtime-secret-request-settings-definition';
 import { WORKFLOW_DEFAULTS, WORKFLOW_SETTING_DETAILS } from './workflow-defaults';
 export const FEATURE_SETTINGS: AdminSettingDefinition[] = [
   {
@@ -117,6 +118,15 @@ export const FEATURE_SETTINGS: AdminSettingDefinition[] = [
     'Collaboration',
     'Most stored rows read before and after a commented message for that view. Agent replies are stored as many streamed rows.',
     { min: 50, max: 5_000 }
+  ),
+  ...RUNTIME_SECRET_REQUEST_SETTINGS.map((setting) =>
+    integerDefinition(
+      setting.name,
+      setting.defaultValue,
+      'Chat',
+      setting.description,
+      setting.range
+    )
   ),
   ...CONNECTOR_READ_SETTINGS.map((setting) =>
     integerDefinition(

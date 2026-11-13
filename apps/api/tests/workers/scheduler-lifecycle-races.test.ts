@@ -4,6 +4,9 @@
  * These tests deliberately race the production placement and cleanup CAS
  * statements. They do not mock D1, and they require no provider credentials.
  */
+import {
+  resolveWorkspaceAdmissionPolicy,
+} from '@simple-agent-manager/scheduler-core';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 
@@ -18,7 +21,6 @@ import {
   reserveWorkspacePlacement,
   type WorkspacePlacementInput,
 } from '../../src/services/workspace-placement';
-import { resolveWorkspaceAdmissionPolicy } from '../../src/services/workspace-resource-capacity';
 import {
   seedInstallation,
   seedNode,

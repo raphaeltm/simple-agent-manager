@@ -119,7 +119,7 @@ export const ALLOCATION_WRITER_INVENTORY: readonly AllocationWriterInventoryEntr
     canonicalService: 'explicit chat-start task adapter',
   },
   {
-    filePath: 'apps/api/src/operations/idea-core.ts',
+    filePath: 'packages/operations/src/idea-core.ts',
     table: 'tasks',
     owner: 'prepareIdeaCreate',
     role: 'shared idea task materialization operation',

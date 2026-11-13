@@ -103,3 +103,11 @@ export function formatSpanWords(ms: number): string {
   if (ms >= MS_PER_HOUR && ms % MS_PER_HOUR === 0) return unit(ms / MS_PER_HOUR, 'hour');
   return unit(Math.max(1, Math.round(ms / MS_PER_MINUTE)), 'minute');
 }
+
+/** A date and time in the viewer's locale ("12 Nov 2026, 10:00"); the input when unparseable. */
+export function formatDateTime(iso: string): string {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime())
+    ? iso
+    : date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}

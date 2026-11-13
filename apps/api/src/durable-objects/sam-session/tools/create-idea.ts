@@ -3,6 +3,7 @@
  *
  * Ideas are stored as tasks with status='draft' in D1.
  */
+import { ideaTaskPredicateSql } from '@simple-agent-manager/operations';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -10,7 +11,6 @@ import * as schema from '../../../db/schema';
 import type { Env } from '../../../env';
 import { log } from '../../../lib/logger';
 import { ulid } from '../../../lib/ulid';
-import { ideaTaskPredicateSql } from '../../../operations/idea-identity';
 import type { AnthropicToolDef, ToolContext } from '../types';
 
 const DEFAULT_TITLE_MAX_LENGTH = 200;

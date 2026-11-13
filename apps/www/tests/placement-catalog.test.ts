@@ -197,7 +197,7 @@ describe('real SAM default mirrored by the explorer', () => {
   it('HOST_MEMORY_RESERVE_MB matches DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB', () => {
     // The admission default is an alias of the shared node reserve; read the literal there.
     const admission = readFileSync(
-      join(REPO_ROOT, 'apps/api/src/services/workspace-admission-policy.ts'),
+      join(REPO_ROOT, 'packages/scheduler-core/src/workspace-admission-policy.ts'),
       'utf8'
     );
     expect(admission).toMatch(

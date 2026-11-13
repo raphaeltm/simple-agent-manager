@@ -15,6 +15,7 @@ import { type FleetOpsSettingName } from './fleet-ops/settings-definitions';
 import { type LifecycleLatencySettingKey } from './lifecycle-latency/defaults';
 import { type LlmEndpointSettingName } from './llm-endpoint-settings';
 import { type OperationsTelemetrySettingName } from './operations-telemetry-defaults';
+import { type RuntimeSecretRequestSettingName } from './runtime-secret-request-settings-definition';
 import { type SpeechEndpointSettingName } from './speech-endpoint-settings';
 import { type StalledClassifierEndpointSettingName } from './stalled-task-classifier-endpoint-settings';
 import { type WORKFLOW_DEFAULTS } from './workflow-defaults';
@@ -30,6 +31,7 @@ export type AdminSettingName =
   | `aiModels.${AgentModelSettingKey}`
   | `connector.${ConnectorSettingKey}`
   | ConnectorReadSettingName
+  | RuntimeSecretRequestSettingName
   | AgentEmailSettingName
   | FleetOpsSettingName
   | NodeTunnelSettingName
@@ -114,6 +116,9 @@ export type AdminSettingName =
   | 'operations.samOperatorStreamMaxSubscribers'
   | 'operations.githubTriggerQueueMaxPendingLimit'
   | 'operations.githubTriggerQueueTtlSecondsLimit'
+  | 'operations.webhookQueueMaxPending'
+  | 'operations.webhookQueueTtlSeconds'
+  | 'operations.webhookSignatureToleranceSeconds'
   | 'operations.pullRequestRefreshCap'
   | 'operations.pullRequestRefreshTtlSeconds'
   | 'operations.pullRequestRefreshBudgetPerHour'

@@ -9,6 +9,8 @@
  * to fetch sessions. For accounts with many projects, this can be slow on
  * cold DOs (~5-20ms each). KV caching (30s TTL) absorbs repeated reads.
  */
+import { ideaTaskPredicateSql } from '@simple-agent-manager/operations';
+import { listLinksForTargets } from '@simple-agent-manager/operations';
 import { isStrongLinkRelation } from '@simple-agent-manager/shared';
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -18,8 +20,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
-import { ideaTaskPredicateSql } from '../operations/idea-core';
-import { listLinksForTargets } from '../operations/link-core';
+import { operationDeps } from '../operation-ports';
 import { resolveAdminSettingDetailsMany } from '../services/admin-settings';
 import { listAgentActivityTasks } from '../services/agent-activity';
 import * as projectDataService from '../services/project-data';
@@ -284,7 +285,7 @@ accountMapRoutes.get('/', async (c) => {
     [...ideasByProject].map(async ([projectId, ideas]) => ({
       projectId,
       links: await listLinksForTargets(
-        c.env,
+        operationDeps(c.env),
         projectId,
         'idea',
         ideas.map((idea) => idea.id)

@@ -18,17 +18,17 @@
  * a working SMTP transport for replies. The Cloudflare binding always wins, so a Cloudflare
  * deployment behaves exactly as before.
  */
-import { AGENT_EMAIL_LOCAL_PART } from '@simple-agent-manager/shared';
-
-import type { Env } from '../../env';
-import { getReverseTunnelGatewaySecret } from '../node-reverse-tunnel-config';
 import {
   type AgentEmailSender,
   type EmailTransportEnv,
   emailTransportKind,
+  type SmtpConnect,
   systemEmailTransportFor,
-} from './provider';
-import type { SmtpConnect } from './smtp-client';
+} from '@simple-agent-manager/agent-email/definitions';
+import { AGENT_EMAIL_LOCAL_PART } from '@simple-agent-manager/shared';
+
+import type { Env } from '../../env';
+import { getReverseTunnelGatewaySecret } from '../node-reverse-tunnel-config';
 
 export type SelfHostInboundEnv = EmailTransportEnv &
   Pick<Env, 'AGENT_EMAIL_INBOUND_SMTP' | 'REVERSE_TUNNEL_GATEWAY_SECRET'>;

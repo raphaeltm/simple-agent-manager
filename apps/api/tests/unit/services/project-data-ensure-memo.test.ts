@@ -11,18 +11,18 @@
  *
  * See: .claude/rules/60-request-io-and-bundle-budgets.md
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-
-import type { Env } from '../../../src/env';
-import { DEFAULT_SHARED_FLIGHT_JOIN_GRACE_MS } from '../../../src/lib/shared-flight';
-import * as svc from '../../../src/services/project-data';
 import {
   DEFAULT_PROJECT_DATA_ENSURE_JOIN_WAIT_MS,
   DEFAULT_PROJECT_DATA_ENSURE_MEMO_MAX_ENTRIES,
   getProjectDataEnsureMemoMaxEntries,
   projectDataEnsureMemoSize,
   resetProjectDataEnsureMemo,
-} from '../../../src/services/project-data-ensure-memo';
+} from '@simple-agent-manager/project-data/internal/client/project-data-ensure-memo';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import type { Env } from '../../../src/env';
+import { DEFAULT_SHARED_FLIGHT_JOIN_GRACE_MS } from '../../../src/lib/shared-flight';
+import * as svc from '../../../src/services/project-data';
 
 interface StubCounters {
   ensure: number;

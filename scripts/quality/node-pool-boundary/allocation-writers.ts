@@ -23,7 +23,8 @@ export interface AllocationWriter {
   snippet: string;
 }
 
-export const ALLOCATION_WRITER_ROOTS = ['apps/api/src'] as const;
+// Packages lifted out of the worker still write allocation tables (worker modularization).
+export const ALLOCATION_WRITER_ROOTS = ['apps/api/src', 'packages/operations/src'] as const;
 
 /** Drizzle schema property / imported binding names, by target table. */
 const DRIZZLE_TABLE_NAMES: Record<string, AllocationTable> = {

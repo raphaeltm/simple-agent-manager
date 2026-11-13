@@ -1,3 +1,4 @@
+import { DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS } from '@simple-agent-manager/scheduler-core';
 import type {
   CapacityPoolPlacementSettings,
   CapacityPoolSelectionWeights,
@@ -8,7 +9,6 @@ import type {
 import {
   DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS,
   isJsonRecord,
-  LEGACY_VM_SIZE_WORKLOAD_ADAPTER_VERSION,
   normalizeResourceRequirements,
   PLATFORM_RESOURCE_DEFAULTS,
 } from '@simple-agent-manager/shared';
@@ -26,27 +26,6 @@ export const CAPACITY_POOL_SELECTION_SETTINGS_SETTING_KEY = 'capacityPools.selec
 export const CAPACITY_POOL_PLATFORM_DEFAULTS_SETTING_KEY = 'capacityPools.platformDefaults.v1';
 
 type PlacementSettingsSource = 'persisted' | 'environment' | 'default';
-
-export const DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS: Pick<
-  CapacityPoolPlacementSettings,
-  | 'version'
-  | 'sourceGeneration'
-  | 'legacyWorkloadAdapterVersion'
-  | 'selectionWeights'
-  | 'rolloutCohortPercent'
-> = {
-  version: 1,
-  sourceGeneration: 1,
-  legacyWorkloadAdapterVersion: LEGACY_VM_SIZE_WORKLOAD_ADAPTER_VERSION,
-  selectionWeights: {
-    priority: 100_000_000,
-    price: 1,
-    fit: 1_000_000,
-    capacity: 1,
-    candidateOrder: 1,
-  },
-  rolloutCohortPercent: 100,
-};
 
 export interface ResolvedCapacityPoolPlacementSettings {
   resourceDefaults: {

@@ -14,7 +14,7 @@ set can turn one unreachable target into a repeated platform-level regression.
 ## Incident Lesson
 
 PR #1348 widened candidate selection in
-`apps/api/src/durable-objects/project-data/reconciliation.ts`. The ProjectData
+`packages/project-data/src/do/reconciliation.ts`. The ProjectData
 DO `alarm()` handler then sequentially awaited VM-agent HTTP calls through
 `DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS = 30_000` in
 `apps/api/src/services/node-agent.ts:7`, an interactive timeout. Dead nodes

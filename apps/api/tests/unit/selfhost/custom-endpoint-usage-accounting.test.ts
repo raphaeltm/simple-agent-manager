@@ -58,7 +58,9 @@ vi.mock('../../../src/middleware/rate-limit', () => ({
     `${prefix}:${userId}:${window}`,
   getCurrentWindowStart: () => 1000,
 }));
-vi.mock('../../../src/services/ai-token-budget', () => ({
+// The package's accounting calls these from inside the package; mock its module, not the
+// worker re-export (worker modularization W5).
+vi.mock('@simple-agent-manager/ai-proxy/internal/ai-token-budget', () => ({
   // No admin allowance: the model-tier gate allows every tier (covered in ai-proxy-model-tiers.test.ts).
   getAdminAiAllowance: async () => null,
   checkAiUsageGate: (...args: unknown[]) => mockCheckAiUsageGate(...args),
@@ -84,6 +86,12 @@ const mockLogWarn = vi.fn();
 vi.mock('../../../src/lib/logger', () => ({
   log: { info: vi.fn(), error: vi.fn(), warn: (...args: unknown[]) => mockLogWarn(...args) },
   createModuleLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() }),
+}));
+// The usage estimate is logged inside @simple-agent-manager/ai-proxy, which logs through
+// worker-core directly (worker modularization W5), so observe that logger too.
+vi.mock('@simple-agent-manager/worker-core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@simple-agent-manager/worker-core')>()),
+  log: { info: vi.fn(), error: vi.fn(), warn: (...args: unknown[]) => mockLogWarn(...args) },
 }));
 
 import { aiProxyRoutes } from '../../../src/routes/ai-proxy';

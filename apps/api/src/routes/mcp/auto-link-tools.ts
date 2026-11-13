@@ -1,7 +1,9 @@
+import { recordAutoLink } from '@simple-agent-manager/operations';
+
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { expectJsonRecord } from '../../lib/runtime-validation';
-import { recordAutoLink } from '../../operations/link-core';
+import { operationDeps } from '../../operation-ports';
 import { type JsonRpcResponse, type McpTokenData, resolveSessionId } from './_helpers';
 
 const RELATIONS = {
@@ -56,7 +58,7 @@ export function scheduleToolAutoLink(
       try {
         const sessionId = await resolveSessionId(env, token.workspaceId);
         if (!sessionId) return;
-        await recordAutoLink(env, token.projectId, {
+        await recordAutoLink(operationDeps(env), token.projectId, {
           sourceKind: 'session',
           sourceId: sessionId,
           targetKind: target[0],

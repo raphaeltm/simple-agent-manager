@@ -1,8 +1,9 @@
+import * as archiveSharding from '@simple-agent-manager/project-data/internal/do/archive-sharding';
+import { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
+import * as mailbox from '@simple-agent-manager/project-data/internal/do/mailbox';
+import * as messages from '@simple-agent-manager/project-data/internal/do/messages';
+
 import { NodeLifecycle } from '../../../src/durable-objects/node-lifecycle';
-import { ProjectData } from '../../../src/durable-objects/project-data';
-import * as archiveSharding from '../../../src/durable-objects/project-data/archive-sharding';
-import * as mailbox from '../../../src/durable-objects/project-data/mailbox';
-import * as messages from '../../../src/durable-objects/project-data/messages';
 
 export interface CapturedExpectedError {
   threw: boolean;
@@ -149,8 +150,14 @@ export class ProjectDataTestDouble extends ProjectData {
 
   /** Inject a rollback inside the DO realm so the workers pool does not report
    * a test-realm thrown exception as an unhandled RPC rejection. */
-  async runAlarmWithGroupedCleanupFailureForTest(failurePoint: 'candidate' | 'second_delete' = 'candidate', failRecording = false): Promise<{
-    injected: boolean; laterCleanup: boolean; markerCommitted: boolean; rolledBack: boolean;
+  async runAlarmWithGroupedCleanupFailureForTest(
+    failurePoint: 'candidate' | 'second_delete' = 'candidate',
+    failRecording = false
+  ): Promise<{
+    injected: boolean;
+    laterCleanup: boolean;
+    markerCommitted: boolean;
+    rolledBack: boolean;
   }> {
     const storage = this.ctx.storage;
     const sql = storage.sql;
@@ -167,9 +174,10 @@ export class ProjectDataTestDouble extends ProjectData {
       if (markerWritten) markerCommitted = true;
     };
     sql.exec = ((query: string, ...bindings: SqlStorageValue[]) => {
-      if (/INSERT INTO chat_messages_grouped_fts/.test(query) && /VALUES\('delete'/.test(query)) deletes++;
-      const shouldFail = failurePoint === 'candidate'
-        ? /SELECT id FROM chat_sessions/.test(query) : deletes === 2;
+      if (/INSERT INTO chat_messages_grouped_fts/.test(query) && /VALUES\('delete'/.test(query))
+        deletes++;
+      const shouldFail =
+        failurePoint === 'candidate' ? /SELECT id FROM chat_sessions/.test(query) : deletes === 2;
       if (!injected && shouldFail) {
         injected = true;
         markerCommittedBeforeFailure = markerCommitted;
@@ -178,7 +186,12 @@ export class ProjectDataTestDouble extends ProjectData {
           throw new Error('out of memory: SQLITE_NOMEM');
         });
       }
-      if (injected && failRecording && bindings[0] === 'storageSafetyLastError' && /INSERT/.test(query)) {
+      if (
+        injected &&
+        failRecording &&
+        bindings[0] === 'storageSafetyLastError' &&
+        /INSERT/.test(query)
+      ) {
         throw new Error('injected diagnostic write failure');
       }
       if (bindings[0] === 'storageSafetyLastAlertAt' && /INSERT/.test(query)) markerWritten = true;
@@ -187,8 +200,12 @@ export class ProjectDataTestDouble extends ProjectData {
     }) as typeof sql.exec;
     try {
       await this.alarm();
-      return { injected, laterCleanup, markerCommitted: markerCommittedBeforeFailure,
-        rolledBack: exec('SELECT count(*) n FROM nomem_rollback_probe WHERE id = 2').one().n === 0 };
+      return {
+        injected,
+        laterCleanup,
+        markerCommitted: markerCommittedBeforeFailure,
+        rolledBack: exec('SELECT count(*) n FROM nomem_rollback_probe WHERE id = 2').one().n === 0,
+      };
     } finally {
       sql.exec = exec;
       storage.sync = sync;

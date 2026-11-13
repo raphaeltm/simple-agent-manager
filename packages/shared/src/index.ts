@@ -78,4 +78,5 @@ export { extractMentions, formatMentionName, getMentionQuery } from './mentions'
 export * from './message-cursor';
 export { canonicalProjectPullRequestUrl } from './pull-requests';
 export * from './secret-exec';
+export * from './typed-chat-cards';
 export * from './workload-identity';

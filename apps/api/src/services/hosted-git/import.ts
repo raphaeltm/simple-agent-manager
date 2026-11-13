@@ -8,12 +8,11 @@
  * the push cap before anything is stored, and the hosted repository then enforces its own
  * object and storage caps on the push.
  */
+import { createFetchHttpClient, MemoryFS } from '@simple-agent-manager/repo-hosting';
 import git from 'isomorphic-git';
 
-import { guardedFetch, OutboundRequestRefusedError } from '../../lib/network-hosts/guarded-fetch';
+import { guardedFetch, OutboundRequestRefusedError } from '../../lib/network-hosts';
 import { errors } from '../../middleware/error';
-import { createFetchHttpClient } from '../repo-browse/fetch-http-client';
-import { MemoryFS } from '../repo-browse/memory-fs';
 import { DEFAULT_HOSTED_GIT_LIMITS } from './limits';
 
 /** Public forges an import may read from. */

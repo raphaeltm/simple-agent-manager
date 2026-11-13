@@ -52,13 +52,7 @@ import {
   buildCelldConfig,
   type CelldWranglerConfig,
 } from './celld-config.js';
-import {
-  ASSETS_DIR,
-  prepareCelldProject,
-  RUNTIME_SECRETS_MAIN,
-  SOURCE_LINK,
-  writeCelldConfig,
-} from './celld-project.js';
+import { ASSETS_DIR, CELLD_MAIN, prepareCelldProject, writeCelldConfig } from './celld-project.js';
 import {
   applyAllMigrations,
   bucketOf,
@@ -282,7 +276,7 @@ async function main(): Promise<void> {
   const source = TOML.parse(readFileSync(join(API_DIR, 'wrangler.toml'), 'utf8')) as WranglerToml;
   const guidedLogin = guidedLoginSettings(box);
   const plan = buildCelldConfig(source, {
-    main: sealed ? RUNTIME_SECRETS_MAIN : `${SOURCE_LINK}/index.ts`,
+    main: CELLD_MAIN,
     baseDomain,
     assetsDirectory: ASSETS_DIR,
     guidedLogin,

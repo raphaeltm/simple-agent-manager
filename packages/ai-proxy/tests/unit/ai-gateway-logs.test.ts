@@ -1,0 +1,510 @@
+/**
+ * Unit tests for shared AI Gateway log helpers.
+ *
+ * Tests period parsing, period bounds, aggregation functions,
+ * and pagination resolution — all pure logic, no bindings needed.
+ */
+import { log } from '@simple-agent-manager/worker-core';
+import { describe, expect, it, vi } from 'vitest';
+
+import {
+  aggregateByDay,
+  aggregateByModel,
+  aggregateByProvider,
+  type AIGatewayLogEntry,
+  getGatewayPeriodBounds,
+  getPeriodLabel,
+  iterateGatewayLogs as iterateGatewayLogsWithPorts,
+  parseGatewayPeriod,
+  resolveGatewayPagination,
+  type UsageByDay,
+  type UsageByModel,
+  type UsageByProvider,
+} from '../../src/ai-gateway-logs';
+
+/** The worker binds this from the `performance.externalReadTimeoutMs` admin setting. */
+const TEST_PORTS = { externalReadTimeoutMs: async () => 15_000 };
+const iterateGatewayLogs = (
+  env: Parameters<typeof iterateGatewayLogsWithPorts>[0],
+  ...rest: Parameters<typeof iterateGatewayLogsWithPorts> extends [unknown, unknown, ...infer R]
+    ? R
+    : never
+) => iterateGatewayLogsWithPorts(env, TEST_PORTS, ...rest);
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function makeEntry(overrides: Partial<AIGatewayLogEntry> = {}): AIGatewayLogEntry {
+  return {
+    id: 'test-1',
+    model: 'gpt-4o',
+    provider: 'openai',
+    tokens_in: 100,
+    tokens_out: 50,
+    cost: 0.01,
+    success: true,
+    cached: false,
+    created_at: '2026-04-15T10:00:00Z',
+    duration: 500,
+    metadata: { userId: 'user-1' },
+    ...overrides,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// parseGatewayPeriod
+// ---------------------------------------------------------------------------
+
+describe('parseGatewayPeriod', () => {
+  it('returns current-month as default for undefined', () => {
+    expect(parseGatewayPeriod(undefined)).toBe('current-month');
+  });
+
+  it('returns current-month as default for invalid string', () => {
+    expect(parseGatewayPeriod('banana')).toBe('current-month');
+    expect(parseGatewayPeriod('')).toBe('current-month');
+    expect(parseGatewayPeriod('24h')).toBe('current-month'); // 24h is admin-only
+  });
+
+  it('accepts valid periods', () => {
+    expect(parseGatewayPeriod('current-month')).toBe('current-month');
+    expect(parseGatewayPeriod('7d')).toBe('7d');
+    expect(parseGatewayPeriod('30d')).toBe('30d');
+    expect(parseGatewayPeriod('90d')).toBe('90d');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getGatewayPeriodBounds
+// ---------------------------------------------------------------------------
+
+describe('getGatewayPeriodBounds', () => {
+  it('current-month starts at the first of the month', () => {
+    const { startDate } = getGatewayPeriodBounds('current-month');
+    const date = new Date(startDate);
+    expect(date.getUTCDate()).toBe(1);
+    expect(date.getUTCHours()).toBe(0);
+  });
+
+  it('7d starts 7 days ago', () => {
+    const { startDate } = getGatewayPeriodBounds('7d');
+    const date = new Date(startDate);
+    const now = new Date();
+    const diffDays = (now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24);
+    expect(diffDays).toBeGreaterThanOrEqual(6.9);
+    expect(diffDays).toBeLessThanOrEqual(7.1);
+  });
+
+  it('30d starts 30 days ago', () => {
+    const { startDate } = getGatewayPeriodBounds('30d');
+    const date = new Date(startDate);
+    const now = new Date();
+    const diffDays = (now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24);
+    expect(diffDays).toBeGreaterThanOrEqual(29.9);
+    expect(diffDays).toBeLessThanOrEqual(30.1);
+  });
+
+  it('returns valid ISO strings', () => {
+    for (const period of ['current-month', '7d', '30d', '90d'] as const) {
+      const { startDate } = getGatewayPeriodBounds(period);
+      expect(new Date(startDate).toISOString()).toBe(startDate);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getPeriodLabel
+// ---------------------------------------------------------------------------
+
+describe('getPeriodLabel', () => {
+  it('returns month name for current-month', () => {
+    const label = getPeriodLabel('current-month');
+    // Should contain a year and a month name
+    expect(label).toMatch(/\d{4}/);
+    expect(label.length).toBeGreaterThan(5);
+  });
+
+  it('returns human-readable labels for day periods', () => {
+    expect(getPeriodLabel('7d')).toBe('Last 7 days');
+    expect(getPeriodLabel('30d')).toBe('Last 30 days');
+    expect(getPeriodLabel('90d')).toBe('Last 90 days');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveGatewayPagination
+// ---------------------------------------------------------------------------
+
+describe('resolveGatewayPagination', () => {
+  it('uses defaults when env is empty', () => {
+    const env = {} as Record<string, string>;
+    const { pageSize, maxPages } = resolveGatewayPagination(env as never);
+    expect(pageSize).toBe(50);
+    expect(maxPages).toBe(20);
+  });
+
+  it('respects env overrides', () => {
+    const env = { AI_USAGE_PAGE_SIZE: '25', AI_USAGE_MAX_PAGES: '10' };
+    const { pageSize, maxPages } = resolveGatewayPagination(env as never);
+    expect(pageSize).toBe(25);
+    expect(maxPages).toBe(10);
+  });
+
+  it('clamps page size to the Cloudflare API bounds', () => {
+    expect(resolveGatewayPagination({ AI_USAGE_PAGE_SIZE: '500' } as never).pageSize).toBe(50);
+    expect(resolveGatewayPagination({ AI_USAGE_PAGE_SIZE: '0' } as never).pageSize).toBe(50);
+    expect(resolveGatewayPagination({ AI_USAGE_PAGE_SIZE: '-5' } as never).pageSize).toBe(50);
+  });
+
+  it('floors fractional page size overrides', () => {
+    const { pageSize } = resolveGatewayPagination({ AI_USAGE_PAGE_SIZE: '12.9' } as never);
+    expect(pageSize).toBe(12);
+  });
+
+  it('caps maxPages at 20', () => {
+    const env = { AI_USAGE_MAX_PAGES: '100' };
+    const { maxPages } = resolveGatewayPagination(env as never);
+    expect(maxPages).toBe(20);
+  });
+
+  it('falls back for invalid max page overrides', () => {
+    for (const invalid of ['0', '-1', 'abc']) {
+      const { maxPages } = resolveGatewayPagination({ AI_USAGE_MAX_PAGES: invalid } as never);
+      expect(maxPages).toBe(20);
+    }
+  });
+
+  it('floors fractional max page overrides', () => {
+    const { maxPages } = resolveGatewayPagination({ AI_USAGE_MAX_PAGES: '4.8' } as never);
+    expect(maxPages).toBe(4);
+  });
+
+  it('supports a separate hard cap for scheduled aggregation', () => {
+    const env = { AI_MONTHLY_COST_AGGREGATION_MAX_PAGES: '300' };
+    const { maxPages } = resolveGatewayPagination(env as never, {
+      defaultMaxPages: 200,
+      maxPagesHardCap: 500,
+      maxPagesEnvValue: env.AI_MONTHLY_COST_AGGREGATION_MAX_PAGES,
+    });
+    expect(maxPages).toBe(300);
+  });
+
+  it('caps scheduled aggregation pages at its configured hard cap', () => {
+    const env = { AI_MONTHLY_COST_AGGREGATION_MAX_PAGES: '999' };
+    const { maxPages } = resolveGatewayPagination(env as never, {
+      defaultMaxPages: 200,
+      maxPagesHardCap: 500,
+      maxPagesEnvValue: env.AI_MONTHLY_COST_AGGREGATION_MAX_PAGES,
+    });
+    expect(maxPages).toBe(500);
+  });
+
+  it('falls back for invalid scheduled aggregation max pages', () => {
+    const env = { AI_MONTHLY_COST_AGGREGATION_MAX_PAGES: '-10' };
+    const { maxPages } = resolveGatewayPagination(env as never, {
+      defaultMaxPages: 200,
+      maxPagesHardCap: 500,
+      maxPagesEnvValue: env.AI_MONTHLY_COST_AGGREGATION_MAX_PAGES,
+    });
+    expect(maxPages).toBe(200);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// iterateGatewayLogs
+// ---------------------------------------------------------------------------
+
+describe('iterateGatewayLogs', () => {
+  it('accepts Cloudflare responses with omitted errors, no total_pages, and non-string metadata', async () => {
+    const env = {
+      CF_ACCOUNT_ID: 'account-1',
+      CF_API_TOKEN: 'token-1',
+      AI_USAGE_PAGE_SIZE: '3',
+    } as never;
+    const entries = [
+      makeEntry({ id: 'log-1', metadata: { userId: 'user-1', messageCount: 3 } as never }),
+      makeEntry({ id: 'log-2', metadata: { userId: 'user-2', hasTools: false } as never }),
+    ];
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            result: entries,
+            result_info: { page: 1, per_page: 3, count: 2, total_count: 2 },
+            success: true,
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+      )
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const visited: AIGatewayLogEntry[] = [];
+    await iterateGatewayLogs(env, 'gateway-1', '2026-05-01T00:00:00.000Z', (entry) =>
+      visited.push(entry)
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(visited.map((entry) => entry.id)).toEqual(['log-1', 'log-2']);
+    expect(visited[0]?.metadata).toEqual({ userId: 'user-1', messageCount: '3' });
+    expect(visited[1]?.metadata).toEqual({ userId: 'user-2', hasTools: 'false' });
+  });
+
+  it('derives total_pages from total_count when Cloudflare omits it', async () => {
+    const env = {
+      CF_ACCOUNT_ID: 'account-1',
+      CF_API_TOKEN: 'token-1',
+      AI_USAGE_PAGE_SIZE: '2',
+    } as never;
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = new URL(input.toString());
+      const page = Number(url.searchParams.get('page') ?? '1');
+      const entries =
+        page === 1
+          ? [makeEntry({ id: 'log-1' }), makeEntry({ id: 'log-2' })]
+          : [makeEntry({ id: 'log-3' })];
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            result: entries,
+            result_info: { page, per_page: 2, count: entries.length, total_count: 3 },
+            success: true,
+            errors: null,
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const visited: AIGatewayLogEntry[] = [];
+    await iterateGatewayLogs(env, 'gateway-1', '2026-05-01T00:00:00.000Z', (entry) =>
+      visited.push(entry)
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(visited.map((entry) => entry.id)).toEqual(['log-1', 'log-2', 'log-3']);
+  });
+
+  it('warns when pagination reaches maxPages while more pages exist', async () => {
+    const env = {
+      CF_ACCOUNT_ID: 'account-1',
+      CF_API_TOKEN: 'token-1',
+      AI_USAGE_PAGE_SIZE: '1',
+    } as never;
+    const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => undefined);
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            result: [makeEntry()],
+            result_info: { page: 1, per_page: 1, count: 1, total_count: 3, total_pages: 3 },
+            success: true,
+            errors: [],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+      )
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await iterateGatewayLogs(env, 'gateway-1', '2026-05-01T00:00:00.000Z', () => undefined, {
+      defaultMaxPages: 2,
+      maxPagesHardCap: 2,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(warnSpy).toHaveBeenCalledWith('ai_gateway.logs_pagination_truncated', {
+      maxPages: 2,
+      totalPages: 3,
+      pageSize: 1,
+      startDate: '2026-05-01T00:00:00.000Z',
+    });
+    warnSpy.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// aggregateByModel
+// ---------------------------------------------------------------------------
+
+describe('aggregateByModel', () => {
+  it('creates a new entry for a new model', () => {
+    const map = new Map<string, UsageByModel>();
+    aggregateByModel(map, makeEntry());
+    expect(map.size).toBe(1);
+    const entry = map.get('gpt-4o')!;
+    expect(entry.requests).toBe(1);
+    expect(entry.inputTokens).toBe(100);
+    expect(entry.outputTokens).toBe(50);
+    expect(entry.totalTokens).toBe(150);
+    expect(entry.costUsd).toBe(0.01);
+    expect(entry.cachedRequests).toBe(0);
+    expect(entry.errorRequests).toBe(0);
+  });
+
+  it('accumulates into existing entry for same model', () => {
+    const map = new Map<string, UsageByModel>();
+    aggregateByModel(map, makeEntry());
+    aggregateByModel(map, makeEntry({ tokens_in: 200, cost: 0.02 }));
+    expect(map.size).toBe(1);
+    const entry = map.get('gpt-4o')!;
+    expect(entry.requests).toBe(2);
+    expect(entry.inputTokens).toBe(300);
+    expect(entry.costUsd).toBeCloseTo(0.03);
+  });
+
+  it('counts cached and error requests', () => {
+    const map = new Map<string, UsageByModel>();
+    aggregateByModel(map, makeEntry({ cached: true }));
+    aggregateByModel(map, makeEntry({ success: false }));
+    aggregateByModel(map, makeEntry());
+    const entry = map.get('gpt-4o')!;
+    expect(entry.cachedRequests).toBe(1);
+    expect(entry.errorRequests).toBe(1);
+    expect(entry.requests).toBe(3);
+  });
+
+  it('handles missing model as "unknown"', () => {
+    const map = new Map<string, UsageByModel>();
+    aggregateByModel(map, makeEntry({ model: '' }));
+    expect(map.has('unknown')).toBe(true);
+  });
+
+  it('handles zero/undefined token values', () => {
+    const map = new Map<string, UsageByModel>();
+    aggregateByModel(map, makeEntry({ tokens_in: 0, tokens_out: 0, cost: 0 }));
+    const entry = map.get('gpt-4o')!;
+    expect(entry.inputTokens).toBe(0);
+    expect(entry.outputTokens).toBe(0);
+    expect(entry.totalTokens).toBe(0);
+    expect(entry.costUsd).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// aggregateByProvider
+// ---------------------------------------------------------------------------
+
+describe('aggregateByProvider', () => {
+  it('uses explicit provider metadata when present', () => {
+    const map = new Map<string, UsageByProvider>();
+    aggregateByProvider(
+      map,
+      makeEntry({
+        provider: 'openai',
+        metadata: {
+          userId: 'user-1',
+          providerId: 'groq',
+          providerName: 'Groq',
+          providerDialect: 'openai-compatible',
+        },
+      })
+    );
+
+    const entry = map.get('groq:openai-compatible')!;
+    expect(entry).toMatchObject({
+      providerId: 'groq',
+      providerName: 'Groq',
+      dialect: 'openai-compatible',
+      requests: 1,
+      inputTokens: 100,
+      outputTokens: 50,
+      totalTokens: 150,
+      costUsd: 0.01,
+      costSource: 'gateway',
+    });
+  });
+
+  it('accumulates multiple models for the same provider and dialect', () => {
+    const map = new Map<string, UsageByProvider>();
+    aggregateByProvider(
+      map,
+      makeEntry({
+        model: 'model-a',
+        cost: 0.02,
+        metadata: {
+          userId: 'user-1',
+          providerId: 'openai',
+          providerName: 'OpenAI',
+          providerDialect: 'openai-compatible',
+        },
+      })
+    );
+    aggregateByProvider(
+      map,
+      makeEntry({
+        model: 'model-b',
+        tokens_in: 200,
+        tokens_out: 75,
+        cost: 0.03,
+        cached: true,
+        success: false,
+        metadata: {
+          userId: 'user-1',
+          providerId: 'openai',
+          providerName: 'OpenAI',
+          providerDialect: 'openai-compatible',
+        },
+      })
+    );
+
+    const entry = map.get('openai:openai-compatible')!;
+    expect(entry.requests).toBe(2);
+    expect(entry.inputTokens).toBe(300);
+    expect(entry.outputTokens).toBe(125);
+    expect(entry.totalTokens).toBe(425);
+    expect(entry.costUsd).toBeCloseTo(0.05);
+    expect(entry.cachedRequests).toBe(1);
+    expect(entry.errorRequests).toBe(1);
+  });
+
+  it('falls back to the Gateway provider field when metadata is absent', () => {
+    const map = new Map<string, UsageByProvider>();
+    aggregateByProvider(map, makeEntry({ provider: 'workers-ai', metadata: null }));
+
+    const entry = map.get('workers-ai:unknown')!;
+    expect(entry.providerName).toBe('Workers Ai');
+    expect(entry.dialect).toBe('unknown');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// aggregateByDay
+// ---------------------------------------------------------------------------
+
+describe('aggregateByDay', () => {
+  it('creates a new entry for a new day', () => {
+    const map = new Map<string, UsageByDay>();
+    aggregateByDay(map, makeEntry({ created_at: '2026-04-15T10:00:00Z' }));
+    expect(map.size).toBe(1);
+    const entry = map.get('2026-04-15')!;
+    expect(entry.requests).toBe(1);
+    expect(entry.costUsd).toBe(0.01);
+  });
+
+  it('accumulates entries for the same day', () => {
+    const map = new Map<string, UsageByDay>();
+    aggregateByDay(map, makeEntry({ created_at: '2026-04-15T08:00:00Z' }));
+    aggregateByDay(map, makeEntry({ created_at: '2026-04-15T20:00:00Z', cost: 0.05 }));
+    expect(map.size).toBe(1);
+    const entry = map.get('2026-04-15')!;
+    expect(entry.requests).toBe(2);
+    expect(entry.costUsd).toBeCloseTo(0.06);
+  });
+
+  it('creates separate entries for different days', () => {
+    const map = new Map<string, UsageByDay>();
+    aggregateByDay(map, makeEntry({ created_at: '2026-04-15T10:00:00Z' }));
+    aggregateByDay(map, makeEntry({ created_at: '2026-04-16T10:00:00Z' }));
+    expect(map.size).toBe(2);
+  });
+
+  it('handles missing created_at as "unknown"', () => {
+    const map = new Map<string, UsageByDay>();
+    aggregateByDay(map, makeEntry({ created_at: '' }));
+    expect(map.has('unknown')).toBe(true);
+  });
+});

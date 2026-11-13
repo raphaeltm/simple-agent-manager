@@ -1,15 +1,15 @@
+import { resolveDurableExecutionConfig } from '@simple-agent-manager/project-data/internal/do/durable-execution-config';
+import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
+import {
+  acceptPromptDelivery,
+  claimDuePromptDeliveries,
+} from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
+import { runPromptDeliveryClaim } from '@simple-agent-manager/project-data/internal/do/prompt-delivery-runner';
+import type { SessionWakeReadyInput } from '@simple-agent-manager/project-data/internal/do/session-wake-ready';
 import { buildVmPromptDeliveryCapabilitiesPath } from '@simple-agent-manager/shared';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { ProjectData } from '../../src/durable-objects/project-data';
-import { resolveDurableExecutionConfig } from '../../src/durable-objects/project-data/durable-execution-config';
-import {
-  acceptPromptDelivery,
-  claimDuePromptDeliveries,
-} from '../../src/durable-objects/project-data/prompt-delivery';
-import { runPromptDeliveryClaim } from '../../src/durable-objects/project-data/prompt-delivery-runner';
-import type { SessionWakeReadyInput } from '../../src/durable-objects/project-data/session-wake-ready';
 import { notifyWakeSettled } from '../../src/durable-objects/task-runner/wake-progress-notifier';
 import type { Env } from '../../src/env';
 import { getNodeBackendBaseUrl } from '../../src/services/node-agent-readiness';
