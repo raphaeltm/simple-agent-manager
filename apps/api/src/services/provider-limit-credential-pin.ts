@@ -3,6 +3,7 @@ import {
   type ProviderLimitWait,
 } from '@simple-agent-manager/scheduler-core';
 import { drizzle } from 'drizzle-orm/d1';
+import * as v from 'valibot';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
@@ -16,15 +17,54 @@ import {
 } from './workspace-callback-identity';
 import { resolveWorkspaceRuntimeIds } from './workspace-runtime-assets';
 
-type ProviderLimitPinTask = WorkspaceCallbackIdentitySnapshot & {
-  id: string | null;
-  taskStatus: string | null;
-  taskStartedAt: string | null;
-  agent_profile_hint: string | null;
-  skill_id: string | null;
-  admission_state: string | null;
-  provider_limit_wait_json: string | null;
-};
+const nullableString = v.nullable(v.string());
+const identityString = v.pipe(v.string(), v.minLength(1));
+const ProviderLimitPinTaskSchema = v.pipe(
+  v.object({
+    id: v.nullable(identityString),
+    taskStatus: nullableString,
+    taskStartedAt: nullableString,
+    agent_profile_hint: nullableString,
+    skill_id: nullableString,
+    admission_state: nullableString,
+    provider_limit_wait_json: nullableString,
+    workspaceId: identityString,
+    userId: identityString,
+    projectId: nullableString,
+    chatSessionId: nullableString,
+    status: v.string(),
+    nodeId: nullableString,
+    nodeStatus: nullableString,
+    callbackGeneration: nullableString,
+  }),
+  // A missing joined task is legitimate only when every joined task field is NULL.
+  v.check(
+    (row) =>
+      row.id !== null ||
+      [
+        row.taskStatus,
+        row.taskStartedAt,
+        row.agent_profile_hint,
+        row.skill_id,
+        row.admission_state,
+        row.provider_limit_wait_json,
+      ].every((value) => value === null)
+  )
+);
+type ProviderLimitPinTask = v.InferOutput<typeof ProviderLimitPinTaskSchema>;
+const ScopedPinGenerationSchema = v.object({
+  credentialGeneration: v.pipe(
+    v.number(),
+    v.integer(),
+    v.minValue(0),
+    v.maxValue(Number.MAX_SAFE_INTEGER)
+  ),
+});
+
+function pinStateUnavailable() {
+  // Never expose validation issues: these rows can contain credential-adjacent state.
+  return errors.conflict('Provider credential recovery state is unavailable; retry shortly');
+}
 
 type ProviderLimitPinRequest = {
   workspaceId: string;
@@ -59,11 +99,12 @@ export async function assertProviderLimitCredentialPin(
       WHERE w.id = ?`
   )
     .bind(workspaceId)
-    .all<ProviderLimitPinTask>();
-  if (
-    expectedWorkspace &&
-    (!tasks.results[0] || !sameWorkspaceCallbackIdentity(tasks.results[0], expectedWorkspace))
-  )
+    .all();
+  const parsed = v.safeParse(v.array(ProviderLimitPinTaskSchema), tasks.results);
+  // This is an authorization set, not a display list: skipping a bad row could omit a hold.
+  if (!parsed.success) throw pinStateUnavailable();
+  const rows = parsed.output;
+  if (expectedWorkspace && (!rows[0] || !sameWorkspaceCallbackIdentity(rows[0], expectedWorkspace)))
     throw errors.gone('Workspace callback identity changed; callback resource is gone');
   const request = {
     workspaceId,
@@ -74,7 +115,7 @@ export async function assertProviderLimitCredentialPin(
     finalInjection,
   };
   // Preserve first-conflict ordering: later tasks must not mutate after a refusal.
-  await tasks.results.reduce<Promise<void>>(
+  await rows.reduce<Promise<void>>(
     (previous, task) => previous.then(() => assertTaskCredentialPin(env, task, request)),
     Promise.resolve()
   );
@@ -157,7 +198,9 @@ async function assertTaskCredentialPin(
     reason = 'Blocked: selected provider credential changed; review before resuming.';
   await env.DATABASE.prepare(
     `UPDATE tasks SET provider_limit_wait_json = ?, admission_state = 'provider_limit_blocked', admission_reason = ?, admission_next_retry_at = NULL
-    WHERE id = ? AND workspace_id = ? AND status IN ('queued','delegated','in_progress','sleeping') AND provider_limit_wait_json IS ?`
+    WHERE id = ? AND workspace_id = ? AND status IS ? AND started_at IS ?
+      AND status IN ('queued','delegated','in_progress','sleeping')
+      AND admission_state IS ? AND provider_limit_wait_json IS ?`
   )
     .bind(
       wait
@@ -166,6 +209,9 @@ async function assertTaskCredentialPin(
       reason,
       task.id,
       workspaceId,
+      task.taskStatus,
+      task.taskStartedAt,
+      task.admission_state,
       task.provider_limit_wait_json
     )
     .run();
@@ -272,12 +318,16 @@ async function readCurrentScopedPin(
   request: ProviderLimitPinRequest
 ) {
   const scope = scopedPinPredicate(task, request);
-  return env.DATABASE.prepare(
+  const row = await env.DATABASE.prepare(
     `SELECT a.agent_credential_generation AS credentialGeneration ${scope.sql}
     ORDER BY a.updated_at DESC, a.created_at DESC LIMIT 1`
   )
     .bind(...scope.values)
-    .first<{ credentialGeneration: number }>();
+    .first();
+  if (row === null) return null;
+  const parsed = v.safeParse(ScopedPinGenerationSchema, row);
+  if (!parsed.success) throw pinStateUnavailable();
+  return parsed.output;
 }
 
 function hasPriorInjection(

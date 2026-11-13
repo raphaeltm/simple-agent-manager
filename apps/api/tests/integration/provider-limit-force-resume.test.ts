@@ -239,7 +239,16 @@ describe('callback provider hold owner force resume', () => {
     );
     const response = await resume();
     expect(response.status, await response.clone().text()).toBe(202);
-    expect(boundary.nudge).not.toHaveBeenCalled();
+    expect(boundary.nudge).toHaveBeenCalledOnce();
+    expect(boundary.nudge.mock.calls[0]?.slice(1)).toEqual([
+      'task-1',
+      'Confirm owner-approved recovery runner',
+      expect.objectContaining({
+        receipt: task().provider_limit_wait_json,
+        ownerUserId: 'user-1',
+        snapshotId: 'snapshot-1',
+      }),
+    ]);
     expect(boundary.start).toHaveBeenCalledOnce();
     expect(boundary.start.mock.calls[0]?.[1]).toMatchObject({
       taskId: 'task-1',

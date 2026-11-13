@@ -1,6 +1,4 @@
-import {
-  PlacementResolutionError,
-} from '@simple-agent-manager/scheduler-core';
+import { PlacementResolutionError } from '@simple-agent-manager/scheduler-core';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -59,7 +57,8 @@ async function reactivateSleepingTask(
   taskId: string,
   placementResolution: RecoveryPlacementResolution,
   recoveryAttemptId: string,
-  sourceTaskGuard?: SessionRecoverySourceTaskGuard
+  sourceTaskGuard?: SessionRecoverySourceTaskGuard,
+  sleepingRepair?: { workspaceId: string | null }
 ): Promise<schema.Task> {
   const existing = await db.select().from(schema.tasks).where(eq(schema.tasks.id, taskId)).get();
   if (!existing || existing.projectId !== context.project.id) {
@@ -108,6 +107,7 @@ async function reactivateSleepingTask(
             WHERE id = ?
               AND project_id = ?
               AND (? = 0 OR status NOT IN ('completed', 'failed', 'cancelled'))
+              ${sleepingRepair ? "AND status = 'sleeping' AND workspace_id IS ?" : ''}
               ${approvalFence.sql}
               AND EXISTS (
                 SELECT 1 FROM session_snapshots snapshot
@@ -131,6 +131,7 @@ async function reactivateSleepingTask(
           taskId,
           context.project.id,
           sourceTaskGuard ? 1 : 0,
+          ...(sleepingRepair ? [sleepingRepair.workspaceId] : []),
           ...approvalFence.params,
           chatSessionId,
           recoveryAttemptId,
@@ -450,8 +451,10 @@ export async function startMissingSessionRecoveryRunner(
     context.snapshot.recoveryTaskId !== guard.taskId ||
     context.snapshot.recoveryAttemptId !== recoveryAttemptId ||
     context.sourceTask?.id !== guard.taskId ||
-    !['queued', 'delegated'].includes(context.sourceTask.status) ||
-    context.sourceTask.workspaceId !== null
+    !['sleeping', 'queued', 'delegated'].includes(context.sourceTask.status) ||
+    (context.sourceTask.workspaceId !== null &&
+      (context.sourceTask.status !== 'sleeping' ||
+        context.sourceTask.workspaceId !== context.snapshot.workspaceId))
   )
     return unavailable;
   await assertReplacementDeletionConfirmed(env, {
@@ -464,7 +467,9 @@ export async function startMissingSessionRecoveryRunner(
   const approvalFence = providerLimitRecoveryApprovalD1Fence('tasks', guard.providerLimitApproval);
   const current = await env.DATABASE.prepare(
     `SELECT 1 AS valid FROM tasks
-     WHERE id=? AND project_id=? AND chat_session_id=? AND status IN ('queued','delegated') AND workspace_id IS NULL
+     WHERE id=? AND project_id=? AND chat_session_id=?
+       AND ((status IN ('queued','delegated') AND workspace_id IS NULL)
+         OR (status='sleeping' AND (workspace_id IS NULL OR workspace_id=?)))
        ${approvalFence.sql}
        AND EXISTS (SELECT 1 FROM session_snapshots snapshot WHERE snapshot.id=?
          AND snapshot.project_id=tasks.project_id AND snapshot.chat_session_id=tasks.chat_session_id
@@ -479,6 +484,7 @@ export async function startMissingSessionRecoveryRunner(
       guard.taskId,
       projectId,
       chatSessionId,
+      context.snapshot.workspaceId,
       ...approvalFence.params,
       context.snapshot.id,
       context.snapshot.updatedAt,
@@ -487,10 +493,24 @@ export async function startMissingSessionRecoveryRunner(
     )
     .first();
   if (current?.valid !== 1) return unavailable;
+  const recoveryTask =
+    context.sourceTask.status === 'sleeping'
+      ? await reactivateSleepingTask(
+          env.DATABASE,
+          db,
+          context,
+          chatSessionId,
+          guard.taskId,
+          placement,
+          recoveryAttemptId,
+          guard,
+          { workspaceId: context.sourceTask.workspaceId }
+        )
+      : context.sourceTask;
   await startRecoveryTask(
     env,
     context,
-    context.sourceTask,
+    recoveryTask,
     chatSessionId,
     placement,
     guard,

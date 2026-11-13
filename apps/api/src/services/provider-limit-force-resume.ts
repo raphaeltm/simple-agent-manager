@@ -17,6 +17,7 @@ import {
 } from './provider-limit-approval-context';
 import {
   loadProviderLimitRecoveryApproval,
+  type ProviderLimitRecoveryApproval,
   providerLimitRecoveryApprovalD1Fence,
 } from './provider-limit-recovery-approval';
 import { requireSessionWriter } from './session-access';
@@ -176,6 +177,7 @@ export async function forceResumeSavedProviderLimitTask(
 
   // Never clear a claim, even when an RPC response is lost. The normal runner's
   // authority checks and alarms own restoration and receipt reconciliation.
+  let confirmedRecoveryAttemptId = snapshot.recovery_attempt_id;
   if (snapshot.recovery_status === 'waking') {
     let nudged: boolean;
     try {
@@ -192,33 +194,22 @@ export async function forceResumeSavedProviderLimitTask(
       await handleRefusedRecoveryNudge(env, task, snapshot.recovery_attempt_id, restoreHold);
     }
   } else {
-    let result: SessionRecoveryResult;
-    try {
-      result = await ensureSessionRecovery(env, task.projectId, task.chatSessionId, {
-        taskId: task.id,
-        projectId: task.projectId,
-        chatSessionId: task.chatSessionId,
-        requiredProjectMemberId: ownerUserId,
-        providerLimitApproval: recoveryApproval,
-      });
-    } catch {
-      // A lookup can fail before recovery acquires any claim. Restore only if
-      // the original claim is still ours (or this wake definitively failed);
-      // an advanced/ambiguous claim keeps its accepted override.
-      await restoreHold();
-      throw errors.conflict('Recovery did not confirm; refresh and try again shortly');
-    }
-    if (result.status !== 'waking') {
-      await restoreHold();
-      throw errors.conflict(`Unable to resume the saved task: ${result.reason}`);
-    }
+    confirmedRecoveryAttemptId = await ensureApprovedRecoveryRunner(
+      env,
+      task,
+      task.chatSessionId,
+      recoveryApproval,
+      restoreHold
+    );
   }
+  if (!confirmedRecoveryAttemptId)
+    throw errors.conflict('Resume accepted, but the runner did not confirm; refresh shortly');
   await acknowledgeProviderLimitRecovery(
     env,
     task.id,
     overridden,
     false,
-    snapshot.recovery_status === 'waking' ? snapshot.recovery_attempt_id : undefined
+    confirmedRecoveryAttemptId
   );
   await projectData
     .syncProviderLimitAttention(env, task.projectId, task.id, task.chatSessionId)
@@ -252,6 +243,66 @@ export async function forceResumeSavedProviderLimitTask(
       )
       .run();
   }
+}
+
+/** A waking claim is not a runner receipt. Confirm one exact attempt before ACK. */
+export async function confirmProviderLimitRecoveryRunner(
+  env: Env,
+  taskId: string,
+  projectId: string,
+  chatSessionId: string,
+  approval: ProviderLimitRecoveryApproval
+): Promise<string | null> {
+  const claim = await env.DATABASE.prepare(
+    `SELECT recovery_attempt_id FROM session_snapshots
+     WHERE id=? AND project_id=? AND chat_session_id=? AND user_id=?
+       AND recovery_task_id=? AND recovery_status IN ('waking','restored')`
+  )
+    .bind(approval.snapshotId, projectId, chatSessionId, approval.ownerUserId, taskId)
+    .first();
+  const attempt = claim?.recovery_attempt_id;
+  if (typeof attempt !== 'string' || !attempt) return null;
+  return (await nudgeTaskRunnerDO(env, taskId, 'Confirm owner-approved recovery runner', approval))
+    ? attempt
+    : null;
+}
+
+async function ensureApprovedRecoveryRunner(
+  env: Env,
+  task: schema.Task,
+  chatSessionId: string,
+  approval: ProviderLimitRecoveryApproval,
+  restoreHold: () => Promise<void>
+): Promise<string> {
+  let result: SessionRecoveryResult;
+  try {
+    result = await ensureSessionRecovery(env, task.projectId, chatSessionId, {
+      taskId: task.id,
+      projectId: task.projectId,
+      chatSessionId,
+      requiredProjectMemberId: approval.ownerUserId,
+      providerLimitApproval: approval,
+    });
+  } catch {
+    await restoreHold();
+    throw errors.conflict('Recovery did not confirm; refresh and try again shortly');
+  }
+  if (result.status !== 'waking') {
+    await restoreHold();
+    throw errors.conflict(`Unable to resume the saved task: ${result.reason}`);
+  }
+  // An existing/raced claim can return waking before any runner was created.
+  // Lost/negative confirmation keeps accepted consent for the bounded repair.
+  const attempt = await confirmProviderLimitRecoveryRunner(
+    env,
+    task.id,
+    task.projectId,
+    chatSessionId,
+    approval
+  ).catch(() => null);
+  if (!attempt)
+    throw errors.conflict('Resume accepted, but the runner did not confirm; refresh shortly');
+  return attempt;
 }
 
 async function handleRefusedRecoveryNudge(
@@ -289,6 +340,11 @@ export async function acknowledgeProviderLimitRecovery(
   requireCommittedRun = false,
   expectedRecoveryAttemptId?: string | null
 ) {
+  if (
+    !requireCommittedRun &&
+    (typeof expectedRecoveryAttemptId !== 'string' || !expectedRecoveryAttemptId)
+  )
+    return;
   const approval = await loadProviderLimitRecoveryApproval(env, taskId, receipt);
   if (!approval) return;
   const fence = providerLimitRecoveryApprovalD1Fence('tasks', approval, true, requireCommittedRun);
@@ -302,6 +358,8 @@ export async function acknowledgeProviderLimitRecovery(
       WHERE acknowledged_snapshot.id=? AND acknowledged_snapshot.project_id=tasks.project_id
         AND acknowledged_snapshot.chat_session_id=tasks.chat_session_id
         AND acknowledged_snapshot.user_id=tasks.user_id
+        AND acknowledged_snapshot.recovery_task_id=tasks.id
+        AND acknowledged_snapshot.recovery_status IN ('waking','restored')
         AND acknowledged_snapshot.recovery_attempt_id IS ?)`,
           params: [approval.snapshotId, expectedRecoveryAttemptId],
         };

@@ -84,6 +84,51 @@ describe('provider wait credential pin at the authenticated secret injection rou
       env
     );
   }
+  function changePinRows(transform: (row: Record<string, unknown>) => Record<string, unknown>) {
+    const prepare = env.DATABASE.prepare.bind(env.DATABASE);
+    env.DATABASE.prepare = ((query: string) => {
+      const statement = prepare(query);
+      if (!query.includes('SELECT t.id, t.admission_state')) return statement;
+      const bind = statement.bind.bind(statement);
+      statement.bind = ((...values: unknown[]) => {
+        const bound = bind(...values);
+        const all = bound.all.bind(bound);
+        bound.all = (async () => {
+          const result = await all();
+          return { ...result, results: result.results.map(transform) };
+        }) as typeof bound.all;
+        return bound;
+      }) as typeof statement.bind;
+      return statement;
+    }) as typeof env.DATABASE.prepare;
+  }
+
+  it.each([
+    ['missing task identity', { id: undefined }],
+    ['empty task identity', { id: '' }],
+    ['null task identity with a hold', { id: null }],
+    ['malformed hold value', { provider_limit_wait_json: { secret: key.secret } }],
+    ['malformed workspace identity', { callbackGeneration: 123 }],
+    ['malformed task state', { admission_state: 123 }],
+  ])('withholds the secret for %s in a D1 pin row', async (_label, mutation) => {
+    pin('cc_credentials:pinned');
+    changePinRows((row) => ({ ...row, ...mutation }));
+    const response = await inject();
+    expect(response.status).toBe(409);
+    const body = await response.text();
+    expect(body).not.toContain(key.secret);
+    expect(body).toContain('Provider credential recovery state is unavailable');
+    expect(sqlite.prepare('SELECT agent_credential_generation FROM agent_sessions').get()).toEqual({
+      agent_credential_generation: 0,
+    });
+  });
+
+  it('preserves the no-task LEFT JOIN result for an ordinary workspace', async () => {
+    const response = await inject();
+    expect(response.status, await response.clone().text()).toBe(200);
+    expect(await response.json()).toMatchObject({ apiKey: key.secret });
+  });
+
   describe('scoped callback approval at credential injection', () => {
     function scopedApproval() {
       pin('cc_credentials:pinned');
@@ -116,6 +161,55 @@ describe('provider wait credential pin at the authenticated secret injection rou
       sqlite.prepare('UPDATE tasks SET provider_limit_wait_json=?').run(JSON.stringify(approved));
       return JSON.stringify(approved);
     }
+
+    it.each(['2', -1, 1.5, Number.MAX_SAFE_INTEGER + 1, null])(
+      'withholds the secret for malformed D1 credential generation %s',
+      async (credentialGeneration) => {
+        const approved = scopedApproval();
+        const prepare = env.DATABASE.prepare.bind(env.DATABASE);
+        env.DATABASE.prepare = ((query: string) => {
+          const statement = prepare(query);
+          if (!query.includes('SELECT a.agent_credential_generation AS credentialGeneration'))
+            return statement;
+          const bind = statement.bind.bind(statement);
+          statement.bind = ((...values: unknown[]) => {
+            const bound = bind(...values);
+            bound.first = (async () => ({ credentialGeneration })) as typeof bound.first;
+            return bound;
+          }) as typeof statement.bind;
+          return statement;
+        }) as typeof env.DATABASE.prepare;
+        const response = await inject();
+        expect(response.status).toBe(409);
+        const body = await response.text();
+        expect(body).not.toContain(key.secret);
+        expect(body).toContain('Provider credential recovery state is unavailable');
+        expect(sqlite.prepare('SELECT provider_limit_wait_json AS value FROM tasks').get()).toEqual(
+          {
+            value: approved,
+          }
+        );
+      }
+    );
+
+    it('withholds a stale response without revoking consent after the task commits', async () => {
+      const approved = scopedApproval();
+      beforeMarkerAuthorization(() => {
+        sqlite
+          .prepare("UPDATE tasks SET status='in_progress',started_at=?")
+          .run(new Date().toISOString());
+      });
+      const response = await inject();
+      expect(response.status).toBe(409);
+      expect(await response.text()).not.toContain(key.secret);
+      expect(
+        sqlite.prepare('SELECT status,admission_state,provider_limit_wait_json FROM tasks').get()
+      ).toEqual({
+        status: 'in_progress',
+        admission_state: null,
+        provider_limit_wait_json: approved,
+      });
+    });
 
     it('injects only the approved account and records final authorization without editing the rejected window', async () => {
       const approved = scopedApproval();

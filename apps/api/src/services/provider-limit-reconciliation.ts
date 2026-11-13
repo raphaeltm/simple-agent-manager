@@ -7,6 +7,7 @@ import {
   DEFAULT_TASK_RUN_ABSOLUTE_CEILING_MS,
   DEFAULT_TASK_RUN_ABSOLUTE_CEILING_SLEEP_GRACE_MS,
 } from '@simple-agent-manager/shared';
+import { maybeJsonRecord } from '@simple-agent-manager/worker-core';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -26,11 +27,16 @@ import {
   parseProviderLimitSnapshotRow,
   resolveProviderLimitProfileId,
 } from './provider-limit-approval-context';
-import { acknowledgeProviderLimitRecovery } from './provider-limit-force-resume';
+import {
+  acknowledgeProviderLimitRecovery,
+  confirmProviderLimitRecoveryRunner,
+} from './provider-limit-force-resume';
 import { repairProviderLimitIntents } from './provider-limit-parking';
 import { presentBlockedProviderLimitWait } from './provider-limit-recovery';
 import {
+  loadProviderLimitRecoveryApproval,
   type ProviderLimitRecoveryApproval,
+  providerLimitRecoveryApprovalD1Fence,
   providerLimitRecoveryApprovalIsCurrent,
 } from './provider-limit-recovery-approval';
 import { requireSessionWriter } from './session-access';
@@ -73,6 +79,11 @@ export async function preserveProviderLimitWait(
       !['sleeping', 'queued', 'delegated'].includes(task.status)
     )
       return false;
+    if (
+      task.workspaceId &&
+      (await providerLimitComputeCeiling(env, task, wait, now)).kind === 'terminalize'
+    )
+      return false;
     await repairOwnerApprovedRecovery(env, task, wait, now);
     return true;
   }
@@ -103,7 +114,17 @@ export async function preserveProviderLimitWait(
   if (!task.workspaceId) return true;
   // A failed sleep remains visibly blocked without check-ins or stall diagnosis.
   // Only the existing absolute compute ceiling can terminalize retained compute.
-  const ceiling = await evaluateRunawayCostCeiling(
+  return (await providerLimitComputeCeiling(env, task, current, now)).kind !== 'terminalize';
+}
+
+/** The same compute budget applies before every pending or held repair. */
+function providerLimitComputeCeiling(
+  env: Env,
+  task: schema.Task,
+  wait: ProviderLimitWait,
+  now: number
+) {
+  return evaluateRunawayCostCeiling(
     env,
     {
       id: task.id,
@@ -113,7 +134,7 @@ export async function preserveProviderLimitWait(
       startedAtMs:
         task.startedAt || task.createdAt
           ? Date.parse(task.startedAt ?? task.createdAt)
-          : current.observedAt,
+          : wait.observedAt,
     },
     {
       nowMs: now,
@@ -127,7 +148,6 @@ export async function preserveProviderLimitWait(
       ),
     }
   );
-  return ceiling.kind !== 'terminalize';
 }
 
 /** The owner's release and this intent share one task-row CAS. A worker crash
@@ -145,6 +165,10 @@ async function repairOwnerApprovedRecovery(
   const permittedStatus = ['sleeping', 'queued', 'delegated'].includes(task.status);
   if (!permittedStatus) return;
   let valid = pendingApprovalMatchesTask(task, wait, now);
+  // Restore commits before the runner transitions the task to in_progress.
+  // Preserve this bounded intent while that exact runner finishes; this read
+  // neither acknowledges consent nor authorizes any new recovery side effect.
+  if (valid && (await materializedOwnerRecoveryIsCurrent(env, task, receipt))) return;
   // Resolve canonical profile IDs here too: the task's raw hint is not an ID.
   const profileId = await resolveProviderLimitProfileId(db, env, {
     projectId: task.projectId,
@@ -222,6 +246,56 @@ async function repairOwnerApprovedRecovery(
     return;
   }
   await dispatchOwnerApprovedRecovery(env, task, wait, snapshot, receipt, task.chatSessionId);
+}
+
+/** A materialized or completed restore still belongs to its exact live recovery attempt. */
+async function materializedOwnerRecoveryIsCurrent(
+  env: Env,
+  task: schema.Task,
+  receipt: string
+): Promise<boolean> {
+  const approval = await loadProviderLimitRecoveryApproval(env, task.id, receipt);
+  if (!approval) return false;
+  const fence = providerLimitRecoveryApprovalD1Fence('t', approval);
+  const restored = await env.DATABASE.prepare(
+    `SELECT s.recovery_attempt_id AS attempt FROM tasks t JOIN session_snapshots s
+       ON s.id=? AND s.project_id=t.project_id AND s.chat_session_id=t.chat_session_id AND s.user_id=t.user_id
+     WHERE t.id=? AND t.project_id=? AND t.user_id=? AND t.status IN ('queued','delegated')
+       AND t.admission_state='provider_limit_recovery_pending' AND t.provider_limit_wait_json IS ?
+       AND s.recovery_status IN ('waking','restored') AND s.recovery_task_id=t.id
+       AND s.recovery_attempt_id IS NOT NULL AND s.recovery_attempt_id!=''
+       AND s.recovery_workspace_id=t.workspace_id
+       ${fence.sql}`
+  )
+    .bind(approval.snapshotId, task.id, task.projectId, task.userId, receipt, ...fence.params)
+    .first<unknown>();
+  if (
+    !restored ||
+    typeof restored !== 'object' ||
+    !('attempt' in restored) ||
+    typeof restored.attempt !== 'string'
+  )
+    return false;
+  const observed = await withinRecoveryRpcBudget(env, async () => ({
+    status: await getTaskRunnerStatus(env, task.id),
+  })).catch(() => false as const);
+  // This D1 scope is valid, but an unavailable runner cannot prove revocation.
+  // Defer without ACK or new work; consent's original deadline still applies.
+  if (!observed) return true;
+  const status = maybeJsonRecord(observed.status);
+  if (
+    !status ||
+    status.taskId !== task.id ||
+    status.projectId !== task.projectId ||
+    status.userId !== task.userId ||
+    status.completed !== false
+  )
+    return false;
+  const config = maybeJsonRecord(status.config);
+  return (
+    config?.recoveryAttemptId === restored.attempt &&
+    config.resumeSnapshotChatSessionId === task.chatSessionId
+  );
 }
 
 type SavedProviderLimitSnapshot = NonNullable<ReturnType<typeof parseProviderLimitSnapshotRow>>;
@@ -374,7 +448,7 @@ async function dispatchOwnerApprovedRecovery(
           approval
         )
       )
-        return true;
+        return snapshot.recovery_attempt_id;
       const status = await getTaskRunnerStatus(env, task.id);
       if (
         !snapshot.recovery_attempt_id ||
@@ -400,7 +474,9 @@ async function dispatchOwnerApprovedRecovery(
         },
         snapshot.recovery_attempt_id
       );
-      return result.status === 'waking';
+      return result.status === 'waking'
+        ? confirmProviderLimitRecoveryRunner(env, task.id, task.projectId, chatSessionId, approval)
+        : null;
     }
     const result = await ensureSessionRecovery(env, task.projectId, chatSessionId, {
       taskId: task.id,
@@ -409,20 +485,16 @@ async function dispatchOwnerApprovedRecovery(
       requiredProjectMemberId: task.userId,
       providerLimitApproval: approval,
     });
-    return result.status === 'waking';
+    return result.status === 'waking'
+      ? confirmProviderLimitRecoveryRunner(env, task.id, task.projectId, chatSessionId, approval)
+      : null;
   });
   if (
     !accepted ||
     !(await providerLimitRecoveryApprovalIsCurrent(env, task.id, task.projectId, approval))
   )
     return;
-  await acknowledgeProviderLimitRecovery(
-    env,
-    task.id,
-    receipt,
-    false,
-    snapshot.recovery_status === 'waking' ? snapshot.recovery_attempt_id : undefined
-  );
+  await acknowledgeProviderLimitRecovery(env, task.id, receipt, false, accepted);
 }
 
 /** Persisted consent covers only this owner, task scope and original deadline. */
@@ -461,10 +533,10 @@ function profileMatchesApproval(
 }
 
 /** Timing out neither releases a claim nor revokes the owner's durable consent. */
-async function withinRecoveryRpcBudget(
+async function withinRecoveryRpcBudget<T>(
   env: Env,
-  operation: () => Promise<boolean>
-): Promise<boolean> {
+  operation: () => Promise<T>
+): Promise<T | false> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([

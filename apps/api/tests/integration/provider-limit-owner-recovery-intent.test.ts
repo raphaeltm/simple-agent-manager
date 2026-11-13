@@ -37,7 +37,10 @@ describe('durable owner-approved provider recovery', () => {
       "INSERT INTO chat_messages(id,session_id,role,content,created_at) VALUES ('original-message','chat-1','user','Deliver this original message once',1)"
     );
   });
-  afterEach(() => harness.close());
+  afterEach(() => {
+    harness.close();
+    vi.useRealTimers();
+  });
 
   async function interruptAfterRelease() {
     const prepare = env.DATABASE.prepare.bind(env.DATABASE);
@@ -118,7 +121,13 @@ describe('durable owner-approved provider recovery', () => {
       recoveryAttemptId: 'existing-claim',
       providerLimitRecoveryApproval: { receipt },
     });
-    expect(boundary.nudge).toHaveBeenCalledTimes(2);
+    expect(boundary.nudge).toHaveBeenCalledTimes(3);
+    expect(boundary.nudge.mock.calls[2]).toEqual([
+      env,
+      'task-1',
+      'Confirm owner-approved recovery runner',
+      expect.objectContaining({ receipt, ownerUserId: 'user-1', snapshotId: 'snapshot-1' }),
+    ]);
     expect(task()).toMatchObject({ admission_state: null, provider_limit_wait_json: receipt });
     expect(claim()).toEqual(retained);
   });
@@ -180,7 +189,13 @@ describe('durable owner-approved provider recovery', () => {
       recoveryAttemptId: 'existing-claim',
       providerLimitRecoveryApproval: { receipt },
     });
-    expect(boundary.nudge).toHaveBeenCalledTimes(2);
+    expect(boundary.nudge).toHaveBeenCalledTimes(3);
+    expect(boundary.nudge.mock.calls[2]).toEqual([
+      env,
+      'task-1',
+      'Confirm owner-approved recovery runner',
+      expect.objectContaining({ receipt, ownerUserId: 'user-1', snapshotId: 'snapshot-1' }),
+    ]);
     expect(task()).toMatchObject({ admission_state: null, provider_limit_wait_json: receipt });
     expect(claim()).toEqual(retained);
     await preserveProviderLimitWait(env, 'task-1', Date.now());
@@ -287,6 +302,145 @@ describe('durable owner-approved provider recovery', () => {
     expect(claim().recovery_attempt_id).toBe('next-claim');
   });
 
+  async function materializedRestore(recoveryStatus: 'waking' | 'restored') {
+    await interruptAfterRelease();
+    d1.exec(`INSERT INTO workspaces(id,user_id,project_id,node_id,status,created_at,updated_at)
+      VALUES ('replacement','user-1','project-1','node-1','running',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP);
+      INSERT INTO agent_sessions(id,user_id,workspace_id,status,agent_type,agent_profile_id,agent_credential_reference,agent_credential_generation)
+      VALUES ('replacement-agent','user-1','replacement','running','claude-code','profile-1','cc_credentials:account-1',1);
+      UPDATE tasks SET workspace_id='replacement';`);
+    d1.prepare(
+      `UPDATE session_snapshots SET recovery_status=?,recovery_workspace_id='replacement',
+      sleeping_at=CASE WHEN ?='restored' THEN NULL ELSE sleeping_at END,
+      sleep_status=CASE WHEN ?='restored' THEN NULL ELSE sleep_status END`
+    ).run(recoveryStatus, recoveryStatus, recoveryStatus);
+    boundary.sql.exec("UPDATE chat_sessions SET status='active',workspace_id='replacement'");
+    const runner = {
+      taskId: 'task-1',
+      projectId: 'project-1',
+      userId: 'user-1',
+      completed: false,
+      currentStep: 'agent_session',
+      config: { recoveryAttemptId: 'existing-claim', resumeSnapshotChatSessionId: 'chat-1' },
+    };
+    boundary.status.mockResolvedValue(runner);
+    return runner;
+  }
+
+  it.each(['queued', 'delegated'] as const)(
+    'retains bounded %s consent while its exact runner finishes a materialized restore',
+    async (status) => {
+      for (const recoveryStatus of ['waking', 'restored'] as const) {
+        // The two observations are successive real commit states of the same run.
+        if (recoveryStatus === 'waking') await materializedRestore(recoveryStatus);
+        else
+          d1.exec(
+            "UPDATE session_snapshots SET recovery_status='restored',sleeping_at=NULL,sleep_status=NULL"
+          );
+        d1.prepare("UPDATE tasks SET status=? WHERE id='task-1'").run(status);
+        const before = task();
+        const retained = claim();
+        expect(getSession(boundary.sql, 'chat-1')?.status).toBe('active');
+        expect(await preserveProviderLimitWait(env, 'task-1', Date.now())).toBe(true);
+        expect(task()).toEqual(before);
+        expect(wait().ownerOverride?.recoveryPending).toBe(true);
+        expect(claim()).toEqual(retained);
+        expect(boundary.nudge).not.toHaveBeenCalled();
+        expect(boundary.start).not.toHaveBeenCalled();
+      }
+    }
+  );
+
+  it.each(['stalled', 'transport failure'] as const)(
+    'retains valid materialized consent within the RPC budget when runner status is %s',
+    async (failure) => {
+      await materializedRestore('restored');
+      env.PROMPT_DELIVERY_BACKGROUND_TIMEOUT_MS = '10';
+      if (failure === 'stalled')
+        boundary.status.mockImplementationOnce(() => new Promise(() => {}));
+      else boundary.status.mockRejectedValueOnce(new Error('runner status transport unavailable'));
+      const before = task();
+      const retained = claim();
+      let watchdog: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const bounded = new Promise<never>((_resolve, reject) => {
+          watchdog = setTimeout(
+            () => reject(new Error('Materialized runner probe exceeded its bounded RPC wait')),
+            1000
+          );
+        });
+        expect(
+          await Promise.race([preserveProviderLimitWait(env, 'task-1', Date.now()), bounded])
+        ).toBe(true);
+      } finally {
+        if (watchdog) clearTimeout(watchdog);
+      }
+      expect(boundary.status).toHaveBeenCalledOnce();
+      expect(task()).toEqual(before);
+      expect(claim()).toEqual(retained);
+      expect(wait().ownerOverride?.recoveryPending).toBe(true);
+      expect(boundary.nudge).not.toHaveBeenCalled();
+      expect(boundary.start).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    'task',
+    'project',
+    'owner',
+    'attempt',
+    'session',
+    'completed',
+    'missing completion',
+    'missing runner',
+    'membership',
+  ])(
+    'does not treat a restored snapshot with foreign or revoked %s evidence as its live runner',
+    async (mismatch) => {
+      const runner = await materializedRestore('restored');
+      if (mismatch === 'task') runner.taskId = 'foreign-task';
+      if (mismatch === 'project') runner.projectId = 'foreign-project';
+      if (mismatch === 'owner') runner.userId = 'foreign-owner';
+      if (mismatch === 'attempt') runner.config.recoveryAttemptId = 'foreign-attempt';
+      if (mismatch === 'session') runner.config.resumeSnapshotChatSessionId = 'foreign-session';
+      if (mismatch === 'completed') runner.completed = true;
+      if (mismatch === 'missing completion')
+        boundary.status.mockResolvedValue({ ...runner, completed: undefined });
+      if (mismatch === 'missing runner') boundary.status.mockResolvedValue(null);
+      if (mismatch === 'membership') d1.exec("UPDATE project_members SET status='removed'");
+      const retained = claim();
+      await preserveProviderLimitWait(env, 'task-1', Date.now());
+      expect(task().admission_state).toBe('provider_limit_blocked');
+      expect(wait().ownerOverride).toBeUndefined();
+      expect(claim()).toEqual(retained);
+      expect(boundary.nudge).not.toHaveBeenCalled();
+      expect(boundary.start).not.toHaveBeenCalled();
+    }
+  );
+
+  it('applies the real allocated-runtime cost ceiling before repairing released pending consent', async () => {
+    const receipt = await interruptAfterRelease();
+    const now = Date.now();
+    d1.prepare("UPDATE workspaces SET status='running',created_at=? WHERE id='workspace-1'").run(
+      new Date(now - 60_000).toISOString()
+    );
+    d1.exec(
+      "UPDATE tasks SET workspace_id='workspace-1'; UPDATE session_snapshots SET status='failed',sleeping_at=NULL,sleep_status=NULL"
+    );
+    env.TASK_RUN_ABSOLUTE_CEILING_MS = '1000';
+    env.TASK_RUN_ABSOLUTE_CEILING_SLEEP_GRACE_MS = '1000';
+    const retained = claim();
+    expect(await preserveProviderLimitWait(env, 'task-1', now)).toBe(false);
+    expect(task()).toMatchObject({
+      status: 'queued',
+      admission_state: 'provider_limit_recovery_pending',
+      provider_limit_wait_json: receipt,
+    });
+    expect(claim()).toEqual(retained);
+    expect(boundary.nudge).not.toHaveBeenCalled();
+    expect(boundary.start).not.toHaveBeenCalled();
+  });
+
   it('does not acknowledge a late nudge after its background wait timed out', async () => {
     const receipt = await interruptAfterRelease();
     const retained = claim();
@@ -324,18 +478,30 @@ describe('durable owner-approved provider recovery', () => {
   ])(
     'the exact approval fences late recovery for %s after a timed-out lookup',
     async (_label, mutation) => {
+      const initialTime = Date.now();
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(initialTime);
+      // Advance the atomic SQL consent fence and JS together, independently of
+      // machine speed. Only the gated expiry case advances either clock.
+      d1.function('julianday', { varargs: true }, (...args: unknown[]) => {
+        let milliseconds = Date.parse(String(args[0]));
+        if (args[0] === 'now') milliseconds = Date.now();
+        else if (args[1] === 'unixepoch') milliseconds = Number(args[0]) * 1000;
+        return milliseconds / 86_400_000 + 2_440_587.5;
+      });
       d1.exec(
         "UPDATE workspaces SET runtime_deletion_confirmed_at=CURRENT_TIMESTAMP; UPDATE tasks SET status='sleeping',workspace_id='workspace-1'; UPDATE session_snapshots SET recovery_status=NULL,recovery_task_id=NULL,recovery_attempt_id=NULL"
       );
       if (_label === 'expired approval') {
         const held = wait();
         d1.prepare("UPDATE tasks SET provider_limit_wait_json=? WHERE id='task-1'").run(
-          JSON.stringify({ ...held, deadlineAt: Date.now() + 120 })
+          JSON.stringify({ ...held, deadlineAt: initialTime + 60_000 })
         );
       }
       await interruptAfterRelease();
       env.PROMPT_DELIVERY_BACKGROUND_TIMEOUT_MS = '10';
       const prepare = env.DATABASE.prepare.bind(env.DATABASE);
+      let lookupEntered = false;
       let finish!: () => void;
       let complete!: () => void;
       const completed = new Promise<void>((resolve) => {
@@ -353,6 +519,7 @@ describe('durable owner-approved provider recovery', () => {
           const raw = bound.raw.bind(bound);
           bound.raw = (async (...args: Parameters<typeof raw>) => {
             const value = await raw(...args);
+            lookupEntered = true;
             await gate;
             complete();
             return value;
@@ -362,8 +529,9 @@ describe('durable owner-approved provider recovery', () => {
         return statement;
       });
       await preserveProviderLimitWait(env, 'task-1', Date.now());
+      expect(lookupEntered).toBe(true);
       if (mutation) d1.exec(mutation);
-      if (_label === 'expired approval') await new Promise((resolve) => setTimeout(resolve, 140));
+      if (_label === 'expired approval') vi.setSystemTime(initialTime + 60_001);
       const retained = claim();
       const receipt = task().provider_limit_wait_json;
       finish();
@@ -371,7 +539,14 @@ describe('durable owner-approved provider recovery', () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
       fault.mockRestore();
       expect(boundary.start).toHaveBeenCalledTimes(_label === 'unchanged approval' ? 1 : 0);
-      expect(boundary.nudge).not.toHaveBeenCalled();
+      expect(boundary.nudge).toHaveBeenCalledTimes(_label === 'unchanged approval' ? 1 : 0);
+      if (_label === 'unchanged approval')
+        expect(boundary.nudge.mock.calls[0]).toEqual([
+          env,
+          'task-1',
+          'Confirm owner-approved recovery runner',
+          expect.objectContaining({ receipt, ownerUserId: 'user-1', snapshotId: 'snapshot-1' }),
+        ]);
       expect(task().provider_limit_wait_json).toBe(receipt);
       expect(task().admission_state).toBe('provider_limit_recovery_pending');
       // Refusal diagnostics may advance, but the snapshot, claim and retry budget cannot.
