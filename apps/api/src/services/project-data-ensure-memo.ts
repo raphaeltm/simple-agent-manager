@@ -71,7 +71,8 @@ export function getProjectDataEnsureMemoMaxEntries(env: ProjectDataEnsureMemoEnv
 
 /**
  * How many abandoned ensures one caller waits out before it runs its own without registering it.
- * Bounds the wait when every replacement's starter also loses its client. Internal safety margin.
+ * Bounds the wait when every replacement's starter also loses its client: at most
+ * 3 x (5 s + 1 s grace) = 18 s before that last ensure. Internal safety margin.
  */
 const MAX_ENSURE_JOIN_ATTEMPTS = 3;
 
@@ -122,6 +123,13 @@ async function ensureOnce(
     // waiter just registered.
     if (inFlight.get(doId) === pending) inFlight.delete(doId);
     return ensureOnce(env, doId, ensure, joinAttempt + 1);
+  }
+
+  if (pending) {
+    // Past the bound: run this caller's ensure unregistered, so it cannot displace a live entry.
+    await ensure();
+    remember(env, doId);
+    return;
   }
 
   const entry = {

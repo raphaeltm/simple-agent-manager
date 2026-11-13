@@ -20,13 +20,17 @@
  *
  * A reviewed exception carries `// shared-flight-join-allowed: <reason>` on the line above.
  *
- * Usage: tsx scripts/quality/check-shared-flight-joins.ts [--inventory] [--json]
+ * Usage: tsx scripts/quality/check-shared-flight-joins.ts [--inventory] [--json] [--file <path>...]
  *   --inventory  also list every module-scope variable whose type holds a promise (the audit)
+ *   --file       check only these files (type-checked with the API's tsconfig)
+ *
+ * Not covered (state it in review instead): `this` state inside a class (Durable Object fields),
+ * a module-scope promise handed to a helper that awaits it, and `for await` over one.
  */
 import { relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { type Node, Project, type SourceFile, SyntaxKind, ts,type Type } from 'ts-morph';
+import { type Node, Project, type SourceFile, SyntaxKind, ts, type Type } from 'ts-morph';
 
 const ROOT = resolve(fileURLToPath(import.meta.url), '../../..');
 
@@ -265,19 +269,35 @@ function loadProject(tsconfig: string, glob: string): SourceFile[] {
   ]);
 }
 
+function explicitFiles(argv: string[]): string[] {
+  return argv.flatMap((arg, index) => (argv[index - 1] === '--file' ? [resolve(arg)] : []));
+}
+
 function main(): void {
-  const args = new Set(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+  const args = new Set(argv);
+  const only = explicitFiles(argv);
   const findings: SharedFlightFinding[] = [];
   const holders: ModulePromiseHolder[] = [];
   let scanned = 0;
-  for (const { tsconfig, glob } of SCANNED_PROJECTS) {
+  const projects = only.length > 0 ? [] : SCANNED_PROJECTS;
+  if (only.length > 0) {
+    const project = new Project({
+      tsConfigFilePath: resolve(ROOT, SCANNED_PROJECTS[0].tsconfig),
+      skipAddingFilesFromTsConfig: true,
+    });
+    const files = only.map((path) => project.addSourceFileAtPath(path));
+    scanned = files.length;
+    findings.push(...findSharedFlightJoins(files));
+  }
+  for (const { tsconfig, glob } of projects) {
     const files = loadProject(tsconfig, glob);
     scanned += files.length;
     findings.push(...findSharedFlightJoins(files));
     if (args.has('--inventory')) holders.push(...listModulePromiseHolders(files));
   }
-  // A scan that read nothing would report "all clear"; refuse that (rule 02).
-  if (scanned < 500) {
+  // A full scan that read almost nothing would report "all clear"; refuse that (rule 02).
+  if (only.length === 0 && scanned < 500) {
     console.error(`shared-flight-joins: scanned only ${scanned} files; the glob is broken`);
     process.exit(1);
   }

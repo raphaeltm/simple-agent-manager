@@ -377,6 +377,37 @@ describe('CredentialSetupSession teardown — recovery alarm', () => {
     expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 0, cleanup_attempts: 0 });
   });
 
+  it('an alarm stops waiting on an inline cleanup that never settles, then resumes it itself', async () => {
+    // On celld the request that ran the inline cleanup can lose its client; its sandbox calls and
+    // their timeouts are dropped with it and never settle (lib/shared-flight.ts). The alarm waits
+    // only for the cleanup's own worst case (2 x exec timeout + 30 s), then runs it again.
+    const fixture = createFixture({ SANDBOX_EXEC_TIMEOUT_MS: '1000' });
+    const handle = await startSession(fixture, true);
+    vi.mocked(destroySandboxInstance)
+      .mockReset()
+      .mockImplementationOnce(() => new Promise(() => undefined))
+      .mockResolvedValue(undefined);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+
+    void handle.instance.cancel();
+    await vi.waitFor(() => expect(destroySandboxInstance).toHaveBeenCalledTimes(1));
+    let alarmDone = false;
+    const alarm = handle.instance.alarm().then(() => {
+      alarmDone = true;
+    });
+    // A live cleanup is never duplicated before its own bound.
+    await vi.advanceTimersByTimeAsync(31_000);
+    expect(alarmDone).toBe(false);
+    expect(destroySandboxInstance).toHaveBeenCalledTimes(1);
+    expect(releaseSetupSlot).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(2_500);
+    await alarm;
+    expect(destroySandboxInstance).toHaveBeenCalledTimes(2);
+    expect(releaseSetupSlot).toHaveBeenCalledWith(expect.anything(), LEASE_ID);
+    expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 0, cleanup_attempts: 1 });
+  });
+
   it('gives up after three interrupted recoveries instead of re-arming forever', async () => {
     const fixture = createFixture();
     await interruptTeardown(fixture);

@@ -40,7 +40,8 @@ different matcher logic in workflow YAML; see `.github/workflows/ci.yml` and
   promise never settles once its starter's client disconnects. Join with `joinSharedFlight` /
   `settleSharedFlight` (`apps/api/src/lib/shared-flight.ts`), or mark a reviewed exception with
   `// shared-flight-join-allowed: <reason>` on the line above. `--inventory` lists every
-  module-scope variable that holds a promise. It does not follow `this` state inside a class.
+  module-scope variable that holds a promise. It does not follow `this` state inside a class (a
+  Durable Object field), a module-scope promise handed to a helper that awaits it, or `for await`.
 - `pnpm lint:oxlint` is report-only. Promotion is forbidden until
   `scripts/quality/lint-adoption-evidence.json` records finding, fix-diff, scope, template,
   suppression, and cold-performance parity. Type-aware Oxlint is disabled.

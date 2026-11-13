@@ -1,3 +1,8 @@
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+
 import { Project } from 'ts-morph';
 import { describe, expect, it } from 'vitest';
 
@@ -119,4 +124,28 @@ describe('shared-flight join guard', () => {
       }`);
     expect(findings).toEqual([]);
   });
+});
+
+describe('shared-flight join guard CLI', () => {
+  const script = resolve(import.meta.dirname, 'check-shared-flight-joins.ts');
+  const run = (code: string) => {
+    const file = join(mkdtempSync(join(tmpdir(), 'shared-flight-')), 'planted.ts');
+    writeFileSync(file, code);
+    return spawnSync('npx', ['tsx', script, '--file', file], { encoding: 'utf8' });
+  };
+
+  it('exits 1 and names the line for a planted violation, 0 for the sanctioned join', () => {
+    const planted = run(`
+      const pending = new Map<string, Promise<string>>();
+      export async function join(key: string) { return await pending.get(key); }`);
+    expect(planted.status, planted.stderr).toBe(1);
+    expect(planted.stderr).toMatch(
+      /planted\.ts:3 awaits a promise read from module-scope `pending`/
+    );
+    const clean = run(`
+      const cached = new Map<string, string>();
+      export async function read(key: string) { return cached.get(key); }`);
+    expect(clean.status, clean.stderr).toBe(0);
+    expect(clean.stdout).toMatch(/1 files, 0 finding\(s\)/);
+  }, 120_000);
 });

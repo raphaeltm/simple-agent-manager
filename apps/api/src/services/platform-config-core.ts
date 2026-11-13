@@ -49,9 +49,9 @@ import type {
 const DEFAULT_PLATFORM_CONFIG_CACHE_MS = 60_000;
 
 /**
- * How many times one resolve may join another request's read (or retry after a write revoked it)
- * before it reads for itself. Bounds the recursion when flights keep being abandoned or revoked.
- * Internal safety margin, not an operator setting.
+ * How many times one resolve may join another request's read, or retry after a write revoked
+ * its own, before it makes one unregistered read for itself. Bounds the recursion when flights
+ * keep being abandoned or revoked. Internal safety margin, not an operator setting.
  */
 const MAX_PLATFORM_CONFIG_JOIN_ATTEMPTS = 3;
 
@@ -391,6 +391,12 @@ async function resolveLegacyPlatformConfig(
     )
       return resolveLegacyPlatformConfig(env, Date.now(), timeoutMs, joinAttempt + 1);
     return joined.value;
+  }
+
+  // Past the attempt bound (flights kept being abandoned or revoked): one read of our own, not
+  // registered and not published, so it cannot displace another request's live flight.
+  if (joinAttempt >= MAX_PLATFORM_CONFIG_JOIN_ATTEMPTS) {
+    return await withDeadline(() => readPlatformConfigFromStore(env), timeoutMs);
   }
 
   const generation = platformConfigCacheGeneration;
