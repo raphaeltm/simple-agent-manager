@@ -52,7 +52,10 @@ import {
 } from './services/connector-agent-answer';
 import { auditConnectorWrite, executeConnectorWrite } from './services/connector-execution';
 import { getConnectorReadLimits } from './services/connector-read-settings';
-import { listProjectCredentialLimits } from './services/credential-limit-events/read';
+import {
+  listProjectCredentialLimits,
+  listUserCredentialLimits,
+} from './services/credential-limit-events/read';
 import { cronToHumanReadable } from './services/cron-utils';
 import { getInstallationToken } from './services/github-app';
 import * as projectData from './services/project-data';
@@ -66,6 +69,7 @@ import {
   parseHarnessWorkConfig,
 } from './services/session-idleness';
 import { DEFAULT_SESSION_SLEEP_AFTER_MS } from './services/session-snapshots';
+import { resolveProfileAccountBindings } from './services/profile-account-bindings';
 import { submitTask } from './services/submit-task';
 import { getRecentAssistantMessagesForTask } from './services/task-final-assistant-message';
 import {
@@ -218,6 +222,8 @@ export function createOperationPorts(env: Env): OperationPorts {
     },
     account: {
       listProfiles: (projectId, userId) => listProfiles(db(), projectId, userId, env),
+      profileAccountBindings: (input) => resolveProfileAccountBindings(env, input),
+      listUserCredentialLimits: (userId) => listUserCredentialLimits(env, { userId }),
       tokenUsage: (userId) => getTokenUsage(env.KV, userId, env),
       budgetSettings: (userId) => getUserBudgetSettings(env.KV, userId),
       effectiveBudgetLimits: (settings) => resolveEffectiveLimits(settings, env),

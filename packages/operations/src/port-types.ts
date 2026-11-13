@@ -495,3 +495,31 @@ export interface ConnectorSettings {
 
 /** Mirrors `ScheduleCreator` (src/durable-objects/project-data/project-event-schedules-authority.ts). */
 export type ScheduleCreator = 'person' | 'agent' | 'system';
+
+/**
+ * Which stored account one agent profile resolves to for the caller in one project
+ * (`apps/api/src/services/profile-account-bindings.ts`). Carries no secret material.
+ */
+export interface ProfileAccountBinding {
+  profileId: string;
+  agentType: string;
+  /**
+   * `account`: one of the caller's own stored credentials. `platform`: SAM's platform credential or
+   * AI proxy for this agent. `paused`: a pinned account is switched off, so runs refuse to start
+   * rather than fall back. `none`: no credential would be found.
+   */
+  state: 'account' | 'platform' | 'paused' | 'none';
+  /** The resolution tier that decided: a profile pin, a project pin, the user default, the platform. */
+  tier: 'profile' | 'project' | 'user' | 'platform' | null;
+  /** Why a paused binding stopped, from the shared resolver's step reasons. */
+  reason: string | null;
+  /**
+   * Opaque quota-pool key. Profiles with the same poolId draw on one provider quota; never treat
+   * them as independent. Null when no account resolves.
+   */
+  poolId: string | null;
+  /** The caller's own account. `name` is the Settings name; legacy rows have none. */
+  account: { name: string | null; storage: 'account' | 'legacy' } | null;
+  /** Usage-sample references belonging to this pool (internal; never returned to callers). */
+  usageReferences: string[];
+}

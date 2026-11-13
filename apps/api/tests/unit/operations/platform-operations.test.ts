@@ -624,6 +624,7 @@ describe('operation registry contract', () => {
       'sam_channel_history',
       'sam_channel_get',
       'sam_channel_subscription_cancel',
+      'sam_usage_get',
     ]);
     expect(operationInputJsonSchema(samTaskGet)).toMatchObject({
       type: 'object',

@@ -16,6 +16,7 @@ import type {
   AcpInteractionBrowserAnswer,
   AcpInteractionSafeSummary,
   AcpInteractionState,
+  AgentEffort,
   AgentProfile,
   CredentialLimitsResponse,
   NotificationResponse,
@@ -34,6 +35,7 @@ import type {
   AgentActivityTask,
   LimitKey,
   ListAgentActivityTasksOptions,
+  ProfileAccountBinding,
   ReconciledSamDispatch,
   ResolveChatAgentStateInput,
   SamDispatchReservation,
@@ -251,6 +253,10 @@ export interface TaskSubmitBody {
   taskMode?: 'conversation' | 'task';
   agentProfileId?: string;
   skillId?: string;
+  /** One-chat model override; the profile and its account stay as resolved. */
+  model?: string | null;
+  /** One-chat effort override, checked against the agent that runs. */
+  effort?: AgentEffort | null;
 }
 
 /** Task lifecycle and task-derived reads. */
@@ -311,6 +317,14 @@ export interface OperationTriggerPort {
 /** Agent profiles, AI usage budgets, notifications and GitHub App tokens. */
 export interface OperationAccountPort {
   listProfiles(projectId: string, userId: string): Promise<AgentProfile[]>;
+  /** The account each profile resolves to for `userId` in `projectId`; metadata only, never secrets. */
+  profileAccountBindings(input: {
+    projectId: string;
+    userId: string;
+    profiles: readonly { id: string; agentType: string }[];
+  }): Promise<ProfileAccountBinding[]>;
+  /** The caller's own credentials' usage windows across every project, newest sample per window. */
+  listUserCredentialLimits(userId: string): Promise<CredentialLimitsResponse>;
   tokenUsage(userId: string): Promise<TokenBudget>;
   budgetSettings(userId: string): Promise<UserAiBudgetSettings | null>;
   effectiveBudgetLimits(settings: UserAiBudgetSettings | null): {
