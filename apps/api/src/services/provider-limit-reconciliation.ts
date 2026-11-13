@@ -150,6 +150,36 @@ function providerLimitComputeCeiling(
   );
 }
 
+/** Canonical SQLite representation of recovery progress, excluding lease-only timestamps. */
+const OWNER_RECOVERY_PROGRESS_SQL = `json_object(
+  'workspaceId', progress_snapshot.workspace_id,
+  'recoveryStatus', progress_snapshot.recovery_status,
+  'recoveryTaskId', progress_snapshot.recovery_task_id,
+  'recoveryAttemptId', progress_snapshot.recovery_attempt_id,
+  'recoveryWorkspaceId', progress_snapshot.recovery_workspace_id,
+  'sleepStatus', progress_snapshot.sleep_status,
+  'sleepingAt', progress_snapshot.sleeping_at,
+  'status', progress_snapshot.status,
+  'snapshotGeneration', progress_snapshot.snapshot_generation)`;
+
+async function captureOwnerRecoveryProgress(
+  env: Env,
+  task: schema.Task,
+  snapshotId: string | undefined
+) {
+  const row = await env.DATABASE.prepare(
+    `SELECT ${OWNER_RECOVERY_PROGRESS_SQL} AS progress FROM session_snapshots progress_snapshot
+     WHERE progress_snapshot.id=? AND progress_snapshot.project_id=?
+       AND progress_snapshot.chat_session_id IS ? AND progress_snapshot.user_id=?`
+  )
+    .bind(snapshotId ?? null, task.projectId, task.chatSessionId, task.userId)
+    .first();
+  if (!row) return null;
+  if (typeof row.progress !== 'string')
+    throw new Error('Provider recovery progress is unavailable');
+  return row.progress;
+}
+
 /** The owner's release and this intent share one task-row CAS. A worker crash
  * before the recovery RPC therefore leaves a bounded cron-consumable receipt. */
 async function repairOwnerApprovedRecovery(
@@ -164,6 +194,7 @@ async function repairOwnerApprovedRecovery(
   const db = drizzle(env.DATABASE, { schema });
   const permittedStatus = ['sleeping', 'queued', 'delegated'].includes(task.status);
   if (!permittedStatus) return;
+  const recoveryProgress = await captureOwnerRecoveryProgress(env, task, approval?.snapshotId);
   let valid = pendingApprovalMatchesTask(task, wait, now);
   // Restore commits before the runner transitions the task to in_progress.
   // Preserve this bounded intent while that exact runner finishes; this read
@@ -242,7 +273,7 @@ async function repairOwnerApprovedRecovery(
   )
     return;
   if (!valid || !snapshot || !task.chatSessionId) {
-    await blockRevokedOwnerApproval(env, task, wait, receipt);
+    await blockRevokedOwnerApproval(env, task, wait, receipt, recoveryProgress);
     return;
   }
   await dispatchOwnerApprovedRecovery(env, task, wait, snapshot, receipt, task.chatSessionId);
@@ -390,7 +421,8 @@ async function blockRevokedOwnerApproval(
   env: Env,
   task: schema.Task,
   wait: ProviderLimitWait,
-  receipt: string
+  receipt: string,
+  recoveryProgress: string | null
 ): Promise<void> {
   const reason = 'Blocked: the approved provider limit recovery expired or its authority changed.';
   const blocked = await env.DATABASE.prepare(
@@ -398,8 +430,12 @@ async function blockRevokedOwnerApproval(
          admission_reason=?,admission_next_retry_at=NULL
        WHERE id=? AND provider_limit_wait_json IS ? AND admission_state='provider_limit_recovery_pending'
          AND project_id=? AND user_id=? AND chat_session_id IS ?
-         AND status IN ('sleeping','queued','delegated')
-         AND agent_profile_hint IS ? AND skill_id IS ?`
+         AND status IN ('sleeping','queued','delegated') AND status=? AND workspace_id IS ?
+         AND agent_profile_hint IS ? AND skill_id IS ?
+         AND (SELECT ${OWNER_RECOVERY_PROGRESS_SQL} FROM session_snapshots progress_snapshot
+           WHERE progress_snapshot.id=? AND progress_snapshot.project_id=tasks.project_id
+             AND progress_snapshot.chat_session_id IS tasks.chat_session_id
+             AND progress_snapshot.user_id=tasks.user_id) IS ?`
   )
     .bind(
       JSON.stringify({ ...wait, phase: 'blocked', reason, ownerOverride: undefined }),
@@ -409,8 +445,12 @@ async function blockRevokedOwnerApproval(
       task.projectId,
       wait.ownerOverride?.ownerUserId ?? null,
       task.chatSessionId,
+      task.status,
+      task.workspaceId,
       task.agentProfileHint,
-      task.skillId
+      task.skillId,
+      wait.ownerOverride?.snapshotId ?? null,
+      recoveryProgress
     )
     .run();
   if (!blocked.meta.changes) return;
