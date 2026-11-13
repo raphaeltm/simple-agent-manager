@@ -97,7 +97,7 @@ for (const operation of ['init', 'complete'] as const) {
         throw errors.conflict(
           'Context job status, executor, attempt, or descriptor no longer matches'
         );
-      if (!job.contextShadow)
+      if (!job.contextShadow && !result.replayed)
         c.executionCtx.waitUntil(
           recordDeploymentPublishJobLifecycleEventBestEffort(c.env, {
             projectId: job.projectId,

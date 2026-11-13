@@ -13,8 +13,10 @@ Scope: app deployment context collection/transport only. Existing node builds an
 - [x] Tests: override/env placeholders, documented Docker ignore matrix (real Docker parity unverified), escapes, secrets, multi-buffer route; SQLite conditional-state attacks + owner controls.
 - [x] Docs/config reference and full quality suite (root 22/23 tasks, remaining API suite separately green).
 - [x] Local specialist review and completion validation (collector/security, API/Cloudflare/constitution, completion/docs/tests; shadow re-review PASS).
-- [ ] Coordinator staging slot; one small claude-code VM and Instant collect proof; cleanup verified in D1, release slot.
-- [ ] CI and CodeRabbit request/wait; exact SHA review request to coordinator.
+- [x] Coordinator staging slot; one small claude-code VM and Instant collect proof at bf4285; cleanup verified immediately and five minutes later, slot released.
+- [x] CI and CodeRabbit request/wait at bf4285; coordinator approved that exact SHA.
+- [ ] Ready-state CodeRabbit follow-up fixes: final CI/incremental wait and new exact-SHA coordinator approval.
+- [ ] Merge and monitor main CI / Deploy Production to success; basic production smoke only.
 
 Mandatory release hold: early DRAFT PR + needs-human-review. Do not mark ready or merge until coordinator task 01M6SHDRB60F28XPA14C7J9XKZ approves PR number at exact full SHA. Every commit voids approval. Never commit main. After approval/merge monitor production and verify deployed tip contains merge.
 
@@ -57,3 +59,12 @@ Review5834302607 requested4 actionable fixes and3nits. All are implemented with 
 ## November 13 refresh (supersedes prior pending/hold notes)
 
 Coordinator resumed real VM proof; no VM gate waiver. Merged main d65360dcd via intermediate b46b127d715eb52bcf8e85cd7faf2fa1c535099d `[skip ci]` push, then repaired modular package boundaries locally. Canonical context schema is in worker-core; context services/sweeps are in app-deployment with narrow API auth/settings/transport adapters. Main tunnel-aware backend URL is preserved. Coordinator withdrew renumbering: preserve staging-applied0230_publish_job_build_context.sql /0231_publish_job_context_shadow.sql (ledgerids261/262) with exact legacy duplicate-prefix exceptions; no D1 bookkeeping needed. Contents remain byte-identical. No staging/D1 mutation yet. Detailed scope, tests, installer push suppression and bounded TASK-mode VM/Instant proof plan: `tasks/evidence/build-context-nov13-refresh.md`. Keep DRAFT+needs-human-review and exact-SHA coordinator approval gate.
+
+
+## November 13 final transport proof and ready-state review
+
+This section supersedes dated pending-state notes above. At exact bf4285bc5c2e4390c73eaadd7686e3478a555baf, genuine task-mode claude-code VM (0.2 vCPU / 0.5 GB) and sequential Claude Instant each reached context_ready through the normal build_and_publish path. Both bundles were 131,474 bytes; independent GET/hash/recorded metadata/tar inspection, empty environment placeholders and secret canary exclusion passed. Full metadata and immediate/late cleanup audits are in project library file 01M7BE06WSGRC44Z6EG0BSQAGM, linked to the source idea and PR. Deploy Staging43507732844 and browser smoke passed; functional CI43506022619 attempt2 passed. Shadow OFF47; no remaining test D1 rows or non-deleted staging nodes at21:40:30Z and21:45:46Z. Two verified bundles retained48h by coordinator disposition, plus known Nov9 baseline; no unexpected R2 keys. Slot released. Instant cancellation500 is disclosed; stopped/cancelled/runtime-terminated state independently confirmed before cleanup.
+
+Coordinator approved bf4285 at21:48Z and marked ready. Its triggered CodeRabbit review5898635052 returned three valid findings at21:59:22Z. Cleanup now checkpoints once per invocation and resumes after the last attempted key, preserving progress past slow failed deletes; failures retry on the next full sweep. Callback init/complete now recognize exact committed owner/executor/attempt/key/size/SHA receipts only in their destination state without timestamp/history mutation. Go retries transient transport/502/503/504 and incomplete init responses with bounded, cancellable attempts. Canceled/terminal jobs and changed descriptors remain rejected. The callback delta touches the VM/Instant collect→PUT→complete path; source-root/collector/PUT signing are unchanged. Independent cleanup and Go/security/env reviews passed; regressions demonstrated red→green.
+
+The new commits void bf4285 approval. Keep the PR ready under coordinator instruction, with needs-human-review until the coordinator approves the new exact SHA. Do not re-stage until the coordinator decides whether the proved bf4285 transport path covers this delta or grants a short rerun. Refreshed old CI43514134748 was superseded by the necessary cleanup push; it had an unrelated compact-archive30s timeout and a restored preflight metadata failure. No unrelated test code is changed. Final current-head CI/CodeRabbit wait and coordinator approval remain required. Real Docker ignore parity remains unverified; phase3 remains out of scope.

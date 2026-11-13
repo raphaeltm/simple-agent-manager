@@ -218,24 +218,69 @@ func (s *Server) contextCallback(ctx context.Context, workspaceID, path string, 
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(s.config.ControlPlaneURL, "/")+path, strings.NewReader(string(data)))
-	if err != nil {
-		return err
+	attempts := s.config.BuildContextCallbackMaxAttempts
+	if attempts < 1 {
+		attempts = config.DefaultBuildContextCallbackMaxAttempts
 	}
-	req.Header.Set("Authorization", "Bearer "+s.workspaceCallbackToken(workspaceID))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := s.controlPlaneHTTPClient(s.deployBuildPublishTimeout()).Do(req)
-	if err != nil {
-		return fmt.Errorf("context callback unavailable")
+	delay := s.config.BuildContextCallbackRetryDelay
+	if delay <= 0 {
+		delay = config.DefaultBuildContextCallbackRetryDelay
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("context callback returned %d; inspect publish job state before retrying", resp.StatusCode)
+	timeout := s.config.HTTPCallbackTimeout
+	if timeout <= 0 {
+		timeout = config.DefaultHTTPCallbackTimeout
 	}
-	if out != nil {
-		return json.NewDecoder(io.LimitReader(resp.Body, DEFAULT_BUILD_CONTEXT_CALLBACK_RESPONSE_MAX_BYTES)).Decode(out)
+	client := s.controlPlaneHTTPClient(timeout)
+	for attempt := 1; attempt <= attempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		attemptCtx, cancel := context.WithTimeout(ctx, timeout)
+		req, err := http.NewRequestWithContext(attemptCtx, http.MethodPost, strings.TrimRight(s.config.ControlPlaneURL, "/")+path, strings.NewReader(string(data)))
+		if err != nil {
+			cancel()
+			return err
+		}
+		req.Header.Set("Authorization", "Bearer "+s.workspaceCallbackToken(workspaceID))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := client.Do(req)
+		retry := err != nil
+		result := fmt.Errorf("context callback unavailable")
+		if err == nil {
+			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+				result = nil
+				if out != nil {
+					// A truncated successful init response can follow a committed reservation.
+					// Validate the complete JSON before changing the caller's output.
+					var raw json.RawMessage
+					if err := json.NewDecoder(io.LimitReader(resp.Body, DEFAULT_BUILD_CONTEXT_CALLBACK_RESPONSE_MAX_BYTES)).Decode(&raw); err != nil {
+						retry = true
+						result = fmt.Errorf("context callback response incomplete")
+					} else if err := json.Unmarshal(raw, out); err != nil {
+						result = fmt.Errorf("invalid context callback response")
+					}
+				}
+			} else {
+				retry = resp.StatusCode == http.StatusBadGateway || resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout
+				// Exact committed receipts are reconciled by the API. Other 409s stay
+				// failures; never infer a successful commit from a conflict response.
+				result = fmt.Errorf("context callback returned %d; inspect publish job state before retrying", resp.StatusCode)
+			}
+			resp.Body.Close()
+		}
+		cancel()
+		if !retry || attempt == attempts {
+			return result
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
 	}
-	return nil
+	return fmt.Errorf("context callback attempts exhausted")
 }
 
 // Strict source resolution: never collect the stale host clone on a VM. Instant

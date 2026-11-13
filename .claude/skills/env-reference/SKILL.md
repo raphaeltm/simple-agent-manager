@@ -771,6 +771,7 @@ configurable.
 ### Workspace Builds
 
 - `BUILD_CONTEXT_MAX_ACTIVE_PER_WORKSPACE` — VM-agent/Instant process environment limit on concurrent context collection and upload per workspace (default `1`; nonpositive values fall back to the default). Excess probes receive 409 immediately; they are not queued or retried and normal node builds continue. At the 2 GiB default bundle limit this permits at most 2 GiB of compressed spool per workspace; increasing concurrency multiplies that bound.
+- `BUILD_CONTEXT_CALLBACK_MAX_ATTEMPTS` / `BUILD_CONTEXT_CALLBACK_RETRY_DELAY` — VM-agent/Instant init and complete callbacks use bounded attempts (default `3`) with cancellable delay (`5s`). Retry transport failures, incomplete init JSON and HTTP 502/503/504; other errors including 409 remain failures. Each attempt uses `HTTP_CALLBACK_TIMEOUT` inside the overall publish context. Nonpositive retry settings fall back to defaults. Exact committed owner/attempt/key/size/SHA receipts are idempotent without timestamp/history changes; canceled/terminal jobs cannot be replayed.
 
 - `DEPLOY_PUBLISH_HEARTBEAT_INTERVAL` — VM publish-job heartbeat interval (default `1m`), independent of slow Docker build/save/upload progress. Each callback is bounded by `HTTP_CALLBACK_TIMEOUT`; API stall recovery starts only after a heartbeat has been recorded. Keep the API stall setting above interval plus callback/network grace. The API default deadline is `30m`, above the VM `DEPLOY_BUILD_PUBLISH_TIMEOUT` default `20m`; operators increasing the VM timeout must also raise the API deadline.
 

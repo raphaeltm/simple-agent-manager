@@ -35,12 +35,18 @@ describe('build context conditional state on real SQLite D1', () => {
     const row = await reserveBuildContext(db, owner, descriptor);
     expect(row?.contextR2Key).toBe('compose-build-contexts/project/env/job/1.tar.zst');
     expect(row?.status).toBe('collecting');
-    expect(await reserveBuildContext(db, owner, descriptor)).toBeNull();
+    expect(await reserveBuildContext(db, owner, descriptor)).toMatchObject({
+      replayed: true,
+      status: 'collecting',
+    });
     const done = await completeBuildContext(db, owner, descriptor);
     expect(done?.status).toBe('context_ready');
     expect(done?.queuedAt).toBeTruthy();
     expect(done?.nodeId).toBe('node');
-    expect(await completeBuildContext(db, owner, descriptor)).toBeNull();
+    expect(await completeBuildContext(db, owner, descriptor)).toMatchObject({
+      replayed: true,
+      status: 'context_ready',
+    });
   });
   for (const mutation of [
     { projectId: 'other' },
@@ -55,8 +61,10 @@ describe('build context conditional state on real SQLite D1', () => {
         status: 'queued',
       });
       expect(await reserveBuildContext(db, owner, descriptor)).not.toBeNull();
+      expect(await reserveBuildContext(db, { ...owner, ...mutation }, descriptor)).toBeNull();
       expect(await completeBuildContext(db, { ...owner, ...mutation }, descriptor)).toBeNull();
       expect((await completeBuildContext(db, owner, descriptor))?.status).toBe('context_ready');
+      expect(await completeBuildContext(db, { ...owner, ...mutation }, descriptor)).toBeNull();
     });
   it('cannot revive cancellation or accept changed descriptor', async () => {
     await reserveBuildContext(db, owner, descriptor);
@@ -65,6 +73,16 @@ describe('build context conditional state on real SQLite D1', () => {
     ).toBeNull();
     expect(await completeBuildContext(db, owner, { ...descriptor, sizeBytes: 101 })).toBeNull();
     sqlite.prepare("UPDATE deployment_publish_jobs SET status='canceled'").run();
+    expect(await completeBuildContext(db, owner, descriptor)).toBeNull();
+  });
+  it('rejects receipt replay after executor or stored key changes', async () => {
+    await reserveBuildContext(db, owner, descriptor);
+    sqlite.prepare("UPDATE deployment_publish_jobs SET executor='node'").run();
+    expect(await reserveBuildContext(db, owner, descriptor)).toBeNull();
+    sqlite
+      .prepare("UPDATE deployment_publish_jobs SET executor='cloudflare',context_r2_key='other'")
+      .run();
+    expect(await reserveBuildContext(db, owner, descriptor)).toBeNull();
     expect(await completeBuildContext(db, owner, descriptor)).toBeNull();
   });
   it('does not intercept the node executor', async () => {

@@ -123,8 +123,39 @@ describe('context callback vertical slice with real SQLite and callback middlewa
     expect(sqlite.prepare('SELECT status FROM deployment_publish_jobs').get()).toEqual({
       status: 'context_ready',
     });
-    expect((await request('complete')).status).toBe(409);
+    expect((await request('complete')).status).toBe(200);
   });
+  it('returns exact committed receipts after lost responses without duplicate events or timestamps', async () => {
+    expect((await request('init')).status).toBe(200);
+    const initial = sqlite.prepare('SELECT * FROM deployment_publish_jobs').get();
+    expect((await request('init')).status).toBe(200);
+    expect(sqlite.prepare('SELECT * FROM deployment_publish_jobs').get()).toEqual(initial);
+    expect((await request('init', { sha256: 'b'.repeat(64) })).status).toBe(409);
+    expect((await request('init', { sizeBytes: 101 })).status).toBe(409);
+    expect((await request('init', { attempt: 2 })).status).toBe(409);
+    expect((await request('complete')).status).toBe(200);
+    const complete = sqlite.prepare('SELECT * FROM deployment_publish_jobs').get();
+    expect((await request('complete')).status).toBe(200);
+    expect(sqlite.prepare('SELECT * FROM deployment_publish_jobs').get()).toEqual(complete);
+    expect(
+      sqlite.prepare('SELECT count(*) AS total FROM deployment_publish_job_events').get()
+    ).toEqual({ total: 2 });
+    expect(lifecycle).toHaveBeenCalledTimes(2);
+    // A completed receipt must never reopen an upload slot.
+    expect((await request('init')).status).toBe(409);
+    head.mockResolvedValue(null);
+    expect((await request('complete')).status).toBe(400);
+  });
+  it.each(['canceled', 'failed', 'succeeded'])(
+    'never replays a terminal %s job',
+    async (status) => {
+      expect((await request('init')).status).toBe(200);
+      expect((await request('complete')).status).toBe(200);
+      sqlite.prepare('UPDATE deployment_publish_jobs SET status=?').run(status);
+      expect((await request('init')).status).toBe(409);
+      expect((await request('complete')).status).toBe(409);
+    }
+  );
   it.each([
     null,
     { size: 99, customMetadata: { sha256 } },

@@ -128,5 +128,23 @@ async function transitionContext(
     update.contextSha256 = descriptor.sha256;
   } else update.queuedAt = now;
   const [, rows] = await db.batch([history, db.update(j).set(update).where(predicate).returning()]);
-  return rows[0] ?? null;
+  if (rows[0]) return { ...rows[0], replayed: false };
+  // The response can be lost after this transaction commits. Recognize only
+  // the exact receipt in the operation's destination state; never revive a
+  // canceled/terminal job or reissue an upload after completion. Replays do
+  // not update timestamps or insert duplicate history.
+  const [receipt] = await db
+    .select()
+    .from(j)
+    .where(
+      and(
+        ownerPredicate(owner),
+        eq(j.status, status),
+        eq(j.contextR2Key, buildContextKey(owner)),
+        eq(j.contextBytes, descriptor.sizeBytes),
+        eq(j.contextSha256, descriptor.sha256)
+      )
+    )
+    .limit(1);
+  return receipt ? { ...receipt, replayed: true } : null;
 }

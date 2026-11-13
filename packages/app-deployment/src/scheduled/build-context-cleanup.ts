@@ -10,9 +10,12 @@ function readCheckpoint(value: string | null): Checkpoint {
   // Existing installations stored the opaque R2 page cursor directly.
   if (!value.startsWith('{')) return { cursor: value };
   try {
-    const parsed = JSON.parse(value) as Checkpoint | null;
-    if (typeof parsed?.startAfter === 'string') return { startAfter: parsed.startAfter };
-    if (typeof parsed?.cursor === 'string') return { cursor: parsed.cursor };
+    const parsed: unknown = JSON.parse(value);
+    if (typeof parsed === 'object' && parsed !== null) {
+      if ('startAfter' in parsed && typeof parsed.startAfter === 'string')
+        return { startAfter: parsed.startAfter };
+      if ('cursor' in parsed && typeof parsed.cursor === 'string') return { cursor: parsed.cursor };
+    }
   } catch {
     // Legacy page cursors are opaque, including JSON-shaped strings.
   }
