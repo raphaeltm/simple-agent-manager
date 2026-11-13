@@ -65,7 +65,9 @@ vi.mock('../../src/middleware/rate-limit', () => ({
   getCurrentWindowStart: () => 1000,
 }));
 
-vi.mock('../../src/services/ai-token-budget', () => ({
+// The package's accounting calls these from inside the package; mock its module, not the
+// worker re-export (worker modularization W5).
+vi.mock('@simple-agent-manager/ai-proxy/internal/ai-token-budget', () => ({
   checkAiUsageGate: (...args: unknown[]) => mockCheckAiUsageGate(...args),
   checkTokenBudget: (...args: unknown[]) => mockCheckTokenBudget(...args),
   checkMonthlyCostCap: (...args: unknown[]) => mockCheckMonthlyCostCap(...args),

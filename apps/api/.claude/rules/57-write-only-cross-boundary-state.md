@@ -138,5 +138,5 @@ lost or stale; the remote process was stuck.
 - `.claude/rules/47-control-loop-io-budget.md` — tiered timeouts, candidate escape paths
 - `.claude/rules/49-capture-prerequisites-before-async-completion.md` — pre-call capture
 - `.claude/rules/34-vm-agent-callback-auth.md` — why these reports go missing
-- Implementation: `apps/api/src/durable-objects/project-data/session-activity-reconciliation.ts`
+- Implementation: `packages/project-data/src/do/session-activity-reconciliation.ts`
 - Task: `tasks/archive/2026-08-16-session-activity-state-machine.md`

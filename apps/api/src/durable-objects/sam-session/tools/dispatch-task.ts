@@ -6,6 +6,15 @@
  * are set so the UI groups it as a subtask (same semantics as the
  * workspace-MCP dispatch path in `routes/mcp/dispatch-tool.ts`).
  */
+import {
+  collectStoredResourceRequirementLayers,
+  createPersistedTaskResourcePlanJson,
+  firstResourceRequirementLayer,
+  firstResourceRequirementLayerJson,
+  mergeResourceRequirementLayers,
+  normalizeResourceRequirementsInput,
+  ResourceRequirementsValidationError,
+} from '@simple-agent-manager/scheduler-core';
 import type {
   ResourceRequirements,
   TaskMode,
@@ -33,15 +42,6 @@ import {
 import { resolveTaskStartPlacementCredentialAttribution } from '../../../services/placement-resolver';
 import { resolveProjectAgentDefault } from '../../../services/project-agent-defaults';
 import * as projectDataService from '../../../services/project-data';
-import {
-  collectStoredResourceRequirementLayers,
-  createPersistedTaskResourcePlanJson,
-  firstResourceRequirementLayer,
-  firstResourceRequirementLayerJson,
-  mergeResourceRequirementLayers,
-  normalizeResourceRequirementsInput,
-  ResourceRequirementsValidationError,
-} from '../../../services/resource-requirements-input';
 import { resolveSkillProfile } from '../../../services/skills';
 import { markTaskFailedIfNonTerminal } from '../../../services/task-failure';
 import { startTaskRunnerDO } from '../../../services/task-runner-do';

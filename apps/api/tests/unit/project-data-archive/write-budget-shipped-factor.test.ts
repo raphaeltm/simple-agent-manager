@@ -35,14 +35,14 @@
  * arguments would return "reserved" no matter what the arithmetic produced
  * (`.claude/rules/28-credential-resolution-fallback-tests.md`).
  */
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-
 import {
   ARCHIVE_WRITE_FIXED_RESERVATION,
   archiveWriteBudgetConfig,
   reserveArchiveWrites,
-} from '../../../src/project-data-archive/write-budget';
+} from '@simple-agent-manager/project-data/internal/archive/write-budget';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
 import {
   readShippedVar,
   shippedBudgetEnv,

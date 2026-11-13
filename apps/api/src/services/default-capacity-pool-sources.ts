@@ -1,10 +1,15 @@
+import {
+  capacitySourceAuthorityGeneration,
+  timestampVersion,
+} from '@simple-agent-manager/scheduler-core';
 import type { CapacityCredentialSource, CapacityPoolScope } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 
 import * as schema from '../db/schema';
-import { capacitySourceAuthorityGeneration } from './capacity-pool-authority';
 import { nextCapacityPoolTimestamp } from './capacity-pool-clock';
-import { defaultCapacitySourceId, timestampVersion } from './default-capacity-pool-helpers';
+import {
+  defaultCapacitySourceId,
+} from './default-capacity-pool-helpers';
 import {
   ACTIVE_STATUS,
   CREDENTIAL_TYPE_CLOUD_PROVIDER,

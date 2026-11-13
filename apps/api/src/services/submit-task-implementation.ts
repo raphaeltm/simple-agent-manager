@@ -9,6 +9,20 @@
  *
  * See: specs/022-simplified-chat-ux/contracts/task-submit.md
  */
+import {
+  recordWorkStartIdeaLink,
+  requireOpenIdeaForWorkStart,
+} from '@simple-agent-manager/operations';
+import {
+  collectStoredResourceRequirementLayers,
+  createPersistedTaskResourcePlanJson,
+  firstResourceRequirementLayer,
+  firstResourceRequirementLayerJson,
+  inheritedCredentialAttributionForCaller,
+  mergeResourceRequirementLayers,
+  normalizeResourceRequirementsInput,
+  ResourceRequirementsValidationError,
+} from '@simple-agent-manager/scheduler-core';
 import type { SubmitTaskResponse, VMSize } from '@simple-agent-manager/shared';
 import {
   ACP_SESSION_DEFAULTS,
@@ -27,17 +41,13 @@ import { markTaskSubmitOperation, type TaskSubmitOperation } from '../lib/task-s
 import { ulid } from '../lib/ulid';
 import { errors } from '../middleware/error';
 import { requireProjectCapability } from '../middleware/project-auth';
-import {
-  recordWorkStartIdeaLink,
-  requireOpenIdeaForWorkStart,
-} from '../operations/start-work-core';
+import { operationDeps } from '../operation-ports';
 import { requireRepositoryAccess } from '../routes/projects/_helpers';
 import { type SubmitTaskSchema } from '../schemas';
 import { resolveTaskAgentOverrides } from '../services/agent-profiles';
 import { generateBranchName } from '../services/branch-name';
 import { capacityPlacementSnapshotDbValues } from '../services/capacity-placement-snapshot';
 import { enrichMessageWithMentions } from '../services/mention-enrichment';
-import { inheritedCredentialAttributionForCaller } from '../services/placement-field-resolution';
 import {
   PlacementResolutionError,
   resolveTaskStartPlacement,
@@ -45,15 +55,6 @@ import {
 } from '../services/placement-resolver';
 import { resolveProjectAgentDefault } from '../services/project-agent-defaults';
 import * as projectDataService from '../services/project-data';
-import {
-  collectStoredResourceRequirementLayers,
-  createPersistedTaskResourcePlanJson,
-  firstResourceRequirementLayer,
-  firstResourceRequirementLayerJson,
-  mergeResourceRequirementLayers,
-  normalizeResourceRequirementsInput,
-  ResourceRequirementsValidationError,
-} from '../services/resource-requirements-input';
 import { resolveSkillProfile } from '../services/skills';
 import { submitInstantTask } from '../services/submit-instant-task';
 import { validateSubmitContextAndAttachments } from '../services/submit-task-input-validation';
@@ -620,7 +621,7 @@ export async function submitTaskImplementation(
   if (sourceIdea) {
     setOperation('source_idea_link');
     try {
-      await recordWorkStartIdeaLink(env, projectId, {
+      await recordWorkStartIdeaLink(operationDeps(env), projectId, {
         ideaId: sourceIdea.ideaId,
         sessionId,
         taskMode,

@@ -1,4 +1,7 @@
 import { createMcpHandler, McpServer } from '@modelcontextprotocol/server';
+import type { Operation } from '@simple-agent-manager/operations';
+import { OperationError, operationErrorHttpStatus } from '@simple-agent-manager/operations';
+import { operations } from '@simple-agent-manager/operations';
 import { toJsonSchema } from '@valibot/to-json-schema';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -8,9 +11,7 @@ import * as v from 'valibot';
 import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { AppError } from '../middleware/error';
-import { OperationError, operationErrorHttpStatus } from '../operations/errors';
-import { operations } from '../operations/registry';
-import type { Operation, OperationContext } from '../operations/types';
+import { createOperationPorts, type WorkerOperationContext } from '../operation-ports';
 import { auditConnectorWrite, consumeConnectorBudget } from '../services/connector-execution';
 import {
   DEFAULT_CONNECTOR_REQUEST_MAX_BYTES,
@@ -70,7 +71,10 @@ const outputSchema = v.object({
 });
 
 /** Input parsing and protocol formatting only; authority and side effects live in operations. */
-export function createConnectorServer(ctx: OperationContext, writeEnabled: boolean): McpServer {
+export function createConnectorServer(
+  ctx: WorkerOperationContext,
+  writeEnabled: boolean
+): McpServer {
   const server = new McpServer(
     { name: 'SAM Connector', version: '1.0.0' },
     { instructions: CONNECTOR_INSTRUCTIONS }
@@ -333,8 +337,9 @@ connectorMcpRoutes.all('/', async (c) => {
       }
     }
   }
-  const ctx: OperationContext = {
+  const ctx: WorkerOperationContext = {
     env: c.env,
+    ports: createOperationPorts(c.env),
     actor,
     connectorSettings: settings,
     requestId: crypto.randomUUID(),

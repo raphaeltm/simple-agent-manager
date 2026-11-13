@@ -168,6 +168,31 @@
       "reviewedAt": "2026-11-10T09:21:52.185Z",
       "expiresAt": "2026-12-10T09:21:52.185Z",
       "digests": ["753cf5e5f0b0593379205af9e29a8f277d5e70a4cb78aec374dc3b006eec7de2"]
+    },
+    {
+      "classification": "synthetic-test-fixture",
+      "reason": "Worker modularization W4 (PR #2686) re-pin, no new bytes: the same already-reviewed synthetic fixtures moved or shifted lines. The JWT-format fixture in deployment-publish-jobs.test.ts and the placeholder API key in compose-preview-parity.test.ts moved from apps/api/tests/unit/services/ to packages/app-deployment/tests/unit/; the deterministic encryption key and the Stripe-format env value in apps/api/tests/workers/deployment-environment-config.test.ts shifted lines after an import and the cipher constant were added. Each digest's match bytes equal a digest already reviewed in group 2 at the old path or line. Exact current rule/path/line/bytes only.",
+      "owner": "security",
+      "reviewedAt": "2026-11-12T10:50:00.000Z",
+      "expiresAt": "2026-12-12T10:50:00.000Z",
+      "digests": [
+        "0668540266fe1a84120dbf112dd614e4d5f0289442c7687e1b80ea641bbf00b5",
+        "a795774a2e28631c0e44d5de0b4b1c2fe44f1fc637e733cdf52e83801de9f297",
+        "c196b6737c7dc269f948016c7d9cdd5139343de3e91d66c0c9ec1afe288ff5ad",
+        "d8ff780285cb598d5429e26548db28ee4472f397f5aa15b14c624c2a1e67e3ca"
+      ]
+    },
+    {
+      "classification": "code-identifier",
+      "reason": "Reviewed 2026-11-12 for worker modularization W7: the PEM header/footer string literals in convertPkcs1ToPkcs8() moved unchanged from apps/api/src/services/github-app-tokens.ts to packages/repo-hosting/src/github-app-tokens.ts. Delimiter references only, no key body. Exact current rule/path/line/bytes only.",
+      "owner": "security",
+      "reviewedAt": "2026-11-12T13:58:35.588Z",
+      "expiresAt": "2026-12-12T13:58:35.588Z",
+      "digests": [
+        "b050c606ef9d5554f41019a04b6037b9e7222d429a3e5a6c21c03a7414f7a740",
+        "e29d9f39d5d508901ff20c3a7d881fb4a7e1e47fb2d68a4b7afcb424b48c105c",
+        "ec04d32901800dd03b4c2dfae3064a8c5889b9cfd76f0b75e1d717d14034bf32"
+      ]
     }
   ]
 }

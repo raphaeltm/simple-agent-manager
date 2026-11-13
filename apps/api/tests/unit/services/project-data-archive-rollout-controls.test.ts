@@ -1,14 +1,14 @@
-import Database from 'better-sqlite3';
-import { describe, expect, it } from 'vitest';
-
-import * as schema from '../../../src/db/schema';
-import type { Env } from '../../../src/env';
 import {
   freezeProjectDataArchiveProject,
   getProjectDataArchiveRolloutState,
   listProjectDataArchiveProblemMigrations,
   setProjectDataArchiveCircuitBreaker,
-} from '../../../src/services/project-data-archive-rollout-controls';
+} from '@simple-agent-manager/project-data/internal/client/project-data-archive-rollout-controls';
+import Database from 'better-sqlite3';
+import { describe, expect, it } from 'vitest';
+
+import * as schema from '../../../src/db/schema';
+import type { Env } from '../../../src/env';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 function makeEnv(sqlite: Database.Database, overrides: Partial<Env> = {}): Env {

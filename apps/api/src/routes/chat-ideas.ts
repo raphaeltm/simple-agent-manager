@@ -3,6 +3,7 @@
  *
  * Mounted by `routes/chat.ts` under `/api/projects/:projectId/sessions`, after its auth middleware.
  */
+import { listLinks, recordLink, removeLink } from '@simple-agent-manager/operations';
 import { and, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -13,7 +14,7 @@ import { requireRouteParam } from '../lib/route-helpers';
 import { getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
-import { listLinks, recordLink, removeLink } from '../operations/link-core';
+import { operationDeps } from '../operation-ports';
 import { LinkTaskToChatSchema, parseOptionalBody } from '../schemas';
 
 const chatIdeaRoutes = new Hono<{ Bindings: Env }>();
@@ -30,7 +31,7 @@ chatIdeaRoutes.get('/:sessionId/ideas', async (c) => {
 
   await requireProjectAccess(db, projectId, userId);
 
-  const links = (await listLinks(c.env, projectId, 'session', sessionId))
+  const links = (await listLinks(operationDeps(c.env), projectId, 'session', sessionId))
     .filter((link) => link.sourceKind === 'session' && link.targetKind === 'idea')
     .filter(
       (link, index, all) =>
@@ -107,7 +108,7 @@ chatIdeaRoutes.post('/:sessionId/ideas', async (c) => {
   }
 
   const context = body.context?.trim() ?? null;
-  await recordLink(c.env, projectId, {
+  await recordLink(operationDeps(c.env), projectId, {
     sourceKind: 'session',
     sourceId: sessionId,
     targetKind: 'idea',
@@ -133,7 +134,7 @@ chatIdeaRoutes.delete('/:sessionId/ideas/:taskId', async (c) => {
 
   await requireProjectCapability(db, projectId, userId, 'task:write');
 
-  await removeLink(c.env, projectId, {
+  await removeLink(operationDeps(c.env), projectId, {
     sourceKind: 'session',
     sourceId: sessionId,
     targetKind: 'idea',

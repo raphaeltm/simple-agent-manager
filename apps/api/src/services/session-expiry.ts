@@ -1,9 +1,9 @@
+import { resolveProjectDataSessionLocation } from '@simple-agent-manager/project-data';
 import { SNAPSHOT_EXPIRED_REASON } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import * as projectDataService from './project-data';
-import { resolveProjectDataSessionLocation } from './project-data-archive-routing';
 import { transitionTaskToTerminal } from './task-terminal-transition';
 
 /** Point lookup used by the sweep before a legacy sleep can be mistaken for death. */

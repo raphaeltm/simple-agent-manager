@@ -8,11 +8,11 @@
  * A teammate reads the owner's workspace, confined to the repository working tree; nothing is
  * returned unless the agent confirms the confinement; every request re-checks the grant.
  */
+import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { Hono } from 'hono';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import type { ProjectData } from '../../src/durable-objects/project-data';
 import type { Env } from '../../src/env';
 import { handleAppError } from '../../src/middleware/app-error-handler';
 import { chatRoutes } from '../../src/routes/chat';

@@ -4,15 +4,15 @@
  * migrated ProjectData SQLite database, so the inbox row, the transcript row, the accept
  * hooks and delivery-id idempotency are the production ones.
  */
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-import { runMigrations } from '../../../src/durable-objects/migrations';
 import {
   acceptPromptDelivery,
   type DurabilityFoundationHooks,
-} from '../../../src/durable-objects/project-data/durability-foundation';
-import { persistMessage } from '../../../src/durable-objects/project-data/messages';
+} from '@simple-agent-manager/project-data/internal/do/durability-foundation';
+import { persistMessage } from '@simple-agent-manager/project-data/internal/do/messages';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import type { Env } from '../../../src/env';
 import {
   queueRestoredSessionPrompt,

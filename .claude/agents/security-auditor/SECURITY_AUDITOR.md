@@ -35,7 +35,7 @@ This is a self-hosted platform (Simple Agent Manager). Each installation serves 
 
 **Files to Review**:
 - `apps/api/src/services/encryption.ts`
-- `apps/api/src/db/schema.ts` (credential columns)
+- `packages/worker-core/src/schema.ts` (credential columns)
 - `apps/api/src/routes/credentials.ts`
 
 **Checklist**:

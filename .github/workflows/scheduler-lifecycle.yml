@@ -30,13 +30,13 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
 
-      - name: Build API dependencies
-        run: pnpm exec turbo run build --filter=@simple-agent-manager/api...
+      - name: Build scheduler-core dependencies
+        run: pnpm exec turbo run build --filter=@simple-agent-manager/scheduler-core^...
 
       - name: Explore generated scheduler lifecycles
         run: |
           set -o pipefail
-          pnpm --filter @simple-agent-manager/api test:scheduler:nightly 2>&1 | tee scheduler-lifecycle.log
+          pnpm --filter @simple-agent-manager/scheduler-core test:scheduler:nightly 2>&1 | tee scheduler-lifecycle.log
 
       - name: Upload replay diagnostics
         if: failure()

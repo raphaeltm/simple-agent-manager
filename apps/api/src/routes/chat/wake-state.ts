@@ -14,7 +14,7 @@
  * This is the *pull* half of wake visibility, and it is what makes the wake banner
  * survive a navigate-away-and-back (PR #1865). The *push* half — live phase deltas
  * without waiting for a poll — is `session.wake_progress`, broadcast from
- * `durable-objects/project-data/session-wake-progress.ts`.
+ * `packages/project-data/src/do/session-wake-progress.ts`.
  *
  * Both halves report the same vocabulary (`TaskExecutionStep`), so a hydrate and a
  * broadcast that race cannot disagree about what phase means.

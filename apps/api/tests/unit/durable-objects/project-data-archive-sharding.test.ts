@@ -1,7 +1,11 @@
-import Database from 'better-sqlite3';
-import { describe, expect, it } from 'vitest';
-
-import { runMigrations } from '../../../src/durable-objects/migrations';
+import {
+  isProjectDataArchiveSourcePrepareRefusal,
+  PROJECT_DATA_ARCHIVE_DEFAULT_HASH_PAGE_ROWS,
+  PROJECT_DATA_ARCHIVE_MAX_HASH_PAGE_ROWS,
+  PROJECT_DATA_ARCHIVE_SURFACE_INVENTORY,
+  PROJECT_DATA_ARCHIVE_TABLES,
+  type ProjectDataArchiveSurface,
+} from '@simple-agent-manager/project-data/internal/archive/contract';
 import {
   abandonArchiveSourceIntent,
   abandonArchiveTargetSession,
@@ -22,21 +26,17 @@ import {
   ProjectDataArchiveInvariantError,
   resolveArchiveHashPageRows,
   sealArchiveTarget,
-} from '../../../src/durable-objects/project-data/archive-sharding';
+} from '@simple-agent-manager/project-data/internal/do/archive-sharding';
 import {
   persistMessage,
   PROJECT_DATA_TRANSCRIPT_WRITE_FENCED,
   RPC_SIZE_BUDGET_BYTES,
-} from '../../../src/durable-objects/project-data/messages';
+} from '@simple-agent-manager/project-data/internal/do/messages';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import Database from 'better-sqlite3';
+import { describe, expect, it } from 'vitest';
+
 import { D1_MAX_BOUND_PARAMETERS } from '../../../src/lib/d1-limits';
-import {
-  isProjectDataArchiveSourcePrepareRefusal,
-  PROJECT_DATA_ARCHIVE_DEFAULT_HASH_PAGE_ROWS,
-  PROJECT_DATA_ARCHIVE_MAX_HASH_PAGE_ROWS,
-  PROJECT_DATA_ARCHIVE_SURFACE_INVENTORY,
-  PROJECT_DATA_ARCHIVE_TABLES,
-  type ProjectDataArchiveSurface,
-} from '../../../src/project-data-archive/contract';
 import { createSqlStorage } from './sql-storage-test-utils';
 
 const NOW = 2_000_000;

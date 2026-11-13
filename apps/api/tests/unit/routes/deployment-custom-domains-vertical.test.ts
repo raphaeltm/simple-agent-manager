@@ -165,7 +165,7 @@ vi.mock('drizzle-orm', () => ({
   }),
 }));
 
-vi.mock('../../../src/db/schema', () => ({
+vi.mock('@simple-agent-manager/worker-core/schema', () => ({
   deploymentCustomDomainEvents,
   deploymentCustomDomains,
   deploymentEnvironments,

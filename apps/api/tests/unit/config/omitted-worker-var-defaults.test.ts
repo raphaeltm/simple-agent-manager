@@ -20,28 +20,34 @@
 import { isDeepStrictEqual } from 'node:util';
 
 import { generateCloudInit } from '@simple-agent-manager/cloud-init';
-import { resolveOrchestratorConfig } from '@simple-agent-manager/shared';
-import { describe, expect, it } from 'vitest';
-
-import { OMITTED_WORKER_VAR_DEFAULTS } from '../../../../../scripts/deploy/worker-var-defaults';
-import { resolveArchiveHashPageRows } from '../../../src/durable-objects/project-data/archive-sharding';
+import { compactArchiveTimeout } from '@simple-agent-manager/project-data/internal/archive/compact-r2';
+import {
+  getProjectDataArchiveManualCanaryConfig,
+  getProjectDataArchiveRolloutListConfig,
+  getProjectDataArchiveRolloutWarningConfig,
+} from '@simple-agent-manager/project-data/internal/client/project-data-archive-rollout-controls';
+import {
+  archiveShardProjectDataOwner,
+  resolveArchiveShardCount,
+} from '@simple-agent-manager/project-data/internal/client/project-data-archive-routing';
+import { resolveArchiveHashPageRows } from '@simple-agent-manager/project-data/internal/do/archive-sharding';
 import {
   computeHumanInputSchedule,
   humanInputMaxWaitMs,
   humanInputUndeliveredGraceMs,
   parseHumanInputEscalationFractions,
-} from '../../../src/durable-objects/project-data/attention';
+} from '@simple-agent-manager/project-data/internal/do/attention';
 import {
   resolveCommentLimits,
   resolveCommentListLimit,
   resolveProjectCommentListLimit,
   resolveProjectCommentListMaxBytes,
-} from '../../../src/durable-objects/project-data/comment-normalization';
-import { resolveMessageSearchBounds } from '../../../src/durable-objects/project-data/message-search';
-import { resolveMaxMessagesPerSession } from '../../../src/durable-objects/project-data/messages-persist-helpers';
-import { channelLimits } from '../../../src/durable-objects/project-data/project-event-channels-config';
-import { scheduleLimits } from '../../../src/durable-objects/project-data/project-event-schedules-config';
-import { resolveProjectEventLimits } from '../../../src/durable-objects/project-data/project-events-limits';
+} from '@simple-agent-manager/project-data/internal/do/comment-normalization';
+import { resolveMessageSearchBounds } from '@simple-agent-manager/project-data/internal/do/message-search';
+import { resolveMaxMessagesPerSession } from '@simple-agent-manager/project-data/internal/do/messages-persist-helpers';
+import { channelLimits } from '@simple-agent-manager/project-data/internal/do/project-event-channels-config';
+import { scheduleLimits } from '@simple-agent-manager/project-data/internal/do/project-event-schedules-config';
+import { resolveProjectEventLimits } from '@simple-agent-manager/project-data/internal/do/project-events-limits';
 import {
   activeWorkHardStallMs,
   maxCandidatesPerSweep,
@@ -50,24 +56,27 @@ import {
   reconciliationNodeCallTimeoutMs,
   reconciliationProbeMaxAttempts,
   reconciliationQuarantineMs,
-} from '../../../src/durable-objects/project-data/reconciliation-thresholds';
-import { resolveStorageSafetyConfig } from '../../../src/durable-objects/project-data/storage-safety';
-import { resolveToolMetadataMaxBytes } from '../../../src/durable-objects/project-data/tool-metadata-storage';
+} from '@simple-agent-manager/project-data/internal/do/reconciliation-thresholds';
+import { resolveStorageSafetyConfig } from '@simple-agent-manager/project-data/internal/do/storage-safety';
+import { resolveToolMetadataMaxBytes } from '@simple-agent-manager/project-data/internal/do/tool-metadata-storage';
+import {
+  getProjectDataArchiveFrozenIntentInspectionConfig,
+  resolveConfig as resolveArchiveCoordinatorConfig,
+  scopedConfig as scopedArchiveCoordinatorConfig,
+} from '@simple-agent-manager/project-data/internal/scheduled/project-data-archive-sharding';
+import { configFromEnv as storageReliefPreflightConfig } from '@simple-agent-manager/project-data/internal/scheduled/project-data-storage-relief-preflight';
+import { resolveOrchestratorConfig } from '@simple-agent-manager/shared';
+import { describe, expect, it } from 'vitest';
+
+import { OMITTED_WORKER_VAR_DEFAULTS } from '../../../../../scripts/deploy/worker-var-defaults';
 import { resolveD1SessionMode } from '../../../src/lib/d1-session';
 import { resolveSearchQueryLimits } from '../../../src/lib/search-query-limits';
 import { getRateLimit } from '../../../src/middleware/rate-limit';
-import { compactArchiveTimeout } from '../../../src/project-data-archive/compact-r2';
 import { getMcpLimits } from '../../../src/routes/mcp/_helpers';
 import { resolveMaxMessageBytes } from '../../../src/routes/workspaces/runtime';
 import { throttleKey } from '../../../src/scheduled/failed-sweep-notifications';
 import { resolveCleanupConfig } from '../../../src/scheduled/node-cleanup/config';
 import { resolveOperatorNotificationThrottleMs } from '../../../src/scheduled/operator-notifications';
-import {
-  getProjectDataArchiveFrozenIntentInspectionConfig,
-  resolveConfig as resolveArchiveCoordinatorConfig,
-  scopedConfig as scopedArchiveCoordinatorConfig,
-} from '../../../src/scheduled/project-data-archive-sharding';
-import { configFromEnv as storageReliefPreflightConfig } from '../../../src/scheduled/project-data-storage-relief-preflight';
 import { getAcpInteractionConfig } from '../../../src/services/acp-interaction-config';
 import { buildAcpInteractionRuntimeConfig } from '../../../src/services/acp-interaction-runtime-config';
 import { adminSettingCacheMs, readAdminSettings } from '../../../src/services/admin-settings';
@@ -88,15 +97,6 @@ import {
   resolveOperationalLoopKvKey,
 } from '../../../src/services/operational-kill-switch';
 import { getOperatorSettings } from '../../../src/services/operator-settings';
-import {
-  getProjectDataArchiveManualCanaryConfig,
-  getProjectDataArchiveRolloutListConfig,
-  getProjectDataArchiveRolloutWarningConfig,
-} from '../../../src/services/project-data-archive-rollout-controls';
-import {
-  archiveShardProjectDataOwner,
-  resolveArchiveShardCount,
-} from '../../../src/services/project-data-archive-routing';
 import { resolveProjectEventSourceOutboxConfig } from '../../../src/services/project-event-source-outbox-contract';
 import { getVmAdmissionConfig } from '../../../src/services/vm-admission-control-types';
 import { errorReportCloudInitVariables } from '../../../src/services/vm-error-report-config';
@@ -236,8 +236,8 @@ const READ_PATHS: readonly ReadPath[] = [
     // attention-expiry.ts hands the raw values to the same exported parsers.
     label: 'human-input schedule',
     sources: [
-      `${API}/durable-objects/project-data/attention.ts`,
-      `${API}/durable-objects/project-data/attention-expiry.ts`,
+      `packages/project-data/src/do/attention.ts`,
+      `packages/project-data/src/do/attention-expiry.ts`,
     ],
     read: (env) => [
       computeHumanInputSchedule(env, 0),
@@ -253,12 +253,12 @@ const READ_PATHS: readonly ReadPath[] = [
   },
   {
     label: 'resolveMaxMessagesPerSession',
-    sources: [`${API}/durable-objects/project-data/messages-persist-helpers.ts`],
+    sources: [`packages/project-data/src/do/messages-persist-helpers.ts`],
     read: (env) => resolveMaxMessagesPerSession(asEnv(env)),
   },
   {
     label: 'comment limits',
-    sources: [`${API}/durable-objects/project-data/comment-normalization.ts`],
+    sources: [`packages/project-data/src/do/comment-normalization.ts`],
     read: (env) => [
       resolveCommentLimits(asEnv(env)),
       resolveCommentListLimit(asEnv(env), undefined),
@@ -270,22 +270,22 @@ const READ_PATHS: readonly ReadPath[] = [
   },
   {
     label: 'resolveToolMetadataMaxBytes',
-    sources: [`${API}/durable-objects/project-data/tool-metadata-storage.ts`],
+    sources: [`packages/project-data/src/do/tool-metadata-storage.ts`],
     read: (env) => resolveToolMetadataMaxBytes(asEnv(env)),
   },
   {
     label: 'resolveStorageSafetyConfig',
-    sources: [`${API}/durable-objects/project-data/storage-safety.ts`],
+    sources: [`packages/project-data/src/do/storage-safety.ts`],
     read: (env) => resolveStorageSafetyConfig(asEnv(env)),
   },
   {
     label: 'storage-relief preflight config',
-    sources: [`${API}/scheduled/project-data-storage-relief-preflight.ts`],
+    sources: [`packages/project-data/src/scheduled/project-data-storage-relief-preflight.ts`],
     read: (env) => storageReliefPreflightConfig(asEnv(env)),
   },
   {
     label: 'archive coordinator config',
-    sources: [`${API}/scheduled/project-data-archive-sharding.ts`],
+    sources: [`packages/project-data/src/scheduled/project-data-archive-sharding.ts`],
     read: (env) => {
       const config = resolveArchiveCoordinatorConfig(asEnv(env));
       return [
@@ -303,20 +303,20 @@ const READ_PATHS: readonly ReadPath[] = [
     // Every ProjectData archive read site calls this shared parser on the raw value.
     label: 'compactArchiveTimeout',
     sources: [
-      `${API}/project-data-archive/compact-r2.ts`,
-      `${API}/durable-objects/project-data/archive-sharding.ts`,
-      `${API}/durable-objects/project-data/compact-archive.ts`,
+      `packages/project-data/src/archive/compact-r2.ts`,
+      `packages/project-data/src/do/archive-sharding.ts`,
+      `packages/project-data/src/do/compact-archive.ts`,
     ],
     read: (env) => compactArchiveTimeout(env.PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS),
   },
   {
     label: 'resolveArchiveHashPageRows',
-    sources: [`${API}/durable-objects/project-data/archive-sharding.ts`],
+    sources: [`packages/project-data/src/do/archive-sharding.ts`],
     read: (env) => resolveArchiveHashPageRows(env),
   },
   {
     label: 'archive shard routing',
-    sources: [`${API}/services/project-data-archive-routing.ts`],
+    sources: [`packages/project-data/src/client/project-data-archive-routing.ts`],
     read: (env) => [
       resolveArchiveShardCount(asEnv(env)),
       archiveShardProjectDataOwner(asEnv(env), 'project-1', 'session-1', 1),
@@ -324,7 +324,7 @@ const READ_PATHS: readonly ReadPath[] = [
   },
   {
     label: 'archive rollout controls',
-    sources: [`${API}/services/project-data-archive-rollout-controls.ts`],
+    sources: [`packages/project-data/src/client/project-data-archive-rollout-controls.ts`],
     read: (env) => [
       getProjectDataArchiveRolloutListConfig(asEnv(env)),
       getProjectDataArchiveManualCanaryConfig(asEnv(env)),
@@ -334,8 +334,8 @@ const READ_PATHS: readonly ReadPath[] = [
   {
     label: 'search query limits',
     sources: [
-      `${API}/lib/search-query-limits.ts`,
-      `${API}/durable-objects/project-data/message-search.ts`,
+      'packages/worker-core/src/search-query-limits.ts',
+      `packages/project-data/src/do/message-search.ts`,
     ],
     read: (env) => [resolveSearchQueryLimits(env), resolveMessageSearchBounds(env)],
   },
@@ -389,7 +389,7 @@ const READ_PATHS: readonly ReadPath[] = [
   },
   {
     label: 'task reconciliation thresholds',
-    sources: [`${API}/durable-objects/project-data/reconciliation-thresholds.ts`],
+    sources: [`packages/project-data/src/do/reconciliation-thresholds.ts`],
     read: (env) => [
       activeWorkHardStallMs(asEnv(env)),
       minReconciliationAlarmDelayMs(asEnv(env)),
@@ -422,19 +422,19 @@ const READ_PATHS: readonly ReadPath[] = [
   {
     label: 'project event limits',
     sources: [
-      `${API}/durable-objects/project-data/project-events-limits.ts`,
+      `packages/project-data/src/do/project-events-limits.ts`,
       `${API}/routes/mcp/_helpers.ts`,
     ],
     read: (env) => [resolveProjectEventLimits(asEnv(env)), getMcpLimits(asEnv(env))],
   },
   {
     label: 'project event schedule limits',
-    sources: [`${API}/durable-objects/project-data/project-event-schedules-config.ts`],
+    sources: [`packages/project-data/src/do/project-event-schedules-config.ts`],
     read: (env) => scheduleLimits(env),
   },
   {
     label: 'project event channel limits',
-    sources: [`${API}/durable-objects/project-data/project-event-channels-config.ts`],
+    sources: [`packages/project-data/src/do/project-event-channels-config.ts`],
     read: (env) => channelLimits(env),
   },
   {

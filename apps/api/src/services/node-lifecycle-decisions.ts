@@ -11,7 +11,9 @@
  */
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
-import { ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL } from './workspace-resource-capacity';
+import {
+  ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL,
+} from './workspace-reservation-usage';
 
 export type NodeLifecycleDecisionSource =
   | 'node_lifecycle'
