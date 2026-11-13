@@ -7,6 +7,17 @@ Parent task `01M7AF82KG9C78WAABTG3V1MN1`; coordination channel `feature.selfhost
 The pull request stays a DRAFT and is not merged or marked ready by the agent. This task file is
 committed on the feature branch only (no direct-to-main task commit, for the same reason).
 
+Hold sources (as given by the coordinator, task `01M7AF82KG9C78WAABTG3V1MN1`):
+1. Draft until coordinator review: Raphaël's rule of 2026-11-08 in project knowledge entity
+   `AgentDispatch` (dispatched agents keep PRs draft until the coordinator approves by PR number and
+   head SHA).
+2. Owner approval per merge to main for the self-host landing: recorded by the first coordinator
+   under "STANDING RULES FROM RAPHAËL" in the note "COORDINATOR HANDOFF STATE" on idea
+   `01M72M9AEB933ZY8269D376DKC` (2026-11-13 about 10:20Z, session
+   `113a693f-8f1c-4b3f-88d8-69fa1ee4ab91`). This is an agent's record of his words; primary
+   confirmation was requested from Raphaël on 2026-11-13 in chat session
+   `7d133cbf-7a83-4f23-ac2c-6961465ff414`.
+
 ## Problem
 
 `apps/api/src/index.ts` on main is 1,040 lines, over the 800-line hard limit (rule 18), and is on
