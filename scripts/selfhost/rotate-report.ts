@@ -91,7 +91,7 @@ export function formatPlan(
       );
       if (!bundle.BETTER_AUTH_SECRET || bundle.BETTER_AUTH_SECRET === bundle.ENCRYPTION_KEY)
         lines.push(
-          '     pins BETTER_AUTH_SECRET to the current value first: session cookies are signed with it. better-auth-secret (also in this plan) then replaces it, so every user signs in again once; until that step is done the old value is not retired'
+          '     BETTER_AUTH_SECRET is unset, so this key also signs every session cookie: better-auth-secret runs first in this plan and gives sessions their own secret (every user signs in again once), so the old value never signs a session after the switch'
         );
       if (!bundle.TOKEN_HASH_KEY)
         lines.push('     pins TOKEN_HASH_KEY to the current value (kept on purpose, see below)');

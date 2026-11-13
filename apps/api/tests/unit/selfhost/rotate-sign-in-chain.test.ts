@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest';
 import { rotatableKey } from '../../../../../scripts/selfhost/rotate-catalog';
 import { formatPlan, formatSummary } from '../../../../../scripts/selfhost/rotate-report';
 import { selectKeys } from '../../../../../scripts/selfhost/rotate-run';
-import { type Journal,JOURNAL_FORMAT } from '../../../../../scripts/selfhost/rotate-store';
+import { type Journal, JOURNAL_FORMAT } from '../../../../../scripts/selfhost/rotate-store';
 
 const BASE = { ENCRYPTION_KEY: 'enc-old' };
 
@@ -35,10 +35,11 @@ function journal(signIn: 'done' | 'rolled-back' | 'blocked'): Journal {
 
 describe('rotate encryption-key and the sign-in secret', () => {
   it('chains better-auth-secret when BETTER_AUTH_SECRET is unset or holds the same value', () => {
-    expect(names(BASE, ['encryption-key'])).toEqual(['encryption-key', 'better-auth-secret']);
+    // Before the key it fell back to, so ENCRYPTION_KEY never signs a session after its switch.
+    expect(names(BASE, ['encryption-key'])).toEqual(['better-auth-secret', 'encryption-key']);
     expect(names({ ...BASE, BETTER_AUTH_SECRET: 'enc-old' }, ['encryption-key'])).toEqual([
-      'encryption-key',
       'better-auth-secret',
+      'encryption-key',
     ]);
   });
 
@@ -52,15 +53,16 @@ describe('rotate encryption-key and the sign-in secret', () => {
     ]);
   });
 
-  it('the plan says the old value signs sessions until the chained step replaces it', () => {
+  it('the plan says the sign-in secret is replaced first and why', () => {
     const keys = selectKeys({ names: ['encryption-key'], all: false }, BASE);
     const plan = formatPlan(keys, BASE, {}).join('\n');
-    expect(plan).toContain('2. better-auth-secret');
-    expect(plan).toMatch(/session cookies are signed with it/);
+    expect(plan).toContain('1. better-auth-secret');
+    expect(plan).toContain('2. encryption-key');
+    expect(plan).toMatch(/also signs every session cookie/);
     expect(plan).toMatch(/every user signs in again once/);
     const distinct = { ...BASE, BETTER_AUTH_SECRET: 'separate' };
     expect(formatPlan([rotatableKey('encryption-key')!], distinct, {}).join('\n')).not.toMatch(
-      /session cookies are signed with it/
+      /also signs every session cookie/
     );
   });
 

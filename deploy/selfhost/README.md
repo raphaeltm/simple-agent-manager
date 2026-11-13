@@ -243,8 +243,9 @@ written under the old key after the first proof is migrated first. If verificati
 rounds, the same migration runs in reverse and the key rolls back; if even that cannot be proven the
 step stops as `blocked` with both keys readable. It first pins `TOKEN_HASH_KEY` to the current value,
 which changes nothing. When `BETTER_AUTH_SECRET` was unset (it then falls back to `ENCRYPTION_KEY`),
-the old key also signs every session: `rotate encryption-key` then runs `better-auth-secret` in the
-same run, which signs everyone out once, and the key is not reported retired until that step is done.
+the old key also signs every session: `rotate encryption-key` then runs `better-auth-secret` first in
+the same run (everyone signs in again once), so the old key never signs a session after the switch.
+If that step stops, the summary says the old key is not retired.
 Library files are written back only if the object store honours conditional get and put (checked
 before the first write; celld 0.6.3 does, `scripts/selfhost/live/key-rotation.live.test.ts`), and
 every file body is checked against its file key, so a damaged file is reported, never re-paired.

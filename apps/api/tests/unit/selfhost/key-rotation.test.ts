@@ -29,6 +29,7 @@ import {
   NOT_ROTATED_IV_COLUMNS,
 } from '../../../src/selfhost/key-rotation/d1-locations';
 import { previousKeyPairs, roleKeys } from '../../../src/selfhost/key-rotation/keys';
+import { conditionalWriteProblem } from '../../../src/selfhost/key-rotation/library-conditional';
 import { getDecryptedAgentKey } from '../../../src/services/agent-key-resolution';
 import {
   decrypt,
@@ -739,6 +740,15 @@ describe('library files: a store that does not honour conditional writes (review
     const result = await call({ op: 'pass', target: 'library', mode: 'migrate', cursor: null });
     expect(result.body).toMatchObject({ migrated: 1, previous: 0, unreadable: 0 });
     expect(bucket.keys()).toEqual(['library/p1/f1']);
+  });
+
+  it('overlapping checks use their own scratch objects and both pass', async () => {
+    const [a, b] = await Promise.all([
+      conditionalWriteProblem(bucket.asBucket()),
+      conditionalWriteProblem(bucket.asBucket()),
+    ]);
+    expect([a, b]).toEqual([null, null]);
+    expect(bucket.keys()).toEqual([]);
   });
 
   it('verify does not run the write check (it writes nothing)', async () => {

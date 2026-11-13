@@ -199,12 +199,14 @@ export async function handleKeyRotationRequest(
   }
   const input = parseObject(body);
   if (!input) return reply(400, { error: 'BAD_REQUEST' });
-  if (input.op === 'status') return await statusReply(env, input);
-  if (input.op !== 'pass') return reply(400, { error: 'BAD_REQUEST' });
+  if (input.op !== 'status' && input.op !== 'pass') return reply(400, { error: 'BAD_REQUEST' });
   const mode = input.mode;
-  if (mode !== 'migrate' && mode !== 'verify') return reply(400, { error: 'BAD_MODE' });
+  if (input.op === 'pass' && mode !== 'migrate' && mode !== 'verify') {
+    return reply(400, { error: 'BAD_MODE' });
+  }
   try {
-    return await passReply(env, input, mode);
+    if (input.op === 'status') return await statusReply(env, input);
+    return await passReply(env, input, mode as PassMode);
   } catch (error) {
     // The message is the pass's own (never a value); the stack stays in the Worker log.
     log.error('selfhost_key_rotation.pass_failed', {

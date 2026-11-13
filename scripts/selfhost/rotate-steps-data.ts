@@ -202,15 +202,15 @@ export async function assertRetireProof(ctx: StepContext, kind: Kind, tag: strin
 async function storedLifetimeMinutes(ctx: StepContext, explicit: number | null): Promise<number> {
   if (explicit !== null) return explicit;
   const call = await controlCall(ctx);
-  const status = (await call({ op: 'status' }).catch(() => null)) as {
+  const status = (await call({ op: 'status', purpose: 'stored-lifetime' }).catch(() => null)) as {
     unreachableValueLifetimeMs?: unknown;
   } | null;
   const reported = status?.unreachableValueLifetimeMs;
   if (typeof reported !== 'number' || !Number.isFinite(reported) || reported <= 0) {
-    ctx.deps.log(
-      `  WARNING: the Worker did not report how long values outside D1/R2 live; waiting the default ${DEFAULT_STORED_LIFETIME_MINUTES} min`
+    // Fail closed: retiring the old key early would make values outside D1/R2 unreadable.
+    throw new Error(
+      'the Worker did not report how long values outside D1/R2 live; run rotate --resume again, or set the wait with --stored-lifetime-minutes'
     );
-    return DEFAULT_STORED_LIFETIME_MINUTES;
   }
   return Math.max(
     DEFAULT_STORED_LIFETIME_MINUTES,

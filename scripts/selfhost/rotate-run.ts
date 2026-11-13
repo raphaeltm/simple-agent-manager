@@ -86,9 +86,10 @@ export function selectKeys(
         return key;
       });
   const signIn = rotatableKey('better-auth-secret');
-  if (signIn && !chosen.includes(signIn) && chosen.some((key) => signsSessionsWith(key, bundle))) {
-    // Rotating ENCRYPTION_KEY pins the sign-in secret to its old value (it fell back to it), so
-    // the old key would keep signing every session. Replace it in the same run (review V1 M2).
+  const signer = chosen.find((key) => signsSessionsWith(key, bundle));
+  if (signIn && signer && !chosen.includes(signIn)) {
+    // ENCRYPTION_KEY also signs every session while BETTER_AUTH_SECRET is unset (it falls back
+    // to it): replace the sign-in secret in the same run (review V1 M2).
     chosen.push(signIn);
   }
   for (const key of chosen) {
@@ -98,7 +99,14 @@ export function selectKeys(
     }
   }
   // Catalog order, whatever order the operator typed.
-  return ROTATABLE_KEYS.filter((key) => chosen.includes(key));
+  const ordered = ROTATABLE_KEYS.filter((key) => chosen.includes(key));
+  if (!signIn || !signer) return ordered;
+  // The sign-in secret right before it: it then has its own value when ENCRYPTION_KEY switches, so the
+  // old key never signs a session after the switch and nothing needs pinning (security review
+  // of F1, L1). Otherwise sessions would stay on the old key through every data-key step.
+  const rest = ordered.filter((key) => key !== signIn);
+  rest.splice(rest.indexOf(signer), 0, signIn);
+  return rest;
 }
 
 /**

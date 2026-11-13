@@ -255,10 +255,10 @@ describe('rotate encryption-key', () => {
     // TOKEN_HASH_KEY is pinned to the old value on purpose (API token lookups keep working).
     expect(mid.TOKEN_HASH_KEY).toBe(old);
     // BETTER_AUTH_SECRET was unset, so the old key signed every session: the run chains
-    // better-auth-secret, which replaces the pinned value at once (review V1 M2).
+    // better-auth-secret and runs it first, so the switch never pins the old key (review V1 M2).
     const journal = readJournal(stateDir);
-    expect(journal?.keys).toEqual(['encryption-key', 'better-auth-secret']);
-    expect(journal?.steps['encryption-key']?.signInSecretPinned).toBe(true);
+    expect(journal?.keys).toEqual(['better-auth-secret', 'encryption-key']);
+    expect(journal?.steps['encryption-key']?.signInSecretPinned).toBeUndefined();
     expect(journal?.steps['better-auth-secret']?.phase).toBe('done');
     expect(mid.BETTER_AUTH_SECRET).toBeTruthy();
     expect(mid.BETTER_AUTH_SECRET).not.toBe(old);
@@ -305,7 +305,9 @@ describe('rotate encryption-key', () => {
     for (let i = 0; i < 5; i += 1) await seedCredential(`c-${i}`, `secret-${i}`, old);
     let calls = 0;
     controlHook = async (body) => {
-      if (body.mode === 'migrate' && ++calls === 2) throw new Error('box lost power');
+      // The encryption key's own pages (the chained sign-in step runs its pass first).
+      if (body.mode === 'migrate' && body.target === 'd1' && ++calls === 2)
+        throw new Error('box lost power');
     };
     await expect(runRotate(input({ names: ['encryption-key'] }), deps())).rejects.toThrow(
       'box lost power'
@@ -391,8 +393,9 @@ describe('rotate --all', () => {
       'deploy-signing-keys',
       'vapid-keys',
       'gateway-secret',
-      'encryption-key',
+      // BETTER_AUTH_SECRET was unset: the sign-in secret moves before the key it fell back to.
       'better-auth-secret',
+      'encryption-key',
       'jwt-keys',
     ]);
     expect(journal.steps['encryption-key']?.phase).toBe('waiting');
@@ -567,6 +570,19 @@ describe('rotate encryption-key: the wait for values outside D1 and R2 (review V
 
   it('keeps the default floor when the Worker uses the defaults (control)', async () => {
     await runRotate(input({ names: ['encryption-key'] }), deps());
+    expect(waitMinutes()).toBe(5 * 60 + 15);
+  });
+
+  it('stops instead of guessing when the Worker cannot report the lifetime', async () => {
+    controlHook = async (body) => {
+      if (body.purpose === 'stored-lifetime') throw new Error('status unavailable');
+    };
+    await expect(runRotate(input({ names: ['encryption-key'] }), deps())).rejects.toThrow(
+      /did not report how long values outside D1\/R2 live/
+    );
+    expect(readJournal(stateDir)?.steps['encryption-key']?.waitUntil).toBeUndefined();
+    controlHook = null;
+    await runRotate(input({ resume: true }), deps());
     expect(waitMinutes()).toBe(5 * 60 + 15);
   });
 

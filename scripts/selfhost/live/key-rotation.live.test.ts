@@ -175,7 +175,12 @@ function deps(log: string[], interruptAfterMigratePages = 0): RotateDeps {
       throw new Error('not used by encryption-key');
     },
     control: async (key, body) => {
-      if (body.mode === 'migrate' && interruptAfterMigratePages > 0) {
+      // Counts the encryption key's own pages (the chained sign-in step migrates first).
+      if (
+        body.mode === 'migrate' &&
+        body.target !== 'better-auth' &&
+        interruptAfterMigratePages > 0
+      ) {
         migratePages += 1;
         if (migratePages > interruptAfterMigratePages)
           throw new Error('the operator pressed Ctrl-C');
