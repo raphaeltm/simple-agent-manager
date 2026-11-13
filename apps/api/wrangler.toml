@@ -143,10 +143,11 @@ PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET = "10000"
 # Tick deadline. Checked between candidates and, since 2026-11-13, inside a migration too: a
 # migration that has advanced pauses at the deadline (copy chunk, R2 verification page or phase
 # boundary) and the next tick resumes it, so a tick runs up to this plus one in-flight RPC. The
-# longest single RPC is the flip's terminal-version recompute on the root (~0.09 ms/message in
-# production, so ~9 s at the 100k-message cap). 60 s (was 10 s until 2026-11-12, which fit
-# exactly one small session); ~12 ms per message plus ~8 s fixed per small session, so at 80
-# ticks/day ~400k messages/day against ~85k ingested. Code fallback stays 5 s.
+# longest are an R2 verification page (bounded by _R2_TIMEOUT_MS per call) and the prepare's
+# terminal-version hash, which yields between 500-row pages (100k messages: 1.8 s locally in
+# slices of at most 70 ms); the flip is an O(1) write-generation check. Production after the
+# 60 s tick shipped (2026-11-13, first ~5 ticks): 68,352 messages in 9 sessions, ~13.7k per tick;
+# 10 s fit exactly one small session before 2026-11-12. Code fallback stays 5 s.
 PROJECT_DATA_ARCHIVE_WALL_TIME_MS = "60000"
 PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS = "4"
 PROJECT_DATA_ARCHIVE_SEARCH_CONCURRENCY = "4"

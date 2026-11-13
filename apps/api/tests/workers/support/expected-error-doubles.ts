@@ -88,6 +88,22 @@ export class ProjectDataTestDouble extends ProjectData {
   /** Remaining injected `archiveTargetAbandonPage` failures: a reset mid-unwind. */
   private targetAbandonPageFailuresForTest = 0;
 
+  /** How many times the coordinator asked this object for a write estimate. */
+  private estimateCallsForTest = 0;
+
+  estimateCallCountForTest(): number {
+    return this.estimateCallsForTest;
+  }
+
+  override archiveSourceEstimateWrites(
+    sessionId: string,
+    factor: number,
+    maxMessages: number
+  ): number {
+    this.estimateCallsForTest++;
+    return super.archiveSourceEstimateWrites(sessionId, factor, maxMessages);
+  }
+
   failNextArchiveFlipsForTest(count: number): void {
     this.flipFailuresForTest = count;
   }

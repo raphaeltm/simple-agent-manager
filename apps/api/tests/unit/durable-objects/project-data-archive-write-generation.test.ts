@@ -20,11 +20,13 @@ import {
   beginArchiveSourcePrepare,
   completeArchiveSourcePrepare,
   computeTerminalVersion,
+  exportArchiveChunk,
   flipArchiveSource,
   markSourceRecoveryManifestPersisted,
   markSourceTargetSealed,
   prepareArchiveSourceIntentOrRefuse,
   readArchiveWriteGeneration,
+  reattachArchiveSourceToken,
 } from '../../../src/durable-objects/project-data/archive-sharding';
 import {
   ARCHIVE_MAX_ESTIMATE_INVENTORY_UNITS,
@@ -345,6 +347,44 @@ describe('archive write-generation fence', () => {
       );
       expect('refused' in flipped).toBe(false);
       expect(recorder.stats.messageScans).toBeGreaterThan(0);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe('archive source token rotation on resume', () => {
+  it("rejects the previous claim's token once a resumed claim reattaches its own", async () => {
+    const { db, sql } = makeSql();
+    try {
+      seedSession(sql, 'tok', 6);
+      await prepare(sql, 'tok');
+      const exportInput = (sourceIntentToken: string) => ({
+        ...prepareInput('tok'),
+        sourceIntentToken,
+        tableName: 'chat_messages' as const,
+        ordinal: 0,
+        cursor: null,
+        maxRows: 3,
+        maxBytes: 1_000_000,
+      });
+      // Before the resume, the original claim's token exports.
+      await expect(exportArchiveChunk(sql, exportInput('token-tok'))).resolves.toMatchObject({
+        rowCount: 3,
+      });
+      expect(
+        reattachArchiveSourceToken(sql, {
+          ...prepareInput('tok'),
+          sourceIntentToken: 'token-resumed',
+          now: NOW + 1,
+        })
+      ).toBe(true);
+      await expect(exportArchiveChunk(sql, exportInput('token-tok'))).rejects.toMatchObject({
+        reason: 'source_intent_mismatch',
+      });
+      await expect(exportArchiveChunk(sql, exportInput('token-resumed'))).resolves.toMatchObject({
+        rowCount: 3,
+      });
     } finally {
       db.close();
     }

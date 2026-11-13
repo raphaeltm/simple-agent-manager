@@ -208,6 +208,64 @@ Checklist:
 - [ ] Discrimination runs per guard (renewal, reserve-once, progress reset, unwind, verification).
 - [ ] Local specialist review; CI; staging on the compact config; parent review of the exact SHA.
 
+Review round 1 (2026-11-13, head ab10ea984) and fixes (commit 327f3db1f):
+
+- task-completion-validator FAIL: HIGH verification redone counted as progress (poison never
+  fires); HIGH paged verification barely tested; MEDIUM estimator cap, stale lease, reclaim
+  deadline determinism, flip/prepare hash still whole-session, maintenance audit, drain arithmetic.
+- adversarial reviewer: HIGH grouped/tool rows no longer checked against the root before the flip;
+  HIGH verification progress discarded yet counted; MEDIUM unwind not crash-safe; MEDIUM repeated
+  flip refusal re-copies daily.
+- cloudflare-specialist: HIGH unpaged target abandon in the unwind can hit the CPU limit and a
+  partial unwind poisons; MEDIUM token not rotated on resume; MEDIUM progressed failure pays the
+  1 h retry delay and a re-prepare; MEDIUM refused candidates re-scan every tick; MEDIUM R2 not
+  re-checked between verification and flip; LOW frozen reads, listing cost, UTF-8 ordering.
+- Parent (01M77TZWBDJHQ3Z87V2NYZMFK1): bound every whole-session root operation with a version or
+  write fence, or with measured enforced bounds; a projected 9 s root block is not acceptable.
+
+- [x] Write-generation fence: DO migration `076-archive-source-write-generation` (counter table,
+      intent columns `prepared_write_generation` / `terminal_components_json`, INSERT/UPDATE/DELETE
+      triggers on messages, grouped rows, tool-payload archives, chat_sessions anchor columns and
+      message comments, counting only pre-flip sessions and real hashed-column changes).
+- [x] Prepare in three phases: fence + generation under the lock, unlocked yielding hash, generation
+      re-check under the lock (`beginArchiveSourcePrepare` / `completeArchiveSourcePrepare`).
+- [x] Flip proves by write generation in O(1) (`finalizeSourceDelete` `proveByWriteGeneration`);
+      legacy intents and the old RPC re-hash.
+- [x] Root records terminal components; final verification page compares the shard's anchor,
+      grouped and tool rows (`assertTargetComponentsMatch`).
+- [x] Verification verdicts persist (complete / failure); timeouts keep progress; UTF-8 ordering.
+- [x] Resumable, paged, crash-safe unwind (`unwindFlipRefusal`, `archiveTargetAbandonPage`,
+      finish-unwind branch, `flip_unwinding` marker preserved by release and markFailed).
+- [x] Progressed failure keeps the phase and retries next tick (`releaseYieldedLease` with error).
+- [x] Token rotation on resume (`archiveSourceReattachToken`).
+- [x] Write-budget floor refusal before the root estimate scan.
+- [x] Renewal leaves an already expired lease to `assertLeaseStillHeld`.
+- [x] Tests: unit `project-data-archive-write-generation.test.ts` (7); workers resumable-cursor
+      11 scenarios (adds flip-fault poison, anchor component mismatch, interrupted unwind, real
+      bypass writer via `markAgentCompleted`, verification counted once across ticks).
+- Deferred with justification (MEDIUM/LOW): R2 HEAD re-check between verification and flip (R2
+  durability; the window is one tick at most); orphaned R2 objects after an unwind (storage only;
+  bounded by refusals per day); routing `frozen` reads to root; exponential backoff for repeated
+  flip refusals (bounded to one copy per session per day by the 1-day refusal window and visible
+  as `flipUnwound`).
+
+Measurement (2026-11-13, local better-sqlite3 + node:crypto, NOT production): 100,000 messages
+(512 B bodies) + 50,000 grouped rows: prepare hash 1,820 ms over 302 yields, longest uninterrupted
+slice 70 ms; flip 1.0 ms; write estimate 23 ms. Production per-row cost has been ~1.5x local.
+
+Drain vs ingress (rule 81; projections from production measurements, not measurements):
+
+- Write budget: production 2026-11-13 reserved 165,678 writes for 68,352 published messages
+  (~2.4 writes/message), so 2.4M/day admits ~1M messages/day.
+- Tick time: ~13.7k messages per 60 s tick measured for 10k-capped sessions; large sessions cost
+  ~3 ms/message (copy 2.2 + verify 0.4-0.8 + prepare ~0.03), ~20k per tick; 80 ticks/day gives
+  ~1.1-1.6M messages/day.
+- Binding constraint ~1M/day against ~85k/day ingress; the 6.6M-message eligible backlog
+  (575k + 1.92M + 4.10M) clears in roughly a week.
+- Retry schedule: a failure after progress retries next tick (18 min); a no-progress failure waits
+  `FAILED_RETRY_DELAY_MS` (1 h) and poisons after 3, so a permanently broken migration is
+  surfaced within ~3 h.
+
 Measurements (2026-11-13, local workerd, NOT production): a 20,000-message production-shaped
 session migrates, verifies, flips and reclaims inside a 46.4 s test that also seeds the session
 and reads the whole transcript back (upper bound ~2.3 ms/msg); 10,500 messages in 23.0 s.
@@ -299,3 +357,12 @@ a 1,284-write receipt, ProjectData DO p99 unchanged.
   coordinator `01M77TZWBDJHQ3Z87V2NYZMFK1` reviews the exact head SHA.
 - 2026-11-12 17:06Z workspace was recycled while paused; untracked `.do-state.md` was lost.
   Keep durable state here and push.
+
+Discrimination, round 2 (each guard reverted alone; the intended test went red, the others
+stayed green): flip write-generation proof (workers bypass-writer test and unit flip test),
+prepare generation re-check (unit mid-hash write), shard component check (anchor test),
+verification verdict kept on completion (flip-fault poison test; reverting to "delete progress
+on completion" reddens it), finish-unwind branch (interrupted unwind test), progressed-failure
+release (transient R2 test), budget floor (lower-bound test), token reattach (unit token test).
+Round 1 (renewal, reserve-once, yield reset, failure reset, unwind, verify, migrating reads,
+stuck past deadline) was recorded at 02:05Z.

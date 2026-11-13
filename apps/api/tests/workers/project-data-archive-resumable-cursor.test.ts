@@ -658,4 +658,31 @@ describe('resumable archive cursor', () => {
     );
     expect((await readLocation(projectId, sessionId))?.location_state).toBe('root');
   });
+  it('refuses from the lower-bound estimate without asking the root object to scan the session', async () => {
+    const { projectId, sessionId, source } = await seedCandidate('budgetfloor', 200);
+    // Today's pool is nearly spent: less than the 1,000-write fixed charge remains.
+    const allowance = 2_400_000;
+    // The window the next tick runs in (`tick` advances the clock by 10 s first).
+    const seedBudget = (reserved: number) =>
+      env.DATABASE.prepare(
+        `INSERT INTO project_data_archive_write_budget (id, window_started_at, reserved_writes)
+         VALUES ('global', ?, ?)
+         ON CONFLICT(id) DO UPDATE SET window_started_at = excluded.window_started_at,
+           reserved_writes = excluded.reserved_writes`
+      )
+        .bind(Math.floor((tickClock + 10_000) / 86_400_000) * 86_400_000, reserved)
+        .run();
+    await seedBudget(allowance - 500);
+    const before = await source.estimateCallCountForTest();
+    const refused = await tick();
+    expect(refused.budgetWindowExhausted ?? 0).toBeGreaterThanOrEqual(1);
+    expect(await source.estimateCallCountForTest()).toBe(before);
+    expect(await readJournal(projectId, sessionId)).toBeNull();
+
+    // Control: with room in the pool the same candidate is estimated and journaled.
+    await seedBudget(0);
+    await tick();
+    expect(await source.estimateCallCountForTest()).toBeGreaterThan(before);
+    expect(await readJournal(projectId, sessionId)).not.toBeNull();
+  });
 });
