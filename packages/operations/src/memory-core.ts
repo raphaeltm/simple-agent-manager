@@ -85,12 +85,16 @@ export async function listProfiles(
     if (status === 400 || status === 403 || status === 409) {
       throw new OperationError('invalid_input', (error as Error).message);
     }
-    // Storage error text (SQL, table names) never reaches an app; it is logged instead.
-    log.warn('operations.list_profiles_failed', {
-      projectId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    throw new OperationError('unavailable', 'SAM could not list agent profiles right now.');
+    const detail = error instanceof Error ? error.message : String(error);
+    log.warn('operations.list_profiles_failed', { projectId, error: detail });
+    // Storage error text (SQL, table names) never reaches an external app; a workspace agent in
+    // the same installation keeps the detail for diagnosis.
+    throw new OperationError(
+      'unavailable',
+      ctx.actor.via === 'workspace-agent'
+        ? `Failed to list profiles: ${detail}`
+        : 'SAM could not list agent profiles right now.'
+    );
   }
   const external = ctx.actor.via !== 'workspace-agent';
   const matching = external
