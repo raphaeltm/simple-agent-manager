@@ -1107,6 +1107,30 @@ export class ProjectData extends DurableObject<Env> {
     );
   }
 
+  /**
+   * The flip for coordinators that unwind late-writer disagreements: same work and lock as
+   * `archiveSourceFinalizeDelete`, but an eligibility or terminal-version disagreement returns
+   * a typed refusal instead of throwing.
+   */
+  async archiveSourceFlip(
+    input: archiveSharding.ArchiveSourceFinalizeDeleteInput
+  ): Promise<
+    archiveSharding.ArchiveSourceFinalizeDeleteResult | archiveSharding.ArchiveSourceFlipRefusal
+  > {
+    return this.withArchiveTranscriptLock(() =>
+      measureArchiveSql(this.sql, input.sessionId, 'source_delete', (sql) =>
+        archiveSharding.flipArchiveSource(
+          sql,
+          {
+            ...input,
+            hashPageRows: input.hashPageRows ?? this.archiveHashPageRows(),
+          },
+          this.ctx.storage.transactionSync.bind(this.ctx.storage)
+        )
+      )
+    );
+  }
+
   async archiveSourceRestoreChunk(
     input: archiveSharding.ArchiveSourceRestoreChunkInput
   ): Promise<archiveSharding.ArchiveSourceRestoreChunkResult> {
@@ -1265,6 +1289,17 @@ export class ProjectData extends DurableObject<Env> {
           },
           this.env
         )
+      )
+    );
+  }
+
+  /** One bounded page of the pre-flip R2 verification of a sealed compact target. */
+  async archiveTargetVerifyPage(
+    input: archiveSharding.ArchiveTargetVerifyPageInput
+  ): Promise<archiveSharding.ArchiveTargetVerifyPageResult> {
+    return this.withArchiveTranscriptLock(() =>
+      measureArchiveSql(this.sql, input.sessionId, 'target_seal', (sql) =>
+        archiveSharding.verifyArchiveTargetPage(sql, this.env, input)
       )
     );
   }
