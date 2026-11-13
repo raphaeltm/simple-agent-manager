@@ -370,6 +370,8 @@ export interface StartInstantChatSessionRequest {
   model?: string;
   /** Effort for this chat only; must be supported by the resolved agent. */
   effort?: AgentEffort;
+  /** The caller's own account for this chat only; omitted uses the profile's account. */
+  agentConfigurationId?: string;
   /** An open idea in this project this conversation starts from. The server links it
    * (`discusses`) before the agent receives its first prompt. */
   sourceIdeaId?: string;

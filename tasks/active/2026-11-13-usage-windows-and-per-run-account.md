@@ -64,34 +64,42 @@ prototypes in Library `/design/run-account-prototypes-2026-11-13/` (prototype ro
 ## Implementation checklist
 
 ### Backend
-- [ ] D1 migration: `ALTER TABLE tasks ADD COLUMN agent_configuration_id TEXT` + schema.ts column
-- [ ] Shared resolver: `run` tier (agent consumers only, above profile), `ResolutionContext.runConfigurationId`, source `run-override`; unusable or other-agent configuration halts
-- [ ] Audit every consumer of `ResolutionTier` / `ResolutionSource` / credential scope for the new values
-- [ ] `ProfileCredentialContext` carries `runConfigurationId`; the session context reads it from the run's task; `explainForConsumer` passes it
-- [ ] `validateRunAgentConfiguration` service: owned, active configuration + credential, consumer agent == run agent; 400 otherwise
-- [ ] Accept `agentConfigurationId` in `SubmitTaskSchema` and `StartChatSessionSchema`; persist on insert in submit (VM + Instant) and chat-start
-- [ ] Carry it to the wake successor (`session-recovery-task.ts`) and re-run (`routes/tasks/run.ts`)
-- [ ] Provider-limit admission reads the task's run account
-- [ ] Tests: resolver tiers (run used, run halts on paused/mismatch/foreign, absent → profile), real-SQL vertical slice submit → agent-key resolves the chosen account and records its reference, foreign-configuration attack + owner control, admission uses run account, wake successor keeps it
+- [x] D1 migration: `ALTER TABLE tasks ADD COLUMN agent_configuration_id TEXT` + schema.ts column
+- [x] Shared resolver: `run` tier (agent consumers only, above profile), `ResolutionContext.runConfigurationId`, source `run-override`; unusable or other-agent configuration halts
+- [x] Audit every consumer of `ResolutionTier` / `ResolutionSource` / credential scope for the new values
+- [x] `ProfileCredentialContext` carries `runConfigurationId`; the session context reads it from the run's task; `explainForConsumer` passes it
+- [x] `validateRunAgentConfiguration` service: owned, active configuration + credential, consumer agent == run agent; 400 otherwise
+- [x] Accept `agentConfigurationId` in `SubmitTaskSchema` and `StartChatSessionSchema`; persist on insert in submit (VM + Instant) and chat-start
+- [x] Carry it to the wake successor and re-run: both reuse the same task row (`session-recovery.ts` UPDATE, `routes/tasks/run.ts`), so no copy is needed
+- [x] Provider-limit admission reads the task's run account
+- [x] Tests: resolver tiers (run used, run halts on paused/mismatch/foreign, absent → profile), real-SQL vertical slice submit → agent-key resolves the chosen account and records its reference, foreign-configuration attack + owner control, admission uses run account, wake successor keeps it
 
 ### Web
-- [ ] Connector provenance on the meta line; `ConnectorChip` no longer in `SessionItem`
-- [ ] `ProfileUsage` carries per-window readings (short, week) and the ring draws variant D
-- [ ] Words: 5h first, silent while both > 50%
-- [ ] Picker rows show labelled per-window meters; Profiles strip shows % left
-- [ ] Account control beside To; compatible accounts only; state in `useComposerOverrides`; sent as `agentConfigurationId`; ring follows the choice
-- [ ] Nudge: names the window, offers "Run on <account>" + meters, then an undo line
-- [ ] Remove the prototype route and directory
-- [ ] Unit/behavioural tests + Playwright audit (375 / 1280) with long names and every usage state
+- [x] Connector provenance on the meta line; `ConnectorChip` no longer in `SessionItem`
+- [x] `ProfileUsage` carries per-window readings (short, week) and the ring draws variant D
+- [x] Words: 5h first, silent while both > 50%
+- [x] Picker rows show labelled per-window meters; Profiles strip shows % left
+- [x] Account control beside To; compatible accounts only; state in `useComposerOverrides`; sent as `agentConfigurationId`; ring follows the choice
+- [x] Nudge: names the window, offers "Run on <account>" + meters, then an undo line
+- [x] Remove the prototype route and directory
+- [x] Unit/behavioural tests + Playwright audit (375 / 1280) with long names and every usage state
 
 ### Docs
-- [ ] Update public docs on agent accounts / profiles for per-run account choice
+- [x] Update public docs on agent accounts / profiles for per-run account choice
 
 ## Acceptance criteria
 
-- [ ] Connector chats show "Chat via ChatGPT" on the meta line; right-side buttons align on every row
-- [ ] The ring's arc is the 5h window and its colour the week; empty shows a dot; weekly-only draws the week
-- [ ] Picking "on Work Max" for a run makes that run's agent start on Work Max (agent-key resolves it), admission checks Work Max's limits, and token write-back targets Work Max
-- [ ] Another user's configuration id, a paused account, or an account for a different agent is rejected at submit and never resolves
-- [ ] A woken session keeps its run account
-- [ ] Mobile and desktop screenshots reviewed with no overflow
+- [x] Connector chats show "Chat via ChatGPT" on the meta line; right-side buttons align on every row
+- [x] The ring's arc is the 5h window and its colour the week; empty shows a dot; weekly-only draws the week
+- [x] Picking "on Work Max" for a run makes that run's agent start on Work Max (agent-key resolves it), admission checks Work Max's limits, and token write-back targets Work Max
+- [x] Another user's configuration id, a paused account, or an account for a different agent is rejected at submit and never resolves
+- [x] A woken session keeps its run account
+- [x] Mobile and desktop screenshots reviewed with no overflow
+
+## Implementation notes
+
+- `git push origin main` for the task file was refused by the repository ruleset; the task file lives on the branch.
+- Wakes (`session-recovery.ts`) and kanban re-runs (`routes/tasks/run.ts`) reactivate the same task row, so `agent_configuration_id` persists without a copy. Verified by reading the UPDATE statements.
+- Out of scope (agent-created work, no per-run account UI): MCP `dispatch_task`, /sam `dispatch_task` and `retry_subtask`, reserved SAM submissions, triggers, workflows. They resolve through the profile as before.
+- The account control shows only when there are two or more accounts for the agent (or one is chosen).
+- `roomierProfile` (switch to another profile) is replaced by `roomiestAccount` (switch the account).

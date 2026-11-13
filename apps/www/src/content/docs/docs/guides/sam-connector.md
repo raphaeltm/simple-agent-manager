@@ -113,8 +113,9 @@ only that chat: the profile, the account it runs on, and every other chat keep t
 SAM passes the model name to the agent as given, so it has to be one the profile's agent supports.
 An effort level the agent can't run is refused before anything starts.
 
-Work your app starts is labelled **via ChatGPT** (or the app's name) on the dashboard, in the session
-list, and on ideas, so you can tell it apart from work you started in SAM.
+Work your app starts is labelled **via ChatGPT** (or the app's name) on the dashboard and on ideas,
+and its chat-list row reads **Chat via ChatGPT** or **Task via ChatGPT** under the title
+(`SessionItem.tsx`), so you can tell it apart from work you started in SAM.
 
 ## Reading chats, teams and channels
 

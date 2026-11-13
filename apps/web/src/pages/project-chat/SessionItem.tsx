@@ -2,7 +2,6 @@ import { PersonAvatar, personColorVar, personTextClassName } from '@simple-agent
 import { AlertCircle, GitPullRequest, ListTodo, MessageSquare } from 'lucide-react';
 import type { CSSProperties, ReactNode } from 'react';
 
-import { ConnectorChip } from '../../components/ConnectorChip';
 import type { ChatSessionResponse } from '../../lib/api';
 import {
   ATTENTION_ICON,
@@ -57,6 +56,13 @@ export function SessionItem({
   // Only rows someone else started get the edge light; yours stay plain.
   const edgeColor = owner && owner.slot !== 'you' ? personColorVar(owner.slot) : null;
   const hasPullRequest = Boolean(session.task?.outputPrUrl);
+  // Work started from an external AI app reads "Chat via ChatGPT" on the meta line, where
+  // it can truncate without moving the buttons on the title line.
+  const connector =
+    session.task?.triggeredBy === 'connector'
+      ? session.task.connectorClientName || 'Connector'
+      : null;
+  const kindLabel = mode === 'task' ? 'Task' : 'Chat';
   const title = session.topic ? stripMarkdown(session.topic) : `Chat ${session.id.slice(0, 8)}`;
 
   return (
@@ -108,9 +114,6 @@ export function SessionItem({
         </span>
 
         <span className="flex items-center gap-1.5">
-          {session.task?.triggeredBy === 'connector' && (
-            <ConnectorChip clientName={session.task.connectorClientName} />
-          )}
           {blockedBadge && (
             <span className="rounded-full bg-danger-tint px-1.5 py-0.5 font-mono text-[9px] font-semibold tracking-wide text-danger-fg uppercase">
               Blocked
@@ -135,7 +138,7 @@ export function SessionItem({
             <>
               {owner && (
                 <span
-                  className="flex min-w-0 shrink items-center gap-1.5"
+                  className={`flex items-center gap-1.5 ${connector ? 'shrink-0' : 'min-w-0 shrink'}`}
                   title={owner.slot === 'you' ? 'Created by you' : `Created by ${owner.label}`}
                 >
                   <PersonAvatar name={owner.name} person={owner.slot} size={14} decorative />
@@ -148,11 +151,26 @@ export function SessionItem({
               )}
               {owner && <span aria-hidden="true">&middot;</span>}
               <span
-                className="flex shrink-0 items-center gap-1"
-                title={mode === 'task' ? 'Task' : 'Conversation'}
+                className={`flex items-center gap-1 ${connector ? 'min-w-0' : 'shrink-0'}`}
+                title={
+                  connector
+                    ? `${kindLabel} started from ${connector}`
+                    : mode === 'task'
+                      ? 'Task'
+                      : 'Conversation'
+                }
               >
-                {!owner && <ModeIcon size={12} strokeWidth={1.75} aria-hidden="true" />}
-                <span>{mode === 'task' ? 'Task' : 'Chat'}</span>
+                {!owner && (
+                  <ModeIcon size={12} strokeWidth={1.75} aria-hidden="true" className="shrink-0" />
+                )}
+                <span className="shrink-0">{kindLabel}</span>
+                {connector && (
+                  <span data-testid="session-connector" className="min-w-0 truncate">
+                    {/* The leading space keeps "Task via X" one phrase for screen readers. */}
+                    {' via '}
+                    <span className="text-fg-secondary">{connector}</span>
+                  </span>
+                )}
               </span>
               {attentionState === 'needs_input' && (
                 <span className="shrink-0 font-medium text-warning-fg">Needs input</span>

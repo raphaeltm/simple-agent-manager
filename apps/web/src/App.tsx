@@ -32,11 +32,6 @@ import { Landing } from './pages/Landing';
 import { ChatLoadingLayout } from './pages/project-chat/ChatLoadingLayout';
 import { LegacyCloudProviderRedirect, SettingsRedirect } from './pages/settings-redirects';
 
-// PROTOTYPE ONLY (dev builds): remove before merge.
-const RunAccountPrototype = lazyNamed(
-  () => import('./pages/run-account-prototype'),
-  'RunAccountPrototype'
-);
 const AccountMap = lazyNamed(() => import('./pages/AccountMap'), 'AccountMap');
 const Admin = lazyNamed(() => import('./pages/Admin'), 'Admin');
 const AdminAIProxy = lazyNamed(() => import('./pages/AdminAIProxy'), 'AdminAIProxy');
@@ -265,7 +260,10 @@ function SuperadminRoute({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
-export const DEV_ONLY_ROUTE_PATHS = ['/__test/error-boundary', '/ui-standards'] as const;
+export const DEV_ONLY_ROUTE_PATHS = [
+  '/__test/error-boundary',
+  '/ui-standards',
+] as const;
 
 /** TEMP audit-only harness — forces ErrorBoundary crash screen for Playwright review. Reverted after use. */
 function ErrorBoundaryAuditHarness(): never {
@@ -302,10 +300,6 @@ export default function App() {
                         <Route
                           path="/__test/error-boundary"
                           element={<ErrorBoundaryAuditHarness />}
-                        />
-                        <Route
-                          path="/prototype/run-account"
-                          element={page(<RunAccountPrototype />)}
                         />
                       </>
                     )}

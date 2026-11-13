@@ -39,7 +39,14 @@ export function ComposerAgentOverrideFields({
   const efforts = getSupportedEffortsForAgent(agentType);
   const defaultModel = defaults.model ? modelLabel({ agentType, model: defaults.model }) : null;
   const update = (patch: Partial<Pick<ChatAgentOverrides, 'model' | 'effort'>>) =>
-    onChange({ agentType, model: sameAgent ? overrides.model : '', effort, ...patch });
+    onChange({
+      agentType,
+      model: sameAgent ? overrides.model : '',
+      effort,
+      // The account is chosen beside To, not here; keep it when the model or effort changes.
+      accountId: sameAgent ? overrides.accountId : '',
+      ...patch,
+    });
 
   return (
     // One row even on a phone: the panel is height-capped and every row counts.

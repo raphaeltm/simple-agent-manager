@@ -1,12 +1,10 @@
 /**
- * Low-key usage line for one profile: "● 5h ▂ 72%  Wk ▁ 31%  Opus ▆ 88%".
- * Colour appears only on windows that need attention; tapping opens the same
- * usage breakdown the chat header chip opens.
+ * Low-key usage line for one profile: "● 5h ▂ 28%  Wk ▅ 69%  Opus ▁ 12%", in percent left
+ * (the same meters as the new-chat picker). Colour appears only on windows at or below half;
+ * tapping opens the same usage breakdown the chat header chip opens.
  */
-import type { CredentialLimitWindowSummary } from '@simple-agent-manager/shared';
 import {
   credentialLimitSummaryAsOf,
-  credentialLimitWindowLabel,
   worstCredentialLimitLevel,
 } from '@simple-agent-manager/shared';
 import { Dialog } from '@simple-agent-manager/ui';
@@ -14,46 +12,9 @@ import { useId, useMemo, useState } from 'react';
 
 import { LEVEL_LABELS, LEVEL_STYLES } from '../credential-limits/credential-limit-format';
 import { CredentialLimitDetails } from '../credential-limits/CredentialLimitChip';
+import { readUsageWindow, sortUsageWindows } from '../project-chat/profile-picker/usage-windows';
+import { UsageMeters } from '../project-chat/profile-picker/UsageMeters';
 import type { ProfileBudget } from './useProfileBudgets';
-
-/** Strip labels are shorter than the dialog's: "Week" → "Wk", "Opus week" → "Opus". */
-const SHORT_LABELS: Record<string, string> = { Week: 'Wk', Month: 'Mo', Rolling: 'Roll' };
-
-function shortLabel(window: CredentialLimitWindowSummary): string {
-  const label = credentialLimitWindowLabel(window.windowType, window.windowMinutes);
-  return SHORT_LABELS[label] ?? label.replace(/ week$/, '');
-}
-
-function MicroMeter({ window }: Readonly<{ window: CredentialLimitWindowSummary }>) {
-  const color = LEVEL_STYLES[window.level].color;
-  const percent = window.utilizationPercent;
-  const width = Math.min(100, Math.max(0, percent ?? 0));
-  return (
-    <span className="inline-flex items-center gap-1 whitespace-nowrap">
-      <span className="text-fg-muted">{shortLabel(window)}</span>
-      <span
-        aria-hidden="true"
-        className="relative inline-block h-[3px] w-5 overflow-hidden rounded-full bg-[color-mix(in_srgb,var(--sam-color-fg-muted)_28%,transparent)]"
-      >
-        <span
-          className="absolute inset-y-0 left-0 rounded-full"
-          style={{ width: `${width}%`, background: color }}
-        />
-      </span>
-      <span
-        className="tabular-nums"
-        style={window.level === 'ok' ? undefined : { color }}
-      >
-        {percent === null ? '—' : `${Math.round(percent)}%`}
-      </span>
-      {window.resetElapsed && (
-        <span className="text-info-fg" aria-hidden="true">
-          ↻
-        </span>
-      )}
-    </span>
-  );
-}
 
 function Quiet({ children, tone }: Readonly<{ children: string; tone?: 'warning' }>) {
   return (
@@ -110,9 +71,11 @@ export function ProfileUsageStrip({
           className="h-1.5 w-1.5 shrink-0 rounded-full"
           style={{ background: dot, boxShadow: `0 0 6px ${dot}` }}
         />
-        {current.windows.map((window) => (
-          <MicroMeter key={window.windowType} window={window} />
-        ))}
+        <UsageMeters
+          windows={sortUsageWindows(
+            current.windows.map((window) => readUsageWindow(window, now ?? Date.now()))
+          )}
+        />
       </button>
       <Dialog
         isOpen={open}

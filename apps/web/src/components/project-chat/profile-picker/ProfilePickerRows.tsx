@@ -4,7 +4,8 @@ import type { ReactNode } from 'react';
 
 import { profileSubtitle } from './model';
 import { ProfileUsageAvatar } from './ProfileUsageAvatar';
-import type { ProfileUsage } from './usage';
+import { type ProfileUsage, usageSpoken } from './usage';
+import { UsageMeters } from './UsageMeters';
 
 /** A heading, so screen readers can jump between the sheet's sections. */
 export function SectionLabel({ children }: Readonly<{ children: ReactNode }>) {
@@ -15,15 +16,17 @@ export function SectionLabel({ children }: Readonly<{ children: ReactNode }>) {
   );
 }
 
-/** Words on the right of a row: what's left when it matters, and when it comes back. */
+/**
+ * Words on the right of a row: only states the meters cannot show (out, paused, no
+ * account). How much is left of each window is in the labelled meters under the name.
+ */
 function RowUsage({ usage }: Readonly<{ usage: ProfileUsage | null | undefined }>) {
-  if (usage?.state === 'ok') return <span className="sr-only">{`${usage.left}% left`}</span>;
+  if (usage?.state === 'ok' || usage?.state === 'low') {
+    return <span className="sr-only">{usageSpoken(usage)}</span>;
+  }
   let primary: string | null = null;
   let secondary: string | null = null;
-  if (usage?.state === 'low') {
-    primary = `${usage.left}% left`;
-    secondary = usage.resetIn ? `resets ${usage.resetIn}` : null;
-  } else if (usage?.state === 'out') {
+  if (usage?.state === 'out') {
     primary = 'Out';
     secondary = usage.resetIn ? `back in ${usage.resetIn}` : null;
   } else if (usage?.state === 'paused') {
@@ -32,7 +35,7 @@ function RowUsage({ usage }: Readonly<{ usage: ProfileUsage | null | undefined }
     primary = 'No account';
   }
   if (!primary || !usage) return null;
-  const colored = usage.state === 'low' || usage.state === 'out';
+  const colored = usage.state === 'out';
   return (
     <span
       data-testid="profile-usage-notice"
@@ -87,7 +90,14 @@ export function ProfilePickerRow({
           >
             {profile.name}
           </span>
-          <span className="block truncate text-xs text-fg-muted">{profileSubtitle(profile)}</span>
+          <span className="block truncate text-xs text-fg-muted">
+            {usage?.accountLabel
+              ? `${profileSubtitle(profile)} · ${usage.accountLabel}`
+              : profileSubtitle(profile)}
+          </span>
+          {usage && usage.windows.length > 0 && usage.state !== 'out' && (
+            <UsageMeters windows={usage.windows} className="mt-0.5" />
+          )}
         </span>
         <RowUsage usage={usage} />
         {selected && <Check size={16} className="shrink-0 text-accent" aria-hidden="true" />}

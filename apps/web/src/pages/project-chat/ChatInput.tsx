@@ -13,6 +13,7 @@ import { useEffect, useId, useState } from 'react';
 
 import { ProfileFormDialog } from '../../components/agent-profiles/ProfileFormDialog';
 import {
+  activeChatAgentOverrides,
   chatAgentDefaults,
   type ChatAgentOverrides,
   ComposerOptionsButton,
@@ -23,13 +24,17 @@ import {
   ProfileToControl,
   type ProfileUsage,
   ProfileUsageNudge,
+  RunAccountButton,
+  RunAccountPanel,
   usageEntry,
-  visibleProfiles,
+  useRunAccounts,
+  withChatAccount,
 } from '../../components/project-chat/profile-picker';
 import {
   effectiveChatAgent,
   EMPTY_CHAT_AGENT_OVERRIDES,
 } from '../../components/project-chat/profile-picker/agent-overrides';
+import { agentLabel } from '../../components/project-chat/profile-picker/model';
 import { ProjectChatComposer } from '../../components/project-chat/ProjectChatComposer';
 import {
   hasValidationErrors,
@@ -157,6 +162,7 @@ export function ChatInput({
   const isMobile = useIsMobile();
   const [editProfileOpen, setEditProfileOpen] = useState(false);
   const [optionsOpen, setOptionsOpen] = useState(false);
+  const [accountsOpen, setAccountsOpen] = useState(false);
   const hasResourceErrors = hasValidationErrors(taskResourceErrors);
 
   const selectedProfile = selectedProfileId
@@ -196,6 +202,44 @@ export function ChatInput({
       onAgentOverridesChange(EMPTY_CHAT_AGENT_OVERRIDES);
     }
   }, [agentOverrides.agentType, effectiveAgentType, onAgentOverridesChange]);
+  // The account this chat runs on: one chosen for this chat (beside To, or from the nudge),
+  // else the profile's. The ring and the nudge follow it.
+  const runAccounts = useRunAccounts(effectiveAgentType, showToolbar && Boolean(profileUsages));
+  const chosenAccountId = activeChatAgentOverrides(agentOverrides, effectiveAgentType).accountId;
+  const chosenAccount = chosenAccountId
+    ? (runAccounts?.find((account) => account.id === chosenAccountId) ?? null)
+    : null;
+  const runUsage = chosenAccount ? chosenAccount.usage : selectedUsage;
+  const profileAccountId = selectedUsage?.accountId ?? null;
+  const chooseAccount = (accountId: string | null) => {
+    if (!effectiveAgentType) return;
+    // Choosing the profile's own account is no choice at all: send nothing, inherit.
+    const next = accountId && accountId !== profileAccountId ? accountId : null;
+    onAgentOverridesChange(withChatAccount(agentOverrides, effectiveAgentType, next));
+    setAccountsOpen(false);
+  };
+  // A chosen account that was paused or removed since is dropped, not sent to be refused.
+  useEffect(() => {
+    if (runAccounts && chosenAccountId && !chosenAccount && effectiveAgentType) {
+      onAgentOverridesChange(withChatAccount(agentOverrides, effectiveAgentType, null));
+    }
+  }, [
+    runAccounts,
+    chosenAccountId,
+    chosenAccount,
+    effectiveAgentType,
+    agentOverrides,
+    onAgentOverridesChange,
+  ]);
+  const runAccountLabel =
+    chosenAccount?.label ??
+    selectedUsage?.accountLabel ??
+    (selectedUsage?.state === 'platform' ? 'SAM platform' : null);
+  // Only worth showing when there is a choice to make (or one has been made).
+  const showAccountControl = Boolean(
+    runAccounts && runAccountLabel && (runAccounts.length > 1 || chosenAccount)
+  );
+  const accountsPanelId = useId();
   const options: ComposerOptionsValue = {
     skills,
     selectedSkillId,
@@ -242,28 +286,54 @@ export function ChatInput({
         <ComposerOptionsPanel id={optionsPanelId} options={options} compact={isMobile} />
       )}
 
+      {showToolbar && accountsOpen && showAccountControl && runAccounts && (
+        <RunAccountPanel
+          id={accountsPanelId}
+          accounts={runAccounts}
+          selectedId={chosenAccount?.id ?? profileAccountId}
+          profileAccountId={profileAccountId}
+          agentName={effectiveAgentType ? agentLabel(effectiveAgentType) : 'agent'}
+          profileName={selectedProfile?.name ?? null}
+          disabled={submitting}
+          onSelect={chooseAccount}
+        />
+      )}
+
       {showToolbar && selectedProfile && profileUsages && (
         <ProfileUsageNudge
-          profile={selectedProfile}
-          usage={selectedUsage}
-          candidates={visibleProfiles(agentProfiles, profilePicker.state)}
-          usageFor={(profileId) => profileUsages.get(profileId)}
-          onSwitch={onProfileChange}
+          usage={runUsage}
+          profileUsage={selectedUsage}
+          accounts={runAccounts}
+          chosenAccount={chosenAccount}
+          onChooseAccount={chooseAccount}
           disabled={submitting}
         />
       )}
 
       {showToolbar && (
         <div className="mb-2 flex items-center gap-2">
-          <div className="@container min-w-0 flex-1">
-            <ProfileToControl
-              profile={selectedProfile}
-              effective={effectiveAgent}
-              usage={selectedUsage}
-              loading={profilePicker.picker.status === 'loading'}
-              disabled={submitting}
-              onOpen={onOpenProfileSheet}
-            />
+          {/* The account wraps under To when the toolbar is narrow (a phone). */}
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+            <div className="@container min-w-[9rem] flex-1">
+              <ProfileToControl
+                profile={selectedProfile}
+                effective={effectiveAgent}
+                usage={runUsage}
+                loading={profilePicker.picker.status === 'loading'}
+                disabled={submitting}
+                onOpen={onOpenProfileSheet}
+              />
+            </div>
+            {showAccountControl && runAccountLabel && (
+              <RunAccountButton
+                label={runAccountLabel}
+                chosen={Boolean(chosenAccount)}
+                open={accountsOpen}
+                panelId={accountsPanelId}
+                disabled={submitting}
+                onToggle={() => setAccountsOpen((open) => !open)}
+              />
+            )}
           </div>
           {onFilesSelected && (
             <button
