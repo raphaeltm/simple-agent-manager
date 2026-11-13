@@ -16,7 +16,10 @@ vi.mock('../../../src/services/admin-settings', () => ({
   resolveAdminSetting: async (_env: unknown, key: string) =>
     key.endsWith('CollectionMode') ? mock.mode : key.endsWith('MaxBytes') ? 2147483648 : 10000,
 }));
-vi.mock('../../../src/lib/ulid', () => ({ ulid: () => `id${++mock.id}` }));
+vi.mock('@simple-agent-manager/worker-core', async (load) => ({
+  ...(await load<typeof import('@simple-agent-manager/worker-core')>()),
+  ulid: () => `id${++mock.id}`,
+}));
 vi.mock('../../../src/services/node-agent', () => ({ fetchNodeAgent: mock.fetch }));
 vi.mock('../../../src/services/jwt', () => ({
   signNodeManagementToken: async () => ({ token: 'real-control-path-test' }),

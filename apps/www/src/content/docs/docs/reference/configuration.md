@@ -1157,6 +1157,7 @@ An out-of-range weight makes the unit fail to load, which would take the slice h
 | `LOG_STREAM_PING_WRITE_TIMEOUT`                | `10s`                                  | VM-agent log-stream WebSocket ping write deadline                                                                                                                                                                                                                              |
 | `DEPLOY_TEARDOWN_TIMEOUT`                      | `2m`                                   | VM-agent max time for deployment environment teardown (stop/start)                                                                                                                                                                                                             |
 | `DEPLOY_APPLY_IDLE_TIMEOUT`                    | `15m`                                  | VM-agent idle watchdog for deployment apply (no-progress only)                                                                                                                                                                                                                 |
+| `BUILD_CONTEXT_MAX_ACTIVE_PER_WORKSPACE` | `1` | Agent process environment: concurrent context collections/uploads per workspace. Nonpositive values use the default. Excess probes fail immediately with 409; no queue or retry, and normal publishing continues. |
 | `DEPLOY_BUILD_PUBLISH_TIMEOUT`                 | `20m`                                  | VM-agent max time for host build + push + release publish                                                                                                                                                                                                                      |
 | `DEPLOY_PUBLISH_HEARTBEAT_INTERVAL`            | `1m`                                   | Publish executor heartbeat interval. Legacy agents are deadline-only; keep overrides well below the API stall threshold (minimum 150 seconds: two default intervals plus callback grace).                                                                                      |
 | `DEPLOY_ARTIFACT_DIAL_TIMEOUT`                 | `30s`                                  | VM-agent TCP dial timeout for artifact downloads                                                                                                                                                                                                                               |
@@ -1999,3 +2000,20 @@ The optional Worker variables `CLI_RECEIPT_REQUEST_MAX_BYTES` (default `262144`)
 Keyed requests exceeding the request limit are rejected before reservation; replies
 exceeding the response limit leave the receipt pending for reconciliation. These
 are runtime configuration overrides, not credentials or required deployment secrets.
+
+## Portable application build-context settings
+
+Installation admins edit these at **Admin → Settings**. They use the existing R2 binding and S3 credentials; no new Worker variables or infrastructure are required. Executor selection is reserved for the later Cloudflare executor rollout.
+
+| Setting                                    | Default | Purpose                                                                                                    |
+| ------------------------------------------ | ------- | ---------------------------------------------------------------------------------------------------------- |
+| `deployments.buildContextCollectionMode`   | `off`   | `shadow` enables an asynchronous hidden context probe on publish; actual build execution remains unchanged |
+| `deployments.buildContextStartTimeoutMs`   | 10,000  | Bounds control-plane wait for source collection acceptance                                                 |
+| `deployments.buildContextMaxBytes`         | 2 GiB   | Maximum raw tar (including headers) and compressed bundle bytes                                            |
+| `deployments.buildContextCollectTimeoutMs` | 120,000 | Source collection deadline                                                                                 |
+| `deployments.buildContextUploadTtlSeconds` | 300     | Presigned upload URL lifetime                                                                              |
+| `deployments.buildContextRetentionHours`   | 48      | Minimum age before abandoned/terminal bundles are deleted                                                  |
+| `deployments.buildContextCleanupBudgetMs`  | 10,000  | Work budget per daily cleanup pass                                                                         |
+| `deployments.buildContextCleanupPageSize`  | 250     | R2 listing page size; a persisted cursor resumes remaining pages                                           |
+
+Collection has no file-count cutoff. For a 100,000-file context near 1.5 GiB, tar headers add at least 49 MiB, plus filename/padding metadata. At 50 MiB/s the payload alone needs about 31 seconds to collect and another 31 seconds to upload; filesystem traversal, compression, and network conditions add time. Collection stops at its deadline rather than repeatedly processing a fixed batch. Phase timings are stored in publish-job events. The source request retains the existing overall VM publish timeout (20 minutes by default) and emits publish heartbeats throughout collection/upload.

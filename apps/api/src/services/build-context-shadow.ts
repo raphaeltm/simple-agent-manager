@@ -1,80 +1,18 @@
-import { drizzle } from 'drizzle-orm/d1';
-
-import * as schema from '../db/schema';
-import type { Env } from '../env';
-import { log, serializeError } from '../lib/logger';
-import { resolveAdminSetting } from './admin-settings';
-import { collectBuildContextOnSource } from './build-context-collection';
+/** Worker wiring for the package's isolated, background-only shadow probe. */
 import {
-  appendDeploymentPublishJobEvent,
-  createDeploymentPublishJob,
+  type BuildContextInterpolation,
   type CreateDeploymentPublishJobInput,
-} from './deployment-publish-jobs';
+  scheduleBuildContextShadow as schedule,
+} from '@simple-agent-manager/app-deployment';
 
-type BackgroundContext = { waitUntil(promise: Promise<unknown>): void };
-/** Only acceptance occupies waitUntil. Collection/PUT runs in the source agent
- * under its existing publish deadline and reports through normal callbacks. */
+import type { Env } from '../env';
+import { createBuildContextCollectionPorts } from './build-context-collection';
+
 export function scheduleBuildContextShadow(
   env: Env,
   input: CreateDeploymentPublishJobInput,
-  interpolation: {
-    buildInterpolationEnv: Record<string, string>;
-    secretInterpolationKeys: string[];
-  },
-  execCtx?: BackgroundContext
+  interpolation: BuildContextInterpolation,
+  execCtx?: { waitUntil(promise: Promise<unknown>): void }
 ) {
-  if (!execCtx) return;
-  execCtx.waitUntil(
-    startShadow(env, input, interpolation).catch((error) => {
-      log.warn('build_context.shadow_start_failed', {
-        projectId: input.projectId,
-        workspaceId: input.workspaceId,
-        ...serializeError(error),
-      });
-    })
-  );
-}
-async function startShadow(
-  env: Env,
-  input: CreateDeploymentPublishJobInput,
-  interpolation: {
-    buildInterpolationEnv: Record<string, string>;
-    secretInterpolationKeys: string[];
-  }
-) {
-  if ((await resolveAdminSetting(env, 'deployments.buildContextCollectionMode')) !== 'shadow')
-    return;
-  const db = drizzle(env.DATABASE, { schema });
-  const job = await createDeploymentPublishJob(db, {
-    ...input,
-    executor: 'cloudflare',
-    contextShadow: true,
-  });
-  try {
-    const result = await collectBuildContextOnSource(env, job, interpolation);
-    if (result.supported) return;
-    throw new Error(result.message);
-  } catch (error) {
-    log.warn('build_context.shadow_collect_failed', {
-      publishJobId: job.id,
-      projectId: job.projectId,
-      workspaceId: job.workspaceId,
-      ...serializeError(error),
-    });
-    // A missing route or failed acceptance never affects the real publish. The
-    // conditional terminal event also fences late callbacks from a lost response.
-    await appendDeploymentPublishJobEvent(db, {
-      publishJobId: job.id,
-      projectId: job.projectId,
-      environmentId: job.environmentId,
-      nodeId: job.nodeId,
-      workspaceId: job.workspaceId,
-      status: 'failed',
-      currentStep: 'context_failed',
-      eventType: 'publish.context.shadow_failed',
-      message: 'Shadow context collection was unavailable; normal publishing continues.',
-      errorCode: 'context_shadow_unavailable',
-      terminal: true,
-    });
-  }
+  return schedule(env, createBuildContextCollectionPorts(env), input, interpolation, execCtx);
 }

@@ -62,7 +62,7 @@ it('expires shadow probes without public events or publish failure counts', asyn
     .run(old, old, old);
   const pending: Promise<unknown>[] = [];
   expect(
-    await runDeploymentPublishJobSweep({ DATABASE: createSqliteD1(sqlite) } as Env, (p) =>
+    await runDeploymentPublishJobSweep({ DATABASE: createSqliteD1(sqlite) }, ports, (p) =>
       pending.push(p)
     )
   ).toEqual({ failed: 0 });
@@ -71,9 +71,5 @@ it('expires shadow probes without public events or publish failure counts', asyn
     status: 'failed',
   });
   expect(record).not.toHaveBeenCalled();
-  expect(cancel).toHaveBeenCalledWith(
-    expect.anything(),
-    expect.objectContaining({ id: 'shadow' }),
-    1000
-  );
+  expect(cancel).toHaveBeenCalledWith('workspace', null, 'node', 'shadow', 1000);
 });

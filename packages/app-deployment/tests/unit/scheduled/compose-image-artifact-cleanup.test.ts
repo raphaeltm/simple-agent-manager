@@ -1,11 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+const contextCleanup = vi.hoisted(() =>
+  vi.fn(async () => ({ scanned: 0, deleted: 0, bytes: 0, errors: 0 }))
+);
+vi.mock('../../../src/scheduled/build-context-cleanup', () => ({
+  runBuildContextCleanup: contextCleanup,
+}));
+
 vi.mock('@simple-agent-manager/worker-core', async (load) => ({
   ...(await load<typeof import('@simple-agent-manager/worker-core')>()),
   createModuleLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
 import type { AppDeploymentEnv as Env } from '../../../src/env';
+const settings = { resolveSetting: vi.fn(async () => 1000) };
 import {
   COMPOSE_IMAGE_ARTIFACT_PREFIX,
   runComposeImageArtifactCleanup,
@@ -114,6 +122,8 @@ function youngObject(name: string): ListedObject {
 
 describe('compose image artifact cleanup', () => {
   beforeEach(() => {
+    contextCleanup.mockReset();
+    contextCleanup.mockResolvedValue({ scanned: 0, deleted: 0, bytes: 0, errors: 0 });
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-06-27T12:00:00Z'));
   });
@@ -225,7 +235,7 @@ describe('compose image artifact cleanup', () => {
       listError: true,
     });
 
-    const result = await runScheduledComposeImageArtifactCleanup(env);
+    const result = await runScheduledComposeImageArtifactCleanup(env, settings);
 
     expect(env.R2.delete).not.toHaveBeenCalled();
     expect(env.KV.put).toHaveBeenCalledWith(
@@ -247,7 +257,7 @@ describe('compose image artifact cleanup', () => {
       overrides: { COMPOSE_IMAGE_ARTIFACT_CLEANUP_INTERVAL_HOURS: '24' },
     });
 
-    const result = await runScheduledComposeImageArtifactCleanup(env);
+    const result = await runScheduledComposeImageArtifactCleanup(env, settings);
 
     expect(env.KV.get).toHaveBeenCalled();
     expect(env.R2.list).not.toHaveBeenCalled();
@@ -258,6 +268,19 @@ describe('compose image artifact cleanup', () => {
     });
   });
 
+  it('includes partial context cleanup successes and deletion errors in scheduled totals', async () => {
+    contextCleanup.mockResolvedValueOnce({ scanned: 3, deleted: 2, bytes: 200, errors: 1 });
+    const env = makeEnv({ objects: [oldObject('orphan', 300)] });
+    const result = await runScheduledComposeImageArtifactCleanup(env, settings);
+    expect(result).toMatchObject({
+      scannedObjects: 4,
+      deletedObjects: 3,
+      deletedBytes: 500,
+      errors: 1,
+    });
+    expect(contextCleanup).toHaveBeenCalledWith(env, settings, new Date('2026-06-27T12:00:00Z'));
+  });
+
   it('runs scheduled cleanup after the interval and records the last run', async () => {
     const env = makeEnv({
       kvLastRun: '2026-06-26T00:00:00.000Z',
@@ -265,7 +288,7 @@ describe('compose image artifact cleanup', () => {
       overrides: { COMPOSE_IMAGE_ARTIFACT_CLEANUP_INTERVAL_HOURS: '24' },
     });
 
-    const result = await runScheduledComposeImageArtifactCleanup(env);
+    const result = await runScheduledComposeImageArtifactCleanup(env, settings);
 
     expect(env.R2.deleted).toEqual([artifactKey('orphan')]);
     expect(env.KV.put).toHaveBeenCalledWith(

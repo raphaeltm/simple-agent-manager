@@ -5170,6 +5170,12 @@ export const deploymentPublishJobs = sqliteTable(
     errorMessage: text('error_message'),
     errorCode: text('error_code'),
     retryable: integer('retryable', { mode: 'boolean' }).notNull().default(false),
+    executor: text('executor').notNull().default('node'),
+    contextShadow: integer('context_shadow', { mode: 'boolean' }).notNull().default(false),
+    contextR2Key: text('context_r2_key'),
+    contextBytes: integer('context_bytes'),
+    contextSha256: text('context_sha256'),
+    queuedAt: text('queued_at'),
     attempt: integer('attempt').notNull().default(1),
     lastEventAt: text('last_event_at'),
     // Null means a legacy executor: only the overall deadline may expire it.

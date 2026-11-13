@@ -24,6 +24,7 @@ export interface DeploymentSecretCipher {
 }
 
 export type DeploymentPublishJobSettingName =
+  | `deployments.buildContext${'CollectionMode' | 'StartTimeoutMs' | 'MaxBytes' | 'CollectTimeoutMs' | 'UploadTtlSeconds' | 'RetentionHours' | 'CleanupBudgetMs' | 'CleanupPageSize'}`
   | 'deployments.publishJobStallMs'
   | 'deployments.publishJobDeadlineMs'
   | 'deployments.publishJobSweepLimit'
@@ -71,4 +72,28 @@ export interface DeploymentPublishJobPorts {
   settings: DeploymentSettingsPort;
   vm: DeploymentPublishVmPort;
   lifecycle: DeploymentLifecyclePort;
+}
+
+export interface BuildContextInterpolation {
+  buildInterpolationEnv: Record<string, string>;
+  secretInterpolationKeys: string[];
+}
+
+/** Source authentication and transport stay in the worker; context policy stays here. */
+export interface BuildContextCollectionPorts {
+  settings: DeploymentSettingsPort;
+  source: {
+    requestCollection(
+      job: import('@simple-agent-manager/worker-core/schema').DeploymentPublishJobRow,
+      body: BuildContextInterpolation & {
+        publishJobId: string;
+        attempt: number;
+        shadow: boolean;
+        workingDir: string | null;
+        maxBytes: number;
+        collectTimeoutMs: number;
+      },
+      timeoutMs: number
+    ): Promise<Response>;
+  };
 }

@@ -1,10 +1,10 @@
 import { createHash, createHmac } from 'node:crypto';
-import { createServer, type IncomingHttpHeaders,request } from 'node:http';
+import { createServer, type IncomingHttpHeaders, request } from 'node:http';
 
 import { describe, expect, it } from 'vitest';
 
-import type { Env } from '../../../src/env';
-import { createBuildContextUpload } from '../../../src/services/build-context-upload';
+import { createBuildContextUpload } from '../../src/build-context-upload';
+import type { AppDeploymentEnv as Env } from '../../src/env';
 
 const secret = 'fake-secret';
 const env = {
