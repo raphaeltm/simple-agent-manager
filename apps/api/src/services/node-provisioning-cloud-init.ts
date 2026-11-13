@@ -3,9 +3,7 @@
  * (rule 18) so the transport-specific variables live next to the rest of the boot config.
  */
 import { type CloudInitVariables, generateCloudInit } from '@simple-agent-manager/cloud-init';
-import {
-  resolveEffectiveNodeHostMemoryReserveMb,
-} from '@simple-agent-manager/scheduler-core';
+import { resolveEffectiveNodeHostMemoryReserveMb } from '@simple-agent-manager/scheduler-core';
 import { type TaskMode } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';

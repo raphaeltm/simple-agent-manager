@@ -1,6 +1,4 @@
-import {
-  parseProviderLimitWait,
-} from '@simple-agent-manager/scheduler-core';
+import { parseProviderLimitWait } from '@simple-agent-manager/scheduler-core';
 
 import type { Env } from '../env';
 import { errors } from '../middleware/error';

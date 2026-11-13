@@ -1,6 +1,4 @@
-import {
-  parseProviderLimitWait,
-} from '@simple-agent-manager/scheduler-core';
+import { parseProviderLimitWait } from '@simple-agent-manager/scheduler-core';
 import {
   DEFAULT_TASK_RUN_ABSOLUTE_CEILING_MS,
   DEFAULT_TASK_RUN_ABSOLUTE_CEILING_SLEEP_GRACE_MS,

@@ -24,13 +24,10 @@ import * as projectData from './project-data';
 import { isSessionRecoverySourceTaskGuardValid } from './session-recovery-authority';
 
 export type AgentMessageChannelsDisabledReason =
-  | 'flag_off'
-  | 'project_event_wake_disabled'
-  | 'durable_prompt_delivery_disabled';
+  'flag_off' | 'project_event_wake_disabled' | 'durable_prompt_delivery_disabled';
 
 export type AgentMessageChannelsConfig =
-  | { enabled: true }
-  | { enabled: false; reason: AgentMessageChannelsDisabledReason };
+  { enabled: true } | { enabled: false; reason: AgentMessageChannelsDisabledReason };
 
 export function resolveAgentMessageChannelsConfig(env: Env): AgentMessageChannelsConfig {
   const flag = env.AGENT_MESSAGE_CHANNELS_ENABLED?.trim();

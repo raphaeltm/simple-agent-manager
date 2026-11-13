@@ -129,9 +129,7 @@ export function generateBranchName(
   text = text.replace(/[^a-z0-9\s-]/g, '');
 
   // Step 3: Split and filter
-  const words = text
-    .split(/[\s-]+/)
-    .filter((w) => w.length > 0 && !STOP_WORDS.has(w));
+  const words = text.split(/[\s-]+/).filter((w) => w.length > 0 && !STOP_WORDS.has(w));
 
   // Step 4: Take first N meaningful words
   const meaningful = words.slice(0, MAX_MEANINGFUL_WORDS);
@@ -213,5 +211,7 @@ export function isValidGitRefName(ref: string): boolean {
   if (ref.endsWith('.')) return false;
 
   // Per-component rules: no empty component, no leading dot, no `.lock` suffix.
-  return ref.split('/').every((part) => Boolean(part) && !part.startsWith('.') && !part.endsWith('.lock'));
+  return ref
+    .split('/')
+    .every((part) => Boolean(part) && !part.startsWith('.') && !part.endsWith('.lock'));
 }

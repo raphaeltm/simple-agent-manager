@@ -296,14 +296,16 @@ export async function listOwnCredentialLimitsByReferences(
   input: { userId: string; references: readonly string[] }
 ): Promise<CredentialLimitsResponse> {
   const referenceByKey = new Map<string, string>();
-  for (const reference of new Set(input.references)) {
-    const key = await credentialLimitReferenceKey(reference);
+  const unique = [...new Set(input.references)];
+  const keys = await Promise.all(unique.map((reference) => credentialLimitReferenceKey(reference)));
+  unique.forEach((reference, index) => {
+    const key = keys[index];
     if (key) referenceByKey.set(key, reference);
-  }
-  const keys = [...referenceByKey.keys()];
+  });
+  const batchKeys = [...referenceByKey.keys()];
   const maxRows = readMaxRows(env);
   const results = await Promise.all(
-    chunk(keys, REFERENCE_CHUNK).map((batch) =>
+    chunk(batchKeys, REFERENCE_CHUNK).map((batch) =>
       env.DATABASE.prepare(
         `SELECT ${WINDOW_COLUMNS}
            FROM credential_limit_windows

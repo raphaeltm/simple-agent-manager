@@ -10,7 +10,10 @@ import * as schema from '../db/schema';
 import type { SessionRecoverySourceTaskGuard } from './session-recovery-authority';
 import { type Db, TERMINAL_TASK_STATUSES } from './session-snapshot-recovery-conditions';
 
-export function sourceTaskGuardCondition(db: Db, guard: SessionRecoverySourceTaskGuard | undefined) {
+export function sourceTaskGuardCondition(
+  db: Db,
+  guard: SessionRecoverySourceTaskGuard | undefined
+) {
   if (!guard) return undefined;
   const sourceTask = alias(schema.tasks, 'recovery_source_task');
   const recoveryOwner = alias(schema.tasks, 'recovery_session_owner');

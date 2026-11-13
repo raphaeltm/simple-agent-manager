@@ -85,6 +85,29 @@ function projectWindow(window: CredentialLimitWindowSummary, now: number, staleA
   };
 }
 
+/** When a refused pool comes back (null if any refusal has no known reset), else the next reset. */
+function nextPoolReset(
+  windows: readonly CredentialLimitWindowSummary[],
+  refused: readonly CredentialLimitWindowSummary[],
+  now: number
+): number | null {
+  if (refused.length > 0) {
+    const resets = refused.map((window) => window.resetsAt);
+    if (resets.includes(null)) return null;
+    return Math.max(...resets.filter((reset): reset is number => reset !== null));
+  }
+  const upcoming = windows
+    .map((window) => window.resetsAt)
+    .filter((reset): reset is number => reset !== null && reset > now);
+  return upcoming.length > 0 ? Math.min(...upcoming) : null;
+}
+
+function worstFreshness(freshnesses: ReadonlySet<UsageFreshness>): UsageFreshness {
+  if (freshnesses.has('stale')) return 'stale';
+  if (freshnesses.has('reset_since_sample')) return 'reset_since_sample';
+  return 'fresh';
+}
+
 /**
  * Pool usage from its windows. `exhausted` is true when a provider refused at least one window
  * that has not reset since; `nextResetAt` is then the latest reset among those refusals (null if
@@ -109,35 +132,19 @@ export function summarizePoolUsage(
   }
   const refused = windows.filter((window) => window.status === 'rejected' && !window.resetElapsed);
   const exhausted = refused.length > 0;
-  let nextReset: number | null = null;
-  if (exhausted) {
-    const resets = refused.map((window) => window.resetsAt);
-    nextReset = resets.some((reset) => reset === null)
-      ? null
-      : Math.max(...resets.filter((reset): reset is number => reset !== null));
-  } else {
-    const upcoming = windows
-      .map((window) => window.resetsAt)
-      .filter((reset): reset is number => reset !== null && reset > now);
-    nextReset = upcoming.length > 0 ? Math.min(...upcoming) : null;
-  }
   const known = windows
     .map((window) => window.utilizationPercent)
     .filter((used): used is number => used !== null);
-  const freshnesses = windows.map((window) => windowFreshness(window, now, staleAfterMs));
+  const freshnesses = new Set(windows.map((window) => windowFreshness(window, now, staleAfterMs)));
   return {
     state: 'reported' as const,
     level: worstCredentialLimitLevel(windows.map((window) => window.level)) as CredentialLimitLevel,
     exhausted,
     remainingPercent:
       known.length > 0 ? Math.max(0, Math.round((100 - Math.max(...known)) * 10) / 10) : null,
-    nextResetAt: iso(nextReset),
+    nextResetAt: iso(nextPoolReset(windows, refused, now)),
     observedAt: iso(Math.max(...windows.map((window) => window.observedAt))),
-    freshness: freshnesses.includes('stale')
-      ? ('stale' as const)
-      : freshnesses.includes('reset_since_sample')
-        ? ('reset_since_sample' as const)
-        : ('fresh' as const),
+    freshness: worstFreshness(freshnesses),
     windows: windows.map((window) => projectWindow(window, now, staleAfterMs)),
   };
 }
@@ -157,6 +164,75 @@ export function poolWindows(
     (a, b) =>
       (a.windowMinutes ?? Number.POSITIVE_INFINITY) -
         (b.windowMinutes ?? Number.POSITIVE_INFINITY) || a.windowType.localeCompare(b.windowType)
+  );
+}
+
+interface UsagePool {
+  binding: ProfileAccountBinding;
+  agentTypes: Set<string>;
+  profiles: { id: string; name: string; tier: string | null }[];
+}
+
+/**
+ * Profiles grouped by quota pool. With `wantedId`, only that profile and every profile sharing
+ * its pool are kept.
+ */
+function groupPools(
+  profiles: readonly { id: string; name: string }[],
+  bindings: ReadonlyMap<string, ProfileAccountBinding>,
+  wantedId: string | undefined
+) {
+  const wantedPool = wantedId ? bindings.get(wantedId)?.poolId : undefined;
+  const pools = new Map<string, UsagePool>();
+  const withoutAccount: {
+    profileId: string;
+    name: string;
+    state: string;
+    reason: string | null;
+  }[] = [];
+  for (const profile of profiles) {
+    const binding = bindings.get(profile.id);
+    if (!binding) continue;
+    const inScope =
+      !wantedId || profile.id === wantedId || (!!wantedPool && binding.poolId === wantedPool);
+    if (!inScope) continue;
+    if (!binding.poolId) {
+      withoutAccount.push({
+        profileId: profile.id,
+        name: profile.name,
+        state: binding.state,
+        reason: binding.reason,
+      });
+      continue;
+    }
+    const pool = pools.get(binding.poolId) ?? {
+      binding,
+      agentTypes: new Set<string>(),
+      profiles: [],
+    };
+    pool.agentTypes.add(binding.agentType);
+    pool.profiles.push({ id: profile.id, name: profile.name, tier: binding.tier });
+    pools.set(binding.poolId, pool);
+  }
+  return { pools, withoutAccount };
+}
+
+function poolUsage(
+  pool: UsagePool,
+  limits: { ok: true; value: { credentials: CredentialLimitCredentialSummary[] } } | { ok: false },
+  samAi: unknown,
+  now: number,
+  staleAfterMs: number
+) {
+  if (pool.binding.state === 'sam_ai_proxy') {
+    return { state: 'sam_ai_budget' as const, samAiToday: samAi ?? ('unavailable' as const) };
+  }
+  if (!limits.ok) return { state: 'unavailable' as const };
+  const own = new Set(pool.binding.usageReferences);
+  return summarizePoolUsage(
+    poolWindows(limits.value.credentials.filter((summary) => own.has(summary.credentialReference))),
+    now,
+    staleAfterMs
   );
 }
 
@@ -185,46 +261,8 @@ export async function usageGet(
       'Retry shortly; this read does not change anything.'
     );
   }
-  const wantedPool = wanted ? bindings.get(wanted.id)?.poolId : undefined;
 
-  const pools = new Map<
-    string,
-    {
-      binding: ProfileAccountBinding;
-      agentTypes: Set<string>;
-      profiles: { id: string; name: string; tier: string | null }[];
-    }
-  >();
-  const withoutAccount: {
-    profileId: string;
-    name: string;
-    state: string;
-    reason: string | null;
-  }[] = [];
-  for (const profile of profiles) {
-    const binding = bindings.get(profile.id);
-    if (!binding) continue;
-    if (wanted && profile.id !== wanted.id && (!wantedPool || binding.poolId !== wantedPool))
-      continue;
-    if (!binding.poolId) {
-      withoutAccount.push({
-        profileId: profile.id,
-        name: profile.name,
-        state: binding.state,
-        reason: binding.reason,
-      });
-      continue;
-    }
-    const pool = pools.get(binding.poolId) ?? {
-      binding,
-      agentTypes: new Set<string>(),
-      profiles: [],
-    };
-    pool.agentTypes.add(binding.agentType);
-    pool.profiles.push({ id: profile.id, name: profile.name, tier: binding.tier });
-    pools.set(binding.poolId, pool);
-  }
-
+  const { pools, withoutAccount } = groupPools(profiles, bindings, wanted?.id);
   const references = [...pools.values()].flatMap((pool) => pool.binding.usageReferences);
   const anyProxy = [...pools.values()].some((pool) => pool.binding.state === 'sam_ai_proxy');
   const [limits, samAi] = await Promise.all([
@@ -241,31 +279,17 @@ export async function usageGet(
   const now = Date.now();
 
   const projected = [...pools.entries()]
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-    .map(([poolId, pool]) => {
-      const proxy = pool.binding.state === 'sam_ai_proxy';
-      const own = new Set(pool.binding.usageReferences);
-      const usage = proxy
-        ? { state: 'sam_ai_budget' as const, samAiToday: samAi ?? ('unavailable' as const) }
-        : limits.ok
-          ? summarizePoolUsage(
-              poolWindows(
-                limits.value.credentials.filter((summary) => own.has(summary.credentialReference))
-              ),
-              now,
-              staleAfterMs
-            )
-          : { state: 'unavailable' as const };
-      return {
-        poolId,
-        kind: proxy ? ('sam_ai_proxy' as const) : ('account' as const),
-        accountName: pool.binding.account?.name ?? null,
-        agentTypes: [...pool.agentTypes].sort(),
-        sharedBy: pool.profiles.length,
-        profiles: pool.profiles,
-        usage,
-      };
-    });
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([poolId, pool]) => ({
+      poolId,
+      kind:
+        pool.binding.state === 'sam_ai_proxy' ? ('sam_ai_proxy' as const) : ('account' as const),
+      accountName: pool.binding.account?.name ?? null,
+      agentTypes: [...pool.agentTypes].sort((a, b) => a.localeCompare(b)),
+      sharedBy: pool.profiles.length,
+      profiles: pool.profiles,
+      usage: poolUsage(pool, limits, samAi, now, staleAfterMs),
+    }));
   return {
     projectId: input.projectId,
     generatedAt: new Date(now).toISOString(),

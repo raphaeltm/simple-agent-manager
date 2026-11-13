@@ -30,10 +30,7 @@ export async function resolveUniqueWorkspaceDisplayName(
   const baseNormalized = normalizeDisplayName(baseName);
 
   const filter = excludeWorkspaceId
-    ? and(
-      eq(schema.workspaces.nodeId, nodeId),
-      ne(schema.workspaces.id, excludeWorkspaceId)
-    )
+    ? and(eq(schema.workspaces.nodeId, nodeId), ne(schema.workspaces.id, excludeWorkspaceId))
     : eq(schema.workspaces.nodeId, nodeId);
 
   const existing = await db
@@ -47,7 +44,7 @@ export async function resolveUniqueWorkspaceDisplayName(
 
   const taken = new Set(
     existing
-      .map((w) => (w.normalizedDisplayName ?? normalizeDisplayName(w.displayName ?? w.name)))
+      .map((w) => w.normalizedDisplayName ?? normalizeDisplayName(w.displayName ?? w.name))
       .filter(Boolean)
   );
 

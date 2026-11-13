@@ -300,8 +300,7 @@ export function classifyTaskRuntimeLiveness(
     if (!ACTIVE_ACP_STATUSES.has(session.status) || session.workspaceId !== workspace.id) {
       return false;
     }
-    if (signals.agentHost?.outcome === 'running')
-      return signals.agentHost.sessionId === session.id;
+    if (signals.agentHost?.outcome === 'running') return signals.agentHost.sessionId === session.id;
     const heartbeatAt = acpSessionHeartbeatAt(session);
     return Number.isFinite(heartbeatAt) && signals.nowMs - heartbeatAt <= signals.heartbeatStaleMs;
   });

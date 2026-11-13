@@ -22,9 +22,7 @@
  * Throughput at the default 60-minute queue budget: about 20 queued builds of ~3 minutes on one
  * node before the last one times out. Ranking spreads a burst across nodes first.
  */
-import {
-  DEFAULT_WORKSPACE_BUILD_QUEUE_TIMEOUT_MINUTES,
-} from '@simple-agent-manager/scheduler-core';
+import { DEFAULT_WORKSPACE_BUILD_QUEUE_TIMEOUT_MINUTES } from '@simple-agent-manager/scheduler-core';
 
 import type { Env } from '../env';
 import { resolveAdminSetting } from './admin-settings-resolution';

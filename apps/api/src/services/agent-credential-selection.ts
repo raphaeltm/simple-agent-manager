@@ -56,6 +56,15 @@ export type AgentCredentialSelection =
    */
   | { kind: 'none' };
 
+const TIER_BY_SOURCE: Record<
+  'profile-attachment' | 'project-attachment' | 'user-attachment',
+  'profile' | 'project' | 'user'
+> = {
+  'profile-attachment': 'profile',
+  'project-attachment': 'project',
+  'user-attachment': 'user',
+};
+
 type TraceSelection = AgentCredentialSelection | { kind: 'legacy' } | { kind: 'platform' };
 
 /**
@@ -84,12 +93,7 @@ export function selectionFromTrace(trace: CCResolutionTrace): TraceSelection {
   return {
     kind: 'credential',
     reference: mapped.credentialReference,
-    tier:
-      resolved.source === 'profile-attachment'
-        ? 'profile'
-        : resolved.source === 'project-attachment'
-          ? 'project'
-          : 'user',
+    tier: TIER_BY_SOURCE[resolved.source],
     credentialId: resolved.credential?.id ?? null,
   };
 }
@@ -206,18 +210,19 @@ export async function resolveAgentCredentialSelections(
           }
         );
         const traced = selectionFromTrace(trace);
-        const selection: AgentCredentialSelection =
-          traced.kind === 'legacy' || (traced.kind === 'platform' && !hasCCData)
-            ? fromLegacy(await legacy(), profile.agentType, input.projectId)
-            : traced.kind === 'platform'
-              ? { kind: 'none' }
-              : traced;
-        const credentialId =
-          selection.kind === 'credential'
-            ? selection.credentialId
-            : selection.kind === 'halted' && selection.configurationId
-              ? (configurationCredential.get(selection.configurationId) ?? null)
-              : null;
+        let selection: AgentCredentialSelection;
+        if (traced.kind === 'legacy' || (traced.kind === 'platform' && !hasCCData)) {
+          selection = fromLegacy(await legacy(), profile.agentType, input.projectId);
+        } else if (traced.kind === 'platform') {
+          selection = { kind: 'none' };
+        } else {
+          selection = traced;
+        }
+        let credentialId: string | null = null;
+        if (selection.kind === 'credential') credentialId = selection.credentialId;
+        else if (selection.kind === 'halted' && selection.configurationId) {
+          credentialId = configurationCredential.get(selection.configurationId) ?? null;
+        }
         return {
           profileId: profile.id,
           agentType: profile.agentType,

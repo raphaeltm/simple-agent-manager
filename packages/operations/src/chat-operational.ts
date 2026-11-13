@@ -64,7 +64,7 @@ export async function chatTaskStates(
   const states = new Map<string, ChatTaskState>();
   for (const row of rows) {
     const task = row.taskId ? tasks.get(row.taskId) : undefined;
-    if (!task || task.projectId !== row.projectId) continue;
+    if (task?.projectId !== row.projectId) continue;
     const taskTerminal = TERMINAL.has(task.status);
     states.set(row.id, {
       taskStatus: task.status,

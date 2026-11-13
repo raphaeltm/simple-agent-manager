@@ -101,7 +101,6 @@ export function isPersonRequiredSleepEpisode(
   } | null
 ): boolean {
   return Boolean(
-    row?.sleepEpisodeStartedAt &&
-      row.sleepRequiredEpisodeStartedAt === row.sleepEpisodeStartedAt
+    row?.sleepEpisodeStartedAt && row.sleepRequiredEpisodeStartedAt === row.sleepEpisodeStartedAt
   );
 }

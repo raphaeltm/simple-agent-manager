@@ -50,7 +50,7 @@ export function pickLegacyAgentCredential<T extends LegacyAgentCredentialRow>(
  * The user's agent-key rows that can apply in `projectId` (user-scoped, plus that project's),
  * optionally for one agent. Ordered by id so the pick is deterministic.
  */
-export async function loadLegacyAgentCredentialRows(
+export function loadLegacyAgentCredentialRows(
   db: ReturnType<typeof drizzle>,
   userId: string,
   projectId: string | null | undefined,

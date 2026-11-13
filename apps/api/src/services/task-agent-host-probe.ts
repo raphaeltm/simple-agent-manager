@@ -37,7 +37,8 @@ function classifyTaskAgentHosts(
       hostStatus !== 'stopped' &&
       hostStatus !== 'error' &&
       hostStatus !== 'idle'
-    ) unknown = true;
+    )
+      unknown = true;
   }
   // Without an explicit expected ID, one stopped historical ACP row cannot
   // hide another genuinely running host for this task's chat and workspace.

@@ -1,6 +1,6 @@
 import type { Env } from '../env';
 import { resolvePlatformConfig } from './platform-config-core';
-import { type ResolvedLoginOAuthConfig,resolveLoginOAuthConfig } from './platform-config-login';
+import { type ResolvedLoginOAuthConfig, resolveLoginOAuthConfig } from './platform-config-login';
 import type { ResolvedPlatformConfig } from './platform-config-types';
 
 /*

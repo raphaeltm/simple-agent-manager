@@ -1,7 +1,5 @@
 import { getProviderInstanceOfferings } from '@simple-agent-manager/providers';
-import {
-  capacityCandidateAuthorityGeneration,
-} from '@simple-agent-manager/scheduler-core';
+import { capacityCandidateAuthorityGeneration } from '@simple-agent-manager/scheduler-core';
 import type {
   CapacityPoolStatus,
   CapacityWorkloadRole,

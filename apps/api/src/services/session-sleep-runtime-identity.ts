@@ -14,8 +14,10 @@ export function sessionSleepRuntimeChanged(error: unknown): boolean {
   try {
     const body: unknown = JSON.parse(error.responseBody);
     if (!body || typeof body !== 'object') return false;
-    return ('message' in body && body.message === 'workspace eviction generation changed') ||
-      ('error' in body && body.error === 'workspace eviction generation changed');
+    return (
+      ('message' in body && body.message === 'workspace eviction generation changed') ||
+      ('error' in body && body.error === 'workspace eviction generation changed')
+    );
   } catch {
     return false;
   }

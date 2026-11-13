@@ -1,6 +1,4 @@
-import type {
-  ProviderLimitWait,
-} from '@simple-agent-manager/scheduler-core';
+import type { ProviderLimitWait } from '@simple-agent-manager/scheduler-core';
 
 import type { Task } from '../db/schema';
 import type { Env } from '../env';

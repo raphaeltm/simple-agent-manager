@@ -102,7 +102,10 @@ export async function resolveNodeTunnelProvisioningBudgetMs(env: Env): Promise<n
  */
 export async function durableAttemptTunnelBudgetMs(
   env: Env,
-  node: { runtimeIncarnationId: string | null; transport: string | null } & ManagedNodeTransportInput,
+  node: {
+    runtimeIncarnationId: string | null;
+    transport: string | null;
+  } & ManagedNodeTransportInput,
   resumingIncarnationId: string
 ): Promise<number> {
   let transport: string | null;

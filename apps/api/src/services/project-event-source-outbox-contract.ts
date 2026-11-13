@@ -57,8 +57,7 @@ export type ProjectEventSourceOutboxActiveState =
 export type ProjectEventSourceOutboxTerminalState =
   (typeof PROJECT_EVENT_SOURCE_OUTBOX_TERMINAL_STATES)[number];
 export type ProjectEventSourceOutboxState =
-  | ProjectEventSourceOutboxActiveState
-  | ProjectEventSourceOutboxTerminalState;
+  ProjectEventSourceOutboxActiveState | ProjectEventSourceOutboxTerminalState;
 
 export interface ProjectEventSourceOutboxConfig {
   batchRows: number;
@@ -143,8 +142,7 @@ type CredentialLimitWindowCaptureGuard = {
 };
 
 export type ProjectEventSourceOutboxCaptureGuard =
-  | TaskTerminalCaptureGuard
-  | CredentialLimitWindowCaptureGuard;
+  TaskTerminalCaptureGuard | CredentialLimitWindowCaptureGuard;
 
 export type ProjectEventSourceOutboxInsertOptions = {
   now?: Date;

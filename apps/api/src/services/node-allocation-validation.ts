@@ -1,6 +1,4 @@
-import {
-  capacityPlacementAuthorityGeneration,
-} from '@simple-agent-manager/scheduler-core';
+import { capacityPlacementAuthorityGeneration } from '@simple-agent-manager/scheduler-core';
 import { type CapacityWorkloadRole } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 

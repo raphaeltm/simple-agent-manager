@@ -1,6 +1,4 @@
-import {
-  PlacementResolutionError,
-} from '@simple-agent-manager/scheduler-core';
+import { PlacementResolutionError } from '@simple-agent-manager/scheduler-core';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 

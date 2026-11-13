@@ -30,7 +30,10 @@ async function digest(value: string): Promise<string> {
   return [...new Uint8Array(bytes)].map((item) => item.toString(16).padStart(2, '0')).join('');
 }
 
-export async function diagnosticIncidentSignature(source: string, message: string): Promise<string> {
+export async function diagnosticIncidentSignature(
+  source: string,
+  message: string
+): Promise<string> {
   return digest(`${normalizeDiagnosticText(source)}\n${normalizeDiagnosticText(message)}`);
 }
 
@@ -152,13 +155,7 @@ export async function ensurePendingIncidents(
        (platform_error_id, incident_id, node_id, workspace_id, occurred_at)
        VALUES (?, ?, ?, ?, ?)`
     )
-      .bind(
-        input.platformErrorId,
-        canonical.id,
-        input.nodeId,
-        input.workspaceId,
-        occurrenceAt
-      )
+      .bind(input.platformErrorId, canonical.id, input.nodeId, input.workspaceId, occurrenceAt)
       .run();
     const occurrenceRecorded = Number(occurrence.meta.changes ?? 0) === 1;
     if (occurrenceRecorded) {

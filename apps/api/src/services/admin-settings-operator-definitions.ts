@@ -1,6 +1,4 @@
-import {
-  PROVIDER_LIMIT_POLICY,
-} from '@simple-agent-manager/scheduler-core';
+import { PROVIDER_LIMIT_POLICY } from '@simple-agent-manager/scheduler-core';
 
 import {
   type AdminSettingDefinition,

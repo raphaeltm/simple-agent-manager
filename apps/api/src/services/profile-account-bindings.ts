@@ -58,12 +58,16 @@ class Pools {
   members(reference: string): string[] {
     if (!this.parent.has(reference)) return [reference];
     const root = this.find(reference);
-    return [...this.parent.keys()].filter((candidate) => this.find(candidate) === root).sort();
+    return [...this.parent.keys()]
+      .filter((candidate) => this.find(candidate) === root)
+      .sort((a, b) => a.localeCompare(b));
   }
 }
 
 async function poolDigest(references: readonly string[]): Promise<string> {
-  const bytes = new TextEncoder().encode([...references].sort().join('\n'));
+  const bytes = new TextEncoder().encode(
+    [...references].sort((a, b) => a.localeCompare(b)).join('\n')
+  );
   const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
   return `pool_${Array.from(digest.slice(0, 8), (b) => b.toString(16).padStart(2, '0')).join('')}`;
 }

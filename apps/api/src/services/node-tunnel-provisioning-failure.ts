@@ -18,7 +18,8 @@ export interface TunnelProvisioningFailure {
 }
 
 /** JWT-shaped values (three base64url segments) and long opaque tokens, as a last line. */
-const TOKEN_SHAPED = /\b[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b|\b[A-Za-z0-9+/_=-]{64,}\b/g;
+const TOKEN_SHAPED =
+  /\b[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b|\b[A-Za-z0-9+/_=-]{64,}\b/g;
 
 /**
  * The cause text that is persisted and logged. Producers must not put secrets in messages;

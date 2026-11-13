@@ -64,10 +64,7 @@ export async function storeBootstrapToken(
     throw new Error('Bootstrap callback token is required');
   }
 
-  const encryptedCallbackToken = await encrypt(
-    callbackToken,
-    getCredentialEncryptionKey(env)
-  );
+  const encryptedCallbackToken = await encrypt(callbackToken, getCredentialEncryptionKey(env));
   const storedData: BootstrapTokenData = {
     ...dataWithoutPlaintextCallbackToken,
     encryptedCallbackToken: encryptedCallbackToken.ciphertext,
@@ -226,9 +223,7 @@ function d1Changes(result: D1Result<unknown>): number {
 async function hashBootstrapToken(token: string): Promise<string> {
   const bytes = new TextEncoder().encode(token);
   const digest = await crypto.subtle.digest('SHA-256', bytes);
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('');
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 function nowPlusSeconds(seconds: number): string {
