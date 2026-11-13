@@ -7,8 +7,9 @@
  *   run account → profile attachment → project attachment → user attachment → platform default
  *
  * The run account is the configuration a person chose for one run. Like a profile or
- * project pin, an unusable choice (paused, missing, another person's, or for a different
- * agent) halts: the run never silently falls back to an account nobody picked for it.
+ * project pin, an unusable choice (paused, missing, another person's) halts: the run never
+ * silently falls back to an account nobody picked for it. A choice for another agent is
+ * skipped, as a profile pin is.
  *
  * Preserves Rule 28: an INACTIVE profile- or project-scoped attachment (or one
  * whose configuration or credential is inactive) does NOT fall through — it
@@ -87,7 +88,7 @@ export function explainResolution(
     const configurationId = ctx.runConfigurationId;
     tiers.push({
       tier: 'run',
-      evaluate: () => runTier(snapshot, consumer, configurationId),
+      evaluate: () => runTier(snapshot, consumer, ctx, configurationId),
     });
   }
   if (ctx.profileId !== undefined && consumer.kind === 'agent') {
@@ -181,14 +182,19 @@ function profileTier(
 }
 
 /**
- * The account chosen for this run. The snapshot holds only the user's own
- * configurations, so another person's id is `configuration-missing`. A configuration
- * for a different agent halts rather than skips: the person chose an account for this
- * run, and the run must not quietly start on one they did not choose.
+ * The account chosen for this run. It must be the run owner's own: the API snapshot holds
+ * only their configurations, and the owner is checked again here so a snapshot built any
+ * other way cannot lend someone else's account. An unusable choice halts: the person chose
+ * an account for this run, and the run must not quietly start on one they did not choose.
+ *
+ * A choice for a different agent is skipped, like a profile pin: it was validated for the
+ * agent the run launches, and another agent's session in the same workspace (or the proxy
+ * probing candidate agents) must keep its own usual account rather than stop.
  */
 function runTier(
   snapshot: CompositionSnapshot,
   consumer: Extract<ConsumerRef, { kind: 'agent' }>,
+  ctx: ResolutionContext,
   configurationId: string
 ): TierOutcome {
   const configuration = findConfiguration(snapshot, configurationId);
@@ -196,13 +202,15 @@ function runTier(
     kind: 'halted',
     step: { tier: 'run', state: 'halted', attachmentId: null, configurationId, reason },
   });
-  if (!configuration) return runStep('configuration-missing');
+  if (!configuration || configuration.ownerId !== ctx.userId) {
+    return runStep('configuration-missing');
+  }
   if (!sameConsumer(configuration.consumer, consumer)) {
     return {
-      kind: 'halted',
+      kind: 'continue',
       step: {
         tier: 'run',
-        state: 'halted',
+        state: 'skipped',
         attachmentId: null,
         configurationId,
         reason: 'agent-type-mismatch',
@@ -213,10 +221,9 @@ function runTier(
   }
   if (!configuration.isActive) return runStep('configuration-inactive');
   const credential = findCredential(snapshot, configuration.credentialId);
-  if (configuration.credentialId !== null) {
-    if (!credential) return runStep('credential-missing');
-    if (!credential.isActive) return runStep('credential-inactive');
-  }
+  // A run account must carry a credential of the run owner (submit refuses one without).
+  if (!credential || credential.ownerId !== ctx.userId) return runStep('credential-missing');
+  if (!credential.isActive) return runStep('credential-inactive');
   return {
     kind: 'used',
     resolved: { consumer, configuration, credential, source: 'run-override' },

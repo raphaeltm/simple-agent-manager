@@ -358,7 +358,7 @@ test.describe('New-chat picker: usage left on profiles', () => {
     await expect(nudge(page)).toContainText('5h limit · 6% left on Sam Support · resets in 53m');
     const runOn = nudge(page).getByRole('button', { name: 'Run on Sam Sam' });
     await expect(runOn).toBeVisible();
-    await expect(runOn.getByTestId('usage-meters')).toContainText('5h83%');
+    await expect(runOn.getByTestId('usage-meters')).toContainText('5h83% left');
     await screenshot(page, `new-chat-usage-cards-${suffix}`);
     await assertNoOverflow(page);
 
@@ -384,22 +384,22 @@ test.describe('New-chat picker: usage left on profiles', () => {
     const suffix = getProjectSuffix(testInfo.project.name);
 
     await accountButton(page).click();
-    const list = page.getByRole('radiogroup', { name: 'Account for this chat' });
+    const list = page.getByRole('group', { name: 'Account for this chat' });
     await expect(list).toBeVisible();
-    await expect(list.getByRole('radio')).toHaveCount(4);
-    await expect(list.getByRole('radio', { name: /Sam Support/ })).toHaveAttribute(
-      'aria-checked',
+    await expect(list.getByRole('button')).toHaveCount(4);
+    await expect(list.getByRole('button', { name: /Sam Support/ })).toHaveAttribute(
+      'aria-pressed',
       'true'
     );
     await expect(
-      list.getByRole('radio', { name: /Team seat/ }).getByTestId('usage-meters')
-    ).toHaveText('5h50%Opus20%Wk40%');
+      list.getByRole('button', { name: /Team seat/ }).getByTestId('usage-meters')
+    ).toHaveText('5h50% leftOpus20% leftWk40% left');
     // Codex accounts are not offered to a Claude chat.
-    await expect(list.getByRole('radio', { name: /Work ChatGPT/ })).toHaveCount(0);
+    await expect(list.getByRole('button', { name: /Work ChatGPT/ })).toHaveCount(0);
     await screenshot(page, `new-chat-run-account-list-${suffix}`);
     await assertNoOverflow(page);
 
-    await list.getByRole('radio', { name: /Team seat/ }).click();
+    await list.getByRole('button', { name: /Team seat/ }).click();
     await expect(list).toHaveCount(0);
     await expect(accountButton(page)).toHaveAccessibleName(/^Runs on Team seat/);
     await expect(toControl(page).getByTestId('profile-usage-ring')).toHaveAttribute(
@@ -419,7 +419,7 @@ test.describe('New-chat picker: usage left on profiles', () => {
     await toControl(page).click();
     await expect(sheet(page)).toBeVisible();
     const claudiii = sheet(page).getByRole('button', { name: /^Claudiii/ });
-    await expect(claudiii.getByTestId('usage-meters')).toHaveText('5h83%Wk91%');
+    await expect(claudiii.getByTestId('usage-meters')).toHaveText('5h83% leftWk91% left');
     await expect(sheet(page).getByRole('button', { name: /^SamSamC/ })).toHaveCount(0);
     await screenshot(page, `new-chat-usage-sheet-${suffix}`);
     await assertNoOverflow(page);
@@ -458,7 +458,7 @@ test.describe('New-chat picker: usage left on profiles', () => {
     await assertNoOverflow(page);
 
     await accountButton(page).click();
-    await expect(page.getByRole('radiogroup', { name: 'Account for this chat' })).toBeVisible();
+    await expect(page.getByRole('group', { name: 'Account for this chat' })).toBeVisible();
     await screenshot(page, `new-chat-run-account-list-light-${suffix}`);
     await assertNoOverflow(page);
   });

@@ -73,7 +73,9 @@ export function ProfileUsageNudge({
   onChooseAccount: (accountId: string | null) => void;
   disabled?: boolean;
 }>) {
-  if (chosenAccount && profileUsage?.urgent) {
+  // The swapped line only when the chosen account has room; a chosen account that is itself
+  // low gets the nudge below, so a worse choice never hides behind a calm line.
+  if (chosenAccount && profileUsage?.urgent && !usage?.urgent) {
     return (
       <div className="@container mb-2">
         <div

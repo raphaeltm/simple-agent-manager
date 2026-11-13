@@ -47,7 +47,8 @@ export function ProfileUsageAvatar({
           width={box}
           height={box}
           viewBox={`0 0 ${box} ${box}`}
-          className="absolute inset-0 -rotate-90"
+          // Visible overflow: the empty arc's dot sits on the ring and reaches past its box.
+          className="absolute inset-0 -rotate-90 overflow-visible"
         >
           <circle
             cx={box / 2}

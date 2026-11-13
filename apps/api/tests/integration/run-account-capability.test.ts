@@ -36,6 +36,7 @@ import { runtimeRoutes } from '../../src/routes/workspaces/runtime';
 import { verifyAIProxyAuth } from '../../src/services/ai-proxy-shared';
 import { encrypt } from '../../src/services/encryption';
 import { resolveRunAgentCredentialReferences } from '../../src/services/run-agent-credential';
+import { reactivateSleepingTask } from '../../src/services/session-recovery';
 import { createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
 const ENCRYPTION_KEY = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
@@ -254,6 +255,67 @@ describe('a run account is used over the profile pin everywhere', () => {
   });
 });
 
+describe('an account chosen for another agent is skipped, not a stop', () => {
+  it('a Claude session in a workspace whose run chose a Codex account keeps its own', async () => {
+    await seedAccount('codex', 'sk-codex', SETTINGS, 'u1', 'openai-codex');
+    chooseForRun('cfg-codex');
+    const { status, body } = await agentKey();
+    expect(status).toBe(200);
+    expect(body).toMatchObject({ credentialReference: 'cc_credentials:cred-pinned' });
+    expect(JSON.stringify(body)).not.toContain('sk-codex');
+    expect(await proxyUpstream()).toMatchObject({ credentialScope: 'profile' });
+  });
+});
+
+describe('a woken chat keeps its run account', () => {
+  it('the real wake reactivation keeps the column, and agent-key still picks it', async () => {
+    chooseForRun('cfg-chosen');
+    // The chat slept: the task is bound to its chat, and a wake claim names it.
+    sqlite.exec(`
+      UPDATE tasks SET status = 'sleeping', chat_session_id = 'chat-1' WHERE id = 't1';
+      UPDATE workspaces SET chat_session_id = 'chat-1' WHERE id = 'w1';
+      INSERT INTO session_snapshots (id, project_id, workspace_id, user_id, chat_session_id, runtime,
+        status, degradation, manifest_r2_key, expires_at, sleeping_at, sleep_status,
+        recovery_status, recovery_task_id, recovery_attempt_id, recovery_attempts, created_at, updated_at)
+      VALUES ('snap-1', 'p1', 'w1', 'u1', 'chat-1', 'vm', 'available', 'none', 'manifest',
+        '2099-01-01T00:00:00.000Z', '${NOW}', 'sleeping', 'waking', 't1', 'att-1', 1, '${NOW}', '${NOW}');
+    `);
+    const db = drizzle(env.DATABASE, { schema });
+    await reactivateSleepingTask(
+      env.DATABASE,
+      db,
+      {
+        project: { id: 'p1' },
+        snapshot: { workspaceId: 'w1', userId: 'u1' },
+      } as unknown as Parameters<typeof reactivateSleepingTask>[2],
+      'chat-1',
+      't1',
+      {
+        placement: { vmSize: 'small' },
+        credentialAttributionUserId: 'u1',
+        credentialAttributionProjectId: null,
+        credentialAttributionSource: 'user',
+        capacityPlacementSnapshot: null,
+      } as unknown as Parameters<typeof reactivateSleepingTask>[5],
+      'att-1'
+    );
+    // Liveness: the wake really reactivated the task (and released its workspace).
+    expect(
+      sqlite
+        .prepare(
+          `SELECT status, workspace_id AS ws, agent_configuration_id AS account FROM tasks WHERE id = 't1'`
+        )
+        .get()
+    ).toEqual({ status: 'queued', ws: null, account: 'cfg-chosen' });
+
+    // The TaskRunner binds the replacement workspace; its agent starts on the chosen account.
+    sqlite.exec(`UPDATE tasks SET workspace_id = 'w1', status = 'in_progress' WHERE id = 't1'`);
+    const { body } = await agentKey();
+    expect(body).toMatchObject({ credentialReference: 'cc_credentials:cred-chosen' });
+    expect(sessionAttribution()).toMatchObject({ scope: 'run' });
+  });
+});
+
 describe('control: a run without a choice resolves as before', () => {
   it('uses the profile pin at every site', async () => {
     chooseForRun(null);
@@ -296,10 +358,23 @@ describe('an unusable run account stops the run instead of switching accounts', 
     await expectStopped();
   });
 
-  it('an account for another agent', async () => {
-    await seedAccount('codex', 'sk-codex', SETTINGS, 'u1', 'openai-codex');
-    chooseForRun('cfg-codex');
-    await expectStopped();
+  it('a paused account with platform mode on still refuses, not the platform proxy', async () => {
+    sqlite
+      .prepare(
+        `INSERT INTO agent_settings (id, user_id, agent_type, provider_mode, created_at, updated_at)
+         VALUES ('as-1', 'u1', 'claude-code', 'sam', ?, ?)`
+      )
+      .run(NOW, NOW);
+    chooseForRun('cfg-chosen');
+    sqlite.exec(`UPDATE cc_credentials SET is_active = 0 WHERE id = 'cred-chosen'`);
+    const { status, body } = await agentKey();
+    expect(status).toBe(404);
+    expect(JSON.stringify(body)).not.toContain('__platform_proxy__');
+    // Control: with the account active again, the chosen account is returned.
+    sqlite.exec(`UPDATE cc_credentials SET is_active = 1 WHERE id = 'cred-chosen'`);
+    expect((await agentKey()).body).toMatchObject({
+      credentialReference: 'cc_credentials:cred-chosen',
+    });
   });
 
   it('a deleted account', async () => {

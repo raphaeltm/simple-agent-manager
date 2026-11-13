@@ -93,7 +93,17 @@ vi.mock('../../../src/services/mention-enrichment', () => ({
   enrichMessageWithMentions: mocks.enrichMessageWithMentions,
 }));
 
+// The agent-key callback authenticates the VM agent; the slice test below calls it as w-slice.
+vi.mock('../../../src/services/jwt', () => ({
+  verifyCallbackToken: vi.fn(async () => ({ workspace: 'w-slice', scope: 'workspace' })),
+  signCallbackToken: vi.fn(),
+  signCurrentWorkspaceCallbackToken: vi.fn(),
+}));
+
 const { submitRoutes } = await import('../../../src/routes/tasks/submit');
+const { runtimeRoutes } = await import('../../../src/routes/workspaces/runtime');
+const { encrypt } = await import('../../../src/services/encryption');
+const ENCRYPTION_KEY = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
 
 function createApp() {
   const app = new Hono<{ Bindings: Env }>();
@@ -299,6 +309,81 @@ describe('POST /tasks/submit with agentConfigurationId', () => {
       });
       expect(response.status).toBe(202);
       expect(taskRows(sqlite)).toEqual([{ account: longId }]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('vertical slice: the account chosen at submit is the one agent-key hands the run', async () => {
+    const { sqlite, env } = await createEnv();
+    try {
+      (env as { ENCRYPTION_KEY?: string }).ENCRYPTION_KEY = ENCRYPTION_KEY;
+      for (const id of ['work-max', 'personal']) {
+        const { ciphertext, iv } = await encrypt(`sk-${id}`, ENCRYPTION_KEY);
+        if (id === 'personal') {
+          sqlite
+            .prepare(
+              `INSERT INTO cc_credentials (id, owner_id, name, kind, encrypted_token, iv, is_active, created_at, updated_at)
+               VALUES ('cred-personal', 'user-1', 'personal', 'api-key', ?, ?, 1, ?, ?)`
+            )
+            .run(ciphertext, iv, NOW, NOW);
+          sqlite
+            .prepare(
+              `INSERT INTO cc_configurations (id, owner_id, name, consumer_kind, consumer_target, credential_id, settings_json, is_active, created_at, updated_at)
+               VALUES ('cfg-personal', 'user-1', 'personal', 'agent', 'claude-code', 'cred-personal', NULL, 1, ?, ?)`
+            )
+            .run(NOW, NOW);
+        } else {
+          sqlite
+            .prepare(
+              `UPDATE cc_credentials SET encrypted_token = ?, iv = ? WHERE id = 'cred-work-max'`
+            )
+            .run(ciphertext, iv);
+        }
+      }
+      // Personal is the default; the chat chooses Work Max.
+      sqlite.exec(`
+        INSERT INTO cc_attachments (id, configuration_id, consumer_kind, consumer_target, user_id, project_id, is_active)
+          VALUES ('att-default', 'cfg-personal', 'agent', 'claude-code', 'user-1', NULL, 1);
+      `);
+
+      const response = await submit(createApp(), env, {
+        message: 'Do the work.',
+        agentType: 'claude-code',
+        taskMode: 'task',
+        agentConfigurationId: 'cfg-work-max',
+      });
+      expect(response.status).toBe(202);
+      const task = sqlite.prepare('SELECT id FROM tasks').get() as { id: string };
+
+      // The TaskRunner provisions the run's workspace and binds it (mocked out above).
+      sqlite.exec(`
+        INSERT INTO nodes (id, user_id, status) VALUES ('n-slice', 'user-1', 'running');
+        INSERT INTO workspaces (id, user_id, node_id, project_id, status)
+          VALUES ('w-slice', 'user-1', 'n-slice', 'project-1', 'running');
+      `);
+      sqlite.prepare(`UPDATE tasks SET workspace_id = 'w-slice' WHERE id = ?`).run(task.id);
+
+      const app = new Hono<{ Bindings: Env }>();
+      app.onError((err, c) =>
+        err instanceof AppError
+          ? c.json(err.toJSON(), err.statusCode as never)
+          : c.json({ error: String(err) }, 500)
+      );
+      app.route('/api/workspaces', runtimeRoutes);
+      const keyResponse = await app.request(
+        '/api/workspaces/w-slice/agent-key',
+        {
+          method: 'POST',
+          headers: { Authorization: 'Bearer cb', 'Content-Type': 'application/json' },
+          body: JSON.stringify({ agentType: 'claude-code' }),
+        },
+        env
+      );
+      expect(keyResponse.status).toBe(200);
+      const body = (await keyResponse.json()) as Record<string, unknown>;
+      expect(body).toMatchObject({ credentialReference: 'cc_credentials:cred-work-max' });
+      expect(JSON.stringify(body)).not.toContain('sk-personal');
     } finally {
       sqlite.close();
     }

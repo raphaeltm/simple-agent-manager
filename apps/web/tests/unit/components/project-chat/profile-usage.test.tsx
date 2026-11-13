@@ -428,7 +428,7 @@ describe('picker surfaces with usage', () => {
     expect(row).toHaveTextContent('Outback in 2h 10m');
     // Rows show every window as a labelled meter in percent left.
     const lowRow = within(sheet).getByRole('button', { name: /^Opus 5\.5 Chat/ });
-    expect(within(lowRow).getByTestId('usage-meters')).toHaveTextContent('5h6%Wk31%');
+    expect(within(lowRow).getByTestId('usage-meters')).toHaveTextContent('5h6% leftWk31% left');
   });
 
   it('the To chip carries the ring and says what is left', () => {
@@ -467,7 +467,7 @@ describe('picker surfaces with usage', () => {
       '5h limit · 6% left on Sam Support · resets in 52m'
     );
     const offer = screen.getByRole('button', { name: 'Run on Sam Sam' });
-    expect(within(offer).getByTestId('usage-meters')).toHaveTextContent('5h83%Wk91%');
+    expect(within(offer).getByTestId('usage-meters')).toHaveTextContent('5h83% leftWk91% left');
     fireEvent.click(offer);
     expect(onChooseAccount).toHaveBeenCalledWith('cfg-samsam');
   });

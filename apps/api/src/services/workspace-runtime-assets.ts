@@ -1,5 +1,5 @@
 import type { WorkspaceRuntimeAssetsResponse } from '@simple-agent-manager/shared';
-import { and, eq, gt, isNull, or, type SQL } from 'drizzle-orm';
+import { and, desc, eq, gt, isNull, or, type SQL } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -59,7 +59,16 @@ export type WorkspaceRuntimeBase = {
  */
 export interface PreloadedRuntimeRows {
   workspace: WorkspaceRuntimeBase;
-  agentSession: { id: string; profileId: string | null; skillId: string | null } | null;
+  agentSession: {
+    id: string;
+    profileId: string | null;
+    skillId: string | null;
+    /**
+     * The run account of the task this workspace serves, read with the session so a
+     * per-model-call caller (the AI proxy) does not pay a second query. Omit when not read.
+     */
+    runConfigurationId?: string | null;
+  } | null;
 }
 
 async function getWorkspaceRuntimeBase(db: Db, workspaceId: string): Promise<WorkspaceRuntimeBase> {
@@ -138,6 +147,9 @@ async function resolveTaskRuntimeIds(
         eq(schema.tasks.userId, workspace.userId)
       )
     )
+    // Newest first, so a workspace that served more than one task reads one row every time
+    // (the AI proxy's preload in `ai-proxy-auth.ts` uses the same order).
+    .orderBy(desc(schema.tasks.createdAt), desc(schema.tasks.id))
     .limit(1);
 
   return {
@@ -278,7 +290,11 @@ export async function resolveWorkspaceRuntimeIds(
     const loaded = preloaded?.agentSession;
     const ids =
       loaded?.id === agentSessionId
-        ? { profileId: loaded.profileId, skillId: loaded.skillId }
+        ? {
+            profileId: loaded.profileId,
+            skillId: loaded.skillId,
+            runConfigurationId: loaded.runConfigurationId,
+          }
         : await resolveAgentSessionRuntimeIds(db, workspace, agentSessionId);
     return { workspace, ...ids, source: 'agent-session' };
   }

@@ -15,7 +15,7 @@ export function UsageNotice({
   return (
     <span
       data-testid="profile-usage-notice"
-      className={`truncate text-[11px] font-medium ${words.length > 0 ? 'text-fg-secondary' : tone} ${className}`}
+      className={`line-clamp-2 break-words text-[11px] font-medium ${words.length > 0 ? 'text-fg-secondary' : tone} ${className}`}
       title={text}
     >
       {words.length > 0

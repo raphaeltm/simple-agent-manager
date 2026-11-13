@@ -116,7 +116,8 @@ export function profileUsage(budget: ProfileBudget | undefined, now: number): Pr
     (classified
       ? below(session, USAGE_HEALTH.low - 1) || below(week, USAGE_HEALTH.low - 1)
       : level !== 'ok');
-  const ringReading = week ?? session;
+  // A week with no reading cannot colour the ring; the session then does.
+  const ringReading = week && week.left !== null ? week : session;
   return {
     state: out ? 'out' : low ? 'low' : 'ok',
     left,

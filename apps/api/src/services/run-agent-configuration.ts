@@ -12,7 +12,10 @@ import { and, eq } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
+import { log } from '../lib/logger';
 import { errors } from '../middleware/error';
+import type { ProfileCredentialContext } from './composable-credentials/profile-context';
+import { explainForConsumer } from './composable-credentials/resolve';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -59,12 +62,53 @@ export async function validateRunAgentConfiguration(
       `That account is for ${row.consumerTarget}, but this chat runs ${input.agentType}.`
     );
   }
-  // A configuration without a credential (a proxy-mode binding) has nothing to pause.
-  const credentialUsable =
-    row.credentialId === null ||
-    (row.credentialActive === true && row.credentialOwnerId === input.userId);
-  if (!row.configurationActive || !credentialUsable) {
+  // A run account is a credential the person owns; a binding without one (proxy mode) is
+  // not something they can choose per chat, and the resolver halts on it.
+  if (row.credentialId === null || row.credentialOwnerId !== input.userId) {
+    throw errors.badRequest('That account was not found. Choose another account for this chat.');
+  }
+  if (!row.configurationActive || row.credentialActive !== true) {
     throw errors.badRequest('That account is paused. Choose another account for this chat.');
   }
   return configurationId;
+}
+
+/**
+ * The agent-key callback found no credential for a run that has a chosen account. If the
+ * run tier halted (the account was paused, removed, or is not the owner's), refuse with a
+ * 404 and a structured log instead of letting the caller continue to the platform proxy or
+ * a fallback credential. A run tier that skipped (an account chosen for another agent)
+ * returns, so that agent keeps its usual resolution. Called only on that miss, so the
+ * extra resolution costs nothing on the normal path.
+ */
+export async function refuseHaltedRunAccount(
+  db: Db,
+  input: {
+    workspaceId: string;
+    userId: string;
+    projectId: string | null;
+    agentType: string;
+    encryptionKey: string;
+    profile: ProfileCredentialContext;
+  }
+): Promise<void> {
+  const trace = await explainForConsumer(
+    db,
+    input.userId,
+    input.encryptionKey,
+    { kind: 'agent', agentType: input.agentType },
+    input.projectId,
+    input.profile
+  );
+  const runStep = trace.steps.find((step) => step.tier === 'run');
+  if (runStep?.state !== 'halted') return;
+  log.warn('agent_key.run_account_unavailable', {
+    workspaceId: input.workspaceId,
+    userId: input.userId,
+    agentType: input.agentType,
+    runConfigurationId: input.profile.runConfigurationId,
+    reason: runStep.reason,
+    action: 'rejected',
+  });
+  throw errors.notFound('The account chosen for this chat');
 }

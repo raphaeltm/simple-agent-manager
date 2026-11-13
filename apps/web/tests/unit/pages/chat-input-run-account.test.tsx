@@ -11,7 +11,7 @@ import type {
   CredentialLimitWindowSummary,
 } from '@simple-agent-manager/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -212,14 +212,16 @@ describe('choosing the account for this chat', () => {
   it('choosing an account beside To changes the ring and the request', () => {
     renderComposer();
     fireEvent.click(screen.getByRole('button', { name: 'Runs on Personal Pro, change account' }));
-    const list = screen.getByRole('radiogroup', { name: 'Account for this chat' });
-    expect(within(list).getByRole('radio', { name: /Personal Pro/ })).toHaveAttribute(
-      'aria-checked',
-      'true'
-    );
-    fireEvent.click(within(list).getByRole('radio', { name: /Work Max/ }));
+    const list = screen.getByRole('group', { name: 'Account for this chat' });
+    const personal = within(list).getByRole('button', { name: /Personal Pro/ });
+    expect(personal).toHaveAttribute('aria-pressed', 'true');
+    // Opening moves focus onto the current choice.
+    expect(personal).toHaveFocus();
+    // While the list is open it is the place to choose; the nudge does not repeat it.
+    expect(screen.queryByTestId('profile-usage-nudge')).not.toBeInTheDocument();
+    fireEvent.click(within(list).getByRole('button', { name: /Work Max/ }));
 
-    expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Account for this chat' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Runs on Work Max, change account' })).toBeVisible();
     // The ring follows the chosen account: its 5h window (28% left).
     expect(ring()).toHaveAttribute('data-usage-left', '28');
@@ -229,9 +231,33 @@ describe('choosing the account for this chat', () => {
   it('choosing the profile’s own account again sends nothing', () => {
     renderComposer();
     fireEvent.click(screen.getByRole('button', { name: 'Runs on Personal Pro, change account' }));
-    fireEvent.click(screen.getByRole('radio', { name: /Work Max/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Work Max/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Runs on Work Max, change account' }));
-    fireEvent.click(screen.getByRole('radio', { name: /Personal Pro/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Personal Pro/ }));
+    expect(submitFields()).toEqual({});
+  });
+
+  it('Escape closes the list without choosing and returns focus to the trigger', async () => {
+    renderComposer();
+    const trigger = screen.getByRole('button', { name: 'Runs on Personal Pro, change account' });
+    fireEvent.click(trigger);
+    const list = screen.getByRole('group', { name: 'Account for this chat' });
+    fireEvent.keyDown(within(list).getByRole('button', { name: /Work Max/ }), { key: 'Escape' });
+    expect(screen.queryByRole('group', { name: 'Account for this chat' })).not.toBeInTheDocument();
+    expect(submitFields()).toEqual({});
+    await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it('a profile on the SAM platform can choose an account and go back to the platform', () => {
+    renderComposer({ kind: 'platform' });
+    fireEvent.click(screen.getByRole('button', { name: 'Runs on SAM platform, change account' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Work Max/ }));
+    expect(submitFields()).toEqual({ agentConfigurationId: 'cfg-work' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Runs on Work Max, change account' }));
+    const back = screen.getByRole('button', { name: /^SAM platform/ });
+    expect(back).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(back);
     expect(submitFields()).toEqual({});
   });
 

@@ -166,7 +166,7 @@ export function SessionItem({
                 <span className="shrink-0">{kindLabel}</span>
                 {connector && (
                   <span data-testid="session-connector" className="min-w-0 truncate">
-                    {/* The leading space keeps "Task via X" one phrase for screen readers. */}
+                    {/* The gap-1 makes the visual space; this one keeps "Task via X" one phrase in the text. */}
                     {' via '}
                     <span className="text-fg-secondary">{connector}</span>
                   </span>

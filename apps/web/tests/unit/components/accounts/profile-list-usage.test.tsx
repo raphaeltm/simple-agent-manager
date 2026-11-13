@@ -224,13 +224,13 @@ describe('Profile list usage and requests', () => {
     // Liveness: the default-account profile shows Work Max's live sample, in percent left
     // (72% used), the same meters as the new-chat picker.
     const everyday = within(rowFor('Everyday')).getByTestId('profile-usage-strip');
-    expect(everyday).toHaveTextContent('5h28%');
+    expect(everyday).toHaveTextContent('5h28% left');
     expect(everyday).toHaveAccessibleName(/Everyday on Work Max/);
 
     // The project pin wins for Reviewer, and its 5h window reset after the sample.
     const reviewer = within(rowFor('Reviewer')).getByTestId('profile-usage-strip');
     expect(reviewer).toHaveAccessibleName(/Reviewer on Client key: OK/);
-    expect(reviewer).toHaveTextContent('5h100%↻');
+    expect(reviewer).toHaveTextContent('5h100% left↻');
     // The stale sample (81% used) is not shown as 19% left.
     expect(reviewer).not.toHaveTextContent('19%');
 

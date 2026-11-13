@@ -9,7 +9,7 @@ import type {
 import { paneClassName } from '@simple-agent-manager/ui';
 import { Paperclip } from 'lucide-react';
 import type { MutableRefObject } from 'react';
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 
 import { ProfileFormDialog } from '../../components/agent-profiles/ProfileFormDialog';
 import {
@@ -211,12 +211,18 @@ export function ChatInput({
     : null;
   const runUsage = chosenAccount ? chosenAccount.usage : selectedUsage;
   const profileAccountId = selectedUsage?.accountId ?? null;
+  const accountButtonRef = useRef<HTMLButtonElement>(null);
+  const closeAccounts = () => {
+    setAccountsOpen(false);
+    // The list (or the nudge button) that had focus unmounts: return it to the trigger.
+    requestAnimationFrame(() => accountButtonRef.current?.focus());
+  };
   const chooseAccount = (accountId: string | null) => {
     if (!effectiveAgentType) return;
     // Choosing the profile's own account is no choice at all: send nothing, inherit.
     const next = accountId && accountId !== profileAccountId ? accountId : null;
     onAgentOverridesChange(withChatAccount(agentOverrides, effectiveAgentType, next));
-    setAccountsOpen(false);
+    closeAccounts();
   };
   // A chosen account that was paused or removed since is dropped, not sent to be refused.
   useEffect(() => {
@@ -231,13 +237,19 @@ export function ChatInput({
     agentOverrides,
     onAgentOverridesChange,
   ]);
-  const runAccountLabel =
-    chosenAccount?.label ??
+  // What the profile runs on when it is not one of your accounts: the platform, or nothing.
+  const profileAccountLabel =
     selectedUsage?.accountLabel ??
-    (selectedUsage?.state === 'platform' ? 'SAM platform' : null);
-  // Only worth showing when there is a choice to make (or one has been made).
+    (selectedUsage?.state === 'platform'
+      ? 'SAM platform'
+      : selectedUsage?.state === 'none'
+        ? 'No account'
+        : null);
+  const runAccountLabel = chosenAccount?.label ?? profileAccountLabel;
+  // Worth showing when there is a choice to make: another account than the profile's.
+  const otherAccounts = (runAccounts ?? []).filter((account) => account.id !== profileAccountId);
   const showAccountControl = Boolean(
-    runAccounts && runAccountLabel && (runAccounts.length > 1 || chosenAccount)
+    runAccounts && runAccountLabel && (otherAccounts.length > 0 || chosenAccount)
   );
   const accountsPanelId = useId();
   const options: ComposerOptionsValue = {
@@ -290,16 +302,19 @@ export function ChatInput({
         <RunAccountPanel
           id={accountsPanelId}
           accounts={runAccounts}
-          selectedId={chosenAccount?.id ?? profileAccountId}
+          selectedId={chosenAccount?.id ?? null}
           profileAccountId={profileAccountId}
+          profileAccountLabel={profileAccountLabel}
           agentName={effectiveAgentType ? agentLabel(effectiveAgentType) : 'agent'}
           profileName={selectedProfile?.name ?? null}
           disabled={submitting}
           onSelect={chooseAccount}
+          onClose={closeAccounts}
         />
       )}
 
-      {showToolbar && selectedProfile && profileUsages && (
+      {/* While the account list is open it is the place to choose; the nudge would repeat it. */}
+      {showToolbar && selectedProfile && profileUsages && !accountsOpen && (
         <ProfileUsageNudge
           usage={runUsage}
           profileUsage={selectedUsage}
@@ -326,6 +341,7 @@ export function ChatInput({
             </div>
             {showAccountControl && runAccountLabel && (
               <RunAccountButton
+                buttonRef={accountButtonRef}
                 label={runAccountLabel}
                 chosen={Boolean(chosenAccount)}
                 open={accountsOpen}

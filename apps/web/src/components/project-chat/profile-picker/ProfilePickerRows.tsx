@@ -96,7 +96,7 @@ export function ProfilePickerRow({
               : profileSubtitle(profile)}
           </span>
           {usage && usage.windows.length > 0 && usage.state !== 'out' && (
-            <UsageMeters windows={usage.windows} className="mt-0.5" />
+            <UsageMeters windows={usage.windows} className="mt-0.5" decorative />
           )}
         </span>
         <RowUsage usage={usage} />

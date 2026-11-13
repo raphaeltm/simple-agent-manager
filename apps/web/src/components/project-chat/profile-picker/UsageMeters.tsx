@@ -10,10 +10,17 @@ const TRACK = 'color-mix(in srgb, var(--sam-color-fg-muted) 28%, transparent)';
 export function UsageMeters({
   windows,
   className = '',
-}: Readonly<{ windows: readonly UsageWindowReading[]; className?: string }>) {
+  decorative = false,
+}: Readonly<{
+  windows: readonly UsageWindowReading[];
+  className?: string;
+  /** Hidden from screen readers where the surrounding control already speaks the usage. */
+  decorative?: boolean;
+}>) {
   return (
     <span
       data-testid="usage-meters"
+      aria-hidden={decorative || undefined}
       className={`flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[11px] ${className}`}
     >
       {windows.map((window) => {
@@ -44,6 +51,7 @@ export function UsageMeters({
             <span className="font-mono tabular-nums" style={quiet ? undefined : { color }}>
               {window.left === null ? '—' : `${window.left}%`}
             </span>
+            <span className="sr-only">{window.left === null ? ' no reading' : ' left'}</span>
             {window.resetElapsed && (
               <span className="text-info-fg" aria-hidden="true">
                 ↻

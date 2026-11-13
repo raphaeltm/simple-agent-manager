@@ -144,7 +144,6 @@ describe('run accounts in explainResolution', () => {
     ['a paused configuration', { runConfigActive: false }, 'cfg-run', 'configuration-inactive'],
     ['a paused credential', { runCredentialActive: false }, 'cfg-run', 'credential-inactive'],
     ['a missing configuration', {}, 'cfg-gone', 'configuration-missing'],
-    ['an account for another agent', {}, 'cfg-codex', 'agent-type-mismatch'],
   ] as const)('%s halts instead of falling back', (_name, overrides, id, reason) => {
     const trace = explainResolution(fullSnapshot(overrides), CLAUDE, runCtx(id));
     expect(trace.resolved).toBeNull();
@@ -152,15 +151,35 @@ describe('run accounts in explainResolution', () => {
     expect(trace.steps[0]).toMatchObject({ tier: 'run', state: 'halted', reason });
   });
 
-  it('another person’s configuration is not in the snapshot, so it halts as missing', () => {
+  it('another person’s configuration halts even when a snapshot holds it', () => {
     const snapshot = fullSnapshot();
-    // The API snapshot only loads the caller's configurations; one that leaked in under
-    // another owner must still not be found by id from a different owner's run.
-    snapshot.configurations = snapshot.configurations.filter((cfg) => cfg.id !== 'cfg-run');
-    snapshot.configurations.push(configuration('cfg-theirs', 'cred-run', CLAUDE, true, OTHER));
-    const trace = explainResolution(snapshot, CLAUDE, runCtx('cfg-run'));
+    snapshot.credentials.push(credential('cred-theirs', OTHER));
+    snapshot.configurations.push(configuration('cfg-theirs', 'cred-theirs', CLAUDE, true, OTHER));
+    const trace = explainResolution(snapshot, CLAUDE, runCtx('cfg-theirs'));
     expect(trace.resolved).toBeNull();
+    expect(trace.halted).toBe(true);
     expect(trace.steps[0]).toMatchObject({ reason: 'configuration-missing' });
+  });
+
+  it('my configuration over another person’s credential halts', () => {
+    const snapshot = fullSnapshot();
+    snapshot.credentials.push(credential('cred-theirs', OTHER));
+    snapshot.configurations.push(configuration('cfg-mine-theirs', 'cred-theirs'));
+    const trace = explainResolution(snapshot, CLAUDE, runCtx('cfg-mine-theirs'));
+    expect(trace.resolved).toBeNull();
+    expect(trace.steps[0]).toMatchObject({ reason: 'credential-missing' });
+  });
+
+  it('an account for another agent is skipped, so that agent keeps its usual account', () => {
+    // Chosen for Claude; a Codex session in the same workspace resolves as before.
+    const trace = explainResolution(fullSnapshot(), CODEX, runCtx('cfg-run'));
+    expect(trace.halted).toBe(false);
+    expect(trace.steps[0]).toMatchObject({
+      tier: 'run',
+      state: 'skipped',
+      reason: 'agent-type-mismatch',
+      pinnedAgentType: 'claude-code',
+    });
   });
 
   it('never applies to compute consumers', () => {
