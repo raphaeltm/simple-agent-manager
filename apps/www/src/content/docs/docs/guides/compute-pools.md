@@ -13,8 +13,8 @@ them as **Your compute pool**, **Project compute pool**, or **Shared compute poo
 where you are.
 
 :::note
-Most people never open this page in the product. If you have connected a cloud provider (or you
-are on the hosted platform, where compute is provided for you), SAM sets up a sensible pool the
+Most people never open this page in the product. If you have connected a cloud provider (or your
+installation's administrator provides compute for you), SAM sets up a sensible pool the
 first time it needs one and keeps it in sync. Read on when you want to control _which_ machines
 get rented, _how big_ they are, or _what happens when your provider is out of capacity_.
 :::
@@ -152,8 +152,8 @@ project  →  user  →  installation
 - A project with its own pool uses that pool. Its nodes are dedicated to that project.
 - No project pool? Your personal pool applies, and your nodes can host your work across the
   projects you have access to.
-- Neither? The installation pool applies. On the hosted platform this is the "installation-funded"
-  compute that lets you work without connecting a cloud account of your own.
+- Neither? The installation pool applies. When the administrator connected a shared cloud account, this is the
+  "installation-funded" compute that lets you work without connecting a cloud account of your own.
 
 :::caution
 **There is no fallback _between_ pools.** Precedence is decided by whether a pool _exists_, not by

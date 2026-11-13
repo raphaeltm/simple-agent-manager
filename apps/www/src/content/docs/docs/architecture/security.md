@@ -21,7 +21,7 @@ For installer-bound instances, `BOOTSTRAP_OWNER_EMAIL` restricts initial adminis
 
 SAM supports **Bring-Your-Own-Cloud (BYOC)**: users and self-hosters may store their own Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, or GCP credentials, encrypted per-user in D1. This is the model for self-hosted deployments and BYO-key users.
 
-However, SAM's own hosted deployment also has an **enabled platform-level cloud credential** (`platform_credentials`, `provider=hetzner`, `credential_type=cloud-provider`). VM provider resolution uses **project credential → user credential → platform credential**, so on the hosted (zero-config) platform a user does **not** need their own cloud credential for SAM to provision workspaces or deployment nodes when the project or platform can supply one. Self-hosted deployments without a project or platform credential rely on user-supplied BYOC tokens.
+An installation administrator can also enable a **platform-level cloud credential** (`platform_credentials`, `credential_type=cloud-provider`). VM provider resolution uses **project credential → user credential → platform credential** (`resolveCredentialSource()` in `apps/api/src/services/provider-credentials.ts`), so where the project or platform can supply one, a user does **not** need their own cloud credential for SAM to provision workspaces or deployment nodes. Installations without a project or platform credential rely on user-supplied BYOC tokens.
 
 ## Credential Types
 
@@ -112,9 +112,9 @@ Code requests and code redemptions are limited per IP address. Requests and rede
 
 | Token           | Lifetime             | Purpose                          | Validated By            |
 | --------------- | -------------------- | -------------------------------- | ----------------------- |
-| Session cookie  | Hours                | Browser authentication           | API Worker (BetterAuth) |
-| Workspace JWT   | Minutes              | Terminal WebSocket auth          | VM Agent (via JWKS)     |
-| Bootstrap token | 5 minutes            | One-time VM credential injection | API Worker              |
+| Session cookie  | 7 days               | Browser authentication           | API Worker (BetterAuth) |
+| Workspace JWT   | 1 hour               | Terminal WebSocket auth          | VM Agent (via JWKS)     |
+| Bootstrap token | 15 minutes (default) | One-time VM credential injection | API Worker              |
 | Callback token  | 24 hours (renewable) | VM Agent → API callbacks         | API Worker              |
 
 ### SAM Connector tokens

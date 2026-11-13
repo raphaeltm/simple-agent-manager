@@ -1,0 +1,505 @@
+[
+  {
+    "slug": "claude-code",
+    "name": "Claude Code",
+    "category": "ai-agents",
+    "tagline": "API key, Claude subscription, or the installation AI proxy",
+    "description": "Anthropic's terminal coding agent. SAM starts it in your workspace, streams its work into project chat, and can run many sessions side by side, each in its own workspace.",
+    "logoPath": "/images/integrations/anthropic.svg",
+    "seoTitle": "Run Claude Code on Your Own Cloud | SAM",
+    "seoDescription": "Run Claude Code agents on cloud VMs you control with SAM, the open-source agent platform. Use an Anthropic API key, a Claude Pro or Max subscription, or an Anthropic-compatible endpoint.",
+    "features": [
+      {
+        "title": "Three ways to pay",
+        "description": "Your Anthropic API key, your Claude Pro or Max subscription (guided sign-in, no terminal), or the installation's AI proxy if your SAM administrator turns it on."
+      },
+      {
+        "title": "Anthropic-compatible endpoints",
+        "description": "Point Claude Code at another Anthropic-compatible API, for example a gateway your company already runs."
+      },
+      {
+        "title": "Several accounts",
+        "description": "Connect a work subscription and a client's API key side by side, then pin each to the projects or profiles that should use it."
+      },
+      {
+        "title": "Pull requests when you ask",
+        "description": "The agent works on its own branch and pushes it when the task is done. Ask, and it opens a pull request."
+      }
+    ],
+    "howItWorks": [
+      {
+        "step": "Connect an account",
+        "description": "In Settings → Agents, sign in with your Claude subscription or paste an API key."
+      },
+      {
+        "step": "Pick a profile",
+        "description": "Choose Claude Code and a model in an agent profile, or use the project default."
+      },
+      {
+        "step": "Start a chat or task",
+        "description": "SAM places the work on a machine, builds your devcontainer and starts Claude Code."
+      },
+      {
+        "step": "Review the result",
+        "description": "Follow along in project chat, steer it while it works, and review the branch or pull request."
+      }
+    ],
+    "useCases": [
+      {
+        "title": "Parallel feature work",
+        "description": "Split a project into tasks and run one agent per task, each in its own workspace and branch."
+      },
+      {
+        "title": "Large refactors",
+        "description": "Describe the pattern once and let several sessions work through different parts of the codebase."
+      },
+      {
+        "title": "Scheduled and event-driven work",
+        "description": "Run Claude Code from a schedule, a GitHub event or a webhook using a saved profile."
+      }
+    ],
+    "faq": [
+      {
+        "question": "Which models can I choose?",
+        "answer": "The Claude 5 models, including Claude Fable 5.2, Opus 5.5, Sonnet 5.5 and Haiku 5.5, plus the Claude 4 models. Choose one in an agent profile."
+      },
+      {
+        "question": "Do I need an Anthropic API key?",
+        "answer": "No. You can sign in with a Claude Pro or Max subscription instead, or use the installation AI proxy if your administrator has enabled it."
+      },
+      {
+        "question": "Where does Claude Code run?",
+        "answer": "On a cloud VM, inside your repository's devcontainer, using a cloud account connected to your SAM installation. A profile can choose an Instant session on Cloudflare Containers instead, which needs no cloud account but does not use your devcontainer."
+      }
+    ],
+    "relatedSlugs": ["codex", "opencode", "github"],
+    "externalUrl": "https://docs.anthropic.com/en/docs/claude-code/overview",
+    "externalLabel": "Claude Code docs",
+    "docsPath": "/docs/guides/agents/",
+    "models": ["Claude Fable 5.2", "Claude Opus 5.5", "Claude Sonnet 5.5", "Claude Haiku 5.5"]
+  },
+  {
+    "slug": "codex",
+    "name": "OpenAI Codex",
+    "shortName": "Codex",
+    "category": "ai-agents",
+    "tagline": "API key, ChatGPT subscription, or the installation AI proxy",
+    "description": "OpenAI's coding agent, run on your own machines instead of OpenAI's sandbox. SAM installs it in your workspace, keeps its sign-in fresh across parallel sessions, and limits it to the tools your project gives it.",
+    "logoPath": "/images/integrations/openai.svg",
+    "seoTitle": "Run OpenAI Codex on Your Own Cloud | SAM",
+    "seoDescription": "Run OpenAI Codex agents on cloud VMs you control with SAM, the open-source agent platform. Use an OpenAI API key, a ChatGPT subscription, or an OpenAI-compatible endpoint.",
+    "features": [
+      {
+        "title": "Three ways to pay",
+        "description": "Your OpenAI API key, your ChatGPT subscription (guided sign-in with a one-time code), or the installation's AI proxy if your administrator turns it on."
+      },
+      {
+        "title": "Safe token refresh",
+        "description": "SAM serializes ChatGPT token refresh per user, so parallel Codex sessions do not invalidate each other's sign-in."
+      },
+      {
+        "title": "Only the tools you give it",
+        "description": "SAM turns off Codex's built-in apps and plugins, so a session has only the tools and skills from SAM, your project and your profile."
+      },
+      {
+        "title": "OpenAI-compatible endpoints",
+        "description": "Point Codex at another OpenAI-compatible API through a custom base URL."
+      }
+    ],
+    "howItWorks": [
+      {
+        "step": "Connect an account",
+        "description": "In Settings → Agents, sign in with ChatGPT or paste an OpenAI API key."
+      },
+      {
+        "step": "Pick a profile",
+        "description": "Choose Codex and a model in an agent profile."
+      },
+      {
+        "step": "Start a chat or task",
+        "description": "SAM places the work on a machine, builds your devcontainer and starts Codex."
+      },
+      {
+        "step": "Review the result",
+        "description": "Follow along in project chat and review the branch or pull request."
+      }
+    ],
+    "useCases": [
+      {
+        "title": "Bug triage in parallel",
+        "description": "Turn several bug reports into tasks and let one Codex session investigate each."
+      },
+      {
+        "title": "Migrations",
+        "description": "Framework upgrades, dependency bumps and language version changes, split across sessions."
+      },
+      {
+        "title": "Second opinion",
+        "description": "Run Codex and Claude Code on the same task with different profiles and compare the branches."
+      }
+    ],
+    "faq": [
+      {
+        "question": "Do I need a ChatGPT subscription?",
+        "answer": "No. You can use an OpenAI API key, a ChatGPT subscription, or the installation AI proxy if your administrator has enabled it."
+      },
+      {
+        "question": "Which models can I choose?",
+        "answer": "GPT-6 Astra, GPT-6.1 Sol, GPT-6.1 Terra, GPT-6 Sol, GPT-6 Luna and the GPT-5.6 models. A few older models work only with an API key."
+      },
+      {
+        "question": "Where does Codex run?",
+        "answer": "On a cloud VM, inside your repository's devcontainer, using a cloud account connected to your SAM installation. A profile can choose an Instant session on Cloudflare Containers instead, which needs no cloud account but does not use your devcontainer."
+      }
+    ],
+    "relatedSlugs": ["claude-code", "opencode", "github"],
+    "externalUrl": "https://developers.openai.com/codex",
+    "externalLabel": "Codex docs",
+    "docsPath": "/docs/guides/agents/",
+    "models": ["GPT-6 Astra", "GPT-6.1 Sol", "GPT-6.1 Terra", "GPT-6 Luna"]
+  },
+  {
+    "slug": "gemini-cli",
+    "name": "Gemini CLI",
+    "category": "ai-agents",
+    "tagline": "Google's terminal agent with a Gemini API key",
+    "description": "Google's open-source command-line coding agent. Add a Gemini API key and SAM runs it in your workspace with Gemini 4 and Gemini 3 models.",
+    "logoPath": "/images/integrations/google-gemini.svg",
+    "seoTitle": "Run Gemini CLI on Your Own Cloud | SAM",
+    "seoDescription": "Run Google Gemini CLI agents on cloud VMs you control with SAM, the open-source agent platform. Bring a Gemini API key and choose Gemini 4 or Gemini 3 models.",
+    "features": [
+      {
+        "title": "Gemini 4 and Gemini 3",
+        "description": "Choose Gemini 4 Argon, Gemini 3.8 Flash, Gemini 3.1 Pro Preview or a lighter Flash-Lite model per profile."
+      },
+      {
+        "title": "API key sign-in",
+        "description": "Add a key from Google AI Studio. SAM injects it into the workspace when the agent starts."
+      },
+      {
+        "title": "Your toolchain",
+        "description": "Gemini CLI runs inside your repository's devcontainer with the same runtimes and test tools your team uses."
+      }
+    ],
+    "howItWorks": [
+      {
+        "step": "Add your API key",
+        "description": "Paste a Gemini API key in Settings → Agents."
+      },
+      {
+        "step": "Pick a profile",
+        "description": "Choose Gemini CLI and a model in an agent profile."
+      },
+      {
+        "step": "Start a chat or task",
+        "description": "SAM places the work on a machine and starts Gemini CLI in your devcontainer."
+      }
+    ],
+    "useCases": [
+      {
+        "title": "Cost-sensitive batches",
+        "description": "Use Flash or Flash-Lite models for many small tasks, such as adding types or fixing lint."
+      },
+      {
+        "title": "Comparing agents",
+        "description": "Run the same task with Gemini CLI and another agent and compare the results."
+      }
+    ],
+    "faq": [
+      {
+        "question": "Which models can I choose?",
+        "answer": "Gemini 4 Argon and the Gemini 3 models, such as Gemini 3.8 Flash and Gemini 3.1 Pro Preview. Gemini 2.5 remains for existing users until Google retires it."
+      },
+      {
+        "question": "Can I sign in with a Google account instead of a key?",
+        "answer": "Not yet. SAM signs Gemini CLI in with a Gemini API key."
+      },
+      {
+        "question": "Where does Gemini CLI run?",
+        "answer": "On a cloud VM, inside your repository's devcontainer, using a cloud account connected to your SAM installation. A profile can choose an Instant session on Cloudflare Containers instead, which needs no cloud account but does not use your devcontainer."
+      }
+    ],
+    "relatedSlugs": ["google-antigravity", "claude-code", "gcp"],
+    "externalUrl": "https://github.com/google-gemini/gemini-cli",
+    "externalLabel": "Gemini CLI on GitHub",
+    "docsPath": "/docs/guides/agents/",
+    "models": [
+      "Gemini 4 Argon",
+      "Gemini 3.8 Flash",
+      "Gemini 3.1 Pro Preview",
+      "Gemini 3.5 Flash-Lite"
+    ]
+  },
+  {
+    "slug": "google-antigravity",
+    "name": "Google Antigravity",
+    "shortName": "Antigravity",
+    "category": "ai-agents",
+    "tagline": "Google's Antigravity agent with Gemini models",
+    "description": "Google's agentic coding tool. SAM downloads the pinned release on first use, checks its SHA-256 digest, signs it in with your Gemini API key and runs it in your workspace or an Instant session.",
+    "logoPath": "/images/integrations/antigravity.svg",
+    "seoTitle": "Run Google Antigravity on Your Own Cloud | SAM",
+    "seoDescription": "Run Google Antigravity coding agents on cloud VMs you control, or in Instant sessions, with SAM. SAM installs a pinned, digest-checked release and signs it in with your Gemini API key.",
+    "features": [
+      {
+        "title": "Gemini models",
+        "description": "Choose Gemini 3.8 Flash, Gemini 3.5 Flash, Gemini 3.1 Pro or another Gemini model Antigravity offers."
+      },
+      {
+        "title": "Verified install",
+        "description": "SAM downloads the pinned release from Google on first use and checks its SHA-256 digest before running it."
+      },
+      {
+        "title": "Permission modes",
+        "description": "SAM's permission modes map to Antigravity's own, so Bypass Permissions runs unattended and Manual asks before acting."
+      }
+    ],
+    "howItWorks": [
+      {
+        "step": "Add your API key",
+        "description": "Paste a Gemini API key under Google Antigravity in Settings → Agents."
+      },
+      {
+        "step": "Pick a profile",
+        "description": "Choose Google Antigravity and a Gemini model in an agent profile."
+      },
+      {
+        "step": "Start a chat or task",
+        "description": "SAM installs Antigravity on first use and runs your task. The first start downloads about 320 MB."
+      }
+    ],
+    "useCases": [
+      {
+        "title": "Trying Google's agent on real repositories",
+        "description": "Compare Antigravity with Gemini CLI, Claude Code or Codex on the same project without installing anything locally."
+      },
+      {
+        "title": "Gemini work in parallel",
+        "description": "Run several Antigravity sessions at once, each in its own workspace."
+      }
+    ],
+    "faq": [
+      {
+        "question": "Which models are available?",
+        "answer": "Gemini models only. Antigravity offers its Claude and GPT models only to clients Google recognizes by name, and SAM is not one of them yet."
+      },
+      {
+        "question": "Can I send a message while it is working?",
+        "answer": "Yes. Antigravity cannot take a message into a running turn, so SAM delivers it as the next message when the turn ends."
+      },
+      {
+        "question": "Does it work on every devcontainer?",
+        "answer": "It needs Linux x86_64 or arm64 with glibc. Alpine (musl) images are not supported."
+      }
+    ],
+    "relatedSlugs": ["gemini-cli", "claude-code", "gcp"],
+    "externalUrl": "https://antigravity.google",
+    "externalLabel": "Antigravity website",
+    "docsPath": "/docs/guides/agents/",
+    "models": ["Gemini 3.8 Flash", "Gemini 3.5 Flash", "Gemini 3.1 Pro"]
+  },
+  {
+    "slug": "mistral-vibe",
+    "name": "Mistral Vibe",
+    "shortName": "Vibe",
+    "category": "ai-agents",
+    "tagline": "Mistral's coding agent with a Mistral API key",
+    "description": "Mistral AI's command-line coding agent. Add a Mistral API key and SAM runs Vibe in your workspace with Mistral Large 3 by default, or Codestral, Mistral Small 4 and the Ministral models.",
+    "logoPath": "/images/integrations/mistral.svg",
+    "seoTitle": "Run Mistral Vibe on Your Own Cloud | SAM",
+    "seoDescription": "Run Mistral Vibe coding agents on cloud VMs you control with SAM, the open-source agent platform. Bring a Mistral API key and choose Mistral Large 3, Codestral or Ministral models.",
+    "features": [
+      {
+        "title": "Mistral models",
+        "description": "Mistral Large 3 by default, Codestral for code-focused work, Mistral Small 4, and Ministral 3 in 14B, 8B and 3B sizes. Z.ai GLM 5.3 is also listed."
+      },
+      {
+        "title": "API key sign-in",
+        "description": "Add a key from the Mistral Console. SAM injects it into the workspace when the agent starts."
+      },
+      {
+        "title": "Installed with uv",
+        "description": "SAM installs Vibe with uv, the Python package manager. uv fetches the Python 3.12 it needs itself."
+      }
+    ],
+    "howItWorks": [
+      {
+        "step": "Add your API key",
+        "description": "Paste a Mistral API key in Settings → Agents."
+      },
+      {
+        "step": "Pick a profile",
+        "description": "Choose Mistral Vibe and a model in an agent profile."
+      },
+      {
+        "step": "Start a chat or task",
+        "description": "SAM places the work on a machine and starts Vibe in your devcontainer."
+      }
+    ],
+    "useCases": [
+      {
+        "title": "European model provider",
+        "description": "Pair Mistral models with an EU cloud such as Hetzner, Scaleway or Infomaniak. The SAM control plane itself runs on Cloudflare's global network."
+      },
+      {
+        "title": "Small, frequent tasks",
+        "description": "Use Ministral or Mistral Small for many cheap tasks and Mistral Large for harder ones."
+      }
+    ],
+    "faq": [
+      {
+        "question": "Which models can I choose?",
+        "answer": "Mistral Large 3, Mistral Small 4, Codestral, Ministral 3 (14B, 8B and 3B) and Z.ai GLM 5.3. Mistral Medium 3.5 is listed as deprecated."
+      },
+      {
+        "question": "Does everything stay in the EU?",
+        "answer": "Model calls go to Mistral and machines run in the cloud region you choose. Chat history is stored in the Cloudflare account that runs your SAM installation, which is a global network."
+      },
+      {
+        "question": "Where does Vibe run?",
+        "answer": "On a cloud VM, inside your repository's devcontainer, using a cloud account connected to your SAM installation. A profile can choose an Instant session on Cloudflare Containers instead, which needs no cloud account but does not use your devcontainer."
+      }
+    ],
+    "relatedSlugs": ["opencode", "scaleway", "infomaniak"],
+    "externalUrl": "https://docs.mistral.ai/capabilities/vibe/",
+    "externalLabel": "Mistral Vibe docs",
+    "docsPath": "/docs/guides/agents/",
+    "models": ["Mistral Large 3", "Codestral", "Mistral Small 4", "Ministral 3 14B"]
+  },
+  {
+    "slug": "opencode",
+    "name": "OpenCode",
+    "category": "ai-agents",
+    "tagline": "OpenCode Zen, OpenCode Go, or any OpenAI-compatible endpoint",
+    "description": "SST's open-source coding agent. SAM installs a pinned, digest-checked build and runs it against OpenCode Zen, OpenCode Go, or an OpenAI-compatible endpoint you supply, such as a model server you host yourself.",
+    "logoPath": "/images/integrations/sst.svg",
+    "seoTitle": "Run OpenCode on Your Own Cloud | SAM",
+    "seoDescription": "Run OpenCode agents on cloud VMs you control with SAM. Use OpenCode Zen, OpenCode Go, or any OpenAI-compatible endpoint, including one you host yourself.",
+    "features": [
+      {
+        "title": "Three inference options",
+        "description": "OpenCode Zen (the default), OpenCode Go, or a custom OpenAI-compatible endpoint with your own base URL and key."
+      },
+      {
+        "title": "Live model lists",
+        "description": "SAM loads the Zen and Go model lists from Models.dev, with a built-in list if that catalog is unavailable."
+      },
+      {
+        "title": "Open source end to end",
+        "description": "OpenCode is open source, and so is SAM. Your security team can read both."
+      },
+      {
+        "title": "Pinned, verified build",
+        "description": "SAM installs a specific OpenCode release with a SHA-256 check, on glibc and musl images."
+      }
+    ],
+    "howItWorks": [
+      {
+        "step": "Choose an inference provider",
+        "description": "In Settings → Agents, pick OpenCode Zen, OpenCode Go, or Custom and enter its key (and base URL for Custom)."
+      },
+      {
+        "step": "Pick a profile",
+        "description": "Choose OpenCode and a model in an agent profile."
+      },
+      {
+        "step": "Start a chat or task",
+        "description": "SAM places the work on a machine and starts OpenCode in your devcontainer."
+      }
+    ],
+    "useCases": [
+      {
+        "title": "Self-hosted models",
+        "description": "Point the custom provider at a model server your machines can reach for a setup where prompts never reach a model vendor."
+      },
+      {
+        "title": "Trying open models",
+        "description": "Switch between models on OpenCode Zen and Go without changing your workflow."
+      }
+    ],
+    "faq": [
+      {
+        "question": "Which inference providers can I use?",
+        "answer": "OpenCode Zen, OpenCode Go, and any OpenAI-compatible endpoint. Zen and Go use an OpenCode API key."
+      },
+      {
+        "question": "Is OpenCode the same as OpenAI Codex?",
+        "answer": "No. OpenCode is a separate open-source project from SST."
+      },
+      {
+        "question": "Can I use my own fine-tuned model?",
+        "answer": "Yes, if it is served behind an OpenAI-compatible API. Choose Custom and enter the base URL."
+      }
+    ],
+    "relatedSlugs": ["codex", "mistral-vibe", "claude-code"],
+    "externalUrl": "https://opencode.ai",
+    "externalLabel": "OpenCode website",
+    "docsPath": "/docs/guides/agents/"
+  },
+  {
+    "slug": "amp",
+    "name": "Amp",
+    "category": "ai-agents",
+    "tagline": "Amp's managed coding agent with an Amp API key",
+    "description": "Amp is a coding agent that picks its own models and bills through Amp credits. Add an Amp API key and SAM runs it in your workspace like any other agent.",
+    "logoPath": "/images/integrations/amp.svg",
+    "seoTitle": "Run Amp on Your Own Cloud | SAM",
+    "seoDescription": "Run Amp coding agents on cloud VMs you control with SAM, the open-source agent platform. Bring an Amp API key; SAM provisions the machine and manages the session.",
+    "features": [
+      {
+        "title": "Managed models",
+        "description": "Amp chooses and routes models itself, so there is no model to pick in the profile."
+      },
+      {
+        "title": "API key sign-in",
+        "description": "Add a key from your Amp settings. Amp may require paid credits."
+      },
+      {
+        "title": "Same workflow as other agents",
+        "description": "Project chat, profiles, triggers and pull requests work the same way for Amp."
+      }
+    ],
+    "howItWorks": [
+      {
+        "step": "Add your API key",
+        "description": "Paste an Amp API key in Settings → Agents."
+      },
+      {
+        "step": "Pick a profile",
+        "description": "Choose Amp in an agent profile."
+      },
+      {
+        "step": "Start a chat or task",
+        "description": "SAM places the work on a machine and starts Amp in your devcontainer."
+      }
+    ],
+    "useCases": [
+      {
+        "title": "Teams already on Amp",
+        "description": "Keep Amp as your agent while moving its sessions onto your own machines."
+      },
+      {
+        "title": "Comparing agents",
+        "description": "Run Amp alongside Claude Code or Codex on the same project."
+      }
+    ],
+    "faq": [
+      {
+        "question": "Can I choose Amp's model?",
+        "answer": "No. Amp manages model selection itself."
+      },
+      {
+        "question": "Does Amp support subscription sign-in in SAM?",
+        "answer": "No. SAM signs Amp in with an Amp API key."
+      },
+      {
+        "question": "Where does Amp run?",
+        "answer": "On a cloud VM, inside your repository's devcontainer, using a cloud account connected to your SAM installation. A profile can choose an Instant session on Cloudflare Containers instead, which needs no cloud account but does not use your devcontainer."
+      }
+    ],
+    "relatedSlugs": ["claude-code", "codex", "opencode"],
+    "externalUrl": "https://ampcode.com",
+    "externalLabel": "Amp website",
+    "docsPath": "/docs/guides/agents/"
+  }
+]

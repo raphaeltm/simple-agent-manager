@@ -21,8 +21,8 @@ curl -fsSL "https://api.example.com/api/cli/download?os=darwin&arch=arm64" -o sa
 
 The one-liner picks Apple Silicon on any Mac; on an Intel Mac, use **Other platforms → macOS
 Intel**, or change `arch=arm64` to `arch=amd64`. Ignore the quick-start steps further down that
-page: they're out of date, and their sign-in step points the CLI at the hosted service even on a
-self-hosted installation. Sign in as described below instead.
+page: they're out of date, and their sign-in step points the CLI at the maintainer's own instance instead of
+yours. Sign in as described below instead.
 
 ## Sign in
 
@@ -37,7 +37,8 @@ select **Authorize**, and go back to the terminal: the CLI prints who you signed
 
 - **Self-hosted SAM:** add your installation's API address the first time, for example
   `sam auth login --api-url https://api.your-domain.com`. It's your SAM web address with `app.`
-  changed to `api.`. Without it, the CLI uses the hosted service.
+  changed to `api.`. Without it, the CLI uses `https://api.simple-agent-manager.org`, the maintainer's
+  own instance, which will not accept your account.
 - **Scripts and CI:** create an API token under **Settings → Access → API Tokens** and set it as
   `SAM_API_TOKEN` (and, for a self-hosted SAM, `SAM_API_URL` to the API address) in the
   environment. The CLI then signs in for each command and saves nothing, so `sam project use`

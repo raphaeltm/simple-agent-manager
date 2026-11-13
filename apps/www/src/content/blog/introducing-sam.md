@@ -60,4 +60,4 @@ If you're building AI tooling, working with Cloudflare Workers, or just interest
 
 ## Try it out
 
-SAM is open source. You can self-host it or use the hosted version at [app.simple-agent-manager.org](https://app.simple-agent-manager.org). All you need is a GitHub account and a Hetzner API token.
+SAM is open source, and you run your own copy: see [Self-host SAM](/self-host/). All you need is a GitHub account and a Hetzner API token.

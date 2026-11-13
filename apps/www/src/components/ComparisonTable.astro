@@ -1,0 +1,223 @@
+---
+/**
+ * A comparison table that stays readable on phones. At narrow widths each row becomes a card and
+ * every cell shows its column name, so no column is hidden off-screen behind a horizontal scroll.
+ *
+ * Cell values: a string, or `true`/`false` for a yes/no mark, or `null` for "not supported".
+ */
+export type ComparisonCell = string | boolean | null;
+
+export interface ComparisonRow {
+  /** Row heading (first column). May include a link. */
+  label: string;
+  href?: string;
+  cells: ComparisonCell[];
+}
+
+interface Props {
+  caption: string;
+  /** Header for the first column, e.g. "Agent" */
+  rowHeader: string;
+  columns: string[];
+  rows: ComparisonRow[];
+  /** Index (in `columns`) of a column to emphasise, e.g. SAM in a vendor comparison */
+  highlightColumn?: number;
+}
+
+const { caption, rowHeader, columns, rows, highlightColumn } = Astro.props;
+---
+
+<div class="cmp-wrap animate-on-scroll">
+  <table class="cmp-table" role="table">
+    <caption class="cmp-caption">{caption}</caption>
+    <thead role="rowgroup">
+      <tr role="row">
+        <th scope="col" role="columnheader">{rowHeader}</th>
+        {columns.map((col, i) => (
+          <th scope="col" role="columnheader" class={i === highlightColumn ? 'is-highlight' : undefined}>{col}</th>
+        ))}
+      </tr>
+    </thead>
+    <tbody role="rowgroup">
+      {rows.map((row) => (
+        <tr role="row">
+          <th scope="row" role="rowheader">{row.href ? <a href={row.href}>{row.label}</a> : row.label}</th>
+          {row.cells.map((cell, i) => (
+            <td role="cell" data-label={columns[i]} class={i === highlightColumn ? 'is-highlight' : undefined}>
+              {cell === true ? (
+                <span class="mark mark--yes">Yes</span>
+              ) : cell === false || cell === null ? (
+                <span class="mark mark--no">No</span>
+              ) : (
+                cell
+              )}
+            </td>
+          ))}
+        </tr>
+      ))}
+    </tbody>
+  </table>
+</div>
+
+<style>
+  .cmp-wrap {
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    background: var(--glass-bg);
+  }
+
+  .cmp-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+  }
+
+  .cmp-caption {
+    caption-side: top;
+    text-align: left;
+    padding: 14px 20px;
+    font-size: 0.8125rem;
+    color: var(--color-fg-muted);
+    border-bottom: 1px solid var(--glass-border);
+  }
+
+  .cmp-table thead th {
+    padding: 12px 20px;
+    text-align: left;
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 0.8125rem;
+    color: var(--color-fg-muted);
+    background: var(--color-bg-surface);
+    border-bottom: 1px solid var(--glass-border);
+  }
+
+  .cmp-table tbody th {
+    text-align: left;
+    font-weight: 600;
+    color: var(--color-fg-primary);
+  }
+
+  .cmp-table tbody th,
+  .cmp-table td {
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--color-border-subtle);
+    color: var(--color-fg-muted);
+    line-height: 1.5;
+    vertical-align: top;
+  }
+
+  .cmp-table tbody tr:last-child > * {
+    border-bottom: none;
+  }
+
+  .cmp-table .is-highlight {
+    color: var(--color-fg-primary);
+    font-weight: 500;
+  }
+
+  .cmp-table thead .is-highlight {
+    color: var(--color-accent);
+  }
+
+  .mark {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    padding: 2px 8px;
+    border-radius: 999px;
+  }
+
+  .mark--yes {
+    color: var(--color-accent);
+    background: var(--color-accent-glow);
+  }
+
+  .mark--no {
+    color: var(--color-fg-dim);
+    border: 1px solid var(--color-border-subtle);
+  }
+
+  :global(html[data-theme='light']) .cmp-table tbody th,
+  :global(html[data-theme='light']) .cmp-table td {
+    border-bottom-color: var(--color-border);
+  }
+
+  /* Phones: one card per row, each cell labelled with its column. */
+  @media (max-width: 719px) {
+    .cmp-table thead {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+    }
+
+    .cmp-table,
+    .cmp-table tbody,
+    .cmp-table tr,
+    .cmp-table tbody th,
+    .cmp-table td {
+      display: block;
+    }
+
+    .cmp-table tr {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--glass-border);
+    }
+
+    .cmp-table tbody tr:last-child {
+      border-bottom: none;
+    }
+
+    .cmp-table tbody th,
+    .cmp-table td {
+      padding: 4px 0;
+      border-bottom: none;
+    }
+
+    .cmp-table tbody th {
+      font-size: 1rem;
+      margin-bottom: 6px;
+    }
+
+    .cmp-table td {
+      display: grid;
+      grid-template-columns: minmax(110px, 40%) 1fr;
+      gap: 12px;
+    }
+
+    .cmp-caption {
+      display: block;
+    }
+
+    .cmp-table td > * {
+      justify-self: start;
+      align-self: start;
+    }
+
+    .cmp-table tbody th {
+      color: var(--color-fg-primary);
+    }
+
+    .cmp-table td.is-highlight {
+      margin: 2px -8px;
+      padding: 4px 8px;
+      border-left: 3px solid var(--color-accent);
+      border-radius: 4px;
+      background: var(--color-accent-glow);
+    }
+
+    .cmp-table td.is-highlight::before {
+      color: var(--color-accent);
+      font-weight: 600;
+    }
+
+    .cmp-table td::before {
+      /* The empty alt text keeps screen readers from reading the label twice: the cell already has a header. */
+      content: attr(data-label) / '';
+      font-weight: 500;
+      color: var(--color-fg-dim);
+    }
+  }
+</style>
