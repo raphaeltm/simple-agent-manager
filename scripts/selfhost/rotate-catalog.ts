@@ -110,7 +110,7 @@ export const ROTATABLE_KEYS: readonly RotatableKey[] = [
     secrets: ['ENCRYPTION_KEY'],
     generate: () => ({ ENCRYPTION_KEY: generateEncryptionKey() }),
     impact:
-      'none while it runs: rows are re-encrypted online and stay readable under either key; the old key is retired only after every row is proven readable under the new one. API tokens, invite links and webhook URLs keep working (their lookup key is kept, see TOKEN_HASH_KEY); a git command that started before the switch may need to be repeated; a node still being provisioned at that moment fails and is retried; reverse-tunnel nodes created before the switch keep their old tunnel credential until they are replaced',
+      'none while it runs: rows are re-encrypted online and stay readable under either key; the old key is retired only after every row is proven readable under the new one. API tokens, invite links and webhook URLs keep working, and a webhook retried across the switch is still recognised as a duplicate (their lookup key is kept, see TOKEN_HASH_KEY); a git command that started before the switch may need to be repeated; a node still being provisioned at that moment fails and is retried; reverse-tunnel nodes created before the switch keep their old tunnel credential until they are replaced',
     downtime: 'none',
   },
   {
@@ -163,7 +163,7 @@ export const NOT_ROTATED: Readonly<Record<string, string>> = {
   SAM_INSTALLATION_ID: "not a secret: it labels this install's VMs; changing it would orphan them",
   AGENT_SIGN_IN_TRUST: 'not a secret: the issuer and accounts trusted for agent sign-in',
   TOKEN_HASH_KEY:
-    'kept on purpose: the lookup key of API tokens, invite links and webhook URLs. They are 256-bit random values stored only as hashes, so the key cannot recover or forge one, and a new key would invalidate every one of them',
+    'kept on purpose: the lookup key of API tokens, invite links, webhook URLs and webhook idempotency keys. They are random values stored only as hashes (256-bit with the default API_TOKEN_BYTES / PROJECT_INVITE_TOKEN_BYTES), so the key cannot recover or forge one, and a new key would invalidate every one of them. After an encryption-key rotation it holds the old ENCRYPTION_KEY: never use it for anything else',
 };
 
 /** External secrets `rotate` cannot replace, and where the operator does it. */

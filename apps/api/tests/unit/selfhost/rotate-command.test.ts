@@ -75,12 +75,15 @@ let healthy: () => boolean;
 let restarts: string[];
 let controlHook: ((body: Record<string, unknown>) => Promise<void>) | null;
 let logs: string[];
+/** Worker settings beyond the bundle (vars a deploy would set). */
+let workerVars: Record<string, string>;
 
 const store = () => openRotationStore(BOX, stateDir);
 const head = async () => (await store().head()).secrets;
 const workerEnv = () =>
   ({
     ...deployed,
+    ...workerVars,
     BASE_DOMAIN: 'example.com',
     DATABASE: d1,
     R2: new ConditionalR2().asBucket(),
@@ -168,6 +171,7 @@ beforeEach(async () => {
   restarts = [];
   controlHook = null;
   logs = [];
+  workerVars = {};
   writeKeyChoice(stateDir, {
     format: KEY_CHOICE_FORMAT,
     provider: 'file',
@@ -542,6 +546,34 @@ describe('rotate swap keys', () => {
     const id = JSON.parse(journal).id as string;
     const snapshot = await store().readSnapshot(id, 'vapid-keys');
     expect(snapshot.VAPID_PUBLIC_KEY).toBe(before.VAPID_PUBLIC_KEY);
+  });
+});
+
+describe('rotate encryption-key: the wait for values outside D1 and R2 (review V1 L4)', () => {
+  const waitMinutes = () => {
+    const step = readJournal(stateDir)?.steps['encryption-key'];
+    return (Date.parse(step?.waitUntil ?? '') - Date.parse(step?.switchedAt ?? '')) / 60_000;
+  };
+
+  it('waits as long as the Worker says a pending interaction can live when that was raised', async () => {
+    workerVars = { ACP_INTERACTION_MAX_DEADLINE_MS: String(10 * HOUR) };
+    await runRotate(input({ names: ['encryption-key'] }), deps());
+    // 10 h deadline + 1 h sensitive purge + 15 min margin.
+    expect(waitMinutes()).toBe(11 * 60 + 15);
+    clock += 6 * HOUR; // past the default wait: not yet
+    await runRotate(input({ resume: true }), deps());
+    expect((await head()).ENCRYPTION_KEY_PREVIOUS).toBeDefined();
+  });
+
+  it('keeps the default floor when the Worker uses the defaults (control)', async () => {
+    await runRotate(input({ names: ['encryption-key'] }), deps());
+    expect(waitMinutes()).toBe(5 * 60 + 15);
+  });
+
+  it('an explicit --stored-lifetime-minutes wins', async () => {
+    workerVars = { ACP_INTERACTION_MAX_DEADLINE_MS: String(10 * HOUR) };
+    await runRotate(input({ names: ['encryption-key'], storedLifetimeMinutes: 30 }), deps());
+    expect(waitMinutes()).toBe(30);
   });
 });
 

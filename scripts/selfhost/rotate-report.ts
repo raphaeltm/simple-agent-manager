@@ -6,6 +6,7 @@ import { join } from 'node:path';
 
 import { EXTERNAL_SECRETS, NOT_ROTATED, type RotatableKey } from './rotate-catalog';
 import type { Journal } from './rotate-store';
+import { DEFAULT_STORED_LIFETIME_MINUTES } from './rotate-steps-data';
 
 const PROCEDURE_TEXT: Record<RotatableKey['procedure'], string> = {
   swap: 'new value, deploy, check',
@@ -74,14 +75,19 @@ export function formatPlan(
   if (!options.skipBackup)
     lines.push('  0. backup (pnpm selfhost:backup; celld stops for about 20-45 s)');
   keys.forEach((key, index) => {
-    lines.push(`  ${index + 1}. ${key.name}: ${key.secrets.join(', ') || '-'}`);
-    lines.push(`     how: ${PROCEDURE_TEXT[key.procedure]}`);
-    lines.push(`     users notice: ${key.impact}`);
-    lines.push(`     downtime: ${key.downtime}`);
+    lines.push(
+      `  ${index + 1}. ${key.name}: ${key.secrets.join(', ') || '-'}`,
+      `     how: ${PROCEDURE_TEXT[key.procedure]}`,
+      `     users notice: ${key.impact}`,
+      `     downtime: ${key.downtime}`
+    );
     if (key.name === 'encryption-key') {
-      const minutes = options.storedLifetimeMinutes ?? 315;
+      const wait =
+        options.storedLifetimeMinutes === undefined
+          ? `${DEFAULT_STORED_LIFETIME_MINUTES} min, or longer if the Worker's ACP_INTERACTION_MAX_DEADLINE_MS / ACP_INTERACTION_SENSITIVE_PURGE_MS / BOOTSTRAP_TOKEN_TTL_SECONDS say values live longer,`
+          : `${options.storedLifetimeMinutes} min (--stored-lifetime-minutes)`;
       lines.push(
-        `     finishes: \`rotate --resume\` at least ${minutes} min after the switch (interaction details and bootstrap tokens expire first)`
+        `     finishes: \`rotate --resume\` at least ${wait} after the switch (interaction details and bootstrap tokens expire first)`
       );
       if (!bundle.BETTER_AUTH_SECRET || bundle.BETTER_AUTH_SECRET === bundle.ENCRYPTION_KEY)
         lines.push(

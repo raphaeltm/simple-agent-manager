@@ -4,6 +4,7 @@ import { type Context, Hono } from 'hono';
 import type { Env } from '../env';
 import { clientIpFromHeaders } from '../lib/client-ip';
 import { log } from '../lib/logger';
+import { getTokenHashKey } from '../lib/secrets';
 import {
   checkRateLimit,
   createRateLimitKey,
@@ -146,7 +147,11 @@ async function handleWebhookIngress(
   if (!areWebhookTriggersEnabled(c.env)) return publicError(404, 'Not found');
 
   const limits = getWebhookTriggerLimits(c.env);
-  const ipKey = await fingerprintWebhookRequest(clientIp(c.req.raw), c.env.ENCRYPTION_KEY);
+  // Lookup hashes use the token-hash key (ENCRYPTION_KEY unless pinned): a self-hosted
+  // ENCRYPTION_KEY rotation pins it, so a delivery retried across the switch is still a
+  // duplicate (review V1 L3 on #2705). Unset, it is ENCRYPTION_KEY, as before.
+  const lookupKey = getTokenHashKey(c.env);
+  const ipKey = await fingerprintWebhookRequest(clientIp(c.req.raw), lookupKey);
   const ingressRate = await takeRateLimit(
     c.env,
     'webhook-ingress',
@@ -232,9 +237,9 @@ async function handleWebhookIngress(
   const delivery = await createWebhookDelivery(c.env, {
     triggerId: resolved.trigger.id,
     idempotencyKeyHash: idempotencyKey
-      ? await hashWebhookIdempotencyKey(idempotencyKey, c.env.ENCRYPTION_KEY)
+      ? await hashWebhookIdempotencyKey(idempotencyKey, lookupKey)
       : null,
-    requestFingerprint: await fingerprintWebhookRequest(rawBody, c.env.ENCRYPTION_KEY),
+    requestFingerprint: await fingerprintWebhookRequest(rawBody, lookupKey),
     bodyBytes: bodyBytes.byteLength,
     receivedAt,
   });

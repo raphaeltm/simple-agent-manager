@@ -36,8 +36,7 @@ export function getIssuer(env: Env): string {
 }
 
 function nonEmpty(value: string | undefined): string | undefined {
-  const trimmed = value?.trim();
-  return trimmed ? trimmed : undefined;
+  return value?.trim() || undefined;
 }
 
 /** kid stamped on tokens signed with the current key, and published for it in /.well-known/jwks.json. */

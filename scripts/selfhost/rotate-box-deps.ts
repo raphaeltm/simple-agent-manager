@@ -3,7 +3,6 @@
  * celld adoption of `secrets migrate`, a backup, docker compose for the gateway consumers, and
  * loopback requests to celld (the key-rotation control endpoint is never reached through Caddy).
  */
-import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 
 import {
@@ -11,7 +10,7 @@ import {
   KEY_ROTATION_PATH,
   signKeyRotationRequest,
 } from '../../apps/api/src/selfhost/key-rotation/control-auth.ts';
-import { gitCommit, REPO_ROOT, SELFHOST_DIR } from './backup-cli';
+import { gitCommit, SELFHOST_DIR } from './backup-cli';
 import { type BoxContext, composeArgs, runBackup } from './backup-lib';
 import type { RotateDeps } from './rotate-apply';
 import { boxMigrateDeps } from './secrets-box-deps';
@@ -29,15 +28,12 @@ function apiHeaders(ctx: BoxContext): Record<string, string> {
   return { host: `api.${ctx.box.SAM_DOMAIN ?? ''}`, 'x-forwarded-proto': 'https' };
 }
 
+/**
+ * docker runs through the box context's command runner (backup-cli.ts runCommand), like every
+ * other box step, so tests substitute it and nothing here spawns a command by name directly.
+ */
 function runningServices(ctx: BoxContext): string[] {
-  const result = spawnSync(
-    'docker',
-    composeArgs(ctx, ['ps', '--services', '--status', 'running']),
-    {
-      cwd: REPO_ROOT,
-      encoding: 'utf8',
-    }
-  );
+  const result = ctx.run('docker', composeArgs(ctx, ['ps', '--services', '--status', 'running']));
   if (result.status !== 0) throw new Error(`docker compose ps failed (exit ${result.status})`);
   return result.stdout
     .split('\n')
@@ -61,12 +57,15 @@ export function boxRotateDeps(ctx: BoxContext): RotateDeps {
     restartGatewayConsumers: async () => {
       const running = runningServices(ctx);
       const services = GATEWAY_CONSUMERS.filter((name) => running.includes(name));
-      const result = spawnSync(
+      const result = ctx.run(
         'docker',
-        composeArgs(ctx, ['up', '-d', '--force-recreate', '--no-deps', ...services]),
-        { cwd: REPO_ROOT, stdio: 'inherit' }
+        composeArgs(ctx, ['up', '-d', '--force-recreate', '--no-deps', ...services])
       );
-      if (result.status !== 0) throw new Error(`docker compose up failed (exit ${result.status})`);
+      if (result.status !== 0) {
+        throw new Error(
+          `docker compose up failed (exit ${result.status}): ${result.stderr.trim().slice(-2000)}`
+        );
+      }
     },
     control: async (controlKey, body) => {
       const text = JSON.stringify(body);
@@ -98,11 +97,12 @@ export function boxRotateDeps(ctx: BoxContext): RotateDeps {
     probeGateway: async (secret) => {
       // frps's plugin call shape (deploy/selfhost/frps/frps.toml); an empty body is refused
       // with a 200 verdict after authentication, a wrong secret with 401 before it.
+      const basic = Buffer.from(`frps:${secret}`).toString('base64');
       const response = await fetch(celld(ctx, '/api/self-host/gateway/frps-plugin?op=Ping'), {
         method: 'POST',
         headers: {
           ...apiHeaders(ctx),
-          authorization: `Basic ${Buffer.from(`frps:${secret}`).toString('base64')}`,
+          authorization: `Basic ${basic}`,
           'content-type': 'application/json',
         },
         body: '{}',

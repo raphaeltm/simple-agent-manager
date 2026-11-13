@@ -29,9 +29,12 @@ export const MAX_MIGRATE_ROUNDS = 3;
 /**
  * Values outside D1/R2 that expire on their own: ACP interaction details (InteractionStore DO,
  * DEFAULT_ACP_INTERACTION_MAX_DEADLINE_MS 4 h + DEFAULT_ACP_INTERACTION_SENSITIVE_PURGE_MS 1 h)
- * and bootstrap tokens (KV, BOOTSTRAP_TOKEN_TTL_SECONDS 15 min), plus a margin.
+ * and bootstrap tokens (KV, BOOTSTRAP_TOKEN_TTL_SECONDS 15 min), plus a margin. The floor of the
+ * wait: an install that raised those settings waits for what its Worker reports instead.
  */
 export const DEFAULT_STORED_LIFETIME_MINUTES = 5 * 60 + 15;
+/** Added to the lifetime the Worker reports (clock skew, a value written just after the switch). */
+export const STORED_LIFETIME_MARGIN_MINUTES = 15;
 
 const BA = {
   secret: 'BETTER_AUTH_SECRET',
@@ -191,6 +194,30 @@ export async function assertRetireProof(ctx: StepContext, kind: Kind, tag: strin
   }
 }
 
+/**
+ * How long to wait after the switch before retiring an ENCRYPTION_KEY-family key: the operator's
+ * --stored-lifetime-minutes when given, else the larger of the default and what the deployed
+ * Worker reports from its own settings (control.ts `unreachableValueLifetimeMs`), plus a margin.
+ */
+async function storedLifetimeMinutes(ctx: StepContext, explicit: number | null): Promise<number> {
+  if (explicit !== null) return explicit;
+  const call = await controlCall(ctx);
+  const status = (await call({ op: 'status' }).catch(() => null)) as {
+    unreachableValueLifetimeMs?: unknown;
+  } | null;
+  const reported = status?.unreachableValueLifetimeMs;
+  if (typeof reported !== 'number' || !Number.isFinite(reported) || reported <= 0) {
+    ctx.deps.log(
+      `  WARNING: the Worker did not report how long values outside D1/R2 live; waiting the default ${DEFAULT_STORED_LIFETIME_MINUTES} min`
+    );
+    return DEFAULT_STORED_LIFETIME_MINUTES;
+  }
+  return Math.max(
+    DEFAULT_STORED_LIFETIME_MINUTES,
+    Math.ceil(reported / 60_000) + STORED_LIFETIME_MARGIN_MINUTES
+  );
+}
+
 /** Nodes whose tunnel credential is still derived from the old key (reported, see control.ts). */
 async function recordLegacyTunnelLeases(ctx: StepContext): Promise<void> {
   const { step, deps } = ctx;
@@ -222,7 +249,8 @@ function resetData(step: StepState): void {
 export async function advanceData(
   ctx: StepContext,
   kind: Kind,
-  waitMinutes: number
+  /** aes only: minutes to wait after the switch; null derives it (storedLifetimeMinutes). */
+  waitMinutes: number | null
 ): Promise<void> {
   const { step, deps } = ctx;
   const tag = step.reverse ? 'reverse' : 'forward';
@@ -263,8 +291,10 @@ export async function advanceData(
     }
     const switched = Date.parse(step.switchedAt ?? new Date(deps.now()).toISOString());
     step.verifiedAt = new Date(deps.now()).toISOString();
+    const waitFor =
+      step.reverse || kind === 'better-auth' ? 0 : await storedLifetimeMinutes(ctx, waitMinutes);
     step.waitUntil = new Date(
-      step.reverse || kind === 'better-auth' ? deps.now() : switched + waitMinutes * 60_000
+      waitFor === 0 ? deps.now() : switched + waitFor * 60_000
     ).toISOString();
     step.phase = 'waiting';
     ctx.save();

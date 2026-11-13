@@ -601,6 +601,41 @@ describe('the control endpoint', () => {
     expect(ok.status).toBe(200);
     expect(ok.body.roles).toEqual({ credential: true, 'credential-nullish': true, library: true });
   });
+
+  it('refuses a body other than the one signed', async () => {
+    const signed = '{"op":"status"}';
+    const sent = '{"op":"pass","target":"library","mode":"migrate"}';
+    const response = await handleKeyRotationRequest(
+      new Request(`https://api.example.com${KEY_ROTATION_PATH}`, {
+        method: 'POST',
+        headers: { [KEY_ROTATION_AUTH_HEADER]: await signKeyRotationRequest(CONTROL, signed) },
+        body: sent,
+      }),
+      env
+    );
+    expect(response.status).toBe(401);
+  });
+
+  it('stops reading a chunked body without Content-Length once it passes the cap (review V1 L5)', async () => {
+    let pulled = 0;
+    const endless = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled += 1;
+        controller.enqueue(new Uint8Array(1024).fill(32));
+      },
+    });
+    const request = new Request(`https://api.example.com${KEY_ROTATION_PATH}`, {
+      method: 'POST',
+      headers: { [KEY_ROTATION_AUTH_HEADER]: await signKeyRotationRequest(CONTROL, '{}') },
+      body: endless,
+      duplex: 'half',
+    } as RequestInit);
+    expect(request.headers.get('content-length')).toBeNull();
+    const response = await handleKeyRotationRequest(request, env);
+    expect(response.status).toBe(413);
+    // 4 KiB cap in 1 KiB chunks: it stopped after a handful, not after the whole stream.
+    expect(pulled).toBeLessThan(10);
+  });
 });
 
 describe('library files', () => {

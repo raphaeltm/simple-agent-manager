@@ -23,8 +23,9 @@ function hex(bytes: ArrayBuffer | Uint8Array): string {
 
 function base64Url(bytes: ArrayBuffer): string {
   let binary = '';
-  for (const byte of new Uint8Array(bytes)) binary += String.fromCharCode(byte);
-  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
+  for (const byte of new Uint8Array(bytes)) binary += String.fromCodePoint(byte);
+  // base64 padding only ever trails the string, so dropping every '=' strips exactly it.
+  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
 }
 
 async function mac(key: string, seconds: string, nonce: string, body: string): Promise<string> {

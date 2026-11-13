@@ -53,7 +53,7 @@ export class ApplyFailedError extends Error {
 }
 
 export function patched(base: Secrets, patch: Patch): Secrets {
-  const next: Secrets = { ...base, ...(patch.set ?? {}) };
+  const next: Secrets = { ...base, ...patch.set };
   for (const name of patch.remove ?? []) delete next[name];
   return next;
 }

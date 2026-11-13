@@ -24,7 +24,7 @@ import {
   DEFAULT_JWT_OVERLAP_HOURS,
   message,
 } from './rotate-steps';
-import { advanceData, CONTROL_KEY, DEFAULT_STORED_LIFETIME_MINUTES } from './rotate-steps-data';
+import { advanceData, CONTROL_KEY } from './rotate-steps-data';
 import {
   archiveJournal,
   type Journal,
@@ -152,11 +152,8 @@ async function advance(ctx: StepContext, input: RotateInput): Promise<void> {
     case 'overlap':
       return await advanceOverlap(ctx, input.jwtOverlapHours ?? DEFAULT_JWT_OVERLAP_HOURS);
     case 'reencrypt':
-      return await advanceData(
-        ctx,
-        'aes',
-        input.storedLifetimeMinutes ?? DEFAULT_STORED_LIFETIME_MINUTES
-      );
+      // Unset: derived from the deployed Worker's own settings (rotate-steps-data.ts).
+      return await advanceData(ctx, 'aes', input.storedLifetimeMinutes ?? null);
     case 'better-auth':
       return await advanceData(ctx, 'better-auth', 0);
   }

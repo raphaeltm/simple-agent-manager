@@ -208,7 +208,7 @@ export async function advanceOverlap(ctx: StepContext, overlapHours: number): Pr
         ? await snapshotOnce(ctx)
         : await ctx.store.readSnapshot(ctx.journal.id, key.name);
     const pair = key.generate();
-    const until = new Date(deps.now() + overlapHours * 3600_000).toISOString();
+    const until = new Date(deps.now() + overlapHours * 3_600_000).toISOString();
     try {
       await applyPatch(
         ctx,
