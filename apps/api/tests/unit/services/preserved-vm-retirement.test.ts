@@ -20,6 +20,7 @@ import { repairRetiredVmSleepSnapshots } from '../../../src/services/retired-vm-
 import { ensureSessionRecovery } from '../../../src/services/session-recovery';
 import { buildSessionSnapshotR2Key } from '../../../src/services/session-snapshot-artifacts';
 import { deleteNodeResourcesStrict } from '../../../src/services/strict-node-deletion';
+import { ensurePoolsWithStarterMachines } from '../../helpers/capacity-pool-picks';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const boundary = vi.hoisted(() => ({
@@ -204,6 +205,13 @@ describe('legacy VM retirement: real SQL, snapshot verifier and strict provider 
       INSERT INTO project_members(project_id,user_id,role,status) VALUES ('project','owner','owner','active');
       INSERT INTO tasks(id,project_id,user_id,chat_session_id,workspace_id,title,description,status,priority,task_mode,dispatch_depth,created_by,created_at,updated_at)
         VALUES ('conversation','project','owner','chat-ws','ws','Conversation','Work','sleeping',0,'conversation',0,'owner','2026-08-15T00:00:00.000Z','2026-08-15T00:00:00.000Z');`);
+    // The owner picked machines: the wake places on the pool, and nothing joins it on its own.
+    await ensurePoolsWithStarterMachines(drizzle(env.DATABASE, { schema }) as never, {
+      userId: 'owner',
+      projectId: 'project',
+      includeInstallation: true,
+      env,
+    });
     expect(await ensureSessionRecovery(env, 'project', 'chat-ws')).toMatchObject({
       status: 'waking',
     });

@@ -1,0 +1,108 @@
+---
+/**
+ * HTML version of the new-chat profile list: each profile with its agent and model, and a ring
+ * showing how much of the person's account is left (Brainstormer's is nearly used up).
+ */
+import './mock.css';
+
+const groups = [
+  {
+    name: 'Recent',
+    rows: [
+      { name: 'Brainstormer', meta: 'Claude · Opus 5.5 · max effort', letter: 'O', low: true, picked: true },
+      { name: 'Careful Builder', meta: 'Claude · Opus 5.5 · high effort', letter: 'O', ring: true },
+      { name: 'Code Reviewer', meta: 'Codex · GPT-6 Astra · high effort', letter: 'A', codex: true },
+    ],
+  },
+  {
+    name: 'Chat & explore',
+    rows: [
+      { name: 'Quick Questions', meta: 'Codex · GPT-6 Luna · medium effort', letter: 'L', codex: true },
+      { name: 'Release Notes', meta: 'Codex · GPT-6.1 Sol · medium effort', letter: 'S', codex: true },
+    ],
+  },
+];
+---
+
+<div class="mk pf">
+  <div class="mk-pad pf-in">
+    <p class="pf-head"><span class="mk-h">Start with…</span><span class="mk-sub">Edit list &nbsp;×</span></p>
+    {groups.map((g) => (
+      <div class="pf-group">
+        <p class="pf-label">{g.name}</p>
+        <ul>
+          {g.rows.map((r) => (
+            <li class:list={['pf-row', { 'pf-row--picked': r.picked }]} data-ring={r.ring ? '' : undefined}>
+              <span class:list={['mk-ring', { 'mk-ring--low': r.low, 'mk-ring--codex': r.codex }]}><span>{r.letter}</span></span>
+              <span class="pf-text"><b>{r.name}</b><span class="mk-meta">{r.meta}</span></span>
+              {r.low && <span class="pf-left">6% left<span class="mk-meta">resets 53m</span></span>}
+              {r.picked && <span class="pf-check">✓</span>}
+            </li>
+          ))}
+        </ul>
+      </div>
+    ))}
+  </div>
+</div>
+
+<style>
+  .pf-in {
+    display: grid;
+    gap: 12px;
+  }
+
+  .pf-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+
+  .pf-group {
+    display: grid;
+    gap: 6px;
+  }
+
+  .pf-label {
+    font-size: 0.8em;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--mk-muted);
+  }
+
+  .pf-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    border: 1px solid transparent;
+  }
+
+  .pf-row--picked {
+    background: var(--mk-green-soft);
+  }
+
+  .pf-text {
+    display: grid;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .pf-text b {
+    font-size: 1.08em;
+    font-weight: 600;
+  }
+
+  .pf-left {
+    display: grid;
+    justify-items: end;
+    color: var(--mk-amber);
+    font-size: 0.9em;
+  }
+
+  .pf-check {
+    color: var(--mk-green);
+    font-weight: 700;
+  }
+</style>

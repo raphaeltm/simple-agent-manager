@@ -19,7 +19,10 @@ export function MinimalToolbar({ onBack }: { onBack: () => void }) {
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
         </svg>
       </button>
-      <span className="font-semibold text-fg-primary" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>
+      <span
+        className="font-semibold text-fg-primary"
+        style={{ fontSize: 'var(--sam-type-secondary-size)' }}
+      >
         Workspace
       </span>
     </header>
@@ -40,13 +43,27 @@ export function CenteredStatus({
   loading?: boolean;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center h-full gap-3" style={{ backgroundColor: 'var(--sam-workspace-chrome-bg)', color: 'var(--sam-workspace-status-fg)' }}>
+    <div
+      className="flex flex-col items-center justify-center h-full gap-3"
+      style={{
+        backgroundColor: 'var(--sam-workspace-chrome-bg)',
+        color: 'var(--sam-workspace-status-fg)',
+      }}
+    >
       {isLoading && <Spinner size="lg" />}
-      <h3 className="font-semibold m-0" style={{ fontSize: 'var(--sam-type-card-title-size)', color }}>{title}</h3>
+      <h3
+        className="font-semibold m-0"
+        style={{ fontSize: 'var(--sam-type-card-title-size)', color }}
+      >
+        {title}
+      </h3>
       {subtitle && (
         <p
           className="m-0 max-w-[400px] text-center"
-          style={{ fontSize: 'var(--sam-type-secondary-size)', color: 'var(--sam-workspace-status-muted)' }}
+          style={{
+            fontSize: 'var(--sam-type-secondary-size)',
+            color: 'var(--sam-workspace-status-muted)',
+          }}
         >
           {subtitle}
         </p>
@@ -72,7 +89,13 @@ export function BootProgress({ logs }: { logs?: BootLogEntry[] }) {
   const hasFailed = lastStep?.status === 'failed';
 
   return (
-    <div className="flex flex-col items-center justify-center h-full p-6" style={{ backgroundColor: 'var(--sam-workspace-chrome-bg)', color: 'var(--sam-workspace-status-fg)' }}>
+    <div
+      className="flex flex-col items-center justify-center h-full p-6"
+      style={{
+        backgroundColor: 'var(--sam-workspace-chrome-bg)',
+        color: 'var(--sam-workspace-status-fg)',
+      }}
+    >
       <h3
         className="font-semibold mb-4"
         style={{

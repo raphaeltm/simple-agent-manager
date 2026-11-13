@@ -5,7 +5,132 @@ description: User-facing SAM changes from the latest development cycles, with pr
 
 This page summarizes recent changes that affect how people use SAM. Use it as a quick orientation when returning to the product after a week away, then follow the linked guides for the full workflow.
 
-## This cycle: 27 October – 3 November 2026
+## This cycle: 3 – 10 November 2026
+
+### For everyone
+
+- **Claude Fable 5.2.** Anthropic's newest frontier model (1M-token context) is selectable for
+  Claude Code in an agent profile and through the SAM AI proxy. Sessions that start after the
+  update run a Claude Code version that supports it. → [Agent profiles](/docs/guides/agents/#agent-profiles)
+- **Install your own SAM from the browser.** The installer signs in with Cloudflare, builds a
+  complete SAM in your account in about half an hour, then hands you a setup link, and later offers
+  updates. No GitHub fork or secrets to copy. The hosted installer's Cloudflare sign-in isn't open
+  to everyone yet, so check the guide first.
+  → [Install SAM with the installer](/docs/guides/installer/)
+- **SAM sets you up on your first visit.** It asks only what your instance leaves open (where agents
+  should work, where your code should live), connects your agent, creates your first project and
+  its first profile, and opens the chat. **Complete Setup** in the sidebar picks it up again.
+  → [Let SAM set you up](/docs/quickstart/#2-let-sam-set-you-up)
+- **Projects without GitHub.** Where your instance offers it, **Let SAM keep it** creates a Git
+  repository for a new project in your Cloudflare account. The Dashboard's button is now **New
+  Project**. → [Quickstart](/docs/quickstart/#4-add-a-repository)
+- **Sign in with an emailed code**, where your instance can send email: **Email me a sign-in code**,
+  then the 6-digit code. It works for accounts that already exist.
+  → [Sign in](/docs/quickstart/#1-sign-in)
+- **See how much is left before you pick a profile.** A ring around each profile in the new-chat
+  picker shows the usage left on its account, words appear when it's low or out, used-up profiles
+  fold into **Out for now**, and SAM can offer a profile on another account with room. The
+  **Profiles** page shows each profile's resources and usage in one table.
+  → [Usage limits](/docs/guides/agents/#usage-limits)
+- **Change the model or effort for one chat** under **Chat options** (the sliders button by **To**),
+  without editing the profile. → [Choosing a profile for a new chat](/docs/guides/agents/#choosing-a-profile-for-a-new-chat)
+- **Steer a busy agent.** While Claude Code, Codex or OpenCode works, your message tries to join its
+  current turn by default; tap the **Steer** chip to **Queue** it for after the turn instead. A
+  message with files always queues, and if the agent can't take it mid-turn it is sent next; the
+  label under the message says which happened.
+  → [Sending a message while the agent works](/docs/guides/chat-features/#sending-a-message-while-the-agent-works)
+- **A new look for chat**, with glass panes over a dark green background. Agent replies no longer
+  sit in bubbles, the session list puts **Needs attention** first, then **Awake**, **Sleeping** and
+  **History**, and on a phone the header is one row (tap the title for the chat's details) and a
+  button hides everything but the conversation.
+  → [The chat header](/docs/guides/chat-features/#the-chat-header),
+  [Switching between chats](/docs/guides/chat-features/#switching-between-chats)
+- **Messages SAM adds to a chat are one-line notices** you can expand, and an agent's
+  `request_human_input` question appears in the conversation as a card you can answer there.
+  → [Messages from SAM](/docs/guides/chat-features/#messages-from-sam)
+- **Check attachments before you send.** Attachments show as preview cards; tap one to see the image,
+  video or text, and any file name is accepted (it is renamed to safe characters).
+  → [Attach files to a message](/docs/guides/chat-features/#attach-files-to-a-message)
+- **Google Antigravity** joins the agents, with Gemini models and a Gemini API key.
+  → [Google Antigravity](/docs/guides/agents/#google-antigravity)
+- **See your machines and what runs on them.** The **Nodes** page names each machine by its
+  hardware and shows each session's live CPU and memory against what SAM set aside, and the new
+  **Map** shows how your projects, chats and machines connect.
+  → [What each machine is using](/docs/guides/compute-pools/#what-each-machine-is-using),
+  [Account Map](/docs/guides/account-map/)
+- **Choose which cloud account a pool tries first.** With **Provider order**, SAM starts new machines
+  on the first account and falls back to the next when one can't (out of capacity or quota).
+  → [Provider order](/docs/guides/compute-pools/#provider-order)
+
+Also changed this week:
+
+- **Stopping a workspace takes seconds**, not around half an hour.
+- **A wake that stopped partway now ends** with "The last wake attempt stopped without finishing"
+  instead of showing that it's waking for ever; send a message to try again.
+  → [Wake failed](/docs/guides/session-troubleshooting/#wake-failed)
+- **The default disk is 15 GB** (it was 40 GB). Set **Disk (GB)** for large builds.
+  → [Machine sizing](/docs/guides/creating-workspaces/#machine-sizing)
+- **Finished chats go to sleep sooner.** A VM chat whose agent has done no work for 15 minutes now
+  sleeps, even though the agent still checks in with SAM (Instant chats keep their one-hour idle
+  window), and work the agent left running in the background keeps it awake for up to two hours.
+  → [Sleep and wake](/docs/guides/instant-sessions/#sleep-and-wake)
+- **New machines aren't refused for being busy setting up,** and work goes to the reusable machine
+  with the shortest setup queue. A fresh machine no longer fails its own first task.
+- **Codex runs without its apps and plugins** unless you turn them on in its config file, and a
+  Codex chat on a pinned account keeps refreshing that account, not your default.
+  → [OpenAI Codex](/docs/guides/agents/#openai-codex)
+- **Another agent's words never appear as yours.** Messages between agents, and prompts an agent
+  scheduled, arrive as notices from SAM. → [Scheduled actions](/docs/guides/scheduled-actions/)
+- **Agents see fewer, grouped SAM tools** (`ideas_read`, `tasks_read` and so on, with a `method`).
+  The old tool names still work, so existing skills and instructions keep running.
+  → [MCP tools](/docs/guides/agents/#mcp-tools)
+- **Hosted trials have ended.** Old `/try` links say so and point to self-hosting.
+
+### For self-hosters & admins
+
+Which release brought what, if you update a self-hosted instance:
+
+- **v2026.11.04**: workspace stop in seconds, lifecycle latency monitoring, the first Operations
+  debugger tools.
+- **v2026.11.05**: SAM Glass chat, live steering, the Nodes page, Operations approvals in chat.
+- **v2026.11.06**: Google Antigravity, the Account Map, event delivery steers by default.
+- **v2026.11.07**: Profiles page usage, provider-limit **Resume task**, bounded automatic sleep.
+- **v2026.11.08**: Chat options, provider order and fallback (API), the Google Cloud live catalog,
+  grouped MCP tools, SAM notice rows.
+- **v2026.11.08.1**: the installer with prebuilt release artifacts, usage left in the new-chat
+  picker, one memory policy for placement.
+- **v2026.11.09**: the provider order editor, the 15 GB disk default, hosted trials removed,
+  hardened deployment publishing.
+- **The next release after v2026.11.09** (not yet tagged when this was written): the new first-run
+  setup and onboarding, email sign-in, SAM-hosted repositories during onboarding.
+
+Also for admins:
+
+- **Operations debugger tools** let agents in the Operations project read across the fleet and ask
+  to run approved actions, which superadmins approve on a card in the chat or in **Admin →
+  Approvals** (new notification type **Approval Needed**). Off until you set
+  `operations.debuggerTools`. → [Operations debugger tools](/docs/guides/admin-settings/#operations-debugger-tools)
+- **Hosted trials are gone**: **Admin → Trials** and `trials.enabled` are removed, and the deploy
+  deletes the `TRIAL_CLAIM_TOKEN_SECRET` and `ANTHROPIC_API_KEY_TRIAL` secrets and drops every
+  `TRIAL_*` variable.
+- **New Admin Settings** include stale agent turns (`operations.sessionStaleTurnNoWorkMinutes`),
+  placement replans (`operations.workspacePlacementMaxRejections`), deployment publish jobs
+  (`deployments.publishJobStallMs`, `deployments.publishJobDeadlineMs`) and Google Cloud machine
+  types (`gcpCatalog.machineTypes`). → [Admin settings](/docs/guides/admin-settings/)
+- **Workspace credentials now end with the workspace**: a stopped, sleeping or deleted workspace's
+  AI proxy and MCP tokens are refused, and a restarted workspace gets new ones. Upgrade very old VM
+  agents before restarting their workspaces. → [Security](/docs/architecture/security/)
+- **Refresh your VM agents** to get the deployment publish fencing.
+  → [Publish-agent rollout compatibility](/docs/guides/app-deployments/#publish-agent-rollout-compatibility)
+
+### Model changes
+
+- Added **GPT-6.1 Terra** for Codex and **Gemini 4 Argon** for OpenCode.
+- **Gemini 2.5 Pro and Flash** are marked deprecated and route to newer models on 1 December 2026.
+- **Vibe GLM 5.2** was removed; **Mistral Medium 3.5** moved to a **Legacy (Deprecated)** group.
+  → [Choosing a model](/docs/guides/agents/#choosing-a-model)
+
+## Previous cycle: 27 October – 3 November 2026
 
 ### For everyone
 
@@ -75,7 +200,7 @@ Which release brought what, if you update a self-hosted instance:
 
 Database migrations run in the deploy pipeline, and there are no new secrets.
 
-## Previous cycle: 20 – 27 October 2026
+## Earlier: 20 – 27 October 2026
 
 ### For everyone
 
@@ -391,7 +516,7 @@ Also changed this week:
   October: an `@` that doesn't name a profile is now ordinary text.
   → [Agent profile not found](/docs/guides/session-troubleshooting/#agent-profile-not-found-when-you-send-a-message)
 - **Resource history is no longer counted twice when a workspace re-sends it.** The duplicate
-  inflated the totals agents read with `get_resource_history` and could drop that stretch's detail
+  inflated the totals agents read with `get_resource_history` (now `sessions_read` method `resource_history`) and could drop that stretch's detail
   from the **Resources** panel. Sessions recorded before the fix keep the inflated totals and gaps.
 
 ### For self-hosters & admins
@@ -842,7 +967,7 @@ If a model you want isn't in the list yet, type its ID — see
 | **Sessions show what they used**            | A **Resources** panel with CPU, memory, and I/O history for a session — including whether it was killed for running out of memory — that outlives the machine.                                                                      | Session tool rail → **Resources**; [Session Resource History](/docs/guides/session-resources/)               |
 | **Long tool runs stop burying the chat**    | A run of consecutive tool calls folds into one card reading "N tool calls". Tap to expand; failures are counted in the text.                                                                                                        | Project chat and workspace chat; [Tool Activity Cards](/docs/guides/chat-features/#tool-activity-cards)      |
 | **Events sit next to the conversation**     | The old "Events & schedules" header link became an **Events** button in the session tool rail that opens a drawer over the chat. The project Events page gained counts, state colours, empty states, and self-refreshing schedules. | Session tool rail → **Events** and Project → **Events** (both **Automation** since 20 October)               |
-| **Sleeping chats are searchable**           | An agent asked to search the project now finds work in sessions that are asleep, not just ones that were stopped — which is most of your recent work.                                                                               | `search_messages` (agent tool); not the chat-list search box                                                 |
+| **Sleeping chats are searchable**           | An agent asked to search the project now finds work in sessions that are asleep, not just ones that were stopped — which is most of your recent work.                                                                               | `search_messages` (agent tool; now `sessions_read` method `search`); not the chat-list search box            |
 | **Wake puts you back on the same commit**   | A woken session restores the exact saved Git checkout — commit, branch, upstream, working tree, index, and clean local-only commits — or reports degraded recovery instead of quietly continuing somewhere else.                    | Any sleeping session                                                                                         |
 | **One pool, two placement strategies**      | A compute pool now orders workspace machines and app-deployment machines separately, with a cap on how many nodes **Spread** may open per user.                                                                                     | Project → Settings → **Infrastructure**; [Compute Pools](/docs/guides/compute-pools/#the-four-policy-fields) |
 | **Deployment size comes from the manifest** | The CPU and memory limits in your Compose services decide which machine a deployment lands on. Environment names do not.                                                                                                            | [App Deployments](/docs/guides/app-deployments/)                                                             |
@@ -1075,7 +1200,7 @@ Before anything reaches the model, SAM strips user IDs, IP addresses, user-agent
 | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
 | Guided subscription sign-in      | Connect Claude Code or OpenAI Codex to your Claude Max/Pro or ChatGPT subscription with a browser sign-in — no terminal, no token paste. | **Settings → Connections**             |
 | More cloud providers             | Bring your own Vultr, DigitalOcean, UpCloud, or Infomaniak account, alongside Hetzner, Scaleway, and Google Cloud.                       | **Settings → Connections**             |
-| Claude Fable 5.1                 | Pick Anthropic's newest frontier model (1M-token context) when you configure an agent profile.                                           | Agent profile model picker             |
+| Claude Fable 5.1                 | Pick Anthropic's Fable 5.1 frontier model (1M-token context) when you configure an agent profile.                                        | Agent profile model picker             |
 | Markdown previews in the library | Markdown an agent saves to a project now renders inline instead of downloading as a file.                                                | Project chat & library                 |
 | Shared projects & roles          | Invite teammates with a link, approve access requests, and share profiles, skills, and secrets. Approved teammates join as admins.       | Project **Settings → Access**          |
 | Credential attribution           | A **Credentials** indicator shows which shared work runs on personal keys versus project credentials.                                    | Project navigation (shared projects)   |

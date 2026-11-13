@@ -4,8 +4,6 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import agentInstallManifest from '../../../../packages/shared/src/agent-install-manifest.json';
-
 const apiPackageRoot = join(fileURLToPath(new URL('.', import.meta.url)), '../..');
 const apiRoot = join(apiPackageRoot, 'src');
 
@@ -17,8 +15,15 @@ function readPackage(relPath: string): string {
   return readFileSync(join(apiPackageRoot, relPath), 'utf8');
 }
 
+// The install manifest is JSON data shared with scripts and the Go agent. Read it as data rather
+// than importing it: the worker may import packages only through their public entry points
+// (eslint.config.mjs, worker modularization boundary 2).
+function readAgentInstallManifest(): unknown {
+  return JSON.parse(readPackage('../../packages/shared/src/agent-install-manifest.json'));
+}
+
 function getPinnedAgentPackage(agentType: string): string {
-  const manifest = agentInstallManifest as Array<{
+  const manifest = readAgentInstallManifest() as Array<{
     agentType: string;
     package: string;
     version: string;
@@ -31,7 +36,7 @@ function getPinnedAgentPackage(agentType: string): string {
 }
 
 function getPinnedAgentNpmCompanion(agentType: string): string {
-  const manifest = agentInstallManifest as Array<{
+  const manifest = readAgentInstallManifest() as Array<{
     agentType: string;
     npmCompanion?: {
       package: string;
@@ -48,7 +53,7 @@ function getPinnedAgentNpmCompanion(agentType: string): string {
 describe('cf-container runtime spike contracts', () => {
   it('adds a non-null node runtime discriminator without changing workspace node_id', () => {
     const migration = read('db/migrations/0088_node_runtime.sql');
-    const schema = read('db/schema.ts');
+    const schema = read('../../../packages/worker-core/src/schema.ts');
 
     expect(migration).toContain("ALTER TABLE nodes ADD COLUMN runtime TEXT NOT NULL DEFAULT 'vm'");
     expect(schema).toContain("runtime: text('runtime').notNull().default('vm')");

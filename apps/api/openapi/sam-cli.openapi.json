@@ -6985,6 +6985,7 @@
             "type": "string",
             "enum": [
               "exists",
+              "notExists",
               "equals",
               "contains"
             ]
@@ -7030,18 +7031,142 @@
               "type": "string"
             }
           },
+          "verification": {
+            "type": "object",
+            "properties": {
+              "scheme": {
+                "type": "string",
+                "enum": [
+                  "sam_bearer",
+                  "slack_v0",
+                  "hmac_sha256_body"
+                ]
+              },
+              "header": {
+                "type": "string",
+                "description": "hmac_sha256_body only: the header carrying the HMAC."
+              }
+            },
+            "required": [
+              "scheme"
+            ],
+            "additionalProperties": false
+          },
+          "eventId": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "Dot path of the sender event ID in the JSON body."
+              },
+              "header": {
+                "type": "string",
+                "description": "Header carrying the sender event ID."
+              }
+            },
+            "required": [],
+            "additionalProperties": false,
+            "nullable": true
+          },
+          "endpointUrl": {
+            "type": "string",
+            "description": "Address the sender calls. Signed automations each have their own; not a credential."
+          },
           "tokenLastFour": {
             "type": "string",
-            "description": "Only the final four token characters; never credential material."
+            "description": "Only the final four token characters; never credential material. Null for signed automations.",
+            "nullable": true
           },
           "tokenCreatedAt": {
             "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "nullable": true
           },
           "tokenRotatedAt": {
             "type": "string",
             "format": "date-time",
             "nullable": true
+          },
+          "signingSecret": {
+            "type": "object",
+            "properties": {
+              "set": {
+                "type": "boolean"
+              },
+              "setAt": {
+                "type": "string",
+                "format": "date-time",
+                "nullable": true
+              },
+              "setBy": {
+                "type": "string",
+                "nullable": true
+              }
+            },
+            "required": [
+              "set",
+              "setAt",
+              "setBy"
+            ],
+            "additionalProperties": false,
+            "nullable": true
+          },
+          "setup": {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "needs_secret",
+                  "waiting_for_first_request",
+                  "receiving",
+                  "rejecting"
+                ]
+              },
+              "secretEntryUrl": {
+                "type": "string",
+                "description": "Page where a person with write access saves the signing secret. Not a credential."
+              },
+              "lastEventAt": {
+                "type": "string",
+                "format": "date-time",
+                "nullable": true
+              },
+              "waiting": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "lastRejection": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  },
+                  "at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "hint": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason",
+                  "at",
+                  "hint"
+                ],
+                "additionalProperties": false,
+                "nullable": true
+              }
+            },
+            "required": [
+              "state",
+              "secretEntryUrl",
+              "lastEventAt",
+              "waiting",
+              "lastRejection"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [
@@ -7049,9 +7174,13 @@
           "filterMode",
           "filters",
           "includedHeaders",
+          "verification",
+          "eventId",
+          "endpointUrl",
           "tokenLastFour",
           "tokenCreatedAt",
-          "tokenRotatedAt"
+          "tokenRotatedAt",
+          "signingSecret"
         ],
         "additionalProperties": false
       },

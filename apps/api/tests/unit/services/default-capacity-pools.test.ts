@@ -2,6 +2,16 @@ import { Buffer } from 'node:buffer';
 
 import { getProviderInstanceOfferings } from '@simple-agent-manager/providers';
 import {
+  buildCapacityPoolSelection,
+  capacityCandidateBaseId,
+  capacityCandidateIdForRole,
+  capacityCandidateRoleFromId,
+  capacityCandidateSatisfiesWorkloadRole,
+  emptyUsage,
+  evaluateWorkspaceReservationCapacity,
+  resolveWorkspaceAdmissionPolicy,
+} from '@simple-agent-manager/scheduler-core';
+import {
   getDefaultLocationForProvider,
   getLocationsForProvider,
   type ProviderInstanceOffering,
@@ -16,12 +26,6 @@ import type { Env } from '../../../src/env';
 import { runScheduledCapacityPoolReconciliation } from '../../../src/scheduled/capacity-pool-reconciliation';
 import { reconcileCapacityPoolsForCredentialMutation } from '../../../src/services/capacity-pool-credential-lifecycle';
 import { resolveCapacityPoolPlacementSettings } from '../../../src/services/capacity-pool-placement-settings';
-import {
-  capacityCandidateBaseId,
-  capacityCandidateIdForRole,
-  capacityCandidateRoleFromId,
-  capacityCandidateSatisfiesWorkloadRole,
-} from '../../../src/services/capacity-pool-workload-roles';
 import { initialStatusForProviderOffering } from '../../../src/services/default-capacity-pool-candidates';
 import { externalCapacitySourceCredentialId } from '../../../src/services/default-capacity-pool-helpers';
 import { updateDefaultCapacityPool } from '../../../src/services/default-capacity-pool-updates';
@@ -47,14 +51,9 @@ import {
   resolveTaskStartCapacityPoolSelection,
   resolveTaskStartPlacement,
 } from '../../../src/services/placement-resolver';
-import { buildCapacityPoolSelection } from '../../../src/services/placement-resolver-capacity';
 import { listUserProviderCatalogSeeds } from '../../../src/services/provider-catalogs';
-import {
-  emptyUsage,
-  evaluateWorkspaceReservationCapacity,
-  resolveWorkspaceAdmissionPolicy,
-} from '../../../src/services/workspace-resource-capacity';
 import { applyCapacityPoolSchemaMigrations } from '../../helpers/capacity-pool-migrations';
+import { pickStarterMachines } from '../../helpers/capacity-pool-picks';
 import { createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 
 let sqlite: Database.Database | null = null;
@@ -597,7 +596,12 @@ function legacySizeReconciliationOfferings(): ProviderInstanceOffering[] {
   ];
 }
 
-async function expectLegacyStatusMappedToLiveCatalog(
+/**
+ * An abstract legacy size row keeps its own status, and never decides the status of the live
+ * catalog rows that map to its size. When it did, an active `small` row switched every new
+ * matching region and zone on by itself (incident 2026-11-09).
+ */
+async function expectLegacyRowIgnoredByNewCatalogRows(
   legacyStatus: LegacyCapacityCandidateStatus
 ): Promise<void> {
   const db = createDb();
@@ -623,7 +627,7 @@ async function expectLegacyStatusMappedToLiveCatalog(
   ).toEqual(
     expect.arrayContaining([
       { provider_instance_type: null, status: legacyStatus, machine_size: 'small' },
-      { provider_instance_type: 'cx23', status: legacyStatus, machine_size: 'small' },
+      { provider_instance_type: 'cx23', status: 'disabled', machine_size: 'small' },
       { provider_instance_type: 'cpx62', status: 'disabled', machine_size: null },
     ])
   );
@@ -648,6 +652,7 @@ async function seedVultrDefaultPool(): Promise<ReturnType<typeof createDb>> {
     userId: 'user-1',
     includeInstallation: false,
   });
+  await pickStarterMachines(db as never);
 
   return db;
 }
@@ -751,21 +756,21 @@ afterEach(() => {
 });
 
 describe('initialStatusForProviderOffering', () => {
-  it('preserves explicit concrete candidate status before applying migration defaults', () => {
-    expect(initialStatusForProviderOffering('active', 'deleted', null)).toBe('active');
-    expect(initialStatusForProviderOffering('disabled', 'active', 'small')).toBe('disabled');
-    expect(initialStatusForProviderOffering('deleted', null, 'medium')).toBe('deleted');
+  it('keeps an existing row status: a person’s additions and removals win', () => {
+    expect(initialStatusForProviderOffering('active', false)).toBe('active');
+    expect(initialStatusForProviderOffering('disabled', true)).toBe('disabled');
+    expect(initialStatusForProviderOffering('deleted', true)).toBe('deleted');
   });
 
-  it('selects only legacy-mapped offerings by default and disables new catalog discoveries', () => {
-    expect(initialStatusForProviderOffering(null, null, 'small')).toBe('active');
-    expect(initialStatusForProviderOffering(undefined, undefined, null)).toBe('disabled');
+  it('starts a row the pool never had unselected (incident 2026-11-09)', () => {
+    // Legacy small/medium/large hints used to switch these on and re-add machines on every
+    // catalog refresh. Nothing joins a pool on its own now.
+    expect(initialStatusForProviderOffering(null, false)).toBe('disabled');
+    expect(initialStatusForProviderOffering(undefined, false)).toBe('disabled');
   });
 
-  it('preserves legacy migration removals for matching concrete offerings', () => {
-    expect(initialStatusForProviderOffering(null, 'disabled', 'small')).toBe('disabled');
-    expect(initialStatusForProviderOffering(null, 'deleted', 'large')).toBe('deleted');
-    expect(initialStatusForProviderOffering(null, 'active', 'medium')).toBe('active');
+  it('adds a new zone only to a region the person already picked', () => {
+    expect(initialStatusForProviderOffering(null, true)).toBe('active');
   });
 });
 
@@ -811,6 +816,7 @@ describe('default capacity pool creation', () => {
     const db = createDb();
     seedUserCredential({ id: 'user-hetzner' });
     await ensureDefaultCapacityPoolsForExistingCredentials(db as never, { userId: 'user-1' });
+    await pickStarterMachines(db as never);
     const offeringResolver = vi.fn(async () => []);
     const summary = await resolveEffectiveDefaultCapacityPoolSummary(db as never, {
       userId: 'user-1',
@@ -879,7 +885,8 @@ describe('default capacity pool creation', () => {
       credentialVersion: Date.parse('2026-08-28T00:00:00.000Z'),
       status: 'active',
     });
-    expect(effective?.activeCandidateCount).toBe(expectedCandidateCount('hetzner'));
+    // Nothing joins a pool on its own: a fresh pool lists every offering with none picked.
+    expect(effective?.activeCandidateCount).toBe(0);
 
     expect(getCount('capacity_pools')).toBe(3);
     expect(getCount('capacity_sources')).toBe(3);
@@ -941,6 +948,7 @@ describe('default capacity pool creation', () => {
     seedUserCredential({ id: 'user-hetzner' });
 
     await ensureDefaultCapacityPoolsForExistingCredentials(db as never, { userId: 'user-1' });
+    await pickStarterMachines(db as never);
     const firstCounts = {
       pools: getCount('capacity_pools'),
       sources: getCount('capacity_sources'),
@@ -1120,6 +1128,7 @@ describe('default capacity pool creation', () => {
       includeInstallation: false,
       env,
     });
+    await pickStarterMachines(db as never);
 
     vi.setSystemTime(new Date('2030-01-02T00:00:00.000Z'));
     const third = await runScheduledCapacityPoolReconciliation(env);
@@ -1230,8 +1239,10 @@ describe('default capacity pool creation', () => {
       userId: 'user-1',
       includeInstallation: false,
     });
+    await pickStarterMachines(db as never);
 
-    expect(result.user?.activeCandidateCount).toBe(expectedCandidateCount('vultr'));
+    // Nothing joins a pool on its own: a fresh pool lists every offering with none picked.
+    expect(result.user?.activeCandidateCount).toBe(0);
     expect(
       getRows<{
         id: string;
@@ -1413,8 +1424,10 @@ describe('default capacity pool creation', () => {
         return liveOfferings;
       },
     });
+    await pickStarterMachines(db as never);
 
-    expect(result.user?.activeCandidateCount).toBe(3);
+    // Nothing joins a pool on its own: a fresh pool lists every offering with none picked.
+    expect(result.user?.activeCandidateCount).toBe(0);
     expect(getCount('capacity_pool_candidates', "workload_role = 'workspace'")).toBe(
       liveOfferings.length
     );
@@ -1485,16 +1498,19 @@ describe('default capacity pool creation', () => {
       projectId: 'project-1',
       offeringResolver: async () => liveOfferings,
     });
+    await pickStarterMachines(db as never);
 
     for (const summary of [result.installation, result.user, result.project]) {
-      expect(summary?.activeCandidateCount).toBe(1);
+      // Nothing joins a pool on its own: a fresh pool lists every offering with none picked.
+      expect(summary?.activeCandidateCount).toBe(0);
       expect(summary?.candidates).toHaveLength(liveOfferings.length);
       expect(summary?.candidates).toEqual(
         expect.arrayContaining([
+          // The legacy size hint is still recorded, but it no longer switches a row on.
           expect.objectContaining({
             providerInstanceType: 'cx23',
             machineSize: 'small',
-            status: 'active',
+            status: 'disabled',
           }),
           expect.objectContaining({
             providerInstanceType: 'cpx62',
@@ -1570,6 +1586,7 @@ describe('default capacity pool creation', () => {
       includeInstallation: false,
       env: catalogEnv(),
     });
+    await pickStarterMachines(db as never);
 
     expect(fetchMock).toHaveBeenCalledWith(
       'https://api.hetzner.cloud/v1/server_types',
@@ -1577,7 +1594,8 @@ describe('default capacity pool creation', () => {
         headers: expect.objectContaining({ Authorization: 'Bearer live-hetzner-token' }),
       })
     );
-    expect(result.user?.activeCandidateCount).toBe(1);
+    // Nothing joins a pool on its own: a fresh pool lists every offering with none picked.
+    expect(result.user?.activeCandidateCount).toBe(0);
     expect(getCandidateStatusRows(['cx23', 'cpx62'])).toEqual([
       {
         location: 'fsn1',
@@ -1622,7 +1640,8 @@ describe('default capacity pool creation', () => {
     expect(warningPayloads.length).toBeGreaterThan(0);
     expect(warningPayloads[0]).toContain('hetzner catalog API unavailable');
     expect(warningPayloads.join('\n')).not.toContain('live-hetzner-token');
-    expect(result.user?.effectiveState).toBe('configured-ready');
+    // Seeded from static metadata, with nothing picked: nothing joins a pool on its own.
+    expect(result.user?.effectiveState).toBe('configured-empty');
     expect(
       getRows<{ provider_instance_catalog_source: string }>(`
         SELECT provider_instance_catalog_source
@@ -1701,6 +1720,7 @@ describe('default capacity pool creation', () => {
         }),
       ],
     });
+    await pickStarterMachines(db as never);
 
     await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
       userId: 'user-1',
@@ -1772,6 +1792,7 @@ describe('default capacity pool creation', () => {
         }),
       ],
     });
+    await pickStarterMachines(db as never);
 
     await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
       userId: 'user-1',
@@ -2055,6 +2076,7 @@ describe('default capacity pool creation', () => {
         }),
       ],
     });
+    await pickStarterMachines(db as never);
 
     expect(ensured.user?.sources[0]).toMatchObject({
       scope: 'user',
@@ -2292,6 +2314,7 @@ describe('default capacity pool creation', () => {
       includeInstallation: false,
       offeringResolver: async () => initialOfferings,
     });
+    await pickStarterMachines(db as never);
     const sourceId = initial.user?.sources[0]?.id;
     expect(sourceId).toBeDefined();
     expect(initial.user?.candidates.map((candidate) => candidate.providerInstanceType)).toEqual([
@@ -2432,6 +2455,7 @@ describe('default capacity pool creation', () => {
       includeInstallation: false,
       offeringResolver: async () => offerings,
     });
+    await pickStarterMachines(db as never);
     const cpx62 = initial.user?.candidates.find(
       (candidate) => candidate.providerInstanceType === 'cpx62'
     );
@@ -2491,6 +2515,7 @@ describe('default capacity pool creation', () => {
       includeInstallation: false,
       offeringResolver: async () => offerings,
     });
+    await pickStarterMachines(db as never);
     const staleCandidate = ensured.user?.candidates[1];
     expect(staleCandidate).toBeDefined();
 
@@ -2524,10 +2549,10 @@ describe('default capacity pool creation', () => {
     ).toEqual({ status: 'deleted', provider_instance_catalog_source: 'api' });
   });
 
-  it.each(['deleted', 'disabled'] as const)(
-    'translates %s legacy size rows onto matching live catalog offerings only',
+  it.each(['active', 'deleted', 'disabled'] as const)(
+    'never lets a %s legacy size row switch on the matching live catalog offering',
     async (legacyStatus) => {
-      await expectLegacyStatusMappedToLiveCatalog(legacyStatus);
+      await expectLegacyRowIgnoredByNewCatalogRows(legacyStatus);
     }
   );
 
@@ -2539,6 +2564,7 @@ describe('default capacity pool creation', () => {
       userId: 'user-1',
       includeInstallation: false,
     });
+    await pickStarterMachines(db as never);
 
     const [candidate] = getRows<{
       id: string;
@@ -2579,7 +2605,7 @@ describe('default capacity pool creation', () => {
     ).toEqual([{ priority: 42, candidate_order: 17 }]);
   });
 
-  it('preserves pre-native legacy size candidate removals when reconciling native offerings', async () => {
+  it('keeps native offerings unselected next to a removed pre-native legacy size row', async () => {
     const db = createDb();
     seedUserCredential({ id: 'user-hetzner' });
 
@@ -2627,7 +2653,8 @@ describe('default capacity pool creation', () => {
     });
 
     const nativeCandidateId = `cap-candidate-default:${poolId}:${sourceId}:hetzner:fsn1:cx23`;
-    expect(reconciled.user?.activeCandidateCount).toBe(expectedCandidateCount('hetzner') - 1);
+    // Nothing joins a pool on its own: no native row is picked, whatever the legacy row says.
+    expect(reconciled.user?.activeCandidateCount).toBe(0);
     const preservedRows = getRows<{
       id: string;
       status: string;
@@ -2656,7 +2683,7 @@ describe('default capacity pool creation', () => {
         },
         {
           id: nativeCandidateId,
-          status: 'deleted',
+          status: 'disabled',
           provider_instance_type: 'cx23',
           provider_instance_display_name: 'cx23 · 2 vCPU · 4 GB RAM · 40 GB disk',
           provider_instance_catalog_source: 'static',
@@ -2760,8 +2787,16 @@ describe('default capacity pool creation', () => {
         }),
       ],
     });
-    expect(ensured.user?.activeCandidateCount).toBe(1);
-    expect(ensured.user?.candidates).toEqual(
+    // Nothing joins a pool on its own; the person then picks the starter machine (cx23).
+    expect(ensured.user?.activeCandidateCount).toBe(0);
+    await pickStarterMachines(db as never);
+    const picked = await readDefaultCapacityPoolSummaries(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      includeDisabled: true,
+    });
+    expect(picked.user?.activeCandidateCount).toBe(1);
+    expect(picked.user?.candidates).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ providerInstanceType: 'cx23', status: 'active' }),
         expect.objectContaining({ providerInstanceType: 'ccx63', status: 'disabled' }),
@@ -2807,6 +2842,7 @@ describe('default capacity pool creation', () => {
       userId: 'user-1',
       includeInstallation: false,
     });
+    await pickStarterMachines(providerMismatchDb as never);
 
     const hetznerPlacement = resolveTaskStartPlacement({
       entryPoint: 'task-submit',
@@ -2844,6 +2880,7 @@ describe('default capacity pool creation', () => {
       userId: 'user-1',
       includeInstallation: false,
     });
+    await pickStarterMachines(locationDb as never);
     const hetznerLocations = getLocationsForProvider('hetzner').map((location) => location.id);
     const explicitLocation = hetznerLocations.find((location) => location !== 'fsn1') ?? 'hel1';
 
@@ -2909,6 +2946,7 @@ describe('default capacity pool creation', () => {
       userId: 'user-1',
       includeInstallation: false,
     });
+    await pickStarterMachines(db as never);
     const usCandidates =
       ensured.user?.candidates.filter(
         (candidate) => candidate.location === 'ash' || candidate.location === 'hil'
@@ -2977,7 +3015,8 @@ describe('default capacity pool creation', () => {
     expect(update.summary?.pool).toMatchObject({
       strategy: 'smallest-fit',
       exhaustionPolicy: 'fail',
-      revision: 2,
+      // Revision 3: picking the starter machines was the first edit.
+      revision: 3,
     });
     expect(update.summary?.activeCandidateCount).toBe(
       expectedCandidateCount('hetzner') - usCandidates.length
@@ -3067,8 +3106,11 @@ describe('default capacity pool creation', () => {
       includeInstallation: false,
       offeringResolver: async () => [offering],
     });
+    await pickStarterMachines(db as never);
     const candidate = initial.user?.candidates.find((row) => row.providerInstanceType === 'cx23');
-    expect(candidate?.status).toBe('active');
+    expect(
+      sqlite!.prepare('SELECT status FROM capacity_pool_candidates WHERE id = ?').get(candidate!.id)
+    ).toEqual({ status: 'active' });
 
     const missing = await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
       userId: 'user-1',
@@ -3145,6 +3187,7 @@ describe('default capacity pool creation', () => {
       includeInstallation: false,
       offeringResolver: async () => [offering],
     });
+    await pickStarterMachines(db as never);
     await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
       userId: 'user-1',
       includeInstallation: false,
@@ -3200,8 +3243,11 @@ describe('default capacity pool creation', () => {
     await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
       userId: 'user-1',
       includeInstallation: false,
-      offeringResolver: async () => [initialOffering],
+      // Both machines are picked up front: nothing joins a pool on its own, so a machine that
+      // only appeared in the newer refresh would be listed but not placeable.
+      offeringResolver: async () => [initialOffering, newerOffering],
     });
+    await pickStarterMachines(db as never);
 
     let releaseOlderRefresh: (() => void) | null = null;
     const olderRefresh = ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
@@ -3255,6 +3301,7 @@ describe('default capacity pool creation', () => {
       userId: 'user-1',
       includeInstallation: false,
     });
+    await pickStarterMachines(db as never);
 
     let releaseOlderRefresh: (() => void) | null = null;
     const olderRefresh = ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
@@ -3338,6 +3385,7 @@ describe('default capacity pool creation', () => {
         }),
       ],
     });
+    await pickStarterMachines(newerDb as never);
 
     releaseOlderRefresh?.();
     await olderRefresh;
@@ -3396,6 +3444,7 @@ describe('default capacity pool creation', () => {
         }),
       ],
     });
+    await pickStarterMachines(newerDb as never);
 
     releaseOlderCleanup?.();
     await olderRefresh;
@@ -3433,6 +3482,7 @@ describe('default capacity pool creation', () => {
         }),
       ],
     });
+    await pickStarterMachines(db as never);
 
     sqlite
       ?.prepare("UPDATE credentials SET is_active = 0, updated_at = ? WHERE id = 'user-hetzner-b'")
@@ -3580,6 +3630,7 @@ describe('default capacity pool creation', () => {
         }),
       ],
     });
+    await pickStarterMachines(db as never);
 
     sqlite
       ?.prepare(
@@ -3675,6 +3726,7 @@ describe('default capacity pool creation', () => {
         }),
       ],
     });
+    await pickStarterMachines(db as never);
 
     let releaseOlderPublication: (() => void) | null = null;
     const olderPublication = ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
@@ -3809,6 +3861,7 @@ describe('default capacity pool creation', () => {
       includeInstallation: false,
       offeringResolver: async () => [offering],
     });
+    await pickStarterMachines(db as never);
     const candidate = initial.user?.candidates.find((row) => row.providerInstanceType === 'cx23');
     expect(candidate?.id).toBeTruthy();
 
@@ -4066,6 +4119,7 @@ describe('default capacity pool creation', () => {
       userId: 'user-1',
       includeInstallation: false,
     });
+    await pickStarterMachines(db as never);
     const candidates = ensured.user?.candidates ?? [];
     expect(candidates.length).toBe(expectedCandidateCount('vultr'));
 
@@ -4122,6 +4176,7 @@ describe('default capacity pool creation', () => {
       userId: 'user-1',
       includeInstallation: false,
     });
+    await pickStarterMachines(db as never);
 
     for (const state of [
       'migration-pending',
@@ -4179,6 +4234,7 @@ describe('default capacity pool creation', () => {
       userId: 'user-1',
       includeInstallation: false,
     });
+    await pickStarterMachines(db as never);
     sqlite
       ?.prepare(
         "UPDATE capacity_pools SET migration_state = 'pending', configuration_state = 'migration-pending' WHERE scope = 'user'"
@@ -4201,6 +4257,7 @@ describe('default capacity pool creation', () => {
     seedUserCredential({ id: 'user-hetzner' });
 
     await ensureDefaultCapacityPoolsForExistingCredentials(db as never, { userId: 'user-1' });
+    await pickStarterMachines(db as never);
     sqlite
       ?.prepare("UPDATE credentials SET is_active = 0, updated_at = ? WHERE id = 'user-hetzner'")
       .run('2026-08-28T01:00:00.000Z');
@@ -4245,6 +4302,7 @@ describe('default capacity pool creation', () => {
       userId: 'user-1',
       projectId: 'project-1',
     });
+    await pickStarterMachines(db as never);
     sqlite?.prepare("DELETE FROM credentials WHERE id = 'project-hetzner'").run();
 
     const effective = await resolveEffectiveDefaultCapacityPoolSummary(db as never, {
@@ -4520,6 +4578,7 @@ describe('default capacity pool creation', () => {
       userId: 'user-1',
       includeInstallation: false,
     });
+    await pickStarterMachines(db as never);
 
     const first = await resolveTaskStartCapacityPoolSelection(
       db as never,
@@ -4593,6 +4652,13 @@ describe('default capacity pool creation', () => {
       updatedAt: '2026-08-28T10:00:00.000Z',
     });
 
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+    });
+    await pickStarterMachines(db as never);
+    // The edit records statuses only; the next refresh records the picked rows' authority, as
+    // in production. The identical refresh below must then leave that authority unchanged.
     await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
       userId: 'user-1',
       includeInstallation: false,
@@ -5001,6 +5067,7 @@ describe('capacity pool review findings', () => {
         }),
       ];
       await ensureUserPool(db, both);
+      await pickStarterMachines(db as never);
       const removedId = workspaceCandidateIds().find((id) => id.includes('cx33'))!;
       sqlite
         ?.prepare("UPDATE capacity_pool_candidates SET status = 'deleted' WHERE id = ?")
@@ -5250,10 +5317,12 @@ describe('capacity pool review findings', () => {
         env: catalogEnv(createSqliteD1WithBindLimit(sqlite!, 100)),
         offeringResolver: async () => productionSizedCatalog(),
       });
+      await pickStarterMachines(poolDb() as never);
 
       expect(getCount('capacity_pool_candidates')).toBe(1000);
       expect(result.user?.pool.migrationState).toBe('complete');
-      expect(result.user?.effectiveState).toBe('configured-ready');
+      // Published in full with nothing picked; picking a machine makes it placeable at once.
+      expect(result.user?.effectiveState).toBe('configured-empty');
       const selection = await resolveTaskStartCapacityPoolSelection(
         db as never,
         defaultTaskPlacement('one-pass-publication'),
@@ -5363,7 +5432,7 @@ describe('capacity pool review findings', () => {
       ).toBe(2);
     });
 
-    it('keeps a 270-row catalog ready after completion and identical later refreshes', async () => {
+    it('keeps a 270-row catalog published after completion and identical later refreshes', async () => {
       createDb();
       seedUserCredential({ id: 'user-hetzner' });
       const offerings = manyLiveOfferings(135);
@@ -5389,8 +5458,9 @@ describe('capacity pool review findings', () => {
             })),
         });
         expect(result.user?.pool.migrationState).toBe(pass === 0 ? 'pending' : 'complete');
+        // Complete publication with nothing picked: nothing joins a pool on its own.
         expect(result.user?.effectiveState).toBe(
-          pass === 0 ? 'migration-pending' : 'configured-ready'
+          pass === 0 ? 'migration-pending' : 'configured-empty'
         );
         expect(getCount('capacity_pool_candidates')).toBe(pass === 0 ? 200 : 270);
         // Initial bounded publication still writes 200 then 70 rows. Later identical refreshes
@@ -5432,6 +5502,11 @@ describe('capacity pool review findings', () => {
           candidatePublishBudgetMs: 0,
           offeringResolver: async () => offerings,
         };
+        await ensureDefaultCapacityPoolsForExistingCredentials(poolDb() as never, options);
+        await ensureDefaultCapacityPoolsForExistingCredentials(poolDb() as never, options);
+        // The person picks a machine. The edit changes row statuses, so the next refreshes
+        // republish the catalog (one batch per pass here) before the pool reads ready.
+        await pickStarterMachines(poolDb() as never);
         await ensureDefaultCapacityPoolsForExistingCredentials(poolDb() as never, options);
         const ready = await ensureDefaultCapacityPoolsForExistingCredentials(
           poolDb() as never,
@@ -5529,95 +5604,92 @@ describe('capacity pool review findings', () => {
       }
     );
 
-    it.each([
-      'hardware',
-      'price',
-      'operator-settings',
-      'disabled',
-      'removed',
-      'credential',
-    ] as const)('invalidates completed publication when %s changes', async (change) => {
-      createDb();
-      seedUserCredential({ id: 'user-hetzner' });
-      let offerings = manyLiveOfferings(4);
-      offerings[0] = liveHetznerOffering({
-        location: 'fsn1',
-        providerInstanceType: 'cx23',
-        displayName: 'CX23',
-      });
-      const refresh = () =>
-        ensureDefaultCapacityPoolsForExistingCredentials(poolDb() as never, {
-          userId: 'user-1',
-          includeInstallation: false,
-          candidatePublishBatchSize: 4,
-          // One batch per pass: these tests prove durable cross-pass resumption.
-          candidatePublishBudgetMs: 0,
-          offeringResolver: async () => offerings,
+    it.each(['hardware', 'price', 'operator-settings', 'status', 'removed', 'credential'] as const)(
+      'invalidates completed publication when %s changes',
+      async (change) => {
+        createDb();
+        seedUserCredential({ id: 'user-hetzner' });
+        let offerings = manyLiveOfferings(4);
+        offerings[0] = liveHetznerOffering({
+          location: 'fsn1',
+          providerInstanceType: 'cx23',
+          displayName: 'CX23',
         });
-      await refresh();
-      expect((await refresh()).user?.pool.migrationState).toBe('complete');
-      const previousAuthority = getRows<{ authority_generation: number }>(
-        'SELECT authority_generation FROM capacity_sources'
-      )[0]?.authority_generation;
+        const refresh = () =>
+          ensureDefaultCapacityPoolsForExistingCredentials(poolDb() as never, {
+            userId: 'user-1',
+            includeInstallation: false,
+            candidatePublishBatchSize: 4,
+            // One batch per pass: these tests prove durable cross-pass resumption.
+            candidatePublishBudgetMs: 0,
+            offeringResolver: async () => offerings,
+          });
+        await refresh();
+        expect((await refresh()).user?.pool.migrationState).toBe('complete');
+        const previousAuthority = getRows<{ authority_generation: number }>(
+          'SELECT authority_generation FROM capacity_sources'
+        )[0]?.authority_generation;
 
-      if (change === 'hardware') offerings[0] = { ...offerings[0]!, vcpu: 8 };
-      if (change === 'price') offerings[0] = { ...offerings[0]!, priceMonthly: 99 };
-      if (change === 'operator-settings')
-        sqlite?.exec(
-          "UPDATE capacity_pool_candidates SET provider_instance_boot_disk_size_gb = 96 WHERE provider_instance_type = 'cx23'"
-        );
-      if (change === 'disabled')
-        sqlite?.exec(
-          "UPDATE capacity_pool_candidates SET status = 'disabled' WHERE provider_instance_type = 'cx23' AND workload_role = 'workspace'"
-        );
-      if (change === 'removed') offerings = offerings.slice(0, -1);
-      if (change === 'credential')
-        sqlite?.exec(
-          "UPDATE credentials SET encrypted_token = 'rotated-token-with-unchanged-timestamp' WHERE id = 'user-hetzner'"
-        );
+        if (change === 'hardware') offerings[0] = { ...offerings[0]!, vcpu: 8 };
+        if (change === 'price') offerings[0] = { ...offerings[0]!, priceMonthly: 99 };
+        if (change === 'operator-settings')
+          sqlite?.exec(
+            "UPDATE capacity_pool_candidates SET provider_instance_boot_disk_size_gb = 96 WHERE provider_instance_type = 'cx23'"
+          );
+        // A person picks a machine: new rows start unselected, so the change is to active.
+        if (change === 'status')
+          sqlite?.exec(
+            "UPDATE capacity_pool_candidates SET status = 'active' WHERE provider_instance_type = 'cx23' AND workload_role = 'workspace'"
+          );
+        if (change === 'removed') offerings = offerings.slice(0, -1);
+        if (change === 'credential')
+          sqlite?.exec(
+            "UPDATE credentials SET encrypted_token = 'rotated-token-with-unchanged-timestamp' WHERE id = 'user-hetzner'"
+          );
 
-      expect((await refresh()).user?.pool.migrationState).toBe('pending');
-      if (change === 'removed')
-        expect(
-          getCount(
-            'capacity_pool_candidates',
-            "provider_instance_type = 'provider-native-3' AND catalog_availability = 'last-known-unavailable'"
-          )
-        ).toBe(0);
-      expect((await refresh()).user?.pool.migrationState).toBe('complete');
-      expect((await refresh()).user?.pool.migrationState).toBe('complete');
-      if (change === 'hardware')
-        expect(getCatalogCandidateRow('cx23')?.provider_instance_vcpu_count).toBe(8);
-      if (change === 'price')
-        expect(getCatalogCandidateRow('cx23')?.provider_instance_price_monthly_cents).toBe(9900);
-      if (change === 'operator-settings')
-        expect(
-          getCount(
-            'capacity_pool_candidates',
-            "provider_instance_type = 'cx23' AND provider_instance_boot_disk_size_gb = 96"
-          )
-        ).toBe(2);
-      if (change === 'disabled')
-        expect(
-          getCount(
-            'capacity_pool_candidates',
-            "provider_instance_type = 'cx23' AND status = 'disabled'"
-          )
-        ).toBe(2);
-      if (change === 'removed')
-        expect(
-          getCount(
-            'capacity_pool_candidates',
-            "provider_instance_type = 'provider-native-3' AND catalog_availability = 'last-known-unavailable'"
-          )
-        ).toBe(2);
-      if (change === 'credential')
-        expect(
-          getRows<{ authority_generation: number }>(
-            'SELECT authority_generation FROM capacity_sources'
-          )[0]?.authority_generation
-        ).not.toBe(previousAuthority);
-    });
+        expect((await refresh()).user?.pool.migrationState).toBe('pending');
+        if (change === 'removed')
+          expect(
+            getCount(
+              'capacity_pool_candidates',
+              "provider_instance_type = 'provider-native-3' AND catalog_availability = 'last-known-unavailable'"
+            )
+          ).toBe(0);
+        expect((await refresh()).user?.pool.migrationState).toBe('complete');
+        expect((await refresh()).user?.pool.migrationState).toBe('complete');
+        if (change === 'hardware')
+          expect(getCatalogCandidateRow('cx23')?.provider_instance_vcpu_count).toBe(8);
+        if (change === 'price')
+          expect(getCatalogCandidateRow('cx23')?.provider_instance_price_monthly_cents).toBe(9900);
+        if (change === 'operator-settings')
+          expect(
+            getCount(
+              'capacity_pool_candidates',
+              "provider_instance_type = 'cx23' AND provider_instance_boot_disk_size_gb = 96"
+            )
+          ).toBe(2);
+        if (change === 'status')
+          expect(
+            getCount(
+              'capacity_pool_candidates',
+              "provider_instance_type = 'cx23' AND status = 'active'"
+            )
+          ).toBe(2);
+        if (change === 'removed')
+          expect(
+            getCount(
+              'capacity_pool_candidates',
+              "provider_instance_type = 'provider-native-3' AND catalog_availability = 'last-known-unavailable'"
+            )
+          ).toBe(2);
+        if (change === 'credential')
+          expect(
+            getRows<{ authority_generation: number }>(
+              'SELECT authority_generation FROM capacity_sources'
+            )[0]?.authority_generation
+          ).not.toBe(previousAuthority);
+      }
+    );
 
     it.each(['legacy', 'malformed'] as const)(
       'resumes safely from a %s publication cursor',
@@ -5849,6 +5921,7 @@ describe('workload-role eligibility contract', () => {
       candidatePublishBatchSize: 1000,
       offeringResolver: async () => offerings,
     });
+    await pickStarterMachines(db as never);
     return db;
   }
 
@@ -6276,6 +6349,7 @@ describe('empty live Hetzner inventory through the credential-backed catalog pat
       includeInstallation: false,
       env: catalogEnv(),
     });
+    await pickStarterMachines(db as never);
     expect(getCount('capacity_pool_candidates', "catalog_availability = 'available'")).toBe(2);
     const selectedStatus = getCandidateStatusRows(['cx23'])[0]?.status;
     // The catalog cache is credential-scoped; the credential is unchanged here, so the second
@@ -6333,6 +6407,7 @@ describe('empty live Hetzner inventory through the credential-backed catalog pat
       includeInstallation: true,
       env: catalogEnv(),
     });
+    await pickStarterMachines(db as never);
     const firstPassCalls = fetchMock.mock.calls.length;
 
     // A second pass inside the cache TTL must not re-ask the provider for the same credential.
@@ -6404,6 +6479,7 @@ describe('GCP managed compatibility copies', () => {
       includeInstallation: false,
       offeringResolver: async () => [gcpOffering('us-central1-a'), gcpOffering(newZone)],
     });
+    await pickStarterMachines(db as never);
     const summary = await resolveEffectiveDefaultCapacityPoolSummary(db as never, {
       userId: 'user-1',
       projectId: null,
@@ -6440,6 +6516,7 @@ describe('GCP managed compatibility copies', () => {
       userId: 'user-1',
       includeInstallation: false,
     });
+    await pickStarterMachines(db as never);
     expect(result.user?.sources).toHaveLength(1);
     expect(new Set(result.user?.candidates.map((c) => c.capacitySourceId)).size).toBe(1);
   });
@@ -6480,6 +6557,7 @@ describe('GCP managed compatibility copies', () => {
     sqlite!.exec("UPDATE cc_configurations SET settings_json = '{}'");
     const options = { userId: 'user-1', includeInstallation: false };
     const before = await ensureDefaultCapacityPoolsForExistingCredentials(db, options);
+    await pickStarterMachines(db as never);
     const canonical = before.user!.sources.find((source) => !source.externalSourceRef)!;
     const mirror = before.user!.sources.find((source) => source.externalSourceRef)!;
     sqlite!
@@ -6864,6 +6942,7 @@ describe('GCP managed compatibility copies', () => {
       userId: 'user-1',
       includeInstallation: false,
     });
+    await pickStarterMachines(db as never);
     expect(result.user?.sources).toHaveLength(2);
   });
 
@@ -6873,6 +6952,7 @@ describe('GCP managed compatibility copies', () => {
     sqlite!.exec("UPDATE cc_configurations SET settings_json = '{}'");
     const options = { userId: 'user-1', includeInstallation: false };
     const before = await ensureDefaultCapacityPoolsForExistingCredentials(db, options);
+    await pickStarterMachines(db as never);
     expect(before.user?.sources).toHaveLength(2);
     const canonical = before.user!.sources.find((s) => !s.externalSourceRef)!;
     const mirror = before.user!.sources.find((s) => s.externalSourceRef)!;
@@ -6988,6 +7068,7 @@ describe('pool provider order (idea 01M6NXTF2RQ5QXHM7YZ4ZF0XBK)', () => {
               }),
             ],
     });
+    await pickStarterMachines(db as never);
     const summary = await readDefaultCapacityPoolSummaries(db as never, {
       userId: 'user-1',
       includeInstallation: false,
@@ -7116,6 +7197,7 @@ describe('pool provider order (idea 01M6NXTF2RQ5QXHM7YZ4ZF0XBK)', () => {
         }),
       ],
     });
+    await pickStarterMachines(db as never);
     const foreignSource = getRows<{ capacity_source_id: string }>(
       "SELECT c.capacity_source_id FROM capacity_pool_candidates c JOIN capacity_pools p ON p.id = c.pool_id WHERE p.owner_user_id = 'user-2' LIMIT 1"
     )[0]!.capacity_source_id;

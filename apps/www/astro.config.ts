@@ -64,6 +64,7 @@ export default defineConfig({
             { slug: 'docs/guides/mcp-servers' },
             { slug: 'docs/guides/secret-execution' },
             { slug: 'docs/guides/workload-identity' },
+            { slug: 'docs/guides/agent-sign-in' },
             { slug: 'docs/guides/ai-models-for-agents' },
             { slug: 'docs/guides/sam-assistant' },
             { slug: 'docs/guides/sam-connector' },
@@ -128,7 +129,8 @@ export default defineConfig({
       ],
       disable404Route: true,
     }),
-    sitemap(),
+    // The brand guide (/brand/) is published but not launched: keep it out of the sitemap.
+    sitemap({ filter: (page) => !new URL(page).pathname.startsWith('/brand/') }),
   ],
   build: {
     assets: '_assets',

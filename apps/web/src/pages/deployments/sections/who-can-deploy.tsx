@@ -11,8 +11,8 @@ import type { AgentProfile } from '@simple-agent-manager/shared';
 import { CircleAlert } from 'lucide-react';
 import { useState } from 'react';
 
-import { ModelToggleSwitch } from '../../../components/agent-models/ModelToggleSwitch';
 import { Panel, SectionTitle } from '../../../components/page-kit/ui';
+import { ToggleSwitch } from '../../../components/ui/ToggleSwitch';
 import type { DeploymentEnvironment } from '../../../lib/api';
 import { useEnvironmentActions } from '../data';
 import { agentAccess, liveVersionOf } from '../model';
@@ -114,7 +114,7 @@ export function WhoCanDeploy({
                       : "Off: agents can't deploy here yet."}
             </span>
           </div>
-          <ModelToggleSwitch
+          <ToggleSwitch
             checked={access.on || choosing}
             disabled={busy}
             label="Agents can deploy here"

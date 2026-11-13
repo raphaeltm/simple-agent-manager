@@ -146,9 +146,17 @@ describe('authenticated maintenance deployment jobs', () => {
     const initialJobId = f.calls.find((call) => call.path === '/start')!.body!.jobId;
     f.setJob({ status: 'completed', sourceCommit: original, jobId: initialJobId });
     const page = await f.request('/');
-    expect(await page.text()).not.toContain('private-setup-token-for-owner');
+    const ready = await page.text();
+    expect(ready).not.toContain('private-setup-token-for-owner');
+    expect(ready).toContain('SAM is live');
     const setup = await f.request('/setup', {});
-    expect(await setup.text()).toContain('private-setup-token-for-owner');
+    const handoff = await setup.text();
+    expect(handoff).toContain('private-setup-token-for-owner');
+    // The instruction leads straight into the token and the button that carries it.
+    expect(handoff).toMatch(
+      /Open your instance and enter this setup token\.<\/p><div class="recovery-row"><span id="setup-token-value"><code>private-setup-token-for-owner<\/code>/
+    );
+    expect(handoff).toContain('/setup#token=private-setup-token-for-owner"');
     expect(setup.headers.get('Cache-Control')).toBe('no-store');
   });
   it('requires a nonexpired one-use update approval for the exact selected release', async () => {

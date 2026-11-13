@@ -53,11 +53,13 @@ async function maintenanceDeploymentPanel(service){
  const lastChecked=new Date().toISOString().slice(11,19)+' UTC';
  const progress=active?'<p data-auto-refresh="'+refresh+'">Step '+(position+1)+' of '+order.length+': <strong>'+escape(labels[current]||'Starting')+'</strong></p><progress class="build-progress" value="'+(position+1)+'" max="'+order.length+'"></progress><p class="muted">'+(started?'Started '+started+'. ':'')+'Usually takes about '+estimate+' minutes. Last checked '+lastChecked+' &middot; updates every '+refresh+'s.</p>':'';
  const attention=job.status==='failed';
+ const details='<details><summary>Installation details</summary><p>Administrator: '+escape(config.ownerEmail)+'</p><p>Approved source</p><code>'+escape(config.sourceCommit)+'</code><p>Account: '+escape(config.accountId)+'<br>Zone: '+escape(config.zoneName)+'</p></details>';
+ // The finished install gets its own celebratory panel: one action, details tucked away.
+ if(!active&&!retry&&manifest.lastSuccessfulCommit)return '<section class="deployment ready"><div class="ready-orb" aria-hidden="true"><span class="ready-ring"></span><span class="ready-ring ready-ring--late"></span>'+'<i class="spark"></i>'.repeat(8)+'<span class="ready-check">✓</span></div><p class="ready-kicker">'+escape(config.baseDomain)+'</p><h1 class="ready-title">SAM is live</h1><p class="ready-lede">Built and running in your own Cloudflare account. One last step and it’s yours.</p><form method="post" action="/setup"><button>Finish setting up SAM →</button></form><div class="quiet-actions"><form method="post" action="/update-preview"><button class="quiet">Check for an update</button></form></div>'+details+'</section>';
  let bodyText='';
  if(!active){
   if(retry)bodyText='Your installation and what has been built so far are kept.';
-  else if(!manifest.lastSuccessfulCommit)bodyText='Build SAM in your account, then open your own instance. This creates databases, storage, application images and the DNS records you reviewed. Workers Paid and usage charges apply.';
-  else bodyText='Your instance passed its deployment health check. Continue to configure sign-in and finish setup.';
+  else bodyText='Build SAM in your account, then open your own instance. This creates databases, storage, application images and the DNS records you reviewed. Workers Paid and usage charges apply.';
  }
  // The first-install checkbox is pre-checked: the installer's own Review
  // screen already presented and recorded the same "Workers Paid and usage
@@ -66,9 +68,8 @@ async function maintenanceDeploymentPanel(service){
  let actionsHtml='';
  if(active)actionsHtml='<details class="secondary-actions"><summary>Stop this build</summary><p>Stopping keeps your installation and what has been built so far. You can start the build again.</p><form method="post" action="/cancel"><label><input name="confirmed" type="checkbox" value="yes" required> Stop the running build</label><button class="secondary">Stop build</button></form></details>';
  else if(retry)actionsHtml='<form method="post" action="/resume"><button>Retry deployment</button></form>';
- else if(!manifest.lastSuccessfulCommit)actionsHtml='<form method="post" action="/deploy"><label><input name="confirmed" type="checkbox" value="yes" checked required> Build and deploy this approved installation.</label><button>Install SAM</button></form>';
- else actionsHtml='<form method="post" action="/setup"><button>Finish setting up SAM</button></form><div class="quiet-actions"><form method="post" action="/update-preview"><button class="quiet">Check for an update</button></form></div>';
- return '<section class="deployment"><span class="badge">Your installation</span><h1>'+escape(config.baseDomain)+'</h1><div class="deployment-status'+(attention?' deployment-status--attention':'')+'"><strong>'+(attention?'⚠ ':'')+escape(status)+'</strong>'+(detail&&!active&&job.status!=='completed'?'<p>'+escape(detail)+'</p>':'')+progress+(bodyText?'<p>'+escape(bodyText)+'</p>':'')+'</div>'+stepList+actionsHtml+(retry&&job.failure?.tail?.length?'<details><summary>Technical details</summary><pre class="build-log">'+escape(job.failure.tail.join('\n'))+'</pre></details>':'')+'<details><summary>Installation details</summary><p>Administrator: '+escape(config.ownerEmail)+'</p><p>Approved source</p><code>'+escape(config.sourceCommit)+'</code><p>Account: '+escape(config.accountId)+'<br>Zone: '+escape(config.zoneName)+'</p></details></section>';
+ else actionsHtml='<form method="post" action="/deploy"><label><input name="confirmed" type="checkbox" value="yes" checked required> Build and deploy this approved installation.</label><button>Install SAM</button></form>';
+ return '<section class="deployment"><span class="badge">Your installation</span><h1>'+escape(config.baseDomain)+'</h1><div class="deployment-status'+(attention?' deployment-status--attention':'')+'"><strong>'+(attention?'⚠ ':'')+escape(status)+'</strong>'+(detail&&!active&&job.status!=='completed'?'<p>'+escape(detail)+'</p>':'')+progress+(bodyText?'<p>'+escape(bodyText)+'</p>':'')+'</div>'+stepList+actionsHtml+(retry&&job.failure?.tail?.length?'<details><summary>Technical details</summary><pre class="build-log">'+escape(job.failure.tail.join('\n'))+'</pre></details>':'')+details+'</section>';
 
 }
 async function maintenanceJobAction(service,path,body){
@@ -94,7 +95,9 @@ async function maintenanceJobAction(service,path,body){
   if(job.status!=='completed'||!maintenanceMatches(manifest,job))return page('<h1>Finish the approved deployment first</h1>',409);
   const result=await maintenanceBuilder(service,'/result');
   if(typeof result.setupToken!=='string'||result.appUrl!=='https://app.'+manifest.config.baseDomain)return page('<h1>Setup handoff unavailable</h1>',409);
-  return page('<h1>Finish setting up SAM</h1><p>Open your instance and enter this setup token. Then configure a supported sign-in provider and sign in using the verified email <strong>'+escape(manifest.config.ownerEmail)+'</strong>. Other visitors cannot claim the initial administrator.</p><code>'+escape(result.setupToken)+'</code><p><a class="primary-link" href="'+escape(result.appUrl)+'/setup" rel="noreferrer">Open SAM setup →</a></p><p><a href="/">Return to maintenance</a></p>');
+  // The link carries the token in its fragment, which never reaches a server; the setup page
+  // fills it in and strips it from the address bar. The token stays visible to copy by hand.
+  return page('<span class="badge">Last step</span><h1>Finish setting up SAM</h1><div class="handoff"><p class="handoff-instruction">Open your instance and enter this setup token.</p><div class="recovery-row"><span id="setup-token-value"><code>'+escape(result.setupToken)+'</code></span><button type="button" class="secondary" data-copy="setup-token-value" aria-live="polite">Copy</button></div><a class="primary-link" href="'+escape(result.appUrl)+'/setup#token='+encodeURIComponent(result.setupToken)+'" rel="noreferrer">Open SAM setup →</a><p class="handoff-note">The button fills the token in for you. Then sign in as <strong>'+escape(manifest.config.ownerEmail)+'</strong>; only that email can become the administrator.</p></div><p class="handoff-back"><a href="/">Return to maintenance</a></p>');
  }
  if(path==='/resume'){if(!maintenanceMatches(manifest,job))return page('<h1>Job does not match this installation approval</h1>',409);}
  if(path==='/resume'){await maintenanceBuilder(service,'/resume',{jobId:job.jobId});return new Response(null,{status:303,headers:{Location:'/'}});}

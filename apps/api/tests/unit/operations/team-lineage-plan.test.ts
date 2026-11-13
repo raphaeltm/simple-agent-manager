@@ -5,12 +5,12 @@
  * in the project for each lineage row. Behavior and project scoping are covered by
  * team-status.test.ts; this file pins the plan of the SQL `readTeamTasks` actually sends.
  */
+import { readTeamTasks } from '@simple-agent-manager/operations';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { tasks } from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
-import { readTeamTasks } from '../../../src/operations/team-lineage';
 import { createDeclaredIndexes, createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const PROJECT_ID = 'project-a';

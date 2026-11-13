@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/container"
 	"github.com/workspace/vm-agent/internal/pty"
 )
@@ -32,6 +33,8 @@ func (s *Server) newPTYManagerForWorkspace(
 		DefaultRows:        s.config.DefaultRows,
 		DefaultCols:        s.config.DefaultCols,
 		WorkDir:            workDir,
+		Env:                standalonePTYEnvironment(s.config, workspaceID),
+		ProcessGroup:       s.config.IsStandaloneMode(),
 		ContainerResolver:  s.ptyManagerContainerResolverForLabel(containerLabelValue),
 		ContainerUser:      resolvedContainerUser,
 		GracePeriod:        s.config.PTYOrphanGracePeriod,
@@ -50,6 +53,12 @@ func (s *Server) newPTYManagerForWorkspace(
 
 func (s *Server) shouldReusePrimaryPTYManager(workspaceID, workspaceDir, containerWorkDir, containerLabelValue string) bool {
 	if s == nil || s.ptyManager == nil {
+		return false
+	}
+
+	// A standalone manager owns a workspace-scoped environment. The legacy host
+	// fallback must not lend the launch workspace's identity to another runtime.
+	if s.config.IsStandaloneMode() && strings.TrimSpace(workspaceID) != strings.TrimSpace(s.config.WorkspaceID) {
 		return false
 	}
 
@@ -200,4 +209,17 @@ func containerLabelCandidates(values ...string) []string {
 		candidates = append(candidates, trimmed)
 	}
 	return candidates
+}
+
+// Standalone shells do not execute the devcontainer's login profile. Give them
+// only the trusted public identity required by tools; Git credentials continue
+// to come from the authenticated local helper, never copied into this env.
+func standalonePTYEnvironment(cfg *config.Config, workspaceID string) []string {
+	if !cfg.IsStandaloneMode() {
+		return nil
+	}
+	return []string{
+		"SAM_WORKSPACE_ID=" + strings.TrimSpace(workspaceID),
+		"SAM_API_URL=" + strings.TrimRight(cfg.ControlPlaneURL, "/"),
+	}
 }

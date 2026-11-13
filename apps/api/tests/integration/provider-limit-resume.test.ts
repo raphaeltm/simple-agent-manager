@@ -1,25 +1,26 @@
 /** Owner HTTP action -> real D1 recovery claim -> retained TaskRunner start. */
+import {
+  createAttentionMarker,
+  listActiveAttentionMarkers,
+  resolveAttentionMarkers,
+} from '@simple-agent-manager/project-data/internal/do/attention';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import { syncProviderLimitAttention } from '@simple-agent-manager/project-data/internal/do/provider-limit-attention';
+import { sleepSession } from '@simple-agent-manager/project-data/internal/do/sessions';
+import { newProviderLimitWait } from '@simple-agent-manager/scheduler-core';
 import Database from 'better-sqlite3';
 import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
-import { runMigrations } from '../../src/durable-objects/migrations';
-import {
-  createAttentionMarker,
-  listActiveAttentionMarkers,
-  resolveAttentionMarkers,
-} from '../../src/durable-objects/project-data/attention';
-import { syncProviderLimitAttention } from '../../src/durable-objects/project-data/provider-limit-attention';
-import { sleepSession } from '../../src/durable-objects/project-data/sessions';
 import type { Env } from '../../src/env';
 import { AppError } from '../../src/middleware/error';
 import { providerLimitResumeRoutes } from '../../src/routes/tasks/provider-limit-resume';
-import { newProviderLimitWait } from '../../src/services/provider-limit-policy';
 import { presentBlockedProviderLimitWait } from '../../src/services/provider-limit-recovery';
 import { createAllSchemaTables } from '../helpers/sqlite-d1';
 import {
   createEvictionEnv,
+  pickEvictionPools,
   seedEvictionOwnerAndNode,
 } from '../helpers/workspace-eviction-route-harness';
 import { createSqlStorage } from '../unit/durable-objects/sql-storage-test-utils';
@@ -27,6 +28,7 @@ import { createSqlStorage } from '../unit/durable-objects/sql-storage-test-utils
 const boundary = vi.hoisted(() => ({
   userId: 'user-1',
   start: vi.fn(),
+  nudge: vi.fn(async () => true),
   sql: null as unknown as SqlStorage,
 }));
 vi.mock('../../src/middleware/auth', () => ({
@@ -37,6 +39,7 @@ vi.mock('../../src/middleware/auth', () => ({
 vi.mock('../../src/services/task-runner-do', () => ({
   startTaskRunnerDO: (...args: unknown[]) => boundary.start(...args),
   ensureTaskRunnerStarted: vi.fn(async () => false),
+  nudgeTaskRunnerDO: (...args: unknown[]) => boundary.nudge(...args),
 }));
 vi.mock('../../src/services/project-data', () => ({
   syncProviderLimitAttention: async (
@@ -64,13 +67,14 @@ describe('blocked provider wait owner recovery', () => {
   let local: Database.Database;
   let env: Env;
   let app: Hono<{ Bindings: Env }>;
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
     boundary.userId = 'user-1';
     d1 = new Database(':memory:');
     createAllSchemaTables(d1, schema);
     env = createEvictionEnv(d1);
     seedEvictionOwnerAndNode(d1);
+    await pickEvictionPools(env);
     local = new Database(':memory:');
     boundary.sql = createSqlStorage(local);
     runMigrations(boundary.sql);
@@ -217,5 +221,81 @@ describe('blocked provider wait owner recovery', () => {
     expect(response.status, await response.clone().text()).toBe(409);
     expect(task()).toMatchObject({ status: 'sleeping', admission_state: 'provider_limit_blocked' });
     expect((await resume()).status).toBe(202);
+  });
+
+  describe('start anyway through the owner route', () => {
+    beforeEach(() => {
+      const wait = newProviderLimitWait({
+        taskId: 'task-1',
+        origin: 'admission',
+        incidentId: 'admission:task-1:1',
+        credentialKey: 'cc_credentials:quota-key',
+        previous: null,
+        now: Date.now(),
+        resetsAt: Date.now() + 8 * 60 * 60_000,
+      });
+      d1.prepare(
+        "UPDATE tasks SET provider_limit_wait_json=?,admission_state='provider_limit_waiting',admission_reason=?,status='queued' WHERE id='task-1'"
+      ).run(JSON.stringify(wait), wait.reason);
+    });
+    function startAnyway(project = 'project-1') {
+      return app.request(
+        `/projects/${project}/tasks/task-1/provider-limit/start-anyway`,
+        { method: 'POST' },
+        env
+      );
+    }
+
+    it('lets the owner start a waiting task and records the scoped override', async () => {
+      const response = await startAnyway();
+      expect(response.status, await response.clone().text()).toBe(202);
+      expect(await response.json()).toEqual({ status: 'starting', taskId: 'task-1' });
+      expect(boundary.nudge).toHaveBeenCalledOnce();
+      const row = task();
+      expect(row.admission_state).toBeNull();
+      expect(JSON.parse(row.provider_limit_wait_json as string)).toMatchObject({
+        phase: 'released',
+        ownerOverride: { credentialKey: 'cc_credentials:quota-key' },
+      });
+      // A second press is a conflict, not a second start.
+      expect((await startAnyway()).status).toBe(409);
+      expect(boundary.nudge).toHaveBeenCalledOnce();
+    });
+
+    it('refuses another project member and a cross-project lookup without changing the task', async () => {
+      const before = task().provider_limit_wait_json;
+      d1.exec(
+        "INSERT INTO users(id,status) VALUES ('other','active'); INSERT INTO project_members(project_id,user_id,role,status) VALUES ('project-1','other','maintainer','active')"
+      );
+      boundary.userId = 'other';
+      expect((await startAnyway()).status).toBe(403);
+      boundary.userId = 'user-1';
+      expect((await startAnyway('another-project')).status).toBe(404);
+      expect(task()).toMatchObject({
+        admission_state: 'provider_limit_waiting',
+        provider_limit_wait_json: before,
+      });
+      expect(boundary.nudge).not.toHaveBeenCalled();
+    });
+
+    it('keeps the hold when the runner has nothing to run', async () => {
+      const before = task().provider_limit_wait_json;
+      boundary.nudge.mockResolvedValueOnce(false);
+      expect((await startAnyway()).status).toBe(409);
+      expect(task()).toMatchObject({
+        admission_state: 'provider_limit_waiting',
+        provider_limit_wait_json: before,
+      });
+    });
+
+    it('keeps the override when the nudge outcome is ambiguous', async () => {
+      boundary.nudge.mockRejectedValueOnce(new Error('rpc reset'));
+      expect((await startAnyway()).status).toBe(409);
+      // The runner may already be acting on it; re-imposing the hold could stall a live start.
+      expect(task().admission_state).toBeNull();
+      expect(JSON.parse(task().provider_limit_wait_json as string)).toMatchObject({
+        ownerOverride: { credentialKey: 'cc_credentials:quota-key' },
+      });
+    });
   });
 });

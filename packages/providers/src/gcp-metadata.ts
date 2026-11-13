@@ -15,11 +15,41 @@ import {
   SAM_VOLUME_FSTAB_OPTIONS,
   SAM_VOLUME_MOUNT_PATH_TEMPLATE,
 } from './types';
-import type { GcpNetworkInterfacePayload } from './validation';
+import type { GcpNetworkInterfacePayload } from './validation-gcp';
 
 export const COMPUTE_API_BASE = 'https://compute.googleapis.com/compute/v1';
 // 100 pages × 500 items/page ≈ 50,000 resources — well above any realistic fleet
 export const DEFAULT_GCP_MAX_LIST_PAGES = 100;
+/**
+ * Attempts at `machineTypes.get` when mapping a created or fetched instance. Observed hardware is
+ * written once, at provisioning, so a single transient failure would otherwise leave the node
+ * unable to admit workspaces for its whole life.
+ */
+export const DEFAULT_GCP_MACHINE_TYPE_LOOKUP_ATTEMPTS = 3;
+/** Delay between those attempts. */
+export const DEFAULT_GCP_MACHINE_TYPE_LOOKUP_RETRY_DELAY_MS = 1000;
+/**
+ * Boot disk type for SAM-created VMs. Compute Engine gives an API-created disk with no type
+ * `pd-standard` (HDD-backed). `pd-balanced` is SSD-backed and counts against the region's
+ * `SSD_TOTAL_GB` quota.
+ */
+export const DEFAULT_GCP_BOOT_DISK_TYPE = 'pd-balanced';
+/**
+ * Machine series that can boot from `pd-balanced`. Hyperdisk-only series (N4, C4, C4A, C4D,
+ * N4A, N4D, ...) reject Persistent Disk, so any series not listed here keeps sending no disk
+ * type, exactly as before SAM requested `pd-balanced`.
+ */
+export const GCP_PD_BALANCED_BOOT_SERIES: ReadonlySet<string> = new Set([
+  'e2',
+  'n1',
+  'n2',
+  'n2d',
+  't2d',
+  'c2',
+  'c2d',
+  'c3',
+  'c3d',
+]);
 
 /** GCP codes that say the zone cannot supply this machine type right now. */
 const GCP_STOCKOUT_CODES = new Set([

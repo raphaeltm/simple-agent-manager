@@ -17,7 +17,6 @@ const mocks = vi.hoisted(() => ({
   deleteProjectRuntimeEnvVar: vi.fn(),
   upsertProjectRuntimeFile: vi.fn(),
   deleteProjectRuntimeFile: vi.fn(),
-  createWorkspace: vi.fn(),
   updateProject: vi.fn(),
   createProjectTask: vi.fn(),
   updateProjectTask: vi.fn(),
@@ -51,7 +50,6 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   deleteProjectRuntimeEnvVar: mocks.deleteProjectRuntimeEnvVar,
   upsertProjectRuntimeFile: mocks.upsertProjectRuntimeFile,
   deleteProjectRuntimeFile: mocks.deleteProjectRuntimeFile,
-  createWorkspace: mocks.createWorkspace,
   updateProject: mocks.updateProject,
   createProjectTask: mocks.createProjectTask,
   updateProjectTask: mocks.updateProjectTask,
@@ -222,7 +220,6 @@ describe('Project page', () => {
       envVars: [],
       files: [],
     });
-    mocks.createWorkspace.mockResolvedValue({ id: 'ws-1' });
     mocks.updateProject.mockResolvedValue({});
     mocks.createProjectTask.mockResolvedValue({});
     mocks.deleteProjectTask.mockResolvedValue({ success: true });

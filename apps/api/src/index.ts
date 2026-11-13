@@ -1,4 +1,6 @@
-import { buildContextCallbackRoute } from './routes/projects/build-context-callback';
+// Configure @simple-agent-manager/repo-hosting's ports before any route or Durable Object can use it.
+import './repo-hosting-wiring';
+
 export { McpRateCounter } from './durable-objects/mcp-rate-counter';
 export { WorkspaceBootLog } from './durable-objects/workspace-boot-log';
 import { adminAgentEmailRoutes } from './routes/admin-agent-email';
@@ -19,11 +21,11 @@ export { InteractionStore } from './durable-objects/interaction-store';
 export { NodeLifecycle } from './durable-objects/node-lifecycle';
 export { NotificationService } from './durable-objects/notification';
 export { ProjectAgent } from './durable-objects/project-agent';
-export { ProjectData } from './durable-objects/project-data';
 export { ProjectOrchestrator } from './durable-objects/project-orchestrator';
 export { SamSession } from './durable-objects/sam-session';
 export { SetupSessionPool } from './durable-objects/setup-session-pool';
 export { TaskRunner } from './durable-objects/task-runner';
+export { ProjectData } from './project-data-wiring';
 // Inert tombstones: wrangler migrations v7-v9 created these classes for the retired
 // anonymous-trial product, so they must stay exported (see durable-objects/retired-trial.ts).
 export { TrialCounter, TrialEventBus, TrialOrchestrator } from './durable-objects/retired-trial';
@@ -44,6 +46,7 @@ import { applyCacheHeaders } from './lib/cache-headers';
 import { withRequestScopedD1Bindings } from './lib/d1-session';
 import { log, serializeError } from './lib/logger';
 import { resolvePagesProxyTarget } from './lib/pages-proxy';
+import { stripPreviewAuthCookies } from './lib/preview-cookies';
 import { parseWorkspaceSubdomain } from './lib/workspace-subdomain';
 import { analyticsMiddleware } from './middleware/analytics';
 import { apiCors } from './middleware/api-cors';
@@ -75,6 +78,7 @@ import { agentCredentialSetupSessionsRoutes } from './routes/agent-credential-se
 import { agentModelCatalogRoutes, projectAgentModelRoutes } from './routes/agent-models';
 import { agentProfileRoutes } from './routes/agent-profiles';
 import { agentSettingsRoutes } from './routes/agent-settings';
+import { agentSignInRoutes } from './routes/agent-sign-in';
 import { agentsCatalogRoutes } from './routes/agents-catalog';
 import { aiProxyRoutes } from './routes/ai-proxy';
 import { aiProxyAnthropicRoutes } from './routes/ai-proxy-anthropic';
@@ -168,6 +172,7 @@ import { terminalRoutes } from './routes/terminal';
 import { transcribeRoutes } from './routes/transcribe';
 import { trialRoutes } from './routes/trial';
 import { triggerWebhookRoutes } from './routes/trigger-webhooks';
+import { signedTriggerWebhookRoutes } from './routes/trigger-webhooks-signed';
 import { triggersRoutes } from './routes/triggers';
 import { ttsRoutes } from './routes/tts';
 import { uiGovernanceRoutes } from './routes/ui-governance';
@@ -183,13 +188,17 @@ import {
 import { scheduled } from './scheduled/handler';
 import { handleInboundAgentEmail } from './services/agent-email/inbound';
 import { agentEmailConfig } from './services/agent-email/setup-state';
+import { isAgentSignInEnabled } from './services/agent-sign-in/config';
+import { isPastHardExpiry } from './services/agent-sign-in/session-cap';
 import { signTerminalToken, verifyPortAccessToken, verifyTerminalToken } from './services/jwt';
+import { getNodeBackendBaseUrl } from './services/node-agent-readiness';
 import { assertSessionUserApproved } from './services/signup-approval';
 import { recordNodeRoutingMetric } from './services/telemetry';
 import { assertTerminalTokenSessionLive } from './services/terminal-token-liveness';
 import {
   fetchVmAgentContainer,
   getVmAgentContainerConfig,
+  isInstantRuntimeAvailable,
   SAM_PROXIED_REQUEST_HEADER,
 } from './services/vm-agent-container';
 
@@ -377,7 +386,8 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
       headers: c.req.raw.headers,
       query: { disableCookieCache: true },
     });
-    if (session?.user) {
+    // An agent sign-in session past its hard expiry is no session (agent-sign-in/session-cap.ts).
+    if (session?.user && !isPastHardExpiry(session.session)) {
       await assertSessionUserApproved(c.env, session.user);
       userId = session.user.id;
     }
@@ -513,6 +523,7 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
     }
 
     const headers = new Headers(c.req.raw.headers);
+    if (targetPort !== null) stripPreviewAuthCookies(headers);
     headers.delete('x-sam-node-id');
     headers.delete('x-sam-workspace-id');
     headers.delete('x-forwarded-host');
@@ -544,6 +555,7 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
     );
 
     const containerRequest = new Request(containerUrl.toString(), {
+      redirect: targetPort !== null ? 'manual' : c.req.raw.redirect,
       method: c.req.raw.method,
       headers,
       body: c.req.raw.body,
@@ -589,15 +601,16 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
         status: response.status,
         statusText: response.statusText,
         headers: responseHeaders,
+        // A 101 response must carry its accepted socket through cookie filtering.
+        webSocket: response.webSocket,
       });
     }
     return response;
   }
 
   // Proxy to the VM agent via its proxied (orange-clouded) backend hostname.
-  // Cloudflare Workers cannot fetch IP addresses directly (Error 1003),
-  // so we use the {id}.vm.{domain} hostname. The two-level subdomain bypasses
-  // the wildcard Worker route *.{domain}/* (which only matches one level).
+  // The explicit scriptless *.vm route prevents recursion through this Worker.
+  // Its DNS record selects legacy public-IP or Cloudflare Tunnel transport.
   const routedNodeId = (workspace.nodeId || workspaceId).toLowerCase();
   const backendHostname = `${routedNodeId}.vm.${baseDomain}`;
   log.info('ws_proxy_route', {
@@ -617,9 +630,7 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
     },
     c.env
   );
-  const vmAgentProtocol = c.env.VM_AGENT_PROTOCOL || 'https';
-  const vmAgentPort = c.env.VM_AGENT_PORT || '8443';
-  const vmUrl = new URL(`${vmAgentProtocol}://${backendHostname}:${vmAgentPort}`);
+  const vmUrl = new URL(getNodeBackendBaseUrl(routedNodeId, c.env));
   vmUrl.pathname = url.pathname;
   vmUrl.search = url.search;
 
@@ -650,6 +661,7 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
 
   // Strip client-supplied routing headers and inject trusted routing context.
   const headers = new Headers(c.req.raw.headers);
+  if (targetPort !== null) stripPreviewAuthCookies(headers);
   headers.delete('x-sam-node-id');
   headers.delete('x-sam-workspace-id');
   headers.delete('x-forwarded-host');
@@ -666,6 +678,7 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
   let response: Response;
   try {
     response = await fetch(vmUrl.toString(), {
+      redirect: targetPort !== null ? 'manual' : c.req.raw.redirect,
       method: c.req.raw.method,
       headers,
       body: c.req.raw.body,
@@ -710,6 +723,8 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
       status: response.status,
       statusText: response.statusText,
       headers,
+      // Preserve preview WebSockets (including dev-server HMR).
+      webSocket: response.webSocket,
     });
   }
 
@@ -749,6 +764,12 @@ app.get('/api/config/artifacts-enabled', (c) => {
   return c.json({ enabled: c.env.ARTIFACTS_ENABLED === 'true' && !!c.env.ARTIFACTS });
 });
 
+// Public config — whether agents can run on Instant (Cloudflare Containers) with no cloud account.
+app.get('/api/config/instant-runtime', (c) => {
+  applyCacheHeaders(c, 'public-config');
+  return c.json({ enabled: isInstantRuntimeAvailable(c.env) });
+});
+
 // Public config — whether this deployment can receive and send agent email (preview).
 app.get('/api/config/agent-email', async (c) => {
   applyCacheHeaders(c, 'public-config');
@@ -765,7 +786,8 @@ app.get('/api/config/vapid-public-key', (c) => {
 
 // Public config — which login providers are configured, so the login surfaces
 // only render a provider button when that provider is actually usable. Google
-// here means the LOGIN client (getGoogleLoginOAuthConfig), never the infra/GCP one.
+// here means the LOGIN client (getGoogleLoginOAuthConfig), never the infra/GCP one. Email
+// means this deployment can send sign-in codes (services/email-sign-in.ts).
 app.get('/api/config/login-providers', async (c) => {
   const { getGitHubOAuthConfig, getGitLabOAuthConfig, getGoogleLoginOAuthConfig } =
     await import('./services/platform-config');
@@ -774,8 +796,17 @@ app.get('/api/config/login-providers', async (c) => {
     getGoogleLoginOAuthConfig(c.env),
     getGitLabOAuthConfig(c.env),
   ]);
+  const { emailSignInAvailable } = await import('./services/email-sign-in');
   applyCacheHeaders(c, 'public-config');
-  return c.json({ github: github !== null, google: google !== null, gitlab: gitlab !== null });
+  return c.json({
+    github: github !== null,
+    google: google !== null,
+    gitlab: gitlab !== null,
+    email: emailSignInAvailable(c.env),
+    // Shown on the sign-in page so anyone using the instance can tell it accepts agent
+    // sign-in. A boolean only: the trusted issuer and allowlists are not published.
+    agentSignIn: isAgentSignInEnabled(c.env),
+  });
 });
 
 // JWKS endpoint (must be at root level)
@@ -817,6 +848,9 @@ app.get('/oidc/.well-known/jwks.json', async (c) => {
 // Both must be mounted before authRoutes to avoid BetterAuth's wildcard catch-all.
 app.route('/api/auth', codexRefreshRoutes);
 app.route('/api/auth', apiTokenRoutes);
+// Agent sign-in through workload identity. Steps aside (falls through) when AGENT_SIGN_IN_TRUST
+// is not configured, so the path then answers exactly as an unknown /api/auth route.
+app.route('/api/auth', agentSignInRoutes);
 app.route('/api/auth', deviceFlowRoutes);
 app.route('/api/auth', authRoutes);
 app.route('/api/setup', setupRoutes);
@@ -853,6 +887,8 @@ app.route('/api/cli', cliRoutes);
 app.route('/api/chats', chatsRoutes);
 app.route('/api/t', analyticsIngestRoutes);
 app.route('/api/webhooks', triggerWebhookRoutes);
+// Signed senders (Slack, HMAC) cannot present SAM's token: POST /api/webhooks/in/:triggerId.
+app.route('/api/webhooks', signedTriggerWebhookRoutes);
 // ORDERING IS CRITICAL: Routes using callback JWT auth MUST be mounted before
 // projectsRoutes. projectsRoutes has use('/*', requireAuth()) which leaks to
 // all siblings at the same base path — mounting these routes first causes them
@@ -869,8 +905,7 @@ app.route('/api/projects', taskCallbackRoute); // Must be before projectsRoutes 
 app.route('/api/projects', registryPushCredentialsCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', composeImageArtifactsCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', composePublishReleaseCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
-app.route('/api/projects', deploymentPublishJobCallbackRoute);
-app.route('/api/projects', buildContextCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
+app.route('/api/projects', deploymentPublishJobCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', workspaceEvictionCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', workspaceResourceHistoryCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', projectsRoutes);

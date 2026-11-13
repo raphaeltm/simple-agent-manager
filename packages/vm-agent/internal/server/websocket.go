@@ -193,7 +193,7 @@ func (s *Server) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	runtime := s.upsertWorkspaceRuntime(workspaceID, "", "", "running", "")
+	runtime := s.upsertWorkspaceRuntimeForAttach(workspaceID)
 	if !s.requireWorkspaceReconnectState(w, r, runtime) {
 		return
 	}
@@ -337,7 +337,7 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	runtime := s.upsertWorkspaceRuntime(workspaceID, "", "", "running", "")
+	runtime := s.upsertWorkspaceRuntimeForAttach(workspaceID)
 	if !s.requireWorkspaceReconnectState(w, r, runtime) {
 		return
 	}

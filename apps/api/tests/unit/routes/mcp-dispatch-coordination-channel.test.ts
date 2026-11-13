@@ -11,6 +11,7 @@ import type { Env } from '../../../src/env';
 import type { McpTokenData } from '../../../src/routes/mcp/_helpers';
 import { parseDispatchTaskParams } from '../../../src/routes/mcp/dispatch-tool-params';
 import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../../src/services/default-capacity-pools';
+import { pickStarterMachines } from '../../helpers/capacity-pool-picks';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 import { seedCloudCredential, seedProjectWithMember, seedUser } from './capacity-pool-test-seeds';
 
@@ -123,6 +124,7 @@ describe('dispatch_task coordination channel inheritance (real persistence)', ()
       projectId: 'project-1',
       includeInstallation: false,
     });
+    await pickStarterMachines(drizzle(env.DATABASE, { schema }) as never);
   });
 
   afterEach(() => sqlite.close());

@@ -96,6 +96,21 @@ const mermaidPosts = [
     path: '/blog/sams-journal-recovery-needs-a-safe-handoff/',
     screenshotName: 'safe-recovery-handoff',
   },
+  {
+    name: 'the VM tunnel journal',
+    path: '/blog/sams-journal-vms-with-no-open-ports/',
+    screenshotName: 'vm-tunnel',
+  },
+  {
+    name: 'the secret request journal',
+    path: '/blog/sams-journal-asking-for-a-secret/',
+    screenshotName: 'secret-request',
+  },
+  {
+    name: 'the worker split journal',
+    path: '/blog/sams-journal-splitting-the-worker/',
+    screenshotName: 'worker-split',
+  },
 ];
 
 for (const post of mermaidPosts) {

@@ -166,6 +166,7 @@ func Load() (*Config, error) {
 		ACPPromptRetryInitial:             getEnvDuration("ACP_PROMPT_RETRY_INITIAL_BACKOFF", 15*time.Second),
 		ACPPromptRetryMax:                 getEnvDuration("ACP_PROMPT_RETRY_MAX_BACKOFF", 2*time.Minute),
 		ACPRecoveryWatchdog:               getEnvDuration("DEFAULT_RECOVERY_WATCHDOG_TIMEOUT", DefaultACPRecoveryWatchdogTimeout),
+		ACPEvictionParkTimeout:            getEnvDuration("EVICTION_PARK_TIMEOUT", DefaultACPEvictionParkTimeout),
 		ACPRestartDecayWindow:             getEnvDuration("DEFAULT_RESTART_DECAY_WINDOW", DefaultACPRestartDecayWindow),
 		ACPIdleSuspendTimeout:             getEnvDuration("ACP_IDLE_SUSPEND_TIMEOUT", 30*time.Minute),
 		ACPNotifSerializeTimeout:          getEnvDuration("ACP_NOTIF_SERIALIZE_TIMEOUT", 5*time.Second),
@@ -458,6 +459,14 @@ func Load() (*Config, error) {
 	}
 	if cfg.WorktreeCacheTTL <= 0 {
 		cfg.WorktreeCacheTTL = 5 * time.Second
+	}
+
+	if err := cfg.validateEvictionParkTimeout(); err != nil {
+		return nil, err
+	}
+
+	if cfg.Tunnel, err = loadTunnelConfig(cfg.Port); err != nil {
+		return nil, err
 	}
 
 	return cfg, nil

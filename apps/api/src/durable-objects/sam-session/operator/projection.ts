@@ -1,8 +1,8 @@
+import { operations } from '@simple-agent-manager/operations';
 import { drizzle } from 'drizzle-orm/d1';
 
 import type { Env } from '../../../env';
 import { requireProjectAccess } from '../../../middleware/project-auth';
-import { operations } from '../../../operations/registry';
 import { requireSessionWriter } from '../../../services/session-access';
 import type { OperatorAction } from './store';
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -412,5 +413,48 @@ func TestEvictionIdleOwnershipReachesCallbackAfterStop(t *testing.T) {
 	}
 	if received == nil || *received {
 		t.Fatal("callback lost captured idle ownership")
+	}
+}
+
+func TestEvictionInterruptedWorkAggregatesAllWorkspaceHosts(t *testing.T) {
+	idle := false
+	for _, tc := range []struct {
+		name    string
+		hosts   int
+		unknown bool
+		want    *bool
+	}{
+		{name: "all idle", hosts: 2, want: &idle},
+		{name: "idle and unknown", hosts: 2, unknown: true},
+		{name: "no hosts"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newEvictionTestServer()
+			initializeEvictionTestStore(t, s)
+			for i := 0; i < tc.hosts; i++ {
+				host := acp.NewSessionHost(acp.SessionHostConfig{})
+				t.Cleanup(host.Stop)
+				if tc.unknown && i == 0 {
+					host.Stop()
+				}
+				s.sessionHosts[fmt.Sprintf("workspace-1:agent-%d", i)] = host
+			}
+			// A similarly named workspace must not contribute its unknown state.
+			unrelated := acp.NewSessionHost(acp.SessionHostConfig{})
+			unrelated.Stop()
+			s.sessionHosts["workspace-10:agent-1"] = unrelated
+			target := evictionTargetFixture(s)
+			if err := s.prepareWorkspaceEvictionStop(context.Background(), target); err != nil {
+				t.Fatal(err)
+			}
+			delivery, err := s.store.ClaimEvictionDelivery(context.Background(), "", time.Now().Add(time.Hour), time.Second, time.Minute, time.Second)
+			if err != nil || delivery == nil {
+				t.Fatalf("delivery=%v err=%v", delivery, err)
+			}
+			got := delivery.InterruptedWork
+			if (got == nil) != (tc.want == nil) || got != nil && *got != *tc.want {
+				t.Fatalf("interruptedWork=%v want=%v", got, tc.want)
+			}
+		})
 	}
 }

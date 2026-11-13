@@ -6,8 +6,8 @@ import { Button } from '@simple-agent-manager/ui';
 import { Lock, Pencil, Plus } from 'lucide-react';
 import { useState } from 'react';
 
-import { ModelToggleSwitch } from '../../../components/agent-models/ModelToggleSwitch';
 import { Panel, SectionTitle } from '../../../components/page-kit/ui';
+import { ToggleSwitch } from '../../../components/ui/ToggleSwitch';
 import type { DeploymentEnvironmentConfigVar } from '../../../lib/api';
 import { useEnvironmentActions } from '../data';
 import { SectionLoading, TwoStepRemove } from '../shared';
@@ -71,7 +71,7 @@ function SettingForm({
             Hidden after saving, and never sent to builds.
           </span>
         </span>
-        <ModelToggleSwitch
+        <ToggleSwitch
           checked={draft.secret}
           label="Keep it secret"
           onChange={() => onChange({ ...draft, secret: !draft.secret })}

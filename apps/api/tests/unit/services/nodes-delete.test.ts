@@ -129,7 +129,8 @@ vi.mock('../../../src/services/workspace-lifecycle-finalizer', () => ({
     finalizeWorkspaceLifecycleClosure(...args),
 }));
 
-vi.mock('../../../src/lib/logger', () => ({
+vi.mock('../../../src/lib/logger', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/logger')>()),
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
   serializeError: vi.fn((err: unknown) => ({
     error: err instanceof Error ? err.message : String(err),

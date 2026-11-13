@@ -51,7 +51,7 @@ the shape rule 74 warns about. Decide the ranking before writing the cap:
 ## References
 
 - `apps/api/src/durable-objects/project-data/idea-work.ts`
-- `apps/api/src/operations/idea-list-core.ts`, `idea-list-reads.ts`
+- `packages/operations/src/idea-list-core.ts`, `idea-list-reads.ts`
 - `.claude/rules/65-capped-selection-must-rank-and-disclose.md`
 - `apps/api/.claude/rules/74` equivalent: `.claude/rules/74-proxy-signals-must-match-the-condition.md`
 - `.claude/rules/60-request-io-and-bundle-budgets.md`

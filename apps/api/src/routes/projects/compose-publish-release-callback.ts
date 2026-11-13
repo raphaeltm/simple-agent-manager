@@ -13,6 +13,7 @@ import type { InferOutput } from 'valibot';
 import * as v from 'valibot';
 import { parse as parseYaml } from 'yaml';
 
+import { createDeploymentProviderPort } from '../../app-deployment-ports/providers';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log, serializeError } from '../../lib/logger';
@@ -118,7 +119,7 @@ const composePublishSubmittedBySchema = v.object({
  * inject a foreign top-level field (notably `routes` — a real
  * DeploymentManifest field this submission has no legitimate reason to
  * carry) that `buildReleaseRouteDiscovery`
- * (services/deployment-routing.ts) would otherwise treat as an authoritative
+ * (`@simple-agent-manager/app-deployment` deployment-routing) would otherwise treat as an authoritative
  * build-on-node manifest. See .claude/rules/11-fail-fast-patterns.md and
  * .claude/rules/51-runtime-boundary-validation.md.
  */
@@ -388,7 +389,7 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
     // Provisioning can still race cancellation. Volumes belong to the environment;
     // createMissingDeclaredVolumes reuses existing names on the next release.
     // The later atomic release fence remains authoritative after provider I/O.
-    await createMissingDeclaredVolumes(db, c.env, userId, {
+    await createMissingDeclaredVolumes(db, createDeploymentProviderPort(c.env), userId, {
       environmentId,
       volumes: volumeDeclarations,
       location: placement.location,

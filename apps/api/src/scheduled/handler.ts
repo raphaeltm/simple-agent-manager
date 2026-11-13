@@ -1,5 +1,6 @@
 import { drizzle } from 'drizzle-orm/d1';
 
+import { createDeploymentPublishJobPorts } from '../app-deployment-ports/publish-jobs';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
@@ -12,7 +13,12 @@ import {
   runLifecycleLatencyDailyEvaluation,
   runLifecycleLatencyWatchdog,
 } from '../services/lifecycle-latency';
+import { runNodeTunnelCleanupSweep } from '../services/node-tunnel-cleanup';
 import { isOperationalLoopEnabled } from '../services/operational-kill-switch';
+import {
+  purgeRuntimeSecretMaterial,
+  runRuntimeSecretRequestSweep,
+} from '../services/runtime-secret-request-maintenance';
 import { checkProvisioningTimeouts } from '../services/timeout';
 import { migrateOrphanedWorkspaces } from '../services/workspace-migration';
 import { runWorkspaceResourceHistoryCleanup } from '../services/workspace-resource-history';
@@ -89,6 +95,14 @@ export async function scheduled(
     ctx.waitUntil(runOperationsAuditPurge(env, controller.cron));
     ctx.waitUntil(runDebugPackagePurge(env, controller.cron));
     ctx.waitUntil(runOperationsTelemetryRetention(env, controller.cron));
+    // Expired collected secret values are already refused at read time; this deletes them.
+    ctx.waitUntil(
+      purgeRuntimeSecretMaterial(env).catch((err) => {
+        log.error('cron.runtime_secret_purge_failed', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      })
+    );
     // Separate promise again, so none of the jobs above can suppress the latency check.
     ctx.waitUntil(
       runLifecycleLatencyDailyEvaluation(env).catch((err) => {
@@ -108,7 +122,7 @@ export async function scheduled(
   // Every sweep is isolated so one failure cannot suppress later recovery work.
   const sweeps = createSweepIsolator(env);
   await sweeps.isolate('deployment_publish_jobs', () =>
-    runDeploymentPublishJobSweep(env, ctx.waitUntil.bind(ctx))
+    runDeploymentPublishJobSweep(env, createDeploymentPublishJobPorts(env), ctx.waitUntil.bind(ctx))
   );
   const githubTriggerRecovery = await sweeps.isolate('github_trigger_recovery', () =>
     runGitHubTriggerRecovery(env, ctx.waitUntil.bind(ctx))
@@ -147,6 +161,11 @@ export async function scheduled(
   const terminalNodeLifecycleRepair = await sweeps.isolate('terminal_node_lifecycle_repair', () =>
     runTerminalNodeLifecycleRepair(env)
   );
+  // After node teardown: releases tunnels of incarnations torn down this tick and retries
+  // any pending Cloudflare tunnel/DNS deletion (services/node-tunnel-cleanup.ts).
+  const nodeTunnelCleanup = await sweeps.isolate('node_tunnel_cleanup', () =>
+    runNodeTunnelCleanupSweep(env)
+  );
   const providerOrphans = await sweeps.isolate('provider_orphan_reconciliation', () =>
     runProviderOrphanReconciliation(env)
   );
@@ -165,6 +184,10 @@ export async function scheduled(
   );
   const triggerCleanup = await sweeps.isolate('trigger_execution_cleanup', () =>
     runTriggerExecutionCleanup(env)
+  );
+  // Two indexed reads per idle tick; work is capped by secrets.expirySweepBatchSize.
+  const secretRequestSweep = await sweeps.isolate('runtime_secret_request_sweep', () =>
+    runRuntimeSecretRequestSweep(env)
   );
   const sessionTaskRepair = await sweeps.isolate('session_task_reconciliation', () =>
     runSessionTaskReconciliation(env)
@@ -272,6 +295,9 @@ export async function scheduled(
     lifetimeNodesDestroyed: nodeCleanup?.lifetimeDestroyed,
     lifetimeNodesSkipped: nodeCleanup?.lifetimeSkipped,
     nodeCleanupErrors: nodeCleanup?.errors,
+    nodeTunnelsReleased: nodeTunnelCleanup?.released,
+    nodeTunnelCleanupsAttempted: nodeTunnelCleanup?.attempted,
+    nodeTunnelsCleaned: nodeTunnelCleanup?.cleaned,
     orphanedWorkspacesFlagged: nodeCleanup?.orphanedWorkspacesFlagged,
     orphanedNodesDestroyed: nodeCleanup?.orphanedNodesDestroyed,
     orphanedNodesSkipped: nodeCleanup?.orphanedNodesSkipped,
@@ -333,6 +359,9 @@ export async function scheduled(
     projectEventSourceOutboxAdmitted: triggerCleanup?.projectEventSourceOutboxAdmitted,
     credentialLimitWindowsPurged: triggerCleanup?.credentialLimitWindowsPurged,
     triggerExecCleanupErrors: triggerCleanup?.errors,
+    secretRequestsExpired: secretRequestSweep?.expired,
+    secretRequestAgentsNotified: secretRequestSweep?.agentsNotified,
+    secretRequestNoticesRetried: secretRequestSweep?.noticesRetried,
     sessionTaskRepairScanned: sessionTaskRepair?.scanned,
     sessionTaskRepairRepaired: sessionTaskRepair?.repaired,
     sessionTaskRepairReused: sessionTaskRepair?.reused,

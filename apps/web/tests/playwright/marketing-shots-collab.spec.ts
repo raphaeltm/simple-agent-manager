@@ -1211,7 +1211,7 @@ test.describe('Marketing shots — collaboration & comments', () => {
       rail.getByText('Prefer the retry helper in lib/http.ts instead of writing a bespoke backoff loop.')
     ).toBeVisible();
 
-    // Thread 1 (Elena's comment, Priya's "Sent to agent" reply, and the
+    // Thread 1 (Elena's comment, Camille's "Sent to agent" reply, and the
     // Claude Code — Opus 5 reply) already carries the Reply / Resolve
     // buttons and the "Sent to agent" label without expanding anything.
     // Leave thread 2's reply composer collapsed (just Reply / Resolve on

@@ -1,5 +1,6 @@
 import { DEFAULT_COMMENT_NOTIFICATION_WINDOW_MS } from '@simple-agent-manager/shared';
 
+import { DEFAULT_USER_ACCESS_TOKEN_LOCK_TIMEOUT_MS } from '../durable-objects/user-access-token-lock-config';
 import {
   type AdminSettingDefinition,
   DEFAULT_COMMENT_CONTEXT_MAX_ROWS,
@@ -28,6 +29,7 @@ import {
 } from './config-read-deadline';
 import { CONNECTOR_READ_SETTINGS } from './connector-read-settings-definition';
 import { ENV_KEYS, SETTING_KEYS } from './platform-config-store';
+import { RUNTIME_SECRET_REQUEST_SETTINGS } from './runtime-secret-request-settings-definition';
 import { WORKFLOW_DEFAULTS, WORKFLOW_SETTING_DETAILS } from './workflow-defaults';
 export const FEATURE_SETTINGS: AdminSettingDefinition[] = [
   {
@@ -117,6 +119,15 @@ export const FEATURE_SETTINGS: AdminSettingDefinition[] = [
     'Most stored rows read before and after a commented message for that view. Agent replies are stored as many streamed rows.',
     { min: 50, max: 5_000 }
   ),
+  ...RUNTIME_SECRET_REQUEST_SETTINGS.map((setting) =>
+    integerDefinition(
+      setting.name,
+      setting.defaultValue,
+      'Chat',
+      setting.description,
+      setting.range
+    )
+  ),
   ...CONNECTOR_READ_SETTINGS.map((setting) =>
     integerDefinition(
       setting.name,
@@ -146,6 +157,13 @@ export const FEATURE_SETTINGS: AdminSettingDefinition[] = [
     'Operations',
     'Maximum milliseconds for GitHub installation discovery.',
     { min: 100, max: 120_000 }
+  ),
+  integerDefinition(
+    'performance.userAccessTokenLockTimeoutMs',
+    DEFAULT_USER_ACCESS_TOKEN_LOCK_TIMEOUT_MS,
+    'Operations',
+    'Milliseconds a GitHub or GitLab user-token lookup may hold its per-user lock before a waiting lookup takes it over. Lower values risk two refreshes overlapping.',
+    { min: 10_000, max: 120_000 }
   ),
   integerDefinition(
     'performance.projectRecentTimeoutMs',

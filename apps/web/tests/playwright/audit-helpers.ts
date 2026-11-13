@@ -90,6 +90,7 @@ type MutableCapacitySummary = {
     exhaustionPolicy: string;
     maxNodes?: number;
     sourceOrder?: string[] | null;
+    excludedSourceIds?: string[];
     revision: number;
   };
   candidates: MutableCapacityCandidate[];
@@ -112,6 +113,7 @@ export type MockCapacityDefaultsUpdate = {
     providerInstanceSku?: string | null;
   }>;
   sourceOrder?: string[] | null;
+  excludedSourceIds?: string[] | null;
 };
 
 export function applyMockCapacityDefaultsUpdate<T extends MutableCapacityDefaultsResponse>(
@@ -128,6 +130,9 @@ export function applyMockCapacityDefaultsUpdate<T extends MutableCapacityDefault
   }
   if (update.policy?.maxNodes) summary.pool.maxNodes = update.policy.maxNodes;
   if (update.sourceOrder !== undefined) summary.pool.sourceOrder = update.sourceOrder;
+  if (update.excludedSourceIds !== undefined) {
+    summary.pool.excludedSourceIds = update.excludedSourceIds ?? [];
+  }
   for (const candidateUpdate of update.candidates ?? []) {
     const candidate = summary.candidates.find((item) => item.id === candidateUpdate.id);
     if (candidate) candidate.status = candidateUpdate.status;
@@ -162,6 +167,22 @@ export function applyMockCapacityDefaultsUpdate<T extends MutableCapacityDefault
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
+  }
+  // Like the server (default-capacity-pool-source-settings.ts): activating a machine switches its
+  // account back on, so the mock cannot diverge from what a real save returns.
+  const activatedSources = new Set([
+    ...(update.catalogAdditions ?? []).map((addition) => addition.sourceId),
+    ...(update.candidates ?? [])
+      .filter((candidateUpdate) => candidateUpdate.status === 'active')
+      .flatMap((candidateUpdate) => {
+        const candidate = summary.candidates.find((item) => item.id === candidateUpdate.id);
+        return candidate?.capacitySourceId ? [candidate.capacitySourceId] : [];
+      }),
+  ]);
+  if (summary.pool.excludedSourceIds) {
+    summary.pool.excludedSourceIds = summary.pool.excludedSourceIds.filter(
+      (id) => !activatedSources.has(id)
+    );
   }
   summary.activeCandidateCount = summary.candidates.filter(
     (candidate) => candidate.status === 'active'
@@ -396,12 +417,17 @@ export async function assertThemeButtonsNotClipped(page: Page) {
  * For `'system'`, pass `prefersDark` to deterministically control the OS
  * preference: a `matchMedia` override is installed before the app boots so the
  * pre-paint script and ThemeContext resolve `system` to a known value.
+ *
+ * `SHOT_THEME=dark|light` overrides the requested theme, so screenshot specs written for one
+ * theme can also capture the other (the website shows its product images in both).
  */
 export async function seedTheme(
   page: Page,
   theme: 'dark' | 'light' | 'system',
   prefersDark = true
 ) {
+  const forced = process.env.SHOT_THEME;
+  if (forced === 'dark' || forced === 'light') theme = forced;
   await page.addInitScript(
     ({ value, dark }) => {
       window.localStorage.setItem('sam-theme', value);

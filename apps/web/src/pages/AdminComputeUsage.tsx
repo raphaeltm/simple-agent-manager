@@ -137,7 +137,11 @@ export function UserDetail({ userId, onBack }: { userId: string; onBack: () => v
 
   return (
     <div className="space-y-4 min-w-0 overflow-hidden">
-      {error && <p role="alert" className="text-sm text-danger-fg">Refresh failed: {error}</p>}
+      {error && (
+        <p role="alert" className="text-sm text-danger-fg">
+          Refresh failed: {error}
+        </p>
+      )}
       <button
         type="button"
         onClick={onBack}
@@ -293,7 +297,11 @@ export function AdminComputeUsage() {
 
   return (
     <div className="space-y-4 min-w-0 overflow-hidden">
-      {error && <p role="alert" className="text-sm text-danger-fg">Refresh failed: {error}</p>}
+      {error && (
+        <p role="alert" className="text-sm text-danger-fg">
+          Refresh failed: {error}
+        </p>
+      )}
       <div>
         <SectionHeading>Node Usage</SectionHeading>
         <Body className="text-fg-muted text-sm">

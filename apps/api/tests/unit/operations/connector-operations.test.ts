@@ -1,12 +1,6 @@
 import { readFileSync } from 'node:fs';
 
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-import * as schema from '../../../src/db/schema';
-import type { Env } from '../../../src/env';
-import { markRejectedBeforeEffects } from '../../../src/lib/operation-effect-boundary';
-import { AppError } from '../../../src/middleware/error';
+import type { OperationContext } from '@simple-agent-manager/operations';
 import {
   samAgentAnswer,
   samChatSend,
@@ -16,8 +10,8 @@ import {
   samProjectGet,
   samProjectsList,
   samWorkStop,
-} from '../../../src/operations/connector-operations';
-import { OperationError } from '../../../src/operations/errors';
+} from '@simple-agent-manager/operations';
+import { OperationError } from '@simple-agent-manager/operations';
 import {
   samChatRead,
   samIdeaCreate,
@@ -25,8 +19,16 @@ import {
   samIdeaUpdate,
   samProfilesList,
   samTasksList,
-} from '../../../src/operations/platform-operations';
-import type { OperationContext } from '../../../src/operations/types';
+} from '@simple-agent-manager/operations';
+import Database from 'better-sqlite3';
+import * as v from 'valibot';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import * as schema from '../../../src/db/schema';
+import type { Env } from '../../../src/env';
+import { markRejectedBeforeEffects } from '../../../src/lib/operation-effect-boundary';
+import { AppError } from '../../../src/middleware/error';
+import { createOperationPorts } from '../../../src/operation-ports';
 import { executeConnectorWrite } from '../../../src/services/connector-execution';
 import * as projectData from '../../../src/services/project-data';
 import { sessionAccessFromGetSession } from '../../helpers/session-access-mock';
@@ -92,6 +94,7 @@ describe('connector operations current membership and creator authority', () => 
   function ctx(userId = 'owner'): OperationContext {
     return {
       env,
+      ports: createOperationPorts(env),
       actor: {
         userId,
         via: 'connector',
@@ -220,6 +223,83 @@ describe('connector operations current membership and creator authority', () => 
     ).toEqual(['chat']);
     expect((await samChatsList.run(ctx('unknown'), {})).chats).toEqual([]);
     expect((await samChatsList.run(ctx('colleague'), {})).chats[0]?.attention).toBeNull();
+  });
+  it('chats carry their task state beside the lifecycle label, flagging a stale active label', async () => {
+    sqlite.exec(`
+      INSERT INTO tasks (id,project_id,user_id,title,status,execution_step,parent_task_id,updated_at)
+        VALUES ('child','project','owner','Child','in_progress','running','task','2026-10-09');
+      INSERT INTO session_summaries (id,project_id,created_by_user_id,updated_at,task_id,status)
+        VALUES ('live','project','owner',30,'child','active');
+      UPDATE session_summaries SET task_id='task', status='active' WHERE id='chat';
+      INSERT INTO tasks (id,project_id,user_id,title,status,updated_at)
+        VALUES ('foreign-task','secret','outsider','Secret','failed','2026-10-09');
+      INSERT INTO session_summaries (id,project_id,created_by_user_id,updated_at,task_id,status)
+        VALUES ('mismatch','project','owner',25,'foreign-task','active');
+    `);
+    const chats = Object.fromEntries(
+      (await samChatsList.run(ctx(), {})).chats.map((chat) => [chat.id, chat])
+    );
+    expect(chats.live?.operational).toEqual({
+      taskStatus: 'in_progress',
+      executionStep: 'running',
+      parentTaskId: 'task',
+      taskTerminal: false,
+      labelMayBeStale: false,
+    });
+    // The index still says active although the task completed.
+    expect(chats.chat).toMatchObject({
+      status: 'active',
+      operational: { taskStatus: 'completed', taskTerminal: true, labelMayBeStale: true },
+    });
+    // A task from another project is never attached, even when the index points at it.
+    expect(chats.mismatch?.operational).toBeNull();
+    expect(JSON.stringify(chats)).not.toContain('"taskStatus":"failed"');
+  });
+  it('tasks list carries lineage, execution step and the chat session for apps', async () => {
+    sqlite.exec(
+      "INSERT INTO tasks (id,project_id,user_id,title,status,execution_step,parent_task_id,chat_session_id,updated_at) VALUES ('child','project','owner','Child','in_progress','running','task','child-chat','2026-10-10')"
+    );
+    const tasks = Object.fromEntries(
+      (await samTasksList.run(ctx(), {})).tasks.map((task) => [task.id, task])
+    );
+    expect(tasks.child).toMatchObject({
+      parentTaskId: 'task',
+      executionStep: 'running',
+      sessionId: 'child-chat',
+    });
+    expect(tasks.task).toMatchObject({ parentTaskId: null, sessionId: 'chat' });
+  });
+  it('sam_chat_start accepts a bounded one-chat model and effort and forwards them', async () => {
+    const ok = v.safeParse(samChatStart.input, {
+      projectId: 'project',
+      message: 'Work',
+      model: 'claude-opus-5-5',
+      effort: 'high',
+    });
+    expect(ok.success && ok.output).toMatchObject({ model: 'claude-opus-5-5', effort: 'high' });
+    for (const bad of [{ model: 'x'.repeat(201) }, { model: '' }, { effort: 'turbo' }])
+      expect(
+        v.safeParse(samChatStart.input, { projectId: 'project', message: 'Work', ...bad }).success
+      ).toBe(false);
+    const result = await samChatStart.run(ctx(), {
+      projectId: 'project',
+      message: 'Work',
+      agentProfileId: 'profile',
+      model: 'claude-opus-5-5',
+      effort: 'high',
+    });
+    expect(mocks.submit.mock.calls[0]?.[3]).toMatchObject({
+      agentProfileId: 'profile',
+      model: 'claude-opus-5-5',
+      effort: 'high',
+    });
+    expect(result).toMatchObject({
+      agentOverrides: { model: 'claude-opus-5-5', effort: 'high', scope: 'this_chat_only' },
+    });
+    // No override, no override block.
+    expect(
+      await samChatStart.run(ctx(), { projectId: 'project', message: 'Again' })
+    ).not.toHaveProperty('agentOverrides');
   });
   it('inbox filters other projects and limits private interaction details to creator', async () => {
     const inbox = await samInboxGet.run(ctx(), {});

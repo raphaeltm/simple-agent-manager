@@ -77,6 +77,11 @@ export interface CapacitySourceIdentity {
   /** Stable semantic source authority. This is not the refresh-order source_generation fence. */
   authorityGeneration?: number;
   status: CapacityPoolStatus;
+  /**
+   * The name a person gave this connection (composable credentials), for display only. Absent
+   * on placement reads and for keys without a name. Never use it for identity.
+   */
+  label?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -103,6 +108,12 @@ export interface CapacityPool {
    * means every source is equal (no order).
    */
   sourceOrder?: string[] | null;
+  /**
+   * Capacity source ids a person switched off in this pool. Their picks are kept but never
+   * placed: no new VMs and no reuse of their running nodes. Absent or empty means every
+   * source is on. See `isCapacitySourceExcluded`.
+   */
+  excludedSourceIds?: string[];
   lastReconciledAt?: string | null;
   migrationVersion?: string | null;
   migrationState?: string | null;
@@ -323,6 +334,19 @@ export interface DefaultCapacityPoolUpdateRequest {
    * `null` or `[]` clears it, making every source equal again.
    */
   sourceOrder?: string[] | null;
+  /**
+   * Replace the set of switched-off capacity sources (accounts). `null` or `[]` switches every
+   * account on. Activating a machine of a switched-off account switches that account on.
+   */
+  excludedSourceIds?: string[] | null;
+}
+
+/** True when a person switched this capacity source off in this pool. */
+export function isCapacitySourceExcluded(
+  pool: Pick<CapacityPool, 'excludedSourceIds'>,
+  sourceId: string
+): boolean {
+  return pool.excludedSourceIds?.includes(sourceId) ?? false;
 }
 
 export interface ProjectDefaultCapacityPoolsResponse {

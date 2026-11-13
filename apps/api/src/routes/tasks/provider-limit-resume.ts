@@ -6,7 +6,10 @@ import type { Env } from '../../env';
 import { requireRouteParam } from '../../lib/route-helpers';
 import { getUserId, requireApproved, requireAuth } from '../../middleware/auth';
 import { requireProjectCapability } from '../../middleware/project-auth';
-import { resumeProviderLimitTask } from '../../services/provider-limit-recovery';
+import {
+  resumeProviderLimitTask,
+  startProviderLimitTaskAnyway,
+} from '../../services/provider-limit-recovery';
 import { requireProjectTaskById } from './_helpers';
 
 export const providerLimitResumeRoutes = new Hono<{ Bindings: Env }>();
@@ -21,5 +24,18 @@ providerLimitResumeRoutes.post(
     await requireProjectCapability(db, projectId, userId, 'task:write');
     const task = await requireProjectTaskById(db, projectId, requireRouteParam(c, 'taskId'));
     return c.json(await resumeProviderLimitTask(c.env, task, userId), 202);
+  }
+);
+providerLimitResumeRoutes.post(
+  '/:taskId/provider-limit/start-anyway',
+  requireAuth(),
+  requireApproved(),
+  async (c) => {
+    const userId = getUserId(c);
+    const projectId = requireRouteParam(c, 'projectId');
+    const db = drizzle(c.env.DATABASE, { schema });
+    await requireProjectCapability(db, projectId, userId, 'task:write');
+    const task = await requireProjectTaskById(db, projectId, requireRouteParam(c, 'taskId'));
+    return c.json(await startProviderLimitTaskAnyway(c.env, task, userId), 202);
   }
 );

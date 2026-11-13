@@ -305,6 +305,16 @@ func TestCheckpointRolloverStrictResumeFailureIsExplicit(t *testing.T) {
 	}
 	assertSingleCheckpointTerminal(t, completed)
 	assertNoReadyStatus(t, host)
+	host.mu.RLock()
+	retained := host.checkpointRollover != nil
+	host.mu.RUnlock()
+	if retained {
+		t.Fatal("failed strict resume retained checkpoint episode after detaching process")
+	}
+	if _, err := host.CheckpointRollover(context.Background(), time.Millisecond); errors.Is(err, ErrCheckpointInProgress) {
+		t.Fatal("old failed checkpoint blocks subsequent rollover")
+	}
+
 }
 
 func TestCheckpointTerminalOwnershipSuppressesDelayedProcessExitRestart(t *testing.T) {

@@ -11,19 +11,23 @@ import type { Env } from './env';
 import { createModuleLogger } from './lib/logger';
 import { readResponseJson } from './lib/runtime-validation';
 import { getBetterAuthSecret } from './lib/secrets';
+import { clampSessionRefresh, HARD_EXPIRES_AT_FIELD } from './services/agent-sign-in/session-cap';
 import {
   bootstrapOwnerEmail,
   bootstrapSessionAllowed,
   bootstrapUserDecision,
 } from './services/bootstrap-owner';
+import { emailSignInPlugins } from './services/email-sign-in';
+import { refreshGitHubAccessToken } from './services/github-oauth-refresh';
 import {
-  getGitHubOAuthConfig,
   resolveLoginOAuthConfig,
   selectGitHubOAuthConfig,
   selectGitLabOAuthConfig,
   selectGoogleLoginOAuthConfig,
 } from './services/platform-config';
 import { isSignupApprovalRequired } from './services/signup-approval';
+
+export { refreshGitHubAccessToken };
 
 const log = createModuleLogger('auth');
 
@@ -72,7 +76,6 @@ interface GitHubEmailResponse {
 }
 
 const GITHUB_API_VERSION = '2022-11-28';
-const GITHUB_TOKEN_URL = 'https://github.com/login/oauth/access_token';
 
 const githubUserSchema = v.object({
   // GitHub sends a number; normalised to the string stored in `accounts.account_id`.
@@ -88,78 +91,6 @@ const githubEmailSchema = v.object({
   primary: v.boolean(),
   verified: v.boolean(),
 });
-
-const githubRefreshTokenSuccessSchema = v.object({
-  access_token: v.string(),
-  refresh_token: v.optional(v.string()),
-  expires_in: v.optional(v.number()),
-  refresh_token_expires_in: v.optional(v.number()),
-  scope: v.optional(v.string()),
-  token_type: v.optional(v.string()),
-  id_token: v.optional(v.string()),
-});
-
-const githubRefreshTokenErrorSchema = v.object({
-  error: v.string(),
-  error_description: v.optional(v.string()),
-});
-
-function expiresAtFromSeconds(seconds: number | undefined): Date | undefined {
-  if (typeof seconds !== 'number' || !Number.isFinite(seconds)) {
-    return undefined;
-  }
-  return new Date(Date.now() + seconds * 1000);
-}
-
-export async function refreshGitHubAccessToken(env: Env, refreshToken: string) {
-  const githubOAuth = await getGitHubOAuthConfig(env);
-  if (!githubOAuth) {
-    throw new Error('GitHub OAuth is not configured');
-  }
-
-  const requestBody = new URLSearchParams();
-  requestBody.set('client_id', githubOAuth.clientId);
-  requestBody.set('client_secret', githubOAuth.clientSecret);
-  requestBody.set('grant_type', 'refresh_token');
-  requestBody.set('refresh_token', refreshToken);
-
-  const response = await fetch(GITHUB_TOKEN_URL, {
-    method: 'POST',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'User-Agent': 'SAM-Auth',
-    },
-    body: requestBody,
-  });
-
-  const body = await response.json().catch(() => null);
-  if (!response.ok) {
-    log.warn('github_oauth_refresh_failed', { status: response.status });
-    throw new Error('GitHub OAuth refresh failed');
-  }
-
-  const errorResult = v.safeParse(githubRefreshTokenErrorSchema, body);
-  if (errorResult.success) {
-    log.warn('github_oauth_refresh_error_body', {
-      status: response.status,
-      error: errorResult.output.error,
-    });
-    throw new Error('GitHub OAuth refresh failed');
-  }
-
-  const data = v.parse(githubRefreshTokenSuccessSchema, body);
-  return {
-    accessToken: data.access_token,
-    refreshToken: data.refresh_token,
-    accessTokenExpiresAt: expiresAtFromSeconds(data.expires_in),
-    refreshTokenExpiresAt: expiresAtFromSeconds(data.refresh_token_expires_in),
-    scopes: data.scope ? data.scope.split(/[,\s]+/).filter(Boolean) : [],
-    tokenType: data.token_type,
-    idToken: data.id_token,
-    raw: data,
-  };
-}
 
 function githubApiHeaders(accessToken: string): HeadersInit {
   return {
@@ -209,7 +140,16 @@ export function selectPrimaryGitHubEmail(
 /**
  * Create BetterAuth instance with Cloudflare D1 + KV configuration.
  */
-export async function createAuth(env: Env) {
+export interface CreateAuthOptions {
+  /**
+   * Keeps work BetterAuth runs in the background alive after the response (the request's
+   * `executionCtx.waitUntil`). Email sign-in codes are sent this way, so the response time does
+   * not reveal whether an address gets a code. Without it, BetterAuth awaits that work inline.
+   */
+  waitUntil?: (promise: Promise<unknown>) => void;
+}
+
+export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
   const db = drizzle(env.DATABASE, { schema });
   // The migration-seeded system user is never a "first real human".
   const sentinelId = SYSTEM_USER_ID;
@@ -374,8 +314,18 @@ export async function createAuth(env: Env) {
         enabled: true,
         maxAge: 5 * 60, // 5 minutes
       },
+      additionalFields: {
+        // Hard lifetime of an agent sign-in session (migration 0234). Server-only.
+        [HARD_EXPIRES_AT_FIELD]: {
+          type: 'date',
+          required: false,
+          input: false,
+        },
+      },
     },
     socialProviders,
+    plugins: emailSignInPlugins(env),
+    ...(options.waitUntil ? { advanced: { backgroundTasks: { handler: options.waitUntil } } } : {}),
     user: {
       additionalFields: {
         githubId: {
@@ -403,7 +353,11 @@ export async function createAuth(env: Env) {
     databaseHooks: {
       user: {
         create: {
-          before: async (user) => {
+          before: async (incoming) => {
+            // Email sign-in creates accounts without a name; show the mailbox name instead.
+            const mailbox = (incoming.email ?? '').split('@')[0];
+            const user =
+              incoming.name?.trim() || !mailbox ? incoming : { ...incoming, name: mailbox };
             const bootstrap = await bootstrapUserDecision(env, user);
             if (bootstrap === 'deny') return false;
             if (bootstrap === 'owner') {
@@ -488,6 +442,12 @@ export async function createAuth(env: Env) {
               });
             }
           },
+        },
+        update: {
+          // Agent sign-in sessions carry a hard expiry (services/agent-sign-in/session-cap.ts).
+          // Lower a refresh's new expiry to it inside BetterAuth's own UPDATE. No-op for every
+          // session without a cap.
+          before: async (data, ctx) => clampSessionRefresh(data, ctx),
         },
       },
     },

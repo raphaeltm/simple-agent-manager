@@ -123,6 +123,31 @@ describe('cf-container workspace port routes', () => {
     );
   });
 
+  it.each(['vm', 'cf-container'] as const)(
+    'strips SAM cookies and returns preview redirects for %s',
+    async (runtime) => {
+      nodeRuntime = runtime;
+      const redirectResponse = () =>
+        new Response(null, { status: 302, headers: { location: '/assets/probe.txt' } });
+      proxyHttp.mockImplementation(async () => redirectResponse());
+      vi.mocked(fetch).mockImplementation(async () => redirectResponse());
+      const request = publicPortRequest(3000, '/redirect');
+      request.headers.set(
+        'cookie',
+        'sam_port_access=preview; vm_session=legacy; vm_session_ws=scoped; __Secure-better-auth.session_token=login; __Host-better-auth.session_data=data; app_session=app; theme=dark'
+      );
+      const response = await worker.default.fetch(request, containerEnv());
+      expect(response.status).toBe(302);
+      expect(response.headers.get('location')).toBe('/assets/probe.txt');
+      const forwarded =
+        runtime === 'cf-container'
+          ? (proxyHttp.mock.calls[0]![0] as Request)
+          : new Request(vi.mocked(fetch).mock.calls[0]![0], vi.mocked(fetch).mock.calls[0]![1]);
+      expect(forwarded.headers.get('cookie')).toBe('app_session=app; theme=dark');
+      expect(forwarded.redirect).toBe('manual');
+    }
+  );
+
   it('refuses the container vm-agent port on a public port route', async () => {
     const response = await worker.default.fetch(publicPortRequest(8080), containerEnv());
 
@@ -159,7 +184,11 @@ describe('cf-container workspace port routes', () => {
   });
 
   it('applies the reserved port and relay marker to WebSocket upgrades', async () => {
-    const upgrade = { upgrade: 'websocket', connection: 'Upgrade' };
+    const upgrade = {
+      upgrade: 'websocket',
+      connection: 'Upgrade',
+      cookie: 'sam_port_access=preview; vm_session_ws=scoped; app_session=app',
+    };
     const base = `https://ws-${WORKSPACE_ID.toLowerCase()}`;
 
     const reserved = await worker.default.fetch(
@@ -177,6 +206,7 @@ describe('cf-container workspace port routes', () => {
     expect(proxyHttp).not.toHaveBeenCalled();
     const [forwarded] = containerFetch.mock.calls[0] as [Request];
     expect(new URL(forwarded.url).pathname).toBe(`/workspaces/${WORKSPACE_ID}/ports/3000/ws`);
+    expect(forwarded.headers.get('cookie')).toBe('app_session=app');
     expect(forwarded.headers.get('X-SAM-Proxied-Request')).toBe('1');
   });
 
@@ -211,7 +241,8 @@ describe('cf-container workspace port routes', () => {
 
     const response = await worker.default.fetch(
       new Request(
-        `https://ws-${WORKSPACE_ID.toLowerCase()}.workspaces.example.com/git-credential?token=terminal-jwt`
+        `https://ws-${WORKSPACE_ID.toLowerCase()}.workspaces.example.com/git-credential?token=terminal-jwt`,
+        { headers: { cookie: 'vm_session_ws=agent-session' } }
       ),
       containerEnv()
     );
@@ -219,6 +250,7 @@ describe('cf-container workspace port routes', () => {
     expect(response.status).toBe(200);
     const [forwarded] = proxyHttp.mock.calls[0] as [Request, number];
     expect(new URL(forwarded.url).pathname).toBe('/git-credential');
+    expect(forwarded.headers.get('cookie')).toBe('vm_session_ws=agent-session');
     expect(forwarded.headers.get('X-SAM-Proxied-Request')).toBe('1');
   });
 

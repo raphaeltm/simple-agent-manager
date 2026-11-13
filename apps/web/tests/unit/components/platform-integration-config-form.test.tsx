@@ -7,14 +7,12 @@ import { integration, makeStatus } from '../../helpers/platform-config-fixtures'
 
 function renderForm(
   status: PlatformConfigStatus,
-  mode: 'setup' | 'admin',
   onPrimary = vi.fn().mockResolvedValue(undefined),
   feedbackProjects: Array<{ id: string; name: string; status?: string | null }> = []
 ) {
   render(
     <PlatformIntegrationConfigForm
       status={status}
-      mode={mode}
       primaryLabel="Save integrations"
       onPrimary={onPrimary}
       feedbackProjects={feedbackProjects}
@@ -24,18 +22,8 @@ function renderForm(
 }
 
 describe('PlatformIntegrationConfigForm Google infrastructure OAuth', () => {
-  it('keeps infrastructure configuration off the first-run setup surface', () => {
-    renderForm(makeStatus(), 'setup');
-
-    expect(
-      screen.queryByRole('heading', { name: 'Google infrastructure OAuth' })
-    ).not.toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'Operations project' })).not.toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Google sign-in (OAuth)' })).toBeInTheDocument();
-  });
-
   it('shows both static callbacks and submits an independent ID/secret pair', async () => {
-    const { onPrimary } = renderForm(makeStatus(), 'admin');
+    const { onPrimary } = renderForm(makeStatus());
     const section = screen.getByTestId('integration-google-infrastructure-oauth');
 
     expect(within(section).getByText(/\/auth\/google\/callback/)).toBeInTheDocument();
@@ -81,7 +69,7 @@ describe('PlatformIntegrationConfigForm Google infrastructure OAuth', () => {
         },
       },
     });
-    renderForm(makeStatus(runtime), 'admin');
+    renderForm(makeStatus(runtime));
     const section = screen.getByTestId('integration-google-infrastructure-oauth');
 
     expect(within(section).getByLabelText('Client ID')).toHaveValue('');
@@ -107,7 +95,7 @@ describe('PlatformIntegrationConfigForm Google infrastructure OAuth', () => {
         clientSecret: { configured: true, source: 'runtime' },
       },
     });
-    const { onPrimary } = renderForm(makeStatus(runtime), 'admin');
+    const { onPrimary } = renderForm(makeStatus(runtime));
     const section = screen.getByTestId('integration-google-infrastructure-oauth');
 
     fireEvent.click(
@@ -146,7 +134,7 @@ describe('PlatformIntegrationConfigForm Google infrastructure OAuth', () => {
         projectId: { configured: true, source: 'environment', updatedAt: null, updatedBy: null },
       },
     };
-    const { onPrimary } = renderForm(makeStatus(undefined, feedbackProject), 'admin', undefined, [
+    const { onPrimary } = renderForm(makeStatus(undefined, feedbackProject), undefined, [
       { id: 'feedback-project-1', name: 'Platform Feedback', status: 'active' },
       { id: 'feedback-project-2', name: 'Operator Feedback', status: 'active' },
     ]);

@@ -15,6 +15,7 @@ import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../../src/s
 import type { startTaskRunnerDO } from '../../../src/services/task-runner-do';
 import { admitAndSubmitTriggerExecution } from '../../../src/services/trigger-admission';
 import { TriggerTaskSubmissionPendingError } from '../../../src/services/trigger-submission';
+import { ensurePoolsWithStarterMachines } from '../../helpers/capacity-pool-picks';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 
 const projectDataBoundary = vi.hoisted(() => {
@@ -192,7 +193,7 @@ function createEnv(): { sqlite: Database.Database; env: Env } {
   };
 }
 
-function seedReservedFixture(label: string): ReservedFixture {
+async function seedReservedFixture(label: string): Promise<ReservedFixture> {
   const { sqlite, env } = createEnv();
   const suffix = unique(label);
   const userId = `user-${suffix}`;
@@ -308,6 +309,12 @@ function seedReservedFixture(label: string): ReservedFixture {
     },
   };
 
+  // A person picks machines before work runs: nothing joins a pool on its own.
+  await ensurePoolsWithStarterMachines(drizzle(env.DATABASE, { schema }) as never, {
+    userId,
+    projectId,
+    includeInstallation: false,
+  });
   return { sqlite, env, userId, projectId, triggerId, executionId, input };
 }
 
@@ -432,8 +439,8 @@ describe('submitReservedTask', () => {
     projectDataBoundary.reset();
   });
 
-  function scheduleFixture(kind: 'schedule' | 'standing_watch' = 'schedule') {
-    const fixture = seedReservedFixture(`creator-authority-${kind}`);
+  async function scheduleFixture(kind: 'schedule' | 'standing_watch' = 'schedule') {
+    const fixture = await seedReservedFixture(`creator-authority-${kind}`);
     fixture.input.source = { ...fixture.input.source, kind, triggeredBy: 'cron' };
     fixture.sqlite
       .prepare(
@@ -446,7 +453,7 @@ describe('submitReservedTask', () => {
   it.each(['schedule', 'standing_watch'] as const)(
     'rejects %s creator demotion during title generation before creating a task',
     async (kind) => {
-      const fixture = scheduleFixture(kind);
+      const fixture = await scheduleFixture(kind);
       let releaseTitle!: () => void;
       let titleStarted!: () => void;
       const started = new Promise<void>((resolve) => {
@@ -481,7 +488,7 @@ describe('submitReservedTask', () => {
   it.each(['suspended-user', 'removed-member', 'viewer-member'] as const)(
     'fences a %s after ProjectData admission while repository access remains available',
     async (revocation) => {
-      const fixture = scheduleFixture();
+      const fixture = await scheduleFixture();
       const { deps } = createSubmissionDependencies({
         afterProjectDataCommit: () => {
           if (revocation === 'suspended-user') {
@@ -514,7 +521,7 @@ describe('submitReservedTask', () => {
   it.each(['owner', 'admin', 'maintainer'] as const)(
     'allows an active %s to start a scheduled task',
     async (role) => {
-      const fixture = scheduleFixture();
+      const fixture = await scheduleFixture();
       fixture.sqlite
         .prepare(`UPDATE project_members SET role = ? WHERE project_id = ? AND user_id = ?`)
         .run(role, fixture.projectId, fixture.userId);
@@ -527,7 +534,7 @@ describe('submitReservedTask', () => {
   );
 
   it('reconciles a lost scheduled start receipt after creator revocation without restarting', async () => {
-    const fixture = scheduleFixture();
+    const fixture = await scheduleFixture();
     let started = false;
     const { deps } = createSubmissionDependencies({
       startTaskRunner: vi.fn(async () => {
@@ -553,7 +560,7 @@ describe('submitReservedTask', () => {
   });
 
   it('keeps an unconfirmed scheduled start pending after creator revocation', async () => {
-    const fixture = scheduleFixture();
+    const fixture = await scheduleFixture();
     const { deps } = createSubmissionDependencies({
       startTaskRunner: vi.fn(async () => {
         throw new Error('lost start response');
@@ -577,7 +584,7 @@ describe('submitReservedTask', () => {
   });
 
   it('converges simultaneous same-intent submissions to one task, status, chat, and prompt', async () => {
-    const fixture = seedReservedFixture('same-intent');
+    const fixture = await seedReservedFixture('same-intent');
     // Provision the pool before racing submissions: catalog bootstrap has its own
     // lifecycle and must not turn this test into a provider-catalog setup race.
     await ensureDefaultCapacityPoolsForExistingCredentials(
@@ -665,7 +672,7 @@ From that information, derive the repository change request and append a short n
       ['webhook', webhookPrompt],
     ] as const) {
       expect(prompt.length).toBeGreaterThan(160);
-      const fixture = seedReservedFixture(`rendered-${label}`);
+      const fixture = await seedReservedFixture(`rendered-${label}`);
       const input = { ...fixture.input, prompt };
       const { deps } = createSubmissionDependencies();
 
@@ -680,7 +687,7 @@ From that information, derive the repository change request and append a short n
   });
 
   it('separates identity caps from the configured prompt message limit', async () => {
-    const fixture = seedReservedFixture('prompt-limit');
+    const fixture = await seedReservedFixture('prompt-limit');
     const multibytePrompt = 'é'.repeat(161);
     const encodedBytes = new TextEncoder().encode(multibytePrompt).length;
     fixture.env.MAX_TASK_MESSAGE_LENGTH = '161';
@@ -694,7 +701,7 @@ From that information, derive the repository change request and append a short n
       )
     ).resolves.toMatchObject({ outcome: 'admitted' });
 
-    const overLimitFixture = seedReservedFixture('prompt-over-limit');
+    const overLimitFixture = await seedReservedFixture('prompt-over-limit');
     overLimitFixture.env.MAX_TASK_MESSAGE_LENGTH = '160';
     const rejected = await submitReservedTask(
       overLimitFixture.env,
@@ -709,8 +716,8 @@ From that information, derive the repository change request and append a short n
     expectNoSubmission(overLimitFixture);
   });
 
-  it('validates identity, display and reason fields with separate boundaries', () => {
-    const fixture = seedReservedFixture('identity-validation');
+  it('validates identity, display and reason fields with separate boundaries', async () => {
+    const fixture = await seedReservedFixture('identity-validation');
     const validIdentity = 'x'.repeat(160);
     const oversizedIdentity = 'x'.repeat(161);
     const base: ReservedTaskSubmissionInput = {
@@ -793,7 +800,7 @@ From that information, derive the repository change request and append a short n
   });
 
   it('rejects a missing source reservation before creating any task effects', async () => {
-    const fixture = seedReservedFixture('missing-source');
+    const fixture = await seedReservedFixture('missing-source');
     fixture.sqlite
       .prepare('DELETE FROM trigger_executions WHERE id = ?')
       .run(fixture.input.source.sourceExecutionId);
@@ -809,7 +816,7 @@ From that information, derive the repository change request and append a short n
   });
 
   it('fences a managed queue reservation that expires while preparation is in flight', async () => {
-    const fixture = seedReservedFixture('queue-expiry-race');
+    const fixture = await seedReservedFixture('queue-expiry-race');
     fixture.sqlite
       .prepare("UPDATE trigger_executions SET queue_expires_at=?,status='queued' WHERE id=?")
       .run(new Date(Date.now() + 60000).toISOString(), fixture.input.source.sourceExecutionId);
@@ -839,7 +846,7 @@ From that information, derive the repository change request and append a short n
   });
 
   it('rejects a trigger execution reserved for another task before creating effects', async () => {
-    const fixture = seedReservedFixture('source-conflict');
+    const fixture = await seedReservedFixture('source-conflict');
     fixture.sqlite
       .prepare('UPDATE trigger_executions SET task_id = ? WHERE id = ?')
       .run('other-task', fixture.input.source.sourceExecutionId);
@@ -855,7 +862,7 @@ From that information, derive the repository change request and append a short n
   });
 
   it('rejects conflicting reuse of the reserved task identity before new effects', async () => {
-    const fixture = seedReservedFixture('conflict');
+    const fixture = await seedReservedFixture('conflict');
     const { deps } = createSubmissionDependencies();
 
     await expect(submitReservedTask(fixture.env, fixture.input, deps)).resolves.toMatchObject({
@@ -894,7 +901,7 @@ From that information, derive the repository change request and append a short n
       import('../../../src/routes/projects/_helpers'),
       import('../../../src/services/github-project-event-producer'),
     ]);
-    const fixture = seedReservedFixture('signed-github');
+    const fixture = await seedReservedFixture('signed-github');
     fixture.env.GITHUB_WEBHOOK_SECRET = 'synthetic-signed-secret';
     fixture.sqlite.prepare('DELETE FROM trigger_executions WHERE id=?').run(fixture.executionId);
     fixture.sqlite
@@ -1013,7 +1020,7 @@ From that information, derive the repository change request and append a short n
   it.each(['afterD1Commit', 'afterProjectDataCommit', 'afterRunnerStartConfirmed'] as const)(
     'GitHub keyed admission reuses actual task/checkpoint after %s crash',
     async (hook) => {
-      const fixture = seedReservedFixture(`github-${hook}`);
+      const fixture = await seedReservedFixture(`github-${hook}`);
       fixture.sqlite.prepare('DELETE FROM trigger_executions WHERE id=?').run(fixture.executionId);
       fixture.sqlite
         .prepare(
@@ -1099,7 +1106,7 @@ From that information, derive the repository change request and append a short n
     ['ProjectData commit', 'afterProjectDataCommit'],
     ['TaskRunner confirmation', 'afterRunnerStartConfirmed'],
   ] as const)('recovers after interruption following the %s boundary', async (_label, hookName) => {
-    const fixture = seedReservedFixture(`interrupt-${hookName}`);
+    const fixture = await seedReservedFixture(`interrupt-${hookName}`);
     let failOnce = true;
     const base = createSubmissionDependencies();
     const deps: ReservedTaskSubmissionDependencies = {
@@ -1121,7 +1128,7 @@ From that information, derive the repository change request and append a short n
   });
 
   it('recovers a lost TaskRunner acknowledgement on retry without starting a second task', async () => {
-    const fixture = seedReservedFixture('lost-ack');
+    const fixture = await seedReservedFixture('lost-ack');
     const startedTaskIds = new Set<string>();
     const startInputs: TaskRunnerStartInput[] = [];
     let tick = 0;
@@ -1155,7 +1162,7 @@ From that information, derive the repository change request and append a short n
   });
 
   it('keeps an ambiguous negative start probe pending until a delayed original start is visible', async () => {
-    const fixture = seedReservedFixture('delayed-original-start');
+    const fixture = await seedReservedFixture('delayed-original-start');
     const startedTaskIds = new Set<string>();
     let commitDelayedOriginalStart: (() => void) | null = null;
     let tick = 0;
@@ -1195,7 +1202,7 @@ From that information, derive the repository change request and append a short n
   it.each(['delegated', 'in_progress'] as const)(
     'returns admitted when a lost start acknowledgement races with a %s D1 winner',
     async (winnerStatus) => {
-      const fixture = seedReservedFixture(`${winnerStatus}-winner`);
+      const fixture = await seedReservedFixture(`${winnerStatus}-winner`);
       let tick = 0;
       const deps: ReservedTaskSubmissionDependencies = {
         now: () => `2026-09-07T00:04:${String(++tick).padStart(2, '0')}.000Z`,
@@ -1227,7 +1234,7 @@ From that information, derive the repository change request and append a short n
   );
 
   it('does not fail, stop, or restart a terminal task on a late retry', async () => {
-    const fixture = seedReservedFixture('terminal');
+    const fixture = await seedReservedFixture('terminal');
     const base = createSubmissionDependencies();
 
     await submitReservedTask(fixture.env, fixture.input, base.deps);
@@ -1249,7 +1256,7 @@ From that information, derive the repository change request and append a short n
   });
 
   it('revalidates repository authority immediately before physical start', async () => {
-    const fixture = seedReservedFixture('authority');
+    const fixture = await seedReservedFixture('authority');
     const { deps, startInputs } = createSubmissionDependencies({
       requireRepositoryAccess: vi
         .fn()
@@ -1270,7 +1277,7 @@ From that information, derive the repository change request and append a short n
   });
 
   it('rejects unavailable skills before creating a task', async () => {
-    const fixture = seedReservedFixture('skill-missing');
+    const fixture = await seedReservedFixture('skill-missing');
     const { deps } = createSubmissionDependencies();
     const result = await submitReservedTask(
       fixture.env,
@@ -1289,7 +1296,7 @@ From that information, derive the repository change request and append a short n
   });
 
   it('rejects stopped chat-session reuse from ProjectData without starting the runner', async () => {
-    const fixture = seedReservedFixture('archive-conflict');
+    const fixture = await seedReservedFixture('archive-conflict');
     const stoppedSessionId = `stopped-${fixture.input.identities.chatSessionId}`;
     projectDataBoundary.sessions.set(stoppedSessionId, {
       projectId: fixture.projectId,
@@ -1313,7 +1320,7 @@ From that information, derive the repository change request and append a short n
   });
 
   it('persists canonical placement and credential attribution in D1 and TaskRunner input', async () => {
-    const fixture = seedReservedFixture('placement');
+    const fixture = await seedReservedFixture('placement');
     const { deps, startInputs } = createSubmissionDependencies();
     const input: ReservedTaskSubmissionInput = {
       ...fixture.input,
@@ -1461,7 +1468,7 @@ describe('agent email executions', () => {
   }
 
   it('refuses a late task for an email SAM gave up on mid-submission, after another email took its slot', async () => {
-    const fixture = seedReservedFixture('email-late-task');
+    const fixture = await seedReservedFixture('email-late-task');
     const first = await storedEmail(fixture, '<first@example.com>', 2);
     const slow = pausedAtTitle();
     // The attempt passed every check and is on its way to creating the task.
@@ -1502,7 +1509,7 @@ describe('agent email executions', () => {
   });
 
   it('still creates the task of an email that is only waiting for a retry', async () => {
-    const fixture = seedReservedFixture('email-retry-wait');
+    const fixture = await seedReservedFixture('email-retry-wait');
     const first = await storedEmail(fixture, '<first@example.com>', 2);
     const slow = pausedAtTitle();
     const late = submitReservedTask(fixture.env, first.input, slow.deps);

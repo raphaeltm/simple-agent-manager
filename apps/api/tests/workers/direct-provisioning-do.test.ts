@@ -1,18 +1,22 @@
 /** Registered HTTP -> real NodeLifecycle RPC/alarm/storage -> provider HTTP -> migrated D1. */
 import { makeSignature } from 'better-auth/crypto';
 import { env, runInDurableObject } from 'cloudflare:test';
+import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import * as schema from '../../src/db/schema';
 import type { NodeLifecycle } from '../../src/durable-objects/node-lifecycle';
 import {
   DIRECT_PROVISIONING_KEY,
   type DirectProvisioningIntent,
+  NodeLifecycleProvisioning,
 } from '../../src/durable-objects/node-lifecycle-provisioning';
 import type { Env } from '../../src/env';
 import { nodesRoutes } from '../../src/routes/nodes';
 import { crudRoutes } from '../../src/routes/workspaces/crud';
 import { registerWorkspaceCreateRoute } from '../../src/routes/workspaces/workspace-create';
+import { updateAdminSettings } from '../../src/services/admin-settings';
 import { clearCapacityCatalogCache } from '../../src/services/default-capacity-source-credentials';
 import { encrypt } from '../../src/services/encryption';
 import { getSession } from '../../src/services/project-data';
@@ -20,6 +24,8 @@ import {
   attemptWorkspaceDeletion,
   loadWorkspaceDeletionIdentity,
 } from '../../src/services/workspace-deletion';
+import { ensurePoolsWithStarterMachines } from '../helpers/capacity-pool-picks';
+import { FakeCloudflare } from '../helpers/fake-cloudflare-tunnels';
 import { seedInstallation, seedNode, seedProject, seedUser } from './helpers/seed-d1';
 
 afterEach(() => {
@@ -27,7 +33,13 @@ afterEach(() => {
   clearCapacityCatalogCache();
 });
 
-async function setup(interrupt: boolean, interruptDispatch = false, directNode = false) {
+async function setup(
+  interrupt: boolean,
+  interruptDispatch = false,
+  directNode = false,
+  /** Tunnel transport: route every Cloudflare API call to this stateful fake. */
+  tunnelCf?: FakeCloudflare
+) {
   const userId = 'durable-user-' + crypto.randomUUID();
   const projectId = 'durable-project-' + crypto.randomUUID();
   const installationId = 'durable-install-' + crypto.randomUUID();
@@ -72,6 +84,13 @@ async function setup(interrupt: boolean, interruptDispatch = false, directNode =
     NODE_PROVISIONING_REQUEST_TIMEOUT_MS: '3000',
     NODE_PROVISIONING_RETRY_INTERVAL_MS: '30000',
     COMPUTE_QUOTA_ENFORCEMENT_ENABLED: 'false',
+    ...(tunnelCf
+      ? {
+          VM_AGENT_TRANSPORT: 'cloudflare-tunnel',
+          CF_ACCOUNT_ID: tunnelCf.accountId,
+          CF_ZONE_ID: tunnelCf.zoneId,
+        }
+      : {}),
   };
   let stub!: DurableObjectStub<NodeLifecycle>;
   const testEnv = {
@@ -126,6 +145,8 @@ async function setup(interrupt: boolean, interruptDispatch = false, directNode =
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (tunnelCf && url.startsWith('https://api.cloudflare.com/'))
+        return tunnelCf.fetch(input, init);
       if (url.includes('/server_types'))
         return Response.json({
           server_types: [serverType],
@@ -167,6 +188,15 @@ async function setup(interrupt: boolean, interruptDispatch = false, directNode =
     })
   );
   clearCapacityCatalogCache();
+  // The request places onto the user's pool, built from the mocked catalog above; a new
+  // pool picks nothing by itself.
+  await ensurePoolsWithStarterMachines(drizzle(env.DATABASE, { schema }) as never, {
+    userId,
+    projectId,
+    includeInstallation: false,
+    env: testEnv,
+    owner: { userId, projectId },
+  });
   const app = new Hono<{ Bindings: Env }>();
   app.onError((error, c) => c.json({ error: error.message }, 500));
   registerWorkspaceCreateRoute(app);
@@ -691,5 +721,117 @@ describe('durable direct workspace allocation', () => {
         .bind(f.workspaceId)
         .first()
     ).toEqual({ dispatched_at: expect.any(String) });
+  });
+});
+
+describe('durable direct allocation on Cloudflare Tunnel transport', () => {
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  it('resumes the same incarnation after its first attempt is cut mid tunnel setup by the real deadline', async () => {
+    const cf = new FakeCloudflare('durable-account', 'durable-zone');
+    // Real POST /nodes -> NodeLifecycle start -> alarm -> provisionNode. The first attempt's
+    // deadline is the 3 s request timeout plus a 1 ms tunnel budget. The first tunnel list
+    // takes 1.0 s and the create 2.5 s (each under the 3 s per-call timeout), so the real
+    // AbortController fires inside the create POST (between ~1.1 s and 3.5 s): a lost
+    // response that commits later.
+    const f = await setup(false, false, true, cf);
+    await updateAdminSettings(f.testEnv, {
+      actorUserId: f.userId,
+      changes: [{ name: 'vmTunnels.provisioningBudgetMs', value: 1 }],
+    });
+    f.release();
+    cf.inject('tunnel.list', { kind: 'hook', run: () => sleep(1000) });
+    cf.inject('tunnel.create', { kind: 'hook', run: () => sleep(2500) });
+    if ((await f.intent())?.attempts === 0) await f.tick();
+    await vi.waitFor(
+      async () => expect((await f.intent())?.lastError).toMatch(/deadline elapsed/),
+      { timeout: 8000 }
+    );
+    const nodeId = f.workspaceId;
+    const afterFirst = await env.DATABASE.prepare(
+      `SELECT status, tunnel_id, pending_create_count, last_error FROM node_cloudflare_tunnels
+        WHERE node_id = ?`
+    )
+      .bind(nodeId)
+      .first<{ status: string; last_error: string; pending_create_count: number }>();
+    // Not released: the durable allocation will resume this incarnation (pre-fix this row was
+    // cleanup_pending and every later attempt failed "already being cleaned up").
+    expect(afterFirst).toMatchObject({ status: 'provisioning', pending_create_count: 1 });
+    expect(afterFirst?.last_error).toMatch(/^aborted during tunnel: NodeAllocationUncertainError/);
+    expect((await f.intent())?.providerCreateRequested).toBe(false);
+    expect(f.creates).toHaveLength(0);
+    // Observe the premise instead of assuming it: the cut create commits after the abort.
+    await vi.waitFor(() => expect(cf.liveTunnels()).toHaveLength(1), { timeout: 5000 });
+
+    await runInDurableObject(f.stub, async (instance) => {
+      (instance as unknown as { provisioningController: unknown }).provisioningController =
+        undefined;
+    });
+    await f.tick();
+    await vi.waitFor(async () => expect((await f.intent())?.status).toBe('complete'), {
+      timeout: 8000,
+    });
+    // One paid create (no "second create is forbidden" deadlock), one tunnel (adopted by name).
+    expect(f.creates).toHaveLength(1);
+    expect(cf.callCount('tunnel.create')).toBe(1);
+    expect(cf.liveTunnels()).toHaveLength(1);
+    expect(String(f.creates[0]?.user_data)).toContain('sam-cloudflared');
+    const node = await env.DATABASE.prepare(
+      'SELECT status, transport, tunnel_id, backend_dns_record_id FROM nodes WHERE id = ?'
+    )
+      .bind(nodeId)
+      .first<{ tunnel_id: string }>();
+    expect(node).toMatchObject({
+      status: 'running',
+      transport: 'cloudflare-tunnel',
+      tunnel_id: cf.liveTunnels()[0]!.id,
+      backend_dns_record_id: null,
+    });
+    expect(
+      await env.DATABASE.prepare(
+        'SELECT status, tunnel_id FROM node_cloudflare_tunnels WHERE node_id = ?'
+      )
+        .bind(nodeId)
+        .first()
+    ).toEqual({ status: 'active', tunnel_id: node!.tunnel_id });
+    expect(cf.records()).toMatchObject([
+      { type: 'CNAME', content: `${node!.tunnel_id}.cfargotunnel.com`, proxied: true },
+    ]);
+  });
+});
+
+describe('the durable create record is written only by its own attempt', () => {
+  it('marks and withdraws the record for the current attempt and refuses a superseded one', async () => {
+    const stub = env.NODE_LIFECYCLE.get(
+      env.NODE_LIFECYCLE.idFromName('record-' + crypto.randomUUID())
+    );
+    await runInDurableObject(stub, async (_instance, state) => {
+      const intent = {
+        attempts: 3,
+        status: 'pending',
+        providerCreateRequested: false,
+      } as unknown as DirectProvisioningIntent;
+      await state.storage.put(DIRECT_PROVISIONING_KEY, intent);
+      const controller = new NodeLifecycleProvisioning(state, env as unknown as Env) as unknown as {
+        recordCreateRequested(i: DirectProvisioningIntent, requested: boolean): Promise<void>;
+      };
+      const stored = async () =>
+        (await state.storage.get<DirectProvisioningIntent>(DIRECT_PROVISIONING_KEY))
+          ?.providerCreateRequested;
+
+      await controller.recordCreateRequested(intent, true);
+      expect(await stored()).toBe(true);
+      await controller.recordCreateRequested(intent, false);
+      expect(await stored()).toBe(false);
+
+      // A superseded attempt (a later one has started) can neither mark nor withdraw.
+      await state.storage.put(DIRECT_PROVISIONING_KEY, {
+        ...intent,
+        attempts: 4,
+        providerCreateRequested: true,
+      });
+      await expect(controller.recordCreateRequested(intent, false)).rejects.toThrow(/superseded/);
+      expect(await stored()).toBe(true);
+    });
   });
 });

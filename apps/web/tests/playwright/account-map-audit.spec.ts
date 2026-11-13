@@ -197,6 +197,24 @@ test.describe('Account Map', () => {
     await expect(page).toHaveURL(/\/projects\/p-sam\/ideas\/i-1$/);
   });
 
+  // State-machine audit D4: the server stores a failed chat as `failed`. The map
+  // compared against `error`, so a failed chat without a task showed as idle.
+  test('a failed chat without a task reads as failed', async ({ page }) => {
+    const base = accountMapFixture();
+    await setup(page, {
+      ...base,
+      sessions: base.sessions.map((s) => (s.id === 's-2' ? { ...s, status: 'failed' } : s)),
+    });
+    await page.goto('/account-map');
+    const failedChat = page.getByRole('button', { name: /Pick a voice for the trailer/ });
+    await expect(failedChat).toBeVisible();
+    await expect(failedChat).toContainText('Failed');
+    // Liveness: the sleeping chat beside it keeps its own state.
+    await expect(page.getByRole('button', { name: /Old idea chat/ })).toContainText('Asleep');
+    await assertNoOverflow(page);
+    await screenshot(page, 'account-map-failed-chat', { scopeToProject: true });
+  });
+
   test('long and hostile text wraps without overflow', async ({ page }) => {
     await setup(page, longTextMap());
     await page.goto('/account-map');

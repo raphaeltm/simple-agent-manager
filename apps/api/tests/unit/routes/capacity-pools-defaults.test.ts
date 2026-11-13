@@ -4,6 +4,7 @@ import {
   LEGACY_VM_SIZE_WORKLOAD_ADAPTER_VERSION,
 } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -59,6 +60,7 @@ import {
   assertDefaultCapacityPoolUpdateResult,
   parseDefaultCapacityPoolUpdateRequest,
 } from '../../../src/routes/capacity-pool-update-request';
+import { pickStarterMachines } from '../../helpers/capacity-pool-picks';
 const providerCatalogs = await import('../../../src/services/provider-catalogs');
 
 function createApp() {
@@ -482,6 +484,8 @@ describe('default capacity pool routes', () => {
       env
     );
     expect(reconcile.status).toBe(200);
+    // The admin picks the shared pool's machines: nothing joins a pool on its own.
+    await pickStarterMachines(drizzle(env.DATABASE, { schema }) as never);
 
     authState.userId = 'user-1';
     authState.role = 'user';
@@ -577,6 +581,8 @@ describe('default capacity pool routes', () => {
       env
     );
     expect(adminReconcile.status).toBe(200);
+    // The admin picks the shared pool's machines: nothing joins a pool on its own.
+    await pickStarterMachines(drizzle(env.DATABASE, { schema }) as never);
 
     const installationPoolCountBefore = countRows(
       sqlite,

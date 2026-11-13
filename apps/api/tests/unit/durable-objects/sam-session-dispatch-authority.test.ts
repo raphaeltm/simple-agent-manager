@@ -10,6 +10,7 @@ import type { Env } from '../../../src/env';
 import { samAssistantAttribution } from '../../../src/services/agent-authorship';
 import { getProfilePickerState } from '../../../src/services/agent-profile-picker';
 import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../../src/services/default-capacity-pools';
+import { pickStarterMachines } from '../../helpers/capacity-pool-picks';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 import {
   seedCloudCredential,
@@ -93,6 +94,7 @@ describe('SAM session dispatch_task current project authority', () => {
       projectId: 'project-1',
       includeInstallation: false,
     });
+    await pickStarterMachines(drizzle(env.DATABASE, { schema }) as never);
     return env;
   }
 
@@ -507,6 +509,7 @@ describe('SAM session dispatch_task current project authority', () => {
         projectId: 'project-1',
         includeInstallation: false,
       });
+      await pickStarterMachines(drizzle(env.DATABASE, { schema }) as never);
 
       const result = await dispatchTask(
         { projectId: 'project-1', description: 'Active member dispatch' },
@@ -581,6 +584,7 @@ describe('SAM session dispatch_task current project authority', () => {
         projectId: 'project-1',
         includeInstallation: false,
       });
+      await pickStarterMachines(drizzle(env.DATABASE, { schema }) as never);
 
       const result = await dispatchTask(
         {

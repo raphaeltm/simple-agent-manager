@@ -12,9 +12,9 @@ export const VIEWER_ID = 'viewer-user';
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
-const DAY = 24 * HOUR;
+export const DAY = 24 * HOUR;
 export const NOW = Date.now();
-const iso = (offsetMs: number) => new Date(NOW + offsetMs).toISOString();
+export const iso = (offsetMs: number) => new Date(NOW + offsetMs).toISOString();
 const zone = 'UTC';
 
 /** Markup, entities, quotes, emoji and accents: must render as text, never as HTML. */

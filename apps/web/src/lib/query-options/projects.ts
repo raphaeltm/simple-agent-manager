@@ -2,6 +2,7 @@ import { queryOptions } from '@tanstack/react-query';
 
 import {
   getArtifactsEnabled,
+  getInstantRuntimeEnabled,
   getProject,
   getProjectCredentialAttributionHealth,
   getProjectRuntimeConfig,
@@ -40,8 +41,13 @@ export const projectQueryKeys = {
     [...projectQueryKeys.details(queryScope), projectId] as const,
   artifactsEnabled: (queryScope: string) =>
     [...projectQueryKeys.all(queryScope), 'artifacts-enabled'] as const,
+  instantRuntimeEnabled: (queryScope: string) =>
+    [...projectQueryKeys.all(queryScope), 'instant-runtime-enabled'] as const,
   runtimeConfig: (queryScope: string, projectId: string) =>
     [...projectQueryKeys.all(queryScope), 'runtime-config', projectId] as const,
+  /** One agent secret request (metadata only), read by the in-chat card. */
+  secretRequest: (queryScope: string, projectId: string, requestId: string) =>
+    [...projectQueryKeys.all(queryScope), 'secret-request', projectId, requestId] as const,
   credentialHealth: (queryScope: string, projectId: string) =>
     [...projectQueryKeys.all(queryScope), 'credential-health', projectId] as const,
 };
@@ -65,6 +71,14 @@ export function projectArtifactsEnabledQueryOptions(queryScope: string) {
   return queryOptions({
     queryKey: projectQueryKeys.artifactsEnabled(queryScope),
     queryFn: getArtifactsEnabled,
+    staleTime: PROJECT_CREATE_CONFIG_STALE_TIME_MS,
+  });
+}
+
+export function instantRuntimeEnabledQueryOptions(queryScope: string) {
+  return queryOptions({
+    queryKey: projectQueryKeys.instantRuntimeEnabled(queryScope),
+    queryFn: getInstantRuntimeEnabled,
     staleTime: PROJECT_CREATE_CONFIG_STALE_TIME_MS,
   });
 }

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/workspace/vm-agent/internal/acp"
 	"github.com/workspace/vm-agent/internal/persistence"
 	"github.com/workspace/vm-agent/internal/resourcemon"
 )
@@ -52,22 +53,13 @@ func (s *Server) prepareWorkspaceEvictionStop(ctx context.Context, target resour
 	// Capture before Docker stop and before finishLocalWorkspaceEviction clears activity.
 	// Retain the admission fence once the durable intent owns this runtime.
 	committed := false
-	rollbackAdmission := func() {
-		// No host means no admission fence was acquired.
-	}
+	interrupted, rollbackAdmission := s.prepareWorkspaceEvictionHosts(target.WorkspaceID)
+	delivery.InterruptedWork = interrupted
 	defer func() {
 		if !committed {
 			rollbackAdmission()
 		}
 	}()
-	if session, err := s.evictionAgentSession(target.WorkspaceID); err == nil {
-		s.sessionHostMu.Lock()
-		host := s.sessionHosts[target.WorkspaceID+":"+session.ID]
-		s.sessionHostMu.Unlock()
-		if host != nil {
-			delivery.InterruptedWork, rollbackAdmission = host.PrepareEviction()
-		}
-	}
 	if delivery.ProjectID == "" {
 		return fmt.Errorf("workspace project identity unavailable; refusing eviction without a recoverable callback")
 	}
@@ -84,6 +76,44 @@ func (s *Server) prepareWorkspaceEvictionStop(ctx context.Context, target resour
 	return nil
 }
 
+// prepareWorkspaceEvictionHosts fences every host sharing the stopped container.
+// Lifecycle ownership prevents a replacement workspace while the stop is prepared.
+func (s *Server) prepareWorkspaceEvictionHosts(workspaceID string) (*bool, func()) {
+	var rollbacks []func()
+	// A container stop kills every session in this workspace, regardless of which
+	// session supplied the snapshot identity. Fence them all before the intent.
+	allIdle, anyActive := true, false
+	var hosts []*acp.SessionHost
+	s.sessionHostMu.Lock()
+	for key, host := range s.sessionHosts {
+		if !strings.HasPrefix(key, workspaceID+":") || host == nil {
+			continue
+		}
+		hosts = append(hosts, host)
+	}
+	s.sessionHostMu.Unlock()
+	// Host locks are independent of the node-wide map lock.
+	for _, host := range hosts {
+		interrupted, rollback := host.PrepareEviction()
+		rollbacks = append(rollbacks, rollback)
+		if interrupted == nil {
+			allIdle = false
+		} else if *interrupted {
+			anyActive = true
+		}
+	}
+	// Active work dominates unknown state; false requires proof from every host.
+	var interrupted *bool
+	if anyActive || (allIdle && len(rollbacks) > 0) {
+		interrupted = &anyActive
+	}
+	return interrupted, func() {
+		for i := len(rollbacks) - 1; i >= 0; i-- {
+			rollbacks[i]()
+		}
+	}
+}
+
 // Reconcile a write-ahead intent after an interrupted/failed Docker stop. The
 // durable generation and exact Docker ID protect a later workspace incarnation.
 func (s *Server) reconcilePendingEvictionStop(ctx context.Context, delivery *persistence.EvictionDelivery) (bool, error) {
@@ -95,6 +125,9 @@ func (s *Server) reconcilePendingEvictionStop(ctx context.Context, delivery *per
 		return false, err
 	}
 	defer lock.Unlock()
+	if s.isEvictionFinalizing(delivery.WorkspaceID) {
+		return false, errWorkspaceEvicting
+	}
 	meta, err := s.store.GetWorkspaceMetadata(delivery.WorkspaceID)
 	if err != nil {
 		return false, err
@@ -109,7 +142,21 @@ func (s *Server) reconcilePendingEvictionStop(ctx context.Context, delivery *per
 	if currentID != "" && !dockerContainerIdentityMatches(currentID, delivery.ContainerID) {
 		return false, fmt.Errorf("pending eviction container no longer current")
 	}
+	// Close host admission before collecting hosts, including retry attempts.
+	// A failed attempt reopens admission; successful teardown stops every host.
+	s.markEvictionFinalizing(delivery.WorkspaceID)
+	defer s.clearEvictionFinalizing(delivery.WorkspaceID)
 	if currentID != "" {
+		// A prior fence may have expired while this intent waited for retry.
+		interrupted, rollback := s.prepareWorkspaceEvictionHosts(delivery.WorkspaceID)
+		if interrupted != nil && *interrupted {
+			delivery.InterruptedWork = interrupted
+		}
+		applied, err := s.store.RecordWorkspaceEviction(ctx, *delivery)
+		if err != nil || !applied {
+			rollback()
+			return !applied && err == nil, err
+		}
 		if err := s.stopEvictionContainer(ctx, delivery.ContainerID); err != nil {
 			return false, err
 		}

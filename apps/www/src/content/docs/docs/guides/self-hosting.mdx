@@ -7,7 +7,7 @@ import GitHubAppSetup from '../../../../components/GitHubAppSetup.astro';
 
 This guide walks you through deploying Simple Agent Manager to your own infrastructure. Deployment runs through the **Deploy Production** GitHub Actions workflow in your own fork, with Pulumi provisioning the Cloudflare resources.
 
-You can also explore the [guided installer prototype](/docs/guides/installer/), either hosted by us or deployed in your own account. It currently verifies account setup and ownership handoff; use this guide for a complete SAM installation.
+If you'd rather not fork and configure a repository, the [installer](/docs/guides/installer/) builds and deploys a complete SAM in your Cloudflare account from your browser, and updates it later (check [who can use the hosted installer today](/docs/guides/installer/)). This guide is the fork-based path: more steps, and full control over every setting.
 
 ## Prerequisites
 
@@ -63,9 +63,11 @@ Set **Zone Resources** to your specific domain and **Account Resources** to your
 
 The default deploy configures AI Gateway and writes Analytics Engine data, so keep the **AI Gateway** permission and enable **Analytics Engine** even if every user brings their own model keys. SAM also enables the Cloudflare Container instant-session runtime by default, so **Containers: Edit** is required for the default Worker deploy. The same deploy automatically builds and versions the container vm-agent; no prebuilt image, registry credential, or manual vm-agent version is required. The **Account → SSL and Certificates → Edit** permission is required for issuing per-node Origin CA certificates used for VM-agent TLS — without it, new nodes cannot obtain a TLS certificate and will fail to boot.
 
+**Optional — VM Cloudflare Tunnels:** To use outbound-only VM agent connections for newly provisioned workspace and deployment VMs, grant the runtime token **Account → Cloudflare One Connector: cloudflared → Edit** (the API catalog calls this `Cloudflare One Connector: cloudflared Write`) and set the GitHub Environment variable `VM_AGENT_TRANSPORT` to `cloudflare-tunnel`. Manual deployments use `CF_API_TOKEN` for runtime operations, so update that token before enabling the setting. The hosted installer includes this permission in newly created runtime tokens; existing installations need their runtime token permission updated. DNS Edit is also required. No per-machine token setup is needed: SAM creates, configures, and removes the tunnels. Existing VMs and instant containers keep their current transport, and deployment VMs keep serving app routes on their public IP. See [VM transport configuration](/docs/reference/configuration/#vm-transport-and-tls).
+
 **Optional — Workers AI read:** [AI models for agents](/docs/guides/ai-models-for-agents/) works without extra permissions. Model calls and the model list use the Worker's own Workers AI binding and go through your AI Gateway. Adding **Account → Workers AI → Read** also lets agents fetch a model's full input schema with `list_ai_models`. Without it, agents get the model's documentation link instead. Model calls are billed to this Cloudflare account, and each project has a monthly limit.
 
-**Optional — agent email:** [Email triggers](/docs/guides/email-triggers/) give an automation its own address on `agents.<your-domain>`. Give the deployment token **Zone → Zone Settings → Edit**, **Zone → Email Routing Rules → Edit**, and **Email Sending → Edit** (Workers Paid required), and every deploy prepares agent email automatically; no GitHub variable is needed, and without these permissions email stays off with a notice in the deploy log. A superadmin then turns it on in **Admin → Integrations → Agent email**, after reviewing any DNS change it would make to your main domain. Your MX records never change. See [Turn on agent email](/docs/guides/email-triggers/#turn-on-agent-email-admins) for the steps and for what to do when setup refuses your SPF record.
+**Optional — email sign-in and agent email:** Give the deployment token **Zone → Zone Settings → Edit**, **Zone → Email Routing Rules → Edit**, and **Email Sending → Edit** (Workers Paid required), and every deploy prepares email automatically; no GitHub variable is needed, and without these permissions email stays off with a notice in the deploy log. With email prepared, people with an account can sign in with an emailed code. Installs made by the hosted installer, which records its owner's email, also let that owner create the first account by email, so their `/setup` needs no OAuth app; other deployments still configure one OAuth provider for the first sign-in. [Email triggers](/docs/guides/email-triggers/) give an automation its own address on `agents.<your-domain>`: a superadmin turns them on after signing in, in **Admin → Integrations → Agent email**, after reviewing any DNS change they would make to your main domain. Your MX records never change. See [Turn on agent email](/docs/guides/email-triggers/#turn-on-agent-email-admins) for the steps and for what to do when setup refuses your SPF record.
 
 **Optional — SAM-hosted repositories (experimental):** SAM can create and host Git repositories for projects directly on [Cloudflare Artifacts](https://developers.cloudflare.com/artifacts/) (currently in beta), letting users start a project without connecting GitHub. If your Cloudflare account has Artifacts access, add an **Account → Artifacts → Edit** permission to the token. The deploy **auto-detects** whether the token can reach the Artifacts REST API and enables the SAM-hosted project option only when it can — so it is safe to add the permission if it is available, or omit it entirely with no effect. To force the behavior regardless of detection, set the `ARTIFACTS_BINDING_ENABLED` GitHub Actions **variable** to `true` or `false`.
 
@@ -79,9 +81,9 @@ Pulumi uses the R2 S3 keys for its state backend. The deploy workflow creates th
 
 ## Step 4: Create GitHub App
 
-You can deploy SAM before creating a GitHub App. On first deploy, SAM generates a one-time `SETUP_TOKEN` Worker variable and the workflow prints a Cloudflare dashboard link where you can read it. Open `https://app.yourdomain.com/setup`, paste that token, and configure GitHub App, GitHub OAuth, and Google **login** OAuth credentials in the setup wizard. The Google login client must have `https://api.yourdomain.com/api/auth/callback/google` registered as an authorized redirect URI, and is a separate OAuth client from any Google/GCP infrastructure credentials (`GOOGLE_CLIENT_ID`). The values are stored in SAM's encrypted platform credential store and can be rotated later by a superadmin.
+You can deploy SAM before creating a GitHub App. On first deploy, SAM generates a one-time `SETUP_TOKEN` Worker variable and the workflow prints a Cloudflare dashboard link where you can read it. Open `https://app.yourdomain.com/setup` and paste that token. When the deploy prepared email and the installer recorded an owner email (`BOOTSTRAP_OWNER_EMAIL`), setup needs only the token and emails that owner a sign-in code; if Cloudflare is still verifying the sending domain, it asks you to wait a few minutes. Otherwise setup asks for one of GitHub, Google or GitLab OAuth, because email cannot create the first account without an owner email; a provider the deployment already has (for example from `GH_*` secrets) is used as is. The Google login client must have `https://api.yourdomain.com/api/auth/callback/google` registered as an authorized redirect URI, and is a separate OAuth client from any Google/GCP infrastructure credentials (`GOOGLE_CLIENT_ID`). After you sign in, add the GitHub App and any other provider in **Admin → Integrations**. The values are stored in SAM's encrypted platform credential store and can be rotated later by a superadmin.
 
-If you prefer to create the GitHub App first, use the wizard below to create it with all settings pre-filled. Enter your domain, click through to GitHub, and paste the generated values into `/setup` or set the optional `GH_*` GitHub Environment secrets before deploy.
+If you prefer to create the GitHub App first, use the wizard below to create it with all settings pre-filled. Enter your domain, click through to GitHub, and paste the generated values into **Admin → Integrations** or set the optional `GH_*` GitHub Environment secrets before deploy.
 
 <GitHubAppSetup />
 
@@ -109,13 +111,12 @@ under **Platform Policy → GitHub CLI access**.
 
 ## Platform integrations after deploy
 
-Fresh deployments can keep most platform integration credentials out of GitHub Actions secrets. After the first deploy, open `/setup` with the one-time setup token and configure the integrations users need:
+Fresh deployments can keep most platform integration credentials out of GitHub Actions secrets. After the first deploy, open `/setup` with the one-time setup token to choose how people sign in, then configure the rest in **Admin → Integrations** (`/admin/integrations`):
 
 - **GitHub App and GitHub OAuth** for GitHub-backed projects, pull requests, and repository access.
 - **Google login OAuth** for Sign in with Google. This is separate from Google/GCP infrastructure OAuth.
 - **GitLab OAuth** when users need to create GitLab-backed projects and workspaces.
-
-A superadmin can separately configure **Google infrastructure OAuth** at `/admin/integrations` for keyless GCP/WIF setup. It is intentionally absent from `/setup` so installations do not confuse it with Google login. Runtime integration values are stored encrypted and override environment fallbacks without a redeploy.
+- **Google infrastructure OAuth** for keyless GCP/WIF setup. It is never offered in `/setup`, so it cannot be confused with Google login. Runtime integration values are stored encrypted and override environment fallbacks without a redeploy.
 
 Before users connect GCP accounts, follow [Connect Google Cloud](/docs/guides/google-cloud/) to enable the infrastructure OAuth-client project APIs and configure its callback. The guide also explains why disabled APIs can appear as permission errors.
 
@@ -368,7 +369,7 @@ Pulumi also generates a non-secret, per-installation identity in stack state and
 :::
 
 :::note[VM TLS certificates]
-New VM nodes do not receive a shared Origin CA private key in cloud-init. The cloud-init template generates a node-local RSA key and CSR, then calls the node-scoped callback endpoint `POST /api/nodes/:id/origin-ca-certificate` with its callback JWT. The API Worker signs that CSR through Cloudflare Origin CA using `CF_API_TOKEN` (`packages/cloud-init/src/template.ts`, `apps/api/src/routes/node-lifecycle.ts`, `apps/api/src/services/origin-ca-certificates.ts`).
+New public-DNS VM nodes do not receive a shared Origin CA private key in cloud-init. The cloud-init template generates a node-local RSA key and CSR, then calls the node-scoped callback endpoint `POST /api/nodes/:id/origin-ca-certificate` with its callback JWT. The API Worker signs that CSR through Cloudflare Origin CA using `CF_API_TOKEN` (`packages/cloud-init/src/template-ingress.ts`, `apps/api/src/routes/node-lifecycle.ts`, `apps/api/src/services/origin-ca-certificates.ts`); tunnel nodes skip Origin CA provisioning.
 :::
 
 :::note[Analytics privacy and configuration]
@@ -454,9 +455,9 @@ curl https://api.yourdomain.com/health
 # Should return: {"status":"healthy","timestamp":"..."}
 ```
 
-Open the Cloudflare dashboard link printed by the workflow, copy the plaintext `SETUP_TOKEN` Worker variable, then open `https://app.yourdomain.com/setup`. The setup page accepts the token only while first-run setup is incomplete. After you save a valid login provider and complete setup, `/setup` returns Gone and future changes are made by a superadmin in **Admin → Integrations** and [**Admin → Settings**](/docs/guides/admin-settings/).
+Open the Cloudflare dashboard link printed by the workflow, copy the plaintext `SETUP_TOKEN` Worker variable, then open `https://app.yourdomain.com/setup`. The setup page accepts the token only while first-run setup is incomplete. When the deploy prepared email and the installer named an owner, setup finishes with the token alone and emails that owner a sign-in code; otherwise it asks for one OAuth provider. Once setup is complete, `/setup` returns Gone and future changes are made by a superadmin in **Admin → Integrations** and [**Admin → Settings**](/docs/guides/admin-settings/).
 
-Open `https://app.yourdomain.com` — you should see the login page with whichever providers you configured.
+Open `https://app.yourdomain.com` — you should see the login page with whichever providers you configured, plus **Email me a sign-in code** when the deploy prepared email.
 
 If you enabled GitLab in platform configuration, create a test project from a GitLab repository and start a lightweight chat before inviting users. That validates the OAuth app, repository metadata propagation, and workspace credential helper path together.
 
@@ -508,7 +509,9 @@ Use the manual workflow when you rotate deployment secrets, change GitHub Enviro
 
 On ordinary deployments without an installer owner binding, the first genuine human to sign in becomes the **superadmin** — the account that can approve other users, manage platform credentials, and reach the admin dashboard.
 
-Experimental installer deployments set the API Worker secret `BOOTSTRAP_OWNER_EMAIL` before enabling login. Until that owner is established, other identities are refused; only a matching provider-verified email can establish initial administration. The owner is elected with an atomic database update, including concurrent callbacks from different providers. `SETUP_TOKEN` authorizes configuring login providers; it does not itself grant a SAM user session. Configure a supported provider through `/setup`, then sign in with the approved owner email. GitHub is not required before the instance exists. Preserve the owner binding across routine updates.
+Installer deployments set the API Worker secret `BOOTSTRAP_OWNER_EMAIL` before enabling login. Until that owner is established, other identities are refused; only a matching verified email (from an OAuth provider, or proven by an emailed sign-in code) can establish initial administration. The owner is elected with an atomic database update, including concurrent callbacks from different providers. `SETUP_TOKEN` authorizes first-run setup; it does not itself grant a SAM user session. Finish `/setup`, then sign in with the approved owner email.
+
+Email sign-in codes (`services/email-sign-in.ts`) create an account only for the installer owner email, before that owner exists. Otherwise only addresses that already belong to an account receive a code. Deployments without an owner email never create accounts by email, because the first person to ask for a code would become the administrator. The response is the same for every address, and the code is sent after the response, so its timing reveals nothing either. The password-reset, verification and email-change code routes are closed. Codes expire after 5 minutes and allow 3 attempts. Each address gets at most 5 codes an hour, each IP address at most 20 requests, and each address at most 10 code guesses an hour from all IP addresses combined (the `agentEmail.signInCodesPerEmailPerHour`, `agentEmail.signInCodesPerIpPerHour` and `agentEmail.signInCodeAttemptsPerEmailPerHour` settings). GitHub is not required before the instance exists. Preserve the owner binding across routine updates.
 
 Fresh deployments are seeded with an internal system user (`system_anonymous_trials`, `status='system'`, created by a database migration). Its id dates from SAM's retired anonymous-trial product; it now records SAM itself as the author of platform settings saved during unattended setup, and it owns the placeholder GitHub installation row that Artifacts- and GitLab-backed projects point at. Never delete either row. This system user is **not** a real user, cannot sign in, and never counts toward "is this the first human" checks. Without the installer owner binding, two mechanisms handle first-user promotion regardless of the system user:
 
@@ -541,7 +544,7 @@ Below the breakers, **Problem migrations** lists the individual session migratio
 
 What to do, by what the card shows:
 
-- **Frozen, error code `precopy_refused`**: nothing. The session was still in use when the sweep tried to copy it, so nothing was copied and it reads normally; the sweep tries it again after `PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS` (a week). The list shows these last.
+- **Frozen, error code `precopy_refused`**: nothing. The session was still in use when the sweep tried to copy it, so nothing was copied and it reads normally; the sweep tries it again after `PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS` (a day). The list shows these last.
 - **Frozen, error code `operator_abandoned`**: nothing. Someone already abandoned it, and the card stays in the list as a record. These records are never removed, and the list puts older entries first, so over time they can push newer problems past its limit (`PROJECT_DATA_ARCHIVE_ROLLOUT_LIST_LIMIT_DEFAULT`, 25). When the page says more may exist beyond the limit, open `https://api.yourdomain.com/api/admin/project-data/storage/archive-sharding/problem-migrations?limit=100&projectId=<id>` in a browser tab where you're signed in as a superadmin (100 is the default maximum; leave out `projectId` to list every project).
 - **Failed**: nothing yet. If it keeps failing it turns Poisoned.
 - **Poisoned, or Frozen with any other error code**: read the error and fix its cause first. Then clear the migration with **Abandon** (or a copy-back, if it already deleted its source — see below), and finally **Close breaker** for the project, because abandoning a migration does not close the breaker.
@@ -589,6 +592,11 @@ The Workers Paid plan ($5/month) is required for Durable Objects and Cloudflare 
 ### User VM Costs
 
 VMs are billed to the cloud provider credential SAM uses for the node. In a typical self-hosted setup, that is each user's own BYOC credential; admins may also configure a platform credential for shared zero-config provisioning. SAM supports Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, and GCP. The example prices below cover the built-in Hetzner, Scaleway, Vultr, DigitalOcean, and UpCloud size mappings; Infomaniak and GCP pricing depend on the selected region and machine configuration.
+
+Connecting a cloud credential lists its machines in the matching compute pool but adds none of them:
+nothing joins a pool on its own. After you add a platform credential, open **Admin → Infrastructure**
+and add the machines and regions the shared pool may use. Until a pool has machines, people who use it
+can run only Instant sessions. See [Compute Pools](/docs/guides/compute-pools/#an-empty-pool-runs-only-instant-sessions).
 
 When compute pools are enabled, the pool editor uses the provider-native catalog for the
 project, user, or platform credential in scope. The small/medium/large prices below remain useful as

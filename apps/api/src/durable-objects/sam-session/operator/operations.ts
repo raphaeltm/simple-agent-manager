@@ -1,4 +1,7 @@
 import type { StandardSchemaWithJSON } from '@mastra/core/schema';
+import type { OperationContext } from '@simple-agent-manager/operations';
+import { authorizeProjectOperation } from '@simple-agent-manager/operations';
+import { operations } from '@simple-agent-manager/operations';
 import { resolveSamConfig } from '@simple-agent-manager/shared';
 import { toJsonSchema } from '@valibot/to-json-schema';
 import { drizzle } from 'drizzle-orm/d1';
@@ -6,9 +9,7 @@ import * as v from 'valibot';
 
 import type { Env } from '../../../env';
 import { requireProjectCapability } from '../../../middleware/project-auth';
-import { authorizeProjectOperation } from '../../../operations/authorization';
-import { operations } from '../../../operations/registry';
-import type { OperationContext } from '../../../operations/types';
+import { createOperationPorts } from '../../../operation-ports';
 import { resolveAdminSetting } from '../../../services/admin-settings';
 import { requireSessionWriter } from '../../../services/session-access';
 import type { OperatorStore, OperatorTurn } from './store';
@@ -164,6 +165,7 @@ export async function operatorTools(options: {
               assertCurrent();
               const context: OperationContext = {
                 env,
+                ports: createOperationPorts(env),
                 actor: { userId, via: 'sam', scopes: new Set(['sam.read', 'sam.write']) },
                 requestId: actionId,
                 idempotencyKey: actionId,

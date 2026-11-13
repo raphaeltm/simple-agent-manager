@@ -1,3 +1,4 @@
+import type { NodeStatus } from '@simple-agent-manager/shared';
 import type { Context } from 'hono';
 
 import type { Env } from '../env';
@@ -40,9 +41,13 @@ export const NODE_CALLBACK_TERMINAL_STATUSES = [
   'deleted',
   'destroyed',
   'destroying',
+  // A deployment node whose last environment was deleted (`routes/deployment-environments.ts`).
+  // It only moves on to `deleted` or `error`, so /ready and heartbeat must not revive it to
+  // `running` or keep refreshing its callback token.
+  'deleting',
   'stopped',
   'stopping',
-] as const;
+] as const satisfies readonly (NodeStatus | 'destroyed')[];
 
 const NODE_STATUSES_TERMINATING_CALLBACKS: ReadonlySet<string> = new Set(
   NODE_CALLBACK_TERMINAL_STATUSES

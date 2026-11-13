@@ -93,7 +93,9 @@ export function IdeaWork({ idea, projectId }: { idea: IdeaDetail; projectId: str
                   title={session.topic ?? 'Untitled chat'}
                   meta={session.agentLabel ?? 'An agent'}
                   trailing={
-                    <span className={`inline-flex items-center gap-1.5 font-medium ${outcome.tone}`}>
+                    <span
+                      className={`inline-flex items-center gap-1.5 font-medium ${outcome.tone}`}
+                    >
                       {live && <LiveDot />}
                       <span className="line-clamp-1 break-words">{outcome.text}</span>
                     </span>

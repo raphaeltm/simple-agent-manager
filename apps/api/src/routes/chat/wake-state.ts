@@ -14,7 +14,7 @@
  * This is the *pull* half of wake visibility, and it is what makes the wake banner
  * survive a navigate-away-and-back (PR #1865). The *push* half — live phase deltas
  * without waiting for a poll — is `session.wake_progress`, broadcast from
- * `durable-objects/project-data/session-wake-progress.ts`.
+ * `packages/project-data/src/do/session-wake-progress.ts`.
  *
  * Both halves report the same vocabulary (`TaskExecutionStep`), so a hydrate and a
  * broadcast that race cannot disagree about what phase means.
@@ -86,6 +86,7 @@ export async function attachWakeState(
     const [row] = await db
       .select({
         recoveryStatus: schema.sessionSnapshots.recoveryStatus,
+        recoveryAttemptId: schema.sessionSnapshots.recoveryAttemptId,
         executionStep: schema.tasks.executionStep,
         admissionReason: schema.tasks.admissionReason,
         admissionNextRetryAt: schema.tasks.admissionNextRetryAt,
@@ -141,6 +142,8 @@ export async function attachWakeState(
     return {
       ...(state ?? EMPTY_STATE),
       recoveryStatus,
+      // Lets the client tell a stale snapshot of a finished wake from a new wake.
+      wakeAttemptId: row.recoveryAttemptId ?? null,
       wakePhase,
       waitReason: admissionWait,
       waitRetryAt: admissionWait ? (row.admissionNextRetryAt ?? null) : null,

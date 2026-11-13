@@ -23,9 +23,9 @@ const geminiInstallPackage = "@google/gemini-cli@0.61.0"
 const vibeInstallPackage = "mistral-vibe==2.25.8"
 const ampCLIInstallPackage = "@ampcode/cli@0.0.1790261352-g2ab14a"
 
-const claudeACPInstallPackage = "@agentclientprotocol/claude-agent-acp@0.81.2"
-const claudeCodeMinVersion = "2.1.280"
-const claudeCodeInstallPackage = "@anthropic-ai/claude-code@2.1.281"
+const claudeACPInstallPackage = "@agentclientprotocol/claude-agent-acp@0.102.0"
+const claudeCodeMinVersion = "2.1.321"
+const claudeCodeInstallPackage = "@anthropic-ai/claude-code@2.1.321"
 const claudeCodeInstallCommand = "npm install -g " + claudeACPInstallPackage + " " + claudeCodeInstallPackage
 const codexACPInstallPackage = "@agentclientprotocol/codex-acp@2.1.1"
 const codexCLIInstallPackage = "@openai/codex@0.160.0"
@@ -244,6 +244,9 @@ type GatewayConfig struct {
 	// RecoveryWatchdogTimeout bounds crash recovery after a prompt disconnect.
 	// Zero uses DefaultRecoveryWatchdogTimeout.
 	RecoveryWatchdogTimeout time.Duration
+	// EvictionParkTimeout bounds how long a pending eviction may own an agent exit
+	// before the host replays it as an ordinary crash. Zero uses DefaultEvictionParkTimeout.
+	EvictionParkTimeout time.Duration
 	// RestartDecayWindow resets restartCount after this quiet period. Zero uses
 	// DefaultRestartDecayWindow.
 	RestartDecayWindow time.Duration

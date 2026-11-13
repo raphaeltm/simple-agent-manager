@@ -99,10 +99,17 @@ export function useProjectChatState() {
   // come from shared TanStack queries. Before this migration each was fetched by a
   // mount effect local to this hook, duplicating requests that the settings pages,
   // onboarding wizards, task forms and workspace creation were already making.
-  const { credentials } = useCredentials(queryScope);
-  const { available: trialAvailable } = useTrialStatus(queryScope);
+  const { credentials, loading: credentialsLoading } = useCredentials(queryScope);
+  // "Is there compute this user may provision on": their own cloud account, or the installation's
+  // machines. Not the SAM-managed AI proxy (`available`), which is off on installs that provide
+  // machines but leave agent credentials to each user; keying on it refused every send there.
+  const { platformCompute, loading: platformComputeLoading } = useTrialStatus(queryScope);
   const hasUserCloudCredentials = hasByocComputeCredential(credentials);
-  const hasCloudCredentials = hasUserCloudCredentials || trialAvailable;
+  const hasCloudCredentials = hasUserCloudCredentials || platformCompute;
+  // The composer refuses only once both reads have answered "no". A send while either is still
+  // in flight goes to the server, which decides placement itself; refusing then would tell a
+  // user with compute that they have none.
+  const computeKnownAbsent = !hasCloudCredentials && !credentialsLoading && !platformComputeLoading;
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Sidebar filtering
@@ -474,7 +481,7 @@ export function useProjectChatState() {
         return;
       }
 
-      if (selectedRuntime !== 'cf-container' && !hasCloudCredentials) {
+      if (selectedRuntime !== 'cf-container' && computeKnownAbsent) {
         setSubmitError(
           'Cloud credentials required. Connect a cloud provider in Settings, or ask your admin to add a platform cloud credential.'
         );

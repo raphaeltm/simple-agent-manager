@@ -39,6 +39,15 @@ export function getVmAgentContainerConfig(env: Env): VmAgentContainerConfig {
   };
 }
 
+/**
+ * Whether this deployment can start Instant (Cloudflare Container) workspaces: the runtime
+ * is on and the container binding exists. Instant needs no cloud account, so onboarding asks
+ * for one only when this is false.
+ */
+export function isInstantRuntimeAvailable(env: Env): boolean {
+  return getVmAgentContainerConfig(env).enabled && Boolean(env.VM_AGENT_CONTAINER);
+}
+
 export function requireVmAgentContainer(env: Env): void {
   const config = getVmAgentContainerConfig(env);
   if (!config.enabled) {

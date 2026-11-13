@@ -8,6 +8,7 @@ import { createAllSchemaTables } from '../helpers/sqlite-d1';
 import {
   createEvictionApp,
   createEvictionEnv,
+  pickEvictionPools,
   postEvictionCallback,
   seedEvictionOwnerAndNode,
 } from '../helpers/workspace-eviction-route-harness';
@@ -35,7 +36,7 @@ describe('workspace eviction HTTP recovery vertical slice', () => {
   let env: Env;
   let app: Hono<{ Bindings: Env }>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
     mocks.startTaskRunnerDO.mockReset().mockResolvedValue(undefined);
     sqlite = new Database(':memory:');
@@ -66,6 +67,7 @@ describe('workspace eviction HTTP recovery vertical slice', () => {
         '2099-01-01T00:00:00.000Z', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
     `);
     env = createEvictionEnv(sqlite);
+    await pickEvictionPools(env);
     app = createEvictionApp();
   });
 

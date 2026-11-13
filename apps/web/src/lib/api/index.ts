@@ -481,6 +481,7 @@ export {
   discoverSubmoduleRepos,
   getAccountMap,
   getArtifactsEnabled,
+  getInstantRuntimeEnabled,
   getProject,
   getProjectCredentialAttributionHealth,
   getProjectInvitePreview,
@@ -519,6 +520,7 @@ export type {
   WorkspaceResourceToolSpan,
 } from './resource-timeline';
 export { getSessionResourceTimeline, getSessionResourceTimelineChunk } from './resource-timeline';
+export { declineSecretRequest, fulfillSecretRequest, getSecretRequest } from './secret-requests';
 export {
   getSessionAccess,
   resumeChatSessionAgent,
@@ -559,7 +561,7 @@ export {
   stopChatSession,
 } from './sessions';
 export type { SetupCompleteResponse, SetupStatusResponse, SetupVerifyResponse } from './setup';
-export { completeSetup, fetchSetupStatus, saveSetupConfig, verifySetupToken } from './setup';
+export { completeSetup, fetchSetupStatus, verifySetupToken } from './setup';
 export type {
   ListProjectTasksParams,
   RequestAttachmentUploadResponse,
@@ -583,6 +585,7 @@ export {
   requestAttachmentUpload,
   resumeProviderLimitTask,
   runProjectTask,
+  startProviderLimitTaskAnyway,
   submitTask,
   updateProjectTask,
   updateProjectTaskStatus,
@@ -598,6 +601,7 @@ export {
   previewWebhookTrigger,
   rotateWebhookTriggerToken,
   runTrigger,
+  setWebhookSigningSecret,
   testTrigger,
   updateTrigger,
 } from './triggers';
@@ -612,7 +616,6 @@ export {
 export { getWorkflowRun, listWorkflowRuns } from './workflows';
 export {
   createAgentSession,
-  createWorkspace,
   deleteWorkspace,
   getPortAccessUrl,
   getTerminalToken,

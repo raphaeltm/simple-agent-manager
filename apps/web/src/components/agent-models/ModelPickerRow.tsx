@@ -2,7 +2,7 @@ import type { AgentModelCatalogEntry } from '@simple-agent-manager/shared';
 import { formatAgentModelPrice } from '@simple-agent-manager/shared';
 import { memo } from 'react';
 
-import { ModelToggleSwitch } from './ModelToggleSwitch';
+import { ToggleSwitch } from '../ui/ToggleSwitch';
 
 interface ModelPickerRowProps {
   model: AgentModelCatalogEntry;
@@ -66,7 +66,7 @@ function ModelPickerRowImpl({ model, checked, onToggle, disabled }: ModelPickerR
           )}
         </span>
       </label>
-      <ModelToggleSwitch
+      <ToggleSwitch
         id={switchId}
         checked={checked}
         onChange={() => onToggle(model.id)}

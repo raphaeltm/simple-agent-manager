@@ -1,5 +1,6 @@
 import type { Env } from '../env';
 import { type GcpCatalogSettingName } from './admin-settings-gcp-catalog-definitions';
+import type { NodeTunnelSettingName } from './admin-settings-node-tunnel-definitions';
 import { type AgentEmailSettingName } from './agent-email/setting-definitions';
 import { type AgentModelSettingKey } from './agent-models/settings-definition';
 import { type ConnectorReadSettingName } from './connector-read-settings-definition';
@@ -11,6 +12,7 @@ import {
 import { type FleetOpsSettingName } from './fleet-ops/settings-definitions';
 import { type LifecycleLatencySettingKey } from './lifecycle-latency/defaults';
 import { type OperationsTelemetrySettingName } from './operations-telemetry-defaults';
+import { type RuntimeSecretRequestSettingName } from './runtime-secret-request-settings-definition';
 import { type WORKFLOW_DEFAULTS } from './workflow-defaults';
 
 export type AdminSettingValue = boolean | number | string | readonly string[] | null;
@@ -27,8 +29,10 @@ export type AdminSettingName =
   | `aiModels.${AgentModelSettingKey}`
   | `connector.${ConnectorSettingKey}`
   | ConnectorReadSettingName
+  | RuntimeSecretRequestSettingName
   | AgentEmailSettingName
   | FleetOpsSettingName
+  | NodeTunnelSettingName
   | GcpCatalogSettingName
   | OperationsTelemetrySettingName
   | 'chat.profileUsageWindowDays'
@@ -104,6 +108,9 @@ export type AdminSettingName =
   | 'operations.samOperatorStreamMaxSubscribers'
   | 'operations.githubTriggerQueueMaxPendingLimit'
   | 'operations.githubTriggerQueueTtlSecondsLimit'
+  | 'operations.webhookQueueMaxPending'
+  | 'operations.webhookQueueTtlSeconds'
+  | 'operations.webhookSignatureToleranceSeconds'
   | 'operations.pullRequestRefreshCap'
   | 'operations.pullRequestRefreshTtlSeconds'
   | 'operations.pullRequestRefreshBudgetPerHour'
@@ -114,6 +121,7 @@ export type AdminSettingName =
   | 'performance.providerCatalogTimeoutMs'
   | 'performance.githubRequestTimeoutMs'
   | 'performance.githubInstallationsDeadlineMs'
+  | 'performance.userAccessTokenLockTimeoutMs'
   | 'performance.projectRecentTimeoutMs'
   | 'performance.externalReadTimeoutMs'
   | 'performance.configReadTimeoutMs'

@@ -7,12 +7,14 @@
  * attack case and a same-project owner control (rules 11, 28).
  */
 import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
+import { ensurePoolsWithStarterMachines } from '../../helpers/capacity-pool-picks';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 import { seedCloudCredential, seedProjectWithMember, seedUser } from './capacity-pool-test-seeds';
 
@@ -38,7 +40,9 @@ const mocks = vi.hoisted(() => ({
   enrichMessageWithMentions: vi.fn(),
 }));
 
-vi.mock('../../../src/operations/link-core', () => ({ recordLink: mocks.recordLink }));
+vi.mock('@simple-agent-manager/operations/internal/link-core', () => ({
+  recordLink: mocks.recordLink,
+}));
 
 vi.mock('../../../src/services/instant-session', () => ({
   acceptInstantSession: mocks.acceptInstantSession,
@@ -105,7 +109,7 @@ function createApp() {
   return app;
 }
 
-function createEnv() {
+async function createEnv() {
   const sqlite = new Database(':memory:');
   createAllSchemaTables(sqlite, schema);
   seedUser(sqlite, 'user-1');
@@ -113,7 +117,7 @@ function createEnv() {
   seedProjectWithMember(sqlite, { projectId: 'project-2', userId: 'user-1', role: 'owner' });
   seedCloudCredential(sqlite, { id: 'cloud-1', userId: 'user-1', projectId: 'project-1' });
   seedIdeas(sqlite);
-  return {
+  const fixture = {
     sqlite,
     env: {
       DATABASE: createSqliteD1WithBindLimit(sqlite, 100),
@@ -123,6 +127,13 @@ function createEnv() {
       CF_CONTAINER_ENABLED: 'true',
     } as Env,
   };
+  // The user picked machines in the project pool: nothing joins a pool on its own.
+  await ensurePoolsWithStarterMachines(drizzle(fixture.env.DATABASE, { schema }) as never, {
+    userId: 'user-1',
+    projectId: 'project-1',
+    env: fixture.env,
+  });
+  return fixture;
 }
 
 function seedIdeas(sqlite: Database.Database): void {
@@ -197,7 +208,7 @@ describe('POST /tasks/submit with sourceIdeaId', () => {
   });
 
   it('records works_on before the task runner starts (VM path)', async () => {
-    const { sqlite, env } = createEnv();
+    const { sqlite, env } = await createEnv();
     try {
       const response = await submit(createApp(), env, {
         message: 'Match the window.',
@@ -205,7 +216,7 @@ describe('POST /tasks/submit with sourceIdeaId', () => {
         sourceIdeaId: 'idea-open',
       });
       expect(response.status).toBe(202);
-      expect(mocks.recordLink).toHaveBeenCalledWith(env, 'project-1', {
+      expect(mocks.recordLink).toHaveBeenCalledWith(expect.objectContaining({ env }), 'project-1', {
         sourceKind: 'session',
         sourceId: 'session-1',
         targetKind: 'idea',
@@ -222,7 +233,7 @@ describe('POST /tasks/submit with sourceIdeaId', () => {
   });
 
   it('records discusses when the start is a conversation', async () => {
-    const { sqlite, env } = createEnv();
+    const { sqlite, env } = await createEnv();
     try {
       await submit(createApp(), env, {
         message: 'Talk it through.',
@@ -237,7 +248,7 @@ describe('POST /tasks/submit with sourceIdeaId', () => {
 
   // Control: the suite must not pass with the link write deleted outright.
   it('records nothing and still starts when no idea is supplied', async () => {
-    const { sqlite, env } = createEnv();
+    const { sqlite, env } = await createEnv();
     try {
       const response = await submit(createApp(), env, { message: 'Plain task.', taskMode: 'task' });
       expect(response.status).toBe(202);
@@ -249,7 +260,7 @@ describe('POST /tasks/submit with sourceIdeaId', () => {
   });
 
   it('aborts the start when the link cannot be written, leaving no queued task', async () => {
-    const { sqlite, env } = createEnv();
+    const { sqlite, env } = await createEnv();
     try {
       mocks.recordLink.mockImplementation(() => Promise.reject(new Error('DO unavailable')));
       const before = linkRows(sqlite);
@@ -281,7 +292,7 @@ describe('POST /tasks/submit with sourceIdeaId', () => {
   // session, so the only production path that re-links one session is a replayed SAM
   // dispatch reservation, which this route cannot reach.
   it('always asks for the same link triple for a given chat and idea', async () => {
-    const { sqlite, env } = createEnv();
+    const { sqlite, env } = await createEnv();
     try {
       const app = createApp();
       const body = { message: 'Match the window.', taskMode: 'task', sourceIdeaId: 'idea-open' };
@@ -295,7 +306,7 @@ describe('POST /tasks/submit with sourceIdeaId', () => {
   });
 
   it('404s an idea belonging to another project, before any task is created', async () => {
-    const { sqlite, env } = createEnv();
+    const { sqlite, env } = await createEnv();
     try {
       const before = linkRows(sqlite);
       const response = await submit(createApp(), env, {
@@ -313,7 +324,7 @@ describe('POST /tasks/submit with sourceIdeaId', () => {
   });
 
   it('404s an ordinary task used as an idea', async () => {
-    const { sqlite, env } = createEnv();
+    const { sqlite, env } = await createEnv();
     try {
       const response = await submit(createApp(), env, {
         message: 'Match the window.',
@@ -334,7 +345,7 @@ describe('POST /tasks/submit with sourceIdeaId', () => {
    * `is_idea = 0`: exactly what the old rule would have accepted as an idea.
    */
   it('404s an ordinary DRAFT task, which the old status rule would have accepted', async () => {
-    const { sqlite, env } = createEnv();
+    const { sqlite, env } = await createEnv();
     try {
       const refused = await submit(createApp(), env, {
         message: 'Match the window.',
@@ -361,7 +372,7 @@ describe('POST /tasks/submit with sourceIdeaId', () => {
     ['idea-done', /idea is done/i],
     ['idea-parked', /idea is parked/i],
   ])('409s %s with a message that says what to do', async (ideaId, pattern) => {
-    const { sqlite, env } = createEnv();
+    const { sqlite, env } = await createEnv();
     try {
       const before = linkRows(sqlite);
       const response = await submit(createApp(), env, {
@@ -381,7 +392,7 @@ describe('POST /tasks/submit with sourceIdeaId', () => {
   // The Instant branch records the link inside `acceptInstantSession`, which is covered
   // by instant-session-idea-link.test.ts. What the route owes it is the validated id.
   it('passes the validated idea to the Instant branch', async () => {
-    const { sqlite, env } = createEnv();
+    const { sqlite, env } = await createEnv();
     try {
       sqlite
         .prepare(

@@ -48,7 +48,7 @@ export function SamPrototype() {
       (text: string) => {
         setChatInputValue((prev: string) => (prev ? `${prev} ${text}` : text));
       },
-      [setChatInputValue],
+      [setChatInputValue]
     ),
   });
 
@@ -69,11 +69,14 @@ export function SamPrototype() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chat.messages]);
 
-  const handleAskAboutProject = useCallback((name: string) => {
-    setSelectedProject(null);
-    setView('chat');
-    setChatInputValue(`Tell me more about ${name}`);
-  }, [setChatInputValue]);
+  const handleAskAboutProject = useCallback(
+    (name: string) => {
+      setSelectedProject(null);
+      setView('chat');
+      setChatInputValue(`Tell me more about ${name}`);
+    },
+    [setChatInputValue]
+  );
 
   // Mic button style based on voice state
   const micButtonStyle: React.CSSProperties = (() => {
@@ -105,11 +108,7 @@ export function SamPrototype() {
   return (
     <div className="h-dvh flex flex-col relative overflow-hidden">
       {/* WebGL background canvas */}
-      <canvas
-        ref={canvasRef}
-        className="absolute inset-0 w-full h-full"
-        style={{ zIndex: 0 }}
-      />
+      <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" style={{ zIndex: 0 }} />
 
       {/* Blur + dim overlay */}
       <div
@@ -155,10 +154,21 @@ export function SamPrototype() {
               view === 'chat' ? 'translate-x-0' : '-translate-x-full'
             }`}
           >
-            <div className="flex-1 overflow-y-auto px-4 py-4" aria-live="polite" aria-label="Conversation">
+            <div
+              className="flex-1 overflow-y-auto px-4 py-4"
+              aria-live="polite"
+              aria-label="Conversation"
+            >
               {chat.isLoadingHistory ? (
-                <div className="flex items-center justify-center py-8" role="status" aria-label="Loading conversation history">
-                  <Loader2 className="w-5 h-5 animate-spin" style={{ color: 'rgba(60, 180, 120, 0.5)' }} />
+                <div
+                  className="flex items-center justify-center py-8"
+                  role="status"
+                  aria-label="Loading conversation history"
+                >
+                  <Loader2
+                    className="w-5 h-5 animate-spin"
+                    style={{ color: 'rgba(60, 180, 120, 0.5)' }}
+                  />
                 </div>
               ) : (
                 chat.messages.map((msg) => (
@@ -179,7 +189,10 @@ export function SamPrototype() {
                 <div className="flex items-center justify-center gap-2 mb-2">
                   <div
                     className="w-2 h-2 rounded-full animate-pulse"
-                    style={{ backgroundColor: '#3cb480', boxShadow: '0 0 8px rgba(60, 180, 120, 0.6)' }}
+                    style={{
+                      backgroundColor: '#3cb480',
+                      boxShadow: '0 0 8px rgba(60, 180, 120, 0.6)',
+                    }}
                   />
                   <span className="text-xs text-white/50">Listening... tap mic to stop</span>
                 </div>
@@ -202,11 +215,7 @@ export function SamPrototype() {
                       void chat.handleSend();
                     }
                   }}
-                  placeholder={
-                    voice.state === 'recording'
-                      ? 'Speak now...'
-                      : 'Ask SAM anything...'
-                  }
+                  placeholder={voice.state === 'recording' ? 'Speak now...' : 'Ask SAM anything...'}
                   aria-label="Message SAM"
                   aria-multiline="true"
                   className="flex-1 px-4 py-3 text-sm rounded-xl text-white placeholder:text-white/25 outline-none resize-none overflow-hidden leading-snug focus-visible:ring-1 focus-visible:ring-[rgba(60,180,120,0.5)]"
@@ -232,11 +241,7 @@ export function SamPrototype() {
                         ? 'Transcribing...'
                         : 'Voice input'
                   }
-                  aria-label={
-                    voice.state === 'recording'
-                      ? 'Stop recording'
-                      : 'Start voice input'
-                  }
+                  aria-label={voice.state === 'recording' ? 'Stop recording' : 'Start voice input'}
                 >
                   {voice.state === 'recording' ? (
                     <Square className="w-4 h-4" fill="currentColor" />
@@ -338,8 +343,7 @@ export function SamPrototype() {
               className="flex items-center gap-2 px-5 py-3 text-sm font-medium transition-all"
               style={{
                 color: view === 'overview' ? '#3cb480' : 'rgba(255,255,255,0.4)',
-                background:
-                  view === 'overview' ? 'rgba(60, 180, 120, 0.12)' : 'transparent',
+                background: view === 'overview' ? 'rgba(60, 180, 120, 0.12)' : 'transparent',
               }}
             >
               <LayoutDashboard className="w-4.5 h-4.5" aria-hidden="true" />

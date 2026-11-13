@@ -8,7 +8,6 @@ import { SectionHeader } from './SectionHeader';
 
 interface NodeWorkspacesSectionProps {
   workspaces: WorkspaceResponse[];
-  onCreateWorkspace: () => void;
   onStop?: (id: string) => void;
   onRestart?: (id: string) => void;
   onDelete?: (id: string) => void;
@@ -16,7 +15,6 @@ interface NodeWorkspacesSectionProps {
 
 export const NodeWorkspacesSection: FC<NodeWorkspacesSectionProps> = ({
   workspaces,
-  onCreateWorkspace,
   onStop,
   onRestart,
   onDelete,
@@ -32,16 +30,9 @@ export const NodeWorkspacesSection: FC<NodeWorkspacesSectionProps> = ({
 
       {workspaces.length === 0 ? (
         <div className="text-center p-6 border border-dashed border-border-default rounded-md">
-          <div className="text-fg-muted mb-3" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>
+          <div className="text-fg-muted" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>
             No workspaces on this node yet.
           </div>
-          <button
-            onClick={onCreateWorkspace}
-            className="px-4 py-2 bg-accent text-fg-on-accent border-none rounded-md font-medium cursor-pointer"
-            style={{ fontSize: 'var(--sam-type-caption-size)' }}
-          >
-            Create Workspace
-          </button>
         </div>
       ) : (
         <div className="flex flex-col gap-2">

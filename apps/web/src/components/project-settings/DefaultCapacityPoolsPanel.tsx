@@ -39,6 +39,26 @@ type DefaultCapacityPoolsPanelProps =
   | { scope: 'user'; projectId?: never }
   | { scope: 'installation'; projectId?: never };
 
+/**
+ * The pool as the editor shows it: only accounts that are still connected. A disconnected or
+ * disabled account's source stays in the database (running work can reference it) but is
+ * never placed, so it disappears from the pool along with its machines.
+ */
+function connectedOnly(
+  summary: DefaultCapacityPoolSummary | null
+): DefaultCapacityPoolSummary | null {
+  if (!summary) return null;
+  const connected = new Set(
+    summary.sources.filter((source) => source.status === 'active').map((source) => source.id)
+  );
+  if (connected.size === summary.sources.length) return summary;
+  return {
+    ...summary,
+    sources: summary.sources.filter((source) => connected.has(source.id)),
+    candidates: summary.candidates.filter((candidate) => connected.has(candidate.capacitySourceId)),
+  };
+}
+
 /** Permission failures get a plain sentence; anything else keeps the server's message. */
 function loadErrorMessage(error: unknown, scope: CapacityPoolScope): string {
   if (error instanceof ApiClientError && (error.status === 401 || error.status === 403)) {
@@ -122,7 +142,9 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
           : fetchInstallationDefaultCapacityPools(),
     enabled: Boolean(queryScope),
   });
-  const [isEditing, setIsEditing] = useState(false);
+  // Bumped after a save, a discard or a conflict, so the editor reopens from the server state.
+  const [editorKey, setEditorKey] = useState(0);
+  const resetEditor = () => setEditorKey((key) => key + 1);
 
   const ownedDefault =
     query.data?.defaults.find((item) => item.scope === scope && item.visibility === 'visible')
@@ -130,7 +152,7 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
   const effective = query.data?.effective ?? null;
   // A scope that owns a pool always shows it, even when it allows no machines yet, so it
   // stays editable. Otherwise show the pool this scope falls back to, read-only.
-  const shown: DefaultCapacityPoolSummary | null = ownedDefault ?? effective;
+  const shown = useMemo(() => connectedOnly(ownedDefault ?? effective), [ownedDefault, effective]);
   const fallbackScope = !ownedDefault && effective ? effective.pool.scope : null;
   const canEdit = Boolean(query.data?.policyMutationSupported && ownedDefault);
   const catalogs = providerCatalog.catalogs;
@@ -164,14 +186,14 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
           : updateInstallationDefaultCapacityPools(body),
     onSuccess: (data) => {
       queryClient.setQueryData(queryKey, data);
-      setIsEditing(false);
+      resetEditor();
       toast.success('Compute pool saved');
     },
     onError: (error) => {
       if (error instanceof ApiClientError && error.status === 409) {
         // Someone else saved this pool after it loaded. Saving again would resend the same stale
         // edit, so show the current pool instead.
-        setIsEditing(false);
+        resetEditor();
         void queryClient.invalidateQueries({ queryKey });
         toast.error(POOL_EDIT_CONFLICT_MESSAGE);
         return;
@@ -194,37 +216,25 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
           </h2>
           <p className="m-0 mt-1 text-sm text-fg-muted">{copy.description}</p>
         </div>
-        {!isEditing && (
-          <div className="flex shrink-0 items-center gap-2">
-            <Button
-              size="sm"
-              variant="ghost"
-              className="border-transparent text-fg-muted hover:text-fg-primary"
-              loading={reconcileMutation.isPending}
-              disabled={busy || !queryScope || (scope === 'project' && !projectId)}
-              title="Read the machine list from the cloud account again. Machines you turned off stay off."
-              aria-label="Refresh machine list"
-              onClick={() => reconcileMutation.mutate()}
-            >
-              <RefreshCw
-                size={14}
-                aria-hidden
-                className={reconcileMutation.isPending ? 'animate-spin' : undefined}
-              />
-              Refresh
-            </Button>
-            {canEdit && (
-              <Button
-                size="sm"
-                variant="secondary"
-                disabled={busy}
-                onClick={() => setIsEditing(true)}
-              >
-                Edit
-              </Button>
-            )}
-          </div>
-        )}
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="border-transparent text-fg-muted hover:text-fg-primary"
+            loading={reconcileMutation.isPending}
+            disabled={busy || !queryScope || (scope === 'project' && !projectId)}
+            title="Read the machine list from the cloud account again. Machines you turned off stay off."
+            aria-label="Refresh machine list"
+            onClick={() => reconcileMutation.mutate()}
+          >
+            <RefreshCw
+              size={14}
+              aria-hidden
+              className={reconcileMutation.isPending ? 'animate-spin' : undefined}
+            />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {query.isLoading && !query.data ? (
@@ -235,18 +245,16 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
         <>
           {query.isError && <Alert variant="error">{loadErrorMessage(query.error, scope)}</Alert>}
           {query.data &&
-            (isEditing && ownedDefault ? (
+            (canEdit && shown ? (
               <ComputePoolEditor
-                pool={ownedDefault.pool}
+                key={editorKey}
+                pool={shown.pool}
                 groups={groups}
                 sources={sources}
-                initialOrder={initialSourceOrder(sources, ownedDefault.pool.sourceOrder)}
+                initialOrder={initialSourceOrder(sources, shown.pool.sourceOrder)}
                 saving={updateMutation.isPending}
-                onCancel={() => setIsEditing(false)}
-                onSave={(request) => {
-                  if (request) updateMutation.mutate(request);
-                  else setIsEditing(false);
-                }}
+                onDiscard={resetEditor}
+                onSave={(request) => updateMutation.mutate(request)}
               />
             ) : shown ? (
               <ComputePoolOverview
@@ -270,7 +278,7 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
         </>
       )}
 
-      {query.isFetching && query.data && !isEditing && (
+      {query.isFetching && query.data && (
         <p className="m-0 text-xs text-fg-muted" role="status">
           Refreshing…
         </p>

@@ -1,3 +1,6 @@
+import {
+  PlacementResolutionError,
+} from '@simple-agent-manager/scheduler-core';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -9,7 +12,6 @@ import {
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS,
   capacityPlacementSnapshotSqlValues,
 } from './capacity-placement-snapshot';
-import { PlacementResolutionError } from './placement-resolution-error';
 import {
   resolveTaskStartPlacement,
   resolveTaskStartPlacementCredentialAttributionFromPlacement,

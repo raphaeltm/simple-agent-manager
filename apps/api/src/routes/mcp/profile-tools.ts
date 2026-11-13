@@ -15,7 +15,6 @@ import type { Env } from '../../index';
 import { log } from '../../lib/logger';
 import { getCredentialEncryptionKey } from '../../lib/secrets';
 import { requireProjectAccess, requireProjectCapability } from '../../middleware/project-auth';
-import { runWorkspaceOperation } from '../../operations/workspace-adapter';
 import * as agentProfileService from '../../services/agent-profiles';
 import { getRuntimeLimits } from '../../services/limits';
 import {
@@ -34,6 +33,7 @@ import {
   mapServiceError,
   type McpTokenData,
 } from './_helpers';
+import { runWorkspaceOperation } from './workspace-operation-adapter';
 
 export class McpProfileFieldValidationError extends Error {
   constructor(message: string) {

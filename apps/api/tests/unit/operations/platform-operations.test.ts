@@ -1,10 +1,6 @@
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-import * as schema from '../../../src/db/schema';
-import type { Env } from '../../../src/env';
-import { OperationError, operationErrorHttpStatus } from '../../../src/operations/errors';
-import { getPlatformOperationLimits } from '../../../src/operations/limits';
+import type { Actor, OperationContext } from '@simple-agent-manager/operations';
+import { OperationError, operationErrorHttpStatus } from '@simple-agent-manager/operations';
+import { getPlatformOperationLimits } from '@simple-agent-manager/operations';
 import {
   samChatRead,
   samChatsSearch,
@@ -16,15 +12,17 @@ import {
   samProfilesList,
   samTaskGet,
   samTasksList,
-} from '../../../src/operations/platform-operations';
-import { operationInputJsonSchema, operations } from '../../../src/operations/registry';
-import type { Actor, OperationContext } from '../../../src/operations/types';
-import {
-  UNTRUSTED_TEXT_GUIDANCE,
-  untrustedTextBlock,
-} from '../../../src/operations/untrusted-text';
-import { runWorkspaceOperation } from '../../../src/operations/workspace-adapter';
+} from '@simple-agent-manager/operations';
+import { operationInputJsonSchema, operations } from '@simple-agent-manager/operations';
+import { UNTRUSTED_TEXT_GUIDANCE, untrustedTextBlock } from '@simple-agent-manager/operations';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import * as schema from '../../../src/db/schema';
+import type { Env } from '../../../src/env';
+import { createOperationPorts } from '../../../src/operation-ports';
 import { getMcpLimits } from '../../../src/routes/mcp/_helpers';
+import { runWorkspaceOperation } from '../../../src/routes/mcp/workspace-operation-adapter';
 import { handleGetPeerAgentOutput } from '../../../src/routes/mcp/workspace-tools-direct';
 import type { McpTokenData } from '../../../src/services/mcp-token';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
@@ -44,7 +42,7 @@ vi.mock('../../../src/services/project-data', async (importOriginal) => {
     searchKnowledgeObservations: vi.fn().mockResolvedValue([]),
   };
 });
-vi.mock('../../../src/operations/agent-linked-context', () => ({
+vi.mock('@simple-agent-manager/operations/internal/agent-linked-context', () => ({
   getAgentLinkedContext: vi.fn().mockResolvedValue({
     kind: 'idea',
     id: 'idea-owner',
@@ -83,7 +81,12 @@ describe('shared platform operation authorization on real SQLite', () => {
   let requestId = 0;
 
   function ctx(userId = ownerId, workspaceProjectId = projectId): OperationContext {
-    return { env, actor: actor(userId, workspaceProjectId), requestId: String(++requestId) };
+    return {
+      env,
+      ports: createOperationPorts(env),
+      actor: actor(userId, workspaceProjectId),
+      requestId: String(++requestId),
+    };
   }
 
   beforeEach(() => {
@@ -621,6 +624,7 @@ describe('operation registry contract', () => {
       'sam_channel_history',
       'sam_channel_get',
       'sam_channel_subscription_cancel',
+      'sam_usage_get',
     ]);
     expect(operationInputJsonSchema(samTaskGet)).toMatchObject({
       type: 'object',

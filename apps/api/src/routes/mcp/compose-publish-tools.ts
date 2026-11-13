@@ -11,6 +11,7 @@ import { eq } from 'drizzle-orm';
  */
 import { drizzle } from 'drizzle-orm/d1';
 
+import { createDeploymentPublishJobPorts } from '../../app-deployment-ports/publish-jobs';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { parsePositiveInt } from '../../lib/route-helpers';
@@ -238,7 +239,7 @@ export async function handleBuildAndPublish(
         .limit(1);
       if (current) responseStatus = current.status;
       if (current?.status === 'canceled' || current?.status === 'failed')
-        await cancelDeploymentPublishJobOnVmBestEffort(env, {
+        await cancelDeploymentPublishJobOnVmBestEffort(createDeploymentPublishJobPorts(env), {
           ...job,
           requestedBy: tokenData.userId,
         });
@@ -387,7 +388,7 @@ export async function handleCancelPublish(
       source: 'mcp.cancel_publish',
       occurredAt: job.completedAt ?? job.updatedAt,
     });
-    await cancelDeploymentPublishJobOnVmBestEffort(env, job);
+    await cancelDeploymentPublishJobOnVmBestEffort(createDeploymentPublishJobPorts(env), job);
   }
   return handleGetPublishStatus(requestId, { publishJobId }, tokenData, env);
 }

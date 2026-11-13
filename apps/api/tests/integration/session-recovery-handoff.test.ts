@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -14,6 +15,7 @@ import { crudRoutes } from '../../src/routes/tasks/crud';
 import { runWorkspaceEvictionRecovery } from '../../src/scheduled/workspace-eviction-recovery';
 import { ensureSessionRecovery } from '../../src/services/session-recovery';
 import { cancelVmTaskAdmission } from '../../src/services/vm-admission-control';
+import { ensurePoolsWithStarterMachines } from '../helpers/capacity-pool-picks';
 import { createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
 /** Gate the actual task handoff, allowing independent catalog batches to run first. */
@@ -97,7 +99,7 @@ async function archive(database: D1Database) {
   );
 }
 
-function seedStableRecoveryFixture(sqlite: Database.Database): void {
+async function seedStableRecoveryFixture(sqlite: Database.Database): Promise<void> {
   createAllSchemaTables(sqlite, schema);
   sqlite.exec(`
     INSERT INTO users (id, name, email, github_id, status)
@@ -167,6 +169,15 @@ function seedStableRecoveryFixture(sqlite: Database.Database): void {
        '2099-08-20T00:00:00.000Z', 'sleeping', '2026-08-15T00:00:00.000Z',
        0, '2026-08-15T00:00:00.000Z');
   `);
+  // A person picks machines before work runs: nothing joins a pool on its own, and the wake
+  // places the replacement runtime on the pool.
+  const env = { DATABASE: createSqliteD1(sqlite) } as Env;
+  await ensurePoolsWithStarterMachines(drizzle(env.DATABASE, { schema }) as never, {
+    userId: 'user-1',
+    projectId: 'project-1',
+    includeInstallation: true,
+    env,
+  });
 }
 
 function makeSnapshotClaimable(sqlite: Database.Database, sleepingAt: string): void {
@@ -235,7 +246,7 @@ describe('session recovery stable task identity', () => {
   it('automatically retries a failed accepted eviction wake through the durable runner boundary', async () => {
     const sqlite = new Database(':memory:');
     try {
-      seedStableRecoveryFixture(sqlite);
+      await seedStableRecoveryFixture(sqlite);
       sqlite.exec(`UPDATE workspaces SET status = 'evicted', eviction_generation = 'oom-generation', chat_session_id = NULL;
         UPDATE session_snapshots SET recovery_status = 'failed', recovery_task_id = 'task-1',
           recovery_attempt_id = 'failed-accepted-attempt', recovery_attempts = 1,
@@ -271,7 +282,7 @@ describe('session recovery stable task identity', () => {
   it('reactivates the sleeping task without creating a recovery task row', async () => {
     const sqlite = new Database(':memory:');
     try {
-      seedStableRecoveryFixture(sqlite);
+      await seedStableRecoveryFixture(sqlite);
       const database = createSqliteD1(sqlite);
 
       await expect(wake(database)).resolves.toEqual({ status: 'waking', taskId: 'task-1' });
@@ -310,7 +321,7 @@ describe('session recovery stable task identity', () => {
   it('wakes from an older snapshot after a later confirmed-deleted runtime retained the binding', async () => {
     const sqlite = new Database(':memory:');
     try {
-      seedStableRecoveryFixture(sqlite);
+      await seedStableRecoveryFixture(sqlite);
       sqlite.exec(`
         CREATE UNIQUE INDEX workspace_chat_unique ON workspaces(chat_session_id);
         UPDATE workspaces SET status = 'deleted', chat_session_id = NULL,
@@ -403,7 +414,7 @@ describe('session recovery stable task identity', () => {
     async (status, projectId, userId, deletionConfirmed, nodeTerminated, released) => {
       const sqlite = new Database(':memory:');
       try {
-        seedStableRecoveryFixture(sqlite);
+        await seedStableRecoveryFixture(sqlite);
         sqlite.exec(`CREATE UNIQUE INDEX workspace_chat_unique ON workspaces(chat_session_id);
           UPDATE workspaces SET status = 'deleted', chat_session_id = NULL WHERE id = 'workspace-1';
           UPDATE tasks SET workspace_id = NULL WHERE id = 'task-1';`);
@@ -431,7 +442,7 @@ describe('session recovery stable task identity', () => {
   it('does not release any predecessor after the claimed attempt is replaced before the batch', async () => {
     const sqlite = new Database(':memory:');
     try {
-      seedStableRecoveryFixture(sqlite);
+      await seedStableRecoveryFixture(sqlite);
       sqlite.exec(`UPDATE workspaces SET chat_session_id = NULL WHERE id = 'workspace-1';
         INSERT INTO workspaces (id,user_id,project_id,status,chat_session_id,runtime_deletion_confirmed_at)
         VALUES ('retained','user-1','project-1','deleted','chat-1','confirmed');`);
@@ -474,7 +485,7 @@ describe('session recovery stable task identity', () => {
     ) => {
       const sqlite = new Database(':memory:');
       try {
-        seedStableRecoveryFixture(sqlite);
+        await seedStableRecoveryFixture(sqlite);
         const at = (minutes: number) =>
           new Date(Date.now() + Number(minutes) * 60_000).toISOString();
         const failedAt = at(Number(failedMinutes));
@@ -573,7 +584,7 @@ describe('session recovery stable task identity', () => {
     async (status) => {
       const sqlite = new Database(':memory:');
       try {
-        seedStableRecoveryFixture(sqlite);
+        await seedStableRecoveryFixture(sqlite);
         sqlite.exec(`UPDATE workspaces SET status='deleted',chat_session_id=NULL,
           runtime_deletion_confirmed_at='2026-08-15T01:00:00.000Z';
           INSERT INTO workspaces (id,user_id,project_id,status,chat_session_id,runtime_deletion_confirmed_at)
@@ -613,7 +624,7 @@ describe('session recovery stable task identity', () => {
   it('preserves the coordination channel on the stable task through wake', async () => {
     const sqlite = new Database(':memory:');
     try {
-      seedStableRecoveryFixture(sqlite);
+      await seedStableRecoveryFixture(sqlite);
       sqlite
         .prepare("UPDATE tasks SET coordination_channel = 'feature.wake' WHERE id = 'task-1'")
         .run();
@@ -632,7 +643,7 @@ describe('session recovery stable task identity', () => {
     async (status) => {
       const sqlite = new Database(':memory:');
       try {
-        seedStableRecoveryFixture(sqlite);
+        await seedStableRecoveryFixture(sqlite);
         sqlite
           .prepare(
             "UPDATE tasks SET status = ?, completed_at = '2026-08-15T00:00:00.000Z', error_message = 'previous outcome' WHERE id = 'task-1'"
@@ -656,7 +667,7 @@ describe('session recovery stable task identity', () => {
   it('rolls back completion if atomic snapshot invalidation fails', async () => {
     const sqlite = new Database(':memory:');
     try {
-      seedStableRecoveryFixture(sqlite);
+      await seedStableRecoveryFixture(sqlite);
       sqlite.exec(`CREATE TRIGGER reject_archive BEFORE UPDATE OF sleeping_at ON session_snapshots
         WHEN NEW.sleeping_at IS NULL BEGIN SELECT RAISE(ABORT, 'archive intent unavailable'); END;`);
       const database = createSqliteD1(sqlite);
@@ -680,7 +691,7 @@ describe('session recovery stable task identity', () => {
   ])('destructive archive fences human recovery (%s, caller %s)', async (ordering, caller) => {
     const sqlite = new Database(':memory:');
     try {
-      seedStableRecoveryFixture(sqlite);
+      await seedStableRecoveryFixture(sqlite);
       sqlite.exec(`INSERT INTO users (id, name, email, github_id, status)
         VALUES ('member-1', 'Member', 'member@example.com', 'gh-member', 'active');
         INSERT INTO project_members (project_id, user_id, role, status)
@@ -731,7 +742,7 @@ describe('session recovery stable task identity', () => {
   it('does not revive a terminal conversation for an automated wake', async () => {
     const sqlite = new Database(':memory:');
     try {
-      seedStableRecoveryFixture(sqlite);
+      await seedStableRecoveryFixture(sqlite);
       sqlite.exec("UPDATE tasks SET status = 'cancelled' WHERE id = 'task-1'");
       await expect(wake(createSqliteD1(sqlite))).resolves.toMatchObject({ status: 'unavailable' });
       expect(taskRow(sqlite)).toMatchObject({ status: 'cancelled' });
@@ -744,7 +755,7 @@ describe('session recovery stable task identity', () => {
   it('requires acknowledgment of this wake attempt after an ambiguous runner response', async () => {
     const sqlite = new Database(':memory:');
     try {
-      seedStableRecoveryFixture(sqlite);
+      await seedStableRecoveryFixture(sqlite);
       startTaskRunnerDOMock.mockRejectedValueOnce(new Error('RPC interrupted'));
       ensureTaskRunnerStartedMock.mockResolvedValueOnce(false);
       await expect(wake(createSqliteD1(sqlite))).resolves.toMatchObject({ status: 'unavailable' });
@@ -777,7 +788,7 @@ describe('session recovery stable task identity', () => {
     async (oldAttempt) => {
       const sqlite = new Database(':memory:');
       try {
-        seedStableRecoveryFixture(sqlite);
+        await seedStableRecoveryFixture(sqlite);
         sqlite.exec(`UPDATE session_snapshots SET recovery_task_id='task-1', recovery_attempt_id='new-wake';
         UPDATE tasks SET admission_state='provisioning' WHERE id='task-1';
         INSERT INTO vm_task_admissions (task_id,project_id,user_id,provider,credential_domain_key,provider_domain_key,scope_key,requested_vm_size,requested_vm_location,state)
@@ -814,7 +825,7 @@ describe('session recovery stable task identity', () => {
   it('converges repeated wake attempts on the same task id', async () => {
     const sqlite = new Database(':memory:');
     try {
-      seedStableRecoveryFixture(sqlite);
+      await seedStableRecoveryFixture(sqlite);
       const database = createSqliteD1(sqlite);
 
       await expect(wake(database)).resolves.toEqual({ status: 'waking', taskId: 'task-1' });
@@ -835,7 +846,7 @@ describe('session recovery stable task identity', () => {
   it('preserves lineage and fan-out parent identity across multiple sleep/wake cycles', async () => {
     const sqlite = new Database(':memory:');
     try {
-      seedStableRecoveryFixture(sqlite);
+      await seedStableRecoveryFixture(sqlite);
       const database = createSqliteD1(sqlite);
 
       await expect(wake(database)).resolves.toEqual({ status: 'waking', taskId: 'task-1' });
@@ -860,7 +871,7 @@ describe('session recovery stable task identity', () => {
   it('keeps the per-parent fan-out counter anchored to the stable task id', async () => {
     const sqlite = new Database(':memory:');
     try {
-      seedStableRecoveryFixture(sqlite);
+      await seedStableRecoveryFixture(sqlite);
       sqlite.exec(`
         INSERT INTO tasks
           (id, project_id, user_id, parent_task_id, title, description, status,

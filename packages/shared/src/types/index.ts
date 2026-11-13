@@ -56,6 +56,7 @@ export type {
   SaveGcpServiceAccountCredentialRequest,
   SessionAgentCredential,
   SessionAgentCredentialResponse,
+  SessionAgentRuntimeConfig,
   SetupProjectDeploymentRequest,
   SignupApprovalConfig,
   SignupApprovalConfigResponse,
@@ -118,6 +119,7 @@ export {
   isCapacityPoolScope,
   isCapacityPoolStatus,
   isCapacityPoolStrategy,
+  isCapacitySourceExcluded,
   isCapacitySourceKind,
   isCapacityWorkloadRole,
   MAX_CAPACITY_POOL_SOURCE_ORDER_LENGTH,
@@ -618,6 +620,7 @@ export type {
 } from './agent-settings';
 export {
   AGENT_EFFORT_LEVELS,
+  AGENT_MODEL_MAX_LENGTH,
   AGENT_PROFILE_RUNTIMES,
   DEFAULT_AGENT_EFFORT,
   DEFAULT_GITHUB_CLI_POLICY,
@@ -700,7 +703,6 @@ export type {
   GitHubTriggerRoutingConfig,
   ListTriggerExecutionsResponse,
   ListTriggersResponse,
-  ListWebhookDeliveriesResponse,
   RunTriggerRequest,
   Trigger,
   TriggeredBy,
@@ -714,16 +716,6 @@ export type {
   TriggerSourceType,
   TriggerStatus,
   UpdateTriggerRequest,
-  WebhookCredential,
-  WebhookDelivery,
-  WebhookDeliveryOutcome,
-  WebhookFilterMode,
-  WebhookFilterOperator,
-  WebhookFilterResult,
-  WebhookTemplateContext,
-  WebhookTriggerConfig,
-  WebhookTriggerConfigInput,
-  WebhookTriggerFilter,
 } from './trigger';
 export {
   GITHUB_TRIGGER_EVENT_TYPES,
@@ -732,10 +724,44 @@ export {
   TRIGGER_SOURCE_TYPES,
   TRIGGER_STATUSES,
   TRIGGERED_BY_VALUES,
+} from './trigger';
+export type {
+  ListWebhookDeliveriesResponse,
+  SetWebhookSigningSecretRequest,
+  SetWebhookSigningSecretResponse,
+  WebhookCredential,
+  WebhookDelivery,
+  WebhookDeliveryOutcome,
+  WebhookEventIdLocation,
+  WebhookFilterMode,
+  WebhookFilterOperator,
+  WebhookFilterResult,
+  WebhookRejectionReason,
+  WebhookSetupState,
+  WebhookSetupStatus,
+  WebhookSignedVerificationScheme,
+  WebhookSigningSecretStatus,
+  WebhookTemplateContext,
+  WebhookTriggerConfig,
+  WebhookTriggerConfigInput,
+  WebhookTriggerFilter,
+  WebhookVerificationConfig,
+  WebhookVerificationScheme,
+} from './trigger-webhook';
+export {
+  isWebhookFilterPresenceOperator,
+  isWebhookSignedScheme,
+  SLACK_WEBHOOK_DEFAULTS,
   WEBHOOK_DELIVERY_OUTCOMES,
   WEBHOOK_FILTER_MODES,
   WEBHOOK_FILTER_OPERATORS,
-} from './trigger';
+  WEBHOOK_FILTER_PRESENCE_OPERATORS,
+  WEBHOOK_REJECTION_REASONS,
+  WEBHOOK_SETUP_STATES,
+  WEBHOOK_SIGNED_VERIFICATION_SCHEMES,
+  WEBHOOK_SIGNING_SECRET_ANCHOR,
+  WEBHOOK_VERIFICATION_SCHEMES,
+} from './trigger-webhook';
 
 // Compute Usage
 export type {
@@ -1071,3 +1097,23 @@ export {
   SAM_NOTICE_VERSION,
   SAM_RUNTIME_REPORTED_KEY,
 } from './sam-notices';
+
+// Agent-requested runtime secrets
+export type {
+  EffectiveRuntimeEnvEntry,
+  FulfillRuntimeSecretRequestBody,
+  ProjectRuntimeEnvVarProvenance,
+  RuntimeEnvCollectedProvenance,
+  RuntimeEnvScope,
+  RuntimeSecretRequest,
+  RuntimeSecretRequestExistingValue,
+  RuntimeSecretRequestResolution,
+  RuntimeSecretRequestResponse,
+  RuntimeSecretRequestStatus,
+} from './runtime-secret-requests';
+export {
+  REQUEST_SECRET_TOOL,
+  RUNTIME_ENV_SCOPES,
+  RUNTIME_SECRET_REQUEST_REASON_MAX_LENGTH,
+  RUNTIME_SECRET_REQUEST_STATUSES,
+} from './runtime-secret-requests';

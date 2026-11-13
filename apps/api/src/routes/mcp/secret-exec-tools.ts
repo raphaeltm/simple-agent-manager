@@ -12,6 +12,7 @@ import type { Env } from '../../env';
 import { getCredentialEncryptionKey } from '../../lib/secrets';
 import { errors } from '../../middleware/error';
 import { recordOperationalJob } from '../../services/operational-job-observations';
+import { UNSUPPORTED_SECRET_EXEC_ENV_NAMES } from '../../services/secret-exec-env-names';
 import { getWorkloadIdentityMetadata } from '../../services/workload-identity-context';
 import {
   signWorkloadIdentityToken,
@@ -35,17 +36,7 @@ const literal = v.pipe(
   v.string(),
   v.check((s) => !s.includes('\0'))
 );
-const unsupportedEnvNames = new Set([
-  WORKLOAD_IDENTITY_TOKEN_ENV,
-  'ENV',
-  'BASH_ENV',
-  'UID',
-  'EUID',
-  'PPID',
-  'SHELLOPTS',
-  'BASHOPTS',
-  'BASH_VERSINFO',
-]);
+const unsupportedEnvNames = UNSUPPORTED_SECRET_EXEC_ENV_NAMES;
 const envKey = v.pipe(v.string(), v.regex(/^[A-Za-z_][A-Za-z0-9_]*$/));
 export const SecretExecSchema = v.pipe(
   v.strictObject({

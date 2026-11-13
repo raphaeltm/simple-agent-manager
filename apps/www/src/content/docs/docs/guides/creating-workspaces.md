@@ -3,13 +3,13 @@ title: Workspaces
 description: How workspaces are provisioned, used, and managed in SAM.
 ---
 
-A **workspace** is the environment an AI coding agent runs in — your repository, cloned and ready, with the tools the agent needs. In everyday use you rarely create one by hand: SAM provisions a workspace for you automatically when you start working in a project chat. This guide explains that automatic flow and the direct controls available for power users.
+A **workspace** is the environment an AI coding agent runs in — your repository, cloned and ready, with the tools the agent needs. You don't create one by hand: SAM provisions a workspace for you automatically when you start working in a project chat. This guide explains that automatic flow and the direct controls available for power users.
 
 ## The Normal Flow: Workspaces Come From Chat
 
 You don't start with a workspace — you start with a conversation:
 
-1. From the **Dashboard**, click **Import Project** and connect a GitHub repository.
+1. From the **Dashboard**, click **New Project** and connect a GitHub repository, or let SAM host a new one where your instance offers it.
 2. Open the project and describe what you want in the **chat**.
 3. SAM automatically provisions a workspace, runs your chosen agent, and streams progress back to you. Ask the agent to commit, push and open a pull request when the work is ready.
 
@@ -89,7 +89,8 @@ on a phone, in the menu). It opens the **Nodes** page, which lists each machine 
 running on it (see [What each machine is using](/docs/guides/compute-pools/#what-each-machine-is-using)).
 Open **Advanced** on a machine for links to its workspaces, or select **Details** to see all of them
 under **Workspaces**. There's no longer a single list of every workspace; old links to the
-Workspaces page open Nodes. **Create Workspace** is on a machine's page.
+Workspaces page open Nodes. There's no form for creating a workspace by hand: start a project chat
+and SAM provisions one, and old links to the create-workspace form open Nodes.
 
 ### Terminal
 
@@ -98,6 +99,27 @@ Open a workspace to get a browser-based terminal — a full interactive shell th
 - **Session persistence** — terminal sessions survive page refreshes
 - **Multiple tabs** — run several shells alongside agent chats
 - **Copy/paste and resize** — standard shortcuts work; the terminal fits the window
+
+### What SAM sets in the workspace
+
+SAM sets these environment variables for the agent in a workspace, so the scripts it runs and your
+agent instructions can tell they are on SAM and which project, chat and task they belong to. On a
+machine shared by several chats, each chat's agent gets its own values. A value SAM has nothing for
+can be missing (for example `SAM_TASK_MODE` in a chat started directly in a workspace), so scripts
+should handle an unset variable.
+
+| Variable              | What it holds                                                             |
+| --------------------- | ------------------------------------------------------------------------- |
+| `SAM_WORKSPACE_ID`    | The workspace's ID. Its presence is the way to detect SAM                 |
+| `SAM_WORKSPACE_URL`   | The workspace's own address                                               |
+| `SAM_API_URL`         | The SAM API's address                                                     |
+| `SAM_NODE_ID`         | The machine it runs on                                                    |
+| `SAM_PROJECT_ID`      | The project                                                               |
+| `SAM_CHAT_SESSION_ID` | The chat                                                                  |
+| `SAM_TASK_ID`         | The task behind the chat                                                  |
+| `SAM_TASK_MODE`       | `task` or `conversation`: whether the session is a **Task** or a **Chat** |
+| `SAM_REPOSITORY`      | The repository, as `owner/repo`                                           |
+| `SAM_BRANCH`          | The branch the workspace checked out                                      |
 
 ### Agent chat in a workspace
 
@@ -144,7 +166,8 @@ Requirements are inherited field by field, so you only set what you care about:
 task  →  trigger  →  skill  →  agent profile  →  project  →  platform default
 ```
 
-The platform default is 2 vCPU, 4 GB RAM, and 40 GB disk. Set a project baseline in
+The platform default is 2 vCPU, 4 GB RAM, and 15 GB disk. If the project's devcontainer image or
+build is large, set **Disk (GB)** in the project baseline, so work doesn't run out of space. Set a project baseline in
 **Project → Settings → Infrastructure → Default Resources**, a per-profile or per-skill default in
 their editors, or a one-off override under the sliders button (**Chat options**) above the chat composer.
 

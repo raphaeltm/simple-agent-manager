@@ -1,3 +1,6 @@
+import { toOperationHttpError } from '@simple-agent-manager/operations';
+import { applyIdeaStatusTransition, isIdeaStatus } from '@simple-agent-manager/operations';
+import { getIdeaSessionLinks } from '@simple-agent-manager/operations';
 import {
   type ListTaskEventsResponse,
   type ListTasksResponse,
@@ -21,10 +24,7 @@ import { ulid } from '../../lib/ulid';
 import { getUserId, requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireOwnedWorkspace, requireProjectCapability } from '../../middleware/project-auth';
-import { toOperationHttpError } from '../../operations/errors';
-import { applyIdeaStatusTransition, isIdeaStatus } from '../../operations/idea-transitions';
-import { getIdeaSessionLinks } from '../../operations/link-core';
-import { webOperationContext } from '../../operations/types';
+import { operationDeps, webOperationContext } from '../../operation-ports';
 import {
   CreateTaskDependencySchema,
   CreateTaskSchema,
@@ -1048,7 +1048,7 @@ crudRoutes.get('/:taskId/sessions', requireAuth(), requireApproved(), async (c) 
 
   await requireProjectCapability(db, projectId, userId, 'task:read');
 
-  const sessions = await getIdeaSessionLinks(c.env, projectId, taskId);
+  const sessions = await getIdeaSessionLinks(operationDeps(c.env), projectId, taskId);
 
   return c.json({ sessions, count: sessions.length });
 });

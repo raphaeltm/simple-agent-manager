@@ -1,9 +1,9 @@
+export { toSafeEffectiveCapacityPoolSummary } from './default-capacity-pool-safe-summary';
 export {
   findDefaultPool,
   readDefaultPoolSummary,
   reconcileDefaultPoolStatus,
   type ReconcileDefaultPoolStatusOptions,
-  toSafeEffectiveCapacityPoolSummary,
 } from './default-capacity-pool-summaries';
 export {
   type CapacityPoolSummary,

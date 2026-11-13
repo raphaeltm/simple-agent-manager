@@ -183,7 +183,7 @@ jobs:
           fi
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
 
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -203,7 +203,7 @@ jobs:
         run: pnpm exec vitest run --config scripts/deploy/installer-engine.vitest.config.ts
 
       - name: Install Pulumi CLI
-        uses: pulumi/actions@8e5e406f4007fca908480587cb9893c07090f58d # v7.0.0
+        uses: pulumi/actions@96c7761824268174e0d2a4e8c7d75671eebd24a7 # v7.1.0
 
       - name: Validate Deployment Resource Names
         id: deploy_resources
@@ -261,6 +261,7 @@ jobs:
               "R2_ACCESS_KEY_ID": ${{ toJSON(secrets.R2_ACCESS_KEY_ID || '') }},
               "R2_SECRET_ACCESS_KEY": ${{ toJSON(secrets.R2_SECRET_ACCESS_KEY || '') }},
               "SEGMENT_WRITE_KEY": ${{ toJSON(secrets.SEGMENT_WRITE_KEY || '') }},
+              "AGENT_SIGN_IN_TRUST": ${{ toJSON(secrets.AGENT_SIGN_IN_TRUST || '') }},
               "SMOKE_TEST_AUTH_ENABLED": ${{ toJSON(secrets.SMOKE_TEST_AUTH_ENABLED || '') }},
               "VAPID_PRIVATE_KEY": ${{ toJSON(secrets.VAPID_PRIVATE_KEY || '') }},
               "VAPID_PUBLIC_KEY": ${{ toJSON(secrets.VAPID_PUBLIC_KEY || '') }},
@@ -1011,6 +1012,13 @@ jobs:
           CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS: ${{ vars.CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS }}
           CF_CONTAINER_CLONE_FILTER: ${{ vars.CF_CONTAINER_CLONE_FILTER }}
           CF_CONTAINER_VM_AGENT_PORT: ${{ vars.CF_CONTAINER_VM_AGENT_PORT }}
+          VM_AGENT_TRANSPORT: ${{ vars.VM_AGENT_TRANSPORT }}
+          VM_AGENT_TUNNEL_PORT: ${{ vars.VM_AGENT_TUNNEL_PORT }}
+          CLOUDFLARED_VERSION: ${{ vars.CLOUDFLARED_VERSION }}
+          VM_AGENT_TUNNEL_LISTENER_WAIT_SECONDS: ${{ vars.VM_AGENT_TUNNEL_LISTENER_WAIT_SECONDS }}
+          VM_AGENT_TUNNEL_PROBE_TIMEOUT_SECONDS: ${{ vars.VM_AGENT_TUNNEL_PROBE_TIMEOUT_SECONDS }}
+          VM_AGENT_TUNNEL_PROBE_INTERVAL_SECONDS: ${{ vars.VM_AGENT_TUNNEL_PROBE_INTERVAL_SECONDS }}
+          VM_AGENT_TUNNEL_RESTART_SECONDS: ${{ vars.VM_AGENT_TUNNEL_RESTART_SECONDS }}
           SANDBOX_CONTAINER_MAX_INSTANCES: ${{ vars.SANDBOX_CONTAINER_MAX_INSTANCES }}
           VM_AGENT_CONTAINER_MAX_INSTANCES: ${{ vars.VM_AGENT_CONTAINER_MAX_INSTANCES }}
           SANDBOX_ENABLED: ${{ vars.SANDBOX_ENABLED }}
@@ -1835,6 +1843,13 @@ jobs:
           CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS: ${{ vars.CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS }}
           CF_CONTAINER_CLONE_FILTER: ${{ vars.CF_CONTAINER_CLONE_FILTER }}
           CF_CONTAINER_VM_AGENT_PORT: ${{ vars.CF_CONTAINER_VM_AGENT_PORT }}
+          VM_AGENT_TRANSPORT: ${{ vars.VM_AGENT_TRANSPORT }}
+          VM_AGENT_TUNNEL_PORT: ${{ vars.VM_AGENT_TUNNEL_PORT }}
+          CLOUDFLARED_VERSION: ${{ vars.CLOUDFLARED_VERSION }}
+          VM_AGENT_TUNNEL_LISTENER_WAIT_SECONDS: ${{ vars.VM_AGENT_TUNNEL_LISTENER_WAIT_SECONDS }}
+          VM_AGENT_TUNNEL_PROBE_TIMEOUT_SECONDS: ${{ vars.VM_AGENT_TUNNEL_PROBE_TIMEOUT_SECONDS }}
+          VM_AGENT_TUNNEL_PROBE_INTERVAL_SECONDS: ${{ vars.VM_AGENT_TUNNEL_PROBE_INTERVAL_SECONDS }}
+          VM_AGENT_TUNNEL_RESTART_SECONDS: ${{ vars.VM_AGENT_TUNNEL_RESTART_SECONDS }}
           SANDBOX_CONTAINER_MAX_INSTANCES: ${{ vars.SANDBOX_CONTAINER_MAX_INSTANCES }}
           VM_AGENT_CONTAINER_MAX_INSTANCES: ${{ vars.VM_AGENT_CONTAINER_MAX_INSTANCES }}
           SANDBOX_ENABLED: ${{ vars.SANDBOX_ENABLED }}
@@ -1911,6 +1926,7 @@ jobs:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           SMOKE_TEST_AUTH_ENABLED: ${{ secrets.SMOKE_TEST_AUTH_ENABLED }}
+          AGENT_SIGN_IN_TRUST: ${{ secrets.AGENT_SIGN_IN_TRUST }}
           DEPLOY_SIGNING_PRIVATE_KEY: ${{ secrets.DEPLOY_SIGNING_PRIVATE_KEY }}
           DEPLOY_SIGNING_PUBLIC_KEY: ${{ secrets.DEPLOY_SIGNING_PUBLIC_KEY }}
           SEGMENT_WRITE_KEY: ${{ secrets.SEGMENT_WRITE_KEY }}

@@ -30,6 +30,7 @@ import { nextRuns } from './cron';
 import { GitHubQueueFields } from './GitHubQueueFields';
 import type { Errors } from './requests';
 import { canMessageChat, type EditorState, isTriggerStart } from './state';
+import { eventsWaitInLine } from './webhook-state';
 import { whenSentence } from './when-sentence';
 
 const VARIABLES = {
@@ -348,6 +349,7 @@ export function StepReview({
       ? `send a message to “${lookups.chatTitle(action.sessionId)}”`
       : `${state.start === 'github' && state.github.eventType !== 'push' && state.github.subjectAffinity ? 'continue this automation’s active chat for the issue or PR, or start a new one with' : 'start a new chat with'} ${lookups.profileName(action.agentProfileId || null)}`;
   const first = state.start === 'schedule' ? nextRuns(state.schedule, Date.now(), 1)[0] : undefined;
+  const eventsWait = eventsWaitInLine(state);
   const set = (patch: Partial<EditorState['trigger']>) =>
     onChange({ ...state, trigger: { ...state.trigger, ...patch } });
   return (
@@ -417,15 +419,13 @@ export function StepReview({
         >
           {/* Every trigger kind honours it at admission (schedule, GitHub, webhook, incident). */}
           <CheckRow
-            label={
-              state.start === 'github'
-                ? 'One run at a time'
-                : 'Skip a run if the last one is still going'
-            }
+            label={eventsWait ? 'One run at a time' : 'Skip a run if the last one is still going'}
             hint={
               state.start === 'github'
                 ? 'Other GitHub events wait their turn.'
-                : 'Recommended. Otherwise runs can pile up.'
+                : eventsWait
+                  ? 'Other events wait their turn.'
+                  : 'Recommended. Otherwise runs can pile up.'
             }
             checked={state.trigger.skipIfRunning}
             onChange={(skipIfRunning) => set({ skipIfRunning })}

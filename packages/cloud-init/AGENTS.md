@@ -11,6 +11,9 @@ Generates cloud-init YAML templates for VM provisioning. Produces the user-data 
 | `src/index.ts` | Public API — `generateCloudInit()` export |
 | `src/template.ts` | YAML template with variable placeholders and multi-line content embedding |
 | `src/generate.ts` | Variable resolution — maps input config to template variables |
+| `src/variables.ts` / `src/validate.ts` | `CloudInitVariables` and their validation |
+| `src/template-resources.ts` | Slice hierarchy and Docker headroom write_files, interpolated into the template |
+| `src/template-ingress.ts` / `src/tunnel.ts` | Ingress-mode blocks (Origin CA direct vs Cloudflare Tunnel) and tunnel validation; each node renders only its own mode |
 
 ## Commands
 
@@ -33,4 +36,5 @@ pnpm --filter @simple-agent-manager/cloud-init typecheck  # Type check only
 - **Tests must use realistic multi-line data** — 1-3 line PEM stubs hide indentation bugs that only manifest with real 20+ line certificates.
 - **Always assert round-trip integrity** — `expect(parsedYaml.field).toBe(originalInput)` for embedded content.
 - Built with `tsup` (not plain `tsc`) — outputs ESM with `.d.ts` declarations.
+- **User-data is near the 32 KB Hetzner limit.** Do not repeat secrets inline (scripts read `/etc/sam/callback-token`), and render mode-specific blocks only for their mode.
 - Changes here require infrastructure verification on staging (provision a real VM) per rule 02.

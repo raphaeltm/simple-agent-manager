@@ -17,6 +17,7 @@ import { log } from '../../../src/lib/logger';
 import { getTaskSubmitOperation } from '../../../src/lib/task-submit-diagnostics';
 import { handleAppError } from '../../../src/middleware/app-error-handler';
 import { AppError } from '../../../src/middleware/error';
+import { createOperationPorts } from '../../../src/operation-ports';
 import { agentProfileRoutes } from '../../../src/routes/agent-profiles';
 import { cliProjectMetadataRoutes } from '../../../src/routes/cli-project-metadata';
 import { skillRoutes } from '../../../src/routes/skills';
@@ -24,6 +25,7 @@ import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../../src/s
 import type { SamDispatchReservation } from '../../../src/services/sam-dispatch-reservation';
 import { resolveSkillProfile } from '../../../src/services/skills';
 import { submitTask } from '../../../src/services/submit-task';
+import { pickStarterMachines } from '../../helpers/capacity-pool-picks';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 import {
   seedCloudCredential,
@@ -209,6 +211,7 @@ async function seedProjectDefaultPool(env: Env): Promise<void> {
     projectId: 'project-1',
     includeInstallation: false,
   });
+  await pickStarterMachines(drizzle(env.DATABASE, { schema }) as never);
 }
 
 async function seedStaticDefaultPool(
@@ -220,6 +223,7 @@ async function seedStaticDefaultPool(
     projectId: input.projectId ?? null,
     includeInstallation: false,
   });
+  await pickStarterMachines(drizzle(env.DATABASE, { schema }) as never);
 }
 
 const executionCtx = {
@@ -548,6 +552,7 @@ describe('task submit capacity-pool placement', () => {
     mocks.enrichMessageWithMentions.mockImplementation(async (message) => ({
       enrichedMessage: message,
     }));
+    await seedProjectDefaultPool(fixture.env);
     return fixture;
   }
 
@@ -614,7 +619,11 @@ describe('task submit capacity-pool placement', () => {
     try {
       const app = createApp();
       const responses = await Promise.all([forkRequest(app, env), forkRequest(app, env)]);
-      expect(responses.map((r) => r.status).sort()).toEqual([202, 409]);
+      // The second concurrent submission either sees the first in flight (409) or replays its
+      // finished receipt (202), depending on timing. Either way exactly one runtime starts.
+      const statuses = responses.map((r) => r.status);
+      expect(statuses).toContain(202);
+      expect(statuses.every((status) => status === 202 || status === 409)).toBe(true);
       const first = await responses.find((r) => r.status === 202)!.json();
       const replay = await forkRequest(app, env);
       expect(replay.status).toBe(202);
@@ -868,6 +877,7 @@ describe('task submit capacity-pool placement', () => {
         projectId: 'project-1',
         includeInstallation: true,
       });
+      await pickStarterMachines(drizzle(env.DATABASE, { schema }) as never);
       const response = await createApp().request(
         '/api/projects/project-1/tasks/submit',
         {
@@ -1026,6 +1036,7 @@ describe('task submit capacity-pool placement', () => {
           projectId: 'project-1',
           includeInstallation: true,
         });
+        await pickStarterMachines(drizzle(env.DATABASE, { schema }) as never);
         env.CF_CONTAINER_ENABLED = 'true';
         sqlite
           .prepare(
@@ -1044,9 +1055,11 @@ describe('task submit capacity-pool placement', () => {
           mocks.acceptInstantSession.mockRejectedValueOnce(
             new AppError(403, 'FORBIDDEN', 'Denied after task insert')
           );
-        const { samChatStart } = await import('../../../src/operations/connector-operations');
+        const { samChatStart } =
+          await import('@simple-agent-manager/operations/internal/connector-operations');
         const context = {
           env,
+          ports: createOperationPorts(env),
           actor: {
             userId: 'user-1',
             via: 'connector' as const,
@@ -1115,10 +1128,13 @@ describe('task submit capacity-pool placement', () => {
           .run(runtime);
         mocks.acceptInstantSession.mockResolvedValue({ chatSessionId: 'instant-chat' });
         mocks.continueInstantSessionLaunch.mockResolvedValue({});
-        const { samChatStart } = await import('../../../src/operations/connector-operations');
-        const { samTaskGet } = await import('../../../src/operations/platform-operations');
+        const { samChatStart } =
+          await import('@simple-agent-manager/operations/internal/connector-operations');
+        const { samTaskGet } =
+          await import('@simple-agent-manager/operations/internal/platform-operations');
         const context = {
           env,
+          ports: createOperationPorts(env),
           actor: {
             userId: 'user-1',
             via: 'connector' as const,
@@ -1469,6 +1485,52 @@ describe('task submit capacity-pool placement', () => {
           const res = await submitWithOverrides(env, {});
           expect(res.status).toBe(202);
           expect(launchedRunSettings(runtime)).toEqual({ model: 'gpt-6.1-sol', effort: 'high' });
+        });
+      }
+    );
+
+    it.each(['vm', 'cf-container'] as const)(
+      'Connector sam_chat_start overrides the model for one chat, keeping the profile (%s)',
+      async (runtime) => {
+        await withSolEnv(runtime, async ({ sqlite, env }) => {
+          for (const migration of ['0191_connector_execution.sql', '0189_cli_operation_receipts.sql'])
+            sqlite.exec(readFileSync(join(process.cwd(), 'src/db/migrations', migration), 'utf8'));
+          const { samChatStart } =
+            await import('@simple-agent-manager/operations/internal/connector-operations');
+          const result = await samChatStart.run(
+            {
+              env,
+              ports: createOperationPorts(env),
+              actor: {
+                userId: 'user-1',
+                via: 'connector',
+                clientName: 'Claude',
+                scopes: new Set(['sam.read', 'sam.write']),
+              },
+              requestId: 'override',
+              idempotencyKey: 'override-start',
+              execCtx: executionCtx,
+            },
+            {
+              projectId: 'project-1',
+              message: 'Use a different model for this one',
+              agentProfileId: 'sol',
+              model: 'gpt-6.1-astra',
+              effort: 'low',
+            }
+          );
+          expect(result).toMatchObject({
+            agentOverrides: { model: 'gpt-6.1-astra', effort: 'low', scope: 'this_chat_only' },
+          });
+          expect(launchedRunSettings(runtime)).toEqual({ model: 'gpt-6.1-astra', effort: 'low' });
+          // The run keeps the chosen profile (and so its account resolution) ...
+          expect(
+            sqlite.prepare('SELECT agent_profile_hint FROM tasks WHERE id=?').get(result.taskId)
+          ).toEqual({ agent_profile_hint: 'sol' });
+          // ... and the profile itself is unchanged for every other chat.
+          expect(
+            sqlite.prepare("SELECT model, effort FROM agent_profiles WHERE id='sol'").get()
+          ).toEqual({ model: 'gpt-6.1-sol', effort: 'high' });
         });
       }
     );
@@ -1980,7 +2042,8 @@ describe('task submit capacity-pool placement', () => {
     expect(taskRow).toMatchObject({
       capacity_pool_id: 'cap-pool-default:project:project-1',
       capacity_pool_scope: 'project',
-      capacity_pool_revision: 1,
+      // Revision 2: picking the pool's machines (pickStarterMachines) is one saved edit.
+      capacity_pool_revision: 2,
       capacity_source_id: 'cap-source-default:project:project-cloud-1',
       capacity_pool_candidate_id:
         'cap-candidate-default:cap-pool-default:project:project-1:cap-source-default:project:project-cloud-1:hetzner:nbg1:cx23',
@@ -2263,7 +2326,7 @@ describe('task submit capacity-pool placement', () => {
       credentialAttributionUserId: 'user-a',
       credentialAttributionSource: 'user',
     });
-    await seedStaticDefaultPool(env, { userId: 'user-b', projectId: 'project-1' });
+    // user-b has no cloud credential and the project has none: there is no pool to seed or pick.
     authState.userId = 'user-b';
 
     const res = await createApp().request(

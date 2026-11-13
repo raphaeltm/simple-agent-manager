@@ -34,7 +34,7 @@ function methodBody(source, signature) {
   throw new Error(`unterminated pinned adapter method ${signature}`);
 }
 
-assertPinned(claudeDir, '0.81.2');
+assertPinned(claudeDir, '0.102.0');
 assertPinned(codexDir, '2.1.1');
 
 const claude = await import(pathToFileURL(join(claudeDir, 'dist/elicitation.js')).href);
@@ -81,4 +81,4 @@ assert.equal(
   'Codex fixture must match the exact reviewed output of the pinned builder',
 );
 
-console.log('Claude 0.81.2 builder output matches fixtures; Codex 2.1.1 source and full fixture fingerprints match the reviewed snapshot.');
+console.log('Claude 0.102.0 builder output matches fixtures; Codex 2.1.1 source and full fixture fingerprints match the reviewed snapshot.');

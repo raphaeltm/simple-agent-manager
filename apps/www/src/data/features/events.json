@@ -20,11 +20,6 @@
       "caption": "Every automation in one place, in plain words"
     }
   ],
-  "homepage": {
-    "headline": "All your automation in one place",
-    "body": "Each automation says what starts it and what it does, and anything that needs you comes first. Each run is an ordinary chat you can read, reply to, or stop.",
-    "caption": "A scheduled dependency audit finishes and tells you"
-  },
   "details": [
     {
       "headline": "Many ways to start work",

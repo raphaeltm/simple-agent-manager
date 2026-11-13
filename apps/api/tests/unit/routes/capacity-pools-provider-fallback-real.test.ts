@@ -95,7 +95,8 @@ describe('default capacity pool route real provider fallback contract', () => {
     const text = await res.text();
     expect(text).not.toContain('live-hetzner-token-canary');
     const body = JSON.parse(text);
-    expect(body.effectiveSummary).toMatchObject({ scope: 'user', state: 'configured-ready' });
+    // The source and its static catalog are seeded, but nothing joins a pool on its own.
+    expect(body.effectiveSummary).toMatchObject({ scope: 'user', state: 'configured-empty' });
     const seeded = sqlite.prepare('SELECT count(*) count FROM capacity_pool_candidates').get() as {
       count: number;
     };

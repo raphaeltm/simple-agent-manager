@@ -1070,6 +1070,13 @@ export function getApiWorkerVars(
       'CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS',
       'CF_CONTAINER_CLONE_FILTER',
       'CF_CONTAINER_VM_AGENT_PORT',
+      'VM_AGENT_TRANSPORT',
+      'VM_AGENT_TUNNEL_PORT',
+      'CLOUDFLARED_VERSION',
+      'VM_AGENT_TUNNEL_LISTENER_WAIT_SECONDS',
+      'VM_AGENT_TUNNEL_PROBE_TIMEOUT_SECONDS',
+      'VM_AGENT_TUNNEL_PROBE_INTERVAL_SECONDS',
+      'VM_AGENT_TUNNEL_RESTART_SECONDS',
       'SANDBOX_ENABLED',
       'SANDBOX_EXEC_TIMEOUT_MS',
       'SANDBOX_VM_AGENT_PORT',
@@ -1203,7 +1210,7 @@ export function generateApiWorkerEnv(
 
     // Vars: merge top-level defaults with dynamic overrides. With the agent email binding, the
     // Worker also learns its own script name: the admin setup points the `agent@` routing rule
-    // at it (apps/api/src/services/agent-email/setup.ts).
+    // at it (packages/agent-email/src/setup.ts).
     vars: {
       ...getApiWorkerVars(topLevel, outputs, stack, analyticsDataset, includeArtifactsBinding),
       ...(agentEmailBindingEnabled ? { [AGENT_EMAIL_WORKER_NAME_VAR]: workerName } : {}),

@@ -17,7 +17,8 @@ to it, and an agent ships your app there when you ask. You don't run Docker or t
    **Nobody yet** (turn it on later from the environment). Select **Create environment**.
 4. On the environment's page, select **Ask an agent to deploy**. A new chat opens with the request
    already written; pick the profile and send it. You can also just ask in any chat, for example
-   "deploy this to staging".
+   "deploy this to staging". Pick a profile that runs on a VM (**Cloud VM**): an
+   [Instant](/docs/guides/instant-sessions/) chat can't deploy yet, and is told so.
 5. Watch **Recent deploys**: the newest version lists the steps the server reports as it goes. When
    it's **Live**, select **Open app**.
 

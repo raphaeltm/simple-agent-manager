@@ -5,7 +5,7 @@ import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
-import { getAuth, requireApproved, requireAuth } from '../middleware/auth';
+import { credentialNotAfter, getAuth, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { rateLimitTerminalToken } from '../middleware/rate-limit';
 import { jsonValidator, TerminalRequestSchema } from '../schemas';
@@ -56,6 +56,7 @@ terminalRoutes.post(
     }
     const { token, expiresAt } = await signTerminalToken(userId, body.workspaceId, c.env, {
       sessionToken: auth.session.token,
+      notAfter: credentialNotAfter(c),
     });
 
     // Canonical workspace URL is derived from workspace ID and base domain.

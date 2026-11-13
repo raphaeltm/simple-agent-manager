@@ -20,7 +20,12 @@ import { Hono } from 'hono';
 
 import type { NotificationService } from '../durable-objects/notification';
 import type { Env } from '../env';
-import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
+import {
+  getUserId,
+  rejectAgentSignInSession,
+  requireApproved,
+  requireAuth,
+} from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { rateLimitPushSubscription } from '../middleware/rate-limit';
 import {
@@ -113,6 +118,9 @@ notificationRoutes.post(
   '/push/subscriptions',
   requireAuth(),
   requireApproved(),
+  // The subscriber chooses the push endpoint and the keys notifications are encrypted to, so a
+  // subscription is a channel that keeps receiving the account's notifications indefinitely.
+  rejectAgentSignInSession(),
   async (c, next) => rateLimitPushSubscription(c.env)(c, next),
   jsonValidator(WebPushSubscriptionSchema),
   async (c) => {

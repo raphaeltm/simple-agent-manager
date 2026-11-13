@@ -47,9 +47,12 @@ export function assertDefaultCapacityPoolUpdateResult(
     );
   }
   if (result.missingSourceIds.length > 0) {
-    throw errors.badRequest('sourceOrder must list capacity sources that serve this pool', {
-      missingSourceIds: result.missingSourceIds,
-    });
+    throw errors.badRequest(
+      'sourceOrder and excludedSourceIds must list capacity sources that serve this pool',
+      {
+        missingSourceIds: result.missingSourceIds,
+      }
+    );
   }
   if (result.missingCatalogAdditions.length > 0) {
     throw errors.badRequest('Catalog additions must belong to the default capacity pool', {
@@ -93,11 +96,23 @@ export function parseDefaultCapacityPoolUpdateRequest(
       ? undefined
       : parseCatalogAdditions(record.catalogAdditions);
   const sourceOrder =
-    record.sourceOrder === undefined ? undefined : parseSourceOrder(record.sourceOrder);
+    record.sourceOrder === undefined
+      ? undefined
+      : parseSourceIdList('sourceOrder', record.sourceOrder);
+  const excludedSourceIds =
+    record.excludedSourceIds === undefined
+      ? undefined
+      : parseSourceIdList('excludedSourceIds', record.excludedSourceIds);
 
-  if (!policy && !candidates && !catalogAdditions && sourceOrder === undefined) {
+  if (
+    !policy &&
+    !candidates &&
+    !catalogAdditions &&
+    sourceOrder === undefined &&
+    excludedSourceIds === undefined
+  ) {
     throw errors.badRequest(
-      'Default capacity pool update must include policy, candidates, catalogAdditions, or sourceOrder'
+      'Default capacity pool update must include policy, candidates, catalogAdditions, sourceOrder, or excludedSourceIds'
     );
   }
 
@@ -106,28 +121,32 @@ export function parseDefaultCapacityPoolUpdateRequest(
     ...(candidates ? { candidates } : {}),
     ...(catalogAdditions ? { catalogAdditions } : {}),
     ...(sourceOrder !== undefined ? { sourceOrder } : {}),
+    ...(excludedSourceIds !== undefined ? { excludedSourceIds } : {}),
   };
 }
 
-/** A provider order: capacity source ids, most preferred first. `null` or `[]` clears it. */
-function parseSourceOrder(value: unknown): string[] | null {
+/**
+ * A list of capacity source ids: the provider order (most preferred first) or the switched-off
+ * accounts. `null` or `[]` clears it.
+ */
+function parseSourceIdList(field: string, value: unknown): string[] | null {
   if (value === null) return null;
   if (!Array.isArray(value)) {
-    throw errors.badRequest('sourceOrder must be an array of capacity source ids or null');
+    throw errors.badRequest(`${field} must be an array of capacity source ids or null`);
   }
   if (value.length > MAX_CAPACITY_POOL_SOURCE_ORDER_LENGTH) {
     throw errors.badRequest(
-      `sourceOrder may list at most ${MAX_CAPACITY_POOL_SOURCE_ORDER_LENGTH} capacity sources`
+      `${field} may list at most ${MAX_CAPACITY_POOL_SOURCE_ORDER_LENGTH} capacity sources`
     );
   }
   const ids = value.map((id) => {
     if (typeof id !== 'string' || id.trim().length === 0) {
-      throw errors.badRequest('sourceOrder entries must be non-empty capacity source ids');
+      throw errors.badRequest(`${field} entries must be non-empty capacity source ids`);
     }
     return id.trim();
   });
   if (new Set(ids).size !== ids.length) {
-    throw errors.badRequest('sourceOrder must not list a capacity source twice');
+    throw errors.badRequest(`${field} must not list a capacity source twice`);
   }
   return ids;
 }

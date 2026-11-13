@@ -1,4 +1,6 @@
-const TOKEN_PREFIX = 'sam_wh_';
+/** Prefix of every SAM webhook token; also used to recognise one pasted where a secret belongs. */
+export const WEBHOOK_TOKEN_PREFIX = 'sam_wh_';
+const TOKEN_PREFIX = WEBHOOK_TOKEN_PREFIX;
 const TOKEN_BYTES = 32;
 const TOKEN_VALUE_LENGTH = 43;
 const TOKEN_PATTERN = new RegExp(`^${TOKEN_PREFIX}[A-Za-z0-9_-]{${TOKEN_VALUE_LENGTH}}$`);

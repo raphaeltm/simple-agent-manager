@@ -321,21 +321,24 @@ describe('AI Model Registry', () => {
       expect(model!.unifiedApiModelId).toBe('anthropic/claude-sonnet-4-6');
     });
 
-    it('registers Claude Fable 5.1 with current Anthropic metadata', () => {
-      const model = PLATFORM_AI_MODELS.find((m) => m.id === 'claude-fable-5-1');
+    it.each([
+      { id: 'claude-fable-5-2', label: 'Claude Fable 5.2', input: 0.008, output: 0.04 },
+      { id: 'claude-fable-5-1', label: 'Claude Fable 5.1', input: 0.01, output: 0.05 },
+    ])('registers $label with current Anthropic metadata', ({ id, label, input, output }) => {
+      const model = PLATFORM_AI_MODELS.find((m) => m.id === id);
 
       expect(model).toBeDefined();
       expect(model).toMatchObject({
-        label: 'Claude Fable 5.1',
+        label,
         provider: 'anthropic',
         tier: 'premium',
-        costPer1kInputTokens: 0.01,
-        costPer1kOutputTokens: 0.05,
+        costPer1kInputTokens: input,
+        costPer1kOutputTokens: output,
         contextWindow: 1000000,
         toolCallSupport: 'excellent',
         intendedRole: 'workspace-agent',
         fallbackGroup: 'anthropic-premium',
-        unifiedApiModelId: 'anthropic/claude-fable-5-1',
+        unifiedApiModelId: `anthropic/${id}`,
       });
     });
 

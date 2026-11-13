@@ -1,13 +1,14 @@
+import {
+  CAPACITY_POOL_MATERIALIZED_WORKLOAD_ROLES,
+  capacityCandidateIdForRole,
+  PRIMARY_CAPACITY_WORKLOAD_ROLE,
+} from '@simple-agent-manager/scheduler-core';
 import type { CredentialProvider, ProviderInstanceOffering } from '@simple-agent-manager/shared';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 
 import * as schema from '../db/schema';
 import { D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
 import { nextCapacityPoolTimestamp } from './capacity-pool-clock';
-import {
-  CAPACITY_POOL_MATERIALIZED_WORKLOAD_ROLES,
-  capacityCandidateIdForRole,
-} from './capacity-pool-workload-roles';
 import { providerInstanceOfferingDbValues } from './default-capacity-pool-candidate-values';
 import {
   ACTIVE_STATUS,
@@ -29,8 +30,8 @@ import {
   candidateValueForOffering,
   initialStatusForProviderOffering,
   isCurrentlySelectableOffering,
-  legacyStatusForOffering,
   legacyVmSizeHintForOffering,
+  offeringRegionKey,
 } from './default-capacity-pool-candidates-values';
 import { defaultCandidateId } from './default-capacity-pool-helpers';
 
@@ -47,6 +48,7 @@ export async function ensureCandidatesForSource(
   const existingStatuses = new Map(
     [...existingCandidates.entries()].map(([id, row]) => [id, row.status])
   );
+  const pickedRegions = pickedRegionKeys(provider, existingCandidates.values());
   const selectableOfferings = offerings.filter(isCurrentlySelectableOffering);
   const candidateIds: string[] = [];
   const candidateValues: schema.NewCapacityPoolCandidate[] = [];
@@ -62,20 +64,17 @@ export async function ensureCandidatesForSource(
       offering.providerInstanceType,
       offering.providerInstanceSku
     );
-    const legacyStatus = legacyStatusForOffering(
-      existingStatuses,
-      poolId,
-      sourceId,
+    const regionKey = offeringRegionKey(
       provider,
-      offering,
-      legacyVmSize
+      offering.location,
+      offering.providerInstanceType,
+      offering.providerInstanceSku ?? null
     );
     // The primary (editor-visible) row owns membership. Coupled roles mirror it so a
     // deliberate removal or disable applies to every workload role of the same offering.
     const primaryStatus = initialStatusForProviderOffering(
       existingStatuses.get(baseId),
-      legacyStatus,
-      legacyVmSize
+      regionKey !== null && pickedRegions.has(regionKey)
     );
     const providerValues = providerInstanceOfferingDbValues(offering);
 
@@ -318,6 +317,27 @@ export function parsePublicationCursor(raw: string | null): PublicationCursor | 
   }
 }
 
+/** Regions a person picked for each machine type: an active primary row in any of their zones. */
+function pickedRegionKeys(
+  provider: CredentialProvider,
+  rows: Iterable<ExistingCandidateRecord>
+): Set<string> {
+  const keys = new Set<string>();
+  for (const row of rows) {
+    if (row.status !== ACTIVE_STATUS || row.workloadRole !== PRIMARY_CAPACITY_WORKLOAD_ROLE)
+      continue;
+    if (!row.location) continue;
+    const key = offeringRegionKey(
+      provider,
+      row.location,
+      row.providerInstanceType,
+      row.providerInstanceSku
+    );
+    if (key) keys.add(key);
+  }
+  return keys;
+}
+
 export async function readExistingCandidates(
   db: Db,
   poolId: string,
@@ -332,6 +352,10 @@ export async function readExistingCandidates(
       providerInstanceBootDiskSizeGb: schema.capacityPoolCandidates.providerInstanceBootDiskSizeGb,
       providerInstanceImage: schema.capacityPoolCandidates.providerInstanceImage,
       providerInstanceArchitecture: schema.capacityPoolCandidates.providerInstanceArchitecture,
+      workloadRole: schema.capacityPoolCandidates.workloadRole,
+      location: schema.capacityPoolCandidates.location,
+      providerInstanceType: schema.capacityPoolCandidates.providerInstanceType,
+      providerInstanceSku: schema.capacityPoolCandidates.providerInstanceSku,
     })
     .from(schema.capacityPoolCandidates)
     .where(

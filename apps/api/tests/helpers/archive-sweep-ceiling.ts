@@ -30,11 +30,10 @@ export const PREVIOUS_SWEEP_MESSAGE_BUDGET = 5_000;
  * Bound to the shipped value for the same reason the ceiling is: the Worker test's `sweepEnv`
  * has to reproduce the deployed configuration, and a hardcoded copy would let a later edit
  * leave the suite green while it exercised a shape that is no longer shipped
- * (`.claude/rules/70`). Note this value does NOT currently bind throughput — the wall-time
- * gate ends the tick after the first candidate — so it is pinned for fidelity, not because
- * changing it would change the drain.
+ * (`.claude/rules/70`). At the shipped 60 s wall time this is a safety cap the wall-time gate
+ * reaches first, so it is pinned for fidelity rather than as a throughput lever.
  */
-export const SHIPPED_SWEEP_SESSIONS = 8;
+export const SHIPPED_SWEEP_SESSIONS = 50;
 
 /**
  * The daily write allowance `apps/api/wrangler.toml` ships, which the `production` Environment

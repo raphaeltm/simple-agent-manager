@@ -1,7 +1,10 @@
+import {
+  parseProviderLimitWait,
+} from '@simple-agent-manager/scheduler-core';
+
 import type { Env } from '../env';
 import { errors } from '../middleware/error';
 import { credentialLimitReferenceKey } from './credential-limit-events/values';
-import { parseProviderLimitWait } from './provider-limit-policy';
 import {
   sameWorkspaceCallbackIdentity,
   type WorkspaceCallbackIdentitySnapshot,
@@ -60,7 +63,7 @@ export async function assertProviderLimitCredentialPin(
     )
       .bind(
         wait
-          ? JSON.stringify({ ...wait, phase: 'blocked', reason })
+          ? JSON.stringify({ ...wait, phase: 'blocked', reason, ownerOverride: undefined })
           : task.provider_limit_wait_json,
         reason,
         task.id,

@@ -31,20 +31,14 @@ export function PendingApproval() {
               <Clock size={24} className="text-fg-muted" />
             </div>
 
-            <PageTitle className="mb-2">
-              Awaiting Approval
-            </PageTitle>
+            <PageTitle className="mb-2">Awaiting Approval</PageTitle>
 
             <Body className="text-fg-muted mb-2">
-              Your account has been created, but an administrator needs to approve
-              your access before you can use SAM.
+              Your account has been created, but an administrator needs to approve your access
+              before you can use SAM.
             </Body>
 
-            {user?.email && (
-              <Secondary className="mb-6">
-                Signed in as {user.email}
-              </Secondary>
-            )}
+            {user?.email && <Secondary className="mb-6">Signed in as {user.email}</Secondary>}
 
             <div className="flex gap-3 justify-center">
               <Button variant="primary" onClick={handleCheckStatus}>

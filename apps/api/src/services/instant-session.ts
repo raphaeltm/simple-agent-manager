@@ -1,3 +1,4 @@
+import { recordWorkStartIdeaLink } from '@simple-agent-manager/operations';
 import type { AgentProfileRuntime, TaskAttachment, TaskMode } from '@simple-agent-manager/shared';
 import {
   CHAT_CONTEXT_SUMMARY_SOURCE,
@@ -11,7 +12,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
-import { recordWorkStartIdeaLink } from '../operations/start-work-core';
+import { operationDeps } from '../operation-ports';
 import { startSamAwareAgentSession } from './agent-session-bootstrap';
 import { explicitRuntimeAdapterSnapshot } from './canonical-vm-allocation';
 import { capacityPlacementSnapshotDbValues } from './capacity-placement-snapshot';
@@ -372,7 +373,7 @@ export async function acceptInstantSession(
 
   if (input.sourceIdeaId) {
     try {
-      await recordWorkStartIdeaLink(env, input.project.id, {
+      await recordWorkStartIdeaLink(operationDeps(env), input.project.id, {
         ideaId: input.sourceIdeaId,
         sessionId: chatSessionId,
         taskMode: input.taskMode ?? 'conversation',

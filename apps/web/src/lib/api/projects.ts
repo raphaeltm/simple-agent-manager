@@ -166,6 +166,20 @@ export async function createProject(data: CreateProjectRequest): Promise<Project
  * Whether the SAM-hosted (Cloudflare Artifacts) repo provider is enabled on this
  * deployment. Used to decide whether to offer it during project onboarding.
  */
+/**
+ * Whether agents can run on Instant (Cloudflare Containers) here, with no cloud account.
+ * Unreadable counts as no, so onboarding asks for a cloud account rather than promising
+ * a runtime that may not exist.
+ */
+export async function getInstantRuntimeEnabled(): Promise<boolean> {
+  try {
+    const result = await request<{ enabled: boolean }>('/api/config/instant-runtime');
+    return !!result.enabled;
+  } catch {
+    return false;
+  }
+}
+
 export async function getArtifactsEnabled(): Promise<boolean> {
   try {
     const result = await request<{ enabled: boolean }>('/api/config/artifacts-enabled');

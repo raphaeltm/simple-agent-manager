@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ "${1:-}" == "--version" ]]; then
-  echo "0.81.2"
+  echo "0.102.0"
   exit 0
 fi
 

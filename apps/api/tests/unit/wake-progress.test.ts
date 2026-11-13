@@ -6,12 +6,12 @@
  * identically with the join deleted (rule 28).
  */
 
+import { publishSessionWakeProgress } from '@simple-agent-manager/project-data/internal/do/session-wake-progress';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
-import { publishSessionWakeProgress } from '../../src/durable-objects/project-data/session-wake-progress';
 import {
   DEFAULT_WAKE_PROGRESS_BROADCAST_TIMEOUT_MS,
   getWakeProgressBroadcastTimeoutMs,
@@ -90,6 +90,30 @@ describe('attachWakeState (hydration)', () => {
 
     expect(result?.recoveryStatus).toBe('waking');
     expect(result?.wakePhase).toBe('node_provisioning');
+  });
+
+  // The client latches a finished wake per attempt, so it needs the attempt id to tell
+  // a stale snapshot of that wake from the start of the next one (audit D8).
+  it('reports which wake attempt the status describes', async () => {
+    const { sqlite, db } = makeDb();
+    seedSnapshot(sqlite, {
+      chatSessionId: SESSION_ID,
+      recoveryStatus: 'waking',
+      recoveryTaskId: 'recovery-task-1',
+    });
+    sqlite
+      .prepare(`UPDATE session_snapshots SET recovery_attempt_id = ? WHERE chat_session_id = ?`)
+      .run('01ATTEMPT2', SESSION_ID);
+    seedTask(sqlite, 'recovery-task-1', 'node_provisioning');
+
+    const result = await attachWakeState(db, BASE_STATE, {
+      projectId: 'p1',
+      sessionId: SESSION_ID,
+      sessionStatus: 'sleeping',
+    });
+
+    expect(result?.recoveryStatus).toBe('waking');
+    expect(result?.wakeAttemptId).toBe('01ATTEMPT2');
   });
 
   it("does not leak another session's wake", async () => {
@@ -221,7 +245,12 @@ describe('publishSessionWakeProgress', () => {
 
     publishSessionWakeProgress(
       { broadcastEvent },
-      { chatSessionId: SESSION_ID, recoveryStatus: 'waking', wakePhase: 'agent_session' },
+      {
+        chatSessionId: SESSION_ID,
+        recoveryStatus: 'waking',
+        wakePhase: 'agent_session',
+        wakeAttemptId: '01WAKEATTEMPT',
+      },
       1234
     );
 
@@ -232,6 +261,7 @@ describe('publishSessionWakeProgress', () => {
       sessionId: SESSION_ID,
       recoveryStatus: 'waking',
       wakePhase: 'agent_session',
+      wakeAttemptId: '01WAKEATTEMPT',
       at: 1234,
     });
     // Third arg scopes delivery — without it the event fans out to every socket.
@@ -246,6 +276,7 @@ describe('publishSessionWakeProgress', () => {
       1
     );
     expect(broadcastEvent.mock.calls[0][1].wakePhase).toBeNull();
+    expect(broadcastEvent.mock.calls[0][1].wakeAttemptId).toBeNull();
   });
 });
 
@@ -269,6 +300,7 @@ describe('notifyWakeProgress', () => {
       projectId: 'p1',
       chatSessionId: SESSION_ID,
       step: 'workspace_creation',
+      attemptId: '01WAKEATTEMPT',
     });
 
     expect(sent).toBe(true);
@@ -277,6 +309,7 @@ describe('notifyWakeProgress', () => {
       chatSessionId: SESSION_ID,
       recoveryStatus: 'waking',
       wakePhase: 'workspace_creation',
+      wakeAttemptId: '01WAKEATTEMPT',
     });
   });
 

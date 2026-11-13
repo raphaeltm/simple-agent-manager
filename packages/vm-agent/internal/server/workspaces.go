@@ -113,6 +113,17 @@ func (s *Server) removeWorkspaceContainer(workspaceID string) {
 }
 
 func (s *Server) stopSessionHostsForWorkspace(workspaceID string) {
+	s.stopSessionHostsForWorkspaceWith(workspaceID, (*acp.SessionHost).Stop)
+}
+
+// stopSessionHostsForWorkspaceEviction stops a committed eviction's hosts. Their
+// in-flight prompts complete as evicted rather than cancelled: the eviction delivery,
+// not a prompt callback, reports the interrupted work to the control plane.
+func (s *Server) stopSessionHostsForWorkspaceEviction(workspaceID string) {
+	s.stopSessionHostsForWorkspaceWith(workspaceID, (*acp.SessionHost).StopForEviction)
+}
+
+func (s *Server) stopSessionHostsForWorkspaceWith(workspaceID string, stop func(*acp.SessionHost)) {
 	s.cancelSecretExecutionsForOwner(workspaceID, "")
 	prefix := workspaceID + ":"
 
@@ -131,7 +142,7 @@ func (s *Server) stopSessionHostsForWorkspace(workspaceID string) {
 	}
 	s.sessionHostMu.Unlock()
 	for _, host := range hosts {
-		host.Stop()
+		stop(host)
 	}
 
 	// Clean up all persisted MCP servers for this workspace (best-effort).
@@ -1325,6 +1336,10 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	startFingerprint := evictionStartFingerprint(body)
+	if s.respondToEvictionOwnedStart(w, workspaceID, sessionID, startFingerprint, body.ProtocolVersion, body.DeliveryID, agentStartDeliveryFingerprint(body.ProtocolVersion, body.MessageID, body.InitialPrompt, body.InjectedInstructions, body.AcpInteractions)) {
+		return
+	}
 	// Always store profile overrides so getOrCreateSessionHost can apply them.
 	// Even empty overrides are stored to distinguish "no profile" from "not set".
 	s.sessionHostMu.Lock()
@@ -1342,6 +1357,7 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 		s.sessionTaskCtx = make(map[string]taskCallbackContext)
 	}
 	s.sessionProfileOvr[hostKey] = profileOverrides{
+		StartFingerprint: s.sessionProfileOvr[hostKey].StartFingerprint,
 		SettingsResolved: body.SettingsResolved,
 		Model:            body.Model,
 		PermissionMode:   body.PermissionMode,
@@ -1431,7 +1447,7 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 		host.ConfigureAcpInteractions(body.AcpInteractions)
 		observer := s.promptReceiptObserver(workspaceID, sessionID, body.DeliveryID)
 		go s.startAgentWithPromptObserved(host, workspaceID, sessionID, body.AgentType,
-			body.InitialPrompt, body.InjectedInstructions, body.MessageID, observer)
+			body.InitialPrompt, body.InjectedInstructions, body.MessageID, observer, startFingerprint)
 		writeJSON(w, http.StatusAccepted, versionedPromptResponse{
 			Status: "accepted", SessionID: sessionID, Receipt: receipt,
 		})
@@ -1441,7 +1457,7 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 	// Start agent and send initial prompt in a background goroutine.
 	// The endpoint returns 202 immediately — the agent runs asynchronously.
 	host.ConfigureAcpInteractions(body.AcpInteractions)
-	go s.startAgentWithPrompt(host, workspaceID, sessionID, body.AgentType, body.InitialPrompt, body.InjectedInstructions)
+	go s.startAgentWithPrompt(host, workspaceID, sessionID, body.AgentType, body.InitialPrompt, body.InjectedInstructions, startFingerprint)
 
 	writeJSON(w, http.StatusAccepted, map[string]interface{}{
 		"status":    "starting",
@@ -1472,11 +1488,11 @@ func buildInitialPromptParamsWithMessageID(initialPrompt, injectedInstructions, 
 
 // startAgentWithPrompt runs SelectAgent and then sends the initial prompt.
 // Called as a goroutine from handleStartAgentSession.
-func (s *Server) startAgentWithPrompt(host *acp.SessionHost, workspaceID, sessionID, agentType, initialPrompt, injectedInstructions string) {
-	s.startAgentWithPromptObserved(host, workspaceID, sessionID, agentType, initialPrompt, injectedInstructions, "", nil)
+func (s *Server) startAgentWithPrompt(host *acp.SessionHost, workspaceID, sessionID, agentType, initialPrompt, injectedInstructions string, fingerprints ...string) {
+	s.startAgentWithPromptObserved(host, workspaceID, sessionID, agentType, initialPrompt, injectedInstructions, "", nil, fingerprints...)
 }
 
-func (s *Server) startAgentWithPromptObserved(host *acp.SessionHost, workspaceID, sessionID, agentType, initialPrompt, injectedInstructions, messageID string, observer acp.PromptTerminalObserver) {
+func (s *Server) startAgentWithPromptObserved(host *acp.SessionHost, workspaceID, sessionID, agentType, initialPrompt, injectedInstructions, messageID string, observer acp.PromptTerminalObserver, fingerprints ...string) {
 	ctx := context.Background()
 
 	// Idempotency: if the host is already prompting, a prompt is in progress —
@@ -1549,18 +1565,20 @@ func (s *Server) startAgentWithPromptObserved(host *acp.SessionHost, workspaceID
 	// callback fires automatically, reporting task status without publishing repository changes.
 	// trustedSource=true: this is the SAM-built initial task prompt, the only
 	// legitimate origin=system producer (the injected instructions block).
-	if observer == nil {
-		host.HandlePrompt(ctx, syntheticReqID, promptParams, "server", true)
-		return
-	}
 	accepted, ok := host.AcceptPrompt(ctx, syntheticReqID, promptParams, "server", true, "", observer)
 	if !ok {
+		if observer == nil {
+			return
+		}
 		promptErr := errors.New("initial prompt was not accepted by the session host")
 		observer("error", promptErr)
 		if cb := host.OnPromptCompleteCallback(); cb != nil {
 			cb("error", promptErr)
 		}
 		return
+	}
+	if len(fingerprints) > 0 {
+		s.rememberSessionStartFingerprint(workspaceID+":"+sessionID, fingerprints[0])
 	}
 	accepted.Run()
 }

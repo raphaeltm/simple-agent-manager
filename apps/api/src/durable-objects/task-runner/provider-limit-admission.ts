@@ -1,3 +1,8 @@
+import {
+  newProviderLimitWait,
+  parseProviderLimitWait,
+  PROVIDER_LIMIT_POLICY,
+} from '@simple-agent-manager/scheduler-core';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
@@ -6,11 +11,6 @@ import { getSelectedAgentCredentialReference } from '../../routes/credentials';
 import { resolveProfileCredentialContext } from '../../services/composable-credentials/profile-context';
 import { credentialLimitReferenceKey } from '../../services/credential-limit-events/values';
 import * as projectData from '../../services/project-data';
-import {
-  newProviderLimitWait,
-  parseProviderLimitWait,
-  PROVIDER_LIMIT_POLICY,
-} from '../../services/provider-limit-policy';
 import { presentBlockedProviderLimitWait } from '../../services/provider-limit-recovery';
 import { resolveProviderLimitResetWindowTolerance } from '../../services/provider-limit-settings';
 import { rejectedProviderWindow } from '../../services/provider-limit-window';
@@ -103,13 +103,25 @@ export async function holdTaskForProviderLimit(
     profile
   );
   const key = reference ? await credentialLimitReferenceKey(reference) : null;
+  // The owner chose to start despite the hold (startProviderLimitTaskAnyway), typically to
+  // spend extra credits the subscription window doesn't show (automatic fix tracked in idea
+  // 01M73WJGGD2TZP6XDFHJJWHD33). It covers only the exact, non-null credential it was granted
+  // for: any other selection falls through to the checks below and blocks for review. A real
+  // provider rejection later builds a fresh wait without the override and parks as usual.
+  if (
+    key !== null &&
+    previous?.phase === 'released' &&
+    previous.ownerOverride?.credentialKey === key
+  )
+    return false;
   const window = await rejectedProviderWindow(rc.env, reference, now);
   let wait = previous;
   if (!ownerResumed && previous?.credentialKey && previous.credentialKey !== key) {
     wait = {
       ...previous,
       phase: 'blocked',
-      reason: 'Blocked: selected provider credential changed; review before resuming.',
+      reason: 'Blocked: selected provider credential changed; review before resuming.', // A blocked wait needs fresh review; an earlier start-anyway must not carry over.
+      ownerOverride: undefined,
     };
   } else if (previous?.phase === 'blocked') {
     await presentBlockedProviderLimitWait(
@@ -129,9 +141,22 @@ export async function holdTaskForProviderLimit(
       ...previous,
       phase: 'blocked',
       reason:
-        'Blocked: provider limit wake deadline expired. Review retained work before resuming.',
+        'Blocked: provider limit wake deadline expired. Review retained work before resuming.', // A blocked wait needs fresh review; an earlier start-anyway must not carry over.
+      ownerOverride: undefined,
     };
   } else if (previous?.phase === 'waiting' && previous.nextRetryAt > now) {
+    // Every other branch writes through a compare-and-set; this one only re-arms. Re-read
+    // first: an owner start-anyway or resume that landed during the awaits above has already
+    // nudged this runner, and re-arming the old far-future retry would overwrite that nudge.
+    const current = await rc.env.DATABASE.prepare(
+      'SELECT provider_limit_wait_json FROM tasks WHERE id = ?'
+    )
+      .bind(state.taskId)
+      .first<{ provider_limit_wait_json: string | null }>();
+    if ((current?.provider_limit_wait_json ?? null) !== (row?.provider_limit_wait_json ?? null)) {
+      await rc.ctx.storage.setAlarm(now);
+      return true;
+    }
     await rc.ctx.storage.setAlarm(previous.nextRetryAt);
     return true;
   } else if (!window) {

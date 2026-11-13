@@ -1,24 +1,54 @@
 import { Button } from '@simple-agent-manager/ui';
 import { useState } from 'react';
 
-import { resumeProviderLimitTask } from '../lib/api/tasks';
+import { resumeProviderLimitTask, startProviderLimitTaskAnyway } from '../lib/api/tasks';
 import { queryClient } from '../lib/query-client';
 
-/** One explicit recovery action. Accepted wakes stay disabled until fresh server state arrives. */
-export function ProviderLimitResume({ projectId, taskId }: { projectId: string; taskId: string }) {
-  const [state, setState] = useState<'idle' | 'pending' | 'waking'>('idle');
-  const [error, setError] = useState<string | null>(null);
+const ACTIONS = {
+  resume: {
+    run: resumeProviderLimitTask,
+    idle: 'Resume task',
+    pending: 'Resuming…',
+    done: 'Waking…',
+    failed: 'Unable to resume task. Try again.',
+  },
+  'start-anyway': {
+    run: startProviderLimitTaskAnyway,
+    idle: 'Start anyway',
+    pending: 'Starting…',
+    done: 'Starting…',
+    failed: 'Unable to start task. Try again.',
+  },
+} as const;
 
-  async function resume() {
+/**
+ * One explicit owner action on a provider-limit hold: resume a blocked wait, or start a
+ * never-started task now despite the limit. Accepted actions stay disabled until fresh
+ * server state arrives.
+ */
+export function ProviderLimitResume({
+  projectId,
+  taskId,
+  action = 'resume',
+}: {
+  projectId: string;
+  taskId: string;
+  action?: keyof typeof ACTIONS;
+}) {
+  const [state, setState] = useState<'idle' | 'pending' | 'done'>('idle');
+  const [error, setError] = useState<string | null>(null);
+  const copy = ACTIONS[action];
+
+  async function run() {
     if (state !== 'idle') return;
     setState('pending');
     setError(null);
     try {
-      await resumeProviderLimitTask(projectId, taskId);
-      setState('waking');
+      await copy.run(projectId, taskId);
+      setState('done');
       void queryClient.invalidateQueries();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Unable to resume task. Try again.');
+      setError(cause instanceof Error ? cause.message : copy.failed);
       setState('idle');
     }
   }
@@ -33,10 +63,10 @@ export function ProviderLimitResume({ projectId, taskId }: { projectId: string; 
         onKeyDown={(event) => event.stopPropagation()}
         onClick={(event) => {
           event.stopPropagation();
-          void resume();
+          void run();
         }}
       >
-        {state === 'pending' ? 'Resuming…' : state === 'waking' ? 'Waking…' : 'Resume task'}
+        {state === 'pending' ? copy.pending : state === 'done' ? copy.done : copy.idle}
       </Button>
       {error && (
         <p role="alert" className="text-sm text-danger-fg break-words mt-2">

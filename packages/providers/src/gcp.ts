@@ -1,5 +1,6 @@
 import type { CredentialProvider } from '@simple-agent-manager/shared';
 
+import { markProviderCreateNotDispatched } from './create-dispatch';
 import { type GcpApiScope, pollGcpOperation } from './gcp-api';
 import { fetchGcpMachineTypes, gcpOfferingsFromMachineTypes } from './gcp-catalog';
 import { ensureGcpFirewallRules } from './gcp-firewall';
@@ -23,7 +24,12 @@ import {
   SIZE_MAP,
   withGcpErrorCategory,
 } from './gcp-metadata';
-import { gcpInstanceToVM, resolveGcpSourceImage } from './gcp-native-instance';
+import {
+  gcpBootDisk,
+  gcpInstanceToObservedVM,
+  gcpInstanceToVM,
+  resolveGcpSourceImage,
+} from './gcp-native-instance';
 import type { GcpPriceTable } from './gcp-pricing';
 import { getProviderCatalogOfferings } from './instance-offerings';
 import { resolveVMConfigWithLegacySizeAdapter } from './native-vm-config';
@@ -47,7 +53,8 @@ import type {
   VolumeResizeConfig,
 } from './types';
 import { ProviderError } from './types';
-import { type GcpInstancePayload, parseProviderJson, validateGcpOperation } from './validation';
+import { parseProviderJson } from './validation';
+import { type GcpInstancePayload, validateGcpOperation } from './validation-gcp';
 
 export type { GcpTokenProvider } from './gcp-metadata';
 export {
@@ -143,19 +150,24 @@ export class GcpProvider implements Provider {
   }
 
   async createVM(config: VMConfig, context?: ProviderRequestContext): Promise<VMInstance> {
+    const dispatch = { sent: false };
     try {
-      return await this.createVMUnclassified(config, context);
+      return await this.createVMUnclassified(config, context, dispatch);
     } catch (err) {
       rethrowIfProviderRequestAborted(err, context);
       // Assign the category at construction (rule 72) so a zone stockout reaches the TaskRunner
       // as `transient_capacity` and descends the pool's fallback chain instead of failing.
-      throw withGcpErrorCategory(err);
+      const classified = withGcpErrorCategory(err);
+      // Config, token exchange and firewall ensure run before the insert: a failure there
+      // proves no VM was requested, so a durable allocation may create again.
+      throw dispatch.sent ? classified : markProviderCreateNotDispatched(classified);
     }
   }
 
   private async createVMUnclassified(
     config: VMConfig,
-    context?: ProviderRequestContext
+    context: ProviderRequestContext | undefined,
+    dispatch: { sent: boolean }
   ): Promise<VMInstance> {
     throwIfProviderRequestAborted(context);
     const nativeConfig = resolveVMConfigWithLegacySizeAdapter(config, {
@@ -199,17 +211,12 @@ export class GcpProvider implements Provider {
         items: networkTags,
       },
       disks: [
-        {
-          boot: true,
-          autoDelete: true,
-          initializeParams: {
-            sourceImage: resolveGcpSourceImage(
-              nativeConfig.image ?? this.imageFamily,
-              this.imageProject
-            ),
-            diskSizeGb: String(nativeConfig.bootDiskSizeGb ?? this.diskSizeGb),
-          },
-        },
+        gcpBootDisk(
+          zone,
+          nativeConfig.instanceType,
+          resolveGcpSourceImage(nativeConfig.image ?? this.imageFamily, this.imageProject),
+          nativeConfig.bootDiskSizeGb ?? this.diskSizeGb
+        ),
       ],
       networkInterfaces: [
         {
@@ -234,6 +241,7 @@ export class GcpProvider implements Provider {
     };
 
     const url = `${this.projectUrl()}/zones/${zone}/instances`;
+    dispatch.sent = true;
     const res = await providerFetch(
       'gcp',
       url,
@@ -256,7 +264,7 @@ export class GcpProvider implements Provider {
 
     // Read the created instance from the zone it was created in, never by name project-wide.
     const created = await getGcpInstanceInZone(this.api, zone, config.name, context);
-    const instance = created ? gcpInstanceToVM(created) : null;
+    const instance = created ? await gcpInstanceToObservedVM(this.api, created, context) : null;
     if (!instance) {
       throw new ProviderError(
         'gcp',
@@ -303,7 +311,18 @@ export class GcpProvider implements Provider {
     throwIfProviderRequestAborted(context);
     const instance = await this.findInstanceByIdOrName(id, context);
     if (!instance) return null;
+    // No machine type lookup: getVM callers check existence and ownership (deletion, orphan
+    // reconciliation), never observed hardware. Allocation recovery uses getObservedVM.
     return gcpInstanceToVM(instance);
+  }
+
+  async getObservedVM(id: string, context?: ProviderRequestContext): Promise<VMInstance | null> {
+    throwIfProviderRequestAborted(context);
+    const instance = await this.findInstanceByIdOrName(id, context);
+    if (!instance) return null;
+    // Durable allocation recovery adopts a VM whose create response was cut off and verifies
+    // its native hardware against the persisted plan (apps/api node-allocation-recovery.ts).
+    return gcpInstanceToObservedVM(this.api, instance, context);
   }
 
   async listVMs(

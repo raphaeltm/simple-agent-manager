@@ -46,6 +46,7 @@ import {
   releaseRestoredSourceWorkspaces,
   restoredSourceReceiptStampStatement,
 } from '../../../src/services/workspace-preservation-receipt';
+import { ensurePoolsWithStarterMachines } from '../../helpers/capacity-pool-picks';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const mocks = vi.hoisted(() => ({
@@ -732,6 +733,13 @@ describe('evicted source cleanup through real writers and real SQL', () => {
       INSERT INTO tasks (id, project_id, user_id, chat_session_id, workspace_id, title, description, status, priority, task_mode, dispatch_depth, created_by, created_at, updated_at)
         VALUES ('conversation', 'project', 'user', 'chat', 'workspace', 'Conversation', 'Work', 'sleeping', 0, 'conversation', 0, 'user', '2026-11-05T00:00:00Z', '2026-11-05T00:00:00Z');
     `);
+    // The user picked machines: the wake places on the pool, and nothing joins it on its own.
+    await ensurePoolsWithStarterMachines(drizzle(env.DATABASE, { schema }) as never, {
+      userId: 'user',
+      projectId: 'project',
+      includeInstallation: true,
+      env,
+    });
     await capture('workspace', 'node', false); // live pre-stop capture
     await capture('workspace', 'node', true); // final capture after docker stop
     const queued = await loadWorkspaceDeletionIdentity(env.DATABASE, 'workspace');

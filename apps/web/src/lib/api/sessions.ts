@@ -19,6 +19,9 @@ export interface ChatSessionTaskEmbed {
   providerLimitReason?: string | null;
   /** Opaque wait generation; changes when a new blocked wait replaces an accepted resume. */
   providerLimitVersion?: string | null;
+  /** True while a never-started task waits at admission on a provider limit, so its owner
+   * may start it anyway (for example to spend extra credits the limit does not show). */
+  providerLimitCanStartAnyway?: boolean;
   triggeredBy?: string;
   connectorClientName?: string | null;
   id: string;
@@ -141,6 +144,8 @@ export interface SessionStateSnapshot {
   /** Whether the session's agent adapter can steer; null until the VM agent reports it. */
   steeringSupported?: boolean | null;
   recoveryStatus?: 'waking' | 'restored' | 'failed' | null;
+  /** The wake attempt `recoveryStatus` describes (mirrors the shared snapshot). */
+  wakeAttemptId?: string | null;
   /**
    * Execution step of the replacement TaskRunner waking this session. Drives
    * phase-level wake progress; null when no wake is in flight.

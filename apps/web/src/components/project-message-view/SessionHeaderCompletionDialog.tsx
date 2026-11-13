@@ -1,14 +1,32 @@
 import { Button, Dialog } from '@simple-agent-manager/ui';
 
+const COPY = {
+  completed: {
+    title: 'Mark task as complete?',
+    body: 'SAM will preserve this session so you can continue it later. Use archive or delete only when you want to remove the saved workspace state.',
+    confirm: 'Mark Complete',
+    variant: 'primary',
+  },
+  cancelled: {
+    title: 'Cancel this task?',
+    body: "This task hasn't begun running. Cancelling it stops any setup in progress and keeps it from starting later, including after a provider limit resets.",
+    confirm: 'Cancel task',
+    variant: 'danger',
+  },
+} as const;
+
 export function SessionHeaderCompletionDialog({
   isOpen,
+  intent = 'completed',
   onClose,
   onConfirm,
 }: {
   isOpen: boolean;
+  intent?: 'completed' | 'cancelled';
   onClose: () => void;
   onConfirm: () => void;
 }) {
+  const copy = COPY[intent];
   return (
     <Dialog
       isOpen={isOpen}
@@ -18,18 +36,17 @@ export function SessionHeaderCompletionDialog({
       aria-describedby="complete-task-description"
     >
       <h3 id="complete-task-title" className="text-base font-semibold text-fg-primary mb-2">
-        Mark task as complete?
+        {copy.title}
       </h3>
       <p id="complete-task-description" className="text-sm text-fg-muted mb-4">
-        SAM will preserve this session so you can continue it later. Use archive or delete only when
-        you want to remove the saved workspace state.
+        {copy.body}
       </p>
       <div className="flex justify-end gap-2">
         <Button variant="ghost" size="sm" onClick={onClose}>
-          Cancel
+          {intent === 'cancelled' ? 'Keep task' : 'Cancel'}
         </Button>
-        <Button variant="primary" size="sm" onClick={onConfirm}>
-          Mark Complete
+        <Button variant={copy.variant} size="sm" onClick={onConfirm}>
+          {copy.confirm}
         </Button>
       </div>
     </Dialog>

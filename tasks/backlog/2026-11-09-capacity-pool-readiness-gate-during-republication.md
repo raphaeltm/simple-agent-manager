@@ -4,7 +4,7 @@
 
 `defaultPoolEffectiveState()` (`apps/api/src/services/default-capacity-pool-summaries.ts`) returns
 `migration-pending` whenever `capacity_pools.migration_state != 'complete'`, and
-`buildCapacityPoolSelection()` (`apps/api/src/services/placement-resolver-capacity.ts`) returns zero
+`buildCapacityPoolSelection()` (`packages/scheduler-core/src/placement-resolver-capacity.ts`) returns zero
 candidates for any pool that is not `configured-ready`. Any one source whose catalog changed takes the
 whole pool offline, including sources whose catalogs are fully published and unchanged.
 
@@ -59,3 +59,20 @@ unaffected.
       pool stays `migration-pending` until the next refresh (daily gate in
       `claimScheduledReconciliationRun`). Let the scheduled reconcile bypass its 24 h gate while
       any default pool is `migration_state='pending'`, or fix the readiness gate above.
+
+## Also: a person's edit republishes the whole catalog on the next refresh
+
+Found while building `tasks/active/2026-11-09-compute-pool-editor-redesign.md`. The candidate
+publication digest (`candidateSetDigest()` in
+`apps/api/src/services/default-capacity-pool-candidates-publication.ts`) includes each row's
+`status` and `authorityGeneration` (whose hash also includes status). A pool edit changes statuses,
+so the next refresh treats the catalog as changed, rewrites every row and holds the pool at
+`migration-pending` until done. With the new editor people save more often, so a 3,400-row Google
+Cloud catalog is rewritten after each save.
+
+- [ ] Decide whether status belongs in the publication digest. The upsert already preserves an
+      existing row's status, so republishing cannot change it; but the candidate authority hash
+      includes status and is only recomputed by a publish, so removing status from the digest
+      needs the authority recompute moved to the edit path (or proven unnecessary).
+- [ ] Test: a pool edit followed by an identical refresh writes no candidate rows and keeps the
+      pool ready (through the real edit and ensure paths).

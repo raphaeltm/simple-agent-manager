@@ -58,7 +58,7 @@ type Rule = {
 
 // Frozen module SQL fragments that may be interpolated into sql.exec() text, mapped to the
 // number of `?` placeholders each one adds. All live in
-// apps/api/src/durable-objects/project-data/project-events-wake-config.ts, links.ts,
+// packages/project-data/src/do/project-events-wake-config.ts, links.ts,
 // anchored-comment-scope.ts or anchored-comment-store.ts and are static strings built at
 // module load, so no caller value reaches the SQL text. When a
 // fragment's placeholder count changes, update it here or parameterized-sql flags its callers.
@@ -141,7 +141,12 @@ const rules: Rule[] = [
     check(ctx) {
       // Only check DO files — these are the most critical for structured logging
       // since DOs are the source of truth and hardest to debug in production
-      if (!ctx.relPath.includes('durable-objects/')) return;
+      // Durable Object code: the worker's DOs, and ProjectData's (packages/project-data/src/do/).
+      if (
+        !ctx.relPath.includes('durable-objects/') &&
+        !ctx.relPath.includes('project-data/src/do/')
+      )
+        return;
 
       const throwStatements = ctx.sourceFile.getDescendantsOfKind(SyntaxKind.ThrowStatement);
       for (const throwStmt of throwStatements) {
@@ -370,7 +375,18 @@ function main() {
       project.addSourceFileAtPath(f);
     }
   } else {
-    project.addSourceFilesAtPaths([resolve(ROOT, 'apps/api/src/**/*.ts')]);
+    project.addSourceFilesAtPaths([
+      resolve(ROOT, 'apps/api/src/**/*.ts'),
+      // Worker modules lifted into packages keep the API checks (worker modularization).
+      resolve(ROOT, 'packages/scheduler-core/src/**/*.ts'),
+      // Worker modules extracted into packages still run in this Worker (worker modularization).
+      resolve(ROOT, 'packages/project-data/src/**/*.ts'),
+      resolve(ROOT, 'packages/agent-email/src/**/*.ts'),
+      resolve(ROOT, 'packages/ai-proxy/src/**/*.ts'),
+      resolve(ROOT, 'packages/app-deployment/src/**/*.ts'),
+      resolve(ROOT, 'packages/operations/src/**/*.ts'),
+      resolve(ROOT, 'packages/repo-hosting/src/**/*.ts'),
+    ]);
   }
 
   const allFindings: Finding[] = [];

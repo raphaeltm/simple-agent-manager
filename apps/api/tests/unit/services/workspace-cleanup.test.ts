@@ -31,7 +31,8 @@ vi.mock('../../../src/services/workspace-confirmed-container-retirement', () => 
 vi.mock('../../../src/services/session-snapshots', () => ({
   deleteSessionSnapshotState: (...args: unknown[]) => mocks.deleteSessionSnapshotState(...args),
 }));
-vi.mock('../../../src/lib/logger', () => ({
+vi.mock('../../../src/lib/logger', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/logger')>()),
   log: { error: vi.fn(), info: vi.fn(), warn: mocks.logWarn },
 }));
 

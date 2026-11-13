@@ -1,4 +1,7 @@
 import {
+  DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB,
+} from '@simple-agent-manager/scheduler-core';
+import {
   D1_MAX_BOUND_PARAMETERS,
   resolveDeploymentManifestReservation,
 } from '@simple-agent-manager/shared';
@@ -17,7 +20,6 @@ import {
   restoreDeploymentEnvironmentRelocation,
 } from '../../../src/services/deployment-provisioning';
 import { assertDeploymentProvisioningAuthority } from '../../../src/services/provisioning-authority';
-import { DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB } from '../../../src/services/workspace-resource-capacity';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 
 const databases: Database.Database[] = [];

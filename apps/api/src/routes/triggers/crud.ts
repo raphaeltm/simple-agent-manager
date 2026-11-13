@@ -1,4 +1,8 @@
 /** Authenticated trigger CRUD. Execution actions live in actions.ts. */
+import {
+  ResourceRequirementsValidationError,
+  serializeResourceRequirementsInput,
+} from '@simple-agent-manager/scheduler-core';
 import type {
   CreateTriggerResponse,
   GitHubTriggerEventType,
@@ -14,12 +18,13 @@ import {
 import { and, desc, eq, inArray, type sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
+import type * as v from 'valibot';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { parsePositiveInt, requireRouteParam } from '../../lib/route-helpers';
-import { getAuth } from '../../middleware/auth';
+import { assertNotAgentSignInSession, getAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { CreateTriggerSchema, jsonValidator, UpdateTriggerSchema } from '../../schemas';
 import {
@@ -36,10 +41,6 @@ import {
 } from '../../services/github-trigger-config';
 import { parseGitHubTriggerFiltersJson } from '../../services/github-trigger-filter';
 import { getProjectMultiplayerState } from '../../services/project-multiplayer';
-import {
-  ResourceRequirementsValidationError,
-  serializeResourceRequirementsInput,
-} from '../../services/resource-requirements-input';
 import { clearTriggerPageCaches } from '../../services/trigger-cache';
 import {
   assertKeepsAgentProfile,
@@ -51,6 +52,7 @@ import {
 import { listTriggerRows, toTriggerResponse } from '../../services/trigger-read';
 import { triggerStatusUpdates } from '../../services/trigger-status';
 import {
+  assertWebhookSchemeUnchanged,
   getWebhookTriggerLimits,
   validateWebhookTriggerConfig,
 } from '../../services/webhook-trigger-config';
@@ -58,7 +60,8 @@ import {
   mergeWebhookConfig,
   toWebhookTriggerConfig,
   webhookConfigUpdateValues,
-} from '../../services/webhook-trigger-store';
+} from '../../services/webhook-trigger-config-rows';
+import { readWebhookTriggerConfig } from '../../services/webhook-trigger-setup';
 import { requireProjectTaskRead, requireProjectTaskWrite } from '../task-project-auth';
 import { buildWebhookCredential } from './webhooks';
 
@@ -150,12 +153,8 @@ async function enrichTrigger(
     }
   }
   if (row.sourceType === 'webhook') {
-    const config = await db
-      .select()
-      .from(schema.webhookTriggerConfigs)
-      .where(eq(schema.webhookTriggerConfigs.triggerId, row.id))
-      .get();
-    if (config) response.webhookConfig = toWebhookTriggerConfig(config);
+    const config = await readWebhookTriggerConfig(env, row);
+    if (config) response.webhookConfig = config;
   }
   if (row.sourceType === 'email') {
     response.emailConfig = await loadEmailTriggerConfig(db, env, row.id);
@@ -167,8 +166,12 @@ crudRoutes.post('/', jsonValidator(CreateTriggerSchema), async (c) => {
   const projectId = requireRouteParam(c, 'projectId');
   const db = drizzle(c.env.DATABASE, { schema });
   const userId = getAuth(c).user.id;
-  const project = await requireProjectTaskWrite(db, projectId, userId);
   const body = c.req.valid('json');
+  // Every trigger starts work after the session that created it has ended: on a schedule (cron),
+  // on mail from its allowed senders (email), on repository events (github) or with the
+  // credential it returns (webhook). An agent sign-in session must not leave one behind.
+  assertNotAgentSignInSession(c);
+  const project = await requireProjectTaskWrite(db, projectId, userId);
   const { created, webhookToken } = await createTrigger(db, c.env, project, userId, body);
   const id = created.id;
   clearTriggerPageCaches(projectId);
@@ -234,7 +237,7 @@ crudRoutes.get('/', async (c) => {
       };
     }
     const webhook = webhookById.get(row.id);
-    if (webhook) response.webhookConfig = toWebhookTriggerConfig(webhook);
+    if (webhook) response.webhookConfig = toWebhookTriggerConfig(webhook, c.env);
     const email = emailById.get(row.id);
     if (email) response.emailConfig = toEmailTriggerConfig(email, c.env.BASE_DOMAIN);
     return response;
@@ -267,9 +270,26 @@ crudRoutes.get('/:triggerId', async (c) => {
   });
 });
 
+/**
+ * Whether an update only stands a trigger down (pause or disable, nothing else). That is the one
+ * change an agent sign-in session may make: any other field (resuming it, its schedule, prompt,
+ * profile, email senders, webhook or GitHub filters) decides what the trigger does after the
+ * session has ended.
+ */
+function onlyStandsDown(body: v.InferOutput<typeof UpdateTriggerSchema>): boolean {
+  const fields = Object.entries(body).filter(([, value]) => value !== undefined);
+  return (
+    fields.length === 1 &&
+    fields[0]?.[0] === 'status' &&
+    body.status !== undefined &&
+    body.status !== 'active'
+  );
+}
+
 crudRoutes.patch('/:triggerId', jsonValidator(UpdateTriggerSchema), async (c) => {
   const projectId = requireRouteParam(c, 'projectId');
   const triggerId = requireRouteParam(c, 'triggerId');
+  if (!onlyStandsDown(c.req.valid('json'))) assertNotAgentSignInSession(c);
   const db = drizzle(c.env.DATABASE, { schema });
   const project = await requireProjectTaskWrite(db, projectId, getAuth(c).user.id);
   const trigger = await db
@@ -365,10 +385,9 @@ crudRoutes.patch('/:triggerId', jsonValidator(UpdateTriggerSchema), async (c) =>
       .where(eq(schema.webhookTriggerConfigs.triggerId, triggerId))
       .get();
     if (!current) throw errors.notFound('Webhook trigger');
-    effectiveWebhookConfig = mergeWebhookConfig(
-      toWebhookTriggerConfig(current),
-      body.webhookConfig
-    );
+    const stored = toWebhookTriggerConfig(current, c.env);
+    assertWebhookSchemeUnchanged(stored.verification, body.webhookConfig.verification);
+    effectiveWebhookConfig = mergeWebhookConfig(stored, body.webhookConfig);
     const configError = validateWebhookTriggerConfig(
       effectiveWebhookConfig,
       getWebhookTriggerLimits(c.env)

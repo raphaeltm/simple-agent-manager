@@ -377,6 +377,7 @@ function capacityDefaults(effective: ProjectSettingsCapacitySummary | null) {
   };
 }
 
+let runtimeConfigBody: unknown = { envVars: [], files: [] };
 let capacityDefaultsStatus = 200;
 let capacityDefaultsBody: unknown = capacityDefaults(capacitySummary());
 
@@ -429,7 +430,7 @@ async function setupMocks(page: Page) {
       if (subPath === '/credential-attribution-health') {
         return respond(200, emptyCredentialHealth);
       }
-      if (subPath === '/runtime-config') return respond(200, { envVars: [], files: [] });
+      if (subPath === '/runtime-config') return respond(200, runtimeConfigBody);
       if (
         subPath === '/capacity-pools/defaults' ||
         subPath === '/capacity-pools/defaults/reconcile'
@@ -465,6 +466,7 @@ async function expectCompactTabs(page: Page) {
 
 test.describe('Project settings sub-pages', () => {
   test.beforeEach(async ({ page }) => {
+    runtimeConfigBody = { envVars: [], files: [] };
     capacityDefaultsStatus = 200;
     capacityDefaultsBody = capacityDefaults(capacitySummary());
     await setupMocks(page);
@@ -489,6 +491,92 @@ test.describe('Project settings sub-pages', () => {
     await expect(page.getByText('Failed to load MCP servers', { exact: false })).toHaveCount(0);
     await screenshot(page, 'project-settings-runtime-performance');
     expect(errors).toEqual([]);
+  });
+
+  test('Runtime tells agent-collected secrets apart, with provenance and expiry', async ({
+    page,
+  }) => {
+    await page.routeWebSocket('**/api/notifications/ws', () => undefined);
+    await page.route(`**/api/projects/${PROJECT_ID}/mcp-connections`, (route) =>
+      route.fulfill({ json: { items: [] } })
+    );
+    const collected = (overrides: Record<string, unknown>) => ({
+      requestId: 'req-1',
+      reason:
+        'Create the DNS records for the preview environment at https://dash.cloudflare.com/profile/api-tokens/a/very/long/path/that/does/not/break <script>alert(1)</script>',
+      requestingTaskId: 'task-1',
+      requestingChatSessionId: 'sess-1',
+      suppliedByName: 'Raphaël',
+      suppliedAt: '2026-11-12T10:00:00.000Z',
+      ...overrides,
+    });
+    runtimeConfigBody = {
+      envVars: [
+        {
+          key: 'CLOUDFLARE_PREVIEW_DNS_EDIT_TOKEN_WITH_A_VERY_LONG_NAME_FOR_THE_EU_WEST_REGION',
+          value: null,
+          isSecret: true,
+          hasValue: true,
+          createdAt: '2026-11-12T10:00:00.000Z',
+          updatedAt: '2026-11-12T10:00:00.000Z',
+          expiresAt: '2099-11-12T11:00:00.000Z',
+          expired: false,
+          collected: collected({}),
+        },
+        {
+          key: 'OPENAI_API_KEY',
+          value: null,
+          isSecret: true,
+          hasValue: true,
+          createdAt: '2026-11-10T10:00:00.000Z',
+          updatedAt: '2026-11-10T10:00:00.000Z',
+          expiresAt: '2026-11-10T11:00:00.000Z',
+          expired: true,
+          collected: collected({ requestId: 'req-2', reason: 'Run the eval suite.' }),
+        },
+        {
+          key: 'NODE_ENV',
+          value: 'production',
+          isSecret: false,
+          hasValue: true,
+          createdAt: '2026-11-01T00:00:00.000Z',
+          updatedAt: '2026-11-01T00:00:00.000Z',
+          expiresAt: null,
+          expired: false,
+          collected: null,
+        },
+        {
+          key: 'MANUAL_TOKEN',
+          value: null,
+          isSecret: true,
+          hasValue: true,
+          createdAt: '2026-11-01T00:00:00.000Z',
+          updatedAt: '2026-11-01T00:00:00.000Z',
+          expiresAt: null,
+          expired: false,
+          collected: null,
+        },
+      ],
+      files: [],
+    };
+    await page.goto(`/projects/${PROJECT_ID}/settings/runtime`);
+    const rows = page.getByTestId('runtime-env-var');
+    await expect(rows).toHaveCount(4);
+    await expect(rows.nth(0).getByText('collected')).toBeVisible();
+    await expect(rows.nth(0).getByText(/supplied by Raphaël/)).toBeVisible();
+    await expect(rows.nth(0).getByRole('link', { name: 'open chat' })).toHaveAttribute(
+      'href',
+      `/projects/${PROJECT_ID}/chat/sess-1`
+    );
+    await expect(rows.nth(1).getByText('expired', { exact: true })).toBeVisible();
+    await expect(rows.nth(1).getByText(/agents can no longer use it/)).toBeVisible();
+    await expect(rows.nth(3).getByText('collected')).toHaveCount(0);
+    await assertNoOverflow(page);
+    // Bring the rows themselves into view: on a phone the form above them fills the screen.
+    await rows.nth(0).scrollIntoViewIfNeeded();
+    await screenshot(page, 'project-settings-runtime-collected-secrets');
+    await rows.nth(1).scrollIntoViewIfNeeded();
+    await screenshot(page, 'project-settings-runtime-collected-secrets-expired');
   });
 
   test('default route redirects to General and tab shell remains compact', async ({ page }) => {
@@ -531,10 +619,15 @@ test.describe('Project settings sub-pages', () => {
   }) => {
     await page.goto(`/projects/${PROJECT_ID}/settings/infrastructure`);
     await expect(page.getByRole('heading', { name: 'Project compute pool' })).toBeVisible();
-    await expect(page.getByText('Allowed machines (5)')).toBeVisible();
-    await expect(page.getByText(/^SAM can start Hetzner machines in/)).toBeVisible();
-    await expect(page.getByText('(not currently offered)')).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: "In this project's pool", exact: true })
+    ).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'Available machines', exact: true })
+    ).toBeVisible();
+    await expect(page.getByText(/^Ready · \d+ in pool$/)).toBeVisible();
     await expect(page.getByText(/credentials:credential-project-default/)).toHaveCount(0);
+    await expect(page.getByText(/\b(small|medium|large)\b/)).toHaveCount(0);
     await expectCompactTabs(page);
     await screenshot(page, 'project-settings-infrastructure-capacity-pool-normal');
     await screenshotNearHeading(
@@ -543,35 +636,35 @@ test.describe('Project settings sub-pages', () => {
       'project-settings-default-compute-pool-normal-focused'
     );
 
-    await page.getByRole('button', { name: 'Edit' }).click();
-    await expect(
-      page.getByRole('heading', { name: 'Allowed machines', exact: true })
-    ).toBeVisible();
-    await page.getByRole('button', { name: 'cpx31 in Ashburn', exact: true }).click();
-    await page
-      .getByRole('button', { name: 'ccx33 in Hillsboro (not currently offered)', exact: true })
-      .click();
-    await expect(page.getByText('2 unsaved changes')).toBeVisible();
+    // The editor is the panel: add or remove rows, then save.
+    const rowButton = (name: RegExp) =>
+      page.getByRole('button', { name }).filter({ visible: true }).first();
+    await rowButton(/^(Add|Remove) cpx31 in Ashburn$/).click();
+    await rowButton(/^(Add|Remove) cx23 in /).click();
+    await expect(page.getByText('2 unsaved changes', { exact: true })).toBeVisible();
     await screenshotNearHeading(
       page,
-      'Allowed machines',
+      'Available machines',
       'project-settings-default-compute-pool-edit-focused'
     );
-    await page.getByRole('searchbox', { name: 'Search machine types' }).fill('hil');
-    await expect(page.getByText('ccx33', { exact: true })).toBeVisible();
+    await page.getByRole('textbox', { name: 'Search machines' }).fill('hil');
+    await expect(
+      page.getByText('ccx33', { exact: true }).filter({ visible: true }).first()
+    ).toBeVisible();
     await screenshotNearHeading(
       page,
-      'Allowed machines',
+      'Available machines',
       'project-settings-default-compute-pool-search-focused'
     );
     await page.getByRole('button', { name: 'Save changes' }).click();
-    await expect(page.getByText('Allowed machines (3)')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Save changes' })).toHaveCount(0);
     await assertNoOverflow(page);
 
     capacityDefaultsBody = capacityDefaults(userCapacitySummary());
     await page.goto(`/projects/${PROJECT_ID}/settings/infrastructure?case=fallback`);
     await expect(page.getByText(/This project uses your personal compute pool/)).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Edit' })).toHaveCount(0);
+    // A pool the project only falls back to is shown read-only, without the editor.
+    await expect(page.getByRole('heading', { name: 'Available machines' })).toHaveCount(0);
     await screenshot(page, 'project-settings-infrastructure-capacity-pool-user-fallback');
     await screenshotNearHeading(
       page,
@@ -606,10 +699,13 @@ test.describe('Project settings sub-pages', () => {
       })
     );
     await page.goto(`/projects/${PROJECT_ID}/settings/infrastructure?case=many`);
-    // 36 regions across the six machine types in the fixture.
-    await expect(page.getByText('Allowed machines (6)')).toBeVisible();
+    // One row per machine type and region: 36 picked rows.
+    await expect(page.getByText('Ready · 36 in pool')).toBeVisible();
     await expect(
-      page.getByText(/region-with-a-very-long-location-name-and-special-marker-ß/)
+      page
+        .getByText(/region-with-a-very-long-location-name-and-special-marker-ß/)
+        .filter({ visible: true })
+        .first()
     ).toBeVisible();
     await screenshot(page, 'project-settings-infrastructure-capacity-pool-many');
     await screenshotNearHeading(

@@ -7,10 +7,11 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log, serializeError } from '../../lib/logger';
 import { expectJsonRecord } from '../../lib/runtime-validation';
-import { getUserId, requireApproved, requireAuth } from '../../middleware/auth';
+import { credentialNotAfter, getUserId, requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { signLocalForwardToken, verifyLocalForwardToken } from '../../services/jwt';
 import { fetchNodeAgent, getNodeAgentRequestTimeoutMs } from '../../services/node-agent';
+import { getNodeBackendBaseUrl } from '../../services/node-agent-readiness';
 import { getOwnedWorkspace, isActiveWorkspaceStatus } from './_helpers';
 
 const localForwardRoutes = new Hono<{ Bindings: Env }>();
@@ -118,9 +119,7 @@ function stripUntrustedForwardHeaders(headers: Headers): Headers {
 }
 
 function vmAgentBaseUrl(nodeId: string, env: Env): URL {
-  const protocol = env.VM_AGENT_PROTOCOL || 'https';
-  const port = env.VM_AGENT_PORT || '8443';
-  return new URL(`${protocol}://${nodeId.toLowerCase()}.vm.${env.BASE_DOMAIN}:${port}`);
+  return new URL(getNodeBackendBaseUrl(nodeId, env));
 }
 
 async function requireRoutedWorkspace(
@@ -164,7 +163,8 @@ localForwardRoutes.post('/:id/forwards', requireAuth(), requireApproved(), async
       mode: 'http',
       localAuthority,
     },
-    c.env
+    c.env,
+    { notAfter: credentialNotAfter(c) }
   );
 
   return c.json({

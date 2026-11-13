@@ -43,6 +43,7 @@ import (
 // profileOverrides holds model/permissionMode/effort/opencode provider overrides from agent profiles.
 // Passed from the control plane in the start-agent-session request.
 type profileOverrides struct {
+	StartFingerprint string // immutable request identity for an eviction-owned start replay
 	SettingsResolved bool
 	Model            string
 	PermissionMode   string
@@ -70,6 +71,7 @@ type Server struct {
 	systemProvisioning     *systemProvisioningBarrier
 	config                 *config.Config
 	httpServer             *http.Server
+	tunnelServer           *http.Server // loopback Cloudflare Tunnel ingress; nil unless enabled
 	jwtValidator           *auth.JWTValidator
 	sessionManager         *auth.SessionManager
 	ptyManager             *pty.Manager
@@ -382,6 +384,7 @@ func New(cfg *config.Config) (*Server, error) {
 		DefaultRows:        cfg.DefaultRows,
 		DefaultCols:        cfg.DefaultCols,
 		WorkDir:            containerWorkDir,
+		Env:                standalonePTYEnvironment(cfg, cfg.WorkspaceID),
 		ContainerResolver:  containerResolver,
 		ContainerUser:      containerUser,
 		ProcessGroup:       cfg.IsStandaloneMode(),
@@ -472,6 +475,7 @@ func New(cfg *config.Config) (*Server, error) {
 		CredentialSyncTimeout:            cfg.ACPCredentialSyncTimeout,
 		RestartAttemptTimeout:            cfg.ACPRestartAttemptTimeout,
 		RecoveryWatchdogTimeout:          cfg.ACPRecoveryWatchdog,
+		EvictionParkTimeout:              cfg.ACPEvictionParkTimeout,
 		RestartDecayWindow:               cfg.ACPRestartDecayWindow,
 		HTTPClient:                       config.NewControlPlaneClient(cfg.HTTPCallbackTimeout),
 	}
@@ -654,17 +658,7 @@ func New(cfg *config.Config) (*Server, error) {
 	mux := http.NewServeMux()
 	s.setupRoutes(mux)
 
-	// Create HTTP server with configurable timeouts.
-	// WriteTimeout is intentionally set to 0 because WebSocket connections
-	// are long-lived. Go's http.Server.WriteTimeout sets a deadline on the
-	// underlying net.Conn BEFORE the handler runs, which kills hijacked
-	// WebSocket connections after the timeout period.
-	s.httpServer = &http.Server{
-		Addr:        fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
-		Handler:     corsMiddleware(mux, cfg.AllowedOrigins),
-		ReadTimeout: cfg.HTTPReadTimeout,
-		IdleTimeout: cfg.HTTPIdleTimeout,
-	}
+	s.buildHTTPServers(mux)
 
 	return s, nil
 }
@@ -897,29 +891,18 @@ func (s *Server) StartPortScanner(workspaceID string) {
 		return
 	}
 
-	// Create a per-workspace container discovery using the workspace's actual
-	// ContainerLabelValue. The server-level s.containerDiscovery may have a stale
-	// label value (e.g., "/workspace" when REPOSITORY was empty at startup), while
-	// the workspace runtime has the correct value (e.g., "/workspace/repo-name")
-	// derived from the repository passed during workspace creation.
-	var wsDiscovery *container.Discovery
-	s.workspaceMu.RLock()
-	if runtime, ok := s.workspaces[workspaceID]; ok && runtime.ContainerLabelValue != "" {
-		wsDiscovery = container.NewDiscovery(container.Config{
-			LabelKey:    s.config.ContainerLabelKey,
-			LabelValue:  runtime.ContainerLabelValue,
-			CacheTTL:    s.config.ContainerCacheTTL,
-			BridgeIPTTL: s.config.PortProxyCacheTTL,
-		})
-		slog.Info("Port scanner: using workspace-specific container label",
-			"workspaceId", workspaceID,
-			"labelValue", runtime.ContainerLabelValue)
-	}
-	s.workspaceMu.RUnlock()
+	// A new provision/rebuild may have changed the container label. Preserve
+	// scanner startup's existing behavior of replacing its discovery cache.
+	s.portScannerMu.Lock()
+	delete(s.portDiscoveries, workspaceID)
+	s.portScannerMu.Unlock()
 
-	// Fall back to server-level discovery if no workspace-specific one is available.
-	if wsDiscovery == nil {
-		wsDiscovery = s.containerDiscovery
+	// Scanning and forwarding must resolve the same workspace-owned container,
+	// including when discovery is recreated after a restart.
+	wsDiscovery, err := s.workspacePortDiscovery(workspaceID)
+	if err != nil {
+		slog.Info("Port scanner: workspace container route unavailable", "workspaceId", workspaceID, "error", err)
+		return
 	}
 
 	// Resolve container ID for scanning — if not available yet, the scanner
@@ -1017,7 +1000,8 @@ func (s *Server) stopAllPortScanners() {
 	}
 }
 
-// Start starts the HTTP server (plain HTTP or TLS based on config).
+// Start starts the HTTP listeners: the main listener (plain HTTP or TLS based
+// on config) and, when enabled, the loopback tunnel listener.
 func (s *Server) Start() error {
 	s.startWorkspaceDeletionReconciler()
 	s.startNodeHealthReporter()
@@ -1029,13 +1013,7 @@ func (s *Server) Start() error {
 	// Start error reporter background flush
 	s.errorReporter.Start()
 
-	if s.config.TLSEnabled {
-		slog.Info("Starting VM Agent with TLS", "addr", s.httpServer.Addr, "cert", s.config.TLSCertPath, "key", s.config.TLSKeyPath)
-		return s.httpServer.ListenAndServeTLS(s.config.TLSCertPath, s.config.TLSKeyPath)
-	}
-
-	slog.Info("Starting VM Agent", "addr", s.httpServer.Addr)
-	return s.httpServer.ListenAndServe()
+	return s.serveListeners()
 }
 
 func (s *Server) startResourceGuard() {
@@ -1465,6 +1443,14 @@ func (s *Server) makeTaskCompletionCallback(
 		strings.TrimRight(controlPlaneURL, "/"), projectID, taskID)
 
 	return func(stopReason string, promptErr error) {
+		if stopReason == acp.EvictedStopReason {
+			// The eviction delivery owns this task's outcome: it reports the interrupted
+			// work and the control plane resumes the conversation on another workspace.
+			// Any status posted here would race it ("failed" stranded tasks on 2026-11-08).
+			slog.Info("Prompt ended by workspace eviction; task status left to the eviction delivery",
+				"taskId", taskID, "workspaceId", workspaceID)
+			return
+		}
 		if isPromptCancellation(stopReason, promptErr) {
 			s.postTaskCallback(
 				callbackURL,

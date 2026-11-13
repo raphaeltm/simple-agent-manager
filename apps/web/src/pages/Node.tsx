@@ -278,13 +278,6 @@ export function Node() {
 
       {/* Action buttons */}
       <div className="flex items-center gap-3 mb-6 flex-wrap">
-        {!isDeploymentNode && (
-          <Button
-            onClick={() => navigate('/workspaces/new', { state: id ? { nodeId: id } : undefined })}
-          >
-            Create Workspace
-          </Button>
-        )}
         <Button
           variant="secondary"
           onClick={handleStop}
@@ -395,9 +388,6 @@ export function Node() {
           {!isDeploymentNode && (
             <NodeWorkspacesSection
               workspaces={workspaces}
-              onCreateWorkspace={() =>
-                navigate('/workspaces/new', { state: id ? { nodeId: id } : undefined })
-              }
               onStop={handleStopWorkspace}
               onRestart={handleRestartWorkspace}
               onDelete={handleDeleteWorkspace}

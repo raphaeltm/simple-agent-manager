@@ -8,12 +8,15 @@ interface Props {
   title?: string;
   description?: string;
   image?: string;
+  /** Keep the page out of search results (pages not launched yet). */
+  noindex?: boolean;
 }
 
 const {
   title = 'SAM — Run Coding Agents in Parallel on Your Infrastructure',
   description = 'Simple Agent Manager (SAM) is an open-source platform for running coding agents on your infrastructure. Run Claude Code, Codex, Gemini CLI, Google Antigravity, Mistral Vibe, OpenCode, and Amp across isolated environments.',
   image = '/images/og-default.png',
+  noindex = false,
 } = Astro.props;
 
 const baseDomain = import.meta.env.PUBLIC_BASE_DOMAIN || 'simple-agent-manager.org';
@@ -28,6 +31,7 @@ const socialImageUrl = new URL(image, `${siteUrl}/`).toString();
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content={description} />
+    {noindex && <meta name="robots" content="noindex" />}
 
     <!-- Pre-paint theme init (shares Starlight's `starlight-theme` key so docs + marketing stay in sync). Must run before first paint to avoid FOUC. -->
     <ThemeInit />
@@ -60,12 +64,13 @@ const socialImageUrl = new URL(image, `${siteUrl}/`).toString();
     <!-- Preload font -->
     <link rel="preload" href="/fonts/Chillax-Variable.woff2" as="font" type="font/woff2" crossorigin />
 
-    <!-- Scroll-reveal content and feature scene images (loaded near the viewport by
-         scenes/scene-motion.ts) must stay visible without JavaScript -->
+    <!-- Scroll-reveal content and the homepage's real screens (loaded near the viewport by
+         components/factory/Shot.astro) must stay visible without JavaScript -->
     <noscript>
       <style>
         .animate-on-scroll { opacity: 1; transform: none; }
-        .scene .scene-img { background-image: var(--img-dark); }
+        .fh [data-reveal] { opacity: 1; transform: none; }
+        .fshot { background-image: var(--img-dark); }
       </style>
     </noscript>
 

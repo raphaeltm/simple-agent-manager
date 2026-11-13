@@ -213,6 +213,27 @@ Notes for client developers:
   one-off schedules and recurring (cron) ones. `sam_channels_list`, `sam_channel_history`,
   `sam_channel_get` and `sam_channel_subscription_cancel` read and manage coordination channels;
   apps cannot post to them.
+- `sam_profiles_list` gives each profile an `account`: `state` (`account`, `sam_ai_proxy`,
+  `paused`, `none` or `unknown`), `tier` (`profile`, `project` or `user`), an opaque `poolId`, and
+  `accountName` (null for accounts stored before named accounts existed). It is the account a new
+  run would use, chosen by the same selection as the agent-key callback
+  (`services/agent-credential-selection.ts`) from row metadata only; a skill that switches the agent
+  is not applied. A platform credential is never an account: without one of yours, Claude Code and
+  Codex run on SAM's AI proxy only when you chose SAM as the provider (`sam_ai_proxy`), otherwise
+  `none`. `sam_usage_get` groups profiles by `poolId` (one stored secret, including byte-identical
+  copies; the id is a digest that can change, so re-read it) and returns provider-reported windows
+  with `usedPercent`, `remainingPercent`, `resetsAt`, `observedAt`, `ageMinutes` and `freshness`
+  (`fresh`, `stale` after `connector.usageStaleAfterMinutes`, or `reset_since_sample`), plus per-pool
+  `exhausted` and `nextResetAt`. `usage.state` is `reported`, `never_reported` (unknown, not full),
+  `unavailable` (the read failed; retry) or, for the `sam_ai_proxy` pool, `sam_ai_budget` with
+  `samAiToday`. Credentials, ciphertext, credential ids and other members' accounts are never
+  returned.
+- `sam_chat_start` accepts `model` and `effort` for that chat only; the result echoes the requested
+  values as `agentOverrides`. An effort the resolved agent cannot run is refused before anything
+  starts. `sam_chats_list` rows carry `operational` (`taskStatus`, `executionStep`,
+  `parentTaskId`, `taskTerminal`, `labelMayBeStale`), `lastMessageAt` and `agentCompletedAt` beside
+  the index `status` label, and
+  `sam_tasks_list` rows carry `parentTaskId`, `executionStep` and `sessionId`.
 - To answer an agent, send its `interactionId` with an `optionId`, `formContent`, or
   `decline: true`. A link request is accepted with `optionId: "accept"`. An attention question takes
   its `markerId` and an `answer` instead. SAM generates the receipt metadata.
@@ -221,7 +242,7 @@ Notes for client developers:
 
 ### `POST /api/auth/sign-in/social`
 
-Start GitHub OAuth flow. Redirects to GitHub for authorization.
+Start an OAuth sign-in (GitHub, Google or GitLab). Redirects to the provider for authorization.
 
 ### `POST /api/auth/sign-out`
 
@@ -230,6 +251,44 @@ End the current session.
 ### `GET /api/auth/session`
 
 Returns the current authenticated session and user info.
+
+### `POST /api/auth/email-otp/send-verification-otp`
+
+Email a six-digit sign-in code. Body: `{ "email": "...", "type": "sign-in" }`. Exists only when the
+deployment can send email. Always answers `200 { "success": true }`; a code is sent only to an
+existing account or the installer owner (see [Security](/docs/architecture/security/)). Returns
+`429` past the per-IP limit.
+
+### `POST /api/auth/sign-in/email-otp`
+
+Sign in with an emailed code. Body: `{ "email": "...", "otp": "123456" }`. Sets the session cookie.
+Limited per IP address. Other `/api/auth/email-otp/*` routes return `404`.
+
+### `GET /api/config/login-providers`
+
+Public. `{ "github": bool, "google": bool, "gitlab": bool, "email": bool }`: which sign-in options
+the login page offers.
+
+### `GET /api/config/instant-runtime`
+
+Public. `{ "enabled": bool }`: whether agents can run on Instant (Cloudflare Containers) here
+with no cloud account. True only when the runtime is on and its container binding exists
+(`isInstantRuntimeAvailable`). Onboarding asks for a cloud account only when this is false and
+the instance has no machines of its own.
+
+### First-run setup (`/api/setup/*`)
+
+The `POST` routes require `SETUP_TOKEN`; `GET /api/setup/status` is public. Every route returns
+`410 SETUP_CLOSED` once setup is complete.
+
+- `GET /api/setup/status` — public. `{ completed, open, forced, tokenConfigured }`.
+- `POST /api/setup/verify` — body `{ token }`. Returns the integration `status` and
+  `signIn: { email, emailReady, ownerEmail }`; `emailReady` is `false` while Cloudflare is still
+  verifying the sending domain.
+- `POST /api/setup/complete` — body `{ token, config? }`. Needs a sign-in method: email sign-up
+  (installer owner set, email prepared and its sending domain verified), or an OAuth provider in
+  `config` or already configured. Setup never turns
+  agent email on; a superadmin does that from **Admin → Integrations**.
 
 ## Workspaces
 
@@ -431,6 +490,8 @@ Comment threads and replies accept an optional `mentions: [{ "userId": "..." }]`
 
 `GET /api/projects/:id/sessions/:sessionId/attention/:markerId` returns the full saved question an agent asked with `request_human_input`, for the [question reader](/docs/guides/notifications/#read-and-answer-an-agents-question) and the question card in the conversation (`apps/api/src/routes/chat-attention.ts`): the request (its text, choices, `category` (`decision`, `clarification`, `approval`, `error_help`, or `null`), whether it is resolved or expired, and `canAnswer`) and the session's id and topic. It needs `task:read`. `canAnswer` is true only for the chat's owner, or a teammate it is shared with, while the question is open. Add `?context=true` for the messages before it: `collaboration.commentContextMessages` of them by default, or `limit`, capped by the session message limit. A question from another chat, or one that isn't an agent question, returns `404`. Answer it with `POST .../attention/:markerId/resolve`.
 
+`GET /api/projects/:id/secret-requests/:requestId` returns one agent [secret request](/docs/guides/secret-execution/#let-the-agent-ask-you-for-a-secret) for the card in the conversation (`apps/api/src/routes/projects/secret-requests.ts`): the variable name, the agent's reason, the requested expiry, its status (`pending`, `fulfilled`, `declined`, `expired`), who answered it, whether a project variable with that name already exists, and `canResolve`. It needs `secret:read`, and never includes a value. `POST .../fulfill` with `{ "value": "…", "replaceExisting": true, "expectedExistingVersion": "…" }` stores the value as an encrypted project secret and wakes the requesting agent with a notice that names the variable only; it needs `secret:write`, and `replaceExisting` is required when the name already exists (`409` otherwise). `expectedExistingVersion` (the `existing.version` the person confirmed, an opaque fingerprint) is required with it; if it is missing, or the stored value has changed since (or changes before the write), the request returns `409` and stays open. `POST .../decline` closes the request. Both return `{ request, agentNotified }`; `agentNotified: false` means the agent's notice could not be queued yet (SAM retries it for `secrets.notifyRetryMinutes`, and the card asks you to tell the agent). Both are writes from the app's own browser flow: they require an `Origin` header equal to the app origin (`https://app.<BASE_DOMAIN>`; any other or missing origin returns `403`) and `Content-Type: application/json` (`415` otherwise), so another site, including a workspace port on the same domain, cannot submit one on your behalf. An empty value or one over the runtime variable size limit returns `400`, as does a project already at its variable limit; the request stays open. A request that was already answered returns `409`; one past its deadline returns `410`. A request from another project returns `404`.
+
 `GET /api/projects/:id/sessions/:sessionId/comments/:threadId/context` returns one comment thread with the chat around the message it is on, for [reading a comment in its conversation](/docs/guides/collaboration/#read-a-comment-in-its-conversation): `{ thread, session: { id, topic }, viewerAccess, anchor: { messageId, found }, messages, hasMoreBefore, hasMoreAfter }`. It needs `task:read`. `messages` is in transcript order and holds the whole commented message (an agent reply is stored as many streamed rows, and a comment can be on any of them) plus `collaboration.commentContextMessages` messages each side, reading at most `collaboration.commentContextMaxRows` rows each side. Page further with `GET .../sessions/:sessionId/messages` and `before`/`after` cursors from the first and last rows. When the commented message is no longer in the chat, `anchor.found` is `false` and `messages` is empty. A thread from another chat or another project returns `404`.
 
 ## Nodes
@@ -537,7 +598,12 @@ project's profiles; the offboarding preview reports `personalProfilePinCount`.
 `GET /api/projects/:projectId/sessions/:sessionId/agent-credential` reports which
 account a chat's agent ran on: `credentialSource` (who owns it), `credentialScope`
 (`profile`, `project`, `user` or `platform`), and `accountName`, which is returned only
-to the person who ran the session.
+to the person who ran the session. Its `runtime` object is the configuration the session
+froze when it started (`agent_sessions.runtime_contract_json`): `model` (null means the
+agent's default), `effort`, `permissionMode` and `opencodeProvider`, plus `skillName`,
+the skill's current name (looked up live, so a renamed skill shows its new name; a
+personal skill's name is returned only to the person who ran the session). `runtime` is
+null for sessions started before that record existed.
 
 ### `POST /api/credentials`
 

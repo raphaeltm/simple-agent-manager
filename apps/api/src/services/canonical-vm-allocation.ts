@@ -1,4 +1,7 @@
 import type { NativeVMConfig } from '@simple-agent-manager/providers';
+import {
+  emptyCapacityPoolMessage,
+} from '@simple-agent-manager/scheduler-core';
 import type {
   CapacityPlacementSnapshot,
   CapacityWorkloadRole,
@@ -162,7 +165,7 @@ export async function resolveCanonicalVmAllocationPlan(
 
   if (capacityPoolSelection && hasNoCapacityPoolCandidates(capacityPoolSelection)) {
     return {
-      error: noEligibleCapacityCandidateMessage(placement, capacityPoolSelection),
+      error: noEligibleCanonicalAllocationMessage(placement, capacityPoolSelection),
       errorKind: 'placement',
     };
   }
@@ -400,10 +403,13 @@ function requestedNativeOfferingUnavailableMessage(
     : 'No active compute-pool offering satisfies the requested allocation.';
 }
 
-function noEligibleCapacityCandidateMessage(
+function noEligibleCanonicalAllocationMessage(
   placement: TaskStartPlacement,
   selection: TaskStartCapacityPoolSelection
 ): string {
+  if (selection.effectiveState === 'configured-empty') {
+    return emptyCapacityPoolMessage(selection.scope);
+  }
   const provider = placement.provider ? ` provider ${placement.provider}` : '';
   const location = placement.explicitVmLocation ? ` location ${placement.vmLocation}` : '';
   return (

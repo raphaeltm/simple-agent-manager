@@ -46,6 +46,12 @@ vi.mock('../../../src/services/notification', async (importOriginal) => ({
   sendNotificationOnce: sendNotificationOnceMock,
 }));
 
+import { setProjectDataArchiveCircuitBreaker } from '@simple-agent-manager/project-data/internal/client/project-data-archive-rollout-controls';
+import {
+  poisonProjectDataArchiveMigration,
+  runProjectDataArchiveSharding,
+} from '@simple-agent-manager/project-data/internal/scheduled/project-data-archive-sharding';
+
 import * as observabilitySchema from '../../../src/db/observability-schema';
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
@@ -53,11 +59,6 @@ import {
   breakerWasClosedBeforeOpening,
   PROJECT_DATA_ARCHIVE_BREAKER_OPENED_ALERT,
 } from '../../../src/scheduled/project-data-archive-breaker-alerts';
-import {
-  poisonProjectDataArchiveMigration,
-  runProjectDataArchiveSharding,
-} from '../../../src/scheduled/project-data-archive-sharding';
-import { setProjectDataArchiveCircuitBreaker } from '../../../src/services/project-data-archive-rollout-controls';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const PROJECT_ID = 'project-breaker';

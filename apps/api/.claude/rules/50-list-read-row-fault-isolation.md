@@ -97,7 +97,7 @@ Before merging a change to any D1/DO-SQLite multi-row read:
 ## Known Follow-Up
 
 The identical unguarded `rows.map(parseRow)` pattern exists in other
-`apps/api/src/durable-objects/project-data/` modules (messages, activity,
+`packages/project-data/src/do/` modules (messages, activity,
 attention, ideas, knowledge, mailbox, policies, materialization, idle-cleanup).
 Hardening those is tracked in
 `tasks/backlog/2026-07-16-project-data-row-fault-isolation-audit.md`.
