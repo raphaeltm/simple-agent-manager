@@ -4,7 +4,7 @@
 
 The small kernel every API worker module needs, so modules extracted from `apps/api` do not each
 invent their own logger, errors, ids, validation helpers or timeouts. It also owns the D1 schema.
-Part of the worker modularization (`tasks/active/2026-11-12-worker-modularization.md`).
+Part of the worker modularization (`tasks/archive/2026-11-12-worker-modularization.md`).
 
 The package reads no environment and imports nothing from `apps/*`. When it needs something the
 worker owns, it declares a port (see `LoggedErrorSink`) and the worker passes the implementation in.

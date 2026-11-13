@@ -29,7 +29,7 @@ import { type drizzle } from 'drizzle-orm/d1';
 import type * as schema from '../db/schema';
 import { log } from '../lib/logger';
 import { maybeJsonRecord } from '../lib/runtime-validation';
-import { getSelectedAgentCredentialReference } from './agent-key-resolution';
+import { getSelectedAgentCredentialReference } from './agent-credential-selection';
 import { ccKindForAgentCredential } from './composable-credentials/agent-sync';
 import { resolveSessionProfileCredentialContext } from './composable-credentials/profile-context';
 

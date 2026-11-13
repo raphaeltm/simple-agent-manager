@@ -954,9 +954,7 @@ export async function getDecryptedCredentialRecord(
   };
 }
 
-export {
-  getDecryptedAgentKey,
-  getSelectedAgentCredentialReference,
-} from '../services/agent-key-resolution';
+export { getSelectedAgentCredentialReference } from '../services/agent-credential-selection';
+export { getDecryptedAgentKey } from '../services/agent-key-resolution';
 
 export { credentialsRoutes };

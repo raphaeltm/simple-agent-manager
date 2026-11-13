@@ -1,5 +1,5 @@
 // Proves the worker-modularization boundary rules in eslint.config.mjs fire, through the real
-// ESLint configuration. See tasks/active/2026-11-12-worker-modularization.md, "Rules for every
+// ESLint configuration. See tasks/archive/2026-11-12-worker-modularization.md, "Rules for every
 // workstream" (2. Boundaries).
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';

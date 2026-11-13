@@ -1,6 +1,6 @@
 # W7: extract repo hosting into `@simple-agent-manager/repo-hosting`
 
-Workstream W7 of `tasks/active/2026-11-12-worker-modularization.md` (the brief overrides the usual
+Workstream W7 of `tasks/archive/2026-11-12-worker-modularization.md` (the brief overrides the usual
 `/do` defaults). Assigned by the coordinator (task `01M77BJHHNW5714E98DEEMBCZA`) to the W1 agent
 after W1 merged into core. Branch `sam/w7-repo-hosting` from core `6b985656b`; draft PR into the
 core branch.
@@ -51,7 +51,7 @@ Staying in the worker, with reasons:
 - [x] Tests that do not need the worker pool move with the code; counts before/after
 - [x] Wiring: ci.yml filters, runtime-boundary scan, ast-checks roots, dependency evidence,
       build order, source scanners, docs/rules paths
-- [ ] Lint, typecheck, tests, quality scripts; reviews; CI green; report to coordinator
+- [x] Lint, typecheck, tests, quality scripts; reviews; CI green; report to coordinator (run 43246659724 green on ece3d5531; PR #2694 merged into the core branch)
 
 ## Progress notes
 

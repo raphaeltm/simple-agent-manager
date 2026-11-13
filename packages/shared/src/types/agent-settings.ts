@@ -137,6 +137,9 @@ export interface SaveAgentSettingsRequest {
 // Agent Effort
 // =============================================================================
 
+/** Longest model id accepted anywhere an agent model is set (settings, profiles, one-chat overrides). */
+export const AGENT_MODEL_MAX_LENGTH = 200;
+
 export const AGENT_EFFORT_LEVELS = ['auto', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type AgentEffort = (typeof AGENT_EFFORT_LEVELS)[number];
 

@@ -6,7 +6,7 @@ The pure decisions of the SAM scheduler: which capacity pool governs a run, how 
 offerings and existing nodes are ranked, whether a node can hold a declared reservation, how
 placement fields and resource requirements resolve, and the provider-limit wait policy. Every
 function takes values and returns values. Part of the worker modularization
-(`tasks/active/2026-11-12-worker-modularization.md`, workstream W2).
+(`tasks/archive/2026-11-12-worker-modularization.md`, workstream W2).
 
 The package holds **no SQL text, no D1 or drizzle access, no Durable Object and no worker `Env`**.
 The worker reads D1, calls these functions, and keeps everything that writes: the final
